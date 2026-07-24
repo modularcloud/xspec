@@ -268,6 +268,9 @@ class PathBlocksComputation {
     return {
       identity: this.storedIdentity(record),
       baselineIdentity: record.baselineIdentity,
+      // Generator-known sidedness (GeneratedNode doc): the record itself
+      // says which side it came from — never graph occupancy.
+      deleted: record.currentIdentity === null,
     };
   }
 
@@ -647,6 +650,10 @@ class PathBlocksComputation {
         this.baseline.graph.codeLocation(location) !== undefined
           ? location
           : null,
+      // For code locations occupancy is exact sidedness: locations are
+      // never journal-mapped, so a location absent from the current graph
+      // is baseline-only — no recapture can exist.
+      deleted: this.current.graph.codeLocation(location) === undefined,
     };
   }
 
@@ -710,7 +717,7 @@ class PathBlocksComputation {
   private generatedNodeOfStored(identity: string): GeneratedNode {
     const record = this.recordOfStored(identity);
     if (record !== undefined) return this.nodeOf(record);
-    return { identity, baselineIdentity: null };
+    return { identity, baselineIdentity: null, deleted: false };
   }
 
   private contentSource(): DecompositionContentSource {

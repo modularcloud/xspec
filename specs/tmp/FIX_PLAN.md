@@ -4,7 +4,10 @@ Source: second Phase 10 compliance panel (2026-07-24) at HEAD 5faf881. Sections 
 verify fully green (485/485 locally; CI jobs harness-self, full suite, Windows E-6 all green); the
 sections 8–15 reviewer confirmed the earlier canonical-identity fix (T41–T44) genuinely closed the
 prior gap and found exactly one residual gap, planned here. Task numbering continues from the
-closed plan: T45–T49. Tasks execute in order; each task ends with the full suite green.
+closed plan: T45–T49 (completed tasks are removed from this file). Tasks execute in order; each
+task ends with the full suite green.
+Progress: T45 (sidedness plumbing on `GeneratedNode`) is done — the required `deleted` marker
+exists at every construction site and is not yet read anywhere.
 
 Hard constraints for every task:
 
@@ -95,30 +98,6 @@ divergence map. Governing facts (all verifiable in `src/core/journal.ts` and rev
   `baselineTexts` are canonical references — the unambiguous place to assert stored keys).
 
 ---
-
-## T45 — Carry generator-known sidedness on `GeneratedNode` (plumbing only)
-
-**Satisfies:** the plumbing precondition of the panel finding's fix direction ("the generator
-knows `presence`; carry it on `GeneratedNode`") — SPEC 10.4/5.4. No behavior change.
-
-1. In `src/core/review-derive.ts`, extend `GeneratedNode` (lines 97–100) with an explicit,
-   **required** sidedness marker — recommended `readonly deleted: boolean`, true exactly when the
-   generating record is baseline-side-only (`NodeChange.currentIdentity === null`); an equivalent
-   explicit encoding (e.g. `side: "current" | "baseline"`) is acceptable. Required, not optional:
-   no construction site may default silently. Document the semantics: sidedness is the
-   generator's knowledge of which side the node came from, never derived from graph occupancy.
-2. Populate every construction site:
-   - `src/core/path-blocks.ts` `nodeOf` (~line 267): `record.currentIdentity === null`;
-     `locationNode` (~line 643): `this.current.graph.codeLocation(location) === undefined`
-     (behavior-neutral for locations, see design note); `generatedNodeOfStored` fallback
-     (~line 713): not deleted (T48 refines this path).
-   - `src/core/review-derive.ts` `currentAncestorChain` (~line 131): not deleted.
-   - `src/core/audit.ts` (lines ~93, ~117, ~120) and `src/core/coverage-session.ts`
-     (lines ~118, ~146, ~159, ~162): not deleted (current-graph nodes; these strategies have no
-     baseline side).
-3. Do not read the new field anywhere yet.
-4. Verify: `npm run build`, `npm run typecheck`, `npm run format:check`, `npm test` (485/485),
-   `npm run test:self` — all green. Commit, push.
 
 ## T46 — Branch `canonicalNodeKey` on sidedness, not graph occupancy
 

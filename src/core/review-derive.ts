@@ -97,6 +97,19 @@ import type { WorkspaceTextModel } from "./text-model.js";
 export interface GeneratedNode {
   readonly identity: string;
   readonly baselineIdentity: string | null;
+  /**
+   * Generator-known sidedness (SPEC 5.4, 10.4): true exactly when the
+   * generating record is baseline-side-only — the node exists only in the
+   * recorded baseline (`NodeChange.currentIdentity === null`), its
+   * `identity` being the baseline identity mapped forward through the
+   * replay journal. Sidedness is the generator's knowledge of which side
+   * the node came from, never derived from graph occupancy of `identity`:
+   * a spelling vacated by a manual deletion (SPEC 6.6) and recaptured by
+   * a journaled rename or move is borne by a distinct current node
+   * (SPEC 5.4), so occupancy would misattribute the deleted node.
+   * Required — every construction site states it explicitly.
+   */
+  readonly deleted: boolean;
 }
 
 /** A blocker reference by kind and scope node — resolved to an item id
@@ -128,7 +141,11 @@ export function currentAncestorChain(
     ancestor !== null;
     ancestor = graph.parentOf(ancestor)
   ) {
-    chain.push({ identity: ancestor.identity, baselineIdentity: null });
+    chain.push({
+      identity: ancestor.identity,
+      baselineIdentity: null,
+      deleted: false,
+    });
   }
   return chain.reverse();
 }
@@ -320,6 +337,7 @@ export function canonicalizeGeneration(
   ): GeneratedNode => ({
     identity: canonicalNodeKey(node, isCodeLocation, inputs),
     baselineIdentity: node.baselineIdentity,
+    deleted: node.deleted,
   });
   const canonicalizeItem = (
     item: GeneratedItem,

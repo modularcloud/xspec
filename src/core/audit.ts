@@ -90,7 +90,7 @@ class AuditItemBuilder {
   subtreeCoherenceItem(identity: string): GeneratedItem {
     return {
       kind: "subtree-coherence",
-      scope: { identity, baselineIdentity: null },
+      scope: { identity, baselineIdentity: null, deleted: false },
       context: currentAncestorChain(this.graph, identity),
       // SPEC 10.6: an empty origin.
       origin: [],
@@ -114,10 +114,15 @@ class AuditItemBuilder {
         childIdentities,
       ): GeneratedItem => ({
         kind: "parent-consistency",
-        scope: { identity: scopeIdentity, baselineIdentity: null },
+        scope: {
+          identity: scopeIdentity,
+          baselineIdentity: null,
+          deleted: false,
+        },
         context: childIdentities.map((identity) => ({
           identity,
           baselineIdentity: null,
+          deleted: false,
         })),
         origin: [],
         reason:

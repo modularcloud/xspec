@@ -115,7 +115,7 @@ export function generateCoverageSessionItems(
     kind: "uncovered-requirement",
     // SPEC 10.7: scope is the node; context its ancestor chain; origin
     // and blockedBy empty.
-    scope: { identity, baselineIdentity: null },
+    scope: { identity, baselineIdentity: null, deleted: false },
     context: currentAncestorChain(graph, identity),
     origin: [],
     reason:
@@ -143,7 +143,11 @@ function coverageContentSource(
   return {
     subtreeCoherenceItem: (scopeIdentity): GeneratedItem => ({
       kind: "subtree-coherence",
-      scope: { identity: scopeIdentity, baselineIdentity: null },
+      scope: {
+        identity: scopeIdentity,
+        baselineIdentity: null,
+        deleted: false,
+      },
       context: currentAncestorChain(graph, scopeIdentity),
       origin: [],
       reason:
@@ -156,10 +160,15 @@ function coverageContentSource(
       childIdentities,
     ): GeneratedItem => ({
       kind: "parent-consistency",
-      scope: { identity: scopeIdentity, baselineIdentity: null },
+      scope: {
+        identity: scopeIdentity,
+        baselineIdentity: null,
+        deleted: false,
+      },
       context: childIdentities.map((identity) => ({
         identity,
         baselineIdentity: null,
+        deleted: false,
       })),
       origin: [],
       reason:
