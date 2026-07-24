@@ -123,6 +123,20 @@ export interface GeneratedNode {
 export interface GeneratedBlockerRef {
   readonly kind: ItemKind;
   readonly scope: string;
+  /**
+   * The reference's scope node as the emitting generator knows it — set by
+   * generator-space emitters that build the reference from a change record
+   * (path-blocks' `parent-consistency` blockers), so the reference
+   * canonicalizes exactly as its target item's scope does: from the
+   * record's sidedness (`GeneratedNode.deleted`), never from graph
+   * occupancy of the `scope` spelling. A reference naming a current-graph
+   * node (audit's child blockers, the decomposition content sources' child
+   * references) may omit it and canonicalizes as a current spelling.
+   * Canonicalized output references never carry it —
+   * `canonicalizeGeneration` emits `{kind, scope}` only, `scope` a
+   * canonical reference.
+   */
+  readonly scopeNode?: GeneratedNode;
 }
 
 /**
@@ -282,11 +296,11 @@ function canonicalNodeKey(
 /**
  * Rewrite one generator run into canonical-reference space (module
  * header): every `GeneratedNode.identity` and every blocker reference's
- * scope becomes a canonical reference, the decomposition content source is
- * wrapped to accept and produce references, and the per-location
- * impact-target map is rekeyed canonically. The generators themselves stay
- * spelling-space and journal-free; this seam is the one place generated
- * nodes canonicalize.
+ * scope becomes a canonical reference (the reference's `scopeNode`
+ * consumed and dropped), the decomposition content source is wrapped to
+ * accept and produce references, and the per-location impact-target map is
+ * rekeyed canonically. The generators themselves stay spelling-space and
+ * journal-free; this seam is the one place generated nodes canonicalize.
  */
 export function canonicalizeGeneration(
   run: {
@@ -298,52 +312,32 @@ export function canonicalizeGeneration(
 ): CanonicalizedGeneration {
   const { journal } = inputs;
 
-  // Blocker references carry only (kind, scope spelling), so a reference
-  // to an item whose scope canonicalizes through its baseline identity (a
-  // deleted node) must resolve through the items: collect the scopes whose
-  // canonical reference diverges from the spelling's own full-journal
-  // canonicalization. Where a current-graph item bears the same (kind,
-  // spelling) — reachable only when a vacated spelling was recaptured —
-  // the current item wins, matching the generators' own current-first
-  // resolution of stored spellings.
-  const divergent = new Map<string, string>();
-  const hasCurrent = new Set<string>();
-  for (const item of run.items) {
-    const key = kindScopeKey(item.kind, item.scope.identity);
-    const canonical = canonicalNodeKey(item.scope, inputs);
-    if (canonical === canonicalKeyOfCurrent(journal, item.scope.identity)) {
-      hasCurrent.add(key);
-    } else if (!divergent.has(key)) {
-      divergent.set(key, canonical);
-    }
-  }
-  const mainRefKey = (ref: GeneratedBlockerRef): string => {
-    const key = kindScopeKey(ref.kind, ref.scope);
-    if (!hasCurrent.has(key)) {
-      const anchored = divergent.get(key);
-      if (anchored !== undefined) {
-        return anchored;
-      }
-    }
-    return canonicalKeyOfCurrent(journal, ref.scope);
-  };
-  // Decomposition-content references — the split parent's blockers and an
-  // audit-style item's child blockers — always name current-graph child
-  // nodes (SPEC 10.5, 10.7: decomposition is per *current* child subtree),
-  // so they canonicalize as current spellings, never through the main
-  // generation's divergent scopes.
-  const contentRefKey = (ref: GeneratedBlockerRef): string =>
-    canonicalKeyOfCurrent(journal, ref.scope);
+  // A blocker reference canonicalizes exactly as its target item's scope
+  // does — from the emitting record's sidedness, carried on
+  // `GeneratedBlockerRef.scopeNode` by the generator-space emitters that
+  // build references from change records — never by resolving the scope
+  // spelling through graph occupancy: a spelling vacated by a manual
+  // deletion and recaptured by a journaled entry is ambiguous, sidedness
+  // is not (module header). A reference without `scopeNode` names a
+  // current-graph node (audit's child blockers, the decomposition content
+  // sources' child references — decomposition is per *current* child
+  // subtree, SPEC 10.5, 10.7) and canonicalizes as a current spelling.
+  // Because every reference is built from the same record — or the same
+  // current-graph node — as its target item's scope, reference and scope
+  // canonicalize identically by construction, so every blocker reference
+  // resolves to a generated item's canonical key (`deriveSessionItems`
+  // rejects any that does not).
+  const refKey = (ref: GeneratedBlockerRef): string =>
+    ref.scopeNode !== undefined
+      ? canonicalNodeKey(ref.scopeNode, inputs)
+      : canonicalKeyOfCurrent(journal, ref.scope);
 
   const canonicalNode = (node: GeneratedNode): GeneratedNode => ({
     identity: canonicalNodeKey(node, inputs),
     baselineIdentity: node.baselineIdentity,
     deleted: node.deleted,
   });
-  const canonicalizeItem = (
-    item: GeneratedItem,
-    refKey: (ref: GeneratedBlockerRef) => string,
-  ): GeneratedItem => ({
+  const canonicalizeItem = (item: GeneratedItem): GeneratedItem => ({
     ...item,
     scope: canonicalNode(item.scope),
     context: item.context.map(canonicalNode),
@@ -359,7 +353,7 @@ export function canonicalizeGeneration(
     impactTargets: item.impactTargets?.map(canonicalNode),
   });
 
-  const items = run.items.map((item) => canonicalizeItem(item, mainRefKey));
+  const items = run.items.map(canonicalizeItem);
 
   // The decomposition content source in reference space: inputs decode to
   // the spellings the strategy's builder works in, outputs canonicalize.
@@ -368,10 +362,7 @@ export function canonicalizeGeneration(
     spellingOfReference(journal, reference);
   const contentSource: DecompositionContentSource = {
     subtreeCoherenceItem: (scopeReference): GeneratedItem =>
-      canonicalizeItem(
-        inner.subtreeCoherenceItem(decode(scopeReference)),
-        contentRefKey,
-      ),
+      canonicalizeItem(inner.subtreeCoherenceItem(decode(scopeReference))),
     splitParentConsistencyItem: (
       scopeReference,
       childReferences,
@@ -381,7 +372,6 @@ export function canonicalizeGeneration(
           decode(scopeReference),
           childReferences.map(decode),
         ),
-        contentRefKey,
       ),
   };
 

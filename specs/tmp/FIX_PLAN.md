@@ -6,11 +6,14 @@ sections 8–15 reviewer confirmed the earlier canonical-identity fix (T41–T44
 prior gap and found exactly one residual gap, planned here. Task numbering continues from the
 closed plan: T45–T49 (completed tasks are removed from this file). Tasks execute in order; each
 task ends with the full suite green.
-Progress: T45 (sidedness plumbing on `GeneratedNode`) and T46 (`canonicalNodeKey` branches on
+Progress: T45 (sidedness plumbing on `GeneratedNode`), T46 (`canonicalNodeKey` branches on
 that sidedness; the graph-occupancy check, the `isCodeLocation` parameter, and
-`GenerationCanonicalization.graph` are removed) are done — the T49 scenario A smoke checks all
-pass against the fixed build; the blocker-ref divergence map (T47) and path-blocks'
-stored-spelling lookups (T48) still resolve through spellings.
+`GenerationCanonicalization.graph` are removed), and T47 (blocker references canonicalize from
+the emitting record's sidedness via `GeneratedBlockerRef.scopeNode`; the `divergent`/`hasCurrent`
+map is retired and the two ref-key functions are one) are done — the T49 scenario A smoke checks
+all pass against the fixed build, and create + `resolve --status updated` re-derivation across a
+plain journaled rename keeps the item shape identical with nothing invalidated; path-blocks'
+stored-spelling lookups (T48) still resolve through spellings current-first.
 
 Hard constraints for every task:
 
@@ -101,38 +104,6 @@ divergence map. Governing facts (all verifiable in `src/core/journal.ts` and rev
   `baselineTexts` are canonical references — the unambiguous place to assert stored keys).
 
 ---
-
-## T47 — Record-faithful blocker-reference canonicalization (retire `divergent`/`hasCurrent`)
-
-**Satisfies:** the panel finding's fix direction "with the same treatment for … the blocker-ref
-divergence map" — SPEC 10.5 rule 2 (`blockedBy` holds the item whose scope node is A's child on
-that branch, compared per 10.4 canonical identity) and re-derivation rule 5. Per the design note,
-no failing scenario is reachable today; the requirement is that the seam stop resolving refs
-through spelling occupancy with a current-first tiebreak.
-
-1. In `src/core/review-derive.ts` `canonicalizeGeneration` (lines 276–315): delete the
-   `divergent`/`hasCurrent` machinery and its comment block. A generator-emitted blocker
-   reference must canonicalize exactly as its target item's scope does — from the emitting
-   record's sidedness. Recommended encoding: extend `GeneratedBlockerRef` with an optional
-   `readonly scopeNode?: GeneratedNode` set by generator-space emitters; `mainRefKey` becomes
-   `ref.scopeNode !== undefined ? canonicalNodeKey(ref.scopeNode, inputs)
-   : canonicalKeyOfCurrent(journal, ref.scope)`, and canonicalized output refs drop `scopeNode`
-   (emit `{kind, scope}` only, canonical space unchanged). With the map gone, `contentRefKey` and
-   `mainRefKey` collapse into one function — unify them.
-2. Emitters: `src/core/path-blocks.ts` `parentConsistencyItem` (blockedBy construction,
-   lines ~481–484) sets `scopeNode: this.nodeOf(branch)` beside `scope:
-   this.storedIdentity(branch)`. Audit's child refs (`src/core/audit.ts`) and the decomposition
-   content sources' child refs name current-graph nodes — they may omit `scopeNode` (current
-   canonicalization) or set it non-deleted; keep them consistent with their item scopes.
-3. Invariant to preserve: every blocker reference must resolve to a generated item's canonical
-   key, or `deriveSessionItems` throws (`review-derive.ts` ~lines 1057–1064). Refs built from the
-   same records as their target items' scopes canonicalize identically by construction — state
-   this in the seam's comment.
-4. Verify: full gates green. Smoke: rerun the T49 scenario A script (unchanged results), and
-   confirm `xspec review create` + `resolve --status updated` re-derivation still produce
-   identical sessions in a plain rename-only workspace (pure rename invalidates nothing,
-   SPEC 10.4).
-5. Commit, push.
 
 ## T48 — Resolution-sided stored-spelling lookup in the decomposition content seam
 

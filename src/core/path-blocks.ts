@@ -480,10 +480,14 @@ class PathBlocksComputation {
     // node is A's child on that branch — the child's subtree-coherence
     // item when the child is the branch's changed node (a changed child of
     // an unchanged ancestor is exactly a surviving changed node), the
-    // child's parent-consistency item otherwise.
+    // child's parent-consistency item otherwise. `scopeNode` carries the
+    // branch record itself, so the reference canonicalizes from the
+    // record's sidedness exactly as its target item's scope — built from
+    // the same record — does (GeneratedBlockerRef doc).
     const blockedBy: GeneratedBlockerRef[] = branches.map((branch) => ({
       kind: branch.changed ? "subtree-coherence" : "parent-consistency",
       scope: this.storedIdentity(branch),
+      scopeNode: this.nodeOf(branch),
     }));
     return {
       kind: "parent-consistency",
