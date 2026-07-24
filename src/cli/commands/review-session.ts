@@ -164,7 +164,7 @@ export function runSessionGenerators(
           contentSource: generation.contentSource,
           impactTargets: generation.impactTargets,
         },
-        { journal, graph: analysis.graph, baselineJournalLength },
+        { journal, baselineJournalLength },
       );
       return {
         items: canonical.items,
@@ -185,7 +185,7 @@ export function runSessionGenerators(
       const generation = generateAuditItems(analysis.graph);
       const canonical = canonicalizeGeneration(
         { items: generation.items, contentSource: generation.contentSource },
-        { journal, graph: analysis.graph },
+        { journal },
       );
       return {
         items: canonical.items,
@@ -199,7 +199,7 @@ export function runSessionGenerators(
       );
       const canonical = canonicalizeGeneration(
         { items: generation.items, contentSource: generation.contentSource },
-        { journal, graph: analysis.graph },
+        { journal },
       );
       return {
         items: canonical.items,

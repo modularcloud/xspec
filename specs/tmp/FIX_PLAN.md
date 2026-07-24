@@ -6,8 +6,11 @@ sections 8–15 reviewer confirmed the earlier canonical-identity fix (T41–T44
 prior gap and found exactly one residual gap, planned here. Task numbering continues from the
 closed plan: T45–T49 (completed tasks are removed from this file). Tasks execute in order; each
 task ends with the full suite green.
-Progress: T45 (sidedness plumbing on `GeneratedNode`) is done — the required `deleted` marker
-exists at every construction site and is not yet read anywhere.
+Progress: T45 (sidedness plumbing on `GeneratedNode`) and T46 (`canonicalNodeKey` branches on
+that sidedness; the graph-occupancy check, the `isCodeLocation` parameter, and
+`GenerationCanonicalization.graph` are removed) are done — the T49 scenario A smoke checks all
+pass against the fixed build; the blocker-ref divergence map (T47) and path-blocks'
+stored-spelling lookups (T48) still resolve through spellings.
 
 Hard constraints for every task:
 
@@ -98,41 +101,6 @@ divergence map. Governing facts (all verifiable in `src/core/journal.ts` and rev
   `baselineTexts` are canonical references — the unambiguous place to assert stored keys).
 
 ---
-
-## T46 — Branch `canonicalNodeKey` on sidedness, not graph occupancy
-
-**Satisfies:** the panel finding's core — SPEC 10.4 ("requirement nodes compare as canonical
-identities (5.4) … an identity mapping from a journaled rename or move … by itself invalidates
-nothing"), SPEC 10.5 (origin/context sets and the one-item-per-kind-and-canonical-scope dedup over
-true canonicals), SPEC 10.2 (`baseline` fixed at entry as recorded-baseline values), SPEC 10.7
-(deleted node presented absent with baseline before-text). Fixes reproductions A, B, and C's core.
-
-1. Rewrite `canonicalNodeKey` (`src/core/review-derive.ts` lines 238–255):
-   - node marked deleted, `node.baselineIdentity !== null`, `baselineJournalLength !== undefined`
-     → `encodeCanonicalIdentity(canonicalAt(journal, baselineJournalLength, node.baselineIdentity))`
-     — unconditionally, with no current-graph lookup;
-   - node marked deleted otherwise → `xspec internal error` throw (generators emit deleted nodes
-     only with a baseline identity and only in baseline sessions);
-   - node not deleted → `canonicalKeyOfCurrent(journal, node.identity)`.
-   The `present` graph-occupancy check is deleted entirely.
-2. Ripples: the `isCodeLocation` parameter and `GenerationCanonicalization.graph` member existed
-   only for the occupancy check — remove them if they fall unused (updating `canonicalNode`,
-   `canonicalizeItem`, and the three `canonicalizeGeneration` call sites in
-   `src/cli/commands/review-session.ts` `runSessionGenerators`, lines ~161–168, ~186–189,
-   ~200–203); keeping them unused is not acceptable, but if removal ripples beyond this seam,
-   keep `graph` and note why in the commit message.
-3. Update the now-stale rationale text: `canonicalNodeKey`'s doc comment ("baseline identity
-   recorded, absent from the current graph") and the module-header identity-policy paragraph
-   (lines ~39–55) must describe the sidedness rule.
-4. Verify:
-   - Full gates green (the frozen harness stages no recapture scenario; all 485 must still pass —
-     if any test goes red, the change broke a non-recapture path; fix before committing).
-   - Smoke repro A (script per T49, scenario A): in the scratch workspace,
-     `.xspec/reviews/s.json`'s root `subtree-coherence` item now stores
-     `origin = ["0:specs/S.mdx", "0:specs/S.mdx#b"]`, `baseline.nodes["0:specs/S.mdx#b"]` present
-     with the deleted node's hashes, `baselineTexts["0:specs/S.mdx#b"]` = "Bravo text.", and node
-     `a`'s baseline state under `0:specs/S.mdx#a`.
-5. Commit, push.
 
 ## T47 — Record-faithful blocker-reference canonicalization (retire `divergent`/`hasCurrent`)
 

@@ -40,14 +40,19 @@
 // work in spelling space — a `GeneratedNode.identity` as produced is the
 // node's current-graph spelling (a deleted node's baseline identity mapped
 // forward through the replay journal, SPEC 6.3) plus its identity in the
-// baseline graph (null when absent there). `canonicalizeGeneration` is the
-// central seam that rewrites one generator run into canonical-reference
-// space (SPEC 5.4): a node identified by a current-graph spelling
-// canonicalizes against the full current journal, while a node that exists
-// only in the recorded baseline canonicalizes as of the baseline journal
-// prefix from its baseline identity — never by canonicalizing its
-// forward-mapped spelling against the full journal, which would
-// misattribute a spelling recaptured by a replay entry. Everything
+// baseline graph (null when absent there) and the generator-known
+// sidedness (`deleted`). `canonicalizeGeneration` is the central seam that
+// rewrites one generator run into canonical-reference space (SPEC 5.4),
+// branching on that recorded sidedness: a current-side node canonicalizes
+// against the full current journal, while a deleted node — the generating
+// record baseline-side-only — canonicalizes as of the baseline journal
+// prefix from its baseline identity. Which branch applies is the
+// generator's knowledge of the record's side, never graph occupancy of the
+// spelling: a spelling vacated by a manual deletion (SPEC 6.6) and
+// recaptured by a journaled rename or move is borne by a distinct current
+// chain (SPEC 5.4), so canonicalizing the deleted node's forward-mapped
+// spelling against the full journal — or consulting who occupies it —
+// would misattribute the deleted node to the recapturing chain. Everything
 // downstream of the seam — matching, decomposition replay, `split`, state
 // and text keys — is byte-wise over (kind, canonical scope reference),
 // which IS the canonical comparison SPEC 10.4 requires; spellings are
@@ -221,8 +226,6 @@ export interface DecompositionContentSource {
 export interface GenerationCanonicalization {
   /** The full current journal. */
   readonly journal: Journal;
-  /** The current workspace graph. */
-  readonly graph: WorkspaceGraph;
   /**
    * The baseline journal prefix length (SPEC 6.3: the baseline journal is
    * a prefix of the current one — its entry count) for a baseline session;
@@ -242,31 +245,36 @@ export interface CanonicalizedGeneration {
 }
 
 /**
- * The canonical reference of one generated node (module header): a node
- * identified by a current-graph spelling canonicalizes against the full
- * current journal (SPEC 5.4: the canonical identity of the node currently
- * bearing the spelling), while a node that exists only in the recorded
- * baseline — baseline identity recorded, absent from the current graph —
- * canonicalizes as of the baseline journal prefix from its baseline
- * identity. Never by canonicalizing its forward-mapped spelling against
- * the full journal: a replay entry that recaptured the spelling for a
- * different chain would misattribute the node.
+ * The canonical reference of one generated node (module header), branched
+ * on the node's generator-known sidedness (`GeneratedNode.deleted`), never
+ * on graph occupancy of its spelling: a current-side node canonicalizes
+ * against the full current journal (SPEC 5.4: the canonical identity of
+ * the node currently bearing the spelling), while a deleted node — its
+ * generating record baseline-side-only — canonicalizes as of the baseline
+ * journal prefix from its baseline identity, unconditionally. Its
+ * forward-mapped spelling is never canonicalized against the full journal:
+ * when a manual deletion (SPEC 6.6) vacated the spelling and a journaled
+ * rename or move recaptured it for a distinct chain, spelling-based
+ * resolution — occupancy checks included — would misattribute the deleted
+ * node to the recapturing chain. For a code-location node the branches
+ * coincide (locations are never journal-mapped, SPEC 6.4/6.5).
  */
 function canonicalNodeKey(
   node: GeneratedNode,
-  isCodeLocation: boolean,
   inputs: GenerationCanonicalization,
 ): string {
-  const { journal, graph, baselineJournalLength } = inputs;
-  if (baselineJournalLength !== undefined && node.baselineIdentity !== null) {
-    const present = isCodeLocation
-      ? graph.codeLocation(node.identity) !== undefined
-      : graph.requirementNode(node.identity) !== undefined;
-    if (!present) {
-      return encodeCanonicalIdentity(
-        canonicalAt(journal, baselineJournalLength, node.baselineIdentity),
+  const { journal, baselineJournalLength } = inputs;
+  if (node.deleted) {
+    if (node.baselineIdentity === null || baselineJournalLength === undefined) {
+      throw new Error(
+        "xspec internal error: a deleted generated node must carry its " +
+          "baseline identity within a baseline session (generators emit " +
+          "deleted nodes only from baseline-side records)",
       );
     }
+    return encodeCanonicalIdentity(
+      canonicalAt(journal, baselineJournalLength, node.baselineIdentity),
+    );
   }
   return canonicalKeyOfCurrent(journal, node.identity);
 }
@@ -302,11 +310,7 @@ export function canonicalizeGeneration(
   const hasCurrent = new Set<string>();
   for (const item of run.items) {
     const key = kindScopeKey(item.kind, item.scope.identity);
-    const canonical = canonicalNodeKey(
-      item.scope,
-      kindScopesCodeLocation(item.kind),
-      inputs,
-    );
+    const canonical = canonicalNodeKey(item.scope, inputs);
     if (canonical === canonicalKeyOfCurrent(journal, item.scope.identity)) {
       hasCurrent.add(key);
     } else if (!divergent.has(key)) {
@@ -331,11 +335,8 @@ export function canonicalizeGeneration(
   const contentRefKey = (ref: GeneratedBlockerRef): string =>
     canonicalKeyOfCurrent(journal, ref.scope);
 
-  const canonicalNode = (
-    node: GeneratedNode,
-    isCodeLocation: boolean,
-  ): GeneratedNode => ({
-    identity: canonicalNodeKey(node, isCodeLocation, inputs),
+  const canonicalNode = (node: GeneratedNode): GeneratedNode => ({
+    identity: canonicalNodeKey(node, inputs),
     baselineIdentity: node.baselineIdentity,
     deleted: node.deleted,
   });
@@ -344,9 +345,9 @@ export function canonicalizeGeneration(
     refKey: (ref: GeneratedBlockerRef) => string,
   ): GeneratedItem => ({
     ...item,
-    scope: canonicalNode(item.scope, kindScopesCodeLocation(item.kind)),
-    context: item.context.map((node) => canonicalNode(node, false)),
-    origin: item.origin.map((node) => canonicalNode(node, false)),
+    scope: canonicalNode(item.scope),
+    context: item.context.map(canonicalNode),
+    origin: item.origin.map(canonicalNode),
     blockedBy: item.blockedBy.map((ref) => ({
       kind: ref.kind,
       scope: refKey(ref),
@@ -355,9 +356,7 @@ export function canonicalizeGeneration(
       kind: ref.kind,
       scope: refKey(ref),
     })),
-    impactTargets: item.impactTargets?.map((node) =>
-      canonicalNode(node, false),
-    ),
+    impactTargets: item.impactTargets?.map(canonicalNode),
   });
 
   const items = run.items.map((item) => canonicalizeItem(item, mainRefKey));
