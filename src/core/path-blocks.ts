@@ -709,17 +709,37 @@ class PathBlocksComputation {
   // Decomposition content (SPEC 10.7 — review-derive.ts's replay seam)
   // -------------------------------------------------------------------------
 
-  /** The record bearing a stored identity, if any: a present node's, else
-   * a deleted node's whose forward-mapped identity matches. */
-  private recordOfStored(identity: string): NodeChange | undefined {
-    return (
-      this.analysis.byCurrentIdentity.get(identity) ??
-      this.deletedByStored.get(identity)
-    );
+  /**
+   * The record bearing a stored identity, resolution-sided (SPEC 10.4,
+   * 5.4): a canonically resolving reference names the chain currently
+   * bearing the spelling, so only a present node's record
+   * (`byCurrentIdentity`) can be it; a non-resolving reference names a
+   * chain whose spelling was recaptured by a journaled entry, so only a
+   * deleted node's record whose forward-mapped identity matches
+   * (`deletedByStored`) can be it. Never current-first across both — that
+   * would alias a dangling stored scope to the distinct node that
+   * recaptured its spelling.
+   */
+  private recordOfStored(
+    identity: string,
+    resolves: boolean,
+  ): NodeChange | undefined {
+    return resolves
+      ? this.analysis.byCurrentIdentity.get(identity)
+      : this.deletedByStored.get(identity);
   }
 
-  private generatedNodeOfStored(identity: string): GeneratedNode {
-    const record = this.recordOfStored(identity);
+  /** The stored identity as a `GeneratedNode`, via its resolution-sided
+   * record. Without a record the node stays non-deleted: for a resolving
+   * identity no baseline-side record exists for it, and for a
+   * non-resolving one the canonicalization wrapper's scope override
+   * governs the stored reference regardless (review-derive.ts
+   * `canonicalizeGeneration`). */
+  private generatedNodeOfStored(
+    identity: string,
+    resolves: boolean,
+  ): GeneratedNode {
+    const record = this.recordOfStored(identity, resolves);
     if (record !== undefined) return this.nodeOf(record);
     return { identity, baselineIdentity: null, deleted: false };
   }
@@ -729,9 +749,14 @@ class PathBlocksComputation {
       // SPEC 10.7: one subtree-coherence item per child subtree — its
       // context the child's ancestor chain, as in 10.5; its origin the
       // originating nodes (5.6) within its scope and context.
-      subtreeCoherenceItem: (scopeIdentity): GeneratedItem => {
-        const record = this.recordOfStored(scopeIdentity);
-        const scope = this.generatedNodeOfStored(scopeIdentity);
+      // `scopeResolves` (DecompositionContentSource doc) defaults to true:
+      // an unflagged call names a current-graph node.
+      subtreeCoherenceItem: (
+        scopeIdentity,
+        scopeResolves = true,
+      ): GeneratedItem => {
+        const record = this.recordOfStored(scopeIdentity, scopeResolves);
+        const scope = this.generatedNodeOfStored(scopeIdentity, scopeResolves);
         const chain = record === undefined ? [] : this.ancestorChain(record);
         const origin = new Set<NodeChange>();
         if (record !== undefined) {
@@ -767,9 +792,10 @@ class PathBlocksComputation {
       splitParentConsistencyItem: (
         scopeIdentity,
         childIdentities,
+        scopeResolves = true,
       ): GeneratedItem => {
-        const record = this.recordOfStored(scopeIdentity);
-        const scope = this.generatedNodeOfStored(scopeIdentity);
+        const record = this.recordOfStored(scopeIdentity, scopeResolves);
+        const scope = this.generatedNodeOfStored(scopeIdentity, scopeResolves);
         const origin = new Set<NodeChange>();
         if (record !== undefined) {
           // The originating nodes within its scope (the root) and its
@@ -784,8 +810,10 @@ class PathBlocksComputation {
         return {
           kind: "parent-consistency",
           scope,
+          // Child identities are enumerated from the current graph
+          // (DecompositionContentSource doc): current-side lookups.
           context: childIdentities.map((identity) =>
-            this.generatedNodeOfStored(identity),
+            this.generatedNodeOfStored(identity, true),
           ),
           origin: this.nodesOf(origin),
           reason:

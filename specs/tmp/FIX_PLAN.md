@@ -8,12 +8,18 @@ closed plan: T45–T49 (completed tasks are removed from this file). Tasks execu
 task ends with the full suite green.
 Progress: T45 (sidedness plumbing on `GeneratedNode`), T46 (`canonicalNodeKey` branches on
 that sidedness; the graph-occupancy check, the `isCodeLocation` parameter, and
-`GenerationCanonicalization.graph` are removed), and T47 (blocker references canonicalize from
+`GenerationCanonicalization.graph` are removed), T47 (blocker references canonicalize from
 the emitting record's sidedness via `GeneratedBlockerRef.scopeNode`; the `divergent`/`hasCurrent`
-map is retired and the two ref-key functions are one) are done — the T49 scenario A smoke checks
-all pass against the fixed build, and create + `resolve --status updated` re-derivation across a
-plain journaled rename keeps the item shape identical with nothing invalidated; path-blocks'
-stored-spelling lookups (T48) still resolve through spellings current-first.
+map is retired and the two ref-key functions are one), and T48 (the decomposition content seam is
+resolution-sided: `canonicalizeGeneration`'s wrapper resolves a scope reference, passes the
+strategy the spelling plus `ReferenceResolution.resolves`, and is authoritative for the produced
+item's scope reference; path-blocks' `recordOfStored`/`generatedNodeOfStored` consult
+`byCurrentIdentity` only for a resolving reference and `deletedByStored` only for a non-resolving
+one) are done. Smokes against the fixed build: the T49 scenario A checks all pass; split of a
+root item + `resolve --status updated` re-derivation keeps the SPEC 10.7 decomposition items with
+statuses kept; and a split file root whose path is manually vacated then recaptured by a
+journaled `move` yields a distinct absent-presented decomposition item with F-side texts and
+baseline — never aliased or merged into the recapturing file's item, whose `no-change` survives.
 
 Hard constraints for every task:
 
@@ -104,40 +110,6 @@ divergence map. Governing facts (all verifiable in `src/core/journal.ts` and rev
   `baselineTexts` are canonical references — the unambiguous place to assert stored keys).
 
 ---
-
-## T48 — Resolution-sided stored-spelling lookup in the decomposition content seam
-
-**Satisfies:** the panel finding's fix direction "the same treatment for path-blocks'
-stored-spelling lookups" — SPEC 10.5 re-derivation rule 2 / SPEC 10.7 (decomposition matching and
-content per 10.4 canonical comparison; a dangling stored scope never aliases the distinct node
-that recaptured its spelling).
-
-1. `src/core/review-derive.ts`, `canonicalizeGeneration`'s wrapped `DecompositionContentSource`
-   (lines ~349–369): the wrapper currently decodes a scope reference to a bare spelling
-   (`spellingOfReference`) — lossy after a recapture. Change it to resolve the reference
-   (`resolveReference`) and pass the strategy's spelling-space source both the spelling and
-   whether the reference canonically resolves (an optional trailing parameter on the
-   `DecompositionContentSource` methods is TS-compatible for all implementers; audit/coverage may
-   ignore it). Child identities passed to `splitParentConsistencyItem` are enumerated from the
-   current graph (`expandDecompositions`) and need no flag.
-2. Additionally make the wrapper authoritative for the produced item's scope reference: the
-   canonicalized item returned for `subtreeCoherenceItem(scopeReference)` /
-   `splitParentConsistencyItem(scopeReference, …)` must carry exactly `scopeReference` as its
-   canonical scope — never a decode-then-recanonicalize round trip that could land on a
-   recapturing chain (`expandDecompositions` memoizes and matches by that reference; the wrapper
-   already knows it).
-3. `src/core/path-blocks.ts` `recordOfStored` (lines ~703–708) takes the flag: consult
-   `byCurrentIdentity` only for a resolving reference and `deletedByStored` only for a
-   non-resolving one — never current-first across both. `generatedNodeOfStored` (~710–714)
-   forwards the flag; its no-record fallback stays non-deleted for a resolving reference, and for
-   a non-resolving one the wrapper's scope override from step 2 governs the stored reference
-   regardless.
-4. Verify: full gates green (split/decomposition tests in the suite are the sensitive area —
-   `npx vitest run --config test/vitest.config.ts --project suite` file subsets per AGENTS.md can
-   narrow a failure). Smoke: in a scratch workspace, `review split` on a baseline session's root
-   item, then a re-derivation (`resolve --status updated`), still yields the decomposition items
-   of SPEC 10.7 with statuses kept.
-5. Commit, push.
 
 ## T49 — End-to-end verification: the finding's three scenarios, full gates, CI
 

@@ -216,19 +216,36 @@ export interface GeneratedItem {
  * (5.6) within its scope and context — empty in an `audit` session").
  */
 export interface DecompositionContentSource {
-  /** The `subtree-coherence` item for a child subtree rooted at
-   * `scopeIdentity` (a stored identity). */
-  subtreeCoherenceItem(scopeIdentity: string): GeneratedItem;
+  /**
+   * The `subtree-coherence` item for a child subtree rooted at
+   * `scopeIdentity` (a stored identity). `scopeResolves` is the
+   * resolution sidedness `canonicalizeGeneration`'s wrapper passes the
+   * strategy's spelling-space source: whether the requested scope
+   * reference canonically resolves through the journal (SPEC 10.4) —
+   * false exactly when the spelling was recaptured for a distinct chain —
+   * so a stored-spelling record lookup consults the side the reference
+   * actually names, never current-first across both (a dangling stored
+   * scope must never alias the recapturing node). Canonical-space
+   * consumers (the decomposition replay, `split`) omit it; a strategy
+   * without per-side records (audit, coverage) may ignore it.
+   */
+  subtreeCoherenceItem(
+    scopeIdentity: string,
+    scopeResolves?: boolean,
+  ): GeneratedItem;
   /**
    * The decomposed scope root's `parent-consistency` item (SPEC 10.7):
    * scope `scopeIdentity`, context the child subtrees (`childIdentities`,
-   * the scope root's current child nodes in document order). `blockedBy`
+   * the scope root's current child nodes in document order — enumerated
+   * from the current graph, so they carry no resolution flag). `blockedBy`
    * MUST reference the child items — the replay rewrites references into
-   * decomposed children recursively.
+   * decomposed children recursively. `scopeResolves` as on
+   * `subtreeCoherenceItem`.
    */
   splitParentConsistencyItem(
     scopeIdentity: string,
     childIdentities: readonly string[],
+    scopeResolves?: boolean,
   ): GeneratedItem;
 }
 
@@ -355,24 +372,55 @@ export function canonicalizeGeneration(
 
   const items = run.items.map(canonicalizeItem);
 
-  // The decomposition content source in reference space: inputs decode to
-  // the spellings the strategy's builder works in, outputs canonicalize.
+  // The decomposition content source in reference space. An input scope
+  // reference is resolved (`resolveReference`), and the strategy's
+  // spelling-space builder receives both the derived spelling and whether
+  // the reference canonically resolves (SPEC 10.4), so its stored-spelling
+  // record lookups are resolution-sided — a dangling reference, whose
+  // spelling may be borne by the distinct node that recaptured it, never
+  // aliases that node (module header). Child identities are enumerated
+  // from the current graph (`expandDecompositions`) and decode to
+  // spellings alone. The wrapper is authoritative for the produced item's
+  // canonical scope: it carries exactly the requested reference — never a
+  // decode-then-recanonicalize round trip, which could land on a
+  // recapturing chain — because `expandDecompositions` memoizes and
+  // matches by that reference, which the wrapper already knows.
   const inner = run.contentSource;
   const decode = (reference: string): string =>
     spellingOfReference(journal, reference);
+  const withScopeReference = (
+    item: GeneratedItem,
+    reference: string,
+  ): GeneratedItem => ({
+    ...item,
+    scope: { ...item.scope, identity: reference },
+  });
   const contentSource: DecompositionContentSource = {
-    subtreeCoherenceItem: (scopeReference): GeneratedItem =>
-      canonicalizeItem(inner.subtreeCoherenceItem(decode(scopeReference))),
+    subtreeCoherenceItem: (scopeReference): GeneratedItem => {
+      const resolution = resolveReference(journal, scopeReference);
+      return withScopeReference(
+        canonicalizeItem(
+          inner.subtreeCoherenceItem(resolution.spelling, resolution.resolves),
+        ),
+        scopeReference,
+      );
+    },
     splitParentConsistencyItem: (
       scopeReference,
       childReferences,
-    ): GeneratedItem =>
-      canonicalizeItem(
-        inner.splitParentConsistencyItem(
-          decode(scopeReference),
-          childReferences.map(decode),
+    ): GeneratedItem => {
+      const resolution = resolveReference(journal, scopeReference);
+      return withScopeReference(
+        canonicalizeItem(
+          inner.splitParentConsistencyItem(
+            resolution.spelling,
+            childReferences.map(decode),
+            resolution.resolves,
+          ),
         ),
-      ),
+        scopeReference,
+      );
+    },
   };
 
   // The per-location impact-target map (SPEC 10.4, 9.2), rekeyed
