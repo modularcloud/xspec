@@ -1,13 +1,8 @@
----
-title: Reviews
-description: "Staged review sessions: path-blocks, audit, and coverage strategies."
----
-
 # Reviews
 
 A review session turns graph results into a **staged, durable checklist**: each item is one focused judgment ("does this subtree still cohere?", "does this dependent still hold given its target changed?"), items unlock in a deliberate order, resolutions survive restarts and merges, and anything that changes after you resolved it gets flagged — not silently forgotten.
 
-Sessions are stored as plain JSON at `.xspec/reviews/<name>.json` — [durable files](./workspace.md#derived-vs-durable) you commit alongside the specs they review.
+Sessions are stored as plain JSON at `.xspec/reviews/<name>.json` — [durable files](workspace.md#derived-vs-durable) you commit alongside the specs they review.
 
 ## Creating a session
 
@@ -27,7 +22,7 @@ For a change relative to `--base`, the session contains:
 - one **`parent-consistency`** item per ancestor of a change — "does this parent's own prose still make sense given what changed beneath it?" — *blocked by* the items for the changed branches beneath it, so parents unlock only after their children are reviewed;
 - one **`metadata-consistency`** item per node whose `d`/`coverage`/`tags` changed;
 - one **`dependency-consistency`** item per node depending on a target whose effective content changed — "your upstream moved; do you still hold?";
-- one **`code-impact`** item per [impacted code location](./impact.md#impacted-code).
+- one **`code-impact`** item per [impacted code location](impact.md#impacted-code).
 
 Item order is deepest-first for requirement items, then code items — matching the blocking direction, so `next` naturally walks bottom-up.
 
@@ -37,7 +32,7 @@ One `subtree-coherence` item per requirement node (roots included), no baseline.
 
 ### `coverage` sessions — burn down uncovered requirements
 
-One **`uncovered-requirement`** item per uncovered required node of the profile at creation time. Use it to turn a [coverage](./coverage.md) gap into a tracked work list.
+One **`uncovered-requirement`** item per uncovered required node of the profile at creation time. Use it to turn a [coverage](coverage.md) gap into a tracked work list.
 
 ## The item model
 
@@ -61,7 +56,7 @@ Resolving an item records the relevant state for its kind (per-kind relevant has
 
 Two properties keep this workable:
 
-- **Journaled renames/moves never invalidate anything** — recorded nodes compare by canonical identity through the journal, and reads present them under their current names. Refactor freely mid-review with [`rename`/`move`](./refactoring.md).
+- **Journaled renames/moves never invalidate anything** — recorded nodes compare by canonical identity through the journal, and reads present them under their current names. Refactor freely mid-review with [`rename`/`move`](refactoring.md).
 - **Deletion review is resolvable**: a node that was already absent when you resolved doesn't re-invalidate by staying absent.
 
 ### Re-derivation — sessions follow the work
@@ -74,7 +69,7 @@ Resolving an item as `updated` re-runs the session's generators against the curr
 
 ## A worked session
 
-The [getting-started project](./getting-started.md), after editing `auth.lockout`'s text (15 → 30 minutes):
+The [getting-started project](getting-started.md), after editing `auth.lockout`'s text (15 → 30 minutes):
 
 ```sh
 $ xspec review create --base HEAD --name lockout-change
@@ -145,7 +140,7 @@ done
 
 ## Operational notes
 
-- `status`, `next`, `show`, `export` are reads; `create`, `resolve`, `split` are mutating and [mutually exclusive](./cli.md#concurrency) per workspace.
+- `status`, `next`, `show`, `export` are reads; `create`, `resolve`, `split` are mutating and [mutually exclusive](cli.md#concurrency) per workspace.
 - Session names: `A–Z a–z 0–9 . _ -`, not starting with `.`.
 - A session file that is damaged or hand-edited into inconsistency is reported **corrupt**: every subcommand naming it (and `check`, and `review list`) says so and exits `1` without touching it. Restore it from version control; nothing regenerates it.
 - Sessions read the graph at the current sources — if the workspace fails validation, review commands report the findings and exit `1` like every other read.

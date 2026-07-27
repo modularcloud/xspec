@@ -1,15 +1,10 @@
----
-title: Coverage
-description: Profiles, boundaries, direct vs. transitive coverage, and CI gating.
----
-
 # Coverage
 
 Coverage answers one question per configured profile: **is every requirement I care about reachable from the things that are supposed to exercise it?** It is graph reachability over dependency edges — deliberate, inspectable, and deterministic — not proof of semantic correctness.
 
 ## The model
 
-A profile ([configured](./configuration.md#coverage--coverage-profiles) in `xspec.config.ts`) names:
+A profile ([configured](configuration.md#coverage--coverage-profiles) in `xspec.config.ts`) names:
 
 - a **target**: the spec group whose requirements must be covered, optionally narrowed by `targetTags` and, by default, to leaves;
 - a **boundary**: the spec or code group that counts as "covering" — test code, test specs, a design layer;
@@ -63,7 +58,7 @@ xspec coverage tested --check
 
 ## Choosing a mode
 
-**`direct`** is the strict form: the boundary itself must reference the requirement. Use it when tests carry [markers](./typescript.md#two-ways-to-reference-a-requirement) straight to the requirements they exercise:
+**`direct`** is the strict form: the boundary itself must reference the requirement. Use it when tests carry [markers](typescript.md#two-ways-to-reference-a-requirement) straight to the requirements they exercise:
 
 ```
 test/auth.test.ts#testValidLogin ──references──▶ specs/AUTH.mdx#auth.login.valid
@@ -79,7 +74,7 @@ With `mode: "transitive"`, a profile targeting the product group and bounded by 
 
 ## Interpreting the numbers
 
-- **uncovered** is your work list: requirements no boundary node reaches. Create a [coverage review session](./reviews.md#coverage-sessions--burn-down-uncovered-requirements) (`xspec review create --coverage <profile> --name <n>`) to burn it down as a checklist.
+- **uncovered** is your work list: requirements no boundary node reaches. Create a [coverage review session](reviews.md#coverage-sessions--burn-down-uncovered-requirements) (`xspec review create --coverage <profile> --name <n>`) to burn it down as a checklist.
 - **ignored** is the audit trail for scope: every target-group node excluded from the required set, with reasons in a fixed order (`root node`, `coverage="none"`, `non-leaf under targets: "leaves"`, lacking every `targetTags` tag). If something you expected to be measured shows up here, the reason tells you which knob to turn.
 - `xspec ids --unreferenced` is related but different: it lists nodes with **no incoming dependency edges at all**, regardless of any profile. A node can be referenced (by the app, by a sibling spec) yet still uncovered for a profile whose boundary is the test group.
 

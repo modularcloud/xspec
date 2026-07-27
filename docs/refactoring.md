@@ -1,8 +1,3 @@
----
-title: Renaming and moving
-description: Identity-preserving refactoring with xspec rename, xspec move, and the journal.
----
-
 # Renaming and moving requirements
 
 Spec trees need restructuring — IDs outgrow their names, sections belong in other files. The naive way (hand-editing IDs and paths) destroys history: every tool that compares against a baseline sees a deletion plus an addition, dependents light up as changed, resolved review items invalidate.
@@ -91,7 +86,7 @@ Journaled operations append one line each to `.xspec/journal`:
 {"from":"specs/AUTH.mdx#auth.throttling","map":[["specs/AUTH.mdx#auth.throttling","specs/THROTTLING.mdx#throttling"]],"op":"move-section","to":"specs/THROTTLING.mdx#throttling"}
 ```
 
-Treat the file as opaque except for its contract: **plain text, one entry per line, append-only, written only by `rename` and `move`**. It is a [durable file](./workspace.md#derived-vs-durable): commit it, never edit or delete it, let concurrent branches merge it textually. Every baseline-taking command replays the entries added since the baseline to map old identities to new ones — chains compose, so `rename` → `move` → `rename` still resolves. `xspec check` validates the journal and reports malformed, conflicting, or unreplayable entries; a baseline whose journal is not a prefix of the current one (someone rewrote it) is a hard error naming the offending entries.
+Treat the file as opaque except for its contract: **plain text, one entry per line, append-only, written only by `rename` and `move`**. It is a [durable file](workspace.md#derived-vs-durable): commit it, never edit or delete it, let concurrent branches merge it textually. Every baseline-taking command replays the entries added since the baseline to map old identities to new ones — chains compose, so `rename` → `move` → `rename` still resolves. `xspec check` validates the journal and reports malformed, conflicting, or unreplayable entries; a baseline whose journal is not a prefix of the current one (someone rewrote it) is a hard error naming the offending entries.
 
 Because identity flows through the journal, an ID that was vacated by a rename and later reintroduced by a brand-new section is a *different* node — references to the two never compare equal, and hashes never collide across the reuse.
 
@@ -103,4 +98,4 @@ Editing IDs or moving text by hand is always *valid* — xspec just treats it as
 
 1. Land content edits and refactoring in the same branch freely — journaled operations keep the two separable in every report.
 2. Run restructuring through the commands even for "trivial" one-reference renames; the journal entry is the cheap part, and hand-edits are the ones you end up explaining in review.
-3. `rename`/`move` are [mutually exclusive](./cli.md#concurrency) with other mutating commands per workspace, and a refused or interrupted operation modifies nothing; `xspec check` reports any inconsistency an interrupted run could leave.
+3. `rename`/`move` are [mutually exclusive](cli.md#concurrency) with other mutating commands per workspace, and a refused or interrupted operation modifies nothing; `xspec check` reports any inconsistency an interrupted run could leave.

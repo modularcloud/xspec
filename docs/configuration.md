@@ -1,8 +1,3 @@
----
-title: Configuration
-description: "The xspec.config.ts schema: spec and code groups, Markdown emission, coverage profiles, and policy rules."
----
-
 # Configuration: `xspec.config.ts`
 
 Every xspec project is configured by a single `xspec.config.ts`. Its directory is the **workspace root**: all globs and paths resolve relative to it, and every identity xspec prints is workspace-relative.
@@ -76,7 +71,7 @@ Group names are what coverage profiles, policy selectors, and `query nodes --gro
 
 ## `code` — code groups
 
-Named groups of TypeScript files. Code groups serve two purposes: they can be a coverage **boundary** ("covered = referenced from this code"), and they are the population reported by [impacted-code analysis](./impact.md#impacted-code).
+Named groups of TypeScript files. Code groups serve two purposes: they can be a coverage **boundary** ("covered = referenced from this code"), and they are the population reported by [impacted-code analysis](impact.md#impacted-code).
 
 A file matched by both a spec group and a code group is a configuration error. Files whose names carry `.xspec.` (generated modules), files under `.xspec/`, and configured Markdown output destinations are never discovered as sources, so generated artifacts cannot sneak into groups via a broad glob.
 
@@ -86,12 +81,12 @@ A file matched by both a spec group and a code group is a configuration error. F
 markdown: { emit: true, outDir: "build/md" }
 ```
 
-- `emit` (required boolean): whether each `NAME.mdx` compiles to a pure `NAME.md` ([what that means](./writing-specs.md#markdown-compilation)).
+- `emit` (required boolean): whether each `NAME.mdx` compiles to a pure `NAME.md` ([what that means](writing-specs.md#markdown-compilation)).
 - `outDir` (optional): redirect emitted files into a directory, preserving workspace-relative paths. Must resolve inside the workspace root. Default: emit next to each source file.
 
 ## `coverage` — coverage profiles
 
-Each profile is a named question of the form "is every requirement in *target* reachable from *boundary*?" — evaluated by `xspec coverage`. See [Coverage](./coverage.md) for semantics; the fields:
+Each profile is a named question of the form "is every requirement in *target* reachable from *boundary*?" — evaluated by `xspec coverage`. See [Coverage](coverage.md) for semantics; the fields:
 
 | Field | Required | Meaning |
 |---|---|---|

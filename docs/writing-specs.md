@@ -1,13 +1,8 @@
----
-title: Writing specs
-description: "The .mdx source syntax: sections, IDs, dependencies, embedding, tags, and Markdown output."
----
-
 # Writing specs
 
 xspec source files are MDX documents (`.mdx`) in which requirement sections are marked with `<S>` tags. Everything else in the file is ordinary Markdown. This page covers the complete authoring syntax; validation of every rule here is enforced by `xspec build` / `xspec check` with errors that name the file, location, and fix.
 
-Source files must be valid UTF-8 without a byte-order mark, and must have the `.mdx` extension. Which files are spec sources at all is decided only by the globs in [`xspec.config.ts`](./configuration.md) — imports never pull extra files into the workspace.
+Source files must be valid UTF-8 without a byte-order mark, and must have the `.mdx` extension. Which files are spec sources at all is decided only by the globs in [`xspec.config.ts`](configuration.md) — imports never pull extra files into the workspace.
 
 ## Sections
 
@@ -72,7 +67,7 @@ Derived behavior.
 - **Local form**: a string literal naming an ID in the same file (`"local.requirement"`).
 - The two forms mix freely in one array; duplicates collapse to one edge; `d={[]}` is the same as omitting the prop.
 
-`d` records a `depends` edge in the graph. It does not render into Markdown output and it does not prove anything by itself — it is the raw material for [coverage](./coverage.md), [policy](./configuration.md#policy--dependency-policy-rules), [impact](./impact.md), and [reviews](./reviews.md).
+`d` records a `depends` edge in the graph. It does not render into Markdown output and it does not prove anything by itself — it is the raw material for [coverage](coverage.md), [policy](configuration.md#policy--dependency-policy-rules), [impact](impact.md), and [reviews](reviews.md).
 
 A section must not depend on (or embed) itself or its own ancestor — that is a dependency cycle, and cycles of any length are build errors reported with the full cycle path.
 
@@ -148,7 +143,7 @@ Prop syntax is strict:
 
 ## Markdown compilation
 
-With [`markdown.emit`](./configuration.md#markdown--pure-markdown-emission) enabled, each `NAME.mdx` compiles to a pure-Markdown `NAME.md`:
+With [`markdown.emit`](configuration.md#markdown--pure-markdown-emission) enabled, each `NAME.mdx` compiles to a pure-Markdown `NAME.md`:
 
 - spec imports, `<S>`/`<Spec>` tags (with their props), and MDX comments are removed;
 - each `{text(...)}` is replaced by the target's fully expanded subtree text;
@@ -169,7 +164,7 @@ Two text values of a node show up throughout xspec (`show`, `query`, review payl
 - **subtree text** — the node's full contribution to the compiled Markdown: its own content with every descendant interleaved in document order.
 - **own text** — the same with every child's contribution excised; just the node's directly-owned prose.
 
-Both are exact bytes with `text(...)` embeddings fully expanded. Hashing works on a related but distinct value (own *content*, where embeddings count as references rather than expanded text) — the practical consequences are described in [Impact analysis](./impact.md#hashes).
+Both are exact bytes with `text(...)` embeddings fully expanded. Hashing works on a related but distinct value (own *content*, where embeddings count as references rather than expanded text) — the practical consequences are described in [Impact analysis](impact.md#hashes).
 
 ## A complete example
 

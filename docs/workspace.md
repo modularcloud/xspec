@@ -1,8 +1,3 @@
----
-title: Workspace files
-description: What xspec writes, derived vs. durable files, and what to commit.
----
-
 # Workspace files
 
 Everything xspec writes is a **plain file with deterministic bytes** — stable ordering, sorted keys, no timestamps, no absolute paths — deliberately suitable for committing and diffing. This page inventories those files, explains the derived/durable distinction, and gives version-control guidance.
@@ -44,7 +39,7 @@ Commit **everything xspec writes**, alongside your sources:
 
 A `.gitignore` for the commit-everything policy needs no xspec entries at all. For the regenerate-in-CI policy:
 
-```ini
+```gitignore
 # derived (rebuilt by `xspec build`) — keep .xspec/journal and .xspec/reviews!
 *.xspec.*
 specs/**/*.md
