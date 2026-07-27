@@ -1,52 +1,82 @@
-# sdg-claude
+# xspec
 
-A Claude-native implementation of **Spec-Driven Generation (SDG)** — a structured process for building software by maintaining a master specification and letting AI generate everything else: the spec, the test spec, the certifications, the test harness, and the product. Humans answer clarifying questions to remove ambiguity; they do not write code or specs by hand.
+**Requirement traceability for specifications written in MDX.**
 
-This repository is the **template**. Dropped into a project, it makes every Claude Code session in that project run the SDG process automatically — no commands to learn, no CLI. You chat; the process does the rest.
+xspec turns your spec documents into a typed, queryable dependency graph. Mark requirement sections with `<S>` tags; xspec compiles each document into a strongly typed TypeScript module, links requirements to the code that implements and tests them, and uses the resulting project-wide graph to validate references, enforce dependency policy, measure coverage, analyze the impact of changes, and drive staged reviews.
 
-## How it works
+```mdx
+{/* specs/AUTH.mdx */}
+<S id="auth">
+Authentication.
 
-- [`specs/PROCESS.md`](specs/PROCESS.md) — the harness-agnostic process specification (authoritative, immutable).
-- [`specs/CLAUDE-PROCESS.md`](specs/CLAUDE-PROCESS.md) — how the process binds to Claude Code: the main thread is a "dumb" Orchestrator that only steps through phases; a forked **Liaison** subagent owns all Developer communication and `specs/PHILOSOPHY.md`; **Reviewer**, **Driver**, **Engineer**, and **Specialist** run as fresh-context subagents driven by per-phase mission prompts in `.claude/prompts/`.
-- [`CLAUDE.md`](CLAUDE.md) — marks the project as SDG-governed, end to end, all or nothing.
+<S id="auth.login" tags="happy-path">
+Users sign in with an email address and a password.
+</S>
+</S>
+```
 
-Defaults: every agent runs Claude **Fable** (`max` effort for the session/Liaison/Reviewer, `high` elsewhere), and `.claude/settings.json` sets `bypassPermissions` — this is built to run unattended in a sandboxed or cloud environment (Claude Code web, a container, a VM). Adjust `settings.json` if that doesn't describe your machine.
+```ts
+// src/auth.ts
+import AUTH from "../specs/AUTH.xspec"
 
-## Bootstrap a project
-
-Use the **sdg-bootstrap skill** (in [`sdg-bootstrap/`](sdg-bootstrap/)) — share it with Claude and ask it to set up SDG in your project. Or do it manually:
+export function login(email: string, password: string): boolean {
+  AUTH.auth.login   // type-checked reference: this code implements that requirement
+  return email.includes("@") && password.length > 0
+}
+```
 
 ```sh
-# in your new project directory
-npx degit modularcloud/sdg-claude sdg-tmp
-rsync -a --exclude README.md --exclude LICENSE --exclude sdg-bootstrap sdg-tmp/ ./ && rm -rf sdg-tmp
+xspec build                 # typed modules + Markdown + project graph
+xspec check                 # validate everything; exit 1 on any finding
+xspec coverage tested --check   # gate CI on requirement coverage
+xspec impact --base main    # what does this change touch?
 ```
 
-Then make sure the project is a git repository with a GitHub remote and Actions enabled, open Claude Code in it, and describe what you want to build.
+## Why
 
-**Requirements:** Claude Code (desktop, CLI, or web) with access to Claude Fable; `git` plus authenticated GitHub access (the `gh` CLI locally; the built-in GitHub integration on web); a GitHub repository with Actions enabled; a sandboxed/disposable environment (see above).
+- **References that can't rot.** Requirement references in code are real TypeScript — hover shows the requirement text, go-to-definition jumps into the `.mdx`, and a renamed or deleted requirement is a compile error, not silent drift.
+- **A graph, not a convention.** Sections, declared dependencies (`d`), text embeddings (`{text(...)}`), and code references form one project-wide graph you can query, gate, and diff.
+- **Coverage as reachability.** Named profiles ask precise questions — "is every product requirement referenced by a test?" — and `--check` turns them into CI gates.
+- **Impact you can trust.** Hash-based change detection attributes every downstream effect to the edit that caused it; `xspec rename`/`xspec move` record identity mappings in a journal, so refactoring produces *zero* spurious impact.
+- **Reviews with memory.** Changes, audits, and coverage gaps become durable, staged checklists that unlock bottom-up and flag resolutions invalidated by later edits.
+- **Deterministic by construction.** Every output and generated file is byte-identical for identical input: no timestamps, no randomness, no network. Exit codes mean things (`0` success, `1` findings, `2` usage/config errors). Every command speaks `--json`.
 
-### Running on Claude Code web
+## Getting started
 
-- **Set `CLAUDE_CODE_FORK_SUBAGENT=1` in the repository's environment configuration** on claude.ai/code (the same place you'd set API keys). Forked subagents are how Liaison inherits your conversation; the scaffold's `.claude/settings.json` also sets this variable, but the platform-level channel is the reliable one — without it, Liaison cannot fork and the process halts at Phase 1 by design.
-- The web sandbox has no `gh` CLI; that's fine — the built-in GitHub integration covers branches, PRs, review comments, and CI status, and the process prompts are tool-agnostic about which is used.
+Requires **Node.js ≥ 22**. Not yet published to npm — run from a checkout:
 
-## Layout
-
+```sh
+git clone https://github.com/modularcloud/xspec.git
+cd xspec && npm ci && npm run build
+npm link    # puts `xspec` on your PATH
 ```
-CLAUDE.md                      Orchestrator charter — auto-loads every session
-specs/
-  PROCESS.md                   the SDG process (never modified)
-  CLAUDE-PROCESS.md            Claude Code bindings, protocols, phase runbook
-  PHILOSOPHY.md                Liaison-only memory of Developer principles
-  GOALS.md                     non-negotiable goals (Developer-approved edits only)
-  tmp/  patches/               process working files
-.claude/
-  settings.json                model, effort, permissions defaults
-  agents/                      sdg-reviewer, sdg-driver, sdg-engineer, sdg-specialist
-  prompts/                     Liaison charter + per-phase mission prompts
-sdg-bootstrap/                 the bootstrap skill (not copied into projects)
-```
+
+Then follow **[docs/getting-started.md](docs/getting-started.md)** to set up a project in minutes.
+
+## Documentation
+
+Usage guides live in [`docs/`](docs/README.md):
+
+| | |
+|---|---|
+| [Getting started](docs/getting-started.md) | Install → first project → first coverage report |
+| [Writing specs](docs/writing-specs.md) | The `.mdx` syntax: sections, IDs, `d`, `text()`, tags |
+| [Configuration](docs/configuration.md) | `xspec.config.ts`: groups, Markdown, coverage profiles, policy |
+| [TypeScript integration](docs/typescript.md) | Generated modules, markers, `text()`, compiler setup |
+| [CLI reference](docs/cli.md) | Every command, flag, exit code, and convention |
+| [Coverage](docs/coverage.md) | Profiles, boundaries, modes, CI gating |
+| [Impact analysis](docs/impact.md) | Hashes, change categories, baselines, impacted code |
+| [Reviews](docs/reviews.md) | Staged review sessions and strategies |
+| [Renaming & moving](docs/refactoring.md) | Identity-preserving refactoring and the journal |
+| [Workspace files](docs/workspace.md) | What xspec writes and what to commit |
+
+The authoritative behavioral specification is [`specs/SPEC.md`](specs/SPEC.md); the docs are the guide, the spec is the law.
+
+## Development
+
+This repository is built and maintained through **Spec-Driven Generation (SDG)**: the specification is the master artifact, and the spec, tests, and implementation are generated and kept in lockstep by the process defined in [`specs/PROCESS.md`](specs/PROCESS.md) (with Claude Code bindings in [`specs/CLAUDE-PROCESS.md`](specs/CLAUDE-PROCESS.md) and scaffolding under `.claude/`). Humans steer by editing goals and answering questions — not by hand-writing code — so issues and ideas are welcome as problem statements rather than patches.
+
+Build and test instructions (for CI and process runs) are in [`AGENTS.md`](AGENTS.md): `npm ci`, `npm run build`, `npm test`. The test harness under `test/` is a separate program that drives the built `xspec` executable as a subprocess; certification fixtures keep the harness itself honest.
 
 ## License
 
