@@ -72,6 +72,8 @@ Usage guides live in [`docs/`](docs/README.md):
 
 The authoritative behavioral specification is [`specs/SPEC.md`](specs/SPEC.md); the docs are the guide, the spec is the law.
 
+The same pages power a browsable docs site ([Fumadocs](https://fumadocs.dev)) in [`website/`](website/) — run it locally with `cd website && npm install && npm run dev`.
+
 ## Development
 
 This repository is built and maintained through **Spec-Driven Generation (SDG)**: the specification is the master artifact, and the spec, tests, and implementation are generated and kept in lockstep by the process defined in [`specs/PROCESS.md`](specs/PROCESS.md) (with Claude Code bindings in [`specs/CLAUDE-PROCESS.md`](specs/CLAUDE-PROCESS.md) and scaffolding under `.claude/`). Humans steer by editing goals and answering questions — not by hand-writing code — so issues and ideas are welcome as problem statements rather than patches.

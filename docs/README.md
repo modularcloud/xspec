@@ -1,8 +1,13 @@
+---
+title: Overview
+description: What xspec is, a thirty-second tour, and where to start reading.
+---
+
 # xspec documentation
 
 xspec is a requirement-traceability tool for specifications written in MDX. You mark requirement sections in your spec documents with `<S>` tags, and xspec compiles them into strongly typed TypeScript modules, builds a project-wide dependency graph between requirements and code, and uses that graph to validate references, enforce dependency policy, measure coverage, analyze the impact of changes, and drive staged reviews.
 
-These pages are the usage guide. The authoritative behavioral specification is [`specs/SPEC.md`](../specs/SPEC.md); if a page here ever disagrees with it, the specification wins.
+These pages are the usage guide. The authoritative behavioral specification is [`specs/SPEC.md`](https://github.com/modularcloud/xspec/blob/main/specs/SPEC.md); if a page here ever disagrees with it, the specification wins.
 
 ## Thirty-second tour
 
@@ -40,19 +45,19 @@ Requirement references are real, type-checked TypeScript — renaming a requirem
 
 Read in order if you are new:
 
-1. **[Getting started](getting-started.md)** — install, create a project, first build, first coverage report.
-2. **[Writing specs](writing-specs.md)** — the `.mdx` source syntax: sections, IDs, dependencies, embedding, tags, Markdown output.
-3. **[Configuration](configuration.md)** — `xspec.config.ts`: spec and code groups, Markdown emission, coverage profiles, policy rules.
-4. **[Using specs from TypeScript](typescript.md)** — generated modules, `text()`, dependency markers, compiler setup.
+1. **[Getting started](./getting-started.md)** — install, create a project, first build, first coverage report.
+2. **[Writing specs](./writing-specs.md)** — the `.mdx` source syntax: sections, IDs, dependencies, embedding, tags, Markdown output.
+3. **[Configuration](./configuration.md)** — `xspec.config.ts`: spec and code groups, Markdown emission, coverage profiles, policy rules.
+4. **[Using specs from TypeScript](./typescript.md)** — generated modules, `text()`, dependency markers, compiler setup.
 
 Reference and workflows:
 
-5. **[CLI reference](cli.md)** — every command, flag, exit code, and output convention.
-6. **[Coverage](coverage.md)** — profiles, boundaries, direct vs. transitive coverage, gating CI.
-7. **[Impact analysis](impact.md)** — hashes, change categories, baselines, impacted code.
-8. **[Reviews](reviews.md)** — staged review sessions: `path-blocks`, `audit`, and `coverage` strategies.
-9. **[Renaming and moving](refactoring.md)** — `xspec rename`, `xspec move`, and the identity journal.
-10. **[Workspace files](workspace.md)** — what xspec writes, derived vs. durable files, what to commit.
+5. **[CLI reference](./cli.md)** — every command, flag, exit code, and output convention.
+6. **[Coverage](./coverage.md)** — profiles, boundaries, direct vs. transitive coverage, gating CI.
+7. **[Impact analysis](./impact.md)** — hashes, change categories, baselines, impacted code.
+8. **[Reviews](./reviews.md)** — staged review sessions: `path-blocks`, `audit`, and `coverage` strategies.
+9. **[Renaming and moving](./refactoring.md)** — `xspec rename`, `xspec move`, and the identity journal.
+10. **[Workspace files](./workspace.md)** — what xspec writes, derived vs. durable files, what to commit.
 
 ## What xspec is not
 

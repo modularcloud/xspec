@@ -1,10 +1,15 @@
+---
+title: Impact analysis
+description: Hashes, change categories, baselines, and impacted code.
+---
+
 # Impact analysis
 
 ```sh
 xspec impact --base <git-ref>
 ```
 
-`impact` compares the current workspace against a **baseline**: the graph reconstructed from the workspace content at a git ref — sources *and* configuration as they stood there — with identities mapped forward through the [journal](refactoring.md#the-journal). It answers "what did this change touch?" at two levels: requirement nodes (with change categories and attribution) and code (which locations are impacted, with witness paths).
+`impact` compares the current workspace against a **baseline**: the graph reconstructed from the workspace content at a git ref — sources *and* configuration as they stood there — with identities mapped forward through the [journal](./refactoring.md#the-journal). It answers "what did this change touch?" at two levels: requirement nodes (with change categories and attribution) and code (which locations are impacted, with witness paths).
 
 `impact` is informational: it exits `0` whether or not differences exist, and `--json` emits the full report as data. It reads git history but never writes to git.
 
@@ -48,7 +53,7 @@ Each impacted location is reported with one impact edge and **one shortest witne
 
 ## Reading a report
 
-An edit to the text of `auth.lockout` in the [getting-started project](getting-started.md):
+An edit to the text of `auth.lockout` in the [getting-started project](./getting-started.md):
 
 ```sh
 $ xspec impact --base HEAD
@@ -107,12 +112,12 @@ $ xspec impact --base HEAD
 baseline ba39f7296cccc1abc4c63ac33189505bb270857c
 ```
 
-— an empty report. The rename rewrote every reference and recorded the identity mapping; nothing *changed* in the graph's terms. Restructure specs by hand instead and the same operation reports a deletion plus an addition, with every dependent upstream-changed. This is the payoff of [`rename`/`move`](refactoring.md).
+— an empty report. The rename rewrote every reference and recorded the identity mapping; nothing *changed* in the graph's terms. Restructure specs by hand instead and the same operation reports a deletion plus an addition, with every dependent upstream-changed. This is the payoff of [`rename`/`move`](./refactoring.md).
 
 A baseline that cannot be read or reconstructed — unknown ref, sources at the ref that don't validate, a journal whose baseline content is not a prefix of the current one — is a usage error (exit `2`) naming the offending entries or files.
 
 ## Where impact fits
 
 - **Pre-merge summary**: `xspec impact --base origin/main --json` in CI annotates a PR with exactly which requirements changed and which code is affected.
-- **Review scoping**: [`xspec review create --base <ref>`](reviews.md) turns the same comparison into a durable, staged checklist with blocking order — impact is the report, review is the workflow.
+- **Review scoping**: [`xspec review create --base <ref>`](./reviews.md) turns the same comparison into a durable, staged checklist with blocking order — impact is the report, review is the workflow.
 - **Change auditing**: since attribution always points at originating nodes, an unexpected entry in the report traces to the edit that caused it in one hop.

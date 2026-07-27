@@ -1,3 +1,8 @@
+---
+title: CLI reference
+description: Every command, flag, exit code, and output convention.
+---
+
 # CLI reference
 
 ```
@@ -89,11 +94,11 @@ Prints one requirement for human reading: identity, source range, tags, coverage
 
 ## `xspec coverage [<profile>] [--check]`
 
-Runs all configured coverage profiles, or one by name. Reports counts plus the identity of every covered (with one shortest covering path), uncovered, and ignored node (with exclusion reasons). With `--check`, exits `1` if any required node is uncovered. See [Coverage](coverage.md).
+Runs all configured coverage profiles, or one by name. Reports counts plus the identity of every covered (with one shortest covering path), uncovered, and ignored node (with exclusion reasons). With `--check`, exits `1` if any required node is uncovered. See [Coverage](./coverage.md).
 
 ## `xspec impact --base <git-ref>`
 
-Compares the current workspace against the graph reconstructed at a git ref (identities mapped through the journal). Reports requirement change categories with attribution, then directly/transitively impacted code with witness paths. Informational: exits `0` either way. See [Impact analysis](impact.md).
+Compares the current workspace against the graph reconstructed at a git ref (identities mapped through the journal). Reports requirement change categories with attribution, then directly/transitively impacted code with witness paths. Informational: exits `0` either way. See [Impact analysis](./impact.md).
 
 ## `xspec review …`
 
@@ -112,7 +117,7 @@ xspec review resolve <name> <item-id> --status <status> [--note <text>]
 xspec review export <name>
 ```
 
-`create` requires exactly one of `--base`, `--strategy audit`, `--coverage`. `resolve --status` accepts `updated`, `no-change`, `skipped`. `export` emits JSON always. Sessions live in `.xspec/reviews/<name>.json`; names are limited to `A–Z a–z 0–9 . _ -` and must not start with `.`. See [Reviews](reviews.md) for the model and a worked session.
+`create` requires exactly one of `--base`, `--strategy audit`, `--coverage`. `resolve --status` accepts `updated`, `no-change`, `skipped`. `export` emits JSON always. Sessions live in `.xspec/reviews/<name>.json`; names are limited to `A–Z a–z 0–9 . _ -` and must not start with `.`. See [Reviews](./reviews.md) for the model and a worked session.
 
 ## `xspec query <sub>`
 
@@ -146,7 +151,7 @@ $ xspec query reachable --from "test/auth.test.ts#testValidLogin" \
 
 ## `xspec rename <file> <old-id> <new-id>`
 
-Renames a requirement ID, rewrites descendant IDs and **every reference across the workspace** (spec `id`s, `d` refs, `text(...)` refs, TypeScript markers), and appends the identity mapping to the journal. Refuses (exit `1`) rather than corrupt: invalid or colliding new ID, broken structural rules, or a workspace that doesn't currently pass `build` validation. Finishes by regenerating derived files. See [Renaming and moving](refactoring.md).
+Renames a requirement ID, rewrites descendant IDs and **every reference across the workspace** (spec `id`s, `d` refs, `text(...)` refs, TypeScript markers), and appends the identity mapping to the journal. Refuses (exit `1`) rather than corrupt: invalid or colliding new ID, broken structural rules, or a workspace that doesn't currently pass `build` validation. Finishes by regenerating derived files. See [Renaming and moving](./refactoring.md).
 
 ## `xspec move <old> <new>`
 
@@ -157,7 +162,7 @@ xspec move <old-file> <new-file>                    # relocate a whole source fi
 xspec move <file>#<id> <target-file>#<new-id>       # extract/move a section subtree
 ```
 
-Both rewrite all references (converting between local and imported forms, adding/removing imports as needed), append the mapping to the journal, and regenerate. The section form's exact text edits and refusal conditions are covered in [Renaming and moving](refactoring.md).
+Both rewrite all references (converting between local and imported forms, adding/removing imports as needed), append the mapping to the journal, and regenerate. The section form's exact text edits and refusal conditions are covered in [Renaming and moving](./refactoring.md).
 
 ---
 

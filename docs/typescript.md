@@ -1,3 +1,8 @@
+---
+title: TypeScript integration
+description: Generated modules, dependency markers, text(), and compiler setup.
+---
+
 # Using specs from TypeScript
 
 `xspec build` compiles each spec source `NAME.mdx` into a typed TypeScript module next to it. Code imports that module to reference requirements; every reference is type-checked, navigable, and recorded as an edge in the project graph.
@@ -40,7 +45,7 @@ export function login(email: string, password: string): boolean {
 }
 ```
 
-At runtime a marker is a harmless property read — no tooling, no side effects. In the graph it records a `references` edge from the enclosing code location to the node. Markers are how code participates in [coverage](coverage.md) and [impact analysis](impact.md).
+At runtime a marker is a harmless property read — no tooling, no side effects. In the graph it records a `references` edge from the enclosing code location to the node. Markers are how code participates in [coverage](./coverage.md) and [impact analysis](./impact.md).
 
 A marker to a *root* node (`AUTH` alone on a line) records an edge, but roots never participate in coverage paths — its practical effect is to make the code location impacted by any change in the whole document or upstream of it.
 

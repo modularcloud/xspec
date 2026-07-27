@@ -1,3 +1,8 @@
+---
+title: Getting started
+description: Install xspec, create a project, and get your first validated, coverage-measured spec.
+---
+
 # Getting started
 
 This walkthrough takes you from an empty directory to a validated, coverage-measured spec project. Every command and output shown here was produced by the real tool.
@@ -58,7 +63,7 @@ export default defineConfig({
 
 Two things to know about this file:
 
-- xspec **parses it statically and never executes it** — it must be purely declarative (literals only). See [Configuration](configuration.md) for the full schema.
+- xspec **parses it statically and never executes it** — it must be purely declarative (literals only). See [Configuration](./configuration.md) for the full schema.
 - The `import { defineConfig } from "xspec"` exists for editor type support. xspec itself never resolves it, so your project does not need xspec installed as a dependency for the CLI to work. If your own `tsc` run includes `xspec.config.ts`, either install the package (e.g. `npm install /path/to/xspec/checkout`) or exclude the config file from your tsconfig.
 
 ## Write a first spec
@@ -88,7 +93,7 @@ Five consecutive failed attempts lock the account for 15 minutes.
 </S>
 ```
 
-The nesting is the structure: `auth.login.valid` must be a child of `auth.login`, which must be a child of `auth`. See [Writing specs](writing-specs.md) for the complete syntax.
+The nesting is the structure: `auth.login.valid` must be a child of `auth.login`, which must be a child of `auth`. See [Writing specs](./writing-specs.md) for the complete syntax.
 
 ## Build
 
@@ -98,7 +103,7 @@ $ echo $?
 0
 ```
 
-`build` validates the sources and generates everything (see [Workspace files](workspace.md) for details):
+`build` validates the sources and generates everything (see [Workspace files](./workspace.md) for details):
 
 ```
 specs/AUTH.mdx                 ← your source
@@ -140,7 +145,7 @@ export function testInvalidLogin(): void {
 }
 ```
 
-A marker is an ordinary property read at runtime (harmless, no tooling required) and a type-checked reference at compile time: if the requirement is renamed or deleted, your build breaks instead of silently drifting. Setup details and rules are in [Using specs from TypeScript](typescript.md).
+A marker is an ordinary property read at runtime (harmless, no tooling required) and a type-checked reference at compile time: if the requirement is renamed or deleted, your build breaks instead of silently drifting. Setup details and rules are in [Using specs from TypeScript](./typescript.md).
 
 Re-run `xspec build` after adding code references so the graph includes them.
 
@@ -184,7 +189,7 @@ subtree text:
   A user submitting valid credentials is signed in.
 ```
 
-`xspec query` is the machine-facing equivalent (JSON only) — see the [CLI reference](cli.md#xspec-query-sub).
+`xspec query` is the machine-facing equivalent (JSON only) — see the [CLI reference](./cli.md#xspec-query-sub).
 
 ## Measure coverage
 
@@ -206,7 +211,7 @@ profile tested
     ...
 ```
 
-`auth.lockout` has no test yet. `xspec coverage tested --check` exits `1` while that is true — wire it into CI to keep specs and tests honest. Details in [Coverage](coverage.md).
+`auth.lockout` has no test yet. `xspec coverage tested --check` exits `1` while that is true — wire it into CI to keep specs and tests honest. Details in [Coverage](./coverage.md).
 
 ## Validate continuously
 
@@ -230,7 +235,7 @@ generate; run `xspec build` to regenerate every derived file (SPEC 14.10)
 
 ## Where to go next
 
-- Track what a spec edit affects: [Impact analysis](impact.md)
-- Turn changes into a reviewable checklist: [Reviews](reviews.md)
-- Restructure specs without losing history: [Renaming and moving](refactoring.md)
-- Commit the right files: [Workspace files](workspace.md)
+- Track what a spec edit affects: [Impact analysis](./impact.md)
+- Turn changes into a reviewable checklist: [Reviews](./reviews.md)
+- Restructure specs without losing history: [Renaming and moving](./refactoring.md)
+- Commit the right files: [Workspace files](./workspace.md)
