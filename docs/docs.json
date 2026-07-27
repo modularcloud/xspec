@@ -1,0 +1,75 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "luma",
+  "name": "xspec",
+  "description": "Requirement traceability for specifications written in MDX.",
+  "colors": {
+    "primary": "#4F6FF0",
+    "light": "#EEF1FE",
+    "dark": "#1A2340"
+  },
+  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/modularcloud/xspec"
+    }
+  },
+  "contextual": {
+    "options": ["copy", "view"]
+  },
+  "redirects": [
+    { "source": "/introduction", "destination": "/" },
+    { "source": "/quickstart", "destination": "/getting-started" },
+    { "source": "/installation", "destination": "/getting-started" },
+    { "source": "/concepts/spec-graph", "destination": "/writing-specs" },
+    { "source": "/concepts/requirement-ids", "destination": "/writing-specs" },
+    { "source": "/concepts/hashes-and-identity", "destination": "/impact" },
+    { "source": "/concepts/coverage-model", "destination": "/coverage" },
+    { "source": "/writing-specs/mdx-syntax", "destination": "/writing-specs" },
+    { "source": "/writing-specs/dependencies", "destination": "/writing-specs" },
+    { "source": "/writing-specs/tags-and-coverage", "destination": "/writing-specs" },
+    { "source": "/writing-specs/configuration", "destination": "/configuration" },
+    { "source": "/typescript/compiler-setup", "destination": "/typescript" },
+    { "source": "/typescript/importing-specs", "destination": "/typescript" },
+    { "source": "/typescript/markers-and-text", "destination": "/typescript" },
+    { "source": "/workflows/coverage", "destination": "/coverage" },
+    { "source": "/workflows/impact-analysis", "destination": "/impact" },
+    { "source": "/workflows/reviews", "destination": "/reviews" },
+    { "source": "/workflows/refactoring", "destination": "/refactoring" },
+    { "source": "/workflows/workspace-files", "destination": "/workspace" },
+    { "source": "/cli/overview", "destination": "/cli" },
+    { "source": "/cli/build-check", "destination": "/cli" },
+    { "source": "/cli/ids-show", "destination": "/cli" },
+    { "source": "/cli/coverage", "destination": "/cli" },
+    { "source": "/cli/impact", "destination": "/cli" },
+    { "source": "/cli/review", "destination": "/cli" },
+    { "source": "/cli/query", "destination": "/cli" },
+    { "source": "/cli/rename-move", "destination": "/cli" }
+  ],
+  "navigation": {
+    "groups": [
+      {
+        "group": "Guide",
+        "pages": [
+          "index",
+          "getting-started",
+          "writing-specs",
+          "configuration",
+          "typescript"
+        ]
+      },
+      {
+        "group": "Reference and workflows",
+        "pages": [
+          "cli",
+          "coverage",
+          "impact",
+          "reviews",
+          "refactoring",
+          "workspace"
+        ]
+      }
+    ]
+  }
+}

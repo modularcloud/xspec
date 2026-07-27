@@ -3,8 +3,6 @@ title: Writing specs
 description: "The .mdx source syntax: sections, IDs, dependencies, embedding, tags, and Markdown output."
 ---
 
-# Writing specs
-
 xspec source files are MDX documents (`.mdx`) in which requirement sections are marked with `<S>` tags. Everything else in the file is ordinary Markdown. This page covers the complete authoring syntax; validation of every rule here is enforced by `xspec build` / `xspec check` with errors that name the file, location, and fix.
 
 Source files must be valid UTF-8 without a byte-order mark, and must have the `.mdx` extension. Which files are spec sources at all is decided only by the globs in [`xspec.config.ts`](./configuration.md) — imports never pull extra files into the workspace.
@@ -125,6 +123,8 @@ Repeated failed logins lock the account.
 ```
 
 `tags` is a whitespace-separated list. Duplicates collapse; an empty value is the same as no prop. A tag follows the same character rules as an ID segment, except that tags may contain `.`. Tags are recorded in the graph and usable in coverage target filters and policy selectors; they do **not** render into Markdown and are **not** inherited by child sections.
+
+Like every other name in xspec, tags compare byte-wise and case-sensitively — `happy-path`, `happyPath`, and `HappyPath` are three unrelated tags. Pick one convention (lowercase and hyphenated reads well) and keep to it, or tag filters and tag-scoped coverage profiles will quietly miss nodes.
 
 ## Excluding a node from coverage
 

@@ -3,8 +3,6 @@ title: Getting started
 description: Install xspec, create a project, and get your first validated, coverage-measured spec.
 ---
 
-# Getting started
-
 This walkthrough takes you from an empty directory to a validated, coverage-measured spec project. Every command and output shown here was produced by the real tool.
 
 ## Install

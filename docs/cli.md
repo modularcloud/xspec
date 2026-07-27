@@ -3,8 +3,6 @@ title: CLI reference
 description: Every command, flag, exit code, and output convention.
 ---
 
-# CLI reference
-
 ```
 xspec <command> [arguments] [flags]
 ```

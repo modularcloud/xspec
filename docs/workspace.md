@@ -3,8 +3,6 @@ title: Workspace files
 description: What xspec writes, derived vs. durable files, and what to commit.
 ---
 
-# Workspace files
-
 Everything xspec writes is a **plain file with deterministic bytes** — stable ordering, sorted keys, no timestamps, no absolute paths — deliberately suitable for committing and diffing. This page inventories those files, explains the derived/durable distinction, and gives version-control guidance.
 
 ## Inventory
@@ -51,7 +49,7 @@ specs/**/*.md
 .xspec/graph.json
 ```
 
-Never ignore `.xspec/` wholesale — that would drop the journal and review sessions.
+The `*.xspec.*` pattern needs both dots, so it matches the generated module and every companion (`AUTH.xspec.ts`, `AUTH.xspec.impl.js`, …) but never the `.xspec/` directory. Still, never ignore `.xspec/` wholesale — that would drop the journal and review sessions.
 
 ## Freshness, staleness, and repair
 

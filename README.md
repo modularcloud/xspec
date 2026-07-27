@@ -55,7 +55,7 @@ Then follow **[docs/getting-started.md](docs/getting-started.md)** to set up a p
 
 ## Documentation
 
-Usage guides live in [`docs/`](docs/README.md):
+Usage guides live in [`docs/`](docs/index.md) and are rendered at **[xspec.mintlify.site](https://xspec.mintlify.site)**:
 
 | | |
 |---|---|
@@ -72,7 +72,7 @@ Usage guides live in [`docs/`](docs/README.md):
 
 The authoritative behavioral specification is [`specs/SPEC.md`](specs/SPEC.md); the docs are the guide, the spec is the law.
 
-The same pages power a browsable docs site ([Fumadocs](https://fumadocs.dev)) in [`website/`](website/) — run it locally with `cd website && npm install && npm run dev`.
+The hosted site ([xspec.mintlify.site](https://xspec.mintlify.site)) renders these same files directly from `docs/` — there is no separate content copy.
 
 ## Development
 

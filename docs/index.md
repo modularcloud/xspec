@@ -1,9 +1,8 @@
 ---
-title: Overview
+title: xspec documentation
+sidebarTitle: Overview
 description: What xspec is, a thirty-second tour, and where to start reading.
 ---
-
-# xspec documentation
 
 xspec is a requirement-traceability tool for specifications written in MDX. You mark requirement sections in your spec documents with `<S>` tags, and xspec compiles them into strongly typed TypeScript modules, builds a project-wide dependency graph between requirements and code, and uses that graph to validate references, enforce dependency policy, measure coverage, analyze the impact of changes, and drive staged reviews.
 
@@ -40,6 +39,17 @@ xspec impact --base main   # what a change touches, up and down the graph
 ```
 
 Requirement references are real, type-checked TypeScript — renaming a requirement without updating the code is a compile error, and `xspec rename` updates every reference for you while preserving identity in the change-tracking journal.
+
+## The graph at a glance
+
+Everything xspec does is computed from one project-wide graph with four edge kinds:
+
+| Edge | Meaning | Created by |
+|---|---|---|
+| `contains` | Structure: parent section to child | `<S>` nesting (structure only — never carries coverage) |
+| `depends` | This requirement builds on that one | the `d` prop |
+| `embeds` | This place splices that requirement's text | `{text(...)}` in MDX; `text(node)` in TypeScript |
+| `references` | This code implements or exercises that requirement | a bare marker statement in TypeScript |
 
 ## Guide
 

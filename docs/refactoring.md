@@ -1,9 +1,8 @@
 ---
-title: Renaming and moving
+title: Renaming and moving requirements
+sidebarTitle: Renaming and moving
 description: Identity-preserving refactoring with xspec rename, xspec move, and the journal.
 ---
-
-# Renaming and moving requirements
 
 Spec trees need restructuring — IDs outgrow their names, sections belong in other files. The naive way (hand-editing IDs and paths) destroys history: every tool that compares against a baseline sees a deletion plus an addition, dependents light up as changed, resolved review items invalidate.
 

@@ -3,8 +3,6 @@ title: Reviews
 description: "Staged review sessions: path-blocks, audit, and coverage strategies."
 ---
 
-# Reviews
-
 A review session turns graph results into a **staged, durable checklist**: each item is one focused judgment ("does this subtree still cohere?", "does this dependent still hold given its target changed?"), items unlock in a deliberate order, resolutions survive restarts and merges, and anything that changes after you resolved it gets flagged — not silently forgotten.
 
 Sessions are stored as plain JSON at `.xspec/reviews/<name>.json` — [durable files](./workspace.md#derived-vs-durable) you commit alongside the specs they review.

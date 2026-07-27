@@ -3,8 +3,6 @@ title: Coverage
 description: Profiles, boundaries, direct vs. transitive coverage, and CI gating.
 ---
 
-# Coverage
-
 Coverage answers one question per configured profile: **is every requirement I care about reachable from the things that are supposed to exercise it?** It is graph reachability over dependency edges — deliberate, inspectable, and deterministic — not proof of semantic correctness.
 
 ## The model

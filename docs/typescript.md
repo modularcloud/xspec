@@ -1,9 +1,8 @@
 ---
-title: TypeScript integration
+title: Using specs from TypeScript
+sidebarTitle: TypeScript integration
 description: Generated modules, dependency markers, text(), and compiler setup.
 ---
-
-# Using specs from TypeScript
 
 `xspec build` compiles each spec source `NAME.mdx` into a typed TypeScript module next to it. Code imports that module to reference requirements; every reference is type-checked, navigable, and recorded as an edge in the project graph.
 
@@ -68,7 +67,29 @@ References must be statically analyzable, and the sanctioned value-level uses of
 - Chains use only dot access or string-literal bracket access. Optional chaining, parentheses, non-null assertions, or any computed index make the reference non-static — a build error.
 - Everything else — aliasing a node into a variable, destructuring, storing nodes in data structures, passing them to other functions, re-exporting them — is a build error ("unsupported node usage"). This is what guarantees the graph is complete: every reference is visible in the source, rooted at an import.
 
-Scoping is respected: an identifier that resolves to a local declaration shadowing the import is not a spec reference, and a type-only binding used at the value level is your TypeScript error, not an xspec edge. Purely type-level references (`typeof AUTH.auth.login` and friends) are unrestricted and record nothing — with the corollary that `xspec rename`/`move` do not rewrite them.
+At a glance, all of these are build errors:
+
+```ts
+AUTH.auth?.login.valid               // ❌ optional chaining — non-static
+(AUTH.auth.login.valid)              // ❌ parenthesized
+AUTH.auth.login.valid!               // ❌ non-null assertion
+AUTH.auth[segment]                   // ❌ computed index
+const node = AUTH.auth.login.valid   // ❌ aliased into a variable
+const { auth } = AUTH                // ❌ destructured
+track(AUTH.auth.login.valid)         // ❌ passed to another function
+export { AUTH }                      // ❌ re-exported
+```
+
+Scoping is respected: an identifier that resolves to a local declaration shadowing the import is not a spec reference, and a type-only binding used at the value level is your TypeScript error, not an xspec edge:
+
+```ts
+function elsewhere() {
+  const AUTH = loadConfig()    // local declaration shadows the import
+  AUTH.auth.login.valid        // not a spec reference — records nothing
+}
+```
+
+Purely type-level references (`typeof AUTH.auth.login` and friends) are unrestricted and record nothing — with the corollary that `xspec rename`/`move` do not rewrite them.
 
 ### Module branding
 

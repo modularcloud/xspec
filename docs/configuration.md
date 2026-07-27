@@ -3,8 +3,6 @@ title: Configuration
 description: "The xspec.config.ts schema: spec and code groups, Markdown emission, coverage profiles, and policy rules."
 ---
 
-# Configuration: `xspec.config.ts`
-
 Every xspec project is configured by a single `xspec.config.ts`. Its directory is the **workspace root**: all globs and paths resolve relative to it, and every identity xspec prints is workspace-relative.
 
 Commands find the file by upward search from the working directory; `--config <path>` (available on every command) points at it explicitly. A missing or invalid configuration is a usage error — exit `2`, before any source is read.

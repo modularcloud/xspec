@@ -3,8 +3,6 @@ title: Impact analysis
 description: Hashes, change categories, baselines, and impacted code.
 ---
 
-# Impact analysis
-
 ```sh
 xspec impact --base <git-ref>
 ```
@@ -24,10 +22,11 @@ Every requirement node carries four hashes; the categories below are defined in 
 | `effectiveHash` | `subtreeHash` inputs + the dependency edges of the node and its subtree, each as (target identity, target's `effectiveHash`) | The subtree changes, a dependency is added/removed/retargeted, or **any upstream target's `effectiveHash` changes** — this is the hash that propagates through the graph |
 | `metadataHash` | The node's `d` target set, `coverage` attribute, and tags | Metadata edits only |
 
-Two consequences worth internalizing:
+Three consequences worth internalizing:
 
 - **Embedding insulates the embedder.** `{text(X)}` hashes as a *reference to X*, not as X's expanded text. Editing X changes X's hashes; the embedder is affected only via `effectiveHash` — an upstream change — while its Markdown output still re-expands on the next build.
 - **References hash by canonical identity**, resolved through the journal. A journaled `rename`/`move` changes no hash anywhere; hand-editing an ID does (it's a delete plus an add).
+- **Content and metadata edits never masquerade as each other.** `ownHash` and `metadataHash` draw on disjoint inputs: retargeting `d`, changing `coverage`, or editing tags moves `metadataHash` alone (`metadata-changed`), while editing prose moves `ownHash` (`changed`).
 
 ## Change categories
 
