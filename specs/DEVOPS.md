@@ -6,27 +6,26 @@ This document defines how release, merge, and deploy actions are performed for t
 
 - Never merge with red CI. A release candidate is a commit at which the full test suite and every CI job are green.
 - Never rewrite pushed history. Ordinary commits only.
-- External release artifacts — version tags, GitHub Releases, package publishes, deploys — always require explicit Developer authorization. Absent that authorization, the default is deferral: take no external action and record the release candidate instead.
+- External release artifacts require explicit Developer authorization. Two standing authorizations exist, granted by Developer on 2026-07-28: publishing `@modularcloud/xspec` to the public npm registry from green `main` commits of this repository, and the `vX.Y.Z` git tags marking those publishes. Any other kind of external artifact (deploys, GitHub Releases, publishes elsewhere) still requires fresh authorization; absent it, the default is deferral — take no external action and record the release candidate instead.
 
-## Initial build on `modularcloud/sdg-claude` (this repository)
+## This repository is the product's home
 
-This repository is the SDG process's home, not the product's. The `xspec` product was built here on branch `sdg/initial-build` (PR #1), and Developer will personally relocate the work to a dedicated xspec repository after the initial build completes. A release artifact created here (tag, GitHub Release, package publish) would brand the wrong repository as the product's home and would outlive the branch it points at — so none are created.
+`modularcloud/xspec` is the xspec product's dedicated repository, and `main` is its released line. (The product was originally built in `modularcloud/sdg-claude`, the SDG process's home, where release was deliberately deferred so no artifact would brand that repository as the product's home; Developer relocated the work here on 2026-07-27, superseding that deferral and its recorded release candidate `9316048`.)
 
-Release procedure for the initial build — **deferred**, by explicit Developer decision:
-
-- Take no external release action from this repository.
-- Do not merge PR #1. It intentionally carries a `specs/GOALS.md` merge conflict and stays open, untouched. Do not merge `main` into the branch.
-- Do not create version tags, GitHub Releases, or package publishes.
-- Leave branch `sdg/initial-build` and PR #1 exactly as they are.
-- The deliverable is the green branch head, ready for Developer's switch-over to the dedicated xspec repository. Release candidate: commit `9316048` — full suite green locally (485/485), all three CI jobs green. Commits after it on the branch are process bookkeeping only (spec-document edits, no product code).
-
-## Future runs in the product's own repository
-
-Once xspec lives in its own repository, the normal release flow for a completed patch is:
+The normal Release-phase flow for a completed patch is:
 
 1. Merge the patch's PR once CI is green on the PR head (never with red CI).
-2. With explicit Developer authorization, tag the release commit; a GitHub Release and/or package publish additionally requires Developer-provided credentials.
-3. Absent authorization for any external artifact, defer that artifact and record the release candidate, per the standing rules.
+2. Nothing further. The standing npm release procedure below publishes the merged commit automatically; there is no per-release tagging, publishing, or Developer step.
+
+## npm releases (standing procedure)
+
+- **Artifact.** The public npm package `@modularcloud/xspec`. `package.json` must always identify the package by that name, with this repository as `repository`/`homepage`/`bugs`, and carry `publishConfig.access: public`.
+- **Trigger.** Every push to `main` (a PR merge is a push). The `Release` workflow (`.github/workflows/release.yml`) runs when the `CI` workflow completes for a `main` push.
+- **Gate.** The publish job runs only when that CI run concluded successfully, and it checks out exactly the commit CI validated — the never-release-with-red-CI rule is enforced mechanically. Nothing beyond green CI gates a release.
+- **Versioning.** Strictly increasing, computed by `.github/scripts/next-version.mjs` with no Developer involvement: if `package.json`'s version is greater than the latest published version (or nothing is published yet), that version is released — a deliberate minor/major bump is made by landing the `package.json` change on `main`; otherwise the latest published version's patch component is incremented. The registry and the `vX.Y.Z` tags are the record of released versions; the computed bump is not committed back to `main`, so the in-repo version is the floor, not the record.
+- **Tags.** Each successful publish pushes the lightweight tag `vX.Y.Z` on the released commit, using the workflow's own repository token.
+- **Credentials.** Publishing authenticates with the `NPM_TOKEN` GitHub repository secret — a granular npm automation token with read/write access to the package (or the `@modularcloud` scope), created under Developer's npm account. Credentials live only in that secret, never in the repository. If the token is missing or expired, recreate it on npmjs.com and set it again with `gh secret set NPM_TOKEN`.
+- **Failure handling.** A missing/invalid secret or any publish error fails the Release run loudly — a release is never silently skipped. Re-running a failed Release run publishes the commit it was gated on and is always safe: the registry refuses to republish an existing version, so duplicate attempts fail rather than corrupt the sequence. A failed run never blocks later landings, which release independently.
 
 ## Post-update actions
 
