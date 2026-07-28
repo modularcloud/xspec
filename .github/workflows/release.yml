@@ -102,8 +102,10 @@ jobs:
           else
             echo "No NPM_TOKEN secret — publishing via the OIDC trusted-publishing exchange."
           fi
-          npm version "${{ steps.version.outputs.next }}" --no-git-tag-version
-          if ! npm publish --provenance --access public; then
+          # --allow-same-version: a first release publishes package.json's own
+          # version, so the bump is a no-op that plain `npm version` rejects.
+          if ! { npm version "${{ steps.version.outputs.next }}" --no-git-tag-version --allow-same-version &&
+                 npm publish --provenance --access public; }; then
             echo "::error::Publishing @modularcloud/xspec@${{ steps.version.outputs.next }} failed, so this green main commit was NOT released — see the npm error above. If it is an auth error (E401/E403/E404/ENEEDAUTH), the one-time npm-side setup (specs/DEVOPS.md — npm releases, Credentials) is incomplete: configure the package's Trusted Publisher on npmjs.com (GitHub Actions: owner modularcloud, repository xspec, workflow release.yml) — or, for bootstrap only, set the NPM_TOKEN repository secret. Then re-run this workflow run: it publishes exactly this commit, and duplicate attempts are safe because the registry refuses to republish an existing version."
             exit 1
           fi
