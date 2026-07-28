@@ -1,11 +1,27 @@
 {
-  "name": "xspec",
-  "version": "0.0.0",
-  "description": "xspec — the product program of this repository; the test harness under test/ is a separate program.",
+  "name": "@modularcloud/xspec",
+  "version": "0.1.0",
+  "description": "Requirement traceability for specifications written in MDX: typed spec modules, reference validation, dependency policy, coverage, impact analysis, and staged reviews.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/modularcloud/sdg-claude.git"
+    "url": "git+https://github.com/modularcloud/xspec.git"
+  },
+  "homepage": "https://github.com/modularcloud/xspec#readme",
+  "bugs": {
+    "url": "https://github.com/modularcloud/xspec/issues"
+  },
+  "keywords": [
+    "specification",
+    "requirements",
+    "traceability",
+    "mdx",
+    "typescript",
+    "coverage",
+    "spec-driven"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "type": "module",
   "engines": {
