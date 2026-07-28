@@ -1,0 +1,85 @@
+# Automated npm releases (DEVOPS.md — npm releases, standing procedure).
+#
+# Every push to main whose CI run is green is published to the public npm
+# registry as @modularcloud/xspec, with a strictly increasing version, and the
+# released commit is tagged vX.Y.Z. No human is involved per release.
+#
+#   Trigger     completion of the CI workflow for a push to main. Publishing
+#               hangs off CI's own result, so the never-release-with-red-CI
+#               rule is enforced mechanically, and the job checks out exactly
+#               the commit CI validated (workflow_run.head_sha).
+#   Version     next-version.mjs: package.json's version when it is greater
+#               than the latest published version (deliberate bumps land on
+#               main as ordinary package.json changes), else latest published
+#               with the patch component incremented. The registry and the
+#               vX.Y.Z tags are the record of released versions; the bump is
+#               not committed back to main.
+#   Credential  the NPM_TOKEN repository secret (granular npm automation
+#               token). Missing secret fails loudly with instructions — a
+#               release is never silently skipped. Re-running a failed run is
+#               safe: the registry refuses to republish an existing version.
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+  id-token: write
+
+# Queue releases rather than cancelling one mid-publish.
+concurrency:
+  group: npm-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish @modularcloud/xspec to npm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    steps:
+      - name: Require the NPM_TOKEN repository secret
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::error::The NPM_TOKEN repository secret is not set, so this green main commit was NOT published. Complete the one-time setup in specs/DEVOPS.md (npm releases — credentials), then re-run this workflow run to publish this commit."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - name: Build the product
+        run: npm run build
+      - name: Compute the release version (strictly increasing)
+        id: version
+        run: |
+          NAME="$(node -p "require('./package.json').name")"
+          BASELINE="$(node -p "require('./package.json').version")"
+          LATEST="$(npm view "$NAME" version 2>/dev/null || true)"
+          NEXT="$(node .github/scripts/next-version.mjs "$BASELINE" "$LATEST")"
+          echo "Package $NAME — baseline $BASELINE, latest published ${LATEST:-<none>}, releasing $NEXT"
+          echo "next=$NEXT" >> "$GITHUB_OUTPUT"
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm version "${{ steps.version.outputs.next }}" --no-git-tag-version
+          npm publish --provenance --access public
+      - name: Tag the released commit
+        run: |
+          git tag "v${{ steps.version.outputs.next }}" "${{ github.event.workflow_run.head_sha }}"
+          git push origin "v${{ steps.version.outputs.next }}"
