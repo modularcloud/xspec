@@ -14,10 +14,19 @@
 #               with the patch component incremented. The registry and the
 #               vX.Y.Z tags are the record of released versions; the bump is
 #               not committed back to main.
-#   Credential  the NPM_TOKEN repository secret (granular npm automation
-#               token). Missing secret fails loudly with instructions — a
-#               release is never silently skipped. Re-running a failed run is
-#               safe: the registry refuses to republish an existing version.
+#   Credential  npm Trusted Publishing (OIDC) — no long-lived secret. The job
+#               upgrades npm to >= 11.5.1 (Node 22 bundles npm 10, which
+#               cannot do the OIDC exchange); npm publish then trades the
+#               workflow's GitHub Actions OIDC token for short-lived publish
+#               credentials, minted only for the Trusted Publisher configured
+#               on npmjs.com (owner modularcloud, repository xspec, workflow
+#               release.yml). The NPM_TOKEN repository secret is a
+#               bootstrap-only fallback, honored automatically when the OIDC
+#               exchange is unavailable (e.g. before the Trusted Publisher is
+#               configured). Publish failures fail the run loudly with setup
+#               instructions — a release is never silently skipped — and
+#               re-running a failed run is safe: the registry refuses to
+#               republish an existing version.
 name: Release
 
 on:
@@ -26,6 +35,8 @@ on:
     types: [completed]
     branches: [main]
 
+# contents: write pushes the vX.Y.Z tag; id-token: write lets npm publish
+# mint the GitHub OIDC token used for trusted publishing and provenance.
 permissions:
   contents: write
   id-token: write
@@ -45,14 +56,6 @@ jobs:
       github.event.workflow_run.event == 'push' &&
       github.event.workflow_run.head_branch == 'main'
     steps:
-      - name: Require the NPM_TOKEN repository secret
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [ -z "$NPM_TOKEN" ]; then
-            echo "::error::The NPM_TOKEN repository secret is not set, so this green main commit was NOT published. Complete the one-time setup in specs/DEVOPS.md (npm releases — credentials), then re-run this workflow run to publish this commit."
-            exit 1
-          fi
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
@@ -60,10 +63,23 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          registry-url: https://registry.npmjs.org
       - run: npm ci
       - name: Build the product
         run: npm run build
+      # The install and build above run on the stock toolchain CI validated;
+      # the upgrade below affects publishing only.
+      - name: Upgrade npm for trusted publishing (the OIDC exchange needs >= 11.5.1)
+        run: |
+          npm install -g "npm@^11.5.1"
+          V="$(npm --version)"
+          node -e '
+            const [a, b, c] = process.argv[1].split(".").map(Number);
+            if (!(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))))) {
+              console.error("::error::npm " + process.argv[1] + " cannot do the npm Trusted Publishing OIDC exchange (needs >= 11.5.1), so this green main commit was NOT published. Fix the npm upgrade step in .github/workflows/release.yml, then re-run this workflow run.");
+              process.exit(1);
+            }
+          ' "$V"
+          echo "Publishing with npm $V"
       - name: Compute the release version (strictly increasing)
         id: version
         run: |
@@ -73,12 +89,24 @@ jobs:
           NEXT="$(node .github/scripts/next-version.mjs "$BASELINE" "$LATEST")"
           echo "Package $NAME — baseline $BASELINE, latest published ${LATEST:-<none>}, releasing $NEXT"
           echo "next=$NEXT" >> "$GITHUB_OUTPUT"
-      - name: Publish to npm
+      - name: Publish to npm (OIDC trusted publishing; NPM_TOKEN as bootstrap fallback)
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            # Bootstrap-only fallback: npm >= 11.5.1 still attempts the OIDC
+            # exchange first and reaches for this token only when that
+            # exchange is unavailable.
+            echo "//registry.npmjs.org/:_authToken=\${NPM_TOKEN}" >> "$HOME/.npmrc"
+            echo "NPM_TOKEN secret found — kept as bootstrap fallback in case the OIDC exchange is not configured yet."
+          else
+            echo "No NPM_TOKEN secret — publishing via the OIDC trusted-publishing exchange."
+          fi
           npm version "${{ steps.version.outputs.next }}" --no-git-tag-version
-          npm publish --provenance --access public
+          if ! npm publish --provenance --access public; then
+            echo "::error::Publishing @modularcloud/xspec@${{ steps.version.outputs.next }} failed, so this green main commit was NOT released — see the npm error above. If it is an auth error (E401/E403/E404/ENEEDAUTH), the one-time npm-side setup (specs/DEVOPS.md — npm releases, Credentials) is incomplete: configure the package's Trusted Publisher on npmjs.com (GitHub Actions: owner modularcloud, repository xspec, workflow release.yml) — or, for bootstrap only, set the NPM_TOKEN repository secret. Then re-run this workflow run: it publishes exactly this commit, and duplicate attempts are safe because the registry refuses to republish an existing version."
+            exit 1
+          fi
       - name: Tag the released commit
         run: |
           git tag "v${{ steps.version.outputs.next }}" "${{ github.event.workflow_run.head_sha }}"
