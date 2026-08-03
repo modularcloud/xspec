@@ -19,7 +19,7 @@ Archival — Developer message (2026-07-31), verbatim:
 The UI's needs map to product capabilities as follows:
 
 1. **Dependency visualization** — complete graph data. Largely present (`query nodes`, `query edges`, hashes, impact categories); gap: code-location endpoints are not locatable in their files.
-2. **Nested structure inline with the MDX** — per-document structural data tied to exact byte positions in the source text. Partially present (per-node source ranges); gap: no single document view, and no positions for the constructs inside a node's text (imports, embeddings, dependency references).
+2. **Nested structure inline with the MDX** — per-document structural data tied to exact byte positions in the source text. Partially present (per-node source ranges); gap: no single document view, no positions for the constructs inside a node's text (imports, embeddings, dependency references, comments), and no decomposition of a section's range into its tags.
 3. **Jumping between references** — per-occurrence positions for every reference, in spec sources and TypeScript sources, navigable in both directions (occurrence → target, node → incoming occurrences). Absent: edges collapse to sets with no occurrence positions, and code locations carry no source range.
 4. **Safe external editing** — the UI edits source text; xspec supplies the safety net: machine-readable validation with precise positions, previews of `rename`/`move`, and a machine-readable inventory of which files are sources, derived, or durable. Partially present.
 
@@ -42,8 +42,8 @@ Introduce the concept of a **reference occurrence**: one textual spelling that r
 
 - Edges remain sets; occurrences are the positions behind them. Duplicate references that collapse to a single edge each remain distinct occurrences.
 - A query surface enumerates occurrences, filterable at least by source file and by target node, so "find all references to this requirement, with positions" and "list every reference this file makes" are single calls. Incoming enumeration must accept any graph-node identity a reference can target (root nodes included).
-- Constructs that record no edge produce no occurrence (unused import bindings, type-only bindings, shadowed identifiers, dynamic references — which are validation errors anyway).
-- Occurrence data is unavailable for a file masked as unparseable, consistent with existing masking behavior.
+- Constructs that record no edge produce no occurrence (unused import bindings, type-only bindings, shadowed identifiers, and reference spellings that are dynamic or do not resolve — the invalid ones are located by diagnostics instead, change 6).
+- Availability follows change 4: occurrence data is per-file and parse-local; only a masked (unparseable) file loses its occurrences.
 - Ordering is deterministic: by file path (byte order), then by range start, then by range end, with a stated tiebreak for identical ranges.
 
 ### 2. Source ranges for code
@@ -56,36 +56,51 @@ Amend the source-range concept (currently: "code locations carry no source range
 
 ### 3. Whole-document structural view
 
-A query surface returns, for one spec source file, everything needed to overlay structure on the raw MDX bytes in a single call:
+A query surface returns, for a spec source file, everything needed to overlay structure on the raw MDX bytes in a single call:
 
 - the root node and the full section tree in document order — each node with identity, source range, tags, coverage attribute, and (on request) own and subtree text;
+- for each non-root node, the decomposition of its construct range: the opening tag's range and the closing tag's range (a self-closing section has an opening-tag range only; a root node spans the whole file and has neither). An interactive consumer needs the tags separately from the content they enclose — to render a section header in place of its opening tag, hide or fold what a tag pair encloses, and land navigation on a section's tag rather than selecting its entire construct;
 - every spec-module import declaration with its source range, binding name, and resolved target file;
 - every reference occurrence in the file (change 1), positioned in document order;
-- enough per-construct positional data that an external tool can resolve any byte position in the file to the innermost enclosing section and, when the position lies within a reference occurrence, to that occurrence and its target — without re-parsing the MDX. Whether position resolution is additionally offered as its own query (file + offset in, node/occurrence out) is a refinement decision; the resolution outcome itself is required.
+- every MDX comment's source range. With tags, imports, comments, and embedding occurrences located, every construct that Markdown compilation removes is positioned, so a consumer can classify each byte of the file as annotation or content without re-parsing the MDX;
+- position resolution as a direct query: given the file and a byte offset, the innermost enclosing section and, when the offset lies within a reference occurrence, that occurrence and its resolved target. The same resolution must also be derivable from the view's data alone, so both index-building consumers and lightweight ones that keep no client-side index are served.
 
-The view is defined for a discovered, parseable spec source; unknown files are usage errors and unparseable files report their validation errors, consistent with existing conventions.
+The view is defined for discovered spec sources: one file, a set restricted by the existing file-glob convention, or all of them — a multi-file request returns per-file views in one deterministic JSON document, so a consumer can index an entire workspace in a single invocation. A file named outside the discovered set is a usage error, per existing conventions.
 
-### 4. Workspace inventory
+### 4. Availability on imperfect workspaces
+
+The structural surfaces of changes 1 and 3 exist to serve an editor while a person is mid-edit — when transiently invalid states (an unknown reference target, a failing file elsewhere in the workspace) are the norm, and exactly when the existing read commands refuse to answer. Their availability is therefore defined per file, from parsing alone, not gated on workspace-wide validity:
+
+- Structure derived from one file's parse — the section tree, ranges and their decompositions, imports, comments, and reference-occurrence positions — remains available while other files are invalid and while the file itself carries resolution-level findings (unresolved references, cycle participation, and similar).
+- Only an unparseable file (or content the existing masking rules already hide) loses its structural view; masking is per file, and the surfaces still answer for every other requested file.
+- Data that only workspace-level resolution defines — resolved target identities, expanded own and subtree text, hashes — is reported as explicitly unavailable wherever it is undefined: deterministically, never silently omitted, never fabricated from partial resolution.
+- A reference spelling that resolves to no target records no edge and therefore no occurrence; its position reaches consumers through the diagnostics of change 6, which carry ranges. The two surfaces jointly locate every reference spelling, valid or invalid.
+- Findings present in the answered files are reported alongside the answer; how an answer-with-findings maps onto the existing exit-code partition is settled during spec refinement.
+
+Existing commands keep their current all-or-nothing read semantics; this availability contract governs the surfaces this proposal adds.
+
+### 5. Workspace inventory
 
 A query surface reports the machine-readable shape of the workspace, so an external editor never edits files xspec owns and never misses files xspec reads:
 
-- the workspace root and the configuration file's path (workspace-relative, per existing path conventions);
+- how the resolved workspace root anchors to the invocation: the workspace root and the configuration file are identified relative to the invocation working directory — invocation input, exactly as existing conventions already treat `--config` resolution — and never as absolute paths. Configuration discovery thereby has one authority: a tool invoking xspec from an arbitrary directory can map the workspace-relative paths in every output to real files without re-implementing the upward search, which is an editing-safety requirement — a consumer that guesses the root wrong edits the wrong files;
 - the resolved configuration view: spec and code groups with their glob lists and kinds, Markdown emission state and destinations, coverage profile names and definitions, policy rule names;
 - every discovered source file with its group memberships;
 - the derived-file map: per source file, the generated module and companion paths and the Markdown emit destination (when enabled), plus any other recorded derived paths;
 - the durable files: the journal path and existing review-session files.
 
-The inventory contains no environment-dependent content and no absolute paths, consistent with existing determinism and security conventions.
+The inventory contains no absolute paths and no environment-dependent content beyond the invocation anchoring above (a function of the invocation, like `--config` resolution — not of the machine), consistent with existing determinism and security conventions. It depends only on configuration and discovery, so it remains available whatever the sources' validity; configuration errors keep their existing precedence.
 
-### 5. Structured diagnostics
+### 6. Structured diagnostics
 
 Sharpen the validation-error contract so an external tool can render findings inline:
 
 - Every reported error condition carries a stable machine-readable code identifying which numbered condition of the validation-errors section it is.
 - Every error that locates inside a source file carries the file and a source range (byte offsets) for the offending construct, at the precision the condition allows; conditions without an in-source location (configuration errors, path-level conditions, journal and session conditions) carry the file or path they concern.
 - The JSON report form presents these fields for every finding, preserving the existing requirements that all conditions are reported together and that JSON carries the same information as the human report.
+- Diagnostics are the locating surface for constructs that record nothing in the graph: an invalid, dynamic, or unresolved reference spelling has no occurrence (changes 1, 4), so its range reaches consumers here.
 
-### 6. Refactoring previews
+### 7. Refactoring previews
 
 `rename` and `move` gain a preview mode that performs the full validation and planning of the real operation and reports, without modifying anything:
 
@@ -95,7 +110,7 @@ Sharpen the validation-error contract so an external tool can render findings in
 
 A preview succeeds exactly when the real operation would proceed and is refused exactly when — and reporting what — the real operation would refuse, with the same exit-code classification. A preview writes nothing (no sources, no journal, no derived files, no graph data) and is therefore a non-mutating command under the concurrency rules, safe to run while readers run. Preview output is byte-deterministic.
 
-### 7. Machine-interface identification
+### 8. Machine-interface identification
 
 - A surface reports the product's version and a machine-interface version in JSON, so an external tool can detect compatibility before relying on output shapes. Output remains deterministic for a given product build.
 - The specification states that the JSON document shapes of the machine-facing surfaces are part of the product's contract: shape changes are product behavior changes, not free implementation detail.
@@ -106,6 +121,7 @@ Dependency visualization and change overlays already rest on: `query node`/`node
 
 ## Compatibility and rigor notes
 
-- All additions obey the existing global conventions: single-JSON-document output, same-information JSON, byte-determinism, byte-wise ordering and comparison, workspace-relative paths, the exit-code partition, and configuration-error precedence.
+- All additions obey the existing global conventions: single-JSON-document output, same-information JSON, byte-determinism, byte-wise ordering and comparison, workspace-relative paths (change 5's invocation anchoring is the one stated exception, itself deterministic per invocation), the exit-code partition, and configuration-error precedence.
+- The availability contract (change 4) is a deliberate, surface-scoped delta from the all-or-nothing read refusal of the existing commands, which keep their semantics unchanged; its refinement must stay deterministic and free of partial-resolution fabrication.
 - New surfaces are reads (or, for previews, validated no-op plans); none introduces new durable state, none writes through any new path, and none weakens the security posture of test seams — exposed data is workspace-local content only.
-- Range data added for code and occurrences follows the existing byte-offset range convention so consumers handle one range model everywhere.
+- Range data added for code, occurrences, tag decompositions, and comments follows the existing byte-offset range convention so consumers handle one range model everywhere.
