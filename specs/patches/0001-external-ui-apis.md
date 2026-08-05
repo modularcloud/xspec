@@ -1,7 +1,7 @@
 # 0001 — Foundational machine surfaces for an external spec UI
 
 - **Type:** Improvement Proposal (IP)
-- **Stage:** Accepted
+- **Stage:** Applied
 - **Branch:** `claude/xspec-ui-apis-4df8fa` (harness-designated for this session; stands in for `patch/external-ui-apis`)
 
 ## Motivation
