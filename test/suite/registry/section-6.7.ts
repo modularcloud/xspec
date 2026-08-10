@@ -1,11 +1,11 @@
-// TEST-SPEC §6.6 (manual restructuring) — SUITE-24: T6.6-1.
+// TEST-SPEC §6.7 (manual restructuring) — SUITE-24: T6.7-1.
 //
 // Registered product-facing body (C-2 "one code path"): it builds its own
 // fresh workspaces (H-1), drives the product strictly as a subprocess (H-2),
 // asserts exact exit codes (H-5), decodes output through the H-3 adapters,
 // and rejects a product only via diagnosed assertion failures (H-8).
 //
-// SPEC 6.6: renames or moves performed by editing files directly, without the
+// SPEC 6.7: renames or moves performed by editing files directly, without the
 // commands, produce no journal entries and are treated as deletions plus
 // additions. The manually renamed node's text is kept byte-identical across
 // the edit, so a product inferring continuity (journaling the edit, or
@@ -83,7 +83,7 @@ async function withWorkspace<T>(
 }
 
 /**
- * Assert the journal file does not exist (SPEC 6.6, 6.1): manual
+ * Assert the journal file does not exist (SPEC 6.7, 6.1): manual
  * restructuring is never journaled, and the file comes into existence only
  * with the first journaled `rename`/`move` — so after direct edits and the
  * commands run on them, nothing may occupy `.xspec/journal`.
@@ -99,7 +99,7 @@ async function assertNoJournal(
       `${context}: ${moment}, ${JOURNAL_PATH} holds a ${kind} — a rename ` +
         `performed by editing the file directly produces no journal entry, ` +
         `and the journal file comes into existence only with the first ` +
-        `journaled operation (SPEC 6.6, 6.1)`,
+        `journaled operation (SPEC 6.7, 6.1)`,
     );
   }
 }
@@ -225,7 +225,7 @@ function assertImpactTable(
       fail(
         `${context}: ${expected.identity} must carry exactly the categories ` +
           `${JSON.stringify(expectedNames)} — a manual rename is a deletion ` +
-          `plus an addition, never continuity (SPEC 6.6, 5.6) — but no ` +
+          `plus an addition, never continuity (SPEC 6.7, 5.6) — but no ` +
           `requirement entry names it`,
       );
     }
@@ -236,7 +236,7 @@ function assertImpactTable(
         fail(
           `${context}: ${expected.identity} must be reported ` +
             `${expectedDeleted ? "as deleted, under its baseline identity" : "as present, not deleted"} ` +
-            `(SPEC 6.6, 5.6, 9.3); an entry naming it has deleted: ${String(flag)}`,
+            `(SPEC 6.7, 5.6, 9.3); an entry naming it has deleted: ${String(flag)}`,
         );
       }
     }
@@ -286,7 +286,7 @@ function assertImpactTable(
 }
 
 // ---------------------------------------------------------------------------
-// T6.6-1 — manual restructuring
+// T6.7-1 — manual restructuring
 // ---------------------------------------------------------------------------
 
 // Impact arm: `a.mid` is manually renamed to `a.neo` by overwriting the file;
@@ -360,16 +360,16 @@ function watchSource(ref: string): {
   return { text, prefix, construct };
 }
 
-const T6_6_1 = defineProductTest({
-  id: "T6.6-1",
+const T6_7_1 = defineProductTest({
+  id: "T6.7-1",
   title:
-    "manual restructuring: renaming an ID by editing the file directly produces no journal entry, impact reports a deletion plus an addition (not continuity), and dependents referencing the old identity fail validation (14.5) until rewritten (SPEC 6.6, 6.1, 5.6, 9.3, 14)",
+    "manual restructuring: renaming an ID by editing the file directly produces no journal entry, impact reports a deletion plus an addition (not continuity), and dependents referencing the old identity fail validation (14.5) until rewritten (SPEC 6.7, 6.1, 5.6, 9.3, 14)",
   run: async (product) => {
     // --- Impact arm: deletion plus addition, never continuity ---
     await withWorkspace(
       { [I1_FILE]: impactArmSource("a.mid") },
       async (workspace) => {
-        const context = "T6.6-1 impact arm";
+        const context = "T6.7-1 impact arm";
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("pre-edit baseline");
         await buildOk(product, workspace, `${context}: \`build\``);
@@ -380,7 +380,7 @@ const T6_6_1 = defineProductTest({
         );
 
         // The manual rename: only the one `id` attribute changes; the node's
-        // text is byte-identical, tempting continuity inference (SPEC 6.6).
+        // text is byte-identical, tempting continuity inference (SPEC 6.7).
         await workspace.file(I1_FILE, impactArmSource("a.neo"));
 
         await buildOk(
@@ -400,7 +400,7 @@ const T6_6_1 = defineProductTest({
           await impactAgainst(product, workspace, base, label),
           [
             // The old identity: deleted and `changed` only — a manual rename
-            // is treated as a deletion plus an addition (SPEC 6.6, 5.6).
+            // is treated as a deletion plus an addition (SPEC 6.7, 5.6).
             {
               identity: I1_MID,
               deleted: true,
@@ -451,7 +451,7 @@ const T6_6_1 = defineProductTest({
         [V2_WATCH]: staleWatch.text,
       },
       async (workspace) => {
-        const context = "T6.6-1 validation arm";
+        const context = "T6.7-1 validation arm";
         await buildOk(product, workspace, `${context}: \`build\``);
         await assertNoJournal(
           workspace,
@@ -469,7 +469,7 @@ const T6_6_1 = defineProductTest({
           { "14.5": 2 },
           `${staleLabel} — each dependent's \`d\` reference to the vacated ` +
             `identity is an unknown dependency: the manual rename carries no ` +
-            `continuity, so the references resolve to nothing (SPEC 6.6, 14.5)`,
+            `continuity, so the references resolve to nothing (SPEC 6.7, 14.5)`,
         );
         for (const [file, source, surface] of [
           [V2_ORIGIN, staleOrigin, "same-file local string reference"],
@@ -505,7 +505,7 @@ const T6_6_1 = defineProductTest({
           product,
           workspace,
           `${context}: \`build\` after rewriting both dependents to the new ` +
-            `identity — the workspace validates again (SPEC 6.6, 14.5)`,
+            `identity — the workspace validates again (SPEC 6.7, 14.5)`,
         );
         await assertNoJournal(
           workspace,
@@ -517,5 +517,5 @@ const T6_6_1 = defineProductTest({
   },
 });
 
-/** TEST-SPEC §6.6, in canonical ID order (SUITE-24). */
-export const section66Tests: readonly ProductTestEntry[] = [T6_6_1];
+/** TEST-SPEC §6.7, in canonical ID order (SUITE-24). */
+export const section67Tests: readonly ProductTestEntry[] = [T6_7_1];

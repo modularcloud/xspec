@@ -36,12 +36,12 @@ const PREAMBLE_KEY = "preamble";
 
 // The universe SPEC.md currently defines. H-7's section lists (the body-text
 // sections above; sections covered through their subsections) enumerate over
-// exactly sections 1–15, and the full universe is preamble + 60 subsections
+// exactly sections 1–15, and the full universe is preamble + 70 subsections
 // + 10 body keys. The detail is derived from the document below; these pins
 // force a deliberate visit when SPEC.md's structure changes and guard
 // against a parser regression losing headings wholesale.
 const EXPECTED_SECTION_COUNT = 15;
-const EXPECTED_KEY_COUNT = 71;
+const EXPECTED_KEY_COUNT = 81;
 
 // Heading shapes exactly as SPEC.md writes them: a section heading is
 // `## <n>. <title>`, a subsection heading `### <n>.<m> <title>`, numbers

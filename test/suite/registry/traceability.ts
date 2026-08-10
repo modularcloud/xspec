@@ -11,9 +11,9 @@
 //   "<major>"           a numbered section's own body text outside its
 //                       subsections. Per H-7 exactly sections 3, 4, 5, 7, 8,
 //                       9, 10, 11, 14, and 15 carry requirements there (for
-//                       3, 11, 14, and 15 — which have no subsections — the
-//                       key spans the whole section body); sections 1, 2, 6,
-//                       12, and 13 carry no requirements outside their
+//                       3, 14, and 15 — which have no subsections — the key
+//                       spans the whole section body); sections 1, 2, 6, 12,
+//                       and 13 carry no requirements outside their
 //                       subsections and are covered through them.
 //
 // Construction (what to maintain when tests change):
@@ -23,6 +23,16 @@
 //   TEST-SPEC's combined heading §5.1–5.2 spans two SPEC.md passages: its one
 //   test T5.2-1 exercises node kinds, edge kinds, and the project-wide graph
 //   over spec and code groups, so it maps to "5", "5.1", and "5.2".
+//   TEST-SPEC 11.1 (`xspec query`) keeps the legacy `T11-<n>` IDs, so
+//   T11-1..T11-7's home passage is "11.1", not the section-11 body.
+// - "11": SPEC.md 11's own body text — the five query surfaces and their
+//   JSON-only contract (a single JSON document as the only output form, with
+//   or without `--json`) — is asserted for `query` by the per-subcommand
+//   both-forms arms of T11-1..T11-5 (section-11.ts's §11-preamble helper),
+//   so those five carry "11" beside their home "11.1". Its remaining clauses
+//   are cross-references asserted at their home passages (11.2's
+//   availability contract; 13.3's gated reads, whose sweeps include
+//   `query`).
 // - Section 16's property tests (P-*) have no SPEC.md section 16; each maps
 //   to the passages whose invariants it asserts per its TEST-SPEC entry.
 // - "14": SPEC.md 14 defines the validation conditions, so a test asserting
@@ -33,9 +43,12 @@
 //   none).
 // - Alias entries: TEST-SPEC's pointer-only tests are not separately
 //   implemented, so their coverage rides on the implementing tests —
-//   T12.0-10 ("covered by T6.4-4/T6.5-5, T6.3-4") puts "12.0" on those
-//   three; T12.1-2 ("T7.5-6") puts "12.1" on T7.5-6; T13.4-7 ("T7-6") puts
-//   "13.4" on T7-6.
+//   T12.0-10's rename/move and baseline arms ride on T6.4-4/T6.5-5 and
+//   T6.3-4, putting "12.0" on those three (alias-only for now: TEST-SPEC
+//   12.0 also specifies gated-read and precedence arms as T12.0-10's own
+//   body, and once those are implemented it becomes a registered test with
+//   its own entry, ending the aliasing); T12.1-2 ("T7.5-6") puts "12.1" on
+//   T7.5-6; T13.4-7 ("T7-6") puts "13.4" on T7-6.
 // - "preamble": per H-7's own citation, T12.0-11 (git is read-only) and
 //   T12.0-12 (git-less operation) cover the preamble's git contract; its
 //   no-network clause is enforced at CI level (E-1), which needs no map
@@ -191,7 +204,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T6.5-4": ["6.5"],
   "T6.5-5": ["6.5", "12.0"],
   "T6.5-6": ["6.5"],
-  "T6.6-1": ["6.6"],
+  "T6.7-1": ["6.7"],
   "T7-1": ["7", "14"],
   "T7-2": ["7", "14"],
   "T7-3": ["7", "14"],
@@ -261,13 +274,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T10.7-10": ["10.7"],
   "T10.7-11": ["10.7"],
   "T10.7-12": ["10.7"],
-  "T11-1": ["11"],
-  "T11-2": ["11"],
-  "T11-3": ["11"],
-  "T11-4": ["11"],
-  "T11-5": ["11"],
-  "T11-6": ["11"],
-  "T11-7": ["11"],
+  "T11-1": ["11", "11.1"],
+  "T11-2": ["11", "11.1"],
+  "T11-3": ["11", "11.1"],
+  "T11-4": ["11", "11.1"],
+  "T11-5": ["11", "11.1"],
+  "T11-6": ["11.1"],
+  "T11-7": ["11.1"],
   "T12.0-1": ["12.0"],
   "T12.0-2": ["12.0"],
   "T12.0-3": ["12.0"],

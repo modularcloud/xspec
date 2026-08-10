@@ -109,7 +109,7 @@ A "new test T<x>" task always means, in one change:
   - Verify: affected suite files compile and fail only as red-as-diagnosed
     product assertions; `npm run test:self` no worse.
 
-- [ ] FP-003 — Re-pin the H-7/S-1 traceability universe and apply the
+- [x] FP-003 — Re-pin the H-7/S-1 traceability universe and apply the
   renumber/remap fixes that need no new tests.
   [VERIFY s1-traceability, R2 #39, R1 #12; TEST-SPEC §0 H-7, §17 S-1]
   - `test/self/s1-traceability.test.ts`: `EXPECTED_KEY_COUNT` 71 → 81 (line
@@ -130,9 +130,16 @@ A "new test T<x>" task always means, in one change:
   - Note in the map comment that T12.0-10 stops being alias-only once
     FP-039 lands (its own arms make it an implemented test).
   - Verify: S-1's universe-count assertion goes green; its unmapped-key
-    failure narrows to exactly {5.7, 11.2, 11.3, 11.4, 11.5, 11.6, 12.6,
-    12.7} (6.7 and 11.1 become mapped here) and stays red until stages E/G
-    land — state left red on purpose.
+    failure narrows to exactly {5.7, 6.6, 11.2, 11.3, 11.4, 11.5, 11.6,
+    12.6, 12.7} (6.7 and 11.1 become mapped here; 6.6 — Previews — joins
+    the red set as planned-task fallout the original note missed: the
+    retired T6.6-1's false "6.6" coverage is removed, and "6.6" stays
+    unmapped until FP-028+ register T6.6-2..-6) and stays red until stages
+    E/G land — state left red on purpose. [Done 2026-08-10: exactly that
+    9-key set observed; T6.7-1 red-as-diagnosed under its new ID; registry
+    module renamed section-6.6.ts → section-6.7.ts (wrapper too) so FP-028
+    creates a fresh section-6.6.ts for the preview tests;
+    SPEC_BODY_TEXT_KEY_SECTIONS reviewed against amended H-7 — unchanged.]
 
 ## Stage B — existing assertions that contradict the current spec
 
