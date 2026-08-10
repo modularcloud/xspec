@@ -270,7 +270,7 @@ A "new test T<x>" task always means, in one change:
 
 ## Stage D — §§1–9 missing arms, with paired certification-fixture reworks
 
-- [ ] FP-008 — T1.3-6: add the invalid-`id`-form arms. [R1 #13; TEST-SPEC
+- [x] FP-008 — T1.3-6: add the invalid-`id`-form arms. [R1 #13; TEST-SPEC
   §1.3, SPEC 14.17]
   `test/suite/registry/section-1.3.ts` has no 14.17 arm. Add: a
   repeated-`id` bearer and a braced-`id` bearer (`id={"x"}`), each reporting
@@ -278,8 +278,22 @@ A "new test T<x>" task always means, in one change:
   grandchildren's structural checks still report. Pair with FP-009 (the
   CONF-VALID conformer must pass this arm once both land — certification
   for the family may be red between the two commits; prefer one spawn).
+  [Done 2026-08-10, one spawn/commit with FP-009: two arms appended to
+  T1.3-6's body — `<S id="one" id="two">` and `<S id={"x"}>`, each behind a
+  valid sibling so the bearer's location window has teeth, each holding an
+  immediate child `a.b` (extends no candidate parent spelling and is
+  multi-segment against the empty prefix, so a non-masking or
+  value-adopting product reports an extra 14.2) with grandchild `zzz`. Each
+  arm asserts exact counts {14.17: 1, 14.2: 1} — hence no 14.1, no 14.20,
+  no immediate-child 14.2 — the 14.17 located within the bearer, the one
+  14.2 within the grandchild. Title updated; traceability already
+  ["1.3", "14"]. Suite file red-as-diagnosed against the stub (all six
+  T1.3-* fail at the FP-001-class form-exact decode: the stub still emits
+  `condition`-member findings, so the new arms' first decode fails the same
+  way); arm soundness proven through the paired conformer: CONF-VALID
+  12/12.]
 
-- [ ] FP-009 — Rework CONF-VALID to its refreshed CERTIFICATIONS.md scope.
+- [x] FP-009 — Rework CONF-VALID to its refreshed CERTIFICATIONS.md scope.
   [R3 gap 4; CERTIFICATIONS.md CONF-VALID, SPEC 12.7, 14.17]
   `test/fixtures/conf-valid/product.mjs` (+ `bin-ctrl.mjs`/`bin-wide.mjs`
   deviations unchanged): (a) add the condition-17 path — today it emits
@@ -290,6 +304,23 @@ A "new test T<x>" task always means, in one change:
   `{"condition","file","location","message"}` with no token). After: FP-001,
   FP-008. Verify: `npm run test:self` — CONF-VALID conformer passes all
   in-scope tests, its violators still fail at least one certified test.
+  [Done 2026-08-10, same commit as FP-008. (d) had already landed with
+  FP-001 (findingsDoc emits the literal 12.7 form with stable tokens);
+  this task added the behavioral 14.17 path: the MDX-lite lexer now counts
+  attribute occurrences per element and scans braced values (`name={...}`,
+  balanced, string-aware) as well-formed MDX — never 14.20; a repeated
+  prop name (one finding per name) or an `id`/`tags` value not in
+  quoted-static form (braced or valueless) yields a 14.17 finding at the
+  bearing element (`"14.17": "invalid-prop"` in CODE_TOKENS); an afflicted
+  `id` spells no identity — never 14.1 (only a wholly absent `id` is
+  14.1), own segment/structural/duplicate checks skipped, and the existing
+  parent-spells-no-identity masking covers repeated/braced parents
+  unchanged since `id` stays null. bin-ctrl/bin-wide untouched. Verified:
+  `npm run test:self` — CONF-VALID conformer 12/12 in-scope tests pass
+  (extended T1.3-6 included), VIOL-VALID-CTRL and VIOL-VALID-WIDE each
+  fail exactly their three certified tests and pass T1.3-6; the 4 planned
+  mid-loop reds unchanged (certification-document ×3 → FP-091; S-1's 9
+  unmapped keys → stages E/G).]
 
 - [ ] FP-010 — T3-1: add the grammar-boundary arm. [R1 #15; TEST-SPEC §3]
   `test/suite/registry/section-3.ts` — the T3-1 fixture's fence (~line 92)

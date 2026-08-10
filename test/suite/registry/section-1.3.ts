@@ -12,8 +12,9 @@
 // within that entry's scope — one configured spec group of `.mdx` sources
 // whose sections carry `id`/`tags` props only; no imports, embeddings, `d`
 // props, code groups, `markdown`, `coverage`, `policy`, or git; the command
-// surface is `build` (error reporting of 14.1–14.4) plus `query nodes`.
-// T1.3-5's cross-file duplicate-ID arm is the multi-file case.
+// surface is `build` (error reporting of 14.1–14.4, plus 14.17 as T1.3-6's
+// invalid-form arms stage it) plus `query nodes`. T1.3-5's cross-file
+// duplicate-ID arm is the multi-file case.
 //
 // Location assertions: fixtures are staged as prefix + offending construct +
 // suffix, all pure ASCII (string indices are byte offsets), and each negative
@@ -377,10 +378,96 @@ const MASK_BAD_CHILD =
   '<S id="bad name">\nImmediate child: its own non-structural condition still reports.\n</S>';
 const MASK_SOURCE = `${MASK_PREFIX}${MASK_GRANDCHILD}${MASK_MID}${MASK_BAD_CHILD}\n</S>\n`;
 
+// T1.3-6 invalid-form arms (SPEC 14.1: a repeated `id` attribute or a value
+// not in quoted static-string form is condition 17, never condition 1, and
+// each case spells no identity, masking condition 2 for the immediate
+// children exactly as a missing `id` does — SPEC 2.7, 14.2, 14.17). Each arm
+// stages one bearer with an immediate child whose ID the structural rule
+// would otherwise judge — `a.b` extends none of the bearer's spelled value
+// candidates (`one`, `two`, `x`) and is multi-segment against the empty
+// prefix, so a product that fails to mask, or silently adopts one of the
+// spelled values as the identity, reports an extra 14.2 — and a grandchild
+// whose structural check runs normally against its parent's spelled id
+// `a.b`. A valid sibling precedes the bearer so the bearer's construct is a
+// proper sub-range of the file and its location assertion has teeth.
+interface InvalidIdFormArm {
+  /** Which T1.3-6 invalid-form case this is (failure diagnostics). */
+  readonly name: string;
+  /** The bearer's opening tag plus its own text, up to the child. */
+  readonly bearerOpen: string;
+}
+
+const FORM_SIBLING = '<S id="ok">\nA valid sibling section.\n</S>\n\n';
+const FORM_CHILD_OPEN =
+  '<S id="a.b">\nImmediate child: its structural check is masked by the bearer spelling no identity.\n\n';
+const FORM_GRANDCHILD =
+  '<S id="zzz">\nGrandchild: checked against its parent id normally.\n</S>';
+const FORM_TAIL = "\n</S>\n</S>";
+
+const INVALID_ID_FORM_ARMS: readonly InvalidIdFormArm[] = [
+  {
+    name: 'a repeated-`id` section (`<S id="one" id="two">`)',
+    bearerOpen:
+      '<S id="one" id="two">\nBearer: the id attribute is repeated.\n\n',
+  },
+  {
+    name: 'a braced-`id` section (`<S id={"x"}>`)',
+    bearerOpen:
+      '<S id={"x"}>\nBearer: the id value is not a quoted static string literal.\n\n',
+  },
+];
+
+/**
+ * Run one invalid-form arm: the bearer reports 14.17 and no 14.1, its
+ * immediate child reports no 14.2, and the grandchild's structural check
+ * still reports (SPEC 14.1, 14.2, 14.17).
+ */
+async function runInvalidIdFormArm(
+  product: ProductBinding,
+  arm: InvalidIdFormArm,
+): Promise<void> {
+  const context = `T1.3-6 \`build --json\` over ${arm.name}`;
+  const bearerConstruct =
+    arm.bearerOpen + FORM_CHILD_OPEN + FORM_GRANDCHILD + FORM_TAIL;
+  const findings = await findingsOf(
+    product,
+    `${FORM_SIBLING}${bearerConstruct}\n`,
+    context,
+  );
+  // Exactly one 14.17 and one 14.2 in the whole report: the bearer reports
+  // condition 17 — never 14.1 and never 14.20, the value form is a validity
+  // matter, not a parse failure — the immediate child's 14.2 is masked, and
+  // the grandchild's structural check still reports (the one 14.2).
+  assertConditionCounts(findings, { "14.17": 1, "14.2": 1 }, context);
+  const ofCondition = (condition: string): Finding =>
+    findings.find((finding) => finding.condition === condition)!;
+  assertFindingLocated(
+    ofCondition("14.17"),
+    {
+      file: "specs/A.mdx",
+      window: byteWindow(FORM_SIBLING, bearerConstruct),
+    },
+    `${context}: the bearer's 14.17 finding (an invalid id form is condition 17, ` +
+      "never condition 1 — located at the bearer, not the valid sibling)",
+  );
+  assertFindingLocated(
+    ofCondition("14.2"),
+    {
+      file: "specs/A.mdx",
+      window: byteWindow(
+        FORM_SIBLING + arm.bearerOpen + FORM_CHILD_OPEN,
+        FORM_GRANDCHILD,
+      ),
+    },
+    `${context}: the grandchild's 14.2 finding (its structural check runs against ` +
+      "its parent's spelled id `a.b` normally)",
+  );
+}
+
 const T1_3_6 = defineProductTest({
   id: "T1.3-6",
   title:
-    "missing-id masking: immediate children of an id-less section report no 14.2, while their other conditions and the grandchildren's structural checks still report (SPEC 1.3, 14.1, 14.2)",
+    "missing-id masking: immediate children of an id-less section report no 14.2, while their other conditions and the grandchildren's structural checks still report; a repeated-`id` or braced-`id` bearer reports 14.17 — never 14.1 — masking the same way (SPEC 1.3, 2.7, 14.1, 14.2, 14.17)",
   run: async (product) => {
     const context =
       "T1.3-6 `build --json` over an id-less section with children";
@@ -424,6 +511,12 @@ const T1_3_6 = defineProductTest({
       },
       `${context}: the immediate child's own 14.4 finding (other conditions are not masked)`,
     );
+
+    // Invalid-form arms: a repeated `id` and a braced `id={"x"}` each report
+    // condition 17 and mask 14.2 for the immediate children the same way.
+    for (const arm of INVALID_ID_FORM_ARMS) {
+      await runInvalidIdFormArm(product, arm);
+    }
   },
 });
 

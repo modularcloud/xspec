@@ -9,16 +9,19 @@
 //   whose sections carry `id` and `tags` props (multi-file included); no
 //   imports, embeddings, `d` props, code groups, `markdown`, `coverage`,
 //   `policy`, or git.
-// - `build` with the error reporting of SPEC 14 for conditions 14.1–14.4:
-//   file, location, condition identity, 14.2's statement of the expected
-//   form, exit codes per SPEC 12.0.
+// - `build` with the error reporting of SPEC 14 for conditions 14.1–14.4 —
+//   and 14.17 as T1.3-6's invalid-form arms stage it (a repeated `id`
+//   attribute and a braced `id={"x"}` value) — file, location, condition
+//   identity with its stable code, 14.2's statement of the expected form,
+//   exit codes per SPEC 12.0.
 // - `query node` / `query nodes` (with `--tag`) reporting identity, tags,
 //   and metadataHash — the scoped query surface; source ranges ride along in
 //   the natural SPEC 11 row shape.
 // - Contracts under certification: SPEC 1.3, SPEC 1.4 with its exact
-//   character classes, SPEC 2.6 tag splitting, and the masking rule of
-//   SPEC 14.2 (condition 1 masks condition 2 for the immediate children of a
-//   section lacking `id`; everything else reports normally).
+//   character classes, SPEC 2.6 tag splitting, and the masking rules of
+//   SPEC 14.1/14.17 over 14.2 (a section spelling no identity — `id`
+//   missing, repeated, or in invalid value form — masks condition 2 for its
+//   immediate children; everything else reports normally).
 //
 // Key mechanisms:
 // - Sources are scanned by a hand-rolled MDX-lite lexer: `<S>`/`<Spec>` tags
@@ -28,6 +31,15 @@
 //   values, and those must reach segment/tag validation (14.4) — never
 //   surface as parse errors (14.20). That mis-staging hazard is exactly what
 //   §CONF-VALID certifies against.
+// - The lexer parses attribute occurrences per element, braced values
+//   (`name={...}`, balanced with string awareness) included: a repeated prop
+//   name, or an `id`/`tags` value not in quoted static-string form (braced
+//   or valueless), is condition 17 (SPEC 2.4, 2.7, 14.17) — well-formed MDX,
+//   so never 14.20 — and an `id` so afflicted spells no identity: never
+//   condition 1 (SPEC 14.1), and it masks condition 2 for its immediate
+//   children exactly as a missing `id` does (SPEC 14.2; T1.3-6's
+//   invalid-form arms). Unknown prop *names* stay ignored: sections in the
+//   accepted workspace shapes carry `id`/`tags` props only (Scope).
 // - Validation (SPEC 1.3/1.4, conditions 14.1–14.4) walks sections in
 //   document order. The structural rule compares segment sequences — a child
 //   ID's segments are its parent ID's segments plus exactly one more — so an
@@ -639,10 +651,48 @@ function byteOffsetMapper(text, byteLength) {
 const TAG_WHITESPACE = new Set(["\t", "\n", "\v", "\f", "\r", " "]);
 
 /**
+ * Scan a braced attribute value (`name={...}`) starting at its `{`: balanced
+ * braces with string-literal awareness (quotes and backslash escapes), enough
+ * for any static-expression spelling such as `{"x"}`. Returns the index just
+ * past the closing `}`, or -1 when unterminated. The braced form is
+ * well-formed MDX — its content is never inspected: whatever it holds, the
+ * value is not in quoted static-string form (condition 17, SPEC 2.4, 2.7).
+ */
+function scanBracedAttributeValue(text, start) {
+  let depth = 0;
+  let i = start;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '"' || c === "'") {
+      i += 1;
+      while (i < text.length && text[i] !== c) {
+        i += text[i] === "\\" ? 2 : 1;
+      }
+      if (i >= text.length) return -1;
+      i += 1;
+      continue;
+    }
+    if (c === "{") depth += 1;
+    else if (c === "}") {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+    }
+    i += 1;
+  }
+  return -1;
+}
+
+/**
  * Parse one source file into a section tree with exact string-index ranges.
  * Attribute values are the raw characters between their quotes — control
  * bytes, line terminators, and boundary code points included — so 1.4
- * validity, never parseability, is what their content decides. Returns
+ * validity, never parseability, is what their content decides. Per element,
+ * attribute occurrences are counted and value forms classified: a repeated
+ * prop name or a non-quoted-static `id`/`tags` value is recorded on the node
+ * as an `invalidProps` entry (condition 17, SPEC 2.7 — well-formed MDX, so
+ * never a parse failure), an `id` so afflicted spells no identity
+ * (`id` null, `idMissing` false — condition 17, never condition 1), and a
+ * wholly absent `id` is `idMissing` (condition 1). Returns
  * { root, sections, failure } where `failure` is null or { at, message }
  * (an unparseable source, SPEC 14.20 — masking the conditions inside).
  */
@@ -692,7 +742,10 @@ function parseMdx(text) {
     const node = {
       isRoot: false,
       id: null,
+      idMissing: false,
       tagsRaw: undefined,
+      /** @type {{ name: string, kind: "repeated" | "value-form" }[]} */
+      invalidProps: [],
       parent: stack.at(-1),
       children: [],
       openStart: i,
@@ -702,6 +755,10 @@ function parseMdx(text) {
       selfClosing: false,
     };
     let j = i + open[0].length;
+    /** @type {Map<string, number>} */
+    const occurrences = new Map();
+    let idValue;
+    let tagsValue;
     for (;;) {
       while (j < text.length && TAG_WHITESPACE.has(text[j])) j += 1;
       if (j >= text.length) {
@@ -724,29 +781,63 @@ function parseMdx(text) {
       }
       const name = attr[0];
       j += name.length;
+      /** @type {"quoted" | "braced" | "valueless"} */
+      let form = "valueless";
       let value;
       if (text[j] === "=") {
         j += 1;
         const quote = text[j];
-        if (quote !== '"' && quote !== "'") {
-          fail20(j, "section props in this scope are quoted string literals");
+        if (quote === '"' || quote === "'") {
+          const valueStart = j + 1;
+          const end = text.indexOf(quote, valueStart);
+          if (end === -1) {
+            fail20(j, "unterminated attribute value");
+            return { root, sections, failure };
+          }
+          value = text.slice(valueStart, end);
+          form = "quoted";
+          j = end + 1;
+        } else if (quote === "{") {
+          const end = scanBracedAttributeValue(text, j);
+          if (end === -1) {
+            fail20(j, "unterminated braced attribute value");
+            return { root, sections, failure };
+          }
+          form = "braced";
+          j = end;
+        } else {
+          fail20(j, "malformed attribute value in a section tag");
           return { root, sections, failure };
         }
-        const valueStart = j + 1;
-        const end = text.indexOf(quote, valueStart);
-        if (end === -1) {
-          fail20(j, "unterminated attribute value");
-          return { root, sections, failure };
-        }
-        value = text.slice(valueStart, end);
-        j = end + 1;
       }
-      if (name === "id" && value !== undefined) {
-        node.id = value;
-      } else if (name === "tags" && value !== undefined) {
-        node.tagsRaw = value;
+      const count = (occurrences.get(name) ?? 0) + 1;
+      occurrences.set(name, count);
+      // A repeated prop, defined or unknown, is condition 17 (SPEC 2.7) —
+      // one violation per prop name, however many further repeats.
+      if (count === 2) {
+        node.invalidProps.push({ name, kind: "repeated" });
+      }
+      // An `id`/`tags` value not in quoted static-string form — braced or
+      // valueless — is condition 17 (SPEC 2.4, 2.7). Unknown prop names stay
+      // ignored: out of the accepted workspace shapes (§CONF-VALID Scope).
+      if ((name === "id" || name === "tags") && count === 1) {
+        if (form === "quoted") {
+          if (name === "id") idValue = value;
+          else tagsValue = value;
+        } else {
+          node.invalidProps.push({ name, kind: "value-form" });
+        }
       }
     }
+    // Spelled identity (SPEC 11.2): exactly one quoted-static `id` spells
+    // one; a repeated or invalid-form `id` spells none — condition 17, never
+    // condition 1 (SPEC 14.1) — and only a wholly absent `id` is condition 1.
+    const idInvalid = node.invalidProps.some((entry) => entry.name === "id");
+    node.id = idInvalid ? null : (idValue ?? null);
+    node.idMissing = !idInvalid && idValue === undefined;
+    node.tagsRaw = node.invalidProps.some((entry) => entry.name === "tags")
+      ? undefined
+      : tagsValue;
     node.openEnd = j;
     if (node.selfClosing) {
       node.closeStart = node.openEnd;
@@ -793,7 +884,24 @@ function validateSections(rel, sections, byteOf) {
       start: byteOf(node.openStart),
       end: byteOf(node.closeEnd),
     };
-    if (node.id === null) {
+    // Condition 14.17 (SPEC 2.7): a repeated prop, or an `id`/`tags` value
+    // not in quoted static-string form — one finding per violation, located
+    // at the bearing element. An `id` so afflicted spells no identity: never
+    // condition 1 (SPEC 14.1), its own segment/structural/duplicate checks
+    // cannot run, and its immediate children's structural checks are masked
+    // below exactly as under a missing `id` (SPEC 14.2).
+    for (const invalid of node.invalidProps) {
+      findings.push({
+        condition: "14.17",
+        message:
+          invalid.kind === "repeated"
+            ? `invalid prop: the ${JSON.stringify(invalid.name)} prop is repeated — no prop name may occur more than once on one element (SPEC 2.7)`
+            : `invalid prop: the ${JSON.stringify(invalid.name)} value must be a static string literal in quoted attribute form (SPEC 2.4, 2.7)`,
+        file: rel,
+        location,
+      });
+    }
+    if (node.idMissing) {
       // Condition 14.1 (SPEC 1.3): a non-root section without `id`. Its own
       // structural and segment checks need an ID and cannot run; its
       // immediate children's structural checks are masked below (SPEC 14.2).
@@ -804,7 +912,7 @@ function validateSections(rel, sections, byteOf) {
         file: rel,
         location,
       });
-    } else {
+    } else if (node.id !== null) {
       const segments = segmentsOf(node.id);
       // Condition 14.4 (SPEC 1.4), one finding per invalid segment.
       for (const segment of segments) {
@@ -822,9 +930,12 @@ function validateSections(rel, sections, byteOf) {
       // exactly one segment, compared as segment sequences (an empty segment
       // is a 1.4 matter, not a structural one). A top-level section is
       // checked against the empty prefix: exactly one segment. Masking
-      // (SPEC 14.2): for the immediate children of a section lacking `id`,
-      // condition 1 masks this condition — their other conditions, and this
-      // condition for their own children, report normally.
+      // (SPEC 14.2): for the immediate children of a section spelling no
+      // identity — `id` missing (condition 1), repeated, or in invalid value
+      // form (condition 17) — the parent's condition masks this one; their
+      // other conditions, and this condition for their own children, report
+      // normally. Every such parent has `id` null here, so one test covers
+      // all three cases.
       const parent = node.parent;
       if (parent.isRoot || parent.id !== null) {
         const parentSegments = parent.isRoot ? [] : segmentsOf(parent.id);
@@ -1004,6 +1115,7 @@ const CODE_TOKENS = {
   14.2: "invalid-structural-id",
   14.3: "duplicate-id",
   14.4: "invalid-segment-or-tag",
+  14.17: "invalid-prop",
   "14.20": "unparseable-source",
 };
 
