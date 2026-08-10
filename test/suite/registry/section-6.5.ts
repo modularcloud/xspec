@@ -65,16 +65,25 @@
 //   without `--json`; "modifies nothing" is a whole-workspace-root byte
 //   snapshot compare around each refused command with the pre-refusal
 //   `build`'s derived files present (the T6.4-3 protocol). Because each arm
-//   proves it modified nothing, the arms share one staged workspace. The
-//   not-valid-UTF-8 destination is staged on the Linux leg only (mirroring
-//   T1.5-2's platform note): argv bytes exist as a channel there, carried by
-//   the subprocess driver's raw-byte argv support.
+//   proves it modified nothing, the arms share one staged workspace. The 6.5
+//   destination clauses "containing `#`" and "not valid UTF-8" admit no
+//   refusal staging (T6.5-4's dead-letter note): every operand spelling that
+//   would present either is an exit-2 usage error before any refusal is
+//   evaluated — those stagings are T6.5-5's.
 // - T6.5-5 exit-2 arms run with `--json`: stdout exactly one 12.7 error
 //   document (12.0: with JSON output in effect, an exit-2 invocation emits
 //   the error document as its entire stdout — no report, no validation
 //   findings: the 12.0-ordering discriminator) and the usage error message
 //   on stderr (presence, not wording). The masking arm asserts exit 1 with
-//   exactly one 14.20 finding naming the unparseable origin file.
+//   exactly one 14.20 finding naming the unparseable origin file. The two
+//   stagings T6.5-4's dead-letter note sets aside are asserted here, each
+//   with a whole-root modifies-nothing snapshot compare around the command:
+//   a `#`-containing file-form destination — classified as a `<file>#<id>`
+//   pair by spelling alone, so the invocation mixes the two synopses' forms
+//   and matches neither (SPEC 6.5, 12.0) — and a non-UTF-8 destination
+//   operand, a usage-error argument value (SPEC 12.0), staged on the Linux
+//   leg only (mirroring T1.5-2's platform note): argv bytes exist as a
+//   channel there, carried by the subprocess driver's raw-byte argv support.
 // - T6.5-6's unstageable clauses are documented at the test, per TEST-SPEC:
 //   the collision clause's after-the-removal qualifier admits no
 //   discriminating fixture (structural IDs make the vacated set exactly the
@@ -358,15 +367,14 @@ function renderArgv(argv: readonly ArgvValue[]): string {
  * existence checks refuses with exit 1): assert exit 1 exactly and that the
  * refusal modifies nothing — a whole-workspace-root byte snapshot compare
  * around the command (derived files, sources, and the journal all included).
- * Accepts raw-byte argv elements for the Linux-leg non-UTF-8 destination arm.
  */
 async function expectRefusalModifiesNothing(
   product: ProductBinding,
   workspace: TestWorkspace,
-  argv: readonly ArgvValue[],
+  argv: readonly string[],
   context: string,
 ): Promise<void> {
-  const command = renderArgv(argv);
+  const command = argv.join(" ");
   await assertLeavesUnchanged(
     workspace.root,
     async () => {
@@ -386,26 +394,30 @@ async function expectRefusalModifiesNothing(
 }
 
 /**
- * A move usage error (SPEC 6.5, 12.0: nonexistent origin file or origin ID):
- * run with `--json`, assert exit 2 exactly, the single 12.7 error document
- * as the entire stdout (12.0: no report and no validation findings — the
- * 12.0-ordering discriminator; H-5), and a usage error message on stderr
- * (presence, not wording).
+ * A move usage error (SPEC 6.5, 12.0): run with `--json`, assert exit 2
+ * exactly, the single 12.7 error document as the entire stdout (12.0: no
+ * report and no validation findings — the 12.0-ordering discriminator; H-5),
+ * and a usage error message on stderr (presence, not wording). Accepts
+ * raw-byte argv elements for the Linux-leg non-UTF-8 destination arm
+ * (T6.5-5, T12.0-5: argv is a byte channel there, carried by the subprocess
+ * driver's raw-byte argv support).
  */
 async function expectMoveUsageError(
   product: ProductBinding,
   workspace: TestWorkspace,
-  argv: readonly string[],
+  argv: readonly ArgvValue[],
   context: string,
 ): Promise<RunResult> {
-  const command = argv.join(" ");
-  const result = await expectExit(
-    product,
-    workspace,
-    [...argv, "--json"],
+  const command = renderArgv(argv);
+  const result = await runProduct(product, {
+    cwd: workspace.root,
+    argv: [...argv, "--json"],
+  });
+  assertExitCode(
+    result,
     2,
-    `${context}: \`${command} --json\` — a nonexistent origin file or origin ` +
-      `ID is a usage error (SPEC 6.5, 12.0)`,
+    `${context}: \`${command} --json\` — a usage error, exit 2 (SPEC 6.5, ` +
+      `12.0)`,
   );
   expectErrorDocument(
     result,
@@ -1396,18 +1408,10 @@ const V4_OTHER_INVALID = [
   "",
 ].join("\n");
 
-// Destination path that is not valid UTF-8: `specs/<0xFF>.mdx` (Linux-leg
-// staging — argv is a byte channel there; TEST-SPEC T6.5-4, T1.5-2's note).
-const V4_NON_UTF8_DESTINATION: Uint8Array = Buffer.concat([
-  Buffer.from("specs/", "utf8"),
-  Buffer.from([0xff]),
-  Buffer.from(".mdx", "utf8"),
-]);
-
 const T6_5_4 = defineProductTest({
   id: "T6.5-4",
   title:
-    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle; file form whose destination exists; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment); the ordinary cross-file `<new-id>` collision; a missing target parent; a target parent within the moved subtree; and destination paths in no configured spec group, in a code group as well, containing `#`, not valid UTF-8 (Linux leg), or lacking `.mdx`; plus the valid-workspace precondition as T6.4-6 (SPEC 6.5, 5.3, 2.1, 1.4, 1.3, 14.14, 14.19, 12.0)",
+    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle; file form whose destination exists; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment); the ordinary cross-file `<new-id>` collision; a missing target parent; a target parent within the moved subtree; and destination paths in no configured spec group, in a code group as well, or lacking `.mdx` — the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6 (SPEC 6.5, 5.3, 2.1, 1.4, 1.3, 14.14, 14.19, 12.0)",
   run: async (product) => {
     await withWorkspace(
       REFUSAL_CONFIG,
@@ -1476,36 +1480,23 @@ const T6_5_4 = defineProductTest({
               "14.14)",
           ],
           [
-            ["move", "specs/A.mdx", "specs/Ha#sh.mdx"],
-            "destination path containing `#` (SPEC 6.5, 1.5, 14.19)",
-          ],
-          [
             ["move", "specs/A.mdx", "specs/plain/Out.md"],
             "destination path lacking the `.mdx` extension — it matches the " +
               "`specs/plain/**` spec glob, isolating 14.19's extension rule " +
               "(SPEC 6.5, 7.1, 14.19)",
           ],
         ];
+        // No `#`-containing and no non-UTF-8 destination arm here: those 6.5
+        // destination clauses are dead letters as refusals (T6.5-4's note) —
+        // a destination path exists only as an operand spelling, and every
+        // spelling that would present either is an exit-2 usage error before
+        // any refusal is evaluated. T6.5-5 stages both.
         for (const [argv, reason] of cases) {
           await expectRefusalModifiesNothing(
             product,
             workspace,
             argv,
             `T6.5-4 (${reason})`,
-          );
-        }
-
-        // Not valid UTF-8, staged on the Linux leg per T6.5-4's own text:
-        // Linux argv is a byte channel, so the destination is passed as raw
-        // bytes (driver trampoline); other platforms cannot carry the
-        // argument at all (the T1.5-2 platform note).
-        if (process.platform === "linux") {
-          await expectRefusalModifiesNothing(
-            product,
-            workspace,
-            ["move", V4_A, V4_NON_UTF8_DESTINATION],
-            "T6.5-4 (destination path not valid UTF-8 — Linux leg; " +
-              "SPEC 6.5, 14.19)",
           );
         }
       },
@@ -1580,6 +1571,18 @@ const U5_BROKEN_SOURCE = [
   "",
 ].join("\n");
 
+// Destination operand that is not valid UTF-8: `specs/<0xFF>.mdx` (Linux-leg
+// staging — argv is a byte channel there; T6.5-5, T12.0-5, T1.5-2's note).
+// It contains no `#`, so only the argument-value rule makes it exit 2: a
+// non-UTF-8 argument value is a usage error (SPEC 12.0), and a valid operand
+// therefore never denotes a non-UTF-8 destination path — the 6.5 refusal
+// clause is unreachable (T6.5-4's dead-letter note).
+const U5_NON_UTF8_DESTINATION: Uint8Array = Buffer.concat([
+  Buffer.from("specs/", "utf8"),
+  Buffer.from([0xff]),
+  Buffer.from(".mdx", "utf8"),
+]);
+
 const U5_USAGE_CASES: readonly (readonly [readonly string[], string])[] = [
   [
     ["move", "specs/Missing.mdx", "specs/New.mdx"],
@@ -1598,7 +1601,7 @@ const U5_USAGE_CASES: readonly (readonly [readonly string[], string])[] = [
 const T6_5_5 = defineProductTest({
   id: "T6.5-5",
   title:
-    "usage errors (exit 2): a nonexistent origin file (either form) and a nonexistent origin ID are usage errors checked before source validation — the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering, as T6.4-4) — but an origin ID inside an unparseable origin file is masked: the validation findings are reported and the command exits 1 (SPEC 6.5, 12.0, 14, 14.20)",
+    "usage errors (exit 2): a nonexistent origin file (either form) and a nonexistent origin ID are usage errors checked before source validation — the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering, as T6.4-4) — but an origin ID inside an unparseable origin file is masked: the validation findings are reported and the command exits 1; a `#`-containing file-form destination classifies as a `<file>#<id>` pair by spelling alone, the invocation matching neither synopsis (exit 2), and a non-UTF-8 destination operand (raw argv bytes, Linux leg) is a usage-error argument value (exit 2) — the stagings T6.5-4's dead-letter note sets aside, each modifying nothing (SPEC 6.5, 12.0, 14, 14.20)",
   run: async (product) => {
     // --- Base arm: a valid workspace ---
     await withWorkspace(
@@ -1613,6 +1616,53 @@ const T6_5_5 = defineProductTest({
             workspace,
             argv,
             `${context}, ${label}`,
+          );
+        }
+
+        // The stagings T6.5-4's dead-letter note sets aside (SPEC 6.5's
+        // `#`-containing and non-UTF-8 destination clauses), each asserted
+        // with a whole-root modifies-nothing snapshot compare around the
+        // command. A move operand is classified by spelling alone: an
+        // operand containing `#` is a `<file>#<id>` pair under the 12.0
+        // split, so `specs/Ha#sh.mdx` beside the bare-file origin mixes the
+        // two synopses' forms and matches neither — exit 2, never the 6.5
+        // destination refusal (exit 1) it would be were the operand a path.
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            await expectMoveUsageError(
+              product,
+              workspace,
+              ["move", "specs/A.mdx", "specs/Ha#sh.mdx"],
+              `${context}, \`#\`-containing file-form destination — the ` +
+                `operand classifies as a \`<file>#<id>\` pair by spelling ` +
+                `alone, so the invocation mixes the two synopses' forms ` +
+                `and matches neither (SPEC 6.5, 12.0)`,
+            );
+          },
+          `${context}: \`move specs/A.mdx specs/Ha#sh.mdx\` — the usage ` +
+            `error modifies nothing (SPEC 6.5, 12.0)`,
+        );
+
+        // Non-UTF-8 destination operand, staged on the Linux leg only
+        // (mirroring T1.5-2's platform note): Linux argv is a byte channel,
+        // so the destination is passed as raw bytes (driver trampoline);
+        // other platforms cannot carry the argument at all.
+        if (process.platform === "linux") {
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              await expectMoveUsageError(
+                product,
+                workspace,
+                ["move", U5_A, U5_NON_UTF8_DESTINATION],
+                `${context}, non-UTF-8 destination operand (raw argv ` +
+                  `bytes, Linux leg) — a non-UTF-8 argument value is a ` +
+                  `usage error (SPEC 12.0)`,
+              );
+            },
+            `${context}: \`move ${U5_A} <non-UTF-8 bytes>\` — the usage ` +
+              `error modifies nothing (SPEC 6.5, 12.0)`,
           );
         }
       },

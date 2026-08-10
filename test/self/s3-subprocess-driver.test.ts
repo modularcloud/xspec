@@ -316,7 +316,7 @@ test("argv reaches the child verbatim — no shell interpretation, empty and met
 });
 
 test.runIf(onPosix)(
-  "raw-byte (Uint8Array) argv elements reach the child byte-verbatim via the POSIX trampoline — non-UTF-8 argument staging (T6.5-4, T12.0-5)",
+  "raw-byte (Uint8Array) argv elements reach the child byte-verbatim via the POSIX trampoline — non-UTF-8 argument staging (T6.5-5, T12.0-5)",
   async () => {
     const { workspace } = await standin();
     // `/bin/sh` itself is the known-behavior stand-in: `printf %s "$1"`

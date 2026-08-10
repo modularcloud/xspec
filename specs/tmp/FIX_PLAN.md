@@ -164,7 +164,7 @@ A "new test T<x>" task always means, in one change:
   unchanged: 4 planned mid-loop reds (certification-document ×3 → FP-091;
   S-1's 9 unmapped keys → stages E/G).]
 
-- [ ] FP-005 — Re-stage the two `move` destination spellings that changed
+- [x] FP-005 — Re-stage the two `move` destination spellings that changed
   exit class from refusal (exit 1) to usage error (exit 2).
   [R1 #25, non-UTF-8 half of R1 #22; TEST-SPEC T6.5-4 dead-letter note,
   T6.5-5]
@@ -175,6 +175,21 @@ A "new test T<x>" task always means, in one change:
   T6.5-5 and assert exit 2 with the FP-002 protocol (single 12.7 error
   document under `--json`), workspace unmodified. Verify: red-as-diagnosed;
   T6.5-4 retains no exit-class contradiction.
+  [Done 2026-08-10: both arms now live in T6.5-5's valid-workspace block —
+  exit 2 via `expectMoveUsageError` (FP-002 protocol: single 12.7 error
+  document under `--json`, stderr message present), each wrapped in a
+  whole-root `assertLeavesUnchanged` compare; the helper widened to
+  raw-byte argv (`ArgvValue`) for the Linux-leg non-UTF-8 operand while
+  `expectRefusalModifiesNothing` narrowed back to strings; T6.5-4's
+  title/cases now carry the dead-letter note instead of the arms; the S-3
+  driver self-test's staging citation updated T6.5-4 → T6.5-5. Verified:
+  T6.5-4 green against the current product (contradiction gone); T6.5-5
+  red-as-diagnosed — direct probe shows the product still exits 1 with a
+  refusal document on both spellings (classifies the operand as a path)
+  where the arms demand exit 2; the suite test currently fails earlier at
+  its first arm (exit-2 stdout empty under `--json`, the FP-002-class
+  product gap). `npm run test:self`: unchanged 4 planned mid-loop reds
+  (certification-document ×3 → FP-091; S-1 unmapped keys → stages E/G).]
 
 ## Stage C — §§1–9 cross-cutting assertion sweeps (after FP-001)
 
