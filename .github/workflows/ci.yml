@@ -27,8 +27,16 @@ name: CI
 
 on:
   pull_request:
+  # GitHub creates no pull_request-event runs while a PR is unmergeable.
+  # PR #7 (patch 0001, branch claude/xspec-ui-apis-4df8fa, standing in for
+  # patch/external-ui-apis) is conflicted with main (specs/PHILOSOPHY.md), so
+  # its CI signal comes from push-event runs on the branch head instead —
+  # same workflow, same tree; checks attach to the head commit and surface on
+  # the PR. Drop that branch from this list once its PR is mergeable again or
+  # the patch completes. (Same channel sdg/initial-build used, kept for
+  # history.)
   push:
-    branches: [main, sdg/initial-build]
+    branches: [main, sdg/initial-build, claude/xspec-ui-apis-4df8fa]
   workflow_dispatch:
 
 concurrency:
