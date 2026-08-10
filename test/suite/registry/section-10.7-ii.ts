@@ -13,7 +13,8 @@
 // fully resolved in human and `--json` forms, exit 0, with no item in the
 // JSON payload, and the `--json` payload is self-contained — every scope,
 // context, and origin node under its current identity and presence, source
-// ranges for present requirement nodes, the recorded `baseline` and `current`
+// ranges for present nodes (requirement node and code location alike; an
+// absent node carries none), the recorded `baseline` and `current`
 // hashes, and text per item kind. `show` reports the full item (the 10.2
 // fields plus the same payload); `export` emits the whole session as one JSON
 // document, with or without `--json`, read-time invalidation applied. `split`
@@ -35,7 +36,11 @@
 //   the pinned graph states (own/subtree text per SPEC 1.6, source ranges per
 //   1.7 — the same values T11-1 fixes for `query node`), with distinctness
 //   premises asserted first so every discrimination (own vs subtree text,
-//   baseline vs create-time vs current values) is meaningful. Embedding
+//   baseline vs create-time vs current values) is meaningful. A code
+//   location is no `query node` operand, so the present code-impact scope's
+//   range — review payloads are one of the two range-presenting outputs for
+//   code locations (SPEC 1.7) — is asserted against precomputed byte offsets
+//   of the staged named unit's construct (SPEC 1.7, 4.6). Embedding
 //   expansion is additionally pinned with byte literals: the asserted text
 //   must contain the embedded target's authored text and must not contain the
 //   unexpanded `text(` spelling (SPEC 1.6, 2.3).
@@ -64,6 +69,7 @@
 //   edit is followed by an explicit `build` before any read, so no read
 //   relies on the 13.3 refresh path (T13.3-*'s business).
 
+import * as fsp from "node:fs/promises";
 import type {
   ExportReport,
   ItemKind,
@@ -597,8 +603,11 @@ interface PresentStateExpectation {
   readonly node: string;
   /** The exact expected text; `undefined` = the node must carry no text. */
   readonly text: string | undefined;
-  /** The exact expected range; `undefined` = the node must carry no range. */
-  readonly sourceRange: SourceRange | undefined;
+  /**
+   * The exact expected range — every present node carries its source range,
+   * requirement node and code location alike (SPEC 10.7, 1.7).
+   */
+  readonly sourceRange: SourceRange;
 }
 
 /** Assert a payload node state presents a present node exactly. */
@@ -634,22 +643,13 @@ function assertPresentState(
         `  expected: ${JSON.stringify(expected.text)}`,
     );
   }
-  if (expected.sourceRange === undefined) {
-    if (state.sourceRange !== undefined) {
-      fail(
-        `${context}: ${expected.node} must carry no source range — a code ` +
-          `location's identity already locates it (SPEC 10.7, 1.7); got ` +
-          JSON.stringify(state.sourceRange),
-      );
-    }
-  } else {
-    assertSameJson(
-      state.sourceRange,
-      expected.sourceRange,
-      `${context}: ${expected.node}'s source range (SPEC 10.7, 1.7 — a ` +
-        `present requirement node enters the payload with its source range)`,
-    );
-  }
+  assertSameJson(
+    state.sourceRange,
+    expected.sourceRange,
+    `${context}: ${expected.node}'s source range (SPEC 10.7, 1.7 — a ` +
+      `present node, requirement node and code location alike, enters the ` +
+      `payload with its source range)`,
+  );
 }
 
 /** Assert a payload node state presents an absent node exactly. */
@@ -684,8 +684,9 @@ function assertAbsentState(
   if (expected.text === undefined) {
     if (state.text !== undefined) {
       fail(
-        `${context}: ${expected.node} is contained in no recorded state, so ` +
-          `it is presented with no text (SPEC 10.7); got ` +
+        `${context}: ${expected.node} must be presented with no text — a ` +
+          `node contained in no recorded state, or a code location, which ` +
+          `has no text value (SPEC 10.7); got ` +
           JSON.stringify(state.text),
       );
     }
@@ -2536,8 +2537,12 @@ const T10_7_11 = defineProductTest({
 //                              dependency-consistency scope (own text).
 //   wt { wt.c }                own text edited v0→v1: dep's changed target.
 //   emb                        the embedded target (unchanged).
-// src/ref.ts (added at v1) references par.n and host.n at the top level: the
-// impacted code location (whole-file identity, SPEC 4.6, 9.2).
+// src/ref.ts (added at v1) references par.n and host.n inside the named unit
+// `refUnit` (SPEC 4.6 attribution): the impacted code location that stays
+// present (SPEC 9.2) — its item's scope enters the payload with the unit
+// construct's byte range (SPEC 1.7). src/del.ts (added at v1, deleted at v2)
+// references par.n at the top level: its whole-file location's code-impact
+// item presents a deleted location — absent, no text, no source range.
 const M12_FILE = "specs/A.mdx";
 const M12_ROOT = "specs/A.mdx";
 const M12_PAR = "specs/A.mdx#par";
@@ -2550,7 +2555,9 @@ const M12_TOLD = "specs/A.mdx#told";
 const M12_TNEW = "specs/A.mdx#tnew";
 const M12_DEP = "specs/A.mdx#dep";
 const M12_WT = "specs/A.mdx#wt";
-const M12_CODE = "src/ref.ts";
+const M12_CODE_FILE = "src/ref.ts";
+const M12_CODE = "src/ref.ts#refUnit";
+const M12_CODE_DEL = "src/del.ts";
 
 const M12_EMBEDDED_TEXT = "Embedded target text.";
 
@@ -2647,13 +2654,30 @@ const M12_V2: M12SpecState = {
   wt: "Wt own v1 line.",
 };
 
-const M12_CODE_SOURCE = [
-  'import A from "../specs/A.xspec";',
-  "",
-  "A.par.n;",
-  "A.host.n;",
-  "",
-].join("\n");
+// The present location's source: both markers sit inside the function
+// declaration `refUnit`, so each reference is attributed to the named unit
+// (SPEC 4.6) and the impacted location is `src/ref.ts#refUnit`. The comment
+// before the unit carries multi-byte UTF-8 bytes, so the precomputed byte
+// offsets diverge from code-point and UTF-16 offsets: the range assertion is
+// byte-precise (SPEC 1.7).
+const M12_CODE_BEFORE_UNIT =
+  'import A from "../specs/A.xspec";\n\n// Präzise UTF-8-Bytes vor der Einheit (multi-byte prefix).\n\n';
+const M12_CODE_UNIT_DECL = "function refUnit() {\n  A.par.n;\n  A.host.n;\n}";
+const M12_CODE_SOURCE = `${M12_CODE_BEFORE_UNIT}${M12_CODE_UNIT_DECL}\n`;
+
+// refUnit's construct range (SPEC 1.7, 4.6): the function declaration's own
+// bytes, from the `function` keyword through the closing brace —
+// start-inclusive, end-exclusive byte offsets into the file.
+const M12_CODE_RANGE: SourceRange = {
+  start: Buffer.byteLength(M12_CODE_BEFORE_UNIT, "utf8"),
+  end:
+    Buffer.byteLength(M12_CODE_BEFORE_UNIT, "utf8") +
+    Buffer.byteLength(M12_CODE_UNIT_DECL, "utf8"),
+};
+
+// The deleted location's source: a top-level marker, so the location is the
+// whole file `src/del.ts` (SPEC 4.6).
+const M12_CODE_DEL_SOURCE = 'import A from "../specs/A.xspec";\n\nA.par.n;\n';
 
 // Sub-fixture B: the absent-node provenance arms. px.x is edited between the
 // baseline and create, then deleted after create (its item's scope presents
@@ -2718,7 +2742,7 @@ const U12_SOURCE = [
 const T10_7_12 = defineProductTest({
   id: "T10.7-12",
   title:
-    "payload text contract: a baseline fixture generating every built-in kind (a coverage session supplying `uncovered-requirement`), texts byte-asserted against `query node` captures in `export`, identically via `show` per item, and identically in `next --json` through a full walk of each session (one payload rule), with an embedding inside asserted texts to pin 1.6 expansion (the expanded target's bytes present, the unexpanded `text(` spelling absent); scope text by kind — the scope root's subtree text for `subtree-coherence`, the scope node's subtree text for `uncovered-requirement`, the scope node's own text (differing from its subtree text by fixture) for `parent-consistency`, `dependency-consistency`, and `metadata-consistency`, and a `code-impact` scope as identity and presence alone with no text and no source range; context text — own text for ancestor-chain contexts (`subtree-coherence`, `uncovered-requirement`), subtree text otherwise (`parent-consistency` branch children; `dependency-consistency`, `metadata-consistency`, and `code-impact` targets); origin text — a before/after pair of own text, before from the item's baseline and after from the current graph (an originating node re-edited after `create` differs on both sides from the create-time value), with the before side absent (no text) for a node added since the baseline and the after side absent for a since-deleted node; source ranges on present nodes byte-equal to `query node`'s and absent on absent nodes; absent-node provenance — a node edited between the baseline and `create`, recorded into an item's scope or context at `create`, then deleted, presents the create-time text (not the differing baseline value) and still does after an `updated` resolve re-derives the session without it, while a node deleted since the baseline and never seen by a mutating derivation with newer text presents its baseline value (SPEC 1.6, 1.7, 5.6, 9.2, 10.2, 10.4, 10.5, 10.7)",
+    "payload text contract: a baseline fixture generating every built-in kind (a coverage session supplying `uncovered-requirement`), texts byte-asserted against `query node` captures in `export`, identically via `show` per item, and identically in `next --json` through a full walk of each session (one payload rule), with an embedding inside asserted texts to pin 1.6 expansion (the expanded target's bytes present, the unexpanded `text(` spelling absent); scope text by kind — the scope root's subtree text for `subtree-coherence`, the scope node's subtree text for `uncovered-requirement`, the scope node's own text (differing from its subtree text by fixture) for `parent-consistency`, `dependency-consistency`, and `metadata-consistency`, and a `code-impact` scope as identity, presence, and — when present — its source range, with no text (review payloads are one of the two range-presenting outputs for code locations: the present location is a named unit whose construct range is byte-asserted against precomputed offsets, and a deleted location's entry carries none); context text — own text for ancestor-chain contexts (`subtree-coherence`, `uncovered-requirement`), subtree text otherwise (`parent-consistency` branch children; `dependency-consistency`, `metadata-consistency`, and `code-impact` targets); origin text — a before/after pair of own text, before from the item's baseline and after from the current graph (an originating node re-edited after `create` differs on both sides from the create-time value), with the before side absent (no text) for a node added since the baseline and the after side absent for a since-deleted node; source ranges on present requirement nodes byte-equal to `query node`'s and absent on absent nodes; absent-node provenance — a node edited between the baseline and `create`, recorded into an item's scope or context at `create`, then deleted, presents the create-time text (not the differing baseline value) and still does after an `updated` resolve re-derives the session without it, while a node deleted since the baseline and never seen by a mutating derivation with newer text presents its baseline value (SPEC 1.6, 1.7, 4.6, 5.6, 9.2, 10.2, 10.4, 10.5, 10.7)",
   timeoutMs: 600_000,
   run: async (product) => {
     // --- sub-fixture A: the per-kind matrix over a path-blocks session -------
@@ -2747,7 +2771,8 @@ const T10_7_12 = defineProductTest({
 
         // v1 — the reviewed differences; then create.
         await workspace.file(M12_FILE, m12Spec(M12_V1));
-        await workspace.file(M12_CODE, M12_CODE_SOURCE);
+        await workspace.file(M12_CODE_FILE, M12_CODE_SOURCE);
+        await workspace.file(M12_CODE_DEL, M12_CODE_DEL_SOURCE);
         await buildOk(product, workspace, `${prefix} \`build\` at v1`);
         const parN1 = await capture(M12_PARN, "v1");
         const gone1 = await capture(M12_GONE, "v1");
@@ -2760,11 +2785,13 @@ const T10_7_12 = defineProductTest({
         }
         await createBaseSession(product, workspace, base, "s", prefix);
 
-        // v2 — the post-create re-edit of the originating node par.n, and
-        // gone's deletion. No re-derivation runs (the walk resolves
-        // `no-change` only), so the item set is fixed at the create-time
-        // derivation.
+        // v2 — the post-create re-edit of the originating node par.n, gone's
+        // deletion, and the deletion of the impacted code file src/del.ts
+        // (its code-impact item's scope becomes a deleted location). No
+        // re-derivation runs (the walk resolves `no-change` only), so the
+        // item set is fixed at the create-time derivation.
         await workspace.file(M12_FILE, m12Spec(M12_V2));
+        await fsp.rm(workspace.path(M12_CODE_DEL));
         await buildOk(product, workspace, `${prefix} \`build\` at v2`);
 
         // Current-state captures (present nodes' texts and ranges).
@@ -2830,13 +2857,14 @@ const T10_7_12 = defineProductTest({
             `metadata-consistency ${M12_M}`,
             `dependency-consistency ${M12_DEP}`,
             `code-impact ${M12_CODE}`,
+            `code-impact ${M12_CODE_DEL}`,
           ].sort(),
           `${prefix}: the staged differences derive exactly one item per ` +
             `built-in path-blocks kind — the four changed nodes' ` +
             `subtree-coherence items, par's parent-consistency item, m's ` +
             `metadata-consistency item, dep's dependency-consistency item, ` +
-            `and the impacted location's code-impact item (SPEC 5.6, 9.2, ` +
-            `10.5)`,
+            `and one code-impact item per impacted location — the named ` +
+            `unit and the since-deleted file (SPEC 4.6, 5.6, 9.2, 10.5)`,
         );
 
         // subtree-coherence par.n: scope subtree text (current), context =
@@ -3143,10 +3171,15 @@ const T10_7_12 = defineProductTest({
           );
         }
 
-        // code-impact: the scope enters as identity and presence alone — no
-        // text, no source range (SPEC 10.7, 1.7); context = the targets that
-        // make it impacted (the added host.n included) with subtree texts;
-        // origin = those targets' originating nodes with their pairs.
+        // code-impact src/ref.ts#refUnit — the present location: the scope
+        // enters as identity, presence, and its source range — review
+        // payloads are one of the two range-presenting outputs for code
+        // locations (SPEC 1.7) — with no text (SPEC 10.7). The range is the
+        // named unit's construct (the function declaration binding
+        // `refUnit`, SPEC 4.6), asserted against precomputed byte offsets.
+        // Context = the targets that make it impacted (the added host.n
+        // included) with subtree texts; origin = those targets' originating
+        // nodes with their pairs.
         {
           const item = requireItem(
             exported.items,
@@ -3154,12 +3187,14 @@ const T10_7_12 = defineProductTest({
             M12_CODE,
             prefix,
           );
-          const label = `${prefix} code-impact(src/ref.ts)`;
+          const label = `${prefix} code-impact(${M12_CODE})`;
           assertPresentState(
             item.scope,
-            { node: M12_CODE, text: undefined, sourceRange: undefined },
-            `${label} scope — a code location has no text value and no ` +
-              `source range: identity and presence alone (SPEC 10.7, 1.7)`,
+            { node: M12_CODE, text: undefined, sourceRange: M12_CODE_RANGE },
+            `${label} scope — a present code location enters the payload ` +
+              `with its source range, the construct binding the unit's ` +
+              `name, asserted against precomputed byte offsets, and with ` +
+              `no text value (SPEC 10.7, 1.7, 4.6)`,
           );
           assertSameJson(
             identitySet(item.context),
@@ -3207,6 +3242,56 @@ const T10_7_12 = defineProductTest({
               after: { present: true, text: hostN2.ownText },
             },
             `${label} origin pair for host.n — added since the baseline`,
+          );
+        }
+
+        // code-impact src/del.ts — the deleted location: the file was
+        // removed at v2, so its item's scope presents the code location
+        // absent — identity and absence alone, no text and no source range
+        // (SPEC 10.7, 1.7; reported under its baseline identity, SPEC 9.2).
+        {
+          const item = requireItem(
+            exported.items,
+            "code-impact",
+            M12_CODE_DEL,
+            prefix,
+          );
+          const label = `${prefix} code-impact(${M12_CODE_DEL})`;
+          assertAbsentState(
+            item.scope,
+            { node: M12_CODE_DEL, text: undefined },
+            `${label} scope — a deleted code location's entry carries no ` +
+              `source range and no text (SPEC 10.7, 1.7)`,
+          );
+          assertSameJson(
+            identitySet(item.context),
+            [M12_PARN],
+            `${label}: context is the impact-edge target that makes the ` +
+              `location impacted (SPEC 9.2, 10.5)`,
+          );
+          assertPresentState(
+            requireContextEntry(item, M12_PARN, label),
+            {
+              node: M12_PARN,
+              text: parN2.subtreeText,
+              sourceRange: parN2.sourceRange,
+            },
+            `${label} context entry par.n — code-impact targets carry ` +
+              `subtree text`,
+          );
+          assertSameJson(
+            identitySet(item.origin),
+            [M12_PARN],
+            `${label}: origin is the originating node of the target's ` +
+              `change (SPEC 5.6, 10.5)`,
+          );
+          assertOriginPair(
+            requireOriginEntry(item, M12_PARN, label),
+            {
+              before: { present: true, text: parN0.ownText },
+              after: { present: true, text: parN2.ownText },
+            },
+            `${label} origin pair for par.n`,
           );
         }
 

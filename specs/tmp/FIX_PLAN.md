@@ -143,7 +143,7 @@ A "new test T<x>" task always means, in one change:
 
 ## Stage B — existing assertions that contradict the current spec
 
-- [ ] FP-004 — Invert T10.7-12's code-impact-scope range assertion.
+- [x] FP-004 — Invert T10.7-12's code-impact-scope range assertion.
   [R2 #19; SPEC 10.7, 1.7]
   `test/suite/registry/section-10.7-ii.ts` ~line 638 asserts a present
   `code-impact` scope "must carry no source range". Current SPEC 10.7/1.7:
@@ -151,6 +151,18 @@ A "new test T<x>" task always means, in one change:
   location's entry carries none. Invert the assertion and stage both sides
   (present location → range asserted byte-precisely; deleted location →
   no range). Verify: red-as-diagnosed against stub; no self-test change.
+  [Done 2026-08-10: `assertPresentState` now requires the range (every
+  present node carries one, SPEC 10.7); the code-impact scope became the
+  named unit `src/ref.ts#refUnit` per TEST-SPEC's refreshed entry, its
+  construct range byte-asserted against precomputed offsets behind a
+  multi-byte prefix; a second location `src/del.ts` (added v1, deleted v2)
+  stages the deleted side — absent, no text, no range. T10.7-12 turned from
+  falsely-green to red-as-diagnosed exactly at the range assertion (stub
+  omits it); the reworked matrix including the deleted arm verified sound
+  against the stub via a local probe. Traceability gains "1.7" per
+  TEST-SPEC's stated delegation (T1.7-1/T1.7-2 → T10.7-12). Self-tests
+  unchanged: 4 planned mid-loop reds (certification-document ×3 → FP-091;
+  S-1's 9 unmapped keys → stages E/G).]
 
 - [ ] FP-005 — Re-stage the two `move` destination spellings that changed
   exit class from refusal (exit 1) to usage error (exit 2).
