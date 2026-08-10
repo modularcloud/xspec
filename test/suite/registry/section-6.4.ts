@@ -43,9 +43,20 @@
 // - T6.4-3/T6.4-6 "modifies nothing" is a whole-workspace-root byte snapshot
 //   compare around the refused command, with the pre-refusal `build`'s
 //   derived files present — a product that rewrites before validating, or
-//   regenerates on refusal, fails the compare. Refusal report content is
-//   deliberately unasserted (12.0 classes refusals exit 1; TEST-SPEC pins no
-//   report content for them), so refusal arms run without `--json`.
+//   regenerates on refusal, fails the compare. Refusal arms run with
+//   `--json`: a refused operation's report is the form-exact 12.7
+//   findings-only report (SPEC 12.7, H-3), and each arm — staged to isolate
+//   one refusal cause — asserts exactly one finding carrying the exact
+//   stable refusal code (SPEC 14: one finding per applicable reason,
+//   TEST-SPEC preamble: a code is contract) with the concerned identity or
+//   located bearer §14 assigns the reason (T14-7's staging record names
+//   T6.4-3). Identity concerns accept the full 1.5 identity or its bare ID
+//   (§14 requires identification, not spelling); the collision arm's window
+//   spans the remaining colliding bearer's whole construct, admitting any
+//   in-construct precision while rejecting wrong-construct attribution.
+//   T6.4-6's invalid-workspace refusal instead reports the workspace's
+//   numbered findings alone (SPEC 14, 6.4) — exactly its one 14.5 finding
+//   located in the offending file, no refusal reason beside it.
 // - T6.4-4 exit-2 arms run with `--json`: stdout exactly one 12.7 error
 //   document (12.0: with JSON output in effect, an exit-2 invocation emits
 //   the error document as its entire stdout — no report, no validation
@@ -81,13 +92,17 @@ import {
 } from "../../helpers/snapshot.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { ConcernedIdentity, FindingSourceExpectation } from "./support.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
   assertFindingLocated,
+  assertFindingMentionsLocation,
+  assertFindingNamesIdentity,
   assertSameJson,
   buildFindings,
   buildOk,
+  byteWindow,
   expectErrorDocument,
   expectExit,
   runJson,
@@ -296,30 +311,83 @@ function assertRewriteHappened(
 }
 
 /**
+ * What a refused rename's report must hold (SPEC 14, 12.7): the arm's one
+ * finding — its exact stable code — plus whichever concern §14 assigns the
+ * reason: a located bearer/spelling, a concerned identity, or nothing further
+ * where the concern's rendering is the reason's message alone.
+ */
+interface RefusalExpectation {
+  /**
+   * The finding's counting key (`assertConditionCounts` vocabulary): a
+   * stable refusal code token (`refused-…`), or a `14.N` condition identity
+   * for the invalid-workspace refusal, which reports the workspace's
+   * numbered findings alone (SPEC 14, 6.4).
+   */
+  readonly finding: string;
+  /** At least one location names this file (and byte window when given). */
+  readonly locatedAt?: FindingSourceExpectation;
+  /** At least one identities entry names this concerned identity. */
+  readonly identity?: ConcernedIdentity;
+}
+
+/**
  * A refused rename (SPEC 6.4: every validation failure beyond the argument
- * existence checks refuses with exit 1): assert exit 1 exactly and that the
- * refusal modifies nothing — a whole-workspace-root byte snapshot compare
- * around the command (derived files, sources, and the journal's absence all
- * included).
+ * existence checks refuses with exit 1): run with `--json`, assert exit 1
+ * exactly, decode stdout as the form-exact 12.7 findings-only report of a
+ * refused operation (SPEC 12.7, H-3), assert the report holds exactly one
+ * finding bearing the arm's stable code with its concerned data (SPEC 14,
+ * T14-7), and assert the refusal modifies nothing — a whole-workspace-root
+ * byte snapshot compare around the command (derived files, sources, and the
+ * journal's absence all included).
  */
 async function expectRefusalModifiesNothing(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
+  expected: RefusalExpectation,
   context: string,
 ): Promise<void> {
   const command = argv.join(" ");
   await assertLeavesUnchanged(
     workspace.root,
-    async () =>
-      await expectExit(
+    async () => {
+      const result = await expectExit(
         product,
         workspace,
-        argv,
+        [...argv, "--json"],
         1,
-        `${context}: \`${command}\` — the refusal is a validation failure, ` +
-          `exit 1 (SPEC 6.4, 12.0)`,
-      ),
+        `${context}: \`${command} --json\` — the refusal is a validation ` +
+          `failure, exit 1 (SPEC 6.4, 12.0)`,
+      );
+      const findings = decodeFindingsReport(
+        parseJsonStdout(result, `${context}: \`${command} --json\``),
+        `${context}: \`${command} --json\` — a refused operation's report ` +
+          `is the form-exact 12.7 findings-only report (SPEC 12.7, H-3)`,
+      ).findings;
+      assertConditionCounts(
+        findings,
+        { [expected.finding]: 1 },
+        `${context}: the arm isolates one refusal cause, so the report ` +
+          `holds exactly one finding carrying its exact stable code — one ` +
+          `finding per applicable reason, a code is contract (SPEC 14, ` +
+          `12.7, T14-7)`,
+      );
+      const finding = findings[0]!;
+      if (expected.locatedAt !== undefined) {
+        assertFindingMentionsLocation(
+          finding,
+          expected.locatedAt,
+          `${context}: the refusal's concerned construct`,
+        );
+      }
+      if (expected.identity !== undefined) {
+        assertFindingNamesIdentity(
+          finding,
+          expected.identity,
+          `${context}: the refusal's concerned identity`,
+        );
+      }
+    },
     `${context}: \`${command}\` refused — modifies nothing (SPEC 6.4)`,
   );
 }
@@ -961,10 +1029,21 @@ const V3_SOURCE = [
   "",
 ].join("\n");
 
+// The remaining colliding bearer's whole construct within V3_SOURCE — the
+// refused-id-collision arm's location window (SPEC 14: the collision locates
+// every colliding bearer, the remaining `a.sib` bearer included): any
+// in-construct precision passes; a location attributed to another construct
+// fails.
+const V3_SIB_CONSTRUCT = '<S id="a.sib">\nSib text.\n</S>';
+const V3_SIB_WINDOW = byteWindow(
+  V3_SOURCE.slice(0, V3_SOURCE.indexOf(V3_SIB_CONSTRUCT)),
+  V3_SIB_CONSTRUCT,
+);
+
 const T6_4_3 = defineProductTest({
   id: "T6.4-3",
   title:
-    "validation refusals (exit 1): a new ID that is invalid (1.4), equal to the old ID, colliding with an existing ID, or violating structural parent rules each refuses the rename and modifies nothing (workspace byte-compare) (SPEC 6.4, 1.4, 1.3, 12.0)",
+    "validation refusals (exit 1): a new ID that is invalid (1.4), equal to the old ID, colliding with an existing ID, or violating structural parent rules each refuses the rename and modifies nothing (workspace byte-compare) — each refusal reported as the form-exact 12.7 findings-only report holding exactly one finding with its exact stable refusal code (refused-invalid-id, refused-identity-unchanged, refused-id-collision, refused-structural-parent) and the concerned identity or located colliding bearer (SPEC 6.4, 1.4, 1.3, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -978,28 +1057,65 @@ const T6_4_3 = defineProductTest({
           "T6.4-3 `build` over the staged workspace",
         );
 
-        const cases: readonly (readonly [string, string])[] = [
+        // Each arm's expected refusal finding (SPEC 14): the exact stable
+        // code, with the concerned identity (`refused-invalid-id` and
+        // `refused-structural-parent` concern the offending identity;
+        // `refused-identity-unchanged` concerns the unchanged one) or the
+        // located remaining colliding bearer (`refused-id-collision`
+        // locates every colliding bearer).
+        const cases: readonly (readonly [
+          string,
+          RefusalExpectation,
+          string,
+        ])[] = [
           [
             "a.then",
+            {
+              finding: "refused-invalid-id",
+              identity: { file: V3_FILE, id: "a.then" },
+            },
             "new ID invalid per 1.4 — its segment is the forbidden name `then`",
           ],
           [
             "a.mi d",
+            {
+              finding: "refused-invalid-id",
+              identity: { file: V3_FILE, id: "a.mi d" },
+            },
             "new ID invalid per 1.4 — its segment contains whitespace",
           ],
-          ["a.mid", "new ID equal to the old ID"],
-          ["a.sib", "new ID colliding with an existing ID in the file"],
+          [
+            "a.mid",
+            {
+              finding: "refused-identity-unchanged",
+              identity: { file: V3_FILE, id: "a.mid" },
+            },
+            "new ID equal to the old ID",
+          ],
+          [
+            "a.sib",
+            {
+              finding: "refused-id-collision",
+              locatedAt: { file: V3_FILE, window: V3_SIB_WINDOW },
+            },
+            "new ID colliding with an existing ID in the file",
+          ],
           [
             "x.mid",
+            {
+              finding: "refused-structural-parent",
+              identity: { file: V3_FILE, id: "x.mid" },
+            },
             "new ID violating the structural parent rules — the node is nested " +
               "inside `a`, so its ID must be `a` plus one segment (1.3)",
           ],
         ];
-        for (const [newId, reason] of cases) {
+        for (const [newId, expected, reason] of cases) {
           await expectRefusalModifiesNothing(
             product,
             workspace,
             ["rename", V3_FILE, "a.mid", newId],
+            expected,
             `T6.4-3 (${reason})`,
           );
         }
@@ -1009,6 +1125,10 @@ const T6_4_3 = defineProductTest({
           product,
           workspace,
           ["rename", V3_FILE, "a", "b.c"],
+          {
+            finding: "refused-structural-parent",
+            identity: { file: V3_FILE, id: "b.c" },
+          },
           "T6.4-3 (new ID violating the structural parent rules — a " +
             "top-level section's ID has exactly one segment, 1.3)",
         );
@@ -1275,7 +1395,7 @@ const P6_OTHER_INVALID = [
 const T6_4_6 = defineProductTest({
   id: "T6.4-6",
   title:
-    "valid-workspace precondition: with a pre-existing validation error elsewhere, rename refuses (exit 1) before modifying anything — the rename's own arguments are valid, so the refusal is the 6.4 precondition that rename only ever rewrites a valid workspace (SPEC 6.4, 12.1)",
+    "valid-workspace precondition: with a pre-existing validation error elsewhere, rename refuses (exit 1) before modifying anything — the rename's own arguments are valid, so the refusal is the 6.4 precondition that rename only ever rewrites a valid workspace, and it reports the workspace's numbered findings alone: exactly the one located 14.5 finding, no refusal reason beside it (SPEC 6.4, 12.1, 14)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -1289,10 +1409,15 @@ const T6_4_6 = defineProductTest({
         // Introduce the pre-existing validation error elsewhere; the rename
         // subject and its file stay untouched and its arguments valid.
         await workspace.file(P6_OTHER_FILE, P6_OTHER_INVALID);
+        // The invalid-workspace refusal reports the workspace's findings
+        // themselves — exactly the one 14.5 finding located in the offending
+        // file, no refusal reason evaluated or reported beside it (SPEC 6.4,
+        // 14).
         await expectRefusalModifiesNothing(
           product,
           workspace,
           ["rename", P6_FILE, "a.mid", "a.hub"],
+          { finding: "14.5", locatedAt: { file: P6_OTHER_FILE } },
           "T6.4-6 (the workspace fails the validations of `xspec build` — an " +
             "unresolved d reference in specs/Other.mdx, SPEC 14.5 — so the " +
             "rename refuses before modifying anything: no source rewrite, no " +

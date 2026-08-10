@@ -60,12 +60,29 @@
 //   references become double-quoted string literals, kept forms keep their
 //   quote style — are asserted as exact substrings (`d={"tm"}`,
 //   `{text("tm.k1")}`, `d={"tm.k1"}`).
-// - T6.5-4 refusal report content is deliberately unasserted (12.0 classes
-//   refusals exit 1; TEST-SPEC pins no report content), so refusal arms run
-//   without `--json`; "modifies nothing" is a whole-workspace-root byte
-//   snapshot compare around each refused command with the pre-refusal
-//   `build`'s derived files present (the T6.4-3 protocol). Because each arm
-//   proves it modified nothing, the arms share one staged workspace. The 6.5
+// - T6.5-4/T6.5-6 refusal arms run with `--json`: a refused operation's
+//   report is the form-exact 12.7 findings-only report (SPEC 12.7, H-3), and
+//   each arm — staged to isolate one refusal cause — asserts exactly one
+//   finding carrying the exact stable refusal code (SPEC 14: one finding per
+//   applicable reason; TEST-SPEC preamble: a code is contract) with the
+//   concern §14 assigns the reason: the concerned identity
+//   (refused-invalid-id, refused-identity-unchanged,
+//   refused-missing-target-parent; the full 1.5 identity or its bare ID —
+//   §14 requires identification, not spelling), the concerned path
+//   (refused-destination-exists, refused-invalid-destination), or a located
+//   participant (refused-id-collision locates every colliding bearer — the
+//   remaining bearer's construct is the window where the staged bytes are
+//   known; refused-cycle locates every reference spelling recording a
+//   participating dependency edge — the `d={"keep"}` spelling for the
+//   dependency-cycle arm, while the would-be spec-import cycle's
+//   participating import declarations exist in no pre-operation source, so
+//   that arm pins the code and form alone). "Modifies nothing" stays the
+//   whole-workspace-root byte snapshot compare around each refused command
+//   with the pre-refusal `build`'s derived files present (the T6.4-3
+//   protocol); because each arm proves it modified nothing, the arms share
+//   one staged workspace. The precondition arm's invalid-workspace refusal
+//   instead reports the workspace's numbered findings alone (SPEC 14, 6.4):
+//   exactly its one 14.5 finding located in the offending file. The 6.5
 //   destination clauses "containing `#`" and "not valid UTF-8" admit no
 //   refusal staging (T6.5-4's dead-letter note): every operand spelling that
 //   would present either is an exit-2 usage error before any refusal is
@@ -119,13 +136,18 @@ import type {
   RunResult,
 } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { ConcernedIdentity, FindingSourceExpectation } from "./support.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
+  assertFindingConcernsPath,
   assertFindingLocated,
+  assertFindingMentionsLocation,
+  assertFindingNamesIdentity,
   assertSameJson,
   buildFindings,
   buildOk,
+  byteWindow,
   expectErrorDocument,
   expectExit,
   runJson,
@@ -363,15 +385,42 @@ function renderArgv(argv: readonly ArgvValue[]): string {
 }
 
 /**
+ * What a refused move's report must hold (SPEC 14, 12.7): the arm's one
+ * finding — its exact stable code — plus whichever concern §14 assigns the
+ * reason: a located participant, a concerned identity, a concerned path, or
+ * nothing further where no pre-operation construct renders the concern.
+ */
+interface RefusalExpectation {
+  /**
+   * The finding's counting key (`assertConditionCounts` vocabulary): a
+   * stable refusal code token (`refused-…`), or a `14.N` condition identity
+   * for the invalid-workspace refusal, which reports the workspace's
+   * numbered findings alone (SPEC 14, 6.4, 6.5).
+   */
+  readonly finding: string;
+  /** At least one location names this file (and byte window when given). */
+  readonly locatedAt?: FindingSourceExpectation;
+  /** At least one identities entry names this concerned identity. */
+  readonly identity?: ConcernedIdentity;
+  /** The finding's 12.7 path member equals this workspace-relative path. */
+  readonly path?: string;
+}
+
+/**
  * A refused move (SPEC 6.5: every validation failure beyond the argument
- * existence checks refuses with exit 1): assert exit 1 exactly and that the
- * refusal modifies nothing — a whole-workspace-root byte snapshot compare
- * around the command (derived files, sources, and the journal all included).
+ * existence checks refuses with exit 1): run with `--json`, assert exit 1
+ * exactly, decode stdout as the form-exact 12.7 findings-only report of a
+ * refused operation (SPEC 12.7, H-3), assert the report holds exactly one
+ * finding bearing the arm's stable code with its concerned data (SPEC 14,
+ * T14-7), and assert the refusal modifies nothing — a whole-workspace-root
+ * byte snapshot compare around the command (derived files, sources, and the
+ * journal all included).
  */
 async function expectRefusalModifiesNothing(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
+  expected: RefusalExpectation,
   context: string,
 ): Promise<void> {
   const command = argv.join(" ");
@@ -380,14 +429,49 @@ async function expectRefusalModifiesNothing(
     async () => {
       const result = await runProduct(product, {
         cwd: workspace.root,
-        argv,
+        argv: [...argv, "--json"],
       });
       assertExitCode(
         result,
         1,
-        `${context}: \`${command}\` — the refusal is a validation failure, ` +
-          `exit 1 (SPEC 6.5, 12.0)`,
+        `${context}: \`${command} --json\` — the refusal is a validation ` +
+          `failure, exit 1 (SPEC 6.5, 12.0)`,
       );
+      const findings = decodeFindingsReport(
+        parseJsonStdout(result, `${context}: \`${command} --json\``),
+        `${context}: \`${command} --json\` — a refused operation's report ` +
+          `is the form-exact 12.7 findings-only report (SPEC 12.7, H-3)`,
+      ).findings;
+      assertConditionCounts(
+        findings,
+        { [expected.finding]: 1 },
+        `${context}: the arm isolates one refusal cause, so the report ` +
+          `holds exactly one finding carrying its exact stable code — one ` +
+          `finding per applicable reason, a code is contract (SPEC 14, ` +
+          `12.7, T14-7)`,
+      );
+      const finding = findings[0]!;
+      if (expected.locatedAt !== undefined) {
+        assertFindingMentionsLocation(
+          finding,
+          expected.locatedAt,
+          `${context}: the refusal's concerned construct`,
+        );
+      }
+      if (expected.identity !== undefined) {
+        assertFindingNamesIdentity(
+          finding,
+          expected.identity,
+          `${context}: the refusal's concerned identity`,
+        );
+      }
+      if (expected.path !== undefined) {
+        assertFindingConcernsPath(
+          finding,
+          expected.path,
+          `${context}: the refusal's concerned path`,
+        );
+      }
     },
     `${context}: \`${command}\` refused — modifies nothing (SPEC 6.5)`,
   );
@@ -1396,6 +1480,22 @@ const V4_B_SOURCE = [
   "",
 ].join("\n");
 
+// Location windows within the staged sources (SPEC 14): the dependency-cycle
+// arm locates the reference spelling recording the participating dependency
+// edge — the moved node's `d={"keep"}` — and the cross-file collision arm
+// locates the remaining colliding bearer `y`'s construct in the target file
+// (any in-window precision passes; wrong-construct attribution fails).
+const V4_KEEP_SPELLING = 'd={"keep"}';
+const V4_KEEP_WINDOW = byteWindow(
+  V4_A_SOURCE.slice(0, V4_A_SOURCE.indexOf(V4_KEEP_SPELLING)),
+  V4_KEEP_SPELLING,
+);
+const V4_Y_CONSTRUCT = '<S id="y">\nY text.\n</S>';
+const V4_Y_WINDOW = byteWindow(
+  V4_B_SOURCE.slice(0, V4_B_SOURCE.indexOf(V4_Y_CONSTRUCT)),
+  V4_Y_CONSTRUCT,
+);
+
 // The precondition arm's other file: valid at staging (so the pre-refusal
 // `build` succeeds), then overwritten with an unresolved local `d` reference
 // (14.5) — the pre-existing validation error elsewhere (as T6.4-6).
@@ -1411,7 +1511,7 @@ const V4_OTHER_INVALID = [
 const T6_5_4 = defineProductTest({
   id: "T6.5-4",
   title:
-    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle; file form whose destination exists; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment); the ordinary cross-file `<new-id>` collision; a missing target parent; a target parent within the moved subtree; and destination paths in no configured spec group, in a code group as well, or lacking `.mdx` — the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6 (SPEC 6.5, 5.3, 2.1, 1.4, 1.3, 14.14, 14.19, 12.0)",
+    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle (refused-cycle, the dependency arm locating the participating `d` spelling); file form whose destination exists (refused-destination-exists, concerning that path); section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment — refused-invalid-id, concerning that identity); the ordinary cross-file `<new-id>` collision (refused-id-collision, locating the remaining bearer); a missing target parent and a target parent within the moved subtree (refused-missing-target-parent, concerning the target-parent identity); and destination paths in no configured spec group, in a code group as well, or lacking `.mdx` (refused-invalid-destination, concerning the destination path) — each refusal the form-exact 12.7 findings-only report holding exactly one finding with its exact stable code; the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6, reporting the workspace's numbered findings alone (SPEC 6.5, 5.3, 2.1, 1.4, 1.3, 14.14, 14.19, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       REFUSAL_CONFIG,
@@ -1425,62 +1525,109 @@ const T6_5_4 = defineProductTest({
           "T6.5-4 `build` over the staged workspace",
         );
 
-        const cases: readonly (readonly [readonly string[], string])[] = [
+        // Each arm's expected refusal finding (SPEC 14): the exact stable
+        // code with the concern §14 assigns the reason — identity, path, or
+        // located participant (the module header's T6.5-4 note walks the
+        // per-reason choices).
+        const cases: readonly (readonly [
+          readonly string[],
+          RefusalExpectation,
+          string,
+        ])[] = [
           [
             ["move", "specs/A.mdx#mv", "specs/B.mdx#bmv"],
+            // The would-be spec import cycle's participating import
+            // declarations exist in no pre-operation source (the move would
+            // add both), so no concern window is assertable: the arm pins
+            // the exact code and the 12.7 form alone.
+            { finding: "refused-cycle" },
             "spec import cycle — the moved node's local `d` on `keep` needs " +
               "B.mdx to import A.mdx while `user`'s reference to the moved " +
               "node needs A.mdx to import B.mdx (SPEC 6.5, 2.1)",
           ],
           [
             ["move", "specs/A.mdx#mv", "specs/A.mdx#keep.mv"],
+            {
+              finding: "refused-cycle",
+              locatedAt: { file: V4_A, window: V4_KEEP_WINDOW },
+            },
             "dependency cycle — the moved node depends on `keep` and would " +
               "become its child, a dependency on its own ancestor (SPEC 6.5, " +
               "5.3)",
           ],
           [
             ["move", "specs/A.mdx", "specs/B.mdx"],
+            { finding: "refused-destination-exists", path: V4_B },
             "file form whose destination file already exists (SPEC 6.5)",
           ],
           [
             ["move", "specs/A.mdx#keep", "specs/B.mdx#then"],
+            {
+              finding: "refused-invalid-id",
+              identity: { file: V4_B, id: "then" },
+            },
             "section form whose <new-id> is invalid per 1.4 — the forbidden " +
               "name `then` (the mirrored new-ID-is-valid check, SPEC 6.5)",
           ],
           [
             ["move", "specs/A.mdx#keep", "specs/B.mdx#ha lf"],
+            {
+              finding: "refused-invalid-id",
+              identity: { file: V4_B, id: "ha lf" },
+            },
             "section form whose <new-id> is invalid per 1.4 — a " +
               "whitespace-bearing segment (SPEC 6.5)",
           ],
           [
             ["move", "specs/A.mdx#x", "specs/B.mdx#y"],
+            {
+              finding: "refused-id-collision",
+              locatedAt: { file: V4_B, window: V4_Y_WINDOW },
+            },
             "the ordinary cross-file collision — <new-id> `y` collides with " +
               "the section `y` already present in the distinct target file " +
               "(SPEC 6.5)",
           ],
           [
             ["move", "specs/A.mdx#keep", "specs/B.mdx#nope.k"],
+            {
+              finding: "refused-missing-target-parent",
+              identity: { file: V4_B, id: "nope" },
+            },
             "section form whose target parent (`nope`, the <new-id> minus " +
               "its final segment) is missing from the target file (SPEC 6.5)",
           ],
           [
             ["move", "specs/A.mdx#x", "specs/A.mdx#x.sub.q"],
+            {
+              finding: "refused-missing-target-parent",
+              identity: { file: V4_A, id: "x.sub" },
+            },
             "section form whose target parent (`x.sub`) lies within the " +
               "moved subtree, leaving no insertion point after the removal " +
               "(SPEC 6.5)",
           ],
           [
             ["move", "specs/A.mdx", "docs/Out.mdx"],
+            { finding: "refused-invalid-destination", path: "docs/Out.mdx" },
             "destination path belonging to no configured spec group — a " +
               "move never takes a node out of the workspace (SPEC 6.5)",
           ],
           [
             ["move", "specs/A.mdx", "specs/dual/Out.mdx"],
+            {
+              finding: "refused-invalid-destination",
+              path: "specs/dual/Out.mdx",
+            },
             "destination path belonging to a code group as well (SPEC 6.5, " +
               "14.14)",
           ],
           [
             ["move", "specs/A.mdx", "specs/plain/Out.md"],
+            {
+              finding: "refused-invalid-destination",
+              path: "specs/plain/Out.md",
+            },
             "destination path lacking the `.mdx` extension — it matches the " +
               "`specs/plain/**` spec glob, isolating 14.19's extension rule " +
               "(SPEC 6.5, 7.1, 14.19)",
@@ -1491,11 +1638,12 @@ const T6_5_4 = defineProductTest({
         // a destination path exists only as an operand spelling, and every
         // spelling that would present either is an exit-2 usage error before
         // any refusal is evaluated. T6.5-5 stages both.
-        for (const [argv, reason] of cases) {
+        for (const [argv, expected, reason] of cases) {
           await expectRefusalModifiesNothing(
             product,
             workspace,
             argv,
+            expected,
             `T6.5-4 (${reason})`,
           );
         }
@@ -1519,10 +1667,15 @@ const T6_5_4 = defineProductTest({
           "T6.5-4 precondition arm `build` over the staged workspace",
         );
         await workspace.file(V4_OTHER, V4_OTHER_INVALID);
+        // The invalid-workspace refusal reports the workspace's findings
+        // themselves — exactly the one 14.5 finding located in the offending
+        // file, no refusal reason evaluated or reported beside it (SPEC 6.5,
+        // 6.4, 14).
         await expectRefusalModifiesNothing(
           product,
           workspace,
           ["move", "specs/A.mdx#keep", "specs/B.mdx#kp"],
+          { finding: "14.5", locatedAt: { file: V4_OTHER } },
           "T6.5-4 (valid-workspace precondition as T6.4-6 — the workspace " +
             "fails the validations of `xspec build` through an unresolved d " +
             "reference in specs/Other.mdx, SPEC 14.5, so the move refuses " +
@@ -1782,7 +1935,7 @@ const I6_B_SOURCE = ['<S id="b">', "Bee text.", "</S>", ""].join("\n");
 const T6_5_6 = defineProductTest({
   id: "T6.5-6",
   title:
-    "identity terms: a cross-file section move keeping its ID (`a.mdx#x` → `b.mdx#x`, no `x` in `b.mdx`) is valid — the new identity differs in its file part; the exact self-move (`<target-file>#<new-id>` equal to `<file>#<id>`) is refused with exit 1, modifies nothing, and appends no journal entry (journal byte-compared around the attempt); a same-file move whose `<new-id>` collides with an ID remaining in the target file after the removal is refused (SPEC 6.5, 1.5, 6.1)",
+    "identity terms: a cross-file section move keeping its ID (`a.mdx#x` → `b.mdx#x`, no `x` in `b.mdx`) is valid — the new identity differs in its file part; the exact self-move (`<target-file>#<new-id>` equal to `<file>#<id>`) is refused with exit 1 as exactly one refused-identity-unchanged finding concerning that identity (no collision reason beside it), modifies nothing, and appends no journal entry (journal byte-compared around the attempt); a same-file move whose `<new-id>` collides with an ID remaining in the target file after the removal is refused as exactly one refused-id-collision finding locating the remaining bearer (SPEC 6.5, 1.5, 6.1, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -1831,6 +1984,13 @@ const T6_5_6 = defineProductTest({
           product,
           workspace,
           ["move", "specs/B.mdx#x", "specs/B.mdx#x"],
+          {
+            // Reported alone — no collision reason beside it: the
+            // after-removal check collides with nothing (SPEC 6.4, 14,
+            // T14-7) — concerning the unchanged identity.
+            finding: "refused-identity-unchanged",
+            identity: { file: I6_B, id: "x" },
+          },
           "T6.5-6 (the exact self-move — the new identity equals the old " +
             "one, SPEC 6.5)",
         );
@@ -1851,6 +2011,14 @@ const T6_5_6 = defineProductTest({
           product,
           workspace,
           ["move", "specs/B.mdx#x", "specs/B.mdx#b"],
+          {
+            // The collision locates every colliding bearer (SPEC 14); the
+            // remaining bearer `b` lives in B.mdx, whose bytes the earlier
+            // successful move rewrote (product-written), so the arm asserts
+            // the bearer's file without a byte window.
+            finding: "refused-id-collision",
+            locatedAt: { file: I6_B },
+          },
           "T6.5-6 (same-file move whose <new-id> `b` collides with the ID " +
             "`b` remaining in the target file after the removal, SPEC 6.5)",
         );

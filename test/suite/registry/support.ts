@@ -8,10 +8,15 @@
 // product only via diagnosed assertion failures (H-8).
 
 import { Buffer } from "node:buffer";
-import type { Finding, GraphEdge } from "../../helpers/adapters/index.js";
+import type {
+  Finding,
+  FindingLocation,
+  GraphEdge,
+} from "../../helpers/adapters/index.js";
 import {
   decodeErrorDocument,
   decodeFindingsReport,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
@@ -295,6 +300,101 @@ export function assertFindingLocated(
       );
     }
   }
+}
+
+/**
+ * Assert a finding's locations include the expected file — and, when a window
+ * is given, a range within it (SPEC.md 14's location-cardinality rule: a
+ * located concern such as a colliding bearer or a cycle-participating
+ * reference spelling renders as a `locations` entry in its containing file).
+ * SOME-quantified, unlike `assertFindingLocated`: the finding may locate
+ * further participants elsewhere — every-participant cardinality is T14-8's
+ * business.
+ */
+export function assertFindingMentionsLocation(
+  finding: Finding,
+  expected: FindingSourceExpectation,
+  context: string,
+): void {
+  const matches = (location: FindingLocation): boolean => {
+    if (location.file !== expected.file) return false;
+    const { window } = expected;
+    return (
+      window === undefined ||
+      (location.range.start >= window.start && location.range.end <= window.end)
+    );
+  };
+  if (finding.locations.some(matches)) return;
+  const rendered = finding.locations.map(
+    (location) =>
+      `${renderPathValue(location.file)} [${String(location.range.start)}, ` +
+      `${String(location.range.end)})`,
+  );
+  fail(
+    `${context}: the finding must locate the concerned construct in ` +
+      `${JSON.stringify(expected.file)}` +
+      (expected.window === undefined
+        ? ""
+        : ` within the byte window [${String(expected.window.start)}, ` +
+          `${String(expected.window.end)}]`) +
+      ` (SPEC.md 14, 12.7); got locations [${rendered.join("; ")}] ` +
+      `(message: ${JSON.stringify(finding.message)})`,
+  );
+}
+
+/** A concerned identity, named by its containing file and its ID (SPEC.md 1.5). */
+export interface ConcernedIdentity {
+  /** The workspace-relative file whose `#`-form identity names the concern. */
+  readonly file: string;
+  /** The concerned ID — possibly one no node bears (a refused new ID). */
+  readonly id: string;
+}
+
+/**
+ * Assert a finding names a concerned identity (SPEC.md 14: a refusal reason's
+ * concerned identity is contractual identity data on the finding, 12.7): at
+ * least one `identities` entry identifies it — as the full 1.5 identity
+ * `<file>#<id>` or as the ID alone, either spelling identifying it
+ * unambiguously within the staged fixture (§14 requires identification, not
+ * wording). Further informational entries are permitted (12.7).
+ */
+export function assertFindingNamesIdentity(
+  finding: Finding,
+  expected: ConcernedIdentity,
+  context: string,
+): void {
+  const full = `${expected.file}#${expected.id}`;
+  if (
+    finding.identities.some((entry) => entry === full || entry === expected.id)
+  ) {
+    return;
+  }
+  fail(
+    `${context}: the finding must name the concerned identity ` +
+      `${JSON.stringify(full)} (or its ID ${JSON.stringify(expected.id)}) in ` +
+      `its identities (SPEC.md 14, 12.7); got ` +
+      `${JSON.stringify(finding.identities)} (message: ` +
+      `${JSON.stringify(finding.message)})`,
+  );
+}
+
+/**
+ * Assert a finding concerns exactly the expected workspace-relative path via
+ * its 12.7 `path` member (SPEC.md 14: conditions and refusal reasons without
+ * an in-source location carry the file or path they concern).
+ */
+export function assertFindingConcernsPath(
+  finding: Finding,
+  expected: string,
+  context: string,
+): void {
+  if (finding.path === expected) return;
+  fail(
+    `${context}: the finding must carry the concerned path ` +
+      `${JSON.stringify(expected)} as its 12.7 path member (SPEC.md 14); ` +
+      `got ${renderPathValue(finding.path)} (message: ` +
+      `${JSON.stringify(finding.message)})`,
+  );
 }
 
 function renderJson(value: unknown): string {

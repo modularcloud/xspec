@@ -230,7 +230,7 @@ A "new test T<x>" task always means, in one change:
   ("expected no member \"condition\"" against the pre-12.7 product), no
   crashes.]
 
-- [ ] FP-007 — Make §6 refusal assertions assert stable refusal codes with
+- [x] FP-007 — Make §6 refusal assertions assert stable refusal codes with
   their concerned file/range/identity. [R1 #27; TEST-SPEC §§6.4–6.5, SPEC
   12.7, 14]
   `expectRefusalModifiesNothing` (defined in
@@ -240,6 +240,33 @@ A "new test T<x>" task always means, in one change:
   asserts the exact stable refusal code and the concerned file/range/
   identity of the refusal finding, most acutely T6.4-3, T6.5-4, T6.5-6.
   Verify: red-as-diagnosed only.
+  [Done 2026-08-10: both modules' `expectRefusalModifiesNothing` now take a
+  per-arm `RefusalExpectation` — run with `--json`, exit 1, stdout decoded
+  as the form-exact 12.7 findings-only report, exactly one finding under the
+  arm's exact stable code (each arm isolates one cause; one finding per
+  applicable reason, SPEC 14), plus the reason's §14 concern via new
+  support.ts helpers: `assertFindingNamesIdentity` (full 1.5 identity or
+  bare ID — §14 requires identification, not spelling; refused-invalid-id,
+  refused-identity-unchanged, refused-missing-target-parent,
+  refused-structural-parent), `assertFindingConcernsPath` (12.7 `path`
+  member equality; refused-destination-exists, refused-invalid-destination),
+  `assertFindingMentionsLocation` (SOME-quantified; refused-id-collision
+  locates the remaining bearer — byte windows over the staged `a.sib`/`y`
+  constructs; refused-cycle's dependency arm locates the participating
+  `d={"keep"}` spelling; T6.5-6's collision asserts file-only, B.mdx being
+  product-rewritten). The spec-import-cycle arm pins code+form alone (the
+  would-be cycle's participating import declarations exist in no
+  pre-operation source, so no concern window is derivable). Precondition
+  arms (T6.4-6, T6.5-4) assert the invalid-workspace refusal as exactly the
+  one located 14.5 finding, no refusal reason beside it. Traceability: "14"
+  added to T6.4-3/T6.5-4/T6.5-6 per TEST-SPEC 14's refusal-reason staging
+  record. Verified: those four tests turned falsely-green →
+  red-as-diagnosed at the form-exact decode (the stub emits `{"refused":…}`
+  for refusals and old-shape `condition` findings for the gate; suite files
+  6.4+6.5 went 2 failed/11 passed → 6 failed/7 passed, the other four being
+  the pre-existing FP-002-class exit-2 gaps); `npm run test:self` unchanged
+  4 planned mid-loop reds (certification-document ×3 → FP-091; S-1 unmapped
+  keys → stages E/G), S-5 and certification green.]
 
 ## Stage D — §§1–9 missing arms, with paired certification-fixture reworks
 

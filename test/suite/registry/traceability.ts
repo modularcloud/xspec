@@ -35,12 +35,14 @@
 //   `query`).
 // - Section 16's property tests (P-*) have no SPEC.md section 16; each maps
 //   to the passages whose invariants it asserts per its TEST-SPEC entry.
-// - "14": SPEC.md 14 defines the validation conditions, so a test asserting
-//   a numbered condition (14.x) covers passage "14" wherever it lives.
-//   TEST-SPEC 14's per-condition record ("the H-7 map is the complete
-//   record") is carried here at H-7's passage granularity, the T7-1..T7.5-1
-//   range resolved to the entries that assert a condition (T7-5 asserts
-//   none).
+// - "14": SPEC.md 14 defines the validation conditions and the refusal
+//   reasons, so a test asserting a numbered condition (14.x) or a stable
+//   refusal code covers passage "14" wherever it lives. TEST-SPEC 14's
+//   per-condition record ("the H-7 map is the complete record") is carried
+//   here at H-7's passage granularity, the T7-1..T7.5-1 range resolved to
+//   the entries that assert a condition (T7-5 asserts none) and the refusal
+//   reasons' staging record resolved to its implemented tests (T6.4-3,
+//   T6.5-4, T6.5-6; T6.6-3 joins when implemented).
 // - Alias entries: TEST-SPEC's pointer-only tests are not separately
 //   implemented, so their coverage rides on the implementing tests —
 //   T12.0-10's rename/move and baseline arms ride on T6.4-4/T6.5-5 and
@@ -196,7 +198,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T6.3-4": ["6.3", "12.0"],
   "T6.4-1": ["6.4"],
   "T6.4-2": ["6.4"],
-  "T6.4-3": ["6.4"],
+  "T6.4-3": ["6.4", "14"],
   "T6.4-4": ["6.4", "12.0"],
   "T6.4-5": ["6.4"],
   "T6.4-6": ["6.4"],
@@ -204,9 +206,9 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T6.5-1": ["6.5"],
   "T6.5-2": ["6.5"],
   "T6.5-3": ["6.5"],
-  "T6.5-4": ["6.5"],
+  "T6.5-4": ["6.5", "14"],
   "T6.5-5": ["6.5", "12.0"],
-  "T6.5-6": ["6.5"],
+  "T6.5-6": ["6.5", "14"],
   "T6.7-1": ["6.7"],
   "T7-1": ["7", "14"],
   "T7-2": ["7", "14"],
