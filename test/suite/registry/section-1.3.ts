@@ -303,18 +303,20 @@ const T1_3_5 = defineProductTest({
     for (const finding of findings) {
       const findingContext = `${sameFileContext}: a 14.3 finding`;
       assertFindingLocated(finding, { file: "specs/A.mdx" }, findingContext);
-      const { location } = finding;
-      const within = (window: { start: number; end: number }): boolean =>
-        location !== undefined &&
-        location.start >= window.start &&
-        location.end <= window.end;
-      if (!within(firstWindow) && !within(secondWindow)) {
-        fail(
-          `${findingContext}: its location must point at one of the two duplicate ` +
-            `constructs (byte windows [${String(firstWindow.start)}, ${String(firstWindow.end)}] ` +
-            `and [${String(secondWindow.start)}, ${String(secondWindow.end)}]); got ` +
-            `[${String(location?.start)}, ${String(location?.end)})`,
-        );
+      const within = (
+        location: { start: number; end: number },
+        window: { start: number; end: number },
+      ): boolean =>
+        location.start >= window.start && location.end <= window.end;
+      for (const { range } of finding.locations) {
+        if (!within(range, firstWindow) && !within(range, secondWindow)) {
+          fail(
+            `${findingContext}: every location must point at one of the two duplicate ` +
+              `constructs (byte windows [${String(firstWindow.start)}, ${String(firstWindow.end)}] ` +
+              `and [${String(secondWindow.start)}, ${String(secondWindow.end)}]); got ` +
+              `[${String(range.start)}, ${String(range.end)})`,
+          );
+        }
       }
     }
 

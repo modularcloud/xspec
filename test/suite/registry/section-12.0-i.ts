@@ -461,11 +461,17 @@ const T12_0_2 = defineProductTest({
             ),
             jsonContext,
           ).findings;
-          if (!findings.some((finding) => finding.file === "specs/A.mdx")) {
+          if (
+            !findings.some((finding) =>
+              finding.locations.some(
+                (location) => location.file === "specs/A.mdx",
+              ),
+            )
+          ) {
             fail(
               `${jsonContext}: the findings report carries the same ` +
                 `information as the human report (SPEC 12.0) — expected a ` +
-                `finding naming specs/A.mdx, got ` +
+                `finding locating in specs/A.mdx, got ` +
                 `${JSON.stringify(findings)}`,
             );
           }

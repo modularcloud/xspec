@@ -546,11 +546,14 @@ function assertFindingFile(
   expectedFile: string,
   context: string,
 ): void {
-  if (finding.file !== expectedFile) {
+  // 14.19 is a path-level condition: it carries the file's path as the
+  // concerned path (SPEC 14, 12.7 — no in-source location).
+  if (finding.path !== expectedFile) {
     fail(
       `${context}: the finding must identify the offending workspace-relative source ` +
-        `path (SPEC 14, 1.5); expected file ${JSON.stringify(expectedFile)}, got ` +
-        `${JSON.stringify(finding.file)} (message: ${JSON.stringify(finding.message)})`,
+        `path as its concerned path (SPEC 14, 1.5, 12.7); expected ` +
+        `${JSON.stringify(expectedFile)}, got ${JSON.stringify(finding.path)} ` +
+        `(message: ${JSON.stringify(finding.message)})`,
     );
   }
 }

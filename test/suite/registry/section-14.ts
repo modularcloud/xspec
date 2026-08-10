@@ -462,7 +462,11 @@ const T14_2 = defineProductTest({
       const typescriptFindings = findings
         .filter((finding) => finding.condition === "14.7")
         .slice()
-        .sort((a, b) => (a.location?.start ?? -1) - (b.location?.start ?? -1));
+        .sort(
+          (a, b) =>
+            (a.locations[0]?.range.start ?? -1) -
+            (b.locations[0]?.range.start ?? -1),
+        );
       assertFindingLocated(
         typescriptFindings[0]!,
         {
@@ -616,7 +620,9 @@ function assertMaskingReport(
       `unresolved (SPEC 14, 14.20, 14.5–14.7)`,
   );
   for (const file of T14_3_UNPARSEABLE_FILES) {
-    const matching = findings.filter((finding) => finding.file === file);
+    const matching = findings.filter((finding) =>
+      finding.locations.some((location) => location.file === file),
+    );
     if (matching.length !== 1 || matching[0]!.condition !== "14.20") {
       fail(
         `${context}: expected exactly one finding naming ` +
@@ -640,7 +646,10 @@ function assertMaskingReport(
   const filesOf = (condition: string): string[] =>
     findings
       .filter((finding) => finding.condition === condition)
-      .map((finding) => finding.file ?? "<no file>")
+      .map((finding) => {
+        const file = finding.locations[0]?.file;
+        return typeof file === "string" ? file : "<no location>";
+      })
       .sort();
   assertSameJson(
     filesOf("14.5"),

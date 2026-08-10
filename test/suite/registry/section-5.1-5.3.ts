@@ -17,13 +17,16 @@
 // 14.9 is reported by `build` and `check` alike (SPEC 14).
 //
 // Conservative operationalizations (noted per H-4):
-// - Cycle-path acceptance: SPEC 5.3 fixes the information — the full cycle —
-//   not its rendering, so a reported path is accepted in any rotation (any
-//   starting node) and in open or closed-walk form (first identity repeated
-//   at the end). Direction is never relaxed: the path follows the cycle's
-//   edges, so a reversed or partial sequence is rejected — in particular the
-//   ancestor arms' three-node cycles must include the intermediate section
-//   the `contains` chain runs through.
+// - Cycle-path acceptance: SPEC 12.7/14 render a cycle's full path through
+//   the finding's `locations` — every reference spelling recording a
+//   participating dependency edge, each located in the file containing it —
+//   while the identity sequence is informational context (12.7: identities
+//   are contractual only where 14 states them). These fixtures do not
+//   precompute per-spelling byte offsets, so the assertion here binds the
+//   file dimension: every finding locates only within the participating
+//   files, and every participating file is identified through located
+//   files, message, or identity context. Byte-precise full-path location
+//   assertion is T14-8's (section-14.ts).
 // - The cross-file `depends` arm of T5.3-1 necessarily co-stages a spec
 //   import cycle: a cross-file `depends` edge needs an external reference
 //   (the local string form is same-file only, SPEC 2.2), external references
@@ -118,45 +121,6 @@ async function checkFindings(
     .findings;
 }
 
-/**
- * A reported cycle path reduced to its open cyclic form: a closed walk (the
- * first identity repeated at the end) reduces to its open rotation, so
- * `[a, b, a]` and `[a, b]` name the same cycle (SPEC 5.3 fixes the
- * information, not the rendering).
- */
-function openCycleForm(path: readonly string[]): readonly string[] {
-  if (path.length > 1 && path[0] === path[path.length - 1]) {
-    return path.slice(0, -1);
-  }
-  return path;
-}
-
-/**
- * Whether a reported cycle path names exactly the staged cycle: the same
- * identities in the same cyclic edge order, from any starting node
- * (rotation-invariant), open or closed form. Direction is never relaxed —
- * the path follows the cycle's edges — and no node may be missing or extra.
- */
-function matchesCycle(
-  reported: readonly string[],
-  staged: readonly string[],
-): boolean {
-  const open = openCycleForm(reported);
-  const n = staged.length;
-  if (open.length !== n) return false;
-  for (let shift = 0; shift < n; shift += 1) {
-    let matched = true;
-    for (let i = 0; i < n; i += 1) {
-      if (open[(shift + i) % n] !== staged[i]) {
-        matched = false;
-        break;
-      }
-    }
-    if (matched) return true;
-  }
-  return false;
-}
-
 /** The file path of a requirement-node identity (SPEC 1.5: `path#id`). */
 function fileOfIdentity(identity: string): string {
   const hash = identity.indexOf("#");
@@ -177,10 +141,14 @@ interface CycleExpectation {
 /**
  * Assert a findings report over a fixture staging exactly one dependency
  * cycle (plus, when stated, the import cycle its cross-file staging
- * necessarily carries): every finding is 14.9, the dependency cycle is
- * reported with its full cycle path — once, or at most once per
- * participating file — and the co-staged import cycle accounts for every
- * remaining finding (SPEC 5.3, 14, 14.9).
+ * necessarily carries): every finding is 14.9 and locates only within the
+ * participating files — a cycle's full path renders through its locations,
+ * every participating reference spelling (or import declaration) located in
+ * the file containing it (SPEC 5.3, 14, 12.7) — the finding count is
+ * bounded (one per cycle, or at most one per participating file), and every
+ * participating file is identified through located files, message, or
+ * identity context (the T2.1-5 convention; byte-precise path location is
+ * T14-8's assertion).
  */
 function assertDependencyCycleFindings(
   findings: readonly Finding[],
@@ -199,65 +167,72 @@ function assertDependencyCycleFindings(
     );
   }
 
-  // The dependency-cycle report: the finding(s) carrying the staged cycle's
-  // full path. SPEC 5.3 mandates the full path, so a finding without one (or
-  // with a rotated-but-wrong, partial, or reversed one) never counts.
-  const cycleFindings = findings.filter(
-    (finding) =>
-      finding.cycle !== undefined &&
-      matchesCycle(finding.cycle, expectation.cycle),
-  );
-  const cycleFileCount = new Set(expectation.cycle.map(fileOfIdentity)).size;
-  if (cycleFindings.length < 1 || cycleFindings.length > cycleFileCount) {
+  const cycleFiles = [...new Set(expectation.cycle.map(fileOfIdentity))];
+  const importCycleFiles = expectation.importCycleFiles ?? [];
+  const participatingFiles = new Set([...cycleFiles, ...importCycleFiles]);
+
+  // Count bounds: each staged cycle is its own condition instance, so each
+  // is reported (SPEC 14: every present error reported) — at least one
+  // finding per staged cycle — and at most once per cycle or per
+  // participating file (the T1.3-5/T2.1-5 per-file tolerance).
+  const min = 1 + (expectation.importCycleFiles === undefined ? 0 : 1);
+  const max =
+    cycleFiles.length +
+    (expectation.importCycleFiles === undefined ? 0 : importCycleFiles.length);
+  if (findings.length < min || findings.length > max) {
     fail(
-      `${context}: the dependency cycle must be reported with its full cycle ` +
-        `path — ${JSON.stringify(expectation.cycle)}, accepted in any rotation, ` +
-        `open or closed form — once, or at most once per participating file ` +
-        `(${String(cycleFileCount)}); got ${String(cycleFindings.length)} such ` +
-        `finding(s) among ${JSON.stringify(findings)}`,
+      `${context}: between ${String(min)} and ${String(max)} 14.9 finding(s) ` +
+        `report the staged cycle(s) — each cycle reported, once or at most ` +
+        `once per participating file — got ${String(findings.length)}: ` +
+        `${JSON.stringify(findings)}`,
     );
   }
 
-  const rest = findings.filter((finding) => !cycleFindings.includes(finding));
-  const importCycleFiles = expectation.importCycleFiles;
-  if (importCycleFiles === undefined) {
-    if (rest.length > 0) {
+  // Every finding locates its cycle's participating spellings: at least one
+  // location, every located file a participating file (SPEC 14: every
+  // reference spelling recording a participating dependency edge, or each
+  // participating import declaration, located in the file containing it).
+  for (const finding of findings) {
+    if (finding.locations.length === 0) {
       fail(
-        `${context}: the staged dependency cycle is the fixture's only cycle, ` +
-          `so nothing beyond its report may appear (SPEC 14: each present error ` +
-          `reported, nothing double-reported); got extra findings ` +
-          JSON.stringify(rest),
+        `${context}: a 14.9 finding locates its cycle's participating ` +
+          `spellings in source (SPEC 14, 12.7); got a finding with no ` +
+          `locations: ${JSON.stringify(finding)}`,
       );
     }
-    return;
+    for (const location of finding.locations) {
+      if (
+        typeof location.file !== "string" ||
+        !participatingFiles.has(location.file)
+      ) {
+        fail(
+          `${context}: a 14.9 finding's locations lie in the cycle's ` +
+            `participating files ${JSON.stringify([...participatingFiles])} ` +
+            `(SPEC 14); got a location in ${JSON.stringify(location.file)}`,
+        );
+      }
+    }
   }
-  // The co-staged spec import cycle: reported once, or at most once per
-  // participating file, identifying every participating file through any of
-  // a finding's file, message, or cycle-path information (the T2.1-5
-  // convention; SPEC 2.1, 14).
-  if (rest.length < 1 || rest.length > importCycleFiles.length) {
-    fail(
-      `${context}: the mutual imports this cross-file cycle needs are ` +
-        `themselves a spec import cycle (SPEC 2.1), reported as one further ` +
-        `14.9 finding — or at most one per participating file ` +
-        `(${String(importCycleFiles.length)}); got ${String(rest.length)} ` +
-        `finding(s) beyond the dependency-cycle report: ${JSON.stringify(findings)}`,
-    );
-  }
-  const identified = rest
+
+  // Every participating file is identified (SPEC 14: actionable errors
+  // identify the file) — through located files, message, or identity context.
+  const identified = findings
     .map((finding) =>
-      [finding.message, finding.file ?? "", ...(finding.cycle ?? [])].join(
-        "\n",
-      ),
+      [
+        finding.message,
+        ...finding.locations.map((location) =>
+          typeof location.file === "string" ? location.file : "",
+        ),
+        ...finding.identities,
+      ].join("\n"),
     )
     .join("\n");
-  for (const file of importCycleFiles) {
+  for (const file of participatingFiles) {
     if (!identified.includes(file)) {
       fail(
-        `${context}: the import-cycle report must identify the participating ` +
-          `file ${JSON.stringify(file)} (SPEC 14: actionable errors identify ` +
-          `the file); findings beyond the dependency-cycle report: ` +
-          JSON.stringify(rest),
+        `${context}: the cycle report must identify the participating file ` +
+          `${JSON.stringify(file)} (SPEC 14: actionable errors identify the ` +
+          `file); findings: ${JSON.stringify(findings)}`,
       );
     }
   }

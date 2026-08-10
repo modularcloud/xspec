@@ -259,19 +259,32 @@ function assertPolicyFindings(
     expected.length === 0 ? {} : { "14.12": expected.length },
     context,
   );
+  // SPEC 14.12/12.7: the offending entity is a graph edge, not a spelling —
+  // `locations` empty, `path` null, the identities in order the violated
+  // rule's name and the edge's source identity, kind token, and target.
+  for (const finding of findings) {
+    if (finding.locations.length !== 0 || finding.path !== null) {
+      fail(
+        `${context}: a policy finding carries no in-source locations and ` +
+          `concerns no path — \`locations\` [], \`path\` null (SPEC 14.12, ` +
+          `12.7); got locations ${JSON.stringify(finding.locations)}, path ` +
+          `${JSON.stringify(finding.path)}`,
+      );
+    }
+  }
   assertSameJson(
     findings
-      .map(
-        (finding) =>
-          `${finding.rule ?? "<no rule>"} :: ` +
-          (finding.edge === undefined
-            ? "<no edge>"
-            : `${finding.edge.kind}: ${finding.edge.from} -> ${finding.edge.to}`),
-      )
+      .map((finding) => {
+        if (finding.identities.length !== 4) {
+          return `<malformed 14.12 identities> ${JSON.stringify(finding.identities)}`;
+        }
+        const [rule, from, kind, to] = finding.identities;
+        return `${rule} :: ${kind}: ${from} -> ${to}`;
+      })
       .sort(),
     expected.map((entry) => renderPolicyPair(entry.rule, entry.edge)).sort(),
-    `${context}: policy findings as (rule name, offending edge) pairs ` +
-      `(SPEC 7.5, 14.12)`,
+    `${context}: policy findings' identities as (rule name, offending edge) ` +
+      `pairs (SPEC 7.5, 14.12, 12.7)`,
   );
 }
 

@@ -1,16 +1,13 @@
-// H-3 output adapters — findings and analysis reports: failing `build` /
-// `check` findings (SPEC.md 14; TEST-SPEC §14), `coverage` (SPEC.md 8;
-// T8.2-1), and `impact --base` (SPEC.md 5.6, 9; T9.1-1, T9.2-*, T9.3-*).
+// H-3 output adapters — analysis reports: `coverage` (SPEC.md 8; T8.2-1) and
+// `impact --base` (SPEC.md 5.6, 9; T9.1-1, T9.2-*, T9.3-*).
 //
 // Shape-aware, value-blind, fail-loud (H-3) — see query.ts for the layer's
 // contract. Adjust the ASSUMED SHAPE below when the real product's output
-// shape legitimately differs; never adjust values.
+// shape legitimately differs; never adjust values. Findings and findings-only
+// reports are NOT here: they are form-exact 12.7 surfaces, decoded literally
+// and never adjusted (forms.ts).
 //
 // ASSUMED SHAPE:
-//   build (exit 1) / check (exit 1) →
-//     { "findings": [ { "condition": "14.N", "message",
-//                       "file"?, "location"?: {"start","end"},
-//                       "rule"?, "edge"?: Edge, "cycle"?: [identity...] } ] }
 //   coverage →
 //     { "profiles": [ { "name",
 //                       "counts": {"required","covered","uncovered","ignored"},
@@ -28,8 +25,6 @@ import type {
   CoverageProfileReport,
   CoverageReport,
   CoveredNode,
-  Finding,
-  FindingsReport,
   IgnoredNode,
   ImpactCategoryEntry,
   ImpactReport,
@@ -52,86 +47,7 @@ import {
   requiredKey,
   rootSite,
 } from "./decode.js";
-import { decodeEdge, decodeSourceRange } from "./query.js";
-
-/**
- * A SPEC.md §14 condition identity: `14.` followed by a condition number.
- * The token shape is spec-fixed; which condition a finding carries is a value
- * the tests assert.
- */
-const CONDITION_PATTERN = /^14\.[1-9][0-9]*$/;
-
-function decodeFinding(value: unknown, site: DecodeSite): Finding {
-  const obj = expectObject(value, site);
-  const conditionSite = at(site, "condition");
-  const condition = expectNonEmptyString(
-    requiredKey(obj, "condition", site),
-    conditionSite,
-  );
-  if (!CONDITION_PATTERN.test(condition)) {
-    decodeFail(
-      conditionSite,
-      'a SPEC.md 14 condition identity ("14.<n>")',
-      condition,
-    );
-  }
-  const finding: {
-    condition: string;
-    message: string;
-    file?: string;
-    location?: Finding["location"];
-    rule?: string;
-    edge?: Finding["edge"];
-    cycle?: readonly string[];
-  } = {
-    condition,
-    message: expectNonEmptyString(
-      requiredKey(obj, "message", site),
-      at(site, "message"),
-    ),
-  };
-  const file = optionalKey(obj, "file");
-  if (file !== undefined) {
-    finding.file = expectNonEmptyString(file, at(site, "file"));
-  }
-  const location = optionalKey(obj, "location");
-  if (location !== undefined) {
-    finding.location = decodeSourceRange(location, at(site, "location"));
-  }
-  const rule = optionalKey(obj, "rule");
-  if (rule !== undefined) {
-    finding.rule = expectNonEmptyString(rule, at(site, "rule"));
-  }
-  const edge = optionalKey(obj, "edge");
-  if (edge !== undefined) {
-    finding.edge = decodeEdge(edge, at(site, "edge"));
-  }
-  const cycle = optionalKey(obj, "cycle");
-  if (cycle !== undefined) {
-    finding.cycle = expectNonEmptyStringArray(cycle, at(site, "cycle"));
-  }
-  return finding;
-}
-
-/**
- * A failing `build`'s validation errors or `check`'s findings (exit 1,
- * stdout). Every finding carries its SPEC.md 14 condition identity and a
- * message; file, location, rule, edge, and cycle path are decoded when
- * present and asserted for presence by the tests that require them (T14-1).
- */
-export function decodeFindingsReport(
-  doc: unknown,
-  context?: string,
-): FindingsReport {
-  const site = rootSite("build/check findings", context);
-  const obj = expectObject(doc, site);
-  const findingsSite = at(site, "findings");
-  const findings = expectArray(
-    requiredKey(obj, "findings", site),
-    findingsSite,
-  ).map((element, index) => decodeFinding(element, at(findingsSite, index)));
-  return { findings };
-}
+import { decodeEdge } from "./query.js";
 
 function decodeCoveredNode(value: unknown, site: DecodeSite): CoveredNode {
   const obj = expectObject(value, site);

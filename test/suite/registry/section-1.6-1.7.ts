@@ -959,16 +959,21 @@ const BOM = "\u{FEFF}";
 const VALID_SECTION_SOURCE = '<S id="ok">\nValid content.\n</S>\n';
 
 /**
- * Exactly one finding names the file, and it carries condition 14.20 (SPEC
- * 14: errors identify the file; 14.20 is a whole-file condition, so no
- * in-file location is demanded of it).
+ * Exactly one finding names the file — locating in it, or carrying it as
+ * the concerned path — and it carries condition 14.20 (SPEC 14: errors
+ * identify the file; where a parser fails inside an unparseable file is
+ * parser-specific, so no particular range is demanded of it).
  */
 function assertUnparseableFinding(
   findings: readonly Finding[],
   file: string,
   context: string,
 ): void {
-  const matching = findings.filter((finding) => finding.file === file);
+  const matching = findings.filter(
+    (finding) =>
+      finding.locations.some((location) => location.file === file) ||
+      finding.path === file,
+  );
   if (matching.length !== 1) {
     fail(
       `${context}: expected exactly one finding naming ${JSON.stringify(file)} ` +
@@ -976,7 +981,8 @@ function assertUnparseableFinding(
         JSON.stringify(
           findings.map((finding) => ({
             condition: finding.condition,
-            file: finding.file ?? null,
+            locations: finding.locations,
+            path: finding.path,
           })),
         ),
     );

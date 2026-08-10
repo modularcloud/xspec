@@ -1279,20 +1279,20 @@ function assertStaleModuleFindings(
           `${JSON.stringify(finding.message)})`,
       );
     }
-    if (finding.file === undefined || !finding.file.startsWith(prefix)) {
+    if (typeof finding.path !== "string" || !finding.path.startsWith(prefix)) {
       fail(
-        `${context}: a 14.10 finding must name the stale derived file, all ` +
-          `of which are ${prefix}* here (SPEC 14.10, 13.1); got ` +
-          `${finding.file === undefined ? "no file" : JSON.stringify(finding.file)} ` +
+        `${context}: a 14.10 finding must name the stale derived file as ` +
+          `its concerned path, all of which are ${prefix}* here (SPEC ` +
+          `14.10, 13.1, 12.7); got ${JSON.stringify(finding.path)} ` +
           `(message: ${JSON.stringify(finding.message)})`,
       );
     }
   }
-  if (!findings.some((finding) => finding.file === module)) {
+  if (!findings.some((finding) => finding.path === module)) {
     fail(
       `${context}: the generated module ${module} must be among the named ` +
         `stale files (SPEC 14.10, 13.1); named: ` +
-        JSON.stringify(findings.map((finding) => finding.file)),
+        JSON.stringify(findings.map((finding) => finding.path)),
     );
   }
 }
@@ -1488,7 +1488,9 @@ const T13_3_3 = defineProductTest({
               !findings.some(
                 (finding) =>
                   finding.condition === "14.1" &&
-                  finding.file === "specs/B.mdx",
+                  finding.locations.some(
+                    (location) => location.file === "specs/B.mdx",
+                  ),
               )
             ) {
               fail(
@@ -1497,7 +1499,7 @@ const T13_3_3 = defineProductTest({
                   JSON.stringify(
                     findings.map((finding) => ({
                       condition: finding.condition,
-                      file: finding.file,
+                      locations: finding.locations,
                     })),
                   ),
               );

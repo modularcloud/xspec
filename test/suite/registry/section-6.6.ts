@@ -475,7 +475,9 @@ const T6_6_1 = defineProductTest({
           [V2_ORIGIN, staleOrigin, "same-file local string reference"],
           [V2_WATCH, staleWatch, "cross-file imported chain reference"],
         ] as const) {
-          const located = findings.filter((finding) => finding.file === file);
+          const located = findings.filter((finding) =>
+            finding.locations.some((location) => location.file === file),
+          );
           if (located.length !== 1) {
             fail(
               `${staleLabel}: expected exactly one 14.5 finding naming ` +

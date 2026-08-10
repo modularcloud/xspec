@@ -454,9 +454,11 @@ async function checkReportsJournalError(
 
 /**
  * Does a 14.13 finding name the garbage line (line 2)? Accepted forms (H-4
- * operationalization, see the module header): a location within the garbage
- * line's byte window in `.xspec/journal`; the message echoing the garbage
- * line; or the message citing line/entry 2.
+ * operationalization, see the module header): the message echoing the
+ * garbage line or citing line/entry 2 — a journal condition carries the
+ * journal path it concerns and no in-source location (SPEC 14, 12.7), so
+ * the lines are named in the message — or, tolerated, a location within the
+ * garbage line's byte window in `.xspec/journal`.
  */
 function findingNamesGarbageLine(
   finding: Finding,
@@ -465,11 +467,11 @@ function findingNamesGarbageLine(
   if (finding.message.includes(GARBAGE_LINE)) return true;
   if (/\b(?:line|entry)\s*#?\s*2\b/i.test(finding.message)) return true;
   if (finding.message.includes("journal:2")) return true;
-  return (
-    finding.location !== undefined &&
-    (finding.file === undefined || finding.file === JOURNAL_PATH) &&
-    finding.location.start >= window.start &&
-    finding.location.end <= window.end + 1
+  return finding.locations.some(
+    (location) =>
+      location.file === JOURNAL_PATH &&
+      location.range.start >= window.start &&
+      location.range.end <= window.end + 1,
   );
 }
 

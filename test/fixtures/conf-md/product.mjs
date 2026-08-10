@@ -1445,14 +1445,95 @@ function compileWorkspace(ws) {
 // Commands (SPEC 12.0 conventions; the §CONF-MD surface)
 // ---------------------------------------------------------------------------
 
+// SPEC 14's stable code tokens by condition ordinal ("14.N" → token). The
+// JSON report carries the token string alone (SPEC 12.7, 14); the ordinal
+// orders findings and is no part of the value. Only the conditions this
+// conformer's scope reports appear.
+const CODE_TOKENS = {
+  14.1: "missing-id",
+  14.5: "unknown-dependency",
+  14.6: "unknown-text-target",
+  14.8: "invalid-argument",
+  14.9: "cycle",
+  14.15: "invalid-import",
+  "14.20": "unparseable-source",
+};
+
+/** A condition's ordinal (the `N` of `14.N`), ordering findings (SPEC 12.7). */
+function conditionOrdinal(condition) {
+  return Number(condition.slice(3));
+}
+
+/**
+ * The pinned findings order (SPEC 12.7): by code (numbered conditions in
+ * numeric order), then locations element-wise (file path bytes, range start,
+ * range end; a proper prefix first), then concerned path (null first), then
+ * identities, then message — over this conformer's all-located findings the
+ * live dimensions are ordinal, single location, and message.
+ */
+function compareFindingDocs(a, b) {
+  const byOrdinal =
+    conditionOrdinal(a.internalCondition) -
+    conditionOrdinal(b.internalCondition);
+  if (byOrdinal !== 0) return byOrdinal;
+  const shared = Math.min(a.locations.length, b.locations.length);
+  for (let i = 0; i < shared; i += 1) {
+    const byFile = Buffer.compare(
+      Buffer.from(a.locations[i].file, "utf8"),
+      Buffer.from(b.locations[i].file, "utf8"),
+    );
+    if (byFile !== 0) return byFile;
+    if (a.locations[i].range.start !== b.locations[i].range.start) {
+      return a.locations[i].range.start - b.locations[i].range.start;
+    }
+    if (a.locations[i].range.end !== b.locations[i].range.end) {
+      return a.locations[i].range.end - b.locations[i].range.end;
+    }
+  }
+  if (a.locations.length !== b.locations.length) {
+    return a.locations.length - b.locations.length;
+  }
+  return Buffer.compare(
+    Buffer.from(a.message, "utf8"),
+    Buffer.from(b.message, "utf8"),
+  );
+}
+
+/**
+ * The findings report in the 12.7 form: one `{"code", "message",
+ * "locations", "path", "identities"}` per finding — every condition this
+ * scope reports locates in source, so `locations` carries the offending
+ * construct and `path` is null — in the pinned findings order, findings
+ * identical in every member collapsed to one (SPEC 12.7).
+ */
 function findingsDoc(findings) {
+  const docs = findings.map((finding) => ({
+    code: CODE_TOKENS[finding.condition],
+    message: finding.message,
+    locations: [{ file: finding.file, range: finding.location }],
+    path: null,
+    identities: [],
+    internalCondition: finding.condition,
+  }));
+  docs.sort(compareFindingDocs);
+  const collapsed = [];
+  for (const doc of docs) {
+    const previous = collapsed[collapsed.length - 1];
+    if (previous !== undefined && compareFindingDocs(previous, doc) === 0) {
+      continue;
+    }
+    collapsed.push(doc);
+  }
   return {
-    findings: findings.map((finding) => ({
-      condition: finding.condition,
-      message: finding.message,
-      file: finding.file,
-      location: finding.location,
-    })),
+    findings: collapsed.map(
+      ({ code, message, locations, path, identities }) => ({
+        code,
+        message,
+        locations,
+        path,
+        identities,
+      }),
+    ),
   };
 }
 

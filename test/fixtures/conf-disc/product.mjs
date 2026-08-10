@@ -1332,15 +1332,104 @@ async function loadWorkspace(cwd, configFlag) {
 // Commands (SPEC 12.0 conventions; the §CONF-DISC surface)
 // ---------------------------------------------------------------------------
 
+// SPEC 14's stable code tokens by condition ordinal ("14.N" → token). The
+// JSON report carries the token string alone (SPEC 12.7, 14); the ordinal
+// orders findings and is no part of the value. Only the conditions this
+// conformer's scope reports appear.
+const CODE_TOKENS = {
+  14.1: "missing-id",
+  14.15: "invalid-import",
+  14.19: "invalid-source-path",
+  "14.20": "unparseable-source",
+};
+
+/** A condition's ordinal (the `N` of `14.N`), ordering findings (SPEC 12.7). */
+function conditionOrdinal(condition) {
+  return Number(condition.slice(3));
+}
+
+/**
+ * The pinned findings order (SPEC 12.7): by code (numbered conditions in
+ * numeric order), then locations element-wise (file path bytes, range start,
+ * range end; a proper prefix first), then concerned path (null before any
+ * path, byte-wise otherwise), then identities, then message — this scope's
+ * identities are always empty, so the remaining dimensions decide.
+ */
+function compareFindingDocs(a, b) {
+  const byOrdinal =
+    conditionOrdinal(a.internalCondition) -
+    conditionOrdinal(b.internalCondition);
+  if (byOrdinal !== 0) return byOrdinal;
+  const shared = Math.min(a.locations.length, b.locations.length);
+  for (let i = 0; i < shared; i += 1) {
+    const byFile = Buffer.compare(
+      Buffer.from(a.locations[i].file, "utf8"),
+      Buffer.from(b.locations[i].file, "utf8"),
+    );
+    if (byFile !== 0) return byFile;
+    if (a.locations[i].range.start !== b.locations[i].range.start) {
+      return a.locations[i].range.start - b.locations[i].range.start;
+    }
+    if (a.locations[i].range.end !== b.locations[i].range.end) {
+      return a.locations[i].range.end - b.locations[i].range.end;
+    }
+  }
+  if (a.locations.length !== b.locations.length) {
+    return a.locations.length - b.locations.length;
+  }
+  if ((a.path === null) !== (b.path === null)) return a.path === null ? -1 : 1;
+  if (a.path !== null && b.path !== null) {
+    const byPath = Buffer.compare(
+      Buffer.from(a.path, "utf8"),
+      Buffer.from(b.path, "utf8"),
+    );
+    if (byPath !== 0) return byPath;
+  }
+  return Buffer.compare(
+    Buffer.from(a.message, "utf8"),
+    Buffer.from(b.message, "utf8"),
+  );
+}
+
+/**
+ * The findings report in the 12.7 form: one `{"code", "message",
+ * "locations", "path", "identities"}` per finding. A finding carrying an
+ * in-source location (14.1, 14.15, 14.20 here) locates the offending
+ * construct with `path` null; the path-level 14.19 carries the offending
+ * path it concerns with `locations` empty. Findings are emitted in the
+ * pinned order, identical findings collapsed to one (SPEC 12.7).
+ */
 function findingsDoc(findings) {
+  const docs = findings.map((finding) => ({
+    code: CODE_TOKENS[finding.condition],
+    message: finding.message,
+    locations:
+      finding.location === undefined
+        ? []
+        : [{ file: finding.file, range: finding.location }],
+    path: finding.location === undefined ? (finding.file ?? null) : null,
+    identities: [],
+    internalCondition: finding.condition,
+  }));
+  docs.sort(compareFindingDocs);
+  const collapsed = [];
+  for (const doc of docs) {
+    const previous = collapsed[collapsed.length - 1];
+    if (previous !== undefined && compareFindingDocs(previous, doc) === 0) {
+      continue;
+    }
+    collapsed.push(doc);
+  }
   return {
-    findings: findings.map((finding) => {
-      /** @type {Record<string, unknown>} */
-      const doc = { condition: finding.condition, message: finding.message };
-      if (finding.file !== undefined) doc.file = finding.file;
-      if (finding.location !== undefined) doc.location = finding.location;
-      return doc;
-    }),
+    findings: collapsed.map(
+      ({ code, message, locations, path, identities }) => ({
+        code,
+        message,
+        locations,
+        path,
+        identities,
+      }),
+    ),
   };
 }
 

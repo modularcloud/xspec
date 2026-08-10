@@ -20,13 +20,17 @@ import { Buffer } from "node:buffer";
 import { expect, onTestFinished, test } from "vitest";
 import { HarnessAssertionError } from "../helpers/assertions.js";
 import type { RunResult } from "../helpers/subprocess.js";
+import type { Finding } from "../helpers/adapters/index.js";
 import {
   ITEM_STATUSES,
   assertJsonKeysByteSorted,
   assertReportMentions,
+  assertUnavailabilityMarkerForms,
   classifyIgnoredReasons,
+  compareFindings,
   conditionMention,
   decodeCoverageReport,
+  decodeDatum,
   decodeEdgesReport,
   decodeExportReport,
   decodeFindingsReport,
@@ -44,6 +48,8 @@ import {
   decodeReachableReport,
   decodeSessionListReport,
   decodeSessionStatusReport,
+  expectNonNegativeInteger,
+  rootSite,
   stageBlockedByAbsentItem,
   stageBlockedByCycle,
   stageDeleteItemField,
@@ -207,24 +213,63 @@ const GOOD_IDS_TREE = {
   ],
 };
 
+// A findings-only report in the literal SPEC 12.7 form (a form-exact
+// surface, H-3): entries deliberately span a located condition, a
+// multi-location cycle, a policy finding (locations [] / path null /
+// contractual identities), a path-level condition, a refusal reason, and a
+// code-less finding — in the pinned findings order (numbered conditions in
+// numeric order, then refusal reasons, then code-less).
 const GOOD_FINDINGS = {
   findings: [
     {
-      condition: "14.2",
-      message: 'expected <S id="validCredentials"> nested inside login',
-      file: "specs/A.mdx",
-      location: { start: 40, end: 78 },
+      code: "invalid-structural-id", // 14.2
+      message: 'expected <S id="login.validCredentials"> nested inside login',
+      locations: [{ file: "specs/A.mdx", range: { start: 40, end: 78 } }],
+      path: null,
+      identities: [],
     },
     {
-      condition: "14.12",
-      message: "policy rule violated",
-      rule: "no-derived-to-base",
-      edge: EDGE_OUT,
-    },
-    {
-      condition: "14.9",
+      code: "cycle", // 14.9 — one finding locating every participant (T14-8)
       message: "dependency cycle",
-      cycle: ["specs/A.mdx#a", "specs/B.mdx#b", "specs/A.mdx#a"],
+      locations: [
+        { file: "specs/A.mdx", range: { start: 10, end: 30 } },
+        { file: "specs/B.mdx", range: { start: 5, end: 25 } },
+      ],
+      path: null,
+      identities: ["specs/A.mdx#a", "specs/B.mdx#b"],
+    },
+    {
+      code: "policy-violation", // 14.12 — no locations, no path, identities
+      message: "policy rule violated",
+      locations: [],
+      path: null,
+      identities: [
+        "no-derived-to-base",
+        "specs/A.mdx#login",
+        "depends",
+        "specs/B.mdx#account",
+      ],
+    },
+    {
+      code: "unreadable-record", // 14.23 — a path-level condition
+      message: "graph data cannot be read as a record; rebuild",
+      locations: [],
+      path: ".xspec",
+      identities: [],
+    },
+    {
+      code: "refused-id-collision", // refusal reasons sort after 14.1–14.23
+      message: "the new id collides with a remaining bearer",
+      locations: [{ file: "specs/A.mdx", range: { start: 3, end: 9 } }],
+      path: null,
+      identities: ["specs/A.mdx#login"],
+    },
+    {
+      code: null, // code-less findings sort last (12.7)
+      message: "refused: the review operation names a blocked item",
+      locations: [],
+      path: null,
+      identities: [],
     },
   ],
 };
@@ -762,39 +807,103 @@ const DECODERS: readonly DecoderSpec[] = [
     ],
   },
   {
-    name: "build/check findings",
+    name: "12.7 findings report",
     decode: decodeFindingsReport,
     good: GOOD_FINDINGS,
     verify: (decoded: ReturnType<typeof decodeFindingsReport>) => {
-      expect(decoded.findings).toHaveLength(3);
-      expect(decoded.findings[0].condition).toBe("14.2");
-      expect(decoded.findings[0].file).toBe("specs/A.mdx");
-      expect(decoded.findings[0].location).toEqual({ start: 40, end: 78 });
-      expect(decoded.findings[1].rule).toBe("no-derived-to-base");
-      expect(decoded.findings[1].edge).toEqual(EDGE_OUT);
-      expect(decoded.findings[2].cycle).toEqual([
-        "specs/A.mdx#a",
-        "specs/B.mdx#b",
-        "specs/A.mdx#a",
+      expect(decoded.findings).toHaveLength(6);
+      // The document members decode literally (form-exact, H-3) …
+      expect(decoded.findings[0].code).toBe("invalid-structural-id");
+      expect(decoded.findings[0].locations).toEqual([
+        { file: "specs/A.mdx", range: { start: 40, end: 78 } },
       ]);
+      expect(decoded.findings[0].path).toBeNull();
+      expect(decoded.findings[0].identities).toEqual([]);
+      // … and the 14.N condition identity is DERIVED through the pinned
+      // token table (model.ts), never read from the document.
+      expect(decoded.findings[0].condition).toBe("14.2");
+      expect(decoded.findings[1].condition).toBe("14.9");
+      expect(decoded.findings[1].locations).toHaveLength(2);
+      expect(decoded.findings[2].condition).toBe("14.12");
+      expect(decoded.findings[2].identities).toEqual([
+        "no-derived-to-base",
+        "specs/A.mdx#login",
+        "depends",
+        "specs/B.mdx#account",
+      ]);
+      expect(decoded.findings[3].path).toBe(".xspec");
+      expect(decoded.findings[4].code).toBe("refused-id-collision");
+      expect(decoded.findings[4].condition).toBeNull(); // refusal: no 14.N
+      expect(decoded.findings[5].code).toBeNull();
+      expect(decoded.findings[5].condition).toBeNull();
     },
+    alsoGood: [
+      {
+        label: "an empty findings array (a finding-free report)",
+        doc: { findings: [] },
+        verify: (decoded: ReturnType<typeof decodeFindingsReport>): void => {
+          expect(decoded.findings).toEqual([]);
+        },
+      },
+      {
+        label:
+          "a non-UTF-8 concerned path in the marked byte form (SPEC 12.0/12.7)",
+        doc: {
+          findings: [
+            {
+              code: "invalid-source-path",
+              message: "a discovered source path is not valid UTF-8",
+              locations: [],
+              path: { bytes: "ff2f61" },
+              identities: [],
+            },
+          ],
+        },
+        verify: (decoded: ReturnType<typeof decodeFindingsReport>): void => {
+          expect(decoded.findings[0]!.path).toEqual({ bytes: "ff2f61" });
+        },
+      },
+    ],
     bad: [
       { label: "missing findings list", doc: {} },
       {
-        label: "finding missing condition",
-        doc: omit(GOOD_FINDINGS, "findings", 0, "condition"),
+        label: "null findings (null never encodes emptiness, SPEC 12.7)",
+        doc: { findings: null },
       },
       {
-        label: "condition not a 14.<n> identity",
-        doc: put(GOOD_FINDINGS, "oops", "findings", 0, "condition"),
+        label: "an extra member on the report (12.7: exactly {findings})",
+        doc: { findings: [], summary: "3 errors" },
       },
       {
-        label: "condition outside section 14",
-        doc: put(GOOD_FINDINGS, "15.1", "findings", 0, "condition"),
+        label: "finding missing its code member (null is never omitted)",
+        doc: omit(GOOD_FINDINGS, "findings", 0, "code"),
       },
       {
-        label: "condition 14.0 (no such condition)",
-        doc: put(GOOD_FINDINGS, "14.0", "findings", 0, "condition"),
+        label: "unknown code token",
+        doc: put(GOOD_FINDINGS, "oops", "findings", 0, "code"),
+      },
+      {
+        label:
+          'the condition ordinal spelled as the code ("14.2" is no token — ' +
+          "the numeral is no part of the value, SPEC 14)",
+        doc: put(GOOD_FINDINGS, "14.2", "findings", 0, "code"),
+      },
+      {
+        label: "the retired pre-12.7 finding shape (condition/file/location)",
+        doc: {
+          findings: [
+            {
+              condition: "14.2",
+              message: "old shape",
+              file: "specs/A.mdx",
+              location: { start: 40, end: 78 },
+            },
+          ],
+        },
+      },
+      {
+        label: "an extra member on a finding (12.7: exactly the five)",
+        doc: put(GOOD_FINDINGS, "extra", "findings", 0, "hint"),
       },
       {
         label: "finding missing message",
@@ -805,26 +914,159 @@ const DECODERS: readonly DecoderSpec[] = [
         doc: put(GOOD_FINDINGS, "", "findings", 1, "message"),
       },
       {
-        label: "malformed location",
+        label: "finding missing locations",
+        doc: omit(GOOD_FINDINGS, "findings", 0, "locations"),
+      },
+      {
+        label: "null locations (a list-valued member is [] when empty)",
+        doc: put(GOOD_FINDINGS, null, "findings", 0, "locations"),
+      },
+      {
+        label: "location missing its range",
+        doc: omit(GOOD_FINDINGS, "findings", 0, "locations", 0, "range"),
+      },
+      {
+        label: "location with an extra member",
+        doc: put(GOOD_FINDINGS, 3, "findings", 0, "locations", 0, "line"),
+      },
+      {
+        label: "malformed range (end < start)",
         doc: put(
           GOOD_FINDINGS,
           { start: 78, end: 40 },
           "findings",
           0,
-          "location",
+          "locations",
+          0,
+          "range",
         ),
       },
       {
-        label: "wrong-typed file (must reject, not default)",
-        doc: put(GOOD_FINDINGS, 9, "findings", 0, "file"),
+        label: "range with an extra member (12.7: exactly {start, end})",
+        doc: put(
+          GOOD_FINDINGS,
+          { start: 40, end: 78, length: 38 },
+          "findings",
+          0,
+          "locations",
+          0,
+          "range",
+        ),
       },
       {
-        label: "edge with unknown kind",
-        doc: put(GOOD_FINDINGS, "dependz", "findings", 1, "edge", "kind"),
+        label:
+          "locations out of order within a finding (12.7: file bytes, " +
+          "then start, then end)",
+        doc: put(
+          GOOD_FINDINGS,
+          [
+            { file: "specs/B.mdx", range: { start: 5, end: 25 } },
+            { file: "specs/A.mdx", range: { start: 10, end: 30 } },
+          ],
+          "findings",
+          1,
+          "locations",
+        ),
       },
       {
-        label: "cycle with empty identity",
-        doc: put(GOOD_FINDINGS, [""], "findings", 2, "cycle"),
+        label: "finding missing its path member (null is never omitted)",
+        doc: omit(GOOD_FINDINGS, "findings", 3, "path"),
+      },
+      {
+        label: "wrong-typed path",
+        doc: put(GOOD_FINDINGS, 9, "findings", 3, "path"),
+      },
+      {
+        label: "byte-form path with uppercase hex",
+        doc: put(GOOD_FINDINGS, { bytes: "FF2F61" }, "findings", 3, "path"),
+      },
+      {
+        label: "byte-form path with odd-length hex",
+        doc: put(GOOD_FINDINGS, { bytes: "ff2" }, "findings", 3, "path"),
+      },
+      {
+        label:
+          "byte-form path whose bytes are valid UTF-8 (12.7: such a path " +
+          "is a plain string)",
+        doc: put(GOOD_FINDINGS, { bytes: "612f62" }, "findings", 3, "path"),
+      },
+      {
+        label: "byte-form path with an extra member",
+        doc: put(
+          GOOD_FINDINGS,
+          { bytes: "ff", hint: "raw" },
+          "findings",
+          3,
+          "path",
+        ),
+      },
+      {
+        label: "path string carrying a lone surrogate (no UTF-8 bytes)",
+        doc: put(GOOD_FINDINGS, "\ud800", "findings", 3, "path"),
+      },
+      {
+        label: "finding missing identities",
+        doc: omit(GOOD_FINDINGS, "findings", 2, "identities"),
+      },
+      {
+        label: "identities with an empty string",
+        doc: put(GOOD_FINDINGS, [""], "findings", 2, "identities"),
+      },
+      {
+        label: "identities not an array",
+        doc: put(
+          GOOD_FINDINGS,
+          "no-derived-to-base",
+          "findings",
+          2,
+          "identities",
+        ),
+      },
+      {
+        label:
+          "findings out of the pinned order (numeric condition order: " +
+          "14.9 may not precede 14.2)",
+        doc: {
+          findings: [
+            structuredClone(GOOD_FINDINGS.findings[1]),
+            structuredClone(GOOD_FINDINGS.findings[0]),
+          ],
+        },
+      },
+      {
+        label:
+          "lexicographic code-ordinal order passed off as numeric " +
+          "(14.10 sorts after 14.2, not before)",
+        doc: {
+          findings: [
+            {
+              code: "stale-output", // 14.10
+              message: "stale module",
+              locations: [],
+              path: "specs/A.xspec.ts",
+              identities: [],
+            },
+            structuredClone(GOOD_FINDINGS.findings[0]), // 14.2
+          ],
+        },
+      },
+      {
+        label: "a code-less finding sorted before a coded one",
+        doc: {
+          findings: [
+            structuredClone(GOOD_FINDINGS.findings[5]),
+            structuredClone(GOOD_FINDINGS.findings[0]),
+          ],
+        },
+      },
+      {
+        label: "findings identical in every member (12.7 collapses duplicates)",
+        doc: {
+          findings: [
+            structuredClone(GOOD_FINDINGS.findings[0]),
+            structuredClone(GOOD_FINDINGS.findings[0]),
+          ],
+        },
       },
     ],
   },
@@ -1260,6 +1502,185 @@ test("S-5: decoder context labels surface in diagnoses (two-document compares st
     decodeNodeReport(null, "second run"),
   );
   expect(failure.message).toContain("second run");
+});
+
+// --- the pinned 12.7 findings-order comparator ---------------------------------
+
+/** A decoded finding literal for comparator vectors (condition is derived
+ * information the comparator never reads). */
+function findingWith(over: Partial<Finding>): Finding {
+  return {
+    code: null,
+    condition: null,
+    message: "m",
+    locations: [],
+    path: null,
+    identities: [],
+    ...over,
+  };
+}
+
+test("S-5: the findings comparator orders codes numerically, refusals in 14's order, code-less last", () => {
+  const c14_2 = findingWith({ code: "invalid-structural-id" });
+  const c14_10 = findingWith({ code: "stale-output" });
+  // Numeric condition order, not lexicographic: 14.2 before 14.10 even
+  // though "14.10" < "14.2" as strings.
+  expect(compareFindings(c14_2, c14_10)).toBeLessThan(0);
+  // Refusal reasons sort after every numbered condition, in 14's own order.
+  const refusalFirst = findingWith({ code: "refused-invalid-id" });
+  const refusalLater = findingWith({ code: "refused-cycle" });
+  expect(
+    compareFindings(findingWith({ code: "unreadable-record" }), refusalFirst),
+  ).toBeLessThan(0);
+  expect(compareFindings(refusalFirst, refusalLater)).toBeLessThan(0);
+  // Code-less findings sort last.
+  expect(
+    compareFindings(refusalLater, findingWith({ code: null })),
+  ).toBeLessThan(0);
+});
+
+test("S-5: the findings comparator compares locations, paths, and identities byte-wise with the prefix rule", () => {
+  const locA = { file: "specs/A.mdx", range: { start: 10, end: 30 } };
+  const locB = { file: "specs/B.mdx", range: { start: 5, end: 25 } };
+  // Element-wise location order, proper prefix first.
+  expect(
+    compareFindings(
+      findingWith({ locations: [locA] }),
+      findingWith({ locations: [locA, locB] }),
+    ),
+  ).toBeLessThan(0);
+  expect(
+    compareFindings(
+      findingWith({ locations: [locA] }),
+      findingWith({ locations: [locB] }),
+    ),
+  ).toBeLessThan(0);
+  // A null concerned path sorts before any path.
+  expect(
+    compareFindings(findingWith({ path: null }), findingWith({ path: "a" })),
+  ).toBeLessThan(0);
+  // Paths compare byte-wise whatever their presentation form: the marked
+  // byte form 0xFF sorts after the string "a" (0x61) in one byte order.
+  expect(
+    compareFindings(
+      findingWith({ path: "a" }),
+      findingWith({ path: { bytes: "ff" } }),
+    ),
+  ).toBeLessThan(0);
+  // Identities compare by UTF-8 bytes, not UTF-16 code units: U+FFFD
+  // (EF BF BD) sorts before U+10000 (F0 90 80 80), while UTF-16 compares
+  // them the other way around.
+  expect(
+    compareFindings(
+      findingWith({ identities: ["�"] }),
+      findingWith({ identities: ["\u{10000}"] }),
+    ),
+  ).toBeLessThan(0);
+  expect("�" < "\u{10000}").toBe(false); // the UTF-16 trap being guarded
+  // The message is the final tie-break; full equality is 0 (a duplicate).
+  expect(
+    compareFindings(
+      findingWith({ message: "a" }),
+      findingWith({ message: "b" }),
+    ),
+  ).toBeLessThan(0);
+  expect(compareFindings(findingWith({}), findingWith({}))).toBe(0);
+});
+
+// --- the three-state datum decode (11.4, 12.7) ---------------------------------
+
+test("S-5: the datum decode separates plain value, null, and the unavailability marker", () => {
+  const site = rootSite("datum self-test");
+  expect(decodeDatum(5, site, expectNonNegativeInteger)).toEqual({
+    state: "value",
+    value: 5,
+  });
+  expect(decodeDatum(null, site, expectNonNegativeInteger)).toEqual({
+    state: "null",
+  });
+  // The marker never reaches the value decoder — a decoder that throws
+  // proves the marker (and null) are recognized structurally, not defaulted.
+  const neverCalled = (): never => {
+    throw new Error("the value decoder must not run for null or the marker");
+  };
+  expect(decodeDatum({ unavailable: true }, site, neverCalled)).toEqual({
+    state: "unavailable",
+  });
+  expect(decodeDatum(null, site, neverCalled)).toEqual({ state: "null" });
+});
+
+test("S-5: the datum decode rejects omission, malformed markers, and malformed plain values", () => {
+  const site = rootSite("datum self-test");
+  // An absent member is never a state: null is never omission (12.7).
+  expectDiagnosed("omitted member", () =>
+    decodeDatum(undefined, site, expectNonNegativeInteger),
+  );
+  // An object carrying "unavailable" must be exactly the marker.
+  expectDiagnosed("unavailable: false", () =>
+    decodeDatum({ unavailable: false }, site, expectNonNegativeInteger),
+  );
+  expectDiagnosed("marker with an extra member", () =>
+    decodeDatum(
+      { unavailable: true, reason: "x" },
+      site,
+      expectNonNegativeInteger,
+    ),
+  );
+  expectDiagnosed('unavailable: "true" (not the boolean)', () =>
+    decodeDatum({ unavailable: "true" }, site, expectNonNegativeInteger),
+  );
+  // A plain value still decodes through the value decoder, fail-loud.
+  expectDiagnosed("plain value failing its decoder", () =>
+    decodeDatum("five", site, expectNonNegativeInteger),
+  );
+});
+
+// --- the unavailability-marker structural walk (T12.7-1) ------------------------
+
+test("S-5: the marker walk accepts documents whose only unavailable-bearing objects are exact markers", () => {
+  assertUnavailabilityMarkerForms(
+    {
+      findings: [],
+      views: [
+        {
+          root: {
+            identity: { unavailable: true },
+            tags: null,
+            children: [{ identity: "a", tags: ["x"] }],
+          },
+        },
+      ],
+      delta: { unavailable: true },
+    },
+    "clean document",
+  );
+  // The marker itself at top level is a legitimate document value.
+  assertUnavailabilityMarkerForms({ unavailable: true }, "bare marker");
+  // Scalars and arrays carry no objects to offend.
+  assertUnavailabilityMarkerForms([1, "two", null], "scalar array");
+});
+
+test("S-5: the marker walk rejects near-markers anywhere in the tree, naming the path", () => {
+  const wrongValue = expectDiagnosed("unavailable: false", () =>
+    assertUnavailabilityMarkerForms(
+      { resolution: { unavailable: false } },
+      "wrong value",
+    ),
+  );
+  expect(wrongValue.message).toContain("$.resolution");
+  const extraMember = expectDiagnosed("marker with a sibling member", () =>
+    assertUnavailabilityMarkerForms(
+      { views: [{ source: { unavailable: true, identity: "a" } }] },
+      "extra member",
+    ),
+  );
+  expect(extraMember.message).toContain("$.views[0].source");
+  expectDiagnosed("unavailable as an ordinary member", () =>
+    assertUnavailabilityMarkerForms(
+      { node: { unavailable: "soon", other: 1 } },
+      "ordinary member",
+    ),
+  );
 });
 
 // --- human-report matcher ----------------------------------------------------

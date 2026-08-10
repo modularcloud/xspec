@@ -1781,19 +1781,118 @@ function emitJsonOnly(io, doc) {
   io.stdout(canonicalJson(doc) + "\n");
 }
 
+// SPEC 14's stable code tokens by condition ordinal ("14.N" → token). The
+// JSON report carries the token string alone (SPEC 12.7, 14); the ordinal
+// orders findings and is no part of the value. Only the conditions this
+// conformer's scope reports appear.
+const CODE_TOKENS = {
+  14.1: "missing-id",
+  14.2: "invalid-structural-id",
+  14.3: "duplicate-id",
+  14.4: "invalid-segment-or-tag",
+  "14.10": "stale-output",
+  14.13: "journal-error",
+  14.19: "invalid-source-path",
+  "14.20": "unparseable-source",
+  14.21: "corrupt-session",
+};
+
+/** A condition's ordinal (the `N` of `14.N`), ordering findings (SPEC 12.7). */
+function conditionOrdinal(condition) {
+  return Number(condition.slice(3));
+}
+
+/**
+ * The pinned findings order (SPEC 12.7): by code (numbered conditions in
+ * numeric order), then locations element-wise (file path bytes, range start,
+ * range end; a proper prefix first), then concerned path (null before any
+ * path, byte-wise otherwise), then identities, then message — this scope's
+ * identities are always empty, so the remaining dimensions decide.
+ */
+function compareFindingDocs(a, b) {
+  const byOrdinal =
+    conditionOrdinal(a.internalCondition) -
+    conditionOrdinal(b.internalCondition);
+  if (byOrdinal !== 0) return byOrdinal;
+  const shared = Math.min(a.locations.length, b.locations.length);
+  for (let i = 0; i < shared; i += 1) {
+    const byFile = Buffer.compare(
+      Buffer.from(a.locations[i].file, "utf8"),
+      Buffer.from(b.locations[i].file, "utf8"),
+    );
+    if (byFile !== 0) return byFile;
+    if (a.locations[i].range.start !== b.locations[i].range.start) {
+      return a.locations[i].range.start - b.locations[i].range.start;
+    }
+    if (a.locations[i].range.end !== b.locations[i].range.end) {
+      return a.locations[i].range.end - b.locations[i].range.end;
+    }
+  }
+  if (a.locations.length !== b.locations.length) {
+    return a.locations.length - b.locations.length;
+  }
+  if ((a.path === null) !== (b.path === null)) return a.path === null ? -1 : 1;
+  if (a.path !== null && b.path !== null) {
+    const byPath = Buffer.compare(
+      Buffer.from(a.path, "utf8"),
+      Buffer.from(b.path, "utf8"),
+    );
+    if (byPath !== 0) return byPath;
+  }
+  return Buffer.compare(
+    Buffer.from(a.message, "utf8"),
+    Buffer.from(b.message, "utf8"),
+  );
+}
+
+/**
+ * The findings report in the 12.7 form: one `{"code", "message",
+ * "locations", "path", "identities"}` per finding. A finding carrying an
+ * in-source location (the located conditions of this scope) locates the
+ * offending construct with `path` null; a path-level finding (14.10, 14.13,
+ * 14.19, 14.21) carries the file or path it concerns with `locations` empty.
+ * Findings are emitted in the pinned order, identical findings collapsed to
+ * one (SPEC 12.7).
+ */
 function findingsDoc(findings) {
+  const docs = findings.map((finding) => ({
+    code: CODE_TOKENS[finding.condition],
+    message: finding.message,
+    locations:
+      finding.location === undefined
+        ? []
+        : [
+            {
+              file: finding.file,
+              range: {
+                start: finding.location.start,
+                end: finding.location.end,
+              },
+            },
+          ],
+    path: finding.location === undefined ? (finding.file ?? null) : null,
+    identities: [],
+    internalCondition: finding.condition,
+  }));
+  docs.sort(compareFindingDocs);
+  const collapsed = [];
+  for (const doc of docs) {
+    const previous = collapsed[collapsed.length - 1];
+    if (previous !== undefined && compareFindingDocs(previous, doc) === 0) {
+      continue;
+    }
+    collapsed.push(doc);
+  }
   return {
-    findings: findings.map((finding) => {
-      const entry = { condition: finding.condition, message: finding.message };
-      if (finding.file !== undefined) entry.file = finding.file;
-      if (finding.location !== undefined) {
-        entry.location = {
-          end: finding.location.end,
-          start: finding.location.start,
-        };
-      }
-      return entry;
-    }),
+    findings: collapsed.map(
+      ({ code, message, locations, path, identities }) => ({
+        code,
+        message,
+        locations,
+        path,
+        identities,
+      }),
+    ),
   };
 }
 

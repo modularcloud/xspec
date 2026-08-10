@@ -173,24 +173,113 @@ export interface IdsTreeNode {
 }
 
 /**
- * One validation/check finding (SPEC.md 14; T14-1, T7.5-2, T5.3-1, T6.1-3).
- * `condition` is the SPEC.md 14 condition identity (`"14.2"`); `message` is
- * the correction-oriented text (information presence, never exact wording).
- * The optional fields carry the extra information particular findings must
- * identify: source file and location, the violated policy rule and offending
- * edge (7.5), a full cycle path (5.3).
+ * SPEC.md 14's numbered-condition stable code tokens, in ordinal order:
+ * index N-1 holds condition 14.N's token. The numeral is the condition's
+ * ordinal — it orders findings (SPEC 12.7) and is no part of the code's
+ * value, which is the token string alone (SPEC 14, T14-6).
  */
-export interface Finding {
-  readonly condition: string;
-  readonly message: string;
-  readonly file?: string;
-  readonly location?: SourceRange;
-  readonly rule?: string;
-  readonly edge?: GraphEdge;
-  readonly cycle?: readonly string[];
+export const CONDITION_CODE_TOKENS = [
+  "missing-id", // 14.1
+  "invalid-structural-id", // 14.2
+  "duplicate-id", // 14.3
+  "invalid-segment-or-tag", // 14.4
+  "unknown-dependency", // 14.5
+  "unknown-text-target", // 14.6
+  "unknown-ts-reference", // 14.7
+  "invalid-argument", // 14.8
+  "cycle", // 14.9
+  "stale-output", // 14.10
+  "cross-module-text", // 14.11
+  "policy-violation", // 14.12
+  "journal-error", // 14.13
+  "configuration-error", // 14.14
+  "invalid-import", // 14.15
+  "invalid-construct", // 14.16
+  "invalid-prop", // 14.17
+  "unsupported-node-usage", // 14.18
+  "invalid-source-path", // 14.19
+  "unparseable-source", // 14.20
+  "corrupt-session", // 14.21
+  "obstructed-write-path", // 14.22
+  "unreadable-record", // 14.23
+] as const;
+export type ConditionCodeToken = (typeof CONDITION_CODE_TOKENS)[number];
+
+/**
+ * SPEC.md 14's refusal-reason stable codes, in the order 14 lists them —
+ * the findings order after the numbered conditions (SPEC 12.7, T14-7).
+ */
+export const REFUSAL_CODE_TOKENS = [
+  "refused-invalid-id",
+  "refused-identity-unchanged",
+  "refused-id-collision",
+  "refused-structural-parent",
+  "refused-unresolvable-reference",
+  "refused-cycle",
+  "refused-destination-exists",
+  "refused-missing-target-parent",
+  "refused-invalid-destination",
+] as const;
+export type RefusalCodeToken = (typeof REFUSAL_CODE_TOKENS)[number];
+
+/**
+ * The harness-pinned SPEC.md 14 token→condition table: the `14.N` condition
+ * identity of a numbered-condition code token, `null` for refusal reasons
+ * and code-less findings. The `14.N` spelling is harness vocabulary derived
+ * from the token — the reported value is always the token string (12.7) —
+ * so condition-identity assertions are assertions against tokens.
+ */
+export function conditionIdentityOf(code: string | null): string | null {
+  if (code === null) return null;
+  const index = (CONDITION_CODE_TOKENS as readonly string[]).indexOf(code);
+  return index === -1 ? null : `14.${String(index + 1)}`;
 }
 
-/** A failing `build` / `check` findings report (exit 1, stdout). */
+/**
+ * A SPEC.md 12.7 path value: a string where the path's bytes are valid
+ * UTF-8, and otherwise the marked byte form of 12.0 — `{"bytes": "…"}`,
+ * lowercase hexadecimal, two digits per byte, an object equal to no path
+ * string.
+ */
+export type PathValue = string | MarkedBytePath;
+export interface MarkedBytePath {
+  readonly bytes: string;
+}
+
+/** One finding location: an offending construct's file and range (12.7). */
+export interface FindingLocation {
+  readonly file: PathValue;
+  readonly range: SourceRange;
+}
+
+/**
+ * One finding in the literal SPEC.md 12.7 form (a form-exact surface, H-3):
+ * `code` is the stable token 14 assigns (`null` where 14 assigns none);
+ * `message` the human-readable description; `locations` one `{file, range}`
+ * per offending construct, ordered by file path bytes, then range start,
+ * then range end, empty for conditions without in-source locations; `path`
+ * the concerned file or path (`null` for located conditions); `identities`
+ * the identities or other context strings the condition names, empty where
+ * none. `condition` is NOT a document member: it is the derived `14.N`
+ * condition identity of a numbered-condition token (`conditionIdentityOf`),
+ * `null` for refusal reasons and code-less findings, kept so existing
+ * condition-identity assertions are expressed against the decoded token.
+ */
+export interface Finding {
+  readonly code: string | null;
+  readonly message: string;
+  readonly locations: readonly FindingLocation[];
+  readonly path: PathValue | null;
+  readonly identities: readonly string[];
+  /** Derived via the pinned token table — never read from the document. */
+  readonly condition: string | null;
+}
+
+/**
+ * A findings-only report — `{"findings": […]}` exactly (SPEC 12.7): a
+ * failing `build`'s validation errors, `check`'s findings, the findings of
+ * refusing reads (13.3) and refused operations (6.4, 6.5, 10.7).
+ */
 export interface FindingsReport {
   readonly findings: readonly Finding[];
 }

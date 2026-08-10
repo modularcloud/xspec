@@ -974,13 +974,19 @@ function expectedFindingRenderings(trial: CaptureTrial): string[] {
   return expected.sort();
 }
 
+/**
+ * Render one policy finding from its contractual identities — in order, the
+ * violated rule's name and the offending edge's source identity, kind token,
+ * and target identity (SPEC 14.12, 12.7) — as `rule :: kind: from -> to`.
+ * A finding without the four identities renders verbatim, failing the
+ * comparison with the offense visible.
+ */
 function renderFinding(finding: Finding): string {
-  return (
-    `${finding.rule ?? "<no rule>"} :: ` +
-    (finding.edge === undefined
-      ? "<no edge>"
-      : `${finding.edge.kind}: ${finding.edge.from} -> ${finding.edge.to}`)
-  );
+  if (finding.identities.length !== 4) {
+    return `<malformed 14.12 identities> ${JSON.stringify(finding.identities)}`;
+  }
+  const [rule, from, kind, to] = finding.identities;
+  return `${rule} :: ${kind}: ${from} -> ${to}`;
 }
 
 function renderCaptureTrial(trial: CaptureTrial): string {

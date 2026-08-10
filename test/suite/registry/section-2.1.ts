@@ -23,6 +23,7 @@ import type { Finding } from "../../helpers/adapters/index.js";
 import {
   DEPENDENCY_EDGE_KINDS,
   decodeEdgesReport,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -444,19 +445,18 @@ const T2_1_3 = defineProductTest({
             { file: "specs/A.mdx" },
             findingContext,
           );
-          const { location } = finding;
-          const within = windows.some(
-            (window) =>
-              location !== undefined &&
-              location.start >= window.start &&
-              location.end <= window.end,
-          );
-          if (!within) {
-            fail(
-              `${findingContext}: its location [${String(location?.start)}, ` +
-                `${String(location?.end)}) must point at one of the two colliding ` +
-                `import statements (byte windows ${JSON.stringify(windows)})`,
+          for (const { range } of finding.locations) {
+            const within = windows.some(
+              (window) =>
+                range.start >= window.start && range.end <= window.end,
             );
+            if (!within) {
+              fail(
+                `${findingContext}: every location [${String(range.start)}, ` +
+                  `${String(range.end)}) must point at one of the two colliding ` +
+                  `import statements (byte windows ${JSON.stringify(windows)})`,
+              );
+            }
           }
         }
       },
@@ -558,8 +558,9 @@ const SELF_IMPORT_SOURCE =
  * present in these fixtures — both files parse, and every reference
  * resolves), at most one finding per participating file (whether a product
  * reports a cycle once or per file is not fixed), and the report identifies
- * every participating file (SPEC 14: actionable errors identify the file)
- * through any of a finding's file, message, or cycle-path information.
+ * every participating file (SPEC 14: actionable errors identify the file —
+ * each participating import declaration located in the file containing it)
+ * through any of a finding's located files, message, or identity context.
  */
 function assertImportCycleFindings(
   findings: readonly Finding[],
@@ -580,9 +581,11 @@ function assertImportCycleFindings(
   }
   const identified = findings
     .map((finding) =>
-      [finding.message, finding.file ?? "", ...(finding.cycle ?? [])].join(
-        "\n",
-      ),
+      [
+        finding.message,
+        ...finding.locations.map((location) => renderPathValue(location.file)),
+        ...finding.identities,
+      ].join("\n"),
     )
     .join("\n");
   for (const file of expectedFiles) {

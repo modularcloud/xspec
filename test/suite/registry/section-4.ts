@@ -473,19 +473,17 @@ async function runInvalidTsImportArm(
       for (const finding of findings) {
         const findingContext = `${context}: a 14.15 finding`;
         assertFindingLocated(finding, { file: "src/app.ts" }, findingContext);
-        const { location } = finding;
-        const within = windows.some(
-          (window) =>
-            location !== undefined &&
-            location.start >= window.start &&
-            location.end <= window.end,
-        );
-        if (!within) {
-          fail(
-            `${findingContext}: its location [${String(location?.start)}, ` +
-              `${String(location?.end)}) must point at one of the colliding ` +
-              `import statements (byte windows ${JSON.stringify(windows)})`,
+        for (const { range } of finding.locations) {
+          const within = windows.some(
+            (window) => range.start >= window.start && range.end <= window.end,
           );
+          if (!within) {
+            fail(
+              `${findingContext}: every location [${String(range.start)}, ` +
+                `${String(range.end)}) must point at one of the colliding ` +
+                `import statements (byte windows ${JSON.stringify(windows)})`,
+            );
+          }
         }
       }
     },

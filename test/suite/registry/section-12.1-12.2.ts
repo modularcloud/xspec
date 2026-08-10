@@ -201,11 +201,11 @@ function assertAllStale(findings: readonly Finding[], context: string): void {
           `${JSON.stringify(finding.condition)} (message: ${JSON.stringify(finding.message)})`,
       );
     }
-    if (finding.file === undefined) {
+    if (finding.path === null) {
       fail(
-        `${context}: a 14.10 finding names the stale or orphaned file ` +
-          `(SPEC 14.10); got a finding without a file (message: ` +
-          `${JSON.stringify(finding.message)})`,
+        `${context}: a 14.10 finding names the stale or orphaned file as ` +
+          `its concerned path (SPEC 14.10, 12.7); got a finding without ` +
+          `one (message: ${JSON.stringify(finding.message)})`,
       );
     }
     if (!/build/i.test(finding.message)) {
@@ -225,13 +225,13 @@ function assertSingleStaleFile(
   context: string,
 ): void {
   assertAllStale(findings, context);
-  if (findings.length !== 1 || findings[0]!.file !== rel) {
+  if (findings.length !== 1 || findings[0]!.path !== rel) {
     fail(
       `${context}: the fixture's only stale file is ${JSON.stringify(rel)} — ` +
         `sources, configuration, and every other derived file are fresh — so ` +
         `exactly one 14.10 finding naming it is expected (SPEC 14.10); got ` +
         JSON.stringify(
-          findings.map(({ condition, file }) => ({ condition, file })),
+          findings.map(({ condition, path }) => ({ condition, path })),
         ),
     );
   }
@@ -243,11 +243,11 @@ function assertStaleFileNamed(
   rel: string,
   context: string,
 ): void {
-  if (!findings.some((finding) => finding.file === rel)) {
+  if (!findings.some((finding) => finding.path === rel)) {
     fail(
       `${context}: a 14.10 finding must name ${JSON.stringify(rel)} (SPEC ` +
-        `14.10: the error names the file); named files: ` +
-        JSON.stringify(findings.map((finding) => finding.file)),
+        `14.10: the error names the file; 12.7 concerned path); named: ` +
+        JSON.stringify(findings.map((finding) => finding.path)),
     );
   }
 }
@@ -965,15 +965,15 @@ const T12_2_2 = defineProductTest({
           (finding) => finding.condition === "14.21",
         )!;
         if (
-          corrupt.file !== CORRUPT_SESSION_PATH &&
+          corrupt.path !== CORRUPT_SESSION_PATH &&
           !/bad/.test(corrupt.message)
         ) {
           fail(
             `${context}: the 14.21 finding must identify the corrupt ` +
               `session — the finding naming the session file ` +
               `${CORRUPT_SESSION_PATH} or the message naming the session ` +
-              `"bad" (SPEC 14, 14.21; H-3 information presence); got file ` +
-              `${JSON.stringify(corrupt.file)}, message ${JSON.stringify(corrupt.message)}`,
+              `"bad" (SPEC 14, 14.21; H-3 information presence); got path ` +
+              `${JSON.stringify(corrupt.path)}, message ${JSON.stringify(corrupt.message)}`,
           );
         }
       },

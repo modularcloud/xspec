@@ -422,7 +422,7 @@ function assertRejectionFindings(
     );
   }
   for (const finding of findings) {
-    if (!allowed.includes(finding.condition)) {
+    if (finding.condition === null || !allowed.includes(finding.condition)) {
       fail(
         `${context}: reported condition ${JSON.stringify(finding.condition)} is not ` +
           `among the staged condition(s) ${JSON.stringify(allowed)} ` +

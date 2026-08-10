@@ -763,17 +763,24 @@ Depends on the derived file as a whole.
   "specs/B.mdx": derivedSource("Derived leaf one."),
 };
 
+/**
+ * Render one policy finding from its contractual identities — in order, the
+ * violated rule's name and the offending edge's source identity, kind token,
+ * and target identity (SPEC 14.12, 12.7) — as `rule :: kind: from -> to`.
+ * A finding without the four identities renders verbatim, failing the
+ * comparison with the offense visible.
+ */
+function renderPolicyIdentities(finding: Finding): string {
+  if (finding.identities.length !== 4) {
+    return `<malformed 14.12 identities> ${JSON.stringify(finding.identities)}`;
+  }
+  const [rule, from, kind, to] = finding.identities;
+  return `${rule} :: ${kind}: ${from} -> ${to}`;
+}
+
 /** Render policy findings for order-insensitive exact comparison (7.5). */
 function renderPolicyFindings(findings: readonly Finding[]): string[] {
-  return findings
-    .map(
-      (finding) =>
-        `${finding.rule ?? "<no rule>"} :: ` +
-        (finding.edge === undefined
-          ? "<no edge>"
-          : `${finding.edge.kind}: ${finding.edge.from} -> ${finding.edge.to}`),
-    )
-    .sort();
+  return findings.map(renderPolicyIdentities).sort();
 }
 
 /**

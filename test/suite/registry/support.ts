@@ -162,7 +162,10 @@ export async function readGeneratedModule(
  * Assert the exact multiset of SPEC.md 14 condition identities present in a
  * findings report (`{"14.2": 1, ...}`): every condition staged in the fixture
  * is reported — none masked away, none phantom, none double-reported (§14:
- * when several error conditions are present, each is reported).
+ * when several error conditions are present, each is reported). Counting keys
+ * are the derived `14.N` identities of numbered-condition code tokens
+ * (model.ts: the harness-pinned token table); a refusal finding counts under
+ * its refusal code, and a code-less finding under `"(code-less)"`.
  */
 export function assertConditionCounts(
   findings: readonly Finding[],
@@ -171,7 +174,8 @@ export function assertConditionCounts(
 ): void {
   const counts: Record<string, number> = {};
   for (const finding of findings) {
-    counts[finding.condition] = (counts[finding.condition] ?? 0) + 1;
+    const key = finding.condition ?? finding.code ?? "(code-less)";
+    counts[key] = (counts[key] ?? 0) + 1;
   }
   const render = (record: Readonly<Record<string, number>>): string[] =>
     Object.entries(record)
@@ -205,8 +209,8 @@ export interface FindingSourceExpectation {
   /** The workspace-relative, `/`-separated source file (SPEC.md 1.5, 14). */
   readonly file: string;
   /**
-   * Byte window the finding's location must fall within — as computed by the
-   * caller from its fixture's exact bytes (typically the offending
+   * Byte window the finding's location ranges must fall within — as computed
+   * by the caller from its fixture's exact bytes (typically the offending
    * construct's own range, end-widened where the caller tolerates a
    * line-granular location).
    */
@@ -214,40 +218,44 @@ export interface FindingSourceExpectation {
 }
 
 /**
- * Assert a finding identifies its source: the file it names, a location, and
- * optionally that the location falls within the offending construct's byte
- * window (SPEC.md 14: errors identify the file, location, and correction).
+ * Assert a finding locates its offending construct(s): at least one
+ * `locations` entry (SPEC.md 14: every condition that locates in source
+ * carries the containing file and a range; 12.7), every entry naming the
+ * expected workspace-relative file, and — when a window is given — every
+ * range falling within the offending construct's byte window.
  */
 export function assertFindingLocated(
   finding: Finding,
   expected: FindingSourceExpectation,
   context: string,
 ): void {
-  if (finding.file !== expected.file) {
-    fail(
-      `${context}: the finding must name the workspace-relative source file ` +
-        `(SPEC.md 14, 1.5); expected ${JSON.stringify(expected.file)}, got ` +
-        `${JSON.stringify(finding.file)} (message: ${JSON.stringify(finding.message)})`,
-    );
-  }
-  if (finding.location === undefined) {
+  if (finding.locations.length === 0) {
     fail(
       `${context}: the finding must carry a location (SPEC.md 14: errors identify ` +
-        `the file, location, and correction); got none (message: ` +
+        `the file, location, and correction; 12.7 locations); got none (message: ` +
         `${JSON.stringify(finding.message)})`,
     );
   }
-  const { window } = expected;
-  if (
-    window !== undefined &&
-    (finding.location.start < window.start || finding.location.end > window.end)
-  ) {
-    fail(
-      `${context}: the finding's location [${String(finding.location.start)}, ` +
-        `${String(finding.location.end)}) must fall within the offending construct's ` +
-        `byte window [${String(window.start)}, ${String(window.end)}] (message: ` +
-        `${JSON.stringify(finding.message)})`,
-    );
+  for (const location of finding.locations) {
+    if (location.file !== expected.file) {
+      fail(
+        `${context}: the finding must locate in the workspace-relative source ` +
+          `file (SPEC.md 14, 1.5, 12.7); expected ${JSON.stringify(expected.file)}, ` +
+          `got ${JSON.stringify(location.file)} (message: ${JSON.stringify(finding.message)})`,
+      );
+    }
+    const { window } = expected;
+    if (
+      window !== undefined &&
+      (location.range.start < window.start || location.range.end > window.end)
+    ) {
+      fail(
+        `${context}: the finding's location [${String(location.range.start)}, ` +
+          `${String(location.range.end)}) must fall within the offending construct's ` +
+          `byte window [${String(window.start)}, ${String(window.end)}] (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
   }
 }
 

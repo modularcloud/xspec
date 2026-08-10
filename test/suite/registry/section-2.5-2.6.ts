@@ -1231,15 +1231,12 @@ const T2_6_3 = defineProductTest({
         );
         const violation = findings[0]!;
         assertSameJson(
-          violation.rule,
-          "no-ui-to-core",
-          "T2.6-3 the violation names its rule (SPEC 7.5)",
-        );
-        assertSameJson(
-          violation.edge,
-          { from: T2_6_3_SRC, to: T2_6_3_TAGGED, kind: "depends" },
-          "T2.6-3 the violation reports the offending edge — selected by the nodes' " +
-            "tags (SPEC 2.6, 7.5)",
+          violation.identities,
+          ["no-ui-to-core", T2_6_3_SRC, "depends", T2_6_3_TAGGED],
+          "T2.6-3 the violation's identities are, in order, the violated " +
+            "rule's name and the offending edge's source identity, kind " +
+            "token, and target identity — the edge selected by the nodes' " +
+            "tags (SPEC 2.6, 7.5, 14.12, 12.7)",
         );
       },
     );

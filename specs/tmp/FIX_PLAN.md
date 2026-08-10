@@ -57,7 +57,7 @@ A "new test T<x>" task always means, in one change:
 
 ## Stage A — foundations (do these first; many tasks depend on them)
 
-- [ ] FP-001 — Rebuild the findings decode layer as a literal, form-exact
+- [x] FP-001 — Rebuild the findings decode layer as a literal, form-exact
   SPEC 12.7 decode; add the three-state datum decode; add the S-5 guards.
   [R1 #28, R2 #18, R2 #41; SPEC 12.7, TEST-SPEC §0 H-3 (amended), §17 S-5]
   - `test/helpers/adapters/reports.ts` (`decodeFinding`, ASSUMED-SHAPE
