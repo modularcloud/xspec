@@ -193,7 +193,7 @@ A "new test T<x>" task always means, in one change:
 
 ## Stage C — §§1–9 cross-cutting assertion sweeps (after FP-001)
 
-- [ ] FP-006 — Sweep §§1–9 condition assertions to assert stable code
+- [x] FP-006 — Sweep §§1–9 condition assertions to assert stable code
   tokens and the literal 12.7 finding form. [R1 #27, #28; TEST-SPEC §0
   ("where §14 assigns the condition or refusal reason a stable code, assert
   that exact code string"), SPEC 12.7, 14]
@@ -204,6 +204,31 @@ A "new test T<x>" task always means, in one change:
   `locations`, `path`, `identities`). Sweep the registry modules for
   sections 1–5, 7, 8, 9 (section 6 refusals are FP-007). Verify: affected
   files red-as-diagnosed only; S-5/S-1 unaffected.
+  [Done 2026-08-10 — already satisfied by FP-001's landing; no code change.
+  The sweep found every §§1–9 numbered-condition assertion site (1.3:
+  14.1–14.4; 1.4: 14.4; 1.5: 14.19; 1.6-1.7: 14.20; 2.1: 14.15/14.9; 2.4:
+  14.5–14.8; 2.5-2.6: 14.17/14.12; 2.7: 14.16/14.17/14.8; 4: 14.15;
+  4.3-4.4: 14.8/14.11; 4.5: 14.8/14.18; 5.1-5.3: 14.9; 7-*: 14.14/14.12/
+  14.15/14.19; 8: 14.12; sections 1.1-1.2, 2.2-2.3, 3, 4.1-4.2, 4.6,
+  5.4-5.6, 9, 9.3 assert none) routing through the shared helpers FP-001
+  rebuilt — `buildFindings`/`assertConditionCounts`/`assertFindingLocated`/
+  `finding.condition`/`expectConfigurationError` — all on the form-exact
+  12.7 decode (`decodeFindingForm`: exact five members, path forms, orders,
+  collapse). The `14.N` identity exists only as the pinned-table image of
+  the decode-validated token (FP-001's stated design: condition-identity
+  assertions are expressed against tokens; unknown or missing codes fail
+  the decode loudly), so each `"14.N"` assertion holds exactly for the one
+  SPEC 14 code string; `expectConfigurationError` asserts
+  `"configuration-error"` directly. No §§1–9 site asserts a condition via
+  stderr text, human-report mentions (`conditionMention` is S-5-only), or
+  ad-hoc JSON access. Verified: typecheck clean; `npm run test:self`
+  unchanged 4 planned mid-loop reds (certification-document ×3 → FP-091;
+  S-1 unmapped keys → stages E/G) with S-5 and certification green
+  (CONF-VALID, emitting 12.7-form findings with stable tokens, passes its
+  in-scope T1.3-*/T1.4-* tests; violators fail as certified); probe run of
+  FP-001-untouched section-2.4 red-as-diagnosed at the form-exact decode
+  ("expected no member \"condition\"" against the pre-12.7 product), no
+  crashes.]
 
 - [ ] FP-007 — Make §6 refusal assertions assert stable refusal codes with
   their concerned file/range/identity. [R1 #27; TEST-SPEC §§6.4–6.5, SPEC
