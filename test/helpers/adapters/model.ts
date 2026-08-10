@@ -284,6 +284,17 @@ export interface FindingsReport {
   readonly findings: readonly Finding[];
 }
 
+/**
+ * The exit-2 error document — `{"error": …}` exactly, holding one finding
+ * form (SPEC 12.0, 12.7): with JSON output in effect, an invocation failing
+ * with a usage or configuration error emits this document as its entire
+ * stdout. For a configuration error the finding carries the stable code and
+ * concerned path (14); for a plain usage error `code` and `path` are `null`.
+ */
+export interface ErrorDocument {
+  readonly error: Finding;
+}
+
 /** `coverage` (T8.2-1): all profiles by default, one when named. */
 export interface CoverageReport {
   readonly profiles: readonly CoverageProfileReport[];

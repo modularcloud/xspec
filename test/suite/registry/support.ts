@@ -9,10 +9,12 @@
 
 import { Buffer } from "node:buffer";
 import type { Finding, GraphEdge } from "../../helpers/adapters/index.js";
-import { decodeFindingsReport } from "../../helpers/adapters/index.js";
+import {
+  decodeErrorDocument,
+  decodeFindingsReport,
+} from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
-  assertStdoutEmpty,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
@@ -66,13 +68,40 @@ export async function runJson(
 }
 
 /**
+ * Decode an exit-2 run's stdout as the single 12.7 error document —
+ * `{"error": …}` exactly, one finding form — and return the finding (SPEC
+ * 12.0: with JSON output in effect, a usage or configuration error emits the
+ * error document as the entire stdout; H-5). Callers assert the exit code
+ * first (`expectExit`) and pass runs with JSON output in effect: `--json`
+ * among the arguments, or a JSON-only surface (10.7 export, 11, 12.6). The
+ * decode is form-exact (H-3); value assertions on `code`/`path` stay with
+ * the caller (T12.7-3 pins them fully).
+ */
+export function expectErrorDocument(
+  result: RunResult,
+  context: string,
+): Finding {
+  return decodeErrorDocument(
+    parseJsonStdout(
+      result,
+      `${context} — with JSON output in effect, an exit-2 invocation emits ` +
+        `the 12.7 error document as its entire stdout (SPEC 12.0, H-5)`,
+    ),
+    context,
+  ).error;
+}
+
+/**
  * Run a command with `--json` and assert the SPEC.md 14.14 configuration-error
- * contract: exit 2 exactly (a usage error, 12.0), byte-empty stdout (the
- * exit-2 error prevents emitting the single JSON document; H-5), and an
- * actionable standard-error message identifying the configuration as the
- * failing subject — any phrasing naming either the file (`xspec.config.ts`)
- * or the condition ("configuration", "config…") qualifies, so the
- * operationalization is /config/i; wording is otherwise free (H-3).
+ * contract: exit 2 exactly (a usage error, 12.0); stdout exactly the single
+ * 12.7 error document `{"error": …}` (12.0/12.7, H-5), its finding carrying
+ * the stable code `configuration-error` and a non-`null` concerned path (14
+ * defines both for configuration errors; the exact anchoring-form spelling is
+ * T12.7-3's assertion); and an actionable standard-error message identifying
+ * the configuration as the failing subject — any phrasing naming either the
+ * file (`xspec.config.ts`) or the condition ("configuration", "config…")
+ * qualifies, so the operationalization is /config/i; wording is otherwise
+ * free (H-3).
  */
 export async function expectConfigurationError(
   product: ProductBinding,
@@ -92,12 +121,21 @@ export async function expectConfigurationError(
       `error, reported by every command at configuration load as a usage ` +
       `error (SPEC 14.14, 12.0)`,
   );
-  assertStdoutEmpty(
-    result,
-    `${context} — under --json, stdout is byte-empty on exit 2: the ` +
-      `configuration error prevents emitting the single JSON document ` +
-      `(SPEC 12.0, H-5)`,
-  );
+  const error = expectErrorDocument(result, context);
+  if (error.code !== "configuration-error") {
+    fail(
+      `${context}: the error document's finding must carry the stable code ` +
+        `"configuration-error" (SPEC 14 condition 14, 12.7); got ` +
+        `${JSON.stringify(error.code)} (message: ${JSON.stringify(error.message)})`,
+    );
+  }
+  if (error.path === null) {
+    fail(
+      `${context}: a configuration error's finding carries its concerned ` +
+        `path — the configuration file, or "." for a failed upward search — ` +
+        `in the anchoring form (SPEC 14, 12.7); got null`,
+    );
+  }
   if (!/config/i.test(result.stderr)) {
     fail(
       `${context}: the configuration-error message on stderr must identify ` +

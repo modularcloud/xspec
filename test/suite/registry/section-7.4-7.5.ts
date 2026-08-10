@@ -26,15 +26,18 @@
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — exit
-//   2 exactly, byte-empty stdout under --json, stderr matching /config/i.
+//   2 exactly, the single 12.7 error document (stable code
+//   `configuration-error`, concerned path) as the entire stdout under
+//   --json, stderr matching /config/i.
 //   Every invalid fixture stages valid sources for every configured group, so
 //   the staged deviation is the workspace's only defect: a product that
 //   wrongly accepts the configuration proceeds to a clean build (exit 0) and
 //   fails the exit-code assertion — never exits 2 for a side reason.
 // - Unknown profile name at `coverage <name>` (T7.4-1) is a 12.0 usage error,
-//   not a 14.14: asserted as exit 2 with byte-empty stdout under --json (the
-//   exit-2 error prevents emitting the single JSON document, H-5) and a
-//   non-empty stderr diagnostic — no /config/i duty applies.
+//   not a 14.14: asserted as exit 2 with the single 12.7 error document as
+//   the entire stdout under --json (12.0: with JSON output in effect, an
+//   exit-2 invocation emits the error document; H-5) and a non-empty stderr
+//   diagnostic — no /config/i duty applies.
 // - Policy findings are compared as sorted "rule :: kind: from -> to"
 //   renderings plus an exact 14.12 condition count: SPEC 7.5 fixes the
 //   information (rule name + offending edge) and one finding per (rule, edge)
@@ -76,7 +79,6 @@ import {
 } from "../../helpers/adapters/index.js";
 import {
   assertFileBytes,
-  assertStdoutEmpty,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
@@ -92,6 +94,7 @@ import {
   assertSameJson,
   buildOk,
   expectConfigurationError,
+  expectErrorDocument,
   expectExit,
   readGeneratedModule,
   runJson,
@@ -586,8 +589,9 @@ const T7_4_1 = defineProductTest({
     );
 
     // (d) Unknown profile name at `coverage <name>` → usage error (12.0):
-    // exit 2, byte-empty stdout under --json, a stderr diagnostic. Not a
-    // 14.14 (the configuration is valid), so no /config/i duty applies.
+    // exit 2, the 12.7 error document as the entire stdout under --json, a
+    // stderr diagnostic. Not a 14.14 (the configuration is valid), so no
+    // /config/i duty applies.
     await withWorkspace(
       { files: { "xspec.config.ts": VALID_COVERAGE_CONFIG, ...MATRIX_FILES } },
       async (workspace) => {
@@ -600,11 +604,10 @@ const T7_4_1 = defineProductTest({
           `${label} — an unknown profile named in arguments is a usage ` +
             `error (SPEC 12.0)`,
         );
-        assertStdoutEmpty(
+        expectErrorDocument(
           result,
-          `${label} — under --json, stdout is byte-empty on exit 2: the ` +
-            `usage error prevents emitting the single JSON document ` +
-            `(SPEC 12.0, H-5)`,
+          `${label} — under --json, the exit-2 error document is the ` +
+            `entire stdout (SPEC 12.0, 12.7, H-5)`,
         );
         if (result.stderrBytes.length === 0) {
           fail(

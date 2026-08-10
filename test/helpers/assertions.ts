@@ -12,7 +12,10 @@
 //   stdout/stderr separation of SPEC.md 12.0 — `assertExitCode`,
 //   `assertStdoutEmpty`/`assertStderrEmpty`, `parseJsonStdout` (stdout is
 //   exactly one JSON document), and `assertJsonOutputConvention` (one JSON
-//   document on exit 0/1; empty stdout on exit 2; anything else diagnosed).
+//   document on every exit: a report/answer document on exit 0/1, the 12.7
+//   error document `{"error": …}` on exit 2; anything else diagnosed).
+//   Exit-2 stdout is byte-empty only when JSON output is NOT in effect
+//   (SPEC.md 12.0) — asserted per call site via `assertStdoutEmpty`.
 // - H-8: a `HarnessAssertionError` is the harness's *diagnosed assertion
 //   failure* — the failure shape every product-facing test must produce
 //   against a missing or stub product. Anything else thrown is a harness
@@ -167,10 +170,17 @@ export function parseJsonStdout(result: RunResult, context?: string): unknown {
 }
 
 /**
- * Assert the full `--json` stream convention of SPEC.md 12.0 / H-5 for a run:
- * exit 0 or 1 → stdout is exactly one JSON document (returned parsed);
- * exit 2 → stdout is byte-empty (returns undefined). Any other exit code —
- * a stub's unexpected code included — or a signal death fails diagnosed.
+ * Assert the stream convention of SPEC.md 12.0 / H-5 for a run with JSON
+ * output in effect (`--json` among the arguments, or a JSON-only surface):
+ * whatever the exit code, stdout is exactly one JSON document (returned
+ * parsed) — on exit 0/1 the report or answer document, on exit 2 the 12.7
+ * error document, `{"error": …}` exactly (asserted here at the protocol
+ * grain: a top-level object whose only member is `error`, holding an object;
+ * the literal finding-form decode is `decodeErrorDocument`,
+ * adapters/forms.ts). Any other exit code — a stub's unexpected code
+ * included — or a signal death fails diagnosed. Exit-2 stdout is byte-empty
+ * only when JSON output is NOT in effect — assert that per call site via
+ * `assertStdoutEmpty`, never through this helper.
  */
 export function assertJsonOutputConvention(
   result: RunResult,
@@ -183,13 +193,29 @@ export function assertJsonOutputConvention(
     );
   }
   switch (result.exitCode) {
-    case 2:
-      if (result.stdoutBytes.length > 0) {
+    case 2: {
+      const doc = parseJsonStdout(
+        result,
+        context === undefined
+          ? "exit-2 error document (SPEC.md 12.0: with JSON output in effect, a usage or configuration error emits the 12.7 error document as the entire stdout)"
+          : `${context} — exit-2 error document (SPEC.md 12.0: with JSON output in effect, a usage or configuration error emits the 12.7 error document as the entire stdout)`,
+      );
+      if (
+        typeof doc !== "object" ||
+        doc === null ||
+        Array.isArray(doc) ||
+        Object.keys(doc).length !== 1 ||
+        !Object.hasOwn(doc, "error") ||
+        typeof (doc as Record<string, unknown>)["error"] !== "object" ||
+        (doc as Record<string, unknown>)["error"] === null ||
+        Array.isArray((doc as Record<string, unknown>)["error"])
+      ) {
         fail(
-          `${prefix}under --json, stdout must be empty on exit 2 (H-5; usage/configuration diagnostics belong on stderr), but ${result.commandLine} wrote ${String(result.stdoutBytes.length)} bytes to stdout: ${renderStream(result.stdoutBytes)}`,
+          `${prefix}on exit 2 with JSON output in effect, stdout must be the 12.7 error document — {"error": …} exactly, one member holding one finding form (SPEC.md 12.0, 12.7; H-5) — but ${result.commandLine} wrote: ${renderStream(result.stdoutBytes)}`,
         );
       }
-      return undefined;
+      return doc;
+    }
     case 0:
     case 1:
       return parseJsonStdout(result, context);

@@ -69,10 +69,12 @@
 //   not-valid-UTF-8 destination is staged on the Linux leg only (mirroring
 //   T1.5-2's platform note): argv bytes exist as a channel there, carried by
 //   the subprocess driver's raw-byte argv support.
-// - T6.5-5 exit-2 arms run with `--json`: stdout byte-empty (H-5: no report,
-//   no validation findings — the 12.0-ordering discriminator) and the usage
-//   error message on stderr (presence, not wording). The masking arm asserts
-//   exit 1 with exactly one 14.20 finding naming the unparseable origin file.
+// - T6.5-5 exit-2 arms run with `--json`: stdout exactly one 12.7 error
+//   document (12.0: with JSON output in effect, an exit-2 invocation emits
+//   the error document as its entire stdout — no report, no validation
+//   findings: the 12.0-ordering discriminator) and the usage error message
+//   on stderr (presence, not wording). The masking arm asserts exit 1 with
+//   exactly one 14.20 finding naming the unparseable origin file.
 // - T6.5-6's unstageable clauses are documented at the test, per TEST-SPEC:
 //   the collision clause's after-the-removal qualifier admits no
 //   discriminating fixture (structural IDs make the vacated set exactly the
@@ -91,7 +93,6 @@ import {
   assertBytesEqual,
   assertExitCode,
   assertFileBytes,
-  assertStdoutEmpty,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
@@ -116,6 +117,7 @@ import {
   assertSameJson,
   buildFindings,
   buildOk,
+  expectErrorDocument,
   expectExit,
   runJson,
   sortedIdentities,
@@ -385,9 +387,10 @@ async function expectRefusalModifiesNothing(
 
 /**
  * A move usage error (SPEC 6.5, 12.0: nonexistent origin file or origin ID):
- * run with `--json`, assert exit 2 exactly, byte-empty stdout (H-5: no report
- * and no validation findings — the 12.0-ordering discriminator), and a usage
- * error message on stderr (presence, not wording).
+ * run with `--json`, assert exit 2 exactly, the single 12.7 error document
+ * as the entire stdout (12.0: no report and no validation findings — the
+ * 12.0-ordering discriminator; H-5), and a usage error message on stderr
+ * (presence, not wording).
  */
 async function expectMoveUsageError(
   product: ProductBinding,
@@ -404,11 +407,11 @@ async function expectMoveUsageError(
     `${context}: \`${command} --json\` — a nonexistent origin file or origin ` +
       `ID is a usage error (SPEC 6.5, 12.0)`,
   );
-  assertStdoutEmpty(
+  expectErrorDocument(
     result,
-    `${context}: \`${command} --json\` — under --json, stdout is byte-empty ` +
-      `on exit 2: the usage error emits no report and no validation findings ` +
-      `(SPEC 12.0, H-5)`,
+    `${context}: \`${command} --json\` — under --json, the exit-2 error ` +
+      `document is the entire stdout: the usage error emits no report and ` +
+      `no validation findings (SPEC 12.0, 12.7, H-5)`,
   );
   if (result.stderrBytes.length === 0) {
     fail(

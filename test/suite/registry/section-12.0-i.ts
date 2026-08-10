@@ -6,7 +6,8 @@
 // only via diagnosed assertion failures (H-8).
 //
 // SPEC 12.0: every command supports `--json` (one JSON document as the entire
-// stdout; when an exit-2 error prevents emitting one, stdout is empty) and
+// stdout; an exit-2 error emits the 12.7 error document as that document,
+// while exit-2 stdout is empty only when JSON output is NOT in effect) and
 // `--config <path>` (a filesystem path resolved against the working
 // directory); reports — findings included — are stdout content while usage
 // and configuration error messages and all other diagnostic text are stderr
@@ -42,7 +43,12 @@
 // - T12.0-2 asserts non-empty stderr on the exit-2 arms (the test's own text:
 //   usage/configuration errors *print diagnostics* to standard error) and
 //   leaves stderr unasserted on the exit-1 arms (12.0 lets diagnostic text
-//   ride stderr beside a stdout report).
+//   ride stderr beside a stdout report). Its stderr-invariance arms compare
+//   stderr bytes across the two output forms of one invocation (H-4,
+//   product-to-itself): 12.0 — the output form never changes an exit code or
+//   standard-error content. Exit-2 arms with `--json` decode the 12.7 error
+//   document (12.0); the human exit-2 arms assert byte-empty stdout (JSON
+//   not in effect).
 // - T12.0-5 uses exit 0 from a subdirectory as the resolution observable for
 //   `<node>`/`<graph-node>`/`<file>` arguments — resolved against the cwd
 //   each would name a nonexistent file and exit 2 — and content for `--file`,
@@ -65,6 +71,7 @@ import {
   decodeReachableReport,
 } from "../../helpers/adapters/index.js";
 import {
+  assertBytesEqual,
   assertExitCode,
   assertStdoutEmpty,
   fail,
@@ -84,6 +91,7 @@ import {
   assertSameJson,
   buildOk,
   expectConfigurationError,
+  expectErrorDocument,
   expectExit,
   runCli,
   runJson,
@@ -416,10 +424,12 @@ export default defineConfig({
 const T12_0_2 = defineProductTest({
   id: "T12.0-2",
   title:
-    "streams: a failing `build`'s validation errors and `check`'s findings are standard-output content (exit 1) in both output forms; usage and configuration errors print diagnostics to standard error with byte-empty standard output under `--json` (exit 2); non-JSON diagnostics never contaminate a `--json` stdout — the entire exit-1 stdout parses as one JSON document (SPEC 12.0, 14.14, H-5)",
+    "streams: a failing `build`'s validation errors and `check`'s findings are standard-output content (exit 1) in both output forms; usage and configuration errors print diagnostics to standard error, with JSON output in effect an exit-2 invocation emits the 12.7 error document as its entire stdout, and without JSON in effect exit-2 stdout is empty; non-JSON diagnostics never contaminate a JSON stdout, and the output form never changes an exit code or standard-error content — a representative exit-2 usage error and a failing `build`, each run with and without `--json`, exit identically with stderr byte-identical across the two forms (SPEC 12.0, 12.7, 14.14, H-4, H-5)",
   run: async (product) => {
     // Findings are stdout content (exit 1) — human and --json forms of a
-    // failing `build` and of `check` over the same invalid workspace.
+    // failing `build` and of `check` over the same invalid workspace. The
+    // failing `build` pair is also the exit-1 stderr-invariance arm: stderr
+    // byte-identical across the two output forms (12.0, H-4).
     await withWorkspace(
       {
         files: {
@@ -475,11 +485,22 @@ const T12_0_2 = defineProductTest({
                 `${JSON.stringify(findings)}`,
             );
           }
+          if (command === "build") {
+            assertBytesEqual(
+              result.stderrBytes,
+              human.stderrBytes,
+              `T12.0-2 stderr invariance, exit 1: a failing \`build\` run ` +
+                `with and without --json — the output form never changes ` +
+                `standard-error content (SPEC 12.0; product-to-itself, H-4)`,
+            );
+          }
         }
       },
     );
 
-    // Usage errors: diagnostics on stderr; byte-empty stdout under --json.
+    // Usage errors: diagnostics on stderr; without --json stdout is empty;
+    // with --json the 12.7 error document is the entire stdout. The unknown
+    // -flag pair is the exit-2 stderr-invariance arm (12.0, H-4).
     await withWorkspace(
       {
         files: {
@@ -501,6 +522,11 @@ const T12_0_2 = defineProductTest({
           2,
           `${humanUsageContext} — an unknown flag is a usage error (SPEC 12.0)`,
         );
+        assertStdoutEmpty(
+          humanUsage,
+          `${humanUsageContext} — without JSON output in effect, an exit-2 ` +
+            `error leaves standard output empty (SPEC 12.0, H-5)`,
+        );
         assertStderrNonEmpty(humanUsage, humanUsageContext);
         const jsonUsageContext = "T12.0-2 `ids --definitely-not-a-flag --json`";
         const jsonUsage = await expectExit(
@@ -510,12 +536,23 @@ const T12_0_2 = defineProductTest({
           2,
           jsonUsageContext,
         );
-        assertStdoutEmpty(
+        expectErrorDocument(
           jsonUsage,
-          `${jsonUsageContext} — the exit-2 error prevents emitting the ` +
-            `single JSON document, so stdout is empty (SPEC 12.0, H-5)`,
+          `${jsonUsageContext} — --json among the arguments puts JSON ` +
+            `output in effect even when the arguments are themselves the ` +
+            `error, so the exit-2 invocation emits the 12.7 error document ` +
+            `as its entire stdout (SPEC 12.0, 12.7)`,
         );
         assertStderrNonEmpty(jsonUsage, jsonUsageContext);
+        assertBytesEqual(
+          jsonUsage.stderrBytes,
+          humanUsage.stderrBytes,
+          `T12.0-2 stderr invariance, exit 2: \`ids ` +
+            `--definitely-not-a-flag\` run with and without --json — the ` +
+            `output form never changes standard-error content, failing a ` +
+            `product that appends or substitutes stderr diagnostics when ` +
+            `JSON output is in effect (SPEC 12.0; product-to-itself, H-4)`,
+        );
         const unknownFileContext = "T12.0-2 `show specs/Missing.mdx --json`";
         const unknownFile = await expectExit(
           product,
@@ -525,16 +562,18 @@ const T12_0_2 = defineProductTest({
           `${unknownFileContext} — an unknown file named in arguments is a ` +
             `usage error (SPEC 12.0)`,
         );
-        assertStdoutEmpty(
+        expectErrorDocument(
           unknownFile,
-          `${unknownFileContext} — stdout is empty under --json on exit 2 ` +
-            `(SPEC 12.0, H-5)`,
+          `${unknownFileContext} — the exit-2 error document is the entire ` +
+            `stdout under --json (SPEC 12.0, 12.7)`,
         );
         assertStderrNonEmpty(unknownFile, unknownFileContext);
       },
     );
 
-    // Configuration errors: stderr diagnostics; empty stdout under --json.
+    // Configuration errors: stderr diagnostics; the error document under
+    // --json (expectConfigurationError asserts it, stable code and concerned
+    // path included); empty stdout without JSON in effect.
     await withWorkspace(
       {
         files: {
@@ -558,6 +597,11 @@ const T12_0_2 = defineProductTest({
           2,
           `${humanConfigContext} — a configuration error is a usage-class ` +
             `error, exit 2 (SPEC 14.14, 12.0)`,
+        );
+        assertStdoutEmpty(
+          humanConfig,
+          `${humanConfigContext} — without JSON output in effect, an exit-2 ` +
+            `error leaves standard output empty (SPEC 12.0, H-5)`,
         );
         assertStderrNonEmpty(humanConfig, humanConfigContext);
       },
@@ -723,10 +767,10 @@ const T12_0_4 = defineProductTest({
               `even with identical values; the ${step.what} invocation with ` +
               `\`--config\` given once, run next, succeeds (SPEC 12.0)`,
           );
-          assertStdoutEmpty(
+          expectErrorDocument(
             result,
-            `${context} — under --json, stdout is byte-empty on exit 2 ` +
-              `(SPEC 12.0, H-5)`,
+            `${context} — under --json, the exit-2 error document is the ` +
+              `entire stdout (SPEC 12.0, 12.7, H-5)`,
           );
         },
       });
@@ -761,7 +805,11 @@ const T12_0_4 = defineProductTest({
         `${kindsRepeatedContext} — the list belongs in one comma-separated ` +
           `value; repeating --kinds is a usage error (SPEC 12.0, 11)`,
       );
-      assertStdoutEmpty(kindsRepeated, kindsRepeatedContext);
+      expectErrorDocument(
+        kindsRepeated,
+        `${kindsRepeatedContext} — under --json, the exit-2 error document ` +
+          `is the entire stdout (SPEC 12.0, 12.7, H-5)`,
+      );
 
       // A repeated single-valued flag (`--tag`): the single form is valid.
       const tagContext = "T12.0-4 `query nodes --tag keep --json`";
@@ -792,7 +840,11 @@ const T12_0_4 = defineProductTest({
         `${tagRepeatedContext} — repeating a value flag is a usage error ` +
           `(SPEC 12.0)`,
       );
-      assertStdoutEmpty(tagRepeated, tagRepeatedContext);
+      expectErrorDocument(
+        tagRepeated,
+        `${tagRepeatedContext} — under --json, the exit-2 error document ` +
+          `is the entire stdout (SPEC 12.0, 12.7, H-5)`,
+      );
 
       // A repeated boolean flag (`--json --json`): exit code only — see the
       // module header on why the stream stays unasserted here.
@@ -945,10 +997,10 @@ const T12_0_5 = defineProductTest({
             `spelled with \\ names no workspace file: an unknown-file usage ` +
             `error (SPEC 12.0; discriminating on the Windows leg, E-6)`,
         );
-        assertStdoutEmpty(
+        expectErrorDocument(
           backslash,
-          `${backslashContext} — stdout is empty under --json on exit 2 ` +
-            `(SPEC 12.0, H-5)`,
+          `${backslashContext} — under --json, the exit-2 error document ` +
+            `is the entire stdout (SPEC 12.0, 12.7, H-5)`,
         );
 
         // Non-UTF-8 argument value — Linux leg only: argv is a byte channel
@@ -966,10 +1018,10 @@ const T12_0_5 = defineProductTest({
             `${nonUtf8Context} — argument values are interpreted as UTF-8; ` +
               `a value that is not valid UTF-8 is a usage error (SPEC 12.0)`,
           );
-          assertStdoutEmpty(
+          expectErrorDocument(
             nonUtf8,
-            `${nonUtf8Context} — stdout is empty under --json on exit 2 ` +
-              `(SPEC 12.0, H-5)`,
+            `${nonUtf8Context} — under --json, the exit-2 error document ` +
+              `is the entire stdout (SPEC 12.0, 12.7, H-5)`,
           );
         }
 
@@ -1103,10 +1155,10 @@ export async function runT1206SingleCasingPathProbe(
           `case-insensitive filesystem lookup would find the file ` +
           `(SPEC 12.0)`,
       );
-      assertStdoutEmpty(
+      expectErrorDocument(
         probe,
-        `${probeContext} — stdout is empty under --json on exit 2 ` +
-          `(SPEC 12.0, H-5)`,
+        `${probeContext} — under --json, the exit-2 error document is the ` +
+          `entire stdout (SPEC 12.0, 12.7, H-5)`,
       );
     },
   );
@@ -1245,10 +1297,10 @@ const T12_0_6 = defineProductTest({
               `case-sensitively: no session bears this spelling, an ` +
               `unknown-session usage error (SPEC 12.0, 10.7)`,
           );
-          assertStdoutEmpty(
+          expectErrorDocument(
             result,
-            `${context} — stdout is empty under --json on exit 2 ` +
-              `(SPEC 12.0, H-5)`,
+            `${context} — under --json, the exit-2 error document is the ` +
+              `entire stdout (SPEC 12.0, 12.7, H-5)`,
           );
         }
       },
@@ -1321,10 +1373,10 @@ const T12_0_6 = defineProductTest({
               `identities compare byte-wise, so specs/a.mdx#upper names no ` +
               `node — an unknown-node usage error (SPEC 12.0, 1.5)`,
           );
-          assertStdoutEmpty(
+          expectErrorDocument(
             cross,
-            `${crossContext} — stdout is empty under --json on exit 2 ` +
-              `(SPEC 12.0, H-5)`,
+            `${crossContext} — under --json, the exit-2 error document is ` +
+              `the entire stdout (SPEC 12.0, 12.7, H-5)`,
           );
         },
       );

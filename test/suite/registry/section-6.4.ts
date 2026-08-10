@@ -46,11 +46,13 @@
 //   regenerates on refusal, fails the compare. Refusal report content is
 //   deliberately unasserted (12.0 classes refusals exit 1; TEST-SPEC pins no
 //   report content for them), so refusal arms run without `--json`.
-// - T6.4-4 exit-2 arms run with `--json`: stdout byte-empty (H-5: no report,
-//   no validation findings — the 12.0-ordering discriminator) and the usage
-//   error message on stderr (12.0), asserted for presence, not wording. The
-//   masking arm asserts exit 1 with a findings report of exactly one 14.20
-//   naming the unparseable file with a location (SPEC 14, H-3).
+// - T6.4-4 exit-2 arms run with `--json`: stdout exactly one 12.7 error
+//   document (12.0: with JSON output in effect, an exit-2 invocation emits
+//   the error document as its entire stdout — no report, no validation
+//   findings: the 12.0-ordering discriminator) and the usage error message
+//   on stderr (12.0), asserted for presence, not wording. The masking arm
+//   asserts exit 1 with a findings report of exactly one 14.20 naming the
+//   unparseable file with a location (SPEC 14, H-3).
 // - T6.4-7 "byte-identical to a fresh build of the rewritten sources" is the
 //   H-6 two-directory protocol: a second workspace is seeded with the
 //   post-rename configuration, sources, and journal (derived files are
@@ -70,7 +72,6 @@ import {
 } from "../../helpers/adapters/index.js";
 import {
   assertFileBytes,
-  assertStdoutEmpty,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
@@ -87,6 +88,7 @@ import {
   assertSameJson,
   buildFindings,
   buildOk,
+  expectErrorDocument,
   expectExit,
   runJson,
   sortedIdentities,
@@ -324,10 +326,10 @@ async function expectRefusalModifiesNothing(
 
 /**
  * A rename usage error (SPEC 6.4, 12.0: nonexistent `<file>` or old ID): run
- * with `--json`, assert exit 2 exactly, byte-empty stdout (H-5: no report and
- * no validation findings — the 12.0-ordering discriminator), and a usage
- * error message on stderr (12.0: standard-error content; presence, not
- * wording).
+ * with `--json`, assert exit 2 exactly, the single 12.7 error document as
+ * the entire stdout (12.0: no report and no validation findings — the
+ * 12.0-ordering discriminator; H-5), and a usage error message on stderr
+ * (12.0: standard-error content; presence, not wording).
  */
 async function expectRenameUsageError(
   product: ProductBinding,
@@ -344,11 +346,11 @@ async function expectRenameUsageError(
     `${context}: \`${command} --json\` — a nonexistent <file> or old ID is a ` +
       `usage error (SPEC 6.4, 12.0)`,
   );
-  assertStdoutEmpty(
+  expectErrorDocument(
     result,
-    `${context}: \`${command} --json\` — under --json, stdout is byte-empty ` +
-      `on exit 2: the usage error emits no report and no validation findings ` +
-      `(SPEC 12.0, H-5)`,
+    `${context}: \`${command} --json\` — under --json, the exit-2 error ` +
+      `document is the entire stdout: the usage error emits no report and ` +
+      `no validation findings (SPEC 12.0, 12.7, H-5)`,
   );
   if (result.stderrBytes.length === 0) {
     fail(

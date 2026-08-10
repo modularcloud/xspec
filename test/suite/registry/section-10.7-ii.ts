@@ -84,16 +84,18 @@ import {
   decodeNodeReport,
   decodeSessionStatusReport,
 } from "../../helpers/adapters/index.js";
-import {
-  assertStdoutEmpty,
-  fail,
-  parseJsonStdout,
-} from "../../helpers/assertions.js";
+import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
+import {
+  assertSameJson,
+  buildOk,
+  expectErrorDocument,
+  expectExit,
+  runJson,
+} from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
 const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
@@ -1400,10 +1402,10 @@ const T10_7_8 = defineProductTest({
             `${context} — an unknown item ID in a review command's ` +
               `arguments is a usage error (SPEC 10.7, 12.0)`,
           );
-          assertStdoutEmpty(
+          expectErrorDocument(
             result,
-            `${context} — under --json, stdout is byte-empty on exit 2 ` +
-              `(SPEC 12.0, H-5)`,
+            `${context} — under --json, the exit-2 error document is the ` +
+              `entire stdout (SPEC 12.0, 12.7, H-5)`,
           );
         }
 
@@ -2096,7 +2098,7 @@ const R10_NOTE = "reviewed; left as-is pending spec sync";
 const T10_7_10 = defineProductTest({
   id: "T10.7-10",
   title:
-    "`review resolve` sets the status and records the current relevant state — `current` holds the resolve-moment hash captures and, after a re-resolve bracketing an edit, the new moment's values and not the old (pairwise-distinct `query node` captures discriminate); it works on any unblocked item regardless of status: flipping a resolved `no-change` to `skipped` without any edit works, and re-resolving an `invalidated` item works and clears the invalidation; resolving a blocked item is refused (exit 1) leaving the session's rows unchanged; an unknown session name or item ID is exit 2 with byte-empty stdout under `--json`; `--note` text is stored and reported by `show` and `export` (SPEC 10.2, 10.3, 10.4, 10.7, 12.0)",
+    "`review resolve` sets the status and records the current relevant state — `current` holds the resolve-moment hash captures and, after a re-resolve bracketing an edit, the new moment's values and not the old (pairwise-distinct `query node` captures discriminate); it works on any unblocked item regardless of status: flipping a resolved `no-change` to `skipped` without any edit works, and re-resolving an `invalidated` item works and clears the invalidation; resolving a blocked item is refused (exit 1) leaving the session's rows unchanged; an unknown session name or item ID is exit 2 with the 12.7 error document as the entire stdout under `--json`; `--note` text is stored and reported by `show` and `export` (SPEC 10.2, 10.3, 10.4, 10.7, 12.0)",
   timeoutMs: 360_000,
   run: async (product) => {
     await withWorkspace(
@@ -2146,7 +2148,8 @@ const T10_7_10 = defineProductTest({
         );
 
         // Unknown session and unknown item are usage errors (SPEC 10.7,
-        // 12.0): exit 2, byte-empty stdout under --json.
+        // 12.0): exit 2, the 12.7 error document as the entire stdout
+        // under --json.
         for (const [argv, why] of [
           [
             ["review", "resolve", "nosuch", idPA, "--status", "no-change"],
@@ -2166,10 +2169,10 @@ const T10_7_10 = defineProductTest({
             `${context} — unknown names in a review command's arguments are ` +
               `usage errors (SPEC 10.7, 12.0)`,
           );
-          assertStdoutEmpty(
+          expectErrorDocument(
             result,
-            `${context} — under --json, stdout is byte-empty on exit 2 ` +
-              `(SPEC 12.0, H-5)`,
+            `${context} — under --json, the exit-2 error document is the ` +
+              `entire stdout (SPEC 12.0, 12.7, H-5)`,
           );
         }
 

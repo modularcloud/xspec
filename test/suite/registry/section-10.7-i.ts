@@ -83,7 +83,6 @@ import {
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
-  assertStdoutEmpty,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
@@ -95,6 +94,7 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertSameJson,
   buildOk,
+  expectErrorDocument,
   expectExit,
   runCli,
   runJson,
@@ -443,7 +443,8 @@ function collectStringLeaves(value: unknown, into: string[] = []): string[] {
 
 /**
  * Run `review create` with `--json` appended, expecting a usage error: exact
- * exit 2 with byte-empty stdout (SPEC 12.0; H-5).
+ * exit 2 with the single 12.7 error document as the entire stdout (SPEC
+ * 12.0, 12.7; H-5).
  */
 async function expectCreateUsageError(
   product: ProductBinding,
@@ -458,9 +459,10 @@ async function expectCreateUsageError(
     2,
     `${context} — a usage error (SPEC 10.7, 12.0)`,
   );
-  assertStdoutEmpty(
+  expectErrorDocument(
     result,
-    `${context} — under --json, stdout is byte-empty on exit 2 (SPEC 12.0, H-5)`,
+    `${context} — under --json, the exit-2 error document is the entire ` +
+      `stdout (SPEC 12.0, 12.7, H-5)`,
   );
 }
 
@@ -1043,9 +1045,10 @@ const T10_7_3 = defineProductTest({
         const baseline = await workspace.gitCommitAll("baseline");
         await buildOk(product, workspace, `${prefix} \`build\``);
 
-        // Arm 1: create with an unresolvable ref — exit 2, byte-empty
-        // stdout under --json, and nothing modified anywhere (SPEC 6.3,
-        // 10.7, 12.0; the compare includes .git/ and .xspec/).
+        // Arm 1: create with an unresolvable ref — exit 2, the 12.7 error
+        // document as the entire stdout under --json, and nothing modified
+        // anywhere (SPEC 6.3, 10.7, 12.0; the compare includes .git/ and
+        // .xspec/).
         for (const [ref, why] of [
           ["no-such-ref", "a nonexistent branch name"],
           [
@@ -1151,10 +1154,10 @@ const T10_7_3 = defineProductTest({
                 `${context} — fails per 6.3 as a usage error (SPEC 6.3, ` +
                   `10.7, 12.0)`,
               );
-              assertStdoutEmpty(
+              expectErrorDocument(
                 result,
-                `${context} — under --json, stdout is byte-empty on exit 2 ` +
-                  `(SPEC 12.0, H-5)`,
+                `${context} — under --json, the exit-2 error document is ` +
+                  `the entire stdout (SPEC 12.0, 12.7, H-5)`,
               );
             },
             `${context} — modifying nothing (SPEC 6.3, 10.7)`,

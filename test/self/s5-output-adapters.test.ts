@@ -32,6 +32,7 @@ import {
   decodeCoverageReport,
   decodeDatum,
   decodeEdgesReport,
+  decodeErrorDocument,
   decodeExportReport,
   decodeFindingsReport,
   decodeIdsReport,
@@ -1066,6 +1067,126 @@ const DECODERS: readonly DecoderSpec[] = [
             structuredClone(GOOD_FINDINGS.findings[0]),
             structuredClone(GOOD_FINDINGS.findings[0]),
           ],
+        },
+      },
+    ],
+  },
+  {
+    name: "12.7 error document",
+    decode: decodeErrorDocument,
+    good: {
+      error: {
+        code: "configuration-error", // 14.14
+        message: "unknown key `bogus` in xspec.config.ts",
+        locations: [],
+        path: "xspec.config.ts",
+        identities: [],
+      },
+    },
+    verify: (decoded: ReturnType<typeof decodeErrorDocument>) => {
+      // {"error": …} holding one literal finding form (SPEC 12.0, 12.7):
+      // a configuration error carries the stable code and concerned path.
+      expect(decoded.error.code).toBe("configuration-error");
+      expect(decoded.error.condition).toBe("14.14");
+      expect(decoded.error.path).toBe("xspec.config.ts");
+      expect(decoded.error.locations).toEqual([]);
+      expect(decoded.error.identities).toEqual([]);
+    },
+    alsoGood: [
+      {
+        label: "a plain usage error: code and path null (SPEC 12.7)",
+        doc: {
+          error: {
+            code: null,
+            message: "unknown flag --definitely-not-a-flag",
+            locations: [],
+            path: null,
+            identities: [],
+          },
+        },
+        verify: (decoded: ReturnType<typeof decodeErrorDocument>): void => {
+          expect(decoded.error.code).toBeNull();
+          expect(decoded.error.condition).toBeNull();
+          expect(decoded.error.path).toBeNull();
+        },
+      },
+      {
+        label:
+          "a missing-configuration error concerning the working directory " +
+          '(anchoring form "." for a failed upward search, SPEC 14)',
+        doc: {
+          error: {
+            code: "configuration-error",
+            message: "no xspec.config.ts found by upward search",
+            locations: [],
+            path: ".",
+            identities: [],
+          },
+        },
+        verify: (decoded: ReturnType<typeof decodeErrorDocument>): void => {
+          expect(decoded.error.path).toBe(".");
+        },
+      },
+    ],
+    bad: [
+      { label: "missing error member", doc: {} },
+      {
+        label: "null error member (the finding form is an object)",
+        doc: { error: null },
+      },
+      {
+        label: "an extra member beside error (12.7: exactly {error})",
+        doc: {
+          error: {
+            code: null,
+            message: "unknown flag",
+            locations: [],
+            path: null,
+            identities: [],
+          },
+          findings: [],
+        },
+      },
+      {
+        label:
+          "the findings-only report shape passed off as the error document",
+        doc: { findings: [] },
+      },
+      { label: "error as a bare string", doc: { error: "unknown flag" } },
+      {
+        label: "error finding missing its code member (null is never omitted)",
+        doc: {
+          error: {
+            message: "unknown flag",
+            locations: [],
+            path: null,
+            identities: [],
+          },
+        },
+      },
+      {
+        label: "error finding with an unknown code token",
+        doc: {
+          error: {
+            code: "usage-error",
+            message: "unknown flag",
+            locations: [],
+            path: null,
+            identities: [],
+          },
+        },
+      },
+      {
+        label: "error finding with an extra member (12.7: exactly the five)",
+        doc: {
+          error: {
+            code: null,
+            message: "unknown flag",
+            locations: [],
+            path: null,
+            identities: [],
+            hint: "try --help",
+          },
         },
       },
     ],

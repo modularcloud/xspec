@@ -64,7 +64,6 @@ import {
 import {
   assertBytesEqual,
   assertExitCode,
-  assertStdoutEmpty,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
@@ -80,6 +79,7 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertSameJson,
   buildOk,
+  expectErrorDocument,
   expectExit,
   runCli,
   runJson,
@@ -412,9 +412,10 @@ export async function probeSessionNameCasing(
     2,
     probeContext,
   );
-  assertStdoutEmpty(
+  expectErrorDocument(
     probe,
-    `${probeContext} — under --json, stdout is byte-empty on exit 2 (H-5)`,
+    `${probeContext} — under --json, the exit-2 error document is the ` +
+      `entire stdout (SPEC 12.0, 12.7, H-5)`,
   );
 }
 
@@ -469,9 +470,10 @@ const T10_1_2 = defineProductTest({
               2,
               `${context} — an invalid session name is a usage error (SPEC 10.1, 12.0)`,
             );
-            assertStdoutEmpty(
+            expectErrorDocument(
               result,
-              `${context} — under --json, stdout is byte-empty on exit 2 (SPEC 12.0, H-5)`,
+              `${context} — under --json, the exit-2 error document is the ` +
+                `entire stdout (SPEC 12.0, 12.7, H-5)`,
             );
           },
           `${context} — nothing created`,
@@ -568,9 +570,10 @@ export async function probeWrongCaseExtensionSession(
     2,
     context,
   );
-  assertStdoutEmpty(
+  expectErrorDocument(
     result,
-    `${context} — under --json, stdout is byte-empty on exit 2 (H-5)`,
+    `${context} — under --json, the exit-2 error document is the entire ` +
+      `stdout (SPEC 12.0, 12.7, H-5)`,
   );
 }
 
@@ -687,9 +690,10 @@ const T10_1_3 = defineProductTest({
           2,
           context,
         );
-        assertStdoutEmpty(
+        expectErrorDocument(
           result,
-          `${context} — under --json, stdout is byte-empty on exit 2 (H-5)`,
+          `${context} — under --json, the exit-2 error document is the ` +
+            `entire stdout (SPEC 12.0, 12.7, H-5)`,
         );
       }
       await probeWrongCaseExtensionSession(product, workspace);

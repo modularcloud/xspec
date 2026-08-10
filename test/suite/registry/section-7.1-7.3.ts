@@ -24,7 +24,9 @@
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — exit
-//   2 exactly, byte-empty stdout under --json, stderr matching /config/i.
+//   2 exactly, the single 12.7 error document (stable code
+//   `configuration-error`, concerned path) as the entire stdout under
+//   --json, stderr matching /config/i.
 // - T7.1-1 coverage: profiles are looked up by name (T8.2-1 owns report
 //   ordering and the full report contract — counts and the ignored-node
 //   composition are not asserted here); "sees it in both" is asserted as the
@@ -70,7 +72,6 @@ import {
 import {
   assertBytesEqual,
   assertFileBytes,
-  assertStdoutEmpty,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
@@ -89,6 +90,7 @@ import {
   buildOk,
   byteWindow,
   expectConfigurationError,
+  expectErrorDocument,
   expectExit,
   runJson,
 } from "./support.js";
@@ -857,11 +859,12 @@ const T7_3_1 = defineProductTest({
             `group, so the path is unknown, a usage error (SPEC 7.3, 13.4, ` +
             `11, 12.0)`,
         );
-        assertStdoutEmpty(
+        expectErrorDocument(
           fromResult,
           `${fromLabel} — query's single JSON document is its only output ` +
-            `form, and the exit-2 error prevents emitting one (SPEC 11, ` +
-            `12.0, H-5)`,
+            `form, so JSON output is in effect without --json and the ` +
+            `exit-2 error document is the entire stdout (SPEC 11, 12.0, ` +
+            `12.7, H-5)`,
         );
         if (fromResult.stderrBytes.length === 0) {
           fail(

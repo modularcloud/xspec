@@ -22,12 +22,13 @@
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — run
-//   with `--json`, exit 2 exactly, byte-empty stdout (12.0: the exit-2 error
-//   prevents emitting the single JSON document; H-5), and a standard-error
-//   message matching /config/i — the actionable configuration-error message
-//   must identify the configuration as the failing subject, and any phrasing
-//   naming either the file (`xspec.config.ts`) or the condition
-//   ("configuration", "config…") qualifies; wording is otherwise free (H-3).
+//   with `--json`, exit 2 exactly, stdout exactly the single 12.7 error
+//   document carrying the stable code `configuration-error` and a concerned
+//   path (12.0/12.7, H-5), and a standard-error message matching /config/i —
+//   the actionable configuration-error message must identify the
+//   configuration as the failing subject, and any phrasing naming either
+//   the file (`xspec.config.ts`) or the condition ("configuration",
+//   "config…") qualifies; wording is otherwise free (H-3).
 // - T7-1 "no configuration reachable": the workspace is a fresh unique
 //   temporary directory (H-1) whose filesystem ancestors (the OS temp
 //   directory and its parents) hold no `xspec.config.ts`, so the upward
@@ -44,11 +45,12 @@
 //   recursive scan of the workspace tree finds no file whose name ends in
 //   `.md` (stronger than probing the default next-to-source destinations:
 //   emission anywhere would fail it).
-// - T7-3 `--from` unknown: exit 2 with byte-empty stdout (SPEC 11: query's
-//   single JSON document is its only output form, and 12.0 makes stdout
-//   empty when an exit-2 error prevents emitting one) and a non-empty
-//   stderr diagnostic (12.0: usage error messages are standard-error
-//   content). This usage error is not a 14.14, so no /config/i duty applies.
+// - T7-3 `--from` unknown: exit 2 with the single 12.7 error document as
+//   the entire stdout (SPEC 11: `query` is a JSON-only surface, so JSON
+//   output is in effect without `--json`, and 12.0 makes an exit-2 error
+//   emit the error document) and a non-empty stderr diagnostic (12.0: usage
+//   error messages are standard-error content). This usage error is not a
+//   14.14, so no /config/i duty applies.
 
 import * as fsp from "node:fs/promises";
 import type { GraphEdge } from "../../helpers/adapters/index.js";
@@ -59,7 +61,6 @@ import {
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
-  assertStdoutEmpty,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
@@ -74,6 +75,7 @@ import {
   assertSameJson,
   buildOk,
   expectConfigurationError,
+  expectErrorDocument,
   expectExit,
   runJson,
 } from "./support.js";
@@ -730,11 +732,12 @@ const T7_3 = defineProductTest({
           `${fromLabel} — a path in no configured group is unknown, a ` +
             `usage error (SPEC 11, 12.0)`,
         );
-        assertStdoutEmpty(
+        expectErrorDocument(
           fromResult,
           `${fromLabel} — query's single JSON document is its only output ` +
-            `form, and the exit-2 error prevents emitting one (SPEC 11, ` +
-            `12.0, H-5)`,
+            `form, so JSON output is in effect without --json and the ` +
+            `exit-2 error document is the entire stdout (SPEC 11, 12.0, ` +
+            `12.7, H-5)`,
         );
         if (fromResult.stderrBytes.length === 0) {
           fail(

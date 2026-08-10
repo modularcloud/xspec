@@ -25,9 +25,10 @@
 //   T1.5-1 interpretation (SPEC 9.3 groups output by category, so an
 //   uncategorized node appears under none), carried through SUITE-20/22.
 // - Every failure arm runs with `--json`: exit 2 exactly (H-5), stdout
-//   byte-empty (H-5: with `--json`, stdout is exactly one JSON document or
-//   empty on exit 2), and the actionable error on stderr (12.0: usage and
-//   configuration error messages are standard-error content).
+//   exactly one 12.7 error document (12.0: with JSON output in effect, an
+//   exit-2 invocation emits the error document as its entire stdout), and
+//   the actionable error on stderr (12.0: usage and configuration error
+//   messages are standard-error content).
 // - "Naming the offending entries" for the garbage replay line (staged on
 //   journal line 2, after one legitimate entry): entry content is opaque
 //   (SPEC 6.1, H-4), so the harness accepts any of — stderr echoing the
@@ -42,8 +43,9 @@
 // - An unresolvable ref: the offending item is the ref itself, so the
 //   actionable error must echo its spelling on stderr.
 // - "Report no validation findings" (the precedence arm): findings are
-//   report content — stdout (12.0) — so under `--json` the empty stdout of a
-//   proper exit-2 usage error is exactly "no validation findings reported".
+//   report content — stdout (12.0) — so under `--json` the exit-2 error
+//   document (which carries no `findings` member, 12.7) as the entire
+//   stdout is exactly "no validation findings reported".
 // - "Modifying nothing" is asserted as a whole-workspace-root byte snapshot
 //   compare around the command, `.git/` included (git is read-only for the
 //   product, SPEC preamble; T12.0-11 pins `.git/` byte-identity around every
@@ -59,11 +61,7 @@ import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import type { ImpactReport } from "../../helpers/adapters/index.js";
 import { decodeImpactReport } from "../../helpers/adapters/index.js";
-import {
-  assertStdoutEmpty,
-  fail,
-  parseJsonStdout,
-} from "../../helpers/assertions.js";
+import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
@@ -74,6 +72,7 @@ import {
   assertSameJson,
   buildFindings,
   buildOk,
+  expectErrorDocument,
   expectExit,
 } from "./support.js";
 
@@ -212,9 +211,10 @@ function assertNoChanges(
 /**
  * A baseline-resolution failure at a baseline-taking command (T6.3-4's
  * contract): run with `--json`, assert exit 2 exactly (a usage error,
- * SPEC 6.3, 12.0) and byte-empty stdout (H-5: with `--json`, stdout is empty
- * on exit 2 — no report, no validation findings). The actionable error is
- * stderr content (12.0); callers assert its naming duties on the result.
+ * SPEC 6.3, 12.0) and the single 12.7 error document as the entire stdout
+ * (12.0: with JSON output in effect, an exit-2 invocation emits the error
+ * document — no report, no validation findings; H-5). The actionable error
+ * is stderr content (12.0); callers assert its naming duties on the result.
  */
 async function expectBaselineUsageError(
   product: ProductBinding,
@@ -230,10 +230,11 @@ async function expectBaselineUsageError(
     `${context} — a baseline that cannot be read or reconstructed is a ` +
       `usage error (SPEC 6.3, 12.0)`,
   );
-  assertStdoutEmpty(
+  expectErrorDocument(
     result,
-    `${context} — under --json, stdout is byte-empty on exit 2: the usage ` +
-      `error emits no report and no validation findings (SPEC 12.0, H-5)`,
+    `${context} — under --json, the exit-2 error document is the entire ` +
+      `stdout: the usage error emits no report and no validation findings ` +
+      `(SPEC 12.0, 12.7, H-5)`,
   );
   return result;
 }
@@ -882,8 +883,8 @@ const T6_3_4 = defineProductTest({
                 argv,
                 `${context}: \`${command}\` — baseline resolution precedes ` +
                   `source validation (SPEC 12.0), so the unresolvable ref ` +
-                  `is reported as exit 2 with empty stdout (no validation ` +
-                  `findings), never exit 1 with findings`,
+                  `is reported as exit 2 with the error document alone (no ` +
+                  `validation findings), never exit 1 with findings`,
               ),
             `${context}: \`${command}\` modifies nothing (SPEC 6.3, 10.7, 12.0)`,
           );

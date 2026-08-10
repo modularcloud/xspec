@@ -66,13 +66,19 @@ import {
   decodeNodeReport,
   decodeSessionStatusReport,
 } from "../../helpers/adapters/index.js";
-import { assertStdoutEmpty, fail } from "../../helpers/assertions.js";
+import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
+import {
+  assertSameJson,
+  buildOk,
+  expectErrorDocument,
+  expectExit,
+  runJson,
+} from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
 const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
@@ -1611,7 +1617,7 @@ function t5Spec(xText: string): string {
 const T10_3_1 = defineProductTest({
   id: "T10.3-1",
   title:
-    "`resolve --status` accepts exactly `updated`, `no-change`, `skipped`; any other value (unknown token, wrong case, the non-resolve statuses `unresolved`/`invalidated`, empty) is a usage error — exit 2, empty stdout under `--json`, nothing modified; items with `unresolved` or `invalidated` status need review and appear in `next`, resolved ones do not (`next` walks the audit items to fully-resolved, and an edit re-surfaces the invalidated item) (SPEC 10.3, 10.4, 10.7, 12.0)",
+    "`resolve --status` accepts exactly `updated`, `no-change`, `skipped`; any other value (unknown token, wrong case, the non-resolve statuses `unresolved`/`invalidated`, empty) is a usage error — exit 2, the 12.7 error document as the entire stdout under `--json`, nothing modified; items with `unresolved` or `invalidated` status need review and appear in `next`, resolved ones do not (`next` walks the audit items to fully-resolved, and an edit re-surfaces the invalidated item) (SPEC 10.3, 10.4, 10.7, 12.0)",
   timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
@@ -1652,8 +1658,9 @@ const T10_3_1 = defineProductTest({
           "T10.3-1",
         ).id;
 
-        // Any other `--status` value is a usage error: exit 2, empty stdout
-        // under --json (H-5), nothing modified (SPEC 10.7, 12.0). The
+        // Any other `--status` value is a usage error: exit 2, the 12.7
+        // error document as the entire stdout under --json (12.0, H-5),
+        // nothing modified (SPEC 10.7, 12.0). The
         // non-resolve statuses of 10.3 are values too — `resolve` accepts
         // exactly the three resolved statuses.
         const invalidValues: readonly (readonly [string, string])[] = [
@@ -1675,9 +1682,10 @@ const T10_3_1 = defineProductTest({
                 2,
                 `${context} — any value other than updated/no-change/skipped is a usage error (SPEC 10.7, 12.0)`,
               );
-              assertStdoutEmpty(
+              expectErrorDocument(
                 result,
-                `${context} — under --json, stdout is byte-empty on exit 2 (SPEC 12.0, H-5)`,
+                `${context} — under --json, the exit-2 error document is ` +
+                  `the entire stdout (SPEC 12.0, 12.7, H-5)`,
               );
             },
             `${context} — a usage error modifies nothing`,

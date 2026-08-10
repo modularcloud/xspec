@@ -74,7 +74,6 @@ import {
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
-  assertStdoutEmpty,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
@@ -92,6 +91,7 @@ import {
   assertEdgeSetEqual,
   assertSameJson,
   buildOk,
+  expectErrorDocument,
   expectExit,
   runJson,
   sortedIdentities,
@@ -284,9 +284,10 @@ async function queryBothForms<T>(options: BothFormsOptions<T>): Promise<T> {
 }
 
 /**
- * A usage-error arm: exit 2 exactly (H-5) and, under `--json`, byte-empty
- * stdout — the exit-2 error prevents emitting the single JSON document
- * (SPEC 12.0). `why` names the staged error class in the diagnosis.
+ * A usage-error arm: exit 2 exactly (H-5) with the single 12.7 error
+ * document as the entire stdout — the run carries `--json`, so JSON output
+ * is in effect and the exit-2 invocation emits the error document (SPEC
+ * 12.0, 12.7). `why` names the staged error class in the diagnosis.
  */
 async function expectUsageError(
   product: ProductBinding,
@@ -302,10 +303,10 @@ async function expectUsageError(
     2,
     `${context} — ${why} is a usage error, exit 2 (SPEC 11, 12.0)`,
   );
-  assertStdoutEmpty(
+  expectErrorDocument(
     result,
-    `${context} — under --json, stdout is byte-empty on exit 2: the usage ` +
-      `error prevents emitting the single JSON document (SPEC 12.0, H-5)`,
+    `${context} — under --json, the exit-2 error document is the entire ` +
+      `stdout (SPEC 12.0, 12.7, H-5)`,
   );
 }
 

@@ -88,7 +88,7 @@ A "new test T<x>" task always means, in one change:
     in-scope path, apply the minimal 12.7 form change to that fixture here
     (CONF-VALID's full behavioral rework stays FP-009).
 
-- [ ] FP-002 — Fix the exit-2 output-stream protocol everywhere it is
+- [x] FP-002 — Fix the exit-2 output-stream protocol everywhere it is
   asserted: with JSON output in effect, exit-2 stdout is exactly one 12.7
   error document (`{"error": …}`); stdout is byte-empty on exit 2 only when
   JSON is NOT in effect; stderr is byte-identical across output forms.

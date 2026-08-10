@@ -44,7 +44,10 @@
 //   segments resolve lexically (wildcard segments count as ordinary names);
 //   an absolute pattern, or one whose resolution escapes the root, is a
 //   configuration error (14.14) reported at load by every command as a usage
-//   error (12.0) — exit 2, message on stderr, stdout empty.
+//   error (12.0) — exit 2, message on stderr; with `--json` the single 12.7
+//   error document ({"error": …} carrying the stable code
+//   `configuration-error` and the concerned path in the anchoring form) is
+//   the entire stdout, and without it stdout stays empty.
 // - Discovery pipeline order (SPEC 7, 13.4): walk plain files (symbolic links
 //   never discovered, never traversed — so link cycles cannot hang the walk),
 //   match the union of all groups' globs, then apply the 13.4 source
@@ -113,8 +116,23 @@ import * as path from "node:path";
 // Outcome carriers
 // ---------------------------------------------------------------------------
 
-/** Usage or configuration error (SPEC 12.0 exit 2): message on stderr. */
-class UsageError extends Error {}
+/**
+ * Usage or configuration error (SPEC 12.0 exit 2): message on stderr in both
+ * output forms; with JSON output in effect the 12.7 error document is the
+ * entire stdout. `code`/`path` are the error finding's stable code and
+ * concerned path — set for configuration errors (14.14: `configuration-error`
+ * plus the concerned path in the anchoring form), `null` for plain usage
+ * errors (SPEC 12.7).
+ */
+class UsageError extends Error {
+  /** @param {string} message
+   *  @param {{ code?: string | null, path?: string | null }} [finding] */
+  constructor(message, { code = null, path = null } = {}) {
+    super(message);
+    this.code = code;
+    this.path = path;
+  }
+}
 
 /** Findings (SPEC 12.0 exit 1): a findings report on stdout. */
 class FindingsError extends Error {
@@ -183,12 +201,27 @@ let deviations = {};
 
 const CONFIG_NAME = "xspec.config.ts";
 
+/**
+ * The anchoring form of SPEC 11.6/14 for a path identified relative to the
+ * invocation working directory: the segments ascending to the nearest common
+ * ancestor spelled `..`, then the descending segments, `/`-joined on every
+ * platform; the working directory itself is `.`.
+ */
+function anchoringPath(cwd, absPath) {
+  const rel = path.relative(path.resolve(cwd), absPath);
+  if (rel === "") return ".";
+  return rel.split(path.sep).join("/");
+}
+
 async function findConfigPath(cwd, configFlag) {
   if (configFlag !== undefined) {
     const abs = path.resolve(cwd, configFlag);
     if (!(await pathOccupied(abs))) {
       throw new UsageError(
         `configuration file not found: --config ${configFlag}`,
+        // Missing configuration: the concerned path is the file --config
+        // names, in the anchoring form (SPEC 14, 11.6).
+        { code: "configuration-error", path: anchoringPath(cwd, abs) },
       );
     }
     return abs;
@@ -201,6 +234,9 @@ async function findConfigPath(cwd, configFlag) {
     if (parent === dir) {
       throw new UsageError(
         `configuration error: no ${CONFIG_NAME} found by upward search from the working directory`,
+        // Missing configuration with no --config: the concerned path is the
+        // directory the failed search started from, spelled "." (SPEC 14).
+        { code: "configuration-error", path: "." },
       );
     }
     dir = parent;
@@ -420,6 +456,24 @@ function validatedPattern(glob, groupName) {
  */
 async function loadConfig(cwd, configFlag) {
   const configPath = await findConfigPath(cwd, configFlag);
+  try {
+    return await parseAndValidateConfig(configPath);
+  } catch (error) {
+    // Every defect found while reading, parsing, or validating the
+    // configuration is a configuration error (SPEC 14.14): its error
+    // finding carries the stable code and the concerned configuration file
+    // in the anchoring form (SPEC 14, 12.7). One invocation reports one
+    // error, however many defects are present (12.7).
+    if (error instanceof UsageError && error.code === null) {
+      error.code = "configuration-error";
+      error.path = anchoringPath(cwd, configPath);
+    }
+    throw error;
+  }
+}
+
+/** The post-discovery half of {@link loadConfig}: read, parse, validate. */
+async function parseAndValidateConfig(configPath) {
   let text;
   try {
     text = await fsp.readFile(configPath, "utf8");
@@ -1607,7 +1661,26 @@ async function dispatchCommand(io, cwd, argv) {
     }
   } catch (error) {
     if (error instanceof UsageError) {
-      // Usage/configuration errors: stderr content, empty stdout (SPEC 12.0).
+      // Usage/configuration errors (SPEC 12.0): the message is stderr
+      // content in both output forms. With JSON output in effect the single
+      // 12.7 error document — {"error": …} holding one finding form, its
+      // stable code and concerned path for a configuration error, null/null
+      // for a plain usage error — is the entire stdout; without it, stdout
+      // stays empty. The output form never changes the exit code or the
+      // standard-error content.
+      if (wantsJson) {
+        io.stdout(
+          canonicalJson({
+            error: {
+              code: error.code,
+              message: error.message,
+              locations: [],
+              path: error.path,
+              identities: [],
+            },
+          }) + "\n",
+        );
+      }
       io.stderr(`xspec: ${error.message}\n`);
       return 2;
     }

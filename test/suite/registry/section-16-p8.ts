@@ -15,9 +15,9 @@
 //   * a command never dies by signal and always exits 0, 1, or 2 — the
 //     SPEC 12.0 exit-code partition ("exit codes partition all outcomes");
 //   * under `--json`, stdout is never a partial JSON document: exit 0/1
-//     emits exactly one JSON document as the entire stdout, and exit 2 emits
-//     byte-empty stdout (SPEC 12.0; the shared `assertJsonOutputConvention`,
-//     H-5);
+//     emits exactly one JSON document as the entire stdout, and exit 2
+//     emits the 12.7 error document — `{"error": …}` — as that document
+//     (SPEC 12.0; the shared `assertJsonOutputConvention`, H-5);
 //   * a failing `build` — exit 1 or exit 2 — modifies nothing: the whole
 //     workspace tree, prior derived files and graph data included, is
 //     byte-identical around the invocation (SPEC 12.1, H-4; snapshot

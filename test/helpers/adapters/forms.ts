@@ -19,6 +19,7 @@
 //     with the harness-pinned token→condition table (model.ts)
 //   - the pinned findings-order comparator and duplicate collapse (12.7)
 //   - findings arrays and the findings-only report {"findings": […]}
+//   - the exit-2 error document {"error": …} holding one finding form (12.0)
 //   - the three-state datum decode: plain value / `null` /
 //     {"unavailable": true} (11.4, 12.7)
 //   - the unavailability-marker structural walk T12.7-1 relies on: no object
@@ -26,6 +27,7 @@
 
 import { Buffer, isUtf8 } from "node:buffer";
 import type {
+  ErrorDocument,
   Finding,
   FindingLocation,
   FindingsReport,
@@ -399,6 +401,35 @@ export function decodeFindingsReport(
     findings: decodeFindingsArray(
       requiredKey(obj, "findings", site),
       at(site, "findings"),
+    ),
+  };
+}
+
+// --- the exit-2 error document (12.0, 12.7) -----------------------------------
+
+/**
+ * The exit-2 error document — `{"error": …}` exactly, holding one finding
+ * form (SPEC 12.0, 12.7). With JSON output in effect — `--json` among the
+ * invocation's arguments, even when the arguments are themselves the error,
+ * or a JSON-only surface (10.7 export, 11, 12.6) — an invocation failing
+ * with a usage or configuration error (exit 2) emits this document as its
+ * entire stdout. Form-exact (H-3): the one member, the literal finding form;
+ * the document carries no `findings` member (12.7). Content: a configuration
+ * error carries the stable code and concerned path (14); a plain usage error
+ * carries `code` and `path` `null` — value assertions belong to callers
+ * (T12.7-3), this decode admits any well-formed finding.
+ */
+export function decodeErrorDocument(
+  doc: unknown,
+  context?: string,
+): ErrorDocument {
+  const site = rootSite("12.7 error document", context);
+  const obj = expectObject(doc, site);
+  expectOnlyMembers(obj, ["error"], site);
+  return {
+    error: decodeFindingForm(
+      requiredKey(obj, "error", site),
+      at(site, "error"),
     ),
   };
 }
