@@ -1,5 +1,6 @@
-// TEST-SPEC §6.6 (previews) — SUITE-24: T6.6-2, T6.6-3, T6.6-4. (T6.6-1 is
-// retired; T6.6-5…T6.6-6 are staged by later plan tasks into this module.)
+// TEST-SPEC §6.6 (previews) — SUITE-24: T6.6-2, T6.6-3, T6.6-4, T6.6-5.
+// (T6.6-1 is retired; T6.6-6 is staged by a later plan task into this
+// module.)
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -115,6 +116,37 @@
 //   `target-insertion` on coincidence; TEST-SPEC T6.6-4). Delta content is
 //   T6.6-5's business — asserted here only as the decode's success
 //   encoding (non-null beside `mapping` and `files`).
+// - T6.6-5 asserts the delta's content record-based, its expected sets
+//   composed from the premise build's own observed writes (H-4): a source
+//   `DIR/NAME.mdx`'s module-and-companion paths are the plain files the
+//   build added under the 13.1 name shape `DIR/NAME.xspec.<suffix>` — the
+//   module `DIR/NAME.xspec.ts` asserted present; the companion suffix set
+//   is implementation latitude, so it is observed, never assumed — and its
+//   Markdown path is the 13.2/7.3 destination, `DIR/NAME.md` next to the
+//   source with `outDir` unset. Derived paths of a file not existing before
+//   the operation (the moved-to file, the created target) are the origin's
+//   observed suffix set transposed under the destination name (SPEC 13.1:
+//   per-source derived paths are defined by the `NAME.mdx` name shape
+//   alone). A partition self-check makes every premise-build write
+//   attributable — graph data (T13.3-2's key rule, shared from
+//   section-13.3.ts) or exactly one staged source's
+//   module/companion/Markdown — failing diagnosed otherwise (SPEC 13.1–13.3
+//   enumerate what `build` writes). The record itself is opaque (H-4), so
+//   "recorded" is pinned through 13.3's contract — the record holds the
+//   paths of the derived files most recently generated, exactly the premise
+//   build's observed writes — and the delta assertions discriminate a
+//   product recording anything else. The record-deleted arm (T13.3-2's
+//   operational definition) asserts the record-based rule from both
+//   directions: `generated` equal to the FULL post-move regeneration set —
+//   the staying sources' paths listed although their files sit on disk, the
+//   origin's still-on-disk paths in neither direction — and `removed`
+//   exactly [] (nothing recorded), so a presence-based product fails both
+//   set equalities. An absent record is nothing-recorded, the empty-record
+//   SUCCESS path (SPEC 6.6: findings [], delta a plain value) — never the
+//   14.23 unavailability of T6.6-6, which covers recorded state that exists
+//   but cannot be read — and the preview never refreshes it (whole-root
+//   compare around the invocation; graph data asserted still absent
+//   afterward).
 
 import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -139,9 +171,11 @@ import {
   parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { assertRunTwiceDeterministic } from "../../helpers/determinism.js";
+import type { DirectorySnapshot } from "../../helpers/snapshot.js";
 import {
   assertLeavesUnchanged,
   assertSnapshotsEqual,
+  displaySnapshotPath,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import type {
@@ -189,6 +223,11 @@ import {
   MOVE_WRONG_KIND_CASES,
   stageMoveRefusalOccupants,
 } from "./section-6.5.js";
+import {
+  assertGraphDataPresent,
+  deleteGraphData,
+  isGraphDataKey,
+} from "./section-13.3.js";
 import {
   CORE_DECL,
   awaitHoldFile,
@@ -2372,8 +2411,418 @@ const T6_6_4 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T6.6-5 — delta: the derived-file delta, both directions, record-based
+// ---------------------------------------------------------------------------
+
+// The file-form arm reuses arm (c)'s sources — origin `specs/Mv.mdx` with an
+// imported neighbor and an importer — under the Markdown-emitting
+// configuration, so the delta's universe spans every derived-file kind the
+// record covers (SPEC 13.3: modules, companions, emitted Markdown). The
+// rename arm renames `pal` in place: its cross-file `PAL.pal` references are
+// content rewrites, changing no derived path.
+const F5_DEST = C4_MOVE_ARGV[2];
+const F5_RENAME_ARGV = ["rename", C4_PAL, "pal", "pal2"] as const;
+
+/** The plain files a premise `build` added: file entries of `after` whose
+ * key `before` lacks (snapshot keys are workspace-relative paths). */
+function addedFiles(
+  before: DirectorySnapshot,
+  after: DirectorySnapshot,
+): readonly string[] {
+  const added: string[] = [];
+  for (const [key, entry] of after.entries) {
+    if (entry.kind === "file" && !before.entries.has(key)) added.push(key);
+  }
+  return added;
+}
+
+/** `DIR/NAME.mdx` → `DIR/NAME` (staging arithmetic; misuse throws). */
+function sourceStem(sourcePath: string): string {
+  if (!sourcePath.endsWith(".mdx")) {
+    throw new Error(
+      `T6.6-5 staging: ${sourcePath} is not a NAME.mdx spec source`,
+    );
+  }
+  return sourcePath.slice(0, -".mdx".length);
+}
+
+/** The 13.1 module-and-companion name-shape prefix: `DIR/NAME.xspec.`. */
+function moduleCompanionPrefix(sourcePath: string): string {
+  return `${sourceStem(sourcePath)}.xspec.`;
+}
+
+/** The 13.2/7.3 Markdown emit destination with `emit: true` and `outDir`
+ * unset: `DIR/NAME.md` next to the source. */
+function markdownDestination(sourcePath: string): string {
+  return `${sourceStem(sourcePath)}.md`;
+}
+
+/** Paths in byte order (SPEC 12.7: delta directions list paths in byte
+ * order, so composed expected lists must meet the decode-enforced order). */
+function byteSortedPaths(paths: readonly string[]): readonly string[] {
+  return [...paths].sort((a, b) =>
+    Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8")),
+  );
+}
+
+/** One staged source's observed derived files (module header, H-4). */
+interface ObservedDerived {
+  /** Observed `DIR/NAME.xspec.<suffix>` paths, byte-sorted. */
+  readonly moduleAndCompanions: readonly string[];
+  /** The Markdown destination; `null` while emission is disabled. */
+  readonly markdown: string | null;
+}
+
+/** Every derived path of one source — module, companions, Markdown. */
+function derivedPathsOf(observed: ObservedDerived): readonly string[] {
+  return [
+    ...observed.moduleAndCompanions,
+    ...(observed.markdown === null ? [] : [observed.markdown]),
+  ];
+}
+
+/**
+ * Partition the premise build's written files into graph data and each
+ * staged source's derived files (module header, H-4): per source, the
+ * observed `DIR/NAME.xspec.<suffix>` plain files — the module
+ * `DIR/NAME.xspec.ts` asserted present (SPEC 13.1), a suffix containing a
+ * path separator rejected (every companion is a plain file beside the
+ * module) — plus, with emission enabled, the 13.2/7.3 Markdown destination
+ * asserted written. A write that is neither graph data nor attributable to
+ * a staged source fails diagnosed: SPEC 13.1–13.3 enumerate what `build`
+ * writes.
+ */
+function observeDerivedWrites(
+  written: readonly string[],
+  sources: readonly string[],
+  emission: boolean,
+  context: string,
+): ReadonlyMap<string, ObservedDerived> {
+  const unattributed = new Set(written.filter((path) => !isGraphDataKey(path)));
+  const observed = new Map<string, ObservedDerived>();
+  for (const source of sources) {
+    const prefix = moduleCompanionPrefix(source);
+    const moduleAndCompanions = byteSortedPaths(
+      [...unattributed].filter((path) => path.startsWith(prefix)),
+    );
+    for (const path of moduleAndCompanions) {
+      if (path.slice(prefix.length).includes("/")) {
+        fail(
+          `${context}: the premise build wrote ${path} — every companion ` +
+            `file is named \`NAME.xspec.\` plus a suffix, a plain file ` +
+            `beside the module (SPEC 13.1), never a deeper path`,
+        );
+      }
+      unattributed.delete(path);
+    }
+    const modulePath = `${prefix}ts`;
+    if (!moduleAndCompanions.includes(modulePath)) {
+      fail(
+        `${context}: the premise build must generate ${source}'s module ` +
+          `${modulePath} (SPEC 13.1); under the name shape it wrote only ` +
+          `[${moduleAndCompanions.join(", ")}]`,
+      );
+    }
+    let markdown: string | null = null;
+    if (emission) {
+      markdown = markdownDestination(source);
+      if (!unattributed.has(markdown)) {
+        fail(
+          `${context}: with emission enabled, ${source} emits ${markdown} — ` +
+            `\`NAME.md\` next to the source, \`outDir\` unset (SPEC 13.2, ` +
+            `7.3); the premise build did not write it`,
+        );
+      }
+      unattributed.delete(markdown);
+    }
+    observed.set(source, { moduleAndCompanions, markdown });
+  }
+  if (unattributed.size > 0) {
+    fail(
+      `${context}: every file the premise build writes is a source's ` +
+        `module or companion (SPEC 13.1), its emitted Markdown (13.2), or ` +
+        `graph data under .xspec/ (13.3); it also wrote ` +
+        `[${[...unattributed].join(", ")}]`,
+    );
+  }
+  return observed;
+}
+
+/**
+ * The origin's observed module-and-companion paths transposed under another
+ * source name — SPEC 13.1: per-source derived paths are defined by the
+ * `NAME.mdx` name shape alone, so a not-yet-existing file's set is the
+ * observed suffix set under its own `DIR/NAME.xspec.` prefix.
+ */
+function transposeModuleCompanions(
+  observed: ObservedDerived,
+  fromSource: string,
+  toSource: string,
+): readonly string[] {
+  const fromPrefix = moduleCompanionPrefix(fromSource);
+  const toPrefix = moduleCompanionPrefix(toSource);
+  return observed.moduleAndCompanions.map((path) => {
+    if (!path.startsWith(fromPrefix)) {
+      throw new Error(
+        `T6.6-5 staging self-check: ${path} must lie under ${fromPrefix}`,
+      );
+    }
+    return `${toPrefix}${path.slice(fromPrefix.length)}`;
+  });
+}
+
+/**
+ * Assert a successful preview's delta content exactly (T6.6-5): findings
+ * `[]`, the success plan encoding, `delta` a plain two-direction value — an
+ * absent record is nothing-recorded, the empty-record success path (SPEC
+ * 6.6), never the 14.23 unavailability of T6.6-6 — and each direction equal
+ * to the expected path set in byte order.
+ */
+function assertDeltaContent(
+  report: PreviewReport,
+  expected: {
+    readonly generated: readonly string[];
+    readonly removed: readonly string[];
+  },
+  context: string,
+): void {
+  assertSameJson(
+    report.findings,
+    [],
+    `${context}: a preview whose real operation would proceed reports ` +
+      `findings [] (SPEC 6.6, 12.7) — a missing record is no finding: ` +
+      `condition 23 covers recorded state that exists but cannot be read ` +
+      `(SPEC 14.23, T6.6-6)`,
+  );
+  if (
+    report.mapping === null ||
+    report.files === null ||
+    report.delta === null
+  ) {
+    fail(
+      `${context}: a successful preview reports its plan — \`mapping\`, ` +
+        `\`files\`, and \`delta\` are null exactly on refusal (SPEC 6.6, ` +
+        `12.7); got mapping ${report.mapping === null ? "null" : "present"}, ` +
+        `files ${report.files === null ? "null" : "present"}, delta ` +
+        `${report.delta === null ? "null" : "present"}`,
+    );
+  }
+  const delta = report.delta;
+  if ("unavailable" in delta) {
+    fail(
+      `${context}: the delta is explicitly unavailable only where recorded ` +
+        `state exists but cannot be read as a record (SPEC 14.23; T6.6-6's ` +
+        `staging) — an absent or empty record is the nothing-recorded ` +
+        `success path, reported as a plain two-direction value (SPEC 6.6)`,
+    );
+  }
+  assertSameJson(
+    delta.generated,
+    expected.generated,
+    `${context}: \`generated\` — exactly the derived paths the operation ` +
+      `would newly generate, the paths where nothing is currently recorded ` +
+      `as generated, in byte order (SPEC 6.6, 12.7)`,
+  );
+  assertSameJson(
+    delta.removed,
+    expected.removed,
+    `${context}: \`removed\` — exactly the recorded derived paths the ` +
+      `operation would leave no longer generated, in byte order (SPEC 6.6, ` +
+      `12.7)`,
+  );
+}
+
+const T6_6_5 = defineProductTest({
+  id: "T6.6-5",
+  title:
+    "delta: after a build, a file-form move preview reports the derived-file delta both directions — under `generated` the destination's module, companion, and (emission enabled) Markdown paths, nothing being recorded there, and under `removed` the recorded pre-move module, companions, and Markdown the operation would leave no longer generated; a rename preview on the same workspace reports [] in both directions (regeneration rewrites recorded paths in place); the created-target move of T6.6-4(d) reports the new file's derived paths under `generated`; record-based, not presence-based: with graph data deleted (T13.3-2's operational definition) the same move preview's `generated` is the full post-move regeneration set and its `removed` [] — nothing being recorded, presence on disk deciding neither direction — and the preview still writes nothing: no refresh, graph data still absent afterward (SPEC 6.6, 12.7, 13.1, 13.2, 13.3, 7.3, 12.1; H-3, H-4)",
+  run: async (product) => {
+    // --- File-form move, rename, and the record-deleted arm: one
+    // Markdown-emitting workspace (arm (c)'s sources) ---
+    await withWorkspace(
+      SPECS_MD_CONFIG,
+      {
+        [C4_MV]: C4_MV_SOURCE,
+        [C4_PAL]: C4_PAL_SOURCE,
+        [C4_USER]: C4_USER_SOURCE,
+      },
+      async (workspace) => {
+        const context = "T6.6-5 file-form move";
+        const before = await snapshotDirectory(workspace.root);
+        await buildOk(
+          product,
+          workspace,
+          `${context}: staging premise \`build\` — it generates every ` +
+            `derived-file kind and records their paths (SPEC 12.1, 13.3)`,
+        );
+        const after = await snapshotDirectory(workspace.root);
+        assertGraphDataPresent(
+          after,
+          `${context}: staging premise — the record the delta consults`,
+        );
+        const observed = observeDerivedWrites(
+          addedFiles(before, after),
+          [C4_MV, C4_PAL, C4_USER],
+          true,
+          `${context} staging observation`,
+        );
+        // `get` cannot miss: observeDerivedWrites maps exactly the sources.
+        const mv = observed.get(C4_MV)!;
+        const pal = observed.get(C4_PAL)!;
+        const user = observed.get(C4_USER)!;
+
+        // The destination's derived paths — nothing recorded there — and
+        // the moved file's recorded paths, left no longer generated.
+        const destinationDerived = byteSortedPaths([
+          ...transposeModuleCompanions(mv, C4_MV, F5_DEST),
+          markdownDestination(F5_DEST),
+        ]);
+        const originDerived = byteSortedPaths(derivedPathsOf(mv));
+
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const armContext = `${context} (record present)`;
+            const report = await runPreviewJson(
+              product,
+              workspace,
+              C4_MOVE_ARGV,
+              armContext,
+            );
+            assertDeltaContent(
+              report,
+              { generated: destinationDerived, removed: originDerived },
+              armContext,
+            );
+          },
+          `${context} (record present): the preview modifies nothing ` +
+            `(SPEC 6.6)`,
+        );
+
+        // A rename preview on the same workspace: regeneration rewrites
+        // recorded paths in place, so both directions are [] (SPEC 6.6) —
+        // the cross-file `PAL.pal` rewrites change file contents, never a
+        // derived path.
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const renameContext = `${context}, rename \`${F5_RENAME_ARGV.join(" ")}\``;
+            const report = await runPreviewJson(
+              product,
+              workspace,
+              F5_RENAME_ARGV,
+              renameContext,
+            );
+            assertDeltaContent(
+              report,
+              { generated: [], removed: [] },
+              renameContext,
+            );
+          },
+          `${context}, rename arm: the preview modifies nothing (SPEC 6.6)`,
+        );
+
+        // --- Record-based, not presence-based: graph data deleted ---
+        const deletedContext = `${context} (record deleted)`;
+        await deleteGraphData(workspace, deletedContext);
+        // With nothing recorded, every path the operation would generate is
+        // a path "where nothing is currently recorded as generated": the
+        // full post-move regeneration set — every post-move source's
+        // module, companions, and Markdown, the staying sources' present-
+        // on-disk files included (presence cannot tell a generated occupant
+        // from a foreign one, SPEC 6.6) — while `removed` is exactly []:
+        // the origin's still-on-disk files are recorded nowhere.
+        const fullRegenerationSet = byteSortedPaths([
+          ...destinationDerived,
+          ...derivedPathsOf(pal),
+          ...derivedPathsOf(user),
+        ]);
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const report = await runPreviewJson(
+              product,
+              workspace,
+              C4_MOVE_ARGV,
+              deletedContext,
+            );
+            assertDeltaContent(
+              report,
+              { generated: fullRegenerationSet, removed: [] },
+              deletedContext,
+            );
+          },
+          `${deletedContext}: the preview still writes nothing — no ` +
+            `refresh, no record rebuild (SPEC 6.6, 13.3)`,
+        );
+        const postPreview = await snapshotDirectory(workspace.root);
+        for (const key of postPreview.entries.keys()) {
+          if (isGraphDataKey(key)) {
+            fail(
+              `${deletedContext}: graph data must still be absent after ` +
+                `the preview — a preview writes nothing and never ` +
+                `refreshes the record (SPEC 6.6, 13.3); found ` +
+                `${displaySnapshotPath(key)}`,
+            );
+          }
+        }
+      },
+    );
+
+    // --- The created-target move of T6.6-4(d), staged identically: the
+    // new file's derived paths under `generated` ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [D4_SOLO]: D4_SOLO_SOURCE },
+      async (workspace) => {
+        const context = "T6.6-5 created-target move (T6.6-4(d)'s staging)";
+        const before = await snapshotDirectory(workspace.root);
+        await buildOk(
+          product,
+          workspace,
+          `${context}: staging premise \`build\` (SPEC 6.5, 6.6)`,
+        );
+        const after = await snapshotDirectory(workspace.root);
+        const observed = observeDerivedWrites(
+          addedFiles(before, after),
+          [D4_SOLO],
+          false,
+          `${context} staging observation`,
+        );
+        const solo = observed.get(D4_SOLO)!;
+        // The created file's derived paths: the destination's module and
+        // companions — no Markdown component, emission being disabled
+        // (SPEC 7.3, 13.1). The origin file stays, its recorded paths
+        // regenerated in place, so `removed` is exactly [].
+        const madeDerived = byteSortedPaths(
+          transposeModuleCompanions(solo, D4_SOLO, D4_MADE),
+        );
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const report = await runPreviewJson(
+              product,
+              workspace,
+              D4_MOVE_ARGV,
+              context,
+            );
+            assertDeltaContent(
+              report,
+              { generated: madeDerived, removed: [] },
+              context,
+            );
+          },
+          `${context}: the preview modifies nothing (SPEC 6.6)`,
+        );
+      },
+    );
+  },
+});
+
 export const section66Tests: readonly ProductTestEntry[] = [
   T6_6_2,
   T6_6_3,
   T6_6_4,
+  T6_6_5,
 ];

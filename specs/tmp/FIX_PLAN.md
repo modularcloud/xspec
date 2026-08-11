@@ -1217,10 +1217,54 @@ A "new test T<x>" task always means, in one change:
   (certification-document ×3 → FP-091; S-1's 7 unmapped keys → stages
   E/G), S-5 and certification green.]
 
-- [ ] FP-031 — Implement T6.6-5: derived-file delta both directions,
+- [x] FP-031 — Implement T6.6-5: derived-file delta both directions,
   record-based. [R1 #10; TEST-SPEC §6.6]
   Not presence-based: with graph data deleted, `generated` approaches the
   full set and the preview still writes nothing.
+  [Done 2026-08-11: T6.6-5 registered in section-6.6.ts, four arms on two
+  workspaces. Expected delta sets are composed from the premise build's own
+  observed writes (H-4, module header): per source the added plain files
+  under the 13.1 name shape `DIR/NAME.xspec.<suffix>` (module asserted
+  present; suffix set observed — implementation latitude) plus the 13.2/7.3
+  Markdown destination (`NAME.md` beside the source, outDir unset), a
+  partition self-check failing diagnosed on any unattributable write; a
+  not-yet-existing file's paths are the origin's suffix set transposed under
+  the destination name (13.1: per-source derived paths are defined by the
+  name shape alone). Workspace 1 (arm (c)'s Mv/Pal/User sources under the
+  Markdown-emitting config): (1) file-form move preview — `generated`
+  exactly the destination's module+companions+Markdown, `removed` exactly
+  the moved file's recorded set; (2) rename preview (`pal`→`pal2`,
+  cross-file content rewrites) — [] both directions; (3) record-deleted
+  (T13.3-2's operational definition shared from section-13.3.ts —
+  isGraphDataKey/assertGraphDataPresent/deleteGraphData now exported): the
+  same move preview's `generated` equals the FULL post-move regeneration
+  set (staying sources' on-disk paths included) and `removed` exactly []
+  (origin's on-disk paths in neither direction), findings [] (a missing
+  record is nothing-recorded — never 14.23; the guard rejects the
+  unavailable encoding), inside a whole-root modifies-nothing compare plus
+  an explicit graph-data-still-absent sweep. Workspace 2: T6.6-4(d)'s
+  staging reused verbatim — the created target's transposed
+  module+companions under `generated` (no Markdown, emission disabled),
+  `removed` []. Delta decode/order enforcement rides the existing
+  S-5-guarded decodePreviewReport; no new adapter. Traceability "T6.6-5":
+  ["6.6"] (13.1–13.3/7.3/12.7 carriage context, home coverage at
+  T13.1-*/T13.3-*/T7-*/T12.7-*); CERTIFICATIONS.md keeps T6.6-5 in the
+  Exclusions. Verified: red-as-diagnosed at the first preview invocation
+  (exit 2 "unknown flag '--preview'"; premise build and staging observation
+  pass against the current product — probes show its writes match the
+  partition model exactly: module + impl.d.ts/impl.d.ts.map/impl.js
+  companions, .md beside source, .xspec/graph.json). Satisfiability and
+  teeth proven by running the registered body via a scratch suite binding
+  against a conforming shim (real-product build delegation + sidecar
+  record, canned 12.7 preview documents; green end-to-end through all four
+  arms) and five deviations: presence-based generated (red at the
+  record-deleted full-set equality), presence-based removed (red at removed
+  []), preview-refreshes-record (red at the modifies-nothing compare),
+  unavailable-on-missing (red at the unavailable guard),
+  misplaced-markdown (red at the record-present set equality).
+  Typecheck/format clean; `npm run test:self` unchanged 4 planned mid-loop
+  reds (certification-document ×3 → FP-091; S-1's 7 unmapped keys → stages
+  E/G), S-5 and certification green.]
 
 - [ ] FP-032 — Implement T6.6-6: preview under a corrupt graph record.
   [R1 #11; TEST-SPEC §6.6, SPEC 14.23]

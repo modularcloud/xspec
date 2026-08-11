@@ -142,9 +142,11 @@ async function withWorkspace<T>(
 /**
  * Whether a snapshot key (a `/`-separated workspace-relative path) is graph
  * data: under `.xspec/`, excluding the durable `.xspec/journal` and
- * `.xspec/reviews/` (SPEC 13.3, 13.4; TEST-SPEC T13.3-2).
+ * `.xspec/reviews/` (SPEC 13.3, 13.4; TEST-SPEC T13.3-2). Exported: T6.6-5
+ * (section-6.6.ts) shares this operational definition — TEST-SPEC's "graph
+ * data deleted (T13.3-2's operational definition)".
  */
-function isGraphDataKey(key: string): boolean {
+export function isGraphDataKey(key: string): boolean {
   if (!key.startsWith(".xspec/")) return false;
   if (key === ".xspec/journal") return false;
   if (key === ".xspec/reviews" || key.startsWith(".xspec/reviews/")) {
@@ -183,9 +185,10 @@ function asSnapshot(
 /**
  * Assert a snapshot holds at least one graph-data entry — after `build`,
  * graph data lives under `.xspec/` (SPEC 13.3), so an empty set means the
- * product maintains it elsewhere or not at all.
+ * product maintains it elsewhere or not at all. Exported for T6.6-5's
+ * record-staging premise (section-6.6.ts).
  */
-function assertGraphDataPresent(
+export function assertGraphDataPresent(
   snapshot: DirectorySnapshot,
   context: string,
 ): void {
@@ -201,9 +204,10 @@ function assertGraphDataPresent(
 
 /**
  * Delete the graph data per the T13.3-2 operational definition: every path
- * under `.xspec/` except `.xspec/journal` and `.xspec/reviews/`.
+ * under `.xspec/` except `.xspec/journal` and `.xspec/reviews/`. Exported
+ * for T6.6-5's record-deleted arm (section-6.6.ts).
  */
-async function deleteGraphData(
+export async function deleteGraphData(
   workspace: TestWorkspace,
   context: string,
 ): Promise<void> {
