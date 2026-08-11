@@ -342,9 +342,11 @@ function assertRewriteHappened(
  * What a refused rename's report must hold (SPEC 14, 12.7): the arm's one
  * finding — its exact stable code — plus whichever concern §14 assigns the
  * reason: a located bearer/spelling, a concerned identity, or nothing further
- * where the concern's rendering is the reason's message alone.
+ * where the concern's rendering is the reason's message alone. Exported for
+ * T6.6-3, which stages T6.4-3's refusals identically and asserts the
+ * `--preview` invocation's refusal equivalence (TEST-SPEC §6.6).
  */
-interface RefusalExpectation {
+export interface RefusalExpectation {
   /**
    * The finding's counting key (`assertConditionCounts` vocabulary): a
    * stable refusal code token (`refused-…`), or a `14.N` condition identity
@@ -1093,14 +1095,100 @@ const V3_SIB_WINDOW = byteWindow(
   V3_SIB_CONSTRUCT,
 );
 
+/**
+ * One T6.4-3 refusal case: the full rename argv (without `--json`), the one
+ * refusal finding the staging isolates (SPEC 14), and its diagnosis context.
+ */
+export interface RenameRefusalCase {
+  readonly argv: readonly string[];
+  readonly expected: RefusalExpectation;
+  readonly reason: string;
+}
+
+/**
+ * T6.4-3's staging and complete refusal-case table, exported so T6.6-3 can
+ * stage each refusal identically and assert the `--preview` invocation's
+ * refusal equivalence over it (TEST-SPEC §6.6: "for each refusal of T6.4-3
+ * and T6.5-4 — the invalid-workspace precondition included — staged
+ * identically"). Each case's argv runs against a fresh RENAME_REFUSAL_CONFIG
+ * + RENAME_REFUSAL_FILES workspace after a premise `build` (the T6.4-3
+ * protocol: derived files sit under the modifies-nothing compares).
+ */
+export const RENAME_REFUSAL_CONFIG = SPECS_ONLY_CONFIG;
+export const RENAME_REFUSAL_FILES: Readonly<Record<string, string>> = {
+  [V3_FILE]: V3_SOURCE,
+};
+
+// Each arm's expected refusal finding (SPEC 14): the exact stable code, with
+// the concerned identity (`refused-invalid-id` and `refused-structural-parent`
+// concern the offending identity; `refused-identity-unchanged` concerns the
+// unchanged one) or the located remaining colliding bearer
+// (`refused-id-collision` locates every colliding bearer). The final case is
+// the top-level structural arm: a top-level section's ID is checked against
+// the empty prefix — exactly one segment (SPEC 1.3).
+export const RENAME_REFUSAL_CASES: readonly RenameRefusalCase[] = [
+  {
+    argv: ["rename", V3_FILE, "a.mid", "a.then"],
+    expected: {
+      finding: "refused-invalid-id",
+      identity: { file: V3_FILE, id: "a.then" },
+    },
+    reason: "new ID invalid per 1.4 — its segment is the forbidden name `then`",
+  },
+  {
+    argv: ["rename", V3_FILE, "a.mid", "a.mi d"],
+    expected: {
+      finding: "refused-invalid-id",
+      identity: { file: V3_FILE, id: "a.mi d" },
+    },
+    reason: "new ID invalid per 1.4 — its segment contains whitespace",
+  },
+  {
+    argv: ["rename", V3_FILE, "a.mid", "a.mid"],
+    expected: {
+      finding: "refused-identity-unchanged",
+      identity: { file: V3_FILE, id: "a.mid" },
+    },
+    reason: "new ID equal to the old ID",
+  },
+  {
+    argv: ["rename", V3_FILE, "a.mid", "a.sib"],
+    expected: {
+      finding: "refused-id-collision",
+      locatedAt: { file: V3_FILE, window: V3_SIB_WINDOW },
+    },
+    reason: "new ID colliding with an existing ID in the file",
+  },
+  {
+    argv: ["rename", V3_FILE, "a.mid", "x.mid"],
+    expected: {
+      finding: "refused-structural-parent",
+      identity: { file: V3_FILE, id: "x.mid" },
+    },
+    reason:
+      "new ID violating the structural parent rules — the node is nested " +
+      "inside `a`, so its ID must be `a` plus one segment (1.3)",
+  },
+  {
+    argv: ["rename", V3_FILE, "a", "b.c"],
+    expected: {
+      finding: "refused-structural-parent",
+      identity: { file: V3_FILE, id: "b.c" },
+    },
+    reason:
+      "new ID violating the structural parent rules — a top-level section's " +
+      "ID has exactly one segment (1.3)",
+  },
+];
+
 const T6_4_3 = defineProductTest({
   id: "T6.4-3",
   title:
     "validation refusals (exit 1): a new ID that is invalid (1.4), equal to the old ID, colliding with an existing ID, or violating structural parent rules each refuses the rename and modifies nothing (workspace byte-compare) — each refusal reported as the form-exact 12.7 findings-only report holding exactly one finding with its exact stable refusal code (refused-invalid-id, refused-identity-unchanged, refused-id-collision, refused-structural-parent) and the concerned identity or located colliding bearer (SPEC 6.4, 1.4, 1.3, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      { [V3_FILE]: V3_SOURCE },
+      RENAME_REFUSAL_CONFIG,
+      RENAME_REFUSAL_FILES,
       async (workspace) => {
         // Build first, so the modifies-nothing compares include intact
         // derived files (module header, H-4).
@@ -1109,82 +1197,17 @@ const T6_4_3 = defineProductTest({
           workspace,
           "T6.4-3 `build` over the staged workspace",
         );
-
-        // Each arm's expected refusal finding (SPEC 14): the exact stable
-        // code, with the concerned identity (`refused-invalid-id` and
-        // `refused-structural-parent` concern the offending identity;
-        // `refused-identity-unchanged` concerns the unchanged one) or the
-        // located remaining colliding bearer (`refused-id-collision`
-        // locates every colliding bearer).
-        const cases: readonly (readonly [
-          string,
-          RefusalExpectation,
-          string,
-        ])[] = [
-          [
-            "a.then",
-            {
-              finding: "refused-invalid-id",
-              identity: { file: V3_FILE, id: "a.then" },
-            },
-            "new ID invalid per 1.4 — its segment is the forbidden name `then`",
-          ],
-          [
-            "a.mi d",
-            {
-              finding: "refused-invalid-id",
-              identity: { file: V3_FILE, id: "a.mi d" },
-            },
-            "new ID invalid per 1.4 — its segment contains whitespace",
-          ],
-          [
-            "a.mid",
-            {
-              finding: "refused-identity-unchanged",
-              identity: { file: V3_FILE, id: "a.mid" },
-            },
-            "new ID equal to the old ID",
-          ],
-          [
-            "a.sib",
-            {
-              finding: "refused-id-collision",
-              locatedAt: { file: V3_FILE, window: V3_SIB_WINDOW },
-            },
-            "new ID colliding with an existing ID in the file",
-          ],
-          [
-            "x.mid",
-            {
-              finding: "refused-structural-parent",
-              identity: { file: V3_FILE, id: "x.mid" },
-            },
-            "new ID violating the structural parent rules — the node is nested " +
-              "inside `a`, so its ID must be `a` plus one segment (1.3)",
-          ],
-        ];
-        for (const [newId, expected, reason] of cases) {
+        // The complete case table (module scope, shared with T6.6-3's
+        // preview-refusal equivalence — TEST-SPEC §6.6 "staged identically").
+        for (const { argv, expected, reason } of RENAME_REFUSAL_CASES) {
           await expectRefusalModifiesNothing(
             product,
             workspace,
-            ["rename", V3_FILE, "a.mid", newId],
+            argv,
             expected,
             `T6.4-3 (${reason})`,
           );
         }
-        // The top-level structural arm: a top-level section's ID is checked
-        // against the empty prefix — exactly one segment (SPEC 1.3).
-        await expectRefusalModifiesNothing(
-          product,
-          workspace,
-          ["rename", V3_FILE, "a", "b.c"],
-          {
-            finding: "refused-structural-parent",
-            identity: { file: V3_FILE, id: "b.c" },
-          },
-          "T6.4-3 (new ID violating the structural parent rules — a " +
-            "top-level section's ID has exactly one segment, 1.3)",
-        );
       },
     );
   },
@@ -1276,6 +1299,55 @@ const U4_SOLO_SOURCE = [
   "",
 ].join("\n");
 
+/**
+ * T6.4-4's usage-error invocations over the shared U4 staging (exit 2,
+ * checked before source validation), exported so T6.6-3 can assert each
+ * `--preview` variant exits 2 identically (TEST-SPEC §6.6: "for the usage
+ * errors of T6.4-4/T6.5-5 the preview exits 2 identically — argument checks
+ * precede either way"). They ride T6.4-4's base arm (valid workspace) and
+ * ordering arm (unrelated validation errors present) alike.
+ */
+export const RENAME_USAGE_CASES: readonly (readonly [
+  readonly string[],
+  string,
+])[] = [
+  [["rename", "specs/Missing.mdx", "a", "a2"], "nonexistent <file>"],
+  [["rename", U4_FILE, "nope", "nope2"], "nonexistent old ID"],
+  [
+    ["rename", U4_CODE_FILE, "a", "a2"],
+    "discovered code source as <file> — a code source bears no requirement " +
+      "IDs, so a code-source origin is a wrong-kind operand, judged like " +
+      "existence before any content question (SPEC 6.4, 12.0)",
+  ],
+];
+
+/** The ordering arm's staging (valid sources + a failing file + the code
+ * source), exported for T6.6-3: on it, exit 2 beside unrelated validation
+ * errors realizes "argument checks precede" — previewed or not. */
+export const RENAME_USAGE_CONFIG = SPEC_AND_CODE_CONFIG;
+export const RENAME_USAGE_ORDERING_FILES: Readonly<Record<string, string>> = {
+  [U4_FILE]: U4_SOURCE,
+  [U4_BAD_FILE]: U4_BAD_SOURCE,
+  [U4_CODE_FILE]: U4_CODE_SOURCE,
+};
+
+/**
+ * T6.4-4's parse-local nonexistence staging (the sole would-be bearer spells
+ * no identity — its `id` attribute repeated): the rename is exit 2 even
+ * beside that file's findings. Exported for T6.6-3's preview variant; stage
+ * under RENAME_REFUSAL_CONFIG (the same specs-only configuration) and pin
+ * the one-14.17 premise before invoking.
+ */
+export const RENAME_SOLO_FILES: Readonly<Record<string, string>> = {
+  [U4_SOLO_FILE]: U4_SOLO_SOURCE,
+};
+export const RENAME_SOLO_ARGV: readonly string[] = [
+  "rename",
+  U4_SOLO_FILE,
+  "solo",
+  "solo2",
+];
+
 const T6_4_4 = defineProductTest({
   id: "T6.4-4",
   title:
@@ -1288,38 +1360,21 @@ const T6_4_4 = defineProductTest({
       async (workspace) => {
         const context = "T6.4-4 valid-workspace arm";
         await buildOk(product, workspace, `${context}: \`build\``);
-        await expectRenameUsageError(
-          product,
-          workspace,
-          ["rename", "specs/Missing.mdx", "a", "a2"],
-          `${context}, nonexistent <file>`,
-        );
-        await expectRenameUsageError(
-          product,
-          workspace,
-          ["rename", U4_FILE, "nope", "nope2"],
-          `${context}, nonexistent old ID`,
-        );
-        await expectRenameUsageError(
-          product,
-          workspace,
-          ["rename", U4_CODE_FILE, "a", "a2"],
-          `${context}, discovered code source as <file> — a code source ` +
-            `bears no requirement IDs, so a code-source origin is a ` +
-            `wrong-kind operand, judged like existence before any content ` +
-            `question (SPEC 6.4, 12.0)`,
-        );
+        for (const [argv, label] of RENAME_USAGE_CASES) {
+          await expectRenameUsageError(
+            product,
+            workspace,
+            argv,
+            `${context}, ${label}`,
+          );
+        }
       },
     );
 
     // --- Ordering arm: the workspace also fails build validation ---
     await withWorkspace(
-      SPEC_AND_CODE_CONFIG,
-      {
-        [U4_FILE]: U4_SOURCE,
-        [U4_BAD_FILE]: U4_BAD_SOURCE,
-        [U4_CODE_FILE]: U4_CODE_SOURCE,
-      },
+      RENAME_USAGE_CONFIG,
+      RENAME_USAGE_ORDERING_FILES,
       async (workspace) => {
         const context = "T6.4-4 ordering arm";
         // Staging premise: the workspace really fails build validation, so
@@ -1338,28 +1393,16 @@ const T6_4_4 = defineProductTest({
               `at least one validation finding (SPEC 14)`,
           );
         }
-        await expectRenameUsageError(
-          product,
-          workspace,
-          ["rename", "specs/Missing.mdx", "a", "a2"],
-          `${context}, nonexistent <file> with unrelated validation errors ` +
-            `present — the existence checks precede source validation (12.0)`,
-        );
-        await expectRenameUsageError(
-          product,
-          workspace,
-          ["rename", U4_FILE, "nope", "nope2"],
-          `${context}, nonexistent old ID with unrelated validation errors ` +
-            `present — the existence checks precede source validation (12.0)`,
-        );
-        await expectRenameUsageError(
-          product,
-          workspace,
-          ["rename", U4_CODE_FILE, "a", "a2"],
-          `${context}, wrong-kind (code-source) <file> with unrelated ` +
-            `validation errors present — the wrong-kind operand is judged ` +
-            `like existence, before source validation (SPEC 6.4, 12.0)`,
-        );
+        for (const [argv, label] of RENAME_USAGE_CASES) {
+          await expectRenameUsageError(
+            product,
+            workspace,
+            argv,
+            `${context}, ${label}, with unrelated validation errors present ` +
+              `— the existence and wrong-kind checks precede source ` +
+              `validation (SPEC 6.4, 12.0)`,
+          );
+        }
       },
     );
 
@@ -1452,8 +1495,8 @@ const T6_4_4 = defineProductTest({
     // --- Parse-local nonexistence: a would-be bearer spelling no
     // identity ---
     await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      { [U4_SOLO_FILE]: U4_SOLO_SOURCE },
+      RENAME_REFUSAL_CONFIG,
+      RENAME_SOLO_FILES,
       async (workspace) => {
         const context = "T6.4-4 spells-no-identity arm";
         // Staging premise: the repeated-`id` bearer leaves the file with
@@ -1480,7 +1523,7 @@ const T6_4_4 = defineProductTest({
         await expectRenameUsageError(
           product,
           workspace,
-          ["rename", U4_SOLO_FILE, "solo", "solo2"],
+          RENAME_SOLO_ARGV,
           `${context}: an old ID whose only would-be bearer spells no ` +
             `identity (its \`id\` attribute repeated on the tag) is ` +
             `nonexistent — exit 2 even beside that file's findings ` +

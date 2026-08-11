@@ -146,7 +146,12 @@ const A_MDX = [
   "",
 ].join("\n");
 
-const CORE_DECL: WorkspaceDecl = {
+/**
+ * The CONF-CORE-shaped staging shared by the 13.5 lock tests — and by
+ * T6.6-3's runs-while-held arm, which per CERTIFICATIONS.md shares this
+ * drive-during-hold choreography (T13.5-2's staging).
+ */
+export const CORE_DECL: WorkspaceDecl = {
   files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/A.mdx": A_MDX },
 };
 
@@ -173,9 +178,10 @@ async function withWorkspace<T>(
 /**
  * An absolute hold-file path in the workspace's temporary directory — beside
  * the workspace root, never inside it, so whole-root byte snapshots are
- * unaffected and disposal cleans it up.
+ * unaffected and disposal cleans it up. Exported for T6.6-3, which shares
+ * this module's drive-during-hold choreography (CERTIFICATIONS.md).
  */
-function holdPathFor(workspace: TestWorkspace, name: string): string {
+export function holdPathFor(workspace: TestWorkspace, name: string): string {
   return path.join(workspace.tempRoot, name);
 }
 
@@ -184,7 +190,7 @@ function holdPathFor(workspace: TestWorkspace, name: string): string {
  * rejection (the process exited first, or the wait timed out) into a
  * diagnosed assertion failure (H-8).
  */
-async function awaitHoldFile(
+export async function awaitHoldFile(
   running: RunningProduct,
   absPath: string,
   context: string,
@@ -230,7 +236,7 @@ async function assertEmptyHoldFile(
 }
 
 /** One-line outcome of a settled run, for premature-exit diagnoses. */
-async function describeExit(running: RunningProduct): Promise<string> {
+export async function describeExit(running: RunningProduct): Promise<string> {
   try {
     return summarizeResult(await running.waitForExit());
   } catch (error) {
@@ -244,7 +250,7 @@ async function describeExit(running: RunningProduct): Promise<string> {
  * a diagnosed assertion failure (H-8). The bound is a hang guard, never an
  * assertion input (H-10).
  */
-async function runBounded(
+export async function runBounded(
   product: ProductBinding,
   cwd: string,
   argv: readonly string[],

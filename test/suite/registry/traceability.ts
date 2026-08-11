@@ -42,7 +42,7 @@
 //   here at H-7's passage granularity, the T7-1..T7.5-1 range resolved to
 //   the entries that assert a condition (T7-5 asserts none) and the refusal
 //   reasons' staging record resolved to its implemented tests (T6.4-3,
-//   T6.5-4, T6.5-6; T6.6-3 joins when implemented).
+//   T6.5-4, T6.5-6, T6.6-3).
 // - Alias entries: TEST-SPEC's pointer-only tests are not separately
 //   implemented, so their coverage rides on the implementing tests —
 //   T12.0-10's rename/move and baseline arms ride on T6.4-4/T6.5-5 and
@@ -216,6 +216,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T6.5-6": ["6.5", "14"],
   "T6.5-7": ["6.5"],
   "T6.6-2": ["6.6"],
+  "T6.6-3": ["6.6", "14"],
   "T6.7-1": ["6.7"],
   "T7-1": ["7", "14"],
   "T7-2": ["7", "14"],

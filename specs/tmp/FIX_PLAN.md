@@ -1089,12 +1089,72 @@ A "new test T<x>" task always means, in one change:
   keys now the 7-key set {11.2, 11.3, 11.4, 11.5, 11.6, 12.6, 12.7} —
   "6.6" mapped by this task), S-5 (70 tests) and certification green.]
 
-- [ ] FP-029 — Implement T6.6-3: refusal/usage-error equivalence under
+- [x] FP-029 — Implement T6.6-3: refusal/usage-error equivalence under
   `--preview`. [R1 #8; TEST-SPEC §6.6]
   Same stable codes as the real operation; exit 1 with `mapping`/`files`/
   `delta` null; exit 2 identically; preview runs to completion under
   `--test-hold` held by another command; `--test-hold` + `--preview` is a
   usage error.
+  [Done 2026-08-11: T6.6-3 registered in section-6.6.ts. Refusal
+  equivalence runs over T6.4-3's and T6.5-4's COMPLETE case tables staged
+  identically — the stagings and expectation tables are now module-scope
+  exports of section-6.4.ts (RENAME_REFUSAL_*) and section-6.5.ts
+  (MOVE_REFUSAL_* + stageMoveRefusalOccupants, MOVE_DERIVED_PATH_*,
+  MOVE_PRECONDITION_* — the derived-path and invalid-workspace-precondition
+  arms included), consumed by the source tests and T6.6-3 alike so "staged
+  identically" holds by construction (behavior-preserving refactor:
+  section-6.4 unchanged 4 failed/3 passed, section-6.5 unchanged
+  5 failed/2 passed, section-13.5 7/7 green). Each of the 24 refusal arms,
+  inside one whole-root modifies-nothing compare: real invocation `--json`
+  exit 1, form-exact 12.7 findings decode, per-arm code counts re-pinned
+  (the arm still isolates its staged cause; concerned-data assertions stay
+  in T6.4-3/T6.5-4), then `--preview --json` exit 1 decoded as the preview
+  document (refused encoding: mapping/files/delta all null; mixed nullity
+  already decode-rejected) with findings compared element-wise to the real
+  report over every member except message — code, locations, path,
+  identities, the contractual members (message composition unpinned, H-4;
+  both sides decode-validated in 12.7's total order whose keys precede the
+  message tie-break on exactly those members). Usage equivalence: every
+  T6.4-4/T6.5-5 usage-error invocation (exported tables RENAME_USAGE_CASES,
+  MOVE_USAGE_CASES, MOVE_WRONG_KIND_CASES, MOVE_MIXED_SYNOPSIS_CASES,
+  MOVE_NON_UTF8_ARGV Linux-gated, both solo argvs) runs real-then-preview
+  on the ordering-shaped staging (failing-build premise pinned, realizing
+  "argument checks precede either way"), each side exit 2 with the single
+  12.7 error document and stderr presence, each sweep inside a
+  modifies-nothing compare; the spells-no-identity arms re-pin their
+  exactly-one-14.17 premise first. Scheduling: the runs-while-held arm
+  reuses T13.5-2's staging and choreography (section-13.5.ts now exports
+  CORE_DECL/holdPathFor/awaitHoldFile/runBounded/describeExit — the
+  CERTIFICATIONS.md Exclusions note binds exactly this sharing): while the
+  real `rename a a2 --test-hold` is held, `rename g g2 --preview --json` —
+  T13.5-2's refused second command, previewed — runs to completion exit 0
+  (bounded run: a blocking product fails diagnosed) with findings [] and a
+  non-null plan, command 1 still running, held-baseline snapshot unchanged;
+  release → command 1 exits 0. `--test-hold`+`--preview` asserted for both
+  operations and both flag orders: exit 2, error document, stderr, no hold
+  file created, nothing modified. Traceability "T6.6-3": ["6.6", "14"]
+  (TEST-SPEC 14's refusal-reason staging record names T6.6-3; map comment
+  updated); CERTIFICATIONS.md keeps T6.6-3 in the Exclusions — no fixture
+  scope. No new adapter (decodePreviewReport/decodeFindingsReport/
+  decodeErrorDocument are S-5-guarded already; the projection is a local
+  assertion). Verified: T6.6-3 red-as-diagnosed at the FIRST refusal arm's
+  real-side form-exact findings decode (the stub emits `{"refused":…}` —
+  the pre-existing FP-001/FP-007-class product gap), the preview-side gap
+  behind it (direct probe: `--preview` is exit 2 "unknown flag '--preview'",
+  the whole 6.6 surface patch-new); satisfiability and teeth proven by
+  running the registered body via a scratch binding against a conforming
+  shim (real-product delegation for build/held commands, synthetic 12.7
+  refusal/usage/preview answers generated FROM the exported expectation
+  tables, old→12.7 build-findings translation for the premises, non-UTF-8
+  detected from raw /proc/self/cmdline) — green end-to-end through all
+  arms, the held choreography running against the real product's lock —
+  and against four deviations: preview-drops-a-finding (red at the
+  same-findings compare), refused-preview-reports-a-plan (red at the
+  null-plan assertion), preview-writes-a-file (red at the modifies-nothing
+  compare), preview-refuses-while-held (red at the runs-while-held exit-0
+  assertion). Typecheck/format clean; `npm run test:self` unchanged 4
+  planned mid-loop reds (certification-document ×3 → FP-091; S-1's 7
+  unmapped keys → stages E/G), S-5 and certification green.]
 
 - [ ] FP-030 — Implement T6.6-4: preview report content — the ten 12.7 edit
   classes. [R1 #9; TEST-SPEC §6.6, SPEC 12.7]

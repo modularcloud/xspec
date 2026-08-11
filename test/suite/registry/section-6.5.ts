@@ -462,8 +462,10 @@ function renderArgv(argv: readonly ArgvValue[]): string {
  * further where no pre-operation construct renders the concern. An arm
  * staging several applicable reasons passes one expectation per reason
  * (SPEC 14: every applicable reason reports together, one finding each).
+ * Exported for T6.6-3, which stages T6.5-4's refusals identically and
+ * asserts the `--preview` invocation's refusal equivalence (TEST-SPEC §6.6).
  */
-interface RefusalExpectation {
+export interface RefusalExpectation {
   /**
    * The finding's counting key (`assertConditionCounts` vocabulary): a
    * stable refusal code token (`refused-…`), or a `14.N` condition identity
@@ -1724,6 +1726,276 @@ export default defineConfig({
 const V4_SOLO = "specs/Solo.mdx";
 const V4_SOLO_SOURCE = ['<S id="solo">', "Solo text.", "</S>", ""].join("\n");
 const V4_MDOUT_OCCUPANT = "mdout/new";
+const V4_MDOUT_OCCUPANT_CONTENT = "not a directory\n";
+
+/**
+ * One T6.5-4 refusal case: the full move argv (without `--json`), the
+ * expected refusal finding — or one expectation per applicable reason where
+ * the staging carries several (SPEC 14) — and its diagnosis context.
+ */
+export interface MoveRefusalCase {
+  readonly argv: readonly string[];
+  readonly expected: RefusalExpectation | readonly RefusalExpectation[];
+  readonly reason: string;
+}
+
+/**
+ * T6.5-4's main-workspace staging and complete refusal-case table, exported
+ * so T6.6-3 can stage each refusal identically and assert the `--preview`
+ * invocation's refusal equivalence over it (TEST-SPEC §6.6: "for each
+ * refusal of T6.4-3 and T6.5-4 — the invalid-workspace precondition included
+ * — staged identically"). The workspace is MOVE_REFUSAL_CONFIG +
+ * MOVE_REFUSAL_FILES with the destination occupants staged by
+ * `stageMoveRefusalOccupants` BEFORE the premise `build` (which must still
+ * pass — the staging note above the V4 fixtures).
+ */
+export const MOVE_REFUSAL_CONFIG = REFUSAL_CONFIG;
+export const MOVE_REFUSAL_FILES: Readonly<Record<string, string>> = {
+  [V4_A]: V4_A_SOURCE,
+  [V4_B]: V4_B_SOURCE,
+  [V4_OCC]: V4_OCC_SOURCE,
+};
+
+/**
+ * Destination occupants (the V4 staging note): non-file occupants at
+ * in-group `.mdx` paths discovery ignores, staged before the pre-refusal
+ * `build` — a directory is no source file and discovery never yields a
+ * symbolic link (SPEC 7), so the build stays valid and each occupant arm
+ * refuses on exactly its staged ground.
+ */
+export async function stageMoveRefusalOccupants(
+  workspace: TestWorkspace,
+): Promise<void> {
+  await workspace.dir(V4_DIR_TARGET);
+  await workspace.symlink(V4_SYM_DEST, "B.mdx");
+  await workspace.symlink(V4_LINK_TARGET, "B.mdx");
+  await workspace.symlink(V4_GONE_DEST, "missing-target.mdx");
+}
+
+// Each case's expected refusal finding (SPEC 14): the exact stable code with
+// the concern §14 assigns the reason — identity, path, or located
+// participant (the module header's T6.5-4 note walks the per-reason
+// choices). No `#`-containing and no non-UTF-8 destination case: those 6.5
+// destination clauses are dead letters as refusals (T6.5-4's note) — every
+// spelling that would present either is an exit-2 usage error first, staged
+// in T6.5-5.
+export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
+  {
+    argv: ["move", "specs/A.mdx#mv", "specs/B.mdx#bmv"],
+    // The would-be spec import cycle's participating import declarations
+    // exist in no pre-operation source (the move would add both), so no
+    // concern window is assertable: the case pins the exact code and the
+    // 12.7 form alone.
+    expected: { finding: "refused-cycle" },
+    reason:
+      "spec import cycle — the moved node's local `d` on `keep` needs " +
+      "B.mdx to import A.mdx while `user`'s reference to the moved " +
+      "node needs A.mdx to import B.mdx (SPEC 6.5, 2.1)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#mv", "specs/A.mdx#keep.mv"],
+    expected: {
+      finding: "refused-cycle",
+      locatedAt: { file: V4_A, window: V4_KEEP_WINDOW },
+    },
+    reason:
+      "dependency cycle — the moved node depends on `keep` and would " +
+      "become its child, a dependency on its own ancestor (SPEC 6.5, 5.3)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", "specs/B.mdx"],
+    expected: { finding: "refused-destination-exists", path: V4_B },
+    reason: "file form whose destination file already exists (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", V4_SYM_DEST],
+    expected: { finding: "refused-destination-exists", path: V4_SYM_DEST },
+    reason:
+      "file form whose destination path is occupied by a symbolic link — " +
+      "whatever kind of filesystem object occupies it, a symbolic link " +
+      "included (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", V4_GONE_DEST],
+    expected: { finding: "refused-destination-exists", path: V4_GONE_DEST },
+    reason:
+      "file form whose destination path is occupied by a broken symbolic " +
+      "link, target absent — a product probing existence through " +
+      "link-following stat sees the path absent and proceeds (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#x", `${V4_DIR_TARGET}#tdir`],
+    expected: { finding: "refused-destination-exists", path: V4_DIR_TARGET },
+    reason:
+      "section form whose target path is occupied by a directory — not a " +
+      "discovered spec source: neither an insertion target nor an absent " +
+      "path to create (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#x", `${V4_LINK_TARGET}#tlink`],
+    expected: { finding: "refused-destination-exists", path: V4_LINK_TARGET },
+    reason:
+      "section form whose target path is occupied by a symbolic link " +
+      "resolving to a discovered spec source — discovery never yields a " +
+      "symlink (SPEC 6.5, 7): a product resolving the target path through " +
+      "the filesystem finds a spec source there and inserts through the " +
+      "link into B.mdx",
+  },
+  {
+    argv: ["move", "specs/A.mdx#x", `${V4_OCC}#tocc`],
+    expected: [
+      { finding: "refused-destination-exists", path: V4_OCC },
+      { finding: "refused-invalid-destination", path: V4_OCC },
+    ],
+    reason:
+      "section form whose target path is occupied by an existing `.mdx` " +
+      "file outside every configured spec group — present, right " +
+      "extension, still no discovered spec source — refusing under both " +
+      "applicable reasons, one finding per reason (SPEC 6.5, 14)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#then"],
+    expected: {
+      finding: "refused-invalid-id",
+      identity: { file: V4_B, id: "then" },
+    },
+    reason:
+      "section form whose <new-id> is invalid per 1.4 — the forbidden " +
+      "name `then` (the mirrored new-ID-is-valid check, SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#ha lf"],
+    expected: {
+      finding: "refused-invalid-id",
+      identity: { file: V4_B, id: "ha lf" },
+    },
+    reason:
+      "section form whose <new-id> is invalid per 1.4 — a " +
+      "whitespace-bearing segment (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#"],
+    expected: {
+      finding: "refused-invalid-id",
+      identity: { file: V4_B, id: "" },
+    },
+    reason:
+      "section form whose <new-id> is empty — the destination operand " +
+      "`specs/B.mdx#` holds one `#`, a well-formed 12.0 split whose id " +
+      "part has zero segments, refused as an invalid intrinsic ID (one or " +
+      "more segments, SPEC 14) — never the exit-2 malformed-value " +
+      "treatment a product gets by generalizing 11.3's `--to` spelling " +
+      "rule to move operands (SPEC 6.5, 12.0)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#x", "specs/B.mdx#y"],
+    expected: {
+      finding: "refused-id-collision",
+      locatedAt: { file: V4_B, window: V4_Y_WINDOW },
+    },
+    reason:
+      "the ordinary cross-file collision — <new-id> `y` collides with the " +
+      "section `y` already present in the distinct target file (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#nope.k"],
+    expected: {
+      finding: "refused-missing-target-parent",
+      identity: { file: V4_B, id: "nope" },
+    },
+    reason:
+      "section form whose target parent (`nope`, the <new-id> minus its " +
+      "final segment) is missing from the target file (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx#x", "specs/A.mdx#x.sub.q"],
+    expected: {
+      finding: "refused-missing-target-parent",
+      identity: { file: V4_A, id: "x.sub" },
+    },
+    reason:
+      "section form whose target parent (`x.sub`) lies within the moved " +
+      "subtree, leaving no insertion point after the removal (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", "docs/Out.mdx"],
+    expected: { finding: "refused-invalid-destination", path: "docs/Out.mdx" },
+    reason:
+      "destination path belonging to no configured spec group — a move " +
+      "never takes a node out of the workspace (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", "specs/dual/Out.mdx"],
+    expected: {
+      finding: "refused-invalid-destination",
+      path: "specs/dual/Out.mdx",
+    },
+    reason:
+      "destination path belonging to a code group as well (SPEC 6.5, 14.14)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", "specs/plain/Out.md"],
+    expected: {
+      finding: "refused-invalid-destination",
+      path: "specs/plain/Out.md",
+    },
+    reason:
+      "destination path lacking the `.mdx` extension — it matches the " +
+      "`specs/plain/**` spec glob, isolating 14.19's extension rule " +
+      "(SPEC 6.5, 7.1, 14.19)",
+  },
+];
+
+/**
+ * T6.5-4's derived-path arm (its own workspace; the V4_OUTDIR_CONFIG staging
+ * note), exported for T6.6-3: the otherwise-valid destination's emit
+ * destination has its directory component occupied by a plain file lying
+ * under no current source's write path, so the premise `build` passes and
+ * the refusal is the move's own — refused-invalid-destination concerning the
+ * destination path, never 14.22.
+ */
+export const MOVE_DERIVED_PATH_CONFIG = V4_OUTDIR_CONFIG;
+export const MOVE_DERIVED_PATH_FILES: Readonly<Record<string, string>> = {
+  [V4_SOLO]: V4_SOLO_SOURCE,
+  [V4_MDOUT_OCCUPANT]: V4_MDOUT_OCCUPANT_CONTENT,
+};
+export const MOVE_DERIVED_PATH_CASE: MoveRefusalCase = {
+  argv: ["move", V4_SOLO, "new/b.mdx"],
+  expected: { finding: "refused-invalid-destination", path: "new/b.mdx" },
+  reason:
+    "derived-path arm — a workspace-relative directory component of a " +
+    "derived path the destination would generate, the emit destination " +
+    "mdout/new/b.md under markdown.outDir, is occupied by a plain file: " +
+    "refused refused-invalid-destination concerning the destination path, " +
+    "never 14.22 — a product vetting only the destination path's own " +
+    "components sees new/ absent and proceeds (SPEC 6.5, 7.3, 13.1, 13.2, 14)",
+};
+
+/**
+ * T6.5-4's valid-workspace precondition arm (as T6.4-6), exported for
+ * T6.6-3: stage MOVE_PRECONDITION_FILES under MOVE_REFUSAL_CONFIG, `build`
+ * (exit 0), then overwrite MOVE_PRECONDITION_BREAK_FILE with
+ * MOVE_PRECONDITION_BREAK_SOURCE — the pre-existing validation error
+ * elsewhere (14.5) — and the otherwise-valid move refuses reporting the
+ * workspace's numbered findings alone.
+ */
+export const MOVE_PRECONDITION_FILES: Readonly<Record<string, string>> = {
+  [V4_A]: V4_A_SOURCE,
+  [V4_B]: V4_B_SOURCE,
+  [V4_OTHER]: V4_OTHER_VALID,
+};
+export const MOVE_PRECONDITION_BREAK_FILE = V4_OTHER;
+export const MOVE_PRECONDITION_BREAK_SOURCE = V4_OTHER_INVALID;
+export const MOVE_PRECONDITION_CASE: MoveRefusalCase = {
+  argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#kp"],
+  expected: { finding: "14.5", locatedAt: { file: V4_OTHER } },
+  reason:
+    "valid-workspace precondition as T6.4-6 — the workspace fails the " +
+    "validations of `xspec build` through an unresolved d reference in " +
+    "specs/Other.mdx (SPEC 14.5), so the move refuses before modifying " +
+    "anything, reporting the workspace's numbered findings alone " +
+    "(SPEC 6.5, 6.4, 12.1, 14)",
+};
 
 const T6_5_4 = defineProductTest({
   id: "T6.5-4",
@@ -1731,18 +2003,14 @@ const T6_5_4 = defineProductTest({
     "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle (refused-cycle, the dependency arm locating the participating `d` spelling); file form whose destination exists — occupied by a plain file, by a symbolic link, and by a broken symbolic link with its target absent, one arm each, the broken-link arm discriminating a product probing existence through link-following stat (refused-destination-exists, concerning that path); section form whose target path is occupied by anything other than a discovered spec source — a directory; a symbolic link resolving to a discovered spec source (discovery never yields a symlink); and an existing `.mdx` file outside every configured spec group, the latter refusing under refused-destination-exists and refused-invalid-destination together, one finding per applicable reason; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment; the empty `<new-id>` of destination operand `specs/B.mdx#`, a well-formed 12.0 split with zero id segments, never the exit-2 generalization of 11.3's `--to` spelling rule — refused-invalid-id, concerning that identity); the ordinary cross-file `<new-id>` collision (refused-id-collision, locating the remaining bearer); a missing target parent and a target parent within the moved subtree (refused-missing-target-parent, concerning the target-parent identity); destination paths in no configured spec group, in a code group as well, or lacking `.mdx`, and the derived-path arm — emission enabled under `markdown.outDir`, the otherwise-valid destination's emit-destination directory component `mdout/new` occupied by a plain file lying under no current source's write path, refused never 14.22 (refused-invalid-destination, concerning the destination path) — each refusal the form-exact 12.7 findings-only report holding exactly one finding per applicable reason with its exact stable code; the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6, reporting the workspace's numbered findings alone (SPEC 6.5, 7, 7.3, 5.3, 2.1, 1.4, 1.3, 13.1, 13.2, 13.4, 14.14, 14.19, 14.22, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
-      REFUSAL_CONFIG,
-      { [V4_A]: V4_A_SOURCE, [V4_B]: V4_B_SOURCE, [V4_OCC]: V4_OCC_SOURCE },
+      MOVE_REFUSAL_CONFIG,
+      MOVE_REFUSAL_FILES,
       async (workspace) => {
         // Destination occupants (the staging note above): staged before the
-        // pre-refusal `build`, which must still pass — a directory is no
-        // source file and discovery never yields a symbolic link (SPEC 7),
-        // so each occupant arm refuses on exactly its staged ground, not
-        // the invalid-workspace precondition.
-        await workspace.dir(V4_DIR_TARGET);
-        await workspace.symlink(V4_SYM_DEST, "B.mdx");
-        await workspace.symlink(V4_LINK_TARGET, "B.mdx");
-        await workspace.symlink(V4_GONE_DEST, "missing-target.mdx");
+        // pre-refusal `build`, which must still pass, so each occupant arm
+        // refuses on exactly its staged ground, not the invalid-workspace
+        // precondition.
+        await stageMoveRefusalOccupants(workspace);
         // Build first, so the modifies-nothing compares include intact
         // derived files (the T6.4-3 protocol).
         await buildOk(
@@ -1751,177 +2019,11 @@ const T6_5_4 = defineProductTest({
           "T6.5-4 `build` over the staged workspace",
         );
 
-        // Each arm's expected refusal finding (SPEC 14): the exact stable
-        // code with the concern §14 assigns the reason — identity, path, or
-        // located participant (the module header's T6.5-4 note walks the
-        // per-reason choices).
-        const cases: readonly (readonly [
-          readonly string[],
-          RefusalExpectation | readonly RefusalExpectation[],
-          string,
-        ])[] = [
-          [
-            ["move", "specs/A.mdx#mv", "specs/B.mdx#bmv"],
-            // The would-be spec import cycle's participating import
-            // declarations exist in no pre-operation source (the move would
-            // add both), so no concern window is assertable: the arm pins
-            // the exact code and the 12.7 form alone.
-            { finding: "refused-cycle" },
-            "spec import cycle — the moved node's local `d` on `keep` needs " +
-              "B.mdx to import A.mdx while `user`'s reference to the moved " +
-              "node needs A.mdx to import B.mdx (SPEC 6.5, 2.1)",
-          ],
-          [
-            ["move", "specs/A.mdx#mv", "specs/A.mdx#keep.mv"],
-            {
-              finding: "refused-cycle",
-              locatedAt: { file: V4_A, window: V4_KEEP_WINDOW },
-            },
-            "dependency cycle — the moved node depends on `keep` and would " +
-              "become its child, a dependency on its own ancestor (SPEC 6.5, " +
-              "5.3)",
-          ],
-          [
-            ["move", "specs/A.mdx", "specs/B.mdx"],
-            { finding: "refused-destination-exists", path: V4_B },
-            "file form whose destination file already exists (SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx", V4_SYM_DEST],
-            { finding: "refused-destination-exists", path: V4_SYM_DEST },
-            "file form whose destination path is occupied by a symbolic " +
-              "link — whatever kind of filesystem object occupies it, a " +
-              "symbolic link included (SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx", V4_GONE_DEST],
-            { finding: "refused-destination-exists", path: V4_GONE_DEST },
-            "file form whose destination path is occupied by a broken " +
-              "symbolic link, target absent — a product probing existence " +
-              "through link-following stat sees the path absent and " +
-              "proceeds (SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx#x", `${V4_DIR_TARGET}#tdir`],
-            { finding: "refused-destination-exists", path: V4_DIR_TARGET },
-            "section form whose target path is occupied by a directory — " +
-              "not a discovered spec source: neither an insertion target " +
-              "nor an absent path to create (SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx#x", `${V4_LINK_TARGET}#tlink`],
-            { finding: "refused-destination-exists", path: V4_LINK_TARGET },
-            "section form whose target path is occupied by a symbolic link " +
-              "resolving to a discovered spec source — discovery never " +
-              "yields a symlink (SPEC 6.5, 7): a product resolving the " +
-              "target path through the filesystem finds a spec source " +
-              "there and inserts through the link into B.mdx",
-          ],
-          [
-            ["move", "specs/A.mdx#x", `${V4_OCC}#tocc`],
-            [
-              { finding: "refused-destination-exists", path: V4_OCC },
-              { finding: "refused-invalid-destination", path: V4_OCC },
-            ],
-            "section form whose target path is occupied by an existing " +
-              "`.mdx` file outside every configured spec group — present, " +
-              "right extension, still no discovered spec source — refusing " +
-              "under both applicable reasons, one finding per reason " +
-              "(SPEC 6.5, 14)",
-          ],
-          [
-            ["move", "specs/A.mdx#keep", "specs/B.mdx#then"],
-            {
-              finding: "refused-invalid-id",
-              identity: { file: V4_B, id: "then" },
-            },
-            "section form whose <new-id> is invalid per 1.4 — the forbidden " +
-              "name `then` (the mirrored new-ID-is-valid check, SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx#keep", "specs/B.mdx#ha lf"],
-            {
-              finding: "refused-invalid-id",
-              identity: { file: V4_B, id: "ha lf" },
-            },
-            "section form whose <new-id> is invalid per 1.4 — a " +
-              "whitespace-bearing segment (SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx#keep", "specs/B.mdx#"],
-            {
-              finding: "refused-invalid-id",
-              identity: { file: V4_B, id: "" },
-            },
-            "section form whose <new-id> is empty — the destination " +
-              "operand `specs/B.mdx#` holds one `#`, a well-formed 12.0 " +
-              "split whose id part has zero segments, refused as an " +
-              "invalid intrinsic ID (one or more segments, SPEC 14) — " +
-              "never the exit-2 malformed-value treatment a product gets " +
-              "by generalizing 11.3's `--to` spelling rule to move " +
-              "operands (SPEC 6.5, 12.0)",
-          ],
-          [
-            ["move", "specs/A.mdx#x", "specs/B.mdx#y"],
-            {
-              finding: "refused-id-collision",
-              locatedAt: { file: V4_B, window: V4_Y_WINDOW },
-            },
-            "the ordinary cross-file collision — <new-id> `y` collides with " +
-              "the section `y` already present in the distinct target file " +
-              "(SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx#keep", "specs/B.mdx#nope.k"],
-            {
-              finding: "refused-missing-target-parent",
-              identity: { file: V4_B, id: "nope" },
-            },
-            "section form whose target parent (`nope`, the <new-id> minus " +
-              "its final segment) is missing from the target file (SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx#x", "specs/A.mdx#x.sub.q"],
-            {
-              finding: "refused-missing-target-parent",
-              identity: { file: V4_A, id: "x.sub" },
-            },
-            "section form whose target parent (`x.sub`) lies within the " +
-              "moved subtree, leaving no insertion point after the removal " +
-              "(SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx", "docs/Out.mdx"],
-            { finding: "refused-invalid-destination", path: "docs/Out.mdx" },
-            "destination path belonging to no configured spec group — a " +
-              "move never takes a node out of the workspace (SPEC 6.5)",
-          ],
-          [
-            ["move", "specs/A.mdx", "specs/dual/Out.mdx"],
-            {
-              finding: "refused-invalid-destination",
-              path: "specs/dual/Out.mdx",
-            },
-            "destination path belonging to a code group as well (SPEC 6.5, " +
-              "14.14)",
-          ],
-          [
-            ["move", "specs/A.mdx", "specs/plain/Out.md"],
-            {
-              finding: "refused-invalid-destination",
-              path: "specs/plain/Out.md",
-            },
-            "destination path lacking the `.mdx` extension — it matches the " +
-              "`specs/plain/**` spec glob, isolating 14.19's extension rule " +
-              "(SPEC 6.5, 7.1, 14.19)",
-          ],
-        ];
-        // No `#`-containing and no non-UTF-8 destination arm here: those 6.5
-        // destination clauses are dead letters as refusals (T6.5-4's note) —
-        // a destination path exists only as an operand spelling, and every
-        // spelling that would present either is an exit-2 usage error before
-        // any refusal is evaluated. T6.5-5 stages both.
-        for (const [argv, expected, reason] of cases) {
+        // The complete case table (module scope, shared with T6.6-3's
+        // preview-refusal equivalence — TEST-SPEC §6.6 "staged identically";
+        // the dead-letter destination spellings stay in T6.5-5, the module
+        // header's note).
+        for (const { argv, expected, reason } of MOVE_REFUSAL_CASES) {
           await expectRefusalModifiesNothing(
             product,
             workspace,
@@ -1941,11 +2043,8 @@ const T6_5_4 = defineProductTest({
     // (SPEC 13.2, 7.3) has its directory component `mdout/new` occupied by
     // a plain file.
     await withWorkspace(
-      V4_OUTDIR_CONFIG,
-      {
-        [V4_SOLO]: V4_SOLO_SOURCE,
-        [V4_MDOUT_OCCUPANT]: "not a directory\n",
-      },
+      MOVE_DERIVED_PATH_CONFIG,
+      MOVE_DERIVED_PATH_FILES,
       async (workspace) => {
         await buildOk(
           product,
@@ -1958,50 +2057,38 @@ const T6_5_4 = defineProductTest({
         await expectRefusalModifiesNothing(
           product,
           workspace,
-          ["move", V4_SOLO, "new/b.mdx"],
-          { finding: "refused-invalid-destination", path: "new/b.mdx" },
-          "T6.5-4 (derived-path arm — a workspace-relative directory " +
-            "component of a derived path the destination would generate, " +
-            "the emit destination mdout/new/b.md under markdown.outDir, is " +
-            "occupied by a plain file: refused refused-invalid-destination " +
-            "concerning the destination path, never 14.22 — a product " +
-            "vetting only the destination path's own components sees new/ " +
-            "absent and proceeds; SPEC 6.5, 7.3, 13.1, 13.2, 14)",
+          MOVE_DERIVED_PATH_CASE.argv,
+          MOVE_DERIVED_PATH_CASE.expected,
+          `T6.5-4 (${MOVE_DERIVED_PATH_CASE.reason})`,
         );
       },
     );
 
     // Valid-workspace precondition, as T6.4-6: with a pre-existing
     // validation error elsewhere, the move's own arguments being valid, the
-    // move refuses (exit 1) before modifying anything.
+    // move refuses (exit 1) before modifying anything. The invalid-workspace
+    // refusal reports the workspace's findings themselves — exactly the one
+    // 14.5 finding located in the offending file, no refusal reason
+    // evaluated or reported beside it (SPEC 6.5, 6.4, 14).
     await withWorkspace(
-      REFUSAL_CONFIG,
-      {
-        [V4_A]: V4_A_SOURCE,
-        [V4_B]: V4_B_SOURCE,
-        [V4_OTHER]: V4_OTHER_VALID,
-      },
+      MOVE_REFUSAL_CONFIG,
+      MOVE_PRECONDITION_FILES,
       async (workspace) => {
         await buildOk(
           product,
           workspace,
           "T6.5-4 precondition arm `build` over the staged workspace",
         );
-        await workspace.file(V4_OTHER, V4_OTHER_INVALID);
-        // The invalid-workspace refusal reports the workspace's findings
-        // themselves — exactly the one 14.5 finding located in the offending
-        // file, no refusal reason evaluated or reported beside it (SPEC 6.5,
-        // 6.4, 14).
+        await workspace.file(
+          MOVE_PRECONDITION_BREAK_FILE,
+          MOVE_PRECONDITION_BREAK_SOURCE,
+        );
         await expectRefusalModifiesNothing(
           product,
           workspace,
-          ["move", "specs/A.mdx#keep", "specs/B.mdx#kp"],
-          { finding: "14.5", locatedAt: { file: V4_OTHER } },
-          "T6.5-4 (valid-workspace precondition as T6.4-6 — the workspace " +
-            "fails the validations of `xspec build` through an unresolved d " +
-            "reference in specs/Other.mdx, SPEC 14.5, so the move refuses " +
-            "before modifying anything: no source rewrite, no journal " +
-            "entry, no derived-file change; SPEC 6.5, 6.4, 12.1)",
+          MOVE_PRECONDITION_CASE.argv,
+          MOVE_PRECONDITION_CASE.expected,
+          `T6.5-4 (${MOVE_PRECONDITION_CASE.reason})`,
         );
       },
     );
@@ -2112,7 +2199,15 @@ const U5_NON_UTF8_DESTINATION: Uint8Array = Buffer.concat([
   Buffer.from(".mdx", "utf8"),
 ]);
 
-const U5_USAGE_CASES: readonly (readonly [readonly string[], string])[] = [
+// The T6.5-5 usage tables below are exported so T6.6-3 can assert each
+// `--preview` variant exits 2 identically (TEST-SPEC §6.6: "for the usage
+// errors of T6.4-4/T6.5-5 the preview exits 2 identically — argument checks
+// precede either way").
+
+export const MOVE_USAGE_CASES: readonly (readonly [
+  readonly string[],
+  string,
+])[] = [
   [
     ["move", "specs/Missing.mdx", "specs/New.mdx"],
     "file form, nonexistent origin file",
@@ -2135,7 +2230,10 @@ const U5_USAGE_CASES: readonly (readonly [readonly string[], string])[] = [
 // in move origins is discriminated. These cases ride the base arm (inside
 // modifies-nothing compares) and the ordering arm (the wrong-kind check
 // precedes source validation, as T6.4-4).
-const U5_WRONG_KIND_CASES: readonly (readonly [readonly string[], string])[] = [
+export const MOVE_WRONG_KIND_CASES: readonly (readonly [
+  readonly string[],
+  string,
+])[] = [
   [
     ["move", U5_CODE, "specs/New.mdx"],
     "file form, discovered code source as origin",
@@ -2144,6 +2242,80 @@ const U5_WRONG_KIND_CASES: readonly (readonly [readonly string[], string])[] = [
     ["move", `${U5_CODE}#noop`, "specs/B.mdx#z"],
     "section form, discovered code source as origin file",
   ],
+];
+
+// The three mixed-synopsis invocations (SPEC 6.5: a move operand is
+// classified by spelling alone — an operand containing `#` is a
+// `<file>#<id>` pair under the 12.0 split, one without is a file — so an
+// invocation mixing the two synopses' forms matches neither). Every operand
+// names staged content (`specs/A.mdx`, its section `a`, `specs/B.mdx`), so a
+// product accepting a mixed form would perform a move — each case runs
+// inside a whole-root modifies-nothing compare. The third, the
+// `#`-containing file-form destination, is also the staging T6.5-4's
+// dead-letter note sets aside: exit 2, never the 6.5 destination refusal
+// (exit 1) it would be were the operand a path.
+export const MOVE_MIXED_SYNOPSIS_CASES: readonly (readonly [
+  readonly string[],
+  string,
+])[] = [
+  [
+    ["move", U5_A, "specs/B.mdx#y"],
+    "mixed synopsis `a.mdx b.mdx#y` — a bare-file origin with a pair " +
+      "destination matches neither form (SPEC 6.5, 12.0)",
+  ],
+  [
+    ["move", `${U5_A}#a`, U5_B],
+    "mixed synopsis `a.mdx#x b.mdx` — a pair origin with a bare-file " +
+      "destination matches neither form (SPEC 6.5, 12.0)",
+  ],
+  [
+    ["move", "specs/A.mdx", "specs/Ha#sh.mdx"],
+    "mixed synopsis `a.mdx b#c.mdx` — the `#`-containing file-form " +
+      "destination classifies as a `<file>#<id>` pair by spelling alone, " +
+      "so the invocation mixes the two synopses' forms and matches " +
+      "neither (SPEC 6.5, 12.0; the staging T6.5-4's dead-letter note " +
+      "sets aside)",
+  ],
+];
+
+/**
+ * The non-UTF-8 destination operand invocation (raw argv bytes; the other
+ * dead-letter staging) — Linux leg only: Linux argv is a byte channel, so
+ * the destination is passed as raw bytes via the subprocess driver's
+ * raw-argv support; other platforms cannot carry the argument at all
+ * (T1.5-2's platform note). Callers gate on `process.platform === "linux"`.
+ */
+export const MOVE_NON_UTF8_ARGV: readonly ArgvValue[] = [
+  "move",
+  U5_A,
+  U5_NON_UTF8_DESTINATION,
+];
+
+/** The base/ordering staging shared by the usage cases (T6.4-4's mirror):
+ * valid sources, the discovered code source, and — in the ordering variant —
+ * the failing Bad.mdx, exported for T6.6-3's preview sweep. */
+export const MOVE_USAGE_CONFIG = SPEC_AND_CODE_CONFIG;
+export const MOVE_USAGE_ORDERING_FILES: Readonly<Record<string, string>> = {
+  [U5_A]: U5_A_SOURCE,
+  [U5_B]: U5_B_SOURCE,
+  [U5_BAD]: U5_BAD_SOURCE,
+  [U5_CODE]: U5_CODE_SOURCE,
+};
+
+/**
+ * T6.5-5's parse-local nonexistence staging (the sole would-be bearer
+ * spells no identity — its `id` attribute repeated): the move is exit 2 even
+ * beside that file's findings. Exported for T6.6-3's preview variant; stage
+ * under MOVE_SOLO_CONFIG and pin the one-14.17 premise before invoking.
+ */
+export const MOVE_SOLO_CONFIG = SPECS_ONLY_CONFIG;
+export const MOVE_SOLO_FILES: Readonly<Record<string, string>> = {
+  [U5_SOLO]: U5_SOLO_SOURCE,
+};
+export const MOVE_SOLO_ARGV: readonly string[] = [
+  "move",
+  `${U5_SOLO}#solo`,
+  "specs/New.mdx#solo2",
 ];
 
 const T6_5_5 = defineProductTest({
@@ -2162,7 +2334,7 @@ const T6_5_5 = defineProductTest({
       async (workspace) => {
         const context = "T6.5-5 valid-workspace arm";
         await buildOk(product, workspace, `${context}: \`build\``);
-        for (const [argv, label] of U5_USAGE_CASES) {
+        for (const [argv, label] of MOVE_USAGE_CASES) {
           await expectMoveUsageError(
             product,
             workspace,
@@ -2177,7 +2349,7 @@ const T6_5_5 = defineProductTest({
         // discovered code file and its real exported unit, so a product
         // accepting a code-source origin would relocate the file (file
         // form) or act on the named unit (section form).
-        for (const [argv, label] of U5_WRONG_KIND_CASES) {
+        for (const [argv, label] of MOVE_WRONG_KIND_CASES) {
           await assertLeavesUnchanged(
             workspace.root,
             async () => {
@@ -2196,64 +2368,24 @@ const T6_5_5 = defineProductTest({
           );
         }
 
-        // The three mixed-synopsis invocations (SPEC 6.5: a move operand is
-        // classified by spelling alone — an operand containing `#` is a
-        // `<file>#<id>` pair under the 12.0 split, one without is a file —
-        // so an invocation mixing the two synopses' forms matches neither):
-        // each asserted with a whole-root modifies-nothing snapshot compare
-        // around the command, because every operand names staged content
-        // (`specs/A.mdx`, its section `a`, `specs/B.mdx`) — a product
-        // accepting a mixed form would perform a move. The third, the
-        // `#`-containing file-form destination, is also the staging
-        // T6.5-4's dead-letter note sets aside: exit 2, never the 6.5
-        // destination refusal (exit 1) it would be were the operand a path.
-        await assertLeavesUnchanged(
-          workspace.root,
-          async () => {
-            await expectMoveUsageError(
-              product,
-              workspace,
-              ["move", U5_A, "specs/B.mdx#y"],
-              `${context}, mixed synopsis \`a.mdx b.mdx#y\` — a bare-file ` +
-                `origin with a pair destination matches neither form ` +
-                `(SPEC 6.5, 12.0)`,
-            );
-          },
-          `${context}: \`move ${U5_A} specs/B.mdx#y\` — the usage error ` +
-            `modifies nothing (SPEC 6.5, 12.0)`,
-        );
-        await assertLeavesUnchanged(
-          workspace.root,
-          async () => {
-            await expectMoveUsageError(
-              product,
-              workspace,
-              ["move", `${U5_A}#a`, U5_B],
-              `${context}, mixed synopsis \`a.mdx#x b.mdx\` — a pair ` +
-                `origin with a bare-file destination matches neither form ` +
-                `(SPEC 6.5, 12.0)`,
-            );
-          },
-          `${context}: \`move ${U5_A}#a ${U5_B}\` — the usage error ` +
-            `modifies nothing (SPEC 6.5, 12.0)`,
-        );
-        await assertLeavesUnchanged(
-          workspace.root,
-          async () => {
-            await expectMoveUsageError(
-              product,
-              workspace,
-              ["move", "specs/A.mdx", "specs/Ha#sh.mdx"],
-              `${context}, mixed synopsis \`a.mdx b#c.mdx\` — the ` +
-                `\`#\`-containing file-form destination classifies as a ` +
-                `\`<file>#<id>\` pair by spelling alone, so the invocation ` +
-                `mixes the two synopses' forms and matches neither ` +
-                `(SPEC 6.5, 12.0)`,
-            );
-          },
-          `${context}: \`move specs/A.mdx specs/Ha#sh.mdx\` — the usage ` +
-            `error modifies nothing (SPEC 6.5, 12.0)`,
-        );
+        // The three mixed-synopsis invocations (the module-scope table's
+        // note): each asserted with a whole-root modifies-nothing snapshot
+        // compare around the command.
+        for (const [argv, label] of MOVE_MIXED_SYNOPSIS_CASES) {
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              await expectMoveUsageError(
+                product,
+                workspace,
+                argv,
+                `${context}, ${label}`,
+              );
+            },
+            `${context}, ${label}: the usage error modifies nothing ` +
+              `(SPEC 6.5, 12.0)`,
+          );
+        }
 
         // Non-UTF-8 destination operand — the other staging T6.5-4's
         // dead-letter note sets aside (SPEC 6.5's non-UTF-8 destination
@@ -2269,7 +2401,7 @@ const T6_5_5 = defineProductTest({
               await expectMoveUsageError(
                 product,
                 workspace,
-                ["move", U5_A, U5_NON_UTF8_DESTINATION],
+                MOVE_NON_UTF8_ARGV,
                 `${context}, non-UTF-8 destination operand (raw argv ` +
                   `bytes, Linux leg) — a non-UTF-8 argument value is a ` +
                   `usage error (SPEC 12.0)`,
@@ -2284,13 +2416,8 @@ const T6_5_5 = defineProductTest({
 
     // --- Ordering arm: the workspace also fails build validation ---
     await withWorkspace(
-      SPEC_AND_CODE_CONFIG,
-      {
-        [U5_A]: U5_A_SOURCE,
-        [U5_B]: U5_B_SOURCE,
-        [U5_BAD]: U5_BAD_SOURCE,
-        [U5_CODE]: U5_CODE_SOURCE,
-      },
+      MOVE_USAGE_CONFIG,
+      MOVE_USAGE_ORDERING_FILES,
       async (workspace) => {
         const context = "T6.5-5 ordering arm";
         // Staging premise: the workspace really fails build validation, so
@@ -2309,7 +2436,7 @@ const T6_5_5 = defineProductTest({
               `at least one validation finding (SPEC 14)`,
           );
         }
-        for (const [argv, label] of U5_USAGE_CASES) {
+        for (const [argv, label] of MOVE_USAGE_CASES) {
           await expectMoveUsageError(
             product,
             workspace,
@@ -2318,7 +2445,7 @@ const T6_5_5 = defineProductTest({
               `— the existence checks precede source validation (SPEC 12.0)`,
           );
         }
-        for (const [argv, label] of U5_WRONG_KIND_CASES) {
+        for (const [argv, label] of MOVE_WRONG_KIND_CASES) {
           await expectMoveUsageError(
             product,
             workspace,
@@ -2427,8 +2554,8 @@ const T6_5_5 = defineProductTest({
     // --- Parse-local nonexistence: a would-be bearer spelling no
     // identity ---
     await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      { [U5_SOLO]: U5_SOLO_SOURCE },
+      MOVE_SOLO_CONFIG,
+      MOVE_SOLO_FILES,
       async (workspace) => {
         const context = "T6.5-5 spells-no-identity arm";
         // Staging premise: the repeated-`id` bearer leaves the file with
@@ -2455,7 +2582,7 @@ const T6_5_5 = defineProductTest({
         await expectMoveUsageError(
           product,
           workspace,
-          ["move", `${U5_SOLO}#solo`, "specs/New.mdx#solo2"],
+          MOVE_SOLO_ARGV,
           `${context}: an origin ID whose only would-be bearer spells no ` +
             `identity (its \`id\` attribute repeated on the tag) is ` +
             `nonexistent — exit 2 even beside that file's findings ` +
