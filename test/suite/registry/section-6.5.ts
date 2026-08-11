@@ -1,4 +1,4 @@
-// TEST-SPEC §6.5 (move) — SUITE-25: T6.5-1…T6.5-6.
+// TEST-SPEC §6.5 (move) — SUITE-25: T6.5-1…T6.5-7.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -141,6 +141,20 @@
 //   staged on the Linux leg only (mirroring T1.5-2's platform note): argv
 //   bytes exist as a channel there, carried by the subprocess driver's
 //   raw-byte argv support.
+// - T6.5-7 asserts the real move's operation-side rewrite bytes — the
+//   assertion T6.5-2's no-other-byte-changes check excludes and T6.6-4 makes
+//   only of the preview's report — as whole-file byte compares against
+//   independently composed expected constants (H-4, normalizing nothing),
+//   each delta cited to the rule of SPEC 6.5, 6.4, or 3 that forces it. The
+//   fixture is staged so no import is added: every moved reference converts
+//   imported → local, the one rewrite direction free of implementation
+//   latitude (SPEC 6.5: identifier choice and insertion offset attach to
+//   added imports alone), so the two files' post-move bytes are the rules'
+//   unique composition. A premise `build` pins the staging valid (the
+//   shared-line two-declaration import block parses, SPEC 2.1) and a
+//   post-move `check` guards the composition's soundness: if the product's
+//   bytes equal the expected bytes yet something failed to resolve, the
+//   staging itself was defective and must fail loud.
 // - T6.5-6's unstageable clauses are documented at the test, per TEST-SPEC:
 //   the collision clause's after-the-removal qualifier admits no
 //   discriminating fixture (structural IDs make the vacated set exactly the
@@ -2578,6 +2592,222 @@ const T6_5_6 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T6.5-7 — operation-side rewrite bytes for the real move
+// ---------------------------------------------------------------------------
+
+// The fixture (TEST-SPEC T6.5-7): the origin imports the target module under
+// two bindings (valid, SPEC 2.1 — multiple imports may bind one module under
+// different names), one declaration alone on its line (`TWO`), the other
+// (`TB`) following the retained, still-referenced third-module import
+// (`Keep`, referenced by `org.stay` OUTSIDE the moved subtree) on a shared
+// line. Every reference through the two bindings — the `d` chain
+// `d={TWO.hub}` and the embedding `{text(TB.aux)}` — lies inside the moved
+// subtree `org.mv`, which also holds the single-quoted local string
+// reference `d={'org.mv.leaf'}` to a moved descendant; no reference to a
+// moved node lies outside the subtree, and no moved reference targets a
+// node remaining in the origin — so the rewrite adds no import anywhere,
+// the one direction free of implementation latitude (SPEC 6.5).
+const B7_ORIGIN = "specs/Origin.mdx";
+const B7_TARGET = "specs/Target.mdx";
+const B7_KEEP = "specs/Keep.mdx";
+
+const B7_ORIGIN_BEFORE = [
+  'import TWO from "./Target.xspec"',
+  'import Keep from "./Keep.xspec"; import TB from "./Target.xspec"',
+  "",
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  '<S id="org.mv" d={TWO.hub}>',
+  "Moved head text.",
+  "",
+  "{text(TB.aux)}",
+  "",
+  '<S id="org.mv.leaf">',
+  "Moved leaf text.",
+  "</S>",
+  "",
+  "<S id=\"org.mv.use\" d={'org.mv.leaf'}>",
+  "Moved user text.",
+  "</S>",
+  "</S>",
+  "",
+  '<S id="org.stay" d={Keep.keep}>',
+  "Staying text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+const B7_TARGET_BEFORE = [
+  '<S id="hub">',
+  "Hub text.",
+  "</S>",
+  "",
+  '<S id="aux">',
+  "Aux text.",
+  "</S>",
+  "",
+].join("\n");
+
+const B7_KEEP_SOURCE = ['<S id="keep">', "Keep text.", "</S>", ""].join("\n");
+
+// Expected origin bytes, composed from the rules of SPEC 6.5 and 3 — not
+// from any product output:
+// - The own-line `TWO` declaration's own characters are deleted in place;
+//   its line, left empty purely by that deletion, is dropped with its
+//   terminator (SPEC 6.5, 3) — a product leaving an emptied line behind
+//   fails here.
+// - On the shared line, the removed `TB` declaration's own characters ALONE
+//   are deleted — the declaration spans `import TB from "./Target.xspec"`
+//   exactly (no trailing `;` exists to reach) — so the retained `Keep`
+//   import, its `;`, AND the separating U+0020 survive byte-for-byte: the
+//   kept line ends `"./Keep.xspec"; ` with a trailing space before its
+//   terminator (spelled as an explicit concatenation below so the byte is
+//   loud). A product normalizing whitespace around a removed declaration
+//   fails here.
+// - The moved text — the `org.mv` construct's own characters, opening `<`
+//   through the closing tag's `>` — is deleted in place; the merged line it
+//   leaves holds only the closing tag's terminator and is dropped (SPEC
+//   6.5, 3). Both surrounding blank lines were already blank in the source,
+//   so both are kept: two adjacent blank lines remain (rule of 3 drops only
+//   lines a removal blanked).
+const B7_ORIGIN_AFTER = [
+  'import Keep from "./Keep.xspec";' + " ",
+  "",
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  "",
+  '<S id="org.stay" d={Keep.keep}>',
+  "Staying text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+// Expected target bytes, composed from the same rules:
+// - Top-level `<new-id>` (`mv`): the moved text is inserted at the end of
+//   the file, followed by U+000A; the existing final line is terminated, so
+//   the insertion point sits at the start of a line and no preceding U+000A
+//   is added (SPEC 6.5).
+// - Re-identification by prefix replacement `org.mv` → `mv` rewrites the
+//   three `id` attributes in place (SPEC 6.5).
+// - The imported references convert to local form — their targets `hub` and
+//   `aux` live in the target file — in 6.4's pinned spelling for converted
+//   references: double-quoted string literals, `d={"hub"}` and
+//   `{text("aux")}` (SPEC 6.5, 6.4). A product spelling a converted
+//   reference single-quoted fails here.
+// - The local reference stays local, re-identified by prefix replacement
+//   with its single-quote spelling preserved: `d={'mv.leaf'}` (SPEC 6.4:
+//   minimal in-place edits preserve quote style).
+const B7_TARGET_AFTER = [
+  '<S id="hub">',
+  "Hub text.",
+  "</S>",
+  "",
+  '<S id="aux">',
+  "Aux text.",
+  "</S>",
+  '<S id="mv" d={"hub"}>',
+  "Moved head text.",
+  "",
+  '{text("aux")}',
+  "",
+  '<S id="mv.leaf">',
+  "Moved leaf text.",
+  "</S>",
+  "",
+  "<S id=\"mv.use\" d={'mv.leaf'}>",
+  "Moved user text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+const B7_MOVE_ARGV = [
+  "move",
+  "specs/Origin.mdx#org.mv",
+  "specs/Target.mdx#mv",
+] as const;
+
+const T6_5_7 = defineProductTest({
+  id: "T6.5-7",
+  title:
+    "operation-side rewrite bytes for the real move: import-edit extents and reference-conversion spellings byte-asserted against independently composed expected files, staged so no import is added (the one rewrite direction free of implementation latitude) — the own-line target-module import's line dropped with its terminator, the shared-line declaration's own characters alone deleted with the retained third-module import kept byte-for-byte on its kept line, the moved references converted to local form as double-quoted string literals, and the single-quoted local reference re-identified by prefix replacement with its quote spelling preserved (SPEC 6.5, 6.4, 3, 2.1; H-4, normalizing nothing)",
+  run: async (product) => {
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      {
+        [B7_ORIGIN]: B7_ORIGIN_BEFORE,
+        [B7_TARGET]: B7_TARGET_BEFORE,
+        [B7_KEEP]: B7_KEEP_SOURCE,
+      },
+      async (workspace) => {
+        // Premise: the staging is valid — most acutely, the shared line's
+        // two import declarations parse as two bindings (SPEC 2.1), so a
+        // later failure is the move's, not the staging's.
+        await buildOk(product, workspace, "T6.5-7 `build` over the staging");
+
+        await expectExit(
+          product,
+          workspace,
+          [...B7_MOVE_ARGV],
+          0,
+          "T6.5-7 `move specs/Origin.mdx#org.mv specs/Target.mdx#mv`",
+        );
+
+        await assertFileBytes(
+          workspace.path(B7_ORIGIN),
+          B7_ORIGIN_AFTER,
+          "T6.5-7: the origin after the move — both target-module imports " +
+            "left unreferenced are removed with 6.5's exact extent: the " +
+            "own-line declaration's line dropped with its terminator, the " +
+            "shared-line declaration's own characters alone deleted, the " +
+            "retained import (its `;` and the separating space included) " +
+            "kept byte-for-byte on its kept line (SPEC 6.5, 2.1, 3; H-4, " +
+            "normalizing nothing)",
+        );
+        await assertFileBytes(
+          workspace.path(B7_TARGET),
+          B7_TARGET_AFTER,
+          "T6.5-7: the target after the move — the moved references " +
+            "convert to local form as double-quoted string literals " +
+            '(`d={"hub"}`, `{text("aux")}`), the local reference is ' +
+            "re-identified by prefix replacement with its single-quote " +
+            "spelling preserved (`d={'mv.leaf'}`), and the insertion adds " +
+            "exactly the rewritten moved text plus U+000A at end of file " +
+            "(SPEC 6.5, 6.4; H-4, normalizing nothing)",
+        );
+        await assertFileBytes(
+          workspace.path(B7_KEEP),
+          B7_KEEP_SOURCE,
+          "T6.5-7: the retained third module's own file is an uninvolved " +
+            "bystander — beyond the stated edits, the identity and " +
+            "reference rewrites, and the finishing regeneration, a move " +
+            "changes no bytes (SPEC 6.5)",
+        );
+
+        // Soundness guard on the composed expectation itself: everything
+        // resolves after the move — if the product's bytes matched the
+        // expected bytes yet a reference or import failed to resolve, the
+        // COMPOSITION was defective, and it must fail loud rather than
+        // certify a broken rewrite (SPEC 6.5, 12.2).
+        await expectExit(
+          product,
+          workspace,
+          ["check"],
+          0,
+          "T6.5-7 `check` immediately after the move — every converted and " +
+            "re-identified reference resolves and no staleness remains " +
+            "(SPEC 6.5, 12.2, 14.10)",
+        );
+      },
+    );
+  },
+});
+
 /** TEST-SPEC §6.5, in canonical ID order (SUITE-25). */
 export const section65Tests: readonly ProductTestEntry[] = [
   T6_5_1,
@@ -2586,4 +2816,5 @@ export const section65Tests: readonly ProductTestEntry[] = [
   T6_5_4,
   T6_5_5,
   T6_5_6,
+  T6_5_7,
 ];

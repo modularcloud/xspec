@@ -985,13 +985,49 @@ A "new test T<x>" task always means, in one change:
   reds (certification-document ×3 → FP-091; S-1's 8 unmapped keys → stages
   E/G), S-5 and certification green.]
 
-- [ ] FP-027 — Implement T6.5-7: operation-side rewrite bytes for the real
+- [x] FP-027 — Implement T6.5-7: operation-side rewrite bytes for the real
   move. [R1 #6; TEST-SPEC §6.5]
   Import-removal extents (own-line import dropped with terminator;
   shared-line declaration's own characters only), double-quoted conversion
   spellings, preserved single-quote local reference — whole files
   byte-asserted against composed expected bytes. Registry
   `section-6.5.ts`; map `"6.5"`.
+  [Done 2026-08-11: T6.5-7 registered in section-6.5.ts — one workspace,
+  TEST-SPEC's exact staging: Origin.mdx imports Target.xspec under two
+  bindings (own-line `TWO`; `TB` following the retained, still-referenced
+  `Keep` import on a shared line, `"; "`-separated with the removed
+  declaration last and semicolonless so its own-characters span is
+  rule-unique), the moved subtree `org.mv` holding every reference through
+  both bindings (`d={TWO.hub}`, `{text(TB.aux)}`) plus the single-quoted
+  local `d={'org.mv.leaf'}`, `Keep.keep` referenced only outside the
+  subtree, no reference to a moved node outside it — so the section move
+  into Target.mdx (top-level `mv`, end-of-file insertion) adds no import
+  anywhere. Body: premise `build` exit 0 (pins the two-declaration
+  shared-line staging parses, 2.1), plain `move` exit 0, then whole-file
+  byte compares of Origin (own-line declaration's line dropped with its
+  terminator; shared line kept as `import Keep from "./Keep.xspec"; ` — the
+  `;` AND the separating space survive, spelled as an explicit `+ " "`
+  concatenation; both pre-existing blanks around the dropped construct
+  kept), Target (before-bytes + rewritten moved text + U+000A: `d={"hub"}`
+  / `{text("aux")}` double-quoted conversions, `d={'mv.leaf'}` single-quote
+  preserved, ids prefix-replaced), and Keep.mdx as bystander — expected
+  constants independently composed from the rules of 6.5/6.4/3 with each
+  delta's rule cited — plus post-move `check` exit 0 as the composition's
+  soundness guard. Traceability "T6.5-7": ["6.5"] (no numbered condition;
+  6.4/3/2.1 carriage context per precedent); CERTIFICATIONS.md names
+  T6.5-7 in the Exclusions (no fixture scope). NOT red against this repo's
+  product: the section-move rewrite machinery predates the patch — the
+  probe returned byte-for-byte the composed expectation (trailing space
+  included) with `check` clean, so the pass is genuine; teeth proven by a
+  scratch shim-binding probe running the registered body against two
+  deviations, whitespace-normalized shared line and double-quoted local
+  reference — each failed as HarnessAssertionError at exactly its
+  diagnosed compare (origin / target). Section-6.5 suite now 5 failed /
+  2 passed (T6.5-2 and T6.5-7 green; the five reds are the pre-existing
+  FP-001/FP-002-class product gaps). Typecheck/format clean; `npm run
+  test:self` unchanged 4 planned mid-loop reds (certification-document ×3
+  → FP-091; S-1's 8 unmapped keys → stages E/G), S-5 green, certification
+  17/17.]
 
 - [ ] FP-028 — Implement T6.6-2: preview is inert and predictive. [R1 #7;
   TEST-SPEC §6.6 (new preview section)]
