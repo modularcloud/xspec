@@ -624,7 +624,7 @@ A "new test T<x>" task always means, in one change:
   7.3/13.1/13.2/13.4 are context with home coverage elsewhere); T6.5-4 is
   in no certification scope (Exclusions-shared machinery only).]
 
-- [ ] FP-019 — T6.5-5: add the missing usage-error arms. [R1 #22; TEST-SPEC
+- [x] FP-019 — T6.5-5: add the missing usage-error arms. [R1 #22; TEST-SPEC
   §6.5]
   `test/suite/registry/section-6.5.ts` (~line 1580 area has only
   nonexistent origin file/ID, ordering, masking): add (a) wrong-kind
@@ -633,6 +633,43 @@ A "new test T<x>" task always means, in one change:
   (c) parse-local ID existence arms mirroring T6.4-4 (FP-016). (The
   non-UTF-8 destination operand arm arrives via FP-005's restage.) Exit-2
   protocol per FP-002.
+  [Done 2026-08-11: (a) base and ordering arms now run on a new
+  SPEC_AND_CODE_CONFIG (6.4's mirror) with a discovered, reference-free
+  `src/app.ts`; U5_WRONG_KIND_CASES adds `move src/app.ts specs/New.mdx`
+  (file form) and `move src/app.ts#noop specs/B.mdx#z` (section form — the
+  id part names the file's real exported unit, discriminating a product
+  that resolves code units in move origins), each exit 2 via
+  `expectMoveUsageError` (FP-002 protocol), riding both arms per
+  TEST-SPEC's "checked before source validation", the base-arm pair inside
+  whole-root `assertLeavesUnchanged` compares (an accepting product would
+  relocate the file). (b) the two missing mixed-synopsis arms `move
+  specs/A.mdx specs/B.mdx#y` and `move specs/A.mdx#a specs/B.mdx` landed
+  beside the FP-005-restaged `specs/Ha#sh.mdx` arm (the trio's third, kept
+  as the dead-letter staging), every operand naming staged content, each in
+  a whole-root modifies-nothing compare — exit 2, matches-neither by
+  spelling alone. (c) three parse-local arms mirror FP-016 with identical
+  sources: dup (two bearers of `dup`) → `expectRefusalModifiesNothing`,
+  exactly one 14.3 located in the file, target file not created; anc (sole
+  bearer `kid` beneath an id-less ancestor) → same protocol, exactly one
+  14.1; solo (`<S id="solo" id="solo">`) → build premise exactly one 14.17,
+  then move exit 2 beside that file's findings. Title and module header
+  extended; traceability unchanged (["6.5","12.0"], the T6.4-4/FP-016
+  precedent — T6.5-5 in no TEST-SPEC 14 staging record and no certification
+  scope). Soundness proven by direct probes against the built product
+  (suite arms past the first are unreached — T6.5-5 stays red-as-diagnosed
+  at the first arm's FP-002-class exit-2 error-document gap): base build
+  exit 0 with the code file; both wrong-kind forms exit 2 ("unknown file")
+  modifying nothing; mixed-2 exits 2 ("names no target section");
+  mixed-1 exposes a real classification gap — the product treats
+  `specs/B.mdx#y` as a `#`-containing file-form destination path and
+  REFUSES exit 1 where the arm demands exit 2 (matches-neither), modifying
+  nothing; dup/anc exit 1 with exactly the one old-shape 14.3/14.1 finding
+  (the FP-001-class form gap), creating nothing (no New.mdx, no `.xspec/`);
+  solo: build reports exactly one 14.17, move exits 2 "unknown ID 'solo'".
+  Typecheck clean; section-6.5 unchanged 5 failed / 1 passed (T6.5-2
+  green); `npm run test:self` unchanged 4 planned mid-loop reds
+  (certification-document ×3 → FP-091; S-1's 9 unmapped keys → stages
+  E/G), S-5 and certification green.]
 
 - [ ] FP-020 — T7-2: add the string-literal group-name keys arm. [R1 #23;
   TEST-SPEC §7]
