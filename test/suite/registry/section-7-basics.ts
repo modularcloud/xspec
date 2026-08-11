@@ -36,6 +36,16 @@
 // - T7-2 single-deviation staging: every invalid fixture is the valid
 //   canonical configuration with exactly one deviation, so the refusal is
 //   attributable to the arm's malformation and nothing else.
+// - T7-2 string-literal keys arm: "both groups discover their globs' files"
+//   is observed as the spec group's exact `ids` listing plus whole-graph
+//   edge-set equality carrying the code file's marker edge (T7-3's
+//   contrapositive: an undiscovered code file sources no edge); "resolve"
+//   is observed as the quoted-name coverage profile's covered/uncovered
+//   rows (counts and ignored composition stay T8.2-1's subject, the
+//   section-8 discipline) and as the policy selector's violation reported
+//   per the SPEC 14.12 contract — identities in order the rule name and the
+//   offending edge's source, kind token, and target; `locations` [], `path`
+//   `null`.
 // - T7-3 "the unfiltered `query edges` list carries no edge from it":
 //   asserted as exact whole-graph edge-set equality — the minimal fixture's
 //   complete edge set is spec-forced (SPEC 5.1–5.2: one contains edge per
@@ -57,6 +67,7 @@ import type { GraphEdge } from "../../helpers/adapters/index.js";
 import {
   decodeCoverageReport,
   decodeEdgesReport,
+  decodeFindingsReport,
   decodeIdsReport,
 } from "../../helpers/adapters/index.js";
 import {
@@ -71,6 +82,7 @@ import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import {
+  assertConditionCounts,
   assertEdgeSetEqual,
   assertSameJson,
   buildOk,
@@ -419,13 +431,88 @@ export default makeConfig({
 })
 `;
 
+// The string-literal keys arm (SPEC 7: the statically literal argument's
+// object literals carry "non-computed identifier or string-literal keys"):
+// a spec group and a code group whose names are not TypeScript identifiers
+// ("my-group", "test-code") have only the string-literal spelling — a
+// product accepting identifier keys alone refuses a valid configuration no
+// other spelling can declare. The quoted names are referenced from every
+// place group names resolve that this arm asserts: the coverage profile's
+// `target` and `boundary` (both unambiguous, so their kinds are inferred,
+// SPEC 7.4) and both policy selectors (SPEC 7.5).
+const QUOTED_KEYS_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    "my-group": ["specs/**/*.mdx"]
+  },
+  code: {
+    "test-code": ["src/**/*.ts"]
+  },
+  coverage: [
+    {
+      name: "quoted",
+      target: "my-group",
+      boundary: "test-code",
+      mode: "direct"
+    }
+  ],
+  policy: [
+    {
+      name: "no-internal-deps",
+      type: "forbidden",
+      from: { group: "my-group" },
+      to: { group: "my-group" }
+    }
+  ]
+})
+`;
+
+// The quoted-keys workspace: the spec group's file holds two leaves — `a`,
+// covered through the code marker's references edge, and `p`, depending
+// locally on `a` (SPEC 2.2's string form) — and the code group's file holds
+// one top-level marker, so its code location is the file itself (SPEC 4.5,
+// 4.6; the T8-3 shape).
+const QUOTED_KEYS_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": QUOTED_KEYS_CONFIG,
+  "specs/A.mdx": `<S id="a">
+Covered leaf.
+</S>
+
+<S id="p" d={"a"}>
+Dependent leaf.
+</S>
+`,
+  "src/impl.ts": `import SPEC from "../specs/A.xspec";
+
+SPEC.a;
+`,
+};
+
+// The quoted-keys fixture's complete edge set (SPEC 5.1–5.2, 2.2, 4.5).
+// Whole-graph equality makes both discovery observations exact: the spec
+// group's nodes carry their contains/depends edges, the code group's marker
+// its references edge — an undiscovered src/impl.ts would drop it (T7-3's
+// contrapositive) — and nothing stray exists. The depends edge doubles as
+// the policy premise: both its endpoints are "my-group" nodes, so the
+// forbidden rule below has exactly one violation to report.
+const QUOTED_KEYS_EDGES: readonly GraphEdge[] = [
+  { from: "specs/A.mdx", to: "specs/A.mdx#a", kind: "contains" },
+  { from: "specs/A.mdx", to: "specs/A.mdx#p", kind: "contains" },
+  { from: "specs/A.mdx#p", to: "specs/A.mdx#a", kind: "depends" },
+  { from: "src/impl.ts", to: "specs/A.mdx#a", kind: "references" },
+];
+
 const T7_2 = defineProductTest({
   id: "T7-2",
   title:
     "declarative form: a syntax error, a missing or misdirected " +
     "defineConfig import, extra statements, each non-literal argument " +
     "form, and a non-call default export are configuration errors (14.14, " +
-    "exit 2); an aliased defineConfig import is valid (SPEC 7)",
+    "exit 2); an aliased defineConfig import is valid; string-literal " +
+    "group-name keys are part of the accepted form — they load, discover, " +
+    "and resolve in a coverage profile and a policy selector (SPEC 7, 7.4, " +
+    "7.5, 8)",
   run: async (product) => {
     for (const arm of FORM_VIOLATIONS) {
       await expectConfigRefused(product, arm.config, `T7-2 (${arm.label})`);
@@ -459,6 +546,133 @@ const T7_2 = defineProductTest({
         );
       },
     );
+
+    // String-literal group-name keys are part of the accepted form (SPEC 7):
+    // the quoted-key groups load, discover, and resolve in a coverage
+    // profile and in a policy selector.
+    await withWorkspace({ files: QUOTED_KEYS_FILES }, async (workspace) => {
+      // Loads without error: a product accepting identifier keys alone
+      // refuses this configuration (14.14, exit 2) and fails here. The
+      // staged policy violation cannot fail the build — build never
+      // evaluates policy (SPEC 7.5, 12.1).
+      await buildOk(
+        product,
+        workspace,
+        "T7-2 (string-literal keys): `build` — a spec group and a code " +
+          'group under string-literal keys ("my-group", "test-code") whose ' +
+          "names are not TypeScript identifiers load without error (SPEC 7)",
+      );
+
+      // Both groups discover their globs' files.
+      const idsLabel = "T7-2 (string-literal keys) `ids --json`";
+      const ids = decodeIdsReport(
+        await runJson(product, workspace, ["ids", "--json"], idsLabel),
+        idsLabel,
+      );
+      assertSameJson(
+        ids.files,
+        [{ file: "specs/A.mdx", ids: ["a", "p"] }],
+        `${idsLabel}: the "my-group" spec group discovered its glob's file ` +
+          `(SPEC 7, 7.1)`,
+      );
+      const edgesLabel =
+        "T7-2 (string-literal keys) `query edges` (unfiltered)";
+      const edges = decodeEdgesReport(
+        await runJson(product, workspace, ["query", "edges"], edgesLabel),
+        edgesLabel,
+      );
+      assertEdgeSetEqual(
+        edges,
+        QUOTED_KEYS_EDGES,
+        `${edgesLabel}: the complete edge set carries the references edge ` +
+          `sourced at src/impl.ts — the "test-code" code group discovered ` +
+          `its glob's file (SPEC 7, 7.2, 4.5; an undiscovered code file ` +
+          `sources no edge, as T7-3 asserts) — and nothing stray`,
+      );
+
+      // The names resolve in a coverage profile: target "my-group" with
+      // boundary "test-code" reports its coverage (SPEC 7.4, 8).
+      const coverageLabel = "T7-2 (string-literal keys) `coverage --json`";
+      const coverage = decodeCoverageReport(
+        await runJson(
+          product,
+          workspace,
+          ["coverage", "--json"],
+          coverageLabel,
+        ),
+        coverageLabel,
+      );
+      const profile = coverage.profiles.find((row) => row.name === "quoted");
+      if (profile === undefined) {
+        fail(
+          `${coverageLabel}: the report must carry profile "quoted" — its ` +
+            `target "my-group" and boundary "test-code" resolve to the ` +
+            `string-literal-keyed groups (SPEC 7, 7.4, 8.2); got profiles ` +
+            `${JSON.stringify(coverage.profiles.map((row) => row.name))}`,
+        );
+      }
+      assertSameJson(
+        profile.covered.map((row) => ({
+          identity: row.identity,
+          path: row.path,
+        })),
+        [{ identity: "specs/A.mdx#a", path: ["src/impl.ts", "specs/A.mdx#a"] }],
+        `${coverageLabel} profile quoted: the "test-code" boundary's ` +
+          `references edge covers \`a\` over the path [code location, ` +
+          `target] — both quoted names resolved (SPEC 7.4, 8, 8.2)`,
+      );
+      assertSameJson(
+        [...profile.uncovered].sort(),
+        ["specs/A.mdx#p"],
+        `${coverageLabel} profile quoted: \`p\`, with no boundary edge into ` +
+          `it, is uncovered — the target set is the quoted spec group's ` +
+          `leaves (SPEC 7.4, 8.1, 8.2)`,
+      );
+
+      // The name resolves in a policy selector: { group: "my-group" }
+      // matches the group's nodes (SPEC 7.5) — the staged depends edge,
+      // both endpoints "my-group" nodes (premise pinned by the edge-set
+      // equality above), is the forbidden rule's one violation.
+      const checkLabel = "T7-2 (string-literal keys) `check --json`";
+      const checkResult = await expectExit(
+        product,
+        workspace,
+        ["check", "--json"],
+        1,
+        `${checkLabel} — the forbidden rule's selectors match through the ` +
+          `string-literal group name, so the depends edge violates it and ` +
+          `check exits 1 (SPEC 7.5, 14.12, 12.0)`,
+      );
+      const checkFindings = decodeFindingsReport(
+        parseJsonStdout(checkResult, checkLabel),
+        checkLabel,
+      ).findings;
+      assertConditionCounts(checkFindings, { "14.12": 1 }, checkLabel);
+      assertSameJson(
+        checkFindings.map((finding) => ({
+          locations: finding.locations,
+          path: finding.path,
+          identities: finding.identities,
+        })),
+        [
+          {
+            locations: [],
+            path: null,
+            identities: [
+              "no-internal-deps",
+              "specs/A.mdx#p",
+              "depends",
+              "specs/A.mdx#a",
+            ],
+          },
+        ],
+        `${checkLabel}: the one policy finding names the rule and the ` +
+          `offending edge — identities in order rule name, source, kind ` +
+          `token, target; no in-source locations, no concerned path ` +
+          `(SPEC 7.5, 14.12, 12.7): { group: "my-group" } matched the ` +
+          `quoted group's nodes`,
+      );
+    });
   },
 });
 

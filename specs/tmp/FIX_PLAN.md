@@ -671,12 +671,41 @@ A "new test T<x>" task always means, in one change:
   (certification-document ×3 → FP-091; S-1's 9 unmapped keys → stages
   E/G), S-5 and certification green.]
 
-- [ ] FP-020 — T7-2: add the string-literal group-name keys arm. [R1 #23;
+- [x] FP-020 — T7-2: add the string-literal group-name keys arm. [R1 #23;
   TEST-SPEC §7]
   Neither `test/suite/registry/section-7-basics.ts` nor
   `section-7.4-7.5.ts` stages quoted keys. Add: group names as string
   literals (`"my-group"`/`"test-code"`) load, discover, and resolve in a
   coverage profile and in a policy selector.
+  [Done 2026-08-11: one arm appended to T7-2 (section-7-basics.ts) — a
+  config declaring spec group `"my-group"` and code group `"test-code"`
+  under string-literal keys (both names non-identifiers, so only that
+  spelling declares them), referenced from the coverage profile
+  (`target`/`boundary`, kinds inferred) and both selectors of a forbidden
+  rule. Asserted: `build` exit 0 (loads; an identifier-keys-only product
+  refuses 14.14/exit 2 here — TEST-SPEC's discriminator); discovery via
+  the exact `ids` listing plus whole-graph edge-set equality (2 contains +
+  `p`→`a` depends + the top-level marker's src/impl.ts→`a` references edge
+  — the code-group observation, T7-3's contrapositive); resolution via
+  profile "quoted" reporting covered `a` with path [src/impl.ts, a] and
+  uncovered `p` (counts/ignored stay T8.2-1's subject, the section-8
+  discipline), and via `check --json` exit 1 with exactly one 14.12
+  finding, identities [rule, p, depends, a], locations [], path null
+  (SPEC 14.12's contractual enumeration). Title extended; traceability
+  unchanged (["7","14"] already covers the asserted conditions; 7.4/7.5/8
+  are context with home coverage at T7.4-*/T7.5-*/T8-*); no certification
+  scope. Verified: direct CLI probes against the built product returned
+  byte-for-byte the expected ids/edges/coverage documents and exactly the
+  one old-shape policy violation (the current product already accepts
+  quoted keys — those observations are genuinely green), and a scratch
+  execution of the arm body ran green through build/ids/edges/coverage/
+  check-exit and red exactly at the form-exact findings decode ("expected
+  no member \"condition\"" — the FP-001-class product gap), so the arm is
+  red-as-diagnosed there; in the suite T7-2 still fails at its first
+  FORM_VIOLATIONS arm (the FP-002-class exit-2 gap), the new arm
+  unreached until that closes. Typecheck/format clean; `npm run
+  test:self` unchanged 4 planned mid-loop reds (certification-document ×3
+  → FP-091; S-1's 9 unmapped keys → stages E/G).]
 
 - [ ] FP-021 — T7.5-5: add the literal-`$` forms arm. [R1 #24; TEST-SPEC
   §7.5, SPEC 14.14]
