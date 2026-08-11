@@ -416,6 +416,80 @@ export interface AppliedMappingPair {
   readonly to: string;
 }
 
+/**
+ * The ten preview edit class names, in the order SPEC.md 12.7 lists them
+ * (6.6 defines the classes; the list order is 12.7's presentation — the edit
+ * ORDER inside a file entry compares class-NAME bytes, not this list's
+ * positions).
+ */
+export const PREVIEW_EDIT_CLASSES = [
+  "reference-rewrite",
+  "id-rewrite",
+  "import-specifier-rewrite",
+  "import-addition",
+  "import-removal",
+  "origin-deletion",
+  "target-insertion",
+  "target-parent-rewrite",
+  "file-relocation",
+  "file-creation",
+] as const;
+export type PreviewEditClass = (typeof PREVIEW_EDIT_CLASSES)[number];
+
+/**
+ * One edit of a preview file entry — `{"class", "range"}` exactly (SPEC.md
+ * 12.7): class plus a source range in current, pre-operation coordinates and
+ * nothing else — an edit is reported without replacement text (6.6).
+ */
+export interface PreviewEdit {
+  readonly class: PreviewEditClass;
+  readonly range: SourceRange;
+}
+
+/**
+ * One file the operation would rewrite, relocate, or create — `{"file",
+ * "edits"}` exactly (SPEC.md 12.7): `file` the file's current, pre-operation
+ * path (for target-file creation, the path the creation would occupy; 6.6),
+ * `edits` in the pinned order — range start, then range end, then class-name
+ * bytes.
+ */
+export interface PreviewFileEntry {
+  readonly file: PathValue;
+  readonly edits: readonly PreviewEdit[];
+}
+
+/**
+ * The derived-file delta, both directions one datum — `{"generated",
+ * "removed"}` exactly, each direction's paths in byte order (SPEC.md 6.6,
+ * 12.7).
+ */
+export interface PreviewDelta {
+  readonly generated: readonly PathValue[];
+  readonly removed: readonly PathValue[];
+}
+
+/**
+ * The delta member's datum: the two-direction value, or explicitly
+ * unavailable as one datum where the recorded state cannot be read (14.23).
+ */
+export type PreviewDeltaDatum = PreviewDelta | { readonly unavailable: true };
+
+/**
+ * The `rename`/`move` preview document (SPEC.md 6.6) — `{"findings",
+ * "mapping", "files", "delta"}` exactly, a form-exact 12.7 surface (H-3):
+ * `mapping` one `{"from", "to"}` per mapped identity ordered by `from`
+ * bytes; `files` one entry per file ordered by file path bytes; `delta` the
+ * two-direction datum or unavailable. On refusal `mapping`, `files`, and
+ * `delta` are `null` — together: a refused preview reports the refusal
+ * findings alone (6.6), so mixed nullity is no 12.7 form.
+ */
+export interface PreviewReport {
+  readonly findings: readonly Finding[];
+  readonly mapping: readonly AppliedMappingPair[] | null;
+  readonly files: readonly PreviewFileEntry[] | null;
+  readonly delta: PreviewDeltaDatum | null;
+}
+
 /** `review list` (T10.7-5): sessions in byte order of name. */
 export interface SessionListReport {
   readonly sessions: readonly SessionListEntry[];

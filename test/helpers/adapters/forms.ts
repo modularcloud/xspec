@@ -24,11 +24,14 @@
 //     {"unavailable": true} (11.4, 12.7)
 //   - the occurrence-record form {"file","range","kind","source","target"}
 //     and the occurrences document {"findings","occurrences"} (5.7, 11.3)
+//   - the rename/move preview document {"findings","mapping","files","delta"}
+//     (6.6) with the ten edit classes and the pinned orders
 //   - the unavailability-marker structural walk T12.7-1 relies on: no object
 //     of any form other than the marker carries a member named "unavailable"
 
 import { Buffer, isUtf8 } from "node:buffer";
 import type {
+  AppliedMappingPair,
   ErrorDocument,
   Finding,
   FindingLocation,
@@ -39,11 +42,17 @@ import type {
   OccurrenceSourceNode,
   OccurrencesReport,
   PathValue,
+  PreviewDelta,
+  PreviewDeltaDatum,
+  PreviewEdit,
+  PreviewFileEntry,
+  PreviewReport,
   SourceRange,
 } from "./model.js";
 import {
   CONDITION_CODE_TOKENS,
   DEPENDENCY_EDGE_KINDS,
+  PREVIEW_EDIT_CLASSES,
   REFUSAL_CODE_TOKENS,
   conditionIdentityOf,
 } from "./model.js";
@@ -639,6 +648,231 @@ export function decodeOccurrencesReport(
     }
   }
   return { findings, occurrences };
+}
+
+// --- the rename/move preview document (6.6, 12.7) -----------------------------
+
+/** One `mapping` entry: `{"from", "to"}` exactly, identities are strings. */
+function decodePreviewMappingPair(
+  value: unknown,
+  site: DecodeSite,
+): AppliedMappingPair {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, ["from", "to"], site);
+  return {
+    from: expectNonEmptyString(
+      requiredKey(obj, "from", site),
+      at(site, "from"),
+    ),
+    to: expectNonEmptyString(requiredKey(obj, "to", site), at(site, "to")),
+  };
+}
+
+/** One edit: `{"class", "range"}` exactly — class-plus-range only (6.6). */
+function decodePreviewEdit(value: unknown, site: DecodeSite): PreviewEdit {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, ["class", "range"], site);
+  return {
+    class: expectToken(
+      requiredKey(obj, "class", site),
+      PREVIEW_EDIT_CLASSES,
+      at(site, "class"),
+    ),
+    range: decodeRangeForm(requiredKey(obj, "range", site), at(site, "range")),
+  };
+}
+
+/**
+ * The pinned edit order (SPEC 12.7): by range start, then range end, then
+ * class-name BYTES — the final tie-break `import-addition` before
+ * `target-insertion` on coinciding zero-length insertion points (T6.6-4).
+ * 12.7 states no collapse rule for edits, so equal keys are admitted by the
+ * order check (content is the tests' business).
+ */
+function comparePreviewEdits(a: PreviewEdit, b: PreviewEdit): number {
+  if (a.range.start !== b.range.start) return a.range.start - b.range.start;
+  if (a.range.end !== b.range.end) return a.range.end - b.range.end;
+  return compareStringBytes(a.class, b.class);
+}
+
+/** One `files` entry: `{"file", "edits"}` exactly, edits in the 12.7 order. */
+function decodePreviewFileEntry(
+  value: unknown,
+  site: DecodeSite,
+): PreviewFileEntry {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, ["file", "edits"], site);
+  const file = decodePathValue(
+    requiredKey(obj, "file", site),
+    at(site, "file"),
+  );
+  const editsSite = at(site, "edits");
+  const edits = expectArray(requiredKey(obj, "edits", site), editsSite).map(
+    (element, index) => decodePreviewEdit(element, at(editsSite, index)),
+  );
+  for (let i = 1; i < edits.length; i += 1) {
+    if (comparePreviewEdits(edits[i - 1]!, edits[i]!) > 0) {
+      formFail(
+        at(editsSite, i),
+        "edits ordered by range start, then range end, then class-name " +
+          "bytes (SPEC 12.7)",
+        obj["edits"],
+      );
+    }
+  }
+  return { file, edits };
+}
+
+/** One delta direction: 12.7 path values in byte order, one per path. */
+function decodeDeltaDirection(value: unknown, site: DecodeSite): PathValue[] {
+  const paths = expectArray(value, site).map((element, index) =>
+    decodePathValue(element, at(site, index)),
+  );
+  for (let i = 1; i < paths.length; i += 1) {
+    const order = Buffer.compare(
+      pathValueBytes(paths[i - 1]!),
+      pathValueBytes(paths[i]!),
+    );
+    if (order === 0) {
+      formFail(
+        at(site, i),
+        "one entry per derived path — a direction of the delta is a set of " +
+          "paths (SPEC 6.6)",
+        value,
+      );
+    }
+    if (order > 0) {
+      formFail(
+        at(site, i),
+        "the direction's paths in byte order (SPEC 12.7)",
+        value,
+      );
+    }
+  }
+  return paths;
+}
+
+/** The delta value form: `{"generated", "removed"}` exactly (6.6, 12.7). */
+function decodePreviewDelta(value: unknown, site: DecodeSite): PreviewDelta {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, ["generated", "removed"], site);
+  return {
+    generated: decodeDeltaDirection(
+      requiredKey(obj, "generated", site),
+      at(site, "generated"),
+    ),
+    removed: decodeDeltaDirection(
+      requiredKey(obj, "removed", site),
+      at(site, "removed"),
+    ),
+  };
+}
+
+/**
+ * The `rename`/`move` preview document (SPEC 6.6) — `{"findings", "mapping",
+ * "files", "delta"}` exactly (SPEC 12.7). Form-exact (H-3): `mapping` one
+ * `{"from", "to"}` per mapped identity, ordered by `from` bytes; `files` one
+ * `{"file", "edits"}` per file, ordered by file path bytes, each edit
+ * `{"class", "range"}` with one of the ten 12.7 class names, edits ordered
+ * by range start, then range end, then class-name bytes; `delta`
+ * `{"generated", "removed"}` with each direction's paths in byte order, or
+ * unavailable as one datum (14.23). On refusal `mapping`, `files`, and
+ * `delta` are `null` — all three together: a refused preview reports the
+ * refusal findings alone (6.6), so a document with some but not all of them
+ * `null` matches neither the refusal nor the success encoding and rejects.
+ */
+export function decodePreviewReport(
+  doc: unknown,
+  context?: string,
+): PreviewReport {
+  const site = rootSite("12.7 preview document", context);
+  const obj = expectObject(doc, site);
+  expectOnlyMembers(obj, ["findings", "mapping", "files", "delta"], site);
+  const findings = decodeFindingsArray(
+    requiredKey(obj, "findings", site),
+    at(site, "findings"),
+  );
+
+  const mappingValue = requiredMember(obj, "mapping", site);
+  let mapping: AppliedMappingPair[] | null = null;
+  if (mappingValue !== null) {
+    const mappingSite = at(site, "mapping");
+    mapping = expectArray(mappingValue, mappingSite).map((element, index) =>
+      decodePreviewMappingPair(element, at(mappingSite, index)),
+    );
+    for (let i = 1; i < mapping.length; i += 1) {
+      const order = compareStringBytes(mapping[i - 1]!.from, mapping[i]!.from);
+      if (order === 0) {
+        formFail(
+          at(mappingSite, i),
+          'one {"from", "to"} per mapped identity (SPEC 12.7)',
+          mappingValue,
+        );
+      }
+      if (order > 0) {
+        formFail(
+          at(mappingSite, i),
+          "mapping entries ordered by `from` bytes (SPEC 12.7)",
+          mappingValue,
+        );
+      }
+    }
+  }
+
+  const filesValue = requiredMember(obj, "files", site);
+  let files: PreviewFileEntry[] | null = null;
+  if (filesValue !== null) {
+    const filesSite = at(site, "files");
+    files = expectArray(filesValue, filesSite).map((element, index) =>
+      decodePreviewFileEntry(element, at(filesSite, index)),
+    );
+    for (let i = 1; i < files.length; i += 1) {
+      const order = Buffer.compare(
+        pathValueBytes(files[i - 1]!.file),
+        pathValueBytes(files[i]!.file),
+      );
+      if (order === 0) {
+        formFail(
+          at(filesSite, i),
+          'one {"file", "edits"} per file (SPEC 12.7)',
+          filesValue,
+        );
+      }
+      if (order > 0) {
+        formFail(
+          at(filesSite, i),
+          "file entries ordered by file path bytes (SPEC 12.7)",
+          filesValue,
+        );
+      }
+    }
+  }
+
+  const deltaDatum = decodeDatum(
+    obj["delta"],
+    at(site, "delta"),
+    (value, valueSite) => decodePreviewDelta(value, valueSite),
+  );
+  const delta: PreviewDeltaDatum | null =
+    deltaDatum.state === "null"
+      ? null
+      : deltaDatum.state === "unavailable"
+        ? { unavailable: true as const }
+        : deltaDatum.value;
+
+  const nullCount = [mapping, files, delta].filter(
+    (member) => member === null,
+  ).length;
+  if (nullCount !== 0 && nullCount !== 3) {
+    formFail(
+      site,
+      "`mapping`, `files`, and `delta` null together (the refusal " +
+        "encoding) or none of them null (a successful preview's plan) — " +
+        "SPEC 6.6, 12.7",
+      doc,
+    );
+  }
+  return { findings, mapping, files, delta };
 }
 
 // --- the unavailability-marker structural walk (T12.7-1) -----------------------

@@ -1029,13 +1029,65 @@ A "new test T<x>" task always means, in one change:
   → FP-091; S-1's 8 unmapped keys → stages E/G), S-5 green, certification
   17/17.]
 
-- [ ] FP-028 — Implement T6.6-2: preview is inert and predictive. [R1 #7;
+- [x] FP-028 — Implement T6.6-2: preview is inert and predictive. [R1 #7;
   TEST-SPEC §6.6 (new preview section)]
   Preview modifies nothing; a subsequent real run's applied mapping equals
   the preview's `mapping`; byte-determinism; form-exact 12.7 preview
   document under `--json`. New-§6.6 tests live beside the renamed T6.7-1
   (FP-003) — keep registry module naming coherent with
   `test/suite/registry/index.ts` imports; map `"6.6"`.
+  [Done 2026-08-11: new registry module section-6.6.ts (wrapper
+  section-6.6.test.ts, spread into index.ts) registering T6.6-2 — two arms,
+  each its own workspace under a specs+markdown-emit config so the premise
+  `build` materializes every derived-file kind under the compare: rename
+  (`core.mid` → `core.hub`, mid-tree with a descendant and sibling local
+  references) and section-form move (`org.mv` → existing-target `tm` with an
+  internal DOWNWARD local reference — the shim probe caught the first
+  draft's child-to-ancestor `d` as a 14.9 cycle in the combined
+  contains/depends graph, SPEC 5.3 — plus a staying reference the real move
+  converts to imported form). Each arm: journal-absent premise (6.1), then
+  inside ONE whole-root assertLeavesUnchanged all four preview invocations —
+  `--preview --json` twice and bare `--preview` twice, each pair through
+  assertRunTwiceDeterministic (H-6: byte-identical stdout/stderr/exit and
+  workspace state) — exit 0, stdout decoded through the NEW form-exact 12.7
+  preview-document layer (forms.ts `decodePreviewReport` + model.ts types:
+  exactly {"findings","mapping","files","delta"}; mapping
+  `from`-byte-ordered one-per-identity; files path-byte-ordered
+  one-per-file, edits {"class","range"} drawn from the ten 12.7 class names
+  ordered by start/end/class-name-bytes — the
+  import-addition-before-target-insertion coincidence decode-admitted;
+  delta {"generated","removed"} with byte-ordered distinct paths per
+  direction, or the unavailability marker via the three-state datum decode;
+  mapping/files/delta null all-together-or-none — the refusal encoding,
+  mixed nullity rejects), findings asserted exactly [] and the plan members
+  non-null; then the subsequent real run with `--json` (exit 0, T6.4-1's
+  H-3 applied-mapping adapter) asserting applied mapping == preview mapping
+  as complete sets (assertAppliedMapping — the equality IS the TEST-SPEC
+  operationalization; mapping/files/delta CONTENT stays T6.6-4's/T6.6-5's).
+  S-5 gains the preview decoder's DECODERS entry (positive controls: full
+  plan incl. nested deletion geometry and the zero-length tie-break pair,
+  refused all-null, delta-unavailable-beside-full-plan, empty lists; 30
+  targeted rejections incl. mixed nullity both ways, a replacement-text
+  edit member, tie-break order violation, duplicate mapped
+  identity/file/delta path). Traceability "T6.6-2": ["6.6"] (no numbered
+  condition asserted; 6.4/6.5/6.1/12.0 carriage context per precedent);
+  CERTIFICATIONS.md names T6.6-2 in the Exclusions — no fixture scope (its
+  compare-around machinery is certified via VIOL-CORE-CHATTYREADS).
+  Verified: red-as-diagnosed exactly at the first preview invocation (exit
+  2 "unknown flag '--preview'" — the whole 6.6 surface is patch-new) with
+  premises green; satisfiability and teeth proven by running the registered
+  body via a scratch binding against a shim product (real product +
+  conforming preview/applied-mapping answers computed from the staged
+  bytes) — green through BOTH arms end-to-end, the real product performing
+  the actual rename and move (both stagings proceed, exit 0, validating
+  "the real operation would proceed" against the real product) — and
+  against three deviations: preview-writes-a-file (red at the
+  modifies-nothing compare), preview-mapping-missing-descendants (red at
+  the applied-mapping equality), nondeterministic bare-form output (red at
+  the H-6 byte compare). Typecheck/format clean; `npm run test:self` 4
+  planned mid-loop reds (certification-document ×3 → FP-091; S-1 unmapped
+  keys now the 7-key set {11.2, 11.3, 11.4, 11.5, 11.6, 12.6, 12.7} —
+  "6.6" mapped by this task), S-5 (70 tests) and certification green.]
 
 - [ ] FP-029 — Implement T6.6-3: refusal/usage-error equivalence under
   `--preview`. [R1 #8; TEST-SPEC §6.6]

@@ -51,6 +51,7 @@ import {
   decodeNodeSummary,
   decodeNodeSummaryRowsReport,
   decodeNodeTextSummary,
+  decodePreviewReport,
   decodeReachableReport,
   decodeSessionListReport,
   decodeSessionStatusReport,
@@ -376,6 +377,61 @@ const GOOD_APPLIED_MAPPING = {
     { from: "specs/A.mdx#login", to: "specs/A.mdx#signin" },
     { from: "specs/A.mdx#login.form", to: "specs/A.mdx#signin.form" },
   ],
+};
+
+// A successful rename/move preview in the literal SPEC 12.7 form (a
+// form-exact surface, H-3): `{"findings", "mapping", "files", "delta"}` —
+// mapping ordered by `from` bytes, file entries by file path bytes, edits by
+// range start, then range end, then class-name bytes (the zero-length
+// insertion coincidence deliberately staged: `import-addition` sorts before
+// `target-insertion` at one offset, T6.6-4's tie-break), delta directions in
+// path byte order.
+const GOOD_PREVIEW = {
+  findings: [],
+  mapping: [
+    { from: "specs/A.mdx#login", to: "specs/B.mdx#login" },
+    { from: "specs/A.mdx#login.form", to: "specs/B.mdx#login.form" },
+  ],
+  files: [
+    {
+      file: "specs/A.mdx",
+      edits: [
+        { class: "origin-deletion", range: { start: 40, end: 160 } },
+        // Nested inside the deletion range — containment is geometry, each
+        // edit under its own class (SPEC 6.6).
+        { class: "id-rewrite", range: { start: 48, end: 58 } },
+        { class: "reference-rewrite", range: { start: 200, end: 216 } },
+      ],
+    },
+    {
+      file: "specs/B.mdx",
+      edits: [
+        { class: "import-addition", range: { start: 90, end: 90 } },
+        { class: "target-insertion", range: { start: 90, end: 90 } },
+      ],
+    },
+  ],
+  delta: {
+    generated: ["specs/B.md", "specs/B.xspec.ts"],
+    removed: ["specs/A.md", "specs/A.xspec.ts"],
+  },
+};
+
+// A refused preview keeps the preview document form: the refusal findings
+// alone, `mapping`, `files`, and `delta` null together (SPEC 6.6, 12.7).
+const REFUSED_PREVIEW = {
+  findings: [
+    {
+      code: "refused-identity-unchanged",
+      message: "the new identity equals the old",
+      locations: [],
+      path: null,
+      identities: ["specs/A.mdx#login"],
+    },
+  ],
+  mapping: null,
+  files: null,
+  delta: null,
 };
 
 const GOOD_SESSION_LIST = {
@@ -1378,6 +1434,271 @@ const DECODERS: readonly DecoderSpec[] = [
         label: "findings out of the pinned order inside the document",
         doc: put(
           GOOD_OCCURRENCES,
+          [
+            structuredClone(GOOD_FINDINGS.findings[1]),
+            structuredClone(GOOD_FINDINGS.findings[0]),
+          ],
+          "findings",
+        ),
+      },
+    ],
+  },
+  {
+    name: "12.7 preview document",
+    decode: decodePreviewReport,
+    good: GOOD_PREVIEW,
+    verify: (decoded: ReturnType<typeof decodePreviewReport>) => {
+      expect(decoded.findings).toEqual([]);
+      // The plan members decode literally (form-exact, H-3) …
+      expect(decoded.mapping).toEqual([
+        { from: "specs/A.mdx#login", to: "specs/B.mdx#login" },
+        { from: "specs/A.mdx#login.form", to: "specs/B.mdx#login.form" },
+      ]);
+      expect(decoded.files).toHaveLength(2);
+      expect(decoded.files![0]).toEqual({
+        file: "specs/A.mdx",
+        edits: [
+          { class: "origin-deletion", range: { start: 40, end: 160 } },
+          { class: "id-rewrite", range: { start: 48, end: 58 } },
+          { class: "reference-rewrite", range: { start: 200, end: 216 } },
+        ],
+      });
+      // … the coinciding zero-length insertion points pass in class-byte
+      // order (import-addition before target-insertion, SPEC 12.7) …
+      expect(decoded.files![1]!.edits.map((edit) => edit.class)).toEqual([
+        "import-addition",
+        "target-insertion",
+      ]);
+      // … and the delta is the two-direction datum.
+      expect(decoded.delta).toEqual({
+        generated: ["specs/B.md", "specs/B.xspec.ts"],
+        removed: ["specs/A.md", "specs/A.xspec.ts"],
+      });
+    },
+    alsoGood: [
+      {
+        label:
+          "a refused preview: refusal findings alone, mapping/files/delta " +
+          "null together (SPEC 6.6, 12.7)",
+        doc: REFUSED_PREVIEW,
+        verify: (decoded: ReturnType<typeof decodePreviewReport>): void => {
+          expect(decoded.findings).toHaveLength(1);
+          expect(decoded.findings[0]!.code).toBe("refused-identity-unchanged");
+          expect(decoded.mapping).toBeNull();
+          expect(decoded.files).toBeNull();
+          expect(decoded.delta).toBeNull();
+        },
+      },
+      {
+        label:
+          "delta explicitly unavailable as one datum beside a full plan " +
+          "(the unreadable-record state, SPEC 6.6, 14.23)",
+        doc: put(GOOD_PREVIEW, { unavailable: true }, "delta"),
+        verify: (decoded: ReturnType<typeof decodePreviewReport>): void => {
+          expect(decoded.delta).toEqual({ unavailable: true });
+          expect(decoded.mapping).not.toBeNull();
+        },
+      },
+      {
+        label: "empty plan lists ([] is emptiness, never null — SPEC 12.7)",
+        doc: {
+          findings: [],
+          mapping: [],
+          files: [],
+          delta: { generated: [], removed: [] },
+        },
+        verify: (decoded: ReturnType<typeof decodePreviewReport>): void => {
+          expect(decoded.mapping).toEqual([]);
+          expect(decoded.files).toEqual([]);
+          expect(decoded.delta).toEqual({ generated: [], removed: [] });
+        },
+      },
+    ],
+    bad: [
+      {
+        label: "missing findings member",
+        doc: omit(GOOD_PREVIEW, "findings"),
+      },
+      {
+        label: "null findings (a list-valued member is [] when empty)",
+        doc: put(GOOD_PREVIEW, null, "findings"),
+      },
+      {
+        label: "missing mapping member (null is never omitted, SPEC 12.7)",
+        doc: omit(GOOD_PREVIEW, "mapping"),
+      },
+      {
+        label: "missing files member",
+        doc: omit(GOOD_PREVIEW, "files"),
+      },
+      {
+        label: "missing delta member",
+        doc: omit(GOOD_PREVIEW, "delta"),
+      },
+      {
+        label:
+          "an extra member on the document (12.7: exactly " +
+          "{findings, mapping, files, delta})",
+        doc: put(GOOD_PREVIEW, "rename", "operation"),
+      },
+      {
+        label:
+          "mixed nullity: mapping null beside a present plan (null marks " +
+          "the refusal encoding, all three together — SPEC 6.6, 12.7)",
+        doc: put(GOOD_PREVIEW, null, "mapping"),
+      },
+      {
+        label: "mixed nullity: a refusal document carrying a delta",
+        doc: put(REFUSED_PREVIEW, { generated: [], removed: [] }, "delta"),
+      },
+      {
+        label: "mapping entries out of `from`-byte order",
+        doc: put(
+          GOOD_PREVIEW,
+          [...structuredClone(GOOD_PREVIEW.mapping)].reverse(),
+          "mapping",
+        ),
+      },
+      {
+        label:
+          "two mapping entries for one identity (one {from, to} per " +
+          "mapped identity)",
+        doc: put(
+          GOOD_PREVIEW,
+          [
+            { from: "specs/A.mdx#login", to: "specs/B.mdx#login" },
+            { from: "specs/A.mdx#login", to: "specs/B.mdx#other" },
+          ],
+          "mapping",
+        ),
+      },
+      {
+        label: "mapping pair missing its to",
+        doc: omit(GOOD_PREVIEW, "mapping", 0, "to"),
+      },
+      {
+        label: "mapping pair with an extra member",
+        doc: put(GOOD_PREVIEW, "rename", "mapping", 0, "via"),
+      },
+      {
+        label: "empty from identity",
+        doc: put(GOOD_PREVIEW, "", "mapping", 0, "from"),
+      },
+      {
+        label: "file entries out of path-byte order",
+        doc: put(
+          GOOD_PREVIEW,
+          [...structuredClone(GOOD_PREVIEW.files)].reverse(),
+          "files",
+        ),
+      },
+      {
+        label: "two file entries for one path (one {file, edits} per file)",
+        doc: put(
+          GOOD_PREVIEW,
+          [
+            structuredClone(GOOD_PREVIEW.files[0]),
+            structuredClone(GOOD_PREVIEW.files[0]),
+          ],
+          "files",
+        ),
+      },
+      {
+        label: "file entry missing its edits",
+        doc: omit(GOOD_PREVIEW, "files", 0, "edits"),
+      },
+      {
+        label: "null edits (a list-valued member is [] when empty)",
+        doc: put(GOOD_PREVIEW, null, "files", 0, "edits"),
+      },
+      {
+        label: "file entry with an extra member",
+        doc: put(GOOD_PREVIEW, "hint", "files", 0, "note"),
+      },
+      {
+        label: "an edit class outside the ten 12.7 names",
+        doc: put(
+          GOOD_PREVIEW,
+          "text-replacement",
+          "files",
+          0,
+          "edits",
+          0,
+          "class",
+        ),
+      },
+      {
+        label:
+          "an edit carrying replacement text (class-plus-range only, " +
+          "SPEC 6.6, 12.7)",
+        doc: put(GOOD_PREVIEW, "new bytes", "files", 0, "edits", 0, "text"),
+      },
+      {
+        label: "edit missing its range",
+        doc: omit(GOOD_PREVIEW, "files", 0, "edits", 0, "range"),
+      },
+      {
+        label: "edits out of range-start order",
+        doc: put(
+          GOOD_PREVIEW,
+          [...structuredClone(GOOD_PREVIEW.files[0]!.edits)].reverse(),
+          "files",
+          0,
+          "edits",
+        ),
+      },
+      {
+        label:
+          "coinciding zero-length insertion points out of class-byte order " +
+          "(target-insertion may not precede import-addition, SPEC 12.7)",
+        doc: put(
+          GOOD_PREVIEW,
+          [...structuredClone(GOOD_PREVIEW.files[1]!.edits)].reverse(),
+          "files",
+          1,
+          "edits",
+        ),
+      },
+      {
+        label: "delta missing a direction (12.7: exactly {generated, removed})",
+        doc: omit(GOOD_PREVIEW, "delta", "removed"),
+      },
+      {
+        label: "delta with an extra member",
+        doc: put(GOOD_PREVIEW, [], "delta", "changed"),
+      },
+      {
+        label: "null delta direction (a list-valued member is [] when empty)",
+        doc: put(GOOD_PREVIEW, null, "delta", "generated"),
+      },
+      {
+        label: "delta paths out of byte order",
+        doc: put(
+          GOOD_PREVIEW,
+          ["specs/B.xspec.ts", "specs/B.md"],
+          "delta",
+          "generated",
+        ),
+      },
+      {
+        label: "one derived path listed twice in a direction",
+        doc: put(
+          GOOD_PREVIEW,
+          ["specs/B.md", "specs/B.md"],
+          "delta",
+          "generated",
+        ),
+      },
+      {
+        label:
+          "a widened unavailability marker as delta (12.7: the marker is " +
+          'exactly {"unavailable": true})',
+        doc: put(GOOD_PREVIEW, { unavailable: true, note: "x" }, "delta"),
+      },
+      {
+        label: "findings out of the pinned order inside the document",
+        doc: put(
+          GOOD_PREVIEW,
           [
             structuredClone(GOOD_FINDINGS.findings[1]),
             structuredClone(GOOD_FINDINGS.findings[0]),
