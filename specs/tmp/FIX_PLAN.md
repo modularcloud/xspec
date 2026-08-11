@@ -468,12 +468,40 @@ A "new test T<x>" task always means, in one change:
   planned mid-loop reds (certification-document ×3 → FP-091; S-1's 9
   unmapped keys → stages E/G).]
 
-- [ ] FP-015 — T6.4-1: assert the rename command's own report — the applied
+- [x] FP-015 — T6.4-1: assert the rename command's own report — the applied
   mapping. [R1 #18; TEST-SPEC §6.4, SPEC 12.0, H-3]
   `test/suite/registry/section-6.4.ts` asserts journal append and rewrites
   only; rename stdout is never decoded. Add: decode rename's stdout (JSON
   per 12.0, H-3 adapter) and assert the report is the applied mapping —
   every journaled identity pair.
+  [Done 2026-08-11: T6.4-1's rename now runs with `--json` (runJson: exit 0,
+  single JSON document as the entire stdout, 12.0) and its report decodes
+  through a new adjustable H-3 adapter, `test/helpers/adapters/operations.ts`
+  `decodeAppliedMappingReport` (ASSUMED SHAPE `{"mapping":[{"from","to"}…]}`,
+  mirroring the preview's pinned 12.7 `mapping` member — the report shape
+  itself is unpinned, adapter adjustable to shape never values, fail-loud on
+  a mapping-less report; model type `AppliedMappingPair`). The test asserts
+  the pairs as a complete set via support.ts `assertAppliedMapping` (order is
+  shape, not information): exactly {core.mid→core.hub, core.mid.leaf→
+  core.hub.leaf} in full 1.5 identity form — SPEC 6.4 pins the journaled
+  mapping as the renamed ID plus prefix-replaced descendants, nothing else,
+  and the fixture's post-rename identity assertions already pin those two as
+  the only new identities. S-5 gains the adapter's DECODERS entry (positive
+  control incl. an ignored `findings` sibling member; rejections: absent/
+  null/non-array mapping — the current product's `{"findings":[]}` shape is
+  the labeled absent case — pair missing from/to, empty identity, non-object
+  pair). Verified: T6.4-1 turned falsely-green → red-as-diagnosed exactly at
+  the applied-mapping decode ("required key \"mapping\" … absent" — probe:
+  the product reports `{"findings":[]}` on successful rename and rejects
+  `--preview` as unknown, the whole 6.6 surface being patch-new); section-6.4
+  went 3 failed/4 passed → 4 failed/3 passed, the other three being the
+  pre-existing FP-002/FP-007-class gaps (T6.4-3/-4/-6), downstream arms
+  unreached until the product reports the mapping. Typecheck clean; S-5
+  66/66; `npm run test:self` unchanged 4 planned mid-loop reds
+  (certification-document ×3 → FP-091; S-1's 9 unmapped keys → stages E/G);
+  T6.4-1 in no certification scope. Traceability unchanged (["6.4"]; 12.0/
+  6.6 are carriage context with home coverage elsewhere). FP-017 (move's
+  applied-mapping report) reuses this adapter and helper.]
 
 - [ ] FP-016 — T6.4-4: add the wrong-kind and parse-local old-ID-existence
   arms. [R1 #19; TEST-SPEC §6.4]

@@ -11,6 +11,8 @@
 //                      adjustable to a product's shape
 //   query.ts           query node/show, rows, edges, reachable, ids
 //   reports.ts         coverage, impact
+//   operations.ts      the applied-mapping report of a successful
+//                      rename/move (6.4, 6.5)
 //   review.ts          review list/status/next/show/export
 //   human.ts           robust required-information matching on human reports
 //   session-staging.ts T10.1-4 corruption transformations (shape-aware,
@@ -29,6 +31,7 @@ export * from "./decode.js";
 export * from "./forms.js";
 export * from "./query.js";
 export * from "./reports.js";
+export * from "./operations.js";
 export * from "./review.js";
 export * from "./human.js";
 export * from "./session-staging.js";

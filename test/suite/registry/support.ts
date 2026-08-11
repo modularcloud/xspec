@@ -9,6 +9,7 @@
 
 import { Buffer } from "node:buffer";
 import type {
+  AppliedMappingPair,
   Finding,
   FindingLocation,
   GraphEdge,
@@ -441,5 +442,23 @@ export function assertEdgeSetEqual(
 ): void {
   const render = (edges: readonly GraphEdge[]): string[] =>
     edges.map((edge) => `${edge.kind}: ${edge.from} -> ${edge.to}`).sort();
+  assertSameJson(render(actual), render(expected), context);
+}
+
+/**
+ * Assert a successful `rename`/`move`'s applied-mapping report carries
+ * exactly the expected identity pairs — every identity pair the operation
+ * journaled, no more (SPEC.md 6.4, 6.5: the complete identity mapping, the
+ * information of the preview's `mapping`, 6.6; T6.4-1, T6.5-1). The report's
+ * shape is unpinned (H-3), so pair order is not asserted: both sides compare
+ * as complete sorted multisets (a duplicated or extra pair still fails).
+ */
+export function assertAppliedMapping(
+  actual: readonly AppliedMappingPair[],
+  expected: readonly AppliedMappingPair[],
+  context: string,
+): void {
+  const render = (pairs: readonly AppliedMappingPair[]): string[] =>
+    pairs.map((pair) => `${pair.from} -> ${pair.to}`).sort();
   assertSameJson(render(actual), render(expected), context);
 }

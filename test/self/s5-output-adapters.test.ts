@@ -31,6 +31,7 @@ import {
   classifyIgnoredReasons,
   compareFindings,
   conditionMention,
+  decodeAppliedMappingReport,
   decodeCoverageReport,
   decodeDatum,
   decodeEdgesReport,
@@ -322,6 +323,18 @@ const GOOD_IMPACT = {
     ],
     transitive: [],
   },
+};
+
+// A successful rename/move's applied-mapping report (SPEC 6.4/6.5; T6.4-1,
+// T6.5-1). The report shape is unpinned (H-3): the assumed shape mirrors the
+// preview's pinned `mapping` member, and members beside it (here `findings`)
+// are passed over by the decoder.
+const GOOD_APPLIED_MAPPING = {
+  findings: [],
+  mapping: [
+    { from: "specs/A.mdx#login", to: "specs/A.mdx#signin" },
+    { from: "specs/A.mdx#login.form", to: "specs/A.mdx#signin.form" },
+  ],
 };
 
 const GOOD_SESSION_LIST = {
@@ -1380,6 +1393,57 @@ const DECODERS: readonly DecoderSpec[] = [
       {
         label: "wrong-typed baseline (must reject, not default)",
         doc: put(GOOD_IMPACT, 7, "baseline"),
+      },
+    ],
+  },
+  {
+    name: "applied mapping (rename/move success report)",
+    decode: decodeAppliedMappingReport,
+    good: GOOD_APPLIED_MAPPING,
+    verify: (decoded: ReturnType<typeof decodeAppliedMappingReport>) => {
+      expect(decoded).toEqual([
+        { from: "specs/A.mdx#login", to: "specs/A.mdx#signin" },
+        { from: "specs/A.mdx#login.form", to: "specs/A.mdx#signin.form" },
+      ]);
+    },
+    bad: [
+      {
+        label:
+          "mapping absent (a findings-only shape reports no applied mapping)",
+        doc: omit(GOOD_APPLIED_MAPPING, "mapping"),
+      },
+      {
+        label: "null mapping (required information, never defaulted)",
+        doc: put(GOOD_APPLIED_MAPPING, null, "mapping"),
+      },
+      {
+        label: "mapping not an array",
+        doc: put(
+          GOOD_APPLIED_MAPPING,
+          { "specs/A.mdx#login": "specs/A.mdx#signin" },
+          "mapping",
+        ),
+      },
+      {
+        label: "pair missing from",
+        doc: omit(GOOD_APPLIED_MAPPING, "mapping", 0, "from"),
+      },
+      {
+        label: "pair missing to",
+        doc: omit(GOOD_APPLIED_MAPPING, "mapping", 1, "to"),
+      },
+      {
+        label: "pair with empty identity",
+        doc: put(GOOD_APPLIED_MAPPING, "", "mapping", 0, "to"),
+      },
+      {
+        label: "pair not an object",
+        doc: put(
+          GOOD_APPLIED_MAPPING,
+          "specs/A.mdx#login -> specs/A.mdx#signin",
+          "mapping",
+          1,
+        ),
       },
     ],
   },

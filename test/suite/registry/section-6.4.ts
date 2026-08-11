@@ -34,6 +34,16 @@
 //   operation, SPEC 6.1) exists as a plain file holding exactly one
 //   line-oriented entry after the one rename; entry content stays opaque
 //   (H-4).
+// - T6.4-1 "the command's own report is the applied mapping": the rename runs
+//   with `--json` (12.0: a single JSON document as the entire stdout) and its
+//   report is decoded through the H-3 applied-mapping adapter
+//   (adapters/operations.ts — the successful operation's report shape is
+//   unpinned, so the adapter owns the shape) and asserted to carry exactly
+//   the identity pairs the operation journaled, as a complete set: journal
+//   entry content being opaque (H-4), the expected pairs are the fixture's —
+//   the renamed node and its descendant, which SPEC 6.4 pins as the complete
+//   mapping (the renamed ID plus the prefix-replaced descendants, nothing
+//   else). Pair order is unasserted (shape, not information).
 // - T6.4-2 stages every *affected* reference part in dot access or
 //   double-quoted form, so each expected byte is pinned whichever way 6.4's
 //   preserve-then-default rule is read; single-quoted spellings appear only
@@ -76,6 +86,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { GraphEdge, NodeReport } from "../../helpers/adapters/index.js";
 import {
+  decodeAppliedMappingReport,
   decodeEdgesReport,
   decodeFindingsReport,
   decodeNodeReport,
@@ -94,6 +105,7 @@ import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { ConcernedIdentity, FindingSourceExpectation } from "./support.js";
 import {
+  assertAppliedMapping,
   assertConditionCounts,
   assertEdgeSetEqual,
   assertFindingLocated,
@@ -548,7 +560,7 @@ async function assertDependencyEdges(
 const T6_4_1 = defineProductTest({
   id: "T6.4-1",
   title:
-    "rewrites: renaming a mid-tree ID rewrites its `id`, all descendant `id`s by prefix replacement, local string references, external chain references in other files, `text(...)` targets in MDX and TS, and TS markers — the workspace builds, all edges retarget (query-asserted), and the mapping is appended to the journal (SPEC 6.4, 6.1)",
+    "rewrites: renaming a mid-tree ID rewrites its `id`, all descendant `id`s by prefix replacement, local string references, external chain references in other files, `text(...)` targets in MDX and TS, and TS markers — the workspace builds, all edges retarget (query-asserted), the mapping is appended to the journal, and the command's own report is the applied mapping — every journaled identity pair, the information of the preview's `mapping`, carried in JSON per 12.0 (SPEC 6.4, 6.6, 6.1, 12.0; H-3 adapter, report shape unpinned)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -590,12 +602,36 @@ const T6_4_1 = defineProductTest({
           "T6.4-1 pre-rename",
         );
 
-        await expectExit(
+        // The command's own report is the applied mapping — every identity
+        // pair the operation journaled, the information of the preview's
+        // `mapping` (SPEC 6.4, 6.6) — carried in JSON per 12.0 and decoded
+        // through the H-3 adapter (the successful operation's report shape is
+        // unpinned). The fixture pins the journaled mapping completely: the
+        // renamed node and its one descendant re-identified by prefix
+        // replacement, and nothing else — every other identity is unchanged
+        // and unmapped.
+        const renameReport = await runJson(
           product,
           workspace,
-          ["rename", "specs/Core.mdx", "core.mid", "core.hub"],
-          0,
-          "T6.4-1 `rename specs/Core.mdx core.mid core.hub`",
+          ["rename", "specs/Core.mdx", "core.mid", "core.hub", "--json"],
+          "T6.4-1 `rename specs/Core.mdx core.mid core.hub --json`",
+        );
+        assertAppliedMapping(
+          decodeAppliedMappingReport(renameReport, "T6.4-1"),
+          [
+            {
+              from: "specs/Core.mdx#core.mid",
+              to: "specs/Core.mdx#core.hub",
+            },
+            {
+              from: "specs/Core.mdx#core.mid.leaf",
+              to: "specs/Core.mdx#core.hub.leaf",
+            },
+          ],
+          "T6.4-1: the successful rename's report is the applied mapping — " +
+            "exactly the identity pairs the operation journaled: the renamed " +
+            "node and its descendant, old identity to new (SPEC 6.4, 6.6, " +
+            "12.0)",
         );
 
         // The rewrites, per source surface: stale spellings gone, rewritten

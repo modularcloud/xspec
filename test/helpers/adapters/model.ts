@@ -357,6 +357,19 @@ export interface ImpactedCodeEntry {
   readonly path: readonly string[];
 }
 
+/**
+ * One identity pair of a successful `rename`/`move`'s applied-mapping report
+ * (SPEC.md 6.4, 6.5; T6.4-1, T6.5-1): the operation's report is the complete
+ * identity mapping it journaled — the information of the preview's `mapping`
+ * (6.6) — carried in JSON per 12.0. The successful operation's report shape
+ * is unpinned (H-3), so pair order is a shape choice: tests assert the pairs
+ * as a complete set (adapters/operations.ts).
+ */
+export interface AppliedMappingPair {
+  readonly from: string;
+  readonly to: string;
+}
+
 /** `review list` (T10.7-5): sessions in byte order of name. */
 export interface SessionListReport {
   readonly sessions: readonly SessionListEntry[];
