@@ -60,6 +60,20 @@
 //   `*`, whole-path regex) so the exact finding set pins the captured tuple.
 //   Determinism of the shortest-match disambiguation runs the identical
 //   `check --json` twice and asserts byte-identical outputs (H-6).
+// - T7.5-5 literal-`$` forms: `build` succeeding on each arm IS the
+//   load-without-14.14 observation — configuration validity is enforced at
+//   load by every command (SPEC 7, 14.14), and a capture-reading product
+//   refuses the `to`-side arms as referencing an absent capture, exit 2.
+//   Matching-only-the-literal-bytes is the exact policy-finding set over
+//   staged bait: beside each literal-byte path, the fixtures stage the paths
+//   a capture reading, a dropped-`$` reading, a one-byte-wildcard reading,
+//   or a regex-anchor reading would match instead, each bearing an edge of
+//   the same shape. The trailing-`$`-in-`to` arm expects zero findings —
+//   plain `check` exit 0 (any finding causes exit 1, 12.0/14.12) — with the
+//   anchor-bait edge's presence pinned first via `query edges`, so the
+//   no-findings observation is not vacuous; no discovered target can spell a
+//   trailing-`$` path (a spec source always ends `.mdx`, 14.19), which is
+//   why that arm's match observation is pure absence.
 // - T7.5-6 "regenerates output" is asserted by tampering with a generated
 //   module after a first build and byte-comparing it back after a rebuild —
 //   a product-to-itself comparison (H-4 allows those; 12.0 makes the
@@ -75,6 +89,7 @@ import type {
 } from "../../helpers/adapters/index.js";
 import {
   decodeCoverageReport,
+  decodeEdgesReport,
   decodeFindingsReport,
 } from "../../helpers/adapters/index.js";
 import {
@@ -91,6 +106,7 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
+  assertEdgeSetEqual,
   assertSameJson,
   buildOk,
   expectConfigurationError,
@@ -1622,6 +1638,228 @@ W.w
   "m/wrong.mdx": mdxSection("w"),
 };
 
+// (e)-(j) Literal `$` forms (SPEC 7.5: a capture is exactly `$` followed by
+// one digit `1`-`9` — every other `$`, `$0` and a trailing `$` included, is a
+// literal byte in either pattern, never a capture or a capture violation,
+// 14.14). Three forms — `$0`, a trailing `$`, and `$` before a non-digit —
+// staged in `from` and in `to`, one arm each (module header: build's success
+// is the load assertion; exact finding sets over bait paths are the match
+// assertion).
+
+/** A code file bearing one top-level marker into `tgt/P.mdx#p`. */
+const CODE_MARKER_TO_P = 'import P from "../tgt/P.xspec"\n\nP.p\n';
+
+// (e) `$0` in `from` — the spec's own example: `a$0.ts` matches the file
+// `a$0.ts` and never `ab.ts` (a capture reading matches `ab.ts` with $0 = b —
+// and `a0.ts` with $0 = 0, and `a$0.ts` itself with $0 = "$0"); a dropped-`$`
+// reading matches `a0.ts`. All three files bear the same marker edge, so the
+// finding set separates every reading.
+const LITERAL_DOLLAR0_FROM_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    tgt: ["tgt/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  },
+  policy: [
+    {
+      name: "dz",
+      type: "forbidden",
+      from: { files: "src/a$0.ts" },
+      to: { group: "tgt" }
+    }
+  ]
+})
+`,
+  "src/a$0.ts": CODE_MARKER_TO_P,
+  "src/ab.ts": CODE_MARKER_TO_P,
+  "src/a0.ts": CODE_MARKER_TO_P,
+  "tgt/P.mdx": mdxSection("p"),
+};
+
+// (f) `$0` in `to` — a capture-reading product refuses the configuration
+// (`to` would reference the absent capture $0, 14.14 — the load assertion) or
+// expands into `tb.mdx`; a dropped-`$` reading matches `t0.mdx`. The source
+// depends on every candidate expansion's node.
+const LITERAL_DOLLAR0_TO_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    pre: ["pre/**/*.mdx"],
+    tgt: ["tgt/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "dz",
+      type: "forbidden",
+      from: { group: "pre" },
+      to: { files: "tgt/t$0.mdx" }
+    }
+  ]
+})
+`,
+  "pre/S.mdx": `import P from "../tgt/t$0.xspec"
+import Q from "../tgt/tb.xspec"
+import R from "../tgt/t0.xspec"
+
+<S id="s" d={[P.p, Q.q, R.r]}>
+Depends on every candidate expansion's node.
+</S>
+`,
+  "tgt/t$0.mdx": mdxSection("p"),
+  "tgt/tb.mdx": mdxSection("q"),
+  "tgt/t0.mdx": mdxSection("r"),
+};
+
+// (g) Trailing `$` in `from` — the pattern `src/end$` matches only the
+// `$`-suffixed name. The `$`-suffixed discovered file is necessarily a code
+// source (a spec source always ends `.mdx`, 14.19), discovered by the
+// extension-free glob `src/*` (SPEC 7.2 restricts code groups by glob alone).
+// A regex-anchor reading matches `src/end` instead and misses `src/end$`.
+const LITERAL_TRAILING_FROM_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    tgt: ["tgt/**/*.mdx"]
+  },
+  code: {
+    app: ["src/*"]
+  },
+  policy: [
+    {
+      name: "tr",
+      type: "forbidden",
+      from: { files: "src/end$" },
+      to: { group: "tgt" }
+    }
+  ]
+})
+`,
+  "src/end$": CODE_MARKER_TO_P,
+  "src/end": CODE_MARKER_TO_P,
+  "tgt/P.mdx": mdxSection("p"),
+};
+
+// (h) Trailing `$` in `to` — `tgt/T.mdx$` ends in `$`, references no absent
+// capture (the load assertion), and matches no discovered target: edge
+// targets are requirement nodes, whose files always end `.mdx` (14.19), so
+// no path spells the trailing-`$` bytes. The staged edge into `tgt/T.mdx#t`
+// is the regex-anchor bait: an anchor reading matches `tgt/T.mdx` and flags
+// it; the literal reading yields zero findings, `check` exit 0.
+const LITERAL_TRAILING_TO_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    pre: ["pre/**/*.mdx"],
+    tgt: ["tgt/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "tr",
+      type: "forbidden",
+      from: { group: "pre" },
+      to: { files: "tgt/T.mdx$" }
+    }
+  ]
+})
+`,
+  "pre/S.mdx": `import T from "../tgt/T.xspec"
+
+<S id="s" d={T.t}>
+Depends on the anchor-reading bait.
+</S>
+`,
+  "tgt/T.mdx": mdxSection("t"),
+};
+
+/** (h)'s bait edge: what a regex-anchor reading of `tgt/T.mdx$` would flag. */
+const LITERAL_TRAILING_TO_BAIT_EDGE: readonly GraphEdge[] = [
+  { from: "pre/S.mdx#s", kind: "depends", to: "tgt/T.mdx#t" },
+];
+
+// (i) `$` before a non-digit in `from` — `pre/a$x.mdx` matches only the
+// literal name (spec files can spell mid-name `$`): a dropped-`$` or
+// empty-anchor reading matches `ax.mdx`, a one-byte-wildcard reading matches
+// `aQx.mdx`, and a regex reading (mid-pattern `$` unmatchable) matches
+// nothing.
+const LITERAL_NONDIGIT_FROM_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    pre: ["pre/**/*.mdx"],
+    tgt: ["tgt/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "nd",
+      type: "forbidden",
+      from: { files: "pre/a$x.mdx" },
+      to: { group: "tgt" }
+    }
+  ]
+})
+`,
+  "pre/a$x.mdx": `import T from "../tgt/T.xspec"
+
+<S id="s1" d={T.t}>
+Source spelling the literal bytes.
+</S>
+`,
+  "pre/ax.mdx": `import T from "../tgt/T.xspec"
+
+<S id="s2" d={T.t}>
+Dropped-dollar bait.
+</S>
+`,
+  "pre/aQx.mdx": `import T from "../tgt/T.xspec"
+
+<S id="s3" d={T.t}>
+One-byte-wildcard bait.
+</S>
+`,
+  "tgt/T.mdx": mdxSection("t"),
+};
+
+// (j) `$` before a non-digit in `to` — `tgt/t$z.mdx` loads (no capture, no
+// capture violation) and matches only the literal target; baits as in (i).
+const LITERAL_NONDIGIT_TO_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    pre: ["pre/**/*.mdx"],
+    tgt: ["tgt/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "nd",
+      type: "forbidden",
+      from: { group: "pre" },
+      to: { files: "tgt/t$z.mdx" }
+    }
+  ]
+})
+`,
+  "pre/S.mdx": `import P from "../tgt/t$z.xspec"
+import Q from "../tgt/tz.xspec"
+import R from "../tgt/tQz.xspec"
+
+<S id="s" d={[P.p, Q.q, R.r]}>
+Depends on every candidate expansion's node.
+</S>
+`,
+  "tgt/t$z.mdx": mdxSection("p"),
+  "tgt/tz.mdx": mdxSection("q"),
+  "tgt/tQz.mdx": mdxSection("r"),
+};
+
 const CAPTURE_PAIR_EXPECTED: readonly PolicyExpectation[] = [
   {
     rule: "pair",
@@ -1639,9 +1877,12 @@ const T7_5_5 = defineProductTest({
     "captures: $1-$2.ts against a-b-c.ts captures a and b-c, *$1* against " +
     "abc captures a (shortest-match left to right), a capture never matches " +
     "/ or the empty string, a to with captures matches only agreeing " +
-    "expansions (mirror-structure allowedOnly fixture), and the " +
-    "disambiguation is deterministic across repeat runs (SPEC 7.5, 14.12, " +
-    "12.0, H-6)",
+    "expansions (mirror-structure allowedOnly fixture), the disambiguation " +
+    "is deterministic across repeat runs, and the literal $ forms — $0, a " +
+    "trailing $, and $ before a non-digit, staged in from and in to, one " +
+    "arm each — load without 14.14 (a to containing $0 or ending in $ " +
+    "references no absent capture) and match exactly the paths spelling " +
+    "those literal bytes (SPEC 7.5, 14.12, 14.14, 12.0, H-6)",
   run: async (product) => {
     // (a) The $1-$2 tuple, plus determinism: the identical `check --json`
     // twice with byte-identical outputs (H-6) — the capture-dependent
@@ -1728,6 +1969,136 @@ const T7_5_5 = defineProductTest({
       "T7.5-5 (mirror-structure allowedOnly — src/good.ts's edge into " +
         "m/good.mdx agrees with its expansion and passes; src/evil.ts's " +
         "edge into m/wrong.mdx disagrees and violates)",
+    );
+
+    // (e) `$0` in `from`: a$0.ts matches the file a$0.ts and never ab.ts —
+    // nor a0.ts (SPEC 7.5's literal-$ example; build's success is the
+    // load-without-14.14 half, module header).
+    await expectPolicyFindings(
+      product,
+      LITERAL_DOLLAR0_FROM_FILES,
+      [
+        {
+          rule: "dz",
+          edge: { from: "src/a$0.ts", to: "tgt/P.mdx#p", kind: "references" },
+        },
+      ],
+      "T7.5-5 ($0 in from — src/a$0.ts is literal bytes: it matches the " +
+        "file src/a$0.ts and never src/ab.ts, which a capture reading of " +
+        "$0 would match, nor src/a0.ts, which a dropped-$ reading would " +
+        "match; SPEC 7.5, 14.14)",
+    );
+
+    // (f) `$0` in `to`: loads — references no absent capture — and matches
+    // only tgt/t$0.mdx.
+    await expectPolicyFindings(
+      product,
+      LITERAL_DOLLAR0_TO_FILES,
+      [
+        {
+          rule: "dz",
+          edge: { from: "pre/S.mdx#s", to: "tgt/t$0.mdx#p", kind: "depends" },
+        },
+      ],
+      "T7.5-5 ($0 in to — a to containing $0 references no absent capture " +
+        "(a capture-reading product refuses the configuration with 14.14 " +
+        "and fails the build step) and matches only the literal " +
+        "tgt/t$0.mdx target, never tgt/tb.mdx or tgt/t0.mdx; SPEC 7.5, " +
+        "14.14)",
+    );
+
+    // (g) Trailing `$` in `from`: the pattern matches only the `$`-suffixed
+    // name.
+    await expectPolicyFindings(
+      product,
+      LITERAL_TRAILING_FROM_FILES,
+      [
+        {
+          rule: "tr",
+          edge: { from: "src/end$", to: "tgt/P.mdx#p", kind: "references" },
+        },
+      ],
+      "T7.5-5 (trailing $ in from — src/end$ matches only the $-suffixed " +
+        "name src/end$, never src/end, which a regex-anchor reading would " +
+        "match instead; SPEC 7.5, 14.14)",
+    );
+
+    // (h) Trailing `$` in `to`: loads — ends in `$`, references no absent
+    // capture — and matches no discovered target (fixture comment), so the
+    // staged bait edge yields no finding: `check` exits 0.
+    await withWorkspace(
+      { files: LITERAL_TRAILING_TO_FILES },
+      async (workspace) => {
+        const base = "T7.5-5 (trailing $ in to — tgt/T.mdx$)";
+        await buildOk(
+          product,
+          workspace,
+          `${base} \`build\` — a to ending in $ references no absent ` +
+            `capture: the configuration loads without 14.14 (SPEC 7.5, ` +
+            `14.14)`,
+        );
+        const premise = `${base} \`query edges --kinds depends\` (fixture premise)`;
+        assertEdgeSetEqual(
+          decodeEdgesReport(
+            await runJson(
+              product,
+              workspace,
+              ["query", "edges", "--kinds", "depends"],
+              premise,
+            ),
+            premise,
+          ),
+          LITERAL_TRAILING_TO_BAIT_EDGE,
+          `${premise}: the depends edge a regex-anchor reading of ` +
+            `tgt/T.mdx$ would flag is present, so the no-findings check ` +
+            `below is not vacuous (SPEC 2.2, 7.5)`,
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["check"],
+          0,
+          `${base} \`check\` — no discovered path spells the trailing-$ ` +
+            `bytes (edge targets are requirement nodes and a spec source ` +
+            `always ends .mdx, 14.19), so the literal pattern matches no ` +
+            `target and the staged edge yields no finding; a regex-anchor ` +
+            `reading flags tgt/T.mdx and exits 1 (SPEC 7.5, 14.12, 12.0)`,
+        );
+      },
+    );
+
+    // (i) `$` before a non-digit in `from`: pre/a$x.mdx matches only the
+    // literal name.
+    await expectPolicyFindings(
+      product,
+      LITERAL_NONDIGIT_FROM_FILES,
+      [
+        {
+          rule: "nd",
+          edge: { from: "pre/a$x.mdx#s1", to: "tgt/T.mdx#t", kind: "depends" },
+        },
+      ],
+      "T7.5-5 ($ before a non-digit in from — pre/a$x.mdx is literal " +
+        "bytes: it matches the file pre/a$x.mdx and never pre/ax.mdx " +
+        "(dropped-$ reading) or pre/aQx.mdx (one-byte-wildcard reading); " +
+        "SPEC 7.5, 14.14)",
+    );
+
+    // (j) `$` before a non-digit in `to`: loads and matches only the
+    // literal target.
+    await expectPolicyFindings(
+      product,
+      LITERAL_NONDIGIT_TO_FILES,
+      [
+        {
+          rule: "nd",
+          edge: { from: "pre/S.mdx#s", to: "tgt/t$z.mdx#p", kind: "depends" },
+        },
+      ],
+      "T7.5-5 ($ before a non-digit in to — tgt/t$z.mdx is neither a " +
+        "capture nor a capture violation: the configuration loads without " +
+        "14.14 and the pattern matches only the literal tgt/t$z.mdx " +
+        "target, never tgt/tz.mdx or tgt/tQz.mdx; SPEC 7.5, 14.14)",
     );
   },
 });

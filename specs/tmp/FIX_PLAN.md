@@ -707,11 +707,45 @@ A "new test T<x>" task always means, in one change:
   test:self` unchanged 4 planned mid-loop reds (certification-document ×3
   → FP-091; S-1's 9 unmapped keys → stages E/G).]
 
-- [ ] FP-021 — T7.5-5: add the literal-`$` forms arm. [R1 #24; TEST-SPEC
+- [x] FP-021 — T7.5-5: add the literal-`$` forms arm. [R1 #24; TEST-SPEC
   §7.5, SPEC 14.14]
   `test/suite/registry/section-7.4-7.5.ts`: stage `$0`, trailing `$`, and
   `$` before a non-digit, each in `from` and in `to`; assert they load
   without 14.14 and match only the literal bytes.
+  [Done 2026-08-11: six arms (e)-(j) appended to T7.5-5 — the three forms
+  staged once in `from` and once in `to` per TEST-SPEC's "one arm each".
+  Load-without-14.14 is each arm's `build` exit 0 (14.14 is load-enforced by
+  every command; a capture-reading product refuses the `to`-side `$0`/
+  trailing-`$` arms as referencing an absent capture and dies there);
+  matching-only-the-literal-bytes is the exact 14.12 finding set over bait:
+  every fixture stages, beside the literal-byte path, the paths a capture
+  reading (`src/ab.ts` for `src/a$0.ts` — the spec's own example),
+  dropped-`$` reading (`a0.ts`/`ax.mdx`/`t0.mdx`/`tz.mdx`), one-byte-wildcard
+  reading (`aQx.mdx`/`tQz.mdx`), or regex-anchor reading (`src/end` for
+  `src/end$`) would match instead, each bearing a same-shaped edge. The
+  trailing-`$`-in-`from` arm stages the `$`-suffixed name as a code source
+  under the extension-free glob `src/*` (a spec source always ends `.mdx`,
+  14.19; SPEC 7.2 restricts code groups by glob alone); the
+  trailing-`$`-in-`to` arm (`tgt/T.mdx$`) can match no discovered target, so
+  it pins the anchor-bait edge's presence via `query edges` (T7-3's
+  premise precedent) then asserts plain `check` exit 0 — zero findings.
+  Title and module header extended; traceability unchanged (["7.5"] —
+  T7.5-5 is in no TEST-SPEC 14 staging record, the T7.5-3/-4 precedent); no
+  certification scope. Verified: direct CLI probes of all six stagings
+  against the built product returned exactly the expected sets in the old
+  finding shape (the matcher is already literal on every form; all six
+  builds exit 0), and guarded solo executions of each arm body ran (e),
+  (f), (g), (i), (j) green through build/check-exit and red exactly at the
+  form-exact 12.7 findings decode ("expected no member \"condition\"" — the
+  FP-001-class product gap) while (h) passed in full, so each finding-
+  bearing arm is red-as-diagnosed at the known product gap with its set
+  assertion proven satisfiable. In the suite T7.5-5 still fails at its
+  first arm (a)'s decode, the new arms unreached until that closes;
+  section-7.4-7.5 unchanged 7 failed / 1 passed (T7.4-2 green). Typecheck/
+  format clean; `npm run test:self` unchanged 4 planned mid-loop reds
+  (certification-document ×3 → FP-091; S-1 unmapped keys → stages E/G),
+  S-5 and certification green (CONF-VALID 12/12, CONF-MD 8/8, CONF-CORE
+  9/9, CONF-DISC 3/3, violators failing as certified).]
 
 ## Stage E — §§1–9 missing tests (new-test convention applies)
 
