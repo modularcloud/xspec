@@ -806,11 +806,48 @@ A "new test T<x>" task always means, in one change:
   → FP-091; S-1's 9 unmapped keys → stages E/G), S-5 (243 tests now) and
   certification green.]
 
-- [ ] FP-023 — Implement T5.7-1: occurrence units and duplicates. [R1 #2;
+- [x] FP-023 — Implement T5.7-1: occurrence units and duplicates. [R1 #2;
   TEST-SPEC §5.7]
   One record per `d` array entry / embedding / call / marker; collapsed
   edges vs distinct occurrence records. New registry module for §5.7 (e.g.
   `test/suite/registry/section-5.7.ts` + suite wrapper); map `"5.7"`.
+  [Done 2026-08-11: new registry module section-5.7.ts (wrapper
+  section-5.7.test.ts, spread into index.ts) registering T5.7-1 — one
+  workspace staging all five occurrence kinds: `tri`'s three-entry mixed
+  `d` array (external chain, local string, external chain), `solo`'s
+  single-reference `d={"peer"}`, `emb`'s MDX `{text(BASE.a.b)}`, and in
+  src/app.ts a `text(SPEC.emb)` call, a once-spelled marker, and the
+  twice-spelled marker, plus TEST-SPEC's literal duplicate pair
+  `d={[BASE.a.b, BASE.a.b]}`. Premise `build` exit 0; bare `occurrences`
+  (JSON-only, no `--json`) decoded through FP-022's form-exact 12.7
+  layer; findings []; the complete 11-record (file, [kind], source ->
+  target) multiset asserted order-free — one record per `d` array entry,
+  never one for the array or the prop; one per embedding/call/marker,
+  each carrying its edge kind; two per duplicate pair (byte-precise
+  spans are T5.7-2's subject, the total order T5.7-3's, decode-enforced
+  as 12.7 form meanwhile) — each duplicate pair additionally pinned to
+  exactly two records at distinct ranges, and the collapse side pinned
+  via unfiltered `query edges` against the complete 17-edge set (8
+  contains + 5 depends + 2 embeds + 2 references — the dup pair and the
+  twice-spelled marker one edge each). Traceability "T5.7-1": ["5.7"]
+  (no numbered condition asserted; 2.2/5.2/11.3 context with home
+  coverage elsewhere); in no certification scope (CERTIFICATIONS.md
+  Exclusions: the TS-side occurrence enumerations sit behind the
+  tooling wall). Verified: red-as-diagnosed exactly at the `occurrences`
+  invocation (exit 2 "unknown command 'occurrences'" — the whole 11.3
+  surface is patch-new) with the build premise green; a direct probe of
+  the staging against the built product returned byte-for-byte the
+  expected 17-edge set (both duplicate groups already collapse, per-unit
+  4.6 attribution confirmed); satisfiability proven by running the
+  registered body via a scratch binding against a shim product (real
+  product + conforming occurrences answer computed from the staged
+  bytes) — green through every assertion — and against a
+  one-record-per-array/per-group deviation shim — red exactly at the
+  multiset assertion (teeth). Typecheck/format clean; `npm run
+  test:self` 4 planned mid-loop reds (certification-document ×3 →
+  FP-091; S-1 unmapped keys now the 8-key set {6.6, 11.2, 11.3, 11.4,
+  11.5, 11.6, 12.6, 12.7} — "5.7" mapped by this task), S-5 and
+  certification green.]
 
 - [ ] FP-024 — Implement T5.7-2: byte-precise occurrence spans per kind.
   [R1 #3; TEST-SPEC §5.7]
