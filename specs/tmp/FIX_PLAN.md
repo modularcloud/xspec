@@ -405,11 +405,30 @@ A "new test T<x>" task always means, in one change:
   suite file 1.6-1.7 shows only T1.6-5's pre-existing FP-001-class product
   gap (form-exact findings decode), T1.7-1 green.]
 
-- [ ] FP-013 — T4.3-2: add the zero-argument and two-argument `text(...)`
+- [x] FP-013 — T4.3-2: add the zero-argument and two-argument `text(...)`
   arms. [R1 #16; TEST-SPEC §4.3, SPEC 14.8]
   `test/suite/registry/section-4.3-4.4.ts` (~line 294) has only the
   string/computed-index/optional-chaining arms. Add `text()` and
   `text("a","b")` calls in a TypeScript file, each → 14.8.
+  [Done 2026-08-11: two arms appended to T4_3_2_ARMS — `text();` and
+  `text(SPEC.a, SPEC.a.b);` — the two-argument arm passing two static
+  resolvable node chains per T2.4-3's MDX precedent (the language's valid
+  argument form; this task summary's literal `text("a","b")` would stage
+  two further string-form-in-TS 14.8 defects, making the finding count
+  ambiguous and letting an arity-tolerant product pass), so arity is each
+  arm's sole defect: exactly one 14.8 asserted at the call within the
+  offending statement's byte window, per TEST-SPEC §4.3 ("14.8's arity
+  clause holds in either language"). Title extended to the full TEST-SPEC
+  entry; traceability already ["4.3","14"], unchanged. Verified by direct
+  probe against the built product: a valid one-argument control of the
+  identical shape builds exit 0 (arity is the sole delta); each arm exits 1
+  with exactly one 14.8 located within the computed window, no 14.18
+  beside; the suite test itself stays red-as-diagnosed at the pre-existing
+  FP-001-class form-exact decode (the product still emits condition-member
+  findings — same first-arm failure as before, new arms unreached until
+  that product gap closes). `npm run test:self`: unchanged 4 planned
+  mid-loop reds (certification-document ×3 → FP-091; S-1's 9 unmapped keys
+  → stages E/G).]
 
 - [ ] FP-014 — T4.5-2: add the upstream (cross-file) impact arm. [R1 #17;
   TEST-SPEC §4.5]

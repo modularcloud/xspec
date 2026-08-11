@@ -20,12 +20,22 @@
 //   equals the hand-derived expansions, SPEC 1.6/3). "From the calling code
 //   location": the calls sit at file top level, so the location is the file
 //   (SPEC 4.6), asserted as the file's complete outgoing edge set.
-// - T4.3-2 arms stage exactly one defect each — the string/dynamic form. The
-//   dynamic arms' chains would resolve to existing nodes if read statically
-//   (`SPEC[key]` with key = "a"; `SPEC.a?.b` with `a.b` staged), so a product
-//   cannot legitimately reclassify them as unresolved references (14.7): the
-//   sole present condition is 14.8 (SPEC 2.4, 4.3, 4.5). Each finding must
-//   fall within the offending statement's byte window (support.ts
+// - T4.3-2 arms stage exactly one defect each — the string/dynamic/arity
+//   form. The dynamic arms' chains would resolve to existing nodes if read
+//   statically (`SPEC[key]` with key = "a"; `SPEC.a?.b` with `a.b` staged),
+//   so a product cannot legitimately reclassify them as unresolved
+//   references (14.7): the sole present condition is 14.8 (SPEC 2.4, 4.3,
+//   4.5). The arity arms mirror T2.4-3's MDX staging in this language's
+//   valid argument form: the two-argument call passes two static, resolvable
+//   node chains (`SPEC.a`, `SPEC.a.b` — never strings, each themselves 14.8
+//   in TypeScript, which would stage further defects), and the zero-argument
+//   call has nothing to resolve, so in each the arity is the sole defect —
+//   exactly one 14.8, at the call — and a product tolerating the arity
+//   builds clean, failing the exit-1 expectation. A node argument of the
+//   wrong-arity call is still a direct argument to its own module's `text`
+//   export, so no 14.18 is present (SPEC 14.18's entry sanctions direct
+//   `text` arguments; 2.4 assigns any other arity to 14.8). Each finding
+//   must fall within the offending statement's byte window (support.ts
 //   byteWindow).
 // - T4.4-1 asserts the condition's three facets (SPEC 14.11: reported by
 //   `build`/`check`, "additionally a TypeScript type error and a runtime
@@ -320,12 +330,28 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
     ],
     offending: "text(SPEC.a?.b);",
   },
+  {
+    name: "a zero-argument `text()` call (arity, SPEC 2.4)",
+    lines: ['import { text } from "../specs/A.xspec";', "", "text();"],
+    offending: "text();",
+  },
+  {
+    name:
+      "a two-argument `text(...)` call (arity, SPEC 2.4) — both arguments " +
+      "static resolvable node chains, so the arity is the sole defect",
+    lines: [
+      'import SPEC, { text } from "../specs/A.xspec";',
+      "",
+      "text(SPEC.a, SPEC.a.b);",
+    ],
+    offending: "text(SPEC.a, SPEC.a.b);",
+  },
 ];
 
 const T4_3_2 = defineProductTest({
   id: "T4.3-2",
   title:
-    "a string argument to `text` in a TypeScript file fails with 14.8, and so does a dynamic node-form argument there — a computed index by variable and an optional-chaining chain, each as the `text` argument (SPEC 4.3, 2.4, 4.5)",
+    "a string argument to `text` in a TypeScript file fails with 14.8; so does a dynamic node-form argument there — a computed index by variable and an optional-chaining chain, each as the `text` argument — and so do a zero-argument and a two-argument `text(...)` call: 14.8's arity clause holds in either language, the MDX arms being T2.4-3 (SPEC 4.3, 2.4, 4.5)",
   run: async (product) => {
     for (const arm of T4_3_2_ARMS) {
       const at = arm.lines.indexOf(arm.offending);
