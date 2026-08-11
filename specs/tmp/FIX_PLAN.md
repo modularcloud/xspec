@@ -503,13 +503,43 @@ A "new test T<x>" task always means, in one change:
   6.6 are carriage context with home coverage elsewhere). FP-017 (move's
   applied-mapping report) reuses this adapter and helper.]
 
-- [ ] FP-016 — T6.4-4: add the wrong-kind and parse-local old-ID-existence
+- [x] FP-016 — T6.4-4: add the wrong-kind and parse-local old-ID-existence
   arms. [R1 #19; TEST-SPEC §6.4]
   `test/suite/registry/section-6.4.ts`, none present today: (a) discovered
   code source passed as `<file>` → exit 2; (b) duplicate-spelling bearers →
   exit 1 via the duplicate-ID finding; (c) bearer beneath an ancestor
   spelling no identity → exit 1; (d) sole would-be bearer spelling no
   identity (repeated `id` attribute) → exit 2 beside that file's findings.
+  [Done 2026-08-11: (a) base and ordering arms now run on
+  SPEC_AND_CODE_CONFIG with a discovered, reference-free `src/app.ts`, each
+  adding `rename src/app.ts a a2` → exit 2 via `expectRenameUsageError`
+  (FP-002 protocol: single 12.7 error document under `--json`, stderr
+  message present) beside the existing nonexistent-file/old-ID invocations —
+  TEST-SPEC's "checked before source validation" covers all three, so the
+  wrong-kind operand rides both arms; three parse-local arms follow the
+  masking arm: (b) two top-level sections both spelling `dup` →
+  `expectRefusalModifiesNothing` (the T6.4-6 protocol: exit 1 under
+  `--json`, form-exact 12.7 findings-only report, exactly one 14.3 located
+  in the file, whole-root snapshot compare); (c) sole bearer `kid` beneath
+  an id-less `<S>` ancestor → same protocol, exactly one 14.1 (the bearer's
+  14.2 masked per condition 2's rule, so the ancestor's finding is the
+  workspace's only one); (d) `<S id="solo" id="solo">` sole would-be bearer
+  → staging premise pinned first (`build --json` reports exactly one 14.17
+  — a repeated `id` is condition 17, never 14.1, and spells no identity)
+  then `rename … solo solo2` → exit 2 via the usage-error protocol.
+  Title/module comments extended; traceability unchanged (["6.4","12.0"]:
+  T6.4-4 appears in no TEST-SPEC 14 staging record — the masking arm's
+  14.20 precedent); no certification scope. Soundness proven by direct
+  probes against the built product (suite arms downstream of the first are
+  unreached — T6.4-4 stays red-as-diagnosed at the base arm's exit-2
+  error-document decode, the FP-002-class product gap; findings decodes the
+  FP-001 class): wrong-kind exits 2 on valid and failing workspaces; dup →
+  exit 1 with exactly one 14.3 in-file; anc → exit 1 with exactly one 14.1,
+  no unknown-ID error (existence established by the spelled bearer); solo →
+  build exactly one 14.17, rename exit 2 "unknown ID 'solo'"; both refusals
+  wrote nothing. Section-6.4 unchanged 4 failed / 3 passed; `npm run
+  test:self` unchanged 4 planned mid-loop reds (certification-document ×3 →
+  FP-091; S-1's 9 unmapped keys → stages E/G).]
 
 - [ ] FP-017 — T6.5-1: assert the applied-mapping report for the file-form
   move (both forms report as rename does). [R1 #20; TEST-SPEC §6.5]

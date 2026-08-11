@@ -15,11 +15,17 @@
 // are valid TypeScript identifiers, double-quoted computed access for
 // segments that are not, and double-quoted string literals. Type-level
 // references record no edges and are not rewritten. A nonexistent `<file>` or
-// old ID is a usage error (12.0) checked before source validation, but an old
-// ID inside an unparseable origin file is masked (14.20, 14); every other
-// validation failure refuses the rename (exit 1), the valid-workspace
-// precondition included, before modifying anything. A successful rename
-// finishes by regenerating derived files exactly as `xspec build` does.
+// old ID is a usage error (12.0) checked before source validation, and so is
+// a `<file>` naming a discovered code source — a wrong-kind operand, judged
+// like existence before any content question (6.4); the old ID's existence is
+// parse-local, judged over spelled identities (11.2): a bearer whose node
+// identity is undefined (duplicate spellings; an undefined ancestor chain)
+// still establishes existence, a section spelling no identity (its `id`
+// attribute repeated) establishes none, and an old ID inside an unparseable
+// origin file is masked (14.20, 14); every other validation failure refuses
+// the rename (exit 1), the valid-workspace precondition included, before
+// modifying anything. A successful rename finishes by regenerating derived
+// files exactly as `xspec build` does.
 //
 // Conservative operationalizations (noted per H-4):
 // - T6.4-1 "all edges retarget (query-asserted)": the workspace-wide edge set
@@ -73,7 +79,17 @@
 //   findings: the 12.0-ordering discriminator) and the usage error message
 //   on stderr (12.0), asserted for presence, not wording. The masking arm
 //   asserts exit 1 with a findings report of exactly one 14.20 naming the
-//   unparseable file with a location (SPEC 14, H-3).
+//   unparseable file with a location (SPEC 14, H-3). The parse-local
+//   existence arms (SPEC 6.4, 11.2) assert the invalid-workspace refusal
+//   through the T6.4-6 protocol — exit 1, the workspace's numbered findings
+//   alone (exactly one 14.3 for duplicate spellings; exactly one 14.1 for
+//   the identity-less ancestor), located in the staged file, nothing
+//   modified — never exit 2: each staged bearer spells the old ID, so
+//   existence holds whatever its node identity. The spells-no-identity arm
+//   pins its staging premise first (`build --json` reports exactly one
+//   14.17 — a repeated `id` is condition 17, never 14.1, and spells no
+//   identity, SPEC 14, 11.2) so its exit-2 assertion demonstrably runs
+//   beside that file's findings.
 // - T6.4-7 "byte-identical to a fresh build of the rewritten sources" is the
 //   H-6 two-directory protocol: a second workspace is seeded with the
 //   post-rename configuration, sources, and journal (derived files are
@@ -405,11 +421,12 @@ async function expectRefusalModifiesNothing(
 }
 
 /**
- * A rename usage error (SPEC 6.4, 12.0: nonexistent `<file>` or old ID): run
- * with `--json`, assert exit 2 exactly, the single 12.7 error document as
- * the entire stdout (12.0: no report and no validation findings — the
- * 12.0-ordering discriminator; H-5), and a usage error message on stderr
- * (12.0: standard-error content; presence, not wording).
+ * A rename usage error (SPEC 6.4, 12.0: a nonexistent or wrong-kind
+ * code-source `<file>`, or a nonexistent old ID): run with `--json`, assert
+ * exit 2 exactly, the single 12.7 error document as the entire stdout (12.0:
+ * no report and no validation findings — the 12.0-ordering discriminator;
+ * H-5), and a usage error message on stderr (12.0: standard-error content;
+ * presence, not wording).
  */
 async function expectRenameUsageError(
   product: ProductBinding,
@@ -423,8 +440,8 @@ async function expectRenameUsageError(
     workspace,
     [...argv, "--json"],
     2,
-    `${context}: \`${command} --json\` — a nonexistent <file> or old ID is a ` +
-      `usage error (SPEC 6.4, 12.0)`,
+    `${context}: \`${command} --json\` — a nonexistent or wrong-kind ` +
+      `<file>, or a nonexistent old ID, is a usage error (SPEC 6.4, 12.0)`,
   );
   expectErrorDocument(
     result,
@@ -1207,15 +1224,67 @@ const U4_BROKEN_SOURCE = [
   "",
 ].join("\n");
 
+// The wrong-kind arm's discovered code source (SPEC 7.2): valid TypeScript
+// with no spec references, so the base arm's workspace still builds clean —
+// a code source bears no requirement IDs, making it a wrong-kind `<file>`
+// operand (SPEC 6.4).
+const U4_CODE_FILE = "src/app.ts";
+const U4_CODE_SOURCE = "export function noop(): void {}\n";
+
+// Parse-local existence fixtures (SPEC 6.4, 11.2). Two sections both
+// spelling the same ID: every bearer's node identity is undefined (11.2,
+// duplicate spellings), yet each spells `dup`, so the old ID exists and the
+// duplicate-ID finding (14.3) refuses instead of any usage error.
+const U4_DUP_FILE = "specs/Dup.mdx";
+const U4_DUP_SOURCE = [
+  '<S id="dup">',
+  "First bearer text.",
+  "</S>",
+  "",
+  '<S id="dup">',
+  "Second bearer text.",
+  "</S>",
+  "",
+].join("\n");
+
+// A sole bearer spelling its ID beneath an ancestor spelling no identity —
+// no `id` attribute at all (14.1): the bearer's node identity is undefined
+// through the ancestor chain (11.2), yet it spells `kid`, so the old ID
+// exists and the ancestor's finding refuses. The bearer's own structural
+// check (14.2) is masked by the parent's condition (SPEC 14 condition 2), so
+// the workspace's findings are exactly the one 14.1.
+const U4_ANC_FILE = "specs/Anc.mdx";
+const U4_ANC_SOURCE = [
+  "<S>",
+  "Ancestor text spelling no identity.",
+  "",
+  '<S id="kid">',
+  "Kid text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+// The old ID's only would-be bearer spells no identity — its `id` attribute
+// repeated on the tag (11.2; condition 17, never 14.1) — so the old ID is
+// nonexistent: exit 2 even beside that file's findings.
+const U4_SOLO_FILE = "specs/Solo.mdx";
+const U4_SOLO_SOURCE = [
+  '<S id="solo" id="solo">',
+  "Sole would-be bearer text.",
+  "</S>",
+  "",
+].join("\n");
+
 const T6_4_4 = defineProductTest({
   id: "T6.4-4",
   title:
-    "usage errors (exit 2): a nonexistent `<file>` and a nonexistent old ID are usage errors checked before source validation — the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering) — but an old ID inside an unparseable origin file is masked: the validation findings are reported and the command exits 1 (SPEC 6.4, 12.0, 14, 14.20)",
+    "usage errors (exit 2): a nonexistent `<file>`, a nonexistent old ID, and a discovered code source as `<file>` — a wrong-kind operand, judged like existence before any content question — are usage errors checked before source validation, the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering); an old ID inside an unparseable origin file is masked — the validation findings are reported and the command exits 1; and old-ID existence is parse-local over spelled identities: an ID two sections both spell, or one whose sole bearer spells it beneath an ancestor spelling no identity, exists — the duplicate-ID or ancestor finding refuses instead (exit 1, never exit 2) — while an old ID whose only would-be bearer spells no identity (its `id` attribute repeated on the tag) is nonexistent, exit 2 even beside that file's findings (SPEC 6.4, 11.2, 12.0, 14, 14.20)",
   run: async (product) => {
     // --- Base arm: a valid workspace ---
     await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      { [U4_FILE]: U4_SOURCE },
+      SPEC_AND_CODE_CONFIG,
+      { [U4_FILE]: U4_SOURCE, [U4_CODE_FILE]: U4_CODE_SOURCE },
       async (workspace) => {
         const context = "T6.4-4 valid-workspace arm";
         await buildOk(product, workspace, `${context}: \`build\``);
@@ -1231,13 +1300,26 @@ const T6_4_4 = defineProductTest({
           ["rename", U4_FILE, "nope", "nope2"],
           `${context}, nonexistent old ID`,
         );
+        await expectRenameUsageError(
+          product,
+          workspace,
+          ["rename", U4_CODE_FILE, "a", "a2"],
+          `${context}, discovered code source as <file> — a code source ` +
+            `bears no requirement IDs, so a code-source origin is a ` +
+            `wrong-kind operand, judged like existence before any content ` +
+            `question (SPEC 6.4, 12.0)`,
+        );
       },
     );
 
     // --- Ordering arm: the workspace also fails build validation ---
     await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      { [U4_FILE]: U4_SOURCE, [U4_BAD_FILE]: U4_BAD_SOURCE },
+      SPEC_AND_CODE_CONFIG,
+      {
+        [U4_FILE]: U4_SOURCE,
+        [U4_BAD_FILE]: U4_BAD_SOURCE,
+        [U4_CODE_FILE]: U4_CODE_SOURCE,
+      },
       async (workspace) => {
         const context = "T6.4-4 ordering arm";
         // Staging premise: the workspace really fails build validation, so
@@ -1269,6 +1351,14 @@ const T6_4_4 = defineProductTest({
           ["rename", U4_FILE, "nope", "nope2"],
           `${context}, nonexistent old ID with unrelated validation errors ` +
             `present — the existence checks precede source validation (12.0)`,
+        );
+        await expectRenameUsageError(
+          product,
+          workspace,
+          ["rename", U4_CODE_FILE, "a", "a2"],
+          `${context}, wrong-kind (code-source) <file> with unrelated ` +
+            `validation errors present — the wrong-kind operand is judged ` +
+            `like existence, before source validation (SPEC 6.4, 12.0)`,
         );
       },
     );
@@ -1305,6 +1395,96 @@ const T6_4_4 = defineProductTest({
           { file: U4_BROKEN_FILE },
           `${context}: the 14.20 finding identifies the unparseable origin ` +
             `file and the location of the parse failure (SPEC 14, 14.20)`,
+        );
+      },
+    );
+
+    // --- Parse-local existence: duplicate spellings still establish it ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [U4_DUP_FILE]: U4_DUP_SOURCE },
+      async (workspace) => {
+        // Renaming an ID two sections both spell is no usage error: the
+        // bearers establish existence, their undefined node identities
+        // notwithstanding (SPEC 6.4, 11.2), and the duplicate-ID finding
+        // refuses instead — the invalid-workspace refusal, exit 1,
+        // reporting the workspace's numbered findings alone: exactly one
+        // 14.3 finding (duplicate identities are one finding locating every
+        // bearer, SPEC 14), nothing modified.
+        await expectRefusalModifiesNothing(
+          product,
+          workspace,
+          ["rename", U4_DUP_FILE, "dup", "dup2"],
+          { finding: "14.3", locatedAt: { file: U4_DUP_FILE } },
+          "T6.4-4 parse-local existence, duplicate spellings (renaming an " +
+            "ID two sections both spell is no usage error — the " +
+            "duplicate-ID finding refuses instead: exit 1, never exit 2; " +
+            "SPEC 6.4, 11.2, 14)",
+        );
+      },
+    );
+
+    // --- Parse-local existence: an undefined ancestor chain still
+    // establishes it ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [U4_ANC_FILE]: U4_ANC_SOURCE },
+      async (workspace) => {
+        // The sole bearer spells `kid` beneath an ancestor spelling no
+        // identity (no `id` attribute): the bearer establishes existence —
+        // its undefined ancestor chain notwithstanding (SPEC 6.4, 11.2) —
+        // and the ancestor's finding refuses: exit 1 with exactly the one
+        // 14.1 finding (the bearer's structural check is masked by the
+        // parent's condition, SPEC 14 condition 2), never exit 2.
+        await expectRefusalModifiesNothing(
+          product,
+          workspace,
+          ["rename", U4_ANC_FILE, "kid", "kid2"],
+          { finding: "14.1", locatedAt: { file: U4_ANC_FILE } },
+          "T6.4-4 parse-local existence, sole bearer beneath an ancestor " +
+            "spelling no identity (the bearer establishes existence and " +
+            "the ancestor's missing-id finding refuses: exit 1, never " +
+            "exit 2; SPEC 6.4, 11.2, 14)",
+        );
+      },
+    );
+
+    // --- Parse-local nonexistence: a would-be bearer spelling no
+    // identity ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [U4_SOLO_FILE]: U4_SOLO_SOURCE },
+      async (workspace) => {
+        const context = "T6.4-4 spells-no-identity arm";
+        // Staging premise: the repeated-`id` bearer leaves the file with
+        // exactly one 14.17 finding — a repeated prop is condition 17,
+        // never 14.1, spells no identity, and has no children whose masked
+        // 14.2 could add findings (SPEC 11.2, 14). Pinning the premise
+        // makes the exit-2 assertion below demonstrably run beside that
+        // file's findings: a product that takes a repeated-`id` value as
+        // spelled, or that reports the file's findings in the old ID's
+        // place, exits 1 here instead.
+        const findings = await buildFindings(
+          product,
+          workspace,
+          `${context}: \`build --json\` premise — the staged workspace ` +
+            `fails build validation (repeated \`id\` attribute, SPEC 14.17)`,
+        );
+        assertConditionCounts(
+          findings,
+          { "14.17": 1 },
+          `${context}: staging premise — the repeated-\`id\` bearer is the ` +
+            `file's one finding (SPEC 14: a repeated prop is condition 17, ` +
+            `never condition 1)`,
+        );
+        await expectRenameUsageError(
+          product,
+          workspace,
+          ["rename", U4_SOLO_FILE, "solo", "solo2"],
+          `${context}: an old ID whose only would-be bearer spells no ` +
+            `identity (its \`id\` attribute repeated on the tag) is ` +
+            `nonexistent — exit 2 even beside that file's findings ` +
+            `(SPEC 6.4, 11.2, 12.0)`,
         );
       },
     );
