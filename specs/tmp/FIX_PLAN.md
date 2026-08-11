@@ -849,10 +849,44 @@ A "new test T<x>" task always means, in one change:
   11.5, 11.6, 12.6, 12.7} — "5.7" mapped by this task), S-5 and
   certification green.]
 
-- [ ] FP-024 — Implement T5.7-2: byte-precise occurrence spans per kind.
+- [x] FP-024 — Implement T5.7-2: byte-precise occurrence spans per kind.
   [R1 #3; TEST-SPEC §5.7]
   Array-entry expression only; the whole braced `{text(...)}` container;
   callee-through-paren; bare marker chain without `;`.
+  [Done 2026-08-11: T5.7-2 registered in section-5.7.ts — one workspace,
+  six occurrences, every span byte-asserted against precomputed offsets
+  composed from the same string parts the files are (the T1.7-2 discipline:
+  multi-byte UTF-8 before every asserted construct so byte offsets diverge
+  from code-point/UTF-16 counts; a pre-product fixture self-check slices
+  each claimed range back out of the staged bytes). Arms: the three-entry
+  `d` array `[BASE.x , BASE.mid , "pre"]` with whitespace on BOTH sides of
+  each comma — all three entry spans asserted, the middle entry the featured
+  no-brackets/commas/whitespace subject, the string entry spanning its
+  quotes; the MDX `{text(BASE.y)}` container brace-through-brace; the
+  import-ALIASED TS callee `t(SPEC.x)` from its `t` through `)` (SPEC 4.4's
+  sanctioned aliasing), `;` excluded; the marker chain `SPEC.y.leaf` alone,
+  indentation, `;`, and trailing comment excluded. Records identified by
+  their unique (file, kind, source, target) tuples — report order stays
+  T5.7-3's subject (decode-enforced as 12.7 form meanwhile), source-node
+  range data likewise; findings [] and exact count 6 pinned. Decode through
+  FP-022's form-exact layer (no new adapter; S-5's existing guards cover
+  it). Traceability "T5.7-2": ["5.7"] (no numbered condition; 1.7/3/4.4/
+  11.3 context with home coverage elsewhere); in no certification scope
+  (CERTIFICATIONS.md Exclusions: T5.7-1 through T5.7-4 behind the tooling
+  wall). Verified: red-as-diagnosed exactly at the `occurrences` invocation
+  (exit 2 "unknown command" — the whole 11.3 surface is patch-new) with the
+  fixture self-check and build premise green; staging externally validated
+  by direct probe of the built product — `build` exit 0 and `query edges`
+  byte-for-byte the six expected dependency tuples (aliased callee
+  attributed to src/app.ts#call included); satisfiability and teeth proven
+  by running the registered body against a shim product (real product +
+  conforming occurrences answer recomputed from staged bytes by anchored
+  search, independent of the module's prefix arithmetic) — green through
+  every assertion — and against a marker-span-includes-`;` deviation — red
+  exactly at the marker span assertion. Typecheck/format clean; `npm run
+  test:self` unchanged 4 planned mid-loop reds (certification-document ×3
+  → FP-091; S-1's 8 unmapped keys → stages E/G), S-5 and certification
+  green.]
 
 - [ ] FP-025 — Implement T5.7-3: occurrence record data and total
   deterministic order. [R1 #4; TEST-SPEC §5.7, H-6]

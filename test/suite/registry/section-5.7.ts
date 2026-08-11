@@ -1,5 +1,5 @@
-// TEST-SPEC §5.7 (reference occurrences) — SUITE-51: T5.7-1. The section's
-// remaining tests (T5.7-2, T5.7-3, T5.7-4) register here as they are
+// TEST-SPEC §5.7 (reference occurrences) — SUITE-51: T5.7-1, T5.7-2. The
+// section's remaining tests (T5.7-3, T5.7-4) register here as they are
 // implemented.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
@@ -24,10 +24,12 @@
 // multisets, order-free, with ranges consulted only for the duplicates'
 // distinctness.
 
+import { Buffer } from "node:buffer";
 import type {
   DependencyEdgeKind,
   GraphEdge,
   OccurrenceRecord,
+  SourceRange,
 } from "../../helpers/adapters/index.js";
 import {
   decodeEdgesReport,
@@ -422,5 +424,351 @@ const T5_7_1 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T5.7-2 — byte-precise spans per kind
+// ---------------------------------------------------------------------------
+
+// Occurrence spans are exact per kind (SPEC 5.7): a `d` occurrence spans that
+// one reference's own expression; an MDX embedding occurrence spans the
+// entire `{text(...)}` expression container, brace through brace; a TS
+// `text(...)` occurrence spans the whole call expression, callee through
+// closing parenthesis; a marker occurrence spans the bare reference chain
+// alone, exclusive of any statement terminator. Every expected range below is
+// composed from the same string parts the staged files are — never measured
+// from product output — and a fixture self-check slices each claimed range
+// back out of the staged bytes before the product is invoked (the T1.7-2
+// discipline), so a staging-arithmetic error fails as a harness-side
+// diagnosis, never as a wrong-but-satisfiable expectation. Both referencing
+// files put multi-byte UTF-8 (é: 1 code point, 2 bytes; 🦄: 1 code point / 2
+// UTF-16 units / 4 bytes) before every asserted construct, so byte offsets
+// diverge from code-point and UTF-16 offsets and a product counting either
+// fails (SPEC 1.7).
+
+/** UTF-8 byte length of a composed fixture part. */
+function utf8Length(text: string): number {
+  return Buffer.byteLength(text, "utf8");
+}
+
+/** Byte range of `span` where it follows exactly `prefix` in a file. */
+function rangeAfter(prefix: string, span: string): SourceRange {
+  const start = utf8Length(prefix);
+  return { start, end: start + utf8Length(span) };
+}
+
+// The referenced spec source: three top-level targets plus a nested child, so
+// the marker's chain is multi-segment (`SPEC.y.leaf`) and every staged
+// occurrence resolves to its own distinct target.
+const SPAN_BASE_SOURCE = [
+  '<S id="x">',
+  "X text.",
+  "</S>",
+  "",
+  '<S id="mid">',
+  "Mid text.",
+  "</S>",
+  "",
+  '<S id="y">',
+  "Y text.",
+  "",
+  '<S id="y.leaf">',
+  "Leaf text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+// specs/MAIN.mdx, composed from the exact parts the expected ranges cite. The
+// `pre` section's multi-byte text shifts every later byte offset. `arr`'s
+// three-entry `d` array spells whitespace on BOTH sides of each comma
+// (` , `), so an entry span including any bracket, comma, or neighboring
+// whitespace misses byte-precisely; `emb` holds the braced embedding.
+const SPAN_MAIN_HEAD =
+  'import BASE from "./BASE.xspec"\n\n<S id="pre">\nPrélude 🦄 text.\n</S>\n\n';
+const SPAN_ARR_TAG_PRE = '<S id="arr" d={[';
+const SPAN_ARR_ENTRY_1 = "BASE.x";
+const SPAN_ARR_SEP = " , ";
+const SPAN_ARR_ENTRY_2 = "BASE.mid";
+const SPAN_ARR_ENTRY_3 = '"pre"';
+const SPAN_ARR_TAG_POST = "]}>\nArr text.\n</S>\n\n";
+const SPAN_EMB_PRE = '<S id="emb">\nEmb: ';
+const SPAN_EMB_CONTAINER = "{text(BASE.y)}";
+const SPAN_EMB_POST = "\n</S>\n";
+const SPAN_MAIN_SOURCE =
+  SPAN_MAIN_HEAD +
+  SPAN_ARR_TAG_PRE +
+  SPAN_ARR_ENTRY_1 +
+  SPAN_ARR_SEP +
+  SPAN_ARR_ENTRY_2 +
+  SPAN_ARR_SEP +
+  SPAN_ARR_ENTRY_3 +
+  SPAN_ARR_TAG_POST +
+  SPAN_EMB_PRE +
+  SPAN_EMB_CONTAINER +
+  SPAN_EMB_POST;
+
+// src/app.ts: the `text` export is aliased ON IMPORT (SPEC 4.4's sanctioned
+// aliasing — TEST-SPEC's aliased callee `t(...)`), and each reference
+// statement wears the trivia its span must exclude — leading indentation, a
+// terminating `;`, and (for the marker) a trailing comment.
+const SPAN_APP_HEAD =
+  '// prélude 🦄 spans\nimport SPEC, { text as t } from "../specs/BASE.xspec";\n\n';
+const SPAN_CALL_PRE = "export function call(): string {\n  return ";
+const SPAN_CALL_EXPR = "t(SPEC.x)";
+const SPAN_CALL_POST = ";\n}\n\n";
+const SPAN_MARK_PRE = "export function mark(): void {\n  ";
+const SPAN_MARK_CHAIN = "SPEC.y.leaf";
+const SPAN_MARK_POST = "; // trailing trivia\n}\n";
+const SPAN_APP_SOURCE =
+  SPAN_APP_HEAD +
+  SPAN_CALL_PRE +
+  SPAN_CALL_EXPR +
+  SPAN_CALL_POST +
+  SPAN_MARK_PRE +
+  SPAN_MARK_CHAIN +
+  SPAN_MARK_POST;
+
+const SPAN_X_ID = "specs/BASE.mdx#x";
+const SPAN_MID_ID = "specs/BASE.mdx#mid";
+const SPAN_Y_ID = "specs/BASE.mdx#y";
+const SPAN_LEAF_ID = "specs/BASE.mdx#y.leaf";
+const SPAN_PRE_ID = "specs/MAIN.mdx#pre";
+const SPAN_ARR_ID = "specs/MAIN.mdx#arr";
+const SPAN_EMB_ID = "specs/MAIN.mdx#emb";
+const SPAN_CALL_LOCATION = "src/app.ts#call";
+const SPAN_MARK_LOCATION = "src/app.ts#mark";
+
+/**
+ * One staged occurrence and the exact span its record must carry. The
+ * (file, kind, source, target) tuple is unique per arm in this staging, so it
+ * identifies the arm's record without leaning on the report order (T5.7-3's
+ * subject, decode-enforced as 12.7 form meanwhile); the source node's own
+ * range datum is likewise T5.7-3's subject, consulted here only as identity.
+ */
+interface SpanArm {
+  readonly what: string;
+  /** The staged file's full content (fixture self-check ground). */
+  readonly fileSource: string;
+  /** The exact characters the occurrence's own range must slice to. */
+  readonly span: string;
+  readonly file: string;
+  readonly kind: DependencyEdgeKind;
+  readonly source: string;
+  readonly target: string;
+  /** Precomputed byte range: zero-based, start-inclusive end-exclusive. */
+  readonly range: SourceRange;
+}
+
+// The complete expected enumeration — the staged references are the
+// workspace's only occurrences (import declarations record none, SPEC 5.7),
+// one record each, every span byte-precise.
+const SPAN_ARMS: readonly SpanArm[] = [
+  {
+    what:
+      "`d` array entry 1 (`BASE.x`) — the reference's own expression, the " +
+      "opening `[` and the following ` , ` excluded (SPEC 5.7, 2.2)",
+    fileSource: SPAN_MAIN_SOURCE,
+    span: SPAN_ARR_ENTRY_1,
+    file: "specs/MAIN.mdx",
+    kind: "depends",
+    source: SPAN_ARR_ID,
+    target: SPAN_X_ID,
+    range: rangeAfter(SPAN_MAIN_HEAD + SPAN_ARR_TAG_PRE, SPAN_ARR_ENTRY_1),
+  },
+  {
+    what:
+      "`d` array MIDDLE entry (`BASE.mid`) alone — no brackets, no commas, " +
+      "no surrounding whitespace: the ` , ` on each side lies outside the " +
+      "span (SPEC 5.7, 2.2)",
+    fileSource: SPAN_MAIN_SOURCE,
+    span: SPAN_ARR_ENTRY_2,
+    file: "specs/MAIN.mdx",
+    kind: "depends",
+    source: SPAN_ARR_ID,
+    target: SPAN_MID_ID,
+    range: rangeAfter(
+      SPAN_MAIN_HEAD + SPAN_ARR_TAG_PRE + SPAN_ARR_ENTRY_1 + SPAN_ARR_SEP,
+      SPAN_ARR_ENTRY_2,
+    ),
+  },
+  {
+    what:
+      '`d` array entry 3 (the local string `"pre"`) — the string literal ' +
+      "expression's own characters, quotes included, the preceding ` , ` " +
+      "and the closing `]}` excluded (SPEC 5.7, 2.2)",
+    fileSource: SPAN_MAIN_SOURCE,
+    span: SPAN_ARR_ENTRY_3,
+    file: "specs/MAIN.mdx",
+    kind: "depends",
+    source: SPAN_ARR_ID,
+    target: SPAN_PRE_ID,
+    range: rangeAfter(
+      SPAN_MAIN_HEAD +
+        SPAN_ARR_TAG_PRE +
+        SPAN_ARR_ENTRY_1 +
+        SPAN_ARR_SEP +
+        SPAN_ARR_ENTRY_2 +
+        SPAN_ARR_SEP,
+      SPAN_ARR_ENTRY_3,
+    ),
+  },
+  {
+    what:
+      "MDX embedding — the ENTIRE braced container `{text(BASE.y)}`, " +
+      "opening brace through closing brace, the whole construct Markdown " +
+      "compilation replaces (SPEC 5.7, 3): a call-only span missing either " +
+      "brace fails",
+    fileSource: SPAN_MAIN_SOURCE,
+    span: SPAN_EMB_CONTAINER,
+    file: "specs/MAIN.mdx",
+    kind: "embeds",
+    source: SPAN_EMB_ID,
+    target: SPAN_Y_ID,
+    range: rangeAfter(
+      SPAN_MAIN_HEAD +
+        SPAN_ARR_TAG_PRE +
+        SPAN_ARR_ENTRY_1 +
+        SPAN_ARR_SEP +
+        SPAN_ARR_ENTRY_2 +
+        SPAN_ARR_SEP +
+        SPAN_ARR_ENTRY_3 +
+        SPAN_ARR_TAG_POST +
+        SPAN_EMB_PRE,
+      SPAN_EMB_CONTAINER,
+    ),
+  },
+  {
+    what:
+      "TS `text(...)` call with an ALIASED callee — `t(SPEC.x)` from its " +
+      "`t` through the closing parenthesis, argument included, the " +
+      "terminating `;` excluded (SPEC 5.7, 4.3, 4.4)",
+    fileSource: SPAN_APP_SOURCE,
+    span: SPAN_CALL_EXPR,
+    file: "src/app.ts",
+    kind: "embeds",
+    source: SPAN_CALL_LOCATION,
+    target: SPAN_X_ID,
+    range: rangeAfter(SPAN_APP_HEAD + SPAN_CALL_PRE, SPAN_CALL_EXPR),
+  },
+  {
+    what:
+      "TS marker — the bare reference chain `SPEC.y.leaf` alone, every " +
+      "segment included, the leading indentation, terminating `;`, and " +
+      "trailing comment all excluded (SPEC 5.7, 4.5)",
+    fileSource: SPAN_APP_SOURCE,
+    span: SPAN_MARK_CHAIN,
+    file: "src/app.ts",
+    kind: "references",
+    source: SPAN_MARK_LOCATION,
+    target: SPAN_LEAF_ID,
+    range: rangeAfter(
+      SPAN_APP_HEAD +
+        SPAN_CALL_PRE +
+        SPAN_CALL_EXPR +
+        SPAN_CALL_POST +
+        SPAN_MARK_PRE,
+      SPAN_MARK_CHAIN,
+    ),
+  },
+];
+
+/**
+ * Fixture self-check (harness-side, before any product invocation): the
+ * precomputed range must slice the staged file's bytes to exactly the span it
+ * claims. A failure here is a staging-arithmetic defect of this test, never a
+ * product failure.
+ */
+function assertStagedSpan(arm: SpanArm): void {
+  const actual = Buffer.from(arm.fileSource, "utf8")
+    .subarray(arm.range.start, arm.range.end)
+    .toString("utf8");
+  if (actual !== arm.span) {
+    fail(
+      `T5.7-2 fixture self-check — ${arm.what}: the precomputed byte range ` +
+        `[${String(arm.range.start)}, ${String(arm.range.end)}) slices the ` +
+        `staged bytes to ${JSON.stringify(actual)}, expected ` +
+        `${JSON.stringify(arm.span)} (a harness-side staging error, not a ` +
+        `product failure)`,
+    );
+  }
+}
+
+const T5_7_2 = defineProductTest({
+  id: "T5.7-2",
+  title:
+    "byte-precise occurrence spans per kind against precomputed offsets: a `d` occurrence spans exactly that one reference's own expression — an array's middle entry alone, no brackets, commas, or surrounding whitespace; an MDX embedding occurrence spans the entire braced container `{text(...)}`, opening brace through closing brace — the whole construct compilation replaces; a TS call occurrence spans callee through closing parenthesis, argument included — an aliased callee `t(SPEC.x)` from its `t`; a marker occurrence spans the bare reference chain alone, exclusive of the statement's terminating `;` and surrounding trivia (SPEC 5.7, 1.7, 3, 4.4, 11.3)",
+  run: async (product) => {
+    for (const arm of SPAN_ARMS) assertStagedSpan(arm);
+
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        "specs/BASE.mdx": SPAN_BASE_SOURCE,
+        "specs/MAIN.mdx": SPAN_MAIN_SOURCE,
+        "src/app.ts": SPAN_APP_SOURCE,
+      },
+    });
+    try {
+      // Premise: the workspace is valid — every staged reference is a
+      // sanctioned spelling that resolves (the import-aliased `t` callee
+      // included, SPEC 4.4) — so the enumeration below is complete and
+      // finding-free (11.2, 11.3).
+      await buildOk(
+        product,
+        workspace,
+        "T5.7-2 `build` (premise: every staged reference is a sanctioned spelling that resolves)",
+      );
+
+      const context = "T5.7-2 `occurrences`";
+      const report = decodeOccurrencesReport(
+        await runJson(product, workspace, ["occurrences"], context),
+        context,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${context}: the consulted domain (the entire discovered set, no ` +
+          `\`--file\`) carries no finding (SPEC 11.2, 11.3)`,
+      );
+      if (report.occurrences.length !== SPAN_ARMS.length) {
+        fail(
+          `${context}: expected exactly ${String(SPAN_ARMS.length)} ` +
+            `occurrence records — one per staged reference; the import ` +
+            `declarations record none (SPEC 5.7) — got ` +
+            `${String(report.occurrences.length)}: ` +
+            JSON.stringify(report.occurrences.map(renderOccurrenceUnit)),
+        );
+      }
+      for (const arm of SPAN_ARMS) {
+        const matches = report.occurrences.filter(
+          (record) =>
+            renderPathValue(record.file) === arm.file &&
+            record.kind === arm.kind &&
+            !("unavailable" in record.source) &&
+            record.source.identity === arm.source &&
+            record.target === arm.target,
+        );
+        if (matches.length !== 1) {
+          fail(
+            `${context}: expected exactly one record for the ${arm.what} — ` +
+              `${arm.file} [${arm.kind}] ${arm.source} -> ${arm.target}; ` +
+              `got ${String(matches.length)} among ` +
+              JSON.stringify(report.occurrences.map(renderOccurrenceUnit)),
+          );
+        }
+        assertSameJson(
+          matches[0]!.range,
+          arm.range,
+          `${context} — ${arm.what}: the occurrence's own range against ` +
+            `precomputed byte offsets — zero-based, start-inclusive ` +
+            `end-exclusive, so code-point, UTF-16, line/column, or 1-based ` +
+            `counting all fail (SPEC 1.7, 5.7)`,
+        );
+      }
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
 /** TEST-SPEC §5.7, in canonical ID order (SUITE-51). */
-export const section57Tests: readonly ProductTestEntry[] = [T5_7_1];
+export const section57Tests: readonly ProductTestEntry[] = [T5_7_1, T5_7_2];
