@@ -888,11 +888,52 @@ A "new test T<x>" task always means, in one change:
   → FP-091; S-1's 8 unmapped keys → stages E/G), S-5 and certification
   green.]
 
-- [ ] FP-025 — Implement T5.7-3: occurrence record data and total
+- [x] FP-025 — Implement T5.7-3: occurrence record data and total
   deterministic order. [R1 #4; TEST-SPEC §5.7, H-6]
   Record members: file, range, edge kind, source node as
   identity-plus-range, target identity. Total order: path bytes, range
   start, range end.
+  [Done 2026-08-11: T5.7-3 registered in section-5.7.ts — three referencing
+  files whose paths give the byte-order clause teeth (`specs/Zed.mdx`, 0x5A,
+  sorts before `specs/alpha.mdx`, 0x61, while any case-folding collation
+  reverses the pair; `specs/` before `src/`), six occurrences asserted
+  per-index as the complete document — every member: file, own range, kind,
+  source as ONE identity-plus-range datum, target identity — against
+  offsets composed from the staged files' own string parts (the
+  T1.7-2/T5.7-2 discipline: multi-byte UTF-8 before every asserted
+  construct; fixture self-checks slice each claimed range back out of the
+  staged bytes AND re-derive the claimed sequence under the pinned
+  comparator). Source-datum arms: MDX nested section `zout.zin` sourcing
+  both a `d` and an embedding (identical datum, construct range strictly
+  inside the parent's), the ROOT sourcing a top-level embedding (identity
+  the path alone, range 0..byteLen — the T8-5 shape), TS whole-file
+  (top-level marker) and innermost nested named unit `wrap.deep` (the inner
+  declaration's own construct, never the enclosing `wrap`). H-6: the
+  identical `occurrences` invocation twice, stdout byte-identical
+  (stdoutBytes compare); no two records share a range (pairwise-distinct
+  expected ranges; same-start pairs are unstageable — distinct spellings
+  occupy distinct spans — so the comparator's range-end leg decides no
+  staged pair, and the decode enforces it as 12.7 form over whatever a
+  product emits, the T6.6-4 latitude treatment). Traceability "T5.7-3":
+  ["5.7"] (no numbered condition; 1.7/4.6/11.3 context with home coverage
+  elsewhere); in no certification scope (CERTIFICATIONS.md Exclusions:
+  T5.7-1 through T5.7-4 behind the tooling wall). Verified:
+  red-as-diagnosed exactly at the `occurrences` invocation (exit 2 "unknown
+  command" — the whole 11.3 surface is patch-new) with self-checks and
+  build premise green; staging externally validated by direct probe of the
+  built product (`build` exit 0; `query edges` byte-for-byte the six
+  dependency edges with exactly the claimed source attributions —
+  root-sourced embeds, innermost nested section, whole-file and `wrap.deep`
+  code sources); satisfiability and teeth proven by running the registered
+  body against a shim product (real product + conforming occurrences answer
+  recomputed from staged bytes by anchored search, independent of the
+  module's prefix arithmetic) — green through every assertion — and against
+  three deviations: case-insensitive file order, outer-section source
+  attribution, run-to-run member-order jitter — each red at its diagnosed
+  assertion (order decode, record[0]'s source datum, the H-6 byte compare).
+  Typecheck/format clean; `npm run test:self` unchanged 4 planned mid-loop
+  reds (certification-document ×3 → FP-091; S-1's 8 unmapped keys → stages
+  E/G), S-5 and certification green.]
 
 - [ ] FP-026 — Implement T5.7-4: no-occurrence constructs and the exit-1
   answer carrying the domain's findings. [R1 #5; TEST-SPEC §5.7]

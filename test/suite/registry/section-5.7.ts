@@ -1,6 +1,5 @@
-// TEST-SPEC §5.7 (reference occurrences) — SUITE-51: T5.7-1, T5.7-2. The
-// section's remaining tests (T5.7-3, T5.7-4) register here as they are
-// implemented.
+// TEST-SPEC §5.7 (reference occurrences) — SUITE-51: T5.7-1, T5.7-2, T5.7-3.
+// The section's remaining test (T5.7-4) registers here as it is implemented.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -17,8 +16,9 @@
 // one TypeScript dependency marker (4.5). Edges are sets; occurrences are the
 // positions behind them: duplicate references that collapse to a single edge
 // each remain distinct occurrences at distinct ranges. Byte-precise
-// occurrence spans are T5.7-2's subject and full record data with the total
-// order T5.7-3's; T5.7-1 asserts the units — record cardinality per staged
+// occurrence spans are T5.7-2's subject; full record data — the source graph
+// node as one identity-plus-range datum — and the total deterministic order
+// are T5.7-3's; T5.7-1 asserts the units — record cardinality per staged
 // construct, each record's edge kind — and the duplicate contrast, so its
 // occurrence-record assertions compare complete (file, kind, source, target)
 // multisets, order-free, with ranges consulted only for the duplicates'
@@ -29,6 +29,7 @@ import type {
   DependencyEdgeKind,
   GraphEdge,
   OccurrenceRecord,
+  OccurrenceSourceNode,
   SourceRange,
 } from "../../helpers/adapters/index.js";
 import {
@@ -36,7 +37,11 @@ import {
   decodeOccurrencesReport,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
-import { fail } from "../../helpers/assertions.js";
+import {
+  assertBytesEqual,
+  fail,
+  parseJsonStdout,
+} from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -44,6 +49,7 @@ import {
   assertEdgeSetEqual,
   assertSameJson,
   buildOk,
+  expectExit,
   runJson,
 } from "./support.js";
 
@@ -770,5 +776,479 @@ const T5_7_2 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T5.7-3 — record data and total deterministic order
+// ---------------------------------------------------------------------------
+
+// Each record carries the referencing file, its own range, its edge kind, its
+// source graph node as ONE identity-plus-range datum — for MDX the containing
+// section with its construct range (opening tag's first character through
+// closing tag's last, 1.7; the ROOT with the whole-file range for a top-level
+// embedding — the T8-5 shape, SPEC 1.2/2.3), for TS the innermost enclosing
+// named unit with the construct binding its name, or the file (SPEC 4.6;
+// T1.7-2 owns the full unit-shape matrix) — and the resolved target's
+// identity. Order is total and deterministic (SPEC 5.7): by referencing file
+// path BYTES, then range start, then range end. The three referencing files
+// give the byte-order clause teeth: `specs/Zed.mdx` (`Z` = 0x5A) sorts before
+// `specs/alpha.mdx` (`a` = 0x61) in byte order while any case-folding or
+// locale collation reverses the pair, and `specs/...` sorts before `src/...`
+// (`p` = 0x70 < `r` = 0x72). The complete six-record document is asserted
+// per-index — every member, byte-precise ranges — against offsets composed
+// from the same string parts the staged files are (the T1.7-2/T5.7-2
+// discipline: multi-byte UTF-8 before every asserted construct so byte
+// offsets diverge from code-point and UTF-16 counts; fixture self-checks
+// slice every claimed range back out of the staged bytes AND re-derive the
+// claimed sequence under the pinned comparator before the product is
+// invoked). H-6: the identical command runs twice, byte-identical stdout. No
+// two records share a range: the six expected ranges are pairwise distinct
+// (distinct spellings occupy distinct spans, and no two sanctioned constructs
+// share a span start, so the comparator's range-end leg decides no stageable
+// pair — the decode enforces both the sharing rejection and the full
+// comparator, range-end leg included, as 12.7 form over whatever a product
+// emits).
+
+const ORD_ZED_FILE = "specs/Zed.mdx";
+const ORD_ALPHA_FILE = "specs/alpha.mdx";
+const ORD_APP_FILE = "src/app.ts";
+const ORD_ZIN_ID = "specs/Zed.mdx#zout.zin";
+const ORD_ZLOC_ID = "specs/Zed.mdx#zloc";
+const ORD_T_ID = "specs/alpha.mdx#t";
+const ORD_U_ID = "specs/alpha.mdx#u";
+const ORD_MID_ID = "specs/alpha.mdx#mid";
+const ORD_DEEP_ID = "src/app.ts#wrap.deep";
+
+// specs/Zed.mdx — byte-FIRST referencing file (`Z` < `a`), three occurrences
+// at increasing starts: a `d` on the NESTED section `zout.zin` (the
+// containing section is the innermost, its construct range strictly inside
+// the parent `zout`'s), an embedding in that same nested section's content
+// (same source datum), and a top-level embedding outside any section (source
+// the ROOT: identity the path alone, range the entire file).
+const ORD_ZED_IMPORT = 'import ALPHA from "./alpha.xspec"\n\n';
+const ORD_ZED_PRELUDE = "Prélude 🦄 Zed.\n\n";
+const ORD_ZED_ZOUT_OPEN = '<S id="zout">\nOuter text.\n\n';
+const ORD_ZED_ZIN_TAG_PRE = '<S id="zout.zin" d={';
+const ORD_ZED_ZIN_DEP = "ALPHA.t";
+const ORD_ZED_ZIN_TAG_POST = "}>\nInner: ";
+const ORD_ZED_ZIN_EMB = '{text("zloc")}';
+const ORD_ZED_ZIN_CLOSE = "\n</S>";
+const ORD_ZED_ZIN_CONSTRUCT =
+  ORD_ZED_ZIN_TAG_PRE +
+  ORD_ZED_ZIN_DEP +
+  ORD_ZED_ZIN_TAG_POST +
+  ORD_ZED_ZIN_EMB +
+  ORD_ZED_ZIN_CLOSE;
+const ORD_ZED_ZOUT_CLOSE = "\n</S>\n\n";
+const ORD_ZED_ZLOC = '<S id="zloc">\nLocal target text.\n</S>\n\n';
+const ORD_ZED_TAIL_PRE = "Tail text.\n\n";
+const ORD_ZED_TAIL_EMB = "{text(ALPHA.u)}";
+const ORD_ZED_SOURCE =
+  ORD_ZED_IMPORT +
+  ORD_ZED_PRELUDE +
+  ORD_ZED_ZOUT_OPEN +
+  ORD_ZED_ZIN_CONSTRUCT +
+  ORD_ZED_ZOUT_CLOSE +
+  ORD_ZED_ZLOC +
+  ORD_ZED_TAIL_PRE +
+  ORD_ZED_TAIL_EMB +
+  "\n";
+
+// specs/alpha.mdx — byte-SECOND (under a case-folding collation it would sort
+// FIRST and its record would lead the enumeration): the two external targets
+// `t` and `u`, plus one local-string `d` occurrence on `mid`.
+const ORD_ALPHA_PRELUDE = "Prélude 🦄 alpha.\n\n";
+const ORD_ALPHA_TARGETS =
+  '<S id="t">\nT text.\n</S>\n\n<S id="u">\nU text.\n</S>\n\n';
+const ORD_ALPHA_MID_TAG_PRE = '<S id="mid" d={';
+const ORD_ALPHA_MID_DEP = '"u"';
+const ORD_ALPHA_MID_TAG_POST = "}>\nMid text.\n";
+const ORD_ALPHA_MID_CLOSE = "</S>";
+const ORD_ALPHA_MID_CONSTRUCT =
+  ORD_ALPHA_MID_TAG_PRE +
+  ORD_ALPHA_MID_DEP +
+  ORD_ALPHA_MID_TAG_POST +
+  ORD_ALPHA_MID_CLOSE;
+const ORD_ALPHA_SOURCE =
+  ORD_ALPHA_PRELUDE + ORD_ALPHA_TARGETS + ORD_ALPHA_MID_CONSTRUCT + "\n";
+
+// src/app.ts — byte-LAST (`src/` after `specs/`): a top-level marker (no
+// named unit encloses it — the source is the whole-file location, identity
+// the path alone, range 0..byte length) and a marker inside the NESTED
+// function `deep` (the innermost enclosing named unit, chain `wrap.deep`,
+// with the inner declaration's own construct range — not the enclosing
+// `wrap`'s; SPEC 4.6, 1.7).
+const ORD_APP_HEAD =
+  '// prélude 🦄 app\nimport SPEC from "../specs/alpha.xspec";\n\n';
+const ORD_APP_TOP_MARKER = "SPEC.t";
+const ORD_APP_TOP_POST = ";\n\n";
+const ORD_APP_WRAP_PRE = "function wrap(): void {\n  ";
+const ORD_APP_DEEP_PRE = "function deep(): void {\n    ";
+const ORD_APP_DEEP_MARKER = "SPEC.u";
+const ORD_APP_DEEP_POST = ";\n  }";
+const ORD_APP_DEEP_CONSTRUCT =
+  ORD_APP_DEEP_PRE + ORD_APP_DEEP_MARKER + ORD_APP_DEEP_POST;
+const ORD_APP_WRAP_POST = "\n  deep();\n}\n";
+const ORD_APP_SOURCE =
+  ORD_APP_HEAD +
+  ORD_APP_TOP_MARKER +
+  ORD_APP_TOP_POST +
+  ORD_APP_WRAP_PRE +
+  ORD_APP_DEEP_CONSTRUCT +
+  ORD_APP_WRAP_POST;
+
+/** One staged occurrence: its complete expected record plus self-check data. */
+interface OrderArm {
+  readonly what: string;
+  /** The staged file's full content (self-check ground). */
+  readonly fileSource: string;
+  /** The exact characters the occurrence's own range must slice to. */
+  readonly occurrenceSpan: string;
+  /** The exact characters the source node's range must slice to. */
+  readonly sourceSpan: string;
+  readonly record: OccurrenceRecord & {
+    readonly source: OccurrenceSourceNode;
+  };
+}
+
+// The complete expected document, in occurrence order (SPEC 5.7): file path
+// bytes — Zed.mdx, then alpha.mdx, then src/app.ts — then range start. The
+// staged references are the workspace's only occurrences (plain sections,
+// prose, and import declarations record none).
+const ORD_EXPECTED: readonly OrderArm[] = [
+  {
+    what:
+      "`d={ALPHA.t}` on the NESTED section `zout.zin` — the source datum is " +
+      "the containing section itself: its identity plus its construct " +
+      "range, opening tag through closing tag, strictly inside the parent " +
+      "`zout`'s construct, so an outer-section attribution fails identity " +
+      "AND range (SPEC 5.7, 1.7, 2.2)",
+    fileSource: ORD_ZED_SOURCE,
+    occurrenceSpan: ORD_ZED_ZIN_DEP,
+    sourceSpan: ORD_ZED_ZIN_CONSTRUCT,
+    record: {
+      file: ORD_ZED_FILE,
+      range: rangeAfter(
+        ORD_ZED_IMPORT +
+          ORD_ZED_PRELUDE +
+          ORD_ZED_ZOUT_OPEN +
+          ORD_ZED_ZIN_TAG_PRE,
+        ORD_ZED_ZIN_DEP,
+      ),
+      kind: "depends",
+      source: {
+        identity: ORD_ZIN_ID,
+        range: rangeAfter(
+          ORD_ZED_IMPORT + ORD_ZED_PRELUDE + ORD_ZED_ZOUT_OPEN,
+          ORD_ZED_ZIN_CONSTRUCT,
+        ),
+      },
+      target: ORD_T_ID,
+    },
+  },
+  {
+    what:
+      '`{text("zloc")}` inside the nested section\'s content — the INNERMOST ' +
+      "containing section (`zout.zin`, never `zout`) sources it, carrying " +
+      "the identical identity-plus-range datum as the sibling `d` " +
+      "occurrence (SPEC 5.7, 1.7, 2.3)",
+    fileSource: ORD_ZED_SOURCE,
+    occurrenceSpan: ORD_ZED_ZIN_EMB,
+    sourceSpan: ORD_ZED_ZIN_CONSTRUCT,
+    record: {
+      file: ORD_ZED_FILE,
+      range: rangeAfter(
+        ORD_ZED_IMPORT +
+          ORD_ZED_PRELUDE +
+          ORD_ZED_ZOUT_OPEN +
+          ORD_ZED_ZIN_TAG_PRE +
+          ORD_ZED_ZIN_DEP +
+          ORD_ZED_ZIN_TAG_POST,
+        ORD_ZED_ZIN_EMB,
+      ),
+      kind: "embeds",
+      source: {
+        identity: ORD_ZIN_ID,
+        range: rangeAfter(
+          ORD_ZED_IMPORT + ORD_ZED_PRELUDE + ORD_ZED_ZOUT_OPEN,
+          ORD_ZED_ZIN_CONSTRUCT,
+        ),
+      },
+      target: ORD_ZLOC_ID,
+    },
+  },
+  {
+    what:
+      "top-level `{text(ALPHA.u)}` outside any section — the containing " +
+      "node is the ROOT: identity the file's path alone, range the entire " +
+      "file, start 0, end the byte length (SPEC 5.7, 1.2, 1.7, 2.3 — the " +
+      "T8-5 root-sourced shape)",
+    fileSource: ORD_ZED_SOURCE,
+    occurrenceSpan: ORD_ZED_TAIL_EMB,
+    sourceSpan: ORD_ZED_SOURCE,
+    record: {
+      file: ORD_ZED_FILE,
+      range: rangeAfter(
+        ORD_ZED_IMPORT +
+          ORD_ZED_PRELUDE +
+          ORD_ZED_ZOUT_OPEN +
+          ORD_ZED_ZIN_CONSTRUCT +
+          ORD_ZED_ZOUT_CLOSE +
+          ORD_ZED_ZLOC +
+          ORD_ZED_TAIL_PRE,
+        ORD_ZED_TAIL_EMB,
+      ),
+      kind: "embeds",
+      source: {
+        identity: ORD_ZED_FILE,
+        range: { start: 0, end: utf8Length(ORD_ZED_SOURCE) },
+      },
+      target: ORD_U_ID,
+    },
+  },
+  {
+    what:
+      '`d={"u"}` (local string form) on `mid` in the byte-SECOND file — ' +
+      "under a case-folding or locale collation `specs/alpha.mdx` would " +
+      "sort before `specs/Zed.mdx` and this record would lead the " +
+      "enumeration; file-path BYTE order places it fourth (SPEC 5.7)",
+    fileSource: ORD_ALPHA_SOURCE,
+    occurrenceSpan: ORD_ALPHA_MID_DEP,
+    sourceSpan: ORD_ALPHA_MID_CONSTRUCT,
+    record: {
+      file: ORD_ALPHA_FILE,
+      range: rangeAfter(
+        ORD_ALPHA_PRELUDE + ORD_ALPHA_TARGETS + ORD_ALPHA_MID_TAG_PRE,
+        ORD_ALPHA_MID_DEP,
+      ),
+      kind: "depends",
+      source: {
+        identity: ORD_MID_ID,
+        range: rangeAfter(
+          ORD_ALPHA_PRELUDE + ORD_ALPHA_TARGETS,
+          ORD_ALPHA_MID_CONSTRUCT,
+        ),
+      },
+      target: ORD_U_ID,
+    },
+  },
+  {
+    what:
+      "top-level TS marker `SPEC.t` — no named unit encloses it, so the " +
+      "source is the whole-file location: identity the path alone, range " +
+      "the entire file (SPEC 4.6, 1.7; T1.7-2)",
+    fileSource: ORD_APP_SOURCE,
+    occurrenceSpan: ORD_APP_TOP_MARKER,
+    sourceSpan: ORD_APP_SOURCE,
+    record: {
+      file: ORD_APP_FILE,
+      range: rangeAfter(ORD_APP_HEAD, ORD_APP_TOP_MARKER),
+      kind: "references",
+      source: {
+        identity: ORD_APP_FILE,
+        range: { start: 0, end: utf8Length(ORD_APP_SOURCE) },
+      },
+      target: ORD_T_ID,
+    },
+  },
+  {
+    what:
+      "marker inside the nested function `deep` — the INNERMOST enclosing " +
+      "named unit sources it: identity `src/app.ts#wrap.deep` (the " +
+      "dot-joined chain, outermost first) with the inner declaration's own " +
+      "construct range, not the enclosing `wrap`'s (SPEC 4.6, 1.7; T1.7-2)",
+    fileSource: ORD_APP_SOURCE,
+    occurrenceSpan: ORD_APP_DEEP_MARKER,
+    sourceSpan: ORD_APP_DEEP_CONSTRUCT,
+    record: {
+      file: ORD_APP_FILE,
+      range: rangeAfter(
+        ORD_APP_HEAD +
+          ORD_APP_TOP_MARKER +
+          ORD_APP_TOP_POST +
+          ORD_APP_WRAP_PRE +
+          ORD_APP_DEEP_PRE,
+        ORD_APP_DEEP_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: ORD_DEEP_ID,
+        range: rangeAfter(
+          ORD_APP_HEAD +
+            ORD_APP_TOP_MARKER +
+            ORD_APP_TOP_POST +
+            ORD_APP_WRAP_PRE,
+          ORD_APP_DEEP_CONSTRUCT,
+        ),
+      },
+      target: ORD_U_ID,
+    },
+  },
+];
+
+/**
+ * Fixture self-check (harness-side, before any product invocation): the
+ * precomputed range must slice the staged file's bytes to exactly the span it
+ * claims. A failure here is a staging-arithmetic defect of this test, never a
+ * product failure.
+ */
+function assertOrdSpan(
+  fileSource: string,
+  range: SourceRange,
+  span: string,
+  what: string,
+): void {
+  const actual = Buffer.from(fileSource, "utf8")
+    .subarray(range.start, range.end)
+    .toString("utf8");
+  if (actual !== span) {
+    fail(
+      `T5.7-3 fixture self-check — ${what}: the precomputed byte range ` +
+        `[${String(range.start)}, ${String(range.end)}) slices the staged ` +
+        `bytes to ${JSON.stringify(actual)}, expected ${JSON.stringify(span)} ` +
+        `(a harness-side staging error, not a product failure)`,
+    );
+  }
+}
+
+/**
+ * Fixture self-check: the claimed expected sequence must be strictly
+ * increasing under the pinned occurrence comparator — file path bytes, then
+ * range start, then range end (SPEC 5.7). This protects the ORDER the arms
+ * claim exactly as the span self-checks protect their offsets: a mis-ordered
+ * expectation fails harness-side, never as a wrong-but-satisfiable one.
+ */
+function assertOrdSequenceSorted(arms: readonly OrderArm[]): void {
+  for (let i = 1; i < arms.length; i += 1) {
+    const a = arms[i - 1]!.record;
+    const b = arms[i]!.record;
+    const byFile = Buffer.compare(
+      Buffer.from(renderPathValue(a.file), "utf8"),
+      Buffer.from(renderPathValue(b.file), "utf8"),
+    );
+    const order =
+      byFile !== 0
+        ? byFile
+        : a.range.start !== b.range.start
+          ? a.range.start - b.range.start
+          : a.range.end - b.range.end;
+    if (order >= 0) {
+      fail(
+        `T5.7-3 fixture self-check — the expected sequence is not strictly ` +
+          `increasing under the pinned occurrence comparator at index ` +
+          `${String(i)}: ${JSON.stringify(a)} vs ${JSON.stringify(b)} ` +
+          `(a harness-side staging error, not a product failure)`,
+      );
+    }
+  }
+}
+
+const T5_7_3 = defineProductTest({
+  id: "T5.7-3",
+  title:
+    "each occurrence record carries the referencing file, its own range, its edge kind, its source graph node as one identity-plus-range datum — the containing section for MDX with its construct range (the root with the whole-file range for a top-level embedding), the innermost enclosing named unit or the file for TS — and the resolved target's identity; order is total and deterministic: a multi-file fixture asserts file-path BYTE order (`specs/Zed.mdx` before `specs/alpha.mdx`), then range start, then range end, byte-identical across repeated runs; no two records share a range (SPEC 5.7, 1.7, 4.6, 11.3; H-6)",
+  run: async (product) => {
+    for (const arm of ORD_EXPECTED) {
+      assertOrdSpan(
+        arm.fileSource,
+        arm.record.range,
+        arm.occurrenceSpan,
+        `${arm.what} — the occurrence's own span`,
+      );
+      assertOrdSpan(
+        arm.fileSource,
+        arm.record.source.range,
+        arm.sourceSpan,
+        `${arm.what} — the source node's construct range`,
+      );
+    }
+    assertOrdSequenceSorted(ORD_EXPECTED);
+
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        [ORD_ZED_FILE]: ORD_ZED_SOURCE,
+        [ORD_ALPHA_FILE]: ORD_ALPHA_SOURCE,
+        [ORD_APP_FILE]: ORD_APP_SOURCE,
+      },
+    });
+    try {
+      // Premise: the workspace is valid — every staged reference is a
+      // sanctioned spelling that resolves (the top-level embedding and the
+      // nested-function marker included) — so the enumeration below is
+      // complete and finding-free (11.2, 11.3). A product disputing any
+      // staging judgment fails loudly here.
+      await buildOk(
+        product,
+        workspace,
+        "T5.7-3 `build` (premise: every staged reference is sanctioned and resolves)",
+      );
+
+      const context = "T5.7-3 `occurrences`";
+      const first = await expectExit(
+        product,
+        workspace,
+        ["occurrences"],
+        0,
+        `${context} (first run)`,
+      );
+      const report = decodeOccurrencesReport(
+        parseJsonStdout(first, `${context} (first run)`),
+        context,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${context}: the consulted domain (the entire discovered set, no ` +
+          `\`--file\`) carries no finding (SPEC 11.2, 11.3)`,
+      );
+      if (report.occurrences.length !== ORD_EXPECTED.length) {
+        fail(
+          `${context}: expected exactly ${String(ORD_EXPECTED.length)} ` +
+            `occurrence records — one per staged reference; plain sections, ` +
+            `prose, and import declarations record none (SPEC 5.7) — got ` +
+            `${String(report.occurrences.length)}: ` +
+            JSON.stringify(report.occurrences.map(renderOccurrenceUnit)),
+        );
+      }
+      // Per-index equality over the length-checked enumeration pins the
+      // total order — file path BYTES, then range start, then range end
+      // (SPEC 5.7: a case-folding collation surfaces alpha.mdx's record
+      // first and fails at index 0) — along with every record member: file,
+      // own range, kind, the source node's identity-plus-range datum, and
+      // the target identity.
+      ORD_EXPECTED.forEach((arm, index) => {
+        assertSameJson(
+          report.occurrences[index],
+          arm.record,
+          `${context} record [${String(index)}] — ${arm.what}; zero-based ` +
+            `byte offsets, start-inclusive end-exclusive (SPEC 1.7)`,
+        );
+      });
+
+      // H-6 determinism: the identical invocation again, byte-identical
+      // stdout — order and every datum stable across repeated runs.
+      const second = await expectExit(
+        product,
+        workspace,
+        ["occurrences"],
+        0,
+        `${context} (second run, H-6)`,
+      );
+      assertBytesEqual(
+        second.stdoutBytes,
+        first.stdoutBytes,
+        `${context}: stdout of the second run vs the first — the ` +
+          `enumeration is total and deterministic, byte-identical across ` +
+          `repeated runs (SPEC 5.7, H-6)`,
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
 /** TEST-SPEC §5.7, in canonical ID order (SUITE-51). */
-export const section57Tests: readonly ProductTestEntry[] = [T5_7_1, T5_7_2];
+export const section57Tests: readonly ProductTestEntry[] = [
+  T5_7_1,
+  T5_7_2,
+  T5_7_3,
+];
