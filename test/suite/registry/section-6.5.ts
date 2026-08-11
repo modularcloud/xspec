@@ -75,10 +75,12 @@
 //   `{text("tm.k1")}`, `d={"tm.k1"}`).
 // - T6.5-4/T6.5-6 refusal arms run with `--json`: a refused operation's
 //   report is the form-exact 12.7 findings-only report (SPEC 12.7, H-3), and
-//   each arm — staged to isolate one refusal cause — asserts exactly one
-//   finding carrying the exact stable refusal code (SPEC 14: one finding per
-//   applicable reason; TEST-SPEC preamble: a code is contract) with the
-//   concern §14 assigns the reason: the concerned identity
+//   each arm asserts exactly one finding per applicable refusal reason,
+//   carrying its exact stable code (SPEC 14: one finding per applicable
+//   reason, every applicable reason reported together; TEST-SPEC preamble: a
+//   code is contract) — most arms stage a single cause; T6.5-4's
+//   out-of-group `.mdx` occupant stages two applicable reasons at once —
+//   with the concern §14 assigns the reason: the concerned identity
 //   (refused-invalid-id, refused-identity-unchanged,
 //   refused-missing-target-parent; the full 1.5 identity or its bare ID —
 //   §14 requires identification, not spelling), the concerned path
@@ -93,7 +95,10 @@
 //   whole-workspace-root byte snapshot compare around each refused command
 //   with the pre-refusal `build`'s derived files present (the T6.4-3
 //   protocol); because each arm proves it modified nothing, the arms share
-//   one staged workspace. The precondition arm's invalid-workspace refusal
+//   one staged workspace — except the derived-path arm, which stages its
+//   own: it needs `markdown.outDir` emission and a spec glob admitting the
+//   destination `new/b.mdx` (SPEC 7.3, 13.2). The precondition arm's
+//   invalid-workspace refusal
 //   instead reports the workspace's numbered findings alone (SPEC 14, 6.4):
 //   exactly its one 14.5 finding located in the offending file. The 6.5
 //   destination clauses "containing `#`" and "not valid UTF-8" admit no
@@ -400,10 +405,12 @@ function renderArgv(argv: readonly ArgvValue[]): string {
 }
 
 /**
- * What a refused move's report must hold (SPEC 14, 12.7): the arm's one
- * finding — its exact stable code — plus whichever concern §14 assigns the
- * reason: a located participant, a concerned identity, a concerned path, or
- * nothing further where no pre-operation construct renders the concern.
+ * What one finding of a refused move's report must hold (SPEC 14, 12.7):
+ * its exact stable code plus whichever concern §14 assigns the reason: a
+ * located participant, a concerned identity, a concerned path, or nothing
+ * further where no pre-operation construct renders the concern. An arm
+ * staging several applicable reasons passes one expectation per reason
+ * (SPEC 14: every applicable reason reports together, one finding each).
  */
 interface RefusalExpectation {
   /**
@@ -426,18 +433,24 @@ interface RefusalExpectation {
  * existence checks refuses with exit 1): run with `--json`, assert exit 1
  * exactly, decode stdout as the form-exact 12.7 findings-only report of a
  * refused operation (SPEC 12.7, H-3), assert the report holds exactly one
- * finding bearing the arm's stable code with its concerned data (SPEC 14,
- * T14-7), and assert the refusal modifies nothing — a whole-workspace-root
- * byte snapshot compare around the command (derived files, sources, and the
- * journal all included).
+ * finding per expected refusal reason — its stable code with its concerned
+ * data (SPEC 14, T14-7: every applicable reason together, one finding each,
+ * and none beside) — and assert the refusal modifies nothing — a
+ * whole-workspace-root byte snapshot compare around the command (derived
+ * files, sources, and the journal all included). Per-reason concern lookup
+ * is by counting key, total because a refusal report never carries two
+ * findings of one reason (SPEC 14: one finding per reason).
  */
 async function expectRefusalModifiesNothing(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
-  expected: RefusalExpectation,
+  expected: RefusalExpectation | readonly RefusalExpectation[],
   context: string,
 ): Promise<void> {
+  const expectations: readonly RefusalExpectation[] = Array.isArray(expected)
+    ? expected
+    : [expected];
   const command = argv.join(" ");
   await assertLeavesUnchanged(
     workspace.root,
@@ -457,35 +470,54 @@ async function expectRefusalModifiesNothing(
         `${context}: \`${command} --json\` — a refused operation's report ` +
           `is the form-exact 12.7 findings-only report (SPEC 12.7, H-3)`,
       ).findings;
+      const counts: Record<string, number> = {};
+      for (const expectation of expectations) {
+        counts[expectation.finding] = (counts[expectation.finding] ?? 0) + 1;
+      }
       assertConditionCounts(
         findings,
-        { [expected.finding]: 1 },
-        `${context}: the arm isolates one refusal cause, so the report ` +
-          `holds exactly one finding carrying its exact stable code — one ` +
-          `finding per applicable reason, a code is contract (SPEC 14, ` +
+        counts,
+        `${context}: the report holds exactly one finding per applicable ` +
+          `refusal reason, each carrying its exact stable code, and no ` +
+          `reason beside the staged one(s) — a code is contract (SPEC 14, ` +
           `12.7, T14-7)`,
       );
-      const finding = findings[0]!;
-      if (expected.locatedAt !== undefined) {
-        assertFindingMentionsLocation(
-          finding,
-          expected.locatedAt,
-          `${context}: the refusal's concerned construct`,
+      for (const expectation of expectations) {
+        const finding = findings.find(
+          (candidate) =>
+            (candidate.condition ?? candidate.code ?? "(code-less)") ===
+            expectation.finding,
         );
-      }
-      if (expected.identity !== undefined) {
-        assertFindingNamesIdentity(
-          finding,
-          expected.identity,
-          `${context}: the refusal's concerned identity`,
-        );
-      }
-      if (expected.path !== undefined) {
-        assertFindingConcernsPath(
-          finding,
-          expected.path,
-          `${context}: the refusal's concerned path`,
-        );
+        if (finding === undefined) {
+          fail(
+            `${context}: no reported finding carries ` +
+              `${JSON.stringify(expectation.finding)} (SPEC 14, 12.7)`,
+          );
+        }
+        if (expectation.locatedAt !== undefined) {
+          assertFindingMentionsLocation(
+            finding,
+            expectation.locatedAt,
+            `${context}: the ${expectation.finding} refusal's concerned ` +
+              `construct`,
+          );
+        }
+        if (expectation.identity !== undefined) {
+          assertFindingNamesIdentity(
+            finding,
+            expectation.identity,
+            `${context}: the ${expectation.finding} refusal's concerned ` +
+              `identity`,
+          );
+        }
+        if (expectation.path !== undefined) {
+          assertFindingConcernsPath(
+            finding,
+            expectation.path,
+            `${context}: the ${expectation.finding} refusal's concerned ` +
+              `path`,
+          );
+        }
       }
     },
     `${context}: \`${command}\` refused — modifies nothing (SPEC 6.5)`,
@@ -1515,12 +1547,28 @@ const T6_5_3 = defineProductTest({
 //   `mv` into B.mdx forces imports in both directions (A ↔ B): the spec
 //   import cycle. Moving `mv` *under* `keep` in the same file makes it depend
 //   on its own ancestor: the dependency cycle (5.3) — no imports involved.
-// - `x`/`x.sub` carry no references: the collision and target-parent arms
-//   refuse on exactly their stated grounds.
+// - `x`/`x.sub` carry no references: the collision, target-parent, and
+//   section-form occupant arms refuse on exactly their stated grounds.
 // - B.mdx exists (file-form destination), holds `y` (cross-file collision),
 //   and has no `nope` (missing target parent).
 // - The destination-path arms use the file form of the reference-free A.mdx,
 //   each violating exactly one destination rule under REFUSAL_CONFIG.
+// - Destination occupants (SPEC 6.5): the file form refuses on ANY occupant
+//   — a plain file (B.mdx), a symbolic link, a broken symbolic link (target
+//   absent; a product probing existence through link-following stat sees
+//   that path absent and proceeds to relocate) — and the section form on
+//   any occupant that is not a discovered spec source: a directory, a
+//   symbolic link resolving to the discovered B.mdx (discovery never yields
+//   a symlink, SPEC 7 — a product resolving the target path through the
+//   filesystem finds a spec source there and inserts through the link), or
+//   the out-of-group plain `.mdx` file docs/Occ.mdx (present, right
+//   extension, still no discovered spec source), the latter refusing under
+//   both applicable reasons at once — refused-destination-exists beside
+//   refused-invalid-destination, one finding per reason (SPEC 14, T14-7).
+//   The non-file occupants stage at in-group `specs/*.mdx` paths discovery
+//   ignores (no source file, so no discovery, no derived paths), so the
+//   pre-refusal `build` stays valid and every arm refuses on exactly its
+//   staged ground rather than the invalid-workspace precondition.
 const V4_A = "specs/A.mdx";
 const V4_A_SOURCE = [
   '<S id="keep">',
@@ -1557,6 +1605,16 @@ const V4_B_SOURCE = [
   "",
 ].join("\n");
 
+// Destination-occupant paths (the staging note above): non-file occupants at
+// in-group `.mdx` paths, staged in the test body before the pre-refusal
+// `build`, plus the out-of-group plain `.mdx` file (in the files map).
+const V4_SYM_DEST = "specs/SymDest.mdx"; // file form: symlink → B.mdx
+const V4_GONE_DEST = "specs/GoneDest.mdx"; // file form: broken symlink
+const V4_DIR_TARGET = "specs/DirTarget.mdx"; // section form: directory
+const V4_LINK_TARGET = "specs/LinkTarget.mdx"; // section form: symlink → B.mdx
+const V4_OCC = "docs/Occ.mdx"; // section form: out-of-group `.mdx` file
+const V4_OCC_SOURCE = ['<S id="occ">', "Occupant text.", "</S>", ""].join("\n");
+
 // Location windows within the staged sources (SPEC 14): the dependency-cycle
 // arm locates the reference spelling recording the participating dependency
 // edge — the moved node's `d={"keep"}` — and the cross-file collision arm
@@ -1585,15 +1643,55 @@ const V4_OTHER_INVALID = [
   "",
 ].join("\n");
 
+// The derived-path arm of refused-invalid-destination (SPEC 6.5: a
+// workspace-relative directory component of a derived path the destination
+// would generate — 13.1, 13.2, 7.3 — occupied by a non-directory), on its
+// own workspace: Markdown emission redirected under `markdown.outDir`, and a
+// second spec glob admitting the file-form destination `new/b.mdx`. The
+// destination is otherwise valid — in-group, `.mdx`, unoccupied, its own
+// directory component `new/` absent (a nonexistent component is never a
+// refusal cause, SPEC 13.4) and the destination's generated module and
+// companions sharing that same absent directory (13.1) — but the destination
+// would emit `mdout/new/b.md` (13.2, 7.3: outDir preserves
+// workspace-relative paths), and that derived path's directory component
+// `mdout/new` is occupied by a plain file. The occupant lies under no
+// current source's write path (specs/Solo.mdx writes specs/Solo.xspec.ts
+// with its companions and mdout/specs/Solo.md), so the staged workspace
+// passes `build`'s validations, and the refusal is the move's own:
+// refused-invalid-destination concerning the destination path, never 14.22
+// (SPEC 14, T14-7) — discriminating a product that vets only the
+// destination path's own components (it sees `new/` absent and proceeds).
+const V4_OUTDIR_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx", "new/**/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "mdout" }
+})
+`;
+const V4_SOLO = "specs/Solo.mdx";
+const V4_SOLO_SOURCE = ['<S id="solo">', "Solo text.", "</S>", ""].join("\n");
+const V4_MDOUT_OCCUPANT = "mdout/new";
+
 const T6_5_4 = defineProductTest({
   id: "T6.5-4",
   title:
-    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle (refused-cycle, the dependency arm locating the participating `d` spelling); file form whose destination exists (refused-destination-exists, concerning that path); section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment — refused-invalid-id, concerning that identity); the ordinary cross-file `<new-id>` collision (refused-id-collision, locating the remaining bearer); a missing target parent and a target parent within the moved subtree (refused-missing-target-parent, concerning the target-parent identity); and destination paths in no configured spec group, in a code group as well, or lacking `.mdx` (refused-invalid-destination, concerning the destination path) — each refusal the form-exact 12.7 findings-only report holding exactly one finding with its exact stable code; the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6, reporting the workspace's numbered findings alone (SPEC 6.5, 5.3, 2.1, 1.4, 1.3, 14.14, 14.19, 12.0, 12.7, 14)",
+    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle (refused-cycle, the dependency arm locating the participating `d` spelling); file form whose destination exists — occupied by a plain file, by a symbolic link, and by a broken symbolic link with its target absent, one arm each, the broken-link arm discriminating a product probing existence through link-following stat (refused-destination-exists, concerning that path); section form whose target path is occupied by anything other than a discovered spec source — a directory; a symbolic link resolving to a discovered spec source (discovery never yields a symlink); and an existing `.mdx` file outside every configured spec group, the latter refusing under refused-destination-exists and refused-invalid-destination together, one finding per applicable reason; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment; the empty `<new-id>` of destination operand `specs/B.mdx#`, a well-formed 12.0 split with zero id segments, never the exit-2 generalization of 11.3's `--to` spelling rule — refused-invalid-id, concerning that identity); the ordinary cross-file `<new-id>` collision (refused-id-collision, locating the remaining bearer); a missing target parent and a target parent within the moved subtree (refused-missing-target-parent, concerning the target-parent identity); destination paths in no configured spec group, in a code group as well, or lacking `.mdx`, and the derived-path arm — emission enabled under `markdown.outDir`, the otherwise-valid destination's emit-destination directory component `mdout/new` occupied by a plain file lying under no current source's write path, refused never 14.22 (refused-invalid-destination, concerning the destination path) — each refusal the form-exact 12.7 findings-only report holding exactly one finding per applicable reason with its exact stable code; the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6, reporting the workspace's numbered findings alone (SPEC 6.5, 7, 7.3, 5.3, 2.1, 1.4, 1.3, 13.1, 13.2, 13.4, 14.14, 14.19, 14.22, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       REFUSAL_CONFIG,
-      { [V4_A]: V4_A_SOURCE, [V4_B]: V4_B_SOURCE },
+      { [V4_A]: V4_A_SOURCE, [V4_B]: V4_B_SOURCE, [V4_OCC]: V4_OCC_SOURCE },
       async (workspace) => {
+        // Destination occupants (the staging note above): staged before the
+        // pre-refusal `build`, which must still pass — a directory is no
+        // source file and discovery never yields a symbolic link (SPEC 7),
+        // so each occupant arm refuses on exactly its staged ground, not
+        // the invalid-workspace precondition.
+        await workspace.dir(V4_DIR_TARGET);
+        await workspace.symlink(V4_SYM_DEST, "B.mdx");
+        await workspace.symlink(V4_LINK_TARGET, "B.mdx");
+        await workspace.symlink(V4_GONE_DEST, "missing-target.mdx");
         // Build first, so the modifies-nothing compares include intact
         // derived files (the T6.4-3 protocol).
         await buildOk(
@@ -1608,7 +1706,7 @@ const T6_5_4 = defineProductTest({
         // per-reason choices).
         const cases: readonly (readonly [
           readonly string[],
-          RefusalExpectation,
+          RefusalExpectation | readonly RefusalExpectation[],
           string,
         ])[] = [
           [
@@ -1638,6 +1736,49 @@ const T6_5_4 = defineProductTest({
             "file form whose destination file already exists (SPEC 6.5)",
           ],
           [
+            ["move", "specs/A.mdx", V4_SYM_DEST],
+            { finding: "refused-destination-exists", path: V4_SYM_DEST },
+            "file form whose destination path is occupied by a symbolic " +
+              "link — whatever kind of filesystem object occupies it, a " +
+              "symbolic link included (SPEC 6.5)",
+          ],
+          [
+            ["move", "specs/A.mdx", V4_GONE_DEST],
+            { finding: "refused-destination-exists", path: V4_GONE_DEST },
+            "file form whose destination path is occupied by a broken " +
+              "symbolic link, target absent — a product probing existence " +
+              "through link-following stat sees the path absent and " +
+              "proceeds (SPEC 6.5)",
+          ],
+          [
+            ["move", "specs/A.mdx#x", `${V4_DIR_TARGET}#tdir`],
+            { finding: "refused-destination-exists", path: V4_DIR_TARGET },
+            "section form whose target path is occupied by a directory — " +
+              "not a discovered spec source: neither an insertion target " +
+              "nor an absent path to create (SPEC 6.5)",
+          ],
+          [
+            ["move", "specs/A.mdx#x", `${V4_LINK_TARGET}#tlink`],
+            { finding: "refused-destination-exists", path: V4_LINK_TARGET },
+            "section form whose target path is occupied by a symbolic link " +
+              "resolving to a discovered spec source — discovery never " +
+              "yields a symlink (SPEC 6.5, 7): a product resolving the " +
+              "target path through the filesystem finds a spec source " +
+              "there and inserts through the link into B.mdx",
+          ],
+          [
+            ["move", "specs/A.mdx#x", `${V4_OCC}#tocc`],
+            [
+              { finding: "refused-destination-exists", path: V4_OCC },
+              { finding: "refused-invalid-destination", path: V4_OCC },
+            ],
+            "section form whose target path is occupied by an existing " +
+              "`.mdx` file outside every configured spec group — present, " +
+              "right extension, still no discovered spec source — refusing " +
+              "under both applicable reasons, one finding per reason " +
+              "(SPEC 6.5, 14)",
+          ],
+          [
             ["move", "specs/A.mdx#keep", "specs/B.mdx#then"],
             {
               finding: "refused-invalid-id",
@@ -1654,6 +1795,20 @@ const T6_5_4 = defineProductTest({
             },
             "section form whose <new-id> is invalid per 1.4 — a " +
               "whitespace-bearing segment (SPEC 6.5)",
+          ],
+          [
+            ["move", "specs/A.mdx#keep", "specs/B.mdx#"],
+            {
+              finding: "refused-invalid-id",
+              identity: { file: V4_B, id: "" },
+            },
+            "section form whose <new-id> is empty — the destination " +
+              "operand `specs/B.mdx#` holds one `#`, a well-formed 12.0 " +
+              "split whose id part has zero segments, refused as an " +
+              "invalid intrinsic ID (one or more segments, SPEC 14) — " +
+              "never the exit-2 malformed-value treatment a product gets " +
+              "by generalizing 11.3's `--to` spelling rule to move " +
+              "operands (SPEC 6.5, 12.0)",
           ],
           [
             ["move", "specs/A.mdx#x", "specs/B.mdx#y"],
@@ -1724,6 +1879,44 @@ const T6_5_4 = defineProductTest({
             `T6.5-4 (${reason})`,
           );
         }
+      },
+    );
+
+    // The derived-path arm of refused-invalid-destination, on its own
+    // workspace (V4_OUTDIR_CONFIG's note): the destination `new/b.mdx` is
+    // otherwise valid and its own directory components unobstructed (`new/`
+    // absent — a nonexistent component is never a refusal cause, SPEC
+    // 13.4), but the emit destination `mdout/new/b.md` it would generate
+    // (SPEC 13.2, 7.3) has its directory component `mdout/new` occupied by
+    // a plain file.
+    await withWorkspace(
+      V4_OUTDIR_CONFIG,
+      {
+        [V4_SOLO]: V4_SOLO_SOURCE,
+        [V4_MDOUT_OCCUPANT]: "not a directory\n",
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T6.5-4 derived-path arm `build` over the staged workspace — the " +
+            "plain file mdout/new lies under no current source's write " +
+            "path (SPEC 13.4), so the workspace passes `build`'s " +
+            "validations and the refusal below is the move's own",
+        );
+        await expectRefusalModifiesNothing(
+          product,
+          workspace,
+          ["move", V4_SOLO, "new/b.mdx"],
+          { finding: "refused-invalid-destination", path: "new/b.mdx" },
+          "T6.5-4 (derived-path arm — a workspace-relative directory " +
+            "component of a derived path the destination would generate, " +
+            "the emit destination mdout/new/b.md under markdown.outDir, is " +
+            "occupied by a plain file: refused refused-invalid-destination " +
+            "concerning the destination path, never 14.22 — a product " +
+            "vetting only the destination path's own components sees new/ " +
+            "absent and proceeds; SPEC 6.5, 7.3, 13.1, 13.2, 14)",
+        );
       },
     );
 

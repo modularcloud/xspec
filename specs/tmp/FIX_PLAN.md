@@ -572,7 +572,7 @@ A "new test T<x>" task always means, in one change:
   unchanged 4 planned mid-loop reds (certification-document ×3 → FP-091;
   S-1's 9 unmapped keys → stages E/G).]
 
-- [ ] FP-018 — T6.5-4: add the missing destination-refusal arms. [R1 #21;
+- [x] FP-018 — T6.5-4: add the missing destination-refusal arms. [R1 #21;
   TEST-SPEC §6.5]
   `test/suite/registry/section-6.5.ts` (plain-file arm at ~line 1435 is the
   only occupancy arm): add (a) file-form destination occupied by a symbolic
@@ -584,6 +584,45 @@ A "new test T<x>" task always means, in one change:
   arm of `refused-invalid-destination`: emission under `markdown.outDir`
   with emit-destination component `<outDir>/new` occupied by a plain file.
   Assert stable refusal codes per FP-007.
+  [Done 2026-08-11: all seven arms landed in T6.5-4.
+  `expectRefusalModifiesNothing` widened to take one `RefusalExpectation`
+  per applicable reason (counts assert the complete multiset — no reason
+  beside the staged ones; per-reason concern lookup by counting key, total
+  since a refusal report holds one finding per reason, SPEC 14). (a)+(b)
+  ride the shared refusal workspace — occupants staged before the premise
+  `build` (directory `specs/DirTarget.mdx`; symlinks `specs/SymDest.mdx`/
+  `specs/LinkTarget.mdx` → B.mdx, broken `specs/GoneDest.mdx`; plain
+  out-of-group `docs/Occ.mdx` in the files map), each arm
+  `refused-destination-exists` concerning the occupied path, the Occ arm
+  additionally `refused-invalid-destination`, both concerning
+  `docs/Occ.mdx`. (c) `move specs/A.mdx#keep specs/B.mdx#` →
+  `refused-invalid-id` concerning `specs/B.mdx#` (zero-segment id; exit 1,
+  never the exit-2 generalization of 11.3's `--to` rule). (d) its own
+  workspace (`V4_OUTDIR_CONFIG`: glob admits `new/**/*.mdx`,
+  `markdown.outDir: "mdout"`; plain file at `mdout/new`; premise `build`
+  exit 0 — the occupant lies under no current source's write path) →
+  `move specs/Solo.mdx new/b.mdx` refused `refused-invalid-destination`
+  concerning the destination path `new/b.mdx`, never 14.22, the count map
+  excluding a 14.22 beside. Verified by direct probes against the built
+  product (suite arms past the first are unreached — T6.5-4 stays
+  red-as-diagnosed at the first arm's FP-001-class form-exact decode, the
+  product still emitting `{"refused":…}`/`condition`-member shapes;
+  section-6.5 unchanged 5 failed / 1 passed): both premise builds exit 0
+  with every occupant present; the five occupant arms and the empty-id arm
+  each exit 1 modifying nothing on exactly the staged ground (the product's
+  old-shape message names the symlink/directory/broken-link occupant, the
+  no-spec-group cause, the empty-segment ID); the two-reason Occ arm's
+  count assertion has teeth (the current product reports only one reason);
+  a control twin proves (d)'s staging — without the occupant the identical
+  move succeeds and writes `mdout/new/b.md`, pinning the 13.2/7.3 emit
+  shape — while with it the product exits 70 (internal error) and modifies
+  the workspace: exactly the diagnosed vets-only-own-components gap the arm
+  discriminates. Typecheck clean; `npm run test:self` unchanged 4 planned
+  mid-loop reds (certification-document ×3 → FP-091; S-1's 9 unmapped keys
+  → stages E/G), S-5 and certification green. Traceability unchanged
+  (["6.5","14"] — T14-7's refusal staging record already rides "14"; 7/
+  7.3/13.1/13.2/13.4 are context with home coverage elsewhere); T6.5-4 is
+  in no certification scope (Exclusions-shared machinery only).]
 
 - [ ] FP-019 — T6.5-5: add the missing usage-error arms. [R1 #22; TEST-SPEC
   §6.5]
