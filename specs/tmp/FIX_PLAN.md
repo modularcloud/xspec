@@ -1156,10 +1156,66 @@ A "new test T<x>" task always means, in one change:
   planned mid-loop reds (certification-document ×3 → FP-091; S-1's 7
   unmapped keys → stages E/G), S-5 and certification green.]
 
-- [ ] FP-030 — Implement T6.6-4: preview report content — the ten 12.7 edit
+- [x] FP-030 — Implement T6.6-4: preview report content — the ten 12.7 edit
   classes. [R1 #9; TEST-SPEC §6.6, SPEC 12.7]
   All ten edit classes with byte-precise pre-operation ranges,
   class-plus-range only, tie-break comparator.
+  [Done 2026-08-11: T6.6-4 registered in section-6.6.ts, five arms. Expected
+  `mapping` and `files` are complete exact lists composed from the staged
+  fixture bytes by locator helpers (unique fragments, container-scoped for
+  recurring spellings; multi-byte text before every located construct), the
+  edit lists in 12.7's pinned order — the order itself enforced by the
+  already-S-5-guarded decodePreviewReport on every document, including the
+  full comparator's class-bytes tie-break. (a) rename across MDX and TS:
+  two id-rewrites (attribute's own characters — the construct-spelling
+  reading, H-4-noted in the module header) plus all four 5.7 occurrence
+  kinds as reference-rewrites (d entries, MDX embedding braces-included,
+  TS call callee-through-paren, TS marker sans terminator), with
+  unaffected-reference/id/specifier controls; (b) section move into an
+  existing target: origin-deletion one contiguous range over the indented
+  construct plus leftover indentation and merged-line terminator,
+  id-rewrites and the moved text's reference rewrites nested inside it
+  (compose-time containment self-checks), import-removal spanning the
+  declaration plus its dropped terminator, target-parent-rewrite spanning
+  the self-closing tag with target-insertion zero-length at the tag's end
+  (the one stable pre-operation anchor, H-4), and Third.mdx's
+  import-addition via a latitude slot (exactly one, zero-length, in-file;
+  offset captured) pinned by the real run on the preview-pinned state
+  (assertLeavesUnchanged realizes "on a copy"): the rewritten file must
+  equal pre-op bytes + known reference rewrite + one added-import line
+  spliced at exactly the previewed offset, fresh binding read from the one
+  added declaration, then `check` exit 0 (T6.5-7's soundness-guard
+  precedent); (c) file move: file-relocation spanning the whole file under
+  its pre-op path beside its own specifier rewrite, importer's specifier
+  rewrite, chains as controls, root pair in the mapping (T6.5-1
+  precedent); (d) created target: exactly one file-creation edit at
+  {0,0} under the creation path — the staged rewrite NEEDS an import
+  addition there, so subsumption has teeth — moved text's rewrites in the
+  origin deletion; (e) the tie-break geometry: top-level `<new-id>` into an
+  existing file whose rewrite needs an import addition in that same file
+  (target-insertion at EOF, addition free to coincide). Traceability
+  "T6.6-4": ["6.6"] (12.7/5.7 carriage context, home coverage at
+  T12.7-*/T5.7-*); CERTIFICATIONS.md keeps T6.6-4 in the Exclusions.
+  Verified: red-as-diagnosed at arm (a)'s first preview invocation (exit 2
+  "unknown flag '--preview'", the whole 6.6 surface patch-new; section-6.6
+  suite 3 failed — T6.6-2/T6.6-3 keep their pre-existing FP-001/FP-028-class
+  reds); staging probes against the built product show all five premise
+  builds exit 0 and all five real operations proceeding with clean `check`
+  (the preview-succeeds premise is sound; the real move's Third.mdx
+  insertion observed at offset 33, binding `Target`, matching the
+  reconstruction). Satisfiability and teeth proven by running the
+  registered body via a scratch suite binding against a conforming shim
+  (real-product delegation for build/real-move/check, canned 12.7 preview
+  documents computed from the same fixture strings, arm-b addition offset
+  33) — green end-to-end through all five arms — and against five
+  deviations: span-off (red at (a)'s byte-precise edit equality),
+  not-subsumed (red at (d)'s exactly-one-edit equality), tie-misorder on
+  the coinciding zero-length pair (red at the decode's comparator),
+  preview-writes-a-file (red at (b)'s modifies-nothing compare),
+  offset-lie (red at (b)'s real-run reconstruction). Typecheck/format
+  clean; `npm run test:self` unchanged 4 planned mid-loop reds
+  (certification-document ×3 → FP-091; S-1's 7 unmapped keys → stages
+  E/G), S-5 and certification green.]
 
 - [ ] FP-031 — Implement T6.6-5: derived-file delta both directions,
   record-based. [R1 #10; TEST-SPEC §6.6]
