@@ -1,6 +1,5 @@
-// TEST-SPEC §6.6 (previews) — SUITE-24: T6.6-2, T6.6-3, T6.6-4, T6.6-5.
-// (T6.6-1 is retired; T6.6-6 is staged by a later plan task into this
-// module.)
+// TEST-SPEC §6.6 (previews) — SUITE-24: T6.6-2, T6.6-3, T6.6-4, T6.6-5,
+// T6.6-6. (T6.6-1 is retired.)
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -147,6 +146,38 @@
 //   but cannot be read — and the preview never refreshes it (whole-root
 //   compare around the invocation; graph data asserted still absent
 //   afterward).
+// - T6.6-6 stages the unreadable record through the H-3 corrupt-record
+//   adapter (record-staging.ts): shape-blind garbage — files present, their
+//   bytes readable as no record, not even valid UTF-8 — over every
+//   product-written plain file of T13.3-2's operational path set, applied
+//   only after the premise `build` wrote them (never fabricated, H-3); the
+//   staging's reachability is positively controlled by the condition-23
+//   finding the arm itself asserts (CERTIFICATIONS.md's Exclusions note on
+//   the shape-blind 14.23 stagings). "The full preview — `mapping` and
+//   `files` complete … every other part of the preview report emitted in
+//   full" (SPEC 14.23, TEST-SPEC T6.6-6) is operationalized as deep
+//   equality against the intact-record run of the same preview first, on
+//   the byte-identical sources: the staging is latitude-free — the moved
+//   subtree is self-contained and nothing outside it references a moved
+//   node, so the plan holds no import addition (SPEC 6.5's one preview
+//   latitude) and is fully determined by sources + operation — with the
+//   exact expected mapping pinned on both runs and re-pinned as the real
+//   run's applied mapping (the preview's `mapping` IS the complete identity
+//   mapping the operation then journals, SPEC 6.6). The condition-23
+//   finding's `locations` are asserted exactly []: 14.23's concern is the
+//   concerned-path member — the graph-data area, `.xspec` spelled
+//   workspace-relative with no trailing separator (SPEC 11.6), no path
+//   inside it named (the record's layout is deliberately unenumerated,
+//   13.3) — and a path-concerned condition is an unlocated one (T12.7-1:
+//   `locations` [] for unlocated conditions, `path` the concerned path).
+//   Both corrupt-state previews — the full move preview and the refused
+//   identity-unchanged rename preview — run inside ONE whole-root
+//   modifies-nothing compare (a preview writes nothing and never refreshes
+//   the record, SPEC 6.6/13.3, so the corrupt state persists byte for
+//   byte), which makes the subsequent real move run on literally "the same
+//   state"; its exit-0 success, applied mapping, and `check` exit 0 realize
+//   "not refused — it proceeds, its finishing regeneration replacing the
+//   corrupt record" (SPEC 6.6, 6.4, 14.10; T12.2-2's protocol).
 
 import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -154,12 +185,16 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import type {
   AppliedMappingPair,
   Finding,
+  PreviewDeltaDatum,
   PreviewEdit,
   PreviewEditClass,
+  PreviewFileEntry,
   PreviewReport,
   SourceRange,
 } from "../../helpers/adapters/index.js";
 import {
+  GRAPH_DATA_AREA_PATH,
+  corruptGraphDataShapeBlind,
   decodeAppliedMappingReport,
   decodeFindingsReport,
   decodePreviewReport,
@@ -238,6 +273,7 @@ import {
 import {
   assertAppliedMapping,
   assertConditionCounts,
+  assertFindingConcernsPath,
   assertSameJson,
   buildFindings,
   buildOk,
@@ -2820,9 +2856,335 @@ const T6_6_5 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T6.6-6 — unreadable record
+// ---------------------------------------------------------------------------
+
+// Staging (module header, H-4): a section-form move whose plan is
+// latitude-free — the moved subtree `org.mv` is self-contained (its one
+// internal `d` reference points down at its own child and moves with it,
+// SPEC 5.3-acyclic) and nothing outside the subtree references a moved node,
+// so the move adds and removes no import anywhere (SPEC 6.5) and the
+// previewed plan is fully determined by sources + operation: origin deletion
+// with the re-identification and reference rewrites nested inside it, and
+// the target insertion. `tm` is top-level (no target parent needed) and
+// collides with nothing in Target.mdx; the whole move is unambiguously
+// valid, so the preview's only imperfection under the corrupt record is the
+// record itself (SPEC 14.23).
+const R6_ORIGIN = "specs/Origin.mdx";
+const R6_TARGET = "specs/Target.mdx";
+const R6_ORIGIN_SOURCE = [
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  '<S id="org.mv" d={"org.mv.k1"}>',
+  "Moved root text.",
+  "",
+  '<S id="org.mv.k1">',
+  "Moved kid.",
+  "</S>",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+const R6_TARGET_SOURCE = ['<S id="tgt">', "Target text.", "</S>", ""].join(
+  "\n",
+);
+const R6_MOVE_ARGV = [
+  "move",
+  `${R6_ORIGIN}#org.mv`,
+  `${R6_TARGET}#tm`,
+] as const;
+// The refused preview staged on the same corrupt-record state: an
+// identity-unchanged rename collides with nothing and reports
+// `refused-identity-unchanged` alone (SPEC 6.4).
+const R6_RENAME_SAME_ARGV = ["rename", R6_ORIGIN, "org", "org"] as const;
+// The complete identity mapping the move journals — the moved ID and its
+// descendant, prefix-replaced, in full 1.5 identity form, `from`-byte
+// ordered (SPEC 6.4, 6.5, 12.7).
+const R6_EXPECTED_MAPPING: readonly AppliedMappingPair[] = [
+  { from: `${R6_ORIGIN}#org.mv`, to: `${R6_TARGET}#tm` },
+  { from: `${R6_ORIGIN}#org.mv.k1`, to: `${R6_TARGET}#tm.k1` },
+];
+
+/**
+ * A successful preview's plan members, non-null — `mapping`, `files`, and
+ * `delta` are `null` exactly on refusal, all together (SPEC 6.6, 12.7; the
+ * decode already rejects mixed nullity).
+ */
+function requirePreviewPlan(
+  report: PreviewReport,
+  context: string,
+): {
+  readonly mapping: readonly AppliedMappingPair[];
+  readonly files: readonly PreviewFileEntry[];
+  readonly delta: PreviewDeltaDatum;
+} {
+  const { mapping, files, delta } = report;
+  if (mapping === null || files === null || delta === null) {
+    fail(
+      `${context}: the preview emits its full plan — \`mapping\`, ` +
+        `\`files\`, and \`delta\` are null exactly on refusal (SPEC 6.6, ` +
+        `12.7); got mapping ${mapping === null ? "null" : "present"}, ` +
+        `files ${files === null ? "null" : "present"}, delta ` +
+        `${delta === null ? "null" : "present"}`,
+    );
+  }
+  return { mapping, files, delta };
+}
+
+const T6_6_6 = defineProductTest({
+  id: "T6.6-6",
+  title:
+    "unreadable record: with the product-written graph data corrupted shape-blind (garbage over T13.3-2's operational path set; H-3 record-staging adapter), a move `--preview` whose plan is otherwise valid exits 1 emitting the full preview — `mapping` and `files` complete: the exact journaled mapping, the files deep-equal to the intact-record run on the identical sources — with `delta` explicitly unavailable as one datum, never read as an empty record, and the condition-23 finding (`unreadable-record`, concerned path the graph-data area `.xspec`, no path inside it named: locations []) in `findings`; the real operation on the same state is not refused — it proceeds, its applied mapping the previewed mapping, its finishing regeneration replacing the corrupt record (`check` clean afterward, T12.2-2) — and a refused preview staged on the same corrupt-record state (an identity-unchanged rename) reports the refusal finding alone with `mapping`/`files`/`delta` null, never a condition-23 finding (SPEC 6.6, 6.4, 6.5, 14.23, 14.10, 11.6, 12.0, 12.7, 13.3; H-3, H-4)",
+  run: async (product) => {
+    await withWorkspace(
+      SPECS_MD_CONFIG,
+      { [R6_ORIGIN]: R6_ORIGIN_SOURCE, [R6_TARGET]: R6_TARGET_SOURCE },
+      async (workspace) => {
+        const context = "T6.6-6";
+        // Premise: the record under corruption is one the product itself
+        // wrote (H-3) — the staged workspace builds and graph data exists.
+        await buildOk(
+          product,
+          workspace,
+          `${context}: staging premise \`build\` — it writes the record the ` +
+            `corruption then applies to (SPEC 12.1, 13.3; H-3)`,
+        );
+        assertGraphDataPresent(
+          await snapshotDirectory(workspace.root),
+          `${context}: staging premise — the product-written record exists`,
+        );
+
+        // Intact-record reference run of the same preview: exit 0, findings
+        // [], delta a plain value — pinning the plan the corrupt-state run
+        // must still emit in full. Wrapped in its own modifies-nothing
+        // compare, so the two runs' inputs differ in the record bytes alone.
+        const intactContext = `${context} (record intact)`;
+        const intactReport = await assertLeavesUnchanged(
+          workspace.root,
+          async () =>
+            await runPreviewJson(
+              product,
+              workspace,
+              R6_MOVE_ARGV,
+              intactContext,
+            ),
+          `${intactContext}: the preview modifies nothing (SPEC 6.6)`,
+        );
+        assertSameJson(
+          intactReport.findings,
+          [],
+          `${intactContext}: on a readable record, this valid move's ` +
+            `preview reports findings [] (SPEC 6.6, 12.7)`,
+        );
+        const intact = requirePreviewPlan(intactReport, intactContext);
+        if ("unavailable" in intact.delta) {
+          fail(
+            `${intactContext}: with the record readable, the delta is the ` +
+              `plain two-direction value — unavailability covers recorded ` +
+              `state that exists but cannot be read (SPEC 6.6, 14.23)`,
+          );
+        }
+        assertSameJson(
+          intact.mapping,
+          R6_EXPECTED_MAPPING,
+          `${intactContext}: staging premise — the previewed plan maps ` +
+            `exactly the moved subtree, prefix-replaced, in full 1.5 ` +
+            `identity form (SPEC 6.4, 6.5, 6.6, 12.7)`,
+        );
+        assertSameJson(
+          intact.files.map((entry) => entry.file),
+          [R6_ORIGIN, R6_TARGET],
+          `${intactContext}: staging premise — the plan rewrites the origin ` +
+            `and the target file (SPEC 6.5, 6.6, 12.7), so the ` +
+            `completeness equality on the corrupt-record run has content`,
+        );
+
+        // Corrupt the product-written record shape-blind (TEST-SPEC
+        // T6.6-6; H-3 adapter — garbage over T13.3-2's operational path
+        // set, files present but readable as no record).
+        await corruptGraphDataShapeBlind(
+          workspace.root,
+          `${context}: corrupt-record staging`,
+        );
+
+        // Both corrupt-state previews inside ONE whole-root compare: a
+        // preview writes nothing and never refreshes the record (SPEC 6.6,
+        // 13.3), so the corrupt state persists byte for byte and the real
+        // operation below runs on the same state.
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            // (1) The move preview: full plan, delta explicitly
+            // unavailable, the condition-23 finding, exit 1 (SPEC 14.23).
+            const corruptContext = `${context} (record corrupt), move preview`;
+            const argv = [...R6_MOVE_ARGV, "--preview", "--json"];
+            const result = await expectExit(
+              product,
+              workspace,
+              argv,
+              1,
+              `${corruptContext}: \`${argv.join(" ")}\` — an answer ` +
+                `carrying a finding and explicitly-unavailable data exits ` +
+                `1, the full answer still emitted (SPEC 14.23, 12.0)`,
+            );
+            const report = decodePreviewReport(
+              parseJsonStdout(
+                result,
+                `${corruptContext}: a single JSON document as the entire ` +
+                  `stdout (SPEC 12.0)`,
+              ),
+              corruptContext,
+            );
+            assertConditionCounts(
+              report.findings,
+              { "14.23": 1 },
+              `${corruptContext}: exactly the one condition-23 finding ` +
+                `(stable code unreadable-record) accompanies the answer — ` +
+                `the workspace is otherwise clean (SPEC 14.23, 14)`,
+            );
+            const finding = report.findings[0]!;
+            assertFindingConcernsPath(
+              finding,
+              GRAPH_DATA_AREA_PATH,
+              `${corruptContext}: the concerned path is the graph-data ` +
+                `area — the .xspec directory spelled as its ` +
+                `workspace-relative path, no trailing separator (SPEC ` +
+                `14.23, 11.6)`,
+            );
+            assertSameJson(
+              finding.locations,
+              [],
+              `${corruptContext}: no path inside the area is named — the ` +
+                `record's layout is deliberately unenumerated (SPEC 14.23, ` +
+                `13.3), and a path-concerned condition is unlocated: ` +
+                `locations [] (SPEC 12.7; T12.7-1)`,
+            );
+            const plan = requirePreviewPlan(report, corruptContext);
+            assertSameJson(
+              plan.mapping,
+              R6_EXPECTED_MAPPING,
+              `${corruptContext}: \`mapping\` complete — the complete ` +
+                `identity mapping the operation would journal, exactly as ` +
+                `on the readable record (SPEC 6.6, 14.23)`,
+            );
+            assertSameJson(
+              plan.files,
+              intact.files,
+              `${corruptContext}: \`files\` complete — every other part of ` +
+                `the preview report is emitted in full, equal to the ` +
+                `intact-record run on these byte-identical sources (the ` +
+                `plan holds no import addition, so no 6.5 latitude can ` +
+                `differ between the runs) (SPEC 14.23, 6.6)`,
+            );
+            if (!("unavailable" in plan.delta)) {
+              fail(
+                `${corruptContext}: the record-supplied datum — the delta ` +
+                  `— is reported explicitly unavailable as one datum, ` +
+                  `never fabricated and never read as an empty record ` +
+                  `(SPEC 14.23, 6.6, 12.7); got ` +
+                  `${JSON.stringify(plan.delta)}`,
+              );
+            }
+
+            // (2) A refused preview staged on the same corrupt-record
+            // state: the identity-unchanged rename reports its refusal
+            // finding alone — a refused preview consults no record, so no
+            // condition-23 finding ever accompanies it (SPEC 6.6, 6.4).
+            const refusedContext = `${context} (record corrupt), refused rename preview`;
+            const refusedArgv = [...R6_RENAME_SAME_ARGV, "--preview", "--json"];
+            const refused = await expectExit(
+              product,
+              workspace,
+              refusedArgv,
+              1,
+              `${refusedContext}: \`${refusedArgv.join(" ")}\` — an ` +
+                `identity-unchanged rename is refused, previewed exactly ` +
+                `as real (SPEC 6.4, 6.6, 12.0)`,
+            );
+            const refusedReport = decodePreviewReport(
+              parseJsonStdout(
+                refused,
+                `${refusedContext}: a single JSON document as the entire ` +
+                  `stdout (SPEC 12.0)`,
+              ),
+              refusedContext,
+            );
+            assertConditionCounts(
+              refusedReport.findings,
+              { "refused-identity-unchanged": 1 },
+              `${refusedContext}: the refusal findings alone — ` +
+                `refused-identity-unchanged and nothing beside it, never a ` +
+                `condition-23 finding: a refused preview consults no ` +
+                `record (SPEC 6.4 "reports refused-identity-unchanged ` +
+                `alone", 6.6, 14)`,
+            );
+            if (
+              refusedReport.mapping !== null ||
+              refusedReport.files !== null ||
+              refusedReport.delta !== null
+            ) {
+              fail(
+                `${refusedContext}: a refused preview's \`mapping\`, ` +
+                  `\`files\`, and \`delta\` are null (SPEC 6.6, 12.7); got ` +
+                  `mapping ` +
+                  `${refusedReport.mapping === null ? "null" : "present"}, ` +
+                  `files ` +
+                  `${refusedReport.files === null ? "null" : "present"}, ` +
+                  `delta ` +
+                  `${refusedReport.delta === null ? "null" : "present"}`,
+              );
+            }
+          },
+          `${context} (record corrupt): the previews modify nothing — no ` +
+            `sources, no journal, no derived files, no graph data: the ` +
+            `corrupt record is not repaired, replaced, or removed, so the ` +
+            `real operation below runs on the same state (SPEC 6.6, 13.3)`,
+        );
+
+        // The real operation on the same corrupt-record state is not
+        // refused — a corrupt record fails no build validation, so the
+        // unreadable record lies on the success side of the refusal
+        // equivalence (SPEC 6.6) — and its finishing regeneration replaces
+        // the corrupt record (SPEC 6.4, 6.5).
+        const realContext = `${context} (record corrupt), real move`;
+        const realArgv = [...R6_MOVE_ARGV, "--json"];
+        const applied = decodeAppliedMappingReport(
+          await runJson(
+            product,
+            workspace,
+            realArgv,
+            `${realContext}: \`${realArgv.join(" ")}\` — the real ` +
+              `operation proceeds, exit 0 (SPEC 6.6, 6.5, 12.0)`,
+          ),
+          realContext,
+        );
+        assertAppliedMapping(
+          applied,
+          R6_EXPECTED_MAPPING,
+          `${realContext}: the applied mapping is the previewed mapping — ` +
+            `the corrupt-state preview reported the complete identity ` +
+            `mapping the operation has now journaled (SPEC 6.4, 6.5, 6.6)`,
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["check"],
+          0,
+          `${context}: after the real move, \`check\` is clean — the ` +
+            `finishing regeneration replaced the corrupt record and left ` +
+            `no stale output (SPEC 6.4, 12.1, 14.10, 14.23; T12.2-2)`,
+        );
+      },
+    );
+  },
+});
+
 export const section66Tests: readonly ProductTestEntry[] = [
   T6_6_2,
   T6_6_3,
   T6_6_4,
   T6_6_5,
+  T6_6_6,
 ];

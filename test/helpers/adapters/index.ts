@@ -17,6 +17,9 @@
 //   human.ts           robust required-information matching on human reports
 //   session-staging.ts T10.1-4 corruption transformations (shape-aware,
 //                      value-blind, over product-written session files)
+//   record-staging.ts  T6.6-6's shape-blind corrupt-record staging (garbage
+//                      over T13.3-2's operational path set, product-written
+//                      files only), shared by the other 14.23 stagings
 //   sorted-keys.ts     T13.4-1 byte-sorted-keys assertion (shape/value-blind)
 //
 // The adapter modules are the only place aware of concrete output shape; they
@@ -35,4 +38,5 @@ export * from "./operations.js";
 export * from "./review.js";
 export * from "./human.js";
 export * from "./session-staging.js";
+export * from "./record-staging.js";
 export * from "./sorted-keys.js";

@@ -67,6 +67,7 @@ import {
   decodeNodeRowsReport,
   decodeSessionListReport,
   decodeSessionStatusReport,
+  isGraphDataKey,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
@@ -139,21 +140,14 @@ async function withWorkspace<T>(
 // Graph-data machinery (the T13.3-2 operational definition)
 // ---------------------------------------------------------------------------
 
-/**
- * Whether a snapshot key (a `/`-separated workspace-relative path) is graph
- * data: under `.xspec/`, excluding the durable `.xspec/journal` and
- * `.xspec/reviews/` (SPEC 13.3, 13.4; TEST-SPEC T13.3-2). Exported: T6.6-5
- * (section-6.6.ts) shares this operational definition — TEST-SPEC's "graph
- * data deleted (T13.3-2's operational definition)".
- */
-export function isGraphDataKey(key: string): boolean {
-  if (!key.startsWith(".xspec/")) return false;
-  if (key === ".xspec/journal") return false;
-  if (key === ".xspec/reviews" || key.startsWith(".xspec/reviews/")) {
-    return false;
-  }
-  return true;
-}
+// Whether a snapshot key (a `/`-separated workspace-relative path) is graph
+// data: under `.xspec/`, excluding the durable `.xspec/journal` and
+// `.xspec/reviews/` (SPEC 13.3, 13.4; TEST-SPEC T13.3-2). The predicate's
+// home is the H-3 adapter layer (record-staging.ts, whose shape-blind
+// corruption shares the operational path set); re-exported here for the
+// suite modules sharing T13.3-2's operational definition — T6.6-5's
+// record-deleted arm and T6.6-6's corrupt-record staging (section-6.6.ts).
+export { isGraphDataKey };
 
 /** The entries of a snapshot whose keys satisfy `keep`. */
 function filteredEntries(

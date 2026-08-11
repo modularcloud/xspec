@@ -1266,13 +1266,76 @@ A "new test T<x>" task always means, in one change:
   reds (certification-document ×3 → FP-091; S-1's 7 unmapped keys → stages
   E/G), S-5 and certification green.]
 
-- [ ] FP-032 — Implement T6.6-6: preview under a corrupt graph record.
+- [x] FP-032 — Implement T6.6-6: preview under a corrupt graph record.
   [R1 #11; TEST-SPEC §6.6, SPEC 14.23]
   Full preview with `delta` explicitly unavailable, a condition-23 finding
   (`unreadable-record`, concerned path the graph-data area), exit 1; the
   real operation proceeds; a refused preview reports refusal findings
   alone. Share the corrupt-record staging with FP-041 (T12.2-2's
   unreadable-record arm reuses it).
+  [Done 2026-08-11: T6.6-6 registered in section-6.6.ts. The corrupt-record
+  staging lives in the H-3 adapter layer per amended H-3's naming of
+  T6.6-6 — NEW test/helpers/adapters/record-staging.ts:
+  `corruptGraphDataShapeBlind` overwrites every product-written plain file
+  of T13.3-2's operational path set with fixed garbage (files stay present
+  but readable as no record — not even valid UTF-8), never creates a path,
+  and fails loudly with nothing modified on a missing area, an empty set,
+  or a non-plain-file occupant (SPEC 13.4); the operational predicate
+  isGraphDataKey moved there (one home), section-13.3.ts re-exporting it
+  for its existing importers (behavior-preserving: section-13.3 unchanged
+  2 failed / 2 passed). FP-041/FP-044/FP-072 ("T6.6-6's staging") import
+  `corruptGraphDataShapeBlind` from the adapters index. One workspace
+  under the Markdown-emitting config, latitude-free section move
+  (self-contained subtree, no outside reference to a moved node → no
+  import edits, SPEC 6.5's one preview latitude): after the premise build
+  (record presence asserted), the intact-record reference preview runs in
+  its own modifies-nothing compare — exit 0, findings [], delta a plain
+  value, mapping pinned to the exact two-pair full-1.5-identity
+  expectation, files paths pinned to [Origin, Target] — then the record is
+  garbled and BOTH corrupt-state previews run inside ONE whole-root
+  compare (the corrupt state persists byte for byte): the move preview
+  exits 1 with exactly one 14.23 finding (stable code unreadable-record;
+  concerned path ".xspec" per 11.6; locations exactly [] — a
+  path-concerned condition is unlocated, T12.7-1's reading, module header)
+  and the full plan — mapping the exact expectation, files deep-equal to
+  the intact run (the "emitted in full" operationalization, sound because
+  the plan is latitude-free), delta the unavailability marker, never an
+  empty-record read; the refused preview (identity-unchanged rename)
+  reports exactly one refused-identity-unchanged finding — never a 14.23
+  beside — with mapping/files/delta all null. Then the real move on the
+  same state: exit 0, applied mapping (T6.4-1's adapter) == the previewed
+  mapping, `check` exit 0 (the finishing regeneration replaced the corrupt
+  record, T12.2-2's protocol). S-5 gains three record-staging guards
+  (garbles-every-file positive control with durables/structure untouched
+  and the not-UTF-8 premise; nothing-to-corrupt rejections; non-plain-file
+  rejections, files untouched). Traceability "T6.6-6": ["6.6", "14"]
+  (TEST-SPEC 14 names T6.6-6 in 14.23's primary record); CERTIFICATIONS.md
+  keeps T6.6-6 in the Exclusions (shape-blind 14.23 stagings are
+  self-controlled — the condition-23 finding is the in-test reachability
+  control), no fixture change. Verified: red-as-diagnosed at the
+  intact-record reference preview (exit 2 "unknown flag '--preview'", the
+  whole 6.6 surface patch-new) with build and record-presence premises
+  green; staging soundness probed against the built product — build exit 0
+  (record: .xspec/graph.json), check clean, and on the garbled record the
+  REAL move exits 0 with `check` clean afterward (the pre-patch machinery
+  already replaces the record) while the identity-unchanged rename refuses
+  exit 1 (old-shape document) leaving the garbage untouched;
+  satisfiability and teeth proven by running the registered body via a
+  scratch binding against a conforming shim (real-product delegation for
+  build/check/real move + synthetic 12.7 preview/applied-mapping answers
+  computed from the staged bytes, corruption detected shim-side) — green
+  end-to-end, the real product performing the actual move on the corrupt
+  record — and against six deviations: empty-record-read (red at the
+  exit-1 assertion), refused-consults-record (red at the
+  refusal-findings-alone count), preview-repairs (red at the
+  modifies-nothing compare), located-finding (red at the
+  no-path-inside-the-area locations assertion), incomplete-files (red at
+  the `files` complete equality), real-refuses (red at the
+  real-operation-proceeds exit). Typecheck/format clean; section-6.6 suite
+  5 failed as diagnosed (T6.6-2..-5 keep their pre-existing reds); `npm
+  run test:self` unchanged 4 planned mid-loop reds (certification-document
+  ×3 → FP-091; S-1's 7 unmapped keys → stages G), S-5 (73 tests) and
+  certification green.]
 
 ## Stage F — §§10–14 missing arms
 

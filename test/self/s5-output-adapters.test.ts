@@ -22,7 +22,9 @@ import { HarnessAssertionError } from "../helpers/assertions.js";
 import type { RunResult } from "../helpers/subprocess.js";
 import type { Finding } from "../helpers/adapters/index.js";
 import {
+  GRAPH_DATA_AREA_PATH,
   ITEM_STATUSES,
+  RECORD_GARBAGE_BYTES,
   assertBareEdgeEndpoints,
   assertJsonKeysByteSorted,
   assertNodeEdgeListsBare,
@@ -31,6 +33,7 @@ import {
   classifyIgnoredReasons,
   compareFindings,
   conditionMention,
+  corruptGraphDataShapeBlind,
   decodeAppliedMappingReport,
   decodeCoverageReport,
   decodeDatum,
@@ -56,6 +59,7 @@ import {
   decodeSessionListReport,
   decodeSessionStatusReport,
   expectNonNegativeInteger,
+  isGraphDataKey,
   rootSite,
   stageBlockedByAbsentItem,
   stageBlockedByCycle,
@@ -2909,6 +2913,147 @@ test("S-5: staging fails loudly on shape mismatch and leaves the file untouched"
       expect(Buffer.compare(Buffer.from(after), before)).toBe(0);
     }
   }
+});
+
+// --- T6.6-6 corrupt-record staging (record-staging.ts) ------------------------
+// Shape-blind by design (graph-data content is opaque, H-4): the staging's
+// only shape knowledge is T13.3-2's operational path set, so the guards
+// cover the H-3 discipline — product-written files only, never fabricated,
+// loud with nothing modified when there is nothing to corrupt.
+
+test("S-5: corrupt-record staging garbles every graph-data file shape-blind, durables and structure untouched", async () => {
+  const workspace = await TestWorkspace.create({
+    files: {
+      "xspec.config.ts": "// outside the area — untouched",
+      ".xspec/journal": '{"op": 1}\n',
+      ".xspec/reviews/s1.json": '{"items": []}\n',
+      ".xspec/graph.json": '{"nodes": []}\n',
+      ".xspec/cache/part-b.bin": "bb",
+      ".xspec/cache/part-a.bin": "aa",
+    },
+  });
+  onTestFinished(() => workspace.dispose());
+  const corrupted = await corruptGraphDataShapeBlind(
+    workspace.root,
+    "S-5 record staging",
+  );
+  // Exactly the operational path set's plain files, byte-ordered — the
+  // durable journal and reviews paths are no part of the record (T13.3-2).
+  expect(corrupted).toEqual([
+    ".xspec/cache/part-a.bin",
+    ".xspec/cache/part-b.bin",
+    ".xspec/graph.json",
+  ]);
+  for (const key of corrupted) {
+    const bytes = await workspace.readBytes(key);
+    expect(
+      Buffer.compare(Buffer.from(bytes), Buffer.from(RECORD_GARBAGE_BYTES)),
+    ).toBe(0);
+    expect(isGraphDataKey(key)).toBe(true);
+  }
+  // The staged state is "exists but cannot be read as a record" (SPEC
+  // 14.23): the files stay present while the garbage decodes as no UTF-8
+  // text at all — so no structured read of any kind can succeed.
+  expect(() =>
+    new TextDecoder("utf-8", { fatal: true }).decode(RECORD_GARBAGE_BYTES),
+  ).toThrow();
+  // Durables and out-of-area files byte-untouched; directory structure
+  // kept; no path created or removed.
+  const utf8 = async (rel: string): Promise<string> =>
+    Buffer.from(await workspace.readBytes(rel)).toString("utf8");
+  expect(await utf8(".xspec/journal")).toBe('{"op": 1}\n');
+  expect(await utf8(".xspec/reviews/s1.json")).toBe('{"items": []}\n');
+  expect(await utf8("xspec.config.ts")).toBe("// outside the area — untouched");
+  expect((await workspace.readdirNames(GRAPH_DATA_AREA_PATH)).sort()).toEqual([
+    "cache",
+    "graph.json",
+    "journal",
+    "reviews",
+  ]);
+  expect((await workspace.readdirNames(".xspec/cache")).sort()).toEqual([
+    "part-a.bin",
+    "part-b.bin",
+  ]);
+});
+
+test("S-5: corrupt-record staging fails loudly with nothing product-written to corrupt", async () => {
+  // No graph-data area at all: the product never wrote graph data here.
+  const bare = await TestWorkspace.create({
+    files: { "xspec.config.ts": "// no build ran" },
+  });
+  onTestFinished(() => bare.dispose());
+  const missing = await expectDiagnosedAsync("no .xspec directory", () =>
+    corruptGraphDataShapeBlind(bare.root, "no .xspec directory"),
+  );
+  expect(missing.message).toContain("corrupt-record staging");
+
+  // The area holds only the durable paths: nothing in the operational set.
+  const durablesOnly = await TestWorkspace.create({
+    files: {
+      ".xspec/journal": "j\n",
+      ".xspec/reviews/s1.json": "{}",
+    },
+  });
+  onTestFinished(() => durablesOnly.dispose());
+  const durablesFailure = await expectDiagnosedAsync("durables only", () =>
+    corruptGraphDataShapeBlind(durablesOnly.root, "durables only"),
+  );
+  expect(durablesFailure.message).toContain("no graph-data file");
+  // Nothing modified: the durables keep their bytes.
+  expect(
+    Buffer.from(await durablesOnly.readBytes(".xspec/journal")).toString(
+      "utf8",
+    ),
+  ).toBe("j\n");
+  expect(
+    Buffer.from(
+      await durablesOnly.readBytes(".xspec/reviews/s1.json"),
+    ).toString("utf8"),
+  ).toBe("{}");
+
+  // A directory alone is no record file either.
+  const dirOnly = await TestWorkspace.create({ dirs: [".xspec/cache"] });
+  onTestFinished(() => dirOnly.dispose());
+  const dirFailure = await expectDiagnosedAsync("empty directory only", () =>
+    corruptGraphDataShapeBlind(dirOnly.root, "empty directory only"),
+  );
+  expect(dirFailure.message).toContain("no graph-data file");
+});
+
+test("S-5: corrupt-record staging fails loudly on non-plain-file occupants, files untouched", async () => {
+  // A symbolic link inside the operational set: not a product-written
+  // record file (SPEC 13.4) — refuse, and touch nothing, the plain file
+  // beside it included.
+  const linked = await TestWorkspace.create({
+    files: { ".xspec/graph.json": '{"nodes": []}' },
+    symlinks: { ".xspec/link.json": "graph.json" },
+  });
+  onTestFinished(() => linked.dispose());
+  const linkFailure = await expectDiagnosedAsync("symlink in the set", () =>
+    corruptGraphDataShapeBlind(linked.root, "symlink in the set"),
+  );
+  expect(linkFailure.message).toContain("corrupt-record staging");
+  expect(linkFailure.message).toContain(".xspec/link.json");
+  expect(
+    Buffer.from(await linked.readBytes(".xspec/graph.json")).toString("utf8"),
+  ).toBe('{"nodes": []}');
+
+  // The area itself occupied by a symlink: not the directory the product
+  // writes — refuse, and write nothing through it.
+  const areaLink = await TestWorkspace.create({
+    files: { "real-area/graph.json": '{"nodes": []}' },
+    symlinks: { ".xspec": "real-area" },
+  });
+  onTestFinished(() => areaLink.dispose());
+  const areaFailure = await expectDiagnosedAsync(".xspec is a symlink", () =>
+    corruptGraphDataShapeBlind(areaLink.root, ".xspec is a symlink"),
+  );
+  expect(areaFailure.message).toContain("not a real directory");
+  expect(
+    Buffer.from(await areaLink.readBytes("real-area/graph.json")).toString(
+      "utf8",
+    ),
+  ).toBe('{"nodes": []}');
 });
 
 // --- T13.4-1 sorted-keys assertion --------------------------------------------
