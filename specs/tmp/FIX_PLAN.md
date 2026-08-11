@@ -935,11 +935,55 @@ A "new test T<x>" task always means, in one change:
   reds (certification-document ×3 → FP-091; S-1's 8 unmapped keys → stages
   E/G), S-5 and certification green.]
 
-- [ ] FP-026 — Implement T5.7-4: no-occurrence constructs and the exit-1
+- [x] FP-026 — Implement T5.7-4: no-occurrence constructs and the exit-1
   answer carrying the domain's findings. [R1 #5; TEST-SPEC §5.7]
   Imports, type-only uses, shadowed chains, dynamic/unresolving spellings
   produce no records; the exit-1 answer still carries the domain's
   findings.
+  [Done 2026-08-11: T5.7-4 registered in section-5.7.ts — one workspace
+  staging every no-occurrence class beside three resolving spellings (one
+  per dependency-kind surface): MDX used + never-used imports (2.1's pair),
+  both T4-4 type-only forms with marker-shaped/call-shaped uses, the T4.5-4
+  shadowing function re-spelling the IDENTICAL statement texts `SPEC.ok;`/
+  `SPEC.absent;` rooted at the local, a dynamic `` d={`ok`} `` (template
+  literal spelling an EXISTING id, so an evaluating product both drops the
+  14.8 and emits a phantom resolved record — failing twice), an unresolving
+  local `d={"nope"}` (14.5), an unresolving embedding `{text(BASE.gone)}`
+  (14.6), an unresolving marker `SPEC.absent` (14.7). Premise pinned first:
+  `build --json` reports EXACTLY {14.5, 14.6, 14.7, 14.8} ×1 — so imports/
+  type-only/shadowed provably trigger nothing and the resolving spellings
+  resolve — each finding located in its construct's byte window, the 14.6
+  finding's range asserted EXACTLY the full braced container (SPEC 14's
+  amended pinning, the span its occurrence would occupy; one spelling → one
+  location). Then bare `occurrences`: exit 1 with the full answer still
+  emitted (11.2), the same finding assertions on the answer's findings, and
+  the complete record multiset exactly the three resolving tuples —
+  phantom records fail by count/tuple, an unavailable TARGET is rejected by
+  the form-exact decode itself (12.7: target is an identity string). No new
+  adapter (FP-022's layer; S-5 unchanged). Traceability "T5.7-4": ["5.7",
+  "14"] (numbered conditions asserted; 2.1/2.4/4.5/11.2/11.3 context with
+  home coverage elsewhere); in no certification scope (Exclusions name
+  T5.7-1..-4). Verified: red-as-diagnosed — in the suite T5.7-4 fails at
+  the premise `build --json` form-exact findings decode (the FP-001-class
+  product gap: old-shape `condition`-member findings), downstream arms
+  unreached until that closes, then red at the `occurrences` invocation
+  (probe: exit 2 "unknown command") and at the 14.6 container range (probe:
+  the current product locates the chain `BASE.gone` [248,257) where the
+  container is [242,259)); staging premise externally validated by direct
+  probe of the built product — exit 1 with EXACTLY the four old-shape
+  findings, correctly classified and located, nothing for imports/
+  type-only/shadowed; satisfiability and teeth proven by running the
+  registered body via a scratch binding against a pure-synthetic conforming
+  shim (12.7-form documents recomputed from the staged bytes by anchored
+  search, independent of the module's prefix arithmetic) — green through
+  every assertion — and against four deviations: unavailable-target (red at
+  the decode's target form), phantom-dynamic resolved record (red at the
+  multiset), chain-only 14.6 range = the current product's precision (red
+  at the exact container range), exit-0-with-findings (red at the exit
+  assertion). Typecheck/format clean; section-5.7 now 4 registered tests,
+  4 failed as diagnosed; `npm run test:self` unchanged 4 planned mid-loop
+  reds (certification-document ×3 → FP-091; S-1's 8 unmapped keys → stages
+  E/G), S-5 and certification green.]
 
 - [ ] FP-027 — Implement T6.5-7: operation-side rewrite bytes for the real
   move. [R1 #6; TEST-SPEC §6.5]

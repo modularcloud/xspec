@@ -1,5 +1,4 @@
-// TEST-SPEC §5.7 (reference occurrences) — SUITE-51: T5.7-1, T5.7-2, T5.7-3.
-// The section's remaining test (T5.7-4) registers here as it is implemented.
+// TEST-SPEC §5.7 (reference occurrences) — SUITE-51: T5.7-1 through T5.7-4.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -27,6 +26,7 @@
 import { Buffer } from "node:buffer";
 import type {
   DependencyEdgeKind,
+  Finding,
   GraphEdge,
   OccurrenceRecord,
   OccurrenceSourceNode,
@@ -46,9 +46,13 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
+  assertConditionCounts,
   assertEdgeSetEqual,
+  assertFindingLocated,
   assertSameJson,
+  buildFindings,
   buildOk,
+  byteWindow,
   expectExit,
   runJson,
 } from "./support.js";
@@ -1246,9 +1250,361 @@ const T5_7_3 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T5.7-4 — no-occurrence constructs; the exit-1 answer carries the findings
+// ---------------------------------------------------------------------------
+
+// A construct that records no edge records no occurrence (SPEC 5.7): an
+// import declaration (its binding used or not, 2.1), a binding introduced
+// type-only, a chain rooted at a shadowing local declaration (4.5), and a
+// reference spelling that is dynamic or does not resolve (11.2) record none.
+// One workspace stages every class beside three resolving spellings — one per
+// dependency-kind surface — so the complete record multiset individuates
+// "records for exactly the resolving spellings": any phantom record (for an
+// import, a type-only use, a shadowed chain, the dynamic spelling, or an
+// unresolved one) is an extra tuple and fails the exact comparison, and a
+// record carrying an unavailable TARGET is rejected by the form-exact decode
+// itself (SPEC 5.7/11.2: occurrence existence turns on target resolution — an
+// unresolved spelling never reports as a record with an unavailable target;
+// 12.7: `target` is an identity string). The dynamic and unresolving
+// spellings each carry their finding instead (14.8, 14.5–14.7), the
+// unresolved spelling's position reaching consumers only through its
+// finding's range — for the MDX embedding form, pinned to the FULL braced
+// container, the span its occurrence would occupy (SPEC 14, T14-8's rule) —
+// and the consulted domain's findings accompany the answer, exit 1 with the
+// full answer document still emitted (11.2). The dynamic template literal
+// spells an EXISTING id (`` `ok` ``), so a product that evaluates it instead
+// of classifying it dynamic both drops the 14.8 finding and emits a phantom
+// resolved record — failing twice, visibly.
+
+const NO_OCC_BASE_SOURCE = '<S id="a">\nA text.\n</S>\n';
+const NO_OCC_SPARE_SOURCE = '<S id="sp">\nSpare text.\n</S>\n';
+
+// specs/MAIN.mdx, composed from the exact parts the expected offsets cite
+// (the T5.7-2/T5.7-3 discipline): the used import (BASE — its references
+// resolve), the never-used import (SPARE — valid, records no edges, 2.1),
+// multi-byte UTF-8 in `ok` shifting every later byte offset, then one
+// resolving `d`, the dynamic `d` (a template literal is not static, 2.4 →
+// 14.8), the unresolving local-string `d` (14.5), the unresolving embedding
+// (14.6), and the resolving embedding.
+const NO_OCC_MAIN_HEAD =
+  'import BASE from "./BASE.xspec"\n' +
+  'import SPARE from "./SPARE.xspec"\n\n' +
+  '<S id="ok">\nPrélude 🦄 ok text.\n</S>\n\n';
+const NO_OCC_MAIN_USE = '<S id="use" d={BASE.a}>\nUse text.\n</S>\n\n';
+const NO_OCC_DYN_CONSTRUCT = '<S id="dyn" d={`ok`}>';
+const NO_OCC_DYN_POST = "\nDyn text.\n</S>\n\n";
+const NO_OCC_UN_CONSTRUCT = '<S id="un" d={"nope"}>';
+const NO_OCC_UN_POST = "\nUn text.\n</S>\n\n";
+const NO_OCC_BAD_PRE = '<S id="bad">\nBad: ';
+const NO_OCC_BAD_CONTAINER = "{text(BASE.gone)}";
+const NO_OCC_BAD_POST = "\n</S>\n\n";
+const NO_OCC_EMB_PRE = '<S id="emb">\nEmb: ';
+const NO_OCC_EMB_CONTAINER = "{text(BASE.a)}";
+const NO_OCC_EMB_POST = "\n</S>\n";
+const NO_OCC_MAIN_SOURCE =
+  NO_OCC_MAIN_HEAD +
+  NO_OCC_MAIN_USE +
+  NO_OCC_DYN_CONSTRUCT +
+  NO_OCC_DYN_POST +
+  NO_OCC_UN_CONSTRUCT +
+  NO_OCC_UN_POST +
+  NO_OCC_BAD_PRE +
+  NO_OCC_BAD_CONTAINER +
+  NO_OCC_BAD_POST +
+  NO_OCC_EMB_PRE +
+  NO_OCC_EMB_CONTAINER +
+  NO_OCC_EMB_POST;
+
+// src/app.ts: the used ordinary import, both T4-4 type-only forms (a `type`
+// modifier on the declaration and on a named binding), a resolving marker in
+// `keeper`, the unresolving marker in `stray` (14.7), the T4.5-4 shadowing
+// function — the IDENTICAL statement texts `SPEC.ok;` and `SPEC.absent;`
+// rooted at the local, recording nothing and triggering nothing — and the
+// T4-4 marker-shaped/call-shaped uses of the type-only bindings (no edge, no
+// occurrence, no finding: such value-level uses fall under no condition,
+// SPEC 4.5).
+const NO_OCC_APP_HEAD =
+  "// prélude 🦄 no-occurrence\n" +
+  'import SPEC from "../specs/MAIN.xspec";\n' +
+  'import type TSPEC from "../specs/BASE.xspec";\n' +
+  'import { type text as tt } from "../specs/BASE.xspec";\n\n';
+const NO_OCC_APP_KEEPER = "export function keeper(): void {\n  SPEC.ok;\n}\n\n";
+const NO_OCC_STRAY_PRE = "export function stray(): void {\n  ";
+const NO_OCC_STRAY_CONSTRUCT = "SPEC.absent;";
+const NO_OCC_STRAY_POST = "\n}\n\n";
+const NO_OCC_APP_TAIL =
+  "export function shadowScope(): string {\n" +
+  '  const SPEC = { ok: "shadow value", absent: "also local" };\n' +
+  "  SPEC.ok;\n" +
+  "  SPEC.absent;\n" +
+  "  return SPEC.ok;\n" +
+  "}\n\n" +
+  "TSPEC.a;\ntt(TSPEC.a);\n";
+const NO_OCC_APP_SOURCE =
+  NO_OCC_APP_HEAD +
+  NO_OCC_APP_KEEPER +
+  NO_OCC_STRAY_PRE +
+  NO_OCC_STRAY_CONSTRUCT +
+  NO_OCC_STRAY_POST +
+  NO_OCC_APP_TAIL;
+
+// The complete expected record multiset: the three resolving spellings and
+// nothing else — no record for any import declaration (binding used or
+// unused), type-only use, shadowed chain, dynamic spelling, or unresolved
+// spelling.
+const NO_OCC_UNITS: readonly OccurrenceUnit[] = [
+  {
+    what: "resolving `d={BASE.a}` on `use`",
+    file: "specs/MAIN.mdx",
+    kind: "depends",
+    source: "specs/MAIN.mdx#use",
+    target: "specs/BASE.mdx#a",
+    count: 1,
+  },
+  {
+    what: "resolving MDX embedding `{text(BASE.a)}` in `emb`",
+    file: "specs/MAIN.mdx",
+    kind: "embeds",
+    source: "specs/MAIN.mdx#emb",
+    target: "specs/BASE.mdx#a",
+    count: 1,
+  },
+  {
+    what: "resolving TS marker `SPEC.ok` in `keeper`",
+    file: "src/app.ts",
+    kind: "references",
+    source: "src/app.ts#keeper",
+    target: "specs/MAIN.mdx#ok",
+    count: 1,
+  },
+];
+
+// The staged defects, exactly one finding each (SPEC 14: every condition
+// reported, and nothing else — so the type-only uses, the shadowed chains,
+// and the unused import provably trigger NO finding beside these four).
+const NO_OCC_EXPECTED_CONDITIONS = {
+  "14.5": 1,
+  "14.6": 1,
+  "14.7": 1,
+  "14.8": 1,
+} as const;
+
+// The unresolved MDX embedding's finding range: the FULL braced container,
+// opening brace through closing brace — the span its occurrence would occupy
+// (SPEC 14, 5.7; T14-8's cardinality rule cross-cited by T5.7-4). Exact, not
+// windowed: a chain-only or call-only range fails.
+const NO_OCC_BAD_RANGE = rangeAfter(
+  NO_OCC_MAIN_HEAD +
+    NO_OCC_MAIN_USE +
+    NO_OCC_DYN_CONSTRUCT +
+    NO_OCC_DYN_POST +
+    NO_OCC_UN_CONSTRUCT +
+    NO_OCC_UN_POST +
+    NO_OCC_BAD_PRE,
+  NO_OCC_BAD_CONTAINER,
+);
+
+/**
+ * Fixture self-check (harness-side, before any product invocation): the
+ * precomputed container range must slice the staged file's bytes to exactly
+ * the braced container. A failure here is a staging-arithmetic defect of this
+ * test, never a product failure.
+ */
+function assertNoOccContainerRange(): void {
+  const actual = Buffer.from(NO_OCC_MAIN_SOURCE, "utf8")
+    .subarray(NO_OCC_BAD_RANGE.start, NO_OCC_BAD_RANGE.end)
+    .toString("utf8");
+  if (actual !== NO_OCC_BAD_CONTAINER) {
+    fail(
+      `T5.7-4 fixture self-check: the precomputed byte range ` +
+        `[${String(NO_OCC_BAD_RANGE.start)}, ${String(NO_OCC_BAD_RANGE.end)}) ` +
+        `slices the staged bytes to ${JSON.stringify(actual)}, expected ` +
+        `${JSON.stringify(NO_OCC_BAD_CONTAINER)} (a harness-side staging ` +
+        `error, not a product failure)`,
+    );
+  }
+}
+
+/**
+ * Resolve the unique finding carrying `condition` (the caller has already
+ * pinned the condition multiset, so a miss here is a diagnosed count defect).
+ */
+function findingWithCondition(
+  findings: readonly Finding[],
+  condition: string,
+  context: string,
+): Finding {
+  const matching = findings.filter(
+    (finding) => finding.condition === condition,
+  );
+  if (matching.length !== 1) {
+    fail(
+      `${context}: expected exactly one condition-${condition} finding ` +
+        `(SPEC 14); got ${String(matching.length)} among ` +
+        JSON.stringify(findings.map((finding) => finding.condition)),
+    );
+  }
+  return matching[0]!;
+}
+
+/** The four staged findings: counts, files, and ranges (shared by surfaces). */
+function assertNoOccFindings(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertConditionCounts(
+    findings,
+    NO_OCC_EXPECTED_CONDITIONS,
+    `${context}: exactly the staged defects are reported — one 14.8 (the ` +
+      `dynamic template-literal \`d\` reference), one 14.5 (the unresolving ` +
+      `local \`d\`), one 14.6 (the unresolving embedding), one 14.7 (the ` +
+      `unresolving marker) — and NOTHING for the import declarations ` +
+      `(binding used and unused, SPEC 2.1), the type-only uses, or the ` +
+      `shadowed chains (such value-level uses fall under no condition, ` +
+      `SPEC 4.5)`,
+  );
+  assertFindingLocated(
+    findingWithCondition(findings, "14.8", context),
+    {
+      file: "specs/MAIN.mdx",
+      window: byteWindow(
+        NO_OCC_MAIN_HEAD + NO_OCC_MAIN_USE,
+        NO_OCC_DYN_CONSTRUCT,
+      ),
+    },
+    `${context}: the 14.8 finding locates the dynamic \`d\` spelling (SPEC 14, 2.4)`,
+  );
+  assertFindingLocated(
+    findingWithCondition(findings, "14.5", context),
+    {
+      file: "specs/MAIN.mdx",
+      window: byteWindow(
+        NO_OCC_MAIN_HEAD +
+          NO_OCC_MAIN_USE +
+          NO_OCC_DYN_CONSTRUCT +
+          NO_OCC_DYN_POST,
+        NO_OCC_UN_CONSTRUCT,
+      ),
+    },
+    `${context}: the 14.5 finding locates the unresolving \`d\` spelling (SPEC 14)`,
+  );
+  assertFindingLocated(
+    findingWithCondition(findings, "14.7", context),
+    {
+      file: "src/app.ts",
+      window: byteWindow(
+        NO_OCC_APP_HEAD + NO_OCC_APP_KEEPER + NO_OCC_STRAY_PRE,
+        NO_OCC_STRAY_CONSTRUCT,
+      ),
+    },
+    `${context}: the 14.7 finding locates the unresolving marker (SPEC 14, 4.5)`,
+  );
+  // The MDX embedding form's finding range is pinned exactly: the full
+  // braced container, opening brace through closing brace — the span its
+  // occurrence would occupy (SPEC 14, 5.7). One offending spelling, one
+  // location; the unresolved spelling's position reaches consumers only
+  // through this range, never as an occurrence record.
+  const bad = findingWithCondition(findings, "14.6", context);
+  assertFindingLocated(
+    bad,
+    { file: "specs/MAIN.mdx" },
+    `${context}: the 14.6 finding locates in the embedding's file (SPEC 14)`,
+  );
+  if (bad.locations.length !== 1) {
+    fail(
+      `${context}: the 14.6 finding has exactly one offending spelling, so ` +
+        `exactly one location (SPEC 14 location cardinality); got ` +
+        `${String(bad.locations.length)}: ${JSON.stringify(bad.locations)}`,
+    );
+  }
+  assertSameJson(
+    bad.locations[0]!.range,
+    NO_OCC_BAD_RANGE,
+    `${context}: the 14.6 finding's range is the FULL braced container ` +
+      `\`{text(BASE.gone)}\`, opening brace through closing brace — the ` +
+      `span its occurrence would occupy (SPEC 14, 5.7): a chain-only or ` +
+      `call-only range fails; zero-based byte offsets, start-inclusive ` +
+      `end-exclusive (SPEC 1.7)`,
+  );
+}
+
+const T5_7_4 = defineProductTest({
+  id: "T5.7-4",
+  title:
+    "constructs that record no edge record no occurrence — an import declaration (binding used and unused), a type-only binding's marker-shaped uses, a chain rooted at a shadowing local declaration, a dynamic reference spelling and unresolving ones (each also its finding, 14.8/14.5–14.7) — so `occurrences` reports records for exactly the resolving spellings, never a record with an unavailable target, the unresolved spelling's position reaching consumers only through its finding's range (the MDX embedding form's spanning its full braced container), the answer carrying the domain's findings, exit 1 (SPEC 5.7, 2.1, 2.4, 4.5, 11.2, 11.3, 14)",
+  run: async (product) => {
+    assertNoOccContainerRange();
+
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        "specs/BASE.mdx": NO_OCC_BASE_SOURCE,
+        "specs/SPARE.mdx": NO_OCC_SPARE_SOURCE,
+        "specs/MAIN.mdx": NO_OCC_MAIN_SOURCE,
+        "src/app.ts": NO_OCC_APP_SOURCE,
+      },
+    });
+    try {
+      // Staging premise, pinned first: `build --json` reports EXACTLY the
+      // four staged defects — so the resolving spellings provably resolve,
+      // and the no-occurrence constructs that are also no-finding constructs
+      // (imports, type-only uses, shadowed chains) provably trigger nothing.
+      const buildContext = "T5.7-4 `build --json` (staging premise)";
+      assertNoOccFindings(
+        await buildFindings(product, workspace, buildContext),
+        buildContext,
+      );
+
+      // The enumeration over the imperfect workspace: the answer carries the
+      // consulted domain's findings, so the invocation exits 1 — with the
+      // full answer document still emitted (SPEC 11.2; 11.3 is JSON-only).
+      const context = "T5.7-4 `occurrences`";
+      const result = await expectExit(
+        product,
+        workspace,
+        ["occurrences"],
+        1,
+        `${context} — an answer carrying any finding exits 1, the full ` +
+          `answer document still emitted (SPEC 11.2, 11.3)`,
+      );
+      const report = decodeOccurrencesReport(
+        parseJsonStdout(result, context),
+        context,
+      );
+
+      // The domain's findings accompany the answer (the entire discovered
+      // set — no `--file`), each locating its spelling.
+      assertNoOccFindings(report.findings, context);
+
+      // Records for exactly the resolving spellings. The form-exact decode
+      // has already rejected any record with an unavailable target (12.7:
+      // `target` is an identity string; SPEC 5.7/11.2 — an unresolved
+      // spelling is never a record), so the exact multiset comparison is the
+      // remaining edge: an extra record for an import declaration, a
+      // type-only use, a shadowed chain, the dynamic spelling, or an
+      // unresolved spelling fails by count and tuple.
+      assertSameJson(
+        report.occurrences.map(renderOccurrenceUnit).sort(),
+        expectedUnitMultiset(NO_OCC_UNITS),
+        `${context}: the complete (file, [kind], source -> target) record ` +
+          `multiset — exactly the three resolving spellings (SPEC 5.7, ` +
+          `11.2): no record for an import declaration (binding used or ` +
+          `unused, 2.1), a type-only binding's marker-shaped uses, a chain ` +
+          `rooted at a shadowing local declaration (4.5), the dynamic ` +
+          `spelling, or the unresolved spellings — each of the latter ` +
+          `reaching consumers only through its finding's range`,
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
 /** TEST-SPEC §5.7, in canonical ID order (SUITE-51). */
 export const section57Tests: readonly ProductTestEntry[] = [
   T5_7_1,
   T5_7_2,
   T5_7_3,
+  T5_7_4,
 ];
