@@ -23,7 +23,9 @@ import type { RunResult } from "../helpers/subprocess.js";
 import type { Finding } from "../helpers/adapters/index.js";
 import {
   ITEM_STATUSES,
+  assertBareEdgeEndpoints,
   assertJsonKeysByteSorted,
+  assertNodeEdgeListsBare,
   assertReportMentions,
   assertUnavailabilityMarkerForms,
   classifyIgnoredReasons,
@@ -1838,6 +1840,71 @@ test("S-5: the marker walk rejects near-markers anywhere in the tree, naming the
       { node: { unavailable: "soon", other: 1 } },
       "ordinary member",
     ),
+  );
+});
+
+// --- the bare edge-endpoint walk (T1.7-1) ------------------------------------
+
+test("S-5: the bare edge-endpoint walk accepts edge surfaces carrying identities alone", () => {
+  assertBareEdgeEndpoints(GOOD_EDGES, "edges document");
+  assertBareEdgeEndpoints(GOOD_REACHABLE, "reachable document");
+  assertBareEdgeEndpoints({ reachable: false }, "unreachable document");
+  // A node report's own sourceRange is contract (SPEC 11, T11-1): the walk
+  // scoped to the edge lists tolerates it while guarding the lists.
+  assertNodeEdgeListsBare(GOOD_NODE, "node report");
+});
+
+test("S-5: the bare edge-endpoint walk rejects range data beside endpoints, naming the path", () => {
+  const rowRange = expectDiagnosed("edge row carrying a range member", () =>
+    assertBareEdgeEndpoints(
+      put(GOOD_EDGES, { start: 0, end: 4 }, "edges", 0, "range"),
+      "row range",
+    ),
+  );
+  expect(rowRange.message).toContain("$.edges[0].range");
+  const endpointObject = expectDiagnosed(
+    "endpoint as an identity-plus-range object",
+    () =>
+      assertBareEdgeEndpoints(
+        put(
+          GOOD_EDGES,
+          {
+            identity: "src/login.ts#handler",
+            sourceRange: { start: 0, end: 4 },
+          },
+          "edges",
+          0,
+          "from",
+        ),
+        "endpoint object",
+      ),
+  );
+  expect(endpointObject.message).toContain("$.edges[0].from.sourceRange");
+  const pathEntry = expectDiagnosed(
+    "witness-path entry carrying start/end data",
+    () =>
+      assertBareEdgeEndpoints(
+        put(
+          GOOD_REACHABLE,
+          { node: "specs/A.mdx#login", start: 0, end: 4 },
+          "path",
+          0,
+        ),
+        "path entry",
+      ),
+  );
+  expect(pathEntry.message).toContain("$.path[0]");
+  const nodeEdgeRange = expectDiagnosed("node edge list carrying a range", () =>
+    assertNodeEdgeListsBare(
+      put(GOOD_NODE, { start: 1, end: 2 }, "edges", "incoming", 0, "range"),
+      "node edge range",
+    ),
+  );
+  expect(nodeEdgeRange.message).toContain("$.edges.incoming[0].range");
+  // The scoped walk still fails loudly when the edge lists are absent
+  // entirely (S-5: reject, never default).
+  expectDiagnosed("node report missing its edges member", () =>
+    assertNodeEdgeListsBare(omit(GOOD_NODE, "edges"), "missing edges"),
   );
 });
 

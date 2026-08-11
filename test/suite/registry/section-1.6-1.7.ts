@@ -14,11 +14,19 @@
 // arrangement described in section-1.1-1.2.ts.
 
 import { Buffer } from "node:buffer";
-import type { Finding, NodeReport } from "../../helpers/adapters/index.js";
+import type {
+  Finding,
+  GraphEdge,
+  NodeReport,
+} from "../../helpers/adapters/index.js";
 import {
+  assertBareEdgeEndpoints,
+  assertNodeEdgeListsBare,
+  decodeEdgesReport,
   decodeImpactReport,
   decodeNextReport,
   decodeNodeReport,
+  decodeReachableReport,
   decodeSessionStatusReport,
 } from "../../helpers/adapters/index.js";
 import {
@@ -39,6 +47,7 @@ import {
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
+  assertEdgeSetEqual,
   assertSameJson,
   buildFindings,
   buildOk,
@@ -1092,10 +1101,55 @@ const EMPTY_RANGE = {
 };
 const ROOT_RANGE = { start: 0, end: utf8Length(RANGE_SOURCE) };
 
+// Bare-endpoint fixture (SPEC 1.7's second half): a dependency chain entering
+// the graph at code locations — `src/app.ts#entry` --references--> `alpha`
+// --depends--> `omega`, and `src/app.ts#writer` --embeds--> `omega` — so
+// `edges` rows, a `reachable` witness path, and `query node`'s incoming and
+// outgoing edge lists each traverse a code location.
+const ENDPOINT_SPEC_SOURCE = [
+  '<S id="alpha" d={"omega"}>',
+  "Alpha text.",
+  "</S>",
+  "",
+  '<S id="omega">',
+  "Omega text.",
+  "</S>",
+  "",
+].join("\n");
+
+const ENDPOINT_CODE_SOURCE = [
+  'import SPEC, { text } from "../specs/E.xspec";',
+  "",
+  "export function entry(): void {",
+  "  SPEC.alpha;",
+  "}",
+  "",
+  "export function writer(): string {",
+  "  return text(SPEC.omega);",
+  "}",
+  "",
+].join("\n");
+
+const ENDPOINT_FILE = "specs/E.mdx";
+const ALPHA_ID = "specs/E.mdx#alpha";
+const OMEGA_ID = "specs/E.mdx#omega";
+const ENTRY_LOCATION = "src/app.ts#entry";
+const WRITER_LOCATION = "src/app.ts#writer";
+
+// The endpoint workspace's complete edge set (SPEC 5.2), endpoints spelled as
+// the bare identities 1.7 demands on every edge surface.
+const ENDPOINT_ALL_EDGES: readonly GraphEdge[] = [
+  { from: ENDPOINT_FILE, to: ALPHA_ID, kind: "contains" },
+  { from: ENDPOINT_FILE, to: OMEGA_ID, kind: "contains" },
+  { from: ALPHA_ID, to: OMEGA_ID, kind: "depends" },
+  { from: ENTRY_LOCATION, to: ALPHA_ID, kind: "references" },
+  { from: WRITER_LOCATION, to: OMEGA_ID, kind: "embeds" },
+];
+
 const T1_7_1 = defineProductTest({
   id: "T1.7-1",
   title:
-    "source ranges are zero-based byte offsets, start-inclusive end-exclusive: opening through closing tag for a section, exactly the self-closing tag, the entire file for the root — equal via `query node` and `show` (SPEC 1.7, 11, 12.4)",
+    "source ranges are zero-based byte offsets, start-inclusive end-exclusive: opening through closing tag for a section, exactly the self-closing tag, the entire file for the root — equal via `query node` and `show`; everywhere a graph node appears as an edge endpoint — `edges` rows, a `reachable` witness path, `query node` edge lists, each traversing a code location — it is a bare identity, no range datum accompanying it (SPEC 1.7, 11, 12.4)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -1160,6 +1214,140 @@ const T1_7_1 = defineProductTest({
       }
     } finally {
       await workspace.dispose();
+    }
+
+    // Bare edge endpoints (SPEC 1.7): a code location is presented with its
+    // source range in exactly two outputs — occurrence records and review
+    // payloads — and everywhere a graph node appears as an edge endpoint it
+    // is a bare identity, requirement node and code location alike. Each arm
+    // asserts the endpoint values through the H-3 decoders (endpoints decode
+    // as identity strings and equal the staged identities) and the absence of
+    // any accompanying range datum through the adapter layer's 1.7 walk over
+    // the raw document.
+    const endpoints = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        "specs/E.mdx": ENDPOINT_SPEC_SOURCE,
+        "src/app.ts": ENDPOINT_CODE_SOURCE,
+      },
+    });
+    try {
+      await buildOk(
+        product,
+        endpoints,
+        "T1.7-1 `build` of the bare-endpoint fixture",
+      );
+
+      // (a) `edges` rows: the complete edge set, the code-location-sourced
+      // `references` and `embeds` rows included — endpoints identities alone.
+      const edgesContext = "T1.7-1 `query edges` (bare endpoints)";
+      const edgesDoc = await runJson(
+        product,
+        endpoints,
+        ["query", "edges"],
+        edgesContext,
+      );
+      assertEdgeSetEqual(
+        decodeEdgesReport(edgesDoc, edgesContext),
+        ENDPOINT_ALL_EDGES,
+        `${edgesContext}: the complete edge set, with the code locations ` +
+          `entering the \`references\` and \`embeds\` rows as identities ` +
+          `(SPEC 1.7, 5.2, 11)`,
+      );
+      assertBareEdgeEndpoints(edgesDoc, edgesContext);
+
+      // (b) a `reachable` witness path traversing the code location: the
+      // path is a node-identity sequence, identities alone.
+      const reachableContext = `T1.7-1 \`query reachable --from ${ENTRY_LOCATION} --to ${OMEGA_ID}\``;
+      const reachableDoc = await runJson(
+        product,
+        endpoints,
+        ["query", "reachable", "--from", ENTRY_LOCATION, "--to", OMEGA_ID],
+        reachableContext,
+      );
+      const reachable = decodeReachableReport(reachableDoc, reachableContext);
+      if (!reachable.reachable) {
+        fail(
+          `${reachableContext}: a dependency path entry -> alpha -> omega ` +
+            `exists (\`references\`, then \`depends\`, both in the default ` +
+            `kinds), so the report must state one does (SPEC 11)`,
+        );
+      }
+      assertSameJson(
+        reachable.path,
+        [ENTRY_LOCATION, ALPHA_ID, OMEGA_ID],
+        `${reachableContext}: the shortest witness path traverses the code ` +
+          `location as a bare identity in a node-identity sequence (SPEC 1.7, 11)`,
+      );
+      assertBareEdgeEndpoints(reachableDoc, reachableContext);
+
+      // (c) `query node`'s incoming and outgoing edge lists, both traversing
+      // code locations (`references` into alpha, `embeds` into omega). The
+      // node report's own `sourceRange` is contract (SPEC 11, T11-1); the
+      // walk is scoped to the edge lists, where no range datum may appear.
+      const alphaContext = `T1.7-1 \`query node ${ALPHA_ID}\` (bare edge-list endpoints)`;
+      const alphaDoc = await runJson(
+        product,
+        endpoints,
+        ["query", "node", ALPHA_ID],
+        alphaContext,
+      );
+      const alpha = decodeNodeReport(alphaDoc, alphaContext);
+      if (alpha.identity !== ALPHA_ID) {
+        fail(
+          `${alphaContext}: expected the report to be about ${JSON.stringify(ALPHA_ID)} ` +
+            `(SPEC 1.5), got identity ${JSON.stringify(alpha.identity)}`,
+        );
+      }
+      assertEdgeSetEqual(
+        alpha.incomingEdges,
+        [
+          { from: ENDPOINT_FILE, to: ALPHA_ID, kind: "contains" },
+          { from: ENTRY_LOCATION, to: ALPHA_ID, kind: "references" },
+        ],
+        `${alphaContext}: incoming edges — the referencing code location ` +
+          `enters as a bare identity (SPEC 1.7, 11)`,
+      );
+      assertEdgeSetEqual(
+        alpha.outgoingEdges,
+        [{ from: ALPHA_ID, to: OMEGA_ID, kind: "depends" }],
+        `${alphaContext}: outgoing edges (SPEC 11)`,
+      );
+      assertNodeEdgeListsBare(alphaDoc, alphaContext);
+
+      const omegaContext = `T1.7-1 \`query node ${OMEGA_ID}\` (bare edge-list endpoints)`;
+      const omegaDoc = await runJson(
+        product,
+        endpoints,
+        ["query", "node", OMEGA_ID],
+        omegaContext,
+      );
+      const omega = decodeNodeReport(omegaDoc, omegaContext);
+      if (omega.identity !== OMEGA_ID) {
+        fail(
+          `${omegaContext}: expected the report to be about ${JSON.stringify(OMEGA_ID)} ` +
+            `(SPEC 1.5), got identity ${JSON.stringify(omega.identity)}`,
+        );
+      }
+      assertEdgeSetEqual(
+        omega.incomingEdges,
+        [
+          { from: ENDPOINT_FILE, to: OMEGA_ID, kind: "contains" },
+          { from: ALPHA_ID, to: OMEGA_ID, kind: "depends" },
+          { from: WRITER_LOCATION, to: OMEGA_ID, kind: "embeds" },
+        ],
+        `${omegaContext}: incoming edges — the embedding code location ` +
+          `enters as a bare identity (SPEC 1.7, 11)`,
+      );
+      assertEdgeSetEqual(
+        omega.outgoingEdges,
+        [],
+        `${omegaContext}: outgoing edges — none; no edge kind targets a ` +
+          `code location and omega declares no dependency (SPEC 5.2)`,
+      );
+      assertNodeEdgeListsBare(omegaDoc, omegaContext);
+    } finally {
+      await endpoints.dispose();
     }
   },
 });

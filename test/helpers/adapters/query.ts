@@ -1,6 +1,7 @@
 // H-3 output adapters — query-surface commands: `query node`, `show`,
 // `query nodes`/`subtree`/`ancestors`, `query edges`, `query reachable`, and
-// `ids` (TEST-SPEC §11, T12.3-1, T12.4-1).
+// `ids` (TEST-SPEC §11, T12.3-1, T12.4-1) — plus the SPEC 1.7 bare
+// edge-endpoint walk (T1.7-1).
 //
 // This module is shape-aware and value-blind: it maps the product's concrete
 // JSON output onto the information model in model.ts, failing loudly
@@ -379,6 +380,83 @@ export function decodeReachableReport(
     );
   }
   return { reachable, path };
+}
+
+// --- the bare edge-endpoint walk (T1.7-1) ----------------------------------
+
+/**
+ * Walk a query document and assert SPEC.md 1.7's bare-endpoint contract: a
+ * code location is presented with its source range in exactly two outputs —
+ * occurrence records (5.7, 11.3) and review payloads (10.7) — so everywhere
+ * a graph node appears as an edge endpoint (`edges` rows, a `reachable`
+ * witness path, `query node`'s incoming and outgoing edge lists) the
+ * reported endpoint is an identity alone, no range datum accompanying it,
+ * requirement node and code location alike. The walk fails loudly on any
+ * source-range-shaped datum anywhere in the given subtree: an object
+ * carrying a member named `range` or `sourceRange`, or carrying both `start`
+ * and `end` members — the range spellings of SPEC.md 1.7/12.7 and of the
+ * ASSUMED SHAPE above. Like the ASSUMED SHAPE, the detection is shape-aware
+ * and adapter-owned: if the real product legitimately spells ranges
+ * differently, adjust the detection with it — never to admit a range datum
+ * beside an edge endpoint. Callers pass whole `query edges` and
+ * `query reachable` documents; node reports go through
+ * {@link assertNodeEdgeListsBare}, which scopes the walk to the report's
+ * `edges` member (the queried node's own source range is contract, T11-1).
+ */
+export function assertBareEdgeEndpoints(doc: unknown, context?: string): void {
+  walkForRangeData(doc, rootSite("1.7 bare edge-endpoint walk", context));
+}
+
+/**
+ * {@link assertBareEdgeEndpoints} scoped to a `query node`/`show` report's
+ * incoming and outgoing edge lists: the report's own `sourceRange` (the
+ * queried node's, SPEC.md 11/12.4) lies outside the walk, while a range
+ * datum anywhere within the edge lists — beside an endpoint, or as an
+ * endpoint's member — fails loudly.
+ */
+export function assertNodeEdgeListsBare(doc: unknown, context?: string): void {
+  const site = rootSite(
+    "1.7 bare edge-endpoint walk (query node/show edge lists)",
+    context,
+  );
+  const obj = expectObject(doc, site);
+  walkForRangeData(requiredKey(obj, "edges", site), at(site, "edges"));
+}
+
+function walkForRangeData(value: unknown, site: DecodeSite): void {
+  if (Array.isArray(value)) {
+    value.forEach((element, index) => {
+      walkForRangeData(element, at(site, index));
+    });
+    return;
+  }
+  if (typeof value !== "object" || value === null) return;
+  const obj = value as Record<string, unknown>;
+  for (const name of ["range", "sourceRange"]) {
+    if (Object.hasOwn(obj, name)) {
+      decodeFail(
+        at(site, name),
+        "no range datum on an edge surface — everywhere a graph node " +
+          "appears as an edge endpoint it is a bare identity, requirement " +
+          "node and code location alike; a code location's source range is " +
+          "presented in exactly two outputs, occurrence records and review " +
+          "payloads (SPEC 1.7)",
+        obj[name],
+      );
+    }
+  }
+  if (Object.hasOwn(obj, "start") && Object.hasOwn(obj, "end")) {
+    decodeFail(
+      site,
+      'no range-shaped {"start", "end"} datum on an edge surface — edge ' +
+        "endpoints are bare identities with no range datum accompanying " +
+        "them (SPEC 1.7)",
+      value,
+    );
+  }
+  for (const [key, member] of Object.entries(obj)) {
+    walkForRangeData(member, at(site, key));
+  }
 }
 
 /** `ids` (T12.3-1): files in byte order, IDs within a file in document order. */

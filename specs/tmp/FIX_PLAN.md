@@ -374,13 +374,36 @@ A "new test T<x>" task always means, in one change:
   diagnosed spurious 14.20 ("unclosed section tag") — the arm fails any
   parse-by-pattern product at `buildOk`.]
 
-- [ ] FP-012 — T1.7-1: add the bare-identity edge-endpoint arms. [R1 #14;
+- [x] FP-012 — T1.7-1: add the bare-identity edge-endpoint arms. [R1 #14;
   TEST-SPEC §1.7]
   `test/suite/registry/section-1.6-1.7.ts` asserts only `query node`/`show`
   ranges; no code location, no `reachable` anywhere in the file. Add arms
   asserting endpoints-as-identities-alone on (a) `edges` rows, (b) a
   `reachable` witness path, and (c) `query node`'s incoming/outgoing edge
   lists — each traversing a code location.
+  [Done 2026-08-11: T1.7-1 gains a second workspace (spec+code config;
+  `src/app.ts#entry` --references--> `alpha` --depends--> `omega`,
+  `src/app.ts#writer` --embeds--> `omega`) with the three arms: (a)
+  unfiltered `query edges` pinned to the exact five-edge set, (b)
+  `reachable --from src/app.ts#entry --to specs/E.mdx#omega` pinned to the
+  witness path [entry, alpha, omega], (c) `query node` on alpha and omega
+  pinned to exact incoming/outgoing lists — endpoint values via the H-3
+  decoders (identity strings), the no-range-datum half via a new
+  adapter-layer 1.7 walk in `test/helpers/adapters/query.ts`
+  (`assertBareEdgeEndpoints` over whole edges/reachable documents;
+  `assertNodeEdgeListsBare` scoped to the node report's edge lists so the
+  node's own contractual sourceRange stays out of scope). The walk rejects
+  any member named `range`/`sourceRange` and any {start,end}-bearing object,
+  detector adapter-owned like the ASSUMED SHAPE. S-5 guards added
+  (accepts-bare + rejects-with-path synthetic cases, missing-edges-member
+  rejection). NOT red against this repo's product: it already reports bare
+  endpoints — probe confirmed the exact edge set and witness path above, so
+  the pass is genuine; teeth live in the S-5 rejections plus exact-value
+  pinning. Traceability unchanged (T1.7-1 → ["1.7"]; no numbered condition).
+  `npm run test:self`: unchanged 4 planned mid-loop reds
+  (certification-document ×3 → FP-091; S-1's 9 unmapped keys → stages E/G);
+  suite file 1.6-1.7 shows only T1.6-5's pre-existing FP-001-class product
+  gap (form-exact findings decode), T1.7-1 green.]
 
 - [ ] FP-013 — T4.3-2: add the zero-argument and two-argument `text(...)`
   arms. [R1 #16; TEST-SPEC §4.3, SPEC 14.8]
