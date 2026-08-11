@@ -66,6 +66,7 @@ import {
   stageDeleteItemField,
   stageDuplicateItemEntry,
   stageGarbleCreationParameters,
+  stageGarbleDecompositions,
   stageUnknownItemStatus,
 } from "../helpers/adapters/index.js";
 import { TestWorkspace } from "../helpers/workspace.js";
@@ -2664,6 +2665,7 @@ const SESSION_REL = ".xspec/reviews/s.json";
 /** A synthetic well-shaped stored session (per the layer's assumed shape). */
 const WELL_SHAPED_SESSION = {
   creationParameters: { strategy: "audit" },
+  decompositions: [{ kind: "subtree-coherence", scope: "specs/A.mdx#a" }],
   items: [
     {
       blockedBy: [],
@@ -2791,6 +2793,28 @@ test("S-5: staging garbles recorded creation parameters by structural type flip"
   expect(flippedToObject["creationParameters"]).not.toBeNull();
 });
 
+test("S-5: staging garbles recorded decompositions by structural type flip", async () => {
+  // The natural recorded form is an array (`typeof [] === "object"`), so the
+  // flip lands on a scalar; the rest of the session is untouched.
+  const arrayRecorded = await sessionWorkspace(WELL_SHAPED_SESSION);
+  await stageGarbleDecompositions(arrayRecorded.file);
+  const flippedToScalar = await arrayRecorded.read();
+  expect(typeof flippedToScalar["decompositions"]).toBe("string");
+  expect(flippedToScalar["creationParameters"]).toEqual(
+    WELL_SHAPED_SESSION.creationParameters,
+  );
+  expect(itemsOf(flippedToScalar)).toEqual(WELL_SHAPED_SESSION.items);
+
+  const scalarRecorded = await sessionWorkspace({
+    ...WELL_SHAPED_SESSION,
+    decompositions: "abc123",
+  });
+  await stageGarbleDecompositions(scalarRecorded.file);
+  const flippedToObject = await scalarRecorded.read();
+  expect(typeof flippedToObject["decompositions"]).toBe("object");
+  expect(flippedToObject["decompositions"]).not.toBeNull();
+});
+
 test("S-5: every staged corruption leaves the file one well-formed JSON document", async () => {
   // Unparseable bytes are a separate, shape-independent corrupt state staged
   // directly by tests — these transformations must each inject exactly their
@@ -2802,6 +2826,7 @@ test("S-5: every staged corruption leaves the file one well-formed JSON document
     stageBlockedByAbsentItem,
     (file: string) => stageDeleteItemField(file, "kind"),
     stageGarbleCreationParameters,
+    stageGarbleDecompositions,
   ]) {
     const { file, read } = await sessionWorkspace(WELL_SHAPED_SESSION);
     await stage(file);
@@ -2888,6 +2913,11 @@ const STAGING_REJECTIONS: readonly StagingRejection[] = [
     label: "no creationParameters member to garble",
     contents: '{"items": []}',
     stage: stageGarbleCreationParameters,
+  },
+  {
+    label: "no decompositions member to garble",
+    contents: '{"items": []}',
+    stage: stageGarbleDecompositions,
   },
 ];
 

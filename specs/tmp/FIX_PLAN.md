@@ -1339,9 +1339,41 @@ A "new test T<x>" task always means, in one change:
 
 ## Stage F — §§10–14 missing arms
 
-- [ ] FP-033 — T10.1-4: stage the "malformed recorded decompositions"
+- [x] FP-033 — T10.1-4: stage the "malformed recorded decompositions"
   corrupt-state arm. [R2 #20; TEST-SPEC §10.1]
   `test/suite/registry/section-10.1.ts`.
+  [Done 2026-08-11: new arm between the creation-parameters and
+  garbage-bytes states — build, create an audit session, select the
+  subtree-coherence item scoped at `specs/A.mdx#a` (the one section with a
+  child) from the decoded status report, have the PRODUCT perform `review
+  split` on it (exit 0; post-split premise pins the original id gone —
+  removed and never reused, SPEC 10.7 — so a decomposition is genuinely
+  recorded durably), capture a current item id, then garble the recorded
+  decompositions via the new H-3 transformation
+  `stageGarbleDecompositions` (session-staging.ts: SESSION_SHAPE gains
+  `decompositionsKey`; the creation-parameters garble refactored into a
+  shared `garbleRecordedMember` structural-type-flip — shape-aware,
+  value-blind, fail-loud, staged file stays one JSON document) and run the
+  full `assertCorruptSessionContract` (six naming subcommands exit 1 +
+  /corrupt/i + modifies-nothing; `list` corrupt-in-place exit 1; `check`
+  14.21). S-5 gains the decompositions guards (type-flip positive control
+  both directions with the rest of the session untouched; stays-parseable
+  loop entry; no-member rejection): 73 → 74 tests, green. Soundness proven
+  by direct probes against the built product (the suite arm is unreached:
+  T10.1-4 stays red-as-diagnosed at the FIRST adapter state's `check
+  --json` form-exact findings decode, the pre-existing FP-001-class
+  product gap — "expected no member \"condition\""): split records
+  `{"kind","scope"}` under `decompositions`; on the garbled state all six
+  naming subcommands exit 1 mentioning corrupt, `list --json` exit 1 with
+  `[{cor, corrupt: true}]`, `check --json` exit 1 with a 14.21 finding
+  (old shape), and the whole tree is byte-unchanged across every contract
+  command. Section-10.1 unchanged 3 failed / 1 passed (T10.1-2/-3 keep
+  their pre-existing FP-002-class exit-2 error-document reds; T10.1-1
+  green). Typecheck/format clean; `npm run test:self` unchanged 4 planned
+  mid-loop reds (certification-document ×3 → FP-091; S-1's 7 unmapped
+  keys → stage G), S-5 and certification green. Traceability unchanged
+  (["10.1", "14"] — 14.21's primary record already rides "14"); T10.1-4
+  in no certification scope.]
 
 - [ ] FP-034 — T10.4-2: add the non-scope presence recordings. [R2 #21;
   TEST-SPEC §10.4]

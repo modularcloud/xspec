@@ -47,8 +47,12 @@
 // staged directly. The harness never writes a session file from an assumed
 // layout. The malformed-creation-parameters state uses a `coverage` session:
 // it records the profile's resolved definition, where an `audit` session
-// records none (SPEC 10.7), so there is a recorded value to garble.
+// records none (SPEC 10.7), so there is a recorded value to garble. The
+// malformed-recorded-decompositions state first has the product perform a
+// `split` — the decomposition is recorded durably in the session (SPEC 10.7)
+// — so the garbled member holds a genuine product-recorded decomposition.
 
+import type { SessionStatusRow } from "../../helpers/adapters/index.js";
 import {
   assertReportMentions,
   decodeFindingsReport,
@@ -59,6 +63,7 @@ import {
   stageDeleteItemField,
   stageDuplicateItemEntry,
   stageGarbleCreationParameters,
+  stageGarbleDecompositions,
   stageUnknownItemStatus,
 } from "../../helpers/adapters/index.js";
 import {
@@ -760,9 +765,36 @@ const PLACEHOLDER_ITEM_ID = "item-1";
 const CORRUPT_NAME = "cor";
 
 /**
+ * Decode `review status <cor> --json` and require at least one item — the
+ * pre-corruption read of a product-written session.
+ */
+async function readSessionItems(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+): Promise<readonly SessionStatusRow[]> {
+  const status = decodeSessionStatusReport(
+    await runJson(
+      product,
+      workspace,
+      ["review", "status", CORRUPT_NAME, "--json"],
+      label,
+    ),
+    label,
+  );
+  if (status.items.length === 0) {
+    fail(
+      `${label}: staging premise — the session must hold at least one item ` +
+        `for the corruption transformations and the item-naming subcommands ` +
+        `(SPEC 10.5–10.7); got none`,
+    );
+  }
+  return status.items;
+}
+
+/**
  * Build, create the session via the given argv, and capture one item id from
- * `status --json` before the file is corrupted (the pre-corruption read of a
- * product-written session).
+ * `status --json` before the file is corrupted.
  */
 async function stageProductSession(
   product: ProductBinding,
@@ -778,24 +810,12 @@ async function stageProductSession(
     0,
     `${context} \`${createArgv.join(" ")}\``,
   );
-  const label = `${context} \`review status ${CORRUPT_NAME} --json\` (pre-corruption item-id capture)`;
-  const status = decodeSessionStatusReport(
-    await runJson(
-      product,
-      workspace,
-      ["review", "status", CORRUPT_NAME, "--json"],
-      label,
-    ),
-    label,
+  const items = await readSessionItems(
+    product,
+    workspace,
+    `${context} \`review status ${CORRUPT_NAME} --json\` (pre-corruption item-id capture)`,
   );
-  if (status.items.length === 0) {
-    fail(
-      `${label}: staging premise — the created session must hold at least ` +
-        `one item for the corruption transformations and the item-naming ` +
-        `subcommands (SPEC 10.5–10.7); got none`,
-    );
-  }
-  return status.items[0].id;
+  return items[0].id;
 }
 
 /** What `review list` must report for a staged corrupt state. */
@@ -932,7 +952,7 @@ const ADAPTER_STATES: readonly (readonly [
 const T10_1_4 = defineProductTest({
   id: "T10.1-4",
   title:
-    "each corrupt session state — unparseable bytes (garbage and truncation), missing 10.2 field, unknown status, duplicate item ids, blockedBy at an absent item, a blockedBy cycle, duplicate kind+scope, malformed recorded creation parameters, and a directory or symlink at the session path — makes every review subcommand naming the session report corruption, exit 1, and modify nothing; `list` reports it corrupt in place of its fields (exit 1); `check` reports 14.21; shape-dependent states are staged via the H-3 adapter over product-written files (SPEC 10.1, 10.7, 13.4, 14.21)",
+    "each corrupt session state — unparseable bytes (garbage and truncation), missing 10.2 field, unknown status, duplicate item ids, blockedBy at an absent item, a blockedBy cycle, duplicate kind+scope, malformed recorded creation parameters, malformed recorded decompositions (garbled over a product-performed `split`'s durable record), and a directory or symlink at the session path — makes every review subcommand naming the session report corruption, exit 1, and modify nothing; `list` reports it corrupt in place of its fields (exit 1); `check` reports 14.21; shape-dependent states are staged via the H-3 adapter over product-written files (SPEC 10.1, 10.7, 13.4, 14.21)",
   timeoutMs: 360_000,
   run: async (product) => {
     // --- Shape-dependent states via the adapter, over an audit session ---
@@ -969,6 +989,77 @@ const T10_1_4 = defineProductTest({
       await assertCorruptSessionContract(product, workspace, state, itemId, [
         { name: CORRUPT_NAME, corrupt: true },
       ]);
+    });
+
+    // --- Malformed recorded decompositions ---
+    // A `split` records its decomposition — the original's kind and scope
+    // node — durably in the session (SPEC 10.7), so the product itself is
+    // made to perform one before the recorded value is garbled: the
+    // corrupted file starts as one the product wrote holding a genuine
+    // recorded decomposition (an unsplit session may record none).
+    await withWorkspace(CORE_FILES, async (workspace) => {
+      const state = "malformed recorded decompositions";
+      const context = `T10.1-4 [${state}]`;
+      await buildOk(product, workspace, `${context} \`build\``);
+      await expectExit(
+        product,
+        workspace,
+        ["review", "create", "--strategy", "audit", "--name", CORRUPT_NAME],
+        0,
+        `${context} \`review create --strategy audit --name ${CORRUPT_NAME}\``,
+      );
+      const items = await readSessionItems(
+        product,
+        workspace,
+        `${context} \`review status ${CORRUPT_NAME} --json\` (split-target selection)`,
+      );
+      // The split target: the subtree-coherence item scoped at the one
+      // section with a child (`a` contains `a.k`), so the split is not
+      // refused (SPEC 10.7: a childless scope root refuses).
+      const splitScope = "specs/A.mdx#a";
+      const splitTarget = items.find(
+        (item) =>
+          item.kind === "subtree-coherence" && item.scope === splitScope,
+      );
+      if (splitTarget === undefined) {
+        fail(
+          `${context}: staging premise — the audit session holds one ` +
+            `subtree-coherence item per requirement node (SPEC 10.6), so an ` +
+            `item scoped at ${splitScope} must exist for \`split\` to ` +
+            `decompose; item scopes: ` +
+            JSON.stringify(items.map((item) => item.scope)),
+        );
+      }
+      await expectExit(
+        product,
+        workspace,
+        ["review", "split", CORRUPT_NAME, splitTarget.id],
+        0,
+        `${context} \`review split ${CORRUPT_NAME} ${splitTarget.id}\` — ` +
+          `the product-performed split records the decomposition durably ` +
+          `(SPEC 10.7)`,
+      );
+      const postSplit = await readSessionItems(
+        product,
+        workspace,
+        `${context} \`review status ${CORRUPT_NAME} --json\` (post-split item-id capture)`,
+      );
+      if (postSplit.some((item) => item.id === splitTarget.id)) {
+        fail(
+          `${context}: staging premise — after \`split\`, the original item ` +
+            `is removed from the session and its id (${splitTarget.id}) ` +
+            `never reused (SPEC 10.7), so its decomposition is genuinely ` +
+            `recorded; the id is still present`,
+        );
+      }
+      await stageGarbleDecompositions(workspace.path(sessionRel(CORRUPT_NAME)));
+      await assertCorruptSessionContract(
+        product,
+        workspace,
+        state,
+        postSplit[0].id,
+        [{ name: CORRUPT_NAME, corrupt: true }],
+      );
     });
 
     // --- Unparseable JSON: garbage bytes (shape-independent, staged

@@ -4,15 +4,16 @@
 // the product itself wrote and is corrupted here — the one place aware of the
 // stored session's concrete shape. The transformations are shape-aware and
 // value-blind: they locate structure (the item list, an item's id, status,
-// blockedBy, the recorded creation parameters), never inspect what the values
-// are, and fail loudly (diagnosed test error, file untouched) when the shape
-// does not match. The harness never writes a session file from an assumed
+// blockedBy, the recorded creation parameters and decompositions), never
+// inspect what the values are, and fail loudly (diagnosed test error, file
+// untouched) when the shape does not match. The harness never writes a session file from an assumed
 // layout — shape-independent corrupt states (unparseable bytes, truncation, a
 // directory or symlink at the path) are staged directly by the tests, not
 // here.
 //
 // ASSUMED STORED-SESSION SHAPE (adjustable per H-3, values never):
-//   { ..., "creationParameters": <recorded>, ...,
+//   { ..., "creationParameters": <recorded>, "decompositions": <recorded>,
+//     ...,
 //     "items": [ { "id": string, "status": string, "blockedBy": [id...],
 //                  ...per-item fields... }, ... ], ... }
 //
@@ -33,6 +34,7 @@ const SESSION_SHAPE = {
   statusKey: "status",
   blockedByKey: "blockedBy",
   creationParametersKey: "creationParameters",
+  decompositionsKey: "decompositions",
 } as const;
 
 interface LoadedSession {
@@ -296,23 +298,20 @@ export async function stageDeleteItemField(
 }
 
 /**
- * T10.1-4 "malformed recorded creation parameters": garble the recorded
- * creation parameters by replacing them with a value of a different JSON
- * structural type (value-blind: only the stored value's type is examined, so
- * the replacement is malformed whatever the recorded content was — a garbage
- * *string* where a string is stored could still parse as merely unresolvable,
- * which is a different, exit-2 state, T10.7-3).
+ * Garble a recorded top-level session member by replacing it with a value of
+ * a different JSON structural type (value-blind: only the stored value's type
+ * is examined, so the replacement is malformed whatever the recorded content
+ * was — a garbage *string* where a string is stored could still parse as
+ * merely unresolvable, which is a different, exit-2 state, T10.7-3).
  */
-export async function stageGarbleCreationParameters(
+async function garbleRecordedMember(
   absPath: string,
+  key: string,
+  what: string,
 ): Promise<void> {
   const loaded = await loadSession(absPath);
-  const key = SESSION_SHAPE.creationParametersKey;
   if (!Object.hasOwn(loaded.doc, key)) {
-    shapeFail(
-      absPath,
-      `expected a "${key}" member holding the recorded creation parameters`,
-    );
+    shapeFail(absPath, `expected a "${key}" member holding the ${what}`);
   }
   const stored = loaded.doc[key];
   loaded.doc[key] =
@@ -320,4 +319,38 @@ export async function stageGarbleCreationParameters(
       ? " xspec-harness-garbled "
       : { "xspec-harness-garbled": true };
   await writeSession(absPath, loaded.doc);
+}
+
+/**
+ * T10.1-4 "malformed recorded creation parameters": garble the recorded
+ * creation parameters by structural type flip (see
+ * {@link garbleRecordedMember}).
+ */
+export async function stageGarbleCreationParameters(
+  absPath: string,
+): Promise<void> {
+  await garbleRecordedMember(
+    absPath,
+    SESSION_SHAPE.creationParametersKey,
+    "recorded creation parameters",
+  );
+}
+
+/**
+ * T10.1-4 "malformed recorded decompositions": garble the recorded
+ * decompositions (SPEC 10.7: a `split`'s decomposition — the original's kind
+ * and scope node — is recorded durably in the session and governs
+ * re-derivation) by structural type flip (see {@link garbleRecordedMember}).
+ * Staged over a session in which the product itself performed a `split`, so
+ * a decomposition is genuinely recorded (T10.1-4's staging discipline: the
+ * corrupted file starts as one the product wrote).
+ */
+export async function stageGarbleDecompositions(
+  absPath: string,
+): Promise<void> {
+  await garbleRecordedMember(
+    absPath,
+    SESSION_SHAPE.decompositionsKey,
+    "recorded decompositions",
+  );
 }
