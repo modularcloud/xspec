@@ -42,6 +42,7 @@ import {
   decodeNextReport,
   decodeNodeMetadataSummary,
   decodeNodeReport,
+  decodeNodeIdentityRowsReport,
   decodeNodeRowsReport,
   decodeNodeSummary,
   decodeNodeSummaryRowsReport,
@@ -644,6 +645,42 @@ const DECODERS: readonly DecoderSpec[] = [
       {
         label: "row with a non-string tag",
         doc: put(GOOD_ROWS, [3], "nodes", 0, "tags"),
+      },
+    ],
+  },
+  {
+    name: "query nodes (identity-only rows)",
+    decode: decodeNodeIdentityRowsReport,
+    good: GOOD_ROWS,
+    verify: (decoded: ReturnType<typeof decodeNodeIdentityRowsReport>) => {
+      expect(decoded).toEqual(["specs/A.mdx#login", "specs/A.mdx"]);
+    },
+    alsoGood: [
+      {
+        // The point of this decoder: rows carrying only an identity decode —
+        // no tags, coverage, or source range is demanded of a fixture product
+        // scoped to the no-node observation (CERTIFICATIONS.md §CONF-MD;
+        // T3-1's grammar-boundary arm).
+        label: "rows carrying only identities",
+        doc: { nodes: [{ identity: "specs/A.mdx#alpha" }] },
+        verify: (
+          decoded: ReturnType<typeof decodeNodeIdentityRowsReport>,
+        ): void => {
+          expect(decoded).toEqual(["specs/A.mdx#alpha"]);
+        },
+      },
+    ],
+    bad: [
+      { label: "missing nodes list", doc: {} },
+      { label: "nodes not an array", doc: { nodes: {} } },
+      { label: "row not an object", doc: { nodes: [7] } },
+      {
+        label: "row missing identity",
+        doc: omit(GOOD_ROWS, "nodes", 0, "identity"),
+      },
+      {
+        label: "row with an empty identity",
+        doc: put(GOOD_ROWS, "", "nodes", 1, "identity"),
       },
     ],
   },

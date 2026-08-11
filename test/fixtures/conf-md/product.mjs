@@ -7,15 +7,25 @@
 // Scope implemented (see CERTIFICATIONS.md §CONF-MD):
 // - Spec-group workspaces of `.mdx` sources with imports (SPEC 2.1, valid
 //   forms as staged), same-file and cross-file `text(...)` embeddings (2.3),
-//   MDX comments, mixed line terminators, and sections carrying the full prop
-//   set of 2.7 — `id`, `d` (local or external form, resolving as staged),
-//   `coverage`, and `tags`; `markdown` absent, `{ emit: false }`, and
-//   `{ emit: true }` with default emission next to each source (13.2); no
-//   code groups, no `coverage` or `policy` configuration keys, no git.
+//   MDX comments, mixed line terminators, fenced code blocks and inline code
+//   spans carrying construct-like bytes (T3-1's grammar boundary), and
+//   sections carrying the full prop set of 2.7 — `id`, `d` (local or
+//   external form, resolving as staged), `coverage`, and `tags`; `markdown`
+//   absent, `{ emit: false }`, and `{ emit: true }` with default emission
+//   next to each source (13.2); no code groups, no `coverage` or `policy`
+//   configuration keys, no git.
 // - `build` with byte-exact Markdown output per SPEC 3, and `query node`
 //   reporting own and subtree text (SPEC 1.6, defined through the rules of 3).
+// - For T3-1's grammar-boundary arm: `check` exiting 0, and
+//   `query nodes`/`query edges` reporting no node and no edge for the
+//   construct-like bytes inside fences and code spans (constructs exist only
+//   where the MDX parse yields them) — implemented as the honest whole
+//   reports: every requirement node with its identity (roots as bare paths,
+//   SPEC 1.5) and every `contains`/`depends`/`embeds` edge of the parsed
+//   workspace, so an exact-set assertion observes the absence.
 // - Contracts under certification: SPEC 3 in full — removal, replacement, the
-//   line-drop rule, line terminators — and the emission scope of 7.3.
+//   line-drop rule, line terminators, the parse-not-pattern grammar boundary
+//   — and the emission scope of 7.3.
 //
 // Key mechanisms:
 // - Sources are scanned by a hand-rolled MDX-lite lexer recognizing exactly
@@ -31,6 +41,22 @@
 //   bytes (boundary code points, lone-CR terminators) that tooling silently
 //   normalizes. That mis-staging hazard is exactly what §CONF-MD certifies
 //   against.
+// - Grammar boundary (T3-1): before the lexer runs, `markdownLiteralRegions`
+//   marks fenced code blocks and inline code spans; the lexer treats every
+//   byte inside a marked region as plain content — no import, tag, comment,
+//   or embedding is recognized there — so construct-like bytes inside them
+//   yield no node, no edge, no finding, and are preserved byte-for-byte.
+//   Region scanning models exactly the staged shapes (a CommonMark-ish
+//   subset): fences open on a line holding up to three spaces of indent then
+//   a run of >= 3 backticks (info string without backticks) or >= 3 tildes,
+//   close on a same-character run at least as long with only blanks after,
+//   and run to end of file when unclosed; inline code spans open at a
+//   backtick run outside a fence and close at the next run of exactly equal
+//   length on the same line (spans never cross line terminators — single-line
+//   spans are the staged scope). The scan uses the plain Markdown line
+//   structure (LF, CRLF, lone CR), deliberately independent of the CERT-13
+//   deviation hook: each violator carries exactly one deviation, in the
+//   compile's line model alone.
 // - Compilation is a port of the harness oracle's line model
 //   (test/helpers/oracles/markdown.ts, S-6-vetted; the "may share HARNESS-08's
 //   compilation logic" of the CERT-11 plan entry) extended with node
@@ -660,6 +686,108 @@ const IMPORT_RE =
 const EMBED_OPEN_RE = /^\{[ \t]*text[ \t]*\(/;
 
 /**
+ * The Markdown literal regions of a source — fenced code blocks and inline
+ * code spans — as sorted, disjoint `{ start, end }` string-index ranges
+ * (T3-1's grammar boundary; see the module header for the modeled subset).
+ * The lexer treats every byte inside a region as plain content: constructs
+ * exist only where the MDX parse yields them, and fences/code spans are
+ * literal text.
+ *
+ * Line structure here is the plain Markdown one (LF, CRLF, lone CR) — never
+ * the deviation-switchable compile line model: each violator's single
+ * deviation lives in the compile hooks alone, and the committed grammar-
+ * boundary staging is LF-only, where all models agree.
+ */
+function markdownLiteralRegions(text) {
+  /** @type {{ start: number, end: number }[]} */
+  const regions = [];
+  /** @type {{ start: number, end: number }[]} */
+  const outsideLines = [];
+  /** @type {{ char: string, len: number, start: number } | null} */
+  let fence = null;
+  let lineStart = 0;
+  while (lineStart < text.length) {
+    let lineEnd = lineStart;
+    while (lineEnd < text.length) {
+      const code = text.charCodeAt(lineEnd);
+      if (code === 0x000a || code === 0x000d) break;
+      lineEnd += 1;
+    }
+    const nextStart =
+      lineEnd >= text.length
+        ? text.length
+        : text.charCodeAt(lineEnd) === 0x000d &&
+            text.charCodeAt(lineEnd + 1) === 0x000a
+          ? lineEnd + 2
+          : lineEnd + 1;
+    const line = text.slice(lineStart, lineEnd);
+    if (fence === null) {
+      const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      if (
+        open !== null &&
+        !(open[1][0] === "`" && open[2].includes("`")) // backtick info strings hold no backtick
+      ) {
+        fence = { char: open[1][0], len: open[1].length, start: lineStart };
+      } else {
+        outsideLines.push({ start: lineStart, end: lineEnd });
+      }
+    } else {
+      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+      if (
+        close !== null &&
+        close[1][0] === fence.char &&
+        close[1].length >= fence.len
+      ) {
+        regions.push({ start: fence.start, end: lineEnd });
+        fence = null;
+      }
+    }
+    lineStart = nextStart;
+  }
+  if (fence !== null) {
+    regions.push({ start: fence.start, end: text.length }); // unclosed: to EOF
+  }
+  // Inline code spans on the lines outside fences: a backtick run opens a
+  // span closed by the next run of exactly equal length on the same line; a
+  // run with no equal-length closer is ordinary text.
+  for (const { start, end } of outsideLines) {
+    let i = start;
+    while (i < end) {
+      if (text[i] !== "`") {
+        i += 1;
+        continue;
+      }
+      let runEnd = i;
+      while (runEnd < end && text[runEnd] === "`") runEnd += 1;
+      const runLength = runEnd - i;
+      let closeEnd = -1;
+      let scan = runEnd;
+      while (scan < end) {
+        if (text[scan] !== "`") {
+          scan += 1;
+          continue;
+        }
+        let scanEnd = scan;
+        while (scanEnd < end && text[scanEnd] === "`") scanEnd += 1;
+        if (scanEnd - scan === runLength) {
+          closeEnd = scanEnd;
+          break;
+        }
+        scan = scanEnd;
+      }
+      if (closeEnd === -1) {
+        i = runEnd;
+        continue;
+      }
+      regions.push({ start: i, end: closeEnd });
+      i = closeEnd;
+    }
+  }
+  regions.sort((a, b) => a.start - b.start);
+  return regions;
+}
+
+/**
  * Parse one source file into document-ordered pieces plus the section tree.
  * Pieces cover the whole file:
  *   - { kind: "content", text, owner }  plain bytes, owned by the innermost
@@ -693,6 +821,11 @@ function parseMdx(text) {
   let failure = null;
   let i = 0;
   let contentStart = 0;
+  // Fenced code blocks and inline code spans are literal text (T3-1's
+  // grammar boundary): the lexer skips whole regions, leaving their bytes in
+  // the pending content run — no construct is recognized inside them.
+  const literalRegions = markdownLiteralRegions(text);
+  let regionIndex = 0;
 
   const flushContent = (end) => {
     if (end > contentStart) {
@@ -709,6 +842,19 @@ function parseMdx(text) {
   };
 
   while (i < text.length) {
+    while (
+      regionIndex < literalRegions.length &&
+      literalRegions[regionIndex].end <= i
+    ) {
+      regionIndex += 1;
+    }
+    if (
+      regionIndex < literalRegions.length &&
+      i >= literalRegions[regionIndex].start
+    ) {
+      i = literalRegions[regionIndex].end; // literal bytes stay plain content
+      continue;
+    }
     const ch = text[i];
     if (
       ch === "i" &&
@@ -1624,17 +1770,153 @@ async function commandBuild(io, cwd, argv) {
 }
 
 /**
+ * `xspec check` (SPEC 12.2, scoped): validate without writing anything.
+ * Findings are the exit-1 report exactly as `build` reports them; a valid
+ * workspace exits 0 — T3-1's grammar-boundary arm asserts exactly that over
+ * fenced/code-span construct-like bytes. (This scope records no graph data,
+ * so there is no staleness to check beyond validation.)
+ */
+async function commandCheck(io, cwd, argv) {
+  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
+  const ws = await loadWorkspace(cwd, flags["--config"]);
+  if (ws.findings.length > 0) {
+    throw new FindingsError(ws.findings);
+  }
+  compileWorkspace(ws); // surfaces an in-scope cycle exactly as `build` does
+  if (flags["--json"]) {
+    io.stdout(canonicalJson(findingsDoc([])) + "\n");
+  }
+  return 0;
+}
+
+/** A requirement node's identity (SPEC 1.5): bare path for a root. */
+function nodeIdentity(rel, node) {
+  return node.isRoot ? rel : `${rel}#${node.id}`;
+}
+
+/**
+ * `xspec query nodes` (SPEC 11.1, scoped to T3-1's grammar-boundary arm): a
+ * single JSON document — with or without `--json` — listing every
+ * requirement node of the valid workspace, files in byte order of
+ * workspace-relative path, the root then sections in document order per
+ * file. Each row carries the node's identity (SPEC 1.5) with its construct
+ * byte range riding along; the scoped observation is that no node arises
+ * from construct-like bytes inside fences or code spans.
+ */
+async function commandQueryNodes(io, cwd, argv) {
+  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
+  const ws = await loadWorkspace(cwd, flags["--config"]);
+  if (ws.findings.length > 0) {
+    throw new FindingsError(ws.findings); // SPEC 13.3: reads gate on validity
+  }
+  compileWorkspace(ws); // an in-scope cycle refuses here too, never answers
+  const rows = [];
+  for (const record of ws.files.values()) {
+    rows.push({
+      identity: record.rel,
+      sourceRange: { start: 0, end: record.byteOf(record.text.length) },
+    });
+    for (const section of record.sections) {
+      rows.push({
+        identity: nodeIdentity(record.rel, section),
+        sourceRange: {
+          start: record.byteOf(section.openStart),
+          end: record.byteOf(section.closeEnd),
+        },
+      });
+    }
+  }
+  io.stdout(canonicalJson({ nodes: rows }) + "\n");
+  return 0;
+}
+
+/**
+ * `xspec query edges` (SPEC 11.1, scoped to T3-1's grammar-boundary arm): a
+ * single JSON document — with or without `--json` — listing every edge of
+ * the valid workspace's graph (SPEC 5.2): `contains` from each parent to
+ * each child section (the file root parenting top-level sections), `depends`
+ * from `d` props, `embeds` from `{text(...)}` embeddings; `references` never
+ * (no code groups in scope). Edges of each kind form a set — duplicates
+ * collapse — ordered deterministically by kind, source, then target (byte
+ * order). The scoped observation is that no edge arises from construct-like
+ * bytes inside fences or code spans.
+ */
+async function commandQueryEdges(io, cwd, argv) {
+  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
+  const ws = await loadWorkspace(cwd, flags["--config"]);
+  if (ws.findings.length > 0) {
+    throw new FindingsError(ws.findings); // SPEC 13.3: reads gate on validity
+  }
+  compileWorkspace(ws); // an in-scope cycle refuses here too, never answers
+  const edges = [];
+  const seen = new Set();
+  const push = (kind, from, to) => {
+    const key = `${kind}\u0000${from}\u0000${to}`;
+    if (seen.has(key)) return; // edges of each kind form a set (SPEC 5.2)
+    seen.add(key);
+    edges.push({ from, kind, to });
+  };
+  for (const record of ws.files.values()) {
+    for (const section of record.sections) {
+      push(
+        "contains",
+        nodeIdentity(record.rel, section.parent),
+        nodeIdentity(record.rel, section),
+      );
+    }
+    for (const section of record.sections) {
+      if (section.dRaw === undefined) continue;
+      const refs = parseDReferences(section.dRaw);
+      if (refs === null) continue; // unreachable: gated as 14.8 above
+      for (const ref of refs) {
+        const resolved = resolveRef(ws.files, record, ref);
+        if (resolved === null) continue; // unreachable: gated as 14.5 above
+        push(
+          "depends",
+          nodeIdentity(record.rel, section),
+          nodeIdentity(resolved.rel, resolved.node),
+        );
+      }
+    }
+    for (const piece of record.pieces) {
+      if (piece.kind !== "embed") continue;
+      if (piece.target === null) continue; // unreachable: gated as 14.6 above
+      push(
+        "embeds",
+        nodeIdentity(record.rel, piece.owner),
+        nodeIdentity(piece.target.rel, piece.target.node),
+      );
+    }
+  }
+  const byBytes = (a, b) =>
+    Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+  edges.sort(
+    (a, b) =>
+      byBytes(a.kind, b.kind) || byBytes(a.from, b.from) || byBytes(a.to, b.to),
+  );
+  io.stdout(canonicalJson({ edges }) + "\n");
+  return 0;
+}
+
+/**
  * `xspec query node <node>` (SPEC 11, scoped): a single JSON document — with
  * or without `--json` — reporting the node's own and subtree text (SPEC 1.6,
  * the §CONF-MD query surface); identity and source range ride along in the
  * natural SPEC 11 shape. `<node>` is `path#id`, or a bare `path` for a file's
- * root node (SPEC 1.5).
+ * root node (SPEC 1.5). The `nodes` and `edges` subcommands (above) complete
+ * the scoped query surface; any other subcommand is out of scope.
  */
 async function commandQuery(io, cwd, argv) {
   const sub = argv[0];
+  if (sub === "nodes") {
+    return await commandQueryNodes(io, cwd, argv.slice(1));
+  }
+  if (sub === "edges") {
+    return await commandQueryEdges(io, cwd, argv.slice(1));
+  }
   if (sub !== "node") {
     throw new UsageError(
-      `unknown query subcommand ${String(sub)} (SPEC 11, 12.0; this fixture's scope is \`query node\`, CERTIFICATIONS.md §CONF-MD)`,
+      `unknown query subcommand ${String(sub)} (SPEC 11, 12.0; this fixture's scope is \`query node\`/\`nodes\`/\`edges\`, CERTIFICATIONS.md §CONF-MD)`,
     );
   }
   const { flags, positionals } = parseArgs(argv.slice(1), READ_FLAGS, [1, 1]);
@@ -1704,6 +1986,8 @@ async function dispatchCommand(io, cwd, argv) {
     switch (command) {
       case "build":
         return await commandBuild(io, cwd, rest);
+      case "check":
+        return await commandCheck(io, cwd, rest);
       case "query":
         return await commandQuery(io, cwd, rest);
       default:

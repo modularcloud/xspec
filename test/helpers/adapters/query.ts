@@ -276,6 +276,36 @@ export function decodeNodeSummaryRowsReport(
   );
 }
 
+/**
+ * `query nodes` rows decoded to identities alone (T3-1's grammar-boundary
+ * arm). That arm is in CERTIFICATIONS.md §CONF-MD's scope, which pins the
+ * fixture product's `query nodes` surface to the no-node observation for
+ * construct-like bytes inside fences and code spans: demanding tags,
+ * coverage, or source-range semantics would reject a document the scope
+ * permits (the row counterpart of {@link decodeNodeTextSummary}'s scoping).
+ * The `nodes` key and per-row `identity` are the `query nodes` shape's own
+ * (see the ASSUMED SHAPE above); other row members are ignored, not
+ * validated. Absent or malformed identities still fail loudly (H-3).
+ */
+export function decodeNodeIdentityRowsReport(
+  doc: unknown,
+  context?: string,
+): string[] {
+  const site = rootSite("query nodes (identity-only rows)", context);
+  const obj = expectObject(doc, site);
+  const rowsSite = at(site, "nodes");
+  return expectArray(requiredKey(obj, "nodes", site), rowsSite).map(
+    (element, index) => {
+      const rowSite = at(rowsSite, index);
+      const row = expectObject(element, rowSite);
+      return expectNonEmptyString(
+        requiredKey(row, "identity", rowSite),
+        at(rowSite, "identity"),
+      );
+    },
+  );
+}
+
 function decodeNodeRow(value: unknown, site: DecodeSite): NodeRow {
   const obj = expectObject(value, site);
   return {

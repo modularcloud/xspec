@@ -322,14 +322,29 @@ A "new test T<x>" task always means, in one change:
   mid-loop reds unchanged (certification-document ×3 → FP-091; S-1's 9
   unmapped keys → stages E/G).]
 
-- [ ] FP-010 — T3-1: add the grammar-boundary arm. [R1 #15; TEST-SPEC §3]
+- [x] FP-010 — T3-1: add the grammar-boundary arm. [R1 #15; TEST-SPEC §3]
   `test/suite/registry/section-3.ts` — the T3-1 fixture's fence (~line 92)
   contains only plain text. Add fences and an inline code span containing
   `<S id="x">`, `<div>`, `import X from "./X.xspec"`, `{text("a")}`, and
   assert: no node, no edge, no finding, bytes preserved byte-for-byte.
   Pair with FP-011 (same red-window note as FP-008/FP-009).
+  [Done 2026-08-11, one spawn/commit with FP-011: the ```text fence gained a
+  `<div>` line; a second ```md fence in gamma carries `<S id="x">`,
+  `import X from "./X.xspec"`, `{text("a")}`; an inline code span in gamma
+  carries `<S id="x">{text("a")}`. Arm asserts: `build` and `check` exit 0
+  (no finding of any kind — a pattern-parsing product instead hits 14.20/
+  14.16/14.15/14.6); `query nodes` identity set exactly the six staged
+  requirement nodes via a new scoped identity-only decoder
+  (`decodeNodeIdentityRowsReport`, adapters/query.ts, S-5-guarded — CONF-MD's
+  scope pins no tags/coverage/range semantics); `query edges` set exactly
+  the 4 `contains` + 3 `depends` edges (decodeEdgesReport +
+  assertEdgeSetEqual); compiled bytes byte-asserted with the fence/span
+  lines preserved verbatim. NOT red against this repo's product: the
+  post-phase-10 product already parses fences/spans as literal (T3-1 stays
+  green, a real pass — probe below proves the arm's teeth); traceability
+  unchanged (T3-1 → "3"; asserts no numbered condition).]
 
-- [ ] FP-011 — Rework CONF-MD to its refreshed CERTIFICATIONS.md scope.
+- [x] FP-011 — Rework CONF-MD to its refreshed CERTIFICATIONS.md scope.
   [R3 gap 3; CERTIFICATIONS.md CONF-MD]
   `test/fixtures/conf-md/product.mjs` (+ `bin-class.mjs`/`bin-cr.mjs`):
   (a) support `check` with exit 0 on T3-1's grammar-boundary staging (today:
@@ -339,6 +354,25 @@ A "new test T<x>" task always means, in one change:
   content — no node, no edge, no finding (today a spurious 14.20), bytes
   preserved. After: FP-010. Verify: CONF-MD conformer green on in-scope
   tests incl. T3-1's new arm; violators still certify.
+  [Done 2026-08-11, same commit as FP-010. `markdownLiteralRegions` pre-scan
+  (CommonMark-ish subset: >=3-backtick/tilde fences with up-to-3-space
+  indent, backtick info strings without backticks, unclosed-to-EOF; inline
+  spans close at an exactly-equal-length backtick run on the same line —
+  single-line spans are the staged scope) feeds parseMdx, which skips whole
+  regions into plain content; the scan uses plain Markdown line structure,
+  deliberately outside the CERT-13 deviation hook so each violator keeps its
+  single deviation. `check` = validate + cycle surface, write nothing, exit
+  0/1; `query nodes`/`query edges` answer the honest whole reports (roots as
+  bare paths, contains/depends/embeds, set-collapsed, byte-ordered) gated on
+  validity per 13.3. No P-2 interference: the generator's prose alphabet
+  excludes backticks and `~`. bin-class/bin-cr untouched. Verified:
+  CONF-MD conformer 8/8 in-scope (new arm included); VIOL-MD-CLASS fails
+  exactly T3-3+P-2, VIOL-MD-CR exactly T3-4+P-2, both passing T3-1;
+  `npm run test:self` unchanged 4 planned mid-loop reds
+  (certification-document ×3 → FP-091; S-1's 9 unmapped keys → stages E/G);
+  teeth probe: the pre-rework conformer on the new staging exits 1 with the
+  diagnosed spurious 14.20 ("unclosed section tag") — the arm fails any
+  parse-by-pattern product at `buildOk`.]
 
 - [ ] FP-012 — T1.7-1: add the bare-identity edge-endpoint arms. [R1 #14;
   TEST-SPEC §1.7]

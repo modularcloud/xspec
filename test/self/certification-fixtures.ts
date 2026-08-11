@@ -201,10 +201,14 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
   ),
   // CONF-MD (§CONF-MD): Markdown compilation — `build` with byte-exact
   // Markdown output per SPEC 3 (removal, replacement, the line-drop rule,
-  // line terminators), `query node` reporting own and subtree text (SPEC
-  // 1.6), and the emission scope of SPEC 7.3, over spec-group workspaces
-  // with imports, embeddings, comments, mixed line terminators, and the
-  // full 2.7 prop set.
+  // line terminators, the parse-not-pattern grammar boundary), `query node`
+  // reporting own and subtree text (SPEC 1.6), `check` exiting 0 and
+  // `query nodes`/`query edges` reporting no node and no edge for
+  // construct-like bytes inside fences and code spans (T3-1's
+  // grammar-boundary arm), and the emission scope of SPEC 7.3, over
+  // spec-group workspaces with imports, embeddings, comments, mixed line
+  // terminators, fenced code blocks and inline code spans carrying
+  // construct-like bytes, and the full 2.7 prop set.
   conformer(
     "CONF-MD",
     "conf-md/bin.mjs",

@@ -18,13 +18,26 @@
 // - A lone U+000D appears only in T3-4's fixtures; every other fixture uses
 //   LF terminators exclusively (CRLF appears only in T3-4).
 // - T3-1 stages sections carrying the full prop set of 2.7 — `id`, `d`
-//   (external and local forms, resolving as staged), `coverage`, and `tags`.
+//   (external and local forms, resolving as staged), `coverage`, and `tags`,
+//   plus the grammar-boundary staging: its fenced code blocks and inline
+//   code span carry construct-like bytes that must stay literal content
+//   (constructs exist only where the MDX parse yields them).
 
 import { assertFileBytes, fail } from "../../helpers/assertions.js";
+import {
+  decodeEdgesReport,
+  decodeNodeIdentityRowsReport,
+} from "../../helpers/adapters/index.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { buildOk } from "./support.js";
+import {
+  assertEdgeSetEqual,
+  assertSameJson,
+  buildOk,
+  expectExit,
+  runJson,
+} from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): one spec group. The spec-group
 // glob matches only `.mdx` files, so no glob matches a Markdown emit
@@ -73,8 +86,19 @@ const REMOVALS_BASE_COMPILED = "Base text.\n";
 // `<Spec>` opening/closing tags carrying the full prop set of 2.7 (`id`, `d`
 // in external and local forms, `coverage`, `tags`), and MDX comments (own-line
 // and in-line) — amid content that must survive byte-for-byte: a heading, a
-// table, a code fence, trailing spaces, and blank lines. Dependencies are
+// table, code fences, trailing spaces, and blank lines. Dependencies are
 // acyclic: alpha → {BASE.base, beta}, beta → BASE.base (SPEC 5.3).
+//
+// Grammar boundary (SPEC 2.7, 14.16, 14.20): constructs exist only where the
+// MDX parse yields them — fenced code blocks and inline code spans are
+// literal text — so the fences and an inline code span carry construct-like
+// bytes: `<div>` (else 14.16), `<S id="x">` (else a node, or 14.20 for the
+// unmatched tag), `import X from "./X.xspec"` (else 14.15: no X.mdx exists),
+// and `{text("a")}` (else an edge, or 14.6: no id "a" exists). A product
+// recognizing constructs by textual pattern rather than by parse trips at
+// least one of the arm's assertions: a finding (build/check no longer exit
+// 0), a phantom node or edge, or bytes missing from the compiled output.
+const SPAN_LINE = 'Inline code span: `<S id="x">{text("a")}` stays literal.';
 const REMOVALS_SOURCE = [
   'import BASE from "./BASE.xspec"', // removed; line drops (SPEC 3)
   "",
@@ -90,6 +114,7 @@ const REMOVALS_SOURCE = [
   "{/* an own-line comment, removed with its line */}",
   "```text",
   "fenced   content with spaces   ",
+  "<div>", // literal inside the fence: no 14.16, preserved (grammar boundary)
   "```",
   "",
   "Middle {/* in-line comment, removed in place */}word.",
@@ -101,13 +126,20 @@ const REMOVALS_SOURCE = [
   "",
   '<S id="gamma">Gamma keeps this line.', // tag deleted in place, content kept
   "More gamma prose.",
+  SPAN_LINE, // construct-like bytes inside an inline code span, literal
+  "```md", // a second fence: construct-like bytes on every line, literal
+  '<S id="x">',
+  'import X from "./X.xspec"',
+  '{text("a")}',
+  "```",
   "</S>",
   "",
 ].join("\n");
 
 // Hand-derived (SPEC 3): each construct is deleted exactly, in place; every
 // line left empty purely by removals drops with its terminator; every other
-// line — author whitespace included — is preserved byte-for-byte.
+// line — author whitespace and the fence/code-span bytes included — is
+// preserved byte-for-byte.
 const REMOVALS_COMPILED = [
   "",
   "# Removals fixture",
@@ -120,6 +152,7 @@ const REMOVALS_COMPILED = [
   "",
   "```text",
   "fenced   content with spaces   ",
+  "<div>",
   "```",
   "",
   "Middle word.", // "Middle " + "word." after exact in-place comment deletion
@@ -128,13 +161,45 @@ const REMOVALS_COMPILED = [
   "",
   "Gamma keeps this line.", // the in-place-deleted opening tag's line, kept
   "More gamma prose.",
+  SPAN_LINE,
+  "```md",
+  '<S id="x">',
+  'import X from "./X.xspec"',
+  '{text("a")}',
+  "```",
   "",
 ].join("\n");
+
+// The exact requirement-node universe of the T3-1 workspace (SPEC 1.5: roots
+// as bare paths, sections as `path#id`), sorted bytewise. `<S id="x">` inside
+// a fence or code span contributes nothing — exact-set equality proves it.
+const REMOVALS_NODE_IDENTITIES = [
+  "specs/A.mdx",
+  "specs/A.mdx#alpha",
+  "specs/A.mdx#beta",
+  "specs/A.mdx#gamma",
+  "specs/BASE.mdx",
+  "specs/BASE.mdx#base",
+] as const;
+
+// The exact edge universe (SPEC 5.2): `contains` from each file root to its
+// top-level sections, `depends` from the staged `d` props. No `embeds` edge
+// exists — the only `text(...)`-like bytes sit inside a fence and a code
+// span — and the fenced import contributes no edge and no import resolution.
+const REMOVALS_EDGES = [
+  { from: "specs/A.mdx", to: "specs/A.mdx#alpha", kind: "contains" },
+  { from: "specs/A.mdx", to: "specs/A.mdx#beta", kind: "contains" },
+  { from: "specs/A.mdx", to: "specs/A.mdx#gamma", kind: "contains" },
+  { from: "specs/BASE.mdx", to: "specs/BASE.mdx#base", kind: "contains" },
+  { from: "specs/A.mdx#alpha", to: "specs/BASE.mdx#base", kind: "depends" },
+  { from: "specs/A.mdx#alpha", to: "specs/A.mdx#beta", kind: "depends" },
+  { from: "specs/A.mdx#beta", to: "specs/BASE.mdx#base", kind: "depends" },
+] as const;
 
 const T3_1 = defineProductTest({
   id: "T3-1",
   title:
-    "imports, `<S>`/`<Spec>` opening and closing tags with all their props (`id`, `d`, `coverage`, `tags`), and MDX comments are removed by exact textual deletion in place; tables, code fences, trailing spaces, and blank lines are preserved byte-for-byte (SPEC 3, 2.7)",
+    "imports, `<S>`/`<Spec>` opening and closing tags with all their props (`id`, `d`, `coverage`, `tags`), and MDX comments are removed by exact textual deletion in place; tables, code fences, trailing spaces, and blank lines are preserved byte-for-byte; grammar boundary: construct-like bytes inside fenced code blocks and an inline code span are literal text — no node, no edge, no finding, preserved byte-for-byte (SPEC 3, 2.7, 14.16, 14.20)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -147,17 +212,59 @@ const T3_1 = defineProductTest({
       await buildOk(
         product,
         workspace,
-        "T3-1 `build` with `markdown: { emit: true }`",
+        "T3-1 `build` with `markdown: { emit: true }` — the fenced and " +
+          "code-span construct-like bytes trigger no finding of any kind " +
+          "(SPEC 3, 2.7: constructs exist only where the MDX parse yields them)",
       );
       await assertFileBytes(
         workspace.path("specs/A.md"),
         REMOVALS_COMPILED,
-        "T3-1 emitted specs/A.md — constructs deleted exactly in place, everything else preserved byte-for-byte (SPEC 3)",
+        "T3-1 emitted specs/A.md — constructs deleted exactly in place, everything else (fence and code-span bytes included) preserved byte-for-byte (SPEC 3)",
       );
       await assertFileBytes(
         workspace.path("specs/BASE.md"),
         REMOVALS_BASE_COMPILED,
         "T3-1 emitted specs/BASE.md (SPEC 3)",
+      );
+
+      // Grammar boundary: `check` reports no finding of any kind either.
+      await expectExit(
+        product,
+        workspace,
+        ["check"],
+        0,
+        "T3-1 `check` — the fenced and code-span construct-like bytes " +
+          "trigger no finding of any kind (SPEC 2.7, 14.16, 14.20)",
+      );
+
+      // The construct-like bytes create no node: the reported requirement
+      // nodes are exactly the staged roots and sections (SPEC 1.5, 11.1) —
+      // in particular no node spells the fenced/code-span `id` "x".
+      const nodesLabel =
+        "T3-1 `query nodes` — fenced and code-span construct-like bytes create no node (SPEC 2.7, 11.1)";
+      const identities = decodeNodeIdentityRowsReport(
+        await runJson(product, workspace, ["query", "nodes"], nodesLabel),
+        nodesLabel,
+      );
+      assertSameJson(
+        [...identities].sort(),
+        [...REMOVALS_NODE_IDENTITIES],
+        `${nodesLabel}: the reported node-identity set`,
+      );
+
+      // …and no edge: the reported edges are exactly the staged `contains`
+      // and `depends` universe (SPEC 5.2) — the fenced import and the
+      // fenced/code-span `{text("a")}` bytes contribute none.
+      const edgesLabel =
+        "T3-1 `query edges` — fenced and code-span construct-like bytes create no edge (SPEC 2.7, 5.2)";
+      const edges = decodeEdgesReport(
+        await runJson(product, workspace, ["query", "edges"], edgesLabel),
+        edgesLabel,
+      );
+      assertEdgeSetEqual(
+        edges,
+        REMOVALS_EDGES,
+        `${edgesLabel}: the reported edge set`,
       );
     } finally {
       await workspace.dispose();
