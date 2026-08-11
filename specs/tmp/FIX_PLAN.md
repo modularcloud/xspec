@@ -1375,12 +1375,49 @@ A "new test T<x>" task always means, in one change:
   (["10.1", "14"] — 14.21's primary record already rides "14"); T10.1-4
   in no certification scope.]
 
-- [ ] FP-034 — T10.4-2: add the non-scope presence recordings. [R2 #21;
+- [x] FP-034 — T10.4-2: add the non-scope presence recordings. [R2 #21;
   TEST-SPEC §10.4]
   `test/suite/registry/section-10.4.ts`: context arm
   (`metadata-consistency`, removed target `T` re-authored) and origin arm
   (`dependency-consistency`, origin `D` deleted with hashes/context set
   unchanged).
+  [Done 2026-08-11: both arms appended to T10.4-2 (title extended, timeout
+  240s → 360s), each its own git-baselined workspace. Context arm: baseline
+  `D` bears `d={"tt"}` to sibling `T` in one file; one edit removes the
+  reference and deletes T's section; `review create --base` derives exactly
+  {metadata-consistency D, subtree-coherence root} (kindScopeSet-pinned; the
+  deleted T skipped for its changed ancestor), D's item's context exactly
+  [{T, absent}] via new `assertSoleContext`; resolve no-change; re-author T
+  → `invalidated` with context presented [{T, present}]. Origin arm:
+  X→T→D across three files (D beside sibling `e`); the d-list edit on D
+  (gains `d={"e"}`) derives exactly {metadata-consistency D,
+  dependency-consistency T, dependency-consistency X} — no `changed` node —
+  with X's item context [{T, present}] and origin [{D, after-present}]
+  (`assertSoleOrigin`); resolve no-change; one edit removes T's `d={O.d}`
+  (import kept — an unused import is valid and records no edges, SPEC 2.1)
+  and deletes D's section → `invalidated`, post-show pinning scope X
+  present, context T present, origin D after-side absent. Arm purity is
+  asserted in-test via `assertHashPremises` (extracted from
+  runSensitivityArms' inline loops, now fail-loud on a missing capture):
+  context arm — D.metadataHash the item's only relevant hash, unchanged
+  across the re-authoring, D still metadata-changed vs baseline (5.5's iff
+  pins the d-set, so the generated context set stays {T}); origin arm —
+  X.ownHash/X.metadataHash/T.subtreeHash unchanged (d-prop edits touch no
+  own content, 1.6/5.5) while T.metadataHash changes and T.effectiveHash
+  stays changed vs baseline (context set stays {T}). NOT red against this
+  repo's product: direct CLI probes of both stagings returned exactly the
+  expected item sets, hash brackets, presence flips, and invalidations (the
+  product records presence for every scope/context/origin node — its
+  `current` holds D presence-only with hashes {}), so the suite pass
+  (section-10.4 5/5) is genuine; teeth live in the purity brackets plus the
+  presence-flip assertion — a product recording presence for scope nodes
+  alone (or scope+context, origin arm) has no other divergence channel and
+  reports no-change where the arms demand invalidated. Typecheck/format
+  clean; `npm run test:self` unchanged 4 planned mid-loop reds
+  (certification-document ×3 → FP-091; S-1's 7 unmapped keys → stage G),
+  S-5 and certification green. Traceability unchanged (["10.4"]; 1.6/5.5/
+  5.6/10.5 are context with home coverage elsewhere; no numbered condition
+  asserted); T10.4-2 in no certification scope.]
 
 - [ ] FP-035 — T10.7-7: assert payload source ranges for EVERY present
   node. [R2 #22; TEST-SPEC §10.7]

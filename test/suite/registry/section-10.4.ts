@@ -425,6 +425,60 @@ async function captureHashes(
 }
 
 /**
+ * Assert the hash premises bracketing a staged edit (SPEC 5.5): every
+ * `changed` probe must differ between the two captures and every `unchanged`
+ * probe must not, so no arm passes or fails for the wrong reason (H-8). A
+ * probe whose node was not captured on both sides fails loudly as a harness
+ * staging defect.
+ */
+function assertHashPremises(
+  before: ReadonlyMap<string, NodeHashes>,
+  after: ReadonlyMap<string, NodeHashes>,
+  changed: readonly HashProbe[],
+  unchanged: readonly HashProbe[],
+  context: string,
+): void {
+  const probeValue = (
+    captures: ReadonlyMap<string, NodeHashes>,
+    probe: HashProbe,
+    side: "pre-edit" | "post-edit",
+  ): string => {
+    const hashes = captures.get(probe.node);
+    if (hashes === undefined) {
+      fail(
+        `${context}: harness staging defect — no ${side} \`query node\` ` +
+          `capture exists for ${probe.node}, so its ${probe.hash} premise ` +
+          `cannot be checked`,
+      );
+    }
+    return hashes[probe.hash];
+  };
+  for (const probe of changed) {
+    const beforeValue = probeValue(before, probe, "pre-edit");
+    const afterValue = probeValue(after, probe, "post-edit");
+    if (beforeValue === afterValue) {
+      fail(
+        `${context}: staging premise — the edit must change ${probe.node}'s ` +
+          `${probe.hash} (SPEC 5.5) for this arm to exercise it; both ` +
+          `captures report ${JSON.stringify(afterValue)}`,
+      );
+    }
+  }
+  for (const probe of unchanged) {
+    const beforeValue = probeValue(before, probe, "pre-edit");
+    const afterValue = probeValue(after, probe, "post-edit");
+    if (beforeValue !== afterValue) {
+      fail(
+        `${context}: staging premise — the edit must leave ${probe.node}'s ` +
+          `${probe.hash} unchanged (SPEC 5.5) so the arm isolates its ` +
+          `intended sensitivity; got ${JSON.stringify(beforeValue)} -> ` +
+          JSON.stringify(afterValue),
+      );
+    }
+  }
+}
+
+/**
  * Run one kind's sensitivity arms against its resolved item: per arm, assert
  * the staged edit's hash premises (SPEC 5.5), then that the item is reported
  * `invalidated` exactly when the arm touches relevant state (SPEC 10.4), and
@@ -459,29 +513,7 @@ async function runSensitivityArms(
       probedNodes,
       `${context}, post-edit capture`,
     );
-    for (const probe of arm.changed) {
-      const beforeValue = before.get(probe.node)?.[probe.hash];
-      const afterValue = after.get(probe.node)?.[probe.hash];
-      if (beforeValue === afterValue) {
-        fail(
-          `${context}: staging premise — the edit must change ${probe.node}'s ` +
-            `${probe.hash} (SPEC 5.5) for this arm to exercise it; both ` +
-            `captures report ${JSON.stringify(afterValue)}`,
-        );
-      }
-    }
-    for (const probe of arm.unchanged) {
-      const beforeValue = before.get(probe.node)?.[probe.hash];
-      const afterValue = after.get(probe.node)?.[probe.hash];
-      if (beforeValue !== afterValue) {
-        fail(
-          `${context}: staging premise — the edit must leave ${probe.node}'s ` +
-            `${probe.hash} unchanged (SPEC 5.5) so the arm isolates its ` +
-            `intended sensitivity; got ${JSON.stringify(beforeValue)} -> ` +
-            JSON.stringify(afterValue),
-        );
-      }
-    }
+    assertHashPremises(before, after, arm.changed, arm.unchanged, context);
     await expectItemStatus(
       product,
       workspace,
@@ -1375,11 +1407,132 @@ function t2Spec(withX: boolean, yText: string): string {
   return [...lines, '<S id="y">', yText, "</S>", ""].join("\n");
 }
 
+// Non-scope presence recordings (SPEC 10.4: presence is recorded for every
+// scope, context, and origin node). Each arm is pure — no recorded relevant
+// hash of the item changes (query-node brackets assert it) and the generated
+// context set stays put — so only the named node's presence divergence can
+// invalidate, and a product recording presence for scope nodes alone reports
+// the item still resolved.
+
+// Context arm (`metadata-consistency`): baseline D bears a `d` reference to
+// sibling T; one edit removes the reference and deletes T's section, so
+// `review create --base` derives D's item with the removed target T as its
+// one context node (SPEC 10.5), currently absent.
+const T2C_FILE = "specs/C.mdx";
+const T2C_ROOT = "specs/C.mdx";
+const T2C_D = "specs/C.mdx#dd";
+const T2C_T = "specs/C.mdx#tt";
+
+function t2cSpec(dAttrs: string, withT: boolean): string {
+  const t = withT ? ["", '<S id="tt">', "Tee text.", "</S>"] : [];
+  return [`<S id="dd"${dAttrs}>`, "Dee own text.", "</S>", ...t, ""].join("\n");
+}
+
+// Origin arm (`dependency-consistency`): X depends on T, T depends on D — a
+// section in its own file, beside sibling `e`, the target D's staged d-list
+// edit gains. That edit leaves D `metadata-changed` and nothing `changed`
+// (SPEC 5.6), so X's item derives as scope X, context {T} (the
+// dependency-edge target whose effectiveHash changed), origin {D} (the
+// originating node of T's change) (SPEC 10.5).
+const T2O_X_FILE = "specs/X.mdx";
+const T2O_T_FILE = "specs/T.mdx";
+const T2O_D_FILE = "specs/O.mdx";
+const T2O_X = "specs/X.mdx#x";
+const T2O_T = "specs/T.mdx#t";
+const T2O_D = "specs/O.mdx#d";
+
+const T2O_X_SOURCE = [
+  'import T from "./T.xspec"',
+  "",
+  '<S id="x" d={T.t}>',
+  "Ex own text.",
+  "</S>",
+  "",
+].join("\n");
+
+// The import stays when the `d` reference goes: an import whose binding is
+// never used is valid and records no edges (SPEC 2.1), so the reference
+// removal is a pure d-prop edit.
+function t2oTSpec(withD: boolean): string {
+  return [
+    'import O from "./O.xspec"',
+    "",
+    withD ? '<S id="t" d={O.d}>' : '<S id="t">',
+    "Tee own text.",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+// `dAttrs === null` deletes D's section; sibling `e` remains, so the file
+// keeps its root and the deletion touches no other source.
+function t2oDSpec(dAttrs: string | null): string {
+  const d =
+    dAttrs === null ? [] : [`<S id="d"${dAttrs}>`, "Dee own text.", "</S>", ""];
+  return [...d, '<S id="e">', "Ee text.", "</S>", ""].join("\n");
+}
+
+/** Assert an item's context is exactly one node with the given presence. */
+function assertSoleContext(
+  item: ReviewItem,
+  node: string,
+  present: boolean,
+  context: string,
+): void {
+  const summary = item.context.map((state) => ({
+    node: state.node,
+    present: state.present,
+  }));
+  if (
+    summary.length === 1 &&
+    summary[0].node === node &&
+    summary[0].present === present
+  ) {
+    return;
+  }
+  fail(
+    `${context}: the item's context must be exactly ` +
+      `[{node: ${JSON.stringify(node)}, present: ${String(present)}}] — the ` +
+      `strategy-derived context node presented under its current identity ` +
+      `and presence (SPEC 10.4, 10.5, 10.7); got ${JSON.stringify(summary)}`,
+  );
+}
+
+/**
+ * Assert an item's origin is exactly one node whose after side carries the
+ * given presence (the after side reads the current graph, SPEC 10.7).
+ */
+function assertSoleOrigin(
+  item: ReviewItem,
+  node: string,
+  afterPresent: boolean,
+  context: string,
+): void {
+  const summary = item.origin.map((entry) => ({
+    node: entry.node,
+    afterPresent: entry.after.present,
+  }));
+  if (
+    summary.length === 1 &&
+    summary[0].node === node &&
+    summary[0].afterPresent === afterPresent
+  ) {
+    return;
+  }
+  fail(
+    `${context}: the item's origin must be exactly one entry for ` +
+      `${JSON.stringify(node)} with its after side ` +
+      `${afterPresent ? "present" : "absent"} — the originating node of the ` +
+      `reviewed change (SPEC 5.6, 10.5), its after side read from the ` +
+      `current graph (SPEC 10.7); got ${JSON.stringify(summary)}`,
+  );
+}
+
 const T10_4_2 = defineProductTest({
   id: "T10.4-2",
   title:
-    "presence changes: deleting a scope node after resolve invalidates the resolution (presence recorded present, node now absent); the item stays resolvable against absence, and a node already absent at resolve time does not invalidate by remaining absent across an unrelated edit — deletion review stays resolvable; restoring the node invalidates the resolution recorded against absence (presence changed in the other direction) (SPEC 10.2, 10.3, 10.4)",
-  timeoutMs: 240_000,
+    "presence changes: deleting a scope node after resolve invalidates the resolution (presence recorded present, node now absent); the item stays resolvable against absence, and a node already absent at resolve time does not invalidate by remaining absent across an unrelated edit — deletion review stays resolvable; restoring the node invalidates the resolution recorded against absence (presence changed in the other direction); non-scope presence recordings (presence is recorded for every scope, context, and origin node), each arm pure — no recorded relevant hash of the item and no generated context set changes, so only the named node's presence divergence can invalidate and a product recording presence for scope nodes alone reports the item still resolved: context arm (metadata-consistency) — baseline D bears a `d` reference to sibling T, one edit removes the reference and deletes T's section, `review create --base` derives D's item with the removed target T as context, recorded absent at resolve; re-authoring T reads the item `invalidated` through the context node's absent-to-present flip alone (D's metadataHash and the context set unchanged); origin arm (dependency-consistency) — baseline X depends on T, T depends on D (a section in its own file); a d-list edit on D derives X's item (scope X, context {T}, origin {D}); after resolve, one edit removes T's reference to D and deletes D's section — X's ownHash and metadataHash and T's subtreeHash unchanged (d-prop edits touch no own content, SPEC 1.6/5.5) and the context set stays {T} (T's effectiveHash still changed against the baseline), so the item reads `invalidated` through the origin node's present-to-absent flip alone (SPEC 1.6, 5.5, 5.6, 10.2, 10.3, 10.4, 10.5)",
+  timeoutMs: 360_000,
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -1519,6 +1672,372 @@ const T10_4_2 = defineProductTest({
               `present: true}, got ${JSON.stringify(afterRestore.scope)}`,
           );
         }
+      },
+    );
+
+    // --- context arm: a context node's absent-to-present flip --------------
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      { [T2C_FILE]: t2cSpec(' d={"tt"}', true) },
+      async (workspace) => {
+        const prefix = "T10.4-2 context arm (metadata-consistency)";
+        await workspace.gitInit();
+        const base = await workspace.gitCommitAll("baseline");
+        await buildOk(product, workspace, `${prefix} \`build\` at baseline`);
+        const atBase = await captureHashes(
+          product,
+          workspace,
+          [T2C_D],
+          `${prefix}, baseline capture`,
+        );
+
+        // One edit removes D's `d` reference and deletes T's section.
+        await workspace.file(T2C_FILE, t2cSpec("", false));
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after the reference-removing edit`,
+        );
+        const atCreate = await captureHashes(
+          product,
+          workspace,
+          [T2C_D],
+          `${prefix}, creation-moment capture`,
+        );
+        assertHashPremises(
+          atBase,
+          atCreate,
+          // D `metadata-changed` (SPEC 5.6) — the item generates.
+          [{ node: T2C_D, hash: "metadataHash" }],
+          // d-prop edits touch no own content (SPEC 1.6, 5.5).
+          [
+            { node: T2C_D, hash: "ownHash" },
+            { node: T2C_D, hash: "subtreeHash" },
+          ],
+          `${prefix}, staging the metadata-changed premise`,
+        );
+
+        await expectExit(
+          product,
+          workspace,
+          ["review", "create", "--base", base, "--name", "s"],
+          0,
+          `${prefix} \`review create --base <baseline> --name s\``,
+        );
+        const status = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          kindScopeSet(status),
+          [
+            `metadata-consistency ${T2C_D}`,
+            `subtree-coherence ${T2C_ROOT}`,
+          ].sort(),
+          `${prefix}: the one edit yields D's metadata-consistency item ` +
+            `plus the changed root's subtree-coherence item — the deleted T ` +
+            `is skipped for its changed ancestor (SPEC 10.5)`,
+        );
+        const dId = requireRow(
+          status,
+          "metadata-consistency",
+          T2C_D,
+          prefix,
+        ).id;
+        assertSoleContext(
+          await showItem(product, workspace, "s", dId, `${prefix} at create`),
+          T2C_T,
+          false,
+          `${prefix} at create — the item's context is the removed ` +
+            `\`d\` target, currently absent`,
+        );
+
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          dId,
+          "no-change",
+          `${prefix} \`review resolve s <D item> --status no-change\` ` +
+            `(context node T absent — its presence recorded so, SPEC 10.4)`,
+        );
+        await expectItemStatus(
+          product,
+          workspace,
+          "s",
+          dId,
+          "no-change",
+          `${prefix} sanity — the fresh resolution matches the graph`,
+        );
+
+        // Re-author T. The item's only relevant hash (D's metadataHash) and
+        // its generated context set are untouched; only the context node's
+        // presence diverges from the recorded state.
+        await workspace.file(T2C_FILE, t2cSpec("", true));
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after re-authoring T`,
+        );
+        const afterRestore = await captureHashes(
+          product,
+          workspace,
+          [T2C_D],
+          `${prefix}, post-restore capture`,
+        );
+        assertHashPremises(
+          atCreate,
+          afterRestore,
+          [],
+          // The item's one relevant hash is unchanged across the edit (the
+          // pre-edit capture equals the state the resolve recorded: no edit
+          // intervened).
+          [{ node: T2C_D, hash: "metadataHash" }],
+          `${prefix}, purity of the re-authoring edit`,
+        );
+        assertHashPremises(
+          atBase,
+          afterRestore,
+          // D still `metadata-changed` against the baseline, and metadataHash
+          // equality tracks the `d` target set exactly (SPEC 5.5), so the
+          // generators still derive the item with context {T} (SPEC 10.5).
+          [{ node: T2C_D, hash: "metadataHash" }],
+          [],
+          `${prefix}, the generated context set stays the removed target`,
+        );
+        await expectItemStatus(
+          product,
+          workspace,
+          "s",
+          dId,
+          "invalidated",
+          `${prefix} after re-authoring T — presence is recorded for the ` +
+            `context node, and its absent-to-present flip alone invalidates ` +
+            `(SPEC 10.4); a product recording presence for scope nodes ` +
+            `alone reports the item still resolved`,
+        );
+        const restored = await showItem(
+          product,
+          workspace,
+          "s",
+          dId,
+          `${prefix} post-restore read`,
+        );
+        assertSoleContext(
+          restored,
+          T2C_T,
+          true,
+          `${prefix} post-restore — the recorded-absent context node is ` +
+            `presented under its current presence`,
+        );
+      },
+    );
+
+    // --- origin arm: an origin node's present-to-absent flip ---------------
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      {
+        [T2O_X_FILE]: T2O_X_SOURCE,
+        [T2O_T_FILE]: t2oTSpec(true),
+        [T2O_D_FILE]: t2oDSpec(""),
+      },
+      async (workspace) => {
+        const prefix = "T10.4-2 origin arm (dependency-consistency)";
+        await workspace.gitInit();
+        const base = await workspace.gitCommitAll("baseline");
+        await buildOk(product, workspace, `${prefix} \`build\` at baseline`);
+        const atBase = await captureHashes(
+          product,
+          workspace,
+          [T2O_X, T2O_T, T2O_D],
+          `${prefix}, baseline capture`,
+        );
+
+        // The d-list edit on D: D `metadata-changed`, nothing `changed`; T
+        // and X are upstream-changed, attributed to D (SPEC 5.6).
+        await workspace.file(T2O_D_FILE, t2oDSpec(' d={"e"}'));
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after the d-list edit on D`,
+        );
+        const atCreate = await captureHashes(
+          product,
+          workspace,
+          [T2O_X, T2O_T, T2O_D],
+          `${prefix}, creation-moment capture`,
+        );
+        assertHashPremises(
+          atBase,
+          atCreate,
+          [
+            // The edit lands on D's metadata...
+            { node: T2O_D, hash: "metadataHash" },
+            // ...and cascades into T's effectiveHash, deriving X's item with
+            // context {T} (SPEC 10.5).
+            { node: T2O_T, hash: "effectiveHash" },
+          ],
+          [
+            // T itself is untouched — its change is upstream only, so the
+            // item's origin is D, not T (SPEC 5.6).
+            { node: T2O_T, hash: "ownHash" },
+            { node: T2O_T, hash: "subtreeHash" },
+            { node: T2O_T, hash: "metadataHash" },
+            { node: T2O_X, hash: "ownHash" },
+            { node: T2O_X, hash: "metadataHash" },
+          ],
+          `${prefix}, staging the upstream-change premise`,
+        );
+
+        await expectExit(
+          product,
+          workspace,
+          ["review", "create", "--base", base, "--name", "s"],
+          0,
+          `${prefix} \`review create --base <baseline> --name s\``,
+        );
+        const status = await sessionStatus(product, workspace, "s", prefix);
+        assertSameJson(
+          kindScopeSet(status),
+          [
+            `dependency-consistency ${T2O_T}`,
+            `dependency-consistency ${T2O_X}`,
+            `metadata-consistency ${T2O_D}`,
+          ].sort(),
+          `${prefix}: the d-list edit yields D's metadata-consistency item ` +
+            `plus one dependency-consistency item per dependent of a ` +
+            `changed-effectiveHash target — no node is \`changed\`, so no ` +
+            `subtree-coherence item exists (SPEC 5.6, 10.5)`,
+        );
+        const xId = requireRow(
+          status,
+          "dependency-consistency",
+          T2O_X,
+          prefix,
+        ).id;
+        const created = await showItem(
+          product,
+          workspace,
+          "s",
+          xId,
+          `${prefix} at create`,
+        );
+        assertSoleContext(
+          created,
+          T2O_T,
+          true,
+          `${prefix} at create — the item's context is the dependency-edge ` +
+            `target whose effectiveHash changed`,
+        );
+        assertSoleOrigin(
+          created,
+          T2O_D,
+          true,
+          `${prefix} at create — the item's origin is the originating node ` +
+            `of T's change`,
+        );
+
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          xId,
+          "no-change",
+          `${prefix} \`review resolve s <X item> --status no-change\` ` +
+            `(D present — every origin node's presence recorded, SPEC 10.4)`,
+        );
+        await expectItemStatus(
+          product,
+          workspace,
+          "s",
+          xId,
+          "no-change",
+          `${prefix} sanity — the fresh resolution matches the graph`,
+        );
+
+        // One edit removes T's reference to D and deletes D's section. The
+        // item's relevant hashes (X's ownHash and metadataHash, T's
+        // subtreeHash) and its generated context set are untouched; only the
+        // origin node's presence diverges from the recorded state.
+        await workspace.file(T2O_T_FILE, t2oTSpec(false));
+        await workspace.file(T2O_D_FILE, t2oDSpec(null));
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after deleting D's section`,
+        );
+        const afterLoss = await captureHashes(
+          product,
+          workspace,
+          [T2O_X, T2O_T],
+          `${prefix}, post-deletion capture (D's identity no longer resolves)`,
+        );
+        assertHashPremises(
+          atCreate,
+          afterLoss,
+          // The reference removal lands on T's metadata (the pre-edit
+          // capture equals the state the resolve recorded).
+          [{ node: T2O_T, hash: "metadataHash" }],
+          // The item's relevant hashes stay put: d-prop edits touch no own
+          // content (SPEC 1.6, 5.5), and X is untouched.
+          [
+            { node: T2O_X, hash: "ownHash" },
+            { node: T2O_X, hash: "metadataHash" },
+            { node: T2O_T, hash: "subtreeHash" },
+          ],
+          `${prefix}, purity of the deletion edit`,
+        );
+        assertHashPremises(
+          atBase,
+          afterLoss,
+          // T's effectiveHash still changed against the baseline, so the
+          // generators still derive X's item with context {T} (SPEC 10.5).
+          [{ node: T2O_T, hash: "effectiveHash" }],
+          [],
+          `${prefix}, the generated context set stays {T}`,
+        );
+        await expectItemStatus(
+          product,
+          workspace,
+          "s",
+          xId,
+          "invalidated",
+          `${prefix} after deleting D's section — presence is recorded for ` +
+            `every origin node, and its present-to-absent flip alone ` +
+            `invalidates (SPEC 10.4); a product recording presence for ` +
+            `scope (or scope and context) nodes alone reports the item ` +
+            `still resolved`,
+        );
+        const afterShow = await showItem(
+          product,
+          workspace,
+          "s",
+          xId,
+          `${prefix} post-deletion read`,
+        );
+        if (
+          afterShow.scope.node !== T2O_X ||
+          afterShow.scope.present !== true
+        ) {
+          fail(
+            `${prefix} post-deletion \`review show\`: the scope node must ` +
+              `still be the present X — the flip under test is the origin ` +
+              `node's alone (SPEC 10.4, 10.7); expected {node: ` +
+              `${JSON.stringify(T2O_X)}, present: true}, got ` +
+              JSON.stringify(afterShow.scope),
+          );
+        }
+        assertSoleContext(
+          afterShow,
+          T2O_T,
+          true,
+          `${prefix} post-deletion — the context node T stays present and ` +
+            `recorded-matching`,
+        );
+        assertSoleOrigin(
+          afterShow,
+          T2O_D,
+          false,
+          `${prefix} post-deletion — the origin node is presented under ` +
+            `its current (absent) presence`,
+        );
       },
     );
   },
