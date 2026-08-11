@@ -24,7 +24,15 @@
 //   impacted-code witness edge can only be the root-targeted `references`
 //   edge, and with exactly one changed leaf there is exactly one qualifying
 //   witness path (SPEC 9.3) — root → print → print.hello, every step
-//   `contains`, every node's subtreeHash changed.
+//   `contains`, every node's subtreeHash changed. Its upstream arm stages a
+//   second workspace with exactly two dependency edges, each forced into its
+//   role: the marker's `references` edge is the location's only impact edge,
+//   and the root-sourced `embeds` edge is the root's only dependency edge —
+//   after the cross-file edit the one qualifying witness path is root →
+//   embedded target (the `contains` step to the untouched `local` child does
+//   not qualify: its effectiveHash is unchanged), and the edge target's
+//   subtreeHash staying unchanged is what the direct-group emptiness
+//   asserts (SPEC 5.5, 9.2, 9.3).
 // - T4.5-3 arms stage exactly one defect each — the non-static form. Every
 //   arm's chain would resolve to an existing node if read statically
 //   (`SPEC[key]` with key = "a"; the `a.b` chains with `a.b` staged), so a
@@ -67,6 +75,8 @@ import {
   runConsumer,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import { assertRequirementCategories, impactAgainst } from "./section-5.6.js";
+import { assertImpactedCode } from "./section-9.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -410,6 +420,32 @@ const T4_5_2_EDITED_SPEC_SOURCE = PRINT_SPEC_SOURCE.replace(
   "Prints a much louder greeting.",
 );
 
+// Upstream arm (SPEC 4.5 "in the document or upstream of it"): the marker's
+// document bears a root-sourced dependency edge into another file — a
+// top-level `{text(...)}` outside any section records an `embeds` edge from
+// the implicit root (SPEC 2.3, 1.2; the T8-5 shape). The `local` section is
+// the untouched in-document control: it must stay uncategorized, and its
+// `contains` step must not enter the witness path.
+const T4_5_2_MAIN_ROOT = "specs/MAIN.mdx";
+const T4_5_2_LOCAL = "specs/MAIN.mdx#local";
+const T4_5_2_OTHER_ROOT = "specs/OTHER.mdx";
+const T4_5_2_UPSTREAM = "specs/OTHER.mdx#upstream";
+
+const T4_5_2_UPSTREAM_MAIN_SOURCE = [
+  'import OTHER from "./OTHER.xspec"',
+  "",
+  "{text(OTHER.upstream)}",
+  "",
+  '<S id="local">',
+  "Local behavior.",
+  "</S>",
+  "",
+].join("\n");
+
+/** The other file: the embedded target's own text is the edited run. */
+const upstreamOtherSource = (text: string): string =>
+  ['<S id="upstream">', text, "</S>", ""].join("\n");
+
 /** Resolve one named profile from a coverage report, diagnosed (H-8). */
 function profileByName(
   report: CoverageReport,
@@ -438,7 +474,7 @@ function renderImpactedCodeEntry(entry: ImpactedCodeEntry): string {
 const T4_5_2 = defineProductTest({
   id: "T4.5-2",
   title:
-    "a bare reference to the default export records a `references` edge to the root; it grants no coverage in any profile — root-targeted edges never extend a covering path — but the code location is directly impacted by a text edit changing the root's subtreeHash, witnessed by the root-targeted edge (SPEC 4.5, 8, 9.2, 9.3)",
+    "a bare reference to the default export records a `references` edge to the root; it grants no coverage in any profile — root-targeted edges never extend a covering path — but the code location is directly impacted by a text edit changing the root's subtreeHash, witnessed by the root-targeted edge; upstream arm: with the marker's document bearing a root-sourced `{text(...)}` embeds edge into another file, an edit there changing only the root's effectiveHash leaves the location transitively impacted, no node of the marker's document `changed` (SPEC 4.5, 2.3, 5.5, 8, 9.2, 9.3)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -546,6 +582,136 @@ const T4_5_2 = defineProductTest({
     } finally {
       await workspace.dispose();
     }
+
+    // Upstream arm (SPEC 4.5: impacted by any change "in the document or
+    // upstream of it"): a second workspace whose MAIN.mdx bears a
+    // root-sourced `{text(...)}` embeds edge into OTHER.mdx. An edit THERE
+    // changes only the root's effectiveHash — an embedded target's text is
+    // no part of the embedder's own content (SPEC 5.5), so the root's
+    // ownHash and subtreeHash stay unchanged — leaving the marker's location
+    // transitively impacted (9.2) while no node of the marker's document is
+    // `changed`.
+    await withWorkspace(
+      SPEC_AND_CODE_CONFIG,
+      {
+        "specs/MAIN.mdx": T4_5_2_UPSTREAM_MAIN_SOURCE,
+        "specs/OTHER.mdx": upstreamOtherSource("Upstream behavior, v1."),
+        "src/app.ts": T4_5_2_APP_SOURCE,
+      },
+      async (workspace) => {
+        await workspace.gitInit();
+        await buildOk(
+          product,
+          workspace,
+          "T4.5-2 `build` over the upstream-arm workspace",
+        );
+
+        // Staging integrity: the two dependency edges, each the complete set
+        // of its kind. The top-level `{text(...)}` outside any section is
+        // root-sourced (SPEC 2.3, 1.2), and the root marker's `references`
+        // edge is the location's only impact edge (SPEC 4.5, 9.2).
+        assertEdgeSetEqual(
+          await queryEdgesOfKind(product, workspace, "embeds", "T4.5-2"),
+          [
+            {
+              from: T4_5_2_MAIN_ROOT,
+              to: T4_5_2_UPSTREAM,
+              kind: "embeds",
+            },
+          ],
+          "T4.5-2 upstream arm: the marker's document bears the root-sourced " +
+            "`embeds` edge into the other file — a top-level `{text(...)}` " +
+            "outside any section embeds from the implicit root (SPEC 2.3, " +
+            "1.2)",
+        );
+        assertEdgeSetEqual(
+          await queryEdgesOfKind(product, workspace, "references", "T4.5-2"),
+          [
+            {
+              from: "src/app.ts",
+              to: T4_5_2_MAIN_ROOT,
+              kind: "references",
+            },
+          ],
+          "T4.5-2 upstream arm: the root marker's `references` edge to the " +
+            "root is the location's only impact edge (SPEC 4.5, 1.5, 9.2)",
+        );
+
+        // Commit the baseline, then edit the embedded target's text in the
+        // OTHER file — the marker's document is not touched.
+        const baseline = await workspace.gitCommitAll("baseline");
+        await workspace.file(
+          "specs/OTHER.mdx",
+          upstreamOtherSource("Upstream behavior, v2."),
+        );
+        const label =
+          "T4.5-2 `impact --base <baseline> --json` after the upstream edit";
+        const impact = await impactAgainst(product, workspace, baseline, label);
+
+        // Transitively impacted, not directly (SPEC 9.2): the edit changes
+        // the root's effectiveHash through the root-sourced dependency pair
+        // (SPEC 5.5) but not its subtreeHash. The witness path is forced
+        // (SPEC 9.3): from the edge's target, the `contains` step to `local`
+        // does not qualify (its effectiveHash is unchanged), so the one
+        // qualifying path is the dependency step to the edited target —
+        // root → upstream, every node's effectiveHash changed, ending at
+        // the `changed` node.
+        assertImpactedCode(
+          impact,
+          {
+            direct: [],
+            transitive: [
+              {
+                location: "src/app.ts",
+                edge: {
+                  from: "src/app.ts",
+                  to: T4_5_2_MAIN_ROOT,
+                  kind: "references",
+                },
+                path: [T4_5_2_MAIN_ROOT, T4_5_2_UPSTREAM],
+              },
+            ],
+          },
+          `${label}: the cross-file edit changes only the root's ` +
+            "effectiveHash, so the marker's location is transitively — " +
+            "never directly — impacted, witnessed by the root-targeted " +
+            "`references` edge and the dependency step to the edited " +
+            "target (SPEC 4.5, 5.5, 9.2, 9.3)",
+        );
+
+        // No node of the marker's document is `changed` (SPEC 5.5, 5.6): the
+        // complete category table. The edited target is `changed`; its file
+        // root `descendant-changed`; the marker document's root is exactly
+        // `upstream-changed` — its ownHash and subtreeHash unchanged, so
+        // never `changed` or `descendant-changed` — and the untouched
+        // `local` section receives no category at all.
+        assertRequirementCategories(
+          impact,
+          [
+            {
+              identity: T4_5_2_UPSTREAM,
+              categories: [{ category: "changed", within: [T4_5_2_UPSTREAM] }],
+            },
+            {
+              identity: T4_5_2_OTHER_ROOT,
+              categories: [
+                { category: "descendant-changed", exact: [T4_5_2_UPSTREAM] },
+              ],
+            },
+            {
+              identity: T4_5_2_MAIN_ROOT,
+              categories: [
+                { category: "upstream-changed", exact: [T4_5_2_UPSTREAM] },
+              ],
+            },
+            { identity: T4_5_2_LOCAL, categories: [] },
+          ],
+          `${label}: editing an embedded target surfaces at the embedding ` +
+            "document as `upstream-changed`, never `changed` — no node of " +
+            "the marker's document is `changed` (SPEC 5.5, 5.6, 9.1)",
+        );
+      },
+    );
   },
 });
 

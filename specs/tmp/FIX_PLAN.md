@@ -430,13 +430,43 @@ A "new test T<x>" task always means, in one change:
   mid-loop reds (certification-document ×3 → FP-091; S-1's 9 unmapped keys
   → stages E/G).]
 
-- [ ] FP-014 — T4.5-2: add the upstream (cross-file) impact arm. [R1 #17;
+- [x] FP-014 — T4.5-2: add the upstream (cross-file) impact arm. [R1 #17;
   TEST-SPEC §4.5]
   `test/suite/registry/section-4.5.ts` stages only the same-document
   subtreeHash edit (direct impact). Add: the marker's document bears a
   root-sourced `{text(...)}` edge into another file; an edit THERE changing
   only that root's effectiveHash leaves the location transitively impacted
   while no node of the marker's own document is `changed`.
+  [Done 2026-08-11: T4.5-2 gains a second workspace — MAIN.mdx holds
+  `import OTHER from "./OTHER.xspec"` plus a top-level `{text(OTHER.
+  upstream)}` outside any section (the T8-5 shape: root-sourced `embeds`
+  edge, SPEC 2.3/1.2) and an untouched `local` section as in-document
+  control; the same root-marker `src/app.ts`. Staging integrity pins both
+  dependency edges as complete per-kind sets, so the marker's `references`
+  edge is the location's only impact edge and the root-sourced `embeds`
+  edge the root's only dependency edge. After baseline commit + edit of
+  the embedded target's text: `assertImpactedCode` (section-9's helper) —
+  direct EMPTY, transitive exactly [src/app.ts | references →
+  specs/MAIN.mdx | path specs/MAIN.mdx > specs/OTHER.mdx#upstream], the
+  witness forced (the `contains` step to `local` has unchanged
+  effectiveHash); `assertRequirementCategories` (section-5.6's helper, the
+  section-15 reuse precedent) with the complete table — `upstream`
+  `changed`, OTHER root `descendant-changed` exact [upstream], MAIN root
+  exactly `upstream-changed` exact [upstream], `local` uncategorized —
+  which realizes "no node of the marker's document `changed`" (a product
+  folding embedded text into the embedder's own content would flip MAIN
+  root to `changed`/the location to direct). NOT red against this repo's
+  product: impact semantics predate the patch — a direct probe of the
+  staging against the built product returned byte-for-byte the expected
+  edges, code groups, and category table, so the pass is genuine; teeth
+  live in the exact-value pinning over the forced fixture. Traceability
+  unchanged (T4.5-2 → ["4.5"]; the entry's 8/9.2 parentheticals are
+  context with home coverage at T8-*/T9.2-*, no numbered condition
+  asserted). Verified: section-4.5 unchanged 2 failed / 5 passed (T4.5-3/
+  T4.5-5 red at the pre-existing FP-001-class form-exact product gap;
+  T4.5-2 green including the new arm); `npm run test:self` unchanged 4
+  planned mid-loop reds (certification-document ×3 → FP-091; S-1's 9
+  unmapped keys → stages E/G).]
 
 - [ ] FP-015 — T6.4-1: assert the rename command's own report — the applied
   mapping. [R1 #18; TEST-SPEC §6.4, SPEC 12.0, H-3]
