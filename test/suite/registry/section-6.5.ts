@@ -39,6 +39,19 @@
 //   plain file holding exactly one line-oriented entry after the one move;
 //   entry content stays opaque (H-4). T6.5-1 asserts it for the file form,
 //   T6.5-3 for the section form — "the full mapping … (6.5: both forms)".
+// - The applied-mapping report — "a successful move … reports its applied
+//   mapping, as rename does" (SPEC 6.5, 6.4) — is asserted with T6.4-1's
+//   protocol: the move runs with `--json` (a single JSON document as the
+//   entire stdout, 12.0), its report decodes through the H-3
+//   `decodeAppliedMappingReport` adapter (the successful operation's report
+//   shape is unpinned), and the decoded pairs are asserted as a complete set
+//   (`assertAppliedMapping`) — every identity pair the operation journaled,
+//   the information of the preview's `mapping` (SPEC 6.4, 6.6). Both forms
+//   report as rename does, split as the journal clause is: T6.5-1 decodes
+//   the file form's report — every node of the moved file mapped, the
+//   implicit root included (its identity is the path alone, 1.2, 1.5), IDs
+//   kept and file parts changed — and T6.5-3 the section form's: exactly
+//   the moved subtree's prefix-replaced pairs, no other identity mapped.
 // - T6.5-1/T6.5-3 "finishing regeneration as T6.4-7" is the H-6 two-directory
 //   protocol: a second workspace is seeded with the post-move configuration,
 //   sources, and journal (derived files are reproducible from those,
@@ -111,6 +124,7 @@
 import { Buffer } from "node:buffer";
 import type { GraphEdge } from "../../helpers/adapters/index.js";
 import {
+  decodeAppliedMappingReport,
   decodeEdgesReport,
   decodeFindingsReport,
   decodeNodeRowsReport,
@@ -138,6 +152,7 @@ import type {
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { ConcernedIdentity, FindingSourceExpectation } from "./support.js";
 import {
+  assertAppliedMapping,
   assertConditionCounts,
   assertEdgeSetEqual,
   assertFindingConcernsPath,
@@ -669,7 +684,7 @@ const F1_SEED_FILES = [
 const T6_5_1 = defineProductTest({
   id: "T6.5-1",
   title:
-    "file form: `xspec move old.mdx new.mdx` keeps IDs unchanged and changes identities only in their file part; the moved file's own import specifiers and other files' imports of its generated module are rewritten so everything resolves; the mapping is appended to the journal; finishing regeneration as T6.4-7 — byte-identical to a fresh `build`, `check` clean (SPEC 6.5, 6.1, 12.1, 14.10)",
+    "file form: `xspec move old.mdx new.mdx` keeps IDs unchanged and changes identities only in their file part; the moved file's own import specifiers and other files' imports of its generated module are rewritten so everything resolves; the mapping is appended to the journal; finishing regeneration as T6.4-7 — byte-identical to a fresh `build`, `check` clean; and the command's own report is the applied mapping as T6.4-1 — every journaled identity pair, carried in JSON per 12.0 (SPEC 6.5, 6.4, 6.1, 12.0, 12.1, 14.10; H-3 adapter, report shape unpinned; 6.5: both forms report as rename does — the section form's report is T6.5-3's assertion)",
   run: async (product) => {
     await withWorkspace(
       FULL_CONFIG,
@@ -707,12 +722,40 @@ const T6_5_1 = defineProductTest({
         );
         await assertF1Edges(product, workspace, F1_CORE, "T6.5-1 pre-move");
 
-        await expectExit(
+        // The command's own report is the applied mapping — every identity
+        // pair the operation journaled, the information of the preview's
+        // `mapping` (SPEC 6.5: both forms report as rename does; 6.4, 6.6) —
+        // carried in JSON per 12.0 and decoded through the H-3 adapter (the
+        // successful operation's report shape is unpinned; T6.4-1's
+        // protocol). The fixture pins the journaled mapping completely: the
+        // file form changes every moved-file identity in its file part alone
+        // — the implicit root included, its identity being the path alone
+        // (SPEC 1.2, 1.5), and its pair journaled like every other, else a
+        // pre-move baseline could not unify the root across the move (6.3,
+        // T6.2-2) — while the premise enumeration above pins the moved
+        // file's nodes as exactly these four, so no other identity is
+        // mapped.
+        const moveReport = await runJson(
           product,
           workspace,
-          ["move", F1_CORE, F1_MOVED],
-          0,
-          "T6.5-1 file-form `move specs/Core.mdx specs/sub/Moved.mdx`",
+          ["move", F1_CORE, F1_MOVED, "--json"],
+          "T6.5-1 file-form `move specs/Core.mdx specs/sub/Moved.mdx --json`",
+        );
+        assertAppliedMapping(
+          decodeAppliedMappingReport(moveReport, "T6.5-1"),
+          [
+            { from: F1_CORE, to: F1_MOVED },
+            { from: `${F1_CORE}#core`, to: `${F1_MOVED}#core` },
+            { from: `${F1_CORE}#core.mid`, to: `${F1_MOVED}#core.mid` },
+            {
+              from: `${F1_CORE}#core.mid.leaf`,
+              to: `${F1_MOVED}#core.mid.leaf`,
+            },
+          ],
+          "T6.5-1: the successful file-form move's report is the applied " +
+            "mapping — exactly the identity pairs the operation journaled: " +
+            "every node of the moved file, the implicit root included, its " +
+            "ID kept and its file part changed (SPEC 6.5, 6.4, 6.6, 12.0)",
         );
 
         // The file was relocated.
@@ -1154,10 +1197,14 @@ const R3_FILES: Readonly<Record<string, string>> = {
   [R3_TARGET]: R3_TARGET_SOURCE,
 };
 
+// `--json` carries the command's own report — the applied mapping — as a
+// single JSON document (SPEC 12.0; the report assertion below); identical
+// argv in both determinism directories, so H-6's compare is unaffected.
 const R3_MOVE_ARGV = [
   "move",
   "specs/Origin.mdx#org.mv",
   "specs/Target.mdx#tm",
+  "--json",
 ] as const;
 
 // Subtree re-identified by prefix replacement: org.mv → tm, descendants too.
@@ -1188,7 +1235,7 @@ const R3_SEED_FILES = [
 const T6_5_3 = defineProductTest({
   id: "T6.5-3",
   title:
-    "re-identification and reference conversion: the moved subtree is re-identified by prefix replacement; references convert between local and imported forms; needed spec imports are added binding fresh, non-colliding identifiers and unneeded ones removed exactly (an import unreferenced before the move stays); rewritten content is byte-deterministic across two identical fixtures; the full mapping is appended to the journal; finishing regeneration as T6.4-7 (SPEC 6.5, 2.1, 6.1, 6.4, 12.1, 14.10)",
+    "re-identification and reference conversion: the moved subtree is re-identified by prefix replacement; references convert between local and imported forms; needed spec imports are added binding fresh, non-colliding identifiers and unneeded ones removed exactly (an import unreferenced before the move stays); rewritten content is byte-deterministic across two identical fixtures; the full mapping is appended to the journal and reported as the command's own applied-mapping report — the section form reports as rename does, T6.4-1's protocol (SPEC 6.5, 2.1, 6.1, 6.4, 12.0, 12.1, 14.10; H-3 adapter, report shape unpinned)",
   run: async (product) => {
     const created: TestWorkspace[] = [];
     try {
@@ -1215,9 +1262,39 @@ const T6_5_3 = defineProductTest({
       assertExitCode(
         first,
         0,
-        "T6.5-3 `move specs/Origin.mdx#org.mv specs/Target.mdx#tm`",
+        "T6.5-3 `move specs/Origin.mdx#org.mv specs/Target.mdx#tm --json`",
       );
       const workspace = firstWorkspace;
+
+      // The command's own report is the applied mapping — the section form
+      // reports as rename does (SPEC 6.5, 6.4; the file form is T6.5-1's
+      // assertion) — carried in JSON per 12.0 and decoded through the H-3
+      // adapter (report shape unpinned; T6.4-1's protocol). The fixture pins
+      // the journaled mapping completely: the section form maps exactly the
+      // moved subtree, `org.mv` and its two descendants re-identified by
+      // prefix replacement of `org.mv` with `tm` (SPEC 6.5), while every
+      // identity outside the subtree — both files' roots, `org`,
+      // `org.usemv`, `tgt`, `keep`, `sp` — is unchanged and unmapped
+      // (R3_POST_IDENTITIES pins that below).
+      assertAppliedMapping(
+        decodeAppliedMappingReport(
+          parseJsonStdout(
+            first,
+            "T6.5-3 the section-form move's report — a single JSON document " +
+              "as the entire stdout (SPEC 12.0)",
+          ),
+          "T6.5-3",
+        ),
+        [
+          { from: `${R3_ORIGIN}#org.mv`, to: `${R3_TARGET}#tm` },
+          { from: `${R3_ORIGIN}#org.mv.k1`, to: `${R3_TARGET}#tm.k1` },
+          { from: `${R3_ORIGIN}#org.mv.k2`, to: `${R3_TARGET}#tm.k2` },
+        ],
+        "T6.5-3: the successful section-form move's report is the applied " +
+          "mapping — exactly the identity pairs the operation journaled: " +
+          "the moved subtree's prefix-replaced identities, nothing else " +
+          "(SPEC 6.5, 6.4, 6.6, 12.0)",
+      );
 
       // Conversion and import-rewrite observables (module header, H-4).
       const originText = await readSourceText(

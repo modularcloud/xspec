@@ -541,11 +541,36 @@ A "new test T<x>" task always means, in one change:
   test:self` unchanged 4 planned mid-loop reds (certification-document ×3 →
   FP-091; S-1's 9 unmapped keys → stages E/G).]
 
-- [ ] FP-017 — T6.5-1: assert the applied-mapping report for the file-form
+- [x] FP-017 — T6.5-1: assert the applied-mapping report for the file-form
   move (both forms report as rename does). [R1 #20; TEST-SPEC §6.5]
   `test/suite/registry/section-6.5.ts`: decode the move command's stdout in
   both file form and section form and assert the applied mapping, exactly
   as FP-015 does for rename.
+  [Done 2026-08-11: both forms decode through FP-015's layer
+  (`decodeAppliedMappingReport` + `assertAppliedMapping`), split as the
+  journal clause already is (TEST-SPEC T6.5-1 carries the clause; module
+  header documents the split). T6.5-1's file-form move now runs via
+  `runJson` (`--json`: exit 0, single JSON document as the entire stdout,
+  12.0) and asserts exactly four pairs — every node of the moved file, the
+  implicit root included (SPEC 1.2/1.5: its identity is the path alone;
+  its pair is journaled, else 6.3 replay could not unify the root across
+  the move, T6.2-2's purity). T6.5-3's section-form move gained `--json`
+  in R3_MOVE_ARGV (identical argv in both H-6 determinism directories, so
+  that compare is unaffected) and asserts exactly the three
+  prefix-replaced subtree pairs (`org.mv{,.k1,.k2}` → `tm{,.k1,.k2}`),
+  no other identity mapped. Titles extended; traceability unchanged
+  (both ["6.5"]; 12.0/6.4/6.6 carriage context per FP-015 precedent);
+  neither test in any certification scope; no new adapter, so S-5's
+  existing operations-adapter guards cover the decode. Verified: both
+  tests turned falsely-green → red-as-diagnosed exactly at the
+  applied-mapping decode ("required key \"mapping\" … absent" — probe:
+  the product reports `{"findings":[]}` on successful move in both
+  forms), downstream arms unreached until the product reports the
+  mapping; section-6.5 went 3 failed/3 passed → 5 failed/1 passed
+  (T6.5-2 stays green; T6.5-4/-5/-6 keep their pre-existing
+  FP-002/FP-007-class reds). Typecheck clean; `npm run test:self`
+  unchanged 4 planned mid-loop reds (certification-document ×3 → FP-091;
+  S-1's 9 unmapped keys → stages E/G).]
 
 - [ ] FP-018 — T6.5-4: add the missing destination-refusal arms. [R1 #21;
   TEST-SPEC §6.5]
