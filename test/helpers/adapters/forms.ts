@@ -22,6 +22,8 @@
 //   - the exit-2 error document {"error": …} holding one finding form (12.0)
 //   - the three-state datum decode: plain value / `null` /
 //     {"unavailable": true} (11.4, 12.7)
+//   - the occurrence-record form {"file","range","kind","source","target"}
+//     and the occurrences document {"findings","occurrences"} (5.7, 11.3)
 //   - the unavailability-marker structural walk T12.7-1 relies on: no object
 //     of any form other than the marker carries a member named "unavailable"
 
@@ -32,11 +34,16 @@ import type {
   FindingLocation,
   FindingsReport,
   MarkedBytePath,
+  OccurrenceRecord,
+  OccurrenceSource,
+  OccurrenceSourceNode,
+  OccurrencesReport,
   PathValue,
   SourceRange,
 } from "./model.js";
 import {
   CONDITION_CODE_TOKENS,
+  DEPENDENCY_EDGE_KINDS,
   REFUSAL_CODE_TOKENS,
   conditionIdentityOf,
 } from "./model.js";
@@ -48,6 +55,7 @@ import {
   expectNonEmptyString,
   expectNonNegativeInteger,
   expectObject,
+  expectToken,
   requiredKey,
   requiredMember,
   rootSite,
@@ -486,6 +494,151 @@ export function decodeDatum<T>(
     return { state: "unavailable" };
   }
   return { state: "value", value: decodeValue(value, site) };
+}
+
+// --- the occurrences document (5.7, 11.3, 12.7) -------------------------------
+
+const OCCURRENCE_RECORD_MEMBERS = [
+  "file",
+  "range",
+  "kind",
+  "source",
+  "target",
+] as const;
+
+/** The source graph node member form: `{"identity", "range"}` exactly. */
+function decodeOccurrenceSourceNode(
+  value: unknown,
+  site: DecodeSite,
+): OccurrenceSourceNode {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, ["identity", "range"], site);
+  return {
+    identity: expectNonEmptyString(
+      requiredKey(obj, "identity", site),
+      at(site, "identity"),
+    ),
+    range: decodeRangeForm(requiredKey(obj, "range", site), at(site, "range")),
+  };
+}
+
+/**
+ * One reference occurrence record in the literal 12.7 form: exactly the five
+ * members `{"file", "range", "kind", "source", "target"}` — the referencing
+ * file as a 12.7 path value, the occurrence's own range, its edge kind
+ * (`"depends"`, `"embeds"`, or `"references"`; 5.2 — `contains` is no
+ * reference kind), the source graph node `{"identity", "range"}` or the
+ * unavailability marker where 11.2 leaves the source node's identity
+ * undefined (one datum, never `null`), and the resolved target's identity.
+ */
+export function decodeOccurrenceRecordForm(
+  value: unknown,
+  site: DecodeSite,
+): OccurrenceRecord {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, OCCURRENCE_RECORD_MEMBERS, site);
+  const file = decodePathValue(
+    requiredKey(obj, "file", site),
+    at(site, "file"),
+  );
+  const range = decodeRangeForm(
+    requiredKey(obj, "range", site),
+    at(site, "range"),
+  );
+  const kind = expectToken(
+    requiredKey(obj, "kind", site),
+    DEPENDENCY_EDGE_KINDS,
+    at(site, "kind"),
+  );
+  const sourceSite = at(site, "source");
+  const sourceDatum = decodeDatum(
+    obj["source"],
+    sourceSite,
+    decodeOccurrenceSourceNode,
+  );
+  if (sourceDatum.state === "null") {
+    formFail(
+      sourceSite,
+      'the source graph node {"identity", "range"} or the unavailability ' +
+        "marker — one datum, defined or explicitly unavailable, never null " +
+        "(SPEC 5.7, 11.2, 12.7)",
+      null,
+    );
+  }
+  const source: OccurrenceSource =
+    sourceDatum.state === "value"
+      ? sourceDatum.value
+      : { unavailable: true as const };
+  const target = expectNonEmptyString(
+    requiredKey(obj, "target", site),
+    at(site, "target"),
+  );
+  return { file, range, kind, source, target };
+}
+
+/**
+ * The pinned occurrence order (SPEC 5.7): by referencing file path bytes,
+ * then range start, then range end. Total and deterministic; distinct
+ * occurrences occupy distinct spans, so equal keys never occur.
+ */
+function compareOccurrenceRecords(
+  a: OccurrenceRecord,
+  b: OccurrenceRecord,
+): number {
+  const byFile = Buffer.compare(pathValueBytes(a.file), pathValueBytes(b.file));
+  if (byFile !== 0) return byFile;
+  if (a.range.start !== b.range.start) return a.range.start - b.range.start;
+  return a.range.end - b.range.end;
+}
+
+/**
+ * The `occurrences` document (11.3) — `{"findings", "occurrences"}` exactly
+ * (SPEC 12.7): the consulted domain's findings in the pinned findings order,
+ * and occurrence records in occurrence order (5.7 — file path bytes, then
+ * range start, then range end; identical spans do not occur). Form-exact
+ * (H-3): 11.3 is a JSON-only surface, no adapter in the path.
+ */
+export function decodeOccurrencesReport(
+  doc: unknown,
+  context?: string,
+): OccurrencesReport {
+  const site = rootSite("12.7 occurrences document", context);
+  const obj = expectObject(doc, site);
+  expectOnlyMembers(obj, ["findings", "occurrences"], site);
+  const findings = decodeFindingsArray(
+    requiredKey(obj, "findings", site),
+    at(site, "findings"),
+  );
+  const occurrencesSite = at(site, "occurrences");
+  const occurrences = expectArray(
+    requiredKey(obj, "occurrences", site),
+    occurrencesSite,
+  ).map((element, index) =>
+    decodeOccurrenceRecordForm(element, at(occurrencesSite, index)),
+  );
+  for (let i = 1; i < occurrences.length; i += 1) {
+    const order = compareOccurrenceRecords(
+      occurrences[i - 1]!,
+      occurrences[i]!,
+    );
+    if (order === 0) {
+      formFail(
+        at(occurrencesSite, i),
+        "distinct occurrences occupying distinct spans — records with an " +
+          "identical (file, range) key do not occur (SPEC 5.7)",
+        obj["occurrences"],
+      );
+    }
+    if (order > 0) {
+      formFail(
+        at(occurrencesSite, i),
+        "records in occurrence order: by referencing file path bytes, then " +
+          "range start, then range end (SPEC 5.7, 12.7)",
+        obj["occurrences"],
+      );
+    }
+  }
+  return { findings, occurrences };
 }
 
 // --- the unavailability-marker structural walk (T12.7-1) -----------------------

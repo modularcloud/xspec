@@ -1,5 +1,6 @@
 // TEST-SPEC §1.6 (own text, subtree text, and own content) and §1.7 (source
-// ranges) — SUITE-05: T1.6-1, T1.6-2, T1.6-3, T1.6-4, T1.6-5, T1.7-1.
+// ranges) — SUITE-05: T1.6-1, T1.6-2, T1.6-3, T1.6-4, T1.6-5, T1.7-1,
+// T1.7-2.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -18,6 +19,9 @@ import type {
   Finding,
   GraphEdge,
   NodeReport,
+  OccurrenceRecord,
+  OccurrenceSourceNode,
+  SourceRange,
 } from "../../helpers/adapters/index.js";
 import {
   assertBareEdgeEndpoints,
@@ -26,6 +30,7 @@ import {
   decodeImpactReport,
   decodeNextReport,
   decodeNodeReport,
+  decodeOccurrencesReport,
   decodeReachableReport,
   decodeSessionStatusReport,
 } from "../../helpers/adapters/index.js";
@@ -1352,6 +1357,471 @@ const T1_7_1 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T1.7-2
+// ---------------------------------------------------------------------------
+
+// Occurrence records (SPEC 5.7, 11.3) are the surface making every code
+// unit's range reachable (SPEC 1.7): each fixture file below stages exactly
+// one sanctioned TypeScript reference — a dependency marker (4.5) or a
+// `text(...)` call (4.3) — inside one named-code-unit shape of SPEC 4.6, and
+// the test asserts the complete `occurrences` document, a form-exact 12.7
+// surface (H-3: no adapter in the path, and a JSON-only surface, so no
+// `--json` flag is passed), against precomputed byte offsets. Every file
+// opens with a multi-byte UTF-8 comment (é: 1 code point, 2 bytes; 🦄: 1 code
+// point / 2 UTF-16 units / 4 bytes) before its constructs, so byte offsets
+// diverge from code-point and UTF-16 offsets and a product counting either
+// fails. Expected ranges are composed from the same string parts the files
+// are — never measured from product output — and a fixture self-check slices
+// every claimed range back out of the staged bytes before the product is
+// invoked, so a staging-arithmetic error fails as a harness-side diagnosis,
+// never as a wrong-but-satisfiable expectation.
+
+const OCC_MARKER = "SPEC.req";
+const OCC_REQ_ID = "specs/R.mdx#req";
+const OCC_ALT_ID = "specs/R.mdx#alt";
+
+// The referenced spec source: two sections, so the marker target and the
+// `text(...)` target are distinct nodes.
+const OCC_TARGET_SOURCE = [
+  '<S id="req">',
+  "Req text.",
+  "</S>",
+  "",
+  '<S id="alt">',
+  "Alt text.",
+  "</S>",
+  "",
+].join("\n");
+
+/** Byte range of `span` where it follows exactly `prefix` in a file. */
+function rangeAfter(prefix: string, span: string): SourceRange {
+  const start = utf8Length(prefix);
+  return { start, end: start + utf8Length(span) };
+}
+
+// src/anon.ts — a default export of an ANONYMOUS construct: unit `default`,
+// whose range is the WHOLE export declaration, `export` through the closing
+// `}` (SPEC 1.7, 4.6).
+const OCC_ANON_HEAD =
+  '// prélude 🦄 anon\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_ANON_DECL_PRE = "export default function () {\n  ";
+const OCC_ANON_DECL = OCC_ANON_DECL_PRE + OCC_MARKER + ";\n}";
+const OCC_ANON_SOURCE = OCC_ANON_HEAD + OCC_ANON_DECL + "\n";
+
+// src/cls.ts — a class declaration: the property initializer is a `text(...)`
+// call (a call expression, so `greeting` is no named unit, SPEC 4.6), and the
+// innermost enclosing named unit of the embed is the class itself — the
+// construct binding the name, `class` through the closing `}`.
+const OCC_CLS_HEAD =
+  '// prélude 🦄 class\nimport SPEC, { text } from "../specs/R.xspec";\n\n';
+const OCC_CLS_CALL = "text(SPEC.alt)";
+const OCC_CLS_DECL_PRE = "class Cls {\n  greeting = ";
+const OCC_CLS_DECL = OCC_CLS_DECL_PRE + OCC_CLS_CALL + ";\n}";
+const OCC_CLS_SOURCE = OCC_CLS_HEAD + OCC_CLS_DECL + "\n";
+
+// src/fn.ts — a function declaration: the construct binding the name.
+const OCC_FN_HEAD =
+  '// prélude 🦄 fn\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_FN_DECL_PRE = "function fn() {\n  ";
+const OCC_FN_DECL = OCC_FN_DECL_PRE + OCC_MARKER + ";\n}";
+const OCC_FN_SOURCE = OCC_FN_HEAD + OCC_FN_DECL + "\n";
+
+// src/multi.ts — a function-valued variable declaration inside a
+// multi-declaration statement (`const one = 1, handler = () => {…};`): unit
+// `handler` spans its own name through its initializer — NOT the enclosing
+// statement, so `const one = 1, ` and the trailing `;` lie outside the range.
+const OCC_MULTI_HEAD =
+  '// prélude 🦄 multi\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_MULTI_STMT_PRE = "const one = 1, ";
+const OCC_MULTI_UNIT_PRE = "handler = () => {\n  ";
+const OCC_MULTI_UNIT = OCC_MULTI_UNIT_PRE + OCC_MARKER + ";\n}";
+const OCC_MULTI_SOURCE =
+  OCC_MULTI_HEAD + OCC_MULTI_STMT_PRE + OCC_MULTI_UNIT + ";\n";
+
+// src/named.ts — a default export of a NAMED construct: the unit takes that
+// construct's OWN range — `function` through the closing `}`, the
+// `export default ` prefix excluded (SPEC 1.7's contrast with the anonymous
+// case, where the whole export declaration is the range).
+const OCC_NAMED_HEAD =
+  '// prélude 🦄 named\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_NAMED_EXPORT_PRE = "export default ";
+const OCC_NAMED_CONSTRUCT_PRE = "function named() {\n  ";
+const OCC_NAMED_CONSTRUCT = OCC_NAMED_CONSTRUCT_PRE + OCC_MARKER + ";\n}";
+const OCC_NAMED_SOURCE =
+  OCC_NAMED_HEAD + OCC_NAMED_EXPORT_PRE + OCC_NAMED_CONSTRUCT + "\n";
+
+// src/ns.ts — a dotted namespace (`namespace Outer.Inner`): one named unit
+// per dot-separated name, all sharing the SINGLE namespace declaration's
+// range — the one construct binding them all (SPEC 1.7, 4.6). A unit's range
+// is reachable exactly through the occurrences it sources (1.7), and every
+// position in the dotted declaration's body lies within `Inner`, so the
+// shared construct range is pinned through the reachable unit `Outer.Inner`
+// (`Outer`, deriving from the same declaration, shares this same range by
+// 1.7 but encloses no position outside `Inner` and so sources no occurrence
+// of its own): a product ranging the unit at anything narrower than the
+// whole `namespace Outer.Inner { … }` declaration fails the byte assertion.
+const OCC_NS_HEAD =
+  '// prélude 🦄 ns\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_NS_DECL_PRE = "namespace Outer.Inner {\n  ";
+const OCC_NS_DECL = OCC_NS_DECL_PRE + OCC_MARKER + ";\n}";
+const OCC_NS_SOURCE = OCC_NS_HEAD + OCC_NS_DECL + "\n";
+
+// src/pair.ts — a getter/setter pair: the same unit chain `Pair.value`
+// occurs twice in document order, so the getter is `Pair.value` and the
+// setter the disambiguated `Pair.value@2` (SPEC 4.6), each carrying the
+// range of its OWN occurrence's construct (SPEC 1.7).
+const OCC_PAIR_HEAD =
+  '// prélude 🦄 pair\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_PAIR_CLASS_PRE = "class Pair {\n  ";
+const OCC_PAIR_GET_PRE = "get value(): number {\n    ";
+const OCC_PAIR_GET = OCC_PAIR_GET_PRE + OCC_MARKER + ";\n    return 1;\n  }";
+const OCC_PAIR_BETWEEN = "\n  ";
+const OCC_PAIR_SET_PRE = "set value(next: number) {\n    ";
+const OCC_PAIR_SET = OCC_PAIR_SET_PRE + OCC_MARKER + ";\n  }";
+const OCC_PAIR_SOURCE =
+  OCC_PAIR_HEAD +
+  OCC_PAIR_CLASS_PRE +
+  OCC_PAIR_GET +
+  OCC_PAIR_BETWEEN +
+  OCC_PAIR_SET +
+  "\n}\n";
+
+// src/top.ts — a top-level marker: no named unit encloses it, so it
+// attributes to the file (SPEC 4.6) and the source node is the whole-file
+// location — identity the path alone, range the entire file, start 0, end
+// the file's byte length (SPEC 1.7).
+const OCC_TOP_HEAD =
+  '// prélude 🦄 top\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_TOP_SOURCE = OCC_TOP_HEAD + OCC_MARKER + ";\n";
+
+/** One staged occurrence: its expected record plus fixture-self-check data. */
+interface OccurrenceArm {
+  readonly what: string;
+  /** The staged file's full content (self-check ground). */
+  readonly fileSource: string;
+  /** The exact characters the occurrence's own range must slice to. */
+  readonly occurrenceSpan: string;
+  /** The exact characters the source unit's range must slice to. */
+  readonly unitSpan: string;
+  readonly record: OccurrenceRecord & {
+    readonly source: OccurrenceSourceNode;
+  };
+}
+
+// The complete expected enumeration, in occurrence order (SPEC 5.7: by
+// referencing file path bytes — anon < cls < fn < multi < named < ns < pair
+// < top — then by range start): the spec source stages no `d` prop, no MDX
+// embedding, and no import, and import declarations record no occurrence
+// (5.7), so the nine staged references are the workspace's only occurrences.
+const OCC_EXPECTED: readonly OccurrenceArm[] = [
+  {
+    what:
+      "anonymous default export — unit `default` carries the WHOLE export " +
+      "declaration's range (SPEC 1.7, 4.6)",
+    fileSource: OCC_ANON_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_ANON_DECL,
+    record: {
+      file: "src/anon.ts",
+      range: rangeAfter(OCC_ANON_HEAD + OCC_ANON_DECL_PRE, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/anon.ts#default",
+        range: rangeAfter(OCC_ANON_HEAD, OCC_ANON_DECL),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "class declaration — the `text(...)` embed in a non-unit property " +
+      "initializer attributes to the class, the construct binding the name; " +
+      "the occurrence spans the call expression, callee through closing " +
+      "parenthesis (SPEC 1.7, 4.6, 5.7)",
+    fileSource: OCC_CLS_SOURCE,
+    occurrenceSpan: OCC_CLS_CALL,
+    unitSpan: OCC_CLS_DECL,
+    record: {
+      file: "src/cls.ts",
+      range: rangeAfter(OCC_CLS_HEAD + OCC_CLS_DECL_PRE, OCC_CLS_CALL),
+      kind: "embeds",
+      source: {
+        identity: "src/cls.ts#Cls",
+        range: rangeAfter(OCC_CLS_HEAD, OCC_CLS_DECL),
+      },
+      target: OCC_ALT_ID,
+    },
+  },
+  {
+    what: "function declaration — the construct binding the name (SPEC 1.7, 4.6)",
+    fileSource: OCC_FN_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_FN_DECL,
+    record: {
+      file: "src/fn.ts",
+      range: rangeAfter(OCC_FN_HEAD + OCC_FN_DECL_PRE, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/fn.ts#fn",
+        range: rangeAfter(OCC_FN_HEAD, OCC_FN_DECL),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "function-valued variable in a multi-declaration statement — the " +
+      "unit's own name through its initializer, NOT the enclosing " +
+      "statement (SPEC 1.7)",
+    fileSource: OCC_MULTI_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_MULTI_UNIT,
+    record: {
+      file: "src/multi.ts",
+      range: rangeAfter(
+        OCC_MULTI_HEAD + OCC_MULTI_STMT_PRE + OCC_MULTI_UNIT_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/multi.ts#handler",
+        range: rangeAfter(OCC_MULTI_HEAD + OCC_MULTI_STMT_PRE, OCC_MULTI_UNIT),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "default export of a NAMED construct — that construct's OWN range, " +
+      "the `export default ` prefix excluded (SPEC 1.7)",
+    fileSource: OCC_NAMED_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_NAMED_CONSTRUCT,
+    record: {
+      file: "src/named.ts",
+      range: rangeAfter(
+        OCC_NAMED_HEAD + OCC_NAMED_EXPORT_PRE + OCC_NAMED_CONSTRUCT_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/named.ts#named",
+        range: rangeAfter(
+          OCC_NAMED_HEAD + OCC_NAMED_EXPORT_PRE,
+          OCC_NAMED_CONSTRUCT,
+        ),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "dotted namespace — the nested units share the SINGLE namespace " +
+      "declaration's range, pinned through the reachable unit `Outer.Inner` " +
+      "(SPEC 1.7, 4.6)",
+    fileSource: OCC_NS_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_NS_DECL,
+    record: {
+      file: "src/ns.ts",
+      range: rangeAfter(OCC_NS_HEAD + OCC_NS_DECL_PRE, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/ns.ts#Outer.Inner",
+        range: rangeAfter(OCC_NS_HEAD, OCC_NS_DECL),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "getter — the FIRST occurrence of chain `Pair.value` stays " +
+      "unsuffixed and carries its own construct's range (SPEC 1.7, 4.6)",
+    fileSource: OCC_PAIR_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_PAIR_GET,
+    record: {
+      file: "src/pair.ts",
+      range: rangeAfter(
+        OCC_PAIR_HEAD + OCC_PAIR_CLASS_PRE + OCC_PAIR_GET_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/pair.ts#Pair.value",
+        range: rangeAfter(OCC_PAIR_HEAD + OCC_PAIR_CLASS_PRE, OCC_PAIR_GET),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "setter — the document-order-disambiguated `Pair.value@2` carries " +
+      "the range of its OWN — second — occurrence's construct (SPEC 1.7, " +
+      "4.6)",
+    fileSource: OCC_PAIR_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_PAIR_SET,
+    record: {
+      file: "src/pair.ts",
+      range: rangeAfter(
+        OCC_PAIR_HEAD +
+          OCC_PAIR_CLASS_PRE +
+          OCC_PAIR_GET +
+          OCC_PAIR_BETWEEN +
+          OCC_PAIR_SET_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/pair.ts#Pair.value@2",
+        range: rangeAfter(
+          OCC_PAIR_HEAD + OCC_PAIR_CLASS_PRE + OCC_PAIR_GET + OCC_PAIR_BETWEEN,
+          OCC_PAIR_SET,
+        ),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "top-level marker — a whole-file location: identity the path alone, " +
+      "range the entire file, start 0, end the file's byte length (SPEC " +
+      "1.7, 4.6)",
+    fileSource: OCC_TOP_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_TOP_SOURCE,
+    record: {
+      file: "src/top.ts",
+      range: rangeAfter(OCC_TOP_HEAD, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/top.ts",
+        range: { start: 0, end: utf8Length(OCC_TOP_SOURCE) },
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+];
+
+/**
+ * Fixture self-check (harness-side, before any product invocation): the
+ * precomputed range must slice the staged file's bytes to exactly the span
+ * it claims. A failure here is a staging-arithmetic defect of this test,
+ * never a product failure.
+ */
+function assertStagedSpan(
+  fileSource: string,
+  range: SourceRange,
+  span: string,
+  what: string,
+): void {
+  const actual = Buffer.from(fileSource, "utf8")
+    .subarray(range.start, range.end)
+    .toString("utf8");
+  if (actual !== span) {
+    fail(
+      `T1.7-2 fixture self-check — ${what}: the precomputed byte range ` +
+        `[${String(range.start)}, ${String(range.end)}) slices the staged bytes to ` +
+        `${JSON.stringify(actual)}, expected ${JSON.stringify(span)} (a harness-side ` +
+        `staging error, not a product failure)`,
+    );
+  }
+}
+
+const T1_7_2 = defineProductTest({
+  id: "T1.7-2",
+  title:
+    "code-location ranges via occurrence records: against precomputed byte offsets, the `source` node of a marker or TS `text(...)` occurrence carries the entire file for a whole-file location; the construct binding the name for a function and a class declaration; the unit's own name through its initializer — not the enclosing multi-declaration statement; the single dotted-namespace declaration's shared range; the named construct's own range vs the whole export declaration under unit `default` for default exports; and the second occurrence's construct for `path#unit@2` (SPEC 1.7, 4.6, 5.7, 11.3, 12.7)",
+  run: async (product) => {
+    for (const arm of OCC_EXPECTED) {
+      assertStagedSpan(
+        arm.fileSource,
+        arm.record.range,
+        arm.occurrenceSpan,
+        `${arm.what} — the occurrence's own span`,
+      );
+      assertStagedSpan(
+        arm.fileSource,
+        arm.record.source.range,
+        arm.unitSpan,
+        `${arm.what} — the source unit's construct range`,
+      );
+    }
+
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        "specs/R.mdx": OCC_TARGET_SOURCE,
+        "src/anon.ts": OCC_ANON_SOURCE,
+        "src/cls.ts": OCC_CLS_SOURCE,
+        "src/fn.ts": OCC_FN_SOURCE,
+        "src/multi.ts": OCC_MULTI_SOURCE,
+        "src/named.ts": OCC_NAMED_SOURCE,
+        "src/ns.ts": OCC_NS_SOURCE,
+        "src/pair.ts": OCC_PAIR_SOURCE,
+        "src/top.ts": OCC_TOP_SOURCE,
+      },
+    });
+    try {
+      // Premise: the workspace is valid — every staged reference is a
+      // sanctioned use (4.5) that resolves, so the enumeration below is
+      // complete and finding-free (11.2). A product disputing any staging
+      // judgment (the property-initializer `text(...)`, the namespace-body
+      // marker) fails loudly here.
+      await buildOk(
+        product,
+        workspace,
+        "T1.7-2 `build` (premise: every staged reference is sanctioned and resolves)",
+      );
+
+      const context = "T1.7-2 `occurrences`";
+      const report = decodeOccurrencesReport(
+        await runJson(product, workspace, ["occurrences"], context),
+        context,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${context}: a complete, finding-free answer — the consulted domain ` +
+          `(the entire discovered set, no \`--file\`) carries no finding ` +
+          `(SPEC 11.2, 11.3)`,
+      );
+      if (report.occurrences.length !== OCC_EXPECTED.length) {
+        fail(
+          `${context}: expected exactly ${String(OCC_EXPECTED.length)} occurrence ` +
+            `records — one per staged reference; import declarations record ` +
+            `none (SPEC 5.7) — got ${String(report.occurrences.length)}: ` +
+            JSON.stringify(
+              report.occurrences.map((record) => ({
+                file: record.file,
+                range: record.range,
+                source:
+                  "unavailable" in record.source
+                    ? "unavailable"
+                    : record.source.identity,
+              })),
+            ),
+        );
+      }
+      // Per-index equality over the length-checked enumeration pins the
+      // occurrence order of 5.7 along with every record member.
+      OCC_EXPECTED.forEach((arm, index) => {
+        assertSameJson(
+          report.occurrences[index],
+          arm.record,
+          `${context} record [${String(index)}] — ${arm.what}; zero-based ` +
+            `byte offsets, start-inclusive end-exclusive, so code-point, ` +
+            `UTF-16, line/column, or 1-based ranges all fail (SPEC 1.7)`,
+        );
+      });
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
 /** TEST-SPEC §1.6–1.7, in canonical ID order (SUITE-05). */
 export const section16to17Tests: readonly ProductTestEntry[] = [
   T1_6_1,
@@ -1360,4 +1830,5 @@ export const section16to17Tests: readonly ProductTestEntry[] = [
   T1_6_4,
   T1_6_5,
   T1_7_1,
+  T1_7_2,
 ];

@@ -46,6 +46,7 @@ import {
   decodeNodeMetadataSummary,
   decodeNodeReport,
   decodeNodeIdentityRowsReport,
+  decodeOccurrencesReport,
   decodeNodeRowsReport,
   decodeNodeSummary,
   decodeNodeSummaryRowsReport,
@@ -275,6 +276,46 @@ const GOOD_FINDINGS = {
       locations: [],
       path: null,
       identities: [],
+    },
+  ],
+};
+
+// An `occurrences` document in the literal SPEC 12.7 form (a form-exact
+// surface, H-3): `{"findings", "occurrences"}`, each record
+// `{"file", "range", "kind", "source", "target"}` in occurrence order (5.7 —
+// file path bytes, then range start, then range end). Records deliberately
+// span the three reference kinds and both source states: a defined
+// `{"identity", "range"}` node and the one-datum unavailability marker
+// (11.2).
+const GOOD_OCCURRENCES = {
+  findings: [],
+  occurrences: [
+    {
+      file: "specs/B.mdx",
+      range: { start: 30, end: 47 },
+      kind: "depends",
+      source: {
+        identity: "specs/B.mdx#intro",
+        range: { start: 10, end: 90 },
+      },
+      target: "specs/A.mdx#login",
+    },
+    {
+      file: "src/app.ts",
+      range: { start: 120, end: 128 },
+      kind: "references",
+      source: {
+        identity: "src/app.ts#entry",
+        range: { start: 80, end: 140 },
+      },
+      target: "specs/A.mdx#login",
+    },
+    {
+      file: "src/app.ts",
+      range: { start: 200, end: 216 },
+      kind: "embeds",
+      source: { unavailable: true },
+      target: "specs/A.mdx#login",
     },
   ],
 };
@@ -1120,6 +1161,229 @@ const DECODERS: readonly DecoderSpec[] = [
             structuredClone(GOOD_FINDINGS.findings[0]),
           ],
         },
+      },
+    ],
+  },
+  {
+    name: "12.7 occurrences document",
+    decode: decodeOccurrencesReport,
+    good: GOOD_OCCURRENCES,
+    verify: (decoded: ReturnType<typeof decodeOccurrencesReport>) => {
+      expect(decoded.findings).toEqual([]);
+      expect(decoded.occurrences).toHaveLength(3);
+      // The record members decode literally (form-exact, H-3) …
+      expect(decoded.occurrences[0]).toEqual({
+        file: "specs/B.mdx",
+        range: { start: 30, end: 47 },
+        kind: "depends",
+        source: {
+          identity: "specs/B.mdx#intro",
+          range: { start: 10, end: 90 },
+        },
+        target: "specs/A.mdx#login",
+      });
+      expect(decoded.occurrences[1]!.kind).toBe("references");
+      expect(decoded.occurrences[1]!.source).toEqual({
+        identity: "src/app.ts#entry",
+        range: { start: 80, end: 140 },
+      });
+      // … and the marker decodes as the one-datum unavailability state,
+      // never as a defaulted node (11.2, 12.7).
+      expect(decoded.occurrences[2]!.source).toEqual({ unavailable: true });
+    },
+    alsoGood: [
+      {
+        label: "an empty enumeration (a finding-free empty answer, 11.3)",
+        doc: { findings: [], occurrences: [] },
+        verify: (decoded: ReturnType<typeof decodeOccurrencesReport>): void => {
+          expect(decoded.findings).toEqual([]);
+          expect(decoded.occurrences).toEqual([]);
+        },
+      },
+      {
+        label: "the consulted domain's findings accompany the answer (11.2)",
+        doc: {
+          findings: [structuredClone(GOOD_FINDINGS.findings[0])],
+          occurrences: [structuredClone(GOOD_OCCURRENCES.occurrences[0])],
+        },
+        verify: (decoded: ReturnType<typeof decodeOccurrencesReport>): void => {
+          expect(decoded.findings).toHaveLength(1);
+          expect(decoded.findings[0]!.code).toBe("invalid-structural-id");
+        },
+      },
+      {
+        label:
+          "a non-UTF-8 referencing file in the marked byte form (SPEC 12.0)",
+        doc: {
+          findings: [],
+          occurrences: [
+            {
+              file: { bytes: "ff2f61" },
+              range: { start: 4, end: 12 },
+              kind: "depends",
+              source: { unavailable: true },
+              target: "specs/A.mdx#login",
+            },
+          ],
+        },
+        verify: (decoded: ReturnType<typeof decodeOccurrencesReport>): void => {
+          expect(decoded.occurrences[0]!.file).toEqual({ bytes: "ff2f61" });
+        },
+      },
+      {
+        label:
+          "same-start ranges break the tie by range end (5.7's stated order)",
+        doc: {
+          findings: [],
+          occurrences: [
+            structuredClone(GOOD_OCCURRENCES.occurrences[1]),
+            {
+              ...structuredClone(GOOD_OCCURRENCES.occurrences[2]),
+              range: { start: 120, end: 140 },
+            },
+          ],
+        },
+      },
+    ],
+    bad: [
+      {
+        label: "missing findings member",
+        doc: omit(GOOD_OCCURRENCES, "findings"),
+      },
+      {
+        label: "null findings (a list-valued member is [] when empty)",
+        doc: put(GOOD_OCCURRENCES, null, "findings"),
+      },
+      {
+        label: "missing occurrences member",
+        doc: omit(GOOD_OCCURRENCES, "occurrences"),
+      },
+      {
+        label: "null occurrences (null never encodes emptiness, SPEC 12.7)",
+        doc: put(GOOD_OCCURRENCES, null, "occurrences"),
+      },
+      {
+        label: "occurrences not an array",
+        doc: put(GOOD_OCCURRENCES, {}, "occurrences"),
+      },
+      {
+        label:
+          "an extra member on the document (12.7: exactly " +
+          "{findings, occurrences})",
+        doc: put(GOOD_OCCURRENCES, 3, "count"),
+      },
+      {
+        label: "record missing its file",
+        doc: omit(GOOD_OCCURRENCES, "occurrences", 0, "file"),
+      },
+      {
+        label: "record missing its range",
+        doc: omit(GOOD_OCCURRENCES, "occurrences", 0, "range"),
+      },
+      {
+        label: "record missing its kind",
+        doc: omit(GOOD_OCCURRENCES, "occurrences", 0, "kind"),
+      },
+      {
+        label: "record missing its source (one datum, never omitted)",
+        doc: omit(GOOD_OCCURRENCES, "occurrences", 0, "source"),
+      },
+      {
+        label: "record missing its target",
+        doc: omit(GOOD_OCCURRENCES, "occurrences", 0, "target"),
+      },
+      {
+        label: "empty target identity",
+        doc: put(GOOD_OCCURRENCES, "", "occurrences", 0, "target"),
+      },
+      {
+        label: "an extra member on a record (12.7: exactly the five)",
+        doc: put(GOOD_OCCURRENCES, "hint", "occurrences", 0, "note"),
+      },
+      {
+        label:
+          '"contains" as a record kind (5.2: no reference occurrence ' +
+          "carries it)",
+        doc: put(GOOD_OCCURRENCES, "contains", "occurrences", 0, "kind"),
+      },
+      {
+        label:
+          "null source (the datum is defined or explicitly unavailable, " +
+          "never null)",
+        doc: put(GOOD_OCCURRENCES, null, "occurrences", 1, "source"),
+      },
+      {
+        label: "source node missing its identity",
+        doc: omit(GOOD_OCCURRENCES, "occurrences", 1, "source", "identity"),
+      },
+      {
+        label: "source node missing its range (one datum: both together)",
+        doc: omit(GOOD_OCCURRENCES, "occurrences", 1, "source", "range"),
+      },
+      {
+        label: "source node with an extra member",
+        doc: put(GOOD_OCCURRENCES, 1, "occurrences", 1, "source", "n"),
+      },
+      {
+        label:
+          "a widened unavailability marker (12.7: the marker is exactly " +
+          '{"unavailable": true})',
+        doc: put(
+          GOOD_OCCURRENCES,
+          { unavailable: true, identity: "src/app.ts" },
+          "occurrences",
+          2,
+          "source",
+        ),
+      },
+      {
+        label: "a bare-identity source (12.7 fixes the object form)",
+        doc: put(
+          GOOD_OCCURRENCES,
+          "src/app.ts#entry",
+          "occurrences",
+          1,
+          "source",
+        ),
+      },
+      {
+        label: "negative range offset",
+        doc: put(GOOD_OCCURRENCES, -1, "occurrences", 0, "range", "start"),
+      },
+      {
+        label:
+          "records out of occurrence order (5.7: file path bytes, then " +
+          "range start, then range end)",
+        doc: {
+          findings: [],
+          occurrences: [
+            structuredClone(GOOD_OCCURRENCES.occurrences[1]),
+            structuredClone(GOOD_OCCURRENCES.occurrences[0]),
+          ],
+        },
+      },
+      {
+        label:
+          "two records over one (file, range) key (5.7: distinct " +
+          "occurrences occupy distinct spans)",
+        doc: {
+          findings: [],
+          occurrences: [
+            structuredClone(GOOD_OCCURRENCES.occurrences[0]),
+            structuredClone(GOOD_OCCURRENCES.occurrences[0]),
+          ],
+        },
+      },
+      {
+        label: "findings out of the pinned order inside the document",
+        doc: put(
+          GOOD_OCCURRENCES,
+          [
+            structuredClone(GOOD_FINDINGS.findings[1]),
+            structuredClone(GOOD_FINDINGS.findings[0]),
+          ],
+          "findings",
+        ),
       },
     ],
   },

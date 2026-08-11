@@ -749,13 +749,62 @@ A "new test T<x>" task always means, in one change:
 
 ## Stage E — §§1–9 missing tests (new-test convention applies)
 
-- [ ] FP-022 — Implement T1.7-2: code-location ranges via occurrence
+- [x] FP-022 — Implement T1.7-2: code-location ranges via occurrence
   records. [R1 #1; TEST-SPEC §1.7]
   First harness use of `xspec occurrences` (it is never invoked anywhere
   today). Assert ranges against precomputed byte offsets for: whole-file,
   function/class, multi-declaration variable, dotted namespace, default
   exports, and `@2` disambiguation. Registry module
   `section-1.6-1.7.ts`; map `"1.7"`.
+  [Done 2026-08-11: T1.7-2 registered in section-1.6-1.7.ts — one valid
+  workspace, eight code files each staging one sanctioned reference inside
+  one SPEC 4.6 unit shape, every file opening with multi-byte UTF-8 before
+  its constructs (byte offsets diverge from code-point/UTF-16 counts); one
+  bare `occurrences` invocation (11.3 is JSON-only, no `--json`) asserting
+  the complete nine-record document per-index against precomputed offsets:
+  whole-file (top-level marker: identity the path alone, range 0..byteLen),
+  `function fn`/`class Cls` construct ranges (the class attribution via a
+  `text(SPEC.alt)` property initializer — a call expression is no named
+  unit, so the embed attributes to the class; also the one `embeds` arm),
+  `handler` name-through-initializer inside `const one = 1, handler = …`
+  (statement excluded), dotted `namespace Outer.Inner` whole-declaration
+  range (the shared range pinned through the reachable unit — every body
+  position lies within `Inner`, and a unit's range is reachable exactly
+  through occurrences it sources, so bare `Outer` sources none; comment
+  documents the reading), `export default function named` = construct's own
+  range (prefix excluded) vs anonymous default = whole declaration under
+  unit `default` (two files — one default export per module), getter
+  `Pair.value` vs setter `Pair.value@2` each carrying its own construct.
+  The document decodes through a NEW form-exact 12.7 layer
+  (`decodeOccurrencesReport`/`decodeOccurrenceRecordForm` in
+  adapters/forms.ts, model types in model.ts): exactly
+  {"findings","occurrences"}, records exactly
+  {"file","range","kind","source","target"}, kind from the dependency-kind
+  vocabulary (never `contains`), `source` decoded through the S-5-guarded
+  three-state datum decode with `null` rejected (defined or the
+  unavailability marker, never null), the 5.7 total order enforced (file
+  path bytes, start, end; identical spans reject). S-5 gains the document's
+  DECODERS entry (positive controls incl. unavailable source, byte-form
+  referencing file, accompanying findings, same-start tie by end; 24
+  targeted rejections). A pre-product fixture self-check slices every
+  claimed range back out of the staged bytes, so staging-arithmetic errors
+  fail harness-side, never as wrong-but-satisfiable expectations.
+  Traceability: "T1.7-2": ["1.7"] (no numbered condition asserted; 4.6/5.7/
+  11.3/12.7 context with home coverage elsewhere); in no certification
+  scope (CERTIFICATIONS.md Exclusions names T1.7-2 explicitly). Verified:
+  red-as-diagnosed exactly at the `occurrences` invocation (exit 2 "unknown
+  command 'occurrences'" — the whole 11.3 surface is patch-new) with the
+  build premise green, and a scratchpad probe of the identical staging via
+  `query edges --kinds references,embeds` returned byte-for-byte all nine
+  expected (source identity, kind, target) triples — `#default`, `#named`,
+  `#Outer.Inner`, `#Pair.value`, `#Pair.value@2`, `#Cls`, `#fn`,
+  `#handler`, whole-file `src/top.ts` — against the product's pre-existing
+  4.6 attribution, so only the ranges (the arm's patch-new subject) await
+  the product. Section file 2 failed / 5 passed (T1.6-5 keeps its
+  pre-existing FP-001-class red); typecheck/format clean; `npm run
+  test:self` unchanged 4 planned mid-loop reds (certification-document ×3
+  → FP-091; S-1's 9 unmapped keys → stages E/G), S-5 (243 tests now) and
+  certification green.]
 
 - [ ] FP-023 — Implement T5.7-1: occurrence units and duplicates. [R1 #2;
   TEST-SPEC §5.7]

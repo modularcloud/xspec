@@ -29,6 +29,7 @@ export const DEPENDENCY_EDGE_KINDS = [
   "embeds",
   "references",
 ] as const;
+export type DependencyEdgeKind = (typeof DEPENDENCY_EDGE_KINDS)[number];
 
 /** Change categories of SPEC.md 5.6 (T5.6-*, T9.1-1). */
 export const CHANGE_CATEGORIES = [
@@ -293,6 +294,51 @@ export interface FindingsReport {
  */
 export interface ErrorDocument {
   readonly error: Finding;
+}
+
+/**
+ * An occurrence record's source graph node — one datum: the node's identity
+ * together with that node's own source range (SPEC.md 5.7, 1.7, 12.7).
+ */
+export interface OccurrenceSourceNode {
+  readonly identity: string;
+  readonly range: SourceRange;
+}
+
+/**
+ * The source datum of an occurrence record: the node, or explicitly
+ * unavailable as one datum — identity and range withheld together — where
+ * 11.2 leaves the source node's identity undefined. Never `null` (12.7).
+ */
+export type OccurrenceSource =
+  OccurrenceSourceNode | { readonly unavailable: true };
+
+/**
+ * One reference occurrence record in the literal SPEC.md 12.7 form (a
+ * form-exact surface, H-3): `{"file", "range", "kind", "source", "target"}`
+ * — the referencing file (a path value: the marked byte form where the
+ * path's bytes are not valid UTF-8, 12.0); the occurrence's own range; its
+ * edge kind (`"depends"`, `"embeds"`, or `"references"`, 5.2 — `contains`
+ * is no reference kind); its source graph node per 11.2; and the resolved
+ * target's identity (a string — no identity carries a non-UTF-8 path, 12.0).
+ */
+export interface OccurrenceRecord {
+  readonly file: PathValue;
+  readonly range: SourceRange;
+  readonly kind: DependencyEdgeKind;
+  readonly source: OccurrenceSource;
+  readonly target: string;
+}
+
+/**
+ * The `occurrences` document (SPEC.md 11.3) — `{"findings", "occurrences"}`
+ * exactly (12.7): the consulted domain's findings, and one record per
+ * occurrence in occurrence order (5.7: by referencing file path bytes, then
+ * range start, then range end).
+ */
+export interface OccurrencesReport {
+  readonly findings: readonly Finding[];
+  readonly occurrences: readonly OccurrenceRecord[];
 }
 
 /** `coverage` (T8.2-1): all profiles by default, one when named. */
