@@ -1,5 +1,6 @@
 // TEST-SPEC §13.5 (concurrency and isolation) — SUITE-48: T13.5-1 (hold-seam
-// basics: five held mutating-command arms, the occupied-hold-path exit-2
+// basics: five held mutating-command arms each compared byte-identically
+// against its no-seam twin (seam neutrality), the occupied-hold-path exit-2
 // arms, and the non-mutating unknown-flag arm), T13.5-2 (mutual exclusion),
 // T13.5-3 (exclusivity ends with the process), T13.5-4 (readers during
 // mutation + build/query storm), T13.5-5 (atomic visibility via a polling
@@ -22,6 +23,11 @@
 //   fixtures stay in CONF-CORE's workspace shape: one spec group of
 //   importless, tagless `.mdx` sources; no `code`, `markdown`, `coverage`,
 //   or `policy` keys; no git.
+// - T13.5-1's seam-neutrality twin drives the exact command sequence of the
+//   held workspace — the staging `build` and the `review status` item
+//   lookup included — with the seam flag alone removed, and its whole-tree
+//   compare includes the journal (§VIOL-CORE-CHATTYREADS's passing analysis
+//   leans on exactly that sequence equality).
 // - T13.5-2's excluded commands carry no `--test-hold` (§VIOL-CORE-NOLOCK),
 //   and its modifies-nothing compare brackets each excluded command alone,
 //   with the baseline snapshot taken while command 1 is already held
@@ -46,6 +52,14 @@
 //   certified via VIOL-CORE-EARLYWRITE — plus: the process is still running
 //   after that snapshot's full-tree read completes, and exits 0 only after
 //   the harness deletes the hold file.
+// - Seam neutrality (T13.5-1): one identical twin workspace replays each
+//   held arm's operation without `--test-hold` and the two whole trees —
+//   sources, journal, sessions, derived files, graph data — are compared
+//   after each arm (H-4 product-to-itself, H-6 across directories). The
+//   per-arm compare makes the twin byte-identical at each next arm's start,
+//   so every arm runs "the same operation on an identical twin workspace";
+//   arms 4/5 pass each side its own workspace's reported item ID — the same
+//   operation by item scope, never an assumed cross-directory ID equality.
 // - "Fails promptly" (T13.5-1 occupied path, T13.5-2): a bounded foreground
 //   run — a product that blocks instead of failing is killed at the bound
 //   and fails diagnosed (H-8; the bound is a hang guard, never an assertion
@@ -317,152 +331,214 @@ function requireRowByScope(
 const T13_5_1 = defineProductTest({
   id: "T13.5-1",
   title:
-    "each mutating command (`rename`, file-form `move`, `review create/resolve/split`) with `--test-hold` creates an empty file at the path after acquiring exclusivity and before modifying anything (workspace byte-identical while held), proceeds only once the file is deleted, and completes normally; anything at the hold path — file, directory, or symlink — fails the command exit 2 without modifying anything; `build` and `query` given `--test-hold` fail exit 2 as an unknown flag (SPEC 13.5, 12.0)",
+    "each mutating command (`rename`, file-form `move`, `review create/resolve/split`) with `--test-hold` creates an empty file at the path after acquiring exclusivity and before modifying anything (workspace byte-identical while held), proceeds only once the file is deleted, and completes normally, the held-then-released run's final workspace state — sources, journal, sessions, derived files, and graph data — byte-identical to the same operation run without `--test-hold` on an identical twin workspace (seam neutrality: the seam changes no other behavior; H-4/H-6); anything at the hold path — file, directory, or symlink — fails the command exit 2 without modifying anything; `build` and `query` given `--test-hold` fail exit 2 as an unknown flag (SPEC 13.5, 12.0)",
   run: async (product) => {
     await withWorkspace(CORE_DECL, async (workspace) => {
-      await buildOk(product, workspace, "T13.5-1 staging `build`");
+      // Seam neutrality (SPEC 13.5: the seam changes no other behavior): an
+      // identical twin workspace is driven through the exact same command
+      // sequence — the staging `build` and the `review status` item lookup
+      // included — with the seam flag alone removed, and after each
+      // held-then-released arm the two whole trees (sources, journal,
+      // sessions, derived files, graph data) are compared byte-identically:
+      // a product-to-itself comparison under H-4, well-defined across
+      // directories per H-6, the hold path outside the workspace. The
+      // per-arm compare makes the twin byte-identical at each next arm's
+      // start, so every arm runs "the same operation on an identical twin
+      // workspace"; the two sides' sequences matching exactly — reads
+      // included — is the staging §VIOL-CORE-CHATTYREADS's passing analysis
+      // leans on (CERTIFICATIONS.md).
+      await withWorkspace(CORE_DECL, async (twin) => {
+        await buildOk(product, workspace, "T13.5-1 staging `build`");
+        await buildOk(product, twin, "T13.5-1 twin staging `build`");
 
-      let armIndex = 0;
-      const heldArm = async (
-        argv: readonly string[],
-        what: string,
-        onCompleted: () => Promise<void>,
-      ): Promise<void> => {
-        armIndex += 1;
-        const hold = holdPathFor(workspace, `hold-${String(armIndex)}.tmp`);
-        const context = `T13.5-1 (held ${what})`;
-        const before = await snapshotDirectory(workspace.root);
-        const running = await startProduct(product, {
-          cwd: workspace.root,
-          argv: [...argv, "--test-hold", hold],
-        });
-        try {
-          await awaitHoldFile(running, hold, context);
-          await assertEmptyHoldFile(hold, context);
-          const whileHeld = await snapshotDirectory(workspace.root);
-          assertSnapshotsEqual(
-            before,
-            whileHeld,
-            `${context}: the workspace while held vs before the command ` +
-              `started — the hold file is created after acquiring ` +
-              `exclusivity and before modifying anything, so the workspace ` +
-              `is byte-identical while held (SPEC 13.5)`,
-          );
-          if (running.hasExited()) {
-            fail(
-              `${context}: the command must proceed only once the hold file ` +
-                `is deleted, but it exited while the hold file still ` +
-                `existed (SPEC 13.5) — ${await describeExit(running)}`,
-            );
-          }
-          await releaseHoldFile(hold);
-          let result: RunResult;
+        let armIndex = 0;
+        const heldArm = async (
+          argv: readonly string[],
+          what: string,
+          onCompleted: () => Promise<void>,
+          twinArgv: readonly string[] = argv,
+        ): Promise<void> => {
+          armIndex += 1;
+          const hold = holdPathFor(workspace, `hold-${String(armIndex)}.tmp`);
+          const context = `T13.5-1 (held ${what})`;
+          const before = await snapshotDirectory(workspace.root);
+          const running = await startProduct(product, {
+            cwd: workspace.root,
+            argv: [...argv, "--test-hold", hold],
+          });
           try {
-            result = await running.waitForExit();
-          } catch (error) {
-            return fail(
-              `${context}: once the hold file is deleted the command must ` +
-                `proceed and complete normally (SPEC 13.5) — ` +
-                `${error instanceof Error ? error.message : String(error)}`,
+            await awaitHoldFile(running, hold, context);
+            await assertEmptyHoldFile(hold, context);
+            const whileHeld = await snapshotDirectory(workspace.root);
+            assertSnapshotsEqual(
+              before,
+              whileHeld,
+              `${context}: the workspace while held vs before the command ` +
+                `started — the hold file is created after acquiring ` +
+                `exclusivity and before modifying anything, so the workspace ` +
+                `is byte-identical while held (SPEC 13.5)`,
             );
+            if (running.hasExited()) {
+              fail(
+                `${context}: the command must proceed only once the hold ` +
+                  `file is deleted, but it exited while the hold file still ` +
+                  `existed (SPEC 13.5) — ${await describeExit(running)}`,
+              );
+            }
+            await releaseHoldFile(hold);
+            let result: RunResult;
+            try {
+              result = await running.waitForExit();
+            } catch (error) {
+              return fail(
+                `${context}: once the hold file is deleted the command must ` +
+                  `proceed and complete normally (SPEC 13.5) — ` +
+                  `${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+            assertExitCode(
+              result,
+              0,
+              `${context}: completes normally once the hold file is deleted ` +
+                `(SPEC 13.5)`,
+            );
+            await onCompleted();
+          } finally {
+            running.kill();
+            await releaseHoldFile(hold);
           }
-          assertExitCode(
-            result,
+
+          // Seam neutrality: the twin runs the same operation without
+          // `--test-hold`, and the final workspace states are compared
+          // whole — no exclusions, the journal included.
+          await expectExit(
+            product,
+            twin,
+            twinArgv,
             0,
-            `${context}: completes normally once the hold file is deleted ` +
-              `(SPEC 13.5)`,
+            `T13.5-1 (twin ${what}) run without --test-hold on the ` +
+              `identical twin workspace (SPEC 13.5)`,
           );
-          await onCompleted();
-        } finally {
-          running.kill();
-          await releaseHoldFile(hold);
-        }
-      };
-
-      // Arm 1 — `review create` (audit strategy per §CONF-CORE).
-      await heldArm(
-        ["review", "create", "--strategy", "audit", "--name", "s"],
-        "`review create --strategy audit --name s`",
-        async () => {
-          const kind = await workspace.kind(sessionRel("s"));
-          if (kind !== "file") {
-            fail(
-              "T13.5-1 (held `review create`): after completing normally, " +
-                `the session file exists as a plain file at ` +
-                `${sessionRel("s")} (SPEC 10.1); found ${kind}`,
-            );
-          }
-        },
-      );
-
-      // Arm 2 — `rename`.
-      await heldArm(
-        ["rename", "specs/A.mdx", "a", "a2"],
-        "`rename specs/A.mdx a a2`",
-        async () => {
-          const text = new TextDecoder("utf-8", { fatal: false }).decode(
-            await workspace.readBytes("specs/A.mdx"),
+          await assertDirectoriesEqual(
+            workspace.root,
+            twin.root,
+            `${context} vs its no-seam twin: the final workspace state of ` +
+              `the held-then-released run — sources, journal, sessions, ` +
+              `derived files, and graph data — is byte-identical to the ` +
+              `same operation run without --test-hold on an identical twin ` +
+              `workspace (SPEC 13.5 seam neutrality: the seam changes no ` +
+              `other behavior; a product-to-itself comparison under H-4, ` +
+              `well-defined across directories per H-6)`,
           );
-          if (!text.includes('id="a2"')) {
-            fail(
-              "T13.5-1 (held `rename`): after completing normally, " +
-                'specs/A.mdx carries the renamed id="a2" (SPEC 6.4)',
+        };
+
+        // Arm 1 — `review create` (audit strategy per §CONF-CORE).
+        await heldArm(
+          ["review", "create", "--strategy", "audit", "--name", "s"],
+          "`review create --strategy audit --name s`",
+          async () => {
+            const kind = await workspace.kind(sessionRel("s"));
+            if (kind !== "file") {
+              fail(
+                "T13.5-1 (held `review create`): after completing normally, " +
+                  `the session file exists as a plain file at ` +
+                  `${sessionRel("s")} (SPEC 10.1); found ${kind}`,
+              );
+            }
+          },
+        );
+
+        // Arm 2 — `rename`.
+        await heldArm(
+          ["rename", "specs/A.mdx", "a", "a2"],
+          "`rename specs/A.mdx a a2`",
+          async () => {
+            const text = new TextDecoder("utf-8", { fatal: false }).decode(
+              await workspace.readBytes("specs/A.mdx"),
             );
-          }
-        },
-      );
+            if (!text.includes('id="a2"')) {
+              fail(
+                "T13.5-1 (held `rename`): after completing normally, " +
+                  'specs/A.mdx carries the renamed id="a2" (SPEC 6.4)',
+              );
+            }
+          },
+        );
 
-      // Arm 3 — file-form `move` (never the section form, §CONF-CORE).
-      await heldArm(
-        ["move", "specs/A.mdx", "specs/Moved.mdx"],
-        "`move specs/A.mdx specs/Moved.mdx`",
-        async () => {
-          const moved = await workspace.kind("specs/Moved.mdx");
-          const original = await workspace.kind("specs/A.mdx");
-          if (moved !== "file" || original !== "absent") {
-            fail(
-              "T13.5-1 (held `move`): after completing normally, the file " +
-                `moved — specs/Moved.mdx is a plain file (found ${moved}) ` +
-                `and specs/A.mdx is absent (found ${original}) (SPEC 6.5)`,
-            );
-          }
-        },
-      );
+        // Arm 3 — file-form `move` (never the section form, §CONF-CORE).
+        await heldArm(
+          ["move", "specs/A.mdx", "specs/Moved.mdx"],
+          "`move specs/A.mdx specs/Moved.mdx`",
+          async () => {
+            const moved = await workspace.kind("specs/Moved.mdx");
+            const original = await workspace.kind("specs/A.mdx");
+            if (moved !== "file" || original !== "absent") {
+              fail(
+                "T13.5-1 (held `move`): after completing normally, the " +
+                  `file moved — specs/Moved.mdx is a plain file (found ` +
+                  `${moved}) and specs/A.mdx is absent (found ${original}) ` +
+                  `(SPEC 6.5)`,
+              );
+            }
+          },
+        );
 
-      // Arms 4 and 5 need item IDs: read them once — identities are
-      // presented under the current (post-rename, post-move) identity
-      // (SPEC 10.4).
-      const status = await sessionStatus(
-        product,
-        workspace,
-        "s",
-        "T13.5-1 item lookup",
-      );
-      const gItem = requireRowByScope(
-        status,
-        "specs/Moved.mdx#g",
-        "T13.5-1 item lookup (leaf item)",
-      );
-      const aItem = requireRowByScope(
-        status,
-        "specs/Moved.mdx#a2",
-        "T13.5-1 item lookup (parent item)",
-      );
+        // Arms 4 and 5 need item IDs: read them once — identities are
+        // presented under the current (post-rename, post-move) identity
+        // (SPEC 10.4). The twin replays the same read at the same sequence
+        // position, and each arm passes each side its own workspace's
+        // reported item ID — the same operation by item scope, never an
+        // assumed cross-directory ID equality (H-4 product-to-itself).
+        const status = await sessionStatus(
+          product,
+          workspace,
+          "s",
+          "T13.5-1 item lookup",
+        );
+        const gItem = requireRowByScope(
+          status,
+          "specs/Moved.mdx#g",
+          "T13.5-1 item lookup (leaf item)",
+        );
+        const aItem = requireRowByScope(
+          status,
+          "specs/Moved.mdx#a2",
+          "T13.5-1 item lookup (parent item)",
+        );
+        const twinStatus = await sessionStatus(
+          product,
+          twin,
+          "s",
+          "T13.5-1 twin item lookup",
+        );
+        const twinGItem = requireRowByScope(
+          twinStatus,
+          "specs/Moved.mdx#g",
+          "T13.5-1 twin item lookup (leaf item)",
+        );
+        const twinAItem = requireRowByScope(
+          twinStatus,
+          "specs/Moved.mdx#a2",
+          "T13.5-1 twin item lookup (parent item)",
+        );
 
-      // Arm 4 — `review resolve` (the unblocked leaf item, SPEC 10.6).
-      await heldArm(
-        ["review", "resolve", "s", gItem.id, "--status", "no-change"],
-        "`review resolve s <leaf item> --status no-change`",
-        async () => Promise.resolve(),
-      );
+        // Arm 4 — `review resolve` (the unblocked leaf item, SPEC 10.6).
+        await heldArm(
+          ["review", "resolve", "s", gItem.id, "--status", "no-change"],
+          "`review resolve s <leaf item> --status no-change`",
+          async () => Promise.resolve(),
+          ["review", "resolve", "s", twinGItem.id, "--status", "no-change"],
+        );
 
-      // Arm 5 — `review split` (the parent item's scope root has a child,
-      // SPEC 10.7).
-      await heldArm(
-        ["review", "split", "s", aItem.id],
-        "`review split s <parent item>`",
-        async () => Promise.resolve(),
-      );
+        // Arm 5 — `review split` (the parent item's scope root has a child,
+        // SPEC 10.7).
+        await heldArm(
+          ["review", "split", "s", aItem.id],
+          "`review split s <parent item>`",
+          async () => Promise.resolve(),
+          ["review", "split", "s", twinAItem.id],
+        );
+      });
 
       // Occupied hold path: anything at the path — a file, directory, or
       // symbolic link (staged dangling: a create that follows the link

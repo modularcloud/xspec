@@ -1975,11 +1975,41 @@ A "new test T<x>" task always means, in one change:
   unmapped keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and certification
   green.]
 
-- [ ] FP-047 — T13.5-1: add the seam-neutrality arm. [R2 #34; TEST-SPEC
+- [x] FP-047 — T13.5-1: add the seam-neutrality arm. [R2 #34; TEST-SPEC
   §13.5]
   `test/suite/registry/section-13.5.ts`: held-then-released final workspace
   state byte-identical to the same operation without `--test-hold` on an
   identical twin.
+  [Done 2026-08-13: one identical twin workspace (CORE_DECL), scoped around
+  the five held arms alone, replays the held workspace's exact command
+  sequence — staging `build` and the `review status` item lookup included —
+  with the seam flag alone removed, and after each held-then-released arm
+  the two whole trees are compared byte-identically via
+  `assertDirectoriesEqual` with no exclusions (sources, journal, sessions,
+  derived files, graph data; H-4 product-to-itself, H-6 across directories;
+  hold paths already live outside the root). Per-arm compares make the twin
+  byte-identical at each next arm's start, so every arm runs "the same
+  operation on an identical twin workspace"; the sequence equality — reads
+  included — is exactly what §VIOL-CORE-CHATTYREADS's passing analysis
+  leans on (its appends land byte-identically on both sides), recorded as a
+  header staging constraint. Arms 4/5 pass each side its own workspace's
+  reported item ID (same operation by item scope, never an assumed
+  cross-directory ID equality); `heldArm` gained an optional `twinArgv`.
+  Title extended; traceability unchanged (["13.5"]; no numbered condition);
+  no new adapter (S-5 unchanged); no certification-scope change. NOT red
+  against this repo's product: suite section-13.5 7/7 — the product is
+  already seam-neutral, consistent with T13.5-6's passing cross-directory
+  tree compare; the pass is proven genuine by a teeth probe (twin's arm-2
+  rename diverted a→a3 fails exactly at the new compare, diagnosing all 6
+  divergent files across sources, journal, graph data, and generated
+  modules; probe reverted). Certification: CONF-CORE conformer 9/9 with the
+  new arm; violators exact — CHATTYREADS fails exactly T6.1-1+T13.4-5 while
+  passing T13.5-1 (the sequence staging's proof), EARLYWRITE fails exactly
+  T13.5-1 (still at the earlier while-held compare) +T13.5-4, NOLOCK/
+  STALELOCK/PARTIALWRITE/PERSISTREADS exact. Typecheck/format clean;
+  `npm run test:self` unchanged 4 planned mid-loop reds
+  (certification-document ×3 → FP-091; S-1's 7 unmapped keys {11.2–11.6,
+  12.6, 12.7} → stage G).]
 
 - [ ] FP-048 — T14-4: extend the reporter matrix. [R2 #35; TEST-SPEC §14]
   `test/suite/registry/section-14.ts`: 14.21 by `check` alone beside gate
