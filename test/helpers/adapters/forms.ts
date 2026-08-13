@@ -27,6 +27,9 @@
 //   - the at document {"findings","resolution"} (11.5)
 //   - the scoped view decode: top level {"findings","views"} and each
 //     per-file wrapper's form with its `file` member (11.4)
+//   - the full view decode: per-file positional trees with node, attribute,
+//     import, occurrence, and comment forms, `--text` conditional presence
+//     (11.4, T11.2-1, T11.4-*)
 //   - the rename/move preview document {"findings","mapping","files","delta"}
 //     (6.6) with the ten edit classes and the pinned orders
 //   - the unavailability-marker structural walk T12.7-1 relies on: no object
@@ -39,6 +42,7 @@ import type {
   AtResolution,
   AtSection,
   ErrorDocument,
+  FileView,
   Finding,
   FindingLocation,
   FindingsReport,
@@ -54,10 +58,15 @@ import type {
   PreviewFileEntry,
   PreviewReport,
   SourceRange,
+  ViewAttributeEntry,
   ViewFilesReport,
+  ViewImportEntry,
+  ViewNode,
+  ViewReport,
 } from "./model.js";
 import {
   CONDITION_CODE_TOKENS,
+  COVERAGE_ATTRIBUTE_VALUES,
   DEPENDENCY_EDGE_KINDS,
   PREVIEW_EDIT_CLASSES,
   REFUSAL_CODE_TOKENS,
@@ -71,6 +80,7 @@ import {
   expectNonEmptyString,
   expectNonNegativeInteger,
   expectObject,
+  expectString,
   expectToken,
   requiredKey,
   requiredMember,
@@ -872,6 +882,392 @@ export function decodeViewFilesReport(
     }
   }
   return { findings, files };
+}
+
+// --- the full view decode (11.4, 12.7) ----------------------------------------
+
+const VIEW_NODE_MEMBERS = [
+  "identity",
+  "range",
+  "opening",
+  "closing",
+  "attributes",
+  "tags",
+  "coverage",
+  "children",
+] as const;
+const VIEW_NODE_TEXT_MEMBERS = ["ownText", "subtreeText"] as const;
+
+/** A tag-range member: a range form or `null` where none exists (11.4). */
+function decodeTagRangeMember(
+  value: unknown,
+  site: DecodeSite,
+): SourceRange | null {
+  if (value === undefined) {
+    formFail(
+      site,
+      "a present member: null is never omission (SPEC 12.7)",
+      value,
+    );
+  }
+  return value === null ? null : decodeRangeForm(value, site);
+}
+
+/** One attribute entry: `{"name", "range", "text"}` exactly (11.4, 12.7). */
+function decodeViewAttributeEntry(
+  value: unknown,
+  site: DecodeSite,
+): ViewAttributeEntry {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, ["name", "range", "text"], site);
+  const nameValue = requiredMember(obj, "name", site);
+  const range = decodeRangeForm(
+    requiredKey(obj, "range", site),
+    at(site, "range"),
+  );
+  const text = expectNonEmptyString(
+    requiredKey(obj, "text", site),
+    at(site, "text"),
+  );
+  if (Buffer.byteLength(text, "utf8") !== range.end - range.start) {
+    formFail(
+      at(site, "text"),
+      "the attribute's own characters — the source text's byte length " +
+        "equals its range's length (SPEC 11.4, 1.7)",
+      value,
+    );
+  }
+  return {
+    name:
+      nameValue === null
+        ? null
+        : expectNonEmptyString(nameValue, at(site, "name")),
+    range,
+    text,
+  };
+}
+
+/** A text-member datum: a plain string or the marker, never `null` (11.2). */
+function decodeViewTextMember(
+  value: unknown,
+  site: DecodeSite,
+): string | { readonly unavailable: true } {
+  const datum = decodeDatum(value, site, expectString);
+  if (datum.state === "null") {
+    formFail(
+      site,
+      "an own/subtree text value — a plain string, or the unavailability " +
+        "marker where 11.2 leaves the whole value undefined, never null " +
+        "(SPEC 11.2, 11.4, 12.7)",
+      null,
+    );
+  }
+  return datum.state === "value" ? datum.value : { unavailable: true as const };
+}
+
+/**
+ * One node of the positional section tree in the literal 12.7 form:
+ * `{"identity", "range", "opening", "closing", "attributes", "tags",
+ * "coverage", "children"}` plus `"ownText"`/`"subtreeText"` exactly when
+ * `--text` is given (the stated conditional presence — absent without the
+ * flag, both present with it). `identity` is a plain identity string or the
+ * unavailability marker, never `null` (11.2 defines no structural absence
+ * for it); `tags`/`coverage` are three-state datums (a root's stated `null`,
+ * 11.4); `attributes` entries are in tag order and `children` in document
+ * order — both strictly ascending by range start (distinct constructs occupy
+ * distinct spans).
+ */
+function decodeViewNodeForm(
+  value: unknown,
+  site: DecodeSite,
+  text: boolean,
+): ViewNode {
+  const obj = expectObject(value, site);
+  const allowed = text
+    ? [...VIEW_NODE_MEMBERS, ...VIEW_NODE_TEXT_MEMBERS]
+    : [...VIEW_NODE_MEMBERS];
+  expectOnlyMembers(obj, allowed, site);
+
+  const identitySite = at(site, "identity");
+  const identityDatum = decodeDatum(
+    obj["identity"],
+    identitySite,
+    expectNonEmptyString,
+  );
+  if (identityDatum.state === "null") {
+    formFail(
+      identitySite,
+      "the node's identity — a plain identity string, or the unavailability " +
+        "marker where 11.2 leaves it undefined, never null (SPEC 11.2, " +
+        "11.4, 12.7)",
+      null,
+    );
+  }
+
+  const range = decodeRangeForm(
+    requiredKey(obj, "range", site),
+    at(site, "range"),
+  );
+  const opening = decodeTagRangeMember(obj["opening"], at(site, "opening"));
+  const closing = decodeTagRangeMember(obj["closing"], at(site, "closing"));
+
+  const attributesSite = at(site, "attributes");
+  const attributes = expectArray(
+    requiredKey(obj, "attributes", site),
+    attributesSite,
+  ).map((element, index) =>
+    decodeViewAttributeEntry(element, at(attributesSite, index)),
+  );
+  for (let i = 1; i < attributes.length; i += 1) {
+    if (attributes[i - 1]!.range.start >= attributes[i]!.range.start) {
+      formFail(
+        at(attributesSite, i),
+        "one entry per spelled attribute in tag order — ranges strictly " +
+          "ascending (SPEC 11.4, 12.7)",
+        obj["attributes"],
+      );
+    }
+  }
+
+  const tagsDatum = decodeDatum(
+    obj["tags"],
+    at(site, "tags"),
+    (tagsValue, tagsSite) =>
+      expectArray(tagsValue, tagsSite).map((element, index) =>
+        expectNonEmptyString(element, at(tagsSite, index)),
+      ),
+  );
+  const coverageDatum = decodeDatum(
+    obj["coverage"],
+    at(site, "coverage"),
+    (coverageValue, coverageSite) =>
+      expectToken(coverageValue, COVERAGE_ATTRIBUTE_VALUES, coverageSite),
+  );
+
+  const childrenSite = at(site, "children");
+  const children = expectArray(
+    requiredKey(obj, "children", site),
+    childrenSite,
+  ).map((element, index) =>
+    decodeViewNodeForm(element, at(childrenSite, index), text),
+  );
+  for (let i = 1; i < children.length; i += 1) {
+    if (children[i - 1]!.range.start >= children[i]!.range.start) {
+      formFail(
+        at(childrenSite, i),
+        "child nodes in document order — construct ranges strictly " +
+          "ascending by start (SPEC 11.4, 12.7)",
+        obj["children"],
+      );
+    }
+  }
+
+  const node: {
+    identity: ViewNode["identity"];
+    range: SourceRange;
+    opening: SourceRange | null;
+    closing: SourceRange | null;
+    attributes: ViewAttributeEntry[];
+    tags: ViewNode["tags"];
+    coverage: ViewNode["coverage"];
+    children: ViewNode[];
+    ownText?: ViewNode["ownText"];
+    subtreeText?: ViewNode["subtreeText"];
+  } = {
+    identity:
+      identityDatum.state === "value"
+        ? identityDatum.value
+        : { unavailable: true as const },
+    range,
+    opening,
+    closing,
+    attributes,
+    tags:
+      tagsDatum.state === "value"
+        ? tagsDatum.value
+        : tagsDatum.state === "null"
+          ? null
+          : { unavailable: true as const },
+    coverage:
+      coverageDatum.state === "value"
+        ? coverageDatum.value
+        : coverageDatum.state === "null"
+          ? null
+          : { unavailable: true as const },
+    children,
+  };
+  if (text) {
+    node.ownText = decodeViewTextMember(obj["ownText"], at(site, "ownText"));
+    node.subtreeText = decodeViewTextMember(
+      obj["subtreeText"],
+      at(site, "subtreeText"),
+    );
+  }
+  return node;
+}
+
+/** One import entry: `{"range", "name", "target"}` exactly (11.4, 12.7). */
+function decodeViewImportEntry(
+  value: unknown,
+  site: DecodeSite,
+): ViewImportEntry {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, ["range", "name", "target"], site);
+  const nameValue = requiredMember(obj, "name", site);
+  const targetSite = at(site, "target");
+  const targetDatum = decodeDatum(obj["target"], targetSite, decodePathValue);
+  if (targetDatum.state === "null") {
+    formFail(
+      targetSite,
+      "the import's resolved target — a path value where specifier form " +
+        "and discovery define one, the unavailability marker otherwise, " +
+        "never null (SPEC 11.4, 11.2, 12.7)",
+      null,
+    );
+  }
+  return {
+    range: decodeRangeForm(requiredKey(obj, "range", site), at(site, "range")),
+    name:
+      nameValue === null
+        ? null
+        : expectNonEmptyString(nameValue, at(site, "name")),
+    target:
+      targetDatum.state === "value"
+        ? targetDatum.value
+        : { unavailable: true as const },
+  };
+}
+
+/**
+ * The full `view` document (SPEC 11.4) — `{"findings", "views"}` exactly,
+ * each per-file view `{"file", "root", "imports", "occurrences", "comments"}`
+ * exactly, decoded in the literal 12.7 forms (H-3: form-exact, never
+ * adjustable to a product's shape). `text` states whether the invocation
+ * carried `--text`: the node text members must be present exactly then
+ * (12.7's stated conditional presence). Enforced orders: per-file views by
+ * file path bytes, strictly ascending (the requested files form a set,
+ * 11.4); per file, imports and comments in document order and occurrence
+ * records in document order over distinct spans (5.7), each record's `file`
+ * equal to the view's file (11.4: the FILE's occurrence records).
+ */
+export function decodeViewReport(
+  doc: unknown,
+  options: { readonly text: boolean },
+  context?: string,
+): ViewReport {
+  const site = rootSite("12.7 view document", context);
+  const obj = expectObject(doc, site);
+  expectOnlyMembers(obj, ["findings", "views"], site);
+  const findings = decodeFindingsArray(
+    requiredKey(obj, "findings", site),
+    at(site, "findings"),
+  );
+  const viewsSite = at(site, "views");
+  const views = expectArray(requiredKey(obj, "views", site), viewsSite).map(
+    (element, index): FileView => {
+      const entrySite = at(viewsSite, index);
+      const entry = expectObject(element, entrySite);
+      expectOnlyMembers(entry, VIEW_FILE_ENTRY_MEMBERS, entrySite);
+      const file = decodePathValue(
+        requiredKey(entry, "file", entrySite),
+        at(entrySite, "file"),
+      );
+      const root = decodeViewNodeForm(
+        requiredKey(entry, "root", entrySite),
+        at(entrySite, "root"),
+        options.text,
+      );
+      const importsSite = at(entrySite, "imports");
+      const imports = expectArray(
+        requiredKey(entry, "imports", entrySite),
+        importsSite,
+      ).map((importValue, importIndex) =>
+        decodeViewImportEntry(importValue, at(importsSite, importIndex)),
+      );
+      for (let i = 1; i < imports.length; i += 1) {
+        if (imports[i - 1]!.range.start >= imports[i]!.range.start) {
+          formFail(
+            at(importsSite, i),
+            "import declarations in document order — ranges strictly " +
+              "ascending by start (SPEC 11.4, 12.7)",
+            entry["imports"],
+          );
+        }
+      }
+      const occurrencesSite = at(entrySite, "occurrences");
+      const occurrences = expectArray(
+        requiredKey(entry, "occurrences", entrySite),
+        occurrencesSite,
+      ).map((recordValue, recordIndex) => {
+        const recordSite = at(occurrencesSite, recordIndex);
+        const record = decodeOccurrenceRecordForm(recordValue, recordSite);
+        if (
+          Buffer.compare(pathValueBytes(record.file), pathValueBytes(file)) !==
+          0
+        ) {
+          formFail(
+            at(recordSite, "file"),
+            `the viewed file's own occurrence records — each record's file ` +
+              `equals the view's file (SPEC 11.4, 12.7); the view is of ` +
+              `${JSON.stringify(renderPathValue(file))}`,
+            recordValue,
+          );
+        }
+        return record;
+      });
+      for (let i = 1; i < occurrences.length; i += 1) {
+        const previous = occurrences[i - 1]!;
+        const current = occurrences[i]!;
+        const ordered =
+          previous.range.start < current.range.start ||
+          (previous.range.start === current.range.start &&
+            previous.range.end < current.range.end);
+        if (!ordered) {
+          formFail(
+            at(occurrencesSite, i),
+            "occurrence records in document order over distinct spans — " +
+              "(start, end) strictly ascending (SPEC 5.7, 11.4, 12.7)",
+            entry["occurrences"],
+          );
+        }
+      }
+      const commentsSite = at(entrySite, "comments");
+      const comments = expectArray(
+        requiredKey(entry, "comments", entrySite),
+        commentsSite,
+      ).map((commentValue, commentIndex) =>
+        decodeRangeForm(commentValue, at(commentsSite, commentIndex)),
+      );
+      for (let i = 1; i < comments.length; i += 1) {
+        if (comments[i - 1]!.start >= comments[i]!.start) {
+          formFail(
+            at(commentsSite, i),
+            "comment ranges in document order — strictly ascending by " +
+              "start (SPEC 11.4, 12.7)",
+            entry["comments"],
+          );
+        }
+      }
+      return { file, root, imports, occurrences, comments };
+    },
+  );
+  for (let i = 1; i < views.length; i += 1) {
+    if (
+      Buffer.compare(
+        pathValueBytes(views[i - 1]!.file),
+        pathValueBytes(views[i]!.file),
+      ) >= 0
+    ) {
+      formFail(
+        at(viewsSite, i),
+        "per-file views ordered by byte order of workspace-relative path — " +
+          "the requested files form a set, so the order is strict " +
+          "(SPEC 11.4, 12.7)",
+        obj["views"],
+      );
+    }
+  }
+  return { findings, views };
 }
 
 // --- the rename/move preview document (6.6, 12.7) -----------------------------

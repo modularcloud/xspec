@@ -387,6 +387,97 @@ export interface ViewFilesReport {
   readonly files: readonly PathValue[];
 }
 
+/**
+ * The interpreted coverage attribute's defined values (SPEC.md 2.5): a view
+ * node's `coverage` member, where it is a plain value, is one of these — any
+ * other spelled value leaves the interpreted datum unavailable (11.2), so no
+ * other plain value exists.
+ */
+export const COVERAGE_ATTRIBUTE_VALUES = ["required", "none"] as const;
+export type CoverageAttributeValue = (typeof COVERAGE_ATTRIBUTE_VALUES)[number];
+
+/**
+ * One raw attribute entry of a view node — `{"name", "range", "text"}`
+ * exactly (SPEC.md 11.4, 12.7): the attribute's name as spelled (`null` for a
+ * spread attribute), its source range, and its source text — for a named
+ * attribute its name through the last character of its value or the bare name
+ * where it spells no value, for a spread attribute its entire braced
+ * construct. One entry per attribute the tag spells, in tag order; inclusion
+ * is by form (repeated, unknown, and spread attributes included).
+ */
+export interface ViewAttributeEntry {
+  readonly name: string | null;
+  readonly range: SourceRange;
+  readonly text: string;
+}
+
+/**
+ * One node of a view's positional section tree — `{"identity", "range",
+ * "opening", "closing", "attributes", "tags", "coverage", "children"}` plus,
+ * exactly when `--text` is given, `"ownText"` and `"subtreeText"` (SPEC.md
+ * 11.4, 12.7). `identity` is defined or explicitly unavailable per 11.2 —
+ * never `null` (no passage defines structural absence for it); `tags` and
+ * `coverage` are each a plain value, the stated `null` (a root's structural
+ * absence, 11.4), or unavailable; the text members are each a plain string or
+ * unavailable (whole-value poisoning, 11.2). `opening`/`closing` are the tag
+ * ranges, `null` where none exists (self-closing: no closing; root: neither).
+ */
+export interface ViewNode {
+  readonly identity: string | { readonly unavailable: true };
+  readonly range: SourceRange;
+  readonly opening: SourceRange | null;
+  readonly closing: SourceRange | null;
+  readonly attributes: readonly ViewAttributeEntry[];
+  readonly tags: readonly string[] | null | { readonly unavailable: true };
+  readonly coverage:
+    CoverageAttributeValue | null | { readonly unavailable: true };
+  readonly children: readonly ViewNode[];
+  /** Present exactly when the invocation carried `--text` (12.7). */
+  readonly ownText?: string | { readonly unavailable: true };
+  /** Present exactly when the invocation carried `--text` (12.7). */
+  readonly subtreeText?: string | { readonly unavailable: true };
+}
+
+/**
+ * One import declaration of a per-file view — `{"range", "name", "target"}`
+ * exactly (SPEC.md 11.4, 12.7): its source range; its default binding's
+ * identifier, `null` where the declaration binds no default (the side-effect-
+ * only, named-only, and namespace-only forms — structural absence, never
+ * unavailability); and its resolved target file where specifier form and
+ * discovery define one, explicitly unavailable otherwise — never `null`.
+ */
+export interface ViewImportEntry {
+  readonly range: SourceRange;
+  readonly name: string | null;
+  readonly target: PathValue | { readonly unavailable: true };
+}
+
+/**
+ * One parseable requested file's view — `{"file", "root", "imports",
+ * "occurrences", "comments"}` exactly (SPEC.md 11.4, 12.7): the file (a 12.7
+ * path value), the root node of the positional section tree, every import
+ * declaration in document order, the file's occurrence records in document
+ * order, and every MDX comment's source range in document order.
+ */
+export interface FileView {
+  readonly file: PathValue;
+  readonly root: ViewNode;
+  readonly imports: readonly ViewImportEntry[];
+  readonly occurrences: readonly OccurrenceRecord[];
+  readonly comments: readonly SourceRange[];
+}
+
+/**
+ * The full `view` document (SPEC.md 11.4) — `{"findings", "views"}` exactly
+ * (12.7): the consulted domain's findings, and one per-file view per
+ * parseable requested file, ordered by byte order of workspace-relative path
+ * (an unparseable requested file contributes no entry).
+ */
+export interface ViewReport {
+  readonly findings: readonly Finding[];
+  readonly views: readonly FileView[];
+}
+
 /** `coverage` (T8.2-1): all profiles by default, one when named. */
 export interface CoverageReport {
   readonly profiles: readonly CoverageProfileReport[];

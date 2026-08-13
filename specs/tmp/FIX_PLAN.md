@@ -2114,9 +2114,58 @@ certify against FP-091's fixtures once those land.
   mid-loop reds (certification-document ×3 → FP-091; S-1's 7 unmapped keys
   {11.2–11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
 
-- [ ] FP-050 — Implement T11.2-1: parse-local structure and per-file
+- [x] FP-050 — Implement T11.2-1: parse-local structure and per-file
   masking with no writes. [R2 #2; TEST-SPEC §11.2] New registry module(s)
   for §11.2 (+ suite wrapper, index import); map `"11.2"`.
+  [Done 2026-08-13: registered in the new registry module section-11.2.ts
+  (SUITE-52; wrapper + index spread) with traceability ["11.2"] (T11.2-1 in
+  no TEST-SPEC 14 staging record — the FP-016 precedent; no certification
+  scope — CERTIFICATIONS.md's Exclusions carry only its answer-side no-write
+  compares through the machinery VIOL-CORE-CHATTYREADS certifies). One
+  workspace: A parseable with findings of both levels — `d={"nosuch"}`
+  (14.5) and the `d={"top"}` self-cycle (14.9), the latter's spelling
+  RESOLVING and recording its depends occurrence (positions survive
+  findings, 11.2/5.7) — beside the dup pair (14.3), one-segment `ha#sh`
+  (14.4), unknown prop (14.17), and `<div>` (14.16); B unparseable (14.20);
+  C finding-free; a multi-byte prefix shifts every A offset (1.7). The
+  `build --json` gate reference pins staging integrity: exit 1, exactly
+  {14.3,14.4,14.5,14.9,14.16,14.17 ×1 located in A; 14.20 ×1 in B}
+  (file-granular; range precision is T14-8's). Bare `view` (JSON-only:
+  entire stdout one document, no `--json`) exits 1 with the same finding
+  multiset — B's 14.20 accompanying — views exactly [A, C] (B contributes
+  no view): A's full positional tree byte-exact over the pinned projection
+  (identity three-state per 11.2 — dup bearers and ha#sh unavailable,
+  top/top.kid/gone/solo defined; construct ranges; raw attribute entries
+  name/range/text, unknown prop included; the div gets no node), comment
+  ranges, and the complete two-record occurrence enumeration (5.7 spans:
+  the d string literal; the whole embedding container); C's view complete,
+  empty lists as []. Tag-range decompositions and interpreted tags/coverage
+  stay outside the projection (T11.4-1, T11.2-2/T11.4-3 homes — the form
+  decode still validates their forms). Failing-side `occurrences` (same
+  findings, same records, exit 1) and `at C 0` (finding-free, exit 0, root
+  resolution — the per-file domain contrast) ride per T11.2-6's stated
+  delegation; every invocation (gate build included) sits in a whole-root
+  assertLeavesUnchanged compare — never-built workspace, so any graph-data
+  or derived write surfaces. New form-exact machinery: full
+  `decodeViewReport` in adapters/forms.ts (node/attribute/import/
+  occurrence/comment forms, `--text` conditional presence, identity/text
+  never null, attribute text byteLength = range length, document orders and
+  per-file record-file equality enforced) with ViewNode/FileView/ViewReport
+  model types and COVERAGE_ATTRIBUTE_VALUES; S-5 gains two DECODERS entries
+  (with/without `--text`) — 86/86 green. Verified: typecheck/format clean;
+  suite section-11.2 red-as-diagnosed at the first arm's FP-001-class
+  form-exact decode ("expected no member \"condition\"" on the gate build;
+  view/occurrences/at are unknown commands on this pre-patch product —
+  further diagnosed exit failures once that closes); a direct probe of the
+  staged fixture against the built product returned exactly the expected
+  old-shape condition multiset; a scratch conforming fake product (deriving
+  every range independently from the workspace bytes) ran the registered
+  body green end-to-end, and three deviation fakes (cycle occurrence
+  dropped; masked B served a view entry; view writing graph data) each
+  failed diagnosed — expectations satisfiable, assertions toothed. `npm run
+  test:self`: 4 planned mid-loop reds (certification-document ×3 → FP-091;
+  S-1's unmapped keys narrowed 7 → 6, now {11.3, 11.4, 11.5, 11.6, 12.6,
+  12.7} → stage G), S-5 and certification green.]
 - [ ] FP-051 — Implement T11.2-2 (CONF-AVAIL): spelled-identity /
   interpreted-data definedness matrix. [R2 #2, R3 gap 1, VERIFY; TEST-SPEC
   §11.2]

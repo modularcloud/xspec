@@ -20,7 +20,7 @@ import { Buffer } from "node:buffer";
 import { expect, onTestFinished, test } from "vitest";
 import { HarnessAssertionError } from "../helpers/assertions.js";
 import type { RunResult } from "../helpers/subprocess.js";
-import type { Finding } from "../helpers/adapters/index.js";
+import type { Finding, ViewReport } from "../helpers/adapters/index.js";
 import {
   GRAPH_DATA_AREA_PATH,
   ITEM_STATUSES,
@@ -62,6 +62,7 @@ import {
   decodeSessionListReport,
   decodeSessionStatusReport,
   decodeViewFilesReport,
+  decodeViewReport,
   expectNonNegativeInteger,
   isGraphDataKey,
   rootSite,
@@ -357,6 +358,144 @@ const GOOD_VIEWS = {
     {
       file: "specs/B.mdx",
       root: { placeholder: true },
+      imports: [],
+      occurrences: [],
+      comments: [],
+    },
+  ],
+};
+
+// The FULL view decode (11.4, 12.7; decodeViewReport): one per-file view
+// carrying a complete positional tree — root with the stated-`null`
+// tags/coverage, a paired child with a named and a spread attribute, a
+// self-closing child with identity/tags unavailable — imports in both target
+// states, the file's own occurrence records in document order, and comment
+// ranges. Attribute text lengths equal their ranges (the decoder's 1.7
+// invariant). Without `--text` the node text members are absent (the stated
+// conditional presence); GOOD_VIEW_FULL_TEXT is the `--text` twin.
+const GOOD_VIEW_FULL = {
+  findings: [],
+  views: [
+    {
+      file: "specs/A.mdx",
+      root: {
+        identity: "specs/A.mdx",
+        range: { start: 0, end: 200 },
+        opening: null,
+        closing: null,
+        attributes: [],
+        tags: null,
+        coverage: null,
+        children: [
+          {
+            identity: "specs/A.mdx#login",
+            range: { start: 40, end: 120 },
+            opening: { start: 40, end: 62 },
+            closing: { start: 116, end: 120 },
+            attributes: [
+              {
+                name: "id",
+                range: { start: 43, end: 53 },
+                text: 'id="login"',
+              },
+              { name: null, range: { start: 54, end: 60 }, text: "{...p}" },
+            ],
+            tags: ["auth", "v2"],
+            coverage: "required",
+            children: [],
+          },
+          {
+            identity: { unavailable: true },
+            range: { start: 130, end: 146 },
+            opening: { start: 130, end: 146 },
+            closing: null,
+            attributes: [
+              {
+                name: "id",
+                range: { start: 133, end: 142 },
+                text: 'id="du.p"',
+              },
+            ],
+            tags: { unavailable: true },
+            coverage: "none",
+            children: [],
+          },
+        ],
+      },
+      imports: [
+        { range: { start: 0, end: 31 }, name: "BASE", target: "specs/B.mdx" },
+        {
+          range: { start: 32, end: 39 },
+          name: null,
+          target: { unavailable: true },
+        },
+      ],
+      occurrences: [
+        {
+          file: "specs/A.mdx",
+          range: { start: 70, end: 84 },
+          kind: "embeds",
+          source: {
+            identity: "specs/A.mdx#login",
+            range: { start: 40, end: 120 },
+          },
+          target: "specs/B.mdx#base",
+        },
+        {
+          file: "specs/A.mdx",
+          range: { start: 90, end: 104 },
+          kind: "depends",
+          source: { unavailable: true },
+          target: "specs/B.mdx#base",
+        },
+      ],
+      comments: [
+        { start: 150, end: 170 },
+        { start: 175, end: 195 },
+      ],
+    },
+  ],
+};
+
+// The `--text` twin: every node additionally carries ownText/subtreeText —
+// a plain string (empty legitimate: an empty leaf, SPEC 1.1) or the
+// unavailability marker (whole-value poisoning, 11.2), never `null`.
+const GOOD_VIEW_FULL_TEXT = {
+  findings: [],
+  views: [
+    {
+      file: "specs/A.mdx",
+      root: {
+        identity: "specs/A.mdx",
+        range: { start: 0, end: 100 },
+        opening: null,
+        closing: null,
+        attributes: [],
+        tags: null,
+        coverage: null,
+        children: [
+          {
+            identity: "specs/A.mdx#login",
+            range: { start: 10, end: 90 },
+            opening: { start: 10, end: 24 },
+            closing: { start: 86, end: 90 },
+            attributes: [
+              {
+                name: "id",
+                range: { start: 13, end: 23 },
+                text: 'id="login"',
+              },
+            ],
+            tags: [],
+            coverage: "required",
+            children: [],
+            ownText: "",
+            subtreeText: { unavailable: true },
+          },
+        ],
+        ownText: "Prose.\n",
+        subtreeText: { unavailable: true },
+      },
       imports: [],
       occurrences: [],
       comments: [],
@@ -1705,6 +1844,335 @@ const DECODERS: readonly DecoderSpec[] = [
             structuredClone(GOOD_VIEWS.views[0]),
           ],
         },
+      },
+    ],
+  },
+  {
+    name: "12.7 view document (full)",
+    decode: (doc: unknown) => decodeViewReport(doc, { text: false }),
+    good: GOOD_VIEW_FULL,
+    verify: (decoded: ViewReport) => {
+      expect(decoded.findings).toEqual([]);
+      expect(decoded.views).toHaveLength(1);
+      const view = decoded.views[0]!;
+      expect(view.file).toBe("specs/A.mdx");
+      // The tree decodes literally: root with the stated-null tags/coverage
+      // and no tag ranges; the paired child with both tag ranges, the named
+      // and the spread attribute entry; the self-closing child with
+      // identity/tags as the one-datum unavailability state (11.2, 12.7).
+      expect(view.root.identity).toBe("specs/A.mdx");
+      expect(view.root.tags).toBeNull();
+      expect(view.root.coverage).toBeNull();
+      expect(view.root.opening).toBeNull();
+      expect(view.root.attributes).toEqual([]);
+      expect(view.root.children).toHaveLength(2);
+      const paired = view.root.children[0]!;
+      expect(paired.identity).toBe("specs/A.mdx#login");
+      expect(paired.opening).toEqual({ start: 40, end: 62 });
+      expect(paired.closing).toEqual({ start: 116, end: 120 });
+      expect(paired.attributes).toEqual([
+        { name: "id", range: { start: 43, end: 53 }, text: 'id="login"' },
+        { name: null, range: { start: 54, end: 60 }, text: "{...p}" },
+      ]);
+      expect(paired.tags).toEqual(["auth", "v2"]);
+      expect(paired.coverage).toBe("required");
+      // Without --text the text members are absent (12.7's stated
+      // conditional presence), never defaulted in.
+      expect("ownText" in paired).toBe(false);
+      expect("subtreeText" in paired).toBe(false);
+      const selfClosing = view.root.children[1]!;
+      expect(selfClosing.identity).toEqual({ unavailable: true });
+      expect(selfClosing.closing).toBeNull();
+      expect(selfClosing.tags).toEqual({ unavailable: true });
+      // Imports decode in both target states; the file's occurrence records
+      // and comment ranges decode literally.
+      expect(view.imports).toHaveLength(2);
+      expect(view.imports[0]!.name).toBe("BASE");
+      expect(view.imports[0]!.target).toBe("specs/B.mdx");
+      expect(view.imports[1]!.name).toBeNull();
+      expect(view.imports[1]!.target).toEqual({ unavailable: true });
+      expect(view.occurrences).toHaveLength(2);
+      expect(view.occurrences[0]!.kind).toBe("embeds");
+      expect(view.occurrences[1]!.source).toEqual({ unavailable: true });
+      expect(view.comments).toEqual([
+        { start: 150, end: 170 },
+        { start: 175, end: 195 },
+      ]);
+    },
+    alsoGood: [
+      {
+        label:
+          "an empty request with findings accompanying (a masked domain: " +
+          "every requested file unparseable contributes no entry, 11.4)",
+        doc: {
+          findings: [structuredClone(GOOD_FINDINGS.findings[0])],
+          views: [],
+        },
+        verify: (decoded: ViewReport): void => {
+          expect(decoded.findings).toHaveLength(1);
+          expect(decoded.views).toEqual([]);
+        },
+      },
+    ],
+    bad: [
+      {
+        label: "ownText present without --text (12.7 conditional presence)",
+        doc: put(GOOD_VIEW_FULL, "x", "views", 0, "root", "ownText"),
+      },
+      {
+        label: "node missing its identity member",
+        doc: omit(GOOD_VIEW_FULL, "views", 0, "root", "identity"),
+      },
+      {
+        label:
+          "null node identity (defined or explicitly unavailable, never " +
+          "null — SPEC 11.2, 12.7)",
+        doc: put(GOOD_VIEW_FULL, null, "views", 0, "root", "identity"),
+      },
+      {
+        label:
+          "a widened unavailability marker as a node identity (12.7: the " +
+          'marker is exactly {"unavailable": true})',
+        doc: put(
+          GOOD_VIEW_FULL,
+          { unavailable: true, id: "x" },
+          "views",
+          0,
+          "root",
+          "children",
+          1,
+          "identity",
+        ),
+      },
+      {
+        label: "node missing its range",
+        doc: omit(GOOD_VIEW_FULL, "views", 0, "root", "range"),
+      },
+      {
+        label: "node missing its opening member (null is never omission)",
+        doc: omit(GOOD_VIEW_FULL, "views", 0, "root", "opening"),
+      },
+      {
+        label: "node missing its attributes member",
+        doc: omit(GOOD_VIEW_FULL, "views", 0, "root", "attributes"),
+      },
+      {
+        label: "null attributes (a root's empty list is [], SPEC 12.7)",
+        doc: put(GOOD_VIEW_FULL, null, "views", 0, "root", "attributes"),
+      },
+      {
+        label: "an extra member on a node",
+        doc: put(GOOD_VIEW_FULL, 1, "views", 0, "root", "note"),
+      },
+      {
+        label: "attribute entry missing its text",
+        doc: omit(
+          GOOD_VIEW_FULL,
+          "views",
+          0,
+          "root",
+          "children",
+          0,
+          "attributes",
+          0,
+          "text",
+        ),
+      },
+      {
+        label:
+          "attribute text whose byte length differs from its range " +
+          "(11.4: the attribute's own characters)",
+        doc: put(
+          GOOD_VIEW_FULL,
+          'id="log"',
+          "views",
+          0,
+          "root",
+          "children",
+          0,
+          "attributes",
+          0,
+          "text",
+        ),
+      },
+      {
+        label: "an extra member on an attribute entry",
+        doc: put(
+          GOOD_VIEW_FULL,
+          true,
+          "views",
+          0,
+          "root",
+          "children",
+          0,
+          "attributes",
+          0,
+          "spread",
+        ),
+      },
+      {
+        label: "non-string attribute name (null only for a spread)",
+        doc: put(
+          GOOD_VIEW_FULL,
+          7,
+          "views",
+          0,
+          "root",
+          "children",
+          0,
+          "attributes",
+          0,
+          "name",
+        ),
+      },
+      {
+        label: "a non-string tag element",
+        doc: put(
+          GOOD_VIEW_FULL,
+          [3],
+          "views",
+          0,
+          "root",
+          "children",
+          0,
+          "tags",
+        ),
+      },
+      {
+        label:
+          'coverage outside the defined values ("required"/"none" — an ' +
+          "invalid-valued prop is the unavailability marker instead, 11.2)",
+        doc: put(
+          GOOD_VIEW_FULL,
+          "optional",
+          "views",
+          0,
+          "root",
+          "children",
+          0,
+          "coverage",
+        ),
+      },
+      {
+        label: "node missing its children member",
+        doc: omit(GOOD_VIEW_FULL, "views", 0, "root", "children"),
+      },
+      {
+        label: "children out of document order (SPEC 11.4)",
+        doc: put(
+          GOOD_VIEW_FULL,
+          [
+            structuredClone(GOOD_VIEW_FULL.views[0]!.root.children[1]),
+            structuredClone(GOOD_VIEW_FULL.views[0]!.root.children[0]),
+          ],
+          "views",
+          0,
+          "root",
+          "children",
+        ),
+      },
+      {
+        label:
+          "an occurrence record whose file differs from the view's file " +
+          "(11.4: the file's own occurrence records)",
+        doc: put(
+          GOOD_VIEW_FULL,
+          "specs/Z.mdx",
+          "views",
+          0,
+          "occurrences",
+          0,
+          "file",
+        ),
+      },
+      {
+        label: "occurrence records out of document order (SPEC 5.7, 11.4)",
+        doc: put(
+          GOOD_VIEW_FULL,
+          [
+            structuredClone(GOOD_VIEW_FULL.views[0]!.occurrences[1]),
+            structuredClone(GOOD_VIEW_FULL.views[0]!.occurrences[0]),
+          ],
+          "views",
+          0,
+          "occurrences",
+        ),
+      },
+      {
+        label: "comment ranges out of document order (SPEC 11.4)",
+        doc: put(
+          GOOD_VIEW_FULL,
+          [
+            structuredClone(GOOD_VIEW_FULL.views[0]!.comments[1]),
+            structuredClone(GOOD_VIEW_FULL.views[0]!.comments[0]),
+          ],
+          "views",
+          0,
+          "comments",
+        ),
+      },
+      {
+        label: "import entry missing its name member (null is never omission)",
+        doc: omit(GOOD_VIEW_FULL, "views", 0, "imports", 0, "name"),
+      },
+      {
+        label:
+          "null import target (a path value or the unavailability marker, " +
+          "never null — SPEC 11.4, 12.7)",
+        doc: put(GOOD_VIEW_FULL, null, "views", 0, "imports", 1, "target"),
+      },
+    ],
+  },
+  {
+    name: "12.7 view document (full, --text)",
+    decode: (doc: unknown) => decodeViewReport(doc, { text: true }),
+    good: GOOD_VIEW_FULL_TEXT,
+    verify: (decoded: ViewReport) => {
+      const root = decoded.views[0]!.root;
+      // With --text both text members are present per node: plain strings
+      // (empty legitimate) and the marker decode as distinct states,
+      // never collapsed (11.2, 12.7).
+      expect(root.ownText).toBe("Prose.\n");
+      expect(root.subtreeText).toEqual({ unavailable: true });
+      const child = root.children[0]!;
+      expect(child.ownText).toBe("");
+      expect(child.subtreeText).toEqual({ unavailable: true });
+    },
+    bad: [
+      {
+        label:
+          "text members absent under --text (12.7 conditional presence: " +
+          "present exactly when the flag is given)",
+        doc: structuredClone(GOOD_VIEW_FULL),
+      },
+      {
+        label: "node missing its subtreeText under --text",
+        doc: omit(
+          GOOD_VIEW_FULL_TEXT,
+          "views",
+          0,
+          "root",
+          "children",
+          0,
+          "subtreeText",
+        ),
+      },
+      {
+        label:
+          "null ownText (a plain string or the unavailability marker, " +
+          "never null — SPEC 11.2, 12.7)",
+        doc: put(GOOD_VIEW_FULL_TEXT, null, "views", 0, "root", "ownText"),
+      },
+      {
+        label: "a widened unavailability marker as subtreeText",
+        doc: put(
+          GOOD_VIEW_FULL_TEXT,
+          { unavailable: true, partial: "x" },
+          "views",
+          0,
+          "root",
+          "subtreeText",
+        ),
       },
     ],
   },
