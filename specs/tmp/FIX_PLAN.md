@@ -1461,13 +1461,47 @@ A "new test T<x>" task always means, in one change:
   S-5 and certification green; T10.7-7 in no certification scope.
   Typecheck/format clean.]
 
-- [ ] FP-036 — T11-6: add the wrong-kind / unknown-unit / disambiguator
+- [x] FP-036 — T11-6: add the wrong-kind / unknown-unit / disambiguator
   arms. [R2 #23; TEST-SPEC §11.1]
   `test/suite/registry/section-11.ts`: (a) `query node`/`show` on a
   code-group `path`/`path#unit` → exit 2; (b) `query edges --from/--to` and
   `reachable --from/--to` with `#unspelled-unit` → exit 2; (c) out-of-range
   `@2`; (d) `@1` unknown at every occurrence count, staged at one and at
   two occurrences.
+  [Done 2026-08-13: twelve arms appended to T11-6's existing workspace (no
+  new files — its code file already stages chain `Box` once and `Box.v`
+  twice, getter/setter). (a) `query node` and `show` each given
+  `src/code.ts` and `src/code.ts#Box.v` → 4 arms via `expectUsageError`
+  (exit 2 exactly + single 12.7 error document under `--json`, the FP-002
+  protocol). (b) `#ghost` (no unit spells it) in all four graph-node flag
+  positions — `edges --from`/`--to`, `reachable --from`/`--to` (valid
+  `specs/S.mdx#s1` as the counterpart flag). (c)+(d) ride `query edges
+  --from` (the entry's primary position) behind a new premise control
+  pinning the once-occurring chain as a spelled unit — `--from
+  src/code.ts#Box` exit 0 with an EMPTY edge list (the check is parse-local
+  over named units per TEST-SPEC T11-6, so a spelled unit is never unknown;
+  empty-at-exit-0 is the module's established valid-identity/no-matching-
+  edges operationalization), keeping the @-arms sharp (they fail on the
+  disambiguator, never on an unknown chain): `Box@2` out-of-range, `Box@1`
+  (once), `Box.v@1` (twice — the discriminating arm: a product resolving
+  `@1` to the first occurrence would answer the getter's `embeds` edge at
+  exit 0, an edgeless-graph-node product an empty list at exit 0; the exact
+  exit-2 assertion forbids both). Title extended; traceability unchanged
+  (["11.1"] — 12.0/12.4/4.6 are context with home coverage at T12.0-*/
+  T12.4-*/T1.7-2; no numbered condition asserted); T11-6's unknown-unit and
+  `@N` arms are named in CERTIFICATIONS.md's Exclusions (shared machinery),
+  no fixture scope. Verified red-as-diagnosed by guarded solo executions of
+  every new arm against the built product: the premise control passes
+  (probe: `{"edges":[]}` exit 0; `Box.v`/`Box.v@2` resolve to getter embeds
+  / setter references), and all 11 usage-error arms pass their exact exit-2
+  assertion (the product already classifies every one correctly per its
+  stderr) and fail exactly at the error-document decode ("stdout is empty"
+  — the FP-002-class product gap, the same first-arm failure T11-6 already
+  shows at its unknown-path arm, so the new arms are unreached in the suite
+  until that closes). Section-11 unchanged 4 failed / 3 passed (T11-1/-3/-7
+  green); typecheck/format clean; `npm run test:self` unchanged 4 planned
+  mid-loop reds (certification-document ×3 → FP-091; S-1's 7 unmapped keys
+  {11.2–11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
 
 - [ ] FP-037 — T12.0-1/-3/-4: extend the shared command sweep with the new
   surfaces. [R2 #24; TEST-SPEC §12.0]

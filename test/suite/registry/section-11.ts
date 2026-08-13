@@ -1431,7 +1431,8 @@ const T11_5 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T11-6 — identity resolution: bare paths, code units, unknown paths
+// T11-6 — identity resolution: bare paths, code units, unknown paths,
+// wrong-kind operands, unknown units, and disambiguator range
 // ---------------------------------------------------------------------------
 
 const T11_6_S1 = '<S id="s1">\nS one.\n</S>';
@@ -1462,7 +1463,7 @@ const T11_6_S1_ID = "specs/S.mdx#s1";
 const T11_6 = defineProductTest({
   id: "T11-6",
   title:
-    "identity resolution: a bare `path` resolves to the root node for a spec-group file and to a code location for a code-group file; `path#unit` and `path#unit@N` address code locations (a getter/setter pair as the duplicate unit chain); a path in no configured group is unknown, exit 2 (SPEC 11, 1.5, 4.6, 12.0)",
+    "identity resolution: a bare `path` resolves to the root node for a spec-group file and to a code location for a code-group file; `path#unit` and `path#unit@N` address code locations (a getter/setter pair as the duplicate unit chain); a path in no configured group is unknown, exit 2; wrong-kind operands — `query node` and `show` given a code-group `path` or `path#unit` — each exit 2; an unspelled unit name on a discovered code source is unknown in every graph-node argument position (`edges --from`/`--to`, `reachable --from`/`--to`), exit 2, as are an out-of-range disambiguator (`@2` on a once-occurring chain) and `@1` at every occurrence count — no occurrence bears `@1`, staged at one and at two occurrences (SPEC 11, 1.5, 4.6, 12.0, 12.4)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -1577,6 +1578,122 @@ const T11_6 = defineProductTest({
           ["query", "edges", "--from", "docs/N.mdx"],
           "a path in no configured group (as a `<graph-node>` argument)",
           "T11-6 `query edges --from docs/N.mdx`",
+        );
+
+        // Wrong-kind operands (SPEC 12.0; 11.1, 12.4): `query node` and
+        // `show` take a requirement-node identity, so a code-group `path` or
+        // `path#unit` — a code source named where a requirement-node identity
+        // is required — is a usage error for each command, in each form.
+        for (const operand of ["src/code.ts", "src/code.ts#Box.v"]) {
+          await expectUsageError(
+            product,
+            workspace,
+            ["query", "node", operand],
+            "a code source named where a requirement-node identity is " +
+              "required (wrong-kind operand)",
+            `T11-6 \`query node ${operand}\``,
+          );
+          await expectUsageError(
+            product,
+            workspace,
+            ["show", operand],
+            "a code source named where a requirement-node identity is " +
+              "required (wrong-kind operand)",
+            `T11-6 \`show ${operand}\``,
+          );
+        }
+
+        // Unknown code units (SPEC 12.0, 4.6): the check is judged
+        // parse-local over the named file's named units, so a unit name no
+        // unit of the discovered code source spells is unknown in every
+        // graph-node argument position.
+        const unspelled = "src/code.ts#ghost";
+        await expectUsageError(
+          product,
+          workspace,
+          ["query", "edges", "--from", unspelled],
+          "an unspelled unit name on a discovered code source",
+          `T11-6 \`query edges --from ${unspelled}\``,
+        );
+        await expectUsageError(
+          product,
+          workspace,
+          ["query", "edges", "--to", unspelled],
+          "an unspelled unit name on a discovered code source",
+          `T11-6 \`query edges --to ${unspelled}\``,
+        );
+        await expectUsageError(
+          product,
+          workspace,
+          ["query", "reachable", "--from", unspelled, "--to", T11_6_S1_ID],
+          "an unspelled unit name on a discovered code source",
+          `T11-6 \`query reachable --from ${unspelled} --to ${T11_6_S1_ID}\``,
+        );
+        await expectUsageError(
+          product,
+          workspace,
+          ["query", "reachable", "--from", T11_6_S1_ID, "--to", unspelled],
+          "an unspelled unit name on a discovered code source",
+          `T11-6 \`query reachable --from ${T11_6_S1_ID} --to ${unspelled}\``,
+        );
+
+        // Disambiguator-range premise (SPEC 4.6): the chain `Box` — the
+        // class declaration — occurs exactly once in the file, so the bare
+        // `src/code.ts#Box` IS a spelled named unit: a valid graph-node
+        // identity whose edge answer is empty at exit 0 (both staged
+        // references lie in the getter and setter, the innermost enclosing
+        // units, so no edge has `Box` itself as an endpoint). Pinning this
+        // keeps the `@`-arms below sharp — they fail on the disambiguator,
+        // never on an unknown chain.
+        const boxLabel =
+          "T11-6 `query edges --from src/code.ts#Box` — the once-occurring " +
+          "chain is a spelled unit (its sole occurrence's identity is the " +
+          "bare `path#unit`, SPEC 4.6), answered with an empty edge list";
+        const boxEdges = decodeEdgesReport(
+          await runJson(
+            product,
+            workspace,
+            ["query", "edges", "--from", "src/code.ts#Box", "--json"],
+            boxLabel,
+          ),
+          boxLabel,
+        );
+        assertEdgeSetEqual(boxEdges, [], boxLabel);
+
+        // An out-of-range disambiguator is equally unknown (SPEC 4.6, 12.0):
+        // `@2` names a second occurrence, and the chain `Box` has only one.
+        await expectUsageError(
+          product,
+          workspace,
+          ["query", "edges", "--from", "src/code.ts#Box@2"],
+          "an out-of-range disambiguator (`@2` where the chain occurs once)",
+          "T11-6 `query edges --from src/code.ts#Box@2`",
+        );
+
+        // `@1` is unknown at EVERY occurrence count (SPEC 4.6, 12.0): 4.6
+        // suffixes only occurrences after the first, so no occurrence bears
+        // `@1` — the first occurrence's identity is the bare `path#unit`,
+        // and identities compare byte-wise. Staged where the chain occurs
+        // once (`Box`) and where it occurs twice (`Box.v`); the
+        // two-occurrence arm discriminates a product that resolves `@1` to
+        // the first occurrence — the getter, whose resolved answer would be
+        // its `embeds` edge at exit 0 — and one answering a bare edgeless
+        // graph node's empty list at exit 0: the exact exit-2 assertion
+        // (H-5) forbids both.
+        await expectUsageError(
+          product,
+          workspace,
+          ["query", "edges", "--from", "src/code.ts#Box@1"],
+          "`@1` on a once-occurring chain (no occurrence bears `@1`)",
+          "T11-6 `query edges --from src/code.ts#Box@1`",
+        );
+        await expectUsageError(
+          product,
+          workspace,
+          ["query", "edges", "--from", "src/code.ts#Box.v@1"],
+          "`@1` on a twice-occurring chain (no occurrence bears `@1`; the " +
+            "first occurrence's identity is the bare `path#unit`, byte-wise)",
+          "T11-6 `query edges --from src/code.ts#Box.v@1`",
         );
       },
     );
