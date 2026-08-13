@@ -23,15 +23,26 @@
 //
 // The full-surface sweep (T12.0-1, T12.0-3, T12.0-4) drives every command and
 // subcommand this specification covers over one evolving fixture story:
-// build, check, ids, show, coverage, impact, the six query subcommands, the
-// eight review subcommands, rename, and file-form move — mutations last, so
-// every step runs at a state its arguments are valid in.
+// build, check, ids, show, coverage, impact, the six query subcommands,
+// occurrences, view, at, inventory, version, the eight review subcommands,
+// rename, and file-form move — mutations last, so every step runs at a state
+// its arguments are valid in.
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - T12.0-1 asserts, per command, the specified exit code and that the entire
 //   stdout parses as exactly one JSON document; information parity with the
 //   human report is adapter-verified by the per-command tests in the sections
 //   above (the test's own text delegates it there).
+// - T12.0-1's JSON-only parity arms: the JSON-only surfaces of 10.7, 11, and
+//   12.6 — review export; the query subcommands, occurrences, view, at, and
+//   inventory; version — emit the same single document with the flag as
+//   without. Each such step (all reads, so rerunnable) is rerun without
+//   `--json` at the same story state, asserting the same exit code (0), a
+//   single JSON document as the entire stdout (H-5's JSON-only clause), and
+//   stdout byte-identical to the flagged run's: a single JSON document is
+//   the surface's ONLY output form with or without the flag, so the flag is
+//   inert there and "the same single document" is a product-to-itself byte
+//   comparison (H-4).
 // - T12.0-4 doubles `--config` with an identical value across the whole sweep
 //   — a repetition regardless of value, and the strictest probe (it fails a
 //   product that dedupes repeated identical values). Each doubled run's argv
@@ -195,6 +206,13 @@ interface SweepStep {
   readonly argv: (state: SweepState) => readonly string[];
   /** Harvest from the step's decoded `--json` document. */
   readonly harvest?: (doc: unknown, state: SweepState, context: string) => void;
+  /**
+   * The step drives a JSON-only surface (SPEC 10.7, 11, 12.6): a single JSON
+   * document is its only output form, with or without `--json`. T12.0-1's
+   * parity arm reruns the step without the flag and asserts the same single
+   * document (byte-identical stdout; see the module header).
+   */
+  readonly jsonOnly?: true;
 }
 
 /** A harvested id the story guarantees is set by the time it is consumed. */
@@ -247,11 +265,23 @@ const SWEEP_STEPS: readonly SweepStep[] = [
   { what: "show", argv: () => ["show", SWEEP_ALPHA] },
   { what: "coverage", argv: () => ["coverage"] },
   { what: "impact", argv: (state) => ["impact", "--base", state.baseRef] },
-  { what: "query node", argv: () => ["query", "node", SWEEP_ALPHA] },
-  { what: "query nodes", argv: () => ["query", "nodes"] },
-  { what: "query edges", argv: () => ["query", "edges"] },
-  { what: "query subtree", argv: () => ["query", "subtree", SWEEP_ALPHA] },
-  { what: "query ancestors", argv: () => ["query", "ancestors", SWEEP_KID] },
+  {
+    what: "query node",
+    argv: () => ["query", "node", SWEEP_ALPHA],
+    jsonOnly: true,
+  },
+  { what: "query nodes", argv: () => ["query", "nodes"], jsonOnly: true },
+  { what: "query edges", argv: () => ["query", "edges"], jsonOnly: true },
+  {
+    what: "query subtree",
+    argv: () => ["query", "subtree", SWEEP_ALPHA],
+    jsonOnly: true,
+  },
+  {
+    what: "query ancestors",
+    argv: () => ["query", "ancestors", SWEEP_KID],
+    jsonOnly: true,
+  },
   {
     what: "query reachable",
     argv: () => [
@@ -262,7 +292,16 @@ const SWEEP_STEPS: readonly SweepStep[] = [
       "--to",
       SWEEP_OMEGA,
     ],
+    jsonOnly: true,
   },
+  // The JSON-only read surfaces of SPEC 11.3–11.6 and 12.6 — clean-domain
+  // invocations over the valid story workspace, so each is a complete,
+  // finding-free answer, exit 0 (11.2, 11.6, 12.6).
+  { what: "occurrences", argv: () => ["occurrences"], jsonOnly: true },
+  { what: "view", argv: () => ["view"], jsonOnly: true },
+  { what: "at", argv: () => ["at", SWEEP_FILE, "0"], jsonOnly: true },
+  { what: "inventory", argv: () => ["inventory"], jsonOnly: true },
+  { what: "version", argv: () => ["version"], jsonOnly: true },
   {
     what: "review create",
     argv: () => [
@@ -281,6 +320,7 @@ const SWEEP_STEPS: readonly SweepStep[] = [
     what: "review export",
     argv: () => ["review", "export", SWEEP_SESSION],
     harvest: harvestItemIds,
+    jsonOnly: true,
   },
   {
     what: "review show",
@@ -341,6 +381,13 @@ interface SweepStoryOptions {
   readonly extraFlags?: readonly string[];
   /** Runs before each step (T12.0-4's repeated-flag variant). */
   readonly beforeStep?: (step: SweepStep, state: SweepState) => Promise<void>;
+  /**
+   * T12.0-1's parity arm: rerun each JSON-only step (SPEC 10.7, 11, 12.6)
+   * without `--json` and assert it emits the same single document — same
+   * exit code, one JSON document as the entire stdout, byte-identical to the
+   * flagged run's (product-to-itself, H-4; see the module header).
+   */
+  readonly assertJsonOnlyParity?: boolean;
   /** Test id labelling every diagnosis (e.g. "T12.0-1"). */
   readonly label: string;
 }
@@ -372,6 +419,41 @@ async function runSweepStory(options: SweepStoryOptions): Promise<void> {
       `${context} — under --json the single JSON document is the entire ` +
         `standard output (SPEC 12.0, H-5)`,
     );
+    if (options.assertJsonOnlyParity === true && step.jsonOnly === true) {
+      // All JSON-only steps are reads, so the rerun observes the same story
+      // state the flagged run did and evolves nothing.
+      const bareArgv = [
+        ...step.argv(options.state),
+        ...(options.extraFlags ?? []),
+      ];
+      const bareContext =
+        `${options.label} \`${bareArgv.join(" ")}\` ` +
+        `(JSON-only surface, no --json)`;
+      const bare = await expectExit(
+        options.product,
+        options.workspace,
+        bareArgv,
+        0,
+        `${bareContext} — ${step.what} is a JSON-only surface (SPEC 10.7, ` +
+          `11, 12.6), and the output form never changes an exit code ` +
+          `(SPEC 12.0)`,
+      );
+      parseJsonStdout(
+        bare,
+        `${bareContext} — on a JSON-only surface a single JSON document is ` +
+          `the entire standard output with or without --json (SPEC 10.7, ` +
+          `11, 12.6, H-5)`,
+      );
+      assertBytesEqual(
+        bare.stdoutBytes,
+        result.stdoutBytes,
+        `${bareContext} — the JSON-only surfaces of 10.7, 11, and 12.6 emit ` +
+          `the same single document with the flag as without: a single JSON ` +
+          `document is the surface's only output form, so the flag is inert ` +
+          `and stdout is byte-identical across the pair (SPEC 10.7, 11, ` +
+          `12.6; product-to-itself, H-4)`,
+      );
+    }
     step.harvest?.(doc, options.state, context);
   }
 }
@@ -383,12 +465,18 @@ async function runSweepStory(options: SweepStoryOptions): Promise<void> {
 const T12_0_1 = defineProductTest({
   id: "T12.0-1",
   title:
-    "`--json` everywhere: every command and subcommand — build, check, ids, show, coverage, impact, all six query subcommands, all eight review subcommands, rename, and file-form move — accepts the flag and emits exactly one JSON document as the entire standard output at its specified exit code; information parity with the human report is adapter-verified per command by the per-section tests (SPEC 12.0)",
+    "`--json` everywhere: every command and subcommand — build, check, ids, show, coverage, impact, all six query subcommands, occurrences, view, at, inventory, version, all eight review subcommands, rename, and file-form move — accepts the flag and emits exactly one JSON document as the entire standard output at its specified exit code; the JSON-only surfaces of 10.7, 11, and 12.6 (review export; the query subcommands, occurrences, view, at, and inventory; version) emit the same single document with the flag as without — byte-identical stdout at the same exit code (product-to-itself, H-4); information parity with the human report is adapter-verified per command by the per-section tests (SPEC 12.0, 11, 12.6, 10.7)",
   timeoutMs: 240_000,
   run: async (product) => {
     const { workspace, state } = await createSweepWorkspace();
     try {
-      await runSweepStory({ product, workspace, state, label: "T12.0-1" });
+      await runSweepStory({
+        product,
+        workspace,
+        state,
+        assertJsonOnlyParity: true,
+        label: "T12.0-1",
+      });
     } finally {
       await workspace.dispose();
     }

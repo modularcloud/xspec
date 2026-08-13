@@ -1503,12 +1503,41 @@ A "new test T<x>" task always means, in one change:
   mid-loop reds (certification-document ×3 → FP-091; S-1's 7 unmapped keys
   {11.2–11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
 
-- [ ] FP-037 — T12.0-1/-3/-4: extend the shared command sweep with the new
+- [x] FP-037 — T12.0-1/-3/-4: extend the shared command sweep with the new
   surfaces. [R2 #24; TEST-SPEC §12.0]
   `test/suite/registry/section-12.0-i.ts` `SWEEP_STEPS` (~line 235): add
   `occurrences`, `view`, `at`, `inventory`, `version`. T12.0-1 must also
   assert the JSON-only surfaces emit the same single document with the
   `--json` flag as without.
+  [Done 2026-08-13: SWEEP_STEPS gains the five surfaces after the query
+  family (mutations still last) — `occurrences`, `view`, `at specs/A.mdx 0`,
+  `inventory`, `version`, each a clean-domain read over the valid story
+  workspace (complete finding-free answer, exit 0; 11.2/11.6/12.6) — so all
+  three sweep users drive them with `--json` (T12.0-1), with a cwd-relative
+  `--config` (T12.0-3; accepted-not-consulted on version, 12.6), and under
+  T12.0-4's doubled-`--config` exit-2 protocol. T12.0-1's parity arm:
+  SweepStep gains a `jsonOnly` marker on the 12 JSON-only steps (the six
+  query subcommands, the five new surfaces, review export — SPEC 11
+  preamble, 12.6, 10.7), and under assertJsonOnlyParity (T12.0-1 only) each
+  such step reruns without `--json` asserting exit 0, a single JSON document
+  as the entire stdout (H-5's JSON-only clause), and stdout byte-identical
+  to the flagged run's — "the same single document" operationalized as a
+  product-to-itself byte compare (H-4; module header documents the reading:
+  a single document as the surface's ONLY output form makes the flag inert).
+  Verified: T12.0-1 turned green → red-as-diagnosed exactly at
+  `occurrences --json` (exit 2 "unknown command" — the new-surface product
+  gap), the six query parity arms passing before it (probe: the product
+  already emits byte-identical stdout with/without the flag on query node
+  and review export, so the parity assertion is satisfiable); T12.0-3 now
+  red at the same step of its sweep (previously a later FP-002-class arm);
+  T12.0-4 keeps its pre-existing first failure (doubled-`--config`
+  error-document decode on build), new steps unreached there;
+  T12.0-2/-5/-6 unchanged. Typecheck/format clean; traceability unchanged
+  (all three ["12.0"]; 10.7/11/12.6 are context with home coverage at stage
+  G); T12.0-1/-3/-4 in no certification scope. `npm run test:self`
+  unchanged 4 planned mid-loop reds (certification-document ×3 → FP-091;
+  S-1's 7 unmapped keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and
+  certification green.]
 
 - [ ] FP-038 — T12.0-9: add the new exit-partition representatives.
   [R2 #25; TEST-SPEC §12.0]
