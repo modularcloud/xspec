@@ -2258,9 +2258,62 @@ certify against FP-091's fixtures once those land.
   at the enumeration compare. `npm run test:self`: unchanged 4 planned
   mid-loop reds (certification-document x3 → FP-091; S-1's 6 unmapped keys
   {11.3–11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
-- [ ] FP-053 — Implement T11.2-4 (CONF-AVAIL): resolution and expanded-text
+- [x] FP-053 — Implement T11.2-4 (CONF-AVAIL): resolution and expanded-text
   poisoning; record observations ride `occurrences`/`view`. [R2 #2, R3 gap
   1, VERIFY; TEST-SPEC §11.2]
+  [Done 2026-08-13: registered in section-11.2.ts (SUITE-52) with
+  traceability ["11.2"] (no TEST-SPEC 14 staging record — the FP-050..052
+  precedent; 11.3/11.4/5.7/1.6/3/12.7 are context with home coverage at
+  T11.3-1/T11.4-5/T5.7-*/T12.7-1). CONF-AVAIL in scope (VIOL-AVAIL-
+  NULLMARKER and VIOL-AVAIL-OMIT certify it; the fixture family lands with
+  FP-091); scope constraints honored: the whole entry drives ONLY bare
+  `view` (with/without --text) and bare `occurrences` — no gate `build`, no
+  `at`, no `--file` — staging integrity riding each answer's own exact
+  findings multiset, conditions drawn from the scope's stated set. Four
+  stagings: (1) specs/R.mdx — duplicate `a` bearers with unique `a.b`
+  beneath the first; `d={"a.b"}` on the second bearer and `{text("a.b")}`
+  in an id-less section each resolve and record with `source` EXACTLY the
+  marker (file/range/kind/target present) — pinned as the complete
+  two-record enumeration via BOTH surfaces (never a picked bearer, never a
+  dropped record, never an unavailable target — the form decode also admits
+  only plain-string targets) — while `d={"a"}` records none, its 14.5
+  located within the opening tag spelling it; findings exactly {14.1, 14.3
+  locating BOTH bearers, 14.5}, the view tree positioning every enclosing
+  construct with identities per 11.2. (2) chain CH-A embeds CH-B embeds
+  CH-C with `{text("nosuch")}` in C: bare `view --text` — exactly one 14.6,
+  its location's range EXACTLY the braced container (SPEC 14 pins the
+  embedding form); top/mid/deep own+subtree text EXACTLY the marker,
+  sibling side (expansion inserted) and ok byte-exact, every root's own
+  text defined beside its poisoned subtree text; imports/occurrences/
+  comments pinned whole. (3) separately staged self-embedding cycle CY.mdx:
+  `{text("self")}` resolves and records (occurrence pinned), exactly one
+  14.9 located at the participating spelling, self poisoned, calm and the
+  root's own text defined byte-exact. (4) removal-by-form: IMP.mdx with an
+  unused-binding import of GONE.xspec plus a stray <div> (14.16, located,
+  preserved byte-for-byte in the enclosing text, no view node); after
+  fsp.rm(GONE.mdx) the SAME pinned tree asserts text values byte-identical
+  (the import removed by form) while the import entry's target flips to the
+  marker and 14.15 (located at the declaration) joins 14.16 — exact counts
+  both sides, exit 1 everywhere. Expected text values hand-derived per the
+  rules of 3 (derivation comments beside each constant), composed from the
+  staged parts. Verified: typecheck/format clean; suite section-11.2
+  red-as-diagnosed — T11.2-4 fails at the first arm's exit assertion
+  (`view` unknown command, exit 2, the pre-patch product gap); scratch
+  probe: a conforming fake re-deriving every answer from the workspace
+  bytes (own mini-parser, line-attribution rules-of-3 renderer with
+  expansion-stack cycle detection) ran the registered body green
+  end-to-end, and six deviation fakes each failed diagnosed —
+  null-for-marker at the form decode (VIOL-AVAIL-NULLMARKER's class),
+  picked-bearer and dropped-record at the enumeration compare,
+  partial-expansion at the poisoned-tree compare, remove-imports-by-
+  resolution at the after-deletion pinned tree, ambiguous-ref-resolves at
+  the count map; direct `build --json` probes of all four stagings against
+  the built product confirm the staged conditions fire in a real parser
+  (14.3+14.1; 14.6; 14.9; 14.16 then 14.15+14.16 — no 14.20 anywhere; the
+  absent 14.5 is exactly the pre-patch resolution-semantics gap the arm
+  discriminates). `npm run test:self`: unchanged 4 planned mid-loop reds
+  (certification-document x3 → FP-091; S-1's 6 unmapped keys {11.3–11.6,
+  12.6, 12.7} → stage G), S-5 and certification green.]
 - [ ] FP-054 — Implement T11.2-5: domain/findings/exit discipline. [R2 #2;
   TEST-SPEC §11.2]
 - [ ] FP-055 — Implement T11.2-6: never-stale + gate-findings-never-attach.

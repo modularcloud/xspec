@@ -1,22 +1,24 @@
 // TEST-SPEC §11.2 (availability on imperfect files) — SUITE-52: T11.2-1
-// through T11.2-3.
+// through T11.2-4.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
 // asserts exact exit codes (H-5), and rejects a product only via diagnosed
 // assertion failures (H-8).
 //
-// Certification (CERTIFICATIONS.md CONF-AVAIL): T11.2-2 is in scope —
-// VIOL-AVAIL-NULLMARKER and VIOL-AVAIL-OMIT certify it (the fixture family
-// lands with the certification-manifest task). CONF-AVAIL's staging
-// constraint pins every command an in-scope test drives to its enumerated
-// `view`/`occurrences` surface, so T11.2-2 runs NO gate-reference `build`
-// (unlike T11.2-1 and T11.2-3, which are not in scope — CONF-AVAIL's
-// workspace scope is `#`-free valid-UTF-8 paths with no code groups, so
-// T11.2-3's staging lies outside it by construction): staging integrity
-// rides the `view` answer's own exact accompanying-findings multiset
-// instead, and the staged conditions are drawn from the scope's stated set
-// (14.1, 14.3, 14.4, 14.17).
+// Certification (CERTIFICATIONS.md CONF-AVAIL): T11.2-2 and T11.2-4 are in
+// scope — VIOL-AVAIL-NULLMARKER and VIOL-AVAIL-OMIT certify both (the
+// fixture family lands with the certification-manifest task). CONF-AVAIL's
+// staging constraint pins every command an in-scope test drives to its
+// enumerated `view`/`occurrences` surface, so T11.2-2 and T11.2-4 run NO
+// gate-reference `build`, no `at`, and no `--file` on `occurrences`
+// (VIOL-AVAIL-NOFILE's staging constraint) — unlike T11.2-1 and T11.2-3,
+// which are not in scope (CONF-AVAIL's workspace scope is `#`-free
+// valid-UTF-8 paths with no code groups, so T11.2-3's staging lies outside
+// it by construction): staging integrity rides each answer's own exact
+// accompanying-findings multiset instead, and the staged conditions are
+// drawn from the scope's stated set (T11.2-2: 14.1, 14.3, 14.4, 14.17;
+// T11.2-4: 14.1, 14.3, 14.5, 14.6, 14.9, 14.15, 14.16).
 //
 // SPEC 11.2: `occurrences`, `view`, and `at` answer per file, from parsing
 // alone, never gated on workspace-wide validity — parse-local structure (the
@@ -64,12 +66,14 @@
 //   asserted at file granularity only (range precision is T14-8's).
 
 import { Buffer } from "node:buffer";
+import * as fsp from "node:fs/promises";
 import type {
   Finding,
   OccurrenceRecord,
   PathValue,
   SourceRange,
   ViewAttributeEntry,
+  ViewImportEntry,
   ViewNode,
 } from "../../helpers/adapters/index.js";
 import {
@@ -78,7 +82,11 @@ import {
   decodeOccurrencesReport,
   decodeViewReport,
 } from "../../helpers/adapters/index.js";
-import { assertExitCode, parseJsonStdout } from "../../helpers/assertions.js";
+import {
+  assertExitCode,
+  fail,
+  parseJsonStdout,
+} from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
@@ -1773,9 +1781,1216 @@ const T11_2_3 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T11.2-4 — resolution and expanded text
+// ---------------------------------------------------------------------------
+//
+// SPEC 11.2 resolution: a reference spelling resolves exactly when it names
+// exactly one target whose own node identity is DEFINED — so a reference to
+// the one section spelling `a.b` resolves and records an occurrence (5.7)
+// even while duplicate spellings of `a` leave every bearer of `a` undefined,
+// and a reference to `a` itself records no edge and no occurrence —
+// ambiguous, every bearer undefined — and never reports an unavailable
+// target: its position reaches consumers through its finding's range (14).
+// Source-side unavailability (5.7): a resolving spelling inside a section
+// whose own identity is undefined still records, the record carrying `file`,
+// its own `range`, `kind`, and `target` with `source` exactly the
+// unavailability marker — identity and range withheld together as one datum,
+// never a picked bearer's identity, never a dropped record. Expanded text
+// (11.2, 1.6, 3): an own/subtree text value is defined exactly when every
+// embedding its expansion transitively reaches records an occurrence and the
+// recursion re-enters no node already being expanded — one unresolved
+// spelling or one embedding cycle on the expansion path poisons the WHOLE
+// value (partial expansion is fabrication and never occurs) — and removal
+// classification is by syntactic form, never by validity or resolution:
+// every import declaration is removed by form (target discovery
+// notwithstanding), while a construct matching no removal rule's form (a
+// stray element, 14.16) is content, preserved byte-for-byte.
+//
+// CONF-AVAIL scope (module header): the whole entry drives ONLY bare `view`
+// (with and without `--text`) and bare `occurrences` — no gate-reference
+// `build`, no `at`, no `--file` (the record observations ride `occurrences`
+// and `view`, per the scope's staging constraints). Staging integrity rides
+// each answer's own exact findings multiset (the T11.2-2 discipline).
+//
+// Conservative operationalizations (noted per H-3/H-4):
+// - The ambiguous reference to `a` is staged in the `d` entry form (14.5) —
+//   the one staged condition set drawn from CONF-AVAIL's stated scope; the
+//   unresolved-embedding form (14.6) rides the expansion chain's boundary
+//   spelling, where SPEC 14 pins the finding range exactly (the full braced
+//   container, the span its occurrence would occupy), asserted exactly
+//   there. Every other located finding is asserted as an exact location
+//   COUNT (one per offending construct — SPEC 14's cardinality rule: both
+//   bearers for the duplicate-ID finding) with each range inside the
+//   offending construct's byte window (end-widened by one byte): the
+//   ambiguous `d` reference's finding inside the opening tag that spells
+//   the reference, the cycle's inside its participating embedding
+//   container's line, 14.1/14.15/14.16 inside their constructs — file and
+//   construct discrimination without pinning T14-8's range precision.
+// - Import-declaration view entries pin the declaration's range as exactly
+//   its own characters (no terminator) — the 1.7 construct convention —
+//   with `name` the default binding's identifier and `target` the resolved
+//   path or the marker (SPEC 11.4).
+// - Expected own/subtree text values are hand-derived per the rules of 3
+//   (line-by-line derivation comments beside each constant; line-drop rule
+//   included) and composed from the same string parts that stage the files
+//   wherever an expansion inserts bytes.
+// - "Text values byte-identical to before" (the deleted-import arm) is
+//   realized by pinning the SAME expected tree on both sides of the
+//   deletion: equality with one pinned constant on each side implies
+//   before/after byte identity AND pins the by-form import removal on both
+//   sides (a remove-by-resolution product leaves the import line in the
+//   compiled text once the target is gone, failing the after-side pin).
+// - The `--text` tree projection pins identity, construct range, ownText,
+//   subtreeText, and tree shape; attribute entries and interpreted
+//   tags/coverage stay at their home tests (T11.2-1/-2, T11.4-1/-3), their
+//   forms still decode-validated (H-3).
+// - "Never an unavailable target" is enforced twice: the form decode admits
+//   only a plain identity string as a record's `target` (12.7), and every
+//   enumeration is pinned as a complete exact set (a phantom record for the
+//   ambiguous spelling fails the compare — "never a dropped record" rides
+//   the same exactness for the two resolving spellings).
+
+/** A window check for one located finding (SPEC 14 location cardinality). */
+interface LocationWindowExpectation {
+  readonly file: string;
+  readonly window: { readonly start: number; readonly end: number };
+}
+
+/** An offending construct's byte window: its range, end-widened by one. */
+function widened(range: SourceRange): { start: number; end: number } {
+  return { start: range.start, end: range.end + 1 };
+}
+
+/**
+ * Assert a located finding's concern exactly: `path` null (a located
+ * condition, SPEC 12.7), exactly one location per offending construct (SPEC
+ * 14's cardinality rule), each — in 12.7 location order, which the decode
+ * has already enforced — lying in its expected file with its range inside
+ * the offending construct's byte window.
+ */
+function assertLocatedFinding(
+  finding: Finding,
+  expected: readonly LocationWindowExpectation[],
+  context: string,
+): void {
+  assertSameJson(
+    finding.path,
+    null,
+    `${context} — a located condition's concerned path is null (SPEC 12.7)`,
+  );
+  if (finding.locations.length !== expected.length) {
+    fail(
+      `${context}: expected exactly ${String(expected.length)} location(s) — ` +
+        `one per offending construct (SPEC 14) — got ` +
+        `${String(finding.locations.length)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+  expected.forEach((want, index) => {
+    const location = finding.locations[index]!;
+    if (location.file !== want.file) {
+      fail(
+        `${context}: location ${String(index)} must lie in ` +
+          `${JSON.stringify(want.file)}, got ` +
+          `${JSON.stringify(location.file)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+    if (
+      location.range.start < want.window.start ||
+      location.range.end > want.window.end
+    ) {
+      fail(
+        `${context}: location ${String(index)} ` +
+          `[${String(location.range.start)}, ${String(location.range.end)}) ` +
+          `must fall within the offending construct's byte window ` +
+          `[${String(want.window.start)}, ${String(want.window.end)}] ` +
+          `(message: ${JSON.stringify(finding.message)})`,
+      );
+    }
+  });
+}
+
+/** The one finding of a condition — counts asserted beforehand. */
+function findingByCondition(
+  findings: readonly Finding[],
+  condition: string,
+  context: string,
+): Finding {
+  const matches = findings.filter((finding) => finding.condition === condition);
+  if (matches.length !== 1) {
+    fail(
+      `${context}: expected exactly one ${condition} finding, got ` +
+        `${String(matches.length)}`,
+    );
+  }
+  return matches[0]!;
+}
+
+// --- staging 1: specs/R.mdx — the resolution matrix ---------------------------
+//
+// Duplicate spellings of `a` (both bearers undefined, one 14.3 locating
+// both) with the unique `a.b` beneath the FIRST bearer (defined without
+// defined prefixes, SPEC 11.2); the SECOND bearer carries `d={"a.b"}` — a
+// resolving spelling inside a duplicate-`id` bearer; an id-less section
+// (14.1) holds `{text("a.b")}` — a resolving spelling inside a section
+// spelling no identity; and the defined `q` carries `d={"a"}` — the
+// ambiguous reference, recording nothing and reporting 14.5. The multi-byte
+// prefix shifts every later offset (SPEC 1.7).
+
+const R_FILE = "specs/R.mdx";
+const R = new ByteFixture();
+R.add("Prélude — resolution turns on the target identity's definedness.\n\n");
+const R_A1_START = R.pos;
+R.add("<S ");
+const R_A1_ID = R.attr("id", 'id="a"');
+R.add(">\nFirst bearer.\n\n");
+const R_AB_START = R.pos;
+R.add("<S ");
+const R_AB_ID = R.attr("id", 'id="a.b"');
+R.add(">\nTarget text.\n</S>");
+const R_AB_RANGE: SourceRange = { start: R_AB_START, end: R.pos };
+R.add("\n</S>");
+const R_A1_RANGE: SourceRange = { start: R_A1_START, end: R.pos };
+R.add("\n\n");
+const R_A2_START = R.pos;
+R.add("<S ");
+const R_A2_ID = R.attr("id", 'id="a"');
+R.add(" ");
+const R_A2_D = R.attr("d", 'd={"a.b"}');
+R.add(">\nSecond bearer.\n</S>");
+const R_A2_RANGE: SourceRange = { start: R_A2_START, end: R.pos };
+R.add("\n\n");
+const R_NOID_START = R.pos;
+R.add("<S>\nNo identity here.\n\n");
+const R_EMBED_TEXT = '{text("a.b")}';
+const R_EMBED_RANGE = R.add(R_EMBED_TEXT);
+R.add("\n</S>");
+const R_NOID_RANGE: SourceRange = { start: R_NOID_START, end: R.pos };
+R.add("\n\n");
+const R_Q_START = R.pos;
+R.add("<S ");
+const R_Q_ID = R.attr("id", 'id="q"');
+R.add(" ");
+const R_Q_D = R.attr("d", 'd={"a"}');
+R.add(">");
+const R_Q_OPEN_END = R.pos;
+R.add("\nAmbiguous reference.\n</S>");
+const R_Q_RANGE: SourceRange = { start: R_Q_START, end: R.pos };
+R.add("\n");
+const R_SOURCE = R.source;
+const R_ROOT_RANGE: SourceRange = { start: 0, end: R.pos };
+
+const R_AB_NODE_ID = `${R_FILE}#a.b`;
+const R_A2_D_REF = dLiteralRange(R_A2_D);
+
+// The view positions each enclosing construct (SPEC 11.4), identities per
+// 11.2: both `a` bearers and the id-less section explicitly unavailable
+// (no winner picked; `id` absent), `a.b` and `q` defined.
+const R_TREE: TreeExpectation = {
+  identity: R_FILE,
+  range: R_ROOT_RANGE,
+  attributes: [],
+  children: [
+    {
+      identity: UNAVAILABLE,
+      range: R_A1_RANGE,
+      attributes: [R_A1_ID],
+      children: [
+        {
+          identity: R_AB_NODE_ID,
+          range: R_AB_RANGE,
+          attributes: [R_AB_ID],
+          children: [],
+        },
+      ],
+    },
+    {
+      identity: UNAVAILABLE,
+      range: R_A2_RANGE,
+      attributes: [R_A2_ID, R_A2_D],
+      children: [],
+    },
+    {
+      identity: UNAVAILABLE,
+      range: R_NOID_RANGE,
+      attributes: [],
+      children: [],
+    },
+    {
+      identity: `${R_FILE}#q`,
+      range: R_Q_RANGE,
+      attributes: [R_Q_ID, R_Q_D],
+      children: [],
+    },
+  ],
+};
+
+// The workspace's COMPLETE enumeration (SPEC 5.7, 11.2): the two resolving
+// spellings record — each record's `source` exactly the unavailability
+// marker (identity and range withheld together as one datum), `file`,
+// `range`, `kind`, `target` present — while the ambiguous reference to `a`
+// records nothing: no record, no unavailable target (the exact set pins
+// both "never a picked bearer's identity" and "never a dropped record").
+const R_EXPECTED_OCCURRENCES: readonly OccurrenceRecord[] = [
+  {
+    file: R_FILE,
+    range: R_A2_D_REF,
+    kind: "depends",
+    source: UNAVAILABLE,
+    target: R_AB_NODE_ID,
+  },
+  {
+    file: R_FILE,
+    range: R_EMBED_RANGE,
+    kind: "embeds",
+    source: UNAVAILABLE,
+    target: R_AB_NODE_ID,
+  },
+];
+
+// Exactly the staged conditions (SPEC 11.2, 14) — staging integrity without
+// a `build` gate (CONF-AVAIL surface constraint): one 14.1 (the id-less
+// section), one 14.3 (the duplicated `a`, locating both bearers), one 14.5
+// (the ambiguous `d` reference — reported by its finding's range, never as
+// a record). No 14.2 anywhere: `a.b` extends its parent's spelling exactly,
+// the id-less section's structural check is masked and it has no section
+// children, and every other spelled identity is one segment at top level.
+const R_CONDITION_COUNTS: Readonly<Record<string, number>> = {
+  "14.1": 1,
+  "14.3": 1,
+  "14.5": 1,
+};
+
+// --- staging 2: the embedding chain (CH-A embeds CH-B embeds CH-C) ------------
+//
+// A#top embeds B#mid (node form via import), B#mid embeds C#deep, and
+// C#deep holds the unresolved `{text("nosuch")}` (14.6) — one unresolved
+// spelling on the expansion path poisons top's and mid's (and deep's) whole
+// own/subtree values; the siblings with resolved or embedding-free
+// expansions (A#side embedding B#ok, and B#ok itself) stay defined and
+// byte-exact; each root's own text is defined (no embedding in any root's
+// own contribution) while each root's subtree text is poisoned through its
+// section. Every id is unique and well-formed, every import valid: the
+// 14.6 is the workspace's ONLY condition.
+
+const CH_A_FILE = "specs/CH-A.mdx";
+const CH_B_FILE = "specs/CH-B.mdx";
+const CH_C_FILE = "specs/CH-C.mdx";
+
+const CHA = new ByteFixture();
+CHA.add("Rôle — chain head.\n\n");
+const CHA_IMPORT_TEXT = 'import B from "./CH-B.xspec"';
+const CHA_IMPORT_RANGE = CHA.add(CHA_IMPORT_TEXT);
+CHA.add("\n\n");
+const CHA_TOP_START = CHA.pos;
+CHA.add('<S id="top">\nTop head.\n\n');
+const CHA_EMBED_MID_RANGE = CHA.add("{text(B.mid)}");
+CHA.add("\n</S>");
+const CHA_TOP_RANGE: SourceRange = { start: CHA_TOP_START, end: CHA.pos };
+CHA.add("\n\n");
+const CHA_SIDE_START = CHA.pos;
+CHA.add('<S id="side">\nSide head.\n\n');
+const CHA_EMBED_OK_RANGE = CHA.add("{text(B.ok)}");
+CHA.add("\n</S>");
+const CHA_SIDE_RANGE: SourceRange = { start: CHA_SIDE_START, end: CHA.pos };
+CHA.add("\n");
+const CH_A_SOURCE = CHA.source;
+const CH_A_ROOT_RANGE: SourceRange = { start: 0, end: CHA.pos };
+
+const CHB = new ByteFixture();
+CHB.add("Über — chain middle.\n\n");
+const CHB_IMPORT_TEXT = 'import C from "./CH-C.xspec"';
+const CHB_IMPORT_RANGE = CHB.add(CHB_IMPORT_TEXT);
+CHB.add("\n\n");
+const CHB_MID_START = CHB.pos;
+CHB.add('<S id="mid">\nMid head.\n\n');
+const CHB_EMBED_DEEP_RANGE = CHB.add("{text(C.deep)}");
+CHB.add("\n</S>");
+const CHB_MID_RANGE: SourceRange = { start: CHB_MID_START, end: CHB.pos };
+CHB.add("\n\n");
+const CHB_OK_START = CHB.pos;
+CHB.add('<S id="ok">\nOK line.\n</S>');
+const CHB_OK_RANGE: SourceRange = { start: CHB_OK_START, end: CHB.pos };
+CHB.add("\n");
+const CH_B_SOURCE = CHB.source;
+const CH_B_ROOT_RANGE: SourceRange = { start: 0, end: CHB.pos };
+
+const CHC = new ByteFixture();
+CHC.add("Café — chain tail.\n\n");
+const CHC_DEEP_START = CHC.pos;
+CHC.add('<S id="deep">\nDeep head.\n\n');
+const CHC_NOSUCH_TEXT = '{text("nosuch")}';
+const CHC_NOSUCH_RANGE = CHC.add(CHC_NOSUCH_TEXT);
+CHC.add("\n</S>");
+const CHC_DEEP_RANGE: SourceRange = { start: CHC_DEEP_START, end: CHC.pos };
+CHC.add("\n");
+const CH_C_SOURCE = CHC.source;
+const CH_C_ROOT_RANGE: SourceRange = { start: 0, end: CHC.pos };
+
+// Expected text values, derived per the rules of 3 (SPEC 3, 1.6). Line
+// derivations (each file): the import line and every `<S>`/`</S>` line are
+// removed and left empty purely by removals, so each is dropped WITH its
+// terminator; blank source lines (never non-whitespace) are preserved; a
+// replaced `{text(...)}` line keeps its own terminator after the inserted
+// expansion.
+//
+// CH-B#ok's construct contributes only its body line:
+const CH_B_OK_TEXT = "OK line.\n";
+// CH-A#side: "Side head.\n" + blank "\n" + (expansion of B.ok inserted in
+// place of the container, then the line's own terminator):
+const CH_A_SIDE_TEXT = "Side head.\n\n" + CH_B_OK_TEXT + "\n";
+// Each root's own text: title line + the blank line after it + the blank
+// line left after the dropped import line (where one exists), then the
+// blank line between the two sections joined at the excision points; the
+// dropped final `</S>` line leaves nothing after the last section.
+const CH_A_ROOT_OWN = "Rôle — chain head.\n\n\n\n";
+const CH_B_ROOT_OWN = "Über — chain middle.\n\n\n\n";
+// CH-C has no import and no second section: title + one blank line.
+const CH_C_ROOT_OWN = "Café — chain tail.\n\n";
+
+/**
+ * T11.2-4's `--text` tree projection: identity datum, construct range, and
+ * the own/subtree text datums (each a byte-exact string or the
+ * unavailability marker — the matrix under test), plus tree shape.
+ * Attribute entries and interpreted tags/coverage stay at their home tests
+ * (module comment); the form-exact decode has validated their forms.
+ */
+interface TextTreeExpectation {
+  readonly identity: ViewNode["identity"];
+  readonly range: SourceRange;
+  readonly ownText: string | { readonly unavailable: true };
+  readonly subtreeText: string | { readonly unavailable: true };
+  readonly children: readonly TextTreeExpectation[];
+}
+
+function projectTextNode(node: ViewNode): TextTreeExpectation {
+  return {
+    identity: node.identity,
+    range: node.range,
+    ownText: node.ownText!,
+    subtreeText: node.subtreeText!,
+    children: node.children.map(projectTextNode),
+  };
+}
+
+const CH_A_TEXT_TREE: TextTreeExpectation = {
+  identity: CH_A_FILE,
+  range: CH_A_ROOT_RANGE,
+  ownText: CH_A_ROOT_OWN,
+  subtreeText: UNAVAILABLE,
+  children: [
+    {
+      identity: `${CH_A_FILE}#top`,
+      range: CHA_TOP_RANGE,
+      ownText: UNAVAILABLE,
+      subtreeText: UNAVAILABLE,
+      children: [],
+    },
+    {
+      identity: `${CH_A_FILE}#side`,
+      range: CHA_SIDE_RANGE,
+      ownText: CH_A_SIDE_TEXT,
+      subtreeText: CH_A_SIDE_TEXT,
+      children: [],
+    },
+  ],
+};
+
+const CH_B_TEXT_TREE: TextTreeExpectation = {
+  identity: CH_B_FILE,
+  range: CH_B_ROOT_RANGE,
+  ownText: CH_B_ROOT_OWN,
+  subtreeText: UNAVAILABLE,
+  children: [
+    {
+      identity: `${CH_B_FILE}#mid`,
+      range: CHB_MID_RANGE,
+      ownText: UNAVAILABLE,
+      subtreeText: UNAVAILABLE,
+      children: [],
+    },
+    {
+      identity: `${CH_B_FILE}#ok`,
+      range: CHB_OK_RANGE,
+      ownText: CH_B_OK_TEXT,
+      subtreeText: CH_B_OK_TEXT,
+      children: [],
+    },
+  ],
+};
+
+const CH_C_TEXT_TREE: TextTreeExpectation = {
+  identity: CH_C_FILE,
+  range: CH_C_ROOT_RANGE,
+  ownText: CH_C_ROOT_OWN,
+  subtreeText: UNAVAILABLE,
+  children: [
+    {
+      identity: `${CH_C_FILE}#deep`,
+      range: CHC_DEEP_RANGE,
+      ownText: UNAVAILABLE,
+      subtreeText: UNAVAILABLE,
+      children: [],
+    },
+  ],
+};
+
+const CH_A_IMPORTS: readonly ViewImportEntry[] = [
+  { range: CHA_IMPORT_RANGE, name: "B", target: CH_B_FILE },
+];
+const CH_B_IMPORTS: readonly ViewImportEntry[] = [
+  { range: CHB_IMPORT_RANGE, name: "C", target: CH_C_FILE },
+];
+
+// The chain's occurrence records (SPEC 5.7): every resolving embedding —
+// sources defined here (each enclosing section spells a unique id) — while
+// the unresolved `{text("nosuch")}` records none (CH-C's list is empty, its
+// position reaching consumers through the 14.6 finding's range).
+const CH_A_OCCURRENCES: readonly OccurrenceRecord[] = [
+  {
+    file: CH_A_FILE,
+    range: CHA_EMBED_MID_RANGE,
+    kind: "embeds",
+    source: { identity: `${CH_A_FILE}#top`, range: CHA_TOP_RANGE },
+    target: `${CH_B_FILE}#mid`,
+  },
+  {
+    file: CH_A_FILE,
+    range: CHA_EMBED_OK_RANGE,
+    kind: "embeds",
+    source: { identity: `${CH_A_FILE}#side`, range: CHA_SIDE_RANGE },
+    target: `${CH_B_FILE}#ok`,
+  },
+];
+const CH_B_OCCURRENCES: readonly OccurrenceRecord[] = [
+  {
+    file: CH_B_FILE,
+    range: CHB_EMBED_DEEP_RANGE,
+    kind: "embeds",
+    source: { identity: `${CH_B_FILE}#mid`, range: CHB_MID_RANGE },
+    target: `${CH_C_FILE}#deep`,
+  },
+];
+
+// --- staging 3: the embedding cycle (staged separately) -----------------------
+//
+// `{text("self")}` inside the section spelling `self`: the spelling
+// RESOLVES (its target's identity is defined) and records an occurrence —
+// an embeds edge from `self` to itself, a dependency cycle of length one
+// (SPEC 5.3, 14.9) — while the expansion re-enters the node being expanded,
+// poisoning self's whole own/subtree value. The sibling `calm` and the
+// root's own text stay defined and byte-exact; the root's subtree text is
+// poisoned through `self`.
+
+const CY_FILE = "specs/CY.mdx";
+const CY = new ByteFixture();
+CY.add("Célula — self-embedding cycle.\n\n");
+const CY_SELF_START = CY.pos;
+CY.add('<S id="self">\nSelf head.\n\n');
+const CY_SELF_EMBED_TEXT = '{text("self")}';
+const CY_SELF_EMBED_RANGE = CY.add(CY_SELF_EMBED_TEXT);
+CY.add("\n</S>");
+const CY_SELF_RANGE: SourceRange = { start: CY_SELF_START, end: CY.pos };
+CY.add("\n\n");
+const CY_CALM_START = CY.pos;
+CY.add('<S id="calm">\nCalm line.\n</S>');
+const CY_CALM_RANGE: SourceRange = { start: CY_CALM_START, end: CY.pos };
+CY.add("\n");
+const CY_SOURCE = CY.source;
+const CY_ROOT_RANGE: SourceRange = { start: 0, end: CY.pos };
+
+const CY_CALM_TEXT = "Calm line.\n";
+// Root own text: title + its blank line, then the blank line between the
+// sections (no import line in this file).
+const CY_ROOT_OWN = "Célula — self-embedding cycle.\n\n\n";
+
+const CY_TEXT_TREE: TextTreeExpectation = {
+  identity: CY_FILE,
+  range: CY_ROOT_RANGE,
+  ownText: CY_ROOT_OWN,
+  subtreeText: UNAVAILABLE,
+  children: [
+    {
+      identity: `${CY_FILE}#self`,
+      range: CY_SELF_RANGE,
+      ownText: UNAVAILABLE,
+      subtreeText: UNAVAILABLE,
+      children: [],
+    },
+    {
+      identity: `${CY_FILE}#calm`,
+      range: CY_CALM_RANGE,
+      ownText: CY_CALM_TEXT,
+      subtreeText: CY_CALM_TEXT,
+      children: [],
+    },
+  ],
+};
+
+const CY_OCCURRENCES: readonly OccurrenceRecord[] = [
+  {
+    file: CY_FILE,
+    range: CY_SELF_EMBED_RANGE,
+    kind: "embeds",
+    source: { identity: `${CY_FILE}#self`, range: CY_SELF_RANGE },
+    target: `${CY_FILE}#self`,
+  },
+];
+
+// --- staging 4: removal classification is by syntactic form -------------------
+//
+// specs/IMP.mdx imports specs/GONE.xspec with an UNUSED binding (2.1: valid,
+// records no edges — so no expansion depends on the target and the text
+// values stay defined on both sides of its deletion) and holds a stray
+// `<div>` (14.16) inside its one section: content, preserved byte-for-byte
+// in the enclosing text, located by its finding, with no view entry (SPEC
+// 11.2, 11.4). Deleting GONE.mdx flips the import's `target` datum to the
+// unavailability marker and adds the 14.15 finding — while every text value
+// is byte-identical to before: the import is removed by FORM, target
+// discovery notwithstanding.
+
+const IMP_FILE = "specs/IMP.mdx";
+const GONE_FILE = "specs/GONE.mdx";
+
+const IMP = new ByteFixture();
+IMP.add("Süd — removal classification.\n\n");
+const IMP_IMPORT_TEXT = 'import GONE from "./GONE.xspec"';
+const IMP_IMPORT_RANGE = IMP.add(IMP_IMPORT_TEXT);
+IMP.add("\n\n");
+const IMP_KEEP_START = IMP.pos;
+IMP.add('<S id="keep">\nKeep head.\n\n');
+const IMP_DIV_TEXT = "<div>stray</div>";
+const IMP_DIV_RANGE = IMP.add(IMP_DIV_TEXT);
+IMP.add("\n\nTail line.\n</S>");
+const IMP_KEEP_RANGE: SourceRange = { start: IMP_KEEP_START, end: IMP.pos };
+IMP.add("\n");
+const IMP_SOURCE = IMP.source;
+const IMP_ROOT_RANGE: SourceRange = { start: 0, end: IMP.pos };
+
+const GONE_FIX = new ByteFixture();
+GONE_FIX.add("Œuvre — deletable import target.\n\n");
+const GONE_G_START = GONE_FIX.pos;
+GONE_FIX.add('<S id="g">\nGone text.\n</S>');
+const GONE_G_RANGE: SourceRange = { start: GONE_G_START, end: GONE_FIX.pos };
+GONE_FIX.add("\n");
+const GONE_SOURCE = GONE_FIX.source;
+const GONE_ROOT_RANGE: SourceRange = { start: 0, end: GONE_FIX.pos };
+
+// keep's contribution: body lines with the stray element's own characters
+// preserved byte-for-byte (it matches no removal rule's form) and both
+// blank lines intact; the tag lines drop.
+const IMP_KEEP_TEXT = "Keep head.\n\n" + IMP_DIV_TEXT + "\n\nTail line.\n";
+// Root own text: title + its blank line + the blank line left after the
+// dropped import line; nothing after keep (the final `</S>` line drops).
+const IMP_ROOT_OWN = "Süd — removal classification.\n\n\n";
+const IMP_ROOT_SUBTREE = IMP_ROOT_OWN + IMP_KEEP_TEXT;
+const GONE_G_TEXT = "Gone text.\n";
+const GONE_ROOT_OWN = "Œuvre — deletable import target.\n\n";
+const GONE_ROOT_SUBTREE = GONE_ROOT_OWN + GONE_G_TEXT;
+
+// One pinned tree serves BOTH sides of the deletion (module comment: equal
+// pinned values realize "byte-identical to before" and the by-form rule).
+const IMP_TEXT_TREE: TextTreeExpectation = {
+  identity: IMP_FILE,
+  range: IMP_ROOT_RANGE,
+  ownText: IMP_ROOT_OWN,
+  subtreeText: IMP_ROOT_SUBTREE,
+  children: [
+    {
+      identity: `${IMP_FILE}#keep`,
+      range: IMP_KEEP_RANGE,
+      ownText: IMP_KEEP_TEXT,
+      subtreeText: IMP_KEEP_TEXT,
+      children: [],
+    },
+  ],
+};
+
+const GONE_TEXT_TREE: TextTreeExpectation = {
+  identity: GONE_FILE,
+  range: GONE_ROOT_RANGE,
+  ownText: GONE_ROOT_OWN,
+  subtreeText: GONE_ROOT_SUBTREE,
+  children: [
+    {
+      identity: `${GONE_FILE}#g`,
+      range: GONE_G_RANGE,
+      ownText: GONE_G_TEXT,
+      subtreeText: GONE_G_TEXT,
+      children: [],
+    },
+  ],
+};
+
+const IMP_IMPORTS_BEFORE: readonly ViewImportEntry[] = [
+  { range: IMP_IMPORT_RANGE, name: "GONE", target: GONE_FILE },
+];
+const IMP_IMPORTS_AFTER: readonly ViewImportEntry[] = [
+  { range: IMP_IMPORT_RANGE, name: "GONE", target: UNAVAILABLE },
+];
+
+const T11_2_4 = defineProductTest({
+  id: "T11.2-4",
+  title:
+    "resolution turns on the referenced identity's own definedness: with duplicate spellings of `a` and the unique `a.b` beneath one bearer, the `d` entry naming `a.b` on the other bearer and the `{text(\"a.b\")}` embedding inside an id-less section each resolve and record occurrences whose `source` is exactly the unavailability marker (`file`, `range`, `kind`, `target` present — never a picked bearer, never a dropped record; observed via bare `occurrences` AND `view`), while the `d` reference to `a` records none — ambiguous, every bearer undefined — reported by its 14.5 finding's range, never as a record or an unavailable target, the view still positioning each enclosing construct with identity unavailable, the file's findings (14.1, 14.3, 14.5) accompanying, exit 1; `view --text`: CH-A embeds CH-B embeds CH-C with an unresolved embedding in CH-C (14.6, its finding's range exactly the braced container) → top's and mid's own/subtree text exactly the unavailability marker — one unresolved spelling, or (staged separately) one self-embedding cycle (14.9), poisons the whole value, partial expansion never occurring — while siblings with resolved expansions stay defined and byte-exact and each root's own text stays defined beside its poisoned subtree text; removal classification is by syntactic form: after deleting the imported (unused-binding) GONE.mdx, IMP.mdx's text values are byte-identical to before — the import removed by form, its 14.15 finding notwithstanding, the import entry's `target` flipping to the marker — and the stray `<div>` (14.16) is content, preserved byte-for-byte in the enclosing text and located by its finding (SPEC 11.2, 11.3, 11.4, 5.7, 1.6, 2.1, 3, 12.7, 14; CERTIFICATIONS.md CONF-AVAIL in scope)",
+  run: async (product) => {
+    // Fixture self-checks (T5.7-2 discipline): composed ranges sliced back
+    // out of the staged bytes before any product invocation.
+    sliceCheck(
+      R_SOURCE,
+      R_A2_D_REF,
+      '"a.b"',
+      "the resolving d reference on the second bearer",
+    );
+    sliceCheck(
+      R_SOURCE,
+      dLiteralRange(R_Q_D),
+      '"a"',
+      "the ambiguous d reference",
+    );
+    sliceCheck(
+      R_SOURCE,
+      R_EMBED_RANGE,
+      R_EMBED_TEXT,
+      "the id-less section's embedding container",
+    );
+    sliceCheck(
+      R_SOURCE,
+      { start: R_Q_START, end: R_Q_OPEN_END },
+      '<S id="q" d={"a"}>',
+      "q's opening tag",
+    );
+    sliceCheck(
+      R_SOURCE,
+      R_AB_RANGE,
+      '<S id="a.b">\nTarget text.\n</S>',
+      "the unique a.b construct",
+    );
+    sliceCheck(
+      CH_A_SOURCE,
+      CHA_IMPORT_RANGE,
+      CHA_IMPORT_TEXT,
+      "CH-A's import declaration",
+    );
+    sliceCheck(
+      CH_A_SOURCE,
+      CHA_EMBED_OK_RANGE,
+      "{text(B.ok)}",
+      "the resolved sibling embedding",
+    );
+    sliceCheck(
+      CH_B_SOURCE,
+      CHB_OK_RANGE,
+      '<S id="ok">\nOK line.\n</S>',
+      "CH-B's ok construct",
+    );
+    sliceCheck(
+      CH_C_SOURCE,
+      CHC_NOSUCH_RANGE,
+      CHC_NOSUCH_TEXT,
+      "the unresolved embedding container",
+    );
+    sliceCheck(
+      CY_SOURCE,
+      CY_SELF_EMBED_RANGE,
+      CY_SELF_EMBED_TEXT,
+      "the self-embedding container",
+    );
+    sliceCheck(
+      IMP_SOURCE,
+      IMP_IMPORT_RANGE,
+      IMP_IMPORT_TEXT,
+      "IMP's import declaration",
+    );
+    sliceCheck(IMP_SOURCE, IMP_DIV_RANGE, IMP_DIV_TEXT, "the stray element");
+    sliceCheck(
+      GONE_SOURCE,
+      GONE_G_RANGE,
+      '<S id="g">\nGone text.\n</S>',
+      "GONE's section construct",
+    );
+
+    // Shared: exactly the R stagings' findings, keyed and located (the
+    // identical multiset must accompany both surfaces' answers).
+    const assertRFindings = (
+      findings: readonly Finding[],
+      context: string,
+    ): void => {
+      assertConditionCounts(
+        findings,
+        R_CONDITION_COUNTS,
+        `${context} — exactly the staged conditions accompany (SPEC 11.2, ` +
+          `14): one 14.1, one 14.3, one 14.5 — and no 14.2 (masked or ` +
+          `satisfied everywhere) and no phantom condition`,
+      );
+      assertLocatedFinding(
+        findingByCondition(findings, "14.1", context),
+        [{ file: R_FILE, window: widened(R_NOID_RANGE) }],
+        `${context} — the missing-id finding locates the id-less section`,
+      );
+      assertLocatedFinding(
+        findingByCondition(findings, "14.3", context),
+        [
+          { file: R_FILE, window: widened(R_A1_RANGE) },
+          { file: R_FILE, window: widened(R_A2_RANGE) },
+        ],
+        `${context} — the duplicate-id finding locates EVERY bearer of ` +
+          `\`a\`, one location each in 12.7 location order (SPEC 14)`,
+      );
+      assertLocatedFinding(
+        findingByCondition(findings, "14.5", context),
+        [{ file: R_FILE, window: { start: R_Q_START, end: R_Q_OPEN_END + 1 } }],
+        `${context} — the ambiguous reference to \`a\` is reported by its ` +
+          `finding's range (within the opening tag spelling the reference), ` +
+          `never as a record or an unavailable target (SPEC 11.2, 14)`,
+      );
+    };
+
+    // --- Staging 1: resolution and source-side unavailability.
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [R_FILE]: R_SOURCE,
+        },
+      });
+      try {
+        const viewContext = "T11.2-4 bare `view` (the resolution matrix)";
+        const viewResult = await expectExit(
+          product,
+          workspace,
+          ["view"],
+          1,
+          `${viewContext} — findings and explicitly-unavailable datums ` +
+            `accompany, so exit 1 with the full answer emitted (SPEC 11.2)`,
+        );
+        const viewReport = decodeViewReport(
+          parseJsonStdout(
+            viewResult,
+            `${viewContext} — a single JSON document is the only output ` +
+              `form, with or without --json (SPEC 11)`,
+          ),
+          { text: false },
+          viewContext,
+        );
+        assertRFindings(viewReport.findings, viewContext);
+        assertSameJson(
+          viewReport.views.map((view) => view.file),
+          [R_FILE],
+          `${viewContext} — one per-file view: the matrix file (SPEC 11.4)`,
+        );
+        const rView = viewReport.views[0]!;
+        assertSameJson(
+          projectNode(rView.root),
+          R_TREE,
+          `${viewContext} — the view still positions each enclosing ` +
+            `construct (SPEC 11.4): both duplicate bearers and the id-less ` +
+            `section with byte-exact ranges and raw attribute entries, ` +
+            `identities explicitly unavailable, while a.b (defined without ` +
+            `defined prefixes) and q stay defined (SPEC 11.2)`,
+        );
+        assertSameJson(
+          rView.occurrences,
+          R_EXPECTED_OCCURRENCES,
+          `${viewContext} — the file's occurrence records: the two ` +
+            `resolving spellings record with source EXACTLY the ` +
+            `unavailability marker (identity and range withheld together ` +
+            `as one datum) and file/range/kind/target present; the ` +
+            `ambiguous reference to a records NONE (SPEC 5.7, 11.2)`,
+        );
+        assertSameJson(
+          [rView.imports, rView.comments],
+          [[], []],
+          `${viewContext} — the matrix file holds no imports or comments: ` +
+            `empty arrays, never null (SPEC 12.7)`,
+        );
+
+        const occContext =
+          "T11.2-4 bare `occurrences` (no --file: the entire discovered set)";
+        const occResult = await expectExit(
+          product,
+          workspace,
+          ["occurrences"],
+          1,
+          `${occContext} — the enumeration carries the domain's findings ` +
+            `and explicitly-unavailable source datums, so exit 1 with the ` +
+            `full answer (SPEC 11.2, 11.3)`,
+        );
+        const occReport = decodeOccurrencesReport(
+          parseJsonStdout(
+            occResult,
+            `${occContext} — a single JSON document is the only output ` +
+              `form (SPEC 11)`,
+          ),
+          occContext,
+        );
+        assertRFindings(occReport.findings, occContext);
+        assertSameJson(
+          occReport.occurrences,
+          R_EXPECTED_OCCURRENCES,
+          `${occContext} — the workspace's COMPLETE enumeration: exactly ` +
+            `the two resolving spellings' records (never a dropped ` +
+            `record), each source exactly the marker (never a picked ` +
+            `bearer's identity), and no record — with no unavailable ` +
+            `target — for the ambiguous reference (SPEC 5.7, 11.2, 11.3)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- Staging 2: whole-value poisoning through an unresolved spelling.
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [CH_A_FILE]: CH_A_SOURCE,
+          [CH_B_FILE]: CH_B_SOURCE,
+          [CH_C_FILE]: CH_C_SOURCE,
+        },
+      });
+      try {
+        const context = "T11.2-4 bare `view --text` (the embedding chain)";
+        const result = await expectExit(
+          product,
+          workspace,
+          ["view", "--text"],
+          1,
+          `${context} — a finding and explicitly-unavailable text values ` +
+            `accompany, so exit 1 with the full answer (SPEC 11.2)`,
+        );
+        const report = decodeViewReport(
+          parseJsonStdout(
+            result,
+            `${context} — a single JSON document is the only output form ` +
+              `(SPEC 11)`,
+          ),
+          { text: true },
+          context,
+        );
+        assertConditionCounts(
+          report.findings,
+          { "14.6": 1 },
+          `${context} — the unresolved embedding is the workspace's ONLY ` +
+            `condition (every id unique and well-formed, every import ` +
+            `valid), so exactly one 14.6 accompanies (SPEC 11.2, 14)`,
+        );
+        const unresolved = findingByCondition(report.findings, "14.6", context);
+        assertSameJson(
+          {
+            code: unresolved.code,
+            locations: unresolved.locations,
+            path: unresolved.path,
+          },
+          {
+            code: "unknown-text-target",
+            locations: [{ file: CH_C_FILE, range: CHC_NOSUCH_RANGE }],
+            path: null,
+          },
+          `${context} — the non-recording spelling is located by its ` +
+            `finding: stable code unknown-text-target, its one location's ` +
+            `range EXACTLY the full braced container — the span its ` +
+            `occurrence would occupy (SPEC 14, 5.7, 12.7)`,
+        );
+        assertSameJson(
+          report.views.map((view) => view.file),
+          [CH_A_FILE, CH_B_FILE, CH_C_FILE],
+          `${context} — per-file views in path-byte order (SPEC 11.4)`,
+        );
+        const aView = report.views[0]!;
+        const bView = report.views[1]!;
+        const cView = report.views[2]!;
+        assertSameJson(
+          projectTextNode(aView.root),
+          CH_A_TEXT_TREE,
+          `${context} — CH-A: top's own/subtree text EXACTLY the ` +
+            `unavailability marker (one unresolved spelling on the ` +
+            `expansion path poisons the whole value — partial expansion ` +
+            `never occurs), the sibling side defined and byte-exact with ` +
+            `its resolved expansion inserted, the root's own text defined ` +
+            `beside its poisoned subtree text (SPEC 11.2, 1.6, 3)`,
+        );
+        assertSameJson(
+          projectTextNode(bView.root),
+          CH_B_TEXT_TREE,
+          `${context} — CH-B: mid poisoned (the unresolved spelling lies ` +
+            `two hops down), ok defined and byte-exact, root own text ` +
+            `defined (SPEC 11.2, 1.6, 3)`,
+        );
+        assertSameJson(
+          projectTextNode(cView.root),
+          CH_C_TEXT_TREE,
+          `${context} — CH-C: deep (holding the unresolved spelling) ` +
+            `poisoned, root own text defined (SPEC 11.2, 1.6, 3)`,
+        );
+        assertSameJson(
+          [aView.imports, bView.imports, cView.imports],
+          [CH_A_IMPORTS, CH_B_IMPORTS, []],
+          `${context} — each import declaration with its range, default ` +
+            `binding, and resolved target file (SPEC 11.4)`,
+        );
+        assertSameJson(
+          [aView.occurrences, bView.occurrences, cView.occurrences],
+          [CH_A_OCCURRENCES, CH_B_OCCURRENCES, []],
+          `${context} — the resolving embeddings record (defined sources ` +
+            `here); the unresolved spelling records NONE, so CH-C's list ` +
+            `is empty (SPEC 5.7, 11.2)`,
+        );
+        assertSameJson(
+          [aView.comments, bView.comments, cView.comments],
+          [[], [], []],
+          `${context} — no comments staged: empty arrays (SPEC 12.7)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- Staging 3: whole-value poisoning through an embedding cycle.
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [CY_FILE]: CY_SOURCE,
+        },
+      });
+      try {
+        const context = "T11.2-4 bare `view --text` (the self-embedding cycle)";
+        const result = await expectExit(
+          product,
+          workspace,
+          ["view", "--text"],
+          1,
+          `${context} — the cycle finding and poisoned text values ` +
+            `accompany, so exit 1 with the full answer (SPEC 11.2)`,
+        );
+        const report = decodeViewReport(
+          parseJsonStdout(
+            result,
+            `${context} — a single JSON document is the only output form ` +
+              `(SPEC 11)`,
+          ),
+          { text: true },
+          context,
+        );
+        assertConditionCounts(
+          report.findings,
+          { "14.9": 1 },
+          `${context} — the length-one embedding cycle is the workspace's ` +
+            `ONLY condition: exactly one 14.9 (SPEC 5.3, 14)`,
+        );
+        assertLocatedFinding(
+          findingByCondition(report.findings, "14.9", context),
+          [{ file: CY_FILE, window: widened(CY_SELF_EMBED_RANGE) }],
+          `${context} — the cycle locates its full path in source: the one ` +
+            `participating reference spelling, the self-embedding ` +
+            `container (SPEC 14)`,
+        );
+        assertSameJson(
+          report.views.map((view) => view.file),
+          [CY_FILE],
+          `${context} — one per-file view (SPEC 11.4)`,
+        );
+        const cyView = report.views[0]!;
+        assertSameJson(
+          projectTextNode(cyView.root),
+          CY_TEXT_TREE,
+          `${context} — one embedding cycle poisons the whole value: ` +
+            `self's own/subtree text EXACTLY the unavailability marker ` +
+            `(the recursion re-enters a node being expanded; partial ` +
+            `expansion never occurs), the sibling calm defined and ` +
+            `byte-exact, the root's own text defined beside its poisoned ` +
+            `subtree text (SPEC 11.2, 1.6)`,
+        );
+        assertSameJson(
+          cyView.occurrences,
+          CY_OCCURRENCES,
+          `${context} — the cycle-participating spelling RESOLVES and ` +
+            `records its occurrence (cycle participation never erases ` +
+            `records; its source is the defined self node): exactly one ` +
+            `embeds record, self to self (SPEC 5.7, 11.2)`,
+        );
+        assertSameJson(
+          [cyView.imports, cyView.comments],
+          [[], []],
+          `${context} — no imports or comments staged (SPEC 12.7)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- Staging 4: removal classification is by syntactic form.
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [IMP_FILE]: IMP_SOURCE,
+          [GONE_FILE]: GONE_SOURCE,
+        },
+      });
+      try {
+        // Before the deletion: the import resolves; the stray element is
+        // the only condition; every text value is defined and pinned.
+        const beforeContext =
+          "T11.2-4 bare `view --text` (before deleting the imported file)";
+        const beforeResult = await expectExit(
+          product,
+          workspace,
+          ["view", "--text"],
+          1,
+          `${beforeContext} — the stray-element finding accompanies, so ` +
+            `exit 1 with the full answer (SPEC 11.2)`,
+        );
+        const beforeReport = decodeViewReport(
+          parseJsonStdout(
+            beforeResult,
+            `${beforeContext} — a single JSON document is the only output ` +
+              `form (SPEC 11)`,
+          ),
+          { text: true },
+          beforeContext,
+        );
+        assertConditionCounts(
+          beforeReport.findings,
+          { "14.16": 1 },
+          `${beforeContext} — the stray element is the workspace's ONLY ` +
+            `condition before the deletion (the unused-binding import is ` +
+            `valid, SPEC 2.1, 14)`,
+        );
+        assertLocatedFinding(
+          findingByCondition(beforeReport.findings, "14.16", beforeContext),
+          [{ file: IMP_FILE, window: widened(IMP_DIV_RANGE) }],
+          `${beforeContext} — the stray element is located by its finding ` +
+            `(SPEC 11.2, 14)`,
+        );
+        assertSameJson(
+          beforeReport.views.map((view) => view.file),
+          [GONE_FILE, IMP_FILE],
+          `${beforeContext} — per-file views in path-byte order (SPEC 11.4)`,
+        );
+        const goneView = beforeReport.views[0]!;
+        const impBeforeView = beforeReport.views[1]!;
+        assertSameJson(
+          projectTextNode(goneView.root),
+          GONE_TEXT_TREE,
+          `${beforeContext} — the import target's own view, text values ` +
+            `defined and byte-exact (SPEC 11.4, 1.6, 3)`,
+        );
+        assertSameJson(
+          projectTextNode(impBeforeView.root),
+          IMP_TEXT_TREE,
+          `${beforeContext} — IMP's text values: the import line removed ` +
+            `by form, the stray <div> preserved byte-for-byte as content ` +
+            `in the enclosing text (it matches no removal rule's form, ` +
+            `14.16 notwithstanding), the section tag lines dropped (SPEC ` +
+            `11.2, 1.6, 3)`,
+        );
+        assertSameJson(
+          impBeforeView.imports,
+          IMP_IMPORTS_BEFORE,
+          `${beforeContext} — the import entry: range, default binding ` +
+            `GONE, resolved target specs/GONE.mdx (SPEC 11.4, 2.1)`,
+        );
+        assertSameJson(
+          [
+            goneView.imports,
+            goneView.occurrences,
+            goneView.comments,
+            impBeforeView.occurrences,
+            impBeforeView.comments,
+          ],
+          [[], [], [], [], []],
+          `${beforeContext} — the unused binding records no occurrence ` +
+            `(SPEC 2.1, 5.7); no comments staged (SPEC 12.7)`,
+        );
+
+        // Delete the imported file: removal classification is by syntactic
+        // form, so IMP's text values MUST NOT move.
+        await fsp.rm(workspace.path(GONE_FILE));
+
+        const afterContext =
+          "T11.2-4 bare `view --text` (after deleting the imported file)";
+        const afterResult = await expectExit(
+          product,
+          workspace,
+          ["view", "--text"],
+          1,
+          `${afterContext} — the 14.15 and 14.16 findings accompany, so ` +
+            `exit 1 with the full answer (SPEC 11.2)`,
+        );
+        const afterReport = decodeViewReport(
+          parseJsonStdout(
+            afterResult,
+            `${afterContext} — a single JSON document is the only output ` +
+              `form (SPEC 11)`,
+          ),
+          { text: true },
+          afterContext,
+        );
+        assertConditionCounts(
+          afterReport.findings,
+          { "14.15": 1, "14.16": 1 },
+          `${afterContext} — the import no longer designates a discovered ` +
+            `spec source (14.15) beside the unchanged stray-element ` +
+            `finding — and nothing else (SPEC 2.1, 14)`,
+        );
+        assertLocatedFinding(
+          findingByCondition(afterReport.findings, "14.15", afterContext),
+          [{ file: IMP_FILE, window: widened(IMP_IMPORT_RANGE) }],
+          `${afterContext} — the invalid import is located at its ` +
+            `declaration (SPEC 14)`,
+        );
+        assertLocatedFinding(
+          findingByCondition(afterReport.findings, "14.16", afterContext),
+          [{ file: IMP_FILE, window: widened(IMP_DIV_RANGE) }],
+          `${afterContext} — the stray element's finding is unchanged ` +
+            `(SPEC 14)`,
+        );
+        assertSameJson(
+          afterReport.views.map((view) => view.file),
+          [IMP_FILE],
+          `${afterContext} — the deleted file is no longer discovered: ` +
+            `IMP's view alone (SPEC 11.4)`,
+        );
+        const impAfterView = afterReport.views[0]!;
+        assertSameJson(
+          projectTextNode(impAfterView.root),
+          IMP_TEXT_TREE,
+          `${afterContext} — the importing file's text values are ` +
+            `BYTE-IDENTICAL to before (the same pinned tree): every import ` +
+            `declaration is removed by FORM — binding shape, specifier ` +
+            `validity, and target discovery notwithstanding — so the ` +
+            `deletion perturbs no text value, its 14.15 finding ` +
+            `notwithstanding (SPEC 11.2, 3)`,
+        );
+        assertSameJson(
+          impAfterView.imports,
+          IMP_IMPORTS_AFTER,
+          `${afterContext} — the import entry stays on view with its ` +
+            `range and binding, its resolved target now EXACTLY the ` +
+            `unavailability marker: discovery defines none (SPEC 11.4, ` +
+            `11.2)`,
+        );
+        assertSameJson(
+          [impAfterView.occurrences, impAfterView.comments],
+          [[], []],
+          `${afterContext} — still no occurrences (the binding stays ` +
+            `unused) and no comments (SPEC 5.7, 12.7)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+  },
+});
+
 /** TEST-SPEC §11.2, in canonical ID order (SUITE-52). */
 export const section112Tests: readonly ProductTestEntry[] = [
   T11_2_1,
   T11_2_2,
   T11_2_3,
+  T11_2_4,
 ];
