@@ -1539,12 +1539,53 @@ A "new test T<x>" task always means, in one change:
   S-1's 7 unmapped keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and
   certification green.]
 
-- [ ] FP-038 — T12.0-9: add the new exit-partition representatives.
+- [x] FP-038 — T12.0-9: add the new exit-partition representatives.
   [R2 #25; TEST-SPEC §12.0]
   Exit 0: `version`, clean `occurrences`/`view`/`at`, `inventory`,
   successful previews. Exit 1: refused previews and answers carrying
   findings/explicitly-unavailable data (emitted in full). Exit 2:
   wrong-kind operands and the `occurrences --to` malformed-only exception.
+  [Done 2026-08-13 (`test/suite/registry/section-12.0-ii.ts`): exit-0 rows
+  on the story workspace after its exit-0 build (the clean-domain premise) —
+  `version`, `occurrences`, `occurrences --to specs/NoSuch.mdx#nope` (the
+  exception's accepted side: well-formed unknown selects the empty set,
+  exit 0), `view`, `at specs/A.mdx 0`, `inventory`, and the successful
+  rename preview `alpha → gamma`; exit-1 rows — refused rename and move
+  previews beside their real refused twins (SPEC 6.6 refusal equivalence on
+  the same state), and `occurrences`/`view`/`at` answering on the findings
+  workspace (id-less `specs/U.mdx` staged beside the unresolved-reference
+  file: findings 14.5 + 14.1, the section's identity explicitly
+  unavailable), each such row asserting emitted-in-full at H-5's protocol
+  grain via the new `emitsAnswer` row marker (stdout exactly one JSON
+  document — T11.2-5 pins the full-answer contract); exit-2 rows —
+  `occurrences --to a#b..c` (the exception's usage-error side: an empty
+  segment), and a new wrong-kind workspace (SPEC_AND_CODE_CONFIG,
+  reference-free `src/app.ts`) with `show src/app.ts` (code source where a
+  requirement-node identity is required) and `view src/app.ts` (where a
+  spec source is required), discovery pinned by the premise probe `query
+  edges --from src/app.ts` → empty answer exit 0 (an unconfigured path
+  would be unknown, exit 2). Title updated to the refreshed TEST-SPEC
+  entry; module-header operationalization note extended (premise probes;
+  emitted-in-full grain; previews exit-code-only, T6.6-* owning
+  modifies-nothing/content). Traceability unchanged (["12.0"] — 11.2/11.6/
+  6.6/12.6 are context with home coverage at stages G/H); no certification
+  scope. Verified: T12.0-9 turned green → red-as-diagnosed exactly at the
+  first new row (`version` → exit 2 "unknown command", the new-surface
+  product gap); later arms unreached in the suite, proven sound by direct
+  probes against the built product — wrong-kind arm: build exit 0, edges
+  premise `{"edges":[]}` exit 0, `show src/app.ts` exit 2 with the
+  wrong-kind diagnosis (genuinely green today); findings arm: build/check
+  exit 1 with exactly the staged 14.5 + 14.1; all three `--preview` rows
+  exit 2 "unknown flag", `occurrences`/`view`/`at`/`inventory`/`version`
+  exit 2 "unknown command" — every 0/1-class row fails as diagnosed until
+  the product grows the surfaces, and the two coincidental exit-2 matches
+  (`view src/app.ts`, malformed `--to`) are toothed jointly by the same
+  surfaces' 0/1-class rows plus T11.4-2/T11.3-3's full semantics.
+  Section-12.0-ii now 4 passed / 1 failed (T12.0-9 the one red;
+  T12.0-7/-8/-11/-12 stay green); typecheck/format clean; `npm run
+  test:self` unchanged 4 planned mid-loop reds (certification-document ×3 →
+  FP-091; S-1's 7 unmapped keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and
+  certification green.]
 
 - [ ] FP-039 — T12.0-10: implement the precedence arms (test stops being
   alias-only). [R2 #26; TEST-SPEC §12.0]

@@ -47,9 +47,15 @@
 // - T12.0-9 asserts exact exit codes (the partition is the contract under
 //   test); stream separation is T12.0-2's. Rows whose class is only
 //   meaningful under a premise (impact *with differences*, coverage with an
-//   uncovered node, fully-resolved `next`, a *blocked* resolve) carry a
-//   light adapter-decoded premise probe so the asserted exit code is
-//   attributable to its class.
+//   uncovered node, fully-resolved `next`, a *blocked* resolve, a code
+//   source *discovered* so a wrong-kind exit 2 is attributable to operand
+//   kind rather than to an unconfigured path) carry a light premise probe so
+//   the asserted exit code is attributable to its class. The class-1
+//   "answers carrying findings or explicitly-unavailable data — emitted in
+//   full" rows assert emission at H-5's protocol grain — stdout parses as
+//   exactly one JSON document (the 11.2 surfaces are JSON-only) — T11.2-5
+//   pinning the full-answer contract; preview rows assert exit codes only,
+//   T6.6-* owning modifies-nothing and report content.
 // - T12.0-11 partitions a whole-workspace byte diff around each git-reading
 //   invocation: any change under `.git/` fails (same file set, same bytes),
 //   and every change outside it must be a write the command's own
@@ -825,6 +831,15 @@ interface PartitionRow {
   readonly what: string;
   readonly argv: readonly string[];
   readonly expect: 0 | 1 | 2;
+  /**
+   * Assert the answer document is still emitted beside the exit code: stdout
+   * parses as exactly one JSON document. For the class-1 rows of the 11.2
+   * surfaces (JSON-only, SPEC 11), whose class is "answers carrying findings
+   * or explicitly-unavailable data — emitted in full": exit 1 signals
+   * imperfection and never withholds the answer (SPEC 11.2), asserted here
+   * at H-5's protocol grain — T11.2-5 pins the full-answer contract.
+   */
+  readonly emitsAnswer?: true;
 }
 
 async function runPartitionRows(
@@ -833,7 +848,7 @@ async function runPartitionRows(
   rows: readonly PartitionRow[],
 ): Promise<void> {
   for (const row of rows) {
-    await expectExit(
+    const result = await expectExit(
       product,
       workspace,
       row.argv,
@@ -842,13 +857,23 @@ async function runPartitionRows(
         `partition all outcomes, and this outcome is in the ` +
         `${String(row.expect)} class (SPEC 12.0)`,
     );
+    if (row.emitsAnswer === true) {
+      parseJsonStdout(
+        result,
+        `T12.0-9 \`${row.argv.join(" ")}\` — ${row.what}: the answer is ` +
+          `emitted in full beside exit ${String(row.expect)} — exit 1 ` +
+          `signals imperfection and never withholds the answer, and the ` +
+          `surface is JSON-only, so stdout is exactly one JSON document ` +
+          `(SPEC 11.2, 11, H-5)`,
+      );
+    }
   }
 }
 
 const T12_0_9 = defineProductTest({
   id: "T12.0-9",
   title:
-    "exit-code partition: a table-driven sweep asserting one representative per class per command family — 0 for success and informational reports (`ids`, `show`, `impact` with differences, `query`, review reads including fully-resolved `next`, `coverage` without `--check`); 1 for findings (failing `build`, `check` findings, `coverage --check` uncovered, refused `rename`/`move`, refused review operations, corrupt-session reports); 2 for usage and configuration errors (unknown command/flag, missing required flag and argument, invalid flag value, unknown profile/session/group/item/node/file, invalid session name, configuration errors, unreadable baseline, mutual-exclusion refusal) (SPEC 12.0)",
+    "exit-code partition: a table-driven sweep asserting one representative per class per command family — 0 for success and informational reports (`ids`, `show`, `impact` with differences, `query`, review reads including fully-resolved `next`, `coverage` without `--check`, `version`, and complete finding-free answers: `occurrences`/`view`/`at` over a clean domain, `inventory`, a successful preview); 1 for findings (failing `build`, `check` findings, `coverage --check` uncovered, refused `rename`/`move` and their refused previews, refused review operations, corrupt-session reports, and answers carrying findings or explicitly-unavailable data — emitted in full); 2 for usage and configuration errors (unknown command/flag, missing required flag and argument, invalid flag value, unknown profile/session/group/item/node/file — except `occurrences --to`, where only a malformed spelling is a usage error — wrong-kind operands: a code source where a spec source or a requirement-node identity is required, invalid session name, configuration errors, unreadable baseline, mutual-exclusion refusal) (SPEC 12.0, 11.2, 11.6, 6.6, 12.6)",
   timeoutMs: 360_000,
   run: async (product) => {
     // --- The valid story workspace: informational, refusal, and usage rows.
@@ -1066,6 +1091,44 @@ const T12_0_9 = defineProductTest({
           argv: ["coverage"],
           expect: 0,
         },
+        // Complete finding-free answers over the clean domain (SPEC 11.2):
+        // the premise — every discovered source finding-free — is the
+        // staging `build`'s exit 0 above.
+        {
+          what: "workspace-independent `version` (SPEC 12.6)",
+          argv: ["version"],
+          expect: 0,
+        },
+        {
+          what: "complete finding-free `occurrences` answer over the clean domain (SPEC 11.2, 11.3)",
+          argv: ["occurrences"],
+          expect: 0,
+        },
+        {
+          what: "`occurrences --to` accepts a well-formed unknown identity — unknown is not a usage error on this filter, the selection empty over the finding-free domain (SPEC 11.3)",
+          argv: ["occurrences", "--to", "specs/NoSuch.mdx#nope"],
+          expect: 0,
+        },
+        {
+          what: "complete finding-free `view` answer over the clean domain (SPEC 11.2, 11.4)",
+          argv: ["view"],
+          expect: 0,
+        },
+        {
+          what: "complete finding-free `at` answer over the clean domain (SPEC 11.2, 11.5)",
+          argv: ["at", STORY_FILE_A, "0"],
+          expect: 0,
+        },
+        {
+          what: "finding-free `inventory` (SPEC 11.6)",
+          argv: ["inventory"],
+          expect: 0,
+        },
+        {
+          what: "successful preview — the real rename would proceed (`gamma` claimed by nothing in the fixture), so its `--preview` succeeds, modifying nothing (SPEC 6.6)",
+          argv: ["rename", STORY_FILE_A, "alpha", "gamma", "--preview"],
+          expect: 0,
+        },
         // 1 — findings.
         {
           what: "`coverage --check` with uncovered requirements",
@@ -1080,6 +1143,19 @@ const T12_0_9 = defineProductTest({
         {
           what: "refused `move` (the destination file already exists, SPEC 6.5)",
           argv: ["move", STORY_FILE_A, STORY_FILE_B],
+          expect: 1,
+        },
+        // Refused previews: a preview is refused exactly when the real
+        // operation would be (SPEC 6.6) — each twin rides the refusal its
+        // real row above just demonstrated on this same state.
+        {
+          what: "refused rename preview (the same ID collision as the real refusal, SPEC 6.6, 6.4)",
+          argv: ["rename", STORY_FILE_A, "alpha", "omega", "--preview"],
+          expect: 1,
+        },
+        {
+          what: "refused move preview (the same occupied destination as the real refusal, SPEC 6.6, 6.5)",
+          argv: ["move", STORY_FILE_A, STORY_FILE_B, "--preview"],
           expect: 1,
         },
         {
@@ -1160,6 +1236,11 @@ const T12_0_9 = defineProductTest({
           expect: 2,
         },
         {
+          what: "`occurrences --to` malformed spelling (an empty segment) — the exception to the unknown class: on this filter only a malformed spelling is a usage error, the well-formed unknown row above exiting 0 (SPEC 11.3)",
+          argv: ["occurrences", "--to", "a#b..c"],
+          expect: 2,
+        },
+        {
           what: "invalid session name (a leading `.`, SPEC 10.1)",
           argv: ["review", "create", "--strategy", "audit", "--name", ".bad"],
           expect: 2,
@@ -1226,7 +1307,11 @@ const T12_0_9 = defineProductTest({
       },
     );
 
-    // --- Findings (exit 1): failing build and check over invalid sources.
+    // --- Findings (exit 1): failing build and check over invalid sources,
+    // and the 11.2 surfaces answering on the same failing workspace — the
+    // domain's findings accompany, an id-less section's identity is
+    // explicitly unavailable (SPEC 11.2), and each answer is emitted in
+    // full beside its exit 1 (`emitsAnswer`).
     await withWorkspace(
       {
         files: {
@@ -1237,12 +1322,20 @@ const T12_0_9 = defineProductTest({
             "</S>",
             "",
           ].join("\n"),
+          // A parseable section spelling no identity: its 14.1 finding and
+          // its explicitly-unavailable identity ride the answers below.
+          "specs/U.mdx": [
+            "<S>",
+            "Section spelling no identity.",
+            "</S>",
+            "",
+          ].join("\n"),
         },
       },
       async (invalidWorkspace) => {
         await runPartitionRows(product, invalidWorkspace, [
           {
-            what: "failing `build` (an unresolved reference, SPEC 14.5)",
+            what: "failing `build` (an unresolved reference, SPEC 14.5; a missing ID, SPEC 14.1)",
             argv: ["build"],
             expect: 1,
           },
@@ -1250,6 +1343,70 @@ const T12_0_9 = defineProductTest({
             what: "`check` findings over the same invalid sources",
             argv: ["check"],
             expect: 1,
+          },
+          {
+            what: "`occurrences` answer carrying the consulted domain's findings — emitted in full (SPEC 11.2, 11.3)",
+            argv: ["occurrences"],
+            expect: 1,
+            emitsAnswer: true,
+          },
+          {
+            what: "`view` answer carrying findings and an explicitly-unavailable identity (the id-less section) — emitted in full (SPEC 11.2, 11.4)",
+            argv: ["view"],
+            expect: 1,
+            emitsAnswer: true,
+          },
+          {
+            what: "`at` answer carrying an explicitly-unavailable identity and its file's finding — emitted in full (SPEC 11.2, 11.5)",
+            argv: ["at", "specs/U.mdx", "0"],
+            expect: 1,
+            emitsAnswer: true,
+          },
+        ]);
+      },
+    );
+
+    // --- Wrong-kind operands (exit 2, SPEC 12.0): a code source named where
+    // a spec source or a requirement-node identity is required. The premise
+    // probe pins `src/app.ts` as discovered: `query edges --from` on it
+    // answers an edgeless known graph node with an empty answer, exit 0,
+    // where a path in no configured group would be unknown, exit 2 (SPEC
+    // 11.1) — so the rows' exit 2 is attributable to operand kind alone.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+          "specs/A.mdx": ['<S id="alpha">', "Alpha text.", "</S>", ""].join(
+            "\n",
+          ),
+          // Valid, reference-free TypeScript: discovered through the code
+          // group's glob, bearing no requirement nodes (SPEC 7.2).
+          "src/app.ts": "export function noop(): void {}\n",
+        },
+      },
+      async (kindWorkspace) => {
+        await buildOk(product, kindWorkspace, "T12.0-9 wrong-kind-arm `build`");
+        await expectExit(
+          product,
+          kindWorkspace,
+          ["query", "edges", "--from", "src/app.ts"],
+          0,
+          "T12.0-9 wrong-kind-arm premise `query edges --from src/app.ts` — " +
+            "the reference-free code source is discovered, a known graph " +
+            "node answering an empty edge set (SPEC 11.1, 7.2), so the " +
+            "wrong-kind rows are attributable to operand kind, not to an " +
+            "unconfigured path",
+        );
+        await runPartitionRows(product, kindWorkspace, [
+          {
+            what: "wrong-kind operand: a code source named where a requirement-node identity is required (`show`, SPEC 12.4, 12.0)",
+            argv: ["show", "src/app.ts"],
+            expect: 2,
+          },
+          {
+            what: "wrong-kind operand: a code source named where a spec source is required (`view`, SPEC 11.4, 12.0)",
+            argv: ["view", "src/app.ts"],
+            expect: 2,
           },
         ]);
       },
