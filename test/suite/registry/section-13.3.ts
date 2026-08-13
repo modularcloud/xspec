@@ -57,6 +57,40 @@
 //   view document — because byte-precise span and per-file view semantics
 //   are T11.3-*/T11.4-*/T11.5-*'s home; this section owns the
 //   serving/refresh behaviors those answers demonstrate.
+// - T13.3-3's whole-gate arms (SPEC 13.3: the gate is over every finding a
+//   `build` would report — source validation errors, journal errors, and
+//   refused writes alike): the garbage journal line rides line 2 behind one
+//   legitimate journaled entry (T6.1-3's staging, so "naming the line" has
+//   teeth and refresh really must consume the journal for canonical
+//   identities, SPEC 5.4), and the baseline commit for `impact --base` is
+//   taken WITH the garbage line in place: 12.0 orders baseline resolution
+//   before the gate, and per 6.3 it succeeds here — the baseline journal is
+//   byte-identical to the current journal (the append-only prefix invariant
+//   holds), zero entries replay (T6.3-4's replay-failure arm is the garbage
+//   line appended AFTER the baseline commit, exit 2 — TEST-SPEC's
+//   deliberate contrast), and the baseline's sources and configuration
+//   parse and validate (6.3's baseline-content validation, operationalized
+//   as source/configuration validity per T6.3-4's "a baseline whose sources
+//   fail parse/validation" arm) — so the whole gate is the operative error,
+//   exit 1 with the journal finding. The obstructed write path stages a
+//   plain file over the emptied `markdown.outDir` directory after a
+//   successful build: the emit write path's workspace-relative component
+//   `mdout` is then occupied by a non-directory (13.4) — the workspace's
+//   one offending component, nonexistent deeper components never being the
+//   condition — so `build` would report exactly the one condition-22
+//   finding (14.22: one finding per distinct offending component). 14.13
+//   line naming follows T6.1-3's H-4 operationalization: the message
+//   echoing the garbage text or citing line/entry 2, or (tolerated) a
+//   location within the garbage line's byte window — a journal condition
+//   carries the concerned journal path, no in-source location (SPEC 14,
+//   12.7). The never-gated contrast (`occurrences`, `view`, `at` answering
+//   per 11.2, `inventory` answering whatever the sources' validity, SPEC
+//   11.6) is asserted at this module's identity/membership altitude, each
+//   probe inside its own whole-root compare: a gate condition is a finding
+//   of no domain file — the journal and a write-path component are never
+//   domain files — so those answers are complete and finding-free at exit
+//   0, whatever journal or write-path state the workspace holds (SPEC
+//   11.2), and nothing is modified.
 // - T13.3-2's record-discipline arm (record corrupted shape-blind, T6.6-6's
 //   staging via the H-3 record-staging adapter): SPEC 13.3 pins the record —
 //   the recorded derived-file paths — as neither read, repaired, nor
@@ -123,6 +157,7 @@ import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
+  assertFindingConcernsPath,
   assertFindingLocated,
   assertSameJson,
   buildOk,
@@ -1962,10 +1997,274 @@ const T13_3_3_B_VALID = ['<S id="beta">', "Beta text.", "</S>", ""].join("\n");
 // A non-root section without `id` — build validation condition 14.1.
 const T13_3_3_B_INVALID = ["<S>", "Beta text.", "</S>", ""].join("\n");
 
+// --- Whole-gate arm fixtures (SPEC 13.3; see the module header) ---
+
+const JOURNAL_PATH = ".xspec/journal";
+const LF = 0x0a;
+
+// Deliberately structureless bytes no conforming entry format accepts — the
+// TEST-SPEC-sanctioned malformed-journal staging (T6.1-3's shape, H-4).
+const GATE_GARBAGE_LINE = "?? harness-injected garbage: not a journal entry ??";
+
+// One reference occurrence (alpha's d entry to beta) keeps every never-gated
+// answer contentful; the sources are otherwise finding-free, so the staged
+// journal/write-path state is the workspace's only build-failing condition.
+const T13_3_3_GATE_A = [
+  '<S id="alpha" d={["beta"]}>',
+  "Alpha depends on beta.",
+  "</S>",
+  "",
+  '<S id="beta">',
+  "Beta text.",
+  "</S>",
+  "",
+].join("\n");
+// An unreferenced section for the legitimate journaled rename (line 1).
+const T13_3_3_GATE_T = ['<S id="tmp">', "Tmp text.", "</S>", ""].join("\n");
+
+// The obstructed-write-path workspace: emission redirected under
+// `markdown.outDir`, so a plain file at `mdout` obstructs the emit write
+// path `mdout/specs/A.md` at its first component (SPEC 7.3, 13.2, 13.4).
+const T13_3_3_OUTDIR_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "mdout" },
+  coverage: [
+    {
+      name: "p",
+      target: "main",
+      targets: "all",
+      boundary: "main",
+      mode: "direct"
+    }
+  ]
+})
+`;
+
+/** Lines in a line-oriented file, either final-line convention (T6.1-3). */
+function journalLineCount(bytes: Uint8Array): number {
+  if (bytes.length === 0) return 0;
+  let count = 0;
+  for (const byte of bytes) {
+    if (byte === LF) count += 1;
+  }
+  if (bytes[bytes.length - 1] !== LF) count += 1;
+  return count;
+}
+
+/**
+ * Does a 14.13 finding name the garbage line (line 2)? T6.1-3's H-4
+ * operationalization: the message echoing the garbage line's text or citing
+ * line/entry 2 — a journal condition carries the journal path it concerns
+ * and no in-source location (SPEC 14, 12.7), so the lines are named in the
+ * message — or, tolerated, a location within the garbage line's byte window
+ * in `.xspec/journal`.
+ */
+function findingNamesGarbageLine(
+  finding: Finding,
+  window: { readonly start: number; readonly end: number },
+): boolean {
+  if (finding.message.includes(GATE_GARBAGE_LINE)) return true;
+  if (/\b(?:line|entry)\s*#?\s*2\b/i.test(finding.message)) return true;
+  if (finding.message.includes("journal:2")) return true;
+  return finding.locations.some(
+    (location) =>
+      location.file === JOURNAL_PATH &&
+      location.range.start >= window.start &&
+      location.range.end <= window.end + 1,
+  );
+}
+
+/**
+ * The six gated reads' invocations (SPEC 13.3; `review` represented by
+ * `status`, the read subcommand — the mutating subcommands are the
+ * invalid-sources workspace's subject).
+ */
+function gatedReadInvocations(
+  base: string,
+  alpha: string,
+): readonly { readonly argv: readonly string[]; readonly what: string }[] {
+  return [
+    { argv: ["ids", "--json"], what: "`ids --json`" },
+    { argv: ["show", alpha, "--json"], what: `\`show ${alpha} --json\`` },
+    { argv: ["coverage", "--json"], what: "`coverage --json`" },
+    {
+      argv: ["impact", "--base", base, "--json"],
+      what: "`impact --base <ref> --json`",
+    },
+    {
+      argv: ["review", "status", "s", "--json"],
+      what: "`review status s --json`",
+    },
+    { argv: ["query", "nodes"], what: "`query nodes`" },
+  ];
+}
+
+/**
+ * One whole-gate probe (SPEC 13.3): the gated read reports exactly the
+ * staged gate finding, exits 1, answers nothing (stdout is the findings
+ * report, like a failed build — the module's T13.3-3 operationalization),
+ * and modifies nothing: journal, sessions, derived files, graph data, and
+ * `.git/` byte-identical around the invocation.
+ */
+async function probeWholeGate(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  counts: Readonly<Record<string, number>>,
+  verifyFinding: (finding: Finding, context: string) => void,
+  context: string,
+): Promise<void> {
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const result = await runCli(product, workspace, argv);
+      assertExitCode(
+        result,
+        1,
+        `${context} — the gate is over every finding a \`build\` would ` +
+          `report, source validity or not: the gated read reports it and ` +
+          `exits 1 without answering (SPEC 13.3, 12.0)`,
+      );
+      const findings = decodeFindingsReport(
+        parseJsonStdout(result, context),
+        context,
+      ).findings;
+      assertConditionCounts(
+        findings,
+        counts,
+        `${context} — exactly the staged gate finding is reported, like a ` +
+          `failed build (SPEC 13.3, 14)`,
+      );
+      verifyFinding(findings[0] as Finding, context);
+    },
+    `${context} — journal, sessions, derived files, and graph data must be ` +
+      `byte-identical around the gated read (SPEC 13.3)`,
+  );
+}
+
+/**
+ * The never-gated contrast (SPEC 13.3, 11.2, 11.6) on a whole-gate
+ * workspace staged with `T13_3_3_GATE_A` as its one occurrence-bearing spec
+ * source: `occurrences`, `view`, and `at` answer per file — complete and
+ * finding-free at exit 0, the gate condition being no domain file's finding
+ * — and `inventory` answers whatever the sources' validity, none of them
+ * modifying anything (whole-root byte compare per probe).
+ */
+async function assertNeverGatedAnswers(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  viewFiles: readonly string[],
+  context: string,
+): Promise<void> {
+  const A_ROOT = "specs/A.mdx";
+  const ALPHA = "specs/A.mdx#alpha";
+  const BETA = "specs/A.mdx#beta";
+
+  const occurrencesLabel = `${context} \`occurrences\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const report = decodeOccurrencesReport(
+        await runJson(product, workspace, ["occurrences"], occurrencesLabel),
+        occurrencesLabel,
+      );
+      assertSameJson(
+        {
+          findings: report.findings,
+          occurrences: occurrenceIdentitySummaries(report.occurrences),
+        },
+        {
+          findings: [],
+          occurrences: [
+            { file: A_ROOT, kind: "depends", source: ALPHA, target: BETA },
+          ],
+        },
+        `${occurrencesLabel}: the staged occurrence, finding-free at exit 0 ` +
+          `— the gate condition is no domain file's finding, so it ` +
+          `accompanies no answer of this surface (SPEC 11.2, 11.3, 13.3)`,
+      );
+    },
+    `${occurrencesLabel} answers from the current sources and modifies ` +
+      `nothing — no graph data, no derived files (SPEC 11.2, 13.3)`,
+  );
+
+  const viewLabel = `${context} \`view\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const view = decodeViewFilesReport(
+        await runJson(product, workspace, ["view"], viewLabel),
+        viewLabel,
+      );
+      assertSameJson(
+        view,
+        { findings: [], files: viewFiles },
+        `${viewLabel}: the whole-domain request answers every discovered ` +
+          `spec source, finding-free at exit 0, whatever journal or ` +
+          `write-path state the workspace holds (SPEC 11.2, 11.4, 13.3)`,
+      );
+    },
+    `${viewLabel} answers from the current sources and modifies nothing ` +
+      `(SPEC 11.2, 13.3)`,
+  );
+
+  // Byte 30 lies inside "Alpha depends on beta." — within alpha's construct
+  // (bytes 0..55), outside the d entry's occurrence span ("beta" at bytes
+  // 18..24) (SPEC 11.5, 1.7).
+  const atLabel = `${context} \`at specs/A.mdx 30\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      assertAtAnswer(
+        decodeAtReport(
+          await runJson(product, workspace, ["at", A_ROOT, "30"], atLabel),
+          atLabel,
+        ),
+        ALPHA,
+        atLabel,
+      );
+    },
+    `${atLabel} answers from the current sources and modifies nothing ` +
+      `(SPEC 11.2, 11.5, 13.3)`,
+  );
+
+  const inventoryLabel = `${context} \`inventory\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const recorded = decodeInventoryRecordedDatum(
+        await runJson(product, workspace, ["inventory"], inventoryLabel),
+        inventoryLabel,
+      );
+      if (recorded.state !== "value") {
+        fail(
+          `${inventoryLabel}: the inventory parses no sources and reads no ` +
+            `journal content — it answers whatever the workspace's gate ` +
+            `state, and with the record intact the record-supplied datum ` +
+            `is the plain recorded derived-file paths (SPEC 11.6, 13.3, ` +
+            `14.23); got state ${JSON.stringify(recorded.state)}`,
+        );
+      }
+      if (!recorded.value.includes("specs/A.xspec.ts")) {
+        fail(
+          `${inventoryLabel}: the recorded derived-file paths must name ` +
+            `the generated module specs/A.xspec.ts (SPEC 11.6, 13.1); got ` +
+            JSON.stringify(recorded.value),
+        );
+      }
+    },
+    `${inventoryLabel} neither refreshes nor writes anything (SPEC 11.6)`,
+  );
+}
+
 const T13_3_3 = defineProductTest({
   id: "T13.3-3",
   title:
-    "with invalid sources, each read command and each mutating review subcommand (create under --base/--strategy audit/--coverage, resolve, split) reports the validation errors, exits 1, answers nothing, and modifies nothing — no session created, and session file, journal, derived files, and graph data byte-identical (SPEC 13.3, 12.0, 14)",
+    "with invalid sources, each read command and each mutating review subcommand (create under --base/--strategy audit/--coverage, resolve, split) reports the validation errors, exits 1, answers nothing, and modifies nothing — no session created, and session file, journal, derived files, and graph data byte-identical; the gate is over every finding a `build` would report: with a garbage journal line staged (the baseline commit including it) and separately an obstructed write path, ids, show, coverage, impact, review status, and query each report exactly that finding — the journal error (14.13) naming the line, the refused write (14.22) its offending component — exit 1, answer nothing, and modify nothing, while on the same workspaces occurrences, view, and at answer per file finding-free at exit 0 and inventory answers, none of them modifying anything (SPEC 13.3, 11.2, 11.6, 12.0, 14)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -2187,6 +2486,219 @@ const T13_3_3 = defineProductTest({
           ["review", "split", "s", alphaRow.id, "--json"],
           "`review split s <unblocked splittable item> --json` (no " +
             "decomposition)",
+        );
+      },
+    );
+
+    // --- Whole-gate arm 1: garbage journal line (14.13). The gate is over
+    // every finding a `build` would report, source validity or not (SPEC
+    // 13.3); the staging and the baseline-commit placement are explained in
+    // the module header. Discriminates a product that gates on source
+    // validity alone and answers `query` from a broken journal with exit 0
+    // (refresh consumes the journal for canonical identities, SPEC 5.4).
+    await withWorkspace(
+      {
+        "xspec.config.ts": GRAPH_CONFIG,
+        "specs/A.mdx": T13_3_3_GATE_A,
+        "specs/T.mdx": T13_3_3_GATE_T,
+      },
+      async (workspace) => {
+        const context = "T13.3-3 (garbage journal)";
+        const ALPHA = "specs/A.mdx#alpha";
+
+        await workspace.gitInit();
+        await buildOk(product, workspace, `${context} staging \`build\``);
+        // Journal line 1: one legitimate journaled operation — the rename
+        // of the unreferenced tmp section — so the garbage lands on line 2
+        // ("naming the line" has teeth, T6.1-3) and the journal really
+        // participates in canonical identities (SPEC 6.1, 6.4, 5.4).
+        await expectExit(
+          product,
+          workspace,
+          ["rename", "specs/T.mdx", "tmp", "tmp2"],
+          0,
+          `${context} staging \`rename specs/T.mdx tmp tmp2\` — the ` +
+            `legitimate journal entry (SPEC 6.4, 6.1)`,
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["review", "create", "--strategy", "audit", "--name", "s"],
+          0,
+          `${context} staging \`review create --strategy audit --name s\` ` +
+            `(SPEC 10.7)`,
+        );
+
+        // Append the garbage as its own line 2 (whole-line append under
+        // either final-line convention; shape-independent, H-4).
+        const journalKind = await workspace.kind(JOURNAL_PATH);
+        if (journalKind !== "file") {
+          fail(
+            `${context}: staging premise — the journaled rename brings the ` +
+              `journal into existence as a plain file at ${JOURNAL_PATH} ` +
+              `(SPEC 6.1, 13.4); found ${journalKind}`,
+          );
+        }
+        const legitimate = await workspace.readBytes(JOURNAL_PATH);
+        if (journalLineCount(legitimate) !== 1) {
+          fail(
+            `${context}: staging premise — one journaled operation yields ` +
+              `a one-line journal (SPEC 6.1), so the garbage lands on line ` +
+              `2; found ${String(journalLineCount(legitimate))} line(s)`,
+          );
+        }
+        const needsTerminator =
+          legitimate.length > 0 && legitimate[legitimate.length - 1] !== LF;
+        const garbageStart = legitimate.length + (needsTerminator ? 1 : 0);
+        await workspace.file(
+          JOURNAL_PATH,
+          Buffer.concat([
+            legitimate,
+            Buffer.from(
+              (needsTerminator ? "\n" : "") + GATE_GARBAGE_LINE + "\n",
+              "utf8",
+            ),
+          ]),
+        );
+        const window = {
+          start: garbageStart,
+          end: garbageStart + Buffer.byteLength(GATE_GARBAGE_LINE, "utf8"),
+        };
+
+        // The baseline commit INCLUDES the garbage line, so baseline
+        // resolution — which precedes the gate (SPEC 12.0) — succeeds and
+        // the gate is `impact --base`'s operative error (module header;
+        // the post-baseline garbage position is T6.3-4's exit-2 arm).
+        const base = await workspace.gitCommitAll(
+          "gate baseline (garbage journal line included)",
+        );
+
+        for (const probe of gatedReadInvocations(base, ALPHA)) {
+          await probeWholeGate(
+            product,
+            workspace,
+            probe.argv,
+            { "14.13": 1 },
+            (finding, findingContext) => {
+              assertFindingConcernsPath(
+                finding,
+                JOURNAL_PATH,
+                `${findingContext} — a journal condition carries the ` +
+                  `journal path it concerns (SPEC 14, 12.7)`,
+              );
+              if (!findingNamesGarbageLine(finding, window)) {
+                fail(
+                  `${findingContext}: the 14.13 finding must name the ` +
+                    `malformed line — the garbage on line 2 (SPEC 14.13 ` +
+                    `"naming the lines"): the garbage line's text, a ` +
+                    `line/entry-2 citation, or a location within bytes ` +
+                    `[${String(window.start)}, ${String(window.end)}] of ` +
+                    `${JOURNAL_PATH}; got ${JSON.stringify(finding)}`,
+                );
+              }
+            },
+            `${context} ${probe.what}`,
+          );
+        }
+
+        // Never-gated contrast on the same workspace (SPEC 11.2, 11.6).
+        await assertNeverGatedAnswers(
+          product,
+          workspace,
+          ["specs/A.mdx", "specs/T.mdx"],
+          context,
+        );
+      },
+    );
+
+    // --- Whole-gate arm 2: obstructed write path (14.22). After a
+    // successful build (and a session for `review status`), the
+    // `markdown.outDir` directory is replaced by a plain file: the emit
+    // write path `mdout/specs/A.md` then has its workspace-relative
+    // component `mdout` occupied by a non-directory — the one offending
+    // component, so `build` would report exactly the one condition-22
+    // finding (SPEC 13.4, 14.22; module header).
+    await withWorkspace(
+      {
+        "xspec.config.ts": T13_3_3_OUTDIR_CONFIG,
+        "specs/A.mdx": T13_3_3_GATE_A,
+      },
+      async (workspace) => {
+        const context = "T13.3-3 (obstructed write path)";
+        const ALPHA = "specs/A.mdx#alpha";
+
+        await workspace.gitInit();
+        // Pristine valid sources at the baseline; the journal is absent on
+        // both sides (an empty journal is a prefix of every journal), so
+        // baseline resolution succeeds and the gate is `impact --base`'s
+        // operative error (SPEC 6.3, 12.0).
+        const base = await workspace.gitCommitAll("baseline (valid sources)");
+        await buildOk(
+          product,
+          workspace,
+          `${context} staging \`build\` — emits under markdown.outDir ` +
+            `(SPEC 7.3, 13.2, 12.1)`,
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["review", "create", "--strategy", "audit", "--name", "s"],
+          0,
+          `${context} staging \`review create --strategy audit --name s\` ` +
+            `(SPEC 10.7)`,
+        );
+
+        // Staging premises: emission landed under mdout/ preserving
+        // workspace-relative paths (SPEC 7.3, 13.2), so mdout is a
+        // component of a path `build` writes.
+        const mdoutKind = await workspace.kind("mdout");
+        if (mdoutKind !== "dir") {
+          fail(
+            `${context}: staging premise — \`build\` with emission enabled ` +
+              `under markdown.outDir creates the mdout/ directory (SPEC ` +
+              `7.3, 13.2, 13.4); found ${mdoutKind}`,
+          );
+        }
+        const emittedKind = await workspace.kind("mdout/specs/A.md");
+        if (emittedKind !== "file") {
+          fail(
+            `${context}: staging premise — emission under outDir preserves ` +
+              `workspace-relative paths, so specs/A.mdx emits ` +
+              `mdout/specs/A.md (SPEC 7.3, 13.2); found ${emittedKind}`,
+          );
+        }
+
+        // Obstruct: replace the directory with a plain file (the emitted
+        // Markdown goes with it — staleness is invisible here: 14.10 is
+        // `check`-only, and `build` would refuse at the obstruction).
+        await fsp.rm(workspace.path("mdout"), { recursive: true, force: true });
+        await workspace.file("mdout", "not a directory\n");
+
+        for (const probe of gatedReadInvocations(base, ALPHA)) {
+          await probeWholeGate(
+            product,
+            workspace,
+            probe.argv,
+            { "14.22": 1 },
+            (finding, findingContext) => {
+              assertFindingConcernsPath(
+                finding,
+                "mdout",
+                `${findingContext} — the refused write's concerned path is ` +
+                  `the offending component's workspace-relative path ` +
+                  `(SPEC 14.22, 13.4)`,
+              );
+            },
+            `${context} ${probe.what}`,
+          );
+        }
+
+        // Never-gated contrast on the same workspace (SPEC 11.2, 11.6).
+        await assertNeverGatedAnswers(
+          product,
+          workspace,
+          ["specs/A.mdx"],
+          context,
         );
       },
     );

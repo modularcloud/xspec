@@ -1873,12 +1873,62 @@ A "new test T<x>" task always means, in one change:
   CONF-DISC 3/3; violators failing exactly as certified). No new decoder
   (S-5 unchanged); T13.3-1/-2 in no certification scope.]
 
-- [ ] FP-045 — T13.3-3: add the whole-gate arms and the never-gated
+- [x] FP-045 — T13.3-3: add the whole-gate arms and the never-gated
   contrast. [R2 #32; TEST-SPEC §13.3]
   Whole-gate: garbage journal line (14.13) and obstructed write path
   (14.22) — each gated read reports it, exits 1, answers nothing, modifies
   nothing. Never-gated contrast: `occurrences`/`view`/`at` answering per
   SPEC 11.2 and `inventory` answering, on the same workspaces.
+  [Done 2026-08-13: two new workspaces in T13.3-3 (section-13.3.ts).
+  Journal arm: one legitimate journaled rename puts the garbage on line 2
+  (T6.1-3's staging, so line naming has teeth; the 14.13 line-naming check
+  mirrors T6.1-3's H-4 operationalization), and the baseline commit for
+  `impact --base` is taken WITH the garbage line in place: 12.0 orders
+  baseline resolution before the gate, and per 6.3 it succeeds there — the
+  baseline journal is byte-identical to the current journal (append-only
+  prefix invariant), zero entries replay (T6.3-4's exit-2 replay-failure
+  arm is the garbage appended AFTER the baseline commit — TEST-SPEC's
+  deliberate contrast), and baseline-content validation is
+  source/configuration validity per T6.3-4's own "sources fail
+  parse/validation" arm; SPEC 13.3's naming of `impact` among the
+  journal-error-reporting gated reads is reachable only under this
+  staging (module header documents the interpretation). Obstruction arm:
+  after a successful build (emission under markdown.outDir) and session
+  create, the mdout directory is replaced by a plain file — the emit
+  write path mdout/specs/A.md's one offending component. Each of the six
+  gated reads (ids, show alpha, coverage, impact --base, review status s,
+  query nodes) asserts exit 1 + the form-exact findings report with
+  exactly {14.13: 1} (concerned path .xspec/journal, line named) /
+  {14.22: 1} (concerned path mdout), each inside a whole-root
+  assertLeavesUnchanged. Never-gated contrast on both workspaces, each
+  probe in its own whole-root compare: `occurrences` (exact one-record
+  alpha→beta identity summary, findings []), `view` (whole domain,
+  findings []), `at specs/A.mdx 30` (alpha, occurrence null), all exit 0
+  whatever the gate state (11.2: a gate condition is no domain file's
+  finding), and `inventory` exit 0 with `recorded` a plain list naming
+  specs/A.xspec.ts (11.6). Verified: typecheck/format clean;
+  section-13.3 unchanged 3 failed / 1 passed (T13.3-3 red at the same
+  first FP-001-class decode; new arms suite-unreached); guarded solo runs
+  of each new arm against the built product fail exactly as diagnosed —
+  journal arm at the first gated probe's form-exact decode (the product
+  already gates the five non-impact reads with old-shape 14.13 naming
+  line 2, while `impact --base` exits 2 treating the baseline's own
+  journal state as a 6.3 failure: the diagnosed precedence gap), and
+  obstruction arm at the first probe's exit assertion (the product
+  answers all six reads exit 0 from the obstructed workspace — the
+  gates-on-source-validity-alone product the arm discriminates; its
+  `build`/`check` crash exit 70 ENOTDIR on the same staging); the
+  never-gated surfaces exit 2 "unknown command" (the patch-new §11
+  dispatch gap). Staging premises probe-verified (rename → one-line
+  journal; build emits mdout/specs/A.md preserving workspace-relative
+  paths; both `review create`s succeed). `npm run test:self`: unchanged 4
+  planned mid-loop reds (certification-document ×3 → FP-091; S-1's 7
+  unmapped keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and certification
+  green. Traceability unchanged (["13.3"] — T13.3-3 sits in TEST-SPEC
+  14's per-condition record for neither 14.13 nor 14.22 (T6.1-3/T13.4-6
+  are its homes), matching the landed convention that "14" rides that
+  record); no new decoder (S-5 unchanged); T13.3-3 in no certification
+  scope (Exclusions-shared machinery only).]
 
 - [ ] FP-046 — T13.4-6: add plain-file occupant and finding-cardinality
   arms. [R2 #33; TEST-SPEC §13.4]
