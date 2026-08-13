@@ -1,5 +1,5 @@
-// TEST-SPEC §11.2 (availability on imperfect files) — SUITE-52: T11.2-1,
-// T11.2-2.
+// TEST-SPEC §11.2 (availability on imperfect files) — SUITE-52: T11.2-1
+// through T11.2-3.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -11,10 +11,12 @@
 // lands with the certification-manifest task). CONF-AVAIL's staging
 // constraint pins every command an in-scope test drives to its enumerated
 // `view`/`occurrences` surface, so T11.2-2 runs NO gate-reference `build`
-// (unlike T11.2-1, which is not in scope): staging integrity rides the
-// `view` answer's own exact accompanying-findings multiset instead, and the
-// staged conditions are drawn from the scope's stated set (14.1, 14.3, 14.4,
-// 14.17).
+// (unlike T11.2-1 and T11.2-3, which are not in scope — CONF-AVAIL's
+// workspace scope is `#`-free valid-UTF-8 paths with no code groups, so
+// T11.2-3's staging lies outside it by construction): staging integrity
+// rides the `view` answer's own exact accompanying-findings multiset
+// instead, and the staged conditions are drawn from the scope's stated set
+// (14.1, 14.3, 14.4, 14.17).
 //
 // SPEC 11.2: `occurrences`, `view`, and `at` answer per file, from parsing
 // alone, never gated on workspace-wide validity — parse-local structure (the
@@ -65,6 +67,7 @@ import { Buffer } from "node:buffer";
 import type {
   Finding,
   OccurrenceRecord,
+  PathValue,
   SourceRange,
   ViewAttributeEntry,
   ViewNode,
@@ -1177,5 +1180,602 @@ const T11_2_2 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T11.2-3 — invalid paths (Linux leg)
+// ---------------------------------------------------------------------------
+//
+// SPEC 11.2: a node identity is formed over the file's path and requires a
+// valid one — in a discovered file whose own path is invalid (14.19: `#` in
+// the workspace-relative path, or not valid UTF-8), NO graph node has a
+// defined identity, whatever the content spells: a spec source's root and
+// every section, a code source's whole-file location and every named unit.
+// Such a file keeps its parse-local structure and positions; its
+// condition-19 finding accompanies every answer whose consulted domain
+// includes it; and no identity over an invalid path is ever emitted or
+// resolved against (1.5). A non-UTF-8 path has no plain string form:
+// wherever an output carries one — a per-file view's `file`, a finding's
+// concerned `path` — it is the marked byte form `{"bytes": …}`, the exact
+// bytes as lowercase hexadecimal (12.0, 12.7).
+//
+// Staging: one workspace, spec group + code group. `specs/OK.mdx` is the
+// valid-path contrast (root identity is defined EXACTLY when the file's path
+// is valid — both directions in one document) and the reference target;
+// `specs/a#b.mdx` (the entry's literal name) and, on the Linux leg,
+// `specs/b<0xFF>.mdx` are the invalid-path spec sources; `src/co#de.ts` is
+// the invalid-path code source, spelling one `text(SPEC.ok)` call inside a
+// named function (kind `embeds`, source would be the unit) and one bare
+// top-level marker `SPEC.ok;` (kind `references`, source would be the
+// whole-file location) — both targets defined, so both spellings resolve
+// and record occurrences whose `source` datum is exactly the unavailability
+// marker (5.7, T11.3-1). Every file's CONTENT is deliberately
+// condition-free: the gate `build --json` reports exactly the 14.19
+// multiset, so the identity unavailability observed later is attributable
+// to the paths alone.
+//
+// Conservative operationalizations (noted per H-3/H-4):
+// - The non-UTF-8 arms are staged exactly when the platform's file names are
+//   byte strings (`process.platform === "linux"`, the T1.5-2/T6.5-5
+//   precedent for the entry's "(Linux leg)" note; other filesystems cannot
+//   hold the path at all), and every expectation is parameterized on that
+//   staging: the `#` arms run on every platform, so the Linux CI leg runs
+//   the whole entry and no platform skips the test (H-9).
+// - "the condition-19 finding accompanies every answer whose domain includes
+//   the file" is asserted in BOTH directions via exact per-answer finding
+//   sets: bare `view` (domain: the discovered spec sources) carries the spec
+//   paths' findings and never the code source's — a 14.19 is a domain file's
+//   through its concerned path (SPEC 11.2) — bare `occurrences` (domain: the
+//   entire discovered set) carries all of them, and `at specs/a#b.mdx`
+//   (domain: the named file) carries exactly its own. Per finding, the
+//   projection pins the stable code token, `locations` empty (a path-level
+//   condition without in-source locations, SPEC 14, 12.7), and the concerned
+//   path — the non-UTF-8 one in the marked byte form, composed from the same
+//   bytes that stage the file; messages stay unpinned (deterministic but
+//   informational, 12.7).
+// - "no identity over the invalid path is ever emitted" is realized as
+//   exact-value pinning of every identity datum in every captured document:
+//   the three view trees (markers on every invalid-path node, root
+//   included; plain identities in OK.mdx), each occurrence record's `source`
+//   (the marker) and `target` (OK's node), and both `at` resolutions (the
+//   marker). The form-exact decode additionally rejects a marked-byte-form
+//   path anywhere a plain identity string is required.
+// - The non-UTF-8 file is nameable by no argument value (12.0: argument
+//   values are UTF-8), so the whole-domain `view` reached without operands
+//   is its one route to position data (11.5) — `at` runs against
+//   `specs/a#b.mdx`, whose `#`-containing spelling names the discovered file
+//   (a bare `<file>` operand is a whole path, `#` has no delimiter role;
+//   12.0 — T12.0-13 owns the operand-classification matrix). The exit-2
+//   side of addressing the non-UTF-8 file is T11.5-3's arm, not staged here.
+// - The gate `build` rides a whole-root snapshot compare (a failing build
+//   modifies nothing, SPEC 12.1), pinning that every later answer runs on
+//   the staged ground; the per-invocation no-write sweep is T11.2-1's home
+//   clause and is not repeated here.
+
+// One spec group plus one code group (SPEC 7.2), so `src/**/*.ts` files are
+// discovered code sources and their spec-module usage is analyzed (4.3, 4.5).
+const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  }
+})
+`;
+
+/** Whether the non-UTF-8-named file is staged (module-header note). */
+const NON_UTF8_STAGED = process.platform === "linux";
+
+// --- specs/OK.mdx — the valid-path contrast and reference target -------------
+const OK_FILE = "specs/OK.mdx";
+const OK = new ByteFixture();
+OK.add("Préambule — valid-path contrast.\n\n");
+const OK_SEC_START = OK.pos;
+OK.add("<S ");
+const OK_ID = OK.attr("id", 'id="ok"');
+OK.add(">\nOK text.\n</S>");
+const OK_SEC_RANGE: SourceRange = { start: OK_SEC_START, end: OK.pos };
+OK.add("\n");
+const OK_SOURCE = OK.source;
+const OK_ROOT_RANGE: SourceRange = { start: 0, end: OK.pos };
+const OK_NODE_ID = `${OK_FILE}#ok`;
+
+// --- specs/a#b.mdx — `#`-containing spec path (14.19) ------------------------
+// Nested sections with attributes: the tree, ranges, and raw attribute
+// entries stay on view while every identity — root included — is
+// unavailable. All spelled identities are well-formed, unique, and
+// structurally consistent: the path is the file's ONLY defect.
+const HP_FILE = "specs/a#b.mdx";
+const HP = new ByteFixture();
+HP.add("Prélude — invalid `#` path.\n\n");
+const HP_PA_START = HP.pos;
+HP.add("<S ");
+const HP_PA_ID = HP.attr("id", 'id="pa"');
+HP.add(">\nParent text.\n\n");
+const HP_KID_START = HP.pos;
+HP.add("<S ");
+const HP_KID_ID = HP.attr("id", 'id="pa.kid"');
+HP.add(" ");
+const HP_KID_TAGS = HP.attr("tags", 'tags="deep"');
+HP.add(">\nKid text.\n</S>");
+const HP_KID_RANGE: SourceRange = { start: HP_KID_START, end: HP.pos };
+HP.add("\n</S>");
+const HP_PA_RANGE: SourceRange = { start: HP_PA_START, end: HP.pos };
+HP.add("\n");
+const HP_SOURCE = HP.source;
+const HP_ROOT_RANGE: SourceRange = { start: 0, end: HP.pos };
+
+// --- specs/b<0xFF>.mdx — non-UTF-8-named spec source (14.19, Linux leg) ------
+// 0xFF can occur in no valid UTF-8 sequence, so the workspace-relative path
+// is not valid UTF-8; the byte-wise glob rules of SPEC 7 still discover it.
+// The marked byte form is composed from the SAME bytes that stage the file
+// (never measured from product output).
+const NU_PATH_BYTES = Buffer.concat([
+  Buffer.from("specs/b", "utf8"),
+  Buffer.from([0xff]),
+  Buffer.from(".mdx", "utf8"),
+]);
+const NU_MARKED_PATH = { bytes: NU_PATH_BYTES.toString("hex") } as const;
+const NU = new ByteFixture();
+NU.add("Prólogo — non-UTF-8 path.\n\n");
+const NU_SEC_START = NU.pos;
+NU.add("<S ");
+const NU_ID = NU.attr("id", 'id="solo"');
+NU.add(">\nSolo text.\n</S>");
+const NU_SEC_RANGE: SourceRange = { start: NU_SEC_START, end: NU.pos };
+NU.add("\n");
+const NU_SOURCE = NU.source;
+const NU_ROOT_RANGE: SourceRange = { start: 0, end: NU.pos };
+
+// --- src/co#de.ts — `#`-containing code source (14.19) -----------------------
+// One sanctioned spelling per attribution case (SPEC 4.5, 4.6): the
+// `text(SPEC.ok)` call inside the named unit `useText` (its occurrence spans
+// the entire call expression, callee through closing parenthesis) and the
+// bare top-level marker `SPEC.ok` (whole-file attribution; its occurrence
+// spans the bare reference chain alone, exclusive of the terminator). The
+// multi-byte comment prefix shifts every later offset (SPEC 1.7).
+const CS_FILE = "src/co#de.ts";
+const CS = new ByteFixture();
+CS.add("// Präambel — invalid-path code source.\n");
+CS.add('import SPEC, { text } from "../specs/OK.xspec";\n');
+CS.add("\nexport function useText(): string {\n  return ");
+const CS_CALL_TEXT = "text(SPEC.ok)";
+const CS_CALL_RANGE = CS.add(CS_CALL_TEXT);
+CS.add(";\n}\n\n");
+const CS_MARKER_TEXT = "SPEC.ok";
+const CS_MARKER_RANGE = CS.add(CS_MARKER_TEXT);
+CS.add(";\n");
+const CS_SOURCE = CS.source;
+
+// The invalid-path code source's complete occurrence enumeration (SPEC 5.7,
+// 11.2): both spellings resolve (the referenced identity `specs/OK.mdx#ok`
+// is defined), so both record — `file`, `range`, `kind`, and `target`
+// present, `source` exactly the unavailability marker (identity and range
+// withheld together as one datum; never a picked identity, never a dropped
+// record). No other staged file holds a reference spelling, so this is the
+// workspace's whole enumeration, in occurrence order (range start).
+const CS_EXPECTED_OCCURRENCES: readonly OccurrenceRecord[] = [
+  {
+    file: CS_FILE,
+    range: CS_CALL_RANGE,
+    kind: "embeds",
+    source: UNAVAILABLE,
+    target: OK_NODE_ID,
+  },
+  {
+    file: CS_FILE,
+    range: CS_MARKER_RANGE,
+    kind: "references",
+    source: UNAVAILABLE,
+    target: OK_NODE_ID,
+  },
+];
+
+// --- expected trees (T11.2-1's projection: identity/range/attributes) --------
+
+const OK_TREE: TreeExpectation = {
+  identity: OK_FILE,
+  range: OK_ROOT_RANGE,
+  attributes: [],
+  children: [
+    {
+      identity: OK_NODE_ID,
+      range: OK_SEC_RANGE,
+      attributes: [OK_ID],
+      children: [],
+    },
+  ],
+};
+
+const HP_TREE: TreeExpectation = {
+  identity: UNAVAILABLE,
+  range: HP_ROOT_RANGE,
+  attributes: [],
+  children: [
+    {
+      identity: UNAVAILABLE,
+      range: HP_PA_RANGE,
+      attributes: [HP_PA_ID],
+      children: [
+        {
+          identity: UNAVAILABLE,
+          range: HP_KID_RANGE,
+          attributes: [HP_KID_ID, HP_KID_TAGS],
+          children: [],
+        },
+      ],
+    },
+  ],
+};
+
+const NU_TREE: TreeExpectation = {
+  identity: UNAVAILABLE,
+  range: NU_ROOT_RANGE,
+  attributes: [],
+  children: [
+    {
+      identity: UNAVAILABLE,
+      range: NU_SEC_RANGE,
+      attributes: [NU_ID],
+      children: [],
+    },
+  ],
+};
+
+// --- expected condition-19 findings ------------------------------------------
+
+/**
+ * The asserted projection of a 14.19 finding (module-header note): the
+ * stable code token, the empty locations of a path-level condition, and the
+ * concerned path (SPEC 14, 12.7). Message and identities stay unpinned.
+ */
+interface PathFindingExpectation {
+  readonly code: string | null;
+  readonly locations: readonly unknown[];
+  readonly path: PathValue | null;
+}
+
+function projectPathFinding(finding: Finding): PathFindingExpectation {
+  return {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+  };
+}
+
+const HP_19: PathFindingExpectation = {
+  code: "invalid-source-path",
+  locations: [],
+  path: HP_FILE,
+};
+const NU_19: PathFindingExpectation = {
+  code: "invalid-source-path",
+  locations: [],
+  path: NU_MARKED_PATH,
+};
+const CS_19: PathFindingExpectation = {
+  code: "invalid-source-path",
+  locations: [],
+  path: CS_FILE,
+};
+
+// Pinned 12.7 order among equal-code, location-less findings: by concerned
+// path bytes — "specs/a#b.mdx" < "specs/b\xFF.mdx" (a marked byte-form path
+// and a plain string sort in one byte order) < "src/co#de.ts".
+const WORKSPACE_19S: readonly PathFindingExpectation[] = NON_UTF8_STAGED
+  ? [HP_19, NU_19, CS_19]
+  : [HP_19, CS_19];
+const VIEW_DOMAIN_19S: readonly PathFindingExpectation[] = NON_UTF8_STAGED
+  ? [HP_19, NU_19]
+  : [HP_19];
+const WORKSPACE_19_COUNTS: Readonly<Record<string, number>> = {
+  "14.19": NON_UTF8_STAGED ? 3 : 2,
+};
+
+// Per-file views ordered by byte order of workspace-relative path (SPEC
+// 11.4): "specs/OK.mdx" ("O" 0x4f) < "specs/a#b.mdx" ("a" 0x61) <
+// "specs/b\xFF.mdx" ("b" 0x62). The code source has no structural view and
+// never appears (SPEC 11.4: the view's domain is the discovered spec
+// sources).
+const EXPECTED_VIEW_FILES: readonly PathValue[] = NON_UTF8_STAGED
+  ? [OK_FILE, HP_FILE, NU_MARKED_PATH]
+  : [OK_FILE, HP_FILE];
+
+const T11_2_3 = defineProductTest({
+  id: "T11.2-3",
+  title:
+    "(Linux leg) invalid paths: the discovered spec sources `specs/a#b.mdx` and — staged where file names are byte strings — a non-UTF-8-named `specs/b<0xFF>.mdx` keep full views (tree, byte-exact construct ranges, raw attribute entries) with every node identity, root included, explicitly unavailable, while `specs/OK.mdx` beside them keeps defined identities — root identity defined exactly when the file's path is valid; the condition-19 finding (stable code `invalid-source-path`, no locations, the file as concerned path — the non-UTF-8 path in the marked byte form `{\"bytes\": …}`) accompanies every answer whose consulted domain includes the file and no other: bare `view` carries exactly the spec paths' findings (never the code source's), bare `occurrences` every 14.19, `at specs/a#b.mdx` exactly its own; the code source `src/co#de.ts` defines no identity for its whole-file location or any unit, its `text(SPEC.ok)` call and bare marker still recording occurrences with `source` exactly the unavailability marker and `file`, `range`, `kind`, `target` present; no identity over an invalid path is ever emitted (every identity datum in every captured document pinned); the gate `build --json` fails with exactly the staged 14.19 multiset, modifying nothing (SPEC 11.2, 11.3-11.5, 12.0, 12.7, 5.7, 1.5, 14)",
+  run: async (product) => {
+    // Fixture self-checks (T5.7-2 discipline): composed ranges sliced back
+    // out of the staged bytes before any product invocation.
+    sliceCheck(
+      OK_SOURCE,
+      OK_SEC_RANGE,
+      '<S id="ok">\nOK text.\n</S>',
+      "OK's section construct",
+    );
+    sliceCheck(
+      HP_SOURCE,
+      HP_KID_RANGE,
+      '<S id="pa.kid" tags="deep">\nKid text.\n</S>',
+      "the nested kid construct",
+    );
+    sliceCheck(HP_SOURCE, HP_PA_ID.range, HP_PA_ID.text, "pa's id attribute");
+    sliceCheck(
+      NU_SOURCE,
+      NU_SEC_RANGE,
+      '<S id="solo">\nSolo text.\n</S>',
+      "the non-UTF-8-named file's section construct",
+    );
+    sliceCheck(
+      CS_SOURCE,
+      CS_CALL_RANGE,
+      CS_CALL_TEXT,
+      "the text(...) call expression",
+    );
+    sliceCheck(
+      CS_SOURCE,
+      CS_MARKER_RANGE,
+      CS_MARKER_TEXT,
+      "the bare marker chain",
+    );
+
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        [OK_FILE]: OK_SOURCE,
+        [HP_FILE]: HP_SOURCE,
+        [CS_FILE]: CS_SOURCE,
+      },
+    });
+    try {
+      if (NON_UTF8_STAGED) {
+        await workspace.file(NU_PATH_BYTES, NU_SOURCE);
+      }
+
+      // --- The gate reference and staging integrity: `build` fails with
+      // EXACTLY the 14.19 multiset — the content of every file stages no
+      // other condition, so later identity unavailability is attributable
+      // to the paths alone. Each finding pinned: stable code, no locations
+      // (a path-level condition), the concerned path — the non-UTF-8 one in
+      // the marked byte form (SPEC 14, 12.0, 12.7).
+      const buildContext =
+        "T11.2-3 `build --json` (the gate reference: the workspace fails " +
+        "`build` on exactly the staged invalid-path conditions)";
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          const result = await expectExit(
+            product,
+            workspace,
+            ["build", "--json"],
+            1,
+            buildContext,
+          );
+          const findings = decodeFindingsReport(
+            parseJsonStdout(result, buildContext),
+            buildContext,
+          ).findings;
+          assertConditionCounts(
+            findings,
+            WORKSPACE_19_COUNTS,
+            `${buildContext} — one 14.19 per invalid-path discovered ` +
+              `source and nothing else: every file's content is ` +
+              `condition-free`,
+          );
+          assertSameJson(
+            findings.map(projectPathFinding),
+            WORKSPACE_19S,
+            `${buildContext} — each finding carries the stable code ` +
+              `"invalid-source-path", no in-source locations, and the ` +
+              `offending file as its concerned path — the non-UTF-8 path ` +
+              `presented in the marked byte form (SPEC 14, 12.0, 12.7)`,
+          );
+        },
+        `${buildContext} — a failing build modifies nothing (SPEC 12.1)`,
+      );
+
+      // --- Bare `view` (whole domain: every discovered spec source, the
+      // one route to the non-UTF-8 file — nameable by no argument value).
+      const viewContext =
+        "T11.2-3 bare `view` (whole domain: every discovered spec source)";
+      const viewResult = await runCli(product, workspace, ["view"]);
+      assertExitCode(
+        viewResult,
+        1,
+        `${viewContext} — the answer carries findings and ` +
+          `explicitly-unavailable identities, so the invocation exits 1 ` +
+          `with the full document still emitted (SPEC 11.2)`,
+      );
+      const viewReport = decodeViewReport(
+        parseJsonStdout(
+          viewResult,
+          `${viewContext} — a single JSON document is the only output ` +
+            `form, with or without --json (SPEC 11)`,
+        ),
+        { text: false },
+        viewContext,
+      );
+      assertSameJson(
+        viewReport.findings.map(projectPathFinding),
+        VIEW_DOMAIN_19S,
+        `${viewContext} — the condition-19 finding accompanies every ` +
+          `answer whose consulted domain includes the file AND NO OTHER ` +
+          `(SPEC 11.2): the requested spec sources' findings exactly — the ` +
+          `code source's 14.19 concerns no domain file and must not attach`,
+      );
+      assertSameJson(
+        viewReport.views.map((view) => view.file),
+        EXPECTED_VIEW_FILES,
+        `${viewContext} — per-file views for every discovered spec source ` +
+          `in path-byte order, the non-UTF-8 file's \`file\` member ` +
+          `presented in the marked byte form — its exact bytes as ` +
+          `lowercase hexadecimal, never a plain string (SPEC 11.4, 12.0, ` +
+          `12.7)`,
+      );
+      const okView = viewReport.views[0]!;
+      const hpView = viewReport.views[1]!;
+      assertSameJson(
+        projectNode(okView.root),
+        OK_TREE,
+        `${viewContext} — the valid-path file's identities are DEFINED ` +
+          `(root: the path; section: path#id): root identity is defined ` +
+          `exactly when the file's path is valid (SPEC 11.2)`,
+      );
+      assertSameJson(
+        projectNode(hpView.root),
+        HP_TREE,
+        `${viewContext} — specs/a#b.mdx keeps its full positional tree ` +
+          `with byte-exact construct ranges and raw attribute entries ` +
+          `while every node identity, root included, is explicitly ` +
+          `unavailable — no identity over an invalid path is ever emitted ` +
+          `(SPEC 11.2, 1.5)`,
+      );
+      assertSameJson(
+        [
+          [okView.imports, okView.occurrences, okView.comments],
+          [hpView.imports, hpView.occurrences, hpView.comments],
+        ],
+        [
+          [[], [], []],
+          [[], [], []],
+        ],
+        `${viewContext} — the spec files hold no imports, occurrences, or ` +
+          `comments: empty arrays, never null (SPEC 12.7)`,
+      );
+      if (NON_UTF8_STAGED) {
+        const nuView = viewReport.views[2]!;
+        assertSameJson(
+          projectNode(nuView.root),
+          NU_TREE,
+          `${viewContext} — the non-UTF-8-named file keeps its full ` +
+            `positional tree, every node identity explicitly unavailable, ` +
+            `root included (SPEC 11.2)`,
+        );
+        assertSameJson(
+          [nuView.imports, nuView.occurrences, nuView.comments],
+          [[], [], []],
+          `${viewContext} — the non-UTF-8-named file holds no imports, ` +
+            `occurrences, or comments (SPEC 12.7)`,
+        );
+      }
+
+      // --- Bare `occurrences` (the entire discovered set, SPEC 11.3):
+      // every 14.19 accompanies — the code source's included — and the
+      // invalid-path code source's spellings still record, `source`
+      // exactly the unavailability marker (SPEC 5.7, 11.2).
+      const occContext = "T11.2-3 bare `occurrences`";
+      const occResult = await runCli(product, workspace, ["occurrences"]);
+      assertExitCode(
+        occResult,
+        1,
+        `${occContext} — the enumeration carries the domain's findings and ` +
+          `explicitly-unavailable source datums, so exit 1 with the full ` +
+          `answer (SPEC 11.2, 11.3)`,
+      );
+      const occReport = decodeOccurrencesReport(
+        parseJsonStdout(
+          occResult,
+          `${occContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        occContext,
+      );
+      assertSameJson(
+        occReport.findings.map(projectPathFinding),
+        WORKSPACE_19S,
+        `${occContext} — the consulted domain is the entire discovered ` +
+          `set, so every invalid path's condition-19 finding accompanies, ` +
+          `the code source's included (SPEC 11.2, 11.3)`,
+      );
+      assertSameJson(
+        occReport.occurrences,
+        CS_EXPECTED_OCCURRENCES,
+        `${occContext} — the invalid-path code source's spellings still ` +
+          `record occurrences: the text(...) call (embeds, spanning the ` +
+          `whole call expression) and the bare marker (references, ` +
+          `spanning the chain alone), each record's source EXACTLY the ` +
+          `unavailability marker — identity and range withheld together as ` +
+          `one datum, never a picked identity, never a dropped record — ` +
+          `while file, range, kind, and target are present (SPEC 5.7, 11.2)`,
+      );
+
+      // --- `at specs/a#b.mdx <offset>` (SPEC 11.5): the `#`-containing
+      // spelling names the discovered file (a bare <file> operand is a
+      // whole path, 12.0); the consulted domain is the named file alone, so
+      // exactly its own condition-19 finding accompanies, and the
+      // resolution's identity is the marker — offset 0 resolves to the
+      // root (prose before any section), the kid-construct offset to the
+      // innermost section.
+      const atCases: readonly {
+        readonly offset: number;
+        readonly what: string;
+        readonly range: SourceRange;
+      }[] = [
+        {
+          offset: 0,
+          what:
+            "offset 0 (prose) resolves to the ROOT, its identity " +
+            "explicitly unavailable — the root of an invalid-path file " +
+            "included (SPEC 11.2, 11.5)",
+          range: HP_ROOT_RANGE,
+        },
+        {
+          offset: HP_KID_RANGE.start,
+          what:
+            "the kid-construct offset resolves to the innermost " +
+            "section, its identity explicitly unavailable (SPEC 11.2, 11.5)",
+          range: HP_KID_RANGE,
+        },
+      ];
+      for (const atCase of atCases) {
+        const atContext = `T11.2-3 \`at ${HP_FILE} ${String(atCase.offset)}\``;
+        const atResult = await runCli(product, workspace, [
+          "at",
+          HP_FILE,
+          String(atCase.offset),
+        ]);
+        assertExitCode(
+          atResult,
+          1,
+          `${atContext} — the answer carries the file's finding and an ` +
+            `unavailable identity, so exit 1 with the full answer ` +
+            `(SPEC 11.2, 11.5)`,
+        );
+        const atReport = decodeAtReport(
+          parseJsonStdout(
+            atResult,
+            `${atContext} — a single JSON document is the only output ` +
+              `form (SPEC 11)`,
+          ),
+          atContext,
+        );
+        assertSameJson(
+          atReport.findings.map(projectPathFinding),
+          [HP_19],
+          `${atContext} — the consulted domain is the named file alone: ` +
+            `exactly its condition-19 finding, never the other invalid ` +
+            `paths' (SPEC 11.2, 11.5)`,
+        );
+        assertSameJson(
+          atReport.resolution,
+          {
+            section: { identity: UNAVAILABLE, range: atCase.range },
+            occurrence: null,
+          },
+          `${atContext} — ${atCase.what}`,
+        );
+      }
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
 /** TEST-SPEC §11.2, in canonical ID order (SUITE-52). */
-export const section112Tests: readonly ProductTestEntry[] = [T11_2_1, T11_2_2];
+export const section112Tests: readonly ProductTestEntry[] = [
+  T11_2_1,
+  T11_2_2,
+  T11_2_3,
+];

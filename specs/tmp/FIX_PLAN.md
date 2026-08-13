@@ -2212,8 +2212,52 @@ certify against FP-091's fixtures once those land.
   map (assertions toothed). `npm run test:self`: unchanged 4 planned
   mid-loop reds (certification-document x3 → FP-091; S-1's 6 unmapped keys
   {11.3–11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
-- [ ] FP-052 — Implement T11.2-3: invalid paths (Linux leg). [R2 #2;
+- [x] FP-052 — Implement T11.2-3: invalid paths (Linux leg). [R2 #2;
   TEST-SPEC §11.2]
+  [Done 2026-08-13: registered in section-11.2.ts (SUITE-52) with
+  traceability ["11.2"] (no TEST-SPEC 14 staging record — the FP-050/051
+  precedent; 12.0/12.7/5.7/1.5 are context with home coverage at T12.0-13/
+  T12.7-1/T11.3-1). NOT in CONF-AVAIL scope (its staging — `#` paths,
+  non-UTF-8 path, a code group — lies outside that scope by construction),
+  so the gate `build --json` rides staging integrity: exit 1 with EXACTLY
+  the 14.19 multiset (every file's content deliberately condition-free, so
+  later identity unavailability is attributable to the paths alone), each
+  finding pinned as {code "invalid-source-path", locations [], concerned
+  path} in the 12.7 order, wrapped in a whole-root snapshot compare. One
+  workspace: valid `specs/OK.mdx` (the defined-side contrast and reference
+  target), `specs/a#b.mdx` (nested pa > pa.kid with a tags attribute),
+  Linux-staged `specs/b<0xFF>.mdx` (raw-byte filename via workspace.file;
+  the T1.5-2 arm-gating precedent for the entry's leg note — the `#` arms
+  run everywhere, every expectation parameterized on the staging, no test
+  skip, H-9), and `src/co#de.ts` (multi-byte comment prefix; one
+  text(SPEC.ok) call inside named unit useText, one bare top-level marker).
+  Answers: bare `view` → exit 1, per-file views [OK, a#b, b<0xFF>] in path-
+  byte order with the non-UTF-8 `file` member as the marked byte form
+  composed from the staging bytes, findings EXACTLY the two spec-path 14.19s
+  (the code source's concerns no domain file — the accompanies-and-no-other
+  discrimination), trees pinned via T11.2-1's projection (OK defined; every
+  invalid-path node identity, root included, the marker); bare `occurrences`
+  → exit 1, all three 14.19s, enumeration exactly the code source's two
+  records ({file, range, kind, target} present, source exactly the marker);
+  `at specs/a#b.mdx` at 0 and at the kid offset → exit 1, exactly its own
+  14.19, resolution root/innermost with identity the marker. "No identity
+  over an invalid path is ever emitted" realized as exact-value pinning of
+  every identity datum in every captured document. Verified: typecheck/
+  format clean; suite section-11.2 red-as-diagnosed — T11.2-3 fails at the
+  gate build's FP-001-class form-exact decode ("expected no member
+  \"condition\""; the pre-patch product does fire exactly 3x 14.19 in the
+  old shape on a direct probe, the old order matching the pinned one, and
+  view/occurrences/at stay unknown commands); scratch probe: a conforming
+  fake re-deriving every answer from the workspace bytes (own mini-parser,
+  byte-wise discovery, hex from real dirent bytes) ran the registered body
+  green end-to-end, and five deviation fakes each failed diagnosed —
+  null-for-marker at the form decode (VIOL-AVAIL-NULLMARKER's class),
+  identities-emitted-over-invalid-paths at the a#b tree compare,
+  all-findings-attached at the view domain compare, lossy-plain-string
+  non-UTF-8 path at the build projection, source-undefined-records-dropped
+  at the enumeration compare. `npm run test:self`: unchanged 4 planned
+  mid-loop reds (certification-document x3 → FP-091; S-1's 6 unmapped keys
+  {11.3–11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
 - [ ] FP-053 — Implement T11.2-4 (CONF-AVAIL): resolution and expanded-text
   poisoning; record observations ride `occurrences`/`view`. [R2 #2, R3 gap
   1, VERIFY; TEST-SPEC §11.2]
