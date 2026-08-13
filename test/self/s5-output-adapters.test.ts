@@ -45,6 +45,7 @@ import {
   decodeIdsReport,
   decodeIdsTreeReport,
   decodeImpactReport,
+  decodeInventoryFindings,
   decodeInventoryRecordedDatum,
   decodeItemReport,
   decodeNextReport,
@@ -2173,6 +2174,70 @@ const DECODERS: readonly DecoderSpec[] = [
       {
         label: "a valid-UTF-8 path in the byte form (SPEC 12.7 forbids it)",
         doc: { recorded: [{ bytes: "612e6d64" }] },
+      },
+    ],
+  },
+  {
+    // The scoped inventory findings decode (SPEC 11.6, 12.7): exactly the
+    // pinned `findings` member — the literal finding form in the pinned
+    // findings order — with every other member unread (the full inventory
+    // form is T11.6-*'s subject; T14-4's 14.23 row reads the condition-23
+    // finding through this decode).
+    name: "11.6 inventory (findings)",
+    decode: decodeInventoryFindings,
+    good: {
+      findings: [
+        {
+          code: "unreadable-record",
+          message: "recorded generation state cannot be read as a record",
+          locations: [],
+          path: ".xspec",
+          identities: [],
+        },
+      ],
+      recorded: { unavailable: true },
+      graphData: ".xspec",
+    },
+    verify: (decoded: ReturnType<typeof decodeInventoryFindings>) => {
+      expect(decoded).toHaveLength(1);
+      expect(decoded[0]!.code).toBe("unreadable-record");
+      expect(decoded[0]!.condition).toBe("14.23");
+      expect(decoded[0]!.path).toBe(".xspec");
+    },
+    alsoGood: [
+      {
+        label:
+          "a finding-free inventory answer carries findings [] — the empty " +
+          "array, never null (SPEC 12.7)",
+        doc: { findings: [], recorded: [] },
+        verify: (decoded: ReturnType<typeof decodeInventoryFindings>): void => {
+          expect(decoded).toEqual([]);
+        },
+      },
+    ],
+    bad: [
+      {
+        label:
+          "absent findings member (SPEC 12.7: wherever a document carries " +
+          'findings they form the array member "findings")',
+        doc: { recorded: [], graphData: ".xspec" },
+      },
+      {
+        label:
+          "null findings (SPEC 12.7: a list-valued member with no elements " +
+          "is the empty array, never null)",
+        doc: { findings: null, recorded: [] },
+      },
+      {
+        label:
+          "an old-shape finding element (condition/file members instead of " +
+          "the literal 12.7 finding form)",
+        doc: {
+          findings: [
+            { condition: "14.23", file: ".xspec", message: "corrupt" },
+          ],
+          recorded: { unavailable: true },
+        },
       },
     ],
   },

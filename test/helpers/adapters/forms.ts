@@ -543,6 +543,31 @@ export function decodeInventoryRecordedDatum(
   );
 }
 
+/**
+ * Scoped decode of the inventory document's `findings` member (SPEC 11.6,
+ * 12.7): the pinned `"findings"` array in the literal finding form and the
+ * pinned findings order. Deliberately scoped exactly as
+ * `decodeInventoryRecordedDatum` is: SPEC 12.7 fixes the whole inventory
+ * form and the T11.6-* tests pin it entirely; this decoder reads the one
+ * member the reporter matrix needs (T14-4's 14.23 row: the condition-23
+ * finding accompanies the inventory answer) — the top level must be an
+ * object and the member present (`[]` is never `null`, and wherever a
+ * document carries findings they form this member, 12.7) while every other
+ * member stays unread. Form-exact (H-3): never adjustable to a product's
+ * shape.
+ */
+export function decodeInventoryFindings(
+  doc: unknown,
+  context?: string,
+): Finding[] {
+  const site = rootSite("11.6 inventory (findings)", context);
+  const obj = expectObject(doc, site);
+  return decodeFindingsArray(
+    requiredKey(obj, "findings", site),
+    at(site, "findings"),
+  );
+}
+
 // --- the occurrences document (5.7, 11.3, 12.7) -------------------------------
 
 const OCCURRENCE_RECORD_MEMBERS = [

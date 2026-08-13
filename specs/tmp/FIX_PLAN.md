@@ -2011,7 +2011,7 @@ A "new test T<x>" task always means, in one change:
   (certification-document ×3 → FP-091; S-1's 7 unmapped keys {11.2–11.6,
   12.6, 12.7} → stage G).]
 
-- [ ] FP-048 — T14-4: extend the reporter matrix. [R2 #35; TEST-SPEC §14]
+- [x] FP-048 — T14-4: extend the reporter matrix. [R2 #35; TEST-SPEC §14]
   `test/suite/registry/section-14.ts`: 14.21 by `check` alone beside gate
   findings; the 14.23 row (`inventory` + previews only, `check` as 14.10
   unit form, `build`/refreshing reads never); 14.14 never `version`;
@@ -2019,6 +2019,56 @@ A "new test T<x>" task always means, in one change:
   answer; every other condition accompanying `occurrences`/`view`/`at`
   answers per domain (all three for spec-source stagings; `occurrences`
   alone for 14.7/14.11/14.18).
+  [Done 2026-08-13: all five rows landed, membership-only per the module
+  header's matrix discipline (depth stays with T10.1-5, T6.6-6, T11.6-4,
+  T12.2-2, T13.3-2/-3, T11.2-5/-6, T12.6-1/-2). (1) The 14.21 block gains
+  the failing-workspace half — source edited to 14.1 after the corrupt
+  session: `build` exactly {14.1}, `check` non-14.10 exactly {14.1, 14.21},
+  `review status bad --json` and `review list --json` each exit 1 with the
+  gate report exactly {14.1}, no 14.21 beside. (2) New 14.23 block: valid
+  build, then `corruptGraphDataShapeBlind` (T6.6-6's shared staging);
+  `inventory` exit 1 exactly {14.23} via a new scoped form-exact adapter
+  `decodeInventoryFindings` (forms.ts, the decodeInventoryRecordedDatum
+  pattern — pinned `findings` member literally decoded, every other member
+  unread; S-5 DECODERS entry with conforming/old-shape/absent/null cases);
+  `rename specs/a.mdx a1 a2 --preview --json` exit 1 exactly {14.23} via
+  decodePreviewReport; `check` exactly {14.10: 1} (the unit form alone —
+  never 14.23, no per-file finding beside on the clean workspace, no
+  nonStale set-aside); `query nodes` exit 0 (reads leave the record
+  unconsulted); `build` exit 0 then `check` exit 0 (the rebuild replaces
+  the record). (3) `version` under the 14.14 workspace: exit 0 with a
+  single JSON document (12.6 JSON-only) — never the configuration error.
+  (4)+(5) Every sweep entry now carries an `answers` classification:
+  spec-source stagings run `occurrences`/`view`/`at <file> 0` (offset 0 —
+  resolution is total, 11.5), code-source stagings (14.7/14.11/14.18)
+  `occurrences` alone, each answer decoded through the form-exact 12.7
+  document decoders at exit 1 with the staged condition counted exactly
+  like the build side (these surfaces never report 14.10); the
+  no-domain-file entries (14.13/14.22) instead probe `query nodes` — exit 1,
+  findings-only report, exactly the staged finding — while all three
+  surfaces answer finding-free at exit 0 over the staged valid spec source.
+  Title extended to the full entry; traceability unchanged (["14"] — 10.1/
+  11.x/12.6/13.3/6.6 are carriage context with home coverage at their own
+  tests, the FP-015/FP-018 precedent); no certification scope (T14-4 sits
+  in CERTIFICATIONS.md's not-to-certify residue). Verified: typecheck/
+  format clean; S-5 82/82 green incl. the new decoder's guards; suite
+  section-14 unchanged 5 failed / 0 passed — every test red at its first
+  FP-001-class form-exact decode, new arms suite-unreached; direct probes
+  against the built product prove every new staging sound and every new
+  arm red-as-diagnosed: the §11/12.6 surfaces and `--preview` are unknown
+  commands/flags on this pre-patch product (exit 2 → diagnosed exit
+  failures: inventory/preview/version/occurrences/view/at), the
+  failing-side 14.21 commands report old-shape findings with conforming
+  membership except `review status bad` which reports the corrupt session
+  instead of the gate findings (a real behavioral gap the arm
+  discriminates), the 14.22 staging's `query nodes` answers exit 0 instead
+  of gating (the T13.3-3-diagnosed gate gap), the 14.13 gated read exits 1
+  with the old-shape 14.13 naming the line, and the 14.23 staging's
+  `check` reports exactly one old-shape 14.10 while `query nodes`/`build`/
+  `check`-after exit 0 as the arms demand. `npm run test:self`: unchanged
+  4 planned mid-loop reds (certification-document ×3 → FP-091; S-1's 7
+  unmapped keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and certification
+  green.]
 
 ## Stage G — §§10–14 missing tests (new-test convention applies)
 

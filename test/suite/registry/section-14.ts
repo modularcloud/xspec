@@ -6,8 +6,9 @@
 // file/location/correction information (T14-1), the unresolved-reference
 // conditions 14.5/14.6/14.7 plus the consumer-side type error (T14-2),
 // masking by unparseable files and by configuration errors (T14-3), the
-// reporter matrix — which of `build`/`check`/`review` reports which
-// condition (T14-4) — and grammar selection by file name (T14-5).
+// reporter matrix — which of `build`/`check`/`review`/the machine-interface
+// surfaces reports which condition (T14-4) — and grammar selection by file
+// name (T14-5).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -51,14 +52,55 @@
 // - T14-4's 14.21 arm asserts matrix membership — exit 1 with /corrupt/i on
 //   stdout, the T10.1-4 operationalization — for one subcommand naming the
 //   session (`review status`) and for `review list`; the all-subcommands
-//   breadth and the fields-level list contract are T10.1-4's subject.
+//   breadth and the fields-level list contract are T10.1-4's subject. The
+//   failing-workspace half likewise asserts membership alone — `check`
+//   reports 14.21 beside the gate's findings while `build`, `review status`,
+//   and `review list` report exactly the gate's findings (the `--json`
+//   findings report of the refusing reads, 12.7/13.3) — the every-subcommand
+//   breadth, modifies-nothing compares, and bytes-untouched assertions being
+//   T10.1-5's subject.
+// - T14-4's 14.23 arm asserts reporter membership by exact condition counts:
+//   `inventory` (the scoped `decodeInventoryFindings` decode) and a
+//   `rename --preview` each carry exactly the one condition-23 finding;
+//   `check` reports exactly one condition-10 finding (the unit form — so
+//   never 14.23, never a per-file finding beside it on the freshly built,
+//   otherwise clean workspace); a refreshing read (`query nodes`) and
+//   `build` exit 0. Depth — `recorded`/`delta` unavailability, concerned
+//   paths, record discipline, replacement — is T11.6-4's, T6.6-6's,
+//   T12.2-2's, and T13.3-2's subject.
+// - T14-4's 14.14 row includes `version`: exit 0 with a single JSON document
+//   as its entire stdout (12.6 is JSON-only) on the same invalid
+//   configuration that makes `build`/`check` exit 2 — the never-`version`
+//   membership; the byte-identity and document-form depth is T12.6-1/2's.
+// - T14-4's availability rows (SPEC 11.2): each sweep condition's finding
+//   accompanies the answers of the surfaces whose domain can hold its staged
+//   file — `occurrences`, `view`, and `at <file> 0` for a spec-source
+//   staging (offset 0 is always a within-file offset of the non-empty staged
+//   files; resolution is total, 11.5), `occurrences` alone for a code-source
+//   one (14.7/14.11/14.18 locate in code sources alone; `view`'s and `at`'s
+//   domains hold spec sources only) — each answer decoded through the
+//   form-exact 12.7 document decoders (so the full answer member is emitted
+//   beside the findings) at exit 1, its findings counted exactly like the
+//   `build` side (these surfaces never report 14.10, which is `check`'s
+//   alone, so no set-aside applies). 14.13 and 14.22 are instead the
+//   findings of no domain file: one gated read (`query nodes`) reports
+//   exactly the staged finding at exit 1 (the 13.3 gate; the six-read
+//   breadth and modifies-nothing compares are T13.3-3's), while the three
+//   surfaces answer finding-free at exit 0 over the staged valid spec
+//   source. Per-surface semantics depth is T11.2-*..T11.5-*'s subject.
 
 import { Buffer } from "node:buffer";
 import type { Finding, GraphEdge } from "../../helpers/adapters/index.js";
 import {
   assertReportMentions,
+  corruptGraphDataShapeBlind,
+  decodeAtReport,
   decodeEdgesReport,
   decodeFindingsReport,
+  decodeInventoryFindings,
+  decodeOccurrencesReport,
+  decodePreviewReport,
+  decodeViewFilesReport,
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
@@ -170,6 +212,24 @@ async function checkFindings(
  */
 function nonStale(findings: readonly Finding[]): readonly Finding[] {
   return findings.filter((finding) => finding.condition !== "14.10");
+}
+
+/**
+ * Run a JSON-only surface (or a `--json` invocation) expecting the exact
+ * exit code (H-5) with exactly one JSON document as the entire stdout (SPEC
+ * 12.0), returned parsed for the form-exact decoders — the counterpart of
+ * support.ts `runJson` for answers that carry findings and therefore exit 1
+ * with the full answer document still emitted (SPEC 11.2, 11.6, 6.6).
+ */
+async function runJsonExpecting(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  exitCode: number,
+  context: string,
+): Promise<unknown> {
+  const result = await expectExit(product, workspace, argv, exitCode, context);
+  return parseJsonStdout(result, context);
 }
 
 /**
@@ -757,6 +817,21 @@ interface SweepEntry {
    * staged defect or one per occurrence (the T1.3-5 operationalization).
    */
   readonly perOccurrenceTolerated?: boolean;
+  /**
+   * Which machine-interface answers the staged condition accompanies (the
+   * T14-4 availability rows; SPEC 11.2, module header): a spec-source
+   * staging accompanies all three of `occurrences`/`view`/`at <file> 0`; a
+   * code-source staging accompanies `occurrences` alone (`view`'s and
+   * `at`'s domains hold spec sources only, 11.4/11.5); the conditions of no
+   * domain file (14.13, 14.22) accompany none of them — they are instead
+   * reported by the gated reads (13.3), probed via `query nodes`, while the
+   * three surfaces answer finding-free at exit 0 over `file`, the staging's
+   * valid spec source.
+   */
+  readonly answers:
+    | { readonly kind: "spec-source"; readonly file: string }
+    | { readonly kind: "code-source" }
+    | { readonly kind: "no-domain-file"; readonly file: string };
 }
 
 /** Shorthand: a specs-only workspace whose one source stages the condition. */
@@ -767,6 +842,7 @@ function specArm(condition: string, label: string, source: string): SweepEntry {
     decl: {
       files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/a.mdx": source },
     },
+    answers: { kind: "spec-source", file: "specs/a.mdx" },
   };
 }
 
@@ -782,6 +858,7 @@ function codeArm(condition: string, label: string, source: string): SweepEntry {
         "src/app.ts": source,
       },
     },
+    answers: { kind: "code-source" },
   };
 }
 
@@ -870,6 +947,7 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
         ].join("\n"),
       },
     },
+    answers: { kind: "code-source" },
   },
   {
     condition: "14.13",
@@ -888,6 +966,7 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
       );
       await workspace.file(".xspec/journal", GARBAGE_JOURNAL_LINE);
     },
+    answers: { kind: "no-domain-file", file: "specs/a.mdx" },
   },
   specArm(
     "14.15",
@@ -930,6 +1009,11 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
         "specs/a#b.mdx": '<S id="a">\nValid content, invalid path.\n</S>\n',
       },
     },
+    // The `#`-containing path is valid UTF-8, so the file is nameable by an
+    // argument value: it keeps its parse-local view, every node identity in
+    // it explicitly unavailable, its condition-19 finding accompanying every
+    // answer whose consulted domain includes it (SPEC 11.2, 11.4, 11.5).
+    answers: { kind: "spec-source", file: "specs/a#b.mdx" },
   },
   specArm("14.20", "unparseable source", '<S id="x">\nUnclosed element.\n'),
   {
@@ -951,8 +1035,49 @@ export default defineConfig({
       dirs: ["real-out"],
       symlinks: { out: "real-out" },
     },
+    answers: { kind: "no-domain-file", file: "specs/a.mdx" },
   },
 ];
+
+/**
+ * One availability-surface probe (SPEC 11.2, 11.3–11.5): the invocation
+ * paired with the form-exact 12.7 document decode, so asserting the decoded
+ * findings also asserts the full answer member is emitted beside them.
+ */
+interface AvailabilityProbe {
+  readonly what: string;
+  readonly argv: readonly string[];
+  readonly findingsOf: (doc: unknown, context: string) => readonly Finding[];
+}
+
+/** `occurrences` alone — the one surface whose domain holds code sources. */
+const OCCURRENCES_PROBE: AvailabilityProbe = {
+  what: "`occurrences`",
+  argv: ["occurrences"],
+  findingsOf: (doc, context) => decodeOccurrencesReport(doc, context).findings,
+};
+
+/**
+ * All three surfaces over one staged spec source. `at` probes offset 0 — a
+ * within-file offset of every (non-empty) staged file; resolution is total
+ * over the file (11.5), so the answer never turns on the offset choice.
+ */
+function availabilityProbes(file: string): readonly AvailabilityProbe[] {
+  return [
+    OCCURRENCES_PROBE,
+    {
+      what: "`view`",
+      argv: ["view"],
+      findingsOf: (doc, context) =>
+        decodeViewFilesReport(doc, context).findings,
+    },
+    {
+      what: `\`at ${file} 0\``,
+      argv: ["at", file, "0"],
+      findingsOf: (doc, context) => decodeAtReport(doc, context).findings,
+    },
+  ];
+}
 
 /** One command's sweep assertion (build exact; check over non-14.10). */
 function assertSweepFindings(
@@ -982,7 +1107,7 @@ function assertSweepFindings(
 const T14_4 = defineProductTest({
   id: "T14-4",
   title:
-    "the reporter matrix: 14.10 and 14.12 reported by `check` only (a stale workspace `build`s successfully by regenerating; a policy-violating workspace `build`s successfully); 14.21 reported by `check`, by `review` subcommands naming the session, and by `review list` — not by `build`; every other condition reported by both `build` and `check` (14.14 as the every-command usage error) (SPEC 14, 12.1, 12.2, 10.1)",
+    "the reporter matrix: 14.10 and 14.12 reported by `check` only (a stale workspace `build`s successfully by regenerating; a policy-violating workspace `build`s successfully); 14.21 reported by `check`, by `review` subcommands naming the session, and by `review list` — not by `build`, and on a workspace failing `build`'s validations by `check` alone, beside the gate's findings; 14.23 reported by `inventory` and `rename`/`move` previews only — `check` reports the state as 14.10's unit form, and `build` and the refreshing reads never do; 14.14 as the every-command usage error — never `version`; 14.13 and 14.22 reported by `build`, `check`, and the gated reads, yet accompanying no `occurrences`/`view`/`at` answer; every other condition reported by both `build` and `check`, and as a domain file's finding accompanying the answers of each of `occurrences`/`view`/`at` whose domain can hold its staged file — all three for a spec-source staging, `occurrences` alone for a code-source one (SPEC 14, 12.1, 12.2, 10.1, 13.3, 11.2, 11.3-11.6, 6.6, 12.6)",
   timeoutMs: 480_000,
   run: async (product) => {
     // --- 14.10: check-only. A stale workspace `build`s successfully by
@@ -1150,6 +1275,171 @@ export default defineConfig({
               `content, 12.0; information presence, never exact wording, H-3)`,
           );
         }
+
+        // On a workspace failing `build`'s validations, 14.21 is reported
+        // by `check` alone, beside the gate's findings: no session is read
+        // on the failing side, so the gated `review` reads report exactly
+        // the gate's findings — the validation errors, no condition-21
+        // finding beside them (SPEC 14.21, 13.3, 10.1; membership only, the
+        // module header — the every-subcommand breadth, modifies-nothing
+        // compares, and bytes-untouched assertions are T10.1-5's).
+        await workspace.file("specs/a.mdx", "<S>\nNo id.\n</S>\n");
+        assertConditionCounts(
+          await buildFindings(
+            product,
+            workspace,
+            "T14-4 (14.21, failing workspace) `build --json`",
+          ),
+          { "14.1": 1 },
+          "T14-4 (14.21, failing workspace) `build` reports the validation " +
+            "error alone — `build` does not read sessions, so 14.21 is " +
+            "never its finding (SPEC 14.21, 12.1)",
+        );
+        assertConditionCounts(
+          nonStale(
+            await checkFindings(
+              product,
+              workspace,
+              "T14-4 (14.21, failing workspace) `check --json`",
+            ),
+          ),
+          { "14.1": 1, "14.21": 1 },
+          "T14-4 (14.21, failing workspace) `check` reports 14.21 beside " +
+            "the failing workspace's other findings — the validation error " +
+            "and the corrupt session together, counted exactly over the " +
+            "non-14.10 findings (SPEC 14.21, 12.2; module header)",
+        );
+        for (const argv of [
+          ["review", "status", "bad", "--json"],
+          ["review", "list", "--json"],
+        ] as const) {
+          const context = `T14-4 (14.21, failing workspace) \`${argv.join(" ")}\``;
+          const result = await expectExit(
+            product,
+            workspace,
+            argv,
+            1,
+            `${context} — on a workspace failing \`build\`'s validations a ` +
+              `gated read reports the gate's findings and exits 1 without ` +
+              `answering (SPEC 13.3, 12.0)`,
+          );
+          assertConditionCounts(
+            decodeFindingsReport(parseJsonStdout(result, context), context)
+              .findings,
+            { "14.1": 1 },
+            `${context} — exactly the gate's findings: no session file is ` +
+              `read on a failing workspace, so no condition-21 finding is ` +
+              `reported beside them — on this workspace 14.21 is \`check\`'s ` +
+              `alone (SPEC 14.21, 13.3, 10.1; depth: T10.1-5)`,
+          );
+        }
+      },
+    );
+
+    // --- 14.23: reported by `inventory` and `rename`/`move` previews only —
+    // `check` reports the state as 14.10's unit form, and `build` and the
+    // refreshing reads never do: the rebuild replaces the record; the reads
+    // leave it unconsulted (SPEC 14.23, 14.10, 13.3, 11.6, 6.6; membership
+    // by exact counts per the module header — depth: T11.6-4, T6.6-6,
+    // T12.2-2, T13.3-2).
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          "specs/a.mdx": '<S id="a1">\nValid behavior.\n</S>\n',
+        },
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T14-4 (14.23) staging `build` — the corruption applies to a " +
+            "record the product itself wrote (SPEC 12.1, 13.3; H-3)",
+        );
+        await corruptGraphDataShapeBlind(workspace.root, "T14-4 (14.23)");
+
+        const inventoryContext = "T14-4 (14.23) `inventory`";
+        assertConditionCounts(
+          decodeInventoryFindings(
+            await runJsonExpecting(
+              product,
+              workspace,
+              ["inventory"],
+              1,
+              `${inventoryContext} — the condition-23 finding accompanies ` +
+                `the answer and the invocation exits 1 (SPEC 14.23, 11.6)`,
+            ),
+            inventoryContext,
+          ),
+          { "14.23": 1 },
+          `${inventoryContext} — the unreadable record is the inventory ` +
+            `answer's one finding on the otherwise clean workspace (SPEC ` +
+            `14.23, 11.6)`,
+        );
+
+        const previewContext =
+          "T14-4 (14.23) `rename specs/a.mdx a1 a2 --preview --json`";
+        assertConditionCounts(
+          decodePreviewReport(
+            await runJsonExpecting(
+              product,
+              workspace,
+              ["rename", "specs/a.mdx", "a1", "a2", "--preview", "--json"],
+              1,
+              `${previewContext} — the condition-23 finding accompanies the ` +
+                `answer and the invocation exits 1 (SPEC 14.23, 6.6)`,
+            ),
+            previewContext,
+          ).findings,
+          { "14.23": 1 },
+          `${previewContext} — the preview consults the record for its ` +
+            `delta, so the otherwise valid plan's report carries exactly ` +
+            `the condition-23 finding (SPEC 14.23, 6.6; the delta's ` +
+            `unavailability and the plan's completeness are T6.6-6's)`,
+        );
+
+        assertConditionCounts(
+          await checkFindings(
+            product,
+            workspace,
+            "T14-4 (14.23) `check --json`",
+          ),
+          { "14.10": 1 },
+          "T14-4 (14.23) `check` reports the state as staleness — exactly " +
+            "one condition-10 finding, the unit form: never 14.23, never " +
+            "the mismatch form or a per-file finding beside it on the " +
+            "freshly built, otherwise clean workspace (SPEC 14.23, 14.10; " +
+            "depth: T12.2-2)",
+        );
+
+        await expectExit(
+          product,
+          workspace,
+          ["query", "nodes"],
+          0,
+          "T14-4 (14.23) `query nodes` on the corrupt-record state — the " +
+            "refreshing reads never report 14.23: they leave the record " +
+            "unconsulted and answer finding-free, exit 0 (SPEC 14.23, 13.3; " +
+            "depth: T13.3-2)",
+        );
+
+        await expectExit(
+          product,
+          workspace,
+          ["build"],
+          0,
+          "T14-4 (14.23) `build` on the corrupt-record state — `build` " +
+            "never reports 14.23: its rebuild replaces the record (SPEC " +
+            "14.23, 12.1)",
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["check"],
+          0,
+          "T14-4 (14.23) `check` after the rebuild — the successful " +
+            "`build` replaced the unreadable state (SPEC 14.23, 12.1, 13.3)",
+        );
       },
     );
 
@@ -1185,10 +1475,36 @@ export default defineConfig({
           "T14-4 (14.14) `check` under the same configuration (SPEC 14.14, " +
             "7, 12.0)",
         );
+
+        // Never `version`: it loads no configuration, so configuration-error
+        // precedence cannot reach it — on the same invalid configuration
+        // that makes `build`/`check` exit 2, `version` answers at exit 0
+        // with a single JSON document as its entire stdout (12.6 is
+        // JSON-only). Membership only; the byte-identity and document-form
+        // depth is T12.6-1/2's.
+        const versionContext =
+          "T14-4 (14.14) `version` under the same invalid configuration";
+        parseJsonStdout(
+          await expectExit(
+            product,
+            workspace,
+            ["version"],
+            0,
+            `${versionContext} — \`version\` loads no configuration and ` +
+              `cannot fail for workspace or configuration reasons: 14.14 is ` +
+              `delivered by every command that loads configuration, never ` +
+              `\`version\` (SPEC 12.6, 14.14)`,
+          ),
+          `${versionContext} — a JSON-only surface: a single JSON document ` +
+            `is its only output form, with or without --json (SPEC 12.6, 12.0)`,
+        );
       },
     );
 
-    // --- Every other condition: reported by both `build` and `check`.
+    // --- Every other condition: reported by both `build` and `check`, and
+    // per its staging's kind by the machine-interface answers (SPEC 11.2;
+    // the availability rows of the module header). 14.13 and 14.22 instead
+    // ride the gated reads and accompany no such answer.
     for (const entry of SWEEP_ENTRIES) {
       await withWorkspace(entry.decl, async (workspace) => {
         await entry.prepare?.(product, workspace);
@@ -1208,6 +1524,90 @@ export default defineConfig({
             `finding, counted exactly over the non-14.10 findings (see the ` +
             `module header; SPEC 14, 12.2)`,
         );
+
+        if (entry.answers.kind === "no-domain-file") {
+          // Reported by the gated reads (SPEC 13.3: the gate is over every
+          // finding a `build` would report — journal errors and refused
+          // writes alike), probed via one read; the six-read breadth and
+          // modifies-nothing compares are T13.3-3's.
+          const gatedContext = `T14-4 (${entry.label}) \`query nodes\``;
+          assertSweepFindings(
+            decodeFindingsReport(
+              await runJsonExpecting(
+                product,
+                workspace,
+                ["query", "nodes"],
+                1,
+                `${gatedContext} — a gated read on the failing workspace ` +
+                  `reports the gate's findings and exits 1 without ` +
+                  `answering (SPEC 13.3, 12.0)`,
+              ),
+              gatedContext,
+            ).findings,
+            entry,
+            `${gatedContext} — condition ${entry.condition} is the gated ` +
+              `reads' finding, exactly as a \`build\`'s (SPEC 13.3, 14; ` +
+              `depth: T13.3-3)`,
+          );
+          // ...yet accompanying no `occurrences`/`view`/`at` answer: the
+          // condition is the finding of no domain file — the journal and a
+          // write-path component are never domain files — so these
+          // surfaces answer finding-free at exit 0 over the staged valid
+          // spec source (SPEC 11.2; depth: T11.2-6).
+          for (const probe of availabilityProbes(entry.answers.file)) {
+            const context = `T14-4 (${entry.label}) ${probe.what}`;
+            assertConditionCounts(
+              probe.findingsOf(
+                await runJson(
+                  product,
+                  workspace,
+                  probe.argv,
+                  `${context} — a complete, finding-free answer exits 0 ` +
+                    `whatever journal or write-path state the workspace ` +
+                    `holds (SPEC 11.2)`,
+                ),
+                context,
+              ),
+              {},
+              `${context} — condition ${entry.condition} is the finding of ` +
+                `no domain file, so it accompanies no answer of this ` +
+                `surface (SPEC 11.2, 14; depth: T11.2-6)`,
+            );
+          }
+          return;
+        }
+
+        // A domain file's finding accompanies the answers of each surface
+        // whose domain can hold its staged file: all three for a
+        // spec-source staging; `occurrences` alone for a code-source one —
+        // 14.7/14.11/14.18 locate in code sources alone, and `view`'s and
+        // `at`'s domains hold spec sources only (SPEC 11.2, 11.3-11.5;
+        // depth: T11.2-5).
+        const probes =
+          entry.answers.kind === "spec-source"
+            ? availabilityProbes(entry.answers.file)
+            : [OCCURRENCES_PROBE];
+        for (const probe of probes) {
+          const context = `T14-4 (${entry.label}) ${probe.what}`;
+          assertSweepFindings(
+            probe.findingsOf(
+              await runJsonExpecting(
+                product,
+                workspace,
+                probe.argv,
+                1,
+                `${context} — an answer carrying any finding exits 1 with ` +
+                  `the full answer document still emitted (SPEC 11.2)`,
+              ),
+              context,
+            ),
+            entry,
+            `${context} — condition ${entry.condition} is a domain file's ` +
+              `finding and accompanies the answer, counted exactly (these ` +
+              `surfaces never report 14.10, which is \`check\`'s alone; ` +
+              `SPEC 11.2, 11.3-11.5, 14)`,
+          );
+        }
       });
     }
   },
