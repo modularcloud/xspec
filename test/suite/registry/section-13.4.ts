@@ -51,6 +51,27 @@
 //   same 14.22 without writing; 14.10 staleness findings are tolerated
 //   beside it (no build has ever succeeded, so every derived file is
 //   missing); any other condition fails.
+// - T13.4-6 plain-file occupant and cardinality arms: every staging is a
+//   first emission — no build has ever run and the occupant is staged in the
+//   workspace declaration — and no move operand is involved (a plain-file
+//   component under a move's destination or its derived paths is the move's
+//   `refused-invalid-destination` instead, SPEC 6.5, 14.22; T6.5-4). Under
+//   OUT_CONFIG emission preserves workspace-relative paths (SPEC 7.3), so
+//   each staged component is a workspace-relative directory component of a
+//   `build` write path and the staged occupants are exactly the offending
+//   components: the arms assert the complete condition-22 finding set with
+//   each finding's concerned path equal to its component (SPEC 14.22 — one
+//   finding per distinct offending component, whatever write paths it
+//   refuses; a product refusing at a different component, once per refused
+//   write, or per occupant kind rather than per component fails the count
+//   or the path equality). The `build`-side finding set is exact (sources
+//   valid; `build` cannot observe 14.10, 12.1); the `check` side counts
+//   the condition-22 findings exactly and tolerates 14.10 beside them (as
+//   above). The cardinality arms — one occupant under which two derived
+//   files would be written yields one finding; two distinct offending
+//   components yield two — are asserted via `check`, where TEST-SPEC pins
+//   them; among equal-code findings with empty locations the pinned 12.7
+//   order is concerned-path byte order, fixing the per-index comparison.
 // - T13.4-6 durable arms: the journal occupant's link target is an empty
 //   plain file — a valid empty journal — and the session occupant's link
 //   target is the product's own healthy session file beside it, so a product
@@ -105,7 +126,7 @@ import { runProduct } from "../../helpers/subprocess.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
-  assertConditionCounts,
+  assertFindingConcernsPath,
   buildOk,
   expectExit,
   runCli,
@@ -1136,6 +1157,15 @@ export default defineConfig({
 })
 `;
 
+// A second minimal source (the cardinality arms): under OUT_CONFIG it adds
+// the emit write path `out/specs/B.md` — or, staged nested, another emit
+// path under its own `out/…` directory chain (SPEC 7.3, 13.2).
+const B_MDX = ['<S id="b">', "Beta text.", "</S>", ""].join("\n");
+
+// The non-directory occupant staged at write-path components (SPEC 14.22's
+// plain-file kind; content arbitrary — the occupant is never read).
+const OCCUPANT = "not a directory\n";
+
 /**
  * Decode a findings report from an exit-1 `--json` run and assert at least
  * one finding carries the given condition; every finding is returned.
@@ -1154,10 +1184,104 @@ function requireCondition(
   }
 }
 
+/**
+ * Assert a findings report carries exactly one condition-22 finding per
+ * staged offending component, each finding's concerned path that component's
+ * workspace-relative path (SPEC 14.22: one finding per distinct offending
+ * component, whatever write paths it refuses). `components` is given in
+ * concerned-path byte order — the pinned 12.7 findings order among
+ * equal-code findings whose locations are empty (module header) — so the
+ * comparison is per index. With `besideStaleness` (the `check` side), 14.10
+ * findings are tolerated beside the counted set; any other condition fails
+ * either way (module header).
+ */
+function assertObstructionFindings(
+  findings: readonly Finding[],
+  components: readonly string[],
+  besideStaleness: boolean,
+  context: string,
+): void {
+  const obstructions = findings.filter(
+    (finding) => finding.condition === "14.22",
+  );
+  if (obstructions.length !== components.length) {
+    fail(
+      `${context}: exactly ${String(components.length)} condition-22 ` +
+        `finding(s) — one per distinct offending component, whatever write ` +
+        `paths it refuses (SPEC 14.22); reported conditions: ` +
+        JSON.stringify(findings.map((finding) => finding.condition)),
+    );
+  }
+  components.forEach((component, index) => {
+    assertFindingConcernsPath(
+      obstructions[index]!,
+      component,
+      `${context}: the concerned path is the offending component's ` +
+        `workspace-relative path (SPEC 14.22, 13.4)`,
+    );
+  });
+  for (const finding of findings) {
+    if (finding.condition === "14.22") continue;
+    if (besideStaleness && finding.condition === "14.10") continue;
+    fail(
+      `${context}: beside the staged condition-22 finding(s), ` +
+        (besideStaleness
+          ? `only 14.10 staleness is stageable here (no build has ever ` +
+            `succeeded, so every derived file is missing; SPEC 14.10, 12.2)`
+          : `nothing else is stageable (the sources are valid, and ` +
+            `\`build\` cannot observe 14.10; SPEC 14.22, 12.1)`) +
+        `; got ${JSON.stringify(finding.condition)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+}
+
+/**
+ * Run `build --json` or `check --json` on a workspace staging non-directory
+ * occupants at write-path directory components and assert the SPEC 14.22
+ * contract: exit 1; the form-exact findings report carrying exactly the
+ * staged obstructions per {@link assertObstructionFindings}; and nothing
+ * modified — `build` refuses before anything is modified, `check` reports
+ * without writing (SPEC 14.22, 13.4, 12.1, 12.2).
+ */
+async function expectObstructionReport(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  command: "build" | "check",
+  components: readonly string[],
+  what: string,
+): Promise<void> {
+  const context = `${what} \`${command} --json\``;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const result = await runCli(product, workspace, [command, "--json"]);
+      assertExitCode(
+        result,
+        1,
+        `${context}: the obstructed write is a condition-22 finding, never ` +
+          `a crash or a success (SPEC 14.22, 12.0)`,
+      );
+      assertObstructionFindings(
+        decodeFindingsReport(parseJsonStdout(result, context), context)
+          .findings,
+        components,
+        command === "check",
+        context,
+      );
+    },
+    command === "build"
+      ? `${context}: \`build\` refuses before anything is modified — no ` +
+          `module, Markdown, or graph data appears and the occupants are ` +
+          `untouched (SPEC 14.22, 13.4, 12.1)`
+      : `${context}: \`check\` reports without writing (SPEC 14.22, 12.2)`,
+  );
+}
+
 const T13_4_6 = defineProductTest({
   id: "T13.4-6",
   title:
-    "a write path with a symbolic link at a workspace-relative directory component is refused before anything is modified (14.22, exit 1, workspace byte-identical; `check` reports it without writing); a durable path occupied by a symlink or non-plain file is a journal error (14.13) / corrupt session (14.21), never read, appended, or replaced; path components above the workspace root are unrestricted — a root reached through a symlink builds, mutates, and `check`s normally (SPEC 13.4, 14.13, 14.21, 14.22)",
+    "a write path with a symbolic link at a workspace-relative directory component is refused before anything is modified (14.22, exit 1, workspace byte-identical; `check` reports it without writing); a plain file occupying a directory component of a `build` write path — a first emission's `outDir` component, and a deeper component below it, no move operand involved — is refused identically, concerned path that component; one occupant under which two derived files would be written is one finding and two distinct offending components are two, via `check`; a durable path occupied by a symlink or non-plain file is a journal error (14.13) / corrupt session (14.21), never read, appended, or replaced; path components above the workspace root are unrestricted — a root reached through a symlink builds, mutates, and `check`s normally (SPEC 13.4, 14.13, 14.21, 14.22)",
   run: async (product) => {
     // --- Refusal arm: the Markdown emit destination's directory component
     // is a symbolic link (module header: exactly one write path traverses
@@ -1169,84 +1293,138 @@ const T13_4_6 = defineProductTest({
         symlinks: { out: "real-out" },
       },
       async (workspace) => {
-        await assertLeavesUnchanged(
-          workspace.root,
-          async () => {
-            const context =
-              "T13.4-6 (write-path symlink) `build --json` — the write to " +
-              "out/specs/A.md traverses the symlink at `out`";
-            const result = await runCli(product, workspace, [
-              "build",
-              "--json",
-            ]);
-            assertExitCode(
-              result,
-              1,
-              `${context}: the write is refused with the report (SPEC ` +
-                `14.22, 12.0)`,
-            );
-            const findings = decodeFindingsReport(
-              parseJsonStdout(result, context),
-              context,
-            ).findings;
-            assertConditionCounts(
-              findings,
-              { "14.22": 1 },
-              `${context}: exactly the one staged condition — one write ` +
-                `path traverses the link, the sources are valid, and ` +
-                `\`build\` cannot observe 14.10 (SPEC 14.22, 12.1)`,
-            );
-          },
-          "T13.4-6 (write-path symlink) `build` refuses before anything is " +
-            "modified — no module, Markdown, or graph data appears and the " +
-            "link and its target are untouched (SPEC 14.22, 13.4, 12.1)",
+        // One write path (out/specs/A.md) traverses the link at `out` — the
+        // one offending component, so the finding set is exactly one 14.22
+        // concerning `out` on both sides (module header).
+        await expectObstructionReport(
+          product,
+          workspace,
+          "build",
+          ["out"],
+          "T13.4-6 (write-path symlink)",
         );
+        await expectObstructionReport(
+          product,
+          workspace,
+          "check",
+          ["out"],
+          "T13.4-6 (write-path symlink)",
+        );
+      },
+    );
 
-        await assertLeavesUnchanged(
-          workspace.root,
-          async () => {
-            const context = "T13.4-6 (write-path symlink) `check --json`";
-            const result = await runCli(product, workspace, [
-              "check",
-              "--json",
-            ]);
-            assertExitCode(
-              result,
-              1,
-              `${context}: \`check\` reports the same finding (SPEC 14.22, ` +
-                `12.2)`,
-            );
-            const findings = decodeFindingsReport(
-              parseJsonStdout(result, context),
-              context,
-            ).findings;
-            const symlinkFindings = findings.filter(
-              (finding) => finding.condition === "14.22",
-            );
-            if (symlinkFindings.length !== 1) {
-              fail(
-                `${context}: exactly one 14.22 finding — one write path ` +
-                  `traverses the link (SPEC 14.22); reported conditions: ` +
-                  JSON.stringify(findings.map((finding) => finding.condition)),
-              );
-            }
-            for (const finding of findings) {
-              if (
-                finding.condition !== "14.22" &&
-                finding.condition !== "14.10"
-              ) {
-                fail(
-                  `${context}: beside the 14.22, only 14.10 staleness is ` +
-                    `stageable here (no build has ever succeeded, so ` +
-                    `derived files are missing; SPEC 14.10, 12.2); got ` +
-                    `${JSON.stringify(finding.condition)} (message: ` +
-                    `${JSON.stringify(finding.message)})`,
-                );
-              }
-            }
-          },
-          "T13.4-6 (write-path symlink) `check` reports without writing " +
-            "(SPEC 14.22, 12.2)",
+    // --- Occupant kinds, plain file at a first emission's `outDir`
+    // component: no build has ever run, no move operand is involved (a
+    // plain-file component under a move's destination or its derived paths
+    // is the move's `refused-invalid-destination` instead, SPEC 6.5, 14.22;
+    // T6.5-4) — refused identically to the symlink kind: `build` exits 1
+    // with the condition-22 finding, concerned path that component,
+    // modifying nothing, and `check` reports it without writing ---
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": OUT_CONFIG,
+          "specs/A.mdx": A_MDX,
+          out: OCCUPANT,
+        },
+      },
+      async (workspace) => {
+        await expectObstructionReport(
+          product,
+          workspace,
+          "build",
+          ["out"],
+          "T13.4-6 (outDir plain-file occupant)",
+        );
+        await expectObstructionReport(
+          product,
+          workspace,
+          "check",
+          ["out"],
+          "T13.4-6 (outDir plain-file occupant)",
+        );
+      },
+    );
+
+    // --- Occupant kinds, plain file at a deeper directory component of the
+    // `build` write path: `out` is a real directory and the occupant sits at
+    // `out/specs` — the emit path out/specs/A.md's other workspace-relative
+    // component (SPEC 7.3 path preservation) — discriminating a product
+    // that vets only the `outDir` component itself (SPEC 14.22, 13.4) ---
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": OUT_CONFIG,
+          "specs/A.mdx": A_MDX,
+          "out/specs": OCCUPANT,
+        },
+      },
+      async (workspace) => {
+        await expectObstructionReport(
+          product,
+          workspace,
+          "build",
+          ["out/specs"],
+          "T13.4-6 (deeper-component plain-file occupant)",
+        );
+        await expectObstructionReport(
+          product,
+          workspace,
+          "check",
+          ["out/specs"],
+          "T13.4-6 (deeper-component plain-file occupant)",
+        );
+      },
+    );
+
+    // --- Finding cardinality, one component refusing two writes: with two
+    // sources both emitting under the occupied `out` (out/specs/A.md and
+    // out/specs/B.md), the one non-directory occupant yields ONE finding,
+    // concerned path that component — never one per refused write (SPEC
+    // 14.22); asserted via `check` per TEST-SPEC (module header) ---
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": OUT_CONFIG,
+          "specs/A.mdx": A_MDX,
+          "specs/B.mdx": B_MDX,
+          out: OCCUPANT,
+        },
+      },
+      async (workspace) => {
+        await expectObstructionReport(
+          product,
+          workspace,
+          "check",
+          ["out"],
+          "T13.4-6 (one component, two refused writes)",
+        );
+      },
+    );
+
+    // --- Finding cardinality, two distinct offending components: nested
+    // sources emit at out/specs/one/A.md and out/specs/two/B.md (SPEC 7.3);
+    // with `out` and `out/specs` real directories and plain files at
+    // `out/specs/one` and `out/specs/two`, each refused write has its own
+    // offending component — TWO findings, each concerning its component, in
+    // concerned-path byte order (SPEC 14.22, 12.7); via `check` ---
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": OUT_CONFIG,
+          "specs/one/A.mdx": A_MDX,
+          "specs/two/B.mdx": B_MDX,
+          "out/specs/one": OCCUPANT,
+          "out/specs/two": OCCUPANT,
+        },
+      },
+      async (workspace) => {
+        await expectObstructionReport(
+          product,
+          workspace,
+          "check",
+          ["out/specs/one", "out/specs/two"],
+          "T13.4-6 (two offending components)",
         );
       },
     );

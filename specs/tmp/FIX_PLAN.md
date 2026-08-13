@@ -1930,12 +1930,50 @@ A "new test T<x>" task always means, in one change:
   record); no new decoder (S-5 unchanged); T13.3-3 in no certification
   scope (Exclusions-shared machinery only).]
 
-- [ ] FP-046 — T13.4-6: add plain-file occupant and finding-cardinality
+- [x] FP-046 — T13.4-6: add plain-file occupant and finding-cardinality
   arms. [R2 #33; TEST-SPEC §13.4]
   `test/suite/registry/section-13.4.ts`: occupants — a `build` write-path
   directory component; a first-emission `outDir` component. Cardinality —
   one component refusing two writes → one finding; two components → two
   findings, via `check`.
+  [Done 2026-08-13: four first-emission workspaces under the existing
+  OUT_CONFIG (outDir "out"; occupant staged in the declaration, so no move
+  operand is involved — the destination-side contrast reporting
+  `refused-invalid-destination` stays T6.5-4's, per TEST-SPEC's
+  parenthetical): plain file at the outDir component `out` and, separately,
+  at the deeper emit-path component `out/specs` (out a real directory —
+  discriminates vet-only-the-outDir products), each asserting `build` and
+  `check`; cardinality via `check` where TEST-SPEC pins it — A+B both
+  emitting under occupied `out` → exactly one 14.22, and nested
+  specs/one/A.mdx + specs/two/B.mdx with plain files at `out/specs/one` +
+  `out/specs/two` → exactly two. All probes ride new module helpers
+  `assertObstructionFindings`/`expectObstructionReport` (exit 1, form-exact
+  12.7 findings report, exactly one condition-22 finding per staged
+  offending component with the component as its concerned path per SPEC
+  14.22's cardinality rule — per-index compare, sound because the pinned
+  12.7 order among equal-code empty-location findings is concerned-path
+  byte order; build-side sets exact, check-side tolerating only 14.10
+  beside; every probe in a whole-root assertLeavesUnchanged); the existing
+  write-path-symlink arm was refactored onto the same helpers, gaining the
+  previously missing concerned-path assertion. No new adapter (S-5
+  unchanged); traceability already ["13.4","14"] (T13.4-6 is 14.22's
+  primary); no certification scope. Verified: typecheck/format clean;
+  suite section-13.4 unchanged 1 failed / 5 passed — T13.4-6 red at the
+  symlink arm's first FP-001-class form-exact decode, new arms
+  suite-unreached; peeled solo runs against the built product fail each
+  new arm exactly as diagnosed at its first probe's exit-code assertion
+  (the product vets symlink components only and crashes exit 70 ENOTDIR on
+  plain-file occupants in all four stagings — build and check alike; the
+  deeper-component build even writes modules before crashing, the
+  modify-while-refusing gap); occupant-free control twins build exit 0
+  writing exactly the obstructed emit paths (staging premise); a
+  fake-product control matrix on the two-components arm proved the helper
+  green path and teeth (conforming report passes; a 14.10 beside passes;
+  one-finding, per-write-duplicate, out-of-order, and extra-14.20 reports
+  each fail at the intended assertion). `npm run test:self`: unchanged 4
+  planned mid-loop reds (certification-document ×3 → FP-091; S-1's 7
+  unmapped keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and certification
+  green.]
 
 - [ ] FP-047 — T13.5-1: add the seam-neutrality arm. [R2 #34; TEST-SPEC
   §13.5]
