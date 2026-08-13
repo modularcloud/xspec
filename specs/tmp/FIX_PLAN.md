@@ -2314,8 +2314,62 @@ certify against FP-091's fixtures once those land.
   discriminates). `npm run test:self`: unchanged 4 planned mid-loop reds
   (certification-document x3 → FP-091; S-1's 6 unmapped keys {11.3–11.6,
   12.6, 12.7} → stage G), S-5 and certification green.]
-- [ ] FP-054 — Implement T11.2-5: domain/findings/exit discipline. [R2 #2;
+- [x] FP-054 — Implement T11.2-5: domain/findings/exit discipline. [R2 #2;
   TEST-SPEC §11.2]
+  [Done 2026-08-13: registered in section-11.2.ts (SUITE-52) with
+  traceability ["11.2"] (no TEST-SPEC 14 staging record — the FP-050..053
+  precedent; T14-4's and T11.5-2's citations are cross-references TO it;
+  11.3–11.5/12.0/12.7 context with home coverage at T11.3-*/T11.4-*/
+  T11.5-*/T12.0-13/T12.7-3). NOT in CONF-AVAIL scope — CERTIFICATIONS.md
+  lists T11.2-5 expressly under Exclusions — so gate `build`, `at`, and
+  `--file` all free. Two workspaces. (1) T11.2-1's A/B/C reused beside a
+  discovered reference-free src/app.ts under a spec+code config (the
+  wrong-kind operand; adds no finding): gate `build --json` pins the exact
+  T11.2-1 multiset; `view C` → exit 0, findings [], C's complete view (the
+  domain is the requested files while A/B stay invalid); `view A` → exit 1,
+  findings EXACTLY A's six of both levels all located in A (B's 14.20
+  excluded by exactness), full answer still emitted (views [A]: tree,
+  comments, occurrences, imports pinned); then the five
+  argument-checks-precede-answering arms on the failing workspace — unknown
+  `view` operand, wrong-kind `view src/app.ts`, outside-root `occurrences
+  --file ../…`, malformed `occurrences --to specs/A.mdx#a..b` (empty
+  segment), out-of-range `at specs/A.mdx <len+1>` — each exit 2 via a new
+  expectAvailabilityUsageError (JSON-only surfaces: bare invocation, single
+  12.7 error document as entire stdout, stderr message present; per-surface
+  matrices stay at T11.3-2/3, T11.4-2, T11.5-2). (2) cycle pair D/E (mutual
+  external `d` references — the external form forces mutual imports, so the
+  staged set is EXACTLY two 14.9s: dependency cycle + spec import cycle,
+  each jointly violated) beside finding-free C: gate pins {14.9: 2} with
+  each finding's full path — two locations, one per file, windows the
+  import declarations resp. the opening tags (disjoint ordered windows pin
+  the 12.7 finding order import-first); `view D` and `view E` each assert
+  both findings WHOLE (the out-of-domain participant's location included)
+  plus the participant's complete view (identities defined — cycle never
+  undefines; import entry resolved; the resolving `d` occurrence recorded);
+  `view C` → exit 0, findings [] (no participant in domain). Both
+  workspaces wrapped in whole-root snapshot compares (hygiene; no-write
+  contract stays T11.2-1/-6's). Verified: typecheck/format clean; suite
+  section-11.2 red-as-diagnosed — T11.2-5 fails at the ws1 gate build's
+  FP-001-class form-exact decode ("expected no member \"condition\"");
+  scratch probe: a conforming fake re-deriving every answer from the
+  workspace bytes (own config parse, glob discovery, MDX-lite parse with
+  byte offsets, 11.2 definedness, resolution/occurrences, Tarjan SCC over
+  contains+depends+embeds and over the import graph, 12.7 forms and order,
+  per-domain attachment, argument checks) ran the registered body green
+  end-to-end, and five deviation fakes each failed diagnosed — attach-all
+  at `view C`'s exit-0 (domain discipline), truncate-joint at the
+  whole-cycle location count (accompanies-whole), answer-past-usage at the
+  unknown-file exit-2 (precedence), withhold-answer at the views-[A] pin
+  (full answer), exit-zero at `view A`'s exit-1; direct `build --json`
+  probes against the built product confirm both stagings fire in a real
+  parser — ws1 exactly the staged multiset per home file, ws2 exactly two
+  14.9s whose old-shape messages name the import cycle and the dependency
+  cycle paths (and whose import-declaration location 45..70 independently
+  corroborates the ByteFixture arithmetic); view/occurrences/at stay
+  unknown commands (exit 2) pre-patch. `npm run test:self`: unchanged 4
+  planned mid-loop reds (certification-document x3 → FP-091; S-1's 6
+  unmapped keys {11.3–11.6, 12.6, 12.7} → stage G), S-5 and certification
+  green.]
 - [ ] FP-055 — Implement T11.2-6: never-stale + gate-findings-never-attach.
   [R2 #2; TEST-SPEC §11.2]
 

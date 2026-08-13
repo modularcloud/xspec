@@ -1,5 +1,5 @@
 // TEST-SPEC §11.2 (availability on imperfect files) — SUITE-52: T11.2-1
-// through T11.2-4.
+// through T11.2-5.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -12,11 +12,13 @@
 // staging constraint pins every command an in-scope test drives to its
 // enumerated `view`/`occurrences` surface, so T11.2-2 and T11.2-4 run NO
 // gate-reference `build`, no `at`, and no `--file` on `occurrences`
-// (VIOL-AVAIL-NOFILE's staging constraint) — unlike T11.2-1 and T11.2-3,
-// which are not in scope (CONF-AVAIL's workspace scope is `#`-free
+// (VIOL-AVAIL-NOFILE's staging constraint) — unlike T11.2-1, T11.2-3, and
+// T11.2-5, which are not in scope (CONF-AVAIL's workspace scope is `#`-free
 // valid-UTF-8 paths with no code groups, so T11.2-3's staging lies outside
-// it by construction): staging integrity rides each answer's own exact
-// accompanying-findings multiset instead, and the staged conditions are
+// it by construction, and T11.2-5 — its argument and domain-and-exit
+// matrix — is expressly an Exclusions entry): staging integrity rides each
+// answer's own exact accompanying-findings multiset instead, and the
+// staged conditions are
 // drawn from the scope's stated set (T11.2-2: 14.1, 14.3, 14.4, 14.17;
 // T11.2-4: 14.1, 14.3, 14.5, 14.6, 14.9, 14.15, 14.16).
 //
@@ -90,11 +92,13 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertFindingLocated,
   assertSameJson,
+  expectErrorDocument,
   expectExit,
   runCli,
 } from "./support.js";
@@ -224,11 +228,12 @@ const A_SOURCE = A.source;
 const A_ROOT_RANGE: SourceRange = { start: 0, end: A.pos };
 
 /**
- * The string-literal reference inside a `d={"…"}` attribute: `d={` and the
- * closing `}` excluded — a `d` occurrence spans that one reference's own
- * expression, the string literal's characters quotes included (SPEC 5.7,
- * 2.2; the T5.7-2 local-form convention). ASCII segment, so character
- * arithmetic is byte arithmetic.
+ * The reference expression inside a single-reference `d={…}` attribute:
+ * `d={` and the closing `}` excluded — a `d` occurrence spans that one
+ * reference's own expression, for the local form the string literal's
+ * characters quotes included (the T5.7-2 convention) and for the external
+ * form the property chain's characters (SPEC 5.7, 2.2). ASCII segment, so
+ * character arithmetic is byte arithmetic.
  */
 function dLiteralRange(attribute: ViewAttributeEntry): SourceRange {
   return {
@@ -2987,10 +2992,695 @@ const T11_2_4 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T11.2-5 — domain, findings, exits
+// ---------------------------------------------------------------------------
+//
+// SPEC 11.2 "Consulted domain, findings, exits": every answer of 11.3–11.5
+// has a consulted domain of files, and the findings of every domain file —
+// and those alone — accompany the answer; a condition several files jointly
+// violate (a cross-file cycle, 14.9) accompanies the answer WHOLE whenever
+// any participating file lies in the domain. Any finding or explicitly-
+// unavailable datum → exit 1 with the full answer document still emitted
+// (exit 1 signals imperfection and never withholds the answer); a complete,
+// finding-free answer → exit 0. The argument checks of 11.3–11.5 precede
+// answering: a malformed `--to` or invalid glob, a `<file>` operand outside
+// the domain or of the wrong kind, and an out-of-range offset each exit 2,
+// whatever findings the workspace or the named files carry (12.0). The
+// per-surface spelling matrices stay at their home tests (T11.3-2/3,
+// T11.4-2, T11.5-2); this test pins the precedence discipline itself, every
+// arm run on the finding-laden workspace.
+//
+// Conservative operationalizations (noted per H-3/H-4):
+// - Workspace 1 is T11.2-1's staging (the entry's own reference: A parseable
+//   with findings of both levels, B unparseable, C finding-free) beside a
+//   discovered, reference-free code source under a spec+code configuration —
+//   the wrong-kind `<file>` operand (11.4) needs a discovered code source,
+//   and a valid, reference-free TypeScript file adds no finding, no node,
+//   and no occurrence (staging integrity rides the gate reference's exact
+//   multiset). T11.2-5 is in no certification scope (CERTIFICATIONS.md
+//   lists it under Exclusions), so the gate `build --json` and `at` are
+//   free to ride.
+// - "A's findings of both levels accompany" is the exact multiset of A's six
+//   staged conditions (resolution-level 14.5/14.9; per-file structural
+//   14.3/14.4/14.16/14.17), every finding located in A — B's 14.20 excluded
+//   by the same exactness: the domain is the requested files, never the
+//   workspace.
+// - The two-file cycle is D#x --depends--> E#y --depends--> D#x via mutual
+//   EXTERNAL `d` references (SPEC 2.2's cross-file form), which forces the
+//   mutual imports the external form requires (2.1) — themselves a spec
+//   import cycle. The staged condition set is therefore exactly two 14.9
+//   findings (SPEC 5.3, 2.1, 14.9), each a condition the two files JOINTLY
+//   violate, each locating its full path per SPEC 14's cardinality rule —
+//   one location per participating construct, one in each file: the two
+//   import declarations; the two reference spellings. "Accompanies whole"
+//   is realized as each finding carrying BOTH files' locations — asserted
+//   with exactly two locations per finding, each within its participating
+//   construct's byte window (the T11.2-4 window discipline: the import
+//   declaration; the opening tag spelling the reference) — in the domain
+//   [D] and again in the domain [E]; message equality across the two
+//   invocations is deliberately not asserted (informational content,
+//   SPEC 12.7). The finding-free C staged beside the pair pins the
+//   contrapositive: with no participant in the domain, neither cycle
+//   finding attaches — findings [], exit 0.
+// - "Explicitly-unavailable datum → exit 1" rides the same arms: SPEC 11.2
+//   derives every unavailable datum from a condition that is a domain
+//   file's finding (or, for 14.19, its concerned path), so no
+//   unavailable-datum-without-finding staging exists to build; view A's
+//   answer carries both (unavailable identities beside findings), view C's
+//   neither.
+// - Exit-2 protocol: the three surfaces are JSON-only (SPEC 11), so JSON
+//   output is in effect on every invocation and an exit-2 usage error emits
+//   the single 12.7 error document as its entire stdout (12.0) — decoded
+//   form-exactly ({"error": …} with no findings member beside it) — with
+//   the usage message on stderr; `code`/`path` value assertions stay at
+//   T12.7-3's home.
+// - Every invocation of both workspaces rides one whole-root snapshot
+//   compare per workspace (H-4): the never-built workspaces make any write
+//   surface in the diff (the no-write CONTRACT clauses stay at their
+//   T11.2-1/T11.2-6 homes; the compare is staging hygiene here).
+
+// --- workspace 1's added code source (the wrong-kind operand) ----------------
+const WRONG_KIND_CODE_FILE = "src/app.ts";
+const WRONG_KIND_CODE_SOURCE = "export function noop(): void {}\n";
+
+/**
+ * `view specs/A.mdx`'s accompanying findings: exactly A's six staged
+ * conditions — findings of both levels — and never B's 14.20 (SPEC 11.2:
+ * the consulted domain is the requested files).
+ */
+const A_DOMAIN_CONDITION_COUNTS: Readonly<Record<string, number>> = {
+  "14.3": 1,
+  "14.4": 1,
+  "14.5": 1,
+  "14.9": 1,
+  "14.16": 1,
+  "14.17": 1,
+};
+
+// --- specs/D.mdx / specs/E.mdx — the two-file cycle pair ---------------------
+//
+// Each file: one import of the other (the external form's requirement,
+// SPEC 2.2, 2.1) and one uniquely identified section whose `d` references
+// the other file's section. Everything else is deliberately clean — every
+// id spelled, well-formed, structural, and unique; both imports valid as
+// declarations (form, target, binding) — so the two cycles are the
+// workspace's ONLY conditions. Both `d` spellings RESOLVE (each target's
+// identity is defined; cycle participation never undefines an identity,
+// SPEC 11.2) and record their `depends` occurrences — positions survive the
+// findings, the T11.2-1 clause — pinned here as each view's exact
+// enumeration. The multi-byte prefixes (é) shift every later offset
+// (SPEC 1.7).
+
+const D_FILE = "specs/D.mdx";
+const E_FILE = "specs/E.mdx";
+
+const D = new ByteFixture();
+D.add("Début — two-file cycle: participant one.\n\n");
+const D_IMPORT_TEXT = 'import E from "./E.xspec"';
+const D_IMPORT_RANGE = D.add(D_IMPORT_TEXT);
+D.add("\n\n");
+const D_X_START = D.pos;
+D.add("<S ");
+const D_X_ID = D.attr("id", 'id="x"');
+D.add(" ");
+const D_X_D = D.attr("d", "d={E.y}");
+D.add(">");
+const D_X_OPEN: SourceRange = { start: D_X_START, end: D.pos };
+D.add("\nParticipant one text.\n</S>");
+const D_X_RANGE: SourceRange = { start: D_X_START, end: D.pos };
+D.add("\n");
+const D_SOURCE = D.source;
+const D_ROOT_RANGE: SourceRange = { start: 0, end: D.pos };
+const D_X_D_REF = dLiteralRange(D_X_D);
+
+const E = new ByteFixture();
+E.add("Étape — two-file cycle: participant two.\n\n");
+const E_IMPORT_TEXT = 'import D from "./D.xspec"';
+const E_IMPORT_RANGE = E.add(E_IMPORT_TEXT);
+E.add("\n\n");
+const E_Y_START = E.pos;
+E.add("<S ");
+const E_Y_ID = E.attr("id", 'id="y"');
+E.add(" ");
+const E_Y_D = E.attr("d", "d={D.x}");
+E.add(">");
+const E_Y_OPEN: SourceRange = { start: E_Y_START, end: E.pos };
+E.add("\nParticipant two text.\n</S>");
+const E_Y_RANGE: SourceRange = { start: E_Y_START, end: E.pos };
+E.add("\n");
+const E_SOURCE = E.source;
+const E_ROOT_RANGE: SourceRange = { start: 0, end: E.pos };
+const E_Y_D_REF = dLiteralRange(E_Y_D);
+
+const D_X_NODE_ID = `${D_FILE}#x`;
+const E_Y_NODE_ID = `${E_FILE}#y`;
+
+const D_TREE: TreeExpectation = {
+  identity: D_FILE,
+  range: D_ROOT_RANGE,
+  attributes: [],
+  children: [
+    {
+      identity: D_X_NODE_ID,
+      range: D_X_RANGE,
+      attributes: [D_X_ID, D_X_D],
+      children: [],
+    },
+  ],
+};
+
+const E_TREE: TreeExpectation = {
+  identity: E_FILE,
+  range: E_ROOT_RANGE,
+  attributes: [],
+  children: [
+    {
+      identity: E_Y_NODE_ID,
+      range: E_Y_RANGE,
+      attributes: [E_Y_ID, E_Y_D],
+      children: [],
+    },
+  ],
+};
+
+/** D's view: the one import entry, resolved (SPEC 11.4, 2.1). */
+const D_IMPORTS: readonly ViewImportEntry[] = [
+  { range: D_IMPORT_RANGE, name: "E", target: E_FILE },
+];
+const E_IMPORTS: readonly ViewImportEntry[] = [
+  { range: E_IMPORT_RANGE, name: "D", target: D_FILE },
+];
+
+// Each file's complete occurrence enumeration (SPEC 5.7): the resolving
+// external `d` reference — its span the reference's own expression — with
+// its source graph node defined (SPEC 11.2).
+const D_OCCURRENCES: readonly OccurrenceRecord[] = [
+  {
+    file: D_FILE,
+    range: D_X_D_REF,
+    kind: "depends",
+    source: { identity: D_X_NODE_ID, range: D_X_RANGE },
+    target: E_Y_NODE_ID,
+  },
+];
+const E_OCCURRENCES: readonly OccurrenceRecord[] = [
+  {
+    file: E_FILE,
+    range: E_Y_D_REF,
+    kind: "depends",
+    source: { identity: E_Y_NODE_ID, range: E_Y_RANGE },
+    target: D_X_NODE_ID,
+  },
+];
+
+/** The cycle workspace's exact condition multiset (staging integrity). */
+const CYCLE_CONDITION_COUNTS: Readonly<Record<string, number>> = {
+  "14.9": 2,
+};
+
+// The two joint findings' full paths (SPEC 14's cardinality rule): one
+// location per participating construct, one in each file, in 12.7 location
+// order (file path bytes: D before E). The spec import cycle locates each
+// participating import declaration; the dependency cycle locates each
+// participating reference spelling — its window the opening tag that spells
+// it (the T11.2-4 tolerance; the two windows are disjoint within each file,
+// so the 12.7 findings order pins the import-cycle finding first).
+const CYCLE_IMPORT_LOCATIONS: readonly LocationWindowExpectation[] = [
+  { file: D_FILE, window: widened(D_IMPORT_RANGE) },
+  { file: E_FILE, window: widened(E_IMPORT_RANGE) },
+];
+const CYCLE_DEPENDENCY_LOCATIONS: readonly LocationWindowExpectation[] = [
+  { file: D_FILE, window: widened(D_X_OPEN) },
+  { file: E_FILE, window: widened(E_Y_OPEN) },
+];
+
+/**
+ * Assert the two-file cycle findings accompany WHOLE (SPEC 11.2, 14):
+ * exactly two 14.9 findings — the spec import cycle, then the dependency
+ * cycle (the 12.7 findings order over their disjoint, ordered windows) —
+ * each carrying exactly its two participating locations, one per file,
+ * whatever the invocation's domain was.
+ */
+function assertCycleFindingsWhole(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertConditionCounts(
+    findings,
+    CYCLE_CONDITION_COUNTS,
+    `${context} — exactly the two staged 14.9 conditions: the dependency ` +
+      `cycle over the mutual d references and the spec import cycle over ` +
+      `the mutual imports the external form forces (SPEC 5.3, 2.1, 14.9)`,
+  );
+  const cycles = findings.filter((finding) => finding.condition === "14.9");
+  assertLocatedFinding(
+    cycles[0]!,
+    CYCLE_IMPORT_LOCATIONS,
+    `${context} — the spec import cycle accompanies WHOLE: one location ` +
+      `per participating import declaration, BOTH files' included ` +
+      `(SPEC 11.2: a condition several files jointly violate accompanies ` +
+      `the answer whole whenever any participating file lies in the ` +
+      `domain; SPEC 14's cardinality rule)`,
+  );
+  assertLocatedFinding(
+    cycles[1]!,
+    CYCLE_DEPENDENCY_LOCATIONS,
+    `${context} — the dependency cycle accompanies WHOLE: one location per ` +
+      `participating reference spelling, BOTH files' included (SPEC 11.2, ` +
+      `14)`,
+  );
+}
+
+/**
+ * Run one availability-surface invocation expected to fail its argument
+ * checks: exit 2 exactly (the checks precede answering — SPEC 11.2, 12.0 —
+ * whatever findings the workspace or the named files carry), stdout exactly
+ * the single 12.7 error document (the surfaces are JSON-only, SPEC 11, so
+ * JSON output is always in effect; the form-exact decode admits no findings
+ * report and no answer beside it), and the usage message on stderr (12.0).
+ */
+async function expectAvailabilityUsageError(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<void> {
+  const command = `xspec ${argv.join(" ")}`;
+  const result = await expectExit(
+    product,
+    workspace,
+    argv,
+    2,
+    `${context}: \`${command}\` — the argument checks of 11.3–11.5 precede ` +
+      `answering, so the usage error exits 2 whatever findings the ` +
+      `workspace or the named files carry (SPEC 11.2, 12.0)`,
+  );
+  expectErrorDocument(
+    result,
+    `${context}: \`${command}\` — the surface is JSON-only, so JSON output ` +
+      `is in effect and the exit-2 error document is the entire stdout: no ` +
+      `findings report, no answer beside it (SPEC 11, 12.0, 12.7, H-5)`,
+  );
+  if (result.stderrBytes.length === 0) {
+    fail(
+      `${context}: \`${command}\` — usage error messages are ` +
+        `standard-error content (SPEC 12.0), but stderr is empty`,
+    );
+  }
+}
+
+const T11_2_5 = defineProductTest({
+  id: "T11.2-5",
+  title:
+    "`view` naming only C — T11.2-1's finding-free file, A and B staying invalid beside it — answers finding-free with exit 0: the domain is the requested files; naming A attaches exactly A's findings of both levels (never B's 14.20), exit 1, the full answer still emitted (the document complete and parseable, H-5); the two-file cycle pair D/E (mutual external `d` references and the mutual imports they force: a dependency cycle and a spec import cycle, 14.9 ×2) accompanies WHOLE — both files' participating locations — when either participant is the domain, and not at all when only the finding-free file is; any finding → exit 1 with the full answer, complete and finding-free → exit 0; argument checks precede answering: unknown `<file>`, wrong-kind `<file>` (a discovered code source), an outside-root `--file` glob, a malformed `--to` (empty segment), and an out-of-range offset each exit 2 with the single 12.7 error document as the entire stdout, whatever findings the workspace or the named files carry (SPEC 11.2, 11.3–11.5, 12.0, 12.7, 14)",
+  run: async (product) => {
+    // Fixture self-checks (T5.7-2 discipline): composed-range arithmetic
+    // proven against the staged bytes before any product invocation.
+    sliceCheck(D_SOURCE, D_IMPORT_RANGE, D_IMPORT_TEXT, "D's import");
+    sliceCheck(D_SOURCE, D_X_D_REF, "E.y", "D's reference expression");
+    sliceCheck(D_SOURCE, D_X_OPEN, '<S id="x" d={E.y}>', "D's opening tag");
+    sliceCheck(E_SOURCE, E_IMPORT_RANGE, E_IMPORT_TEXT, "E's import");
+    sliceCheck(E_SOURCE, E_Y_D_REF, "D.x", "E's reference expression");
+    sliceCheck(E_SOURCE, E_Y_OPEN, '<S id="y" d={D.x}>', "E's opening tag");
+
+    // --- Workspace 1: T11.2-1's A/B/C beside a discovered code source ------
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+          [A_FILE]: A_SOURCE,
+          [B_FILE]: B_SOURCE,
+          [C_FILE]: C_SOURCE,
+          [WRONG_KIND_CODE_FILE]: WRONG_KIND_CODE_SOURCE,
+        },
+      });
+      try {
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            // Gate reference and staging integrity: A and B stay invalid —
+            // exactly T11.2-1's condition multiset, so the reference-free
+            // code source adds no finding (and C none), and every later
+            // domain assertion stands on pinned ground (SPEC 12.1, 14).
+            const buildContext =
+              "T11.2-5 `build --json` (staging integrity: A and B stay " +
+              "invalid; the reference-free code source and C contribute " +
+              "nothing)";
+            const buildResult = await expectExit(
+              product,
+              workspace,
+              ["build", "--json"],
+              1,
+              buildContext,
+            );
+            const buildFindings = decodeFindingsReport(
+              parseJsonStdout(buildResult, buildContext),
+              buildContext,
+            ).findings;
+            assertConditionCounts(
+              buildFindings,
+              WORKSPACE_CONDITION_COUNTS,
+              `${buildContext} — exactly the staged conditions (SPEC 14)`,
+            );
+            assertFindingHomes(buildFindings, buildContext);
+
+            // --- `view` naming only C: the domain is the requested files,
+            // so nothing of A's or B's attaches — a complete, finding-free
+            // answer, exit 0, while the workspace stays failing (SPEC 11.2,
+            // 11.4).
+            const viewCContext =
+              "T11.2-5 `view specs/C.mdx` (the finding-free file alone, on " +
+              "the failing workspace)";
+            const viewCResult = await expectExit(
+              product,
+              workspace,
+              ["view", C_FILE],
+              0,
+              `${viewCContext} — a complete, finding-free answer exits 0: ` +
+                `the consulted domain is the requested files, and A's and ` +
+                `B's findings are no domain file's (SPEC 11.2)`,
+            );
+            const viewCReport = decodeViewReport(
+              parseJsonStdout(
+                viewCResult,
+                `${viewCContext} — a single JSON document is the only ` +
+                  `output form (SPEC 11)`,
+              ),
+              { text: false },
+              viewCContext,
+            );
+            assertSameJson(
+              viewCReport.findings,
+              [],
+              `${viewCContext} — the domain's findings alone accompany: ` +
+                `none — never A's six, never B's 14.20 (SPEC 11.2)`,
+            );
+            assertSameJson(
+              viewCReport.views.map((view) => view.file),
+              [C_FILE],
+              `${viewCContext} — exactly the requested file's view (SPEC 11.4)`,
+            );
+            const viewC = viewCReport.views[0]!;
+            assertSameJson(
+              projectNode(viewC.root),
+              C_TREE,
+              `${viewCContext} — C's complete view: byte-exact ranges, ` +
+                `defined identities (SPEC 11.2, 11.4)`,
+            );
+            assertSameJson(
+              [viewC.imports, viewC.occurrences, viewC.comments],
+              [[], [], []],
+              `${viewCContext} — C holds no imports, occurrences, or ` +
+                `comments: empty arrays, never null (SPEC 12.7)`,
+            );
+
+            // --- `view` naming A: A's findings of BOTH levels accompany —
+            // and only A's — exit 1 with the full answer still emitted:
+            // exit 1 signals imperfection and never withholds the answer
+            // (SPEC 11.2, H-5).
+            const viewAContext =
+              "T11.2-5 `view specs/A.mdx` (the finding-laden file alone)";
+            const viewAResult = await expectExit(
+              product,
+              workspace,
+              ["view", A_FILE],
+              1,
+              `${viewAContext} — the answer carries findings and ` +
+                `explicitly-unavailable identities, so exit 1 (SPEC 11.2)`,
+            );
+            const viewAReport = decodeViewReport(
+              parseJsonStdout(
+                viewAResult,
+                `${viewAContext} — the full answer document is still ` +
+                  `emitted, complete and parseable (SPEC 11.2, H-5)`,
+              ),
+              { text: false },
+              viewAContext,
+            );
+            assertConditionCounts(
+              viewAReport.findings,
+              A_DOMAIN_CONDITION_COUNTS,
+              `${viewAContext} — exactly A's findings of both levels ` +
+                `(resolution-level 14.5/14.9; per-file structural ` +
+                `14.3/14.4/14.16/14.17) accompany; B's 14.20 is no domain ` +
+                `file's finding and never attaches (SPEC 11.2)`,
+            );
+            assertFindingHomes(viewAReport.findings, viewAContext);
+            assertSameJson(
+              viewAReport.views.map((view) => view.file),
+              [A_FILE],
+              `${viewAContext} — the full answer: exactly A's view, never ` +
+                `withheld for the findings (SPEC 11.2, 11.4)`,
+            );
+            const viewA = viewAReport.views[0]!;
+            assertSameJson(
+              projectNode(viewA.root),
+              A_TREE,
+              `${viewAContext} — A's full positional tree, byte-exact, ` +
+                `identities per 11.2 (SPEC 11.2, 11.4)`,
+            );
+            assertSameJson(
+              viewA.comments,
+              [A_COMMENT_RANGE],
+              `${viewAContext} — A's comment ranges served (SPEC 11.4)`,
+            );
+            assertSameJson(
+              viewA.occurrences,
+              A_EXPECTED_OCCURRENCES,
+              `${viewAContext} — A's complete occurrence enumeration ` +
+                `(SPEC 5.7, 11.2)`,
+            );
+            assertSameJson(
+              viewA.imports,
+              [],
+              `${viewAContext} — A declares no imports (SPEC 12.7)`,
+            );
+
+            // --- Argument checks precede answering (SPEC 11.2, 12.0): each
+            // usage error exits 2 with the single 12.7 error document,
+            // whatever findings the workspace or the named files carry —
+            // never exit 1 with the domain's findings. The per-surface
+            // spelling matrices live at T11.3-2/3, T11.4-2, T11.5-2.
+            await expectAvailabilityUsageError(
+              product,
+              workspace,
+              ["view", "specs/Nope.mdx"],
+              "T11.2-5 unknown `<file>` operand (11.4: a file outside the " +
+                "discovered set is unknown) on the failing workspace",
+            );
+            await expectAvailabilityUsageError(
+              product,
+              workspace,
+              ["view", WRONG_KIND_CODE_FILE],
+              "T11.2-5 wrong-kind `<file>` operand (11.4: a discovered " +
+                "code source has no structural view) on the failing " +
+                "workspace",
+            );
+            await expectAvailabilityUsageError(
+              product,
+              workspace,
+              ["occurrences", "--file", "../outside/*.mdx"],
+              "T11.2-5 invalid glob (11.3, 11.1: a `--file` pattern " +
+                "resolving outside the workspace root is an invalid flag " +
+                "value) on the failing workspace",
+            );
+            await expectAvailabilityUsageError(
+              product,
+              workspace,
+              ["occurrences", "--to", `${A_FILE}#a..b`],
+              "T11.2-5 malformed `--to` (11.3: an empty segment is not a " +
+                "well-formed identity spelling) naming the finding-laden A",
+            );
+            await expectAvailabilityUsageError(
+              product,
+              workspace,
+              ["at", A_FILE, String(A_ROOT_RANGE.end + 1)],
+              "T11.2-5 out-of-range offset (11.5: only the offsets 0 " +
+                "through the file's byte length resolve) on the " +
+                "finding-laden A",
+            );
+          },
+          "T11.2-5 workspace 1 — no invocation of the sweep modifies " +
+            "anything: no graph data, no derived files (SPEC 11.2, 12.1, " +
+            "13.3; staging hygiene — the no-write contract clauses live at " +
+            "T11.2-1/T11.2-6)",
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- Workspace 2: the two-file cycle pair beside the finding-free C ----
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [C_FILE]: C_SOURCE,
+          [D_FILE]: D_SOURCE,
+          [E_FILE]: E_SOURCE,
+        },
+      });
+      try {
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            // Gate reference and staging integrity: the two cycles are the
+            // workspace's ONLY conditions, each located whole (SPEC 5.3,
+            // 2.1, 14.9, 14).
+            const buildContext =
+              "T11.2-5 cycle workspace `build --json` (staging integrity: " +
+              "the dependency cycle and the forced spec import cycle are " +
+              "the only conditions; C contributes nothing)";
+            const buildResult = await expectExit(
+              product,
+              workspace,
+              ["build", "--json"],
+              1,
+              buildContext,
+            );
+            assertCycleFindingsWhole(
+              decodeFindingsReport(
+                parseJsonStdout(buildResult, buildContext),
+                buildContext,
+              ).findings,
+              buildContext,
+            );
+
+            // --- `view` naming each participant: both joint findings
+            // accompany WHOLE — the other file's locations included, that
+            // file lying outside the domain (SPEC 11.2) — with the full
+            // answer (the participant's complete view) still emitted,
+            // exit 1.
+            const participants = [
+              {
+                file: D_FILE,
+                tree: D_TREE,
+                imports: D_IMPORTS,
+                occurrences: D_OCCURRENCES,
+                what: "D",
+              },
+              {
+                file: E_FILE,
+                tree: E_TREE,
+                imports: E_IMPORTS,
+                occurrences: E_OCCURRENCES,
+                what: "E",
+              },
+            ] as const;
+            for (const participant of participants) {
+              const context =
+                `T11.2-5 \`view ${participant.file}\` (one cycle ` +
+                `participant as the whole domain)`;
+              const result = await expectExit(
+                product,
+                workspace,
+                ["view", participant.file],
+                1,
+                `${context} — the answer carries the cycle findings, so ` +
+                  `exit 1 with the full answer (SPEC 11.2)`,
+              );
+              const report = decodeViewReport(
+                parseJsonStdout(
+                  result,
+                  `${context} — a single JSON document is the only output ` +
+                    `form (SPEC 11)`,
+                ),
+                { text: false },
+                context,
+              );
+              assertCycleFindingsWhole(report.findings, context);
+              assertSameJson(
+                report.views.map((view) => view.file),
+                [participant.file],
+                `${context} — exactly the requested file's view (SPEC 11.4)`,
+              );
+              const view = report.views[0]!;
+              assertSameJson(
+                projectNode(view.root),
+                participant.tree,
+                `${context} — ${participant.what}'s complete positional ` +
+                  `tree, identities defined: cycle participation never ` +
+                  `undefines an identity (SPEC 11.2)`,
+              );
+              assertSameJson(
+                view.imports,
+                participant.imports,
+                `${context} — the import entry stays on view, resolved: ` +
+                  `the cycle is a finding, never a view omission ` +
+                  `(SPEC 11.4, 2.1)`,
+              );
+              assertSameJson(
+                view.occurrences,
+                participant.occurrences,
+                `${context} — the resolving reference records its ` +
+                  `occurrence, cycle notwithstanding (SPEC 5.7, 11.2)`,
+              );
+              assertSameJson(
+                view.comments,
+                [],
+                `${context} — no comments staged (SPEC 12.7)`,
+              );
+            }
+
+            // --- `view` naming only C: no participant in the domain, so
+            // neither joint finding attaches — complete and finding-free,
+            // exit 0 (SPEC 11.2: whole attachment turns on a participating
+            // file lying in the domain, and only on that).
+            const calmContext =
+              "T11.2-5 cycle workspace `view specs/C.mdx` (no cycle " +
+              "participant in the domain)";
+            const calmResult = await expectExit(
+              product,
+              workspace,
+              ["view", C_FILE],
+              0,
+              `${calmContext} — a complete, finding-free answer exits 0: ` +
+                `the cycle findings belong to D and E, neither in the ` +
+                `domain (SPEC 11.2)`,
+            );
+            const calmReport = decodeViewReport(
+              parseJsonStdout(
+                calmResult,
+                `${calmContext} — a single JSON document is the only ` +
+                  `output form (SPEC 11)`,
+              ),
+              { text: false },
+              calmContext,
+            );
+            assertSameJson(
+              calmReport.findings,
+              [],
+              `${calmContext} — neither 14.9 attaches: a joint condition ` +
+                `accompanies exactly the answers whose domain holds a ` +
+                `participant (SPEC 11.2)`,
+            );
+            assertSameJson(
+              calmReport.views.map((view) => view.file),
+              [C_FILE],
+              `${calmContext} — exactly C's view (SPEC 11.4)`,
+            );
+            assertSameJson(
+              projectNode(calmReport.views[0]!.root),
+              C_TREE,
+              `${calmContext} — C's complete view (SPEC 11.2, 11.4)`,
+            );
+          },
+          "T11.2-5 workspace 2 — no invocation of the sweep modifies " +
+            "anything (SPEC 11.2, 12.1, 13.3; staging hygiene)",
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+  },
+});
+
 /** TEST-SPEC §11.2, in canonical ID order (SUITE-52). */
 export const section112Tests: readonly ProductTestEntry[] = [
   T11_2_1,
   T11_2_2,
   T11_2_3,
   T11_2_4,
+  T11_2_5,
 ];
