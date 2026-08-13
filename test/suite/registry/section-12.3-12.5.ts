@@ -21,9 +21,9 @@
 // (root) and prints identity, source range (1.7), own and subtree text,
 // hashes, tags, coverage attribute (absent for a root node, 11), and edges by
 // kind; `query node` is the machine-facing equivalent. SPEC 12.5: `coverage`,
-// `impact`, `review`, `query`, `rename`, `move` behave as sections 8, 9, 10,
-// 11, and 6 specify; an unknown subcommand or command is a usage error
-// (exit 2, 12.0).
+// `impact`, `review`, `query`, `occurrences`, `view`, `at`, `inventory`,
+// `rename`, `move` behave as sections 8, 9, 10, 11, and 6 specify; an
+// unknown subcommand or command is a usage error (exit 2, 12.0).
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - Tree node IDs are the full requirement IDs (`zeta.minor`), not bare
@@ -62,7 +62,12 @@
 //   so the unknown-command arms discriminate "unknown → exit 2" from a CLI
 //   that exits 2 for everything. Unknown arms assert exit 2 exactly and,
 //   under `--json`, the 12.7 error document as the entire stdout (SPEC
-//   12.0).
+//   12.0). The four §11 read surfaces are JSON-only — one document with or
+//   without `--json` (SPEC 11), invoked bare here: `occurrences` and `at`
+//   decode through their form-exact 12.7 document decoders; `view` through
+//   the scoped file-members decode and `inventory` through the scoped
+//   `recorded` datum (the full per-file view and inventory forms are
+//   T11.4-*'s and T11.6-*'s subjects).
 // - T12.3-2's coverage arm asserts the demonstration facts (the profile's
 //   uncovered set, the referenced-yet-uncovered node among it) — full §8
 //   report content is T8-*'s subject.
@@ -75,13 +80,17 @@ import type {
 } from "../../helpers/adapters/index.js";
 import {
   assertReportMentions,
+  decodeAtReport,
   decodeCoverageReport,
   decodeIdsReport,
   decodeIdsTreeReport,
   decodeImpactReport,
+  decodeInventoryRecordedDatum,
   decodeNodeReport,
   decodeNodeRowsReport,
+  decodeOccurrencesReport,
   decodeSessionListReport,
+  decodeViewFilesReport,
 } from "../../helpers/adapters/index.js";
 import type { Mention } from "../../helpers/adapters/index.js";
 import type { GraphEdge } from "../../helpers/adapters/index.js";
@@ -910,7 +919,7 @@ const T12_4_1 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T12.5-1 — dispatch: the six commands reach their sections; unknown → 2
+// T12.5-1 — dispatch: the ten commands reach their sections; unknown → 2
 // ---------------------------------------------------------------------------
 
 const T12_5_1_D = [
@@ -927,7 +936,7 @@ const T12_5_1_D = [
 const T12_5_1 = defineProductTest({
   id: "T12.5-1",
   title:
-    "`coverage`, `impact`, `review`, `query`, `rename`, and `move` dispatch into their sections' specified outcomes (behavior covered in sections 8, 9, 10, 11, 6); an unknown command or an unknown `query`/`review` subcommand is a usage error, exit 2 (SPEC 12.5, 12.0)",
+    "`coverage`, `impact`, `review`, `query`, `occurrences`, `view`, `at`, `inventory`, `rename`, and `move` dispatch into their sections' specified outcomes (behavior covered in sections 8, 9, 10, 11, 6; the four §11 read surfaces are JSON-only, answering one document when invoked bare); an unknown command or an unknown `query`/`review` subcommand is a usage error, exit 2 (SPEC 12.5, 12.0, 11)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -1020,6 +1029,99 @@ const T12_5_1 = defineProductTest({
         `${nodesContext}: \`query nodes\` rows are the workspace's ` +
           `requirement nodes, the root included (SPEC 11, 1.2)`,
       );
+
+      // `occurrences` (SPEC 11.3): a JSON-only surface — one document with
+      // or without `--json` (SPEC 11), invoked bare. Nothing in the
+      // workspace spells a reference, so the enumeration is the definitive
+      // empty, finding-free answer, exit 0.
+      const occurrencesContext = "T12.5-1 `occurrences` (dispatch)";
+      const occurrences = decodeOccurrencesReport(
+        await runJson(product, workspace, ["occurrences"], occurrencesContext),
+        occurrencesContext,
+      );
+      assertSameJson(
+        occurrences,
+        { findings: [], occurrences: [] },
+        `${occurrencesContext}: no reference spelling exists in the ` +
+          `workspace, so the enumeration is empty and finding-free — ` +
+          `definitive over the whole discovered set (SPEC 11.3, 5.7, 12.7)`,
+      );
+
+      // `view` (SPEC 11.4): with neither `<file>` operands nor `--file`,
+      // the request covers every discovered spec source — here exactly
+      // specs/D.mdx, finding-free (scoped decode; the full per-file view
+      // is T11.4-*'s subject).
+      const viewContext = "T12.5-1 `view` (dispatch)";
+      const view = decodeViewFilesReport(
+        await runJson(product, workspace, ["view"], viewContext),
+        viewContext,
+      );
+      assertSameJson(
+        view,
+        { findings: [], files: ["specs/D.mdx"] },
+        `${viewContext}: with neither operands nor \`--file\`, the request ` +
+          `covers every discovered spec source — one per-file view, for ` +
+          `specs/D.mdx, finding-free (SPEC 11.4, 12.7)`,
+      );
+
+      // `at` (SPEC 11.5): byte offset 20 lies inside "Anchor line." —
+      // within `anchor`'s construct range (bytes 0..69: `<S id="anchor">`
+      // opens at byte 0 and its closing `</S>` ends at byte 69), outside
+      // `anchor.sub`'s (bytes 30..64) — so the innermost enclosing section
+      // construct is `anchor`; the offset lies within no occurrence.
+      const atContext = "T12.5-1 `at specs/D.mdx 20` (dispatch)";
+      const atReport = decodeAtReport(
+        await runJson(
+          product,
+          workspace,
+          ["at", "specs/D.mdx", "20"],
+          atContext,
+        ),
+        atContext,
+      );
+      assertSameJson(
+        atReport,
+        {
+          findings: [],
+          resolution: {
+            section: {
+              identity: "specs/D.mdx#anchor",
+              range: { start: 0, end: 69 },
+            },
+            occurrence: null,
+          },
+        },
+        `${atContext}: the offset resolves to the innermost enclosing ` +
+          `section construct — \`anchor\`, its construct range bytes 0..69 ` +
+          `(1.7) — with no containing occurrence and no finding ` +
+          `(SPEC 11.5, 11.2, 12.7)`,
+      );
+
+      // `inventory` (SPEC 11.6): parses no sources and answers the
+      // workspace's shape; the record-supplied datum names the module the
+      // `build` above generated (scoped decode; the full inventory form is
+      // T11.6-*'s subject).
+      const inventoryContext = "T12.5-1 `inventory` (dispatch)";
+      const recorded = decodeInventoryRecordedDatum(
+        await runJson(product, workspace, ["inventory"], inventoryContext),
+        inventoryContext,
+      );
+      if (recorded.state !== "value") {
+        fail(
+          `${inventoryContext}: after the successful \`build\` above, the ` +
+            `record-supplied datum is the plain recorded derived-file ` +
+            `paths — never unavailability, never null (SPEC 11.6, 12.7); ` +
+            `got state ${JSON.stringify(recorded.state)}`,
+        );
+      }
+      if (!recorded.value.includes("specs/D.xspec.ts")) {
+        fail(
+          `${inventoryContext}: the recorded derived-file paths — the ` +
+            `paths as last generated, companions included — name the ` +
+            `generated module specs/D.xspec.ts (SPEC 11.6, 13.1, 13.3); ` +
+            `got ${JSON.stringify(recorded.value)}`,
+        );
+      }
 
       // Unknown command and unknown subcommands → exit 2 (SPEC 12.5, 12.0).
       await expectUsageError(

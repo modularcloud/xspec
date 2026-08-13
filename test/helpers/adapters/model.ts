@@ -341,6 +341,52 @@ export interface OccurrencesReport {
   readonly occurrences: readonly OccurrenceRecord[];
 }
 
+/**
+ * The `at` resolution's section member (SPEC.md 11.5, 12.7): the innermost
+ * section construct whose range contains the offset — the root when no
+ * narrower section does — as `{"identity", "range"}` exactly: its construct
+ * range, and its node identity per 11.2 — defined, or explicitly unavailable
+ * as the marker; never `null`.
+ */
+export interface AtSection {
+  readonly identity: string | { readonly unavailable: true };
+  readonly range: SourceRange;
+}
+
+/**
+ * The `at` resolution: `{"section", "occurrence"}` exactly (SPEC.md 12.7) —
+ * the containing occurrence's record, `null` when the offset lies within
+ * none.
+ */
+export interface AtResolution {
+  readonly section: AtSection;
+  readonly occurrence: OccurrenceRecord | null;
+}
+
+/**
+ * The `at` document (SPEC.md 11.5) — `{"findings", "resolution"}` exactly
+ * (12.7): the consulted domain's findings (the named file's), and the
+ * resolution — or, on an unparseable file, explicitly unavailable as one
+ * datum; never `null`.
+ */
+export interface AtReport {
+  readonly findings: readonly Finding[];
+  readonly resolution: AtResolution | { readonly unavailable: true };
+}
+
+/**
+ * Scoped projection of the `view` document (SPEC.md 11.4, 12.7 — decoded by
+ * `decodeViewFilesReport`): the consulted domain's findings, and each
+ * per-file view's `file` member in the reported order (byte order of
+ * workspace-relative path); the per-file `root`, `imports`, `occurrences`,
+ * and `comments` members are presence-checked and left undecoded — the
+ * T11.4-* tests pin the full per-file view.
+ */
+export interface ViewFilesReport {
+  readonly findings: readonly Finding[];
+  readonly files: readonly PathValue[];
+}
+
 /** `coverage` (T8.2-1): all profiles by default, one when named. */
 export interface CoverageReport {
   readonly profiles: readonly CoverageProfileReport[];

@@ -24,6 +24,9 @@
 //     {"unavailable": true} (11.4, 12.7)
 //   - the occurrence-record form {"file","range","kind","source","target"}
 //     and the occurrences document {"findings","occurrences"} (5.7, 11.3)
+//   - the at document {"findings","resolution"} (11.5)
+//   - the scoped view decode: top level {"findings","views"} and each
+//     per-file wrapper's form with its `file` member (11.4)
 //   - the rename/move preview document {"findings","mapping","files","delta"}
 //     (6.6) with the ten edit classes and the pinned orders
 //   - the unavailability-marker structural walk T12.7-1 relies on: no object
@@ -32,6 +35,9 @@
 import { Buffer, isUtf8 } from "node:buffer";
 import type {
   AppliedMappingPair,
+  AtReport,
+  AtResolution,
+  AtSection,
   ErrorDocument,
   Finding,
   FindingLocation,
@@ -48,6 +54,7 @@ import type {
   PreviewFileEntry,
   PreviewReport,
   SourceRange,
+  ViewFilesReport,
 } from "./model.js";
 import {
   CONDITION_CODE_TOKENS,
@@ -679,6 +686,167 @@ export function decodeOccurrencesReport(
     }
   }
   return { findings, occurrences };
+}
+
+// --- the at document (11.5, 12.7) ---------------------------------------------
+
+/**
+ * The resolution's section member: `{"identity", "range"}` exactly — the
+ * innermost enclosing section construct's range, and its node identity per
+ * 11.2: a plain identity string, or the unavailability marker where 11.2
+ * leaves it undefined; never `null`.
+ */
+function decodeAtSectionForm(value: unknown, site: DecodeSite): AtSection {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, ["identity", "range"], site);
+  const identitySite = at(site, "identity");
+  const identityDatum = decodeDatum(
+    obj["identity"],
+    identitySite,
+    expectNonEmptyString,
+  );
+  if (identityDatum.state === "null") {
+    formFail(
+      identitySite,
+      "the section's node identity — a plain identity string, or the " +
+        "unavailability marker where 11.2 leaves it undefined, never null " +
+        "(SPEC 11.5, 11.2, 12.7)",
+      null,
+    );
+  }
+  return {
+    identity:
+      identityDatum.state === "value"
+        ? identityDatum.value
+        : { unavailable: true as const },
+    range: decodeRangeForm(requiredKey(obj, "range", site), at(site, "range")),
+  };
+}
+
+/**
+ * The `at` document (11.5) — `{"findings", "resolution"}` exactly (SPEC
+ * 12.7): the consulted domain's findings, and `resolution` as
+ * `{"section", "occurrence"}` — the innermost enclosing section construct
+ * and the containing occurrence's record, `occurrence` `null` when the
+ * offset lies within none — or the unavailability marker on an unparseable
+ * file; never `null`. Form-exact (H-3): 11.5 is a JSON-only surface, no
+ * adapter in the path.
+ */
+export function decodeAtReport(doc: unknown, context?: string): AtReport {
+  const site = rootSite("12.7 at document", context);
+  const obj = expectObject(doc, site);
+  expectOnlyMembers(obj, ["findings", "resolution"], site);
+  const findings = decodeFindingsArray(
+    requiredKey(obj, "findings", site),
+    at(site, "findings"),
+  );
+  const resolutionSite = at(site, "resolution");
+  const resolutionDatum = decodeDatum(
+    obj["resolution"],
+    resolutionSite,
+    (value, valueSite): AtResolution => {
+      const res = expectObject(value, valueSite);
+      expectOnlyMembers(res, ["section", "occurrence"], valueSite);
+      const occurrenceValue = requiredMember(res, "occurrence", valueSite);
+      return {
+        section: decodeAtSectionForm(
+          requiredKey(res, "section", valueSite),
+          at(valueSite, "section"),
+        ),
+        occurrence:
+          occurrenceValue === null
+            ? null
+            : decodeOccurrenceRecordForm(
+                occurrenceValue,
+                at(valueSite, "occurrence"),
+              ),
+      };
+    },
+  );
+  if (resolutionDatum.state === "null") {
+    formFail(
+      resolutionSite,
+      'the resolution {"section", "occurrence"}, or the unavailability ' +
+        "marker on an unparseable file — never null (SPEC 11.5, 12.7)",
+      null,
+    );
+  }
+  return {
+    findings,
+    resolution:
+      resolutionDatum.state === "value"
+        ? resolutionDatum.value
+        : { unavailable: true as const },
+  };
+}
+
+// --- scoped view decode: the per-file `file` members (11.4, 12.7) -------------
+
+const VIEW_FILE_ENTRY_MEMBERS = [
+  "file",
+  "root",
+  "imports",
+  "occurrences",
+  "comments",
+] as const;
+
+/**
+ * Scoped decode of the `view` document (SPEC 11.4, 12.7): the top level —
+ * `{"findings", "views"}` exactly — and each per-file view's wrapper form —
+ * `{"file", "root", "imports", "occurrences", "comments"}` exactly, every
+ * member present — with `file` decoded as a 12.7 path value and the
+ * per-file order enforced: byte order of workspace-relative path, strictly
+ * ascending, since the requested files form a set (11.4). Deliberately
+ * scoped (the `decodeInventoryRecordedDatum` pattern): the T11.4-* tests
+ * pin the full per-file view; this decoder reads exactly what a
+ * whole-domain dispatch or membership assertion needs, `root`, `imports`,
+ * `occurrences`, and `comments` staying unread. Form-exact (H-3): never
+ * adjustable to a product's shape.
+ */
+export function decodeViewFilesReport(
+  doc: unknown,
+  context?: string,
+): ViewFilesReport {
+  const site = rootSite("12.7 view document (files)", context);
+  const obj = expectObject(doc, site);
+  expectOnlyMembers(obj, ["findings", "views"], site);
+  const findings = decodeFindingsArray(
+    requiredKey(obj, "findings", site),
+    at(site, "findings"),
+  );
+  const viewsSite = at(site, "views");
+  const files = expectArray(requiredKey(obj, "views", site), viewsSite).map(
+    (element, index) => {
+      const entrySite = at(viewsSite, index);
+      const entry = expectObject(element, entrySite);
+      expectOnlyMembers(entry, VIEW_FILE_ENTRY_MEMBERS, entrySite);
+      for (const member of VIEW_FILE_ENTRY_MEMBERS) {
+        if (member === "file") continue;
+        requiredMember(entry, member, entrySite);
+      }
+      return decodePathValue(
+        requiredKey(entry, "file", entrySite),
+        at(entrySite, "file"),
+      );
+    },
+  );
+  for (let i = 1; i < files.length; i += 1) {
+    if (
+      Buffer.compare(
+        pathValueBytes(files[i - 1]!),
+        pathValueBytes(files[i]!),
+      ) >= 0
+    ) {
+      formFail(
+        at(viewsSite, i),
+        "per-file views ordered by byte order of workspace-relative path — " +
+          "the requested files form a set, so the order is strict " +
+          "(SPEC 11.4, 12.7)",
+        obj["views"],
+      );
+    }
+  }
+  return { findings, files };
 }
 
 // --- the rename/move preview document (6.6, 12.7) -----------------------------

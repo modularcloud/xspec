@@ -1768,10 +1768,50 @@ A "new test T<x>" task always means, in one change:
   unmapped keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and certification
   green.]
 
-- [ ] FP-043 — T12.5-1: extend the dispatch sweep. [R2 #30; TEST-SPEC
+- [x] FP-043 — T12.5-1: extend the dispatch sweep. [R2 #30; TEST-SPEC
   §12.5]
   `test/suite/registry/section-12.3-12.5.ts`: add `occurrences`, `view`,
   `at`, `inventory`.
+  [Done 2026-08-13: four dispatch arms appended between the `query nodes`
+  arm and the unknown-command arms (reads before the mutating rename/move),
+  each a minimal exit-0 probe on the existing fixture, invoked bare — the
+  §11 surfaces are JSON-only, one document with or without `--json` (SPEC
+  11): `occurrences` decoded via the existing form-exact
+  `decodeOccurrencesReport` and asserted exactly `{findings: [],
+  occurrences: []}` (no reference spelling staged — the definitive empty
+  enumeration, SPEC 11.3); `view` via new scoped forms.ts
+  `decodeViewFilesReport` (top level `{"findings","views"}` exact, each
+  per-file wrapper's five members exact and present, `file` decoded,
+  path-byte order strict — a set; `root`/`imports`/`occurrences`/`comments`
+  deliberately unread, T11.4-*'s subject) asserted `{findings: [], files:
+  ["specs/D.mdx"]}` — the whole-domain request; `at specs/D.mdx 20` via new
+  forms.ts `decodeAtReport` (the full 12.7 at form:
+  `{"findings","resolution"}`, resolution and section-identity datums
+  value-or-marker never null, occurrence record-or-null) asserted exactly —
+  section identity specs/D.mdx#anchor, construct range {0,69}, occurrence
+  null (offset 20 inside "Anchor line.": inside anchor 0..69, outside
+  anchor.sub 30..64; offsets computed independently and matching `query
+  node`'s probed sourceRanges); `inventory` via the existing scoped
+  `decodeInventoryRecordedDatum` — recorded a plain list naming
+  specs/D.xspec.ts (T12.2-2's precedent; membership, companions
+  unpinned). Title, module header, and the T12.5-1 operationalization note
+  updated to the ten-command list; S-5 gains both new decoders' DECODERS
+  guards (positives incl. resolution/identity unavailability, byte-form
+  view file, containing-occurrence record, empty views; rejections:
+  absent/null members, widened markers, extra members at every level,
+  out-of-order and duplicate per-file views, null section identity).
+  Traceability unchanged (["12.5"]; 11.2–11.6 are dispatch context with
+  home coverage at stage G's T11.*-*). Verified: suite file unchanged 2
+  failed / 2 passed — T12.5-1 red-as-diagnosed now at the first new arm
+  (`occurrences` exits 2 "unknown command": the whole §11 surface is
+  patch-new, so all four arms hit the same dispatch gap; T12.3-1 keeps its
+  pre-existing FP-002-class red), later arms suite-unreached with decode
+  satisfiability proven by S-5's positive controls over the same document
+  shapes and the fixture byte facts probed directly (build generates
+  specs/D.xspec.ts; D.mdx spells no reference; one discovered spec
+  source). Typecheck/format clean; `npm run test:self` unchanged 4 planned
+  mid-loop reds (certification-document ×3 → FP-091; S-1's 7 unmapped keys
+  {11.2–11.6, 12.6, 12.7} → stage G), S-5 (80) and certification green.]
 
 - [ ] FP-044 — T13.3-1/T13.3-2: extend read sweeps; add the
   record-discipline arm. [R2 #31; TEST-SPEC §13.3]

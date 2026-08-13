@@ -35,6 +35,7 @@ import {
   conditionMention,
   corruptGraphDataShapeBlind,
   decodeAppliedMappingReport,
+  decodeAtReport,
   decodeCoverageReport,
   decodeDatum,
   decodeEdgesReport,
@@ -59,6 +60,7 @@ import {
   decodeReachableReport,
   decodeSessionListReport,
   decodeSessionStatusReport,
+  decodeViewFilesReport,
   expectNonNegativeInteger,
   isGraphDataKey,
   rootSite,
@@ -323,6 +325,40 @@ const GOOD_OCCURRENCES = {
       kind: "embeds",
       source: { unavailable: true },
       target: "specs/A.mdx#login",
+    },
+  ],
+};
+
+const GOOD_AT = {
+  findings: [],
+  resolution: {
+    section: {
+      identity: "specs/A.mdx#login",
+      range: { start: 10, end: 90 },
+    },
+    occurrence: null,
+  },
+};
+
+// The scoped view decode reads the top level, each wrapper's form, and the
+// `file` members; `root`/`imports`/`occurrences`/`comments` are
+// presence-checked placeholders here (their values stay unread by design).
+const GOOD_VIEWS = {
+  findings: [],
+  views: [
+    {
+      file: "specs/A.mdx",
+      root: { placeholder: true },
+      imports: [],
+      occurrences: [],
+      comments: [],
+    },
+    {
+      file: "specs/B.mdx",
+      root: { placeholder: true },
+      imports: [],
+      occurrences: [],
+      comments: [],
     },
   ],
 };
@@ -1446,6 +1482,228 @@ const DECODERS: readonly DecoderSpec[] = [
           ],
           "findings",
         ),
+      },
+    ],
+  },
+  {
+    name: "12.7 at document",
+    decode: decodeAtReport,
+    good: GOOD_AT,
+    verify: (decoded: ReturnType<typeof decodeAtReport>) => {
+      expect(decoded.findings).toEqual([]);
+      // The resolution decodes literally (form-exact, H-3): the innermost
+      // enclosing section construct with its defined identity, and no
+      // containing occurrence (`null` is spelled, never omitted).
+      expect(decoded.resolution).toEqual({
+        section: {
+          identity: "specs/A.mdx#login",
+          range: { start: 10, end: 90 },
+        },
+        occurrence: null,
+      });
+    },
+    alsoGood: [
+      {
+        label:
+          "the resolution explicitly unavailable on an unparseable file " +
+          "(11.5) — never a defaulted section",
+        doc: { findings: [], resolution: { unavailable: true } },
+        verify: (decoded: ReturnType<typeof decodeAtReport>): void => {
+          expect(decoded.resolution).toEqual({ unavailable: true });
+        },
+      },
+      {
+        label:
+          "the section's identity unavailable per 11.2 while its " +
+          "construct range stays on view",
+        doc: {
+          findings: [],
+          resolution: {
+            section: {
+              identity: { unavailable: true },
+              range: { start: 0, end: 40 },
+            },
+            occurrence: null,
+          },
+        },
+        verify: (decoded: ReturnType<typeof decodeAtReport>): void => {
+          expect(decoded.resolution).toEqual({
+            section: {
+              identity: { unavailable: true },
+              range: { start: 0, end: 40 },
+            },
+            occurrence: null,
+          });
+        },
+      },
+      {
+        label: "a containing occurrence's record decodes literally (5.7, 12.7)",
+        doc: put(
+          GOOD_AT,
+          structuredClone(GOOD_OCCURRENCES.occurrences[0]),
+          "resolution",
+          "occurrence",
+        ),
+        verify: (decoded: ReturnType<typeof decodeAtReport>): void => {
+          const resolution = decoded.resolution;
+          if ("unavailable" in resolution) {
+            throw new Error("resolution unexpectedly unavailable");
+          }
+          expect(resolution.occurrence).toEqual(
+            GOOD_OCCURRENCES.occurrences[0],
+          );
+        },
+      },
+    ],
+    bad: [
+      { label: "missing findings member", doc: omit(GOOD_AT, "findings") },
+      {
+        label: "missing resolution member (null is never omission, SPEC 12.7)",
+        doc: omit(GOOD_AT, "resolution"),
+      },
+      {
+        label:
+          "null resolution (a value or the unavailability marker, never null)",
+        doc: put(GOOD_AT, null, "resolution"),
+      },
+      {
+        label:
+          "an extra member on the document (12.7: exactly " +
+          "{findings, resolution})",
+        doc: put(GOOD_AT, 20, "offset"),
+      },
+      {
+        label: "resolution missing its section",
+        doc: omit(GOOD_AT, "resolution", "section"),
+      },
+      {
+        label:
+          "resolution missing its occurrence member (null is spelled, " +
+          "never omitted, SPEC 12.7)",
+        doc: omit(GOOD_AT, "resolution", "occurrence"),
+      },
+      {
+        label: "an extra member on the resolution",
+        doc: put(GOOD_AT, 1, "resolution", "extra"),
+      },
+      {
+        label: "section missing its range",
+        doc: omit(GOOD_AT, "resolution", "section", "range"),
+      },
+      {
+        label: "section missing its identity",
+        doc: omit(GOOD_AT, "resolution", "section", "identity"),
+      },
+      {
+        label:
+          "null section identity (defined or explicitly unavailable, " +
+          "never null — SPEC 11.2, 12.7)",
+        doc: put(GOOD_AT, null, "resolution", "section", "identity"),
+      },
+      {
+        label: "an extra member on the section",
+        doc: put(GOOD_AT, "x", "resolution", "section", "note"),
+      },
+      {
+        label:
+          "a widened unavailability marker as the resolution (12.7: the " +
+          'marker is exactly {"unavailable": true})',
+        doc: put(GOOD_AT, { unavailable: true, section: null }, "resolution"),
+      },
+    ],
+  },
+  {
+    name: "12.7 view document (files)",
+    decode: decodeViewFilesReport,
+    good: GOOD_VIEWS,
+    verify: (decoded: ReturnType<typeof decodeViewFilesReport>) => {
+      expect(decoded.findings).toEqual([]);
+      // The per-file `file` members in the reported (path-byte) order; the
+      // unread wrapper members are presence-checked only (module scope).
+      expect(decoded.files).toEqual(["specs/A.mdx", "specs/B.mdx"]);
+    },
+    alsoGood: [
+      {
+        label:
+          "an empty request (a glob admitting none — an empty, " +
+          "finding-free answer, 11.4)",
+        doc: { findings: [], views: [] },
+        verify: (decoded: ReturnType<typeof decodeViewFilesReport>): void => {
+          expect(decoded.findings).toEqual([]);
+          expect(decoded.files).toEqual([]);
+        },
+      },
+      {
+        label: "a non-UTF-8 view file in the marked byte form (SPEC 12.0)",
+        doc: {
+          findings: [],
+          views: [
+            {
+              file: { bytes: "ff2e6d6478" },
+              root: { placeholder: true },
+              imports: [],
+              occurrences: [],
+              comments: [],
+            },
+          ],
+        },
+        verify: (decoded: ReturnType<typeof decodeViewFilesReport>): void => {
+          expect(decoded.files).toEqual([{ bytes: "ff2e6d6478" }]);
+        },
+      },
+    ],
+    bad: [
+      { label: "missing findings member", doc: omit(GOOD_VIEWS, "findings") },
+      { label: "missing views member", doc: omit(GOOD_VIEWS, "views") },
+      {
+        label: "null views (null never encodes emptiness, SPEC 12.7)",
+        doc: put(GOOD_VIEWS, null, "views"),
+      },
+      {
+        label:
+          "an extra member on the document (12.7: exactly {findings, views})",
+        doc: put(GOOD_VIEWS, 2, "count"),
+      },
+      {
+        label: "a per-file view missing its file",
+        doc: omit(GOOD_VIEWS, "views", 0, "file"),
+      },
+      {
+        label:
+          "a per-file view missing its root member (every wrapper member " +
+          "is present, SPEC 12.7)",
+        doc: omit(GOOD_VIEWS, "views", 0, "root"),
+      },
+      {
+        label: "a per-file view missing its comments member",
+        doc: omit(GOOD_VIEWS, "views", 1, "comments"),
+      },
+      {
+        label:
+          "an extra member on a per-file view (12.7: exactly " +
+          "{file, root, imports, occurrences, comments})",
+        doc: put(GOOD_VIEWS, 1, "views", 0, "extra"),
+      },
+      {
+        label: "per-file views out of file-path byte order (SPEC 11.4, 12.7)",
+        doc: {
+          findings: [],
+          views: [
+            structuredClone(GOOD_VIEWS.views[1]),
+            structuredClone(GOOD_VIEWS.views[0]),
+          ],
+        },
+      },
+      {
+        label:
+          "duplicate per-file views (11.4: the requested files form a set)",
+        doc: {
+          findings: [],
+          views: [
+            structuredClone(GOOD_VIEWS.views[0]),
+            structuredClone(GOOD_VIEWS.views[0]),
+          ],
+        },
       },
     ],
   },
