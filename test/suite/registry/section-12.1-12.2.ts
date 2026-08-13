@@ -60,13 +60,36 @@
 //   14.10 findings aside. The staleness family itself asserts the reverse:
 //   every finding is 14.10, names its file, and instructs rebuilding.
 // - The 14.10 arms pin the exact finding where the fixture has exactly one
-//   stale file (hand-edited module, hand-deleted module: sources, config,
-//   and every other derived file stay fresh). The edited-source and
-//   disabled-emission arms cannot enumerate the product's stale set (which
-//   companions embed text, and how graph data records derived paths, are
-//   opaque — 13.1/13.3), so they assert: all findings are 14.10 and the one
-//   file SPEC fixes as stale/orphaned — the emitted Markdown, whose bytes
-//   are the compiled source (3, 13.2) — is among the named files.
+//   stale file (hand-edited module, hand-deleted module, and the
+//   occupant-kind arms — symlink to a byte-identical target, directory:
+//   sources, config, graph data, and every other derived file stay fresh).
+//   The edited-source and disabled-emission arms cannot enumerate the
+//   product's stale set (which companions embed text, and how graph data
+//   records derived paths, are opaque — 13.1/13.3), so they assert: all
+//   findings are 14.10 and the one file SPEC fixes as stale/orphaned — the
+//   emitted Markdown, whose bytes are the compiled source (3, 13.2) — is
+//   among the named files.
+// - The 14.10 unit form ("concerned path the graph-data area, no path
+//   inside it named") is operationalized as: exactly one finding, its
+//   concerned path exactly `.xspec` (the area's workspace-relative path,
+//   no trailing separator, SPEC 11.6) and its locations [] (a
+//   path-concerned condition is unlocated, 12.7) — the T6.6-6 precedent.
+//   "No per-file finding beside it" and "never the mismatch form beside
+//   it" are both the exactly-one count: any second condition-10 finding,
+//   whatever its concerned path, fails it.
+// - The mismatch arm's premise (refresh-then-revert leaves graph data
+//   reflecting the edited sources) is pinned by whole comparison of the
+//   graph-data byte state (T13.3-2's operational path set) before the edit
+//   and after the refreshing read: graph data carries all four hashes
+//   (13.3), so a text edit must change it, and comparing the product's
+//   bytes against the product's own earlier bytes is the H-4
+//   self-comparison carve-out — content stays otherwise unread.
+// - The unreadable-record recovery arm reads `inventory` through the
+//   scoped `recorded`-datum decode (forms.ts): `recorded` is the one
+//   member the recovery contract needs ("`inventory` reports `recorded`
+//   again", 14.10 → 11.6), asserted as a plain list naming the generated
+//   module; the full inventory form and the corrupt-state unavailability
+//   report are T11.6-*'s subject (T11.6-4).
 // - 14.21 identification: the corrupt-session finding must let the user find
 //   the session — accepted as the finding naming the session file path or
 //   the message naming the session (H-3 information presence, never exact
@@ -84,15 +107,36 @@
 
 import * as fsp from "node:fs/promises";
 import type { Finding } from "../../helpers/adapters/index.js";
-import { decodeFindingsReport } from "../../helpers/adapters/index.js";
-import { fail, parseJsonStdout } from "../../helpers/assertions.js";
+import {
+  GRAPH_DATA_AREA_PATH,
+  corruptGraphDataShapeBlind,
+  decodeFindingsReport,
+  decodeInventoryRecordedDatum,
+  isGraphDataKey,
+} from "../../helpers/adapters/index.js";
+import {
+  assertBytesEqual,
+  fail,
+  parseJsonStdout,
+} from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
-import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import type {
+  DirectorySnapshot,
+  SnapshotEntry,
+} from "../../helpers/snapshot.js";
+import {
+  assertLeavesUnchanged,
+  diffSnapshots,
+  snapshotDirectory,
+} from "../../helpers/snapshot.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import { assertGraphDataPresent, deleteGraphData } from "./section-13.3.js";
 import {
   assertConditionCounts,
+  assertFindingConcernsPath,
+  assertSameJson,
   buildFindings,
   buildOk,
   expectConfigurationError,
@@ -250,6 +294,64 @@ function assertStaleFileNamed(
         JSON.stringify(findings.map((finding) => finding.path)),
     );
   }
+}
+
+/**
+ * Exactly one 14.10 finding in the unit form (SPEC 14.10): concerned path
+ * the graph-data area — `.xspec`, its workspace-relative path with no
+ * trailing separator (11.6) — with no path inside the area named (the
+ * record's layout is deliberately unenumerated, 13.3: locations [], and the
+ * concerned path is exactly the area), instructing rebuilding. The
+ * exactly-one count is "no per-file finding beside it" and "never the
+ * mismatch form beside it" at once: one finding either way (14.10).
+ */
+function assertSingleUnitFormFinding(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertAllStale(findings, context);
+  if (findings.length !== 1) {
+    fail(
+      `${context}: the graph-data unit form is one condition-10 finding — ` +
+        `never a per-file finding or a second unit-form finding beside it ` +
+        `(SPEC 14.10: one finding either way; the unit forms are ` +
+        `exclusive); got ` +
+        JSON.stringify(
+          findings.map(({ condition, path }) => ({ condition, path })),
+        ),
+    );
+  }
+  const finding = findings[0]!;
+  assertFindingConcernsPath(
+    finding,
+    GRAPH_DATA_AREA_PATH,
+    `${context}: the unit form's concerned path is the graph-data area — ` +
+      `the .xspec directory spelled as its workspace-relative path, no ` +
+      `trailing separator (SPEC 14.10, 11.6)`,
+  );
+  assertSameJson(
+    finding.locations,
+    [],
+    `${context}: no path inside the area is named — the record's layout is ` +
+      `deliberately unenumerated (SPEC 14.10, 13.3), and a path-concerned ` +
+      `condition is unlocated: locations [] (SPEC 12.7)`,
+  );
+}
+
+/**
+ * The graph-data entries of a whole-root snapshot, viewed as a snapshot —
+ * T13.3-2's operational path set (every path under `.xspec/` except the
+ * durable journal and reviews paths; the predicate's one home is the H-3
+ * adapter layer). Used only for whole comparison against the product's own
+ * earlier bytes (H-4: graph-data content is opaque; the self-comparison
+ * carve-out).
+ */
+function graphDataStateOf(snapshot: DirectorySnapshot): DirectorySnapshot {
+  const entries = new Map<string, SnapshotEntry>();
+  for (const [key, entry] of snapshot.entries) {
+    if (isGraphDataKey(key)) entries.set(key, entry);
+  }
+  return { root: snapshot.root, entries };
 }
 
 /** Assert a plain file exists at `rel`, diagnosed with the SPEC cite. */
@@ -725,8 +827,8 @@ const CORRUPT_SESSION_PATH = ".xspec/reviews/bad.json";
 const T12_2_2 = defineProductTest({
   id: "T12.2-2",
   title:
-    "one workspace per finding family, each reported by `check` with exit 1: build validations re-validated from the current sources against persisting derived state; stale generated output and orphaned recorded derived files (14.10) after hand-editing, hand-deleting, editing a source, and disabling emission; unresolved/non-static references; cycles; journal integrity (14.13); policy (14.12); corrupt sessions (14.21) (SPEC 12.2, 14)",
-  timeoutMs: 240_000,
+    "one workspace per finding family, each reported by `check` with exit 1: build validations re-validated from the current sources against persisting derived state; stale generated output and orphaned recorded derived files (14.10) after hand-editing, hand-deleting, editing a source, and disabling emission, plus the occupant-kind arms — the per-file comparison judges the path's occupant itself, never traversing a symbolic link: a generated module's path occupied by a symlink whose target holds byte-identical generated content, and by a directory, each stale; the graph-data unit form, missing and mismatch arms each positively isolated — exactly one condition-10 finding, concerned path the graph-data area, no path inside it named, no per-file finding beside it; the unreadable-record unit form (14.23) reported alone, a successful `build` replacing the state (`check` clean afterward, `inventory` reports `recorded` again); unresolved/non-static references; cycles; journal integrity (14.13); policy (14.12); corrupt sessions (14.21) (SPEC 12.2, 13.3, 13.4, 11.6, 14)",
+  timeoutMs: 300_000,
   run: async (product) => {
     // Family 1 — build validations, re-validated from the current sources.
     // Derived state from a prior valid build persists while the sources are
@@ -762,7 +864,9 @@ const T12_2_2 = defineProductTest({
       },
     );
 
-    // Family 2 — 14.10 staleness and orphans, check-only, four arms.
+    // Family 2 — 14.10 per-file staleness and orphans, check-only: the
+    // hand-edit/hand-delete/edited-source/disabled-emission arms plus the
+    // occupant-kind arms.
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(true),
@@ -816,6 +920,70 @@ const T12_2_2 = defineProductTest({
             "generate: a 14.10 finding naming it (SPEC 12.2, 14.10)",
         );
 
+        // Occupant-kind arm A — the module's path occupied by a symbolic
+        // link whose target holds byte-identical generated content: the
+        // per-file comparison judges the path's occupant itself, never
+        // traversing a symbolic link (SPEC 14.10, 13.4), so the link is
+        // stale exactly as a missing or content-differing file — the
+        // discriminating arm a link-following product wrongly passes. The
+        // link target lives at the workspace root under a name no group
+        // matches and no derived path claims, so the copy itself changes
+        // nothing else `check` consults.
+        await buildOk(
+          product,
+          workspace,
+          "T12.2-2 (staleness) rebuild between arms — restores the deleted " +
+            "module (SPEC 12.1)",
+        );
+        const generatedBytes = await workspace.readBytes(moduleRel);
+        const linkTargetRel = "module-copy.txt";
+        await workspace.file(linkTargetRel, generatedBytes);
+        await fsp.rm(workspace.path(moduleRel));
+        await workspace.symlink(moduleRel, `../${linkTargetRel}`);
+        // Staging premise: reading THROUGH the link yields byte-identical
+        // generated content — only occupant-kind judgment can find this
+        // arm's staleness, so a link-following product wrongly passes.
+        assertBytesEqual(
+          await workspace.readBytes(moduleRel),
+          generatedBytes,
+          "T12.2-2 (staleness, symlink occupant) staging premise — the " +
+            "link's target holds byte-identical generated content " +
+            "(TEST-SPEC T12.2-2: the discriminating arm)",
+        );
+        assertSingleStaleFile(
+          await checkFindings(
+            product,
+            workspace,
+            "T12.2-2 (staleness, symlink occupant) `check --json`",
+          ),
+          moduleRel,
+          "T12.2-2 (staleness, symlink occupant) — the per-file comparison " +
+            "matches only a plain file holding exactly the generated " +
+            "content, never traversing a symbolic link: a symlink whose " +
+            "target holds byte-identical generated content is stale, " +
+            "exactly as a missing or content-differing file " +
+            "(SPEC 12.2, 14.10, 13.4)",
+        );
+        await fsp.rm(workspace.path(moduleRel));
+        await fsp.rm(workspace.path(linkTargetRel));
+
+        // Occupant-kind arm B — the module's path occupied by a directory:
+        // a non-plain-file occupant is stale whatever it holds (SPEC 14.10).
+        await fsp.mkdir(workspace.path(moduleRel));
+        assertSingleStaleFile(
+          await checkFindings(
+            product,
+            workspace,
+            "T12.2-2 (staleness, directory occupant) `check --json`",
+          ),
+          moduleRel,
+          "T12.2-2 (staleness, directory occupant) — a directory at a " +
+            "generated module's path is a non-plain-file occupant: stale, " +
+            "exactly as a missing or content-differing file " +
+            "(SPEC 12.2, 14.10, 13.4)",
+        );
+        await fsp.rm(workspace.path(moduleRel), { recursive: true });
+
         // Arm 3 — source edited without rebuilding: the emitted Markdown's
         // bytes are the compiled source (SPEC 3, 13.2), so it is stale for
         // certain; which further derived files change is opaque (module and
@@ -866,7 +1034,206 @@ const T12_2_2 = defineProductTest({
       },
     );
 
-    // Family 3 — unresolved and non-static references (14.5, 14.6, 14.7,
+    // Family 3 — the graph-data unit form (14.10), missing and mismatch
+    // arms, each positively isolated: every generated file present and
+    // matching, so any per-file finding beside the one unit-form finding
+    // is a phantom.
+    await withWorkspace(
+      {
+        "xspec.config.ts": markdownConfig(true),
+        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T12.2-2 (graph-data unit form) initial `build` (SPEC 12.1)",
+        );
+
+        // Missing arm — on the freshly built, otherwise clean workspace,
+        // delete the graph data (T13.3-2's operational definition: every
+        // path under .xspec/ except the durable journal and reviews
+        // paths). Every generated file stays present and matching, and the
+        // absent record leaves the recorded-file form nothing to report —
+        // so exactly one condition-10 finding, the unit form,
+        // discriminates a product that treats absent graph data as
+        // nothing to verify.
+        await deleteGraphData(
+          workspace,
+          "T12.2-2 (graph-data unit form, missing) staging",
+        );
+        assertSingleUnitFormFinding(
+          await checkFindings(
+            product,
+            workspace,
+            "T12.2-2 (graph-data unit form, missing) `check --json`",
+          ),
+          "T12.2-2 (graph-data unit form, missing) — `check` verifies " +
+            "graph data against the current sources and configuration: " +
+            "deleted graph data is missing graph data, exactly one " +
+            "condition-10 finding in the unit form with no per-file " +
+            "finding beside it (SPEC 12.2, 13.3, 14.10)",
+        );
+
+        // Mismatch arm — positively isolated via refresh-then-revert
+        // (TEST-SPEC T12.2-2): build, edit the source, run one refreshing
+        // read — graph data then reflects the edit while the generated
+        // files go stale (SPEC 13.3) — and revert the edit: the generated
+        // files again match the current sources while graph data does not.
+        await buildOk(
+          product,
+          workspace,
+          "T12.2-2 (graph-data unit form) rebuild between arms — restores " +
+            "the deleted graph data (SPEC 12.1)",
+        );
+        const wholeFresh = await snapshotDirectory(workspace.root);
+        assertGraphDataPresent(
+          wholeFresh,
+          "T12.2-2 (graph-data unit form, mismatch) staging premise after " +
+            "the rebuild",
+        );
+        const freshGraph = graphDataStateOf(wholeFresh);
+        await workspace.file(
+          "specs/A.mdx",
+          [
+            '<S id="a1">',
+            "Alpha behavior, edited for the mismatch arm.",
+            "</S>",
+            "",
+          ].join("\n"),
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["ids"],
+          0,
+          "T12.2-2 (graph-data unit form, mismatch) one refreshing read " +
+            "(`ids`) over the edited, still-valid sources — the read " +
+            "refreshes graph data before answering (SPEC 13.3, 12.3)",
+        );
+        const refreshedGraph = graphDataStateOf(
+          await snapshotDirectory(workspace.root),
+        );
+        // Staging premise: the refresh rewrote graph data to reflect the
+        // edit — graph data carries all four hashes (SPEC 13.3), so the
+        // text edit must change its bytes (whole comparison against the
+        // product's own earlier bytes; H-4 self-comparison carve-out).
+        if (diffSnapshots(freshGraph, refreshedGraph).length === 0) {
+          fail(
+            "T12.2-2 (graph-data unit form, mismatch) staging premise: " +
+              "graph data is byte-identical before the edit and after the " +
+              "refreshing read — the refresh must rewrite graph data to " +
+              "reflect the edited sources (SPEC 13.3: read results never " +
+              "come from stale data; graph data carries all four hashes, " +
+              "so a text edit changes it), leaving the mismatch arm " +
+              "nothing to stage",
+          );
+        }
+        await workspace.file("specs/A.mdx", FAILED_BUILD_VALID_SOURCE);
+        assertSingleUnitFormFinding(
+          await checkFindings(
+            product,
+            workspace,
+            "T12.2-2 (graph-data unit form, mismatch) `check --json` after " +
+              "reverting the edit",
+          ),
+          "T12.2-2 (graph-data unit form, mismatch) — the generated files " +
+            "again match the current sources while graph data does not: " +
+            "exactly one condition-10 finding in the unit form with no " +
+            "per-file finding beside it, discriminating a product that " +
+            "runs the per-file and record-readability checks but never " +
+            "compares graph data against the current sources and " +
+            "configuration (SPEC 12.2, 13.3, 14.10)",
+        );
+      },
+    );
+
+    // Family 4 — the unreadable-record unit form (14.10/14.23): graph data
+    // corrupted shape-blind (T6.6-6's staging; H-3 record-staging adapter,
+    // garbage over T13.3-2's operational path set, product-written files
+    // only), then replaced by a successful `build`.
+    await withWorkspace(
+      {
+        "xspec.config.ts": markdownConfig(true),
+        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
+      },
+      async (workspace) => {
+        const moduleRel = "specs/A.xspec.ts";
+        await buildOk(
+          product,
+          workspace,
+          "T12.2-2 (unreadable record) initial `build` — the corruption " +
+            "applies to a record the product itself wrote (SPEC 12.1, 13.3)",
+        );
+        await corruptGraphDataShapeBlind(
+          workspace.root,
+          "T12.2-2 (unreadable record) staging",
+        );
+        assertSingleUnitFormFinding(
+          await checkFindings(
+            product,
+            workspace,
+            "T12.2-2 (unreadable record) `check --json`",
+          ),
+          "T12.2-2 (unreadable record) — recorded generation state that " +
+            "exists but cannot be read as a record reports under the " +
+            "unreadable-record unit form alone: never the mismatch form " +
+            "beside it (the unit forms are exclusive), and the " +
+            "recorded-file form, consulting no readable record, is " +
+            "undetectable while the state holds (SPEC 12.2, 14.10, 14.23)",
+        );
+
+        // A successful `build` replaces the state (SPEC 14.10, 12.1,
+        // 13.4: a corrupted derived file is correctly resolved by
+        // rebuilding).
+        await buildOk(
+          product,
+          workspace,
+          "T12.2-2 (unreadable record) `build` over the corrupt-record " +
+            "state — a successful build replaces the record " +
+            "(SPEC 12.1, 13.4, 14.10)",
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["check"],
+          0,
+          "T12.2-2 (unreadable record) `check` after the rebuild — clean " +
+            "(SPEC 14.10: a successful build replaces the state)",
+        );
+        // `inventory` reports `recorded` again — the record-supplied datum
+        // is the plain recorded derived-file paths, naming the generated
+        // module (the corrupt-state unavailability report is T11.6-4's
+        // subject; `inventory` is a JSON-only surface, one document,
+        // exit 0 on the clean workspace, SPEC 11.6, 12.0).
+        const inventoryContext =
+          "T12.2-2 (unreadable record) `inventory` after the rebuild";
+        const recorded = decodeInventoryRecordedDatum(
+          await runJson(product, workspace, ["inventory"], inventoryContext),
+          inventoryContext,
+        );
+        if (recorded.state !== "value") {
+          fail(
+            `${inventoryContext}: after a successful \`build\` replaces ` +
+              `the corrupt record, the record-supplied datum is the plain ` +
+              `recorded derived-file paths again — never unavailability, ` +
+              `never null (SPEC 14.10, 14.23, 11.6, 12.7); got state ` +
+              `${JSON.stringify(recorded.state)}`,
+          );
+        }
+        if (!recorded.value.includes(moduleRel)) {
+          fail(
+            `${inventoryContext}: the recorded derived-file paths — the ` +
+              `paths as last generated, companions included — must name ` +
+              `the generated module ${JSON.stringify(moduleRel)} ` +
+              `(SPEC 11.6, 13.1, 13.3); got ` +
+              JSON.stringify(recorded.value),
+          );
+        }
+      },
+    );
+
+    // Family 5 — unresolved and non-static references (14.5, 14.6, 14.7,
     // 14.8), each staged against a distinct missing name.
     await withWorkspace(REFERENCES_FAMILY_FILES, async (workspace) => {
       await checkFamilyFindings(
@@ -879,7 +1246,7 @@ const T12_2_2 = defineProductTest({
       );
     });
 
-    // Family 4 — cycles: a self-`depends` cycle of length one (no import
+    // Family 6 — cycles: a self-`depends` cycle of length one (no import
     // cycle co-staged).
     await withWorkspace(CYCLE_FAMILY_FILES, async (workspace) => {
       await checkFamilyFindings(
@@ -891,7 +1258,7 @@ const T12_2_2 = defineProductTest({
       );
     });
 
-    // Family 5 — journal integrity (14.13): a malformed journal line.
+    // Family 7 — journal integrity (14.13): a malformed journal line.
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(false),
@@ -916,7 +1283,7 @@ const T12_2_2 = defineProductTest({
       },
     );
 
-    // Family 6 — policy (14.12, check-only): one forbidden rule, one
+    // Family 8 — policy (14.12, check-only): one forbidden rule, one
     // violating edge, freshly built so the violation is the only finding.
     await withWorkspace(POLICY_FAMILY_FILES, async (workspace) => {
       await buildOk(
@@ -934,7 +1301,7 @@ const T12_2_2 = defineProductTest({
       );
     });
 
-    // Family 7 — corrupt sessions (14.21): a session file that cannot be
+    // Family 9 — corrupt sessions (14.21): a session file that cannot be
     // parsed is corrupt categorically (SPEC 10.1).
     await withWorkspace(
       {

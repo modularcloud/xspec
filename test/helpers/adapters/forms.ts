@@ -505,6 +505,37 @@ export function decodeDatum<T>(
   return { state: "value", value: decodeValue(value, site) };
 }
 
+// --- scoped inventory decode: the `recorded` datum (11.6, 12.7) ---------------
+
+/**
+ * Scoped decode of the inventory document's `recorded` member (SPEC 11.6,
+ * 12.7): the record-supplied datum — the recorded derived-file paths, each a
+ * 12.7 path value — as a three-state datum: a plain list, `null`, or the
+ * explicit-unavailability marker (14.23). Which states are legitimate for
+ * this member is the caller's value assertion (a conforming inventory
+ * reports the plain list or unavailability, never `null`, 11.6/12.7).
+ * Deliberately scoped: SPEC 12.7 fixes the whole inventory form and the
+ * T11.6-* tests pin it entirely; this decoder reads exactly the one pinned
+ * member the record-recovery contract needs (T12.2-2's unreadable-record
+ * arm: after a successful `build` replaces the corrupt state, `inventory`
+ * reports `recorded` again) — the top level must be an object and the member
+ * present (`null` is never omission, 12.7) while every other member stays
+ * unread. Form-exact (H-3): never adjustable to a product's shape.
+ */
+export function decodeInventoryRecordedDatum(
+  doc: unknown,
+  context?: string,
+): DecodedDatum<readonly PathValue[]> {
+  const site = rootSite("11.6 inventory (recorded datum)", context);
+  const obj = expectObject(doc, site);
+  const recordedSite = at(site, "recorded");
+  return decodeDatum(obj["recorded"], recordedSite, (value, valueSite) =>
+    expectArray(value, valueSite).map((element, index) =>
+      decodePathValue(element, at(valueSite, index)),
+    ),
+  );
+}
+
 // --- the occurrences document (5.7, 11.3, 12.7) -------------------------------
 
 const OCCURRENCE_RECORD_MEMBERS = [

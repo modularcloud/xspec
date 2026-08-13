@@ -44,6 +44,7 @@ import {
   decodeIdsReport,
   decodeIdsTreeReport,
   decodeImpactReport,
+  decodeInventoryRecordedDatum,
   decodeItemReport,
   decodeNextReport,
   decodeNodeMetadataSummary,
@@ -1830,6 +1831,90 @@ const DECODERS: readonly DecoderSpec[] = [
             hint: "try --help",
           },
         },
+      },
+    ],
+  },
+  {
+    // The scoped inventory decode (SPEC 11.6, 12.7): exactly the `recorded`
+    // member as a three-state datum — a plain list of path values, `null`,
+    // or the unavailability marker (14.23) — with every other member unread
+    // (the full inventory form is T11.6-*'s subject). Which states a
+    // conforming inventory may report is the caller's value assertion; the
+    // decoder's job is that no state ever collapses into a defaulted or
+    // fabricated value (S-5).
+    name: "11.6 inventory (recorded datum)",
+    decode: decodeInventoryRecordedDatum,
+    good: {
+      findings: [],
+      recorded: ["specs/A.md", "specs/A.xspec.ts"],
+      graphData: ".xspec",
+    },
+    verify: (decoded: ReturnType<typeof decodeInventoryRecordedDatum>) => {
+      expect(decoded).toEqual({
+        state: "value",
+        value: ["specs/A.md", "specs/A.xspec.ts"],
+      });
+    },
+    alsoGood: [
+      {
+        label:
+          "explicit unavailability (14.23) decodes as the marker state — " +
+          "never as an empty or fabricated record",
+        doc: { recorded: { unavailable: true } },
+        verify: (
+          decoded: ReturnType<typeof decodeInventoryRecordedDatum>,
+        ): void => {
+          expect(decoded).toEqual({ state: "unavailable" });
+        },
+      },
+      {
+        label:
+          "an empty recorded list stays [] (empty before any generation, " +
+          "SPEC 11.6; [] is never null, 12.7)",
+        doc: { recorded: [] },
+        verify: (
+          decoded: ReturnType<typeof decodeInventoryRecordedDatum>,
+        ): void => {
+          expect(decoded).toEqual({ state: "value", value: [] });
+        },
+      },
+      {
+        label: "a non-UTF-8 recorded path arrives in the marked byte form",
+        doc: { recorded: [{ bytes: "ff2e6d64" }] },
+        verify: (
+          decoded: ReturnType<typeof decodeInventoryRecordedDatum>,
+        ): void => {
+          expect(decoded).toEqual({
+            state: "value",
+            value: [{ bytes: "ff2e6d64" }],
+          });
+        },
+      },
+    ],
+    bad: [
+      {
+        label: "absent recorded member (null is never omission, SPEC 12.7)",
+        doc: { findings: [], graphData: ".xspec" },
+      },
+      {
+        label: "a non-marker object carrying `unavailable` (SPEC 12.7)",
+        doc: { recorded: { unavailable: false } },
+      },
+      {
+        label: "the marker with an extra member (SPEC 12.7: exactly one)",
+        doc: { recorded: { unavailable: true, paths: [] } },
+      },
+      {
+        label: "a non-array plain value",
+        doc: { recorded: "specs/A.xspec.ts" },
+      },
+      {
+        label: "a non-path element",
+        doc: { recorded: [42] },
+      },
+      {
+        label: "a valid-UTF-8 path in the byte form (SPEC 12.7 forbids it)",
+        doc: { recorded: [{ bytes: "612e6d64" }] },
       },
     ],
   },

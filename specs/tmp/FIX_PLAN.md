@@ -1674,7 +1674,7 @@ A "new test T<x>" task always means, in one change:
   mid-loop reds (certification-document ×3 → FP-091; S-1's 7 unmapped
   keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
 
-- [ ] FP-041 — T12.2-2: add occupant-kind staleness and graph-data
+- [x] FP-041 — T12.2-2: add occupant-kind staleness and graph-data
   unit-form arms. [R2 #28; TEST-SPEC §12.2]
   `test/suite/registry/section-12.1-12.2.ts`: occupant kinds (symlink to a
   byte-identical target; directory); graph-data unit forms — missing
@@ -1682,6 +1682,53 @@ A "new test T<x>" task always means, in one change:
   finding), mismatch (isolated via refresh-then-revert), unreadable-record
   (FP-032's staging → unit form alone; `build` replaces; `check` clean;
   `inventory` recovers).
+  [Done 2026-08-13: occupant arms landed inside the per-file staleness
+  family between the hand-deleted and edited-source arms — the module path
+  occupied by a symlink to a root-level byte-identical copy (identity
+  through the link pinned as the staging premise: only occupant-kind
+  judgment can find it, the arm a link-following product wrongly passes)
+  and by a directory, each asserted via the existing
+  exactly-one-14.10-naming-the-module protocol, cleaned up between arms.
+  Two new families follow (the TEST-SPEC list reading: unit forms are their
+  own families): graph-data unit form — missing via section-13.3's
+  `deleteGraphData` (T13.3-2's operational definition) on the freshly
+  built, otherwise clean workspace; mismatch via build → text-only edit →
+  one refreshing read (`ids`, exit 0) → revert, the refresh premise pinned
+  by whole graph-data byte comparison before/after (graph data carries all
+  four hashes, 13.3; H-4 self-comparison carve-out, content otherwise
+  unread) — and unreadable record via `corruptGraphDataShapeBlind`
+  (FP-032's H-3 record-staging adapter), then `build` exit 0, `check` exit
+  0, and `inventory` decoded through the new scoped forms.ts
+  `decodeInventoryRecordedDatum` (the `recorded` member alone as the
+  FP-001 three-state datum; S-5 DECODERS guards added — marker/empty-list/
+  byte-form positives, absent-member/non-marker/fabricated-value
+  rejections) asserting a plain list naming specs/A.xspec.ts. Each
+  unit-form state asserts `assertSingleUnitFormFinding`: exactly one
+  condition-10 finding (no per-file finding beside, never the mismatch
+  form beside), concerned path exactly `.xspec` (GRAPH_DATA_AREA_PATH),
+  locations [], message instructing rebuilding — the T6.6-6
+  operationalization, recorded in the module header. Title extended;
+  timeout 240s → 300s; traceability unchanged (["12.2", "14"];
+  13.3/13.4/11.6 are carriage context with home coverage at
+  T13.3-*/T13.4-*/T11.6-*); no certification scope (T12.2-2 sits in
+  CERTIFICATIONS.md prose only). Verified: suite file unchanged 3 failed /
+  3 passed — T12.2-2 red-as-diagnosed at family 1's pre-existing
+  FP-001-class form-exact decode, new arms suite-unreached — with
+  soundness proven by scratch solo executions of the exact arm code plus
+  direct CLI probes against the built product: both occupant stagings run
+  clean and the product already judges occupants itself (exit 1, exactly
+  one old-shape 14.10 naming the module both ways — red only at the form
+  gap); missing/mismatch/unreadable each exit 1 with exactly one old-shape
+  condition-10 finding whose concerned file is `.xspec/graph.json` — a
+  path INSIDE the area where the arms demand the area path `.xspec`
+  itself, a real value gap beyond the form gap; the mismatch premise held
+  (refresh rewrote graph data); build-over-corrupt exit 0, check-after
+  clean, and `inventory` exit 2 unknown command (the patch-new surface —
+  the recovery assertion's diagnosed red at runJson's exit-0 gate).
+  Typecheck/format clean; `npm run test:self` unchanged 4 planned mid-loop
+  reds (certification-document ×3 → FP-091; S-1's 7 unmapped keys
+  {11.2–11.6, 12.6, 12.7} → stage G), S-5 green including the new
+  inventory-recorded-datum guards, certification green.]
 
 - [ ] FP-042 — T12.2-3: pin never-refreshes per state. [R2 #29; TEST-SPEC
   §12.2]
