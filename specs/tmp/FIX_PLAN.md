@@ -1643,10 +1643,36 @@ A "new test T<x>" task always means, in one change:
   CERTIFICATIONS.md's Exclusions only, which name exactly the in-test
   valid-twin comparison this body carries.]
 
-- [ ] FP-040 — T12.0-12: extend the git-less sweep. [R2 #27; TEST-SPEC
+- [x] FP-040 — T12.0-12: extend the git-less sweep. [R2 #27; TEST-SPEC
   §12.0]
   Add `occurrences`, `view`, `at`, `inventory`, `version`, and the
   `--preview` invocations of `rename`/`move`.
+  [Done 2026-08-13: seven steps joined GITLESS_STEPS
+  (section-12.0-ii.ts) — `occurrences`, bare `view`, `at specs/A.mdx 0`,
+  `inventory`, `version` after the query steps (clean-domain finding-free
+  answers per SPEC 11.2 and the workspace-independent 12.6 report; each a
+  JSON-only surface accepting the sweep's uniform `--json` per T12.0-1),
+  plus `rename … --preview` and `move … --preview` each directly before
+  its real operation with identical operands (a preview succeeds exactly
+  when the real operation would proceed and modifies nothing, SPEC 6.6,
+  so each real step still runs at the state it saw before). Title
+  extended to the full T12.0-12 surface. Traceability unchanged
+  (["preamble", "12.0"]; 11.2–11.6/12.6/6.6 are carriage context with
+  home coverage at stage G's §11/§12.6 tests and T6.6-*; no numbered
+  condition asserted); no certification scope (T12.0-12 appears nowhere
+  in CERTIFICATIONS.md). Verified: T12.0-12 turned green →
+  red-as-diagnosed at the first new step (`occurrences --json` exit 2
+  "unknown command" — the patch-new surface); section-12.0-ii went 2
+  failed/4 passed → 3 failed/3 passed (T12.0-9/T12.0-10 keep their
+  pre-existing reds); later steps unreached in the suite, proven sound by
+  direct probes against the built product in sweep order on a replica
+  staging: the five reads each exit 2 unknown-command, both previews exit
+  2 unknown-flag `--preview` (each failure exactly the diagnosed product
+  gap), while the premise build and the real rename/move at the probed
+  states exit 0 — every new argv valid at its insertion point.
+  Typecheck/format clean; `npm run test:self` unchanged 4 planned
+  mid-loop reds (certification-document ×3 → FP-091; S-1's 7 unmapped
+  keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
 
 - [ ] FP-041 — T12.2-2: add occupant-kind staleness and graph-data
   unit-form arms. [R2 #28; TEST-SPEC §12.2]

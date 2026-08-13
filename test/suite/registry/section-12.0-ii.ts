@@ -2250,6 +2250,16 @@ const GITLESS_STEPS: readonly GitlessStep[] = [
   { what: "coverage", argv: () => ["coverage"] },
   { what: "query node", argv: () => ["query", "node", GITLESS_ALPHA] },
   { what: "query edges", argv: () => ["query", "edges"] },
+  // The 11.3–11.6 surfaces answer over the clean domain — complete,
+  // finding-free, exit 0 (SPEC 11.2) — and `version` (12.6) is
+  // workspace-independent; none consults git. All five are JSON-only
+  // surfaces that accept `--json` per T12.0-1, so the sweep's uniform
+  // `--json` append holds for them too.
+  { what: "occurrences", argv: () => ["occurrences"] },
+  { what: "view", argv: () => ["view"] },
+  { what: "at", argv: () => ["at", GITLESS_FILE, "0"] },
+  { what: "inventory", argv: () => ["inventory"] },
+  { what: "version", argv: () => ["version"] },
   {
     what: "review create (audit)",
     argv: () => ["review", "create", "--strategy", "audit", "--name", "aud"],
@@ -2346,9 +2356,22 @@ const GITLESS_STEPS: readonly GitlessStep[] = [
     ],
   },
   { what: "review list (both sessions)", argv: () => ["review", "list"] },
+  // Each `--preview` invocation performs the real operation's full
+  // validation and planning while modifying nothing (SPEC 6.6) — a
+  // git-less planning run at the same state as the real operation that
+  // follows it, and a successful preview since the real operation
+  // proceeds (exit 0, T12.0-9).
+  {
+    what: "rename --preview",
+    argv: () => ["rename", GITLESS_FILE, "omega", "omega2", "--preview"],
+  },
   {
     what: "rename",
     argv: () => ["rename", GITLESS_FILE, "omega", "omega2"],
+  },
+  {
+    what: "move --preview",
+    argv: () => ["move", GITLESS_FILE, "specs/B.mdx", "--preview"],
   },
   { what: "move", argv: () => ["move", GITLESS_FILE, "specs/B.mdx"] },
 ];
@@ -2356,7 +2379,7 @@ const GITLESS_STEPS: readonly GitlessStep[] = [
 const T12_0_12 = defineProductTest({
   id: "T12.0-12",
   title:
-    "git-less operation: the non-baseline surface — `build`, `check`, `ids`, `show`, `coverage`, `query`, `rename`, file-form `move`, and `review` with the audit and coverage strategies through create/list/status/next/show/split/resolve/export (an `updated` resolve re-running the recorded-profile generator included) — runs to its specified outcomes in a workspace that is not a git repository and has no enclosing repository; only baseline-taking invocations require git (SPEC 12.0, SPEC.md preamble; T10.6-1's git-less audit is one instance)",
+    "git-less operation: the non-baseline surface — `build`, `check`, `ids`, `show`, `coverage`, `query`, `occurrences`, `view`, `at`, `inventory`, `version`, `rename` and file-form `move` (their `--preview` invocations included), and `review` with the audit and coverage strategies through create/list/status/next/show/split/resolve/export (an `updated` resolve re-running the recorded-profile generator included) — runs to its specified outcomes in a workspace that is not a git repository and has no enclosing repository; only baseline-taking invocations require git (SPEC 12.0, 11.2, 12.6, 6.6, SPEC.md preamble; T10.6-1's git-less audit is one instance)",
   timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
