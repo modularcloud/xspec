@@ -1,9 +1,20 @@
-// TEST-SPEC §11.2 (availability on imperfect files) — SUITE-52: T11.2-1.
+// TEST-SPEC §11.2 (availability on imperfect files) — SUITE-52: T11.2-1,
+// T11.2-2.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
 // asserts exact exit codes (H-5), and rejects a product only via diagnosed
 // assertion failures (H-8).
+//
+// Certification (CERTIFICATIONS.md CONF-AVAIL): T11.2-2 is in scope —
+// VIOL-AVAIL-NULLMARKER and VIOL-AVAIL-OMIT certify it (the fixture family
+// lands with the certification-manifest task). CONF-AVAIL's staging
+// constraint pins every command an in-scope test drives to its enumerated
+// `view`/`occurrences` surface, so T11.2-2 runs NO gate-reference `build`
+// (unlike T11.2-1, which is not in scope): staging integrity rides the
+// `view` answer's own exact accompanying-findings multiset instead, and the
+// staged conditions are drawn from the scope's stated set (14.1, 14.3, 14.4,
+// 14.17).
 //
 // SPEC 11.2: `occurrences`, `view`, and `at` answer per file, from parsing
 // alone, never gated on workspace-wide validity — parse-local structure (the
@@ -675,5 +686,496 @@ const T11_2_1 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T11.2-2 — spelled identities and interpreted data
+// ---------------------------------------------------------------------------
+//
+// SPEC 11.2's definedness matrix in one file, every node's identity datum —
+// and every node's interpreted tags and coverage — asserted via the bare
+// `view` (each a plain value, the root's stated `null`, or the 12.7
+// unavailability marker):
+//
+// - a section spells an identity exactly when EXACTLY ONE `id` attribute
+//   occurs on its tag with a quoted static-string value; repeated (values
+//   agreeing and disagreeing), braced, valueless, and absent `id` each spell
+//   none — identity explicitly unavailable;
+// - duplicate spellings (`x` twice) leave every bearer undefined, no winner,
+//   while the uniquely spelled `x.y` beneath one bearer keeps its defined
+//   identity (uniqueness constrains the section's own spelled identity
+//   alone: a defined identity without defined prefix identities);
+// - the chain conditions ARE inherited: descendants of a no-`id` section
+//   (child and grandchild — the grandchild discriminates a product checking
+//   only the immediate parent) and of a malformed-`id` section are undefined;
+// - uniqueness compares spelled identities only: the unique `z` stays
+//   defined beside a braced `id={"z"}`, whose invalid form contests nothing;
+// - absent `tags`/`coverage` props define the defaults (no tags — the plain
+//   empty list, never null — and coverage "required"), asserted on every
+//   propless section; a repeated, malformed (braced/valueless), or
+//   invalid-valued `tags`/`coverage` leaves the interpreted value
+//   unavailable, its raw spelling still a listed attribute entry (the full
+//   T11.4-3 attribute contract stays at its home test — here the entries
+//   pin exactly that no invalid form is omitted); identity is untouched by
+//   `tags`/`coverage` invalidity (those sections stay defined).
+//
+// Staging integrity WITHOUT a `build` gate reference (the CONF-AVAIL surface
+// constraint, module header): the answer's findings are pinned as the exact
+// staged condition multiset — every finding located in the matrix file —
+// so a mis-staged arm (a defect that never fired, or one firing under the
+// wrong condition) fails loudly here. Finding locations are asserted at
+// file granularity (range precision is T14-8's).
+
+const M_FILE = "specs/M.mdx";
+
+const M = new ByteFixture();
+M.add("Prélude — spelled-identity and interpreted-data matrix.\n\n");
+
+// (a) Exactly one quoted static `id` → defined; `coverage="none"` is the
+// defined non-default interpreted value (SPEC 2.5).
+const M_SOLO_START = M.pos;
+M.add("<S ");
+const M_SOLO_ID = M.attr("id", 'id="solo"');
+M.add(" ");
+const M_SOLO_COVERAGE = M.attr("coverage", 'coverage="none"');
+M.add(">\nSolo text.\n</S>");
+const M_SOLO_RANGE: SourceRange = { start: M_SOLO_START, end: M.pos };
+M.add("\n\n");
+
+// (b) Repeated `id`, values agreeing → spells none (14.17, never 14.1); a
+// take-any-value product would define #ragree and fail the tree compare.
+const M_RAGREE_START = M.pos;
+M.add("<S ");
+const M_RAGREE_ID1 = M.attr("id", 'id="ragree"');
+M.add(" ");
+const M_RAGREE_ID2 = M.attr("id", 'id="ragree"');
+M.add(">\nAgreeing repeat.\n</S>");
+const M_RAGREE_RANGE: SourceRange = { start: M_RAGREE_START, end: M.pos };
+M.add("\n\n");
+
+// (c) Repeated `id`, values disagreeing → spells none (14.17); take-first
+// (#rone) and take-last (#rtwo) products both fail the tree compare.
+const M_RPAIR_START = M.pos;
+M.add("<S ");
+const M_RPAIR_ID1 = M.attr("id", 'id="rone"');
+M.add(" ");
+const M_RPAIR_ID2 = M.attr("id", 'id="rtwo"');
+M.add(">\nDisagreeing repeat.\n</S>");
+const M_RPAIR_RANGE: SourceRange = { start: M_RPAIR_START, end: M.pos };
+M.add("\n\n");
+
+// (d) Braced `id={"x"}` → spells none (14.17); TEST-SPEC's own value ties it
+// to the duplicate pair below — under any reading its datum is unavailable,
+// and the contests-nothing discrimination rides the `z` arm.
+const M_BRACEDX_START = M.pos;
+M.add("<S ");
+const M_BRACEDX_ID = M.attr("id", 'id={"x"}');
+M.add(">\nBraced value.\n</S>");
+const M_BRACEDX_RANGE: SourceRange = { start: M_BRACEDX_START, end: M.pos };
+M.add("\n\n");
+
+// (e) Valueless `id` → spells none (14.17); the raw entry is the bare name.
+const M_VALUELESS_START = M.pos;
+M.add("<S ");
+const M_VALUELESS_ID = M.attr("id", "id");
+M.add(">\nValueless id.\n</S>");
+const M_VALUELESS_RANGE: SourceRange = { start: M_VALUELESS_START, end: M.pos };
+M.add("\n\n");
+
+// (f) No `id` at all → 14.1, identity unavailable — and (h) inheritance:
+// the child spells the well-formed, unique `orphan` (its structural check
+// masked by the parent's 14.1 — no 14.2), the grandchild `orphan.deep`
+// (structurally clean against `orphan`) — both undefined because the chain
+// contains a section spelling no identity. The grandchild discriminates a
+// product that checks only its immediate parent's spelling.
+const M_NOID_START = M.pos;
+M.add("<S>\nNo id here.\n\n");
+const M_ORPHAN_START = M.pos;
+M.add("<S ");
+const M_ORPHAN_ID = M.attr("id", 'id="orphan"');
+M.add(">\nOrphan text.\n\n");
+const M_DEEP_START = M.pos;
+M.add("<S ");
+const M_DEEP_ID = M.attr("id", 'id="orphan.deep"');
+M.add(">\nDeep text.\n</S>");
+const M_DEEP_RANGE: SourceRange = { start: M_DEEP_START, end: M.pos };
+M.add("\n</S>");
+const M_ORPHAN_RANGE: SourceRange = { start: M_ORPHAN_START, end: M.pos };
+M.add("\n</S>");
+const M_NOID_RANGE: SourceRange = { start: M_NOID_START, end: M.pos };
+M.add("\n\n");
+
+// (g) Two sections both spelling `x` → one 14.3 locating both bearers, both
+// identities unavailable, no winner — while the uniquely spelled `x.y`
+// beneath the first keeps its defined identity: defined without defined
+// prefixes (duplication is not a chain condition).
+const M_X1_START = M.pos;
+M.add("<S ");
+const M_X1_ID = M.attr("id", 'id="x"');
+M.add(">\nFirst duplicate bearer.\n\n");
+const M_XY_START = M.pos;
+M.add("<S ");
+const M_XY_ID = M.attr("id", 'id="x.y"');
+M.add(">\nUnique descendant.\n</S>");
+const M_XY_RANGE: SourceRange = { start: M_XY_START, end: M.pos };
+M.add("\n</S>");
+const M_X1_RANGE: SourceRange = { start: M_X1_START, end: M.pos };
+M.add("\n\n");
+const M_X2_START = M.pos;
+M.add("<S ");
+const M_X2_ID = M.attr("id", 'id="x"');
+M.add(">\nSecond duplicate bearer.\n</S>");
+const M_X2_RANGE: SourceRange = { start: M_X2_START, end: M.pos };
+M.add("\n\n");
+
+// (i) Malformed spelled identity (`ha#sh`, 14.4) with a structurally
+// consistent child `ha#sh.kid` — the child's own spelled identity carries
+// the malformed segment too (its own 14.4; extending a malformed identity
+// cannot avoid its segments), and both are undefined: the chain contains a
+// malformed spelled identity. No 14.2 anywhere: the child extends its
+// parent's spelling exactly.
+const M_HASH_START = M.pos;
+M.add("<S ");
+const M_HASH_ID = M.attr("id", 'id="ha#sh"');
+M.add(">\nMalformed bearer.\n\n");
+const M_HASHKID_START = M.pos;
+M.add("<S ");
+const M_HASHKID_ID = M.attr("id", 'id="ha#sh.kid"');
+M.add(">\nMalformed-chain child.\n</S>");
+const M_HASHKID_RANGE: SourceRange = { start: M_HASHKID_START, end: M.pos };
+M.add("\n</S>");
+const M_HASH_RANGE: SourceRange = { start: M_HASH_START, end: M.pos };
+M.add("\n\n");
+
+// (j) The unique `z` stays defined beside the braced `id={"z"}`: uniqueness
+// compares spelled identities only — an invalid form contests nothing. A
+// product reading the braced value would see `z` duplicated and undefine
+// the quoted bearer (tree compare) and report a second 14.3 (count map).
+// `tags="lone"` doubles as the defined single-tag interpreted value.
+const M_Z_START = M.pos;
+M.add("<S ");
+const M_Z_ID = M.attr("id", 'id="z"');
+M.add(" ");
+const M_Z_TAGS = M.attr("tags", 'tags="lone"');
+M.add(">\nUnique beside invalid forms.\n</S>");
+const M_Z_RANGE: SourceRange = { start: M_Z_START, end: M.pos };
+M.add("\n\n");
+const M_BRACEDZ_START = M.pos;
+M.add("<S ");
+const M_BRACEDZ_ID = M.attr("id", 'id={"z"}');
+M.add(">\nContests nothing.\n</S>");
+const M_BRACEDZ_RANGE: SourceRange = { start: M_BRACEDZ_START, end: M.pos };
+M.add("\n\n");
+
+// Interpreted tags/coverage matrix (each bearer's own `id` valid and unique,
+// pinning that tags/coverage invalidity never undefines identity):
+// repeated `tags` (values disagreeing — any picked or merged value fails),
+// malformed braced `tags`, invalid-valued `tags` (an invalid tag, 14.4),
+// repeated `coverage` (values AGREEING — a take-any product yields the
+// plain "none" and fails), valueless `coverage`, invalid `coverage` value.
+const M_TR_START = M.pos;
+M.add("<S ");
+const M_TR_ID = M.attr("id", 'id="tr"');
+M.add(" ");
+const M_TR_TAGS1 = M.attr("tags", 'tags="alpha"');
+M.add(" ");
+const M_TR_TAGS2 = M.attr("tags", 'tags="beta"');
+M.add(">\nRepeated tags.\n</S>");
+const M_TR_RANGE: SourceRange = { start: M_TR_START, end: M.pos };
+M.add("\n\n");
+const M_TM_START = M.pos;
+M.add("<S ");
+const M_TM_ID = M.attr("id", 'id="tm"');
+M.add(" ");
+const M_TM_TAGS = M.attr("tags", 'tags={"alpha"}');
+M.add(">\nBraced tags.\n</S>");
+const M_TM_RANGE: SourceRange = { start: M_TM_START, end: M.pos };
+M.add("\n\n");
+const M_TI_START = M.pos;
+M.add("<S ");
+const M_TI_ID = M.attr("id", 'id="ti"');
+M.add(" ");
+const M_TI_TAGS = M.attr("tags", 'tags="ok bad#tag"');
+M.add(">\nInvalid tag value.\n</S>");
+const M_TI_RANGE: SourceRange = { start: M_TI_START, end: M.pos };
+M.add("\n\n");
+const M_CR_START = M.pos;
+M.add("<S ");
+const M_CR_ID = M.attr("id", 'id="cr"');
+M.add(" ");
+const M_CR_COVERAGE1 = M.attr("coverage", 'coverage="none"');
+M.add(" ");
+const M_CR_COVERAGE2 = M.attr("coverage", 'coverage="none"');
+M.add(">\nRepeated coverage.\n</S>");
+const M_CR_RANGE: SourceRange = { start: M_CR_START, end: M.pos };
+M.add("\n\n");
+const M_CM_START = M.pos;
+M.add("<S ");
+const M_CM_ID = M.attr("id", 'id="cm"');
+M.add(" ");
+const M_CM_COVERAGE = M.attr("coverage", "coverage");
+M.add(">\nValueless coverage.\n</S>");
+const M_CM_RANGE: SourceRange = { start: M_CM_START, end: M.pos };
+M.add("\n\n");
+const M_CI_START = M.pos;
+M.add("<S ");
+const M_CI_ID = M.attr("id", 'id="ci"');
+M.add(" ");
+const M_CI_COVERAGE = M.attr("coverage", 'coverage="maybe"');
+M.add(">\nInvalid coverage value.\n</S>");
+const M_CI_RANGE: SourceRange = { start: M_CI_START, end: M.pos };
+M.add("\n");
+const M_SOURCE = M.source;
+const M_ROOT_RANGE: SourceRange = { start: 0, end: M.pos };
+
+/**
+ * The staged condition multiset — the answer's exact accompanying findings
+ * (SPEC 11.2, 14), doubling as staging integrity (no `build` gate reference:
+ * CONF-AVAIL surface constraint, module header). One finding per afflicted
+ * element for 14.17 (each element stages exactly one cause); 14.3 is ONE
+ * finding for the jointly-duplicated `x` (locating both bearers); 14.4 once
+ * per malformed spelled identity (`ha#sh`, `ha#sh.kid`) plus once for the
+ * invalid tag (`bad#tag`, T1.4-4's condition). The masked checks contribute
+ * nothing: no 14.1 from repeated/braced/valueless `id` (condition 17, never
+ * 1), no 14.2 anywhere (the no-`id` section's child is masked; every other
+ * child extends its parent's spelling exactly).
+ */
+const M_CONDITION_COUNTS: Readonly<Record<string, number>> = {
+  "14.1": 1,
+  "14.3": 1,
+  "14.4": 3,
+  "14.17": 10,
+};
+
+/**
+ * T11.2-2's tree projection: T11.2-1's clauses (identity datum, construct
+ * range, raw attribute entries, children) PLUS the interpreted `tags` and
+ * `coverage` datums — this test's own matrix. Tag-range decompositions stay
+ * outside (T11.4-1's home); the form-exact decode has validated their forms.
+ */
+interface DatumTreeExpectation {
+  readonly identity: ViewNode["identity"];
+  readonly range: SourceRange;
+  readonly attributes: readonly ViewAttributeEntry[];
+  readonly tags: ViewNode["tags"];
+  readonly coverage: ViewNode["coverage"];
+  readonly children: readonly DatumTreeExpectation[];
+}
+
+function projectDatumNode(node: ViewNode): DatumTreeExpectation {
+  return {
+    identity: node.identity,
+    range: node.range,
+    attributes: node.attributes.map((entry) => ({
+      name: entry.name,
+      range: entry.range,
+      text: entry.text,
+    })),
+    tags: node.tags,
+    coverage: node.coverage,
+    children: node.children.map(projectDatumNode),
+  };
+}
+
+/** Shorthand for a leaf expectation with defaulted tags/coverage. */
+function datumLeaf(
+  identity: DatumTreeExpectation["identity"],
+  range: SourceRange,
+  attributes: readonly ViewAttributeEntry[],
+  overrides?: Partial<Pick<DatumTreeExpectation, "tags" | "coverage">> & {
+    readonly children?: readonly DatumTreeExpectation[];
+  },
+): DatumTreeExpectation {
+  return {
+    identity,
+    range,
+    attributes,
+    // Absent props define the defaults (SPEC 11.2, 2.5, 2.6): no tags — the
+    // plain empty list, never null (12.7) — and coverage "required".
+    tags: overrides?.tags ?? [],
+    coverage: overrides?.coverage ?? "required",
+    children: overrides?.children ?? [],
+  };
+}
+
+// The complete expected tree (document order). Root: identity defined (the
+// path is valid), tags/coverage the stated structural-absence `null` (11.4,
+// 12.7) — never the marker.
+const M_TREE: DatumTreeExpectation = {
+  identity: M_FILE,
+  range: M_ROOT_RANGE,
+  attributes: [],
+  tags: null,
+  coverage: null,
+  children: [
+    datumLeaf(`${M_FILE}#solo`, M_SOLO_RANGE, [M_SOLO_ID, M_SOLO_COVERAGE], {
+      coverage: "none",
+    }),
+    datumLeaf(UNAVAILABLE, M_RAGREE_RANGE, [M_RAGREE_ID1, M_RAGREE_ID2]),
+    datumLeaf(UNAVAILABLE, M_RPAIR_RANGE, [M_RPAIR_ID1, M_RPAIR_ID2]),
+    datumLeaf(UNAVAILABLE, M_BRACEDX_RANGE, [M_BRACEDX_ID]),
+    datumLeaf(UNAVAILABLE, M_VALUELESS_RANGE, [M_VALUELESS_ID]),
+    datumLeaf(UNAVAILABLE, M_NOID_RANGE, [], {
+      children: [
+        datumLeaf(UNAVAILABLE, M_ORPHAN_RANGE, [M_ORPHAN_ID], {
+          children: [datumLeaf(UNAVAILABLE, M_DEEP_RANGE, [M_DEEP_ID])],
+        }),
+      ],
+    }),
+    datumLeaf(UNAVAILABLE, M_X1_RANGE, [M_X1_ID], {
+      children: [datumLeaf(`${M_FILE}#x.y`, M_XY_RANGE, [M_XY_ID])],
+    }),
+    datumLeaf(UNAVAILABLE, M_X2_RANGE, [M_X2_ID]),
+    datumLeaf(UNAVAILABLE, M_HASH_RANGE, [M_HASH_ID], {
+      children: [datumLeaf(UNAVAILABLE, M_HASHKID_RANGE, [M_HASHKID_ID])],
+    }),
+    datumLeaf(`${M_FILE}#z`, M_Z_RANGE, [M_Z_ID, M_Z_TAGS], {
+      tags: ["lone"],
+    }),
+    datumLeaf(UNAVAILABLE, M_BRACEDZ_RANGE, [M_BRACEDZ_ID]),
+    datumLeaf(`${M_FILE}#tr`, M_TR_RANGE, [M_TR_ID, M_TR_TAGS1, M_TR_TAGS2], {
+      tags: UNAVAILABLE,
+    }),
+    datumLeaf(`${M_FILE}#tm`, M_TM_RANGE, [M_TM_ID, M_TM_TAGS], {
+      tags: UNAVAILABLE,
+    }),
+    datumLeaf(`${M_FILE}#ti`, M_TI_RANGE, [M_TI_ID, M_TI_TAGS], {
+      tags: UNAVAILABLE,
+    }),
+    datumLeaf(
+      `${M_FILE}#cr`,
+      M_CR_RANGE,
+      [M_CR_ID, M_CR_COVERAGE1, M_CR_COVERAGE2],
+      {
+        coverage: UNAVAILABLE,
+      },
+    ),
+    datumLeaf(`${M_FILE}#cm`, M_CM_RANGE, [M_CM_ID, M_CM_COVERAGE], {
+      coverage: UNAVAILABLE,
+    }),
+    datumLeaf(`${M_FILE}#ci`, M_CI_RANGE, [M_CI_ID, M_CI_COVERAGE], {
+      coverage: UNAVAILABLE,
+    }),
+  ],
+};
+
+const T11_2_2 = defineProductTest({
+  id: "T11.2-2",
+  title:
+    'one file\'s definedness matrix via bare `view`: exactly one quoted static `id` is defined while repeated (agreeing and disagreeing), braced (`id={"x"}`), valueless, and absent `id` each spell none — identity explicitly unavailable; duplicate spellings of `x` leave both bearers unavailable, no winner, while the uniquely spelled `x.y` beneath one keeps its defined identity (defined without defined prefixes); descendants of a no-`id` and of a malformed-`id` (`ha#sh`) section are undefined by inheritance (grandchild included); the unique `z` stays defined beside a braced `id={"z"}` (an invalid form contests nothing); absent `tags`/`coverage` props define the defaults (no tags, coverage-required) while repeated, malformed, and invalid-valued ones leave the interpreted value unavailable, raw spellings still listed; the answer carries exactly the staged findings (14.1, 14.3, one 14.4 per malformed identity or tag, one 14.17 per afflicted element), each located in the file, exit 1 (SPEC 11.2, 11.4, 2.5-2.7, 14; CERTIFICATIONS.md CONF-AVAIL in scope)',
+  run: async (product) => {
+    // Fixture self-checks (T5.7-2 discipline): composed ranges sliced back
+    // out of the staged bytes before any product invocation.
+    sliceCheck(
+      M_SOURCE,
+      M_SOLO_RANGE,
+      '<S id="solo" coverage="none">\nSolo text.\n</S>',
+      "the solo construct",
+    );
+    sliceCheck(
+      M_SOURCE,
+      M_BRACEDX_ID.range,
+      M_BRACEDX_ID.text,
+      "the braced id attribute",
+    );
+    sliceCheck(M_SOURCE, M_VALUELESS_ID.range, "id", "the valueless id");
+    sliceCheck(
+      M_SOURCE,
+      M_DEEP_RANGE,
+      '<S id="orphan.deep">\nDeep text.\n</S>',
+      "the deep descendant construct",
+    );
+    sliceCheck(
+      M_SOURCE,
+      M_TI_TAGS.range,
+      'tags="ok bad#tag"',
+      "the invalid-valued tags attribute",
+    );
+    sliceCheck(M_SOURCE, M_ROOT_RANGE, M_SOURCE, "the whole matrix file");
+
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [M_FILE]: M_SOURCE,
+      },
+    });
+    try {
+      const context = "T11.2-2 bare `view` (the matrix file is the domain)";
+      const result = await runCli(product, workspace, ["view"]);
+      assertExitCode(
+        result,
+        1,
+        `${context} — the answer carries findings and explicitly-unavailable ` +
+          `datums, so the invocation exits 1 with the full document still ` +
+          `emitted (SPEC 11.2)`,
+      );
+      const report = decodeViewReport(
+        parseJsonStdout(
+          result,
+          `${context} — a single JSON document is the only output form, ` +
+            `with or without --json (SPEC 11)`,
+        ),
+        { text: false },
+        context,
+      );
+
+      // Staging integrity and the reporting side of the matrix: exactly the
+      // staged conditions accompany, every finding located in the file.
+      assertConditionCounts(
+        report.findings,
+        M_CONDITION_COUNTS,
+        `${context} — exactly the staged conditions accompany the answer ` +
+          `(SPEC 11.2, 14): one 14.1 (the id-less section), one 14.3 (the ` +
+          `duplicated x, locating both bearers), three 14.4 (ha#sh, ` +
+          `ha#sh.kid, the invalid tag bad#tag), ten 14.17 (repeated ` +
+          `agreeing/disagreeing id, braced id x2, valueless id, repeated ` +
+          `tags, braced tags, repeated coverage, valueless coverage, ` +
+          `invalid coverage value) — and nothing masked reports: no 14.1 ` +
+          `from an invalid-form id (condition 17, never 1) and no 14.2 ` +
+          `anywhere (the no-id section's child is masked, every other ` +
+          `child extends its parent's spelling exactly)`,
+      );
+      for (const finding of report.findings) {
+        assertFindingLocated(
+          finding,
+          { file: M_FILE },
+          `${context} — the ${finding.condition ?? finding.code ?? "code-less"} finding ` +
+            `locates in the matrix file (file granularity; range precision ` +
+            `is T14-8's)`,
+        );
+      }
+
+      // The one requested file's view, with every node's identity datum and
+      // interpreted tags/coverage per SPEC 11.2 — the matrix itself.
+      assertSameJson(
+        report.views.map((view) => view.file),
+        [M_FILE],
+        `${context} — one per-file view: the parseable matrix file (SPEC 11.4)`,
+      );
+      assertSameJson(
+        projectDatumNode(report.views[0]!.root),
+        M_TREE,
+        `${context} — the full positional tree with byte-exact construct ` +
+          `ranges and raw attribute entries, each node's identity datum per ` +
+          `11.2's spelling/chain/uniqueness rules (defined string or the ` +
+          `unavailability marker; the root's identity the path) and its ` +
+          `interpreted tags/coverage (plain value, the root's stated null, ` +
+          `or the marker; absent props the defaults — no tags as the plain ` +
+          `empty list, coverage "required")`,
+      );
+      assertSameJson(
+        [
+          report.views[0]!.imports,
+          report.views[0]!.occurrences,
+          report.views[0]!.comments,
+        ],
+        [[], [], []],
+        `${context} — the matrix file holds no imports, occurrences, or ` +
+          `comments: empty arrays, never null (SPEC 12.7)`,
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
 /** TEST-SPEC §11.2, in canonical ID order (SUITE-52). */
-export const section112Tests: readonly ProductTestEntry[] = [T11_2_1];
+export const section112Tests: readonly ProductTestEntry[] = [T11_2_1, T11_2_2];

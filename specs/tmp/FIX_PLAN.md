@@ -2166,9 +2166,52 @@ certify against FP-091's fixtures once those land.
   test:self`: 4 planned mid-loop reds (certification-document ×3 → FP-091;
   S-1's unmapped keys narrowed 7 → 6, now {11.3, 11.4, 11.5, 11.6, 12.6,
   12.7} → stage G), S-5 and certification green.]
-- [ ] FP-051 — Implement T11.2-2 (CONF-AVAIL): spelled-identity /
+- [x] FP-051 — Implement T11.2-2 (CONF-AVAIL): spelled-identity /
   interpreted-data definedness matrix. [R2 #2, R3 gap 1, VERIFY; TEST-SPEC
   §11.2]
+  [Done 2026-08-13: registered in section-11.2.ts (SUITE-52) with
+  traceability ["11.2"] (no TEST-SPEC 14 staging record — the FP-050
+  precedent). CONF-AVAIL in scope (VIOL-AVAIL-NULLMARKER and VIOL-AVAIL-OMIT
+  certify it; the fixture family lands with FP-091), and its scope
+  constraint is honored: NO gate-reference `build` — CERTIFICATIONS.md pins
+  every command an in-scope test drives to the enumerated `view`/
+  `occurrences` surface — so staging integrity rides the `view` answer's own
+  exact findings multiset, the staged conditions drawn from the scope's
+  stated set. One file (specs/M.mdx, multi-byte prefix), bare `view`, exit 1,
+  full tree projection (identity/range/raw attribute entries per node PLUS
+  this test's tags/coverage datums; `datumLeaf` defaults pin the absent-prop
+  defaults — tags [] never null, coverage "required" — on every propless
+  section; root the stated null/null): solo defined (+`coverage="none"` as
+  the defined non-default value); repeated agreeing (`ragree` x2) and
+  disagreeing (`rone`/`rtwo`), braced `id={"x"}`, valueless `id` each
+  unavailable (14.17, never 14.1); no-`id` section (14.1) with child
+  `orphan` (14.2 masked) AND grandchild `orphan.deep` — the deep arm
+  discriminates a product checking only the immediate parent's spelling;
+  duplicate `x` pair both unavailable (one 14.3 locating both) with `x.y`
+  defined beneath one (defined without defined prefixes); `ha#sh` (14.4)
+  with structurally-consistent child `ha#sh.kid` (own 14.4 — extending a
+  malformed identity cannot avoid its segments; deliberately no 14.2
+  anywhere, a condition outside CONF-AVAIL's stated set); unique `z` defined
+  beside braced `id={"z"}` (contests nothing — a value-reading product
+  fails the tree compare AND the count map via a second 14.3); tags matrix
+  `tr`/`tm`/`ti` (repeated/braced/invalid tag `bad#tag` 14.4) and coverage
+  matrix `cr`/`cm`/`ci` (repeated-agreeing/valueless/`"maybe"`) each
+  interpreted-unavailable with raw spellings listed and identities STAYING
+  defined (tags/coverage invalidity never undefines identity). Exact
+  findings {14.1:1, 14.3:1, 14.4:3, 14.17:10 — one per afflicted element},
+  every finding located in M (file granularity; range precision T14-8's);
+  imports/occurrences/comments []. Verified: typecheck/format clean; suite
+  section-11.2 red-as-diagnosed — T11.2-2 fails at the exit assertion
+  (`view` unknown command, exit 2, the pre-patch product gap); scratch
+  probe: a conforming fake re-deriving the 11.2 rules independently from the
+  workspace bytes ran the registered body green end-to-end (expectations
+  satisfiable, findings order accepted), and four deviation fakes each
+  failed diagnosed — markers-as-null at the identity-datum decode (exactly
+  VIOL-AVAIL-NULLMARKER's certified failure), take-last-value and
+  no-inheritance at the tree compare, invalid-forms-contest at the count
+  map (assertions toothed). `npm run test:self`: unchanged 4 planned
+  mid-loop reds (certification-document x3 → FP-091; S-1's 6 unmapped keys
+  {11.3–11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
 - [ ] FP-052 — Implement T11.2-3: invalid paths (Linux leg). [R2 #2;
   TEST-SPEC §11.2]
 - [ ] FP-053 — Implement T11.2-4 (CONF-AVAIL): resolution and expanded-text
