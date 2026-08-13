@@ -2078,10 +2078,41 @@ T11.2-4's record observations ride `occurrences`/`view`; T11.4-1 stages no
 undefined datum. The six in-scope tests are marked (CONF-AVAIL) — they must
 certify against FP-091's fixtures once those land.
 
-- [ ] FP-049 — Implement T10.1-5: failing-workspace gate precedence over
+- [x] FP-049 — Implement T10.1-5: failing-workspace gate precedence over
   session corruption, with the `check`-reports-14.21-beside-gate-findings
   discriminating pair. [R2 #1; TEST-SPEC §10.1] Registry
   `section-10.1.ts`; map `"10.1"` (+ `"14"`).
+  [Done 2026-08-13: registered in section-10.1.ts with traceability
+  ["10.1","14"]. One workspace in TEST-SPEC's staging order — valid build,
+  audit session `cor`, T10.1-4's shape-independent garbage-bytes corruption,
+  then specs/B.mdx overwritten to a childless `<S>` (exactly one 14.1, no
+  masking interplay). A `build --json` gate-reference probe pins the gate's
+  findings as exactly {14.1: 1} located in specs/B.mdx — the exact count
+  doubling as condition 21's not-by-build half — then seven gated probes
+  (`status`, `next`, `show`/`resolve --status updated`/`split` with an item
+  ID no session ever held — judged only against session content, never
+  reached, 12.0 — `export`, and `review list`) each assert exit 1, the
+  form-exact 12.7 findings report holding exactly {14.1: 1} in specs/B.mdx
+  (the exact multiset realizes "no condition-21 finding beside them"; the
+  one-member decode realizes list's whole-report replacement, 10.7), inside
+  whole-root modifies-nothing compares; `check` asserts 14.21 present and
+  concerning `.xspec/reviews/cor.json` via the 12.7 path member together
+  with the 14.1 (presence-based beside them — 14.10 detectability is
+  T14-4's, the T13.3-3 precedent); a final byte-compare restates the
+  corrupt session untouched across the sweep. No certification scope
+  (CERTIFICATIONS.md Exclusions: T10.1-5 carries its own in-test
+  check-vs-subcommand contrast). Verified: typecheck/format clean; suite
+  section-10.1 went 3 failed/1 passed → 4 failed/1 passed — T10.1-5
+  red-as-diagnosed at the first arm's FP-001-class form-exact decode
+  ("expected no member \"condition\""); direct probes against the built
+  product prove every arm sound and the deeper diagnosed gap real: the six
+  naming subcommands open the corrupt session first and report the old-shape
+  14.21 instead of the gate's findings (exactly the TEST-SPEC-named defect),
+  while `list` gates correctly and `check` reports both conditions with
+  `file` naming the session path, everything exit 1, nothing modified,
+  cor.json bytes untouched. `npm run test:self`: unchanged 4 planned
+  mid-loop reds (certification-document ×3 → FP-091; S-1's 7 unmapped keys
+  {11.2–11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
 
 - [ ] FP-050 — Implement T11.2-1: parse-local structure and per-file
   masking with no writes. [R2 #2; TEST-SPEC §11.2] New registry module(s)

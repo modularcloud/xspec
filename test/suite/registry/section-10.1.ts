@@ -1,4 +1,4 @@
-// TEST-SPEC §10.1 (review sessions) — SUITE-33: T10.1-1…T10.1-4.
+// TEST-SPEC §10.1 (review sessions) — SUITE-33: T10.1-1…T10.1-5.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -38,6 +38,15 @@
 //   NAME` against only `NAME.JSON`) stage exactly one casing, so the
 //   Windows-leg rerun (E-6; implemented by CI-01 in test/windows/) meets a
 //   case-insensitive filesystem with the discriminating state intact.
+// - T10.1-5's gate probes (SPEC 13.3): "report exactly the gate's findings"
+//   is exit 1 with stdout the single form-exact 12.7 findings report holding
+//   exactly the staged validation finding — for `review list`, that same
+//   one-member decode realizes "the gate's report replaces the per-session
+//   report whole" (SPEC 10.7): a document carrying session rows fails it.
+//   The `show`/`resolve`/`split` probes pass an item ID no session ever
+//   held: an item ID is judged only against its session's content (SPEC
+//   12.0), which no gated command reads on a failing workspace (13.3), so
+//   the probes must gate identically whatever the ID.
 //
 // T10.1-4 staging is blackbox (H-3): every shape-dependent corrupt fixture
 // starts from a session file the product itself wrote and is corrupted
@@ -52,7 +61,10 @@
 // `split` — the decomposition is recorded durably in the session (SPEC 10.7)
 // — so the garbled member holds a genuine product-recorded decomposition.
 
-import type { SessionStatusRow } from "../../helpers/adapters/index.js";
+import type {
+  Finding,
+  SessionStatusRow,
+} from "../../helpers/adapters/index.js";
 import {
   assertReportMentions,
   decodeFindingsReport,
@@ -82,6 +94,8 @@ import {
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
+  assertConditionCounts,
+  assertFindingLocated,
   assertSameJson,
   buildOk,
   expectErrorDocument,
@@ -1165,10 +1179,280 @@ const T10_1_4 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T10.1-5 — failing workspace: gate precedence over corruption
+// ---------------------------------------------------------------------------
+
+// The invalidating edit's target: valid at staging, then overwritten with a
+// non-root section carrying no `id` — after the edit the workspace's one
+// `build` validation finding is that 14.1 (the section has no children, so
+// condition 2's masking never enters), making "exactly the gate's findings"
+// a one-element multiset (SPEC 13.3, 14.1). A.mdx — the session's item
+// source — is never touched, so the gate alone flips every subcommand's
+// behavior.
+const T10_1_5_B_VALID = ['<S id="b">', "Beta text.", "</S>", ""].join("\n");
+const T10_1_5_B_INVALID = ["<S>", "Beta text.", "</S>", ""].join("\n");
+
+// T10.1-4's shape-independent garbage-bytes corruption: staged directly, no
+// assumed session layout — the bytes parse as no JSON document (SPEC 10.1,
+// 14.21).
+const T10_1_5_GARBAGE = "this is deliberately not a JSON document ][}{\n";
+
+// Item ID for the gated `show`/`resolve`/`split` probes: deliberately one no
+// session ever held. An item ID is judged only against its session's content
+// (SPEC 12.0), which no gated command reads on a failing workspace (13.3) —
+// and the corruption would withhold anyway — so the probes must report the
+// gate's findings whatever the ID: a product judging the ID before the gate
+// (exit 2, unknown item) or opening the session to judge it (a corruption
+// report) fails the exact-findings assertions below.
+const T10_1_5_ITEM_ID = "no-such-item";
+
+const T10_1_5 = defineProductTest({
+  id: "T10.1-5",
+  title:
+    "failing workspace: gate precedence over corruption — a session created on a valid build is corrupted shape-independently (garbage bytes), then a source edited to fail build validation: `status`, `next`, `show`, `export`, `resolve` and `split` with an item ID no session held, and `review list` each report exactly the gate's findings as the form-exact findings report — the one staged 14.1, no condition-21 finding beside it — exit 1 and modify nothing, the corrupt session's bytes untouched (no session file is read; for `list` the gate's report replaces the per-session report whole), while `check` reports 14.21 concerning the session file together with the validation finding — the discriminating pair (SPEC 10.1, 10.7, 13.3, 14.21, 12.0)",
+  run: async (product) => {
+    await withWorkspace(
+      {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        "specs/A.mdx": A_MDX,
+        "specs/B.mdx": T10_1_5_B_VALID,
+      },
+      async (workspace) => {
+        // --- Staging, in TEST-SPEC's order: session on a valid build,
+        // shape-independent corruption, then the invalidating source edit.
+        await buildOk(product, workspace, "T10.1-5 staging `build`");
+        await expectExit(
+          product,
+          workspace,
+          ["review", "create", "--strategy", "audit", "--name", CORRUPT_NAME],
+          0,
+          `T10.1-5 staging \`review create --strategy audit --name ${CORRUPT_NAME}\``,
+        );
+        await workspace.file(sessionRel(CORRUPT_NAME), T10_1_5_GARBAGE);
+        const corruptBytes = await readSessionBytes(
+          workspace,
+          CORRUPT_NAME,
+          "T10.1-5 staging (the corrupted session file)",
+        );
+        await workspace.file("specs/B.mdx", T10_1_5_B_INVALID);
+
+        // --- The gate reference: `build` itself reports exactly the staged
+        // validation error — "the findings a `build` would now report" is
+        // what every gated probe below must reproduce (SPEC 13.3) — and the
+        // exact one-element count doubles as condition 21's not-by-build
+        // half: `build` reads no sessions (SPEC 14 condition 21). A failing
+        // build modifies nothing (SPEC 12.1).
+        const buildContext = "T10.1-5 `build --json` (the gate reference)";
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const result = await expectExit(
+              product,
+              workspace,
+              ["build", "--json"],
+              1,
+              `${buildContext} — the edited source fails build validation (SPEC 12.1, 14.1)`,
+            );
+            const findings = decodeFindingsReport(
+              parseJsonStdout(result, buildContext),
+              buildContext,
+            ).findings;
+            assertConditionCounts(
+              findings,
+              { "14.1": 1 },
+              `${buildContext} — exactly the staged validation error, and ` +
+                `never 14.21: \`build\` does not read sessions (SPEC 14 ` +
+                `condition 21)`,
+            );
+            assertFindingLocated(
+              findings[0] as Finding,
+              { file: "specs/B.mdx" },
+              `${buildContext} — the validation error identifies the broken source (SPEC 14)`,
+            );
+          },
+          `${buildContext} — a failing build modifies nothing (SPEC 12.1)`,
+        );
+
+        /**
+         * One gated probe (SPEC 13.3, 10.1): exit 1 with stdout the single
+         * form-exact findings report holding exactly the gate's findings —
+         * the staged 14.1 alone, so no condition-21 finding beside it — and
+         * nothing modified: sources, graph data, and the corrupt session's
+         * bytes byte-identical around the invocation.
+         */
+        const probeGate = async (
+          argv: readonly string[],
+          what: string,
+        ): Promise<void> => {
+          const context = `T10.1-5 ${what}`;
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              const result = await runCli(product, workspace, argv);
+              assertExitCode(
+                result,
+                1,
+                `${context} — on a workspace failing \`build\`'s ` +
+                  `validations the gate's findings are reported and the ` +
+                  `command exits 1; no session file is read, so the ` +
+                  `corruption is not the outcome (SPEC 13.3, 10.1, 12.0)`,
+              );
+              const findings = decodeFindingsReport(
+                parseJsonStdout(result, context),
+                context,
+              ).findings;
+              assertConditionCounts(
+                findings,
+                { "14.1": 1 },
+                `${context} — exactly the gate's findings: the staged ` +
+                  `validation error alone, no condition-21 finding beside ` +
+                  `it (SPEC 13.3, 14.21)`,
+              );
+              assertFindingLocated(
+                findings[0] as Finding,
+                { file: "specs/B.mdx" },
+                `${context} — the gate's finding identifies the broken source (SPEC 14)`,
+              );
+            },
+            `${context} — nothing modified: sources, graph data, and the ` +
+              `corrupt session's bytes stay byte-identical (SPEC 13.3, 10.1)`,
+          );
+        };
+
+        // Every `review` subcommand naming the session (TEST-SPEC's list).
+        await probeGate(
+          ["review", "status", CORRUPT_NAME, "--json"],
+          `\`review status ${CORRUPT_NAME} --json\``,
+        );
+        await probeGate(
+          ["review", "next", CORRUPT_NAME, "--json"],
+          `\`review next ${CORRUPT_NAME} --json\``,
+        );
+        await probeGate(
+          ["review", "show", CORRUPT_NAME, T10_1_5_ITEM_ID, "--json"],
+          `\`review show ${CORRUPT_NAME} ${T10_1_5_ITEM_ID} --json\``,
+        );
+        await probeGate(
+          ["review", "export", CORRUPT_NAME, "--json"],
+          `\`review export ${CORRUPT_NAME} --json\``,
+        );
+        await probeGate(
+          [
+            "review",
+            "resolve",
+            CORRUPT_NAME,
+            T10_1_5_ITEM_ID,
+            "--status",
+            "updated",
+            "--json",
+          ],
+          `\`review resolve ${CORRUPT_NAME} ${T10_1_5_ITEM_ID} --status updated --json\``,
+        );
+        await probeGate(
+          ["review", "split", CORRUPT_NAME, T10_1_5_ITEM_ID, "--json"],
+          `\`review split ${CORRUPT_NAME} ${T10_1_5_ITEM_ID} --json\``,
+        );
+        // `review list`: the gate's report replaces the per-session report
+        // whole (SPEC 10.7) — realized by the same form-exact one-member
+        // decode, which no session-row-carrying document passes.
+        await probeGate(["review", "list", "--json"], "`review list --json`");
+
+        // --- The discriminating pair's other half: `check` reports 14.21
+        // together with the validation findings (SPEC 14 condition 21:
+        // beside a failing workspace's other findings; 12.2).
+        // Presence-based beside the two staged conditions: with invalid
+        // sources, the detectability of staleness findings (14.10) beside
+        // them is T14-4's reporter-matrix business (the T13.3-3 precedent).
+        const checkContext = "T10.1-5 `check --json`";
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const result = await expectExit(
+              product,
+              workspace,
+              ["check", "--json"],
+              1,
+              `${checkContext} — the workspace carries findings (SPEC 12.2)`,
+            );
+            const findings = decodeFindingsReport(
+              parseJsonStdout(result, checkContext),
+              checkContext,
+            ).findings;
+            if (
+              !findings.some(
+                (finding) =>
+                  finding.condition === "14.1" &&
+                  finding.locations.some(
+                    (location) => location.file === "specs/B.mdx",
+                  ),
+              )
+            ) {
+              fail(
+                `${checkContext}: the staged validation error (14.1 in ` +
+                  `specs/B.mdx) must be reported (SPEC 12.2, 14.1); got ` +
+                  JSON.stringify(
+                    findings.map((finding) => ({
+                      condition: finding.condition,
+                      locations: finding.locations,
+                    })),
+                  ),
+              );
+            }
+            const corrupt = findings.filter(
+              (finding) => finding.condition === "14.21",
+            );
+            if (corrupt.length === 0) {
+              fail(
+                `${checkContext}: \`check\` must report 14.21 together ` +
+                  `with the validation findings — beside a failing ` +
+                  `workspace's other findings, the discriminating half ` +
+                  `against a product dropping 14.21 on the failing side ` +
+                  `(SPEC 14 condition 21, 12.2); reported conditions: ` +
+                  JSON.stringify(findings.map((finding) => finding.condition)),
+              );
+            }
+            if (
+              !corrupt.some(
+                (finding) => finding.path === sessionRel(CORRUPT_NAME),
+              )
+            ) {
+              fail(
+                `${checkContext}: the 14.21 finding carries the corrupt ` +
+                  `session file it concerns, ${sessionRel(CORRUPT_NAME)}, ` +
+                  `as its 12.7 path member (SPEC 14: session conditions ` +
+                  `carry the file they concern); got paths ` +
+                  JSON.stringify(corrupt.map((finding) => finding.path)),
+              );
+            }
+          },
+          `${checkContext} — \`check\` never writes (SPEC 12.2, 13.3)`,
+        );
+
+        // --- Pointed restatement of "the corrupt session's bytes
+        // untouched" across the whole sweep (each probe's whole-root
+        // compare already covers its own invocation).
+        assertBytesEqual(
+          await readSessionBytes(
+            workspace,
+            CORRUPT_NAME,
+            "T10.1-5 (after every probe)",
+          ),
+          corruptBytes,
+          "T10.1-5: the corrupt session's bytes are untouched by the whole " +
+            "probe sweep — no session file is read or written on a failing " +
+            "workspace (SPEC 13.3, 10.1)",
+        );
+      },
+    );
+  },
+});
+
 /** TEST-SPEC §10.1, in canonical ID order (SUITE-33). */
 export const section101Tests: readonly ProductTestEntry[] = [
   T10_1_1,
   T10_1_2,
   T10_1_3,
   T10_1_4,
+  T10_1_5,
 ];
