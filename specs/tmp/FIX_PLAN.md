@@ -1730,10 +1730,43 @@ A "new test T<x>" task always means, in one change:
   {11.2–11.6, 12.6, 12.7} → stage G), S-5 green including the new
   inventory-recorded-datum guards, certification green.]
 
-- [ ] FP-042 — T12.2-3: pin never-refreshes per state. [R2 #29; TEST-SPEC
+- [x] FP-042 — T12.2-3: pin never-refreshes per state. [R2 #29; TEST-SPEC
   §12.2]
   Missing-arm state (graph data stays absent), isolated mismatch state,
   combined per-file+unit state.
+  [Done 2026-08-13: T12.2-3 rebuilt as the three per-state pins on one
+  workspace (section-12.1-12.2.ts) — (1) T12.2-2's missing-arm staging
+  (fresh build, `deleteGraphData`), absence pinned as a staging premise so
+  the whole-root compare-around positively proves graph data STAYS absent
+  (`check` never rewrites it, where every refreshing read would —
+  T13.3-2's cite); (2) the isolated mismatch state via T12.2-2's
+  refresh-then-revert staging with both premise pins (graph data present
+  after rebuild; the refresh rewrote it — H-4 self-comparison carve-out);
+  (3) the edited-source-without-rebuild state, per-file + unit staleness
+  together (generated files compile the old source; graph data carries all
+  four hashes — the state 2 premise pin shows this edit class rewrites it).
+  Each state runs plain `check` (exit 1) and `check --json` inside one
+  whole-root `assertLeavesUnchanged`; the staleness report is asserted per
+  state — exactly one unit-form condition-10 finding (states 1–2,
+  T12.2-2's shared helper) / `assertAllStale` (state 3) — so each state's
+  reachability is positively established, never assumed. No new helpers or
+  adapters (S-5 untouched); traceability unchanged (["12.2"] — the
+  T13.3-2/T13.3-3 precedent: the condition assertions establish the state,
+  14.10's primary record is T12.2-2's). Verified: suite file unchanged 3
+  failed / 3 passed — T12.2-3 red-as-diagnosed at state 1's FP-001-class
+  form-exact decode, later arms suite-unreached — with soundness proven by
+  a scratch probe of the exact state sequence against the built product:
+  every staging premise holds (build/ids exit 0, delete leaves zero graph
+  entries, the refresh rewrites graph data), all three states exit 1 on
+  both `check` forms reporting only old-shape condition-10 findings
+  (concerned file `.xspec/graph.json`, INSIDE the area where the unit form
+  demands `.xspec` itself — the FP-041-diagnosed value gap behind the form
+  gap), and the whole-root diff around the invocations is empty in every
+  state — the byte pins themselves already hold, graph data staying absent
+  in state 1. Typecheck/format clean; `npm run test:self` unchanged 4
+  planned mid-loop reds (certification-document ×3 → FP-091; S-1's 7
+  unmapped keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and certification
+  green.]
 
 - [ ] FP-043 — T12.5-1: extend the dispatch sweep. [R2 #30; TEST-SPEC
   §12.5]

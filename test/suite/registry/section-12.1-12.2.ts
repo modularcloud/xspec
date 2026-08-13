@@ -1349,13 +1349,38 @@ const T12_2_2 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T12.2-3 — check never refreshes
+// T12.2-3 — check never refreshes, pinned per state
 // ---------------------------------------------------------------------------
+
+// The per-state pins (TEST-SPEC T12.2-3; SPEC 13.3: "`check` never
+// refreshes — it reports staleness instead"):
+// - Missing state (T12.2-2's missing-arm staging): graph data stays absent
+//   around `check` — `check` never rewrites the record, where every
+//   refreshing read on this same state would (T13.3-2's deleted-graph-data
+//   arms). Absence is pinned as a staging premise before the invocations, so
+//   the whole-root compare-around proves "stays absent" positively.
+// - Isolated mismatch state (T12.2-2's refresh-then-revert staging, premise
+//   pinned the same way): graph data and every derived file byte-identical
+//   around the invocation.
+// - Edited-source-without-rebuild state: one content edit after a build
+//   leaves the generated files stale (their bytes compile the old source —
+//   SPEC 3, 13.1, 13.2) and graph data mismatched against the current
+//   sources (it carries all four hashes, SPEC 13.3 — the mismatch premise
+//   pin above shows exactly this edit class rewrites graph data on refresh),
+//   so the state carries per-file and unit staleness together; byte-identity
+//   around the invocation pins that neither form's detection refreshes
+//   anything.
+// Each state's staleness report is asserted in-test, so the state's
+// reachability is positively established, never assumed: the missing and
+// mismatch states report exactly the one unit-form condition-10 finding
+// (T12.2-2's contract), the edited-source state 14.10 findings only. Both
+// output forms run inside each compare, so the byte pin covers the human
+// and the `--json` invocation alike.
 
 const T12_2_3 = defineProductTest({
   id: "T12.2-3",
   title:
-    "`check` on a stale workspace reports the staleness (exit 1, 14.10) and never refreshes: graph data and derived files — the whole workspace — stay byte-identical around both the human and the `--json` invocation (SPEC 12.2, 13.3, 14.10)",
+    "`check` reports staleness and never refreshes, pinned per state: on the missing-graph-data state graph data stays absent, where every refreshing read would rewrite it; on the isolated mismatch state and on an edited-source state carrying per-file and unit staleness together, graph data and every derived file — the whole workspace — stay byte-identical around both the human and the `--json` invocation (SPEC 12.2, 13.3, 14.10)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -1363,42 +1388,161 @@ const T12_2_3 = defineProductTest({
         "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
       },
       async (workspace) => {
+        // The content edit shared by the mismatch staging and the
+        // edited-source state: a text-only edit to the one source (still
+        // valid, same node set).
+        const editedSource = [
+          '<S id="a1">',
+          "Alpha behavior, edited without rebuilding.",
+          "</S>",
+          "",
+        ].join("\n");
+
+        // Both `check` output forms on the current stale state: plain
+        // `check` exits 1, then `check --json` decodes as the findings
+        // report (SPEC 12.2, 12.0; H-3).
+        const checkStale = async (
+          context: string,
+        ): Promise<readonly Finding[]> => {
+          await expectExit(
+            product,
+            workspace,
+            ["check"],
+            1,
+            `${context} \`check\` — staleness is a finding, exit 1 ` +
+              `(SPEC 12.2, 14.10)`,
+          );
+          return await checkFindings(
+            product,
+            workspace,
+            `${context} \`check --json\``,
+          );
+        };
+
+        // State 1 — T12.2-2's missing-arm state: freshly built, otherwise
+        // clean workspace with the graph data deleted (T13.3-2's
+        // operational definition).
         await buildOk(
           product,
           workspace,
-          "T12.2-3 initial `build` (SPEC 12.1)",
+          "T12.2-3 (missing) initial `build` (SPEC 12.1)",
         );
-        // Stale: the source is edited (still valid) without rebuilding.
-        await workspace.file(
-          "specs/A.mdx",
-          ['<S id="a1">', "Alpha behavior, edited.", "</S>", ""].join("\n"),
+        await deleteGraphData(workspace, "T12.2-3 (missing) staging");
+        const missingBefore = graphDataStateOf(
+          await snapshotDirectory(workspace.root),
         );
+        if (missingBefore.entries.size > 0) {
+          fail(
+            "T12.2-3 (missing) staging premise: deleting the graph data — " +
+              "every path under .xspec/ except the durable journal and " +
+              "reviews paths (T13.3-2's operational definition) — must " +
+              "leave none; found " +
+              JSON.stringify([...missingBefore.entries.keys()].sort()),
+          );
+        }
         await assertLeavesUnchanged(
           workspace.root,
           async () => {
-            await expectExit(
-              product,
-              workspace,
-              ["check"],
-              1,
-              "T12.2-3 `check` on a stale workspace — staleness is a " +
-                "finding, exit 1 (SPEC 12.2, 14.10)",
-            );
-            const findings = await checkFindings(
-              product,
-              workspace,
-              "T12.2-3 `check --json` on a stale workspace",
-            );
-            assertAllStale(
-              findings,
-              "T12.2-3 — `check` reports the staleness: every finding is " +
-                "14.10, naming its file and instructing rebuilding " +
-                "(SPEC 12.2, 14.10)",
+            assertSingleUnitFormFinding(
+              await checkStale("T12.2-3 (missing)"),
+              "T12.2-3 (missing) — `check` reports the absent graph data: " +
+                "exactly one condition-10 finding in the unit form " +
+                "(SPEC 12.2, 13.3, 14.10)",
             );
           },
-          "T12.2-3: `check` never refreshes — graph data and derived files " +
-            "(the whole workspace) byte-identical around both invocations " +
+          "T12.2-3 (missing): graph data stays absent — `check` reports " +
+            "staleness and never rewrites the record, where every " +
+            "refreshing read on this state would (SPEC 13.3, 12.2; " +
+            "TEST-SPEC T13.3-2) — and nothing else changes either",
+        );
+
+        // State 2 — T12.2-2's isolated mismatch state: rebuild, edit the
+        // source, run one refreshing read (graph data then reflects the
+        // edit while the generated files go stale, SPEC 13.3), revert the
+        // edit — the generated files again match the current sources while
+        // graph data does not.
+        await buildOk(
+          product,
+          workspace,
+          "T12.2-3 (mismatch) rebuild — restores the deleted graph data " +
+            "(SPEC 12.1)",
+        );
+        const wholeFresh = await snapshotDirectory(workspace.root);
+        assertGraphDataPresent(
+          wholeFresh,
+          "T12.2-3 (mismatch) staging premise after the rebuild",
+        );
+        const freshGraph = graphDataStateOf(wholeFresh);
+        await workspace.file("specs/A.mdx", editedSource);
+        await expectExit(
+          product,
+          workspace,
+          ["ids"],
+          0,
+          "T12.2-3 (mismatch) one refreshing read (`ids`) over the edited, " +
+            "still-valid sources — the read refreshes graph data before " +
+            "answering (SPEC 13.3, 12.3)",
+        );
+        // Staging premise: the refresh rewrote graph data to reflect the
+        // edit — graph data carries all four hashes (SPEC 13.3), so the
+        // text edit must change its bytes (whole comparison against the
+        // product's own earlier bytes; H-4 self-comparison carve-out).
+        if (
+          diffSnapshots(
+            freshGraph,
+            graphDataStateOf(await snapshotDirectory(workspace.root)),
+          ).length === 0
+        ) {
+          fail(
+            "T12.2-3 (mismatch) staging premise: graph data is " +
+              "byte-identical before the edit and after the refreshing " +
+              "read — the refresh must rewrite graph data to reflect the " +
+              "edited sources (SPEC 13.3: read results never come from " +
+              "stale data; graph data carries all four hashes, so a text " +
+              "edit changes it), leaving the mismatch state nothing to " +
+              "stage",
+          );
+        }
+        await workspace.file("specs/A.mdx", FAILED_BUILD_VALID_SOURCE);
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            assertSingleUnitFormFinding(
+              await checkStale("T12.2-3 (mismatch)"),
+              "T12.2-3 (mismatch) — the generated files again match the " +
+                "current sources while graph data does not: exactly one " +
+                "condition-10 finding in the unit form (SPEC 12.2, 13.3, " +
+                "14.10)",
+            );
+          },
+          "T12.2-3 (mismatch): `check` never refreshes — on the isolated " +
+            "mismatch state, graph data and every derived file (the whole " +
+            "workspace) byte-identical around both invocations " +
             "(SPEC 13.3, 12.2)",
+        );
+
+        // State 3 — edited source without rebuild: per-file and unit
+        // staleness together.
+        await buildOk(
+          product,
+          workspace,
+          "T12.2-3 (edited source) rebuild (SPEC 12.1)",
+        );
+        await workspace.file("specs/A.mdx", editedSource);
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            assertAllStale(
+              await checkStale("T12.2-3 (edited source)"),
+              "T12.2-3 (edited source) — `check` reports the staleness: " +
+                "every finding is 14.10, naming its file and instructing " +
+                "rebuilding (SPEC 12.2, 14.10)",
+            );
+          },
+          "T12.2-3 (edited source): `check` never refreshes — on the state " +
+            "carrying per-file and unit staleness together, graph data and " +
+            "every derived file (the whole workspace) byte-identical " +
+            "around both invocations (SPEC 13.3, 12.2)",
         );
       },
     );
