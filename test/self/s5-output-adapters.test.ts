@@ -2187,6 +2187,33 @@ const DECODERS: readonly DecoderSpec[] = [
           });
         },
       },
+      {
+        label:
+          "currently-present origin node carrying its source range (SPEC 10.7, 1.7; T10.7-7)",
+        doc: put(
+          put(
+            GOOD_ITEM,
+            { present: true, text: "new text\n" },
+            "origin",
+            0,
+            "after",
+          ),
+          { start: 40, end: 90 },
+          "origin",
+          0,
+          "sourceRange",
+        ),
+        verify: (decoded: ReturnType<typeof decodeItemReport>) => {
+          expect(decoded.origin[0].after).toEqual({
+            present: true,
+            text: "new text\n",
+          });
+          expect(decoded.origin[0].sourceRange).toEqual({
+            start: 40,
+            end: 90,
+          });
+        },
+      },
     ],
     bad: [
       { label: "missing id", doc: omit(GOOD_ITEM, "id") },
@@ -2219,6 +2246,11 @@ const DECODERS: readonly DecoderSpec[] = [
       {
         label: "origin absent side carrying text (contradiction)",
         doc: put(GOOD_ITEM, "ghost", "origin", 0, "after", "text"),
+      },
+      {
+        label:
+          "currently-absent origin node carrying a source range (contradiction)",
+        doc: put(GOOD_ITEM, { start: 3, end: 9 }, "origin", 0, "sourceRange"),
       },
       { label: "missing baseline record", doc: omit(GOOD_ITEM, "baseline") },
       { label: "missing current record", doc: omit(GOOD_ITEM, "current") },

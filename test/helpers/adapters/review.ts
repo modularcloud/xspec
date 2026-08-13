@@ -25,7 +25,8 @@
 //   Item = { "id", "kind", "status", "blocked", "blockedBy": [id...],
 //            "reason", "note"?,
 //            "scope": NodeState, "context": [NodeState],
-//            "origin": [ { "node", "before": Side, "after": Side } ],
+//            "origin": [ { "node", "before": Side, "after": Side,
+//                          "sourceRange"? } ],
 //            "baseline", "current" }
 //   NodeState = { "node", "present": bool, "text"?, "sourceRange"? }
 //     (text optional either way: a present node's text is read from the
@@ -35,6 +36,12 @@
 //     an absent node has no current source)
 //   Side = { "present": bool, "text"? }   (text required iff present — the
 //     absent side of an origin before/after pair carries no text, SPEC 10.7)
+//   An origin entry's "sourceRange" is the node's CURRENT range: the after
+//     side is read from the current graph, so its presence is the node's
+//     current presence, and only a currently-present origin node may carry a
+//     range — every payload node, origin nodes included, enters with its
+//     source range when present and none when absent (SPEC 10.7, 1.7;
+//     T10.7-7).
 
 import type {
   ExportReport,
@@ -243,7 +250,12 @@ function decodeOriginSide(value: unknown, site: DecodeSite): OriginTextSide {
 
 function decodeOriginEntry(value: unknown, site: DecodeSite): OriginEntry {
   const obj = expectObject(value, site);
-  return {
+  const entry: {
+    node: string;
+    before: OriginTextSide;
+    after: OriginTextSide;
+    sourceRange?: OriginEntry["sourceRange"];
+  } = {
     node: expectNonEmptyString(
       requiredKey(obj, "node", site),
       at(site, "node"),
@@ -254,6 +266,23 @@ function decodeOriginEntry(value: unknown, site: DecodeSite): OriginEntry {
     ),
     after: decodeOriginSide(requiredKey(obj, "after", site), at(site, "after")),
   };
+  if (!entry.after.present) {
+    // The after side is the node's current presence (SPEC 10.7: after from
+    // the current graph), so a currently-absent origin node has no current
+    // source and carries no source range (SPEC 10.7, 1.7).
+    forbiddenKey(
+      obj,
+      "sourceRange",
+      site,
+      "a currently-absent origin node (absent after side) has no current source, so it carries no source range (SPEC 10.7, 1.7)",
+    );
+    return entry;
+  }
+  const sourceRange = optionalKey(obj, "sourceRange");
+  if (sourceRange !== undefined) {
+    entry.sourceRange = decodeSourceRange(sourceRange, at(site, "sourceRange"));
+  }
+  return entry;
 }
 
 /** Decode one full review item (10.2 fields plus the payload of 10.7). */

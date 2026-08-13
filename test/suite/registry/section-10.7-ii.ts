@@ -594,6 +594,7 @@ function payloadProjection(item: ReviewItem): unknown {
         node: entry.node,
         before: entry.before,
         after: entry.after,
+        sourceRange: entry.sourceRange,
       })),
   };
 }
@@ -783,6 +784,26 @@ function assertOriginPair(
 }
 
 /**
+ * Assert an origin entry's node-level source range (SPEC 10.7, 1.7): every
+ * payload node — scope, context, and origin alike — enters with its current
+ * source range when present. (The adapter already rejects a range on a
+ * currently-absent origin node, whose after side is absent.)
+ */
+function assertOriginRange(
+  entry: OriginEntry,
+  expected: SourceRange,
+  context: string,
+): void {
+  assertSameJson(
+    entry.sourceRange,
+    expected,
+    `${context}: ${entry.node}'s origin-entry source range — every present ` +
+      `payload node, origin nodes included, carries its current source ` +
+      `range (SPEC 10.7, 1.7)`,
+  );
+}
+
+/**
  * Walk a session to completion via `next --json` + `resolve --status
  * no-change` (which never re-derives, SPEC 10.5): every item of `reference`
  * must be returned by `next` exactly once, presenting the identical
@@ -888,6 +909,31 @@ function n7PbSpec(kidText: string): string {
   ].join("\n");
 }
 
+// The payload arm's impacted code location (SPEC 9.2, 10.5): the marker sits
+// inside the function declaration `nextUnit`, so the reference is attributed
+// to the named unit (SPEC 4.6) and the impacted location is
+// `src/next.ts#nextUnit`. Multi-byte UTF-8 bytes precede the unit, so the
+// precomputed byte offsets diverge from code-point and UTF-16 offsets: the
+// range assertion is byte-precise (SPEC 1.7; a code location is no
+// `query node` operand, so its range is asserted against precomputed offsets
+// — the T10.7-12/T1.7-2 pattern).
+const N7_CODE_FILE = "src/next.ts";
+const N7_CODE = "src/next.ts#nextUnit";
+const N7_CODE_BEFORE_UNIT =
+  'import A from "../specs/A2.xspec";\n\n// Byte-genaue Präambel vor der Einheit (multi-byte prefix).\n\n';
+const N7_CODE_UNIT_DECL = "function nextUnit() {\n  A.a.k;\n}";
+const N7_CODE_SOURCE = `${N7_CODE_BEFORE_UNIT}${N7_CODE_UNIT_DECL}\n`;
+
+// nextUnit's construct range (SPEC 1.7, 4.6): the function declaration's own
+// bytes, from the `function` keyword through the closing brace — zero-based,
+// start-inclusive, end-exclusive byte offsets into the file.
+const N7_CODE_RANGE: SourceRange = {
+  start: Buffer.byteLength(N7_CODE_BEFORE_UNIT, "utf8"),
+  end:
+    Buffer.byteLength(N7_CODE_BEFORE_UNIT, "utf8") +
+    Buffer.byteLength(N7_CODE_UNIT_DECL, "utf8"),
+};
+
 /**
  * `review next <name>` (human form) reporting the session fully resolved:
  * exit 0 and stdout mentioning resolution (H-3: information presence — the
@@ -929,7 +975,7 @@ async function expectFullyResolvedBothForms(
 const T10_7_7 = defineProductTest({
   id: "T10.7-7",
   title:
-    "`review next`: returns the first needing-review unblocked item in item order — in an audit session with blocked root and parent items it returns the first leaf, then the second, then moves backward in item order to the meanwhile-unblocked parent and root; when all items are resolved, and for a session with no items, it exits 0 and reports fully resolved in the human and `--json` forms with no item in the JSON payload; the `--json` payload is self-contained — scope text, context texts, origin before/after texts, source ranges for present requirement nodes, and the recorded `baseline` and `current` hashes (asserted against distinct `query node` captures at the baseline and creation moments) (SPEC 10.2, 10.3, 10.4, 10.6, 10.7)",
+    "`review next`: returns the first needing-review unblocked item in item order — in an audit session with blocked root and parent items it returns the first leaf, then the second, then moves backward in item order to the meanwhile-unblocked parent and root; when all items are resolved, and for a session with no items, it exits 0 and reports fully resolved in the human and `--json` forms with no item in the JSON payload; the `--json` payload is self-contained — scope text, context texts, origin before/after texts, source ranges for every present node, requirement node and present code location alike (scope, context, and origin entries; the code-impact scope's named-unit construct range byte-asserted against precomputed offsets) and none for absent nodes (after the code file's deletion the same item's scope presents identity and absence alone — no text, no range), and the recorded `baseline` and `current` hashes (asserted against distinct `query node` captures at the baseline and creation moments) (SPEC 1.7, 4.6, 9.2, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7)",
   timeoutMs: 360_000,
   run: async (product) => {
     // --- arm 1: order walking and the fully-resolved report -----------------
@@ -1060,8 +1106,14 @@ const T10_7_7 = defineProductTest({
     });
 
     // --- arm 3: the self-contained --json payload ----------------------------
+    // Source ranges are asserted for EVERY present payload node — requirement
+    // node and present code location alike — and for none of the absent ones
+    // (SPEC 10.7, 1.7): the walk below reaches the code-impact item, whose
+    // scope is first a present code location (named-unit construct range,
+    // precomputed byte offsets) and then, after the code file's deletion, an
+    // absent one (identity and absence alone — no text, no range).
     await withWorkspace(
-      SPECS_ONLY_CONFIG,
+      SPECS_CODE_CONFIG,
       { [N7_PB_FILE]: n7PbSpec("Kid line v0.") },
       async (workspace) => {
         const prefix = "T10.7-7 payload arm";
@@ -1075,7 +1127,11 @@ const T10_7_7 = defineProductTest({
           `${prefix} baseline capture`,
         );
 
+        // v1: the reviewed edit, plus the code source whose named unit
+        // references a.k — the impacted location (SPEC 9.2) whose
+        // code-impact item the walk below reaches.
         await workspace.file(N7_PB_FILE, n7PbSpec("Kid line v1."));
+        await workspace.file(N7_CODE_FILE, N7_CODE_SOURCE);
         await buildOk(product, workspace, `${prefix} \`build\` at v1`);
         const akAtCreate = await queryNode(
           product,
@@ -1129,8 +1185,10 @@ const T10_7_7 = defineProductTest({
 
         // Self-contained payload (SPEC 10.7): scope with subtree text and
         // source range; context (the ancestor chain) with own texts and
-        // source ranges; origin with the before/after own-text pair; the
-        // recorded baseline and current hashes.
+        // source ranges; origin with the before/after own-text pair AND the
+        // origin node's current source range (every present payload node
+        // carries one, SPEC 10.7, 1.7); the recorded baseline and current
+        // hashes.
         assertPresentState(
           item.scope,
           {
@@ -1165,14 +1223,20 @@ const T10_7_7 = defineProductTest({
           [N7_AK],
           `${prefix}: the origin is the changed node (SPEC 10.5)`,
         );
+        const akOrigin = requireOriginEntry(item, N7_AK, prefix);
         assertOriginPair(
-          requireOriginEntry(item, N7_AK, prefix),
+          akOrigin,
           {
             before: { present: true, text: akAtBase.ownText },
             after: { present: true, text: akAtCreate.ownText },
           },
           `${prefix} origin pair for a.k — before from the item's baseline ` +
             `state, after from the current graph`,
+        );
+        assertOriginRange(
+          akOrigin,
+          akAtCreate.sourceRange,
+          `${prefix} origin entry a.k`,
         );
         assertRecordedHolds(
           item.baseline,
@@ -1203,6 +1267,170 @@ const T10_7_7 = defineProductTest({
           akAtBase.hashes.subtreeHash,
           "the baseline subtreeHash",
           `${prefix} payload \`current\``,
+        );
+
+        // Walk to the code-impact item (item order: the two spec items
+        // precede the code location's, whose file path sorts after
+        // specs/…; `resolve --status no-change` never re-derives, SPEC
+        // 10.5). The parent's item, unblocked by the leaf's resolve, is
+        // returned next — its scope a present requirement node with own
+        // text and source range.
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          item.id,
+          "no-change",
+          `${prefix} \`resolve s <a.k's item> --status no-change\``,
+        );
+        const second = requireNextItem(
+          await nextInSession(product, workspace, "s", `${prefix} second`),
+          `${prefix} second`,
+        );
+        if (
+          second.kind !== "parent-consistency" ||
+          second.scope.node !== N7_A
+        ) {
+          fail(
+            `${prefix}: after resolving a.k's item, the first needing-review ` +
+              `unblocked item is a's parent-consistency item (SPEC 10.5, ` +
+              `10.7); got ${second.kind} ${second.scope.node}`,
+          );
+        }
+        assertPresentState(
+          second.scope,
+          { node: N7_A, text: aNow.ownText, sourceRange: aNow.sourceRange },
+          `${prefix} second scope (parent-consistency scope text is the ` +
+            `scope node's own text)`,
+        );
+        await resolveOk(
+          product,
+          workspace,
+          "s",
+          second.id,
+          "no-change",
+          `${prefix} \`resolve s <a's item> --status no-change\``,
+        );
+
+        // The code-impact item: its scope is a PRESENT code location —
+        // identity, presence, and the named unit's construct range,
+        // byte-asserted against precomputed offsets (review payloads are
+        // one of the two range-presenting outputs for code locations,
+        // SPEC 1.7, 4.6), with no text value; its context and origin nodes
+        // are present requirement nodes carrying their ranges.
+        const codeItem = requireNextItem(
+          await nextInSession(product, workspace, "s", `${prefix} code item`),
+          `${prefix} code item`,
+        );
+        if (
+          codeItem.kind !== "code-impact" ||
+          codeItem.scope.node !== N7_CODE
+        ) {
+          fail(
+            `${prefix}: after resolving both spec items, the remaining ` +
+              `needing-review item is the impacted location's code-impact ` +
+              `item (SPEC 9.2, 10.5, 10.7); got ` +
+              `${codeItem.kind} ${codeItem.scope.node}`,
+          );
+        }
+        const codeLabel = `${prefix} code-impact(${N7_CODE})`;
+        assertPresentState(
+          codeItem.scope,
+          { node: N7_CODE, text: undefined, sourceRange: N7_CODE_RANGE },
+          `${codeLabel} scope — a present code location enters the payload ` +
+            `with its source range (the construct binding the unit's name, ` +
+            `precomputed byte offsets) and no text (SPEC 10.7, 1.7, 4.6)`,
+        );
+        assertSameJson(
+          identitySet(codeItem.context),
+          [N7_AK],
+          `${codeLabel}: context is the impact-edge target (SPEC 9.2, 10.5)`,
+        );
+        assertPresentState(
+          requireContextEntry(codeItem, N7_AK, codeLabel),
+          {
+            node: N7_AK,
+            text: akAtCreate.subtreeText,
+            sourceRange: akAtCreate.sourceRange,
+          },
+          `${codeLabel} context entry a.k — code-impact targets carry ` +
+            `subtree text, with the present node's source range`,
+        );
+        assertSameJson(
+          identitySet(codeItem.origin),
+          [N7_AK],
+          `${codeLabel}: origin is the originating node (SPEC 5.6, 10.5)`,
+        );
+        const codeItemOrigin = requireOriginEntry(codeItem, N7_AK, codeLabel);
+        assertOriginPair(
+          codeItemOrigin,
+          {
+            before: { present: true, text: akAtBase.ownText },
+            after: { present: true, text: akAtCreate.ownText },
+          },
+          `${codeLabel} origin pair for a.k`,
+        );
+        assertOriginRange(
+          codeItemOrigin,
+          akAtCreate.sourceRange,
+          `${codeLabel} origin entry a.k`,
+        );
+
+        // None for absent nodes (SPEC 10.7, 1.7): delete the code file —
+        // the location leaves the current graph while the workspace stays
+        // valid (a zero-source code group, SPEC 7) — and the still-
+        // unresolved item presents its scope ABSENT: identity and absence
+        // alone, no text (a code location has none and no recorded state
+        // supplies one), no source range; the present context and origin
+        // nodes keep their ranges. Reads never re-derive, so it is the
+        // same item (SPEC 10.5, 10.7).
+        await fsp.rm(workspace.path(N7_CODE_FILE));
+        await buildOk(
+          product,
+          workspace,
+          `${prefix} \`build\` after the deletion`,
+        );
+        const goneItem = requireNextItem(
+          await nextInSession(product, workspace, "s", `${prefix} deleted`),
+          `${prefix} deleted`,
+        );
+        if (goneItem.id !== codeItem.id) {
+          fail(
+            `${prefix}: deleting the code file re-derives nothing — \`next\` ` +
+              `still returns the same unresolved code-impact item (SPEC ` +
+              `10.5, 10.7); expected ${codeItem.id}, got ${goneItem.id} ` +
+              `(${goneItem.kind} ${goneItem.scope.node})`,
+          );
+        }
+        const goneLabel = `${prefix} code-impact(${N7_CODE}) after deletion`;
+        assertAbsentState(
+          goneItem.scope,
+          { node: N7_CODE, text: undefined },
+          `${goneLabel} scope — a deleted code location's entry carries no ` +
+            `source range and no text (SPEC 10.7, 1.7)`,
+        );
+        assertPresentState(
+          requireContextEntry(goneItem, N7_AK, goneLabel),
+          {
+            node: N7_AK,
+            text: akAtCreate.subtreeText,
+            sourceRange: akAtCreate.sourceRange,
+          },
+          `${goneLabel} context entry a.k — still present, still ranged`,
+        );
+        const goneOrigin = requireOriginEntry(goneItem, N7_AK, goneLabel);
+        assertOriginPair(
+          goneOrigin,
+          {
+            before: { present: true, text: akAtBase.ownText },
+            after: { present: true, text: akAtCreate.ownText },
+          },
+          `${goneLabel} origin pair for a.k`,
+        );
+        assertOriginRange(
+          goneOrigin,
+          akAtCreate.sourceRange,
+          `${goneLabel} origin entry a.k`,
         );
       },
     );

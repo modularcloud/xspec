@@ -538,11 +538,18 @@ export type OriginTextSide =
   | { readonly present: false }
   | { readonly present: true; readonly text: string };
 
-/** One origin entry: a node's own text before and after (T10.7-12). */
+/**
+ * One origin entry: a node's own text before and after (T10.7-12). The after
+ * side is read from the current graph, so its presence is the node's current
+ * presence (SPEC.md 10.7) — and like every payload node, a currently-present
+ * origin node carries its current source range while a currently-absent one
+ * carries none (SPEC.md 10.7, 1.7; T10.7-7).
+ */
 export interface OriginEntry {
   readonly node: string;
   readonly before: OriginTextSide;
   readonly after: OriginTextSide;
+  readonly sourceRange?: SourceRange;
 }
 
 /**

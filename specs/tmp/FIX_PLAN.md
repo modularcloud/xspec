@@ -1419,12 +1419,47 @@ A "new test T<x>" task always means, in one change:
   5.6/10.5 are context with home coverage elsewhere; no numbered condition
   asserted); T10.4-2 in no certification scope.]
 
-- [ ] FP-035 — T10.7-7: assert payload source ranges for EVERY present
+- [x] FP-035 — T10.7-7: assert payload source ranges for EVERY present
   node. [R2 #22; TEST-SPEC §10.7]
   Currently asserted "for present requirement nodes" only
   (section-10.7-i/ii — locate the T10.7-7 body): cover every present
   node's, requirement node and present code location alike; none for
   absent nodes.
+  [Done 2026-08-13: the payload arm (section-10.7-ii.ts) now runs on
+  SPECS_CODE_CONFIG with a v1 code source whose named unit `nextUnit`
+  references a.k (SPEC 4.6 attribution behind a multi-byte prefix), and
+  covers the range clause on every payload position: ORIGIN nodes — the
+  H-3 review adapter's OriginEntry gains a node-level `sourceRange`
+  (SPEC 10.7 presents every scope/context/origin node under its current
+  identity and presence with its range when present; the after side IS the
+  current presence, so the decode forbids a range on an after-absent entry)
+  asserted via new `assertOriginRange` on every origin entry the test
+  reads, and carried through `payloadProjection` so the one-payload-rule
+  compares include it; CODE LOCATIONS — the walk (resolve no-change never
+  re-derives) reaches the code-impact item after the two spec items and
+  byte-asserts its present scope's named-unit construct range against
+  precomputed offsets, no text (SPEC 1.7's review-payload half), context
+  a.k subtree text + range, origin a.k pair + range; ABSENT nodes — the
+  code file is then deleted (build exit 0, zero-source code group valid),
+  and the SAME item id presents its scope absent: identity and absence
+  alone, no text, no range (assertAbsentState), context/origin still
+  present and ranged; the parent-consistency middle item's scope (own
+  text + range) asserted in passing. S-5 gains the origin-range guards
+  (present entry's range decoded and surfaced; range on a currently-absent
+  origin node rejected), 74/74. Verified: T10.7-7 turned falsely-green →
+  red-as-diagnosed at exactly the first new assertion — the first item's
+  origin-entry range, undefined against a.k's `query node` range (the
+  product emits no origin range and no code-impact scope range: probes
+  confirmed the whole walk, item order [sc a.k, pc a, ci], presence flip
+  after deletion, and every asserted text/range value against the built
+  product, so downstream arms are sound and unreached until the product
+  presents ranges). Traceability unchanged (["10.7"] — T1.7-1's entry
+  names T10.7-7 as field-presence coverage like T11-1/T12.4-1, which
+  carry no "1.7"; the range-key homes stay T1.7-*/T10.7-12). `npm run
+  test:self`: unchanged 4 planned mid-loop reds (certification-document
+  ×3 → FP-091; S-1's 7 unmapped keys {11.2–11.6, 12.6, 12.7} → stage G),
+  S-5 and certification green; T10.7-7 in no certification scope.
+  Typecheck/format clean.]
 
 - [ ] FP-036 — T11-6: add the wrong-kind / unknown-unit / disambiguator
   arms. [R2 #23; TEST-SPEC §11.1]
