@@ -1587,13 +1587,61 @@ A "new test T<x>" task always means, in one change:
   FP-091; S-1's 7 unmapped keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and
   certification green.]
 
-- [ ] FP-039 — T12.0-10: implement the precedence arms (test stops being
+- [x] FP-039 — T12.0-10: implement the precedence arms (test stops being
   alias-only). [R2 #26; TEST-SPEC §12.0]
   Add: gated-read usage-error precedence on a failing workspace with the
   valid-twin comparison; the `show <unparseable>#id` masking arm; the
   past-the-gate corrupt-session `resolve` arm; the within-class-2
   no-configuration arms; the configuration-error-precedes arm. Update its
   H-7 entry (see FP-003's note).
+  [Done 2026-08-13 (`test/suite/registry/section-12.0-ii.ts`): T12.0-10
+  registered with the four own-arm groups; the rename/move/baseline arms
+  stay cross-references to T6.4-4/T6.5-5/T6.3-4 (module header rewritten;
+  traceability map comment updated per FP-003's note; entry
+  `"T12.0-10": ["12.0"]` — the FP-016 precedent: in no TEST-SPEC 14
+  staging record, so no "14"). Gated reads: a failing workspace (valid
+  A.mdx + src/app.ts with named unit `known` + unparseable Broken.mdx as
+  the premise-pinned single 14.20) and a valid twin identical in
+  everything the six checks consult; rows unknown-profile, code-group
+  `--group`, unknown-session, `show A.mdx#unspelled`, `query node
+  src/app.ts`, `edges --from src/app.ts#unspelled` each exit 2 with
+  stdout exactly the 12.7 error document ("reports no validation
+  findings" at H-5's protocol grain), stderr nonempty, failing/twin
+  documents byte-identical ("the same exit-2 errors", H-4
+  product-to-itself; stderr wording left free per the module-header
+  operationalization note); five twin controls pin every name as
+  resolving. Masking: `show Broken.mdx#broken` exit 1, form-exact
+  findings report = exactly the one 14.20 located in Broken.mdx (the file
+  contains `id="broken"`, failing scrape-and-answer and unknown-id
+  products both ways). Past the gate: product-written audit session
+  corrupted by garbage overwrite; premise `resolve corrupt <no-such-item>`
+  exit 2 pre-corruption (T10.7-10's contract), the same argv exit 1 with
+  /corrupt/i post-corruption (T10.1-4's operationalization). Within class
+  2: unknown command, `ids --json --json`, `show a#b#c` on invalid-config
+  and missing-config workspaces — exit 2, plain usage error (code and
+  path null, 12.7), byte-identical documents across the two states — then
+  `coverage no-such-profile` under invalid configuration via
+  expectConfigurationError (14.14, not the unknown profile). Verified:
+  suite file 12.0-ii 2 failed / 4 passed (T12.0-9 the pre-existing red;
+  T12.0-10 red-as-diagnosed at the failing-premise form-exact findings
+  decode — the FP-001-class gap); later arms unreached in the suite,
+  proven sound by direct probes against the built product: all five twin
+  controls exit 0; failing rows 1–3 already exit 2 (red only at the
+  FP-002-class empty exit-2 stdout) while rows 4–6 expose a real
+  precedence gap (the product gates the parse-local identity/kind/unit
+  checks — exit 1 where the arms demand 2); twin rows exit 2 with the
+  right classifications; masking exits 1 with the gated report (old
+  shape); the corrupt arm runs genuinely green end to end; syntax rows
+  1–2 already precede configuration (identical stderr across states, red
+  at the missing error document) while `show a#b#c` exposes the second
+  real gap (the product reports the configuration error, not the
+  malformed value); config-error precedence already holds (red at the
+  empty stdout alone). Typecheck/format clean; `npm run test:self`
+  unchanged 4 planned mid-loop reds (certification-document ×3 → FP-091;
+  S-1's 7 unmapped keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and
+  certification green. No certification scope: T12.0-10 sits in
+  CERTIFICATIONS.md's Exclusions only, which name exactly the in-test
+  valid-twin comparison this body carries.]
 
 - [ ] FP-040 — T12.0-12: extend the git-less sweep. [R2 #27; TEST-SPEC
   §12.0]

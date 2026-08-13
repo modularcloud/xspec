@@ -1,15 +1,14 @@
 // TEST-SPEC §12.0 II (global command conventions, second half) — SUITE-42:
-// T12.0-7, T12.0-8, T12.0-9, T12.0-11, T12.0-12.
+// T12.0-7, T12.0-8, T12.0-9, T12.0-10, T12.0-11, T12.0-12.
 //
-// T12.0-10 (check ordering) is a pure cross-reference in TEST-SPEC — "Covered
-// by T6.4-4/T6.5-5 (rename/move existence checks precede source validation;
-// unparseable-file masking flips to exit 1) and T6.3-4's precedence arm
-// (baseline resolution precedes source validation)" — so no separate body is
-// registered here: its content runs as the ordering/masking arms of
-// section-6.4.ts, section-6.5.ts, and section-6.3.ts, and the H-7 map ties
-// SPEC 12.0's ordering bullet to those tests. A registered T12.0-10 body
-// would either re-run those bodies (duplicated execution) or pass vacuously
-// against the stub, violating H-8.
+// T12.0-10's rename/move and baseline arms stay cross-references in
+// TEST-SPEC ("Rename/move and baseline arms: T6.4-4/T6.5-5 (existence,
+// kind, and masking) and T6.3-4"): that content runs as the ordering/masking
+// arms of section-6.4.ts, section-6.5.ts, and section-6.3.ts — the H-7 map
+// keeps "12.0" on those three — and a re-registration here would re-run
+// those bodies (duplicated execution). The gated-read, masking,
+// past-the-gate, and within-class-2 precedence arms are T12.0-10's own
+// registered body below.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -56,6 +55,20 @@
 //   exactly one JSON document (the 11.2 surfaces are JSON-only) — T11.2-5
 //   pinning the full-answer contract; preview rows assert exit codes only,
 //   T6.6-* owning modifies-nothing and report content.
+// - T12.0-10 operationalizes "the same names on a valid twin workspace
+//   giving the same exit-2 errors" and "identically with the workspace's
+//   configuration file invalid or missing" as byte-identical exit-2 stdout —
+//   the entire 12.7 error document (H-5) — across the paired workspaces:
+//   H-4's product-to-itself compare, sound because each check consults
+//   identical state in both (configuration, the session directory, the
+//   named files' parses) and a plain usage error describes the invocation,
+//   never workspace content (SPEC 14). Stderr is asserted nonempty on each
+//   side only — its wording, like all diagnostic text, is unpinned (H-3).
+//   "Reports no validation findings" is asserted at H-5's protocol grain:
+//   the exit-2 stdout is exactly the one 12.7 error document, a form with
+//   no findings member (12.7). "Reports the corruption" reuses T10.1-4's
+//   operationalization (exit 1, stdout matching /corrupt/i — SPEC.md's
+//   fixed vocabulary for the state; information presence, not wording).
 // - T12.0-11 partitions a whole-workspace byte diff around each git-reading
 //   invocation: any change under `.git/` fails (same file set, same bytes),
 //   and every change outside it must be a write the command's own
@@ -68,13 +81,16 @@
 import { Buffer } from "node:buffer";
 import * as path from "node:path";
 import {
+  assertReportMentions,
   decodeCoverageReport,
   decodeExportReport,
+  decodeFindingsReport,
   decodeNextReport,
   decodeReachableReport,
 } from "../../helpers/adapters/index.js";
-import type { ExportReport } from "../../helpers/adapters/index.js";
+import type { ExportReport, Finding } from "../../helpers/adapters/index.js";
 import {
+  assertBytesEqual,
   assertExitCode,
   fail,
   parseJsonStdout,
@@ -91,7 +107,7 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import type { SnapshotChange } from "../../helpers/snapshot.js";
-import type { ProductBinding } from "../../helpers/subprocess.js";
+import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import {
   pathExists,
   releaseHoldFile,
@@ -103,9 +119,13 @@ import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { impactAgainst, SPECS_ONLY_CONFIG } from "./section-5.6.js";
 import { assertImpactedCode, SPEC_AND_CODE_CONFIG } from "./section-9.js";
 import {
+  assertConditionCounts,
+  assertFindingLocated,
   assertSameJson,
+  buildFindings,
   buildOk,
   expectConfigurationError,
+  expectErrorDocument,
   expectExit,
   runCli,
   runJson,
@@ -1507,6 +1527,458 @@ export default defineConfig({
 });
 
 // ---------------------------------------------------------------------------
+// T12.0-10 — argument-check precedence
+// ---------------------------------------------------------------------------
+
+// The precedence pair: a failing workspace and its valid twin, identical in
+// everything the six gated argument checks consult — the configuration (a
+// spec group, a code group, one coverage profile), the parseable named spec
+// source, and the discovered code source with one named unit — differing
+// exactly in the unparseable file that makes `build` fail (14.20).
+const PRECEDENCE_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  },
+  coverage: [
+    {
+      name: "prof",
+      target: "main",
+      boundary: "main",
+      mode: "direct"
+    }
+  ]
+})
+`;
+
+const PREC_SPEC_FILE = "specs/A.mdx";
+const PREC_CODE_FILE = "src/app.ts";
+const PREC_BROKEN_FILE = "specs/Broken.mdx";
+
+const PRECEDENCE_TWIN_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": PRECEDENCE_CONFIG,
+  [PREC_SPEC_FILE]: ['<S id="alpha">', "Alpha text.", "</S>", ""].join("\n"),
+  [PREC_CODE_FILE]: "export function known(): void {}\n",
+};
+
+const PRECEDENCE_FAILING_FILES: Readonly<Record<string, string>> = {
+  ...PRECEDENCE_TWIN_FILES,
+  // An unclosed section tag: unparseable MDX (14.20), the workspace's one
+  // validation finding — staged in a file no gated row names, so every
+  // argument check below is judged from consulted state identical to the
+  // twin's; only the masking arm names this file, deliberately.
+  [PREC_BROKEN_FILE]: ['<S id="broken">', "Text that never closes.", ""].join(
+    "\n",
+  ),
+};
+
+/** One gated-read row: a usage-error argument checked before the 13.3 gate. */
+interface GatedUsageRow {
+  /** What the row's check consults and why the argument is a usage error. */
+  readonly what: string;
+  readonly argv: readonly string[];
+}
+
+const GATED_USAGE_ROWS: readonly GatedUsageRow[] = [
+  {
+    what: "an unknown profile, judged against the configuration (SPEC 7.4)",
+    argv: ["coverage", "no-such-profile"],
+  },
+  {
+    what:
+      "a code group's name where `--group` requires a configured spec " +
+      "group's — an invalid flag value (SPEC 11.1)",
+    argv: ["query", "nodes", "--group", "app"],
+  },
+  {
+    what: "an unknown session, judged against the session directory (SPEC 10.1)",
+    argv: ["review", "status", "no-such-session"],
+  },
+  {
+    what:
+      "an unknown id, judged parse-local over the named file's spelled " +
+      "identities (SPEC 11.2)",
+    argv: ["show", `${PREC_SPEC_FILE}#unspelled`],
+  },
+  {
+    what:
+      "a wrong-kind operand — a code source where a requirement-node " +
+      "identity is required (SPEC 11.1, 12.0)",
+    argv: ["query", "node", PREC_CODE_FILE],
+  },
+  {
+    what:
+      "an unknown code unit, judged parse-local over the named file's " +
+      "named units (SPEC 4.6)",
+    argv: ["query", "edges", "--from", `${PREC_CODE_FILE}#unspelled`],
+  },
+];
+
+/**
+ * Run one usage-error invocation (the caller's argv puts JSON output in
+ * effect): exit 2 exactly; stdout exactly the single 12.7 error document —
+ * a form with no findings member, so no validation finding rides the error
+ * report (SPEC 12.0, 12.7, H-5) — and a nonempty stderr (usage and
+ * configuration error messages are standard-error content, their wording
+ * free, H-3).
+ */
+async function expectUsageErrorDocument(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<{ readonly result: RunResult; readonly error: Finding }> {
+  const result = await expectExit(product, workspace, argv, 2, context);
+  const error = expectErrorDocument(result, context);
+  if (result.stderrBytes.length === 0) {
+    fail(
+      `${context}: usage and configuration error messages are ` +
+        `standard-error content (SPEC 12.0), but stderr is empty`,
+    );
+  }
+  return { result, error };
+}
+
+// The unknown item ID named by the past-the-gate arm (no session ever
+// contains it; harness-prefixed so a collision is impossible by staging).
+const PRECEDENCE_NO_SUCH_ITEM = "xspec-harness-no-such-item";
+
+const T12_0_10 = defineProductTest({
+  id: "T12.0-10",
+  title:
+    "argument-check precedence: the rename/move and baseline arms ride on T6.4-4/T6.5-5/T6.3-4; on one workspace failing `build`'s validations each gated read given a usage-error argument exits 2 with that error and reports no validation findings (the exit-2 stdout is exactly the one 12.7 error document) — `coverage <unknown-profile>`, `query nodes --group <code-group>`, `review status <unknown-session>`, `show <file>#<unspelled-id>`, `query node <code-source-path>`, `query edges --from <code-source-path>#<unspelled-unit>` — each check judged from what it consults (configuration; the session directory; parse-local spelled identities or named units of the named file), the same names on a valid twin workspace giving the same exit-2 errors (byte-identical error documents); masking: `show <unparseable-file>#<id>` on the failing workspace yields the gated report of 13.3, exit 1, carrying exactly the workspace's findings; past the gate: on a passing workspace `review resolve <corrupt-session> <any-item-id> --status updated` reports the corruption, exit 1 — the item ID judged only against session content, which the corruption withholds (the same unknown item ID in the well-formed session exits 2 as the pre-corruption premise); within class 2: an unknown command, a repeated flag, and the malformed value `show a#b#c` are reported without loading configuration — byte-identical error documents with the configuration file invalid or missing, each the plain usage error (`code` and `path` null) — while a configuration error precedes every check that consults configuration: `coverage <unknown-profile>` with invalid configuration reports 14.14 (`configuration-error`), not the unknown profile (SPEC 12.0, 13.3, 11.1, 11.2, 4.6, 10.1, 14.14, 14.20, 14.21, 12.7)",
+  timeoutMs: 240_000,
+  run: async (product) => {
+    // --- Gated reads: usage-error arguments precede the 13.3 gate, judged
+    // from what they consult, identically on the failing workspace and its
+    // valid twin; masking flips `show` on the unparseable file to the gated
+    // report.
+    await withWorkspace(
+      { files: PRECEDENCE_FAILING_FILES },
+      async (failing) => {
+        await withWorkspace({ files: PRECEDENCE_TWIN_FILES }, async (twin) => {
+          // Twin premises: the twin is valid, and every name the rows turn
+          // on resolves there — the profile, the spec group, the named
+          // file's spelled id, the discovered code source (a known graph
+          // node, SPEC 11.1) and its named unit — so each row's exit 2 is
+          // attributable to its staged usage error alone.
+          await buildOk(product, twin, "T12.0-10 valid-twin `build`");
+          const controls: readonly (readonly string[])[] = [
+            ["coverage", "prof"],
+            ["query", "nodes", "--group", "main"],
+            ["show", `${PREC_SPEC_FILE}#alpha`],
+            ["query", "edges", "--from", PREC_CODE_FILE],
+            ["query", "edges", "--from", `${PREC_CODE_FILE}#known`],
+          ];
+          for (const argv of controls) {
+            await expectExit(
+              product,
+              twin,
+              argv,
+              0,
+              `T12.0-10 twin control \`${argv.join(" ")}\` — the configured ` +
+                `profile, the spec group, the named file's spelled id, and ` +
+                `the discovered code source with its named unit all resolve ` +
+                `on the valid twin (SPEC 8.2, 11.1, 11.2, 4.6), so each ` +
+                `precedence row's exit 2 is attributable to its staged ` +
+                `usage error alone`,
+            );
+          }
+
+          // Failing-workspace premise: the workspace fails `build`'s
+          // validations with exactly the staged 14.20 — the finding whose
+          // non-appearance the exit-2 rows assert and whose report the
+          // masking arm expects.
+          const premiseContext =
+            "T12.0-10 failing-workspace `build --json` premise";
+          const premiseFindings = await buildFindings(
+            product,
+            failing,
+            `${premiseContext} — the staged workspace fails build ` +
+              `validation (an unparseable source, SPEC 14.20)`,
+          );
+          assertConditionCounts(
+            premiseFindings,
+            { "14.20": 1 },
+            `${premiseContext}: the unparseable file is the workspace's ` +
+              `one validation finding (SPEC 14, 14.20)`,
+          );
+          assertFindingLocated(
+            premiseFindings[0]!,
+            { file: PREC_BROKEN_FILE },
+            `${premiseContext}: the 14.20 finding locates the parse ` +
+              `failure in the staged unparseable file (SPEC 14, 14.20)`,
+          );
+
+          for (const row of GATED_USAGE_ROWS) {
+            const argv = [...row.argv, "--json"];
+            const command = argv.join(" ");
+            const onFailing = await expectUsageErrorDocument(
+              product,
+              failing,
+              argv,
+              `T12.0-10 \`${command}\` on the failing workspace — ` +
+                `${row.what}: a gated read's argument checks precede the ` +
+                `invalid-workspace report of 13.3, so the usage error is ` +
+                `reported, exit 2, whatever findings the workspace ` +
+                `carries, and no validation finding rides the report ` +
+                `(SPEC 12.0, 13.3)`,
+            );
+            const onTwin = await expectUsageErrorDocument(
+              product,
+              twin,
+              argv,
+              `T12.0-10 \`${command}\` on the valid twin — ${row.what}: ` +
+                `the same name is the same usage error on a valid ` +
+                `workspace (SPEC 12.0)`,
+            );
+            assertBytesEqual(
+              onFailing.result.stdoutBytes,
+              onTwin.result.stdoutBytes,
+              `T12.0-10 \`${command}\`: the check is judged from what it ` +
+                `consults — configuration, the session directory, the ` +
+                `named file's parse, identical in both workspaces — ` +
+                `identically on valid and failing workspaces, so the same ` +
+                `name gives the same exit-2 error document (SPEC 12.0, 14: ` +
+                `a plain usage error describes the invocation, never ` +
+                `workspace content; H-4's product-to-itself compare)`,
+            );
+          }
+
+          // Masking: the named file itself is unparseable, so the id check
+          // cannot be judged — the gated report of 13.3 takes its place,
+          // exit 1 (as in 6.4). The file even contains the bytes
+          // `id="broken"`, so a product scraping identities out of the
+          // unparseable text and answering (exit 0), or reporting an
+          // unknown id (exit 2), fails either way.
+          const maskCommand = `show ${PREC_BROKEN_FILE}#broken --json`;
+          const maskContext = `T12.0-10 \`${maskCommand}\` (masking)`;
+          const maskResult = await expectExit(
+            product,
+            failing,
+            ["show", `${PREC_BROKEN_FILE}#broken`, "--json"],
+            1,
+            `${maskContext} — an unparseable named file masks the ` +
+              `parse-local id check as in 6.4: the gated report of 13.3 is ` +
+              `emitted and the command exits 1, never 2 (SPEC 12.0, 13.3, ` +
+              `14.20)`,
+          );
+          const maskFindings = decodeFindingsReport(
+            parseJsonStdout(maskResult, maskContext),
+            maskContext,
+          ).findings;
+          assertConditionCounts(
+            maskFindings,
+            { "14.20": 1 },
+            `${maskContext}: the gated report carries exactly the findings ` +
+              `a \`build\` would now report — the one unparseable-source ` +
+              `condition (SPEC 13.3, 14.20)`,
+          );
+          assertFindingLocated(
+            maskFindings[0]!,
+            { file: PREC_BROKEN_FILE },
+            `${maskContext}: the 14.20 finding locates the parse failure ` +
+              `in the unparseable named file (SPEC 14, 14.20)`,
+          );
+        });
+      },
+    );
+
+    // --- Past the gate: an item ID is judged only against session content,
+    // which a corrupt session withholds (SPEC 12.0, 10.1, 14.21).
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          "specs/A.mdx": ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
+        },
+      },
+      async (workspace) => {
+        await buildOk(product, workspace, "T12.0-10 past-the-gate `build`");
+        await runJson(
+          product,
+          workspace,
+          [
+            "review",
+            "create",
+            "--strategy",
+            "audit",
+            "--name",
+            "corrupt",
+            "--json",
+          ],
+          "T12.0-10 staging `review create --strategy audit --name corrupt`",
+        );
+        const sessionRel = ".xspec/reviews/corrupt.json";
+        if ((await workspace.kind(sessionRel)) !== "file") {
+          fail(
+            `T12.0-10 staging: \`review create\` must store the session at ` +
+              `${sessionRel} (SPEC 10.1) — the corruption arm overwrites ` +
+              `the file the product wrote`,
+          );
+        }
+        // Premise: with the session well-formed, the unknown item ID stays
+        // a usage error (SPEC 10.7, 12.0; T10.7-10's contract) — so the
+        // exit-1 flip below is attributable to the corruption withholding
+        // the session content the ID would be judged against.
+        await expectExit(
+          product,
+          workspace,
+          [
+            "review",
+            "resolve",
+            "corrupt",
+            PRECEDENCE_NO_SUCH_ITEM,
+            "--status",
+            "updated",
+          ],
+          2,
+          "T12.0-10 pre-corruption premise `review resolve corrupt " +
+            "<no-such-item> --status updated` — an unknown item ID in a " +
+            "well-formed session is a usage error, exit 2 (SPEC 10.7, " +
+            "12.0; T10.7-10)",
+        );
+        await workspace.file(sessionRel, "this is not a JSON document {{{\n");
+        const context =
+          "T12.0-10 `review resolve corrupt <no-such-item> --status " +
+          "updated` (corrupt session)";
+        const result = await runCli(product, workspace, [
+          "review",
+          "resolve",
+          "corrupt",
+          PRECEDENCE_NO_SUCH_ITEM,
+          "--status",
+          "updated",
+        ]);
+        assertExitCode(
+          result,
+          1,
+          `${context} — one check runs past the gate: the item ID is ` +
+            `judged only against session content, which the corruption ` +
+            `withholds, so the corruption is reported in the check's ` +
+            `place, exit 1 — never the well-formed session's exit-2 ` +
+            `unknown-item error (SPEC 12.0, 10.1, 14.21)`,
+        );
+        assertReportMentions(
+          result,
+          [/corrupt/i],
+          `${context} — the report identifies the session as corrupt ` +
+            `(SPEC 10.1/14.21 vocabulary; T10.1-4's operationalization: ` +
+            `information presence, never exact wording, H-3)`,
+        );
+      },
+    );
+
+    // --- Within class 2: an error the invocation's syntax alone determines
+    // is reported without loading configuration — identically with the
+    // configuration file invalid or missing — while a configuration error
+    // precedes every check that consults configuration (SPEC 12.0, 14.14).
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  bogus: true
+})
+`,
+        },
+      },
+      async (invalidConfig) => {
+        await withWorkspace({}, async (missingConfig) => {
+          const syntaxRows: readonly {
+            readonly what: string;
+            readonly argv: readonly string[];
+          }[] = [
+            {
+              what: "an unknown command",
+              argv: ["definitely-not-a-command", "--json"],
+            },
+            {
+              what: "a repeated flag",
+              argv: ["ids", "--json", "--json"],
+            },
+            {
+              what: "the malformed multi-`#` value (T12.0-13's spelling)",
+              argv: ["show", "a#b#c", "--json"],
+            },
+          ];
+          for (const row of syntaxRows) {
+            const command = row.argv.join(" ");
+            const onInvalid = await expectUsageErrorDocument(
+              product,
+              invalidConfig,
+              row.argv,
+              `T12.0-10 \`${command}\` with the configuration file invalid ` +
+                `— ${row.what} is determined by the invocation's syntax ` +
+                `alone and reported without loading configuration ` +
+                `(SPEC 12.0)`,
+            );
+            const onMissing = await expectUsageErrorDocument(
+              product,
+              missingConfig,
+              row.argv,
+              `T12.0-10 \`${command}\` with the configuration file missing ` +
+                `— ${row.what} is reported without loading configuration ` +
+                `(SPEC 12.0)`,
+            );
+            for (const [error, state] of [
+              [onInvalid.error, "invalid"],
+              [onMissing.error, "missing"],
+            ] as const) {
+              if (error.code !== null || error.path !== null) {
+                fail(
+                  `T12.0-10 \`${command}\` (configuration ${state}): the ` +
+                    `reported error must be the plain usage error — ` +
+                    `\`code\` and \`path\` null (SPEC 12.7, 14) — never a ` +
+                    `configuration error: the syntax-alone check loads no ` +
+                    `configuration (SPEC 12.0); got code ` +
+                    `${JSON.stringify(error.code)}, path ` +
+                    `${JSON.stringify(error.path)} (message: ` +
+                    `${JSON.stringify(error.message)})`,
+                );
+              }
+            }
+            assertBytesEqual(
+              onInvalid.result.stdoutBytes,
+              onMissing.result.stdoutBytes,
+              `T12.0-10 \`${command}\`: reported identically with the ` +
+                `workspace's configuration file invalid or missing — the ` +
+                `error document depends on the invocation's syntax alone, ` +
+                `never on configuration state (SPEC 12.0; H-4's ` +
+                `product-to-itself compare)`,
+            );
+          }
+
+          // A configuration error precedes every check that consults
+          // configuration or discovery: the unknown-profile check of the
+          // gated-read arm, run under invalid configuration, reports 14.14
+          // — the stable code `configuration-error`, where the unknown
+          // profile's plain usage error carries a null code.
+          await expectConfigurationError(
+            product,
+            invalidConfig,
+            ["coverage", "no-such-profile"],
+            "T12.0-10 `coverage no-such-profile` with invalid " +
+              "configuration — a configuration error precedes every " +
+              "argument check that consults configuration or discovery: " +
+              "14.14 is reported, not the unknown profile (SPEC 12.0, " +
+              "14.14)",
+          );
+        });
+      },
+    );
+  },
+});
+
+// ---------------------------------------------------------------------------
 // T12.0-11 — git is read-only
 // ---------------------------------------------------------------------------
 
@@ -1925,6 +2397,7 @@ export const section120iiTests: readonly ProductTestEntry[] = [
   T12_0_7,
   T12_0_8,
   T12_0_9,
+  T12_0_10,
   T12_0_11,
   T12_0_12,
 ];

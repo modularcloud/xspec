@@ -46,11 +46,11 @@
 // - Alias entries: TEST-SPEC's pointer-only tests are not separately
 //   implemented, so their coverage rides on the implementing tests —
 //   T12.0-10's rename/move and baseline arms ride on T6.4-4/T6.5-5 and
-//   T6.3-4, putting "12.0" on those three (alias-only for now: TEST-SPEC
-//   12.0 also specifies gated-read and precedence arms as T12.0-10's own
-//   body, and once those are implemented it becomes a registered test with
-//   its own entry, ending the aliasing); T12.1-2 ("T7.5-6") puts "12.1" on
-//   T7.5-6; T13.4-7 ("T7-6") puts "13.4" on T7-6.
+//   T6.3-4, putting "12.0" on those three (no longer alias-only: its
+//   gated-read, masking, past-the-gate, and within-class-2 precedence arms
+//   are implemented as the registered T12.0-10, which carries its own entry
+//   below); T12.1-2 ("T7.5-6") puts "12.1" on T7.5-6; T13.4-7 ("T7-6")
+//   puts "13.4" on T7-6.
 // - "preamble": per H-7's own citation, T12.0-11 (git is read-only) and
 //   T12.0-12 (git-less operation) cover the preamble's git contract; its
 //   no-network clause is enforced at CI level (E-1), which needs no map
@@ -306,6 +306,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T12.0-7": ["12.0"],
   "T12.0-8": ["12.0"],
   "T12.0-9": ["12.0"],
+  "T12.0-10": ["12.0"],
   "T12.0-11": ["preamble", "12.0"],
   "T12.0-12": ["preamble", "12.0"],
   "T12.1-1": ["12.1"],
