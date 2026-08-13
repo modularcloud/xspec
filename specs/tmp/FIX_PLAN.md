@@ -1813,12 +1813,65 @@ A "new test T<x>" task always means, in one change:
   mid-loop reds (certification-document ×3 → FP-091; S-1's 7 unmapped keys
   {11.2–11.6, 12.6, 12.7} → stage G), S-5 (80) and certification green.]
 
-- [ ] FP-044 — T13.3-1/T13.3-2: extend read sweeps; add the
+- [x] FP-044 — T13.3-1/T13.3-2: extend read sweeps; add the
   record-discipline arm. [R2 #31; TEST-SPEC §13.3]
   `test/suite/registry/section-13.3.ts`: sweeps gain `occurrences`, `view`,
   `at`. T13.3-2 gains: shape-blind record corruption → refreshing reads
   answer finding-free exit 0, state neither read nor replaced, `inventory`
   reports `recorded` unavailable until `build`.
+  [Done 2026-08-13: T13.3-1's serving sweep gains the three probes inside
+  its leaves-unchanged block — `occurrences` (the complete record set at
+  identity level via new module helpers `occurrenceIdentitySummaries`/
+  `assertAtAnswer`: the one d occurrence alpha→beta, finding-free), `view`
+  (scoped decode, exactly {findings [], files [specs/A.mdx]}), `at` offset
+  30 → alpha with occurrence null — the identity/membership altitude
+  documented in the module header (byte-precise spans and per-file view
+  content are T11.3-*/T11.4-*/T11.5-*'s home; ranges still form-validated
+  by the S-5-guarded decoders). T13.3-2 arm A gains the same three
+  (definitive empty enumeration; both files; offset 20 → alpha), each
+  followed by the existing rewritten-exactly-as-build w0 compare; arm B's
+  edit now stages `<S id="added" d={["alpha"]}>` — the edited sources'
+  one occurrence — so `occurrences` (added→alpha) and `coverage`
+  (uncovered exactly [added, beta], covered exactly alpha via
+  [added, alpha]) answer values the stale pre-edit graph cannot produce,
+  `at` 75 resolves the edited-source-only identity added, `view` answers
+  the whole domain finding-free. New record-discipline arm on its own
+  workspace (alpha d=["beta"]+beta, git baseline, audit session):
+  `corruptGraphDataShapeBlind` (T6.6-6's staging, the H-3 record-staging
+  adapter), then all nine refreshing reads, each asserting the exit-0
+  finding-free contentful answer, then `inventory` exit 1 with `recorded`
+  still explicitly unavailable (persistence per read — neither read,
+  repaired, nor replaced; the finding's full form stays T11.6-4's home),
+  then outside-graph-data byte-identity against the post-corruption
+  snapshot (graph-data bytes deliberately unpinned: the record's location
+  inside the area is unenumerated, so a conforming refresh may rewrite
+  non-record files around the preserved record state — module header
+  note); after the sweep, `build` exit 0 → `inventory` exit 0 with
+  `recorded` a plain list naming specs/A.xspec.ts. Traceability: T13.3-2
+  gains "14" (TEST-SPEC 14's per-condition record lists it under 14.23;
+  the map's construction note carries that record at passage granularity).
+  Verified: typecheck/format clean; section-13.3 went 2 failed/2 passed →
+  3 failed/1 passed — T13.3-1 falsely-green → red-as-diagnosed at its
+  `occurrences` probe and T13.3-2's red moved earlier to arm A's
+  `occurrences` probe (both exit 2 "unknown command 'occurrences'" — the
+  whole §11 surface is patch-new, the FP-043-diagnosed dispatch gap;
+  T13.3-3 keeps its FP-001-class red, T13.3-4 green). Suite-unreached
+  arms probe-verified directly against the built product: arm B's
+  review-status invalidation table, the V1 coverage/ids/show answers
+  (added's construct range 41..94 confirmed), and the deleted-source
+  sub-arm end-to-end under V1 (B's module survives the read, `check`
+  reports 14.10 ×4 on B's derived files, the final build removes them, A
+  survives); record arm: `ids` on the corrupt record answers exit 0 while
+  the current product rewrites the whole record — exactly the
+  replace-the-state behavior the arm discriminates — and `inventory`
+  exits 2 (unknown), the arm's first diagnosed failure if reached;
+  at-offsets computed mechanically (30/20/75 inside alpha/alpha/added,
+  outside the occurrence spans 18..24/none/59..66). `npm run test:self`:
+  unchanged 4 planned mid-loop reds (certification-document ×3 → FP-091;
+  S-1's 7 unmapped keys {11.2–11.6, 12.6, 12.7} → stage G), S-5 and
+  certification green (CONF-CORE 9/9, CONF-VALID 12/12, CONF-MD 8/8,
+  CONF-DISC 3/3; violators failing exactly as certified). No new decoder
+  (S-5 unchanged); T13.3-1/-2 in no certification scope.]
 
 - [ ] FP-045 — T13.3-3: add the whole-gate arms and the never-gated
   contrast. [R2 #32; TEST-SPEC §13.3]

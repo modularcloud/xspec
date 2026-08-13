@@ -50,23 +50,52 @@
 //   over the whole workspace root, `.git/` included (SPEC 13.3, 12.1;
 //   `.git/` byte-identity around git-reading invocations is also T12.0-11's
 //   subject).
+// - The T13.3-1/T13.3-2 sweeps include the 11.2 surfaces (`occurrences`,
+//   `view`, `at`) per their TEST-SPEC command lists. Their answers are
+//   asserted at the identity/membership level — complete record sets with
+//   endpoints, resolved section identities, the scoped per-file list of the
+//   view document — because byte-precise span and per-file view semantics
+//   are T11.3-*/T11.4-*/T11.5-*'s home; this section owns the
+//   serving/refresh behaviors those answers demonstrate.
+// - T13.3-2's record-discipline arm (record corrupted shape-blind, T6.6-6's
+//   staging via the H-3 record-staging adapter): SPEC 13.3 pins the record —
+//   the recorded derived-file paths — as neither read, repaired, nor
+//   replaced by a refresh, while the record's location inside the graph-data
+//   area is deliberately unenumerated (13.3, 11.6), so the harness cannot
+//   byte-pin which files under `.xspec/` a conforming refresh may rewrite
+//   around the preserved record state. The arm therefore asserts persistence
+//   through the record-consulting surface TEST-SPEC names: after every
+//   refreshing read, `inventory` still reports `recorded` explicitly
+//   unavailable (exit 1, the 14.23 outcome; the finding's full form is
+//   T11.6-4's home), while outside the graph data the workspace stays
+//   byte-identical (no TypeScript or Markdown generated or removed, sources
+//   and durable files untouched); a successful `build` then replaces the
+//   state (`recorded` a plain list again at exit 0, SPEC 13.3, 14.10, 12.1).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import type {
+  AtReport,
   Finding,
+  OccurrenceRecord,
+  PathValue,
   SessionStatusReport,
   SessionStatusRow,
 } from "../../helpers/adapters/index.js";
 import {
+  corruptGraphDataShapeBlind,
+  decodeAtReport,
   decodeCoverageReport,
   decodeFindingsReport,
   decodeIdsReport,
   decodeImpactReport,
+  decodeInventoryRecordedDatum,
   decodeNodeReport,
   decodeNodeRowsReport,
+  decodeOccurrencesReport,
   decodeSessionListReport,
   decodeSessionStatusReport,
+  decodeViewFilesReport,
   isGraphDataKey,
 } from "../../helpers/adapters/index.js";
 import {
@@ -364,6 +393,72 @@ async function resolveNoChange(
 }
 
 // ---------------------------------------------------------------------------
+// §11.2-surface sweep helpers (SPEC 11.3, 11.5) — the identity-level scope
+// this module's sweeps assert (see the header note)
+// ---------------------------------------------------------------------------
+
+/** One sweep probe: a labeled read invocation with its answer assertions. */
+interface SweepProbe {
+  readonly label: string;
+  readonly run: () => Promise<void>;
+}
+
+/**
+ * Identity-level projection of occurrence records: referencing file, edge
+ * kind, source graph-node identity (or the unavailability marker), resolved
+ * target identity. Ranges stay unprojected — the decoder validates their
+ * form and order, and byte-precise span semantics are T11.3-*'s home
+ * (SPEC 5.7, 11.3).
+ */
+function occurrenceIdentitySummaries(records: readonly OccurrenceRecord[]): {
+  file: PathValue;
+  kind: string;
+  source: string | { readonly unavailable: true };
+  target: string;
+}[] {
+  return records.map((record) => ({
+    file: record.file,
+    kind: record.kind,
+    source:
+      "identity" in record.source ? record.source.identity : record.source,
+    target: record.target,
+  }));
+}
+
+/**
+ * Assert an `at` answer at this module's identity level: finding-free, the
+ * resolution present (only an unparseable file's resolution is unavailable,
+ * and these fixtures are parseable), resolving to the expected section
+ * identity with no containing occurrence (SPEC 11.5, 11.2; construct-range
+ * byte precision is T11.5-*'s home).
+ */
+function assertAtAnswer(
+  report: AtReport,
+  expectedIdentity: string,
+  context: string,
+): void {
+  if ("unavailable" in report.resolution) {
+    fail(
+      `${context}: the resolution must be present — the named file is ` +
+        `parseable, and only an unparseable file's resolution is reported ` +
+        `explicitly unavailable (SPEC 11.5, 11.2); got the unavailability ` +
+        `marker`,
+    );
+  }
+  assertSameJson(
+    {
+      findings: report.findings,
+      identity: report.resolution.section.identity,
+      occurrence: report.resolution.occurrence,
+    },
+    { findings: [], identity: expectedIdentity, occurrence: null },
+    `${context}: a finding-free answer resolving the offset to the ` +
+      `innermost enclosing section construct, the offset lying within no ` +
+      `occurrence (SPEC 11.5, 11.2)`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // T13.3-1 — serving reads
 // ---------------------------------------------------------------------------
 
@@ -381,7 +476,7 @@ const T13_3_1_A = [
 const T13_3_1 = defineProductTest({
   id: "T13.3-1",
   title:
-    "after `build`, the read commands (check, ids, show, coverage, impact, review, query) answer without error, and graph data lives under .xspec/ (SPEC 13.3, 12.0)",
+    "after `build`, the read commands (check, ids, show, coverage, impact, review, query, occurrences, view, at) answer without error, and graph data lives under .xspec/ (SPEC 13.3, 12.0)",
   run: async (product) => {
     await withWorkspace(
       { "xspec.config.ts": GRAPH_CONFIG, "specs/A.mdx": T13_3_1_A },
@@ -588,6 +683,73 @@ const T13_3_1 = defineProductTest({
                 );
               }
             }
+
+            // The 11.2 surfaces are read commands of 13.3 too — JSON-only,
+            // answering one document when invoked bare (SPEC 11, 11.2).
+            const occurrencesLabel = "T13.3-1 `occurrences`";
+            const occurrences = decodeOccurrencesReport(
+              await runJson(
+                product,
+                workspace,
+                ["occurrences"],
+                occurrencesLabel,
+              ),
+              occurrencesLabel,
+            );
+            assertSameJson(
+              {
+                findings: occurrences.findings,
+                occurrences: occurrenceIdentitySummaries(
+                  occurrences.occurrences,
+                ),
+              },
+              {
+                findings: [],
+                occurrences: [
+                  {
+                    file: A_ROOT,
+                    kind: "depends",
+                    source: ALPHA,
+                    target: BETA,
+                  },
+                ],
+              },
+              `${occurrencesLabel}: the staged d entry is the workspace's ` +
+                `one reference occurrence — alpha's depends reference to ` +
+                `beta, finding-free (SPEC 11.3, 5.7, 13.3)`,
+            );
+
+            const viewLabel = "T13.3-1 `view`";
+            const view = decodeViewFilesReport(
+              await runJson(product, workspace, ["view"], viewLabel),
+              viewLabel,
+            );
+            assertSameJson(
+              view,
+              { findings: [], files: [A_ROOT] },
+              `${viewLabel}: with neither operands nor --file, the request ` +
+                `covers every discovered spec source — one per-file view, ` +
+                `finding-free (SPEC 11.4, 12.7)`,
+            );
+
+            // Byte 30 lies inside "Alpha depends on beta." — within alpha's
+            // construct (bytes 0..55), outside beta's (starting at 57) and
+            // outside the d entry's occurrence span ("beta" at bytes
+            // 18..24) (SPEC 11.5, 1.7).
+            const atLabel = "T13.3-1 `at specs/A.mdx 30`";
+            assertAtAnswer(
+              decodeAtReport(
+                await runJson(
+                  product,
+                  workspace,
+                  ["at", A_ROOT, "30"],
+                  atLabel,
+                ),
+                atLabel,
+              ),
+              ALPHA,
+              atLabel,
+            );
           },
           "T13.3-1 the read commands serve from the graph data `build` " +
             "wrote without modifying anything in the workspace (SPEC 13.3, " +
@@ -608,22 +770,41 @@ const T13_3_2_A_V0 = [
   "</S>",
   "",
 ].join("\n");
+// The edit adds a section carrying a same-file d reference: the edited
+// sources hold exactly one reference occurrence where the pre-edit sources
+// hold none, so `occurrences` (and `coverage`, via the new edge) answer
+// values stale graph data cannot produce (SPEC 5.7, 8.2, 13.3).
 const T13_3_2_A_V1 = [
   '<S id="alpha">',
   "Alpha revised text.",
   "</S>",
   "",
-  '<S id="added">',
+  '<S id="added" d={["alpha"]}>',
   "Added section text.",
   "</S>",
   "",
 ].join("\n");
 const T13_3_2_B = ['<S id="beta">', "Beta text.", "</S>", ""].join("\n");
 
+// The record-discipline arm's one source: a d reference makes every
+// surface's answer contentful (the one occurrence; beta covered through it),
+// and the workspace is otherwise clean — a successful `build` precedes the
+// corruption, so nothing but the corrupt record is wrong (SPEC 13.3, 14.23).
+const T13_3_2_RECORD_A = [
+  '<S id="alpha" d={["beta"]}>',
+  "Alpha depends on beta.",
+  "</S>",
+  "",
+  '<S id="beta">',
+  "Beta text.",
+  "</S>",
+  "",
+].join("\n");
+
 const T13_3_2 = defineProductTest({
   id: "T13.3-2",
   title:
-    "deleting the graph data (every path under .xspec/ except the durable journal and reviews/) or editing a source makes each of ids, show, coverage, impact, review status, query answer from current sources and rewrite graph data as `build` would write it — while no TypeScript or Markdown is generated or removed and the recorded derived-file paths stay unchanged (a stale module stays stale, `check` reports 14.10; a later `build` removes the recorded orphan) (SPEC 13.3, 13.4, 12.1)",
+    "deleting the graph data (every path under .xspec/ except the durable journal and reviews/) or editing a source makes each of ids, show, coverage, impact, review status, query, occurrences, view, at answer from current sources and rewrite graph data as `build` would write it — while no TypeScript or Markdown is generated or removed and the recorded derived-file paths stay unchanged (a stale module stays stale, `check` reports 14.10; a later `build` removes the recorded orphan); with the record corrupted shape-blind instead, each refreshing read answers finding-free at exit 0, leaving the corrupt state neither read, repaired, nor replaced — `inventory` still reports `recorded` unavailable — until a successful `build` replaces the state (SPEC 13.3, 13.4, 12.1, 14.23)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -688,15 +869,10 @@ const T13_3_2 = defineProductTest({
         assertGraphDataPresent(w0, "T13.3-2 after the staging builds");
         const staleGraph = graphDataEntries(w0);
 
-        // The six refreshing reads (SPEC 13.3; `review` represented by
+        // The nine refreshing reads (SPEC 13.3; `review` represented by
         // `status` per the T13.3-2 command list), with per-arm answer
         // assertions supplied by each arm below.
-        type Probe = {
-          readonly label: string;
-          readonly run: () => Promise<void>;
-        };
-
-        const armAProbes: readonly Probe[] = [
+        const armAProbes: readonly SweepProbe[] = [
           {
             label: "`ids --json`",
             run: async () => {
@@ -830,6 +1006,62 @@ const T13_3_2 = defineProductTest({
               }
             },
           },
+          {
+            label: "`occurrences`",
+            run: async () => {
+              const label = "T13.3-2 (deleted graph data) `occurrences`";
+              const report = decodeOccurrencesReport(
+                await runJson(product, workspace, ["occurrences"], label),
+                label,
+              );
+              assertSameJson(
+                report,
+                { findings: [], occurrences: [] },
+                `${label}: no reference spelling exists in these sources — ` +
+                  `the definitive empty, finding-free enumeration, answered ` +
+                  `from the current sources (SPEC 11.3, 5.7, 13.3)`,
+              );
+            },
+          },
+          {
+            label: "`view`",
+            run: async () => {
+              const label = "T13.3-2 (deleted graph data) `view`";
+              const view = decodeViewFilesReport(
+                await runJson(product, workspace, ["view"], label),
+                label,
+              );
+              assertSameJson(
+                view,
+                { findings: [], files: [A_ROOT, B_ROOT] },
+                `${label}: with neither operands nor --file the request ` +
+                  `covers every discovered spec source, finding-free ` +
+                  `(SPEC 11.4, 12.7, 13.3)`,
+              );
+            },
+          },
+          {
+            label: "`at`",
+            run: async () => {
+              // Byte 20 lies inside "Alpha original text." — within
+              // alpha's construct (bytes 0..40 of the pre-edit source),
+              // and the source spells no occurrence (SPEC 11.5, 1.7).
+              const label = "T13.3-2 (deleted graph data) `at specs/A.mdx 20`";
+              assertAtAnswer(
+                decodeAtReport(
+                  await runJson(
+                    product,
+                    workspace,
+                    ["at", A_ROOT, "20"],
+                    label,
+                  ),
+                  label,
+                ),
+                ALPHA,
+                label,
+              );
+            },
+          },
         ];
 
         // --- Arm A: deletion trigger. Before each command the graph data is
@@ -872,7 +1104,7 @@ const T13_3_2 = defineProductTest({
           bytes: Buffer.from(T13_3_2_A_V1, "utf8"),
         });
 
-        const armBProbes: readonly Probe[] = [
+        const armBProbes: readonly SweepProbe[] = [
           {
             label: "`ids --json`",
             run: async () => {
@@ -943,9 +1175,17 @@ const T13_3_2 = defineProductTest({
               }
               assertSameJson(
                 [...profile.uncovered].sort(),
-                [ADDED, ALPHA, BETA],
-                `${label}: the added node is required and uncovered — the ` +
-                  `answer reflects the edited sources (SPEC 8.1, 8.2, 13.3)`,
+                [ADDED, BETA],
+                `${label}: the added node is required and uncovered while ` +
+                  `alpha is covered through its new d edge — the answer ` +
+                  `reflects the edited sources (SPEC 8.1, 8.2, 13.3)`,
+              );
+              assertSameJson(
+                profile.covered,
+                [{ identity: ALPHA, path: [ADDED, ALPHA] }],
+                `${label}: alpha's covering path exists only in the edited ` +
+                  `sources — the stale graph holds no dependency edge at ` +
+                  `all (SPEC 8.2, 13.3)`,
               );
             },
           },
@@ -1033,6 +1273,77 @@ const T13_3_2 = defineProductTest({
                   );
                 }
               }
+            },
+          },
+          {
+            label: "`occurrences`",
+            run: async () => {
+              const label = "T13.3-2 (edited source) `occurrences`";
+              const report = decodeOccurrencesReport(
+                await runJson(product, workspace, ["occurrences"], label),
+                label,
+              );
+              assertSameJson(
+                {
+                  findings: report.findings,
+                  occurrences: occurrenceIdentitySummaries(report.occurrences),
+                },
+                {
+                  findings: [],
+                  occurrences: [
+                    {
+                      file: A_ROOT,
+                      kind: "depends",
+                      source: ADDED,
+                      target: ALPHA,
+                    },
+                  ],
+                },
+                `${label}: the edited source's d entry is the workspace's ` +
+                  `one reference occurrence — the pre-edit sources spell ` +
+                  `none, so stale graph data cannot produce this answer ` +
+                  `(SPEC 11.3, 5.7, 13.3)`,
+              );
+            },
+          },
+          {
+            label: "`view`",
+            run: async () => {
+              const label = "T13.3-2 (edited source) `view`";
+              const view = decodeViewFilesReport(
+                await runJson(product, workspace, ["view"], label),
+                label,
+              );
+              assertSameJson(
+                view,
+                { findings: [], files: [A_ROOT, B_ROOT] },
+                `${label}: the whole-domain request answers finding-free ` +
+                  `over the edited, valid sources (SPEC 11.4, 12.7, 13.3)`,
+              );
+            },
+          },
+          {
+            label: "`at`",
+            run: async () => {
+              // Byte 75 lies inside "Added section text." — within the
+              // added section's construct (bytes 41..94 of the edited
+              // source) and outside its d entry's occurrence span ("alpha"
+              // at bytes 59..66); the section exists only in the edited
+              // source, so a stale answer cannot name it (SPEC 11.5, 13.3).
+              const label = "T13.3-2 (edited source) `at specs/A.mdx 75`";
+              assertAtAnswer(
+                decodeAtReport(
+                  await runJson(
+                    product,
+                    workspace,
+                    ["at", A_ROOT, "75"],
+                    label,
+                  ),
+                  label,
+                ),
+                ADDED,
+                label,
+              );
             },
           },
         ];
@@ -1243,6 +1554,341 @@ const T13_3_2 = defineProductTest({
               "orphan-removing rebuild — A's source still generates it " +
               "(SPEC 12.1, 13.1); found " +
               aKind,
+          );
+        }
+      },
+    );
+
+    // --- Record discipline (SPEC 13.3, 14.23): with the record corrupted
+    // shape-blind (T6.6-6's staging), each refreshing read answers
+    // finding-free at exit 0 on the otherwise clean workspace, reporting
+    // nothing for the record and leaving the corrupt state neither read,
+    // repaired, nor replaced — `inventory` still reports `recorded`
+    // explicitly unavailable after every read (the record-consulting
+    // surface; see the module header for why graph-data bytes are not
+    // pinned here) — until a successful `build` replaces the state.
+    await withWorkspace(
+      { "xspec.config.ts": GRAPH_CONFIG, "specs/A.mdx": T13_3_2_RECORD_A },
+      async (workspace) => {
+        const A_ROOT = "specs/A.mdx";
+        const ALPHA = "specs/A.mdx#alpha";
+        const BETA = "specs/A.mdx#beta";
+
+        // Staging: a resolvable baseline for `impact --base`, a successful
+        // `build` (the corruption applies only to record files the product
+        // itself wrote, H-3), and an audit session for `review status`.
+        await workspace.gitInit();
+        const base = await workspace.gitCommitAll("baseline");
+        await buildOk(product, workspace, "T13.3-2 (corrupt record) `build`");
+        await expectExit(
+          product,
+          workspace,
+          ["review", "create", "--strategy", "audit", "--name", "s"],
+          0,
+          "T13.3-2 (corrupt record) staging `review create --strategy " +
+            "audit --name s` (SPEC 10.7)",
+        );
+        await corruptGraphDataShapeBlind(
+          workspace.root,
+          "T13.3-2 (corrupt record) staging",
+        );
+        const corrupted = await snapshotDirectory(workspace.root);
+        const outsideGraph = filteredEntries(
+          corrupted.entries,
+          (key) => !isGraphDataKey(key),
+        );
+
+        const recordProbes: readonly SweepProbe[] = [
+          {
+            label: "`ids --json`",
+            run: async () => {
+              const label = "T13.3-2 (corrupt record) `ids --json`";
+              const ids = decodeIdsReport(
+                await runJson(product, workspace, ["ids", "--json"], label),
+                label,
+              );
+              assertSameJson(
+                ids.files,
+                [{ file: A_ROOT, ids: ["alpha", "beta"] }],
+                `${label}: the current sources' IDs, answered finding-free ` +
+                  `(SPEC 13.3, 12.3)`,
+              );
+            },
+          },
+          {
+            label: "`show`",
+            run: async () => {
+              const label = `T13.3-2 (corrupt record) \`show ${ALPHA} --json\``;
+              const node = decodeNodeReport(
+                await runJson(
+                  product,
+                  workspace,
+                  ["show", ALPHA, "--json"],
+                  label,
+                ),
+                label,
+              );
+              assertBytesEqual(
+                node.subtreeText,
+                "Alpha depends on beta.\n",
+                `${label}: subtree text from the current sources (SPEC ` +
+                  `13.3, 12.4)`,
+              );
+            },
+          },
+          {
+            label: "`coverage --json`",
+            run: async () => {
+              const label = "T13.3-2 (corrupt record) `coverage --json`";
+              const coverage = decodeCoverageReport(
+                await runJson(
+                  product,
+                  workspace,
+                  ["coverage", "--json"],
+                  label,
+                ),
+                label,
+              );
+              const profile = coverage.profiles.find((p) => p.name === "p");
+              if (profile === undefined) {
+                fail(
+                  `${label}: the configured profile "p" must be reported ` +
+                    `(SPEC 8.2); got ` +
+                    JSON.stringify(coverage.profiles.map((p) => p.name)),
+                );
+              }
+              assertSameJson(
+                {
+                  covered: profile.covered,
+                  uncovered: profile.uncovered,
+                },
+                {
+                  covered: [{ identity: BETA, path: [ALPHA, BETA] }],
+                  uncovered: [ALPHA],
+                },
+                `${label}: beta covered through alpha's d edge, alpha ` +
+                  `uncovered (SPEC 8.2, 13.3)`,
+              );
+            },
+          },
+          {
+            label: "`impact --base`",
+            run: async () => {
+              const label = `T13.3-2 (corrupt record) \`impact --base ${base} --json\``;
+              const impact = decodeImpactReport(
+                await runJson(
+                  product,
+                  workspace,
+                  ["impact", "--base", base, "--json"],
+                  label,
+                ),
+                label,
+              );
+              assertSameJson(
+                {
+                  requirements: impact.requirements,
+                  direct: impact.code.direct,
+                  transitive: impact.code.transitive,
+                },
+                { requirements: [], direct: [], transitive: [] },
+                `${label}: current sources equal the baseline — no ` +
+                  `categories, no impacted code (SPEC 5.6, 9.3, 13.3)`,
+              );
+            },
+          },
+          {
+            label: "`review status`",
+            run: async () => {
+              const status = await sessionStatus(
+                product,
+                workspace,
+                "s",
+                "T13.3-2 (corrupt record)",
+              );
+              assertStatusRows(
+                status,
+                [
+                  { scope: A_ROOT, status: "unresolved", blocked: true },
+                  { scope: ALPHA, status: "unresolved", blocked: false },
+                  { scope: BETA, status: "unresolved", blocked: false },
+                ],
+                "T13.3-2 (corrupt record) `review status s --json` — the " +
+                  "session answers on the passing workspace (SPEC 10.6, " +
+                  "10.7, 13.3)",
+              );
+            },
+          },
+          {
+            label: "`query nodes`",
+            run: async () => {
+              const label = "T13.3-2 (corrupt record) `query nodes`";
+              const rows = decodeNodeRowsReport(
+                await runJson(product, workspace, ["query", "nodes"], label),
+                label,
+              );
+              for (const identity of [ALPHA, BETA]) {
+                if (!rows.some((row) => row.identity === identity)) {
+                  fail(
+                    `${label}: expected ${identity} among the rows (SPEC ` +
+                      `11, 13.3); got ` +
+                      JSON.stringify(rows.map((row) => row.identity).sort()),
+                  );
+                }
+              }
+            },
+          },
+          {
+            label: "`occurrences`",
+            run: async () => {
+              const label = "T13.3-2 (corrupt record) `occurrences`";
+              const report = decodeOccurrencesReport(
+                await runJson(product, workspace, ["occurrences"], label),
+                label,
+              );
+              assertSameJson(
+                {
+                  findings: report.findings,
+                  occurrences: occurrenceIdentitySummaries(report.occurrences),
+                },
+                {
+                  findings: [],
+                  occurrences: [
+                    {
+                      file: A_ROOT,
+                      kind: "depends",
+                      source: ALPHA,
+                      target: BETA,
+                    },
+                  ],
+                },
+                `${label}: the one staged occurrence, finding-free — no ` +
+                  `condition-23 finding accompanies a refreshing read's ` +
+                  `answer (SPEC 11.3, 13.3, 14.23)`,
+              );
+            },
+          },
+          {
+            label: "`view`",
+            run: async () => {
+              const label = "T13.3-2 (corrupt record) `view`";
+              const view = decodeViewFilesReport(
+                await runJson(product, workspace, ["view"], label),
+                label,
+              );
+              assertSameJson(
+                view,
+                { findings: [], files: [A_ROOT] },
+                `${label}: the whole-domain request answers finding-free — ` +
+                  `nothing is reported for the record (SPEC 11.4, 13.3, ` +
+                  `14.23)`,
+              );
+            },
+          },
+          {
+            label: "`at`",
+            run: async () => {
+              // Byte 30 lies inside "Alpha depends on beta." — within
+              // alpha's construct (bytes 0..55), outside the d entry's
+              // occurrence span ("beta" at bytes 18..24) (SPEC 11.5, 1.7).
+              const label = "T13.3-2 (corrupt record) `at specs/A.mdx 30`";
+              assertAtAnswer(
+                decodeAtReport(
+                  await runJson(
+                    product,
+                    workspace,
+                    ["at", A_ROOT, "30"],
+                    label,
+                  ),
+                  label,
+                ),
+                ALPHA,
+                label,
+              );
+            },
+          },
+        ];
+
+        for (const probe of recordProbes) {
+          await probe.run();
+
+          // The corrupt state persists — neither read, repaired, nor
+          // replaced (SPEC 13.3): the record-consulting surface still
+          // reports the record-supplied datum explicitly unavailable, with
+          // the 14.23 outcome's exit 1 (the finding's full form is
+          // T11.6-4's home).
+          const invLabel = `T13.3-2 (corrupt record) \`inventory\` after ${probe.label}`;
+          const invResult = await runCli(product, workspace, ["inventory"]);
+          assertExitCode(
+            invResult,
+            1,
+            `${invLabel} — an inventory answer carrying the condition-23 ` +
+              `finding exits 1 (SPEC 14.23, 11.6, 12.0)`,
+          );
+          const recorded = decodeInventoryRecordedDatum(
+            parseJsonStdout(invResult, invLabel),
+            invLabel,
+          );
+          if (recorded.state !== "unavailable") {
+            fail(
+              `${invLabel}: the record-supplied datum must still be ` +
+                `explicitly unavailable — a refreshing read leaves the ` +
+                `corrupt record state neither read, repaired, nor ` +
+                `replaced, and it is never read as an empty record (SPEC ` +
+                `13.3, 14.23, 11.6); got state ` +
+                JSON.stringify(recorded.state),
+            );
+          }
+
+          // Outside the graph data, nothing changed: no TypeScript or
+          // Markdown generated or removed, sources and durable files
+          // untouched (SPEC 13.3, 13.4; graph-data bytes stay unpinned —
+          // module header).
+          const after = await snapshotDirectory(workspace.root);
+          assertSnapshotsEqual(
+            asSnapshot(workspace.root, outsideGraph),
+            asSnapshot(
+              workspace.root,
+              filteredEntries(after.entries, (key) => !isGraphDataKey(key)),
+            ),
+            `T13.3-2 (corrupt record) after ${probe.label} and its ` +
+              `inventory probe: outside the graph data the workspace must ` +
+              `be byte-identical — no TypeScript or Markdown generated or ` +
+              `removed, journal, session, and source files untouched ` +
+              `(SPEC 13.3, 13.4)`,
+          );
+        }
+
+        // Until a successful `build` replaces the state (SPEC 13.3, 14.10,
+        // 12.1): afterwards the record-supplied datum is the plain recorded
+        // derived-file paths again, at exit 0 on the clean workspace.
+        await buildOk(
+          product,
+          workspace,
+          "T13.3-2 (corrupt record) `build` over the corrupt-record state " +
+            "— a successful build replaces the record (SPEC 12.1, 13.4, " +
+            "14.10)",
+        );
+        const recoveredLabel =
+          "T13.3-2 (corrupt record) `inventory` after the rebuild";
+        const recovered = decodeInventoryRecordedDatum(
+          await runJson(product, workspace, ["inventory"], recoveredLabel),
+          recoveredLabel,
+        );
+        if (recovered.state !== "value") {
+          fail(
+            `${recoveredLabel}: after a successful \`build\` replaces the ` +
+              `corrupt record, the record-supplied datum is the plain ` +
+              `recorded derived-file paths again — never unavailability, ` +
+              `never null (SPEC 13.3, 14.23, 11.6, 12.7); got state ` +
+              JSON.stringify(recovered.state),
+          );
+        }
+        if (!recovered.value.includes("specs/A.xspec.ts")) {
+          fail(
+            `${recoveredLabel}: the recorded derived-file paths — the ` +
+              `paths as last generated, companions included — must name ` +
+              `the generated module specs/A.xspec.ts (SPEC 11.6, 13.1, ` +
+              `13.3); got ${JSON.stringify(recovered.value)}`,
           );
         }
       },
