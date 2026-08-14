@@ -2703,9 +2703,44 @@ certify against FP-091's fixtures once those land.
   (certification-document ×3 → FP-091, its in-scope-registry gap still
   exactly {T11.4-3, T11.4-4}; S-1's unmapped keys exactly {11.5, 11.6,
   12.6, 12.7} → stage G), S-5 and certification green.]
-- [ ] FP-062 — Implement T11.4-3 (CONF-AVAIL): raw attributes and per-node
+- [x] FP-062 — Implement T11.4-3 (CONF-AVAIL): raw attributes and per-node
   data with stated-`null` root `tags`/`coverage`. [R2 #4, R3 gap 1, VERIFY;
   TEST-SPEC §11.4]
+  [Done 2026-08-14: T11.4-3 registered in section-11.4.ts (wrapper
+  auto-declares; traceability `"T11.4-3": ["11.4"]` — T11.4-3 is in no
+  TEST-SPEC 14 staging record, the T11.2-2 precedent). One workspace, two
+  files, two invocations, inside CONF-AVAIL's staging constraints
+  (spec-only `.mdx` workspace, no `build` gate, no snapshot compare,
+  `view` alone — bare + one `<file>` operand — staged conditions 14.17
+  only, within the scope's stated set): specs/attrs.mdx stages the
+  five-attribute tag `<S id="dup" id="dup" note="mystery" {...extras}
+  tags>` plus `<S id="cov" coverage={"none"}>`; the bare view asserts
+  every raw attribute entry {name, range, text} byte-exactly in tag order
+  (the repeated id's BOTH entries; the spread's name the stated null, its
+  text the whole braced construct; the valueless bare-name tags), exactly
+  five located 14.17 beside the view (inclusion by form, never an
+  omission; no 14.1/14.16/14.2/14.3 beside), and per-node
+  identity/tags/coverage in every legitimate state (unavailable: the
+  repeated-id identity, the valueless tags, the braced coverage; plain:
+  cov/ok identities, [] and ["solo"] tags, the absent-prop default
+  "required" on the spread-bearing tag and "none"; the roots' stated
+  nulls); the finding-free specs/clean.mdx named as an operand exits 0
+  with root tags/coverage null — the no-finding, no-exit-1 root arm
+  VIOL-AVAIL-OMIT's note names. Verified: typecheck/format clean; suite
+  red-as-diagnosed at the first invocation (`view` unknown command, exit
+  2 — the same product gap as T11.4-1); scratch run (deleted) of the
+  registered body against a workspace-deriving conforming fake green
+  end-to-end, nine deviation fakes each failing at the targeted
+  assertion — nullmarker at the decode's never-null identity, omit at the
+  decode's absent finding-`path` member, dropinvalid/spreadname at the
+  attributes compare, takefirst/readbraced/nofinding at the exact 14.17
+  count, rootmarker at the root-null tree compare, cleanmarker
+  (operand-invocation-only misbehavior) at the exit-0 assertion.
+  `npm run test:self`: unchanged 4 planned mid-loop reds, the
+  certification-document in-scope-registry gap narrowed exactly
+  {T11.4-3, T11.4-4} → {T11.4-4} (rest → FP-091; S-1's unmapped keys
+  {11.5, 11.6, 12.6, 12.7} → stage G); S-5, S-7, and certification
+  green.]
 - [ ] FP-063 — Implement T11.4-4 (CONF-AVAIL): imports datum. [R2 #4, R3
   gap 1, VERIFY; TEST-SPEC §11.4]
 - [ ] FP-064 — Implement T11.4-5: `--text` expansion domain. [R2 #4;

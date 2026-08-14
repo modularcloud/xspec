@@ -1,5 +1,5 @@
-// TEST-SPEC §11.4 (`xspec view`) — SUITE-54: T11.4-1 and T11.4-2 (T11.4-3
-// through T11.4-6 are planned follow-ups in this module).
+// TEST-SPEC §11.4 (`xspec view`) — SUITE-54: T11.4-1 through T11.4-3
+// (T11.4-4 through T11.4-6 are planned follow-ups in this module).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -105,33 +105,89 @@
 //   view's substance is pinned at identity level (root and child identity);
 //   ranges, attributes, and interpreted values stay T11.4-1/-3's subject.
 //
-// Certification (CERTIFICATIONS.md CONF-AVAIL): T11.4-1 is IN scope (the
-// fixture family lands with the certification-manifest task), so the body
-// obeys the scope's staging constraints exactly: a spec-only workspace of
-// `.mdx` sources at valid-UTF-8 `#`-free paths; the ONE command it drives is
-// the enumerated surface's bare whole-domain `view` — NO gate-reference
-// `build` (the validity premise rides the answer's own findings member) —
-// and NO snapshot compare (graph-data and refresh behavior are expressly out
-// of CONF-AVAIL scope). Its fixtures stage NO undefined datum — every node
-// identity defined under 11.2's chain conditions, the invalid-element arm
-// keeping every spelled identity defined — so its answers carry the
+// T11.4-3 — attributes and per-node data (SPEC 11.4, 11.2, 2.7). One
+// workspace, two files, two invocations:
+//
+// - specs/attrs.mdx, staged via the running-offset builder: a
+//   five-attribute section tag `<S id="dup" id="dup" note="mystery"
+//   {...extras} tags>` — a repeated `id` (BOTH entries listed), an unknown
+//   prop, a spread attribute (its `name` structurally absent — the stated
+//   `null` — its source text the whole braced construct), and a valueless
+//   bare-name `tags` — and a second section `<S id="cov"
+//   coverage={"none"}>`. The bare `view` asserts every attribute entry
+//   `{name, range, text}` byte-exactly in tag order: inclusion is by form —
+//   a product omitting an invalid form from the listing (or folding the
+//   repeated pair to one entry) fails the exact attributes compare — while
+//   each invalidity is a located finding beside the view: exactly five
+//   14.17 (repeated `id`; unknown prop; spread attribute; valueless `tags`;
+//   braced `coverage` — SPEC 2.7 assigns each), every finding located in
+//   specs/attrs.mdx (file granularity; range precision is T14-8's), and
+//   nothing else: no 14.1 (an invalid-form `id` is condition 17, never
+//   condition 1), no 14.16 (a spread attribute is an attribute form of a
+//   permitted section element, not an invalid construct), no 14.2/14.3
+//   (`cov` and `ok` are unique and structurally conformant).
+// - Per-node interpreted data ride the same tree compare, each datum
+//   observed in every legitimate state (the full definedness matrix is
+//   T11.2-2's home; this test carries each state once): identity — plain
+//   (`cov`, `ok`, every root) and unavailable (the repeated-`id` bearer
+//   spells none); tags — plain default `[]` (`cov`), plain `["solo"]`
+//   (`ok`), the roots' stated `null`, and unavailable (the valueless
+//   `tags`); coverage — plain default `"required"` (the five-attribute tag:
+//   `coverage` is absent there, and an absent prop defines the default
+//   whatever OTHER attributes the tag spells, SPEC 11.2), plain `"none"`
+//   (`ok`), the roots' stated `null`, and unavailable (the braced
+//   `coverage={"none"}` — quoted-static form required, 2.7).
+// - specs/clean.mdx is finding-free (`<S id="ok" tags="solo"
+//   coverage="none">`); the second invocation names it as a `<file>`
+//   operand and asserts SPEC 11.4's root sentence sharply: a root's `tags`
+//   and `coverage` are structurally absent — the stated `null`, never the
+//   unavailability marker, NO finding and NO exit-1 consequence — so the
+//   finding-free domain exits 0 with them `null` (a product reading the
+//   structural absence as unavailability owes exit 1 per 11.2's
+//   any-unavailable-datum rule and fails the exit compare; the bare
+//   invocation exits 1 for the matrix file's findings and markers).
+//
+// Certification (CERTIFICATIONS.md CONF-AVAIL): T11.4-1 and T11.4-3 are IN
+// scope (the fixture family lands with the certification-manifest task), so
+// both bodies obey the scope's staging constraints exactly: spec-only
+// workspaces of `.mdx` sources at valid-UTF-8 `#`-free paths; every command
+// driven is drawn from the enumerated surface — T11.4-1's bare whole-domain
+// `view`, T11.4-3's bare `view` plus one `<file>`-operand `view`, never
+// `occurrences` or `at` — with NO gate-reference `build` (each answer's own
+// findings member is the staging integrity) and NO snapshot compare
+// (graph-data and refresh behavior are expressly out of CONF-AVAIL scope),
+// and every staged condition drawn from the scope's stated set (T11.4-3
+// stages 14.17 alone). T11.4-1's fixtures stage NO undefined datum — every
+// node identity defined under 11.2's chain conditions, the invalid-element
+// arm keeping every spelled identity defined — so its answers carry the
 // unavailability marker nowhere: the marker-free ground
 // VIOL-AVAIL-NULLMARKER's passing side stands on (nothing undefined, so the
 // deviation touches nothing), while the stated `null`s the answers DO carry
 // (each root's `tags`/`coverage`; `closing` on self-closing sections;
 // `opening`/`closing` on roots) make the decode fail under VIOL-AVAIL-OMIT
 // exactly as certified (`null` is never omission — decodeViewReport rejects
-// the absent members). The per-node `tags`/`coverage` VALUES and raw
-// attribute entries stay outside this test's compare (T11.4-3's subject; the
-// decode already enforces their presence and forms). T11.4-2 is NOT in
-// scope: CERTIFICATIONS.md's Exclusions name the argument, spelling, and
-// domain-and-exit matrices of the machine-interface surfaces (T11.2-5,
-// T11.3-2/3, T11.4-2, T11.5-2) — certified representatively through the
-// shared machinery — so unlike its sibling it is free to drive the
-// gate-reference `build` and the snapshot compare.
+// the absent members). T11.4-3 is the per-node unavailability carrier the
+// document names: under VIOL-AVAIL-NULLMARKER its identity, tags, and
+// coverage unavailability arms read `null` where the test asserts the
+// marker literally (a `null` identity fails the form-exact decode outright;
+// `null` tags/coverage fail the tree compare against the expected marker);
+// under VIOL-AVAIL-OMIT every stated-`null` member its answers carry (each
+// root's `tags`/`coverage`, every finding's `null` path, the spread entry's
+// `null` name) is absent and the decode rejects the omission, the exit-0
+// operand arm asserting the root distinction directly; under
+// VIOL-AVAIL-NOFILE it passes untouched — T11.4-3 drives `view` alone.
+// T11.4-2 is NOT in scope: CERTIFICATIONS.md's Exclusions name the
+// argument, spelling, and domain-and-exit matrices of the machine-interface
+// surfaces (T11.2-5, T11.3-2/3, T11.4-2, T11.5-2) — certified
+// representatively through the shared machinery — so unlike its siblings it
+// is free to drive the gate-reference `build` and the snapshot compare.
 
 import { Buffer } from "node:buffer";
-import type { SourceRange, ViewNode } from "../../helpers/adapters/index.js";
+import type {
+  SourceRange,
+  ViewAttributeEntry,
+  ViewNode,
+} from "../../helpers/adapters/index.js";
 import { decodeViewReport } from "../../helpers/adapters/index.js";
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -154,8 +210,11 @@ import {
 
 /**
  * Running byte-offset fixture assembler (the T5.7-2/T11.2-1 discipline):
- * `add` appends a segment and returns its byte range, so every expected
- * offset is composed from the same parts the staged file is.
+ * `add` appends a segment and returns its byte range, and `attr` an
+ * attribute segment as the expected `{name, range, text}` view entry (SPEC
+ * 11.4: the source text is the attribute's own characters, so entry text =
+ * segment), so every expected offset is composed from the same parts the
+ * staged file is.
  */
 class ByteFixture {
   private readonly parts: string[] = [];
@@ -175,7 +234,14 @@ class ByteFixture {
     this.bytes += Buffer.byteLength(segment, "utf8");
     return { start, end: this.bytes };
   }
+
+  attr(name: string | null, text: string): ViewAttributeEntry {
+    return { name, range: this.add(text), text };
+  }
 }
+
+/** The 12.7 unavailability marker, as decoded (one-datum state). */
+const UNAVAILABLE = { unavailable: true } as const;
 
 /**
  * Fixture self-check (harness-side, before any product invocation): a
@@ -194,7 +260,7 @@ function sliceCheck(
     .toString("utf8");
   if (actual !== span) {
     fail(
-      `T11.4-1 fixture self-check — ${what}: the claimed byte range ` +
+      `§11.4 fixture self-check — ${what}: the claimed byte range ` +
         `[${String(range.start)}, ${String(range.end)}) slices the staged ` +
         `bytes to ${JSON.stringify(actual)}, expected ` +
         `${JSON.stringify(span)} (a harness-side staging error, not a ` +
@@ -879,4 +945,361 @@ const T11_4_2 = defineProductTest({
   },
 });
 
-export const section114Tests: readonly ProductTestEntry[] = [T11_4_1, T11_4_2];
+// --- T11.4-3 — attributes and per-node data -----------------------------------
+//
+// The staging ground (module header): specs/attrs.mdx carries the raw
+// attribute matrix — the five-attribute tag and the braced-coverage tag,
+// exactly five 14.17 — while specs/clean.mdx is finding-free with all three
+// interpreted data plain. The multi-byte prose prefixes shift every later
+// offset (SPEC 1.7: byte offsets, not code points or UTF-16 units).
+
+const ATTRS_FILE = "specs/attrs.mdx";
+
+const AT = new ByteFixture();
+AT.add("Prélude — matrice d'attributs.\n\n");
+const AT_DUP_START = AT.pos;
+AT.add("<S ");
+const AT_DUP_ID1 = AT.attr("id", 'id="dup"');
+AT.add(" ");
+const AT_DUP_ID2 = AT.attr("id", 'id="dup"');
+AT.add(" ");
+const AT_NOTE = AT.attr("note", 'note="mystery"');
+AT.add(" ");
+// The spread attribute (SPEC 2.7): `name` is structurally absent — the
+// stated null — and the source text is its entire braced construct.
+const AT_SPREAD = AT.attr(null, "{...extras}");
+AT.add(" ");
+const AT_TAGS = AT.attr("tags", "tags");
+AT.add(">\nDup text.\n</S>");
+const AT_DUP_RANGE: SourceRange = { start: AT_DUP_START, end: AT.pos };
+AT.add("\n\n");
+const AT_COV_START = AT.pos;
+AT.add("<S ");
+const AT_COV_ID = AT.attr("id", 'id="cov"');
+AT.add(" ");
+const AT_COV_COVERAGE = AT.attr("coverage", 'coverage={"none"}');
+AT.add(">\nCov text.\n</S>");
+const AT_COV_RANGE: SourceRange = { start: AT_COV_START, end: AT.pos };
+AT.add("\n");
+const ATTRS_SOURCE = AT.source;
+const ATTRS_ROOT_RANGE: SourceRange = { start: 0, end: AT.pos };
+
+const CLEAN_FILE = "specs/clean.mdx";
+
+const CN = new ByteFixture();
+CN.add("Épilogue — sol sans finding.\n\n");
+const CN_OK_START = CN.pos;
+CN.add("<S ");
+const CN_OK_ID = CN.attr("id", 'id="ok"');
+CN.add(" ");
+const CN_OK_TAGS = CN.attr("tags", 'tags="solo"');
+CN.add(" ");
+const CN_OK_COVERAGE = CN.attr("coverage", 'coverage="none"');
+CN.add(">\nOk text.\n</S>");
+const CN_OK_RANGE: SourceRange = { start: CN_OK_START, end: CN.pos };
+CN.add("\n");
+const CLEAN_SOURCE = CN.source;
+const CLEAN_ROOT_RANGE: SourceRange = { start: 0, end: CN.pos };
+
+/**
+ * The answer's exact accompanying findings (SPEC 11.2, 14) — doubling as
+ * staging integrity (no `build` gate reference: CONF-AVAIL surface
+ * constraint, module header). One 14.17 per afflicted prop name per element
+ * (SPEC 2.7; T11.2-2's counting precedent): the repeated `id`, the unknown
+ * prop, the spread attribute, the valueless `tags`, the braced `coverage` —
+ * and nothing else (no 14.1, no 14.16, no 14.2/14.3; module header).
+ */
+const ATTRS_CONDITION_COUNTS: Readonly<Record<string, number>> = {
+  "14.17": 5,
+};
+
+/**
+ * T11.4-3's projection: the identity datum, the construct range, the raw
+ * attribute entries (`{name, range, text}` — this test's own subject), and
+ * the interpreted `tags`/`coverage` datums, per node. Tag-range
+ * decompositions stay outside (T11.4-1 byte-asserts them; the form-exact
+ * decode has already validated their presence and forms).
+ */
+interface AttributeDataShape {
+  readonly identity: ViewNode["identity"];
+  readonly range: SourceRange;
+  readonly attributes: readonly ViewAttributeEntry[];
+  readonly tags: ViewNode["tags"];
+  readonly coverage: ViewNode["coverage"];
+  readonly children: readonly AttributeDataShape[];
+}
+
+function projectAttributeData(node: ViewNode): AttributeDataShape {
+  return {
+    identity: node.identity,
+    range: node.range,
+    attributes: node.attributes.map((entry) => ({
+      name: entry.name,
+      range: entry.range,
+      text: entry.text,
+    })),
+    tags: node.tags,
+    coverage: node.coverage,
+    children: node.children.map(projectAttributeData),
+  };
+}
+
+// The complete expected trees (document order). Each root: identity defined
+// (the path is valid), attributes [], tags/coverage the stated
+// structural-absence null (SPEC 11.4, 12.7) — never the marker.
+const ATTRS_TREE: AttributeDataShape = {
+  identity: ATTRS_FILE,
+  range: ATTRS_ROOT_RANGE,
+  attributes: [],
+  tags: null,
+  coverage: null,
+  children: [
+    {
+      // Repeated `id` spells no identity (SPEC 11.2) — explicitly
+      // unavailable, never a picked value; BOTH raw entries listed in tag
+      // order. `coverage` is absent on this tag, so its interpreted value
+      // is the plain default "required" (an absent prop defines the
+      // default whatever other attributes the tag spells), while the
+      // valueless `tags` leaves the interpreted tags unavailable.
+      identity: UNAVAILABLE,
+      range: AT_DUP_RANGE,
+      attributes: [AT_DUP_ID1, AT_DUP_ID2, AT_NOTE, AT_SPREAD, AT_TAGS],
+      tags: UNAVAILABLE,
+      coverage: "required",
+      children: [],
+    },
+    {
+      // The braced `coverage={"none"}` is not quoted-static form (SPEC
+      // 2.7): interpreted coverage unavailable — never the braced value
+      // read through — while the identity stays defined (tags/coverage
+      // invalidity never undefines identity) and absent `tags` defines
+      // the plain default [].
+      identity: `${ATTRS_FILE}#cov`,
+      range: AT_COV_RANGE,
+      attributes: [AT_COV_ID, AT_COV_COVERAGE],
+      tags: [],
+      coverage: UNAVAILABLE,
+      children: [],
+    },
+  ],
+};
+
+const CLEAN_TREE: AttributeDataShape = {
+  identity: CLEAN_FILE,
+  range: CLEAN_ROOT_RANGE,
+  attributes: [],
+  tags: null,
+  coverage: null,
+  children: [
+    {
+      identity: `${CLEAN_FILE}#ok`,
+      range: CN_OK_RANGE,
+      attributes: [CN_OK_ID, CN_OK_TAGS, CN_OK_COVERAGE],
+      tags: ["solo"],
+      coverage: "none",
+      children: [],
+    },
+  ],
+};
+
+const T11_4_3 = defineProductTest({
+  id: "T11.4-3",
+  title:
+    'raw attribute spellings as parsed, one entry per spelled attribute in tag order on the five-attribute tag `<S id="dup" id="dup" note="mystery" {...extras} tags>` — a repeated `id` (BOTH entries), an unknown prop, a spread attribute (its `name` structurally absent — the stated `null` — its source text the whole braced construct), a valueless bare-name `tags` — each entry\'s name, range, and source text byte-asserted against precomputed offsets behind a multi-byte prefix; inclusion is by form: every invalid form stays a listed entry, its invalidity a located finding beside the view, never a view omission — exactly five 14.17 (those four plus a braced `coverage={"none"}` on a second section), each located in the matrix file; per-node `identity`, `tags`, `coverage` each plain or explicitly unavailable per T11.2-2, every state carried once (identity unavailable on the repeated-`id` bearer; tags unavailable on the valueless `tags` beside its absent-prop default coverage "required"; coverage unavailable on the braced value beside its defined identity and default empty tags; all three plain in the sibling file); a root\'s `tags` and `coverage` are structurally absent — the stated `null`, never the unavailability marker, no finding and no exit-1 consequence: the finding-free specs/clean.mdx named as a `<file>` operand exits 0 with them `null`, the bare whole-domain view exiting 1 for the matrix file\'s findings and markers (SPEC 11.4, 11.2, 2.7, 12.7, 14; CERTIFICATIONS.md CONF-AVAIL in scope)',
+  run: async (product) => {
+    // Fixture self-checks (T5.7-2 discipline) — composed-range arithmetic
+    // proven against the staged bytes before any product invocation.
+    for (const [entry, what] of [
+      [AT_DUP_ID1, "the first repeated id spelling"],
+      [AT_DUP_ID2, "the second repeated id spelling"],
+      [AT_NOTE, "the unknown prop"],
+      [AT_SPREAD, "the spread attribute's whole braced construct"],
+      [AT_TAGS, "the valueless tags prop"],
+      [AT_COV_ID, "the cov id"],
+      [AT_COV_COVERAGE, "the braced coverage"],
+    ] as const) {
+      sliceCheck(ATTRS_SOURCE, entry.range, entry.text, what);
+    }
+    sliceCheck(
+      ATTRS_SOURCE,
+      AT_DUP_RANGE,
+      '<S id="dup" id="dup" note="mystery" {...extras} tags>\nDup text.\n</S>',
+      "the five-attribute construct",
+    );
+    sliceCheck(
+      ATTRS_SOURCE,
+      AT_COV_RANGE,
+      '<S id="cov" coverage={"none"}>\nCov text.\n</S>',
+      "the braced-coverage construct",
+    );
+    sliceCheck(ATTRS_SOURCE, ATTRS_ROOT_RANGE, ATTRS_SOURCE, "the matrix file");
+    for (const [entry, what] of [
+      [CN_OK_ID, "the ok id"],
+      [CN_OK_TAGS, "the ok tags"],
+      [CN_OK_COVERAGE, "the ok coverage"],
+    ] as const) {
+      sliceCheck(CLEAN_SOURCE, entry.range, entry.text, what);
+    }
+    sliceCheck(
+      CLEAN_SOURCE,
+      CN_OK_RANGE,
+      '<S id="ok" tags="solo" coverage="none">\nOk text.\n</S>',
+      "the clean construct",
+    );
+    sliceCheck(CLEAN_SOURCE, CLEAN_ROOT_RANGE, CLEAN_SOURCE, "the clean file");
+
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [ATTRS_FILE]: ATTRS_SOURCE,
+        [CLEAN_FILE]: CLEAN_SOURCE,
+      },
+    });
+    try {
+      // --- Invocation 1: the bare whole-domain `view` (CONF-AVAIL's
+      // enumerated surface; no gate-reference `build`, no snapshot
+      // compare). The answer carries the five 14.17 findings and the
+      // explicitly-unavailable datums, so exit 1 with the full document
+      // still emitted (SPEC 11.2).
+      const context = "T11.4-3 bare `view` (whole domain: attrs + clean)";
+      const result = await expectExit(
+        product,
+        workspace,
+        ["view"],
+        1,
+        `${context} — the answer carries the staged 14.17 findings and ` +
+          `explicitly-unavailable datums, so the invocation exits 1 with ` +
+          `the full document still emitted (SPEC 11.2, 11.4)`,
+      );
+      const report = decodeViewReport(
+        parseJsonStdout(
+          result,
+          `${context} — a single JSON document is the only output form, ` +
+            `with or without --json (SPEC 11)`,
+        ),
+        { text: false },
+        context,
+      );
+
+      // Staging integrity rides the answer itself (no `build` gate):
+      // exactly one 14.17 per afflicted prop name per element, nothing
+      // else — the invalidity is a located finding beside the view, never
+      // a view omission (SPEC 11.4, 2.7, 14).
+      assertConditionCounts(
+        report.findings,
+        ATTRS_CONDITION_COUNTS,
+        `${context}: exactly five 14.17 accompany — the repeated id, the ` +
+          `unknown prop, the spread attribute, the valueless tags, and ` +
+          `the braced coverage (SPEC 2.7, 14) — and nothing masked or ` +
+          `phantom reports: no 14.1 from the invalid-form id (condition ` +
+          `17, never condition 1), no 14.16 for the spread attribute (an ` +
+          `attribute form of a permitted section element, not an invalid ` +
+          `construct), no 14.2/14.3 (cov and ok are unique and conformant)`,
+      );
+      for (const finding of report.findings) {
+        assertFindingLocated(
+          finding,
+          { file: ATTRS_FILE },
+          `${context} — every 14.17 locates in the matrix file (file ` +
+            `granularity; range precision is T14-8's)`,
+        );
+      }
+
+      // The whole domain in path-byte order, then each per-file tree with
+      // its raw attribute entries and interpreted datums (module header).
+      assertSameJson(
+        report.views.map((view) => view.file),
+        [ATTRS_FILE, CLEAN_FILE],
+        `${context}: both discovered spec sources are viewed, in byte ` +
+          `order of workspace-relative path (SPEC 11.4, 12.7)`,
+      );
+      assertSameJson(
+        projectAttributeData(report.views[0]!.root),
+        ATTRS_TREE,
+        `${context} — ${ATTRS_FILE}: raw attribute spellings as parsed, ` +
+          `one entry per spelled attribute in tag order — the repeated ` +
+          `id's BOTH entries, the unknown prop, the spread attribute ` +
+          `(name the stated null, text the whole braced construct), the ` +
+          `valueless bare-name tags — each with byte-exact range and ` +
+          `source text, none omitted for its invalidity (SPEC 11.4); ` +
+          `per-node identity/tags/coverage per 11.2: the repeated-id ` +
+          `bearer's identity and valueless-tags value explicitly ` +
+          `unavailable beside its absent-prop default coverage ` +
+          `"required", the braced-coverage value unavailable beside its ` +
+          `defined identity and default empty tags, and the root's ` +
+          `tags/coverage the stated null, never the marker (SPEC 12.7)`,
+      );
+      assertSameJson(
+        projectAttributeData(report.views[1]!.root),
+        CLEAN_TREE,
+        `${context} — ${CLEAN_FILE}: the sibling file's section carries ` +
+          `all three interpreted data plain (identity "ok", tags ` +
+          `["solo"], coverage "none") with its three attribute entries ` +
+          `byte-exact, and the root's tags/coverage stay the stated null ` +
+          `(SPEC 11.4, 11.2, 12.7)`,
+      );
+      [ATTRS_FILE, CLEAN_FILE].forEach((file, index) => {
+        const view = report.views[index]!;
+        assertSameJson(
+          [view.imports, view.occurrences, view.comments],
+          [[], [], []],
+          `${context} — ${file}: no import, reference spelling, or MDX ` +
+            `comment is staged — empty lists are [], never null (SPEC ` +
+            `11.4, 12.7)`,
+        );
+      });
+
+      // --- Invocation 2: the finding-free file named as a `<file>`
+      // operand (SPEC 11.4's root sentence, sharply): the root's
+      // tags/coverage are structurally absent — the stated null, never
+      // the unavailability marker — with NO finding and NO exit-1
+      // consequence, so the finding-free domain {clean} exits 0 with the
+      // full answer while the matrix file stays failing outside the
+      // domain (SPEC 11.2, 11.4, 12.7).
+      const cleanContext =
+        "T11.4-3 `view specs/clean.mdx` (the finding-free file as a " +
+        "`<file>` operand)";
+      const cleanReport = decodeViewReport(
+        await runJson(
+          product,
+          workspace,
+          ["view", CLEAN_FILE],
+          `${cleanContext} — a finding-free file's view exits 0 with the ` +
+            `root's tags/coverage the stated null: structural absence ` +
+            `carries no finding and no exit-1 consequence, unlike an ` +
+            `explicitly-unavailable datum (SPEC 11.4, 11.2, 12.7)`,
+        ),
+        { text: false },
+        cleanContext,
+      );
+      assertSameJson(
+        cleanReport.findings,
+        [],
+        `${cleanContext}: the domain's one file is finding-free — the ` +
+          `matrix file's 14.17s are no domain file's findings — and a ` +
+          `root's stated-null tags/coverage contribute none (SPEC 11.2, ` +
+          `11.4)`,
+      );
+      assertSameJson(
+        cleanReport.views.map((view) => view.file),
+        [CLEAN_FILE],
+        `${cleanContext}: one per-file view — the requested file (SPEC 11.4)`,
+      );
+      assertSameJson(
+        projectAttributeData(cleanReport.views[0]!.root),
+        CLEAN_TREE,
+        `${cleanContext}: the same tree as the whole-domain answer — the ` +
+          `root's tags/coverage the stated null, never the unavailability ` +
+          `marker, on the exit-0 side too (SPEC 11.4, 12.7)`,
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
+export const section114Tests: readonly ProductTestEntry[] = [
+  T11_4_1,
+  T11_4_2,
+  T11_4_3,
+];
