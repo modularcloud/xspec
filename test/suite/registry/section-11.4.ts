@@ -1,5 +1,5 @@
-// TEST-SPEC §11.4 (`xspec view`) — SUITE-54: T11.4-1 through T11.4-4
-// (T11.4-5 and T11.4-6 are planned follow-ups in this module).
+// TEST-SPEC §11.4 (`xspec view`) — SUITE-54: T11.4-1 through T11.4-5
+// (T11.4-6 is the planned follow-up in this module).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -191,6 +191,59 @@
 //   too: imports/occurrences/comments `[]`, both files' root-only trees
 //   byte-asserted, the roots' stated-null tags/coverage riding the decode.
 //
+// T11.4-5 — `--text` and the expansion domain (SPEC 11.4, 11.2, 1.6, 3,
+// 12.0). Four workspaces, each staged failing on purpose and pinned by a
+// `build --json` gate (T11.4-5 is NOT in CONF-AVAIL scope — certification
+// note below — so the gate-reference build is free), then observed through
+// operand-requested views:
+//
+// - The chain (A → B → C, X beyond the boundary): A imports B and embeds
+//   B#b; B holds its own unresolved `d={"ghost"}` (14.5) and embeds C#c; C
+//   imports X and holds the boundary spelling `{text(X.dup)}` — X spells
+//   `dup` twice, every bearer undefined (SPEC 11.2), so the reference
+//   records no occurrence (14.6) and X is NEVER consulted: the consulted
+//   domain is the requested files plus exactly the files of resolved
+//   targets reachable through occurrence-RECORDING embeddings (SPEC 11.4).
+//   `view specs/A.mdx --text`: the domain is {A, B, C} — exactly B's 14.5
+//   and C's 14.6 accompany (deep findings in consulted files never
+//   requested) while X's 14.3, proven staged by the gate, accompanies
+//   NOTHING (a product picking a winner among duplicate bearers, or
+//   consulting import targets rather than resolved-embedding targets,
+//   carries it and fails the exact multiset); A's view alone is served —
+//   alpha poisoned (the boundary lies two hops down), the embedding-free
+//   sibling and the root's own text defined and byte-exact per the rules of
+//   3. Without `--text`, the same request consults A alone: findings `[]`,
+//   exit 0 — A itself is finding-free, so the exit follows A's own findings
+//   while B/C/X stay failing (a product consulting embedded targets without
+//   `--text`, or reporting whole-workspace findings, fails both compares).
+// - The cycle: entry.mdx embeds loop.mdx#l1, whose `{text("l1")}` re-enters
+//   itself — the length-one embedding cycle (SPEC 5.3, 14.9), one finding,
+//   one location: the participating container in loop.mdx. `view
+//   specs/entry.mdx --text`: the cycle participant is consulted — the
+//   entry's embedding resolves and records, whether or not any expansion
+//   completes (SPEC 11.4) — so the 14.9 accompanies from a consulted file
+//   never requested; start and the root's subtree text are poisoned, the
+//   root's own text defined.
+// - The masked file: main.mdx imports gone.xspec (valid — discovery, not
+//   parseability, defines designation, SPEC 2.1) and embeds GONE.g, but
+//   gone.mdx is unparseable (14.20): a masked file's sections spell no
+//   defined identity, so the spelling records NO occurrence (main's
+//   occurrence list is `[]`) and gone is never consulted by expansion —
+//   `view specs/main.mdx --text` carries exactly main's own 14.6 (located
+//   exactly at the braced container), never the 14.20. Requesting gone too
+//   (`view specs/main.mdx specs/gone.mdx --text`) attaches the 14.20 — its
+//   parse-failure finding accompanies only when itself requested — and gone
+//   still contributes NO view: the views list stays [main]. The import
+//   entry's target is the plain "specs/gone.mdx" both times.
+// - The invalid path: `specs/vi#ew.mdx` is discovered and parseable; a bare
+//   `<file>` operand is a whole path with no delimiter role for `#` (SPEC
+//   12.0), so requesting it serves its full view: every identity — root
+//   included — explicitly unavailable (no identity over an invalid path,
+//   SPEC 11.2) while its text values are plain and byte-exact (expansion
+//   definedness turns on occurrence-recording spellings alone — the file
+//   holds none — never on identity definedness), the 14.19 accompanying
+//   with no locations and the file as concerned path, exit 1.
+//
 // Certification (CERTIFICATIONS.md CONF-AVAIL): T11.4-1, T11.4-3, and
 // T11.4-4 are IN scope (the fixture family lands with the
 // certification-manifest task), so those bodies obey the scope's staging
@@ -230,14 +283,17 @@
 // no-default declarations' `null` name) is absent and the decode rejects
 // the omission; under VIOL-AVAIL-NOFILE it passes untouched — T11.4-4
 // drives `view` alone.
-// T11.4-2 is NOT in scope: CERTIFICATIONS.md's Exclusions name the
-// argument, spelling, and domain-and-exit matrices of the machine-interface
-// surfaces (T11.2-5, T11.3-2/3, T11.4-2, T11.5-2) — certified
-// representatively through the shared machinery — so unlike its siblings it
-// is free to drive the gate-reference `build` and the snapshot compare.
+// T11.4-2 and T11.4-5 are NOT in scope: CERTIFICATIONS.md's Exclusions name
+// the argument, spelling, and domain-and-exit matrices of the
+// machine-interface surfaces (T11.2-5, T11.3-2/3, T11.4-2, T11.5-2) and
+// T11.4-5's consultation-domain negatives — certified representatively
+// through the shared machinery — so unlike their siblings they are free to
+// drive the gate-reference `build` and the snapshot compare.
 
 import { Buffer } from "node:buffer";
 import type {
+  Finding,
+  OccurrenceRecord,
   SourceRange,
   ViewAttributeEntry,
   ViewImportEntry,
@@ -1605,9 +1661,1057 @@ const T11_4_4 = defineProductTest({
   },
 });
 
+// --- T11.4-5 — `--text` and the expansion domain ------------------------------
+//
+// Module header holds the narrative; the constants below stage the four
+// workspaces with the running-offset builder so every expected offset and
+// every expected text value is composed from the same parts the staged files
+// are (expected own/subtree text hand-derived per the rules of 3, the
+// T11.2-4 discipline: the import line and every tag-only line are left empty
+// purely by removals and drop WITH their terminators — a straddling
+// closing-tag line's drop eats the enclosing contribution's terminator —
+// while originally-blank lines stay).
+
+/**
+ * The projection T11.4-5 pins per node under `--text`: the identity datum,
+ * the construct range (1.7), and the own/subtree text datums — each a
+ * byte-exact string or the unavailability marker (T11.2-4's matrix) — plus
+ * tree shape. Attribute entries and interpreted tags/coverage stay at their
+ * home tests (T11.4-1/-3); the form-exact decode has validated their forms.
+ */
+interface TextTreeShape {
+  readonly identity: ViewNode["identity"];
+  readonly range: SourceRange;
+  readonly ownText: string | { readonly unavailable: true };
+  readonly subtreeText: string | { readonly unavailable: true };
+  readonly children: readonly TextTreeShape[];
+}
+
+function projectTextShape(node: ViewNode): TextTreeShape {
+  return {
+    identity: node.identity,
+    range: node.range,
+    ownText: node.ownText!,
+    subtreeText: node.subtreeText!,
+    children: node.children.map(projectTextShape),
+  };
+}
+
+/** An offending construct's byte window: its range, end-widened by one. */
+function widened(range: SourceRange): { start: number; end: number } {
+  return { start: range.start, end: range.end + 1 };
+}
+
+/** The one finding of a condition — counts asserted beforehand. */
+function findingByCondition(
+  findings: readonly Finding[],
+  condition: string,
+  context: string,
+): Finding {
+  const matches = findings.filter((finding) => finding.condition === condition);
+  if (matches.length !== 1) {
+    fail(
+      `${context}: expected exactly one ${condition} finding, got ` +
+        `${String(matches.length)}`,
+    );
+  }
+  return matches[0]!;
+}
+
+/** A window check for one located finding (SPEC 14 location cardinality). */
+interface LocatedWindow {
+  readonly file: string;
+  readonly window: { readonly start: number; readonly end: number };
+}
+
+/**
+ * Assert a located finding's concern: `path` null (a located condition, SPEC
+ * 12.7), exactly one location per offending construct (SPEC 14's cardinality
+ * rule), each — in 12.7 location order, which the decode has already
+ * enforced — lying in its expected file with its range inside the offending
+ * construct's byte window.
+ */
+function assertFindingWindows(
+  finding: Finding,
+  expected: readonly LocatedWindow[],
+  context: string,
+): void {
+  assertSameJson(
+    finding.path,
+    null,
+    `${context} — a located condition's concerned path is null (SPEC 12.7)`,
+  );
+  if (finding.locations.length !== expected.length) {
+    fail(
+      `${context}: expected exactly ${String(expected.length)} location(s) — ` +
+        `one per offending construct (SPEC 14) — got ` +
+        `${String(finding.locations.length)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+  expected.forEach((want, index) => {
+    const location = finding.locations[index]!;
+    if (location.file !== want.file) {
+      fail(
+        `${context}: location ${String(index)} must lie in ` +
+          `${JSON.stringify(want.file)}, got ` +
+          `${JSON.stringify(location.file)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+    if (
+      location.range.start < want.window.start ||
+      location.range.end > want.window.end
+    ) {
+      fail(
+        `${context}: location ${String(index)} ` +
+          `[${String(location.range.start)}, ${String(location.range.end)}) ` +
+          `must fall within the offending construct's byte window ` +
+          `[${String(want.window.start)}, ${String(want.window.end)}] ` +
+          `(message: ${JSON.stringify(finding.message)})`,
+      );
+    }
+  });
+}
+
+/**
+ * Assert a non-recording MDX embedding spelling's finding exactly: stable
+ * code `unknown-text-target`, ONE location whose range is EXACTLY the full
+ * braced container — the span its occurrence would occupy (SPEC 14, 5.7) —
+ * `path` null.
+ */
+function assertUnresolvedEmbedding(
+  finding: Finding,
+  expected: { readonly file: string; readonly range: SourceRange },
+  context: string,
+): void {
+  assertSameJson(
+    { code: finding.code, locations: finding.locations, path: finding.path },
+    {
+      code: "unknown-text-target",
+      locations: [{ file: expected.file, range: expected.range }],
+      path: null,
+    },
+    `${context} — the non-recording embedding spelling is located by its ` +
+      `finding: stable code unknown-text-target, its one location's range ` +
+      `EXACTLY the full braced container — the span its occurrence would ` +
+      `occupy (SPEC 14, 5.7, 12.7)`,
+  );
+}
+
+// --- the chain workspace: A → B → C, X beyond the boundary --------------------
+
+const XDA_FILE = "specs/A.mdx";
+const XDA = new ByteFixture();
+XDA.add("Ärm — the requested head.\n\n");
+const XDA_IMPORT_TEXT = 'import B from "./B.xspec"';
+const XDA_IMPORT_RANGE = XDA.add(XDA_IMPORT_TEXT);
+XDA.add("\n\n");
+const XDA_ALPHA_START = XDA.pos;
+XDA.add('<S id="alpha">\nAlpha head.\n\n');
+const XDA_EMBED_TEXT = "{text(B.b)}";
+const XDA_EMBED_RANGE = XDA.add(XDA_EMBED_TEXT);
+XDA.add("\n</S>");
+const XDA_ALPHA_RANGE: SourceRange = { start: XDA_ALPHA_START, end: XDA.pos };
+XDA.add("\n\n");
+const XDA_PLAIN_START = XDA.pos;
+XDA.add('<S id="plain">\nPlain line.\n</S>');
+const XDA_PLAIN_RANGE: SourceRange = { start: XDA_PLAIN_START, end: XDA.pos };
+XDA.add("\n");
+const XDA_SOURCE = XDA.source;
+const XDA_ROOT_RANGE: SourceRange = { start: 0, end: XDA.pos };
+
+const XDB_FILE = "specs/B.mdx";
+const XDB = new ByteFixture();
+XDB.add("Bäck — first hop, own finding.\n\n");
+XDB.add('import C from "./C.xspec"');
+XDB.add("\n\n");
+const XDB_B_START = XDB.pos;
+XDB.add('<S id="b" d={"ghost"}>');
+const XDB_B_OPEN_END = XDB.pos;
+XDB.add("\nB head.\n\n{text(C.c)}\n</S>\n");
+const XDB_SOURCE = XDB.source;
+
+const XDC_FILE = "specs/C.mdx";
+const XDC = new ByteFixture();
+XDC.add("Çay — second hop, the boundary.\n\n");
+XDC.add('import X from "./X.xspec"');
+XDC.add("\n\n");
+XDC.add('<S id="c">\nC head.\n\n');
+const XDC_BOUNDARY_TEXT = "{text(X.dup)}";
+const XDC_BOUNDARY_RANGE = XDC.add(XDC_BOUNDARY_TEXT);
+XDC.add("\n</S>\n");
+const XDC_SOURCE = XDC.source;
+
+const XDX_FILE = "specs/X.mdx";
+const XDX = new ByteFixture();
+XDX.add("Xîlo — never consulted.\n\n");
+const XDX_DUP1_START = XDX.pos;
+XDX.add('<S id="dup">\nFirst twin.\n</S>');
+const XDX_DUP1_RANGE: SourceRange = { start: XDX_DUP1_START, end: XDX.pos };
+XDX.add("\n\n");
+const XDX_DUP2_START = XDX.pos;
+XDX.add('<S id="dup">\nSecond twin.\n</S>');
+const XDX_DUP2_RANGE: SourceRange = { start: XDX_DUP2_START, end: XDX.pos };
+XDX.add("\n");
+const XDX_SOURCE = XDX.source;
+
+// The chain workspace's COMPLETE findings multiset — the gate's staging
+// premise: X's duplicate pair (one 14.3 locating both bearers), B's
+// unresolved `d` (14.5), C's non-recording boundary spelling (14.6). A is
+// finding-free (the no-`--text` arm's ground).
+const XD_WORKSPACE_CONDITIONS: Readonly<Record<string, number>> = {
+  "14.3": 1,
+  "14.5": 1,
+  "14.6": 1,
+};
+
+// A's expected text values (rules of 3): the root's own text is defined —
+// title line + its blank + the dropped import line's blank successor + the
+// between-construct blank (each closing-tag line's drop eats the root's
+// terminator) — while alpha (holding the embedding whose expansion reaches
+// the boundary two hops down) and the root's subtree text are poisoned.
+const XDA_ROOT_OWN = "Ärm — the requested head.\n\n\n\n";
+const XDA_PLAIN_TEXT = "Plain line.\n";
+
+const XDA_TEXT_TREE: TextTreeShape = {
+  identity: XDA_FILE,
+  range: XDA_ROOT_RANGE,
+  ownText: XDA_ROOT_OWN,
+  subtreeText: UNAVAILABLE,
+  children: [
+    {
+      identity: `${XDA_FILE}#alpha`,
+      range: XDA_ALPHA_RANGE,
+      ownText: UNAVAILABLE,
+      subtreeText: UNAVAILABLE,
+      children: [],
+    },
+    {
+      identity: `${XDA_FILE}#plain`,
+      range: XDA_PLAIN_RANGE,
+      ownText: XDA_PLAIN_TEXT,
+      subtreeText: XDA_PLAIN_TEXT,
+      children: [],
+    },
+  ],
+};
+
+const XDA_IDENTITY_TREE: IdentityShape = {
+  identity: XDA_FILE,
+  children: [
+    { identity: `${XDA_FILE}#alpha`, children: [] },
+    { identity: `${XDA_FILE}#plain`, children: [] },
+  ],
+};
+
+const XDA_IMPORTS: readonly ViewImportEntry[] = [
+  { range: XDA_IMPORT_RANGE, name: "B", target: XDB_FILE },
+];
+// A's one embedding resolves (b's identity is defined) and records — with
+// and without `--text` alike: resolution is never flag-dependent.
+const XDA_OCCURRENCES: readonly OccurrenceRecord[] = [
+  {
+    file: XDA_FILE,
+    range: XDA_EMBED_RANGE,
+    kind: "embeds",
+    source: { identity: `${XDA_FILE}#alpha`, range: XDA_ALPHA_RANGE },
+    target: `${XDB_FILE}#b`,
+  },
+];
+
+// --- the cycle workspace: entry → loop, loop self-embeds ----------------------
+
+const CYE_FILE = "specs/entry.mdx";
+const CYE = new ByteFixture();
+CYE.add("Öse — the cycle's entry.\n\n");
+const CYE_IMPORT_TEXT = 'import LOOP from "./loop.xspec"';
+const CYE_IMPORT_RANGE = CYE.add(CYE_IMPORT_TEXT);
+CYE.add("\n\n");
+const CYE_START_START = CYE.pos;
+CYE.add('<S id="start">\nStart head.\n\n');
+const CYE_EMBED_TEXT = "{text(LOOP.l1)}";
+const CYE_EMBED_RANGE = CYE.add(CYE_EMBED_TEXT);
+CYE.add("\n</S>");
+const CYE_START_RANGE: SourceRange = { start: CYE_START_START, end: CYE.pos };
+CYE.add("\n");
+const CYE_SOURCE = CYE.source;
+const CYE_ROOT_RANGE: SourceRange = { start: 0, end: CYE.pos };
+
+const CYL_FILE = "specs/loop.mdx";
+const CYL = new ByteFixture();
+CYL.add("Løkke — the self-embedding participant.\n\n");
+CYL.add('<S id="l1">\nLoop head.\n\n');
+const CYL_SELF_TEXT = '{text("l1")}';
+const CYL_SELF_RANGE = CYL.add(CYL_SELF_TEXT);
+CYL.add("\n</S>\n");
+const CYL_SOURCE = CYL.source;
+
+// entry's root own text: title + its blank + the dropped import line's blank
+// successor; nothing after the one section (its closing-tag line's drop eats
+// the root's terminator).
+const CYE_ROOT_OWN = "Öse — the cycle's entry.\n\n\n";
+
+const CYE_TEXT_TREE: TextTreeShape = {
+  identity: CYE_FILE,
+  range: CYE_ROOT_RANGE,
+  ownText: CYE_ROOT_OWN,
+  subtreeText: UNAVAILABLE,
+  children: [
+    {
+      identity: `${CYE_FILE}#start`,
+      range: CYE_START_RANGE,
+      ownText: UNAVAILABLE,
+      subtreeText: UNAVAILABLE,
+      children: [],
+    },
+  ],
+};
+
+const CYE_IMPORTS: readonly ViewImportEntry[] = [
+  { range: CYE_IMPORT_RANGE, name: "LOOP", target: CYL_FILE },
+];
+const CYE_OCCURRENCES: readonly OccurrenceRecord[] = [
+  {
+    file: CYE_FILE,
+    range: CYE_EMBED_RANGE,
+    kind: "embeds",
+    source: { identity: `${CYE_FILE}#start`, range: CYE_START_RANGE },
+    target: `${CYL_FILE}#l1`,
+  },
+];
+
+// --- the masked workspace: main → gone (unparseable) --------------------------
+
+const MKM_FILE = "specs/main.mdx";
+const MKM = new ByteFixture();
+MKM.add("Måne — the masked target's requester.\n\n");
+const MKM_IMPORT_TEXT = 'import GONE from "./gone.xspec"';
+const MKM_IMPORT_RANGE = MKM.add(MKM_IMPORT_TEXT);
+MKM.add("\n\n");
+const MKM_M_START = MKM.pos;
+MKM.add('<S id="m">\nMain head.\n\n');
+const MKM_EMBED_TEXT = "{text(GONE.g)}";
+const MKM_EMBED_RANGE = MKM.add(MKM_EMBED_TEXT);
+MKM.add("\n</S>");
+const MKM_M_RANGE: SourceRange = { start: MKM_M_START, end: MKM.pos };
+MKM.add("\n");
+const MKM_SOURCE = MKM.source;
+const MKM_ROOT_RANGE: SourceRange = { start: 0, end: MKM.pos };
+
+const MK_GONE_FILE = "specs/gone.mdx";
+// Unparseable MDX (14.20): an unclosed section tag (the T11.2-1 staging).
+const MK_GONE_SOURCE = '<S id="g">\nNever closed.\n';
+
+const MKM_ROOT_OWN = "Måne — the masked target's requester.\n\n\n";
+
+const MKM_TEXT_TREE: TextTreeShape = {
+  identity: MKM_FILE,
+  range: MKM_ROOT_RANGE,
+  ownText: MKM_ROOT_OWN,
+  subtreeText: UNAVAILABLE,
+  children: [
+    {
+      identity: `${MKM_FILE}#m`,
+      range: MKM_M_RANGE,
+      ownText: UNAVAILABLE,
+      subtreeText: UNAVAILABLE,
+      children: [],
+    },
+  ],
+};
+
+// The import's resolved target turns on specifier form and discovery ALONE:
+// gone.mdx is discovered, so the entry carries the plain path even while the
+// file is unparseable and the embedding into it records nothing.
+const MKM_IMPORTS: readonly ViewImportEntry[] = [
+  { range: MKM_IMPORT_RANGE, name: "GONE", target: MK_GONE_FILE },
+];
+
+// --- the invalid-path workspace: specs/vi#ew.mdx ------------------------------
+
+const IP_FILE = "specs/vi#ew.mdx";
+const IPF = new ByteFixture();
+IPF.add("Vïew — invalid path, intact view.\n\n");
+const IP_H_START = IPF.pos;
+IPF.add('<S id="h">\nHash line.\n</S>');
+const IP_H_RANGE: SourceRange = { start: IP_H_START, end: IPF.pos };
+IPF.add("\n");
+const IP_SOURCE = IPF.source;
+const IP_ROOT_RANGE: SourceRange = { start: 0, end: IPF.pos };
+
+// The file holds no embedding, so every text value is defined and byte-exact
+// even though no node of the file has a defined identity: expansion
+// definedness turns on occurrence-recording spellings alone (SPEC 11.2).
+const IP_H_TEXT = "Hash line.\n";
+const IP_ROOT_OWN = "Vïew — invalid path, intact view.\n\n";
+const IP_ROOT_SUBTREE = IP_ROOT_OWN + IP_H_TEXT;
+
+const IP_TEXT_TREE: TextTreeShape = {
+  identity: UNAVAILABLE,
+  range: IP_ROOT_RANGE,
+  ownText: IP_ROOT_OWN,
+  subtreeText: IP_ROOT_SUBTREE,
+  children: [
+    {
+      identity: UNAVAILABLE,
+      range: IP_H_RANGE,
+      ownText: IP_H_TEXT,
+      subtreeText: IP_H_TEXT,
+      children: [],
+    },
+  ],
+};
+
+const T11_4_5 = defineProductTest({
+  id: "T11.4-5",
+  title:
+    "with `--text` each node carries own and subtree text per T11.2-4, and the consulted domain is the requested files plus exactly the files of resolved targets reachable through occurrence-RECORDING embeddings: requesting ONLY A, whose embeddings reach B and C transitively, accompanies exactly B's 14.5 and C's 14.6 — deep findings lying in consulted files never requested — while the boundary spelling `{text(X.dup)}` (X's duplicate pair proven staged by the `build --json` gate) records no occurrence and consults NO further file: X's 14.3 accompanies nothing, no winner resolved through; a self-embedding cycle reached from a requested entry file accompanies its one 14.9 located in the consulted-but-never-requested participant, whether or not any expansion completes, poisoning the entry's reaching values; a masked file is never consulted by expansion — the spelling naming into it records no occurrence (an empty occurrence list), the blocking 14.6 lying in the requester at exactly the braced container — its 14.20 accompanying only when itself requested, and the unparseable requested file then contributing NO view (the views list stays [main]); an invalid-path requested file (`specs/vi#ew.mdx` — a bare `<file>` operand is a whole path, `#` having no delimiter role, 12.0) keeps its view: identities unavailable, text values plain and byte-exact, the 14.19 carrying no locations and the file as concerned path; without `--text`, requesting A consults A alone — findings `[]`, exit 0, the exit following A's own findings while B/C/X stay failing (SPEC 11.4, 11.2, 1.6, 3, 2.1, 5.3, 12.0, 12.7, 14)",
+  run: async (product) => {
+    // Fixture self-checks (T5.7-2 discipline): composed ranges sliced back
+    // out of the staged bytes before any product invocation.
+    sliceCheck(
+      XDA_SOURCE,
+      XDA_IMPORT_RANGE,
+      XDA_IMPORT_TEXT,
+      "A's import declaration",
+    );
+    sliceCheck(
+      XDA_SOURCE,
+      XDA_EMBED_RANGE,
+      XDA_EMBED_TEXT,
+      "A's embedding container",
+    );
+    sliceCheck(
+      XDA_SOURCE,
+      XDA_ALPHA_RANGE,
+      '<S id="alpha">\nAlpha head.\n\n{text(B.b)}\n</S>',
+      "alpha's whole construct",
+    );
+    sliceCheck(
+      XDA_SOURCE,
+      XDA_PLAIN_RANGE,
+      '<S id="plain">\nPlain line.\n</S>',
+      "plain's whole construct",
+    );
+    sliceCheck(
+      XDB_SOURCE,
+      { start: XDB_B_START, end: XDB_B_OPEN_END },
+      '<S id="b" d={"ghost"}>',
+      "b's opening tag",
+    );
+    sliceCheck(
+      XDC_SOURCE,
+      XDC_BOUNDARY_RANGE,
+      XDC_BOUNDARY_TEXT,
+      "the boundary embedding container",
+    );
+    sliceCheck(
+      XDX_SOURCE,
+      XDX_DUP1_RANGE,
+      '<S id="dup">\nFirst twin.\n</S>',
+      "the first dup bearer",
+    );
+    sliceCheck(
+      XDX_SOURCE,
+      XDX_DUP2_RANGE,
+      '<S id="dup">\nSecond twin.\n</S>',
+      "the second dup bearer",
+    );
+    sliceCheck(
+      CYE_SOURCE,
+      CYE_EMBED_RANGE,
+      CYE_EMBED_TEXT,
+      "entry's embedding container",
+    );
+    sliceCheck(
+      CYE_SOURCE,
+      CYE_START_RANGE,
+      '<S id="start">\nStart head.\n\n{text(LOOP.l1)}\n</S>',
+      "start's whole construct",
+    );
+    sliceCheck(
+      CYL_SOURCE,
+      CYL_SELF_RANGE,
+      CYL_SELF_TEXT,
+      "the self-embedding container",
+    );
+    sliceCheck(
+      MKM_SOURCE,
+      MKM_EMBED_RANGE,
+      MKM_EMBED_TEXT,
+      "main's embedding container",
+    );
+    sliceCheck(
+      MKM_SOURCE,
+      MKM_M_RANGE,
+      '<S id="m">\nMain head.\n\n{text(GONE.g)}\n</S>',
+      "m's whole construct",
+    );
+    sliceCheck(
+      IP_SOURCE,
+      IP_H_RANGE,
+      '<S id="h">\nHash line.\n</S>',
+      "h's whole construct",
+    );
+
+    // --- The chain workspace: transitive consultation, the boundary, and
+    // the no-`--text` contrast.
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [XDA_FILE]: XDA_SOURCE,
+          [XDB_FILE]: XDB_SOURCE,
+          [XDC_FILE]: XDC_SOURCE,
+          [XDX_FILE]: XDX_SOURCE,
+        },
+      });
+      try {
+        // The staging gate: the workspace's COMPLETE findings multiset —
+        // X's 14.3 proven staged (so its absence from the view answers below
+        // is a real negative observation), B's 14.5 and C's 14.6 located,
+        // and nothing else anywhere (A finding-free).
+        const gateContext =
+          "T11.4-5 staging gate (`build --json`, the chain workspace)";
+        const gateFindings = await buildFindings(
+          product,
+          workspace,
+          gateContext,
+        );
+        assertConditionCounts(
+          gateFindings,
+          XD_WORKSPACE_CONDITIONS,
+          `${gateContext}: exactly the staged conditions — X's duplicate ` +
+            `pair (14.3), B's unresolved d reference (14.5), C's ` +
+            `non-recording boundary spelling (14.6) — and A finding-free ` +
+            `(SPEC 14)`,
+        );
+        assertFindingWindows(
+          findingByCondition(gateFindings, "14.3", gateContext),
+          [
+            { file: XDX_FILE, window: widened(XDX_DUP1_RANGE) },
+            { file: XDX_FILE, window: widened(XDX_DUP2_RANGE) },
+          ],
+          `${gateContext} — the duplicate-id finding locates EVERY bearer ` +
+            `of \`dup\` in specs/X.mdx (SPEC 14)`,
+        );
+        assertFindingWindows(
+          findingByCondition(gateFindings, "14.5", gateContext),
+          [
+            {
+              file: XDB_FILE,
+              window: { start: XDB_B_START, end: XDB_B_OPEN_END + 1 },
+            },
+          ],
+          `${gateContext} — the unresolved d reference is located within ` +
+            `the opening tag spelling it, in specs/B.mdx (SPEC 14)`,
+        );
+        assertUnresolvedEmbedding(
+          findingByCondition(gateFindings, "14.6", gateContext),
+          { file: XDC_FILE, range: XDC_BOUNDARY_RANGE },
+          gateContext,
+        );
+
+        // `view specs/A.mdx --text`: the consulted domain is {A, B, C} —
+        // B's and C's findings accompany while X's 14.3 accompanies
+        // NOTHING — and A's view alone is served, its text datums pinned.
+        const textContext =
+          "T11.4-5 `view specs/A.mdx --text` (requesting only the chain head)";
+        const textResult = await expectExit(
+          product,
+          workspace,
+          ["view", XDA_FILE, "--text"],
+          1,
+          `${textContext} — consulted-domain findings and poisoned text ` +
+            `values accompany, so exit 1 with the full answer (SPEC 11.2)`,
+        );
+        const textReport = decodeViewReport(
+          parseJsonStdout(
+            textResult,
+            `${textContext} — a single JSON document is the only output ` +
+              `form, with or without --json (SPEC 11)`,
+          ),
+          { text: true },
+          textContext,
+        );
+        assertConditionCounts(
+          textReport.findings,
+          { "14.5": 1, "14.6": 1 },
+          `${textContext}: the consulted domain is {A, B, C} — exactly B's ` +
+            `14.5 and C's 14.6 accompany (deep findings in consulted files ` +
+            `never requested) and X's 14.3 accompanies NOTHING: the ` +
+            `boundary spelling records no occurrence, so no further file ` +
+            `is consulted (SPEC 11.4, 11.2, 14)`,
+        );
+        assertFindingWindows(
+          findingByCondition(textReport.findings, "14.5", textContext),
+          [
+            {
+              file: XDB_FILE,
+              window: { start: XDB_B_START, end: XDB_B_OPEN_END + 1 },
+            },
+          ],
+          `${textContext} — B's own finding accompanies from a consulted ` +
+            `file never requested (SPEC 11.4, 14)`,
+        );
+        assertUnresolvedEmbedding(
+          findingByCondition(textReport.findings, "14.6", textContext),
+          { file: XDC_FILE, range: XDC_BOUNDARY_RANGE },
+          `${textContext} — the blocking finding lies in a file already ` +
+            `consulted (SPEC 11.4)`,
+        );
+        assertSameJson(
+          textReport.views.map((view) => view.file),
+          [XDA_FILE],
+          `${textContext}: the requested files alone are viewed — ` +
+            `consultation never adds views (SPEC 11.4)`,
+        );
+        const aTextView = textReport.views[0]!;
+        assertSameJson(
+          projectTextShape(aTextView.root),
+          XDA_TEXT_TREE,
+          `${textContext} — A's tree with text datums: alpha's own/subtree ` +
+            `text EXACTLY the unavailability marker (the boundary lies two ` +
+            `hops down; partial expansion never occurs), the embedding-free ` +
+            `sibling and the root's own text defined and byte-exact, the ` +
+            `root's subtree text poisoned (SPEC 11.2, 1.6, 3)`,
+        );
+        assertSameJson(
+          aTextView.imports,
+          XDA_IMPORTS,
+          `${textContext} — A's import declaration with range, default ` +
+            `binding, and resolved target (SPEC 11.4)`,
+        );
+        assertSameJson(
+          aTextView.occurrences,
+          XDA_OCCURRENCES,
+          `${textContext} — A's one embedding resolves and records: file, ` +
+            `range, kind, defined source, target (SPEC 5.7, 11.2)`,
+        );
+        assertSameJson(
+          aTextView.comments,
+          [],
+          `${textContext} — no MDX comment is staged (SPEC 12.7)`,
+        );
+
+        // Without `--text`, requesting A consults A alone: B's findings
+        // absent, findings `[]`, and the exit follows A's own findings —
+        // none, so exit 0 while B/C/X stay failing.
+        const bareContext =
+          "T11.4-5 `view specs/A.mdx` (no --text: A consults A alone)";
+        const bareResult = await expectExit(
+          product,
+          workspace,
+          ["view", XDA_FILE],
+          0,
+          `${bareContext} — the consulted domain is the requested files ` +
+            `alone: A is finding-free and its answer carries no ` +
+            `explicitly-unavailable datum, so exit 0 whatever findings ` +
+            `B/C/X carry (SPEC 11.4, 11.2)`,
+        );
+        const bareReport = decodeViewReport(
+          parseJsonStdout(
+            bareResult,
+            `${bareContext} — a single JSON document is the only output ` +
+              `form (SPEC 11)`,
+          ),
+          { text: false },
+          bareContext,
+        );
+        assertSameJson(
+          bareReport.findings,
+          [],
+          `${bareContext}: B's findings are absent — the empty findings ` +
+            `member is [], never null (SPEC 11.4, 12.7)`,
+        );
+        assertSameJson(
+          bareReport.views.map((view) => view.file),
+          [XDA_FILE],
+          `${bareContext} — one per-file view: the requested file (SPEC 11.4)`,
+        );
+        const aBareView = bareReport.views[0]!;
+        assertSameJson(
+          projectIdentities(aBareView.root),
+          XDA_IDENTITY_TREE,
+          `${bareContext} — A's tree served in full (the decode has already ` +
+            `rejected any text member: absent without the flag, SPEC 12.7)`,
+        );
+        assertSameJson(
+          aBareView.imports,
+          XDA_IMPORTS,
+          `${bareContext} — the import entry is flag-independent (SPEC 11.4)`,
+        );
+        assertSameJson(
+          aBareView.occurrences,
+          XDA_OCCURRENCES,
+          `${bareContext} — the embedding's occurrence record is ` +
+            `flag-independent: resolution never turns on --text (SPEC 5.7, ` +
+            `11.2)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- The cycle workspace: a consulted participant's 14.9.
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [CYE_FILE]: CYE_SOURCE,
+          [CYL_FILE]: CYL_SOURCE,
+        },
+      });
+      try {
+        const gateContext =
+          "T11.4-5 staging gate (`build --json`, the cycle workspace)";
+        const gateFindings = await buildFindings(
+          product,
+          workspace,
+          gateContext,
+        );
+        assertConditionCounts(
+          gateFindings,
+          { "14.9": 1 },
+          `${gateContext}: the length-one embedding cycle is the ` +
+            `workspace's ONLY condition — entry is finding-free (SPEC 5.3, ` +
+            `14)`,
+        );
+        assertFindingWindows(
+          findingByCondition(gateFindings, "14.9", gateContext),
+          [{ file: CYL_FILE, window: widened(CYL_SELF_RANGE) }],
+          `${gateContext} — the cycle locates its full path in source: the ` +
+            `one participating reference spelling, the self-embedding ` +
+            `container in specs/loop.mdx (SPEC 14)`,
+        );
+
+        const context =
+          "T11.4-5 `view specs/entry.mdx --text` (the cycle participant is consulted)";
+        const result = await expectExit(
+          product,
+          workspace,
+          ["view", CYE_FILE, "--text"],
+          1,
+          `${context} — the consulted participant's cycle finding and ` +
+            `poisoned text values accompany, so exit 1 with the full ` +
+            `answer (SPEC 11.2)`,
+        );
+        const report = decodeViewReport(
+          parseJsonStdout(
+            result,
+            `${context} — a single JSON document is the only output form ` +
+              `(SPEC 11)`,
+          ),
+          { text: true },
+          context,
+        );
+        assertConditionCounts(
+          report.findings,
+          { "14.9": 1 },
+          `${context}: the entry's embedding resolves and records, so the ` +
+            `cycle participant is consulted — whether or not any expansion ` +
+            `completes — and its 14.9 accompanies from a consulted file ` +
+            `never requested (SPEC 11.4, 14)`,
+        );
+        assertFindingWindows(
+          findingByCondition(report.findings, "14.9", context),
+          [{ file: CYL_FILE, window: widened(CYL_SELF_RANGE) }],
+          `${context} — the cycle's finding lies in ` +
+            `consulted-but-never-requested specs/loop.mdx (SPEC 11.4, 14)`,
+        );
+        assertSameJson(
+          report.views.map((view) => view.file),
+          [CYE_FILE],
+          `${context}: the requested file alone is viewed (SPEC 11.4)`,
+        );
+        const entryView = report.views[0]!;
+        assertSameJson(
+          projectTextShape(entryView.root),
+          CYE_TEXT_TREE,
+          `${context} — one embedding cycle on the expansion path poisons ` +
+            `the whole value: start's own/subtree text and the root's ` +
+            `subtree text EXACTLY the unavailability marker, the root's ` +
+            `own text defined and byte-exact (SPEC 11.2, 1.6, 3)`,
+        );
+        assertSameJson(
+          entryView.imports,
+          CYE_IMPORTS,
+          `${context} — entry's import declaration (SPEC 11.4)`,
+        );
+        assertSameJson(
+          entryView.occurrences,
+          CYE_OCCURRENCES,
+          `${context} — entry's embedding into the participant resolves ` +
+            `and records (SPEC 5.7, 11.2)`,
+        );
+        assertSameJson(
+          entryView.comments,
+          [],
+          `${context} — no MDX comment is staged (SPEC 12.7)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- The masked workspace: never consulted by expansion; a requested
+    // unparseable file contributes no view.
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [MKM_FILE]: MKM_SOURCE,
+          [MK_GONE_FILE]: MK_GONE_SOURCE,
+        },
+      });
+      try {
+        const gateContext =
+          "T11.4-5 staging gate (`build --json`, the masked workspace)";
+        const gateFindings = await buildFindings(
+          product,
+          workspace,
+          gateContext,
+        );
+        assertConditionCounts(
+          gateFindings,
+          { "14.6": 1, "14.20": 1 },
+          `${gateContext}: gone.mdx is unparseable (14.20) and the ` +
+            `spelling naming into it reports as unresolved (14.6) — ` +
+            `nothing else (SPEC 14)`,
+        );
+        assertUnresolvedEmbedding(
+          findingByCondition(gateFindings, "14.6", gateContext),
+          { file: MKM_FILE, range: MKM_EMBED_RANGE },
+          gateContext,
+        );
+        assertFindingLocated(
+          findingByCondition(gateFindings, "14.20", gateContext),
+          { file: MK_GONE_FILE },
+          `${gateContext} — the parse-failure finding locates in ` +
+            `specs/gone.mdx (SPEC 14)`,
+        );
+
+        // Requesting main alone: gone is never consulted by expansion — no
+        // spelling resolves into a masked file — so its 14.20 does NOT
+        // accompany; the blocking 14.6 lies in the requester itself.
+        const soloContext =
+          "T11.4-5 `view specs/main.mdx --text` (the masked file is never consulted)";
+        const soloResult = await expectExit(
+          product,
+          workspace,
+          ["view", MKM_FILE, "--text"],
+          1,
+          `${soloContext} — main's own finding and poisoned text values ` +
+            `accompany, so exit 1 with the full answer (SPEC 11.2)`,
+        );
+        const soloReport = decodeViewReport(
+          parseJsonStdout(
+            soloResult,
+            `${soloContext} — a single JSON document is the only output ` +
+              `form (SPEC 11)`,
+          ),
+          { text: true },
+          soloContext,
+        );
+        assertConditionCounts(
+          soloReport.findings,
+          { "14.6": 1 },
+          `${soloContext}: exactly main's own 14.6 — the masked file's ` +
+            `14.20 accompanies only when itself requested, and no spelling ` +
+            `consults it by expansion (SPEC 11.4, 11.2, 14)`,
+        );
+        assertUnresolvedEmbedding(
+          findingByCondition(soloReport.findings, "14.6", soloContext),
+          { file: MKM_FILE, range: MKM_EMBED_RANGE },
+          soloContext,
+        );
+        assertSameJson(
+          soloReport.views.map((view) => view.file),
+          [MKM_FILE],
+          `${soloContext}: one per-file view (SPEC 11.4)`,
+        );
+        const soloView = soloReport.views[0]!;
+        assertSameJson(
+          projectTextShape(soloView.root),
+          MKM_TEXT_TREE,
+          `${soloContext} — the non-recording spelling poisons m's ` +
+            `own/subtree text and the root's subtree text, the root's own ` +
+            `text defined and byte-exact (SPEC 11.2, 1.6, 3)`,
+        );
+        assertSameJson(
+          soloView.imports,
+          MKM_IMPORTS,
+          `${soloContext} — the import entry's target is the plain ` +
+            `"specs/gone.mdx": discovery, not parseability, defines it ` +
+            `(SPEC 11.4, 2.1)`,
+        );
+        assertSameJson(
+          soloView.occurrences,
+          [],
+          `${soloContext} — the spelling naming into the masked file ` +
+            `records NO occurrence: an empty list, never null (SPEC 11.2, ` +
+            `5.7, 12.7)`,
+        );
+        assertSameJson(
+          soloView.comments,
+          [],
+          `${soloContext} — no MDX comment is staged (SPEC 12.7)`,
+        );
+
+        // Requesting gone too: its parse-failure finding now accompanies —
+        // and the unparseable requested file contributes NO view.
+        const bothContext =
+          "T11.4-5 `view specs/main.mdx specs/gone.mdx --text` (the masked file requested)";
+        const bothResult = await expectExit(
+          product,
+          workspace,
+          ["view", MKM_FILE, MK_GONE_FILE, "--text"],
+          1,
+          `${bothContext} — findings accompany, so exit 1 with the full ` +
+            `answer (SPEC 11.2)`,
+        );
+        const bothReport = decodeViewReport(
+          parseJsonStdout(
+            bothResult,
+            `${bothContext} — a single JSON document is the only output ` +
+              `form (SPEC 11)`,
+          ),
+          { text: true },
+          bothContext,
+        );
+        assertConditionCounts(
+          bothReport.findings,
+          { "14.6": 1, "14.20": 1 },
+          `${bothContext}: the parse-failure finding accompanies exactly ` +
+            `when its file is itself requested (SPEC 11.4, 14)`,
+        );
+        assertUnresolvedEmbedding(
+          findingByCondition(bothReport.findings, "14.6", bothContext),
+          { file: MKM_FILE, range: MKM_EMBED_RANGE },
+          bothContext,
+        );
+        assertFindingLocated(
+          findingByCondition(bothReport.findings, "14.20", bothContext),
+          { file: MK_GONE_FILE },
+          `${bothContext} — the parse-failure finding locates in ` +
+            `specs/gone.mdx (SPEC 14)`,
+        );
+        assertSameJson(
+          bothReport.views.map((view) => view.file),
+          [MKM_FILE],
+          `${bothContext}: an unparseable requested file contributes NO ` +
+            `view — the views list stays [specs/main.mdx] (SPEC 11.4, 11.2)`,
+        );
+        assertSameJson(
+          projectTextShape(bothReport.views[0]!.root),
+          MKM_TEXT_TREE,
+          `${bothContext} — main's view is unchanged beside the requested ` +
+            `masked file (SPEC 11.4)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- The invalid-path workspace: a requested 14.19 file keeps its view.
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [IP_FILE]: IP_SOURCE,
+        },
+      });
+      try {
+        const gateContext =
+          "T11.4-5 staging gate (`build --json`, the invalid-path workspace)";
+        const gateFindings = await buildFindings(
+          product,
+          workspace,
+          gateContext,
+        );
+        assertConditionCounts(
+          gateFindings,
+          { "14.19": 1 },
+          `${gateContext}: the '#'-containing path is the workspace's ONLY ` +
+            `condition — the file itself parses (SPEC 14.19)`,
+        );
+        const gate19 = findingByCondition(gateFindings, "14.19", gateContext);
+        assertSameJson(
+          { code: gate19.code, locations: gate19.locations, path: gate19.path },
+          { code: "invalid-source-path", locations: [], path: IP_FILE },
+          `${gateContext} — a path-level condition carries no in-source ` +
+            `location, the file as concerned path (SPEC 14, 12.7)`,
+        );
+
+        const context =
+          "T11.4-5 `view specs/vi#ew.mdx --text` (an invalid-path requested file keeps its view)";
+        const result = await expectExit(
+          product,
+          workspace,
+          ["view", IP_FILE, "--text"],
+          1,
+          `${context} — the condition-19 finding and the unavailable ` +
+            `identities accompany, so exit 1 with the full answer (SPEC ` +
+            `11.2)`,
+        );
+        const report = decodeViewReport(
+          parseJsonStdout(
+            result,
+            `${context} — a single JSON document is the only output form ` +
+              `(SPEC 11)`,
+          ),
+          { text: true },
+          context,
+        );
+        assertConditionCounts(
+          report.findings,
+          { "14.19": 1 },
+          `${context}: the condition-19 finding accompanies every answer ` +
+            `whose consulted domain includes the file (SPEC 11.2, 14)`,
+        );
+        const view19 = findingByCondition(report.findings, "14.19", context);
+        assertSameJson(
+          { code: view19.code, locations: view19.locations, path: view19.path },
+          { code: "invalid-source-path", locations: [], path: IP_FILE },
+          `${context} — stable code invalid-source-path, no locations, the ` +
+            `file as concerned path (SPEC 14, 12.7)`,
+        );
+        assertSameJson(
+          report.views.map((view) => view.file),
+          [IP_FILE],
+          `${context}: a bare <file> operand is a whole path — '#' has no ` +
+            `delimiter role — naming the discovered file of that invalid ` +
+            `path, whose view is served (SPEC 12.0, 11.4)`,
+        );
+        const ipView = report.views[0]!;
+        assertSameJson(
+          projectTextShape(ipView.root),
+          IP_TEXT_TREE,
+          `${context} — structure is parse-local: the tree and byte-exact ` +
+            `ranges are served with every identity — root included — ` +
+            `EXACTLY the unavailability marker (no identity over an ` +
+            `invalid path) while every text value is defined and ` +
+            `byte-exact: expansion definedness turns on ` +
+            `occurrence-recording spellings alone (SPEC 11.2, 1.6, 3)`,
+        );
+        assertSameJson(
+          [ipView.imports, ipView.occurrences, ipView.comments],
+          [[], [], []],
+          `${context} — no import, reference spelling, or MDX comment is ` +
+            `staged: empty lists are [], never null (SPEC 11.4, 12.7)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+  },
+});
+
 export const section114Tests: readonly ProductTestEntry[] = [
   T11_4_1,
   T11_4_2,
   T11_4_3,
   T11_4_4,
+  T11_4_5,
 ];

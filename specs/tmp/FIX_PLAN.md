@@ -2785,8 +2785,51 @@ certify against FP-091's fixtures once those land.
   → {}), its two fixture-manifest gates stay red → FP-091; S-1's unmapped
   keys exactly {11.5, 11.6, 12.6, 12.7} → stage G; S-5, S-7, and
   certification green.]
-- [ ] FP-064 — Implement T11.4-5: `--text` expansion domain. [R2 #4;
+- [x] FP-064 — Implement T11.4-5: `--text` expansion domain. [R2 #4;
   TEST-SPEC §11.4]
+  [Done 2026-08-14: T11.4-5 registered in section-11.4.ts (wrapper
+  auto-declares; traceability `"T11.4-5": ["11.4"]` — in no TEST-SPEC 14
+  staging record, the T11.4-3/-4 precedent; NOT in CONF-AVAIL scope — the
+  Exclusions name its consultation-domain negatives — so unlike its
+  siblings it drives a `build --json` staging gate per workspace, the
+  T11.4-2 precedent). Four workspaces, six views: (1) the chain A→B→C with
+  X beyond the boundary — A embeds B#b, B holds an unresolved `d={"ghost"}`
+  (14.5) and embeds C#c, C's `{text(X.dup)}` names X's duplicate pair
+  (gate-proven staged) so the spelling records no occurrence (14.6, located
+  exactly at the braced container) and X is never consulted: `view
+  specs/A.mdx --text` carries exactly {14.5, 14.6} — deep findings in
+  consulted-never-requested files, X's 14.3 accompanying NOTHING — views
+  [A] alone with alpha poisoned, the embedding-free sibling and root own
+  text byte-exact, the resolved embedding's record and import entry
+  pinned; without `--text` the same request consults A alone — findings
+  [], exit 0, tree/imports/occurrences flag-independent (the decode
+  rejects text members absent the flag); (2) entry→loop where loop#l1
+  self-embeds — the one 14.9 located at the participating container in
+  consulted-never-requested loop.mdx, entry's reaching values poisoned;
+  (3) main→gone (unparseable): the spelling into the masked file records
+  nothing (occurrences []), `view specs/main.mdx --text` carries exactly
+  main's own 14.6 — never the 14.20 — while requesting gone too attaches
+  the 14.20 and gone still contributes NO view (views stay [main]), the
+  import entry's target the plain path both times (discovery, not
+  parseability); (4) `specs/vi#ew.mdx` requested as a bare operand (`#`
+  has no delimiter role, 12.0) keeps its full view — every identity the
+  marker, text values plain and byte-exact (expansion definedness turns on
+  occurrence-recording spellings alone), the 14.19 with locations [] and
+  the file as concerned path. Verified: typecheck/format clean; every
+  hand-derived text constant and byte range probed byte-identical against
+  the built product on passing twins (`query node` own/subtree text;
+  scratch probe, deleted), and every staged finding multiset probed
+  against the failing stagings — the current product picks a winner among
+  X's duplicate bearers (no 14.6), reports one-location 14.3, a wide 14.9
+  location, a narrow 14.6 range, and old-shape findings, all diagnosed
+  product gaps the certified T11.2-4 semantics pin; suite red-as-diagnosed
+  at the chain gate's form-exact findings decode ("expected no member
+  \"condition\"" — the FP-001-class gap; the `view` surface itself is the
+  T11.4-1-class unknown-command gap behind it), section-11.4 now 5 failed
+  / 0 passed. `npm run test:self`: unchanged 3 planned mid-loop reds
+  (certification-document fixture-manifest ×2 → FP-091; S-1's unmapped
+  keys exactly {11.5, 11.6, 12.6, 12.7} → stage G); S-5, S-7, and
+  certification green.]
 - [ ] FP-065 — Implement T11.4-6: byte classification reproducing compiled
   Markdown via the P-2 oracle (`test/helpers/oracles/markdown.ts`).
   [R2 #4; TEST-SPEC §11.4]
