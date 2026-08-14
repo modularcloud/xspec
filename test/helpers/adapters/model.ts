@@ -610,6 +610,17 @@ export interface InventoryResolvedMap {
   readonly derived: readonly InventoryDerivedEntry[];
 }
 
+/**
+ * The inventory document's `journal` member — `{"path", "occupied"}` exactly
+ * (SPEC.md 11.6, 12.7): the journal path (6.1) and whether anything presently
+ * occupies it. Occupancy is presence alone, whatever kind of filesystem
+ * object occupies the path — the inventory reads no journal content.
+ */
+export interface InventoryJournalStatus {
+  readonly path: PathValue;
+  readonly occupied: boolean;
+}
+
 /** `coverage` (T8.2-1): all profiles by default, one when named. */
 export interface CoverageReport {
   readonly profiles: readonly CoverageProfileReport[];

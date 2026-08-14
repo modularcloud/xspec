@@ -319,6 +319,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T11.5-3": ["11.5"],
   "T11.6-1": ["11.6"],
   "T11.6-2": ["11.6"],
+  // T11.6-3: 13.3/13.1/6.1/10.1/12.7 are carriage context with home
+  // coverage at T13.3-*/T13.1-*/T6.1-*/T10.1-*/T12.7-*; the occupancy and
+  // listing arms assert findings [] — no numbered condition is asserted, so
+  // no "14" (the T11.6-2 precedent).
+  "T11.6-3": ["11.6"],
   "T12.0-1": ["12.0"],
   "T12.0-2": ["12.0"],
   "T12.0-3": ["12.0"],

@@ -1,5 +1,5 @@
-// TEST-SPEC §11.6 (`xspec inventory`) — SUITE-56: T11.6-1, T11.6-2
-// (T11.6-3..T11.6-4 register here as they are implemented).
+// TEST-SPEC §11.6 (`xspec inventory`) — SUITE-56: T11.6-1, T11.6-2, T11.6-3
+// (T11.6-4 registers here as it is implemented).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -10,8 +10,9 @@
 // runs bare (per-test arms additionally with `--json`, asserting the two
 // forms carry the same information, SPEC 11) and its stdout decodes through
 // the scoped form-exact decoders `decodeInventoryAnchoring`,
-// `decodeInventoryFindings`, and `decodeInventoryResolvedMap` (the full
-// inventory form is pinned across the T11.6-* tests as they land).
+// `decodeInventoryFindings`, and `decodeInventoryResolvedMap` (T11.6-1/-2)
+// and the full ten-member `decodeInventoryDocument` (T11.6-3 — its entry
+// completes the member set, so its arms pin the whole document form).
 //
 // T11.6-1 — anchoring (SPEC 11.6, 12.0). The workspace root and the
 // configuration file are identified relative to the invocation working
@@ -87,22 +88,66 @@
 // and the exit code is 0 (SPEC 12.0, 11.6) — T11.6-1's workspaces being
 // valid, and T11.6-2's 14.19 staging never being the inventory's finding.
 //
+// T11.6-3 — record, area, durables, order (SPEC 11.6, 13.3, 13.1, 6.1,
+// 10.1, 12.7). Two workspaces:
+//
+// - record/area/journal workspace (emission enabled; two spec groups `zz`
+//   before `aa` so configuration order has teeth): before any build,
+//   `recorded` is [] (empty before any generation — never null, never
+//   unavailable), `graphData` is exactly ".xspec" (reported unconditionally,
+//   no trailing separator), `journal` is {".xspec/journal", occupied: false}
+//   (an absent journal is an empty journal, 6.1), `sessions` [] — flag-less
+//   and `--json` forms against the same expectation (SPEC 11). After a
+//   `build`: `recorded` lists the recorded derived paths — both generated
+//   modules and both emitted Markdown files pinned present, and every
+//   further entry attributable to a discovered source through the 13.1
+//   naming scheme (`<dir>/<NAME>.xspec.<suffix>` beside `<dir>/<NAME>.mdx`)
+//   — in byte order (decoder-enforced). After a configuration change
+//   without rebuild (emission flipped off): the resolved view and derived
+//   map report the new configuration (`markdown` null per source) while
+//   `recorded` still lists the previously generated Markdown — the record
+//   lags, reported as recorded, not as configured (11.6, 13.3). A foreign
+//   file placed under `.xspec/` (neither journal, session-named, nor
+//   recorded) appears in no inventory list and is never claimed: the exact
+//   sources/sessions compares and the recorded attribution rule exclude it,
+//   and its name appears nowhere in the document bytes. Journal occupancy is
+//   presence alone: a garbage-content plain file, a directory, and a broken
+//   symbolic link each report occupied true with a finding-free answer (no
+//   content read, no 14.13 from inventory; the broken link discriminates a
+//   product probing occupancy through the link).
+//
+// - sessions workspace: a product-written session (`review create
+//   --strategy audit --name ancien`), a garbage-content `S.json`, and a
+//   directory named `S2.json` are all listed (selection by name alone,
+//   content unread — no 14.21 here), while `notes.txt` and `.foo.json` are
+//   never listed (no session file name, 10.1) and never claimed (their
+//   names appear nowhere in the document bytes). Order: byte order of file
+//   name — "S.json" < "S2.json" < "ancien.json" (0x53 'S' sorts before
+//   0x61 'a'), inverting under case folding, so the byte-order contract has
+//   teeth.
+//
 // Certification note: CERTIFICATIONS.md's Exclusions list T11.6-1 through
 // T11.6-4 ("`inventory` and `version`"), so no fixture executes these
-// bodies; the anchoring, resolved-configuration, and derived-map arms are
-// positive and byte-asserted per that entry.
+// bodies; the anchoring, resolved-configuration, derived-map, occupancy,
+// and listing arms are positive and byte-asserted per that entry.
 
+import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import type {
+  DecodedDatum,
   DependencyEdgeKind,
   GroupKind,
   InventoryConfigurationView,
+  InventoryDocument,
+  InventoryJournalStatus,
   InventoryResolvedMap,
   PathValue,
 } from "../../helpers/adapters/index.js";
 import {
+  GRAPH_DATA_AREA_PATH,
   decodeInventoryAnchoring,
+  decodeInventoryDocument,
   decodeInventoryFindings,
   decodeInventoryResolvedMap,
   renderPathValue,
@@ -118,7 +163,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { assertSameJson } from "./support.js";
+import { assertSameJson, buildOk, expectExit } from "./support.js";
 
 // --- fixture ------------------------------------------------------------------
 //
@@ -1013,4 +1058,621 @@ const T11_6_2 = defineProductTest({
   },
 });
 
-export const section116Tests: readonly ProductTestEntry[] = [T11_6_1, T11_6_2];
+// --- T11.6-3 ------------------------------------------------------------------
+//
+// Fixtures. The record/area/journal workspace declares two spec groups in an
+// order (`zz` before `aa`) that inverts name byte order, so the
+// configuration-order clause of 11.6's ordering contract has teeth here too;
+// emission is enabled so the post-build record carries modules AND Markdown;
+// the lag arm rewrites the configuration to the emission-off twin (still
+// valid — a configuration error would preempt the inventory, 14.14) without
+// rebuilding.
+
+const DURABLES_EMIT_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    zz: ["specs/z*.mdx"],
+    aa: ["specs/a*.mdx"]
+  },
+  markdown: { emit: true }
+})
+`;
+
+const DURABLES_NOEMIT_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    zz: ["specs/z*.mdx"],
+    aa: ["specs/a*.mdx"]
+  },
+  markdown: { emit: false }
+})
+`;
+
+/**
+ * The foreign occupant's distinctive name component: chosen to appear in no
+ * legitimate inventory content of these workspaces, so "appears in no
+ * inventory list and is never claimed" (SPEC 11.6) is assertable as
+ * document-wide byte absence on top of the exact list compares.
+ */
+const FOREIGN_TOKEN = "zzz-artefact-etranger";
+
+const SESSIONS_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`;
+
+/** The journal's workspace-relative path (SPEC 6.1). */
+const JOURNAL_PATH = `${GRAPH_DATA_AREA_PATH}/journal`;
+
+/**
+ * Run `inventory` and assert the T11.6-3 frame: exit 0 exactly (every
+ * staging here is a complete, finding-free answer — the inventory parses no
+ * sources, reads no journal or session content, and no arm corrupts the
+ * record; SPEC 11.6, 12.0; H-5); exactly one JSON document as the entire
+ * stdout (JSON-only, SPEC 11); the full ten-member 12.7 inventory document
+ * form (H-3); `findings` [] — which IS the no-14.13/no-14.21 observation on
+ * the occupancy and session stagings. Returns the decoded document and the
+ * raw run for the callers' value assertions and byte scans.
+ */
+async function expectInventoryDocument(
+  product: ProductBinding,
+  cwd: string,
+  argv: readonly string[],
+  context: string,
+): Promise<{ document: InventoryDocument; result: RunResult }> {
+  const result = await runProduct(product, { cwd, argv });
+  assertExitCode(
+    result,
+    0,
+    `${context} — a complete, finding-free inventory answer exits 0: the ` +
+      `inventory parses no sources and reads no journal or session content, ` +
+      `and the findings a listed file or path may bear are reported where ` +
+      `their conditions assign them, never here (SPEC 11.6, 12.0)`,
+  );
+  const document = decodeInventoryDocument(
+    parseJsonStdout(
+      result,
+      `${context} — inventory is JSON-only: a single JSON document is its ` +
+        `only output form, with or without --json (SPEC 11, 12.0)`,
+    ),
+    context,
+  );
+  if (document.findings.length !== 0) {
+    fail(
+      `${context}: the inventory answer is finding-free — findings [] ` +
+        `(SPEC 11.6, 12.7: parsing no sources and reading no journal or ` +
+        `session content, the inventory meets no condition on these ` +
+        `stagings — no 14.13, no 14.21 — and no arm corrupts the record); ` +
+        `got ${String(document.findings.length)} finding(s), first: ` +
+        `${JSON.stringify(document.findings[0]?.message)}`,
+    );
+  }
+  return { document, result };
+}
+
+/** The graph-data area: exactly `.xspec`, no trailing separator (11.6). */
+function assertGraphDataArea(actual: PathValue, context: string): void {
+  if (actual === GRAPH_DATA_AREA_PATH) return;
+  fail(
+    `${context}: the graph-data area is reported unconditionally as its ` +
+      `workspace-relative path ${JSON.stringify(GRAPH_DATA_AREA_PATH)} with ` +
+      `no trailing separator (SPEC 11.6, 13.3); got ` +
+      `${renderPathValue(actual)}`,
+  );
+}
+
+/** The journal member: `{".xspec/journal", occupied}` byte-exact (11.6). */
+function assertJournalStatus(
+  actual: InventoryJournalStatus,
+  occupied: boolean,
+  context: string,
+): void {
+  if (actual.path !== JOURNAL_PATH) {
+    fail(
+      `${context}: the inventory reports the journal path — xspec maintains ` +
+        `the journal at ${JSON.stringify(JOURNAL_PATH)} (SPEC 6.1, 11.6); ` +
+        `got ${renderPathValue(actual.path)}`,
+    );
+  }
+  if (actual.occupied !== occupied) {
+    fail(
+      `${context}: journal occupancy must be ${String(occupied)} — ` +
+        `occupancy is presence alone, whatever kind of filesystem object ` +
+        `occupies the path, and an absent journal is an empty journal ` +
+        `(SPEC 11.6, 6.1); got ${String(actual.occupied)}`,
+    );
+  }
+}
+
+/**
+ * The document's bytes must not contain the token anywhere: a path the
+ * inventory neither lists nor claims (a foreign occupant under `.xspec/`, a
+ * non-session entry under the review-session directory) appears nowhere in
+ * the answer (SPEC 11.6, 10.1).
+ */
+function assertStdoutOmits(
+  result: RunResult,
+  token: string,
+  context: string,
+): void {
+  if (!Buffer.from(result.stdoutBytes).includes(Buffer.from(token, "utf8"))) {
+    return;
+  }
+  fail(
+    `${context}: the inventory document mentions ${JSON.stringify(token)} — ` +
+      `an unattributed path under the graph-data area (or a non-session ` +
+      `entry under the review-session directory) appears in no inventory ` +
+      `list and is never claimed (SPEC 11.6, 10.1)`,
+  );
+}
+
+interface RecordedExpectation {
+  /**
+   * Paths that MUST be recorded: the generated module and (while emission
+   * was enabled at the recording build) the emitted Markdown per source —
+   * the paths as last generated (SPEC 13.3, 13.1, 13.2).
+   */
+  readonly pinned: readonly string[];
+  /**
+   * The discovered spec sources (`<dir>/<NAME>.mdx`) every further recorded
+   * entry must attribute to through the 13.1 naming scheme.
+   */
+  readonly specSources: readonly string[];
+}
+
+/**
+ * Assert the record-supplied datum after a generation has run: the plain
+ * list state (never `null`, never unavailable — 14.23 is T11.6-4's staging),
+ * every pinned module/Markdown path present, and every further entry a
+ * companion attributable to its source through the 13.1 naming scheme —
+ * `<dir>/<NAME>.xspec.<suffix>` beside a discovered `<dir>/<NAME>.mdx`, the
+ * suffix non-empty. 13.1 pins no companion set (a product generates
+ * whatever companions its modules need), so companions are asserted by
+ * attributability, not enumeration; a path attributable to no source — a
+ * graph-data path, the foreign occupant, any invention — fails. Byte order
+ * and uniqueness are decoder-enforced (SPEC 11.6, 12.7).
+ */
+function assertRecordedDerivedPaths(
+  recorded: DecodedDatum<readonly PathValue[]>,
+  expectation: RecordedExpectation,
+  context: string,
+): void {
+  if (recorded.state !== "value") {
+    fail(
+      `${context}: the recorded derived-file paths must be the plain list — ` +
+        `the record exists and is readable on this staging, so the datum is ` +
+        `never null and never the unavailability marker (14.23 is the ` +
+        `corrupt-record case, T11.6-4) (SPEC 11.6, 12.7); got state ` +
+        `"${recorded.state}"`,
+    );
+  }
+  const entries: string[] = recorded.value.map((entry, index) => {
+    if (typeof entry === "string") return entry;
+    fail(
+      `${context}: recorded entry ${String(index)} arrived in the marked ` +
+        `byte form (${renderPathValue(entry)}) — every derived path of this ` +
+        `staging is valid UTF-8, and a valid-UTF-8 path is never presented ` +
+        `in the byte form (SPEC 12.0, 12.7)`,
+    );
+  });
+  for (const pinnedPath of expectation.pinned) {
+    if (!entries.includes(pinnedPath)) {
+      fail(
+        `${context}: the record must list ${JSON.stringify(pinnedPath)} — ` +
+          `the recorded derived-file paths are the paths as last generated: ` +
+          `the generated modules with their companions and the emitted ` +
+          `Markdown (SPEC 13.3, 13.1, 13.2, 11.6); recorded: ` +
+          `${JSON.stringify(entries)}`,
+      );
+    }
+  }
+  const stems = expectation.specSources.map((source) => {
+    if (!source.endsWith(".mdx")) {
+      fail(
+        `${context}: fixture self-check — spec source ` +
+          `${JSON.stringify(source)} does not end in ".mdx" (a harness ` +
+          `staging defect, not a product failure)`,
+      );
+    }
+    return source.slice(0, -".mdx".length);
+  });
+  for (const entry of entries) {
+    if (expectation.pinned.includes(entry)) continue;
+    const attributable = stems.some(
+      (stem) =>
+        entry.startsWith(`${stem}.xspec.`) &&
+        entry.length > `${stem}.xspec.`.length,
+    );
+    if (!attributable) {
+      fail(
+        `${context}: recorded entry ${JSON.stringify(entry)} is neither a ` +
+          `pinned module/Markdown path nor a companion attributable to a ` +
+          `discovered source through the 13.1 naming scheme ` +
+          `("<dir>/<NAME>.xspec." plus a suffix, beside "<dir>/<NAME>.mdx") ` +
+          `— the record lists generated modules, their companions, and ` +
+          `emitted Markdown, and nothing else: graph data records no paths ` +
+          `of its own, and an unattributed path is never claimed (SPEC ` +
+          `13.3, 13.1, 11.6)`,
+      );
+    }
+  }
+}
+
+const T11_6_3 = defineProductTest({
+  id: "T11.6-3",
+  title:
+    'inventory record, area, durables, order: `recorded` is [] before any generation (never null, never unavailable) and after a build lists the recorded derived paths in byte order — generated modules and emitted Markdown pinned present, every further entry a companion attributable to its source through the 13.1 naming scheme — and after a configuration change without rebuild it lags, reported as recorded, not as configured (emission flipped off: `derived[*].markdown` null while the previously emitted `.md` paths stay recorded); the graph-data area is reported unconditionally — before any build — as ".xspec" with no trailing separator; a foreign file placed under `.xspec/` appears in no inventory list and is never claimed (its name absent from the document bytes); `journal` is {".xspec/journal", occupied} with occupancy by presence alone — absent false; a garbage-content plain file, a directory, and a broken symbolic link each true, content unread, no 14.13 from inventory, the answer finding-free; sessions are selected by name alone — a product-written session, a garbage-content S.json, and a directory named S2.json all listed (content unread, no 14.21 here) in byte order of file name ("S.json" < "S2.json" < "ancien.json", inverting under case folding), while notes.txt and .foo.json are never listed; groups stay in configuration order (`zz` before `aa` against name byte order); every answer complete and finding-free at exit 0, the pre-build state asserted in the flag-less and `--json` forms against one expectation (SPEC 11.6, 13.3, 13.1, 13.2, 6.1, 10.1, 12.7, 12.0, 11)',
+  run: async (product) => {
+    // --- record / area / journal workspace ---------------------------------
+    const workspace = await TestWorkspace.create({
+      files: {
+        [CONFIG_FILE]: DURABLES_EMIT_CONFIG,
+        "specs/apex.mdx": '<S id="apex">\nSommet.\n</S>\n',
+        "specs/zele.mdx": '<S id="zele">\nArdeur.\n</S>\n',
+      },
+    });
+    try {
+      // Before any build: the record is empty, the area is already reported,
+      // the absent journal is unoccupied, no sessions exist — flag-less and
+      // `--json` forms against the same expectation (JSON-only, SPEC 11).
+      for (const argv of [["inventory"], ["inventory", "--json"]] as const) {
+        const context =
+          `T11.6-3 — \`${argv.join(" ")}\` before any build: recorded [], ` +
+          `graphData ".xspec", journal unoccupied, sessions [] (SPEC 11.6)`;
+        const { document } = await expectInventoryDocument(
+          product,
+          workspace.root,
+          argv,
+          context,
+        );
+        assertSameJson(
+          document.recorded,
+          { state: "value", value: [] },
+          `${context} — \`recorded\` is empty before any generation has ` +
+            `run: the empty list, never null and never the unavailability ` +
+            `marker (SPEC 11.6, 12.7)`,
+        );
+        assertGraphDataArea(
+          document.graphData,
+          `${context} — the graph-data area is reported unconditionally: a ` +
+            `consumer must know the area before any build has run`,
+        );
+        assertJournalStatus(
+          document.journal,
+          false,
+          `${context} — no journal file exists yet`,
+        );
+        assertSameJson(
+          document.sessions,
+          [],
+          `${context} — no session directory entries exist (SPEC 11.6, 10.1)`,
+        );
+        // 11.6's ordering contract, configuration-order half: groups arrive
+        // in configuration order — `zz` before `aa`, inverting name byte
+        // order (profiles and rules ride the same clause; their
+        // configuration-order exact compares are T11.6-2's).
+        assertSameJson(
+          document.configuration.specs.map((group) => group.name),
+          ["zz", "aa"],
+          `${context} — groups in configuration order, not name byte order ` +
+            `(SPEC 11.6)`,
+        );
+        // The as-configured baseline the lag arm contrasts against.
+        assertSameJson(
+          document.derived,
+          [
+            {
+              source: "specs/apex.mdx",
+              module: "specs/apex.xspec.ts",
+              markdown: "specs/apex.md",
+            },
+            {
+              source: "specs/zele.mdx",
+              module: "specs/zele.xspec.ts",
+              markdown: "specs/zele.md",
+            },
+          ],
+          `${context} — the derived map per spec source with emission ` +
+            `enabled (SPEC 11.6, 13.1, 7.3)`,
+        );
+      }
+
+      // Build, then place a foreign file under the graph-data area. The
+      // foreign occupant is staged after the build so the arm asserts
+      // exactly what 11.6 defines — the inventory's treatment of an
+      // unattributed path — not any build-time behavior toward it.
+      await buildOk(
+        product,
+        workspace,
+        "T11.6-3 — the staged workspace is valid, so `build` succeeds and " +
+          "records the generated derived paths (SPEC 12.1, 13.3)",
+      );
+      await workspace.file(
+        `${GRAPH_DATA_AREA_PATH}/${FOREIGN_TOKEN}.bin`,
+        "contenu etranger — ni journal, ni session, ni enregistre\n",
+      );
+
+      const postBuildRecorded: RecordedExpectation = {
+        pinned: [
+          "specs/apex.md",
+          "specs/apex.xspec.ts",
+          "specs/zele.md",
+          "specs/zele.xspec.ts",
+        ],
+        specSources: ["specs/apex.mdx", "specs/zele.mdx"],
+      };
+      const afterContext =
+        "T11.6-3 — `inventory` after a build: the record lists the " +
+        "recorded derived paths — modules, companions, Markdown (SPEC " +
+        "11.6, 13.3)";
+      const after = await expectInventoryDocument(
+        product,
+        workspace.root,
+        ["inventory"],
+        afterContext,
+      );
+      assertRecordedDerivedPaths(
+        after.document.recorded,
+        postBuildRecorded,
+        `${afterContext} — both generated modules and both emitted Markdown ` +
+          `files recorded, every further entry a 13.1-attributable companion`,
+      );
+      assertJournalStatus(
+        after.document.journal,
+        false,
+        `${afterContext} — a build journals nothing: the journal is written ` +
+          `only by rename and move (SPEC 6.1)`,
+      );
+      assertGraphDataArea(after.document.graphData, afterContext);
+      assertSameJson(
+        after.document.sessions,
+        [],
+        `${afterContext} — still no session directory entries`,
+      );
+      // The foreign occupant is in no list: `sources` holds exactly the two
+      // discovered files (`.xspec/` is excluded from every group, 13.4),
+      // `sessions` is empty, the recorded entries are pinned-or-attributable
+      // — and the name appears nowhere in the document at all.
+      assertSameJson(
+        after.document.sources,
+        [
+          { path: "specs/apex.mdx", groups: [{ name: "aa", kind: "spec" }] },
+          { path: "specs/zele.mdx", groups: [{ name: "zz", kind: "spec" }] },
+        ],
+        `${afterContext} — every discovered source with its membership; the ` +
+          `foreign file under .xspec/ is never a source (SPEC 11.6, 13.4)`,
+      );
+      assertStdoutOmits(
+        after.result,
+        FOREIGN_TOKEN,
+        `${afterContext} — a foreign file under the graph-data area ` +
+          `(neither journal, session-named, nor recorded) is unattributed: ` +
+          `listed nowhere, claimed never (SPEC 11.6)`,
+      );
+
+      // Configuration change without rebuild: emission off. The resolved
+      // view and derived map follow the new configuration; the record lags —
+      // reported as recorded, not as configured (SPEC 11.6, 13.3: the
+      // inventory never refreshes or writes, and even a refresh leaves the
+      // recorded paths unchanged).
+      await workspace.file(CONFIG_FILE, DURABLES_NOEMIT_CONFIG);
+      const lagContext =
+        "T11.6-3 — `inventory` after the configuration change (emission " +
+        "off) without rebuild: the record lags, reported as recorded, not " +
+        "as configured (SPEC 11.6, 13.3)";
+      const lag = await expectInventoryDocument(
+        product,
+        workspace.root,
+        ["inventory"],
+        lagContext,
+      );
+      assertSameJson(
+        lag.document.configuration.markdown,
+        { emit: false, outDir: null },
+        `${lagContext} — the resolved view reports the new configuration ` +
+          `(SPEC 7.3, 11.6)`,
+      );
+      assertSameJson(
+        lag.document.derived,
+        [
+          {
+            source: "specs/apex.mdx",
+            module: "specs/apex.xspec.ts",
+            markdown: null,
+          },
+          {
+            source: "specs/zele.mdx",
+            module: "specs/zele.xspec.ts",
+            markdown: null,
+          },
+        ],
+        `${lagContext} — the derived map follows the configuration: no ` +
+          `Markdown destination exists while emission is disabled (SPEC ` +
+          `7.3, 11.6)`,
+      );
+      assertRecordedDerivedPaths(
+        lag.document.recorded,
+        postBuildRecorded,
+        `${lagContext} — the previously emitted Markdown paths and the ` +
+          `modules stay recorded until a rebuild replaces the record: a ` +
+          `product recomputing "recorded" from the current configuration ` +
+          `drops the .md paths and fails here`,
+      );
+      assertStdoutOmits(lag.result, FOREIGN_TOKEN, lagContext);
+
+      // Journal occupancy by presence alone: a garbage-content plain file, a
+      // directory, and a broken symbolic link each occupy the path — no
+      // content read, no 14.13 from the inventory (findings [] is asserted
+      // by the shared frame on every decode).
+      await workspace.file(
+        JOURNAL_PATH,
+        "ceci n'est pas une entree de journal\n",
+      );
+      const plainFile = await expectInventoryDocument(
+        product,
+        workspace.root,
+        ["inventory"],
+        "T11.6-3 — `inventory` with a garbage-content plain file at the " +
+          "journal path: occupancy is presence alone and no content is " +
+          "read — no 14.13 from the inventory (SPEC 11.6, 6.1)",
+      );
+      assertJournalStatus(
+        plainFile.document.journal,
+        true,
+        "T11.6-3 — journal occupied by a plain file",
+      );
+
+      await fsp.rm(workspace.path(JOURNAL_PATH));
+      await workspace.dir(JOURNAL_PATH);
+      const directory = await expectInventoryDocument(
+        product,
+        workspace.root,
+        ["inventory"],
+        "T11.6-3 — `inventory` with a directory at the journal path: " +
+          "occupancy is presence alone, whatever kind of filesystem object " +
+          "occupies it (SPEC 11.6, 6.1)",
+      );
+      assertJournalStatus(
+        directory.document.journal,
+        true,
+        "T11.6-3 — journal occupied by a directory",
+      );
+
+      await fsp.rm(workspace.path(JOURNAL_PATH), { recursive: true });
+      await workspace.symlink(JOURNAL_PATH, "cible-fantome");
+      const symlink = await expectInventoryDocument(
+        product,
+        workspace.root,
+        ["inventory"],
+        "T11.6-3 — `inventory` with a broken symbolic link at the journal " +
+          "path: still occupied — presence alone, so a product probing " +
+          "occupancy through the link (stat, open) wrongly reports absent " +
+          "(SPEC 11.6, 6.1)",
+      );
+      assertJournalStatus(
+        symlink.document.journal,
+        true,
+        "T11.6-3 — journal occupied by a broken symbolic link",
+      );
+    } finally {
+      await workspace.dispose();
+    }
+
+    // --- sessions workspace -------------------------------------------------
+    const sessions = await TestWorkspace.create({
+      files: {
+        [CONFIG_FILE]: SESSIONS_CONFIG,
+        "specs/seul.mdx": '<S id="seul">\nSeul.\n</S>\n',
+      },
+    });
+    try {
+      await buildOk(
+        product,
+        sessions,
+        "T11.6-3 — the sessions workspace is valid, so `build` succeeds " +
+          "(SPEC 12.1)",
+      );
+      await expectExit(
+        product,
+        sessions,
+        ["review", "create", "--strategy", "audit", "--name", "ancien"],
+        0,
+        "T11.6-3 — `review create --strategy audit --name ancien` writes " +
+          "the product's own session file (SPEC 10.1, 10.7)",
+      );
+      // Staging premise: the product wrote a plain session file where 10.1
+      // stores sessions — the later exact listing rests on it.
+      const sessionKind = await sessions.kind(
+        `${GRAPH_DATA_AREA_PATH}/reviews/ancien.json`,
+      );
+      if (sessionKind !== "file") {
+        fail(
+          "T11.6-3 — staging premise: `review create` must store the " +
+            "session at .xspec/reviews/ancien.json as a plain file (SPEC " +
+            `10.1, 13.4); found ${sessionKind}`,
+        );
+      }
+      await sessions.file(
+        `${GRAPH_DATA_AREA_PATH}/reviews/S.json`,
+        "{{{ pas du JSON du tout — contenu jamais lu par l'inventaire",
+      );
+      await sessions.dir(`${GRAPH_DATA_AREA_PATH}/reviews/S2.json`);
+      await sessions.file(
+        `${GRAPH_DATA_AREA_PATH}/reviews/notes.txt`,
+        "a ne jamais lister\n",
+      );
+      await sessions.file(`${GRAPH_DATA_AREA_PATH}/reviews/.foo.json`, "{}\n");
+
+      const listContext =
+        "T11.6-3 — `inventory` over the staged review-session directory: " +
+        "sessions are selected by name alone, content unread (SPEC 11.6, " +
+        "10.1)";
+      const listed = await expectInventoryDocument(
+        product,
+        sessions.root,
+        ["inventory"],
+        listContext,
+      );
+      // Selection by name alone, whatever occupies the entry: the
+      // product-written session, the garbage-content S.json, and the
+      // directory S2.json are all listed — no 14.21 here (findings [] in
+      // the frame) — while notes.txt (no .json session name) and .foo.json
+      // (a session name never begins with ".") never are. Order: byte
+      // order of file name — "S.json" < "S2.json" (0x2e < 0x32) <
+      // "ancien.json" (0x53 < 0x61); case folding would sort "ancien"
+      // first, so the byte-order contract has teeth.
+      assertSameJson(
+        listed.document.sessions,
+        [
+          `${GRAPH_DATA_AREA_PATH}/reviews/S.json`,
+          `${GRAPH_DATA_AREA_PATH}/reviews/S2.json`,
+          `${GRAPH_DATA_AREA_PATH}/reviews/ancien.json`,
+        ],
+        `${listContext} — exactly the three session-named entries, in byte ` +
+          `order of file name`,
+      );
+      assertStdoutOmits(
+        listed.result,
+        "notes.txt",
+        `${listContext} — a review-directory entry with no session file ` +
+          `name is not a session: never listed, never claimed (SPEC 10.1, ` +
+          `11.6)`,
+      );
+      assertStdoutOmits(
+        listed.result,
+        ".foo.json",
+        `${listContext} — a session name never begins with ".", so ` +
+          `.foo.json is no session file name: never listed, never claimed ` +
+          `(SPEC 10.1, 11.6)`,
+      );
+      assertJournalStatus(
+        listed.document.journal,
+        false,
+        `${listContext} — review operations never touch the journal (SPEC ` +
+          `6.1)`,
+      );
+      assertGraphDataArea(listed.document.graphData, listContext);
+      assertRecordedDerivedPaths(
+        listed.document.recorded,
+        { pinned: ["specs/seul.xspec.ts"], specSources: ["specs/seul.mdx"] },
+        `${listContext} — the record from the build: the module (no ` +
+          `Markdown; emission is disabled by the absent key) plus ` +
+          `attributable companions (SPEC 13.3, 13.1, 7.3)`,
+      );
+    } finally {
+      await sessions.dispose();
+    }
+  },
+});
+
+export const section116Tests: readonly ProductTestEntry[] = [
+  T11_6_1,
+  T11_6_2,
+  T11_6_3,
+];

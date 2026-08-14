@@ -3102,8 +3102,62 @@ certify against FP-091's fixtures once those land.
   certification green 17/17 (violators failing as certified). FP-071/072
   build T11.6-3/-4 on this module and may widen the scoped decode to the
   full top-level form.]
-- [ ] FP-071 — Implement T11.6-3: record, area, durables, orders. [R2 #6;
+- [x] FP-071 — Implement T11.6-3: record, area, durables, orders. [R2 #6;
   TEST-SPEC §11.6]
+  [Done 2026-08-14: T11.6-3 registered in section-11.6.ts (SUITE-56),
+  decoding through the new full-form `decodeInventoryDocument`
+  (forms.ts/model.ts — FP-070's stated widening: exactly the ten 12.7
+  top-level members via expectOnlyMembers, composed from the existing
+  scoped decoders plus the `graphData` path value, `journal`
+  `{"path","occupied"}`, and `sessions` decode with byte-order-of-file-name
+  enforcement; `decodeInventoryRecordedDatum` additionally now enforces the
+  recorded list's byte order and uniqueness, strengthening its existing
+  T12.2-2/T13.3-2 callers). Two workspaces. Record/area/journal workspace
+  (two spec groups `zz` before `aa` — configuration order inverts byte
+  order — emission on): pre-build arm flag-less AND `--json` against one
+  expectation — recorded exactly {state value, []} (never null/unavailable),
+  graphData exactly ".xspec", journal exactly {".xspec/journal", false},
+  sessions [], groups ["zz","aa"], derived-with-markdown as the lag
+  baseline; post-build arm — both modules and both emitted .md pinned
+  present in recorded, every further entry attributable through the 13.1
+  naming scheme (`<dir>/<NAME>.xspec.<suffix>` beside a discovered
+  `<dir>/<NAME>.mdx` — companions asserted by attributability, not
+  enumeration, since 13.1 pins no companion set), byte order
+  decoder-enforced; foreign file `.xspec/zzz-artefact-etranger.bin` staged
+  after the build — exact sources/sessions compares plus the attribution
+  rule exclude it from every list and a document-wide byte scan asserts it
+  is never claimed; lag arm — config rewritten to emit:false without
+  rebuild: view/derived report the new configuration (markdown null) while
+  recorded still carries the .md paths (as recorded, not as configured);
+  journal occupancy arms — garbage plain file, directory, broken symlink
+  each {occupied:true} with the finding-free exit-0 frame (no 14.13 from
+  inventory; the broken link discriminates stat-through-the-link
+  products). Sessions workspace: product-written session (`review create
+  --strategy audit --name ancien`, plain-file premise pinned), garbage
+  S.json, directory S2.json → sessions exactly [S.json, S2.json,
+  ancien.json] in byte order of file name (0x53 'S' < 0x61 'a' — case
+  folding inverts it), findings [] (no 14.21 here), notes.txt/.foo.json
+  never listed and absent from the document bytes. Traceability
+  "T11.6-3": ["11.6"] (13.3/13.1/6.1/10.1/12.7 context, home coverage
+  elsewhere; findings-[] arms assert no numbered condition — no "14", the
+  T11.6-2 precedent). In CERTIFICATIONS.md's Exclusions, no fixture scope.
+  Verified: typecheck/format clean; S-5 gains the full-document guards
+  (good + recorded-unavailable/empty-sessions positives; ten bad shapes
+  incl. extra top-level member, journal form breaks, session order) and
+  two recorded-order rejections — all green; suite red-as-diagnosed at the
+  first arm's exit-0 assert (stub: unknown command 'inventory', exit 2);
+  soundness proven by a scratch mock implementing the 11.6 projection
+  independently (config eval + own glob matcher + own derived/record/
+  session arithmetic; body green — the two implementations agree); teeth
+  probed via eleven mock deviations (trailing-separator area, stat-journal
+  broken-link occupancy, journal-content-read 14.13, recorded-as-configured,
+  record-without-markdown, claim-foreign, sessions-any-name,
+  sessions-casefold order, sessions-files-only, recorded-unavailable,
+  groups-byte-order), each failing at exactly the intended assertion.
+  `npm run test:self`: unchanged 3 planned mid-loop reds
+  (certification-document ×2 → FP-091; S-1 unmapped {12.6, 12.7} → stage
+  G); certification green (violators failing as certified). FP-072 builds
+  T11.6-4 on this module and decoder.]
 - [ ] FP-072 — Implement T11.6-4: no-parse/no-write/one-finding
   (condition-23, `recorded` unavailable). [R2 #6; TEST-SPEC §11.6, SPEC
   14.23]

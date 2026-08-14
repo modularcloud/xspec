@@ -24,8 +24,9 @@
 //     {"unavailable": true} (11.4, 12.7)
 //   - the scoped inventory decodes: the `recorded` datum, the `findings`
 //     member, the `root`/`config` anchoring, and the resolved
-//     configuration/sources/derived map (11.6; the full inventory form is
-//     T11.6-*'s subject)
+//     configuration/sources/derived map (11.6), plus the full ten-member
+//     inventory document decode composing them with the `graphData`,
+//     `journal`, and `sessions` forms (T11.6-3)
 //   - the occurrence-record form {"file","range","kind","source","target"}
 //     and the occurrences document {"findings","occurrences"} (5.7, 11.3)
 //   - the at document {"findings","resolution"} (11.5)
@@ -56,6 +57,7 @@ import type {
   InventoryCoverageProfileView,
   InventoryDerivedEntry,
   InventoryGroupDef,
+  InventoryJournalStatus,
   InventoryPolicyRuleView,
   InventoryPolicySelector,
   InventoryResolvedMap,
@@ -547,17 +549,20 @@ export function decodeDatum<T>(
 /**
  * Scoped decode of the inventory document's `recorded` member (SPEC 11.6,
  * 12.7): the record-supplied datum — the recorded derived-file paths, each a
- * 12.7 path value — as a three-state datum: a plain list, `null`, or the
- * explicit-unavailability marker (14.23). Which states are legitimate for
- * this member is the caller's value assertion (a conforming inventory
- * reports the plain list or unavailability, never `null`, 11.6/12.7).
- * Deliberately scoped: SPEC 12.7 fixes the whole inventory form and the
- * T11.6-* tests pin it entirely; this decoder reads exactly the one pinned
- * member the record-recovery contract needs (T12.2-2's unreadable-record
- * arm: after a successful `build` replaces the corrupt state, `inventory`
- * reports `recorded` again) — the top level must be an object and the member
- * present (`null` is never omission, 12.7) while every other member stays
- * unread. Form-exact (H-3): never adjustable to a product's shape.
+ * 12.7 path value, the list in byte order of workspace-relative path with no
+ * duplicate (11.6/12.7 pin the order; decoder-enforced, exactly as the
+ * `sources`/`derived` orders are) — as a three-state datum: a plain list,
+ * `null`, or the explicit-unavailability marker (14.23). Which states are
+ * legitimate for this member is the caller's value assertion (a conforming
+ * inventory reports the plain list or unavailability, never `null`,
+ * 11.6/12.7). Deliberately scoped: SPEC 12.7 fixes the whole inventory form
+ * and the T11.6-* tests pin it entirely; this decoder reads exactly the one
+ * pinned member the record-recovery contract needs (T12.2-2's
+ * unreadable-record arm: after a successful `build` replaces the corrupt
+ * state, `inventory` reports `recorded` again) — the top level must be an
+ * object and the member present (`null` is never omission, 12.7) while every
+ * other member stays unread. Form-exact (H-3): never adjustable to a
+ * product's shape.
  */
 export function decodeInventoryRecordedDatum(
   doc: unknown,
@@ -566,11 +571,34 @@ export function decodeInventoryRecordedDatum(
   const site = rootSite("11.6 inventory (recorded datum)", context);
   const obj = expectObject(doc, site);
   const recordedSite = at(site, "recorded");
-  return decodeDatum(obj["recorded"], recordedSite, (value, valueSite) =>
-    expectArray(value, valueSite).map((element, index) =>
+  return decodeDatum(obj["recorded"], recordedSite, (value, valueSite) => {
+    const paths = expectArray(value, valueSite).map((element, index) =>
       decodePathValue(element, at(valueSite, index)),
-    ),
-  );
+    );
+    for (let i = 1; i < paths.length; i += 1) {
+      const order = Buffer.compare(
+        pathValueBytes(paths[i - 1]!),
+        pathValueBytes(paths[i]!),
+      );
+      if (order === 0) {
+        formFail(
+          at(valueSite, i),
+          "recorded derived-file paths without duplicates (SPEC 11.6: a " +
+            "deterministically ordered path list)",
+          value,
+        );
+      }
+      if (order > 0) {
+        formFail(
+          at(valueSite, i),
+          "recorded derived-file paths in byte order of workspace-relative " +
+            "path (SPEC 11.6, 12.7)",
+          value,
+        );
+      }
+    }
+    return paths;
+  });
 }
 
 /**
@@ -1005,6 +1033,144 @@ export function decodeInventoryResolvedMap(
   }
 
   return { configuration, sources, derived };
+}
+
+// --- the full inventory document (11.6, 12.7) ---------------------------------
+
+/**
+ * The complete decoded inventory document (SPEC 11.6, 12.7 — the surface the
+ * T11.6-* tests pin together): every member of the pinned form
+ * `{"findings", "root", "config", "configuration", "sources", "derived",
+ * "recorded", "graphData", "journal", "sessions"}`.
+ */
+export interface InventoryDocument {
+  readonly findings: readonly Finding[];
+  readonly root: PathValue;
+  readonly config: PathValue;
+  readonly configuration: InventoryConfigurationView;
+  readonly sources: readonly InventorySourceEntry[];
+  readonly derived: readonly InventoryDerivedEntry[];
+  readonly recorded: DecodedDatum<readonly PathValue[]>;
+  readonly graphData: PathValue;
+  readonly journal: InventoryJournalStatus;
+  readonly sessions: readonly PathValue[];
+}
+
+/** The ten members of the inventory document form, exactly (SPEC 12.7). */
+const INVENTORY_DOCUMENT_MEMBERS = [
+  "findings",
+  "root",
+  "config",
+  "configuration",
+  "sources",
+  "derived",
+  "recorded",
+  "graphData",
+  "journal",
+  "sessions",
+] as const;
+
+/** The file-name bytes of a 12.7 path value (its bytes after the last `/`). */
+function pathValueFileNameBytes(value: PathValue): Buffer {
+  const bytes = pathValueBytes(value);
+  const lastSep = bytes.lastIndexOf(0x2f);
+  return lastSep === -1 ? bytes : bytes.subarray(lastSep + 1);
+}
+
+/**
+ * The `journal` member form: `{"path", "occupied"}` exactly — the journal
+ * path as a 12.7 path value and occupancy as a boolean (SPEC 11.6, 12.7).
+ */
+function decodeInventoryJournalStatus(
+  value: unknown,
+  site: DecodeSite,
+): InventoryJournalStatus {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, ["path", "occupied"], site);
+  return {
+    path: decodePathValue(requiredKey(obj, "path", site), at(site, "path")),
+    occupied: expectBoolean(
+      requiredKey(obj, "occupied", site),
+      at(site, "occupied"),
+    ),
+  };
+}
+
+/**
+ * Full decode of the inventory document (SPEC 11.6, 12.7; the T11.6-3 entry
+ * completes the member set the T11.6-* tests pin): the top level carries
+ * exactly the ten members of the pinned form — `null` never omission, no
+ * member outside the form — decoded through the scoped decoders above (one
+ * code path per member form) plus the `recorded`, `graphData`, `journal`,
+ * and `sessions` members: `recorded` the three-state record-supplied datum
+ * (byte-ordered paths, or the unavailability marker, 14.23); `graphData` a
+ * path value (the `.xspec` spelling is the caller's byte-exact value
+ * assertion); `journal` `{"path", "occupied"}`; `sessions` the session file
+ * paths in byte order of file name with no duplicate (11.6 pins that order;
+ * decoder-enforced). Form-exact (H-3): never adjustable to a product's
+ * shape.
+ */
+export function decodeInventoryDocument(
+  doc: unknown,
+  context?: string,
+): InventoryDocument {
+  const site = rootSite("11.6 inventory (document)", context);
+  const obj = expectObject(doc, site);
+  expectOnlyMembers(obj, INVENTORY_DOCUMENT_MEMBERS, site);
+
+  const anchoring = decodeInventoryAnchoring(doc, context);
+  const map = decodeInventoryResolvedMap(doc, context);
+  const findings = decodeInventoryFindings(doc, context);
+  const recorded = decodeInventoryRecordedDatum(doc, context);
+
+  const graphData = decodePathValue(
+    requiredKey(obj, "graphData", site),
+    at(site, "graphData"),
+  );
+  const journal = decodeInventoryJournalStatus(
+    requiredKey(obj, "journal", site),
+    at(site, "journal"),
+  );
+
+  const sessionsSite = at(site, "sessions");
+  const sessions = expectArray(
+    requiredKey(obj, "sessions", site),
+    sessionsSite,
+  ).map((element, index) => decodePathValue(element, at(sessionsSite, index)));
+  for (let i = 1; i < sessions.length; i += 1) {
+    const order = Buffer.compare(
+      pathValueFileNameBytes(sessions[i - 1]!),
+      pathValueFileNameBytes(sessions[i]!),
+    );
+    if (order === 0) {
+      formFail(
+        at(sessionsSite, i),
+        "one entry per session file — directory entries are unique, so no " +
+          "two session file names coincide (SPEC 11.6, 10.1)",
+        obj["sessions"],
+      );
+    }
+    if (order > 0) {
+      formFail(
+        at(sessionsSite, i),
+        "session files in byte order of file name (SPEC 11.6)",
+        obj["sessions"],
+      );
+    }
+  }
+
+  return {
+    findings,
+    root: anchoring.root,
+    config: anchoring.config,
+    configuration: map.configuration,
+    sources: map.sources,
+    derived: map.derived,
+    recorded,
+    graphData,
+    journal,
+    sessions,
+  };
 }
 
 // --- the occurrences document (5.7, 11.3, 12.7) -------------------------------

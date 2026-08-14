@@ -46,6 +46,7 @@ import {
   decodeIdsTreeReport,
   decodeImpactReport,
   decodeInventoryAnchoring,
+  decodeInventoryDocument,
   decodeInventoryFindings,
   decodeInventoryRecordedDatum,
   decodeInventoryResolvedMap,
@@ -752,6 +753,17 @@ const GOOD_RESOLVED_INVENTORY = {
   ],
   recorded: [],
   graphData: ".xspec",
+};
+
+// The full ten-member inventory document (SPEC 12.7; T11.6-3's frame): the
+// resolved-map control plus a non-empty byte-ordered record, the journal
+// status, and session file paths in byte order of file name ("S.json"
+// before "ancien.json": 0x53 < 0x61 — inverted by case folding).
+const GOOD_INVENTORY_DOCUMENT = {
+  ...GOOD_RESOLVED_INVENTORY,
+  recorded: ["specs/core/a.md", "specs/core/a.xspec.ts"],
+  journal: { path: ".xspec/journal", occupied: false },
+  sessions: [".xspec/reviews/S.json", ".xspec/reviews/ancien.json"],
 };
 
 // --- decoder table -----------------------------------------------------------
@@ -2711,6 +2723,18 @@ const DECODERS: readonly DecoderSpec[] = [
         label: "a valid-UTF-8 path in the byte form (SPEC 12.7 forbids it)",
         doc: { recorded: [{ bytes: "612e6d64" }] },
       },
+      {
+        label:
+          "recorded paths out of byte order (SPEC 11.6, 12.7: the recorded " +
+          "derived-file paths in byte order)",
+        doc: { recorded: ["specs/A.xspec.ts", "specs/A.md"] },
+      },
+      {
+        label:
+          "a duplicate recorded path (SPEC 11.6: a deterministically " +
+          "ordered path list)",
+        doc: { recorded: ["specs/A.md", "specs/A.md"] },
+      },
     ],
   },
   {
@@ -3097,6 +3121,115 @@ const DECODERS: readonly DecoderSpec[] = [
           0,
           "module",
         ),
+      },
+    ],
+  },
+  {
+    // The full inventory document decode (SPEC 11.6, 12.7; T11.6-3's
+    // frame): the top level carries exactly the ten pinned members, decoded
+    // through the scoped decoders plus the recorded/graphData/journal/
+    // sessions forms — `recorded` a three-state datum in byte order,
+    // `journal` {"path","occupied"} exactly, `sessions` in byte order of
+    // file name.
+    name: "11.6 inventory (document)",
+    decode: decodeInventoryDocument,
+    good: GOOD_INVENTORY_DOCUMENT,
+    verify: (decoded: ReturnType<typeof decodeInventoryDocument>) => {
+      expect(decoded.root).toBe(".");
+      expect(decoded.config).toBe("xspec.config.ts");
+      expect(decoded.configuration.specs.map((g) => g.name)).toEqual([
+        "core",
+        "aux",
+      ]);
+      expect(decoded.findings).toEqual([]);
+      expect(decoded.recorded).toEqual({
+        state: "value",
+        value: ["specs/core/a.md", "specs/core/a.xspec.ts"],
+      });
+      expect(decoded.graphData).toBe(".xspec");
+      expect(decoded.journal).toEqual({
+        path: ".xspec/journal",
+        occupied: false,
+      });
+      expect(decoded.sessions).toEqual([
+        ".xspec/reviews/S.json",
+        ".xspec/reviews/ancien.json",
+      ]);
+    },
+    alsoGood: [
+      {
+        label:
+          "recorded unavailable (14.23) beside an occupied journal decodes " +
+          "as stated — never as an empty record or a defaulted occupancy",
+        doc: put(
+          put(GOOD_INVENTORY_DOCUMENT, { unavailable: true }, "recorded"),
+          true,
+          "journal",
+          "occupied",
+        ),
+        verify: (decoded: ReturnType<typeof decodeInventoryDocument>): void => {
+          expect(decoded.recorded).toEqual({ state: "unavailable" });
+          expect(decoded.journal.occupied).toBe(true);
+        },
+      },
+      {
+        label: "no sessions is the empty array (SPEC 12.7)",
+        doc: put(GOOD_INVENTORY_DOCUMENT, [], "sessions"),
+        verify: (decoded: ReturnType<typeof decodeInventoryDocument>): void => {
+          expect(decoded.sessions).toEqual([]);
+        },
+      },
+    ],
+    bad: [
+      {
+        label:
+          "an extra top-level member (the form carries exactly the ten " +
+          "pinned members, SPEC 12.7)",
+        doc: put(GOOD_INVENTORY_DOCUMENT, ".xspec", "area"),
+      },
+      {
+        label: "absent graphData member (null is never omission, SPEC 12.7)",
+        doc: omit(GOOD_INVENTORY_DOCUMENT, "graphData"),
+      },
+      {
+        label: "absent journal member",
+        doc: omit(GOOD_INVENTORY_DOCUMENT, "journal"),
+      },
+      {
+        label:
+          'journal without occupied (the member form is {"path", ' +
+          '"occupied"} exactly, SPEC 12.7)',
+        doc: omit(GOOD_INVENTORY_DOCUMENT, "journal", "occupied"),
+      },
+      {
+        label: "journal with an extra member",
+        doc: put(GOOD_INVENTORY_DOCUMENT, 3, "journal", "lines"),
+      },
+      {
+        label: "a stringly-typed occupied",
+        doc: put(GOOD_INVENTORY_DOCUMENT, "false", "journal", "occupied"),
+      },
+      {
+        label: "absent sessions member",
+        doc: omit(GOOD_INVENTORY_DOCUMENT, "sessions"),
+      },
+      {
+        label: "null sessions (an empty list is [], never null, SPEC 12.7)",
+        doc: put(GOOD_INVENTORY_DOCUMENT, null, "sessions"),
+      },
+      {
+        label:
+          "sessions out of byte order of file name (the case-folded order, " +
+          "SPEC 11.6)",
+        doc: put(
+          GOOD_INVENTORY_DOCUMENT,
+          [".xspec/reviews/ancien.json", ".xspec/reviews/S.json"],
+          "sessions",
+        ),
+      },
+      {
+        label: "absent recorded member",
+        doc: omit(GOOD_INVENTORY_DOCUMENT, "recorded"),
       },
     ],
   },
