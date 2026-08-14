@@ -1,5 +1,4 @@
-// TEST-SPEC §11.4 (`xspec view`) — SUITE-54: T11.4-1 through T11.4-5
-// (T11.4-6 is the planned follow-up in this module).
+// TEST-SPEC §11.4 (`xspec view`) — SUITE-54: T11.4-1 through T11.4-6.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -244,6 +243,51 @@
 //   holds none — never on identity definedness), the 14.19 accompanying
 //   with no locations and the file as concerned path, exit 1.
 //
+// T11.4-6 — byte classification (SPEC 11.4's closing paragraph; 3, 5.7, 13.2,
+// 14). Two workspaces:
+//
+// - The emission loop (finding-free): specs/host.mdx carries every construct
+//   class at once — an import, paired/self-closing sections at two depths
+//   with `tags` and `d` props, single- and multi-line MDX comments, and an
+//   external plus a local embedding — beside the embedding-target file
+//   specs/parts.mdx (its own local embedding chains the expansion two
+//   levels), with Markdown emission enabled. After the staging `build`
+//   (exit 0 — the finding-free premise — writing specs/host.md and
+//   specs/parts.md), one bare `view` answers finding-free, exit 0, and is
+//   byte-asserted whole (trees with decomposition and attribute entries,
+//   imports, occurrences, comments). Then the classification: from the
+//   DECODED view alone the harness assembles every annotation span — tag
+//   decompositions (opening and closing ranges; the whole self-closing
+//   tag), import ranges, comment ranges, and embedding-occurrence container
+//   spans (SPEC 5.7) — asserting attribute ranges lie inside their tag's
+//   opening range and the `d` reference occurrence inside a tag span
+//   (subsumed annotation bytes), and that the spans are exactly the staged
+//   constructs, disjoint and in document order: every spanned byte is
+//   annotation, every other byte content. Reproduction: the P-2 oracle
+//   (helpers/oracles/markdown.ts, S-6-vetted) applied to those view-derived
+//   spans over the staged bytes — removals deleted in place, embedding
+//   containers replaced by the targets' subtree texts (chain-expanded
+//   constants, contribution-derived per SPEC 1.6/3), the line-drop rules of
+//   3 — must reproduce BOTH emitted files byte-equal (a fixture self-check
+//   proves the harness arithmetic against hand-derived expected output
+//   before any product invocation; mixed CRLF/LF terminators and multi-byte
+//   characters keep byte offsets sharp).
+// - The imperfect file (joint with the findings): specs/imp.mdx holds an
+//   invalid construct (`<em>…</em>`, 14.16) and a no-occurrence embedding
+//   spelling (`{text("ghost")}`, 14.6) beside a valid import, comment, and
+//   resolving embedding into specs/tgt.mdx; the `build --json` gate pins
+//   exactly those two conditions. `view specs/imp.mdx` (exit 1): the
+//   invalid element contributes NO view node and the ghost spelling NO
+//   occurrence record — each is located by its finding instead, the
+//   embedding form's finding spanning EXACTLY its full braced container
+//   (the span its occurrence would occupy, SPEC 14, T14-8 — what keeps this
+//   classification exact), the 14.16 located within its element's construct
+//   window. The classification is re-assembled from the view PLUS the 14.6
+//   finding's range and asserted equal to the staged span set: view plus
+//   findings again position every removable construct, while the invalid
+//   element's bytes lie in NO span — a construct matching no removal rule's
+//   form is content (SPEC 11.2).
+//
 // Certification (CERTIFICATIONS.md CONF-AVAIL): T11.4-1, T11.4-3, and
 // T11.4-4 are IN scope (the fixture family lands with the
 // certification-manifest task), so those bodies obey the scope's staging
@@ -283,15 +327,21 @@
 // no-default declarations' `null` name) is absent and the decode rejects
 // the omission; under VIOL-AVAIL-NOFILE it passes untouched — T11.4-4
 // drives `view` alone.
-// T11.4-2 and T11.4-5 are NOT in scope: CERTIFICATIONS.md's Exclusions name
-// the argument, spelling, and domain-and-exit matrices of the
-// machine-interface surfaces (T11.2-5, T11.3-2/3, T11.4-2, T11.5-2) and
+// T11.4-2, T11.4-5, and T11.4-6 are NOT in scope: CERTIFICATIONS.md's
+// Exclusions name the argument, spelling, and domain-and-exit matrices of
+// the machine-interface surfaces (T11.2-5, T11.3-2/3, T11.4-2, T11.5-2) and
 // T11.4-5's consultation-domain negatives — certified representatively
-// through the shared machinery — so unlike their siblings they are free to
-// drive the gate-reference `build` and the snapshot compare.
+// through the shared machinery — so unlike their siblings those two are
+// free to drive the gate-reference `build` and the snapshot compare, and
+// T11.4-6 lies outside the scope by construction: its emission loop needs
+// the `markdown` configuration and emitted-file reads, both expressly
+// outside CONF-AVAIL's workspace scope, its assertions are the loud
+// positive byte-asserted class, and its oracle is S-6-vetted — so it too
+// drives the gate-reference `build` freely.
 
 import { Buffer } from "node:buffer";
 import type {
+  FileView,
   Finding,
   OccurrenceRecord,
   SourceRange,
@@ -300,7 +350,13 @@ import type {
   ViewNode,
 } from "../../helpers/adapters/index.js";
 import { decodeViewReport } from "../../helpers/adapters/index.js";
-import { fail, parseJsonStdout } from "../../helpers/assertions.js";
+import {
+  assertFileBytes,
+  fail,
+  parseJsonStdout,
+} from "../../helpers/assertions.js";
+import type { MarkdownPiece } from "../../helpers/oracles/markdown.js";
+import { compileMarkdown } from "../../helpers/oracles/markdown.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
@@ -315,6 +371,7 @@ import {
   assertFindingLocated,
   assertSameJson,
   buildFindings,
+  buildOk,
   expectExit,
   runJson,
 } from "./support.js";
@@ -2708,10 +2765,1015 @@ const T11_4_5 = defineProductTest({
   },
 });
 
+// =============================================================================
+// T11.4-6 — byte classification (SPEC 11.4 closing paragraph, 3, 5.7, 13.2).
+// =============================================================================
+
+// Spec-only configuration with Markdown emission enabled (SPEC 7.3; default
+// destination: next to each source, `specs/host.mdx` → `specs/host.md`,
+// 13.2). The group globs match only `.mdx` names, so no emit destination is
+// ever discovered (13.4).
+const BC_EMIT_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true }
+})
+`;
+
+/**
+ * One byte-classification span: a construct Markdown compilation removes
+ * (imports, section tags, comments — SPEC 3) or replaces (an embedding's
+ * full braced container, SPEC 5.7/3). Every byte inside a span is
+ * annotation; every byte outside every span is content (SPEC 11.4).
+ * `target` carries an embeds occurrence's resolved target identity (the
+ * expansion key for reproduction); `null` for removals and for a container
+ * positioned by its finding rather than by a record (no target resolves).
+ */
+interface AnnotationSpan {
+  readonly kind: "removal" | "embedding";
+  readonly range: SourceRange;
+  readonly target: string | null;
+}
+
+/** The `{kind, range}` image compared against the staged expectation. */
+function classificationOf(
+  spans: readonly AnnotationSpan[],
+): readonly { kind: string; range: SourceRange }[] {
+  return spans.map((span) => ({ kind: span.kind, range: span.range }));
+}
+
+/**
+ * Classify every byte of a viewed file from the view's data alone (SPEC
+ * 11.4): tag decompositions (opening and closing ranges — the whole
+ * self-closing tag), import ranges, comment ranges, and embeds-occurrence
+ * container spans become the annotation spans; `findingEmbeddings` adds
+ * containers positioned by a finding's range instead of a record (the
+ * imperfect-file arm, SPEC 14). Asserts, as diagnosed failures, the
+ * classification's own soundness over the product's data: every attribute
+ * range lies inside its tag's opening range and every non-embeds occurrence
+ * (a `d` reference, spelled inside a tag) inside some tag span — subsumed
+ * annotation bytes, never spans of their own — and the assembled spans are
+ * non-empty, in bounds, and disjoint, so together they classify every byte
+ * exactly once.
+ */
+function assembleAnnotationSpans(
+  view: FileView,
+  byteLength: number,
+  findingEmbeddings: readonly SourceRange[],
+  context: string,
+): readonly AnnotationSpan[] {
+  const spans: AnnotationSpan[] = [];
+  const tagSpans: SourceRange[] = [];
+  const walk = (node: ViewNode): void => {
+    for (const tag of [node.opening, node.closing]) {
+      if (tag !== null) {
+        spans.push({ kind: "removal", range: tag, target: null });
+        tagSpans.push(tag);
+      }
+    }
+    for (const attribute of node.attributes) {
+      const opening = node.opening;
+      if (
+        opening === null ||
+        attribute.range.start < opening.start ||
+        attribute.range.end > opening.end
+      ) {
+        fail(
+          `${context}: attribute ${JSON.stringify(attribute.text)} at ` +
+            `[${String(attribute.range.start)}, ` +
+            `${String(attribute.range.end)}) must lie within its tag's ` +
+            `opening range ${JSON.stringify(opening)} — attribute bytes ` +
+            `are annotation through the tag span (SPEC 11.4, 3)`,
+        );
+      }
+    }
+    node.children.forEach(walk);
+  };
+  walk(view.root);
+  for (const declaration of view.imports) {
+    spans.push({ kind: "removal", range: declaration.range, target: null });
+  }
+  for (const comment of view.comments) {
+    spans.push({ kind: "removal", range: comment, target: null });
+  }
+  for (const record of view.occurrences) {
+    if (record.kind === "embeds") {
+      spans.push({
+        kind: "embedding",
+        range: record.range,
+        target: record.target,
+      });
+    } else {
+      const contained = tagSpans.some(
+        (tag) => record.range.start >= tag.start && record.range.end <= tag.end,
+      );
+      if (!contained) {
+        fail(
+          `${context}: a ${record.kind} occurrence at ` +
+            `[${String(record.range.start)}, ${String(record.range.end)}) ` +
+            `spans its reference expression inside a section tag (SPEC ` +
+            `5.7) — its bytes must be annotation through a tag span, but ` +
+            `no tag range contains it`,
+        );
+      }
+    }
+  }
+  for (const range of findingEmbeddings) {
+    spans.push({ kind: "embedding", range, target: null });
+  }
+  spans.sort(
+    (a, b) => a.range.start - b.range.start || a.range.end - b.range.end,
+  );
+  let cursor = 0;
+  for (const span of spans) {
+    if (
+      span.range.end <= span.range.start ||
+      span.range.start < cursor ||
+      span.range.end > byteLength
+    ) {
+      fail(
+        `${context}: annotation spans must be non-empty, in bounds ` +
+          `(byte length ${String(byteLength)}), and disjoint — span ` +
+          `[${String(span.range.start)}, ${String(span.range.end)}) ` +
+          `violates that after the previous span ended at ` +
+          `${String(cursor)} (SPEC 11.4: the classification is exact)`,
+      );
+    }
+    cursor = span.range.end;
+  }
+  return spans;
+}
+
+/**
+ * The P-2 oracle applied to view data (SPEC 11.4, 3): slice the staged
+ * source's bytes at the assembled annotation spans, feed the pieces to the
+ * S-6-vetted Markdown oracle — removals deleted in place, each embedding
+ * container replaced by its target's subtree text from `expansions` — and
+ * return the compiled output. A missing expansion is a diagnosed failure
+ * (the occurrence compare has already pinned every target).
+ */
+function reproduceMarkdown(
+  source: string,
+  spans: readonly AnnotationSpan[],
+  expansions: ReadonlyMap<string, string>,
+  context: string,
+): string {
+  const bytes = Buffer.from(source, "utf8");
+  const pieces: MarkdownPiece[] = [];
+  let cursor = 0;
+  for (const span of spans) {
+    pieces.push({
+      kind: "content",
+      text: bytes.subarray(cursor, span.range.start).toString("utf8"),
+    });
+    const text = bytes
+      .subarray(span.range.start, span.range.end)
+      .toString("utf8");
+    if (span.kind === "removal") {
+      pieces.push({ kind: "removal", text });
+    } else {
+      const expansion =
+        span.target === null ? undefined : expansions.get(span.target);
+      if (expansion === undefined) {
+        fail(
+          `${context}: no staged expansion for embedding target ` +
+            `${JSON.stringify(span.target)} at ` +
+            `[${String(span.range.start)}, ${String(span.range.end)}) — ` +
+            `the reproduction replaces each container with its resolved ` +
+            `target's subtree text (SPEC 3, 1.6)`,
+        );
+      }
+      pieces.push({ kind: "embedding", text, expansion });
+    }
+    cursor = span.range.end;
+  }
+  pieces.push({
+    kind: "content",
+    text: bytes.subarray(cursor).toString("utf8"),
+  });
+  return compileMarkdown(pieces);
+}
+
+// --- specs/host.mdx — every construct class on one finding-free file ----------
+//
+// Line map (logical lines; the multi-byte prefix and the CRLF terminator
+// shift and sharpen byte offsets, SPEC 1.7/3): a CRLF-terminated prose line;
+// an empty line; the import (line dropped); an empty line; a lone-comment
+// line (dropped); `top`'s opening tag with `tags` and `d` props (dropped);
+// prose; a multi-line comment merging its two source lines into one logical
+// line; the single-line child `top.kid`; the external embedding
+// `{text(PÄRT.piece)}` on its own line; the self-closing `top.gap` (dropped);
+// prose; `top`'s closing tag (dropped); prose; the single-line `side` with
+// an in-line local embedding; prose.
+
+const BC_HOST_FILE = "specs/host.mdx";
+const BC_PARTS_FILE = "specs/parts.mdx";
+
+const BCH = new ByteFixture();
+BCH.add("Höst — carrier of every construct.\r\n\n");
+const BCH_IMPORT_TEXT = 'import PÄRT from "./parts.xspec"';
+const BCH_IMPORT = BCH.add(BCH_IMPORT_TEXT);
+BCH.add("\n\n");
+const BCH_COMMENT1_TEXT = "{/* lone comment line */}";
+const BCH_COMMENT1 = BCH.add(BCH_COMMENT1_TEXT);
+BCH.add("\n");
+const BCH_TOP_OPEN_START = BCH.pos;
+BCH.add("<S ");
+const BCH_TOP_ID = BCH.attr("id", 'id="top"');
+BCH.add(" ");
+const BCH_TOP_TAGS = BCH.attr("tags", 'tags="tag.α mark"');
+BCH.add(" ");
+const BCH_TOP_D = BCH.attr("d", 'd={"top.kid"}');
+BCH.add(">");
+const BCH_TOP_OPEN: SourceRange = { start: BCH_TOP_OPEN_START, end: BCH.pos };
+BCH.add("\nTop head.\nMerged head ");
+const BCH_COMMENT2_TEXT = "{/* first half\nsecond half */}";
+const BCH_COMMENT2 = BCH.add(BCH_COMMENT2_TEXT);
+BCH.add(" merged tail.\n");
+const BCH_KID_START = BCH.pos;
+BCH.add("<S ");
+const BCH_KID_ID = BCH.attr("id", 'id="top.kid"');
+BCH.add(">");
+const BCH_KID_OPEN: SourceRange = { start: BCH_KID_START, end: BCH.pos };
+BCH.add("Kid line.");
+const BCH_KID_CLOSE = BCH.add("</S>");
+const BCH_KID_RANGE: SourceRange = { start: BCH_KID_START, end: BCH.pos };
+BCH.add("\n");
+const BCH_EMBED_PIECE_TEXT = "{text(PÄRT.piece)}";
+const BCH_EMBED_PIECE = BCH.add(BCH_EMBED_PIECE_TEXT);
+BCH.add("\n");
+const BCH_GAP_START = BCH.pos;
+BCH.add("<S ");
+const BCH_GAP_ID = BCH.attr("id", 'id="top.gap"');
+BCH.add(" />");
+const BCH_GAP_RANGE: SourceRange = { start: BCH_GAP_START, end: BCH.pos };
+BCH.add("\nTop tail.\n");
+const BCH_TOP_CLOSE = BCH.add("</S>");
+const BCH_TOP_RANGE: SourceRange = { start: BCH_TOP_OPEN_START, end: BCH.pos };
+BCH.add("\nBetween prose.\n");
+const BCH_SIDE_START = BCH.pos;
+BCH.add("<S ");
+const BCH_SIDE_ID = BCH.attr("id", 'id="side"');
+BCH.add(">");
+const BCH_SIDE_OPEN: SourceRange = { start: BCH_SIDE_START, end: BCH.pos };
+BCH.add("Inline ");
+const BCH_EMBED_KID_TEXT = '{text("top.kid")}';
+const BCH_EMBED_KID = BCH.add(BCH_EMBED_KID_TEXT);
+BCH.add(" run.");
+const BCH_SIDE_CLOSE = BCH.add("</S>");
+const BCH_SIDE_RANGE: SourceRange = { start: BCH_SIDE_START, end: BCH.pos };
+BCH.add("\nCoda.\n");
+const BCH_SOURCE = BCH.source;
+const BCH_ROOT_RANGE: SourceRange = { start: 0, end: BCH.pos };
+
+// The `d` reference occurrence spans that one reference's own expression:
+// for the local form the string literal's characters, quotes included —
+// `d={` and the closing `}` excluded (SPEC 5.7, 2.2; the T5.7-2 convention).
+const BCH_D_REF: SourceRange = {
+  start: BCH_TOP_D.range.start + "d={".length,
+  end: BCH_TOP_D.range.end - 1,
+};
+
+// --- specs/parts.mdx — the embedding-target file (chained local embedding) ----
+
+const BCP = new ByteFixture();
+BCP.add("Pärts prose head.\n\n");
+const BCP_PIECE_START = BCP.pos;
+BCP.add("<S ");
+const BCP_PIECE_ID = BCP.attr("id", 'id="piece"');
+BCP.add(">");
+const BCP_PIECE_OPEN: SourceRange = { start: BCP_PIECE_START, end: BCP.pos };
+BCP.add("\nPiece head.\n");
+const BCP_EMBED_TEXT = '{text("piece.leaf")}';
+const BCP_EMBED = BCP.add(BCP_EMBED_TEXT);
+BCP.add("\n");
+const BCP_LEAF_START = BCP.pos;
+BCP.add("<S ");
+const BCP_LEAF_ID = BCP.attr("id", 'id="piece.leaf"');
+BCP.add(">");
+const BCP_LEAF_OPEN: SourceRange = { start: BCP_LEAF_START, end: BCP.pos };
+BCP.add("Leaf line.");
+const BCP_LEAF_CLOSE = BCP.add("</S>");
+const BCP_LEAF_RANGE: SourceRange = { start: BCP_LEAF_START, end: BCP.pos };
+BCP.add("\nPiece tail.\n");
+const BCP_PIECE_CLOSE = BCP.add("</S>");
+const BCP_PIECE_RANGE: SourceRange = { start: BCP_PIECE_START, end: BCP.pos };
+BCP.add("\nParts tail.\n");
+const BCP_SOURCE = BCP.source;
+const BCP_ROOT_RANGE: SourceRange = { start: 0, end: BCP.pos };
+
+// Subtree texts (SPEC 1.6: a node's subtree text is its construct's
+// contribution to the file's compiled output — the rules of 3 applied over
+// the WHOLE file, then restricted to output attributable to the construct's
+// range; `text(...)` returns exactly this value):
+//
+// - piece.leaf / top.kid: single-line paired constructs — tags removed, the
+//   residue between them survives on its kept line; the line's terminator
+//   sits after `</S>`, outside the construct range, so neither value ends
+//   with one.
+// - piece: its opening- and closing-tag lines are dropped whole (tag-only
+//   lines; each terminator inside the dropped line contributes nothing), so
+//   the contribution is the four kept lines between them — the embedding
+//   line replaced by piece.leaf's chained expansion.
+const BC_EXPANSION_LEAF = "Leaf line.";
+const BC_EXPANSION_KID = "Kid line.";
+const BC_EXPANSION_PIECE =
+  "Piece head.\n" + "Leaf line.\n" + "Leaf line.\n" + "Piece tail.\n";
+const BC_EXPANSIONS: ReadonlyMap<string, string> = new Map([
+  [`${BC_PARTS_FILE}#piece`, BC_EXPANSION_PIECE],
+  [`${BC_PARTS_FILE}#piece.leaf`, BC_EXPANSION_LEAF],
+  [`${BC_HOST_FILE}#top.kid`, BC_EXPANSION_KID],
+]);
+
+// Hand-derived compiled outputs (SPEC 3; the fixture self-check proves the
+// oracle over the staged spans reproduces exactly these before any product
+// invocation): construct-only lines drop with their terminators, the
+// multi-line comment merges its residues into one line (two spaces), kept
+// prose keeps its bytes and terminator — the CRLF included — and each
+// embedding line carries its non-empty expansion.
+const BC_EXPECTED_HOST_MD =
+  "Höst — carrier of every construct.\r\n" +
+  "\n" +
+  "\n" +
+  "Top head.\n" +
+  "Merged head  merged tail.\n" +
+  "Kid line.\n" +
+  BC_EXPANSION_PIECE +
+  "\n" +
+  "Top tail.\n" +
+  "Between prose.\n" +
+  "Inline Kid line. run.\n" +
+  "Coda.\n";
+const BC_EXPECTED_PARTS_MD =
+  "Pärts prose head.\n" +
+  "\n" +
+  "Piece head.\n" +
+  "Leaf line.\n" +
+  "Leaf line.\n" +
+  "Piece tail.\n" +
+  "Parts tail.\n";
+
+// The staged annotation spans, in document order (the classification's
+// expected value; embedding entries carry the expansion key for the
+// self-check's reproduction).
+const BC_HOST_SPANS: readonly AnnotationSpan[] = [
+  { kind: "removal", range: BCH_IMPORT, target: null },
+  { kind: "removal", range: BCH_COMMENT1, target: null },
+  { kind: "removal", range: BCH_TOP_OPEN, target: null },
+  { kind: "removal", range: BCH_COMMENT2, target: null },
+  { kind: "removal", range: BCH_KID_OPEN, target: null },
+  { kind: "removal", range: BCH_KID_CLOSE, target: null },
+  {
+    kind: "embedding",
+    range: BCH_EMBED_PIECE,
+    target: `${BC_PARTS_FILE}#piece`,
+  },
+  { kind: "removal", range: BCH_GAP_RANGE, target: null },
+  { kind: "removal", range: BCH_TOP_CLOSE, target: null },
+  { kind: "removal", range: BCH_SIDE_OPEN, target: null },
+  {
+    kind: "embedding",
+    range: BCH_EMBED_KID,
+    target: `${BC_HOST_FILE}#top.kid`,
+  },
+  { kind: "removal", range: BCH_SIDE_CLOSE, target: null },
+];
+const BC_PARTS_SPANS: readonly AnnotationSpan[] = [
+  { kind: "removal", range: BCP_PIECE_OPEN, target: null },
+  {
+    kind: "embedding",
+    range: BCP_EMBED,
+    target: `${BC_PARTS_FILE}#piece.leaf`,
+  },
+  { kind: "removal", range: BCP_LEAF_OPEN, target: null },
+  { kind: "removal", range: BCP_LEAF_CLOSE, target: null },
+  { kind: "removal", range: BCP_PIECE_CLOSE, target: null },
+];
+
+/** The tree data the classification consumes, projected for exact compare. */
+interface ClassifyShape {
+  readonly identity: string | { readonly unavailable: true };
+  readonly range: SourceRange;
+  readonly opening: SourceRange | null;
+  readonly closing: SourceRange | null;
+  readonly attributes: readonly ViewAttributeEntry[];
+  readonly children: readonly ClassifyShape[];
+}
+
+function projectClassifyShape(node: ViewNode): ClassifyShape {
+  return {
+    identity: node.identity,
+    range: node.range,
+    opening: node.opening,
+    closing: node.closing,
+    attributes: node.attributes,
+    children: node.children.map(projectClassifyShape),
+  };
+}
+
+const BC_HOST_TREE: ClassifyShape = {
+  identity: BC_HOST_FILE,
+  range: BCH_ROOT_RANGE,
+  opening: null,
+  closing: null,
+  attributes: [],
+  children: [
+    {
+      identity: `${BC_HOST_FILE}#top`,
+      range: BCH_TOP_RANGE,
+      opening: BCH_TOP_OPEN,
+      closing: BCH_TOP_CLOSE,
+      attributes: [BCH_TOP_ID, BCH_TOP_TAGS, BCH_TOP_D],
+      children: [
+        {
+          identity: `${BC_HOST_FILE}#top.kid`,
+          range: BCH_KID_RANGE,
+          opening: BCH_KID_OPEN,
+          closing: BCH_KID_CLOSE,
+          attributes: [BCH_KID_ID],
+          children: [],
+        },
+        {
+          identity: `${BC_HOST_FILE}#top.gap`,
+          range: BCH_GAP_RANGE,
+          opening: BCH_GAP_RANGE,
+          closing: null,
+          attributes: [BCH_GAP_ID],
+          children: [],
+        },
+      ],
+    },
+    {
+      identity: `${BC_HOST_FILE}#side`,
+      range: BCH_SIDE_RANGE,
+      opening: BCH_SIDE_OPEN,
+      closing: BCH_SIDE_CLOSE,
+      attributes: [BCH_SIDE_ID],
+      children: [],
+    },
+  ],
+};
+
+const BC_HOST_IMPORTS: readonly ViewImportEntry[] = [
+  { range: BCH_IMPORT, name: "PÄRT", target: BC_PARTS_FILE },
+];
+const BC_HOST_OCCURRENCES: readonly OccurrenceRecord[] = [
+  {
+    file: BC_HOST_FILE,
+    range: BCH_D_REF,
+    kind: "depends",
+    source: { identity: `${BC_HOST_FILE}#top`, range: BCH_TOP_RANGE },
+    target: `${BC_HOST_FILE}#top.kid`,
+  },
+  {
+    file: BC_HOST_FILE,
+    range: BCH_EMBED_PIECE,
+    kind: "embeds",
+    source: { identity: `${BC_HOST_FILE}#top`, range: BCH_TOP_RANGE },
+    target: `${BC_PARTS_FILE}#piece`,
+  },
+  {
+    file: BC_HOST_FILE,
+    range: BCH_EMBED_KID,
+    kind: "embeds",
+    source: { identity: `${BC_HOST_FILE}#side`, range: BCH_SIDE_RANGE },
+    target: `${BC_HOST_FILE}#top.kid`,
+  },
+];
+const BC_HOST_COMMENTS: readonly SourceRange[] = [BCH_COMMENT1, BCH_COMMENT2];
+
+const BC_PARTS_TREE: ClassifyShape = {
+  identity: BC_PARTS_FILE,
+  range: BCP_ROOT_RANGE,
+  opening: null,
+  closing: null,
+  attributes: [],
+  children: [
+    {
+      identity: `${BC_PARTS_FILE}#piece`,
+      range: BCP_PIECE_RANGE,
+      opening: BCP_PIECE_OPEN,
+      closing: BCP_PIECE_CLOSE,
+      attributes: [BCP_PIECE_ID],
+      children: [
+        {
+          identity: `${BC_PARTS_FILE}#piece.leaf`,
+          range: BCP_LEAF_RANGE,
+          opening: BCP_LEAF_OPEN,
+          closing: BCP_LEAF_CLOSE,
+          attributes: [BCP_LEAF_ID],
+          children: [],
+        },
+      ],
+    },
+  ],
+};
+const BC_PARTS_OCCURRENCES: readonly OccurrenceRecord[] = [
+  {
+    file: BC_PARTS_FILE,
+    range: BCP_EMBED,
+    kind: "embeds",
+    source: { identity: `${BC_PARTS_FILE}#piece`, range: BCP_PIECE_RANGE },
+    target: `${BC_PARTS_FILE}#piece.leaf`,
+  },
+];
+
+// --- specs/imp.mdx — the imperfect file (14.6 + 14.16, nothing else) ----------
+
+const BCI_FILE = "specs/imp.mdx";
+const BCT_FILE = "specs/tgt.mdx";
+const BCT_SOURCE = 'Tärget prose.\n\n<S id="t">Tgt line.</S>\n';
+
+const BCI = new ByteFixture();
+BCI.add("Ïmp — imperfect carrier.\n\n");
+const BCI_IMPORT_TEXT = 'import TGT from "./tgt.xspec"';
+const BCI_IMPORT = BCI.add(BCI_IMPORT_TEXT);
+BCI.add("\n\n");
+const BCI_ONE_START = BCI.pos;
+BCI.add("<S ");
+const BCI_ONE_ID = BCI.attr("id", 'id="one"');
+BCI.add(">");
+const BCI_ONE_OPEN: SourceRange = { start: BCI_ONE_START, end: BCI.pos };
+BCI.add("\nOne head.\n");
+const BCI_COMMENT_TEXT = "{/* positioned comment */}";
+const BCI_COMMENT = BCI.add(BCI_COMMENT_TEXT);
+BCI.add("\n");
+const BCI_EMBED_OK_TEXT = "{text(TGT.t)}";
+const BCI_EMBED_OK = BCI.add(BCI_EMBED_OK_TEXT);
+BCI.add("\n");
+const BCI_GHOST_TEXT = '{text("ghost")}';
+const BCI_GHOST = BCI.add(BCI_GHOST_TEXT);
+BCI.add("\n");
+const BCI_EM_START = BCI.pos;
+BCI.add("<em>stray content</em>");
+const BCI_EM_WINDOW: SourceRange = { start: BCI_EM_START, end: BCI.pos };
+BCI.add("\nOne tail.\n");
+const BCI_ONE_CLOSE = BCI.add("</S>");
+const BCI_ONE_RANGE: SourceRange = { start: BCI_ONE_START, end: BCI.pos };
+BCI.add("\n");
+const BCI_SOURCE = BCI.source;
+const BCI_ROOT_RANGE: SourceRange = { start: 0, end: BCI.pos };
+
+// The imperfect workspace's COMPLETE findings multiset (the gate's staging
+// premise): the no-occurrence embedding spelling (14.6 — `ghost` is a
+// well-formed segment naming no section) and the invalid construct (14.16);
+// the import resolves, the comment and the `{text(TGT.t)}` embedding are
+// valid, and specs/tgt.mdx is finding-free.
+const BCI_WORKSPACE_CONDITIONS: Readonly<Record<string, number>> = {
+  "14.6": 1,
+  "14.16": 1,
+};
+
+const BCI_TREE: ClassifyShape = {
+  identity: BCI_FILE,
+  range: BCI_ROOT_RANGE,
+  opening: null,
+  closing: null,
+  attributes: [],
+  children: [
+    {
+      identity: `${BCI_FILE}#one`,
+      range: BCI_ONE_RANGE,
+      opening: BCI_ONE_OPEN,
+      closing: BCI_ONE_CLOSE,
+      attributes: [BCI_ONE_ID],
+      children: [],
+    },
+  ],
+};
+const BCI_IMPORTS: readonly ViewImportEntry[] = [
+  { range: BCI_IMPORT, name: "TGT", target: BCT_FILE },
+];
+const BCI_OCCURRENCES: readonly OccurrenceRecord[] = [
+  {
+    file: BCI_FILE,
+    range: BCI_EMBED_OK,
+    kind: "embeds",
+    source: { identity: `${BCI_FILE}#one`, range: BCI_ONE_RANGE },
+    target: `${BCT_FILE}#t`,
+  },
+];
+
+// Every removable construct of the imperfect file, positioned: the section's
+// tag decomposition, the import, and the comment from the view; the
+// recording container from its occurrence record; the ghost container from
+// its finding's range. The `<em>` element is in NO span: a construct
+// matching no removal rule's form is content (SPEC 11.2, 3).
+const BCI_EXPECTED_SPANS: readonly AnnotationSpan[] = [
+  { kind: "removal", range: BCI_IMPORT, target: null },
+  { kind: "removal", range: BCI_ONE_OPEN, target: null },
+  { kind: "removal", range: BCI_COMMENT, target: null },
+  { kind: "embedding", range: BCI_EMBED_OK, target: `${BCT_FILE}#t` },
+  { kind: "embedding", range: BCI_GHOST, target: null },
+  { kind: "removal", range: BCI_ONE_CLOSE, target: null },
+];
+
+const T11_4_6 = defineProductTest({
+  id: "T11.4-6",
+  title:
+    "byte classification: on a finding-free file with imports, sections, tags, comments, and embeddings, the view's data alone — tag ranges (attribute ranges inside them), import ranges, comment ranges, embedding-occurrence container spans (5.7), the `d` reference occurrence subsumed by its tag — classifies every byte as annotation or content, and the P-2 oracle applied to those view-derived spans reproduces the compiled Markdown through the rules of 3 byte-equal to the emitted output of BOTH files, expansions chained two levels; on an imperfect file, jointly with the findings: the invalid construct gets NO view entry and the no-occurrence embedding spelling NO record — each located by its finding's range, the embedding form's finding spanning EXACTLY its full braced container (the span its occurrence would occupy, 14, T14-8) — so view plus findings again position every removable construct, the invalid element's bytes in no span (SPEC 11.4, 3, 1.6, 5.7, 11.2, 13.2, 14, 12.7)",
+  run: async (product) => {
+    // Fixture self-checks (T5.7-2 discipline): composed ranges sliced back
+    // out of the staged bytes, and the oracle reproduction over the staged
+    // spans proven equal to the hand-derived compiled outputs — all before
+    // any product invocation; a failure here is a harness staging error,
+    // never a product failure.
+    sliceCheck(BCH_SOURCE, BCH_IMPORT, BCH_IMPORT_TEXT, "host's import");
+    sliceCheck(
+      BCH_SOURCE,
+      BCH_COMMENT1,
+      BCH_COMMENT1_TEXT,
+      "host's lone comment",
+    );
+    sliceCheck(
+      BCH_SOURCE,
+      BCH_TOP_OPEN,
+      '<S id="top" tags="tag.α mark" d={"top.kid"}>',
+      "top's opening tag",
+    );
+    sliceCheck(BCH_SOURCE, BCH_D_REF, '"top.kid"', "top's d reference");
+    sliceCheck(
+      BCH_SOURCE,
+      BCH_COMMENT2,
+      BCH_COMMENT2_TEXT,
+      "host's multi-line comment",
+    );
+    sliceCheck(
+      BCH_SOURCE,
+      BCH_KID_RANGE,
+      '<S id="top.kid">Kid line.</S>',
+      "top.kid's whole construct",
+    );
+    sliceCheck(
+      BCH_SOURCE,
+      BCH_EMBED_PIECE,
+      BCH_EMBED_PIECE_TEXT,
+      "host's external embedding container",
+    );
+    sliceCheck(
+      BCH_SOURCE,
+      BCH_GAP_RANGE,
+      '<S id="top.gap" />',
+      "top.gap's self-closing tag",
+    );
+    sliceCheck(
+      BCH_SOURCE,
+      BCH_SIDE_RANGE,
+      '<S id="side">Inline {text("top.kid")} run.</S>',
+      "side's whole construct",
+    );
+    sliceCheck(
+      BCP_SOURCE,
+      BCP_EMBED,
+      BCP_EMBED_TEXT,
+      "parts' local embedding container",
+    );
+    sliceCheck(
+      BCP_SOURCE,
+      BCP_LEAF_RANGE,
+      '<S id="piece.leaf">Leaf line.</S>',
+      "piece.leaf's whole construct",
+    );
+    sliceCheck(
+      BCI_SOURCE,
+      BCI_GHOST,
+      BCI_GHOST_TEXT,
+      "imp's ghost embedding container",
+    );
+    sliceCheck(
+      BCI_SOURCE,
+      BCI_EM_WINDOW,
+      "<em>stray content</em>",
+      "imp's invalid element",
+    );
+    for (const [what, actual, expected] of [
+      [
+        "host reproduction",
+        reproduceMarkdown(
+          BCH_SOURCE,
+          BC_HOST_SPANS,
+          BC_EXPANSIONS,
+          "T11.4-6 fixture self-check (host)",
+        ),
+        BC_EXPECTED_HOST_MD,
+      ],
+      [
+        "parts reproduction",
+        reproduceMarkdown(
+          BCP_SOURCE,
+          BC_PARTS_SPANS,
+          BC_EXPANSIONS,
+          "T11.4-6 fixture self-check (parts)",
+        ),
+        BC_EXPECTED_PARTS_MD,
+      ],
+    ] as const) {
+      if (actual !== expected) {
+        fail(
+          `T11.4-6 fixture self-check — ${what}: the oracle over the ` +
+            `staged spans must reproduce the hand-derived compiled output ` +
+            `(a harness staging error, not a product failure)\n` +
+            `  actual:   ${JSON.stringify(actual)}\n` +
+            `  expected: ${JSON.stringify(expected)}`,
+        );
+      }
+    }
+
+    // --- The finding-free emission workspace: classification and
+    // reproduction from the view alone.
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": BC_EMIT_CONFIG,
+          [BC_HOST_FILE]: BCH_SOURCE,
+          [BC_PARTS_FILE]: BCP_SOURCE,
+        },
+      });
+      try {
+        await buildOk(
+          product,
+          workspace,
+          "T11.4-6 staging `build` (emission enabled): the workspace is " +
+            "finding-free, so build succeeds and emits specs/host.md and " +
+            "specs/parts.md next to their sources (SPEC 12.1, 13.2, 7.3)",
+        );
+
+        const context =
+          "T11.4-6 bare `view` (the finding-free emission workspace)";
+        const result = await expectExit(
+          product,
+          workspace,
+          ["view"],
+          0,
+          `${context} — complete and finding-free, so exit 0 (SPEC 11.2)`,
+        );
+        const report = decodeViewReport(
+          parseJsonStdout(
+            result,
+            `${context} — a single JSON document is the only output form, ` +
+              `with or without --json (SPEC 11)`,
+          ),
+          { text: false },
+          context,
+        );
+        assertSameJson(
+          report.findings,
+          [],
+          `${context}: a finding-free domain — the findings member is [], ` +
+            `never null (SPEC 11.2, 12.7)`,
+        );
+        assertSameJson(
+          report.views.map((view) => view.file),
+          [BC_HOST_FILE, BC_PARTS_FILE],
+          `${context} — every discovered spec source is viewed, per-file ` +
+            `views in byte order of workspace-relative path (SPEC 11.4)`,
+        );
+        const hostView = report.views[0]!;
+        const partsView = report.views[1]!;
+        assertSameJson(
+          projectClassifyShape(hostView.root),
+          BC_HOST_TREE,
+          `${context} — host's positional tree byte-exact: construct ` +
+            `ranges, opening/closing decompositions (the whole self-closing ` +
+            `tag; neither on the root), and every attribute entry — the ` +
+            `classification's tag and attribute data (SPEC 11.4, 1.7)`,
+        );
+        assertSameJson(
+          hostView.imports,
+          BC_HOST_IMPORTS,
+          `${context} — host's import declaration with byte-exact range ` +
+            `(SPEC 11.4)`,
+        );
+        assertSameJson(
+          hostView.occurrences,
+          BC_HOST_OCCURRENCES,
+          `${context} — host's occurrence records in document order: the d ` +
+            `reference (spanning the string literal inside the tag) and ` +
+            `both embedding containers, each spanning the entire ` +
+            `{text(...)} expression (SPEC 5.7)`,
+        );
+        assertSameJson(
+          hostView.comments,
+          BC_HOST_COMMENTS,
+          `${context} — both MDX comments' byte-exact ranges, the ` +
+            `multi-line one included (SPEC 11.4)`,
+        );
+        assertSameJson(
+          projectClassifyShape(partsView.root),
+          BC_PARTS_TREE,
+          `${context} — parts' positional tree byte-exact (SPEC 11.4, 1.7)`,
+        );
+        assertSameJson(
+          [partsView.imports, partsView.comments],
+          [[], []],
+          `${context} — parts stages no import and no comment: empty lists ` +
+            `are [], never null (SPEC 12.7)`,
+        );
+        assertSameJson(
+          partsView.occurrences,
+          BC_PARTS_OCCURRENCES,
+          `${context} — parts' one local embedding records, spanning its ` +
+            `full braced container (SPEC 5.7)`,
+        );
+
+        // The classification, from the view alone: every byte annotation or
+        // content (SPEC 11.4).
+        const hostSpans = assembleAnnotationSpans(
+          hostView,
+          BCH_ROOT_RANGE.end,
+          [],
+          `${context} — specs/host.mdx classification`,
+        );
+        assertSameJson(
+          classificationOf(hostSpans),
+          classificationOf(BC_HOST_SPANS),
+          `${context}: host's annotation spans — tag decompositions, ` +
+            `import, comments, embedding containers — are exactly the ` +
+            `staged constructs, disjoint, in document order; every other ` +
+            `byte is content (SPEC 11.4, 3, 5.7)`,
+        );
+        const partsSpans = assembleAnnotationSpans(
+          partsView,
+          BCP_ROOT_RANGE.end,
+          [],
+          `${context} — specs/parts.mdx classification`,
+        );
+        assertSameJson(
+          classificationOf(partsSpans),
+          classificationOf(BC_PARTS_SPANS),
+          `${context}: parts' annotation spans are exactly the staged ` +
+            `constructs (SPEC 11.4, 3, 5.7)`,
+        );
+
+        // The reproduction: the P-2 oracle over the view-derived spans,
+        // byte-equal to the emitted output (SPEC 11.4, 3, 13.2).
+        await assertFileBytes(
+          workspace.path("specs/host.md"),
+          reproduceMarkdown(BCH_SOURCE, hostSpans, BC_EXPANSIONS, context),
+          `${context}: the compiled Markdown reproduced from the view's ` +
+            `spans through the rules of 3 — removals deleted in place, ` +
+            `construct-only lines dropped with their terminators, the ` +
+            `multi-line comment merging its lines, embedding containers ` +
+            `replaced by the targets' chain-expanded subtree texts — is ` +
+            `byte-equal to the emitted specs/host.md (SPEC 11.4, 3, 13.2)`,
+        );
+        await assertFileBytes(
+          workspace.path("specs/parts.md"),
+          reproduceMarkdown(BCP_SOURCE, partsSpans, BC_EXPANSIONS, context),
+          `${context}: the reproduction from parts' view spans is ` +
+            `byte-equal to the emitted specs/parts.md (SPEC 11.4, 3, 13.2)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- The imperfect file: classification joint with the findings.
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [BCI_FILE]: BCI_SOURCE,
+          [BCT_FILE]: BCT_SOURCE,
+        },
+      });
+      try {
+        const gateContext =
+          "T11.4-6 staging gate (`build --json`, the imperfect workspace)";
+        const gateFindings = await buildFindings(
+          product,
+          workspace,
+          gateContext,
+        );
+        assertConditionCounts(
+          gateFindings,
+          BCI_WORKSPACE_CONDITIONS,
+          `${gateContext}: exactly the staged conditions — the ` +
+            `no-occurrence embedding spelling (14.6) and the invalid ` +
+            `construct (14.16); the import, comment, and resolving ` +
+            `embedding are valid and specs/tgt.mdx is finding-free (SPEC 14)`,
+        );
+        assertUnresolvedEmbedding(
+          findingByCondition(gateFindings, "14.6", gateContext),
+          { file: BCI_FILE, range: BCI_GHOST },
+          gateContext,
+        );
+        assertFindingWindows(
+          findingByCondition(gateFindings, "14.16", gateContext),
+          [{ file: BCI_FILE, window: BCI_EM_WINDOW }],
+          `${gateContext} — the invalid construct is located within its ` +
+            `own element's construct window (SPEC 14)`,
+        );
+
+        const context = "T11.4-6 `view specs/imp.mdx` (the imperfect file)";
+        const result = await expectExit(
+          product,
+          workspace,
+          ["view", BCI_FILE],
+          1,
+          `${context} — the domain file's findings accompany, so exit 1 ` +
+            `with the full answer still emitted (SPEC 11.2)`,
+        );
+        const report = decodeViewReport(
+          parseJsonStdout(
+            result,
+            `${context} — a single JSON document is the only output form ` +
+              `(SPEC 11)`,
+          ),
+          { text: false },
+          context,
+        );
+        assertConditionCounts(
+          report.findings,
+          BCI_WORKSPACE_CONDITIONS,
+          `${context}: exactly the requested file's findings accompany ` +
+            `(SPEC 11.2, 14)`,
+        );
+        const ghostFinding = findingByCondition(
+          report.findings,
+          "14.6",
+          context,
+        );
+        assertUnresolvedEmbedding(
+          ghostFinding,
+          { file: BCI_FILE, range: BCI_GHOST },
+          `${context} — what keeps the byte classification exact on ` +
+            `imperfect files (SPEC 14, T14-8)`,
+        );
+        assertFindingWindows(
+          findingByCondition(report.findings, "14.16", context),
+          [{ file: BCI_FILE, window: BCI_EM_WINDOW }],
+          `${context} — the invalid construct gets NO view entry and is ` +
+            `located by its finding's range instead (SPEC 11.4, 14)`,
+        );
+        assertSameJson(
+          report.views.map((view) => view.file),
+          [BCI_FILE],
+          `${context} — the requested file alone is viewed (SPEC 11.4)`,
+        );
+        const impView = report.views[0]!;
+        assertSameJson(
+          projectClassifyShape(impView.root),
+          BCI_TREE,
+          `${context} — the positional tree holds the root and the ` +
+            `section alone: the invalid element contributes NO node ` +
+            `(SPEC 11.4)`,
+        );
+        assertSameJson(
+          impView.imports,
+          BCI_IMPORTS,
+          `${context} — the import entry with byte-exact range and ` +
+            `resolved target (SPEC 11.4)`,
+        );
+        assertSameJson(
+          impView.occurrences,
+          BCI_OCCURRENCES,
+          `${context} — the resolving embedding records; the ghost ` +
+            `spelling records NOTHING — no record, no unavailable target — ` +
+            `its position reaching consumers through its finding's range ` +
+            `alone (SPEC 5.7, 11.2)`,
+        );
+        assertSameJson(
+          impView.comments,
+          [BCI_COMMENT],
+          `${context} — the comment's byte-exact range (SPEC 11.4)`,
+        );
+
+        // View plus findings position every removable construct (SPEC
+        // 11.4): the ghost container enters the classification from ITS
+        // FINDING's range — the decoded location, not the staged constant.
+        const impSpans = assembleAnnotationSpans(
+          impView,
+          BCI_ROOT_RANGE.end,
+          [ghostFinding.locations[0]!.range],
+          `${context} — classification joint with the findings`,
+        );
+        assertSameJson(
+          classificationOf(impSpans),
+          classificationOf(BCI_EXPECTED_SPANS),
+          `${context}: view plus findings again position every removable ` +
+            `construct — the tag decomposition, import, and comment from ` +
+            `the view, the recording container from its occurrence record, ` +
+            `the no-occurrence container from its finding's range — ` +
+            `exactly the staged spans, disjoint, in document order; the ` +
+            `invalid element's bytes lie in NO span: a construct matching ` +
+            `no removal rule's form is content (SPEC 11.4, 11.2, 3)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+  },
+});
+
 export const section114Tests: readonly ProductTestEntry[] = [
   T11_4_1,
   T11_4_2,
   T11_4_3,
   T11_4_4,
   T11_4_5,
+  T11_4_6,
 ];

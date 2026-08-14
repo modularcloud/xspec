@@ -2830,9 +2830,60 @@ certify against FP-091's fixtures once those land.
   (certification-document fixture-manifest ×2 → FP-091; S-1's unmapped
   keys exactly {11.5, 11.6, 12.6, 12.7} → stage G); S-5, S-7, and
   certification green.]
-- [ ] FP-065 — Implement T11.4-6: byte classification reproducing compiled
+- [x] FP-065 — Implement T11.4-6: byte classification reproducing compiled
   Markdown via the P-2 oracle (`test/helpers/oracles/markdown.ts`).
   [R2 #4; TEST-SPEC §11.4]
+  [Done 2026-08-14: T11.4-6 registered in section-11.4.ts (wrapper
+  auto-declares; traceability `"T11.4-6": ["11.4"]` — in no TEST-SPEC 14
+  staging record, the T11.4-5 precedent; NOT in CONF-AVAIL scope: its
+  emission loop needs the `markdown` configuration, expressly outside that
+  scope's workspaces, so the gate-reference `build` and emitted-file reads
+  are free). Two workspaces. (1) The finding-free emission loop:
+  specs/host.mdx (import, paired/self-closing sections with `tags`+`d`
+  props, single- and multi-line comments, external + local embeddings, a
+  CRLF among LF terminators, multi-byte offsets) beside embedding target
+  specs/parts.mdx (own local embedding — the expansion chains two levels);
+  after the `build` gate (exit 0, emitting both .md files), one bare `view`
+  (exit 0, findings []) byte-asserted whole — trees with decomposition and
+  attribute entries, imports, occurrences (the `d` reference spanning its
+  string literal inside the tag; both embedding containers spanning their
+  whole {text(...)} expressions), comments — then the classification:
+  module helper `assembleAnnotationSpans` builds every annotation span from
+  the DECODED view alone (tag decompositions, imports, comments,
+  embeds-occurrence containers), asserting attribute ranges inside their
+  opening tag and the depends occurrence inside a tag span (subsumed
+  annotation bytes) and the spans disjoint/in-bounds/non-empty, compared
+  exactly to the staged span set; then `reproduceMarkdown` (byte-slices the
+  staged source at the view's spans, feeds the S-6-vetted P-2 oracle,
+  expansions = contribution-derived subtree-text constants per SPEC 1.6/3)
+  must byte-equal BOTH emitted files via assertFileBytes. A fixture
+  self-check proves oracle(staged spans) === the hand-derived expected .md
+  constants before any product invocation. (2) The imperfect file:
+  specs/imp.mdx stages exactly {14.6: a `{text("ghost")}` no-occurrence
+  spelling; 14.16: `<em>stray content</em>`} beside a valid import,
+  comment, and resolving embedding into specs/tgt.mdx, gate-pinned; `view
+  specs/imp.mdx` (exit 1) asserts the em contributes NO tree node and
+  ghost NO occurrence record, the 14.6's one location EXACTLY the full
+  braced container (assertUnresolvedEmbedding — the T14-8 pin that keeps
+  the classification exact), the 14.16 located within the em's construct
+  window; the classification is re-assembled from the view PLUS the
+  decoded 14.6 finding's range and compared exactly to the staged spans —
+  view plus findings position every removable construct, the em's bytes in
+  no span (content by form, SPEC 11.2). Verified: typecheck/format clean;
+  scratch probe (deleted) against the built product — W1 builds exit 0
+  with BOTH emitted files byte-identical to the hand-derived expectations
+  and all three expansion constants equal to `query node` subtree text
+  (the contribution derivation proven against the real §3 machinery), W2
+  stages exactly the {14.6, 14.16} multiset with the 14.16 in-window while
+  the current product locates the 14.6 at the string literal [130, 137)
+  instead of the full container [124, 139) — the diagnosed FP-064-class
+  range gap the amended SPEC 14 pins; suite red-as-diagnosed at arm 1's
+  first `view` invocation (unknown command, exit 2 — the T11.4-1-class
+  gap; the fixture self-checks and the staging build pass before it),
+  section-11.4 now 6 failed / 0 passed. `npm run test:self`: unchanged 3
+  planned mid-loop reds (certification-document fixture-manifest ×2 →
+  FP-091; S-1's unmapped keys exactly {11.5, 11.6, 12.6, 12.7} → stage G);
+  S-5, S-7, and certification green.]
 
 - [ ] FP-066 — Implement T11.5-1: total `at` resolution incl. EOF offset
   and derivability from view data. [R2 #5; TEST-SPEC §11.5] New §11.5
