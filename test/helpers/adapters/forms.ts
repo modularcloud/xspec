@@ -39,7 +39,12 @@
 //   - the rename/move preview document {"findings","mapping","files","delta"}
 //     (6.6) with the ten edit classes and the pinned orders
 //   - the unavailability-marker structural walk T12.7-1 relies on: no object
-//     of any form other than the marker carries a member named "unavailable"
+//     of any form other than the marker carries a member named "unavailable".
+//     Every public DOCUMENT decoder below runs the walk over the whole raw
+//     document before decoding members — the scoped decoders included, whose
+//     unread members the walk still covers — so the T12.7-1 walk runs over
+//     every 12.7 document the suite captures (captures go through these
+//     entry points; S-5 guards both the walk and this integration)
 
 import { Buffer, isUtf8 } from "node:buffer";
 import type {
@@ -452,6 +457,7 @@ export function decodeFindingsReport(
   doc: unknown,
   context?: string,
 ): FindingsReport {
+  assertUnavailabilityMarkerForms(doc, context);
   const site = rootSite("12.7 findings report", context);
   const obj = expectObject(doc, site);
   expectOnlyMembers(obj, ["findings"], site);
@@ -481,6 +487,7 @@ export function decodeErrorDocument(
   doc: unknown,
   context?: string,
 ): ErrorDocument {
+  assertUnavailabilityMarkerForms(doc, context);
   const site = rootSite("12.7 error document", context);
   const obj = expectObject(doc, site);
   expectOnlyMembers(obj, ["error"], site);
@@ -507,6 +514,7 @@ export function decodeVersionDocument(
   doc: unknown,
   context?: string,
 ): VersionDocument {
+  assertUnavailabilityMarkerForms(doc, context);
   const site = rootSite("12.7 version document", context);
   const obj = expectObject(doc, site);
   expectOnlyMembers(obj, ["product", "interface"], site);
@@ -600,6 +608,7 @@ export function decodeInventoryRecordedDatum(
   doc: unknown,
   context?: string,
 ): DecodedDatum<readonly PathValue[]> {
+  assertUnavailabilityMarkerForms(doc, context);
   const site = rootSite("11.6 inventory (recorded datum)", context);
   const obj = expectObject(doc, site);
   const recordedSite = at(site, "recorded");
@@ -650,6 +659,7 @@ export function decodeInventoryFindings(
   doc: unknown,
   context?: string,
 ): Finding[] {
+  assertUnavailabilityMarkerForms(doc, context);
   const site = rootSite("11.6 inventory (findings)", context);
   const obj = expectObject(doc, site);
   return decodeFindingsArray(
@@ -677,6 +687,7 @@ export function decodeInventoryAnchoring(
   doc: unknown,
   context?: string,
 ): InventoryAnchoring {
+  assertUnavailabilityMarkerForms(doc, context);
   const site = rootSite("11.6 inventory (anchoring)", context);
   const obj = expectObject(doc, site);
   return {
@@ -955,6 +966,7 @@ export function decodeInventoryResolvedMap(
   doc: unknown,
   context?: string,
 ): InventoryResolvedMap {
+  assertUnavailabilityMarkerForms(doc, context);
   const site = rootSite("11.6 inventory (resolved map)", context);
   const obj = expectObject(doc, site);
 
@@ -1146,6 +1158,7 @@ export function decodeInventoryDocument(
   doc: unknown,
   context?: string,
 ): InventoryDocument {
+  assertUnavailabilityMarkerForms(doc, context);
   const site = rootSite("11.6 inventory (document)", context);
   const obj = expectObject(doc, site);
   expectOnlyMembers(obj, INVENTORY_DOCUMENT_MEMBERS, site);
@@ -1311,6 +1324,7 @@ export function decodeOccurrencesReport(
   doc: unknown,
   context?: string,
 ): OccurrencesReport {
+  assertUnavailabilityMarkerForms(doc, context);
   const site = rootSite("12.7 occurrences document", context);
   const obj = expectObject(doc, site);
   expectOnlyMembers(obj, ["findings", "occurrences"], site);
@@ -1395,6 +1409,7 @@ function decodeAtSectionForm(value: unknown, site: DecodeSite): AtSection {
  * adapter in the path.
  */
 export function decodeAtReport(doc: unknown, context?: string): AtReport {
+  assertUnavailabilityMarkerForms(doc, context);
   const site = rootSite("12.7 at document", context);
   const obj = expectObject(doc, site);
   expectOnlyMembers(obj, ["findings", "resolution"], site);
@@ -1469,6 +1484,7 @@ export function decodeViewFilesReport(
   doc: unknown,
   context?: string,
 ): ViewFilesReport {
+  assertUnavailabilityMarkerForms(doc, context);
   const site = rootSite("12.7 view document (files)", context);
   const obj = expectObject(doc, site);
   expectOnlyMembers(obj, ["findings", "views"], site);
@@ -1782,6 +1798,7 @@ export function decodeViewReport(
   options: { readonly text: boolean },
   context?: string,
 ): ViewReport {
+  assertUnavailabilityMarkerForms(doc, context);
   const site = rootSite("12.7 view document", context);
   const obj = expectObject(doc, site);
   expectOnlyMembers(obj, ["findings", "views"], site);
@@ -2032,6 +2049,7 @@ export function decodePreviewReport(
   doc: unknown,
   context?: string,
 ): PreviewReport {
+  assertUnavailabilityMarkerForms(doc, context);
   const site = rootSite("12.7 preview document", context);
   const obj = expectObject(doc, site);
   expectOnlyMembers(obj, ["findings", "mapping", "files", "delta"], site);
@@ -2129,6 +2147,12 @@ export function decodePreviewReport(
  * object of any form other than the unavailability marker carries a member
  * named `unavailable` — every object with that member is exactly
  * `{"unavailable": true}`. Diagnoses name the offending JSON path.
+ *
+ * Every public document decoder in this module runs this walk over the
+ * whole raw document before decoding members (the scoped decoders included,
+ * whose unread members the walk still covers), so it runs over every 12.7
+ * document the suite captures (T12.7-1; S-5 guards the walk and the
+ * integration). Tests may additionally call it directly.
  */
 export function assertUnavailabilityMarkerForms(
   doc: unknown,

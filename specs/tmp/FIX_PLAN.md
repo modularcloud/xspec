@@ -3315,10 +3315,66 @@ certify against FP-091's fixtures once those land.
   now exactly {12.7} (→ stage G: FP-075..077); certification green
   (violators failing as certified).]
 
-- [ ] FP-075 — Implement T12.7-1: 12.7 value forms — range, byte-form
+- [x] FP-075 — Implement T12.7-1: 12.7 value forms — range, byte-form
   paths, the `{"unavailable": true}` uniqueness walk, finding form. Uses
   FP-001's three-state datum decode; S-5 guards that walk (FP-001).
   [R2 #9, R2 #41; TEST-SPEC §12.7] New §12.7 registry module; map `"12.7"`.
+  [Done 2026-08-14: new registry module section-12.7.ts (+ wrapper,
+  index spread, traceability "T12.7-1": ["12.7"] — the FP-016/T12.0-13
+  precedent: every staged condition's primary test lives elsewhere in
+  TEST-SPEC 14's record, so no "14"). Five arms: (A) located findings —
+  one 14.3 whose two bearers order by start within one file and one 14.9
+  (spec import cycle, bindings deliberately unused so no dependency cycle
+  rides beside) whose two participating import declarations order by file
+  bytes across files; exact code/path-null/location-file projections plus
+  containment in disjoint byte windows in the expected sequence, which
+  observes the location order by value. (B) the 14.12 finding's pinned
+  enumeration [rule, source, kind token, target] with locations []/path
+  null via `check --json`. (C) one located 14.11 whose identities must
+  name the foreign module (distinctive-stem containment, the T4.4-1
+  operationalization). (D) a review refusal (`review create` onto an
+  existing name, audit strategy — git-less) as a nonempty findings-only
+  report with every finding's `code` null (cardinality unpinned by SPEC
+  for review refusals — noted). (E, Linux-leg staging per TEST-SPEC; the
+  T11.2-3 conditional-staging discipline, no skip) a non-UTF-8 DIRECTORY
+  `specs/d<0xFF>/` — the one way an import's resolved target can be a
+  non-UTF-8 path, `./Tgt.xspec` resolving against it — holding In.mdx
+  (imports `../OK.xspec` + `./Tgt.xspec`, embeds `{text(OK.ok)}`, and an
+  id-less `<S>` — the located finding INSIDE a non-UTF-8 file; 11.2:
+  validation is parse-local) and Tgt.mdx: byte-form paths asserted
+  byte-exactly (composed from the staging bytes) at every output the 12.0
+  rule names — build's 14.1 location file and 14.19 concerned paths, the
+  occurrence's referencing file (source exactly the marker, target a
+  plain identity), the view's file members and the `./Tgt.xspec` import's
+  resolved target (the `../OK.xspec` one plain beside it), inventory
+  sources and derived module paths (exit 0 — 11.6: inventory parses no
+  sources and carries no finding but 14.23; markdown null with emission
+  disabled) — with the embed occurrence's range byte-exact (the range-form
+  value assertion). The T12.7-1 walk now runs over every 12.7 document the
+  suite captures: assertUnavailabilityMarkerForms integrated at every
+  forms.ts document-decode entry point (scoped decoders included, whose
+  unread members it covers), called explicitly on the arm-E captures, and
+  S-5 gains the integration guard (scoped inventory/view decodes reject a
+  near-marker in an unread member; exact-marker positive control).
+  Verified: typecheck/format clean; suite red-as-diagnosed at arm A's
+  first decode (the FP-001-class product gap — the product still emits
+  condition-member findings; §11 surfaces and review create are patch-new,
+  probes: occurrences/view/inventory exit 2 "unknown command", refusal
+  emits {"refused":…}, build skips invalid-path files' content 14.1);
+  staging premises proven by direct product probes (arm A: exactly one
+  old-shape 14.9 + one 14.3, the cycle located at A's declaration [31,56);
+  arm B: build 0/check 1 with exactly the one 14.12 naming rule and edge;
+  arm C: exactly one 14.11 at [103,120) within the window, message naming
+  FOREIGNMOD; arm D: create 0 then refuse 1); soundness proven by a
+  scratch conforming mock running the registered body green through all
+  five arms via entry.run(mockBinding), with eight deviation mocks each
+  failing diagnosed at the intended assertion (locations-order,
+  range-form, identities-order, no-foreign, coded-refusal, nullmarker,
+  lossy-paths, near-marker — the last caught by the integrated walk).
+  `npm run test:self`: 268 passed, planned mid-loop reds narrowed to 2 —
+  certification-document ×2 (→ FP-091); S-1 fully green (the "12.7" key
+  mapped; unmapped set now empty), S-5 and certification green (T12.7-*
+  stay certification Exclusions, no fixture scope).]
 - [ ] FP-076 — Implement T12.7-2: findings-array ordering + document forms.
   [R2 #9; TEST-SPEC §12.7]
 - [ ] FP-077 — Implement T12.7-3: the exit-2 error document, incl. the

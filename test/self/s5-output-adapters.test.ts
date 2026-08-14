@@ -3987,6 +3987,51 @@ test("S-5: the marker walk rejects near-markers anywhere in the tree, naming the
   );
 });
 
+test("S-5: the 12.7 document decoders run the marker walk over the whole document (T12.7-1)", () => {
+  // The walk is integrated at every forms.ts document-decode entry point, so
+  // it covers members a SCOPED decode otherwise leaves unread — the cases a
+  // per-member decode alone can never reject. The inventory recorded-datum
+  // decode reads only `recorded`; a near-marker in the unread `journal`
+  // member must still reject.
+  expectDiagnosed(
+    "scoped inventory decode, near-marker in an unread member",
+    () =>
+      decodeInventoryRecordedDatum(
+        { recorded: [], journal: { unavailable: "soon", note: 1 } },
+        "walk integration",
+      ),
+  );
+  // The scoped view decode reads each per-file wrapper's `file` and member
+  // presence only; a near-marker inside the unread `root` tree must still
+  // reject.
+  expectDiagnosed("scoped view decode, near-marker in an unread subtree", () =>
+    decodeViewFilesReport(
+      {
+        findings: [],
+        views: [
+          {
+            file: "specs/A.mdx",
+            root: { identity: { unavailable: false } },
+            imports: [],
+            occurrences: [],
+            comments: [],
+          },
+        ],
+      },
+      "walk integration",
+    ),
+  );
+  // Positive control: a scoped decode over a document whose only
+  // unavailable-bearing object is an exact marker passes the integrated walk
+  // (the marker is a legitimate value, never a rejection).
+  expect(
+    decodeInventoryRecordedDatum(
+      { recorded: { unavailable: true }, extra: { fine: true } },
+      "walk integration",
+    ),
+  ).toEqual({ state: "unavailable" });
+});
+
 // --- the bare edge-endpoint walk (T1.7-1) ------------------------------------
 
 test("S-5: the bare edge-endpoint walk accepts edge surfaces carrying identities alone", () => {
