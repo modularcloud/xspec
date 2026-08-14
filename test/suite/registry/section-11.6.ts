@@ -1,5 +1,5 @@
-// TEST-SPEC §11.6 (`xspec inventory`) — SUITE-56: T11.6-1, T11.6-2, T11.6-3
-// (T11.6-4 registers here as it is implemented).
+// TEST-SPEC §11.6 (`xspec inventory`) — SUITE-56: T11.6-1, T11.6-2, T11.6-3,
+// T11.6-4.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -126,10 +126,66 @@
 //   0x61 'a'), inverting under case folding, so the byte-order contract has
 //   teeth.
 //
+// T11.6-4 — no parse, no write, one finding (SPEC 11.6, 14.23, 14.14, 12.7,
+// 12.0, 13.3). Three arm groups, three workspaces:
+//
+// - imperfect workspace: sources failing every validation family — an
+//   unparseable file included — plus a garbage journal line and a corrupt
+//   session. Staging premise pinned first (the FP-016 style): `build --json`
+//   exits 1 reporting exactly the staged multiset — 14.1–14.9, 14.11, 14.15
+//   through 14.20 across MDX and TS, plus the journal line's 14.13 — one
+//   finding each, nothing beside (14.21 deliberately absent: `build` does
+//   not read sessions, SPEC 14; 14.10/14.12 are `check`-only; the record is
+//   absent, so no 14.23 anywhere). Then `inventory`, flag-less and `--json`
+//   against ONE expected document, both inside a single whole-root
+//   modifies-nothing compare (byte-compare; no refresh — graph data absent
+//   before and after, where every refreshing read would create it or die on
+//   the invalid sources): the COMPLETE ten-member document asserted exactly
+//   — every discovered source listed with its membership, the unparseable
+//   and non-`.mdx` files included; the derived map determined by
+//   configuration and discovery alone (the unparseable source's module and
+//   Markdown paths present — a product computing the map through parsing
+//   dies here); `recorded` [] (the failed build modified nothing, 12.1);
+//   the journal occupied; the corrupt session listed by name — and
+//   `findings` [] at exit 0: the staged findings are reported where their
+//   conditions assign them (the premise build; T13.3-3, T10.1-4, T12.2-2),
+//   never here, which IS the parses-no-sources/reads-no-content observation.
+//
+// - configuration errors keep precedence (14.14): missing configuration (a
+//   bare directory tree with no reachable xspec.config.ts, the T7-1
+//   operationalization) and invalid configuration (garbage TypeScript, a
+//   valid source beside it so the refusal is attributable to the
+//   configuration alone) each → exit 2 with the single 12.7 error document
+//   as the entire stdout — asserted in the flag-less form (inventory is a
+//   JSON-only surface, so JSON output is in effect without `--json`, SPEC
+//   12.0) and via `expectConfigurationError`'s `--json` form — the finding
+//   carrying the stable code `configuration-error` and a concerned path,
+//   the stderr message naming the configuration; "no inventory" is the
+//   decode itself: the error document is `{"error": …}` exactly, no
+//   inventory member beside it (12.7).
+//
+// - corrupt-record workspace: valid, built, `recorded` premise-pinned as a
+//   readable non-empty record (module and Markdown present), then the
+//   record corrupted shape-blind (T6.6-6's staging — garbage over T13.3-2's
+//   operational path set, product-written files only, H-3/H-4). Both output
+//   forms inside one whole-root compare (the corrupt state is left neither
+//   read-repaired nor replaced, 13.3): exit 1 (an answer carrying a finding
+//   and explicitly-unavailable data, 12.0), `recorded` exactly the
+//   unavailability marker — never read as empty, never fabricated —
+//   `findings` exactly one condition-23 finding (the stable code
+//   `unreadable-record` pinned through the decode's token table), concerned
+//   path the graph-data area, locations [] (no path inside the area is
+//   named, 13.3/12.7), and every other member emitted in full — deep-equal
+//   to the intact-record answer on the same workspace.
+//
 // Certification note: CERTIFICATIONS.md's Exclusions list T11.6-1 through
 // T11.6-4 ("`inventory` and `version`"), so no fixture executes these
 // bodies; the anchoring, resolved-configuration, derived-map, occupancy,
-// and listing arms are positive and byte-asserted per that entry.
+// and listing arms are positive and byte-asserted per that entry, T11.6-4's
+// no-parse/no-write negatives ride the certified compare-around machinery,
+// and every broken state T11.6-4 must ignore is positively reported from
+// the same staging by its home reporter (its premise build in-test;
+// T13.3-3, T10.1-4, T12.2-2 on their own stagings).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -146,6 +202,7 @@ import type {
 } from "../../helpers/adapters/index.js";
 import {
   GRAPH_DATA_AREA_PATH,
+  corruptGraphDataShapeBlind,
   decodeInventoryAnchoring,
   decodeInventoryDocument,
   decodeInventoryFindings,
@@ -160,10 +217,20 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
-import { runProduct } from "../../helpers/subprocess.js";
+import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { assertSameJson, buildOk, expectExit } from "./support.js";
+import {
+  assertConditionCounts,
+  assertFindingConcernsPath,
+  assertSameJson,
+  buildFindings,
+  buildOk,
+  expectConfigurationError,
+  expectErrorDocument,
+  expectExit,
+} from "./support.js";
 
 // --- fixture ------------------------------------------------------------------
 //
@@ -1111,14 +1178,15 @@ export default defineConfig({
 const JOURNAL_PATH = `${GRAPH_DATA_AREA_PATH}/journal`;
 
 /**
- * Run `inventory` and assert the T11.6-3 frame: exit 0 exactly (every
- * staging here is a complete, finding-free answer — the inventory parses no
- * sources, reads no journal or session content, and no arm corrupts the
- * record; SPEC 11.6, 12.0; H-5); exactly one JSON document as the entire
- * stdout (JSON-only, SPEC 11); the full ten-member 12.7 inventory document
- * form (H-3); `findings` [] — which IS the no-14.13/no-14.21 observation on
- * the occupancy and session stagings. Returns the decoded document and the
- * raw run for the callers' value assertions and byte scans.
+ * Run `inventory` and assert the finding-free full-document frame (T11.6-3;
+ * reused by T11.6-4's imperfect-workspace arm and intact-record premise):
+ * exit 0 exactly (a complete, finding-free answer — the inventory parses no
+ * sources, reads no journal or session content, and the calling arm has not
+ * corrupted the record; SPEC 11.6, 12.0; H-5); exactly one JSON document as
+ * the entire stdout (JSON-only, SPEC 11); the full ten-member 12.7 inventory
+ * document form (H-3); `findings` [] — which IS the no-14.13/no-14.21
+ * observation on the occupancy and session stagings. Returns the decoded
+ * document and the raw run for the callers' value assertions and byte scans.
  */
 async function expectInventoryDocument(
   product: ProductBinding,
@@ -1671,8 +1739,578 @@ const T11_6_3 = defineProductTest({
   },
 });
 
+// --- T11.6-4 ------------------------------------------------------------------
+//
+// Fixtures. The imperfect workspace's sources fail every validation family
+// (see the module header): one heavily invalid but parseable file, one
+// unparseable file, an in-file dependency cycle, two valid resolution
+// targets, a non-`.mdx` spec-group file (the extension-free glob discovers
+// it, 14.19), and a TypeScript source with the code-side reference family —
+// plus a garbage journal line and a corrupt session staged as files. The
+// configuration is valid (a configuration error would preempt everything,
+// 14.14) with emission enabled, so the derived map carries Markdown
+// destinations for every `.mdx` source, the unparseable one included.
+
+const IMPERFECT_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    grp: ["specs/*"]
+  },
+  code: {
+    impl: ["src/**/*.ts"]
+  },
+  markdown: { emit: true }
+})
+`;
+
+/**
+ * The parseable multi-family file: 14.1 (id-less section), 14.2 (top-level
+ * multi-segment ID), 14.3 (duplicated `paire`, one finding), 14.4
+ * (whitespace in a segment), 14.5 (`d` to an absent node), 14.6
+ * (`text(...)` to an absent node), 14.8 (zero-argument `text()`), 14.15
+ * (import designating no discovered spec source), 14.16 (`<div>`), 14.17
+ * (unknown prop) — each staged once.
+ */
+const IMPERFECT_MULTI = `import AUTRE from "./autre.xspec"
+import RIEN from "./inexistant.xspec"
+
+<S>
+Sans identite.
+</S>
+
+<S id="saut.niveau">
+Saute un niveau.
+</S>
+
+<S id="paire">
+Premiere.
+</S>
+
+<S id="paire">
+Seconde.
+</S>
+
+<S id="mauvais seg">
+Segment invalide.
+</S>
+
+<S id="charge" d={AUTRE.absent}>
+Dependance inconnue.
+
+{text(AUTRE.manque)}
+
+{text()}
+</S>
+
+<S id="props" inconnu="x">
+Prop inconnue.
+</S>
+
+<div>hors grammaire</div>
+`;
+
+/**
+ * The TypeScript reference family: an unresolving marker (14.7), a spec
+ * module binding used outside the sanctioned forms (14.18), and a node of
+ * one module passed to another module's `text` export (14.11) — the two
+ * imports themselves valid (SPEC 4), their targets the valid spec files.
+ */
+const IMPERFECT_CODE = `import AUTRE, { text } from "../specs/autre.xspec";
+import PUR from "../specs/pur.xspec";
+
+export function usine() {
+  AUTRE.inconnu;
+  const garde = AUTRE;
+  text(PUR.net);
+}
+`;
+
+/** In-file dependency cycle via local string references (14.9, SPEC 2.4). */
+const IMPERFECT_CYCLE = `<S id="boucle1" d={"boucle2"}>
+Premier maillon.
+</S>
+
+<S id="boucle2" d={"boucle1"}>
+Second maillon.
+</S>
+`;
+
+/** Unparseable MDX: an unclosed section tag (14.20). */
+const IMPERFECT_BROKEN = '<S id="casse">\nJamais fermee.\n';
+
+/** The corrupt session's path: a well-formed session file name (SPEC 10.1). */
+const CORRUPT_SESSION_PATH = `${GRAPH_DATA_AREA_PATH}/reviews/louche.json`;
+
+/**
+ * The staged multiset the premise `build` must report — one finding per
+ * staged construct, nothing beside: 14.21 is deliberately absent (`build`
+ * does not read sessions, SPEC 14), 14.10/14.12 are `check`-only, the
+ * configuration is valid (no 14.14), no write path is obstructed (no
+ * 14.22), and no record exists (14.23 is never `build`'s anyway). Counting
+ * keys are the token-derived `14.N` identities (support.ts), so each count
+ * pins the exact stable code string too.
+ */
+const IMPERFECT_PREMISE_CONDITIONS: Readonly<Record<string, number>> = {
+  "14.1": 1,
+  "14.2": 1,
+  "14.3": 1,
+  "14.4": 1,
+  "14.5": 1,
+  "14.6": 1,
+  "14.7": 1,
+  "14.8": 1,
+  "14.9": 1,
+  "14.11": 1,
+  "14.13": 1,
+  "14.15": 1,
+  "14.16": 1,
+  "14.17": 1,
+  "14.18": 1,
+  "14.19": 1,
+  "14.20": 1,
+};
+
+/** Not well-formed TypeScript: the invalid-configuration staging (14.14). */
+const IMPERFECT_BROKEN_CONFIG =
+  "ceci n'est pas du TypeScript ((( donc pas une configuration\n";
+
+/** Arm C's valid workspace: one source, emission on (a rich record). */
+const RECORD_EMIT_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    seul: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true }
+})
+`;
+
+/**
+ * Run flag-less `inventory` from `cwd` and assert the 14.14 precedence
+ * contract on a JSON-only surface: exit 2 exactly; stdout exactly the
+ * single 12.7 error document — JSON output is in effect without `--json`
+ * (SPEC 12.0), and the decode's single `error` member IS the no-inventory
+ * observation — its finding carrying the stable code `configuration-error`
+ * and a non-`null` concerned path (SPEC 14; the exact anchoring-form
+ * spelling is T12.7-3's assertion); and a standard-error message
+ * identifying the configuration as the failing subject (/config/i, the
+ * `expectConfigurationError` operationalization; 12.0: error messages are
+ * standard-error content, diagnostics beside the error document).
+ */
+async function expectFlaglessInventoryConfigurationError(
+  product: ProductBinding,
+  cwd: string,
+  context: string,
+): Promise<void> {
+  const result = await runProduct(product, { cwd, argv: ["inventory"] });
+  assertExitCode(
+    result,
+    2,
+    `${context} — missing or invalid configuration is a configuration ` +
+      `error, preceding the inventory: exit 2, no inventory (SPEC 14.14, ` +
+      `11.6, 12.0)`,
+  );
+  const error = expectErrorDocument(result, context);
+  if (error.code !== "configuration-error") {
+    fail(
+      `${context}: the error document's finding must carry the stable code ` +
+        `"configuration-error" (SPEC 14 condition 14, 12.7); got ` +
+        `${JSON.stringify(error.code)} (message: ` +
+        `${JSON.stringify(error.message)})`,
+    );
+  }
+  if (error.path === null) {
+    fail(
+      `${context}: a configuration error's finding carries its concerned ` +
+        `path — the configuration file, or "." for a failed upward search — ` +
+        `in the anchoring form (SPEC 14, 12.7); got null`,
+    );
+  }
+  if (!/config/i.test(result.stderr)) {
+    fail(
+      `${context}: the configuration-error message on stderr must identify ` +
+        `the configuration as the failing subject (SPEC 14.14; 12.0: error ` +
+        `messages are standard-error content) — any phrasing naming ` +
+        `xspec.config.ts or "configuration" qualifies (H-3); got ` +
+        `${summarizeResult(result)}`,
+    );
+  }
+}
+
+/**
+ * An inventory document's eight members apart from the record-supplied
+ * `recorded` datum and the `findings` that report its state — the "every
+ * other member emitted in full" projection of SPEC 14.23, built in the
+ * decoded document's member order so `assertSameJson` compares exactly.
+ */
+function inventoryApartFromRecordSupplied(
+  document: InventoryDocument,
+): Record<string, unknown> {
+  return {
+    root: document.root,
+    config: document.config,
+    configuration: document.configuration,
+    sources: document.sources,
+    derived: document.derived,
+    graphData: document.graphData,
+    journal: document.journal,
+    sessions: document.sessions,
+  };
+}
+
+const T11_6_4 = defineProductTest({
+  id: "T11.6-4",
+  title:
+    "inventory no parse, no write, one finding: on a workspace whose sources fail every validation family — an unparseable file included, the premise `build --json` exiting 1 with exactly one finding per staged construct (14.1–14.9, 14.11, 14.15–14.20 across MDX and TS, plus the garbage journal line's 14.13; no 14.21 — build reads no sessions) — with a garbage journal line and a corrupt session staged, `inventory` answers in full, finding-free, exit 0, modifying nothing (whole-root byte-compare; no refresh — graph data absent throughout): the complete ten-member document asserted exactly in the flag-less and `--json` forms against one expectation — every discovered source listed with its membership (the unparseable and non-`.mdx` files included), the derived map determined by configuration and discovery alone (the unparseable source's module and Markdown paths present), `recorded` [], the journal occupied, the corrupt session listed by name — those findings reported where their conditions assign them, never here; configuration errors keep precedence: missing and invalid configuration each exit 2 with the single 12.7 error document as the entire stdout (stable code `configuration-error`, concerned path present, stderr naming the configuration), flag-less — a JSON-only surface — and with `--json` alike, no inventory beside the error member; the one finding it ever carries: with the record corrupted shape-blind (T6.6-6's staging) after a pinned readable-record premise, `recorded` is exactly the unavailability marker — never read as empty — beside exactly one condition-23 finding (stable code `unreadable-record`, concerned path the graph-data area, locations []: no path inside the area is named), exit 1, every other member emitted in full (deep-equal to the intact-record answer), the corrupt state left unmodified in a whole-root compare (SPEC 11.6, 14.23, 14.14, 14, 12.7, 12.0, 13.3, 12.1, 11)",
+  run: async (product) => {
+    // --- arm A: the imperfect workspace ------------------------------------
+    const imperfect = await TestWorkspace.create({
+      files: {
+        [CONFIG_FILE]: IMPERFECT_CONFIG,
+        "specs/anneau.mdx": IMPERFECT_CYCLE,
+        "specs/autre.mdx": '<S id="autre">\nCible saine.\n</S>\n',
+        "specs/casse.mdx": IMPERFECT_BROKEN,
+        "specs/multi.mdx": IMPERFECT_MULTI,
+        "specs/note.txt": "pas une source xspec\n",
+        "specs/pur.mdx": '<S id="net">\nCible nette.\n</S>\n',
+        "src/impl.ts": IMPERFECT_CODE,
+        [JOURNAL_PATH]: "pas une entree de journal valide\n",
+        [CORRUPT_SESSION_PATH]: "{{{ pas du JSON — session corrompue\n",
+      },
+    });
+    try {
+      // Staging premise (SPEC 14; the Exclusions' positively-reported
+      // condition): the workspace genuinely fails every staged family — the
+      // premise build reports exactly one finding per staged construct and
+      // nothing beside. 14.21 is absent (build reads no sessions), which is
+      // itself part of the "reported where their conditions assign them"
+      // contract this arm rides.
+      const premise = await buildFindings(
+        product,
+        imperfect,
+        "T11.6-4 — staging premise: `build --json` on the imperfect " +
+          "workspace exits 1 reporting the staged validation findings " +
+          "(SPEC 12.1, 14)",
+      );
+      assertConditionCounts(
+        premise,
+        IMPERFECT_PREMISE_CONDITIONS,
+        "T11.6-4 — staging premise: exactly the staged multiset — every " +
+          "validation family fails once, none masked away, none phantom, " +
+          "no 14.21 (build reads no sessions) and no 14.10/14.12 " +
+          "(check-only) (SPEC 14)",
+      );
+
+      // The complete expected document, asserted exactly (SPEC 11.6, 12.7):
+      // the answer is full — sources and derived from configuration and
+      // discovery alone, the record-supplied datum the empty record (the
+      // failed premise build modified nothing, 12.1), durables by presence
+      // and name alone — and finding-free at exit 0.
+      const expectedImperfect: InventoryDocument = {
+        findings: [],
+        root: ".",
+        config: CONFIG_FILE,
+        configuration: {
+          specs: [{ name: "grp", globs: ["specs/*"] }],
+          code: [{ name: "impl", globs: ["src/**/*.ts"] }],
+          markdown: { emit: true, outDir: null },
+          coverage: [],
+          policy: [],
+        },
+        sources: [
+          {
+            path: "specs/anneau.mdx",
+            groups: [{ name: "grp", kind: "spec" }],
+          },
+          { path: "specs/autre.mdx", groups: [{ name: "grp", kind: "spec" }] },
+          // The unparseable file IS a discovered source with a membership:
+          // discovery is glob-driven, never parse-driven (SPEC 7, 11.6).
+          { path: "specs/casse.mdx", groups: [{ name: "grp", kind: "spec" }] },
+          { path: "specs/multi.mdx", groups: [{ name: "grp", kind: "spec" }] },
+          { path: "specs/note.txt", groups: [{ name: "grp", kind: "spec" }] },
+          { path: "specs/pur.mdx", groups: [{ name: "grp", kind: "spec" }] },
+          { path: "src/impl.ts", groups: [{ name: "impl", kind: "code" }] },
+        ],
+        derived: [
+          {
+            source: "specs/anneau.mdx",
+            module: "specs/anneau.xspec.ts",
+            markdown: "specs/anneau.md",
+          },
+          {
+            source: "specs/autre.mdx",
+            module: "specs/autre.xspec.ts",
+            markdown: "specs/autre.md",
+          },
+          // Determined by configuration and discovery, existing whether or
+          // not generation could ever succeed: the unparseable source's
+          // derived paths are present — a product computing the map by
+          // parsing sources fails here (SPEC 11.6, 13.1).
+          {
+            source: "specs/casse.mdx",
+            module: "specs/casse.xspec.ts",
+            markdown: "specs/casse.md",
+          },
+          {
+            source: "specs/multi.mdx",
+            module: "specs/multi.xspec.ts",
+            markdown: "specs/multi.md",
+          },
+          // The spec-group file without `.mdx` (14.19): both structurally
+          // absent (SPEC 11.6, 13.1, 12.7).
+          { source: "specs/note.txt", module: null, markdown: null },
+          {
+            source: "specs/pur.mdx",
+            module: "specs/pur.xspec.ts",
+            markdown: "specs/pur.md",
+          },
+        ],
+        // Empty before any generation — the premise build failed and
+        // modified nothing (SPEC 12.1), so the record is the empty list:
+        // never null, never the unavailability marker (SPEC 11.6, 12.7).
+        recorded: { state: "value", value: [] },
+        graphData: GRAPH_DATA_AREA_PATH,
+        // Occupancy by presence alone — the garbage content is never read,
+        // no 14.13 from the inventory (SPEC 11.6, 6.1).
+        journal: { path: JOURNAL_PATH, occupied: true },
+        // Selected by name alone — the corrupt content is never read, no
+        // 14.21 from the inventory (SPEC 11.6, 10.1).
+        sessions: [CORRUPT_SESSION_PATH],
+      };
+
+      // Both output forms inside ONE whole-root modifies-nothing compare:
+      // the inventory never refreshes or writes anything (SPEC 11.6) —
+      // graph data stays absent (every refreshing read would create it or
+      // die on the invalid sources, 13.3), sources, journal, and session
+      // bytes stay put.
+      await assertLeavesUnchanged(
+        imperfect.root,
+        async () => {
+          for (const argv of [
+            ["inventory"],
+            ["inventory", "--json"],
+          ] as const) {
+            const context =
+              `T11.6-4 — \`${argv.join(" ")}\` on the imperfect workspace: ` +
+              `the inventory parses no sources and reads no journal or ` +
+              `session content — the answer is complete, finding-free, ` +
+              `exit 0, the staged findings reported where their conditions ` +
+              `assign them, never here (SPEC 11.6, 12.0)`;
+            const { document } = await expectInventoryDocument(
+              product,
+              imperfect.root,
+              argv,
+              context,
+            );
+            assertSameJson(
+              document,
+              expectedImperfect,
+              `${context} — the complete ten-member document, exactly: ` +
+                `every discovered source with its membership (unparseable ` +
+                `and non-.mdx files included), the configuration-determined ` +
+                `derived map, recorded [], the occupied journal, the ` +
+                `corrupt session listed by name (SPEC 11.6, 12.7)`,
+            );
+          }
+        },
+        "T11.6-4 — `inventory` on the imperfect workspace modifies nothing " +
+          "and never refreshes: graph data absent before and after, every " +
+          "source, journal, and session byte untouched (SPEC 11.6, 13.3)",
+      );
+    } finally {
+      await imperfect.dispose();
+    }
+
+    // --- arm B: configuration errors keep precedence (14.14) ---------------
+    const missing = await TestWorkspace.create({});
+    try {
+      await expectFlaglessInventoryConfigurationError(
+        product,
+        missing.root,
+        "T11.6-4 — flag-less `inventory` with no reachable configuration " +
+          "(the upward search exhausts): the error document on a JSON-only " +
+          "surface, no inventory (SPEC 14.14, 11.6, 12.0, 12.7)",
+      );
+      await expectConfigurationError(
+        product,
+        missing,
+        ["inventory"],
+        "T11.6-4 — `inventory --json` with no reachable configuration: " +
+          "exit 2, the single 12.7 error document, no inventory (SPEC " +
+          "14.14, 11.6, 12.0)",
+      );
+    } finally {
+      await missing.dispose();
+    }
+
+    const invalid = await TestWorkspace.create({
+      files: {
+        [CONFIG_FILE]: IMPERFECT_BROKEN_CONFIG,
+        // A valid source beside the broken configuration: the refusal is
+        // attributable to the configuration alone, and "no inventory" has
+        // content an answer would have carried.
+        "specs/a.mdx": ANCHOR_SOURCE,
+      },
+    });
+    try {
+      await expectFlaglessInventoryConfigurationError(
+        product,
+        invalid.root,
+        "T11.6-4 — flag-less `inventory` with invalid configuration (not " +
+          "well-formed TypeScript): the error document on a JSON-only " +
+          "surface, no inventory (SPEC 14.14, 14 condition 14, 11.6, 12.0)",
+      );
+      await expectConfigurationError(
+        product,
+        invalid,
+        ["inventory"],
+        "T11.6-4 — `inventory --json` with invalid configuration: exit 2, " +
+          "the single 12.7 error document, no inventory (SPEC 14.14, 11.6)",
+      );
+    } finally {
+      await invalid.dispose();
+    }
+
+    // --- arm C: the one finding it ever carries (14.23) --------------------
+    const record = await TestWorkspace.create({
+      files: {
+        [CONFIG_FILE]: RECORD_EMIT_CONFIG,
+        "specs/seul.mdx": '<S id="seul">\nContenu stable.\n</S>\n',
+      },
+    });
+    try {
+      await buildOk(
+        product,
+        record,
+        "T11.6-4 — the corrupt-record workspace is valid, so `build` " +
+          "succeeds and records the generated derived paths (SPEC 12.1, " +
+          "13.3)",
+      );
+      const intactContext =
+        "T11.6-4 — `inventory` on the intact record: the readable-record " +
+        "premise the corruption then destroys (SPEC 11.6, 13.3)";
+      const intact = await expectInventoryDocument(
+        product,
+        record.root,
+        ["inventory"],
+        intactContext,
+      );
+      // Premise: the record-supplied datum is a readable, non-empty record
+      // — module and Markdown pinned present — so the corrupt-state
+      // "unavailable" below is a real state change, and "never read as
+      // empty" has a non-empty record to contrast against.
+      assertRecordedDerivedPaths(
+        intact.document.recorded,
+        {
+          pinned: ["specs/seul.md", "specs/seul.xspec.ts"],
+          specSources: ["specs/seul.mdx"],
+        },
+        `${intactContext} — the generated module and emitted Markdown ` +
+          `recorded, every further entry an attributable companion`,
+      );
+
+      // Corrupt the product-written record shape-blind (TEST-SPEC T6.6-6;
+      // H-3 adapter — garbage over T13.3-2's operational path set, files
+      // present but readable as no record).
+      await corruptGraphDataShapeBlind(
+        record.root,
+        "T11.6-4 — corrupt-record staging",
+      );
+
+      // Both output forms inside ONE whole-root compare: the inventory
+      // leaves the corrupt state neither read-repaired nor replaced (SPEC
+      // 11.6, 13.3 — only a successful build or finishing regeneration
+      // replaces it).
+      await assertLeavesUnchanged(
+        record.root,
+        async () => {
+          for (const argv of [
+            ["inventory"],
+            ["inventory", "--json"],
+          ] as const) {
+            const context =
+              `T11.6-4 — \`${argv.join(" ")}\` with the record corrupted ` +
+              `shape-blind: recorded explicitly unavailable beside the one ` +
+              `condition-23 finding, every other member in full (SPEC ` +
+              `14.23, 11.6)`;
+            const result = await expectExit(
+              product,
+              record,
+              argv,
+              1,
+              `${context} — an answer carrying a finding and ` +
+                `explicitly-unavailable data exits 1, emitted in full ` +
+                `(SPEC 14.23, 12.0)`,
+            );
+            const document = decodeInventoryDocument(
+              parseJsonStdout(
+                result,
+                `${context} — inventory is JSON-only: a single JSON ` +
+                  `document as the entire stdout (SPEC 11, 12.0)`,
+              ),
+              context,
+            );
+            // The one finding an inventory answer ever carries: exactly one
+            // condition-23 finding. The counting key "14.23" is the
+            // token-derived identity, so this pins the stable code
+            // `unreadable-record` exactly (an unknown or misspelled code
+            // fails the decode; a different token counts elsewhere).
+            assertConditionCounts(
+              document.findings,
+              { "14.23": 1 },
+              `${context} — exactly the one condition-23 finding (stable ` +
+                `code unreadable-record) — the workspace is otherwise ` +
+                `clean, and the inventory meets no other condition (SPEC ` +
+                `14.23, 11.6, 14)`,
+            );
+            const finding = document.findings[0]!;
+            assertFindingConcernsPath(
+              finding,
+              GRAPH_DATA_AREA_PATH,
+              `${context} — the concerned path is the graph-data area, the ` +
+                `.xspec directory spelled workspace-relative with no ` +
+                `trailing separator (SPEC 14.23, 11.6)`,
+            );
+            assertSameJson(
+              finding.locations,
+              [],
+              `${context} — no path inside the area is named: the record's ` +
+                `layout is deliberately unenumerated (SPEC 14.23, 13.3), ` +
+                `and a path-concerned condition is unlocated — locations ` +
+                `[] (SPEC 12.7)`,
+            );
+            assertSameJson(
+              document.recorded,
+              { state: "unavailable" },
+              `${context} — the record-supplied datum is exactly the ` +
+                `unavailability marker: never fabricated, never read as an ` +
+                `empty record (the intact premise recorded real paths, so ` +
+                `[] here would be a fabrication) (SPEC 14.23, 11.6, 12.7)`,
+            );
+            assertSameJson(
+              inventoryApartFromRecordSupplied(document),
+              inventoryApartFromRecordSupplied(intact.document),
+              `${context} — every other member emitted in full: the ` +
+                `anchoring, configuration, sources, derived map, area, ` +
+                `journal, and sessions equal to the intact-record answer ` +
+                `on this same workspace (SPEC 14.23, 11.6)`,
+            );
+          }
+        },
+        "T11.6-4 — `inventory` on the corrupt record modifies nothing: the " +
+          "corrupt state is left neither read-repaired nor replaced, every " +
+          "byte untouched (SPEC 11.6, 13.3, 14.23)",
+      );
+    } finally {
+      await record.dispose();
+    }
+  },
+});
+
 export const section116Tests: readonly ProductTestEntry[] = [
   T11_6_1,
   T11_6_2,
   T11_6_3,
+  T11_6_4,
 ];

@@ -3158,9 +3158,57 @@ certify against FP-091's fixtures once those land.
   (certification-document ×2 → FP-091; S-1 unmapped {12.6, 12.7} → stage
   G); certification green (violators failing as certified). FP-072 builds
   T11.6-4 on this module and decoder.]
-- [ ] FP-072 — Implement T11.6-4: no-parse/no-write/one-finding
+- [x] FP-072 — Implement T11.6-4: no-parse/no-write/one-finding
   (condition-23, `recorded` unavailable). [R2 #6; TEST-SPEC §11.6, SPEC
   14.23]
+  [Done 2026-08-14: T11.6-4 registered in section-11.6.ts (SUITE-56), three
+  arm groups on FP-071's full-document decoder. Imperfect workspace (sources
+  failing every validation family + garbage journal line + corrupt session
+  `.xspec/reviews/louche.json`): staging premise pinned first, FP-016 style
+  — `build --json` exit 1 with exactly the staged multiset {14.1–14.9,
+  14.11, 14.13, 14.15–14.20, one each} across MDX and TS (no 14.21 — build
+  reads no sessions; no 14.10/14.12 — check-only), probe-confirmed
+  byte-for-byte against the real product's build on the identical staging;
+  then flag-less and `--json` inventory against ONE expected document inside
+  a single whole-root `assertLeavesUnchanged` — the complete ten-member
+  document asserted exactly (unparseable casse.mdx listed in sources AND
+  carrying module/markdown in derived — discovery/configuration-determined,
+  the parse-driven-product discriminator; note.txt null/null; recorded []
+  after the failed build, 12.1; journal occupied true; the corrupt session
+  listed by name), findings [] at exit 0 realizing "reported where their
+  conditions assign them, never here". Config-precedence arm: missing (bare
+  tree, T7-1 operationalization) and invalid (garbage TS beside a valid
+  source) each asserted flag-less (JSON-only surface — new local helper
+  `expectFlaglessInventoryConfigurationError`: exit 2, error document,
+  stable code `configuration-error`, non-null concerned path, /config/i
+  stderr) and via `expectConfigurationError` with `--json`; "no inventory"
+  is the decode's single-`error`-member enforcement. Corrupt-record arm:
+  valid built workspace, intact-record premise via `assertRecordedDerivedPaths`
+  (module+Markdown pinned), `corruptGraphDataShapeBlind` (T6.6-6's shared
+  staging), then both output forms inside one whole-root compare — exit 1,
+  exactly {"14.23": 1} (the token table pins `unreadable-record`),
+  concerned path `.xspec`, locations [], `recorded` exactly
+  {state:"unavailable"} (never read as empty), and every other member
+  deep-equal to the intact answer via `inventoryApartFromRecordSupplied`.
+  Traceability "T11.6-4": ["11.6", "14"] (TEST-SPEC 14's primary-test
+  record lists T11.6-4 under 14.23; 14.14/12.7/13.3/12.1 context, home
+  coverage elsewhere). In CERTIFICATIONS.md's Exclusions, no fixture scope.
+  Verified: typecheck/format clean; suite red-as-diagnosed at the premise
+  build's form-exact findings decode (the FP-001-class product gap — the
+  product still emits `condition`-member findings; inventory itself is
+  still unknown-command exit 2, the T11.6-1..-3 diagnosis); soundness
+  proven by a scratch mock implementing the 11.6 projection independently
+  (config extraction + own glob matcher + discovery walk + derived/record/
+  session arithmetic, record unavailability by actual parse failure; the
+  premise findings hardcoded in 12.7 form/pinned order, their multiset
+  anchored by the real-product probe) — the whole registered body ran green
+  against it via `entry.run(mockBinding)`; teeth probed via seven mock
+  deviations (read-empty, session-content, refresh, parse-derived,
+  no-precedence, concern-inside, repair), each failing diagnosed at the
+  intended assertion. `npm run test:self`: unchanged 3 planned mid-loop
+  reds (certification-document ×2 → FP-091; S-1 unmapped {12.6, 12.7} →
+  stage G), 264 passed, certification green (violators failing as
+  certified).]
 
 - [ ] FP-073 — Implement T12.0-13: multi-`#` operand malformedness vs `#`
   in `<file>`/`--file` values (`specs/a#b.mdx` staging). [R2 #7; TEST-SPEC

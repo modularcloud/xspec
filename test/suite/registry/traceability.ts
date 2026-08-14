@@ -324,6 +324,12 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // listing arms assert findings [] — no numbered condition is asserted, so
   // no "14" (the T11.6-2 precedent).
   "T11.6-3": ["11.6"],
+  // T11.6-4: asserts numbered conditions — the premise build's
+  // every-family multiset and the condition-23 finding (TEST-SPEC 14's
+  // primary-test record lists T11.6-4 under 14.23) — so "14" joins the
+  // home passage; 14.14/12.7/13.3/12.1 are carriage context with home
+  // coverage at T7-*/T12.7-*/T13.3-*/T12.1-*.
+  "T11.6-4": ["11.6", "14"],
   "T12.0-1": ["12.0"],
   "T12.0-2": ["12.0"],
   "T12.0-3": ["12.0"],
