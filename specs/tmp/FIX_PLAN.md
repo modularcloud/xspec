@@ -3210,9 +3210,61 @@ certify against FP-091's fixtures once those land.
   stage G), 264 passed, certification green (violators failing as
   certified).]
 
-- [ ] FP-073 — Implement T12.0-13: multi-`#` operand malformedness vs `#`
+- [x] FP-073 — Implement T12.0-13: multi-`#` operand malformedness vs `#`
   in `<file>`/`--file` values (`specs/a#b.mdx` staging). [R2 #7; TEST-SPEC
   §12.0] Registry `section-12.0-i.ts` or `-ii.ts`; map `"12.0"`.
+  [Done 2026-08-14: T12.0-13 registered in section-12.0-ii.ts (SUITE-42) on
+  one workspace — valid specs/OK.mdx beside specs/a#b.mdx (content
+  condition-free; multi-byte prefix; section `pa` spelled so the multi-`#`
+  operand `specs/a#b.mdx#pa` is a last-`#`-split trap: both halves name
+  real staged things). Staging premise FP-016 style: `build --json` exit 1
+  with exactly one pinned 14.19 ({invalid-source-path, locations [], path
+  specs/a#b.mdx}), whole-root compare. Malformed arms: the entry's literal
+  `a#b#c` and the trap spelling, each on `show`, `query node`,
+  `occurrences --to`, and both `move` operand sides (destination = the
+  T6.5-4 dead-letter spelling, `#` in the section form's target-file part;
+  moves in whole-root modifies-nothing compares) — each exit 2 via the
+  FP-002 protocol (single 12.7 error document under `--json`, stderr
+  nonempty), the usage error preceding the failing workspace's findings
+  (12.0). Whole-path arms: `view specs/a#b.mdx` → exit 1, exactly its one
+  per-file view (membership holds — never a specs/a + b.mdx pair, which
+  would be exit 2 unknown file), tree projection pinned with every node
+  identity the unavailability marker; `at specs/a#b.mdx 0` → exit 1, root
+  construct + marker, occurrence null; `occurrences --file specs/a#*` →
+  exit 1 with exactly the 14.19 (domain membership = the pattern matched)
+  against the matching-nothing control `specs/zz#*` (exit 0, empty,
+  finding-free, 11.3). Traceability "T12.0-13": ["12.0"] (FP-016
+  precedent: in no TEST-SPEC 14 staging record — the premise 14.19 rides
+  staging integrity, the T11.2-3 precedent; 11.2-11.5/12.7/6.5 carriage
+  context, home coverage elsewhere). In CERTIFICATIONS.md's Exclusions
+  only, no fixture scope. Verified: typecheck/format clean; suite
+  red-as-diagnosed at the premise build's form-exact findings decode (the
+  FP-001-class gap — the product emits condition-member findings;
+  section-12.0-ii 3→4 failed / 3 passed, the other three the pre-existing
+  T12.0-9/-10/-12 reds); every downstream arm probed against the built
+  product: the show/query-node multi-`#` arms exit 1 (the gated
+  invalid-workspace report — the product runs no multi-`#` value check,
+  the FP-039-noted precedence-gap family), `occurrences`/`view`/`at` exit
+  2 unknown-command (patch-new surface; the --to arms' exit-2 coincidence
+  still fails at the absent error document, FP-002-class), the move
+  destination arm exit 1 (the product proceeds into the invalid-workspace
+  refusal — exactly the accepting-product path the arm discriminates), the
+  move origin arm exit 2 "unknown file 'specs/a'" (first-`#` split)
+  failing at the absent error document — all probes modifying nothing.
+  Soundness proven by a scratch conforming mock (config extraction + own
+  glob matcher + discovery walk + 14.19 arithmetic + byte-offset MDX
+  section/attribute scan) running the registered body green via
+  entry.run(mockBinding), with eight deviation mocks each failing at the
+  intended assertion: split-last (first --to arm's exit code),
+  split-last-checked (the trap arm alone catches a product rejecting only
+  unresolvable multi-`#` spellings), no-error-doc (the error-document
+  decode), view-split (view membership exit), glob-split (occurrences
+  --file exit), move-writes (the whole-root compare),
+  identity-over-invalid (the tree projection), extra-finding-attach (the
+  control's exit 0). `npm run test:self`: unchanged 3 planned mid-loop
+  reds (certification-document ×2 → FP-091; S-1 unmapped {12.6, 12.7} →
+  stage G), 264 passed, certification green (violators failing as
+  certified).]
 
 - [ ] FP-074 — Implement T12.6-1 and T12.6-2: the `version` command.
   [R2 #8; TEST-SPEC §12.6] Form-exact `{"product","interface"}` with

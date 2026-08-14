@@ -1,5 +1,5 @@
 // TEST-SPEC §12.0 II (global command conventions, second half) — SUITE-42:
-// T12.0-7, T12.0-8, T12.0-9, T12.0-10, T12.0-11, T12.0-12.
+// T12.0-7, T12.0-8, T12.0-9, T12.0-10, T12.0-11, T12.0-12, T12.0-13.
 //
 // T12.0-10's rename/move and baseline arms stay cross-references in
 // TEST-SPEC ("Rename/move and baseline arms: T6.4-4/T6.5-5 (existence,
@@ -77,18 +77,43 @@
 //   enclosing git repository (walked to the filesystem root), thrown as a
 //   harness staging error — an ambient repository would mask a product that
 //   wrongly requires git.
+// - T12.0-13 stages the entry's `specs/a#b.mdx` on every platform (`#` is a
+//   legal file-name byte on every filesystem the harness supports — the
+//   T11.2-3 operationalization of the entry's "(Linux leg)" note, which
+//   exists for that entry's non-UTF-8 siblings, staged nowhere in this
+//   test — so no platform skips it, H-9). Its multi-`#` spellings pair the
+//   entry's literal `a#b#c` with `specs/a#b.mdx#pa`, whose last-`#` split
+//   names a DISCOVERED file plus a SPELLED id: a product splitting at the
+//   last `#` instead of rejecting the value proceeds into the gated read /
+//   move machinery and answers exit 1 on this failing workspace — an
+//   observably different exit — while the first-`#` split's unknown-file
+//   error stays inside exit class 2 and is discriminated by T12.0-10's
+//   valid-twin machinery, not re-staged here. "Malformed value → exit 2" is
+//   asserted with the FP-002 protocol (single 12.7 error document under
+//   JSON output, stderr message present); the no-configuration-load half of
+//   malformed-value precedence is T12.0-10's within-class-2 arm.
 
 import { Buffer } from "node:buffer";
 import * as path from "node:path";
 import {
   assertReportMentions,
+  decodeAtReport,
   decodeCoverageReport,
   decodeExportReport,
   decodeFindingsReport,
   decodeNextReport,
+  decodeOccurrencesReport,
   decodeReachableReport,
+  decodeViewReport,
 } from "../../helpers/adapters/index.js";
-import type { ExportReport, Finding } from "../../helpers/adapters/index.js";
+import type {
+  ExportReport,
+  Finding,
+  PathValue,
+  SourceRange,
+  ViewAttributeEntry,
+  ViewNode,
+} from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
   assertExitCode,
@@ -103,6 +128,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import {
   assertDirectoriesEqual,
+  assertLeavesUnchanged,
   diffSnapshots,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
@@ -2416,6 +2442,534 @@ const T12_0_12 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T12.0-13 — `#` in operands
+// ---------------------------------------------------------------------------
+//
+// SPEC 12.0: `<node>` and `<graph-node>` values are identities in the form of
+// 1.5, their `#` splitting path from id or unit, and the split applies
+// equally to an operand spelled `<file>#<id>` (6.5); at most one `#` is
+// well-formed in any such value — 11.3 pins the same bound for `--to` — so a
+// spelling containing more than one `#` is a malformed value, a usage error,
+// and the split is never ambiguous. A bare `<file>` operand and a `--file`
+// glob are instead a whole path or pattern: `#` has no delimiter role in
+// them, so a `#`-containing spelling names the discovered file of that
+// invalid path (14.19, 11.4), never a `path#id` pair.
+//
+// One workspace serves both halves: valid `specs/OK.mdx` (the move origin
+// and valid-side contrast) beside `specs/a#b.mdx` — the entry's literal
+// name, its content deliberately condition-free (well-formed unique id `pa`,
+// multi-byte prose prefix shifting every later byte offset, SPEC 1.7) so the
+// staging premise `build --json` reports EXACTLY one 14.19 and every later
+// observation is attributable to the path alone. The workspace failing
+// `build` is itself load-bearing twice over: the malformed-value exit 2 must
+// precede the gated report (12.0 — argument checks precede the invalid-
+// workspace report), and a product that instead splits `specs/a#b.mdx#pa`
+// at the last `#` finds a discovered file whose spelled identities include
+// `pa`, passes its parse-local argument check, and answers the gated report
+// exit 1 — the sharpest observable divergence from the required exit 2.
+// The `--file` control `specs/zz#*` (a `#`-containing pattern matching
+// nothing) pins the other side: the empty admitted set is an empty,
+// finding-free answer, exit 0 (11.3), so the exit-1-with-14.19 answer on
+// `specs/a#*` is attributable to the pattern MATCHING the invalid path.
+
+/**
+ * Running byte-offset fixture assembler (the T5.7-2/T1.7-2 discipline;
+ * the module-local class of section-11.2/-11.4/-11.5): `add` appends a
+ * segment and returns its byte range, `attr` an attribute segment as the
+ * expected `{name, range, text}` view entry (SPEC 11.4). Every expected
+ * offset is composed from the same parts the staged file is.
+ */
+class ByteFixture {
+  private readonly parts: string[] = [];
+  private bytes = 0;
+
+  get pos(): number {
+    return this.bytes;
+  }
+
+  get source(): string {
+    return this.parts.join("");
+  }
+
+  add(segment: string): SourceRange {
+    const start = this.bytes;
+    this.parts.push(segment);
+    this.bytes += Buffer.byteLength(segment, "utf8");
+    return { start, end: this.bytes };
+  }
+
+  attr(name: string, text: string): ViewAttributeEntry {
+    return { name, range: this.add(text), text };
+  }
+}
+
+/** The 12.7 unavailability marker, as decoded (one-datum state). */
+const UNAVAILABLE = { unavailable: true } as const;
+
+/** Fixture self-check (T5.7-2 discipline): a claimed range slices the staged bytes to exactly `expected` — before the product is ever invoked. */
+function sliceCheck(
+  source: string,
+  range: SourceRange,
+  expected: string,
+  what: string,
+): void {
+  const actual = Buffer.from(source, "utf8")
+    .subarray(range.start, range.end)
+    .toString("utf8");
+  if (actual !== expected) {
+    throw new Error(
+      `section-12.0-ii fixture self-check: ${what} — expected the range ` +
+        `[${String(range.start)}, ${String(range.end)}) to slice to ` +
+        `${JSON.stringify(expected)}, got ${JSON.stringify(actual)}; the ` +
+        `staging arithmetic is wrong (harness defect, not a product result)`,
+    );
+  }
+}
+
+// --- specs/OK.mdx — valid path: the move origin and valid-side contrast -----
+const H13_OK_FILE = "specs/OK.mdx";
+const H13_OK_SOURCE = ['<S id="ok">', "Anchor text.", "</S>", ""].join("\n");
+
+// --- specs/a#b.mdx — the `#`-containing discovered spec source (14.19) ------
+// The path is the file's ONLY defect: `pa` is well-formed, unique, and
+// structurally valid, so the premise `build` reports exactly one 14.19. The
+// section deliberately spells `pa` so the multi-`#` operand
+// `specs/a#b.mdx#pa` below is a last-`#`-split trap: both split halves name
+// real staged things, and only rejecting the value gives exit 2.
+const H13_FILE = "specs/a#b.mdx";
+const H13 = new ByteFixture();
+H13.add("Ancré — préfixe multi-octets.\n\n");
+const H13_PA_START = H13.pos;
+H13.add("<S ");
+const H13_PA_ID = H13.attr("id", 'id="pa"');
+H13.add(">\nHash-path text.\n</S>");
+const H13_PA_RANGE: SourceRange = { start: H13_PA_START, end: H13.pos };
+H13.add("\n");
+const H13_SOURCE = H13.source;
+const H13_ROOT_RANGE: SourceRange = { start: 0, end: H13.pos };
+
+/**
+ * The asserted projection of the 14.19 finding (SPEC 14, 12.7): the stable
+ * code token, the empty locations of a path-level condition, and the
+ * concerned path. Message and identities stay unpinned (informational).
+ */
+interface PathFindingExpectation {
+  readonly code: string | null;
+  readonly locations: readonly unknown[];
+  readonly path: PathValue | null;
+}
+
+function projectPathFinding(finding: Finding): PathFindingExpectation {
+  return {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+  };
+}
+
+const H13_19: PathFindingExpectation = {
+  code: "invalid-source-path",
+  locations: [],
+  path: H13_FILE,
+};
+
+/**
+ * One malformed multi-`#` operand invocation (SPEC 12.0): run with `--json`,
+ * assert exit 2 exactly — reported whatever findings the workspace carries
+ * (the argument checks precede the gated report and source validation,
+ * 12.0) — the single 12.7 error document as the entire stdout (no report, no
+ * validation findings; H-5), and a usage error message on stderr (presence,
+ * not wording — H-3).
+ */
+async function expectMalformedOperandError(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<void> {
+  const rendered = ["xspec", ...argv, "--json"].join(" ");
+  const result = await runCli(product, workspace, [...argv, "--json"]);
+  assertExitCode(
+    result,
+    2,
+    `${context}: \`${rendered}\` — a value containing more than one \`#\` ` +
+      `is a malformed value, a usage error: exit 2, whatever findings the ` +
+      `workspace carries (SPEC 12.0)`,
+  );
+  expectErrorDocument(
+    result,
+    `${context}: \`${rendered}\` — with JSON output in effect, the exit-2 ` +
+      `error document is the entire stdout: the malformed value emits no ` +
+      `report and no validation findings (SPEC 12.0, 12.7, H-5)`,
+  );
+  if (result.stderrBytes.length === 0) {
+    fail(
+      `${context}: \`${rendered}\` — usage error messages are ` +
+        `standard-error content (SPEC 12.0), but stderr is empty`,
+    );
+  }
+}
+
+/** The malformed spellings: the entry's literal, and the last-`#`-split trap. */
+const H13_MULTI_HASH_VALUES: readonly { value: string; trap: string }[] = [
+  {
+    value: "a#b#c",
+    trap: "the entry's literal spelling — no staged interpretation",
+  },
+  {
+    value: `${H13_FILE}#pa`,
+    trap:
+      "the last-`#` split names the discovered file specs/a#b.mdx plus its " +
+      "spelled id `pa`, so an accepting product proceeds and answers exit 1 " +
+      "on this failing workspace",
+  },
+];
+
+/**
+ * The tree projection the view arm pins (T11.2-1's named clauses): per node,
+ * the identity datum (the 11.2 three-state), the construct range (1.7), the
+ * raw attribute entries as parsed, and the children in document order. The
+ * opening/closing decompositions and interpreted tags/coverage stay outside
+ * (T11.4-1, T11.2-2/T11.4-3 pin those); the form-exact decode has already
+ * validated their forms.
+ */
+interface ViewTreeExpectation {
+  readonly identity: string | { readonly unavailable: true };
+  readonly range: SourceRange;
+  readonly attributes: readonly ViewAttributeEntry[];
+  readonly children: readonly ViewTreeExpectation[];
+}
+
+function projectViewNode(node: ViewNode): ViewTreeExpectation {
+  return {
+    identity: node.identity,
+    range: node.range,
+    attributes: node.attributes.map((entry) => ({
+      name: entry.name,
+      range: entry.range,
+      text: entry.text,
+    })),
+    children: node.children.map(projectViewNode),
+  };
+}
+
+const T12_0_13 = defineProductTest({
+  id: "T12.0-13",
+  title:
+    "`#` in operands: a `<node>`, `<graph-node>`, `--to`, or move-operand value containing more than one `#` (the literal `a#b#c`, and `specs/a#b.mdx#pa` — whose last-`#` split would name a discovered file plus a spelled id) is a malformed value — exit 2 with the single 12.7 error document on `show`, `query node`, `occurrences --to`, and `move` (origin and destination operands alike, the destination the T6.5-4 dead-letter spelling — `#` in the section form's target-file part; each move wrapped in a whole-root modifies-nothing compare), the usage error preceding the failing workspace's findings; a bare `<file>` operand or `--file` glob is a whole path or pattern with no delimiter role for `#`: with `specs/a#b.mdx` discovered (condition 19 — the staging premise `build --json` fails with exactly that one pinned 14.19, modifying nothing), `view specs/a#b.mdx` names the discovered file — membership holds: exactly its one per-file view, tree and ranges on view with every node identity explicitly unavailable, its condition-19 finding accompanying, exit 1 — never a `specs/a` + `b.mdx` pair (which would be exit 2, unknown file); `at specs/a#b.mdx 0` resolves the same way (the root construct, identity unavailable, no containing occurrence); and `occurrences --file specs/a#*` matches it as a pattern — domain membership proven by the accompanying 14.19, exit 1, against the matching-nothing control `specs/zz#*` (empty, finding-free, exit 0) (SPEC 12.0, 11.2-11.5, 12.7, 14)",
+  run: async (product) => {
+    // Fixture self-checks (T5.7-2 discipline): composed ranges sliced back
+    // out of the staged bytes before any product invocation.
+    sliceCheck(
+      H13_SOURCE,
+      H13_PA_RANGE,
+      '<S id="pa">\nHash-path text.\n</S>',
+      "the pa section construct",
+    );
+    sliceCheck(
+      H13_SOURCE,
+      H13_PA_ID.range,
+      H13_PA_ID.text,
+      "pa's id attribute",
+    );
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [H13_OK_FILE]: H13_OK_SOURCE,
+        [H13_FILE]: H13_SOURCE,
+      },
+    });
+    try {
+      // --- Staging premise: `build --json` fails with EXACTLY one 14.19 —
+      // the content of both files stages no other condition, so the path is
+      // the sole defect — the finding pinned (stable code, no in-source
+      // locations, the file as concerned path; SPEC 14, 12.7), and a
+      // failing build modifies nothing (SPEC 12.1).
+      const buildContext =
+        "T12.0-13 `build --json` (staging premise: the `#` path is the " +
+        "workspace's one defect)";
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          const result = await expectExit(
+            product,
+            workspace,
+            ["build", "--json"],
+            1,
+            buildContext,
+          );
+          const findings = decodeFindingsReport(
+            parseJsonStdout(result, buildContext),
+            buildContext,
+          ).findings;
+          assertConditionCounts(
+            findings,
+            { "14.19": 1 },
+            `${buildContext} — exactly one condition-19 finding for the ` +
+              `discovered \`#\` path and nothing else: both files' content ` +
+              `is condition-free (SPEC 14.19)`,
+          );
+          assertSameJson(
+            findings.map(projectPathFinding),
+            [H13_19],
+            `${buildContext} — the finding carries the stable code ` +
+              `"invalid-source-path", no in-source locations (a path-level ` +
+              `condition), and the offending file as its concerned path ` +
+              `(SPEC 14, 12.7)`,
+          );
+        },
+        `${buildContext} — a failing build modifies nothing (SPEC 12.1)`,
+      );
+
+      // --- Malformed multi-`#` values: exit 2 on `show`, `query node`, and
+      // `occurrences --to` (SPEC 12.0; 11.3 pins the `--to` bound — a lax
+      // product reading the spelling as well-formed selects the empty set
+      // and answers exit 1 with the domain's findings, never 2).
+      for (const spelling of H13_MULTI_HASH_VALUES) {
+        const rows: readonly { argv: readonly string[]; what: string }[] = [
+          {
+            argv: ["show", spelling.value],
+            what: "`show <node>`",
+          },
+          {
+            argv: ["query", "node", spelling.value],
+            what: "`query node <node>`",
+          },
+          {
+            argv: ["occurrences", "--to", spelling.value],
+            what: "`occurrences --to <node>`",
+          },
+        ];
+        for (const row of rows) {
+          await expectMalformedOperandError(
+            product,
+            workspace,
+            row.argv,
+            `T12.0-13 ${row.what}, value ${JSON.stringify(spelling.value)} ` +
+              `(${spelling.trap})`,
+          );
+        }
+      }
+
+      // --- Malformed multi-`#` move operands (SPEC 12.0, 6.5): the
+      // destination arm is T6.5-4's dead letter realized — a `#` in the
+      // section form's target-file part makes a two-`#` operand — and an
+      // accepting product's last-`#` split names the discovered
+      // specs/a#b.mdx as target file (or as origin), proceeds, and answers
+      // exit 1 (the invalid-workspace refusal) or worse, writes; each arm
+      // rides a whole-root modifies-nothing compare.
+      const moveRows: readonly {
+        readonly argv: readonly string[];
+        readonly what: string;
+      }[] = [
+        {
+          argv: ["move", `${H13_OK_FILE}#ok`, `${H13_FILE}#pa`],
+          what:
+            "destination operand with two `#` (the T6.5-4 dead-letter " +
+            "spelling: `#` in the section form's target-file part)",
+        },
+        {
+          argv: [`move`, `${H13_FILE}#pa`, `${H13_OK_FILE}#zz`],
+          what: "origin operand with two `#`",
+        },
+      ];
+      for (const row of moveRows) {
+        const context = `T12.0-13 \`move\`, ${row.what}`;
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            await expectMalformedOperandError(
+              product,
+              workspace,
+              row.argv,
+              context,
+            );
+          },
+          `${context} — a usage error modifies nothing (SPEC 6.5, 12.0)`,
+        );
+      }
+
+      // --- `view specs/a#b.mdx`: a bare `<file>` operand is a whole path —
+      // the `#`-containing spelling names the DISCOVERED file, so
+      // membership holds (never a `specs/a` + `b.mdx` pair, which would be
+      // exit 2, unknown file): exactly its one per-file view is served,
+      // structure on view, every node identity explicitly unavailable, its
+      // condition-19 finding accompanying, exit 1 (SPEC 12.0, 11.4, 11.2).
+      const viewContext = `T12.0-13 \`view ${H13_FILE}\``;
+      const viewResult = await runCli(product, workspace, ["view", H13_FILE]);
+      assertExitCode(
+        viewResult,
+        1,
+        `${viewContext} — the \`#\`-containing operand names the ` +
+          `discovered file (membership holds, never an unknown-file exit ` +
+          `2), and the answer carries its finding and unavailable ` +
+          `identities: exit 1 with the full document (SPEC 12.0, 11.4, 11.2)`,
+      );
+      const viewReport = decodeViewReport(
+        parseJsonStdout(
+          viewResult,
+          `${viewContext} — a single JSON document is the only output ` +
+            `form, with or without --json (SPEC 11)`,
+        ),
+        { text: false },
+        viewContext,
+      );
+      assertSameJson(
+        viewReport.findings.map(projectPathFinding),
+        [H13_19],
+        `${viewContext} — the consulted domain is the requested file ` +
+          `alone: exactly its condition-19 finding accompanies (SPEC 11.2, ` +
+          `11.4)`,
+      );
+      assertSameJson(
+        viewReport.views.map((view) => view.file),
+        [H13_FILE],
+        `${viewContext} — exactly one per-file view, for the requested ` +
+          `\`#\` path presented as the whole workspace-relative path ` +
+          `(SPEC 11.4, 12.0)`,
+      );
+      const h13View = viewReport.views[0]!;
+      assertSameJson(
+        projectViewNode(h13View.root),
+        {
+          identity: UNAVAILABLE,
+          range: H13_ROOT_RANGE,
+          attributes: [],
+          children: [
+            {
+              identity: UNAVAILABLE,
+              range: H13_PA_RANGE,
+              attributes: [H13_PA_ID],
+              children: [],
+            },
+          ],
+        },
+        `${viewContext} — the invalid-path file keeps its full positional ` +
+          `tree with byte-exact construct ranges and raw attribute entries ` +
+          `while every node identity, root included, is explicitly ` +
+          `unavailable (SPEC 11.2, 1.5)`,
+      );
+      assertSameJson(
+        [h13View.imports, h13View.occurrences, h13View.comments],
+        [[], [], []],
+        `${viewContext} — the file holds no imports, occurrences, or ` +
+          `comments: empty arrays, never null (SPEC 12.7)`,
+      );
+
+      // --- `at specs/a#b.mdx 0` resolves the same way (SPEC 11.5): the
+      // operand names the discovered file; offset 0 lies in the prose
+      // before any section, so the innermost enclosing construct is the
+      // ROOT, its identity explicitly unavailable; no containing
+      // occurrence; exactly the file's own finding; exit 1.
+      const atContext = `T12.0-13 \`at ${H13_FILE} 0\``;
+      const atResult = await runCli(product, workspace, ["at", H13_FILE, "0"]);
+      assertExitCode(
+        atResult,
+        1,
+        `${atContext} — the \`<file>\` operand asserts membership exactly ` +
+          `as a view operand does; the answer carries the file's finding ` +
+          `and an unavailable identity: exit 1 (SPEC 11.5, 11.2, 12.0)`,
+      );
+      const atReport = decodeAtReport(
+        parseJsonStdout(
+          atResult,
+          `${atContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        atContext,
+      );
+      assertSameJson(
+        atReport.findings.map(projectPathFinding),
+        [H13_19],
+        `${atContext} — the consulted domain is the named file alone: ` +
+          `exactly its condition-19 finding (SPEC 11.2, 11.5)`,
+      );
+      assertSameJson(
+        atReport.resolution,
+        {
+          section: { identity: UNAVAILABLE, range: H13_ROOT_RANGE },
+          occurrence: null,
+        },
+        `${atContext} — offset 0 (prose) resolves to the root construct, ` +
+          `its identity explicitly unavailable, within no occurrence ` +
+          `(SPEC 11.5, 11.2)`,
+      );
+
+      // --- `occurrences --file specs/a#*` matches the file as a PATTERN
+      // (SPEC 12.0, 11.3, 7): `#` is a literal glob byte, `*` any run of
+      // bytes within the segment, so the admitted set is {specs/a#b.mdx} —
+      // proven by the accompanying condition-19 finding (a finding is a
+      // domain file's exactly when that file is its concerned path, 11.2) —
+      // while the control pattern admits the empty set: an empty,
+      // finding-free answer, exit 0 (11.3), pinning that the exit-1 answer
+      // is attributable to the pattern MATCHING the `#` path.
+      const occContext = `T12.0-13 \`occurrences --file specs/a#*\``;
+      const occResult = await runCli(product, workspace, [
+        "occurrences",
+        "--file",
+        "specs/a#*",
+      ]);
+      assertExitCode(
+        occResult,
+        1,
+        `${occContext} — the pattern matches the discovered \`#\` path ` +
+          `(no delimiter role in a --file glob), whose finding accompanies ` +
+          `the answer: exit 1 (SPEC 12.0, 11.3, 11.2)`,
+      );
+      const occReport = decodeOccurrencesReport(
+        parseJsonStdout(
+          occResult,
+          `${occContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        occContext,
+      );
+      assertSameJson(
+        occReport.findings.map(projectPathFinding),
+        [H13_19],
+        `${occContext} — the admitted set is exactly {${H13_FILE}}: its ` +
+          `condition-19 finding accompanies, and no other file's finding ` +
+          `can (SPEC 11.2, 11.3)`,
+      );
+      assertSameJson(
+        occReport.occurrences,
+        [],
+        `${occContext} — the file spells no references: an empty ` +
+          `enumeration, [] never null (SPEC 11.3, 12.7)`,
+      );
+      const ctrlContext = `T12.0-13 \`occurrences --file specs/zz#*\` (control)`;
+      const ctrlResult = await runCli(product, workspace, [
+        "occurrences",
+        "--file",
+        "specs/zz#*",
+      ]);
+      assertExitCode(
+        ctrlResult,
+        0,
+        `${ctrlContext} — a \`#\`-containing pattern matching nothing ` +
+          `admits the empty set: an empty, finding-free answer, exit 0 — ` +
+          `never an unknown-file usage error (SPEC 11.3)`,
+      );
+      assertSameJson(
+        decodeOccurrencesReport(
+          parseJsonStdout(
+            ctrlResult,
+            `${ctrlContext} — a single JSON document is the only output ` +
+              `form (SPEC 11)`,
+          ),
+          ctrlContext,
+        ),
+        { findings: [], occurrences: [] },
+        `${ctrlContext} — empty and finding-free: the empty admitted set ` +
+          `consults no file (SPEC 11.3, 11.2)`,
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
 export const section120iiTests: readonly ProductTestEntry[] = [
   T12_0_7,
   T12_0_8,
@@ -2423,4 +2977,5 @@ export const section120iiTests: readonly ProductTestEntry[] = [
   T12_0_10,
   T12_0_11,
   T12_0_12,
+  T12_0_13,
 ];

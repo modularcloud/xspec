@@ -342,6 +342,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T12.0-10": ["12.0"],
   "T12.0-11": ["preamble", "12.0"],
   "T12.0-12": ["preamble", "12.0"],
+  // T12.0-13: the FP-016 precedent — in no TEST-SPEC 14 staging record
+  // (its premise-pinned 14.19 rides staging integrity, the T11.2-3
+  // precedent), so no "14"; 11.2-11.5/12.7/6.5 are carriage context with
+  // home coverage at T11.2-3/T11.3-*/T11.4-*/T11.5-*/T12.7-*/T6.5-*.
+  "T12.0-13": ["12.0"],
   "T12.1-1": ["12.1"],
   "T12.1-3": ["12.1"],
   "T12.1-4": ["12.1"],
