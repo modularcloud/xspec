@@ -2962,8 +2962,47 @@ certify against FP-091's fixtures once those land.
   before it, T11.5-1 unchanged; `npm run test:self` unchanged 3 planned
   mid-loop reds (certification-document ×2 → FP-091; S-1 unmapped keys
   {11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
-- [ ] FP-068 — Implement T11.5-3: occurrence containment ends and imperfect
+- [x] FP-068 — Implement T11.5-3: occurrence containment ends and imperfect
   files. [R2 #5; TEST-SPEC §11.5]
+  [Done 2026-08-14: T11.5-3 registered in section-11.5.ts. One workspace
+  (SPECS_ONLY_CONFIG), one whole-root assertLeavesUnchanged: finding-free
+  specs/occ.mdx (multi-byte prose head; blank-line-separated import binding
+  CIBLE — load-bearing: MDX block grammar makes a paragraph-glued import
+  prose, see FP-094; section `host` bearing `d={CIBLE.but}` and embedding
+  `{text(CIBLE.but)}`, both resolving into specs/cible.mdx#but) plus
+  unparseable specs/casse.mdx (14.20) and, staged where file names are byte
+  strings (Linux, the T11.2-3 precedent), non-UTF-8-named
+  specs/nu<0xFF>.mdx (14.19). Arms: gate `build --json` pinning exactly
+  {14.20 located, 14.19 code/locations-[]/marked-byte path}; eight
+  containment offsets — each occurrence's start and end−1 → the full 12.7
+  record (file, byte-exact range, kind depends/embeds, source node
+  {identity, range} = host, resolved target), its end and start−1 → none
+  (start-inclusive, end-exclusive, 1.7), every answer findings [] exit 0
+  (per-file domain on the failing workspace), section pinned to host
+  throughout, arm-table containment fixture-self-checked; `at casse.mdx` at
+  0 AND the EOF caret → resolution exactly the unavailability marker (no
+  root fallback bypasses the mask) beside exactly the located 14.20, exit
+  1; four non-UTF-8 spellings — exact path bytes as raw argv (the widened
+  expectAvailabilityUsageError now takes ArgvValue, runProduct-backed, the
+  T6.5-5 trampoline), lossy U+FFFD, marked-byte-form JSON round-trip,
+  percent-encoded — each exit 2 via the T11.2-5 protocol, and
+  `view --file specs/nu*.mdx` (byte-wise glob) as the one route to its
+  positions: exit 1, exactly the 14.19 projection, one view with `file` in
+  marked byte form and the tree byte-exact, every identity unavailable
+  (projectResolution reuse). Traceability "T11.5-3": ["11.5"] (the §11
+  precedent: accompanying-finding assertions add no "14"); expressly
+  outside CONF-AVAIL ("no in-scope staging drives `at`"), no fixture scope.
+  Verified: typecheck/format clean; probes against the built product prove
+  the staging (build --json exactly the two old-shape findings in the right
+  files, occ/cible contributing nothing — resolution proven by a control
+  probe where the unseparated import left CIBLE unbound and 14.8 fired at
+  both spellings) and the channel (`at` unknown-command exit 2 on every
+  spelling incl. the sh-trampoline raw-bytes leg; `view` likewise); suite:
+  T11.5-3 red-as-diagnosed at the gate's FP-001-class form-exact decode
+  ("expected no member \"column\""), every fixture self-check passing
+  before it, T11.5-1/T11.5-2 unchanged; `npm run test:self` unchanged 3
+  planned mid-loop reds (certification-document ×2 → FP-091; S-1 unmapped
+  keys {11.6, 12.6, 12.7} → stage G), S-5, S-7, and certification green.]
 
 - [ ] FP-069 — Implement T11.6-1: `inventory` anchoring byte-exact, incl.
   the E-6 drive-mismatch arm (Linux side; the Windows-subset arm is
@@ -3109,3 +3148,33 @@ certify against FP-091's fixtures once those land.
   T11.6-1. [R2 #43; TEST-SPEC §11.6 (E-6 arm)] After FP-069.
   `test/windows/` (beside `e6-subset.test.ts`): the drive-mismatch
   anchoring arm runs on the Windows leg only.
+
+## Stage K — findings discovered mid-loop
+
+- [ ] FP-094 — Restage T11.5-1's fixture so its imports (and top-level
+  comment) are real MDX blocks, not paragraph prose. [Found 2026-08-14
+  during FP-068; TEST-SPEC §11.5 T11.5-1, SPEC 1 ("an MDX document"), 2.1]
+  `test/suite/registry/section-11.5.ts` (FP-066's fixture, ~lines 184-230):
+  specs/total.mdx separates its head prose, both import declarations, and
+  the top-level comment by SINGLE newlines — under MDX block grammar that
+  whole run is one paragraph, so the two `import` lines are paragraph
+  prose, not import declarations. Proven against the built product: with
+  IMPORT_ONE's specifier changed to `"./typo.xspec"` in the exact staged
+  layout, `build --json` stays finding-free (a parsed import would report
+  14.15), while the same import blank-line-separated binds (and its
+  unbound references report 14.8). Consequences when a conforming product
+  lands: the `view.imports` anchor (EXPECTED_IMPORTS: two entries with
+  resolved targets) fails as a harness staging defect — the product will
+  report no import declarations — and the "inside the first import
+  declaration" pointwise arm probes prose (its root resolution stays
+  correct, its label wrong); EXPECTED_COMMENTS' top entry rides the same
+  paragraph (whether an inline `{/* */}` inside a paragraph is a
+  comment-range entry is unverifiable until `view` exists). Fix: insert
+  blank-line segments so the imports and the top comment start their own
+  blocks (composed constants recompute every offset; the derivability
+  comparator and self-checks adapt), keep the deep comment's in-section
+  placement only if the landed product classifies it as a comment range,
+  and re-verify: fixture self-checks pass, `build --json` finding-free,
+  a typo-specifier control probe now DOES report 14.15 on the restaged
+  layout. No other §11 fixture shares the hazard (11.2/11.3/11.4
+  layouts checked 2026-08-14: all imports start a block).

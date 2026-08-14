@@ -95,7 +95,8 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
-import type { ProductBinding } from "../../helpers/subprocess.js";
+import { runProduct } from "../../helpers/subprocess.js";
+import type { ArgvValue, ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
@@ -3270,19 +3271,27 @@ function assertCycleFindingsWhole(
  * report and no answer beside it), and the usage message on stderr (12.0).
  * Exported: the per-surface spelling matrices (T11.3-2/3, T11.4-2, T11.5-2)
  * assert their exit-2 arms through this same protocol
- * (registry/section-11.3.ts imports, never copies).
+ * (registry/section-11.3.ts imports, never copies). Accepts raw-byte argv
+ * elements (`ArgvValue`) for T11.5-3's Linux-leg non-UTF-8 `at` spellings
+ * (the T6.5-5/T12.0-5 precedent: argv is a byte channel there, carried by
+ * the subprocess driver's raw-byte argv support).
  */
 export async function expectAvailabilityUsageError(
   product: ProductBinding,
   workspace: TestWorkspace,
-  argv: readonly string[],
+  argv: readonly ArgvValue[],
   context: string,
 ): Promise<void> {
-  const command = `xspec ${argv.join(" ")}`;
-  const result = await expectExit(
-    product,
-    workspace,
-    argv,
+  const command = `xspec ${argv
+    .map((arg) =>
+      typeof arg === "string"
+        ? arg
+        : `<bytes 0x${Buffer.from(arg).toString("hex")}>`,
+    )
+    .join(" ")}`;
+  const result = await runProduct(product, { cwd: workspace.root, argv });
+  assertExitCode(
+    result,
     2,
     `${context}: \`${command}\` — the argument checks of 11.3–11.5 precede ` +
       `answering, so the usage error exits 2 whatever findings the ` +

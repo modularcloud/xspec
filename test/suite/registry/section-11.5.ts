@@ -1,5 +1,4 @@
-// TEST-SPEC §11.5 (`xspec at`) — SUITE-55: T11.5-1 and T11.5-2 (T11.5-3
-// follows in this module as it is implemented).
+// TEST-SPEC §11.5 (`xspec at`) — SUITE-55: T11.5-1, T11.5-2, and T11.5-3.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -67,6 +66,7 @@ import { Buffer } from "node:buffer";
 import type {
   AtResolution,
   AtSection,
+  Finding,
   OccurrenceRecord,
   SourceRange,
   ViewNode,
@@ -75,11 +75,15 @@ import {
   decodeAtReport,
   decodeViewReport,
 } from "../../helpers/adapters/index.js";
-import { fail, parseJsonStdout } from "../../helpers/assertions.js";
+import {
+  assertExitCode,
+  fail,
+  parseJsonStdout,
+} from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
-import type { ProductBinding } from "../../helpers/subprocess.js";
+import type { ArgvValue, ProductBinding } from "../../helpers/subprocess.js";
 import type { TestWorkspace as Workspace } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -93,6 +97,7 @@ import {
   assertSameJson,
   buildFindings,
   expectExit,
+  runCli,
   runJson,
 } from "./support.js";
 
@@ -966,4 +971,597 @@ const T11_5_2 = defineProductTest({
   },
 });
 
-export const section115Tests: readonly ProductTestEntry[] = [T11_5_1, T11_5_2];
+// --- T11.5-3 — occurrence containment and imperfect files ---------------------
+//
+// SPEC 11.5: "when the offset lies within a reference occurrence's range,
+// that occurrence and its resolved target (5.7)" — containment under the one
+// range convention of 1.7 (start-inclusive, end-exclusive); "on an
+// unparseable file the resolution is reported explicitly unavailable, the
+// parse-failure finding accompanying it (11.2)"; and "a discovered spec
+// source whose path is not valid UTF-8 is nameable by no argument value
+// (12.0), so `at` cannot address it: for such a file (14.19) the view,
+// reached by glob (11.4), is the one route to position data".
+//
+// One workspace (SPECS_ONLY_CONFIG), four spec sources:
+//
+// - specs/occ.mdx — the containment ground, finding-free: behind a
+//   multi-byte prose head (SPEC 1.7), a blank-line-separated import binding
+//   CIBLE (MDX block grammar: an import glued to a paragraph is prose, so
+//   the separation is load-bearing), then one section `host` bearing
+//   `d={CIBLE.but}` on its opening tag and an MDX embedding
+//   `{text(CIBLE.but)}` in its body — both spellings resolve into
+//   specs/cible.mdx#but, so both record occurrences (SPEC 5.7): the `d`
+//   occurrence spans that one reference's own expression (`CIBLE.but`), the
+//   embedding occurrence the entire braced container, opening brace through
+//   closing brace. Offsets at each range's start and at end − 1 report the
+//   containing occurrence's full 12.7 record — file, byte-exact range, kind
+//   (`depends` / `embeds`), source graph node {identity, range} (`host` and
+//   its construct range for both spellings, SPEC 2.2, 2.3), and resolved
+//   target — while the end offset and the byte immediately before the start
+//   report none (`occurrence` null), realizing 1.7's start-inclusive,
+//   end-exclusive convention on both edges. Every probed offset lies inside
+//   `host`'s construct and inside no other section, so `section` is pinned
+//   to the same {identity, range} constant throughout, and each answer is
+//   findings [] at exit 0: the consulted domain is the named file alone
+//   (SPEC 11.2) — the workspace's other findings (below) never attach, the
+//   sharpest per-file contrast on a failing workspace.
+// - specs/cible.mdx — the finding-free reference target.
+// - specs/casse.mdx — unparseable (unclosed section tag, 14.20): `at` at
+//   offset 0 AND at the EOF caret (the byte-length offset — an offset the
+//   argument checks accept, byte length being a property of the bytes, not
+//   the parse) each answer with `resolution` exactly the unavailability
+//   marker — never a root fallback bypassing the mask — beside exactly the
+//   file's one parse-failure finding, exit 1 (SPEC 11.5, 11.2, 12.7).
+// - specs/nu<0xFF>.mdx — non-UTF-8-named (14.19), staged exactly when the
+//   platform's file names are byte strings (`process.platform === "linux"`,
+//   the T11.2-3/T6.5-5 precedent for the entry's "Linux leg" note; every
+//   expectation is parameterized on that staging, so the Linux CI leg runs
+//   the whole entry and no platform skips the test, H-9). The file is
+//   nameable by no argument value (SPEC 12.0: argument values are UTF-8):
+//   representative `at` spellings — the exact on-disk path bytes as raw
+//   argv (the sharpest: a product resolving byte argv against the
+//   filesystem finds the file and answers), the lossy U+FFFD decode, the
+//   marked-byte-form JSON rendering (the product's OWN output spelling for
+//   the path, 12.7 — still no argument value), and a percent-encoded
+//   rendering — each an unknown file, exit 2 with the single 12.7 error
+//   document, via the shared T11.2-5 protocol. The glob-reached view stays
+//   the one route to its positions: `view --file specs/nu*.mdx` (the
+//   byte-wise glob rules of SPEC 7 match the 0xFF byte; the pattern admits
+//   no other staged file) answers exit 1 with exactly the file's
+//   condition-19 finding (stable code `invalid-source-path`, no locations,
+//   the marked-byte-form concerned path) and its one view — `file` in the
+//   marked byte form, the full positional tree byte-exact with every node
+//   identity, root included, explicitly unavailable (SPEC 11.2, 11.4,
+//   12.0, 12.7; T11.2-3 owns the whole-domain sweep).
+//
+// The gate `build --json` doubles as staging integrity (exactly casse's
+// 14.20 plus — where staged — nu's 14.19, so occ.mdx and cible.mdx are
+// proven finding-free on pinned ground), and the whole sweep rides one
+// whole-root snapshot compare: the failing build writes nothing (SPEC 12.1)
+// and on a failing workspace these surfaces answer from current sources and
+// write nothing (SPEC 11.2; the no-write contract clauses live at
+// T11.2-1/T11.2-6).
+//
+// Certification note: CONF-AVAIL's scope expressly excludes `at` ("no
+// in-scope staging drives `at`" — CERTIFICATIONS.md), and T11.5-3 is in no
+// other fixture's scope; its answer-side decode rigor is certified through
+// the CONF-AVAIL datum-form violators (the shared 12.7 machinery) and its
+// exit-2 arms ride the Exclusions-certified shared protocol.
+
+const UNAVAILABLE = { unavailable: true } as const;
+
+const OC_FILE = "specs/occ.mdx";
+const OC_TGT_FILE = "specs/cible.mdx";
+const OC_CASSE_FILE = "specs/casse.mdx";
+
+const OC_HEAD_TEXT = "Tête — préambule multi-octets.\n";
+const OC_IMPORT_TEXT = 'import CIBLE from "./cible.xspec"';
+const OC_HOST_PRE_TEXT = '<S id="host" d={';
+const OC_DREF_TEXT = "CIBLE.but";
+const OC_HOST_POST_TEXT = "}>";
+const OC_BODY_TEXT = "Corps local.\n";
+const OC_EMB_TEXT = "{text(CIBLE.but)}";
+const OC_TAIL_TEXT = "Queue après l’ancre.\n";
+
+const OC = new ByteFixture();
+OC.add(OC_HEAD_TEXT);
+OC.add("\n"); // blank line: the import must start its own MDX block
+OC.add(OC_IMPORT_TEXT);
+OC.add("\n\n");
+const OC_HOST_START = OC.pos;
+OC.add(OC_HOST_PRE_TEXT);
+const OC_DREF = OC.add(OC_DREF_TEXT);
+OC.add(OC_HOST_POST_TEXT);
+const OC_HOST_OPEN: SourceRange = { start: OC_HOST_START, end: OC.pos };
+OC.add("\n");
+OC.add(OC_BODY_TEXT);
+const OC_EMB = OC.add(OC_EMB_TEXT);
+OC.add("\n");
+OC.add(OC_TAIL_TEXT);
+OC.add(CLOSE_TEXT);
+const OC_HOST_RANGE: SourceRange = { start: OC_HOST_START, end: OC.pos };
+OC.add("\n");
+const OC_SOURCE = OC.source;
+
+const OC_HOST_OPEN_TEXT = `${OC_HOST_PRE_TEXT}${OC_DREF_TEXT}${OC_HOST_POST_TEXT}`;
+const OC_HOST_CONSTRUCT_TEXT = `${OC_HOST_OPEN_TEXT}\n${OC_BODY_TEXT}${OC_EMB_TEXT}\n${OC_TAIL_TEXT}${CLOSE_TEXT}`;
+
+const OC_TGT_SOURCE = 'Cible du dossier.\n\n<S id="but">\nTexte visé.\n</S>\n';
+
+/** Every probed offset resolves to `host` (no section nests inside it). */
+const OC_HOST_SECTION: AtSection = {
+  identity: `${OC_FILE}#host`,
+  range: OC_HOST_RANGE,
+};
+
+/** Both spellings' source graph node: `host` (SPEC 2.2, 2.3, 5.7). */
+const OC_SOURCE_NODE = {
+  identity: `${OC_FILE}#host`,
+  range: OC_HOST_RANGE,
+} as const;
+const OC_TARGET = `${OC_TGT_FILE}#but`;
+
+/** The `d` occurrence: that one reference's own expression (SPEC 5.7). */
+const OC_D_RECORD: OccurrenceRecord = {
+  file: OC_FILE,
+  range: OC_DREF,
+  kind: "depends",
+  source: OC_SOURCE_NODE,
+  target: OC_TARGET,
+};
+
+/** The embedding occurrence: the entire braced container (SPEC 5.7). */
+const OC_EMB_RECORD: OccurrenceRecord = {
+  file: OC_FILE,
+  range: OC_EMB,
+  kind: "embeds",
+  source: OC_SOURCE_NODE,
+  target: OC_TARGET,
+};
+
+/**
+ * The containment arms (SPEC 11.5, 1.7): per occurrence, its start and its
+ * end − 1 lie within — the record reported with its resolved target — while
+ * its end and the byte immediately before its start lie outside — none
+ * reported. A fixture self-check proves each arm's offset against the
+ * claimed ranges before any product invocation.
+ */
+const OC_CONTAINMENT_ARMS: readonly {
+  readonly what: string;
+  readonly offset: number;
+  readonly occurrence: OccurrenceRecord | null;
+}[] = [
+  {
+    what: "the d reference expression's start (start-inclusive, SPEC 1.7)",
+    offset: OC_DREF.start,
+    occurrence: OC_D_RECORD,
+  },
+  {
+    what: "the d reference expression's end − 1 (the last within-range byte)",
+    offset: OC_DREF.end - 1,
+    occurrence: OC_D_RECORD,
+  },
+  {
+    what: "the d reference expression's end (end-exclusive: outside, SPEC 1.7)",
+    offset: OC_DREF.end,
+    occurrence: null,
+  },
+  {
+    what: "the byte immediately before the d reference expression (outside)",
+    offset: OC_DREF.start - 1,
+    occurrence: null,
+  },
+  {
+    what: "the embedding container's start — its opening brace (SPEC 5.7)",
+    offset: OC_EMB.start,
+    occurrence: OC_EMB_RECORD,
+  },
+  {
+    what: "the embedding container's end − 1 — its closing brace, within range",
+    offset: OC_EMB.end - 1,
+    occurrence: OC_EMB_RECORD,
+  },
+  {
+    what: "the embedding container's end (end-exclusive: outside, SPEC 1.7)",
+    offset: OC_EMB.end,
+    occurrence: null,
+  },
+  {
+    what: "the byte immediately before the embedding container (outside)",
+    offset: OC_EMB.start - 1,
+    occurrence: null,
+  },
+];
+
+// The unparseable file (14.20: unclosed section tag; the T11.2-1 shape).
+// Composed through ByteFixture so the EOF-caret offset is the same
+// arithmetic the staged bytes are.
+const OC_CASSE = new ByteFixture();
+OC_CASSE.add("Cassé dès l’ouverture.\n\n");
+OC_CASSE.add('<S id="seul">\nJamais fermé.\n');
+const OC_CASSE_SOURCE = OC_CASSE.source;
+const OC_CASSE_LENGTH = OC_CASSE.pos;
+
+// --- specs/nu<0xFF>.mdx — non-UTF-8-named spec source (14.19, Linux leg) -----
+// 0xFF can occur in no valid UTF-8 sequence, so the workspace-relative path
+// is not valid UTF-8; the byte-wise glob rules of SPEC 7 still discover it.
+// The marked byte form is composed from the SAME bytes that stage the file
+// (never measured from product output).
+const NU3_STAGED = process.platform === "linux";
+const NU3_PATH_BYTES = Buffer.concat([
+  Buffer.from("specs/nu", "utf8"),
+  Buffer.from([0xff]),
+  Buffer.from(".mdx", "utf8"),
+]);
+const NU3_MARKED_PATH = { bytes: NU3_PATH_BYTES.toString("hex") } as const;
+const NU3 = new ByteFixture();
+NU3.add("Prólogo — chemin invalide.\n\n");
+const NU3_SEC_START = NU3.pos;
+NU3.add('<S id="solo">\nTexte positionné.\n</S>');
+const NU3_SEC_RANGE: SourceRange = { start: NU3_SEC_START, end: NU3.pos };
+NU3.add("\n");
+const NU3_SOURCE = NU3.source;
+const NU3_ROOT_RANGE: SourceRange = { start: 0, end: NU3.pos };
+
+/**
+ * Representative `at` spellings for the non-UTF-8-pathed source (SPEC 12.0:
+ * argument values are UTF-8, so NO value names it — each is an unknown
+ * file, exit 2, whatever the spelling's provenance).
+ */
+const NU3_AT_SPELLINGS: readonly {
+  readonly value: ArgvValue;
+  readonly what: string;
+}[] = [
+  {
+    value: NU3_PATH_BYTES,
+    what:
+      "the exact on-disk path bytes as raw argv — argument values are " +
+      "UTF-8 (SPEC 12.0), so the byte string names no discovered file; a " +
+      "product resolving byte argv against the filesystem finds the file " +
+      "and answers instead",
+  },
+  {
+    value: "specs/nu�.mdx",
+    what:
+      "the lossy UTF-8 decode (U+FFFD replacing the invalid byte) names a " +
+      "different, undiscovered path",
+  },
+  {
+    value: JSON.stringify(NU3_MARKED_PATH),
+    what:
+      "the marked byte form — the product's own 12.7 output spelling for " +
+      "the path — is itself no argument value naming the file (SPEC 12.0)",
+  },
+  {
+    value: "specs/nu%ff.mdx",
+    what: "a percent-encoded rendering names a different, undiscovered path",
+  },
+];
+
+/**
+ * The asserted projection of the condition-19 finding (the T11.2-3
+ * discipline): stable code token, the empty locations of a path-level
+ * condition, the concerned path in the marked byte form (SPEC 14, 12.7).
+ * Message and identities stay unpinned.
+ */
+function projectNu3Finding(finding: Finding): {
+  readonly code: string | null;
+  readonly locations: readonly unknown[];
+  readonly path: unknown;
+} {
+  return {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+  };
+}
+
+/** Range containment under SPEC 1.7 (start-inclusive, end-exclusive). */
+function containsOffset(range: SourceRange, offset: number): boolean {
+  return range.start <= offset && offset < range.end;
+}
+
+const T11_5_3 = defineProductTest({
+  id: "T11.5-3",
+  title:
+    "occurrence containment ends and imperfect files: on a finding-free file whose section `host` bears `d={CIBLE.but}` and embeds `{text(CIBLE.but)}` — both resolving into specs/cible.mdx#but — offsets at the d reference expression's start and end − 1 report the containing occurrence's full 12.7 record (file, byte-exact range, kind `depends`, source graph node {identity, range} = host, resolved target) while the end offset and the byte before the start report none, and likewise for the embedding container (opening brace through closing brace, kind `embeds`) — start-inclusive, end-exclusive (SPEC 1.7) — every answer findings [] at exit 0, the consulted domain being the named file alone whatever the workspace's other findings; the unparseable specs/casse.mdx (unclosed section tag) answers `at` offset 0 AND the EOF caret with `resolution` exactly the unavailability marker — no root fallback bypasses the mask — beside exactly its one located 14.20, exit 1; and — staged where file names are byte strings (Linux leg) — the non-UTF-8-pathed specs/nu<0xFF>.mdx is nameable by no argument value: the exact on-disk path bytes as raw argv, the lossy U+FFFD decode, the marked-byte-form JSON rendering, and a percent-encoded rendering each exit 2 as an unknown file with the single 12.7 error document, while the glob-reached view (`view --file specs/nu*.mdx`, byte-wise glob) stays the one route to its positions: exit 1 with exactly its condition-19 finding (stable code `invalid-source-path`, locations [], the marked-byte-form concerned path) and its full positional tree byte-exact, every node identity — root included — explicitly unavailable; no invocation of the sweep modifies anything (SPEC 11.5, 11.2, 5.7, 1.7, 12.0, 12.7; T11.2-3, T11.2-5)",
+  run: async (product) => {
+    // Fixture self-checks (T5.7-2 discipline) — composed-range arithmetic
+    // proven against the staged bytes before any product invocation.
+    sliceCheck(OC_SOURCE, OC_DREF, OC_DREF_TEXT, "the d reference expression");
+    sliceCheck(OC_SOURCE, OC_EMB, OC_EMB_TEXT, "the embedding container");
+    sliceCheck(OC_SOURCE, OC_HOST_OPEN, OC_HOST_OPEN_TEXT, "host's open tag");
+    sliceCheck(
+      OC_SOURCE,
+      OC_HOST_RANGE,
+      OC_HOST_CONSTRUCT_TEXT,
+      "host's construct",
+    );
+    sliceCheck(
+      NU3_SOURCE,
+      NU3_SEC_RANGE,
+      '<S id="solo">\nTexte positionné.\n</S>',
+      "the non-UTF-8-named file's section construct",
+    );
+    if (Buffer.byteLength(OC_CASSE_SOURCE, "utf8") !== OC_CASSE_LENGTH) {
+      fail(
+        `§11.5 fixture self-check — the composed byte length ` +
+          `${String(OC_CASSE_LENGTH)} must equal specs/casse.mdx's staged ` +
+          `byte length (a harness-side staging error, not a product failure)`,
+      );
+    }
+    // Both occurrence ranges lie within host's construct and are disjoint;
+    // each arm's offset lies inside host, and inside its expected record's
+    // range or inside NEITHER record's range — so the arm table's section
+    // and occurrence expectations rest on proven staging arithmetic.
+    for (const arm of OC_CONTAINMENT_ARMS) {
+      if (!containsOffset(OC_HOST_RANGE, arm.offset)) {
+        fail(
+          `§11.5 fixture self-check — offset ${String(arm.offset)} ` +
+            `(${arm.what}) must lie within host's construct range ` +
+            `[${String(OC_HOST_RANGE.start)}, ${String(OC_HOST_RANGE.end)}) ` +
+            `(a harness-side staging error, not a product failure)`,
+        );
+      }
+      const inD = containsOffset(OC_DREF, arm.offset);
+      const inEmb = containsOffset(OC_EMB, arm.offset);
+      const expected =
+        arm.occurrence === null
+          ? !inD && !inEmb
+          : arm.occurrence === OC_D_RECORD
+            ? inD && !inEmb
+            : inEmb && !inD;
+      if (!expected) {
+        fail(
+          `§11.5 fixture self-check — offset ${String(arm.offset)} ` +
+            `(${arm.what}): the arm's expected occurrence disagrees with ` +
+            `range containment over the staged fixture (in d: ` +
+            `${String(inD)}, in embedding: ${String(inEmb)}) — a ` +
+            `harness-side staging error, not a product failure`,
+        );
+      }
+    }
+
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [OC_FILE]: OC_SOURCE,
+        [OC_TGT_FILE]: OC_TGT_SOURCE,
+        [OC_CASSE_FILE]: OC_CASSE_SOURCE,
+      },
+    });
+    try {
+      if (NU3_STAGED) {
+        await workspace.file(NU3_PATH_BYTES, NU3_SOURCE);
+      }
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          // Gate reference and staging integrity (SPEC 12.1, 14): exactly
+          // casse's 14.20 plus — where staged — nu's 14.19, nothing else,
+          // so occ.mdx and cible.mdx are finding-free on pinned ground
+          // (the d reference and the embedding both resolve: an unresolved
+          // or unparsed spelling would surface here as 14.5/14.8).
+          const gateContext =
+            "T11.5-3 `build --json` (staging integrity: one 14.20 in " +
+            "specs/casse.mdx" +
+            (NU3_STAGED
+              ? ", one 14.19 for the non-UTF-8-named specs/nu<0xFF>.mdx"
+              : "") +
+            "; specs/occ.mdx and specs/cible.mdx finding-free)";
+          const gateFindings = await buildFindings(
+            product,
+            workspace,
+            gateContext,
+          );
+          assertConditionCounts(
+            gateFindings,
+            NU3_STAGED ? { "14.20": 1, "14.19": 1 } : { "14.20": 1 },
+            `${gateContext} — exactly the staged conditions (SPEC 14)`,
+          );
+          assertFindingLocated(
+            gateFindings.find((finding) => finding.condition === "14.20")!,
+            { file: OC_CASSE_FILE },
+            `${gateContext} — the parse failure locates in the ` +
+              `unparseable file (SPEC 14.20, 14)`,
+          );
+          if (NU3_STAGED) {
+            assertSameJson(
+              projectNu3Finding(
+                gateFindings.find((finding) => finding.condition === "14.19")!,
+              ),
+              {
+                code: "invalid-source-path",
+                locations: [],
+                path: NU3_MARKED_PATH,
+              },
+              `${gateContext} — the condition-19 finding carries the ` +
+                `stable code, no in-source locations, and the non-UTF-8 ` +
+                `concerned path in the marked byte form (SPEC 14, 12.0, ` +
+                `12.7)`,
+            );
+          }
+
+          // --- Occurrence containment (SPEC 11.5, 5.7, 1.7): within-range
+          // offsets report the containing occurrence's record and resolved
+          // target; the end offset and other outside offsets report none.
+          for (const arm of OC_CONTAINMENT_ARMS) {
+            const context = `T11.5-3 \`at ${OC_FILE} ${String(arm.offset)}\` — ${arm.what}`;
+            const report = decodeAtReport(
+              await runJson(
+                product,
+                workspace,
+                ["at", OC_FILE, String(arm.offset)],
+                `${context} — a single JSON document is the only output ` +
+                  `form, and the named file's domain is finding-free, so ` +
+                  `the complete answer exits 0 (SPEC 11, 11.2, 11.5)`,
+              ),
+              context,
+            );
+            assertSameJson(
+              report.findings,
+              [],
+              `${context} — the consulted domain is the named file alone ` +
+                `and specs/occ.mdx is finding-free: the workspace's staged ` +
+                `14.20/14.19 are no domain file's findings (SPEC 11.2, ` +
+                `11.5)`,
+            );
+            assertSameJson(
+              report.resolution,
+              { section: OC_HOST_SECTION, occurrence: arm.occurrence },
+              `${context}: the innermost containing section construct is ` +
+                `host ({identity, range} byte-exact), and the containing ` +
+                `occurrence — reported as the full 12.7 record with its ` +
+                `file, byte-exact range, kind, source graph node, and ` +
+                `resolved target — is determined by range containment, ` +
+                `start-inclusive and end-exclusive (SPEC 11.5, 5.7, 1.7, ` +
+                `12.7)`,
+            );
+          }
+
+          // --- The unparseable file (SPEC 11.5, 11.2): resolution
+          // explicitly unavailable — at offset 0 AND at the EOF caret, so
+          // no root fallback bypasses the mask — the parse-failure finding
+          // accompanying, exit 1 with the full answer still emitted.
+          for (const offset of [0, OC_CASSE_LENGTH]) {
+            const context = `T11.5-3 \`at ${OC_CASSE_FILE} ${String(offset)}\` (the unparseable file${offset === 0 ? "" : ", the EOF caret"})`;
+            const result = await expectExit(
+              product,
+              workspace,
+              ["at", OC_CASSE_FILE, String(offset)],
+              1,
+              `${context} — the answer carries the parse-failure finding ` +
+                `and an explicitly-unavailable resolution, so exit 1 with ` +
+                `the full answer document still emitted (SPEC 11.2, 11.5)`,
+            );
+            const report = decodeAtReport(
+              parseJsonStdout(
+                result,
+                `${context} — the full answer document is still emitted, ` +
+                  `complete and parseable (SPEC 11.2, H-5)`,
+              ),
+              context,
+            );
+            assertSameJson(
+              report.resolution,
+              UNAVAILABLE,
+              `${context} — on an unparseable file the resolution is ` +
+                `reported explicitly unavailable: exactly the ` +
+                `unavailability marker, never null, never a fabricated ` +
+                `root resolution (SPEC 11.5, 11.2, 12.7)`,
+            );
+            assertConditionCounts(
+              report.findings,
+              { "14.20": 1 },
+              `${context} — exactly the named file's parse-failure ` +
+                `finding accompanies (SPEC 11.2, 14.20)`,
+            );
+            assertFindingLocated(
+              report.findings[0]!,
+              { file: OC_CASSE_FILE },
+              `${context} — the parse failure locates in the named file ` +
+                `(SPEC 14)`,
+            );
+          }
+
+          // --- The non-UTF-8-pathed source (SPEC 12.0, 11.5; Linux leg):
+          // nameable by no argument value — every `at` spelling for it is
+          // an unknown file, exit 2 — while the glob-reached view is the
+          // one route to its positions.
+          if (NU3_STAGED) {
+            for (const spelling of NU3_AT_SPELLINGS) {
+              await expectAvailabilityUsageError(
+                product,
+                workspace,
+                ["at", spelling.value, "0"],
+                `T11.5-3 non-UTF-8-pathed source, \`at\` spelling: ` +
+                  `${spelling.what} — an unknown file, the usage error of ` +
+                  `12.0 (SPEC 11.5, 11.4, 12.0)`,
+              );
+            }
+
+            const viewContext =
+              "T11.5-3 `view --file specs/nu*.mdx` (the glob-reached " +
+              "view: the one route to the non-UTF-8-pathed file's " +
+              "positions)";
+            const viewResult = await runCli(product, workspace, [
+              "view",
+              "--file",
+              "specs/nu*.mdx",
+            ]);
+            assertExitCode(
+              viewResult,
+              1,
+              `${viewContext} — the answer carries the file's ` +
+                `condition-19 finding and explicitly-unavailable ` +
+                `identities, so exit 1 with the full document still ` +
+                `emitted (SPEC 11.2, 11.4)`,
+            );
+            const viewReport = decodeViewReport(
+              parseJsonStdout(
+                viewResult,
+                `${viewContext} — a single JSON document is the only ` +
+                  `output form (SPEC 11)`,
+              ),
+              { text: false },
+              viewContext,
+            );
+            assertSameJson(
+              viewReport.findings.map(projectNu3Finding),
+              [
+                {
+                  code: "invalid-source-path",
+                  locations: [],
+                  path: NU3_MARKED_PATH,
+                },
+              ],
+              `${viewContext} — exactly the admitted file's condition-19 ` +
+                `finding accompanies: stable code, no in-source ` +
+                `locations, the concerned path in the marked byte form ` +
+                `(SPEC 11.2, 14, 12.0, 12.7)`,
+            );
+            assertSameJson(
+              viewReport.views.map((view) => view.file),
+              [NU3_MARKED_PATH],
+              `${viewContext} — the byte-wise glob admits exactly the ` +
+                `non-UTF-8-named file, its \`file\` member presented in ` +
+                `the marked byte form (SPEC 7, 11.4, 12.0, 12.7)`,
+            );
+            assertSameJson(
+              projectResolution(viewReport.views[0]!.root),
+              {
+                identity: UNAVAILABLE,
+                range: NU3_ROOT_RANGE,
+                children: [
+                  {
+                    identity: UNAVAILABLE,
+                    range: NU3_SEC_RANGE,
+                    children: [],
+                  },
+                ],
+              },
+              `${viewContext} — the view serves the file's full ` +
+                `positional tree with byte-exact construct ranges — the ` +
+                `position data \`at\` cannot address — while every node ` +
+                `identity, root included, is explicitly unavailable ` +
+                `(SPEC 11.2, 11.4, 1.7)`,
+            );
+          }
+        },
+        "T11.5-3 — no invocation of the sweep modifies anything: the gate " +
+          "build fails writing nothing (SPEC 12.1) and on a failing " +
+          "workspace these surfaces answer from current sources and write " +
+          "nothing (SPEC 11.2; the no-write contract clauses live at " +
+          "T11.2-1/T11.2-6)",
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
+export const section115Tests: readonly ProductTestEntry[] = [
+  T11_5_1,
+  T11_5_2,
+  T11_5_3,
+];
