@@ -297,6 +297,18 @@ export interface ErrorDocument {
 }
 
 /**
+ * The `version` document — `{"product", "interface"}` exactly (SPEC.md 12.6,
+ * 12.7): the product version and the machine-interface version, both
+ * strings. The reported machine-interface value is the string form of 12.6's
+ * stated value, `"1"` — a caller value assertion (T12.6-1); the product
+ * version is informational, with no requirement beyond per-build fixedness.
+ */
+export interface VersionDocument {
+  readonly product: string;
+  readonly interface: string;
+}
+
+/**
  * An occurrence record's source graph node — one datum: the node's identity
  * together with that node's own source range (SPEC.md 5.7, 1.7, 12.7).
  */

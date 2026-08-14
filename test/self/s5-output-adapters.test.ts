@@ -64,6 +64,7 @@ import {
   decodeReachableReport,
   decodeSessionListReport,
   decodeSessionStatusReport,
+  decodeVersionDocument,
   decodeViewFilesReport,
   decodeViewReport,
   expectNonNegativeInteger,
@@ -2636,6 +2637,63 @@ const DECODERS: readonly DecoderSpec[] = [
             path: null,
             identities: [],
             hint: "try --help",
+          },
+        },
+      },
+    ],
+  },
+  {
+    // The version document (SPEC 12.6, 12.7): {"product", "interface"}
+    // exactly, both strings. Form-exact (H-3); value contracts — `interface`
+    // exactly "1", per-build fixedness — stay with T12.6-1/2, so the decoder
+    // admits any string values (the empty informational `product` included:
+    // 12.6 places no requirement on it beyond per-build fixedness).
+    name: "12.7 version document",
+    decode: decodeVersionDocument,
+    good: { product: "xspec 1.2.3", interface: "1" },
+    verify: (decoded: ReturnType<typeof decodeVersionDocument>) => {
+      expect(decoded.product).toBe("xspec 1.2.3");
+      expect(decoded.interface).toBe("1");
+    },
+    alsoGood: [
+      {
+        label:
+          "an empty informational product version (12.6: no requirement " +
+          "beyond per-build fixedness) — the value contract on `interface` " +
+          "is the caller's",
+        doc: { product: "", interface: "2" },
+        verify: (decoded: ReturnType<typeof decodeVersionDocument>): void => {
+          expect(decoded.product).toBe("");
+          expect(decoded.interface).toBe("2");
+        },
+      },
+    ],
+    bad: [
+      { label: "missing product member", doc: { interface: "1" } },
+      { label: "missing interface member", doc: { product: "xspec 1.2.3" } },
+      {
+        label: "null product (the form carries two strings, 12.7)",
+        doc: { product: null, interface: "1" },
+      },
+      {
+        label:
+          "numeric interface (the string form of 12.6's stated value, " +
+          "never the number)",
+        doc: { product: "xspec 1.2.3", interface: 1 },
+      },
+      {
+        label: 'an extra member (12.7: exactly {"product", "interface"})',
+        doc: { product: "xspec 1.2.3", interface: "1", commit: "abc123" },
+      },
+      {
+        label: "the error document passed off as the version document",
+        doc: {
+          error: {
+            code: null,
+            message: "unknown flag",
+            locations: [],
+            path: null,
+            identities: [],
           },
         },
       },

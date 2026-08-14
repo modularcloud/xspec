@@ -3266,11 +3266,54 @@ certify against FP-091's fixtures once those land.
   stage G), 264 passed, certification green (violators failing as
   certified).]
 
-- [ ] FP-074 — Implement T12.6-1 and T12.6-2: the `version` command.
+- [x] FP-074 — Implement T12.6-1 and T12.6-2: the `version` command.
   [R2 #8; TEST-SPEC §12.6] Form-exact `{"product","interface"}` with
   `interface` exactly `"1"`; workspace/configuration independence with the
   `build`-exits-2 discriminating pair. New §12.6 registry module (may share
   a module/wrapper with §12.7 tests); map `"12.6"`.
+  [Done 2026-08-14: new registry module section-12.6.ts (SUITE-57) + thin
+  wrapper, spread into the manifest. The version document decodes through a
+  new form-exact decoder (forms.ts `decodeVersionDocument`, model.ts
+  `VersionDocument`): exactly {"product","interface"}, both strings — H-3
+  fixes 12.6's document form — with S-5 DECODERS guards (positive control,
+  empty-informational-product alsoGood, missing-member/null-product/
+  numeric-interface/extra-member/error-document-shape rejections).
+  T12.6-1: bare and flagged forms each exit 0 with a single JSON document
+  as the entire stdout, decoded form-exactly, `interface` pinned "1";
+  values identical across the bare, flagged, and repeated runs ("fixed per
+  build" as product-to-itself value identity, H-4 — whole-document byte
+  determinism stays T12.0-7's); unknown flag → exit 2 with the 12.7 error
+  document as the entire stdout (JSON in effect on the JSON-only surface,
+  no --json given) and nonempty stderr (T12.0-2; code/path values stay
+  T12.7-3's). T12.6-2: the valid-workspace answer is the byte reference
+  (decoded once); byte-identical stdout at exit 0 in the
+  no-discoverable-configuration directory, with invalid configuration
+  present, and with --config naming a nonexistent and a malformed file;
+  the no-config context's premise pinned in-test (`build` there fails
+  14.14 via expectConfigurationError — an ancestor config accidentally
+  reachable would silently weaken the context) and the discriminating pair
+  asserted on the invalid-config fixture (`build` exit 2, stable code
+  configuration-error, on the very fixture `version` answers from at exit
+  0). Traceability: both → ["12.6"] (the plan's mapping; the premise/pair
+  14.14 rides staging integrity, the FP-016/FP-073 precedent — T12.6-2 is
+  in no TEST-SPEC 14 per-condition record, the never-`version`
+  reporter-matrix clause living at T14-4). In CERTIFICATIONS.md's
+  Exclusions only, no fixture scope. Verified: typecheck/format clean;
+  both tests red-as-diagnosed against the built product at their first
+  exit-0 assertion (exit 2 "unknown command 'version'" — the whole 12.6
+  surface is patch-new); soundness proven by a scratch conforming mock
+  running both registered bodies green via entry.run(mockBinding), with
+  eleven deviation mocks each failing at the intended assertion:
+  wrong-form and extra-member (the form-exact decode), wrong-interface
+  (the "1" pin), unstable-values (the fixedness compare), no-error-doc
+  (the error-document decode), quiet-stderr (the stderr assertion),
+  consults-config (the no-config context's exit), consults-dashdash-config
+  (the never-consulted --config arm), context-answer (the byte compare),
+  accepts-invalid (the discriminating pair), no-premise (the staging
+  premise). `npm run test:self`: 266 passed, planned mid-loop reds
+  narrowed to 3 — certification-document ×2 (→ FP-091) and S-1 unmapped
+  now exactly {12.7} (→ stage G: FP-075..077); certification green
+  (violators failing as certified).]
 
 - [ ] FP-075 — Implement T12.7-1: 12.7 value forms — range, byte-form
   paths, the `{"unavailable": true}` uniqueness walk, finding form. Uses

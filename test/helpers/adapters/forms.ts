@@ -20,6 +20,7 @@
 //   - the pinned findings-order comparator and duplicate collapse (12.7)
 //   - findings arrays and the findings-only report {"findings": […]}
 //   - the exit-2 error document {"error": …} holding one finding form (12.0)
+//   - the version document {"product","interface"} (12.6)
 //   - the three-state datum decode: plain value / `null` /
 //     {"unavailable": true} (11.4, 12.7)
 //   - the scoped inventory decodes: the `recorded` datum, the `findings`
@@ -74,6 +75,7 @@ import type {
   PreviewFileEntry,
   PreviewReport,
   SourceRange,
+  VersionDocument,
   ViewAttributeEntry,
   ViewFilesReport,
   ViewImportEntry,
@@ -486,6 +488,36 @@ export function decodeErrorDocument(
     error: decodeFindingForm(
       requiredKey(obj, "error", site),
       at(site, "error"),
+    ),
+  };
+}
+
+// --- the version document (12.6, 12.7) ----------------------------------------
+
+/**
+ * The `version` document — `{"product", "interface"}` exactly, both strings
+ * (SPEC 12.6, 12.7): the product version and the machine-interface version.
+ * 12.6 is a JSON-only surface, so this single document is `version`'s only
+ * output form, with or without `--json` (12.0). Form-exact (H-3): 12.7 fixes
+ * the document form of 12.6, no adapter in the path. Value contracts — the
+ * machine-interface value exactly `"1"` (the string form of 12.6's stated
+ * value) and per-build fixedness — stay with the caller (T12.6-1/2).
+ */
+export function decodeVersionDocument(
+  doc: unknown,
+  context?: string,
+): VersionDocument {
+  const site = rootSite("12.7 version document", context);
+  const obj = expectObject(doc, site);
+  expectOnlyMembers(obj, ["product", "interface"], site);
+  return {
+    product: expectString(
+      requiredKey(obj, "product", site),
+      at(site, "product"),
+    ),
+    interface: expectString(
+      requiredKey(obj, "interface", site),
+      at(site, "interface"),
     ),
   };
 }
