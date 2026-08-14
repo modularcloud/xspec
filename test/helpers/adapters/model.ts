@@ -491,6 +491,125 @@ export interface InventoryAnchoring {
   readonly config: PathValue;
 }
 
+/** Group kinds (SPEC.md 7.1, 7.2): every group is a spec or a code group. */
+export const GROUP_KINDS = ["spec", "code"] as const;
+export type GroupKind = (typeof GROUP_KINDS)[number];
+
+/** `targets` values of a coverage profile (SPEC.md 7.4). */
+export const COVERAGE_TARGETS_VALUES = ["leaves", "all"] as const;
+export type CoverageTargetsValue = (typeof COVERAGE_TARGETS_VALUES)[number];
+
+/** `mode` values of a coverage profile (SPEC.md 7.4). */
+export const COVERAGE_MODES = ["direct", "transitive"] as const;
+export type CoverageMode = (typeof COVERAGE_MODES)[number];
+
+/** Policy rule types (SPEC.md 7.5). */
+export const POLICY_RULE_TYPES = ["forbidden", "allowedOnly"] as const;
+export type PolicyRuleType = (typeof POLICY_RULE_TYPES)[number];
+
+/** One group of the resolved configuration view: `{"name", "globs"}` (12.7). */
+export interface InventoryGroupDef {
+  readonly name: string;
+  readonly globs: readonly string[];
+}
+
+/**
+ * The resolved `markdown` view — `{"emit", "outDir"}` exactly: `outDir`
+ * `null` where unset, and an absent configuration key resolving to
+ * `{"emit": false, "outDir": null}` (SPEC.md 7.3, 11.6, 12.7).
+ */
+export interface InventoryMarkdownView {
+  readonly emit: boolean;
+  readonly outDir: PathValue | null;
+}
+
+/**
+ * One resolved coverage profile — every default and inferred kind explicit
+ * (SPEC.md 7.4, 11.6, 12.7): `targetTags` `null` where absent, `targets`
+ * `"leaves"` where defaulted, `boundaryKind` explicit though inferred,
+ * `edgeKinds` all three where defaulted. `target` and `boundary` stay
+ * configured group names, resolving against the view's own group lists.
+ */
+export interface InventoryCoverageProfileView {
+  readonly name: string;
+  readonly target: string;
+  readonly targetTags: readonly string[] | null;
+  readonly targets: CoverageTargetsValue;
+  readonly boundary: string;
+  readonly boundaryKind: GroupKind;
+  readonly mode: CoverageMode;
+  readonly edgeKinds: readonly DependencyEdgeKind[];
+}
+
+/**
+ * A resolved policy selector (SPEC.md 7.5, 12.7): exactly one of the three
+ * forms — a group selector `{"group", "kind"}` with the kind explicit though
+ * inferred, `{"files"}`, or `{"tags"}`.
+ */
+export type InventoryPolicySelector =
+  | { readonly group: string; readonly kind: GroupKind }
+  | { readonly files: string }
+  | { readonly tags: readonly string[] };
+
+/** One resolved policy rule — `kinds` all three where defaulted (7.5, 12.7). */
+export interface InventoryPolicyRuleView {
+  readonly name: string;
+  readonly type: PolicyRuleType;
+  readonly from: InventoryPolicySelector;
+  readonly to: InventoryPolicySelector;
+  readonly kinds: readonly DependencyEdgeKind[];
+}
+
+/**
+ * The inventory document's `configuration` member (SPEC.md 11.6, 12.7): the
+ * resolved configuration view — `{"specs", "code", "markdown", "coverage",
+ * "policy"}` exactly, groups/profiles/rules each carried with its complete
+ * definition, never as a bare name.
+ */
+export interface InventoryConfigurationView {
+  readonly specs: readonly InventoryGroupDef[];
+  readonly code: readonly InventoryGroupDef[];
+  readonly markdown: InventoryMarkdownView;
+  readonly coverage: readonly InventoryCoverageProfileView[];
+  readonly policy: readonly InventoryPolicyRuleView[];
+}
+
+/** One group membership of a discovered source: `{"name", "kind"}` (12.7). */
+export interface InventoryGroupMembership {
+  readonly name: string;
+  readonly kind: GroupKind;
+}
+
+/** One `sources` entry: `{"path", "groups"}` per discovered file (12.7). */
+export interface InventorySourceEntry {
+  readonly path: PathValue;
+  readonly groups: readonly InventoryGroupMembership[];
+}
+
+/**
+ * One `derived` entry — `{"source", "module", "markdown"}` per discovered
+ * spec source (SPEC.md 11.6, 13.1, 12.7): `module` and `markdown` `null` for
+ * a spec-group file without the `.mdx` extension, `markdown` `null` also
+ * while emission is disabled (7.3).
+ */
+export interface InventoryDerivedEntry {
+  readonly source: PathValue;
+  readonly module: PathValue | null;
+  readonly markdown: PathValue | null;
+}
+
+/**
+ * The inventory document's resolved configuration/sources/derived projection
+ * (SPEC.md 11.6, 12.7 — decoded by `decodeInventoryResolvedMap`; T11.6-2's
+ * subject). The document's other members are outside this scoped projection
+ * (the full inventory form is pinned across the T11.6-* tests).
+ */
+export interface InventoryResolvedMap {
+  readonly configuration: InventoryConfigurationView;
+  readonly sources: readonly InventorySourceEntry[];
+  readonly derived: readonly InventoryDerivedEntry[];
+}
+
 /** `coverage` (T8.2-1): all profiles by default, one when named. */
 export interface CoverageReport {
   readonly profiles: readonly CoverageProfileReport[];

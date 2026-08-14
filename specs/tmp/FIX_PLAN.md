@@ -3050,8 +3050,58 @@ certify against FP-091's fixtures once those land.
   certification green (violators failing as certified). FP-093 stays
   pending for the Windows-subset drive-mismatch arm; FP-070..072 build
   T11.6-2..-4 on this module.]
-- [ ] FP-070 — Implement T11.6-2: resolved configuration/sources/derived
+- [x] FP-070 — Implement T11.6-2: resolved configuration/sources/derived
   map. [R2 #6; TEST-SPEC §11.6]
+  [Done 2026-08-14: T11.6-2 registered in section-11.6.ts (SUITE-56),
+  decoding through the new scoped form-exact decoder
+  `decodeInventoryResolvedMap` (forms.ts/model.ts — the
+  `decodeInventoryRecordedDatum` scoping precedent: exactly
+  `configuration`/`sources`/`derived` in the full 12.7 member forms —
+  expectOnlyMembers per object, `null`-never-omission on
+  `outDir`/`targetTags`/`module`/`markdown`, selector exactly one of
+  {"group","kind"}/{"files"}/{"tags"}, sources/derived byte order and
+  uniqueness decoder-enforced — every other member unread until FP-071/072
+  pin the rest). Four workspaces, no arm ever running `build`: defaults —
+  `markdown` key absent → view {"emit":false,"outDir":null} and derived
+  `markdown` null everywhere; profile/rule spelling only required fields →
+  `targetTags` null, `targets` "leaves", `boundaryKind` and selector kinds
+  explicit-though-inferred, `edgeKinds`/`kinds` all three (compared as
+  sets: 11.6 pins no element order for them; every other list exact —
+  groups/profiles/rules configuration order with `core` before `aux`
+  chosen so byte-ordering products fail, sources/derived path byte order);
+  group references asserted twice (exact configured names in the compare
+  plus a resolve-against-reported-lists walk); the two-group `shared`
+  file carrying both memberships in configuration order; a code group so
+  `sources` spans kinds while `derived` holds spec sources only; flag-less
+  AND `--json` decoded against one expectation (§11 same-information).
+  Emission-enabled workspace — module + next-to-source destination both
+  present pre-build; extension-free glob `specs/*` discovers
+  `specs/note.txt` (the 14.19 staging beside) listed in `sources` with
+  membership, `module`/`markdown` the stated null, answer finding-free
+  exit 0 (the 14.19 is build/check's, never inventory's). outDir
+  workspace — view echoes "mdout", destinations `mdout/specs/…` preserving
+  workspace-relative paths, nested source included. Disabled-explicit
+  workspace — `{emit:false, outDir:"docsout"}` echoed whole while derived
+  `markdown` stays null (7.3: destinations exist exactly while emission
+  is enabled). Traceability "T11.6-2": ["11.6"] (7.3/12.7/13.1
+  parentheticals context, the §11/FP-014 precedent; no numbered condition
+  asserted — the 14.19 is staged, not asserted). In CERTIFICATIONS.md's
+  Exclusions ("`inventory` and `version`"), no fixture scope. Verified:
+  typecheck/format clean; suite red-as-diagnosed at the first arm's
+  exit-0 assert (stub: unknown-command exit 2); soundness proven by a
+  scratch mock implementing the projection independently (config eval +
+  own glob matcher + own derived arithmetic; body green — the two
+  implementations agree); teeth probed via ten mock deviations
+  (omit-boundaryKind/targetTags/selector-kind → the decode, byte-ordered
+  groups, bare-name groups, byte-ordered memberships,
+  destinations-while-disabled, non-.mdx skipped from sources,
+  outDir-ignored, phantom finding + exit 1), each failing at exactly the
+  intended assertion. `npm run test:self`: unchanged 3 planned mid-loop
+  reds (certification-document ×2 → FP-091; S-1 unmapped {12.6, 12.7} →
+  stage G); S-5 90/90 green incl. the new resolved-map guards;
+  certification green 17/17 (violators failing as certified). FP-071/072
+  build T11.6-3/-4 on this module and may widen the scoped decode to the
+  full top-level form.]
 - [ ] FP-071 — Implement T11.6-3: record, area, durables, orders. [R2 #6;
   TEST-SPEC §11.6]
 - [ ] FP-072 — Implement T11.6-4: no-parse/no-write/one-finding

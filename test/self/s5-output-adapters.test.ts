@@ -48,6 +48,7 @@ import {
   decodeInventoryAnchoring,
   decodeInventoryFindings,
   decodeInventoryRecordedDatum,
+  decodeInventoryResolvedMap,
   decodeItemReport,
   decodeNextReport,
   decodeNodeMetadataSummary,
@@ -685,6 +686,72 @@ const GOOD_EXPORT = {
   creationParameters: null,
   decompositions: [],
   items: [GOOD_ITEM],
+};
+
+// An inventory document's configuration/sources/derived projection in the
+// literal SPEC 12.7 member forms (11.6): the resolved view with every
+// default and inferred kind explicit — `markdown` unset resolving to
+// emit-false/outDir-null, `targetTags` the stated null, `boundaryKind` and
+// selector kinds explicit — one `{"path","groups"}` per discovered file in
+// byte order, one `{"source","module","markdown"}` per discovered spec
+// source. The two selector forms beyond the group form and the derived-map
+// nulls appear so the positive control spans the shape space T11.6-2
+// asserts.
+const GOOD_RESOLVED_INVENTORY = {
+  findings: [],
+  root: ".",
+  config: "xspec.config.ts",
+  configuration: {
+    specs: [
+      {
+        name: "core",
+        globs: ["specs/core/**/*.mdx", "specs/shared/**/*.mdx"],
+      },
+      { name: "aux", globs: ["specs/aux/**/*.mdx"] },
+    ],
+    code: [{ name: "impl", globs: ["src/**/*.ts"] }],
+    markdown: { emit: false, outDir: null },
+    coverage: [
+      {
+        name: "socle",
+        target: "core",
+        targetTags: null,
+        targets: "leaves",
+        boundary: "impl",
+        boundaryKind: "code",
+        mode: "direct",
+        edgeKinds: ["depends", "embeds", "references"],
+      },
+    ],
+    policy: [
+      {
+        name: "cloison",
+        type: "forbidden",
+        from: { group: "aux", kind: "spec" },
+        to: { files: "specs/core/**" },
+        kinds: ["depends"],
+      },
+    ],
+  },
+  sources: [
+    { path: "specs/aux/b.mdx", groups: [{ name: "aux", kind: "spec" }] },
+    { path: "specs/core/a.mdx", groups: [{ name: "core", kind: "spec" }] },
+    { path: "src/app.ts", groups: [{ name: "impl", kind: "code" }] },
+  ],
+  derived: [
+    {
+      source: "specs/aux/b.mdx",
+      module: "specs/aux/b.xspec.ts",
+      markdown: null,
+    },
+    {
+      source: "specs/core/a.mdx",
+      module: "specs/core/a.xspec.ts",
+      markdown: "specs/core/a.md",
+    },
+  ],
+  recorded: [],
+  graphData: ".xspec",
 };
 
 // --- decoder table -----------------------------------------------------------
@@ -2768,6 +2835,268 @@ const DECODERS: readonly DecoderSpec[] = [
           "a valid-UTF-8 anchoring path in the marked byte form (SPEC 12.7 " +
           "forbids the byte form for a valid-UTF-8 path)",
         doc: { root: { bytes: "2e" }, config: "xspec.config.ts" },
+      },
+    ],
+  },
+  {
+    // The scoped inventory resolved-map decode (SPEC 11.6, 12.7; T11.6-2's
+    // subject): exactly the `configuration`, `sources`, and `derived`
+    // members in the 12.7 member forms — every default and inferred kind
+    // explicit, `null` never omission, sources/derived in byte order — with
+    // every other member unread (the full inventory form is T11.6-*'s
+    // subject).
+    name: "11.6 inventory (resolved map)",
+    decode: decodeInventoryResolvedMap,
+    good: GOOD_RESOLVED_INVENTORY,
+    verify: (decoded: ReturnType<typeof decodeInventoryResolvedMap>) => {
+      expect(decoded.configuration.specs.map((g) => g.name)).toEqual([
+        "core",
+        "aux",
+      ]);
+      expect(decoded.configuration.markdown).toEqual({
+        emit: false,
+        outDir: null,
+      });
+      const profile = decoded.configuration.coverage[0]!;
+      expect(profile.targetTags).toBeNull();
+      expect(profile.targets).toBe("leaves");
+      expect(profile.boundaryKind).toBe("code");
+      expect(profile.edgeKinds).toEqual(["depends", "embeds", "references"]);
+      const rule = decoded.configuration.policy[0]!;
+      expect(rule.from).toEqual({ group: "aux", kind: "spec" });
+      expect(rule.to).toEqual({ files: "specs/core/**" });
+      expect(decoded.sources.map((s) => s.path)).toEqual([
+        "specs/aux/b.mdx",
+        "specs/core/a.mdx",
+        "src/app.ts",
+      ]);
+      expect(decoded.sources[2]!.groups).toEqual([
+        { name: "impl", kind: "code" },
+      ]);
+      expect(decoded.derived[0]!.markdown).toBeNull();
+      expect(decoded.derived[1]!).toEqual({
+        source: "specs/core/a.mdx",
+        module: "specs/core/a.xspec.ts",
+        markdown: "specs/core/a.md",
+      });
+    },
+    alsoGood: [
+      {
+        label:
+          "a tags selector, a non-UTF-8 source path in the marked byte " +
+          "form, and a non-generating source's null module/markdown all " +
+          "decode as stated (SPEC 12.7, 11.6)",
+        doc: put(
+          put(
+            put(
+              GOOD_RESOLVED_INVENTORY,
+              { tags: ["stable", "v2"] },
+              "configuration",
+              "policy",
+              0,
+              "to",
+            ),
+            [
+              ...GOOD_RESOLVED_INVENTORY.sources,
+              // 0xff… sorts after every ASCII path: byte order holds.
+              {
+                path: { bytes: "ff2e6d64" },
+                groups: [{ name: "core", kind: "spec" }],
+              },
+            ],
+            "sources",
+          ),
+          [
+            ...GOOD_RESOLVED_INVENTORY.derived,
+            { source: { bytes: "ff2e6d64" }, module: null, markdown: null },
+          ],
+          "derived",
+        ),
+        verify: (
+          decoded: ReturnType<typeof decodeInventoryResolvedMap>,
+        ): void => {
+          expect(decoded.configuration.policy[0]!.to).toEqual({
+            tags: ["stable", "v2"],
+          });
+          expect(decoded.sources[3]!.path).toEqual({ bytes: "ff2e6d64" });
+          expect(decoded.derived[2]!).toEqual({
+            source: { bytes: "ff2e6d64" },
+            module: null,
+            markdown: null,
+          });
+        },
+      },
+    ],
+    bad: [
+      {
+        label:
+          "absent configuration member (null is never omission, SPEC 12.7)",
+        doc: omit(GOOD_RESOLVED_INVENTORY, "configuration"),
+      },
+      {
+        label:
+          "an extra member inside configuration (the form carries exactly " +
+          "specs/code/markdown/coverage/policy, SPEC 12.7)",
+        doc: put(GOOD_RESOLVED_INVENTORY, true, "configuration", "extra"),
+      },
+      {
+        label:
+          "markdown without outDir (unset is the stated null, never " +
+          "omission, SPEC 12.7)",
+        doc: omit(
+          GOOD_RESOLVED_INVENTORY,
+          "configuration",
+          "markdown",
+          "outDir",
+        ),
+      },
+      {
+        label: "a non-boolean emit",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          "false",
+          "configuration",
+          "markdown",
+          "emit",
+        ),
+      },
+      {
+        label:
+          "a group carried as a bare name instead of its complete " +
+          "definition (SPEC 11.6: never as a bare name)",
+        doc: put(GOOD_RESOLVED_INVENTORY, ["core"], "configuration", "specs"),
+      },
+      {
+        label:
+          "a profile without targetTags (an absent targetTags is the " +
+          "stated null — every default explicit, SPEC 11.6, 12.7)",
+        doc: omit(
+          GOOD_RESOLVED_INVENTORY,
+          "configuration",
+          "coverage",
+          0,
+          "targetTags",
+        ),
+      },
+      {
+        label:
+          "a profile without boundaryKind (explicit though inferred, SPEC " +
+          "11.6, 7.4)",
+        doc: omit(
+          GOOD_RESOLVED_INVENTORY,
+          "configuration",
+          "coverage",
+          0,
+          "boundaryKind",
+        ),
+      },
+      {
+        label:
+          'edgeKinds carrying "contains" (no dependency edge kind, SPEC ' +
+          "5.2, 7.4)",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          ["contains"],
+          "configuration",
+          "coverage",
+          0,
+          "edgeKinds",
+        ),
+      },
+      {
+        label:
+          "a group selector without kind (explicit though inferred, SPEC " +
+          "7.5, 12.7)",
+        doc: omit(
+          GOOD_RESOLVED_INVENTORY,
+          "configuration",
+          "policy",
+          0,
+          "from",
+          "kind",
+        ),
+      },
+      {
+        label: "a selector of no 7.5 form",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          { unit: "x" },
+          "configuration",
+          "policy",
+          0,
+          "from",
+        ),
+      },
+      {
+        label: "a selector mixing the group and files forms",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          { group: "aux", kind: "spec", files: "src/**" },
+          "configuration",
+          "policy",
+          0,
+          "from",
+        ),
+      },
+      {
+        label:
+          "source entries out of byte order (SPEC 11.6: files and paths " +
+          "in byte order of workspace-relative path)",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          [
+            GOOD_RESOLVED_INVENTORY.sources[1],
+            GOOD_RESOLVED_INVENTORY.sources[0],
+            GOOD_RESOLVED_INVENTORY.sources[2],
+          ],
+          "sources",
+        ),
+      },
+      {
+        label: "duplicate source entries (one entry per discovered file)",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          [
+            GOOD_RESOLVED_INVENTORY.sources[0],
+            GOOD_RESOLVED_INVENTORY.sources[0],
+          ],
+          "sources",
+        ),
+      },
+      {
+        label: "a membership without kind",
+        doc: omit(GOOD_RESOLVED_INVENTORY, "sources", 0, "groups", 0, "kind"),
+      },
+      {
+        label:
+          "a valid-UTF-8 source path in the marked byte form (SPEC 12.7 " +
+          "forbids it)",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          { bytes: "612e6d64" },
+          "sources",
+          0,
+          "path",
+        ),
+      },
+      {
+        label:
+          "a derived entry without markdown (structural absence is the " +
+          "stated null, never omission, SPEC 11.6, 12.7)",
+        doc: omit(GOOD_RESOLVED_INVENTORY, "derived", 0, "markdown"),
+      },
+      {
+        label:
+          "a derived module as the unavailability marker (the projection " +
+          "is configuration- and discovery-determined, never " +
+          "record-supplied, SPEC 11.6)",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          { unavailable: true },
+          "derived",
+          0,
+          "module",
+        ),
       },
     ],
   },

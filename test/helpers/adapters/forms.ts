@@ -23,8 +23,9 @@
 //   - the three-state datum decode: plain value / `null` /
 //     {"unavailable": true} (11.4, 12.7)
 //   - the scoped inventory decodes: the `recorded` datum, the `findings`
-//     member, and the `root`/`config` anchoring (11.6; the full inventory
-//     form is T11.6-*'s subject)
+//     member, the `root`/`config` anchoring, and the resolved
+//     configuration/sources/derived map (11.6; the full inventory form is
+//     T11.6-*'s subject)
 //   - the occurrence-record form {"file","range","kind","source","target"}
 //     and the occurrences document {"findings","occurrences"} (5.7, 11.3)
 //   - the at document {"findings","resolution"} (11.5)
@@ -44,12 +45,21 @@ import type {
   AtReport,
   AtResolution,
   AtSection,
+  DependencyEdgeKind,
   ErrorDocument,
   FileView,
   Finding,
   FindingLocation,
   FindingsReport,
   InventoryAnchoring,
+  InventoryConfigurationView,
+  InventoryCoverageProfileView,
+  InventoryDerivedEntry,
+  InventoryGroupDef,
+  InventoryPolicyRuleView,
+  InventoryPolicySelector,
+  InventoryResolvedMap,
+  InventorySourceEntry,
   MarkedBytePath,
   OccurrenceRecord,
   OccurrenceSource,
@@ -71,7 +81,11 @@ import type {
 import {
   CONDITION_CODE_TOKENS,
   COVERAGE_ATTRIBUTE_VALUES,
+  COVERAGE_MODES,
+  COVERAGE_TARGETS_VALUES,
   DEPENDENCY_EDGE_KINDS,
+  GROUP_KINDS,
+  POLICY_RULE_TYPES,
   PREVIEW_EDIT_CLASSES,
   REFUSAL_CODE_TOKENS,
   conditionIdentityOf,
@@ -81,7 +95,9 @@ import {
   at,
   describeJsonValue,
   expectArray,
+  expectBoolean,
   expectNonEmptyString,
+  expectNonEmptyStringArray,
   expectNonNegativeInteger,
   expectObject,
   expectString,
@@ -610,6 +626,385 @@ export function decodeInventoryAnchoring(
       at(site, "config"),
     ),
   };
+}
+
+// --- scoped inventory decode: configuration, sources, derived (11.6, 12.7) ----
+
+/**
+ * A member that is the stated `null` or a 12.7 path value (`markdown.outDir`
+ * unset; a non-generating source's `module`/`markdown`). The member must be
+ * present — `null` is never omission (12.7) — and a present value must be a
+ * well-formed path value; the unavailability marker is no path value and
+ * rejects (these members are configuration- and discovery-determined, never
+ * record-supplied, 11.6).
+ */
+function decodeNullablePathMember(
+  obj: Record<string, unknown>,
+  key: string,
+  site: DecodeSite,
+): PathValue | null {
+  const value = requiredMember(obj, key, site);
+  if (value === null) return null;
+  return decodePathValue(value, at(site, key));
+}
+
+/** One group of the view: `{"name", "globs"}` exactly (12.7). */
+function decodeInventoryGroupDef(
+  value: unknown,
+  site: DecodeSite,
+): InventoryGroupDef {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, ["name", "globs"], site);
+  return {
+    name: expectNonEmptyString(
+      requiredKey(obj, "name", site),
+      at(site, "name"),
+    ),
+    globs: expectNonEmptyStringArray(
+      requiredKey(obj, "globs", site),
+      at(site, "globs"),
+    ),
+  };
+}
+
+/** A group list of the view (`specs`/`code`), each entry `{"name","globs"}`. */
+function decodeInventoryGroupList(
+  value: unknown,
+  site: DecodeSite,
+): InventoryGroupDef[] {
+  return expectArray(value, site).map((element, index) =>
+    decodeInventoryGroupDef(element, at(site, index)),
+  );
+}
+
+/** An edge-kind list member (`edgeKinds`/`kinds`): 5.2's tokens only. */
+function decodeEdgeKindList(
+  value: unknown,
+  site: DecodeSite,
+): DependencyEdgeKind[] {
+  return expectArray(value, site).map((element, index) =>
+    expectToken(element, DEPENDENCY_EDGE_KINDS, at(site, index)),
+  );
+}
+
+const COVERAGE_PROFILE_VIEW_MEMBERS = [
+  "name",
+  "target",
+  "targetTags",
+  "targets",
+  "boundary",
+  "boundaryKind",
+  "mode",
+  "edgeKinds",
+] as const;
+
+/**
+ * One resolved coverage profile (12.7): all eight members present — every
+ * default and inferred kind explicit (11.6) — `targetTags` `null` where
+ * absent, never omitted.
+ */
+function decodeCoverageProfileView(
+  value: unknown,
+  site: DecodeSite,
+): InventoryCoverageProfileView {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, COVERAGE_PROFILE_VIEW_MEMBERS, site);
+  const targetTagsValue = requiredMember(obj, "targetTags", site);
+  return {
+    name: expectNonEmptyString(
+      requiredKey(obj, "name", site),
+      at(site, "name"),
+    ),
+    target: expectNonEmptyString(
+      requiredKey(obj, "target", site),
+      at(site, "target"),
+    ),
+    targetTags:
+      targetTagsValue === null
+        ? null
+        : expectNonEmptyStringArray(targetTagsValue, at(site, "targetTags")),
+    targets: expectToken(
+      requiredKey(obj, "targets", site),
+      COVERAGE_TARGETS_VALUES,
+      at(site, "targets"),
+    ),
+    boundary: expectNonEmptyString(
+      requiredKey(obj, "boundary", site),
+      at(site, "boundary"),
+    ),
+    boundaryKind: expectToken(
+      requiredKey(obj, "boundaryKind", site),
+      GROUP_KINDS,
+      at(site, "boundaryKind"),
+    ),
+    mode: expectToken(
+      requiredKey(obj, "mode", site),
+      COVERAGE_MODES,
+      at(site, "mode"),
+    ),
+    edgeKinds: decodeEdgeKindList(
+      requiredKey(obj, "edgeKinds", site),
+      at(site, "edgeKinds"),
+    ),
+  };
+}
+
+/**
+ * A resolved policy selector (7.5, 12.7): exactly one of `{"group","kind"}`
+ * (the kind explicit though inferred), `{"files"}`, or `{"tags"}`.
+ */
+function decodePolicySelectorView(
+  value: unknown,
+  site: DecodeSite,
+): InventoryPolicySelector {
+  const obj = expectObject(value, site);
+  if (Object.hasOwn(obj, "group")) {
+    expectOnlyMembers(obj, ["group", "kind"], site);
+    return {
+      group: expectNonEmptyString(
+        requiredKey(obj, "group", site),
+        at(site, "group"),
+      ),
+      kind: expectToken(
+        requiredKey(obj, "kind", site),
+        GROUP_KINDS,
+        at(site, "kind"),
+      ),
+    };
+  }
+  if (Object.hasOwn(obj, "files")) {
+    expectOnlyMembers(obj, ["files"], site);
+    return {
+      files: expectNonEmptyString(
+        requiredKey(obj, "files", site),
+        at(site, "files"),
+      ),
+    };
+  }
+  if (Object.hasOwn(obj, "tags")) {
+    expectOnlyMembers(obj, ["tags"], site);
+    return {
+      tags: expectNonEmptyStringArray(
+        requiredKey(obj, "tags", site),
+        at(site, "tags"),
+      ),
+    };
+  }
+  formFail(
+    site,
+    'a selector in exactly one of the forms {"group", "kind"}, {"files"}, ' +
+      'or {"tags"} (SPEC 7.5, 12.7)',
+    value,
+  );
+}
+
+/** One resolved policy rule (12.7): `{"name","type","from","to","kinds"}`. */
+function decodePolicyRuleView(
+  value: unknown,
+  site: DecodeSite,
+): InventoryPolicyRuleView {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, ["name", "type", "from", "to", "kinds"], site);
+  return {
+    name: expectNonEmptyString(
+      requiredKey(obj, "name", site),
+      at(site, "name"),
+    ),
+    type: expectToken(
+      requiredKey(obj, "type", site),
+      POLICY_RULE_TYPES,
+      at(site, "type"),
+    ),
+    from: decodePolicySelectorView(
+      requiredKey(obj, "from", site),
+      at(site, "from"),
+    ),
+    to: decodePolicySelectorView(requiredKey(obj, "to", site), at(site, "to")),
+    kinds: decodeEdgeKindList(
+      requiredKey(obj, "kinds", site),
+      at(site, "kinds"),
+    ),
+  };
+}
+
+/** One `sources` entry: `{"path", "groups"}` exactly (12.7). */
+function decodeInventorySourceEntry(
+  value: unknown,
+  site: DecodeSite,
+): InventorySourceEntry {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, ["path", "groups"], site);
+  const groupsSite = at(site, "groups");
+  return {
+    path: decodePathValue(requiredKey(obj, "path", site), at(site, "path")),
+    groups: expectArray(requiredKey(obj, "groups", site), groupsSite).map(
+      (element, index) => {
+        const membershipSite = at(groupsSite, index);
+        const membership = expectObject(element, membershipSite);
+        expectOnlyMembers(membership, ["name", "kind"], membershipSite);
+        return {
+          name: expectNonEmptyString(
+            requiredKey(membership, "name", membershipSite),
+            at(membershipSite, "name"),
+          ),
+          kind: expectToken(
+            requiredKey(membership, "kind", membershipSite),
+            GROUP_KINDS,
+            at(membershipSite, "kind"),
+          ),
+        };
+      },
+    ),
+  };
+}
+
+/** One `derived` entry: `{"source", "module", "markdown"}` exactly (12.7). */
+function decodeInventoryDerivedEntry(
+  value: unknown,
+  site: DecodeSite,
+): InventoryDerivedEntry {
+  const obj = expectObject(value, site);
+  expectOnlyMembers(obj, ["source", "module", "markdown"], site);
+  return {
+    source: decodePathValue(
+      requiredKey(obj, "source", site),
+      at(site, "source"),
+    ),
+    module: decodeNullablePathMember(obj, "module", site),
+    markdown: decodeNullablePathMember(obj, "markdown", site),
+  };
+}
+
+/**
+ * Scoped decode of the inventory document's `configuration`, `sources`, and
+ * `derived` members (SPEC 11.6, 12.7; T11.6-2's subject): the resolved
+ * configuration view `{"specs", "code", "markdown", "coverage", "policy"}` —
+ * every member present, every default and inferred kind explicit, each
+ * group/profile/rule carried with its complete definition in the 12.7 member
+ * forms — one `{"path", "groups"}` per discovered file, and one `{"source",
+ * "module", "markdown"}` per discovered spec source. The `sources` and
+ * `derived` lists must arrive in byte order of workspace-relative path with
+ * one entry per file (11.6/12.7 pin that order; configuration order for
+ * groups, profiles, and rules is the caller's value assertion — this decoder
+ * cannot know the configuration). Deliberately scoped exactly as
+ * `decodeInventoryRecordedDatum` is: SPEC 12.7 fixes the whole inventory
+ * form and the T11.6-* tests pin it entirely; every other member stays
+ * unread here. Form-exact (H-3): never adjustable to a product's shape.
+ */
+export function decodeInventoryResolvedMap(
+  doc: unknown,
+  context?: string,
+): InventoryResolvedMap {
+  const site = rootSite("11.6 inventory (resolved map)", context);
+  const obj = expectObject(doc, site);
+
+  const configurationSite = at(site, "configuration");
+  const configurationObj = expectObject(
+    requiredKey(obj, "configuration", site),
+    configurationSite,
+  );
+  expectOnlyMembers(
+    configurationObj,
+    ["specs", "code", "markdown", "coverage", "policy"],
+    configurationSite,
+  );
+  const markdownSite = at(configurationSite, "markdown");
+  const markdownObj = expectObject(
+    requiredKey(configurationObj, "markdown", configurationSite),
+    markdownSite,
+  );
+  expectOnlyMembers(markdownObj, ["emit", "outDir"], markdownSite);
+  const coverageSite = at(configurationSite, "coverage");
+  const policySite = at(configurationSite, "policy");
+  const configuration: InventoryConfigurationView = {
+    specs: decodeInventoryGroupList(
+      requiredKey(configurationObj, "specs", configurationSite),
+      at(configurationSite, "specs"),
+    ),
+    code: decodeInventoryGroupList(
+      requiredKey(configurationObj, "code", configurationSite),
+      at(configurationSite, "code"),
+    ),
+    markdown: {
+      emit: expectBoolean(
+        requiredKey(markdownObj, "emit", markdownSite),
+        at(markdownSite, "emit"),
+      ),
+      outDir: decodeNullablePathMember(markdownObj, "outDir", markdownSite),
+    },
+    coverage: expectArray(
+      requiredKey(configurationObj, "coverage", configurationSite),
+      coverageSite,
+    ).map((element, index) =>
+      decodeCoverageProfileView(element, at(coverageSite, index)),
+    ),
+    policy: expectArray(
+      requiredKey(configurationObj, "policy", configurationSite),
+      policySite,
+    ).map((element, index) =>
+      decodePolicyRuleView(element, at(policySite, index)),
+    ),
+  };
+
+  const sourcesSite = at(site, "sources");
+  const sources = expectArray(
+    requiredKey(obj, "sources", site),
+    sourcesSite,
+  ).map((element, index) =>
+    decodeInventorySourceEntry(element, at(sourcesSite, index)),
+  );
+  for (let i = 1; i < sources.length; i += 1) {
+    const order = Buffer.compare(
+      pathValueBytes(sources[i - 1]!.path),
+      pathValueBytes(sources[i]!.path),
+    );
+    if (order === 0) {
+      formFail(
+        at(sourcesSite, i),
+        'one {"path", "groups"} entry per discovered file (SPEC 12.7)',
+        obj["sources"],
+      );
+    }
+    if (order > 0) {
+      formFail(
+        at(sourcesSite, i),
+        "source entries in byte order of workspace-relative path (SPEC 11.6)",
+        obj["sources"],
+      );
+    }
+  }
+
+  const derivedSite = at(site, "derived");
+  const derived = expectArray(
+    requiredKey(obj, "derived", site),
+    derivedSite,
+  ).map((element, index) =>
+    decodeInventoryDerivedEntry(element, at(derivedSite, index)),
+  );
+  for (let i = 1; i < derived.length; i += 1) {
+    const order = Buffer.compare(
+      pathValueBytes(derived[i - 1]!.source),
+      pathValueBytes(derived[i]!.source),
+    );
+    if (order === 0) {
+      formFail(
+        at(derivedSite, i),
+        'one {"source", "module", "markdown"} entry per discovered spec ' +
+          "source (SPEC 12.7)",
+        obj["derived"],
+      );
+    }
+    if (order > 0) {
+      formFail(
+        at(derivedSite, i),
+        "derived entries in byte order of workspace-relative source path " +
+          "(SPEC 11.6)",
+        obj["derived"],
+      );
+    }
+  }
+
+  return { configuration, sources, derived };
 }
 
 // --- the occurrences document (5.7, 11.3, 12.7) -------------------------------
