@@ -1,5 +1,5 @@
 // TEST-SPEC §11.2 (availability on imperfect files) — SUITE-52: T11.2-1
-// through T11.2-5.
+// through T11.2-6.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -12,11 +12,14 @@
 // staging constraint pins every command an in-scope test drives to its
 // enumerated `view`/`occurrences` surface, so T11.2-2 and T11.2-4 run NO
 // gate-reference `build`, no `at`, and no `--file` on `occurrences`
-// (VIOL-AVAIL-NOFILE's staging constraint) — unlike T11.2-1, T11.2-3, and
-// T11.2-5, which are not in scope (CONF-AVAIL's workspace scope is `#`-free
-// valid-UTF-8 paths with no code groups, so T11.2-3's staging lies outside
-// it by construction, and T11.2-5 — its argument and domain-and-exit
-// matrix — is expressly an Exclusions entry): staging integrity rides each
+// (VIOL-AVAIL-NOFILE's staging constraint) — unlike T11.2-1, T11.2-3,
+// T11.2-5, and T11.2-6, which are not in scope (CONF-AVAIL's workspace scope
+// is `#`-free valid-UTF-8 paths with no code groups, so T11.2-3's staging
+// lies outside it by construction, and T11.2-5 — its argument and
+// domain-and-exit matrix — and T11.2-6 — its answer-side no-write compares
+// lean on the compare-around machinery certified through
+// VIOL-CORE-CHATTYREADS — are expressly Exclusions entries): staging
+// integrity rides each
 // answer's own exact accompanying-findings multiset instead, and the
 // staged conditions are
 // drawn from the scope's stated set (T11.2-2: 14.1, 14.3, 14.4, 14.17;
@@ -96,11 +99,14 @@ import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
+  assertFindingConcernsPath,
   assertFindingLocated,
   assertSameJson,
+  buildOk,
   expectErrorDocument,
   expectExit,
   runCli,
+  runJson,
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
@@ -3676,6 +3682,398 @@ const T11_2_5 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T11.2-6 — never stale, gate findings never attach
+// ---------------------------------------------------------------------------
+//
+// SPEC 11.2's closing paragraph, with TEST-SPEC's stated delegations: the
+// passing-workspace half — these surfaces participate in read-time refresh
+// exactly as 13.3's reads — rides T13.3-2's sweep; the failing-side
+// answer-from-current-sources-and-write-nothing discipline is T11.2-1's;
+// the gated-read breadth over these two fixtures (each of `ids`, `show`,
+// `coverage`, `impact`, `review status`, `query` reporting the gate finding
+// without answering) is T13.3-3's whole-gate arms; and the
+// `occurrences`/`at` finding-free contrast on the same states rides
+// T13.3-3's never-gated sweep and T14-4's availability rows. This test owns
+// the two fixtures and the entry's own arms: a gate condition that is NO
+// domain file's finding — the journal's 14.13, a write-path component's
+// 14.22, each carrying a concerned path that is never a requested file and
+// no in-source location — accompanies no answer of these surfaces, while
+// the state surfaces through `build` and `check`.
+//
+// Fixture 1 (garbage journal, 14.13): a passing `build` first — derived
+// files and graph data then exist and match, so the later `check` stands on
+// pinned ground — then one garbage line written at `.xspec/journal` (the
+// journal is written only by `rename`/`move`, SPEC 6.1, so the build left
+// it absent; the T12.2-2 family-7 and T14-4 staging). `build --json` and
+// `check --json` each report the journal error — build's multiset exact
+// ({14.13: 1}: build cannot observe staleness, SPEC 12.1), check's exact
+// over the non-14.10 findings (the T12.2-2 set-aside: the journal feeds
+// canonical identities, SPEC 5.4, so whether graph data is verifiable
+// beside an unreadable journal is underdetermined; no phantom
+// non-staleness condition is accepted) — each finding concerning the
+// journal path (SPEC 14: a journal condition carries the file it
+// concerns). Then `view specs/C.mdx`: the finding-free file's complete
+// view, findings [], exit 0 — the workspace fails `build`'s validations
+// (journal errors alike, SPEC 13.3), so the surface answers from current
+// sources, consults no journal, and the gate finding never attaches.
+//
+// Fixture 2 (obstructed write path, 14.22): a passing `build` with
+// emission under `markdown.outDir` (premise-checked: `mdout/` exists and
+// holds the emitted `mdout/specs/C.md`, SPEC 7.3, 13.2), then the outDir
+// directory replaced by a plain file — the emit write path's
+// workspace-relative component `mdout` is now occupied by a non-directory,
+// the one offending component (SPEC 13.4, 14.22; T13.3-3's arm-2 staging).
+// `build --json` reports exactly {14.22: 1} concerning `mdout` and
+// modifies nothing — the refusal precedes every write (byte-level, H-4: an
+// identical regeneration would be invisible, which is exactly the
+// contract's grain). `check --json` reports exactly {14.10: 1, 14.22: 1}:
+// the swap deleted the emitted Markdown, and on this valid-source
+// workspace what the current sources generate is defined, so the missing
+// emitted file is definite per-file staleness (the T12.2-2 exactness
+// position) — pinning the swap's entire fallout rather than setting it
+// aside — the 14.22 concerning `mdout`, the 14.10 concerning the deleted
+// `mdout/specs/C.md`. Then `view specs/C.mdx`: finding-free, complete,
+// exit 0 — the viewed file is the very file whose emission path is
+// obstructed, and the write-path condition is still no domain file's
+// finding (its concerned path is the component, never the source).
+//
+// Every invocation runs under a whole-root snapshot compare (the
+// CERTIFICATIONS.md Exclusions note's answer-side no-write compares): the
+// view answers write nothing — the garbage journal not repaired or
+// deleted, no graph data or derived files touched — and the failing
+// build/check modify nothing (SPEC 12.1, 12.2, 14.22).
+
+const JOURNAL_PATH = ".xspec/journal";
+const T11_2_6_GARBAGE_LINE =
+  "?? harness-injected garbage: not a journal entry ??\n";
+
+const T11_2_6_OUTDIR_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "mdout" }
+})
+`;
+const T11_2_6_OUTDIR = "mdout";
+const T11_2_6_EMITTED = "mdout/specs/C.md";
+
+/**
+ * The T11.2-6 never-attach arm: `view` naming the finding-free C answers
+ * complete and finding-free at exit 0 — whatever journal or write-path
+ * state the workspace holds (SPEC 11.2) — modifying nothing.
+ */
+async function assertViewOfCFindingFree(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const report = decodeViewReport(
+        await runJson(
+          product,
+          workspace,
+          ["view", C_FILE],
+          `${context} — a complete, finding-free answer exits 0 whatever ` +
+            `journal or write-path state the workspace holds (SPEC 11.2)`,
+        ),
+        { text: false },
+        context,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${context} — the gate condition is the finding of no domain file ` +
+          `(no in-source location, its concerned path never a requested ` +
+          `file), so it accompanies no answer of this surface (SPEC 11.2, ` +
+          `14; the gated reads report it instead, T13.3-3)`,
+      );
+      assertSameJson(
+        report.views.map((view) => view.file),
+        [C_FILE],
+        `${context} — exactly the requested file's view (SPEC 11.4)`,
+      );
+      const cView = report.views[0]!;
+      assertSameJson(
+        projectNode(cView.root),
+        C_TREE,
+        `${context} — C's complete view: the answer is served whole, from ` +
+          `the current sources (SPEC 11.2, 11.4)`,
+      );
+      assertSameJson(
+        [cView.imports, cView.occurrences, cView.comments],
+        [[], [], []],
+        `${context} — C holds no imports, occurrences, or comments: empty ` +
+          `arrays, never null (SPEC 12.7)`,
+      );
+    },
+    `${context} — the answer consults no journal and no record and writes ` +
+      `nothing: journal, graph data, and derived files byte-identical ` +
+      `around the invocation (SPEC 11.2, 13.3)`,
+  );
+}
+
+const T11_2_6 = defineProductTest({
+  id: "T11.2-6",
+  title:
+    "gate findings never attach: on an otherwise-valid pre-built workspace with a garbage journal line staged (14.13), and separately with the `markdown.outDir` directory replaced by a plain file (14.22, the obstructed emit write path's one offending component), `view` of the finding-free file answers complete and finding-free at exit 0, writing nothing — the state surfaces through `build` (exactly the gate condition; a failing build modifies nothing) and `check` (the gate condition beside the obstruction fixture's one definite per-file staleness, each concerned path pinned: the journal path, the offending component, the deleted emitted file), and through the gated reads (T13.3-3), never these answers; the passing-workspace refresh participation is T13.3-2's sweep and the failing-side answering discipline T11.2-1's (SPEC 11.2, 13.3, 12.1, 12.2, 14.13, 14.22, 14.10)",
+  run: async (product) => {
+    // --- Fixture 1: garbage journal line (14.13) --------------------------
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [C_FILE]: C_SOURCE,
+        },
+      });
+      try {
+        const context = "T11.2-6 (garbage journal)";
+        await buildOk(
+          product,
+          workspace,
+          `${context} staging \`build\` — a passing build, so derived ` +
+            `files and graph data exist and match before the journal is ` +
+            `garbaged (SPEC 12.1)`,
+        );
+        await workspace.file(JOURNAL_PATH, T11_2_6_GARBAGE_LINE);
+
+        // The state surfaces through `build`: exactly the staged gate
+        // condition, concerning the journal path (SPEC 14.13, 14, 12.1).
+        const buildContext = `${context} \`build --json\``;
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const result = await expectExit(
+              product,
+              workspace,
+              ["build", "--json"],
+              1,
+              `${buildContext} — journal errors are among \`build\`'s ` +
+                `validations (SPEC 12.1, 13.3, 14.13)`,
+            );
+            const findings = decodeFindingsReport(
+              parseJsonStdout(result, buildContext),
+              buildContext,
+            ).findings;
+            assertConditionCounts(
+              findings,
+              { "14.13": 1 },
+              `${buildContext} — exactly the staged gate condition: the ` +
+                `pre-built otherwise-valid workspace stages nothing else, ` +
+                `and \`build\` cannot observe staleness (SPEC 14.13, 12.1)`,
+            );
+            assertFindingConcernsPath(
+              findings[0]!,
+              JOURNAL_PATH,
+              `${buildContext} — a journal condition carries the journal ` +
+                `path it concerns (SPEC 14, 12.7)`,
+            );
+          },
+          `${buildContext} — a failing build modifies nothing, the garbage ` +
+            `journal included (SPEC 12.1, 6.1)`,
+        );
+
+        // ...and through `check` (SPEC 12.2, 14.13): the gate condition
+        // counted exactly over the non-14.10 findings (the T12.2-2
+        // set-aside — the journal feeds canonical identities, SPEC 5.4, so
+        // whether graph data is verifiable beside an unreadable journal is
+        // underdetermined; no phantom non-staleness condition is accepted).
+        const checkContext = `${context} \`check --json\``;
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const result = await expectExit(
+              product,
+              workspace,
+              ["check", "--json"],
+              1,
+              `${checkContext} — \`check\` performs all build validations, ` +
+                `journal errors included (SPEC 12.2, 14.13)`,
+            );
+            const findings = decodeFindingsReport(
+              parseJsonStdout(result, checkContext),
+              checkContext,
+            ).findings;
+            const nonStale = findings.filter(
+              (finding) => finding.condition !== "14.10",
+            );
+            assertConditionCounts(
+              nonStale,
+              { "14.13": 1 },
+              `${checkContext} — the journal error is reported, and no ` +
+                `condition beside it save 14.10 (SPEC 12.2, 14.13)`,
+            );
+            assertFindingConcernsPath(
+              nonStale[0]!,
+              JOURNAL_PATH,
+              `${checkContext} — the journal condition's concerned path ` +
+                `(SPEC 14, 12.7)`,
+            );
+          },
+          `${checkContext} — \`check\` writes nothing (SPEC 12.2, 13.3)`,
+        );
+
+        // ...never this answer: `view` of the finding-free file (SPEC 11.2).
+        await assertViewOfCFindingFree(
+          product,
+          workspace,
+          `${context} \`view ${C_FILE}\``,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- Fixture 2: obstructed write path (14.22) -------------------------
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": T11_2_6_OUTDIR_CONFIG,
+          [C_FILE]: C_SOURCE,
+        },
+      });
+      try {
+        const context = "T11.2-6 (obstructed write path)";
+        await buildOk(
+          product,
+          workspace,
+          `${context} staging \`build\` — emits under markdown.outDir ` +
+            `(SPEC 7.3, 13.2, 12.1)`,
+        );
+
+        // Staging premises (T13.3-3's arm-2 discipline): emission landed
+        // under mdout/ preserving workspace-relative paths (SPEC 7.3,
+        // 13.2), so mdout is a component of a path `build` writes.
+        const mdoutKind = await workspace.kind(T11_2_6_OUTDIR);
+        if (mdoutKind !== "dir") {
+          fail(
+            `${context}: staging premise — \`build\` with emission enabled ` +
+              `under markdown.outDir creates the mdout/ directory (SPEC ` +
+              `7.3, 13.2, 13.4); found ${mdoutKind}`,
+          );
+        }
+        const emittedKind = await workspace.kind(T11_2_6_EMITTED);
+        if (emittedKind !== "file") {
+          fail(
+            `${context}: staging premise — emission under outDir preserves ` +
+              `workspace-relative paths, so ${C_FILE} emits ` +
+              `${T11_2_6_EMITTED} (SPEC 7.3, 13.2); found ${emittedKind}`,
+          );
+        }
+
+        // Obstruct: replace the directory with a plain file. The emitted
+        // Markdown goes with it — definite per-file staleness for `check`
+        // on this valid-source workspace, invisible to `build`, which
+        // refuses at the obstruction (SPEC 13.4, 14.22, 14.10).
+        await fsp.rm(workspace.path(T11_2_6_OUTDIR), {
+          recursive: true,
+          force: true,
+        });
+        await workspace.file(T11_2_6_OUTDIR, "not a directory\n");
+
+        // The state surfaces through `build`: exactly the one condition-22
+        // finding — one finding per distinct offending component —
+        // concerning the component's workspace-relative path, and the
+        // refusal precedes every write (SPEC 14.22, 13.4, 12.1).
+        const buildContext = `${context} \`build --json\``;
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const result = await expectExit(
+              product,
+              workspace,
+              ["build", "--json"],
+              1,
+              `${buildContext} — a command refuses the obstructed write ` +
+                `and reports it (SPEC 14.22, 13.4)`,
+            );
+            const findings = decodeFindingsReport(
+              parseJsonStdout(result, buildContext),
+              buildContext,
+            ).findings;
+            assertConditionCounts(
+              findings,
+              { "14.22": 1 },
+              `${buildContext} — exactly the one offending component, and ` +
+                `\`build\` cannot observe the deleted emission's staleness ` +
+                `(SPEC 14.22, 12.1)`,
+            );
+            assertFindingConcernsPath(
+              findings[0]!,
+              T11_2_6_OUTDIR,
+              `${buildContext} — the refused write's concerned path is the ` +
+                `offending component's workspace-relative path (SPEC ` +
+                `14.22, 13.4)`,
+            );
+          },
+          `${buildContext} — the write is refused before anything is ` +
+            `modified (SPEC 14.22, 12.1)`,
+        );
+
+        // ...and through `check`: the obstruction beside the swap's one
+        // definite per-file staleness — exact counts, each concerned path
+        // pinned (SPEC 12.2, 14.22, 14.10; SPEC 14: when several error
+        // conditions are present, each is reported).
+        const checkContext = `${context} \`check --json\``;
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const result = await expectExit(
+              product,
+              workspace,
+              ["check", "--json"],
+              1,
+              `${checkContext} — \`check\` reports the obstruction without ` +
+                `writing (SPEC 12.2, 14.22)`,
+            );
+            const findings = decodeFindingsReport(
+              parseJsonStdout(result, checkContext),
+              checkContext,
+            ).findings;
+            assertConditionCounts(
+              findings,
+              { "14.10": 1, "14.22": 1 },
+              `${checkContext} — the obstructed component and the deleted ` +
+                `emitted file, nothing else: sources are valid, so what ` +
+                `the current sources generate is defined and the missing ` +
+                `${T11_2_6_EMITTED} is definite per-file staleness (SPEC ` +
+                `14.22, 14.10, 12.2, 14)`,
+            );
+            assertFindingConcernsPath(
+              findings.find((finding) => finding.condition === "14.22")!,
+              T11_2_6_OUTDIR,
+              `${checkContext} — the refused write's concerned path (SPEC ` +
+                `14.22, 13.4)`,
+            );
+            assertFindingConcernsPath(
+              findings.find((finding) => finding.condition === "14.10")!,
+              T11_2_6_EMITTED,
+              `${checkContext} — the per-file staleness finding names the ` +
+                `stale file as its concerned path (SPEC 14.10, 12.7)`,
+            );
+          },
+          `${checkContext} — \`check\` writes nothing (SPEC 12.2, 13.3)`,
+        );
+
+        // ...never this answer: `view` of the very file whose emission
+        // path is obstructed (SPEC 11.2 — the condition's concerned path
+        // is the component, never the source file).
+        await assertViewOfCFindingFree(
+          product,
+          workspace,
+          `${context} \`view ${C_FILE}\``,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+  },
+});
+
 /** TEST-SPEC §11.2, in canonical ID order (SUITE-52). */
 export const section112Tests: readonly ProductTestEntry[] = [
   T11_2_1,
@@ -3683,4 +4081,5 @@ export const section112Tests: readonly ProductTestEntry[] = [
   T11_2_3,
   T11_2_4,
   T11_2_5,
+  T11_2_6,
 ];

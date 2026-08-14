@@ -2370,8 +2370,56 @@ certify against FP-091's fixtures once those land.
   planned mid-loop reds (certification-document x3 → FP-091; S-1's 6
   unmapped keys {11.3–11.6, 12.6, 12.7} → stage G), S-5 and certification
   green.]
-- [ ] FP-055 — Implement T11.2-6: never-stale + gate-findings-never-attach.
+- [x] FP-055 — Implement T11.2-6: never-stale + gate-findings-never-attach.
   [R2 #2; TEST-SPEC §11.2]
+  [Done 2026-08-14: registered in section-11.2.ts (SUITE-52) with
+  traceability ["11.2"] (not in TEST-SPEC 14's staging record — 14.13's
+  home is T6.1-3/T13.4-6, 14.22's T13.4-6; T14-4's and T13.3-3's citations
+  are cross-references TO it). NOT in CONF-AVAIL scope — expressly an
+  Exclusions entry (its answer-side no-write compares lean on the
+  compare-around machinery certified via VIOL-CORE-CHATTYREADS). The
+  entry's delegations honored: passing-side refresh participation stays
+  T13.3-2's sweep, failing-side answering T11.2-1's, gated-read breadth
+  over these fixtures T13.3-3's whole-gate arms (already landed pre-plan),
+  and the occurrences/at finding-free contrast T13.3-3's never-gated sweep
+  + T14-4's availability rows — this test owns the two fixtures and the
+  view never-attach arm with the build/check surfacing. Fixture 1: passing
+  build, then one garbage line at .xspec/journal (T12.2-2-family-7/T14-4
+  staging) — `build --json` exactly {14.13: 1} concerning .xspec/journal,
+  failing build modifies nothing; `check --json` the same counted over
+  non-14.10 findings (the T12.2-2 set-aside: the journal feeds canonical
+  identities, 5.4, so graph-data verifiability beside an unreadable
+  journal is underdetermined); `view specs/C.mdx` (module C fixture
+  reused) → findings [], views exactly [C] with C_TREE pinned,
+  imports/occurrences/comments [], exit 0. Fixture 2: passing build under
+  `markdown.outDir: "mdout"` (premise-checked: mdout/ dir, emitted
+  mdout/specs/C.md — T13.3-3's arm-2 discipline), then the outDir
+  directory replaced by a plain file — `build --json` exactly {14.22: 1}
+  concerning `mdout`, refusal before any write; `check --json` exactly
+  {14.10: 1, 14.22: 1} (valid sources make the swap-deleted emission
+  DEFINITE per-file staleness — the T12.2-2 exactness position — pinning
+  the swap's whole fallout; paths pinned: mdout, mdout/specs/C.md); `view`
+  of the very file whose emission path is obstructed → finding-free
+  complete exit 0. Every invocation under whole-root snapshot compares.
+  Verified: typecheck/format clean; suite section-11.2 red-as-diagnosed —
+  T11.2-6 fails at the fixture-1 gate build's FP-001-class form-exact
+  decode ("expected no member \"condition\""); direct probes against the
+  built product confirm the stagings fire in the real product (fixture 1:
+  build/check exit 1 with exactly one old-shape 14.13 naming
+  .xspec/journal and NOTHING stale beside on the pre-built workspace,
+  everything unmodified; fixture 2: premise build emits mdout/specs/C.md,
+  the obstructed build/check exit 70 — the pre-patch vets-no-components
+  gap FP-018 also observed — and `view` stays an unknown command, exit 2);
+  scratch run of the registered body against a conforming fake
+  (re-deriving journal/obstruction/staleness findings and the C view from
+  workspace bytes) green end-to-end, five deviation fakes each failing
+  diagnosed — attach-gate at the view arm's exit-0, drop-path at the
+  14.22 concerned-path pin, answer-stale at the C_TREE compare (current
+  sources, not cache), write-on-view at the whole-root compare,
+  miss-stale at check's exact count map. `npm run test:self`: unchanged 4
+  planned mid-loop reds (certification-document x3 → FP-091; S-1's 6
+  unmapped keys {11.3–11.6, 12.6, 12.7} → stage G), S-5 and certification
+  green.]
 
 - [ ] FP-056 — Implement T11.3-1: `occurrences` enumeration in the
   form-exact 12.7 record form. [R2 #3; TEST-SPEC §11.3] New §11.3 registry
