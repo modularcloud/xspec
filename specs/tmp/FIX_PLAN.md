@@ -2566,9 +2566,48 @@ certify against FP-091's fixtures once those land.
   test:self`: unchanged 4 planned mid-loop reds (certification-document ×3
   → FP-091; S-1's 5 unmapped keys {11.4, 11.5, 11.6, 12.6, 12.7} → stage
   G), S-5 and certification green.]
-- [ ] FP-059 — Implement T11.3-4 (CONF-AVAIL): definitive emptiness.
+- [x] FP-059 — Implement T11.3-4 (CONF-AVAIL): definitive emptiness.
   [R2 #3, R3 gap 1 (VIOL-AVAIL-NOFILE certifies exactly this), VERIFY;
   TEST-SPEC §11.3]
+  [Done 2026-08-14: registered in section-11.3.ts (SUITE-53) with
+  traceability ["11.3"] (no numbered condition asserted — finding-free
+  everywhere). IN CONF-AVAIL scope (VIOL-AVAIL-NOFILE certifies exactly it;
+  fixtures land with FP-091), so the body obeys the scope's staging
+  constraints exactly: spec-only workspace (imports + `d` + embedding), NO
+  gate-reference `build` — the validity premise rides arm 1's own empty
+  findings member (no `--file` → the whole discovered set's findings
+  accompany, SPEC 11.2/11.3) — no snapshot compare (graph-data/refresh
+  behavior expressly out of scope; both states valid, so a conforming
+  product may refresh), and exactly two `occurrences` answers, both the
+  empty enumeration `{"findings":[],"occurrences":[]}` exit 0 (the
+  datum-form violators' stated passing ground). One workspace, one X
+  (specs/target.mdx#tgt), evolved between the arms per the entry's single
+  narrative: arm 1 bare `--to X` on a nonempty other-target ground
+  (teammate.mdx's local `d` + embedding → its own `mate`; X's defining
+  spelling unreferenced) → absolute emptiness — an ignore-`--to`,
+  enumerate-the-domain, definition-as-record, or error-on-empty product
+  fails here; then holder.mdx (import + `d={TGT.tgt}`, the workspace's ONE
+  resolving occurrence of X) is staged and arm 2 runs `--to X --file
+  "specs/t*.mdx"` — the glob admits exactly the nonempty {target, teammate}
+  domain away from holder → still empty, finding-free, exit 0. The
+  restricted arm carries NO in-test positive control by design (holder lies
+  outside every domain the test observes — CERTIFICATIONS' stated hazard,
+  certified through VIOL-AVAIL-NOFILE, whose whole-set enumeration serves
+  holder's record exactly when successfully staged). Verified:
+  typecheck/format clean; direct probes against the built product prove the
+  staging (both states build exit 0 with findings []; the only edge into
+  `tgt` is holder#user's depends edge; `occurrences` still unknown, exit 2
+  — the pre-patch gap); suite section-11.3 red-as-diagnosed — T11.3-4 fails
+  at arm 1's runJson (exit 2 unknown command), siblings' known reds
+  unchanged (file 4 failed / 0 passed); scratch run (deleted) of the
+  registered body: conforming fake (deriving records from workspace bytes)
+  green end-to-end, the nofile deviation failing exactly at arm 2's
+  exact-empty enumeration compare (the certified diagnosis), ignore-to /
+  error-on-empty / definition-as-record each failing at arm 1's targeted
+  assertion. `npm run test:self`: unchanged 4 planned mid-loop reds
+  (certification-document ×3 → FP-091, its in-scope-registry gap narrowed
+  to exactly {T11.4-1, T11.4-3, T11.4-4}; S-1's 5 unmapped keys {11.4,
+  11.5, 11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
 
 - [ ] FP-060 — Implement T11.4-1 (CONF-AVAIL): whole-domain views and
   positional tree with tag-range decomposition byte-asserted; stages no

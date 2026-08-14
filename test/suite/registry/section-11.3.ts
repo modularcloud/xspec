@@ -1,5 +1,5 @@
-// TEST-SPEC §11.3 (`xspec occurrences`) — SUITE-53: T11.3-1, T11.3-2, and
-// T11.3-3.
+// TEST-SPEC §11.3 (`xspec occurrences`) — SUITE-53: T11.3-1 through
+// T11.3-4.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -79,6 +79,31 @@
 // it (both edge kinds), never its descendant's records and never the
 // root's, and a bare path selects exactly the module-form root reference
 // (T2.2-2), never the file's section-targeted records.
+//
+// Certification (CERTIFICATIONS.md CONF-AVAIL): T11.3-4 is in scope —
+// VIOL-AVAIL-NOFILE certifies exactly it (the fixture family lands with the
+// certification-manifest task) — while T11.3-1/2/3 are not (T11.3-1 sits
+// behind the section-4 consumer wall, T11.3-2/3's matrices are named
+// Exclusions entries). CONF-AVAIL's staging constraint pins every command an
+// in-scope test drives to the enumerated `view`/`occurrences` surface, so
+// T11.3-4 — unlike its module siblings — runs NO gate-reference `build`:
+// its validity premise rides the answers themselves (the unrestricted arm's
+// empty findings member IS the whole discovered set's finding-freeness at
+// that point, SPEC 11.2/11.3). It observes no graph-data or refresh
+// behavior (no snapshot compare: both workspace states are valid, and
+// passing-side refresh participation is T13.3-2's subject, expressly out of
+// CONF-AVAIL scope), and it makes exactly two `occurrences` answers, both
+// empty enumerations — the ground the datum-form violators' passing sides
+// stand on (`[]` is not `null`, no member to omit, no marker to replace).
+// Its restricted arm carries NO in-test positive control by design: the
+// excluded file is staged between the arms and lies outside every consulted
+// domain the test ever observes, so nothing observable in-test separates
+// restricted-away-from-the-occurrence from an occurrence never successfully
+// staged (a mis-staged reference's finding would lie outside the restricted
+// domain with the file that holds it) — the staging hazard CERTIFICATIONS.md
+// assigns to VIOL-AVAIL-NOFILE, whose whole-set enumeration serves the
+// excluded record, failing the exact-empty compare, exactly when the
+// occurrence IS successfully staged.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -1809,9 +1834,180 @@ const T11_3_3 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T11.3-4 — definitive emptiness (CONF-AVAIL)
+// ---------------------------------------------------------------------------
+
+// One valid workspace and one queried identity X = specs/target.mdx#tgt
+// (CONF-AVAIL's workspace scope: one configured spec group of `.mdx` sources
+// at valid-UTF-8 `#`-free workspace-relative paths, imports + `d` props +
+// embeddings only), staged in two states around the two arms:
+//
+// - Arm 1 ground (at creation): specs/target.mdx defines `tgt`, referenced
+//   by nothing; specs/teammate.mdx holds a local `d` entry AND a local
+//   embedding, both targeting its own `mate`. The workspace holds real
+//   occurrences — none of them targeting X — so the empty selection is
+//   `--to`'s doing over a nonempty enumeration ground: a product ignoring
+//   `--to`, enumerating the domain wholesale, or serving X's DEFINING
+//   spelling as an occurrence answers nonempty and fails the exact-empty
+//   compare; a product treating a zero-occurrence resolving target as an
+//   error fails the exit (SPEC 11.3: acceptance is syntactic, an empty
+//   selection is an answer, and T12.0-9's partition states the same
+//   exception).
+// - Between the arms: specs/holder.mdx is staged — an import of target plus
+//   `d={TGT.tgt}`, the workspace's ONE resolving occurrence of X (probed
+//   against the built product: the only dependency edge into `tgt`). The
+//   workspace stays valid: the reference resolves, every identity stays
+//   defined.
+// - Arm 2 (`--file specs/t*.mdx`): the glob admits exactly {target,
+//   teammate} — a NONEMPTY restricted domain holding teammate's two records
+//   and X's defining spelling, consulted and still answering empty — away
+//   from holder. The guarantee is domain-wide only: the outside occurrence
+//   is neither reported nor denied.
+const EMPTY_TARGET_FILE = "specs/target.mdx";
+const EMPTY_TEAMMATE_FILE = "specs/teammate.mdx";
+const EMPTY_HOLDER_FILE = "specs/holder.mdx";
+const EMPTY_X_ID = "specs/target.mdx#tgt";
+const EMPTY_DOMAIN_GLOB = "specs/t*.mdx";
+
+const EMPTY_TARGET_SOURCE = ['<S id="tgt">', "Target text.", "</S>", ""].join(
+  "\n",
+);
+
+const EMPTY_TEAMMATE_SOURCE = [
+  '<S id="mate">',
+  "Mate text.",
+  "</S>",
+  "",
+  '<S id="pal" d={"mate"}>',
+  'Pal: {text("mate")}',
+  "</S>",
+  "",
+].join("\n");
+
+const EMPTY_HOLDER_SOURCE = [
+  'import TGT from "./target.xspec"',
+  "",
+  '<S id="user" d={TGT.tgt}>',
+  "User text.",
+  "</S>",
+  "",
+].join("\n");
+
+const T11_3_4 = defineProductTest({
+  id: "T11.3-4",
+  title:
+    'Definitive emptiness: in a valid workspace with no reference to node X — real occurrences targeting other nodes on the ground — `occurrences --to X` answers `{"findings":[],"occurrences":[]}`, exit 0, and the proof is absolute without `--file`: the whole discovered set is consulted, so the empty findings member is the workspace\'s own finding-freeness and the empty enumeration says nothing anywhere references X (X\'s defining spelling is no occurrence); with a file then staged holding the workspace\'s one resolving occurrence of X, restricted by `--file` away from that file onto a NONEMPTY domain (X\'s defining file and the other-target records among it, consulted and still empty), the answer is still `{"findings":[],"occurrences":[]}`, exit 0 — the guarantee is domain-wide only, the outside occurrence neither reported nor denied (SPEC 11.3, 11.2)',
+  run: async (product) => {
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [EMPTY_TARGET_FILE]: EMPTY_TARGET_SOURCE,
+        [EMPTY_TEAMMATE_FILE]: EMPTY_TEAMMATE_SOURCE,
+      },
+    });
+    try {
+      // --- Arm 1: absolute emptiness. No `--file`, so the consulted domain
+      // is the entire discovered set (SPEC 11.3): the empty, finding-free
+      // answer is definitive — nothing in the WORKSPACE references X — and
+      // its empty findings member doubles as the validity premise for this
+      // ground (the domain's findings accompany, SPEC 11.2; CONF-AVAIL's
+      // staging constraint admits no gate-reference `build` on this test).
+      {
+        const context =
+          "T11.3-4 `occurrences --to specs/target.mdx#tgt` (no `--file`: " +
+          "the whole discovered set consulted; nothing references tgt)";
+        const report = decodeOccurrencesReport(
+          await runJson(
+            product,
+            workspace,
+            ["occurrences", "--to", EMPTY_X_ID],
+            `${context} — an empty, finding-free answer exits 0 (SPEC ` +
+              `11.2, 11.3): a resolving target with no occurrences is an ` +
+              `answer, never an error (T12.0-9's stated exception)`,
+          ),
+          context,
+        );
+        assertSameJson(
+          report.findings,
+          [],
+          `${context}: without \`--file\` the consulted domain is the ` +
+            `entire discovered set, so this empty findings member is the ` +
+            `whole workspace's finding-freeness — the arm's validity ` +
+            `premise, observed on the answer itself (SPEC 11.2, 11.3)`,
+        );
+        assertSameJson(
+          report.occurrences,
+          [],
+          `${context}: the empty enumeration is definitive over the whole ` +
+            `discovered set — teammate's two records target its own ` +
+            `\`mate\`, never \`tgt\`, and target.mdx's defining spelling ` +
+            `is no occurrence (SPEC 5.7, 11.3) — so a product ignoring ` +
+            `\`--to\`, enumerating the domain, or serving the definition ` +
+            `as a record answers nonempty here`,
+        );
+      }
+
+      // --- Between the arms: stage the workspace's ONE resolving
+      // occurrence of X — holder's `d={TGT.tgt}`. The workspace stays
+      // valid; no invocation of this test ever consults holder, and that is
+      // the point (the staging hazard is VIOL-AVAIL-NOFILE's to certify:
+      // under its whole-set enumeration this record IS served and arm 2's
+      // exact-empty compare fails — exactly when the occurrence is
+      // successfully staged).
+      await workspace.file(EMPTY_HOLDER_FILE, EMPTY_HOLDER_SOURCE);
+
+      // --- Arm 2: domain-wide emptiness. The glob restricts the consulted
+      // domain to exactly {target, teammate} — nonempty, holding records
+      // and X's defining spelling, away from the file that holds the
+      // resolving occurrence of X — and the answer is still empty,
+      // finding-free, exit 0: the outside occurrence is neither reported
+      // nor denied (SPEC 11.3).
+      {
+        const context =
+          "T11.3-4 `occurrences --to specs/target.mdx#tgt --file " +
+          '"specs/t*.mdx"` (restricted away from the file holding the ' +
+          "one resolving occurrence of tgt)";
+        const report = decodeOccurrencesReport(
+          await runJson(
+            product,
+            workspace,
+            ["occurrences", "--to", EMPTY_X_ID, "--file", EMPTY_DOMAIN_GLOB],
+            `${context} — the restricted domain is finding-free and holds ` +
+              `no occurrence of tgt, so the empty answer exits 0 (SPEC ` +
+              `11.2, 11.3)`,
+          ),
+          context,
+        );
+        assertSameJson(
+          report.findings,
+          [],
+          `${context}: the admitted files carry no finding — the guarantee ` +
+            `(and the findings member) is exactly domain-wide (SPEC 11.2, ` +
+            `11.3)`,
+        );
+        assertSameJson(
+          report.occurrences,
+          [],
+          `${context}: still the empty enumeration — the restricted domain ` +
+            `is consulted (teammate's two other-target records and ` +
+            `target.mdx's defining spelling lie within it, selected by ` +
+            `nothing) while holder's resolving occurrence of tgt lies ` +
+            `outside it, neither reported nor denied: a product consulting ` +
+            `the whole discovered set despite \`--file\` serves that ` +
+            `record and answers nonempty (SPEC 11.3)`,
+        );
+      }
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
 /** TEST-SPEC §11.3, in canonical ID order (SUITE-53). */
 export const section113Tests: readonly ProductTestEntry[] = [
   T11_3_1,
   T11_3_2,
   T11_3_3,
+  T11_3_4,
 ];
