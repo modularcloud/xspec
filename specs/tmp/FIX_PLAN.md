@@ -2513,8 +2513,59 @@ certify against FP-091's fixtures once those land.
   mid-loop reds (certification-document ×3 → FP-091; S-1's 5 unmapped keys
   {11.4, 11.5, 11.6, 12.6, 12.7} → stage G), S-5 and certification green;
   sections 5.7/11.2 unchanged (4 resp. 6 diagnosed reds).]
-- [ ] FP-058 — Implement T11.3-3: `--to` syntactic acceptance / malformed
+- [x] FP-058 — Implement T11.3-3: `--to` syntactic acceptance / malformed
   spellings. [R2 #3; TEST-SPEC §11.3]
+  [Done 2026-08-14: registered in section-11.3.ts (SUITE-53) with
+  traceability ["11.3"] (no TEST-SPEC 14 staging record — the FP-056/057
+  precedent; 1.4/1.5/12.0/12.7 are context with home coverage at
+  T1.4-*/T1.5-*/T12.0-*/T12.7-*); no certification scope (Exclusions name
+  T11.3-2/3's matrices). Two self-owned fixtures. (1) The acceptance ground
+  (failing on purpose; specs-only config): OK.mdx holds the domain's ONE
+  resolving occurrence (`use`→`ok`) so every empty selection is provably the
+  filter's doing (pinned by a bare-enumeration staging arm); the three
+  non-resolving grounds each carry a spelling a mis-implemented product
+  would resolve INTO — broken.mdx (14.20; sibling `hidden` +
+  `hiddenUse d={"hidden"}` complete before the unclosed final tag, so an
+  error-recovering product serves the record), dup.mdx (14.3 twin pair +
+  `watcher d={"twin"}` → 14.5, so a winner-picking product serves it), and
+  the undiscovered docs/other.mdx (valid `x` + `xuse d={"x"}` in no group,
+  so a filesystem-resolving product serves it). Gate `build --json` pins
+  {14.20,14.3,14.5} with homes; the five accepted arms (`path#id` nosuch,
+  bare-path no file, undiscovered, masked, undefined bearer) each assert
+  exit 1 — never an error, the T12.0-9 partition's stated exception — with
+  the domain's findings as the exact multiset and occurrences exactly [];
+  the six malformed arms (two `#`, `#ok` empty path, `ok..use` empty
+  segment, `ok use` whitespace, `then` forbidden, trailing `OK.mdx#`) ride
+  T11.2-5's exported usage-error protocol on the same failing workspace,
+  each defect spelled over the DISCOVERED OK.mdx path where the form allows
+  (TEST-SPEC's `a#b..c`/`a#then`/`a.mdx#` give classes, not byte-exact
+  operands — the FP-018 precedent) so a resolve-first product answers and
+  fails the exit; all under one whole-root modifies-nothing compare. (2)
+  The exact-selection ground (valid): BASE (top ⊃ top.sub) + USE staging
+  four records (useTop's d AND embedding → top, useSub → top.sub, useRoot's
+  module-form d={BASE} → root), all four pinned bare first; `--to #top` →
+  exactly the two top-targeting records (both kinds, never the
+  descendant's, never the root's), `--to #top.sub` → exactly the
+  descendant's own, bare `--to specs/BASE.mdx` → exactly the module-form
+  root record (T2.2-2), never the file's section-targeted ones. Verified:
+  typecheck/format clean; suite section-11.3 red-as-diagnosed — T11.3-3
+  fails at the gate build's FP-001-class form-exact decode ("expected no
+  member \"column\""), T11.3-1/2's known reds unchanged; direct probes
+  against the built product prove the stagings (ws1 build exit 1 with
+  old-shape 14.20-in-broken + 14.3-in-dup — the absent 14.5 is FP-053's
+  diagnosed pre-patch resolution gap, same as T11.2-4's; ws2 build exit 0
+  with exactly the four staged dependency edges incl. the module-form root
+  edge; `occurrences` still unknown, exit 2 — the pre-patch gap); scratch
+  run (deleted) of the registered body against a conforming fake deriving
+  findings/records/selection from workspace bytes green end-to-end, ten
+  deviation fakes each failing at exactly the targeted arm — ignore-to,
+  unknown-node-error, and findings-follow-to at the accepted arms,
+  lenient-spelling at the malformed protocol, serve-picked/recover-masked/
+  fs-resolve at their non-resolving arms, prefix-select and depends-only at
+  the `#top` exact compare, file-select at the bare-path compare. `npm run
+  test:self`: unchanged 4 planned mid-loop reds (certification-document ×3
+  → FP-091; S-1's 5 unmapped keys {11.4, 11.5, 11.6, 12.6, 12.7} → stage
+  G), S-5 and certification green.]
 - [ ] FP-059 — Implement T11.3-4 (CONF-AVAIL): definitive emptiness.
   [R2 #3, R3 gap 1 (VIOL-AVAIL-NOFILE certifies exactly this), VERIFY;
   TEST-SPEC §11.3]

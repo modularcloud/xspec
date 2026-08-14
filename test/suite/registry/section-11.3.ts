@@ -1,4 +1,5 @@
-// TEST-SPEC §11.3 (`xspec occurrences`) — SUITE-53: T11.3-1 and T11.3-2.
+// TEST-SPEC §11.3 (`xspec occurrences`) — SUITE-53: T11.3-1, T11.3-2, and
+// T11.3-3.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -49,6 +50,35 @@
 // target) tuple unique; ranges and order enforced by the decode); the
 // exit-2 arms ride T11.2-5's exported usage-error protocol
 // (registry/section-11.2.ts).
+//
+// T11.3-3 owns its two fixtures. (1) The acceptance ground (failing on
+// purpose): SPEC 11.3 makes `--to` acceptance purely syntactic — only a
+// malformed spelling is a usage error (12.0; T12.0-9's partition states the
+// same exception) — so every well-formed spelling naming an identity that
+// does not currently resolve is ACCEPTED and selects the empty set while the
+// domain's findings stay on the answer, exit 1, never exit 2. The workspace
+// stages one resolving occurrence (so each empty selection is the filter's
+// doing, pinned by a bare-enumeration staging arm, never a product that
+// enumerates nothing) beside the three non-resolving grounds the TEST-SPEC
+// names — an undiscovered on-disk file (valid content whose occurrence a
+// configuration-blind product would resolve and select), a masked file
+// (14.20; its pre-breakage sections and reference spellings recorded by a
+// recovering product), and duplicate bearers (14.3) with an ambiguous
+// reference to them (14.5; recorded by a winner-picking product) — plus the
+// no-such-node spellings in both syntactic forms. Malformed spellings ride
+// T11.2-5's exported usage-error protocol on this same failing workspace
+// (the argument checks precede answering, whatever findings the workspace
+// carries); each malformed arm spells its defect over the DISCOVERED
+// specs/OK.mdx path where the form allows, so a resolve-first product that
+// finds the file and answers (empty or otherwise) instead of erring is
+// discriminated — TEST-SPEC's parenthetical `a#b..c`/`a#then`/`a.mdx#`
+// spellings give the malformed classes, not byte-exact operands (the
+// FP-018/T6.5-4 `b.mdx#` precedent). (2) The exact-selection ground
+// (valid): a two-file workspace whose four records make every mis-selection
+// nonempty-visible — a resolving identity selects the occurrences targeting
+// it (both edge kinds), never its descendant's records and never the
+// root's, and a bare path selects exactly the module-form root reference
+// (T2.2-2), never the file's section-targeted records.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -1228,5 +1258,560 @@ const T11_3_2 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T11.3-3 — `--to`: syntactic acceptance / malformed spellings; exact
+// selection
+// ---------------------------------------------------------------------------
+
+// The acceptance workspace (failing on purpose). specs/OK.mdx is the
+// finding-free file holding the domain's ONE resolving occurrence
+// (`use` → `ok`), so every accepted-but-empty answer below is provably the
+// selection's doing: a product ignoring `--to` returns this record and fails
+// the empty compare, while a product erring on a non-resolving identity
+// fails the exit assertion (SPEC 11.3: acceptance is syntactic, never an
+// error). The three non-resolving grounds each carry a spelling a
+// mis-implemented product would resolve INTO:
+//
+// - specs/broken.mdx (masked, 14.20): sibling sections `hidden` and
+//   `hiddenUse d={"hidden"}` precede the breakage (the final section never
+//   closes), so an error-recovering product that keeps the pre-breakage
+//   parse resolves `hiddenUse` → `hidden` and serves it under
+//   `--to specs/broken.mdx#hidden`, where the whole-file masking of 14
+//   demands the empty set.
+// - specs/dup.mdx: two bearers of `twin` (14.3 — every bearer undefined, no
+//   winner) and `watcher d={"twin"}` (ambiguous → no occurrence, its 14.5
+//   reporting it instead), so a winner-picking product records
+//   `watcher` → `twin` and serves it under `--to specs/dup.mdx#twin`.
+// - docs/other.mdx: fully VALID content (`x` and `xuse d={"x"}`) in NO
+//   configured group (SPEC 7: discovery is controlled exclusively by
+//   configuration), so a product resolving the operand against the
+//   filesystem instead of the discovered set records `xuse` → `x` and
+//   serves it under `--to docs/other.mdx#x` — while for a conforming
+//   product the file contributes nothing: no finding, no record.
+const TO_OK_FILE = "specs/OK.mdx";
+const TO_MASKED_FILE = "specs/broken.mdx";
+const TO_DUP_FILE = "specs/dup.mdx";
+const TO_DECOY_FILE = "docs/other.mdx";
+
+const TO_OK_SOURCE = [
+  '<S id="ok">',
+  "Ok text.",
+  "</S>",
+  "",
+  '<S id="use" d={"ok"}>',
+  "Use text.",
+  "</S>",
+  "",
+].join("\n");
+
+const TO_MASKED_SOURCE = [
+  '<S id="hidden">',
+  "Hidden text.",
+  "</S>",
+  "",
+  '<S id="hiddenUse" d={"hidden"}>',
+  "Hidden use — this final section never closes, so the file is",
+  "unparseable on purpose (14.20) and masked whole.",
+  "",
+].join("\n");
+
+const TO_DUP_SOURCE = [
+  '<S id="twin">',
+  "Twin one.",
+  "</S>",
+  "",
+  '<S id="twin">',
+  "Twin two.",
+  "</S>",
+  "",
+  '<S id="watcher" d={"twin"}>',
+  "Watcher text.",
+  "</S>",
+  "",
+].join("\n");
+
+const TO_DECOY_SOURCE = [
+  '<S id="x">',
+  "X text.",
+  "</S>",
+  "",
+  '<S id="xuse" d={"x"}>',
+  "X use.",
+  "</S>",
+  "",
+].join("\n");
+
+/**
+ * The acceptance workspace's complete finding multiset — the `build --json`
+ * gate and every accepted-arm answer pin exactly this (no `--file`, so the
+ * consulted domain is the entire discovered set and `--to` never changes the
+ * accompanying findings): broken's parse failure, dup's duplicate pair, and
+ * dup's ambiguous reference; nothing from OK.mdx, nothing from the
+ * undiscovered decoy.
+ */
+const TO_WORKSPACE_CONDITIONS: Readonly<Record<string, number>> = {
+  "14.20": 1,
+  "14.3": 1,
+  "14.5": 1,
+};
+
+/** The whole domain's one record — the ground every empty selection filters. */
+const TO_BASELINE_TUPLES: readonly RecordTuple[] = [
+  {
+    file: TO_OK_FILE,
+    kind: "depends",
+    source: "specs/OK.mdx#use",
+    target: "specs/OK.mdx#ok",
+  },
+];
+
+/**
+ * The five accepted-but-empty spellings (SPEC 11.3: acceptance is syntactic,
+ * and a named identity that does not currently resolve selects the empty
+ * set) — the TEST-SPEC's list: `path#id`, bare `path`, an undiscovered
+ * file's identity, a masked file's, an undefined bearer's.
+ */
+const TO_ACCEPTED_EMPTY: ReadonlyArray<readonly [string, string]> = [
+  [
+    `${TO_OK_FILE}#nosuch`,
+    "well-formed `path#id` — a discovered file's nonexistent id (no such " +
+      "node)",
+  ],
+  [
+    "specs/none.mdx",
+    "well-formed bare `path` — a root identity no discovered file bears " +
+      "(no such file anywhere)",
+  ],
+  [
+    `${TO_DECOY_FILE}#x`,
+    "an undiscovered file's identity — the on-disk docs/other.mdx is in no " +
+      "configured group, so its section `x` resolves for no conforming " +
+      "product",
+  ],
+  [
+    `${TO_MASKED_FILE}#hidden`,
+    "a masked file's identity — specs/broken.mdx is unparseable (14.20), " +
+      "its pre-breakage `hidden` section masked with the rest",
+  ],
+  [
+    `${TO_DUP_FILE}#twin`,
+    "an undefined bearer's identity — duplicate spellings of `twin` leave " +
+      "every bearer undefined, no winner picked",
+  ],
+];
+
+/**
+ * The malformed spellings, one arm per TEST-SPEC class (whitespace-bearing
+ * and forbidden-name staged one arm each), each exit 2 (SPEC 11.3, 1.4,
+ * 12.0). Where the form allows, the defect is spelled over the DISCOVERED
+ * specs/OK.mdx path, so a product that resolves first and errs only on
+ * unknown names answers (empty or otherwise) and fails the exit assertion.
+ */
+const TO_MALFORMED: ReadonlyArray<readonly [string, string]> = [
+  [`${TO_OK_FILE}#ok#use`, "more than one `#`"],
+  ["#ok", "an empty path part"],
+  [`${TO_OK_FILE}#ok..use`, "an empty segment (the `a#b..c` class)"],
+  [`${TO_OK_FILE}#ok use`, "a whitespace-bearing segment (U+0020 inside)"],
+  [`${TO_OK_FILE}#then`, "a forbidden-name segment (the `a#then` class)"],
+  [`${TO_OK_FILE}#`, "a trailing empty id part (the `a.mdx#` class)"],
+];
+
+// The exact-selection workspace (valid): four records, all in specs/USE.mdx
+// in source order, chosen so every mis-selection is nonempty-visible against
+// the per-index compares — `--to specs/BASE.mdx#top` must select the two
+// records targeting `top` (one per edge kind: the `d` entry and the
+// embedding), never `useSub`'s record targeting the DESCENDANT `top.sub`
+// (a prefix- or subtree-selecting product fails) and never the root-targeted
+// record; `--to specs/BASE.mdx#top.sub` selects exactly the descendant's own
+// record (the complement); and the bare `--to specs/BASE.mdx` selects
+// exactly the module-form root reference `d={BASE}` (T2.2-2: a `depends`
+// edge to the file's root node, identified by the path alone, SPEC 1.5) —
+// a product reading the bare path as "anything in (or into) that file"
+// returns the section-targeted records and fails.
+const SEL_BASE_FILE = "specs/BASE.mdx";
+const SEL_USE_FILE = "specs/USE.mdx";
+
+const SEL_BASE_SOURCE = [
+  '<S id="top">',
+  "Top text.",
+  "",
+  '<S id="top.sub">',
+  "Sub text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+const SEL_USE_SOURCE = [
+  'import BASE from "./BASE.xspec"',
+  "",
+  '<S id="useTop" d={BASE.top}>',
+  "Top use: {text(BASE.top)}",
+  "</S>",
+  "",
+  '<S id="useSub" d={BASE.top.sub}>',
+  "Sub use.",
+  "</S>",
+  "",
+  '<S id="useRoot" d={BASE}>',
+  "Root use.",
+  "</S>",
+  "",
+].join("\n");
+
+const SEL_TOP_D: RecordTuple = {
+  file: SEL_USE_FILE,
+  kind: "depends",
+  source: "specs/USE.mdx#useTop",
+  target: "specs/BASE.mdx#top",
+};
+const SEL_TOP_EMBED: RecordTuple = {
+  file: SEL_USE_FILE,
+  kind: "embeds",
+  source: "specs/USE.mdx#useTop",
+  target: "specs/BASE.mdx#top",
+};
+const SEL_SUB_D: RecordTuple = {
+  file: SEL_USE_FILE,
+  kind: "depends",
+  source: "specs/USE.mdx#useSub",
+  target: "specs/BASE.mdx#top.sub",
+};
+const SEL_ROOT_D: RecordTuple = {
+  file: SEL_USE_FILE,
+  kind: "depends",
+  source: "specs/USE.mdx#useRoot",
+  target: "specs/BASE.mdx",
+};
+
+/** All four records in occurrence order (one file, source order). */
+const SEL_ALL_TUPLES: readonly RecordTuple[] = [
+  SEL_TOP_D,
+  SEL_TOP_EMBED,
+  SEL_SUB_D,
+  SEL_ROOT_D,
+];
+
+const T11_3_3 = defineProductTest({
+  id: "T11.3-3",
+  title:
+    "`--to` acceptance is syntactic: well-formed spellings naming identities that do not currently resolve — a discovered file's nonexistent id (`path#id`), a bare `path` no file bears, an undiscovered on-disk file's identity, a masked (14.20) file's, an undefined duplicate bearer's — are each accepted and select the empty set while the domain's one real occurrence stays enumerable (pinned bare) and the domain's findings stay on the answer (exactly {14.20, 14.3, 14.5}, exit 1), never an error; malformed spellings — more than one `#`, an empty path part, an empty segment, a whitespace-bearing segment, a forbidden-name segment (`then`), a trailing empty id part — each exit 2 with the single 12.7 error document, the argument check preceding answering whatever findings the workspace carries; selection is exact over a valid workspace: a resolving identity selects the occurrences targeting it — both its `d`-entry and its embedding record, never the descendant `top.sub`'s record and never the root's — the descendant's own identity selects exactly its record, and a bare path selects exactly the module-form root reference (T2.2-2), never the file's section-targeted records (SPEC 11.3, 11.2, 1.4, 1.5, 12.0, 12.7)",
+  run: async (product) => {
+    // --- Workspace 1: the acceptance ground (failing on purpose). -------------
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [TO_OK_FILE]: TO_OK_SOURCE,
+          [TO_MASKED_FILE]: TO_MASKED_SOURCE,
+          [TO_DUP_FILE]: TO_DUP_SOURCE,
+          [TO_DECOY_FILE]: TO_DECOY_SOURCE,
+        },
+      });
+      try {
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            // Gate reference and staging integrity (SPEC 12.1, 14): exactly
+            // the three staged conditions, homes pinned, so every
+            // acceptance assertion below reads on staged ground.
+            const gateContext =
+              "T11.3-3 `build --json` (staging integrity: broken's 14.20, " +
+              "dup's 14.3 and 14.5; OK.mdx finding-free; the undiscovered " +
+              "docs/other.mdx contributes nothing)";
+            const gateFindings = await buildFindings(
+              product,
+              workspace,
+              gateContext,
+            );
+            assertConditionCounts(
+              gateFindings,
+              TO_WORKSPACE_CONDITIONS,
+              `${gateContext} — exactly the staged conditions (SPEC 14)`,
+            );
+            assertFindingLocated(
+              findingByCondition(gateFindings, "14.20", gateContext),
+              { file: TO_MASKED_FILE },
+              `${gateContext} — the parse failure locates in broken.mdx ` +
+                `(SPEC 14)`,
+            );
+            assertFindingLocated(
+              findingByCondition(gateFindings, "14.3", gateContext),
+              { file: TO_DUP_FILE },
+              `${gateContext} — the duplicate \`twin\` pair locates every ` +
+                `bearer, both in dup.mdx (SPEC 14)`,
+            );
+            assertFindingLocated(
+              findingByCondition(gateFindings, "14.5", gateContext),
+              { file: TO_DUP_FILE },
+              `${gateContext} — the ambiguous \`watcher\` reference ` +
+                `locates in dup.mdx (SPEC 14)`,
+            );
+
+            // Bare-enumeration staging pin: the domain holds EXACTLY the one
+            // resolving record, so each accepted arm's empty selection below
+            // is the `--to` filter's observable doing — never a domain that
+            // was empty to begin with.
+            {
+              const context =
+                "T11.3-3 bare `occurrences` (staging pin: the whole " +
+                "domain's one record)";
+              const result = await expectExit(
+                product,
+                workspace,
+                ["occurrences"],
+                1,
+                `${context} — the domain's findings accompany, so exit 1 ` +
+                  `with the full answer (SPEC 11.2, 11.3)`,
+              );
+              const report = decodeOccurrencesReport(
+                parseJsonStdout(
+                  result,
+                  `${context} — a single JSON document is the only output ` +
+                    `form (SPEC 11)`,
+                ),
+                context,
+              );
+              assertConditionCounts(
+                report.findings,
+                TO_WORKSPACE_CONDITIONS,
+                `${context}: the domain's findings — nothing for the ` +
+                  `undiscovered decoy (SPEC 11.2, 14)`,
+              );
+              assertSameJson(
+                report.occurrences.map(projectTuple),
+                TO_BASELINE_TUPLES,
+                `${context}: exactly the one resolving record ` +
+                  `(\`use\` → \`ok\`) — no record for the masked file's ` +
+                  `spellings, the ambiguous \`d={"twin"}\`, or the ` +
+                  `undiscovered decoy's content (SPEC 5.7, 11.2, 11.3)`,
+              );
+            }
+
+            // --- The accepted-but-empty spellings: acceptance is syntactic
+            // (SPEC 11.3) — each well-formed spelling is accepted whatever
+            // the workspace contains, selects the empty set, keeps the
+            // domain's findings on the answer, and is NEVER an error (the
+            // T12.0-9 partition: unknown-node usage errors exist everywhere
+            // except `occurrences --to`).
+            for (const [spelling, what] of TO_ACCEPTED_EMPTY) {
+              const context = `T11.3-3 \`occurrences --to "${spelling}"\` (${what})`;
+              const result = await expectExit(
+                product,
+                workspace,
+                ["occurrences", "--to", spelling],
+                1,
+                `${context} — accepted, never an error: the named identity ` +
+                  `does not currently resolve, so the selection is empty ` +
+                  `while the domain's findings keep the answer at exit 1 ` +
+                  `(SPEC 11.3, 11.2, 12.0)`,
+              );
+              const report = decodeOccurrencesReport(
+                parseJsonStdout(
+                  result,
+                  `${context} — a single JSON document is the only output ` +
+                    `form (SPEC 11)`,
+                ),
+                context,
+              );
+              assertConditionCounts(
+                report.findings,
+                TO_WORKSPACE_CONDITIONS,
+                `${context}: \`--to\` selects occurrences and never ` +
+                  `changes the consulted domain — the domain's findings ` +
+                  `accompany unchanged (SPEC 11.2, 11.3)`,
+              );
+              assertSameJson(
+                report.occurrences,
+                [],
+                `${context}: the empty selection — never the domain's ` +
+                  `\`use\` → \`ok\` record (a product ignoring \`--to\`), ` +
+                  `never a masked file's, winner-picked, or ` +
+                  `filesystem-resolved record (SPEC 11.2, 11.3)`,
+              );
+            }
+
+            // --- The malformed spellings: each exit 2 via the shared
+            // JSON-only usage-error protocol (single 12.7 error document,
+            // message on stderr), the argument check preceding answering,
+            // whatever findings the workspace carries (SPEC 11.2, 11.3,
+            // 1.4, 12.0).
+            for (const [spelling, what] of TO_MALFORMED) {
+              await expectAvailabilityUsageError(
+                product,
+                workspace,
+                ["occurrences", "--to", spelling],
+                `T11.3-3 malformed \`--to\` spelling ` +
+                  `${JSON.stringify(spelling)} — ${what} — on the failing ` +
+                  `workspace`,
+              );
+            }
+          },
+          "T11.3-3 workspace 1 — no invocation of the sweep modifies " +
+            "anything: the gate build fails writing nothing (SPEC 12.1) " +
+            "and on a failing workspace these surfaces answer from current " +
+            "sources and write nothing (SPEC 11.2; the no-write contract " +
+            "clauses live at T11.2-1/T11.2-6)",
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- Workspace 2: selection is exact (valid ground). ----------------------
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [SEL_BASE_FILE]: SEL_BASE_SOURCE,
+          [SEL_USE_FILE]: SEL_USE_SOURCE,
+        },
+      });
+      try {
+        await buildOk(
+          product,
+          workspace,
+          "T11.3-3 `build` (premise: the selection workspace is valid, so " +
+            "every answer below is complete and finding-free, SPEC 11.2, " +
+            "11.3)",
+        );
+
+        // Staging pin: all four records exist in the unrestricted
+        // enumeration, so each selection below provably filters a domain
+        // that HOLDS the records it must exclude (the descendant's and the
+        // root's records are absent from the `top` selection because of the
+        // selection, never because they were never recorded).
+        {
+          const context =
+            "T11.3-3 bare `occurrences` (staging pin: all four records)";
+          const report = decodeOccurrencesReport(
+            await runJson(
+              product,
+              workspace,
+              ["occurrences"],
+              `${context} — complete and finding-free, exit 0 (SPEC 11.2, ` +
+                `11.3)`,
+            ),
+            context,
+          );
+          assertSameJson(
+            report.findings,
+            [],
+            `${context}: the domain carries no finding (SPEC 11.2)`,
+          );
+          assertSameJson(
+            report.occurrences.map(projectTuple),
+            SEL_ALL_TUPLES,
+            `${context}: the complete four-record sequence per index — ` +
+              `\`useTop\`'s \`d\` entry and embedding (both targeting ` +
+              `\`top\`), \`useSub\`'s record targeting the descendant ` +
+              `\`top.sub\`, and the module-form \`d={BASE}\` record ` +
+              `targeting the root (SPEC 2.2, 5.7, 11.3)`,
+          );
+        }
+
+        // A resolving identity selects the occurrences targeting it — not
+        // its descendants' and not the root's.
+        {
+          const context =
+            "T11.3-3 `occurrences --to specs/BASE.mdx#top` (a resolving " +
+            "identity)";
+          const report = decodeOccurrencesReport(
+            await runJson(
+              product,
+              workspace,
+              ["occurrences", "--to", `${SEL_BASE_FILE}#top`],
+              `${context} — complete and finding-free, exit 0 (SPEC 11.2, ` +
+                `11.3)`,
+            ),
+            context,
+          );
+          assertSameJson(
+            report.findings,
+            [],
+            `${context}: the domain carries no finding (SPEC 11.2)`,
+          );
+          assertSameJson(
+            report.occurrences.map(projectTuple),
+            [SEL_TOP_D, SEL_TOP_EMBED],
+            `${context}: exactly the two records whose resolved target is ` +
+              `\`top\` — the \`d\` entry and the embedding, whatever the ` +
+              `edge kind — never the descendant \`top.sub\`'s record (a ` +
+              `prefix- or subtree-selecting product fails here) and never ` +
+              `the root-targeted one (SPEC 11.3, 5.7)`,
+          );
+        }
+
+        // The complement: the descendant's own identity selects exactly its
+        // record.
+        {
+          const context =
+            "T11.3-3 `occurrences --to specs/BASE.mdx#top.sub` (the " +
+            "descendant's own identity)";
+          const report = decodeOccurrencesReport(
+            await runJson(
+              product,
+              workspace,
+              ["occurrences", "--to", `${SEL_BASE_FILE}#top.sub`],
+              `${context} — complete and finding-free, exit 0 (SPEC 11.2, ` +
+                `11.3)`,
+            ),
+            context,
+          );
+          assertSameJson(
+            report.findings,
+            [],
+            `${context}: the domain carries no finding (SPEC 11.2)`,
+          );
+          assertSameJson(
+            report.occurrences.map(projectTuple),
+            [SEL_SUB_D],
+            `${context}: exactly \`useSub\`'s record — the descendant's ` +
+              `occurrences belong to the descendant's own identity, not ` +
+              `to its parent's selection (SPEC 11.3)`,
+          );
+        }
+
+        // A bare path selects module-form root references (T2.2-2).
+        {
+          const context =
+            "T11.3-3 `occurrences --to specs/BASE.mdx` (a bare path — the " +
+            "root)";
+          const report = decodeOccurrencesReport(
+            await runJson(
+              product,
+              workspace,
+              ["occurrences", "--to", SEL_BASE_FILE],
+              `${context} — complete and finding-free, exit 0 (SPEC 11.2, ` +
+                `11.3)`,
+            ),
+            context,
+          );
+          assertSameJson(
+            report.findings,
+            [],
+            `${context}: the domain carries no finding (SPEC 11.2)`,
+          );
+          assertSameJson(
+            report.occurrences.map(projectTuple),
+            [SEL_ROOT_D],
+            `${context}: exactly the module-form \`d={BASE}\` record — the ` +
+              `bare path names the file's root node (the path alone, SPEC ` +
+              `1.5), so the selection is the root-targeted references ` +
+              `(T2.2-2), never the file's section-targeted records (SPEC ` +
+              `11.3, 2.2)`,
+          );
+        }
+      } finally {
+        await workspace.dispose();
+      }
+    }
+  },
+});
+
 /** TEST-SPEC §11.3, in canonical ID order (SUITE-53). */
-export const section113Tests: readonly ProductTestEntry[] = [T11_3_1, T11_3_2];
+export const section113Tests: readonly ProductTestEntry[] = [
+  T11_3_1,
+  T11_3_2,
+  T11_3_3,
+];
