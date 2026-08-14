@@ -22,6 +22,9 @@
 //   - the exit-2 error document {"error": …} holding one finding form (12.0)
 //   - the three-state datum decode: plain value / `null` /
 //     {"unavailable": true} (11.4, 12.7)
+//   - the scoped inventory decodes: the `recorded` datum, the `findings`
+//     member, and the `root`/`config` anchoring (11.6; the full inventory
+//     form is T11.6-*'s subject)
 //   - the occurrence-record form {"file","range","kind","source","target"}
 //     and the occurrences document {"findings","occurrences"} (5.7, 11.3)
 //   - the at document {"findings","resolution"} (11.5)
@@ -46,6 +49,7 @@ import type {
   Finding,
   FindingLocation,
   FindingsReport,
+  InventoryAnchoring,
   MarkedBytePath,
   OccurrenceRecord,
   OccurrenceSource,
@@ -576,6 +580,36 @@ export function decodeInventoryFindings(
     requiredKey(obj, "findings", site),
     at(site, "findings"),
   );
+}
+
+/**
+ * Scoped decode of the inventory document's anchoring members (SPEC 11.6,
+ * 12.7): exactly `root` and `config` — the workspace root and the
+ * configuration file identified relative to the invocation working
+ * directory — each a 12.7 path value (`decodePathValue`: a plain string
+ * where the bytes are valid UTF-8, the marked byte form otherwise, never the
+ * byte form for a valid-UTF-8 path). The canonical relative spelling (`.`,
+ * ascent-`..`-then-descent joined with `/`) and the platform-absolute
+ * drive-mismatch form are value contracts the caller asserts byte-exactly
+ * (T11.6-1); the decoder's job is that neither member is ever absent (`null`
+ * is never omission, 12.7) or mis-formed. Deliberately scoped exactly as
+ * `decodeInventoryRecordedDatum` is: SPEC 12.7 fixes the whole inventory
+ * form and the T11.6-* tests pin it entirely; every other member stays
+ * unread here. Form-exact (H-3): never adjustable to a product's shape.
+ */
+export function decodeInventoryAnchoring(
+  doc: unknown,
+  context?: string,
+): InventoryAnchoring {
+  const site = rootSite("11.6 inventory (anchoring)", context);
+  const obj = expectObject(doc, site);
+  return {
+    root: decodePathValue(requiredKey(obj, "root", site), at(site, "root")),
+    config: decodePathValue(
+      requiredKey(obj, "config", site),
+      at(site, "config"),
+    ),
+  };
 }
 
 // --- the occurrences document (5.7, 11.3, 12.7) -------------------------------

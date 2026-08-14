@@ -3004,10 +3004,52 @@ certify against FP-091's fixtures once those land.
   planned mid-loop reds (certification-document ×2 → FP-091; S-1 unmapped
   keys {11.6, 12.6, 12.7} → stage G), S-5, S-7, and certification green.]
 
-- [ ] FP-069 — Implement T11.6-1: `inventory` anchoring byte-exact, incl.
+- [x] FP-069 — Implement T11.6-1: `inventory` anchoring byte-exact, incl.
   the E-6 drive-mismatch arm (Linux side; the Windows-subset arm is
   FP-093). [R2 #6; TEST-SPEC §11.6, E-6] New §11.6 registry module; map
   `"11.6"`.
+  [Done 2026-08-14: T11.6-1 registered in the new section-11.6.ts
+  (SUITE-56; wrapper + manifest spread), decoding through a new scoped
+  form-exact decoder `decodeInventoryAnchoring` (forms.ts/model.ts — the
+  `decodeInventoryRecordedDatum` scoping precedent: exactly `root` and
+  `config` as 12.7 path values, every other member unread until FP-070+
+  pin the full form) plus the existing `decodeInventoryFindings`; every
+  arm asserts exit 0 with findings [] (complete finding-free answer,
+  12.0/11.6). Arms: workspace root — `.` / `xspec.config.ts`, flag-less
+  AND `--json` against the same byte-exact expectation (the §11 JSON-only
+  same-information parity); nested `a/b` — `../..` /
+  `../../xspec.config.ts` (upward search); sibling and deeper-sibling
+  directories beside the builder's `work/` root with relative `--config`
+  — `../work/…` and `../../work/…` (multi-`..` ascent then descent,
+  joined `/`); the same deep cwd with an ABSOLUTE `--config` spelling —
+  anchoring unchanged (pure invocation input: cwd + identified file,
+  never an argument echo); E-6 Linux side — cwd in an unrelated temp tree
+  (nearest common ancestor outside both trees, the closest Linux staging
+  to a cross-drive invocation): still the pure relative
+  ascent-then-descent form, no absolute form ever appears, expectation
+  computed by a harness-side implementation of 11.6's own spelling rule
+  over the realpath'd pair (fixed-vector + shape self-checks before any
+  product invocation), invocation repeated with byte-identical stdout
+  (deterministic per invocation, 12.0; product-to-itself, H-4).
+  Traceability "T11.6-1": ["11.6"] (12.0/E-6 carriage context, the §11
+  precedent); expressly in CERTIFICATIONS.md's Exclusions ("`inventory`
+  and `version`"), no fixture scope. Verified: typecheck/format clean;
+  suite red-as-diagnosed at the first arm's exit-0 assert (the stub has
+  no `inventory`: unknown-command exit 2); soundness proven by a scratch
+  mock product implementing the anchoring independently via
+  path.relative (body green — the two independent rule implementations
+  agree); teeth probed via seven mock deviations (absolute output,
+  trailing separator, `./`-prefixed spelling, `--config` echo, omitted
+  `root` member, phantom finding + exit 1, nondeterministic member), each
+  failing at exactly the intended assertion (the echo lands on the
+  absolute-`--config` arm, the omitted member on the form-exact decode,
+  the nondeterminism on the repeat byte-compare). `npm run test:self`:
+  planned mid-loop reds now certification-document ×2 (→ FP-091) and S-1
+  with its unmapped set narrowed {11.6, 12.6, 12.7} → {12.6, 12.7}
+  (→ stage G); S-5 88/88 green incl. the new anchoring guards;
+  certification green (violators failing as certified). FP-093 stays
+  pending for the Windows-subset drive-mismatch arm; FP-070..072 build
+  T11.6-2..-4 on this module.]
 - [ ] FP-070 — Implement T11.6-2: resolved configuration/sources/derived
   map. [R2 #6; TEST-SPEC §11.6]
 - [ ] FP-071 — Implement T11.6-3: record, area, durables, orders. [R2 #6;

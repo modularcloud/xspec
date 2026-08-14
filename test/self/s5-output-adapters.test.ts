@@ -45,6 +45,7 @@ import {
   decodeIdsReport,
   decodeIdsTreeReport,
   decodeImpactReport,
+  decodeInventoryAnchoring,
   decodeInventoryFindings,
   decodeInventoryRecordedDatum,
   decodeItemReport,
@@ -2706,6 +2707,67 @@ const DECODERS: readonly DecoderSpec[] = [
           ],
           recorded: { unavailable: true },
         },
+      },
+    ],
+  },
+  {
+    // The scoped inventory anchoring decode (SPEC 11.6, 12.7): exactly the
+    // `root` and `config` members, each a 12.7 path value, with every other
+    // member unread (the full inventory form is T11.6-*'s subject; T11.6-1
+    // pins the canonical relative spellings byte-exactly as its value
+    // assertions — the decoder's job is that neither member is ever absent
+    // or mis-formed).
+    name: "11.6 inventory (anchoring)",
+    decode: decodeInventoryAnchoring,
+    good: {
+      findings: [],
+      root: ".",
+      config: "xspec.config.ts",
+      graphData: ".xspec",
+    },
+    verify: (decoded: ReturnType<typeof decodeInventoryAnchoring>) => {
+      expect(decoded).toEqual({ root: ".", config: "xspec.config.ts" });
+    },
+    alsoGood: [
+      {
+        label:
+          "ascent-then-descent relative spellings decode as plain path " +
+          "strings (SPEC 11.6)",
+        doc: { root: "../../work", config: "../../work/xspec.config.ts" },
+        verify: (
+          decoded: ReturnType<typeof decodeInventoryAnchoring>,
+        ): void => {
+          expect(decoded).toEqual({
+            root: "../../work",
+            config: "../../work/xspec.config.ts",
+          });
+        },
+      },
+    ],
+    bad: [
+      {
+        label:
+          "absent root member (12.7: each object carries exactly the " +
+          "members its form names — null is never omission)",
+        doc: { findings: [], config: "xspec.config.ts" },
+      },
+      {
+        label: "absent config member",
+        doc: { findings: [], root: "." },
+      },
+      {
+        label: "null root (a path value is a string or the byte form)",
+        doc: { root: null, config: "xspec.config.ts" },
+      },
+      {
+        label: "a non-path root",
+        doc: { root: 42, config: "xspec.config.ts" },
+      },
+      {
+        label:
+          "a valid-UTF-8 anchoring path in the marked byte form (SPEC 12.7 " +
+          "forbids the byte form for a valid-UTF-8 path)",
+        doc: { root: { bytes: "2e" }, config: "xspec.config.ts" },
       },
     ],
   },

@@ -478,6 +478,19 @@ export interface ViewReport {
   readonly views: readonly FileView[];
 }
 
+/**
+ * The inventory document's anchoring members (SPEC.md 11.6, 12.7 — decoded
+ * by `decodeInventoryAnchoring`): the workspace root and the configuration
+ * file, each identified relative to the invocation working directory in
+ * 11.6's canonical spelling and carried as a 12.7 path value. The document's
+ * other members are outside this scoped projection (the full inventory form
+ * is T11.6-*'s subject).
+ */
+export interface InventoryAnchoring {
+  readonly root: PathValue;
+  readonly config: PathValue;
+}
+
 /** `coverage` (T8.2-1): all profiles by default, one when named. */
 export interface CoverageReport {
   readonly profiles: readonly CoverageProfileReport[];
