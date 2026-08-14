@@ -2463,8 +2463,56 @@ certify against FP-091's fixtures once those land.
   test:self`: 4 planned mid-loop reds with S-1's unmapped set narrowed
   6 → 5 keys, exactly {11.4, 11.5, 11.6, 12.6, 12.7} ("11.3" now mapped;
   certification-document ×3 → FP-091), S-5 and certification green.]
-- [ ] FP-057 — Implement T11.3-2: `--file` set restriction. [R2 #3;
+- [x] FP-057 — Implement T11.3-2: `--file` set restriction. [R2 #3;
   TEST-SPEC §11.3]
+  [Done 2026-08-14: registered in section-11.3.ts (SUITE-53) with
+  traceability ["11.3"] (no TEST-SPEC 14 staging record — the FP-056
+  precedent; 11.1/11.2/12.0 are context with home coverage at
+  T11-*/T11.2-*/T12.0-*); no certification scope (CERTIFICATIONS.md
+  Exclusions name T11.3-2's matrix explicitly; CONF-AVAIL's in-scope set
+  excludes it). Two self-owned fixtures. (1) A failing spec+code workspace —
+  one 14.5 in specs/apple.mdx (beside a resolving reference INTO the
+  excluded file and a local embedding), one 14.3 in specs/beta.mdx (beside
+  a resolving local `d`), one 14.8 in src/app.ts (string-form `text` beside
+  a resolving marker), plus an UNDISCOVERED unparseable decoy docs/note.mdx
+  in no configured group — gate `build --json` pins the exact multiset and
+  per-file homes first; then, inside one whole-root modifies-nothing
+  compare: `--file "**/ap*"` (one glob admitting spec and code alike) →
+  exit 1, findings exactly {14.5,14.8} located in the admitted files (never
+  beta's 14.3, never a phantom 14.5 for the cross-boundary reference —
+  resolution is workspace-wide, the domain restricts consultation), records
+  exactly the admitted files' three tuples per index; complementary literal
+  glob `specs/beta.mdx` flips the domain (exactly {14.3}, exactly beta's
+  record); empty-set arms `docs/*.mdx` (matches the on-disk decoy, no
+  DISCOVERED file — a filesystem-globbing product surfaces the decoy's
+  14.20) and `nosuch/**/*.mdx` → each `{"findings":[],"occurrences":[]}`
+  exit 0, no unknown-file usage error, whatever findings the workspace
+  carries; outside-root arms `../elsewhere/**/*.mdx` and
+  `specs/../../evil/*.mdx` → exit 2 via T11.2-5's usage-error protocol
+  (single 12.7 error document, stderr message), newly exported from
+  section-11.2.ts (export-only edit) for the per-surface matrices. (2) A
+  valid conjunction workspace (P→x, P→y, Q→x): `--file specs/P.mdx` alone →
+  P's two records; `--to specs/T.mdx#x` alone → the two x-targeting
+  records; both → exactly the one-record intersection — each filter alone
+  admits more, so union or either-alone fails the exact per-index compares;
+  all exit 0 finding-free after the buildOk premise. Verified:
+  typecheck/format clean; suite section-11.3 red-as-diagnosed — T11.3-2
+  fails at the gate build's FP-001-class form-exact decode ("expected no
+  member \"condition\"", the 14.5 leading), T11.3-1's known red unchanged;
+  direct probes against the built product prove the stagings (ws1 build
+  exit 1 with exactly the three old-shape findings in the right files,
+  BETA.far resolving, decoy contributing nothing; ws2 build exit 0 with
+  exactly the three depends edges; `occurrences` still unknown, exit 2 —
+  the pre-patch gap); scratch run (deleted) of the registered body against
+  a conforming fake deriving ranges from workspace bytes green end-to-end,
+  six deviation fakes each failing at exactly the targeted arm —
+  ignore-`--file` and whole-workspace-findings at the subset-domain
+  assertions, unknown-file-error and filesystem-globbing at the empty-set
+  arm, union at the conjunction's intersection compare, no-escape-check at
+  the outside-root exit-2 arm. `npm run test:self`: unchanged 4 planned
+  mid-loop reds (certification-document ×3 → FP-091; S-1's 5 unmapped keys
+  {11.4, 11.5, 11.6, 12.6, 12.7} → stage G), S-5 and certification green;
+  sections 5.7/11.2 unchanged (4 resp. 6 diagnosed reds).]
 - [ ] FP-058 — Implement T11.3-3: `--to` syntactic acceptance / malformed
   spellings. [R2 #3; TEST-SPEC §11.3]
 - [ ] FP-059 — Implement T11.3-4 (CONF-AVAIL): definitive emptiness.

@@ -1,4 +1,4 @@
-// TEST-SPEC §11.3 (`xspec occurrences`) — SUITE-53: T11.3-1.
+// TEST-SPEC §11.3 (`xspec occurrences`) — SUITE-53: T11.3-1 and T11.3-2.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -35,9 +35,24 @@
 // as exact condition-count multisets (staging integrity riding the answer
 // itself), plus the code/path projection for the code-source arm's single
 // path-level finding.
+//
+// T11.3-2 owns its two fixtures (nothing imports them): a failing
+// three-source workspace whose per-file findings are pairwise distinct
+// conditions (one 14.5 in specs/apple.mdx, one 14.3 in specs/beta.mdx, one
+// 14.8 in src/app.ts — the `build --json` gate pins the multiset and homes
+// before any `--file` arm, so every domain assertion stands on staged
+// ground), each file also holding occurrences, plus an UNDISCOVERED
+// on-disk decoy (docs/note.mdx, deliberately unparseable, in no configured
+// group); and a valid three-spec-file workspace for the `--file`/`--to`
+// conjunction. Domain membership is the subject, so records are pinned as
+// per-index identity-level tuples (each staged (file, kind, source,
+// target) tuple unique; ranges and order enforced by the decode); the
+// exit-2 arms ride T11.2-5's exported usage-error protocol
+// (registry/section-11.2.ts).
 
 import { Buffer } from "node:buffer";
 import type {
+  Finding,
   OccurrenceRecord,
   PathValue,
   SourceRange,
@@ -46,6 +61,7 @@ import { decodeOccurrencesReport } from "../../helpers/adapters/index.js";
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { OccurrenceUnit } from "./section-5.7.js";
 import {
@@ -80,6 +96,7 @@ import {
   CS_EXPECTED_OCCURRENCES,
   CS_FILE,
   CS_SOURCE,
+  expectAvailabilityUsageError,
   OK_FILE,
   OK_SOURCE,
   R_CONDITION_COUNTS,
@@ -91,7 +108,9 @@ import {
 } from "./section-11.2.js";
 import {
   assertConditionCounts,
+  assertFindingLocated,
   assertSameJson,
+  buildFindings,
   buildOk,
   expectExit,
   runJson,
@@ -657,5 +676,557 @@ const T11_3_1 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T11.3-2 — `--file`: a set restriction over discovered files
+// ---------------------------------------------------------------------------
+
+// The restriction workspace (failing on purpose): three discovered sources,
+// each holding at least one occurrence and exactly one finding of a condition
+// no other file stages — so every domain assertion individuates by condition
+// AND by located file — plus an on-disk decoy no configured group discovers.
+//
+// - specs/apple.mdx: one 14.5 (the unresolved local `"nosuch"` entry) beside
+//   TWO resolving spellings — the external `BETA.far` (its target lying in
+//   the file the subset glob EXCLUDES: resolution is workspace-wide, the
+//   domain restricts consultation, not the reference ground, SPEC 11.2/11.3
+//   — a product resolving only within the admitted set reports a phantom
+//   14.5 and drops the record) and the local embedding `{text("apple")}`.
+// - specs/beta.mdx: one 14.3 (the duplicate `twin` pair) beside the
+//   resolving local `d={"far"}`.
+// - src/app.ts: one 14.8 (the string-form `text("apple")`, invalid in
+//   TypeScript by form, SPEC 4.3 — no occurrence) beside the resolving
+//   marker `SPEC.apple`.
+// - docs/note.mdx: deliberately unparseable, in NO configured group — a
+//   pattern matching it on disk still matches no DISCOVERED file (SPEC 7:
+//   discovery is controlled exclusively by configuration), so a product
+//   globbing the filesystem instead of the discovered set consults it and
+//   surfaces a phantom 14.20 (or any nonempty answer) where the empty,
+//   finding-free answer is required.
+const FILTER_APPLE_FILE = "specs/apple.mdx";
+const FILTER_BETA_FILE = "specs/beta.mdx";
+const FILTER_APP_FILE = "src/app.ts";
+const FILTER_TRAP_FILE = "docs/note.mdx";
+
+const FILTER_APPLE_SOURCE = [
+  'import BETA from "./beta.xspec"',
+  "",
+  '<S id="apple">',
+  "Apple text.",
+  "</S>",
+  "",
+  '<S id="pick" d={[BETA.far, "nosuch"]}>',
+  'Pick: {text("apple")}',
+  "</S>",
+  "",
+].join("\n");
+
+const FILTER_BETA_SOURCE = [
+  '<S id="far">',
+  "Far text.",
+  "</S>",
+  "",
+  '<S id="near" d={"far"}>',
+  "Near text.",
+  "</S>",
+  "",
+  '<S id="twin">',
+  "Twin one.",
+  "</S>",
+  "",
+  '<S id="twin">',
+  "Twin two.",
+  "</S>",
+  "",
+].join("\n");
+
+const FILTER_APP_SOURCE = [
+  'import SPEC, { text } from "../specs/apple.xspec";',
+  "",
+  "export function grab(): void {",
+  "  SPEC.apple;",
+  "}",
+  "",
+  "export function bad(): string {",
+  '  return text("apple");',
+  "}",
+  "",
+].join("\n");
+
+const FILTER_TRAP_SOURCE = '<S id="trap">\nUnclosed on purpose.\n';
+
+/** The workspace's complete finding multiset (the `build --json` gate). */
+const FILTER_WORKSPACE_CONDITIONS: Readonly<Record<string, number>> = {
+  "14.3": 1,
+  "14.5": 1,
+  "14.8": 1,
+};
+
+// Expected record tuples per file, each list in that file's source order
+// (the 5.7 comparator's within-file leg; `specs/apple.mdx` < `src/app.ts`
+// by path bytes on the cross-file leg). Every staged (file, kind, source,
+// target) tuple is unique, so the per-index tuple compare individuates a
+// dropped, phantom, or out-of-domain record by name.
+const FILTER_APPLE_TUPLES: readonly RecordTuple[] = [
+  {
+    file: FILTER_APPLE_FILE,
+    kind: "depends",
+    source: "specs/apple.mdx#pick",
+    target: "specs/beta.mdx#far",
+  },
+  {
+    file: FILTER_APPLE_FILE,
+    kind: "embeds",
+    source: "specs/apple.mdx#pick",
+    target: "specs/apple.mdx#apple",
+  },
+];
+const FILTER_APP_TUPLES: readonly RecordTuple[] = [
+  {
+    file: FILTER_APP_FILE,
+    kind: "references",
+    source: "src/app.ts#grab",
+    target: "specs/apple.mdx#apple",
+  },
+];
+const FILTER_BETA_TUPLES: readonly RecordTuple[] = [
+  {
+    file: FILTER_BETA_FILE,
+    kind: "depends",
+    source: "specs/beta.mdx#near",
+    target: "specs/beta.mdx#far",
+  },
+];
+
+// The conjunction workspace (valid): occurrences P→x, P→y, Q→x, so `--file
+// specs/P.mdx` alone admits two records, `--to specs/T.mdx#x` alone selects
+// two, and the conjunction is exactly the one-record intersection — each
+// filter alone admits MORE than the intersection, TEST-SPEC's fixture
+// condition, so a product applying either filter alone (or their union)
+// fails the exact compare.
+const CONJ_T_FILE = "specs/T.mdx";
+const CONJ_P_FILE = "specs/P.mdx";
+const CONJ_Q_FILE = "specs/Q.mdx";
+const CONJ_X_ID = "specs/T.mdx#x";
+const CONJ_Y_ID = "specs/T.mdx#y";
+
+const CONJ_T_SOURCE = [
+  '<S id="x">',
+  "X text.",
+  "</S>",
+  "",
+  '<S id="y">',
+  "Y text.",
+  "</S>",
+  "",
+].join("\n");
+
+const CONJ_P_SOURCE = [
+  'import T from "./T.xspec"',
+  "",
+  '<S id="p" d={[T.x, T.y]}>',
+  "P text.",
+  "</S>",
+  "",
+].join("\n");
+
+const CONJ_Q_SOURCE = [
+  'import T from "./T.xspec"',
+  "",
+  '<S id="q" d={T.x}>',
+  "Q text.",
+  "</S>",
+  "",
+].join("\n");
+
+const CONJ_P_TO_X: RecordTuple = {
+  file: CONJ_P_FILE,
+  kind: "depends",
+  source: "specs/P.mdx#p",
+  target: CONJ_X_ID,
+};
+const CONJ_P_TO_Y: RecordTuple = {
+  file: CONJ_P_FILE,
+  kind: "depends",
+  source: "specs/P.mdx#p",
+  target: CONJ_Y_ID,
+};
+const CONJ_Q_TO_X: RecordTuple = {
+  file: CONJ_Q_FILE,
+  kind: "depends",
+  source: "specs/Q.mdx#q",
+  target: CONJ_X_ID,
+};
+
+/**
+ * The answer's one finding of a condition, returned for its located-home
+ * assertion; the caller has already pinned the count map, so a miss here is
+ * diagnosed against the whole findings array.
+ */
+function findingByCondition(
+  findings: readonly Finding[],
+  condition: string,
+  context: string,
+): Finding {
+  const matches = findings.filter((finding) => finding.condition === condition);
+  if (matches.length !== 1) {
+    fail(
+      `${context}: expected exactly one ${condition} finding in the ` +
+        `answer; got ${String(matches.length)} among ` +
+        JSON.stringify(findings),
+    );
+  }
+  return matches[0]!;
+}
+
+const T11_3_2 = defineProductTest({
+  id: "T11.3-2",
+  title:
+    "`--file` is a set restriction over discovered files, spec and code alike: one glob (`**/ap*`) admitting a spec source and a code source restricts the consulted domain to exactly the admitted files — only their findings accompany (never the excluded file's 14.3) and only their occurrences are enumerated, the admitted spec file's record into the excluded file still resolving and recording (the domain restricts consultation, not resolution), exit 1; the complementary literal glob flips the domain (exactly the 14.3, exactly the excluded file's record); a glob matching no discovered file — one matching an on-disk file no configured group discovers, and one matching nothing at all — admits the empty set: an empty, finding-free answer, exit 0, no unknown-file usage error on this filter, whatever findings the workspace carries; an outside-root pattern (a leading and an embedded `..` traversal) exits 2 as an invalid flag value with the single 12.7 error document, the argument check preceding answering; `--file` and `--to` combine conjunctively — a fixture where each filter alone admits more records than the intersection (SPEC 11.3, 11.2, 11.1, 7, 12.0, 12.7)",
+  run: async (product) => {
+    // --- Workspace 1: the restriction ground (failing on purpose). ------------
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+          [FILTER_APPLE_FILE]: FILTER_APPLE_SOURCE,
+          [FILTER_BETA_FILE]: FILTER_BETA_SOURCE,
+          [FILTER_APP_FILE]: FILTER_APP_SOURCE,
+          [FILTER_TRAP_FILE]: FILTER_TRAP_SOURCE,
+        },
+      });
+      try {
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            // Gate reference and staging integrity (SPEC 12.1, 14): exactly
+            // one finding per file, each of a condition no other file
+            // stages, homes pinned — so every domain assertion below reads
+            // on staged ground. The decoy is in no configured group and
+            // contributes nothing (SPEC 7: discovery is controlled
+            // exclusively by configuration).
+            const gateContext =
+              "T11.3-2 `build --json` (staging integrity: one 14.5 in " +
+              "apple, one 14.3 in beta, one 14.8 in the code source; the " +
+              "undiscovered docs/note.mdx contributes nothing)";
+            const gateFindings = await buildFindings(
+              product,
+              workspace,
+              gateContext,
+            );
+            assertConditionCounts(
+              gateFindings,
+              FILTER_WORKSPACE_CONDITIONS,
+              `${gateContext} — exactly the staged conditions (SPEC 14)`,
+            );
+            assertFindingLocated(
+              findingByCondition(gateFindings, "14.5", gateContext),
+              { file: FILTER_APPLE_FILE },
+              `${gateContext} — the unresolved \`"nosuch"\` entry locates ` +
+                `in apple (SPEC 14)`,
+            );
+            assertFindingLocated(
+              findingByCondition(gateFindings, "14.3", gateContext),
+              { file: FILTER_BETA_FILE },
+              `${gateContext} — the duplicate \`twin\` pair locates every ` +
+                `bearer, both in beta (SPEC 14)`,
+            );
+            assertFindingLocated(
+              findingByCondition(gateFindings, "14.8", gateContext),
+              { file: FILTER_APP_FILE },
+              `${gateContext} — the string-form \`text("apple")\` call ` +
+                `locates in the code source (SPEC 4.3, 14)`,
+            );
+
+            // --- One glob admitting a spec source AND a code source (SPEC
+            // 11.3: the discovered files, spec and code alike): the
+            // consulted domain is exactly {apple, app.ts} — only their
+            // findings accompany, only their occurrences are enumerated,
+            // and apple's reference INTO the excluded beta still resolves
+            // and records (never a phantom 14.5, never a dropped record).
+            {
+              const context =
+                'T11.3-2 `occurrences --file "**/ap*"` (a subset of spec ' +
+                "and code files alike)";
+              const result = await expectExit(
+                product,
+                workspace,
+                ["occurrences", "--file", "**/ap*"],
+                1,
+                `${context} — the admitted files' findings accompany, so ` +
+                  `exit 1 with the full answer (SPEC 11.2, 11.3)`,
+              );
+              const report = decodeOccurrencesReport(
+                parseJsonStdout(
+                  result,
+                  `${context} — a single JSON document is the only output ` +
+                    `form (SPEC 11)`,
+                ),
+                context,
+              );
+              assertConditionCounts(
+                report.findings,
+                { "14.5": 1, "14.8": 1 },
+                `${context}: ONLY the admitted files' findings accompany — ` +
+                  `apple's one 14.5 and the code source's one 14.8, never ` +
+                  `the excluded beta's 14.3, and never a second 14.5 for ` +
+                  `apple's resolving reference into the excluded file ` +
+                  `(SPEC 11.2, 11.3, 14)`,
+              );
+              assertFindingLocated(
+                findingByCondition(report.findings, "14.5", context),
+                { file: FILTER_APPLE_FILE },
+                `${context} — the accompanying 14.5 is the ADMITTED ` +
+                  `apple's (SPEC 11.2)`,
+              );
+              assertFindingLocated(
+                findingByCondition(report.findings, "14.8", context),
+                { file: FILTER_APP_FILE },
+                `${context} — the accompanying 14.8 is the ADMITTED code ` +
+                  `source's (SPEC 11.2)`,
+              );
+              assertSameJson(
+                report.occurrences.map(projectTuple),
+                [...FILTER_APPLE_TUPLES, ...FILTER_APP_TUPLES],
+                `${context}: the complete enumeration per index in ` +
+                  `occurrence order — apple's two records (the external ` +
+                  `reference into the EXCLUDED beta included: resolution ` +
+                  `is workspace-wide, the domain restricts consultation) ` +
+                  `and the code source's marker record; nothing of beta's ` +
+                  `(SPEC 5.7, 11.2, 11.3)`,
+              );
+            }
+
+            // --- The complementary literal glob: the domain flips to
+            // exactly {beta} — the other side of "only its findings
+            // accompany" over the same staging.
+            {
+              const context =
+                'T11.3-2 `occurrences --file "specs/beta.mdx"` (the ' +
+                "complementary single-file subset)";
+              const result = await expectExit(
+                product,
+                workspace,
+                ["occurrences", "--file", FILTER_BETA_FILE],
+                1,
+                `${context} — beta's finding accompanies, so exit 1 with ` +
+                  `the full answer (SPEC 11.2, 11.3)`,
+              );
+              const report = decodeOccurrencesReport(
+                parseJsonStdout(
+                  result,
+                  `${context} — a single JSON document is the only output ` +
+                    `form (SPEC 11)`,
+                ),
+                context,
+              );
+              assertConditionCounts(
+                report.findings,
+                { "14.3": 1 },
+                `${context}: ONLY beta's 14.3 accompanies — never apple's ` +
+                  `14.5 or the code source's 14.8 (SPEC 11.2, 11.3, 14)`,
+              );
+              assertFindingLocated(
+                findingByCondition(report.findings, "14.3", context),
+                { file: FILTER_BETA_FILE },
+                `${context} — the 14.3 locates in beta (SPEC 14)`,
+              );
+              assertSameJson(
+                report.occurrences.map(projectTuple),
+                FILTER_BETA_TUPLES,
+                `${context}: exactly beta's one record — nothing of ` +
+                  `apple's or the code source's (SPEC 5.7, 11.2, 11.3)`,
+              );
+            }
+
+            // --- A glob matching no DISCOVERED file admits the empty set
+            // (SPEC 11.3: a set restriction, not an existence assertion):
+            // an empty, finding-free answer, exit 0, no unknown-file usage
+            // error — whatever findings the workspace carries. First with a
+            // pattern matching a real on-disk file no group discovers (a
+            // product globbing the filesystem consults the unparseable
+            // decoy and answers nonempty), then with one matching nothing
+            // at all.
+            for (const [glob, what] of [
+              [
+                "docs/*.mdx",
+                "matching the on-disk but UNDISCOVERED docs/note.mdx",
+              ],
+              ["nosuch/**/*.mdx", "matching nothing at all"],
+            ] as const) {
+              const context = `T11.3-2 \`occurrences --file "${glob}"\` (${what})`;
+              const report = decodeOccurrencesReport(
+                await runJson(
+                  product,
+                  workspace,
+                  ["occurrences", "--file", glob],
+                  `${context} — the glob admits the empty set: an empty, ` +
+                    `finding-free answer exits 0, and no unknown-file ` +
+                    `usage error exists on this filter, whatever findings ` +
+                    `the workspace carries (SPEC 11.2, 11.3)`,
+                ),
+                context,
+              );
+              assertSameJson(
+                report.findings,
+                [],
+                `${context}: an empty consulted domain has no findings — ` +
+                  `the workspace's staged 14.3/14.5/14.8 are no domain ` +
+                  `file's findings here (SPEC 11.2, 11.3)`,
+              );
+              assertSameJson(
+                report.occurrences,
+                [],
+                `${context}: the empty enumeration (SPEC 11.3)`,
+              );
+            }
+
+            // --- An outside-root pattern is an invalid flag value, exit 2
+            // (SPEC 11.3, 11.1, 7): the argument check precedes answering
+            // (11.2), whatever findings the named files carry — asserted on
+            // this failing workspace via the shared JSON-only usage-error
+            // protocol (single 12.7 error document, message on stderr).
+            await expectAvailabilityUsageError(
+              product,
+              workspace,
+              ["occurrences", "--file", "../elsewhere/**/*.mdx"],
+              "T11.3-2 outside-root `--file` pattern (leading `..` " +
+                "traversal) on the failing workspace",
+            );
+            await expectAvailabilityUsageError(
+              product,
+              workspace,
+              ["occurrences", "--file", "specs/../../evil/*.mdx"],
+              "T11.3-2 outside-root `--file` pattern (embedded `..` " +
+                "traversal escaping the root mid-pattern) on the failing " +
+                "workspace",
+            );
+          },
+          "T11.3-2 workspace 1 — no invocation of the sweep modifies " +
+            "anything: the gate build fails writing nothing (SPEC 12.1) " +
+            "and on a failing workspace these surfaces answer from current " +
+            "sources and write nothing (SPEC 11.2; the no-write contract " +
+            "clauses live at T11.2-1/T11.2-6)",
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- Workspace 2: `--file` and `--to` combine conjunctively. --------------
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [CONJ_T_FILE]: CONJ_T_SOURCE,
+          [CONJ_P_FILE]: CONJ_P_SOURCE,
+          [CONJ_Q_FILE]: CONJ_Q_SOURCE,
+        },
+      });
+      try {
+        await buildOk(
+          product,
+          workspace,
+          "T11.3-2 `build` (premise: the conjunction workspace is valid, " +
+            "so every answer below is complete and finding-free, SPEC " +
+            "11.2, 11.3)",
+        );
+
+        // `--file` alone admits P's two records — more than the
+        // intersection.
+        {
+          const context =
+            "T11.3-2 `occurrences --file specs/P.mdx` (the file filter " +
+            "alone)";
+          const report = decodeOccurrencesReport(
+            await runJson(
+              product,
+              workspace,
+              ["occurrences", "--file", CONJ_P_FILE],
+              `${context} — complete and finding-free, exit 0 (SPEC 11.2, ` +
+                `11.3)`,
+            ),
+            context,
+          );
+          assertSameJson(
+            report.findings,
+            [],
+            `${context}: the domain carries no finding (SPEC 11.2)`,
+          );
+          assertSameJson(
+            report.occurrences.map(projectTuple),
+            [CONJ_P_TO_X, CONJ_P_TO_Y],
+            `${context}: exactly P's two records — the file filter alone ` +
+              `admits MORE than the conjunction's one (SPEC 11.3)`,
+          );
+        }
+
+        // `--to` alone selects the two records targeting x — more than the
+        // intersection.
+        {
+          const context =
+            "T11.3-2 `occurrences --to specs/T.mdx#x` (the target filter " +
+            "alone)";
+          const report = decodeOccurrencesReport(
+            await runJson(
+              product,
+              workspace,
+              ["occurrences", "--to", CONJ_X_ID],
+              `${context} — complete and finding-free, exit 0 (SPEC 11.2, ` +
+                `11.3)`,
+            ),
+            context,
+          );
+          assertSameJson(
+            report.findings,
+            [],
+            `${context}: the domain (the entire discovered set) carries ` +
+              `no finding (SPEC 11.2)`,
+          );
+          assertSameJson(
+            report.occurrences.map(projectTuple),
+            [CONJ_P_TO_X, CONJ_Q_TO_X],
+            `${context}: exactly the two records targeting x, P's before ` +
+              `Q's by path bytes — the target filter alone selects MORE ` +
+              `than the conjunction's one (SPEC 5.7, 11.3)`,
+          );
+        }
+
+        // Both filters combine conjunctively: exactly the one-record
+        // intersection — a union, or either filter applied alone, reports
+        // two or three records and fails.
+        {
+          const context =
+            "T11.3-2 `occurrences --file specs/P.mdx --to specs/T.mdx#x` " +
+            "(the conjunction)";
+          const report = decodeOccurrencesReport(
+            await runJson(
+              product,
+              workspace,
+              ["occurrences", "--file", CONJ_P_FILE, "--to", CONJ_X_ID],
+              `${context} — complete and finding-free, exit 0 (SPEC 11.2, ` +
+                `11.3)`,
+            ),
+            context,
+          );
+          assertSameJson(
+            report.findings,
+            [],
+            `${context}: the domain carries no finding (SPEC 11.2)`,
+          );
+          assertSameJson(
+            report.occurrences.map(projectTuple),
+            [CONJ_P_TO_X],
+            `${context}: exactly the intersection — P's record targeting ` +
+              `x and nothing else: the two filters combine conjunctively ` +
+              `(SPEC 11.3)`,
+          );
+        }
+      } finally {
+        await workspace.dispose();
+      }
+    }
+  },
+});
+
 /** TEST-SPEC §11.3, in canonical ID order (SUITE-53). */
-export const section113Tests: readonly ProductTestEntry[] = [T11_3_1];
+export const section113Tests: readonly ProductTestEntry[] = [T11_3_1, T11_3_2];

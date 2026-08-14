@@ -3268,8 +3268,11 @@ function assertCycleFindingsWhole(
  * the single 12.7 error document (the surfaces are JSON-only, SPEC 11, so
  * JSON output is always in effect; the form-exact decode admits no findings
  * report and no answer beside it), and the usage message on stderr (12.0).
+ * Exported: the per-surface spelling matrices (T11.3-2/3, T11.4-2, T11.5-2)
+ * assert their exit-2 arms through this same protocol
+ * (registry/section-11.3.ts imports, never copies).
  */
-async function expectAvailabilityUsageError(
+export async function expectAvailabilityUsageError(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
