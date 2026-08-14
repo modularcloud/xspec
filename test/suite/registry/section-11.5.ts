@@ -1,5 +1,5 @@
-// TEST-SPEC §11.5 (`xspec at`) — SUITE-55: T11.5-1 (T11.5-2 and T11.5-3
-// follow in this module as they are implemented).
+// TEST-SPEC §11.5 (`xspec at`) — SUITE-55: T11.5-1 and T11.5-2 (T11.5-3
+// follows in this module as it is implemented).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -75,17 +75,26 @@ import {
   decodeAtReport,
   decodeViewReport,
 } from "../../helpers/adapters/index.js";
-import { fail } from "../../helpers/assertions.js";
+import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import type { TestWorkspace as Workspace } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   expectAvailabilityUsageError,
+  SPEC_AND_CODE_CONFIG,
   SPECS_ONLY_CONFIG,
 } from "./section-11.2.js";
-import { assertSameJson, runJson } from "./support.js";
+import {
+  assertConditionCounts,
+  assertFindingLocated,
+  assertSameJson,
+  buildFindings,
+  expectExit,
+  runJson,
+} from "./support.js";
 
 /**
  * Running byte-offset fixture assembler (the T5.7-2/T11.2-1/T11.4-1
@@ -597,4 +606,364 @@ const T11_5_1 = defineProductTest({
   },
 });
 
-export const section115Tests: readonly ProductTestEntry[] = [T11_5_1];
+// --- T11.5-2 — offset spelling and operands (SPEC 11.5, 12.0) -----------------
+//
+// The matrix ground (failing on purpose — the T11.4-2 discipline): a
+// finding-free spec source whose one section opens BEFORE byte offset 7
+// behind a multi-byte prose head (so `007` read as decimal 7 resolves into
+// the section while a product reading the spelling as 0 resolves to the
+// root — the acceptance arm's teeth), a finding-laden spec source carrying
+// exactly one 14.3 (the "same errors on a finding-laden file" ground), a
+// discovered code source carrying exactly one 14.8 (the wrong-kind operand,
+// its own finding notwithstanding), and an on-disk decoy no configured
+// group discovers (membership is in the DISCOVERED set, SPEC 7 — a product
+// resolving operands against the filesystem accepts it and answers, or
+// surfaces its 14.20, instead of erring).
+//
+// Certification note: T11.5-2 is expressly in CERTIFICATIONS.md's
+// Exclusions — the argument, spelling, and domain-and-exit matrices of the
+// machine-interface surfaces (T11.2-5, T11.3-2/3, T11.4-2, T11.5-2) are
+// certified representatively through the shared machinery — so, like
+// T11.4-2, this body freely drives the gate-reference `build` and the
+// whole-root snapshot compare.
+
+const OS_OK_FILE = "specs/ok.mdx";
+const OS_PROSE_TEXT = "Pré.\n"; // 6 bytes (é is 2): the head prose [0, 6)
+const OS_SEPT_OPEN_TEXT = '<S id="sept">';
+const OS_SEPT_BODY_TEXT = "\nTexte visé.\n";
+
+const OS = new ByteFixture();
+const OS_PROSE = OS.add(OS_PROSE_TEXT);
+const OS_SEPT_OPEN = OS.add(OS_SEPT_OPEN_TEXT);
+OS.add(OS_SEPT_BODY_TEXT);
+OS.add(CLOSE_TEXT);
+const OS_SEPT_RANGE: SourceRange = { start: OS_SEPT_OPEN.start, end: OS.pos };
+OS.add("\n");
+const OS_OK_SOURCE = OS.source;
+
+const OS_SEPT_CONSTRUCT_TEXT = `${OS_SEPT_OPEN_TEXT}${OS_SEPT_BODY_TEXT}${CLOSE_TEXT}`;
+
+/** Offset 7's precomputed resolution — the anchor `007` must reproduce. */
+const OS_SEPT_SECTION: AtSection = {
+  identity: `${OS_OK_FILE}#sept`,
+  range: OS_SEPT_RANGE,
+};
+
+// The finding-laden spec source: prose before any section (so offset 0
+// resolves to the root, its identity the defined path — the control arm's
+// answer is complete, exit 1 riding on the finding alone), then two
+// sections both spelling `twin` — exactly one 14.3, locating every bearer.
+const OS_BAD_FILE = "specs/bad.mdx";
+const OS_BAD = new ByteFixture();
+OS_BAD.add("Préambule fautif — hors de toute section.\n");
+OS_BAD.add('<S id="twin">\nUn.\n</S>\n');
+OS_BAD.add('<S id="twin">\nDeux.\n</S>\n');
+const OS_BAD_SOURCE = OS_BAD.source;
+
+/** Offset 0's resolution in the finding-laden file: the root (SPEC 11.5). */
+const OS_BAD_ROOT: AtSection = {
+  identity: OS_BAD_FILE,
+  range: { start: 0, end: OS_BAD.pos },
+};
+
+// The discovered code source (SPEC 7.2): one string-form `text(...)` marker
+// — exactly one 14.8 (SPEC 4.3) — beside a resolving reference, so the
+// wrong-kind operand is itself finding-laden and the argument check's
+// precedence over answering is sharp (T11.4-2's discipline).
+const OS_CODE_FILE = "src/app.ts";
+const OS_CODE_SOURCE = [
+  'import SPEC, { text } from "../specs/ok.xspec";',
+  "",
+  "export function grab(): void {",
+  "  SPEC.sept;",
+  "}",
+  "",
+  "export function bad(): string {",
+  '  return text("sept");',
+  "}",
+  "",
+].join("\n");
+
+// On disk but in no configured group (SPEC 7): unknown as an operand. Its
+// unclosed tag makes a filesystem-resolving product's acceptance loud — it
+// answers or surfaces a spurious 14.20 instead of the usage error.
+const OS_DECOY_FILE = "docs/note.mdx";
+const OS_DECOY_SOURCE = '<S id="piège">\nJamais fermé.\n';
+
+/** The workspace's complete finding multiset (the `build --json` gate). */
+const OS_WORKSPACE_CONDITIONS: Readonly<Record<string, number>> = {
+  "14.3": 1,
+  "14.8": 1,
+};
+
+/**
+ * The rejected `<offset>` spellings (SPEC 11.5): anything but one or more
+ * ASCII decimal digits — a sign, whitespace, or any other character is not
+ * a non-negative integer's spelling. Each runs twice: on the finding-free
+ * file and on the finding-laden one (the argument checks precede answering,
+ * SPEC 11.2, T11.2-5).
+ */
+const OS_REJECTED_SPELLINGS: readonly {
+  readonly spelling: string;
+  readonly what: string;
+}[] = [
+  { spelling: "+7", what: "a plus sign is not a digit" },
+  {
+    spelling: "-1",
+    what: "a minus sign is not a digit (no negative offset has a spelling)",
+  },
+  { spelling: " 7", what: "leading whitespace is not a digit" },
+  { spelling: "7 ", what: "trailing whitespace is not a digit" },
+  {
+    spelling: "0x7",
+    what: "a hexadecimal prefix is not a digits-only decimal spelling",
+  },
+  { spelling: "", what: "an empty value spells no non-negative integer" },
+];
+
+const T11_5_2 = defineProductTest({
+  id: "T11.5-2",
+  title:
+    '`007` is accepted as 7 — leading zeros permitted, the value read in ASCII decimal: on a file whose one section opens before byte 7 behind a multi-byte prose head, `at specs/ok.mdx 007` answers exit 0, findings [], with byte-exactly offset 7\'s precomputed resolution (the section whose opening tag contains it — a product reading the spelling as 0 resolves to the root and fails), equal to the plain-`7` invocation\'s answer — while `+7`, `-1`, `" 7"`, `"7 "`, `0x7`, and an empty value are each not a digits-only spelling: exit 2 with the single 12.7 error document as the entire stdout, the same six spellings on the finding-laden specs/bad.mdx exiting 2 identically (the argument checks precede answering, never exit 1 with the domain\'s findings); `<file>` membership and wrong-kind checks as T11.4-2: an operand existing nowhere, an on-disk docs/note.mdx no configured group discovers, and a discovered code source — its own staged 14.8 notwithstanding — each exit 2; and the finding-laden file still answers when the arguments are valid: `at specs/bad.mdx 0` exits 1 with the full answer, the root resolution complete beside exactly its one 14.3, no invocation of the sweep modifying anything (SPEC 11.5, 11.2, 12.0, 12.7, 7)',
+  run: async (product) => {
+    // Fixture self-checks (T5.7-2 discipline) — the staging arithmetic the
+    // acceptance arm's teeth rest on, proven before any product invocation.
+    sliceCheck(OS_OK_SOURCE, OS_PROSE, OS_PROSE_TEXT, "T11.5-2's head prose");
+    sliceCheck(
+      OS_OK_SOURCE,
+      OS_SEPT_OPEN,
+      OS_SEPT_OPEN_TEXT,
+      "T11.5-2 sept's opening tag",
+    );
+    sliceCheck(
+      OS_OK_SOURCE,
+      OS_SEPT_RANGE,
+      OS_SEPT_CONSTRUCT_TEXT,
+      "T11.5-2 sept's construct",
+    );
+    if (!(OS_SEPT_OPEN.start <= 7 && 7 < OS_SEPT_OPEN.end)) {
+      fail(
+        `§11.5 fixture self-check — byte offset 7 must fall inside sept's ` +
+          `opening tag [${String(OS_SEPT_OPEN.start)}, ` +
+          `${String(OS_SEPT_OPEN.end)}) so \`007\` read as decimal 7 ` +
+          `resolves into the section (a harness-side staging error, not a ` +
+          `product failure)`,
+      );
+    }
+    if (!(OS_PROSE.start <= 0 && 0 < OS_PROSE.end)) {
+      fail(
+        `§11.5 fixture self-check — byte offset 0 must fall inside the ` +
+          `head prose so a product reading \`007\` as 0 resolves to the ` +
+          `root, not to sept (a harness-side staging error, not a product ` +
+          `failure)`,
+      );
+    }
+
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        [OS_OK_FILE]: OS_OK_SOURCE,
+        [OS_BAD_FILE]: OS_BAD_SOURCE,
+        [OS_CODE_FILE]: OS_CODE_SOURCE,
+        [OS_DECOY_FILE]: OS_DECOY_SOURCE,
+      },
+    });
+    try {
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          // Gate reference and staging integrity (SPEC 12.1, 14): exactly
+          // one 14.3 in bad.mdx and one 14.8 in the discovered code
+          // source, nothing else — ok.mdx is finding-free and the decoy is
+          // in no configured group, contributing nothing (SPEC 7).
+          const gateContext =
+            "T11.5-2 `build --json` (staging integrity: one 14.3 in " +
+            "specs/bad.mdx, one 14.8 in src/app.ts; specs/ok.mdx " +
+            "finding-free; the undiscovered docs/note.mdx contributes " +
+            "nothing)";
+          const gateFindings = await buildFindings(
+            product,
+            workspace,
+            gateContext,
+          );
+          assertConditionCounts(
+            gateFindings,
+            OS_WORKSPACE_CONDITIONS,
+            `${gateContext} — exactly the staged conditions (SPEC 14)`,
+          );
+          assertFindingLocated(
+            gateFindings.find((finding) => finding.condition === "14.3")!,
+            { file: OS_BAD_FILE },
+            `${gateContext} — the duplicate \`twin\` pair locates every ` +
+              `bearer, both in specs/bad.mdx (SPEC 14)`,
+          );
+          assertFindingLocated(
+            gateFindings.find((finding) => finding.condition === "14.8")!,
+            { file: OS_CODE_FILE },
+            `${gateContext} — the string-form \`text("sept")\` call ` +
+              `locates in the code source (SPEC 4.3, 14)`,
+          );
+
+          // --- `007` is accepted as 7 (SPEC 11.5): leading zeros are
+          // permitted and the value is read in decimal, so the answer is
+          // byte-exactly offset 7's — the section whose opening tag
+          // contains byte 7, never offset 0's root — and equals the
+          // plain-`7` invocation's, both pinned to the same precomputed
+          // constant. Findings [] beside: the consulted domain is the
+          // named file alone, and ok.mdx is finding-free — the
+          // workspace's staged 14.3/14.8 are no domain file's findings
+          // (SPEC 11.2), so exit 0.
+          const expectedSeven = {
+            section: OS_SEPT_SECTION,
+            occurrence: null,
+          };
+          for (const spelling of ["007", "7"] as const) {
+            const context = `T11.5-2 \`at ${OS_OK_FILE} ${spelling}\``;
+            const report = decodeAtReport(
+              await runJson(
+                product,
+                workspace,
+                ["at", OS_OK_FILE, spelling],
+                `${context} — \`${spelling}\` is one-or-more ASCII decimal ` +
+                  `digits, read in decimal as 7 (leading zeros permitted), ` +
+                  `and the named file's domain is finding-free, so the ` +
+                  `answer exits 0 (SPEC 11.5, 11.2)`,
+              ),
+              context,
+            );
+            assertSameJson(
+              report.findings,
+              [],
+              `${context} — the consulted domain is the named file alone ` +
+                `and specs/ok.mdx is finding-free: the workspace's staged ` +
+                `14.3/14.8 are no domain file's findings (SPEC 11.2, 11.5)`,
+            );
+            assertSameJson(
+              report.resolution,
+              expectedSeven,
+              `${context} — the spelling is read in ASCII decimal as ` +
+                `offset 7, which lies inside sept's opening tag: the ` +
+                `innermost containing section construct, byte-exactly ` +
+                `{identity, range}, occurrence null — a product reading ` +
+                `\`007\` as 0 resolves to the root instead (SPEC 11.5, ` +
+                `1.7, 11.2, 12.7)`,
+            );
+          }
+
+          // --- The rejected spellings (SPEC 11.5, 12.0): each exits 2
+          // with the single 12.7 error document — on the finding-free
+          // file, and identically on the finding-laden one: the argument
+          // checks precede answering, never exit 1 with the domain's
+          // findings (SPEC 11.2, T11.2-5's protocol).
+          for (const { spelling, what } of OS_REJECTED_SPELLINGS) {
+            await expectAvailabilityUsageError(
+              product,
+              workspace,
+              ["at", OS_OK_FILE, spelling],
+              `T11.5-2 offset value ${JSON.stringify(spelling)} on the ` +
+                `finding-free file (${what} — not one-or-more ASCII ` +
+                `decimal digits, SPEC 11.5)`,
+            );
+            await expectAvailabilityUsageError(
+              product,
+              workspace,
+              ["at", OS_BAD_FILE, spelling],
+              `T11.5-2 offset value ${JSON.stringify(spelling)} on the ` +
+                `FINDING-LADEN specs/bad.mdx (${what}): the argument ` +
+                `checks precede answering, so the usage error exits 2 ` +
+                `whatever findings the named file carries — never exit 1 ` +
+                `with its 14.3 (SPEC 11.2, 11.5)`,
+            );
+          }
+
+          // --- `<file>` membership and wrong-kind checks as T11.4-2
+          // (SPEC 11.5: `<file>` asserts domain membership exactly as a
+          // `view` operand does; 11.4, 12.0) — each with a well-formed
+          // offset, so the operand is each arm's sole defect.
+          await expectAvailabilityUsageError(
+            product,
+            workspace,
+            ["at", "specs/Nope.mdx", "0"],
+            "T11.5-2 unknown `<file>` operand (a file existing nowhere) " +
+              "on the failing workspace",
+          );
+          await expectAvailabilityUsageError(
+            product,
+            workspace,
+            ["at", OS_DECOY_FILE, "0"],
+            "T11.5-2 unknown `<file>` operand (docs/note.mdx exists on " +
+              "disk but no configured group discovers it — membership is " +
+              "in the DISCOVERED set, SPEC 7) on the failing workspace",
+          );
+          await expectAvailabilityUsageError(
+            product,
+            workspace,
+            ["at", OS_CODE_FILE, "0"],
+            "T11.5-2 wrong-kind `<file>` operand (src/app.ts is a " +
+              "discovered CODE source, and `at` resolves positions in " +
+              "spec sources — SPEC 11.5, 11.4, 12.0), its own staged " +
+              "14.8 notwithstanding: the argument checks precede " +
+              "answering, never exit 1 with the file's findings",
+          );
+
+          // --- Control: the finding-laden file ANSWERS when the
+          // arguments are valid (SPEC 11.2: exit 1 signals imperfection
+          // and never withholds the answer) — pinning that the exit-2s
+          // above are the argument checks' doing, not a product erring on
+          // every invocation that names bad.mdx.
+          {
+            const context = `T11.5-2 \`at ${OS_BAD_FILE} 0\` (the control: valid arguments on the finding-laden file)`;
+            const result = await expectExit(
+              product,
+              workspace,
+              ["at", OS_BAD_FILE, "0"],
+              1,
+              `${context} — the domain file's 14.3 accompanies the ` +
+                `answer, so exit 1 with the full answer still emitted ` +
+                `(SPEC 11.2, 11.5)`,
+            );
+            const report = decodeAtReport(
+              parseJsonStdout(
+                result,
+                `${context} — the full answer document is still emitted, ` +
+                  `complete and parseable (SPEC 11.2, H-5)`,
+              ),
+              context,
+            );
+            assertConditionCounts(
+              report.findings,
+              { "14.3": 1 },
+              `${context} — exactly the named file's one finding ` +
+                `accompanies; the code source's 14.8 is no domain file's ` +
+                `finding (SPEC 11.2, 14)`,
+            );
+            assertFindingLocated(
+              report.findings[0]!,
+              { file: OS_BAD_FILE },
+              `${context} — the duplicate \`twin\` finding locates every ` +
+                `bearer in the named file (SPEC 14)`,
+            );
+            assertSameJson(
+              report.resolution,
+              { section: OS_BAD_ROOT, occurrence: null },
+              `${context} — offset 0 lies in the head prose, so the ` +
+                `resolution is the root, complete: identity the defined ` +
+                `path, range the whole file, occurrence null — the ` +
+                `duplicate bearers' undefined identities are never ` +
+                `consulted here (SPEC 11.5, 11.2, 1.5)`,
+            );
+          }
+        },
+        "T11.5-2 — no invocation of the sweep modifies anything: the gate " +
+          "build fails writing nothing (SPEC 12.1) and on a failing " +
+          "workspace these surfaces answer from current sources and write " +
+          "nothing (SPEC 11.2; the no-write contract clauses live at " +
+          "T11.2-1/T11.2-6)",
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
+export const section115Tests: readonly ProductTestEntry[] = [T11_5_1, T11_5_2];

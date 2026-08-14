@@ -2930,8 +2930,38 @@ certify against FP-091's fixtures once those land.
   reds — certification-document fixture-manifest ×2 → FP-091; S-1's
   unmapped keys narrowed {11.5, 11.6, 12.6, 12.7} → exactly {11.6, 12.6,
   12.7} (stage G); S-5, S-7, and certification green.]
-- [ ] FP-067 — Implement T11.5-2: offset spelling matrix. [R2 #5; TEST-SPEC
+- [x] FP-067 — Implement T11.5-2: offset spelling matrix. [R2 #5; TEST-SPEC
   §11.5]
+  [Done 2026-08-14: T11.5-2 registered in section-11.5.ts on the T11.4-2
+  matrix ground (SPEC_AND_CODE_CONFIG; finding-free specs/ok.mdx whose one
+  section `sept` opens at byte 6 behind a multi-byte prose head — offset 7
+  inside its opening tag, offset 0 in the prose, both containments
+  fixture-self-checked, so `007`-as-7 vs as-0 has teeth; specs/bad.mdx with
+  exactly one 14.3; src/app.ts with exactly one 14.8; undiscovered
+  docs/note.mdx decoy), all inside one whole-root assertLeavesUnchanged.
+  Arms: gate `build --json` pinning exactly {14.3, 14.8} located;
+  `at ok.mdx 007` and `7` each exit 0, findings [], resolution byte-exactly
+  the precomputed sept {identity, range} with occurrence null (leading
+  zeros, ASCII decimal); the six rejected spellings `+7`/`-1`/`" 7"`/
+  `"7 "`/`0x7`/`""` each exit 2 via expectAvailabilityUsageError (T11.2-5
+  protocol) on the finding-free file AND identically on the finding-laden
+  bad.mdx (checks precede answering); membership/wrong-kind as T11.4-2 —
+  nowhere-file, on-disk undiscovered decoy, discovered code source (its own
+  14.8 notwithstanding) each exit 2; control `at bad.mdx 0` exit 1 with the
+  full answer (root resolution complete, exactly the one located 14.3).
+  Traceability "T11.5-2": ["11.5"] (the T11.4-2 precedent: gate staging
+  integrity adds no "14"); expressly in CERTIFICATIONS.md's Exclusions, so
+  no fixture scope. Verified: typecheck/format clean; probes against the
+  built product prove the staging (build --json reports exactly the two
+  old-shape findings in the right files; ok.mdx finding-free) and the argv
+  mechanics (empty-string operand passes through; `at` is unknown-command
+  exit 2, stdout empty, stderr message — so the exit-2 arms fail diagnosed
+  at the error-document decode until the surface exists); suite:
+  T11.5-2 red-as-diagnosed at the gate's FP-001-class form-exact decode
+  ("expected no member \"condition\""), every fixture self-check passing
+  before it, T11.5-1 unchanged; `npm run test:self` unchanged 3 planned
+  mid-loop reds (certification-document ×2 → FP-091; S-1 unmapped keys
+  {11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
 - [ ] FP-068 — Implement T11.5-3: occurrence containment ends and imperfect
   files. [R2 #5; TEST-SPEC §11.5]
 
