@@ -2662,8 +2662,47 @@ certify against FP-091's fixtures once those land.
   gap now exactly {T11.4-3, T11.4-4}; S-1's unmapped keys now exactly
   {11.5, 11.6, 12.6, 12.7} → stage G — S-5 and certification green
   (certification.test.ts 17/17).]
-- [ ] FP-061 — Implement T11.4-2: operands-vs-restriction. [R2 #4;
+- [x] FP-061 — Implement T11.4-2: operands-vs-restriction. [R2 #4;
   TEST-SPEC §11.4]
+  [Done 2026-08-14: T11.4-2 appended to test/suite/registry/section-11.4.ts
+  (module header extended); traceability "T11.4-2": ["11.4"] (the T11.3-2
+  precedent: gate condition counts are staging integrity, no "14";
+  12.0/7 parentheticals context). NOT in CONF-AVAIL scope — a named
+  Exclusions entry (the domain-and-exit matrices) — so unlike T11.4-1 it
+  drives the gate-reference `build --json` (staging integrity: exactly one
+  14.3 in specs/bad.mdx, one 14.8 in src/app.ts — the T11.3-2 staging
+  mirror — specs/dup.mdx finding-free, docs/note.mdx an on-disk unparseable
+  decoy in NO configured group) and wraps the whole sweep in one
+  assertLeavesUnchanged. Arms: operands assert membership via T11.2-5's
+  exported usage-error protocol — a file existing nowhere, the on-disk
+  undiscovered decoy (a filesystem-resolving product accepts it), and the
+  discovered code source as wrong-kind (its own 14.8 notwithstanding —
+  checks precede answering), each exit 2 with the single 12.7 error
+  document; `--file` restricts — the decoy glob, a nothing-at-all glob, and
+  the SAME `src/app.ts` spelling that just erred as an operand each answer
+  `{"findings": [], "views": []}` exit 0 (the code arm is the sharp half:
+  a product reusing 11.3's spec-and-code-alike filter carries the staged
+  14.8 and exits 1); combining operand with `--file`, each part
+  individually valid, exit 2; `view specs/dup.mdx specs/dup.mdx` → ONE
+  view, findings [], exit 0 on the failing workspace (domain = requested
+  files; positive control that empty answers are the filter's doing), the
+  view's substance pinned at identity level (root + `#solo`; ranges/
+  attributes stay T11.4-1/-3's). Verified: typecheck/format clean; staging
+  premise probed against the built product (`build --json` reports exactly
+  the one 14.3 in bad.mdx and one 14.8 in app.ts, old shape); suite
+  section-11.4 red-as-diagnosed (T11.4-2 fails at the gate's FP-001-class
+  form-exact findings decode — "expected no member \"condition\"" — arms
+  unreached until that product gap closes; T11.4-1 unchanged at `view`
+  unknown-command); scratch run (deleted) of the registered body:
+  conforming fake (deriving findings/views from workspace bytes) green
+  end-to-end, seven deviation fakes each failing at the targeted
+  assertion — fsoperand/wrongkind at the operand exit-2 arms, fsglob/
+  codeglob/wsfindings at the empty-answer arms, combine at the combining
+  exit-2 arm, dupview at the decode's strictly-ascending views rejection.
+  `npm run test:self`: unchanged 4 planned mid-loop reds
+  (certification-document ×3 → FP-091, its in-scope-registry gap still
+  exactly {T11.4-3, T11.4-4}; S-1's unmapped keys exactly {11.5, 11.6,
+  12.6, 12.7} → stage G), S-5 and certification green.]
 - [ ] FP-062 — Implement T11.4-3 (CONF-AVAIL): raw attributes and per-node
   data with stated-`null` root `tags`/`coverage`. [R2 #4, R3 gap 1, VERIFY;
   TEST-SPEC §11.4]

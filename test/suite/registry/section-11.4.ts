@@ -1,5 +1,5 @@
-// TEST-SPEC §11.4 (`xspec view`) — SUITE-54: T11.4-1 (T11.4-2 through
-// T11.4-6 are planned follow-ups in this module).
+// TEST-SPEC §11.4 (`xspec view`) — SUITE-54: T11.4-1 and T11.4-2 (T11.4-3
+// through T11.4-6 are planned follow-ups in this module).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -64,6 +64,47 @@
 //   imports/occurrences/comments are asserted `[]` per file — nothing is
 //   staged, and empty lists are `[]`, never `null` (SPEC 12.7).
 //
+// T11.4-2 — operands vs restriction (SPEC 11.4). One failing-on-purpose
+// workspace, the whole sweep inside one modifies-nothing compare:
+//
+// - Staging (the `build --json` gate pins it before any arm, so every
+//   domain-and-exit assertion below reads on staged ground): specs/dup.mdx
+//   is finding-free with one section `solo` (the positive-control file the
+//   set arm views); specs/bad.mdx holds exactly one 14.3 (a duplicate
+//   `twin` pair); src/app.ts is a DISCOVERED code source holding exactly one
+//   14.8 (the string-form `text("solo")` call, invalid in TypeScript by
+//   form, SPEC 4.3) beside a resolving `SPEC.solo` marker; docs/note.mdx is
+//   an on-disk, deliberately unparseable decoy in NO configured group (SPEC
+//   7: discovery is controlled exclusively by configuration).
+// - `<file>` operands assert membership in the DISCOVERED spec-source
+//   domain: a file existing nowhere and the on-disk undiscovered decoy each
+//   exit 2 as an unknown file (a product resolving operands against the
+//   filesystem accepts the decoy and answers — or surfaces its 14.20 —
+//   instead of erring); the discovered code source exits 2 as a wrong-kind
+//   operand (12.0), its own 14.8 notwithstanding — the argument checks
+//   precede answering (11.2, the T11.2-5 protocol), never exit 1 with the
+//   file's findings.
+// - `--file` is instead a set restriction over the domain: a glob matching
+//   only the undiscovered decoy, one matching nothing at all, and the SAME
+//   `src/app.ts` spelling that just erred as an operand each admit the
+//   empty set — `{"findings": [], "views": []}`, exit 0, no unknown-file
+//   usage error on this filter, whatever findings the workspace carries.
+//   The only-code-sources arm is the sharp half (SPEC 11.4: the restriction
+//   admits the discovered SPEC sources it matches, unlike 11.3's
+//   spec-and-code-alike filter): a product reusing the occurrences filter
+//   consults the finding-laden code file, carries its 14.8, and exits 1.
+// - Combining `<file>` operands with `--file` — each part individually
+//   valid — is a usage error, exit 2 (an intersecting or union product
+//   answers instead).
+// - The requested files form a set: the discovered specs/dup.mdx named
+//   twice yields ONE view (the decode besides rejects a duplicated view
+//   entry: per-file views are strictly ascending by path bytes), the
+//   finding-free domain {dup} exiting 0 with an empty findings member while
+//   bad.mdx and the code source stay failing — the domain is the requested
+//   files (T11.2-5's ground riding as this arm's positive control). The
+//   view's substance is pinned at identity level (root and child identity);
+//   ranges, attributes, and interpreted values stay T11.4-1/-3's subject.
+//
 // Certification (CERTIFICATIONS.md CONF-AVAIL): T11.4-1 is IN scope (the
 // fixture family lands with the certification-manifest task), so the body
 // obeys the scope's staging constraints exactly: a spec-only workspace of
@@ -82,7 +123,12 @@
 // exactly as certified (`null` is never omission — decodeViewReport rejects
 // the absent members). The per-node `tags`/`coverage` VALUES and raw
 // attribute entries stay outside this test's compare (T11.4-3's subject; the
-// decode already enforces their presence and forms).
+// decode already enforces their presence and forms). T11.4-2 is NOT in
+// scope: CERTIFICATIONS.md's Exclusions name the argument, spelling, and
+// domain-and-exit matrices of the machine-interface surfaces (T11.2-5,
+// T11.3-2/3, T11.4-2, T11.5-2) — certified representatively through the
+// shared machinery — so unlike its sibling it is free to drive the
+// gate-reference `build` and the snapshot compare.
 
 import { Buffer } from "node:buffer";
 import type { SourceRange, ViewNode } from "../../helpers/adapters/index.js";
@@ -90,13 +136,20 @@ import { decodeViewReport } from "../../helpers/adapters/index.js";
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { SPECS_ONLY_CONFIG } from "./section-11.2.js";
+import {
+  expectAvailabilityUsageError,
+  SPEC_AND_CODE_CONFIG,
+  SPECS_ONLY_CONFIG,
+} from "./section-11.2.js";
 import {
   assertConditionCounts,
   assertFindingLocated,
   assertSameJson,
+  buildFindings,
   expectExit,
+  runJson,
 } from "./support.js";
 
 /**
@@ -544,4 +597,286 @@ const T11_4_1 = defineProductTest({
   },
 });
 
-export const section114Tests: readonly ProductTestEntry[] = [T11_4_1];
+// --- T11.4-2 — operands vs restriction ----------------------------------------
+//
+// The matrix ground (failing on purpose; module header): a finding-free spec
+// source, a spec source with one 14.3, a discovered code source with one
+// 14.8, and an on-disk decoy no configured group discovers.
+
+const OV_DUP_FILE = "specs/dup.mdx";
+const OV_DUP_SOURCE = ['<S id="solo">', "Solo text.", "</S>", ""].join("\n");
+
+const OV_BAD_FILE = "specs/bad.mdx";
+const OV_BAD_SOURCE = [
+  '<S id="twin">',
+  "Twin one.",
+  "</S>",
+  "",
+  '<S id="twin">',
+  "Twin two.",
+  "</S>",
+  "",
+].join("\n");
+
+const OV_CODE_FILE = "src/app.ts";
+const OV_CODE_SOURCE = [
+  'import SPEC, { text } from "../specs/dup.xspec";',
+  "",
+  "export function grab(): void {",
+  "  SPEC.solo;",
+  "}",
+  "",
+  "export function bad(): string {",
+  '  return text("solo");',
+  "}",
+  "",
+].join("\n");
+
+const OV_DECOY_FILE = "docs/note.mdx";
+const OV_DECOY_SOURCE = '<S id="trap">\nUnclosed on purpose.\n';
+
+/** The workspace's complete finding multiset (the `build --json` gate). */
+const OV_WORKSPACE_CONDITIONS: Readonly<Record<string, number>> = {
+  "14.3": 1,
+  "14.8": 1,
+};
+
+/**
+ * The set arm's identity-level projection: the served view's substance is
+ * pinned by node identities alone — the construct ranges, decompositions,
+ * attribute entries, and interpreted values are T11.4-1's and T11.4-3's
+ * subject (the form-exact decode has already enforced their presence and
+ * forms).
+ */
+interface IdentityShape {
+  readonly identity: string | { readonly unavailable: true };
+  readonly children: readonly IdentityShape[];
+}
+
+function projectIdentities(node: ViewNode): IdentityShape {
+  return {
+    identity: node.identity,
+    children: node.children.map(projectIdentities),
+  };
+}
+
+const OV_DUP_IDENTITY_TREE: IdentityShape = {
+  identity: OV_DUP_FILE,
+  children: [{ identity: `${OV_DUP_FILE}#solo`, children: [] }],
+};
+
+const T11_4_2 = defineProductTest({
+  id: "T11.4-2",
+  title:
+    '`<file>` operands assert membership in the DISCOVERED spec-source domain while `--file` is a set restriction over it: an undiscovered operand — a file existing nowhere, and an on-disk `docs/note.mdx` no configured group discovers — exits 2 as an unknown file, and a discovered code source exits 2 as a wrong-kind operand (12.0), its own staged 14.8 notwithstanding — the argument checks precede answering — each with the single 12.7 error document; the SAME `src/app.ts` spelling as a `--file` value instead admits the empty set — a glob matching only code sources, one matching the undiscovered on-disk decoy, and one matching nothing at all each answer `{"findings": [], "views": []}`, exit 0, no unknown-file usage error on this filter, whatever findings the workspace carries; combining `<file>` operands with `--file`, each part individually valid, exits 2; and the requested files form a set — the discovered `specs/dup.mdx` named twice yields ONE view, its finding-free domain exiting 0 with the root and section identities served while the rest of the workspace stays failing, no invocation of the sweep modifying anything (SPEC 11.4, 11.2, 12.0, 12.7, 7)',
+  run: async (product) => {
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+        [OV_DUP_FILE]: OV_DUP_SOURCE,
+        [OV_BAD_FILE]: OV_BAD_SOURCE,
+        [OV_CODE_FILE]: OV_CODE_SOURCE,
+        [OV_DECOY_FILE]: OV_DECOY_SOURCE,
+      },
+    });
+    try {
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          // Gate reference and staging integrity (SPEC 12.1, 14): exactly
+          // one 14.3 in bad.mdx and one 14.8 in the discovered code source,
+          // nothing else — dup.mdx is finding-free and the decoy is in no
+          // configured group, contributing nothing (SPEC 7: discovery is
+          // controlled exclusively by configuration). Every domain-and-exit
+          // assertion below reads on this staged ground.
+          const gateContext =
+            "T11.4-2 `build --json` (staging integrity: one 14.3 in " +
+            "specs/bad.mdx, one 14.8 in src/app.ts; specs/dup.mdx " +
+            "finding-free; the undiscovered docs/note.mdx contributes " +
+            "nothing)";
+          const gateFindings = await buildFindings(
+            product,
+            workspace,
+            gateContext,
+          );
+          assertConditionCounts(
+            gateFindings,
+            OV_WORKSPACE_CONDITIONS,
+            `${gateContext} — exactly the staged conditions (SPEC 14)`,
+          );
+          assertFindingLocated(
+            gateFindings.find((finding) => finding.condition === "14.3")!,
+            { file: OV_BAD_FILE },
+            `${gateContext} — the duplicate \`twin\` pair locates every ` +
+              `bearer, both in specs/bad.mdx (SPEC 14)`,
+          );
+          assertFindingLocated(
+            gateFindings.find((finding) => finding.condition === "14.8")!,
+            { file: OV_CODE_FILE },
+            `${gateContext} — the string-form \`text("solo")\` call ` +
+              `locates in the code source (SPEC 4.3, 14)`,
+          );
+
+          // --- `<file>` operands assert membership (SPEC 11.4, 12.0): an
+          // undiscovered file is unknown — whether it exists nowhere or
+          // sits on disk outside every configured group (a product
+          // resolving operands against the filesystem accepts the decoy
+          // and answers, or surfaces its 14.20, instead of erring) — and a
+          // discovered code source is a wrong-kind operand, each exit 2
+          // with the single 12.7 error document, the checks preceding
+          // answering whatever findings the workspace or the named file
+          // carries (SPEC 11.2, T11.2-5's protocol).
+          await expectAvailabilityUsageError(
+            product,
+            workspace,
+            ["view", "specs/Nope.mdx"],
+            "T11.4-2 unknown `<file>` operand (a file existing nowhere) " +
+              "on the failing workspace",
+          );
+          await expectAvailabilityUsageError(
+            product,
+            workspace,
+            ["view", OV_DECOY_FILE],
+            "T11.4-2 unknown `<file>` operand (docs/note.mdx exists on " +
+              "disk but no configured group discovers it — membership is " +
+              "in the DISCOVERED set, SPEC 7) on the failing workspace",
+          );
+          await expectAvailabilityUsageError(
+            product,
+            workspace,
+            ["view", OV_CODE_FILE],
+            "T11.4-2 wrong-kind `<file>` operand (src/app.ts is a " +
+              "discovered CODE source, which has no structural view — " +
+              "SPEC 11.4, 12.0), its own staged 14.8 notwithstanding: the " +
+              "argument checks precede answering, never exit 1 with the " +
+              "file's findings",
+          );
+
+          // --- `--file` restricts the domain (SPEC 11.4): a glob
+          // admitting no discovered SPEC source admits the empty set — an
+          // empty, finding-free answer, exit 0, no unknown-file usage
+          // error on this filter, whatever findings the workspace
+          // carries. The `src/app.ts` arm is the operand-vs-restriction
+          // contrast in one spelling — the path that just erred as an
+          // operand — and the sharp half of "only code sources": a
+          // product reusing 11.3's spec-and-code-alike filter consults
+          // the code file, carries its staged 14.8, and exits 1.
+          for (const [glob, what] of [
+            [
+              "docs/*.mdx",
+              "matching the on-disk but UNDISCOVERED docs/note.mdx — a " +
+                "product globbing the filesystem consults the unparseable " +
+                "decoy and answers nonempty",
+            ],
+            ["nosuch/**/*.mdx", "matching nothing at all"],
+            [
+              OV_CODE_FILE,
+              "matching only a discovered CODE source — the restriction " +
+                "admits the discovered SPEC sources it matches (SPEC " +
+                "11.4), so the finding-laden src/app.ts is never " +
+                "consulted, unlike 11.3's spec-and-code-alike filter",
+            ],
+          ] as const) {
+            const context = `T11.4-2 \`view --file "${glob}"\` (${what})`;
+            const report = decodeViewReport(
+              await runJson(
+                product,
+                workspace,
+                ["view", "--file", glob],
+                `${context} — the glob admits the empty set: an empty, ` +
+                  `finding-free answer exits 0, and no unknown-file usage ` +
+                  `error exists on this filter, whatever findings the ` +
+                  `workspace carries (SPEC 11.4, 11.2)`,
+              ),
+              { text: false },
+              context,
+            );
+            assertSameJson(
+              report.findings,
+              [],
+              `${context}: an empty consulted domain has no findings — ` +
+                `the workspace's staged 14.3/14.8 are no domain file's ` +
+                `findings here (SPEC 11.2, 11.4)`,
+            );
+            assertSameJson(
+              report.views,
+              [],
+              `${context}: the empty set of views — an empty list is [], ` +
+                `never null (SPEC 11.4, 12.7)`,
+            );
+          }
+
+          // --- Combining `<file>` operands with `--file` is a usage
+          // error, exit 2 (SPEC 11.4) — each part individually valid (the
+          // operand is a discovered spec source; the glob matches
+          // discovered spec sources), so an intersecting or union product
+          // answers with views instead of erring.
+          await expectAvailabilityUsageError(
+            product,
+            workspace,
+            ["view", OV_DUP_FILE, "--file", "specs/*.mdx"],
+            "T11.4-2 combining a `<file>` operand with `--file` (each " +
+              "part individually valid — the combination itself is the " +
+              "usage error, SPEC 11.4)",
+          );
+
+          // --- The requested files form a set (SPEC 11.4): a file named
+          // twice yields one view. The decode besides rejects a
+          // duplicated per-file entry (views strictly ascending by path
+          // bytes). Domain {dup} is finding-free, so exit 0 with an empty
+          // findings member while bad.mdx and the code source stay
+          // failing — the domain is the requested files (T11.2-5's
+          // ground, riding as this arm's positive control that the
+          // workspace serves views at all: the empty answers above are
+          // the filter's doing, not a product serving nothing).
+          {
+            const context =
+              "T11.4-2 `view specs/dup.mdx specs/dup.mdx` (a discovered " +
+              "file named twice)";
+            const report = decodeViewReport(
+              await runJson(
+                product,
+                workspace,
+                ["view", OV_DUP_FILE, OV_DUP_FILE],
+                `${context} — the requested files form a set with the ` +
+                  `finding-free domain {specs/dup.mdx}, so exit 0 with ` +
+                  `the full answer (SPEC 11.4, 11.2)`,
+              ),
+              { text: false },
+              context,
+            );
+            assertSameJson(
+              report.findings,
+              [],
+              `${context}: the domain's one file is finding-free — ` +
+                `bad.mdx's 14.3 and the code source's 14.8 are no domain ` +
+                `file's findings (SPEC 11.2, 11.4)`,
+            );
+            assertSameJson(
+              report.views.map((view) => view.file),
+              [OV_DUP_FILE],
+              `${context}: ONE view — a file named twice yields one ` +
+                `(SPEC 11.4)`,
+            );
+            assertSameJson(
+              projectIdentities(report.views[0]!.root),
+              OV_DUP_IDENTITY_TREE,
+              `${context}: the served view is genuinely the named ` +
+                `file's — the root and its one section, each identity ` +
+                `the defined plain string (SPEC 11.4, 11.2, 1.5)`,
+            );
+          }
+        },
+        "T11.4-2 — no invocation of the sweep modifies anything: the gate " +
+          "build fails writing nothing (SPEC 12.1) and on a failing " +
+          "workspace these surfaces answer from current sources and write " +
+          "nothing (SPEC 11.2; the no-write contract clauses live at " +
+          "T11.2-1/T11.2-6)",
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
+export const section114Tests: readonly ProductTestEntry[] = [T11_4_1, T11_4_2];
