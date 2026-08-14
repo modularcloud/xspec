@@ -22,6 +22,12 @@
 // occurrence-record assertions compare complete (file, kind, source, target)
 // multisets, order-free, with ranges consulted only for the duplicates'
 // distinctness.
+//
+// Fixture sharing: the four workspaces staged here are ALSO T11.3-1's ground
+// (TEST-SPEC §11.3 "over the T5.7-* fixtures"; registry/section-11.3.ts
+// imports the exported staging constants and expectation tables, never
+// copies them, so the two sections cannot drift apart). The exported unit
+// tables carry an order contract stated at each table.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -60,7 +66,7 @@ import {
 // One spec group plus one code group (SPEC 7.2): TypeScript files under
 // `src/` are discovered code sources, so `build` analyzes their spec-module
 // usage (4.3, 4.5) — the TS half of the occurrence kinds.
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+export const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -79,7 +85,7 @@ export default defineConfig({
 // The imported spec source: `a` with child `a.b` (the duplicate pair's
 // target, TEST-SPEC's literal `d={[BASE.a.b, BASE.a.b]}` spelling) and
 // `other`, so the three-entry array has distinct external targets.
-const T5_7_1_BASE_SOURCE = [
+export const T5_7_1_BASE_SOURCE = [
   '<S id="a">',
   "Alpha text.",
   "",
@@ -104,7 +110,7 @@ const T5_7_1_BASE_SOURCE = [
 //   `embeds`;
 // - `dup`: TEST-SPEC's duplicate pair `d={[BASE.a.b, BASE.a.b]}` — one
 //   edge, two occurrences at distinct ranges.
-const T5_7_1_MAIN_SOURCE = [
+export const T5_7_1_MAIN_SOURCE = [
   'import BASE from "./BASE.xspec"',
   "",
   '<S id="peer">',
@@ -134,7 +140,7 @@ const T5_7_1_MAIN_SOURCE = [
 // a single marker (kind `references`), and the twice-spelled marker — one
 // edge, two occurrences at distinct ranges. The import declaration records
 // no edge and no occurrence (SPEC 2.1, 5.7).
-const T5_7_1_APP_SOURCE = [
+export const T5_7_1_APP_SOURCE = [
   'import SPEC, { text } from "../specs/MAIN.xspec";',
   "",
   "export function useText(): string {",
@@ -152,9 +158,9 @@ const T5_7_1_APP_SOURCE = [
   "",
 ].join("\n");
 
-const BASE_FILE = "specs/BASE.mdx";
-const MAIN_FILE = "specs/MAIN.mdx";
-const APP_FILE = "src/app.ts";
+export const BASE_FILE = "specs/BASE.mdx";
+export const MAIN_FILE = "specs/MAIN.mdx";
+export const APP_FILE = "src/app.ts";
 const A_ID = "specs/BASE.mdx#a";
 const AB_ID = "specs/BASE.mdx#a.b";
 const OTHER_ID = "specs/BASE.mdx#other";
@@ -168,7 +174,7 @@ const ONCE_LOCATION = "src/app.ts#once";
 const TWICE_LOCATION = "src/app.ts#twice";
 
 /** One expected occurrence unit: its identifying data and record count. */
-interface OccurrenceUnit {
+export interface OccurrenceUnit {
   readonly what: string;
   readonly file: string;
   readonly kind: DependencyEdgeKind;
@@ -184,7 +190,15 @@ interface OccurrenceUnit {
 // order-free multiset comparison individuates every unit: a missing,
 // phantom, per-array, per-prop, uncollapsed-edge-shaped, or mis-kinded
 // record fails with the offending tuple named.
-const T5_7_1_UNITS: readonly OccurrenceUnit[] = [
+//
+// ORDER CONTRACT (exported; T11.3-1 relies on it): the table lists the units
+// in occurrence order (SPEC 5.7 — file path bytes, `specs/MAIN.mdx` before
+// `src/app.ts`, then range start, i.e. each file's spellings in source
+// order), each duplicate pair's records adjacent. T5.7-1 itself compares
+// order-free; section-11.3.ts expands the table BY POSITION into its
+// per-index expected sequence, so keep the table position-sorted when
+// restaging.
+export const T5_7_1_UNITS: readonly OccurrenceUnit[] = [
   {
     what: "three-entry `d` array, entry 1 (external chain `BASE.a`)",
     file: MAIN_FILE,
@@ -468,7 +482,7 @@ function rangeAfter(prefix: string, span: string): SourceRange {
 // The referenced spec source: three top-level targets plus a nested child, so
 // the marker's chain is multi-segment (`SPEC.y.leaf`) and every staged
 // occurrence resolves to its own distinct target.
-const SPAN_BASE_SOURCE = [
+export const SPAN_BASE_SOURCE = [
   '<S id="x">',
   "X text.",
   "</S>",
@@ -503,7 +517,7 @@ const SPAN_ARR_TAG_POST = "]}>\nArr text.\n</S>\n\n";
 const SPAN_EMB_PRE = '<S id="emb">\nEmb: ';
 const SPAN_EMB_CONTAINER = "{text(BASE.y)}";
 const SPAN_EMB_POST = "\n</S>\n";
-const SPAN_MAIN_SOURCE =
+export const SPAN_MAIN_SOURCE =
   SPAN_MAIN_HEAD +
   SPAN_ARR_TAG_PRE +
   SPAN_ARR_ENTRY_1 +
@@ -528,7 +542,7 @@ const SPAN_CALL_POST = ";\n}\n\n";
 const SPAN_MARK_PRE = "export function mark(): void {\n  ";
 const SPAN_MARK_CHAIN = "SPEC.y.leaf";
 const SPAN_MARK_POST = "; // trailing trivia\n}\n";
-const SPAN_APP_SOURCE =
+export const SPAN_APP_SOURCE =
   SPAN_APP_HEAD +
   SPAN_CALL_PRE +
   SPAN_CALL_EXPR +
@@ -554,7 +568,7 @@ const SPAN_MARK_LOCATION = "src/app.ts#mark";
  * subject, decode-enforced as 12.7 form meanwhile); the source node's own
  * range datum is likewise T5.7-3's subject, consulted here only as identity.
  */
-interface SpanArm {
+export interface SpanArm {
   readonly what: string;
   /** The staged file's full content (fixture self-check ground). */
   readonly fileSource: string;
@@ -571,7 +585,13 @@ interface SpanArm {
 // The complete expected enumeration — the staged references are the
 // workspace's only occurrences (import declarations record none, SPEC 5.7),
 // one record each, every span byte-precise.
-const SPAN_ARMS: readonly SpanArm[] = [
+//
+// ORDER CONTRACT (exported; T11.3-1 relies on it): the arms are listed in
+// occurrence order (file path bytes, then range start — section-11.3.ts
+// additionally self-checks this sortedness against the claimed ranges
+// before any product invocation), so keep the list position-sorted when
+// restaging.
+export const SPAN_ARMS: readonly SpanArm[] = [
   {
     what:
       "`d` array entry 1 (`BASE.x`) — the reference's own expression, the " +
@@ -811,9 +831,9 @@ const T5_7_2 = defineProductTest({
 // comparator, range-end leg included, as 12.7 form over whatever a product
 // emits).
 
-const ORD_ZED_FILE = "specs/Zed.mdx";
-const ORD_ALPHA_FILE = "specs/alpha.mdx";
-const ORD_APP_FILE = "src/app.ts";
+export const ORD_ZED_FILE = "specs/Zed.mdx";
+export const ORD_ALPHA_FILE = "specs/alpha.mdx";
+export const ORD_APP_FILE = "src/app.ts";
 const ORD_ZIN_ID = "specs/Zed.mdx#zout.zin";
 const ORD_ZLOC_ID = "specs/Zed.mdx#zloc";
 const ORD_T_ID = "specs/alpha.mdx#t";
@@ -845,7 +865,7 @@ const ORD_ZED_ZOUT_CLOSE = "\n</S>\n\n";
 const ORD_ZED_ZLOC = '<S id="zloc">\nLocal target text.\n</S>\n\n';
 const ORD_ZED_TAIL_PRE = "Tail text.\n\n";
 const ORD_ZED_TAIL_EMB = "{text(ALPHA.u)}";
-const ORD_ZED_SOURCE =
+export const ORD_ZED_SOURCE =
   ORD_ZED_IMPORT +
   ORD_ZED_PRELUDE +
   ORD_ZED_ZOUT_OPEN +
@@ -871,7 +891,7 @@ const ORD_ALPHA_MID_CONSTRUCT =
   ORD_ALPHA_MID_DEP +
   ORD_ALPHA_MID_TAG_POST +
   ORD_ALPHA_MID_CLOSE;
-const ORD_ALPHA_SOURCE =
+export const ORD_ALPHA_SOURCE =
   ORD_ALPHA_PRELUDE + ORD_ALPHA_TARGETS + ORD_ALPHA_MID_CONSTRUCT + "\n";
 
 // src/app.ts — byte-LAST (`src/` after `specs/`): a top-level marker (no
@@ -891,7 +911,7 @@ const ORD_APP_DEEP_POST = ";\n  }";
 const ORD_APP_DEEP_CONSTRUCT =
   ORD_APP_DEEP_PRE + ORD_APP_DEEP_MARKER + ORD_APP_DEEP_POST;
 const ORD_APP_WRAP_POST = "\n  deep();\n}\n";
-const ORD_APP_SOURCE =
+export const ORD_APP_SOURCE =
   ORD_APP_HEAD +
   ORD_APP_TOP_MARKER +
   ORD_APP_TOP_POST +
@@ -900,7 +920,7 @@ const ORD_APP_SOURCE =
   ORD_APP_WRAP_POST;
 
 /** One staged occurrence: its complete expected record plus self-check data. */
-interface OrderArm {
+export interface OrderArm {
   readonly what: string;
   /** The staged file's full content (self-check ground). */
   readonly fileSource: string;
@@ -916,8 +936,10 @@ interface OrderArm {
 // The complete expected document, in occurrence order (SPEC 5.7): file path
 // bytes — Zed.mdx, then alpha.mdx, then src/app.ts — then range start. The
 // staged references are the workspace's only occurrences (plain sections,
-// prose, and import declarations record none).
-const ORD_EXPECTED: readonly OrderArm[] = [
+// prose, and import declarations record none). Exported: T11.3-1 asserts the
+// identical full-record sequence through the same surface (section-11.3.ts),
+// re-running the slice and sortedness self-checks below in its own body.
+export const ORD_EXPECTED: readonly OrderArm[] = [
   {
     what:
       "`d={ALPHA.t}` on the NESTED section `zout.zin` — the source datum is " +
@@ -1277,8 +1299,9 @@ const T5_7_3 = defineProductTest({
 // of classifying it dynamic both drops the 14.8 finding and emits a phantom
 // resolved record — failing twice, visibly.
 
-const NO_OCC_BASE_SOURCE = '<S id="a">\nA text.\n</S>\n';
-const NO_OCC_SPARE_SOURCE = '<S id="sp">\nSpare text.\n</S>\n';
+export const NO_OCC_BASE_SOURCE = '<S id="a">\nA text.\n</S>\n';
+export const NO_OCC_SPARE_SOURCE = '<S id="sp">\nSpare text.\n</S>\n';
+export const NO_OCC_SPARE_FILE = "specs/SPARE.mdx";
 
 // specs/MAIN.mdx, composed from the exact parts the expected offsets cite
 // (the T5.7-2/T5.7-3 discipline): the used import (BASE — its references
@@ -1302,7 +1325,7 @@ const NO_OCC_BAD_POST = "\n</S>\n\n";
 const NO_OCC_EMB_PRE = '<S id="emb">\nEmb: ';
 const NO_OCC_EMB_CONTAINER = "{text(BASE.a)}";
 const NO_OCC_EMB_POST = "\n</S>\n";
-const NO_OCC_MAIN_SOURCE =
+export const NO_OCC_MAIN_SOURCE =
   NO_OCC_MAIN_HEAD +
   NO_OCC_MAIN_USE +
   NO_OCC_DYN_CONSTRUCT +
@@ -1341,7 +1364,7 @@ const NO_OCC_APP_TAIL =
   "  return SPEC.ok;\n" +
   "}\n\n" +
   "TSPEC.a;\ntt(TSPEC.a);\n";
-const NO_OCC_APP_SOURCE =
+export const NO_OCC_APP_SOURCE =
   NO_OCC_APP_HEAD +
   NO_OCC_APP_KEEPER +
   NO_OCC_STRAY_PRE +
@@ -1353,7 +1376,13 @@ const NO_OCC_APP_SOURCE =
 // nothing else — no record for any import declaration (binding used or
 // unused), type-only use, shadowed chain, dynamic spelling, or unresolved
 // spelling.
-const NO_OCC_UNITS: readonly OccurrenceUnit[] = [
+//
+// ORDER CONTRACT (exported; T11.3-1 relies on it): listed in occurrence
+// order — `specs/MAIN.mdx` before `src/app.ts`, and within MAIN the `use`
+// reference precedes the `emb` container in source order — so keep the
+// table position-sorted when restaging (T5.7-4 itself compares order-free;
+// section-11.3.ts expands the table by position).
+export const NO_OCC_UNITS: readonly OccurrenceUnit[] = [
   {
     what: "resolving `d={BASE.a}` on `use`",
     file: "specs/MAIN.mdx",
@@ -1383,7 +1412,7 @@ const NO_OCC_UNITS: readonly OccurrenceUnit[] = [
 // The staged defects, exactly one finding each (SPEC 14: every condition
 // reported, and nothing else — so the type-only uses, the shadowed chains,
 // and the unused import provably trigger NO finding beside these four).
-const NO_OCC_EXPECTED_CONDITIONS = {
+export const NO_OCC_EXPECTED_CONDITIONS = {
   "14.5": 1,
   "14.6": 1,
   "14.7": 1,

@@ -2421,9 +2421,48 @@ certify against FP-091's fixtures once those land.
   unmapped keys {11.3–11.6, 12.6, 12.7} → stage G), S-5 and certification
   green.]
 
-- [ ] FP-056 — Implement T11.3-1: `occurrences` enumeration in the
+- [x] FP-056 — Implement T11.3-1: `occurrences` enumeration in the
   form-exact 12.7 record form. [R2 #3; TEST-SPEC §11.3] New §11.3 registry
   module; map `"11.3"`. Uses FP-001's literal decode.
+  [Done 2026-08-14: registered in new section-11.3.ts (SUITE-53; wrapper
+  section-11.3.test.ts; spread into registry/index.ts) with traceability
+  ["11.3"] (no TEST-SPEC 14 staging record — the FP-050..055 precedent;
+  5.7/11.2/12.7 are context with home coverage at T5.7-*/T11.2-3/-4/
+  T12.7-1); no certification scope. The entry's fixtures are imported,
+  never copied: section-5.7.ts and section-11.2.ts now export their staging
+  constants and expectation tables (export-only edits, bodies untouched;
+  the T5.7-1/T5.7-4 unit tables carry a stated order contract — listed in
+  occurrence order — that this test expands by position). Per fixture, the
+  COMPLETE record sequence is asserted PER INDEX in occurrence order
+  through bare `occurrences` (JSON-only; decodeOccurrencesReport enforces
+  the exact five-member 12.7 record form, the never-null source datum, and
+  the 5.7 comparator): T5.7-1's eleven records as identity-level tuples
+  (both duplicate pairs adjacent — T5.7-1 pins the same multiset
+  order-free, this test adds the order), T5.7-2's six with byte-precise
+  own ranges, T5.7-3's six via full-record equality (every 5.7 datum
+  byte-precise), T5.7-4's three resolving spellings (exit 1, staging
+  integrity as the exact {14.5,14.6,14.7,14.8} count map); the
+  unavailability arms restage T11.2-3's code source (OK.mdx + src/co#de.ts:
+  findings exactly one 14.19 pinned {code invalid-source-path, locations
+  [], path src/co#de.ts}, enumeration exactly CS_EXPECTED_OCCURRENCES) and
+  T11.2-4's resolution matrix (R.mdx: counts {14.1,14.3,14.5}, enumeration
+  exactly R_EXPECTED_OCCURRENCES) — `source` exactly the marker,
+  file/range/kind/target present, never a picked bearer, never a dropped
+  record. The body re-earns every imported claim before any product
+  invocation: slice self-checks over all claimed ranges (SPAN/ORD/CS/R)
+  plus claimed-sequence sortedness checks under the pinned comparator.
+  Verified: typecheck/format clean; scratch probes (deleted): the
+  T5.7-1/T5.7-4 tuple orders proven against mechanically derived spelling
+  byte positions, and against the built product the six stagings fire as
+  diagnosed (arms 1–3 build exit 0; arm 4 exactly {14.5,14.6,14.7,14.8}
+  old-shape; arm 5 exactly one 14.19 naming co#de.ts; arm 6 {14.1,14.3} —
+  the absent 14.5 is FP-053's diagnosed pre-patch resolution gap); suite
+  section-11.3 red-as-diagnosed at the first arm (`occurrences` unknown
+  command, exit 2, the pre-patch product gap; every self-check passes
+  first); sections 5.7/11.2 unchanged (4 resp. 6 diagnosed reds). `npm run
+  test:self`: 4 planned mid-loop reds with S-1's unmapped set narrowed
+  6 → 5 keys, exactly {11.4, 11.5, 11.6, 12.6, 12.7} ("11.3" now mapped;
+  certification-document ×3 → FP-091), S-5 and certification green.]
 - [ ] FP-057 — Implement T11.3-2: `--file` set restriction. [R2 #3;
   TEST-SPEC §11.3]
 - [ ] FP-058 — Implement T11.3-3: `--to` syntactic acceptance / malformed

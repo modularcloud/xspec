@@ -110,7 +110,10 @@ import {
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// Exported (with the T11.2-3 code-source and T11.2-4 resolution-matrix
+// staging constants below): T11.3-1 asserts the same stagings' enumerations
+// through `occurrences` (registry/section-11.3.ts imports, never copies).
+export const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1271,7 +1274,7 @@ const T11_2_2 = defineProductTest({
 
 // One spec group plus one code group (SPEC 7.2), so `src/**/*.ts` files are
 // discovered code sources and their spec-module usage is analyzed (4.3, 4.5).
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+export const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1287,7 +1290,7 @@ export default defineConfig({
 const NON_UTF8_STAGED = process.platform === "linux";
 
 // --- specs/OK.mdx — the valid-path contrast and reference target -------------
-const OK_FILE = "specs/OK.mdx";
+export const OK_FILE = "specs/OK.mdx";
 const OK = new ByteFixture();
 OK.add("Préambule — valid-path contrast.\n\n");
 const OK_SEC_START = OK.pos;
@@ -1296,7 +1299,7 @@ const OK_ID = OK.attr("id", 'id="ok"');
 OK.add(">\nOK text.\n</S>");
 const OK_SEC_RANGE: SourceRange = { start: OK_SEC_START, end: OK.pos };
 OK.add("\n");
-const OK_SOURCE = OK.source;
+export const OK_SOURCE = OK.source;
 const OK_ROOT_RANGE: SourceRange = { start: 0, end: OK.pos };
 const OK_NODE_ID = `${OK_FILE}#ok`;
 
@@ -1354,7 +1357,7 @@ const NU_ROOT_RANGE: SourceRange = { start: 0, end: NU.pos };
 // bare top-level marker `SPEC.ok` (whole-file attribution; its occurrence
 // spans the bare reference chain alone, exclusive of the terminator). The
 // multi-byte comment prefix shifts every later offset (SPEC 1.7).
-const CS_FILE = "src/co#de.ts";
+export const CS_FILE = "src/co#de.ts";
 const CS = new ByteFixture();
 CS.add("// Präambel — invalid-path code source.\n");
 CS.add('import SPEC, { text } from "../specs/OK.xspec";\n');
@@ -1365,7 +1368,7 @@ CS.add(";\n}\n\n");
 const CS_MARKER_TEXT = "SPEC.ok";
 const CS_MARKER_RANGE = CS.add(CS_MARKER_TEXT);
 CS.add(";\n");
-const CS_SOURCE = CS.source;
+export const CS_SOURCE = CS.source;
 
 // The invalid-path code source's complete occurrence enumeration (SPEC 5.7,
 // 11.2): both spellings resolve (the referenced identity `specs/OK.mdx#ok`
@@ -1374,7 +1377,7 @@ const CS_SOURCE = CS.source;
 // withheld together as one datum; never a picked identity, never a dropped
 // record). No other staged file holds a reference spelling, so this is the
 // workspace's whole enumeration, in occurrence order (range start).
-const CS_EXPECTED_OCCURRENCES: readonly OccurrenceRecord[] = [
+export const CS_EXPECTED_OCCURRENCES: readonly OccurrenceRecord[] = [
   {
     file: CS_FILE,
     range: CS_CALL_RANGE,
@@ -1950,7 +1953,7 @@ function findingByCondition(
 // ambiguous reference, recording nothing and reporting 14.5. The multi-byte
 // prefix shifts every later offset (SPEC 1.7).
 
-const R_FILE = "specs/R.mdx";
+export const R_FILE = "specs/R.mdx";
 const R = new ByteFixture();
 R.add("Prélude — resolution turns on the target identity's definedness.\n\n");
 const R_A1_START = R.pos;
@@ -1990,7 +1993,7 @@ const R_Q_OPEN_END = R.pos;
 R.add("\nAmbiguous reference.\n</S>");
 const R_Q_RANGE: SourceRange = { start: R_Q_START, end: R.pos };
 R.add("\n");
-const R_SOURCE = R.source;
+export const R_SOURCE = R.source;
 const R_ROOT_RANGE: SourceRange = { start: 0, end: R.pos };
 
 const R_AB_NODE_ID = `${R_FILE}#a.b`;
@@ -2044,7 +2047,7 @@ const R_TREE: TreeExpectation = {
 // `range`, `kind`, `target` present — while the ambiguous reference to `a`
 // records nothing: no record, no unavailable target (the exact set pins
 // both "never a picked bearer's identity" and "never a dropped record").
-const R_EXPECTED_OCCURRENCES: readonly OccurrenceRecord[] = [
+export const R_EXPECTED_OCCURRENCES: readonly OccurrenceRecord[] = [
   {
     file: R_FILE,
     range: R_A2_D_REF,
@@ -2068,7 +2071,7 @@ const R_EXPECTED_OCCURRENCES: readonly OccurrenceRecord[] = [
 // a record). No 14.2 anywhere: `a.b` extends its parent's spelling exactly,
 // the id-less section's structural check is masked and it has no section
 // children, and every other spelled identity is one segment at top level.
-const R_CONDITION_COUNTS: Readonly<Record<string, number>> = {
+export const R_CONDITION_COUNTS: Readonly<Record<string, number>> = {
   "14.1": 1,
   "14.3": 1,
   "14.5": 1,
