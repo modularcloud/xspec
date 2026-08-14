@@ -2741,8 +2741,50 @@ certify against FP-091's fixtures once those land.
   {T11.4-3, T11.4-4} → {T11.4-4} (rest → FP-091; S-1's unmapped keys
   {11.5, 11.6, 12.6, 12.7} → stage G); S-5, S-7, and certification
   green.]
-- [ ] FP-063 — Implement T11.4-4 (CONF-AVAIL): imports datum. [R2 #4, R3
+- [x] FP-063 — Implement T11.4-4 (CONF-AVAIL): imports datum. [R2 #4, R3
   gap 1, VERIFY; TEST-SPEC §11.4]
+  [Done 2026-08-14: T11.4-4 registered in section-11.4.ts (wrapper
+  auto-declares; traceability `"T11.4-4": ["11.4"]` — T11.4-4 is in no
+  TEST-SPEC 14 staging record, the T11.4-3 precedent). One workspace, two
+  files, one bare `view`, inside CONF-AVAIL's staging constraints
+  (spec-only `.mdx` workspace, no `build` gate, no snapshot compare,
+  `view` alone; staged condition 14.15 within the scope's stated set):
+  specs/imports.mdx opens with the six-declaration matrix, one per line
+  (the §2.1 byte-window discipline), the valid first declaration's
+  multi-byte identifier `BÄSE` (Ä: 2 bytes) shifting every later byte
+  offset off code-point/UTF-16 counts; then the side-effect-only,
+  named-only (`{ part }`), and namespace-only (`* as ns`) forms each with
+  the same valid resolving specifier, the valid-form default import of the
+  undiscovered `./typo.xspec`, and the bare specifier `base.xspec` (a
+  suffix-keyed resolver bait). Asserted as ONE exact six-entry imports
+  compare: every declaration, valid and invalid, with its byte-exact range;
+  `name` the default binding's identifier ("BÄSE"/"TYPO"/"BARE") or the
+  stated null for the three no-default forms (never the marker — decode
+  rejects; never `part`/`ns`); `target` turning on specifier form and
+  discovery ALONE — the invalid binding forms carry the plain
+  "specs/base.mdx" (name null beside a defined target) while typo/bare are
+  the literal marker, never null (decode rejects — VIOL-AVAIL-NULLMARKER's
+  certified failure names exactly these two). Exactly five located 14.15
+  beside the view (one per invalid declaration, each within its own
+  declaration's end-widened window, order decode-pinned), exit 1 with the
+  full answer; both root-only trees byte-asserted, prose-only
+  specs/base.mdx viewed with imports []. Verified: typecheck/format clean;
+  staging premise probed against the built product (`build --json` reports
+  exactly the five 14.15 in imports.mdx, old shape, at byte-exactly the
+  ByteFixture declaration ranges — the Ä shift visible); suite
+  red-as-diagnosed at the one invocation (`view` unknown command, exit 2 —
+  the same product gap as T11.4-1); scratch run (deleted) of the registered
+  body: workspace-deriving conforming fake green end-to-end, eight
+  deviation fakes each failing at the targeted assertion — nullmarker at
+  the decode's never-null target, omitname/omittags at the decode's
+  absent-member rejections, namedname/collapse at the imports compare,
+  dropfinding at the exact 14.15 count, cpranges at the finding-window
+  byte assertion, exit0 at the exit-1 arm. `npm run test:self`: planned
+  mid-loop reds narrowed 4 → 3 exactly as predicted — the
+  certification-document in-scope-registry gate went GREEN (gap {T11.4-4}
+  → {}), its two fixture-manifest gates stay red → FP-091; S-1's unmapped
+  keys exactly {11.5, 11.6, 12.6, 12.7} → stage G; S-5, S-7, and
+  certification green.]
 - [ ] FP-064 — Implement T11.4-5: `--text` expansion domain. [R2 #4;
   TEST-SPEC §11.4]
 - [ ] FP-065 — Implement T11.4-6: byte classification reproducing compiled
