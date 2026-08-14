@@ -2885,9 +2885,51 @@ certify against FP-091's fixtures once those land.
   FP-091; S-1's unmapped keys exactly {11.5, 11.6, 12.6, 12.7} → stage G);
   S-5, S-7, and certification green.]
 
-- [ ] FP-066 — Implement T11.5-1: total `at` resolution incl. EOF offset
+- [x] FP-066 — Implement T11.5-1: total `at` resolution incl. EOF offset
   and derivability from view data. [R2 #5; TEST-SPEC §11.5] New §11.5
   registry module; map `"11.5"`.
+  [Done 2026-08-14: T11.5-1 registered in new section-11.5.ts (SUITE-55;
+  wrapper section-11.5.test.ts auto-declares; traceability
+  `"T11.5-1": ["11.5"]` — no numbered condition asserted, the T11.4-*
+  precedent; in NO certification scope: CONF-AVAIL's scope statement
+  expressly excludes `at`). One workspace: specs/total.mdx (295 bytes —
+  two resolving imports, a top-level and an in-section comment, sections
+  a ⊃ a.b ⊃ a.b.c beside top-level z, prose before/inside/between
+  constructs, multi-byte é/è/— shifting every later offset, SPEC 1.7)
+  beside prose-only specs/base.mdx, composed by the running-offset
+  builder. Twelve pointwise arms against precomputed constants (the P-12
+  anchor CERTIFICATIONS.md names): offsets inside an import, both
+  comments, deep content, between-section prose, opening tags (a.b's,
+  a.b.c's — the innermost containing construct, never the parent),
+  closing tags (a's past a.b's close, z's), a.b's post-child tail
+  content, and the EOF caret (byte length → root) each pinned to the
+  exact {identity, range} resolution, occurrence null, findings [], exit
+  0 through the form-exact decodeAtReport; byte length + 1 → exit 2 via
+  expectAvailabilityUsageError (section-11.2's shared T11.2-5 protocol).
+  Derivability: `view specs/total.mdx` first anchored byte-exactly
+  against the fixture (tree projection {identity, range, children}, both
+  import entries, both comment ranges, occurrences [], findings []),
+  then for EVERY offset 0..295 `at` must equal the exported comparator
+  `resolveAtFromView` over the DECODED view — a containment descent
+  realizing innermost resolution, the root-where-none rule, and the EOF
+  rule in one shape, plus the containing-occurrence pick (null here;
+  occurrence containment is T11.5-3's subject) — non-circular via the
+  anchor. FP-088's P-12 imports the comparator from the module. Verified:
+  typecheck/format clean; fixture self-checks (17 slice checks, a
+  composed-length pin, comparator ≡ every hand-stated arm on the
+  precomputed tree) pass before any product invocation; a scratch
+  cross-validation (deleted) proved the comparator ≡ an independent
+  brute-force narrowest-containing-range implementation over all 296
+  offsets with boundary spot checks (start-inclusive/end-exclusive at
+  every construct edge, EOF → root); staging probed finding-free against
+  the built product (`build --json` findings [], `ids` exactly
+  a/a.b/a.b.c/z); suite red-as-diagnosed at the first arm's `at`
+  invocation (unknown command, exit 2 — the T11.4-1-class gap; every
+  self-check passes before it), timeoutMs 360_000 for the
+  ~310-invocation sweep. `npm run test:self`: the 3 planned mid-loop
+  reds — certification-document fixture-manifest ×2 → FP-091; S-1's
+  unmapped keys narrowed {11.5, 11.6, 12.6, 12.7} → exactly {11.6, 12.6,
+  12.7} (stage G); S-5, S-7, and certification green.]
 - [ ] FP-067 — Implement T11.5-2: offset spelling matrix. [R2 #5; TEST-SPEC
   §11.5]
 - [ ] FP-068 — Implement T11.5-3: occurrence containment ends and imperfect
