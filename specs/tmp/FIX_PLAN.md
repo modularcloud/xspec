@@ -2609,10 +2609,59 @@ certify against FP-091's fixtures once those land.
   to exactly {T11.4-1, T11.4-3, T11.4-4}; S-1's 5 unmapped keys {11.4,
   11.5, 11.6, 12.6, 12.7} → stage G), S-5 and certification green.]
 
-- [ ] FP-060 — Implement T11.4-1 (CONF-AVAIL): whole-domain views and
+- [x] FP-060 — Implement T11.4-1 (CONF-AVAIL): whole-domain views and
   positional tree with tag-range decomposition byte-asserted; stages no
   undefined datum. [R2 #4, R3 gap 1, VERIFY; TEST-SPEC §11.4] New §11.4
   registry module; map `"11.4"`.
+  [Done 2026-08-14: new module test/suite/registry/section-11.4.ts
+  (SUITE-54) + wrapper section-11.4.test.ts, spread into registry/index.ts;
+  traceability "T11.4-1": ["11.4"] (the T11.2-*/T11.3-* precedent: the
+  answer-borne condition counts are staging integrity, 14.16's primary
+  coverage stays T2.7-1's). IN CONF-AVAIL scope, so the body obeys the
+  scope's constraints exactly: spec-only workspace, ONE command — the bare
+  whole-domain `view` — NO gate-reference `build` (the validity premise
+  rides the answer's own findings member), no snapshot compare, and NO
+  undefined datum staged: every identity spelled, well-formed, conformant
+  against its POSITIONAL parent, unique — the marker-free ground
+  VIOL-AVAIL-NULLMARKER's passing side stands on, while the stated `null`s
+  the answers do carry (root tags/coverage; self-closing/root decomposition
+  members) are exactly what decodeViewReport rejects when omitted
+  (VIOL-AVAIL-OMIT's certified failure; fixtures land with FP-091). One
+  workspace, three files, whole document asserted: specs/Zebra.mdx (0x5A) <
+  specs/alpha.mdx (0x61) < specs/sub/leaf.mdx (0x73) pins byte order
+  against case-folding/locale collation and completeness (leaf is
+  section-less — root-only view, a views-only-sectioned-files product
+  drops it); Zebra pins the finding-free tree — paired sections at three
+  depths, self-closing leaves at depths two and three, two top-level
+  sections — per node construct range + decomposition (opening AND closing
+  for paired, opening only = construct range for self-closing, neither for
+  the root, whose range is the whole file) byte-asserted via the
+  running-offset builder behind a multi-byte prefix, projection {identity,
+  range, opening, closing, children} (attributes/tags/coverage VALUES stay
+  T11.4-3's; the form-exact decode already enforces their presence/forms);
+  alpha pins invalid-element parenting — wrap ⊃ wrap.mid ⊃ <div> ⊃
+  wrap.mid.inner parents to wrap.mid (INNERMOST, never wrap/root) and a
+  top-level <em> ⊃ free parents to the root — with exactly the two 14.16
+  findings (no phantom 14.2; the chain conditions read the same enclosure,
+  so every identity stays a defined plain string), each located within its
+  own element's whole-construct window (div's ordered before em's, 12.7),
+  exit 1 with the full answer; per-file imports/occurrences/comments []
+  (nothing staged). Verified: typecheck/format clean; suite section-11.4
+  red-as-diagnosed against the stub (HarnessAssertionError at the bare
+  `view`: exit 2 "unknown command 'view'" where 1 is demanded — the whole
+  §11 surface is patch-new); scratch run (deleted) of the registered body:
+  conforming fake (deriving views/findings from workspace bytes) green
+  end-to-end, ten deviation fakes each failing at the targeted assertion —
+  outermost/rootparent/elementnode/noclosing/chainbreak at the tree
+  compare, casefold at the decode's byte-order rejection, skipempty at the
+  whole-domain file-list compare, omitroot at the decode's
+  null-is-never-omission rejection (the OMIT anchor), utf16 at the
+  finding's byte window, misjudge (phantom 14.2) at the exact findings
+  count. `npm run test:self`: the 4 planned mid-loop reds narrowed as
+  scheduled — certification-document ×3 → FP-091, its in-scope-registry
+  gap now exactly {T11.4-3, T11.4-4}; S-1's unmapped keys now exactly
+  {11.5, 11.6, 12.6, 12.7} → stage G — S-5 and certification green
+  (certification.test.ts 17/17).]
 - [ ] FP-061 — Implement T11.4-2: operands-vs-restriction. [R2 #4;
   TEST-SPEC §11.4]
 - [ ] FP-062 — Implement T11.4-3 (CONF-AVAIL): raw attributes and per-node
