@@ -3474,10 +3474,50 @@ certify against FP-091's fixtures once those land.
   unchanged 2 planned mid-loop reds (certification-document ×2 → FP-091),
   S-1/S-5/certification green.]
 
-- [ ] FP-078 — Implement T13.4-8: writes create missing directories
+- [x] FP-078 — Implement T13.4-8: writes create missing directories
   (file-form move, section-form move target, first emission under nested
   `outDir`). [R2 #10; TEST-SPEC §13.4] Registry `section-13.4.ts`; map
   `"13.4"`.
+  [Done 2026-08-16: T13.4-8 registered in the existing section-13.4.ts
+  (the wrapper already declares the module array) with the three named
+  cases, each staged with its directories absent beforehand
+  (premise-asserted at the last instant before the write) and its fresh
+  components asserted as real directories afterward via lstat kind (a
+  symlink component would violate 13.4's never-traverse rule): file-form
+  `move specs/A.mdx new/deep/b.mdx` (destination in the configured spec
+  group, `new/` still absent after the premise build) exit 0 with the
+  moved file byte-identical at the destination (import- and
+  reference-free staging, so relocation changes no bytes; H-4 "6.5 move
+  edits"), origin absent, and the regenerated module `new/deep/b.xspec.ts`
+  plus emitted `new/deep/b.md` under the fresh directories (13.1's
+  in-source-directory name rule and 13.2's next-to-source default — the
+  two SPEC-pinned per-source derived paths; companion sets are latitude,
+  content other tests' subject); section-form `move specs/S.mdx#mv
+  fresh/sub/T.mdx#mv` (kept-ID cross-file move, valid per 6.5; target
+  path under absent `fresh/`) exit 0 with the created target file's
+  entire initial content byte-pinned to the moved construct + one U+000A
+  (6.5: created empty, top-level insertion at the start of the empty
+  file, no import additions required) plus module and Markdown under the
+  fresh directories; first emission under nested nonexistent
+  `outDir: "out/md"` (two sources, one nested deeper) — `build` exit 0,
+  the whole chain out → out/md → out/md/specs → out/md/specs/sub real
+  directories, both destinations written. Traceability "T13.4-8":
+  ["13.4"] (6.5/7.3/13.1/13.2 are carriage context with home coverage at
+  T6.5-*/T7.3-1/T13.1-*/T13.2-1; no numbered condition asserted —
+  FP-078's stated map); no certification scope (T13.4-5 remains §13.4's
+  only in-scope test). NOT red against this repo's product: move
+  directory-creation and nested-outDir emission predate the patch —
+  direct CLI probes of all three stagings returned exactly the staged
+  trees, bytes included, so the pass is genuine (the FP-010/FP-012/FP-014
+  precedent); teeth live in the exact pins (exit 0, real-directory kinds,
+  byte-identical moved/created files, pinned derived paths) and in S-7,
+  where the new body fails diagnosed at its first `buildOk` against the
+  empty stub. Verified: typecheck/format clean; section-13.4 went
+  1 failed/5 passed → 1 failed/6 passed (T13.4-8 green; T13.4-6 keeps its
+  pre-existing FP-001-class form-exact product red, confirmed unchanged
+  by a stashed control run); `npm run test:self` 268 passed, unchanged 2
+  planned mid-loop reds (certification-document ×2 → FP-091),
+  S-1/S-5/S-7/certification green.]
 
 - [ ] FP-079 — Implement T14-6: stable codes — all 23 condition tokens read
   from each condition's stated reporter; `code` `null` for plain usage

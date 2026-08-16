@@ -1,7 +1,8 @@
 // TEST-SPEC §13.4 (derived and durable files) — SUITE-47: T13.4-1 (plain
 // committable files + sorted keys), T13.4-2 (derived reproducibility),
 // T13.4-3 (orphan knowledge boundary), T13.4-4 (derived paths belong to
-// xspec), T13.4-5 (durable protection), T13.4-6 (symlink write rules).
+// xspec), T13.4-5 (durable protection), T13.4-6 (symlink write rules),
+// T13.4-8 (writes create missing directories).
 // T13.4-7 registers no test body: its TEST-SPEC entry is a cross-reference —
 // T7-6 (section-7-discovery.ts) carries the `.xspec.` / `.xspec/` /
 // emit-destination source exclusion. (A registered no-op body would pass
@@ -89,6 +90,23 @@
 //   above the workspace root are unrestricted (13.4), so `build`, a
 //   journaled `rename`, and `check` must behave normally and land their
 //   effects in the real root.
+// - T13.4-8 stagings are import- and reference-free, so the file-form
+//   relocation changes no bytes of the moved file (SPEC 6.5: beyond the
+//   stated edits a move changes no bytes, and none applies) and the created
+//   target file's entire initial content is the moved section construct's
+//   own characters followed by one U+000A (SPEC 6.5: the target file is
+//   created empty; a top-level `new-id` inserts at the end of the file —
+//   the start of a line in an empty file, so no preceding terminator — and
+//   no import addition is required); both are asserted byte-exactly per H-4
+//   ("6.5 move edits"). "Present as real directories afterward" is asserted
+//   via lstat kind — a symbolic link at a fresh component would violate
+//   13.4's writes-never-traverse-links rule. The "regenerated derived files
+//   under the fresh directories" are asserted as the two SPEC-pinned
+//   per-source paths — the module `NAME.xspec.ts` in the source's directory
+//   (13.1) and the emitted `NAME.md` (13.2; next to the source by default,
+//   under `outDir` in the emission arm) — companion sets being
+//   implementation latitude (13.1) and content another test's subject
+//   (T13.1-*, T13.2-1, T3-*).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -285,6 +303,19 @@ async function readFileDiagnosed(
     );
   }
   return await workspace.readBytes(rel);
+}
+
+/** Assert the filesystem kind at a workspace-relative path, diagnosed. */
+async function assertKindIs(
+  workspace: TestWorkspace,
+  rel: string,
+  expected: "file" | "dir" | "absent",
+  context: string,
+): Promise<void> {
+  const kind = await workspace.kind(rel);
+  if (kind !== expected) {
+    fail(`${context}; expected ${expected} at ${rel}, found ${kind}`);
+  }
 }
 
 /** `review status <name> --json`, decoded (SPEC 10.7). */
@@ -1666,6 +1697,282 @@ const T13_4_6 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T13.4-8 — writes create missing directories
+// ---------------------------------------------------------------------------
+
+// File-form move arm: the destination `new/deep/b.mdx` lies in a configured
+// spec group (SPEC 6.5's not-out-of-the-workspace refusal must not apply)
+// while `new/` is absent — nothing stages it and no source lives there, so
+// the premise build cannot create it either.
+const NEW_GROUP_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx", "new/**/*.mdx"]
+  },
+  markdown: { emit: true }
+})
+`;
+
+// Section-form move arm: the created target path `fresh/sub/T.mdx` lies in a
+// configured spec group, `fresh/` absent (as above).
+const FRESH_GROUP_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx", "fresh/**/*.mdx"]
+  },
+  markdown: { emit: true }
+})
+`;
+
+// Emission arm: a nested `markdown.outDir` whose whole chain is nonexistent
+// (`out/` absent; SPEC 7.3 — resolves within the root, workspace-relative
+// paths preserved beneath it).
+const NESTED_OUT_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "out/md" }
+})
+`;
+
+// The relocated file: import- and reference-free, so relocation rewrites
+// nothing and the moved file is byte-identical at its destination (module
+// header; SPEC 6.5).
+const RELOCATED_MDX = ['<S id="a">', "Alpha text.", "</S>", ""].join("\n");
+
+// The section-form origin: `mv` is the moved subtree (kept-ID cross-file
+// move, valid per SPEC 6.5), `stay` keeps the origin file non-empty.
+const MOVED_CONSTRUCT = ['<S id="mv">', "Moved text.", "</S>"].join("\n");
+const SECTION_ORIGIN_MDX = [
+  '<S id="stay">',
+  "Stay text.",
+  "</S>",
+  "",
+  MOVED_CONSTRUCT,
+  "",
+].join("\n");
+// The created target file's entire initial content (module header; SPEC 6.5).
+const CREATED_TARGET_BYTES = `${MOVED_CONSTRUCT}\n`;
+
+const T13_4_8 = defineProductTest({
+  id: "T13.4-8",
+  title:
+    "a missing intermediate directory never refuses or fails a write — the nonexistent workspace-relative directory components of a written path come into existence as real directories, each case staged with its directories absent beforehand: a file-form move to `new/deep/b.mdx` (destination in a configured spec group, `new/` absent) succeeds with the moved file byte-identical and its regenerated derived files under the fresh directories; a section-form move whose created target file lies under an absent directory succeeds likewise; a first emission under the nested nonexistent `markdown.outDir` writes every destination, creating the chain (SPEC 13.4, 6.5, 7.3, 13.1, 13.2)",
+  run: async (product) => {
+    // --- File-form move: destination directories `new/deep/` absent ---
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": NEW_GROUP_CONFIG,
+          "specs/A.mdx": RELOCATED_MDX,
+        },
+      },
+      async (workspace) => {
+        await buildOk(product, workspace, "T13.4-8 (file-form move) `build`");
+        await assertKindIs(
+          workspace,
+          "new",
+          "absent",
+          "T13.4-8 (file-form move): staging premise — the destination's " +
+            "directory components do not exist before the move (TEST-SPEC " +
+            "13.4: staged with its directories absent beforehand)",
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["move", A_ROOT, "new/deep/b.mdx"],
+          0,
+          "T13.4-8 (file-form move) `move specs/A.mdx new/deep/b.mdx` — a " +
+            "missing intermediate directory never refuses or fails a " +
+            "write: a nonexistent component is never a refusal cause (SPEC " +
+            "13.4, 6.5)",
+        );
+        for (const dir of ["new", "new/deep"]) {
+          await assertKindIs(
+            workspace,
+            dir,
+            "dir",
+            "T13.4-8 (file-form move): the fresh destination directory " +
+              "components come into existence as real directories (SPEC " +
+              "13.4)",
+          );
+        }
+        assertBytesEqual(
+          await readFileDiagnosed(
+            workspace,
+            "new/deep/b.mdx",
+            "T13.4-8 (file-form move): the moved file under the fresh " +
+              "directories (SPEC 13.4, 6.5)",
+          ),
+          RELOCATED_MDX,
+          "T13.4-8 (file-form move): the moved file at its destination — " +
+            "import- and reference-free, so relocation changes none of its " +
+            "bytes (SPEC 6.5; H-4)",
+        );
+        await assertKindIs(
+          workspace,
+          A_ROOT,
+          "absent",
+          "T13.4-8 (file-form move): the origin path after the relocation " +
+            "(SPEC 6.5)",
+        );
+        await assertKindIs(
+          workspace,
+          "new/deep/b.xspec.ts",
+          "file",
+          "T13.4-8 (file-form move): the regenerated module under the " +
+            "fresh directories — generated in the source file's directory " +
+            "(SPEC 13.4, 13.1, 6.5)",
+        );
+        await assertKindIs(
+          workspace,
+          "new/deep/b.md",
+          "file",
+          "T13.4-8 (file-form move): the re-emitted Markdown under the " +
+            "fresh directories — emitted next to the source (SPEC 13.4, " +
+            "13.2, 7.3)",
+        );
+      },
+    );
+
+    // --- Section-form move: the created target file (SPEC 6.5) lies under
+    // the absent directory `fresh/sub/` ---
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": FRESH_GROUP_CONFIG,
+          "specs/S.mdx": SECTION_ORIGIN_MDX,
+        },
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T13.4-8 (section-form move) `build`",
+        );
+        await assertKindIs(
+          workspace,
+          "fresh",
+          "absent",
+          "T13.4-8 (section-form move): staging premise — the created " +
+            "target file's directory components do not exist before the " +
+            "move (TEST-SPEC 13.4)",
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["move", "specs/S.mdx#mv", "fresh/sub/T.mdx#mv"],
+          0,
+          "T13.4-8 (section-form move) `move specs/S.mdx#mv " +
+            "fresh/sub/T.mdx#mv` — the created target file's missing " +
+            "directories never refuse or fail the write (SPEC 13.4, 6.5; " +
+            "a cross-file section move keeping its ID is valid)",
+        );
+        for (const dir of ["fresh", "fresh/sub"]) {
+          await assertKindIs(
+            workspace,
+            dir,
+            "dir",
+            "T13.4-8 (section-form move): the created target file's fresh " +
+              "directory components come into existence as real " +
+              "directories (SPEC 13.4)",
+          );
+        }
+        assertBytesEqual(
+          await readFileDiagnosed(
+            workspace,
+            "fresh/sub/T.mdx",
+            "T13.4-8 (section-form move): the created target file under " +
+              "the fresh directories (SPEC 13.4, 6.5)",
+          ),
+          CREATED_TARGET_BYTES,
+          "T13.4-8 (section-form move): the created target file's entire " +
+            "initial content — created empty, the moved construct inserted " +
+            "at the start of the new file followed by one U+000A, no " +
+            "import additions required (SPEC 6.5; H-4)",
+        );
+        await assertKindIs(
+          workspace,
+          "fresh/sub/T.xspec.ts",
+          "file",
+          "T13.4-8 (section-form move): the created target's regenerated " +
+            "module under the fresh directories (SPEC 13.4, 13.1)",
+        );
+        await assertKindIs(
+          workspace,
+          "fresh/sub/T.md",
+          "file",
+          "T13.4-8 (section-form move): the created target's emitted " +
+            "Markdown under the fresh directories (SPEC 13.4, 13.2, 7.3)",
+        );
+      },
+    );
+
+    // --- First emission under a nested nonexistent `markdown.outDir`: no
+    // build has ever run and the whole `out/md/…` chain is absent; the
+    // nested source pins the chain below the outDir too (SPEC 7.3 preserves
+    // workspace-relative paths) ---
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": NESTED_OUT_CONFIG,
+          "specs/A.mdx": RELOCATED_MDX,
+          "specs/sub/B.mdx": B_MDX,
+        },
+      },
+      async (workspace) => {
+        await assertKindIs(
+          workspace,
+          "out",
+          "absent",
+          "T13.4-8 (first emission): staging premise — the `outDir` chain " +
+            "does not exist before the first emission (TEST-SPEC 13.4)",
+        );
+        await buildOk(
+          product,
+          workspace,
+          "T13.4-8 (first emission) `build` — a first emission under a " +
+            "nested nonexistent `markdown.outDir` never refuses or fails " +
+            "(SPEC 13.4, 7.3)",
+        );
+        for (const dir of [
+          "out",
+          "out/md",
+          "out/md/specs",
+          "out/md/specs/sub",
+        ]) {
+          await assertKindIs(
+            workspace,
+            dir,
+            "dir",
+            "T13.4-8 (first emission): every directory component of the " +
+              "emit destinations comes into existence as a real directory " +
+              "— the chain is created (SPEC 13.4, 7.3)",
+          );
+        }
+        for (const destination of [
+          "out/md/specs/A.md",
+          "out/md/specs/sub/B.md",
+        ]) {
+          await assertKindIs(
+            workspace,
+            destination,
+            "file",
+            "T13.4-8 (first emission): every destination is written under " +
+              "the created chain, workspace-relative paths preserved (SPEC " +
+              "13.4, 13.2, 7.3)",
+          );
+        }
+      },
+    );
+  },
+});
+
 /** TEST-SPEC §13.4, in canonical ID order (SUITE-47). */
 export const section134Tests: readonly ProductTestEntry[] = [
   T13_4_1,
@@ -1674,4 +1981,5 @@ export const section134Tests: readonly ProductTestEntry[] = [
   T13_4_4,
   T13_4_5,
   T13_4_6,
+  T13_4_8,
 ];

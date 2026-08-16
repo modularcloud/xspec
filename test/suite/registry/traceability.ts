@@ -395,6 +395,10 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T13.4-4": ["13.4"],
   "T13.4-5": ["13.4"],
   "T13.4-6": ["13.4", "14"],
+  // T13.4-8's 6.5/7.3/13.1/13.2 citations are carriage context with home
+  // coverage at T6.5-*/T7.3-1/T13.1-*/T13.2-1; no numbered condition is
+  // asserted (success paths only).
+  "T13.4-8": ["13.4"],
   "T13.5-1": ["13.5"],
   "T13.5-2": ["13.5"],
   "T13.5-3": ["13.5"],
