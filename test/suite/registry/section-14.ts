@@ -1,5 +1,5 @@
 // TEST-SPEC §14 (validation errors: the reporting contract) — SUITE-49:
-// T14-1 … T14-6.
+// T14-1 … T14-7.
 //
 // Sections 1–13 exercise each numbered condition in its home context; these
 // are the reporting-contract tests: multi-error completeness with
@@ -8,9 +8,12 @@
 // masking by unparseable files and by configuration errors (T14-3), the
 // reporter matrix — which of `build`/`check`/`review`/the machine-interface
 // surfaces reports which condition (T14-4) — grammar selection by file
-// name (T14-5), and the stable-code contract — each of the 23 conditions'
+// name (T14-5), the stable-code contract — each of the 23 conditions'
 // exact token as the finding's `code`, `null` where 14 assigns none
-// (T14-6).
+// (T14-6) — and the refusal-reason contract: each stable refusal code with
+// its concerned file, range, or identity, every applicable reason together,
+// and the invalid-workspace refusal reporting numbered findings alone
+// (T14-7).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -105,6 +108,37 @@
 //   reporter breadth stay T14-4's and the home tests' subject; the
 //   `code`-null arms mirror T12.7-3's plain-usage-error and T12.7-1's
 //   review-refusal stagings, per T14-6's own citations.
+// - T14-7 stages the refusal reasons via the home fixtures — T6.4-3's and
+//   T6.5-4's exported staging and case tables (TEST-SPEC §14 preamble: the
+//   refusal reasons are staged at T6.4-3, T6.5-4, T6.5-6, T6.6-3) — and
+//   asserts the reporting contract alone: exit 1, the form-exact 12.7
+//   findings-only report, the exact finding multiset (one finding per
+//   applicable reason, none beside), and each finding's stable code with
+//   its concerned file/range/identity. The modifies-nothing compares,
+//   journal discipline, and preview equivalence stay the home tests'
+//   subject (T6.4-3, T6.5-4, T6.6-3). Location assertions are
+//   SOME-quantified per the home operationalization (support.ts
+//   assertFindingMentionsLocation): every-participant location cardinality
+//   is T14-8's subject, so "locating every colliding bearer" and "the
+//   would-be cycle's full path" are asserted as the staged fixtures' one
+//   assertable participant each — the remaining colliding bearer's
+//   construct; the dependency cycle's participating `d` spelling (the
+//   would-be spec import cycle's participating import declarations exist
+//   in no pre-operation source, so that arm pins code and form alone, the
+//   home note). `refused-unresolvable-reference` admits no fixture
+//   (TEST-SPEC T6.4-3, T6.5-6) and is asserted only as the always-passing
+//   side of successful operations (T6.4-1, T6.5-1/2/3): no arm here. The
+//   exact self-move's refused-identity-unchanged is staged at its home
+//   (T6.5-6); T14-7's identity-unchanged arm is the rename, per its entry.
+//   T14-7's own stagings add what no home table stages: the plain file as
+//   a directory component of the destination path itself (the other
+//   destination-side directory-component case of 6.5 beside T6.5-4's
+//   derived-path arm — refused-invalid-destination, never 14.22); the
+//   both-collide-and-cycle section move (every applicable reason together,
+//   never only the first found); and the invalid-workspace refusal with
+//   the rename staged to ALSO collide — the control arm on the valid twin
+//   pins the staged-to-collide premise (exactly the collision refusal),
+//   then the broken workspace reports the validation findings alone.
 
 import { Buffer } from "node:buffer";
 import type { Finding, GraphEdge } from "../../helpers/adapters/index.js";
@@ -135,9 +169,27 @@ import {
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
+  RENAME_REFUSAL_CASES,
+  RENAME_REFUSAL_CONFIG,
+  RENAME_REFUSAL_FILES,
+} from "./section-6.4.js";
+import type { RefusalExpectation } from "./section-6.5.js";
+import {
+  MOVE_DERIVED_PATH_CASE,
+  MOVE_DERIVED_PATH_CONFIG,
+  MOVE_DERIVED_PATH_FILES,
+  MOVE_REFUSAL_CASES,
+  MOVE_REFUSAL_CONFIG,
+  MOVE_REFUSAL_FILES,
+  stageMoveRefusalOccupants,
+} from "./section-6.5.js";
+import {
   assertConditionCounts,
   assertEdgeSetEqual,
+  assertFindingConcernsPath,
   assertFindingLocated,
+  assertFindingMentionsLocation,
+  assertFindingNamesIdentity,
   assertSameJson,
   buildFindings,
   buildOk,
@@ -2046,7 +2098,423 @@ const T14_6 = defineProductTest({
   },
 });
 
-/** TEST-SPEC §14 T14-1…T14-6, in canonical ID order (SUITE-49). */
+// ---------------------------------------------------------------------------
+// T14-7 — refusal reasons
+// ---------------------------------------------------------------------------
+
+/**
+ * The T14-7 reporting contract over one refused invocation (SPEC 14, 12.7):
+ * run with `--json`, assert exit 1 exactly (refusals are findings in the
+ * exit-code partition, SPEC 12.0; H-5), decode stdout as the form-exact 12.7
+ * findings-only report (H-3), assert the exact finding multiset — one
+ * finding per applicable reason (or per staged numbered condition, for the
+ * invalid-workspace refusal), never only the first found, none beside — and
+ * assert each expected finding's concerned file/range/identity (the
+ * SOME-quantified location of the home operationalization; module header).
+ * The modifies-nothing compares are the home tests' subject (T6.4-3,
+ * T6.5-4). Per-reason concern lookup is by counting key, total because a
+ * refusal report never carries two findings of one reason (SPEC 14: one
+ * finding per reason).
+ */
+async function assertRefusalReport(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  expected: RefusalExpectation | readonly RefusalExpectation[],
+  context: string,
+): Promise<void> {
+  const expectations: readonly RefusalExpectation[] = Array.isArray(expected)
+    ? expected
+    : [expected];
+  const command = argv.join(" ");
+  const result = await expectExit(
+    product,
+    workspace,
+    [...argv, "--json"],
+    1,
+    `${context}: \`${command} --json\` — a refusal is a validation failure, ` +
+      `exit 1 (SPEC 6.4, 6.5, 12.0)`,
+  );
+  const findings = decodeFindingsReport(
+    parseJsonStdout(result, `${context}: \`${command} --json\``),
+    `${context}: \`${command} --json\` — a refused operation's report is ` +
+      `the form-exact 12.7 findings-only report (SPEC 12.7, H-3)`,
+  ).findings;
+  const counts: Record<string, number> = {};
+  for (const expectation of expectations) {
+    counts[expectation.finding] = (counts[expectation.finding] ?? 0) + 1;
+  }
+  assertConditionCounts(
+    findings,
+    counts,
+    `${context}: every applicable reason reports together, one finding per ` +
+      `reason — never only the first found — and none beside the staged ` +
+      `one(s), each carrying its exact stable code (SPEC 14, 12.7)`,
+  );
+  for (const expectation of expectations) {
+    const finding = findings.find(
+      (candidate) =>
+        (candidate.condition ?? candidate.code ?? "(code-less)") ===
+        expectation.finding,
+    );
+    if (finding === undefined) {
+      fail(
+        `${context}: no reported finding carries ` +
+          `${JSON.stringify(expectation.finding)} (SPEC 14, 12.7)`,
+      );
+    }
+    if (expectation.locatedAt !== undefined) {
+      assertFindingMentionsLocation(
+        finding,
+        expectation.locatedAt,
+        `${context}: the ${expectation.finding} finding's concerned construct`,
+      );
+    }
+    if (expectation.identity !== undefined) {
+      assertFindingNamesIdentity(
+        finding,
+        expectation.identity,
+        `${context}: the ${expectation.finding} finding's concerned identity`,
+      );
+    }
+    if (expectation.path !== undefined) {
+      assertFindingConcernsPath(
+        finding,
+        expectation.path,
+        `${context}: the ${expectation.finding} finding's concerned path`,
+      );
+    }
+  }
+}
+
+// The destination-path directory-component staging (the other
+// destination-side directory-component case of SPEC 6.5, beside T6.5-4's
+// derived-path arm): the plain file `specs/blocked` occupies a
+// workspace-relative directory component of the destination path
+// `specs/blocked/Out.mdx`. The occupant matches no configured glob (no
+// `.mdx`) and lies under no current source's write path, so the premise
+// `build` passes and the refusal is the move's own —
+// refused-invalid-destination concerning the destination path, never 14.22
+// (SPEC 6.5, 14.22, 14). Soundness: without the occupant the identical move
+// succeeds and creates `specs/blocked/Out.mdx` (writes create missing
+// directories, 13.4) — component occupancy is the arm's sole defect.
+const T14_7_COMPONENT_OCCUPANT = "specs/blocked";
+const T14_7_COMPONENT_DEST = "specs/blocked/Out.mdx";
+const T14_7_COMPONENT_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": SPECS_ONLY_CONFIG,
+  "specs/Src.mdx": '<S id="solo">\nSolo text.\n</S>\n',
+  [T14_7_COMPONENT_OCCUPANT]: "not a directory\n",
+};
+
+// The every-applicable-reason staging: a section move staged to BOTH collide
+// and create a dependency cycle. `mv` carries `d={"keep"}` and the move
+// `specs/M.mdx#mv` → `specs/M.mdx#keep.mv` would make it `keep`'s child — a
+// dependency on its own ancestor, a cycle (SPEC 5.3, 6.5) — while the
+// occupant child already identified `keep.mv` remains after the removal (the
+// vacated set is exactly the moved subtree's IDs, here `mv` alone), so the
+// prefix-replaced new ID collides (SPEC 6.5). Each reason's applicability
+// reads on its own terms (SPEC 14): both findings, never only the first.
+const T14_7_MULTI_FILE = "specs/M.mdx";
+const T14_7_MULTI_SOURCE = [
+  '<S id="keep">',
+  "Keep holder text.",
+  "",
+  '<S id="keep.mv">',
+  "Occupant child text.",
+  "</S>",
+  "</S>",
+  "",
+  '<S id="mv" d={"keep"}>',
+  "Moved candidate text.",
+  "</S>",
+  "",
+].join("\n");
+
+// The remaining colliding bearer's whole construct (the collision locates
+// every colliding bearer, SPEC 14; the fixture's one assertable participant)
+// and the dependency cycle's participating reference spelling (the home
+// operationalization of "locating the would-be cycle's full path").
+const T14_7_OCCUPANT_CONSTRUCT = '<S id="keep.mv">\nOccupant child text.\n</S>';
+const T14_7_OCCUPANT_WINDOW = byteWindow(
+  T14_7_MULTI_SOURCE.slice(
+    0,
+    T14_7_MULTI_SOURCE.indexOf(T14_7_OCCUPANT_CONSTRUCT),
+  ),
+  T14_7_OCCUPANT_CONSTRUCT,
+);
+const T14_7_CYCLE_SPELLING = 'd={"keep"}';
+const T14_7_CYCLE_WINDOW = byteWindow(
+  T14_7_MULTI_SOURCE.slice(0, T14_7_MULTI_SOURCE.indexOf(T14_7_CYCLE_SPELLING)),
+  T14_7_CYCLE_SPELLING,
+);
+
+// The invalid-workspace staging: rename `a.mid` → `a.sib` is staged to
+// collide with the remaining `a.sib` bearer (the control arm pins that
+// premise on the valid twin), and `specs/Bad.mdx` is then broken with an
+// unresolved `d` reference (14.5) — the workspace failing `build`'s
+// validations through a file the rename's arguments never touch, while the
+// usage-error argument checks still pass (the origin file exists and spells
+// `a.mid`, SPEC 6.4, 12.0).
+const T14_7_RENAME_FILE = "specs/R.mdx";
+const T14_7_RENAME_SOURCE = [
+  '<S id="a">',
+  "Holder text.",
+  "",
+  '<S id="a.mid">',
+  "Mid text.",
+  "</S>",
+  "",
+  '<S id="a.sib">',
+  "Sib text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+const T14_7_SIB_CONSTRUCT = '<S id="a.sib">\nSib text.\n</S>';
+const T14_7_SIB_WINDOW = byteWindow(
+  T14_7_RENAME_SOURCE.slice(
+    0,
+    T14_7_RENAME_SOURCE.indexOf(T14_7_SIB_CONSTRUCT),
+  ),
+  T14_7_SIB_CONSTRUCT,
+);
+const T14_7_BAD_FILE = "specs/Bad.mdx";
+const T14_7_BAD_VALID =
+  '<S id="bad">\nBad-file text, valid for the control arm.\n</S>\n';
+const T14_7_BAD_INVALID =
+  '<S id="bad" d={"nope"}>\nUnresolved dependency target.\n</S>\n';
+
+const T14_7 = defineProductTest({
+  id: "T14-7",
+  title:
+    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename, no collision reason beside it; refused-id-collision locating the colliding bearer; refused-structural-parent concerning the violated identity; refused-cycle locating the would-be cycle's participating spelling; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination; refused-unresolvable-reference admits no fixture and is asserted only as the always-passing side of successful operations; every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them (SPEC 14, 6.4, 6.5, 5.3, 12.0, 12.7)",
+  timeoutMs: 300_000,
+  run: async (product) => {
+    // --- The rename reasons, staged via T6.4-3's exported fixture: the
+    // 1.4-invalid new IDs (refused-invalid-id concerning the invalid
+    // identity), the identity-unchanged rename (alone — the exact one-entry
+    // multiset holds no collision reason beside it, SPEC 6.4), the
+    // collision (locating the remaining bearer), and the structurally
+    // misplaced but intrinsically valid new IDs (refused-structural-parent
+    // alone, never refused-invalid-id beside it — the same exact-multiset
+    // teeth; SPEC 14 "intrinsic form only").
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": RENAME_REFUSAL_CONFIG,
+          ...RENAME_REFUSAL_FILES,
+        },
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T14-7 rename-reason staging `build` (the T6.4-3 protocol)",
+        );
+        for (const { argv, expected, reason } of RENAME_REFUSAL_CASES) {
+          await assertRefusalReport(
+            product,
+            workspace,
+            argv,
+            expected,
+            `T14-7 rename (${reason})`,
+          );
+        }
+      },
+    );
+
+    // --- The move reasons, staged via T6.5-4's exported fixture: the two
+    // cycle arms (the dependency arm locating the participating `d`
+    // spelling), the destination occupants — the section form's
+    // non-spec-source occupants included, the out-of-group `.mdx` occupant
+    // refusing under both applicable reasons — the 1.4-invalid new IDs, the
+    // cross-file collision, the missing and within-subtree target parents,
+    // and the invalid destinations (SPEC 6.5, 14).
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": MOVE_REFUSAL_CONFIG,
+          ...MOVE_REFUSAL_FILES,
+        },
+      },
+      async (workspace) => {
+        // Occupants before the premise `build`, which must still pass
+        // (T6.5-4's staging note).
+        await stageMoveRefusalOccupants(workspace);
+        await buildOk(
+          product,
+          workspace,
+          "T14-7 move-reason staging `build` (occupants staged before it; " +
+            "the T6.5-4 protocol)",
+        );
+        for (const { argv, expected, reason } of MOVE_REFUSAL_CASES) {
+          await assertRefusalReport(
+            product,
+            workspace,
+            argv,
+            expected,
+            `T14-7 move (${reason})`,
+          );
+        }
+      },
+    );
+
+    // --- refused-invalid-destination, the derived-path directory-component
+    // case, staged via T6.5-4's exported derived-path fixture: the
+    // otherwise-valid destination's `outDir` emit destination has its
+    // directory component occupied by a plain file lying under no current
+    // source's write path — refused concerning the destination path, never
+    // 14.22 (SPEC 6.5, 7.3, 13.1, 13.2, 14).
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": MOVE_DERIVED_PATH_CONFIG,
+          ...MOVE_DERIVED_PATH_FILES,
+        },
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T14-7 derived-path staging `build` — the occupant lies under no " +
+            "current source's write path (T6.5-4's derived-path arm), so " +
+            "the refusal below is the move's own",
+        );
+        await assertRefusalReport(
+          product,
+          workspace,
+          MOVE_DERIVED_PATH_CASE.argv,
+          MOVE_DERIVED_PATH_CASE.expected,
+          `T14-7 move (${MOVE_DERIVED_PATH_CASE.reason})`,
+        );
+      },
+    );
+
+    // --- refused-invalid-destination, the destination-path
+    // directory-component case (T14-7's own staging; the fixture note): a
+    // plain file occupies a directory component of the destination path
+    // itself — refused concerning the destination path, never 14.22 (the
+    // exact one-entry multiset excludes a condition-22 finding beside it;
+    // SPEC 6.5, 14.22, 14).
+    await withWorkspace({ files: T14_7_COMPONENT_FILES }, async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T14-7 destination-component staging `build` — the plain-file " +
+          "occupant matches no glob and lies under no current source's " +
+          "write path, so the workspace passes `build`'s validations",
+      );
+      await assertRefusalReport(
+        product,
+        workspace,
+        ["move", "specs/Src.mdx", T14_7_COMPONENT_DEST],
+        {
+          finding: "refused-invalid-destination",
+          path: T14_7_COMPONENT_DEST,
+        },
+        "T14-7 move (destination-path directory component occupied by a " +
+          "plain file — refused-invalid-destination concerning the " +
+          "destination path, never 14.22)",
+      );
+    });
+
+    // --- Every applicable reason together: the both-collide-and-cycle
+    // section move (the fixture note) reports both findings, never only the
+    // first found — the exact two-entry multiset with each reason's
+    // concerned participant (SPEC 14, 6.5, 5.3).
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [T14_7_MULTI_FILE]: T14_7_MULTI_SOURCE,
+        },
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T14-7 multi-reason staging `build` over the valid workspace",
+        );
+        await assertRefusalReport(
+          product,
+          workspace,
+          ["move", `${T14_7_MULTI_FILE}#mv`, `${T14_7_MULTI_FILE}#keep.mv`],
+          [
+            {
+              finding: "refused-id-collision",
+              locatedAt: {
+                file: T14_7_MULTI_FILE,
+                window: T14_7_OCCUPANT_WINDOW,
+              },
+            },
+            {
+              finding: "refused-cycle",
+              locatedAt: {
+                file: T14_7_MULTI_FILE,
+                window: T14_7_CYCLE_WINDOW,
+              },
+            },
+          ],
+          "T14-7 move (staged to both collide — `keep.mv` present in the " +
+            "target file, remaining after the removal — and create a " +
+            "dependency cycle — the moved node depends on `keep`, its " +
+            "would-be ancestor: both findings, never only the first)",
+        );
+      },
+    );
+
+    // --- The invalid-workspace refusal: the control arm on the valid twin
+    // pins the staged-to-collide premise (exactly the collision refusal),
+    // then the broken workspace — an unresolved `d` in a file the rename
+    // never touches — reports the workspace's numbered findings alone: the
+    // one located 14.5 finding, exit 1, no refusal reason evaluated or
+    // reported beside it (SPEC 6.4, 14).
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [T14_7_RENAME_FILE]: T14_7_RENAME_SOURCE,
+          [T14_7_BAD_FILE]: T14_7_BAD_VALID,
+        },
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T14-7 invalid-workspace staging `build` over the valid twin",
+        );
+        await assertRefusalReport(
+          product,
+          workspace,
+          ["rename", T14_7_RENAME_FILE, "a.mid", "a.sib"],
+          {
+            finding: "refused-id-collision",
+            locatedAt: { file: T14_7_RENAME_FILE, window: T14_7_SIB_WINDOW },
+          },
+          "T14-7 rename control (the valid twin: the rename is staged to " +
+            "collide with the remaining `a.sib` bearer — the premise the " +
+            "invalid-workspace arm rides)",
+        );
+        await workspace.file(T14_7_BAD_FILE, T14_7_BAD_INVALID);
+        await assertRefusalReport(
+          product,
+          workspace,
+          ["rename", T14_7_RENAME_FILE, "a.mid", "a.sib"],
+          {
+            finding: "14.5",
+            locatedAt: { file: T14_7_BAD_FILE },
+          },
+          "T14-7 rename (invalid workspace: the same rename, still staged " +
+            "to collide, reports the workspace's numbered findings alone — " +
+            "the one 14.5 finding located in specs/Bad.mdx, no refusal " +
+            "reason evaluated or reported beside it)",
+        );
+      },
+    );
+  },
+});
+
+/** TEST-SPEC §14 T14-1…T14-7, in canonical ID order (SUITE-49). */
 export const section14ValidationTests: readonly ProductTestEntry[] = [
   T14_1,
   T14_2,
@@ -2054,4 +2522,5 @@ export const section14ValidationTests: readonly ProductTestEntry[] = [
   T14_4,
   T14_5,
   T14_6,
+  T14_7,
 ];

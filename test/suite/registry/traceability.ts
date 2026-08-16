@@ -415,6 +415,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // error document carriage) are context with home coverage at
   // T12.7-*/T12.0-*.
   "T14-6": ["14"],
+  // T14-7: 6.4/6.5/5.3 (the staged operations and the cycle rule) and
+  // 12.7/12.0 (report carriage) are context with home coverage at
+  // T6.4-*/T6.5-*/T5.3-1/T12.7-*/T12.0-*; the home passage "14" also
+  // carries the invalid-workspace arm's asserted numbered condition (14.5).
+  "T14-7": ["14"],
   "T15-1": ["15"],
   "P-1": ["1.4", "2.6"],
   "P-2": ["3"],

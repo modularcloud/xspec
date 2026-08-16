@@ -3563,10 +3563,55 @@ certify against FP-091's fixtures once those land.
   `npm run test:self` 268 passed, unchanged 2 planned mid-loop reds
   (certification-document ×2 → FP-091); S-1/S-5/S-7/certification green
   (S-7 sweeps T14-6 against the stub, diagnosed).]
-- [ ] FP-080 — Implement T14-7: refusal reasons — each stable refusal code
+- [x] FP-080 — Implement T14-7: refusal reasons — each stable refusal code
   with concerned file/range/identity; all-applicable-reasons-together; the
   invalid-workspace refusal reporting numbered findings alone. [R2 #12;
   TEST-SPEC §14]
+  [Done 2026-08-16: T14-7 registered in section-14.ts. The per-reason sweep
+  stages the reasons via the home fixtures (TEST-SPEC 14 preamble: staged at
+  T6.4-3/T6.5-4/T6.5-6/T6.6-3) — section-6.4's RENAME_REFUSAL_* and
+  section-6.5's MOVE_REFUSAL_*/stageMoveRefusalOccupants/MOVE_DERIVED_PATH_*
+  exports, the T6.6-3 reuse precedent — through a new reporting-contract
+  helper (`assertRefusalReport`): exit 1, form-exact 12.7 findings-only
+  report, exact finding multiset (one finding per applicable reason, none
+  beside — the exact counts also realize "identity-unchanged alone", the
+  intrinsic-only "never both", and "never 14.22"), plus each reason's
+  concerned file/range/identity via the support.ts SOME-quantified helpers;
+  modifies-nothing compares, journal discipline, and preview equivalence
+  stay the home tests' subject. T14-7's own stagings add what no home table
+  stages: (i) a plain file as a directory component of the destination path
+  itself (`specs/blocked`; matches no glob, under no write path, premise
+  `build` passes) → refused-invalid-destination concerning
+  specs/blocked/Out.mdx, never 14.22; (ii) the both-collide-and-cycle
+  section move (occupant child `keep.mv` remains after the removal while
+  `mv` `d={"keep"}` would become `keep`'s child, SPEC 5.3) → exactly
+  {refused-id-collision, refused-cycle}, never only the first, the collision
+  locating the occupant construct, the cycle the participating `d` spelling;
+  (iii) the invalid-workspace refusal with the rename staged to ALSO collide
+  — a control on the valid twin pins the premise (exactly
+  refused-id-collision locating the remaining `a.sib` bearer), then Bad.mdx
+  broken (14.5) → exactly the one located 14.5 finding, no refusal reason
+  evaluated or reported beside it. refused-unresolvable-reference: no arm
+  (admits no fixture; the always-passing side of successful operations);
+  the exact self-move's identity-unchanged stays at its home T6.5-6.
+  Traceability "T14-7": ["14"] (6.4/6.5/5.3/12.7/12.0 carriage context, the
+  T14-6 precedent); no certification scope. Verified: typecheck/format
+  clean; T14-7 red-as-diagnosed at the first rename case's form-exact
+  decode ("expected no member \"refused\"" — the FP-001/FP-007-class
+  product gap), section-14 6→7 failed with T14-1..T14-6 unchanged; direct
+  CLI probes against the built product prove the new stagings — the
+  component arm's control twin succeeds without the occupant (creates
+  specs/blocked/Out.mdx, pinning component occupancy as the sole defect)
+  while with it the product internal-errors exit 70 (the
+  vets-only-own-components gap class FP-018 diagnosed); the multi staging's
+  reasons each fire individually (collision-alone twin refuses on the
+  collision; cycle-alone twin reports the would-be keep→keep.mv→keep cycle)
+  while combined the product reports only the collision — the
+  only-the-first-found gap the arm rejects; the invalid-workspace probes
+  behave as specced in the old shape (control: collision refusal; broken:
+  the one 14.5 finding alone). `npm run test:self` unchanged 2 planned
+  mid-loop reds (certification-document ×2 → FP-091); S-1/S-5/S-7/
+  certification green (S-7 sweeps T14-7 against the stub, diagnosed).]
 - [ ] FP-081 — Implement T14-8: location cardinality — one finding locating
   every participant (triple-duplicate ID, import collision, cycle full
   path, embedding container span); within-finding location order. [R2 #13;
