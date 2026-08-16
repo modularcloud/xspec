@@ -411,6 +411,10 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T14-3": ["14"],
   "T14-4": ["14"],
   "T14-5": ["14"],
+  // T14-6: 12.7 (the JSON report form pinning `code`) and 12.0 (the exit-2
+  // error document carriage) are context with home coverage at
+  // T12.7-*/T12.0-*.
+  "T14-6": ["14"],
   "T15-1": ["15"],
   "P-1": ["1.4", "2.6"],
   "P-2": ["3"],

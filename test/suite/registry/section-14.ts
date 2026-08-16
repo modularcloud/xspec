@@ -1,5 +1,5 @@
 // TEST-SPEC §14 (validation errors: the reporting contract) — SUITE-49:
-// T14-1 … T14-5.
+// T14-1 … T14-6.
 //
 // Sections 1–13 exercise each numbered condition in its home context; these
 // are the reporting-contract tests: multi-error completeness with
@@ -7,8 +7,10 @@
 // conditions 14.5/14.6/14.7 plus the consumer-side type error (T14-2),
 // masking by unparseable files and by configuration errors (T14-3), the
 // reporter matrix — which of `build`/`check`/`review`/the machine-interface
-// surfaces reports which condition (T14-4) — and grammar selection by file
-// name (T14-5).
+// surfaces reports which condition (T14-4) — grammar selection by file
+// name (T14-5), and the stable-code contract — each of the 23 conditions'
+// exact token as the finding's `code`, `null` where 14 assigns none
+// (T14-6).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -88,10 +90,26 @@
 //   breadth and modifies-nothing compares are T13.3-3's), while the three
 //   surfaces answer finding-free at exit 0 over the staged valid spec
 //   source. Per-surface semantics depth is T11.2-*..T11.5-*'s subject.
+// - T14-6 stages each condition via its primary test's fixture — the same
+//   minimal home-form stagings T14-4 sweeps, plus the five specially
+//   reported conditions' stagings (14.10, 14.12, 14.14, 14.21, 14.23),
+//   hoisted below and shared with T14-4's dedicated arms — and reads it
+//   from ONE stated reporter of T14-4's matrix: `build` for every
+//   both-reporter condition, `check` for 14.10/14.12/14.21, the exit-2
+//   error document for 14.14, `inventory` for 14.23. Its assertion is the
+//   code value alone: at least one finding, every finding carrying the
+//   staged condition's exact token — sound because every staging stages
+//   exactly one condition (T14-4 pins the counts; 14.3's per-occurrence
+//   tolerance and several stale files under 14.10 both collapse into
+//   "every finding carries the one staged token"). Count precision and
+//   reporter breadth stay T14-4's and the home tests' subject; the
+//   `code`-null arms mirror T12.7-3's plain-usage-error and T12.7-1's
+//   review-refusal stagings, per T14-6's own citations.
 
 import { Buffer } from "node:buffer";
 import type { Finding, GraphEdge } from "../../helpers/adapters/index.js";
 import {
+  CONDITION_CODE_TOKENS,
   assertReportMentions,
   corruptGraphDataShapeBlind,
   decodeAtReport,
@@ -125,6 +143,7 @@ import {
   buildOk,
   byteWindow,
   expectConfigurationError,
+  expectErrorDocument,
   expectExit,
   runCli,
   runJson,
@@ -962,7 +981,8 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
       await buildOk(
         product,
         workspace,
-        "T14-4 (journal error) staging `build` (SPEC 12.1)",
+        "section-14 (journal error) staging `build` (SPEC 12.1; the " +
+          "staging is shared by T14-4's sweep and T14-6's)",
       );
       await workspace.file(".xspec/journal", GARBAGE_JOURNAL_LINE);
     },
@@ -1039,6 +1059,86 @@ export default defineConfig({
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Stagings shared by T14-4's dedicated reporter arms and T14-6's stable-code
+// sweep — one per specially-reported condition, each the minimal
+// primary-fixture form of the TEST-SPEC 14 preamble's per-condition record
+// ---------------------------------------------------------------------------
+
+// 14.10 (T12.2-2's fixture): build, then edit the source — Markdown emission
+// on, so the emitted file's bytes are the compiled source and the staged
+// staleness is certainly detectable.
+const STALE_DECL: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": markdownConfig(true),
+    "specs/a.mdx": '<S id="a1">\nAlpha behavior.\n</S>\n',
+  },
+};
+const STALE_EDIT = '<S id="a1">\nAlpha behavior, edited.\n</S>\n';
+
+// 14.12 (T7.5-2's fixture): one forbidden rule, one violating dependence.
+const POLICY_DECL: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    hi: ["hi/**/*.mdx"],
+    lo: ["lo/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "no-hi-to-lo",
+      type: "forbidden",
+      from: { group: "hi" },
+      to: { group: "lo" }
+    }
+  ]
+})
+`,
+    "hi/H.mdx": [
+      'import L from "../lo/L.xspec"',
+      "",
+      '<S id="h1" d={L.l1}>',
+      "Violating dependence.",
+      "</S>",
+      "",
+    ].join("\n"),
+    "lo/L.mdx": ['<S id="l1">', "Low one.", "</S>", ""].join("\n"),
+  },
+};
+
+// A minimal valid workspace (one spec group, one valid source): the ground
+// the 14.21/14.23 corruptions — and T14-6's code-null arms — are staged on.
+const VALID_SPECS_DECL: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": SPECS_ONLY_CONFIG,
+    "specs/a.mdx": '<S id="a1">\nValid behavior.\n</S>\n',
+  },
+};
+
+// 14.21 (T10.1-4's fixture): a session file that cannot be parsed.
+const GARBAGE_SESSION_PATH = ".xspec/reviews/bad.json";
+const GARBAGE_SESSION_CONTENT = "{ this is not a parseable session";
+
+// 14.14 (the T7-2 attribution discipline, as in T14-3's configuration arm):
+// the canonical valid configuration plus one unknown top-level key, so the
+// error is attributable to that one defect, beside a valid source.
+const BOGUS_KEY_DECL: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  bogus: true
+})
+`,
+    "specs/a.mdx": '<S id="a1">\nValid behavior.\n</S>\n',
+  },
+};
+
 /**
  * One availability-surface probe (SPEC 11.2, 11.3–11.5): the invocation
  * paired with the form-exact 12.7 document decode, so asserting the decoded
@@ -1111,395 +1211,307 @@ const T14_4 = defineProductTest({
   timeoutMs: 480_000,
   run: async (product) => {
     // --- 14.10: check-only. A stale workspace `build`s successfully by
-    // regenerating (Markdown emission on: the emitted file's bytes are the
-    // compiled source, so the staged staleness is certainly detectable).
-    await withWorkspace(
-      {
-        files: {
-          "xspec.config.ts": markdownConfig(true),
-          "specs/a.mdx": '<S id="a1">\nAlpha behavior.\n</S>\n',
-        },
-      },
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T14-4 (14.10) staging `build` (SPEC 12.1)",
+    // regenerating (STALE_DECL: Markdown emission on, so the staged
+    // staleness is certainly detectable).
+    await withWorkspace(STALE_DECL, async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T14-4 (14.10) staging `build` (SPEC 12.1)",
+      );
+      await workspace.file("specs/a.mdx", STALE_EDIT);
+      const context = "T14-4 (14.10) `check --json` on the stale workspace";
+      const findings = await checkFindings(product, workspace, context);
+      if (
+        findings.length === 0 ||
+        findings.some((finding) => finding.condition !== "14.10")
+      ) {
+        fail(
+          `${context}: staleness is the workspace's only staged error ` +
+            `condition, so \`check\` reports at least one finding and ` +
+            `every finding is 14.10 (SPEC 12.2, 14.10); got ` +
+            JSON.stringify(findings.map((finding) => finding.condition)),
         );
-        await workspace.file(
-          "specs/a.mdx",
-          '<S id="a1">\nAlpha behavior, edited.\n</S>\n',
-        );
-        const context = "T14-4 (14.10) `check --json` on the stale workspace";
-        const findings = await checkFindings(product, workspace, context);
-        if (
-          findings.length === 0 ||
-          findings.some((finding) => finding.condition !== "14.10")
-        ) {
-          fail(
-            `${context}: staleness is the workspace's only staged error ` +
-              `condition, so \`check\` reports at least one finding and ` +
-              `every finding is 14.10 (SPEC 12.2, 14.10); got ` +
-              JSON.stringify(findings.map((finding) => finding.condition)),
-          );
-        }
-        await expectExit(
-          product,
-          workspace,
-          ["build"],
-          0,
-          "T14-4 (14.10) `build` on the stale workspace — `build` cannot " +
-            "observe staleness because it regenerates every derived file: " +
-            "14.10 is reported by `check` only (SPEC 14.10, 12.1)",
-        );
-        await expectExit(
-          product,
-          workspace,
-          ["check"],
-          0,
-          "T14-4 (14.10) `check` after the rebuild — the successful " +
-            "`build` resolved the staleness by regenerating (SPEC 12.1, 14.10)",
-        );
-      },
-    );
+      }
+      await expectExit(
+        product,
+        workspace,
+        ["build"],
+        0,
+        "T14-4 (14.10) `build` on the stale workspace — `build` cannot " +
+          "observe staleness because it regenerates every derived file: " +
+          "14.10 is reported by `check` only (SPEC 14.10, 12.1)",
+      );
+      await expectExit(
+        product,
+        workspace,
+        ["check"],
+        0,
+        "T14-4 (14.10) `check` after the rebuild — the successful " +
+          "`build` resolved the staleness by regenerating (SPEC 12.1, 14.10)",
+      );
+    });
 
     // --- 14.12: check-only. A policy-violating workspace `build`s
-    // successfully; `check` reports the violation.
-    await withWorkspace(
-      {
-        files: {
-          "xspec.config.ts": `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    hi: ["hi/**/*.mdx"],
-    lo: ["lo/**/*.mdx"]
-  },
-  policy: [
-    {
-      name: "no-hi-to-lo",
-      type: "forbidden",
-      from: { group: "hi" },
-      to: { group: "lo" }
-    }
-  ]
-})
-`,
-          "hi/H.mdx": [
-            'import L from "../lo/L.xspec"',
-            "",
-            '<S id="h1" d={L.l1}>',
-            "Violating dependence.",
-            "</S>",
-            "",
-          ].join("\n"),
-          "lo/L.mdx": ['<S id="l1">', "Low one.", "</S>", ""].join("\n"),
-        },
-      },
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T14-4 (14.12) `build` over the policy-violating workspace — " +
-            "policy violations are `check` findings, and `build` succeeds " +
-            "and regenerates regardless (SPEC 14.12, 12.1, 7.5)",
-        );
-        assertConditionCounts(
-          await checkFindings(
-            product,
-            workspace,
-            "T14-4 (14.12) `check --json`",
-          ),
-          { "14.12": 1 },
-          "T14-4 (14.12) `check` reports the one violating edge — the " +
-            "freshly built workspace stages nothing else (SPEC 14.12, 12.2)",
-        );
-      },
-    );
+    // successfully; `check` reports the violation (POLICY_DECL).
+    await withWorkspace(POLICY_DECL, async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T14-4 (14.12) `build` over the policy-violating workspace — " +
+          "policy violations are `check` findings, and `build` succeeds " +
+          "and regenerates regardless (SPEC 14.12, 12.1, 7.5)",
+      );
+      assertConditionCounts(
+        await checkFindings(product, workspace, "T14-4 (14.12) `check --json`"),
+        { "14.12": 1 },
+        "T14-4 (14.12) `check` reports the one violating edge — the " +
+          "freshly built workspace stages nothing else (SPEC 14.12, 12.2)",
+      );
+    });
 
     // --- 14.21: reported by `check`, by `review` subcommands naming the
-    // session, and by `review list` — not by `build`.
-    await withWorkspace(
-      {
-        files: {
-          "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/a.mdx": '<S id="a1">\nValid behavior.\n</S>\n',
-        },
-      },
-      async (workspace) => {
-        await buildOk(
+    // session, and by `review list` — not by `build` (VALID_SPECS_DECL plus
+    // the garbage session file).
+    await withWorkspace(VALID_SPECS_DECL, async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T14-4 (14.21) staging `build` (SPEC 12.1)",
+      );
+      await workspace.file(GARBAGE_SESSION_PATH, GARBAGE_SESSION_CONTENT);
+      await expectExit(
+        product,
+        workspace,
+        ["build"],
+        0,
+        "T14-4 (14.21) `build` beside the corrupt session — `build` does " +
+          "not read sessions, so 14.21 is not its finding (SPEC 14.21)",
+      );
+      assertConditionCounts(
+        await checkFindings(product, workspace, "T14-4 (14.21) `check --json`"),
+        { "14.21": 1 },
+        "T14-4 (14.21) `check` reports the one corrupt session — the " +
+          "just-rebuilt workspace stages nothing else (SPEC 14.21, 12.2)",
+      );
+      for (const argv of [
+        ["review", "status", "bad"],
+        ["review", "list"],
+      ] as const) {
+        const context = `T14-4 (14.21) \`${argv.join(" ")}\``;
+        const result = await runCli(product, workspace, argv);
+        assertExitCode(
+          result,
+          1,
+          `${context} — a review subcommand naming a corrupt session, and ` +
+            `\`review list\` reporting one, exit 1 (SPEC 14.21, 10.1, ` +
+            `10.7, 12.0)`,
+        );
+        assertReportMentions(
+          result,
+          [/corrupt/i],
+          `${context} — the report identifies the session as corrupt ` +
+            `(SPEC 10.1/14.21 vocabulary; findings are standard-output ` +
+            `content, 12.0; information presence, never exact wording, H-3)`,
+        );
+      }
+
+      // On a workspace failing `build`'s validations, 14.21 is reported
+      // by `check` alone, beside the gate's findings: no session is read
+      // on the failing side, so the gated `review` reads report exactly
+      // the gate's findings — the validation errors, no condition-21
+      // finding beside them (SPEC 14.21, 13.3, 10.1; membership only, the
+      // module header — the every-subcommand breadth, modifies-nothing
+      // compares, and bytes-untouched assertions are T10.1-5's).
+      await workspace.file("specs/a.mdx", "<S>\nNo id.\n</S>\n");
+      assertConditionCounts(
+        await buildFindings(
           product,
           workspace,
-          "T14-4 (14.21) staging `build` (SPEC 12.1)",
-        );
-        await workspace.file(
-          ".xspec/reviews/bad.json",
-          "{ this is not a parseable session",
-        );
-        await expectExit(
-          product,
-          workspace,
-          ["build"],
-          0,
-          "T14-4 (14.21) `build` beside the corrupt session — `build` does " +
-            "not read sessions, so 14.21 is not its finding (SPEC 14.21)",
-        );
-        assertConditionCounts(
+          "T14-4 (14.21, failing workspace) `build --json`",
+        ),
+        { "14.1": 1 },
+        "T14-4 (14.21, failing workspace) `build` reports the validation " +
+          "error alone — `build` does not read sessions, so 14.21 is " +
+          "never its finding (SPEC 14.21, 12.1)",
+      );
+      assertConditionCounts(
+        nonStale(
           await checkFindings(
             product,
             workspace,
-            "T14-4 (14.21) `check --json`",
+            "T14-4 (14.21, failing workspace) `check --json`",
           ),
-          { "14.21": 1 },
-          "T14-4 (14.21) `check` reports the one corrupt session — the " +
-            "just-rebuilt workspace stages nothing else (SPEC 14.21, 12.2)",
+        ),
+        { "14.1": 1, "14.21": 1 },
+        "T14-4 (14.21, failing workspace) `check` reports 14.21 beside " +
+          "the failing workspace's other findings — the validation error " +
+          "and the corrupt session together, counted exactly over the " +
+          "non-14.10 findings (SPEC 14.21, 12.2; module header)",
+      );
+      for (const argv of [
+        ["review", "status", "bad", "--json"],
+        ["review", "list", "--json"],
+      ] as const) {
+        const context = `T14-4 (14.21, failing workspace) \`${argv.join(" ")}\``;
+        const result = await expectExit(
+          product,
+          workspace,
+          argv,
+          1,
+          `${context} — on a workspace failing \`build\`'s validations a ` +
+            `gated read reports the gate's findings and exits 1 without ` +
+            `answering (SPEC 13.3, 12.0)`,
         );
-        for (const argv of [
-          ["review", "status", "bad"],
-          ["review", "list"],
-        ] as const) {
-          const context = `T14-4 (14.21) \`${argv.join(" ")}\``;
-          const result = await runCli(product, workspace, argv);
-          assertExitCode(
-            result,
-            1,
-            `${context} — a review subcommand naming a corrupt session, and ` +
-              `\`review list\` reporting one, exit 1 (SPEC 14.21, 10.1, ` +
-              `10.7, 12.0)`,
-          );
-          assertReportMentions(
-            result,
-            [/corrupt/i],
-            `${context} — the report identifies the session as corrupt ` +
-              `(SPEC 10.1/14.21 vocabulary; findings are standard-output ` +
-              `content, 12.0; information presence, never exact wording, H-3)`,
-          );
-        }
-
-        // On a workspace failing `build`'s validations, 14.21 is reported
-        // by `check` alone, beside the gate's findings: no session is read
-        // on the failing side, so the gated `review` reads report exactly
-        // the gate's findings — the validation errors, no condition-21
-        // finding beside them (SPEC 14.21, 13.3, 10.1; membership only, the
-        // module header — the every-subcommand breadth, modifies-nothing
-        // compares, and bytes-untouched assertions are T10.1-5's).
-        await workspace.file("specs/a.mdx", "<S>\nNo id.\n</S>\n");
         assertConditionCounts(
-          await buildFindings(
-            product,
-            workspace,
-            "T14-4 (14.21, failing workspace) `build --json`",
-          ),
+          decodeFindingsReport(parseJsonStdout(result, context), context)
+            .findings,
           { "14.1": 1 },
-          "T14-4 (14.21, failing workspace) `build` reports the validation " +
-            "error alone — `build` does not read sessions, so 14.21 is " +
-            "never its finding (SPEC 14.21, 12.1)",
+          `${context} — exactly the gate's findings: no session file is ` +
+            `read on a failing workspace, so no condition-21 finding is ` +
+            `reported beside them — on this workspace 14.21 is \`check\`'s ` +
+            `alone (SPEC 14.21, 13.3, 10.1; depth: T10.1-5)`,
         );
-        assertConditionCounts(
-          nonStale(
-            await checkFindings(
-              product,
-              workspace,
-              "T14-4 (14.21, failing workspace) `check --json`",
-            ),
-          ),
-          { "14.1": 1, "14.21": 1 },
-          "T14-4 (14.21, failing workspace) `check` reports 14.21 beside " +
-            "the failing workspace's other findings — the validation error " +
-            "and the corrupt session together, counted exactly over the " +
-            "non-14.10 findings (SPEC 14.21, 12.2; module header)",
-        );
-        for (const argv of [
-          ["review", "status", "bad", "--json"],
-          ["review", "list", "--json"],
-        ] as const) {
-          const context = `T14-4 (14.21, failing workspace) \`${argv.join(" ")}\``;
-          const result = await expectExit(
-            product,
-            workspace,
-            argv,
-            1,
-            `${context} — on a workspace failing \`build\`'s validations a ` +
-              `gated read reports the gate's findings and exits 1 without ` +
-              `answering (SPEC 13.3, 12.0)`,
-          );
-          assertConditionCounts(
-            decodeFindingsReport(parseJsonStdout(result, context), context)
-              .findings,
-            { "14.1": 1 },
-            `${context} — exactly the gate's findings: no session file is ` +
-              `read on a failing workspace, so no condition-21 finding is ` +
-              `reported beside them — on this workspace 14.21 is \`check\`'s ` +
-              `alone (SPEC 14.21, 13.3, 10.1; depth: T10.1-5)`,
-          );
-        }
-      },
-    );
+      }
+    });
 
     // --- 14.23: reported by `inventory` and `rename`/`move` previews only —
     // `check` reports the state as 14.10's unit form, and `build` and the
     // refreshing reads never do: the rebuild replaces the record; the reads
     // leave it unconsulted (SPEC 14.23, 14.10, 13.3, 11.6, 6.6; membership
     // by exact counts per the module header — depth: T11.6-4, T6.6-6,
-    // T12.2-2, T13.3-2).
-    await withWorkspace(
-      {
-        files: {
-          "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/a.mdx": '<S id="a1">\nValid behavior.\n</S>\n',
-        },
-      },
-      async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          "T14-4 (14.23) staging `build` — the corruption applies to a " +
-            "record the product itself wrote (SPEC 12.1, 13.3; H-3)",
-        );
-        await corruptGraphDataShapeBlind(workspace.root, "T14-4 (14.23)");
+    // T12.2-2, T13.3-2). Staged on VALID_SPECS_DECL.
+    await withWorkspace(VALID_SPECS_DECL, async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T14-4 (14.23) staging `build` — the corruption applies to a " +
+          "record the product itself wrote (SPEC 12.1, 13.3; H-3)",
+      );
+      await corruptGraphDataShapeBlind(workspace.root, "T14-4 (14.23)");
 
-        const inventoryContext = "T14-4 (14.23) `inventory`";
-        assertConditionCounts(
-          decodeInventoryFindings(
-            await runJsonExpecting(
-              product,
-              workspace,
-              ["inventory"],
-              1,
-              `${inventoryContext} — the condition-23 finding accompanies ` +
-                `the answer and the invocation exits 1 (SPEC 14.23, 11.6)`,
-            ),
-            inventoryContext,
-          ),
-          { "14.23": 1 },
-          `${inventoryContext} — the unreadable record is the inventory ` +
-            `answer's one finding on the otherwise clean workspace (SPEC ` +
-            `14.23, 11.6)`,
-        );
-
-        const previewContext =
-          "T14-4 (14.23) `rename specs/a.mdx a1 a2 --preview --json`";
-        assertConditionCounts(
-          decodePreviewReport(
-            await runJsonExpecting(
-              product,
-              workspace,
-              ["rename", "specs/a.mdx", "a1", "a2", "--preview", "--json"],
-              1,
-              `${previewContext} — the condition-23 finding accompanies the ` +
-                `answer and the invocation exits 1 (SPEC 14.23, 6.6)`,
-            ),
-            previewContext,
-          ).findings,
-          { "14.23": 1 },
-          `${previewContext} — the preview consults the record for its ` +
-            `delta, so the otherwise valid plan's report carries exactly ` +
-            `the condition-23 finding (SPEC 14.23, 6.6; the delta's ` +
-            `unavailability and the plan's completeness are T6.6-6's)`,
-        );
-
-        assertConditionCounts(
-          await checkFindings(
+      const inventoryContext = "T14-4 (14.23) `inventory`";
+      assertConditionCounts(
+        decodeInventoryFindings(
+          await runJsonExpecting(
             product,
             workspace,
-            "T14-4 (14.23) `check --json`",
+            ["inventory"],
+            1,
+            `${inventoryContext} — the condition-23 finding accompanies ` +
+              `the answer and the invocation exits 1 (SPEC 14.23, 11.6)`,
           ),
-          { "14.10": 1 },
-          "T14-4 (14.23) `check` reports the state as staleness — exactly " +
-            "one condition-10 finding, the unit form: never 14.23, never " +
-            "the mismatch form or a per-file finding beside it on the " +
-            "freshly built, otherwise clean workspace (SPEC 14.23, 14.10; " +
-            "depth: T12.2-2)",
-        );
+          inventoryContext,
+        ),
+        { "14.23": 1 },
+        `${inventoryContext} — the unreadable record is the inventory ` +
+          `answer's one finding on the otherwise clean workspace (SPEC ` +
+          `14.23, 11.6)`,
+      );
 
-        await expectExit(
-          product,
-          workspace,
-          ["query", "nodes"],
-          0,
-          "T14-4 (14.23) `query nodes` on the corrupt-record state — the " +
-            "refreshing reads never report 14.23: they leave the record " +
-            "unconsulted and answer finding-free, exit 0 (SPEC 14.23, 13.3; " +
-            "depth: T13.3-2)",
-        );
+      const previewContext =
+        "T14-4 (14.23) `rename specs/a.mdx a1 a2 --preview --json`";
+      assertConditionCounts(
+        decodePreviewReport(
+          await runJsonExpecting(
+            product,
+            workspace,
+            ["rename", "specs/a.mdx", "a1", "a2", "--preview", "--json"],
+            1,
+            `${previewContext} — the condition-23 finding accompanies the ` +
+              `answer and the invocation exits 1 (SPEC 14.23, 6.6)`,
+          ),
+          previewContext,
+        ).findings,
+        { "14.23": 1 },
+        `${previewContext} — the preview consults the record for its ` +
+          `delta, so the otherwise valid plan's report carries exactly ` +
+          `the condition-23 finding (SPEC 14.23, 6.6; the delta's ` +
+          `unavailability and the plan's completeness are T6.6-6's)`,
+      );
 
-        await expectExit(
-          product,
-          workspace,
-          ["build"],
-          0,
-          "T14-4 (14.23) `build` on the corrupt-record state — `build` " +
-            "never reports 14.23: its rebuild replaces the record (SPEC " +
-            "14.23, 12.1)",
-        );
-        await expectExit(
-          product,
-          workspace,
-          ["check"],
-          0,
-          "T14-4 (14.23) `check` after the rebuild — the successful " +
-            "`build` replaced the unreadable state (SPEC 14.23, 12.1, 13.3)",
-        );
-      },
-    );
+      assertConditionCounts(
+        await checkFindings(product, workspace, "T14-4 (14.23) `check --json`"),
+        { "14.10": 1 },
+        "T14-4 (14.23) `check` reports the state as staleness — exactly " +
+          "one condition-10 finding, the unit form: never 14.23, never " +
+          "the mismatch form or a per-file finding beside it on the " +
+          "freshly built, otherwise clean workspace (SPEC 14.23, 14.10; " +
+          "depth: T12.2-2)",
+      );
+
+      await expectExit(
+        product,
+        workspace,
+        ["query", "nodes"],
+        0,
+        "T14-4 (14.23) `query nodes` on the corrupt-record state — the " +
+          "refreshing reads never report 14.23: they leave the record " +
+          "unconsulted and answer finding-free, exit 0 (SPEC 14.23, 13.3; " +
+          "depth: T13.3-2)",
+      );
+
+      await expectExit(
+        product,
+        workspace,
+        ["build"],
+        0,
+        "T14-4 (14.23) `build` on the corrupt-record state — `build` " +
+          "never reports 14.23: its rebuild replaces the record (SPEC " +
+          "14.23, 12.1)",
+      );
+      await expectExit(
+        product,
+        workspace,
+        ["check"],
+        0,
+        "T14-4 (14.23) `check` after the rebuild — the successful " +
+          "`build` replaced the unreadable state (SPEC 14.23, 12.1, 13.3)",
+      );
+    });
 
     // --- 14.14: reported by `build` and `check` alike — as the
     // every-command usage error of its entry (exit 2, not a finding).
-    await withWorkspace(
-      {
-        files: {
-          "xspec.config.ts": `import { defineConfig } from "xspec"
+    // Staged on BOGUS_KEY_DECL.
+    await withWorkspace(BOGUS_KEY_DECL, async (workspace) => {
+      await expectConfigurationError(
+        product,
+        workspace,
+        ["build"],
+        "T14-4 (14.14) `build` under an unknown configuration key " +
+          "(SPEC 14.14, 7, 12.0)",
+      );
+      await expectConfigurationError(
+        product,
+        workspace,
+        ["check"],
+        "T14-4 (14.14) `check` under the same configuration (SPEC 14.14, " +
+          "7, 12.0)",
+      );
 
-export default defineConfig({
-  specs: {
-    main: ["specs/**/*.mdx"]
-  },
-  bogus: true
-})
-`,
-          "specs/a.mdx": '<S id="a1">\nValid behavior.\n</S>\n',
-        },
-      },
-      async (workspace) => {
-        await expectConfigurationError(
+      // Never `version`: it loads no configuration, so configuration-error
+      // precedence cannot reach it — on the same invalid configuration
+      // that makes `build`/`check` exit 2, `version` answers at exit 0
+      // with a single JSON document as its entire stdout (12.6 is
+      // JSON-only). Membership only; the byte-identity and document-form
+      // depth is T12.6-1/2's.
+      const versionContext =
+        "T14-4 (14.14) `version` under the same invalid configuration";
+      parseJsonStdout(
+        await expectExit(
           product,
           workspace,
-          ["build"],
-          "T14-4 (14.14) `build` under an unknown configuration key " +
-            "(SPEC 14.14, 7, 12.0)",
-        );
-        await expectConfigurationError(
-          product,
-          workspace,
-          ["check"],
-          "T14-4 (14.14) `check` under the same configuration (SPEC 14.14, " +
-            "7, 12.0)",
-        );
-
-        // Never `version`: it loads no configuration, so configuration-error
-        // precedence cannot reach it — on the same invalid configuration
-        // that makes `build`/`check` exit 2, `version` answers at exit 0
-        // with a single JSON document as its entire stdout (12.6 is
-        // JSON-only). Membership only; the byte-identity and document-form
-        // depth is T12.6-1/2's.
-        const versionContext =
-          "T14-4 (14.14) `version` under the same invalid configuration";
-        parseJsonStdout(
-          await expectExit(
-            product,
-            workspace,
-            ["version"],
-            0,
-            `${versionContext} — \`version\` loads no configuration and ` +
-              `cannot fail for workspace or configuration reasons: 14.14 is ` +
-              `delivered by every command that loads configuration, never ` +
-              `\`version\` (SPEC 12.6, 14.14)`,
-          ),
-          `${versionContext} — a JSON-only surface: a single JSON document ` +
-            `is its only output form, with or without --json (SPEC 12.6, 12.0)`,
-        );
-      },
-    );
+          ["version"],
+          0,
+          `${versionContext} — \`version\` loads no configuration and ` +
+            `cannot fail for workspace or configuration reasons: 14.14 is ` +
+            `delivered by every command that loads configuration, never ` +
+            `\`version\` (SPEC 12.6, 14.14)`,
+        ),
+        `${versionContext} — a JSON-only surface: a single JSON document ` +
+          `is its only output form, with or without --json (SPEC 12.6, 12.0)`,
+      );
+    });
 
     // --- Every other condition: reported by both `build` and `check`, and
     // per its staging's kind by the machine-interface answers (SPEC 11.2;
@@ -1759,11 +1771,287 @@ const T14_5 = defineProductTest({
   },
 });
 
-/** TEST-SPEC §14 T14-1…T14-5, in canonical ID order (SUITE-49). */
+// ---------------------------------------------------------------------------
+// T14-6 — stable codes
+// ---------------------------------------------------------------------------
+
+/**
+ * The 1-based SPEC 14 ordinal of a `"14.N"` condition identity (the sweep
+ * entries' vocabulary). A malformed identity is a harness defect, not a
+ * product failure — hence a plain error, never `fail` (H-8 taxonomy).
+ */
+function conditionOrdinal(condition: string): number {
+  const ordinal = Number(condition.slice("14.".length));
+  if (
+    !condition.startsWith("14.") ||
+    !Number.isInteger(ordinal) ||
+    ordinal < 1 ||
+    ordinal > CONDITION_CODE_TOKENS.length
+  ) {
+    throw new Error(
+      `section-14 harness defect: no SPEC 14 condition ${JSON.stringify(condition)} exists`,
+    );
+  }
+  return ordinal;
+}
+
+/**
+ * The T14-6 per-condition assertion: at least one finding, and EVERY finding
+ * carries the staged condition's exact stable code token as its `code` —
+ * strict string equality against the harness-pinned SPEC 14 token table
+ * (model.ts CONDITION_CODE_TOKENS: index N-1 holds condition 14.N's token).
+ * The form-exact decode already admits only known tokens or null (S-5), so
+ * with this equality an omitted, misspelled, null, wrong-condition, or
+ * numeral-decorated code fails even where exit class and located
+ * information are right (SPEC 14, 12.7; T14-6). Every T14-6 staging stages
+ * exactly one condition, so "every finding" is the whole report.
+ */
+function assertExactCodeToken(
+  findings: readonly Finding[],
+  ordinal: number,
+  context: string,
+): void {
+  const token = CONDITION_CODE_TOKENS[ordinal - 1];
+  if (token === undefined) {
+    throw new Error(
+      `section-14 harness defect: no SPEC 14 condition ${String(ordinal)} exists`,
+    );
+  }
+  if (findings.length === 0) {
+    fail(
+      `${context}: the staged condition ${String(ordinal)} must be reported — with ` +
+        `its finding absent altogether, the stable-code assertion is absent ` +
+        `with it (SPEC 14; T14-6 is a positive identity check); got an ` +
+        `empty findings array`,
+    );
+  }
+  for (const finding of findings) {
+    if (finding.code !== token) {
+      fail(
+        `${context}: the finding must carry condition ${String(ordinal)}'s stable ` +
+          `code — the exact token ${JSON.stringify(token)} as its \`code\` member, ` +
+          `the token string alone, the ordinal numeral no part of the value ` +
+          `(SPEC 14, 12.7); got ${JSON.stringify(finding.code)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+  }
+}
+
+/** Assert a code-less finding: `code` null where SPEC 14 assigns none. */
+function assertCodeNull(finding: Finding, why: string, context: string): void {
+  if (finding.code !== null) {
+    fail(
+      `${context}: ${why} carries no stable code — \`code\` is null where ` +
+        `14 assigns none (SPEC 14, 12.7); got ${JSON.stringify(finding.code)} ` +
+        `(message: ${JSON.stringify(finding.message)})`,
+    );
+  }
+}
+
+const T14_6 = defineProductTest({
+  id: "T14-6",
+  title:
+    "stable codes: for each of the 23 conditions, staged via its primary test's fixture and read from its stated reporter, the finding carries the exact token 14 lists (`missing-id` … `unreadable-record`) as its `code` in the JSON report form — the value is the token string alone, the ordinal numeral no part of it — so a product omitting or misspelling a code fails even where exit class and located information are right; a plain usage error and a review-operation refusal carry no stable code — `code` null (SPEC 14, 12.7, 12.0)",
+  timeoutMs: 300_000,
+  run: async (product) => {
+    // --- The 18 conditions `build` reports, staged as T14-4 sweeps them
+    // (their minimal primary-fixture forms) and read from `build --json` —
+    // a stated reporter for every one of them: "every other condition
+    // reported by both `build` and `check`", 14.13/14.22 "by both `build`
+    // and `check` and by the gated reads" (T14-4's matrix).
+    for (const entry of SWEEP_ENTRIES) {
+      const ordinal = conditionOrdinal(entry.condition);
+      await withWorkspace(entry.decl, async (workspace) => {
+        await entry.prepare?.(product, workspace);
+        const context = `T14-6 (${entry.label}) \`build --json\``;
+        assertExactCodeToken(
+          await buildFindings(product, workspace, context),
+          ordinal,
+          `${context} — condition ${entry.condition}'s stable code, read ` +
+            `from \`build\``,
+        );
+      });
+    }
+
+    // --- 14.10 `stale-output`: `check` is its sole reporter (SPEC 14.10).
+    await withWorkspace(STALE_DECL, async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T14-6 (14.10) staging `build` (SPEC 12.1)",
+      );
+      await workspace.file("specs/a.mdx", STALE_EDIT);
+      const context = "T14-6 (14.10) `check --json` on the stale workspace";
+      assertExactCodeToken(
+        await checkFindings(product, workspace, context),
+        10,
+        `${context} — staleness is the only staged condition, so every ` +
+          `finding carries its code`,
+      );
+    });
+
+    // --- 14.12 `policy-violation`: `check` only (SPEC 14.12), on the
+    // freshly built policy-violating workspace.
+    await withWorkspace(POLICY_DECL, async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T14-6 (14.12) staging `build` (SPEC 12.1, 14.12: `build` succeeds " +
+          "regardless of policy)",
+      );
+      const context = "T14-6 (14.12) `check --json`";
+      assertExactCodeToken(
+        await checkFindings(product, workspace, context),
+        12,
+        context,
+      );
+    });
+
+    // --- 14.14 `configuration-error`: delivered by every configuration-
+    // loading command as the exit-2 usage error; its JSON report form is
+    // the error document, whose one finding carries the stable code
+    // (SPEC 14.14, 12.0, 12.7).
+    await withWorkspace(BOGUS_KEY_DECL, async (workspace) => {
+      const context =
+        "T14-6 (14.14) `build --json` under the unknown-key configuration";
+      const result = await expectExit(
+        product,
+        workspace,
+        ["build", "--json"],
+        2,
+        `${context} — a configuration error is an exit-2 usage error ` +
+          `(SPEC 14.14, 12.0)`,
+      );
+      assertExactCodeToken(
+        [expectErrorDocument(result, context)],
+        14,
+        `${context} — the error document's finding`,
+      );
+    });
+
+    // --- 14.21 `corrupt-session`: `check` (a stated reporter beside the
+    // `review` subcommands naming the session and `review list`, SPEC
+    // 14.21), on the freshly built workspace plus the garbage session.
+    await withWorkspace(VALID_SPECS_DECL, async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T14-6 (14.21) staging `build` (SPEC 12.1)",
+      );
+      await workspace.file(GARBAGE_SESSION_PATH, GARBAGE_SESSION_CONTENT);
+      const context = "T14-6 (14.21) `check --json` beside the corrupt session";
+      assertExactCodeToken(
+        await checkFindings(product, workspace, context),
+        21,
+        context,
+      );
+    });
+
+    // --- 14.23 `unreadable-record`: `inventory` (a stated reporter beside
+    // the `rename`/`move` previews, SPEC 14.23) — the finding accompanies
+    // the answer with its stable code, exit 1; the corruption applies to a
+    // record the product itself wrote (H-3).
+    await withWorkspace(VALID_SPECS_DECL, async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T14-6 (14.23) staging `build` (SPEC 12.1, 13.3; H-3)",
+      );
+      await corruptGraphDataShapeBlind(workspace.root, "T14-6 (14.23)");
+      const context = "T14-6 (14.23) `inventory`";
+      assertExactCodeToken(
+        decodeInventoryFindings(
+          await runJsonExpecting(
+            product,
+            workspace,
+            ["inventory"],
+            1,
+            `${context} — the condition-23 finding accompanies the answer ` +
+              `with its stable code and the invocation exits 1 (SPEC 14.23, ` +
+              `11.6)`,
+          ),
+          context,
+        ),
+        23,
+        context,
+      );
+    });
+
+    // --- `code` null: a plain usage error (T12.7-3's staging — an unknown
+    // command, the error determined by the invocation's syntax alone)
+    // describes the invocation the consuming tool composed and carries no
+    // stable code (SPEC 14, 12.0).
+    await withWorkspace(VALID_SPECS_DECL, async (workspace) => {
+      const context =
+        "T14-6 (plain usage error) `definitely-not-a-command --json`";
+      const result = await expectExit(
+        product,
+        workspace,
+        ["definitely-not-a-command", "--json"],
+        2,
+        `${context} — an unknown command is a plain usage error (SPEC 12.0)`,
+      );
+      assertCodeNull(
+        expectErrorDocument(result, context),
+        "a plain usage error",
+        context,
+      );
+    });
+
+    // --- `code` null: a review-operation refusal (T12.7-1's staging —
+    // `create` with an existing session's exact name, refused per SPEC
+    // 10.1/10.7; the audit strategy needs no git).
+    await withWorkspace(VALID_SPECS_DECL, async (workspace) => {
+      await expectExit(
+        product,
+        workspace,
+        ["review", "create", "--strategy", "audit", "--name", "s"],
+        0,
+        "T14-6 (review refusal) staging `review create --strategy audit " +
+          "--name s` — the first creation succeeds on the valid workspace " +
+          "(SPEC 10.1, 10.6)",
+      );
+      const context =
+        "T14-6 (review refusal) `review create --strategy audit --name s " +
+        "--json` again";
+      const result = await expectExit(
+        product,
+        workspace,
+        ["review", "create", "--strategy", "audit", "--name", "s", "--json"],
+        1,
+        `${context} — \`create\` with an existing session's exact name is ` +
+          `refused: exit 1, a refused review operation (SPEC 10.1, 10.7, ` +
+          `12.0)`,
+      );
+      const findings = decodeFindingsReport(
+        parseJsonStdout(
+          result,
+          `${context} — a refused operation's report is the findings-only ` +
+            `document {"findings": […]} (SPEC 12.7)`,
+        ),
+        context,
+      ).findings;
+      if (findings.length === 0) {
+        fail(
+          `${context}: the refusal must be reported as at least one ` +
+            `finding — an exit-1 refusal with an empty findings array ` +
+            `reports nothing (SPEC 10.7, 12.7, 14)`,
+        );
+      }
+      for (const finding of findings) {
+        assertCodeNull(finding, "a review-operation refusal", context);
+      }
+    });
+  },
+});
+
+/** TEST-SPEC §14 T14-1…T14-6, in canonical ID order (SUITE-49). */
 export const section14ValidationTests: readonly ProductTestEntry[] = [
   T14_1,
   T14_2,
   T14_3,
   T14_4,
   T14_5,
+  T14_6,
 ];

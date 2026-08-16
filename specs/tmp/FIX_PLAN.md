@@ -3519,10 +3519,50 @@ certify against FP-091's fixtures once those land.
   planned mid-loop reds (certification-document ×2 → FP-091),
   S-1/S-5/S-7/certification green.]
 
-- [ ] FP-079 — Implement T14-6: stable codes — all 23 condition tokens read
+- [x] FP-079 — Implement T14-6: stable codes — all 23 condition tokens read
   from each condition's stated reporter; `code` `null` for plain usage
   errors and review refusals. [R2 #11; TEST-SPEC §14] Registry
   `section-14.ts`; map `"14"`.
+  [Done 2026-08-16: T14-6 registered in section-14.ts (the wrapper already
+  declares the module's array; traceability "T14-6": ["14"] — 12.7/12.0
+  carriage context, the T12.7-* precedent). Each condition staged via its
+  primary-fixture form and read from ONE stated reporter of T14-4's
+  matrix: the 18 both-reporter conditions ride T14-4's own SWEEP_ENTRIES
+  stagings read via `build --json`; the five specially-reported
+  conditions (14.10 stale → `check`; 14.12 policy → `check`; 14.14
+  unknown key → `build --json`'s exit-2 error document; 14.21 garbage
+  session → `check`; 14.23 shape-blind record corruption → `inventory`
+  at exit 1) ride stagings hoisted out of T14-4's dedicated arms into
+  shared module constants (STALE_DECL/STALE_EDIT, POLICY_DECL,
+  VALID_SPECS_DECL, GARBAGE_SESSION_*, BOGUS_KEY_DECL — a pure lift,
+  T14-4's assertions untouched). Per-arm assertion
+  (`assertExactCodeToken`): at least one finding and EVERY finding's
+  `code` strictly equal to the harness-pinned token
+  (CONDITION_CODE_TOKENS[N-1]) — sound because every staging stages
+  exactly one condition (T14-4 pins the counts; 14.3's per-occurrence
+  tolerance and 14.10's several stale files collapse into it) — so an
+  omitted, misspelled, null, wrong-condition, or numeral-decorated code
+  fails even with exit class and locations right; count precision and
+  reporter breadth stay T14-4's and the home tests'. The `code`-null
+  arms mirror T14-6's own citations: T12.7-3's unknown command beside
+  `--json` (error document, code null) and T12.7-1 Arm D's
+  duplicate-name `review create --strategy audit` refusal
+  (findings-only report, every finding code null). No certification
+  scope (CERTIFICATIONS.md certifies the code contracts
+  representatively via CONF-AVAIL's datum-form violators). Verified:
+  typecheck/format clean; T14-6 red-as-diagnosed at its first sweep
+  arm's form-exact decode ("expected no member \"condition\"" — the
+  FP-001-class product gap), T14-1..T14-5 failing exactly as before
+  (T14-4 still at its 14.10 arm — the hoist is semantics-preserving);
+  direct CLI probes of the T14-6-specific reads against the built
+  product: the review-create refusal fires (old-shape `{"refused":…}` →
+  the findings-report decode gap), `inventory` is unknown-command exit 2
+  (patch-new surface), unknown-command and bogus-config `--json` exit 2
+  with empty stdout (the FP-002-class error-document gap) — every arm
+  red at a known product-gap class with its staging premise holding.
+  `npm run test:self` 268 passed, unchanged 2 planned mid-loop reds
+  (certification-document ×2 → FP-091); S-1/S-5/S-7/certification green
+  (S-7 sweeps T14-6 against the stub, diagnosed).]
 - [ ] FP-080 — Implement T14-7: refusal reasons — each stable refusal code
   with concerned file/range/identity; all-applicable-reasons-together; the
   invalid-workspace refusal reporting numbered findings alone. [R2 #12;
