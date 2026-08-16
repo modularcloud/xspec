@@ -365,6 +365,14 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // staging record there), so no "14"; 11.2-11.6/10.7 are carriage context
   // with home coverage at T11.2-*/T11.3-*/T11.4-*/T11.6-*/T10.7-*.
   "T12.7-1": ["12.7"],
+  // T12.7-2: same precedent — the staged conditions (14.1, 14.3, 14.5,
+  // 14.9, 14.12, 14.15, 14.19) and the refusal reasons have their primaries
+  // in TEST-SPEC 14's records elsewhere (the refusal-reason record lists
+  // T14-7 staged at T6.4-3/T6.5-4/T6.5-6/T6.6-3, not this test), so no
+  // "14"; 13.3 (the gated read), 11.3-11.6, 12.6, 6.5/6.6, and 7.3 are
+  // carriage context with home coverage at T13.3-*/T11.*/T12.6-*/T6.5-*/
+  // T6.6-*/T11.6-2.
+  "T12.7-2": ["12.7"],
   "T13.1-1": ["13.1"],
   "T13.1-2": ["13.1"],
   "T13.2-1": ["13.2"],

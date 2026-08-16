@@ -3375,8 +3375,66 @@ certify against FP-091's fixtures once those land.
   certification-document ×2 (→ FP-091); S-1 fully green (the "12.7" key
   mapped; unmapped set now empty), S-5 and certification green (T12.7-*
   stay certification Exclusions, no fixture scope).]
-- [ ] FP-076 — Implement T12.7-2: findings-array ordering + document forms.
+- [x] FP-076 — Implement T12.7-2: findings-array ordering + document forms.
   [R2 #9; TEST-SPEC §12.7]
+  [Done 2026-08-16: four arms in section-12.7.ts. (A) Ordering+collapse: one
+  workspace stages 14.1 ×3 (two id-less sections in E1.mdx — range-start
+  order between one file's findings — plus one in a `main`+`extra` two-group
+  file, the identically-staged-duplicate collapse: exact counts pin one
+  finding, membership pinned via the inventory `sources` entry), 14.3, 14.5,
+  14.9 (import cycle, unused bindings), 14.15 (named-only import designating
+  an existing source), 14.19 ×2 plain-`#` paths (+ Linux a non-UTF-8
+  `specs/A<0xFF>.mdx` whose marked byte form sorts BEFORE the plain strings
+  — one byte order over both presentation forms); the numeric code order
+  inverts both token-alphabetical (`cycle` < `missing-id`) and
+  ordinal-decimal-string ("15" < "3") orders, the exact projected sequence
+  asserted on `build --json` AND on the gated `query nodes` read (13.3:
+  the same findings-only {"findings"} document — the gated-read form), the
+  inventory additionally pinning the entry's named unset-`outDir`-is-null
+  example. (B) The T14-7 dual refusal: a section move staged to both
+  collide (`keep.sub` present in the target) and create a dependency cycle
+  (moved node depends on `keep`, would become its child; no third reason
+  applicable — nothing references the moved node) → exactly
+  [refused-id-collision, refused-cycle], 14's LISTED order inverting the
+  alphabetical, paths null, concerns SOME-quantified in byte windows
+  (FP-007's latitude). (C) Identities tie-break: two forbidden rules
+  (declared "rb" then "ra") on one edge → two 14.12 findings equal up to
+  the rule name, ["ra"…] before ["rb"…] by identity bytes — failing a
+  configuration-order emission (the current product emits rb-first, probe
+  below). (D) Document forms on one valid workspace: finding-free
+  `check --json` {"findings": []}; `occurrences` with the byte-exact
+  record (source node's own construct range, 5.7); `view` bare vs `--text`
+  through decodeViewReport's decoder-enforced conditional presence, the
+  eight-member node form byte-exact (root attributes [], opening/closing
+  stated null; spelled attribute entries; interpreted defaults tags
+  []/coverage "required" on the attribute-free leaf; import entry;
+  expanded text values content-asserted); `at` with `occurrence` null
+  (offset in no occurrence); `version` decode. Comparator levels beyond
+  the stageable (locations proper-prefix, null-before-path, message)
+  admit no product-independent discriminating fixture (module header
+  note, the T6.6-4 precedent) — the full pinned comparator rides every
+  captured findings array via decodeFindingsArray. No new adapters (S-5
+  untouched); traceability "T12.7-2": ["12.7"] (the T12.7-1 no-"14"
+  precedent: every staged condition/reason has its primary in 14's
+  records elsewhere). Verified: typecheck/format clean; suite
+  red-as-diagnosed at arm A's first decode (the FP-001-class gap — the
+  product emits condition-member findings; §11 surfaces/version/inventory
+  exit 2 "unknown command"); staging premises proven by direct probes
+  against the built product (arm A: exactly the staged old-shape
+  multiset incl. the two-group file's finding reported ONCE, gated query
+  {"findings"} exit 1; arm B: build 0, the dual move refused exit 1
+  naming the collision, the cycle ground proven alone via a
+  non-colliding `keep.fresh` variant refusing on the 14.9 cycle; arm C:
+  14.12 ×2 in rb-first config order — the discriminated ordering; arm D:
+  build/check 0 with {"findings": []}); soundness proven by a scratch
+  conforming mock running the registered body green through all four
+  arms via entry.run(mockBinding), with ten deviation mocks each failing
+  diagnosed at the intended assertion (alpha-codes, ordinal-string,
+  dup-uncollapsed, refusal-alpha, ids-config-order, text-always,
+  occurrence-omitted, findings-null, root-attrs-null, outdir-omitted).
+  `npm run test:self`: 268 passed, unchanged 2 planned mid-loop reds
+  (certification-document ×2 → FP-091), S-1/S-5/certification green
+  (T12.7-* stay certification Exclusions, no fixture scope).]
 - [ ] FP-077 — Implement T12.7-3: the exit-2 error document, incl. the
   `configuration-error` stable code and the anchoring-form concerned path.
   Pairs with FP-002's protocol. [R2 #9; TEST-SPEC §12.7]

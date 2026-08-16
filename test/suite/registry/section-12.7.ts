@@ -1,4 +1,4 @@
-// TEST-SPEC §12.7 (JSON document forms) — SUITE-58: T12.7-1.
+// TEST-SPEC §12.7 (JSON document forms) — SUITE-58: T12.7-1, T12.7-2.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -9,8 +9,9 @@
 // unavailability-marker, and finding forms every JSON output uses — and this
 // section's assertions are form-exact (H-3): member names, `null`-vs-omission,
 // `[]`-vs-`null`, and orderings asserted literally through the forms.ts
-// decode layer, never adapted. T12.7-1 is the value-form test; T12.7-2
-// (arrays/document forms) and T12.7-3 (the error document) follow it.
+// decode layer, never adapted. T12.7-1 is the value-form test; T12.7-2 is
+// the findings-array-ordering and document-forms test; T12.7-3 (the error
+// document) follows.
 //
 // Conservative operationalizations (noted per H-3/H-5/H-9):
 // - "A source range is {"start", "end"}, non-negative integers, everywhere
@@ -75,6 +76,78 @@
 //   state, so the answer is finding-free and carries no unavailable datum
 //   (12.0's exit partition). The sources/derived byte-form paths ride the
 //   scoped resolved-map decode; the full inventory form is T11.6-3's.
+//
+// T12.7-2's conservative operationalizations (per H-3/H-9):
+// - The comparator's cross-class code ordering (numbered conditions, then
+//   refusal reasons, then code-less findings) admits no single-array staging:
+//   no report mixes refusal reasons with numbered conditions (SPEC 14: the
+//   reasons are defined only over a workspace passing `build`'s validations,
+//   and the invalid-workspace refusal reports numbered findings alone), and a
+//   code-less finding arises only in review-refusal reports, where it is the
+//   only finding class (10.7, 14). The test stages each stageable class's
+//   internal order by value — numbered conditions across six codes whose
+//   numeric order inverts both the token-alphabetical order (`cycle` <
+//   `missing-id`) and the ordinal-decimal-string order ("15" < "3"), and the
+//   T14-7 refusal pair whose listed order inverts the token-alphabetical
+//   order (`refused-cycle` < `refused-id-collision` alphabetically, yet
+//   collision ranks 3rd and cycle 6th in 14's listing) — while the full
+//   pinned comparator, cross-class ranks included, is enforced over every
+//   findings array the suite captures (`decodeFindingsArray`, S-5-guarded).
+// - The locations proper-prefix rule, the `null`-before-path rule, and the
+//   message tie-break admit no product-independent discriminating fixture:
+//   two same-code findings agreeing on every earlier key while differing
+//   exactly there cannot be staged — located conditions carry `path` null and
+//   path-level conditions carry `locations` [] (so a same-code pair differing
+//   in path-nullity already differs at the locations key), no condition
+//   yields two findings sharing code, locations, path, AND identities, and
+//   messages are unpinned wording (12.7) — the T6.6-4 tie-break precedent:
+//   the harness asserts the full comparator over whatever arrays are emitted.
+//   The staged tie-break levels: locations element-wise (three missing-id
+//   findings — range-start order inside one file, then file-byte order
+//   across files), concerned path (the 14.19s in one byte order — on the
+//   Linux leg a marked byte-form path sorting BEFORE the plain strings,
+//   failing any plain-first partition), and identities element-wise (two
+//   policy findings identical to each other except the rule name, declared
+//   in the opposite configuration order).
+// - The duplicate-collapse staging: one defect file discovered through two
+//   spec groups (membership pinned via the inventory's `sources` entry —
+//   SPEC 7 allows a file in two same-kind groups). A per-group-iterating
+//   product reports the defect once per membership; SPEC 14's cardinality
+//   (one finding per violating construct) plus 12.7's collapse pin exactly
+//   one finding, and the decode additionally rejects adjacent identical
+//   findings wherever they appear.
+// - The multi-reason refusal is TEST-SPEC 14's own dual staging (T14-7): a
+//   section move staged to both collide (`<new-id>` present in the target
+//   file) and create a dependency cycle (the moved node depends on `keep`
+//   and would become its child — a dependency on its own ancestor, SPEC
+//   5.3), reporting both findings. The code sequence is pinned exactly
+//   (order, count, and completeness: no reason beside the staged two); each
+//   finding's location is asserted SOME-quantified within its construct's
+//   byte window (FP-007's latitude note: cardinality beyond the concerned
+//   participant is T14-8's business), `path` null (located findings, 12.7).
+//   No third reason is applicable: the new ID `keep.sub` is intrinsically
+//   valid, differs from the old identity, sits structurally under the
+//   existing target parent `keep` (outside the moved subtree), the target
+//   path is occupied by the discovered origin source itself, and nothing
+//   references the moved node, so no rewritten reference can fail to
+//   resolve.
+// - Document forms delegated per the TEST-SPEC entry's own citations: the
+//   refused preview's four-member form (T6.6-3), the full inventory and
+//   preview forms (T11.6-*, T6.6-4/5), a root's stated-null `tags`/
+//   `coverage` (T11.4-3), an absent `targetTags` (T11.6-2). The unset
+//   `outDir` null — the entry's named null-never-omission example — IS
+//   asserted here, on the ordering workspace's inventory. The gated-read
+//   `{"findings": […]}` form is asserted on the same staged array via
+//   `query nodes` (13.3: a failing workspace's read reports exactly the
+//   findings `build` would report), so the pinned order is observed on a
+//   second surface.
+// - Interpreted per-node values asserted on the document-forms fixture are
+//   the spelled ones plus the 11.2-defined defaults of an attribute-free
+//   non-root (`tags` [] — a list-valued member with no elements, never
+//   null — and `coverage` "required"); the root's `tags`/`coverage` null
+//   distinction stays T11.4-3's. Own/subtree text values are asserted as
+//   plain strings containing the embedded target's text (1.6: expanded
+//   values) — byte-exact expansion is T11.2-1's business.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -82,12 +155,16 @@ import type {
   OccurrenceRecord,
   PathValue,
   SourceRange,
+  ViewNode,
+  ViewReport,
 } from "../../helpers/adapters/index.js";
 import {
   assertUnavailabilityMarkerForms,
+  decodeAtReport,
   decodeFindingsReport,
   decodeInventoryResolvedMap,
   decodeOccurrencesReport,
+  decodeVersionDocument,
   decodeViewReport,
 } from "../../helpers/adapters/index.js";
 import {
@@ -102,6 +179,7 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
+  assertFindingMentionsLocation,
   assertSameJson,
   buildFindings,
   buildOk,
@@ -881,6 +959,889 @@ async function runBytePathsArm(product: ProductBinding): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// T12.7-2 arm A — findings-array ordering by value, and duplicate collapse
+// ---------------------------------------------------------------------------
+//
+// One workspace stages six numbered conditions whose numeric order inverts
+// both the token-alphabetical and the ordinal-decimal-string orders (module
+// header note), each condition its files' sole defect:
+//   14.1  missing-id          x3 — two id-less sections in E1.mdx (range-start
+//                                  order between findings of one file) and one
+//                                  in dual/D.mdx (file-byte order; the
+//                                  two-group collapse staging)
+//   14.3  duplicate-id        x1 — two bearers in C.mdx
+//   14.5  unknown-dependency  x1 — an unresolved `d` in K.mdx
+//   14.9  cycle               x1 — the spec import cycle IA <-> IB (unused
+//                                  bindings: valid, no edges, so no dependency
+//                                  cycle exists beside it)
+//   14.15 invalid-import      x1 — a named-only (non-default) import in M.mdx,
+//                                  designating the existing OK.mdx so the
+//                                  binding form is the declaration's one defect
+//   14.19 invalid-source-path x2 (x3 Linux) — `#`-containing paths ha#1/ha#2
+//                                  and, Linux, a non-UTF-8 name whose marked
+//                                  byte form sorts BEFORE the plain strings
+//                                  ("specs/A\xFF…" < "specs/ha…" byte-wise):
+//                                  one byte order over both presentation forms
+
+const ORD_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"],
+    extra: ["specs/dual/*.mdx"]
+  }
+})
+`;
+
+const ORD_E1_FILE = "specs/E1.mdx";
+const ORD_E1 = new ByteFixture();
+ORD_E1.add("Éléments — multi-byte prefix.\n\n");
+const ORD_E1_FIRST_TEXT = "<S>\nFirst unnamed.\n</S>";
+const ORD_E1_FIRST_RANGE = ORD_E1.add(ORD_E1_FIRST_TEXT);
+ORD_E1.add("\n\n");
+const ORD_E1_SECOND_TEXT = "<S>\nSecond unnamed.\n</S>";
+const ORD_E1_SECOND_RANGE = ORD_E1.add(ORD_E1_SECOND_TEXT);
+ORD_E1.add("\n");
+const ORD_E1_SOURCE = ORD_E1.source;
+
+// The collapse staging: discovered through BOTH spec groups (`main` and
+// `extra`), its sole defect one id-less section (module header note).
+const ORD_DUAL_FILE = "specs/dual/D.mdx";
+const ORD_DUAL_SOURCE = "<S>\nDual-group unnamed.\n</S>\n";
+
+const ORD_C_FILE = "specs/C.mdx";
+const ORD_C_SOURCE =
+  '<S id="dup">\nFirst bearer.\n</S>\n\n<S id="dup">\nSecond bearer.\n</S>\n';
+
+const ORD_K_FILE = "specs/K.mdx";
+const ORD_K_SOURCE = '<S id="k" d={"nope"}>\nK text.\n</S>\n';
+
+const ORD_IA_FILE = "specs/IA.mdx";
+const ORD_IA_SOURCE = 'import B from "./IB.xspec"\n\n<S id="ia">\nIA.\n</S>\n';
+const ORD_IB_FILE = "specs/IB.mdx";
+const ORD_IB_SOURCE = 'import A from "./IA.xspec"\n\n<S id="ib">\nIB.\n</S>\n';
+
+const ORD_M_FILE = "specs/M.mdx";
+const ORD_M_SOURCE =
+  'import { x } from "./OK.xspec"\n\n<S id="m">\nM text.\n</S>\n';
+const ORD_OK_FILE = "specs/OK.mdx";
+const ORD_OK_SOURCE = '<S id="ok">\nOK text.\n</S>\n';
+
+const ORD_HASH1_FILE = "specs/ha#1.mdx";
+const ORD_HASH2_FILE = "specs/ha#2.mdx";
+const ORD_HASH1_SOURCE = '<S id="v1">\nValid content one.\n</S>\n';
+const ORD_HASH2_SOURCE = '<S id="v2">\nValid content two.\n</S>\n';
+
+// (Linux leg) The non-UTF-8-named source: 0x41 ("A") then 0xFF, so its exact
+// bytes sort before every staged plain 14.19 path ("specs/h…"), composed from
+// the same bytes that stage the file (the T12.7-1 arm-E discipline).
+const ORD_NU_PATH_BYTES = Buffer.concat([
+  Buffer.from("specs/A", "utf8"),
+  Buffer.from([0xff]),
+  Buffer.from(".mdx", "utf8"),
+]);
+const ORD_NU_MARKED = { bytes: ORD_NU_PATH_BYTES.toString("hex") } as const;
+const ORD_NU_SOURCE = '<S id="v3">\nValid content three.\n</S>\n';
+
+/** The pinned 12.7 findings order over the staged conditions (SPEC 12.7, 14). */
+const ORD_EXPECTED_FINDINGS: readonly FindingFormExpectation[] = [
+  { code: "missing-id", path: null, locations: [ORD_E1_FILE] },
+  { code: "missing-id", path: null, locations: [ORD_E1_FILE] },
+  { code: "missing-id", path: null, locations: [ORD_DUAL_FILE] },
+  { code: "duplicate-id", path: null, locations: [ORD_C_FILE, ORD_C_FILE] },
+  { code: "unknown-dependency", path: null, locations: [ORD_K_FILE] },
+  { code: "cycle", path: null, locations: [ORD_IA_FILE, ORD_IB_FILE] },
+  { code: "invalid-import", path: null, locations: [ORD_M_FILE] },
+  ...(NON_UTF8_STAGED
+    ? [
+        {
+          code: "invalid-source-path",
+          path: ORD_NU_MARKED,
+          locations: [],
+        } satisfies FindingFormExpectation,
+      ]
+    : []),
+  { code: "invalid-source-path", path: ORD_HASH1_FILE, locations: [] },
+  { code: "invalid-source-path", path: ORD_HASH2_FILE, locations: [] },
+];
+
+const ORD_EXPECTED_COUNTS: Readonly<Record<string, number>> = {
+  "14.1": 3,
+  "14.3": 1,
+  "14.5": 1,
+  "14.9": 1,
+  "14.15": 1,
+  "14.19": NON_UTF8_STAGED ? 3 : 2,
+};
+
+function assertOrderedFindings(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertConditionCounts(
+    findings,
+    ORD_EXPECTED_COUNTS,
+    `${context} — each staged condition is its files' sole defect, the ` +
+      `two-group file's defect reported once (identically-staged duplicate ` +
+      `findings collapse to one; SPEC 12.7, 14)`,
+  );
+  assertSameJson(
+    findings.map(projectFindingForm),
+    ORD_EXPECTED_FINDINGS,
+    `${context} — the findings array in the pinned 12.7 order: by code ` +
+      `with numbered conditions in NUMERIC order (missing-id(1) first ` +
+      `though alphabetically last; invalid-import(15) after cycle(9) ` +
+      `though "15" < "9" as decimal strings), then by locations ` +
+      `element-wise (both E1 findings before dual/D's — file-byte order — ` +
+      `and C's two in-file locations riding one finding), then by ` +
+      `concerned path in ONE byte order over both presentation forms ` +
+      `(the marked byte-form path before the plain "specs/ha#…" strings ` +
+      `on the Linux leg), null-path located findings carrying path null ` +
+      `(SPEC 12.7, 14)`,
+  );
+  // Range-start order between same-file findings, observed by containment in
+  // disjoint windows in the expected sequence (the T12.7-1 technique).
+  assertLocationWithin(
+    findings[0]!,
+    0,
+    widen(ORD_E1_FIRST_RANGE),
+    `${context} — the first missing-id finding's location (E1's first ` +
+      `id-less construct; range-start order between findings of one file, ` +
+      `SPEC 12.7)`,
+  );
+  assertLocationWithin(
+    findings[1]!,
+    0,
+    widen(ORD_E1_SECOND_RANGE),
+    `${context} — the second missing-id finding's location (E1's second ` +
+      `id-less construct)`,
+  );
+}
+
+async function runConditionOrderingArm(product: ProductBinding): Promise<void> {
+  sliceCheck(
+    ORD_E1_SOURCE,
+    ORD_E1_FIRST_RANGE,
+    ORD_E1_FIRST_TEXT,
+    "E1's first id-less construct",
+  );
+  sliceCheck(
+    ORD_E1_SOURCE,
+    ORD_E1_SECOND_RANGE,
+    ORD_E1_SECOND_TEXT,
+    "E1's second id-less construct",
+  );
+
+  const workspace = await TestWorkspace.create({
+    files: {
+      "xspec.config.ts": ORD_CONFIG,
+      [ORD_E1_FILE]: ORD_E1_SOURCE,
+      [ORD_DUAL_FILE]: ORD_DUAL_SOURCE,
+      [ORD_C_FILE]: ORD_C_SOURCE,
+      [ORD_K_FILE]: ORD_K_SOURCE,
+      [ORD_IA_FILE]: ORD_IA_SOURCE,
+      [ORD_IB_FILE]: ORD_IB_SOURCE,
+      [ORD_M_FILE]: ORD_M_SOURCE,
+      [ORD_OK_FILE]: ORD_OK_SOURCE,
+      [ORD_HASH1_FILE]: ORD_HASH1_SOURCE,
+      [ORD_HASH2_FILE]: ORD_HASH2_SOURCE,
+    },
+  });
+  try {
+    if (NON_UTF8_STAGED) {
+      await workspace.file(ORD_NU_PATH_BYTES, ORD_NU_SOURCE);
+    }
+
+    // --- `build --json`: the several-conditions findings array, ordered and
+    // collapsed per 12.7; the build report is `{"findings": […]}` exactly
+    // (decoder-enforced).
+    const buildContext = "T12.7-2 (condition ordering) `build --json`";
+    assertOrderedFindings(
+      await buildFindings(product, workspace, buildContext),
+      buildContext,
+    );
+
+    // --- The gated read: on a workspace failing `build`'s validations,
+    // `query` reports exactly those findings and exits 1 without answering
+    // (SPEC 13.3) — its report the same findings-only document
+    // `{"findings": […]}`, in the same pinned order (12.7). `query` is a
+    // JSON-only surface (11), so the single JSON document needs no `--json`.
+    const queryContext =
+      "T12.7-2 (condition ordering) gated `query nodes` on the failing " +
+      "workspace";
+    const queryResult = await expectExit(
+      product,
+      workspace,
+      ["query", "nodes"],
+      1,
+      `${queryContext} — a failing workspace's read reports the findings a ` +
+        `\`build\` would now report and exits 1 without answering ` +
+        `(SPEC 13.3, 12.0)`,
+    );
+    assertOrderedFindings(
+      decodeFindingsReport(
+        parseJsonStdout(queryResult, queryContext),
+        `${queryContext} — a refusing read's report is the findings-only ` +
+          `document {"findings": […]} (SPEC 12.7, 13.3)`,
+      ).findings,
+      queryContext,
+    );
+
+    // --- `inventory` (JSON-only; parses no sources, so the answer is
+    // finding-free, exit 0 — SPEC 11.6): the collapse premise — the dual
+    // file's membership in BOTH spec groups, configuration order — and the
+    // entry's named null-never-omission example: the `markdown` key absent
+    // resolves to {"emit": false, "outDir": null}, `outDir` null, never
+    // omitted (SPEC 7.3, 11.6, 12.7; the full resolved view is T11.6-2's).
+    const invContext = "T12.7-2 (condition ordering) `inventory`";
+    const invDoc = await runJson(product, workspace, ["inventory"], invContext);
+    const resolved = decodeInventoryResolvedMap(invDoc, invContext);
+    assertSameJson(
+      resolved.configuration.markdown,
+      { emit: false, outDir: null },
+      `${invContext} — an unset \`outDir\` is null: null is never omission ` +
+        `(SPEC 12.7, 7.3, 11.6)`,
+    );
+    const dualEntry = resolved.sources.find(
+      (entry) => entry.path === ORD_DUAL_FILE,
+    );
+    if (dualEntry === undefined) {
+      fail(
+        `${invContext}: the discovered source ${JSON.stringify(
+          ORD_DUAL_FILE,
+        )} must appear in the inventory's sources (SPEC 11.6) — the ` +
+          `collapse staging's premise; got paths ` +
+          `${JSON.stringify(resolved.sources.map((entry) => entry.path))}`,
+      );
+    }
+    assertSameJson(
+      dualEntry.groups,
+      [
+        { name: "main", kind: "spec" },
+        { name: "extra", kind: "spec" },
+      ],
+      `${invContext} — the collapse staging's premise: the defect file is ` +
+        `discovered through BOTH spec groups (memberships in configuration ` +
+        `order, SPEC 7, 11.6), so a per-group-iterating product reports ` +
+        `its finding twice where 12.7 collapses to one`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// T12.7-2 arm B — the multi-reason refusal: refusal reasons in 14's listed
+// order
+// ---------------------------------------------------------------------------
+//
+// TEST-SPEC 14's dual staging (T14-7): a section move staged to both collide
+// (`<new-id>` present in the target file) and create a dependency cycle. The
+// listed order — refused-id-collision (3rd) before refused-cycle (6th) —
+// inverts the token-alphabetical order, so a token-sorting product fails.
+// No third reason is applicable (module header note).
+
+const MR_FILE = "specs/MR.mdx";
+const MR = new ByteFixture();
+MR.add("Préambule — multi-byte prefix.\n\n");
+MR.add('<S id="keep">\nKeep text.\n\n');
+const MR_SUB_TEXT = '<S id="keep.sub">\nExisting sub text.\n</S>';
+const MR_SUB_RANGE = MR.add(MR_SUB_TEXT);
+MR.add("\n</S>\n\n");
+MR.add('<S id="mv" ');
+const MR_D_TEXT = 'd={"keep"}';
+const MR_D_RANGE = MR.add(MR_D_TEXT);
+MR.add(">\nMoved candidate text.\n</S>\n");
+const MR_SOURCE = MR.source;
+
+async function runRefusalOrderingArm(product: ProductBinding): Promise<void> {
+  sliceCheck(MR_SOURCE, MR_SUB_RANGE, MR_SUB_TEXT, "the remaining bearer");
+  sliceCheck(MR_SOURCE, MR_D_RANGE, MR_D_TEXT, "the cycle's `d` spelling");
+
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [MR_FILE]: MR_SOURCE,
+      },
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T12.7-2 (refusal ordering) premise `build` — the refusal reasons " +
+          "are defined only over a workspace passing build's validations " +
+          "(SPEC 6.4, 6.5, 14)",
+      );
+      const context =
+        "T12.7-2 (refusal ordering) `move specs/MR.mdx#mv " +
+        "specs/MR.mdx#keep.sub --json`";
+      const result = await expectExit(
+        product,
+        workspace,
+        ["move", `${MR_FILE}#mv`, `${MR_FILE}#keep.sub`, "--json"],
+        1,
+        `${context} — the move both collides (keep.sub remains after the ` +
+          `subtree removal) and would create a dependency cycle (the moved ` +
+          `node depends on \`keep\` and would become its child, SPEC 5.3), ` +
+          `so it is refused: exit 1, every applicable reason reported ` +
+          `together (SPEC 6.5, 14, 12.0)`,
+      );
+      const findings = decodeFindingsReport(
+        parseJsonStdout(
+          result,
+          `${context} — a refused operation's report is the findings-only ` +
+            `document {"findings": […]} (SPEC 12.7, 14)`,
+        ),
+        context,
+      ).findings;
+      assertSameJson(
+        findings.map((finding) => ({
+          code: finding.code,
+          path: finding.path,
+        })),
+        [
+          { code: "refused-id-collision", path: null },
+          { code: "refused-cycle", path: null },
+        ],
+        `${context} — the multi-reason refusal report: one finding per ` +
+          `applicable reason and no reason beside them (SPEC 14), in 14's ` +
+          `LISTED order — refused-id-collision (3rd listed) before ` +
+          `refused-cycle (6th listed), the inverse of their alphabetical ` +
+          `order — with \`path\` null on located findings (SPEC 12.7)`,
+      );
+      assertFindingMentionsLocation(
+        findings[0]!,
+        { file: MR_FILE, window: widen(MR_SUB_RANGE) },
+        `${context} — the collision finding locates the remaining bearer ` +
+          `\`keep.sub\`'s construct (SPEC 14: every colliding bearer)`,
+      );
+      assertFindingMentionsLocation(
+        findings[1]!,
+        { file: MR_FILE, window: widen(MR_D_RANGE) },
+        `${context} — the cycle finding locates the participating ` +
+          `reference spelling \`d={"keep"}\` (SPEC 14: the would-be ` +
+          `cycle's full path in source)`,
+      );
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// T12.7-2 arm C — the identities tie-break: two policy findings equal up to
+// the rule name
+// ---------------------------------------------------------------------------
+//
+// Two forbidden rules with identical selectors match the one staged edge, so
+// `check` reports two findings identical in code (policy-violation),
+// locations ([]), and path (null), ordered by identities element-wise — the
+// rule name, their first element. The rules are declared in the OPPOSITE
+// order ("rb" first), so a configuration-order emission fails.
+
+const IDS_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "rb",
+      type: "forbidden",
+      from: { group: "main" },
+      to: { group: "main" }
+    },
+    {
+      name: "ra",
+      type: "forbidden",
+      from: { group: "main" },
+      to: { group: "main" }
+    }
+  ]
+})
+`;
+
+const IDS_FILE = "specs/P.mdx";
+const IDS_SOURCE = `<S id="a">
+Target leaf.
+</S>
+
+<S id="p" d={"a"}>
+Dependent leaf.
+</S>
+`;
+
+async function runIdentitiesOrderingArm(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": IDS_CONFIG,
+        [IDS_FILE]: IDS_SOURCE,
+      },
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T12.7-2 (identities ordering) `build` — policy never fails a " +
+          "build (SPEC 7.5, 12.1)",
+      );
+      const context = "T12.7-2 (identities ordering) `check --json`";
+      const result = await expectExit(
+        product,
+        workspace,
+        ["check", "--json"],
+        1,
+        `${context} — the staged depends edge violates both forbidden ` +
+          `rules: one finding per rule and offending edge (SPEC 7.5, ` +
+          `14.12, 12.0)`,
+      );
+      const findings = decodeFindingsReport(
+        parseJsonStdout(result, context),
+        context,
+      ).findings;
+      assertConditionCounts(findings, { "14.12": 2 }, context);
+      assertSameJson(
+        findings.map((finding) => ({
+          code: finding.code,
+          locations: finding.locations,
+          path: finding.path,
+          identities: finding.identities,
+        })),
+        [
+          {
+            code: "policy-violation",
+            locations: [],
+            path: null,
+            identities: ["ra", "specs/P.mdx#p", "depends", "specs/P.mdx#a"],
+          },
+          {
+            code: "policy-violation",
+            locations: [],
+            path: null,
+            identities: ["rb", "specs/P.mdx#p", "depends", "specs/P.mdx#a"],
+          },
+        ],
+        `${context} — two findings identical in code, locations ([]), and ` +
+          `path (null) sort by identities element-wise: "ra" before "rb" ` +
+          `by identity bytes though "rb" is declared first, so a ` +
+          `configuration-order emission fails; each finding's identities ` +
+          `are 14.12's exact enumeration [rule, source, kind token, ` +
+          `target] (SPEC 12.7, 14.12)`,
+      );
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// T12.7-2 arm D — document forms and member presence
+// ---------------------------------------------------------------------------
+//
+// One small valid workspace drives each form-catalog surface this test owns
+// (module header note names the delegations): a finding-free `check` report
+// (`{"findings": []}` — a finding-free `findings` is [], never null),
+// `occurrences` (`{"findings", "occurrences"}` with the one byte-exact
+// record), `view` without and with `--text` (the eight node members with
+// `ownText`/`subtreeText` present exactly under the flag — decoder-enforced
+// conditional presence — attribute entries `{"name", "range", "text"}`,
+// imports `{"range", "name", "target"}`, a root's `attributes` [] and its
+// absent opening/closing as the stated null), `at` (`{"findings",
+// "resolution"}` with `occurrence` null when the offset lies in none), and
+// `version` (`{"product", "interface"}`; values are T12.6-1's).
+
+const DF_F_FILE = "specs/F.mdx";
+const DF_W_FILE = "specs/W.mdx";
+
+const DF_F = new ByteFixture();
+DF_F.add("Façade — multi-byte prefix.\n\n");
+const DF_IMPORT_TEXT = 'import W from "./W.xspec"';
+const DF_IMPORT_RANGE = DF_F.add(DF_IMPORT_TEXT);
+DF_F.add("\n\n");
+const DF_F_START = DF_F.pos;
+DF_F.add("<S ");
+const DF_ATTR_ID_RANGE = DF_F.add('id="f"');
+DF_F.add(" ");
+const DF_ATTR_TAGS_RANGE = DF_F.add('tags="alpha beta"');
+DF_F.add(" ");
+const DF_ATTR_COV_RANGE = DF_F.add('coverage="none"');
+const DF_F_GT_RANGE = DF_F.add(">");
+DF_F.add("\n");
+const DF_BODY_RANGE = DF_F.add("Body text.");
+DF_F.add("\n\n");
+const DF_LEAF_START = DF_F.pos;
+DF_F.add("<S ");
+const DF_LEAF_ATTR_ID_RANGE = DF_F.add('id="f.leaf"');
+const DF_LEAF_GT_RANGE = DF_F.add(">");
+DF_F.add("\nEmbed: ");
+const DF_EMBED_TEXT = "{text(W.w)}";
+const DF_EMBED_RANGE = DF_F.add(DF_EMBED_TEXT);
+DF_F.add("\n");
+const DF_LEAF_CLOSE_RANGE = DF_F.add("</S>");
+DF_F.add("\n");
+const DF_F_CLOSE_RANGE = DF_F.add("</S>");
+DF_F.add("\n");
+const DF_F_SOURCE = DF_F.source;
+
+const DF_F_RANGE: SourceRange = {
+  start: DF_F_START,
+  end: DF_F_CLOSE_RANGE.end,
+};
+const DF_F_OPENING: SourceRange = {
+  start: DF_F_START,
+  end: DF_F_GT_RANGE.end,
+};
+const DF_LEAF_RANGE: SourceRange = {
+  start: DF_LEAF_START,
+  end: DF_LEAF_CLOSE_RANGE.end,
+};
+const DF_LEAF_OPENING: SourceRange = {
+  start: DF_LEAF_START,
+  end: DF_LEAF_GT_RANGE.end,
+};
+
+const DF_W_SOURCE = '<S id="w">\nW text.\n</S>\n';
+
+// The workspace's one occurrence: f.leaf's embedding of W's `w` (byte-exact
+// container span; the source graph node's own construct range — SPEC 5.7).
+const DF_EXPECTED_OCCURRENCE: OccurrenceRecord = {
+  file: DF_F_FILE,
+  range: DF_EMBED_RANGE,
+  kind: "embeds",
+  source: { identity: `${DF_F_FILE}#f.leaf`, range: DF_LEAF_RANGE },
+  target: `${DF_W_FILE}#w`,
+};
+
+/** The asserted projection of one view node's non-text members. */
+function projectViewNode(node: ViewNode): unknown {
+  return {
+    identity: node.identity,
+    range: node.range,
+    opening: node.opening,
+    closing: node.closing,
+    attributes: node.attributes,
+    tags: node.tags,
+    coverage: node.coverage,
+    childCount: node.children.length,
+  };
+}
+
+/** Assert a decoded text member is a plain string containing `expected`. */
+function assertTextContains(
+  value: string | { readonly unavailable: true } | undefined,
+  expected: string,
+  context: string,
+): void {
+  if (typeof value !== "string" || !value.includes(expected)) {
+    fail(
+      `${context}: expected a defined text value — a plain string carrying ` +
+        `the embedded target's text ${JSON.stringify(expected)} (SPEC 1.6: ` +
+        `own and subtree text are the expanded values; 11.2: defined here, ` +
+        `every embedding resolving) — got ${JSON.stringify(value)}`,
+    );
+  }
+}
+
+function assertDocumentFormsViews(
+  report: ViewReport,
+  text: boolean,
+  context: string,
+): void {
+  assertSameJson(
+    report.findings,
+    [],
+    `${context} — a finding-free answer's findings member is [], never ` +
+      `null (SPEC 12.7)`,
+  );
+  assertSameJson(
+    report.views.map((view) => view.file),
+    [DF_F_FILE, DF_W_FILE],
+    `${context} — per-file views in path-byte order (SPEC 11.4, 12.7)`,
+  );
+  const fView = report.views[0]!;
+  const root = fView.root;
+  assertSameJson(
+    {
+      identity: root.identity,
+      opening: root.opening,
+      closing: root.closing,
+      attributes: root.attributes,
+      childCount: root.children.length,
+    },
+    {
+      identity: DF_F_FILE,
+      opening: null,
+      closing: null,
+      attributes: [],
+      childCount: 1,
+    },
+    `${context} — the root node: identity the file path (SPEC 1.5), ` +
+      `opening/closing the stated null (a root has neither tag range, ` +
+      `SPEC 11.4 — null, never omitted), and attributes [] — an empty ` +
+      `list is [], never null (SPEC 12.7); the root's tags/coverage ` +
+      `null distinction is T11.4-3's`,
+  );
+  const fNode = root.children[0]!;
+  assertSameJson(
+    projectViewNode(fNode),
+    {
+      identity: `${DF_F_FILE}#f`,
+      range: DF_F_RANGE,
+      opening: DF_F_OPENING,
+      closing: DF_F_CLOSE_RANGE,
+      attributes: [
+        { name: "id", range: DF_ATTR_ID_RANGE, text: 'id="f"' },
+        { name: "tags", range: DF_ATTR_TAGS_RANGE, text: 'tags="alpha beta"' },
+        { name: "coverage", range: DF_ATTR_COV_RANGE, text: 'coverage="none"' },
+      ],
+      tags: ["alpha", "beta"],
+      coverage: "none",
+      childCount: 1,
+    },
+    `${context} — the section node \`f\`: the eight-member node form with ` +
+      `byte-exact construct/opening/closing ranges, one attribute entry ` +
+      `{"name", "range", "text"} per spelled attribute in tag order, and ` +
+      `the interpreted tags/coverage (SPEC 11.4, 12.7)`,
+  );
+  const leafNode = fNode.children[0]!;
+  assertSameJson(
+    projectViewNode(leafNode),
+    {
+      identity: `${DF_F_FILE}#f.leaf`,
+      range: DF_LEAF_RANGE,
+      opening: DF_LEAF_OPENING,
+      closing: DF_LEAF_CLOSE_RANGE,
+      attributes: [
+        { name: "id", range: DF_LEAF_ATTR_ID_RANGE, text: 'id="f.leaf"' },
+      ],
+      tags: [],
+      coverage: "required",
+      childCount: 0,
+    },
+    `${context} — the leaf node: an attribute-free non-root's interpreted ` +
+      `defaults are tags [] (an empty list, never null — 11.4 states ` +
+      `structural absence for roots alone) and coverage "required" ` +
+      `(SPEC 11.2, 2.5, 2.6, 12.7)`,
+  );
+  assertSameJson(
+    fView.imports,
+    [{ range: DF_IMPORT_RANGE, name: "W", target: DF_W_FILE }],
+    `${context} — the import entry {"range", "name", "target"}: the ` +
+      `declaration's byte-exact range, its default binding name, its ` +
+      `resolved target (SPEC 11.4, 12.7)`,
+  );
+  assertSameJson(
+    fView.occurrences,
+    [DF_EXPECTED_OCCURRENCE],
+    `${context} — the viewed file's occurrence records (SPEC 11.4, 5.7)`,
+  );
+  assertSameJson(
+    fView.comments,
+    [],
+    `${context} — a comment-free file's comments member is [] (SPEC 11.4, ` +
+      `12.7)`,
+  );
+  const wView = report.views[1]!;
+  assertSameJson(
+    {
+      wChild: wView.root.children[0]!.identity,
+      imports: wView.imports,
+      occurrences: wView.occurrences,
+      comments: wView.comments,
+    },
+    {
+      wChild: `${DF_W_FILE}#w`,
+      imports: [],
+      occurrences: [],
+      comments: [],
+    },
+    `${context} — the second view: W's section node, with empty imports/` +
+      `occurrences/comments each [] (SPEC 11.4, 12.7)`,
+  );
+  if (text) {
+    const fWithText = report.views[0]!.root.children[0]!;
+    assertTextContains(
+      fWithText.children[0]!.ownText,
+      "W text.",
+      `${context} — the leaf's ownText under --text`,
+    );
+    assertTextContains(
+      fWithText.subtreeText,
+      "W text.",
+      `${context} — \`f\`'s subtreeText under --text`,
+    );
+  }
+}
+
+async function runDocumentFormsArm(product: ProductBinding): Promise<void> {
+  sliceCheck(DF_F_SOURCE, DF_IMPORT_RANGE, DF_IMPORT_TEXT, "F's import");
+  sliceCheck(DF_F_SOURCE, DF_EMBED_RANGE, DF_EMBED_TEXT, "F's embed");
+  sliceCheck(DF_F_SOURCE, DF_ATTR_ID_RANGE, 'id="f"', "f's id attribute");
+  sliceCheck(
+    DF_F_SOURCE,
+    DF_ATTR_TAGS_RANGE,
+    'tags="alpha beta"',
+    "f's tags attribute",
+  );
+  sliceCheck(
+    DF_F_SOURCE,
+    DF_ATTR_COV_RANGE,
+    'coverage="none"',
+    "f's coverage attribute",
+  );
+  sliceCheck(
+    DF_F_SOURCE,
+    DF_LEAF_ATTR_ID_RANGE,
+    'id="f.leaf"',
+    "the leaf's id attribute",
+  );
+  sliceCheck(
+    DF_F_SOURCE,
+    DF_F_OPENING,
+    '<S id="f" tags="alpha beta" coverage="none">',
+    "f's opening tag",
+  );
+  sliceCheck(
+    DF_F_SOURCE,
+    DF_LEAF_RANGE,
+    '<S id="f.leaf">\nEmbed: {text(W.w)}\n</S>',
+    "the leaf construct",
+  );
+
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [DF_F_FILE]: DF_F_SOURCE,
+        [DF_W_FILE]: DF_W_SOURCE,
+      },
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T12.7-2 (document forms) `build` — the staged workspace is valid",
+      );
+
+      // --- A finding-free `check` report: `{"findings": []}` exactly.
+      const checkContext = "T12.7-2 (document forms) `check --json`";
+      const checkDoc = await runJson(
+        product,
+        workspace,
+        ["check", "--json"],
+        `${checkContext} — a finding-free workspace's check exits 0 ` +
+          `(SPEC 12.0, 12.2)`,
+      );
+      assertSameJson(
+        decodeFindingsReport(checkDoc, checkContext).findings,
+        [],
+        `${checkContext} — the check report is {"findings": […]} with a ` +
+          `finding-free findings member [], never null (SPEC 12.7)`,
+      );
+
+      // --- `occurrences`: `{"findings", "occurrences"}` with the byte-exact
+      // record (JSON-only, no `--json` needed; SPEC 11.3, 11).
+      const occContext = "T12.7-2 (document forms) bare `occurrences`";
+      const occReport = decodeOccurrencesReport(
+        await runJson(
+          product,
+          workspace,
+          ["occurrences"],
+          `${occContext} — a complete, finding-free answer exits 0 ` +
+            `(SPEC 11.2)`,
+        ),
+        occContext,
+      );
+      assertSameJson(
+        { findings: occReport.findings, occurrences: occReport.occurrences },
+        { findings: [], occurrences: [DF_EXPECTED_OCCURRENCE] },
+        `${occContext} — the occurrences document: findings [] and the one ` +
+          `record {"file", "range", "kind", "source", "target"} with the ` +
+          `byte-exact container span and the source node's own construct ` +
+          `range (SPEC 11.3, 5.7, 12.7)`,
+      );
+
+      // --- `view` without `--text`: the node text members are ABSENT (the
+      // stated conditional presence — the decoder rejects them under
+      // text: false and requires them under text: true; SPEC 11.4, 12.7).
+      const viewContext = "T12.7-2 (document forms) bare `view`";
+      assertDocumentFormsViews(
+        decodeViewReport(
+          await runJson(
+            product,
+            workspace,
+            ["view"],
+            `${viewContext} — a complete, finding-free answer exits 0 ` +
+              `(SPEC 11.2, 11.4)`,
+          ),
+          { text: false },
+          viewContext,
+        ),
+        false,
+        viewContext,
+      );
+
+      // --- `view --text`: both text members present on every node.
+      const viewTextContext = "T12.7-2 (document forms) `view --text`";
+      assertDocumentFormsViews(
+        decodeViewReport(
+          await runJson(
+            product,
+            workspace,
+            ["view", "--text"],
+            `${viewTextContext} — every expansion resolves, so the answer ` +
+              `stays complete and finding-free, exit 0 (SPEC 11.2, 11.4)`,
+          ),
+          { text: true },
+          viewTextContext,
+        ),
+        true,
+        viewTextContext,
+      );
+
+      // --- `at`: `{"findings", "resolution"}`; an offset inside `f`'s body
+      // text lies within no occurrence, so `occurrence` is the stated null —
+      // present, never omitted (SPEC 11.5, 12.7).
+      const atOffset = DF_BODY_RANGE.start + 3;
+      const atContext = `T12.7-2 (document forms) \`at ${DF_F_FILE} ${String(atOffset)}\``;
+      const atReport = decodeAtReport(
+        await runJson(
+          product,
+          workspace,
+          ["at", DF_F_FILE, String(atOffset)],
+          `${atContext} — every within-file offset resolves; a complete, ` +
+            `finding-free answer exits 0 (SPEC 11.5, 11.2)`,
+        ),
+        atContext,
+      );
+      assertSameJson(
+        { findings: atReport.findings, resolution: atReport.resolution },
+        {
+          findings: [],
+          resolution: {
+            section: { identity: `${DF_F_FILE}#f`, range: DF_F_RANGE },
+            occurrence: null,
+          },
+        },
+        `${atContext} — the at document: resolution {"section", ` +
+          `"occurrence"} with the innermost enclosing section construct ` +
+          `(byte-exact range) and occurrence null — the offset lies in no ` +
+          `occurrence, and null is never omission (SPEC 11.5, 12.7)`,
+      );
+
+      // --- `version`: `{"product", "interface"}` exactly (JSON-only). The
+      // decode pins the two-member form; values are T12.6-1's.
+      const versionContext = "T12.7-2 (document forms) bare `version`";
+      decodeVersionDocument(
+        await runJson(product, workspace, ["version"], versionContext),
+        versionContext,
+      );
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
 // T12.7-1 — value forms
 // ---------------------------------------------------------------------------
 
@@ -918,5 +1879,48 @@ const T12_7_1 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T12.7-2 — findings arrays and document forms
+// ---------------------------------------------------------------------------
+
+const T12_7_2 = defineProductTest({
+  id: "T12.7-2",
+  title:
+    "findings arrays and document forms: a workspace staging several " +
+    "conditions reports one findings array ordered by code — numbered " +
+    "conditions in NUMERIC order (missing-id first though alphabetically " +
+    "last, invalid-import(15) after cycle(9) though before it as decimal " +
+    "strings) — then by locations element-wise (range-start order between " +
+    "one file's findings, file-byte order across files), then by concerned " +
+    "path in one byte order over marked byte-form and plain paths alike " +
+    "(Linux leg), with identically-staged duplicate findings collapsed to " +
+    "one (a defect file discovered through two spec groups reports once); " +
+    "the T14-7 multi-reason refusal (a section move staged to both collide " +
+    "and create a dependency cycle) reports its reasons in 14's LISTED " +
+    "order — refused-id-collision before refused-cycle, the inverse of " +
+    "their alphabetical order; two policy findings equal up to the rule " +
+    "name sort by identities element-wise, not configuration order; " +
+    "document forms are asserted literally (H-3): build/check/gated-read/" +
+    'refused-operation reports are {"findings": […]} (a finding-free ' +
+    'findings is [], never null), occurrences is {"findings", ' +
+    '"occurrences"}, view is {"findings", "views"} with the eight-member ' +
+    "node form plus ownText/subtreeText exactly when --text is given, " +
+    'attribute entries {"name", "range", "text"}, imports {"range", ' +
+    '"name", "target"}, a root\'s attributes [] and its opening/closing ' +
+    'the stated null, at is {"findings", "resolution"} with occurrence ' +
+    'null when the offset lies in none, version is {"product", ' +
+    '"interface"}, and an unset outDir is null, never omitted (the ' +
+    "refused preview's four-member form is T6.6-3's, the full inventory/" +
+    "preview forms T11.6-*'s and T6.6-4/5's, a root's tags/coverage null " +
+    "T11.4-3's, an absent targetTags T11.6-2's) (SPEC 12.7, 14, 13.3, " +
+    "11.3-11.5, 12.6, 7.3)",
+  run: async (product) => {
+    await runConditionOrderingArm(product);
+    await runRefusalOrderingArm(product);
+    await runIdentitiesOrderingArm(product);
+    await runDocumentFormsArm(product);
+  },
+});
+
 /** TEST-SPEC §12.7, in canonical ID order (SUITE-58). */
-export const section127Tests: readonly ProductTestEntry[] = [T12_7_1];
+export const section127Tests: readonly ProductTestEntry[] = [T12_7_1, T12_7_2];
