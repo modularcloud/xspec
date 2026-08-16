@@ -373,6 +373,15 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // carriage context with home coverage at T13.3-*/T11.*/T12.6-*/T6.5-*/
   // T6.6-*/T11.6-2.
   "T12.7-2": ["12.7"],
+  // T12.7-3: same precedent — the asserted configuration-error code's
+  // condition (14.14) has its primary tests in TEST-SPEC 14's per-condition
+  // record at T7-1..T7.5-1 (T12.7-3 appears in no staging record there; the
+  // T14-6 code-null parenthetical cites this test as it cites T12.7-1,
+  // which set the no-"14" precedent), so no "14"; 12.0 (JSON-in-effect,
+  // stream separation, stderr diagnostics) and 11.6 (the anchoring form)
+  // are carriage context with home coverage at T12.0-2/T11.6-1, and 7's
+  // configuration location/validity at T7-*.
+  "T12.7-3": ["12.7"],
   "T13.1-1": ["13.1"],
   "T13.1-2": ["13.1"],
   "T13.2-1": ["13.2"],

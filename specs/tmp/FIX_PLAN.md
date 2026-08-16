@@ -3435,9 +3435,44 @@ certify against FP-091's fixtures once those land.
   `npm run test:self`: 268 passed, unchanged 2 planned mid-loop reds
   (certification-document ×2 → FP-091), S-1/S-5/certification green
   (T12.7-* stay certification Exclusions, no fixture scope).]
-- [ ] FP-077 — Implement T12.7-3: the exit-2 error document, incl. the
+- [x] FP-077 — Implement T12.7-3: the exit-2 error document, incl. the
   `configuration-error` stable code and the anchoring-form concerned path.
   Pairs with FP-002's protocol. [R2 #9; TEST-SPEC §12.7]
+  [Done 2026-08-16: T12.7-3 registered in section-12.7.ts, four arms over
+  FP-002's protocol (`expectErrorDocument` → the existing S-5-guarded
+  `decodeErrorDocument`; no new adapters). (A) Configuration-error concerned
+  paths, each pinned byte-exactly as
+  {code: "configuration-error", path, locations: []} (locations [] per SPEC
+  14's unlocated-condition class): the found xspec.config.ts from the root
+  (`xspec.config.ts`) and from nested/inner (`../../xspec.config.ts` —
+  ascent spelled `..`, failing a workspace-relative reporter); a
+  `--config ./cfg/broken.config.ts` argument reporting the canonical
+  `cfg/broken.config.ts` (11.6: no `.` segments — failing a verbatim echo);
+  `--config missing.config.ts` reporting the named file, never `.`; bare
+  `inventory` under the invalid configuration (JSON-only surface, no
+  --json). (B) Failed upward search with no --config → path exactly `.`
+  from the root AND from nested/inner (T7-1's no-ancestor-config premise).
+  (C) One finding however many defects: three independent 14.14 defects
+  (unknown top-level key, out-of-root glob, unknown markdown field) in one
+  declarative file — cardinality enforced by the decode (one JSON document
+  as the entire stdout, one `error` member, one finding form). (D) Plain
+  usage errors carry code AND path null: `inventory --definitely-not-a-flag`
+  (JSON-only, unknown flag, no --json) and `definitely-not-a-command
+  --json`; every exit-2 arm asserts non-empty stderr (diagnostics;
+  invariance stays T12.0-2's). Traceability "T12.7-3": ["12.7"] (the
+  T12.7-1 no-"14" precedent — 14.14's primaries are T7-1..T7.5-1); T12.7-3
+  stays a certification Exclusion (named in the Exclusions' 12.7-sweep
+  paragraph). Verified: typecheck/format clean; suite red-as-diagnosed at
+  arm A's first decode (the FP-002-class gap — probes show every staged
+  invocation class exits 2 with the diagnostic on stderr and byte-EMPTY
+  stdout; `inventory` still exit 2 "unknown command"); soundness proven by
+  a scratch conforming mock running the registered body green through all
+  four arms via entry.run(mockBinding), with 11 deviation mocks each
+  failing diagnosed at the intended assertion (ws-relative, echo-config,
+  missing-dot, inv-human, search-abs, multi-docs, error-array, usage-coded,
+  usage-path, stderr-quiet, located). `npm run test:self`: 268 passed,
+  unchanged 2 planned mid-loop reds (certification-document ×2 → FP-091),
+  S-1/S-5/certification green.]
 
 - [ ] FP-078 — Implement T13.4-8: writes create missing directories
   (file-form move, section-form move target, first emission under nested

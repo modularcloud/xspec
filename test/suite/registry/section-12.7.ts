@@ -1,4 +1,4 @@
-// TEST-SPEC §12.7 (JSON document forms) — SUITE-58: T12.7-1, T12.7-2.
+// TEST-SPEC §12.7 (JSON document forms) — SUITE-58: T12.7-1…T12.7-3.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -10,8 +10,8 @@
 // section's assertions are form-exact (H-3): member names, `null`-vs-omission,
 // `[]`-vs-`null`, and orderings asserted literally through the forms.ts
 // decode layer, never adapted. T12.7-1 is the value-form test; T12.7-2 is
-// the findings-array-ordering and document-forms test; T12.7-3 (the error
-// document) follows.
+// the findings-array-ordering and document-forms test; T12.7-3 is the
+// error-document test.
 //
 // Conservative operationalizations (noted per H-3/H-5/H-9):
 // - "A source range is {"start", "end"}, non-negative integers, everywhere
@@ -148,6 +148,54 @@
 //   distinction stays T11.4-3's. Own/subtree text values are asserted as
 //   plain strings containing the embedded target's text (1.6: expanded
 //   values) — byte-exact expansion is T11.2-1's business.
+//
+// T12.7-3's conservative operationalizations (per H-3/H-5/H-9):
+// - The anchoring form is asserted byte-exactly where SPEC 14 + 11.6 fix the
+//   spelling as a pure function of invocation input: the found configuration
+//   file from the workspace root (`xspec.config.ts`) and from a nested
+//   working directory two levels down (`../../xspec.config.ts` — ascent
+//   spelled `..`, joined with `/`, failing a product that reports the path
+//   workspace-relative); a `--config`-named file whose argument is spelled
+//   with a leading `./` segment reporting the canonical
+//   `cfg/broken.config.ts` (11.6: no `.` segments — failing a
+//   verbatim-echoing product), present and missing alike (SPEC 14: "the
+//   path `--config` names — it is that file"); and the failed upward search
+//   with no `--config` concerning the working directory itself, spelled `.`
+//   — from the root and from a nested cwd equally (the search starts at the
+//   invocation working directory).
+// - The failed-search premise is T7-1's: the workspace is a fresh unique
+//   temporary directory (H-1) whose filesystem ancestors (the OS temp
+//   directory and its parents) hold no `xspec.config.ts`, so the upward
+//   search exhausts without a hit.
+// - The configuration-error finding pins locations [] beside code and path:
+//   SPEC 14 classes configuration conditions among those "without an
+//   in-source location" (they carry the file or path they concern instead),
+//   and T12.7-1 pins `locations` [] for unlocated conditions.
+// - One-finding-however-many-defects is enforced through the document
+//   decode: exactly one JSON document as the entire stdout (H-5), decoded
+//   as {"error": …} with the single member holding ONE finding form — a
+//   product reporting the three independently-staged 14.14 defects (an
+//   unknown top-level key, a glob resolving outside the workspace root, an
+//   unknown `markdown` field) as several findings, an array-valued `error`,
+//   a `findings` member, or concatenated documents fails the decode; which
+//   defect the one finding's message describes is unpinned (12.7: the
+//   message is deterministic but otherwise unpinned).
+// - A plain usage error pins exactly what the entry states: `code` null and
+//   `path` null. Its locations and identities stay unpinned (the finding
+//   form permits informational identities, 12.7, and the entry pins neither
+//   for usage errors).
+// - "Diagnostics on stderr" is asserted as non-empty stderr on every exit-2
+//   arm; stderr byte-invariance across output forms and the /config/i
+//   actionability operationalization are T12.0-2's and T7-*'s business.
+// - Configuration-error runs use `build --json` (the T12.0-2/T7-*
+//   precedent); the JSON-only-surface clause rides `inventory` twice — a
+//   configuration error on the bare surface, a plain usage error with an
+//   unknown flag and no `--json` — and the erroneous-arguments clause rides
+//   an unknown command beside `--json`. Every arm's workspace stages a
+//   valid source under a canonical spec group so the arm's staged defect is
+//   its sole one (the T7-2 attribution discipline): a product that wrongly
+//   proceeds exits 0 with a real answer and fails the exit-code assertion
+//   attributably, never exits 2 for a side reason.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -174,7 +222,8 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
-import type { ProductBinding } from "../../helpers/subprocess.js";
+import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
+import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import {
@@ -183,6 +232,7 @@ import {
   assertSameJson,
   buildFindings,
   buildOk,
+  expectErrorDocument,
   expectExit,
   runCli,
   runJson,
@@ -1842,6 +1892,324 @@ async function runDocumentFormsArm(product: ProductBinding): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// T12.7-3 — the exit-2 error document (12.0, 12.7, 14)
+// ---------------------------------------------------------------------------
+//
+// SPEC 12.0: with JSON output in effect, an invocation failing with a usage
+// or configuration error (exit 2) emits as its entire stdout a single JSON
+// document reporting the error — the error document of 12.7, `{"error": …}`
+// holding ONE finding form. SPEC 14: a configuration error's concerned path
+// is reported in the anchoring form of 11.6, identified relative to the
+// invocation working directory — where a configuration file is concerned
+// (the file the upward search found, or the path `--config` names) it is
+// that file; for missing configuration with no `--config`, the directory
+// the failed search started from, the invocation working directory,
+// spelled `.`.
+
+/** A minimal valid source, matched by SPECS_ONLY_CONFIG's spec group. */
+const ERR_SOURCE = '<S id="a">\nAlpha.\n</S>\n';
+
+/**
+ * The single-deviation invalid configuration (the T7-2 attribution
+ * discipline): the canonical valid file plus one unknown top-level key, so
+ * the refusal is attributable to that one 14.14 defect and nothing else
+ * (SPEC 7: unknown keys anywhere in the defineConfig argument are a
+ * configuration error).
+ */
+const ERR_UNKNOWN_KEY_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  definitelyUnknownKey: true
+})
+`;
+
+/**
+ * Three independent 14.14 defects in one well-formed declarative-form file
+ * (SPEC 7): an unknown top-level key, a glob resolving outside the
+ * workspace root, and an unknown `markdown` field — "a configuration file
+ * with several distinct defects" (T12.7-3), each a configuration error on
+ * its own.
+ */
+const ERR_MULTI_DEFECT_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  definitelyUnknownKey: true,
+  specs: {
+    main: ["specs/**/*.mdx"],
+    outside: ["../escapee/**/*.mdx"]
+  },
+  markdown: { emit: true, definitelyUnknownField: false }
+})
+`;
+
+/**
+ * Diagnostics are standard-error content (SPEC 12.0; T12.7-3: "each the
+ * error document on stdout, diagnostics on stderr"): non-empty stderr on
+ * every exit-2 arm. Stderr byte-invariance across output forms and the
+ * /config/i actionability operationalization stay T12.0-2's and T7-*'s.
+ */
+function assertStderrDiagnostic(result: RunResult, context: string): void {
+  if (result.stderrBytes.length > 0) return;
+  fail(
+    `${context}: usage and configuration error messages are standard-error ` +
+      `content (SPEC 12.0), so the exit-2 diagnostics must appear on ` +
+      `stderr beside the JSON error document on stdout — got empty stderr ` +
+      `from ${result.commandLine}`,
+  );
+}
+
+/**
+ * Run an invocation with JSON output in effect that must fail as a
+ * configuration error: exit 2 exactly (SPEC 14.14, 12.0), stderr
+ * diagnostics present, and stdout exactly the single 12.7 error document
+ * whose one finding carries the stable code `configuration-error`,
+ * locations [] (SPEC 14: configuration conditions carry no in-source
+ * location), and the concerned path exactly `expectedPath` — the anchoring
+ * form of 11.6, identified relative to the invocation working directory
+ * (SPEC 14, 12.7).
+ */
+async function expectAnchoredConfigurationError(
+  product: ProductBinding,
+  cwd: string,
+  argv: readonly string[],
+  expectedPath: string,
+  context: string,
+): Promise<void> {
+  const result = await runProduct(product, { cwd, argv });
+  assertExitCode(
+    result,
+    2,
+    `${context} — missing or invalid configuration is a configuration ` +
+      `error, reported by every command that loads configuration as a ` +
+      `usage-error outcome (SPEC 14.14, 12.0)`,
+  );
+  assertStderrDiagnostic(result, context);
+  const finding = expectErrorDocument(result, context);
+  assertSameJson(
+    projectFindingForm(finding),
+    { code: "configuration-error", path: expectedPath, locations: [] },
+    `${context} — the error document's one finding: the stable code ` +
+      `"configuration-error" (SPEC 14 condition 14), locations [] (a ` +
+      `configuration error is an unlocated condition, SPEC 14), and the ` +
+      `concerned path in the anchoring form of 11.6, identified relative ` +
+      `to the invocation working directory (SPEC 14, 12.7)`,
+  );
+}
+
+/**
+ * Arm: configuration-error concerned paths — the found and the
+ * `--config`-named configuration file, each in the canonical anchoring
+ * spelling (SPEC 14, 11.6), on `build --json` and on the bare JSON-only
+ * `inventory` surface.
+ */
+async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": ERR_UNKNOWN_KEY_CONFIG,
+        "cfg/broken.config.ts": ERR_UNKNOWN_KEY_CONFIG,
+        "specs/A.mdx": ERR_SOURCE,
+      },
+      dirs: ["nested/inner"],
+    },
+    async (workspace) => {
+      // The upward-search-found file from the workspace root: zero ascent
+      // segments, one descending segment, no `.` segment and no trailing
+      // separator (SPEC 11.6's canonical spelling).
+      await expectAnchoredConfigurationError(
+        product,
+        workspace.root,
+        ["build", "--json"],
+        "xspec.config.ts",
+        "T12.7-3 `build --json` from the workspace root (invalid " +
+          "configuration found in place)",
+      );
+      // From a nested working directory two levels down, the search finds
+      // the same file — identified relative to the INVOCATION working
+      // directory: ascent spelled `..`, joined with `/` (SPEC 14, 11.6) —
+      // failing a product that reports the path workspace-relative.
+      await expectAnchoredConfigurationError(
+        product,
+        workspace.path("nested/inner"),
+        ["build", "--json"],
+        "../../xspec.config.ts",
+        "T12.7-3 `build --json` from nested/inner (invalid configuration " +
+          "found by upward search)",
+      );
+      // The `--config`-named file (SPEC 14: "the path --config names — it
+      // is that file"), the argument deliberately spelled with a leading
+      // `./` segment: the canonical anchoring spelling carries no `.`
+      // segments (SPEC 11.6), so the concerned path is
+      // "cfg/broken.config.ts" — failing a product that echoes the
+      // argument verbatim.
+      await expectAnchoredConfigurationError(
+        product,
+        workspace.root,
+        ["build", "--json", "--config", "./cfg/broken.config.ts"],
+        "cfg/broken.config.ts",
+        "T12.7-3 `build --json --config ./cfg/broken.config.ts` (invalid " +
+          "named configuration)",
+      );
+      // A missing `--config`-named file is missing configuration WITH
+      // --config given: the concerned path is still the named file, never
+      // "." (SPEC 14 reserves "." for a failed upward search with no
+      // --config).
+      await expectAnchoredConfigurationError(
+        product,
+        workspace.root,
+        ["build", "--json", "--config", "missing.config.ts"],
+        "missing.config.ts",
+        "T12.7-3 `build --json --config missing.config.ts` (missing named " +
+          "configuration)",
+      );
+      // A JSON-only surface without `--json`: bare `inventory` under the
+      // invalid configuration — JSON output is in effect (SPEC 12.0, 11),
+      // and configuration errors keep their precedence on the inventory
+      // (SPEC 11.6), so the error arrives as the error document.
+      await expectAnchoredConfigurationError(
+        product,
+        workspace.root,
+        ["inventory"],
+        "xspec.config.ts",
+        "T12.7-3 bare `inventory` (JSON-only surface, no --json) under the " +
+          "invalid configuration",
+      );
+    },
+  );
+}
+
+/**
+ * Arm: a failed upward search with no `--config` concerns the directory it
+ * started from — the invocation working directory, spelled `.` (SPEC 14,
+ * 11.6) — whatever that directory's position in the tree.
+ */
+async function runErrorSearchFailureArm(
+  product: ProductBinding,
+): Promise<void> {
+  // The workspace is a fresh unique temporary directory whose filesystem
+  // ancestors (the OS temp directory and its parents) hold no
+  // xspec.config.ts — the T7-1 premise — so the upward search exhausts
+  // without a hit.
+  await withWorkspace(
+    { files: { "specs/A.mdx": ERR_SOURCE }, dirs: ["nested/inner"] },
+    async (workspace) => {
+      await expectAnchoredConfigurationError(
+        product,
+        workspace.root,
+        ["build", "--json"],
+        ".",
+        "T12.7-3 `build --json` with no xspec.config.ts reachable by " +
+          "upward search and no --config",
+      );
+      // From a nested working directory the failed search still concerns
+      // the working directory itself, spelled "." (SPEC 11.6 spells the
+      // working directory "."), never that directory's path from anywhere
+      // else.
+      await expectAnchoredConfigurationError(
+        product,
+        workspace.path("nested/inner"),
+        ["build", "--json"],
+        ".",
+        "T12.7-3 `build --json` from nested/inner with no xspec.config.ts " +
+          "reachable by upward search and no --config",
+      );
+    },
+  );
+}
+
+/**
+ * Arm: one finding however many defects — a configuration file with
+ * several distinct defects yields a single condition-14 finding (SPEC
+ * 12.7: "One invocation reports one error"). The cardinality rides the
+ * decode: one JSON document as the entire stdout, `{"error": …}` with the
+ * one member holding one finding form.
+ */
+async function runErrorSingleFindingArm(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": ERR_MULTI_DEFECT_CONFIG,
+        "specs/A.mdx": ERR_SOURCE,
+      },
+    },
+    async (workspace) => {
+      await expectAnchoredConfigurationError(
+        product,
+        workspace.root,
+        ["build", "--json"],
+        "xspec.config.ts",
+        "T12.7-3 `build --json` over a configuration file with three " +
+          "distinct defects (one condition-14 finding, however many " +
+          "defects are present)",
+      );
+    },
+  );
+}
+
+/**
+ * Arm: plain usage errors carry `code` null and `path` null, and JSON is
+ * in effect for a JSON-only surface without `--json` (`inventory` with an
+ * unknown flag) and whenever `--json` appears among the arguments, the
+ * arguments themselves erroneous included (an unknown command beside
+ * `--json`) — each the error document on stdout, diagnostics on stderr
+ * (SPEC 12.0, 12.7; T12.0-2).
+ */
+async function runErrorUsageArm(product: ProductBinding): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        "specs/A.mdx": ERR_SOURCE,
+      },
+    },
+    async (workspace) => {
+      const cases: readonly { argv: readonly string[]; label: string }[] = [
+        {
+          argv: ["inventory", "--definitely-not-a-flag"],
+          label:
+            "T12.7-3 `inventory --definitely-not-a-flag` (JSON-only " +
+            "surface, unknown flag, no --json)",
+        },
+        {
+          argv: ["definitely-not-a-command", "--json"],
+          label:
+            "T12.7-3 `definitely-not-a-command --json` (unknown command " +
+            "beside --json)",
+        },
+      ];
+      for (const { argv, label } of cases) {
+        const result = await runCli(product, workspace, argv);
+        assertExitCode(
+          result,
+          2,
+          `${label} — an unknown command or flag is a usage error, and the ` +
+            `error is determined by the invocation's syntax alone ` +
+            `(SPEC 12.0)`,
+        );
+        assertStderrDiagnostic(result, label);
+        const finding = expectErrorDocument(result, label);
+        if (finding.code !== null || finding.path !== null) {
+          fail(
+            `${label}: a plain usage error's finding carries code null and ` +
+              `path null — it describes the invocation the consuming tool ` +
+              `composed, no SPEC 14 condition code and no concerned ` +
+              `workspace path (SPEC 12.7, 14; T14-6); got code ` +
+              `${JSON.stringify(finding.code)}, path ` +
+              `${JSON.stringify(finding.path)} (message: ` +
+              `${JSON.stringify(finding.message)})`,
+          );
+        }
+      }
+    },
+  );
+}
+
+// ---------------------------------------------------------------------------
 // T12.7-1 — value forms
 // ---------------------------------------------------------------------------
 
@@ -1922,5 +2290,41 @@ const T12_7_2 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T12.7-3 — error document
+// ---------------------------------------------------------------------------
+
+const T12_7_3 = defineProductTest({
+  id: "T12.7-3",
+  title:
+    "error document: an exit-2 invocation with JSON output in effect emits " +
+    '{"error": …} holding one finding form as the entire stdout — a ' +
+    'configuration error carries the stable code "configuration-error", ' +
+    "locations [], and its concerned path in the anchoring form of 11.6 " +
+    "relative to the invocation working directory (the found " +
+    "xspec.config.ts from the root; ../../xspec.config.ts from a nested " +
+    "cwd; a --config-named file in the canonical spelling — a ./-spelled " +
+    'argument reports without the "." segment — present or missing alike; ' +
+    '"." for a failed upward search with no --config); a plain usage error ' +
+    "carries code and path null; one finding however many defects (a " +
+    "configuration file with three distinct defects yields a single " +
+    "condition-14 finding); JSON is in effect for a JSON-only surface " +
+    "without --json (inventory with an unknown flag; bare inventory under " +
+    "an invalid configuration) and whenever --json appears among the " +
+    "arguments, the arguments themselves erroneous included (an unknown " +
+    "command beside --json) — each the error document on stdout with " +
+    "diagnostics on stderr (SPEC 12.0, 12.7, 14, 11.6)",
+  run: async (product) => {
+    await runErrorConfigPathsArm(product);
+    await runErrorSearchFailureArm(product);
+    await runErrorSingleFindingArm(product);
+    await runErrorUsageArm(product);
+  },
+});
+
 /** TEST-SPEC §12.7, in canonical ID order (SUITE-58). */
-export const section127Tests: readonly ProductTestEntry[] = [T12_7_1, T12_7_2];
+export const section127Tests: readonly ProductTestEntry[] = [
+  T12_7_1,
+  T12_7_2,
+  T12_7_3,
+];
