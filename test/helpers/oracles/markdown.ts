@@ -16,6 +16,15 @@
 // it independent of the product (P-2: "an independent oracle ... the oracle
 // lives in the harness").
 //
+// Grammar boundary (TEST-SPEC T3-1, §16 P-2): constructs exist only where
+// the MDX parse yields them — fenced code blocks and inline code spans are
+// literal text, so construct-like bytes inside them (`<S id="x">`, `<div>`,
+// `import X from "./X.xspec"`, `{text("a")}`) are plain content. Callers
+// express that by passing every fence and span byte as a `content` piece;
+// the oracle treats content uniformly — preserved verbatim, subject only to
+// the drop rule under the 1.4 classes — and never scans content for
+// construct-like patterns (the S-6 grammar-boundary vectors pin this).
+//
 // SPEC.md 3, as implemented here:
 //
 // * Compilation removes spec module imports, `<S>`/`<Spec>` tags together

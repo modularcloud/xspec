@@ -3665,13 +3665,49 @@ certify against FP-091's fixtures once those land.
 
 ## Stage H — property layer (§16) and oracles (S-6)
 
-- [ ] FP-082 — P-2 generator: include backticks/`~` so fenced code blocks
+- [x] FP-082 — P-2 generator: include backticks/`~` so fenced code blocks
   and inline code spans spelling construct-like bytes are generated, with
   the oracle treating them as content. [R2 #36; TEST-SPEC §16 P-2]
   Generator/oracle: `test/helpers/oracles/markdown.ts` +
   `test/suite/registry/section-16-p2-p3.ts`. Keep the S-6 markdown-oracle
   vetted suite green (`test/self/s6-markdown-oracle.test.ts`) — extend its
   vectors for the new grammar-boundary treatment.
+  [Done 2026-08-17: backticks/`~` enter the generator only as deliberately
+  staged constructs — free prose keeps excluding them (a stray backtick
+  would open a span across a real construct and desynchronize the product's
+  parse from the generator's model): new `genFenceBlock` block shape
+  (column-0 fences, 3–4-run backtick or tilde markers, optional
+  backtick-free info string, 0–3 interior lines from T3-1's construct-like
+  set / free prose / empty, bare equal-run closer — always closed, staged
+  at every nesting depth so fences land inside block sections and in
+  embeddable targets' subtree text) and `codeSpan` generator (equal
+  1–2-backtick runs around a non-empty backtick-free construct-like
+  interior), staged as a prose-line inline element and as an own-line
+  comment's sole residue (the span keeps its removal-affected line). Every
+  fence/span byte is a `content` entry, so the oracle — which never scans
+  content for construct-like patterns — needed no functional change
+  (module header now documents the T3-1/P-2 grammar boundary), and the
+  untouched-lines byte-preservation assertion covers them directly. S-6
+  vectors 31→35: construct-like fence interior preserved amid real
+  removals; tilde fence's blank/whitespace-only interior lines kept
+  (CRLF); span as a removal-affected line's sole survivor; fence bytes
+  riding an expansion. Stale LF-only-staging justification in conf-md
+  `markdownLiteralRegions`' docstring corrected (comment only; region
+  scanning stays plain-line-model across the fixture family — the
+  deviation is compile-model-only per CERTIFICATIONS.md). Verified:
+  typecheck/format clean; S-6 35/35; scratch per-seed dry-runs (deleted
+  before commit) prove fixed-seed reach — 43 fences (21 backtick/22 tilde;
+  23 inside sections; 12 empty interior lines), 8 span lines (4 beside
+  comments), 4 embedded fence-bearing targets across the 36 P-2 trials —
+  and per seed the CONF-MD conformer passes P-2 while VIOL-MD-CLASS and
+  VIOL-MD-CR are each falsified (flip-class reach re-verified against the
+  violator executables themselves; module comment records it); suite
+  section-16-p2-p3 stays 2 passed against the built product — a genuine
+  pass; direct probes confirmed it parses tilde/4-run/CR-terminated
+  fences, blank fence interiors, 2-run spans, and fence bytes in an
+  embedded target's subtree text exactly as staged; `npm run test:self`
+  unchanged 2 planned mid-loop reds (certification-document ×2 → FP-091),
+  272 passed.]
 
 - [ ] FP-083 — Implement the P-5 section-move category oracle + its S-6
   vetted fixed-vector suite. [R2 #42; TEST-SPEC §16 P-5, §17 S-6; SPEC 6.2,

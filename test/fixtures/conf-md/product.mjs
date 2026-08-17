@@ -695,8 +695,11 @@ const EMBED_OPEN_RE = /^\{[ \t]*text[ \t]*\(/;
  *
  * Line structure here is the plain Markdown one (LF, CRLF, lone CR) — never
  * the deviation-switchable compile line model: each violator's single
- * deviation lives in the compile hooks alone, and the committed grammar-
- * boundary staging is LF-only, where all models agree.
+ * deviation is defined on the compile's line model alone (CERTIFICATIONS.md),
+ * so construct recognition — fence and span regions included, the P-2
+ * generator staging fences over mixed terminators — is identical across the
+ * whole fixture family, and only compiled bytes (with own/subtree text
+ * through SPEC 1.6) diverge under a deviation.
  */
 function markdownLiteralRegions(text) {
   /** @type {{ start: number, end: number }[]} */

@@ -3,11 +3,14 @@
 // Two registered product-facing property tests (C-2 "one code path") sharing
 // one seeded random-document generator (helpers/property.ts, H-10; fixed seed
 // set in CI, E-5). Each trial generates a workspace of 1–3 `.mdx` spec
-// sources composed of prose blocks, nested sections, imports, single- and
-// multi-line MDX comments, and same-file and cross-file `{text(...)}`
-// embeddings, over mixed line terminators (LF, CRLF, lone CR), with content
-// weighted toward the whitespace/non-whitespace boundary code points of
-// SPEC 1.4 (U+00A0, U+0085, U+2028 included) — exactly the P-2 input space.
+// sources composed of prose blocks — fenced code blocks and inline code
+// spans spelling tag-, import-, and expression-like bytes included (T3-1's
+// grammar boundary: such bytes are content) — nested sections, imports,
+// single- and multi-line MDX comments, and same-file and cross-file
+// `{text(...)}` embeddings, over mixed line terminators (LF, CRLF, lone CR),
+// with content weighted toward the whitespace/non-whitespace boundary code
+// points of SPEC 1.4 (U+00A0, U+0085, U+2028 included) — exactly the P-2
+// input space.
 //
 //   * P-2 — for every file, `build` under `markdown: { emit: true }` emits
 //     Markdown byte-equal to the independent harness oracle
@@ -38,7 +41,9 @@
 // 1.4/3, dropped under the CLASS deviation), and lone-CR terminators on and
 // around removal-affected lines (line extents, and therefore drops and kept
 // bytes, diverge under the CR deviation) — verified by a per-seed dry-run
-// against deviation-simulating oracles at implementation time. P-3 asserts
+// against deviation-simulating oracles at implementation time, and
+// re-verified per seed against the violator executables themselves when the
+// fence/code-span staging landed (the choice streams shifted). P-3 asserts
 // only product-internal consistency, which both violators preserve
 // ("consistently in Markdown output and, through 1.6, in own and subtree
 // text"), so P-3 passes against every CONF-MD fixture while P-2 fails
@@ -49,13 +54,32 @@
 //
 // Staging discipline (byte-exact per HARNESS-01; the generator, not the
 // oracle, owns these choices):
-//   * Generated prose draws from an alphabet that excludes MDX-structural
-//     characters — `<`, `{`, `}`, backtick, `~`, `>`, `&`, `\` — so a prose
-//     byte can never open a fence, JSX tag, expression container, blockquote
-//     lazy-continuation, or character reference that would make the
-//     product's construct parse diverge from the generator's structure.
-//     Everything else (Markdown punctuation included) is plain content to
-//     SPEC 3, which never interprets Markdown semantics.
+//   * Generated free prose draws from an alphabet that excludes
+//     MDX-structural characters — `<`, `{`, `}`, backtick, `~`, `>`, `&`,
+//     `\` — so a prose byte can never open a fence, JSX tag, expression
+//     container, blockquote lazy-continuation, or character reference that
+//     would make the product's construct parse diverge from the generator's
+//     structure. Everything else (Markdown punctuation included) is plain
+//     content to SPEC 3, which never interprets Markdown semantics.
+//   * Backticks and `~` appear only inside deliberately staged fenced code
+//     blocks and inline code spans (T3-1's grammar boundary, the P-2 entry's
+//     named inclusion) — complete by construction and within the grammar
+//     subset every certified model shares: fences open at column 0 with a
+//     run of 3–4 backticks or tildes plus an optional backtick-free
+//     identifier info string, close with a bare run of the same character
+//     and length, and hold interior lines that never spell a fence marker
+//     (the interior alphabet has no backtick or `~`); code spans are
+//     single-line, open and close with equal-length runs of 1–2 backticks,
+//     and hold a non-empty backtick-free interior (an empty interior would
+//     merge the two runs into one). Interior bytes spell the construct-like
+//     forms T3-1 fixes — `<S id="x">`, `<div>`,
+//     `import X from "./X.xspec"`, `{text("a")}` — plus free prose. Every
+//     fence and span byte is a `content` entry: constructs exist only where
+//     the MDX parse yields them, so the oracle treats these bytes as
+//     content (preserved verbatim; their lines carry the marker or span
+//     runs as non-whitespace, and interior blank or whitespace-only lines
+//     are untouched lines, kept), and the direct byte-preservation
+//     assertion sees them as ordinary untouched lines.
 //   * Section tags, imports, and embeddings are single-line and ASCII; the
 //     exotic bytes live in content, where P-2 aims them. Multi-line comments
 //     carry 1–2 internal terminators and no internal blank line (MDX
@@ -128,6 +152,10 @@ const CRLF = CR + LF;
 const NBSP = cp(0x00a0);
 const NEL = cp(0x0085);
 const LS = cp(0x2028);
+// Fence and code-span marker characters — staged only inside deliberately
+// constructed fences and spans, never drawn into free prose (module header).
+const BACKTICK = cp(0x0060);
+const TILDE = cp(0x007e);
 
 // ---------------------------------------------------------------------------
 // Document IR
@@ -369,6 +397,44 @@ const terminator: Gen<string> = (choices) =>
     [3, CR],
   ]);
 
+// Construct-like literal bytes (T3-1's grammar-boundary set, the P-2 entry's
+// named inclusion): spelled inside fenced code blocks and inline code spans,
+// where the MDX parse makes them plain content. A product recognizing
+// constructs by textual pattern instead of by parse turns them into phantom
+// constructs — a finding failing `build` exit 0, or bytes missing from the
+// compiled output failing the oracle and byte-preservation arms. Backtick-
+// and tilde-free, so none can close a span or spell a fence marker.
+const CONSTRUCT_LIKE_LINES = [
+  '<S id="x">',
+  "<div>",
+  'import X from "./X.xspec"',
+  '{text("a")}',
+  "</S>",
+  "{/* not a comment */}",
+] as const;
+
+/** Single-line code-span interiors: non-empty, backtick-free (module header). */
+const CONSTRUCT_LIKE_SPAN_INTERIORS = [
+  '<S id="x">',
+  '{text("a")}',
+  '<S id="x">{text("a")}',
+  'import X from "./X.xspec"',
+  "<div>",
+] as const;
+
+/**
+ * A complete inline code span on one line: equal-length runs of 1–2
+ * backticks around a non-empty backtick-free construct-like interior — the
+ * exact shape both the CommonMark/MDX grammar and CONF-MD's modeled subset
+ * close where the generator says (an empty interior would merge the two runs
+ * into one). Always emitted as a `content` entry: span bytes are literal
+ * text (T3-1).
+ */
+const codeSpan: Gen<string> = (choices) => {
+  const marker = BACKTICK.repeat(choices.intInclusive(1, 2));
+  return `${marker}${choices.pick(CONSTRUCT_LIKE_SPAN_INTERIORS)}${marker}`;
+};
+
 // ---------------------------------------------------------------------------
 // Per-file generation
 
@@ -497,6 +563,7 @@ function genBlock(
     | "comment"
     | "multiComment"
     | "embedLine"
+    | "fence"
     | "section"
     | "selfClosing"
   >([
@@ -506,6 +573,7 @@ function genBlock(
     [3, "comment"],
     [2, "multiComment"],
     [3, "embedLine"],
+    [2, "fence"],
     [5, "section"],
     [2, "selfClosing"],
   ]);
@@ -525,6 +593,9 @@ function genBlock(
       return;
     case "multiComment":
       genMultiLineComment(choices, ctx, out);
+      return;
+    case "fence":
+      genFenceBlock(choices, ctx, out);
       return;
     case "embedLine": {
       const ref = pickRef(choices, ctx);
@@ -571,12 +642,13 @@ function registerSection(
 }
 
 /**
- * A prose line: free content, optionally hosting one inline construct — an
- * inline comment, an inline embedding, a one-line section, or a self-closing
- * section — with content around it. A line hosting an inline section always
- * carries a guaranteed-kept plain prose anchor, so the line is kept under
- * SPEC 3 and the section's contribution is exactly its interior bytes
- * (module header).
+ * A prose line: free content, optionally hosting one inline element — an
+ * inline comment, an inline embedding, an inline code span whose
+ * construct-like bytes are literal content (T3-1), a one-line section, or a
+ * self-closing section — with content around it. A line hosting an inline
+ * section always carries a guaranteed-kept plain prose anchor, so the line
+ * is kept under SPEC 3 and the section's contribution is exactly its
+ * interior bytes (module header).
  */
 function genProseLine(
   choices: Choices,
@@ -591,10 +663,11 @@ function genProseLine(
     return;
   }
   const inline = choices.weightedPick<
-    "comment" | "embed" | "inlineSection" | "inlineSelfClosing"
+    "comment" | "embed" | "codeSpan" | "inlineSection" | "inlineSelfClosing"
   >([
     [3, "comment"],
     [3, "embed"],
+    [2, "codeSpan"],
     [3, "inlineSection"],
     [1, "inlineSelfClosing"],
   ]);
@@ -602,6 +675,10 @@ function genProseLine(
   switch (inline) {
     case "comment":
       pieces.push({ kind: "removal", text: `{/*${commentProse(choices)}*/}` });
+      break;
+    case "codeSpan":
+      // Literal span bytes amid prose — content, never a construct (T3-1).
+      pieces.push({ kind: "content", text: codeSpan(choices) });
       break;
     case "embed": {
       const ref = pickRef(choices, ctx);
@@ -649,7 +726,9 @@ function genProseLine(
  * A single-line own-line comment, optionally with a residue on the line —
  * weighted toward the T3-3 arms: a boundary-code-point-only residue (kept
  * under SPEC 1.4, the §VIOL-MD-CLASS flip), a 1.4-whitespace residue (the
- * line still drops), mixes, and plain kept residues.
+ * line still drops), mixes, plain kept residues, and an inline code span as
+ * the line's sole other survivor (non-whitespace literal content, T3-1: the
+ * removal-affected line is kept holding exactly the span bytes).
  */
 function genCommentLine(
   choices: Choices,
@@ -681,6 +760,7 @@ function genCommentLine(
         )(c),
     ],
     [2, run(plainChar, 1, 3)],
+    [2, codeSpan],
   ])(choices);
   const residueFirst = choices.boolean(0.3);
   if (residue !== "" && residueFirst) {
@@ -715,6 +795,46 @@ function genMultiLineComment(
   if (before !== "") out.push({ kind: "content", text: before });
   out.push({ kind: "removal", text });
   if (after !== "") out.push({ kind: "content", text: after });
+  endLine(choices, ctx, out, false);
+}
+
+/**
+ * A fenced code block (T3-1's grammar boundary; module header): an opening
+ * fence line — column 0, a run of 3–4 backticks or tildes, an optional
+ * backtick-free identifier info string — 0–3 interior lines spelling
+ * construct-like bytes, free prose, or nothing, and a bare closing fence of
+ * the same character and length. Every byte is a `content` entry: fences are
+ * literal text under the MDX grammar, so the oracle and a conforming product
+ * alike treat the interior's construct-like spellings as plain content, and
+ * the fence's lines are ordinary logical lines (marker lines carry
+ * non-whitespace; interior blank or whitespace-only lines are untouched and
+ * kept). Interior alphabets contain no backtick or `~`, so no interior line
+ * can spell a fence marker and the fence closes exactly where the generator
+ * says it does — fenced code blocks interrupt paragraphs in CommonMark, so
+ * no blank-line separation is needed around the block.
+ */
+function genFenceBlock(
+  choices: Choices,
+  ctx: FileContext,
+  out: DocEntry[],
+): void {
+  const marker = choices
+    .pick([BACKTICK, TILDE] as const)
+    .repeat(choices.intInclusive(3, 4));
+  const info = choices.pick(["", "ts", "md"] as const);
+  out.push({ kind: "content", text: `${marker}${info}` });
+  endLine(choices, ctx, out, false);
+  const interiorLines = choices.intInclusive(0, 3);
+  for (let index = 0; index < interiorLines; index += 1) {
+    const line = choices.weightedPick<Gen<string>>([
+      [4, (c: Choices) => c.pick(CONSTRUCT_LIKE_LINES)],
+      [2, prose],
+      [1, () => ""],
+    ])(choices);
+    if (line !== "") out.push({ kind: "content", text: line });
+    endLine(choices, ctx, out, line === "");
+  }
+  out.push({ kind: "content", text: marker });
   endLine(choices, ctx, out, false);
 }
 
@@ -1160,11 +1280,12 @@ async function runP3Trial(
 const P_2 = defineProductTest({
   id: "P-2",
   title:
-    "property: random documents (prose, nested sections, imports, single- and multi-line " +
-    "comments, embeddings, mixed line terminators, boundary-code-point-weighted content) " +
-    "compile to Markdown byte-equal to the harness's SPEC 3 oracle, deterministically " +
-    "across directories, preserving content bytes outside removed constructs " +
-    "(SPEC 3, 1.4, 1.6, 7.3; TEST-SPEC §16 P-2)",
+    "property: random documents (prose, fenced code blocks and inline code spans spelling " +
+    "tag-, import-, and expression-like bytes as literal content, nested sections, imports, " +
+    "single- and multi-line comments, embeddings, mixed line terminators, " +
+    "boundary-code-point-weighted content) compile to Markdown byte-equal to the harness's " +
+    "SPEC 3 oracle, deterministically across directories, preserving content bytes outside " +
+    "removed constructs (SPEC 3, 1.4, 1.6, 7.3; TEST-SPEC §16 P-2)",
   // Wall-clock hang guard only (H-10): three fixed seeds (E-5), two
   // workspaces and two builds per trial, plus the shrink budget.
   timeoutMs: 300_000,

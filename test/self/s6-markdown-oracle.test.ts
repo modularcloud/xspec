@@ -10,6 +10,10 @@
 // in parentheses):
 //   * removals of imports, tags with all their props, and comments; byte
 //     preservation of everything else (T3-1);
+//   * the grammar boundary: fenced-code-block and inline-code-span bytes are
+//     content — callers pass them as content pieces, and the oracle
+//     preserves them verbatim, construct-like spellings included (T3-1's
+//     boundary, the P-2 generator's fence/span staging);
 //   * text(...) replacement, fully expanded through chains, expansions
 //     inserted verbatim (T3-2);
 //   * the line-drop rule with all counter-cases, the 1.4 class boundaries —
@@ -102,6 +106,63 @@ test("S-6 (T3-1): tables, code fences, trailing spaces, and blank lines are pres
 
 test("S-6 (T3-1): a document without constructs compiles to itself, final terminator-less line included", () => {
   expectCompiled([content("plain\ntext  \n\nend ")], "plain\ntext  \n\nend ");
+});
+
+// --- grammar boundary: fence/span bytes are content (T3-1, P-2) --------------
+
+test("S-6 (T3-1/P-2): fenced-code-block bytes spelling construct-like forms are content — preserved verbatim while real constructs are removed", () => {
+  // The P-2 generator stages fences as content pieces (constructs exist only
+  // where the MDX parse yields them); the oracle must preserve every fence
+  // byte and never scan content for construct-like patterns.
+  const fence =
+    '```md\n<S id="x">\nimport X from "./X.xspec"\n{text("a")}\n```';
+  expectCompiled(
+    [
+      removal('import BASE from "./BASE.xspec"'),
+      content(`\n${fence}\n`),
+      removal("{/* own-line comment */}"),
+      content("\ntail\n"),
+    ],
+    `${fence}\ntail\n`,
+  );
+});
+
+test("S-6 (T3-1/P-2): a tilde fence's blank and whitespace-only interior lines are untouched content and are kept", () => {
+  // No construct touches the fence's interior lines, so the drop rule never
+  // fires for them — an empty and a whitespace-only interior line survive
+  // exactly, CRLF terminators included.
+  const fence = "~~~ts\r\n\r\n \t\r\n<div>\r\n~~~";
+  expectCompiled(
+    [
+      removal('<S id="a">'),
+      content(`\r\n${fence}\r\n`),
+      removal("</S>"),
+      content("\r\n"),
+    ],
+    `${fence}\r\n`,
+  );
+});
+
+test("S-6 (T3-1/P-2): inline-code-span bytes are non-whitespace content — a removal-affected line holding only the span is kept", () => {
+  expectCompiled(
+    [
+      content("a\n"),
+      removal("{/* c */}"),
+      content('`<S id="x">{text("a")}`\nb\n'),
+    ],
+    'a\n`<S id="x">{text("a")}`\nb\n',
+  );
+});
+
+test("S-6 (T3-2/P-2): an expansion carrying fence bytes is inserted verbatim — an embedded target's fences ride the replacement", () => {
+  expectCompiled(
+    [
+      content("pre\n"),
+      embedding('{text("t")}', "```\n<div>\n```\n"),
+      content("\npost\n"),
+    ],
+    "pre\n```\n<div>\n```\n\npost\n",
+  );
 });
 
 // --- replacement (T3-2) ------------------------------------------------------
