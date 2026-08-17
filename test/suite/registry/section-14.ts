@@ -1,5 +1,5 @@
 // TEST-SPEC §14 (validation errors: the reporting contract) — SUITE-49:
-// T14-1 … T14-7.
+// T14-1 … T14-8.
 //
 // Sections 1–13 exercise each numbered condition in its home context; these
 // are the reporting-contract tests: multi-error completeness with
@@ -10,10 +10,13 @@
 // surfaces reports which condition (T14-4) — grammar selection by file
 // name (T14-5), the stable-code contract — each of the 23 conditions'
 // exact token as the finding's `code`, `null` where 14 assigns none
-// (T14-6) — and the refusal-reason contract: each stable refusal code with
+// (T14-6) — the refusal-reason contract: each stable refusal code with
 // its concerned file, range, or identity, every applicable reason together,
 // and the invalid-workspace refusal reporting numbered findings alone
-// (T14-7).
+// (T14-7) — and the location-cardinality contract: a condition several
+// constructs jointly violate is one finding locating every participant,
+// each in its containing file, in the pinned within-finding location order
+// (T14-8).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -139,6 +142,30 @@
 //   the rename staged to ALSO collide — the control arm on the valid twin
 //   pins the staged-to-collide premise (exactly the collision refusal),
 //   then the broken workspace reports the validation findings alone.
+// - T14-8 owns the every-participant strictness the home tests SOME-quantify
+//   (T1.3-5's and T2.1-5's per-file tolerance, T5.3-1's file-dimension
+//   binding, T14-7's mentions-location): exact finding counts and an
+//   index-wise per-participant assertion — exactly one location per
+//   participating construct, each within its construct's byte window (the
+//   module-header window convention). Participant sequences are declared in
+//   the 12.7 within-finding order — document order within one file,
+//   file-path-byte order across files — so the index-wise assertion also
+//   pins "file bytes, then start, then end" value-wise, beside the
+//   form-exact decoder's enforcement of that order on every decoded finding
+//   (forms.ts, S-5-guarded); no staged pair of participants shares file and
+//   start, so the end tiebreak stays decoder-enforced. The no-occurrence
+//   embedding spelling's container range is byte-EXACT, no end-widening:
+//   SPEC 14 pins the full braced container, opening brace through closing
+//   brace — the span its occurrence would occupy (5.7) — keeping T11.4-6's
+//   byte classification exact. The cross-file dependency cycle necessarily
+//   co-stages the mutual-import spec import cycle (the T5.3-1 rationale: a
+//   cross-file `depends` edge needs an external reference, external
+//   references need imports, so A→B→A needs mutual imports); its report is
+//   exactly two 14.9 findings, told apart by their located participants —
+//   the reference spellings (element windows) vs the import declarations
+//   (import windows), disjoint by construction — while the pure
+//   mutual-import staging (bindings unused, so no dependency edge exists,
+//   SPEC 2.1) isolates the import cycle as exactly one 14.9 finding.
 
 import { Buffer } from "node:buffer";
 import type { Finding, GraphEdge } from "../../helpers/adapters/index.js";
@@ -2514,7 +2541,477 @@ const T14_7 = defineProductTest({
   },
 });
 
-/** TEST-SPEC §14 T14-1…T14-7, in canonical ID order (SUITE-49). */
+// ---------------------------------------------------------------------------
+// T14-8 — location cardinality
+// ---------------------------------------------------------------------------
+
+/**
+ * One expected participant of a jointly violated condition: its containing
+ * file and its construct's byte window (the module-header window
+ * convention). Participant sequences are declared in the 12.7
+ * within-finding location order — document order within one file,
+ * file-path-byte order across files — so the index-wise assertions below
+ * also pin that order value-wise.
+ */
+interface ParticipantExpectation {
+  readonly file: string;
+  readonly window: { readonly start: number; readonly end: number };
+}
+
+/**
+ * Whether a finding's locations match a participant sequence index-wise:
+ * exactly one location per participant, each in the participant's file
+ * within its window. Boolean — the W1 cycle arm classifies its two 14.9
+ * findings with it; `assertFindingLocatesParticipants` is the diagnosed
+ * form.
+ */
+function locationsMatchParticipants(
+  finding: Finding,
+  participants: readonly ParticipantExpectation[],
+): boolean {
+  return (
+    finding.locations.length === participants.length &&
+    finding.locations.every((location, index) => {
+      const expected = participants[index]!;
+      return (
+        location.file === expected.file &&
+        location.range.start >= expected.window.start &&
+        location.range.end <= expected.window.end
+      );
+    })
+  );
+}
+
+/**
+ * Assert one finding locates EVERY participant and nothing else (SPEC 14's
+ * location-cardinality rule — the every-participant strictness T14-8 owns;
+ * no SOME-quantified tolerance): exactly one location per participating
+ * construct, index-wise in the declared order, each in its containing file
+ * within its construct's byte window; and, locating in source, the finding
+ * concerns no path (12.7: `path` null for located conditions).
+ */
+function assertFindingLocatesParticipants(
+  finding: Finding,
+  participants: readonly ParticipantExpectation[],
+  context: string,
+): void {
+  if (finding.locations.length !== participants.length) {
+    fail(
+      `${context}: one finding carries a location for every participating ` +
+        `construct — no representative chosen, none beside (SPEC 14, 12.7); ` +
+        `expected exactly ${String(participants.length)} location(s), got ` +
+        `${String(finding.locations.length)}: ` +
+        `${JSON.stringify(finding.locations)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+  participants.forEach((expected, index) => {
+    const location = finding.locations[index]!;
+    if (
+      location.file !== expected.file ||
+      location.range.start < expected.window.start ||
+      location.range.end > expected.window.end
+    ) {
+      fail(
+        `${context}: location[${String(index)}] must locate its participant ` +
+          `in ${JSON.stringify(expected.file)} within the construct's byte ` +
+          `window [${String(expected.window.start)}, ` +
+          `${String(expected.window.end)}] (SPEC 14: each participant located ` +
+          `in the file containing it; 12.7 orders locations by file bytes, ` +
+          `then start, then end — the declared participant order); got ` +
+          `${JSON.stringify(finding.locations)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+  });
+  if (finding.path !== null) {
+    fail(
+      `${context}: a located condition's finding concerns no path — ` +
+        `\`path\` null (SPEC 12.7, 14); got ${JSON.stringify(finding.path)} ` +
+        `(message: ${JSON.stringify(finding.message)})`,
+    );
+  }
+}
+
+// Triple-duplicated ID (SPEC 14.3, 14): three bearers of `dup`, each a
+// structurally valid top-level section (one segment against the empty
+// prefix), so the duplication is the workspace's only condition — one
+// condition-3 finding with three locations, one per bearer, no
+// representative chosen (a product reporting only the later bearers, or one
+// finding per occurrence, fails the exact cardinality).
+const T14_8_DUP_FILE = "specs/Dup.mdx";
+const T14_8_DUP_BEARERS: readonly string[] = [
+  '<S id="dup">\nFirst bearer text.\n</S>',
+  '<S id="dup">\nSecond bearer text.\n</S>',
+  '<S id="dup">\nThird bearer text.\n</S>',
+];
+const T14_8_DUP_SOURCE = `${T14_8_DUP_BEARERS.join("\n\n")}\n`;
+const T14_8_DUP_PARTICIPANTS: readonly ParticipantExpectation[] =
+  T14_8_DUP_BEARERS.map((construct, index) => ({
+    file: T14_8_DUP_FILE,
+    window: byteWindow(
+      T14_8_DUP_BEARERS.slice(0, index)
+        .map((bearer) => `${bearer}\n\n`)
+        .join(""),
+      construct,
+    ),
+  }));
+
+// Import-binding collision (SPEC 2.1, 14.15): two imports binding `A`, each
+// individually valid (single default binding designating a discovered spec
+// source; an unused binding is valid and records no edges), so the
+// collision is the file's only condition — one condition-15 finding locating
+// every colliding declaration, the first included.
+const T14_8_COL_FILE = "specs/Col.mdx";
+const T14_8_COL_IMPORTS: readonly string[] = [
+  'import A from "./One.xspec"',
+  'import A from "./Two.xspec"',
+];
+const T14_8_COL_SOURCE = [
+  ...T14_8_COL_IMPORTS,
+  "",
+  '<S id="col">',
+  "Collision-file body text.",
+  "</S>",
+  "",
+].join("\n");
+const T14_8_COL_PARTICIPANTS: readonly ParticipantExpectation[] =
+  T14_8_COL_IMPORTS.map((declaration, index) => ({
+    file: T14_8_COL_FILE,
+    window: byteWindow(
+      T14_8_COL_IMPORTS.slice(0, index)
+        .map((line) => `${line}\n`)
+        .join(""),
+      declaration,
+    ),
+  }));
+
+// Cross-file dependency cycle a→b→a with its unavoidable mutual-import spec
+// import cycle (the module-header note): exactly two 14.9 findings — the
+// dependency cycle's full path rendered as every participating reference
+// spelling's location (the `d`-bearing elements, one per file), the import
+// cycle's as every participating import declaration's — told apart by which
+// disjoint windows their locations fall in.
+const T14_8_CYC_A_FILE = "specs/CycA.mdx";
+const T14_8_CYC_B_FILE = "specs/CycB.mdx";
+const T14_8_CYC_A_IMPORT = 'import B from "./CycB.xspec"';
+const T14_8_CYC_A_ELEMENT = '<S id="a" d={B.b}>\nCycle A behavior text.\n</S>';
+const T14_8_CYC_B_IMPORT = 'import A from "./CycA.xspec"';
+const T14_8_CYC_B_ELEMENT = '<S id="b" d={A.a}>\nCycle B behavior text.\n</S>';
+const T14_8_CYC_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": SPECS_ONLY_CONFIG,
+  [T14_8_CYC_A_FILE]: `${T14_8_CYC_A_IMPORT}\n\n${T14_8_CYC_A_ELEMENT}\n`,
+  [T14_8_CYC_B_FILE]: `${T14_8_CYC_B_IMPORT}\n\n${T14_8_CYC_B_ELEMENT}\n`,
+};
+const T14_8_CYC_SPELLING_PARTICIPANTS: readonly ParticipantExpectation[] = [
+  {
+    file: T14_8_CYC_A_FILE,
+    window: byteWindow(`${T14_8_CYC_A_IMPORT}\n\n`, T14_8_CYC_A_ELEMENT),
+  },
+  {
+    file: T14_8_CYC_B_FILE,
+    window: byteWindow(`${T14_8_CYC_B_IMPORT}\n\n`, T14_8_CYC_B_ELEMENT),
+  },
+];
+const T14_8_CYC_IMPORT_PARTICIPANTS: readonly ParticipantExpectation[] = [
+  { file: T14_8_CYC_A_FILE, window: byteWindow("", T14_8_CYC_A_IMPORT) },
+  { file: T14_8_CYC_B_FILE, window: byteWindow("", T14_8_CYC_B_IMPORT) },
+];
+
+// Pure spec import cycle (SPEC 2.1: invalid even when no requirement-level
+// dependency cycle exists): mutual imports whose bindings are never used —
+// valid individually, recording no edges — so the import cycle is the
+// workspace's only condition, one condition-9 finding locating every
+// participating import declaration.
+const T14_8_IMP_A_FILE = "specs/ImpA.mdx";
+const T14_8_IMP_B_FILE = "specs/ImpB.mdx";
+const T14_8_IMP_A_IMPORT = 'import B from "./ImpB.xspec"';
+const T14_8_IMP_B_IMPORT = 'import A from "./ImpA.xspec"';
+const T14_8_IMP_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": SPECS_ONLY_CONFIG,
+  [T14_8_IMP_A_FILE]: `${T14_8_IMP_A_IMPORT}\n\n<S id="ia">\nImport-cycle A text, binding unused.\n</S>\n`,
+  [T14_8_IMP_B_FILE]: `${T14_8_IMP_B_IMPORT}\n\n<S id="ib">\nImport-cycle B text, binding unused.\n</S>\n`,
+};
+const T14_8_IMP_PARTICIPANTS: readonly ParticipantExpectation[] = [
+  { file: T14_8_IMP_A_FILE, window: byteWindow("", T14_8_IMP_A_IMPORT) },
+  { file: T14_8_IMP_B_FILE, window: byteWindow("", T14_8_IMP_B_IMPORT) },
+];
+
+// No-occurrence MDX embedding spelling (SPEC 14, 14.6, 5.7): a local
+// `text(...)` embedding whose target resolves to nothing records no
+// occurrence, so its condition-6 finding's range is the FULL braced
+// container, opening brace through closing brace — the span its occurrence
+// would occupy — byte-exact (prose on both sides keeps the container off
+// the file's ends, so an end-widened or line-granular range fails).
+const T14_8_EMB_FILE = "specs/Emb.mdx";
+const T14_8_EMB_PREFIX = '<S id="emb">\nProse before the embedding.\n\n';
+const T14_8_EMB_CONTAINER = '{text("emb.nope")}';
+const T14_8_EMB_SOURCE = `${T14_8_EMB_PREFIX}${T14_8_EMB_CONTAINER}\n\nProse after keeps the container off the file end.\n</S>\n`;
+const T14_8_EMB_RANGE = {
+  start: Buffer.byteLength(T14_8_EMB_PREFIX, "utf8"),
+  end:
+    Buffer.byteLength(T14_8_EMB_PREFIX, "utf8") +
+    Buffer.byteLength(T14_8_EMB_CONTAINER, "utf8"),
+};
+
+// Policy finding (SPEC 7.5, 14.12, 12.7): one forbidden rule over the spec
+// group and one `depends` edge between its nodes — `build` never evaluates
+// policy, so the premise build passes and `check` reports exactly the one
+// violation, locations `[]`, path `null`, its context identities alone in
+// 14.12's contractual order.
+const T14_8_POLICY_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "no-spec-deps",
+      type: "forbidden",
+      from: { group: "main" },
+      to: { group: "main" }
+    }
+  ]
+})
+`;
+const T14_8_POL_FILE = "specs/Pol.mdx";
+const T14_8_POL_SOURCE = [
+  '<S id="a">',
+  "Policy target text.",
+  "</S>",
+  "",
+  '<S id="p" d={"a"}>',
+  "Policy source text.",
+  "</S>",
+  "",
+].join("\n");
+
+const T14_8 = defineProductTest({
+  id: "T14-8",
+  title:
+    "location cardinality: a condition several constructs jointly violate is one finding locating every participant, each in its containing file — a triple-duplicated ID is one condition-3 finding with three locations, one per bearer, no representative chosen; an import-binding collision is one condition-15 finding locating every colliding declaration; a cross-file dependency cycle is one condition-9 finding locating its full path — every participating reference spelling — beside exactly one further condition-9 finding locating the co-staged spec import cycle's every participating import declaration, a pure mutual-import cycle with unused bindings reporting exactly that one finding; a no-occurrence MDX embedding spelling's condition-6 finding has the full braced container as its byte-exact range, the span its occurrence would occupy, keeping T11.4-6's byte classification exact; a policy finding carries locations [], path null, its context identities alone; location order within a finding is file bytes, then start, then end (SPEC 14, 12.7, 5.7, 5.3, 2.1, 14.12)",
+  timeoutMs: 180_000,
+  run: async (product) => {
+    // --- Triple-duplicated ID → one 14.3 finding with three locations.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [T14_8_DUP_FILE]: T14_8_DUP_SOURCE,
+        },
+      },
+      async (workspace) => {
+        const context = "T14-8 `build --json` over a triple-duplicated ID";
+        const findings = await buildFindings(product, workspace, context);
+        assertConditionCounts(
+          findings,
+          { "14.3": 1 },
+          `${context} — the duplication is ONE finding (one condition the ` +
+            `three bearers jointly violate), never one per occurrence, and ` +
+            `the workspace's only condition (SPEC 14, 14.3)`,
+        );
+        assertFindingLocatesParticipants(
+          findingOf(findings, "14.3", context),
+          T14_8_DUP_PARTICIPANTS,
+          `${context}: the condition-3 finding locates every bearer`,
+        );
+      },
+    );
+
+    // --- Import-binding collision → one 14.15 finding locating every
+    // colliding declaration.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [T14_8_COL_FILE]: T14_8_COL_SOURCE,
+          "specs/One.mdx": '<S id="one">\nTarget one text.\n</S>\n',
+          "specs/Two.mdx": '<S id="two">\nTarget two text.\n</S>\n',
+        },
+      },
+      async (workspace) => {
+        const context = "T14-8 `build --json` over an import-binding collision";
+        const findings = await buildFindings(product, workspace, context);
+        assertConditionCounts(
+          findings,
+          { "14.15": 1 },
+          `${context} — the collision is ONE finding (one condition the two ` +
+            `declarations jointly violate) and the workspace's only ` +
+            `condition: each import is individually valid, unused bindings ` +
+            `included (SPEC 2.1, 14, 14.15)`,
+        );
+        assertFindingLocatesParticipants(
+          findingOf(findings, "14.15", context),
+          T14_8_COL_PARTICIPANTS,
+          `${context}: the condition-15 finding locates every colliding ` +
+            `declaration — the first included`,
+        );
+      },
+    );
+
+    // --- Cross-file dependency cycle → one 14.9 finding locating every
+    // participating reference spelling, beside the one 14.9 finding locating
+    // the unavoidable import cycle's every participating import declaration.
+    await withWorkspace({ files: T14_8_CYC_FILES }, async (workspace) => {
+      const context =
+        "T14-8 `build --json` over a cross-file dependency cycle (with its " +
+        "unavoidable mutual-import spec import cycle)";
+      const findings = await buildFindings(product, workspace, context);
+      assertConditionCounts(
+        findings,
+        { "14.9": 2 },
+        `${context} — two distinct condition-9 violations are present (the ` +
+          `dependency cycle; the spec import cycle), each ONE finding — ` +
+          `never merged, never split per file or per rotation (SPEC 5.3, ` +
+          `2.1, 14, 14.9)`,
+      );
+      const dependencyMatches = findings.filter((finding) =>
+        locationsMatchParticipants(finding, T14_8_CYC_SPELLING_PARTICIPANTS),
+      );
+      const importMatches = findings.filter((finding) =>
+        locationsMatchParticipants(finding, T14_8_CYC_IMPORT_PARTICIPANTS),
+      );
+      if (dependencyMatches.length !== 1 || importMatches.length !== 1) {
+        fail(
+          `${context}: of the two 14.9 findings, exactly one must locate ` +
+            `the dependency cycle's full path — every participating ` +
+            `reference spelling, one location per \`d\`-bearing element in ` +
+            `its containing file — and exactly one must locate every ` +
+            `participating import declaration (SPEC 14, 5.3, 2.1, 12.7; the ` +
+            `windows are disjoint by construction); got ` +
+            `${String(dependencyMatches.length)} spelling-located and ` +
+            `${String(importMatches.length)} import-located among ` +
+            `${JSON.stringify(findings)}`,
+        );
+      }
+      assertFindingLocatesParticipants(
+        dependencyMatches[0]!,
+        T14_8_CYC_SPELLING_PARTICIPANTS,
+        `${context}: the dependency-cycle finding`,
+      );
+      assertFindingLocatesParticipants(
+        importMatches[0]!,
+        T14_8_CYC_IMPORT_PARTICIPANTS,
+        `${context}: the import-cycle finding`,
+      );
+    });
+
+    // --- Pure spec import cycle → exactly one 14.9 finding locating every
+    // participating import declaration.
+    await withWorkspace({ files: T14_8_IMP_FILES }, async (workspace) => {
+      const context =
+        "T14-8 `build --json` over a pure mutual-import spec import cycle " +
+        "(bindings unused, so no dependency edge exists)";
+      const findings = await buildFindings(product, workspace, context);
+      assertConditionCounts(
+        findings,
+        { "14.9": 1 },
+        `${context} — the import cycle is the workspace's only condition ` +
+          `and ONE finding (SPEC 2.1, 14, 14.9)`,
+      );
+      assertFindingLocatesParticipants(
+        findingOf(findings, "14.9", context),
+        T14_8_IMP_PARTICIPANTS,
+        `${context}: the condition-9 finding locates every participating ` +
+          `import declaration`,
+      );
+    });
+
+    // --- No-occurrence MDX embedding spelling → the 14.6 finding's range is
+    // the full braced container, byte-exact.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [T14_8_EMB_FILE]: T14_8_EMB_SOURCE,
+        },
+      },
+      async (workspace) => {
+        const context =
+          "T14-8 `build --json` over a no-occurrence MDX embedding spelling";
+        const findings = await buildFindings(product, workspace, context);
+        assertConditionCounts(
+          findings,
+          { "14.6": 1 },
+          `${context} — the unresolving local \`text(...)\` target is the ` +
+            `workspace's only condition (SPEC 14.6)`,
+        );
+        const finding = findingOf(findings, "14.6", context);
+        assertSameJson(
+          finding.locations,
+          [{ file: T14_8_EMB_FILE, range: T14_8_EMB_RANGE }],
+          `${context}: the condition-6 finding's one location is the FULL ` +
+            `braced container, opening brace through closing brace — the ` +
+            `span its occurrence would occupy — byte-exact (SPEC 14, 5.7; ` +
+            `keeping T11.4-6's byte classification exact)`,
+        );
+        if (finding.path !== null) {
+          fail(
+            `${context}: a located condition's finding concerns no path — ` +
+              `\`path\` null (SPEC 12.7, 14); got ` +
+              `${JSON.stringify(finding.path)}`,
+          );
+        }
+      },
+    );
+
+    // --- Policy finding → locations [], path null, context identities alone.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": T14_8_POLICY_CONFIG,
+          [T14_8_POL_FILE]: T14_8_POL_SOURCE,
+        },
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T14-8 policy staging `build` — build never evaluates policy " +
+            "(SPEC 7.5, 12.1), so the premise build passes",
+        );
+        const context =
+          "T14-8 `check --json` over the one forbidden `depends` edge";
+        const findings = await checkFindings(product, workspace, context);
+        assertConditionCounts(
+          findings,
+          { "14.12": 1 },
+          `${context} — the forbidden rule's one violation (the sole ` +
+            `depends/embeds/references edge between "main" nodes) is the ` +
+            `freshly built workspace's only finding (SPEC 7.5, 14.12)`,
+        );
+        assertSameJson(
+          findings.map((finding) => ({
+            locations: finding.locations,
+            path: finding.path,
+            identities: finding.identities,
+          })),
+          [
+            {
+              locations: [],
+              path: null,
+              identities: [
+                "no-spec-deps",
+                `${T14_8_POL_FILE}#p`,
+                "depends",
+                `${T14_8_POL_FILE}#a`,
+              ],
+            },
+          ],
+          `${context}: a policy finding, constraining an edge rather than ` +
+            `any file's content, carries no in-source locations and ` +
+            `concerns no path — \`locations\` [], \`path\` null — its ` +
+            `context identities alone, in order the violated rule's name ` +
+            `and the edge's source identity, kind token, and target ` +
+            `identity (SPEC 14.12, 12.7)`,
+        );
+      },
+    );
+  },
+});
+
+/** TEST-SPEC §14 T14-1…T14-8, in canonical ID order (SUITE-49). */
 export const section14ValidationTests: readonly ProductTestEntry[] = [
   T14_1,
   T14_2,
@@ -2523,4 +3020,5 @@ export const section14ValidationTests: readonly ProductTestEntry[] = [
   T14_5,
   T14_6,
   T14_7,
+  T14_8,
 ];

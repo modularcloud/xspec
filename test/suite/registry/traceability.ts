@@ -420,6 +420,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // T6.4-*/T6.5-*/T5.3-1/T12.7-*/T12.0-*; the home passage "14" also
   // carries the invalid-workspace arm's asserted numbered condition (14.5).
   "T14-7": ["14"],
+  // T14-8: 5.7/11.4 (the embedding container span and the byte
+  // classification it keeps exact) and 12.7 (the finding form's location
+  // order) are context with home coverage at T5.7-2/T11.4-6/T12.7-*; 2.1
+  // and 5.3 (the staged cycles) have home coverage at T2.1-5/T5.3-*. The
+  // home passage "14" carries the asserted numbered conditions (14.3,
+  // 14.15, 14.9, 14.6, 14.12).
+  "T14-8": ["14"],
   "T15-1": ["15"],
   "P-1": ["1.4", "2.6"],
   "P-2": ["3"],

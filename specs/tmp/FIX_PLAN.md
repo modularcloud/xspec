@@ -3612,10 +3612,56 @@ certify against FP-091's fixtures once those land.
   the one 14.5 finding alone). `npm run test:self` unchanged 2 planned
   mid-loop reds (certification-document ×2 → FP-091); S-1/S-5/S-7/
   certification green (S-7 sweeps T14-7 against the stub, diagnosed).]
-- [ ] FP-081 — Implement T14-8: location cardinality — one finding locating
+- [x] FP-081 — Implement T14-8: location cardinality — one finding locating
   every participant (triple-duplicate ID, import collision, cycle full
   path, embedding container span); within-finding location order. [R2 #13;
   TEST-SPEC §14]
+  [Done 2026-08-17: T14-8 registered in section-14.ts — six own stagings,
+  each arm's condition multiset exact and its participants asserted
+  index-wise via new every-participant helpers
+  (`assertFindingLocatesParticipants`: exact location count, per-participant
+  byte window, `path` null; `locationsMatchParticipants` classifies the
+  two-cycle report), the every-participant strictness the home tests
+  SOME-quantify (T1.3-5/T2.1-5/T5.3-1/T14-7 notes): (i) triple-duplicated
+  ID → exactly one 14.3 finding with three locations, one per bearer
+  window; (ii) two imports binding `A` → exactly one 14.15 finding locating
+  both declarations, the first included; (iii) cross-file `depends` cycle
+  a→b→a with its unavoidable mutual-import spec import cycle (the T5.3-1
+  rationale) → exactly two 14.9 findings, told apart by disjoint windows —
+  one locating every participating reference spelling (the `d`-bearing
+  elements, one per file), one every participating import declaration;
+  (iv) pure mutual-import cycle with unused bindings (SPEC 2.1: valid
+  individually, recording no edges) → exactly one 14.9 finding locating
+  both declarations; (v) no-occurrence embedding `{text("emb.nope")}` →
+  one 14.6 finding whose range is the full braced container asserted
+  BYTE-EXACT [42,60) — no widening, the T14-8 pin keeping T11.4-6's byte
+  classification exact; (vi) forbidden-rule policy violation via
+  build-then-`check --json` → exactly one 14.12 finding, locations [],
+  path null, identities exactly [rule, source, kind token, target].
+  Participant sequences are declared in the 12.7 within-finding order
+  (document order in-file, file bytes across files), so the index-wise
+  assertions pin the order value-wise beside the decoder's global
+  enforcement (forms.ts, S-5-guarded; the end tiebreak admits no natural
+  fixture — no staged pair shares file and start — and stays
+  decoder-enforced). Traceability "T14-8": ["14"] (5.7/11.4/12.7/2.1/5.3
+  carriage context, the T14-6/-7 precedent); no certification scope
+  (CERTIFICATIONS.md Exclusions name T14-8 explicitly). Verified:
+  typecheck/format clean; T14-8 red-as-diagnosed at the first arm's
+  form-exact decode ("expected no member \"condition\"" — the FP-001-class
+  product gap), section-14 7→8 failed with T14-1..T14-7 unchanged; direct
+  CLI probes against the built product prove every staging fires exactly
+  the diagnosed multiset and the cardinality teeth are real — dup: two
+  old-shape per-occurrence findings locating only the later bearers;
+  collision: one finding locating only the second declaration; the
+  two-cycle staging: exactly the two 14.9 findings (import cycle at the
+  CycA import [0,28), dependency cycle at the CycA element [30,76)) each
+  locating only its CycA participant; pure import cycle: one finding, ImpA
+  declaration only; emb: 14.6 located at the argument [48,58) where the
+  container is [42,60); policy: build 0 then check 1 with exactly the one
+  old-shape 14.12 naming the staged edge. `npm run test:self` unchanged 2
+  planned mid-loop reds (certification-document ×2 → FP-091), 268 passed;
+  S-1/S-5/S-7/certification green (S-7 sweeps T14-8 against the stub,
+  diagnosed).]
 
 ## Stage H — property layer (§16) and oracles (S-6)
 
