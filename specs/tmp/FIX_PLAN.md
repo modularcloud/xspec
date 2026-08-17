@@ -3709,12 +3709,58 @@ certify against FP-091's fixtures once those land.
   unchanged 2 planned mid-loop reds (certification-document ×2 → FP-091),
   272 passed.]
 
-- [ ] FP-083 — Implement the P-5 section-move category oracle + its S-6
+- [x] FP-083 — Implement the P-5 section-move category oracle + its S-6
   vetted fixed-vector suite. [R2 #42; TEST-SPEC §16 P-5, §17 S-6; SPEC 6.2,
   5.6]
   New oracle under `test/helpers/oracles/`; vetted vectors: SPEC 6.2's
   worked straddling-line case plus the T6.2-3/T6.2-4 cases, in a new
   `test/self/s6-*-oracle.test.ts`.
+  [Done 2026-08-17: `test/helpers/oracles/section-move.ts`
+  (`predictSectionMoveImpact`) + `test/self/s6-section-move-oracle.test.ts`
+  (17 vectors). Interface FP-084 wires to: input is the BEFORE state in
+  baseline identities — origin/target piece-tree documents (content /
+  removal / embedding-with-expansion-and-target / nested sections carrying
+  `id`, tag bytes, `depends`; same object for a same-file move;
+  `{createdPath}` for a created target) plus movedId/newId and `otherNodes`
+  (untouched files' children+edgeTargets, for the cascade graph) — the
+  oracle derives the after side itself (6.5 at the piece level: origin
+  deletion enters the compile as one removal piece, insertion appends the
+  moved construct as the parent's last child with the U+000A rules judged
+  over post-deletion bytes, self-closing target parent rewritten per
+  T6.5-2) and reports in current identities: per-node full category
+  predictions ({required|tolerated-optional, attributionWithin,
+  attributionMustInclude} — the T6.2-3 two-sided tolerance is
+  required:false on cascades whose only cause is a relocated one-side-only
+  member; `metadata-changed` excluded by vocabulary), changed/added sets,
+  identityMap, and before/after own-content token sequences (runs + child/
+  embed reference tokens, the P-4 shape). Every logical line's keep/drop
+  decision is delegated to P-2's `compileMarkdown` (the line's pieces plus
+  terminator; empty output = dropped), so the two oracles cannot disagree
+  on SPEC 3 — expansion semantics included. Guards FP-084's generator must
+  respect: a sequence change outside {origin parent, target parent, moved
+  subtree} throws (P-5's exactly-three-groups pin — no other node's bytes
+  on a line whose keep/drop status the move flips); single-line tags;
+  self-closing = empty body; complete cascade graph (dangling edge targets
+  throw); embedding expansions are emptiness-stable across the move
+  (documented staged scope — only emptiness enters the drop decision, and
+  the generators stage no empty subtree texts). Vectors: T6.2-3 clean
+  boundary (full table incl. Watch dependents' exact attributions), SPEC
+  6.2's worked case (origin remainder+terminator contributed, destination
+  line dropped, moved node changed, parents/roots with the documented
+  tolerance), T6.2-4 pure final-position (empty table, sequence reproduced)
+  + non-final contrast (coincident parent alone changed), created-target
+  root changed-as-added carrying no other category over a changed moved
+  descendant, self-closing moved section and self-closing target parent
+  (T6.5-2 bytes), mid-line insertion's preceding U+000A landing in the
+  parent's run, non-empty-expansion-keeps-line delegation, 8 misuse guards
+  (sibling-flip staging first). Teeth proven by 5 scratch mutation probes
+  (each reverted): deletion-as-excise 2 vectors failed, dropped preceding
+  newline 1, added-rule removal 1, expansion stripping 1,
+  tolerance-made-required 3. Verified: typecheck/format clean; suite 17/17;
+  `npm run test:self` unchanged 2 planned mid-loop reds
+  (certification-document ×2 → FP-091), 289 passed. section-16-p5-p6.ts
+  untouched — wiring is FP-084's task (FP-085 extracts the P-6 graph-diff
+  oracle separately).]
 
 - [ ] FP-084 — Generalize P-5 to random section moves using the full
   6.2/5.6 oracle. [R2 #37; TEST-SPEC §16 P-5] After FP-083.
