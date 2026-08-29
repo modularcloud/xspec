@@ -260,4 +260,51 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       violator("VIOL-DISC-DERIVED", "conf-disc/bin-derived.mjs", ["T7-6"]),
     ],
   ),
+  // CONF-AVAIL (§CONF-AVAIL): availability answers and JSON datum forms —
+  // `view` (with and without `--text`) and `occurrences` over spec-only
+  // `.mdx` workspaces, answering in the form-exact 12.7 document forms with
+  // the three-state datums (plain value / stated `null` / the unavailability
+  // marker), the 11.2 availability rules (spelled-identity definedness,
+  // chain conditions, resolution through defined identities, whole-value
+  // expansion poisoning, removal classification by form), occurrence
+  // records per SPEC 5.7/11.3, the `--file`/`--to` domain rules of 11.3,
+  // the raw attribute and import data of 11.4, findings with stable codes
+  // for the staged conditions, and the 11.2 exit discipline.
+  conformer(
+    "CONF-AVAIL",
+    "conf-avail/bin.mjs",
+    ["T11.2-2", "T11.2-4", "T11.3-4", "T11.4-1", "T11.4-3", "T11.4-4"],
+    [
+      // VIOL-AVAIL-NULLMARKER: the unavailability marker is never emitted —
+      // every datum the rules of SPEC 11.2 leave undefined is carried as
+      // `null` in place of {"unavailable": true} (12.7). Which data are
+      // undefined, all defined values, findings, exit codes, and every
+      // other document member are unchanged.
+      violator("VIOL-AVAIL-NULLMARKER", "conf-avail/bin-nullmarker.mjs", [
+        "T11.2-2",
+        "T11.2-4",
+        "T11.4-3",
+        "T11.4-4",
+      ]),
+      // VIOL-AVAIL-OMIT: `null`-valued members are omitted — every member
+      // whose value an answer would carry as the stated `null` (12.7) is
+      // absent from the emitted document (a viewed root's `tags` and
+      // `coverage` and a located finding's `path` among them). Members with
+      // plain, marker, or list values, which findings exist, and exit codes
+      // are unchanged.
+      violator("VIOL-AVAIL-OMIT", "conf-avail/bin-omit.mjs", [
+        "T11.2-2",
+        "T11.2-4",
+        "T11.4-1",
+        "T11.4-3",
+        "T11.4-4",
+      ]),
+      // VIOL-AVAIL-NOFILE: `occurrences` does not apply the `--file`
+      // restriction — the flag and its argument checks behave as specified
+      // (11.3), but the consulted domain is the entire discovered set,
+      // exactly as with the flag absent. `--to` selection, `view`, and
+      // every other behavior are unchanged.
+      violator("VIOL-AVAIL-NOFILE", "conf-avail/bin-nofile.mjs", ["T11.3-4"]),
+    ],
+  ),
 ];

@@ -31,8 +31,8 @@ const CERTIFICATIONS_PATH = fileURLToPath(
 // equality below carries the detail; these pins force a deliberate visit to
 // this gate when the document's fixture set changes, and guard against a
 // parser regression losing entries wholesale.
-const EXPECTED_CONFORMERS = 4;
-const EXPECTED_VIOLATORS = 13;
+const EXPECTED_CONFORMERS = 5;
+const EXPECTED_VIOLATORS = 16;
 
 /** A violator entry as parsed from CERTIFICATIONS.md. */
 interface DocumentViolator {
@@ -265,7 +265,7 @@ function parseDocument(): readonly DocumentConformer[] {
   );
 }
 
-test("CERTIFICATIONS.md defines exactly 4 conformers and 13 violators (C-1 whole-document gate)", () => {
+test("CERTIFICATIONS.md defines exactly 5 conformers and 16 violators (C-1 whole-document gate)", () => {
   const document = parseDocument();
   expect(
     {

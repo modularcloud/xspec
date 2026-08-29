@@ -4035,7 +4035,7 @@ certify against FP-091's fixtures once those land.
 
 ## Stage I — CONF-AVAIL certification family
 
-- [ ] FP-091 — Build the CONF-AVAIL fixture family, wire the manifest, and
+- [x] FP-091 — Build the CONF-AVAIL fixture family, wire the manifest, and
   flip the whole-document pins. [R3 gaps 1–2, R2 #40, VERIFY; CERTIFICATIONS.md
   CONF-AVAIL; TEST-SPEC §17 C-1/C-2]
   After the six in-scope tests are registered (FP-051, FP-053, FP-059,
@@ -4056,6 +4056,34 @@ certify against FP-091's fixtures once those land.
     certification (conformer passes every in-scope test; each violator
     fails at least one certified test) — this task clears the three VERIFY
     certification-document failures.
+  [Done 2026-08-29: test/fixtures/conf-avail/ — product.mjs (~2k lines,
+  ports of the CONF-MD/CONF-DISC config+glob+discovery and attributed
+  line-model compile plus CONF-VALID's 1.4 predicate) with bin.mjs and the
+  three violator bins (bin-nullmarker.mjs / bin-omit.mjs / bin-nofile.mjs),
+  each threading exactly one deviation switch through runXspec's options
+  seam: `nullMarkers` and `omitNullMembers` hook the single serialization
+  point (exit codes computed pre-transform, so only bytes deviate);
+  `ignoreFileRestriction` hooks commandOccurrences' domain computation.
+  Conformer serves `view` (bare/operand/--file/--text) and `occurrences`
+  (bare/--file/--to) per 11.2-11.4: full positional trees with tag
+  decompositions and every spelled attribute (quoted/braced/valueless/
+  spread) as {name, range, text}, spelled-identity definedness (exactly one
+  quoted static id; chain spelling+well-formedness+conformance; own-only
+  uniqueness), interpreted tags/coverage three-state datums, invalid
+  elements as 14.16 content with innermost-SECTION parenting, imports of
+  all four binding forms at MDX ESM block positions (target from specifier
+  form + discovery alone), resolution through defined identities recording
+  5.7 occurrences (source withheld as ONE datum where undefined), SCC-based
+  14.9, expansion poisoning via tri-state subtree/own definedness memos over
+  the ownership-attributed compile, findings in the pinned 12.7 order with
+  stable tokens, and the any-finding-or-marker exit-1 discipline.
+  certification-fixtures.ts appended verbatim; pins 4/13 → 5/16 (plus the
+  certification.test.ts header prose). Verified: conformer 6/6 pass;
+  NULLMARKER fails exactly its 4, OMIT exactly its 5, NOFILE exactly
+  T11.3-4 (its restricted arm), all as diagnosed assertion failures, no
+  errors/hangs; `npm run test:self` FULLY GREEN — 330 passed, 0 failed —
+  clearing the plan's 2 remaining mid-loop reds; typecheck + format:check
+  clean.]
 
 ## Stage J — E-6 cross-platform legs
 
