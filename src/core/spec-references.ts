@@ -19,13 +19,18 @@
 // a dynamic reference (14.8): it is not "rooted at an imported spec
 // module" (SPEC 2.4). References through a valid import of an
 // unparseable file are recorded normally and report as unresolved during
-// resolution (SPEC 14.20, 14.5–14.7).
+// resolution (SPEC 14.20, 14.5–14.7); references through a valid import
+// of a member whose own path is invalid (SPEC 14.19) never resolve —
+// every identity of such a file is undefined (SPEC 11.2) — a condition
+// decidable per file, so their 14.5/14.6 is reported here directly.
 
 import ts from "typescript";
 import type { ByteRange } from "./bytes.js";
 import { Utf8Offsets } from "./bytes.js";
 import type { Finding } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
+import type { PathText } from "./path-text.js";
+import { pathTextKey, pathTextOf, renderPathText } from "./path-text.js";
 import type {
   SpecDocument,
   SpecEmbedding,
@@ -59,10 +64,21 @@ export interface SpecImport {
   /**
    * The designated source file's workspace-relative path (SPEC 2.1:
    * `DIR/NAME.xspec` designates `DIR/NAME.mdx`) when the import is valid
-   * — the target of the file-level import edge (cycles, SPEC 5.3). Null
-   * for an invalid import.
+   * and the designated member's identities are defined (a valid source
+   * path, SPEC 11.2). Null for an invalid import — and for a valid import
+   * designating a member whose path is invalid (SPEC 14.19): such a
+   * member's identities are all undefined, so nothing identity-shaped
+   * points at it; `targetFile` still carries its path.
    */
   readonly targetPath: string | null;
+  /**
+   * The designated member's path as data (SPEC 12.0, 12.7) for every
+   * valid import — equal to `targetPath` where that is non-null, and the
+   * 14.19 member's exact path (marked byte form capable) otherwise; the
+   * file-level import relation (cycles, SPEC 2.1 → 5.3) and the surfaces
+   * of 11.4 read it. Null exactly for an invalid import.
+   */
+  readonly targetFile: PathText | null;
   /** Whether the import itself is valid (duplicate bindings are pairwise). */
   readonly valid: boolean;
 }
@@ -73,6 +89,16 @@ export type SpecImportBinding =
       /** A valid spec-module binding: chains rooted here are external. */
       readonly kind: "module";
       readonly targetPath: string;
+    }
+  | {
+      /**
+       * A valid spec-module binding of a member whose own path is invalid
+       * (SPEC 14.19): the import is no finding, but every identity of the
+       * designated file is undefined (SPEC 11.2), so a reference rooted
+       * here never resolves — condition 14.5/14.6, decidable per file.
+       */
+      readonly kind: "undefined-module";
+      readonly modulePath: PathText;
     }
   | {
       /**
@@ -119,6 +145,190 @@ export function resolveImportSpecifier(
     segments.push(part);
   }
   return segments.join("/");
+}
+
+/**
+ * SPEC 2.1: `resolveImportSpecifier` over exact path bytes, for an
+ * importing file whose own path has no plain string form (SPEC 14.19):
+ * the importer's directory bytes joined with the specifier's segments —
+ * the specifier itself is decoded source text, so its segments enter as
+ * their UTF-8 bytes. Returns null when the specifier climbs out of the
+ * workspace root. For a valid-UTF-8 importer this computes exactly what
+ * the string form computes.
+ */
+export function resolveImportSpecifierBytes(
+  importerBytes: Uint8Array,
+  specifier: string,
+): Uint8Array | null {
+  const SLASH = 0x2f;
+  const segments: Uint8Array[] = [];
+  let start = 0;
+  for (let index = 0; index <= importerBytes.length; index += 1) {
+    if (index === importerBytes.length || importerBytes[index] === SLASH) {
+      segments.push(importerBytes.subarray(start, index));
+      start = index + 1;
+    }
+  }
+  segments.pop(); // the importing file's own name — resolve from its directory
+  const encoder = new TextEncoder();
+  for (const part of specifier.split("/")) {
+    if (part === "" || part === ".") {
+      continue;
+    }
+    if (part === "..") {
+      if (segments.length === 0) {
+        return null; // resolves outside the workspace root
+      }
+      segments.pop();
+      continue;
+    }
+    segments.push(encoder.encode(part));
+  }
+  let length = 0;
+  for (const segment of segments) length += segment.length;
+  const joined = new Uint8Array(
+    length + (segments.length > 0 ? segments.length - 1 : 0),
+  );
+  let offset = 0;
+  for (let index = 0; index < segments.length; index += 1) {
+    if (index > 0) {
+      joined[offset] = SLASH;
+      offset += 1;
+    }
+    joined.set(segments[index], offset);
+    offset += segments[index].length;
+  }
+  return joined;
+}
+
+/**
+ * The outcome of designating the file an in-form import specifier names
+ * (SPEC 2.1: a relative `./`/`../` specifier ending `.xspec`, resolved
+ * against the importing file's directory; `DIR/NAME.xspec` designates
+ * `DIR/NAME.mdx`). Membership is over the entire discovered spec-source
+ * set — an import designating a discovered member whose path is invalid
+ * (SPEC 14.19) is valid (no 14.15), while the member's identities are all
+ * undefined (SPEC 11.2), so references through it never resolve.
+ */
+export type SpecifierDesignation =
+  | { readonly kind: "outside-root" }
+  | {
+      /** Not a discovered spec-group member; `designated` is its
+       * deterministic display spelling for the 14.15 message. */
+      readonly kind: "undiscovered";
+      readonly designated: string;
+    }
+  | {
+      /** A member with defined identities: a valid source path. */
+      readonly kind: "defined-member";
+      readonly path: string;
+    }
+  | {
+      /** A 14.19 member: import valid, every identity undefined (11.2). */
+      readonly kind: "undefined-member";
+      readonly file: PathText;
+    };
+
+/**
+ * Designate the member an in-form specifier names from one importing
+ * file. Callers check the specifier's form first (relative, `.xspec`);
+ * the designator owns resolution and membership.
+ */
+export type DesignateSpecifier = (specifier: string) => SpecifierDesignation;
+
+const XSPEC_SUFFIX_LENGTH = 6; // ".xspec"
+const MDX_SUFFIX_BYTES = [0x2e, 0x6d, 0x64, 0x78]; // ".mdx"
+
+/** One discovered spec source's designation record, either path form. */
+interface SpecMemberRecord {
+  readonly path: PathText;
+  readonly defined: boolean;
+}
+
+/**
+ * The discovered spec-source domain import designation consults (SPEC 2.1,
+ * 7.1): every discovered spec source, valid or invalid-path (14.19),
+ * indexed for the two resolution spaces — string space for importing
+ * files with a plain string path, byte space for importers whose own path
+ * has none (only reachable inside 14.19 analyses).
+ */
+export class SpecSourceDomain {
+  private readonly byString = new Map<string, SpecMemberRecord>();
+  private readonly byKey = new Map<string, SpecMemberRecord>();
+
+  constructor(
+    definedPaths: Iterable<string>,
+    invalidSpecPaths: Iterable<{
+      readonly path: PathText;
+      readonly bytes: Uint8Array;
+    }>,
+  ) {
+    for (const path of definedPaths) {
+      const record: SpecMemberRecord = { path, defined: true };
+      this.byString.set(path, record);
+      this.byKey.set(pathTextKey(path), record);
+    }
+    for (const source of invalidSpecPaths) {
+      const record: SpecMemberRecord = { path: source.path, defined: false };
+      if (typeof source.path === "string") {
+        this.byString.set(source.path, record);
+      }
+      this.byKey.set(pathTextKey(source.path), record);
+    }
+  }
+
+  private static memberDesignation(
+    record: SpecMemberRecord | undefined,
+    display: () => string,
+  ): SpecifierDesignation {
+    if (record === undefined) {
+      return { kind: "undiscovered", designated: display() };
+    }
+    return record.defined && typeof record.path === "string"
+      ? { kind: "defined-member", path: record.path }
+      : { kind: "undefined-member", file: record.path };
+  }
+
+  /** The designator for an importing file with a plain string path. */
+  designatorFor(importerPath: string): DesignateSpecifier {
+    return (specifier) => {
+      const resolved = resolveImportSpecifier(importerPath, specifier);
+      if (resolved === null) {
+        return { kind: "outside-root" };
+      }
+      // SPEC 2.1: `DIR/NAME.xspec` designates `DIR/NAME.mdx`.
+      const designated = resolved.slice(0, -XSPEC_SUFFIX_LENGTH) + ".mdx";
+      return SpecSourceDomain.memberDesignation(
+        this.byString.get(designated),
+        () => designated,
+      );
+    };
+  }
+
+  /**
+   * The designator for an importing file whose own path has no plain
+   * string form (SPEC 14.19): resolution and membership over exact bytes.
+   */
+  designatorForBytes(importerBytes: Uint8Array): DesignateSpecifier {
+    return (specifier) => {
+      const resolved = resolveImportSpecifierBytes(importerBytes, specifier);
+      if (resolved === null) {
+        return { kind: "outside-root" };
+      }
+      // SPEC 2.1: `DIR/NAME.xspec` designates `DIR/NAME.mdx`.
+      const designated = new Uint8Array(
+        resolved.length - XSPEC_SUFFIX_LENGTH + MDX_SUFFIX_BYTES.length,
+      );
+      designated.set(
+        resolved.subarray(0, resolved.length - XSPEC_SUFFIX_LENGTH),
+      );
+      designated.set(MDX_SUFFIX_BYTES, resolved.length - XSPEC_SUFFIX_LENGTH);
+      return SpecSourceDomain.memberDesignation(
+        this.byKey.get(pathTextKey(pathTextOf(designated))),
+        () => renderPathText(pathTextOf(designated)),
+      );
+    };
+  }
 }
 
 /** SPEC 2.1: the compiler-provided names an import may never bind. */
@@ -173,18 +383,21 @@ function boundIdentifiers(clause: ts.ImportClause | undefined): string[] {
 
 /**
  * Analyze and validate one file's spec-module imports (SPEC 2.1 →
- * 14.15). `specPaths` is the set of discovered spec-source paths (SPEC
- * 7.1): an import must designate one of them — whether the designated
- * file parses does not matter here (references through it report as
- * unresolved, SPEC 14.20, 14.5–14.7). Each invalid import yields exactly
- * one 14.15 finding listing its defects; an identifier bound by more
- * than one import (SPEC 2.1: no two imports in a file may bind the same
- * identifier) yields ONE 14.15 finding locating every colliding
- * declaration, the first included (SPEC 14 location cardinality).
+ * 14.15). `designate` resolves an in-form specifier against the importing
+ * file and answers membership over the entire discovered spec-source set
+ * (SPEC 7.1, `SpecSourceDomain`): an import must designate a discovered
+ * member — whether the designated file parses does not matter here
+ * (references through it report as unresolved, SPEC 14.20, 14.5–14.7),
+ * and a member whose own path is invalid (SPEC 14.19) is designated
+ * validly, its identities all undefined (SPEC 11.2). Each invalid import
+ * yields exactly one 14.15 finding listing its defects; an identifier
+ * bound by more than one import (SPEC 2.1: no two imports in a file may
+ * bind the same identifier) yields ONE 14.15 finding locating every
+ * colliding declaration, the first included (SPEC 14 cardinality).
  */
 export function analyzeSpecImports(
   document: SpecDocument,
-  specPaths: ReadonlySet<string>,
+  designate: DesignateSpecifier,
 ): SpecImportModel {
   const imports: SpecImport[] = [];
   const bindings = new Map<string, SpecImportBinding>();
@@ -254,24 +467,29 @@ export function analyzeSpecImports(
         );
       }
       let targetPath: string | null = null;
+      let targetFile: PathText | null = null;
+      let undefinedTarget: PathText | null = null;
       if (relative && specifier.endsWith(XSPEC_SUFFIX)) {
-        const resolved = resolveImportSpecifier(document.path, specifier);
-        if (resolved === null) {
+        const designation = designate(specifier);
+        if (designation.kind === "outside-root") {
           defects.push(
             `the specifier ${JSON.stringify(specifier)} resolves outside ` +
               `the workspace root`,
           );
+        } else if (designation.kind === "undiscovered") {
+          defects.push(
+            `the designated file ${JSON.stringify(designation.designated)} ` +
+              `is not a discovered source file of a configured spec group`,
+          );
+        } else if (designation.kind === "defined-member") {
+          targetPath = designation.path;
+          targetFile = designation.path;
         } else {
-          // SPEC 2.1: `DIR/NAME.xspec` designates `DIR/NAME.mdx`.
-          const designated = resolved.slice(0, -XSPEC_SUFFIX.length) + ".mdx";
-          if (specPaths.has(designated)) {
-            targetPath = designated;
-          } else {
-            defects.push(
-              `the designated file ${JSON.stringify(designated)} is not a ` +
-                `discovered source file of a configured spec group`,
-            );
-          }
+          // SPEC 14.19/11.2: a discovered member whose path is invalid is
+          // designated validly — no 14.15 — while its identities are all
+          // undefined, so references rooted at this binding never resolve.
+          targetFile = designation.file;
+          undefinedTarget = designation.file;
         }
       }
 
@@ -298,10 +516,12 @@ export function analyzeSpecImports(
               `specifier ending in ".xspec" that designates a discovered ` +
               `spec-group file, e.g. import BASE from "./BASE.xspec" ` +
               `(SPEC 2.1, 14.15)`,
-            [{ file: document.path, range: statement.range }],
+            [{ file: document.file, range: statement.range }],
           ),
         );
         targetPath = null;
+        targetFile = null;
+        undefinedTarget = null;
       }
 
       // SPEC 2.1: no two imports in a file may bind the same identifier —
@@ -314,8 +534,12 @@ export function analyzeSpecImports(
           declarationsByName.set(name, [statement]);
           bindings.set(
             name,
-            valid && targetPath !== null && name === clause?.name?.text
-              ? { kind: "module", targetPath }
+            valid && name === clause?.name?.text
+              ? targetPath !== null
+                ? { kind: "module", targetPath }
+                : undefinedTarget !== null
+                  ? { kind: "undefined-module", modulePath: undefinedTarget }
+                  : { kind: "poisoned" }
               : { kind: "poisoned" },
           );
         } else if (!declared.includes(statement)) {
@@ -335,6 +559,7 @@ export function analyzeSpecImports(
           end: specifierLiteral.getEnd(),
         }),
         targetPath,
+        targetFile,
         valid,
       });
     }
@@ -354,7 +579,7 @@ export function analyzeSpecImports(
           `by ${String(declared.length)} imports in this file — no two ` +
           `imports in an xspec source file may bind the same identifier; ` +
           `rename all but one binding (SPEC 2.1, 14.15)`,
-        declared.map((decl) => ({ file: document.path, range: decl.range })),
+        declared.map((decl) => ({ file: document.file, range: decl.range })),
       ),
     );
     bindings.set(name, { kind: "poisoned" });
@@ -497,7 +722,38 @@ export interface SpecReferenceModel {
 type ResolvedReference =
   | { readonly outcome: "reference"; readonly reference: SpecReference }
   | { readonly outcome: "finding"; readonly finding: Finding }
+  | {
+      /**
+       * A chain rooted at a valid import of a member whose path is
+       * invalid (SPEC 14.19): every identity of that file is undefined
+       * (SPEC 11.2), so the reference never resolves — the caller reports
+       * its 14.5/14.6 with the span rules of its construct kind.
+       */
+      readonly outcome: "undefined-target";
+      readonly modulePath: PathText;
+      readonly segments: readonly string[];
+      readonly span: TextSpan;
+    }
   | { readonly outcome: "masked" };
+
+/** A human description of an undefined-member target (messages only). */
+function describeUndefinedTarget(
+  modulePath: PathText,
+  segments: readonly string[],
+): string {
+  const display = renderPathText(modulePath);
+  if (segments.length === 0) {
+    // SPEC 2.2: the module itself targets that file's root node.
+    return `the root node of ${JSON.stringify(display)}`;
+  }
+  return JSON.stringify(`${display}#${segments.join(".")}`);
+}
+
+/** The SPEC 14.19/11.2 reason an undefined-member reference never resolves. */
+const UNDEFINED_TARGET_REASON =
+  `no identity of the designated file is defined because its own path is ` +
+  `invalid (SPEC 14.19, 11.2); rename that file to a valid source path or ` +
+  `retarget the reference`;
 
 /**
  * Extract the file's references (SPEC 2.2, 2.3) through the shared
@@ -548,7 +804,7 @@ class ReferenceAnalyzer {
 
   private addFinding(range: ByteRange, message: string): void {
     this.findings.push(
-      locatedFinding(8, message, [{ file: this.document.path, range }]),
+      locatedFinding(8, message, [{ file: this.document.file, range }]),
     );
   }
 
@@ -620,6 +876,24 @@ class ReferenceAnalyzer {
         references.push(resolved.reference);
       } else if (resolved.outcome === "finding") {
         this.findings.push(resolved.finding);
+      } else if (resolved.outcome === "undefined-target") {
+        // SPEC 14.5: a d reference that does not resolve — here into a
+        // member whose identities are all undefined (SPEC 14.19, 11.2).
+        // The finding spans the reference's own expression (SPEC 14).
+        this.findings.push(
+          locatedFinding(
+            5,
+            `unknown dependency: the d reference to ` +
+              `${describeUndefinedTarget(resolved.modulePath, resolved.segments)} ` +
+              `does not resolve — ${UNDEFINED_TARGET_REASON} (SPEC 2.2, 14.5)`,
+            [
+              {
+                file: this.document.file,
+                range: translate.range(resolved.span),
+              },
+            ],
+          ),
+        );
       }
     }
     return references;
@@ -694,6 +968,20 @@ class ReferenceAnalyzer {
     }
     if (resolved.outcome === "finding") {
       this.findings.push(resolved.finding);
+    } else if (resolved.outcome === "undefined-target") {
+      // SPEC 14.6: a text(...) reference that does not resolve — here
+      // into a member whose identities are all undefined (SPEC 14.19,
+      // 11.2). An embedding-form finding's range is the full braced
+      // container — the span its occurrence would occupy (SPEC 14, 5.7).
+      this.findings.push(
+        locatedFinding(
+          6,
+          `unknown text target: the text(...) reference to ` +
+            `${describeUndefinedTarget(resolved.modulePath, resolved.segments)} ` +
+            `does not resolve — ${UNDEFINED_TARGET_REASON} (SPEC 2.3, 14.6)`,
+          [{ file: this.document.file, range: embedding.range }],
+        ),
+      );
     }
     return null;
   }
@@ -719,7 +1007,7 @@ class ReferenceAnalyzer {
           `invalid argument: ${classified.reason} — ${expectation}`,
           [
             {
-              file: this.document.path,
+              file: this.document.file,
               range: containerRange ?? translate.range(classified.span),
             },
           ],
@@ -745,11 +1033,23 @@ class ReferenceAnalyzer {
             `import in this file binds — ${expectation}`,
           [
             {
-              file: this.document.path,
+              file: this.document.file,
               range: containerRange ?? translate.range(classified.span),
             },
           ],
         ),
+      };
+    }
+    if (binding.kind === "undefined-module") {
+      // SPEC 14.19/11.2: the import is valid, but every identity of the
+      // designated file is undefined — the reference never resolves. The
+      // condition (14.5/14.6) is decidable per file; the caller reports it
+      // with its construct kind's span rules (SPEC 14, 5.7).
+      return {
+        outcome: "undefined-target",
+        modulePath: binding.modulePath,
+        segments: classified.segments.map((segment) => segment.name),
+        span: classified.span,
       };
     }
     if (binding.kind === "poisoned") {

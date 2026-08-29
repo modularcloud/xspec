@@ -19,6 +19,7 @@
 import type { Configuration, ConfiguredGroup } from "./config.js";
 import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
+import type { PathText } from "./path-text.js";
 import { pathTextOf } from "./path-text.js";
 
 const SLASH = 0x2f; // "/"
@@ -32,6 +33,34 @@ const XSPEC_NAME_INFIX = utf8Encoder.encode(".xspec.");
 const XSPEC_DIR_PREFIX = utf8Encoder.encode(".xspec/");
 /** SPEC 7.1: every spec-group match must have the `.mdx` extension. */
 const MDX_SUFFIX = utf8Encoder.encode(".mdx");
+
+/**
+ * One discovered file whose workspace-relative path is invalid (SPEC 7,
+ * 7.1 → 14.19): it stays visible to analysis — structure is parse-local
+ * (SPEC 11.2), so `build`/`check` report its located conditions beside the
+ * 14.19 — while no identity over it is ever defined, emitted, or resolved
+ * against (SPEC 11.2, 1.5) and it never interacts with the journal or any
+ * derived file (a 14.19 finding fails `build`, which then modifies
+ * nothing, SPEC 12.1).
+ */
+export interface InvalidSource {
+  /**
+   * The real path as data (SPEC 12.0, 12.7): the decoded string where the
+   * path bytes are valid UTF-8 (a `#`-containing or non-`.mdx` spec-group
+   * path), otherwise the exact bytes in the marked form.
+   */
+  readonly path: PathText;
+  /** The path's exact bytes — the resolution and membership space. */
+  readonly bytes: Uint8Array;
+  /**
+   * Which analysis the file enters (SPEC 11.2): "spec" when a spec
+   * group's globs match it (MDX analysis, whatever its extension —
+   * SPEC 14.20 parses every spec-group file as MDX), otherwise "code".
+   */
+  readonly kind: "spec" | "code";
+  /** The matching groups of its kind, in configuration order (SPEC 7). */
+  readonly groups: readonly string[];
+}
 
 /** One discovered source file of one kind (spec or code). */
 export interface DiscoveredSource {
@@ -56,11 +85,19 @@ export interface SourceClassification {
   /** Valid discovered code sources, byte-ordered by path. */
   readonly codeSources: readonly DiscoveredSource[];
   /**
+   * Discovered files whose paths 14.19 rejects (SPEC 7, 7.1), byte-ordered
+   * by path: no identity of theirs is ever defined, but they stay visible
+   * to per-file analysis (SPEC 11.2). A file with the 14.14 both-groups
+   * error is not here — that error precedes all source analysis (SPEC 14).
+   */
+  readonly invalidSources: readonly InvalidSource[];
+  /**
    * Discovery-level conditions, as data: 14.14 for a file matched by both
    * a spec and a code group (SPEC 7.2; usage class — it precedes all
    * source analysis, SPEC 14) and 14.19 for invalid source paths (SPEC 7,
    * 7.1). Ordered by the offending path's bytes, then condition order. A
-   * file with any finding here is no source: it appears in neither list.
+   * file with any finding here appears in neither source list; a file with
+   * only 14.19 findings appears in `invalidSources`.
    */
   readonly findings: readonly Finding[];
 }
@@ -313,6 +350,7 @@ export function classifySources(
 
   const specSources: DiscoveredSource[] = [];
   const codeSources: DiscoveredSource[] = [];
+  const invalidSources: InvalidSource[] = [];
   const findings: Finding[] = [];
   for (const candidate of matched) {
     if (destinationKeys.has(byteKey(candidate.bytes))) continue;
@@ -323,10 +361,12 @@ export function classifySources(
     const fileLabel = pathTextOf(candidate.bytes);
     const decoded = typeof fileLabel === "string" ? fileLabel : null;
     let valid = true;
+    let bothGroups = false;
     if (candidate.specGroups.length > 0 && candidate.codeGroups.length > 0) {
       // SPEC 7.2 → 14.14: a file matched by both a spec and a code group
       // is a configuration error (usage class; precedes source analysis).
       valid = false;
+      bothGroups = true;
       findings.push(
         pathFinding(
           14,
@@ -378,12 +418,29 @@ export function classifySources(
         ),
       );
     }
-    if (!valid || decoded === null) continue;
+    if (!valid || decoded === null) {
+      // SPEC 11.2: a 14.19 file stays visible to per-file analysis — its
+      // located conditions report beside the path finding — while the
+      // 14.14 both-groups error precedes all source analysis (SPEC 14), so
+      // a file bearing it is analyzed as nothing.
+      if (!bothGroups) {
+        invalidSources.push({
+          path: fileLabel,
+          bytes: candidate.bytes.slice(),
+          kind: candidate.specGroups.length > 0 ? "spec" : "code",
+          groups:
+            candidate.specGroups.length > 0
+              ? candidate.specGroups
+              : candidate.codeGroups,
+        });
+      }
+      continue;
+    }
     if (candidate.specGroups.length > 0) {
       specSources.push({ path: decoded, groups: candidate.specGroups });
     } else {
       codeSources.push({ path: decoded, groups: candidate.codeGroups });
     }
   }
-  return { specSources, codeSources, findings };
+  return { specSources, codeSources, invalidSources, findings };
 }

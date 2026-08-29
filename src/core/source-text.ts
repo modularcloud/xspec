@@ -10,6 +10,7 @@
 
 import type { Finding } from "./findings.js";
 import { locatedFinding } from "./findings.js";
+import type { PathText } from "./path-text.js";
 
 /** Decoder for byte sequences already validated by `firstInvalidUtf8`. */
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
@@ -83,7 +84,7 @@ export type DecodedSource =
  * decoded content, exactly.
  */
 export function decodeSourceBytes(
-  path: string,
+  path: PathText,
   bytes: Uint8Array,
 ): DecodedSource {
   // SPEC 1.6: a source beginning with a byte-order mark is unparseable.

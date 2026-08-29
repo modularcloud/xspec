@@ -48,6 +48,7 @@ import type { ByteRange } from "./bytes.js";
 import { Utf8Offsets } from "./bytes.js";
 import type { ConditionNumber, Finding } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
+import type { PathText } from "./path-text.js";
 import { decodeSourceBytes } from "./source-text.js";
 import {
   containsControl,
@@ -191,8 +192,22 @@ export interface SpecEsmBlock {
 
 /** The parsed per-file document model. */
 export interface SpecDocument {
-  /** Workspace-relative `/`-separated path (SPEC 1.5). */
+  /**
+   * Workspace-relative `/`-separated path (SPEC 1.5) — the identity-space
+   * name. For a discovered file whose own path is invalid (SPEC 14.19,
+   * 11.2) this is a deterministic stand-in (the lossily decoded spelling
+   * of the path bytes): no identity is ever formed over it, nothing
+   * resolves against it, and it is never rendered — `file` carries the
+   * real path. For every valid discovered source, `path` equals `file`.
+   */
   readonly path: string;
+  /**
+   * The file's real path as data (SPEC 12.0, 12.7): equal to `path`
+   * except for a file whose path is invalid (SPEC 14.19), where it holds
+   * the exact path — the marked byte form for a non-UTF-8 path. Every
+   * finding location and output-facing path of this file renders from it.
+   */
+  readonly file: PathText;
   /** The decoded UTF-8 content (SPEC 1.6). */
   readonly text: string;
   /** UTF-16 index ↔ UTF-8 byte offset conversion for `text` (SPEC 1.7). */
@@ -900,8 +915,9 @@ const mdxParser = unified()
 export function parseSpecSource(
   path: string,
   bytes: Uint8Array,
+  file: PathText = path,
 ): SpecSourceResult {
-  const decoded = decodeSourceBytes(path, bytes);
+  const decoded = decodeSourceBytes(file, bytes);
   if (!decoded.ok) {
     return { kind: "unparseable", finding: decoded.finding };
   }
@@ -915,11 +931,11 @@ export function parseSpecSource(
   } catch (error) {
     return {
       kind: "unparseable",
-      finding: parseFailureFinding(path, error, text, offsets),
+      finding: parseFailureFinding(file, error, text, offsets),
     };
   }
 
-  const builder = new DocumentBuilder(path, text, offsets);
+  const builder = new DocumentBuilder(path, file, text, offsets);
   try {
     builder.walk(tree);
     builder.finishTags();
@@ -929,7 +945,7 @@ export function parseSpecSource(
       // mismatched tags make the file unparseable, masking its contents.
       return {
         kind: "unparseable",
-        finding: parseFailureFinding(path, error, text, offsets),
+        finding: parseFailureFinding(file, error, text, offsets),
       };
     }
     if (error instanceof RangeError) {
@@ -945,7 +961,7 @@ export function parseSpecSource(
           `unparseable source: not well-formed MDX — the file's nesting ` +
             `exceeds what the parser can process, so no location inside ` +
             `it can be analyzed; simplify or split the file (SPEC 14.20)`,
-          [{ file: path, range: { start: 0, end: 0 } }],
+          [{ file, range: { start: 0, end: 0 } }],
         ),
       };
     }
@@ -957,7 +973,7 @@ export function parseSpecSource(
 
 /** The 14.20 finding for a thrown MDX parse failure, with its location. */
 function parseFailureFinding(
-  path: string,
+  file: PathText,
   error: unknown,
   text: string,
   offsets: Utf8Offsets,
@@ -1011,7 +1027,7 @@ function parseFailureFinding(
     20,
     `unparseable source: not well-formed MDX${where} — ${reason}. ` +
       `Correct the syntax at the reported location (SPEC 14.20)`,
-    [{ file: path, range }],
+    [{ file, range }],
   );
 }
 
@@ -1141,6 +1157,7 @@ class DocumentBuilder {
 
   constructor(
     private readonly path: string,
+    private readonly file: PathText,
     private readonly text: string,
     private readonly offsets: Utf8Offsets,
   ) {
@@ -1177,7 +1194,7 @@ class DocumentBuilder {
     message: string,
   ): void {
     this.findings.push(
-      locatedFinding(condition, message, [{ file: this.path, range }]),
+      locatedFinding(condition, message, [{ file: this.file, range }]),
     );
   }
 
@@ -1821,7 +1838,7 @@ class DocumentBuilder {
             `${String(locations.length)} sections bear this ID — IDs must ` +
             `be unique within a source file; rename all but one of the ` +
             `sections (SPEC 1.3, 14.3)`,
-          locations.map((range) => ({ file: this.path, range })),
+          locations.map((range) => ({ file: this.file, range })),
         ),
       );
     }
@@ -1833,6 +1850,7 @@ class DocumentBuilder {
     const sorted = [...this.findings].sort(compareFindings);
     return {
       path: this.path,
+      file: this.file,
       text: this.text,
       offsets: this.offsets,
       root: this.root,

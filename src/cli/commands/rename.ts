@@ -347,6 +347,9 @@ async function reanalyzeRewritten(
   return analyzeWorkspaceContent(workspace.configuration, {
     classification: analysis.classification,
     readSource: (rel) => Promise.resolve(byPath.get(rel) ?? null),
+    // A valid workspace discovers no invalid-path sources (SPEC 14.19
+    // gates rename, 6.4), so this reanalysis is never asked for one.
+    readInvalidSource: () => Promise.resolve(null),
     loadJournal: () => Promise.resolve(journalFromBytes(journalBytes)),
   });
 }

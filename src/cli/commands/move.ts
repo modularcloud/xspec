@@ -672,6 +672,8 @@ async function reanalyzeMoved(
       movedSource,
     ].sort((a, b) => compareBytes(a.path, b.path)),
     codeSources: analysis.classification.codeSources,
+    // A valid workspace discovers none (SPEC 14.19 gates move, 6.5).
+    invalidSources: analysis.classification.invalidSources,
     findings: [],
   };
   const currentJournal = await readJournalBytes(workspace.root);
@@ -682,6 +684,9 @@ async function reanalyzeMoved(
   return analyzeWorkspaceContent(workspace.configuration, {
     classification,
     readSource: (rel) => Promise.resolve(byPath.get(rel) ?? null),
+    // A valid workspace discovers no invalid-path sources (SPEC 14.19
+    // gates move, 6.5), so this reanalysis is never asked for one.
+    readInvalidSource: () => Promise.resolve(null),
     loadJournal: () => Promise.resolve(journalFromBytes(journalBytes)),
   });
 }
@@ -973,6 +978,8 @@ async function reanalyzeSectionMoved(
         (a, b) => compareBytes(a.path, b.path),
       ),
       codeSources: analysis.classification.codeSources,
+      // A valid workspace discovers none (SPEC 14.19 gates move, 6.5).
+      invalidSources: analysis.classification.invalidSources,
       findings: analysis.classification.findings,
     };
   }
@@ -984,6 +991,9 @@ async function reanalyzeSectionMoved(
   return analyzeWorkspaceContent(workspace.configuration, {
     classification,
     readSource: (rel) => Promise.resolve(byPath.get(rel) ?? null),
+    // A valid workspace discovers no invalid-path sources (SPEC 14.19
+    // gates move, 6.5), so this reanalysis is never asked for one.
+    readInvalidSource: () => Promise.resolve(null),
     loadJournal: () => Promise.resolve(journalFromBytes(journalBytes)),
   });
 }

@@ -385,7 +385,24 @@ export async function resolveBaseline(
     }
     oidForSource.set(sourcePath, oid);
   }
-  const sourceBlobs = await readBlobs(root, [...oidForSource.values()]);
+  // SPEC 14.19/11.2: invalid-path sources at the ref are analyzed too —
+  // their findings make the baseline fail resolution like any others —
+  // addressed by their exact path bytes.
+  const oidForInvalidSource = new Map<string, string>();
+  for (const source of classification.invalidSources) {
+    const oid = oidByPath.get(byteKey(Buffer.from(source.bytes)));
+    if (oid === undefined) {
+      // Impossible: classified sources come from the same listing.
+      throw new Error(
+        "xspec internal error: baseline invalid-path source without a blob",
+      );
+    }
+    oidForInvalidSource.set(byteKey(Buffer.from(source.bytes)), oid);
+  }
+  const sourceBlobs = await readBlobs(root, [
+    ...oidForSource.values(),
+    ...oidForInvalidSource.values(),
+  ]);
   if (sourceBlobs === null) return unreadable;
 
   const analysis = await analyzeWorkspaceContent(configParse.configuration, {
@@ -396,6 +413,16 @@ export async function resolveBaseline(
       if (bytes === undefined) {
         throw new Error(
           `xspec internal error: baseline blob not preloaded: ${rel}`,
+        );
+      }
+      return Promise.resolve(bytes);
+    },
+    readInvalidSource: (pathBytes) => {
+      const oid = oidForInvalidSource.get(byteKey(Buffer.from(pathBytes)));
+      const bytes = oid === undefined ? undefined : sourceBlobs.get(oid);
+      if (bytes === undefined) {
+        throw new Error(
+          "xspec internal error: baseline invalid-path blob not preloaded",
         );
       }
       return Promise.resolve(bytes);

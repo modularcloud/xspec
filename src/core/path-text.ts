@@ -70,6 +70,22 @@ export function pathTextBytes(path: PathText): Uint8Array {
   return typeof path === "string" ? utf8Encoder.encode(path) : path.bytes;
 }
 
+/**
+ * An injective string key for a path's exact bytes (one UTF-16 code unit
+ * per byte), for exact byte-path map and set membership across both
+ * `PathText` forms (SPEC 12.0: every path comparison is byte-wise). Keys
+ * of byte sequences 0x00–0xFF compare by `compareBytes` in byte order.
+ * Never rendered anywhere.
+ */
+export function pathTextKey(path: PathText): string {
+  const bytes = pathTextBytes(path);
+  let key = "";
+  for (let index = 0; index < bytes.length; index += 1) {
+    key += String.fromCharCode(bytes[index]);
+  }
+  return key;
+}
+
 /** Three-way lexicographic comparison of two byte arrays. */
 function compareByteArrays(a: Uint8Array, b: Uint8Array): -1 | 0 | 1 {
   const shorter = Math.min(a.length, b.length);

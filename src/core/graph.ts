@@ -37,6 +37,8 @@ import type { CodeAnalysis } from "./code-analysis.js";
 import type { Finding, FindingLocation } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
 import type { SpecDocument, SpecEmbedding, SpecSection } from "./mdx.js";
+import type { PathText } from "./path-text.js";
+import { pathTextKey, renderPathText } from "./path-text.js";
 import type {
   ReferenceTarget,
   SpecImportModel,
@@ -113,6 +115,18 @@ export interface SpecFileAnalysis {
 export interface WorkspaceGraphInputs {
   readonly specs: readonly SpecFileAnalysis[];
   readonly code: readonly CodeAnalysis[];
+  /**
+   * Per-file analyses of discovered spec sources whose own paths are
+   * invalid (SPEC 14.19, 11.2): they contribute no nodes and no edges —
+   * no identity of theirs is defined — but their references are resolved
+   * here on their own terms (a reference out of such a file into a
+   * defined identity resolves finding-free; anything else reports
+   * 14.5/14.6) and their imports participate in the file-level import
+   * relation (spec import cycles, SPEC 2.1 → 14.9).
+   */
+  readonly invalidPathSpecs?: readonly SpecFileAnalysis[];
+  /** The code-source counterpart: references resolve or report 14.7. */
+  readonly invalidPathCode?: readonly CodeAnalysis[];
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +293,8 @@ export function buildWorkspaceGraph(
   // workspace-relative path, content in document order.
   const specs = sortByBytes(inputs.specs, (spec) => spec.document.path);
   const code = sortByBytes(inputs.code, (analysis) => analysis.path);
+  const invalidPathSpecs = inputs.invalidPathSpecs ?? [];
+  const invalidPathCode = inputs.invalidPathCode ?? [];
 
   // --- requirement nodes (SPEC 5.1, 1.5) ----------------------------------
   const requirementNodes: RequirementNode[] = [];
@@ -517,6 +533,94 @@ export function buildWorkspaceGraph(
     }
   }
 
+  // --- references of invalid-path files (SPEC 14.19, 11.2) ----------------
+  //
+  // A discovered file whose own path is invalid contributes no nodes and
+  // no edges — no identity of it is defined, and nothing resolves into it
+  // — but its constructs are judged on their own terms (SPEC 11.2, 14):
+  // its extracted references resolve against the defined identities, a
+  // local reference (naming an ID in the invalid-path file itself) never
+  // resolving, and each unresolved reference reports its 14.5/14.6/14.7
+  // located in the file (marked byte form capable). References that DO
+  // resolve are finding-free; their occurrence recording (source datum
+  // explicitly unavailable, SPEC 5.7) is the occurrence machinery's.
+  const invalidPathFailure = (
+    target: ReferenceTarget,
+  ): { readonly described: string; readonly reason: string } | null => {
+    if (target.kind === "local") {
+      return {
+        described: `${JSON.stringify(target.idPath)} in this file`,
+        reason:
+          `the reference names an ID in this file, and no identity of ` +
+          `this file is defined because its own path is invalid ` +
+          `(SPEC 14.19, 11.2); rename the file to a valid source path`,
+      };
+    }
+    const resolved = resolution.resolveExternal(
+      target.modulePath,
+      target.segments,
+    );
+    if (resolved.ok) return null;
+    return {
+      described: describeExternal(target.modulePath, target.segments),
+      reason: resolved.reason,
+    };
+  };
+  for (const spec of invalidPathSpecs) {
+    const file = spec.document.file;
+    for (const dependency of spec.references.dependencies) {
+      const failure = invalidPathFailure(dependency.reference.target);
+      if (failure === null) continue;
+      findings.push(
+        locatedFinding(
+          5,
+          `unknown dependency: the d reference to ${failure.described} ` +
+            `does not resolve — ${failure.reason}; declare the target ` +
+            `section or correct the reference (SPEC 2.2, 14.5)`,
+          [{ file, range: dependency.reference.range }],
+        ),
+      );
+    }
+    for (const embedded of spec.references.embeddings) {
+      if (embedded.reference === null) continue;
+      const failure = invalidPathFailure(embedded.reference.target);
+      if (failure === null) continue;
+      // SPEC 14: an embedding-form finding's range is the full braced
+      // container — the span its occurrence would occupy (5.7).
+      findings.push(
+        locatedFinding(
+          6,
+          `unknown text target: the text(...) reference to ` +
+            `${failure.described} does not resolve — ${failure.reason}; ` +
+            `declare the target section or correct the reference ` +
+            `(SPEC 2.3, 14.6)`,
+          [{ file, range: embedded.embedding.range }],
+        ),
+      );
+    }
+  }
+  for (const analysis of invalidPathCode) {
+    for (const reference of analysis.references) {
+      const resolved = resolution.resolveExternal(
+        reference.modulePath,
+        reference.segments,
+      );
+      if (resolved.ok) continue;
+      const construct =
+        reference.kind === "references" ? "marker" : "text(...) argument";
+      findings.push(
+        locatedFinding(
+          7,
+          `unknown TypeScript reference: the ${construct} referencing ` +
+            `${describeExternal(reference.modulePath, reference.segments)} ` +
+            `does not resolve — ${resolved.reason}; correct or remove the ` +
+            `reference (SPEC 4.5, 14.7)`,
+          [{ file: analysis.file, range: reference.range }],
+        ),
+      );
+    }
+  }
+
   // SPEC 14/12.7: deterministic finding order.
   findings.sort(compareFindings);
 
@@ -538,7 +642,7 @@ export function buildWorkspaceGraph(
       edgeSpellings,
     ),
   );
-  findings.push(...importCycleFindings(specs, parsedByPath));
+  findings.push(...importCycleFindings([...specs, ...invalidPathSpecs]));
 
   return new WorkspaceGraph({
     requirementNodes,
@@ -730,50 +834,70 @@ function dependencyCycleFindings(
  * SPEC 2.1: spec import cycles — over each parsed file's valid imports'
  * designated files, whether or not the bindings are used (an unused
  * import records no edges, but the import itself still relates the
- * files). A file importing itself is a cycle of length one. One 14.9
- * finding per cyclic component, locating each participating import
- * declaration — every import recording a step of the reported cycle
- * (SPEC 14 location cardinality), the full file path carried in the
- * message.
+ * files). A file importing itself is a cycle of length one. The relation
+ * is between FILES, so discovered spec sources whose own paths are
+ * invalid (SPEC 14.19) participate — their imports were analyzed
+ * (SPEC 11.2) and a valid import designates a member whatever that
+ * member's path validity — and the walk therefore runs over exact path
+ * bytes (SPEC 12.0), with every location and message path rendered from
+ * the file's real path (marked byte form capable). One 14.9 finding per
+ * cyclic component, locating each participating import declaration —
+ * every import recording a step of the reported cycle (SPEC 14 location
+ * cardinality), the full file path carried in the message.
  */
-function importCycleFindings(
-  specs: readonly SpecFileAnalysis[],
-  parsedByPath: ReadonlyMap<string, SpecFileAnalysis>,
-): Finding[] {
+function importCycleFindings(specs: readonly SpecFileAnalysis[]): Finding[] {
+  /** Byte key of one parsed file (both `PathText` forms, SPEC 12.0). */
+  const keyed = new Map<string, SpecFileAnalysis>();
+  for (const spec of specs) {
+    keyed.set(pathTextKey(spec.document.file), spec);
+  }
   const adjacency = new Map<string, Set<string>>();
   for (const spec of specs) {
+    const sourceKey = pathTextKey(spec.document.file);
     for (const declared of spec.imports.imports) {
-      if (declared.targetPath === null) continue;
-      let targets = adjacency.get(spec.document.path);
+      if (declared.targetFile === null) continue;
+      let targets = adjacency.get(sourceKey);
       if (targets === undefined) {
-        adjacency.set(spec.document.path, (targets = new Set()));
+        adjacency.set(sourceKey, (targets = new Set()));
       }
-      targets.add(declared.targetPath);
+      targets.add(pathTextKey(declared.targetFile));
     }
   }
-  const paths = specs.map((spec) => spec.document.path);
-  const cycles = findCycles(paths, adjacency);
+  const cycles = findCycles([...keyed.keys()], adjacency);
   return cycles.map((cycle) => {
+    const fileOf = (key: string): PathText => {
+      const spec = keyed.get(key);
+      if (spec === undefined) {
+        throw new Error("xspec internal error: cycle through unknown file");
+      }
+      return spec.document.file;
+    };
     // SPEC 14/14.9: locate each participating import declaration — for
     // every step of the closed walk, every import of the step's source
     // file designating the step's target (for a self-import cycle, the
     // self-designating imports).
     const locations: FindingLocation[] = [];
     for (let step = 0; step + 1 < cycle.length; step += 1) {
-      const spec = parsedByPath.get(cycle[step]);
+      const spec = keyed.get(cycle[step]);
       if (spec === undefined) continue;
       for (const declared of spec.imports.imports) {
-        if (declared.targetPath === cycle[step + 1]) {
+        if (
+          declared.targetFile !== null &&
+          pathTextKey(declared.targetFile) === cycle[step + 1]
+        ) {
           locations.push({
-            file: spec.document.path,
+            file: spec.document.file,
             range: declared.statement.range,
           });
         }
       }
     }
+    const renderedCycle = cycle
+      .map((key) => renderPathText(fileOf(key)))
+      .join(" → ");
     return locatedFinding(
       9,
-      `spec import cycle: ${cycle.join(" → ")} — import cycles among ` +
+      `spec import cycle: ${renderedCycle} — import cycles among ` +
         `spec source files are invalid, even when no requirement-level ` +
         `dependency cycle exists; remove one of the participating imports ` +
         `(SPEC 2.1, 14.9)`,
@@ -782,7 +906,7 @@ function importCycleFindings(
         : // Unreachable — every step of a reported import cycle came from
           // a recorded import — but a located condition must locate
           // (SPEC 14).
-          [{ file: cycle[0], range: { start: 0, end: 0 } }],
+          [{ file: fileOf(cycle[0]), range: { start: 0, end: 0 } }],
     );
   });
 }

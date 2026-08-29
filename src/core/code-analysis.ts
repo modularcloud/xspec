@@ -40,6 +40,9 @@ import { compareFindings, locatedFinding } from "./findings.js";
 import type { ClassifiedChain } from "./references.js";
 import { classifyReference } from "./references.js";
 import { decodeSourceBytes } from "./source-text.js";
+import type { PathText } from "./path-text.js";
+import { pathTextKey, renderPathText } from "./path-text.js";
+import type { DesignateSpecifier } from "./spec-references.js";
 import type { ReferenceSpelling } from "./spec-references.js";
 import { resolveImportSpecifier } from "./spec-references.js";
 
@@ -50,12 +53,16 @@ import { resolveImportSpecifier } from "./spec-references.js";
 /** What the workspace provides the analysis of one code source. */
 export interface CodeAnalysisContext {
   /**
-   * The discovered spec-source paths (SPEC 7.1): a spec module import must
-   * designate one of them (SPEC 4 → 14.15). Whether the designated file
-   * parses does not matter here — references through it report as
-   * unresolved during resolution (SPEC 14.20, 14.7).
+   * Designation of spec module import specifiers over the entire
+   * discovered spec-source set (SPEC 7.1, 2.1; `SpecSourceDomain`): a
+   * spec module import must designate a discovered member (SPEC 4 →
+   * 14.15). Whether the designated file parses does not matter here —
+   * references through it report as unresolved during resolution
+   * (SPEC 14.20, 14.7) — and a member whose own path is invalid
+   * (SPEC 14.19) is designated validly, references through it never
+   * resolving (SPEC 11.2 → 14.7, reported by this analysis).
    */
-  readonly specPaths: ReadonlySet<string>;
+  readonly designate: DesignateSpecifier;
   /**
    * The configured Markdown emit destinations (SPEC 7.3,
    * `markdownEmitDestinations`) — empty while emission is disabled — for
@@ -101,10 +108,20 @@ export interface CodeImport {
   readonly specifierRange: ByteRange;
   /**
    * The designated source file's workspace-relative path (SPEC 2.1:
-   * `DIR/NAME.xspec` designates `DIR/NAME.mdx`) when the import is valid;
-   * null for an invalid import.
+   * `DIR/NAME.xspec` designates `DIR/NAME.mdx`) when the import is valid
+   * and the member's identities are defined (a valid source path,
+   * SPEC 11.2); null for an invalid import — and for a valid import
+   * designating a member whose path is invalid (SPEC 14.19), whose path
+   * `targetFile` still carries.
    */
   readonly targetPath: string | null;
+  /**
+   * The designated member's path as data (SPEC 12.0, 12.7) for every
+   * valid import — equal to `targetPath` where that is non-null, the
+   * 14.19 member's exact path otherwise. Null exactly for an invalid
+   * import.
+   */
+  readonly targetFile: PathText | null;
   /** The default-export binding, when present (SPEC 4). */
   readonly defaultBinding: CodeImportBinding | null;
   /** The named `text` bindings, in written order (SPEC 4). */
@@ -138,8 +155,23 @@ export interface CodeReference {
 
 /** The analysis of one parseable code source. */
 export interface CodeAnalysis {
-  /** Workspace-relative `/`-separated path (SPEC 1.5). */
+  /**
+   * Workspace-relative `/`-separated path (SPEC 1.5) — the identity-space
+   * name. For a discovered file whose own path is invalid (SPEC 14.19,
+   * 11.2) this is a deterministic stand-in (the lossily decoded spelling
+   * of the path bytes): the unit identities and reference locations built
+   * over it stay internal — no identity of such a file is ever emitted
+   * (SPEC 11.2) — and `file` carries the real path. For every valid
+   * discovered source, `path` equals `file`.
+   */
   readonly path: string;
+  /**
+   * The file's real path as data (SPEC 12.0, 12.7): equal to `path`
+   * except for a file whose path is invalid (SPEC 14.19), where it holds
+   * the exact path — the marked byte form for a non-UTF-8 path. Every
+   * finding location of this file renders from it.
+   */
+  readonly file: PathText;
   /**
    * The decoded UTF-8 content (SPEC 1.6). Valid, BOM-free UTF-8 re-encodes
    * to the file's exact bytes, so the recorded reference spans can drive
@@ -177,8 +209,9 @@ export function analyzeCodeSource(
   path: string,
   bytes: Uint8Array,
   context: CodeAnalysisContext,
+  file: PathText = path,
 ): CodeSourceResult {
-  const decoded = decodeSourceBytes(path, bytes);
+  const decoded = decodeSourceBytes(file, bytes);
   if (!decoded.ok) {
     return { kind: "unparseable", finding: decoded.finding };
   }
@@ -199,7 +232,7 @@ export function analyzeCodeSource(
       return {
         kind: "unparseable",
         finding: parseFailureFinding(
-          path,
+          file,
           sourceFile,
           offsets,
           tsx,
@@ -209,6 +242,7 @@ export function analyzeCodeSource(
     }
     const analyzer = new CodeAnalyzer(
       path,
+      file,
       sourceFile,
       offsets,
       program.getTypeChecker(),
@@ -225,19 +259,19 @@ export function analyzeCodeSource(
     if (!(error instanceof RangeError)) throw error;
     return {
       kind: "unparseable",
-      finding: stackOverflowFinding(path, tsx ? "TSX" : "plain TypeScript"),
+      finding: stackOverflowFinding(file, tsx ? "TSX" : "plain TypeScript"),
     };
   }
 }
 
 /** The 14.20 finding for a source the parser cannot process (overflow). */
-function stackOverflowFinding(path: string, grammar: string): Finding {
+function stackOverflowFinding(file: PathText, grammar: string): Finding {
   return locatedFinding(
     20,
     `unparseable source: not well-formed ${grammar} — the file's ` +
       `nesting exceeds what the parser can process, so no location inside ` +
       `it can be analyzed; simplify or split the file (SPEC 14.20)`,
-    [{ file: path, range: { start: 0, end: 0 } }],
+    [{ file, range: { start: 0, end: 0 } }],
   );
 }
 
@@ -279,7 +313,7 @@ function createSingleFileProgram(
 
 /** The 14.20 finding for a parse failure, locating it (SPEC 14.20). */
 function parseFailureFinding(
-  path: string,
+  file: PathText,
   sourceFile: ts.SourceFile,
   offsets: Utf8Offsets,
   tsx: boolean,
@@ -301,7 +335,7 @@ function parseFailureFinding(
       `syntax at the reported location (SPEC 14.20)`,
     [
       {
-        file: path,
+        file,
         range: {
           start: offsets.byteOffset(start),
           end: offsets.byteOffset(end),
@@ -315,10 +349,49 @@ function parseFailureFinding(
 // The per-file analyzer
 // ---------------------------------------------------------------------------
 
+/**
+ * The designated member of a valid spec-module binding (SPEC 2.1, 4): a
+ * member with defined identities (a valid source path), or a 14.19 member
+ * — designated validly, every identity undefined (SPEC 11.2), so
+ * references through the binding never resolve (14.7).
+ */
+type SpecModuleTarget =
+  | { readonly defined: true; readonly path: string }
+  | { readonly defined: false; readonly file: PathText };
+
+/** Byte-exact comparison key of a designated member (SPEC 12.0). */
+function moduleTargetKey(target: SpecModuleTarget): string {
+  return pathTextKey(target.defined ? target.path : target.file);
+}
+
+/** The deterministic display spelling of a designated member (messages). */
+function moduleTargetDisplay(target: SpecModuleTarget): string {
+  return target.defined ? target.path : renderPathText(target.file);
+}
+
+/** A human description of a chain into a designated member (messages). */
+function describeTargetChain(
+  target: SpecModuleTarget,
+  segments: readonly string[],
+): string {
+  const display = moduleTargetDisplay(target);
+  if (segments.length === 0) {
+    // SPEC 4.5: a bare module reference targets that file's root node.
+    return `the root node of ${JSON.stringify(display)}`;
+  }
+  return JSON.stringify(`${display}#${segments.join(".")}`);
+}
+
+/** The SPEC 14.19/11.2 reason an undefined-member reference never resolves. */
+const UNDEFINED_TARGET_REASON =
+  `no identity of the designated file is defined because its own path is ` +
+  `invalid (SPEC 14.19, 11.2); rename that file to a valid source path or ` +
+  `retarget the reference`;
+
 /** What one import-bound identifier means as a reference root (SPEC 4.5). */
 type TrackedBinding =
-  | { readonly kind: "node"; readonly modulePath: string }
-  | { readonly kind: "text"; readonly modulePath: string }
+  | { readonly kind: "node"; readonly target: SpecModuleTarget }
+  | { readonly kind: "text"; readonly target: SpecModuleTarget }
   | {
       /** SPEC 4: a binding introduced type-only is a type-level name. */
       readonly kind: "type-level";
@@ -354,6 +427,7 @@ class CodeAnalyzer {
 
   constructor(
     private readonly path: string,
+    private readonly file: PathText,
     private readonly sourceFile: ts.SourceFile,
     private readonly offsets: Utf8Offsets,
     private readonly checker: ts.TypeChecker,
@@ -366,6 +440,7 @@ class CodeAnalyzer {
     this.walk(this.sourceFile);
     return {
       path: this.path,
+      file: this.file,
       text: this.sourceFile.text,
       units: this.units,
       imports: this.imports,
@@ -387,7 +462,7 @@ class CodeAnalyzer {
   }
 
   private addFinding(
-    condition: 8 | 11 | 15 | 18,
+    condition: 7 | 8 | 11 | 15 | 18,
     node: ts.Node,
     message: string,
     identities: readonly string[] = [],
@@ -396,7 +471,7 @@ class CodeAnalyzer {
       locatedFinding(
         condition,
         message,
-        [{ file: this.path, range: this.rangeOf(node) }],
+        [{ file: this.file, range: this.rangeOf(node) }],
         identities,
       ),
     );
@@ -532,7 +607,7 @@ class CodeAnalyzer {
             `imports may bind the same identifier when either is a spec ` +
             `module import; rename all but one binding (SPEC 4, 2.1, 14.15)`,
           statements.map((declaration) => ({
-            file: this.path,
+            file: this.file,
             range: this.rangeOf(declaration),
           })),
         ),
@@ -608,24 +683,30 @@ class CodeAnalyzer {
       );
     }
     let targetPath: string | null = null;
+    let targetFile: PathText | null = null;
+    let target: SpecModuleTarget | null = null;
     if (relative) {
-      const resolved = resolveImportSpecifier(this.path, specifier);
-      if (resolved === null) {
+      // SPEC 2.1/4: `DIR/NAME.xspec` designates `DIR/NAME.mdx`, membership
+      // judged over the entire discovered spec-source set — a 14.19 member
+      // is designated validly, its identities all undefined (SPEC 11.2).
+      const designation = this.context.designate(specifier);
+      if (designation.kind === "outside-root") {
         defects.push(
           `the specifier ${JSON.stringify(specifier)} resolves outside ` +
             `the workspace root`,
         );
+      } else if (designation.kind === "undiscovered") {
+        defects.push(
+          `the designated file ${JSON.stringify(designation.designated)} ` +
+            `is not a discovered source file of a configured spec group`,
+        );
+      } else if (designation.kind === "defined-member") {
+        targetPath = designation.path;
+        targetFile = designation.path;
+        target = { defined: true, path: designation.path };
       } else {
-        // SPEC 2.1/4: `DIR/NAME.xspec` designates `DIR/NAME.mdx`.
-        const designated = resolved.slice(0, -XSPEC_SUFFIX.length) + ".mdx";
-        if (this.context.specPaths.has(designated)) {
-          targetPath = designated;
-        } else {
-          defects.push(
-            `the designated file ${JSON.stringify(designated)} is not a ` +
-              `discovered source file of a configured spec group`,
-          );
-        }
+        targetFile = designation.file;
+        target = { defined: false, file: designation.file };
       }
     }
     if (statement.attributes !== undefined) {
@@ -702,11 +783,11 @@ class CodeAnalyzer {
     for (const { declaration, binding, role } of roles) {
       this.declarations.set(
         declaration,
-        !valid || targetPath === null
+        !valid || target === null
           ? { kind: "poisoned" }
           : binding.typeOnly
             ? { kind: "type-level" }
-            : { kind: role, modulePath: targetPath },
+            : { kind: role, target },
       );
     }
 
@@ -721,6 +802,7 @@ class CodeAnalyzer {
       specifierQuote: quote === "'" ? "'" : '"',
       specifierRange: this.rangeOf(literal),
       targetPath: valid ? targetPath : null,
+      targetFile: valid ? targetFile : null,
       defaultBinding,
       textBindings,
       valid,
@@ -808,6 +890,13 @@ class CodeAnalyzer {
     formLabel: string,
   ): void {
     if (!specifier.startsWith("./") && !specifier.startsWith("../")) return;
+    // For a file whose own path is invalid (SPEC 14.19) `this.path` is the
+    // lossily decoded stand-in: the `.xspec.`-infix and `.xspec/`-prefix
+    // rules below stay byte-exact over it (the specifier's own segments
+    // and the path's structure survive lossy decoding), while the
+    // Markdown-destination membership is checked over the lossy spelling —
+    // exact except where a non-UTF-8 directory has a sibling spelled with
+    // the literal replacement character.
     const resolved = resolveImportSpecifier(this.path, specifier);
     if (resolved === null) return;
     const kind = derivedFilePathKind(
@@ -1039,7 +1128,7 @@ class CodeAnalyzer {
    */
   private visitNodeBindingUse(
     identifier: ts.Identifier,
-    binding: { readonly kind: "node"; readonly modulePath: string },
+    binding: { readonly kind: "node"; readonly target: SpecModuleTarget },
   ): void {
     const use = climbUseExpression(identifier);
     const parent = use.parent;
@@ -1049,14 +1138,31 @@ class CodeAnalyzer {
       // is a dependency marker recording a `references` edge.
       const classified = classifyReference(use, this.sourceFile);
       if (classified.kind === "chain") {
-        this.references.push(
-          this.chainReference(
-            "references",
-            classified,
-            binding.modulePath,
-            this.attributionOf(use),
-          ),
-        );
+        if (binding.target.defined) {
+          this.references.push(
+            this.chainReference(
+              "references",
+              classified,
+              binding.target.path,
+              this.attributionOf(use),
+            ),
+          );
+        } else {
+          // SPEC 14.7: a marker that does not resolve — into a member
+          // whose identities are all undefined (SPEC 14.19, 11.2), a
+          // condition decidable per file.
+          this.addFinding(
+            7,
+            use,
+            `unknown TypeScript reference: the marker referencing ` +
+              `${describeTargetChain(
+                binding.target,
+                classified.segments.map((segment) => segment.name),
+              )} ` +
+              `does not resolve — ${UNDEFINED_TARGET_REASON} ` +
+              `(SPEC 4.5, 14.7)`,
+          );
+        }
       } else {
         // The expression is rooted at `identifier`, so the string
         // classification is impossible; dynamic is 14.8 (SPEC 4.5, 2.4).
@@ -1121,7 +1227,7 @@ class CodeAnalyzer {
    */
   private visitTextBindingUse(
     identifier: ts.Identifier,
-    binding: { readonly kind: "text"; readonly modulePath: string },
+    binding: { readonly kind: "text"; readonly target: SpecModuleTarget },
   ): void {
     const parent = identifier.parent;
     if (ts.isCallExpression(parent) && parent.expression === identifier) {
@@ -1144,7 +1250,7 @@ class CodeAnalyzer {
    */
   private analyzeTextCall(
     call: ts.CallExpression,
-    calleeBinding: { readonly kind: "text"; readonly modulePath: string },
+    calleeBinding: { readonly kind: "text"; readonly target: SpecModuleTarget },
   ): void {
     if (call.questionDotToken !== undefined) {
       this.addFinding(
@@ -1251,19 +1357,41 @@ class CodeAnalyzer {
       );
       return;
     }
-    if (rootBinding.modulePath !== calleeBinding.modulePath) {
-      // SPEC 4.4 → 14.11: a node passed to another module's text export.
-      // The foreign (called) module is identity data on the finding, not a
+    if (
+      moduleTargetKey(rootBinding.target) !==
+      moduleTargetKey(calleeBinding.target)
+    ) {
+      // SPEC 4.4 → 14.11: a node passed to another module's text export
+      // — modules compared as their files, byte-exact (SPEC 12.0). The
+      // foreign (called) module is identity data on the finding, not a
       // further location (SPEC 14, 12.7).
       this.addFinding(
         11,
         call,
         `cross-module text call: the argument is a node of module ` +
-          `${JSON.stringify(rootBinding.modulePath)} but the "text" export ` +
-          `called belongs to module ` +
-          `${JSON.stringify(calleeBinding.modulePath)} — pass a node only ` +
-          `to its own module's "text" export (SPEC 4.4, 14.11)`,
-        [calleeBinding.modulePath],
+          `${JSON.stringify(moduleTargetDisplay(rootBinding.target))} but ` +
+          `the "text" export called belongs to module ` +
+          `${JSON.stringify(moduleTargetDisplay(calleeBinding.target))} — ` +
+          `pass a node only to its own module's "text" export ` +
+          `(SPEC 4.4, 14.11)`,
+        [moduleTargetDisplay(calleeBinding.target)],
+      );
+      return;
+    }
+    if (!rootBinding.target.defined) {
+      // SPEC 14.7: a text(...) call that does not resolve — into a member
+      // whose identities are all undefined (SPEC 14.19, 11.2), a
+      // condition decidable per file. The finding spans the argument
+      // chain, as an unresolved defined-member argument's would (SPEC 14).
+      this.addFinding(
+        7,
+        argument,
+        `unknown TypeScript reference: the text(...) argument referencing ` +
+          `${describeTargetChain(
+            rootBinding.target,
+            classified.segments.map((segment) => segment.name),
+          )} ` +
+          `does not resolve — ${UNDEFINED_TARGET_REASON} (SPEC 4.3, 14.7)`,
       );
       return;
     }
@@ -1273,7 +1401,7 @@ class CodeAnalyzer {
       this.chainReference(
         "embeds",
         classified,
-        rootBinding.modulePath,
+        rootBinding.target.path,
         this.attributionOf(call),
       ),
     );

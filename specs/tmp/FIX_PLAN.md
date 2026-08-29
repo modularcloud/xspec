@@ -82,45 +82,28 @@ human one `FROM -> TO` line per pair plus a count line.)
 
 ## Stage B — missing command surfaces (patch 0001)
 
-### B2a. Invalid-path sources enter per-file analysis (parse-local findings)
-
-(Positioned before B2/B4/B5 deliberately — they consume this parse.) SPEC 11.2
-("Structure is parse-local": a discovered file whose own path is invalid
-(14.19) keeps its parse-local structure, its located findings, and its
-occurrence positions — while no identity over an invalid path is ever emitted
-or resolved against), 14 (only an unparseable file (14.20) masks its content;
-14.19 does not — `build`/`check` "MUST report each" condition), 12.0/12.7
-(marked byte-form paths in every output). Today `SourceClassification`
-(`src/core/discovery.ts` ~63: "A file with any finding here is no source: it
-appears in neither list") drops every 14.19 file before parsing, so located
-conditions inside such files are never reported. Observed: T12.7-1 arm E
-(`runBytePathsArm`, `test/suite/registry/section-12.7.ts`) stages a non-UTF-8
-directory `specs/d<0xFF>/` holding `In.mdx` (valid imports of `../OK.xspec`
-and `./Tgt.xspec`, a resolving `{text(OK.ok)}` embedding, an id-less `<S>`)
-plus `Tgt.mdx` (path-only defect): `build --json` must report exactly
-`14.1 x1` (located in `In.mdx`, its location `file` the marked byte form) and
-`14.19 x2` (each concerned path marked) — the product reports `14.19 x2` only.
-Required:
-
-- Discovery keeps 14.19 files visible to analysis (condition-19 findings
-  intact) and core analysis parses and per-file validates them per 11.2:
-  their located findings report from `build`/`check` beside the 14.19,
-  location files rendered through `pathTextOf` (A2).
-- No identity of such a file is defined (11.2, 1.5): no graph nodes, no
-  resolution *into* the file (references to it stay unresolved), no journal
-  or derived-file interaction — `build` on such a workspace fails on the
-  findings and modifies nothing (12.1). A valid import designating such a
-  file is no finding (arm E: `./Tgt.xspec` reports nothing), and constructs
-  inside it are judged on their own terms.
-- Reference spellings inside such files whose targets resolve record
-  occurrences with the source datum explicitly unavailable (11.2, 5.7) —
-  the recording itself lands with B2 (its "explicitly unavailable when 11.2
-  leaves the containing node's identity undefined" datum); B4/B5 then answer
-  for these files from this same per-file analysis (an invalid-path file
-  keeps its view, B5).
-
-Verify: T12.7-1 arm E's `build --json` leg (`section-12.7.test.ts` — its
-`occurrences`/`view`/`inventory` legs additionally need B2/B4/B5/B7).
+(B2a landed: 14.19 files enter per-file analysis. Discovery carries them as
+`classification.invalidSources` (`{path: PathText, bytes, kind, groups}`,
+`src/core/discovery.ts`); the pipeline parses them into
+`WorkspaceAnalysis.invalidPathSpecs`/`invalidPathCode` — ordinary
+`SpecFileAnalysis`/`CodeAnalysis` values whose `document.file` /
+`analysis.file` is the real `PathText` while `path` is a never-rendered
+lossy stand-in — their per-file findings reported beside the 14.19; they
+feed no nodes, hashes, or recorded inputs. Import designation consults the
+whole discovered set through `SpecSourceDomain`
+(`src/core/spec-references.ts`; byte-space designators for byte-path
+importers, `WorkspaceContent.readInvalidSource` reads content by exact
+bytes): a valid import of a 14.19 member is no finding,
+`SpecImport.targetFile`/`CodeImport.targetFile` carry every valid import's
+member as `PathText`, bindings of such members are `undefined-module` (MDX)
+/ `target: {defined: false}` (TS), and references rooted there report their
+14.5/14.6/14.7 at analysis time. References *from* invalid-path files
+resolve in `buildWorkspaceGraph` (the `invalidPathSpecs`/`invalidPathCode`
+inputs — findings only, local form never resolves); spec import cycles run
+over path bytes with invalid-path files participating. B4/B5 answer for
+these files from `invalidPathSpecs`/`invalidPathCode`; B2's occurrence
+recording for them hooks into the graph's invalid-path resolution pass,
+source datum explicitly unavailable.)
 
 ### B2. Record reference occurrences in core analysis and graph data
 
