@@ -39,129 +39,139 @@ export type CommandHandler = (
 /**
  * The dispatch table: one lazily imported handler per SPEC 12.5 command
  * path, so an invocation loads only its own command's implementation.
+ * `version` (SPEC 12.6) is absent by design: it loads no configuration and
+ * consults no workspace, so `main` dispatches it before workspace location,
+ * upstream of this workspace-bound table.
  */
 const HANDLERS: ReadonlyMap<string, () => Promise<CommandHandler>> = new Map(
-  COMMAND_PATHS.map((path): [string, () => Promise<CommandHandler>] => {
-    switch (path) {
-      case "build":
-        // SPEC 12.1.
-        return [
-          path,
-          async () => (await import("./commands/build.js")).buildCommand,
-        ];
-      case "check":
-        // SPEC 12.2.
-        return [
-          path,
-          async () => (await import("./commands/check.js")).checkCommand,
-        ];
-      case "ids":
-        // SPEC 12.3.
-        return [
-          path,
-          async () => (await import("./commands/ids.js")).idsCommand,
-        ];
-      case "show":
-        // SPEC 12.4.
-        return [
-          path,
-          async () => (await import("./commands/show.js")).showCommand,
-        ];
-      case "coverage":
-        // SPEC 8.2.
-        return [
-          path,
-          async () => (await import("./commands/coverage.js")).coverageCommand,
-        ];
-      case "impact":
-        // SPEC 9.
-        return [
-          path,
-          async () => (await import("./commands/impact.js")).impactCommand,
-        ];
-      case "query node":
-      case "query nodes":
-      case "query edges":
-      case "query subtree":
-      case "query ancestors":
-      case "query reachable":
-        // SPEC 11.
-        return [
-          path,
-          async () => (await import("./commands/query.js")).queryCommand,
-        ];
-      case "review create":
-        // SPEC 10.7.
-        return [
-          path,
-          async () =>
-            (await import("./commands/review.js")).reviewCreateCommand,
-        ];
-      case "review list":
-        // SPEC 10.7.
-        return [
-          path,
-          async () => (await import("./commands/review.js")).reviewListCommand,
-        ];
-      case "review status":
-        // SPEC 10.7.
-        return [
-          path,
-          async () =>
-            (await import("./commands/review.js")).reviewStatusCommand,
-        ];
-      case "review next":
-        // SPEC 10.7.
-        return [
-          path,
-          async () => (await import("./commands/review.js")).reviewNextCommand,
-        ];
-      case "review show":
-        // SPEC 10.7.
-        return [
-          path,
-          async () => (await import("./commands/review.js")).reviewShowCommand,
-        ];
-      case "review split":
-        // SPEC 10.7.
-        return [
-          path,
-          async () =>
-            (await import("./commands/review-mutate.js")).reviewSplitCommand,
-        ];
-      case "review resolve":
-        // SPEC 10.7.
-        return [
-          path,
-          async () =>
-            (await import("./commands/review-mutate.js")).reviewResolveCommand,
-        ];
-      case "review export":
-        // SPEC 10.7.
-        return [
-          path,
-          async () =>
-            (await import("./commands/review.js")).reviewExportCommand,
-        ];
-      case "rename":
-        // SPEC 6.4.
-        return [
-          path,
-          async () => (await import("./commands/rename.js")).renameCommand,
-        ];
-      case "move":
-        // SPEC 6.5.
-        return [
-          path,
-          async () => (await import("./commands/move.js")).moveCommand,
-        ];
-      default:
-        // Unreachable: every SPEC 12.5 command path is cased above.
-        // Guarded so a command-table addition without a handler fails
-        // loudly at module load.
-        throw new Error(`no handler implemented for command '${path}'`);
-    }
-  }),
+  COMMAND_PATHS.filter((path) => path !== "version").map(
+    (path): [string, () => Promise<CommandHandler>] => {
+      switch (path) {
+        case "build":
+          // SPEC 12.1.
+          return [
+            path,
+            async () => (await import("./commands/build.js")).buildCommand,
+          ];
+        case "check":
+          // SPEC 12.2.
+          return [
+            path,
+            async () => (await import("./commands/check.js")).checkCommand,
+          ];
+        case "ids":
+          // SPEC 12.3.
+          return [
+            path,
+            async () => (await import("./commands/ids.js")).idsCommand,
+          ];
+        case "show":
+          // SPEC 12.4.
+          return [
+            path,
+            async () => (await import("./commands/show.js")).showCommand,
+          ];
+        case "coverage":
+          // SPEC 8.2.
+          return [
+            path,
+            async () =>
+              (await import("./commands/coverage.js")).coverageCommand,
+          ];
+        case "impact":
+          // SPEC 9.
+          return [
+            path,
+            async () => (await import("./commands/impact.js")).impactCommand,
+          ];
+        case "query node":
+        case "query nodes":
+        case "query edges":
+        case "query subtree":
+        case "query ancestors":
+        case "query reachable":
+          // SPEC 11.
+          return [
+            path,
+            async () => (await import("./commands/query.js")).queryCommand,
+          ];
+        case "review create":
+          // SPEC 10.7.
+          return [
+            path,
+            async () =>
+              (await import("./commands/review.js")).reviewCreateCommand,
+          ];
+        case "review list":
+          // SPEC 10.7.
+          return [
+            path,
+            async () =>
+              (await import("./commands/review.js")).reviewListCommand,
+          ];
+        case "review status":
+          // SPEC 10.7.
+          return [
+            path,
+            async () =>
+              (await import("./commands/review.js")).reviewStatusCommand,
+          ];
+        case "review next":
+          // SPEC 10.7.
+          return [
+            path,
+            async () =>
+              (await import("./commands/review.js")).reviewNextCommand,
+          ];
+        case "review show":
+          // SPEC 10.7.
+          return [
+            path,
+            async () =>
+              (await import("./commands/review.js")).reviewShowCommand,
+          ];
+        case "review split":
+          // SPEC 10.7.
+          return [
+            path,
+            async () =>
+              (await import("./commands/review-mutate.js")).reviewSplitCommand,
+          ];
+        case "review resolve":
+          // SPEC 10.7.
+          return [
+            path,
+            async () =>
+              (await import("./commands/review-mutate.js"))
+                .reviewResolveCommand,
+          ];
+        case "review export":
+          // SPEC 10.7.
+          return [
+            path,
+            async () =>
+              (await import("./commands/review.js")).reviewExportCommand,
+          ];
+        case "rename":
+          // SPEC 6.4.
+          return [
+            path,
+            async () => (await import("./commands/rename.js")).renameCommand,
+          ];
+        case "move":
+          // SPEC 6.5.
+          return [
+            path,
+            async () => (await import("./commands/move.js")).moveCommand,
+          ];
+        default:
+          // Unreachable: every workspace-bound SPEC 12.5 command path is
+          // cased above. Guarded so a command-table addition without a
+          // handler fails loudly at module load.
+          throw new Error(`no handler implemented for command '${path}'`);
+      }
+    },
+  ),
 );
 
 /** Whether the invocation is a `query` subcommand (SPEC 11). */
@@ -195,6 +205,18 @@ export async function main(
     }
     return 2;
   }
+
+  // SPEC 12.6: `version` is workspace-independent — it consults no
+  // workspace and no configuration (`--config` accepted, not consulted;
+  // SPEC 7: every command *except* `version` locates the configuration), so
+  // it dispatches before workspace location and cannot fail for workspace
+  // or configuration reasons: configuration-error precedence (SPEC 14.14)
+  // never reaches it.
+  if (result.invocation.command === "version") {
+    const { versionCommand } = await import("./commands/version.js");
+    return versionCommand(stdout);
+  }
+
   const loadHandler = HANDLERS.get(result.invocation.command);
   if (loadHandler === undefined) {
     // Unreachable: the dispatch table is built from the same command table

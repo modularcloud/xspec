@@ -10,8 +10,9 @@
 //
 // - The first argv element names a command from the known table (12.5):
 //   `build`, `check`, `ids`, `show`, `coverage`, `impact`, `review`, `query`,
-//   `rename`, `move`. `review` and `query` take a subcommand as the next
-//   element. Unknown commands and subcommands are usage errors (12.0).
+//   `rename`, `move`, `version`. `review` and `query` take a subcommand as
+//   the next element. Unknown commands and subcommands are usage errors
+//   (12.0).
 // - Tokens beginning `--` are flags; a value flag consumes the following
 //   element, verbatim, as its value. The specification writes only the
 //   space-separated form, so a token like `--config=x` is an unknown flag.
@@ -113,7 +114,8 @@ const TEST_HOLD_FLAG: FlagSpec = {
 /**
  * The known command table (SPEC 12.5), in specification order. Argument
  * forms: `build` 12.1, `check` 12.2, `ids` 12.3, `show` 12.4, `coverage` 8.2,
- * `impact` 9, `review` 10.7, `query` 11, `rename` 6.4, `move` 6.5.
+ * `impact` 9, `review` 10.7, `query` 11, `rename` 6.4, `move` 6.5,
+ * `version` 12.6.
  */
 const COMMANDS: readonly CommandSpec[] = [
   // SPEC 12.1.
@@ -276,6 +278,11 @@ const COMMANDS: readonly CommandSpec[] = [
   // SPEC 6.5: `move <old-file> <new-file>` or
   // `move <file>#<id> <target-file>#<new-id>` — two positionals either way.
   { path: "move", positionals: ["<old>", "<new>"], flags: [TEST_HOLD_FLAG] },
+  // SPEC 12.6: `version` — JSON-only (a single JSON document is its only
+  // output form, with or without `--json`); workspace-independent, so
+  // `--config` (a global) is accepted and never consulted — `main`
+  // dispatches it before configuration location.
+  { path: "version", positionals: [], flags: [], jsonOnly: true },
 ];
 
 /** Every dispatch key (`CommandSpec.path`), in specification order. */

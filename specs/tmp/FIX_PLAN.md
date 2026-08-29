@@ -82,24 +82,6 @@ human one `FROM -> TO` line per pair plus a count line.)
 
 ## Stage B — missing command surfaces (patch 0001)
 
-### B1. `xspec version`
-
-SPEC 12.6, 12.7, 12.0. Not in the command table (`src/cli/args.ts` `COMMANDS`);
-exits 2 unknown-command today. Add the command and handler (`src/cli/main.ts`):
-
-- JSON-only: `{"product": <string>, "interface": "1"}` is its only output form,
-  with or without `--json`. Interface is exactly the string `"1"`. Product
-  version fixed per build (read from the package's own metadata at build or
-  startup — byte-deterministic, no environment-dependent content).
-- Loads no configuration and consults no workspace: `--config` accepted, not
-  consulted; identical output in any working directory, missing/invalid
-  configuration included — configuration-error precedence (14.14) never reaches
-  it. Usage errors (unknown flag) keep exit 2 and, being a JSON-only surface,
-  emit the A4 error document.
-
-Verify: T12.6-1/2 (`section-12.6.test.ts`), T12.0-9 arm; unblocks the Windows CI
-leg's leading edge (E-6).
-
 ### B2a. Invalid-path sources enter per-file analysis (parse-local findings)
 
 (Positioned before B2/B4/B5 deliberately — they consume this parse.) SPEC 11.2
