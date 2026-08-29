@@ -40,26 +40,17 @@ order over both forms, used by `compareFindings`/`compareLocations`. Finding
 `locations[].file` and `path` are `PathText` now; Stage B surfaces reuse the
 same renderer for their own path members.)
 
-### A3. Multi-location cardinality for jointly-violated conditions
-
-SPEC 14 (location-cardinality paragraph). Prereq A1. One finding carries a
-location for every participating construct — no representative:
-
-- Condition 3 (duplicate ID): one finding per duplicated identity locating every
-  bearer (`src/core/spec-references.ts` / structure validation).
-- Condition 15 import-binding collision: locate every colliding declaration.
-- Condition 9 (cycle): locate the full path in source — a dependency cycle by
-  every reference spelling recording a participating dependency edge, a spec
-  import cycle by each participating import declaration — `path` null; the cycle
-  is locations now, not `identities` (replace A1's interim). Producer:
-  `src/core/graph.ts` cycle detection must map edges back to spellings.
-- A reference spelling of the MDX embedding form that records no occurrence
-  (unknown target / invalid argument, 14.5–14.8): the finding's range is the
-  full braced container, opening brace through closing brace
-  (`SpecEmbedding.range` in `src/core/mdx.ts` already holds it) — not the inner
-  expression.
-
-Verify: T14-8 (`section-14.test.ts`), T7.5 arms.
+(A3 landed: jointly-violated conditions carry every participant's location —
+duplicate IDs one 14.3 finding per identity locating every bearer (`mdx.ts`
+`validateStructure`), import-binding collisions one 14.15 locating every
+colliding declaration (`spec-references.ts` `analyzeSpecImports`,
+`code-analysis.ts` `scanModuleLinks`), cycles located through their full
+in-source path with identities dropped — `graph.ts` keeps an `edgeSpellings`
+map (requirement-side depends/embeds edge → its 5.7 spelling spans; `d` =
+the entry's own expression, MDX embedding = the full braced container),
+which B8's `refused-cycle` can reuse; import cycles locate every
+participating import declaration. Embedding-form no-occurrence findings
+(14.6, 14.8) span the full braced container, `SpecEmbedding.range`.)
 
 ### A4. Exit-2 JSON error document
 

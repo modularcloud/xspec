@@ -501,8 +501,11 @@ class CodeAnalyzer {
       }
     }
     // SPEC 4/2.1 → 14.15: no import may bind an identifier already bound
-    // by another import, when either import is a spec module import; one
-    // finding per re-binding import, every colliding binding masked.
+    // by ANOTHER import, when either import is a spec module import — one
+    // condition the declarations jointly violate: ONE finding per collided
+    // identifier, locating every colliding declaration (SPEC 14 location
+    // cardinality; no representative chosen), every colliding binding
+    // masked.
     const byName = new Map<string, BoundName[]>();
     for (const entry of bound) {
       const entries = byName.get(entry.name);
@@ -510,17 +513,30 @@ class CodeAnalyzer {
       else entries.push(entry);
     }
     for (const [name, entries] of byName) {
-      if (entries.length < 2 || !entries.some((entry) => entry.spec)) continue;
-      for (const entry of entries.slice(1)) {
-        this.addFinding(
-          15,
-          entry.statement,
-          `invalid import: the identifier ${JSON.stringify(name)} is ` +
-            `already bound by another import in this file — no two imports ` +
-            `may bind the same identifier when either is a spec module ` +
-            `import; rename one binding (SPEC 4, 2.1, 14.15)`,
-        );
+      const statements: ts.Statement[] = [];
+      for (const entry of entries) {
+        if (!statements.includes(entry.statement)) {
+          statements.push(entry.statement);
+        }
       }
+      // The collision is between imports (SPEC 4: "already bound by
+      // another import"): it needs two distinct declarations.
+      if (statements.length < 2 || !entries.some((entry) => entry.spec)) {
+        continue;
+      }
+      this.findings.push(
+        locatedFinding(
+          15,
+          `invalid import: the identifier ${JSON.stringify(name)} is bound ` +
+            `by ${String(statements.length)} imports in this file — no two ` +
+            `imports may bind the same identifier when either is a spec ` +
+            `module import; rename all but one binding (SPEC 4, 2.1, 14.15)`,
+          statements.map((declaration) => ({
+            file: this.path,
+            range: this.rangeOf(declaration),
+          })),
+        ),
+      );
       for (const entry of entries) {
         this.declarations.set(entry.declaration, { kind: "poisoned" });
       }

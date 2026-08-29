@@ -1754,9 +1754,15 @@ class DocumentBuilder {
    * the immediate children of a section without a usable ID it is masked,
    * while their other conditions, and the check for their own children
    * (against their declared IDs), report normally.
+   *
+   * Location cardinality (SPEC 14): a duplicated ID is one condition the
+   * bearers jointly violate — ONE 14.3 finding per duplicated identity,
+   * carrying a location for every bearer, the first included; no
+   * representative is chosen.
    */
   validateStructure(): void {
-    const seen = new Set<string>();
+    /** Declared ID → the location of every bearer, in document order. */
+    const bearers = new Map<string, ByteRange[]>();
     for (const section of this.sections) {
       if (!section.idPresent) {
         // SPEC 1.3 → 14.1: a non-root section without `id`.
@@ -1800,19 +1806,24 @@ class DocumentBuilder {
           );
         }
       }
-      if (seen.has(section.id)) {
-        // SPEC 1.3 → 14.3: IDs unique within a source file; reported at
-        // each repeated occurrence.
-        this.addFinding(
+      const locations = bearers.get(section.id);
+      if (locations === undefined) bearers.set(section.id, [location]);
+      else locations.push(location);
+    }
+    for (const [id, locations] of bearers) {
+      if (locations.length < 2) continue;
+      // SPEC 1.3 → 14.3: IDs unique within a source file. One finding per
+      // duplicated identity, locating every bearer (SPEC 14 cardinality).
+      this.findings.push(
+        locatedFinding(
           3,
-          location,
-          `duplicate ID ${JSON.stringify(section.id)}: IDs must be unique ` +
-            `within a source file — rename one of the sections ` +
-            `(SPEC 1.3, 14.3)`,
-        );
-      } else {
-        seen.add(section.id);
-      }
+          `duplicate ID ${JSON.stringify(id)}: ` +
+            `${String(locations.length)} sections bear this ID — IDs must ` +
+            `be unique within a source file; rename all but one of the ` +
+            `sections (SPEC 1.3, 14.3)`,
+          locations.map((range) => ({ file: this.path, range })),
+        ),
+      );
     }
   }
 

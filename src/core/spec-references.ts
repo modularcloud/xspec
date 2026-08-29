@@ -177,9 +177,10 @@ function boundIdentifiers(clause: ts.ImportClause | undefined): string[] {
  * 7.1): an import must designate one of them — whether the designated
  * file parses does not matter here (references through it report as
  * unresolved, SPEC 14.20, 14.5–14.7). Each invalid import yields exactly
- * one 14.15 finding listing its defects; identifiers bound by two
- * imports yield one 14.15 per re-binding import (SPEC 2.1: no two
- * imports in a file may bind the same identifier).
+ * one 14.15 finding listing its defects; an identifier bound by more
+ * than one import (SPEC 2.1: no two imports in a file may bind the same
+ * identifier) yields ONE 14.15 finding locating every colliding
+ * declaration, the first included (SPEC 14 location cardinality).
  */
 export function analyzeSpecImports(
   document: SpecDocument,
@@ -188,8 +189,8 @@ export function analyzeSpecImports(
   const imports: SpecImport[] = [];
   const bindings = new Map<string, SpecImportBinding>();
   const findings: Finding[] = [];
-  /** name → whether any import already bound it (duplicate rule). */
-  const seenNames = new Set<string>();
+  /** name → the distinct import declarations binding it (duplicate rule). */
+  const declarationsByName = new Map<string, SpecImportStatement[]>();
 
   for (const block of document.esmBlocks) {
     for (const statement of block.imports) {
@@ -303,28 +304,22 @@ export function analyzeSpecImports(
         targetPath = null;
       }
 
-      // SPEC 2.1: no two imports in a file may bind the same identifier.
+      // SPEC 2.1: no two imports in a file may bind the same identifier —
+      // declarations are recorded here and the collision judged once every
+      // declaration is seen (SPEC 14 cardinality: one finding locating
+      // every colliding declaration).
       for (const name of names) {
-        if (seenNames.has(name)) {
-          findings.push(
-            locatedFinding(
-              15,
-              `invalid import: the identifier ${JSON.stringify(name)} is ` +
-                `already bound by another import in this file — no two ` +
-                `imports in an xspec source file may bind the same ` +
-                `identifier; rename one binding (SPEC 2.1, 14.15)`,
-              [{ file: document.path, range: statement.range }],
-            ),
-          );
-          bindings.set(name, { kind: "poisoned" });
-        } else {
-          seenNames.add(name);
+        const declared = declarationsByName.get(name);
+        if (declared === undefined) {
+          declarationsByName.set(name, [statement]);
           bindings.set(
             name,
             valid && targetPath !== null && name === clause?.name?.text
               ? { kind: "module", targetPath }
               : { kind: "poisoned" },
           );
+        } else if (!declared.includes(statement)) {
+          declared.push(statement);
         }
       }
 
@@ -343,6 +338,26 @@ export function analyzeSpecImports(
         valid,
       });
     }
+  }
+
+  // SPEC 2.1 → 14.15: an identifier bound by more than one import is one
+  // condition the declarations jointly violate — ONE finding per collided
+  // identifier, locating every colliding declaration (SPEC 14: no
+  // representative is chosen); the identifier's binding is poisoned, so
+  // references rooted at it are masked (SPEC 14).
+  for (const [name, declared] of declarationsByName) {
+    if (declared.length < 2) continue;
+    findings.push(
+      locatedFinding(
+        15,
+        `invalid import: the identifier ${JSON.stringify(name)} is bound ` +
+          `by ${String(declared.length)} imports in this file — no two ` +
+          `imports in an xspec source file may bind the same identifier; ` +
+          `rename all but one binding (SPEC 2.1, 14.15)`,
+        declared.map((decl) => ({ file: document.path, range: decl.range })),
+      ),
+    );
+    bindings.set(name, { kind: "poisoned" });
   }
 
   return {
@@ -654,11 +669,11 @@ class ReferenceAnalyzer {
       embedding.expressionRange.start,
     );
     if (ts.isSpreadElement(argument)) {
+      // SPEC 14: a no-occurrence spelling of the MDX embedding form is
+      // located by the full braced container (the span its occurrence
+      // would occupy, 5.7).
       this.addFinding(
-        translate.range({
-          start: argument.getStart(sourceFile),
-          end: argument.getEnd(),
-        }),
+        embedding.range,
         `invalid argument: a spread element is not a static reference ` +
           `(SPEC 2.3, 2.4, 14.8)`,
       );
@@ -670,6 +685,9 @@ class ReferenceAnalyzer {
       `the text(...) argument must be a static string literal naming a ` +
         `same-file ID or a static property chain rooted at an imported ` +
         `spec module (SPEC 2.3, 2.4, 14.8)`,
+      // SPEC 14: an embedding-form finding's range is the full braced
+      // container — the span its occurrence would occupy (5.7).
+      embedding.range,
     );
     if (resolved.outcome === "reference") {
       return resolved.reference;
@@ -680,11 +698,18 @@ class ReferenceAnalyzer {
     return null;
   }
 
-  /** Turn one classification into a reference, a 14.8, or a mask. */
+  /**
+   * Turn one classification into a reference, a 14.8, or a mask.
+   * `containerRange` — set for a `text(...)` embedding argument — is the
+   * embedding's full braced container: an embedding-form finding's range
+   * is that container, the span its occurrence would occupy (SPEC 14,
+   * 5.7); a `d` reference's finding keeps its own expression's span.
+   */
   private resolveClassified(
     classified: ClassifiedReference,
     translate: SpanTranslator,
     expectation: string,
+    containerRange: ByteRange | null = null,
   ): ResolvedReference {
     if (classified.kind === "dynamic") {
       return {
@@ -695,7 +720,7 @@ class ReferenceAnalyzer {
           [
             {
               file: this.document.path,
-              range: translate.range(classified.span),
+              range: containerRange ?? translate.range(classified.span),
             },
           ],
         ),
@@ -721,7 +746,7 @@ class ReferenceAnalyzer {
           [
             {
               file: this.document.path,
-              range: translate.range(classified.span),
+              range: containerRange ?? translate.range(classified.span),
             },
           ],
         ),

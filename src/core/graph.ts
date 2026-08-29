@@ -34,7 +34,7 @@
 import { compareBytes, sortByBytes } from "./bytes.js";
 import type { ByteRange } from "./bytes.js";
 import type { CodeAnalysis } from "./code-analysis.js";
-import type { Finding } from "./findings.js";
+import type { Finding, FindingLocation } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
 import type { SpecDocument, SpecEmbedding, SpecSection } from "./mdx.js";
 import type {
@@ -365,7 +365,7 @@ export function buildWorkspaceGraph(
     source: string,
     target: string,
   ): void => {
-    const key = `${kind} ${source} ${target}`;
+    const key = `${kind}\u0000${source}\u0000${target}`;
     if (!edgeByKey.has(key)) edgeByKey.set(key, { kind, source, target });
   };
 
@@ -384,6 +384,23 @@ export function buildWorkspaceGraph(
 
   const findings: Finding[] = [];
   const resolution = new Resolver(parsedByPath, requirementIndex, idIndex);
+
+  // The reference spellings behind each requirement-side dependency edge
+  // (SPEC 5.7 spans), keyed source → target: a cycle locates its full path
+  // in source through every spelling recording a participating edge
+  // (SPEC 14 location cardinality, 14.9).
+  const edgeSpellings = new Map<string, FindingLocation[]>();
+  const addSpelling = (
+    source: string,
+    target: string,
+    file: string,
+    range: ByteRange,
+  ): void => {
+    const key = `${source}\u0000${target}`;
+    let spellings = edgeSpellings.get(key);
+    if (spellings === undefined) edgeSpellings.set(key, (spellings = []));
+    spellings.push({ file, range });
+  };
 
   // SPEC 5.2/2.2: `depends` — declared by the `d` prop; unknown targets
   // are 14.5.
@@ -410,6 +427,13 @@ export function buildWorkspaceGraph(
       const source = sectionIndex.get(dependency.section);
       if (source !== undefined) {
         addEdge("depends", source.identity, resolved.node.identity);
+        // SPEC 5.7: a `d` reference's spelling spans its own expression.
+        addSpelling(
+          source.identity,
+          resolved.node.identity,
+          spec.document.path,
+          dependency.reference.range,
+        );
       }
     }
   }
@@ -432,11 +456,14 @@ export function buildWorkspaceGraph(
       );
       if (!resolved.ok) {
         embeddingIndex.set(embedded.embedding, null);
+        // SPEC 14: a no-occurrence spelling of the MDX embedding form is
+        // located by the full braced container, opening brace through
+        // closing brace — the span its occurrence would occupy (5.7).
         findings.push(
           unresolvedFinding(
             6,
             spec.document.path,
-            embedded.reference.range,
+            embedded.embedding.range,
             `unknown text target: the text(...) reference to ` +
               `${resolution.describe(spec.document, embedded.reference.target)} ` +
               `does not resolve — ${resolved.reason}; declare the target ` +
@@ -449,6 +476,14 @@ export function buildWorkspaceGraph(
       const source = sectionIndex.get(embedded.embedding.section);
       if (source !== undefined) {
         addEdge("embeds", source.identity, resolved.node.identity);
+        // SPEC 5.7: an MDX embedding's spelling spans the entire braced
+        // container, opening brace through closing brace.
+        addSpelling(
+          source.identity,
+          resolved.node.identity,
+          spec.document.path,
+          embedded.embedding.range,
+        );
       }
     }
   }
@@ -496,7 +531,12 @@ export function buildWorkspaceGraph(
 
   // --- cycles (SPEC 5.3, 2.1 → 14.9) ---------------------------------------
   findings.push(
-    ...dependencyCycleFindings(requirementNodes, requirementIndex, edges),
+    ...dependencyCycleFindings(
+      requirementNodes,
+      requirementIndex,
+      edges,
+      edgeSpellings,
+    ),
   );
   findings.push(...importCycleFindings(specs, parsedByPath));
 
@@ -633,12 +673,16 @@ class Resolver {
  * `depends`, and `embeds` edges on requirement nodes (`references` edges
  * and code-sourced `embeds` edges have code-location sources and do not
  * participate). One 14.9 finding per cyclic strongly connected component,
- * carrying a full cycle path within it.
+ * carrying a full cycle path within it — located in source through every
+ * reference spelling recording a participating dependency edge (SPEC 14
+ * location cardinality; `contains` steps arise from document structure and
+ * spell nothing), the full identity path carried in the message.
  */
 function dependencyCycleFindings(
   requirementNodes: readonly RequirementNode[],
   requirementIndex: ReadonlyMap<string, RequirementNode>,
   edges: readonly GraphEdge[],
+  edgeSpellings: ReadonlyMap<string, readonly FindingLocation[]>,
 ): Finding[] {
   const adjacency = new Map<string, Set<string>>();
   for (const edge of edges) {
@@ -656,17 +700,28 @@ function dependencyCycleFindings(
     if (start === undefined) {
       throw new Error("xspec internal error: cycle through an unknown node");
     }
-    // SPEC 14.9/12.7: the full cycle path travels as identity context (a
-    // closed walk, first identity repeated at the end); the finding locates
-    // the cycle's starting section.
+    // SPEC 14/14.9: locate the cycle's full path in source — every
+    // reference spelling recording a participating dependency edge (a
+    // walk step covered only by `contains` contributes no spelling).
+    const locations: FindingLocation[] = [];
+    for (let step = 0; step + 1 < cycle.length; step += 1) {
+      const spellings = edgeSpellings.get(
+        `${cycle[step]}\u0000${cycle[step + 1]}`,
+      );
+      if (spellings !== undefined) locations.push(...spellings);
+    }
     return locatedFinding(
       9,
       `dependency cycle: ${cycle.join(" → ")} — the combined ` +
         `contains/depends/embeds graph over requirement nodes must be ` +
         `acyclic; break the cycle by removing or retargeting one of its ` +
         `depends or embeds references (SPEC 5.3, 14.9)`,
-      [{ file: start.path, range: start.section.range }],
-      cycle,
+      locations.length > 0
+        ? locations
+        : // Unreachable in practice — `contains` alone cannot cycle — but
+          // a located condition must locate (SPEC 14): fall back to the
+          // cycle's starting section.
+          [{ file: start.path, range: start.section.range }],
     );
   });
 }
@@ -676,8 +731,10 @@ function dependencyCycleFindings(
  * designated files, whether or not the bindings are used (an unused
  * import records no edges, but the import itself still relates the
  * files). A file importing itself is a cycle of length one. One 14.9
- * finding per cyclic component, locating the import that closes the
- * reported cycle.
+ * finding per cyclic component, locating each participating import
+ * declaration — every import recording a step of the reported cycle
+ * (SPEC 14 location cardinality), the full file path carried in the
+ * message.
  */
 function importCycleFindings(
   specs: readonly SpecFileAnalysis[],
@@ -697,30 +754,35 @@ function importCycleFindings(
   const paths = specs.map((spec) => spec.document.path);
   const cycles = findCycles(paths, adjacency);
   return cycles.map((cycle) => {
-    // Locate the closing import: the first import of cycle[0] designating
-    // cycle[1] (for a self-import, cycle[1] === cycle[0]).
-    const spec = parsedByPath.get(cycle[0]);
-    const closing = spec?.imports.imports.find(
-      (declared) => declared.targetPath === cycle[1],
-    );
-    // SPEC 14.9/12.7: the participating files travel as identity context;
-    // the finding locates the import that closes the reported cycle.
+    // SPEC 14/14.9: locate each participating import declaration — for
+    // every step of the closed walk, every import of the step's source
+    // file designating the step's target (for a self-import cycle, the
+    // self-designating imports).
+    const locations: FindingLocation[] = [];
+    for (let step = 0; step + 1 < cycle.length; step += 1) {
+      const spec = parsedByPath.get(cycle[step]);
+      if (spec === undefined) continue;
+      for (const declared of spec.imports.imports) {
+        if (declared.targetPath === cycle[step + 1]) {
+          locations.push({
+            file: spec.document.path,
+            range: declared.statement.range,
+          });
+        }
+      }
+    }
     return locatedFinding(
       9,
       `spec import cycle: ${cycle.join(" → ")} — import cycles among ` +
         `spec source files are invalid, even when no requirement-level ` +
         `dependency cycle exists; remove one of the participating imports ` +
         `(SPEC 2.1, 14.9)`,
-      [
-        {
-          file: cycle[0],
-          range:
-            closing !== undefined
-              ? closing.statement.range
-              : { start: 0, end: 0 },
-        },
-      ],
-      cycle,
+      locations.length > 0
+        ? locations
+        : // Unreachable — every step of a reported import cycle came from
+          // a recorded import — but a located condition must locate
+          // (SPEC 14).
+          [{ file: cycle[0], range: { start: 0, end: 0 } }],
     );
   });
 }
