@@ -39,10 +39,13 @@
 //   without. Each such step (all reads, so rerunnable) is rerun without
 //   `--json` at the same story state, asserting the same exit code (0), a
 //   single JSON document as the entire stdout (H-5's JSON-only clause), and
-//   stdout byte-identical to the flagged run's: a single JSON document is
-//   the surface's ONLY output form with or without the flag, so the flag is
-//   inert there and "the same single document" is a product-to-itself byte
-//   comparison (H-4).
+//   that the two decoded documents carry the same information: deep
+//   equality of the parsed documents with array order significant and
+//   object key order not (key order is formatting, not information).
+//   Byte-identity across the flagged/flag-less pair is NOT asserted —
+//   TEST-SPEC §11: SPEC.md does not require it, and H-4/H-6 license byte
+//   comparison only across identical invocations, which a flagged and a
+//   flag-less run are not.
 // - T12.0-4 doubles `--config` with an identical value across the whole sweep
 //   — a repetition regardless of value, and the strictest probe (it fails a
 //   product that dedupes repeated identical values). Each doubled run's argv
@@ -210,7 +213,8 @@ interface SweepStep {
    * The step drives a JSON-only surface (SPEC 10.7, 11, 12.6): a single JSON
    * document is its only output form, with or without `--json`. T12.0-1's
    * parity arm reruns the step without the flag and asserts the same single
-   * document (byte-identical stdout; see the module header).
+   * document (same information; byte-identity not asserted — see the module
+   * header).
    */
   readonly jsonOnly?: true;
 }
@@ -384,12 +388,35 @@ interface SweepStoryOptions {
   /**
    * T12.0-1's parity arm: rerun each JSON-only step (SPEC 10.7, 11, 12.6)
    * without `--json` and assert it emits the same single document — same
-   * exit code, one JSON document as the entire stdout, byte-identical to the
-   * flagged run's (product-to-itself, H-4; see the module header).
+   * exit code, one JSON document as the entire stdout, decoding to the same
+   * information as the flagged run's (key-order-insensitive deep equality;
+   * byte-identity not asserted — see the module header).
    */
   readonly assertJsonOnlyParity?: boolean;
   /** Test id labelling every diagnosis (e.g. "T12.0-1"). */
   readonly label: string;
+}
+
+/**
+ * Recursively sort object keys so two decoded JSON documents that differ
+ * only in key order render identically under `assertSameJson`'s
+ * `JSON.stringify` comparison (which is key-order-sensitive). Arrays are
+ * mapped element-wise, never reordered — array order stays significant;
+ * object key order is formatting, not information (TEST-SPEC §11).
+ */
+function canonicalizeJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeJson);
+  }
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(record).sort()) {
+      sorted[key] = canonicalizeJson(record[key]);
+    }
+    return sorted;
+  }
+  return value;
 }
 
 /**
@@ -438,20 +465,21 @@ async function runSweepStory(options: SweepStoryOptions): Promise<void> {
           `11, 12.6), and the output form never changes an exit code ` +
           `(SPEC 12.0)`,
       );
-      parseJsonStdout(
+      const bareDoc = parseJsonStdout(
         bare,
         `${bareContext} — on a JSON-only surface a single JSON document is ` +
           `the entire standard output with or without --json (SPEC 10.7, ` +
           `11, 12.6, H-5)`,
       );
-      assertBytesEqual(
-        bare.stdoutBytes,
-        result.stdoutBytes,
+      assertSameJson(
+        canonicalizeJson(bareDoc),
+        canonicalizeJson(doc),
         `${bareContext} — the JSON-only surfaces of 10.7, 11, and 12.6 emit ` +
-          `the same single document with the flag as without: a single JSON ` +
-          `document is the surface's only output form, so the flag is inert ` +
-          `and stdout is byte-identical across the pair (SPEC 10.7, 11, ` +
-          `12.6; product-to-itself, H-4)`,
+          `the same single document with the flag as without: the two ` +
+          `decoded documents carry the same information, compared with ` +
+          `array order significant and object key order not (SPEC 10.7, ` +
+          `11, 12.6; TEST-SPEC §11 — byte-identity between the two forms ` +
+          `is not asserted)`,
       );
     }
     step.harvest?.(doc, options.state, context);
@@ -465,7 +493,7 @@ async function runSweepStory(options: SweepStoryOptions): Promise<void> {
 const T12_0_1 = defineProductTest({
   id: "T12.0-1",
   title:
-    "`--json` everywhere: every command and subcommand — build, check, ids, show, coverage, impact, all six query subcommands, occurrences, view, at, inventory, version, all eight review subcommands, rename, and file-form move — accepts the flag and emits exactly one JSON document as the entire standard output at its specified exit code; the JSON-only surfaces of 10.7, 11, and 12.6 (review export; the query subcommands, occurrences, view, at, and inventory; version) emit the same single document with the flag as without — byte-identical stdout at the same exit code (product-to-itself, H-4); information parity with the human report is adapter-verified per command by the per-section tests (SPEC 12.0, 11, 12.6, 10.7)",
+    "`--json` everywhere: every command and subcommand — build, check, ids, show, coverage, impact, all six query subcommands, occurrences, view, at, inventory, version, all eight review subcommands, rename, and file-form move — accepts the flag and emits exactly one JSON document as the entire standard output at its specified exit code; the JSON-only surfaces of 10.7, 11, and 12.6 (review export; the query subcommands, occurrences, view, at, and inventory; version) emit the same single document with the flag as without — same information at the same exit code, one JSON document as the entire stdout each way; byte-identity between the two forms is not asserted (TEST-SPEC §11); information parity with the human report is adapter-verified per command by the per-section tests (SPEC 12.0, 11, 12.6, 10.7)",
   timeoutMs: 240_000,
   run: async (product) => {
     const { workspace, state } = await createSweepWorkspace();

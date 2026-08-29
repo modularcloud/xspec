@@ -197,7 +197,7 @@ const T12_6_1 = defineProductTest({
 
         // Flagged form: `--json` is accepted and inert on a JSON-only
         // surface — the same document form at the same exit code (SPEC
-        // 12.6, 12.0; the byte-level flag-parity compare is T12.0-1's).
+        // 12.6, 12.0; the flag-parity compare is T12.0-1's).
         const flaggedContext = "T12.6-1 `version --json`";
         const flagged = await expectVersionAnswer(
           product,
