@@ -164,7 +164,16 @@ function sliceCheck(
 // (é: 2 bytes; è: 2 bytes; —: 3 bytes) shift every later offset, so byte
 // offsets diverge from code-point and UTF-16 counts (SPEC 1.7). Every
 // segment's text is a named constant so construct-slice expectations are
-// composed, never retyped.
+// composed, never retyped. Every block construct is blank-line-separated
+// (FP-094): under MDX block grammar a line glued to a paragraph rides that
+// paragraph, so the separation is load-bearing — it is what makes the two
+// `import` lines import DECLARATIONS rather than paragraph prose
+// (SPEC 1, 2.1; an import glued to the head prose binds nothing, and a
+// typo specifier there draws no 14.15) and both `{/* … */}` comments flow
+// expression blocks, unambiguous MDX comments whose ranges the view must
+// carry (SPEC 11.4) — the deep one kept inside a.b.c, so its in-section
+// placement no longer rests on how an inline expression inside a paragraph
+// is classified.
 
 const AT_FILE = "specs/total.mdx";
 const BASE_FILE = "specs/base.mdx";
@@ -188,36 +197,42 @@ const Z_PROSE_TEXT = "Finale.\n";
 
 const F = new ByteFixture();
 const PROSE_HEAD = F.add(PROSE_HEAD_TEXT);
+F.add("\n"); // blank line: each import must start its own MDX block
 const IMPORT_ONE = F.add(IMPORT_ONE_TEXT);
-F.add("\n");
+F.add("\n\n");
 const IMPORT_TWO = F.add(IMPORT_TWO_TEXT);
-F.add("\n");
+F.add("\n\n"); // blank line: the comment is a flow expression block
 const COMMENT_TOP = F.add(COMMENT_TOP_TEXT);
-F.add("\n");
+F.add("\n\n");
 const A_OPEN = F.add(A_OPEN_TEXT);
-F.add("\n");
+F.add("\n\n");
 F.add(A_PROSE_TEXT);
+F.add("\n"); // blank line: the nested opening tag starts its own block
 const AB_OPEN = F.add(AB_OPEN_TEXT);
-F.add("\n");
+F.add("\n\n");
 const ABC_OPEN = F.add(ABC_OPEN_TEXT);
-F.add("\n");
+F.add("\n\n");
 const DEEP_PROSE = F.add(DEEP_PROSE_TEXT);
+F.add("\n"); // blank line: the deep comment is a flow block inside a.b.c
 const COMMENT_DEEP = F.add(COMMENT_DEEP_TEXT);
-F.add("\n");
+F.add("\n\n");
 F.add(CLOSE_TEXT);
 const ABC_RANGE: SourceRange = { start: ABC_OPEN.start, end: F.pos };
-F.add("\n");
+F.add("\n\n");
 const AB_TAIL = F.add(AB_TAIL_TEXT);
+F.add("\n");
 F.add(CLOSE_TEXT);
 const AB_RANGE: SourceRange = { start: AB_OPEN.start, end: F.pos };
-F.add("\n");
+F.add("\n\n");
 const A_CLOSE = F.add(CLOSE_TEXT);
 const A_RANGE: SourceRange = { start: A_OPEN.start, end: F.pos };
-F.add("\n");
+F.add("\n\n");
 const PROSE_BETWEEN = F.add(PROSE_BETWEEN_TEXT);
-const Z_OPEN = F.add(Z_OPEN_TEXT);
 F.add("\n");
+const Z_OPEN = F.add(Z_OPEN_TEXT);
+F.add("\n\n");
 F.add(Z_PROSE_TEXT);
+F.add("\n");
 const Z_CLOSE = F.add(CLOSE_TEXT);
 const Z_RANGE: SourceRange = { start: Z_OPEN.start, end: F.pos };
 F.add("\n");
@@ -228,10 +243,10 @@ const ROOT_RANGE: SourceRange = { start: 0, end: AT_LENGTH };
 // Composed construct-slice expectations (never retyped): each paired
 // section's construct spans its opening tag's first character through its
 // closing tag's last (SPEC 1.7).
-const ABC_CONSTRUCT_TEXT = `${ABC_OPEN_TEXT}\n${DEEP_PROSE_TEXT}${COMMENT_DEEP_TEXT}\n${CLOSE_TEXT}`;
-const AB_CONSTRUCT_TEXT = `${AB_OPEN_TEXT}\n${ABC_CONSTRUCT_TEXT}\n${AB_TAIL_TEXT}${CLOSE_TEXT}`;
-const A_CONSTRUCT_TEXT = `${A_OPEN_TEXT}\n${A_PROSE_TEXT}${AB_CONSTRUCT_TEXT}\n${CLOSE_TEXT}`;
-const Z_CONSTRUCT_TEXT = `${Z_OPEN_TEXT}\n${Z_PROSE_TEXT}${CLOSE_TEXT}`;
+const ABC_CONSTRUCT_TEXT = `${ABC_OPEN_TEXT}\n\n${DEEP_PROSE_TEXT}\n${COMMENT_DEEP_TEXT}\n\n${CLOSE_TEXT}`;
+const AB_CONSTRUCT_TEXT = `${AB_OPEN_TEXT}\n\n${ABC_CONSTRUCT_TEXT}\n\n${AB_TAIL_TEXT}\n${CLOSE_TEXT}`;
+const A_CONSTRUCT_TEXT = `${A_OPEN_TEXT}\n\n${A_PROSE_TEXT}\n${AB_CONSTRUCT_TEXT}\n\n${CLOSE_TEXT}`;
+const Z_CONSTRUCT_TEXT = `${Z_OPEN_TEXT}\n\n${Z_PROSE_TEXT}\n${CLOSE_TEXT}`;
 
 // --- the view-derived resolution comparator (SPEC 11.5) -----------------------
 
