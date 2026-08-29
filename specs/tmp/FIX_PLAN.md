@@ -3945,9 +3945,50 @@ certify against FP-091's fixtures once those land.
   product implements none of the §11 surfaces), shrinking in 5 steps to
   the minimal one-anchor-file workspace (seed 271828183).]
 
-- [ ] FP-089 — Implement the P-13 coverage-reachability oracle (independent
+- [x] FP-089 — Implement the P-13 coverage-reachability oracle (independent
   SPEC 8.1/8 reachability) + its S-6 vetted suite (vectors per SPEC 15).
   [R2 #42; TEST-SPEC §16 P-13, §17 S-6]
+  [Done 2026-08-29: `test/helpers/oracles/coverage.ts` (`computeCoverage`)
+  + `test/self/s6-coverage-oracle.test.ts` (21 vectors). Interface FP-090
+  wires to: input is the caller-staged graph — every node with root flag,
+  contains-children (leaf judgment only; the reachability walk never
+  consults them), spelled coverage attribute, tags; dependency edges with
+  kinds, root-adjacent ones included — plus the target and boundary
+  groups' FULL memberships (roots included; the coverage-scoped root
+  exclusions are the oracle's job) and the profile (mode; targets default
+  "leaves"; targetTags null/omitted = absent; edgeKinds default all
+  three). Output: the four 8.2 counts plus required / covered (each with
+  the unique shortest covering path, boundary node first, 12.0
+  element-wise byte tie-break via reverse-BFS distance levels + greedy
+  byte-least descent) / uncovered / ignored (all applicable reasons in
+  the fixed 8.2 order, spelled as the harness IGNORED_REASON_KINDS tokens
+  "root"/"coverage-none"/"non-leaf"/"lacking-tags" so FP-090 can compare
+  classifyIgnoredReasons output directly), every array identity-byte
+  sorted. Misuse guards throw plain errors: incomplete graphs, duplicate
+  group members, self-edges and combined contains/depends/embeds cycles
+  (5.3 — outside the valid-workspace input space), roots carrying
+  tags/coverage (5.5), empty edgeKinds/targetTags (14.14). Vectors: SPEC
+  15's exact worked workspace under T15-1's grouping — the worked
+  transitive statement's full 8.2 result, direct contrast, one-edge
+  direct over the depends edge, edgeKinds breaking the worked path at
+  each step, targets "all" + contains-never-grants, one-or-more-edges
+  (boundary membership alone covers nothing), targetTags
+  carried/lacking/any-of with the fixed reason order pinned on root and
+  print, coverage="none" attribute variants (exclusion,
+  order-beside-lacking-tags, 2.5's descendants-retain sentence, and the
+  T8.2-1-shape coverage-none/non-leaf/lacking-tags triple), root-marker +
+  root-sourced-embeds variants (4.5: never intermediate; a boundary
+  root's byte-least one-edge route loses to the non-root path), three
+  12.0 tie-break vectors (boundary element, interior element,
+  length-before-bytes), 6 misuse-guard tests. Teeth proven by 7 oracle
+  mutation probes (each reverted), all falsified: contains-into-adjacency
+  1 vector, root-filters-removed 2, direct-as-transitive 1,
+  tie-break-reversed 2, root-exclusion-dropped 9, reason-order-swap 1
+  (that probe initially passed — the reason-order vector was added to
+  close the gap), coverage-none-not-excluded 3. Verified:
+  typecheck/format clean; suite 21/21; `npm run test:self` 324 passed
+  (+21), unchanged 2 planned mid-loop reds (certification-document ×2 →
+  FP-091). section-16 registry untouched — wiring is FP-090's task.]
 
 - [ ] FP-090 — Implement P-13: coverage oracle property — random
   workspaces/profiles vs the FP-089 oracle. [R2 #16; TEST-SPEC §16 P-13]
