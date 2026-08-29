@@ -39,7 +39,11 @@ import type { Configuration } from "../core/config.js";
 import type { SourceClassification } from "../core/discovery.js";
 import { markdownEmitDestinations } from "../core/discovery.js";
 import type { Finding } from "../core/findings.js";
-import { conditionExitClass } from "../core/findings.js";
+import {
+  codeExitClass,
+  locatedFinding,
+  orderFindings,
+} from "../core/findings.js";
 import { configurationToStored } from "../core/config-data.js";
 import type { StoredInputs } from "../core/graph-data.js";
 import type { SpecFileAnalysis } from "../core/graph.js";
@@ -101,21 +105,6 @@ function absoluteOf(root: string, rel: string): string {
 }
 
 /**
- * SPEC 14: deterministic report order — by file (byte order), then location,
- * then condition number. The sort is stable, so equal keys keep their
- * collection order (which is already document order within a file).
- */
-function orderFindings(findings: readonly Finding[]): Finding[] {
-  return [...findings].sort(
-    (a, b) =>
-      compareBytes(a.file ?? "", b.file ?? "") ||
-      (a.range?.start ?? -1) - (b.range?.start ?? -1) ||
-      (a.range?.end ?? -1) - (b.range?.end ?? -1) ||
-      a.condition - b.condition,
-  );
-}
-
-/**
  * A workspace's content, however sourced: the classified file listing, a
  * byte reader for the discovered sources, and the journal. The filesystem
  * workspace (`analyzeWorkspace`) and a git tree at a baseline ref
@@ -172,7 +161,7 @@ export async function analyzeWorkspaceContent(
   // precede all source analysis — with one present, no source is parsed and
   // no finding-class condition is reported.
   const configurationErrors = classification.findings.filter(
-    (finding) => conditionExitClass(finding.condition) === 2,
+    (finding) => codeExitClass(finding.code) === 2,
   );
   if (configurationErrors.length > 0) {
     const graph = buildWorkspaceGraph({ specs: [], code: [] });
@@ -245,15 +234,15 @@ export async function analyzeWorkspaceContent(
       // when the MDX parse itself succeeded) makes the file unparseable —
       // one finding, the file's contents masked, never a crash (SPEC 12.0).
       if (!(error instanceof RangeError)) throw error;
-      findings.push({
-        condition: 20,
-        file: source.path,
-        range: { start: 0, end: 0 },
-        message:
+      findings.push(
+        locatedFinding(
+          20,
           `unparseable source: not well-formed MDX — the file's nesting ` +
-          `exceeds what the analyzer can process, so no location inside ` +
-          `it can be analyzed; simplify or split the file (SPEC 14.20)`,
-      });
+            `exceeds what the analyzer can process, so no location inside ` +
+            `it can be analyzed; simplify or split the file (SPEC 14.20)`,
+          [{ file: source.path, range: { start: 0, end: 0 } }],
+        ),
+      );
     }
   }
 
@@ -355,12 +344,13 @@ async function readSourceBytes(
  * analyzed.
  */
 function unreadableSourceFinding(rel: string): Finding {
-  return {
-    condition: 20,
-    file: rel,
-    message:
-      `unparseable source: the discovered file could not be read — it ` +
+  // SPEC 14.20 locates in source; with no readable content, the failure
+  // locates at the file start (range [0, 0)).
+  return locatedFinding(
+    20,
+    `unparseable source: the discovered file could not be read — it ` +
       `changed or vanished while the command ran; re-run the command ` +
       `once the workspace is quiescent (SPEC 13.5, 14.20)`,
-  };
+    [{ file: rel, range: { start: 0, end: 0 } }],
+  );
 }

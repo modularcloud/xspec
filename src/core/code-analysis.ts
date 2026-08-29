@@ -36,6 +36,7 @@ import { Utf8Offsets } from "./bytes.js";
 import type { DerivedPathKind } from "./discovery.js";
 import { derivedFilePathKind } from "./discovery.js";
 import type { Finding } from "./findings.js";
+import { compareFindings, locatedFinding } from "./findings.js";
 import type { ClassifiedChain } from "./references.js";
 import { classifyReference } from "./references.js";
 import { decodeSourceBytes } from "./source-text.js";
@@ -231,15 +232,13 @@ export function analyzeCodeSource(
 
 /** The 14.20 finding for a source the parser cannot process (overflow). */
 function stackOverflowFinding(path: string, grammar: string): Finding {
-  return {
-    condition: 20,
-    file: path,
-    range: { start: 0, end: 0 },
-    message:
-      `unparseable source: not well-formed ${grammar} — the file's ` +
+  return locatedFinding(
+    20,
+    `unparseable source: not well-formed ${grammar} — the file's ` +
       `nesting exceeds what the parser can process, so no location inside ` +
       `it can be analyzed; simplify or split the file (SPEC 14.20)`,
-  };
+    [{ file: path, range: { start: 0, end: 0 } }],
+  );
 }
 
 /**
@@ -293,21 +292,23 @@ function parseFailureFinding(
     start + Math.max(diagnostic.length, 0),
     sourceFile.text.length,
   );
-  const position = sourceFile.getLineAndCharacterOfPosition(start);
-  const lineStart = sourceFile.getPositionOfLineAndCharacter(position.line, 0);
-  // 1-based column in the line's Unicode code points (Finding contract).
-  const column = [...sourceFile.text.slice(lineStart, start)].length + 1;
-  return {
-    condition: 20,
-    file: path,
-    range: { start: offsets.byteOffset(start), end: offsets.byteOffset(end) },
-    line: position.line + 1,
-    column,
-    message:
-      `unparseable source: not well-formed TypeScript under the ` +
+  // SPEC 14/1.7: the reported location is the failure's byte range (the
+  // compiler exposes UTF-16 offsets; converted here).
+  return locatedFinding(
+    20,
+    `unparseable source: not well-formed TypeScript under the ` +
       `${grammar} grammar the file name selects — ${reason}. Correct the ` +
       `syntax at the reported location (SPEC 14.20)`,
-  };
+    [
+      {
+        file: path,
+        range: {
+          start: offsets.byteOffset(start),
+          end: offsets.byteOffset(end),
+        },
+      },
+    ],
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -389,13 +390,16 @@ class CodeAnalyzer {
     condition: 8 | 11 | 15 | 18,
     node: ts.Node,
     message: string,
+    identities: readonly string[] = [],
   ): void {
-    this.findings.push({
-      condition,
-      file: this.path,
-      range: this.rangeOf(node),
-      message,
-    });
+    this.findings.push(
+      locatedFinding(
+        condition,
+        message,
+        [{ file: this.path, range: this.rangeOf(node) }],
+        identities,
+      ),
+    );
   }
 
   /** The tracked binding a resolved symbol belongs to, if any. */
@@ -1233,6 +1237,8 @@ class CodeAnalyzer {
     }
     if (rootBinding.modulePath !== calleeBinding.modulePath) {
       // SPEC 4.4 → 14.11: a node passed to another module's text export.
+      // The foreign (called) module is identity data on the finding, not a
+      // further location (SPEC 14, 12.7).
       this.addFinding(
         11,
         call,
@@ -1241,6 +1247,7 @@ class CodeAnalyzer {
           `called belongs to module ` +
           `${JSON.stringify(calleeBinding.modulePath)} — pass a node only ` +
           `to its own module's "text" export (SPEC 4.4, 14.11)`,
+        [calleeBinding.modulePath],
       );
       return;
     }
@@ -1468,12 +1475,7 @@ function leftmostIdentifier(expression: ts.Expression): ts.Identifier | null {
   }
 }
 
-/** Deterministic finding order (SPEC 12.0): by location, then condition. */
+/** Deterministic finding order (SPEC 12.0, 12.7). */
 function sortFindings(findings: readonly Finding[]): Finding[] {
-  return [...findings].sort(
-    (a, b) =>
-      (a.range?.start ?? 0) - (b.range?.start ?? 0) ||
-      (a.range?.end ?? 0) - (b.range?.end ?? 0) ||
-      a.condition - b.condition,
-  );
+  return [...findings].sort(compareFindings);
 }

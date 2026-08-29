@@ -45,6 +45,7 @@ import type { ByteRange } from "./bytes.js";
 import { compareBytes, sortByBytes } from "./bytes.js";
 import { compactJson } from "./canonical-json.js";
 import type { Finding } from "./findings.js";
+import { pathFinding } from "./findings.js";
 import { firstInvalidUtf8 } from "./source-text.js";
 import {
   containsControl,
@@ -195,7 +196,7 @@ export function parseJournal(bytes: Uint8Array): ParsedJournal {
     if (result.ok) {
       entries.push({ ...result.entry, line, range });
     } else {
-      findings.push(journalFinding(line, range, result.problem));
+      findings.push(journalFinding(line, result.problem));
     }
     offset = end + 1;
   }
@@ -203,23 +204,18 @@ export function parseJournal(bytes: Uint8Array): ParsedJournal {
 }
 
 /** One 14.13 finding for a bad journal line, naming the line (SPEC 14.13). */
-function journalFinding(
-  line: number,
-  range: ByteRange,
-  problem: string,
-): Finding {
-  return {
-    condition: 13,
-    file: JOURNAL_PATH,
-    line,
-    range,
-    message:
-      `journal error: the entry on line ${String(line)} of ${JOURNAL_PATH} ` +
+function journalFinding(line: number, problem: string): Finding {
+  // SPEC 14: a journal condition carries the path it concerns, not an
+  // in-source location; the offending line is named in the message.
+  return pathFinding(
+    13,
+    `journal error: the entry on line ${String(line)} of ${JOURNAL_PATH} ` +
       `${problem} — the journal is a durable, append-only record written ` +
       `only by \`xspec rename\` and \`xspec move\` (SPEC 6.1, 13.4); ` +
       `restore it from version control or delete the offending line ` +
       `(SPEC 14.13)`,
-  };
+    JOURNAL_PATH,
+  );
 }
 
 type LineResult =

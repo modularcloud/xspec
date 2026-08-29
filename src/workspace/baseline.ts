@@ -186,10 +186,9 @@ function invalidBaselineMessage(
   findings: readonly Finding[],
 ): string {
   const lines = findings.map((finding) => {
-    const file = finding.file === undefined ? "" : `${finding.file}: `;
-    const correction =
-      finding.correction === undefined ? "" : ` — ${finding.correction}`;
-    return `\n  ${file}${finding.message}${correction}`;
+    const concerned = finding.locations[0]?.file ?? finding.path;
+    const file = concerned === null ? "" : `${concerned}: `;
+    return `\n  ${file}${finding.message}`;
   });
   return (
     `the workspace content at baseline ref '${ref}' cannot be parsed and ` +

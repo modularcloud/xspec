@@ -20,6 +20,7 @@
 
 import ts from "typescript";
 import type { Finding } from "./findings.js";
+import { pathFinding } from "./findings.js";
 import type { CompiledGlob } from "./glob.js";
 import { compileGlob, unboundToCaptures } from "./glob.js";
 
@@ -141,7 +142,10 @@ class ConfigFindings {
 
   /** SPEC 14.14: every entry is a configuration error (usage error, 12.0). */
   add(message: string, line?: number): void {
-    this.findings.push({ condition: 14, message, file: this.fileName, line });
+    // The offending line, when known, is message content: a configuration
+    // error carries a concerned path, not an in-source location (SPEC 14).
+    const where = line === undefined ? "" : `line ${String(line)}: `;
+    this.findings.push(pathFinding(14, `${where}${message}`, this.fileName));
   }
 
   get count(): number {
@@ -1389,15 +1393,14 @@ export function parseConfiguration(
     return {
       ok: false,
       findings: [
-        {
-          condition: 14,
-          file: fileName,
-          message:
-            `not well-formed TypeScript in the declarative form of SPEC 7 ` +
+        pathFinding(
+          14,
+          `not well-formed TypeScript in the declarative form of SPEC 7 ` +
             `— the file's expression nesting exceeds what the parser can ` +
             `process; flatten the configuration to plain literal form ` +
             `(SPEC 7, 14.14)`,
-        },
+          fileName,
+        ),
       ],
     };
   }

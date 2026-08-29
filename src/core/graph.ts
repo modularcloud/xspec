@@ -35,6 +35,7 @@ import { compareBytes, sortByBytes } from "./bytes.js";
 import type { ByteRange } from "./bytes.js";
 import type { CodeAnalysis } from "./code-analysis.js";
 import type { Finding } from "./findings.js";
+import { compareFindings, locatedFinding } from "./findings.js";
 import type { SpecDocument, SpecEmbedding, SpecSection } from "./mdx.js";
 import type {
   ReferenceTarget,
@@ -481,14 +482,8 @@ export function buildWorkspaceGraph(
     }
   }
 
-  // SPEC 14: deterministic finding order — by file, location, condition.
-  findings.sort(
-    (a, b) =>
-      compareBytes(a.file ?? "", b.file ?? "") ||
-      (a.range?.start ?? 0) - (b.range?.start ?? 0) ||
-      (a.range?.end ?? 0) - (b.range?.end ?? 0) ||
-      a.condition - b.condition,
-  );
+  // SPEC 14/12.7: deterministic finding order.
+  findings.sort(compareFindings);
 
   // The collapsed edge set, ordered (source, kind, target) — kinds in
   // SPEC 5.2 listing order (SPEC 12.0 determinism).
@@ -524,7 +519,7 @@ function unresolvedFinding(
   range: ByteRange,
   message: string,
 ): Finding {
-  return { condition, file, range, message };
+  return locatedFinding(condition, message, [{ file, range }]);
 }
 
 /** A human description of an external reference's target (messages only). */
@@ -661,18 +656,18 @@ function dependencyCycleFindings(
     if (start === undefined) {
       throw new Error("xspec internal error: cycle through an unknown node");
     }
-    const finding: Finding = {
-      condition: 9,
-      file: start.path,
-      range: start.section.range,
-      cycle,
-      message:
-        `dependency cycle: ${cycle.join(" → ")} — the combined ` +
+    // SPEC 14.9/12.7: the full cycle path travels as identity context (a
+    // closed walk, first identity repeated at the end); the finding locates
+    // the cycle's starting section.
+    return locatedFinding(
+      9,
+      `dependency cycle: ${cycle.join(" → ")} — the combined ` +
         `contains/depends/embeds graph over requirement nodes must be ` +
         `acyclic; break the cycle by removing or retargeting one of its ` +
         `depends or embeds references (SPEC 5.3, 14.9)`,
-    };
-    return finding;
+      [{ file: start.path, range: start.section.range }],
+      cycle,
+    );
   });
 }
 
@@ -708,18 +703,25 @@ function importCycleFindings(
     const closing = spec?.imports.imports.find(
       (declared) => declared.targetPath === cycle[1],
     );
-    const finding: Finding = {
-      condition: 9,
-      file: cycle[0],
-      ...(closing !== undefined ? { range: closing.statement.range } : {}),
-      cycle,
-      message:
-        `spec import cycle: ${cycle.join(" → ")} — import cycles among ` +
+    // SPEC 14.9/12.7: the participating files travel as identity context;
+    // the finding locates the import that closes the reported cycle.
+    return locatedFinding(
+      9,
+      `spec import cycle: ${cycle.join(" → ")} — import cycles among ` +
         `spec source files are invalid, even when no requirement-level ` +
         `dependency cycle exists; remove one of the participating imports ` +
         `(SPEC 2.1, 14.9)`,
-    };
-    return finding;
+      [
+        {
+          file: cycle[0],
+          range:
+            closing !== undefined
+              ? closing.statement.range
+              : { start: 0, end: 0 },
+        },
+      ],
+      cycle,
+    );
   });
 }
 

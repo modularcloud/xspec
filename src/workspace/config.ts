@@ -22,6 +22,7 @@
 import type { Configuration, ConfigurationResult } from "../core/config.js";
 import { parseConfiguration } from "../core/config.js";
 import type { Finding } from "../core/findings.js";
+import { pathFinding } from "../core/findings.js";
 import { sha256Hex } from "../core/hash.js";
 import type { LocatedWorkspace } from "./locate.js";
 import { locateWorkspace } from "./locate.js";
@@ -108,13 +109,12 @@ export function parseConfigurationBytes(
     return {
       ok: false,
       findings: [
-        {
-          condition: 14,
-          file: configFileName,
-          message:
-            `not valid UTF-8 — the configuration must be well-formed ` +
+        pathFinding(
+          14,
+          `not valid UTF-8 — the configuration must be well-formed ` +
             `TypeScript (SPEC 7, 14.14)`,
-        },
+          configFileName,
+        ),
       ],
     };
   }

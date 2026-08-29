@@ -76,6 +76,7 @@ import type {
 } from "./config.js";
 import { DEPENDENCY_EDGE_KINDS } from "./config.js";
 import type { Finding } from "./findings.js";
+import { pathFinding } from "./findings.js";
 
 /** SPEC 10.1: the reviews directory under the workspace root. */
 export const REVIEWS_DIRECTORY = ".xspec/reviews";
@@ -485,19 +486,17 @@ export function corruptSessionFinding(
   name: string,
   problems: readonly string[],
 ): Finding {
-  return {
-    condition: 21,
-    file: sessionFilePath(name),
-    message:
-      `corrupt review session ${JSON.stringify(name)}: ` +
+  return pathFinding(
+    21,
+    `corrupt review session ${JSON.stringify(name)}: ` +
       problems.join("; ") +
-      ` (SPEC 10.1)`,
-    correction:
-      `the session file ${sessionFilePath(name)} was modified outside ` +
-      `xspec or damaged; sessions are durable files changed only by their ` +
-      `owning commands (SPEC 13.4) — restore the file from version control, ` +
-      `or delete it and create the session again (SPEC 14.21)`,
-  };
+      ` (SPEC 10.1) — the session file ${sessionFilePath(name)} was ` +
+      `modified outside xspec or damaged; sessions are durable files ` +
+      `changed only by their owning commands (SPEC 13.4) — restore the ` +
+      `file from version control, or delete it and create the session ` +
+      `again (SPEC 14.21)`,
+    sessionFilePath(name),
+  );
 }
 
 /**
@@ -510,19 +509,17 @@ export function corruptSessionOccupantFinding(
   name: string,
   occupant: string,
 ): Finding {
-  return {
-    condition: 21,
-    file: sessionFilePath(name),
-    message:
-      `corrupt review session ${JSON.stringify(name)}: the session path ` +
+  return pathFinding(
+    21,
+    `corrupt review session ${JSON.stringify(name)}: the session path ` +
       `${sessionFilePath(name)} is occupied by ${occupant}, not a plain ` +
       `file — a durable file's path occupied by anything other than a ` +
-      `plain file is never read, appended to, or replaced (SPEC 13.4, 10.1)`,
-    correction:
-      `remove the occupant and restore the session as a plain file from ` +
-      `version control, or delete it and create the session again ` +
+      `plain file is never read, appended to, or replaced (SPEC 13.4, ` +
+      `10.1); remove the occupant and restore the session as a plain file ` +
+      `from version control, or delete it and create the session again ` +
       `(SPEC 14.21)`,
-  };
+    sessionFilePath(name),
+  );
 }
 
 // ---------------------------------------------------------------------------

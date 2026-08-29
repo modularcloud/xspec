@@ -1,4 +1,4 @@
-// Findings-report rendering (SPEC 12.0, 14).
+// Findings-report rendering (SPEC 12.0, 12.7, 14).
 //
 // IMPLEMENTATION (cross-cutting rules): reports are built as data (the
 // Finding model, core/findings.ts) and rendered once per output form —
@@ -9,98 +9,95 @@
 // messages (exit 2) are standard-error content; the exit-2 renderer for
 // them lives here too so every command reports them identically.
 //
+// Every emitter applies the SPEC 12.7 findings-array discipline through one
+// choke point (core/findings.ts `orderFindings`): the pinned total order and
+// duplicate collapse, identically in the human and JSON forms. The JSON
+// finding is exactly the five-member 12.7 finding form; the human line
+// presents the same information — code, every location, concerned path,
+// context identities, message (SPEC 14, 12.0).
+//
 // All rendering is byte-deterministic for identical findings (SPEC 12.0):
 // static text, workspace-relative paths, and byte offsets only — no
 // absolute paths, no wall clock, no environment-dependent content.
 
 import { canonicalJson } from "../core/canonical-json.js";
 import type { JsonObject, JsonValue } from "../core/canonical-json.js";
-import type { ConditionNumber, Finding } from "../core/findings.js";
-import { conditionName } from "../core/findings.js";
+import type { Finding, FindingLocation } from "../core/findings.js";
+import { orderFindings } from "../core/findings.js";
 import type { CliWriter } from "./io.js";
 
-/** The SPEC 14 condition identity of a finding (`3` → `"14.3"`). */
-export function conditionIdentity(condition: ConditionNumber): string {
-  return `14.${String(condition)}`;
+/** A location as human text: `FILE:START-END`. */
+function renderLocation(location: FindingLocation): string {
+  return `${location.file}:${String(location.range.start)}-${String(location.range.end)}`;
 }
 
 /**
- * One finding as a human report line (SPEC 14: actionable — file, location,
- * and correction): `FILE:START-END: NAME (14.N): MESSAGE — CORRECTION`.
- * Location falls back to `line[:column]` when the finding carries no byte
- * range; both parts are omitted when absent.
+ * One finding as a human report line, presenting the same information as
+ * the 12.7 JSON finding form (SPEC 14, 12.0): the primary location (or the
+ * concerned path) as the prefix, the stable code as the label, the
+ * actionable message, any further locations, and the context identities.
  */
 function renderFindingLine(finding: Finding): string {
-  let location = "";
-  if (finding.file !== undefined) {
-    location = finding.file;
-    if (finding.range !== undefined) {
-      location += `:${String(finding.range.start)}-${String(finding.range.end)}`;
-    } else if (finding.line !== undefined) {
-      location += `:${String(finding.line)}`;
-      if (finding.column !== undefined) {
-        location += `:${String(finding.column)}`;
-      }
-    }
-    location += ": ";
+  let prefix = "";
+  if (finding.locations.length > 0) {
+    prefix = `${renderLocation(finding.locations[0]!)}: `;
+  } else if (finding.path !== null) {
+    prefix = `${finding.path}: `;
   }
-  const label =
-    `${conditionName(finding.condition)} ` +
-    `(${conditionIdentity(finding.condition)})`;
-  const correction =
-    finding.correction === undefined ? "" : ` — ${finding.correction}`;
-  return `${location}${label}: ${finding.message}${correction}\n`;
+  const label = finding.code ?? "finding";
+  const more =
+    finding.locations.length > 1
+      ? ` (also at ${finding.locations
+          .slice(1)
+          .map(renderLocation)
+          .join(", ")})`
+      : "";
+  const identities =
+    finding.identities.length > 0 ? ` [${finding.identities.join(", ")}]` : "";
+  return `${prefix}${label}: ${finding.message}${more}${identities}\n`;
 }
 
 /**
- * The human findings report: one line per finding, in the given (already
- * deterministic) order, closed by a one-line count. Standard-output content
- * (SPEC 12.0).
+ * The human findings report: the SPEC 12.7 order and collapse, one line per
+ * finding, closed by a one-line count. Standard-output content (SPEC 12.0).
  */
 export function renderFindingsHuman(findings: readonly Finding[]): string {
-  const lines = findings.map(renderFindingLine);
-  const count = findings.length;
+  const ordered = orderFindings(findings);
+  const lines = ordered.map(renderFindingLine);
+  const count = ordered.length;
   lines.push(`${String(count)} finding${count === 1 ? "" : "s"}\n`);
   return lines.join("");
 }
 
-/** One finding as JSON data — the same information as the human line. */
-function findingToJson(finding: Finding): JsonObject {
+/**
+ * One finding as JSON data — exactly the five-member finding form of SPEC
+ * 12.7: `{"code", "message", "locations", "path", "identities"}`, `null`
+ * never omitted, empty lists `[]`.
+ */
+export function findingToJson(finding: Finding): JsonObject {
   return {
-    condition: conditionIdentity(finding.condition),
+    code: finding.code,
     message: finding.message,
-    correction: finding.correction,
-    file: finding.file,
-    location:
-      finding.range === undefined
-        ? undefined
-        : { start: finding.range.start, end: finding.range.end },
-    line: finding.line,
-    column: finding.column,
-    cycle: finding.cycle === undefined ? undefined : [...finding.cycle],
-    // SPEC 7.5 → 14.12: a policy violation carries the rule name and the
-    // offending edge; the JSON form holds the same information as the
-    // human message (SPEC 12.0), structured.
-    rule: finding.rule,
-    edge:
-      finding.edge === undefined
-        ? undefined
-        : {
-            from: finding.edge.source,
-            to: finding.edge.target,
-            kind: finding.edge.kind,
-          },
+    locations: finding.locations.map((location) => ({
+      file: location.file,
+      range: { start: location.range.start, end: location.range.end },
+    })),
+    path: finding.path,
+    identities: [...finding.identities],
   };
 }
 
 /**
- * The findings report as the single JSON document of `--json` (SPEC 12.0:
- * same information as the human report; the canonical serializer keeps it
- * byte-deterministic). An empty findings list is the exit-0 document of a
- * command whose report is its findings (`build`, `check`).
+ * The findings report as the single JSON document of `--json` (SPEC 12.0,
+ * 12.7: `{"findings": […]}` in the pinned order, duplicates collapsed; the
+ * canonical serializer keeps it byte-deterministic). An empty findings list
+ * is the exit-0 document of a command whose report is its findings
+ * (`build`, `check`).
  */
 export function findingsReportJson(findings: readonly Finding[]): string {
-  const document: JsonValue = { findings: findings.map(findingToJson) };
+  const document: JsonValue = {
+    findings: orderFindings(findings).map(findingToJson),
+  };
   return canonicalJson(document);
 }
 
@@ -122,23 +119,19 @@ export function emitFindingsReport(
 /**
  * SPEC 12.0/14.14: render one configuration-error finding as a diagnostic
  * line. Configuration errors are usage errors: the message is
- * standard-error content, and standard output stays empty.
+ * standard-error content.
  */
 export function renderConfigurationError(finding: Finding): string {
-  const location =
-    finding.file === undefined
-      ? ""
-      : finding.line === undefined
-        ? `${finding.file}: `
-        : `${finding.file}:${String(finding.line)}: `;
-  return `xspec: ${conditionName(finding.condition)}: ${location}${finding.message}\n`;
+  const location = finding.path === null ? "" : `${finding.path}: `;
+  return `xspec: configuration error: ${location}${finding.message}\n`;
 }
 
 /**
  * Report configuration errors (SPEC 14.14) the way every command must: each
- * as a standard-error diagnostic line, standard output untouched (with
- * `--json`, the exit-2 error prevents emitting the single JSON document, so
- * standard output stays empty — SPEC 12.0). The caller exits 2.
+ * as a standard-error diagnostic line. The caller exits 2. (The exit-2 JSON
+ * error document of 12.0/12.7 — the standard-output half when JSON output
+ * is in effect — is emitted by the caller's error path, not here; stderr
+ * diagnostics are identical either way.)
  */
 export function emitConfigurationErrors(
   stderr: CliWriter,

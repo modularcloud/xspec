@@ -25,6 +25,7 @@ import ts from "typescript";
 import type { ByteRange } from "./bytes.js";
 import { Utf8Offsets } from "./bytes.js";
 import type { Finding } from "./findings.js";
+import { compareFindings, locatedFinding } from "./findings.js";
 import type {
   SpecDocument,
   SpecEmbedding,
@@ -288,33 +289,33 @@ export function analyzeSpecImports(
       const valid = defects.length === 0;
       if (!valid) {
         // SPEC 14.15: one finding per invalid import, listing its defects.
-        findings.push({
-          condition: 15,
-          file: document.path,
-          range: statement.range,
-          message:
+        findings.push(
+          locatedFinding(
+            15,
             `invalid import: ${defects.join("; ")} — the only permitted ` +
-            `import is a single default binding of a relative "./"/"../" ` +
-            `specifier ending in ".xspec" that designates a discovered ` +
-            `spec-group file, e.g. import BASE from "./BASE.xspec" ` +
-            `(SPEC 2.1, 14.15)`,
-        });
+              `import is a single default binding of a relative "./"/"../" ` +
+              `specifier ending in ".xspec" that designates a discovered ` +
+              `spec-group file, e.g. import BASE from "./BASE.xspec" ` +
+              `(SPEC 2.1, 14.15)`,
+            [{ file: document.path, range: statement.range }],
+          ),
+        );
         targetPath = null;
       }
 
       // SPEC 2.1: no two imports in a file may bind the same identifier.
       for (const name of names) {
         if (seenNames.has(name)) {
-          findings.push({
-            condition: 15,
-            file: document.path,
-            range: statement.range,
-            message:
+          findings.push(
+            locatedFinding(
+              15,
               `invalid import: the identifier ${JSON.stringify(name)} is ` +
-              `already bound by another import in this file — no two ` +
-              `imports in an xspec source file may bind the same ` +
-              `identifier; rename one binding (SPEC 2.1, 14.15)`,
-          });
+                `already bound by another import in this file — no two ` +
+                `imports in an xspec source file may bind the same ` +
+                `identifier; rename one binding (SPEC 2.1, 14.15)`,
+              [{ file: document.path, range: statement.range }],
+            ),
+          );
           bindings.set(name, { kind: "poisoned" });
         } else {
           seenNames.add(name);
@@ -531,12 +532,9 @@ class ReferenceAnalyzer {
   ) {}
 
   private addFinding(range: ByteRange, message: string): void {
-    this.findings.push({
-      condition: 8,
-      file: this.document.path,
-      range,
-      message,
-    });
+    this.findings.push(
+      locatedFinding(8, message, [{ file: this.document.path, range }]),
+    );
   }
 
   /**
@@ -691,12 +689,16 @@ class ReferenceAnalyzer {
     if (classified.kind === "dynamic") {
       return {
         outcome: "finding",
-        finding: {
-          condition: 8,
-          file: this.document.path,
-          range: translate.range(classified.span),
-          message: `invalid argument: ${classified.reason} — ${expectation}`,
-        },
+        finding: locatedFinding(
+          8,
+          `invalid argument: ${classified.reason} — ${expectation}`,
+          [
+            {
+              file: this.document.path,
+              range: translate.range(classified.span),
+            },
+          ],
+        ),
       };
     }
     if (classified.kind === "string") {
@@ -711,15 +713,18 @@ class ReferenceAnalyzer {
       // module; a root no import binds makes the reference dynamic.
       return {
         outcome: "finding",
-        finding: {
-          condition: 8,
-          file: this.document.path,
-          range: translate.range(classified.span),
-          message:
-            `invalid argument: the property chain is rooted at ` +
+        finding: locatedFinding(
+          8,
+          `invalid argument: the property chain is rooted at ` +
             `${JSON.stringify(classified.rootName)}, which no spec-module ` +
             `import in this file binds — ${expectation}`,
-        },
+          [
+            {
+              file: this.document.path,
+              range: translate.range(classified.span),
+            },
+          ],
+        ),
       };
     }
     if (binding.kind === "poisoned") {
@@ -777,12 +782,7 @@ class ReferenceAnalyzer {
   }
 }
 
-/** Deterministic finding order (SPEC 12.0): by location, then condition. */
+/** Deterministic finding order (SPEC 12.0, 12.7). */
 function sortFindings(findings: readonly Finding[]): Finding[] {
-  return [...findings].sort(
-    (a, b) =>
-      (a.range?.start ?? 0) - (b.range?.start ?? 0) ||
-      (a.range?.end ?? 0) - (b.range?.end ?? 0) ||
-      a.condition - b.condition,
-  );
+  return [...findings].sort(compareFindings);
 }

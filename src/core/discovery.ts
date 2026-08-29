@@ -18,6 +18,7 @@
 
 import type { Configuration, ConfiguredGroup } from "./config.js";
 import type { Finding } from "./findings.js";
+import { pathFinding } from "./findings.js";
 
 const SLASH = 0x2f; // "/"
 const HASH = 0x23; // "#" — reserved by node identities (SPEC 1.5)
@@ -335,52 +336,56 @@ export function classifySources(
       // SPEC 7.2 → 14.14: a file matched by both a spec and a code group
       // is a configuration error (usage class; precedes source analysis).
       valid = false;
-      findings.push({
-        condition: 14,
-        file: fileLabel,
-        message:
+      findings.push(
+        pathFinding(
+          14,
           `matched by both spec group "${candidate.specGroups[0]}" and ` +
-          `code group "${candidate.codeGroups[0]}" — a configuration ` +
-          `error: adjust the configured globs so no file belongs to both ` +
-          `a spec and a code group (SPEC 7.2, 14.14)`,
-      });
+            `code group "${candidate.codeGroups[0]}" — a configuration ` +
+            `error: adjust the configured globs so no file belongs to both ` +
+            `a spec and a code group (SPEC 7.2, 14.14)`,
+          fileLabel,
+        ),
+      );
     }
     if (bytesContainByte(candidate.bytes, HASH)) {
       // SPEC 7 → 14.19: `#` is reserved by node identities (SPEC 1.5).
       valid = false;
-      findings.push({
-        condition: 19,
-        file: fileLabel,
-        message:
+      findings.push(
+        pathFinding(
+          19,
           `the workspace-relative path contains "#", which node ` +
-          `identities reserve (path#id) — rename the file to a "#"-free ` +
-          `path (SPEC 7, 1.5, 14.19)`,
-      });
+            `identities reserve (path#id) — rename the file to a "#"-free ` +
+            `path (SPEC 7, 1.5, 14.19)`,
+          fileLabel,
+        ),
+      );
     }
     if (decoded === null) {
       // SPEC 7 → 14.19: paths are matched as UTF-8 bytes; a discovered
       // path that is not valid UTF-8 is invalid.
       valid = false;
-      findings.push({
-        condition: 19,
-        file: fileLabel,
-        message:
+      findings.push(
+        pathFinding(
+          19,
           `the workspace-relative path is not valid UTF-8 — rename the ` +
-          `file to a valid UTF-8 path (SPEC 7, 14.19)`,
-      });
+            `file to a valid UTF-8 path (SPEC 7, 14.19)`,
+          fileLabel,
+        ),
+      );
     }
     if (candidate.specGroups.length > 0 && !candidate.isMdx) {
       // SPEC 7.1 → 14.19: every spec-group match MUST end `.mdx`.
       valid = false;
-      findings.push({
-        condition: 19,
-        file: fileLabel,
-        message:
+      findings.push(
+        pathFinding(
+          19,
           `matched by spec group "${candidate.specGroups[0]}" but the ` +
-          `file does not have the .mdx extension — every spec-group match ` +
-          `must end ".mdx"; rename the file or narrow the group's globs ` +
-          `(SPEC 7.1, 14.19)`,
-      });
+            `file does not have the .mdx extension — every spec-group ` +
+            `match must end ".mdx"; rename the file or narrow the group's ` +
+            `globs (SPEC 7.1, 14.19)`,
+          fileLabel,
+        ),
+      );
     }
     if (!valid || decoded === null) continue;
     if (candidate.specGroups.length > 0) {

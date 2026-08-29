@@ -30,86 +30,32 @@ test passes (`npm test` locally and in CI, including the Windows E-6 leg).
 
 ## Stage A — SPEC 12.7 report forms and the stable-code model
 
-### A1. Rebuild the finding model into the 12.7 finding form with stable code tokens
+### A2. Marked byte-form path values in finding JSON
 
-SPEC 14 (code table), 12.7 (finding value form), 12.0. The model in
-`src/core/findings.ts` carries `condition: 1..22` plus ad-hoc members
-(`correction`, `file`, `range`, `line`, `column`, `cycle`, `rule`, `edge`); the
-serializer `findingToJson` (`src/cli/report.ts`) emits `{"condition":"14.N",...}`.
-Required observable form: `{"code", "message", "locations", "path", "identities"}`
-— exactly these five members, `null` never omitted, empty lists `[]`.
+SPEC 12.7 (path value form), 12.0 (marked byte form), 14.19. Landed already
+(with the A1 model rebuild): the five-member finding form with stable code
+tokens, the 12.7 findings ordering/collapse choke point
+(`orderFindings`/`compareFindings` in `src/core/findings.ts`, applied by every
+emitter through `src/cli/report.ts` and `src/workspace/pipeline.ts`), and the
+human renderer. Remaining — the path presentation form:
 
-- Extend the condition table to 23 entries with the SPEC 14 tokens as string
-  codes: `missing-id`, `invalid-structural-id`, `duplicate-id`,
-  `invalid-segment-or-tag`, `unknown-dependency`, `unknown-text-target`,
-  `unknown-ts-reference`, `invalid-argument`, `cycle`, `stale-output`,
-  `cross-module-text`, `policy-violation`, `journal-error`,
-  `configuration-error`, `invalid-import`, `invalid-construct`, `invalid-prop`,
-  `unsupported-node-usage`, `invalid-source-path`, `unparseable-source`,
-  `corrupt-session`, `obstructed-write-path` (rename condition 22 from the
-  current "symbolic link in a write path" — behavioral widening is task C3),
-  `unreadable-record` (new condition 23, SPEC 14.23). Add the nine refusal-reason
-  tokens in SPEC 14's listed order (used from task B8 on): `refused-invalid-id`,
-  `refused-identity-unchanged`, `refused-id-collision`,
-  `refused-structural-parent`, `refused-unresolvable-reference`, `refused-cycle`,
-  `refused-destination-exists`, `refused-missing-target-parent`,
-  `refused-invalid-destination`. Keep an internal ordinal per code for sorting
-  (numbered conditions 1–23, then refusal reasons in listed order, then
-  code-less) and the exit class; the emitted `code` is the token string, or
-  `null` for code-less findings (10.7 review refusals — task A5).
-- Model members: `message` (fold the current `correction` into it — SPEC 14
-  actionability lives in the message); `locations` — ordered list of
-  `{file, range}`, one per offending construct, empty for conditions without
-  in-source locations; `path` — the concerned file or path for non-located
-  conditions, `null` for located ones; `identities` — list of context strings,
-  empty where none. Content of `identities` is contractual only where 14 states
-  it: condition 12 carries, in order, the violated rule's name, the edge's
-  source identity, its kind token (`"depends"`/`"embeds"`/`"references"`, 12.7),
-  and its target identity, with `locations` empty and `path` null (fold the
-  current `rule`/`edge` members in here); condition 11's foreign module is
-  identity data, not a location.
-- Port every construction site (≈40 across `src/core/*` and `src/workspace/*`)
-  mechanically: today's single `file`+`range` becomes a one-element `locations`;
-  a concerned-path-style `file` without range (conditions 13, 14, 19, 21, 22,
-  10's unit form) becomes `path`. Conditions that locate in source must carry
-  byte ranges (SPEC 14, 1.7): convert condition-20 parse-failure locations from
-  `line`/`column` to the failure's byte range (remark-mdx and the TS compiler
-  both expose offsets); drop `line`/`column` entirely. The legacy `cycle`
-  member: keep the cycle path in `identities` for now — cycle-as-locations is
-  task A3.
-- Update the JSON serializer to emit exactly the five-member form and the human
-  renderer (`renderFindingsHuman`, `renderFindingLine`) to present the same
-  information (code token, every location, concerned path) — SPEC 14 last
-  paragraph, 12.0.
+- A path whose bytes are valid UTF-8 is a JSON string; otherwise the marked
+  byte form `{"bytes": "<lowercase hex, two digits per byte>"}` — wherever a
+  JSON output carries a workspace-relative path (finding `locations[].file`
+  and `path` now; the 11.3–11.6 surfaces reuse the same renderer in Stage B).
+  Implement one path-value renderer shared by all JSON output.
+- This needs the internal path representation at finding sites to preserve raw
+  bytes for non-UTF-8 discovered paths (14.19) rather than the lossy U+FFFD
+  string `src/core/discovery.ts` produces today (`fileLabel` from
+  `lossyUtf8Decoder`) — choose conservatively (e.g. carry bytes alongside the
+  string on the finding path, or a marker encoding) and note the choice. The
+  findings comparator must then compare such paths by their exact bytes
+  (`compareFindings` in `src/core/findings.ts` compares the string spelling
+  today), and the human renderer must render them deterministically.
 
-Verify: `section-16-p1.test.ts` (P-1, seed 271828183 fails today at
-`$.findings[0].condition: expected no member "condition"`), `section-14.test.ts`
-T14-1..6 arms, `section-7*.test.ts` T7.1-1/T7.5-2..6, T12.1-4, T12.2-2/3.
-
-### A2. Findings-array ordering, duplicate collapse, and the marked byte-form path
-
-SPEC 12.7 (ordering and collapse), 12.0 (marked byte form). Prereq A1. Implement
-one ordering/dedup function applied by every findings emitter
-(`src/cli/report.ts`), and one path-value renderer shared by all JSON output:
-
-- Order `"findings"` by: code ordinal (numbered conditions in numeric order,
-  then refusal reasons in 14's listed order, then code-less findings); then
-  `locations` element-wise — each element by file path bytes, then range start,
-  then range end; a sequence that is a proper prefix of another sorts first;
-  then `path` (`null` before any path; paths compare byte-wise whatever their
-  presentation form); then `identities` element-wise under the same prefix rule
-  (string elements byte-wise); then `message`. Findings identical in every
-  member collapse to one.
-- Path value form (12.7): a path whose bytes are valid UTF-8 is a string;
-  otherwise the marked byte form `{"bytes": "<lowercase hex, two digits per
-  byte>"}` — used wherever a JSON output carries a workspace-relative path
-  (finding `locations[].file` and `path` now; the 11.3–11.6 surfaces reuse it in
-  Stage B). This needs the internal path representation at finding sites to
-  preserve raw bytes for non-UTF-8 discovered paths (14.19) rather than a lossy
-  string — choose conservatively (e.g. carry bytes alongside the string) and
-  note the choice.
-
-Verify: T12.7-1/2 (`section-12.7.test.ts`), T14 ordering/collapse arms, P-7.
+Verify: T12.7-1/2 (`section-12.7.test.ts` — T12.7-2's 14.19 arm expects
+`{"bytes":"73706563732f41ff2e6d6478"}` where the product now emits the lossy
+string), T14 arms, P-7.
 
 ### A3. Multi-location cardinality for jointly-violated conditions
 

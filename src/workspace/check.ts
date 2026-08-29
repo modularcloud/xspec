@@ -22,6 +22,7 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import type { BuildOutputs } from "../core/build.js";
 import type { Finding } from "../core/findings.js";
+import { pathFinding } from "../core/findings.js";
 import {
   GRAPH_DATA_PATH,
   graphDataMatchesCurrent,
@@ -47,26 +48,24 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 
 /** SPEC 14.10: a stale generated file — names the file, instructs rebuild. */
 function staleFinding(rel: string, state: string): Finding {
-  return {
-    condition: 10,
-    file: rel,
-    message:
-      `stale generated output: ${rel} ${state} what the current sources ` +
+  return pathFinding(
+    10,
+    `stale generated output: ${rel} ${state} what the current sources ` +
       `and configuration generate; run \`xspec build\` to regenerate every ` +
       `derived file (SPEC 14.10)`,
-  };
+    rel,
+  );
 }
 
 /** SPEC 14.10: a recorded derived file at a no-longer-generated path. */
 function orphanFinding(rel: string): Finding {
-  return {
-    condition: 10,
-    file: rel,
-    message:
-      `stale generated output: the recorded derived file ${rel} remains at ` +
+  return pathFinding(
+    10,
+    `stale generated output: the recorded derived file ${rel} remains at ` +
       `a path the current sources and configuration no longer generate; ` +
       `run \`xspec build\` to remove it (SPEC 14.10)`,
-  };
+    rel,
+  );
 }
 
 /**

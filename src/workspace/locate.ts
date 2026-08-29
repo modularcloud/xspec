@@ -18,6 +18,7 @@
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import type { Finding } from "../core/findings.js";
+import { pathFinding } from "../core/findings.js";
 
 /** SPEC 7: the configuration file name the upward search looks for. */
 export const CONFIG_FILE_NAME = "xspec.config.ts";
@@ -40,7 +41,7 @@ export type WorkspaceLocateResult =
   | { readonly ok: false; readonly findings: readonly Finding[] };
 
 function failure(message: string, file?: string): WorkspaceLocateResult {
-  return { ok: false, findings: [{ condition: 14, message, file }] };
+  return { ok: false, findings: [pathFinding(14, message, file ?? null)] };
 }
 
 /** Whether a plain-stat of the path reaches a regular file. */

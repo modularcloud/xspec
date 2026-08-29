@@ -9,6 +9,7 @@
 // as a byte offset into the file.
 
 import type { Finding } from "./findings.js";
+import { locatedFinding } from "./findings.js";
 
 /** Decoder for byte sequences already validated by `firstInvalidUtf8`. */
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
@@ -94,30 +95,26 @@ export function decodeSourceBytes(
   ) {
     return {
       ok: false,
-      finding: {
-        condition: 20,
-        file: path,
-        range: { start: 0, end: 3 },
-        message:
-          "unparseable source: the file begins with a UTF-8 byte-order " +
+      finding: locatedFinding(
+        20,
+        "unparseable source: the file begins with a UTF-8 byte-order " +
           "mark (bytes 0-3) — source files are BOM-free UTF-8; remove the " +
           "byte-order mark (SPEC 1.6, 14.20)",
-      },
+        [{ file: path, range: { start: 0, end: 3 } }],
+      ),
     };
   }
   const invalidAt = firstInvalidUtf8(bytes);
   if (invalidAt !== -1) {
     return {
       ok: false,
-      finding: {
-        condition: 20,
-        file: path,
-        range: { start: invalidAt, end: invalidAt + 1 },
-        message:
-          `unparseable source: the file is not valid UTF-8 (first invalid ` +
+      finding: locatedFinding(
+        20,
+        `unparseable source: the file is not valid UTF-8 (first invalid ` +
           `byte at offset ${String(invalidAt)}) — re-encode the file as ` +
           `UTF-8 (SPEC 1.6, 14.20)`,
-      },
+        [{ file: path, range: { start: invalidAt, end: invalidAt + 1 } }],
+      ),
     };
   }
   return { ok: true, text: utf8Decoder.decode(bytes) };

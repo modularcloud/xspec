@@ -17,6 +17,7 @@
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import type { Finding } from "../core/findings.js";
+import { pathFinding } from "../core/findings.js";
 import type { JournalEntry, PositionedJournalEntry } from "../core/journal.js";
 import {
   Journal,
@@ -95,17 +96,16 @@ export function journalFromBytes(bytes: Uint8Array | null): LoadedJournal {
  * the ref) instead of a filesystem occupant.
  */
 export function occupiedJournal(occupant: PathOccupant): LoadedJournal {
-  const finding: Finding = {
-    condition: 13,
-    file: JOURNAL_PATH,
-    message:
-      `journal error: the journal path ${JOURNAL_PATH} is occupied by ` +
+  const finding: Finding = pathFinding(
+    13,
+    `journal error: the journal path ${JOURNAL_PATH} is occupied by ` +
       `${describeOccupant(occupant)}, not a plain file — a durable file's ` +
       `path occupied by anything other than a plain file is never read, ` +
       `appended to, or replaced (SPEC 6.1, 13.4); remove the occupant ` +
       `and restore the journal as a plain file from version control ` +
       `(SPEC 14.13)`,
-  };
+    JOURNAL_PATH,
+  );
   return {
     fileState: "occupied",
     journal: new Journal([]),

@@ -47,6 +47,7 @@ import { unified } from "unified";
 import type { ByteRange } from "./bytes.js";
 import { Utf8Offsets } from "./bytes.js";
 import type { ConditionNumber, Finding } from "./findings.js";
+import { compareFindings, locatedFinding } from "./findings.js";
 import { decodeSourceBytes } from "./source-text.js";
 import {
   containsControl,
@@ -939,15 +940,13 @@ export function parseSpecSource(
       // same way by its own catch-all.
       return {
         kind: "unparseable",
-        finding: {
-          condition: 20,
-          file: path,
-          range: { start: 0, end: 0 },
-          message:
-            `unparseable source: not well-formed MDX — the file's nesting ` +
+        finding: locatedFinding(
+          20,
+          `unparseable source: not well-formed MDX — the file's nesting ` +
             `exceeds what the parser can process, so no location inside ` +
             `it can be analyzed; simplify or split the file (SPEC 14.20)`,
-        },
+          [{ file: path, range: { start: 0, end: 0 } }],
+        ),
       };
     }
     throw error;
@@ -975,7 +974,10 @@ function parseFailureFinding(
 
   // A VFileMessage's `place` is a point ({line, column, offset}) or a
   // position ({start, end}); either way the offsets are UTF-16 indices.
-  let range: ByteRange | undefined;
+  // SPEC 14/1.7: the reported location is a byte range; a failure exposing
+  // no offset locates at the file start (range [0, 0)). Line/column, when
+  // the failure carries them, enter the message text only.
+  let range: ByteRange = { start: 0, end: 0 };
   let line: number | undefined;
   let column: number | undefined;
   const place = failure.place as
@@ -1005,17 +1007,12 @@ function parseFailureFinding(
     line !== undefined
       ? ` at line ${String(line)}${column !== undefined ? `, column ${String(column)}` : ""}`
       : "";
-  const finding: Finding = {
-    condition: 20,
-    file: path,
-    message:
-      `unparseable source: not well-formed MDX${where} — ${reason}. ` +
+  return locatedFinding(
+    20,
+    `unparseable source: not well-formed MDX${where} — ${reason}. ` +
       `Correct the syntax at the reported location (SPEC 14.20)`,
-    ...(range !== undefined ? { range } : {}),
-    ...(line !== undefined ? { line } : {}),
-    ...(column !== undefined ? { column } : {}),
-  };
-  return finding;
+    [{ file: path, range }],
+  );
 }
 
 /** A byte range from a parse failure's UTF-16 point (and optional end). */
@@ -1179,7 +1176,9 @@ class DocumentBuilder {
     range: ByteRange,
     message: string,
   ): void {
-    this.findings.push({ condition, message, file: this.path, range });
+    this.findings.push(
+      locatedFinding(condition, message, [{ file: this.path, range }]),
+    );
   }
 
   /** The node's UTF-16 span; every parsed mdast node carries one. */
@@ -1819,13 +1818,8 @@ class DocumentBuilder {
 
   /** The completed, deterministic document model. */
   finish(): SpecDocument {
-    // Deterministic report order (SPEC 12.0): by location, then condition.
-    const sorted = [...this.findings].sort(
-      (a, b) =>
-        (a.range?.start ?? 0) - (b.range?.start ?? 0) ||
-        (a.range?.end ?? 0) - (b.range?.end ?? 0) ||
-        a.condition - b.condition,
-    );
+    // Deterministic report order (SPEC 12.0, 12.7).
+    const sorted = [...this.findings].sort(compareFindings);
     return {
       path: this.path,
       text: this.text,

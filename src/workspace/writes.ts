@@ -35,6 +35,7 @@ import * as path from "node:path";
 import * as process from "node:process";
 import { compareBytes } from "../core/bytes.js";
 import type { Finding } from "../core/findings.js";
+import { pathFinding } from "../core/findings.js";
 
 /**
  * What occupies a filesystem path, judged by `lstat` — a symbolic link is
@@ -121,17 +122,15 @@ export async function symlinkComponentOf(
 
 /** The SPEC 14.22 finding for `rel` traversing the symlink `component`. */
 function symlinkFinding(rel: string, component: string): Finding {
-  return {
-    condition: 22,
-    file: rel,
-    message:
-      `symbolic link in a write path: writing ${rel} would traverse the ` +
+  return pathFinding(
+    22,
+    `obstructed write path: writing ${rel} would traverse the ` +
       `workspace-relative directory component ${component}, which is a ` +
-      `symbolic link — writes never traverse symbolic links (SPEC 13.4)`,
-    correction:
+      `symbolic link — writes never traverse symbolic links (SPEC 13.4); ` +
       `replace ${component} with a real directory, or redirect the write ` +
       `so no path xspec writes passes through it (SPEC 14.22)`,
-  };
+    rel,
+  );
 }
 
 /**
