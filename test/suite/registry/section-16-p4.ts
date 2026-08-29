@@ -217,7 +217,12 @@ function importBinding(fileIndex: number): string {
   return `M${String(fileIndex)}`;
 }
 
-function refIdentity(ref: RefModel): string {
+/**
+ * Workspace identity a reference resolves to (exported for the P-5
+ * section-move piece-tree builder, which must speak the same identities —
+ * section-16-p5-p6.ts).
+ */
+export function refIdentity(ref: RefModel): string {
   return ref.dotted === ""
     ? filePath(ref.file)
     : `${filePath(ref.file)}#${ref.dotted}`;
@@ -239,7 +244,12 @@ export function spellingVariants(ref: RefModel, hostFile: number): number {
   return ref.dotted === "" ? 1 : 3;
 }
 
-function renderRef(ref: RefModel, hostFile: number): string {
+/**
+ * Concrete spelling of a reference at its host file (exported for the P-5
+ * section-move piece-tree builder — byte-exact agreement with
+ * renderWorkspace is guarded there).
+ */
+export function renderRef(ref: RefModel, hostFile: number): string {
   if (ref.file === hostFile) {
     if (ref.dotted === "") {
       throw new Error(
@@ -261,7 +271,12 @@ function renderRef(ref: RefModel, hostFile: number): string {
   }
 }
 
-function renderOpenTag(
+/**
+ * A section's opening tag with its props, single-line (exported for the P-5
+ * section-move piece-tree builder — byte-exact agreement with
+ * renderWorkspace is guarded there).
+ */
+export function renderOpenTag(
   section: SectionItem,
   dotted: string,
   hostFile: number,

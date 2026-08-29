@@ -3762,13 +3762,51 @@ certify against FP-091's fixtures once those land.
   untouched — wiring is FP-084's task (FP-085 extracts the P-6 graph-diff
   oracle separately).]
 
-- [ ] FP-084 — Generalize P-5 to random section moves using the full
+- [x] FP-084 — Generalize P-5 to random section moves using the full
   6.2/5.6 oracle. [R2 #37; TEST-SPEC §16 P-5] After FP-083.
   `test/suite/registry/section-16-p5-p6.ts` currently restricts the
   section-move arm to "clean-boundary" moves. Require: random section moves
   generally — straddling-line drops computed via the line-drop rules/P-2
   oracle, created-target-file root as added, coincident-parent purity,
   `metadata-changed` on no node — anchored by T6.2-3/T6.2-4.
+  [Done 2026-08-29: arm 2 rebuilt on FP-083's `predictSectionMoveImpact`;
+  the trial no longer mutates the model. A piece-tree builder (sharing
+  section-16-p4.ts's now-exported renderRef/renderOpenTag/refIdentity)
+  reproduces renderWorkspace byte-for-byte when undecorated (asserted per
+  trial) and stages the origin/target files with randomized boundary
+  layouts; the runner computes the full prediction before any product call,
+  then asserts the impact report per node: required categories present,
+  unpredicted ones (metadata-changed included) rejected, tolerated-optional
+  accepted either way, attributions within `attributionWithin` and
+  including `attributionMustInclude`, deleted entries rejected, code empty.
+  Layouts (every byte form vetted against remark-mdx by an
+  implementation-time probe; findings in the module header): flow (any
+  subtree), balanced inline (childless plain-prose subtrees — remark-mdx
+  accepts a multi-line element only fully flow or fully inline, so SPEC
+  6.2's worked shape is staged with an inline close such as `</S>ptail`),
+  single-line collapse, self-closing moved section; plus self-closing
+  target parents (T6.5-2), terminator-less-EOF root targets (mid-line
+  insertion), created target files (`specs/N0.mdx`; strict import window:
+  max referenced-out file strictly below min referencing-in file), and a
+  purity branch confined to final-child-onto-own-parent (the ordinary pick
+  excludes the pure-reproducing target). Embeddings keep prose-flanked
+  lines so no drop decision ever consults expansion emptiness; expansions
+  enter as emptiness-faithful sentinels from a model fixpoint. Arm-2 runs
+  5→8. Verified: typecheck/format clean; scratch dry-runs (deleted before
+  commit) drove gen+builder+oracle productless — fixed seeds: 24/24 trials
+  accepted by the oracle's misuse guards, every staged file parses under
+  remark-mdx, reach = created ×3, same-file ×14 (pure ×5), cross-file ×7,
+  inline ×5 / collapse ×2 / selfClose ×1, moved-node straddle flips ×3,
+  self-closing target parent ×3, stripped EOF ×6, required
+  descendant/upstream attributions ×8/×6, optional (T6.2-3 tolerance) ×4 —
+  plus 1,440 random-seed trials, all accepted and parsing. Against the
+  built product, suite section-16-p5-p6 genuinely passes (2 passed, ~105s;
+  like P-2/P-3 since FP-082) — teeth proven by 2 end-to-end mutation
+  probes (each reverted): an oracle-unseen staged byte falsified with the
+  "no ground for" diagnosis, and a bogus attributionMustInclude entry
+  falsified in the attribution loop, the product's real attributions
+  flowing through the within-bound. `npm run test:self` unchanged 2
+  planned mid-loop reds (certification-document ×2 → FP-091), 289 passed.]
 
 - [ ] FP-085 — Implement the P-6 baseline graph-diff oracle + its S-6
   vetted suite; wire P-6 to it. [R2 #42; TEST-SPEC §16 P-6, §17 S-6; SPEC

@@ -20,18 +20,24 @@
 //     no requirement categories and no impacted code (SPEC 6.2, 6.3, 9).
 //   * P-5 arm 2 — random section moves. One random section-form `move`: any
 //     section subtree to a random valid target parent (its own parent, a
-//     section of any file, or a file root — same-file and cross-file), under
-//     a fresh ID. Staged tags/coverage/`d` travel with the subtree. The
-//     impact report against the pre-move baseline must equal the oracle diff
-//     of the before/after workspace models: with the PROP-03 staging
-//     discipline every construct tag stands alone on its line, so no moved
-//     node has own-content bytes on the construct's straddling lines and the
-//     moved subtree keeps every hash (SPEC 6.2) — the only originators are
-//     the parents whose own-content sequence changed (origin and target; or
-//     none, when re-inserting a final child at its own former position
-//     reproduces the parent's content exactly), with the ordinary 5.6
-//     cascades and nothing else: P-5's "only the predicted parents gain
-//     categories".
+//     section of any file, a file root — same-file and cross-file — or a
+//     freshly created target file), under a fresh ID, with the construct's
+//     byte layout at both boundaries randomized (see "arm-2 boundary
+//     staging" below). Staged tags/coverage/`d` travel with the subtree.
+//     The impact report against the pre-move baseline must satisfy the
+//     section-move category oracle (helpers/oracles/section-move.ts, vetted
+//     by its S-6 suite before this arm trusts it): the `changed` set drawn
+//     from exactly the origin parent, the target parent, and the moved
+//     subtree's nodes — a moved node `changed` iff the straddling-line
+//     drops of 6.2 change its runs, computed by the line-drop rules of 3
+//     (every keep/drop decision delegated to P-2's markdown oracle) — a
+//     created target file's root `changed` as an added node carrying no
+//     other category, a coincident parent pure when the re-insertion
+//     reproduces its sequence (a final child re-inserted at its own former
+//     position, T6.2-4), `metadata-changed` on no node (SPEC 6.2), and
+//     `descendant-changed`/`upstream-changed` exactly per 5.6's cascades
+//     with per-category attribution bounds — anchored by T6.2-3/T6.2-4
+//     (TEST-SPEC §16 P-5).
 //   * P-6 — baseline replay. A random interleaving of staged edits (the
 //     PROP-03 edit classes), `rename`, file-form `move`, and commits; then
 //     `impact --base` against every historical baseline must equal the
@@ -40,7 +46,57 @@
 //     harness composes the per-operation mappings it requested, which is
 //     exactly the journal suffix a conforming product replays.
 //
-// The oracle (shared by P-5 arm 2 and P-6) computes SPEC 5.6 categories from
+// Arm-2 boundary staging (the generalization past PROP-03's tag-alone-line
+// discipline; TEST-SPEC §16 P-5 "random section moves"). The two files a
+// move textually touches are staged from piece trees (the FP-083 oracle's
+// input form) built to reproduce renderWorkspace byte-for-byte when
+// undecorated — asserted every trial — and then decorated at the moved
+// construct's boundaries. Every decorated byte form was vetted against
+// remark-mdx by an implementation-time probe (staged sources must parse,
+// SPEC 1; findings below), which pinned this validity rule: a multi-line
+// element parses only fully flow (tags at line starts, at most trailing
+// whitespace sharing a tag's line) or fully inline (the whole element
+// inside one paragraph, non-whitespace forcers on BOTH sides — an element
+// opened inline must also close inline, so SPEC 6.2's worked shape is
+// staged with a balanced close such as `</S>ptail`). The staged layouts:
+//   * flow — the PROP-03 form; any subtree (child sections, blanks,
+//     comments, embeddings); clean boundaries, moved subtree keeps every
+//     hash;
+//   * inline — parent prose immediately before the opening tag
+//     (`plead. <S …>`), moved-root text or whitespace-only residue after it
+//     on the same line (the SPEC 6.2 worked straddling case), moved-root
+//     text or residue before the closing tag, parent prose after it —
+//     balanced combinations only; requires a childless subtree of
+//     plain-text prose items (no embeddings, blanks, comments — an inline
+//     element's interior must stay inside one paragraph), or an empty body
+//     with parent prose on both sides;
+//   * collapse — a single-prose-item section as one line (`<S …>text</S>`,
+//     SPEC 3's in-line example): complete on its line, valid in every
+//     context, optional parent prose on either side (with embeddings in the
+//     prose, only the undecorated line-start form);
+//   * self-closing — an empty moved section as `<S … />`, optional parent
+//     prose on either side.
+// The target side adds two forms: an empty target parent rendered
+// self-closing (T6.5-2's rewrite exercised against the product) and, for an
+// existing-file root target, the file's final line terminator stripped so
+// the insertion point is mid-line (6.5's preceding-U+000A rule). Decoration
+// bytes are owned by exactly the origin parent (outside the tags) and the
+// moved root (inside them), and the construct's first and last body lines
+// carry no other node's bytes, so no line whose keep/drop status the move
+// flips holds a third node's bytes — the oracle's exactly-three-groups
+// misuse guard enforces this, throwing a harness defect (H-8), never a
+// diagnosed product failure. Embeddings keep the PROP-03 prose-flanked
+// staging everywhere (never on a straddling or decorated line), so no
+// line-drop decision ever consults an expansion's emptiness and the
+// oracle's emptiness-stability contract holds trivially; expansion values
+// are emptiness-faithful sentinels ("E"/"") from the model's expanded-text
+// fixpoint — only emptiness enters the drop rule (SPEC 3), which never
+// fires here. Import rewrites the move performs (additions as own lines,
+// removals with their adjunct drops, 6.5) touch no node's runs, and
+// reference respells never enter any hash (SPEC 5.4), so the oracle's
+// derived after-side stays exact without modeling them.
+//
+// The graph-diff oracle below (P-6's) computes SPEC 5.6 categories from
 // the harness's own model semantics (section-16-p4.ts `semanticsOf`): per
 // node, `changed` iff added or its own-content token sequence changed;
 // `metadata-changed` iff its `d`-target set, coverage, or tag set changed;
@@ -56,19 +112,25 @@
 //   suite's fixed T1.5-1 interpretation (SPEC 9.3 groups output by category),
 //   carried through SUITE-20/22; entry granularity is merged per node
 //   identity (the SUITE-20 convention).
-// - Category sets are asserted exactly per node; attributions are asserted
-//   within the diff's originating-node set (SPEC 5.6: every category MUST be
-//   attributed to its originating nodes), the empty list accepted — exact
-//   causal attribution is pinned by the deterministic tests (SUITE-20/22).
+// - P-6 asserts category sets exactly per node with attributions within the
+//   diff's originating-node set (SPEC 5.6: every category MUST be attributed
+//   to its originating nodes), the empty list accepted — exact causal
+//   attribution is pinned by the deterministic tests (SUITE-20/22). P-5's
+//   section-move arm asserts the tighter per-category bounds its oracle
+//   states: reported attributions lie within `attributionWithin` and include
+//   `attributionMustInclude` (TEST-SPEC §16 P-5, "attributions included").
 // - The two-sided ambiguity documented by T6.2-3 — a node whose one-side-only
-//   subtree member carries the cause — is kept out of the required diff: the
-//   generators never let a changed or metadata-changed node relocate (guarded
-//   as a harness defect), P-6 stages no section moves and never deletes
-//   nodes, and added sections carry no dependency edges. The one residual
-//   case — an ancestor holding a *relocated* dependency-bearing node on one
-//   side only while that node's target changed effectively — makes
+//   subtree member carries the cause — is kept out of P-6's required diff:
+//   its generator never lets a changed or metadata-changed node relocate
+//   (guarded as a harness defect), stages no section moves, never deletes
+//   nodes, and adds only dependency-free sections. The one residual case —
+//   an ancestor holding a *relocated* dependency-bearing node on one side
+//   only while that node's target changed effectively — makes
 //   `upstream-changed` optional on exactly those ancestors, accepted present
-//   or absent (mirroring T6.2-3's documented tolerance).
+//   or absent. P-5's section moves relocate whole subtrees by design; there
+//   the section-move oracle predicts each category as required or
+//   tolerated-optional per exactly that documented tolerance (its module
+//   header), and the assertion honors the flag.
 // - Every `impact` run follows a successful `build` (the SUITE-20/22
 //   protocol); P-5's operations regenerate as `build` does (SPEC 6.4), so no
 //   extra build is needed between operations.
@@ -106,6 +168,17 @@ import {
   decodeNodeRowsReport,
 } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
+import type {
+  SectionMoveCategoryName,
+  SectionMoveDocument,
+  SectionMoveGraphNode,
+  SectionMovePiece,
+  SectionMovePrediction,
+} from "../../helpers/oracles/section-move.js";
+import {
+  predictSectionMoveImpact,
+  sectionMoveSourceText,
+} from "../../helpers/oracles/section-move.js";
 import type { Choices, Gen } from "../../helpers/property.js";
 import { checkProperty } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -116,6 +189,7 @@ import type {
   BodyItem,
   Edit,
   EditClass,
+  ProseItem,
   RefModel,
   SectionItem,
   WorkspaceModel,
@@ -124,6 +198,9 @@ import {
   applyEdit,
   genEditOfClass,
   genWorkspaceModel,
+  refIdentity,
+  renderOpenTag,
+  renderRef,
   renderWorkspace,
   semanticsOf,
 } from "./section-16-p4.js";
@@ -800,71 +877,6 @@ function applyPureOp(state: TrialState, op: PureOp): AppliedOp {
     : applyMoveFile(state, op);
 }
 
-interface SectionMoveOp {
-  readonly fromFile: number;
-  readonly dotted: string;
-  readonly toFile: number;
-  /** Target parent's dotted ID; null = the target file's root. */
-  readonly targetDotted: string | null;
-  readonly newSeg: string;
-}
-
-function applySectionMove(state: TrialState, op: SectionMoveOp): AppliedOp {
-  const located = locateSection(state.model, op.fromFile, op.dotted);
-  const section = located.items[located.index];
-  if (section.kind !== "section") {
-    throw new Error("unreachable: locateSection returns a section index");
-  }
-  const newDotted =
-    op.targetDotted === null ? op.newSeg : `${op.targetDotted}.${op.newSeg}`;
-  const oldSub = subtreeDotteds(section, op.dotted);
-  located.items.splice(located.index, 1);
-  section.seg = op.newSeg;
-  if (op.targetDotted === null) {
-    state.model.files[op.toFile].items.push(section);
-  } else {
-    const target = locateSection(state.model, op.toFile, op.targetDotted);
-    const parent = target.items[target.index];
-    if (parent.kind !== "section") {
-      throw new Error("unreachable: locateSection returns a section index");
-    }
-    parent.items.push(section);
-  }
-  state.model.files[op.toFile].nextSeg += 1;
-  const fromModelPath = state.modelPaths[op.fromFile];
-  const toModelPath = state.modelPaths[op.toFile];
-  const internalMap: Record<string, string> = {};
-  const dottedMap: Record<string, string> = {};
-  for (const dotted of oldSub) {
-    const mapped = rewriteDotted(dotted, op.dotted, newDotted);
-    if (mapped === null) {
-      throw new Error("unreachable: subtree dotteds share the prefix");
-    }
-    dottedMap[dotted] = mapped;
-    internalMap[`${fromModelPath}#${dotted}`] = `${toModelPath}#${mapped}`;
-  }
-  forEachRef(state.model, (ref) => {
-    if (ref.file !== op.fromFile) return;
-    const mapped = dottedMap[ref.dotted];
-    if (mapped !== undefined) {
-      ref.file = op.toFile;
-      ref.dotted = mapped;
-    }
-  });
-  return {
-    argv: [
-      "move",
-      `${state.paths[op.fromFile]}#${op.dotted}`,
-      `${state.paths[op.toFile]}#${newDotted}`,
-    ],
-    internalMap,
-    wsMap: {},
-    description:
-      `move section ${state.paths[op.fromFile]}#${op.dotted} -> ` +
-      `${state.paths[op.toFile]}#${newDotted}`,
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Staged-edit application (P-6): rewrite edited files from the model
 //
@@ -1095,17 +1107,164 @@ async function runPurityTrial(
 }
 
 // ---------------------------------------------------------------------------
-// P-5 arm 2 — random section moves
+// P-5 arm 2 — random section moves (module header: arm-2 boundary staging)
+
+/**
+ * Byte layout staged around the moved construct (module header). JSON-safe;
+ * `flow` is the undecorated PROP-03 form.
+ */
+interface MovedLayout {
+  readonly form: "flow" | "inline" | "collapse" | "selfClose";
+  /** Origin-parent prose immediately before the opening tag (same line). */
+  readonly leadOutside: string | null;
+  /** Moved-root bytes after the opening tag on its line (`inline` only). */
+  readonly leadInside: string | null;
+  /** Moved-root bytes before the closing tag on its line (`inline` only). */
+  readonly tailInside: string | null;
+  /** Origin-parent bytes immediately after the closing tag (same line). */
+  readonly tailOutside: string | null;
+}
+
+const FLOW_LAYOUT: MovedLayout = {
+  form: "flow",
+  leadOutside: null,
+  leadInside: null,
+  tailInside: null,
+  tailOutside: null,
+};
+
+// Fixed decoration bytes (deterministic staging, HARNESS-01): MDX-safe plain
+// prose per the PROP-03 alphabet, whitespace residues two spaces (never four
+// or more — line-start indentation must not open a Markdown code block).
+const LEAD_OUTSIDE = "plead. ";
+const LEAD_INSIDE = "k9 lead";
+const TAIL_INSIDE = "k9 tail";
+const TAIL_OUTSIDE = "ptail";
+const WS_RESIDUE = "  ";
+
+/**
+ * Every inline combination the remark-mdx probe accepts (module header's
+ * balance rule): a non-whitespace open-side forcer — parent lead before the
+ * tag, or moved-root text after it — iff a non-whitespace close-side forcer;
+ * whitespace residues force nothing and ride either side. Enumerated in a
+ * fixed order, simplest first (shrinking).
+ */
+const INLINE_LAYOUTS: readonly MovedLayout[] = (() => {
+  const layouts: MovedLayout[] = [];
+  for (const leadOutside of [null, LEAD_OUTSIDE]) {
+    for (const leadInside of [null, WS_RESIDUE, LEAD_INSIDE]) {
+      for (const tailInside of [null, WS_RESIDUE, TAIL_INSIDE]) {
+        for (const tailOutside of [null, WS_RESIDUE, TAIL_OUTSIDE]) {
+          const openForced = leadOutside !== null || leadInside === LEAD_INSIDE;
+          const closeForced =
+            tailInside === TAIL_INSIDE || tailOutside === TAIL_OUTSIDE;
+          if (openForced && closeForced) {
+            layouts.push({
+              form: "inline",
+              leadOutside,
+              leadInside,
+              tailInside,
+              tailOutside,
+            });
+          }
+        }
+      }
+    }
+  }
+  return layouts;
+})();
+
+/**
+ * The probed inline form for an empty moved section (`plead. <S …>` +
+ * terminator + `</S>ptail`): parent prose on both sides, nothing inside.
+ */
+const EMPTY_INLINE_LAYOUT: MovedLayout = {
+  form: "inline",
+  leadOutside: LEAD_OUTSIDE,
+  leadInside: null,
+  tailInside: null,
+  tailOutside: TAIL_OUTSIDE,
+};
+
+const OUTSIDE_LEADS: readonly (string | null)[] = [null, LEAD_OUTSIDE];
+const OUTSIDE_TAILS: readonly (string | null)[] = [
+  null,
+  WS_RESIDUE,
+  TAIL_OUTSIDE,
+];
+
+/** A prose item whose parts are all plain text (no embeddings). */
+function isPlainProse(item: BodyItem): item is ProseItem {
+  return item.kind === "prose" && item.parts.every((p) => p.kind === "text");
+}
+
+/**
+ * One random byte layout valid for the moved section's shape (module
+ * header): inline requires a childless all-plain-prose body (or an empty
+ * one, in the probed both-sides form), collapse a single prose item.
+ */
+function genMovedLayout(choices: Choices, section: SectionItem): MovedLayout {
+  const options: (readonly [number, () => MovedLayout])[] = [
+    [4, () => FLOW_LAYOUT],
+  ];
+  if (section.items.length === 0) {
+    options.push([
+      3,
+      () => ({
+        form: "selfClose",
+        leadOutside: choices.pick(OUTSIDE_LEADS),
+        leadInside: null,
+        tailInside: null,
+        tailOutside: choices.pick(OUTSIDE_TAILS),
+      }),
+    ]);
+    options.push([2, () => EMPTY_INLINE_LAYOUT]);
+  } else {
+    if (section.items.every(isPlainProse)) {
+      options.push([10, () => choices.pick(INLINE_LAYOUTS)]);
+    }
+    if (section.items.length === 1 && section.items[0].kind === "prose") {
+      const plain = isPlainProse(section.items[0]);
+      options.push([
+        3,
+        () => ({
+          form: "collapse",
+          // Embeddings stay valid only in the undecorated line-start
+          // collapse (module header / the probe).
+          leadOutside: plain ? choices.pick(OUTSIDE_LEADS) : null,
+          leadInside: null,
+          tailInside: null,
+          tailOutside: plain ? choices.pick(OUTSIDE_TAILS) : null,
+        }),
+      ]);
+    }
+  }
+  return choices.weightedPick(options)();
+}
 
 interface SectionMoveTrial {
   readonly model: WorkspaceModel;
-  readonly move: SectionMoveOp;
+  readonly fromFile: number;
+  /** Dotted ID of the moved section in the origin file. */
+  readonly dotted: string;
+  readonly target: MoveCandidate;
+  readonly newSeg: string;
+  readonly layout: MovedLayout;
+  /** Render the (empty) target parent self-closing (T6.5-2's rewrite). */
+  readonly selfCloseTargetParent: boolean;
+  /** Strip the root-target file's final terminator (mid-line insertion). */
+  readonly stripFinalNewline: boolean;
 }
 
 interface MoveCandidate {
-  readonly toFile: number;
+  /** Existing target file index; null = the move creates the target file. */
+  readonly toFile: number | null;
+  /** Target parent's dotted ID; null = the target file's root. */
   readonly targetDotted: string | null;
 }
+
+/** The created-target path (`specs/**` keeps it in the spec group, 6.5). */
+const CREATED_TARGET_PATH = "specs/N0.mdx";
 
 /**
  * Valid target parents for moving `moved`, mirroring SPEC 6.5's refusals
@@ -1116,12 +1275,16 @@ interface MoveCandidate {
  * import-cycle-free window — every file referenced from the subtree at or
  * before it, every file referencing into the subtree at or after it (the
  * base import graph is the complete downward DAG, so any other destination
- * would need a forward import that closes a cycle).
+ * would need a forward import that closes a cycle). A created target file
+ * (`createdOk`) sits strictly between the two: it must import every file
+ * the subtree references while every file referencing into the subtree
+ * imports it, so the window must be strict — max referenced-out index
+ * strictly below min referencing-in index.
  */
 function moveCandidates(
   model: WorkspaceModel,
   moved: SectionSite,
-): MoveCandidate[] {
+): { readonly candidates: MoveCandidate[]; readonly createdOk: boolean } {
   const movedKeys = new Set(
     subtreeDotteds(moved.section, moved.dotted).map(
       (dotted) => `${String(moved.file)}#${dotted}`,
@@ -1148,20 +1311,22 @@ function moveCandidates(
   for (const ref of moved.section.deps ?? []) insideRefs.add(ref);
   collectInside(moved.section.items);
 
-  let maxOut = 0;
-  let minIn = model.files.length - 1;
+  const outFiles = new Set<number>();
+  const inFiles = new Set<number>();
   const outTargets = new Set<string>();
   forEachRef(model, (ref, hostFile) => {
     const targetsMoved = movedKeys.has(refKey(ref));
     if (insideRefs.has(ref)) {
       if (!targetsMoved) {
-        maxOut = Math.max(maxOut, ref.file);
+        outFiles.add(ref.file);
         outTargets.add(refKey(ref));
       }
     } else if (targetsMoved) {
-      minIn = Math.min(minIn, hostFile);
+      inFiles.add(hostFile);
     }
   });
+  const maxOut = outFiles.size > 0 ? Math.max(...outFiles) : -1;
+  const minIn = inFiles.size > 0 ? Math.min(...inFiles) : model.files.length;
 
   const candidates: MoveCandidate[] = [];
   const consider = (
@@ -1196,7 +1361,7 @@ function moveCandidates(
     }
     consider(site.file, site.dotted, ancestorKeys);
   }
-  return candidates;
+  return { candidates, createdOk: maxOut < minIn };
 }
 
 const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
@@ -1223,7 +1388,7 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
     withChildren.length > 0 && choices.boolean(0.5)
       ? choices.pick(withChildren)
       : choices.pick(sections);
-  const candidates = moveCandidates(model, moved);
+  const { candidates, createdOk } = moveCandidates(model, moved);
   if (candidates.length === 0) {
     // The moved section's own parent is always a valid target (same file,
     // ancestors unchanged), so an empty candidate list is a harness defect.
@@ -1232,41 +1397,560 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
         `${String(moved.file)}#${moved.dotted}`,
     );
   }
-  // Bias toward section target parents (nesting under a section, the deeper
-  // 6.5 insertion) over file roots, which otherwise dominate small models.
-  const sectionTargets = candidates.filter(
-    (candidate) => candidate.targetDotted !== null,
-  );
-  const target =
-    sectionTargets.length > 0 && choices.boolean(0.65)
-      ? choices.pick(sectionTargets)
-      : choices.pick(candidates);
+  // Target pick: sometimes a created target file (the created-root-as-added
+  // arm) when the strict import window allows; sometimes the final child
+  // re-inserted at its own former position (T6.2-4's purity, reached in the
+  // random space — and confined to this branch: the ordinary pick excludes
+  // the pure-reproducing own-parent target so no-op trials stay rare);
+  // otherwise biased toward section parents (nesting under a section, the
+  // deeper 6.5 insertion) over file roots, which dominate small models.
+  const container = locateSection(model, moved.file, moved.dotted);
+  const isFinalChild = container.index === container.items.length - 1;
+  const ownParent: MoveCandidate = {
+    toFile: moved.file,
+    targetDotted: moved.parentDotted === "" ? null : moved.parentDotted,
+  };
+  let target: MoveCandidate;
+  if (createdOk && choices.boolean(0.2)) {
+    target = { toFile: null, targetDotted: null };
+  } else if (isFinalChild && choices.boolean(0.2)) {
+    target = ownParent;
+  } else {
+    const pool = isFinalChild
+      ? candidates.filter(
+          (candidate) =>
+            candidate.toFile !== ownParent.toFile ||
+            candidate.targetDotted !== ownParent.targetDotted,
+        )
+      : candidates;
+    const effective = pool.length > 0 ? pool : candidates;
+    const sectionTargets = effective.filter(
+      (candidate) => candidate.targetDotted !== null,
+    );
+    target =
+      sectionTargets.length > 0 && choices.boolean(0.65)
+        ? choices.pick(sectionTargets)
+        : choices.pick(effective);
+  }
+  const layout = genMovedLayout(choices, moved.section);
+  let selfCloseTargetParent = false;
+  if (target.toFile !== null && target.targetDotted !== null) {
+    const located = locateSection(model, target.toFile, target.targetDotted);
+    const parent = located.items[located.index];
+    if (
+      parent.kind === "section" &&
+      parent.items.length === 0 &&
+      choices.boolean(0.5)
+    ) {
+      selfCloseTargetParent = true;
+    }
+  }
+  let stripFinalNewline = false;
+  if (target.toFile !== null && target.targetDotted === null) {
+    const rendered = renderWorkspace(model);
+    const text = rendered[Object.keys(rendered)[target.toFile]];
+    // Effective only when stripping actually leaves EOF mid-line: the last
+    // line non-empty and singly terminated.
+    const effective =
+      text.endsWith("\n") &&
+      text.length > 1 &&
+      text[text.length - 2] !== "\n" &&
+      text[text.length - 2] !== "\r";
+    if (effective && choices.boolean(0.5)) stripFinalNewline = true;
+  }
   return {
     model,
-    move: {
-      fromFile: moved.file,
-      dotted: moved.dotted,
-      toFile: target.toFile,
-      targetDotted: target.targetDotted,
-      newSeg: `s${String(model.files[target.toFile].nextSeg)}`,
-    },
+    fromFile: moved.file,
+    dotted: moved.dotted,
+    target,
+    newSeg:
+      target.toFile === null
+        ? "s0"
+        : `s${String(model.files[target.toFile].nextSeg)}`,
+    layout,
+    selfCloseTargetParent,
+    stripFinalNewline,
   };
 };
+
+// --- piece-tree staging (the FP-083 oracle's input form) ---------------------
+
+/**
+ * Emptiness-faithful expansion sentinels (module header): "E" when the
+ * identity's fully-expanded subtree text is non-empty, "" when empty. Only
+ * emptiness enters any drop decision (the oracle's contract; SPEC 3), and
+ * the prose-flanked embedding staging keeps even that from ever firing.
+ */
+function expansionSentinels(sems: SemanticsMap): (identity: string) => string {
+  const memo = new Map<string, boolean>();
+  const visiting = new Set<string>();
+  const nonempty = (identity: string): boolean => {
+    const cached = memo.get(identity);
+    if (cached !== undefined) return cached;
+    if (visiting.has(identity)) {
+      throw new Error(
+        `P-5 harness defect: contains/embeds cycle through ${identity} — ` +
+          `staged graphs are acyclic by construction (SPEC 5.3)`,
+      );
+    }
+    const sem = sems.get(identity);
+    if (sem === undefined) {
+      throw new Error(`P-5 harness defect: no semantics for ${identity}`);
+    }
+    visiting.add(identity);
+    const tokens = JSON.parse(sem.ownTokens) as [string, string][];
+    const result = tokens.some(([kind, value]) =>
+      kind === "run" ? value !== "" : nonempty(value),
+    );
+    visiting.delete(identity);
+    memo.set(identity, result);
+    return result;
+  };
+  return (identity) => (nonempty(identity) ? "E" : "");
+}
+
+/** Decorations applied to one staged file (module header). */
+interface FileDecorations {
+  readonly moved?: { readonly dotted: string; readonly layout: MovedLayout };
+  /** Dotted ID of an empty section to render self-closing. */
+  readonly selfCloseDotted?: string;
+  readonly stripFinalNewline?: boolean;
+}
+
+function stagingDefect(message: string): never {
+  throw new Error(`P-5 harness defect: ${message}`);
+}
+
+/**
+ * The file's piece tree: byte-identical to renderWorkspace's output when
+ * `deco` is empty — locked by an equality assertion per trial — with the
+ * arm-2 boundary decorations applied where staged (module header).
+ */
+function buildFilePieces(
+  model: WorkspaceModel,
+  fileIndex: number,
+  modelPaths: readonly string[],
+  expansionOf: (identity: string) => string,
+  deco: FileDecorations,
+): SectionMovePiece[] {
+  const prosePieces = (
+    item: ProseItem,
+    withTerminator: boolean,
+  ): SectionMovePiece[] => {
+    const out: SectionMovePiece[] = [];
+    for (const part of item.parts) {
+      if (part.kind === "text") {
+        out.push({ kind: "content", text: part.text });
+      } else {
+        const identity = refIdentity(part.ref);
+        out.push({
+          kind: "embedding",
+          text: `{text(${renderRef(part.ref, fileIndex)})}`,
+          expansion: expansionOf(identity),
+          target: identity,
+        });
+      }
+    }
+    if (withTerminator) out.push({ kind: "content", text: "\n" });
+    return out;
+  };
+  const newline: SectionMovePiece = { kind: "content", text: "\n" };
+  const walk = (
+    items: readonly BodyItem[],
+    parentDotted: string,
+  ): SectionMovePiece[] => {
+    const out: SectionMovePiece[] = [];
+    for (const item of items) {
+      switch (item.kind) {
+        case "blank":
+          out.push(newline);
+          break;
+        case "comment":
+          out.push({ kind: "removal", text: `{/* ${item.words} */}` });
+          out.push(newline);
+          break;
+        case "prose":
+          out.push(...prosePieces(item, true));
+          break;
+        case "section": {
+          const dotted =
+            parentDotted === "" ? item.seg : `${parentDotted}.${item.seg}`;
+          const open = renderOpenTag(item, dotted, fileIndex);
+          const selfClosed = `${open.slice(0, -1)} />`;
+          const depends = (item.deps ?? []).map(refIdentity);
+          const layout =
+            deco.moved !== undefined && deco.moved.dotted === dotted
+              ? deco.moved.layout
+              : null;
+          if (deco.selfCloseDotted === dotted) {
+            if (item.items.length > 0 || layout !== null) {
+              stagingDefect(
+                `self-closing decoration on ${dotted}, which has body items ` +
+                  `or is the moved section`,
+              );
+            }
+            out.push({
+              kind: "section",
+              id: dotted,
+              open: selfClosed,
+              close: null,
+              body: [],
+              depends,
+            });
+            out.push(newline);
+            break;
+          }
+          if (layout === null || layout.form === "flow") {
+            out.push({
+              kind: "section",
+              id: dotted,
+              open,
+              close: "</S>",
+              body: [newline, ...walk(item.items, dotted)],
+              depends,
+            });
+            out.push(newline);
+            break;
+          }
+          // A decorated moved construct (module header's staged forms).
+          if (layout.leadOutside !== null) {
+            out.push({ kind: "content", text: layout.leadOutside });
+          }
+          if (layout.form === "selfClose") {
+            if (item.items.length > 0) {
+              stagingDefect(`selfClose layout on non-empty ${dotted}`);
+            }
+            out.push({
+              kind: "section",
+              id: dotted,
+              open: selfClosed,
+              close: null,
+              body: [],
+              depends,
+            });
+          } else if (layout.form === "collapse") {
+            const only = item.items[0];
+            if (item.items.length !== 1 || only.kind !== "prose") {
+              stagingDefect(
+                `collapse layout on ${dotted} without exactly one prose item`,
+              );
+            }
+            out.push({
+              kind: "section",
+              id: dotted,
+              open,
+              close: "</S>",
+              body: prosePieces(only, false),
+              depends,
+            });
+          } else {
+            if (!item.items.every(isPlainProse)) {
+              stagingDefect(
+                `inline layout on ${dotted}, whose body is not all ` +
+                  `plain-text prose (module header)`,
+              );
+            }
+            const body: SectionMovePiece[] = [
+              { kind: "content", text: `${layout.leadInside ?? ""}\n` },
+              ...walk(item.items, dotted),
+            ];
+            if (layout.tailInside !== null) {
+              body.push({ kind: "content", text: layout.tailInside });
+            }
+            out.push({
+              kind: "section",
+              id: dotted,
+              open,
+              close: "</S>",
+              body,
+              depends,
+            });
+          }
+          if (layout.tailOutside !== null) {
+            out.push({ kind: "content", text: layout.tailOutside });
+          }
+          out.push(newline);
+          break;
+        }
+      }
+    }
+    return out;
+  };
+
+  const pieces: SectionMovePiece[] = [];
+  for (let j = 0; j < fileIndex; j += 1) {
+    pieces.push({
+      kind: "removal",
+      text: `import M${String(j)} from "./${specBasename(modelPaths[j])}.xspec"`,
+    });
+    pieces.push(newline);
+  }
+  // Mandatory blank line after the import block (PROP-03 module header).
+  if (fileIndex > 0) pieces.push(newline);
+  pieces.push(...walk(model.files[fileIndex].items, ""));
+  if (deco.stripFinalNewline === true) {
+    const last = pieces[pieces.length - 1];
+    if (
+      last === undefined ||
+      last.kind !== "content" ||
+      !last.text.endsWith("\n")
+    ) {
+      stagingDefect(
+        "stripFinalNewline on a file not ending with a content terminator",
+      );
+    }
+    const trimmed = last.text.slice(0, -1);
+    if (trimmed === "") pieces.pop();
+    else pieces[pieces.length - 1] = { kind: "content", text: trimmed };
+  }
+  return pieces;
+}
+
+interface BuiltSectionMove {
+  readonly origin: SectionMoveDocument;
+  readonly target: SectionMoveDocument | { readonly createdPath: string };
+  /** The move's dotted new ID (SPEC 6.5). */
+  readonly newId: string;
+  readonly otherNodes: readonly SectionMoveGraphNode[];
+  readonly argv: readonly string[];
+  /** Every workspace file as staged (decorations applied). */
+  readonly files: Record<string, string>;
+  readonly description: string;
+}
+
+/**
+ * Materialize a trial: piece trees for the involved files (decorated), the
+ * untouched files' graph nodes, the staged bytes, and the move's argv. Pure
+ * — identical trials build identical stagings (H-10) — and independent of
+ * the product, so every staging defect (including the oracle's misuse
+ * guards downstream) surfaces as a harness error, never a diagnosed
+ * failure (H-8).
+ */
+function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
+  const { model, target } = trial;
+  const rendered = renderWorkspace(model);
+  const modelPaths = Object.keys(rendered);
+  const sems = semanticsOf(model);
+  const expansionOf = expansionSentinels(sems);
+
+  const originPath = modelPaths[trial.fromFile];
+  const { toFile } = target;
+  const coincident = toFile === trial.fromFile;
+  const targetPath = toFile === null ? CREATED_TARGET_PATH : modelPaths[toFile];
+
+  // Builder-vs-renderer byte lock (module header): the undecorated piece
+  // tree reproduces renderWorkspace exactly for every involved file.
+  const involvedIndexes = new Set<number>([trial.fromFile]);
+  if (toFile !== null && !coincident) involvedIndexes.add(toFile);
+  for (const fileIndex of involvedIndexes) {
+    const undecorated = sectionMoveSourceText(
+      buildFilePieces(model, fileIndex, modelPaths, expansionOf, {}),
+    );
+    if (undecorated !== rendered[modelPaths[fileIndex]]) {
+      stagingDefect(
+        `piece-tree builder diverges from renderWorkspace for ` +
+          `${modelPaths[fileIndex]}`,
+      );
+    }
+  }
+
+  const targetSideDeco: FileDecorations = {
+    ...(trial.selfCloseTargetParent && target.targetDotted !== null
+      ? { selfCloseDotted: target.targetDotted }
+      : {}),
+    ...(trial.stripFinalNewline ? { stripFinalNewline: true } : {}),
+  };
+  const origin: SectionMoveDocument = {
+    path: originPath,
+    pieces: buildFilePieces(model, trial.fromFile, modelPaths, expansionOf, {
+      moved: { dotted: trial.dotted, layout: trial.layout },
+      ...(coincident ? targetSideDeco : {}),
+    }),
+  };
+  const targetDocument: SectionMoveDocument | { createdPath: string } =
+    toFile === null
+      ? { createdPath: targetPath }
+      : coincident
+        ? origin
+        : {
+            path: targetPath,
+            pieces: buildFilePieces(
+              model,
+              toFile,
+              modelPaths,
+              expansionOf,
+              targetSideDeco,
+            ),
+          };
+
+  const involvedPaths = new Set([originPath, targetPath]);
+  const otherNodes: SectionMoveGraphNode[] = [];
+  for (const [identity, sem] of sems) {
+    const hash = identity.indexOf("#");
+    const path = hash === -1 ? identity : identity.slice(0, hash);
+    if (involvedPaths.has(path)) continue;
+    otherNodes.push({
+      identity,
+      children: sem.children,
+      edgeTargets: sem.edgeTargets,
+    });
+  }
+
+  const newId =
+    target.targetDotted === null
+      ? trial.newSeg
+      : `${target.targetDotted}.${trial.newSeg}`;
+  const files: Record<string, string> = { ...rendered };
+  files[originPath] = sectionMoveSourceText(origin.pieces);
+  if ("pieces" in targetDocument && !coincident) {
+    files[targetPath] = sectionMoveSourceText(targetDocument.pieces);
+  }
+  return {
+    origin,
+    target: targetDocument,
+    newId,
+    otherNodes,
+    argv: ["move", `${originPath}#${trial.dotted}`, `${targetPath}#${newId}`],
+    files,
+    description:
+      `move section ${originPath}#${trial.dotted} -> ${targetPath}#${newId} ` +
+      `(${trial.layout.form} layout${toFile === null ? ", created target" : ""}` +
+      `${trial.selfCloseTargetParent ? ", self-closing target parent" : ""}` +
+      `${trial.stripFinalNewline ? ", terminator-less EOF" : ""})`,
+  };
+}
+
+// --- prediction assertion (SPEC 6.2, 5.6, 9.1, 9.3; SUITE-20 merging) --------
+
+function assertImpactMatchesPrediction(
+  report: ImpactReport,
+  prediction: SectionMovePrediction,
+  context: string,
+): void {
+  const merged = new Map<string, Map<ChangeCategory, string[]>>();
+  for (const entry of report.requirements) {
+    for (const identity of entry.nodes) {
+      if (!prediction.nodes.has(identity)) {
+        fail(
+          `${context}: the report names ${JSON.stringify(identity)}, which ` +
+            `is no current node of the workspace (in the workspace-relative ` +
+            `identity form of SPEC 1.5) — a pre-move identity here means the ` +
+            `product failed to unify identities through the journaled ` +
+            `mapping (SPEC 6.3, 6.5, 9.2); entry: ${JSON.stringify(entry)}`,
+        );
+      }
+      if (entry.deleted) {
+        fail(
+          `${context}: an entry names ${JSON.stringify(identity)} as ` +
+            `deleted — a section move deletes no node: every moved node is ` +
+            `re-identified through the journaled mapping (SPEC 6.2, 6.5, ` +
+            `9.3); entry: ${JSON.stringify(entry)}`,
+        );
+      }
+      let categories = merged.get(identity);
+      if (categories === undefined) {
+        categories = new Map();
+        merged.set(identity, categories);
+      }
+      for (const category of entry.categories) {
+        const attributed = categories.get(category.category) ?? [];
+        attributed.push(...category.attributedTo);
+        categories.set(category.category, attributed);
+      }
+    }
+  }
+
+  for (const [identity, node] of prediction.nodes) {
+    const reported =
+      merged.get(identity) ?? new Map<ChangeCategory, string[]>();
+    for (const name of reported.keys()) {
+      if (name === "metadata-changed") {
+        fail(
+          `${context}: ${identity} is reported metadata-changed — a section ` +
+            `move changes no node's metadataHash: every moved node keeps ` +
+            `its own, and canonical identities preserve every other node's ` +
+            `(SPEC 6.2; TEST-SPEC §16 P-5)`,
+        );
+      }
+      if (!node.categories.has(name as SectionMoveCategoryName)) {
+        fail(
+          `${context}: ${identity} carries the category ${name}, which the ` +
+            `section-move oracle gives it no ground for — expected within ` +
+            `${JSON.stringify([...node.categories.keys()].sort())} ` +
+            `(SPEC 6.2, 5.6, 9.1)`,
+        );
+      }
+    }
+    for (const [name, category] of node.categories) {
+      const attribution = reported.get(name);
+      if (attribution === undefined) {
+        if (category.required) {
+          fail(
+            `${context}: ${identity} must carry ${name} — the section-move ` +
+              `oracle derives it from the staged move (SPEC 6.2, 5.6, 9.1) ` +
+              `— but the report gives it only ` +
+              `${JSON.stringify([...reported.keys()].sort())}`,
+          );
+        }
+        // Tolerated-optional (the T6.2-3 two-sided tolerance): absence is
+        // accepted.
+        continue;
+      }
+      const attributed = [...new Set(attribution)].sort();
+      const within = new Set(category.attributionWithin);
+      for (const source of attributed) {
+        if (!within.has(source)) {
+          fail(
+            `${context}: the ${name} category of ${identity} is attributed ` +
+              `to ${JSON.stringify(source)}, outside the oracle's ` +
+              `originating-node bound ` +
+              `${JSON.stringify([...category.attributionWithin])} — every ` +
+              `category is attributed to its originating nodes, the nodes ` +
+              `where edits occurred (SPEC 5.6)`,
+          );
+        }
+      }
+      const attributedSet = new Set(attributed);
+      for (const source of category.attributionMustInclude) {
+        if (!attributedSet.has(source)) {
+          fail(
+            `${context}: the ${name} category of ${identity} must be ` +
+              `attributed to ${JSON.stringify(source)} — the originating ` +
+              `node its cause traces to through both-sides members ` +
+              `(SPEC 5.6: every category MUST be attributed to its ` +
+              `originating nodes) — but the report attributes it to ` +
+              `${JSON.stringify(attributed)}`,
+          );
+        }
+      }
+    }
+  }
+
+  assertSameJson(
+    report.code,
+    { direct: [], transitive: [] },
+    `${context}: no code groups are configured, so no code location is ` +
+      `impacted (SPEC 9.2)`,
+  );
+}
 
 async function runSectionMoveTrial(
   product: ProductBinding,
   trial: SectionMoveTrial,
 ): Promise<void> {
-  const state = initTrialState(trial.model);
-  const beforeSems = mapSemantics(
-    semanticsOf(state.model),
-    workspaceIdentityFn(state),
-  );
+  const built = buildSectionMove(trial);
+  // The full prediction is computed before any product invocation: a
+  // staging outside the oracle's input space throws here as a harness
+  // defect (H-8), never a diagnosed product failure.
+  const prediction = predictSectionMoveImpact({
+    origin: built.origin,
+    target: built.target,
+    movedId: trial.dotted,
+    newId: built.newId,
+    otherNodes: built.otherNodes,
+  });
   const workspace = await TestWorkspace.create({
-    files: {
-      "xspec.config.ts": SPECS_ONLY_CONFIG,
-      ...renderWorkspace(state.model),
-    },
+    files: { "xspec.config.ts": SPECS_ONLY_CONFIG, ...built.files },
   });
   try {
     await workspace.gitInit();
@@ -1275,17 +1959,16 @@ async function runSectionMoveTrial(
       product,
       workspace,
       "P-5: `build` of the generated workspace (the generator stages only " +
-        "valid workspaces)",
+        "valid workspaces; every decorated byte form parses — module header)",
     );
-    const applied = applySectionMove(state, trial.move);
-    const context = `P-5 section move — ${applied.description} —`;
+    const context = `P-5 section move — ${built.description} —`;
     await expectExit(
       product,
       workspace,
-      applied.argv,
+      built.argv,
       0,
-      `P-5: \`${applied.argv.join(" ")}\` satisfies every 6.5 validation ` +
-        `over the staged space (module header), so the move must succeed`,
+      `P-5: \`${built.argv.join(" ")}\` satisfies every 6.5 validation over ` +
+        `the staged space (module header), so the move must succeed`,
     );
     await expectExit(
       product,
@@ -1295,23 +1978,18 @@ async function runSectionMoveTrial(
       `${context} \`check\` must pass: all rewritten references resolve and ` +
         `the journal replays (SPEC 6.5, 12.2)`,
     );
-    const afterSems = mapSemantics(
-      semanticsOf(state.model),
-      workspaceIdentityFn(state),
-    );
-    const diff = computeOracleDiff(
-      mapSemantics(beforeSems, composeIdentityMaps([applied.internalMap])),
-      afterSems,
-    );
     const label = `${context} \`impact --base <pre-move ref> --json\``;
-    assertImpactMatchesOracle(
+    assertImpactMatchesPrediction(
       await impactAgainst(product, workspace, base, label),
-      diff,
-      `${label} — only the predicted parents originate categories: the ` +
-        `moved subtree keeps every hash (no own-content bytes on the ` +
-        `construct's straddling lines, SPEC 6.2), so the oracle diff holds ` +
-        `exactly the parents whose own-content sequence changed, with their ` +
-        `5.6 cascades`,
+      prediction,
+      `${label} — the report must match the section-move oracle's ` +
+        `prediction: the changed set drawn from exactly the origin parent, ` +
+        `the target parent, and the moved subtree's nodes (straddling-line ` +
+        `drops computed by the line-drop rules of 3), a created target ` +
+        `file's root changed as an added node, a coincident parent pure ` +
+        `when re-insertion reproduces its sequence, metadata-changed on no ` +
+        `node, and the 5.6 cascades with their attributions (TEST-SPEC §16 ` +
+        `P-5; SPEC 6.2, 5.6)`,
     );
   } finally {
     await workspace.dispose();
@@ -1529,9 +2207,15 @@ function renderPurityTrial(trial: PurityTrial): string {
 }
 
 function renderSectionMoveTrial(trial: SectionMoveTrial): string {
+  // The staged bytes (decorations applied) are what reproduces the trial;
+  // buildSectionMove is pure. renderValue guards against a builder throw.
+  const built = buildSectionMove(trial);
   return JSON.stringify({
-    files: renderWorkspace(trial.model),
-    move: trial.move,
+    files: built.files,
+    move: built.argv.slice(1).join(" -> "),
+    layout: trial.layout,
+    selfCloseTargetParent: trial.selfCloseTargetParent,
+    stripFinalNewline: trial.stripFinalNewline,
   });
 }
 
@@ -1549,12 +2233,17 @@ const P_5 = defineProductTest({
     "pure — after every operation each node's four hashes are byte-identical under the " +
     "operation's identity map, `check` passes (all references resolve, the journal replays), " +
     "and `impact --base` against every prior commit in the sequence reports no categories and " +
-    "no impacted code; random clean-boundary section moves produce exactly the oracle-predicted " +
-    "impact: only the parents whose own-content sequence changed originate categories, with " +
-    "their ordinary 5.6 cascades (SPEC 5.4-5.6, 6.1-6.5, 9, 12.2; TEST-SPEC §16 P-5)",
-  // Wall-clock hang guard only (H-10): three fixed seeds (E-5), and per
-  // purity trial up to 3 operations x (sweep of every node + impact against
-  // every prior commit), plus the shrink budget on falsification.
+    "no impacted code; random section moves — boundary layouts randomized, same-file, " +
+    "cross-file, and created-target-file — produce exactly the section-move oracle's " +
+    "prediction: the changed set drawn from the origin parent, the target parent, and the " +
+    "moved subtree via the straddling-line drop rules of 3, a created target root changed as " +
+    "added, a coincident parent pure on exact re-insertion, metadata-changed on no node, and " +
+    "the 5.6 cascades with their attributions (SPEC 3, 5.4-5.6, 6.1-6.5, 9, 12.2; TEST-SPEC " +
+    "§16 P-5)",
+  // Wall-clock hang guard only (H-10): three fixed seeds (E-5); per purity
+  // trial up to 3 operations x (sweep of every node + impact against every
+  // prior commit), 8 section-move trials per seed (each one build + move +
+  // check + impact), plus the shrink budget on falsification.
   timeoutMs: 600_000,
   run: async (product) => {
     await checkProperty(
@@ -1571,7 +2260,7 @@ const P_5 = defineProductTest({
       async (trial) => {
         await runSectionMoveTrial(product, trial);
       },
-      { runs: 5, maxShrinkExecutions: 80, render: renderSectionMoveTrial },
+      { runs: 8, maxShrinkExecutions: 80, render: renderSectionMoveTrial },
     );
   },
 });
