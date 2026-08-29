@@ -4115,10 +4115,46 @@ certify against FP-091's fixtures once those land.
   crash/hang, the Windows leg failing before consulting the exchange;
   `npm run test:self` fully green (330 passed).]
 
-- [ ] FP-093 — Add the Windows-subset drive-mismatch anchoring arm of
+- [x] FP-093 — Add the Windows-subset drive-mismatch anchoring arm of
   T11.6-1. [R2 #43; TEST-SPEC §11.6 (E-6 arm)] After FP-069.
   `test/windows/` (beside `e6-subset.test.ts`): the drive-mismatch
   anchoring arm runs on the Windows leg only.
+  [Done 2026-08-29: new test/windows/e6-drive-mismatch.test.ts (subset
+  part 2 of 3; sibling headers renumbered, AGENTS.md notes the
+  Windows-only staging). Body order pins the e6-byte-identity failure
+  taxonomy (H-8/H-9 — never a skip, never a vacuous pass): (1) fixed-
+  vector self-checks of the platform-absolute spelling validator
+  (accepts `C:\…\work` vs cwd drive Z; rejects forward slashes,
+  drive-less, relative, trailing separator, `\\?\` prefix, same-drive)
+  plus the platform-join composition — pure path.win32 arithmetic, run
+  on every platform; (2) same-drive premise arm — flag-less `inventory`
+  from the workspace root, exit 0, findings [], anchoring `.` /
+  `xspec.config.ts` byte-exact — so a stub or nonconforming product
+  fails first, diagnosed, on any platform, and on the Windows leg the
+  arm carries its own contrast (same workspace, relative until the
+  drives differ); (3) non-win32 → loud plain-Error (the product answers
+  but `subst` exists only on Windows; run the Windows leg); (4) the
+  staging: a free letter substituted over a tempRoot scratch dir
+  (claim-by-trying Z→E — `subst` refuses in-use letters, so concurrent
+  instances race safely, H-1/E-3; released in finally, leak named if
+  deletion fails), cwd the mapped drive's root, `--config` the
+  realpath.native long-name drive-qualified spelling of the config (one
+  canonical form whether or not the product canonicalizes; the
+  registered body's absolute-`--config` same-drive arm already proves
+  the spelling never flips the form, so the absolute output is
+  attributable to the mismatch alone); expected `root`/`config` that
+  same platform-absolute spelling byte-exact through
+  decodeInventoryAnchoring (whose doc-comment anticipated exactly this
+  caller), findings [] at exit 0, repeated invocation byte-identical
+  stdout (deterministic per invocation, 12.0; H-4). Verified: typecheck
+  + format:check clean; `npm run test:windows` on this Linux container
+  — the arm fails red-as-diagnosed at the premise arm (unknown command
+  `inventory`, exit 2 vs expected 0), no crash/hang, subst never
+  attempted, the two sibling tests unchanged; `npm run test:self` fully
+  green (330 passed). The subst leg itself first executes on the
+  Windows CI leg once a product answers `inventory` — same epistemic
+  position as the exchange comparison (FP-081/FP-092), its failure
+  modes all loud staging errors.]
 
 ## Stage K — findings discovered mid-loop
 

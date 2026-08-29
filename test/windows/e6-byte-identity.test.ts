@@ -1,4 +1,4 @@
-// E-6 platform-sensitive subset, part 2 of 2 (TEST-SPEC §18 E-6; CI-01) —
+// E-6 platform-sensitive subset, part 3 of 3 (TEST-SPEC §18 E-6; CI-01) —
 // the representative-fixture byte-identity comparison against the Linux leg.
 //
 // The identical fixture the Linux leg ran (helpers/e6.ts: `version`,

@@ -1,7 +1,8 @@
-// E-6 platform-sensitive subset, part 1 of 2 (TEST-SPEC §18 E-6; CI-01) —
+// E-6 platform-sensitive subset, part 1 of 3 (TEST-SPEC §18 E-6; CI-01) —
 // the path/identity assertions and the single-casing case-mismatch probes.
-// Run by the suite-windows CI job (`npm run test:windows`); the byte-identity
-// comparison lives in e6-byte-identity.test.ts.
+// Run by the suite-windows CI job (`npm run test:windows`); the T11.6-1
+// drive-mismatch anchoring arm lives in e6-drive-mismatch.test.ts and the
+// byte-identity comparison in e6-byte-identity.test.ts.
 //
 // One code path with the suite leg (C-2):
 //
