@@ -30,32 +30,15 @@ test passes (`npm test` locally and in CI, including the Windows E-6 leg).
 
 ## Stage A — SPEC 12.7 report forms and the stable-code model
 
-### A2. Marked byte-form path values in finding JSON
-
-SPEC 12.7 (path value form), 12.0 (marked byte form), 14.19. Landed already
-(with the A1 model rebuild): the five-member finding form with stable code
-tokens, the 12.7 findings ordering/collapse choke point
-(`orderFindings`/`compareFindings` in `src/core/findings.ts`, applied by every
-emitter through `src/cli/report.ts` and `src/workspace/pipeline.ts`), and the
-human renderer. Remaining — the path presentation form:
-
-- A path whose bytes are valid UTF-8 is a JSON string; otherwise the marked
-  byte form `{"bytes": "<lowercase hex, two digits per byte>"}` — wherever a
-  JSON output carries a workspace-relative path (finding `locations[].file`
-  and `path` now; the 11.3–11.6 surfaces reuse the same renderer in Stage B).
-  Implement one path-value renderer shared by all JSON output.
-- This needs the internal path representation at finding sites to preserve raw
-  bytes for non-UTF-8 discovered paths (14.19) rather than the lossy U+FFFD
-  string `src/core/discovery.ts` produces today (`fileLabel` from
-  `lossyUtf8Decoder`) — choose conservatively (e.g. carry bytes alongside the
-  string on the finding path, or a marker encoding) and note the choice. The
-  findings comparator must then compare such paths by their exact bytes
-  (`compareFindings` in `src/core/findings.ts` compares the string spelling
-  today), and the human renderer must render them deterministically.
-
-Verify: T12.7-1/2 (`section-12.7.test.ts` — T12.7-2's 14.19 arm expects
-`{"bytes":"73706563732f41ff2e6d6478"}` where the product now emits the lossy
-string), T14 arms, P-7.
+(A2 landed: the shared path-value representation and renderer are
+`src/core/path-text.ts` — `PathText` is `string | PathBytes` (a tagged
+wrapper holding a non-UTF-8 path's exact bytes, constructed only through
+`pathTextOf` so a valid-UTF-8 path can never take the marked form);
+`pathTextJson` renders the 12.7 value form, `renderPathText` the
+deterministic human spelling `<bytes HEX>`, `comparePathTexts` the one byte
+order over both forms, used by `compareFindings`/`compareLocations`. Finding
+`locations[].file` and `path` are `PathText` now; Stage B surfaces reuse the
+same renderer for their own path members.)
 
 ### A3. Multi-location cardinality for jointly-violated conditions
 

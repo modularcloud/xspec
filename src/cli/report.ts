@@ -24,11 +24,16 @@ import { canonicalJson } from "../core/canonical-json.js";
 import type { JsonObject, JsonValue } from "../core/canonical-json.js";
 import type { Finding, FindingLocation } from "../core/findings.js";
 import { orderFindings } from "../core/findings.js";
+import { pathTextJson, renderPathText } from "../core/path-text.js";
 import type { CliWriter } from "./io.js";
 
-/** A location as human text: `FILE:START-END`. */
+/**
+ * A location as human text: `FILE:START-END` — the file through the shared
+ * deterministic path spelling (core/path-text.ts): a non-UTF-8 path (SPEC
+ * 14.19) renders as its exact bytes, never lossily (SPEC 12.0).
+ */
 function renderLocation(location: FindingLocation): string {
-  return `${location.file}:${String(location.range.start)}-${String(location.range.end)}`;
+  return `${renderPathText(location.file)}:${String(location.range.start)}-${String(location.range.end)}`;
 }
 
 /**
@@ -42,7 +47,7 @@ function renderFindingLine(finding: Finding): string {
   if (finding.locations.length > 0) {
     prefix = `${renderLocation(finding.locations[0]!)}: `;
   } else if (finding.path !== null) {
-    prefix = `${finding.path}: `;
+    prefix = `${renderPathText(finding.path)}: `;
   }
   const label = finding.code ?? "finding";
   const more =
@@ -72,17 +77,20 @@ export function renderFindingsHuman(findings: readonly Finding[]): string {
 /**
  * One finding as JSON data — exactly the five-member finding form of SPEC
  * 12.7: `{"code", "message", "locations", "path", "identities"}`, `null`
- * never omitted, empty lists `[]`.
+ * never omitted, empty lists `[]`. Location files and the concerned path go
+ * through the one shared path-value renderer (core/path-text.ts): a plain
+ * JSON string, or the marked byte form for a non-UTF-8 path (SPEC 12.0,
+ * 12.7, 14.19).
  */
 export function findingToJson(finding: Finding): JsonObject {
   return {
     code: finding.code,
     message: finding.message,
     locations: finding.locations.map((location) => ({
-      file: location.file,
+      file: pathTextJson(location.file),
       range: { start: location.range.start, end: location.range.end },
     })),
-    path: finding.path,
+    path: finding.path === null ? null : pathTextJson(finding.path),
     identities: [...finding.identities],
   };
 }
@@ -122,7 +130,8 @@ export function emitFindingsReport(
  * standard-error content.
  */
 export function renderConfigurationError(finding: Finding): string {
-  const location = finding.path === null ? "" : `${finding.path}: `;
+  const location =
+    finding.path === null ? "" : `${renderPathText(finding.path)}: `;
   return `xspec: configuration error: ${location}${finding.message}\n`;
 }
 

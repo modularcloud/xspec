@@ -33,6 +33,7 @@ import * as path from "node:path";
 import { classifySources } from "../core/discovery.js";
 import type { Finding } from "../core/findings.js";
 import type { Journal } from "../core/journal.js";
+import { renderPathText } from "../core/path-text.js";
 import { computeJournalReplay, JOURNAL_PATH } from "../core/journal.js";
 import type { LoadedWorkspace } from "./config.js";
 import { parseConfigurationBytes } from "./config.js";
@@ -187,7 +188,7 @@ function invalidBaselineMessage(
 ): string {
   const lines = findings.map((finding) => {
     const concerned = finding.locations[0]?.file ?? finding.path;
-    const file = concerned === null ? "" : `${concerned}: `;
+    const file = concerned === null ? "" : `${renderPathText(concerned)}: `;
     return `\n  ${file}${finding.message}`;
   });
   return (

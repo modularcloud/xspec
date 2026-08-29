@@ -12,6 +12,8 @@
 
 import type { ByteRange } from "./bytes.js";
 import { compareBytes } from "./bytes.js";
+import type { PathText } from "./path-text.js";
+import { comparePathTexts } from "./path-text.js";
 
 /**
  * SPEC 12.0: exit codes partition all outcomes — 0 success, 1 findings
@@ -108,10 +110,12 @@ export function conditionCode(condition: ConditionNumber): ConditionCode {
 /**
  * One offending construct's location: the containing file (workspace-
  * relative, `/`-separated, SPEC 1.5) and its byte range (SPEC 1.7). The
- * observable form is `{"file", "range"}` (SPEC 12.7).
+ * observable form is `{"file", "range"}` (SPEC 12.7). The file is a
+ * `PathText`: a plain string except for a file whose path is not valid
+ * UTF-8 (SPEC 14.19), presented in the marked byte form (SPEC 12.0, 12.7).
  */
 export interface FindingLocation {
-  readonly file: string;
+  readonly file: PathText;
   readonly range: ByteRange;
 }
 
@@ -128,7 +132,9 @@ export interface FindingLocation {
  *   in-source locations (SPEC 14, 12.7).
  * - `path`: the concerned file or path for non-located conditions
  *   (configuration, path-level, journal, session, and record conditions);
- *   null for located ones (SPEC 14).
+ *   null for located ones (SPEC 14). A `PathText`: a non-UTF-8 concerned
+ *   path (SPEC 14.19) carries its exact bytes, presented in the marked
+ *   byte form (SPEC 12.0, 12.7).
  * - `identities`: the identities or other context strings the condition
  *   names, empty where none — contractual exactly where 14 states it
  *   (14.12's enumeration, 14.11's foreign module, a refusal reason's
@@ -138,7 +144,7 @@ export interface Finding {
   readonly code: FindingCode | null;
   readonly message: string;
   readonly locations: readonly FindingLocation[];
-  readonly path: string | null;
+  readonly path: PathText | null;
   readonly identities: readonly string[];
 }
 
@@ -171,7 +177,7 @@ export function locatedFinding(
 export function pathFinding(
   condition: ConditionNumber,
   message: string,
-  path: string | null,
+  path: PathText | null,
   identities: readonly string[] = [],
 ): Finding {
   return {
@@ -207,13 +213,17 @@ export function codeExitClass(code: FindingCode | null): 1 | 2 {
   return code === "configuration-error" ? 2 : 1;
 }
 
-/** The pinned within-finding location order (SPEC 12.7). */
+/**
+ * The pinned within-finding location order (SPEC 12.7). Files compare by
+ * their exact path bytes whatever their presentation form (SPEC 12.0): a
+ * marked byte-form path and a plain string sort in one byte order.
+ */
 export function compareLocations(
   a: FindingLocation,
   b: FindingLocation,
 ): number {
   return (
-    compareBytes(a.file, b.file) ||
+    comparePathTexts(a.file, b.file) ||
     a.range.start - b.range.start ||
     a.range.end - b.range.end
   );
@@ -248,10 +258,12 @@ function compareSequences<T>(
  * numeric order, then refusal reasons in 14's listed order, then code-less
  * findings), then by locations element-wise (file path bytes, range start,
  * range end; proper prefix first), then by concerned path (null before any
- * path; byte-wise), then by identities element-wise under the same prefix
- * rule (byte-wise elements), then by message. Returns 0 exactly for
- * findings identical in every member — which collapse to one (12.7) — so
- * the order is total.
+ * path; paths compare byte-wise whatever their presentation form — a
+ * marked byte-form path and a plain string sort in one byte order, SPEC
+ * 12.0), then by identities element-wise under the same prefix rule
+ * (byte-wise elements), then by message. Returns 0 exactly for findings
+ * identical in every member — which collapse to one (12.7) — so the order
+ * is total.
  */
 export function compareFindings(a: Finding, b: Finding): number {
   const byCode = codeOrdinal(a.code) - codeOrdinal(b.code);
@@ -264,7 +276,7 @@ export function compareFindings(a: Finding, b: Finding): number {
   if (byLocations !== 0) return byLocations;
   if ((a.path === null) !== (b.path === null)) return a.path === null ? -1 : 1;
   if (a.path !== null && b.path !== null) {
-    const byPath = compareBytes(a.path, b.path);
+    const byPath = comparePathTexts(a.path, b.path);
     if (byPath !== 0) return byPath;
   }
   const byIdentities = compareSequences(a.identities, b.identities, (x, y) =>

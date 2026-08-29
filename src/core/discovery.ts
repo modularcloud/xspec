@@ -19,13 +19,12 @@
 import type { Configuration, ConfiguredGroup } from "./config.js";
 import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
+import { pathTextOf } from "./path-text.js";
 
 const SLASH = 0x2f; // "/"
 const HASH = 0x23; // "#" — reserved by node identities (SPEC 1.5)
 
 const utf8Encoder = new TextEncoder();
-const strictUtf8Decoder = new TextDecoder("utf-8", { fatal: true });
-const lossyUtf8Decoder = new TextDecoder("utf-8");
 
 /** SPEC 13.4: derived-file name marker — `.xspec.` within the file name. */
 const XSPEC_NAME_INFIX = utf8Encoder.encode(".xspec.");
@@ -130,15 +129,6 @@ function byteKey(bytes: Uint8Array): string {
     key += String.fromCharCode(bytes[index]);
   }
   return key;
-}
-
-/** The decoded path, or null when the bytes are not valid UTF-8 (SPEC 7). */
-function decodeStrict(bytes: Uint8Array): string | null {
-  try {
-    return strictUtf8Decoder.decode(bytes);
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -326,11 +316,12 @@ export function classifySources(
   const findings: Finding[] = [];
   for (const candidate of matched) {
     if (destinationKeys.has(byteKey(candidate.bytes))) continue;
-    const decoded = decodeStrict(candidate.bytes);
-    // Findings name the file by its decoded workspace-relative path; a
-    // non-UTF-8 path has no exact string spelling, so it renders lossily
-    // (U+FFFD) — SPEC.md fixes no spelling for it.
-    const fileLabel = decoded ?? lossyUtf8Decoder.decode(candidate.bytes);
+    // Findings name the file by its workspace-relative path as a PathText:
+    // the decoded string where the bytes are valid UTF-8, otherwise the
+    // exact bytes — presented downstream in the marked byte form, never a
+    // lossy string (SPEC 12.0, 12.7, 14.19).
+    const fileLabel = pathTextOf(candidate.bytes);
+    const decoded = typeof fileLabel === "string" ? fileLabel : null;
     let valid = true;
     if (candidate.specGroups.length > 0 && candidate.codeGroups.length > 0) {
       // SPEC 7.2 → 14.14: a file matched by both a spec and a code group
