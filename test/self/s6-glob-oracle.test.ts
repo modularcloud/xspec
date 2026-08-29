@@ -23,6 +23,11 @@
 //     empty; whole-pattern left-to-right shortest-match disambiguation with
 //     SPEC.md 7.5's two worked examples; `to` expansion agreement matching
 //     captured bytes literally (7.5; T7.5-5);
+//   * the `$` forms at the capture boundary — `$0`, `$` before a non-digit,
+//     a trailing `$` — are literal bytes in `from` and `to` patterns alike,
+//     never captures, never capture violations: they match exactly the paths
+//     spelling those bytes, and in a `to` they reference no absent capture
+//     (7.5; T7.5-5, P-7);
 // plus misuse guards: a `from` repeating a capture and a `to` referencing an
 // unvalued capture throw plain errors (harness defects), never diagnosed
 // product failures.
@@ -191,6 +196,38 @@ test("S-6 (7.5): capture wildcards are `$1`…`$9` exactly — `$12` is capture 
   expectCaptures("$12.ts", "ab2.ts", { 1: "ab" });
   expectCaptures("$0.ts", "$0.ts", {});
   expectCaptures("a$", "a$", {});
+});
+
+test("S-6 (7.5): the literal `$` forms in a `from` match exactly the paths spelling those bytes — never what a capture reading would match (T7.5-5)", () => {
+  // T7.5-5's worked near-miss: `a$0.ts` matches the file `a$0.ts` and never
+  // `ab.ts`.
+  expectCaptures("a$0.ts", "a$0.ts", {});
+  expectCaptures("a$0.ts", "ab.ts", null);
+  // `$` before a non-digit.
+  expectCaptures("a$x", "a$x", {});
+  expectCaptures("a$x", "aQx", null);
+  // A trailing `$` is a byte to match, not an anchor and not a capture.
+  expectCaptures("ab$", "ab$", {});
+  expectCaptures("ab$", "ab", null);
+  // A literal `$` directly before a capture: `$$1` is the literal byte `$`
+  // followed by capture 1 (shortest match grows $1 to "ab" so `.ts` fits).
+  expectCaptures("$$1.ts", "$ab.ts", { 1: "ab" });
+  expectCaptures("$$1.ts", "ab.ts", null);
+});
+
+test("S-6 (7.5): the literal `$` forms in a `to` reference no capture — the pattern loads and matches exactly its own bytes (T7.5-5)", () => {
+  // A `to` containing `$0` or ending in `$` references no absent capture
+  // (SPEC.md 7.5): no misuse throw under an empty capture map, and plain
+  // byte-literal matching.
+  expect(matchToPattern("tgt/$0.mdx", "tgt/$0.mdx", values({}))).toBe(true);
+  expect(matchToPattern("tgt/$0.mdx", "tgt/ab.mdx", values({}))).toBe(false);
+  expect(matchToPattern("a$/b.mdx", "a$/b.mdx", values({}))).toBe(true);
+  expect(matchToPattern("a$/b.mdx", "a/b.mdx", values({}))).toBe(false);
+  expect(matchToPattern("x$y", "x$y", values({}))).toBe(true);
+  // A literal `$` directly before a referenced capture: `$$1` is the byte
+  // `$` followed by the captured bytes.
+  expect(matchToPattern("$$1.mdx", "$a.mdx", values({ 1: "a" }))).toBe(true);
+  expect(matchToPattern("$$1.mdx", "a.mdx", values({ 1: "a" }))).toBe(false);
 });
 
 test("S-6 (7.5): a capture never matches the empty string", () => {

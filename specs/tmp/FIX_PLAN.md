@@ -3835,12 +3835,38 @@ certify against FP-091's fixtures once those land.
   301 passed, unchanged 2 planned mid-loop reds (certification-document
   ×2 → FP-091).]
 
-- [ ] FP-086 — P-7 generator: add the `$`-at-capture-boundary literal forms
+- [x] FP-086 — P-7 generator: add the `$`-at-capture-boundary literal forms
   (`$0`, `$` before a non-digit, trailing `$`). [R2 #38; TEST-SPEC §16 P-7]
   `test/suite/registry/section-16-p7.ts` (+ glob-input generator); keep the
   S-6 glob-oracle suite (`test/self/s6-glob-oracle.test.ts`) green —
   `test/helpers/oracles/glob.ts` already models patterns; extend vectors if
   the oracle needs the literal-`$` forms pinned.
+  [Done 2026-08-29: the 7.5 policy-pattern generators now draw the literal
+  forms — `$0` and `$<non-digit>` as atomic literal tokens in `from`, `to`
+  middle, and `to` final segments; trailing `$` appended segment-final
+  (followed only by `/`, end of pattern, or a `$`-initial capture/ref
+  token, so no accidental `$<digit 1–9>` can form — invariant argued in
+  the module header and checked mechanically: scratch probe over 3,135
+  generated rules found no from-repeat/absent-ref and, on the real CI
+  seeds/runs, counted `$0` ×5, `$<non-digit>` ×15, segment-final `$` ×8
+  across 23 rules). `$` also became a capture-side PATH byte (an ordinary
+  literal in the staging discovery globs, SPEC 7.5, so paths still match
+  themselves; 25 staged sources / 6 targets carried `$` in the CI trials).
+  Oracle unchanged (already literal-correct); S-6 vectors extended with the
+  T7.5-5 pins: from-side `a$0.ts`≠`ab.ts`, trailing-`$`≠anchor, `$$1`
+  literal-then-capture, and to-side `$0`/segment-final-`$` referencing no
+  absent capture — 29 passed. Verified: typecheck/format clean;
+  `npm run test:self` 303 passed with the unchanged 2 planned mid-loop
+  reds (certification-document ×2 → FP-091; S-7 sweep green, so P-7 with
+  the new generator still fails-as-diagnosed against the stub). Against
+  the built product, P-7's discovery property passes in full; the capture
+  property falsifies on the PRE-EXISTING findings-shape red (product emits
+  old-shape `condition` members vs the form-exact 12.7 decode of FP-001) —
+  confirmed identical on the pre-change baseline (same seed 271828183,
+  same diagnosis), a genuine product conformance red for phase 10, not a
+  harness defect; the pre-shrink falsifying trial carried `$` forms
+  through config load, `build` exit 0, and `check` exit 1, proving the
+  `$`-bearing staging sound end-to-end.]
 
 - [ ] FP-087 — Implement P-11: availability robustness fuzz over
   `occurrences`/`view`/`at`. [R2 #14; TEST-SPEC §16 P-11] New §16 registry

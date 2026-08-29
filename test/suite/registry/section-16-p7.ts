@@ -5,10 +5,13 @@
 // E-5) produce random patterns and paths over SPEC 7's glob grammar and SPEC
 // 7.5's capture grammar — with the glob metacharacters of common dialects
 // (`[` `]` `{` `}` `!` `+` `(` `)`) in both the pattern and the path
-// alphabets, and `$` as a discovery-glob literal — and assert that the
-// product's match decisions and capture values equal the harness's
-// independent spec oracle (helpers/oracles/glob.ts, HARNESS-09), which S-6
-// certifies against fixed vectors before any property trusts it
+// alphabets, `$` as a discovery-glob literal, and the `$` forms at the
+// capture boundary in 7.5 policy patterns (`$0`, `$` before a non-digit,
+// trailing `$` — literal bytes in `from` and `to` alike, never captures or
+// capture violations; SPEC 7.5, T7.5-5, P-7) — and assert that the product's
+// match decisions and capture values equal the harness's independent spec
+// oracle (helpers/oracles/glob.ts, HARNESS-09), which S-6 certifies against
+// fixed vectors before any property trusts it
 // (test/self/s6-glob-oracle.test.ts).
 //
 // Two properties under the one P-7 entry, one per black-box channel:
@@ -70,10 +73,14 @@
 //     exactly its own bytes — the dot rule reads the pattern as written), so
 //     the generated policy patterns are the trial's only wildcard matching.
 //     For that staging to be sound under SPEC 7 itself, capture-side PATH
-//     bytes exclude `*`, `?`, and `$` (a source path `t*t/x.ts` would, as its
-//     own literal glob, legitimately match under `tgt/` and could collide
-//     with the spec group, 14.14) — the foreign-dialect metacharacters stay,
-//     probing literal-ness through the config→discovery channel too. Source
+//     bytes exclude `*` and `?` (a source path `t*t/x.ts` would, as its own
+//     literal glob, legitimately match under `tgt/` and could collide with
+//     the spec group, 14.14) — the foreign-dialect metacharacters stay, and
+//     so does `$`, an ordinary literal in a discovery glob (SPEC 7.5
+//     confines captures to policy `files` selectors), so a `$`-bearing path
+//     still matches exactly itself while the policy patterns meet `$` bytes
+//     in the paths they judge — probing literal-ness through the
+//     config→discovery channel too. Source
 //     paths never start with `tgt` (the target namespace: keeps spec and
 //     code groups file-disjoint, 7.2) and never contain `.xspec.` (never a
 //     product-written derived path, 13.4). Targets end in `.mdx` (7.1).
@@ -86,8 +93,15 @@
 //   * A rejected capture-side `to` never references an index absent from its
 //     `from` and a `from` never repeats an index (both 14.14 configuration
 //     errors, not match decisions): capture tokens are injected from a
-//     managed distinct-index set and `$` is absent from the capture-side
-//     literal alphabets, so no accidental `$<digit>` can form.
+//     managed distinct-index set, and `$` enters the policy-pattern literals
+//     only through three atomic forms — `$0`, `$` fused to a non-digit
+//     character, and a bare `$` appended as a segment's final token — so no
+//     accidental `$<digit 1–9>` can form: the fused forms carry no digit
+//     `1`–`9` after their `$`, and a segment-final `$` is followed in the
+//     rendered pattern only by `/`, the end of the pattern, or a
+//     later-spliced capture/reference token, whose rendering starts with `$`
+//     (making the pair the literal-`$`-before-non-digit form `$$<d>`, a
+//     literal `$` then a modeled capture — the oracle reads the same bytes).
 //
 // The capture-side protocol follows T7.5-4/T7.5-5: `build` first (exit 0 —
 // sources are valid by construction and build does not evaluate policy, SPEC
@@ -196,10 +210,37 @@ const DISCOVERY_PATH_ALPHABET: Weighted = [
   [2, "?"],
 ];
 
-// Path-segment characters for the capture property: no `*`/`?`/`$`, so the
+// Path-segment characters for the capture property: no `*`/`?`, so the
 // literal path-globs that stage discovery are metacharacter-free and match
-// exactly their own path under SPEC 7 (module header).
-const CAPTURE_PATH_ALPHABET: Weighted = PATTERN_LITERAL_ALPHABET;
+// exactly their own path under SPEC 7 — but `$` is a path byte here: in a
+// discovery glob it is an ordinary literal (SPEC 7.5), so a staged path
+// still matches exactly itself, while the 7.5 policy patterns then meet `$`
+// bytes in the paths they judge (module header).
+const CAPTURE_PATH_ALPHABET: Weighted = [...PATTERN_LITERAL_ALPHABET, [2, "$"]];
+
+// The `$<non-digit>` literal form draws its fused character from the
+// digit-free pattern literals: a capture is exactly `$` followed by one
+// digit `1`–`9` (SPEC 7.5), so with every digit excluded the fused pair can
+// never spell one (`$0`, the digit form that is still a literal, is its own
+// atomic arm below).
+const NON_DIGIT_PATTERN_LITERALS: Weighted = PATTERN_LITERAL_ALPHABET.filter(
+  ([, char]) => char < "0" || char > "9",
+);
+
+/**
+ * A position-free literal `$` form at the capture boundary (SPEC 7.5: a
+ * capture is exactly `$` followed by one digit `1`–`9`; every other `$` —
+ * `$0` and a trailing `$` included — is a literal byte in either pattern,
+ * never a capture or a capture violation; TEST-SPEC §16 P-7, T7.5-5): `$0`,
+ * or `$` fused to a non-digit character. Injected as one atomic literal
+ * token, so no rendering adjacency can turn the `$` into a capture (module
+ * header). The position-dependent trailing-`$` form is `withTrailingDollar`.
+ */
+function dollarLiteral(choices: Choices): string {
+  return choices.boolean(0.4)
+    ? "$0"
+    : `$${choices.weightedPick(NON_DIGIT_PATTERN_LITERALS)}`;
+}
 
 const pathChar =
   (alphabet: Weighted): Gen<string> =>
@@ -253,21 +294,50 @@ function renderPattern(segs: readonly PatternSeg[]): string {
   return segs.map(renderSegment).join("/");
 }
 
-/** A token segment of 1..3 tokens over the given literal alphabet. */
-function tokenSegmentGen(literalAlphabet: Weighted): Gen<PatternSeg> {
+/**
+ * A token segment of 1..3 tokens over the given literal alphabet. With
+ * `dollarForms` (the 7.5 policy-pattern generators), tokens also draw the
+ * atomic literal `$` forms of `dollarLiteral`.
+ */
+function tokenSegmentGen(
+  literalAlphabet: Weighted,
+  dollarForms = false,
+): Gen<PatternSeg> {
   return (choices) => {
     const count = choices.intInclusive(1, 3);
     const tokens: PatternToken[] = [];
     for (let i = 0; i < count; i += 1) {
-      tokens.push(
-        choices.weightedPick<PatternToken>([
-          [6, { kind: "lit", text: fillerGen(literalAlphabet, 1, 3)(choices) }],
-          [3, { kind: "star" }],
-          [2, { kind: "question" }],
-        ]),
-      );
+      const entries: Array<readonly [number, PatternToken]> = [
+        [6, { kind: "lit", text: fillerGen(literalAlphabet, 1, 3)(choices) }],
+        [3, { kind: "star" }],
+        [2, { kind: "question" }],
+      ];
+      if (dollarForms) {
+        entries.push([2, { kind: "lit", text: dollarLiteral(choices) }]);
+      }
+      tokens.push(choices.weightedPick(entries));
     }
     return { kind: "tokens", tokens };
+  };
+}
+
+/**
+ * With probability 0.15, append the trailing-`$` literal form to a token
+ * segment (SPEC 7.5: a trailing `$` is a literal byte, never a capture or a
+ * capture violation; TEST-SPEC §16 P-7, T7.5-5). Appended as the segment's
+ * final token, the `$` is followed in the rendered pattern only by `/`, the
+ * end of the pattern, or a later-spliced capture/reference token — whose
+ * rendering starts with `$`, not a digit — so it can never spell a capture
+ * (module header); a pattern-final segment stages the genuinely trailing
+ * form. Applied after `repairPatternSegment`, whose `.`/`..` checks read the
+ * pre-append rendering.
+ */
+function withTrailingDollar(seg: PatternSeg, choices: Choices): PatternSeg {
+  const trailing = choices.boolean(0.15);
+  if (!trailing || seg.kind === "globstar") return seg;
+  return {
+    kind: "tokens",
+    tokens: [...seg.tokens, { kind: "lit", text: "$" }],
   };
 }
 
@@ -702,7 +772,11 @@ function captureIndicesGen(choices: Choices): number[] {
 
 /**
  * A `from` pattern: 1..3 repaired segments with every capture index injected
- * exactly once into a token segment (SPEC 7.5: each at most once).
+ * exactly once into a token segment (SPEC 7.5: each at most once). Its
+ * segments draw the literal `$` forms — `$0`/`$<non-digit>` in-segment,
+ * trailing `$` segment-final (P-7, T7.5-5); a capture spliced after a
+ * trailing `$` renders as the literal-`$`-before-`$` pair `$$<d>` (module
+ * header).
  */
 function fromPatternSegments(
   choices: Choices,
@@ -713,8 +787,8 @@ function fromPatternSegments(
   for (let i = 0; i < count; i += 1) {
     const seg = choices.boolean(0.12)
       ? ({ kind: "globstar" } as const)
-      : tokenSegmentGen(PATTERN_LITERAL_ALPHABET)(choices);
-    segs.push(repairPatternSegment(seg, false));
+      : tokenSegmentGen(PATTERN_LITERAL_ALPHABET, true)(choices);
+    segs.push(withTrailingDollar(repairPatternSegment(seg, false), choices));
   }
   const tokenPositions = segs.flatMap((seg, index) =>
     seg.kind === "tokens" ? [index] : [],
@@ -744,7 +818,10 @@ function fromPatternSegments(
  * A `to` pattern: literal first segment `tgt`, an optional middle segment,
  * and a final token segment referencing 0..2 of the `from` captures (repeats
  * allowed) with a forced literal `.mdx` suffix (targets are spec sources,
- * SPEC 7.1).
+ * SPEC 7.1). The middle and final segments draw the literal `$` forms too —
+ * in a `to`, `$0` and a segment-final `$` reference no absent capture (SPEC
+ * 7.5, T7.5-5): they are literal bytes, so the pattern loads without 14.14
+ * and must match exactly the paths spelling them.
  */
 function toPatternSegments(
   choices: Choices,
@@ -757,9 +834,12 @@ function toPatternSegments(
     segs.push(
       choices.boolean(0.25)
         ? { kind: "globstar" }
-        : repairPatternSegment(
-            tokenSegmentGen(PATTERN_LITERAL_ALPHABET)(choices),
-            false,
+        : withTrailingDollar(
+            repairPatternSegment(
+              tokenSegmentGen(PATTERN_LITERAL_ALPHABET, true)(choices),
+              false,
+            ),
+            choices,
           ),
     );
   }
@@ -777,6 +857,7 @@ function toPatternSegments(
         ],
         [2, { kind: "star" }],
         [1, { kind: "question" }],
+        [1, { kind: "lit", text: dollarLiteral(choices) }],
       ]),
     );
   }
@@ -1071,11 +1152,12 @@ const P_7 = defineProductTest({
   id: "P-7",
   title:
     "property: over random patterns and paths (foreign-dialect metacharacters " +
-    "included), discovery match decisions equal the spec oracle via `ids`, and " +
-    "policy capture matching — from-match, unique shortest-match capture " +
-    "values, to-expansion agreement, captures never spanning `/` or matching " +
-    "empty — equals the oracle via `check` findings (SPEC 7, 7.5; TEST-SPEC " +
-    "§16 P-7)",
+    "and the literal `$` capture-boundary forms `$0`/`$<non-digit>`/trailing " +
+    "`$` included), discovery match decisions equal the spec oracle via " +
+    "`ids`, and policy capture matching — from-match, unique shortest-match " +
+    "capture values, to-expansion agreement, captures never spanning `/` or " +
+    "matching empty — equals the oracle via `check` findings (SPEC 7, 7.5; " +
+    "TEST-SPEC §16 P-7)",
   // Wall-clock hang guard only (H-10): two properties over three fixed seeds
   // (E-5); one workspace and one to three subprocess runs per trial, plus the
   // shrink budgets on falsification.
