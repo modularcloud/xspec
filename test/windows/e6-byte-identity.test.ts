@@ -1,13 +1,18 @@
 // E-6 platform-sensitive subset, part 2 of 2 (TEST-SPEC §18 E-6; CI-01) —
 // the representative-fixture byte-identity comparison against the Linux leg.
 //
-// The identical fixture the Linux leg ran (helpers/e6.ts: `build`, `check`,
-// `query`, `coverage`, `impact`, a journaled `rename`, a journaled file-form
-// `move` — the specifier-computation probe, with `check` clean after it — and
-// an `audit` review session) is run here against the built product, and its
+// The identical fixture the Linux leg ran (helpers/e6.ts: `version`,
+// `build`, `check`, `query`, `coverage`, `impact`, `occurrences`,
+// `view --text`, `at`, a `move --preview`, a journaled `rename`, a journaled
+// file-form `move` — the specifier-computation probe, with `check` clean
+// after it — an `audit` review session, and `inventory` from a nested
+// working directory, pinning the relative `/`-joined anchoring) is run here
+// against the built product, and its
 // outputs are asserted byte-identical to the Linux leg's, read from
 // XSPEC_E6_EXCHANGE_DIR (the `e6-linux-outputs` CI artifact,
-// .github/workflows/ci.yml): reports (every step's stdout/stderr),
+// .github/workflows/ci.yml): reports (every step's stdout/stderr — the
+// path- and range-dense occurrence, view, at, inventory, and preview
+// documents included),
 // move-rewritten sources, generated files, emitted Markdown, graph data, the
 // journal, and the session file — a product-to-itself comparison, permitted
 // by H-4, sound because both legs consume byte-identical input (12.0; the
@@ -32,9 +37,9 @@ import {
 } from "../helpers/e6.js";
 import { builtProductBinding } from "../helpers/subprocess.js";
 
-// Generous hang guard for the 17-invocation fixture plus the comparison
+// Generous hang guard for the 23-invocation fixture plus the comparison
 // (H-8); never an assertion input (H-10).
-const FIXTURE_TIMEOUT_MS = 240_000;
+const FIXTURE_TIMEOUT_MS = 300_000;
 
 test(
   "E-6 byte-identity: the representative fixture's reports, rewritten sources, generated files, emitted Markdown, graph data, journal, and session file are byte-identical to the Linux leg's outputs from XSPEC_E6_EXCHANGE_DIR (TEST-SPEC E-6)",

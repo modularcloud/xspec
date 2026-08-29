@@ -2,14 +2,17 @@
 // Harness machinery only: no product imports; the product is driven strictly
 // as a subprocess through a ProductBinding (H-2, C-2).
 //
-// One fixture story exercises the E-6 command set — `build`, `check`,
-// `query`, `coverage`, `impact`, a journaled `rename`, a journaled file-form
-// `move`, and an `audit` review session (`review create --strategy audit`,
-// `next --json`, a `resolve`, an `export`) — and captures two kinds of
-// output:
+// One fixture story exercises the E-6 command set — `version`, `build`,
+// `check`, `query`, `coverage`, `impact`, `occurrences`, `view --text`,
+// `at`, a `move --preview`, a journaled `rename`, a journaled file-form
+// `move`, an `audit` review session (`review create --strategy audit`,
+// `next --json`, a `resolve`, an `export`), and `inventory` invoked from a
+// nested working directory, pinning the relative `/`-joined anchoring (SPEC
+// 11.6) — and captures two kinds of output:
 //
 //   - the transcript: every invocation's argv, exit code, and exact
-//     stdout/stderr bytes (reports, 12.0);
+//     stdout/stderr bytes — the path- and range-dense occurrence, view, at,
+//     inventory, and preview documents included (reports, 12.0);
 //   - the final workspace tree, `.git/` excluded: move-rewritten sources,
 //     generated files, emitted Markdown, graph data, the journal, and the
 //     session file (stored data, 1.5/13.4).
@@ -172,6 +175,14 @@ const E6_APP_SOURCE = [
   "",
 ].join("\n");
 
+// `at` probe: the fixture points `at` at the byte offset of `Other.oth`
+// inside core.mid.leaf's `{text(Other.oth)}` embedding — within the
+// occurrence's braced span (SPEC 5.7), so the answer carries the innermost
+// section, the occurrence, and its resolved target (11.5). The offset is
+// derived from the staged constant (pure ASCII, so character offsets are
+// byte offsets), making both legs pass the identical decimal argument.
+const E6_AT_EMBEDDING = "{text(Other.oth)}";
+
 const GIT_DIR_BYTES = Buffer.from(".git", "utf8");
 
 /** Exclude exactly the top-level `.git` tree from workspace snapshots. */
@@ -210,9 +221,10 @@ export async function runE6RepresentativeFixture(
       argv: readonly string[],
       expectedExit: number,
       why: string,
+      cwd: string = workspace.root,
     ): Promise<RunResult> => {
       const result = await runProduct(product, {
-        cwd: workspace.root,
+        cwd,
         argv,
       });
       assertExitCode(
@@ -230,6 +242,15 @@ export async function runE6RepresentativeFixture(
       return result;
     };
 
+    // The interface handshake first: workspace-independent, JSON-only, fixed
+    // per build — both legs build the same commit, so the document compares
+    // byte-identical (SPEC 12.6, 12.0).
+    await step(
+      "version",
+      ["version"],
+      0,
+      "the version handshake answers anywhere, workspace-independent (SPEC 12.6)",
+    );
     await step(
       "build",
       ["build"],
@@ -296,6 +317,42 @@ export async function runE6RepresentativeFixture(
       "the pinned baseline commit resolves and the report answers (SPEC 9, 5.6)",
     );
 
+    // The per-file query surfaces (SPEC 11.2–11.5), JSON-only and
+    // non-mutating, over the valid workspace: the whole-domain occurrence
+    // enumeration (`d` references, `text(...)` embeddings, and the code
+    // file's TypeScript markers alike), every spec source's structural view
+    // with own/subtree text, and one byte-position resolution — the path-
+    // and range-dense documents E-6 byte-compares across legs. Core.mdx is
+    // still byte-identical to its staged constant here (the leaf edit
+    // touched Other.mdx only; the rename comes later), so the `at` offset
+    // derived from the constant addresses the live file.
+    await step(
+      "occurrences",
+      ["occurrences"],
+      0,
+      "the whole-domain enumeration answers finding-free on the valid workspace (SPEC 11.3, 5.7)",
+    );
+    await step(
+      "view-text",
+      ["view", "--text"],
+      0,
+      "every discovered spec source serves its structural view with text (SPEC 11.4, 11.2)",
+    );
+    const atBase = E6_CORE_SOURCE.indexOf(E6_AT_EMBEDDING);
+    if (atBase < 0) {
+      throw new Error(
+        `E-6 fixture bug: Core.mdx no longer stages the ${E6_AT_EMBEDDING} ` +
+          `embedding the \`at\` step probes — realign E6_AT_EMBEDDING with ` +
+          `E6_CORE_SOURCE`,
+      );
+    }
+    await step(
+      "at",
+      ["at", E6_CORE, String(atBase + E6_AT_EMBEDDING.indexOf("Other.oth"))],
+      0,
+      "the byte position resolves to the innermost section and its enclosing occurrence (SPEC 11.5)",
+    );
+
     // Journaled rename: rewrites the ID and its references in MDX and
     // TypeScript sources, appending the mapping to the journal (SPEC 6.4).
     await step(
@@ -303,6 +360,18 @@ export async function runE6RepresentativeFixture(
       ["rename", E6_CORE, "core.mid.leaf", "core.mid.tip"],
       0,
       "a valid rename succeeds and appends to the journal (SPEC 6.4, 6.1)",
+    );
+
+    // Preview of exactly the move the next step performs: full validation
+    // and planning, modifying nothing (SPEC 6.6) — the identity mapping, the
+    // per-file edit classes with pre-operation ranges, and the derived-file
+    // delta form the path- and range-dense preview document (12.7); the real
+    // move then still proceeds identically.
+    await step(
+      "move-preview",
+      ["move", E6_CORE, E6_MOVED, "--preview", "--json"],
+      0,
+      "the planned file-form move would proceed, reported while performing nothing (SPEC 6.6, 6.5)",
     );
 
     // Journaled file-form move — the specifier-computation probe (E-6): the
@@ -364,6 +433,22 @@ export async function runE6RepresentativeFixture(
       ["review", "export", "r", "--json"],
       0,
       "the session exports as one JSON payload (SPEC 10.7)",
+    );
+
+    // Inventory, invoked from the nested directory the move created
+    // (specs/sub, so it exists exactly when this step runs): the anchoring
+    // is the relative, `/`-joined canonical spelling — `root` `../..`,
+    // `config` `../../xspec.config.ts` (SPEC 11.6; the E-6 nested-cwd
+    // probe, which a native-path product misspells with `\` only on Windows) —
+    // and the report is at its densest: journal occupied, session `r`
+    // listed, recorded derived paths reflecting the move's finishing
+    // regeneration.
+    await step(
+      "inventory-nested",
+      ["inventory"],
+      0,
+      "the workspace shape reports from a nested working directory with relative /-joined anchoring (SPEC 11.6, 12.0)",
+      workspace.path("specs/sub"),
     );
 
     const snapshot = await snapshotDirectory(workspace.root, {

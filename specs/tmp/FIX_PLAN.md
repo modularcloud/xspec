@@ -4087,7 +4087,7 @@ certify against FP-091's fixtures once those land.
 
 ## Stage J — E-6 cross-platform legs
 
-- [ ] FP-092 — Extend the E-6 representative fixture with the new command
+- [x] FP-092 — Extend the E-6 representative fixture with the new command
   steps. [R2 #43; TEST-SPEC E-6]
   `test/helpers/e6.ts` (the `step(...)` sequence): add `occurrences`,
   `view --text`, `at`, `inventory` (invoked from a NESTED working
@@ -4095,6 +4095,25 @@ certify against FP-091's fixtures once those land.
   documents byte-compared across legs via the existing exchange
   (`test/suite/e6-exchange-writer.test.ts`, `test/windows/
   e6-byte-identity.test.ts`, `XSPEC_E6_EXCHANGE_DIR`; see AGENTS.md).
+  [Done 2026-08-29: test/helpers/e6.ts — the step sequence now opens with
+  `version` and adds bare `occurrences`, `view --text`, and `at` after the
+  impact steps (the `at` offset derived from the staged Core.mdx constant,
+  landing inside the `{text(Other.oth)}` embedding so the answer carries
+  section + occurrence + resolved target; Core.mdx is still pristine
+  there), `move --preview --json` immediately before the applied move
+  (previewing exactly the operation the next step performs), and
+  `inventory` as the final step from `specs/sub` — the nested directory
+  the move created — via a new optional `cwd` parameter on the `step`
+  helper (root `../..`, config `../../xspec.config.ts`: the /-joined
+  anchoring at its densest — journal occupied, session listed). 17 → 23
+  invocations; exchange format unchanged (step names/argv/exit codes plus
+  stream and workspace bytes still compared). Command-list and
+  23-invocation comments updated in e6-exchange-writer.test.ts and
+  e6-byte-identity.test.ts, hang guards 240s → 300s. Verified: typecheck +
+  format:check clean; both E-6 tests fail red-as-diagnosed at the new
+  first step (`version` — the stub knows no such command, exit 2), no
+  crash/hang, the Windows leg failing before consulting the exchange;
+  `npm run test:self` fully green (330 passed).]
 
 - [ ] FP-093 — Add the Windows-subset drive-mismatch anchoring arm of
   T11.6-1. [R2 #43; TEST-SPEC §11.6 (E-6 arm)] After FP-069.
