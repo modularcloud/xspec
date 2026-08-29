@@ -3868,11 +3868,44 @@ certify against FP-091's fixtures once those land.
   through config load, `build` exit 0, and `check` exit 1, proving the
   `$`-bearing staging sound end-to-end.]
 
-- [ ] FP-087 — Implement P-11: availability robustness fuzz over
+- [x] FP-087 — Implement P-11: availability robustness fuzz over
   `occurrences`/`view`/`at`. [R2 #14; TEST-SPEC §16 P-11] New §16 registry
   module + wrapper; H-7 map per the passages its TEST-SPEC entry asserts.
   Property machinery: `test/helpers/property.ts` (fixed default seed set —
   see AGENTS.md).
+  [Done 2026-08-29: test/suite/registry/section-16-p11.ts (+ wrapper,
+  manifest spread, H-7 entry "P-11": ["11.2", "11.4", "12.7"]). Input
+  space per the entry's "P-8's generators": section-16-p8.ts now exports
+  FUZZ_BASE_FILES and drawFuzzMutation (the weighted mutation menu), and
+  P-11 draws 1–3 mutations over the three SOURCES only — never
+  xspec.config.ts, which must stay valid so no unstaged 14.14 exit-2 can
+  arise (P-8's own trial stream proven byte-identical across the refactor
+  by a pre/post generation diff over the fixed seeds). Per trial, 2–4
+  drawn invocations from a 17-entry menu — 7 answer arms (bare/--file/--to
+  `occurrences`; bare/operand/--file `view`, each side of `--text`; `at`
+  with offsets drawn over [0, staged byte length]) and 10
+  staged-argument-error arms (wrong-kind / unknown / operand-plus---file
+  `view`; wrong-kind, out-of-range, malformed-spelling `at`; malformed
+  `--to`; outside-root glob; repeated flag; unknown flag) — asserting:
+  termination (hang/overflow guards converted to diagnosed failures), no
+  signal death, exit 0/1 on answer arms with exit 2 only on the staged
+  errors (which must exit 2 with the 12.7 error document — 11.2: argument
+  checks precede answering), stdout exactly one complete JSON document,
+  the form-exact 12.7 decode per surface (three-state datum discipline via
+  the decoders and their marker walk), and 11.2's iff closed both ways
+  (any finding or unavailable datum ⟹ exit 1 with the full document
+  emitted; clean ⟹ exit 0). No staging build (11.2 never-stale: these
+  surfaces answer from current sources). Seed-coverage dry-run over the
+  CI-pinned 36 trials: every menu entry, mutation kind, and mutation
+  target occurs. Verified: typecheck/format clean; `npm run test:self`
+  303 passed with the unchanged 2 planned mid-loop reds
+  (certification-document ×2 → FP-091; S-1 green with the new mapping,
+  S-7 sweep green so P-11 fails-as-diagnosed against the stub). Against
+  the built product P-11 falsifies immediately as a genuine phase-10 red:
+  bare `occurrences` exits 2 — the product implements none of the §11
+  surfaces ("unknown command 'occurrences'", probed directly) — shrinking
+  to a no-op mutation plus bare `occurrences` with the exit-clause
+  diagnosis (seed 271828183).]
 
 - [ ] FP-088 — Implement P-12: `at` ≡ view-derived resolution over every
   offset; occurrence order/totality equivalence. [R2 #15; TEST-SPEC §16

@@ -79,6 +79,12 @@
 // P-8 is outside every CERTIFICATIONS.md fixture scope (its preamble: "P-8
 // sweeps every command, exceeding any narrow conformer scope"), so this body
 // binds only to the real product surface.
+//
+// Shared machinery: P-11 (availability robustness, section-16-p11.ts) is
+// specified over "P-8's generators" (TEST-SPEC §16 P-11), so the base
+// workspace (`FUZZ_BASE_FILES`) and the mutation menu (`drawFuzzMutation`)
+// are exported and drawn by both properties — one input-space definition,
+// two command surfaces.
 
 import { Buffer } from "node:buffer";
 import { assertJsonOutputConvention, fail } from "../../helpers/assertions.js";
@@ -153,15 +159,22 @@ const BASE_CODE = [
   "",
 ].join("\n");
 
-/** The mutable surface: exactly the files whose bytes trials fuzz. */
-const BASE_FILES: ReadonlyArray<readonly [string, string]> = [
+/**
+ * The fuzz base workspace: exactly the files whose bytes P-8's trials fuzz
+ * (P-11 mutates the three sources only, never the configuration — see
+ * section-16-p11.ts). SPEC-valid by construction; shared per TEST-SPEC §16
+ * P-11 ("P-8's generators").
+ */
+export const FUZZ_BASE_FILES: ReadonlyArray<readonly [string, string]> = [
   ["xspec.config.ts", BASE_CONFIG],
   ["specs/A.mdx", BASE_SPEC_A],
   ["specs/B.mdx", BASE_SPEC_B],
   ["src/app.ts", BASE_CODE],
 ];
 
-const MUTATION_TARGETS: readonly string[] = BASE_FILES.map(([path]) => path);
+const MUTATION_TARGETS: readonly string[] = FUZZ_BASE_FILES.map(
+  ([path]) => path,
+);
 
 // ---------------------------------------------------------------------------
 // The command menu (SPEC 12 surface). Every entry is drawn by trials; the
@@ -292,7 +305,7 @@ function renderBytes(sequence: readonly number[]): string {
 }
 
 /** One mutation: new bytes plus a human-readable description for the log. */
-interface MutationResult {
+export interface MutationResult {
   readonly bytes: Uint8Array;
   readonly description: string;
 }
@@ -463,6 +476,23 @@ const MUTATION_KINDS: ReadonlyArray<readonly [number, Mutator]> = [
   [2, (c, b) => mutateGarbage(c, b)],
 ];
 
+/**
+ * Draw one mutation from the weighted menu (the module header's full input
+ * classes of P-8) and apply it to the given bytes: one weightedPick for the
+ * kind, then the kind's own parameter draws — all through `choices`, so
+ * identical tapes re-derive identical staged bytes on replay and during
+ * shrinking (H-10). The one mutation-drawing entry point shared with P-11
+ * (TEST-SPEC §16 P-11: "P-8's generators").
+ */
+export function drawFuzzMutation(
+  choices: Choices,
+  bytes: Uint8Array,
+  path: string,
+): MutationResult {
+  const mutate = choices.weightedPick(MUTATION_KINDS);
+  return mutate(choices, bytes, path);
+}
+
 // ---------------------------------------------------------------------------
 // Trial generation
 
@@ -479,7 +509,7 @@ export interface FuzzTrial {
 /** The P-8 trial generator (see the module header). */
 export const genFuzzTrial: Gen<FuzzTrial> = (choices) => {
   const files = new Map<string, Uint8Array>(
-    BASE_FILES.map(([path, text]) => [
+    FUZZ_BASE_FILES.map(([path, text]) => [
       path,
       Uint8Array.from(Buffer.from(text, "utf8")),
     ]),
@@ -488,12 +518,11 @@ export const genFuzzTrial: Gen<FuzzTrial> = (choices) => {
   const mutationCount = 1 + choices.intInclusive(0, 2);
   for (let i = 0; i < mutationCount; i += 1) {
     const path = choices.pick(MUTATION_TARGETS);
-    const mutate = choices.weightedPick(MUTATION_KINDS);
     const current = files.get(path);
     if (current === undefined) {
       throw new Error(`P-8 harness defect: no staged bytes for ${path}`);
     }
-    const result = mutate(choices, current, path);
+    const result = drawFuzzMutation(choices, current, path);
     files.set(path, result.bytes);
     mutations.push(`${path}: ${result.description}`);
   }
@@ -628,7 +657,7 @@ async function runFuzzTrial(
   trial: FuzzTrial,
 ): Promise<void> {
   const workspace = await TestWorkspace.create({
-    files: Object.fromEntries(BASE_FILES),
+    files: Object.fromEntries(FUZZ_BASE_FILES),
   });
   try {
     // Staging: the base workspace is SPEC-valid; a successful build leaves
