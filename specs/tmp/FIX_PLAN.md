@@ -71,19 +71,12 @@ route every new exit-2 outcome through them.)
 `emitFindingsReport`, one finding with `code`/`path` null, `locations` empty,
 `identities` the session name (+ item id / colliding name) — informational.)
 
-### A6. `rename`/`move` success report is the applied mapping
-
-SPEC 6.4 ("A successful rename's report is the applied mapping … the
-information of the preview's `mapping` (6.6), carried in JSON per 12.0"), 6.5
-(move "reports its applied mapping, as rename does"). Today both emit
-`{"findings":[]}` (JSON) / nothing (human) — verify run: "missing `mapping` key".
-Report the complete identity mapping the operation journaled: JSON carries a
-`mapping` member of `{"from", "to"}` entries ordered by `from` bytes (the
-preview `mapping` form of 12.7); human output lists the same mapping. Files:
-`src/cli/commands/rename.ts`, `src/cli/commands/move.ts`.
-
-Verify: T6.4-1, T6.5-1 success arms (`section-6.4.test.ts`,
-`section-6.5*.test.ts`).
+(A6 landed: a successful `rename`/`move` reports its applied mapping —
+`emitAppliedMappingReport(json, stdout, mapping)` in `src/cli/report.ts`,
+fed `plan.entry.mapping` (the journal entry's canonical `from`-byte order):
+JSON `{"findings": [], "mapping": [{"from", "to"}...]}` — the preview
+`mapping` member encoding of 12.7, which B9's success document can reuse —
+human one `FROM -> TO` line per pair plus a count line.)
 
 ---
 

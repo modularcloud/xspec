@@ -36,8 +36,10 @@
 //    modifying anything.
 //
 // Success writes the rewritten sources, appends the journal entry, and
-// regenerates; the report is the (empty) findings list — with `--json`, the
-// single JSON document (SPEC 12.0).
+// regenerates; the report is the applied mapping — the complete identity
+// mapping the operation journaled, the information of the preview's
+// `mapping` (SPEC 6.4, 6.6) — with `--json`, the single JSON document
+// (SPEC 12.0).
 
 import { computeBuildOutputs } from "../../core/build.js";
 import { canonicalJson } from "../../core/canonical-json.js";
@@ -68,7 +70,11 @@ import {
 import type { Invocation } from "../args.js";
 import { jsonOutputInEffect } from "../args.js";
 import type { CliWriter, CommandContext } from "../io.js";
-import { emitConfigurationErrors, emitFindingsReport } from "../report.js";
+import {
+  emitAppliedMappingReport,
+  emitConfigurationErrors,
+  emitFindingsReport,
+} from "../report.js";
 import { requirementIdProblem, testHoldSpecOf, usageError } from "./common.js";
 
 /**
@@ -303,12 +309,11 @@ async function runRename(
   await appendJournalEntry(workspace.root, plan.entry);
   await executeBuildOutputs(workspace.root, outputs);
 
-  if (invocation.json) {
-    // SPEC 12.0: one JSON document as the entire standard output — the
-    // successful rename's report is its (empty) findings list, as for
-    // `build` (SPEC 12.1).
-    emitFindingsReport(true, stdout, []);
-  }
+  // SPEC 6.4/12.0: a successful rename's report is the applied mapping —
+  // the complete identity mapping the operation journaled, the information
+  // of the preview's `mapping` (6.6), in both output forms. The journal
+  // entry's mapping is that mapping in its canonical `from`-byte order.
+  emitAppliedMappingReport(invocation.json, stdout, plan.entry.mapping);
   return 0;
 }
 

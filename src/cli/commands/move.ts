@@ -56,8 +56,10 @@
 //    modifying anything.
 //
 // Success writes the rewritten sources, removes the origin (file form),
-// appends the journal entry, and regenerates; the report is the (empty)
-// findings list — with `--json`, the single JSON document (SPEC 12.0).
+// appends the journal entry, and regenerates; the report is the applied
+// mapping — the complete identity mapping the operation journaled, the
+// information of the preview's `mapping` (SPEC 6.5, 6.4, 6.6) — with
+// `--json`, the single JSON document (SPEC 12.0).
 
 import * as path from "node:path";
 import { computeBuildOutputs } from "../../core/build.js";
@@ -100,7 +102,11 @@ import {
 import type { Invocation } from "../args.js";
 import { isValidUtf8ArgumentValue, jsonOutputInEffect } from "../args.js";
 import type { CliWriter, CommandContext } from "../io.js";
-import { emitConfigurationErrors, emitFindingsReport } from "../report.js";
+import {
+  emitAppliedMappingReport,
+  emitConfigurationErrors,
+  emitFindingsReport,
+} from "../report.js";
 import { requirementIdProblem, testHoldSpecOf, usageError } from "./common.js";
 
 /**
@@ -616,12 +622,11 @@ async function runMoveFile(
   await appendJournalEntry(workspace.root, plan.entry);
   await executeBuildOutputs(workspace.root, outputs);
 
-  if (invocation.json) {
-    // SPEC 12.0: one JSON document as the entire standard output — the
-    // successful move's report is its (empty) findings list, as for
-    // `build` (SPEC 12.1) and `rename` (SPEC 6.4).
-    emitFindingsReport(true, stdout, []);
-  }
+  // SPEC 6.5/6.4/12.0: a successful move reports its applied mapping, as
+  // rename does — the complete identity mapping the operation journaled, in
+  // both output forms; the journal entry's mapping is that mapping in its
+  // canonical `from`-byte order.
+  emitAppliedMappingReport(invocation.json, stdout, plan.entry.mapping);
   return 0;
 }
 
@@ -919,11 +924,11 @@ async function runMoveSection(
   await appendJournalEntry(workspace.root, plan.entry);
   await executeBuildOutputs(workspace.root, outputs);
 
-  if (invocation.json) {
-    // SPEC 12.0: one JSON document as the entire standard output — the
-    // successful move's report is its (empty) findings list.
-    emitFindingsReport(true, stdout, []);
-  }
+  // SPEC 6.5/6.4/12.0: a successful move reports its applied mapping, as
+  // rename does — the complete identity mapping the operation journaled, in
+  // both output forms; the journal entry's mapping is that mapping in its
+  // canonical `from`-byte order.
+  emitAppliedMappingReport(invocation.json, stdout, plan.entry.mapping);
   return 0;
 }
 

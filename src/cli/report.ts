@@ -24,6 +24,7 @@ import { canonicalJson } from "../core/canonical-json.js";
 import type { JsonObject, JsonValue } from "../core/canonical-json.js";
 import type { Finding, FindingLocation } from "../core/findings.js";
 import { orderFindings } from "../core/findings.js";
+import type { IdentityMapping } from "../core/journal.js";
 import { pathTextJson, renderPathText } from "../core/path-text.js";
 import type { CliWriter, CommandIo } from "./io.js";
 
@@ -122,6 +123,38 @@ export function emitFindingsReport(
   stdout.write(
     json ? findingsReportJson(findings) : renderFindingsHuman(findings),
   );
+}
+
+/**
+ * The applied-mapping report of a successful `rename`/`move` (SPEC 6.4,
+ * 6.5): the complete identity mapping the operation journaled — the
+ * information of the preview's `mapping` (6.6), carried in JSON per 12.0.
+ * The JSON document carries the mapping under the preview's pinned
+ * `mapping` member encoding (SPEC 12.7): one `{"from", "to"}` per mapped
+ * identity, ordered by `from` bytes — exactly the journal entry's canonical
+ * order (core/journal.ts) — beside the consulted domain's (empty) findings.
+ * The human form presents the same information (SPEC 12.0): one
+ * `FROM -> TO` line per pair in the same order, closed by a one-line count.
+ * Identities and paths are workspace-relative and the mapping order is
+ * canonical, so both forms are byte-deterministic (SPEC 12.0).
+ */
+export function emitAppliedMappingReport(
+  json: boolean,
+  stdout: CliWriter,
+  mapping: readonly IdentityMapping[],
+): void {
+  if (json) {
+    const document: JsonValue = {
+      findings: [],
+      mapping: mapping.map((pair) => ({ from: pair.from, to: pair.to })),
+    };
+    stdout.write(canonicalJson(document));
+    return;
+  }
+  const lines = mapping.map((pair) => `${pair.from} -> ${pair.to}\n`);
+  const count = mapping.length;
+  lines.push(`${String(count)} identit${count === 1 ? "y" : "ies"} mapped\n`);
+  stdout.write(lines.join(""));
 }
 
 /**
