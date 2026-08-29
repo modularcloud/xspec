@@ -440,4 +440,5 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "P-10": ["6.1", "13.5"],
   "P-11": ["11.2", "11.4", "12.7"],
   "P-12": ["5.7", "11.5"],
+  "P-13": ["7.4", "8", "8.1", "8.2"],
 };

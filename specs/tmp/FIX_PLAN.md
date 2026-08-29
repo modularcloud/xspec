@@ -3990,9 +3990,48 @@ certify against FP-091's fixtures once those land.
   (+21), unchanged 2 planned mid-loop reds (certification-document ×2 →
   FP-091). section-16 registry untouched — wiring is FP-090's task.]
 
-- [ ] FP-090 — Implement P-13: coverage oracle property — random
+- [x] FP-090 — Implement P-13: coverage oracle property — random
   workspaces/profiles vs the FP-089 oracle. [R2 #16; TEST-SPEC §16 P-13]
   After FP-089.
+  [Done 2026-08-29: test/suite/registry/section-16-p13.ts (+ wrapper
+  section-16-p13.test.ts, manifest spread, H-7 entry "P-13": ["7.4", "8",
+  "8.1", "8.2"]). Generator: valid-by-construction workspaces under a rank
+  discipline (file index, then per-file post-order; every reference targets
+  a strictly lower rank in-file or any node of an earlier file, so the
+  combined contains/depends/embeds graph and the import graph are acyclic
+  and build must exit 0) — 1–3 spec files with nested tagged /
+  coverage-attributed sections (segment pools deliberately non-sorted so
+  identity byte order decouples from structure), d refs and embeddings in
+  local, external-chain, and module-form (root-targeted) spellings,
+  top-level embeddings (root-sourced), 0–2 TS files with whole-file and
+  named-unit markers/text calls, overlapping spec/code groups with
+  discovered-membership repair, 1–3 profiles over every 7.4 knob
+  (mode/targets/targetTags incl. a no-node tag/edgeKinds/spec+code
+  boundaries). Per trial: `build` (exit 0) then one `coverage --json`;
+  profile-name set pinned (8.2 all-profiles); per profile the four counts,
+  covered rows with exact paths, uncovered, and ignored rows (reasons via
+  classifyIgnoredReasons, fixed order) compared against computeCoverage fed
+  the generator's own model — required observed as covered ∪ uncovered +
+  count; the unique shortest+tie-break oracle path makes exact equality
+  P-13's permitted-path clause. 24 CI-pinned trials (runs 8 × 3 default
+  seeds); a dry-run over the committed seeds verified every MDX parses with
+  imports as real ESM blocks (FP-094 lesson), every TS parses, every oracle
+  input passes the misuse guards, and every input class occurs (all three
+  edge kinds, root-sourced ×28 / root-targeted ×51 edges, code boundaries
+  ×18, boundary=target ×10, all four ignored reasons + multi-reason rows,
+  multi-edge covered paths ×11, tie-broken paths ×16, all targetTags and
+  most edgeKinds subsets, targets leaves/all/omitted). Teeth proven by 6
+  probes (each reverted), all falsified against the built product:
+  transitive-as-direct, coverage-none dropped, tags dropped, children
+  dropped, code-sourced edges dropped, reported paths reversed (that one
+  failing the covered-path assertion specifically). Verified:
+  typecheck/format clean; unlike P-11/P-12, P-13 is GREEN against the built
+  product — its coverage engine predates this patch and agrees with the
+  oracle on all 24 workspaces (which also proves the staged workspaces
+  valid: build accepts every one); `npm run test:self` 324 passed with the
+  unchanged 2 planned mid-loop reds (certification-document ×2 → FP-091);
+  S-1 green with the new mapping; S-7 sweep green, so P-13 fails as
+  diagnosed against the empty stub product (H-8).]
 
 ## Stage I — CONF-AVAIL certification family
 
