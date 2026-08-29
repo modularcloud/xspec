@@ -96,16 +96,18 @@
 // reference respells never enter any hash (SPEC 5.4), so the oracle's
 // derived after-side stays exact without modeling them.
 //
-// The graph-diff oracle below (P-6's) computes SPEC 5.6 categories from
-// the harness's own model semantics (section-16-p4.ts `semanticsOf`): per
-// node, `changed` iff added or its own-content token sequence changed;
-// `metadata-changed` iff its `d`-target set, coverage, or tag set changed;
-// `descendant-changed` iff a changed node lies among its strict descendants
-// (either side); `upstream-changed` iff its effective state changed through a
-// dependency-edge cause — a dependency-edge target (of the node or of a
-// both-sides subtree node) whose effective state changed, or a strict-subtree
-// node whose dependency-edge pair multiset changed (SPEC 5.5's effectiveHash
-// recursion, evaluated as a fixpoint over the model).
+// P-6's category oracle is the baseline graph-diff oracle
+// (helpers/oracles/graph-diff.ts, vetted by its S-6 suite — SPEC 5.6's
+// three worked examples plus T5.6-6's added/deleted convention — before
+// this arm trusts it): per node, `changed` iff added or its own-content
+// key changed; `metadata-changed` iff its `d`-target set, coverage, or tag
+// set changed; `descendant-changed` iff a changed node lies among its
+// strict descendants (either side); `upstream-changed` iff its effective
+// state changed through a dependency-edge cause (SPEC 5.5's effectiveHash
+// recursion, evaluated as a fixpoint). It is fed the harness's own model
+// semantics (section-16-p4.ts `semanticsOf`), every identity mapped into
+// the current workspace space, the JSON semantic keys standing in for the
+// 5.5 hash preimages.
 //
 // Conservative operationalizations (noted per H-4):
 // - "No change categories" is asserted as an empty `requirements` list — the
@@ -122,8 +124,12 @@
 // - The two-sided ambiguity documented by T6.2-3 — a node whose one-side-only
 //   subtree member carries the cause — is kept out of P-6's required diff:
 //   its generator never lets a changed or metadata-changed node relocate
-//   (guarded as a harness defect), stages no section moves, never deletes
-//   nodes, and adds only dependency-free sections. The one residual case —
+//   (the graph-diff oracle's relocated-originator misuse guard), stages no
+//   section moves, never deletes nodes, and adds only dependency-free
+//   sections (both guarded at the call site as harness defects — the oracle
+//   itself handles deletions and edge-bearing additions per SPEC 5.6 and
+//   its documented tolerance, but this generator stages neither). The one
+//   residual case —
 //   an ancestor holding a *relocated* dependency-bearing node on one side
 //   only while that node's target changed effectively — makes
 //   `upstream-changed` optional on exactly those ancestors, accepted present
@@ -168,6 +174,12 @@ import {
   decodeNodeRowsReport,
 } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
+import type {
+  GraphDiff,
+  GraphDiffNode,
+  GraphDiffSide,
+} from "../../helpers/oracles/graph-diff.js";
+import { computeGraphDiff } from "../../helpers/oracles/graph-diff.js";
 import type {
   SectionMoveCategoryName,
   SectionMoveDocument,
@@ -228,7 +240,7 @@ import {
 
 type IdentityFn = (identity: string) => string;
 
-/** Semantic content of one node, in whatever identity space it was mapped to. */
+/** Semantic content of one node in model space (`semanticsOf`'s shape). */
 interface NodeSemantics {
   readonly children: readonly string[];
   readonly ownTokens: string;
@@ -252,14 +264,16 @@ function composeIdentityMaps(
 }
 
 /**
- * Map every identity occurrence of a semantics map — keys, child lists, the
- * reference tokens inside `ownTokens`, the `d`-target set inside `metaKey`,
- * the dependency-edge pair multiset `pairKey`, and `edgeTargets` — through
- * `fn`, re-sorting the sorted components (mapping is injective over the
- * staged spaces, so deduplicated sets stay deduplicated).
+ * Map every identity occurrence of a model semantics map — keys, child
+ * lists, the reference tokens inside `ownTokens`, the `d`-target set inside
+ * `metaKey`, the dependency-edge pair multiset `pairKey`, and `edgeTargets`
+ * — through `fn`, re-sorting the sorted components (mapping is injective
+ * over the staged spaces, so deduplicated sets stay deduplicated). The
+ * result is one side of the graph-diff oracle's input: the mapped JSON
+ * semantic keys stand in for the SPEC 5.5 hash preimages.
  */
-function mapSemantics(sems: SemanticsMap, fn: IdentityFn): SemanticsMap {
-  const mapped = new Map<string, NodeSemantics>();
+function mapSemantics(sems: SemanticsMap, fn: IdentityFn): GraphDiffSide {
+  const mapped = new Map<string, GraphDiffNode>();
   for (const [identity, sem] of sems) {
     const tokens = JSON.parse(sem.ownTokens) as [string, string][];
     const [deps, coverage, tags] = JSON.parse(sem.metaKey) as [
@@ -270,7 +284,7 @@ function mapSemantics(sems: SemanticsMap, fn: IdentityFn): SemanticsMap {
     const pairs = JSON.parse(sem.pairKey) as string[];
     mapped.set(fn(identity), {
       children: sem.children.map(fn),
-      ownTokens: JSON.stringify(
+      ownKey: JSON.stringify(
         tokens.map(([kind, value]) =>
           kind === "run" ? [kind, value] : [kind, fn(value)],
         ),
@@ -290,222 +304,11 @@ function mapSemantics(sems: SemanticsMap, fn: IdentityFn): SemanticsMap {
 }
 
 // ---------------------------------------------------------------------------
-// The SPEC 5.6 category oracle
-//
-// Inputs are two semantics maps in one identity space (the baseline mapped
-// forward to current identities). Output: per current-graph node the exact
-// required category set, the optional-upstream tolerance set, and the
-// originating-node attribution bound (module header, H-4).
-
-interface OracleDiff {
-  /** Exact required category set per current-graph node identity. */
-  readonly required: ReadonlyMap<string, ReadonlySet<ChangeCategory>>;
-  /** Nodes that may additionally carry `upstream-changed` (module header). */
-  readonly optionalUpstream: ReadonlySet<string>;
-  /** Attribution bound: every originating node's current identity. */
-  readonly originators: ReadonlySet<string>;
-}
-
-/** Memoized strict-descendant sets over one side's `children` lists. */
-function strictDescendants(sems: SemanticsMap): Map<string, Set<string>> {
-  const memo = new Map<string, Set<string>>();
-  const visiting = new Set<string>();
-  const resolve = (identity: string): Set<string> => {
-    const cached = memo.get(identity);
-    if (cached !== undefined) return cached;
-    if (visiting.has(identity)) {
-      throw new Error(
-        `P-5/P-6 harness defect: contains-cycle through ${identity}`,
-      );
-    }
-    visiting.add(identity);
-    const sem = sems.get(identity);
-    if (sem === undefined) {
-      throw new Error(`P-5/P-6 harness defect: no semantics for ${identity}`);
-    }
-    const descendants = new Set<string>();
-    for (const child of sem.children) {
-      descendants.add(child);
-      for (const inner of resolve(child)) descendants.add(inner);
-    }
-    visiting.delete(identity);
-    memo.set(identity, descendants);
-    return descendants;
-  };
-  for (const identity of sems.keys()) resolve(identity);
-  return memo;
-}
-
-function computeOracleDiff(
-  before: SemanticsMap,
-  after: SemanticsMap,
-): OracleDiff {
-  const kept = [...before.keys()].filter((identity) => after.has(identity));
-  const added = [...after.keys()].filter((identity) => !before.has(identity));
-  const deleted = [...before.keys()].filter((identity) => !after.has(identity));
-  if (deleted.length > 0) {
-    throw new Error(
-      `P-5/P-6 harness defect: the generated history deleted node(s) ` +
-        `${deleted.join(", ")} — deletions are outside PROP-04's input space ` +
-        `(module header)`,
-    );
-  }
-  const beforeAt = (identity: string): NodeSemantics => {
-    const sem = before.get(identity);
-    if (sem === undefined) {
-      throw new Error(
-        `P-5/P-6 harness defect: no baseline semantics for ${identity}`,
-      );
-    }
-    return sem;
-  };
-  const afterAt = (identity: string): NodeSemantics => {
-    const sem = after.get(identity);
-    if (sem === undefined) {
-      throw new Error(
-        `P-5/P-6 harness defect: no current semantics for ${identity}`,
-      );
-    }
-    return sem;
-  };
-
-  const keptSet = new Set(kept);
-  const ownChanged = new Set(
-    kept.filter((id) => beforeAt(id).ownTokens !== afterAt(id).ownTokens),
-  );
-  const metaChanged = new Set(
-    kept.filter((id) => beforeAt(id).metaKey !== afterAt(id).metaKey),
-  );
-  const pairChanged = new Set(
-    kept.filter((id) => beforeAt(id).pairKey !== afterAt(id).pairKey),
-  );
-  const changedSet = new Set([...ownChanged, ...added]);
-  const originators = new Set([...changedSet, ...metaChanged]);
-
-  const descBefore = strictDescendants(before);
-  const descAfter = strictDescendants(after);
-  const descAt = (
-    memo: Map<string, Set<string>>,
-    identity: string,
-  ): Set<string> => memo.get(identity) ?? new Set<string>();
-
-  // Input-space guard (module header, H-4): an originator never relocates —
-  // its strict-ancestor relation is two-sided — so `descendant-changed` is
-  // never ambiguous. Added nodes are one-sided by nature (the 5.6 worked
-  // example pins their ancestors' category) and carry no dependency edges.
-  for (const id of kept) {
-    if (!ownChanged.has(id) && !metaChanged.has(id)) continue;
-    const beforeHolders = kept.filter((a) => descAt(descBefore, a).has(id));
-    const afterHolders = kept.filter((a) => descAt(descAfter, a).has(id));
-    if (
-      JSON.stringify(beforeHolders.sort()) !==
-      JSON.stringify(afterHolders.sort())
-    ) {
-      throw new Error(
-        `P-5/P-6 harness defect: originating node ${id} relocated between ` +
-          `baseline and current — the generators must never move a changed ` +
-          `node (module header)`,
-      );
-    }
-  }
-  for (const id of added) {
-    if (afterAt(id).edgeTargets.length > 0) {
-      throw new Error(
-        `P-5/P-6 harness defect: added node ${id} carries dependency edges — ` +
-          `added sections must be dependency-free (module header)`,
-      );
-    }
-  }
-
-  // effChanged fixpoint over kept nodes: own content changed, own pair
-  // multiset changed, a both-sides child changed effectively, or a
-  // both-sides dependency-edge target changed effectively (SPEC 5.5; added
-  // or removed children and edges surface through ownTokens/pairKey).
-  const effMemo = new Map<string, boolean>();
-  const effVisiting = new Set<string>();
-  const commonOf = (
-    beforeList: readonly string[],
-    afterList: readonly string[],
-  ): string[] =>
-    beforeList.filter((id) => keptSet.has(id) && afterList.includes(id));
-  const effChanged = (id: string): boolean => {
-    const cached = effMemo.get(id);
-    if (cached !== undefined) return cached;
-    if (effVisiting.has(id)) {
-      throw new Error(
-        `P-5/P-6 harness defect: dependency/contains cycle through ${id} — ` +
-          `generated graphs are acyclic by construction (SPEC 5.3)`,
-      );
-    }
-    effVisiting.add(id);
-    const result =
-      ownChanged.has(id) ||
-      pairChanged.has(id) ||
-      commonOf(beforeAt(id).children, afterAt(id).children).some(effChanged) ||
-      commonOf(beforeAt(id).edgeTargets, afterAt(id).edgeTargets).some(
-        effChanged,
-      );
-    effVisiting.delete(id);
-    effMemo.set(id, result);
-    return result;
-  };
-
-  // A node's dependency-edge cause (SPEC 5.6 upstream-changed): a common
-  // dependency-edge target of the node itself or of a subtree node whose
-  // effective state changed, or a strict-subtree node (not the node itself)
-  // whose pair multiset changed. Both-sides subtree members give the
-  // required cause; one-side-only kept members (relocated subtrees) give the
-  // optional tolerance (module header, H-4).
-  const targetCause = (id: string): boolean =>
-    commonOf(beforeAt(id).edgeTargets, afterAt(id).edgeTargets).some(
-      effChanged,
-    );
-  const memberCause = (member: string): boolean =>
-    pairChanged.has(member) || targetCause(member);
-
-  const required = new Map<string, Set<ChangeCategory>>();
-  const optionalUpstream = new Set<string>();
-  for (const id of kept) {
-    const categories = new Set<ChangeCategory>();
-    if (ownChanged.has(id)) categories.add("changed");
-    if (metaChanged.has(id)) categories.add("metadata-changed");
-    const beforeDesc = descAt(descBefore, id);
-    const afterDesc = descAt(descAfter, id);
-    const eitherDesc = new Set([...beforeDesc, ...afterDesc]);
-    if ([...eitherDesc].some((d) => changedSet.has(d))) {
-      categories.add("descendant-changed");
-    }
-    if (effChanged(id)) {
-      const bothMembers = [...beforeDesc].filter(
-        (d) => keptSet.has(d) && afterDesc.has(d),
-      );
-      if (targetCause(id) || bothMembers.some(memberCause)) {
-        categories.add("upstream-changed");
-      } else {
-        const oneSided = [...eitherDesc].filter(
-          (d) => keptSet.has(d) && !(beforeDesc.has(d) && afterDesc.has(d)),
-        );
-        // Only a relocated (one-side-only) subtree member's dependency cause
-        // makes the category tolerable-but-not-required (module header, H-4).
-        if (oneSided.some(memberCause)) optionalUpstream.add(id);
-      }
-    }
-    required.set(id, categories);
-  }
-  for (const id of added) {
-    // An added node is `changed` and receives no category through its own
-    // hashes (SPEC 5.6).
-    required.set(id, new Set<ChangeCategory>(["changed"]));
-  }
-  return { required, optionalUpstream, originators };
-}
-
-// ---------------------------------------------------------------------------
 // Impact-report-vs-oracle assertion (SPEC 5.6, 9.1, 9.3; SUITE-20 merging)
 
 function assertImpactMatchesOracle(
   report: ImpactReport,
-  oracle: OracleDiff,
+  oracle: GraphDiff,
   context: string,
 ): void {
   interface MergedNode {
@@ -2179,7 +1982,26 @@ async function runReplayTrial(
           composeIdentityMaps(internalMaps.slice(snapshot.mapsFrom))(identity),
         ),
       );
-      const diff = computeOracleDiff(mapped, currentSems);
+      const diff = computeGraphDiff(mapped, currentSems);
+      // Input-space guards (module header, H-4): the oracle defines
+      // deletions and edge-bearing additions, but this generator stages
+      // neither — meeting one is a harness defect (H-8), never a diagnosed
+      // product failure.
+      if (diff.deleted.size > 0) {
+        throw new Error(
+          `P-6 harness defect: the generated history deleted node(s) ` +
+            `${[...diff.deleted].sort().join(", ")} — deletions are outside ` +
+            `PROP-04's input space (module header)`,
+        );
+      }
+      for (const id of diff.added) {
+        if ((currentSems.get(id)?.edgeTargets.length ?? 0) > 0) {
+          throw new Error(
+            `P-6 harness defect: added node ${id} carries dependency edges ` +
+              `— added sections must be dependency-free (module header)`,
+          );
+        }
+      }
       const label =
         `P-6 \`impact --base <${snapshot.label}> --json\` — full history: ` +
         `${history.join("; ") || "no steps"}`;

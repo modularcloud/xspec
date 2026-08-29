@@ -3808,10 +3808,32 @@ certify against FP-091's fixtures once those land.
   flowing through the within-bound. `npm run test:self` unchanged 2
   planned mid-loop reds (certification-document ×2 → FP-091), 289 passed.]
 
-- [ ] FP-085 — Implement the P-6 baseline graph-diff oracle + its S-6
+- [x] FP-085 — Implement the P-6 baseline graph-diff oracle + its S-6
   vetted suite; wire P-6 to it. [R2 #42; TEST-SPEC §16 P-6, §17 S-6; SPEC
   5.6]
   Vetted vectors: SPEC 5.6's three worked examples + the T5.6-6 case.
+  [Done 2026-08-29: P-6's inline category diff extracted to
+  test/helpers/oracles/graph-diff.ts — opaque 5.5-preimage keys
+  (ownKey/metaKey/pairKey), generalized past P-6's input space so the
+  vetted vectors can cover the worked material: added AND deleted nodes
+  exactly `changed` per T5.6-6 (deleted keyed by baseline identity,
+  flagged in `deleted`), edge-bearing added/deleted subtree members
+  joining relocated kept members in the tolerated-optional upstream
+  reading; misuse guards (relocated originators, incomplete graphs,
+  contains/dependency cycles, an ownKey not covering child tokens) throw
+  plain errors. Vetted by test/self/s6-graph-diff-oracle.test.ts: 12
+  vectors — the three 5.6 worked examples (T5.6-1/-2/-3 shapes) plus the
+  coverage/tags-only closing sentence (T5.6-4 shapes), T5.6-6's
+  added/deleted convention, both one-sided tolerances, 5 misuse guards;
+  vector teeth proven by 4 oracle mutation probes (each reverted), all
+  falsified. P-6 wired to computeGraphDiff with its
+  no-deletion/dependency-free-addition input-space guards kept at the
+  call site; wiring teeth: one end-to-end probe (originators emptied,
+  reverted) falsified P-6 with the no-originating-node diagnosis.
+  Verified: typecheck/format clean; suite section-16-p5-p6 vs the built
+  product 2 passed (~110s, unchanged from FP-084); `npm run test:self`
+  301 passed, unchanged 2 planned mid-loop reds (certification-document
+  ×2 → FP-091).]
 
 - [ ] FP-086 — P-7 generator: add the `$`-at-capture-boundary literal forms
   (`$0`, `$` before a non-digit, trailing `$`). [R2 #38; TEST-SPEC §16 P-7]
