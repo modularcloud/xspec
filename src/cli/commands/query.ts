@@ -29,7 +29,7 @@ export async function queryCommand(
 
   // SPEC 11: configuration-level flag validation precedes source analysis,
   // like its 14.14 counterparts (query-core.ts).
-  const prevalidated = prevalidateQuery(invocation, groups, stderr);
+  const prevalidated = prevalidateQuery(invocation, groups, context);
   if (!prevalidated.ok) {
     return prevalidated.exit;
   }

@@ -25,7 +25,7 @@ import type { ExitCode } from "../../core/findings.js";
 import { shortestWitnessPath } from "../../core/paths.js";
 import type { Invocation } from "../args.js";
 import { flagList, flagValue } from "../args.js";
-import type { CliWriter } from "../io.js";
+import type { CliWriter, CommandIo } from "../io.js";
 import { emitDocument, rangeJson, usageError } from "./common.js";
 
 /** One requirement node as the query subcommands consume it (SPEC 11). */
@@ -352,7 +352,7 @@ function kindSet(
 export function prevalidateQuery(
   invocation: Invocation,
   groups: GroupsView,
-  stderr: CliWriter,
+  io: CommandIo,
 ): { readonly ok: true } | { readonly ok: false; readonly exit: ExitCode } {
   if (invocation.command !== "query nodes") {
     return { ok: true };
@@ -361,7 +361,7 @@ export function prevalidateQuery(
   if (!resolved.ok) {
     return {
       ok: false,
-      exit: usageError(stderr, invocation.command, resolved.message),
+      exit: usageError(invocation, io, resolved.message),
     };
   }
   return { ok: true };
@@ -380,11 +380,12 @@ export function answerQuery(
   stdout: CliWriter,
   stderr: CliWriter,
 ): ExitCode {
+  const io: CommandIo = { stdout, stderr };
   switch (invocation.command) {
     case "query node": {
       const resolved = resolveRow(view, invocation.positionals[0]);
       if (!resolved.ok) {
-        return usageError(stderr, invocation.command, resolved.message);
+        return usageError(invocation, io, resolved.message);
       }
       return emitDocument(stdout, nodeReportOf(view, resolved.row));
     }
@@ -393,7 +394,7 @@ export function answerQuery(
       if (!resolved.ok) {
         // Unreachable after prevalidateQuery; kept total so the answering
         // is correct standalone.
-        return usageError(stderr, invocation.command, resolved.message);
+        return usageError(invocation, io, resolved.message);
       }
       const filters = resolved.filters;
       // SPEC 11/12.0: deterministic order — the graph's requirement-node
@@ -416,7 +417,7 @@ export function answerQuery(
         }
         const message = unknownGraphNodeMessage(view, flag, raw);
         if (message !== null) {
-          return usageError(stderr, invocation.command, message);
+          return usageError(invocation, io, message);
         }
       }
       const edges = view.edges.filter(
@@ -430,7 +431,7 @@ export function answerQuery(
     case "query subtree": {
       const resolved = resolveRow(view, invocation.positionals[0]);
       if (!resolved.ok) {
-        return usageError(stderr, invocation.command, resolved.message);
+        return usageError(invocation, io, resolved.message);
       }
       return emitDocument(
         stdout,
@@ -440,7 +441,7 @@ export function answerQuery(
     case "query ancestors": {
       const resolved = resolveRow(view, invocation.positionals[0]);
       if (!resolved.ok) {
-        return usageError(stderr, invocation.command, resolved.message);
+        return usageError(invocation, io, resolved.message);
       }
       return emitDocument(
         stdout,
@@ -464,7 +465,7 @@ export function answerQuery(
       ] as const) {
         const message = unknownGraphNodeMessage(view, flag, raw);
         if (message !== null) {
-          return usageError(stderr, invocation.command, message);
+          return usageError(invocation, io, message);
         }
       }
       const adjacency = new Map<string, Set<string>>();

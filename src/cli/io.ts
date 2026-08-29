@@ -17,6 +17,18 @@ export interface CliWriter {
 
 import type { LoadedWorkspace } from "../workspace/config.js";
 
+/**
+ * The two output streams of one invocation (SPEC 12.0): the report goes to
+ * standard output, diagnostics to standard error. Exit-2 emitters take this
+ * pair — the stderr diagnostic always, and with JSON output in effect the
+ * 12.7 error document as the entire standard output. `CommandContext`
+ * satisfies it structurally.
+ */
+export interface CommandIo {
+  readonly stdout: CliWriter;
+  readonly stderr: CliWriter;
+}
+
 /** Per-invocation context handed to command handlers. */
 export interface CommandContext {
   /**

@@ -65,8 +65,8 @@ function unknownItemError(
   itemId: string,
 ): ExitCode {
   return usageError(
-    context.stderr,
-    invocation.command,
+    invocation,
+    context,
     `unknown item '${itemId}' in session '${name}' — no item of the ` +
       `session has that id (SPEC 10.7, 12.0)`,
   );
@@ -204,7 +204,7 @@ export async function reviewSplitCommand(
     () => runSplit(invocation, context, name, itemId),
   );
   if (!outcome.ok) {
-    return usageError(context.stderr, invocation.command, outcome.usageMessage);
+    return usageError(invocation, context, outcome.usageMessage);
   }
   return outcome.value;
 }
@@ -328,7 +328,7 @@ export async function reviewResolveCommand(
       ),
   );
   if (!outcome.ok) {
-    return usageError(context.stderr, invocation.command, outcome.usageMessage);
+    return usageError(invocation, context, outcome.usageMessage);
   }
   return outcome.value;
 }

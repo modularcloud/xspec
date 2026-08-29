@@ -101,8 +101,8 @@ export async function coverageCommand(
     );
     if (named === undefined) {
       return usageError(
-        stderr,
-        invocation.command,
+        invocation,
+        context,
         `unknown profile '${name}' — no configured coverage profile has ` +
           `that name (SPEC 8.2, 7.4, 12.0)`,
       );

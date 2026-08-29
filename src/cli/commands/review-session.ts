@@ -393,8 +393,8 @@ export async function loadSessionForCommand(
       return {
         ok: false,
         exit: usageError(
-          context.stderr,
-          invocation.command,
+          invocation,
+          context,
           `the recorded baseline of session '${name}' cannot be ` +
             `reconstructed: ${resolution.message}`,
         ),
@@ -427,7 +427,7 @@ export function requireValidSessionName(
   if (problem === null) {
     return null;
   }
-  return usageError(context.stderr, invocation.command, problem);
+  return usageError(invocation, context, problem);
 }
 
 /** SPEC 10.7 → 12.0: an unknown session named in arguments. */
@@ -437,8 +437,8 @@ export function unknownSessionError(
   context: CommandContext,
 ): ExitCode {
   return usageError(
-    context.stderr,
-    invocation.command,
+    invocation,
+    context,
     `unknown session '${name}' — no session file ` +
       `.xspec/reviews/${name}.json exists; session names compare byte-wise ` +
       `and case-sensitively (SPEC 10.1, 10.7, 12.0)`,

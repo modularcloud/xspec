@@ -94,7 +94,7 @@ async function runCreate(
   // SPEC 10.1 → 12.0: an invalid session name is a usage error.
   const nameProblem = sessionNameProblem(name);
   if (nameProblem !== null) {
-    return usageError(stderr, invocation.command, nameProblem);
+    return usageError(invocation, context, nameProblem);
   }
 
   // SPEC 10.7: exactly one of `--base`, `--strategy audit`, `--coverage`
@@ -115,8 +115,8 @@ async function runCreate(
     );
     if (profile === undefined) {
       return usageError(
-        stderr,
-        invocation.command,
+        invocation,
+        context,
         `unknown profile '${profileName}' — no configured coverage profile ` +
           `has that name (SPEC 10.7, 7.4, 12.0)`,
       );
@@ -131,7 +131,7 @@ async function runCreate(
     // even when the current sources also fail build validation.
     const resolution = await resolveBaseline(workspace, baseRef);
     if (!resolution.ok) {
-      return usageError(stderr, invocation.command, resolution.message);
+      return usageError(invocation, context, resolution.message);
     }
     baseline = resolution.baseline;
     // SPEC 10.7: a baseline session records the commit identity `--base`
@@ -272,7 +272,7 @@ export async function reviewCreateCommand(
     () => runCreate(invocation, context, name),
   );
   if (!outcome.ok) {
-    return usageError(context.stderr, invocation.command, outcome.usageMessage);
+    return usageError(invocation, context, outcome.usageMessage);
   }
   return outcome.value;
 }
@@ -457,8 +457,8 @@ export async function reviewShowCommand(
     // SPEC 10.7 → 12.0: an unknown item ID in any `review` command's
     // arguments is a usage error.
     return usageError(
-      context.stderr,
-      invocation.command,
+      invocation,
+      context,
       `unknown item '${itemId}' in session '${name}' — no item of the ` +
         `session has that id (SPEC 10.7, 12.0)`,
     );
@@ -487,7 +487,15 @@ export async function reviewExportCommand(
     // Unreachable: the parser enforces the positional (SPEC 10.7).
     throw new Error("xspec internal error: review export without <name>");
   }
-  const opened = await openSessionForRead(name, invocation, context);
+  // SPEC 10.7/12.0: `export` is a JSON-only surface — a single JSON
+  // document is its only output form, with or without `--json`, the
+  // findings report of a failed gate or a corrupt session included — so
+  // every report path runs with JSON output forced on (as `query` does).
+  const opened = await openSessionForRead(
+    name,
+    { ...invocation, json: true },
+    context,
+  );
   if (!opened.ok) {
     return opened.exit;
   }

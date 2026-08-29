@@ -25,7 +25,7 @@ import type { JsonObject, JsonValue } from "../core/canonical-json.js";
 import type { Finding, FindingLocation } from "../core/findings.js";
 import { orderFindings } from "../core/findings.js";
 import { pathTextJson, renderPathText } from "../core/path-text.js";
-import type { CliWriter } from "./io.js";
+import type { CliWriter, CommandIo } from "./io.js";
 
 /**
  * A location as human text: `FILE:START-END` — the file through the shared
@@ -125,6 +125,56 @@ export function emitFindingsReport(
 }
 
 /**
+ * A plain usage error as the finding form of SPEC 12.7: `code` and `path`
+ * null — SPEC 14 assigns usage errors no stable code and no concerned
+ * workspace path (they describe the invocation the consuming tool itself
+ * composed) — locations and identities empty, the diagnostic as the
+ * message.
+ */
+export function usageErrorFinding(message: string): Finding {
+  return { code: null, message, locations: [], path: null, identities: [] };
+}
+
+/**
+ * The exit-2 error document of SPEC 12.0/12.7 — `{"error": …}` holding one
+ * finding form — as the entire standard output. Emitted exactly when JSON
+ * output is in effect (`--json` among the arguments, or a JSON-only
+ * surface); the caller writes the stderr diagnostics and exits 2 either
+ * way.
+ */
+export function emitErrorDocument(stdout: CliWriter, finding: Finding): void {
+  const document: JsonValue = { error: findingToJson(finding) };
+  stdout.write(canonicalJson(document));
+}
+
+/**
+ * The one condition-14 finding of an exit-2 configuration error (SPEC 12.7:
+ * "One invocation reports one error" — a configuration file with several
+ * distinct defects is a single finding, its message deterministic but
+ * otherwise unpinned). The concerned path is the configuration file in the
+ * anchoring form of 11.6, relative to the invocation working directory, or
+ * `.` for a failed upward search with no `--config` (SPEC 14); locations
+ * stay empty — a configuration error is an unlocated condition (SPEC 14).
+ */
+export function configurationErrorFinding(
+  findings: readonly Finding[],
+  configAnchor: string,
+): Finding {
+  // The per-defect messages joined in the pinned findings order (SPEC 12.7)
+  // keep the merged message deterministic (SPEC 12.0).
+  const message = orderFindings(findings)
+    .map((finding) => finding.message)
+    .join("; ");
+  return {
+    code: "configuration-error",
+    message,
+    locations: [],
+    path: configAnchor,
+    identities: [],
+  };
+}
+
+/**
  * SPEC 12.0/14.14: render one configuration-error finding as a diagnostic
  * line. Configuration errors are usage errors: the message is
  * standard-error content.
@@ -137,16 +187,25 @@ export function renderConfigurationError(finding: Finding): string {
 
 /**
  * Report configuration errors (SPEC 14.14) the way every command must: each
- * as a standard-error diagnostic line. The caller exits 2. (The exit-2 JSON
- * error document of 12.0/12.7 — the standard-output half when JSON output
- * is in effect — is emitted by the caller's error path, not here; stderr
- * diagnostics are identical either way.)
+ * defect as a standard-error diagnostic line and, when JSON output is in
+ * effect, the exit-2 error document of 12.0/12.7 as the entire standard
+ * output — one finding however many defects, its concerned path the
+ * anchored configuration path (SPEC 14). The caller exits 2; stderr
+ * diagnostics are identical whatever the output form (SPEC 12.0).
  */
 export function emitConfigurationErrors(
-  stderr: CliWriter,
+  io: CommandIo,
+  jsonInEffect: boolean,
+  configAnchor: string,
   findings: readonly Finding[],
 ): void {
   for (const finding of findings) {
-    stderr.write(renderConfigurationError(finding));
+    io.stderr.write(renderConfigurationError(finding));
+  }
+  if (jsonInEffect) {
+    emitErrorDocument(
+      io.stdout,
+      configurationErrorFinding(findings, configAnchor),
+    );
   }
 }

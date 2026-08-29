@@ -10,7 +10,8 @@
 //   output (with `--json`, the single JSON document), exit 1, nothing
 //   answered, nothing modified;
 // - configuration errors (SPEC 14.14) — usage class: diagnostics on
-//   standard error, exit 2, and with `--json` an empty standard output.
+//   standard error, exit 2, and with JSON output in effect the 12.7 error
+//   document as the entire standard output (12.0).
 //
 // `check` must not use this: it never refreshes (SPEC 13.3, 14.10).
 
@@ -19,6 +20,7 @@ import type { GraphData } from "../core/graph-data.js";
 import type { WorkspaceAnalysis } from "../workspace/pipeline.js";
 import { prepareWorkspaceForRead } from "../workspace/refresh.js";
 import type { Invocation } from "./args.js";
+import { jsonOutputInEffect } from "./args.js";
 import type { CommandContext } from "./io.js";
 import { emitConfigurationErrors, emitFindingsReport } from "./report.js";
 
@@ -51,7 +53,12 @@ export async function prepareGraphForRead(
   const prepared = await prepareWorkspaceForRead(context.workspace);
   switch (prepared.kind) {
     case "configuration":
-      emitConfigurationErrors(context.stderr, prepared.errors);
+      emitConfigurationErrors(
+        context,
+        jsonOutputInEffect(invocation),
+        context.workspace.configAnchor,
+        prepared.errors,
+      );
       return { ok: false, exit: 2 };
     case "findings":
       emitFindingsReport(invocation.json, context.stdout, prepared.findings);

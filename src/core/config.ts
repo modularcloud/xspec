@@ -1349,8 +1349,10 @@ function validateSchema(
 
 /**
  * Parse and validate configuration text (SPEC 7). `fileName` names the file
- * in findings (its base name — never an absolute path, SPEC 12.0). The text
- * is analyzed statically and never executed or imported (IMPLEMENTATION).
+ * in the findings' concerned-path member (the caller's label — the anchored
+ * spelling of SPEC 14 for the current configuration; never an
+ * environment-dependent absolute path, SPEC 12.0). The text is analyzed
+ * statically and never executed or imported (IMPLEMENTATION).
  */
 export function parseConfiguration(
   text: string,

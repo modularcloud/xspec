@@ -8,9 +8,12 @@
 //
 // IMPLEMENTATION (Architecture): this workspace-layer module owns the I/O —
 // locating and reading the file; parsing and validation are the pure core's
-// (src/core/config.ts). Diagnostics never carry absolute paths (SPEC 12.0):
-// findings name the configuration file by its base name, and the `--config`
-// value is echoed as given.
+// (src/core/config.ts). Findings name the configuration file by its
+// anchored spelling relative to the invocation working directory (SPEC 14:
+// a configuration error's concerned path is the 11.6 anchoring form) — a
+// pure function of invocation input, never an environment-dependent
+// absolute path (SPEC 12.0; the Windows drive-mismatch case of 11.6 is the
+// sole absolute form).
 //
 // This module statically imports the TypeScript-based parser, so it is
 // loaded on demand (cli/main.ts imports it dynamically): the store-backed
@@ -36,8 +39,14 @@ export interface LoadedWorkspace {
    * file's directory (SPEC 7). Never rendered into output (SPEC 12.0).
    */
   readonly root: string;
-  /** The configuration file's base name, for diagnostics. */
+  /** The configuration file's base name, for workspace-relative reads. */
   readonly configFileName: string;
+  /**
+   * The configuration file in the anchoring form of 11.6, relative to the
+   * invocation working directory — the concerned path of every
+   * configuration error this invocation reports (SPEC 14, 12.0).
+   */
+  readonly configAnchor: string;
   /**
    * SHA-256 (hex) of the configuration file's exact bytes — the graph
    * data's recorded-parse key (SPEC 13.3; ./fast-read.ts).
@@ -58,9 +67,12 @@ export type WorkspaceLoadResult =
 export function parseLocatedWorkspace(
   located: LocatedWorkspace,
 ): WorkspaceLoadResult {
+  // SPEC 14: the parse findings' concerned path is the configuration file
+  // in the anchoring form of 11.6, relative to the invocation working
+  // directory.
   const parsed = parseConfigurationBytes(
     located.configBytes,
-    located.configFileName,
+    located.configAnchor,
   );
   if (!parsed.ok) {
     return { ok: false, findings: parsed.findings };
@@ -70,6 +82,7 @@ export function parseLocatedWorkspace(
     workspace: {
       root: located.root,
       configFileName: located.configFileName,
+      configAnchor: located.configAnchor,
       configHash: sha256Hex(located.configBytes),
       configuration: parsed.configuration,
     },
@@ -96,7 +109,9 @@ export async function loadWorkspace(
  * Decode and parse a configuration file's exact bytes (SPEC 7, 14.14) — the
  * I/O-free tail of `loadWorkspace`, shared with baseline reconstruction
  * (SPEC 6.3), which reads the configuration content as it stood at a git
- * ref instead of from the filesystem.
+ * ref instead of from the filesystem. `configFileName` labels the file in
+ * the findings' concerned-path member: the current configuration passes its
+ * anchored spelling (SPEC 14), the baseline its tree-relative name.
  */
 export function parseConfigurationBytes(
   bytes: Uint8Array,

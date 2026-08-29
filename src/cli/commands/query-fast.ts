@@ -75,7 +75,7 @@ export async function tryFastQuery(
     return null;
   }
   const groups = groupsViewOfConfiguration(verified.configuration);
-  const prevalidated = prevalidateQuery(invocation, groups, stderr);
+  const prevalidated = prevalidateQuery(invocation, groups, { stdout, stderr });
   if (!prevalidated.ok) {
     return prevalidated.exit;
   }

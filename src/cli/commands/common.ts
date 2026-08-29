@@ -17,22 +17,31 @@ import {
 } from "../../core/text.js";
 import type { TestHoldSpec } from "../../workspace/lock.js";
 import type { Invocation } from "../args.js";
-import { flagValue } from "../args.js";
-import type { CliWriter } from "../io.js";
+import { flagValue, jsonOutputInEffect } from "../args.js";
+import type { CliWriter, CommandIo } from "../io.js";
+import { emitErrorDocument, usageErrorFinding } from "../report.js";
 
 /**
  * SPEC 12.0: usage errors — unknown identities, unknown groups, invalid
- * flag values — exit 2 with the diagnostic on standard error and nothing on
- * standard output (the exit-2 error prevents emitting the single JSON
- * document). Diagnostics echo argv tokens and static text only, keeping
- * output byte-deterministic (SPEC 12.0).
+ * flag values — exit 2 with the diagnostic on standard error. With JSON
+ * output in effect (`--json` among the arguments, or a JSON-only surface),
+ * the 12.7 error document — `{"error": …}` holding one code-less,
+ * path-less finding form — is the entire standard output; without it,
+ * standard output stays empty. Diagnostics echo argv tokens and static
+ * text only, keeping output byte-deterministic (SPEC 12.0).
  */
 export function usageError(
-  stderr: CliWriter,
-  command: string,
+  invocation: Invocation,
+  io: CommandIo,
   message: string,
 ): 2 {
-  stderr.write(`xspec: ${command}: ${message}\n`);
+  io.stderr.write(`xspec: ${invocation.command}: ${message}\n`);
+  if (jsonOutputInEffect(invocation)) {
+    emitErrorDocument(
+      io.stdout,
+      usageErrorFinding(`${invocation.command}: ${message}`),
+    );
+  }
   return 2;
 }
 

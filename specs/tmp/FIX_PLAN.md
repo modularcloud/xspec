@@ -52,32 +52,18 @@ which B8's `refused-cycle` can reuse; import cycles locate every
 participating import declaration. Embedding-form no-occurrence findings
 (14.6, 14.8) span the full braced container, `SpecEmbedding.range`.)
 
-### A4. Exit-2 JSON error document
-
-SPEC 12.0 (JSON-in-effect rule), 12.7 (error document), 14.14. Prereq A1. Today
-every exit-2 outcome leaves stdout empty (`src/cli/main.ts` usage path;
-`emitConfigurationErrors` in `src/cli/report.ts` writes stderr only). Required:
-
-- JSON output is in effect exactly when `--json` appears among the invocation's
-  arguments — even when the arguments are themselves the error: unknown command,
-  unknown flag, malformed value — or when the invoked surface is JSON-only
-  (`query`, `occurrences`, `view`, `at`, `inventory` (11), `version` (12.6),
-  `review export` (10.7)). When in effect, an exit-2 usage or configuration
-  error emits as its entire stdout the single document `{"error": <finding
-  form>}` (one five-member finding form, 12.7). Stderr diagnostics and exit
-  codes are unchanged; without JSON in effect stdout stays empty.
-- Plain usage error: `code` and `path` null (no stable code — 14).
-- Configuration error (14.14): `code` `"configuration-error"`; `path` is the
-  concerned path in the anchoring form of 11.6, relative to the invocation
-  working directory — the configuration file the upward search found or
-  `--config` named (canonical `..`-ascend/descend `/`-joined spelling), or `.`
-  when the upward search failed with no `--config`. One invocation reports one
-  error: a configuration file with several defects is a single condition-14
-  finding with a deterministic message. Implement the cwd→path anchoring
-  spelling as a shared helper (`inventory`, task B7, reuses it).
-
-Verify: T12.0-1..6 arms (`section-12.0*.test.ts`), ~25 tests across sections
-7–13 that exercise exit-2 under `--json`.
+(A4 landed: the exit-2 JSON error document. The 11.6 anchoring spelling is
+the shared helper `anchoredPathSpelling` in `src/workspace/anchor.ts` (B7's
+inventory reuses it for `root`/`config`); `LocatedWorkspace`/`LoadedWorkspace`
+carry `configAnchor`, the concerned path of every condition-14 finding.
+JSON-in-effect is `jsonOutputInEffect(invocation)` in `src/cli/args.ts` —
+`--json` or a `CommandSpec.jsonOnly` surface; Stage B registrations
+(`version`, `occurrences`, `view`, `at`, `inventory`) must set
+`jsonOnly: true` and force `{...invocation, json: true}` for their exit-1
+reports as `query`/`review export` do. `usageError(invocation, io, message)`
+in `src/cli/commands/common.ts` and `emitConfigurationErrors(io, jsonInEffect,
+configAnchor, findings)` in `src/cli/report.ts` are the exit-2 choke points —
+route every new exit-2 outcome through them.)
 
 ### A5. Review-operation refusals report as code-less findings
 

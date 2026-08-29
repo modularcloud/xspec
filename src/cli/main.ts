@@ -21,10 +21,14 @@
 import type { ExitCode } from "../core/findings.js";
 import { locateWorkspace } from "../workspace/locate.js";
 import type { Invocation } from "./args.js";
-import { COMMAND_PATHS, parseArgv } from "./args.js";
+import { COMMAND_PATHS, jsonOutputInEffect, parseArgv } from "./args.js";
 import { tryFastQuery } from "./commands/query-fast.js";
 import type { CliWriter, CommandContext } from "./io.js";
-import { emitConfigurationErrors } from "./report.js";
+import {
+  emitConfigurationErrors,
+  emitErrorDocument,
+  usageErrorFinding,
+} from "./report.js";
 
 /** One command's implementation, dispatched by `Invocation.command`. */
 export type CommandHandler = (
@@ -180,9 +184,15 @@ export async function main(
   if (!result.ok) {
     // SPEC 12.0: usage errors — unknown commands or flags, missing required
     // flags or arguments, invalid flag values, repeated flags, non-UTF-8
-    // argument values — exit 2 with the diagnostic on standard error and
-    // nothing on standard output.
-    stderr.write(`${result.message}\n`);
+    // argument values — exit 2 with the diagnostic on standard error. With
+    // JSON output in effect (`--json` among the arguments even when the
+    // arguments are themselves the error, or a JSON-only surface), the
+    // 12.7 error document — one code-less, path-less finding — is the
+    // entire standard output; otherwise standard output stays empty.
+    stderr.write(`xspec: ${result.message}\n`);
+    if (result.jsonInEffect) {
+      emitErrorDocument(stdout, usageErrorFinding(result.message));
+    }
     return 2;
   }
   const loadHandler = HANDLERS.get(result.invocation.command);
@@ -197,11 +207,16 @@ export async function main(
   // upward search from the working directory, or the `--config <path>`
   // value resolved against it (12.0). A missing or invalid configuration
   // is a configuration error, reported as a usage error (exit 2) preceding
-  // all source analysis; with `--json`, the exit-2 error prevents emitting
-  // the single JSON document, so standard output stays empty (12.0).
+  // all source analysis — with JSON output in effect, the 12.7 error
+  // document as the entire standard output (12.0).
   const location = await locateWorkspace(cwd, result.invocation.config);
   if (!location.ok) {
-    emitConfigurationErrors(stderr, location.findings);
+    emitConfigurationErrors(
+      { stdout, stderr },
+      jsonOutputInEffect(result.invocation),
+      location.configAnchor,
+      location.findings,
+    );
     return 2;
   }
 
@@ -226,7 +241,12 @@ export async function main(
   const { parseLocatedWorkspace } = await import("../workspace/config.js");
   const loaded = parseLocatedWorkspace(location.located);
   if (!loaded.ok) {
-    emitConfigurationErrors(stderr, loaded.findings);
+    emitConfigurationErrors(
+      { stdout, stderr },
+      jsonOutputInEffect(result.invocation),
+      location.located.configAnchor,
+      loaded.findings,
+    );
     return 2;
   }
   const handler = await loadHandler();

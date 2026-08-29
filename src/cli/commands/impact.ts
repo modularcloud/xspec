@@ -134,7 +134,7 @@ export async function impactCommand(
   // current sources also fail build validation.
   const resolution = await resolveBaseline(context.workspace, ref);
   if (!resolution.ok) {
-    return usageError(context.stderr, invocation.command, resolution.message);
+    return usageError(invocation, context, resolution.message);
   }
   const { baseline } = resolution;
 

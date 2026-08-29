@@ -37,6 +37,7 @@ import {
 import { loadAllSessions } from "../../workspace/reviews.js";
 import { symlinkWritePathFindings } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
+import { jsonOutputInEffect } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { emitConfigurationErrors, emitFindingsReport } from "../report.js";
 
@@ -50,9 +51,15 @@ export async function checkCommand(
 
   // SPEC 14.14/12.0: a discovery-level configuration error is a usage error
   // preceding all source analysis — exit 2, diagnostics on standard error,
-  // and with `--json` an empty standard output.
+  // and with JSON output in effect the 12.7 error document on standard
+  // output.
   if (analysis.configurationErrors.length > 0) {
-    emitConfigurationErrors(context.stderr, analysis.configurationErrors);
+    emitConfigurationErrors(
+      context,
+      jsonOutputInEffect(invocation),
+      workspace.configAnchor,
+      analysis.configurationErrors,
+    );
     return 2;
   }
 

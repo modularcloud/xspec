@@ -179,8 +179,8 @@ export async function idsCommand(
     if (!compiled.ok) {
       // Plain mode has one compile error: outside-root (SPEC 7).
       return usageError(
-        stderr,
-        invocation.command,
+        invocation,
+        context,
         `invalid value '${filePattern}' for '--file' — the pattern ` +
           `resolves outside the workspace root (SPEC 12.3, 7, 12.0)`,
       );

@@ -88,7 +88,7 @@ export async function showCommand(
 
   const resolved = resolveRow(view, invocation.positionals[0]);
   if (!resolved.ok) {
-    return usageError(stderr, invocation.command, resolved.message);
+    return usageError(invocation, context, resolved.message);
   }
   if (invocation.json) {
     // SPEC 12.4/11: the machine form is `query node`'s document exactly.

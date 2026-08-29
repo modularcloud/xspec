@@ -98,7 +98,7 @@ import {
   writeSourceFile,
 } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
-import { isValidUtf8ArgumentValue } from "../args.js";
+import { isValidUtf8ArgumentValue, jsonOutputInEffect } from "../args.js";
 import type { CliWriter, CommandContext } from "../io.js";
 import { emitConfigurationErrors, emitFindingsReport } from "../report.js";
 import { requirementIdProblem, testHoldSpecOf, usageError } from "./common.js";
@@ -415,8 +415,8 @@ async function runMove(
     // A section origin with a bare-file destination matches neither form
     // (SPEC 6.5): a malformed invocation, a usage error (12.0).
     return usageError(
-      stderr,
-      invocation.command,
+      invocation,
+      context,
       `'${destinationArg}' names no target section — the forms are ` +
         `\`move <old-file> <new-file>\` and \`move <file>#<id> ` +
         `<target-file>#<new-id>\` (SPEC 6.5)`,
@@ -428,7 +428,12 @@ async function runMove(
   // SPEC 14.14/12.0: configuration errors precede all source analysis —
   // usage class, exit 2, diagnostics on standard error, nothing modified.
   if (analysis.configurationErrors.length > 0) {
-    emitConfigurationErrors(stderr, analysis.configurationErrors);
+    emitConfigurationErrors(
+      context,
+      jsonOutputInEffect(invocation),
+      workspace.configAnchor,
+      analysis.configurationErrors,
+    );
     return 2;
   }
 
@@ -439,8 +444,8 @@ async function runMove(
     !analysis.classification.specSources.some((s) => s.path === origin.file)
   ) {
     return usageError(
-      stderr,
-      invocation.command,
+      invocation,
+      context,
       `unknown file '${origin.file}' — the origin must name a discovered ` +
         `source file of a configured spec group, workspace-relative ` +
         `(SPEC 6.5, 12.0)`,
@@ -466,8 +471,8 @@ async function runMove(
     );
     if (section === undefined) {
       return usageError(
-        stderr,
-        invocation.command,
+        invocation,
+        context,
         `unknown ID '${origin.id}' in '${origin.file}' — <id> must name an ` +
           `existing requirement ID of that file (SPEC 6.5, 12.0)`,
       );
@@ -553,7 +558,12 @@ async function runMoveFile(
     // Unreachable: the destination was validated against the same group
     // rules discovery applies. Guarded so a regression reports rather than
     // corrupts.
-    emitConfigurationErrors(stderr, rewritten.configurationErrors);
+    emitConfigurationErrors(
+      context,
+      jsonOutputInEffect(invocation),
+      workspace.configAnchor,
+      rewritten.configurationErrors,
+    );
     return 2;
   }
   if (rewritten.findings.length > 0) {
@@ -855,7 +865,12 @@ async function runMoveSection(
     // Unreachable: the configuration is untouched and a created target was
     // validated against the same group rules discovery applies. Guarded so
     // a regression reports rather than corrupts.
-    emitConfigurationErrors(stderr, rewritten.configurationErrors);
+    emitConfigurationErrors(
+      context,
+      jsonOutputInEffect(invocation),
+      workspace.configAnchor,
+      rewritten.configurationErrors,
+    );
     return 2;
   }
   if (rewritten.findings.length > 0) {
@@ -988,7 +1003,7 @@ export async function moveCommand(
     () => runMove(invocation, context, originArg, destinationArg),
   );
   if (!outcome.ok) {
-    return usageError(context.stderr, invocation.command, outcome.usageMessage);
+    return usageError(invocation, context, outcome.usageMessage);
   }
   return outcome.value;
 }

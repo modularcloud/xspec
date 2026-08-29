@@ -25,13 +25,15 @@
 // - Argument values are interpreted as UTF-8; a value that is not valid
 //   UTF-8 is a usage error (12.0).
 //
-// Every parse failure is a usage error: exit 2, diagnostic on stderr, and an
-// empty standard output — under `--json` the exit-2 error prevents emitting
-// the single JSON document (12.0), and no report is defined for exit-2
-// outcomes in human form either. Diagnostics echo only argv tokens and static
-// text, never resolved filesystem paths, keeping all output byte-deterministic
-// for identical input (12.0: no absolute paths, no environment-dependent
-// content).
+// Every parse failure is a usage error: exit 2 with the diagnostic on
+// stderr. Standard output is empty unless JSON output is in effect —
+// `--json` among the arguments (even when the arguments are themselves the
+// error) or a JSON-only surface — in which case the exit-2 error emits the
+// 12.7 error document as the entire standard output (12.0); the parse
+// result carries that determination for the caller. Diagnostics echo only
+// argv tokens and static text, never resolved filesystem paths, keeping all
+// output byte-deterministic for identical input (12.0: no absolute paths,
+// no environment-dependent content).
 
 /** One flag a command accepts, and how its value (if any) is validated. */
 interface FlagSpec {
@@ -68,6 +70,13 @@ interface CommandSpec {
    * none or more than one is a usage error (12.0).
    */
   readonly exactlyOneOf?: readonly (readonly string[])[];
+  /**
+   * SPEC 12.0: the surface is JSON-only — a single JSON document is its
+   * only output form, with or without `--json` (10.7 `review export`, 11,
+   * 12.6), so JSON output is in effect for every invocation of it, its
+   * exit-2 errors included (the 12.7 error document).
+   */
+  readonly jsonOnly?: boolean;
 }
 
 /** SPEC 12.0: every command supports `--json` and `--config <path>` (7). */
@@ -188,12 +197,15 @@ const COMMANDS: readonly CommandSpec[] = [
       TEST_HOLD_FLAG,
     ],
   },
-  { path: "review export", positionals: ["<name>"], flags: [] },
-  // SPEC 11: the six query subcommands.
-  { path: "query node", positionals: ["<node>"], flags: [] },
+  // SPEC 10.7: `export` is JSON-only — the entire session as a single JSON
+  // document, its only output form with or without `--json` (12.0).
+  { path: "review export", positionals: ["<name>"], flags: [], jsonOnly: true },
+  // SPEC 11: the six query subcommands — JSON-only surfaces (12.0).
+  { path: "query node", positionals: ["<node>"], flags: [], jsonOnly: true },
   {
     path: "query nodes",
     positionals: [],
+    jsonOnly: true,
     flags: [
       { name: "--group", takesValue: true, valueName: "<g>" },
       { name: "--file", takesValue: true, valueName: "<glob>" },
@@ -210,6 +222,7 @@ const COMMANDS: readonly CommandSpec[] = [
   {
     path: "query edges",
     positionals: [],
+    jsonOnly: true,
     flags: [
       { name: "--from", takesValue: true, valueName: "<graph-node>" },
       { name: "--to", takesValue: true, valueName: "<graph-node>" },
@@ -222,11 +235,17 @@ const COMMANDS: readonly CommandSpec[] = [
       },
     ],
   },
-  { path: "query subtree", positionals: ["<node>"], flags: [] },
-  { path: "query ancestors", positionals: ["<node>"], flags: [] },
+  { path: "query subtree", positionals: ["<node>"], flags: [], jsonOnly: true },
+  {
+    path: "query ancestors",
+    positionals: ["<node>"],
+    flags: [],
+    jsonOnly: true,
+  },
   {
     path: "query reachable",
     positionals: [],
+    jsonOnly: true,
     flags: [
       {
         name: "--from",
@@ -264,6 +283,11 @@ export const COMMAND_PATHS: readonly string[] = COMMANDS.map(
   (spec) => spec.path,
 );
 
+/** The dispatch keys of the JSON-only surfaces (SPEC 12.0; 10.7, 11, 12.6). */
+const JSON_ONLY_PATHS: ReadonlySet<string> = new Set(
+  COMMANDS.filter((spec) => spec.jsonOnly === true).map((spec) => spec.path),
+);
+
 /** A parsed flag value: boolean presence, one value, or a `--kinds` list. */
 export type FlagValue = true | string | readonly string[];
 
@@ -287,10 +311,23 @@ export interface Invocation {
 
 export type ParseResult =
   | { readonly ok: true; readonly invocation: Invocation }
-  | { readonly ok: false; readonly message: string };
+  | {
+      readonly ok: false;
+      /** The diagnostic, without the `xspec: ` program prefix. */
+      readonly message: string;
+      /**
+       * SPEC 12.0: whether JSON output is in effect for the failed
+       * invocation — `--json` appears among the arguments (even when the
+       * arguments are themselves the error), or the invoked surface, as
+       * far as the arguments identify one, is JSON-only. Governs error
+       * delivery: with it, the exit-2 error emits the 12.7 error document
+       * as the entire standard output.
+       */
+      readonly jsonInEffect: boolean;
+    };
 
-function usageError(message: string): ParseResult {
-  return { ok: false, message: `xspec: ${message}` };
+function usageError(message: string, jsonInEffect: boolean): ParseResult {
+  return { ok: false, message, jsonInEffect };
 }
 
 /**
@@ -365,10 +402,21 @@ const TABLE = buildTable();
 /**
  * Parse one invocation's argv (the elements after the executable name)
  * against the SPEC 12.0 conventions and the SPEC 12.5 command table. Returns
- * the parsed invocation, or the usage-error diagnostic the caller must write
- * to stderr before exiting 2 (12.0).
+ * the parsed invocation, or the usage-error failure the caller reports
+ * before exiting 2 (12.0): the diagnostic for stderr (the caller prefixes
+ * the program name) and whether JSON output is in effect — with it, the
+ * caller emits the 12.7 error document as the entire standard output.
  */
 export function parseArgv(argv: readonly string[]): ParseResult {
+  // SPEC 12.0: `--json` among the invocation's arguments puts JSON output
+  // in effect even when the arguments are themselves the error — the parse
+  // may fail before every token's role is assigned, so the presence scan
+  // is literal over the argument vector — and a JSON-only surface puts it
+  // in effect regardless, as soon as the arguments identify one.
+  const jsonToken = argv.includes("--json");
+  let jsonOnlySurface = false;
+  const inEffect = (): boolean => jsonToken || jsonOnlySurface;
+
   // SPEC 12.0: argument values are interpreted as UTF-8, and a value that is
   // not valid UTF-8 is a usage error. Checked per token below, because the
   // `move` command's positionals are exempt (SPEC 6.5: a destination path
@@ -379,11 +427,13 @@ export function parseArgv(argv: readonly string[]): ParseResult {
     usageError(
       `argument ${String(indexInArgv + 1)} is not valid UTF-8 — argument ` +
         `values are interpreted as UTF-8`,
+      inEffect(),
     );
 
   if (argv.length === 0) {
     return usageError(
       `missing command (expected one of: ${commandNameList()})`,
+      inEffect(),
     );
   }
   const commandToken = argv[0]!;
@@ -394,6 +444,7 @@ export function parseArgv(argv: readonly string[]): ParseResult {
     return usageError(
       `expected a command before any flags (expected one of: ` +
         `${commandNameList()})`,
+      inEffect(),
     );
   }
   const entry = TABLE.get(commandToken);
@@ -401,17 +452,24 @@ export function parseArgv(argv: readonly string[]): ParseResult {
     return usageError(
       `unknown command '${commandToken}' (expected one of: ` +
         `${commandNameList()})`,
+      inEffect(),
     );
   }
 
   let spec: CommandSpec;
   let tokens: readonly string[];
   if (entry instanceof Map) {
+    // SPEC 12.0: a command group all of whose subcommands are JSON-only
+    // (`query`, 11) is a JSON-only surface already at the group name.
+    jsonOnlySurface = [...entry.values()].every(
+      (subcommand) => subcommand.jsonOnly === true,
+    );
     const subToken = argv.length > 1 ? argv[1]! : undefined;
     if (subToken === undefined || subToken.startsWith("--")) {
       return usageError(
         `${commandToken}: missing subcommand (expected one of: ` +
           `${subcommandNameList(entry)})`,
+        inEffect(),
       );
     }
     if (!isValidUtf8ArgumentValue(subToken)) {
@@ -422,6 +480,7 @@ export function parseArgv(argv: readonly string[]): ParseResult {
       return usageError(
         `${commandToken}: unknown subcommand '${subToken}' (expected one ` +
           `of: ${subcommandNameList(entry)})`,
+        inEffect(),
       );
     }
     spec = subcommand;
@@ -430,6 +489,7 @@ export function parseArgv(argv: readonly string[]): ParseResult {
     spec = entry;
     tokens = argv.slice(1);
   }
+  jsonOnlySurface = spec.jsonOnly === true;
 
   const flagSpecs = new Map<string, FlagSpec>();
   for (const flag of GLOBAL_FLAGS) flagSpecs.set(flag.name, flag);
@@ -465,7 +525,7 @@ export function parseArgv(argv: readonly string[]): ParseResult {
     const flag = flagSpecs.get(token);
     if (flag === undefined) {
       // SPEC 12.0: unknown flags are usage errors.
-      return usageError(`${spec.path}: unknown flag '${token}'`);
+      return usageError(`${spec.path}: unknown flag '${token}'`, inEffect());
     }
     // SPEC 12.0: a flag may be given at most once per invocation; repeating a
     // flag is a usage error — identical values included.
@@ -473,6 +533,7 @@ export function parseArgv(argv: readonly string[]): ParseResult {
       return usageError(
         `${spec.path}: flag '${token}' given more than once — a flag may be ` +
           `given at most once per invocation`,
+        inEffect(),
       );
     }
     seen.add(token);
@@ -486,6 +547,7 @@ export function parseArgv(argv: readonly string[]): ParseResult {
       return usageError(
         `${spec.path}: flag '${token}' requires a value` +
           (flag.valueName === undefined ? "" : ` ${flag.valueName}`),
+        inEffect(),
       );
     }
     const value = tokens[index]!;
@@ -501,6 +563,7 @@ export function parseArgv(argv: readonly string[]): ParseResult {
           return usageError(
             `${spec.path}: invalid value '${value}' for '${token}' — one ` +
               `comma-separated list of: ${flag.list.join(", ")}`,
+            inEffect(),
           );
         }
       }
@@ -512,6 +575,7 @@ export function parseArgv(argv: readonly string[]): ParseResult {
       return usageError(
         `${spec.path}: invalid value '${value}' for '${token}' (expected ` +
           `one of: ${flag.allowed.join(", ")})`,
+        inEffect(),
       );
     }
     if (token === "--config") config = value;
@@ -524,6 +588,7 @@ export function parseArgv(argv: readonly string[]): ParseResult {
       return usageError(
         `${spec.path}: missing required flag '${flag.name}'` +
           (flag.valueName === undefined ? "" : ` ${flag.valueName}`),
+        inEffect(),
       );
     }
   }
@@ -534,6 +599,7 @@ export function parseArgv(argv: readonly string[]): ParseResult {
       return usageError(
         `${spec.path}: exactly one of ${group.join(", ")} is required` +
           (given.length === 0 ? "" : ` (got ${given.join(" and ")})`),
+        inEffect(),
       );
     }
   }
@@ -544,12 +610,14 @@ export function parseArgv(argv: readonly string[]): ParseResult {
     return usageError(
       `${spec.path}: missing required argument ` +
         `${spec.positionals[positionals.length]!}`,
+      inEffect(),
     );
   }
   if (positionals.length > spec.positionals.length) {
     return usageError(
       `${spec.path}: unexpected argument ` +
         `'${positionals[spec.positionals.length]!}'`,
+      inEffect(),
     );
   }
 
@@ -584,6 +652,17 @@ export function flagPresent(invocation: Invocation, name: string): boolean {
     );
   }
   return true;
+}
+
+/**
+ * SPEC 12.0: whether JSON output is in effect for a parsed invocation —
+ * `--json` appears among its arguments, or the invoked surface is
+ * JSON-only, a single JSON document its only output form with or without
+ * `--json` (10.7 `review export`, 11, 12.6). Governs the whole output
+ * form, the exit-2 error document included (12.7).
+ */
+export function jsonOutputInEffect(invocation: Invocation): boolean {
+  return invocation.json || JSON_ONLY_PATHS.has(invocation.command);
 }
 
 /** The elements of a list-valued flag, or undefined when it was not given. */

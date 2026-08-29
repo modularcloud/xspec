@@ -66,6 +66,7 @@ import {
   writeSourceFile,
 } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
+import { jsonOutputInEffect } from "../args.js";
 import type { CliWriter, CommandContext } from "../io.js";
 import { emitConfigurationErrors, emitFindingsReport } from "../report.js";
 import { requirementIdProblem, testHoldSpecOf, usageError } from "./common.js";
@@ -158,7 +159,12 @@ async function runRename(
   // SPEC 14.14/12.0: configuration errors precede all source analysis —
   // usage class, exit 2, diagnostics on standard error, nothing modified.
   if (analysis.configurationErrors.length > 0) {
-    emitConfigurationErrors(stderr, analysis.configurationErrors);
+    emitConfigurationErrors(
+      context,
+      jsonOutputInEffect(invocation),
+      workspace.configAnchor,
+      analysis.configurationErrors,
+    );
     return 2;
   }
 
@@ -167,8 +173,8 @@ async function runRename(
   // (workspace-relative, SPEC 12.0, 1.5; byte-wise comparison).
   if (!analysis.classification.specSources.some((s) => s.path === file)) {
     return usageError(
-      stderr,
-      invocation.command,
+      invocation,
+      context,
       `unknown file '${file}' — <file> must name a discovered source file ` +
         `of a configured spec group, workspace-relative (SPEC 6.4, 12.0)`,
     );
@@ -187,8 +193,8 @@ async function runRename(
   const section = origin.document.sections.find((s) => s.id === oldId);
   if (section === undefined) {
     return usageError(
-      stderr,
-      invocation.command,
+      invocation,
+      context,
       `unknown ID '${oldId}' in '${file}' — <old-id> must name an existing ` +
         `requirement ID of that file (SPEC 6.4, 12.0)`,
     );
@@ -247,7 +253,12 @@ async function runRename(
   if (rewritten.configurationErrors.length > 0) {
     // Unreachable: the configuration and file set are unchanged. Guarded so
     // a regression reports rather than corrupts.
-    emitConfigurationErrors(stderr, rewritten.configurationErrors);
+    emitConfigurationErrors(
+      context,
+      jsonOutputInEffect(invocation),
+      workspace.configAnchor,
+      rewritten.configurationErrors,
+    );
     return 2;
   }
   if (rewritten.findings.length > 0) {
@@ -355,7 +366,7 @@ export async function renameCommand(
     () => runRename(invocation, context, file, oldId, newId),
   );
   if (!outcome.ok) {
-    return usageError(context.stderr, invocation.command, outcome.usageMessage);
+    return usageError(invocation, context, outcome.usageMessage);
   }
   return outcome.value;
 }
