@@ -65,18 +65,11 @@ in `src/cli/commands/common.ts` and `emitConfigurationErrors(io, jsonInEffect,
 configAnchor, findings)` in `src/cli/report.ts` are the exit-2 choke points —
 route every new exit-2 outcome through them.)
 
-### A5. Review-operation refusals report as code-less findings
-
-SPEC 10.7, 12.7, 14 ("review-operation refusals likewise carry none"). Prereq
-A1. `emitReviewRefusal` (`src/cli/commands/review-session.ts:789`) emits
-`{"refused": {"command", "message"}}` / ad-hoc text. Required: a refused review
-operation (`split` on a wrong-kind or childless item, `resolve` on a blocked
-item, `create` with an existing name) is a findings-class outcome whose report
-is `{"findings": [...]}` — one finding, `code` null, `locations` empty,
-`identities` per 14 (informational), exit 1, nothing modified; human form the
-same information.
-
-Verify: T10.3-1, T10.7 refusal arms (`section-10*.test.ts`).
+(A5 landed: review-operation refusals are code-less findings —
+`emitReviewRefusal(json, stdout, message, identities)` in
+`src/cli/commands/review-session.ts` emits `{"findings": [...]}` through
+`emitFindingsReport`, one finding with `code`/`path` null, `locations` empty,
+`identities` the session name (+ item id / colliding name) — informational.)
 
 ### A6. `rename`/`move` success report is the applied mapping
 
@@ -113,6 +106,46 @@ exits 2 unknown-command today. Add the command and handler (`src/cli/main.ts`):
 
 Verify: T12.6-1/2 (`section-12.6.test.ts`), T12.0-9 arm; unblocks the Windows CI
 leg's leading edge (E-6).
+
+### B2a. Invalid-path sources enter per-file analysis (parse-local findings)
+
+(Positioned before B2/B4/B5 deliberately — they consume this parse.) SPEC 11.2
+("Structure is parse-local": a discovered file whose own path is invalid
+(14.19) keeps its parse-local structure, its located findings, and its
+occurrence positions — while no identity over an invalid path is ever emitted
+or resolved against), 14 (only an unparseable file (14.20) masks its content;
+14.19 does not — `build`/`check` "MUST report each" condition), 12.0/12.7
+(marked byte-form paths in every output). Today `SourceClassification`
+(`src/core/discovery.ts` ~63: "A file with any finding here is no source: it
+appears in neither list") drops every 14.19 file before parsing, so located
+conditions inside such files are never reported. Observed: T12.7-1 arm E
+(`runBytePathsArm`, `test/suite/registry/section-12.7.ts`) stages a non-UTF-8
+directory `specs/d<0xFF>/` holding `In.mdx` (valid imports of `../OK.xspec`
+and `./Tgt.xspec`, a resolving `{text(OK.ok)}` embedding, an id-less `<S>`)
+plus `Tgt.mdx` (path-only defect): `build --json` must report exactly
+`14.1 x1` (located in `In.mdx`, its location `file` the marked byte form) and
+`14.19 x2` (each concerned path marked) — the product reports `14.19 x2` only.
+Required:
+
+- Discovery keeps 14.19 files visible to analysis (condition-19 findings
+  intact) and core analysis parses and per-file validates them per 11.2:
+  their located findings report from `build`/`check` beside the 14.19,
+  location files rendered through `pathTextOf` (A2).
+- No identity of such a file is defined (11.2, 1.5): no graph nodes, no
+  resolution *into* the file (references to it stay unresolved), no journal
+  or derived-file interaction — `build` on such a workspace fails on the
+  findings and modifies nothing (12.1). A valid import designating such a
+  file is no finding (arm E: `./Tgt.xspec` reports nothing), and constructs
+  inside it are judged on their own terms.
+- Reference spellings inside such files whose targets resolve record
+  occurrences with the source datum explicitly unavailable (11.2, 5.7) —
+  the recording itself lands with B2 (its "explicitly unavailable when 11.2
+  leaves the containing node's identity undefined" datum); B4/B5 then answer
+  for these files from this same per-file analysis (an invalid-path file
+  keeps its view, B5).
+
+Verify: T12.7-1 arm E's `build --json` leg (`section-12.7.test.ts` — its
+`occurrences`/`view`/`inventory` legs additionally need B2/B4/B5/B7).
 
 ### B2. Record reference occurrences in core analysis and graph data
 
@@ -419,7 +452,21 @@ behind the gate (judged against session content, which gated commands do not
 read there). Files: gate sequencing in `src/workspace/pipeline.ts` and the
 command handlers under `src/cli/commands/`.
 
-Verify: T12.0-10 (`section-12.0*.test.ts`).
+The corrupt-session report is likewise gated (SPEC 14.21: reported "only on a
+workspace passing `build`'s validations — on a failing one the gate's findings
+are reported without any session being read"): `loadSessionForCommand`
+(`src/cli/commands/review-session.ts`) currently reports the 14.21 corruption
+before the refresh, so `review status <corrupt>` on a failing workspace emits
+`corrupt-session` instead of the gate's findings (observed: T10.1-5 expects
+`14.1 x1`, got `14.21 x1`). Required order there: session-name validity and
+existence (exit 2, judged against the directory) still precede the gate; the
+corruption *report* moves behind it — gate failing → gate findings alone, exit
+1; gate passing → the 14.21 finding as today. Recorded-baseline resolution
+(6.3, exit 2 before source validation) applies only to a readable session;
+a corrupt one has no readable parameters — the corruption (or, failing
+workspace, the gate) reports instead. `review list` already gates first.
+
+Verify: T12.0-10 (`section-12.0*.test.ts`), T10.1-5 (`section-10.1.test.ts`).
 
 ### C3. Obstructed write path: any non-directory component, refused before modifying
 

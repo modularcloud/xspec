@@ -165,12 +165,14 @@ async function runCreate(
     return 1;
   }
   if (occupant.state === "ok") {
+    // SPEC 10.7/14: one code-less finding, exit 1, nothing created; the
+    // identities name the session (informational).
     return emitReviewRefusal(
       invocation.json,
       stdout,
-      invocation.command,
       `a session named '${name}' already exists — \`review create\` with ` +
         `the name of an existing session is refused (SPEC 10.1, 10.7)`,
+      [name],
     );
   }
   const collision = existingNameIgnoringAsciiCase(
@@ -178,13 +180,16 @@ async function runCreate(
     name,
   );
   if (collision !== null) {
+    // SPEC 10.1/10.7/14: one code-less finding, exit 1, nothing created;
+    // the identities name the requested and the colliding session
+    // (informational).
     return emitReviewRefusal(
       invocation.json,
       stdout,
-      invocation.command,
       `the name '${name}' matches the existing session '${collision}' ` +
         `ignoring ASCII case, so it is treated as the name of an existing ` +
         `session and refused (SPEC 10.1, 10.7)`,
+      [name, collision],
     );
   }
 

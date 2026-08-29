@@ -44,9 +44,8 @@
 
 import { generateAuditItems } from "../../core/audit.js";
 import type { JsonObject } from "../../core/canonical-json.js";
-import { canonicalJson } from "../../core/canonical-json.js";
 import { generateCoverageSessionItems } from "../../core/coverage-session.js";
-import type { ExitCode } from "../../core/findings.js";
+import type { ExitCode, Finding } from "../../core/findings.js";
 import { generatePathBlocksItems } from "../../core/path-blocks.js";
 import type {
   ItemKind,
@@ -774,21 +773,30 @@ export function renderCountsHuman(
 // ---------------------------------------------------------------------------
 
 /**
- * SPEC 10.7/12.0: a refused review operation is a findings-class outcome —
- * exit 1, the refusal report on standard output (with `--json`, one JSON
- * document as the entire standard output).
+ * SPEC 10.7/12.0/14: a refused review operation (`split` on a wrong-kind or
+ * childless item, `resolve` on a blocked item, `create` with an existing
+ * name) is a findings-class outcome — its report is the findings-only
+ * document `{"findings": […]}` (SPEC 12.7), one finding per refusal, and the
+ * human form presents the same information through the shared findings
+ * renderer (SPEC 12.0). Review-operation refusals carry no stable code
+ * (SPEC 14: "review-operation refusals likewise carry none"): `code` null,
+ * no in-source locations, no concerned path; `identities` carry the context
+ * strings the refusal names (session name, item id) — informational,
+ * deterministic per SPEC 12.7. Exit 1, nothing modified.
  */
 export function emitReviewRefusal(
   json: boolean,
   stdout: CliWriter,
-  command: string,
   message: string,
+  identities: readonly string[],
 ): ExitCode {
-  if (json) {
-    // The canonical serializer keeps the document byte-deterministic.
-    stdout.write(canonicalJson({ refused: { command, message } }));
-  } else {
-    stdout.write(`${command} refused: ${message}\n`);
-  }
+  const finding: Finding = {
+    code: null,
+    message,
+    locations: [],
+    path: null,
+    identities,
+  };
+  emitFindingsReport(json, stdout, [finding]);
   return 1;
 }

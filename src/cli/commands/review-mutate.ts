@@ -153,13 +153,12 @@ async function runSplit(
     baseline: generation.baseline,
   });
   if (!split.ok) {
-    // SPEC 10.7: the refusal — exit 1, nothing modified.
-    return emitReviewRefusal(
-      invocation.json,
-      context.stdout,
-      invocation.command,
-      split.refusal,
-    );
+    // SPEC 10.7/14: the refusal — one code-less finding, exit 1, nothing
+    // modified; the identities name the session and item (informational).
+    return emitReviewRefusal(invocation.json, context.stdout, split.refusal, [
+      name,
+      itemId,
+    ]);
   }
   // The write re-records the journal's entry count as the session's
   // write-moment bound (core/review.ts identity policy: every stored
@@ -246,15 +245,16 @@ async function runResolve(
     return unknownItemError(invocation, context, name, itemId);
   }
   if (view.blocked.get(item.id) ?? false) {
-    // SPEC 10.7: resolving a blocked item is refused — exit 1, nothing
-    // modified. Any *unblocked* item is resolvable regardless of status.
+    // SPEC 10.7/14: resolving a blocked item is refused — one code-less
+    // finding, exit 1, nothing modified. Any *unblocked* item is resolvable
+    // regardless of status.
     return emitReviewRefusal(
       invocation.json,
       context.stdout,
-      invocation.command,
       `item '${itemId}' of session '${name}' is blocked — an item is ` +
         `blocked while any item in its blockedBy is not resolved, and ` +
         `resolving a blocked item is refused (SPEC 10.3, 10.7)`,
+      [name, itemId],
     );
   }
   // SPEC 10.7/10.4: set the status, record the current relevant state; an
