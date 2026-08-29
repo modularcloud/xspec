@@ -1,77 +1,9 @@
 # FIX_PLAN — Phase 9 (test harness), compliance round 2
 
-Source: compliance review of TEST-SPEC.md §§10–18 + cross-cutting (2026-08-29). Two gaps.
+Source: compliance review of TEST-SPEC.md §§10–18 + cross-cutting (2026-08-29). One gap
+remains (FP-095 done: T10.5-3 now stages and asserts both halves of SPEC 10.5's note).
 Scope guard for every task: Phase 9 — harness code only (`test/`), never product code (`src/`).
 Task numbering continues from FP-094 (earlier rounds' tasks, already done and cleared).
-
----
-
-## FP-095 — T10.5-3: stage and assert the embedding half of SPEC 10.5's note
-
-**Status:** TODO
-
-**Requirement.** TEST-SPEC.md §10.5, T10.5-3: "both halves of 10.5's note staged (a new
-`d` edge makes the source `metadata-changed`, a new embedding makes it `changed`): a
-fixture node whose only affected target was added since the baseline gets no
-`dependency-consistency` item, its new `d` edge surfacing as its own
-`metadata-consistency` item; **a second node whose only affected target entered through a
-new `{text(...)}` embedding likewise gets no `dependency-consistency` item — the new
-embedded reference changes its own content (5.5), it is `changed`, and the change is
-reviewed via its own `subtree-coherence` item**." Product-spec anchor: SPEC.md 10.5,
-dependency-impact rule 2's note ("An edge to a target added since the baseline is
-necessarily itself new (5.4), so that change is reviewed at its source: a new `d` edge
-makes the source `metadata-changed`, a new embedding makes it `changed` (5.6)").
-
-**Gap (reviewer finding 1).** In `test/suite/registry/section-10.5.ts`, the T10.5-3
-fixture (`N_BASELINE`/`N_CURRENT`, currently lines ~919–1007) stages only the `d`-edge
-half: `dep2` gains `d={"h.newt"}` in `N_CURRENT`. No node anywhere in the file gains a new
-`{text(...)}` embedding (the file stages zero embeddings), and no assertion covers the
-embedding half.
-
-**Change.** Extend the T10.5-3 fixture with a second node whose only affected target
-enters through a `{text(...)}` embedding new since the baseline, and assert the embedding
-half. Required properties of the staging (all load-bearing under SPEC.md 10.5/5.6):
-
-- The embedder is present in both `N_BASELINE` and `N_CURRENT`; its only change between
-  the two is that its text gains a `{text(...)}` embedding of a node **added since the
-  baseline** (e.g. a new top-level section `dep3` whose current text gains
-  `{text("h.newt")}` — the string form resolves within the same file, TEST-SPEC T2.3-2;
-  `h.newt` is already added-since-baseline in this fixture).
-- The embedder carries no `d` attribute and no other embedding (so that target is its
-  *only* affected target), has no `changed` ancestor (else 10.5's skipping rule absorbs
-  its item), and sits at file top level (10.5 parent-consistency rule 2 creates items only
-  per non-root ancestor, keeping the expected item set free of parent-consistency noise —
-  same reasoning as the existing fixture comment at the top of the T10.5-3 block).
-- No other node `d`-references or embeds the embedder, and the code fixture
-  (`N_CODE_BASELINE`/`N_CODE_CURRENT`, `src/ci3.ts`) does not reference it — leaving the
-  existing dep1/dep2/m/m2/code-impact assertions' expected values untouched.
-
-Assertions to add (the three the TEST-SPEC statement names):
-
-1. The embedder gets **no `dependency-consistency` item**: extend the exact
-   `kindScopeSet(status)` expected set — it must gain `subtree-coherence <embedder>` and
-   must NOT gain any `dependency-consistency` or `metadata-consistency` entry for the
-   embedder; the existing "exactly one dependency-consistency item, scoped at dep1"
-   `dcRows` check then also covers the embedder — extend its diagnosis message to cite the
-   embedding half.
-2. The embedder **is `changed`** (not `metadata-changed`): assert its impact category via
-   the harness's existing category observable (the same surface T1.6-4 uses for
-   category assertions), citing SPEC 5.5/5.6.
-3. The change is **reviewed via the embedder's own `subtree-coherence` item**: covered by
-   the exact `kindScopeSet` (item 1); the diagnosis messages should say so, citing
-   SPEC 10.5's note.
-
-Also update the test's `title` to mirror the amended T10.5-3 statement (both halves), per
-the harness convention that titles restate the TEST-SPEC statement. No traceability
-change: the test ID stays T10.5-3 (`test/suite/registry/traceability.ts` untouched).
-
-**Verify.** `npm run typecheck` and `npm run format:check` green; `npm run test:self`
-green (self-tests + certification — this is a product-facing test body, so no
-certification fixture change is expected); after `npm run build`, the amended test runs
-and fails-as-diagnosed against the stub product:
-`npx vitest run --config test/vitest.config.ts --project suite test/suite/section-10.5.test.ts`
-(Phase 9: product tests are expected to fail; failure text must be the test's own
-diagnoses, not harness errors).
 
 ---
 

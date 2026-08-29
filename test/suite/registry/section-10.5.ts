@@ -59,6 +59,7 @@ import type {
 } from "../../helpers/adapters/index.js";
 import {
   decodeExportReport,
+  decodeImpactReport,
   decodeItemReport,
   decodeNextReport,
   decodeNodeReport,
@@ -901,7 +902,15 @@ const T10_5_2 = defineProductTest({
 
 // Top-level sections so no parent-consistency noise arises; h holds the
 // added/deleted children (its own item absorbs them via the skipping rule,
-// keeping the root unchanged).
+// keeping the root unchanged). Both halves of SPEC 10.5's note are staged
+// against the added target h.newt: dep2's only affected target enters
+// through a new `d` edge (dep2 becomes `metadata-changed`), dep3's through a
+// new `{text(...)}` embedding (dep3 becomes `changed`, SPEC 5.5/5.6 — the
+// string form resolves within the same file, TEST-SPEC T2.3-2) — neither
+// gets a `dependency-consistency` item, each change being reviewed at its
+// source. dep3 carries no `d` attribute and no other embedding, nothing
+// references or embeds dep3, and the code fixture never mentions it, so the
+// other items' expected values stay untouched.
 const N_FILE = "specs/N.mdx";
 const N_X = "specs/N.mdx#x";
 const N_Y = "specs/N.mdx#y";
@@ -910,6 +919,7 @@ const N_M2 = "specs/N.mdx#m2";
 const N_T = "specs/N.mdx#t";
 const N_DEP1 = "specs/N.mdx#dep1";
 const N_DEP2 = "specs/N.mdx#dep2";
+const N_DEP3 = "specs/N.mdx#dep3";
 const N_H = "specs/N.mdx#h";
 const N_H_GONE = "specs/N.mdx#h.gone";
 const N_H_NEWT = "specs/N.mdx#h.newt";
@@ -943,6 +953,10 @@ const N_BASELINE = [
   "",
   '<S id="dep2">',
   "Dep two text.",
+  "</S>",
+  "",
+  '<S id="dep3">',
+  "Dep three text.",
   "</S>",
   "",
   '<S id="h">',
@@ -988,6 +1002,10 @@ const N_CURRENT = [
   "Dep two text.",
   "</S>",
   "",
+  '<S id="dep3">',
+  'Dep three text. {text("h.newt")}',
+  "</S>",
+  "",
   '<S id="h">',
   "Aitch own text.",
   "",
@@ -1025,7 +1043,7 @@ const N_CODE_CURRENT = [
 const T10_5_3 = defineProductTest({
   id: "T10.5-3",
   title:
-    "metadata, dependency, and code items: one metadata-consistency item per metadata-changed node — m's d retargeting (context: the added and removed d targets), m2's coverage and tags edits (empty context; both changes described in the reason), and dep2's added d edge — one dependency-consistency item per node with a dependency edge to a both-sides target whose effectiveHash changed (dep1 against t; context: the changed target; origin: its originating node), while dep2, whose only affected target h.newt was added since the baseline, gets no dependency-consistency item — the change is reviewed at its source as dep2's own metadata-consistency item (context: the added target); and one code-impact item per impacted location with context the impact-edge targets that make it impacted, deleted (h.gone) and added (h.born) targets included, unchanged targets excluded (SPEC 5.6, 9.2, 10.5)",
+    "metadata, dependency, and code items: one metadata-consistency item per metadata-changed node — m's d retargeting (context: the added and removed d targets), m2's coverage and tags edits (empty context; both changes described in the reason), and dep2's added d edge — one dependency-consistency item per node with a dependency edge to a both-sides target whose effectiveHash changed (dep1 against t; context: the changed target; origin: its originating node), with both halves of 10.5's note staged (a new d edge makes the source metadata-changed, a new embedding makes it changed): dep2, whose only affected target h.newt was added since the baseline, gets no dependency-consistency item — the change is reviewed at its source as dep2's own metadata-consistency item (context: the added target) — and dep3, whose only affected target entered through a new {text(...)} embedding, likewise gets no dependency-consistency item — the new embedded reference changes dep3's own content, it is changed (not metadata-changed), and the change is reviewed via dep3's own subtree-coherence item; and one code-impact item per impacted location with context the impact-edge targets that make it impacted, deleted (h.gone) and added (h.born) targets included, unchanged targets excluded (SPEC 5.5, 5.6, 9.2, 10.5)",
   timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
@@ -1042,6 +1060,55 @@ const T10_5_3 = defineProductTest({
           workspace,
           `${prefix} \`build\` after the edits`,
         );
+
+        // The embedding half's category (SPEC 10.5's note): the new
+        // `{text(...)}` embedding changes dep3's own content, so dep3 is
+        // `changed` — never `metadata-changed`, embedded references
+        // surfacing through ownHash, not metadataHash (SPEC 5.5, 5.6).
+        // Asserted via the impact surface, as in T1.6-4.
+        const impactLabel = `${prefix} \`impact --base <baseline> --json\``;
+        const impact = decodeImpactReport(
+          await runJson(
+            product,
+            workspace,
+            ["impact", "--base", base, "--json"],
+            impactLabel,
+          ),
+          impactLabel,
+        );
+        const dep3Entry = impact.requirements.find((entry) =>
+          entry.nodes.includes(N_DEP3),
+        );
+        if (dep3Entry === undefined) {
+          fail(
+            `${impactLabel}: expected an entry for ${N_DEP3} — its new ` +
+              `{text(...)} embedding changed its own content (SPEC 5.5, ` +
+              `5.6); got entries for ` +
+              JSON.stringify(impact.requirements.map((entry) => entry.nodes)),
+          );
+        }
+        assertSameJson(
+          dep3Entry.nodes,
+          [N_DEP3],
+          `${impactLabel}: dep3's entry covers exactly dep3 (its category ` +
+            `is \`changed\`, so no ancestor chain collapses onto it, ` +
+            `SPEC 9.3)`,
+        );
+        assertSameJson(
+          dep3Entry.deleted,
+          false,
+          `${impactLabel}: dep3 is present on both sides of the baseline`,
+        );
+        assertSameJson(
+          dep3Entry.categories.map((category) => category.category),
+          ["changed"],
+          `${impactLabel}: a new {text(...)} embedding changes the ` +
+            `embedder's own content, so dep3's only category is \`changed\` ` +
+            `— never \`metadata-changed\`: embedded references surface ` +
+            `through ownHash, not metadataHash (SPEC 5.5, 5.6; SPEC 10.5's ` +
+            `note: "a new embedding makes it \`changed\`")`,
+        );
+
         await createBaseSession(product, workspace, base, "s", prefix);
 
         const status = await sessionStatus(product, workspace, "s", prefix);
@@ -1053,17 +1120,22 @@ const T10_5_3 = defineProductTest({
             `metadata-consistency ${N_DEP2}`,
             `metadata-consistency ${N_M}`,
             `metadata-consistency ${N_M2}`,
+            `subtree-coherence ${N_DEP3}`,
             `subtree-coherence ${N_H}`,
             `subtree-coherence ${N_T}`,
           ].sort(),
           `${prefix}: one metadata-consistency item per metadata-changed ` +
             `node (m, m2, dep2), one dependency-consistency item for dep1 ` +
-            `alone — dep2's only affected target was added since the ` +
-            `baseline, so its change is reviewed at its source — one ` +
-            `code-impact item for the impacted location, and the ` +
-            `subtree-coherence items of the changed nodes t and h (h's ` +
-            `child additions and deletion originate at h; the skipped ` +
-            `children generate no own items) (SPEC 5.6, 10.5)`,
+            `alone — dep2's and dep3's only affected target was added ` +
+            `since the baseline, so each change is reviewed at its source ` +
+            `(SPEC 10.5's note): dep2's new d edge as dep2's own ` +
+            `metadata-consistency item, dep3's new {text(...)} embedding ` +
+            `via dep3's own subtree-coherence item (dep3 is changed, so it ` +
+            `gets no metadata-consistency item either) — one code-impact ` +
+            `item for the impacted location, and the subtree-coherence ` +
+            `items of the other changed nodes t and h (h's child additions ` +
+            `and deletion originate at h; the skipped children generate no ` +
+            `own items) (SPEC 5.5, 5.6, 10.5)`,
         );
         const dcRows = status.items.filter(
           (row) => row.kind === "dependency-consistency",
@@ -1072,7 +1144,9 @@ const T10_5_3 = defineProductTest({
           fail(
             `${prefix}: exactly one dependency-consistency item exists, ` +
               `scoped at dep1 — an edge to a target added since the ` +
-              `baseline yields no such item (SPEC 10.5, 5.6); got ` +
+              `baseline yields no such item, for dep2's new d edge and ` +
+              `dep3's new {text(...)} embedding alike (SPEC 10.5's note, ` +
+              `5.6); got ` +
               JSON.stringify(dcRows.map((row) => row.scope)),
           );
         }
