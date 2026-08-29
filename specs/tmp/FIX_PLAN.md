@@ -3907,9 +3907,43 @@ certify against FP-091's fixtures once those land.
   to a no-op mutation plus bare `occurrences` with the exit-clause
   diagnosis (seed 271828183).]
 
-- [ ] FP-088 — Implement P-12: `at` ≡ view-derived resolution over every
+- [x] FP-088 — Implement P-12: `at` ≡ view-derived resolution over every
   offset; occurrence order/totality equivalence. [R2 #15; TEST-SPEC §16
   P-12]
+  [Done 2026-08-29: test/suite/registry/section-16-p12.ts (+ wrapper,
+  manifest spread, H-7 entry "P-12": ["5.7", "11.5"]). Product-vs-product
+  equivalences, no independent oracle (per CERTIFICATIONS.md's P-12
+  exclusion note): the comparator is `resolveAtFromView`, imported from
+  section-11.5.ts where T11.5-1 proves it against precomputed constants.
+  Input space: compact spec-only workspaces (1–3 files, a constant anchor
+  section `t` per file so resolving references always have a target,
+  nested sections to depth 2, multi-byte prose, imports blank-line
+  separated per the FP-094 lesson, `d` refs and embeddings in
+  resolving/maybe/never spellings), plus one optional twist — duplicate-id
+  (both bearers' identities unavailable; a resolving `d={"t"}` occurrence
+  with source explicitly unavailable, carried identically by view,
+  enumeration, and at) or break-parse (masked file: no view entry, at must
+  answer the unavailability marker at every offset). Per trial: one bare
+  `view`; `occurrences` twice (stdout byte-identical + one exit, 5.7/12.0
+  determinism); duplicate-span-freedom on both sides (5.7 "identical
+  ranges do not occur", which also makes the sort key total); enumeration
+  == view-collected records sorted by file path bytes, start, end (both
+  sides through the same form-exact 12.7 record decode); then `at` for
+  EVERY file at EVERY offset 0..byte length vs the view-derived
+  resolution; every answer exits 0/1 (no staged usage error exists).
+  9 CI-pinned trials (runs 3 × 3 default seeds, ~1470 at invocations);
+  an implementation-time dry-run over the committed seeds verified every
+  twist kind, multi-file workspaces, imports, embeddings, d props,
+  external refs, and multi-byte prose all occur, and every staged source
+  parses under remark-mdx except exactly the break-parse files (which
+  fail to parse). Verified: typecheck/format clean; `npm run test:self`
+  303 passed with the unchanged 2 planned mid-loop reds
+  (certification-document ×2 → FP-091; S-1 green with the new mapping,
+  S-7 sweep green so P-12 fails-as-diagnosed against the empty stub).
+  Against the built product P-12 falsifies immediately as a genuine
+  phase-10 red: bare `view` exits 2 ("unknown command 'view'" — the
+  product implements none of the §11 surfaces), shrinking in 5 steps to
+  the minimal one-anchor-file workspace (seed 271828183).]
 
 - [ ] FP-089 — Implement the P-13 coverage-reachability oracle (independent
   SPEC 8.1/8 reachability) + its S-6 vetted suite (vectors per SPEC 15).
