@@ -1,0 +1,590 @@
+# FIX_PLAN — Phase 10: product adherence to `specs/SPEC.md`
+
+Source: two compliance reviews of the product against SPEC.md plus a red verify run
+(142 failed / 495 passed; branch `claude/xspec-ui-apis-4df8fa`, PR #7). Goal: every
+test passes (`npm test` locally and in CI, including the Windows E-6 leg).
+
+**Rules for every task (read once per spawn):**
+
+- Phase 10: never modify the test harness (`test/`). Product code (`src/`) only.
+  Never couple product code to harness internals.
+- Respect `specs/IMPLEMENTATION.md` (three layers: pure `core`, I/O `workspace`,
+  rendering `cli`; one canonical JSON serializer; findings built as data, rendered
+  once per output form; no new runtime dependencies).
+- Work top to bottom. The stages are ordered by dependency: Stage A rebuilds the
+  SPEC 12.7 finding/error-document forms and the stable-code model — single choke
+  points that ~90 failures decode through; Stage B adds the missing command
+  surfaces; Stage C makes localized behavioral fixes. A task lists its hard
+  prerequisites; do not pick a task whose prerequisites are still in this file.
+- Build first (`npm run build`), then run the named tests:
+  `npx vitest run --config test/vitest.config.ts --project suite test/suite/<file>`
+  (see `AGENTS.md`). A task's named tests are its verification; other tests may
+  stay red until later tasks land. Before committing: `npm run typecheck` and
+  `npm run format`. Commit `sdg(phase-10): <imperative summary>`, push.
+- When a task is done, remove it from this file in the same commit. If a task
+  turns out too large for one spawn, land a coherent part, and replace the task
+  with precise remainder task(s) here. When the last task is removed, delete
+  this file.
+
+---
+
+## Stage A — SPEC 12.7 report forms and the stable-code model
+
+### A1. Rebuild the finding model into the 12.7 finding form with stable code tokens
+
+SPEC 14 (code table), 12.7 (finding value form), 12.0. The model in
+`src/core/findings.ts` carries `condition: 1..22` plus ad-hoc members
+(`correction`, `file`, `range`, `line`, `column`, `cycle`, `rule`, `edge`); the
+serializer `findingToJson` (`src/cli/report.ts`) emits `{"condition":"14.N",...}`.
+Required observable form: `{"code", "message", "locations", "path", "identities"}`
+— exactly these five members, `null` never omitted, empty lists `[]`.
+
+- Extend the condition table to 23 entries with the SPEC 14 tokens as string
+  codes: `missing-id`, `invalid-structural-id`, `duplicate-id`,
+  `invalid-segment-or-tag`, `unknown-dependency`, `unknown-text-target`,
+  `unknown-ts-reference`, `invalid-argument`, `cycle`, `stale-output`,
+  `cross-module-text`, `policy-violation`, `journal-error`,
+  `configuration-error`, `invalid-import`, `invalid-construct`, `invalid-prop`,
+  `unsupported-node-usage`, `invalid-source-path`, `unparseable-source`,
+  `corrupt-session`, `obstructed-write-path` (rename condition 22 from the
+  current "symbolic link in a write path" — behavioral widening is task C3),
+  `unreadable-record` (new condition 23, SPEC 14.23). Add the nine refusal-reason
+  tokens in SPEC 14's listed order (used from task B8 on): `refused-invalid-id`,
+  `refused-identity-unchanged`, `refused-id-collision`,
+  `refused-structural-parent`, `refused-unresolvable-reference`, `refused-cycle`,
+  `refused-destination-exists`, `refused-missing-target-parent`,
+  `refused-invalid-destination`. Keep an internal ordinal per code for sorting
+  (numbered conditions 1–23, then refusal reasons in listed order, then
+  code-less) and the exit class; the emitted `code` is the token string, or
+  `null` for code-less findings (10.7 review refusals — task A5).
+- Model members: `message` (fold the current `correction` into it — SPEC 14
+  actionability lives in the message); `locations` — ordered list of
+  `{file, range}`, one per offending construct, empty for conditions without
+  in-source locations; `path` — the concerned file or path for non-located
+  conditions, `null` for located ones; `identities` — list of context strings,
+  empty where none. Content of `identities` is contractual only where 14 states
+  it: condition 12 carries, in order, the violated rule's name, the edge's
+  source identity, its kind token (`"depends"`/`"embeds"`/`"references"`, 12.7),
+  and its target identity, with `locations` empty and `path` null (fold the
+  current `rule`/`edge` members in here); condition 11's foreign module is
+  identity data, not a location.
+- Port every construction site (≈40 across `src/core/*` and `src/workspace/*`)
+  mechanically: today's single `file`+`range` becomes a one-element `locations`;
+  a concerned-path-style `file` without range (conditions 13, 14, 19, 21, 22,
+  10's unit form) becomes `path`. Conditions that locate in source must carry
+  byte ranges (SPEC 14, 1.7): convert condition-20 parse-failure locations from
+  `line`/`column` to the failure's byte range (remark-mdx and the TS compiler
+  both expose offsets); drop `line`/`column` entirely. The legacy `cycle`
+  member: keep the cycle path in `identities` for now — cycle-as-locations is
+  task A3.
+- Update the JSON serializer to emit exactly the five-member form and the human
+  renderer (`renderFindingsHuman`, `renderFindingLine`) to present the same
+  information (code token, every location, concerned path) — SPEC 14 last
+  paragraph, 12.0.
+
+Verify: `section-16-p1.test.ts` (P-1, seed 271828183 fails today at
+`$.findings[0].condition: expected no member "condition"`), `section-14.test.ts`
+T14-1..6 arms, `section-7*.test.ts` T7.1-1/T7.5-2..6, T12.1-4, T12.2-2/3.
+
+### A2. Findings-array ordering, duplicate collapse, and the marked byte-form path
+
+SPEC 12.7 (ordering and collapse), 12.0 (marked byte form). Prereq A1. Implement
+one ordering/dedup function applied by every findings emitter
+(`src/cli/report.ts`), and one path-value renderer shared by all JSON output:
+
+- Order `"findings"` by: code ordinal (numbered conditions in numeric order,
+  then refusal reasons in 14's listed order, then code-less findings); then
+  `locations` element-wise — each element by file path bytes, then range start,
+  then range end; a sequence that is a proper prefix of another sorts first;
+  then `path` (`null` before any path; paths compare byte-wise whatever their
+  presentation form); then `identities` element-wise under the same prefix rule
+  (string elements byte-wise); then `message`. Findings identical in every
+  member collapse to one.
+- Path value form (12.7): a path whose bytes are valid UTF-8 is a string;
+  otherwise the marked byte form `{"bytes": "<lowercase hex, two digits per
+  byte>"}` — used wherever a JSON output carries a workspace-relative path
+  (finding `locations[].file` and `path` now; the 11.3–11.6 surfaces reuse it in
+  Stage B). This needs the internal path representation at finding sites to
+  preserve raw bytes for non-UTF-8 discovered paths (14.19) rather than a lossy
+  string — choose conservatively (e.g. carry bytes alongside the string) and
+  note the choice.
+
+Verify: T12.7-1/2 (`section-12.7.test.ts`), T14 ordering/collapse arms, P-7.
+
+### A3. Multi-location cardinality for jointly-violated conditions
+
+SPEC 14 (location-cardinality paragraph). Prereq A1. One finding carries a
+location for every participating construct — no representative:
+
+- Condition 3 (duplicate ID): one finding per duplicated identity locating every
+  bearer (`src/core/spec-references.ts` / structure validation).
+- Condition 15 import-binding collision: locate every colliding declaration.
+- Condition 9 (cycle): locate the full path in source — a dependency cycle by
+  every reference spelling recording a participating dependency edge, a spec
+  import cycle by each participating import declaration — `path` null; the cycle
+  is locations now, not `identities` (replace A1's interim). Producer:
+  `src/core/graph.ts` cycle detection must map edges back to spellings.
+- A reference spelling of the MDX embedding form that records no occurrence
+  (unknown target / invalid argument, 14.5–14.8): the finding's range is the
+  full braced container, opening brace through closing brace
+  (`SpecEmbedding.range` in `src/core/mdx.ts` already holds it) — not the inner
+  expression.
+
+Verify: T14-8 (`section-14.test.ts`), T7.5 arms.
+
+### A4. Exit-2 JSON error document
+
+SPEC 12.0 (JSON-in-effect rule), 12.7 (error document), 14.14. Prereq A1. Today
+every exit-2 outcome leaves stdout empty (`src/cli/main.ts` usage path;
+`emitConfigurationErrors` in `src/cli/report.ts` writes stderr only). Required:
+
+- JSON output is in effect exactly when `--json` appears among the invocation's
+  arguments — even when the arguments are themselves the error: unknown command,
+  unknown flag, malformed value — or when the invoked surface is JSON-only
+  (`query`, `occurrences`, `view`, `at`, `inventory` (11), `version` (12.6),
+  `review export` (10.7)). When in effect, an exit-2 usage or configuration
+  error emits as its entire stdout the single document `{"error": <finding
+  form>}` (one five-member finding form, 12.7). Stderr diagnostics and exit
+  codes are unchanged; without JSON in effect stdout stays empty.
+- Plain usage error: `code` and `path` null (no stable code — 14).
+- Configuration error (14.14): `code` `"configuration-error"`; `path` is the
+  concerned path in the anchoring form of 11.6, relative to the invocation
+  working directory — the configuration file the upward search found or
+  `--config` named (canonical `..`-ascend/descend `/`-joined spelling), or `.`
+  when the upward search failed with no `--config`. One invocation reports one
+  error: a configuration file with several defects is a single condition-14
+  finding with a deterministic message. Implement the cwd→path anchoring
+  spelling as a shared helper (`inventory`, task B7, reuses it).
+
+Verify: T12.0-1..6 arms (`section-12.0*.test.ts`), ~25 tests across sections
+7–13 that exercise exit-2 under `--json`.
+
+### A5. Review-operation refusals report as code-less findings
+
+SPEC 10.7, 12.7, 14 ("review-operation refusals likewise carry none"). Prereq
+A1. `emitReviewRefusal` (`src/cli/commands/review-session.ts:789`) emits
+`{"refused": {"command", "message"}}` / ad-hoc text. Required: a refused review
+operation (`split` on a wrong-kind or childless item, `resolve` on a blocked
+item, `create` with an existing name) is a findings-class outcome whose report
+is `{"findings": [...]}` — one finding, `code` null, `locations` empty,
+`identities` per 14 (informational), exit 1, nothing modified; human form the
+same information.
+
+Verify: T10.3-1, T10.7 refusal arms (`section-10*.test.ts`).
+
+### A6. `rename`/`move` success report is the applied mapping
+
+SPEC 6.4 ("A successful rename's report is the applied mapping … the
+information of the preview's `mapping` (6.6), carried in JSON per 12.0"), 6.5
+(move "reports its applied mapping, as rename does"). Today both emit
+`{"findings":[]}` (JSON) / nothing (human) — verify run: "missing `mapping` key".
+Report the complete identity mapping the operation journaled: JSON carries a
+`mapping` member of `{"from", "to"}` entries ordered by `from` bytes (the
+preview `mapping` form of 12.7); human output lists the same mapping. Files:
+`src/cli/commands/rename.ts`, `src/cli/commands/move.ts`.
+
+Verify: T6.4-1, T6.5-1 success arms (`section-6.4.test.ts`,
+`section-6.5*.test.ts`).
+
+---
+
+## Stage B — missing command surfaces (patch 0001)
+
+### B1. `xspec version`
+
+SPEC 12.6, 12.7, 12.0. Not in the command table (`src/cli/args.ts` `COMMANDS`);
+exits 2 unknown-command today. Add the command and handler (`src/cli/main.ts`):
+
+- JSON-only: `{"product": <string>, "interface": "1"}` is its only output form,
+  with or without `--json`. Interface is exactly the string `"1"`. Product
+  version fixed per build (read from the package's own metadata at build or
+  startup — byte-deterministic, no environment-dependent content).
+- Loads no configuration and consults no workspace: `--config` accepted, not
+  consulted; identical output in any working directory, missing/invalid
+  configuration included — configuration-error precedence (14.14) never reaches
+  it. Usage errors (unknown flag) keep exit 2 and, being a JSON-only surface,
+  emit the A4 error document.
+
+Verify: T12.6-1/2 (`section-12.6.test.ts`), T12.0-9 arm; unblocks the Windows CI
+leg's leading edge (E-6).
+
+### B2. Record reference occurrences in core analysis and graph data
+
+SPEC 5.7, 13.3, 12.7 (occurrence record form), 11.2 (existence/source-datum
+rules). No occurrence concept exists in `src/`. In `core`, compute and carry,
+and in graph data persist, reference occurrences:
+
+- One occurrence per textual spelling of a dependency-kind reference whose
+  target resolves: each `d` array entry separately; each MDX `{text(...)}`
+  embedding; each TS `text(...)` call; each TS dependency marker. Duplicates
+  collapsing to one edge remain distinct occurrences. Constructs recording no
+  edge record none (imports, type-only bindings, shadowed chains, dynamic or
+  unresolving spellings).
+- Record: referencing file; own range — exact per kind: a `d` entry's own
+  expression; an MDX embedding the entire braced container, opening through
+  closing brace (`SpecEmbedding.range`, `src/core/mdx.ts`, already holds it); a
+  TS `text(...)` occurrence the entire call expression, callee through closing
+  parenthesis (record this span in `src/core/code-analysis.ts` — today only the
+  argument chain's span exists); a marker the bare chain, terminator excluded
+  (`CodeReference.range` holds it) — edge kind; source graph node as one datum
+  (identity plus that node's own range; explicitly unavailable when 11.2 leaves
+  the containing node's identity undefined — representable now, consumed by
+  Stage B surfaces); resolved target's identity.
+- Total order: referencing file path bytes, then range start, then range end.
+- Persist in graph data (`src/core/graph-data.ts` stored shape,
+  `src/core/graph.ts`) so 13.3's "graph data contains … reference occurrences"
+  holds and refresh round-trips them byte-deterministically.
+
+Verify: T5.7-1..4 (`section-5.7.test.ts`) via the Stage B surfaces; T13.3-1/2
+arms once B4 lands.
+
+### B3. Compute code-location source ranges
+
+SPEC 1.7 (code-location ranges), 4.6. `CodeUnit` (`src/core/code-analysis.ts`),
+`CodeLocationNode` (`src/core/graph.ts`), and `StoredCodeLocation`
+(`src/core/graph-data.ts`) carry no range. Compute and store one per code
+location: whole-file = the entire file; named unit = the construct binding its
+name — a function/class-valued variable declaration's unit spans its own name
+through its initializer (not the multi-declaration statement); the nested units
+of a dotted namespace name all share the single namespace declaration's range; a
+named default export takes the exported construct's range, an anonymous one's
+`default` unit the whole export declaration; `path#unit@N` takes its own
+occurrence's construct. Presentation stays confined to exactly two outputs —
+occurrence records (B2/B4) and review payloads (C6); everywhere else a code
+location remains a bare identity (query edges/reachable unchanged).
+
+Verify: T1.7-2 (`section-1.7.test.ts`) once B4/C6 expose the ranges.
+
+### B4. `xspec occurrences` and the shared 11.2 availability layer
+
+SPEC 11.3, 11.2, 12.7. Prereqs A1–A4, B2. Register the command (JSON-only) and
+build the per-file availability machinery in `core` (not in the command file —
+`view`/`at` reuse it):
+
+- Document `{"findings", "occurrences"}`: records in occurrence order, each in
+  the 12.7 record form `{"file", "range", "kind", "source", "target"}`, `source`
+  `{"identity", "range"}` or `{"unavailable": true}` per 11.2.
+- `--file <glob>`: set restriction over discovered sources (spec and code) under
+  the glob rules of 7; a pattern resolving outside the workspace root is an
+  invalid flag value (exit 2); a glob admitting nothing yields
+  `{"findings": [], "occurrences": []}` exit 0 — no unknown-file error exists on
+  this filter. Without it, the domain is the entire discovered set.
+- `--to <node>`: acceptance is syntactic only — well-formed iff at most one `#`,
+  non-empty path part, and any post-`#` part is one or more non-empty
+  `.`-joined segments each satisfying 1.4; malformed = usage error exit 2;
+  unknown or unresolving selects nothing (the 12.0 exit-class exception).
+  Filters combine conjunctively.
+- 11.2 contract (shared machinery): the consulted domain's findings accompany
+  the answer — a finding belongs to a domain file when one of its locations lies
+  in it or it is the concerned path; a cross-file cycle accompanies whole when
+  any participant is in the domain. Any finding or explicitly-unavailable datum
+  in the answer → exit 1 with the full document still emitted; complete and
+  finding-free → exit 0. Argument checks precede answering (exit 2 whatever the
+  workspace carries). On a workspace passing `build`'s validations these
+  surfaces join the read-time refresh of 13.3; on a failing one they answer from
+  current sources and write nothing — journal (14.13) and write-path (14.22)
+  gate findings, being no domain file's findings, never accompany the answer.
+
+Verify: T11.3-1..4 (`section-11.3.test.ts`), T11.2-1/3/5/6 arms
+(`section-11.2.test.ts`), T13.3-1/2, P-11.
+
+### B5. `xspec view`
+
+SPEC 11.4, 11.2, 12.7. Prereqs B2, B4 (availability layer). Register the command
+(JSON-only). Document `{"findings", "views"}`, one
+`{"file", "root", "imports", "occurrences", "comments"}` per parseable requested
+file ordered by path bytes:
+
+- Operands vs. flag: `<file>` operands assert membership — a file outside the
+  discovered set is unknown (exit 2), a discovered code source is a wrong-kind
+  operand (exit 2); a `#`-containing operand is a whole path, never a
+  `path#id` split. `--file <glob>` is a set restriction (empty admitted set →
+  empty finding-free answer, exit 0). Combining operands with `--file` is a
+  usage error. Neither → every discovered spec source. An unparseable requested
+  file contributes no view entry (its parse finding accompanies, exit 1); an
+  invalid-path (14.19) file keeps its view, every identity unavailable,
+  condition-19 finding accompanying.
+- Node form `{"identity", "range", "opening", "closing", "attributes", "tags",
+  "coverage", "children"}` plus `"ownText"`/`"subtreeText"` exactly when
+  `--text`. Positional tree by construct nesting alone (a section inside a
+  non-section construct parents to the innermost enclosing section, else root).
+  `opening`/`closing`: tag ranges — self-closing has opening only, root neither
+  (null). `attributes`: one `{"name", "range", "text"}` per spelled attribute in
+  tag order — repeated/unknown/spread included, spread `name` null, `text` the
+  attribute's own characters. `identity`, `tags`, `coverage`, text members:
+  plain value, null where 11.4 defines structural absence (a root's
+  tags/coverage — absent, never unavailable), or `{"unavailable": true}` per
+  11.2 (spelled-identity rules; interpreted tags/coverage undefined on
+  repeated/malformed props; text all-or-nothing over transitive expansion,
+  unavailable on any unresolved spelling or embedding cycle on the path).
+- With `--text` the consulted domain adds every file the requested expansions
+  transitively consult (resolved targets reachable through occurrence-recording
+  embeddings, cycle participants included); a spelling recording no occurrence
+  is an expansion boundary; a masked file is consulted only when itself
+  requested.
+- `imports`: every declaration, valid or invalid, `{"range", "name", "target"}`
+  in document order — `name` the default-binding identifier or null (absent,
+  never unavailable), `target` the resolved file or `{"unavailable": true}`.
+  `occurrences`: the file's records in document order. `comments`: every MDX
+  comment's range.
+
+Verify: T11.4-1..6 (`section-11.4.test.ts`), T11.2-2/4, P-12.
+
+### B6. `xspec at`
+
+SPEC 11.5, 12.7. Prereqs B2, B4. Register (JSON-only). Document
+`{"findings", "resolution"}`; `resolution` `{"section", "occurrence"}` or
+`{"unavailable": true}` (unparseable file — parse finding accompanies, exit 1):
+
+- `<file>` asserts membership exactly as a `view` operand (unknown / wrong-kind
+  → exit 2). `<offset>` must be one or more ASCII decimal digits, read decimal,
+  leading zeros permitted — sign, whitespace, or any other character is a usage
+  error; an offset greater than the file's byte length is a usage error; equal
+  resolves to the root.
+- `section`: `{"identity", "range"}` of the innermost section construct whose
+  range contains the offset (root when none — resolution is total over the
+  file), identity per 11.2. `occurrence`: the containing occurrence's full
+  record, `null` when the offset lies in none.
+
+Verify: T11.5-1..3 (`section-11.5.test.ts`), P-12.
+
+### B7. `xspec inventory`
+
+SPEC 11.6, 12.7, 14.23. Prereqs A1–A4 (anchoring helper from A4). Register
+(JSON-only). Parses no sources, never refreshes or writes, answers whatever the
+sources' validity; configuration errors keep precedence. Document
+`{"findings", "root", "config", "configuration", "sources", "derived",
+"recorded", "graphData", "journal", "sessions"}`:
+
+- Anchoring: `root`/`config` relative to the invocation cwd in the canonical
+  spelling (ascend `..` segments, then descend, `/`-joined, no `.` segments or
+  trailing separator; cwd itself `.`); only when the platform admits no relative
+  path (different Windows drives) the platform's absolute drive-qualified form.
+- `configuration` resolved view with every default and inferred kind explicit:
+  `specs`/`code` one `{"name", "globs"}` per group; `markdown`
+  `{"emit", "outDir"}` (absent key → `{"emit": false, "outDir": null}`);
+  `coverage` one `{"name", "target", "targetTags", "targets", "boundary",
+  "boundaryKind", "mode", "edgeKinds"}` per profile (`targetTags` null when
+  absent); `policy` one `{"name", "type", "from", "to", "kinds"}` per rule, each
+  selector `{"group", "kind"}`, `{"files"}`, or `{"tags"}`.
+- `sources`: one `{"path", "groups"}` per discovered file, `groups`
+  `{"name", "kind"}` entries. `derived`: one `{"source", "module", "markdown"}`
+  per discovered spec source — `module`/`markdown` null for a spec-group file
+  without `.mdx`; `markdown` null also while emission is disabled.
+- `recorded`: the recorded derived-file paths in byte order — empty before any
+  generation (a missing store is an empty record here), but recorded state that
+  exists and cannot be read as a record is condition 23: `recorded` is
+  `{"unavailable": true}`, a finding with code `unreadable-record` and concerned
+  path `.xspec` accompanies, exit 1, everything else emitted in full. Implement
+  the record read with a three-way outcome (absent / readable / unreadable) as a
+  shared helper — the preview delta (B10) and Stage C reuse it. This is the only
+  finding an inventory ever carries.
+- `graphData`: `.xspec` (workspace-relative, no trailing separator). `journal`:
+  `{"path", "occupied"}` — occupancy is presence of anything at the path, no
+  content read. `sessions`: every directory entry under the review-session
+  directory whose name is a well-formed session file name, by name alone,
+  whatever occupies it, in byte order of file name. Other lists: paths byte
+  order; groups/profiles/rules configuration order.
+
+Verify: T11.6-2..4 (`section-11.6.test.ts`; T11.6-1's drive-mismatch arm is
+Windows-only, `test/windows/e6-drive-mismatch.test.ts`).
+
+### B8. `rename`/`move` refusal contract: every reason, stable codes, 12.7 form
+
+SPEC 14 (refusal-reason paragraph), 6.4, 6.5, 12.7. Prereqs A1–A2 (codes/form),
+B2 (spelling spans for locations). Replace the ad-hoc first-failure refusals
+(`emitRefusal` in `src/cli/commands/rename.ts` and `move.ts`, emitting
+`{"refused": …}`) with the findings report `{"findings": [...]}` (exit 1):
+
+- Evaluate and report every applicable reason together, one finding per reason,
+  each reason on its own terms — e.g. an occupied non-spec-source `.mdx` target
+  outside every spec group reports both `refused-destination-exists` and
+  `refused-invalid-destination` (`sectionDestinationProblem` returns one problem
+  today).
+- Per-reason content under the cardinality rule: `refused-invalid-id` /
+  `refused-identity-unchanged` / `refused-structural-parent` /
+  `refused-missing-target-parent` concern the stated identity (in
+  `identities`); `refused-id-collision` locates every colliding bearer;
+  `refused-unresolvable-reference` locates each rewritten reference spelling
+  that would not resolve; `refused-cycle` locates the would-be cycle's full
+  in-source path; `refused-destination-exists` / `refused-invalid-destination`
+  concern the destination/target path (`path` member). Would-be cycles and
+  unresolvable references must surface as these refusal codes — today they leak
+  out of in-memory reanalysis as numbered conditions.
+- `refused-invalid-destination` also covers a workspace-relative directory
+  component of the destination path or of a derived path it would generate
+  occupied by anything other than a directory (`symlinkComponentOf` in
+  `src/workspace/writes.ts` checks symlinks only; a plain-file component
+  currently crashes mid-write) — check destination-side components up front.
+- The invalid-workspace refusal reports the workspace's numbered findings alone;
+  no report ever mixes refusal reasons with numbered conditions. Refusal
+  evaluation must be shared with `--preview` (B9) — same findings, codes, exit.
+
+Verify: T6.4-1/3 (`section-6.4.test.ts`), T6.5-1/3/4/6 (`section-6.5*.test.ts`),
+T14-7 (`section-14.test.ts`).
+
+### B9. `--preview` for `rename`/`move`: plan surface (mapping + files/edits)
+
+SPEC 6.6, 12.7, 13.5. Prereqs B2, B8. `--preview` is not in the command table
+(exit 2 unknown flag today). Full validation and planning, zero modification (no
+sources, journal, derived files, or graph data touched):
+
+- Non-mutating under 13.5: acquires no workspace exclusivity; `--test-hold`
+  together with `--preview` is a usage error (exit 2). Byte-deterministic.
+- Document `{"findings", "mapping", "files", "delta"}` (delta itself is B10 —
+  emit it as the record-based value or land B9+B10 together if inseparable).
+  `mapping`: `{"from", "to"}` per mapped identity, by `from` bytes. `files`: one
+  `{"file", "edits"}` per file the operation would rewrite, relocate, or create,
+  by path bytes — `file` the pre-operation path (for target-file creation, the
+  path the creation would occupy); edits `{"class", "range"}` ordered by range
+  start, end, class-name bytes; classes exactly `"reference-rewrite"`,
+  `"id-rewrite"`, `"import-specifier-rewrite"`, `"import-addition"`,
+  `"import-removal"`, `"origin-deletion"`, `"target-insertion"`,
+  `"target-parent-rewrite"`, `"file-relocation"`, `"file-creation"`.
+- Exact pre-operation ranges: a rewrite spans the construct it rewrites (a
+  reference occurrence's 5.7 span; the `id` attribute's own characters; the
+  import specifier literal; the target parent's self-closing tag); a removal
+  spans every byte removed — origin-deletion extends over each line the
+  line-drop rule additionally drops (contiguous leftover whitespace +
+  terminator), as does import-removal; import-addition, target-insertion, and
+  file-creation are zero-length insertion points (file-creation at the new
+  file's start — the one location without pre-operation coordinates, the created
+  file's only edit, subsuming its entire initial content); file-relocation spans
+  the entire moved file. Ranges may nest. No replacement text anywhere.
+- Refusal equivalence: refused exactly when the real operation would be, same
+  findings/codes/exit (shared evaluation from B8); the refused document keeps
+  the preview form with `mapping`, `files`, `delta` null.
+- Refactor so the real operation and the preview share one plan: in a
+  pre-existing file the real import-addition offset must equal the preview's
+  (6.5).
+
+Verify: T6.6-2..5 (`section-6.6*.test.ts`), T12.7-3.
+
+### B10. Preview derived-file delta and the condition-23 outcome
+
+SPEC 6.6 (delta), 14.23, 12.7. Prereqs B9, B7 (shared record reader). `delta` is
+`{"generated", "removed"}`, both directions one datum, paths in byte order:
+derived paths the operation would newly generate (nothing currently recorded
+there) and recorded derived paths left no longer generated (the pre-move module
+path after a file move included). Both directions consult the recorded
+derived-file paths; a preview never refreshes the record. Unreadable record →
+`delta` is `{"unavailable": true}` as one datum, an `unreadable-record` finding
+(concerned path `.xspec`) accompanies, exit 1, the rest of the preview emitted
+in full; the real operation is not refused in that state. A refused preview
+consults no record — never a condition-23 finding beside a refusal.
+
+Verify: T6.6-6 arms (`section-6.6*.test.ts`).
+
+---
+
+## Stage C — localized behavioral fixes
+
+### C1. Move operand classification is by spelling, at exit 2
+
+SPEC 6.5 (operand classification), 12.0 (`#` split, UTF-8 arguments). Three
+misroutes in `src/cli/commands/move.ts` / `src/cli/args.ts`, all currently exit
+1 refusals, all usage errors (exit 2):
+
+- An invocation mixing the two synopses' forms (one operand containing `#`, the
+  other not — e.g. file-form origin with a `#`-containing destination) matches
+  neither synopsis: usage error, never `fileDestinationProblem`.
+- A non-UTF-8 operand value is a usage error: remove move's
+  `utf8ExemptPositionals` exemption in `parseArgv` (`src/cli/args.ts` ~451) —
+  no argument value may name a non-UTF-8 path (12.0).
+- An operand with more than one `#` is a malformed value: usage error in
+  `parseMoveArgument`, never an invalid-ID refusal.
+
+Verify: T6.5-5 (`section-6.5*.test.ts`).
+
+### C2. Argument checks precede the invalid-workspace gate on gated reads
+
+SPEC 12.0 (precedence bullet), 13.3. On a workspace failing `build`'s
+validations, `ids`/`show`/`coverage`/`impact`/`review`/`query` currently emit
+the gate report (exit 1) before argument checks. Required: each argument check
+runs first, judged from what it consults, identically on valid and failing
+workspaces — a profile/group name against configuration, a session name against
+the session directory, a requirement- or graph-node identity parse-local against
+the named file (a discovered path of the identity's kind; an `id` over the
+file's spelled identities; a code unit over the file's named units), an
+unparseable named file masking the check (gate report, exit 1). So
+`show docs/none.mdx#x` (unknown file) and `query node specs/A.mdx#nope`
+(unknown id in a parseable file) exit 2 on a failing workspace. Item IDs stay
+behind the gate (judged against session content, which gated commands do not
+read there). Files: gate sequencing in `src/workspace/pipeline.ts` and the
+command handlers under `src/cli/commands/`.
+
+Verify: T12.0-10 (`section-12.0*.test.ts`).
+
+### C3. Obstructed write path: any non-directory component, refused before modifying
+
+SPEC 13.4, 14.22. Prereq A1 (token `obstructed-write-path`).
+`symlinkComponentOf` (`src/workspace/writes.ts` ~108) detects symlink components
+only; a plain-file component flows through — `build` modifies files, then
+crashes ENOTDIR exit 70. Required: a workspace-relative directory component of
+any path xspec writes occupied by anything other than a directory (plain file,
+symlink whatever it targets, any non-directory) refuses the write, reported as
+condition 22 before anything is modified; `check` reports it without writing.
+One finding per distinct offending component, concerned path the component's
+workspace-relative path, however many write paths it refuses. An occupant at a
+derived file's own path stays a replacement, not an error; a durable file's own
+path holding a non-plain-file stays 14.13/14.21; a move's destination-side
+component stays `refused-invalid-destination` (B8), never condition 22.
+
+Verify: P-8 (`section-16-p8.test.ts` or the P-8 registry file), T13.4 arms
+(`section-13.4*.test.ts`).
+
+### C4. Unreadable recorded state persists; `check` reports the exclusive unit form
+
+SPEC 13.3, 14.23, 14.10. Prereq A1 (condition 23), B7 (shared record reader).
+Today `graphDataMatchesCurrent`/`refreshedGraphData`
+(`src/core/graph-data.ts` ~229–280) treat a malformed store as an ordinary
+mismatch and fabricate a fresh record: after corrupting `.xspec/graph.json`,
+`ids` exits 0 and rewrites the store, and `check` then exits 0. Required:
+
+- Refreshing reads (`ids`, `show`, `coverage`, `impact`, `review`, `query`,
+  `occurrences`, `view`, `at`) never consult, repair, or replace recorded state
+  that exists but cannot be read as a record, and report no finding for it: they
+  answer from current analysis, leave the store byte-for-byte, and the state
+  persists until a successful `build` (which replaces it silently) or a
+  `rename`/`move` finishing regeneration.
+- `check` reports the state as staleness (14.10): the unreadable-record unit
+  form — one condition-10 (`stale-output`) finding instructing rebuilding,
+  concerned path the graph-data area — exclusive with the mismatch unit form
+  (never both), and while it holds the recorded-file per-file form (a recorded
+  derived path no longer generated), consulting no readable record, is
+  undetectable and not reported; the other per-file forms report normally.
+
+Verify: T13.3-3 (`section-13.3*.test.ts`), T12.2 arms.
+
+### C5. 14.10 unit-form findings concern the graph-data area
+
+SPEC 14.10, 11.6. The graph-data staleness finding names `.xspec/graph.json`
+(`stalenessFindings`, `src/workspace/check.ts` ~132). Required: both unit forms'
+concerned path is the graph-data area itself — `.xspec`, the 11.6 spelling, no
+trailing separator — never any path inside it (the record's layout is
+unenumerated, 13.3).
+
+Verify: T12.2-2/3 arms (`section-12.2*.test.ts`), T14 arms.
+
+### C6. Review payloads carry source ranges for every present node
+
+SPEC 10.7 (`next --json`, `show`, `export` payload). Prereq B3 (code-location
+ranges). `nodeStateJson` (`src/cli/commands/review-session.ts`) returns present
+code locations as identity+presence only, and `originEntryJson` carries no
+range. Required: every present scope, context, and origin node — requirement
+node and code location alike — carries its source range (1.7), read from the
+current graph; an absent node carries none.
+
+Verify: T10.7-7, T10.7-12 (`section-10.7*.test.ts`).
+
+### C7. Full-suite verification sweep
+
+Prereq: all tasks above removed. Run `npm run typecheck`, `npm run format:check`,
+`npm run build`, `npm test` (Linux full suite) — every test must pass. Push and
+confirm the branch-head CI runs: harness-self, full suite (Linux), and the
+Windows E-6 leg (its byte-identity test consumes the Linux run's exchange
+artifact; see `AGENTS.md`). Diagnose any residual failure against SPEC.md
+(property seeds are replayable: `XSPEC_PROPERTY_SEED=<seed from the failure>`);
+fix small residues directly, or append precise tasks here for anything larger.
+Product green + this file emptied ends the phase (delete this file when its last
+task is removed).
