@@ -550,14 +550,16 @@ function absentNodeText(
 
 /**
  * One payload node (SPEC 10.7): identity, presence, the role's text, and —
- * for a present requirement node — its source range (1.7). The stored
+ * for a present graph node, requirement node and code location alike — its
+ * source range (1.7: review payloads are one of the two range-presenting
+ * outputs for code locations), read from the current graph. The stored
  * canonical reference surfaces as its derived current spelling (SPEC 10.4:
  * every recorded node presented under its current identity), while
  * presence is judged by canonical resolution (10.4): a dangling reference
  * — its identity ceased to resolve through the journal — presents absent,
  * with no source range and the absent-node text rule, even though its
  * presented spelling matches the distinct node that recaptured it. A code
- * location (`selection === "code"`) enters as identity and presence alone.
+ * location (`selection === "code"`) carries no text value either way.
  */
 function nodeStateJson(
   view: SessionReadView,
@@ -570,11 +572,20 @@ function nodeStateJson(
     reference,
   );
   if (selection === "code") {
-    return {
-      node: spelling,
-      present:
-        resolves && view.analysis.graph.codeLocation(spelling) !== undefined,
-    };
+    const location = resolves
+      ? view.analysis.graph.codeLocation(spelling)
+      : undefined;
+    if (location !== undefined) {
+      // SPEC 10.7/1.7: a present code location enters as identity,
+      // presence, and its source range — the construct binding the unit's
+      // name (4.6), the entire file for a whole-file location — no text.
+      return {
+        node: spelling,
+        present: true,
+        sourceRange: rangeJson(location.range),
+      };
+    }
+    return { node: spelling, present: false };
   }
   const node = resolves
     ? view.analysis.graph.requirementNode(spelling)
@@ -605,7 +616,10 @@ function nodeStateJson(
  * the absent side of the pair is presented absent, with no text. The after
  * side's presence is judged by canonical resolution (SPEC 10.4): a
  * dangling reference presents absent even though its presented spelling
- * matches the distinct node that recaptured it.
+ * matches the distinct node that recaptured it. Like every payload node, a
+ * currently-present origin node carries its current source range on the
+ * entry (SPEC 10.7, 1.7) — the after side is the current graph's, so a
+ * currently-absent node (absent after side) carries none.
  */
 function originEntryJson(
   view: SessionReadView,
@@ -624,14 +638,18 @@ function originEntryJson(
   const node = resolves
     ? view.analysis.graph.requirementNode(spelling)
     : undefined;
-  const after: JsonObject =
-    node === undefined
-      ? { present: false }
-      : {
-          present: true,
-          text: view.analysis.textModel.ownText(node.document, node.section),
-        };
-  return { node: spelling, before, after };
+  if (node === undefined) {
+    return { node: spelling, before, after: { present: false } };
+  }
+  return {
+    node: spelling,
+    before,
+    after: {
+      present: true,
+      text: view.analysis.textModel.ownText(node.document, node.section),
+    },
+    sourceRange: rangeJson(node.section.range),
+  };
 }
 
 /**
@@ -723,6 +741,11 @@ function renderNodeStateHuman(label: string, state: JsonObject): string {
 /** One origin before/after pair as human lines (SPEC 10.7). */
 function renderOriginHuman(entry: JsonObject): string {
   let out = `  - ${String(entry["node"])}\n`;
+  const range = entry["sourceRange"];
+  if (range !== undefined) {
+    const rangeObject = range as JsonObject;
+    out += `    range: ${String(rangeObject["start"])}-${String(rangeObject["end"])}\n`;
+  }
   for (const side of ["before", "after"] as const) {
     const sideObject = entry[side] as JsonObject;
     const present = sideObject["present"] === true;

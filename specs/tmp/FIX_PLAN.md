@@ -372,16 +372,13 @@ finding, concerned path `GRAPH_DATA_AREA` (`.xspec`), locations empty,
 covering missing and mismatch as one form beside C4's unreadable arm.
 Section-12.1-12.2, section-13.3, and section-14 files all green.)
 
-### C6. Review payloads carry source ranges for every present node
-
-SPEC 10.7 (`next --json`, `show`, `export` payload). Prereq B3 (code-location
-ranges). `nodeStateJson` (`src/cli/commands/review-session.ts`) returns present
-code locations as identity+presence only, and `originEntryJson` carries no
-range. Required: every present scope, context, and origin node — requirement
-node and code location alike — carries its source range (1.7), read from the
-current graph; an absent node carries none.
-
-Verify: T10.7-7, T10.7-12 (`section-10.7*.test.ts`).
+(C6 landed: review payloads carry source ranges for every present node —
+`nodeStateJson` (`src/cli/commands/review-session.ts`) presents a present
+code-location scope as identity + presence + `sourceRange`
+(`CodeLocationNode.range`, B3), and `originEntryJson` puts a
+currently-present origin node's `sourceRange` on the entry itself (the
+after side is the current graph's; a currently-absent node carries none).
+Section-10.7 files, 1.6-1.7, and 10.2-10.3 all green.)
 
 ### C7. Full-suite verification sweep
 
