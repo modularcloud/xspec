@@ -41,7 +41,7 @@ import type { LoadedWorkspace } from "./config.js";
 import { loadGraphData, writeGraphData } from "./graph-data.js";
 import type { WorkspaceAnalysis } from "./pipeline.js";
 import { analyzeWorkspace, workspaceInputsOf } from "./pipeline.js";
-import { symlinkWritePathFindings } from "./writes.js";
+import { obstructedWritePathFindings } from "./writes.js";
 
 /** The outcome of the SPEC 11.2 pre-answer step. */
 export type AvailabilityPreparation =
@@ -125,7 +125,7 @@ export async function finishAvailabilityRefresh(
   // would now report. On that failing side these surfaces write nothing
   // and consult no record (SPEC 11.2); the condition itself is no domain
   // file's finding and accompanies no answer.
-  const writeFindings = await symlinkWritePathFindings(
+  const writeFindings = await obstructedWritePathFindings(
     workspace.root,
     build.writePaths,
   );

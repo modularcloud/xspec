@@ -16,7 +16,8 @@
 //   core/policy.ts);
 // - review sessions are not internally corrupt (SPEC 14.21, judged without
 //   modifying anything; workspace/reviews.ts);
-// - write paths a build would use traverse no symbolic link — reported
+// - no write path a build would use has a workspace-relative directory
+//   component occupied by anything other than a directory — reported
 //   without writing (SPEC 14.22).
 //
 // `check` never refreshes (SPEC 13.3): it reports staleness instead of
@@ -35,7 +36,7 @@ import {
   workspaceInputsOf,
 } from "../../workspace/pipeline.js";
 import { loadAllSessions } from "../../workspace/reviews.js";
-import { symlinkWritePathFindings } from "../../workspace/writes.js";
+import { obstructedWritePathFindings } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
 import { jsonOutputInEffect } from "../args.js";
 import type { CommandContext } from "../io.js";
@@ -84,10 +85,13 @@ export async function checkCommand(
     findings.push(
       ...(await stalenessFindings(workspace.root, outputs, stored)),
     );
-    // SPEC 14.22: `check` reports a symbolic link in a write path without
-    // writing — the same findings a `build` would refuse on.
+    // SPEC 14.22: `check` reports the obstructed write-path components
+    // without writing — the same findings a `build` would refuse on.
     findings.push(
-      ...(await symlinkWritePathFindings(workspace.root, outputs.writePaths)),
+      ...(await obstructedWritePathFindings(
+        workspace.root,
+        outputs.writePaths,
+      )),
     );
   }
 

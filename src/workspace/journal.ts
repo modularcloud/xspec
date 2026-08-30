@@ -177,9 +177,10 @@ export async function readJournalBytes(
  * atomic in its observable effect (SPEC 13.5) and merging textually with
  * concurrent additions (SPEC 13.4). Callers are `rename` and `move` only,
  * running under workspace exclusivity (SPEC 13.5) and after full workspace
- * validation (SPEC 6.4) — an occupied journal path or a symlinked `.xspec`
- * component has already refused the operation as a finding (14.13, 14.22),
- * and the layer's own guards are the terminal defense, thrown as errors.
+ * validation (SPEC 6.4) — an occupied journal path or an obstructed
+ * `.xspec` component has already refused the operation as a finding (14.13,
+ * 14.22), and the layer's own guards are the terminal defense, thrown as
+ * errors.
  */
 export async function appendJournalEntry(
   root: string,

@@ -224,8 +224,8 @@ byte shape alone, total over invalid paths), `journalOccupied(root)` in
 `src/workspace/journal.ts` (presence alone, lstat), `listSessionFilePaths`
 in `src/workspace/reviews.ts` (well-formed session file names by name alone,
 byte order of file name), and the discovery-level 14.14 exit-2 routing
-inside the handler. T11.6-1..4 green on Linux; T12.2-2/3, T13.3-2/3, T14-4
-inventory-adjacent arms stay red on C4/C5/C2 defects as their notes say.)
+inside the handler. T11.6-1..4 green on Linux; T12.2-2/3 and T13.3-2's
+corrupt-record arms stay red on C4/C5 defects as their notes say.)
 
 (B8 landed: the refusal contract. `src/core/refusal.ts` is the one shared
 evaluation — `evaluateRenameRefusals` / `evaluateMoveFileRefusals` /
@@ -326,41 +326,25 @@ recorded-baseline call site (`loadSessionForCommand`). `impact` and
 replay-suffix lines — `ParsedJournal.findings` are `PositionedJournalFinding`
 (line-carrying; the extra member never renders) — so a garbage line inside
 the shared prefix is the gate's 14.13, never a replay failure. T6.3-1..4
-green; T13.3-3's garbage-journal arm green — its obstructed-write-path arm
-stays red on C3, and T13.3-2's corrupt-record arm on C4, as their notes
-say.)
+green; T13.3-3 green in full since C3; T13.3-2's corrupt-record arm stays
+red on C4, as its note says.)
 
-### C3. Obstructed write path: any non-directory component, refused before modifying
-
-SPEC 13.4, 14.22. Prereq A1 (token `obstructed-write-path`).
-`symlinkComponentOf` (`src/workspace/writes.ts` ~108) detects symlink components
-only; a plain-file component flows through — `build` modifies files, then
-crashes ENOTDIR exit 70. Required: a workspace-relative directory component of
-any path xspec writes occupied by anything other than a directory (plain file,
-symlink whatever it targets, any non-directory) refuses the write, reported as
-condition 22 before anything is modified; `check` reports it without writing.
-One finding per distinct offending component, concerned path the component's
-workspace-relative path, however many write paths it refuses. An occupant at a
-derived file's own path stays a replacement, not an error; a durable file's own
-path holding a non-plain-file stays 14.13/14.21; a move's destination-side
-component stays `refused-invalid-destination` (B8), never condition 22.
-
-Same condition, gate side (observed at T13.3-3's obstructed-write-path arm,
-`markdown.outDir` replaced by a plain file): the gated reads' 13.3 gate is
-"the findings a `build` would now report", 14.22 over build's FULL write set
-included — today `assessWorkspaceRead` (`src/workspace/refresh.ts`) probes
-only the graph-data path, and only on a store mismatch, so `ids` et al.
-answer exit 0 where T13.3-3 expects the one condition-22 finding, exit 1.
-`finishAvailabilityRefresh` (`src/workspace/availability.ts`) already
-evaluates build's `writePaths` — mirror that in `assessWorkspaceRead`
-(evaluation only; the reads still write nothing on the failing side). Note
-`classifyOccupant` currently throws raw ENOTDIR when a parent component is a
-plain file (`build` crashes exit 70, T11.2-6's observed failure) — the
-writes.ts fix must classify that as the obstructed component, not crash.
-
-Verify: P-8 (`section-16-p8.test.ts` or the P-8 registry file), T13.4 arms
-(`section-13.4*.test.ts`), T13.3-3's obstructed-write-path arms, T11.2-6
-(`section-11.2.test.ts`), T14-4's 14.13/14.22 reporter rows.
+(C3 landed: 14.22 covers every non-directory component.
+`obstructedWritePathFindings`/`obstructedComponentOf`
+(`src/workspace/writes.ts`) judge each write path's components
+shallowest-first, stopping at the first non-directory or missing one; one
+finding per distinct offending component, concerned path the component,
+findings in component byte order. `classifyOccupant` maps ENOTDIR/ELOOP to
+"absent" (nothing occupies a path below a non-directory — `probeOccupant`
+is now its alias), so `check`'s per-file staleness compare reports the
+unreachable derived file "missing" instead of crashing; the removal helpers
+skip any obstructed path. Gate side: `assessWorkspaceRead`
+(`src/workspace/refresh.ts`) computes build with a null store and evaluates
+the FULL `build.writePaths` before any store read — obstructions are the
+gate's findings, exit 1, store unconsulted; the store-backed fast paths
+(`verifyStoreForRead`, `src/workspace/fast-read.ts`, shared by `query` and
+`at`) verify the write set unobstructed as step 5 (`generatedDerivedPaths`
++ `GRAPH_DATA_PATH`), falling back to the full path otherwise.)
 
 ### C4. Unreadable recorded state persists; `check` reports the exclusive unit form
 

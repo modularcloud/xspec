@@ -73,7 +73,7 @@ import {
   loadSession,
   writeSession,
 } from "../../workspace/reviews.js";
-import { symlinkWritePathFindings } from "../../workspace/writes.js";
+import { obstructedWritePathFindings } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
 import { flagValue } from "../args.js";
 import type { CommandContext } from "../io.js";
@@ -263,9 +263,10 @@ async function runCreate(
     items: derived.items,
   };
 
-  // SPEC 14.22: a symbolic link at a workspace-relative directory component
-  // of the write path refuses the write, reported before modifying anything.
-  const writeFindings = await symlinkWritePathFindings(workspace.root, [
+  // SPEC 14.22: a workspace-relative directory component of the write path
+  // occupied by anything other than a directory refuses the write, reported
+  // before modifying anything.
+  const writeFindings = await obstructedWritePathFindings(workspace.root, [
     sessionFilePath(name),
   ]);
   if (writeFindings.length > 0) {

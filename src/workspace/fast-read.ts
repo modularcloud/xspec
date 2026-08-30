@@ -28,7 +28,15 @@
 //     classification the pipeline runs (./discovery.ts) — yields no
 //     findings, exactly the recorded path set, and every discovered file's
 //     bytes hash to the recorded fingerprint (the discovered SET is part
-//     of the record: a new matching file is a mismatch).
+//     of the record: a new matching file is a mismatch);
+//  5. no path a `build` would write has an obstructed workspace-relative
+//     directory component (SPEC 14.22): a refused write fails `build`'s
+//     validations alike (SPEC 13.3), so on such a workspace the gated full
+//     path reports the findings instead of answering — and the availability
+//     full path (`at`, SPEC 11.2) answers from the current sources without
+//     the refresh side effect, which the identical bytes make byte-equal to
+//     this store; falling back keeps both surfaces byte-identical to their
+//     full paths.
 //
 // The fast path never writes (a verified store needs no refresh; SPEC
 // 13.3's refreshing reads write only when the store does not match), and
@@ -36,6 +44,7 @@
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import { generatedDerivedPaths } from "../core/build.js";
 import { configurationFromStored } from "../core/config-data.js";
 import type { Configuration } from "../core/config.js";
 import type { GraphData, StoredRequirementNode } from "../core/graph-data.js";
@@ -48,6 +57,7 @@ import { sha256Hex } from "../core/hash.js";
 import { discoverSources } from "./discovery.js";
 import { readJournalBytes } from "./journal.js";
 import type { LocatedWorkspace } from "./locate.js";
+import { obstructedWritePathFindings } from "./writes.js";
 
 /** A verified store: the parsed graph data and the recovered parse. */
 export interface VerifiedStore {
@@ -131,6 +141,22 @@ export async function verifyStoreForRead(
     if (sha256Hex(bytes) !== expected) {
       return null;
     }
+  }
+
+  // 5. Build's write set is unobstructed (SPEC 14.22, 13.3): an obstructed
+  // component fails `build`'s validations, so the full paths answer
+  // differently there (module header) — fall back.
+  const writePaths = [
+    ...generatedDerivedPaths(
+      configuration,
+      classification.specSources.map((source) => source.path),
+    ),
+    GRAPH_DATA_PATH,
+  ];
+  if (
+    (await obstructedWritePathFindings(located.root, writePaths)).length > 0
+  ) {
+    return null;
   }
 
   return { configuration, data };

@@ -167,7 +167,7 @@ export async function readDerivedFileRecord(
  * in its observable effect (SPEC 13.5), replacing whatever occupies the
  * path (SPEC 13.4). Byte-deterministic for a given workspace (SPEC 12.0).
  * Callers validate the write path first (SPEC 14.22,
- * `symlinkWritePathFindings`) and write only for workspaces that pass
+ * `obstructedWritePathFindings`) and write only for workspaces that pass
  * build validation — a failed build or refresh writes nothing (SPEC 12.1,
  * 13.3).
  */

@@ -22,7 +22,7 @@ import {
   analyzeWorkspace,
   workspaceInputsOf,
 } from "../../workspace/pipeline.js";
-import { symlinkWritePathFindings } from "../../workspace/writes.js";
+import { obstructedWritePathFindings } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
 import { jsonOutputInEffect } from "../args.js";
 import type { CommandContext } from "../io.js";
@@ -55,9 +55,11 @@ export async function buildCommand(
   let outputs: BuildOutputs | null = null;
   if (findings.length === 0) {
     // Valid workspace: derive the complete output set (core), then validate
-    // every write path before touching anything (SPEC 14.22: a symbolic
-    // link at a workspace-relative directory component of a path xspec
-    // writes refuses the write, reported before anything is modified).
+    // every write path before touching anything (SPEC 14.22: a
+    // workspace-relative directory component of a path xspec writes
+    // occupied by anything other than a directory refuses the write,
+    // reported before anything is modified — one finding per distinct
+    // offending component).
     const stored = await loadGraphData(workspace.root);
     outputs = computeBuildOutputs(
       workspace.configuration,
@@ -69,7 +71,10 @@ export async function buildCommand(
       workspaceInputsOf(workspace, analysis),
     );
     findings.push(
-      ...(await symlinkWritePathFindings(workspace.root, outputs.writePaths)),
+      ...(await obstructedWritePathFindings(
+        workspace.root,
+        outputs.writePaths,
+      )),
     );
   }
 

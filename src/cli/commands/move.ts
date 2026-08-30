@@ -114,7 +114,7 @@ import {
   nonDirectoryComponents,
   probeOccupant,
   removeSourceFile,
-  symlinkWritePathFindings,
+  obstructedWritePathFindings,
   writeSourceFile,
 } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
@@ -484,7 +484,7 @@ async function runMoveFile(
   // SPEC 14.22: validate the complete write set — rewritten sources (the
   // destination included), the journal, and every regenerated file — before
   // modifying anything.
-  const writeFindings = await symlinkWritePathFindings(workspace.root, [
+  const writeFindings = await obstructedWritePathFindings(workspace.root, [
     ...plan.rewrites.map((rewrite) => rewrite.path),
     JOURNAL_PATH,
     ...outputs.writePaths,
@@ -717,7 +717,7 @@ async function runMoveSection(
   // SPEC 14.22: validate the complete write set — rewritten sources (a
   // created target included), the journal, and every regenerated file —
   // before modifying anything.
-  const writeFindings = await symlinkWritePathFindings(workspace.root, [
+  const writeFindings = await obstructedWritePathFindings(workspace.root, [
     ...plan.rewrites.map((rewrite) => rewrite.path),
     JOURNAL_PATH,
     ...outputs.writePaths,

@@ -20,12 +20,16 @@
 // to, or replaced: the read side reports it (journal → 14.13, session →
 // 14.21), and the write primitives here refuse it as a terminal defense.
 //
-// SPEC 13.4 → 14.22: writes never traverse symbolic links. A symbolic link
-// at a workspace-relative directory component of any write path refuses the
-// write, reported before anything is modified; `check` reports it without
-// writing. `symlinkWritePathFindings` is that report's producer — callers
-// (build, and every command that writes) run it over their complete write
-// set before touching the workspace, and the write primitives re-check as a
+// SPEC 13.4 → 14.22: a write path having a workspace-relative directory
+// component occupied by anything other than a directory — a plain file, a
+// symbolic link (whatever it targets: writes never traverse one), or any
+// other non-directory occupant — is refused, reported before anything is
+// modified; `check` reports it without writing. One finding per distinct
+// offending component, concerned path the component's workspace-relative
+// path, however many write paths it refuses.
+// `obstructedWritePathFindings` is that report's producer — callers (build,
+// and every command that writes) run it over their complete write set
+// before touching the workspace, and the write primitives re-check as a
 // terminal defense. Path components above the workspace root are
 // unrestricted (SPEC 13.4).
 
@@ -44,38 +48,19 @@ import { pathFinding } from "../core/findings.js";
 export type PathOccupant =
   "absent" | "file" | "directory" | "symlink" | "other";
 
-/** Classify the occupant of an absolute path (SPEC 13.4). */
+/**
+ * Classify the occupant of an absolute path (SPEC 13.4). A path unreachable
+ * through a non-directory or looping component classifies as "absent" —
+ * nothing occupies the path itself; the offending component is judged and
+ * reported separately (SPEC 14.22, `obstructedWritePathFindings`; SPEC 6.5,
+ * `nonDirectoryComponents`) — never a crash on the classifying read.
+ */
 export async function classifyOccupant(
   absolute: string,
 ): Promise<PathOccupant> {
   let stats;
   try {
     stats = await fsp.lstat(absolute);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "absent";
-    throw error;
-  }
-  if (stats.isSymbolicLink()) return "symlink";
-  if (stats.isFile()) return "file";
-  if (stats.isDirectory()) return "directory";
-  return "other";
-}
-
-/**
- * Classify the occupant of a workspace-relative path for the
- * `rename`/`move` destination probes (SPEC 6.5, core/refusal.ts): like
- * `classifyOccupant`, but a path unreachable through a non-directory or
- * looping component classifies as "absent" — nothing occupies the path
- * itself; the offending component reports separately through
- * `nonDirectoryComponents` (SPEC 6.5: `refused-invalid-destination`).
- */
-export async function probeOccupant(
-  root: string,
-  rel: string,
-): Promise<PathOccupant> {
-  let stats;
-  try {
-    stats = await fsp.lstat(absoluteOf(root, rel));
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
@@ -87,6 +72,20 @@ export async function probeOccupant(
   if (stats.isFile()) return "file";
   if (stats.isDirectory()) return "directory";
   return "other";
+}
+
+/**
+ * Classify the occupant of a workspace-relative path — the `rename`/`move`
+ * destination probes' entry (SPEC 6.5, core/refusal.ts). A path unreachable
+ * through a non-directory or looping component classifies as "absent" like
+ * every classification; the offending component reports separately through
+ * `nonDirectoryComponents` (SPEC 6.5: `refused-invalid-destination`).
+ */
+export async function probeOccupant(
+  root: string,
+  rel: string,
+): Promise<PathOccupant> {
+  return classifyOccupant(absoluteOf(root, rel));
 }
 
 /**
@@ -155,62 +154,84 @@ function directoryComponents(rel: string): string[] {
   return components;
 }
 
+/** An offending directory component and what occupies it (SPEC 14.22). */
+export interface ObstructedComponent {
+  /** The component's workspace-relative path — the concerned path. */
+  readonly component: string;
+  /** Its non-directory occupant, judged by `lstat` (SPEC 13.4). */
+  readonly occupant: PathOccupant;
+}
+
 /**
- * The first workspace-relative directory component of `rel` that is a
- * symbolic link, or null when the path traverses none (SPEC 13.4, 14.22).
- * Components are examined shallowest first and examination stops at the
- * first symbolic link or missing component — an `lstat` of anything deeper
- * would itself traverse the link, and below a missing component nothing
- * exists (directory creation supplies real directories). Components above
- * the workspace root are unrestricted (SPEC 13.4) and never examined.
+ * The first workspace-relative directory component of `rel` occupied by
+ * anything other than a directory — a plain file, a symbolic link (whatever
+ * it targets: writes never traverse one, SPEC 13.4), or any other
+ * non-directory occupant — or null when every existing component is a real
+ * directory (SPEC 14.22). Components are examined shallowest first and
+ * examination stops at the first non-directory or missing component: below
+ * a non-directory nothing exists to examine (deeper conditions are
+ * undetectable, SPEC 14, and an `lstat` through a symbolic link would
+ * itself traverse it), and below a missing component nothing exists —
+ * writes create those as directories, so a nonexistent component is never
+ * this condition (SPEC 13.4). Components above the workspace root are
+ * unrestricted (SPEC 13.4) and never examined.
  */
-export async function symlinkComponentOf(
+export async function obstructedComponentOf(
   root: string,
   rel: string,
-): Promise<string | null> {
+): Promise<ObstructedComponent | null> {
   for (const component of directoryComponents(rel)) {
     const occupant = await classifyOccupant(absoluteOf(root, component));
-    if (occupant === "symlink") return component;
     if (occupant === "absent") return null;
-    // A plain-file or other non-directory occupant is not a symbolic link:
-    // not this condition (SPEC 14.22). The write itself fails on it.
+    if (occupant !== "directory") return { component, occupant };
   }
   return null;
 }
 
-/** The SPEC 14.22 finding for `rel` traversing the symlink `component`. */
-function symlinkFinding(rel: string, component: string): Finding {
+/** The SPEC 14.22 finding for one obstructed directory component. */
+function obstructionFinding(obstructed: ObstructedComponent): Finding {
+  const occupant =
+    obstructed.occupant === "symlink"
+      ? `a symbolic link — writes never traverse symbolic links, whatever ` +
+        `the link targets (SPEC 13.4)`
+      : `${describeOccupant(obstructed.occupant)}, not a directory ` +
+        `(SPEC 13.4)`;
   return pathFinding(
     22,
-    `obstructed write path: writing ${rel} would traverse the ` +
-      `workspace-relative directory component ${component}, which is a ` +
-      `symbolic link — writes never traverse symbolic links (SPEC 13.4); ` +
-      `replace ${component} with a real directory, or redirect the write ` +
-      `so no path xspec writes passes through it (SPEC 14.22)`,
-    rel,
+    `obstructed write path: the workspace-relative directory component ` +
+      `${obstructed.component} of a path xspec writes is occupied by ` +
+      `${occupant}; replace ${obstructed.component} with a real directory, ` +
+      `or redirect the writes so no path xspec writes passes through it ` +
+      `(SPEC 14.22)`,
+    obstructed.component,
   );
 }
 
 /**
  * SPEC 14.22 findings over a set of workspace-relative write paths: one
- * finding per offending path, naming the first symbolic-link directory
- * component it traverses. Deterministic — paths are deduplicated and
- * examined in byte order (SPEC 12.0). Callers run this over their complete
- * write set before modifying anything ("a command refuses the write and
- * reports it before modifying anything"); `check` reports the same findings
- * without writing (SPEC 14.22).
+ * finding per distinct offending component, whatever write paths it
+ * refuses, each finding's concerned path the component's workspace-relative
+ * path. Deterministic — paths are deduplicated and examined in byte order,
+ * findings in byte order of component (SPEC 12.0). Callers run this over
+ * their complete write set before modifying anything ("a command refuses
+ * the write and reports it before modifying anything"); `check` reports the
+ * same findings without writing (SPEC 14.22).
  */
-export async function symlinkWritePathFindings(
+export async function obstructedWritePathFindings(
   root: string,
   rels: Iterable<string>,
 ): Promise<Finding[]> {
   const unique = [...new Set(rels)].sort(compareBytes);
-  const findings: Finding[] = [];
+  const obstructions = new Map<string, ObstructedComponent>();
   for (const rel of unique) {
-    const component = await symlinkComponentOf(root, rel);
-    if (component !== null) findings.push(symlinkFinding(rel, component));
+    const obstructed = await obstructedComponentOf(root, rel);
+    if (obstructed !== null && !obstructions.has(obstructed.component)) {
+      obstructions.set(obstructed.component, obstructed);
+    }
   }
-  return findings;
+  return [...obstructions.values()]
+    .sort((a, b) => compareBytes(a.component, b.component))
+    .map(obstructionFinding);
 }
 
 /**
@@ -301,8 +322,8 @@ async function replaceWithFile(
  * effect (SPEC 13.5), replacing whatever occupies the path — a symbolic
  * link included, never writing through it (SPEC 13.4). Missing parent
  * directories are created. Callers have already validated the write path
- * (SPEC 14.22, `symlinkWritePathFindings`); a symlinked component here is a
- * terminal defense and throws.
+ * (SPEC 14.22, `obstructedWritePathFindings`); an obstructed component here
+ * is a terminal defense and throws.
  */
 export async function writeDerivedFile(
   root: string,
@@ -336,14 +357,16 @@ export async function writeSourceFile(
  * to exist). The occupant is a discovered source — a plain file reached
  * through real directories (discovery never follows symbolic links, SPEC 7)
  * — and removal never traverses a symlinked component (SPEC 13.4): a path
- * whose directory component became a symbolic link is skipped untouched, as
- * in orphan removal. An absent occupant is a completed removal.
+ * whose directory component became a symbolic link — or any other
+ * non-directory, below which the source cannot exist — is skipped
+ * untouched, as in orphan removal. An absent occupant is a completed
+ * removal.
  */
 export async function removeSourceFile(
   root: string,
   rel: string,
 ): Promise<void> {
-  if ((await symlinkComponentOf(root, rel)) !== null) return;
+  if ((await obstructedComponentOf(root, rel)) !== null) return;
   await fsp.rm(absoluteOf(root, rel), { force: true });
 }
 
@@ -356,13 +379,15 @@ export async function removeSourceFile(
  * recorded path with a symbolic link at a workspace-relative directory
  * component is skipped untouched: removal never traverses a link (SPEC
  * 13.4), so the path no longer denotes a location xspec may touch — like an
- * orphan whose record is missing, it is outside xspec's knowledge.
+ * orphan whose record is missing, it is outside xspec's knowledge; below
+ * any other non-directory component the recorded path cannot exist, so the
+ * removal is equally complete without touching anything.
  */
 export async function removeDerivedFile(
   root: string,
   rel: string,
 ): Promise<void> {
-  if ((await symlinkComponentOf(root, rel)) !== null) return;
+  if ((await obstructedComponentOf(root, rel)) !== null) return;
   const absolute = absoluteOf(root, rel);
   const occupant = await classifyOccupant(absolute);
   if (occupant === "absent") return;

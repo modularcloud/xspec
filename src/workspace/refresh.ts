@@ -7,10 +7,13 @@
 // commands refresh it — writing exactly what `xspec build` would write,
 // except that no TypeScript or Markdown is generated or removed and the
 // recorded derived-file paths are left unchanged — before answering. When
-// the current sources fail `build` validation, they report the validation
-// errors and exit 1 without answering and without modifying anything: a
-// failed refresh, like a failed build (SPEC 12.1), leaves every derived
-// file and all graph data unmodified.
+// the current workspace fails the validations of `xspec build` — source
+// validation errors, journal errors (14.13), and refused writes over
+// build's complete write set (14.22) alike: the findings a `build` would
+// now report — they report exactly those findings and exit 1 without
+// answering and without modifying anything: a failed refresh, like a failed
+// build (SPEC 12.1), leaves every derived file and all graph data
+// unmodified.
 //
 // `check` never uses this step: it never refreshes and reports staleness
 // instead (SPEC 13.3, 14.10) — it composes `analyzeWorkspace` and the
@@ -29,7 +32,6 @@ import { computeBuildOutputs } from "../core/build.js";
 import type { Finding } from "../core/findings.js";
 import type { GraphData } from "../core/graph-data.js";
 import {
-  GRAPH_DATA_PATH,
   graphDataMatchesCurrent,
   refreshedGraphData,
 } from "../core/graph-data.js";
@@ -37,7 +39,7 @@ import type { LoadedWorkspace } from "./config.js";
 import { loadGraphData, writeGraphData } from "./graph-data.js";
 import type { WorkspaceAnalysis } from "./pipeline.js";
 import { analyzeWorkspace, workspaceInputsOf } from "./pipeline.js";
-import { symlinkWritePathFindings } from "./writes.js";
+import { obstructedWritePathFindings } from "./writes.js";
 
 /** The outcome of the SPEC 13.3 pre-answer step. */
 export type WorkspacePreparation =
@@ -54,8 +56,9 @@ export type WorkspacePreparation =
     }
   | {
       /**
-       * SPEC 13.3: the current sources fail `build` validation (or the
-       * needed refresh write is refused, SPEC 14.22) — the command reports
+       * SPEC 13.3: the current workspace fails `build`'s validations —
+       * source validation errors, journal errors, and refused writes over
+       * build's complete write set alike (SPEC 14.22) — the command reports
        * these findings as its report (standard output, SPEC 12.0) and
        * exits 1 without answering; nothing was modified.
        */
@@ -101,7 +104,8 @@ export async function analyzeWorkspaceForRead(
 /**
  * The gate-and-refresh assessment (SPEC 13.3), decision separated from
  * write: `findings` is the invalid-workspace report — validation findings,
- * or the refused refresh write (SPEC 14.22) — with nothing modified;
+ * or refused writes over build's complete write set (SPEC 14.22): the
+ * findings a `build` would now report — with nothing modified;
  * `ready` carries the graph data the read answers beside and a `commit`
  * that performs the one refresh write (a no-op when the store already
  * matches). The caller commits only once every remaining argument check
@@ -128,37 +132,42 @@ export async function assessWorkspaceRead(
     return { kind: "findings", findings: analysis.findings };
   }
 
-  const stored = await loadGraphData(workspace.root);
   // What `xspec build` would write for the current sources and
   // configuration (SPEC 13.3): the same pure derivation `build` runs
   // (SPEC 12.1), so the refreshed bytes match a real build's byte for byte
-  // (SPEC 12.0 determinism). Only its graph data is consumed — the refresh
-  // generates and removes no TypeScript or Markdown.
+  // (SPEC 12.0 determinism). Its graph data and write set are independent
+  // of the stored record (`stored` feeds orphan removal alone, which no
+  // refresh performs), so the store stays unconsulted until the workspace
+  // has passed the complete gate below. The refresh generates and removes
+  // no TypeScript or Markdown — only the graph data is ever written.
   const build = computeBuildOutputs(
     workspace.configuration,
     analysis.specs,
     analysis.graph,
     analysis.textModel,
     analysis.hashes,
-    stored.data,
+    null,
     workspaceInputsOf(workspace, analysis),
-  ).graphData;
+  );
 
-  const graphData = refreshedGraphData(stored.data, build);
-  if (graphDataMatchesCurrent(stored.bytes, stored.data, build)) {
-    // Matching data is served as is — no write, nothing to commit.
-    return { kind: "ready", graphData, commit: async () => {} };
-  }
-
-  // SPEC 14.22: the refresh writes exactly one path; a symbolic link at a
-  // workspace-relative directory component refuses the write, reported
-  // before anything is modified — the command cannot answer from stale
-  // data (SPEC 13.3), so it fails with the finding (exit 1).
-  const writeFindings = await symlinkWritePathFindings(workspace.root, [
-    GRAPH_DATA_PATH,
-  ]);
+  // SPEC 13.3: refused writes (14.22) fail `build`'s validations alike —
+  // judged over build's complete write set, exactly the findings a `build`
+  // would now report. The gated read reports them and exits 1 without
+  // answering; evaluation only — nothing is modified and the store stays
+  // unread on this failing side.
+  const writeFindings = await obstructedWritePathFindings(
+    workspace.root,
+    build.writePaths,
+  );
   if (writeFindings.length > 0) {
     return { kind: "findings", findings: writeFindings };
+  }
+
+  const stored = await loadGraphData(workspace.root);
+  const graphData = refreshedGraphData(stored.data, build.graphData);
+  if (graphDataMatchesCurrent(stored.bytes, stored.data, build.graphData)) {
+    // Matching data is served as is — no write, nothing to commit.
+    return { kind: "ready", graphData, commit: async () => {} };
   }
 
   return {

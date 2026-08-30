@@ -68,7 +68,7 @@ import {
   workspaceInputsOf,
 } from "../../workspace/pipeline.js";
 import {
-  symlinkWritePathFindings,
+  obstructedWritePathFindings,
   writeSourceFile,
 } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
@@ -280,7 +280,7 @@ async function runRename(
 
   // SPEC 14.22: validate the complete write set — rewritten sources, the
   // journal, and every regenerated file — before modifying anything.
-  const writeFindings = await symlinkWritePathFindings(workspace.root, [
+  const writeFindings = await obstructedWritePathFindings(workspace.root, [
     ...plan.rewrites.map((rewrite) => rewrite.path),
     JOURNAL_PATH,
     ...outputs.writePaths,

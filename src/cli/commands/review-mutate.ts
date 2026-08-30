@@ -43,7 +43,7 @@ import {
 import { withMutationExclusivity } from "../../workspace/lock.js";
 import type { WorkspaceAnalysis } from "../../workspace/pipeline.js";
 import { writeSession } from "../../workspace/reviews.js";
-import { symlinkWritePathFindings } from "../../workspace/writes.js";
+import { obstructedWritePathFindings } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
 import { flagValue } from "../args.js";
 import type { CommandContext } from "../io.js";
@@ -93,9 +93,10 @@ function currentSideOf(
 }
 
 /**
- * SPEC 14.22: validate the session file's write path — a symbolic link at a
- * workspace-relative directory component refuses the write, reported before
- * modifying anything — then write the session. Returns null on success.
+ * SPEC 14.22: validate the session file's write path — a
+ * workspace-relative directory component occupied by anything other than a
+ * directory refuses the write, reported before modifying anything — then
+ * write the session. Returns null on success.
  */
 async function writeSessionChecked(
   invocation: Invocation,
@@ -103,7 +104,7 @@ async function writeSessionChecked(
   name: string,
   session: Parameters<typeof writeSession>[2],
 ): Promise<ExitCode | null> {
-  const findings = await symlinkWritePathFindings(context.workspace.root, [
+  const findings = await obstructedWritePathFindings(context.workspace.root, [
     sessionFilePath(name),
   ]);
   if (findings.length > 0) {
