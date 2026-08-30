@@ -314,12 +314,46 @@ class ViewRenderer {
    * One node of the positional section tree (SPEC 11.4, 12.7): the
    * `{"identity", "range", "opening", "closing", "attributes", "tags",
    * "coverage", "children"}` form plus `"ownText"`/`"subtreeText"` exactly
-   * when `--text` is given.
+   * when `--text` is given. The tree is built iteratively — children before
+   * parents over an explicit stack — so a pathologically deep nesting tower
+   * cannot exhaust the call stack (the answer covers any parseable file).
    */
   private nodeJson(
     document: SpecDocument,
     section: SpecSection,
     defined: ReadonlySet<SpecSection> | null,
+  ): JsonObject {
+    // Pre-order collection (parents before descendants), then a reverse
+    // build pass so every node's children are built when the node is.
+    const order: SpecSection[] = [];
+    const pending: SpecSection[] = [section];
+    while (pending.length > 0) {
+      const current = pending.pop() as SpecSection;
+      order.push(current);
+      for (const child of current.children) {
+        pending.push(child);
+      }
+    }
+    const built = new Map<SpecSection, JsonObject>();
+    for (let index = order.length - 1; index >= 0; index -= 1) {
+      const current = order[index];
+      const children = current.children.map(
+        (child) => built.get(child) as JsonObject,
+      );
+      built.set(
+        current,
+        this.sectionJson(document, current, defined, children),
+      );
+    }
+    return built.get(section) as JsonObject;
+  }
+
+  /** The one-node body of `nodeJson`, its children already rendered. */
+  private sectionJson(
+    document: SpecDocument,
+    section: SpecSection,
+    defined: ReadonlySet<SpecSection> | null,
+    children: readonly JsonObject[],
   ): JsonObject {
     const isRoot = section.parent === null;
     // SPEC 11.2: the identity datum — the root's is defined exactly when
@@ -381,9 +415,7 @@ class ViewRenderer {
         : section.coverageDefined
           ? section.coverage
           : this.unavailable(),
-      children: section.children.map((child) =>
-        this.nodeJson(document, child, defined),
-      ),
+      children,
       ownText,
       subtreeText,
     };

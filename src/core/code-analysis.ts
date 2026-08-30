@@ -30,7 +30,8 @@
 // and falls under no condition (SPEC 4.5); its value-level misuse is the
 // consumer's TypeScript error, outside xspec's validations.
 
-import ts from "typescript";
+import ts from "./ts-module.js";
+import type * as tst from "typescript";
 import type { ByteRange } from "./bytes.js";
 import { Utf8Offsets } from "./bytes.js";
 import type { DerivedPathKind } from "./discovery.js";
@@ -299,10 +300,10 @@ function stackOverflowFinding(file: PathText, grammar: string): Finding {
  * serves only identifier-to-declaration resolution (SPEC 4.5 scoping).
  */
 function createSingleFileProgram(
-  sourceFile: ts.SourceFile,
+  sourceFile: tst.SourceFile,
   tsx: boolean,
-): ts.Program {
-  const options: ts.CompilerOptions = {
+): tst.Program {
+  const options: tst.CompilerOptions = {
     noLib: true,
     noResolve: true,
     // SPEC 14.20/7: grammar selection is by file name alone — `.tsx` as
@@ -314,7 +315,7 @@ function createSingleFileProgram(
     target: ts.ScriptTarget.Latest,
     ...(tsx ? { jsx: ts.JsxEmit.Preserve } : {}),
   };
-  const host: ts.CompilerHost = {
+  const host: tst.CompilerHost = {
     getSourceFile: (name) =>
       name === sourceFile.fileName ? sourceFile : undefined,
     getDefaultLibFileName: () => "lib.d.ts",
@@ -332,10 +333,10 @@ function createSingleFileProgram(
 /** The 14.20 finding for a parse failure, locating it (SPEC 14.20). */
 function parseFailureFinding(
   file: PathText,
-  sourceFile: ts.SourceFile,
+  sourceFile: tst.SourceFile,
   offsets: Utf8Offsets,
   tsx: boolean,
-  diagnostic: ts.DiagnosticWithLocation,
+  diagnostic: tst.DiagnosticWithLocation,
 ): Finding {
   const reason = ts.flattenDiagnosticMessageText(diagnostic.messageText, " ");
   const grammar = tsx ? "TSX" : "plain TypeScript";
@@ -427,10 +428,10 @@ type TrackedBinding =
 interface BoundName {
   readonly name: string;
   /** The binding's declaration node (the checker resolves uses to it). */
-  readonly declaration: ts.Node;
+  readonly declaration: tst.Node;
   /** Whether the binding's import is a spec module import. */
   readonly spec: boolean;
-  readonly statement: ts.Statement;
+  readonly statement: tst.Statement;
 }
 
 class CodeAnalyzer {
@@ -439,16 +440,16 @@ class CodeAnalyzer {
   private readonly imports: CodeImport[] = [];
   private readonly units: CodeUnit[] = [];
   /** Declaration node → what a use resolving to it means (SPEC 4.5). */
-  private readonly declarations = new Map<ts.Node, TrackedBinding>();
+  private readonly declarations = new Map<tst.Node, TrackedBinding>();
   /** Named-unit construct → its unit (attribution, SPEC 4.6). */
-  private readonly unitByNode = new Map<ts.Node, CodeUnit>();
+  private readonly unitByNode = new Map<tst.Node, CodeUnit>();
 
   constructor(
     private readonly path: string,
     private readonly file: PathText,
-    private readonly sourceFile: ts.SourceFile,
+    private readonly sourceFile: tst.SourceFile,
     private readonly offsets: Utf8Offsets,
-    private readonly checker: ts.TypeChecker,
+    private readonly checker: tst.TypeChecker,
     private readonly context: CodeAnalysisContext,
   ) {}
 
@@ -472,7 +473,7 @@ class CodeAnalyzer {
   // -- shared helpers -------------------------------------------------------
 
   /** The node's own characters as a byte range (SPEC 1.7 offsets). */
-  private rangeOf(node: ts.Node): ByteRange {
+  private rangeOf(node: tst.Node): ByteRange {
     return {
       start: this.offsets.byteOffset(node.getStart(this.sourceFile)),
       end: this.offsets.byteOffset(node.getEnd()),
@@ -481,7 +482,7 @@ class CodeAnalyzer {
 
   private addFinding(
     condition: 7 | 8 | 11 | 15 | 18,
-    node: ts.Node,
+    node: tst.Node,
     message: string,
     identities: readonly string[] = [],
   ): void {
@@ -497,7 +498,7 @@ class CodeAnalyzer {
 
   /** The tracked binding a resolved symbol belongs to, if any. */
   private bindingOfSymbol(
-    symbol: ts.Symbol | undefined,
+    symbol: tst.Symbol | undefined,
   ): TrackedBinding | undefined {
     for (const declaration of symbol?.declarations ?? []) {
       const binding = this.declarations.get(declaration);
@@ -508,7 +509,7 @@ class CodeAnalyzer {
 
   /** Resolve one use-site identifier through TypeScript scoping (SPEC 4.5). */
   private bindingOfIdentifier(
-    identifier: ts.Identifier,
+    identifier: tst.Identifier,
   ): TrackedBinding | undefined {
     const parent = identifier.parent;
     const symbol =
@@ -522,9 +523,9 @@ class CodeAnalyzer {
    * SPEC 4.6: the innermost enclosing named code unit's identity, or the
    * file when none encloses the node.
    */
-  private attributionOf(node: ts.Node): string {
+  private attributionOf(node: tst.Node): string {
     for (
-      let current: ts.Node | undefined = node.parent;
+      let current: tst.Node | undefined = node.parent;
       current !== undefined;
       current = current.parent
     ) {
@@ -614,7 +615,7 @@ class CodeAnalyzer {
       else entries.push(entry);
     }
     for (const [name, entries] of byName) {
-      const statements: ts.Statement[] = [];
+      const statements: tst.Statement[] = [];
       for (const entry of entries) {
         if (!statements.includes(entry.statement)) {
           statements.push(entry.statement);
@@ -653,7 +654,7 @@ class CodeAnalyzer {
    * other import declaration is checked against the derived-path rule.
    */
   private scanImportDeclaration(
-    statement: ts.ImportDeclaration,
+    statement: tst.ImportDeclaration,
     bound: BoundName[],
   ): void {
     const literal = statement.moduleSpecifier;
@@ -747,7 +748,7 @@ class CodeAnalyzer {
     const textBindings: CodeImportBinding[] = [];
     /** Registered once validity is known: declaration → role. */
     const roles: {
-      declaration: ts.Node;
+      declaration: tst.Node;
       binding: CodeImportBinding;
       role: "node" | "text";
     }[] = [];
@@ -842,7 +843,7 @@ class CodeAnalyzer {
    * module's nodes or `text` past 4.5. Other module specifiers are
    * checked against the derived-path rule.
    */
-  private scanExportDeclaration(statement: ts.ExportDeclaration): void {
+  private scanExportDeclaration(statement: tst.ExportDeclaration): void {
     const literal = statement.moduleSpecifier;
     if (literal === undefined || !ts.isStringLiteral(literal)) return;
     if (literal.text.endsWith(XSPEC_SUFFIX)) {
@@ -870,7 +871,7 @@ class CodeAnalyzer {
    * (`import X = A.B`) is a use of `A`, handled in the use walk.
    */
   private scanImportEquals(
-    statement: ts.ImportEqualsDeclaration,
+    statement: tst.ImportEqualsDeclaration,
     bound: BoundName[],
   ): void {
     const reference = statement.moduleReference;
@@ -912,7 +913,7 @@ class CodeAnalyzer {
    */
   private checkDerivedSpecifier(
     specifier: string,
-    at: ts.Node,
+    at: tst.Node,
     formLabel: string,
   ): void {
     if (!specifier.startsWith("./") && !specifier.startsWith("../")) return;
@@ -954,9 +955,9 @@ class CodeAnalyzer {
    * on repeated chains (SPEC 4.6).
    */
   private collectUnits(): void {
-    const records: { node: ts.Node; chain: string; start: number }[] = [];
+    const records: { node: tst.Node; chain: string; start: number }[] = [];
     const visit = (
-      node: ts.Node,
+      node: tst.Node,
       enclosing: readonly string[],
       ambient: boolean,
     ): void => {
@@ -1017,12 +1018,12 @@ class CodeAnalyzer {
    * `path#unit@N` simply carries its own occurrence's construct, which is
    * the node recorded for it.
    */
-  private unitRange(node: ts.Node): ByteRange {
+  private unitRange(node: tst.Node): ByteRange {
     if (ts.isModuleDeclaration(node)) {
       // A dotted name (`namespace A.B`) nests declarations: an inner one
       // is its parent declaration's body. Climb to the chain's outermost
       // declaration — the single construct binding every derived unit.
-      let outer: ts.ModuleDeclaration = node;
+      let outer: tst.ModuleDeclaration = node;
       while (
         ts.isModuleDeclaration(outer.parent) &&
         outer.parent.body === outer
@@ -1069,7 +1070,7 @@ class CodeAnalyzer {
 
   // -- value-level use analysis (SPEC 4.3, 4.5 → 14.8, 14.11, 14.18) --------
 
-  private walk(node: ts.Node): void {
+  private walk(node: tst.Node): void {
     // Module-linking constructs were validated in scanModuleLinks; their
     // identifiers are bindings or foreign-module names, never local uses.
     if (ts.isImportDeclaration(node)) return;
@@ -1120,7 +1121,7 @@ class CodeAnalyzer {
    * derived-file path (13.4); a dynamic `import()` whose specifier is not
    * static is not analyzed and records nothing.
    */
-  private visitImportCall(call: ts.CallExpression): void {
+  private visitImportCall(call: tst.CallExpression): void {
     const argument = call.arguments[0];
     if (argument === undefined || !ts.isStringLiteral(argument)) return;
     if (argument.text.endsWith(XSPEC_SUFFIX)) {
@@ -1141,7 +1142,7 @@ class CodeAnalyzer {
    * re-exporting a spec module binding is an unsanctioned value-level use
    * (SPEC 4.5 → 14.18); type-only forms are type-level and unrestricted.
    */
-  private visitExportSpecifiers(declaration: ts.ExportDeclaration): void {
+  private visitExportSpecifiers(declaration: tst.ExportDeclaration): void {
     if (declaration.isTypeOnly) return;
     const clause = declaration.exportClause;
     if (clause === undefined || !ts.isNamedExports(clause)) return;
@@ -1174,9 +1175,9 @@ class CodeAnalyzer {
    * value-level use of a spec module binding (SPEC 4.5 → 14.18). The
    * require form was handled by scanModuleLinks.
    */
-  private visitImportEqualsUse(declaration: ts.ImportEqualsDeclaration): void {
+  private visitImportEqualsUse(declaration: tst.ImportEqualsDeclaration): void {
     if (ts.isExternalModuleReference(declaration.moduleReference)) return;
-    let name: ts.EntityName = declaration.moduleReference;
+    let name: tst.EntityName = declaration.moduleReference;
     while (ts.isQualifiedName(name)) name = name.left;
     const binding = this.bindingOfSymbol(
       this.checker.getSymbolAtLocation(name),
@@ -1197,7 +1198,7 @@ class CodeAnalyzer {
   }
 
   /** One identifier: a spec binding use, or nothing (SPEC 4.5). */
-  private visitIdentifier(identifier: ts.Identifier): void {
+  private visitIdentifier(identifier: tst.Identifier): void {
     if (!isValueUseSite(identifier)) return;
     const binding = this.bindingOfIdentifier(identifier);
     if (binding === undefined) return; // not a spec module reference
@@ -1221,7 +1222,7 @@ class CodeAnalyzer {
    * position).
    */
   private visitNodeBindingUse(
-    identifier: ts.Identifier,
+    identifier: tst.Identifier,
     binding: { readonly kind: "node"; readonly target: SpecModuleTarget },
   ): void {
     const use = climbUseExpression(identifier);
@@ -1291,13 +1292,13 @@ class CodeAnalyzer {
   }
 
   /** Whether `use` sits in argument position of a `text`-callee call. */
-  private isTextCallArgument(use: ts.Expression): boolean {
-    let argument: ts.Node = use;
+  private isTextCallArgument(use: tst.Expression): boolean {
+    let argument: tst.Node = use;
     if (ts.isSpreadElement(argument.parent)) argument = argument.parent;
     const call = argument.parent;
     if (
       !ts.isCallExpression(call) ||
-      (call.expression as ts.Node) === argument
+      (call.expression as tst.Node) === argument
     ) {
       return false;
     }
@@ -1320,7 +1321,7 @@ class CodeAnalyzer {
    * position too, recording its `embeds` edge (4.3) — never a marker.
    */
   private visitTextBindingUse(
-    identifier: ts.Identifier,
+    identifier: tst.Identifier,
     binding: { readonly kind: "text"; readonly target: SpecModuleTarget },
   ): void {
     const parent = identifier.parent;
@@ -1343,7 +1344,7 @@ class CodeAnalyzer {
    * form is MDX-only (4.3 → 14.8); a cross-module node is 14.11 (4.4).
    */
   private analyzeTextCall(
-    call: ts.CallExpression,
+    call: tst.CallExpression,
     calleeBinding: { readonly kind: "text"; readonly target: SpecModuleTarget },
   ): void {
     if (call.questionDotToken !== undefined) {
@@ -1509,7 +1510,7 @@ class CodeAnalyzer {
 // ---------------------------------------------------------------------------
 
 /** Whether the node carries the given modifier keyword. */
-function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
+function hasModifier(node: tst.Node, kind: tst.SyntaxKind): boolean {
   return (
     ts.canHaveModifiers(node) &&
     (ts.getModifiers(node) ?? []).some((modifier) => modifier.kind === kind)
@@ -1517,7 +1518,7 @@ function hasModifier(node: ts.Node, kind: ts.SyntaxKind): boolean {
 }
 
 /** Whether the expression is a function, arrow, or class expression. */
-function isFunctionOrClassExpression(expression: ts.Expression): boolean {
+function isFunctionOrClassExpression(expression: tst.Expression): boolean {
   return (
     ts.isFunctionExpression(expression) ||
     ts.isArrowFunction(expression) ||
@@ -1525,7 +1526,7 @@ function isFunctionOrClassExpression(expression: ts.Expression): boolean {
   );
 }
 
-function stripParentheses(expression: ts.Expression): ts.Expression {
+function stripParentheses(expression: tst.Expression): tst.Expression {
   let current = expression;
   while (ts.isParenthesizedExpression(current)) current = current.expression;
   return current;
@@ -1540,9 +1541,9 @@ function stripParentheses(expression: ts.Expression): ts.Expression {
  * sibling token would overshoot it.
  */
 function firstTokenStartAfter(
-  node: ts.Node,
+  node: tst.Node,
   boundary: number,
-  sourceFile: ts.SourceFile,
+  sourceFile: tst.SourceFile,
 ): number {
   for (const child of node.getChildren(sourceFile)) {
     if (child.getEnd() <= boundary) continue;
@@ -1570,7 +1571,7 @@ function firstTokenStartAfter(
  * `default` when the exported construct is anonymous. Signature-only
  * declarations (overloads, abstract members) bind no executable code.
  */
-function unitName(node: ts.Node): string | null {
+function unitName(node: tst.Node): string | null {
   if (ts.isFunctionDeclaration(node)) {
     if (node.body === undefined) return null;
     if (node.name !== undefined) return node.name.text;
@@ -1624,7 +1625,7 @@ function unitName(node: ts.Node): string | null {
  * name, declaration name, label, or other non-reference role. Type
  * positions never reach this test: the walk does not descend into them.
  */
-function isValueUseSite(identifier: ts.Identifier): boolean {
+function isValueUseSite(identifier: tst.Identifier): boolean {
   const parent = identifier.parent;
   if (ts.isPropertyAccessExpression(parent) && parent.name === identifier) {
     return false;
@@ -1690,10 +1691,10 @@ function isValueUseSite(identifier: ts.Identifier): boolean {
  * reference dynamic). The result is the expression classified as marker
  * (SPEC 4.5), `text` argument, or unsanctioned use.
  */
-function climbUseExpression(identifier: ts.Identifier): ts.Expression {
-  let use: ts.Expression = identifier;
+function climbUseExpression(identifier: tst.Identifier): tst.Expression {
+  let use: tst.Expression = identifier;
   for (;;) {
-    const parent: ts.Node = use.parent;
+    const parent: tst.Node = use.parent;
     if (
       (ts.isPropertyAccessExpression(parent) ||
         ts.isElementAccessExpression(parent)) &&
@@ -1717,8 +1718,8 @@ function climbUseExpression(identifier: ts.Identifier): ts.Expression {
 }
 
 /** The leftmost root identifier of a chain-shaped expression, if any. */
-function leftmostIdentifier(expression: ts.Expression): ts.Identifier | null {
-  let node: ts.Expression = expression;
+function leftmostIdentifier(expression: tst.Expression): tst.Identifier | null {
+  let node: tst.Expression = expression;
   for (;;) {
     if (ts.isIdentifier(node)) return node;
     if (

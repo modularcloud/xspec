@@ -391,3 +391,25 @@ artifact; see `AGENTS.md`). Diagnose any residual failure against SPEC.md
 fix small residues directly, or append precise tasks here for anything larger.
 Product green + this file emptied ends the phase (delete this file when its last
 task is removed).
+
+(2026-08-30 sweep, product side landed: the sweep found two reds, P-11 and
+P-12, both rooted in per-invocation cost, and fixed the product half. The
+canonical serializer (`src/core/canonical-json.ts`) is now an iterative
+single-buffer emitter — linear time, no recursion — with pretty indentation
+bounded at 32 levels (`MAX_INDENT_LEVELS`): byte-identical output for every
+document nested within the bound (verified over view/query/check/graph-data on
+a staged workspace), and a depth-4096 fuzz tower's `view` answer is ~35 MB in
+~4 s instead of quadratic-indentation gigabytes; `view`'s node-tree walk
+(`src/cli/commands/view.ts` `nodeJson`) builds iteratively, children before
+parents, so depth-4096 nesting no longer overflows the call stack. The
+TypeScript compiler module loads once through `createRequire`
+(`src/core/ts-module.ts`; all four former ESM import sites route through it),
+cutting every configuration-parsing invocation ~0.5 s → ~0.26 s — that took
+P-12 from a 600 s timeout to 321 s green locally. Remaining red: P-11 alone,
+now failing INSIDE THE HARNESS — its recursive `decodeViewNodeForm`
+(`test/helpers/adapters/forms.ts`) overflows on the depth-2048 view tree its
+own generator draws (CI seed 271828183, trial 1) after the product answers
+conformingly; no product change can clear it (SPEC 11.4 mandates the full
+tree). Logged 2026-08-30 in `specs/tmp/TEST-SPEC-PROBLEMS.md`. When the
+harness-side fix lands, rerun this sweep — expected then: full suite green,
+CI legs green, empty this file.)

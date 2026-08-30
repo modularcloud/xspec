@@ -17,7 +17,8 @@
 // (the text of the `sourceFile` handed in); callers translate them into
 // document byte ranges (SPEC 1.7).
 
-import ts from "typescript";
+import ts from "./ts-module.js";
+import type * as tst from "typescript";
 
 /**
  * A half-open span of UTF-16 code-unit offsets into the analyzed source
@@ -108,14 +109,14 @@ export type ClassifiedReference =
   ClassifiedString | ClassifiedChain | ClassifiedDynamic;
 
 /** The span of a node's own characters (leading trivia excluded). */
-function spanOf(node: ts.Node, sourceFile: ts.SourceFile): TextSpan {
+function spanOf(node: tst.Node, sourceFile: tst.SourceFile): TextSpan {
   return { start: node.getStart(sourceFile), end: node.getEnd() };
 }
 
 /** The quote character a string literal was written with. */
 function quoteOf(
-  literal: ts.StringLiteral,
-  sourceFile: ts.SourceFile,
+  literal: tst.StringLiteral,
+  sourceFile: tst.SourceFile,
 ): '"' | "'" {
   const quote = sourceFile.text[literal.getStart(sourceFile)];
   if (quote !== '"' && quote !== "'") {
@@ -134,8 +135,8 @@ function quoteOf(
  * parentheses, and any other index or expression form.
  */
 export function classifyReference(
-  expression: ts.Expression,
-  sourceFile: ts.SourceFile,
+  expression: tst.Expression,
+  sourceFile: tst.SourceFile,
 ): ClassifiedReference {
   const whole = spanOf(expression, sourceFile);
   const dynamic = (reason: string): ClassifiedDynamic => ({
@@ -167,7 +168,7 @@ export function classifyReference(
   // Walk a candidate property chain from the outermost access inward
   // (SPEC 2.4); segments are collected outermost-first and reversed.
   const collected: ClassifiedSegment[] = [];
-  let node: ts.Expression = expression;
+  let node: tst.Expression = expression;
   for (;;) {
     if (ts.isIdentifier(node)) {
       return {
@@ -255,8 +256,8 @@ export function classifyReference(
  * into `text`.
  */
 export function parseExpressionText(text: string): {
-  readonly sourceFile: ts.SourceFile;
-  readonly expression: ts.Expression | null;
+  readonly sourceFile: tst.SourceFile;
+  readonly expression: tst.Expression | null;
 } {
   const sourceFile = ts.createSourceFile(
     "xspec-expression.ts",

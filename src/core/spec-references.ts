@@ -24,7 +24,8 @@
 // every identity of such a file is undefined (SPEC 11.2) — a condition
 // decidable per file, so their 14.5/14.6 is reported here directly.
 
-import ts from "typescript";
+import ts from "./ts-module.js";
+import type * as tst from "typescript";
 import type { ByteRange } from "./bytes.js";
 import { Utf8Offsets } from "./bytes.js";
 import type { Finding } from "./findings.js";
@@ -370,7 +371,7 @@ class SpanTranslator {
 }
 
 /** Every identifier an import clause binds, in written order. */
-function boundIdentifiers(clause: ts.ImportClause | undefined): string[] {
+function boundIdentifiers(clause: tst.ImportClause | undefined): string[] {
   if (clause === undefined) {
     return [];
   }
@@ -610,10 +611,10 @@ export function analyzeSpecImports(
 
 /** The parsed shape of one recorded import statement's exact text. */
 interface ParsedImport {
-  readonly sourceFile: ts.SourceFile;
-  readonly importClause: ts.ImportClause | undefined;
-  readonly moduleSpecifier: ts.Expression;
-  readonly attributes: ts.ImportAttributes | undefined;
+  readonly sourceFile: tst.SourceFile;
+  readonly importClause: tst.ImportClause | undefined;
+  readonly moduleSpecifier: tst.Expression;
+  readonly attributes: tst.ImportAttributes | undefined;
 }
 
 /** Re-parse one import declaration's exact text (positions are local). */

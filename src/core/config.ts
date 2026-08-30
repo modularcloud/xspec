@@ -18,7 +18,8 @@
 // `Configuration` or to condition-14 findings. Locating and reading the
 // file is the workspace layer's (src/workspace/config.ts).
 
-import ts from "typescript";
+import ts from "./ts-module.js";
+import type * as tst from "typescript";
 import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
 import type { CompiledGlob } from "./glob.js";
@@ -158,7 +159,7 @@ class ConfigFindings {
 // ---------------------------------------------------------------------------
 
 /** 1-based line of a node's start, for actionable findings (SPEC 14). */
-function lineOf(node: ts.Node, sourceFile: ts.SourceFile): number {
+function lineOf(node: tst.Node, sourceFile: tst.SourceFile): number {
   return (
     sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
   );
@@ -211,11 +212,11 @@ const FORM_EXPECTATION =
  * argument expression, or null after reporting the deviations.
  */
 function checkForm(
-  sourceFile: ts.SourceFile,
+  sourceFile: tst.SourceFile,
   findings: ConfigFindings,
-): ts.Expression | null {
-  let importDecl: ts.ImportDeclaration | undefined;
-  let exportAssign: ts.ExportAssignment | undefined;
+): tst.Expression | null {
+  let importDecl: tst.ImportDeclaration | undefined;
+  let exportAssign: tst.ExportAssignment | undefined;
   let ok = true;
   for (const statement of sourceFile.statements) {
     if (importDecl === undefined && ts.isImportDeclaration(statement)) {
@@ -253,8 +254,8 @@ function checkForm(
  * "xspec", optionally aliased. Returns the local binding name, or null.
  */
 function checkImport(
-  decl: ts.ImportDeclaration,
-  sourceFile: ts.SourceFile,
+  decl: tst.ImportDeclaration,
+  sourceFile: tst.SourceFile,
   findings: ConfigFindings,
 ): string | null {
   let ok = true;
@@ -343,11 +344,11 @@ function checkImport(
  * exactly one (sole) argument. Returns the argument expression, or null.
  */
 function checkExport(
-  decl: ts.ExportAssignment,
+  decl: tst.ExportAssignment,
   binding: string | null,
-  sourceFile: ts.SourceFile,
+  sourceFile: tst.SourceFile,
   findings: ConfigFindings,
-): ts.Expression | null {
+): tst.Expression | null {
   if (decl.isExportEquals === true) {
     findings.add(
       `\`export =\` is not the declarative form — use ` +
@@ -432,7 +433,7 @@ interface ObjectNode {
 }
 
 /** Names the rejected expression form in "not statically literal" findings. */
-function describeExpression(expr: ts.Expression): string {
+function describeExpression(expr: tst.Expression): string {
   if (ts.isNumericLiteral(expr) || ts.isBigIntLiteral(expr)) {
     return "a number literal";
   }
@@ -462,8 +463,8 @@ const LITERAL_EXPECTATION =
  * part failed.
  */
 function reduceLiteral(
-  expr: ts.Expression,
-  sourceFile: ts.SourceFile,
+  expr: tst.Expression,
+  sourceFile: tst.SourceFile,
   findings: ConfigFindings,
 ): ConfigNode | null {
   const line = lineOf(expr, sourceFile);
