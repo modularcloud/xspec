@@ -365,19 +365,12 @@ T13.3-2 and section-6.6/11.6/14 files green; T12.2-2's family 4 conforms
 (verified by hand) but the test aborts earlier, at its family-3 missing
 arm, on C5's defect.)
 
-### C5. 14.10 unit-form findings concern the graph-data area
-
-SPEC 14.10, 11.6. The graph-data mismatch/missing staleness finding still
-names `.xspec/graph.json`: the `staleFinding(GRAPH_DATA_PATH, "does not
-match")` arm of `stalenessFindings` (`src/workspace/check.ts` ~175, beside
-C4's unreadable arm). Required: both unit forms' concerned path is the
-graph-data area itself — `.xspec`, the 11.6 spelling, no trailing
-separator — never any path inside it (the record's layout is unenumerated,
-13.3); the finding is one unit-form condition-10 finding instructing
-rebuilding, not the per-file message shape.
-
-Verify: T12.2-2/3 (`section-12.1-12.2.test.ts` — both currently abort at
-their missing-arm unit-form assertions on exactly this), T14 arms.
+(C5 landed: both 14.10 unit forms concern the graph-data area —
+`mismatchedGraphDataStaleFinding()` in `src/workspace/check.ts` replaces
+the per-file `staleFinding(GRAPH_DATA_PATH, …)` arm: one condition-10
+finding, concerned path `GRAPH_DATA_AREA` (`.xspec`), locations empty,
+covering missing and mismatch as one form beside C4's unreadable arm.
+Section-12.1-12.2, section-13.3, and section-14 files all green.)
 
 ### C6. Review payloads carry source ranges for every present node
 

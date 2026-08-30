@@ -25,7 +25,6 @@ import type { Finding } from "../core/findings.js";
 import { pathFinding } from "../core/findings.js";
 import {
   GRAPH_DATA_AREA,
-  GRAPH_DATA_PATH,
   graphDataMatchesCurrent,
 } from "../core/graph-data.js";
 import type { LoadedGraphData } from "./graph-data.js";
@@ -70,6 +69,26 @@ function orphanFinding(rel: string): Finding {
 }
 
 /**
+ * SPEC 14.10's mismatch/missing unit form: graph data that is missing or
+ * does not match the current sources and configuration (the comparison of
+ * 13.3, the recorded derived-file paths excluded) — one condition-10
+ * finding instructing rebuilding, concerned path the graph-data area
+ * itself (the record's layout is deliberately unenumerated, SPEC
+ * 13.3/11.6, so no path inside it is named), never the per-file message
+ * shape.
+ */
+function mismatchedGraphDataStaleFinding(): Finding {
+  return pathFinding(
+    10,
+    `stale generated output: the graph data under the graph-data area is ` +
+      `missing or does not match the current sources and configuration; ` +
+      `run \`xspec build\` to regenerate every derived file (SPEC 14.10, ` +
+      `13.3)`,
+    GRAPH_DATA_AREA,
+  );
+}
+
+/**
  * SPEC 14.10's unreadable-record unit form: recorded generation state that
  * exists but cannot be read as a record (14.23) is staleness — one
  * condition-10 finding instructing rebuilding, concerned path the
@@ -93,11 +112,12 @@ function unreadableRecordStaleFinding(): Finding {
  *
  * - each derived file the current sources and configuration generate whose
  *   path holds different bytes, no plain file, or nothing at all;
- * - the graph data, as one unit in two exclusive forms (SPEC 14.10):
- *   recorded state that exists but cannot be read as a record (SPEC 14.23)
- *   under the unreadable-record form, concerned path the graph-data area;
- *   otherwise the shared compare-with-current predicate (SPEC 13.3 — the
- *   retained derived-file record is never staleness);
+ * - the graph data, as one unit in two exclusive forms (SPEC 14.10), each
+ *   one finding whose concerned path is the graph-data area itself, no
+ *   path inside it named: recorded state that exists but cannot be read as
+ *   a record (SPEC 14.23) under the unreadable-record form; otherwise the
+ *   missing-or-mismatch form by the shared compare-with-current predicate
+ *   (SPEC 13.3 — the retained derived-file record is never staleness);
  * - each recorded derived file remaining (anything occupying its path) at
  *   a path the current build no longer generates (`outputs.orphans`) —
  *   undetectable, and so unreported, while the unreadable-record state
@@ -160,7 +180,7 @@ export async function stalenessFindings(
   } else if (
     !graphDataMatchesCurrent(stored.bytes, stored.data, outputs.graphData)
   ) {
-    findings.push(staleFinding(GRAPH_DATA_PATH, "does not match"));
+    findings.push(mismatchedGraphDataStaleFinding());
   }
 
   // SPEC 14.10's recorded-orphan arm: `outputs.orphans` holds the recorded
