@@ -10,14 +10,19 @@
 //   2. `--coverage`: the named profile must be configured (SPEC 10.7 →
 //      12.0 "unknown profiles named in arguments", exit 2) — a
 //      configuration-level check preceding source analysis;
-//   3. `--base`: baseline resolution (SPEC 6.3 → 12.0, exit 2) — precedes
-//      source validation;
-//   4. refresh-on-read (SPEC 13.3): invalid sources report the validation
-//      errors, exit 1, nothing created;
-//   5. an existing session name — matched ignoring ASCII case (SPEC 10.1)
+//   3. `--base`: read the baseline — ref resolution and the journal
+//      prefix/replay (SPEC 6.3 → 12.0, exit 2) — preceding source
+//      validation;
+//   4. the SPEC 13.3 gate: invalid sources report the validation errors,
+//      exit 1, nothing created;
+//   5. `--base`: validate the baseline content as a workspace (SPEC 6.3 →
+//      12.0, exit 2) — past the gate, so a baseline sharing the current
+//      workspace's findings is the gate's exit-1 report — then commit the
+//      refresh write (a no-op when the store already matches);
+//   6. an existing session name — matched ignoring ASCII case (SPEC 10.1)
 //      — is refused, exit 1, nothing created (SPEC 10.7); an exact-name
 //      corrupt occupant reports the corruption instead (SPEC 10.1, 14.21);
-//   6. derive the items (SPEC 10.5–10.7), validate the write path
+//   7. derive the items (SPEC 10.5–10.7), validate the write path
 //      (SPEC 14.22), and write the session file (SPEC 10.1, 13.4).
 //
 // `list` (read) — refresh-on-read, then every session in byte order of
@@ -52,9 +57,16 @@ import {
   expandDecompositions,
 } from "../../core/review-derive.js";
 import { spellingOfReference } from "../../core/review-state.js";
-import type { ResolvedBaseline } from "../../workspace/baseline.js";
-import { resolveBaseline } from "../../workspace/baseline.js";
+import type {
+  BaselineRead,
+  ResolvedBaseline,
+} from "../../workspace/baseline.js";
+import {
+  readBaseline,
+  validateBaselineContent,
+} from "../../workspace/baseline.js";
 import { withMutationExclusivity } from "../../workspace/lock.js";
+import { assessWorkspaceRead } from "../../workspace/refresh.js";
 import {
   listSessionNames,
   loadAllSessions,
@@ -65,7 +77,7 @@ import { symlinkWritePathFindings } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
 import { flagValue } from "../args.js";
 import type { CommandContext } from "../io.js";
-import { prepareGraphForRead } from "../prepare.js";
+import { analyzeGraphForRead, prepareGraphForRead } from "../prepare.js";
 import { emitFindingsReport } from "../report.js";
 import { emitDocument, testHoldSpecOf, usageError } from "./common.js";
 import {
@@ -105,7 +117,7 @@ async function runCreate(
   const baseRef = flagValue(invocation, "--base");
   const profileName = flagValue(invocation, "--coverage");
   let parameters: SessionParameters;
-  let baseline: ResolvedBaseline | undefined;
+  let baselineRead: BaselineRead | undefined;
   if (profileName !== undefined) {
     // SPEC 10.7 → 12.0: an unknown profile named in arguments is a usage
     // error — a configuration-level check preceding source analysis, as
@@ -126,33 +138,56 @@ async function runCreate(
       profile: recordCoverageProfile(workspace.configuration, profile),
     };
   } else if (baseRef !== undefined) {
-    // SPEC 6.3 → 12.0: baseline resolution precedes source validation — an
-    // unresolvable baseline is a usage error (exit 2), nothing modified,
+    // SPEC 6.3 → 12.0: reading the baseline — ref resolution and the
+    // journal prefix/replay — precedes source validation: an unresolvable
+    // ref or a replay failure is a usage error (exit 2), nothing modified,
     // even when the current sources also fail build validation.
-    const resolution = await resolveBaseline(workspace, baseRef);
+    const resolution = await readBaseline(workspace, baseRef);
     if (!resolution.ok) {
       return usageError(invocation, context, resolution.message);
     }
-    baseline = resolution.baseline;
+    baselineRead = resolution.read;
     // SPEC 10.7: a baseline session records the commit identity `--base`
     // resolved to at creation, never the ref spelling.
     parameters = {
       strategy: "path-blocks",
-      baseCommit: resolution.baseline.commit,
+      baseCommit: resolution.read.commit,
     };
   } else {
     // SPEC 10.7: an audit session records no creation parameters.
     parameters = { strategy: "audit" };
   }
 
-  // SPEC 13.3: refresh-on-read — with invalid sources, report the
-  // validation errors, exit 1, nothing created (a `review` subcommand like
-  // any other).
-  const prepared = await prepareGraphForRead(invocation, context);
-  if (!prepared.ok) {
-    return prepared.exit;
+  // SPEC 13.3/14.14: analyze the current workspace (configuration errors
+  // exit 2), then the gate — with invalid sources, report the validation
+  // errors, exit 1, nothing created (a `review` subcommand like any other);
+  // the baseline content is not validated past it (module header).
+  const analyzed = await analyzeGraphForRead(invocation, context);
+  if (!analyzed.ok) {
+    return analyzed.exit;
   }
-  const { analysis } = prepared;
+  const { analysis } = analyzed;
+  const assessed = await assessWorkspaceRead(workspace, analysis);
+  if (assessed.kind === "findings") {
+    emitFindingsReport(invocation.json, stdout, assessed.findings);
+    return 1;
+  }
+
+  // SPEC 6.3 → 12.0: past the gate, a baseline whose content cannot be
+  // parsed and validated as a workspace is a usage error (exit 2) —
+  // reported before the refresh write commits, so nothing is modified.
+  let baseline: ResolvedBaseline | undefined;
+  if (baselineRead !== undefined) {
+    const resolution = await validateBaselineContent(baselineRead);
+    if (!resolution.ok) {
+      return usageError(invocation, context, resolution.message);
+    }
+    baseline = resolution.baseline;
+  }
+
+  // SPEC 13.3: the one refresh write (a no-op when the store already
+  // matches), every pre-creation check of the workspace passed.
+  await assessed.commit();
 
   // SPEC 10.1/10.7: `create` with the name of an existing session is
   // refused (exit 1, nothing created); a name matching an existing

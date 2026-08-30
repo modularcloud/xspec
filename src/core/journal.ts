@@ -91,12 +91,26 @@ export interface PositionedJournalEntry extends JournalEntry {
   readonly range: ByteRange;
 }
 
+/**
+ * A journal parse finding positioned at its offending line. A plain Finding
+ * everywhere findings flow (the extra member never renders — the JSON form
+ * extracts the 12.7 members explicitly); the line carries the prefix/suffix
+ * partition of baseline replay (SPEC 6.3): a malformed line within the
+ * baseline prefix is the workspace content's own 14.13 — reported by the
+ * SPEC 13.3 gate on the current side, or by baseline-content validation —
+ * while one in the replay suffix makes the mapping unresolvable.
+ */
+export interface PositionedJournalFinding extends Finding {
+  /** 1-based journal line number of the offending line. */
+  readonly line: number;
+}
+
 /** The result of parsing a journal file's bytes. */
 export interface ParsedJournal {
   /** The entries of the lines that parsed and validated, in file order. */
   readonly entries: readonly PositionedJournalEntry[];
   /** One 14.13 finding per malformed, conflicting, or non-canonical line. */
-  readonly findings: readonly Finding[];
+  readonly findings: readonly PositionedJournalFinding[];
 }
 
 /**
@@ -184,7 +198,7 @@ const decoder = new TextDecoder();
  */
 export function parseJournal(bytes: Uint8Array): ParsedJournal {
   const entries: PositionedJournalEntry[] = [];
-  const findings: Finding[] = [];
+  const findings: PositionedJournalFinding[] = [];
   let offset = 0;
   let line = 0;
   while (offset < bytes.length) {
@@ -204,18 +218,24 @@ export function parseJournal(bytes: Uint8Array): ParsedJournal {
 }
 
 /** One 14.13 finding for a bad journal line, naming the line (SPEC 14.13). */
-function journalFinding(line: number, problem: string): Finding {
+function journalFinding(
+  line: number,
+  problem: string,
+): PositionedJournalFinding {
   // SPEC 14: a journal condition carries the path it concerns, not an
   // in-source location; the offending line is named in the message.
-  return pathFinding(
-    13,
-    `journal error: the entry on line ${String(line)} of ${JOURNAL_PATH} ` +
-      `${problem} — the journal is a durable, append-only record written ` +
-      `only by \`xspec rename\` and \`xspec move\` (SPEC 6.1, 13.4); ` +
-      `restore it from version control or delete the offending line ` +
-      `(SPEC 14.13)`,
-    JOURNAL_PATH,
-  );
+  return {
+    ...pathFinding(
+      13,
+      `journal error: the entry on line ${String(line)} of ${JOURNAL_PATH} ` +
+        `${problem} — the journal is a durable, append-only record written ` +
+        `only by \`xspec rename\` and \`xspec move\` (SPEC 6.1, 13.4); ` +
+        `restore it from version control or delete the offending line ` +
+        `(SPEC 14.13)`,
+      JOURNAL_PATH,
+    ),
+    line,
+  };
 }
 
 type LineResult =
@@ -824,10 +844,16 @@ export type JournalReplayResult =
  * append-only, SPEC 6.1) — and the entries beyond that prefix are the
  * replay, applied in file order with chained mappings composing.
  *
- * Callers validate the baseline journal first (a baseline whose journal has
- * malformed lines fails workspace validation, 14.13, before replay is ever
- * computed); with the prefix holding, any malformed current line therefore
- * lies in the replay suffix and makes the mapping unresolvable.
+ * Replay judges only the lines it applies: a malformed line in the replay
+ * suffix makes the mapping unresolvable (the failure names it), while a
+ * malformed line within the shared prefix — present identically on both
+ * sides, so nothing of it is replayed — is not a replay failure. Such a
+ * line is the workspace content's own journal error (14.13), on both sides
+ * at once: callers sequence replay before baseline-content validation
+ * (workspace/baseline.ts), and the SPEC 13.3 gate reports the current
+ * side's finding first (SPEC 12.0 — replay failures precede the gate, the
+ * gate precedes baseline-content validation), so the prefix's 14.13 is the
+ * gate's exit-1 report, never an exit-2 resolution error.
  */
 export function computeJournalReplay(
   baselineBytes: Uint8Array,
@@ -868,17 +894,22 @@ export function computeJournalReplay(
       };
     }
   }
-  // SPEC 6.3: replay is unresolvable when the entries to apply cannot be
-  // parsed and validated — the findings name the offending lines (14.13's
-  // message form, reused here as the naming duty's carrier).
+  // SPEC 6.3: replay is unresolvable when the entries to apply — the lines
+  // beyond the baseline prefix — cannot be parsed and validated; the
+  // findings name the offending lines (14.13's message form, reused here as
+  // the naming duty's carrier). Malformed lines within the prefix are not
+  // replayed and not judged here (module comment above).
   const parsed = parseJournal(currentBytes);
-  if (parsed.findings.length > 0) {
+  const suffixFindings = parsed.findings.filter(
+    (finding) => finding.line > baselineLines.length,
+  );
+  if (suffixFindings.length > 0) {
     return {
       ok: false,
       problem:
         `replaying the journal entries absent at the baseline ref ` +
         `produced no resolvable mapping — ` +
-        parsed.findings.map((finding) => finding.message).join("; "),
+        suffixFindings.map((finding) => finding.message).join("; "),
     };
   }
   return {

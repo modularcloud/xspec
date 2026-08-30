@@ -313,32 +313,22 @@ values are parse-level malformed values (`identityValueProblem` in
 `query node`/`subtree`/`ancestors`, `edges`/`reachable` `--from`/`--to`) —
 reported without loading configuration.)
 
-### C2b. A resolvable baseline over a failing workspace hits the gate, not 6.3
-
-SPEC 13.3, 12.0, 6.3. Observed at T13.3-3's garbage-journal whole-gate arm:
-`impact --base <commit>` where the commit *includes* the garbage journal line
-(baseline journal bytes = current journal bytes) exits 2 with the 6.3
-reconstruction error ("the workspace content at baseline ref … cannot be
-parsed and validated"); expected: the gate's one 14.13 finding, exit 1 —
-the test's own staging comment says "baseline resolution — which precedes
-the gate (SPEC 12.0) — succeeds and the gate is `impact --base`'s operative
-error". TEST-SPEC T6.3-4 draws the line: an *unresolvable ref* stays exit 2
-with the baseline error even over invalid sources (the precedence arm), and
-the garbage line *appended after* the baseline commit stays the exit-2
-replay failure at `impact --base` and `review create --base`; "the
-resolvable-ref counterpart over invalid sources is T13.3-3's refresh
-failure (exit 1)". Required: `resolveBaseline` (`src/workspace/baseline.ts`)
-must not fail on baseline-content validation findings the gate would report
-— sequence at `impact --base` (and `review create --base`): unresolvable
-ref → exit 2; journal prefix/replay failure → exit 2 (naming the entries);
-then the current-workspace gate → exit 1; baseline-content validation
-failure (reachable on passing current workspaces — T6.3-4's
-invalid-baseline-sources arm) → exit 2. Pin exact semantics against
-T6.3-1..4 (all currently green — keep them green) and T13.3-3.
-
-Verify: T13.3-3's garbage-journal `impact` arm (`section-13.3.test.ts` —
-its obstructed-write-path arm is C3's, its later arms C4-adjacent),
-T6.3-1..4 (`section-6.3.test.ts`).
+(C2b landed: baseline resolution is split around the gate —
+`readBaseline` (ref resolution, tree listing, journal prefix/replay;
+failures exit 2 pre-gate) and `validateBaselineContent` (baseline content
+parsed and validated as a workspace; exit 2, reachable only past the gate
+and before the refresh `commit()`), both `src/workspace/baseline.ts`;
+`resolveBaseline` remains their composition for the post-gate
+recorded-baseline call site (`loadSessionForCommand`). `impact` and
+`review create` sequence: read → `analyzeGraphForRead` →
+`assessWorkspaceRead` (findings exit 1) → validate content →
+`commit()`. `computeJournalReplay` (`src/core/journal.ts`) now judges only
+replay-suffix lines — `ParsedJournal.findings` are `PositionedJournalFinding`
+(line-carrying; the extra member never renders) — so a garbage line inside
+the shared prefix is the gate's 14.13, never a replay failure. T6.3-1..4
+green; T13.3-3's garbage-journal arm green — its obstructed-write-path arm
+stays red on C3, and T13.3-2's corrupt-record arm on C4, as their notes
+say.)
 
 ### C3. Obstructed write path: any non-directory component, refused before modifying
 
