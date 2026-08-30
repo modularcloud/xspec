@@ -49,6 +49,8 @@ import type { ByteRange } from "./bytes.js";
 import { compareBytes } from "./bytes.js";
 import type { JsonValue } from "./canonical-json.js";
 import { canonicalJson } from "./canonical-json.js";
+import type { Finding } from "./findings.js";
+import { pathFinding } from "./findings.js";
 import type {
   DependencyEdgeKind,
   GraphEdge,
@@ -69,6 +71,27 @@ export const GRAPH_DATA_AREA = ".xspec";
 
 /** SPEC 13.3/13.4: the graph-data file's workspace-relative path. */
 export const GRAPH_DATA_PATH = ".xspec/graph.json";
+
+/**
+ * The one condition-23 finding (SPEC 14.23): recorded generation state that
+ * exists but cannot be read as a record, reported by the surfaces that
+ * consult the record without refreshing it — `inventory` (SPEC 11.6) and
+ * the `rename`/`move` preview delta (SPEC 6.6) — beside their explicitly
+ * unavailable record-supplied datum. The concerned path is the graph-data
+ * area itself: the record's layout is deliberately unenumerated (SPEC
+ * 13.3), so no path inside it is named and the finding has no in-source
+ * locations.
+ */
+export function unreadableRecordFinding(): Finding {
+  return pathFinding(
+    23,
+    `the recorded generation state under the graph-data area exists but ` +
+      `cannot be read as a record, so the recorded derived-file paths are ` +
+      `unavailable — a successful \`xspec build\` (or a finishing ` +
+      `rename/move regeneration) replaces the record (SPEC 14.23, 13.3)`,
+    GRAPH_DATA_AREA,
+  );
+}
 
 /**
  * The stored format version: a parsed file of any other version is

@@ -41,10 +41,13 @@ import {
   EditCollector,
   jsStringLiteral,
 } from "./edits.js";
+import type { ByteRange } from "./bytes.js";
 import type { SpecFileAnalysis } from "./graph.js";
 import type { IdentityMapping, JournalEntry } from "./journal.js";
 import { createJournalEntry } from "./journal.js";
 import type { SpecAttributeValue, SpecDocument } from "./mdx.js";
+import type { PreviewFileEdits } from "./preview.js";
+import { PreviewCollector } from "./preview.js";
 import { classifyReference, parseExpressionText } from "./references.js";
 import type {
   ReferenceSpelling,
@@ -62,6 +65,13 @@ export interface RenamePlan {
   readonly entry: JournalEntry;
   /** Every source file with edits, byte-ordered rewrites applied. */
   readonly rewrites: readonly SourceRewrite[];
+  /**
+   * The preview plan surface (SPEC 6.6): every file the operation would
+   * rewrite, with every edit classed and located in pre-operation
+   * coordinates — collected in the same pass that derives the applied
+   * edits, so the real operation and its preview share one plan.
+   */
+  readonly previewFiles: readonly PreviewFileEdits[];
 }
 
 // ---------------------------------------------------------------------------
@@ -207,15 +217,32 @@ function chainReferenceEdit(
   return segmentEdit(affected, newLastSegment);
 }
 
+/** One reference with its SPEC 5.7 occurrence span (preview ranges). */
+interface SpannedReference {
+  readonly reference: SpecReference;
+  /**
+   * The occurrence span (SPEC 5.7): a `d` entry's own expression; an MDX
+   * embedding's full braced container — the construct a preview's
+   * `reference-rewrite` edit spans (SPEC 6.6).
+   */
+  readonly occurrence: ByteRange;
+}
+
 /** One spec file's references, `d` and `text(...)` alike (SPEC 2.2, 2.3). */
-function specReferencesOf(spec: SpecFileAnalysis): SpecReference[] {
-  const references: SpecReference[] = [];
+function specReferencesOf(spec: SpecFileAnalysis): SpannedReference[] {
+  const references: SpannedReference[] = [];
   for (const dependency of spec.references.dependencies) {
-    references.push(dependency.reference);
+    references.push({
+      reference: dependency.reference,
+      occurrence: dependency.reference.range,
+    });
   }
   for (const embedding of spec.references.embeddings) {
     if (embedding.reference !== null) {
-      references.push(embedding.reference);
+      references.push({
+        reference: embedding.reference,
+        occurrence: embedding.embedding.range,
+      });
     }
   }
   return references;
@@ -277,6 +304,10 @@ export function planRename(
   // descendant, re-identified by prefix replacement.
   const mapping: IdentityMapping[] = [];
   const edits = new EditCollector();
+  // SPEC 6.6: the preview edits, collected beside the applied edits — one
+  // classed entry per construct the operation rewrites, at the construct's
+  // own pre-operation span.
+  const preview = new PreviewCollector();
   for (const section of origin.document.sections) {
     if (section.id === null) {
       continue;
@@ -300,6 +331,9 @@ export function planRename(
       range: attribute.valueRange,
       replacement: attributeValueText(mapped, attribute.quote),
     });
+    // SPEC 6.6: an `id`-attribute rewrite spans the attribute's own
+    // characters, name through closing quote.
+    preview.add(originPath, "id-rewrite", attribute.attributeRange);
   }
   if (mapping.length === 0) {
     throw new Error(
@@ -310,10 +344,12 @@ export function planRename(
 
   // SPEC 6.4: rewrite every reference to the affected identities across all
   // configured spec sources — local string references in the origin file,
-  // external chain references everywhere.
+  // external chain references everywhere. SPEC 6.6: each rewritten
+  // reference contributes one preview `reference-rewrite` edit spanning its
+  // occurrence (SPEC 5.7).
   for (const spec of specs) {
     const path = spec.document.path;
-    for (const reference of specReferencesOf(spec)) {
+    for (const { reference, occurrence } of specReferencesOf(spec)) {
       if (reference.target.kind === "local") {
         if (path !== originPath) {
           continue; // the local form names an ID in its own file (SPEC 2.2)
@@ -332,6 +368,7 @@ export function planRename(
           range: reference.spelling.range,
           replacement: jsStringLiteral(mapped, reference.spelling.quote),
         });
+        preview.add(path, "reference-rewrite", occurrence);
         continue;
       }
       if (reference.target.modulePath !== originPath) {
@@ -345,6 +382,7 @@ export function planRename(
       );
       if (edit !== null) {
         edits.add(path, edit);
+        preview.add(path, "reference-rewrite", occurrence);
       }
     }
   }
@@ -365,6 +403,13 @@ export function planRename(
       );
       if (edit !== null) {
         edits.add(analysis.path, edit);
+        // SPEC 6.6/5.7: a marker occurrence spans the bare chain, a TS
+        // `text(...)` occurrence the whole call expression.
+        preview.add(
+          analysis.path,
+          "reference-rewrite",
+          reference.occurrenceRange,
+        );
       }
     }
   }
@@ -404,5 +449,6 @@ export function planRename(
       mapping,
     ),
     rewrites,
+    previewFiles: preview.files(),
   };
 }

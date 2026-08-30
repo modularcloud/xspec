@@ -72,7 +72,7 @@ import {
   writeSourceFile,
 } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
-import { jsonOutputInEffect } from "../args.js";
+import { flagPresent, flagValue, jsonOutputInEffect } from "../args.js";
 import type { CliWriter, CommandContext } from "../io.js";
 import {
   emitAppliedMappingReport,
@@ -80,6 +80,7 @@ import {
   emitFindingsReport,
 } from "../report.js";
 import { testHoldSpecOf, usageError } from "./common.js";
+import { emitRefusedPreview, emitSuccessfulPreview } from "./preview.js";
 
 /**
  * SPEC 6.4/12.0/12.7: a refused rename is a validation failure — exit 1,
@@ -87,13 +88,19 @@ import { testHoldSpecOf, usageError } from "./common.js";
  * reports are standard-output content; with `--json`, one JSON document as
  * the entire standard output). Workspace-precondition findings and
  * refusal-reason findings alike go through here — never mixed in one
- * report (SPEC 14).
+ * report (SPEC 14). A refused `--preview` reports exactly the same
+ * findings and exit, in the preview document form with `mapping`, `files`,
+ * and `delta` null (SPEC 6.6, 12.7).
  */
 function emitFindingsRefusal(
+  preview: boolean,
   json: boolean,
   stdout: CliWriter,
   findings: readonly Finding[],
 ): ExitCode {
+  if (preview) {
+    return emitRefusedPreview(json, stdout, findings);
+  }
   emitFindingsReport(json, stdout, findings);
   return 1;
 }
@@ -113,13 +120,18 @@ function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
   return out;
 }
 
-/** The rename operation, run under workspace exclusivity (SPEC 13.5). */
+/**
+ * The rename operation — run under workspace exclusivity (SPEC 13.5), or
+ * as its `--preview` (SPEC 6.6), which shares every validation and the
+ * plan, takes no exclusivity, and modifies nothing.
+ */
 async function runRename(
   invocation: Invocation,
   context: CommandContext,
   file: string,
   oldId: string,
   newId: string,
+  preview: boolean,
 ): Promise<ExitCode> {
   const { workspace, stdout, stderr } = context;
   const analysis = await analyzeWorkspace(workspace);
@@ -153,7 +165,12 @@ async function runRename(
   // validation findings are reported and the command exits 1.
   const origin = analysis.specs.find((s) => s.document.path === file);
   if (origin === undefined) {
-    return emitFindingsRefusal(invocation.json, stdout, analysis.findings);
+    return emitFindingsRefusal(
+      preview,
+      invocation.json,
+      stdout,
+      analysis.findings,
+    );
   }
 
   // SPEC 6.4 → 12.0: a nonexistent old ID is a usage error, checked before
@@ -173,22 +190,46 @@ async function runRename(
   // numbered findings alone: no refusal reason is evaluated or reported
   // beside them (SPEC 14).
   if (analysis.findings.length > 0) {
-    return emitFindingsRefusal(invocation.json, stdout, analysis.findings);
+    return emitFindingsRefusal(
+      preview,
+      invocation.json,
+      stdout,
+      analysis.findings,
+    );
   }
 
   // SPEC 6.4/14: evaluate every applicable refusal reason together over
   // the valid workspace — one finding per reason, never only the first
   // found, each with its stable code and concerned identity or located
   // bearer — and refuse (exit 1) with the 12.7 findings report, nothing
-  // modified.
+  // modified. `--preview` shares exactly this evaluation (SPEC 6.6).
   const refusals = evaluateRenameRefusals({ origin, oldId, newId });
   if (refusals.length > 0) {
-    return emitFindingsRefusal(invocation.json, stdout, refusals);
+    return emitFindingsRefusal(preview, invocation.json, stdout, refusals);
   }
 
-  // The pure plan: the identity mapping, the journal entry, and the minimal
-  // in-place rewrites of every affected source (SPEC 6.4, 6.1).
+  // The pure plan: the identity mapping, the journal entry, the minimal
+  // in-place rewrites of every affected source, and the classed preview
+  // edits — one plan for the real operation and its preview (SPEC 6.4,
+  // 6.1, 6.6).
   const plan = planRename(analysis.specs, analysis.code, file, oldId, newId);
+
+  // SPEC 6.6: a preview reports the plan and performs it on nothing — the
+  // complete identity mapping the operation would journal (the journal
+  // entry's canonical `from`-byte order), the per-file edits, and the
+  // record-based derived-file delta (a rename regenerates every derived
+  // path in place, so the post-operation generation set is the current
+  // source set's).
+  if (preview) {
+    return emitSuccessfulPreview(
+      invocation.json,
+      stdout,
+      workspace,
+      plan.entry.mapping,
+      plan.previewFiles,
+      analysis.classification.specSources.map((source) => source.path),
+    );
+  }
 
   // Re-validate the rewritten workspace in memory before touching anything
   // (SPEC 6.4: structural rules remain satisfied and all rewritten
@@ -213,7 +254,12 @@ async function runRename(
     // every reason a rename can be refused for, so a validated plan leaves
     // a valid workspace. Guarded so a regression refuses (exit 1, nothing
     // modified) rather than corrupts.
-    return emitFindingsRefusal(invocation.json, stdout, rewritten.findings);
+    return emitFindingsRefusal(
+      false,
+      invocation.json,
+      stdout,
+      rewritten.findings,
+    );
   }
 
   // SPEC 6.4/12.1: the finishing regeneration's outputs, derived exactly as
@@ -240,7 +286,7 @@ async function runRename(
     ...outputs.writePaths,
   ]);
   if (writeFindings.length > 0) {
-    return emitFindingsRefusal(invocation.json, stdout, writeFindings);
+    return emitFindingsRefusal(false, invocation.json, stdout, writeFindings);
   }
 
   // All validation passed — modify: rewrite the sources (atomic per file,
@@ -297,7 +343,7 @@ async function reanalyzeRewritten(
   });
 }
 
-/** The `rename` command handler (SPEC 6.4). */
+/** The `rename` command handler (SPEC 6.4, 6.6). */
 export async function renameCommand(
   invocation: Invocation,
   context: CommandContext,
@@ -307,6 +353,22 @@ export async function renameCommand(
     // Unreachable: the parser enforces the three positionals (SPEC 6.4).
     throw new Error("xspec internal error: rename without its arguments");
   }
+  // SPEC 6.6/13.5: a preview invocation is a non-mutating command — it
+  // acquires no workspace exclusivity and does not take the
+  // acquisition-tied test seam, so `--test-hold` together with `--preview`
+  // is a usage error (exit 2), no hold file created, nothing modified.
+  if (flagPresent(invocation, "--preview")) {
+    if (flagValue(invocation, "--test-hold") !== undefined) {
+      return usageError(
+        invocation,
+        context,
+        `--test-hold cannot be combined with --preview: a preview acquires ` +
+          `no workspace exclusivity and does not take the acquisition-tied ` +
+          `test seam (SPEC 6.6, 13.5, 12.0)`,
+      );
+    }
+    return runRename(invocation, context, file, oldId, newId, true);
+  }
   // SPEC 13.5: workspace exclusivity around the whole operation, with the
   // `--test-hold` seam immediately after acquisition; a workspace held by
   // another mutating command fails promptly as a usage error (12.0),
@@ -314,7 +376,7 @@ export async function renameCommand(
   const outcome = await withMutationExclusivity(
     context.workspace.root,
     testHoldSpecOf(invocation, context.cwd),
-    () => runRename(invocation, context, file, oldId, newId),
+    () => runRename(invocation, context, file, oldId, newId, false),
   );
   if (!outcome.ok) {
     return usageError(invocation, context, outcome.usageMessage);

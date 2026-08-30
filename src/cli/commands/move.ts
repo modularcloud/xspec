@@ -109,7 +109,12 @@ import {
   writeSourceFile,
 } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
-import { isValidUtf8ArgumentValue, jsonOutputInEffect } from "../args.js";
+import {
+  flagPresent,
+  flagValue,
+  isValidUtf8ArgumentValue,
+  jsonOutputInEffect,
+} from "../args.js";
 import type { CliWriter, CommandContext } from "../io.js";
 import {
   emitAppliedMappingReport,
@@ -117,6 +122,7 @@ import {
   emitFindingsReport,
 } from "../report.js";
 import { testHoldSpecOf, usageError } from "./common.js";
+import { emitRefusedPreview, emitSuccessfulPreview } from "./preview.js";
 
 /**
  * SPEC 6.5/12.0/12.7: a refused move is a validation failure — exit 1, the
@@ -124,13 +130,19 @@ import { testHoldSpecOf, usageError } from "./common.js";
  * reports are standard-output content; with `--json`, one JSON document as
  * the entire standard output). Workspace-precondition findings and
  * refusal-reason findings alike go through here — never mixed in one
- * report (SPEC 14).
+ * report (SPEC 14). A refused `--preview` reports exactly the same
+ * findings and exit, in the preview document form with `mapping`, `files`,
+ * and `delta` null (SPEC 6.6, 12.7).
  */
 function emitFindingsRefusal(
+  preview: boolean,
   json: boolean,
   stdout: CliWriter,
   findings: readonly Finding[],
 ): ExitCode {
+  if (preview) {
+    return emitRefusedPreview(json, stdout, findings);
+  }
   emitFindingsReport(json, stdout, findings);
   return 1;
 }
@@ -208,12 +220,17 @@ function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
   return out;
 }
 
-/** The move operation, run under workspace exclusivity (SPEC 13.5). */
+/**
+ * The move operation — run under workspace exclusivity (SPEC 13.5), or as
+ * its `--preview` (SPEC 6.6), which shares every validation and the plan,
+ * takes no exclusivity, and modifies nothing.
+ */
 async function runMove(
   invocation: Invocation,
   context: CommandContext,
   originArg: string,
   destinationArg: string,
+  preview: boolean,
 ): Promise<ExitCode> {
   const { workspace, stdout, stderr } = context;
 
@@ -270,7 +287,12 @@ async function runMove(
     (s) => s.document.path === origin.file,
   );
   if (originSpec === undefined) {
-    return emitFindingsRefusal(invocation.json, stdout, analysis.findings);
+    return emitFindingsRefusal(
+      preview,
+      invocation.json,
+      stdout,
+      analysis.findings,
+    );
   }
 
   // SPEC 6.5 → 12.0: a nonexistent origin ID (section form) is a usage
@@ -293,7 +315,12 @@ async function runMove(
   // workspace fails the validations of `xspec build` — move only ever
   // rewrites a valid workspace. The findings are the report (SPEC 12.0).
   if (analysis.findings.length > 0) {
-    return emitFindingsRefusal(invocation.json, stdout, analysis.findings);
+    return emitFindingsRefusal(
+      preview,
+      invocation.json,
+      stdout,
+      analysis.findings,
+    );
   }
 
   if (origin.id !== null) {
@@ -308,6 +335,7 @@ async function runMove(
       origin.id,
       destination.file,
       destination.id,
+      preview,
     );
   }
 
@@ -317,6 +345,7 @@ async function runMove(
     analysis,
     origin.file,
     destinationArg,
+    preview,
   );
 }
 
@@ -327,13 +356,15 @@ async function runMoveFile(
   analysis: WorkspaceAnalysis,
   originPath: string,
   destination: string,
+  preview: boolean,
 ): Promise<ExitCode> {
   const { workspace, stdout, stderr } = context;
 
   // SPEC 6.5/14: evaluate every applicable refusal reason together over
   // the valid workspace — destination occupancy and validity, identity
   // change, and the would-be cycles, one finding per reason — and refuse
-  // (exit 1) with the 12.7 findings report, nothing modified.
+  // (exit 1) with the 12.7 findings report, nothing modified. `--preview`
+  // shares exactly this evaluation (SPEC 6.6).
   const { assessment, probe } = await assessAndProbeDestination(
     workspace,
     destination,
@@ -348,17 +379,37 @@ async function runMoveFile(
     probe,
   });
   if (refusals.length > 0) {
-    return emitFindingsRefusal(invocation.json, stdout, refusals);
+    return emitFindingsRefusal(preview, invocation.json, stdout, refusals);
   }
 
   // The pure plan: the identity mapping (file part only), the journal
-  // entry, and the minimal import-specifier rewrites (SPEC 6.5, 6.1).
+  // entry, the minimal import-specifier rewrites, and the classed preview
+  // edits — one plan for the real operation and its preview (SPEC 6.5,
+  // 6.1, 6.6).
   const plan = planMoveFile(
     analysis.specs,
     analysis.code,
     originPath,
     destination,
   );
+
+  // SPEC 6.6: a preview reports the plan and performs it on nothing. The
+  // post-operation generation set follows the post-move source set — the
+  // origin's entry replaced by the destination — so the delta carries the
+  // destination's newly generated derived paths and the recorded pre-move
+  // paths left no longer generated (SPEC 6.6, 13.1–13.3).
+  if (preview) {
+    return emitSuccessfulPreview(
+      invocation.json,
+      stdout,
+      workspace,
+      plan.entry.mapping,
+      plan.previewFiles,
+      analysis.classification.specSources.map((source) =>
+        source.path === originPath ? destination : source.path,
+      ),
+    );
+  }
 
   // Re-validate the rewritten workspace in memory before touching anything
   // (SPEC 6.5: all rewritten references resolve, no import or dependency
@@ -392,7 +443,12 @@ async function runMoveFile(
     // every reason a move can be refused for, so a validated plan leaves a
     // valid workspace. Guarded so a regression refuses (exit 1, nothing
     // modified) rather than corrupts.
-    return emitFindingsRefusal(invocation.json, stdout, rewritten.findings);
+    return emitFindingsRefusal(
+      false,
+      invocation.json,
+      stdout,
+      rewritten.findings,
+    );
   }
 
   // SPEC 6.5/6.4/12.1: the finishing regeneration's outputs, derived
@@ -424,7 +480,7 @@ async function runMoveFile(
     ...outputs.writePaths,
   ]);
   if (writeFindings.length > 0) {
-    return emitFindingsRefusal(invocation.json, stdout, writeFindings);
+    return emitFindingsRefusal(false, invocation.json, stdout, writeFindings);
   }
 
   // All validation passed — modify: write the rewritten sources (atomic per
@@ -517,6 +573,7 @@ async function runMoveSection(
   oldId: string,
   targetPath: string,
   newId: string,
+  preview: boolean,
 ): Promise<ExitCode> {
   const { workspace, stdout, stderr } = context;
   const originPath = originSpec.document.path;
@@ -535,7 +592,7 @@ async function runMoveSection(
   // cli/args.ts): it can never be a valid requirement ID (SPEC 1.6, 1.4),
   // refused under its reason's stable code (SPEC 14).
   if (!isValidUtf8ArgumentValue(newId)) {
-    return emitFindingsRefusal(invocation.json, stdout, [
+    return emitFindingsRefusal(preview, invocation.json, stdout, [
       {
         code: "refused-invalid-id",
         message:
@@ -575,13 +632,15 @@ async function runMoveSection(
     probe,
   });
   if (refusals.length > 0) {
-    return emitFindingsRefusal(invocation.json, stdout, refusals);
+    return emitFindingsRefusal(preview, invocation.json, stdout, refusals);
   }
   const createGroups: readonly string[] | null =
     targetSpec === null ? assessment.specGroups : null;
 
   // The pure plan: the identity mapping, the journal entry, the exact text
-  // edits, and every reference and import rewrite (SPEC 6.5, 6.1).
+  // edits, every reference and import rewrite, and the classed preview
+  // edits — one plan for the real operation and its preview (SPEC 6.5,
+  // 6.1, 6.6).
   const plan = planMoveSection(
     analysis.specs,
     analysis.code,
@@ -590,6 +649,24 @@ async function runMoveSection(
     targetPath,
     newId,
   );
+
+  // SPEC 6.6: a preview reports the plan and performs it on nothing. The
+  // post-operation generation set follows the post-move source set — a
+  // created target file joins it — so the delta carries the created file's
+  // newly generated derived paths (SPEC 6.6, 13.1–13.3).
+  if (preview) {
+    return emitSuccessfulPreview(
+      invocation.json,
+      stdout,
+      workspace,
+      plan.entry.mapping,
+      plan.previewFiles,
+      [
+        ...analysis.classification.specSources.map((source) => source.path),
+        ...(plan.createsTargetFile ? [targetPath] : []),
+      ],
+    );
+  }
 
   // Re-validate the rewritten workspace in memory before touching anything
   // (SPEC 6.5: all rewritten references resolve, structural rules hold, and
@@ -621,7 +698,12 @@ async function runMoveSection(
     // unresolvable rewritten references included — so a validated plan
     // leaves a valid workspace. Guarded so a regression refuses (exit 1,
     // nothing modified) rather than corrupts.
-    return emitFindingsRefusal(invocation.json, stdout, rewritten.findings);
+    return emitFindingsRefusal(
+      false,
+      invocation.json,
+      stdout,
+      rewritten.findings,
+    );
   }
 
   // SPEC 6.5/6.4/12.1: the finishing regeneration's outputs, derived
@@ -650,7 +732,7 @@ async function runMoveSection(
     ...outputs.writePaths,
   ]);
   if (writeFindings.length > 0) {
-    return emitFindingsRefusal(invocation.json, stdout, writeFindings);
+    return emitFindingsRefusal(false, invocation.json, stdout, writeFindings);
   }
 
   // All validation passed — modify: write the rewritten sources (atomic per
@@ -732,7 +814,7 @@ async function reanalyzeSectionMoved(
   });
 }
 
-/** The `move` command handler (SPEC 6.5). */
+/** The `move` command handler (SPEC 6.5, 6.6). */
 export async function moveCommand(
   invocation: Invocation,
   context: CommandContext,
@@ -742,6 +824,22 @@ export async function moveCommand(
     // Unreachable: the parser enforces the two positionals (SPEC 6.5).
     throw new Error("xspec internal error: move without its arguments");
   }
+  // SPEC 6.6/13.5: a preview invocation is a non-mutating command — it
+  // acquires no workspace exclusivity and does not take the
+  // acquisition-tied test seam, so `--test-hold` together with `--preview`
+  // is a usage error (exit 2), no hold file created, nothing modified.
+  if (flagPresent(invocation, "--preview")) {
+    if (flagValue(invocation, "--test-hold") !== undefined) {
+      return usageError(
+        invocation,
+        context,
+        `--test-hold cannot be combined with --preview: a preview acquires ` +
+          `no workspace exclusivity and does not take the acquisition-tied ` +
+          `test seam (SPEC 6.6, 13.5, 12.0)`,
+      );
+    }
+    return runMove(invocation, context, originArg, destinationArg, true);
+  }
   // SPEC 13.5: workspace exclusivity around the whole operation, with the
   // `--test-hold` seam immediately after acquisition; a workspace held by
   // another mutating command fails promptly as a usage error (12.0),
@@ -749,7 +847,7 @@ export async function moveCommand(
   const outcome = await withMutationExclusivity(
     context.workspace.root,
     testHoldSpecOf(invocation, context.cwd),
-    () => runMove(invocation, context, originArg, destinationArg),
+    () => runMove(invocation, context, originArg, destinationArg, false),
   );
   if (!outcome.ok) {
     return usageError(invocation, context, outcome.usageMessage);

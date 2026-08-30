@@ -123,6 +123,14 @@ const TEST_HOLD_FLAG: FlagSpec = {
 };
 
 /**
+ * SPEC 6.6: `rename` and `move` accept `--preview` — full validation and
+ * planning, performed on nothing. Combining it with `--test-hold` is a
+ * usage error (a preview acquires no exclusivity and does not take the
+ * acquisition-tied seam), checked by the command handlers.
+ */
+const PREVIEW_FLAG: FlagSpec = { name: "--preview", takesValue: false };
+
+/**
  * The known command table (SPEC 12.5), in specification order. Argument
  * forms: `build` 12.1, `check` 12.2, `ids` 12.3, `show` 12.4, `coverage` 8.2,
  * `impact` 9, `review` 10.7, `query` 11.1, `occurrences` 11.3, `view` 11.4,
@@ -322,15 +330,20 @@ const COMMANDS: readonly CommandSpec[] = [
   // its only output form, with or without `--json`). No flags beyond the
   // globals: the inventory is a pure report of the workspace's shape.
   { path: "inventory", positionals: [], flags: [], jsonOnly: true },
-  // SPEC 6.4: `rename <file> <old-id> <new-id>`.
+  // SPEC 6.4: `rename <file> <old-id> <new-id> [--preview]` (6.6).
   {
     path: "rename",
     positionals: ["<file>", "<old-id>", "<new-id>"],
-    flags: [TEST_HOLD_FLAG],
+    flags: [TEST_HOLD_FLAG, PREVIEW_FLAG],
   },
   // SPEC 6.5: `move <old-file> <new-file>` or
-  // `move <file>#<id> <target-file>#<new-id>` — two positionals either way.
-  { path: "move", positionals: ["<old>", "<new>"], flags: [TEST_HOLD_FLAG] },
+  // `move <file>#<id> <target-file>#<new-id>` — two positionals either way,
+  // `[--preview]` on both forms (6.6).
+  {
+    path: "move",
+    positionals: ["<old>", "<new>"],
+    flags: [TEST_HOLD_FLAG, PREVIEW_FLAG],
+  },
   // SPEC 12.6: `version` — JSON-only (a single JSON document is its only
   // output form, with or without `--json`); workspace-independent, so
   // `--config` (a global) is accepted and never consulted — `main`

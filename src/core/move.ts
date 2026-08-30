@@ -67,6 +67,8 @@ import type { SpecFileAnalysis } from "./graph.js";
 import type { IdentityMapping, JournalEntry } from "./journal.js";
 import { createJournalEntry } from "./journal.js";
 import type { SpecSection } from "./mdx.js";
+import type { PreviewFileEdits } from "./preview.js";
+import { PreviewCollector } from "./preview.js";
 import {
   isDotAccessSegmentName,
   replaceIdPrefix,
@@ -96,6 +98,14 @@ export interface MoveFilePlan {
    * itself ceases to exist (the workspace layer removes it).
    */
   readonly rewrites: readonly SourceRewrite[];
+  /**
+   * The preview plan surface (SPEC 6.6): every file the operation would
+   * rewrite or relocate, with every edit classed and located in
+   * pre-operation coordinates — the moved file's entry under its current
+   * path — collected in the same pass that derives the applied edits, so
+   * the real operation and its preview share one plan.
+   */
+  readonly previewFiles: readonly PreviewFileEdits[];
 }
 
 /**
@@ -204,6 +214,14 @@ export function planMoveFile(
 
   const destinationModule = moduleSpecifierTargetOf(destinationPath);
   const edits = new EditCollector();
+  // SPEC 6.6: the preview edits, collected beside the applied edits. The
+  // relocation spans the entire moved file, its entry under the current,
+  // pre-operation path.
+  const preview = new PreviewCollector();
+  preview.add(originPath, "file-relocation", {
+    start: 0,
+    end: encoder.encode(origin.document.text).length,
+  });
 
   /** Rewrite one import's specifier literal to designate `targetModule`. */
   const specifierEdit = (
@@ -220,6 +238,10 @@ export function planMoveFile(
         imported.specifierQuote,
       ),
     });
+    // SPEC 6.6: an import-specifier rewrite spans the specifier literal's
+    // characters, quotes included, in the file's pre-operation coordinates
+    // (the moved file's own edits under its current path).
+    preview.add(path, "import-specifier-rewrite", imported.specifierRange);
   };
 
   // SPEC 6.5: relocation rewrites the moved file's own import specifiers —
@@ -334,6 +356,7 @@ export function planMoveFile(
       mapping,
     ),
     rewrites,
+    previewFiles: preview.files(),
   };
 }
 
@@ -489,6 +512,54 @@ function deletionEditsWithLineDrops(
 }
 
 /**
+ * The single span a deletion removes (SPEC 6.6): the range's own bytes,
+ * extended over the leftover whitespace and line terminator of each line
+ * the line-drop rule additionally drops (SPEC 6.5, 3) — bytes contiguous
+ * with the range, so the result is one range. The preview's
+ * `origin-deletion` and `import-removal` ranges are exactly this span,
+ * judged per edit over the same machinery the applied deletion uses.
+ */
+function removalSpan(bytes: Uint8Array, range: ByteRange): ByteRange {
+  const edits = deletionEditsWithLineDrops(bytes, [range]);
+  const first = edits[0];
+  const last = edits[edits.length - 1];
+  if (first === undefined || last === undefined) {
+    throw new Error("xspec internal error: a deletion produced no edits");
+  }
+  return { start: first.range.start, end: last.range.end };
+}
+
+/**
+ * SPEC 6.5: the deterministic import-addition offset anchored after the
+ * line containing `position` — the byte just past that line's terminator
+ * (the end of the file when the line is unterminated). In a file existing
+ * before the operation, this is exactly the offset the preview reports
+ * (SPEC 6.6) and the offset the real operation inserts at.
+ */
+function offsetAfterLine(bytes: Uint8Array, position: number): number {
+  return terminatorEndAt(bytes, lineContentEndAfter(bytes, position));
+}
+
+/**
+ * SPEC 6.5: the import-addition edit at `offset` in the file's original
+ * bytes — each declaration inserted as a line of its own, its characters
+ * followed by a U+000A line terminator, the block preceded by one exactly
+ * when the insertion point is not at the start of a line. Shared by the
+ * real rewrite and the preview (SPEC 6.6: the real insertion offset equals
+ * the previewed one).
+ */
+function importAdditionEdit(
+  bytes: Uint8Array,
+  offset: number,
+  lines: readonly string[],
+): SourceEdit {
+  const atLineStart = offset === 0 || isTerminatorByte(bytes[offset - 1]!);
+  const text =
+    (atLineStart ? "" : "\n") + lines.map((line) => `${line}\n`).join("");
+  return { range: { start: offset, end: offset }, replacement: text };
+}
+
+/**
  * ECMAScript reserved words, which an import binding can never use — the
  * fresh-identifier chooser (SPEC 6.5) skips them.
  */
@@ -603,6 +674,12 @@ function bump(counts: Map<string, number>, key: string): void {
 interface LocatedReference {
   readonly section: SpecSection;
   readonly reference: SpecReference;
+  /**
+   * The occurrence span (SPEC 5.7): a `d` entry's own expression; an MDX
+   * embedding's full braced container — the construct a preview's
+   * `reference-rewrite` edit spans (SPEC 6.6).
+   */
+  readonly occurrence: ByteRange;
 }
 
 /** Every reference of a spec file, `d` and `text(...)` alike, in document order. */
@@ -612,6 +689,7 @@ function locatedReferencesOf(spec: SpecFileAnalysis): LocatedReference[] {
     references.push({
       section: dependency.section,
       reference: dependency.reference,
+      occurrence: dependency.reference.range,
     });
   }
   for (const embedding of spec.references.embeddings) {
@@ -624,6 +702,7 @@ function locatedReferencesOf(spec: SpecFileAnalysis): LocatedReference[] {
     references.push({
       section: embedding.embedding.section,
       reference: embedding.reference,
+      occurrence: embedding.embedding.range,
     });
   }
   return references;
@@ -902,6 +981,17 @@ export interface MoveSectionPlan {
   readonly rewrites: readonly SourceRewrite[];
   /** Whether the plan creates the target file (absent before the move). */
   readonly createsTargetFile: boolean;
+  /**
+   * The preview plan surface (SPEC 6.6): every file the operation would
+   * rewrite or create, with every edit classed and located in
+   * pre-operation coordinates — a created target file's entry holding
+   * exactly its one `file-creation` edit, the moved text's own rewrites
+   * located in the origin file inside the origin deletion's range —
+   * collected in the same pass that derives the applied edits, so the real
+   * operation and its preview share one plan (the import-addition offsets
+   * included, SPEC 6.5).
+   */
+  readonly previewFiles: readonly PreviewFileEdits[];
 }
 
 /** An import declaration line for a spec file (SPEC 2.1, 6.5 additions). */
@@ -1010,6 +1100,12 @@ export function planMoveSection(
   // applied to the extracted slice; outer edits apply to each file's
   // remaining content.
   const outerEdits = new EditCollector();
+  // SPEC 6.6: the preview edits, collected beside the applied edits — the
+  // moved text's own rewrites in the origin file, at pre-operation
+  // coordinates inside the origin deletion's range; a created target file
+  // carries exactly its one `file-creation` edit, everything the creation
+  // composes subsumed.
+  const preview = new PreviewCollector();
   const innerEdits: SourceEdit[] = [];
   const addInner = (edit: SourceEdit): void => {
     if (
@@ -1056,6 +1152,10 @@ export function planMoveSection(
       range: attribute.valueRange,
       replacement: attributeValueText(mapped, attribute.quote),
     });
+    // SPEC 6.6: an `id`-attribute rewrite spans the attribute's own
+    // characters — the re-identification's rewrites locate in the origin
+    // file, inside the origin deletion's range (containment is geometry).
+    preview.add(originPath, "id-rewrite", attribute.attributeRange);
   }
 
   // SPEC 6.5: rewrite every reference across the workspace to resolve to
@@ -1065,7 +1165,7 @@ export function planMoveSection(
   for (const spec of specs) {
     const path = spec.document.path;
     for (const located of locatedReferencesOf(spec)) {
-      const { section, reference } = located;
+      const { section, reference, occurrence } = located;
       const declaredInMoved =
         spec === origin &&
         section.id !== null &&
@@ -1097,6 +1197,7 @@ export function planMoveSection(
                 reference.spelling.quote,
               ),
             });
+            preview.add(originPath, "reference-rewrite", occurrence);
           } else if (!sameFile) {
             // A moved reference to a node staying behind: local → imported,
             // rooted at the target file's binding of the origin module
@@ -1112,6 +1213,7 @@ export function planMoveSection(
                 reference.target.idPath.split("."),
               ),
             });
+            preview.add(originPath, "reference-rewrite", occurrence);
           }
           continue;
         }
@@ -1134,6 +1236,7 @@ export function planMoveSection(
             replacement: renderChain(name, mappedLocal.split(".")),
           });
         }
+        preview.add(path, "reference-rewrite", occurrence);
         continue;
       }
 
@@ -1164,6 +1267,7 @@ export function planMoveSection(
             range: chainSpan(reference.spelling),
             replacement: jsStringLiteral(segments.join("."), '"'),
           });
+          preview.add(originPath, "reference-rewrite", occurrence);
         } else {
           // The chain must root at the target file's binding of the same
           // module — an existing binding, or a fresh added import
@@ -1177,6 +1281,7 @@ export function planMoveSection(
               range: reference.spelling.rootRange,
               replacement: name,
             });
+            preview.add(originPath, "reference-rewrite", occurrence);
           }
         }
         continue;
@@ -1201,17 +1306,22 @@ export function planMoveSection(
             '"',
           ),
         });
+        preview.add(path, "reference-rewrite", occurrence);
         continue;
       }
       if (sameFile) {
         // The module is unchanged; only the segment prefix is re-identified.
-        for (const edit of chainPrefixEdits(
+        const prefixEdits = chainPrefixEdits(
           reference.spelling,
           oldSegments,
           newSegments,
           null,
-        )) {
+        );
+        for (const edit of prefixEdits) {
           outerEdits.add(path, edit);
+        }
+        if (prefixEdits.length > 0) {
+          preview.add(path, "reference-rewrite", occurrence);
         }
         continue;
       }
@@ -1221,13 +1331,17 @@ export function planMoveSection(
       const filePlan = planFor(spec, path);
       filePlan.depart(reference.spelling.rootName);
       const rootName = filePlan.bindingFor(targetPath);
-      for (const edit of chainPrefixEdits(
+      const prefixEdits = chainPrefixEdits(
         reference.spelling,
         oldSegments,
         newSegments,
         rootName,
-      )) {
+      );
+      for (const edit of prefixEdits) {
         outerEdits.add(path, edit);
+      }
+      if (prefixEdits.length > 0) {
+        preview.add(path, "reference-rewrite", occurrence);
       }
     }
   }
@@ -1290,13 +1404,23 @@ export function planMoveSection(
           }
         }
       }
-      for (const edit of chainPrefixEdits(
+      const prefixEdits = chainPrefixEdits(
         reference.spelling,
         oldSegments,
         newSegments,
         rootName,
-      )) {
+      );
+      for (const edit of prefixEdits) {
         outerEdits.add(analysis.path, edit);
+      }
+      if (prefixEdits.length > 0) {
+        // SPEC 6.6/5.7: a marker occurrence spans the bare chain, a TS
+        // `text(...)` occurrence the whole call expression.
+        preview.add(
+          analysis.path,
+          "reference-rewrite",
+          reference.occurrenceRange,
+        );
       }
     }
   }
@@ -1317,9 +1441,11 @@ export function planMoveSection(
 
   // Per-file import add/remove edits (cross-file only): removals are
   // line-dropped like every 6.5 deletion; additions anchor after the last
-  // surviving import, at the removed block's position when none survives,
-  // or at the start of the file (blank-line separated) when the file had no
-  // imports (deterministic placement, SPEC 6.5).
+  // surviving import's line, at the removed block's line start when none
+  // survives, or at the start of the file when the file had no imports —
+  // one deterministic offset (SPEC 6.5), shared with the preview
+  // (SPEC 6.6: in a pre-existing file the real insertion offset is exactly
+  // the previewed one).
   interface ImportEditSet {
     readonly deletionRanges: ByteRange[];
     readonly additionEdit: SourceEdit | null;
@@ -1329,14 +1455,24 @@ export function planMoveSection(
     plan: SpecImportPlan,
     bytes: Uint8Array,
   ): ImportEditSet => {
+    const path = spec.document.path;
     const removed = plan.removedImports();
     const added = plan.addedImports();
     const removedSet = new Set(removed);
     const deletionRanges = removed.map((imported) => imported.statement.range);
+    // SPEC 6.6: an import removal's range spans the declaration plus the
+    // leftover whitespace and terminator of each line its drop empties —
+    // every byte the edit removes, judged per declaration.
+    for (const imported of removed) {
+      preview.add(
+        path,
+        "import-removal",
+        removalSpan(bytes, imported.statement.range),
+      );
+    }
     if (added.length === 0) {
       return { deletionRanges, additionEdit: null };
     }
-    const path = spec.document.path;
     const lines = added.map((addition) =>
       specImportLine(path, addition.modulePath, addition.name),
     );
@@ -1344,33 +1480,19 @@ export function planMoveSection(
       (imported) => !removedSet.has(imported),
     );
     const lastSurvivor = survivors[survivors.length - 1];
-    if (lastSurvivor !== undefined) {
-      const anchor = lastSurvivor.statement.range.end;
-      return {
-        deletionRanges,
-        additionEdit: {
-          range: { start: anchor, end: anchor },
-          replacement: lines.map((line) => `\n${line}`).join(""),
-        },
-      };
-    }
     const firstRemoved = removed[0];
-    if (firstRemoved !== undefined) {
-      const anchor = lineStartBefore(bytes, firstRemoved.statement.range.start);
-      return {
-        deletionRanges,
-        additionEdit: {
-          range: { start: anchor, end: anchor },
-          replacement: lines.map((line) => `${line}\n`).join(""),
-        },
-      };
-    }
+    const offset =
+      lastSurvivor !== undefined
+        ? offsetAfterLine(bytes, lastSurvivor.statement.range.end)
+        : firstRemoved !== undefined
+          ? lineStartBefore(bytes, firstRemoved.statement.range.start)
+          : 0;
+    // SPEC 6.6: an import addition is a zero-length insertion point at the
+    // exact offset the real operation then inserts at (SPEC 6.5).
+    preview.add(path, "import-addition", { start: offset, end: offset });
     return {
       deletionRanges,
-      additionEdit: {
-        range: { start: 0, end: 0 },
-        replacement: `${lines.map((line) => `${line}\n`).join("")}\n`,
-      },
+      additionEdit: importAdditionEdit(bytes, offset, lines),
     };
   };
 
@@ -1434,6 +1556,39 @@ export function planMoveSection(
       body: movedBody,
       pairedClosingTag: null,
     };
+  }
+
+  // SPEC 6.6: the origin deletion — one range spanning every byte the
+  // origin edit removes: the construct's own characters extended over the
+  // adjunct-dropped leftover whitespace and line terminators (SPEC 6.5, 3).
+  preview.add(
+    originPath,
+    "origin-deletion",
+    removalSpan(originBytes, movedRange),
+  );
+  if (createsTargetFile) {
+    // SPEC 6.6: target-file creation — the insertion point at the start of
+    // the new file, the one reported location without pre-operation
+    // coordinates and the created file's only reported edit: creation
+    // composes the file's entire initial content, subsuming the insertion
+    // and the import additions the rewrite requires there.
+    preview.add(targetPath, "file-creation", { start: 0, end: 0 });
+  } else {
+    // SPEC 6.6: the target insertion point, zero-length at its offset in
+    // pre-operation coordinates — a self-closing target parent's is the
+    // tag's end, where every byte the operation adds attaches.
+    preview.add(targetPath, "target-insertion", {
+      start: insertion.pos,
+      end: insertion.pos,
+    });
+    if (pairedFormEdit !== null && parentSection !== null) {
+      // SPEC 6.6: the self-closing-target-parent rewrite spans the tag.
+      preview.add(
+        targetPath,
+        "target-parent-rewrite",
+        parentSection.openingTagRange,
+      );
+    }
   }
 
   if (sameFile) {
@@ -1567,12 +1722,15 @@ export function planMoveSection(
   }
 
   // Code files: chain retargets plus added imports (SPEC 6.5, 4). Anchored
-  // after the file's last spec-module import — a code file referencing the
-  // moved subtree always has one (its chains root at import bindings).
+  // after the line of the file's last spec-module import — a code file
+  // referencing the moved subtree always has one (its chains root at
+  // import bindings) — at the one deterministic offset the preview reports
+  // (SPEC 6.5, 6.6).
   for (const analysis of code) {
     const fileEdits: SourceEdit[] = [
       ...(outerEdits.editsFor(analysis.path) ?? []),
     ];
+    const bytes = encoder.encode(analysis.text);
     const additions = codeAdditions.get(analysis.path);
     if (additions !== undefined && additions.size > 0) {
       const anchor = analysis.imports[analysis.imports.length - 1];
@@ -1586,24 +1744,27 @@ export function planMoveSection(
         .sort((a, b) => compareBytes(a[0], b[0]))
         .map(
           ([modulePath, name]) =>
-            `\nimport ${name} from ${jsStringLiteral(
+            `import ${name} from ${jsStringLiteral(
               relativeModuleSpecifier(
                 analysis.path,
                 moduleSpecifierTargetOf(modulePath),
               ),
               '"',
             )};`,
-        )
-        .join("");
-      fileEdits.push({
-        range: { start: anchor.range.end, end: anchor.range.end },
-        replacement: lines,
+        );
+      const offset = offsetAfterLine(bytes, anchor.range.end);
+      // SPEC 6.6: the import addition's zero-length insertion point, at
+      // the exact offset the real operation then inserts at (SPEC 6.5).
+      preview.add(analysis.path, "import-addition", {
+        start: offset,
+        end: offset,
       });
+      fileEdits.push(importAdditionEdit(bytes, offset, lines));
     }
     if (fileEdits.length > 0) {
       rewrites.push({
         path: analysis.path,
-        content: applyEdits(encoder.encode(analysis.text), fileEdits),
+        content: applyEdits(bytes, fileEdits),
       });
     }
   }
@@ -1620,5 +1781,6 @@ export function planMoveSection(
     ),
     rewrites,
     createsTargetFile,
+    previewFiles: preview.files(),
   };
 }

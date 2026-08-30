@@ -250,57 +250,33 @@ components included, never 14.22. B9's `--preview` must call exactly this
 evaluation (the CLI face is `assessAndProbeDestination` + the evaluate
 functions in `rename.ts`/`move.ts`) for its refusal equivalence.)
 
-### B9. `--preview` for `rename`/`move`: plan surface (mapping + files/edits)
-
-SPEC 6.6, 12.7, 13.5. Prereqs B2, B8. `--preview` is not in the command table
-(exit 2 unknown flag today). Full validation and planning, zero modification (no
-sources, journal, derived files, or graph data touched):
-
-- Non-mutating under 13.5: acquires no workspace exclusivity; `--test-hold`
-  together with `--preview` is a usage error (exit 2). Byte-deterministic.
-- Document `{"findings", "mapping", "files", "delta"}` (delta itself is B10 —
-  emit it as the record-based value or land B9+B10 together if inseparable).
-  `mapping`: `{"from", "to"}` per mapped identity, by `from` bytes. `files`: one
-  `{"file", "edits"}` per file the operation would rewrite, relocate, or create,
-  by path bytes — `file` the pre-operation path (for target-file creation, the
-  path the creation would occupy); edits `{"class", "range"}` ordered by range
-  start, end, class-name bytes; classes exactly `"reference-rewrite"`,
-  `"id-rewrite"`, `"import-specifier-rewrite"`, `"import-addition"`,
-  `"import-removal"`, `"origin-deletion"`, `"target-insertion"`,
-  `"target-parent-rewrite"`, `"file-relocation"`, `"file-creation"`.
-- Exact pre-operation ranges: a rewrite spans the construct it rewrites (a
-  reference occurrence's 5.7 span; the `id` attribute's own characters; the
-  import specifier literal; the target parent's self-closing tag); a removal
-  spans every byte removed — origin-deletion extends over each line the
-  line-drop rule additionally drops (contiguous leftover whitespace +
-  terminator), as does import-removal; import-addition, target-insertion, and
-  file-creation are zero-length insertion points (file-creation at the new
-  file's start — the one location without pre-operation coordinates, the created
-  file's only edit, subsuming its entire initial content); file-relocation spans
-  the entire moved file. Ranges may nest. No replacement text anywhere.
-- Refusal equivalence: refused exactly when the real operation would be, same
-  findings/codes/exit (shared evaluation from B8); the refused document keeps
-  the preview form with `mapping`, `files`, `delta` null.
-- Refactor so the real operation and the preview share one plan: in a
-  pre-existing file the real import-addition offset must equal the preview's
-  (6.5).
-
-Verify: T6.6-2..5 (`section-6.6*.test.ts`), T12.7-3.
-
-### B10. Preview derived-file delta and the condition-23 outcome
-
-SPEC 6.6 (delta), 14.23, 12.7. Prereqs B9, B7 (shared record reader). `delta` is
-`{"generated", "removed"}`, both directions one datum, paths in byte order:
-derived paths the operation would newly generate (nothing currently recorded
-there) and recorded derived paths left no longer generated (the pre-move module
-path after a file move included). Both directions consult the recorded
-derived-file paths; a preview never refreshes the record. Unreadable record →
-`delta` is `{"unavailable": true}` as one datum, an `unreadable-record` finding
-(concerned path `.xspec`) accompanies, exit 1, the rest of the preview emitted
-in full; the real operation is not refused in that state. A refused preview
-consults no record — never a condition-23 finding beside a refusal.
-
-Verify: T6.6-6 arms (`section-6.6*.test.ts`).
+(B9+B10 landed together: `--preview` for `rename`/`move`, delta included.
+The classed edit model is `src/core/preview.ts` — the ten `PreviewEditClass`
+names, `PreviewCollector` (files by path bytes, edits by start/end/class
+bytes), `derivedFileDelta`. The planners collect preview edits in the same
+pass as the applied edits (`RenamePlan.previewFiles`, `MoveFilePlan.…`,
+`MoveSectionPlan.…`): reference rewrites span the 5.7 occurrence (a `d`
+entry's `reference.range`, an embedding's `embedding.range`,
+`CodeReference.occurrenceRange`), id-rewrites the attribute's own
+`attributeRange`, removals the extended span (`removalSpan` over the shared
+line-drop machinery), and import additions one deterministic offset shared
+by preview and real edit — `offsetAfterLine`/`importAdditionEdit` in
+`core/move.ts`: after the last surviving import's line, at the removed
+block's line start, or offset 0 for an import-less file (the applied edit
+inserts `decl\n` at exactly the previewed offset, 6.5; an import line
+directly before/after JSX parses fine, so no blank-line separator). CLI:
+`--preview` in `args.ts`; the handlers thread a `preview` flag through the
+shared validation (every findings-refusal emits the four-member document
+with `mapping`/`files`/`delta` null via `emitRefusedPreview`; the preview
+returns before the unreachable-guard reanalysis and takes no exclusivity;
+`--test-hold`+`--preview` exits 2 before any lock). Success is
+`emitSuccessfulPreview` (`src/cli/commands/preview.ts`): B7's
+`readDerivedFileRecord` (the one record consult), post-op generation set
+via `generatedDerivedPaths` (`core/build.ts` — post spec paths with the
+operation's path substitution applied), 14.23 → delta unavailable beside
+the shared `unreadableRecordFinding` (`core/graph-data.ts`; inventory now
+reuses it), exit 1 with everything else in full. T6.6-2/4/5/6 and T12.7-3
+green; T6.6-3 red only on the C1-shared arms below.)
 
 ---
 
@@ -321,7 +297,12 @@ misroutes in `src/cli/commands/move.ts` / `src/cli/args.ts`, all currently exit
 - An operand with more than one `#` is a malformed value: usage error in
   `parseMoveArgument`, never an invalid-ID refusal.
 
-Verify: T6.5-5 (`section-6.5*.test.ts`).
+Verify: T6.5-5 (`section-6.5*.test.ts`), and T6.6-3 (`section-6.6.test.ts`)
+goes green with this task: its usage sweep runs the same mixed-synopsis and
+non-UTF-8 invocations with and without `--preview` (both must exit 2), and
+today it aborts at the first of them — everything else in T6.6-3 (refusal
+equivalence, scheduling, `--test-hold`+`--preview`) already passes, so run
+it after T6.5-5.
 
 ### C2. Argument checks precede the invalid-workspace gate on gated reads
 

@@ -27,6 +27,7 @@ import type { Finding, FindingLocation } from "../core/findings.js";
 import { orderFindings } from "../core/findings.js";
 import type { IdentityMapping } from "../core/journal.js";
 import { pathTextJson, renderPathText } from "../core/path-text.js";
+import type { PreviewDelta, PreviewFileEdits } from "../core/preview.js";
 import type { CliWriter, CommandIo } from "./io.js";
 
 /**
@@ -161,6 +162,100 @@ export function emitAppliedMappingReport(
 /** The SPEC 12.7 unavailability marker — the one explicit-absence form. */
 export function unavailableJson(): JsonObject {
   return { unavailable: true };
+}
+
+/**
+ * A successful preview's plan (SPEC 6.6): the complete identity mapping the
+ * operation would journal (canonical `from`-byte order, core/journal.ts),
+ * the classed per-file edits (core/preview.ts), and the derived-file delta
+ * — the record-supplied datum, `"unavailable"` exactly where recorded state
+ * exists but cannot be read as a record (SPEC 14.23).
+ */
+export interface PreviewPlanReport {
+  readonly mapping: readonly IdentityMapping[];
+  readonly files: readonly PreviewFileEdits[];
+  readonly delta: PreviewDelta | "unavailable";
+}
+
+/**
+ * Emit the `rename`/`move` preview report (SPEC 6.6, 12.7): the four-member
+ * preview document `{"findings", "mapping", "files", "delta"}` under
+ * `--json` — `mapping`, `files`, and `delta` null together exactly on
+ * refusal (`plan` null), the delta the unavailability marker where the
+ * record cannot be read — and a human report presenting the same
+ * information (SPEC 12.0). Both forms are byte-deterministic: identities,
+ * workspace-relative paths, byte offsets, and static text only.
+ */
+export function emitPreviewReport(
+  json: boolean,
+  stdout: CliWriter,
+  findings: readonly Finding[],
+  plan: PreviewPlanReport | null,
+): void {
+  const ordered = orderFindings(findings);
+  if (json) {
+    const document: JsonValue = {
+      findings: ordered.map(findingToJson),
+      mapping:
+        plan === null
+          ? null
+          : plan.mapping.map((pair) => ({ from: pair.from, to: pair.to })),
+      files:
+        plan === null
+          ? null
+          : plan.files.map((entry) => ({
+              file: entry.path,
+              edits: entry.edits.map((edit) => ({
+                class: edit.class,
+                range: { start: edit.range.start, end: edit.range.end },
+              })),
+            })),
+      delta:
+        plan === null
+          ? null
+          : plan.delta === "unavailable"
+            ? unavailableJson()
+            : {
+                generated: [...plan.delta.generated],
+                removed: [...plan.delta.removed],
+              },
+    };
+    stdout.write(canonicalJson(document));
+    return;
+  }
+  const lines: string[] = ordered.map(renderFindingLine);
+  if (plan === null) {
+    // SPEC 6.6: a refused preview reports the refusal findings alone.
+    const count = ordered.length;
+    lines.push(`${String(count)} finding${count === 1 ? "" : "s"}\n`);
+    stdout.write(lines.join(""));
+    return;
+  }
+  lines.push("mapping:\n");
+  for (const pair of plan.mapping) {
+    lines.push(`  ${pair.from} -> ${pair.to}\n`);
+  }
+  lines.push("files:\n");
+  for (const entry of plan.files) {
+    lines.push(`  ${entry.path}\n`);
+    for (const edit of entry.edits) {
+      lines.push(
+        `    ${String(edit.range.start)}-${String(edit.range.end)} ${edit.class}\n`,
+      );
+    }
+  }
+  if (plan.delta === "unavailable") {
+    lines.push("delta: unavailable\n");
+  } else {
+    lines.push("delta:\n");
+    for (const path of plan.delta.generated) {
+      lines.push(`  generated ${path}\n`);
+    }
+    for (const path of plan.delta.removed) {
+      lines.push(`  removed ${path}\n`);
+    }
+  }
+  stdout.write(lines.join(""));
 }
 
 /**

@@ -27,7 +27,7 @@ import { compareBytes, sortByBytes } from "./bytes.js";
 import type { Configuration } from "./config.js";
 import { canonicalOutDirPrefix } from "./discovery.js";
 import type { GeneratedFile } from "./emission.js";
-import { generateSpecModule } from "./emission.js";
+import { generateSpecModule, specModulePaths } from "./emission.js";
 import type { GraphData, StoredInputs } from "./graph-data.js";
 import {
   buildGraphSnapshot,
@@ -134,4 +134,47 @@ export function computeBuildOutputs(
     orphans,
     writePaths: [...files.map((file) => file.path), GRAPH_DATA_PATH],
   };
+}
+
+/**
+ * The derived-file paths a build over `specPaths` would generate — each
+ * source's generated module and companions (SPEC 13.1, the `NAME.mdx` name
+ * shape via emission's `specModulePaths`) plus, exactly while `markdown` is
+ * present with `emit` true, its Markdown destination (SPEC 13.2, 7.3) — in
+ * byte order, graph data excluded (SPEC 13.3: the record holds the
+ * generated derived files; graph data records no path of its own). The
+ * path-only companion of `computeBuildOutputs`' enumeration, serving the
+ * preview delta's post-operation generation set (SPEC 6.6): the paths are a
+ * function of the source names and the configuration alone.
+ */
+export function generatedDerivedPaths(
+  configuration: Configuration,
+  specPaths: readonly string[],
+): readonly string[] {
+  const paths: string[] = [];
+  const markdown = configuration.markdown;
+  const emitMarkdown = markdown !== undefined && markdown.emit;
+  const prefix = emitMarkdown
+    ? (canonicalOutDirPrefix(markdown.outDir) ?? "")
+    : "";
+  for (const specPath of specPaths) {
+    if (!specPath.endsWith(".mdx")) {
+      // SPEC 13.1: per-source derived paths are defined by the `NAME.mdx`
+      // name shape alone; a valid workspace discovers no other spec-source
+      // names (SPEC 14.19), so this arm is defensive.
+      continue;
+    }
+    const modulePaths = specModulePaths(specPath);
+    paths.push(
+      modulePaths.module,
+      modulePaths.runtime,
+      modulePaths.types,
+      modulePaths.typesMap,
+    );
+    if (emitMarkdown) {
+      // SPEC 13.2: the `.mdx` source emits `.md` — the trailing "x" dropped.
+      paths.push(prefix + specPath.slice(0, -1));
+    }
+  }
+  return [...new Set(paths)].sort(compareBytes);
 }

@@ -25,13 +25,12 @@ import { canonicalJson } from "../../core/canonical-json.js";
 import type { Configuration, PolicySelector } from "../../core/config.js";
 import { specSourceDerivedPaths } from "../../core/discovery.js";
 import type { SourceClassification } from "../../core/discovery.js";
-import type { ExitCode, Finding } from "../../core/findings.js";
+import type { ExitCode } from "../../core/findings.js";
+import { codeExitClass, orderFindings } from "../../core/findings.js";
 import {
-  codeExitClass,
-  orderFindings,
-  pathFinding,
-} from "../../core/findings.js";
-import { GRAPH_DATA_AREA } from "../../core/graph-data.js";
+  GRAPH_DATA_AREA,
+  unreadableRecordFinding,
+} from "../../core/graph-data.js";
 import { JOURNAL_PATH } from "../../core/journal.js";
 import type { PathText } from "../../core/path-text.js";
 import { comparePathTexts, pathTextJson } from "../../core/path-text.js";
@@ -152,24 +151,6 @@ function configurationViewJson(configuration: Configuration): JsonObject {
       kinds: [...rule.kinds],
     })),
   };
-}
-
-/**
- * The one finding an inventory answer ever carries (SPEC 11.6, 14.23):
- * recorded state that exists but cannot be read as a record. The concerned
- * path is the graph-data area — the record's layout is deliberately
- * unenumerated (13.3), so no path inside it is named and the finding has no
- * in-source locations.
- */
-function unreadableRecordFinding(): Finding {
-  return pathFinding(
-    23,
-    `the recorded generation state under the graph-data area exists but ` +
-      `cannot be read as a record, so the recorded derived-file paths are ` +
-      `unavailable — a successful \`xspec build\` (or a finishing ` +
-      `rename/move regeneration) replaces the record (SPEC 14.23, 13.3)`,
-    GRAPH_DATA_AREA,
-  );
 }
 
 /** The `inventory` command handler (SPEC 11.6). */
