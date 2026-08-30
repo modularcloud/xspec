@@ -34,7 +34,7 @@
 // edges. Only valid workspaces ever surface graph content (SPEC 12.1,
 // 13.3).
 
-import { compareBytes, sortByBytes } from "./bytes.js";
+import { compareBytes, sortByBytes, utf8Length } from "./bytes.js";
 import type { ByteRange } from "./bytes.js";
 import type { CodeAnalysis } from "./code-analysis.js";
 import type { Finding, FindingLocation } from "./findings.js";
@@ -73,6 +73,14 @@ export interface CodeLocationNode {
   readonly identity: string;
   /** Workspace-relative `/`-separated code file path (SPEC 1.5). */
   readonly path: string;
+  /**
+   * SPEC 1.7: the location's source range — the entire file for a
+   * whole-file location, the construct binding the unit's name for a
+   * named unit (CodeUnit.range). Presented in exactly two outputs —
+   * occurrence records (5.7, 11.3) and review payloads (10.7); everywhere
+   * else a code location remains a bare identity (SPEC 1.7).
+   */
+  readonly range: ByteRange;
 }
 
 export type GraphNode = RequirementNode | CodeLocationNode;
@@ -409,6 +417,10 @@ export function buildWorkspaceGraph(
       kind: "code",
       identity: analysis.path,
       path: analysis.path,
+      // SPEC 1.7: a whole-file location's range spans the entire file —
+      // the analyzed text is the file's exact bytes decoded (SPEC 1.6),
+      // so its UTF-8 length is the file's byte length.
+      range: { start: 0, end: utf8Length(analysis.text) },
     };
     codeLocations.push(file);
     codeIndex.set(file.identity, file);
@@ -418,6 +430,8 @@ export function buildWorkspaceGraph(
         kind: "code",
         identity: unit.identity,
         path: analysis.path,
+        // SPEC 1.7: the construct binding the unit's name.
+        range: unit.range,
       };
       codeLocations.push(node);
       codeIndex.set(node.identity, node);

@@ -122,25 +122,24 @@ the node itself: a requirement source's is `RequirementNode.section.range`
 (root = whole file); a code source's range is B3's deliverable — B4 renders
 `{"identity", "range"}` from the graph node, or `{"unavailable": true}` for
 null. Persisted as `GraphSnapshot.occurrences` (`StoredOccurrence`,
-`src/core/graph-data.ts`, format version 3): valid workspaces only, so
+`src/core/graph-data.ts`, format version 4 since B3): valid workspaces only, so
 stored `file` is a plain string; round-trips byte-deterministically.)
 
-### B3. Compute code-location source ranges
-
-SPEC 1.7 (code-location ranges), 4.6. `CodeUnit` (`src/core/code-analysis.ts`),
-`CodeLocationNode` (`src/core/graph.ts`), and `StoredCodeLocation`
-(`src/core/graph-data.ts`) carry no range. Compute and store one per code
-location: whole-file = the entire file; named unit = the construct binding its
-name — a function/class-valued variable declaration's unit spans its own name
-through its initializer (not the multi-declaration statement); the nested units
-of a dotted namespace name all share the single namespace declaration's range; a
-named default export takes the exported construct's range, an anonymous one's
-`default` unit the whole export declaration; `path#unit@N` takes its own
-occurrence's construct. Presentation stays confined to exactly two outputs —
-occurrence records (B2/B4) and review payloads (C6); everywhere else a code
-location remains a bare identity (query edges/reachable unchanged).
-
-Verify: T1.7-2 (`section-1.7.test.ts`) once B4/C6 expose the ranges.
+(B3 landed: every code location carries its SPEC 1.7 source range.
+`CodeUnit.range` (`src/core/code-analysis.ts`) is the construct binding the
+unit's name — a variable declaration's own node (name through initializer,
+never the multi-declaration statement), dotted-namespace units sharing the
+chain's outermost declaration, a named default export the construct's own
+range with the `export default ` prefix excluded (`async`/`abstract` kept),
+an anonymous one's `default` unit the whole export declaration, `@N` units
+their own occurrence's construct. `CodeLocationNode.range`
+(`src/core/graph.ts`) carries it into the graph (whole-file location =
+`0..utf8Length(text)`), persisted as `StoredCodeLocation.range`
+(`src/core/graph-data.ts`, format version 4 — an old store reads as
+malformed → mismatch). Verified against T1.7-2's fixture offsets at the
+core level; nothing presents the range yet — B4's occurrence records and
+C6's review payloads are the two presentation points, and T1.7-2 goes
+green with them.)
 
 ### B4. `xspec occurrences` and the shared 11.2 availability layer
 

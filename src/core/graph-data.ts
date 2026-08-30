@@ -65,9 +65,10 @@ export const GRAPH_DATA_PATH = ".xspec/graph.json";
  * The stored format version: a parsed file of any other version is
  * malformed (parse yields null), so it reads as not matching the current
  * sources and configuration and is refreshed or rebuilt (SPEC 13.3).
- * Version 3 added the reference occurrences (SPEC 5.7, 13.3).
+ * Version 3 added the reference occurrences (SPEC 5.7, 13.3); version 4
+ * added the code-location source ranges (SPEC 1.7).
  */
-const GRAPH_DATA_VERSION = 3;
+const GRAPH_DATA_VERSION = 4;
 
 /** One recorded derivation input: a discovered source and its fingerprint. */
 export interface StoredSourceInput {
@@ -138,6 +139,12 @@ export interface StoredCodeLocation {
   readonly identity: string;
   /** Workspace-relative `/`-separated code file path (SPEC 1.5). */
   readonly path: string;
+  /**
+   * SPEC 1.7: the location's source range — the entire file for a
+   * whole-file location, the construct binding the unit's name for a
+   * named unit.
+   */
+  readonly range: ByteRange;
 }
 
 /**
@@ -237,6 +244,7 @@ export function buildGraphSnapshot(
   const codeLocations = graph.codeLocations.map((node): StoredCodeLocation => ({
     identity: node.identity,
     path: node.path,
+    range: { start: node.range.start, end: node.range.end },
   }));
   const edges = graph.edges.map((edge): GraphEdge => ({
     kind: edge.kind,
@@ -381,6 +389,7 @@ export function serializeGraphData(data: GraphData): string {
     codeLocations: data.snapshot.codeLocations.map((location): JsonValue => ({
       identity: location.identity,
       path: location.path,
+      range: { start: location.range.start, end: location.range.end },
     })),
     edges: data.snapshot.edges.map((edge): JsonValue => ({
       kind: edge.kind,
@@ -621,10 +630,15 @@ function parseCodeLocation(value: unknown): StoredCodeLocation | null {
   }
   const identity = value["identity"];
   const path = value["path"];
-  if (typeof identity !== "string" || typeof path !== "string") {
+  const range = parseRange(value["range"]);
+  if (
+    typeof identity !== "string" ||
+    typeof path !== "string" ||
+    range === null
+  ) {
     return null;
   }
-  return { identity, path };
+  return { identity, path, range };
 }
 
 function parseEdge(value: unknown): GraphEdge | null {

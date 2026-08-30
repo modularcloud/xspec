@@ -81,6 +81,17 @@ export interface CodeUnit {
    * same chain occurs more than once in the file (SPEC 4.6).
    */
   readonly identity: string;
+  /**
+   * SPEC 1.7: the byte range of the construct binding the unit's name — a
+   * variable declaration's unit spans its own name through its
+   * initializer (not the enclosing multi-declaration statement), the
+   * nested units of a dotted namespace name all share the single
+   * namespace declaration's range, a named default export takes the
+   * exported construct's own range while an anonymous one's `default`
+   * unit takes the whole export declaration, and a `path#unit@N` takes
+   * its own occurrence's construct.
+   */
+  readonly range: ByteRange;
 }
 
 /** One identifier a spec module import binds (SPEC 4). */
@@ -982,10 +993,78 @@ class CodeAnalyzer {
         identity:
           `${this.path}#${record.chain}` +
           (count > 1 ? `@${String(count)}` : ""),
+        range: this.unitRange(record.node),
       };
       this.units.push(unit);
       this.unitByNode.set(record.node, unit);
     }
+  }
+
+  /**
+   * SPEC 1.7: the byte range of the construct binding a unit's name. The
+   * construct is the recorded declaration node itself — a variable
+   * declaration node already spans its own name through its initializer,
+   * never the enclosing multi-declaration statement — with three
+   * carve-outs: the nested declarations a dotted namespace name nests in
+   * the AST all take the outermost declaration of the dotted chain (the
+   * one construct binding them all); a default export whose exported
+   * construct is named takes that construct's own range — for the merged
+   * declaration form (`export default function f() {}`) the declaration
+   * with its `export default ` modifier prefix excluded, for the
+   * `export default <expression>` form the named function or class
+   * expression's own span — while the `default` unit an anonymous
+   * exported construct derives takes the whole export declaration; and a
+   * `path#unit@N` simply carries its own occurrence's construct, which is
+   * the node recorded for it.
+   */
+  private unitRange(node: ts.Node): ByteRange {
+    if (ts.isModuleDeclaration(node)) {
+      // A dotted name (`namespace A.B`) nests declarations: an inner one
+      // is its parent declaration's body. Climb to the chain's outermost
+      // declaration — the single construct binding every derived unit.
+      let outer: ts.ModuleDeclaration = node;
+      while (
+        ts.isModuleDeclaration(outer.parent) &&
+        outer.parent.body === outer
+      ) {
+        outer = outer.parent;
+      }
+      return this.rangeOf(outer);
+    }
+    if (ts.isExportAssignment(node)) {
+      const expression = stripParentheses(node.expression);
+      if (
+        (ts.isFunctionExpression(expression) ||
+          ts.isClassExpression(expression)) &&
+        expression.name !== undefined
+      ) {
+        // A named exported construct: its own range (SPEC 1.7).
+        return this.rangeOf(expression);
+      }
+      // Anonymous: the whole export declaration, terminator included.
+      return this.rangeOf(node);
+    }
+    if (
+      (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
+      node.name !== undefined
+    ) {
+      const defaultModifier = (ts.getModifiers(node) ?? []).find(
+        (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword,
+      );
+      if (defaultModifier !== undefined) {
+        // The merged named-default-export form: the construct's own range
+        // excludes the `export default ` prefix, beginning at the first
+        // construct token after the `default` modifier (SPEC 1.7) — any
+        // further modifier (`async`, `abstract`) is the construct's own.
+        return {
+          start: this.offsets.byteOffset(
+            firstTokenStartAfter(node, defaultModifier.end, this.sourceFile),
+          ),
+          end: this.offsets.byteOffset(node.getEnd()),
+        };
+      }
+    }
+    return this.rangeOf(node);
   }
 
   // -- value-level use analysis (SPEC 4.3, 4.5 → 14.8, 14.11, 14.18) --------
@@ -1450,6 +1529,33 @@ function stripParentheses(expression: ts.Expression): ts.Expression {
   let current = expression;
   while (ts.isParenthesizedExpression(current)) current = current.expression;
   return current;
+}
+
+/**
+ * The UTF-16 start of `node`'s first token lying entirely after
+ * `boundary` — used to exclude a leading `export default ` modifier
+ * prefix from a named construct's own range (SPEC 1.7). Children come in
+ * source order; a syntax list (the modifier list) is searched within, so
+ * a modifier following `default` (e.g. `async`) is found where the next
+ * sibling token would overshoot it.
+ */
+function firstTokenStartAfter(
+  node: ts.Node,
+  boundary: number,
+  sourceFile: ts.SourceFile,
+): number {
+  for (const child of node.getChildren(sourceFile)) {
+    if (child.getEnd() <= boundary) continue;
+    if (child.kind === ts.SyntaxKind.SyntaxList) {
+      for (const member of child.getChildren(sourceFile)) {
+        if (member.getEnd() <= boundary) continue;
+        return member.getStart(sourceFile);
+      }
+      continue; // defensive: a list's end is its last member's end
+    }
+    return child.getStart(sourceFile);
+  }
+  return node.getStart(sourceFile); // defensive: boundary inside the node
 }
 
 /**
