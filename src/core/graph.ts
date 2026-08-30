@@ -40,6 +40,7 @@ import type { CodeAnalysis } from "./code-analysis.js";
 import type { Finding, FindingLocation } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
 import type { SpecDocument, SpecEmbedding, SpecSection } from "./mdx.js";
+import { definedIdentitySections } from "./mdx.js";
 import type { PathText } from "./path-text.js";
 import { comparePathTexts, pathTextKey, renderPathText } from "./path-text.js";
 import type {
@@ -380,18 +381,21 @@ export function buildWorkspaceGraph(
     requirementNodes.push(root);
     requirementIndex.set(root.identity, root);
     sectionIndex.set(document.root, root);
+    // SPEC 11.2/1.5: only defined node identities are formed, emitted, or
+    // resolved against — a section spelling no identity, a malformed or
+    // structurally invalid spelling (or one anywhere in its chain), and
+    // every bearer of a duplicated spelling (no winner picked) contribute
+    // no identified node; their findings (14.1–14.4, 14.17) account for
+    // them, and references to them report as unresolved (14.5–14.7).
+    const definedSections = definedIdentitySections(document);
     for (const section of document.sections) {
-      if (section.id === null) {
-        // No usable identity — the section's 14.1/14.17 accounts for it.
+      if (section.id === null || !definedSections.has(section)) {
         continue;
       }
       // SPEC 1.5: `path#id`; the `#` is unambiguous because discovered
-      // paths never contain `#` (14.19).
+      // paths never contain `#` (14.19), and definedness makes the
+      // identity unique within the file (SPEC 11.2).
       const identity = `${document.path}#${section.id}`;
-      if (requirementIndex.has(identity)) {
-        // A duplicate ID (14.3): the first declaration keeps the identity.
-        continue;
-      }
       const node: RequirementNode = {
         kind: "requirement",
         identity,

@@ -20,6 +20,7 @@
 // static text, workspace-relative paths, and byte offsets only — no
 // absolute paths, no wall clock, no environment-dependent content.
 
+import type { ResolvedOccurrence } from "../core/availability.js";
 import { canonicalJson } from "../core/canonical-json.js";
 import type { JsonObject, JsonValue } from "../core/canonical-json.js";
 import type { Finding, FindingLocation } from "../core/findings.js";
@@ -155,6 +156,40 @@ export function emitAppliedMappingReport(
   const count = mapping.length;
   lines.push(`${String(count)} identit${count === 1 ? "y" : "ies"} mapped\n`);
   stdout.write(lines.join(""));
+}
+
+/** The SPEC 12.7 unavailability marker — the one explicit-absence form. */
+export function unavailableJson(): JsonObject {
+  return { unavailable: true };
+}
+
+/**
+ * One reference occurrence record as JSON data — exactly the five-member
+ * record form of SPEC 12.7: `{"file", "range", "kind", "source", "target"}`
+ * — the referencing file through the shared path-value renderer (marked
+ * byte form for a non-UTF-8 path, SPEC 12.0), the occurrence's own range,
+ * its edge kind, the source graph node as `{"identity", "range"}` or the
+ * unavailability marker (one datum per SPEC 11.2 — never `null`), and the
+ * resolved target's identity. Shared by every emitter of occurrence
+ * records (SPEC 11.3, 11.4, 11.5).
+ */
+export function occurrenceRecordJson(record: ResolvedOccurrence): JsonObject {
+  return {
+    file: pathTextJson(record.file),
+    range: { start: record.range.start, end: record.range.end },
+    kind: record.kind,
+    source:
+      record.source === null
+        ? unavailableJson()
+        : {
+            identity: record.source.identity,
+            range: {
+              start: record.source.range.start,
+              end: record.source.range.end,
+            },
+          },
+    target: record.target,
+  };
 }
 
 /**

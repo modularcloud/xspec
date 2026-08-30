@@ -17,6 +17,7 @@
 
 import type { ExitCode } from "../core/findings.js";
 import type { GraphData } from "../core/graph-data.js";
+import { prepareWorkspaceForAvailability } from "../workspace/availability.js";
 import type { WorkspaceAnalysis } from "../workspace/pipeline.js";
 import { prepareWorkspaceForRead } from "../workspace/refresh.js";
 import type { Invocation } from "./args.js";
@@ -70,4 +71,44 @@ export async function prepareGraphForRead(
         graphData: prepared.graphData,
       };
   }
+}
+
+/** The analysis an availability surface answers from, or the emitted exit. */
+export type AvailabilityAnalysis =
+  | {
+      readonly ok: true;
+      /** The analyzed current workspace — the SPEC 11.2 answer's source. */
+      readonly analysis: WorkspaceAnalysis;
+    }
+  | {
+      /** The failure is fully reported already; return `exit` as is. */
+      readonly ok: false;
+      readonly exit: ExitCode;
+    };
+
+/**
+ * The SPEC 11.2 pre-answer step of `occurrences`, `view`, and `at`
+ * (workspace/availability.ts), with its one failure rendered here:
+ * configuration errors keep their exit-2 precedence (SPEC 14.14, 12.0) —
+ * diagnostics on standard error and, these surfaces being JSON-only
+ * (SPEC 11), the 12.7 error document as the entire standard output. A
+ * failing workspace is not a failure of this step: the surface answers
+ * from the analysis, its findings selected by consulted domain
+ * (core/availability.ts).
+ */
+export async function prepareAnalysisForAvailability(
+  invocation: Invocation,
+  context: CommandContext,
+): Promise<AvailabilityAnalysis> {
+  const prepared = await prepareWorkspaceForAvailability(context.workspace);
+  if (prepared.kind === "configuration") {
+    emitConfigurationErrors(
+      context,
+      jsonOutputInEffect(invocation),
+      context.workspace.configAnchor,
+      prepared.errors,
+    );
+    return { ok: false, exit: 2 };
+  }
+  return { ok: true, analysis: prepared.analysis };
 }

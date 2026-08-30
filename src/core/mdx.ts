@@ -1085,6 +1085,81 @@ function valueViolation(value: string, kind: "segment" | "tag"): string | null {
 }
 
 /**
+ * SPEC 11.2: the sections of a parsed document whose node identities are
+ * defined, over a valid file path (an invalid-path file defines no identity
+ * whatever this returns — the caller's concern, SPEC 14.19). A section's
+ * node identity is defined exactly when it and each enclosing section spell
+ * an identity, each spelled identity in the chain is well-formed (SPEC 1.4)
+ * and satisfies the structural rules (SPEC 1.3), and no other section of
+ * the file spells the same identity as it does. The chain conditions are
+ * inherited — a descendant of a section that spells no identity, or whose
+ * spelled identity is malformed or structurally invalid, has no defined
+ * identity — but uniqueness is not: it constrains the section's own spelled
+ * identity alone, so duplicate spellings leave every bearer undefined (no
+ * winner picked) while a uniquely spelled descendant of duplicate-`id`
+ * ancestors keeps its defined identity. Parse-local (SPEC 11.2): shared by
+ * graph node construction (core/graph.ts) — only defined identities are
+ * formed, emitted, or resolved against (SPEC 1.5) — and the availability
+ * surfaces (SPEC 11.3–11.5).
+ */
+export function definedIdentitySections(
+  document: SpecDocument,
+): ReadonlySet<SpecSection> {
+  // Uniqueness compares spelled identities only (SPEC 11.2): a section
+  // spelling no identity (`id` absent, repeated, or in invalid value form —
+  // SpecSection.id null) contests no other section's.
+  const spelled = new Map<string, number>();
+  for (const section of document.sections) {
+    if (section.id !== null) {
+      spelled.set(section.id, (spelled.get(section.id) ?? 0) + 1);
+    }
+  }
+
+  // The chain conditions (own and inherited; uniqueness excluded): spells
+  // an identity, well-formed per SPEC 1.4, structurally valid per SPEC 1.3
+  // against the parent's spelled identity — a top-level section against the
+  // empty prefix (exactly one segment).
+  const wellFormed = (id: string): boolean =>
+    id
+      .split(".")
+      .every((segment) => valueViolation(segment, "segment") === null);
+  const chain = new Map<SpecSection, boolean>();
+  const chainOk = (section: SpecSection): boolean => {
+    if (section.parent === null) return true; // the root spells no identity
+    const memo = chain.get(section);
+    if (memo !== undefined) return memo;
+    let ok = false;
+    if (section.id !== null && wellFormed(section.id)) {
+      const segments = section.id.split(".");
+      const parent = section.parent;
+      if (parent.parent === null) {
+        // SPEC 1.3: a top-level section's ID is exactly one segment.
+        ok = segments.length === 1;
+      } else if (parent.id !== null) {
+        // SPEC 1.3: the parent's spelled ID plus exactly one segment. A
+        // parent spelling no identity fails the chain regardless.
+        const parentSegments = parent.id.split(".");
+        ok =
+          segments.length === parentSegments.length + 1 &&
+          parentSegments.every((segment, index) => segments[index] === segment);
+      }
+      ok = ok && chainOk(parent);
+    }
+    chain.set(section, ok);
+    return ok;
+  };
+
+  const defined = new Set<SpecSection>();
+  for (const section of document.sections) {
+    if (section.id === null) continue;
+    if (spelled.get(section.id) !== 1) continue;
+    if (!chainOk(section)) continue;
+    defined.add(section);
+  }
+  return defined;
+}
+
+/**
  * SPEC 2.6: split a `tags` value on runs of SPEC 1.4 whitespace, ignoring
  * leading and trailing whitespace, and collapse duplicates keeping
  * first-occurrence order. A value yielding no tags is equivalent to an

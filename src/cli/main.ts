@@ -152,6 +152,13 @@ const HANDLERS: ReadonlyMap<string, () => Promise<CommandHandler>> = new Map(
             async () =>
               (await import("./commands/review.js")).reviewExportCommand,
           ];
+        case "occurrences":
+          // SPEC 11.3.
+          return [
+            path,
+            async () =>
+              (await import("./commands/occurrences.js")).occurrencesCommand,
+          ];
         case "rename":
           // SPEC 6.4.
           return [

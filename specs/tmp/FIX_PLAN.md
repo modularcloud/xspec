@@ -141,38 +141,30 @@ core level; nothing presents the range yet — B4's occurrence records and
 C6's review payloads are the two presentation points, and T1.7-2 goes
 green with them.)
 
-### B4. `xspec occurrences` and the shared 11.2 availability layer
-
-SPEC 11.3, 11.2, 12.7. Prereqs A1–A4, B2. Register the command (JSON-only) and
-build the per-file availability machinery in `core` (not in the command file —
-`view`/`at` reuse it):
-
-- Document `{"findings", "occurrences"}`: records in occurrence order, each in
-  the 12.7 record form `{"file", "range", "kind", "source", "target"}`, `source`
-  `{"identity", "range"}` or `{"unavailable": true}` per 11.2.
-- `--file <glob>`: set restriction over discovered sources (spec and code) under
-  the glob rules of 7; a pattern resolving outside the workspace root is an
-  invalid flag value (exit 2); a glob admitting nothing yields
-  `{"findings": [], "occurrences": []}` exit 0 — no unknown-file error exists on
-  this filter. Without it, the domain is the entire discovered set.
-- `--to <node>`: acceptance is syntactic only — well-formed iff at most one `#`,
-  non-empty path part, and any post-`#` part is one or more non-empty
-  `.`-joined segments each satisfying 1.4; malformed = usage error exit 2;
-  unknown or unresolving selects nothing (the 12.0 exit-class exception).
-  Filters combine conjunctively.
-- 11.2 contract (shared machinery): the consulted domain's findings accompany
-  the answer — a finding belongs to a domain file when one of its locations lies
-  in it or it is the concerned path; a cross-file cycle accompanies whole when
-  any participant is in the domain. Any finding or explicitly-unavailable datum
-  in the answer → exit 1 with the full document still emitted; complete and
-  finding-free → exit 0. Argument checks precede answering (exit 2 whatever the
-  workspace carries). On a workspace passing `build`'s validations these
-  surfaces join the read-time refresh of 13.3; on a failing one they answer from
-  current sources and write nothing — journal (14.13) and write-path (14.22)
-  gate findings, being no domain file's findings, never accompany the answer.
-
-Verify: T11.3-1..4 (`section-11.3.test.ts`), T11.2-1/3/5/6 arms
-(`section-11.2.test.ts`), T13.3-1/2, P-11.
+(B4 landed: `xspec occurrences` and the shared 11.2 layer.
+`src/core/availability.ts` — `discoveredDomain(classification, glob?)` builds
+the `ConsultedDomain` (byte-keyed membership over the entire discovered set,
+invalid-path members matched by their exact bytes), `accompanyingFindings`
+selects a domain's findings (location file or concerned path in domain —
+jointly-violated conditions accompany whole), `nodeSpellingProblem` is 11.3's
+syntactic `--to`/node-spelling well-formedness, `selectOccurrences(graph,
+domain, to?)` yields `ResolvedOccurrence`s (the source datum's range joined
+through the graph node — requirement `section.range`, root = whole file; code
+`range`), `availabilityExit` the any-finding-or-unavailable → 1 rule.
+Identity definedness (11.2) is `definedIdentitySections(document)` in
+`src/core/mdx.ts` — spells + well-formed + structural, chain-inherited,
+uniqueness own-only — and graph node construction now builds nodes for
+exactly those sections (winner-picking removed: on failing workspaces,
+references to duplicate/malformed/structurally-invalid bearers report
+14.5–14.7 and record nothing); B5's `view` per-node identity datum and B6's
+`at` reuse it. Pre-answer step `prepareWorkspaceForAvailability`
+(`src/workspace/availability.ts`): config errors exit 2; a failing workspace
+(analysis findings, or 14.22 symlink findings over build's full write set) →
+answer from the current analysis, no store or journal consequence, no write;
+passing → the 13.3 refresh participation. CLI plumbing:
+`prepareAnalysisForAvailability` (`src/cli/prepare.ts`);
+`occurrenceRecordJson`/`unavailableJson` (`src/cli/report.ts`) — `view`/`at`
+render occurrence records and unavailability markers through these.)
 
 ### B5. `xspec view`
 
