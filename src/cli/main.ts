@@ -22,6 +22,7 @@ import type { ExitCode } from "../core/findings.js";
 import { locateWorkspace } from "../workspace/locate.js";
 import type { Invocation } from "./args.js";
 import { COMMAND_PATHS, jsonOutputInEffect, parseArgv } from "./args.js";
+import { tryFastAt } from "./commands/at-fast.js";
 import { tryFastQuery } from "./commands/query-fast.js";
 import type { CliWriter, CommandContext } from "./io.js";
 import {
@@ -165,6 +166,12 @@ const HANDLERS: ReadonlyMap<string, () => Promise<CommandHandler>> = new Map(
             path,
             async () => (await import("./commands/view.js")).viewCommand,
           ];
+        case "at":
+          // SPEC 11.5.
+          return [
+            path,
+            async () => (await import("./commands/at.js")).atCommand,
+          ];
         case "rename":
           // SPEC 6.4.
           return [
@@ -261,6 +268,23 @@ export async function main(
   // parser. Anything unverified falls through to the full path below.
   if (isQueryCommand(result.invocation.command)) {
     const fast = await tryFastQuery(
+      result.invocation,
+      location.located,
+      stdout,
+      stderr,
+    );
+    if (fast !== null) {
+      return fast;
+    }
+  }
+
+  // SPEC 13.3/11.2: `at` likewise answers from a verified store — the
+  // store already matches the current sources and configuration, so its
+  // refresh participation would write nothing and the answer equals the
+  // full path's byte for byte (SPEC 12.0). Anything unverified falls
+  // through to the full path below.
+  if (result.invocation.command === "at") {
+    const fast = await tryFastAt(
       result.invocation,
       location.located,
       stdout,

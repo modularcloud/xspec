@@ -192,23 +192,22 @@ records = `selectOccurrences(graph, new ConsultedDomain([file]))` — B6's
 `occurrence` member reuses this. P-12 stays red until B6's `at` lands, as
 its own verify line records.)
 
-### B6. `xspec at`
-
-SPEC 11.5, 12.7. Prereqs B2, B4. Register (JSON-only). Document
-`{"findings", "resolution"}`; `resolution` `{"section", "occurrence"}` or
-`{"unavailable": true}` (unparseable file — parse finding accompanies, exit 1):
-
-- `<file>` asserts membership exactly as a `view` operand (unknown / wrong-kind
-  → exit 2). `<offset>` must be one or more ASCII decimal digits, read decimal,
-  leading zeros permitted — sign, whitespace, or any other character is a usage
-  error; an offset greater than the file's byte length is a usage error; equal
-  resolves to the root.
-- `section`: `{"identity", "range"}` of the innermost section construct whose
-  range contains the offset (root when none — resolution is total over the
-  file), identity per 11.2. `occurrence`: the containing occurrence's full
-  record, `null` when the offset lies in none.
-
-Verify: T11.5-1..3 (`section-11.5.test.ts`), P-12.
+(B6 landed: `xspec at` (`src/cli/commands/at.ts`), registered JSON-only with
+`<file>` `<offset>` positionals. Membership mirrors `view`'s operand check
+(spec/code/invalid sources by `pathTextKey`); the offset-spelling check is
+syntactic and precedes the analysis; the offset bound is judged against the
+parsed root's range end or, for an unparseable named file, the byte length
+read via `readSourceByteLength` (`src/workspace/availability.ts`); the
+unparseable file answers `{"unavailable": true}` beside its 14.20, and
+identity/occurrence rendering reuses `definedIdentitySections` /
+`selectOccurrences` / `occurrenceRecordJson`. Performance: the full path
+costs ~0.5s per invocation (the pinned TS-compiler config parse), which
+would blow P-12's 600s exhaustive sweep, so `at` also answers from a
+verified store — `tryFastAt` in `src/cli/commands/at-fast.ts`, wired in
+`main` beside `tryFastQuery` over `workspace/fast-read.ts`, ~0.12s,
+byte-identical to the full path (usage diagnostics shared through
+`src/cli/commands/at-common.ts`). If another exhaustive sweep nears its
+timeout, this store-backed fast-path pattern is the lever.)
 
 ### B7. `xspec inventory`
 

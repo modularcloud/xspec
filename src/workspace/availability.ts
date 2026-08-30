@@ -28,6 +28,9 @@
 // core/build.ts, exactly as ./refresh.ts composes them, so refresh and
 // build agree byte for byte (SPEC 12.0).
 
+import * as fsp from "node:fs/promises";
+import * as path from "node:path";
+
 import { computeBuildOutputs } from "../core/build.js";
 import type { Finding } from "../core/findings.js";
 import {
@@ -140,6 +143,29 @@ export async function finishAvailabilityRefresh(
       workspace.root,
       refreshedGraphData(stored.data, build.graphData),
     );
+  }
+}
+
+/**
+ * The byte length of one discovered source, read from the filesystem — for
+ * a named file the analysis holds no parse for (an unparseable source,
+ * SPEC 14.20): `at`'s out-of-range offset check (SPEC 11.5) is judged
+ * against the file's bytes, a property of the bytes and not of the parse,
+ * so the check runs on unparseable files too. Null when the content cannot
+ * be read (the unreadable 14.20 case): no byte length exists to judge
+ * against, and the resolution is explicitly unavailable regardless.
+ */
+export async function readSourceByteLength(
+  workspace: LoadedWorkspace,
+  rel: string,
+): Promise<number | null> {
+  try {
+    const bytes = await fsp.readFile(
+      path.join(workspace.root, ...rel.split("/")),
+    );
+    return bytes.length;
+  } catch {
+    return null;
   }
 }
 

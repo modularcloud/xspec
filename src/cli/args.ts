@@ -10,9 +10,9 @@
 //
 // - The first argv element names a command from the known table (12.5):
 //   `build`, `check`, `ids`, `show`, `coverage`, `impact`, `review`, `query`,
-//   `occurrences`, `view`, `rename`, `move`, `version`. `review` and `query`
-//   take a subcommand as the next element. Unknown commands and subcommands
-//   are usage errors (12.0).
+//   `occurrences`, `view`, `at`, `rename`, `move`, `version`. `review` and
+//   `query` take a subcommand as the next element. Unknown commands and
+//   subcommands are usage errors (12.0).
 // - Tokens beginning `--` are flags; a value flag consumes the following
 //   element, verbatim, as its value. The specification writes only the
 //   space-separated form, so a token like `--config=x` is an unknown flag.
@@ -126,7 +126,7 @@ const TEST_HOLD_FLAG: FlagSpec = {
  * The known command table (SPEC 12.5), in specification order. Argument
  * forms: `build` 12.1, `check` 12.2, `ids` 12.3, `show` 12.4, `coverage` 8.2,
  * `impact` 9, `review` 10.7, `query` 11.1, `occurrences` 11.3, `view` 11.4,
- * `rename` 6.4, `move` 6.5, `version` 12.6.
+ * `at` 11.5, `rename` 6.4, `move` 6.5, `version` 12.6.
  */
 const COMMANDS: readonly CommandSpec[] = [
   // SPEC 12.1.
@@ -306,6 +306,17 @@ const COMMANDS: readonly CommandSpec[] = [
       { name: "--file", takesValue: true, valueName: "<glob>" },
       { name: "--text", takesValue: false },
     ],
+  },
+  // SPEC 11.5: `at <file> <offset>` — JSON-only (SPEC 11). `<file>` asserts
+  // domain membership exactly as a `view` operand does and `<offset>` must
+  // be one or more ASCII decimal digits within the file's byte length —
+  // checks the handler runs against discovery and the file's bytes, before
+  // answering (SPEC 11.2, 12.0).
+  {
+    path: "at",
+    positionals: ["<file>", "<offset>"],
+    flags: [],
+    jsonOnly: true,
   },
   // SPEC 6.4: `rename <file> <old-id> <new-id>`.
   {
