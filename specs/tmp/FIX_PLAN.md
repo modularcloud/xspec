@@ -410,6 +410,12 @@ now failing INSIDE THE HARNESS — its recursive `decodeViewNodeForm`
 (`test/helpers/adapters/forms.ts`) overflows on the depth-2048 view tree its
 own generator draws (CI seed 271828183, trial 1) after the product answers
 conformingly; no product change can clear it (SPEC 11.4 mandates the full
-tree). Logged 2026-08-30 in `specs/tmp/TEST-SPEC-PROBLEMS.md`. When the
-harness-side fix lands, rerun this sweep — expected then: full suite green,
-CI legs green, empty this file.)
+tree). Logged 2026-08-30 in `specs/tmp/TEST-SPEC-PROBLEMS.md`. CI at e239f0c (run
+33298889697) confirms: harness-self green; suite-linux 636/637 with P-11's
+harness error the sole red; Windows E-6 leg 8/9, its byte-identity arm
+starved of the exchange artifact — the suite-linux upload step has no
+`if: always()`, so any Linux test failure skips the upload (0 artifacts on
+the run); that wiring self-heals the moment suite-linux is green, so the
+Windows byte-identity signal arrives only then. When the harness-side fix
+lands, rerun this sweep — expected then: full suite green, all three CI
+legs green, empty this file.)
