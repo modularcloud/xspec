@@ -97,6 +97,22 @@ export interface SpecDependencyAttribute {
 }
 
 /**
+ * One raw attribute spelling as parsed (SPEC 11.4): every attribute the
+ * tag spells appears — repeated, unknown, and spread attributes included,
+ * their invalidity a located finding, never an omission. `name` is the
+ * attribute's name as spelled, structurally absent (null) for a spread
+ * attribute; `range` the attribute's own characters (SPEC 1.7) — for a
+ * named attribute its name through the last character of its value, or the
+ * bare name where it spells no value; for a spread attribute its entire
+ * braced construct — and `text` those exact source characters.
+ */
+export interface SpecRawAttribute {
+  readonly name: string | null;
+  readonly range: ByteRange;
+  readonly text: string;
+}
+
+/**
  * One requirement section (SPEC 1.1) or the file's implicit root (SPEC 1.2,
  * distinguished by `parent === null`). Sections form the containment tree;
  * all ranges are byte offsets into the file's bytes (SPEC 1.7).
@@ -150,6 +166,29 @@ export interface SpecSection {
   readonly idAttribute: SpecAttributeValue | null;
   /** The `d` attribute's recorded expression span, when validly braced. */
   readonly dependency: SpecDependencyAttribute | null;
+  /**
+   * The raw attribute spellings as parsed, one entry per attribute the tag
+   * spells, in tag order (SPEC 11.4). Empty for the root, which has no tag.
+   */
+  readonly attributes: readonly SpecRawAttribute[];
+  /**
+   * SPEC 11.2: whether the interpreted `tags` value is defined — an absent
+   * prop defines the default (no tags), while a repeated, malformed
+   * (braced or valueless), or invalid-valued (SPEC 1.4 → 14.4) `tags` prop
+   * leaves the interpreted value undefined, its raw spelling still listed
+   * in `attributes`. `tags` holds the interpreted value only where this is
+   * true. The root's `tags` is structurally absent, not undefined
+   * (SPEC 11.4): true there.
+   */
+  readonly tagsDefined: boolean;
+  /**
+   * SPEC 11.2: whether the interpreted coverage value is defined — the
+   * `tags` rule's coverage counterpart (absent → the default "required";
+   * repeated, braced, valueless, or a value other than "required"/"none" →
+   * undefined). `coverage` holds the interpreted value only where this is
+   * true; structurally absent (null) for the root, which is not undefined.
+   */
+  readonly coverageDefined: boolean;
 }
 
 /** One `{text(...)}` embedding occurrence (SPEC 2.3). */
@@ -1205,6 +1244,9 @@ interface MutableSection {
   tags: readonly string[];
   idAttribute: SpecAttributeValue | null;
   dependency: SpecDependencyAttribute | null;
+  attributes: SpecRawAttribute[];
+  tagsDefined: boolean;
+  coverageDefined: boolean;
   /** Whether an `id` prop occurred at all (14.1 is only for absence). */
   idPresent: boolean;
 }
@@ -1251,6 +1293,9 @@ class DocumentBuilder {
       tags: [],
       idAttribute: null,
       dependency: null,
+      attributes: [],
+      tagsDefined: true,
+      coverageDefined: true,
       idPresent: false,
     };
   }
@@ -1569,6 +1614,9 @@ class DocumentBuilder {
       tags: [],
       idAttribute: null,
       dependency: null,
+      attributes: [],
+      tagsDefined: true,
+      coverageDefined: true,
       idPresent: false,
     };
     this.processAttributes(node, section);
@@ -1584,7 +1632,17 @@ class DocumentBuilder {
     for (const attribute of node.attributes ?? []) {
       const attrSpan = this.spanOf(attribute);
       const attrRange = this.byteRange(attrSpan.start, attrSpan.end);
-      if (attribute.type !== "mdxJsxAttribute") {
+      const named = attribute.type === "mdxJsxAttribute";
+      // SPEC 11.4: every attribute the tag spells is recorded as a raw
+      // entry, in tag order — repeated, unknown, and spread attributes
+      // included; a spread attribute's name is structurally absent, its
+      // text its entire braced construct.
+      section.attributes.push({
+        name: named ? (attribute.name ?? "") : null,
+        range: attrRange,
+        text: this.text.slice(attrSpan.start, attrSpan.end),
+      });
+      if (!named) {
         // SPEC 2.7 → 14.17: every prop is a named attribute; a spread
         // attribute is invalid.
         this.addFinding(
@@ -1610,15 +1668,38 @@ class DocumentBuilder {
         if (name === "id") {
           idUnusable = true; // ambiguous declaration — no usable ID
         }
+        // SPEC 11.2: a repeated `tags`/`coverage` prop leaves the
+        // interpreted value undefined — no occurrence is picked.
+        if (name === "tags") {
+          section.tagsDefined = false;
+        }
+        if (name === "coverage") {
+          section.coverageDefined = false;
+        }
         continue;
       }
       seen.add(name);
       if (name === "d") {
         this.processDependencyProp(attribute, attrSpan, section);
       } else if (name === "id" || name === "coverage" || name === "tags") {
-        this.processStringProp(name, attribute, attrSpan, section, () => {
-          idUnusable = true;
-        });
+        const interpreted = this.processStringProp(
+          name,
+          attribute,
+          attrSpan,
+          section,
+          () => {
+            idUnusable = true;
+          },
+        );
+        // SPEC 11.2: a malformed (braced/valueless) or invalid-valued
+        // `tags`/`coverage` prop leaves the interpreted value undefined,
+        // its raw spelling still listed.
+        if (!interpreted && name === "tags") {
+          section.tagsDefined = false;
+        }
+        if (!interpreted && name === "coverage") {
+          section.coverageDefined = false;
+        }
       } else {
         // SPEC 2.7 → 14.17: the props defined on <S>/<Spec> are id, d,
         // coverage, and tags.
@@ -1674,7 +1755,11 @@ class DocumentBuilder {
   /**
    * SPEC 2.7: the value of `id`, `coverage`, and `tags` MUST be a static
    * string literal in quoted attribute form. Validates the value and
-   * records it on the section (SPEC 1.3, 2.5, 2.6 → 14.4, 14.17).
+   * records it on the section (SPEC 1.3, 2.5, 2.6 → 14.4, 14.17). Returns
+   * whether the prop's interpreted value is defined (SPEC 11.2): false for
+   * a malformed (braced/valueless) or invalid-valued `tags`/`coverage`
+   * occurrence — a spelled `id`'s definedness is the identity machinery's
+   * (`definedIdentitySections`), not this predicate's.
    */
   private processStringProp(
     name: "id" | "coverage" | "tags",
@@ -1682,7 +1767,7 @@ class DocumentBuilder {
     attrSpan: { start: number; end: number },
     section: MutableSection,
     onIdUnusable: () => void,
-  ): void {
+  ): boolean {
     const attrRange = this.byteRange(attrSpan.start, attrSpan.end);
     if (name === "id") {
       section.idPresent = true;
@@ -1703,7 +1788,7 @@ class DocumentBuilder {
       if (name === "id") {
         onIdUnusable();
       }
-      return;
+      return false;
     }
     const open = this.valueOpenIndex(attribute, attrSpan);
     const quoteCharacter = open === null ? null : this.text[open];
@@ -1733,10 +1818,10 @@ class DocumentBuilder {
             `only defined values are "required" (the default) and "none" ` +
             `(SPEC 2.5, 2.7, 14.17)`,
         );
-        return;
+        return false;
       }
       section.coverage = value;
-      return;
+      return true;
     }
 
     if (name === "tags") {
@@ -1744,8 +1829,10 @@ class DocumentBuilder {
       // yielding no tags is equivalent to omitting the prop.
       const tags = splitTags(value);
       section.tags = tags;
+      let tagsValid = true;
       if (rawHasNul) {
         // SPEC 1.4 → 14.4: U+0000 is a control character.
+        tagsValid = false;
         this.addFinding(
           4,
           attrRange,
@@ -1757,6 +1844,9 @@ class DocumentBuilder {
       for (const tag of tags) {
         const violation = valueViolation(tag, "tag");
         if (violation !== null) {
+          // SPEC 11.2: an invalid-valued prop leaves the interpreted
+          // value undefined.
+          tagsValid = false;
           this.addFinding(
             4,
             attrRange,
@@ -1766,7 +1856,7 @@ class DocumentBuilder {
           );
         }
       }
-      return;
+      return tagsValid;
     }
 
     // name === "id" (SPEC 1.3): record the declared ID and validate its
@@ -1801,6 +1891,9 @@ class DocumentBuilder {
         );
       }
     }
+    // The spelled identity stays spelled whatever its segments (SPEC 11.2);
+    // its definedness is judged by `definedIdentitySections`.
+    return true;
   }
 
   /**

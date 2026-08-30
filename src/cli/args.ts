@@ -10,9 +10,9 @@
 //
 // - The first argv element names a command from the known table (12.5):
 //   `build`, `check`, `ids`, `show`, `coverage`, `impact`, `review`, `query`,
-//   `occurrences`, `rename`, `move`, `version`. `review` and `query` take a
-//   subcommand as the next element. Unknown commands and subcommands are
-//   usage errors (12.0).
+//   `occurrences`, `view`, `rename`, `move`, `version`. `review` and `query`
+//   take a subcommand as the next element. Unknown commands and subcommands
+//   are usage errors (12.0).
 // - Tokens beginning `--` are flags; a value flag consumes the following
 //   element, verbatim, as its value. The specification writes only the
 //   space-separated form, so a token like `--config=x` is an unknown flag.
@@ -63,6 +63,17 @@ interface CommandSpec {
   readonly positionals: readonly string[];
   /** How many trailing positionals are optional (default none). */
   readonly optionalPositionals?: number;
+  /**
+   * The command accepts any number of positionals beyond `positionals`
+   * (SPEC 11.4: `view [<file> …]`); the upper arity bound is not checked.
+   */
+  readonly variadicPositionals?: boolean;
+  /**
+   * Flags that may not be combined with positional operands — SPEC 11.4:
+   * combining `<file>` operands with `--file` is a usage error, a defect
+   * the invocation's syntax alone determines (SPEC 12.0).
+   */
+  readonly positionalConflicts?: readonly string[];
   /** Command-specific flags; the SPEC 12.0 globals are added for every command. */
   readonly flags: readonly FlagSpec[];
   /**
@@ -114,8 +125,8 @@ const TEST_HOLD_FLAG: FlagSpec = {
 /**
  * The known command table (SPEC 12.5), in specification order. Argument
  * forms: `build` 12.1, `check` 12.2, `ids` 12.3, `show` 12.4, `coverage` 8.2,
- * `impact` 9, `review` 10.7, `query` 11.1, `occurrences` 11.3, `rename` 6.4,
- * `move` 6.5, `version` 12.6.
+ * `impact` 9, `review` 10.7, `query` 11.1, `occurrences` 11.3, `view` 11.4,
+ * `rename` 6.4, `move` 6.5, `version` 12.6.
  */
 const COMMANDS: readonly CommandSpec[] = [
   // SPEC 12.1.
@@ -279,6 +290,21 @@ const COMMANDS: readonly CommandSpec[] = [
     flags: [
       { name: "--file", takesValue: true, valueName: "<glob>" },
       { name: "--to", takesValue: true, valueName: "<node>" },
+    ],
+  },
+  // SPEC 11.4: `view [<file> …] [--file <glob>] [--text]` — JSON-only
+  // (SPEC 11). Operands assert membership while `--file` restricts the
+  // domain; combining them is a usage error.
+  {
+    path: "view",
+    positionals: ["<file>"],
+    optionalPositionals: 1,
+    variadicPositionals: true,
+    positionalConflicts: ["--file"],
+    jsonOnly: true,
+    flags: [
+      { name: "--file", takesValue: true, valueName: "<glob>" },
+      { name: "--text", takesValue: false },
     ],
   },
   // SPEC 6.4: `rename <file> <old-id> <new-id>`.
@@ -623,7 +649,8 @@ export function parseArgv(argv: readonly string[]): ParseResult {
     }
   }
   // SPEC 12.0: missing required arguments are usage errors; an argument the
-  // command's form does not define is one too.
+  // command's form does not define is one too (a variadic command defines
+  // no upper bound, SPEC 11.4).
   const minimum = spec.positionals.length - (spec.optionalPositionals ?? 0);
   if (positionals.length < minimum) {
     return usageError(
@@ -632,12 +659,28 @@ export function parseArgv(argv: readonly string[]): ParseResult {
       inEffect(),
     );
   }
-  if (positionals.length > spec.positionals.length) {
+  if (
+    spec.variadicPositionals !== true &&
+    positionals.length > spec.positionals.length
+  ) {
     return usageError(
       `${spec.path}: unexpected argument ` +
         `'${positionals[spec.positionals.length]!}'`,
       inEffect(),
     );
+  }
+  // SPEC 11.4/12.0: combining positional operands with a domain-restricting
+  // flag is a usage error the invocation's syntax alone determines.
+  for (const conflicting of spec.positionalConflicts ?? []) {
+    if (positionals.length > 0 && seen.has(conflicting)) {
+      return usageError(
+        `${spec.path}: ${spec.positionals[0] ?? "positional"} operands ` +
+          `cannot be combined with '${conflicting}' — operands assert ` +
+          `membership while the flag restricts the domain; give one or ` +
+          `the other`,
+        inEffect(),
+      );
+    }
   }
 
   return {

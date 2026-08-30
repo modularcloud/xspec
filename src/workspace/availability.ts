@@ -65,23 +65,40 @@ export type AvailabilityPreparation =
     };
 
 /**
- * The SPEC 11.2 pre-answer step: analyze the current workspace; on
- * configuration errors fail with exit-2 precedence; on a workspace failing
- * `build`'s validations answer from the analysis consulting nothing and
- * writing nothing; on a passing one participate in read-time refresh
- * exactly as the reads of 13.3 do, then answer from the same analysis.
+ * The analysis half of the SPEC 11.2 pre-answer step: analyze the current
+ * workspace — a pure read, nothing consulted beyond the sources and
+ * nothing modified — failing only with configuration-error precedence
+ * (SPEC 14.14). Callers whose argument checks consult discovery (`view`'s
+ * operand membership, SPEC 11.4) run them between this and
+ * `finishAvailabilityRefresh`: the checks precede answering (SPEC 11.2,
+ * 12.0), and a failing invocation writes nothing.
  */
-export async function prepareWorkspaceForAvailability(
+export async function analyzeWorkspaceForAvailability(
   workspace: LoadedWorkspace,
 ): Promise<AvailabilityPreparation> {
   const analysis = await analyzeWorkspace(workspace);
   if (analysis.configurationErrors.length > 0) {
     return { kind: "configuration", errors: analysis.configurationErrors };
   }
+  return { kind: "answer", analysis };
+}
+
+/**
+ * The refresh half of the SPEC 11.2 pre-answer step: on a workspace whose
+ * current sources fail `build`'s validations — source findings, journal
+ * errors, and refused writes alike (SPEC 13.3) — do nothing (no store
+ * read, no journal consequence, no write); on a passing one participate in
+ * read-time refresh exactly as the reads of 13.3 do. The answer itself
+ * always comes from `analysis`, never from the store.
+ */
+export async function finishAvailabilityRefresh(
+  workspace: LoadedWorkspace,
+  analysis: WorkspaceAnalysis,
+): Promise<void> {
   if (analysis.findings.length > 0) {
     // SPEC 11.2/13.3: the current sources fail build validation — answer
     // from them; no store read, no journal consequence, no write.
-    return { kind: "answer", analysis };
+    return;
   }
 
   // What `xspec build` would write for the current sources and
@@ -110,7 +127,7 @@ export async function prepareWorkspaceForAvailability(
     build.writePaths,
   );
   if (writeFindings.length > 0) {
-    return { kind: "answer", analysis };
+    return;
   }
 
   // Passing workspace: read-time refresh participation (SPEC 13.3), as in
@@ -124,5 +141,21 @@ export async function prepareWorkspaceForAvailability(
       refreshedGraphData(stored.data, build.graphData),
     );
   }
-  return { kind: "answer", analysis };
+}
+
+/**
+ * The SPEC 11.2 pre-answer step: analyze the current workspace; on
+ * configuration errors fail with exit-2 precedence; on a workspace failing
+ * `build`'s validations answer from the analysis consulting nothing and
+ * writing nothing; on a passing one participate in read-time refresh
+ * exactly as the reads of 13.3 do, then answer from the same analysis.
+ */
+export async function prepareWorkspaceForAvailability(
+  workspace: LoadedWorkspace,
+): Promise<AvailabilityPreparation> {
+  const prepared = await analyzeWorkspaceForAvailability(workspace);
+  if (prepared.kind === "answer") {
+    await finishAvailabilityRefresh(workspace, prepared.analysis);
+  }
+  return prepared;
 }

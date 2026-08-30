@@ -24,6 +24,7 @@ import type { SourceClassification } from "./discovery.js";
 import type { Finding } from "./findings.js";
 import type { CompiledGlob } from "./glob.js";
 import type { DependencyEdgeKind, WorkspaceGraph } from "./graph.js";
+import type { SpecDocument, SpecSection } from "./mdx.js";
 import type { PathText } from "./path-text.js";
 import { pathTextKey } from "./path-text.js";
 import {
@@ -245,4 +246,122 @@ export function availabilityExit(
   carriesUnavailable: boolean,
 ): 0 | 1 {
   return findings.length > 0 || carriesUnavailable ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Expanded text (SPEC 11.2) — definedness and the expansion-consulted files
+// ---------------------------------------------------------------------------
+
+/** Whether `range` lies within `outer` (byte containment, SPEC 1.7). */
+function rangeWithin(outer: ByteRange, range: ByteRange): boolean {
+  return range.start >= outer.start && range.end <= outer.end;
+}
+
+/**
+ * The files a request's expansions transitively consult beyond the
+ * requested files themselves (SPEC 11.4, with `--text`): exactly the files
+ * of the resolved targets reachable from the requested files' embeddings
+ * through resolved — occurrence-recording (SPEC 5.7) — embeddings, an
+ * embedding cycle's participants included, whether or not any expansion
+ * completes. A spelling that records no occurrence is an expansion's
+ * boundary: it consults no further file; a masked file (SPEC 14.20) is
+ * never consulted — no spelling resolves into it (SPEC 11.2). From an
+ * embedded target the expansion re-enters exactly the embeddings anywhere
+ * in that target's subtree (SPEC 11.2), so the walk recurses over the
+ * embeddings lying within the target section's construct range.
+ */
+export function expansionConsultedFiles(
+  graph: WorkspaceGraph,
+  requested: readonly SpecDocument[],
+): PathText[] {
+  const files: PathText[] = [];
+  const fileKeys = new Set<string>();
+  const visited = new Set<SpecSection>();
+
+  const visitTarget = (document: SpecDocument, section: SpecSection): void => {
+    if (visited.has(section)) return;
+    visited.add(section);
+    for (const embedding of document.embeddings) {
+      if (!rangeWithin(section.range, embedding.range)) continue;
+      const target = graph.embeddingTarget(embedding);
+      if (target === null) continue; // no occurrence — the boundary
+      const key = pathTextKey(target.document.file);
+      if (!fileKeys.has(key)) {
+        fileKeys.add(key);
+        files.push(target.document.file);
+      }
+      visitTarget(target.document, target.section);
+    }
+  };
+
+  for (const document of requested) {
+    // With `--text` every node's text is computed, the root's subtree
+    // covering the whole file (SPEC 1.2), so every embedding of a
+    // requested file starts an expansion.
+    visitTarget(document, document.root);
+  }
+  return files;
+}
+
+/**
+ * Per-node definedness of the SPEC 11.2 expanded-text values: a node's own
+ * (respectively subtree) text is defined exactly when every embedding the
+ * expansion transitively reaches — each `{text(...)}` spelling in the
+ * node's own contribution (respectively anywhere in its subtree), and
+ * recursively each one anywhere in every embedded target's subtree —
+ * records an occurrence (resolved through the graph's embedding index) and
+ * the recursion re-enters no node already being expanded (an embedding
+ * cycle). One unresolved spelling or one cycle on the expansion path makes
+ * the whole value unavailable — partial expansion never occurs. Where
+ * defined, the text model's values are exact (SPEC 11.2).
+ */
+export class TextAvailability {
+  /** Per-section verdict; "visiting" marks a subtree expansion in progress. */
+  private readonly state = new Map<SpecSection, "visiting" | boolean>();
+
+  constructor(private readonly graph: WorkspaceGraph) {}
+
+  /** Whether the node's own text (SPEC 1.6) is defined (SPEC 11.2). */
+  ownTextDefined(document: SpecDocument, section: SpecSection): boolean {
+    for (const embedding of document.embeddings) {
+      // The node's own contribution: the embeddings whose innermost
+      // section is the node itself (children's are excised, SPEC 1.6).
+      if (embedding.section !== section) continue;
+      const target = this.graph.embeddingTarget(embedding);
+      if (target === null) return false; // records no occurrence
+      if (!this.subtreeTextDefined(target.document, target.section)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Whether the node's subtree text (SPEC 1.6) is defined (SPEC 11.2). */
+  subtreeTextDefined(document: SpecDocument, section: SpecSection): boolean {
+    const memo = this.state.get(section);
+    if (memo === "visiting") {
+      // The recursion re-entered a node already being expanded: an
+      // embedding cycle — the value is undefined for every node on or
+      // reaching the cycle (the false return propagates up the chain).
+      return false;
+    }
+    if (typeof memo === "boolean") return memo;
+    this.state.set(section, "visiting");
+    let defined = true;
+    for (const embedding of document.embeddings) {
+      // Anywhere in the subtree: the embeddings within the construct range
+      // (the whole file for the root, SPEC 1.2).
+      if (!rangeWithin(section.range, embedding.range)) continue;
+      const target = this.graph.embeddingTarget(embedding);
+      if (
+        target === null ||
+        !this.subtreeTextDefined(target.document, target.section)
+      ) {
+        defined = false;
+        break;
+      }
+    }
+    this.state.set(section, defined);
+    return defined;
+  }
 }

@@ -166,47 +166,31 @@ passing → the 13.3 refresh participation. CLI plumbing:
 `occurrenceRecordJson`/`unavailableJson` (`src/cli/report.ts`) — `view`/`at`
 render occurrence records and unavailability markers through these.)
 
-### B5. `xspec view`
-
-SPEC 11.4, 11.2, 12.7. Prereqs B2, B4 (availability layer). Register the command
-(JSON-only). Document `{"findings", "views"}`, one
-`{"file", "root", "imports", "occurrences", "comments"}` per parseable requested
-file ordered by path bytes:
-
-- Operands vs. flag: `<file>` operands assert membership — a file outside the
-  discovered set is unknown (exit 2), a discovered code source is a wrong-kind
-  operand (exit 2); a `#`-containing operand is a whole path, never a
-  `path#id` split. `--file <glob>` is a set restriction (empty admitted set →
-  empty finding-free answer, exit 0). Combining operands with `--file` is a
-  usage error. Neither → every discovered spec source. An unparseable requested
-  file contributes no view entry (its parse finding accompanies, exit 1); an
-  invalid-path (14.19) file keeps its view, every identity unavailable,
-  condition-19 finding accompanying.
-- Node form `{"identity", "range", "opening", "closing", "attributes", "tags",
-  "coverage", "children"}` plus `"ownText"`/`"subtreeText"` exactly when
-  `--text`. Positional tree by construct nesting alone (a section inside a
-  non-section construct parents to the innermost enclosing section, else root).
-  `opening`/`closing`: tag ranges — self-closing has opening only, root neither
-  (null). `attributes`: one `{"name", "range", "text"}` per spelled attribute in
-  tag order — repeated/unknown/spread included, spread `name` null, `text` the
-  attribute's own characters. `identity`, `tags`, `coverage`, text members:
-  plain value, null where 11.4 defines structural absence (a root's
-  tags/coverage — absent, never unavailable), or `{"unavailable": true}` per
-  11.2 (spelled-identity rules; interpreted tags/coverage undefined on
-  repeated/malformed props; text all-or-nothing over transitive expansion,
-  unavailable on any unresolved spelling or embedding cycle on the path).
-- With `--text` the consulted domain adds every file the requested expansions
-  transitively consult (resolved targets reachable through occurrence-recording
-  embeddings, cycle participants included); a spelling recording no occurrence
-  is an expansion boundary; a masked file is consulted only when itself
-  requested.
-- `imports`: every declaration, valid or invalid, `{"range", "name", "target"}`
-  in document order — `name` the default-binding identifier or null (absent,
-  never unavailable), `target` the resolved file or `{"unavailable": true}`.
-  `occurrences`: the file's records in document order. `comments`: every MDX
-  comment's range.
-
-Verify: T11.4-1..6 (`section-11.4.test.ts`), T11.2-2/4, P-12.
+(B5 landed: `xspec view` (`src/cli/commands/view.ts`), registered JSON-only
+with variadic `<file>` positionals — `variadicPositionals` and
+`positionalConflicts` in `src/cli/args.ts` make combining operands with
+`--file` a parse-level usage error. The 11.2 pre-answer step is split so
+discovery-consulting argument checks precede answering AND the refresh:
+`analyzeWorkspaceForAvailability`/`finishAvailabilityRefresh`
+(`src/workspace/availability.ts`; `prepareWorkspaceForAvailability` still
+composes both for `occurrences`), CLI face `analyzeAnalysisForAvailability`
+(`src/cli/prepare.ts`) — B6's `at` must reuse this: operand membership by
+`pathTextKey` over `classification` spec/code/invalid sources (unknown /
+wrong-kind → exit 2), then `finishAvailabilityRefresh`, then answer. New
+parse-local data: `SpecSection.attributes` (raw `{name, range, text}`
+entries, spread name null) and `tagsDefined`/`coverageDefined` (11.2
+three-state interpreted datums) in `src/core/mdx.ts`;
+`SpecImport.designatedFile` (`src/core/spec-references.ts`) is the 11.4
+import-target datum (specifier form + discovery alone, binding validity
+notwithstanding). `src/core/availability.ts` adds `expansionConsultedFiles`
+(the `--text` domain walk over occurrence-recording embeddings) and
+`TextAvailability` (per-node own/subtree-text definedness — unresolved
+spelling or embedding cycle poisons the whole value); the graph's
+embedding index now also covers invalid-path files' embeddings, so the
+text model expands them where resolution holds. A file's own occurrence
+records = `selectOccurrences(graph, new ConsultedDomain([file]))` — B6's
+`occurrence` member reuses this. P-12 stays red until B6's `at` lands, as
+its own verify line records.)
 
 ### B6. `xspec at`
 

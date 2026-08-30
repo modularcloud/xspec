@@ -17,7 +17,10 @@
 
 import type { ExitCode } from "../core/findings.js";
 import type { GraphData } from "../core/graph-data.js";
-import { prepareWorkspaceForAvailability } from "../workspace/availability.js";
+import {
+  analyzeWorkspaceForAvailability,
+  prepareWorkspaceForAvailability,
+} from "../workspace/availability.js";
 import type { WorkspaceAnalysis } from "../workspace/pipeline.js";
 import { prepareWorkspaceForRead } from "../workspace/refresh.js";
 import type { Invocation } from "./args.js";
@@ -101,6 +104,33 @@ export async function prepareAnalysisForAvailability(
   context: CommandContext,
 ): Promise<AvailabilityAnalysis> {
   const prepared = await prepareWorkspaceForAvailability(context.workspace);
+  if (prepared.kind === "configuration") {
+    emitConfigurationErrors(
+      context,
+      jsonOutputInEffect(invocation),
+      context.workspace.configAnchor,
+      prepared.errors,
+    );
+    return { ok: false, exit: 2 };
+  }
+  return { ok: true, analysis: prepared.analysis };
+}
+
+/**
+ * The analysis half of the SPEC 11.2 pre-answer step alone — a pure read,
+ * configuration errors rendered exactly as `prepareAnalysisForAvailability`
+ * renders them (SPEC 14.14, 12.0). For surfaces whose argument checks
+ * consult discovery (`view`'s operand membership, SPEC 11.4): the caller
+ * runs those checks against the returned analysis, then — the invocation
+ * valid — performs the SPEC 13.3 refresh participation
+ * (workspace/availability.ts `finishAvailabilityRefresh`) before
+ * answering, so a failing invocation writes nothing.
+ */
+export async function analyzeAnalysisForAvailability(
+  invocation: Invocation,
+  context: CommandContext,
+): Promise<AvailabilityAnalysis> {
+  const prepared = await analyzeWorkspaceForAvailability(context.workspace);
   if (prepared.kind === "configuration") {
     emitConfigurationErrors(
       context,

@@ -718,10 +718,21 @@ export function buildWorkspaceGraph(
       );
     }
     for (const embedded of spec.references.embeddings) {
-      if (embedded.reference === null) continue;
+      if (embedded.reference === null) {
+        // No reference extracted: its 14.8 (or a masking 14.15) accounts
+        // for it (SPEC 14); the text model expands it to nothing.
+        embeddingIndex.set(embedded.embedding, null);
+        continue;
+      }
       const outcome = invalidPathOutcome(embedded.reference.target);
       if (outcome.ok) {
-        // SPEC 5.7: the occurrence spans the entire braced container.
+        // SPEC 5.7: the occurrence spans the entire braced container. The
+        // resolved target also enters the embedding index: the text model
+        // expands an invalid-path file's resolving embeddings exactly like
+        // any other (SPEC 11.2 — a defined text value is exact on
+        // imperfect files too), while the file still contributes no nodes
+        // and no edges.
+        embeddingIndex.set(embedded.embedding, outcome.node);
         addOccurrence(
           file,
           embedded.embedding.range,
@@ -731,6 +742,7 @@ export function buildWorkspaceGraph(
         );
         continue;
       }
+      embeddingIndex.set(embedded.embedding, null);
       // SPEC 14: an embedding-form finding's range is the full braced
       // container — the span its occurrence would occupy (5.7).
       findings.push(
