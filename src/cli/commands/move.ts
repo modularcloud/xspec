@@ -36,24 +36,28 @@
 //    reported and the command exits 1.
 // 4. Valid-workspace precondition (SPEC 6.5 → 6.4): when the current
 //    workspace fails the validations of `xspec build`, the move refuses
-//    (exit 1) before modifying anything, reporting those findings.
-// 5. Move-specific refusals (SPEC 6.5), each exit 1 before modifying
-//    anything — for the file form: a destination path that is not valid
-//    UTF-8, contains `#`, is not a well-formed workspace-relative path,
-//    already exists, belongs to no configured spec group, belongs to a code
-//    group as well (14.14), would be excluded as a derived-file path (13.4),
-//    or lacks the `.mdx` extension (14.19). For the section form: a target
-//    file that is neither a discovered spec source nor a creatable valid
-//    spec-source path (the same destination-validity family); the exact
-//    self-move; an invalid `<new-id>` (1.4); a `<new-id>` colliding with an
-//    ID remaining in the target file after the removal; a missing target
-//    parent or one inside the moved subtree; a moved reference targeting the
-//    target file's root node (the local form cannot name it, 2.2).
-// 6. The rewritten workspace is re-validated in memory — realizing "all
-//    rewritten references resolve" and the no-new-cycles rule (import and
-//    dependency cycles alike, 5.3, 2.1) — and the complete write set passes
-//    the SPEC 14.22 symlink check; any finding refuses (exit 1) before
-//    modifying anything.
+//    (exit 1) before modifying anything, reporting those findings alone —
+//    no refusal reason evaluated or reported beside them (SPEC 14).
+// 5. The refusal contract (SPEC 6.5, 14): every applicable refusal reason
+//    is evaluated together over the valid workspace (core/refusal.ts) —
+//    the mirrored identity checks (intrinsic form, identity change,
+//    collisions after the removal), the target parent, destination
+//    occupancy and validity (obstructed destination-side directory
+//    components included), would-be dependency and spec-import cycles, and
+//    rewritten references that could not resolve — and a refused move
+//    reports one finding per reason, each with its stable code and
+//    concerned identity, path, or located participants (at current,
+//    pre-operation coordinates), as the 12.7 findings report (exit 1),
+//    modifying nothing. `--preview` (SPEC 6.6) shares exactly this
+//    evaluation. The destination-side filesystem facts are probed by the
+//    workspace layer (workspace/writes.ts) over exactly the paths the
+//    core assessment names.
+// 6. The rewritten workspace is re-validated in memory and the complete
+//    write set passes the SPEC 14.22 symlink check — internal-consistency
+//    guards on the would-succeed path (the refusal evaluation above
+//    realizes "all rewritten references resolve" and the no-new-cycles
+//    rule for the user-facing contract); any finding refuses (exit 1)
+//    before modifying anything.
 //
 // Success writes the rewritten sources, removes the origin (file form),
 // appends the journal entry, and regenerates; the report is the applied
@@ -61,23 +65,27 @@
 // information of the preview's `mapping` (SPEC 6.5, 6.4, 6.6) — with
 // `--json`, the single JSON document (SPEC 12.0).
 
-import * as path from "node:path";
 import { computeBuildOutputs } from "../../core/build.js";
 import { compareBytes } from "../../core/bytes.js";
-import { canonicalJson } from "../../core/canonical-json.js";
-import type { Configuration } from "../../core/config.js";
 import type {
   DiscoveredSource,
   SourceClassification,
 } from "../../core/discovery.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import type { SpecFileAnalysis } from "../../core/graph.js";
-import type { SpecSection } from "../../core/mdx.js";
-import type { SpecReference } from "../../core/spec-references.js";
 import { JOURNAL_PATH, serializeJournalEntry } from "../../core/journal.js";
 import type { MoveFilePlan, MoveSectionPlan } from "../../core/move.js";
 import { planMoveFile, planMoveSection } from "../../core/move.js";
-import { replaceIdPrefix } from "../../core/rename.js";
+import type {
+  DestinationPathAssessment,
+  DestinationProbe,
+} from "../../core/refusal.js";
+import {
+  assessDestinationPath,
+  evaluateMoveFileRefusals,
+  evaluateMoveSectionRefusals,
+  UNPROBED_DESTINATION,
+} from "../../core/refusal.js";
 import { executeBuildOutputs } from "../../workspace/build.js";
 import type { LoadedWorkspace } from "../../workspace/config.js";
 import { loadGraphData } from "../../workspace/graph-data.js";
@@ -93,8 +101,9 @@ import {
   analyzeWorkspaceContent,
   workspaceInputsOf,
 } from "../../workspace/pipeline.js";
-import { classifyOccupant, describeOccupant } from "../../workspace/writes.js";
 import {
+  nonDirectoryComponents,
+  probeOccupant,
   removeSourceFile,
   symlinkWritePathFindings,
   writeSourceFile,
@@ -107,27 +116,16 @@ import {
   emitConfigurationErrors,
   emitFindingsReport,
 } from "../report.js";
-import { requirementIdProblem, testHoldSpecOf, usageError } from "./common.js";
+import { testHoldSpecOf, usageError } from "./common.js";
 
 /**
- * SPEC 6.5/12.0: a refused move is a validation failure — exit 1, the
- * refusal report on standard output (SPEC 12.0: reports are standard-output
- * content; with `--json`, one JSON document as the entire standard output).
+ * SPEC 6.5/12.0/12.7: a refused move is a validation failure — exit 1, the
+ * findings report `{"findings": […]}` on standard output (SPEC 12.0:
+ * reports are standard-output content; with `--json`, one JSON document as
+ * the entire standard output). Workspace-precondition findings and
+ * refusal-reason findings alike go through here — never mixed in one
+ * report (SPEC 14).
  */
-function emitRefusal(
-  json: boolean,
-  stdout: CliWriter,
-  message: string,
-): ExitCode {
-  if (json) {
-    stdout.write(canonicalJson({ refused: { command: "move", message } }));
-  } else {
-    stdout.write(`move refused: ${message}\n`);
-  }
-  return 1;
-}
-
-/** SPEC 6.5: refusals reported as findings (workspace validation, 14.22). */
 function emitFindingsRefusal(
   json: boolean,
   stdout: CliWriter,
@@ -135,6 +133,45 @@ function emitFindingsRefusal(
 ): ExitCode {
   emitFindingsReport(json, stdout, findings);
   return 1;
+}
+
+/**
+ * Assess a move destination and probe its filesystem facts (SPEC 6.5):
+ * the pure path assessment (core/refusal.ts), then — for a well-formed,
+ * probeable path only — the destination occupant (skipped for an already
+ * discovered section-form target, whose occupant question does not arise)
+ * and the non-directory directory components of the destination-side
+ * write paths the assessment names. A malformed spelling is never
+ * resolved against the workspace root (SPEC 1.5).
+ */
+async function assessAndProbeDestination(
+  workspace: LoadedWorkspace,
+  destination: string,
+  probeOccupancy: boolean,
+): Promise<{
+  readonly assessment: DestinationPathAssessment;
+  readonly probe: DestinationProbe;
+}> {
+  const assessment = assessDestinationPath(
+    destination,
+    isValidUtf8ArgumentValue(destination),
+    workspace.configuration,
+  );
+  if (!assessment.probeable) {
+    return { assessment, probe: UNPROBED_DESTINATION };
+  }
+  return {
+    assessment,
+    probe: {
+      occupant: probeOccupancy
+        ? await probeOccupant(workspace.root, destination)
+        : "file",
+      obstructedComponents: await nonDirectoryComponents(
+        workspace.root,
+        assessment.componentProbePaths,
+      ),
+    },
+  };
 }
 
 /** The parsed shape of one `move` argument: a bare file, or `file#id`. */
@@ -154,239 +191,6 @@ function parseMoveArgument(raw: string): MoveArgument {
     return { file: raw, id: null };
   }
   return { file: raw.slice(0, hash), id: raw.slice(hash + 1) };
-}
-
-/**
- * Why `destination` is not a well-formed workspace-relative spec-source
- * path shape (SPEC 1.5: workspace-relative, `/`-separated, no `.`/`..`
- * segments — the shape every discovered source path has), or null when it
- * is. Checked before any filesystem probe, so a `..`-bearing argument never
- * resolves outside the workspace root.
- */
-function destinationShapeProblem(destination: string): string | null {
-  if (destination.length === 0) {
-    return "it is empty";
-  }
-  if (destination.startsWith("/")) {
-    return "it is not workspace-relative (SPEC 1.5, 12.0)";
-  }
-  for (const segment of destination.split("/")) {
-    if (segment === "") {
-      return "it has an empty path segment";
-    }
-    if (segment === "." || segment === "..") {
-      return (
-        `it has a ${JSON.stringify(segment)} path segment — discovered ` +
-        `source paths are workspace-relative without "." or ".." (SPEC 1.5)`
-      );
-    }
-  }
-  return null;
-}
-
-const utf8Encoder = new TextEncoder();
-
-/** The configured groups (spec or code) whose globs match `bytes` (SPEC 7). */
-function matchingGroups(
-  groups: Configuration["specGroups"],
-  bytes: Uint8Array,
-): string[] {
-  const names: string[] = [];
-  for (const group of groups) {
-    if (group.globs.some((glob) => glob.matches(bytes))) {
-      names.push(group.name);
-    }
-  }
-  return names;
-}
-
-/**
- * SPEC 6.5: why the file-form destination must be refused, or null when it
- * is acceptable. Covers the destination-validity family — the path would
- * not be a valid discovered spec source after the move — plus the
- * destination-exists refusal; each reason is a validation refusal (exit 1),
- * never a usage error.
- */
-async function fileDestinationProblem(
-  workspace: LoadedWorkspace,
-  destination: string,
-): Promise<{ readonly problem: string } | { readonly specGroups: string[] }> {
-  // SPEC 6.5 → 14.19: a destination that is not valid UTF-8 would not be a
-  // valid discovered spec source. Node decodes non-UTF-8 argv bytes to
-  // U+FFFD (see cli/args.ts), so U+FFFD marks an undecodable argument.
-  if (!isValidUtf8ArgumentValue(destination)) {
-    return {
-      problem:
-        `the destination path is not valid UTF-8 — a discovered source ` +
-        `file's workspace-relative path must be valid UTF-8 (SPEC 6.5, 7, ` +
-        `14.19)`,
-    };
-  }
-  // SPEC 6.5 → 1.5/14.19: node identities reserve `#`.
-  if (destination.includes("#")) {
-    return {
-      problem:
-        `the destination path ${JSON.stringify(destination)} contains "#", ` +
-        `which node identities reserve (path#id) — it would not be a valid ` +
-        `discovered spec source (SPEC 6.5, 1.5, 14.19)`,
-    };
-  }
-  const shape = destinationShapeProblem(destination);
-  if (shape !== null) {
-    return {
-      problem:
-        `the destination path ${JSON.stringify(destination)} is not a ` +
-        `well-formed workspace-relative path: ${shape} (SPEC 6.5)`,
-    };
-  }
-  // SPEC 6.5: refuse a file-form move whose destination file already
-  // exists — whatever occupies the path (the exact self-move is refused
-  // here too: its destination is the existing origin).
-  const occupant = await classifyOccupant(
-    path.join(workspace.root, ...destination.split("/")),
-  );
-  if (occupant !== "absent") {
-    return {
-      problem:
-        `the destination file ${JSON.stringify(destination)} already ` +
-        `exists — a file-form move refuses an existing destination ` +
-        `(SPEC 6.5)`,
-    };
-  }
-  const bytes = utf8Encoder.encode(destination);
-  const specGroups = matchingGroups(workspace.configuration.specGroups, bytes);
-  // SPEC 6.5: a path belonging to no configured spec group — a move never
-  // takes a node out of the workspace.
-  if (specGroups.length === 0) {
-    return {
-      problem:
-        `the destination path ${JSON.stringify(destination)} belongs to no ` +
-        `configured spec group — a move never takes a node out of the ` +
-        `workspace; choose a destination a spec group's globs match ` +
-        `(SPEC 6.5, 7)`,
-    };
-  }
-  // SPEC 6.5 → 14.14: belonging to a code group as well.
-  const codeGroups = matchingGroups(workspace.configuration.codeGroups, bytes);
-  if (codeGroups.length > 0) {
-    return {
-      problem:
-        `the destination path ${JSON.stringify(destination)} is matched by ` +
-        `spec group "${specGroups[0]!}" and code group "${codeGroups[0]!}" ` +
-        `alike — no file may belong to both a spec and a code group ` +
-        `(SPEC 6.5, 7.2, 14.14)`,
-    };
-  }
-  // SPEC 6.5 → 7.1/14.19: lacking the `.mdx` extension.
-  if (!destination.endsWith(".mdx")) {
-    return {
-      problem:
-        `the destination path ${JSON.stringify(destination)} lacks the ` +
-        `.mdx extension — every spec-group source must end ".mdx" ` +
-        `(SPEC 6.5, 7.1, 14.19)`,
-    };
-  }
-  // SPEC 13.4: derived-file paths are never sources — a file name
-  // containing `.xspec.` or a path under `.xspec/` is excluded from every
-  // group, so such a destination would never be discovered. (A configured
-  // Markdown emit destination always ends ".md" and can never collide with
-  // a ".mdx" destination.)
-  const fileName = destination.slice(destination.lastIndexOf("/") + 1);
-  if (fileName.includes(".xspec.") || destination.startsWith(".xspec/")) {
-    return {
-      problem:
-        `the destination path ${JSON.stringify(destination)} is a ` +
-        `derived-file path (a file name containing ".xspec." or a path ` +
-        `under ".xspec/") — derived-file paths are never discovered as ` +
-        `sources (SPEC 6.5, 13.4)`,
-    };
-  }
-  return { specGroups };
-}
-
-/**
- * SPEC 6.5 (section form): why a target file that is not already a
- * discovered spec source cannot be created at `destination`, or its spec
- * groups when it can. The same destination-validity family as the file
- * form — the path must be a valid discovered spec source after the move —
- * except that the path must be unoccupied (an occupied path that is no
- * discovered spec source can never become one by insertion).
- */
-async function sectionDestinationProblem(
-  workspace: LoadedWorkspace,
-  destination: string,
-): Promise<{ readonly problem: string } | { readonly specGroups: string[] }> {
-  if (!isValidUtf8ArgumentValue(destination)) {
-    return {
-      problem:
-        `the target file path is not valid UTF-8 — a discovered source ` +
-        `file's workspace-relative path must be valid UTF-8 (SPEC 6.5, 7, ` +
-        `14.19)`,
-    };
-  }
-  const shape = destinationShapeProblem(destination);
-  if (shape !== null) {
-    return {
-      problem:
-        `the target file path ${JSON.stringify(destination)} is not a ` +
-        `well-formed workspace-relative path: ${shape} (SPEC 6.5)`,
-    };
-  }
-  const bytes = utf8Encoder.encode(destination);
-  const specGroups = matchingGroups(workspace.configuration.specGroups, bytes);
-  if (specGroups.length === 0) {
-    return {
-      problem:
-        `the target file path ${JSON.stringify(destination)} belongs to no ` +
-        `configured spec group — a move never takes a node out of the ` +
-        `workspace; choose a target a spec group's globs match (SPEC 6.5, 7)`,
-    };
-  }
-  const codeGroups = matchingGroups(workspace.configuration.codeGroups, bytes);
-  if (codeGroups.length > 0) {
-    return {
-      problem:
-        `the target file path ${JSON.stringify(destination)} is matched by ` +
-        `spec group "${specGroups[0]!}" and code group "${codeGroups[0]!}" ` +
-        `alike — no file may belong to both a spec and a code group ` +
-        `(SPEC 6.5, 7.2, 14.14)`,
-    };
-  }
-  if (!destination.endsWith(".mdx")) {
-    return {
-      problem:
-        `the target file path ${JSON.stringify(destination)} lacks the ` +
-        `.mdx extension — every spec-group source must end ".mdx" ` +
-        `(SPEC 6.5, 7.1, 14.19)`,
-    };
-  }
-  const fileName = destination.slice(destination.lastIndexOf("/") + 1);
-  if (fileName.includes(".xspec.") || destination.startsWith(".xspec/")) {
-    return {
-      problem:
-        `the target file path ${JSON.stringify(destination)} is a ` +
-        `derived-file path (a file name containing ".xspec." or a path ` +
-        `under ".xspec/") — derived-file paths are never discovered as ` +
-        `sources (SPEC 6.5, 13.4)`,
-    };
-  }
-  // The path passed every rule yet is no discovered spec source, so
-  // something undiscoverable occupies it (a directory, a symbolic link —
-  // discovery never follows them, SPEC 7) — or nothing does and the move
-  // creates the file (SPEC 6.5).
-  const occupant = await classifyOccupant(
-    path.join(workspace.root, ...destination.split("/")),
-  );
-  if (occupant !== "absent") {
-    return {
-      problem:
-        `the target file path ${JSON.stringify(destination)} is occupied ` +
-        `by ${describeOccupant(occupant)} that is not a discovered spec ` +
-        `source — the target of a section move must be a discovered spec ` +
-        `source or a creatable spec-source path (SPEC 6.5, 7)`,
-    };
-  }
-  return { specGroups };
 }
 
 /** Concatenate byte arrays (the hypothetical post-append journal bytes). */
@@ -526,14 +330,25 @@ async function runMoveFile(
 ): Promise<ExitCode> {
   const { workspace, stdout, stderr } = context;
 
-  // SPEC 6.5: the destination refusals — each refuses (exit 1) before
-  // modifying anything.
-  const destinationResult = await fileDestinationProblem(
+  // SPEC 6.5/14: evaluate every applicable refusal reason together over
+  // the valid workspace — destination occupancy and validity, identity
+  // change, and the would-be cycles, one finding per reason — and refuse
+  // (exit 1) with the 12.7 findings report, nothing modified.
+  const { assessment, probe } = await assessAndProbeDestination(
     workspace,
     destination,
+    true,
   );
-  if ("problem" in destinationResult) {
-    return emitRefusal(invocation.json, stdout, destinationResult.problem);
+  const refusals = evaluateMoveFileRefusals({
+    specs: analysis.specs,
+    graph: analysis.graph,
+    originPath,
+    destination,
+    assessment,
+    probe,
+  });
+  if (refusals.length > 0) {
+    return emitFindingsRefusal(invocation.json, stdout, refusals);
   }
 
   // The pure plan: the identity mapping (file part only), the journal
@@ -558,7 +373,7 @@ async function runMoveFile(
     plan,
     originPath,
     destination,
-    destinationResult.specGroups,
+    assessment.specGroups,
   );
   if (rewritten.configurationErrors.length > 0) {
     // Unreachable: the destination was validated against the same group
@@ -573,8 +388,10 @@ async function runMoveFile(
     return 2;
   }
   if (rewritten.findings.length > 0) {
-    // SPEC 6.5: the rewrite would not leave a valid workspace — refuse with
-    // the would-be findings, nothing modified.
+    // Unreachable: the refusal evaluation above (core/refusal.ts) realizes
+    // every reason a move can be refused for, so a validated plan leaves a
+    // valid workspace. Guarded so a regression refuses (exit 1, nothing
+    // modified) rather than corrupts.
     return emitFindingsRefusal(invocation.json, stdout, rewritten.findings);
   }
 
@@ -704,149 +521,64 @@ async function runMoveSection(
   const { workspace, stdout, stderr } = context;
   const originPath = originSpec.document.path;
   const sameFile = targetPath === originPath;
-  const inMovedSubtree = (id: string): boolean =>
-    id === oldId || id.startsWith(`${oldId}.`);
 
   // SPEC 6.5: resolve the target file — the origin itself, another
-  // discovered spec source, or a creatable spec-source path (the
-  // destination-validity refusal family; each reason refuses, exit 1,
-  // before modifying anything).
-  let targetSpec: SpecFileAnalysis | null;
-  let createGroups: readonly string[] | null = null;
-  if (sameFile) {
-    targetSpec = originSpec;
-  } else {
-    const found = analysis.specs.find(
-      (spec) => spec.document.path === targetPath,
-    );
-    if (found !== undefined) {
-      targetSpec = found;
-    } else {
-      const result = await sectionDestinationProblem(workspace, targetPath);
-      if ("problem" in result) {
-        return emitRefusal(invocation.json, stdout, result.problem);
-      }
-      targetSpec = null;
-      createGroups = result.specGroups;
-    }
-  }
+  // discovered spec source, or no discovered source at all (the path the
+  // move would create, or an occupant the evaluation refuses).
+  const targetSpec: SpecFileAnalysis | null = sameFile
+    ? originSpec
+    : (analysis.specs.find((spec) => spec.document.path === targetPath) ??
+      null);
 
-  // SPEC 6.5 (identity terms): the new identity must differ from the old —
-  // the exact self-move is refused and appends no journal entry, while a
-  // cross-file move keeping its ID is valid.
-  if (sameFile && newId === oldId) {
-    return emitRefusal(
-      invocation.json,
-      stdout,
-      `'${targetPath}#${newId}' is the moved section's own identity — the ` +
-        `exact self-move is refused (SPEC 6.5)`,
-    );
-  }
-
-  // SPEC 6.5 → 1.4: the new ID must be valid. A `<new-id>` that is not
-  // valid UTF-8 cannot be written into a source file faithfully (argv bytes
-  // that do not decode are irrecoverable; see cli/args.ts).
+  // A `<new-id>` that is not valid UTF-8 cannot be written into a source
+  // file faithfully (argv bytes that do not decode are irrecoverable; see
+  // cli/args.ts): it can never be a valid requirement ID (SPEC 1.6, 1.4),
+  // refused under its reason's stable code (SPEC 14).
   if (!isValidUtf8ArgumentValue(newId)) {
-    return emitRefusal(
-      invocation.json,
-      stdout,
-      `the new ID is not valid UTF-8 — requirement IDs are decoded UTF-8 ` +
-        `content (SPEC 6.5, 1.6)`,
-    );
-  }
-  const invalid = requirementIdProblem(newId);
-  if (invalid !== null) {
-    return emitRefusal(
-      invocation.json,
-      stdout,
-      `the new ID ${JSON.stringify(newId)} is not a valid requirement ID: ` +
-        `${invalid} (SPEC 1.4, 6.5)`,
-    );
+    return emitFindingsRefusal(invocation.json, stdout, [
+      {
+        code: "refused-invalid-id",
+        message:
+          `invalid new ID: the new ID is not valid UTF-8 — requirement ` +
+          `IDs are decoded UTF-8 content (SPEC 1.6, 1.4); pass a valid ` +
+          `UTF-8 ID (SPEC 6.5, 14)`,
+        locations: [],
+        path: null,
+        identities: [`${targetPath}#${newId}`],
+      },
+    ]);
   }
 
-  // SPEC 6.5: `<new-id>` must collide with no ID remaining in the target
-  // file after the removal — the moved subtree's own IDs are vacated by it.
-  if (
-    targetSpec !== null &&
-    targetSpec.document.sections.some(
-      (section) =>
-        section.id === newId && !(sameFile && inMovedSubtree(section.id)),
-    )
-  ) {
-    return emitRefusal(
-      invocation.json,
-      stdout,
-      `the new ID ${JSON.stringify(newId)} collides with an ID remaining ` +
-        `in '${targetPath}' after the removal — IDs are unique within a ` +
-        `source file (SPEC 1.3, 6.5)`,
-    );
+  // SPEC 6.5/14: evaluate every applicable refusal reason together over
+  // the valid workspace — the mirrored identity checks, the target
+  // parent, destination occupancy and validity, would-be cycles, and
+  // unresolvable rewritten references, one finding per reason — and
+  // refuse (exit 1) with the 12.7 findings report, nothing modified. The
+  // destination probes run only where no discovered spec source occupies
+  // the target path (a discovered target raises no occupancy or validity
+  // question); its destination-side directory components are vetted
+  // either way.
+  const { assessment, probe } = await assessAndProbeDestination(
+    workspace,
+    targetPath,
+    targetSpec === null,
+  );
+  const refusals = evaluateMoveSectionRefusals({
+    specs: analysis.specs,
+    graph: analysis.graph,
+    origin: originSpec,
+    oldId,
+    targetPath,
+    newId,
+    target: targetSpec,
+    assessment,
+    probe,
+  });
+  if (refusals.length > 0) {
+    return emitFindingsRefusal(invocation.json, stdout, refusals);
   }
-
-  // SPEC 6.5: the target parent — the target file's section bearing
-  // `<new-id>` minus its final segment, needed whenever `<new-id>` has more
-  // than one segment — must exist and lie outside the moved subtree,
-  // leaving an insertion point after the removal (the mirrored structural
-  // parent rule, SPEC 1.3).
-  const newSegments = newId.split(".");
-  if (newSegments.length > 1) {
-    const parentId = newSegments.slice(0, -1).join(".");
-    const parent = targetSpec?.document.sections.find(
-      (section) => section.id === parentId,
-    );
-    if (parent === undefined) {
-      return emitRefusal(
-        invocation.json,
-        stdout,
-        `the target parent '${targetPath}#${parentId}' — the section ` +
-          `bearing the new ID minus its final segment — does not exist in ` +
-          `the target file (SPEC 6.5, 1.3)`,
-      );
-    }
-    if (sameFile && inMovedSubtree(parentId)) {
-      return emitRefusal(
-        invocation.json,
-        stdout,
-        `the target parent '${targetPath}#${parentId}' lies within the ` +
-          `moved subtree, leaving no insertion point after the removal ` +
-          `(SPEC 6.5)`,
-      );
-    }
-  }
-
-  // SPEC 6.5 → 2.2: a moved reference targeting the target file's root node
-  // has no rewritable spelling — the local form names IDs in the same file,
-  // never its root — so the move refuses rather than leave an unresolvable
-  // rewrite ("all rewritten references resolve").
-  if (!sameFile) {
-    const targetsRootOfTarget = (
-      section: SpecSection,
-      reference: SpecReference,
-    ): boolean =>
-      section.id !== null &&
-      inMovedSubtree(section.id) &&
-      reference.target.kind === "external" &&
-      reference.target.modulePath === targetPath &&
-      reference.target.segments.length === 0;
-    const offends =
-      originSpec.references.dependencies.some((dependency) =>
-        targetsRootOfTarget(dependency.section, dependency.reference),
-      ) ||
-      originSpec.references.embeddings.some(
-        (embedding) =>
-          embedding.reference !== null &&
-          targetsRootOfTarget(embedding.embedding.section, embedding.reference),
-      );
-    if (offends) {
-      return emitRefusal(
-        invocation.json,
-        stdout,
-        `a reference within the moved subtree targets the target file's ` +
-          `root node — the local reference form names IDs in its own file, ` +
-          `never the file's root, so no rewrite of it can resolve after ` +
-          `the move (SPEC 6.5, 2.2)`,
-      );
-    }
-  }
+  const createGroups: readonly string[] | null =
+    targetSpec === null ? assessment.specGroups : null;
 
   // The pure plan: the identity mapping, the journal entry, the exact text
   // edits, and every reference and import rewrite (SPEC 6.5, 6.1).
@@ -884,9 +616,11 @@ async function runMoveSection(
     return 2;
   }
   if (rewritten.findings.length > 0) {
-    // SPEC 6.5: the rewrite would not leave a valid workspace — a move
-    // creating an import or dependency cycle lands here — refuse with the
-    // would-be findings, nothing modified.
+    // Unreachable: the refusal evaluation above (core/refusal.ts) realizes
+    // every reason a move can be refused for — would-be cycles and
+    // unresolvable rewritten references included — so a validated plan
+    // leaves a valid workspace. Guarded so a regression refuses (exit 1,
+    // nothing modified) rather than corrupts.
     return emitFindingsRefusal(invocation.json, stdout, rewritten.findings);
   }
 

@@ -61,6 +61,64 @@ export async function classifyOccupant(
   return "other";
 }
 
+/**
+ * Classify the occupant of a workspace-relative path for the
+ * `rename`/`move` destination probes (SPEC 6.5, core/refusal.ts): like
+ * `classifyOccupant`, but a path unreachable through a non-directory or
+ * looping component classifies as "absent" — nothing occupies the path
+ * itself; the offending component reports separately through
+ * `nonDirectoryComponents` (SPEC 6.5: `refused-invalid-destination`).
+ */
+export async function probeOccupant(
+  root: string,
+  rel: string,
+): Promise<PathOccupant> {
+  let stats;
+  try {
+    stats = await fsp.lstat(absoluteOf(root, rel));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR" || code === "ELOOP") {
+      return "absent";
+    }
+    throw error;
+  }
+  if (stats.isSymbolicLink()) return "symlink";
+  if (stats.isFile()) return "file";
+  if (stats.isDirectory()) return "directory";
+  return "other";
+}
+
+/**
+ * SPEC 6.5: the workspace-relative directory components of `rels` occupied
+ * by anything other than a directory — a plain file, a symbolic link
+ * (whatever it targets: writes never traverse one, SPEC 13.4), or any
+ * other non-directory occupant. Distinct components, probed once each, in
+ * byte order; nonexistent components are never listed (writes create
+ * those, SPEC 13.4). The `refused-invalid-destination` evaluation
+ * (core/refusal.ts) consumes this for the destination path and the
+ * derived paths it would generate.
+ */
+export async function nonDirectoryComponents(
+  root: string,
+  rels: readonly string[],
+): Promise<string[]> {
+  const components = new Set<string>();
+  for (const rel of rels) {
+    for (const component of directoryComponents(rel)) {
+      components.add(component);
+    }
+  }
+  const obstructed: string[] = [];
+  for (const component of [...components].sort(compareBytes)) {
+    const occupant = await probeOccupant(root, component);
+    if (occupant !== "absent" && occupant !== "directory") {
+      obstructed.push(component);
+    }
+  }
+  return obstructed;
+}
+
 /** Human words for an occupant kind, for diagnostics. */
 export function describeOccupant(occupant: PathOccupant): string {
   switch (occupant) {

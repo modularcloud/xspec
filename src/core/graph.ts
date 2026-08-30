@@ -1096,9 +1096,12 @@ function importCycleFindings(specs: readonly SpecFileAnalysis[]): Finding[] {
  * than one node, or a self-loop), the shortest cycle through its
  * byte-least node, as a closed walk (first identity repeated at the end;
  * `[a, a]` for a self-loop). Results are ordered by starting identity.
- * Adjacency entries naming unknown nodes are ignored.
+ * Adjacency entries naming unknown nodes are ignored. Exported for the
+ * `rename`/`move` refusal evaluation (core/refusal.ts), which runs the
+ * same detection over the would-be post-operation graph (SPEC 6.5, 14
+ * `refused-cycle`).
  */
-function findCycles(
+export function findCycles(
   nodes: readonly string[],
   adjacency: ReadonlyMap<string, ReadonlySet<string>>,
 ): string[][] {

@@ -25,15 +25,20 @@
 //    command exits 1.
 // 4. Valid-workspace precondition (SPEC 6.4): when the current workspace
 //    fails the validations of `xspec build`, the rename refuses (exit 1)
-//    before modifying anything, reporting those findings.
-// 5. New-ID validation (SPEC 6.4): the new ID must be valid (1.4), differ
-//    from the old ID, collide with no existing ID, and keep the structural
-//    parent rules (1.3); each failure refuses the rename (exit 1) before
-//    modifying anything.
-// 6. The rewritten workspace is re-validated in memory — realizing "all
-//    rewritten references resolve" — and the complete write set passes the
-//    SPEC 14.22 symlink check; any finding refuses (exit 1) before
-//    modifying anything.
+//    before modifying anything, reporting those findings alone — no
+//    refusal reason evaluated or reported beside them (SPEC 14).
+// 5. The refusal contract (SPEC 6.4, 14): every applicable refusal reason
+//    is evaluated together over the valid workspace (core/refusal.ts) —
+//    the new ID's intrinsic form, identity change, collisions, and the
+//    structural parent rules — and a refused rename reports one finding
+//    per reason, each with its stable code and concerned identity or
+//    located bearer, as the 12.7 findings report (exit 1), modifying
+//    nothing. `--preview` (SPEC 6.6) shares exactly this evaluation.
+// 6. The rewritten workspace is re-validated in memory and the complete
+//    write set passes the SPEC 14.22 symlink check — internal-consistency
+//    guards on the would-succeed path (the refusal evaluation above
+//    realizes "all rewritten references resolve" for the user-facing
+//    contract); any finding refuses (exit 1) before modifying anything.
 //
 // Success writes the rewritten sources, appends the journal entry, and
 // regenerates; the report is the applied mapping — the complete identity
@@ -42,10 +47,9 @@
 // (SPEC 12.0).
 
 import { computeBuildOutputs } from "../../core/build.js";
-import { canonicalJson } from "../../core/canonical-json.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import { JOURNAL_PATH, serializeJournalEntry } from "../../core/journal.js";
-import type { SpecSection } from "../../core/mdx.js";
+import { evaluateRenameRefusals } from "../../core/refusal.js";
 import type { RenamePlan } from "../../core/rename.js";
 import { planRename } from "../../core/rename.js";
 import { executeBuildOutputs } from "../../workspace/build.js";
@@ -75,27 +79,16 @@ import {
   emitConfigurationErrors,
   emitFindingsReport,
 } from "../report.js";
-import { requirementIdProblem, testHoldSpecOf, usageError } from "./common.js";
+import { testHoldSpecOf, usageError } from "./common.js";
 
 /**
- * SPEC 6.4/12.0: a refused rename is a validation failure — exit 1, the
- * refusal report on standard output (SPEC 12.0: reports are standard-output
- * content; with `--json`, one JSON document as the entire standard output).
+ * SPEC 6.4/12.0/12.7: a refused rename is a validation failure — exit 1,
+ * the findings report `{"findings": […]}` on standard output (SPEC 12.0:
+ * reports are standard-output content; with `--json`, one JSON document as
+ * the entire standard output). Workspace-precondition findings and
+ * refusal-reason findings alike go through here — never mixed in one
+ * report (SPEC 14).
  */
-function emitRefusal(
-  json: boolean,
-  stdout: CliWriter,
-  message: string,
-): ExitCode {
-  if (json) {
-    stdout.write(canonicalJson({ refused: { command: "rename", message } }));
-  } else {
-    stdout.write(`rename refused: ${message}\n`);
-  }
-  return 1;
-}
-
-/** SPEC 6.4: refusals reported as findings (workspace validation, 14.22). */
 function emitFindingsRefusal(
   json: boolean,
   stdout: CliWriter,
@@ -103,37 +96,6 @@ function emitFindingsRefusal(
 ): ExitCode {
   emitFindingsReport(json, stdout, findings);
   return 1;
-}
-
-/**
- * SPEC 6.4 → 1.3: the renamed section keeps its place in the tree, so the
- * new ID must satisfy the structural parent rules at that place — the
- * parent's ID plus `"."` plus exactly one segment, or exactly one segment
- * for a top-level section. Returns the refusal message, or null when the
- * rule holds.
- */
-function structuralProblem(section: SpecSection, newId: string): string | null {
-  const parentId = section.parent === null ? null : section.parent.id;
-  if (parentId === null) {
-    // A top-level section (its parent is the implicit root, SPEC 1.2) is
-    // checked against the empty prefix: exactly one segment (SPEC 1.3).
-    if (newId.includes(".")) {
-      return (
-        `the renamed section is top-level, so its ID must be exactly one ` +
-        `segment (SPEC 1.3) — ${JSON.stringify(newId)} has more`
-      );
-    }
-    return null;
-  }
-  const prefix = `${parentId}.`;
-  if (!newId.startsWith(prefix) || newId.slice(prefix.length).includes(".")) {
-    return (
-      `the renamed section is nested inside ${JSON.stringify(parentId)}, so ` +
-      `its ID must equal ${JSON.stringify(parentId)} plus "." plus exactly ` +
-      `one segment (SPEC 1.3)`
-    );
-  }
-  return null;
 }
 
 /** Concatenate byte arrays (the hypothetical post-append journal bytes). */
@@ -195,9 +157,8 @@ async function runRename(
   }
 
   // SPEC 6.4 → 12.0: a nonexistent old ID is a usage error, checked before
-  // source validation.
-  const section = origin.document.sections.find((s) => s.id === oldId);
-  if (section === undefined) {
+  // source validation — parse-local, judged over spelled identities (11.2).
+  if (!origin.document.sections.some((s) => s.id === oldId)) {
     return usageError(
       invocation,
       context,
@@ -208,41 +169,21 @@ async function runRename(
 
   // SPEC 6.4: refuse, before modifying anything, when the current workspace
   // fails the validations of `xspec build` — rename only ever rewrites a
-  // valid workspace. The findings are the report (SPEC 12.0).
+  // valid workspace. The invalid-workspace refusal reports the workspace's
+  // numbered findings alone: no refusal reason is evaluated or reported
+  // beside them (SPEC 14).
   if (analysis.findings.length > 0) {
     return emitFindingsRefusal(invocation.json, stdout, analysis.findings);
   }
 
-  // SPEC 6.4: validate the new ID — each failure refuses (exit 1), nothing
+  // SPEC 6.4/14: evaluate every applicable refusal reason together over
+  // the valid workspace — one finding per reason, never only the first
+  // found, each with its stable code and concerned identity or located
+  // bearer — and refuse (exit 1) with the 12.7 findings report, nothing
   // modified.
-  if (newId === oldId) {
-    return emitRefusal(
-      invocation.json,
-      stdout,
-      `the new ID must differ from the old ID ${JSON.stringify(oldId)} ` +
-        `(SPEC 6.4)`,
-    );
-  }
-  const invalid = requirementIdProblem(newId);
-  if (invalid !== null) {
-    return emitRefusal(
-      invocation.json,
-      stdout,
-      `the new ID ${JSON.stringify(newId)} is not a valid requirement ID: ` +
-        `${invalid} (SPEC 1.4, 6.4)`,
-    );
-  }
-  const structural = structuralProblem(section, newId);
-  if (structural !== null) {
-    return emitRefusal(invocation.json, stdout, `${structural} (SPEC 6.4)`);
-  }
-  if (origin.document.sections.some((s) => s.id === newId)) {
-    return emitRefusal(
-      invocation.json,
-      stdout,
-      `the new ID ${JSON.stringify(newId)} collides with an existing ID in ` +
-        `'${file}' — IDs are unique within a source file (SPEC 1.3, 6.4)`,
-    );
+  const refusals = evaluateRenameRefusals({ origin, oldId, newId });
+  if (refusals.length > 0) {
+    return emitFindingsRefusal(invocation.json, stdout, refusals);
   }
 
   // The pure plan: the identity mapping, the journal entry, and the minimal
@@ -268,8 +209,10 @@ async function runRename(
     return 2;
   }
   if (rewritten.findings.length > 0) {
-    // SPEC 6.4: the rewrite would not leave a valid workspace — refuse with
-    // the would-be findings, nothing modified.
+    // Unreachable: the refusal evaluation above (core/refusal.ts) realizes
+    // every reason a rename can be refused for, so a validated plan leaves
+    // a valid workspace. Guarded so a regression refuses (exit 1, nothing
+    // modified) rather than corrupts.
     return emitFindingsRefusal(invocation.json, stdout, rewritten.findings);
   }
 

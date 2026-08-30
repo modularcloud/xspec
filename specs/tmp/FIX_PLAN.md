@@ -227,39 +227,28 @@ byte order of file name), and the discovery-level 14.14 exit-2 routing
 inside the handler. T11.6-1..4 green on Linux; T12.2-2/3, T13.3-2/3, T14-4
 inventory-adjacent arms stay red on C4/C5/C2 defects as their notes say.)
 
-### B8. `rename`/`move` refusal contract: every reason, stable codes, 12.7 form
-
-SPEC 14 (refusal-reason paragraph), 6.4, 6.5, 12.7. Prereqs A1–A2 (codes/form),
-B2 (spelling spans for locations). Replace the ad-hoc first-failure refusals
-(`emitRefusal` in `src/cli/commands/rename.ts` and `move.ts`, emitting
-`{"refused": …}`) with the findings report `{"findings": [...]}` (exit 1):
-
-- Evaluate and report every applicable reason together, one finding per reason,
-  each reason on its own terms — e.g. an occupied non-spec-source `.mdx` target
-  outside every spec group reports both `refused-destination-exists` and
-  `refused-invalid-destination` (`sectionDestinationProblem` returns one problem
-  today).
-- Per-reason content under the cardinality rule: `refused-invalid-id` /
-  `refused-identity-unchanged` / `refused-structural-parent` /
-  `refused-missing-target-parent` concern the stated identity (in
-  `identities`); `refused-id-collision` locates every colliding bearer;
-  `refused-unresolvable-reference` locates each rewritten reference spelling
-  that would not resolve; `refused-cycle` locates the would-be cycle's full
-  in-source path; `refused-destination-exists` / `refused-invalid-destination`
-  concern the destination/target path (`path` member). Would-be cycles and
-  unresolvable references must surface as these refusal codes — today they leak
-  out of in-memory reanalysis as numbered conditions.
-- `refused-invalid-destination` also covers a workspace-relative directory
-  component of the destination path or of a derived path it would generate
-  occupied by anything other than a directory (`symlinkComponentOf` in
-  `src/workspace/writes.ts` checks symlinks only; a plain-file component
-  currently crashes mid-write) — check destination-side components up front.
-- The invalid-workspace refusal reports the workspace's numbered findings alone;
-  no report ever mixes refusal reasons with numbered conditions. Refusal
-  evaluation must be shared with `--preview` (B9) — same findings, codes, exit.
-
-Verify: T6.4-1/3 (`section-6.4.test.ts`), T6.5-1/3/4/6 (`section-6.5*.test.ts`),
-T14-7 (`section-14.test.ts`).
+(B8 landed: the refusal contract. `src/core/refusal.ts` is the one shared
+evaluation — `evaluateRenameRefusals` / `evaluateMoveFileRefusals` /
+`evaluateMoveSectionRefusals` return every applicable reason together as
+`Finding[]` (one finding per reason, stable codes, 12.7 concerns:
+identity-concerning reasons carry `file#id` in `identities`, collisions
+locate every bearer, destination reasons carry the `path` member), emitted
+through `emitFindingsReport` as `{"findings": [...]}` exit 1; the
+invalid-workspace precondition still reports the analysis findings alone
+before any reason is evaluated. Would-be cycles and unresolvable
+references are evaluated in identity space over the CURRENT graph's
+edges/occurrences with the mapping applied (section form re-parented;
+`findCycles` exported from `graph.ts`), locating participants at
+pre-operation coordinates — reanalysis no longer leaks numbered
+conditions and stays only as an unreachable-guard on the success path.
+Destination facts: `assessDestinationPath` (core; pure causes +
+`componentProbePaths` — destination plus its would-be Markdown emit path)
+with `probeOccupant`/`nonDirectoryComponents` (`src/workspace/writes.ts`;
+lstat-classified, ENOENT/ENOTDIR/ELOOP → absent) feeding the one
+`refused-invalid-destination` finding — obstructed destination-side
+components included, never 14.22. B9's `--preview` must call exactly this
+evaluation (the CLI face is `assessAndProbeDestination` + the evaluate
+functions in `rename.ts`/`move.ts`) for its refusal equivalence.)
 
 ### B9. `--preview` for `rename`/`move`: plan surface (mapping + files/edits)
 
