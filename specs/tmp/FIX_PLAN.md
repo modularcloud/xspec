@@ -293,48 +293,52 @@ are gone — unreachable, guarded by internal errors. T6.5-5, T6.6-3, and
 T12.0-13's move arms behave; T12.0-13 still aborts earlier, at its `show
 a#b#c` arm — C2's scope, see its note.)
 
-### C2. Argument checks precede the invalid-workspace gate on gated reads
+(C2 landed: gated-read argument checks precede the gate. The read
+pre-answer step is split — `analyzeWorkspaceForRead` (pure) +
+`assessWorkspaceRead` (gate decision with a deferred `commit()` write) in
+`src/workspace/refresh.ts`, CLI faces `analyzeGraphForRead` /
+`finishGraphForRead` in `src/cli/prepare.ts` — so handlers run identity
+checks between analysis and gate report. The parse-local judgments are
+`nodeOperandProblem`/`graphNodeValueProblem` in
+`src/cli/commands/gated-args.ts` (discovery kind → spelled identities /
+named units; unparseable named file masks the id/unit half), sharing
+query-core's exported message builders so the store-backed fast path
+reports byte-identically. `loadSessionForCommand` now orders: name →
+analyze → existence by directory entry (`sessionOccupied`,
+`workspace/reviews.ts`, no content read) → gate (assess; findings exit 1,
+session unread) → load (corrupt → 14.21, passing workspaces only) →
+recorded-baseline resolution → `commit()`. Multi-`#` `<node>`/`<graph-node>`
+values are parse-level malformed values (`identityValueProblem` in
+`src/cli/args.ts`, `identityPositionals`/`identityValue` marks on `show`,
+`query node`/`subtree`/`ancestors`, `edges`/`reachable` `--from`/`--to`) —
+reported without loading configuration.)
 
-SPEC 12.0 (precedence bullet), 13.3. On a workspace failing `build`'s
-validations, `ids`/`show`/`coverage`/`impact`/`review`/`query` currently emit
-the gate report (exit 1) before argument checks. Required: each argument check
-runs first, judged from what it consults, identically on valid and failing
-workspaces — a profile/group name against configuration, a session name against
-the session directory, a requirement- or graph-node identity parse-local against
-the named file (a discovered path of the identity's kind; an `id` over the
-file's spelled identities; a code unit over the file's named units), an
-unparseable named file masking the check (gate report, exit 1). So
-`show docs/none.mdx#x` (unknown file) and `query node specs/A.mdx#nope`
-(unknown id in a parseable file) exit 2 on a failing workspace. Item IDs stay
-behind the gate (judged against session content, which gated commands do not
-read there). Files: gate sequencing in `src/workspace/pipeline.ts` and the
-command handlers under `src/cli/commands/`.
+### C2b. A resolvable baseline over a failing workspace hits the gate, not 6.3
 
-The corrupt-session report is likewise gated (SPEC 14.21: reported "only on a
-workspace passing `build`'s validations — on a failing one the gate's findings
-are reported without any session being read"): `loadSessionForCommand`
-(`src/cli/commands/review-session.ts`) currently reports the 14.21 corruption
-before the refresh, so `review status <corrupt>` on a failing workspace emits
-`corrupt-session` instead of the gate's findings (observed: T10.1-5 expects
-`14.1 x1`, got `14.21 x1`). Required order there: session-name validity and
-existence (exit 2, judged against the directory) still precede the gate; the
-corruption *report* moves behind it — gate failing → gate findings alone, exit
-1; gate passing → the 14.21 finding as today. Recorded-baseline resolution
-(6.3, exit 2 before source validation) applies only to a readable session;
-a corrupt one has no readable parameters — the corruption (or, failing
-workspace, the gate) reports instead. `review list` already gates first.
+SPEC 13.3, 12.0, 6.3. Observed at T13.3-3's garbage-journal whole-gate arm:
+`impact --base <commit>` where the commit *includes* the garbage journal line
+(baseline journal bytes = current journal bytes) exits 2 with the 6.3
+reconstruction error ("the workspace content at baseline ref … cannot be
+parsed and validated"); expected: the gate's one 14.13 finding, exit 1 —
+the test's own staging comment says "baseline resolution — which precedes
+the gate (SPEC 12.0) — succeeds and the gate is `impact --base`'s operative
+error". TEST-SPEC T6.3-4 draws the line: an *unresolvable ref* stays exit 2
+with the baseline error even over invalid sources (the precedence arm), and
+the garbage line *appended after* the baseline commit stays the exit-2
+replay failure at `impact --base` and `review create --base`; "the
+resolvable-ref counterpart over invalid sources is T13.3-3's refresh
+failure (exit 1)". Required: `resolveBaseline` (`src/workspace/baseline.ts`)
+must not fail on baseline-content validation findings the gate would report
+— sequence at `impact --base` (and `review create --base`): unresolvable
+ref → exit 2; journal prefix/replay failure → exit 2 (naming the entries);
+then the current-workspace gate → exit 1; baseline-content validation
+failure (reachable on passing current workspaces — T6.3-4's
+invalid-baseline-sources arm) → exit 2. Pin exact semantics against
+T6.3-1..4 (all currently green — keep them green) and T13.3-3.
 
-Also observed by C1's spawn, same scope: a `<node>`/`<graph-node>` value with
-more than one `#` must exit 2 as a malformed value on `show`/`query node`
-(T12.0-13's arms — currently exit 1 via the gate), and T12.0-10's
-within-class-2 arm additionally pins `show a#b#c` as reported *without
-loading configuration* (byte-identical error documents with the
-configuration invalid or missing) — for that one a handler-level check is
-too late; C1's `moveOperandsProblem` in `src/cli/args.ts` is the
-parse-level pattern (`occurrences --to` already checks its spelling in the
-handler, which its arms accept).
-
-Verify: T12.0-10 (`section-12.0*.test.ts`), T10.1-5 (`section-10.1.test.ts`).
+Verify: T13.3-3's garbage-journal `impact` arm (`section-13.3.test.ts` —
+its obstructed-write-path arm is C3's, its later arms C4-adjacent),
+T6.3-1..4 (`section-6.3.test.ts`).
 
 ### C3. Obstructed write path: any non-directory component, refused before modifying
 
@@ -351,8 +355,22 @@ derived file's own path stays a replacement, not an error; a durable file's own
 path holding a non-plain-file stays 14.13/14.21; a move's destination-side
 component stays `refused-invalid-destination` (B8), never condition 22.
 
+Same condition, gate side (observed at T13.3-3's obstructed-write-path arm,
+`markdown.outDir` replaced by a plain file): the gated reads' 13.3 gate is
+"the findings a `build` would now report", 14.22 over build's FULL write set
+included — today `assessWorkspaceRead` (`src/workspace/refresh.ts`) probes
+only the graph-data path, and only on a store mismatch, so `ids` et al.
+answer exit 0 where T13.3-3 expects the one condition-22 finding, exit 1.
+`finishAvailabilityRefresh` (`src/workspace/availability.ts`) already
+evaluates build's `writePaths` — mirror that in `assessWorkspaceRead`
+(evaluation only; the reads still write nothing on the failing side). Note
+`classifyOccupant` currently throws raw ENOTDIR when a parent component is a
+plain file (`build` crashes exit 70, T11.2-6's observed failure) — the
+writes.ts fix must classify that as the obstructed component, not crash.
+
 Verify: P-8 (`section-16-p8.test.ts` or the P-8 registry file), T13.4 arms
-(`section-13.4*.test.ts`).
+(`section-13.4*.test.ts`), T13.3-3's obstructed-write-path arms, T11.2-6
+(`section-11.2.test.ts`), T14-4's 14.13/14.22 reporter rows.
 
 ### C4. Unreadable recorded state persists; `check` reports the exclusive unit form
 
@@ -375,7 +393,9 @@ mismatch and fabricate a fresh record: after corrupting `.xspec/graph.json`,
   derived path no longer generated), consulting no readable record, is
   undetectable and not reported; the other per-file forms report normally.
 
-Verify: T13.3-3 (`section-13.3*.test.ts`), T12.2 arms.
+Verify: T13.3-2 (`section-13.3*.test.ts` — its corrupt-record half is this
+task's observed failure: `ids --json` repairs the store and `inventory` then
+answers exit 0), T12.2-2/3 arms.
 
 ### C5. 14.10 unit-form findings concern the graph-data area
 

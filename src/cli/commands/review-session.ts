@@ -9,18 +9,25 @@
 //
 // 1. Session-name validity (SPEC 10.1 → 12.0: any other name is a usage
 //    error, exit 2).
-// 2. Load the session (workspace/reviews.ts): an absent session is an
-//    unknown session named in arguments — usage error, exit 2 (SPEC 10.7,
-//    12.0); a corrupt one is reported as the 14.21 finding, exit 1,
-//    modifying nothing (SPEC 10.1).
-// 3. For a `path-blocks` session, resolve the recorded baseline commit
-//    (SPEC 10.7: every later generator run uses the recorded parameters).
-//    A baseline that cannot be resolved or reconstructed fails per 6.3 as a
-//    usage error (exit 2), and baseline resolution precedes source
-//    validation (SPEC 12.0) — so this runs before the refresh.
-// 4. Refresh-on-read (SPEC 13.3, cli/prepare.ts): validation findings
-//    report and exit 1, nothing answered, nothing modified.
-// 5. Re-run the session's strategy generators with the recorded creation
+// 2. Analyze the workspace (a pure read): configuration errors keep their
+//    exit-2 precedence over every later check (SPEC 14.14, 12.0).
+// 3. Session existence, judged against the session directory alone — no
+//    content read (SPEC 12.0, 10.1): an absent session is an unknown
+//    session named in arguments, exit 2, whatever findings the workspace
+//    carries.
+// 4. The gate (SPEC 13.3): on a workspace failing `build`'s validations
+//    the gate's findings report alone, exit 1, and no session file is read
+//    — a session's corruption (14.21) is reported exactly where sessions
+//    are read, on a passing workspace (SPEC 10.1). Passing, the session is
+//    loaded: corrupt → the 14.21 finding, exit 1, modifying nothing.
+// 5. For a readable `path-blocks` session, resolve the recorded baseline
+//    commit (SPEC 10.7: every later generator run uses the recorded
+//    parameters). A baseline that cannot be resolved or reconstructed
+//    fails per 6.3 as a usage error (exit 2) — before the refresh write,
+//    so the failing invocation modifies nothing; a corrupt session has no
+//    readable parameters, the corruption reporting instead. Then the one
+//    refresh write of 13.3 commits.
+// 6. Re-run the session's strategy generators with the recorded creation
 //    parameters against the current workspace (SPEC 10.4, 10.7),
 //    canonicalized at the derivation seam (core/review-derive.ts
 //    `canonicalizeGeneration` — stored references and generated nodes
@@ -81,11 +88,12 @@ import {
 } from "../../core/review-state.js";
 import type { ResolvedBaseline } from "../../workspace/baseline.js";
 import { resolveBaseline } from "../../workspace/baseline.js";
-import { loadSession } from "../../workspace/reviews.js";
+import { loadSession, sessionOccupied } from "../../workspace/reviews.js";
 import type { WorkspaceAnalysis } from "../../workspace/pipeline.js";
+import { assessWorkspaceRead } from "../../workspace/refresh.js";
 import type { Invocation } from "../args.js";
 import type { CliWriter, CommandContext } from "../io.js";
-import { prepareGraphForRead } from "../prepare.js";
+import { analyzeGraphForRead } from "../prepare.js";
 import { emitFindingsReport } from "../report.js";
 import { rangeJson, usageError } from "./common.js";
 
@@ -249,7 +257,7 @@ export interface SessionReadView {
 }
 
 /**
- * Derive a session's read-time view (module header step 5). Nothing is
+ * Derive a session's read-time view (module header step 6). Nothing is
  * persisted: read-time invalidation is computed and reported, never written
  * (SPEC 10.4). The stored session is consumed as-is — stored references
  * are canonical identities (SPEC 5.4), eternal under journal growth, so no
@@ -305,7 +313,7 @@ export function buildSessionReadView(
 }
 
 // ---------------------------------------------------------------------------
-// The shared open flow (module header steps 1–5)
+// The shared open flow (module header steps 1–6)
 // ---------------------------------------------------------------------------
 
 /** The open outcome: the view, or an already-emitted exit code. */
@@ -315,8 +323,8 @@ export type SessionOpenResult =
 
 /**
  * Open a named session for a read (`status`, `next`, `show`, `export`) —
- * the module header's steps 1–5. Failures are fully reported here; the
- * caller returns `exit` unchanged. Mutating subcommands share steps 1–4
+ * the module header's steps 1–6. Failures are fully reported here; the
+ * caller returns `exit` unchanged. Mutating subcommands share steps 1–5
  * through `loadSessionForCommand` and run their own derivation.
  */
 export async function openSessionForRead(
@@ -344,7 +352,7 @@ export async function openSessionForRead(
   };
 }
 
-/** Steps 1–4 of the open flow: the stored session, the current analysis,
+/** Steps 1–5 of the open flow: the stored session, the current analysis,
  * and — for a `path-blocks` session — the resolved recorded baseline. */
 export interface LoadedSessionForCommand {
   readonly ok: true;
@@ -366,8 +374,45 @@ export async function loadSessionForCommand(
     return { ok: false, exit: nameCheck };
   }
 
-  // Step 2 — load: absent = unknown session (usage, SPEC 10.7 → 12.0);
-  // corrupt = the 14.21 finding, exit 1, modifying nothing (SPEC 10.1).
+  // Step 2 — SPEC 14.14/12.0: analyze the current workspace — a pure read;
+  // configuration errors precede every argument check that consults the
+  // workspace, the unknown-session check below included.
+  const analyzed = await analyzeGraphForRead(invocation, context);
+  if (!analyzed.ok) {
+    return { ok: false, exit: analyzed.exit };
+  }
+
+  // Step 3 — SPEC 12.0/10.1: the session name is judged against the
+  // session directory — existence by directory entry alone, no session
+  // content read — before the invalid-workspace report of 13.3: an unknown
+  // session is a usage error, exit 2, whatever findings the workspace
+  // carries.
+  if (!(await sessionOccupied(context.workspace.root, name))) {
+    return {
+      ok: false,
+      exit: unknownSessionError(name, invocation, context),
+    };
+  }
+
+  // Step 4 — the gate (SPEC 13.3): on a workspace failing `build`'s
+  // validations — validation findings and a refused refresh write
+  // (SPEC 14.22) alike — the gate's findings are reported alone, exit 1,
+  // and no session file is read: a session's corruption (14.21) is
+  // reported exactly where sessions are read, on a passing workspace
+  // (SPEC 10.1, 12.0). The assessment decides without writing; the one
+  // refresh write commits below, once every remaining check has passed.
+  const assessed = await assessWorkspaceRead(
+    context.workspace,
+    analyzed.analysis,
+  );
+  if (assessed.kind === "findings") {
+    emitFindingsReport(invocation.json, context.stdout, assessed.findings);
+    return { ok: false, exit: 1 };
+  }
+
+  // Step 5 — the workspace passes: sessions are read here (SPEC 10.1).
+  // Corrupt = the 14.21 finding, exit 1, modifying nothing; absent (the
+  // occupant vanished since step 3) = unknown session (SPEC 10.7 → 12.0).
   const loaded = await loadSession(context.workspace.root, name);
   if (loaded.state === "absent") {
     return {
@@ -380,8 +425,11 @@ export async function loadSessionForCommand(
     return { ok: false, exit: 1 };
   }
 
-  // Step 3 — SPEC 10.7/6.3/12.0: resolve the recorded baseline before
-  // source validation; failure is a usage error, nothing modified.
+  // Step 6 — SPEC 10.7/6.3/12.0: resolve the recorded baseline of a
+  // readable session before source validation could mask it; failure is a
+  // usage error, nothing modified (the refresh write has not run yet). A
+  // corrupt session has no readable parameters — the corruption (or, on a
+  // failing workspace, the gate) reports instead.
   let baseline: ResolvedBaseline | undefined;
   if (loaded.session.parameters.strategy === "path-blocks") {
     const resolution = await resolveBaseline(
@@ -402,16 +450,13 @@ export async function loadSessionForCommand(
     baseline = resolution.baseline;
   }
 
-  // Step 4 — refresh-on-read (SPEC 13.3): validation findings report and
-  // exit 1; configuration errors exit 2 (already reported).
-  const prepared = await prepareGraphForRead(invocation, context);
-  if (!prepared.ok) {
-    return { ok: false, exit: prepared.exit };
-  }
+  // Step 7 — refresh-on-read (SPEC 13.3): the one refresh write (a no-op
+  // when the store already matches), every check passed.
+  await assessed.commit();
   return {
     ok: true,
     session: loaded.session,
-    analysis: prepared.analysis,
+    analysis: analyzed.analysis,
     baseline,
   };
 }

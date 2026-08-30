@@ -143,6 +143,30 @@ export async function listSessionFilePaths(root: string): Promise<string[]> {
 }
 
 /**
+ * Whether anything occupies the named session's path — existence judged
+ * against the session directory's exact entry names alone, no content read
+ * and no occupant classified (SPEC 10.1, 12.0: byte-wise, case-sensitive —
+ * on a case-insensitive filesystem a path lookup would reach a
+ * differently-cased entry, so the directory listing is the judge). The
+ * gated `review` subcommands' existence check (SPEC 12.0: a session name
+ * judged against the session directory, before the invalid-workspace
+ * report of 13.3) — which must read no session file, since on a failing
+ * workspace none is ever read (SPEC 13.3).
+ */
+export async function sessionOccupied(
+  root: string,
+  name: string,
+): Promise<boolean> {
+  let entries: string[];
+  try {
+    entries = await fsp.readdir(reviewsAbsolutePath(root));
+  } catch {
+    return false;
+  }
+  return entries.includes(`${name}${SESSION_EXTENSION}`);
+}
+
+/**
  * Load one session by name (SPEC 10.1). The caller has validated the name
  * (an invalid name is a usage error before any lookup, SPEC 12.0). The
  * path's occupant decides: nothing → absent; a plain file → parsed and

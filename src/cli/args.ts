@@ -53,6 +53,14 @@ interface FlagSpec {
    * list whose every element must be in this set.
    */
   readonly list?: readonly string[];
+  /**
+   * SPEC 12.0: the flag's value is a `<node>`/`<graph-node>` identity —
+   * `#` splits path from id or unit, at most one is well-formed, and a
+   * spelling containing more than one is a malformed value, an error the
+   * invocation's syntax alone determines: parse-level, reported without
+   * loading configuration.
+   */
+  readonly identityValue?: boolean;
 }
 
 /** One command (or `review`/`query` subcommand) of the SPEC 12.5 table. */
@@ -74,6 +82,14 @@ interface CommandSpec {
    * the invocation's syntax alone determines (SPEC 12.0).
    */
   readonly positionalConflicts?: readonly string[];
+  /**
+   * SPEC 12.0: the command's positional operands are `<node>`/`<graph-node>`
+   * identities (the `identityValue` rule, positional side) — a multi-`#`
+   * spelling is a malformed value, parse-level. Never set for `<file>`
+   * operands: a bare `<file>` is a whole path in which `#` has no delimiter
+   * role (`view`, `at`, `rename`'s origin).
+   */
+  readonly identityPositionals?: boolean;
   /** Command-specific flags; the SPEC 12.0 globals are added for every command. */
   readonly flags: readonly FlagSpec[];
   /**
@@ -152,7 +168,12 @@ const COMMANDS: readonly CommandSpec[] = [
     ],
   },
   // SPEC 12.4: `show <node>`.
-  { path: "show", positionals: ["<node>"], flags: [] },
+  {
+    path: "show",
+    positionals: ["<node>"],
+    identityPositionals: true,
+    flags: [],
+  },
   // SPEC 8.2: `coverage` runs all profiles, `coverage <name>` one; `--check`.
   {
     path: "coverage",
@@ -222,7 +243,13 @@ const COMMANDS: readonly CommandSpec[] = [
   // document, its only output form with or without `--json` (12.0).
   { path: "review export", positionals: ["<name>"], flags: [], jsonOnly: true },
   // SPEC 11: the six query subcommands — JSON-only surfaces (12.0).
-  { path: "query node", positionals: ["<node>"], flags: [], jsonOnly: true },
+  {
+    path: "query node",
+    positionals: ["<node>"],
+    identityPositionals: true,
+    flags: [],
+    jsonOnly: true,
+  },
   {
     path: "query nodes",
     positionals: [],
@@ -245,8 +272,18 @@ const COMMANDS: readonly CommandSpec[] = [
     positionals: [],
     jsonOnly: true,
     flags: [
-      { name: "--from", takesValue: true, valueName: "<graph-node>" },
-      { name: "--to", takesValue: true, valueName: "<graph-node>" },
+      {
+        name: "--from",
+        takesValue: true,
+        valueName: "<graph-node>",
+        identityValue: true,
+      },
+      {
+        name: "--to",
+        takesValue: true,
+        valueName: "<graph-node>",
+        identityValue: true,
+      },
       // SPEC 11: `edges --kinds` filters over all four kinds.
       {
         name: "--kinds",
@@ -256,10 +293,17 @@ const COMMANDS: readonly CommandSpec[] = [
       },
     ],
   },
-  { path: "query subtree", positionals: ["<node>"], flags: [], jsonOnly: true },
+  {
+    path: "query subtree",
+    positionals: ["<node>"],
+    identityPositionals: true,
+    flags: [],
+    jsonOnly: true,
+  },
   {
     path: "query ancestors",
     positionals: ["<node>"],
+    identityPositionals: true,
     flags: [],
     jsonOnly: true,
   },
@@ -273,12 +317,14 @@ const COMMANDS: readonly CommandSpec[] = [
         takesValue: true,
         valueName: "<graph-node>",
         required: true,
+        identityValue: true,
       },
       {
         name: "--to",
         takesValue: true,
         valueName: "<graph-node>",
         required: true,
+        identityValue: true,
       },
       {
         name: "--kinds",
@@ -470,6 +516,26 @@ function moveOperandsProblem(positionals: readonly string[]): string | null {
       `without is a file, so the invocation matches neither ` +
       `\`move <old-file> <new-file>\` nor ` +
       `\`move <file>#<id> <target-file>#<new-id>\` (SPEC 6.5, 12.0)`
+    );
+  }
+  return null;
+}
+
+/**
+ * SPEC 12.0: at most one `#` is well-formed in a `<node>`/`<graph-node>`
+ * value — its `#` splits path from id or unit, and no identity contains one
+ * in path, id segment, or unit name (1.4, 1.5, 4.6) — so a spelling
+ * containing more than one is a malformed value, a usage error the
+ * invocation's syntax alone determines: parse-level, reported without
+ * loading configuration. Returns the diagnostic, or null.
+ */
+function identityValueProblem(value: string, what: string): string | null {
+  const first = value.indexOf("#");
+  if (first !== -1 && value.includes("#", first + 1)) {
+    return (
+      `${what} value '${value}' contains more than one '#' — at most one ` +
+      `is well-formed: '#' splits path from id or unit, and no identity ` +
+      `contains one (SPEC 12.0, 1.5)`
     );
   }
   return null;
@@ -686,6 +752,14 @@ export function parseArgv(argv: readonly string[]): ParseResult {
         inEffect(),
       );
     }
+    if (flag.identityValue === true) {
+      // SPEC 12.0: a `<graph-node>` flag value with more than one `#` is a
+      // malformed value — syntax-determined, so parse-level.
+      const problem = identityValueProblem(value, `${spec.path}: '${token}'`);
+      if (problem !== null) {
+        return usageError(problem, inEffect());
+      }
+    }
     if (token === "--config") config = value;
     else flags.set(token, value);
   }
@@ -743,6 +817,20 @@ export function parseArgv(argv: readonly string[]): ParseResult {
           `the other`,
         inEffect(),
       );
+    }
+  }
+  // SPEC 12.0: a `<node>` positional with more than one `#` is a malformed
+  // value — syntax-determined, so parse-level (`show`, `query node`,
+  // `query subtree`, `query ancestors`).
+  if (spec.identityPositionals === true) {
+    for (const positional of positionals) {
+      const problem = identityValueProblem(
+        positional,
+        `${spec.path}: ${spec.positionals[0] ?? "<node>"}`,
+      );
+      if (problem !== null) {
+        return usageError(problem, inEffect());
+      }
     }
   }
   // SPEC 6.5/12.0: `move` operand classification is by spelling alone — a

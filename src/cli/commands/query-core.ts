@@ -151,6 +151,40 @@ export type RowResolution =
   | { readonly ok: false; readonly message: string };
 
 /**
+ * SPEC 11.1/12.4/12.0: the wrong-kind `<node>` diagnostic — the value names
+ * a code location where a requirement-node identity is required. Shared by
+ * the graph-based resolution below and the parse-local pre-gate check
+ * (./gated-args.ts), so the two judgments — identical by construction on
+ * valid workspaces (SPEC 12.0) — report byte-identically.
+ */
+export function codeLocationNodeMessage(raw: string): string {
+  return (
+    `'${raw}' names a code location — <node> takes a requirement-node ` +
+    `identity: path#id, or a bare path for a file's root node ` +
+    `(SPEC 11, 1.5)`
+  );
+}
+
+/** SPEC 11/12.0: the unknown-`<node>` diagnostic (shared as above). */
+export function unknownNodeMessage(raw: string): string {
+  return (
+    `unknown requirement node '${raw}' — expected path#id, or a bare ` +
+    `path for a file's root node; a path in no configured group is ` +
+    `unknown (SPEC 11, 1.5, 12.0)`
+  );
+}
+
+/** SPEC 11/4.6/12.0: the unknown-`<graph-node>` diagnostic (shared as above). */
+export function unknownGraphNodeMessage(flag: string, raw: string): string {
+  return (
+    `unknown graph node '${raw}' for '${flag}' — expected a requirement ` +
+    `node (path#id, or a bare path for a spec file's root node) or a code ` +
+    `location (path, path#unit, or path#unit@N); a path in no configured ` +
+    `group is unknown (SPEC 11, 1.5, 4.6, 12.0)`
+  );
+}
+
+/**
  * Resolve a `<node>` argument: a requirement-node identity — `path#id`, or
  * a bare path for a file's root node (SPEC 11, 12.4, 1.5). A code-location
  * identity or a path in no configured group is unknown here (12.0).
@@ -161,21 +195,9 @@ export function resolveRow(view: QueryView, raw: string): RowResolution {
     return { ok: true, row };
   }
   if (view.isCodeLocation(raw)) {
-    return {
-      ok: false,
-      message:
-        `'${raw}' names a code location — <node> takes a requirement-node ` +
-        `identity: path#id, or a bare path for a file's root node ` +
-        `(SPEC 11, 1.5)`,
-    };
+    return { ok: false, message: codeLocationNodeMessage(raw) };
   }
-  return {
-    ok: false,
-    message:
-      `unknown requirement node '${raw}' — expected path#id, or a bare ` +
-      `path for a file's root node; a path in no configured group is ` +
-      `unknown (SPEC 11, 1.5, 12.0)`,
-  };
+  return { ok: false, message: unknownNodeMessage(raw) };
 }
 
 /**
@@ -183,7 +205,7 @@ export function resolveRow(view: QueryView, raw: string): RowResolution {
  * a requirement node or a code location. Returns the usage-error message
  * for an unknown identity, null when it resolves.
  */
-function unknownGraphNodeMessage(
+function graphNodeProblem(
   view: QueryView,
   flag: string,
   raw: string,
@@ -191,12 +213,7 @@ function unknownGraphNodeMessage(
   if (view.row(raw) !== undefined || view.isCodeLocation(raw)) {
     return null;
   }
-  return (
-    `unknown graph node '${raw}' for '${flag}' — expected a requirement ` +
-    `node (path#id, or a bare path for a spec file's root node) or a code ` +
-    `location (path, path#unit, or path#unit@N); a path in no configured ` +
-    `group is unknown (SPEC 11, 1.5, 4.6, 12.0)`
-  );
+  return unknownGraphNodeMessage(flag, raw);
 }
 
 /** The `nodes` filters, validated against the configuration alone. */
@@ -415,7 +432,7 @@ export function answerQuery(
         if (raw === undefined) {
           continue;
         }
-        const message = unknownGraphNodeMessage(view, flag, raw);
+        const message = graphNodeProblem(view, flag, raw);
         if (message !== null) {
           return usageError(invocation, io, message);
         }
@@ -463,7 +480,7 @@ export function answerQuery(
         ["--from", from],
         ["--to", to],
       ] as const) {
-        const message = unknownGraphNodeMessage(view, flag, raw);
+        const message = graphNodeProblem(view, flag, raw);
         if (message !== null) {
           return usageError(invocation, io, message);
         }

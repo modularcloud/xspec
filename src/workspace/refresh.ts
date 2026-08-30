@@ -72,22 +72,56 @@ export type WorkspacePreparation =
       readonly errors: readonly Finding[];
     };
 
+/** The analysis half of the pre-answer step: pure, nothing modified. */
+export type ReadAnalysis =
+  | { readonly kind: "analysis"; readonly analysis: WorkspaceAnalysis }
+  | { readonly kind: "configuration"; readonly errors: readonly Finding[] };
+
 /**
- * The shared pre-answer step (SPEC 13.3): analyze the current workspace;
- * on validation findings or configuration errors, fail without modifying
- * anything; otherwise ensure the stored graph data matches the current
- * sources and configuration — refreshing it if missing or mismatched,
- * writing exactly what `xspec build` would write except that no TypeScript
- * or Markdown is generated or removed and the recorded derived-file paths
- * are left unchanged — and hand back the analysis to answer from.
+ * Analyze the current workspace for a gated read (SPEC 13.3) — a pure
+ * read, nothing consulted beyond the sources and nothing modified —
+ * failing only with configuration-error precedence (SPEC 14.14). The
+ * gated reads' argument checks that consult discovery or the named files'
+ * parses (SPEC 12.0: a requirement-node or graph-node identity judged
+ * parse-local; a session name against the session directory) run between
+ * this and `assessWorkspaceRead`: configuration errors precede those
+ * checks, the checks precede the invalid-workspace report (SPEC 12.0),
+ * and a failing invocation modifies nothing.
  */
-export async function prepareWorkspaceForRead(
+export async function analyzeWorkspaceForRead(
   workspace: LoadedWorkspace,
-): Promise<WorkspacePreparation> {
+): Promise<ReadAnalysis> {
   const analysis = await analyzeWorkspace(workspace);
   if (analysis.configurationErrors.length > 0) {
     return { kind: "configuration", errors: analysis.configurationErrors };
   }
+  return { kind: "analysis", analysis };
+}
+
+/**
+ * The gate-and-refresh assessment (SPEC 13.3), decision separated from
+ * write: `findings` is the invalid-workspace report — validation findings,
+ * or the refused refresh write (SPEC 14.22) — with nothing modified;
+ * `ready` carries the graph data the read answers beside and a `commit`
+ * that performs the one refresh write (a no-op when the store already
+ * matches). The caller commits only once every remaining argument check
+ * has passed, so a usage-error invocation writes nothing — and the
+ * decision itself never writes, so a report that must precede other
+ * evaluation (the corrupt-session report of 10.1 behind this gate) can be
+ * sequenced after it without a write having happened.
+ */
+export type ReadRefreshAssessment =
+  | { readonly kind: "findings"; readonly findings: readonly Finding[] }
+  | {
+      readonly kind: "ready";
+      readonly graphData: GraphData;
+      readonly commit: () => Promise<void>;
+    };
+
+export async function assessWorkspaceRead(
+  workspace: LoadedWorkspace,
+  analysis: WorkspaceAnalysis,
+): Promise<ReadRefreshAssessment> {
   if (analysis.findings.length > 0) {
     // SPEC 13.3: current sources fail build validation — report, exit 1,
     // answer nothing, modify nothing (the store has not even been read).
@@ -110,13 +144,10 @@ export async function prepareWorkspaceForRead(
     workspaceInputsOf(workspace, analysis),
   ).graphData;
 
+  const graphData = refreshedGraphData(stored.data, build);
   if (graphDataMatchesCurrent(stored.bytes, stored.data, build)) {
-    // Matching data is served as is — no write, nothing modified.
-    return {
-      kind: "ready",
-      analysis,
-      graphData: refreshedGraphData(stored.data, build),
-    };
+    // Matching data is served as is — no write, nothing to commit.
+    return { kind: "ready", graphData, commit: async () => {} };
   }
 
   // SPEC 14.22: the refresh writes exactly one path; a symbolic link at a
@@ -130,7 +161,39 @@ export async function prepareWorkspaceForRead(
     return { kind: "findings", findings: writeFindings };
   }
 
-  const graphData = refreshedGraphData(stored.data, build);
-  await writeGraphData(workspace.root, graphData);
-  return { kind: "ready", analysis, graphData };
+  return {
+    kind: "ready",
+    graphData,
+    commit: () => writeGraphData(workspace.root, graphData),
+  };
+}
+
+/**
+ * The shared pre-answer step (SPEC 13.3): analyze the current workspace;
+ * on validation findings or configuration errors, fail without modifying
+ * anything; otherwise ensure the stored graph data matches the current
+ * sources and configuration — refreshing it if missing or mismatched,
+ * writing exactly what `xspec build` would write except that no TypeScript
+ * or Markdown is generated or removed and the recorded derived-file paths
+ * are left unchanged — and hand back the analysis to answer from. The
+ * composition of `analyzeWorkspaceForRead` and `assessWorkspaceRead` for
+ * callers whose argument checks all precede the analysis.
+ */
+export async function prepareWorkspaceForRead(
+  workspace: LoadedWorkspace,
+): Promise<WorkspacePreparation> {
+  const analyzed = await analyzeWorkspaceForRead(workspace);
+  if (analyzed.kind === "configuration") {
+    return analyzed;
+  }
+  const assessed = await assessWorkspaceRead(workspace, analyzed.analysis);
+  if (assessed.kind === "findings") {
+    return assessed;
+  }
+  await assessed.commit();
+  return {
+    kind: "ready",
+    analysis: analyzed.analysis,
+    graphData: assessed.graphData,
+  };
 }
