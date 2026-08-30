@@ -16,6 +16,9 @@
 //   and 14.7. Masking (SPEC 14): a reference into an unparseable file
 //   reports as unresolved here while the file's internal conditions stay
 //   masked behind its own 14.20;
+// - reference occurrences (SPEC 5.7) — one record per textual spelling of
+//   a dependency-kind reference whose target resolves, in occurrence
+//   order: the positions behind the collapsed edge set;
 // - cycles (SPEC 5.3 → 14.9) — dependency cycles over the combined
 //   `contains`+`depends`+`embeds` graph on requirement nodes (a
 //   self-`depends`/self-`embeds` is a cycle of length one; a section
@@ -38,7 +41,7 @@ import type { Finding, FindingLocation } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
 import type { SpecDocument, SpecEmbedding, SpecSection } from "./mdx.js";
 import type { PathText } from "./path-text.js";
-import { pathTextKey, renderPathText } from "./path-text.js";
+import { comparePathTexts, pathTextKey, renderPathText } from "./path-text.js";
 import type {
   ReferenceTarget,
   SpecImportModel,
@@ -96,6 +99,48 @@ export interface GraphEdge {
   readonly target: string;
 }
 
+/** SPEC 5.2/5.7: the dependency edge kinds — the kinds occurrences record. */
+export type DependencyEdgeKind = Exclude<GraphEdgeKind, "contains">;
+
+/**
+ * SPEC 5.7: one reference occurrence — one textual spelling of a
+ * dependency-kind reference whose target resolves (SPEC 11.2): each `d`
+ * array entry separately (2.2), each MDX `{text(...)}` embedding (2.3),
+ * each TypeScript `text(...)` call (4.3), and each TypeScript dependency
+ * marker (4.5). Edges are sets; occurrences are the positions behind them
+ * — duplicate references collapsing to a single edge each remain distinct
+ * occurrences. A construct that records no edge records no occurrence.
+ */
+export interface ReferenceOccurrence {
+  /**
+   * The referencing file's real path (SPEC 12.0, 12.7 path value form
+   * capable — the marked byte form for an invalid-path file's occurrence,
+   * SPEC 14.19; such occurrences arise only on failing workspaces).
+   */
+  readonly file: PathText;
+  /**
+   * The occurrence's own span (SPEC 5.7), exact per kind: a `d` reference's
+   * own expression; an MDX embedding's entire braced container, opening
+   * brace through closing brace; a TS `text(...)` call's entire call
+   * expression, callee through closing parenthesis; a marker's bare
+   * reference chain, exclusive of any statement terminator.
+   */
+  readonly range: ByteRange;
+  readonly kind: DependencyEdgeKind;
+  /**
+   * The source graph node's identity — null exactly where SPEC 11.2 leaves
+   * the containing node's identity undefined (a section without a usable
+   * identity; every node of an invalid-path file, SPEC 14.19): the source
+   * datum is then reported explicitly unavailable (SPEC 5.7). The datum's
+   * other half — the source node's own range (SPEC 1.7) — travels with the
+   * identified node itself (a requirement node's section range; a code
+   * location's range), joined at presentation (SPEC 11.3, 12.7).
+   */
+  readonly source: string | null;
+  /** The resolved target's identity (SPEC 1.5) — always a requirement node. */
+  readonly target: string;
+}
+
 /** One parsed spec source with its per-file analyses (T6–T8 outputs). */
 export interface SpecFileAnalysis {
   readonly document: SpecDocument;
@@ -145,6 +190,7 @@ interface GraphParts {
   readonly requirementNodes: readonly RequirementNode[];
   readonly codeLocations: readonly CodeLocationNode[];
   readonly edges: readonly GraphEdge[];
+  readonly occurrences: readonly ReferenceOccurrence[];
   readonly findings: readonly Finding[];
   readonly requirementIndex: ReadonlyMap<string, RequirementNode>;
   readonly codeIndex: ReadonlyMap<string, CodeLocationNode>;
@@ -156,16 +202,19 @@ interface GraphParts {
  * The assembled workspace graph (SPEC 5). Node lists are ordered by file
  * path (byte order, SPEC 12.0) and within a file by document order, the
  * root (or the whole-file code location) first; `edges` is the collapsed
- * edge set (SPEC 5.2) ordered by (source, kind, target); `findings` holds
- * the graph's own conditions — unresolved references (14.5–14.7) and
- * cycles (14.9) — deterministically ordered. Everything else (structural,
- * prop, import, argument, and code-usage findings) belongs to the
- * per-file analyses this graph was built from.
+ * edge set (SPEC 5.2) ordered by (source, kind, target); `occurrences`
+ * holds every reference occurrence (SPEC 5.7) in occurrence order —
+ * referencing file path bytes, then range start, then range end;
+ * `findings` holds the graph's own conditions — unresolved references
+ * (14.5–14.7) and cycles (14.9) — deterministically ordered. Everything
+ * else (structural, prop, import, argument, and code-usage findings)
+ * belongs to the per-file analyses this graph was built from.
  */
 export class WorkspaceGraph {
   readonly requirementNodes: readonly RequirementNode[];
   readonly codeLocations: readonly CodeLocationNode[];
   readonly edges: readonly GraphEdge[];
+  readonly occurrences: readonly ReferenceOccurrence[];
   readonly findings: readonly Finding[];
 
   private readonly requirementIndex: ReadonlyMap<string, RequirementNode>;
@@ -182,6 +231,7 @@ export class WorkspaceGraph {
     this.requirementNodes = parts.requirementNodes;
     this.codeLocations = parts.codeLocations;
     this.edges = parts.edges;
+    this.occurrences = parts.occurrences;
     this.findings = parts.findings;
     this.requirementIndex = parts.requirementIndex;
     this.codeIndex = parts.codeIndex;
@@ -401,6 +451,22 @@ export function buildWorkspaceGraph(
   const findings: Finding[] = [];
   const resolution = new Resolver(parsedByPath, requirementIndex, idIndex);
 
+  // SPEC 5.7: one occurrence per textual spelling of a dependency-kind
+  // reference whose target resolves — recorded beside edge recording, so a
+  // construct that records no edge records no occurrence, while a resolving
+  // spelling whose SOURCE node has no defined identity (SPEC 11.2) still
+  // records one, its source datum explicitly unavailable (null).
+  const occurrences: ReferenceOccurrence[] = [];
+  const addOccurrence = (
+    file: PathText,
+    range: ByteRange,
+    kind: DependencyEdgeKind,
+    source: string | null,
+    target: string,
+  ): void => {
+    occurrences.push({ file, range, kind, source, target });
+  };
+
   // The reference spellings behind each requirement-side dependency edge
   // (SPEC 5.7 spans), keyed source → target: a cycle locates its full path
   // in source through every spelling recording a participating edge
@@ -441,6 +507,17 @@ export function buildWorkspaceGraph(
         continue;
       }
       const source = sectionIndex.get(dependency.section);
+      // SPEC 5.7: a `d` reference occurrence spans that one reference's own
+      // expression — recorded whenever the target resolves, the source
+      // datum unavailable where the declaring section has no defined
+      // identity (SPEC 11.2).
+      addOccurrence(
+        spec.document.file,
+        dependency.reference.range,
+        "depends",
+        source?.identity ?? null,
+        resolved.node.identity,
+      );
       if (source !== undefined) {
         addEdge("depends", source.identity, resolved.node.identity);
         // SPEC 5.7: a `d` reference's spelling spans its own expression.
@@ -490,6 +567,17 @@ export function buildWorkspaceGraph(
       }
       embeddingIndex.set(embedded.embedding, resolved.node);
       const source = sectionIndex.get(embedded.embedding.section);
+      // SPEC 5.7: an MDX embedding occurrence spans the entire braced
+      // container, opening brace through closing brace — the innermost
+      // containing section (the root included) is its source, unavailable
+      // where that section has no defined identity (SPEC 11.2).
+      addOccurrence(
+        spec.document.file,
+        embedded.embedding.range,
+        "embeds",
+        source?.identity ?? null,
+        resolved.node.identity,
+      );
       if (source !== undefined) {
         addEdge("embeds", source.identity, resolved.node.identity);
         // SPEC 5.7: an MDX embedding's spelling spans the entire braced
@@ -530,6 +618,18 @@ export function buildWorkspaceGraph(
         continue;
       }
       addEdge(reference.kind, reference.location, resolved.node.identity);
+      // SPEC 5.7: a TS `text(...)` occurrence spans the entire call
+      // expression, callee through closing parenthesis; a marker occurrence
+      // spans the bare reference chain alone. The source is the attributed
+      // code location (SPEC 4.6), whose identity is always defined for a
+      // valid-path file (SPEC 11.2).
+      addOccurrence(
+        analysis.file,
+        reference.occurrenceRange,
+        reference.kind,
+        reference.location,
+        resolved.node.identity,
+      );
     }
   }
 
@@ -541,14 +641,22 @@ export function buildWorkspaceGraph(
   // its extracted references resolve against the defined identities, a
   // local reference (naming an ID in the invalid-path file itself) never
   // resolving, and each unresolved reference reports its 14.5/14.6/14.7
-  // located in the file (marked byte form capable). References that DO
-  // resolve are finding-free; their occurrence recording (source datum
-  // explicitly unavailable, SPEC 5.7) is the occurrence machinery's.
-  const invalidPathFailure = (
+  // located in the file (marked byte form capable). A reference that DOES
+  // resolve is finding-free and records its occurrence (SPEC 5.7), the
+  // source datum explicitly unavailable — no identity of the referencing
+  // file is defined (SPEC 14.19, 11.2).
+  const invalidPathOutcome = (
     target: ReferenceTarget,
-  ): { readonly described: string; readonly reason: string } | null => {
+  ):
+    | { readonly ok: true; readonly node: RequirementNode }
+    | {
+        readonly ok: false;
+        readonly described: string;
+        readonly reason: string;
+      } => {
     if (target.kind === "local") {
       return {
+        ok: false,
         described: `${JSON.stringify(target.idPath)} in this file`,
         reason:
           `the reference names an ID in this file, and no identity of ` +
@@ -560,8 +668,9 @@ export function buildWorkspaceGraph(
       target.modulePath,
       target.segments,
     );
-    if (resolved.ok) return null;
+    if (resolved.ok) return resolved;
     return {
+      ok: false,
       described: describeExternal(target.modulePath, target.segments),
       reason: resolved.reason,
     };
@@ -569,13 +678,22 @@ export function buildWorkspaceGraph(
   for (const spec of invalidPathSpecs) {
     const file = spec.document.file;
     for (const dependency of spec.references.dependencies) {
-      const failure = invalidPathFailure(dependency.reference.target);
-      if (failure === null) continue;
+      const outcome = invalidPathOutcome(dependency.reference.target);
+      if (outcome.ok) {
+        addOccurrence(
+          file,
+          dependency.reference.range,
+          "depends",
+          null,
+          outcome.node.identity,
+        );
+        continue;
+      }
       findings.push(
         locatedFinding(
           5,
-          `unknown dependency: the d reference to ${failure.described} ` +
-            `does not resolve — ${failure.reason}; declare the target ` +
+          `unknown dependency: the d reference to ${outcome.described} ` +
+            `does not resolve — ${outcome.reason}; declare the target ` +
             `section or correct the reference (SPEC 2.2, 14.5)`,
           [{ file, range: dependency.reference.range }],
         ),
@@ -583,15 +701,25 @@ export function buildWorkspaceGraph(
     }
     for (const embedded of spec.references.embeddings) {
       if (embedded.reference === null) continue;
-      const failure = invalidPathFailure(embedded.reference.target);
-      if (failure === null) continue;
+      const outcome = invalidPathOutcome(embedded.reference.target);
+      if (outcome.ok) {
+        // SPEC 5.7: the occurrence spans the entire braced container.
+        addOccurrence(
+          file,
+          embedded.embedding.range,
+          "embeds",
+          null,
+          outcome.node.identity,
+        );
+        continue;
+      }
       // SPEC 14: an embedding-form finding's range is the full braced
       // container — the span its occurrence would occupy (5.7).
       findings.push(
         locatedFinding(
           6,
           `unknown text target: the text(...) reference to ` +
-            `${failure.described} does not resolve — ${failure.reason}; ` +
+            `${outcome.described} does not resolve — ${outcome.reason}; ` +
             `declare the target section or correct the reference ` +
             `(SPEC 2.3, 14.6)`,
           [{ file, range: embedded.embedding.range }],
@@ -605,7 +733,16 @@ export function buildWorkspaceGraph(
         reference.modulePath,
         reference.segments,
       );
-      if (resolved.ok) continue;
+      if (resolved.ok) {
+        addOccurrence(
+          analysis.file,
+          reference.occurrenceRange,
+          reference.kind,
+          null,
+          resolved.node.identity,
+        );
+        continue;
+      }
       const construct =
         reference.kind === "references" ? "marker" : "text(...) argument";
       findings.push(
@@ -633,6 +770,17 @@ export function buildWorkspaceGraph(
       compareBytes(a.target, b.target),
   );
 
+  // SPEC 5.7: occurrence order is total and deterministic — referencing
+  // file path bytes (one byte order over both path forms, SPEC 12.0), then
+  // range start, then range end. Distinct occurrences occupy distinct
+  // spans, so no further tiebreak exists.
+  occurrences.sort(
+    (a, b) =>
+      comparePathTexts(a.file, b.file) ||
+      a.range.start - b.range.start ||
+      a.range.end - b.range.end,
+  );
+
   // --- cycles (SPEC 5.3, 2.1 → 14.9) ---------------------------------------
   findings.push(
     ...dependencyCycleFindings(
@@ -648,6 +796,7 @@ export function buildWorkspaceGraph(
     requirementNodes,
     codeLocations,
     edges,
+    occurrences,
     findings,
     requirementIndex,
     codeIndex,

@@ -151,6 +151,13 @@ export interface CodeReference {
   readonly spelling: ReferenceSpelling;
   /** The reference expression's bytes (finding locations, SPEC 14.7). */
   readonly range: ByteRange;
+  /**
+   * The occurrence span (SPEC 5.7), exact per kind: for a marker the bare
+   * reference chain alone, exclusive of any statement terminator (equal to
+   * `range`); for a `text(...)` call the entire call expression, callee
+   * through closing parenthesis, argument included.
+   */
+  readonly occurrenceRange: ByteRange;
 }
 
 /** The analysis of one parseable code source. */
@@ -516,12 +523,18 @@ class CodeAnalyzer {
     return this.path;
   }
 
-  /** Build one recorded reference from a classified static chain. */
+  /**
+   * Build one recorded reference from a classified static chain.
+   * `occurrenceRange` is the SPEC 5.7 occurrence span — for a marker the
+   * chain itself (omit it), for a `text(...)` call the entire call
+   * expression, callee through closing parenthesis.
+   */
   private chainReference(
     kind: "references" | "embeds",
     classified: ClassifiedChain,
     modulePath: string,
     location: string,
+    occurrenceRange?: ByteRange,
   ): CodeReference {
     const spanRange = (span: {
       readonly start: number;
@@ -530,6 +543,7 @@ class CodeAnalyzer {
       start: this.offsets.byteOffset(span.start),
       end: this.offsets.byteOffset(span.end),
     });
+    const range = spanRange(classified.span);
     return {
       kind,
       location,
@@ -547,7 +561,8 @@ class CodeAnalyzer {
           accessRange: spanRange(segment.accessSpan),
         })),
       },
-      range: spanRange(classified.span),
+      range,
+      occurrenceRange: occurrenceRange ?? range,
     };
   }
 
@@ -1396,13 +1411,15 @@ class CodeAnalyzer {
       return;
     }
     // SPEC 4.3: text(node) records an `embeds` edge from the calling
-    // code location.
+    // code location. Its occurrence spans the entire call expression,
+    // callee through closing parenthesis (SPEC 5.7).
     this.references.push(
       this.chainReference(
         "embeds",
         classified,
         rootBinding.target.path,
         this.attributionOf(call),
+        this.rangeOf(call),
       ),
     );
   }

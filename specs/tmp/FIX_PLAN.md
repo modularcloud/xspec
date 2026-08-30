@@ -105,35 +105,25 @@ these files from `invalidPathSpecs`/`invalidPathCode`; B2's occurrence
 recording for them hooks into the graph's invalid-path resolution pass,
 source datum explicitly unavailable.)
 
-### B2. Record reference occurrences in core analysis and graph data
-
-SPEC 5.7, 13.3, 12.7 (occurrence record form), 11.2 (existence/source-datum
-rules). No occurrence concept exists in `src/`. In `core`, compute and carry,
-and in graph data persist, reference occurrences:
-
-- One occurrence per textual spelling of a dependency-kind reference whose
-  target resolves: each `d` array entry separately; each MDX `{text(...)}`
-  embedding; each TS `text(...)` call; each TS dependency marker. Duplicates
-  collapsing to one edge remain distinct occurrences. Constructs recording no
-  edge record none (imports, type-only bindings, shadowed chains, dynamic or
-  unresolving spellings).
-- Record: referencing file; own range — exact per kind: a `d` entry's own
-  expression; an MDX embedding the entire braced container, opening through
-  closing brace (`SpecEmbedding.range`, `src/core/mdx.ts`, already holds it); a
-  TS `text(...)` occurrence the entire call expression, callee through closing
-  parenthesis (record this span in `src/core/code-analysis.ts` — today only the
-  argument chain's span exists); a marker the bare chain, terminator excluded
-  (`CodeReference.range` holds it) — edge kind; source graph node as one datum
-  (identity plus that node's own range; explicitly unavailable when 11.2 leaves
-  the containing node's identity undefined — representable now, consumed by
-  Stage B surfaces); resolved target's identity.
-- Total order: referencing file path bytes, then range start, then range end.
-- Persist in graph data (`src/core/graph-data.ts` stored shape,
-  `src/core/graph.ts`) so 13.3's "graph data contains … reference occurrences"
-  holds and refresh round-trips them byte-deterministically.
-
-Verify: T5.7-1..4 (`section-5.7.test.ts`) via the Stage B surfaces; T13.3-1/2
-arms once B4 lands.
+(B2 landed: reference occurrences are computed in the graph and persisted.
+`WorkspaceGraph.occurrences` (`src/core/graph.ts`) holds one
+`ReferenceOccurrence` per resolving dependency-kind spelling in occurrence
+order (file path bytes via `comparePathTexts`, then range start, then end):
+`file` is the referencing file's real `PathText`; `range` is the exact 5.7
+span (a `d` entry's own expression; an MDX embedding's full braced
+container; a TS `text(...)` call's whole call expression via the new
+`CodeReference.occurrenceRange`, `src/core/code-analysis.ts`; a marker's
+bare chain); `kind` is the `DependencyEdgeKind`; `source` is the source
+node's IDENTITY or null (= the 11.2 explicitly-unavailable datum: sections
+without a usable identity, every node of an invalid-path file — those
+occurrences are recorded in the graph's invalid-path resolution pass);
+`target` the resolved identity. The source datum's RANGE half joins through
+the node itself: a requirement source's is `RequirementNode.section.range`
+(root = whole file); a code source's range is B3's deliverable — B4 renders
+`{"identity", "range"}` from the graph node, or `{"unavailable": true}` for
+null. Persisted as `GraphSnapshot.occurrences` (`StoredOccurrence`,
+`src/core/graph-data.ts`, format version 3): valid workspaces only, so
+stored `file` is a plain string; round-trips byte-deterministically.)
 
 ### B3. Compute code-location source ranges
 

@@ -3,10 +3,11 @@
 // Pure core (IMPLEMENTATION Architecture: serialization is core —
 // deterministic, I/O-free; storage I/O is the workspace layer's,
 // src/workspace/graph-data.ts): xspec maintains graph data under `.xspec/`,
-// containing requirement nodes, code locations, edges by kind, source
-// ranges (SPEC 1.7), all four hashes (SPEC 5.5), coverage attributes
-// (SPEC 2.5), tags (SPEC 2.6), and the paths of the derived files most
-// recently generated (SPEC 13.3, 13.4). This module defines that content:
+// containing requirement nodes, code locations, edges by kind, reference
+// occurrences (SPEC 5.7), source ranges (SPEC 1.7), all four hashes
+// (SPEC 5.5), coverage attributes (SPEC 2.5), tags (SPEC 2.6), and the
+// paths of the derived files most recently generated (SPEC 13.3, 13.4).
+// This module defines that content:
 //
 // - the stored model — a plain-data snapshot of the assembled workspace
 //   graph (./graph.ts) plus the recorded derived-file paths;
@@ -48,7 +49,12 @@ import type { ByteRange } from "./bytes.js";
 import { compareBytes } from "./bytes.js";
 import type { JsonValue } from "./canonical-json.js";
 import { canonicalJson } from "./canonical-json.js";
-import type { GraphEdge, GraphEdgeKind, WorkspaceGraph } from "./graph.js";
+import type {
+  DependencyEdgeKind,
+  GraphEdge,
+  GraphEdgeKind,
+  WorkspaceGraph,
+} from "./graph.js";
 import type { NodeHashes } from "./hashes.js";
 import type { WorkspaceTextModel } from "./text-model.js";
 
@@ -59,8 +65,9 @@ export const GRAPH_DATA_PATH = ".xspec/graph.json";
  * The stored format version: a parsed file of any other version is
  * malformed (parse yields null), so it reads as not matching the current
  * sources and configuration and is refreshed or rebuilt (SPEC 13.3).
+ * Version 3 added the reference occurrences (SPEC 5.7, 13.3).
  */
-const GRAPH_DATA_VERSION = 2;
+const GRAPH_DATA_VERSION = 3;
 
 /** One recorded derivation input: a discovered source and its fingerprint. */
 export interface StoredSourceInput {
@@ -134,6 +141,28 @@ export interface StoredCodeLocation {
 }
 
 /**
+ * One stored reference occurrence (SPEC 13.3, 5.7). The snapshot is built
+ * only over workspaces passing `build`'s validations (core/build.ts), so
+ * the referencing file's path is always a plain string (SPEC 14.19) and
+ * the source graph node's identity is always defined (SPEC 11.2) — the
+ * null arm is carried for shape totality. The source node's own range
+ * (the reported datum's other half, SPEC 5.7) travels with the stored
+ * node itself.
+ */
+export interface StoredOccurrence {
+  /** Workspace-relative `/`-separated referencing file path (SPEC 1.5). */
+  readonly file: string;
+  /** SPEC 5.7: the occurrence's own span, exact per kind. */
+  readonly range: ByteRange;
+  /** The recorded edge kind (SPEC 5.2): depends, embeds, or references. */
+  readonly kind: DependencyEdgeKind;
+  /** The source graph node's identity — null where undefined (SPEC 11.2). */
+  readonly source: string | null;
+  /** The resolved target's identity (SPEC 1.5). */
+  readonly target: string;
+}
+
+/**
  * The graph-content part of the store: a pure function of the current
  * sources, configuration, and journal (SPEC 13.3) — the part the
  * compare-with-current predicate judges.
@@ -145,6 +174,11 @@ export interface GraphSnapshot {
   readonly codeLocations: readonly StoredCodeLocation[];
   /** The collapsed edge set in (source, kind, target) order (SPEC 5.2). */
   readonly edges: readonly GraphEdge[];
+  /**
+   * Every reference occurrence (SPEC 5.7, 13.3) in occurrence order:
+   * referencing file path bytes, then range start, then range end.
+   */
+  readonly occurrences: readonly StoredOccurrence[];
 }
 
 /** The complete stored graph data (SPEC 13.3). */
@@ -167,7 +201,8 @@ export interface GraphData {
  * hashes (SPEC 13.3): every requirement node with its source range,
  * coverage attribute, tags, four hashes, and fully expanded own and
  * subtree text (SPEC 1.6 — recorded so the store answers the node report
- * of SPEC 11/12.4 without re-deriving); every code location; every edge.
+ * of SPEC 11/12.4 without re-deriving); every code location; every edge;
+ * every reference occurrence (SPEC 5.7).
  * Deterministic: everything is emitted in the graph's own fixed order
  * (SPEC 12.0). `hashes` must be the computation over this same graph
  * (./hashes.ts covers every requirement node), `textModel` the model over
@@ -208,7 +243,25 @@ export function buildGraphSnapshot(
     source: edge.source,
     target: edge.target,
   }));
-  return { requirements, codeLocations, edges };
+  // SPEC 5.7/13.3: the reference occurrences, already in occurrence order.
+  // Only valid workspaces reach this derivation (core/build.ts), so every
+  // referencing file's path is a plain string (SPEC 14.19).
+  const occurrences = graph.occurrences.map((occurrence): StoredOccurrence => {
+    if (typeof occurrence.file !== "string") {
+      throw new Error(
+        `xspec internal error: an invalid-path file's occurrence reached ` +
+          `a stored snapshot (SPEC 14.19 fails build validation)`,
+      );
+    }
+    return {
+      file: occurrence.file,
+      range: { start: occurrence.range.start, end: occurrence.range.end },
+      kind: occurrence.kind,
+      source: occurrence.source,
+      target: occurrence.target,
+    };
+  });
+  return { requirements, codeLocations, edges, occurrences };
 }
 
 /**
@@ -334,6 +387,13 @@ export function serializeGraphData(data: GraphData): string {
       source: edge.source,
       target: edge.target,
     })),
+    occurrences: data.snapshot.occurrences.map((occurrence): JsonValue => ({
+      file: occurrence.file,
+      range: { start: occurrence.range.start, end: occurrence.range.end },
+      kind: occurrence.kind,
+      source: occurrence.source,
+      target: occurrence.target,
+    })),
   };
   return canonicalJson(value);
 }
@@ -393,17 +453,19 @@ export function parseGraphData(text: string): GraphData | null {
   const requirements = parseArray(raw["requirements"], parseRequirement);
   const codeLocations = parseArray(raw["codeLocations"], parseCodeLocation);
   const edges = parseArray(raw["edges"], parseEdge);
+  const occurrences = parseArray(raw["occurrences"], parseOccurrence);
   if (
     inputs === null ||
     derivedFiles === null ||
     requirements === null ||
     codeLocations === null ||
-    edges === null
+    edges === null ||
+    occurrences === null
   ) {
     return null;
   }
   return {
-    snapshot: { requirements, codeLocations, edges },
+    snapshot: { requirements, codeLocations, edges, occurrences },
     inputs,
     derivedFiles,
   };
@@ -581,4 +643,33 @@ function parseEdge(value: unknown): GraphEdge | null {
     return null;
   }
   return { kind: kind as GraphEdgeKind, source, target };
+}
+
+/** SPEC 5.7: the dependency edge kinds occurrences record. */
+const OCCURRENCE_KINDS: ReadonlySet<string> = new Set([
+  "depends",
+  "embeds",
+  "references",
+]);
+
+function parseOccurrence(value: unknown): StoredOccurrence | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const file = value["file"];
+  const kind = value["kind"];
+  const source = value["source"];
+  const target = value["target"];
+  const range = parseRange(value["range"]);
+  if (
+    typeof file !== "string" ||
+    typeof kind !== "string" ||
+    !OCCURRENCE_KINDS.has(kind) ||
+    (source !== null && typeof source !== "string") ||
+    typeof target !== "string" ||
+    range === null
+  ) {
+    return null;
+  }
+  return { file, range, kind: kind as DependencyEdgeKind, source, target };
 }
