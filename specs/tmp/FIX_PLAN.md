@@ -282,27 +282,16 @@ green; T6.6-3 red only on the C1-shared arms below.)
 
 ## Stage C — localized behavioral fixes
 
-### C1. Move operand classification is by spelling, at exit 2
-
-SPEC 6.5 (operand classification), 12.0 (`#` split, UTF-8 arguments). Three
-misroutes in `src/cli/commands/move.ts` / `src/cli/args.ts`, all currently exit
-1 refusals, all usage errors (exit 2):
-
-- An invocation mixing the two synopses' forms (one operand containing `#`, the
-  other not — e.g. file-form origin with a `#`-containing destination) matches
-  neither synopsis: usage error, never `fileDestinationProblem`.
-- A non-UTF-8 operand value is a usage error: remove move's
-  `utf8ExemptPositionals` exemption in `parseArgv` (`src/cli/args.ts` ~451) —
-  no argument value may name a non-UTF-8 path (12.0).
-- An operand with more than one `#` is a malformed value: usage error in
-  `parseMoveArgument`, never an invalid-ID refusal.
-
-Verify: T6.5-5 (`section-6.5*.test.ts`), and T6.6-3 (`section-6.6.test.ts`)
-goes green with this task: its usage sweep runs the same mixed-synopsis and
-non-UTF-8 invocations with and without `--preview` (both must exit 2), and
-today it aborts at the first of them — everything else in T6.6-3 (refusal
-equivalence, scheduling, `--test-hold`+`--preview`) already passes, so run
-it after T6.5-5.
+(C1 landed: move operand classification is parse-level —
+`moveOperandsProblem` in `src/cli/args.ts` rejects, inside `parseArgv`
+(syntax-determined class: reported without loading configuration, before
+any lock or hold), a move operand with more than one `#` (malformed value)
+and a mixed-synopsis invocation, both directions; the non-UTF-8 positional
+exemption is removed, so every argument value is UTF-8-checked. The
+handler's one-direction mixed check and its non-UTF-8 `<new-id>` refusal
+are gone — unreachable, guarded by internal errors. T6.5-5, T6.6-3, and
+T12.0-13's move arms behave; T12.0-13 still aborts earlier, at its `show
+a#b#c` arm — C2's scope, see its note.)
 
 ### C2. Argument checks precede the invalid-workspace gate on gated reads
 
@@ -334,6 +323,16 @@ corruption *report* moves behind it — gate failing → gate findings alone, ex
 (6.3, exit 2 before source validation) applies only to a readable session;
 a corrupt one has no readable parameters — the corruption (or, failing
 workspace, the gate) reports instead. `review list` already gates first.
+
+Also observed by C1's spawn, same scope: a `<node>`/`<graph-node>` value with
+more than one `#` must exit 2 as a malformed value on `show`/`query node`
+(T12.0-13's arms — currently exit 1 via the gate), and T12.0-10's
+within-class-2 arm additionally pins `show a#b#c` as reported *without
+loading configuration* (byte-identical error documents with the
+configuration invalid or missing) — for that one a handler-level check is
+too late; C1's `moveOperandsProblem` in `src/cli/args.ts` is the
+parse-level pattern (`occurrences --to` already checks its spelling in the
+handler, which its arms accept).
 
 Verify: T12.0-10 (`section-12.0*.test.ts`), T10.1-5 (`section-10.1.test.ts`).
 

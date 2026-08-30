@@ -405,18 +405,20 @@ function usageError(message: string, jsonInEffect: boolean): ParseResult {
 
 /**
  * SPEC 12.0: argument values are interpreted as UTF-8, and a value that is
- * not valid UTF-8 is a usage error. Node materializes `process.argv` by
- * decoding the OS argument bytes as UTF-8 with U+FFFD substituted for every
- * invalid sequence, so invalid input bytes are observable only as U+FFFD in
- * the decoded string: a value containing U+FFFD is indistinguishable from
- * mis-decoded bytes and is treated as not valid UTF-8. A lone surrogate
- * (which no UTF-8 decode produces, but an in-process caller could pass) has
- * no UTF-8 encoding and is rejected the same way.
+ * not valid UTF-8 is a usage error — every argument value, `move`'s
+ * positional operands included: no argument value may name a non-UTF-8 path
+ * (12.0), so 6.5's non-UTF-8 destination clause is unreachable through the
+ * CLI. Node materializes `process.argv` by decoding the OS argument bytes
+ * as UTF-8 with U+FFFD substituted for every invalid sequence, so invalid
+ * input bytes are observable only as U+FFFD in the decoded string: a value
+ * containing U+FFFD is indistinguishable from mis-decoded bytes and is
+ * treated as not valid UTF-8. A lone surrogate (which no UTF-8 decode
+ * produces, but an in-process caller could pass) has no UTF-8 encoding and
+ * is rejected the same way.
  *
- * Exported for `move` (SPEC 6.5): the parser exempts `move`'s positionals —
- * a destination path that is not valid UTF-8 is one of 6.5's destination
- * *refusals* (exit 1), not a usage error, so the command classifies its own
- * arguments with this same predicate.
+ * Exported for `move` (SPEC 6.5): the destination-validity assessment
+ * (core/refusal.ts) takes the path's UTF-8 validity as an input — always
+ * true for a CLI-supplied operand, per the parse rule above.
  */
 export function isValidUtf8ArgumentValue(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
@@ -431,6 +433,46 @@ export function isValidUtf8ArgumentValue(value: string): boolean {
     }
   }
   return true;
+}
+
+/**
+ * SPEC 6.5: a `move` operand is classified by spelling alone — an operand
+ * containing `#` is a `<file>#<id>` pair under the split of 12.0, one
+ * without is a file. SPEC 12.0: at most one `#` is well-formed in any such
+ * value, so a spelling containing more than one is a malformed value; and
+ * an invocation mixing the two synopses' forms (one pair operand, one bare
+ * file) matches neither synopsis. Both are usage errors the invocation's
+ * syntax alone determines, so they are parse-level: reported without
+ * loading configuration (12.0), before workspace exclusivity or any hold
+ * file (13.5). Returns the diagnostic, or null for a well-formed pair of
+ * operands.
+ */
+function moveOperandsProblem(positionals: readonly string[]): string | null {
+  for (const operand of positionals) {
+    const first = operand.indexOf("#");
+    if (first !== -1 && operand.includes("#", first + 1)) {
+      return (
+        `operand '${operand}' contains more than one '#' — at most one is ` +
+        `well-formed: an operand containing '#' is a <file>#<id> pair and ` +
+        `one without is a file (SPEC 6.5, 12.0)`
+      );
+    }
+  }
+  const [origin, destination] = positionals;
+  if (
+    origin !== undefined &&
+    destination !== undefined &&
+    origin.includes("#") !== destination.includes("#")
+  ) {
+    return (
+      `operands '${origin}' and '${destination}' mix the two synopses' ` +
+      `forms — an operand containing '#' is a <file>#<id> pair and one ` +
+      `without is a file, so the invocation matches neither ` +
+      `\`move <old-file> <new-file>\` nor ` +
+      `\`move <file>#<id> <target-file>#<new-id>\` (SPEC 6.5, 12.0)`
+    );
+  }
+  return null;
 }
 
 /** `"build, check, ids, …"` for diagnostics, in specification order. */
@@ -490,12 +532,9 @@ export function parseArgv(argv: readonly string[]): ParseResult {
   let jsonOnlySurface = false;
   const inEffect = (): boolean => jsonToken || jsonOnlySurface;
 
-  // SPEC 12.0: argument values are interpreted as UTF-8, and a value that is
-  // not valid UTF-8 is a usage error. Checked per token below, because the
-  // `move` command's positionals are exempt (SPEC 6.5: a destination path
-  // that is not valid UTF-8 is a destination refusal, exit 1 — the command
-  // classifies it; a non-UTF-8 origin names no discovered source and stays
-  // in the usage-error class through the existence check).
+  // SPEC 12.0: argument values are interpreted as UTF-8, and a value that
+  // is not valid UTF-8 is a usage error — every token, `move`'s positional
+  // operands included (no argument value may name a non-UTF-8 path, 12.0).
   const nonUtf8 = (indexInArgv: number): ParseResult =>
     usageError(
       `argument ${String(indexInArgv + 1)} is not valid UTF-8 — argument ` +
@@ -578,15 +617,11 @@ export function parseArgv(argv: readonly string[]): ParseResult {
   // subcommand) tokens, so the offset restores the original position for
   // the non-UTF-8 diagnostics.
   const tokenOffset = argv.length - tokens.length;
-  // SPEC 6.5: `move`'s positional arguments are exempt from the parse-level
-  // UTF-8 usage check (see `isValidUtf8ArgumentValue`); flags and their
-  // values keep it.
-  const utf8ExemptPositionals = spec.path === "move";
 
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]!;
     if (!token.startsWith("--")) {
-      if (!utf8ExemptPositionals && !isValidUtf8ArgumentValue(token)) {
+      if (!isValidUtf8ArgumentValue(token)) {
         return nonUtf8(tokenOffset + index);
       }
       positionals.push(token);
@@ -708,6 +743,15 @@ export function parseArgv(argv: readonly string[]): ParseResult {
           `the other`,
         inEffect(),
       );
+    }
+  }
+  // SPEC 6.5/12.0: `move` operand classification is by spelling alone — a
+  // multi-`#` operand is a malformed value, and a mixed-synopsis invocation
+  // matches neither form (see `moveOperandsProblem`).
+  if (spec.path === "move") {
+    const problem = moveOperandsProblem(positionals);
+    if (problem !== null) {
+      return usageError(`move: ${problem}`, inEffect());
     }
   }
 

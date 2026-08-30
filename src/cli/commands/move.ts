@@ -6,9 +6,15 @@
 // files' imports of its generated module rewritten so all references
 // resolve; the full mapping appended to the journal (SPEC 6.1); finishing
 // regeneration exactly as `xspec build` (SPEC 12.1, 6.4) — which cannot
-// fail, because move only ever rewrites a valid workspace. The form is
-// selected by the origin argument: an origin containing `#` names a section
-// (the second form), a bare origin names a file.
+// fail, because move only ever rewrites a valid workspace. A move operand
+// is classified by spelling alone (SPEC 6.5): an operand containing `#` is
+// a `<file>#<id>` pair under the split of 12.0, one without is a file — and
+// the parser (cli/args.ts) has already rejected, as syntax-determined usage
+// errors reported without loading configuration (SPEC 12.0), every
+// invocation this classification cannot serve: a non-UTF-8 operand value, a
+// multi-`#` operand (a malformed value), and an invocation mixing the two
+// synopses' forms. The handler therefore only ever sees two operands of one
+// form.
 //
 // The section form extracts the section subtree with the exact text edits
 // of SPEC 6.5 (deletion with the SPEC 3 line-drop rule; insertion before
@@ -19,7 +25,10 @@
 // additions and exact removals, appends the full mapping to the journal,
 // and regenerates (core/move.ts holds the pure derivation).
 //
-// Outcome precedence (SPEC 6.5, 6.4, 12.0, 13.5, 14):
+// Outcome precedence (SPEC 6.5, 6.4, 12.0, 13.5, 14) — upstream of it all,
+// the parse-level operand classification above (SPEC 12.0: within exit
+// class 2, an error the invocation's syntax alone determines is reported
+// without loading configuration):
 //
 // 1. Workspace exclusivity (SPEC 13.5): `move` is a mutating command — while
 //    another one runs, it fails promptly with a usage error (exit 2)
@@ -194,8 +203,10 @@ interface MoveArgument {
 }
 
 /**
- * Split a `move` argument at its first `#` (SPEC 6.5, 1.5: discovered
- * source paths never contain `#`, so the first `#` separates file from ID).
+ * Split a `move` argument at its `#` (SPEC 6.5 under the split of 12.0).
+ * The parser has already rejected any operand containing more than one
+ * `#` as a malformed value (SPEC 12.0), so the split is never ambiguous:
+ * the operand's sole `#` separates file from ID.
  */
 function parseMoveArgument(raw: string): MoveArgument {
   const hash = raw.indexOf("#");
@@ -234,21 +245,12 @@ async function runMove(
 ): Promise<ExitCode> {
   const { workspace, stdout, stderr } = context;
 
-  // SPEC 6.5: the origin argument selects the form — a bare path is the
-  // file form, `file#id` the section form.
+  // SPEC 6.5: each operand's spelling selects the form — a bare path is
+  // the file form, `file#id` the section form. The parser has already
+  // rejected mixed-synopsis invocations (SPEC 12.0), so the two operands
+  // parse to one form.
   const origin = parseMoveArgument(originArg);
   const destination = parseMoveArgument(destinationArg);
-  if (origin.id !== null && destination.id === null) {
-    // A section origin with a bare-file destination matches neither form
-    // (SPEC 6.5): a malformed invocation, a usage error (12.0).
-    return usageError(
-      invocation,
-      context,
-      `'${destinationArg}' names no target section — the forms are ` +
-        `\`move <old-file> <new-file>\` and \`move <file>#<id> ` +
-        `<target-file>#<new-id>\` (SPEC 6.5)`,
-    );
-  }
 
   const analysis = await analyzeWorkspace(workspace);
 
@@ -325,6 +327,8 @@ async function runMove(
 
   if (origin.id !== null) {
     if (destination.id === null) {
+      // Unreachable: the parser rejects mixed-synopsis invocations
+      // (SPEC 6.5, 12.0). Guarded so a parse regression fails loudly.
       throw new Error("xspec internal error: section move without a new ID");
     }
     return runMoveSection(
@@ -339,12 +343,18 @@ async function runMove(
     );
   }
 
+  if (destination.id !== null) {
+    // Unreachable: the parser rejects mixed-synopsis invocations (SPEC 6.5,
+    // 12.0). Guarded so a parse regression fails loudly instead of treating
+    // a pair operand as a destination path.
+    throw new Error("xspec internal error: file move with a pair destination");
+  }
   return runMoveFile(
     invocation,
     context,
     analysis,
     origin.file,
-    destinationArg,
+    destination.file,
     preview,
   );
 }
@@ -586,25 +596,6 @@ async function runMoveSection(
     ? originSpec
     : (analysis.specs.find((spec) => spec.document.path === targetPath) ??
       null);
-
-  // A `<new-id>` that is not valid UTF-8 cannot be written into a source
-  // file faithfully (argv bytes that do not decode are irrecoverable; see
-  // cli/args.ts): it can never be a valid requirement ID (SPEC 1.6, 1.4),
-  // refused under its reason's stable code (SPEC 14).
-  if (!isValidUtf8ArgumentValue(newId)) {
-    return emitFindingsRefusal(preview, invocation.json, stdout, [
-      {
-        code: "refused-invalid-id",
-        message:
-          `invalid new ID: the new ID is not valid UTF-8 — requirement ` +
-          `IDs are decoded UTF-8 content (SPEC 1.6, 1.4); pass a valid ` +
-          `UTF-8 ID (SPEC 6.5, 14)`,
-        locations: [],
-        path: null,
-        identities: [`${targetPath}#${newId}`],
-      },
-    ]);
-  }
 
   // SPEC 6.5/14: evaluate every applicable refusal reason together over
   // the valid workspace — the mirrored identity checks, the target
