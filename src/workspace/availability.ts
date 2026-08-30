@@ -136,8 +136,15 @@ export async function finishAvailabilityRefresh(
   // Passing workspace: read-time refresh participation (SPEC 13.3), as in
   // ./refresh.ts — matching data is served as is; mismatched or missing
   // data is rewritten as `build` would write it, the recorded derived-file
-  // paths left unchanged.
+  // paths left unchanged. Recorded state that exists but cannot be read as
+  // a record is neither read, repaired, nor replaced, and no finding is
+  // reported for it (SPEC 13.3, 14.23): the store stays byte-for-byte
+  // until a successful `build` or a finishing `rename`/`move` regeneration
+  // replaces the record.
   const stored = await loadGraphData(workspace.root);
+  if (stored.state === "unreadable") {
+    return;
+  }
   if (!graphDataMatchesCurrent(stored.bytes, stored.data, build.graphData)) {
     await writeGraphData(
       workspace.root,

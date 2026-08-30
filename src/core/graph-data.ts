@@ -33,11 +33,16 @@
 // outlives the generation set (that is what makes orphan removal and
 // 14.10's recorded-orphan arm possible, SPEC 13.3, 13.4, 12.1). A refresh
 // writes exactly what `xspec build` would write except for that record
-// clause (SPEC 13.3): with a recoverable record, build's data with the
-// stored record preserved; with none — the store missing or malformed —
-// there are no recorded paths to preserve, and the written data is exactly
-// build's, would-be record included. The predicate compares against the
-// same refreshed form, so both judge the store by one rule.
+// clause (SPEC 13.3): with a readable record, build's data with the stored
+// record preserved; with an absent store there are no recorded paths to
+// preserve, and the written data is exactly build's, would-be record
+// included. Recorded state that exists but cannot be read as a record —
+// malformed bytes, a non-plain occupant (workspace/graph-data.ts's
+// "unreadable" state) — is neither read, repaired, nor replaced by any
+// refresh (SPEC 13.3, 14.23): only `build` and the finishing
+// `rename`/`move` regeneration replace it, and `check` reports it as
+// staleness (SPEC 14.10). The predicate compares against the same
+// refreshed form, so refresh and `check` judge the store by one rule.
 //
 // The content is otherwise opaque (SPEC 13.3): its observable contract is
 // its location under `.xspec/`, its classification as a derived file
@@ -95,10 +100,12 @@ export function unreadableRecordFinding(): Finding {
 
 /**
  * The stored format version: a parsed file of any other version is
- * malformed (parse yields null), so it reads as not matching the current
- * sources and configuration and is refreshed or rebuilt (SPEC 13.3).
- * Version 3 added the reference occurrences (SPEC 5.7, 13.3); version 4
- * added the code-location source ranges (SPEC 1.7).
+ * malformed (parse yields null) — recorded state that exists but cannot be
+ * read as a record (SPEC 14.23): the refreshing reads leave it untouched
+ * and answer from the current analysis, `check` reports it as staleness,
+ * and a `build` (or finishing regeneration) replaces it (SPEC 13.3,
+ * 14.10). Version 3 added the reference occurrences (SPEC 5.7, 13.3);
+ * version 4 added the code-location source ranges (SPEC 1.7).
  */
 const GRAPH_DATA_VERSION = 4;
 
@@ -309,15 +316,18 @@ export function buildGraphSnapshot(
  * would write, except the recorded derived-file paths are left unchanged.
  * `build` is what the build would write for the current sources and
  * configuration — snapshot plus the would-be generated set as its record
- * (core/build.ts, `BuildOutputs.graphData`). With a recoverable record the
+ * (core/build.ts, `BuildOutputs.graphData`). With a readable record the
  * refresh preserves it (the record is updated only by generation, and it
- * legitimately outlives the generation set — SPEC 13.3, 13.4); with none —
- * the store missing or malformed — there are no recorded paths to leave
- * unchanged, and the refresh writes build's data as is. Files orphaned
- * while the record was missing stay outside xspec's knowledge either way
- * (SPEC 13.4): the would-be record names only currently generated paths,
- * never such orphans. `build` itself does not use this — it records the
- * paths it just generated.
+ * legitimately outlives the generation set — SPEC 13.3, 13.4); with an
+ * absent store (`stored` null) there are no recorded paths to leave
+ * unchanged, and the refresh writes build's data as is. An unreadable
+ * record never reaches a refresh write at all: the refreshing reads leave
+ * that state untouched (SPEC 13.3, 14.23; workspace/refresh.ts,
+ * workspace/availability.ts). Files orphaned while the record was missing
+ * stay outside xspec's knowledge either way (SPEC 13.4): the would-be
+ * record names only currently generated paths, never such orphans.
+ * `build` itself does not use this — it records the paths it just
+ * generated.
  */
 export function refreshedGraphData(
   stored: GraphData | null,
@@ -350,13 +360,17 @@ export function recordedDerivedFiles(
  * operationally, whether the stored bytes are exactly what a refresh
  * would write (`refreshedGraphData` over `build`, what `xspec build`
  * would write for the current sources and configuration). False when the
- * store is missing (`storedBytes` null) or malformed (`storedData` null —
- * its bytes cannot equal a canonical serialization, which always parses).
- * The refreshing reads refresh exactly when this is false (SPEC 13.3);
- * `check`, which never refreshes, reports the graph-data file stale
- * exactly when this is false (SPEC 14.10) — by the same rule, so the
- * retained derived-file record never reads as staleness (SPEC 13.3: the
- * record is mandated to be left unchanged).
+ * store is missing (`storedBytes` null). The unreadable-record state is
+ * judged before this predicate is ever consulted (SPEC 13.3, 14.23:
+ * workspace/graph-data.ts's three-way load state): the refreshing reads
+ * skip both the predicate and the write there, and `check` reports that
+ * state under 14.10's unreadable-record unit form instead — so the inputs
+ * here are an absent or readable store. The refreshing reads refresh
+ * exactly when this is false (SPEC 13.3); `check`, which never refreshes,
+ * reports the graph data mismatched exactly when this is false
+ * (SPEC 14.10) — by the same rule, so the retained derived-file record
+ * never reads as staleness (SPEC 13.3: the record is mandated to be left
+ * unchanged).
  */
 export function graphDataMatchesCurrent(
   storedBytes: Uint8Array | null,
@@ -474,10 +488,14 @@ const EDGE_KINDS: ReadonlySet<string> = new Set([
  * Parse stored graph-data text. Returns null — malformed — for anything
  * that is not the versioned shape `serializeGraphData` writes: not JSON,
  * a different version, or structurally invalid fields. A malformed store
- * never matches the current sources and configuration (SPEC 13.3), so it
- * is refreshed by the reading commands and reported stale by `check`
- * (SPEC 14.10); its derived-file record is unrecoverable, leaving any
- * orphans outside xspec's knowledge (SPEC 13.4).
+ * is recorded state that exists but cannot be read as a record
+ * (SPEC 14.23): the refreshing reads leave it untouched and answer from
+ * the current analysis (SPEC 13.3), `check` reports it as staleness under
+ * the unreadable-record unit form (SPEC 14.10), the record-consulting
+ * surfaces report their record-supplied datum explicitly unavailable
+ * beside the condition-23 finding, and a successful `build` or finishing
+ * regeneration replaces it; its derived-file record is unrecoverable,
+ * leaving any orphans outside xspec's knowledge (SPEC 13.4).
  */
 export function parseGraphData(text: string): GraphData | null {
   let raw: unknown;

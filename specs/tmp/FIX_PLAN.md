@@ -346,40 +346,38 @@ gate's findings, exit 1, store unconsulted; the store-backed fast paths
 `at`) verify the write set unobstructed as step 5 (`generatedDerivedPaths`
 + `GRAPH_DATA_PATH`), falling back to the full path otherwise.)
 
-### C4. Unreadable recorded state persists; `check` reports the exclusive unit form
-
-SPEC 13.3, 14.23, 14.10. Prereq A1 (condition 23), B7 (shared record reader).
-Today `graphDataMatchesCurrent`/`refreshedGraphData`
-(`src/core/graph-data.ts` ~229–280) treat a malformed store as an ordinary
-mismatch and fabricate a fresh record: after corrupting `.xspec/graph.json`,
-`ids` exits 0 and rewrites the store, and `check` then exits 0. Required:
-
-- Refreshing reads (`ids`, `show`, `coverage`, `impact`, `review`, `query`,
-  `occurrences`, `view`, `at`) never consult, repair, or replace recorded state
-  that exists but cannot be read as a record, and report no finding for it: they
-  answer from current analysis, leave the store byte-for-byte, and the state
-  persists until a successful `build` (which replaces it silently) or a
-  `rename`/`move` finishing regeneration.
-- `check` reports the state as staleness (14.10): the unreadable-record unit
-  form — one condition-10 (`stale-output`) finding instructing rebuilding,
-  concerned path the graph-data area — exclusive with the mismatch unit form
-  (never both), and while it holds the recorded-file per-file form (a recorded
-  derived path no longer generated), consulting no readable record, is
-  undetectable and not reported; the other per-file forms report normally.
-
-Verify: T13.3-2 (`section-13.3*.test.ts` — its corrupt-record half is this
-task's observed failure: `ids --json` repairs the store and `inventory` then
-answers exit 0), T12.2-2/3 arms.
+(C4 landed: the loaded store is three-state — `LoadedGraphData.state` is
+`"absent" | "readable" | "unreadable"` (`src/workspace/graph-data.ts`;
+`readDerivedFileRecord` now derives from the same `loadGraphData`, one
+classification rule — a non-plain occupant, non-UTF-8, or unparseable
+bytes are "unreadable", a path below a non-directory "absent"). Both
+refresh points — `assessWorkspaceRead` (`src/workspace/refresh.ts`) and
+`finishAvailabilityRefresh` (`src/workspace/availability.ts`) — skip the
+predicate and the write on "unreadable": the read answers from current
+analysis at exit 0, reports no finding, and the store stays byte-for-byte
+(symlink occupants included) until `build` or a finishing regeneration
+replaces it. `check`'s `stalenessFindings` (`src/workspace/check.ts`)
+branches unreadable → `unreadableRecordStaleFinding()` (one condition-10
+finding, concerned path `GRAPH_DATA_AREA`, locations empty), else the
+mismatch predicate — never both, and orphan reporting is empty by
+construction there (null stored data feeds `computeBuildOutputs`).
+T13.3-2 and section-6.6/11.6/14 files green; T12.2-2's family 4 conforms
+(verified by hand) but the test aborts earlier, at its family-3 missing
+arm, on C5's defect.)
 
 ### C5. 14.10 unit-form findings concern the graph-data area
 
-SPEC 14.10, 11.6. The graph-data staleness finding names `.xspec/graph.json`
-(`stalenessFindings`, `src/workspace/check.ts` ~132). Required: both unit forms'
-concerned path is the graph-data area itself — `.xspec`, the 11.6 spelling, no
-trailing separator — never any path inside it (the record's layout is
-unenumerated, 13.3).
+SPEC 14.10, 11.6. The graph-data mismatch/missing staleness finding still
+names `.xspec/graph.json`: the `staleFinding(GRAPH_DATA_PATH, "does not
+match")` arm of `stalenessFindings` (`src/workspace/check.ts` ~175, beside
+C4's unreadable arm). Required: both unit forms' concerned path is the
+graph-data area itself — `.xspec`, the 11.6 spelling, no trailing
+separator — never any path inside it (the record's layout is unenumerated,
+13.3); the finding is one unit-form condition-10 finding instructing
+rebuilding, not the per-file message shape.
 
-Verify: T12.2-2/3 arms (`section-12.2*.test.ts`), T14 arms.
+Verify: T12.2-2/3 (`section-12.1-12.2.test.ts` — both currently abort at
+their missing-arm unit-form assertions on exactly this), T14 arms.
 
 ### C6. Review payloads carry source ranges for every present node
 

@@ -13,12 +13,17 @@
 //
 // Serialization, parsing, and the compare-with-current predicate are the
 // pure core's (src/core/graph-data.ts). Loading classifies the occupant
-// with lstat: only a plain file is read (a non-plain occupant loads as
-// missing — it cannot match the current sources and configuration, so the
-// refreshing reads replace it and `check` reports it stale, SPEC 13.3,
-// 14.10); bytes that are not valid UTF-8 or do not parse as the stored
-// shape load with a null model (malformed — same consequence, and the
-// derived-file record is unrecoverable, SPEC 13.4).
+// with lstat and yields one of three states (SPEC 13.3, 14.23): absent
+// (nothing recorded — the refreshing reads write build's data whole),
+// readable (the parsed model — compared, and refreshed on mismatch with
+// the record preserved), or unreadable — recorded state that exists but
+// cannot be read as a record: a non-plain occupant, or bytes that are not
+// valid UTF-8 or not the stored shape. The unreadable state is neither
+// read, repaired, nor replaced by any refreshing read and no finding is
+// reported for it (SPEC 13.3); it persists — met by the record-consulting
+// surfaces (SPEC 11.6, 6.6 → 14.23) and reported as staleness by `check`
+// (SPEC 14.10) — until a successful `build` or a finishing `rename`/`move`
+// regeneration replaces the record.
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
@@ -33,19 +38,40 @@ import { classifyOccupant, writeDerivedFile } from "./writes.js";
 
 const strictUtf8Decoder = new TextDecoder("utf-8", { fatal: true });
 
-/** The loaded store: raw bytes and, when they parse, the model. */
+/**
+ * The loaded store's three-way state (SPEC 13.3, 14.23) — the same
+ * classification `readDerivedFileRecord` makes for the record-consulting
+ * surfaces: nothing recorded, a readable record, or recorded state that
+ * exists but cannot be read as a record.
+ */
+export type GraphDataState = "absent" | "readable" | "unreadable";
+
+/** The loaded store: its state, raw bytes and, when they parse, the model. */
 export interface LoadedGraphData {
   /**
-   * The stored file's exact bytes — null when nothing is loadable: the
-   * path is absent or occupied by anything other than a plain file
+   * SPEC 13.3/14.23: "absent" — nothing occupies the store's path (the
+   * refreshing reads write build's data whole, SPEC 13.3); "readable" —
+   * a plain file parsing as the stored shape (`data` non-null);
+   * "unreadable" — recorded state that exists but cannot be read as a
+   * record: a non-plain occupant, or bytes that are not valid UTF-8, not
+   * JSON, or not the stored shape. A refresh neither reads, repairs, nor
+   * replaces the unreadable state and reports no finding for it; only a
+   * successful `build` or a finishing `rename`/`move` regeneration
+   * replaces it, and `check` reports it as staleness (SPEC 14.10).
+   */
+  readonly state: GraphDataState;
+  /**
+   * The stored file's exact bytes — null when no plain file is readable:
+   * the path is absent or occupied by anything other than a plain file
    * (SPEC 13.4: a derived path's occupant is resolved by rebuilding).
    */
   readonly bytes: Uint8Array | null;
   /**
-   * The parsed model — null when `bytes` is null or the bytes are
-   * malformed (not UTF-8, not JSON, or not the stored shape). Feed this
+   * The parsed model — non-null exactly in the "readable" state. Feed this
    * with `bytes` to `graphDataMatchesCurrent` (core) for the staleness
-   * predicate, and to `recordedDerivedFiles` (core) for orphan handling.
+   * predicate, and to `recordedDerivedFiles` (core) for orphan handling
+   * (an unreadable record recovers nothing — such orphans are outside
+   * xspec's knowledge, SPEC 13.4).
    */
   readonly data: GraphData | null;
 }
@@ -57,31 +83,41 @@ function graphDataAbsolutePath(root: string): string {
 
 /**
  * Load the workspace's graph data (SPEC 13.3). Never throws on the
- * expected states: an absent file, a non-plain occupant, or malformed
- * content all load as "does not match" inputs for the predicate — the
- * refresh, failure, and staleness behaviors are the callers' (SPEC 13.3,
- * 14.10).
+ * expected states — each loads as its `GraphDataState`, and the refresh,
+ * failure, and staleness behaviors are the callers' (SPEC 13.3, 14.10,
+ * 14.23). The occupant classification mirrors `readDerivedFileRecord`:
+ * only a plain file is read; anything else at the record's path exists but
+ * is no readable record, while a path below a non-directory classifies
+ * absent (writes.ts — nothing occupies it).
  */
 export async function loadGraphData(root: string): Promise<LoadedGraphData> {
   const absolute = graphDataAbsolutePath(root);
-  if ((await classifyOccupant(absolute)) !== "file") {
-    return { bytes: null, data: null };
+  const occupant = await classifyOccupant(absolute);
+  if (occupant === "absent") {
+    return { state: "absent", bytes: null, data: null };
+  }
+  if (occupant !== "file") {
+    return { state: "unreadable", bytes: null, data: null };
   }
   let bytes: Uint8Array;
   try {
     bytes = await fsp.readFile(absolute);
   } catch {
-    // The occupant changed between classification and read (SPEC 13.5:
-    // concurrent commands, last-write-wins): load as missing.
-    return { bytes: null, data: null };
+    // Vanished between classification and read (SPEC 13.5: concurrent
+    // commands, last-write-wins): nothing exists to read as a record.
+    return { state: "absent", bytes: null, data: null };
   }
   let text: string;
   try {
     text = strictUtf8Decoder.decode(bytes);
   } catch {
-    return { bytes, data: null };
+    return { state: "unreadable", bytes, data: null };
   }
-  return { bytes, data: parseGraphData(text) };
+  const data = parseGraphData(text);
+  if (data === null) {
+    return { state: "unreadable", bytes, data: null };
+  }
+  return { state: "readable", bytes, data };
 }
 
 /**
@@ -119,45 +155,23 @@ export type DerivedFileRecord =
  * refreshing it (`inventory`, 11.6; preview deltas, 6.6; `check`'s
  * unreadable-record staleness arm, 14.10). Never repairs, replaces, or
  * otherwise writes: the state persists until a successful `build` or a
- * finishing regeneration replaces the record (SPEC 13.3). The occupant is
- * classified by lstat (writes.ts): only a plain file is read — anything
- * else at the record's path exists but is no readable record.
+ * finishing regeneration replaces the record (SPEC 13.3). The three-way
+ * state is `loadGraphData`'s — one classification rule for the record
+ * readers and the refreshing reads alike.
  */
 export async function readDerivedFileRecord(
   root: string,
 ): Promise<DerivedFileRecord> {
-  const absolute = graphDataAbsolutePath(root);
-  const occupant = await classifyOccupant(absolute);
-  if (occupant === "absent") {
-    return { state: "absent" };
-  }
-  if (occupant !== "file") {
-    return { state: "unreadable" };
-  }
-  let bytes: Uint8Array;
-  try {
-    bytes = await fsp.readFile(absolute);
-  } catch {
-    // Vanished between classification and read (SPEC 13.5: concurrent
-    // commands, last-write-wins): nothing exists to read as a record.
-    return { state: "absent" };
-  }
-  let text: string;
-  try {
-    text = strictUtf8Decoder.decode(bytes);
-  } catch {
-    return { state: "unreadable" };
-  }
-  const data = parseGraphData(text);
-  if (data === null) {
-    return { state: "unreadable" };
+  const loaded = await loadGraphData(root);
+  if (loaded.state !== "readable" || loaded.data === null) {
+    return { state: loaded.state === "absent" ? "absent" : "unreadable" };
   }
   // SPEC 11.6/12.0: the recorded paths as one byte-ordered, duplicate-free
   // list (the canonical serialization already writes them so; sorting here
   // keeps the datum canonical whatever bytes parsed).
   return {
     state: "readable",
-    paths: [...new Set(data.derivedFiles)].sort(compareBytes),
+    paths: [...new Set(loaded.data.derivedFiles)].sort(compareBytes),
   };
 }
 
