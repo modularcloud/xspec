@@ -209,46 +209,23 @@ byte-identical to the full path (usage diagnostics shared through
 `src/cli/commands/at-common.ts`). If another exhaustive sweep nears its
 timeout, this store-backed fast-path pattern is the lever.)
 
-### B7. `xspec inventory`
-
-SPEC 11.6, 12.7, 14.23. Prereqs A1–A4 (anchoring helper from A4). Register
-(JSON-only). Parses no sources, never refreshes or writes, answers whatever the
-sources' validity; configuration errors keep precedence. Document
-`{"findings", "root", "config", "configuration", "sources", "derived",
-"recorded", "graphData", "journal", "sessions"}`:
-
-- Anchoring: `root`/`config` relative to the invocation cwd in the canonical
-  spelling (ascend `..` segments, then descend, `/`-joined, no `.` segments or
-  trailing separator; cwd itself `.`); only when the platform admits no relative
-  path (different Windows drives) the platform's absolute drive-qualified form.
-- `configuration` resolved view with every default and inferred kind explicit:
-  `specs`/`code` one `{"name", "globs"}` per group; `markdown`
-  `{"emit", "outDir"}` (absent key → `{"emit": false, "outDir": null}`);
-  `coverage` one `{"name", "target", "targetTags", "targets", "boundary",
-  "boundaryKind", "mode", "edgeKinds"}` per profile (`targetTags` null when
-  absent); `policy` one `{"name", "type", "from", "to", "kinds"}` per rule, each
-  selector `{"group", "kind"}`, `{"files"}`, or `{"tags"}`.
-- `sources`: one `{"path", "groups"}` per discovered file, `groups`
-  `{"name", "kind"}` entries. `derived`: one `{"source", "module", "markdown"}`
-  per discovered spec source — `module`/`markdown` null for a spec-group file
-  without `.mdx`; `markdown` null also while emission is disabled.
-- `recorded`: the recorded derived-file paths in byte order — empty before any
-  generation (a missing store is an empty record here), but recorded state that
-  exists and cannot be read as a record is condition 23: `recorded` is
-  `{"unavailable": true}`, a finding with code `unreadable-record` and concerned
-  path `.xspec` accompanies, exit 1, everything else emitted in full. Implement
-  the record read with a three-way outcome (absent / readable / unreadable) as a
-  shared helper — the preview delta (B10) and Stage C reuse it. This is the only
-  finding an inventory ever carries.
-- `graphData`: `.xspec` (workspace-relative, no trailing separator). `journal`:
-  `{"path", "occupied"}` — occupancy is presence of anything at the path, no
-  content read. `sessions`: every directory entry under the review-session
-  directory whose name is a well-formed session file name, by name alone,
-  whatever occupies it, in byte order of file name. Other lists: paths byte
-  order; groups/profiles/rules configuration order.
-
-Verify: T11.6-2..4 (`section-11.6.test.ts`; T11.6-1's drive-mismatch arm is
-Windows-only, `test/windows/e6-drive-mismatch.test.ts`).
+(B7 landed: `xspec inventory` (`src/cli/commands/inventory.ts`), registered
+JSON-only between `at` and `rename`. The shared three-way record read is
+`readDerivedFileRecord(root)` in `src/workspace/graph-data.ts` —
+`DerivedFileRecord` is `{state: "absent"} | {state: "readable", paths} |
+{state: "unreadable"}` (absent = empty record; a non-plain occupant or
+unparseable bytes = unreadable, condition 23) — B10's delta and C4's `check`
+staleness arm reuse it. `GRAPH_DATA_AREA` (`.xspec`, no trailing separator)
+is exported from `src/core/graph-data.ts`: the concerned path of every 14.23
+finding, and the path C5's 14.10 unit forms must switch to. Other reusable
+pieces: `specSourceDerivedPaths(sourceBytes, configuration)` in
+`src/core/discovery.ts` (per-source module/Markdown paths by the `NAME.mdx`
+byte shape alone, total over invalid paths), `journalOccupied(root)` in
+`src/workspace/journal.ts` (presence alone, lstat), `listSessionFilePaths`
+in `src/workspace/reviews.ts` (well-formed session file names by name alone,
+byte order of file name), and the discovery-level 14.14 exit-2 routing
+inside the handler. T11.6-1..4 green on Linux; T12.2-2/3, T13.3-2/3, T14-4
+inventory-adjacent arms stay red on C4/C5/C2 defects as their notes say.)
 
 ### B8. `rename`/`move` refusal contract: every reason, stable codes, 12.7 form
 

@@ -58,6 +58,15 @@ import type {
 import type { NodeHashes } from "./hashes.js";
 import type { WorkspaceTextModel } from "./text-model.js";
 
+/**
+ * SPEC 13.3/11.6: the graph-data area — the location under which graph
+ * data is kept, spelled as its workspace-relative path with no trailing
+ * separator. The record's layout under it is deliberately unenumerated, so
+ * the area itself is the concerned path of every condition-23 finding
+ * (SPEC 14.23) and of 14.10's unit forms — no path inside it is named.
+ */
+export const GRAPH_DATA_AREA = ".xspec";
+
 /** SPEC 13.3/13.4: the graph-data file's workspace-relative path. */
 export const GRAPH_DATA_PATH = ".xspec/graph.json";
 

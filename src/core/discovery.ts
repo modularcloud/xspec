@@ -239,6 +239,69 @@ export function markdownEmitDestinations(
   return destinations;
 }
 
+/** SPEC 13.4/13.1: the module suffix replacing a source's `.mdx`. */
+const XSPEC_MODULE_SUFFIX = utf8Encoder.encode(".xspec.ts");
+
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
+/** One discovered spec source's derived paths (SPEC 13.1, 13.2, 11.6). */
+export interface SpecSourceDerivedPaths {
+  /**
+   * The generated-module path (`NAME.mdx` → `NAME.xspec.ts`, SPEC 13.1),
+   * or null for a spec-group file without the `.mdx` extension (14.19),
+   * which generates nothing — structurally absent (SPEC 11.6, 12.7).
+   */
+  readonly module: PathText | null;
+  /**
+   * The Markdown emit destination (`NAME.mdx` → `NAME.md` under
+   * `markdown.outDir`, SPEC 13.2, 7.3), or null: for a non-`.mdx` source,
+   * and for every source while emission is disabled — destinations exist
+   * exactly while emission is enabled (SPEC 7.3, 11.6).
+   */
+  readonly markdown: PathText | null;
+}
+
+/**
+ * SPEC 13.1/13.2/11.6: a discovered spec source's derived paths, determined
+ * by configuration and discovery alone — by the `NAME.mdx` name shape over
+ * the path's exact bytes, never by parsing or by what exists on disk. Total
+ * over invalid source paths (SPEC 14.19): a non-UTF-8 source's derived
+ * paths are themselves byte paths, presented in the marked byte form
+ * wherever an output carries them (SPEC 12.0, 12.7).
+ */
+export function specSourceDerivedPaths(
+  sourceBytes: Uint8Array,
+  configuration: Configuration,
+): SpecSourceDerivedPaths {
+  if (!bytesEndWith(sourceBytes, MDX_SUFFIX)) {
+    // SPEC 13.1: per-source derived paths are defined by the `NAME.mdx`
+    // name shape alone — a spec-group file without the extension has no
+    // generated-module path and no emit destination.
+    return { module: null, markdown: null };
+  }
+  const stem = sourceBytes.subarray(0, sourceBytes.length - MDX_SUFFIX.length);
+  const module = pathTextOf(concatBytes(stem, XSPEC_MODULE_SUFFIX));
+  const markdown = configuration.markdown;
+  if (markdown === undefined || !markdown.emit) {
+    return { module, markdown: null };
+  }
+  const prefix = outDirPrefixBytes(markdown.outDir);
+  // SPEC 13.2: `NAME.mdx` emits `NAME.md` — the trailing "x" dropped —
+  // placed per `markdown.outDir` preserving workspace-relative paths (7.3).
+  const destination = sourceBytes.subarray(0, sourceBytes.length - 1);
+  return {
+    module,
+    markdown: pathTextOf(
+      prefix === null ? destination : concatBytes(prefix, destination),
+    ),
+  };
+}
+
 /** Why a path is a derived-file path (SPEC 13.4). */
 export type DerivedPathKind =
   "xspec-name" | "xspec-dir" | "markdown-destination";

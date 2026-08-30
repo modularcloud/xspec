@@ -63,6 +63,18 @@ function journalAbsolutePath(root: string): string {
 }
 
 /**
+ * SPEC 11.6: whether anything presently occupies the journal's path —
+ * occupancy is presence alone, whatever kind of filesystem object occupies
+ * it (a plain file, a directory, a symbolic link broken or not), judged by
+ * lstat so a link is never probed through (SPEC 13.4). No content is read:
+ * an absent journal is an empty journal (SPEC 6.1), and the inventory
+ * reports no 14.13 for whatever the occupant holds.
+ */
+export async function journalOccupied(root: string): Promise<boolean> {
+  return (await classifyOccupant(journalAbsolutePath(root))) !== "absent";
+}
+
+/**
  * The journal loaded from raw file bytes (`null` = the file is absent, an
  * empty journal, SPEC 6.1) — the I/O-free tail of `loadJournal`, shared
  * with baseline reconstruction (SPEC 6.3), which reads the journal content

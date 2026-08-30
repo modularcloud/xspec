@@ -22,6 +22,7 @@
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import { compareBytes } from "../core/bytes.js";
 import type { GraphData } from "../core/graph-data.js";
 import {
   GRAPH_DATA_PATH,
@@ -81,6 +82,83 @@ export async function loadGraphData(root: string): Promise<LoadedGraphData> {
     return { bytes, data: null };
   }
   return { bytes, data: parseGraphData(text) };
+}
+
+/**
+ * The record-supplied datum's three-way outcome (SPEC 13.3, 14.23): the
+ * recorded generation state is absent (an empty record — nothing has been
+ * generated, or the record was removed), readable as a record (the recorded
+ * derived-file paths), or exists but cannot be read as a record — condition
+ * 23 for the surfaces that consult the record without refreshing it
+ * (`inventory`, 11.6; `rename`/`move` previews' delta, 6.6). The refreshing
+ * reads of 13.3 never use this: they never consult the record and report no
+ * finding for it.
+ */
+export type DerivedFileRecord =
+  | { readonly state: "absent" }
+  | {
+      /** The recorded derived-file paths, in byte order (SPEC 11.6, 12.0). */
+      readonly state: "readable";
+      readonly paths: readonly string[];
+    }
+  | {
+      /**
+       * SPEC 14.23: recorded state that exists but cannot be read as a
+       * record — a non-plain-file occupant, or bytes that are not the
+       * stored shape (corrupt, merge-conflicted or otherwise). The
+       * consulting surface reports its record-supplied datum explicitly
+       * unavailable beside one condition-23 finding whose concerned path is
+       * the graph-data area, and exits 1 with everything else in full.
+       */
+      readonly state: "unreadable";
+    };
+
+/**
+ * Read the recorded derived-file paths as a record (SPEC 13.3, 14.23) —
+ * the shared record read of the surfaces that consult the record without
+ * refreshing it (`inventory`, 11.6; preview deltas, 6.6; `check`'s
+ * unreadable-record staleness arm, 14.10). Never repairs, replaces, or
+ * otherwise writes: the state persists until a successful `build` or a
+ * finishing regeneration replaces the record (SPEC 13.3). The occupant is
+ * classified by lstat (writes.ts): only a plain file is read — anything
+ * else at the record's path exists but is no readable record.
+ */
+export async function readDerivedFileRecord(
+  root: string,
+): Promise<DerivedFileRecord> {
+  const absolute = graphDataAbsolutePath(root);
+  const occupant = await classifyOccupant(absolute);
+  if (occupant === "absent") {
+    return { state: "absent" };
+  }
+  if (occupant !== "file") {
+    return { state: "unreadable" };
+  }
+  let bytes: Uint8Array;
+  try {
+    bytes = await fsp.readFile(absolute);
+  } catch {
+    // Vanished between classification and read (SPEC 13.5: concurrent
+    // commands, last-write-wins): nothing exists to read as a record.
+    return { state: "absent" };
+  }
+  let text: string;
+  try {
+    text = strictUtf8Decoder.decode(bytes);
+  } catch {
+    return { state: "unreadable" };
+  }
+  const data = parseGraphData(text);
+  if (data === null) {
+    return { state: "unreadable" };
+  }
+  // SPEC 11.6/12.0: the recorded paths as one byte-ordered, duplicate-free
+  // list (the canonical serialization already writes them so; sorting here
+  // keeps the datum canonical whatever bytes parsed).
+  return {
+    state: "readable",
+    paths: [...new Set(data.derivedFiles)].sort(compareBytes),
+  };
 }
 
 /**

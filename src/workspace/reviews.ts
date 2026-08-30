@@ -19,6 +19,7 @@
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import { compareBytes } from "../core/bytes.js";
 import type { Finding } from "../core/findings.js";
 import type { ReviewSession } from "../core/review.js";
 import {
@@ -108,6 +109,37 @@ export async function listSessionNames(root: string): Promise<string[]> {
     names.push(name);
   }
   return sortSessionNames(names);
+}
+
+/**
+ * SPEC 11.6: every directory entry directly under the review-session
+ * directory whose name is a well-formed session file name
+ * (`<valid-name>.json`, byte-exact on the extension), selected by name
+ * alone, whatever kind of filesystem object occupies it — corrupt sessions,
+ * directories, and symbolic links included: no content is read, so no
+ * 14.21 arises here. Returned as workspace-relative session file paths in
+ * byte order of file name (SPEC 11.6's pinned order — the file name, not
+ * the bare session name). An entry with any other name is not a session
+ * and is never listed; an absent or non-directory `.xspec/reviews` yields
+ * no sessions, and a symbolic link there is never traversed (SPEC 13.4).
+ */
+export async function listSessionFilePaths(root: string): Promise<string[]> {
+  const directory = reviewsAbsolutePath(root);
+  if ((await classifyOccupant(directory)) !== "directory") {
+    return [];
+  }
+  let entries: string[];
+  try {
+    entries = await fsp.readdir(directory);
+  } catch {
+    return [];
+  }
+  const fileNames = entries.filter((entry) => {
+    if (!entry.endsWith(SESSION_EXTENSION)) return false;
+    return isValidSessionName(entry.slice(0, -SESSION_EXTENSION.length));
+  });
+  fileNames.sort(compareBytes);
+  return fileNames.map((entry) => `${REVIEWS_DIRECTORY}/${entry}`);
 }
 
 /**

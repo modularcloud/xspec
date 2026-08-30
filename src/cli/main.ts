@@ -172,6 +172,13 @@ const HANDLERS: ReadonlyMap<string, () => Promise<CommandHandler>> = new Map(
             path,
             async () => (await import("./commands/at.js")).atCommand,
           ];
+        case "inventory":
+          // SPEC 11.6.
+          return [
+            path,
+            async () =>
+              (await import("./commands/inventory.js")).inventoryCommand,
+          ];
         case "rename":
           // SPEC 6.4.
           return [
