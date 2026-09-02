@@ -14,8 +14,11 @@
 // a form cannot be kept, the rewritten part uses dot access for segments that
 // are valid TypeScript identifiers, double-quoted computed access for
 // segments that are not, and double-quoted string literals. Type-level
-// references record no edges and are not rewritten. A nonexistent `<file>` or
-// old ID is a usage error (12.0) checked before source validation, and so is
+// references record no edges and are not rewritten. A nonexistent `<file>` —
+// absent on disk, or an `.mdx` present on disk but matched by no spec group:
+// a file named in an argument exists as a member of the discovered set
+// (12.0) — or old ID is a usage error (12.0) checked before source
+// validation, and so is
 // a `<file>` naming a discovered code source — a wrong-kind operand, judged
 // like existence before any content question (6.4); the old ID's existence is
 // parse-local, judged over spelled identities (11.2): a bearer whose node
@@ -83,7 +86,10 @@
 //   document (12.0: with JSON output in effect, an exit-2 invocation emits
 //   the error document as its entire stdout — no report, no validation
 //   findings: the 12.0-ordering discriminator) and the usage error message
-//   on stderr (12.0), asserted for presence, not wording. The masking arm
+//   on stderr (12.0), asserted for presence, not wording — the whole table
+//   run inside one whole-root modifies-nothing compare (12.0), the base
+//   arm first pinning through `ids --json` that the stray `.mdx` present
+//   on disk is outside the discovered set (12.3). The masking arm
 //   asserts exit 1 with a findings report of exactly one 14.20 naming the
 //   unparseable file with a location (SPEC 14, H-3). The parse-local
 //   existence arms (SPEC 6.4, 11.2) assert the invalid-workspace refusal
@@ -111,6 +117,7 @@ import {
   decodeAppliedMappingReport,
   decodeEdgesReport,
   decodeFindingsReport,
+  decodeIdsReport,
   decodeNodeReport,
   decodeNodeRowsReport,
 } from "../../helpers/adapters/index.js";
@@ -1439,6 +1446,26 @@ const U4_BROKEN_SOURCE = [
 const U4_CODE_FILE = "src/app.ts";
 const U4_CODE_SOURCE = "export function noop(): void {}\n";
 
+// The second nonexistent-`<file>` spelling (TEST-SPEC T6.4-4): a valid `.mdx`
+// present on disk, holding a section spelling the old ID, but outside every
+// configured spec group (`specs/**/*.mdx`, SPEC 7) — a file named in an
+// argument exists as a member of the discovered set (SPEC 12.0, 11.4's
+// operand rule), so this operand is as nonexistent as an absent path. It
+// spells the same old ID `a` that the discovered `specs/A.mdx` bears, so a
+// product probing the filesystem for the operand finds the old ID whether it
+// then reads it from the named file or looks it up over the discovered set
+// — and proceeds instead of exiting 2. Its `a` beside `specs/A.mdx`'s is no
+// duplicate-ID condition even when discovered (SPEC 14 condition 3 is a
+// duplicate within a file), so the base arm pins the stray file's absence
+// from the discovered set directly, through `ids --json` (SPEC 12.3).
+const U4_STRAY_FILE = "docs/Stray.mdx";
+const U4_STRAY_SOURCE = [
+  '<S id="a">',
+  "Stray text outside every spec group.",
+  "</S>",
+  "",
+].join("\n");
+
 // Parse-local existence fixtures (SPEC 6.4, 11.2). Two sections both
 // spelling the same ID: every bearer's node identity is undefined (11.2,
 // duplicate spellings), yet each spells `dup`, so the old ID exists and the
@@ -1496,7 +1523,16 @@ export const RENAME_USAGE_CASES: readonly (readonly [
   readonly string[],
   string,
 ])[] = [
-  [["rename", "specs/Missing.mdx", "a", "a2"], "nonexistent <file>"],
+  [
+    ["rename", "specs/Missing.mdx", "a", "a2"],
+    "nonexistent <file>, absent on disk",
+  ],
+  [
+    ["rename", U4_STRAY_FILE, "a", "a2"],
+    "nonexistent <file>, an .mdx present on disk (holding a section " +
+      "spelling the old ID) but matched by no spec group — a file named in " +
+      "an argument exists as a member of the discovered set (SPEC 12.0)",
+  ],
   [["rename", U4_FILE, "nope", "nope2"], "nonexistent old ID"],
   [
     ["rename", U4_CODE_FILE, "a", "a2"],
@@ -1507,13 +1543,15 @@ export const RENAME_USAGE_CASES: readonly (readonly [
 ];
 
 /** The ordering arm's staging (valid sources + a failing file + the code
- * source), exported for T6.6-3: on it, exit 2 beside unrelated validation
- * errors realizes "argument checks precede" — previewed or not. */
+ * source + the undiscovered stray `.mdx`), exported for T6.6-3: on it, exit 2
+ * beside unrelated validation errors realizes "argument checks precede" —
+ * previewed or not. */
 export const RENAME_USAGE_CONFIG = SPEC_AND_CODE_CONFIG;
 export const RENAME_USAGE_ORDERING_FILES: Readonly<Record<string, string>> = {
   [U4_FILE]: U4_SOURCE,
   [U4_BAD_FILE]: U4_BAD_SOURCE,
   [U4_CODE_FILE]: U4_CODE_SOURCE,
+  [U4_STRAY_FILE]: U4_STRAY_SOURCE,
 };
 
 /**
@@ -1536,23 +1574,55 @@ export const RENAME_SOLO_ARGV: readonly string[] = [
 const T6_4_4 = defineProductTest({
   id: "T6.4-4",
   title:
-    "usage errors (exit 2): a nonexistent `<file>`, a nonexistent old ID, and a discovered code source as `<file>` — a wrong-kind operand, judged like existence before any content question — are usage errors checked before source validation, the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering); an old ID inside an unparseable origin file is masked — the validation findings are reported and the command exits 1; and old-ID existence is parse-local over spelled identities: an ID two sections both spell, or one whose sole bearer spells it beneath an ancestor spelling no identity, exists — the duplicate-ID or ancestor finding refuses instead (exit 1, never exit 2) — while an old ID whose only would-be bearer spells no identity (its `id` attribute repeated on the tag) is nonexistent, exit 2 even beside that file's findings (SPEC 6.4, 11.2, 12.0, 14, 14.20)",
+    "usage errors (exit 2): a nonexistent `<file>` — absent on disk, or an `.mdx` present on disk but matched by no spec group (a file named in an argument exists as a member of the discovered set) — a nonexistent old ID, and a discovered code source as `<file>` — a wrong-kind operand, judged like existence before any content question — are usage errors checked before source validation, the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering); an old ID inside an unparseable origin file is masked — the validation findings are reported and the command exits 1; and old-ID existence is parse-local over spelled identities: an ID two sections both spell, or one whose sole bearer spells it beneath an ancestor spelling no identity, exists — the duplicate-ID or ancestor finding refuses instead (exit 1, never exit 2) — while an old ID whose only would-be bearer spells no identity (its `id` attribute repeated on the tag) is nonexistent, exit 2 even beside that file's findings (SPEC 6.4, 11.2, 12.0, 14, 14.20)",
   run: async (product) => {
     // --- Base arm: a valid workspace ---
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
-      { [U4_FILE]: U4_SOURCE, [U4_CODE_FILE]: U4_CODE_SOURCE },
+      {
+        [U4_FILE]: U4_SOURCE,
+        [U4_CODE_FILE]: U4_CODE_SOURCE,
+        [U4_STRAY_FILE]: U4_STRAY_SOURCE,
+      },
       async (workspace) => {
         const context = "T6.4-4 valid-workspace arm";
         await buildOk(product, workspace, `${context}: \`build\``);
-        for (const [argv, label] of RENAME_USAGE_CASES) {
-          await expectRenameUsageError(
-            product,
-            workspace,
-            argv,
-            `${context}, ${label}`,
+        // Staging premise: the stray file is outside the discovered set —
+        // `ids --json` lists the discovered spec sources (SPEC 12.3), and it
+        // lists `specs/A.mdx` but never `docs/Stray.mdx`. Pinning this makes
+        // the exit-2 assertion below demonstrably a discovered-set judgement
+        // over a file present on disk, not a filesystem miss.
+        const idsLabel = `${context}: \`ids --json\` premise`;
+        const listed = decodeIdsReport(
+          await runJson(product, workspace, ["ids", "--json"], idsLabel),
+          idsLabel,
+        ).files.map((entry) => entry.file);
+        if (!listed.includes(U4_FILE) || listed.includes(U4_STRAY_FILE)) {
+          fail(
+            `${context}: staging premise — the discovered spec sources must ` +
+              `include ${U4_FILE} and exclude the stray ${U4_STRAY_FILE} ` +
+              `(outside every spec group, SPEC 7; a file named in an ` +
+              `argument exists as a member of the discovered set, SPEC ` +
+              `12.0), but \`ids --json\` listed ${JSON.stringify(listed)}`,
           );
         }
+        // Every usage error modifies nothing (SPEC 12.0): one whole-root
+        // byte compare around the table — derived files, sources, and the
+        // stray file alike.
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            for (const [argv, label] of RENAME_USAGE_CASES) {
+              await expectRenameUsageError(
+                product,
+                workspace,
+                argv,
+                `${context}, ${label}`,
+              );
+            }
+          },
+          `${context}: the usage errors modify nothing (SPEC 12.0)`,
+        );
       },
     );
 
@@ -1578,16 +1648,22 @@ const T6_4_4 = defineProductTest({
               `at least one validation finding (SPEC 14)`,
           );
         }
-        for (const [argv, label] of RENAME_USAGE_CASES) {
-          await expectRenameUsageError(
-            product,
-            workspace,
-            argv,
-            `${context}, ${label}, with unrelated validation errors present ` +
-              `— the existence and wrong-kind checks precede source ` +
-              `validation (SPEC 6.4, 12.0)`,
-          );
-        }
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            for (const [argv, label] of RENAME_USAGE_CASES) {
+              await expectRenameUsageError(
+                product,
+                workspace,
+                argv,
+                `${context}, ${label}, with unrelated validation errors ` +
+                  `present — the existence and wrong-kind checks precede ` +
+                  `source validation (SPEC 6.4, 12.0)`,
+              );
+            }
+          },
+          `${context}: the usage errors modify nothing (SPEC 12.0)`,
+        );
       },
     );
 

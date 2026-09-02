@@ -65,22 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 21 — T6.4-4: nonexistent `<file>` spelled as an `.mdx` present on disk but in no spec group (exit 2)
-
-Cites: TEST-SPEC T6.4-4 (a `<file>` operand naming no discovered spec source is
-a usage error, exit 2, in both spellings: absent on disk, and present on disk
-but matched by no configured spec group); SPEC 6.4, 12.0.
-
-Now: `test/suite/registry/section-6.4.ts` ≈ lines 1352–1354 stage only the
-absent-on-disk spelling.
-
-Do: add the second spelling: write a valid `.mdx` outside every spec-group
-glob (e.g. `docs/stray.mdx` with globs `specs/**/*.mdx`), `rename docs/stray.mdx
-<id> <new>` → exit 2 with the 12.7 error document (decoded through the
-existing usage-error adapter), nothing modified.
-
-Verify: `npx vitest run … test/suite/section-6.4.test.ts`.
-
 ### Task 22 — T6.4-5: `move` arm — a `typeof` reference to a section-moved node stays byte-unchanged
 
 Cites: TEST-SPEC T6.4-5 (revised: a code-file `typeof` reference to a node is
