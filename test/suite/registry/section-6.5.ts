@@ -3945,6 +3945,572 @@ const T6_5_7 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+
+// T6.5-8 Added-import insertion discipline (TEST-SPEC T6.5-8): the
+// addition-side byte contract of SPEC 6.5 — an added import is inserted as
+// a line of its own, the declaration's characters followed by U+000A,
+// preceded by one when the insertion point is not at the start of a line —
+// asserted with the identifier choice and the insertion offset left free
+// (6.5's latitude). Each arm's receiving file has its expected post-move
+// bytes composed from the rules of 6.4/6.5 and 3 up to exactly those two
+// unknowns: the fresh identifier is read off the rewritten references (the
+// one place 6.4's pinned spellings make it observable), and
+// `assertAddedImportInsertion` isolates the single inserted run by diff
+// against the composed bytes and reads it under the line discipline at
+// whatever offset the product made observable. Three section-move arms,
+// each moving `org.mv` out of `specs/Origin.mdx` to the top-level `mv` of
+// `specs/Target.mdx`:
+// - TS (the grammar-freest case): `src/app.ts` imports the origin module and
+//   holds markers on one moved node (`ORG.org.mv`) and one unmoved node
+//   (`ORG.org.stay`), so the rewrite needs a target-module binding the file
+//   lacks — added — while the origin import keeps its remaining reference
+//   and stays.
+// - MDX origin: the origin file holds a retained third-module import
+//   (`Keep`, referenced by `org.stay`; grammar-permitted offsets exist
+//   beside it, and freshness is live against its binding) and, outside the
+//   moved subtree, a local string reference to a moved descendant
+//   (`d={"org.mv.leaf"}`), whose conversion to imported form
+//   (`<fresh>.mv.leaf`, dot access) makes the origin file itself gain the
+//   target module's import.
+// - MDX target (the third conversion direction): the moved subtree holds a
+//   local string reference to an origin node outside it, `org.base-line`,
+//   whose second segment is not identifier-valid; the target file — an
+//   existing discovered source holding a retained `Keep` import but no
+//   import of the origin module — gains that import, the reference
+//   converting to imported form through the fresh binding in 6.4's pinned
+//   spellings (`<fresh>.org["base-line"]`: dot access, then double-quoted
+//   computed access), the moved text otherwise byte-identical; the origin
+//   loses the section and gains no import.
+// Every file the two unknowns do not touch is asserted byte-equal to its
+// composed expectation; the arm's edge set and a post-move `check` guard
+// the compositions' soundness (every rewritten reference resolves).
+const A8_ORIGIN = "specs/Origin.mdx";
+const A8_TARGET = "specs/Target.mdx";
+const A8_KEEP = "specs/Keep.mdx";
+const A8_APP = "src/app.ts";
+const A8_ORIGIN_MODULE = "specs/Origin.xspec";
+const A8_TARGET_MODULE = "specs/Target.xspec";
+
+const A8_MOVE_ARGV = [
+  "move",
+  "specs/Origin.mdx#org.mv",
+  "specs/Target.mdx#mv",
+] as const;
+
+const A8_KEEP_SOURCE = ['<S id="keep">', "Keep text.", "</S>", ""].join("\n");
+
+/** A plain target file: one top-level section, no imports. */
+const A8_PLAIN_TARGET = ['<S id="tgt">', "Target text.", "</S>", ""].join("\n");
+
+// TS arm. The origin's moved section is a leaf; `org.stay` keeps the origin
+// binding referenced after the move.
+const A8_TS_ORIGIN_BEFORE = [
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  '<S id="org.mv">',
+  "Moved text.",
+  "</S>",
+  "",
+  '<S id="org.stay">',
+  "Staying text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+// Composed from SPEC 6.5 and 3: the moved construct's own characters are
+// deleted in place; the merged line that deletion leaves holds only the
+// closing tag's terminator and is dropped with it; both neighbouring blank
+// lines were blank before the deletion and stay (two adjacent blank lines
+// remain). No import is gained: nothing left in the origin references a
+// moved node.
+const A8_TS_ORIGIN_AFTER = [
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  "",
+  '<S id="org.stay">',
+  "Staying text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+// Composed from SPEC 6.5: top-level `mv`, so the moved text — re-identified
+// by prefix replacement `org.mv` → `mv` — is inserted at the end of the
+// file, followed by U+000A; the existing final line is terminated, so the
+// insertion point lies at a line start and no preceding U+000A is added.
+const A8_TS_TARGET_AFTER = [
+  '<S id="tgt">',
+  "Target text.",
+  "</S>",
+  '<S id="mv">',
+  "Moved text.",
+  "</S>",
+  "",
+].join("\n");
+
+// The receiving code file: markers at module scope (SPEC 4.5), so the
+// `references` edges are attributed to the file itself (4.6). Only `ORG` is
+// bound, leaving every plausible fresh identifier free (T6.5-9 stages the
+// collisions).
+const A8_APP_BEFORE = [
+  'import ORG from "../specs/Origin.xspec";',
+  "",
+  "ORG.org.mv;",
+  "ORG.org.stay;",
+  "",
+].join("\n");
+
+// `src/app.ts`'s expected post-move bytes WITHOUT the added import (SPEC
+// 6.4/6.5): the moved marker is re-rooted at the fresh binding of the
+// target module with dot access (`mv` is identifier-valid), its `;` kept;
+// the unmoved marker and the origin import stay byte-for-byte (the binding
+// keeps a reference, so it is not removed).
+const A8_APP_BASE = (root: string): string =>
+  [
+    'import ORG from "../specs/Origin.xspec";',
+    "",
+    `${root}.mv;`,
+    "ORG.org.stay;",
+    "",
+  ].join("\n");
+
+// The rewritten marker: a root not preceded by an identifier character or a
+// `.` (so an unrewritten `ORG.org.mv;` never reads as root `org`), `.mv;`.
+const A8_APP_REWRITTEN = /(?<![A-Za-z0-9_$.])([A-Za-z_$][A-Za-z0-9_$]*)\.mv;/g;
+
+// MDX origin arm.
+const A8_ORG_ORIGIN_BEFORE = [
+  'import Keep from "./Keep.xspec"',
+  "",
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  '<S id="org.mv">',
+  "Moved head text.",
+  "",
+  '<S id="org.mv.leaf">',
+  "Moved leaf text.",
+  "</S>",
+  "</S>",
+  "",
+  '<S id="org.use" d={"org.mv.leaf"}>',
+  "Uses the moved leaf.",
+  "</S>",
+  "",
+  '<S id="org.stay" d={Keep.keep}>',
+  "Staying text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+// The origin's expected post-move bytes WITHOUT the added import (SPEC
+// 6.4/6.5, 3): the moved construct deleted in place with its emptied merged
+// line dropped (the two blank neighbours stay), the local reference to the
+// moved descendant converted to imported form in 6.4's pinned spelling —
+// rooted at the fresh binding, dot access for the identifier-valid segments
+// — and the retained `Keep` import kept byte-for-byte.
+const A8_ORG_ORIGIN_BASE = (root: string): string =>
+  [
+    'import Keep from "./Keep.xspec"',
+    "",
+    '<S id="org">',
+    "Origin holder text.",
+    "",
+    "",
+    `<S id="org.use" d={${root}.mv.leaf}>`,
+    "Uses the moved leaf.",
+    "</S>",
+    "",
+    '<S id="org.stay" d={Keep.keep}>',
+    "Staying text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n");
+
+// Composed from SPEC 6.5: the moved text, re-identified (`org.mv` → `mv`,
+// `org.mv.leaf` → `mv.leaf`), appended at end of file plus U+000A, otherwise
+// byte-identical.
+const A8_ORG_TARGET_AFTER = [
+  '<S id="tgt">',
+  "Target text.",
+  "</S>",
+  '<S id="mv">',
+  "Moved head text.",
+  "",
+  '<S id="mv.leaf">',
+  "Moved leaf text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+const A8_ORG_REWRITTEN =
+  /<S id="org\.use" d=\{([A-Za-z_$][A-Za-z0-9_$]*)\.mv\.leaf\}>/g;
+
+// MDX target arm. `org.base-line` is a valid ID (SPEC 1.4 forbids `.`, `#`,
+// whitespace, and control characters alone) whose second segment is not a
+// TypeScript identifier.
+const A8_TGT_ORIGIN_BEFORE = [
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  '<S id="org.mv" d={"org.base-line"}>',
+  "Moved text.",
+  "</S>",
+  "",
+  '<S id="org.base-line">',
+  "Base line text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+// Composed from SPEC 6.5 and 3 (as the TS arm's origin): the section gone,
+// its merged line dropped, the blank neighbours kept; no import gained.
+const A8_TGT_ORIGIN_AFTER = [
+  '<S id="org">',
+  "Origin holder text.",
+  "",
+  "",
+  '<S id="org.base-line">',
+  "Base line text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+const A8_TGT_TARGET_BEFORE = [
+  'import Keep from "./Keep.xspec"',
+  "",
+  '<S id="tgt" d={Keep.keep}>',
+  "Target text.",
+  "</S>",
+  "",
+].join("\n");
+
+// The target's expected post-move bytes WITHOUT the added import (SPEC
+// 6.4/6.5): the moved text appended at end of file plus U+000A, its `id`
+// re-identified, and its local reference to the origin node converted to
+// imported form in 6.4's pinned spellings — the fresh root, dot access for
+// the identifier-valid `org`, double-quoted computed access for
+// `base-line` — otherwise byte-identical; the retained `Keep` import and
+// `tgt` kept byte-for-byte.
+const A8_TGT_TARGET_BASE = (root: string): string =>
+  [
+    'import Keep from "./Keep.xspec"',
+    "",
+    '<S id="tgt" d={Keep.keep}>',
+    "Target text.",
+    "</S>",
+    `<S id="mv" d={${root}.org["base-line"]}>`,
+    "Moved text.",
+    "</S>",
+    "",
+  ].join("\n");
+
+const A8_TGT_REWRITTEN =
+  /<S id="mv" d=\{([A-Za-z_$][A-Za-z0-9_$]*)\.org\["base-line"\]\}>/g;
+
+/** Names an added import may not bind in an MDX source (SPEC 2.1, 14.15). */
+const A8_MDX_RESERVED = ["S", "Spec", "text"].map((name) => ({
+  name,
+  why: "a compiler-provided name no import in an xspec source file may bind",
+}));
+
+/** One T6.5-8 arm: a receiving file gaining exactly one import. */
+interface AddedImportArm {
+  readonly label: string;
+  readonly config: string;
+  readonly files: Readonly<Record<string, string>>;
+  /** Workspace-relative path of the file gaining the import. */
+  readonly receiving: string;
+  /** Matches the one rewritten reference; group 1 is the fresh root. */
+  readonly rewritten: RegExp;
+  /** The rewritten reference's expected spelling, for diagnoses. */
+  readonly rewrittenForm: string;
+  /** The receiving file's composed post-move bytes without the import. */
+  readonly base: (root: string) => string;
+  /** Workspace-relative module path the added import must designate. */
+  readonly expectedModule: string;
+  readonly moduleLabel: string;
+  /** Identifiers the fresh binding may not be, each with its reason. */
+  readonly forbiddenRoots: readonly { name: string; why: string }[];
+  /** Files whose post-move bytes are fully composed (no latitude). */
+  readonly composed: readonly {
+    rel: string;
+    expected: string;
+    why: string;
+  }[];
+  /** The workspace's complete edge set of this kind after the move. */
+  readonly edgeKind: "depends" | "references";
+  readonly edges: readonly GraphEdge[];
+}
+
+/**
+ * The identifier the receiving file's rewritten reference is rooted at —
+ * the value-unpinned fresh binding (SPEC 6.5), read off the one place 6.4's
+ * pinned spelling makes it observable; diagnosed when the reference is not
+ * spelled as 6.4 pins it (or is rewritten more or less than once).
+ */
+function addedImportReferenceRoot(
+  text: string,
+  arm: AddedImportArm,
+  context: string,
+): string {
+  const matches = [...text.matchAll(arm.rewritten)];
+  const root = matches.length === 1 ? matches[0]?.[1] : undefined;
+  if (root === undefined) {
+    fail(
+      `${context}: ${arm.receiving} must hold exactly one ` +
+        `${arm.rewrittenForm} — the reference to the moved node rewritten ` +
+        `through a binding of ${arm.moduleLabel} in 6.4's pinned spelling ` +
+        `(dot access for identifier-valid segments, double-quoted computed ` +
+        `access for the others; SPEC 6.5, 6.4); found ` +
+        `${String(matches.length)} in ${JSON.stringify(text)}`,
+    );
+  }
+  return root;
+}
+
+/**
+ * Stage one arm, run the section-form move, and assert the receiving file
+ * is its composed post-move bytes with exactly one import of the needed
+ * module added under 6.5's line discipline, binding the fresh identifier
+ * the rewritten reference uses; the fully composed files byte-equal; the
+ * edge set and a clean `check` as soundness guards.
+ */
+async function runAddedImportArm(
+  product: ProductBinding,
+  arm: AddedImportArm,
+): Promise<void> {
+  const context = `T6.5-8 ${arm.label} arm`;
+  await withWorkspace(arm.config, arm.files, async (workspace) => {
+    // Premise: the staging is valid (every reference and marker resolves),
+    // so a later failure is the move's, not the staging's.
+    await buildOk(product, workspace, `${context} \`build\` over the staging`);
+    await expectExit(
+      product,
+      workspace,
+      [...A8_MOVE_ARGV],
+      0,
+      `${context} \`move specs/Origin.mdx#org.mv specs/Target.mdx#mv\``,
+    );
+
+    const text = await readSourceText(workspace, arm.receiving, context);
+    const root = addedImportReferenceRoot(text, arm, context);
+    for (const forbidden of arm.forbiddenRoots) {
+      if (root === forbidden.name) {
+        fail(
+          `${context}: the added import binds \`${forbidden.name}\`, ` +
+            `${forbidden.why} — an added import binds fresh identifiers ` +
+            `colliding with no binding already in the file (SPEC 6.5, ` +
+            `2.1, 14.15)`,
+        );
+      }
+    }
+    // Composed from the rules of 6.4/6.5 and 3 up to the two unknowns —
+    // the fresh identifier (now known) and the insertion offset (isolated
+    // by the helper, which reads the run at every admissible offset).
+    assertAddedImportInsertion(
+      {
+        rel: arm.receiving,
+        base: Buffer.from(arm.base(root), "utf8"),
+        actual: await workspace.readBytes(arm.receiving),
+        importerDir: posixPath.dirname(arm.receiving),
+        expectedModule: arm.expectedModule,
+        identifier: root,
+      },
+      `${context}: ${arm.receiving} after the move is its composed ` +
+        `post-move bytes with exactly one import of ${arm.moduleLabel} ` +
+        `added as a line of its own — the declaration followed by U+000A ` +
+        `at a line-start offset, preceded by one as well at any other — ` +
+        `binding the fresh identifier the rewritten reference uses, no ` +
+        `other byte inserted (SPEC 6.5, 2.1, 6.4, 3)`,
+    );
+    for (const file of arm.composed) {
+      await assertFileBytes(
+        workspace.path(file.rel),
+        file.expected,
+        `${context}: ${file.rel} after the move — ${file.why} (SPEC 6.5, ` +
+          `6.4, 3; H-4, normalizing nothing)`,
+      );
+    }
+
+    // Soundness guards on the compositions: the rewritten reference resolves
+    // to the moved node's new identity through the added binding, and
+    // nothing else changed hands.
+    assertEdgeSetEqual(
+      await queryEdgesOfKind(product, workspace, arm.edgeKind, context),
+      arm.edges,
+      `${context}: the complete \`${arm.edgeKind}\` edge set after the ` +
+        `move — the rewritten reference reported under the moved node's ` +
+        `new identity, every other edge unchanged (SPEC 6.5, 5.2)`,
+    );
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context} \`check\` immediately after the move — the added import ` +
+        `and the rewritten reference resolve, the fresh binding collides ` +
+        `with nothing (14.15), and no staleness remains (SPEC 6.5, 12.2, ` +
+        `14.10)`,
+    );
+  });
+}
+
+const A8_ARMS: readonly AddedImportArm[] = [
+  {
+    label: "TS",
+    config: SPEC_AND_CODE_CONFIG,
+    files: {
+      [A8_ORIGIN]: A8_TS_ORIGIN_BEFORE,
+      [A8_TARGET]: A8_PLAIN_TARGET,
+      [A8_APP]: A8_APP_BEFORE,
+    },
+    receiving: A8_APP,
+    rewritten: A8_APP_REWRITTEN,
+    rewrittenForm: "marker `<binding>.mv;`",
+    base: A8_APP_BASE,
+    expectedModule: A8_TARGET_MODULE,
+    moduleLabel: "the target module",
+    forbiddenRoots: [
+      {
+        name: "ORG",
+        why: "the identifier the file's retained origin import already binds",
+      },
+    ],
+    composed: [
+      {
+        rel: A8_ORIGIN,
+        expected: A8_TS_ORIGIN_AFTER,
+        why:
+          "the moved section deleted in place with its emptied merged " +
+          "line dropped, the blank neighbours kept, and no import gained",
+      },
+      {
+        rel: A8_TARGET,
+        expected: A8_TS_TARGET_AFTER,
+        why:
+          "the re-identified moved text appended at end of file plus " +
+          "U+000A, otherwise byte-identical",
+      },
+    ],
+    edgeKind: "references",
+    edges: [
+      { from: A8_APP, to: `${A8_TARGET}#mv`, kind: "references" },
+      { from: A8_APP, to: `${A8_ORIGIN}#org.stay`, kind: "references" },
+    ],
+  },
+  {
+    label: "MDX origin",
+    config: SPECS_ONLY_CONFIG,
+    files: {
+      [A8_KEEP]: A8_KEEP_SOURCE,
+      [A8_ORIGIN]: A8_ORG_ORIGIN_BEFORE,
+      [A8_TARGET]: A8_PLAIN_TARGET,
+    },
+    receiving: A8_ORIGIN,
+    rewritten: A8_ORG_REWRITTEN,
+    rewrittenForm: '`<S id="org.use" d={<binding>.mv.leaf}>`',
+    base: A8_ORG_ORIGIN_BASE,
+    expectedModule: A8_TARGET_MODULE,
+    moduleLabel: "the target module",
+    forbiddenRoots: [
+      {
+        name: "Keep",
+        why: "the identifier the file's retained third-module import already binds",
+      },
+      ...A8_MDX_RESERVED,
+    ],
+    composed: [
+      {
+        rel: A8_TARGET,
+        expected: A8_ORG_TARGET_AFTER,
+        why:
+          "the re-identified moved text appended at end of file plus " +
+          "U+000A, otherwise byte-identical",
+      },
+      {
+        rel: A8_KEEP,
+        expected: A8_KEEP_SOURCE,
+        why: "an uninvolved bystander, untouched",
+      },
+    ],
+    edgeKind: "depends",
+    edges: [
+      {
+        from: `${A8_ORIGIN}#org.use`,
+        to: `${A8_TARGET}#mv.leaf`,
+        kind: "depends",
+      },
+      { from: `${A8_ORIGIN}#org.stay`, to: `${A8_KEEP}#keep`, kind: "depends" },
+    ],
+  },
+  {
+    label: "MDX target",
+    config: SPECS_ONLY_CONFIG,
+    files: {
+      [A8_KEEP]: A8_KEEP_SOURCE,
+      [A8_ORIGIN]: A8_TGT_ORIGIN_BEFORE,
+      [A8_TARGET]: A8_TGT_TARGET_BEFORE,
+    },
+    receiving: A8_TARGET,
+    rewritten: A8_TGT_REWRITTEN,
+    rewrittenForm: '`<S id="mv" d={<binding>.org["base-line"]}>`',
+    base: A8_TGT_TARGET_BASE,
+    expectedModule: A8_ORIGIN_MODULE,
+    moduleLabel: "the origin module",
+    forbiddenRoots: [
+      {
+        name: "Keep",
+        why: "the identifier the file's retained third-module import already binds",
+      },
+      ...A8_MDX_RESERVED,
+    ],
+    composed: [
+      {
+        rel: A8_ORIGIN,
+        expected: A8_TGT_ORIGIN_AFTER,
+        why:
+          "the moved section deleted in place with its emptied merged " +
+          "line dropped, the blank neighbours kept, and no import gained",
+      },
+      {
+        rel: A8_KEEP,
+        expected: A8_KEEP_SOURCE,
+        why: "an uninvolved bystander, untouched",
+      },
+    ],
+    edgeKind: "depends",
+    edges: [
+      {
+        from: `${A8_TARGET}#mv`,
+        to: `${A8_ORIGIN}#org.base-line`,
+        kind: "depends",
+      },
+      { from: `${A8_TARGET}#tgt`, to: `${A8_KEEP}#keep`, kind: "depends" },
+    ],
+  },
+];
+
+const T6_5_8 = defineProductTest({
+  id: "T6.5-8",
+  title:
+    "added-import insertion discipline: the addition-side byte contract of 6.5 asserted value-blind — in three section-move arms (a TS file importing the origin module with markers on one moved and one unmoved node, so a target-module binding is added while the origin import stays; an MDX origin holding a retained third-module import and a local string reference to a moved descendant, converted to imported form so the origin itself gains the target module's import; an MDX target gaining the origin module's import for a moved local reference to an origin node with a non-identifier segment, converted to dot then double-quoted computed access) the receiving file's post-move bytes are composed from the rules of 6.4/6.5 and 3 up to the fresh identifier (read off the rewritten reference) and the insertion offset, and the single inserted run isolated by diff is exactly the declaration followed by U+000A at a line-start offset, or U+000A, the declaration, U+000A at any other — one 2.1-form import of the needed module binding that fresh identifier, no other byte inserted; the fully composed files byte-equal, the edge set exact, `check` clean (SPEC 6.5, 6.4, 2.1, 3; H-4, normalizing nothing)",
+  run: async (product) => {
+    for (const arm of A8_ARMS) {
+      await runAddedImportArm(product, arm);
+    }
+  },
+});
+
 /** TEST-SPEC §6.5, in canonical ID order (SUITE-25). */
 export const section65Tests: readonly ProductTestEntry[] = [
   T6_5_1,
@@ -3954,4 +4520,5 @@ export const section65Tests: readonly ProductTestEntry[] = [
   T6_5_5,
   T6_5_6,
   T6_5_7,
+  T6_5_8,
 ];

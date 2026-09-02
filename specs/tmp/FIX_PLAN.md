@@ -65,39 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 28 — T6.5-8 Added-import insertion discipline (new test: TS, MDX-origin, MDX-target arms)
-
-Cites: TEST-SPEC T6.5-8 (full text in §6.5): an added import is a line of its
-own — declaration + U+000A, preceded by U+000A when the insertion offset is not
-at a line start — with identifier and offset left free; three section-move
-arms: TS (code file imports the origin, references one moved and one unmoved
-node → gains a target-module import, origin import stays), MDX origin (origin
-holds a retained third-module import and a local string reference to a moved
-descendant → origin gains the target module's import, the reference converting
-to imported form in 6.4's pinned spellings), MDX target (moved subtree holds a
-local `d` reference to an unmoved origin node with a non-identifier segment →
-the target file gains the origin module's import; dot access / double-quoted
-computed access; origin loses the section and gains no import); in each arm
-the harness isolates the single added byte run by diff against the composed
-bytes and asserts exactly `decl + \n` at a line-start offset or `\n + decl +
-\n` otherwise, the declaration one import of the needed module's specifier
-binding one fresh identifier (value unpinned) that the rewritten references
-use, no other byte inserted. SPEC 6.5, 6.4, 2.1, 3.
-
-Now: not implemented; no registry entry, no H-7 map entry.
-
-Do: in `test/suite/registry/section-6.5.ts` add `T6.5-8` with the three arms.
-Write (or reuse from Task 24) a helper in `test/helpers/` that, given the
-composed expected bytes with two unknowns and the actual post-move bytes,
-(1) recovers the fresh identifier from the rewritten references, (2) locates
-the single inserted run by diff, and (3) checks the `\n` discipline by the
-offset's line position and that the run's declaration is a 2.1-form import of
-the expected module binding that identifier; everything else byte-identical.
-Register the ID and add `"T6.5-8": ["6.5"]` to `traceability.ts`.
-
-Verify: `npx vitest run … test/suite/section-6.5.test.ts` (pass or diagnosed
-product failure, never a harness error); `npm run test:self` green (S-1, S-7).
-
 ### Task 29 — T6.5-9 Fresh identifiers in code (new test: pre-empted local bindings, compile-clean after the move)
 
 Cites: TEST-SPEC T6.5-9 (full text in §6.5): T6.5-8's TS arm re-staged with a
