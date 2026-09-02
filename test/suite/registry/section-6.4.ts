@@ -50,12 +50,18 @@
 //   the renamed node and its descendant, which SPEC 6.4 pins as the complete
 //   mapping (the renamed ID plus the prefix-replaced descendants, nothing
 //   else). Pair order is unasserted (shape, not information).
-// - T6.4-2 stages every *affected* reference part in dot access or
-//   double-quoted form, so each expected byte is pinned whichever way 6.4's
-//   preserve-then-default rule is read; single-quoted spellings appear only
-//   in untouched parts and untouched references, whose byte-wise preservation
-//   T6.4-2 pins explicitly. Whole rewritten source files are compared
-//   byte-exactly ("only the affected parts change" pins all other bytes).
+// - T6.4-2 stages every keepable form on the *affected* segment itself —
+//   computed access in both quote kinds, dot access, local string literals
+//   and `id` attributes in both quote kinds — and composes each expected
+//   post-rename file from SPEC 6.4's rules: only the renamed segment's
+//   characters change, quote kind and access form are kept, and the
+//   double-quoted computed fallback applies to a dot segment whose new name
+//   is not a TS identifier alone. Whole files are compared byte-exactly,
+//   `.mdx` and `.ts` alike (markers and `text(...)` calls included), and
+//   two files holding only unaffected references must come through
+//   byte-identical ("only the affected parts change" pins all other
+//   bytes: untouched segments and references, prose and comments spelling
+//   the old name).
 // - T6.4-3/T6.4-6 "modifies nothing" is a whole-workspace-root byte snapshot
 //   compare around the refused command, with the pre-refusal `build`'s
 //   derived files present — a product that rewrites before validating, or
@@ -807,184 +813,205 @@ const T6_4_1 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T6.4-2 — minimal edits (byte-exact)
+// T6.4-2 — minimal edits (byte-exact, every keepable form kept)
 // ---------------------------------------------------------------------------
 
-// Arm A: the new segment `neo` is a valid TypeScript identifier, so every
-// staged form is keepable and every rewrite is the minimal in-place edit —
-// dot stays dot, double-quoted computed stays double-quoted computed,
-// double-quoted string literals stay double-quoted. Untouched parts carry the
-// contrasting spellings (single-quoted computed segments before and after the
-// affected segment, a single-quoted local string, a whole untouched
-// single-quoted-computed reference) and must be preserved byte-wise.
-const M2A_CORE_BEFORE = [
-  '<S id="top">',
-  "Top text.",
-  "",
-  '<S id="top.mid">',
-  "Mid text.",
-  "",
-  '<S id="top.mid.kid-x">',
-  "Kid text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="top.aid" d={["top.mid", \'top.res\']}>',
-  "Embeds: {text(\"top.mid.kid-x\")} and {text('top.res')}",
-  "</S>",
-  "",
-  '<S id="top.res">',
-  "Res text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+// Each fixture below is a template over the renamed segment's spelling, so
+// every expected post-rename file is composed from SPEC 6.4's rules — only
+// the renamed segment's characters change; the quote kind of a computed
+// access, a string literal, or an `id` attribute and the access form of a
+// chain segment are kept wherever the new name admits them — while every
+// other byte (untouched segments and references, prose and comments that
+// spell the old name, whole files holding no affected reference) is the
+// staged byte verbatim.
+//
+// Fixture L (arms 1 and 2): the renamed segment `login-v2` is not a TS
+// identifier, so its chain references are computed — double-quoted
+// (`["login-v2"]`) and single-quoted (`['login-v2']`) — and its local string
+// references and `id` attributes come in both quote kinds; the renamed
+// section's own `id` and one rewritten descendant's `id` are single-quoted
+// (SPEC 2.7). Arm 1 renames it to the identifier-valid `login2`: the
+// double-quoted computed segment stays computed and double-quoted (never
+// `.login2`), the single-quoted one keeps its single quotes, and so do the
+// single-quoted local strings and `id` values. Arm 2 renames it to
+// `login-v3`: the same forms, all kept.
 
-const M2A_CORE_AFTER = [
-  '<S id="top">',
-  "Top text.",
-  "",
-  '<S id="top.neo">',
-  "Mid text.",
-  "",
-  '<S id="top.neo.kid-x">',
-  "Kid text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="top.aid" d={["top.neo", \'top.res\']}>',
-  "Embeds: {text(\"top.neo.kid-x\")} and {text('top.res')}",
-  "</S>",
-  "",
-  '<S id="top.res">',
-  "Res text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+/** Fixture L's `specs/Core.mdx`; `seg` spells the renamed segment. */
+function coreL(seg: string): string {
+  return [
+    `<S id='${seg}'>`,
+    "Login text; the prose spelling login-v2 is no reference and stays.",
+    "",
+    `<S id='${seg}.kid'>`,
+    "Kid text.",
+    "</S>",
+    "",
+    `<S id="${seg}.aux" d={['${seg}.kid']}>`,
+    `Aux: {text('${seg}.kid')}`,
+    "</S>",
+    "</S>",
+    "",
+    `<S id="other" d={["${seg}", '${seg}.kid', 'other.leaf']}>`,
+    `Other: {text('${seg}')} and {text("${seg}.aux")} and {text('other.leaf')}`,
+    "",
+    '<S id="other.leaf">',
+    "Leaf text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n");
+}
 
-const M2A_REFS_BEFORE = [
+/** Fixture L's `specs/Refs.mdx`: external chains through both quote kinds. */
+function refsL(seg: string): string {
+  return [
+    'import Core from "./Core.xspec"',
+    "",
+    `<S id="refs" d={[Core["${seg}"], Core['${seg}'].kid, Core["${seg}"]["aux"], Core['other'].leaf]}>`,
+    `Embeds: {text(Core['${seg}'])} and {text(Core["${seg}"].kid)} and {text(Core['other'])}`,
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+/** Fixture L's `src/app.ts`: markers and `text(...)` calls, both quote kinds. */
+function appL(seg: string): string {
+  return [
+    'import CORE, { text } from "../specs/Core.xspec";',
+    "",
+    '// A comment is no reference: CORE["login-v2"] stays as written here.',
+    "export function login(): string {",
+    `  CORE["${seg}"];`,
+    `  CORE['${seg}'].kid;`,
+    `  return text(CORE['${seg}']) + text(CORE["${seg}"]["aux"]);`,
+    "}",
+    "",
+    "export function other(): string {",
+    "  CORE.other.leaf;",
+    "  return text(CORE['other']);",
+    "}",
+    "",
+  ].join("\n");
+}
+
+// Fixture L's untouched sources: unaffected identities only, referenced in
+// single-quoted and computed spellings beside a single-quoted `id` — the
+// rename must leave both files byte-identical.
+const OTHER_MDX_L = [
   'import Core from "./Core.xspec"',
   "",
-  '<S id="refs" d={[Core.top.mid, Core.top["mid"], Core[\'top\'].mid]}>',
-  'Embeds: {text(Core.top.mid["kid-x"])}',
-  "Also: {text(Core.top.mid['kid-x'])}",
-  "Watch: {text(Core.top['res'])}",
+  "<S id=\"unrelated\" d={[Core.other, Core['other'].leaf]}>",
+  "Unrelated: {text(Core[\"other\"].leaf)} and {text('unrelated.sub')}",
+  "",
+  "<S id='unrelated.sub'>",
+  "Sub text.",
+  "</S>",
   "</S>",
   "",
 ].join("\n");
 
-const M2A_REFS_AFTER = [
+const OTHER_TS_L = [
+  'import CORE, { text } from "../specs/Core.xspec";',
+  "",
+  "CORE.other;",
+  "text(CORE['other'].leaf);",
+  "",
+].join("\n");
+
+// Fixture M (arms 3 and 4): the renamed segment `mid` is a TS identifier,
+// referenced in dot access, in computed access of both quote kinds, and in
+// local strings of both quote kinds. Arm 3 renames it to `neo`: dot stays dot
+// and every computed segment keeps its quotes. Arm 4 renames it to `neo-2`:
+// dot access cannot hold it and becomes double-quoted computed access (the
+// 6.4 fallback), while the computed segments keep their quote kinds and the
+// string literals hold any segment — untouched dot parts after the converted
+// segment (`.kid-x`, `.mid` after `['top']`) stay as they are.
+
+/** Fixture M's `specs/Core.mdx`; `seg` spells the renamed segment. */
+function coreM(seg: string): string {
+  return [
+    '<S id="top">',
+    "Top text.",
+    "",
+    `<S id="top.${seg}">`,
+    "Mid text.",
+    "",
+    `<S id="top.${seg}.kid-x">`,
+    "Kid text.",
+    "</S>",
+    "</S>",
+    "",
+    `<S id="top.aid" d={["top.${seg}", 'top.${seg}.kid-x', 'top.res']}>`,
+    `Embeds: {text("top.${seg}.kid-x")} and {text('top.${seg}')} and {text('top.res')}`,
+    "</S>",
+    "",
+    '<S id="top.res">',
+    "Res text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+/**
+ * Fixture M's `specs/Refs.mdx`; `dot` spells an affected dot-access segment
+ * (`.mid`, `.neo`, or the `["neo-2"]` fallback), `seg` an affected computed one.
+ */
+function refsM(dot: string, seg: string): string {
+  return [
+    'import Core from "./Core.xspec"',
+    "",
+    `<S id="refs" d={[Core.top${dot}, Core.top["${seg}"], Core.top['${seg}'], Core['top']${dot}]}>`,
+    `Embeds: {text(Core.top${dot}["kid-x"])} and {text(Core.top['${seg}']['kid-x'])} and {text(Core.top['res'])}`,
+    "</S>",
+    "",
+  ].join("\n");
+}
+
+/** Fixture M's `src/app.ts`: markers and `text(...)` calls, every access form. */
+function appM(dot: string, seg: string): string {
+  return [
+    'import CORE, { text } from "../specs/Core.xspec";',
+    "",
+    `CORE.top${dot};`,
+    `CORE.top${dot}["kid-x"];`,
+    `CORE.top['${seg}'];`,
+    `CORE['top']${dot};`,
+    `text(CORE.top["${seg}"]);`,
+    `text(CORE.top['${seg}']["kid-x"]);`,
+    "",
+  ].join("\n");
+}
+
+const OTHER_MDX_M = [
   'import Core from "./Core.xspec"',
   "",
-  '<S id="refs" d={[Core.top.neo, Core.top["neo"], Core[\'top\'].neo]}>',
-  'Embeds: {text(Core.top.neo["kid-x"])}',
-  "Also: {text(Core.top.neo['kid-x'])}",
-  "Watch: {text(Core.top['res'])}",
+  "<S id=\"unrelated\" d={[Core.top.res, Core['top']['res']]}>",
+  "Unrelated: {text(Core.top[\"res\"])} and {text('unrelated.sub')}",
+  "",
+  "<S id='unrelated.sub'>",
+  "Sub text.",
+  "</S>",
   "</S>",
   "",
 ].join("\n");
 
-const M2A_APP_BEFORE = [
+const OTHER_TS_M = [
   'import CORE, { text } from "../specs/Core.xspec";',
   "",
-  "CORE.top.mid;",
-  'CORE.top.mid["kid-x"];',
-  "CORE['top'].mid;",
-  'text(CORE.top["mid"]);',
+  "CORE.top.res;",
+  "text(CORE['top'].res);",
   "",
 ].join("\n");
 
-const M2A_APP_AFTER = [
-  'import CORE, { text } from "../specs/Core.xspec";',
-  "",
-  "CORE.top.neo;",
-  'CORE.top.neo["kid-x"];',
-  "CORE['top'].neo;",
-  'text(CORE.top["neo"]);',
-  "",
-].join("\n");
-
-// Arm B: the new segment `neo-2` is not a TypeScript identifier. A dot-access
-// affected part cannot keep its form and is written as double-quoted computed
-// access; a double-quoted computed affected part keeps its form; untouched
-// dot parts after the converted segment, and string-literal forms (which hold
-// any segment), are preserved.
-const M2B_CORE_BEFORE = [
-  '<S id="top">',
-  "Top text.",
-  "",
-  '<S id="top.mid">',
-  "Mid text.",
-  "",
-  '<S id="top.mid.kid">',
-  "Kid text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="top.aid" d={"top.mid"}>',
-  'Embeds: {text("top.mid.kid")}',
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
-
-const M2B_CORE_AFTER = [
-  '<S id="top">',
-  "Top text.",
-  "",
-  '<S id="top.neo-2">',
-  "Mid text.",
-  "",
-  '<S id="top.neo-2.kid">',
-  "Kid text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="top.aid" d={"top.neo-2"}>',
-  'Embeds: {text("top.neo-2.kid")}',
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
-
-const M2B_REFS_BEFORE = [
-  'import Core from "./Core.xspec"',
-  "",
-  '<S id="refs" d={[Core.top.mid, Core.top["mid"]]}>',
-  "Embeds: {text(Core.top.mid.kid)}",
-  "</S>",
-  "",
-].join("\n");
-
-const M2B_REFS_AFTER = [
-  'import Core from "./Core.xspec"',
-  "",
-  '<S id="refs" d={[Core.top["neo-2"], Core.top["neo-2"]]}>',
-  'Embeds: {text(Core.top["neo-2"].kid)}',
-  "</S>",
-  "",
-].join("\n");
-
-const M2B_APP_BEFORE = [
-  'import CORE, { text } from "../specs/Core.xspec";',
-  "",
-  "CORE.top.mid;",
-  "text(CORE.top.mid.kid);",
-  "",
-].join("\n");
-
-const M2B_APP_AFTER = [
-  'import CORE, { text } from "../specs/Core.xspec";',
-  "",
-  'CORE.top["neo-2"];',
-  'text(CORE.top["neo-2"].kid);',
-  "",
-].join("\n");
-
-/** One T6.4-2 arm: stage, build, rename, byte-compare every rewritten file. */
+/**
+ * One T6.4-2 arm: stage, build, rename, then byte-compare every staged file
+ * against its composed expectation — the rewritten files against their
+ * post-rename composition, the untouched ones against their staged bytes.
+ */
 async function runMinimalEditArm(
   product: ProductBinding,
+  oldId: string,
   newId: string,
   sources: Readonly<Record<string, string>>,
   expected: Readonly<Record<string, string>>,
@@ -995,19 +1022,28 @@ async function runMinimalEditArm(
     await expectExit(
       product,
       workspace,
-      ["rename", "specs/Core.mdx", "top.mid", newId],
+      ["rename", "specs/Core.mdx", oldId, newId],
       0,
-      `${context}: \`rename specs/Core.mdx top.mid ${newId}\``,
+      `${context}: \`rename specs/Core.mdx ${oldId} ${newId}\``,
     );
     for (const [rel, bytes] of Object.entries(expected)) {
+      const touched = bytes !== sources[rel];
       await assertFileBytes(
         workspace.path(rel),
         bytes,
-        `${context}: ${rel} after the rename — rewrites are minimal in-place ` +
-          `edits: quote style and access form of untouched reference parts ` +
-          `are preserved byte-wise and only the affected parts change; where ` +
-          `a form cannot be kept, a non-identifier segment is written as ` +
-          `double-quoted computed access (SPEC 6.4, 2.4; H-4)`,
+        `${context}: ${rel} after the rename — ` +
+          (touched
+            ? `the rewritten file must differ from its original in the ` +
+              `rewritten segments alone: rewrites are minimal in-place edits ` +
+              `keeping each reference's quote style and access form, and each ` +
+              `\`id\` attribute's quotes, wherever the new name admits them ` +
+              `(dot stays dot, computed stays computed in its own quote kind, ` +
+              `a string literal keeps its quotes); only a dot-access segment ` +
+              `whose new name is not a TS identifier falls back to ` +
+              `double-quoted computed access (SPEC 6.4, 2.4, 2.7; H-4)`
+            : `a file holding no reference to an affected identity must come ` +
+              `through byte-identical (SPEC 6.4: only the affected parts ` +
+              `change)`),
       );
     }
   });
@@ -1016,44 +1052,80 @@ async function runMinimalEditArm(
 const T6_4_2 = defineProductTest({
   id: "T6.4-2",
   title:
-    "minimal edits: quote style (single vs double) and access form (dot vs computed) of untouched reference parts are preserved byte-wise and only the affected parts change; where the form cannot be kept, a new segment that is not a TS identifier is written as double-quoted computed access (SPEC 6.4, 2.4)",
+    "minimal edits: quote style (single vs double) and access form (dot vs computed) of untouched reference parts are preserved byte-wise and only the affected parts change; the rewritten segment keeps every keepable form — a computed segment stays computed in its own quote kind whether or not the new name is a TS identifier, dot stays dot for an identifier-valid name, single-quoted local strings and single-quoted `id` attributes keep their quotes — and only a dot segment whose new name is not a TS identifier becomes double-quoted computed access; every rewritten `.mdx` and `.ts` file is byte-equal to its composed expectation and untouched files stay byte-identical (SPEC 6.4, 2.4, 2.7)",
   run: async (product) => {
-    // Arm A: keepable forms — every rewrite is the in-place minimal edit.
+    const stagedL = {
+      "specs/Core.mdx": coreL("login-v2"),
+      "specs/Refs.mdx": refsL("login-v2"),
+      "specs/Other.mdx": OTHER_MDX_L,
+      "src/app.ts": appL("login-v2"),
+      "src/other.ts": OTHER_TS_L,
+    };
+    const expectedL = (seg: string) => ({
+      "specs/Core.mdx": coreL(seg),
+      "specs/Refs.mdx": refsL(seg),
+      "specs/Other.mdx": OTHER_MDX_L,
+      "src/app.ts": appL(seg),
+      "src/other.ts": OTHER_TS_L,
+    });
+
+    // Arm 1: computed segment → identifier-valid name; forms kept.
     await runMinimalEditArm(
       product,
-      "top.neo",
-      {
-        "specs/Core.mdx": M2A_CORE_BEFORE,
-        "specs/Refs.mdx": M2A_REFS_BEFORE,
-        "src/app.ts": M2A_APP_BEFORE,
-      },
-      {
-        "specs/Core.mdx": M2A_CORE_AFTER,
-        "specs/Refs.mdx": M2A_REFS_AFTER,
-        "src/app.ts": M2A_APP_AFTER,
-      },
-      "T6.4-2 identifier-segment arm (top.mid → top.neo)",
+      "login-v2",
+      "login2",
+      stagedL,
+      expectedL("login2"),
+      "T6.4-2 arm 1 (login-v2 → login2: computed and single-quoted forms kept)",
     );
 
-    // Arm B: the dot form cannot hold `neo-2` — double-quoted computed access.
+    // Arm 2: computed segment → non-identifier name; forms kept.
     await runMinimalEditArm(
       product,
+      "login-v2",
+      "login-v3",
+      stagedL,
+      expectedL("login-v3"),
+      "T6.4-2 arm 2 (login-v2 → login-v3: computed and single-quoted forms kept)",
+    );
+
+    const stagedM = {
+      "specs/Core.mdx": coreM("mid"),
+      "specs/Refs.mdx": refsM(".mid", "mid"),
+      "specs/Other.mdx": OTHER_MDX_M,
+      "src/app.ts": appM(".mid", "mid"),
+      "src/other.ts": OTHER_TS_M,
+    };
+    const expectedM = (dot: string, seg: string) => ({
+      "specs/Core.mdx": coreM(seg),
+      "specs/Refs.mdx": refsM(dot, seg),
+      "specs/Other.mdx": OTHER_MDX_M,
+      "src/app.ts": appM(dot, seg),
+      "src/other.ts": OTHER_TS_M,
+    });
+
+    // Arm 3: dot segment → identifier-valid name; dot stays dot.
+    await runMinimalEditArm(
+      product,
+      "top.mid",
+      "top.neo",
+      stagedM,
+      expectedM(".neo", "neo"),
+      "T6.4-2 arm 3 (top.mid → top.neo: dot stays dot, computed keeps quotes)",
+    );
+
+    // Arm 4: dot segment → non-identifier name; the double-quoted computed
+    // fallback for dot access alone, every computed segment keeping its quotes.
+    await runMinimalEditArm(
+      product,
+      "top.mid",
       "top.neo-2",
-      {
-        "specs/Core.mdx": M2B_CORE_BEFORE,
-        "specs/Refs.mdx": M2B_REFS_BEFORE,
-        "src/app.ts": M2B_APP_BEFORE,
-      },
-      {
-        "specs/Core.mdx": M2B_CORE_AFTER,
-        "specs/Refs.mdx": M2B_REFS_AFTER,
-        "src/app.ts": M2B_APP_AFTER,
-      },
-      "T6.4-2 non-identifier-segment arm (top.mid → top.neo-2)",
+      stagedM,
+      expectedM('["neo-2"]', "neo-2"),
+      "T6.4-2 arm 4 (top.mid → top.neo-2: dot falls back to double-quoted computed access, computed keeps quotes)",
     );
   },
 });
-
 // ---------------------------------------------------------------------------
 // T6.4-3 — validation refusals (exit 1, nothing modified)
 // ---------------------------------------------------------------------------

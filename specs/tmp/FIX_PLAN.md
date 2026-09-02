@@ -65,32 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 19 — T6.4-2: keepable reference forms, whole-file byte contract, single-quoted `id` attributes
-
-Cites: TEST-SPEC T6.4-2 (revised: minimal in-place edits — a computed
-double-quoted access `BASE["login-v2"]` → `BASE["login2"]` stays computed and
-double-quoted; single-quoted `BASE['login-v2']` → `BASE['login2']` and →
-`BASE['login-v3']` keep single quotes; dot access stays dot; `{text('login-v2')}`
-and a `d` array entry `'login-v2'` keep single quotes; every rewritten `.mdx`
-and `.ts` file — marker and `text` rewrites included — is asserted byte-equal to
-an expected whole file; `id` attributes spelled single-quoted, on the renamed
-section and on one descendant, stay single-quoted); SPEC 6.4, 2.7, 3.
-
-Now: `test/suite/registry/section-6.4.ts` ≈ lines 1017–1019 implement the
-pre-revisit text (spot assertions on rewritten spellings only).
-
-Do: restage T6.4-2 with fixtures carrying each listed form (in `.mdx` `d`
-props/arrays, `{text(...)}` embeddings, and a `.ts` file with markers and
-`text` calls through both access forms), compose the expected post-rename
-bytes for every touched file from SPEC 6.4's rules (only the ID segment's
-characters change; quote kind and access form kept), and assert each rewritten
-file byte-equal to its composed expectation (files untouched by the rename
-byte-identical). Include the two single-quoted `id` attributes. Keep the
-existing preview/journal assertions.
-
-Verify: `npx vitest run … test/suite/section-6.4.test.ts`; `npm run test:self`
-green.
-
 ### Task 20 — T6.4-3: two-bearer collision — one `refused-id-collision` locating both `b` and `b.c`
 
 Cites: TEST-SPEC T6.4-3 (rename `a`→`b` where `a.c` exists beside `b` and `b.c`:
