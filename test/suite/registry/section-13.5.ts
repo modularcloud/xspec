@@ -1,7 +1,9 @@
 // TEST-SPEC §13.5 (concurrency and isolation) — SUITE-48: T13.5-1 (hold-seam
 // basics: five held mutating-command arms each compared byte-identically
-// against its no-seam twin (seam neutrality), the occupied-hold-path exit-2
-// arms, and the non-mutating unknown-flag arm), T13.5-2 (mutual exclusion),
+// against its no-seam twin (seam neutrality), the stale-workspace arm — the
+// hold precedes the 13.3 refresh, graph data byte-identical while held — the
+// occupied-hold-path exit-2 arms, and the non-mutating unknown-flag arm),
+// T13.5-2 (mutual exclusion),
 // T13.5-3 (exclusivity ends with the process), T13.5-4 (readers during
 // mutation + build/query storm), T13.5-5 (atomic visibility via a polling
 // reader), T13.5-6 (workspace isolation), T13.5-7 (interrupted mutation:
@@ -28,6 +30,13 @@
 //   lookup included — with the seam flag alone removed, and its whole-tree
 //   compare includes the journal (§VIOL-CORE-CHATTYREADS's passing analysis
 //   leans on exactly that sequence equality).
+// - T13.5-1's stale-workspace arm is the only in-scope mutating command
+//   started on stale graph data (§CONF-CORE's freshness constraint, which
+//   §VIOL-CORE-EARLYREFRESH's passing side leans on): it stages its own
+//   workspaces, and every other mutating command these tests start —
+//   T13.5-1's basic arms, T13.5-2's held and excluded commands, T13.5-3's
+//   killed and subsequent commands, T13.5-4's held mutator — starts on a
+//   freshly built workspace with no refresh pending (T10.1-1).
 // - T13.5-2's excluded commands carry no `--test-hold` (§VIOL-CORE-NOLOCK),
 //   and its modifies-nothing compare brackets each excluded command alone,
 //   with the baseline snapshot taken while command 1 is already held
@@ -113,6 +122,7 @@ import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
   assertSnapshotsEqual,
+  diffSnapshots,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import type {
@@ -328,11 +338,211 @@ function requireRowByScope(
 // T13.5-1 — hold seam basics
 // ---------------------------------------------------------------------------
 
+// The staleness edit for T13.5-1's stale-workspace arm, as T10.1-1 stages
+// it: same structure and identities, different leaf text — the graph data the
+// earlier `build` wrote no longer matches the sources (SPEC 13.3), while the
+// workspace stays valid.
+const A_MDX_EDITED = A_MDX.replace("Kid text.", "Kid text, edited.");
+
+/**
+ * Snapshot scope "graph data alone": everything under `.xspec/` except the
+ * durable files there — the journal (`.xspec/journal`, SPEC 6.1) and the
+ * review sessions (`.xspec/reviews/`, SPEC 10.1) — with everything outside
+ * `.xspec/` pruned. SPEC 13.3 leaves graph data's layout unenumerated, so
+ * the scope is the graph-data area (11.6) minus its durable occupants; in a
+ * harness-staged workspace nothing foreign lives there.
+ */
+function excludeAllButGraphData(relPathBytes: Uint8Array): boolean {
+  const rel = Buffer.from(relPathBytes).toString("latin1");
+  if (rel === ".xspec") return false;
+  if (!rel.startsWith(".xspec/")) return true;
+  return (
+    rel === ".xspec/journal" ||
+    rel === ".xspec/reviews" ||
+    rel.startsWith(".xspec/reviews/")
+  );
+}
+
+/**
+ * T13.5-1's stale-workspace arm (SPEC 13.5: the hold precedes every
+ * modification, the 13.3 refresh included). Three identically staged
+ * CONF-CORE-shaped workspaces: `build`, then one section's own text edited so
+ * the graph data is stale while the workspace stays valid (as T10.1-1 stages
+ * it). The held workspace runs `review create --strategy audit --test-hold`:
+ * while held, every workspace file — `.xspec/graph.json` included, the one
+ * file a pre-hold refresh would change — is byte-identical to its
+ * pre-invocation state; after release the command exits 0 and the session
+ * file exists; the final tree equals the no-seam twin's (seam neutrality on
+ * this arm too — both refresh, to the same final state), and the graph data
+ * equals what `build` writes on the build twin (13.3: the refresh writes
+ * exactly what `build` would write, the recorded derived-file paths — which
+ * this edit leaves unchanged — excepted): product-to-itself compares under
+ * H-4, well-defined across directories per H-6. This is the only in-scope
+ * mutating command the 13.5 tests start on stale graph data
+ * (CERTIFICATIONS.md §CONF-CORE's freshness constraint, which
+ * §VIOL-CORE-EARLYREFRESH's passing side leans on); every other arm stages
+ * itself freshly built.
+ */
+async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
+  const create = ["review", "create", "--strategy", "audit", "--name", "n"];
+  const context =
+    "T13.5-1 (stale workspace, held `review create --strategy audit --name n`)";
+  await withWorkspace(CORE_DECL, async (workspace) => {
+    await withWorkspace(CORE_DECL, async (twinNoSeam) => {
+      await withWorkspace(CORE_DECL, async (twinBuild) => {
+        // Identical staging on all three: `build`, then the staleness edit.
+        await buildOk(product, workspace, "T13.5-1 stale arm staging `build`");
+        await buildOk(
+          product,
+          twinNoSeam,
+          "T13.5-1 stale arm no-seam twin staging `build`",
+        );
+        await buildOk(
+          product,
+          twinBuild,
+          "T13.5-1 stale arm build twin staging `build`",
+        );
+        for (const staged of [workspace, twinNoSeam, twinBuild]) {
+          await staged.file("specs/A.mdx", A_MDX_EDITED);
+        }
+
+        // What `build` writes on the edited sources (the build twin), and the
+        // staging premise: it differs from the held workspace's current graph
+        // data, so a refresh is pending there (SPEC 13.3: graph data carries
+        // the sources' hashes and source ranges, so an edited text cannot
+        // leave it current) — otherwise the arm could discriminate nothing.
+        await buildOk(
+          product,
+          twinBuild,
+          "T13.5-1 stale arm build twin `build` on the edited sources",
+        );
+        const staleGraphData = await snapshotDirectory(workspace.root, {
+          exclude: excludeAllButGraphData,
+        });
+        const builtGraphData = await snapshotDirectory(twinBuild.root, {
+          exclude: excludeAllButGraphData,
+        });
+        if (diffSnapshots(staleGraphData, builtGraphData).length === 0) {
+          fail(
+            `${context}: staging premise — after the edit the workspace's ` +
+              `graph data must be stale, i.e. differ from what \`build\` ` +
+              `writes on an identically edited twin (SPEC 13.3: graph data ` +
+              `carries the sources' hashes and source ranges), but the two ` +
+              `are byte-identical, so no refresh is pending and the arm ` +
+              `cannot discriminate (H-8)`,
+          );
+        }
+
+        // Pre-invocation state: every workspace file, `.xspec/` included.
+        const before = await snapshotDirectory(workspace.root);
+        const hold = holdPathFor(workspace, "hold-stale.tmp");
+        const running = await startProduct(product, {
+          cwd: workspace.root,
+          argv: [...create, "--test-hold", hold],
+        });
+        try {
+          await awaitHoldFile(running, hold, context);
+          await assertEmptyHoldFile(hold, context);
+          const whileHeld = await snapshotDirectory(workspace.root);
+          assertSnapshotsEqual(
+            before,
+            whileHeld,
+            `${context}: the workspace while held vs before the command ` +
+              `started — graph data (.xspec/graph.json, the one file the ` +
+              `pending 13.3 refresh changes) and every other workspace ` +
+              `file: the hold is created after acquiring exclusivity and ` +
+              `before every modification, the refresh included, so a ` +
+              `product that refreshes before acquiring exclusivity fails ` +
+              `here (SPEC 13.5, 13.3)`,
+          );
+          if (running.hasExited()) {
+            fail(
+              `${context}: the command must proceed only once the hold ` +
+                `file is deleted, but it exited while the hold file still ` +
+                `existed (SPEC 13.5) — ${await describeExit(running)}`,
+            );
+          }
+          await releaseHoldFile(hold);
+          let result: RunResult;
+          try {
+            result = await running.waitForExit();
+          } catch (error) {
+            return fail(
+              `${context}: once the hold file is deleted the command must ` +
+                `proceed and complete normally (SPEC 13.5) — ` +
+                `${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+          assertExitCode(
+            result,
+            0,
+            `${context}: completes normally once the hold file is deleted ` +
+              `(SPEC 13.5)`,
+          );
+        } finally {
+          running.kill();
+          await releaseHoldFile(hold);
+        }
+        const kind = await workspace.kind(sessionRel("n"));
+        if (kind !== "file") {
+          fail(
+            `${context}: after completing normally, the session file exists ` +
+              `as a plain file at ${sessionRel("n")} (SPEC 10.1); found ${kind}`,
+          );
+        }
+
+        // Seam neutrality on this arm: the no-seam twin runs the same
+        // operation on the same stale state without `--test-hold`, and the
+        // final trees are compared whole — sources, journal, sessions,
+        // derived files, and graph data (both refresh, to the same state).
+        await expectExit(
+          product,
+          twinNoSeam,
+          create,
+          0,
+          "T13.5-1 (stale workspace, twin) `review create --strategy audit " +
+            "--name n` run without --test-hold on the identical stale twin " +
+            "workspace (SPEC 13.5)",
+        );
+        await assertDirectoriesEqual(
+          workspace.root,
+          twinNoSeam.root,
+          `${context} vs its no-seam twin: the final workspace state of the ` +
+            `held-then-released run — sources, journal, sessions, derived ` +
+            `files, and graph data — is byte-identical to the same operation ` +
+            `run without --test-hold on an identical twin workspace (SPEC ` +
+            `13.5 seam neutrality; a product-to-itself comparison under H-4, ` +
+            `well-defined across directories per H-6)`,
+        );
+
+        // The refresh (SPEC 13.3, T10.1-1): after release the graph data is
+        // refreshed — byte-identical to what `build` writes on the build
+        // twin, the edit leaving the recorded derived-file paths unchanged.
+        await assertDirectoriesEqual(
+          workspace.root,
+          twinBuild.root,
+          `${context} vs its build twin, graph data alone (everything ` +
+            `under .xspec/ but the journal and .xspec/reviews/): after ` +
+            `release the 13.3 refresh has run, writing exactly what ` +
+            `\`build\` writes on an identically edited twin — the recorded ` +
+            `derived-file paths, which the edit leaves unchanged, excepted ` +
+            `(SPEC 13.3, 13.5; T10.1-1; a product-to-itself comparison ` +
+            `under H-4/H-6)`,
+          { exclude: excludeAllButGraphData },
+        );
+      });
+    });
+  });
+}
+
 const T13_5_1 = defineProductTest({
   id: "T13.5-1",
   title:
-    "each mutating command (`rename`, file-form `move`, `review create/resolve/split`) with `--test-hold` creates an empty file at the path after acquiring exclusivity and before modifying anything (workspace byte-identical while held), proceeds only once the file is deleted, and completes normally, the held-then-released run's final workspace state — sources, journal, sessions, derived files, and graph data — byte-identical to the same operation run without `--test-hold` on an identical twin workspace (seam neutrality: the seam changes no other behavior; H-4/H-6); anything at the hold path — file, directory, or symlink — fails the command exit 2 without modifying anything; `build` and `query` given `--test-hold` fail exit 2 as an unknown flag (SPEC 13.5, 12.0)",
+    "each mutating command (`rename`, file-form `move`, `review create/resolve/split`) with `--test-hold` creates an empty file at the path after acquiring exclusivity and before modifying anything (workspace byte-identical while held), proceeds only once the file is deleted, and completes normally, the held-then-released run's final workspace state — sources, journal, sessions, derived files, and graph data — byte-identical to the same operation run without `--test-hold` on an identical twin workspace (seam neutrality: the seam changes no other behavior; H-4/H-6); on a workspace whose graph data is stale (a section's text edited after `build`, the workspace still valid) `review create --strategy audit --test-hold` leaves graph data and every other workspace file byte-identical while held — the hold precedes the 13.3 refresh too — and after release creates the session and refreshes the graph data to what `build` writes on an identical twin; anything at the hold path — file, directory, or symlink — fails the command exit 2 without modifying anything; `build` and `query` given `--test-hold` fail exit 2 as an unknown flag (SPEC 13.5, 13.3, 12.0)",
   run: async (product) => {
+    // Every arm below stages itself on a freshly built workspace with no
+    // refresh pending (CERTIFICATIONS.md §CONF-CORE's freshness constraint);
+    // the stale-workspace arm at the end stages its own.
     await withWorkspace(CORE_DECL, async (workspace) => {
       // Seam neutrality (SPEC 13.5: the seam changes no other behavior): an
       // identical twin workspace is driven through the exact same command
@@ -686,6 +896,11 @@ const T13_5_1 = defineProductTest({
         );
       }
     });
+
+    // Stale-workspace arm (SPEC 13.5: the hold precedes every modification,
+    // the 13.3 refresh included) — on its own workspaces, the only in-scope
+    // mutating command started on stale graph data.
+    await staleWorkspaceArm(product);
   },
 });
 

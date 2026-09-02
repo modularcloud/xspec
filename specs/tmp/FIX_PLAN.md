@@ -65,45 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage A — certification gate: CONF-CORE refresh, T13.5-1 stale arm, VIOL-CORE-EARLYREFRESH, manifest
 
-### Task 2 — T13.5-1: stale-workspace arm (`review create --strategy audit --test-hold` on stale graph data)
-
-Cites: TEST-SPEC T13.5-1 ("Stale-workspace arm (13.5: the hold precedes every
-modification, the 13.3 refresh included): on a workspace whose graph data is
-stale — a section's text edited after `build`, the workspace still valid —
-`review create --strategy audit --test-hold`: while held, graph data, and every
-other workspace file, is byte-identical to its pre-invocation state; after
-release the session is created and the graph data refreshed (T10.1-1) —
-discriminating a product that refreshes before acquiring exclusivity");
-CERTIFICATIONS.md §CONF-CORE staging constraints (the stale arm is the only
-in-scope mutating command started on stale graph data; the basic arm and every
-other held command start on a freshly built workspace with no refresh pending);
-§VIOL-CORE-EARLYREFRESH expected failures (fails on the while-held compare of
-this arm alone). SPEC 13.3, 13.5.
-
-Now: `test/suite/registry/section-13.5.ts` T13.5-1 has the basic, seam-neutrality,
-occupied-hold-path and unknown-flag arms; no stale/refresh staging anywhere in
-the file.
-
-Do: add the arm to T13.5-1 (same ID, same registered body): build a workspace
-drawn from CONF-CORE's surface (one spec group, plain `.mdx` sections, no
-imports/`d`/embeddings/tags, no git, no `code`/`markdown`/`coverage`/`policy`),
-`build` it, edit one section's own text so the workspace stays valid, snapshot
-every workspace file (`.xspec/` included), then run `review create --name <n>
---strategy audit --test-hold <path outside the workspace>` through the
-existing hold choreography; while held assert the whole workspace byte-identical
-to the snapshot (graph data included — the compare must be scoped to include
-`.xspec/graph.json`, the one file a pre-hold refresh would change); release;
-assert exit 0, the session file exists, and graph data now equals what `build`
-writes on an identical twin (product-to-itself compare under H-4/H-6, as the
-seam-neutrality arm already does). Keep every other arm's fixture freshly built
-(the CERTIFICATIONS freshness constraint).
-
-Verify: `npx vitest run --config test/vitest.config.ts --project suite
-test/suite/section-13.5.test.ts` — T13.5-1 passes against the built product or
-fails as a diagnosed product failure (report which); `npm run test:self`: the
-CONF-CORE conformer (Task 1) passes T13.5-1, VIOL-CORE-EARLYWRITE still fails it,
-no other certification change.
-
 ### Task 3 — VIOL-CORE-EARLYREFRESH executable and deviation switch
 
 Cites: CERTIFICATIONS.md §VIOL-CORE-EARLYREFRESH (Scope CONF-CORE; Deviation:
@@ -130,7 +91,7 @@ Verify: by hand, on a stale workspace as in Task 1, `node
 test/fixtures/conf-core/bin-earlyrefresh.mjs review create --name n --strategy
 audit --test-hold <path>`: while held, `.xspec/graph.json` already holds the
 refreshed bytes; on a current workspace nothing differs from `bin.mjs`. Then run
-T13.5-1 (Task 2) against this binding through the certification runner or a
+T13.5-1 (its stale-workspace arm landed with the Task 2 commit) against this binding through the certification runner or a
 one-off binding: it fails on the stale arm's while-held compare; T6.1-2,
 T10.4-5, T13.4-5, T13.5-2..5 pass. (The manifest entry is Task 4.)
 
