@@ -787,9 +787,10 @@ export const VALUELESS_TAGS_FIXTURE: ValuelessTagsFixture =
  * The exported fixture's declared offsets against its own bytes (staging
  * integrity, T11.4-3's slice-check precedent): each attribute's range slices
  * to its text and the section range to the bearer's whole construct, so
- * T11.4-3 asserts `view` against offsets the build arm has verified.
+ * T11.4-3 asserts `view` against offsets the build arm has verified — and
+ * runs this same check itself, since it may run alone.
  */
-function assertValuelessTagsFixture(): void {
+export function assertValuelessTagsFixture(): void {
   const fixture = VALUELESS_TAGS_FIXTURE;
   const context = "T2.7-3 staging: the exported valueless-`tags` fixture";
   const bytes = Buffer.from(fixture.source, "utf8");

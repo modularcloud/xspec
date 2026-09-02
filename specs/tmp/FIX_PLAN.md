@@ -65,32 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 39 — T11.4-3: stage the valueless prop as T2.7-3's shared `<S id="x" tags>` fixture
-
-Cites: TEST-SPEC T11.4-3 (§11.4: the valueless-prop case is staged as T2.7-3's
-`<S id="x" tags>` — one fixture shared by `build` and `view` — so that `view`'s
-answer for a section whose identity is well-formed but which carries a
-form-invalid valueless prop is asserted as the spec states: identity present,
-the attribute listed in tag order, no unavailability where 11.2 defines none);
-CERTIFICATIONS.md §CONF-AVAIL (bare valueless attributes → 14.17;
-document-order listings); SPEC 11.2, 11.4, 2.7.
-
-Now: `test/suite/registry/section-11.4.ts` T11.4-3 (≈ line 1274) stages
-valueless `tags` only on `<S id="dup" id="dup" note="mystery" {...extras}
-tags>`, whose identity is already unavailable, so a product withdrawing
-identity on the valueless prop alone is not discriminated; nothing is shared
-with `section-2.7.ts`.
-
-Do: import Task 15's exported fixture constant and add a `view` arm on that
-exact file: decode through `decodeViewReport` and assert the node's identity
-is the plain `x`, its `attributes` list the valueless `tags` entry in tag
-order with the datum form T11.4-3 states, and the per-node fields 11.2 leaves
-defined are present; keep the existing compound arm. Prerequisite: Task 15.
-
-Verify: `npx vitest run … test/suite/section-11.4.test.ts`; `npm run
-test:self` green — CONF-AVAIL passes T11.4-3; NULLMARKER and OMIT still fail
-exactly their sets (both list T11.4-3).
-
 ### Task 40 — T12.0-10: missing required flag/argument rows in the syntax class (no configuration load)
 
 Cites: TEST-SPEC T12.0-10 (§12.0 revised: within class 2 the rows include "a

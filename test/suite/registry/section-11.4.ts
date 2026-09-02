@@ -104,8 +104,8 @@
 //   view's substance is pinned at identity level (root and child identity);
 //   ranges, attributes, and interpreted values stay T11.4-1/-3's subject.
 //
-// T11.4-3 — attributes and per-node data (SPEC 11.4, 11.2, 2.7). One
-// workspace, two files, two invocations:
+// T11.4-3 — attributes and per-node data (SPEC 11.4, 11.2, 2.7). Two
+// workspaces, three files, three invocations:
 //
 // - specs/attrs.mdx, staged via the running-offset builder: a
 //   five-attribute section tag `<S id="dup" id="dup" note="mystery"
@@ -145,6 +145,27 @@
 //   structural absence as unavailability owes exit 1 per 11.2's
 //   any-unavailable-datum rule and fails the exit compare; the bare
 //   invocation exits 1 for the matrix file's findings and markers).
+// - The third invocation is a bare `view` over T2.7-3's shared fixture
+//   (`VALUELESS_TAGS_FIXTURE`, imported from section-2.7: the exact
+//   specs/A.mdx bytes the build arm stages — `<S id="ok">` then
+//   `<S id="x" tags>` — with the declared offsets that arm slice-checks
+//   before staging), alone in its own workspace, so build and view share
+//   one fixture (TEST-SPEC T11.4-3). The matrix file's valueless `tags`
+//   rides a tag whose identity the repeated `id` has already withdrawn,
+//   so it cannot ask what this arm asks: the bearer's identity is
+//   well-formed and unique, hence defined (SPEC 11.2: exactly one quoted
+//   static `id` spells; tags/coverage invalidity never undefines identity)
+//   — asserted the plain `specs/A.mdx#x`, never the marker — while the
+//   bare-name prop alone leaves its interpreted tags unavailable beside
+//   the absent-prop default coverage `"required"`, BOTH attribute entries
+//   listed in tag order (the bare name's text the name alone), and the one
+//   14.17 the build reports located within the opening tag's window (the
+//   same `FindingSourceExpectation` T2.7-3 holds the build's finding to),
+//   nothing else (no 14.1: the identity is spelled), exit 1. A product
+//   withdrawing identity on the valueless prop alone, reading the bare
+//   name as an absent prop (the plain default `[]` where 11.2 leaves the
+//   value unavailable), or dropping the valueless entry from the listing
+//   fails here; the sibling `ok` keeps every datum plain as the control.
 //
 // T11.4-4 — imports (SPEC 11.4, 11.2, 2.1). One workspace, two files, one
 // bare `view`, the imports member asserted as ONE exact list:
@@ -294,7 +315,7 @@
 // constraints exactly: spec-only workspaces of `.mdx` sources at valid-UTF-8
 // `#`-free paths, imports as the fixtures stage them; every command driven
 // is drawn from the enumerated surface — T11.4-1's and T11.4-4's bare
-// whole-domain `view`s, T11.4-3's bare `view` plus one `<file>`-operand
+// whole-domain `view`s, T11.4-3's two bare `view`s plus one `<file>`-operand
 // `view`, never `occurrences` or `at` — with NO gate-reference `build` (each
 // answer's own findings member is the staging integrity) and NO snapshot
 // compare (graph-data and refresh behavior are expressly out of CONF-AVAIL
@@ -310,9 +331,10 @@
 // exactly as certified (`null` is never omission — decodeViewReport rejects
 // the absent members). T11.4-3 is the per-node unavailability carrier the
 // document names: under VIOL-AVAIL-NULLMARKER its identity, tags, and
-// coverage unavailability arms read `null` where the test asserts the
-// marker literally (a `null` identity fails the form-exact decode outright;
-// `null` tags/coverage fail the tree compare against the expected marker);
+// coverage unavailability arms — the shared fixture's bare-name `tags`
+// among them — read `null` where the test asserts the marker literally (a
+// `null` identity fails the form-exact decode outright; `null`
+// tags/coverage fail the tree compare against the expected marker);
 // under VIOL-AVAIL-OMIT every stated-`null` member its answers carry (each
 // root's `tags`/`coverage`, every finding's `null` path, the spread entry's
 // `null` name) is absent and the decode rejects the omission, the exit-0
@@ -366,6 +388,10 @@ import {
   SPEC_AND_CODE_CONFIG,
   SPECS_ONLY_CONFIG,
 } from "./section-11.2.js";
+import {
+  assertValuelessTagsFixture,
+  VALUELESS_TAGS_FIXTURE,
+} from "./section-2.7.js";
 import {
   assertConditionCounts,
   assertFindingLocated,
@@ -1270,10 +1296,54 @@ const CLEAN_TREE: AttributeDataShape = {
   ],
 };
 
+// T2.7-3's shared fixture (module header): the exact specs/A.mdx bytes the
+// build arm stages, with the offsets that arm verifies — build and view
+// share one fixture (TEST-SPEC T11.4-3).
+const SHARED = VALUELESS_TAGS_FIXTURE;
+const SHARED_ROOT_RANGE: SourceRange = {
+  start: 0,
+  end: Buffer.byteLength(SHARED.source, "utf8"),
+};
+
+const SHARED_TREE: AttributeDataShape = {
+  identity: SHARED.file,
+  range: SHARED_ROOT_RANGE,
+  attributes: [],
+  tags: null,
+  coverage: null,
+  children: [
+    {
+      // The valid sibling: every datum plain — its identity defined, its
+      // absent props the defaults (SPEC 11.2) — the control beside the one
+      // defect.
+      identity: `${SHARED.file}#${SHARED.sibling.id}`,
+      range: SHARED.sibling.sectionRange,
+      attributes: SHARED.sibling.attributes,
+      tags: [],
+      coverage: "required",
+      children: [],
+    },
+    {
+      // The bearer: exactly one quoted static `id`, well-formed and unique,
+      // spells and defines its identity whatever invalid-form prop stands
+      // beside it (SPEC 11.2) — the plain value, never the marker; BOTH
+      // attribute entries in tag order, the bare name's text the name alone
+      // (SPEC 11.4); interpreted tags unavailable (a valueless prop is no
+      // quoted static string, SPEC 2.7), coverage the absent-prop default.
+      identity: `${SHARED.file}#${SHARED.id}`,
+      range: SHARED.sectionRange,
+      attributes: SHARED.attributes,
+      tags: UNAVAILABLE,
+      coverage: "required",
+      children: [],
+    },
+  ],
+};
+
 const T11_4_3 = defineProductTest({
   id: "T11.4-3",
   title:
-    'raw attribute spellings as parsed, one entry per spelled attribute in tag order on the five-attribute tag `<S id="dup" id="dup" note="mystery" {...extras} tags>` — a repeated `id` (BOTH entries), an unknown prop, a spread attribute (its `name` structurally absent — the stated `null` — its source text the whole braced construct), a valueless bare-name `tags` — each entry\'s name, range, and source text byte-asserted against precomputed offsets behind a multi-byte prefix; inclusion is by form: every invalid form stays a listed entry, its invalidity a located finding beside the view, never a view omission — exactly five 14.17 (those four plus a braced `coverage={"none"}` on a second section), each located in the matrix file; per-node `identity`, `tags`, `coverage` each plain or explicitly unavailable per T11.2-2, every state carried once (identity unavailable on the repeated-`id` bearer; tags unavailable on the valueless `tags` beside its absent-prop default coverage "required"; coverage unavailable on the braced value beside its defined identity and default empty tags; all three plain in the sibling file); a root\'s `tags` and `coverage` are structurally absent — the stated `null`, never the unavailability marker, no finding and no exit-1 consequence: the finding-free specs/clean.mdx named as a `<file>` operand exits 0 with them `null`, the bare whole-domain view exiting 1 for the matrix file\'s findings and markers (SPEC 11.4, 11.2, 2.7, 12.7, 14; CERTIFICATIONS.md CONF-AVAIL in scope)',
+    'raw attribute spellings as parsed, one entry per spelled attribute in tag order on the five-attribute tag `<S id="dup" id="dup" note="mystery" {...extras} tags>` — a repeated `id` (BOTH entries), an unknown prop, a spread attribute (its `name` structurally absent — the stated `null` — its source text the whole braced construct), a valueless bare-name `tags` — each entry\'s name, range, and source text byte-asserted against precomputed offsets behind a multi-byte prefix; inclusion is by form: every invalid form stays a listed entry, its invalidity a located finding beside the view, never a view omission — exactly five 14.17 (those four plus a braced `coverage={"none"}` on a second section), each located in the matrix file; per-node `identity`, `tags`, `coverage` each plain or explicitly unavailable per T11.2-2, every state carried once (identity unavailable on the repeated-`id` bearer; tags unavailable on the valueless `tags` beside its absent-prop default coverage "required"; coverage unavailable on the braced value beside its defined identity and default empty tags; all three plain in the sibling file); a root\'s `tags` and `coverage` are structurally absent — the stated `null`, never the unavailability marker, no finding and no exit-1 consequence: the finding-free specs/clean.mdx named as a `<file>` operand exits 0 with them `null`, the bare whole-domain view exiting 1 for the matrix file\'s findings and markers; T2.7-3\'s shared `<S id="x" tags>` fixture (specs/A.mdx, the exact bytes its build arm stages) viewed bare in its own workspace: the bearer\'s identity the plain `specs/A.mdx#x` — exactly one quoted static `id`, well-formed and unique, keeps its defined identity whatever invalid-form prop stands beside it — its `id` and bare-name `tags` entries listed in tag order at the fixture\'s declared offsets, its interpreted tags unavailable beside the absent-prop default coverage "required", the one 14.17 the build reports located within the opening tag\'s window and nothing else (never 14.1), exit 1, the valid sibling every datum plain (SPEC 11.4, 11.2, 2.7, 12.7, 14; CERTIFICATIONS.md CONF-AVAIL in scope)',
   run: async (product) => {
     // Fixture self-checks (T5.7-2 discipline) — composed-range arithmetic
     // proven against the staged bytes before any product invocation.
@@ -1315,6 +1385,16 @@ const T11_4_3 = defineProductTest({
       "the clean construct",
     );
     sliceCheck(CLEAN_SOURCE, CLEAN_ROOT_RANGE, CLEAN_SOURCE, "the clean file");
+    // The shared fixture's declared offsets against its own bytes: the
+    // fixture's own check (section-2.7), run here too since this test may
+    // run alone, plus the root range this module derives.
+    assertValuelessTagsFixture();
+    sliceCheck(
+      SHARED.source,
+      SHARED_ROOT_RANGE,
+      SHARED.source,
+      "the shared file",
+    );
 
     const workspace = await TestWorkspace.create({
       files: {
@@ -1462,6 +1542,88 @@ const T11_4_3 = defineProductTest({
       );
     } finally {
       await workspace.dispose();
+    }
+
+    // --- Invocation 3: T2.7-3's shared fixture, viewed bare in its own
+    // workspace (module header) — the identity question the matrix file
+    // cannot ask: a well-formed, unique `id` beside a valueless `tags`.
+    const sharedWorkspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [SHARED.file]: SHARED.source,
+      },
+    });
+    try {
+      const sharedContext =
+        'T11.4-3 bare `view` over T2.7-3\'s shared `<S id="x" tags>` fixture';
+      const sharedResult = await expectExit(
+        product,
+        sharedWorkspace,
+        ["view"],
+        1,
+        `${sharedContext} — the answer carries the bare-name prop's 14.17 ` +
+          `and its explicitly-unavailable tags datum, so the invocation ` +
+          `exits 1 with the full document still emitted (SPEC 11.2, 11.4)`,
+      );
+      const sharedReport = decodeViewReport(
+        parseJsonStdout(
+          sharedResult,
+          `${sharedContext} — a single JSON document is the only output ` +
+            `form, with or without --json (SPEC 11)`,
+        ),
+        { text: false },
+        sharedContext,
+      );
+      assertConditionCounts(
+        sharedReport.findings,
+        { "14.17": 1 },
+        `${sharedContext}: exactly the one 14.17 T2.7-3's build arm ` +
+          `asserts on the same bytes accompanies the view — the valueless ` +
+          `tags (SPEC 2.7, 14) — and nothing else: no 14.1 (the bearer ` +
+          `spells an identity: exactly one quoted static id, SPEC 11.2), ` +
+          `no 14.2/14.3 (ok and x are unique and conformant)`,
+      );
+      assertFindingLocated(
+        sharedReport.findings[0]!,
+        SHARED.finding,
+        `${sharedContext} — the 14.17 locates in ${SHARED.file} within ` +
+          `the bearer's opening tag, the window T2.7-3 holds the build's ` +
+          `finding to: the condition beside the view is the condition the ` +
+          `build reports (SPEC 11.2, 14)`,
+      );
+      assertSameJson(
+        sharedReport.views.map((view) => view.file),
+        [SHARED.file],
+        `${sharedContext}: the one discovered spec source is viewed (SPEC 11.4)`,
+      );
+      assertSameJson(
+        projectAttributeData(sharedReport.views[0]!.root),
+        SHARED_TREE,
+        `${sharedContext} — ${SHARED.file}: the bearer's identity is the ` +
+          `plain "${SHARED.file}#${SHARED.id}" — exactly one quoted static ` +
+          `id, well-formed and unique, spells and defines it whatever ` +
+          `invalid-form prop stands beside it (SPEC 11.2: tags/coverage ` +
+          `invalidity never undefines identity; a product withdrawing ` +
+          `identity on the valueless prop alone fails) — its attributes ` +
+          `the id entry then the bare-name tags entry in tag order, each ` +
+          `byte-exact at the fixture's declared offsets, the bare name's ` +
+          `text the name alone (SPEC 11.4: inclusion is by form), its ` +
+          `interpreted tags explicitly unavailable (a valueless prop is ` +
+          `no quoted static string, SPEC 2.7 — a product reading the bare ` +
+          `name as an absent prop reports the plain default [] and fails) ` +
+          `beside the absent-prop default coverage "required"; the sibling ` +
+          `ok carries every datum plain, and the root's tags/coverage are ` +
+          `the stated null, never the marker (SPEC 12.7)`,
+      );
+      const sharedView = sharedReport.views[0]!;
+      assertSameJson(
+        [sharedView.imports, sharedView.occurrences, sharedView.comments],
+        [[], [], []],
+        `${sharedContext}: no import, reference spelling, or MDX comment ` +
+          `is staged — empty lists are [], never null (SPEC 11.4, 12.7)`,
+      );
+    } finally {
+      await sharedWorkspace.dispose();
     }
   },
 });
