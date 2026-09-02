@@ -65,31 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 18 — T6.1-1: never-modifies sweep over every command surface
-
-Cites: TEST-SPEC T6.1-1 (the journal is appended only by `rename`/`move`;
-every other command leaves the journal-bearing workspace byte-identical:
-`build`, `check`, `coverage`, `impact --base HEAD`, `review list`, `query
-nodes`, plus `ids`, `show`, `review create/resolve/split`, `occurrences`,
-`view`, `at`, `inventory`, `version`, and `rename --preview` / `move
---preview`, each on a journal-bearing workspace); CERTIFICATIONS.md Exclusions
-(T6.1-1 sweeps every surface — outside CONF-CORE); SPEC 6.1, 6.6.
-
-Now: `test/suite/registry/section-6.1.ts` ≈ lines 311–316 byte-compare only the
-first six commands.
-
-Do: extend the sweep so each listed command runs on a workspace holding a
-non-empty journal (and, for the review subcommands, an `audit` session and an
-unblocked item; for `impact`, a resolvable commit) and the journal file is
-byte-identical before/after each invocation (compare the journal — and, where
-the existing sweep compares more, the same set); the `--preview` runs must
-leave the journal and every source byte-identical. Keep each invocation's
-own exit/answer decoded through the adapters (no assertion beyond a normal
-completion is required here).
-
-Verify: `npx vitest run … test/suite/section-6.1.test.ts`; `npm run test:self`
-green.
-
 ### Task 19 — T6.4-2: keepable reference forms, whole-file byte contract, single-quoted `id` attributes
 
 Cites: TEST-SPEC T6.4-2 (revised: minimal in-place edits — a computed

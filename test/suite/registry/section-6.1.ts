@@ -13,13 +13,18 @@
 // workspace state; content is otherwise opaque — assertions here stick to the
 // stated observable contract (line-oriented, append-only form; H-4).
 //
-// Staging constraint (CERTIFICATIONS.md §CONF-CORE — T6.1-1 and T6.1-2 are
-// in-scope): their fixtures stay within CONF-CORE's scope — one configured
-// spec group of `.mdx` sources without imports, embeddings, `d` props, or
-// tags; no `code`, `markdown`, `coverage`, or `policy` keys; no git; the only
-// mutating commands driven are `rename` and file-form `move`. In this
-// git-less scope `impact --base` is the exit-2 unreadable-baseline case
-// (SPEC 6.3, 12.0).
+// Staging constraint (CERTIFICATIONS.md §CONF-CORE — T6.1-2 is in-scope):
+// its fixture stays within CONF-CORE's scope — one configured spec group of
+// `.mdx` sources without imports, embeddings, `d` props, or tags; no `code`,
+// `markdown`, `coverage`, or `policy` keys; no git; the only mutating
+// commands driven are `rename` and file-form `move`. T6.1-1 lies outside
+// every certification scope (CERTIFICATIONS.md §Exclusions): its
+// never-modifies sweep covers every command surface, so its workspace adds
+// what the sweep needs on top of the same files — a git baseline commit (a
+// resolvable `impact --base HEAD`, SPEC 6.3), an `audit` review session
+// (`create`/`split`/`resolve` and the read subcommands, 10.7), the 11.2
+// surfaces (`occurrences`, `view`, `at`), `inventory`, `version`, and the
+// 6.6 previews of both operations.
 //
 // Conservative operationalizations (noted per H-4):
 // - "One entry per line" + "the journal is written only by rename and move"
@@ -40,7 +45,24 @@
 
 import { Buffer } from "node:buffer";
 import type { Finding } from "../../helpers/adapters/index.js";
-import { decodeFindingsReport } from "../../helpers/adapters/index.js";
+import {
+  decodeAtReport,
+  decodeCoverageReport,
+  decodeExportReport,
+  decodeFindingsReport,
+  decodeIdsReport,
+  decodeImpactReport,
+  decodeInventoryDocument,
+  decodeItemReport,
+  decodeNextReport,
+  decodeNodeRowsReport,
+  decodeOccurrencesReport,
+  decodePreviewReport,
+  decodeSessionListReport,
+  decodeSessionStatusReport,
+  decodeVersionDocument,
+  decodeViewReport,
+} from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
   fail,
@@ -48,7 +70,8 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
-import type { ProductBinding } from "../../helpers/subprocess.js";
+import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { buildOk, expectExit } from "./support.js";
 
@@ -93,6 +116,32 @@ async function withCoreWorkspace<T>(
   } finally {
     await workspace.dispose();
   }
+}
+
+/**
+ * Stage T6.1-1's sweep workspace: the same files plus a git baseline commit
+ * holding the configuration and sources exactly as staged, so `impact --base
+ * HEAD` resolves (SPEC 6.3). The commit precedes `build`, so the ref holds
+ * no derived file and no journal — a journal absent at the ref is the empty
+ * journal, a prefix of every journal, and the current entries replay onto
+ * the baseline identities (6.3).
+ */
+async function withSweepWorkspace<T>(
+  body: (workspace: TestWorkspace) => Promise<T>,
+): Promise<T> {
+  const workspace = await TestWorkspace.create({ files: CORE_FILES });
+  try {
+    await workspace.gitInit();
+    await workspace.gitCommitAll("baseline");
+    return await body(workspace);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/** Snapshot exclusion pruning the top-level `.git` subtree. */
+function excludeGitDir(relPathBytes: Uint8Array): boolean {
+  return Buffer.from(relPathBytes).toString("latin1") === ".git";
 }
 
 /**
@@ -170,7 +219,8 @@ function assertJournalAppend(
  * Byte-compare the journal around one command (T6.1-1 "never modify it"):
  * read it, run the command asserting the exact exit code (H-5), read it
  * again, assert byte identity — a deleted or replaced journal fails via
- * `readJournal`'s plain-file check.
+ * `readJournal`'s plain-file check. Returns the run so the caller can decode
+ * its answer.
  */
 async function assertLeavesJournalUnchanged(
   product: ProductBinding,
@@ -178,13 +228,13 @@ async function assertLeavesJournalUnchanged(
   argv: readonly string[],
   exitCode: number,
   context: string,
-): Promise<void> {
+): Promise<RunResult> {
   const command = argv.join(" ");
   const before = await readJournal(
     workspace,
     `${context}: before \`${command}\``,
   );
-  await expectExit(
+  const result = await expectExit(
     product,
     workspace,
     argv,
@@ -202,6 +252,7 @@ async function assertLeavesJournalUnchanged(
       `written only by \`rename\` and \`move\` (byte-compare around the ` +
       `command; SPEC 6.1, 13.4)`,
   );
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,9 +262,9 @@ async function assertLeavesJournalUnchanged(
 const T6_1_1 = defineProductTest({
   id: "T6.1-1",
   title:
-    "no journal exists after `build` in a fresh workspace; the file appears at .xspec/journal with the first rename/move; each subsequent operation appends exactly one line-oriented entry and rewrites nothing above it (byte-prefix asserted); build, check, coverage, impact, review, query never modify it (byte-compare around each) (SPEC 6.1, 13.4)",
+    "no journal exists after `build` in a fresh workspace; the file appears at .xspec/journal with the first rename/move; each subsequent operation appends exactly one line-oriented entry and rewrites nothing above it (byte-prefix asserted); every other command surface — build, check, ids, show, coverage, impact, review (reads and create/split/resolve alike), query, occurrences, view, at, inventory, version, and rename/move --preview — never modifies it (byte-compare around each on the journal-bearing workspace; the previews leave the whole workspace byte-identical) (SPEC 6.1, 6.6, 13.4)",
   run: async (product) => {
-    await withCoreWorkspace(async (workspace) => {
+    await withSweepWorkspace(async (workspace) => {
       // Fresh workspace: `build` succeeds and creates no journal.
       await buildOk(
         product,
@@ -292,37 +343,139 @@ const T6_1_1 = defineProductTest({
         "T6.1-1",
       );
 
-      // `build`, `check`, `coverage`, `impact`, `review`, `query` never
-      // modify the journal — byte-compare around each, with the journal
-      // present and non-empty so an append or truncation is visible. Exit
-      // codes (H-5): `build` 0 (the workspace is valid); `check` 0 (rename
-      // and move finish by regenerating derived files exactly as `build`
-      // does, SPEC 6.4/6.5, and the product-written journal is well-formed);
-      // `coverage` 0 reporting zero profiles (no `coverage` key, SPEC 7.4);
-      // `impact --base HEAD` 2 — the git-less workspace makes the baseline
-      // unreadable, a usage error (SPEC 6.3, 12.0), and even the refused
-      // invocation must leave the journal untouched; `review list` 0 (a read
-      // subcommand, informational with no sessions, SPEC 12.0); `query
-      // nodes` 0.
-      const readArms: readonly {
-        readonly argv: readonly string[];
-        readonly exitCode: number;
-      }[] = [
-        { argv: ["build"], exitCode: 0 },
-        { argv: ["check"], exitCode: 0 },
-        { argv: ["coverage"], exitCode: 0 },
-        { argv: ["impact", "--base", "HEAD"], exitCode: 2 },
-        { argv: ["review", "list"], exitCode: 0 },
-        { argv: ["query", "nodes"], exitCode: 0 },
-      ];
-      for (const arm of readArms) {
+      // Every other command surface never modifies the journal (SPEC 6.1
+      // "written only by rename and move"; 13.4): byte-compare it around
+      // each invocation, with the journal present and non-empty so an
+      // append or truncation is visible. Exit codes (H-5) are all 0: the
+      // workspace is valid; `check` finds nothing (rename and move finish by
+      // regenerating derived files exactly as `build` does, SPEC 6.4/6.5,
+      // and the product-written journal is well-formed); `coverage` reports
+      // zero profiles (no `coverage` key, 7.4); `impact --base HEAD`
+      // resolves against the staged baseline commit, the current journal
+      // replaying onto it (6.3); the `review` subcommands drive an `audit`
+      // session (10.6, 10.7); the 11 surfaces answer complete, finding-free
+      // documents; `version` is workspace-independent (12.6); and each
+      // preview succeeds exactly as its real operation would (6.6). Answers
+      // are decoded form-exactly through the adapters (H-3) — no value
+      // assertion is this test's business beyond a normal completion.
+      const sweepContext = "T6.1-1 never-modifies sweep";
+      const sweep = async (
+        argv: readonly string[],
+        exitCode: number,
+      ): Promise<RunResult> =>
         await assertLeavesJournalUnchanged(
           product,
           workspace,
-          arm.argv,
-          arm.exitCode,
-          "T6.1-1 read sweep",
+          argv,
+          exitCode,
+          sweepContext,
         );
+      const sweepJson = async <T>(
+        argv: readonly string[],
+        decode: (doc: unknown, context: string) => T,
+      ): Promise<T> => {
+        const context = `${sweepContext}: \`${argv.join(" ")}\` answer`;
+        return decode(parseJsonStdout(await sweep(argv, 0), context), context);
+      };
+
+      await sweep(["build"], 0);
+      await sweep(["check"], 0);
+      await sweepJson(["ids", "--json"], decodeIdsReport);
+      await sweep(["show", "specs/A.mdx#a3"], 0);
+      await sweepJson(["coverage", "--json"], decodeCoverageReport);
+      await sweepJson(
+        ["impact", "--base", "HEAD", "--json"],
+        decodeImpactReport,
+      );
+
+      // `review`: `create` under the audit strategy — one subtree-coherence
+      // item per requirement node, leaves unblocked (10.6) — then the reads,
+      // a `split` of `a3`'s item (its scope root has the child `a3.k`), and a
+      // `resolve` of the first unblocked item `next` reports (10.7).
+      await sweep(
+        ["review", "create", "--strategy", "audit", "--name", "s"],
+        0,
+      );
+      await sweepJson(["review", "list", "--json"], decodeSessionListReport);
+      const status = await sweepJson(
+        ["review", "status", "s", "--json"],
+        decodeSessionStatusReport,
+      );
+      const splitRow = status.items.find(
+        (row) =>
+          row.kind === "subtree-coherence" && row.scope === "specs/A.mdx#a3",
+      );
+      if (splitRow === undefined) {
+        fail(
+          `${sweepContext}: the audit session must hold a subtree-coherence ` +
+            `item scoped to specs/A.mdx#a3 — one item per requirement node ` +
+            `(SPEC 10.6); \`review status s --json\` listed ` +
+            `${String(status.items.length)} item(s)`,
+        );
+      }
+      await sweepJson(["review", "next", "s", "--json"], decodeNextReport);
+      await sweep(["review", "split", "s", splitRow.id], 0);
+      const next = await sweepJson(
+        ["review", "next", "s", "--json"],
+        decodeNextReport,
+      );
+      if (next.item === undefined) {
+        fail(
+          `${sweepContext}: \`review next s --json\` must report an ` +
+            `unblocked needing-review item — the leaf items of an audit ` +
+            `session are unblocked and unresolved (SPEC 10.6, 10.7); the ` +
+            `session reports itself fully resolved`,
+        );
+      }
+      await sweep(
+        ["review", "resolve", "s", next.item.id, "--status", "updated"],
+        0,
+      );
+      await sweepJson(
+        ["review", "show", "s", next.item.id, "--json"],
+        decodeItemReport,
+      );
+      await sweepJson(["review", "export", "s"], decodeExportReport);
+
+      await sweepJson(["query", "nodes"], decodeNodeRowsReport);
+      await sweepJson(["occurrences"], decodeOccurrencesReport);
+      await sweepJson(["view"], (doc, context) =>
+        decodeViewReport(doc, { text: false }, context),
+      );
+      await sweepJson(["at", "specs/A.mdx", "0"], decodeAtReport);
+      await sweepJson(["inventory"], decodeInventoryDocument);
+      await sweepJson(["version"], decodeVersionDocument);
+
+      // Previews modify nothing at all (SPEC 6.6: no sources, no journal, no
+      // derived files, no graph data): beyond the journal compare, the whole
+      // workspace tree (the git directory aside — a preview reads no git)
+      // is byte-compared around each. `rename`, the file form of `move`,
+      // and the section form — every operation with a preview.
+      const previewArms: readonly (readonly string[])[] = [
+        ["rename", "specs/A.mdx", "a3", "a4", "--preview"],
+        ["rename", "specs/A.mdx", "a3", "a4", "--preview", "--json"],
+        ["move", "specs/Bmoved.mdx", "specs/B.mdx", "--preview", "--json"],
+        [
+          "move",
+          "specs/A.mdx#a3.k",
+          "specs/Bmoved.mdx#b.k",
+          "--preview",
+          "--json",
+        ],
+      ];
+      for (const argv of previewArms) {
+        const command = argv.join(" ");
+        const result = await assertLeavesUnchanged(
+          workspace.root,
+          () => sweep(argv, 0),
+          `T6.1-1 preview sweep: \`${command}\` must modify nothing — no ` +
+            `sources, no journal, no derived files, no graph data (SPEC 6.6)`,
+          { exclude: excludeGitDir },
+        );
+        if (argv.includes("--json")) {
+          const context = `T6.1-1 preview sweep: \`${command}\` answer`;
+          decodePreviewReport(parseJsonStdout(result, context), context);
+        }
       }
     });
   },
