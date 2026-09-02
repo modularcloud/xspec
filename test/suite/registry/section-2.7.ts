@@ -97,7 +97,8 @@ export default defineConfig({
 // Shared negative-arm template (the SUITE-02/03 discipline): a valid sibling
 // first, so the offending construct is a proper sub-range of the file and the
 // location assertion has teeth.
-const SIBLING = '<S id="ok">\nA valid sibling section.\n</S>\n\n';
+const SIBLING_CONSTRUCT = '<S id="ok">\nA valid sibling section.\n</S>';
+const SIBLING = `${SIBLING_CONSTRUCT}\n\n`;
 
 // T2.7-3's one-defect file: the sibling, then the offending section — its
 // opening tag the staged construct, its body and closing tag fixed — at one
@@ -688,8 +689,11 @@ export interface StagedAttribute {
 
 /**
  * T2.7-3's valueless-`tags` file, the fixture T11.4-3 shares for `view`
- * (TEST-SPEC T11.4-3: one fixture for build and view). Pure ASCII, so string
- * indices are byte offsets; every offset derives from the exact parts, and
+ * (TEST-SPEC T11.4-3: one fixture for build and view — the build arm asserts
+ * its one 14.17; the view arm asserts the bearer's identity defined beside
+ * it, its attribute entries, and its interpreted tags unavailable, SPEC
+ * 11.2/11.4). Pure ASCII, so string indices are byte offsets; every offset —
+ * the bearer's and the valid sibling's — derives from the exact parts, and
  * T2.7-3 slices each back against `source` before staging.
  */
 export interface ValuelessTagsFixture {
@@ -705,6 +709,19 @@ export interface ValuelessTagsFixture {
   readonly sectionRange: SourceRange;
   /** The bearer's attributes in tag order: `id="x"`, then the bare `tags`. */
   readonly attributes: readonly StagedAttribute[];
+  /**
+   * The valid sibling preceding the bearer — `<S id="ok">`, the file's first
+   * bytes — every datum of it plain under SPEC 11.2 (the defaults for its
+   * absent `tags` and `coverage`): the control beside the one defect.
+   */
+  readonly sibling: {
+    /** Its spelled `id` value. */
+    readonly id: string;
+    /** Its construct range, opening tag through closing tag (SPEC 1.7). */
+    readonly sectionRange: SourceRange;
+    /** Its attributes in tag order: the one `id="ok"`. */
+    readonly attributes: readonly StagedAttribute[];
+  };
   /** Where the one 14.17 finding must locate: the opening tag's window (SPEC 14). */
   readonly finding: FindingSourceExpectation;
 }
@@ -716,6 +733,8 @@ function valuelessTagsFixture(): ValuelessTagsFixture {
   const tagStart = Buffer.byteLength(SIBLING, "utf8");
   const idStart = tagStart + Buffer.byteLength("<S ", "utf8");
   const tagsStart = idStart + Buffer.byteLength(`${idText} `, "utf8");
+  const siblingIdText = 'id="ok"';
+  const siblingIdStart = Buffer.byteLength("<S ", "utf8");
   return {
     file: INVALID_PROP_FILE,
     source: invalidPropSource(construct),
@@ -737,6 +756,23 @@ function valuelessTagsFixture(): ValuelessTagsFixture {
         text: tagsText,
       },
     ],
+    sibling: {
+      id: "ok",
+      sectionRange: {
+        start: 0,
+        end: Buffer.byteLength(SIBLING_CONSTRUCT, "utf8"),
+      },
+      attributes: [
+        {
+          name: "id",
+          range: {
+            start: siblingIdStart,
+            end: siblingIdStart + siblingIdText.length,
+          },
+          text: siblingIdText,
+        },
+      ],
+    },
     finding: {
       file: INVALID_PROP_FILE,
       window: byteWindow(SIBLING, construct),
@@ -770,6 +806,19 @@ function assertValuelessTagsFixture(): void {
     slice(fixture.sectionRange),
     fixture.construct + INVALID_PROP_BODY,
     `${context}: the section range slices to the bearer's whole construct`,
+  );
+  for (const attribute of fixture.sibling.attributes) {
+    assertSameJson(
+      slice(attribute.range),
+      attribute.text,
+      `${context}: the sibling's \`${attribute.name}\` attribute's range ` +
+        `slices to its text`,
+    );
+  }
+  assertSameJson(
+    slice(fixture.sibling.sectionRange),
+    SIBLING_CONSTRUCT,
+    `${context}: the sibling's section range slices to its whole construct`,
   );
 }
 
