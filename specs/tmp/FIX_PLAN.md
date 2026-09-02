@@ -65,50 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage C — CONF-DISC code-group surface (fixture and suite)
 
-### Task 10 — CONF-DISC conformer: code groups of well-formed `.ts` sources and `query edges --from <path>`
-
-Cites: CERTIFICATIONS.md §CONF-DISC Scope (revised): "code groups (7.2) of
-well-formed `.ts` sources spelling no marker, spec-module import, or `text`
-call (4) — each discovered code source an edgeless whole-file code location
-(4.6)"; command surface "`query edges --from <path>` (11.1) as the observation
-of the discovered code set — for a discovered code source's whole-file
-location, exit 0 with its empty edge enumeration, the JSON document 11 makes
-its only output form; for a path in no configured group, an excluded derived
-path included, the usage error of 12.0 (exit 2, the error document of 12.7), a
-check preceding the gate of 13.3"; the 13.4 exclusion applies to code globs too
-(the module `build` generates next to a source, files under `.xspec/`, enabled
-emit destinations). SPEC 7.2, 11.1, 12.0, 12.7, 13.1, 13.4.
-
-Now: `test/fixtures/conf-disc/product.mjs` refuses any non-empty `code` group
-("outside this fixture's scope", ≈ line 526) and implements no `query`
-command; `build` on a discovered spec source generates the next-to-source
-module (13.1) that a code glob would match.
-
-Do: extend the conformer: accept `code` groups (same glob grammar, dot-segment
-rule, no link following, byte-wise matching as the spec side; patterns
-resolving outside the root → 14.14), discover `.ts` matches, exclude 13.4's
-derived paths from the code set exactly as from the spec set (generated
-modules next to sources, `.xspec/` paths, enabled emit destinations), treat
-each discovered code source as an edgeless whole-file location (no parsing
-needed beyond that the file is a well-formed `.ts` the scope stages; keep
-14.14's both-groups rule dormant but implemented if cheap). Add `query edges
---from <path>`: for a discovered code source's whole-file location, exit 0 and
-the empty edge enumeration in the exact 11/12.7 JSON form the harness's query
-adapter decodes (`test/helpers/adapters/query.ts`; match the real product's
-form byte-for-byte for the empty case); for a path in no configured group
-(derived paths included), exit 2 with the 12.7 error document (stable code and
-concerned path as the existing usage-error path renders them), decided before
-any 13.3 gate. Keep every existing behavior and the other three violators'
-switches unchanged. Update the file header's scope description.
-
-Verify: by hand on a staged workspace with a spec group and a code glob such as
-`src/**/*.ts` that also matches `specs/*.ts` generated modules: after `build`,
-`query edges --from src/a.ts` → exit 0, empty enumeration; `--from
-specs/A.xspec.ts` (or whatever 13.1 name the fixture generates) → exit 2 error
-document; `--from .xspec/graph.json` → exit 2. `npm run test:self` stays green
-(T7-4..T7-6 as currently implemented still pass; each DISC violator still fails
-exactly its set).
-
 ### Task 11 — VIOL-DISC-DERIVED: code-group side of the dropped 13.4 exclusion
 
 Cites: CERTIFICATIONS.md §VIOL-DISC-DERIVED Deviation (revised): "a path …
@@ -119,20 +75,28 @@ match — on the code side an edgeless whole-file location"; Expected failures:
 enabled destination — enters the discovered code set, so `query edges --from`
 answers it exit 0 where the arm asserts the unknown-path refusal (12.0)".
 
-Now: the `noDerivedExclusion` switch in `test/fixtures/conf-disc/product.mjs`
-(consumed ≈ line 1040) drops the exclusion on the spec side only; the
-code-group side does not exist before Task 10.
+Now: since Task 10 (the commit adding code groups and `query edges` to the
+fixture), `discoverSources` in `test/fixtures/conf-disc/product.mjs` passes
+the spec-glob matches and the code-glob matches through one 13.4 exclusion
+filter, and `noDerivedExclusion` skips it for both kinds — verified by hand
+on a workspace whose code globs match the generated module, a `.ts` file
+under `.xspec/`, and the enabled emit destination: `bin-derived.mjs query
+edges --from specs/A.xspec.ts` (likewise `--from .xspec/staged.ts` and
+`--from specs/A.md`) → exit 0 with the empty enumeration, while `bin.mjs` →
+exit 2. Only `bin-derived.mjs`'s header comment still describes the
+spec-side-only deviation ("when matched by a spec-group glob … a non-`.mdx`
+occupant then surfaces as 14.19").
 
-Do: make the same single switch also skip the 13.4 exclusion for code-group
-matches (Task 10's code discovery), so `query edges --from <derived path
-matched by the code glob>` answers exit 0 with an empty enumeration under
-`bin-derived.mjs`; update `bin-derived.mjs`'s header comment to the revised
-deviation text. No other behavior changes. Prerequisite: Task 10.
+Do: update `bin-derived.mjs`'s header comment to the revised deviation text
+(both group sides — on the code side each such path an edgeless whole-file
+location that `query edges --from` answers exit 0). No behavior changes.
 
-Verify: by hand (Task 10's workspace): `node test/fixtures/conf-disc/
-bin-derived.mjs query edges --from specs/<generated module>` → exit 0, while
-`bin.mjs` → exit 2; `npm run test:self` green. Once Task 12 lands, the
-certification shows DERIVED failing T7-6 on both group sides.
+Verify: re-run the hand check above (stage `xspec.config.ts` with
+`specs: { main: ["specs/*.mdx"] }`, `code: { src: ["src/**/*.ts",
+"specs/*.ts", ".xspec/*.ts", "specs/*.md"] }`, `markdown: { emit: true }`,
+one `specs/A.mdx`, `src/a.ts`, `.xspec/staged.ts`, `specs/A.md`; `build`
+first); `npm run test:self` green. Once Task 12 lands, the certification
+shows DERIVED failing T7-6 on both group sides.
 
 ### Task 12 — T7-6: code-group exclusion arm observed through `query edges --from`
 

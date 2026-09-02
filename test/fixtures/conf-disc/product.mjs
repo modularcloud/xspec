@@ -14,18 +14,25 @@
 //   file's directory to a discovered source, an undiscovered target failing
 //   with 14.15; `markdown` with `emit: true` and default destinations,
 //   classified by configuration alone (7.3); symbolic links present in the
-//   tree; no code groups (`code` appears only as the empty map), `coverage`,
-//   `policy`, or git; content of derived and emitted files beyond path is out
-//   of scope.
+//   tree; code groups (7.2) of well-formed `.ts` sources spelling no marker,
+//   spec-module import, or `text` call — each discovered code source an
+//   edgeless whole-file code location (4.6), nothing in scope giving a code
+//   file an edge — under the same glob grammar; no `coverage`, `policy`, or
+//   git; content of derived and emitted files beyond path is out of scope.
 // - Command surface: `build` and `ids` (12.3) as the observation of the
-//   discovered set, the configuration-error behavior of 14.14/12.0 for
-//   patterns resolving outside the workspace root, and the source-error
-//   reporting of 14.15.
+//   discovered spec set; `query edges --from <path>` (11.1) as the
+//   observation of the discovered code set — a discovered code source's
+//   whole-file location answers exit 0 with its empty edge enumeration, and
+//   a path in no configured group (an excluded derived path included) is the
+//   usage error of 12.0, a check preceding the gate of 13.3; the
+//   configuration-error behavior of 14.14/12.0 for patterns resolving
+//   outside the workspace root, and the source-error reporting of 14.15 and
+//   14.19.
 // - Contracts under certification: glob semantics of 7 — `*`, `?`, `**`,
 //   byte-wise case-sensitive matching, the dot-segment rule, every other
 //   character a literal — discovery's refusal to follow symbolic links, and
 //   the source exclusion of 13.4 (`.xspec.` names, `.xspec/` paths, and
-//   enabled Markdown emit destinations in no group).
+//   enabled Markdown emit destinations in no spec or code group).
 //
 // Key mechanisms:
 // - The glob matcher is a port of the harness oracle's discovery half
@@ -50,14 +57,23 @@
 //   the entire stdout, and without it stdout stays empty.
 // - Discovery pipeline order (SPEC 7, 13.4): walk plain files (symbolic links
 //   never discovered, never traversed — so link cycles cannot hang the walk),
-//   match the union of all groups' globs, then apply the 13.4 source
-//   exclusion to the matches — paths whose file name contains `.xspec.`,
-//   files under `.xspec/`, and, exactly while `markdown.emit` is true, the
-//   default emit destinations (`X.md` beside each discovered `X.mdx` source;
+//   match the spec groups' globs and the code groups' globs — one matcher,
+//   the same grammar, dot-segment rule, and byte-wise comparison on both
+//   sides — then apply the 13.4 source exclusion to the matches of either
+//   kind — paths whose file name contains `.xspec.`, files under `.xspec/`,
+//   and, exactly while `markdown.emit` is true, the default emit
+//   destinations (`X.md` beside each discovered `X.mdx` spec source;
 //   destinations exist by configuration alone, whether or not emission has
-//   run, 7.3). A surviving match without the `.mdx` extension, or whose path
-//   contains `#`, is a 14.19 finding; exclusion precedes that check, so an
-//   excluded occupant of an emit destination is silently no source.
+//   run, 7.3) — so the module `build` generates beside a source is excluded
+//   from a code glob exactly as from a spec glob. A surviving spec match
+//   without the `.mdx` extension, or a surviving match of either kind whose
+//   path contains `#`, is a 14.19 finding; exclusion precedes that check, so
+//   an excluded occupant of an emit destination is silently no source. A
+//   surviving code match is a discovered code source as it stands: nothing
+//   in scope gives a code file an edge, so it is never read — its whole-file
+//   location is the only graph node it contributes (4.6). The both-groups
+//   rule of 14.14 stays dormant (the staged code globs match no spec-group
+//   file); no check for it is implemented here.
 // - Sources are scanned by a hand-rolled MDX-lite lexer for exactly the
 //   scope's constructs: spec module imports at line start (2.1) and
 //   `<S>`/`<Spec>` opening/self-closing/closing tags with quoted or braced
@@ -82,6 +98,24 @@
 //   workspace-relative path (UTF-8 byte comparison, not code-unit order), IDs
 //   within a file in document order; `--json` emits the single JSON document
 //   as the entire stdout (12.0).
+// - `query edges [--from <graph-node>]` (11.1): JSON-only — the single edge
+//   enumeration `{"edges": [{"from", "to", "kind"}, …]}` is the entire
+//   stdout with or without `--json`, and so is the 12.7 error document on
+//   exit 2 (12.0). The `--from` check runs after configuration loading and
+//   before the 13.3 gate (12.0): a graph node is a discovered code source's
+//   whole-file location (its path), a discovered spec source's root (its
+//   path), or a section it spells (`path#id`); any other spelling — a
+//   derived path the exclusion kept out of every group above all — is the
+//   unknown-graph-node usage error, exit 2, whatever findings the workspace
+//   carries; an unparseable named spec file masks the identity check and
+//   the gate reports the findings (exit 1). The answer is recomputed from
+//   sources as `ids` does: a code location has no edges; a spec root's
+//   outgoing edges are `contains` to its top-level sections and a section's
+//   `contains` to its direct children (5.2) — the scope's sources spell no
+//   reference, so no other kind arises; without `--from`, every edge, files
+//   in byte order. `--to`, `--kinds`, named code units, and the other
+//   `query` subcommands are outside this fixture's scope and are refused
+//   loudly (exit 70, outside the 12.0 partition, never a false answer).
 //
 // Determinism (SPEC 12.0): no wall clock, no randomness, no absolute paths in
 // any output; files in byte order of workspace-relative path; all JSON is
@@ -102,11 +136,14 @@
 //     broken links stay ignored and directory links stay untraversed, so the
 //     walk still terminates and T7-5 fails by assertion, not by hang.
 //   - §VIOL-DISC-DERIVED (CERT-17, bin-derived.mjs): `noDerivedExclusion`,
-//     consumed in `discoverSources`' exclusion filter — the 13.4 source
-//     exclusion is not applied to glob matches, so `.xspec.`-named files,
-//     files under `.xspec/` (where a pattern spells the dot segment), and
-//     occupants of enabled emit destinations are treated as ordinary matches
-//     (a non-`.mdx` occupant then surfaces as 14.19).
+//     consumed in `discoverSources`' exclusion filter — the one filter both
+//     group kinds pass through — so the 13.4 source exclusion is not applied
+//     to glob matches of either kind: `.xspec.`-named files, files under
+//     `.xspec/` (where a pattern spells the dot segment), and occupants of
+//     enabled emit destinations are treated as ordinary matches — on the
+//     spec side a non-`.mdx` occupant then surfaces as 14.19; on the code
+//     side each such path enters the discovered code set as an edgeless
+//     whole-file location, so `query edges --from` answers it exit 0.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -144,6 +181,16 @@ class FindingsError extends Error {
 }
 
 /**
+ * An invocation outside this fixture's scope (CERTIFICATIONS.md §CONF-DISC)
+ * that a conforming product would answer — a `query` subcommand, flag, or
+ * graph-node form no in-scope observation uses. Refused loudly with an exit
+ * code outside the 12.0 partition (as a crash is, below), so a test reaching
+ * it fails on its exit-code assertion with the cause on stderr — never on a
+ * fabricated answer or a false usage error.
+ */
+class ScopeError extends Error {}
+
+/**
  * @typedef {{ condition: string, message: string, file?: string,
  *             location?: { start: number, end: number } }} Finding
  */
@@ -168,9 +215,13 @@ function sortKeysDeep(value) {
   return value;
 }
 
-/** One canonical serializer for emitted JSON. */
+/**
+ * One canonical serializer for emitted JSON: byte-sorted keys, two-space
+ * indentation — the real product's form, so the empty edge enumeration of
+ * `query edges` (`{"edges": []}`) matches it byte for byte.
+ */
 function canonicalJson(value) {
-  return JSON.stringify(sortKeysDeep(value));
+  return JSON.stringify(sortKeysDeep(value), null, 2);
 }
 
 /** Whether anything (file, directory, or symlink) occupies the path. */
@@ -190,7 +241,8 @@ async function pathOccupied(absPath) {
 // header for the hook point each named switch is consumed at:
 // `dialectMetachars` (§VIOL-DISC-DIALECT → parseSegment),
 // `followFileSymlinks` (§VIOL-DISC-SYMLINK → walkPlainFiles),
-// `noDerivedExclusion` (§VIOL-DISC-DERIVED → discoverSources).
+// `noDerivedExclusion` (§VIOL-DISC-DERIVED → discoverSources, both group
+// kinds).
 // ---------------------------------------------------------------------------
 
 let deviations = {};
@@ -446,10 +498,32 @@ function validatedPattern(glob, groupName) {
 }
 
 /**
+ * Validate one group map (SPEC 7.1 spec groups, 7.2 code groups — the same
+ * glob grammar and pattern rules on both sides): each group a list of glob
+ * strings, each pattern validated and resolved by {@link validatedPattern}.
+ * @param {Record<string, unknown>} map @param {string} kind
+ * @param {string} section @returns {Record<string, string[]>}
+ */
+function validatedGroups(map, kind, section) {
+  /** @type {Record<string, string[]>} */
+  const groups = {};
+  for (const [name, globs] of Object.entries(map)) {
+    if (!Array.isArray(globs)) {
+      throw new UsageError(
+        `configuration error: ${kind} group ${name} must be a list of glob strings (SPEC ${section})`,
+      );
+    }
+    groups[name] = globs.map((glob) => validatedPattern(glob, name));
+  }
+  return groups;
+}
+
+/**
  * Load and validate the configuration; returns the workspace root, the spec
- * groups (patterns validated and resolved), and the emission switch. The
- * in-scope shape (CERTIFICATIONS.md §CONF-DISC) is spec groups of glob
- * strings, an optional `code` that MUST be the empty map, and an optional
+ * groups and the code groups (patterns validated and resolved under one
+ * grammar, SPEC 7), and the emission switch. The in-scope shape
+ * (CERTIFICATIONS.md §CONF-DISC) is spec groups and code groups of glob
+ * strings (either map may be empty) and an optional
  * `markdown: { emit: boolean }` with default destinations — no `outDir`, no
  * `coverage` or `policy` keys; anything else is refused loudly as a
  * configuration error rather than half-implemented (SPEC 7, 14.14).
@@ -501,16 +575,9 @@ async function parseAndValidateConfig(configPath) {
       "configuration error: `specs` is required and must be a map of groups (SPEC 7)",
     );
   }
+  const groups = validatedGroups(specs, "spec", "7.1");
   /** @type {Record<string, string[]>} */
-  const groups = {};
-  for (const [name, globs] of Object.entries(specs)) {
-    if (!Array.isArray(globs)) {
-      throw new UsageError(
-        `configuration error: spec group ${name} must be a list of glob strings (SPEC 7.1)`,
-      );
-    }
-    groups[name] = globs.map((glob) => validatedPattern(glob, name));
-  }
+  let codeGroups = {};
   if (data.code !== undefined) {
     const code = data.code;
     if (code === null || typeof code !== "object" || Array.isArray(code)) {
@@ -518,14 +585,7 @@ async function parseAndValidateConfig(configPath) {
         "configuration error: `code` must be a map of groups (SPEC 7.2)",
       );
     }
-    if (Object.keys(code).length > 0) {
-      // SPEC 7 allows code groups; §CONF-DISC's scope does not (`code`
-      // appears only as the empty map). Refuse loudly rather than
-      // half-implement code discovery.
-      throw new UsageError(
-        "configuration error: non-empty `code` groups are outside this fixture's scope (CERTIFICATIONS.md §CONF-DISC; SPEC 7.2, 14.14)",
-      );
-    }
+    codeGroups = validatedGroups(code, "code", "7.2");
   }
   let emit = false;
   if (data.markdown !== undefined) {
@@ -553,7 +613,7 @@ async function parseAndValidateConfig(configPath) {
     }
     emit = markdown.emit;
   }
-  return { root: path.dirname(configPath), groups, emit };
+  return { root: path.dirname(configPath), groups, codeGroups, emit };
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,31 +1062,40 @@ function isXspecClassified(rel) {
 
 /**
  * Discover the workspace's sources (SPEC 7, 13.4): walk plain files, match
- * the union of all spec groups' globs, apply the 13.4 source exclusion, and
- * validate surviving matches' paths (14.19). Returns byte-ordered sources
- * plus any 14.19 findings.
+ * the spec groups' globs and the code groups' globs, apply the 13.4 source
+ * exclusion to the matches of either kind, and validate surviving matches'
+ * paths (14.19). Returns the byte-ordered spec sources and code sources plus
+ * any 14.19 findings. A code source is discovered by path alone: nothing in
+ * scope gives a code file an edge, so it is never read — its whole-file
+ * location is its only graph node (4.6).
  *
  * §VIOL-DISC-DERIVED hook (CERT-17, bin-derived.mjs): the exclusion filter
- * below is the deviation's single consumption point — under
- * `noDerivedExclusion` the 13.4 exclusion is skipped and every glob match is
- * an ordinary match, so an excluded-under-the-conformer path enters the
- * discovered set (or, lacking `.mdx`, surfaces as 14.19); glob semantics,
+ * below — the one filter both group kinds pass through — is the deviation's
+ * single consumption point: under `noDerivedExclusion` the 13.4 exclusion is
+ * skipped and every glob match of either kind is an ordinary match, so an
+ * excluded-under-the-conformer path enters the discovered spec set (or,
+ * lacking `.mdx`, surfaces as 14.19) or the discovered code set (an edgeless
+ * whole-file location, answered by `query edges --from`); glob semantics,
  * the dot-segment rule, link behavior, and the import and empty-map rules
  * are unchanged.
  */
 async function discoverSources(config) {
   const walked = await walkPlainFiles(config.root);
   walked.sort(compareUtf8);
-  const allPatterns = Object.values(config.groups).flat();
-  const matched = walked.filter((rel) =>
-    allPatterns.some((pattern) => globMatches(pattern, rel)),
+  const matchingAny = (patterns) => (rel) =>
+    patterns.some((pattern) => globMatches(pattern, rel));
+  const specMatched = walked.filter(
+    matchingAny(Object.values(config.groups).flat()),
+  );
+  const codeMatched = walked.filter(
+    matchingAny(Object.values(config.codeGroups).flat()),
   );
   // The enabled Markdown emit destinations exist by configuration alone
   // (SPEC 7.3): `X.md` beside each discovered `X.mdx` spec source, whether or
   // not emission has run. Destination paths never end in `.mdx`, so this
-  // exclusion can never remove a source and the provisional set below is the
-  // final source set.
-  const provisional = matched.filter(
+  // exclusion can never remove a spec source and the provisional set below
+  // is the final spec source set.
+  const provisional = specMatched.filter(
     (rel) => !isXspecClassified(rel) && rel.endsWith(".mdx"),
   );
   const destinations = new Set(
@@ -1036,21 +1105,24 @@ async function discoverSources(config) {
   );
   const excluded = (rel) => isXspecClassified(rel) || destinations.has(rel);
   // §VIOL-DISC-DERIVED (CERT-17): under `noDerivedExclusion` the 13.4
-  // exclusion is skipped entirely — every glob match is an ordinary match.
-  const kept = deviations.noDerivedExclusion
-    ? matched
-    : matched.filter((rel) => !excluded(rel));
+  // exclusion is skipped entirely — every glob match of either kind is an
+  // ordinary match.
+  const kept = (matched) =>
+    deviations.noDerivedExclusion
+      ? matched
+      : matched.filter((rel) => !excluded(rel));
   /** @type {Finding[]} */
   const findings = [];
+  const hashFinding = (rel) => ({
+    condition: "14.19",
+    message: `invalid source path: the discovered path ${JSON.stringify(rel)} contains "#" (SPEC 7, 1.5, 14.19)`,
+    file: rel,
+  });
   /** @type {string[]} */
   const sources = [];
-  for (const rel of kept) {
+  for (const rel of kept(specMatched)) {
     if (rel.includes("#")) {
-      findings.push({
-        condition: "14.19",
-        message: `invalid source path: the discovered path ${JSON.stringify(rel)} contains "#" (SPEC 7, 1.5, 14.19)`,
-        file: rel,
-      });
+      findings.push(hashFinding(rel));
       continue;
     }
     if (!rel.endsWith(".mdx")) {
@@ -1063,7 +1135,16 @@ async function discoverSources(config) {
     }
     sources.push(rel);
   }
-  return { sources, findings };
+  /** @type {string[]} */
+  const codeSources = [];
+  for (const rel of kept(codeMatched)) {
+    if (rel.includes("#")) {
+      findings.push(hashFinding(rel));
+      continue;
+    }
+    codeSources.push(rel);
+  }
+  return { sources, codeSources, findings };
 }
 
 // ---------------------------------------------------------------------------
@@ -1111,7 +1192,10 @@ const IMPORT_RE =
  * { at, message } (an unparseable source, SPEC 14.20).
  */
 function parseMdx(text) {
-  /** @type {{ id: string | null, openStart: number, openEnd: number }[]} */
+  // `depth` is the section's nesting depth — the number of open sections
+  // enclosing it; 0 for a top-level section — from which `query edges`
+  // derives the `contains` edges (SPEC 5.2).
+  /** @type {{ id: string | null, openStart: number, openEnd: number, depth: number }[]} */
   const sections = [];
   /** @type {{ binding: string, specifier: string, start: number, end: number }[]} */
   const imports = [];
@@ -1234,7 +1318,7 @@ function parseMdx(text) {
           }
           if (name === "id" && quoted !== undefined) id = quoted;
         }
-        sections.push({ id, openStart: i, openEnd: j });
+        sections.push({ id, openStart: i, openEnd: j, depth });
         if (!selfClosing) depth += 1;
         i = j;
         continue;
@@ -1319,10 +1403,12 @@ function resolveImportTarget(fromRel, specifier) {
 const RESERVED_BINDINGS = new Set(["S", "Spec", "text"]);
 
 /**
- * Load the workspace: configuration, discovery, every discovered source's
- * analysis, and import resolution. Files in byte order of workspace-relative
- * path — deterministic (SPEC 12.0). An unparseable file (14.20) masks the
- * conditions inside itself (SPEC 14).
+ * Load the workspace: configuration, discovery, every discovered spec
+ * source's analysis, and import resolution; the discovered code sources are
+ * carried by path alone (never read — edgeless whole-file locations, 4.6).
+ * Files in byte order of workspace-relative path — deterministic (SPEC
+ * 12.0). An unparseable file (14.20) masks the conditions inside itself
+ * (SPEC 14).
  */
 async function loadWorkspace(cwd, configFlag) {
   const config = await loadConfig(cwd, configFlag);
@@ -1379,7 +1465,7 @@ async function loadWorkspace(cwd, configFlag) {
       }
     }
   }
-  return { config, files, findings };
+  return { config, files, codeSources: discovery.codeSources, findings };
 }
 
 // ---------------------------------------------------------------------------
@@ -1624,6 +1710,152 @@ async function commandIds(io, cwd, argv) {
   return 0;
 }
 
+const QUERY_FLAGS = {
+  "--from": "value",
+  "--to": "value",
+  "--kinds": "value",
+  "--json": "bool",
+  "--config": "value",
+};
+
+/** JSON-only surfaces (SPEC 11): the single document is the entire stdout. */
+function emitJsonOnly(io, doc) {
+  io.stdout(canonicalJson(doc) + "\n");
+}
+
+/**
+ * The `contains` edges (SPEC 5.2) a parsed spec source contributes: root →
+ * each top-level section, and each section → its direct children, in
+ * document order of the containing node, then of the contained one. Section
+ * identities are `path#id` over the spelled (chain-form, 1.3) IDs; callers
+ * answer only past the 13.3 gate, so every section here spells one.
+ * @param {{ rel: string, sections: { id: string | null, depth: number }[] }} record
+ * @returns {{ from: string, to: string, kind: string }[]}
+ */
+function containsEdges(record) {
+  const edges = [];
+  const identity = (section) => `${record.rel}#${String(section.id)}`;
+  const { sections } = record;
+  for (let i = -1; i < sections.length; i += 1) {
+    const from = i < 0 ? record.rel : identity(sections[i]);
+    const depth = i < 0 ? -1 : sections[i].depth;
+    for (let j = i + 1; j < sections.length; j += 1) {
+      if (sections[j].depth <= depth) break;
+      if (sections[j].depth === depth + 1) {
+        edges.push({ from, to: identity(sections[j]), kind: "contains" });
+      }
+    }
+  }
+  return edges;
+}
+
+/** The unknown-graph-node usage error of SPEC 11.1/12.0 for `--from`. */
+function unknownGraphNode(spelling) {
+  return new UsageError(
+    `query edges: unknown graph node ${JSON.stringify(spelling)} for --from — expected a requirement node (path#id, or a bare path for a spec source's root) or a discovered code source's whole-file location; a path in no configured group is unknown (SPEC 11.1, 1.5, 4.6, 12.0)`,
+  );
+}
+
+/**
+ * `xspec query edges [--from <graph-node>]` (SPEC 11.1, scoped): the
+ * observation of the discovered code set. JSON-only (11, 12.0). The `--from`
+ * check (12.0) runs after configuration loading — a configuration error
+ * precedes it — and before the 13.3 gate: the spelling must name a graph
+ * node of the current discovery — a discovered code source's whole-file
+ * location (its path, 4.6), a discovered spec source's root (its path), or
+ * a section it spells (`path#id`) — else it is the unknown-graph-node usage
+ * error, exit 2, whatever findings the workspace carries; a derived path the
+ * 13.4 exclusion kept out of every group is such an unknown path. An
+ * unparseable named spec file masks its identity check, the gate then
+ * reporting the findings (exit 1, 12.0). Past the gate the answer is
+ * recomputed from sources as `ids` does: a code location has no edges
+ * (nothing in scope gives a code file one), a spec node's outgoing edges are
+ * its `contains` edges (5.2), and without `--from` every edge is enumerated,
+ * files in byte order. `--to`, `--kinds`, named code units, and the other
+ * `query` subcommands are outside this fixture's scope (ScopeError, exit
+ * 70).
+ */
+async function commandQuery(io, cwd, argv) {
+  const subcommand = argv[0];
+  if (subcommand === undefined) {
+    throw new UsageError("query: missing subcommand (SPEC 11.1, 12.0)");
+  }
+  if (subcommand !== "edges") {
+    const known = ["node", "nodes", "subtree", "ancestors", "reachable"];
+    if (known.includes(subcommand)) {
+      throw new ScopeError(
+        `query ${subcommand} is outside this fixture's scope (CERTIFICATIONS.md §CONF-DISC: query edges --from <path> only)`,
+      );
+    }
+    throw new UsageError(
+      `query: unknown subcommand ${subcommand} (SPEC 11.1, 12.0)`,
+    );
+  }
+  const { flags } = parseArgs(argv.slice(1), QUERY_FLAGS, [0, 0]);
+  for (const flag of ["--to", "--kinds"]) {
+    if (flags[flag] !== undefined) {
+      throw new ScopeError(
+        `query edges ${flag} is outside this fixture's scope (CERTIFICATIONS.md §CONF-DISC: query edges --from <path> only)`,
+      );
+    }
+  }
+  // Syntax alone (SPEC 12.0): a graph-node spelling holds at most one `#`, a
+  // non-empty path part, and, when a `#` is present, a non-empty id part —
+  // judged before configuration is loaded.
+  const from = flags["--from"];
+  let fromPath = null;
+  let fromId = null;
+  if (from !== undefined) {
+    const parts = from.split("#");
+    if (parts.length > 2 || parts[0] === "" || parts[1] === "") {
+      throw new UsageError(
+        `query edges: malformed graph-node identity ${JSON.stringify(from)} for --from (SPEC 1.5, 12.0)`,
+      );
+    }
+    fromPath = parts[0];
+    fromId = parts[1] ?? null;
+  }
+  const ws = await loadWorkspace(cwd, flags["--config"]);
+  // The argument check precedes the gate (SPEC 12.0), judged from the
+  // current discovery: a path in no configured group is unknown (11.1).
+  let record = null;
+  if (fromPath !== null) {
+    if (ws.codeSources.includes(fromPath)) {
+      if (fromId !== null) {
+        throw new ScopeError(
+          `named code units (${JSON.stringify(from)}) are outside this fixture's scope (CERTIFICATIONS.md §CONF-DISC: whole-file code locations only)`,
+        );
+      }
+    } else if (ws.files.has(fromPath)) {
+      record = ws.files.get(fromPath);
+      // An unparseable named file masks the identity check; the gate below
+      // reports its findings (12.0).
+      if (
+        fromId !== null &&
+        record.failure === null &&
+        !record.sections.some((section) => section.id === fromId)
+      ) {
+        throw unknownGraphNode(from);
+      }
+    } else {
+      throw unknownGraphNode(from);
+    }
+  }
+  if (ws.findings.length > 0) {
+    throw new FindingsError(ws.findings);
+  }
+  let edges;
+  if (fromPath === null) {
+    edges = [...ws.files.values()].flatMap(containsEdges);
+  } else if (record === null) {
+    edges = []; // a whole-file code location: edgeless in scope (4.6)
+  } else {
+    edges = containsEdges(record).filter((edge) => edge.from === from);
+  }
+  emitJsonOnly(io, { edges });
+  return 0;
+}
+
 // ---------------------------------------------------------------------------
 // Entry: deviation seam + dispatch
 // ---------------------------------------------------------------------------
@@ -1645,7 +1877,9 @@ export async function runXspec(argv, cwd, options = {}) {
 
 /** Dispatch one parsed invocation and map its outcome to SPEC 12.0's codes. */
 async function dispatchCommand(io, cwd, argv) {
-  const wantsJson = argv.includes("--json");
+  // JSON output is in effect with `--json`, or when the invoked surface is
+  // JSON-only (SPEC 12.0) — `query` (11) — governing error delivery too.
+  const wantsJson = argv.includes("--json") || argv[0] === "query";
   try {
     const command = argv[0];
     const rest = argv.slice(1);
@@ -1654,9 +1888,11 @@ async function dispatchCommand(io, cwd, argv) {
         return await commandBuild(io, cwd, rest);
       case "ids":
         return await commandIds(io, cwd, rest);
+      case "query":
+        return await commandQuery(io, cwd, rest);
       default:
         throw new UsageError(
-          `unknown command ${String(command)} (SPEC 12.0; this fixture's surface is build and ids, CERTIFICATIONS.md §CONF-DISC)`,
+          `unknown command ${String(command)} (SPEC 12.0; this fixture's surface is build, ids, and query edges, CERTIFICATIONS.md §CONF-DISC)`,
         );
     }
   } catch (error) {
@@ -1687,6 +1923,13 @@ async function dispatchCommand(io, cwd, argv) {
     if (error instanceof FindingsError) {
       emitFindings(io, wantsJson, error.findings);
       return 1;
+    }
+    if (error instanceof ScopeError) {
+      // Outside this fixture's scope (CERTIFICATIONS.md §CONF-DISC): refused
+      // loudly, outside the 12.0 partition — never answered, never
+      // misreported as a usage error.
+      io.stderr(`xspec: fixture scope error: ${error.message}\n`);
+      return 70;
     }
     // A crash is a fixture bug: exit outside the 12.0 partition so every
     // exit-code assertion fails loudly and the diagnosis carries the stack.
