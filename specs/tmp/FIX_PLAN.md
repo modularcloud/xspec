@@ -65,33 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 29 — T6.5-9 Fresh identifiers in code (new test: pre-empted local bindings, compile-clean after the move)
-
-Cites: TEST-SPEC T6.5-9 (full text in §6.5): T6.5-8's TS arm re-staged with a
-receiving code file that also declares at module scope a local `const`, a
-`function`, a `class`, a `type` alias, and a non-spec import binding whose
-names pre-empt the identifiers a product would plausibly derive — the target
-file's basename as written, lower-cased, upper-cased, `Spec`- and
-`SPEC`-suffixed, and the origin binding's name with a digit and with an
-underscore appended — the file compiling clean before the move under standard
-tooling; after the move, through H-2's standard-tooling channel
-(`test/helpers/tooling.ts`), the rewritten file compiles with no diagnostics;
-`query edges` reports the moved markers' `references` edges to the new
-identities and the unmoved marker's edge through the retained origin binding;
-`check` clean. SPEC 6.5, 2.1, 4, 4.5.
-
-Now: not implemented.
-
-Do: add `T6.5-9` to `section-6.5.ts` (prerequisite: Task 28's TS arm fixture
-to re-stage): stage the pre-empting declarations (exactly the enumerated
-derivations; each binding used trivially so the file is not just declarations),
-compile before the move (no diagnostics — a fixture self-check), section-move,
-compile after (no diagnostics), then the `query edges` and `check` assertions.
-Register and map the ID.
-
-Verify: `npx vitest run … test/suite/section-6.5.test.ts`; `npm run test:self`
-green (S-1, S-4 tooling driver unaffected).
-
 ### Task 30 — T6.5-10 Third-module bindings carried with moved text (new test: arms (a) value-blind and (b) byte-composable)
 
 Cites: TEST-SPEC T6.5-10 (full text in §6.5): three spec sources `a.mdx`
