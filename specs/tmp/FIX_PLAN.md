@@ -65,33 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 30 — T6.5-10 Third-module bindings carried with moved text (new test: arms (a) value-blind and (b) byte-composable)
-
-Cites: TEST-SPEC T6.5-10 (full text in §6.5): three spec sources `a.mdx`
-(origin), `b.mdx` (target), `x.mdx` in one directory; the moved subtree holds a
-`d` reference and a `{text(...)}` embedding through the origin's `X` binding,
-one through `X["bar-baz"]`; (a) target lacks an import of `x.mdx` and the
-origin's only `X` references lie in the moved subtree → target gains exactly
-one import declaration under T6.5-8's line discipline (specifier of 2.1's
-form designating `x.mdx`, relative spelling free), each moved reference rooted
-at the fresh identifier (`X` itself admissible) with access form kept, moved
-text otherwise byte-identical; origin loses the section and its own-line `X`
-declaration with the terminator, otherwise byte-identical; (b) target already
-imports `x.mdx` as `Z` (referenced by its own section) and the origin keeps an
-`X` reference outside the subtree → no import added, `X.foo` → `Z.foo`,
-`X["bar-baz"]` → `Z["bar-baz"]`, origin's `X` declaration kept, both files
-byte-equal to composed expectations; in both arms `query edges` reports the
-moved nodes' `depends` and `embeds` edges under their new identities to
-`x.mdx`'s unchanged nodes, `build` and `check` clean. SPEC 6.5, 6.4, 2.1, 3.
-
-Now: not implemented.
-
-Do: add `T6.5-10` to `section-6.5.ts` using Task 28's diff-isolation helper
-for arm (a) and whole-file byte compares for arm (b); register and map the ID.
-
-Verify: `npx vitest run … test/suite/section-6.5.test.ts`; `npm run test:self`
-green.
-
 ### Task 31 — T6.6-4: rename-preview mapping-order fixture with descendants in document order opposite to byte order
 
 Cites: TEST-SPEC T6.6-4 (the preview's mapping lists the renamed section's

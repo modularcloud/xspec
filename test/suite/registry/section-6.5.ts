@@ -4790,6 +4790,461 @@ const T6_5_9 = defineProductTest({
   },
 });
 
+// T6.5-10 — Third-module bindings carried with moved text (TEST-SPEC
+// T6.5-10). A reference inside the moved text need not target a moved node
+// to need rewriting: an imported-form reference to a node of a spec module
+// `X` that is neither origin nor target — `d={X.foo}`, `{text(X["bar-baz"])}`
+// — is bound by the origin file's import of `X`, which the moved text leaves
+// behind, so in the target file it needs a binding of `X`'s module (SPEC
+// 6.5: an import is added when a rewritten reference needs a module binding
+// its file lacks — and only then, the reading T6.5-7's TS arm pins for
+// markers rewritten through an existing binding). T6.5-7 keeps its
+// third-module reference outside the moved subtree and T6.5-8's conversions
+// are local↔imported alone, so no fixture of theirs meets this shape. Two
+// section-move arms over three spec sources in one directory — origin
+// `specs/a.mdx`, target `specs/b.mdx`, and `specs/x.mdx` — each moving
+// `a.mv` to the top-level `mv` of the target, where the moved head carries
+// `d={X.foo}` and the moved leaf embeds `{text(X["bar-baz"])}` (a
+// double-quoted computed segment: `bar-baz` is a valid ID, 1.4, that is not
+// a TypeScript identifier, 2.4), and no reference to a moved node lies
+// outside the subtree:
+// - (a) value-blind, T6.5-8's discipline: the target, an existing discovered
+//   source, holds no import of `x.mdx`'s module, and the origin's only
+//   references through `X` lie inside the moved subtree. The target's
+//   post-move bytes are composed from the rules of 6.4/6.5 and 3 up to the
+//   fresh identifier — read off the rewritten `d` reference in 6.4's pinned
+//   spelling and cross-checked against the rewritten embedding; `X` itself
+//   admissible, being fresh in that file — and the insertion offset,
+//   `assertAddedImportInsertion` isolating the single inserted run as
+//   exactly one 2.1-form import designating `x.mdx`'s module under 6.5's
+//   line discipline; the origin loses the section and, its `X` binding left
+//   without references, its own-line `X` declaration with the line's
+//   terminator (6.5's exact extent, T6.5-7), and is otherwise
+//   byte-identical.
+// - (b) byte-composable, no latitude: the target already imports `x.mdx`'s
+//   module as `Z`, referenced by a section of its own, and the origin keeps
+//   a reference through `X` outside the moved subtree. No import is added
+//   (the file lacks no binding of the module), each moved reference is
+//   re-rooted to `Z` with quote style and access form kept (`X.foo` →
+//   `Z.foo`, `X["bar-baz"]` → `Z["bar-baz"]`; 6.4: minimal in-place edits),
+//   the origin's `X` declaration stays byte-for-byte, and the rewritten
+//   origin and target are each asserted byte-equal to composed expectations.
+// In both arms `x.mdx` is a bystander asserted untouched, `query edges`
+// reports the moved nodes' `depends` and `embeds` edges under their new
+// identities to `x.mdx`'s unchanged nodes (the complete set of each kind),
+// and `check` and `build` are clean (6.5: a successful move's finishing
+// regeneration runs on a valid workspace; Markdown emission is enabled so
+// the embedding's expansion is regenerated as well, 3). A product converting
+// only between local and imported forms leaves `X.foo` unbound in the
+// target — an invalid workspace behind a reported success — and fails both
+// arms; one adding a second import of a module the target already binds
+// fails (b)'s whole-file contract.
+const C10_ORIGIN = "specs/a.mdx";
+const C10_TARGET = "specs/b.mdx";
+const C10_THIRD = "specs/x.mdx";
+const C10_THIRD_MODULE = "specs/x.xspec";
+
+const C10_MOVE_ARGV = ["move", "specs/a.mdx#a.mv", "specs/b.mdx#mv"] as const;
+
+// The third module: `foo` (identifier-valid) and `bar-baz` (a valid ID that
+// is not a TypeScript identifier, reachable only by computed access; SPEC
+// 1.4, 2.4). Neither is moved, so both keep their identities.
+const C10_THIRD_SOURCE = [
+  '<S id="foo">',
+  "Foo text.",
+  "</S>",
+  "",
+  '<S id="bar-baz">',
+  "Bar baz text.",
+  "</S>",
+  "",
+].join("\n");
+
+/**
+ * The moved subtree's lines, spelled with its ID prefix (`a.mv` in the
+ * origin, `mv` after re-identification in the target) and the binding its
+ * third-module references are rooted at (`X` in the origin; the fresh
+ * identifier or the existing `Z` in the target), the access forms kept:
+ * dot access for `foo`, double-quoted computed access for `bar-baz` (SPEC
+ * 6.5, 6.4, 2.4).
+ */
+function c10MovedLines(prefix: string, root: string): string[] {
+  return [
+    `<S id="${prefix}" d={${root}.foo}>`,
+    "Moved head text.",
+    "",
+    `<S id="${prefix}.leaf">`,
+    "Moved leaf text, as specified:",
+    "",
+    `{text(${root}["bar-baz"])}`,
+    "</S>",
+    "</S>",
+  ];
+}
+
+// Arm (a). The origin's `X` import is the first line, alone; its only
+// references through `X` are the moved subtree's two.
+const C10_A_ORIGIN_BEFORE = [
+  'import X from "./x.xspec"',
+  "",
+  '<S id="a">',
+  "Origin holder text.",
+  "",
+  ...c10MovedLines("a.mv", "X"),
+  "</S>",
+  "",
+].join("\n");
+
+// Composed from SPEC 6.5 and 3, no latitude: the moved construct deleted in
+// place, the lines holding its opening and closing tags (left empty) dropped
+// with their terminators, the blank neighbours kept; the `X` binding left
+// without references, so its declaration is deleted in place and its
+// emptied line dropped with its U+000A — the blank line that followed it
+// stays, so the file now opens with that terminator (T6.5-7's exact extent).
+const C10_A_ORIGIN_AFTER = [
+  "",
+  '<S id="a">',
+  "Origin holder text.",
+  "",
+  "</S>",
+  "",
+].join("\n");
+
+const C10_A_TARGET_BEFORE = ['<S id="b">', "Target text.", "</S>", ""].join(
+  "\n",
+);
+
+// The target's expected post-move bytes WITHOUT the added import (SPEC
+// 6.4/6.5): the moved text appended at end of file (the insertion point at
+// the start of a line, so no preceding terminator) plus U+000A, its `id`s
+// re-identified by prefix replacement, each third-module reference re-rooted
+// at the fresh binding with its access form kept, otherwise byte-identical.
+const C10_A_TARGET_BASE = (root: string): string =>
+  ['<S id="b">', "Target text.", "</S>", ...c10MovedLines("mv", root), ""].join(
+    "\n",
+  );
+
+const C10_REWRITTEN_DEPENDS =
+  /<S id="mv" d=\{([A-Za-z_$][A-Za-z0-9_$]*)\.foo\}>/g;
+const C10_REWRITTEN_EMBEDS =
+  /\{text\(([A-Za-z_$][A-Za-z0-9_$]*)\["bar-baz"\]\)\}/g;
+
+// Arm (b). The origin keeps `a.stay`'s reference through `X` outside the
+// moved subtree; the target already binds `x.mdx`'s module as `Z`, used by
+// its own section.
+const C10_B_ORIGIN_BEFORE = [
+  'import X from "./x.xspec"',
+  "",
+  '<S id="a">',
+  "Origin holder text.",
+  "",
+  ...c10MovedLines("a.mv", "X"),
+  "",
+  '<S id="a.stay" d={X.foo}>',
+  "Staying text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+// Composed from SPEC 6.5 and 3: the moved construct deleted in place with
+// its two emptied lines dropped, the blank neighbours kept; the `X` binding
+// keeps `a.stay`'s reference, so its declaration stays byte-for-byte.
+const C10_B_ORIGIN_AFTER = [
+  'import X from "./x.xspec"',
+  "",
+  '<S id="a">',
+  "Origin holder text.",
+  "",
+  "",
+  '<S id="a.stay" d={X.foo}>',
+  "Staying text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+const C10_B_TARGET_BEFORE = [
+  'import Z from "./x.xspec"',
+  "",
+  '<S id="b" d={Z.foo}>',
+  "Target text.",
+  "</S>",
+  "",
+].join("\n");
+
+// Composed from SPEC 6.5 and 6.4, no latitude: the moved text appended at
+// end of file plus U+000A, re-identified, each third-module reference
+// re-rooted at the existing `Z` binding with quote style and access form
+// kept; no import added, the existing import and `b` byte-for-byte.
+const C10_B_TARGET_AFTER = [
+  'import Z from "./x.xspec"',
+  "",
+  '<S id="b" d={Z.foo}>',
+  "Target text.",
+  "</S>",
+  ...c10MovedLines("mv", "Z"),
+  "",
+].join("\n");
+
+/** The moved nodes' edges under their new identities (SPEC 6.5, 5.2). */
+const C10_MOVED_DEPENDS: GraphEdge = {
+  from: `${C10_TARGET}#mv`,
+  to: `${C10_THIRD}#foo`,
+  kind: "depends",
+};
+const C10_MOVED_EMBEDS: GraphEdge = {
+  from: `${C10_TARGET}#mv.leaf`,
+  to: `${C10_THIRD}#bar-baz`,
+  kind: "embeds",
+};
+
+/**
+ * The identifier one of the target's rewritten third-module references is
+ * rooted at, read off 6.4's pinned spelling; diagnosed when the reference
+ * is not spelled as 6.4 pins it, or is present more or less than once.
+ */
+function c10ReferenceRoot(
+  text: string,
+  pattern: RegExp,
+  form: string,
+  context: string,
+): string {
+  const matches = [...text.matchAll(pattern)];
+  const root = matches.length === 1 ? matches[0]?.[1] : undefined;
+  if (root === undefined) {
+    fail(
+      `${context}: ${C10_TARGET} must hold exactly one ${form} — the moved ` +
+        `reference to ${C10_THIRD}'s node rewritten through a binding of ` +
+        `its module in 6.4's pinned spelling, its access form kept (dot ` +
+        `access for the identifier-valid segment, double-quoted computed ` +
+        `access for the other; SPEC 6.5, 6.4); found ` +
+        `${String(matches.length)} in ${JSON.stringify(text)}`,
+    );
+  }
+  return root;
+}
+
+/**
+ * The guards shared by both arms after the move: the third module untouched,
+ * the complete `depends` and `embeds` edge sets exact — the moved nodes'
+ * edges reported under their new identities to `x.mdx`'s unchanged nodes —
+ * and `check` and `build` clean on the rewritten workspace.
+ */
+async function c10AssertPostMove(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  edges: { depends: readonly GraphEdge[]; embeds: readonly GraphEdge[] },
+  context: string,
+): Promise<void> {
+  await assertFileBytes(
+    workspace.path(C10_THIRD),
+    C10_THIRD_SOURCE,
+    `${context}: ${C10_THIRD} after the move — the third module, whose ` +
+      `nodes are referenced but not moved, untouched (SPEC 6.5; H-4)`,
+  );
+  assertEdgeSetEqual(
+    await queryEdgesOfKind(product, workspace, "depends", context),
+    edges.depends,
+    `${context}: the complete \`depends\` edge set after the move — the ` +
+      `moved head's \`d={…foo}\` reported under its new identity to ` +
+      `${C10_THIRD}#foo, every other edge unchanged (SPEC 6.5, 5.2)`,
+  );
+  assertEdgeSetEqual(
+    await queryEdgesOfKind(product, workspace, "embeds", context),
+    edges.embeds,
+    `${context}: the complete \`embeds\` edge set after the move — the ` +
+      `moved leaf's \`{text(…["bar-baz"])}\` reported under its new ` +
+      `identity to ${C10_THIRD}#bar-baz (SPEC 6.5, 5.2, 2.3)`,
+  );
+  await expectExit(
+    product,
+    workspace,
+    ["check"],
+    0,
+    `${context} \`check\` immediately after the move — every rewritten ` +
+      `reference resolves through its file's binding of ${C10_THIRD}'s ` +
+      `module and no staleness remains (SPEC 6.5, 12.2, 14.10)`,
+  );
+  await buildOk(
+    product,
+    workspace,
+    `${context} \`build\` after the move — the rewritten workspace is ` +
+      `valid, the embedding's expansion included (SPEC 6.5, 12.1, 3)`,
+  );
+}
+
+const T6_5_10 = defineProductTest({
+  id: "T6.5-10",
+  title:
+    "third-module bindings carried with moved text: two section-move arms over three spec sources in one directory (origin `a.mdx`, target `b.mdx`, and `x.mdx`), the moved subtree holding a `d={X.foo}` reference and a `{text(X[\"bar-baz\"])}` embedding through the origin's `X` binding and no reference to a moved node lying outside it — (a) value-blind: the target holds no import of `x.mdx`'s module and the origin's only `X` references lie in the moved subtree, so the target's post-move bytes are composed from the rules of 6.4/6.5 and 3 up to the fresh identifier (read off the rewritten references in 6.4's pinned spelling, `X` itself admissible) and the insertion offset, the single inserted run isolated by diff being exactly one 2.1-form import of `x.mdx`'s module under 6.5's line discipline, each moved reference rooted at its binding with access form kept, while the origin loses the section and its own-line `X` declaration with the line's terminator and is otherwise byte-identical; (b) byte-composable: the target already imports `x.mdx`'s module as `Z`, referenced by its own section, and the origin keeps an `X` reference outside the subtree, so no import is added, `X.foo` → `Z.foo` and `X[\"bar-baz\"]` → `Z[\"bar-baz\"]`, the origin's `X` declaration stays, and both files are byte-equal to composed expectations; in both arms `x.mdx` is untouched, `query edges` reports the moved nodes' `depends` and `embeds` edges under their new identities to `x.mdx`'s unchanged nodes, and `check` and `build` are clean (SPEC 6.5, 6.4, 2.1, 3; H-4, normalizing nothing)",
+  run: async (product) => {
+    {
+      const context = "T6.5-10 arm (a) value-blind";
+      await withWorkspace(
+        SPECS_MD_CONFIG,
+        {
+          [C10_THIRD]: C10_THIRD_SOURCE,
+          [C10_ORIGIN]: C10_A_ORIGIN_BEFORE,
+          [C10_TARGET]: C10_A_TARGET_BEFORE,
+        },
+        async (workspace) => {
+          // Premise: the staging is valid (every reference resolves), so a
+          // later failure is the move's, not the staging's.
+          await buildOk(
+            product,
+            workspace,
+            `${context} \`build\` over the staging`,
+          );
+          await expectExit(
+            product,
+            workspace,
+            [...C10_MOVE_ARGV],
+            0,
+            `${context} \`move specs/a.mdx#a.mv specs/b.mdx#mv\``,
+          );
+
+          const text = await readSourceText(workspace, C10_TARGET, context);
+          const root = c10ReferenceRoot(
+            text,
+            C10_REWRITTEN_DEPENDS,
+            '`<S id="mv" d={<binding>.foo}>`',
+            context,
+          );
+          const embedRoot = c10ReferenceRoot(
+            text,
+            C10_REWRITTEN_EMBEDS,
+            '`{text(<binding>["bar-baz"])}`',
+            context,
+          );
+          if (embedRoot !== root) {
+            fail(
+              `${context}: the moved references are rooted at different ` +
+                `identifiers — the \`d\` reference at ${JSON.stringify(root)}, ` +
+                `the embedding at ${JSON.stringify(embedRoot)} — while both ` +
+                `were bound by the origin's one \`X\` import and need the ` +
+                `one binding of ${C10_THIRD}'s module the added import ` +
+                `supplies (SPEC 6.5, 2.1)`,
+            );
+          }
+          for (const forbidden of A8_MDX_RESERVED) {
+            if (root === forbidden.name) {
+              fail(
+                `${context}: the added import binds \`${forbidden.name}\`, ` +
+                  `${forbidden.why} — an added import binds fresh ` +
+                  `identifiers colliding with no binding already in the ` +
+                  `file (SPEC 6.5, 2.1, 14.15)`,
+              );
+            }
+          }
+          // Composed from the rules of 6.4/6.5 and 3 up to the two unknowns —
+          // the fresh identifier (now known) and the insertion offset
+          // (isolated by the helper, which reads the run at every
+          // admissible offset).
+          assertAddedImportInsertion(
+            {
+              rel: C10_TARGET,
+              base: Buffer.from(C10_A_TARGET_BASE(root), "utf8"),
+              actual: await workspace.readBytes(C10_TARGET),
+              importerDir: posixPath.dirname(C10_TARGET),
+              expectedModule: C10_THIRD_MODULE,
+              identifier: root,
+            },
+            `${context}: ${C10_TARGET} after the move is its composed ` +
+              `post-move bytes with exactly one import of ${C10_THIRD}'s ` +
+              `module added as a line of its own — the declaration followed ` +
+              `by U+000A at a line-start offset, preceded by one as well at ` +
+              `any other — binding the identifier the moved references are ` +
+              `rooted at, no other byte inserted (SPEC 6.5, 2.1, 6.4, 3)`,
+          );
+          await assertFileBytes(
+            workspace.path(C10_ORIGIN),
+            C10_A_ORIGIN_AFTER,
+            `${context}: ${C10_ORIGIN} after the move — the moved section ` +
+              `deleted in place with its emptied lines dropped, the blank ` +
+              `neighbours kept, and the \`X\` import, its binding left ` +
+              `without references, deleted in place with its emptied line's ` +
+              `U+000A (6.5's exact extent), otherwise byte-identical (SPEC ` +
+              `6.5, 2.1, 3; H-4, normalizing nothing)`,
+          );
+          await c10AssertPostMove(
+            product,
+            workspace,
+            { depends: [C10_MOVED_DEPENDS], embeds: [C10_MOVED_EMBEDS] },
+            context,
+          );
+        },
+      );
+    }
+    {
+      const context = "T6.5-10 arm (b) byte-composable";
+      await withWorkspace(
+        SPECS_MD_CONFIG,
+        {
+          [C10_THIRD]: C10_THIRD_SOURCE,
+          [C10_ORIGIN]: C10_B_ORIGIN_BEFORE,
+          [C10_TARGET]: C10_B_TARGET_BEFORE,
+        },
+        async (workspace) => {
+          await buildOk(
+            product,
+            workspace,
+            `${context} \`build\` over the staging`,
+          );
+          await expectExit(
+            product,
+            workspace,
+            [...C10_MOVE_ARGV],
+            0,
+            `${context} \`move specs/a.mdx#a.mv specs/b.mdx#mv\``,
+          );
+          await assertFileBytes(
+            workspace.path(C10_TARGET),
+            C10_B_TARGET_AFTER,
+            `${context}: ${C10_TARGET} after the move — the re-identified ` +
+              `moved text appended at end of file plus U+000A, its ` +
+              `third-module references re-rooted at the existing \`Z\` ` +
+              `binding with quote style and access form kept (\`X.foo\` → ` +
+              `\`Z.foo\`, \`X["bar-baz"]\` → \`Z["bar-baz"]\`), no import ` +
+              `added (the file lacks no binding of the module), otherwise ` +
+              `byte-identical (SPEC 6.5, 6.4, 2.1; H-4, normalizing nothing)`,
+          );
+          await assertFileBytes(
+            workspace.path(C10_ORIGIN),
+            C10_B_ORIGIN_AFTER,
+            `${context}: ${C10_ORIGIN} after the move — the moved section ` +
+              `deleted in place with its emptied lines dropped, the blank ` +
+              `neighbours kept, and the \`X\` import kept byte-for-byte, its ` +
+              `binding keeping \`a.stay\`'s reference (SPEC 6.5, 2.1, 3; ` +
+              `H-4, normalizing nothing)`,
+          );
+          await c10AssertPostMove(
+            product,
+            workspace,
+            {
+              depends: [
+                C10_MOVED_DEPENDS,
+                {
+                  from: `${C10_TARGET}#b`,
+                  to: `${C10_THIRD}#foo`,
+                  kind: "depends",
+                },
+                {
+                  from: `${C10_ORIGIN}#a.stay`,
+                  to: `${C10_THIRD}#foo`,
+                  kind: "depends",
+                },
+              ],
+              embeds: [C10_MOVED_EMBEDS],
+            },
+            context,
+          );
+        },
+      );
+    }
+  },
+});
+
 /** TEST-SPEC §6.5, in canonical ID order (SUITE-25). */
 export const section65Tests: readonly ProductTestEntry[] = [
   T6_5_1,
@@ -4801,4 +5256,5 @@ export const section65Tests: readonly ProductTestEntry[] = [
   T6_5_7,
   T6_5_8,
   T6_5_9,
+  T6_5_10,
 ];
