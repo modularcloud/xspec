@@ -40,15 +40,18 @@
 //   (a configuration condition carries the file it concerns, no source
 //   range; 14), and, by a whole-root snapshot compare around the invocation,
 //   that nothing is written (12.1).
-// - T7.4-1 stray-member arms (`edgeKinds` not a subset of the three
-//   dependency kinds; a non-string `targetTags` element): each `edgeKinds`
-//   stray member — "contains", "depend", `true` — is staged last beside the
-//   valid kind "depends", so a product that drops unknown members (or
-//   filters them and only then applies the empty-list rule) keeps a valid
-//   list and builds, exit 0, instead of refusing by the wrong rule;
-//   `targetTags: [true]` is staged as TEST-SPEC spells it. `true` is the
-//   boolean literal the declarative form of 7 admits, so those refusals are
-//   14.14's invalid profile shape, never a form error.
+// - T7.4-1 and T7.5-1 stray-member arms (`edgeKinds` / `kinds` not a subset
+//   of the three dependency kinds; a non-string `targetTags` / selector
+//   `tags` element): each `edgeKinds` or `kinds` stray member — "contains",
+//   "depend", `true` — is staged last beside the valid kind "depends", so a
+//   product that drops unknown members (or filters them and only then
+//   applies the empty-list rule) keeps a valid list and builds, exit 0,
+//   instead of refusing by the wrong rule (`build` never evaluates policy,
+//   12.1, so a tolerated rule can never fail the build by a side reason);
+//   `targetTags: [true]` and `tags: [true]` are staged as TEST-SPEC spells
+//   them. `true` is the boolean literal the declarative form of 7 admits, so
+//   those refusals are 14.14's invalid profile or rule shape, never a form
+//   error.
 // - Unknown profile name at `coverage <name>` (T7.4-1) is a 12.0 usage error,
 //   not a 14.14: asserted as exit 2 with the single 12.7 error document as
 //   the entire stdout under --json (12.0: with JSON output in effect, an
@@ -1082,6 +1085,61 @@ const RULE_MATRIX: readonly {
       ],
     ],
   },
+  // `kinds` not a subset of the dependency edge kinds (7.5) — an otherwise
+  // invalid rule shape (14.14), one arm per kind of stray member. As in
+  // T7.4-1, each stray member sits last beside the valid kind "depends", so
+  // the list is non-empty and non-subset at once: a product that drops or
+  // ignores members it does not know, or that filters them out and only then
+  // applies the empty-list rule, keeps a well-formed ["depends"] and builds
+  // (exit 0 — `build` never evaluates policy, 12.1) — where a lone stray
+  // member would let such a product refuse by the wrong rule (an emptied
+  // list) and pass by accident.
+  {
+    label:
+      '`kinds` holding the non-dependency kind "contains" beside ' +
+      '"depends" — not a subset of the dependency edge kinds (7.5), ' +
+      "discriminating a product that evaluates policy over `contains` " +
+      "edges or ignores the stray member",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { group: "main" }',
+        'to: { group: "aux" }',
+        'kinds: ["depends", "contains"]',
+      ],
+    ],
+  },
+  {
+    label:
+      '`kinds` holding the unknown token "depend" beside "depends" — not ' +
+      "a subset (7.5), discriminating a product that accepts and ignores a " +
+      "stray member",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { group: "main" }',
+        'to: { group: "aux" }',
+        'kinds: ["depends", "depend"]',
+      ],
+    ],
+  },
+  {
+    label:
+      "`kinds` holding the non-string element `true` beside " +
+      '"depends" — the boolean literal the declarative form of 7 admits, ' +
+      "so the refusal is 14.14's invalid rule shape, not a form error",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { group: "main" }',
+        'to: { group: "aux" }',
+        'kinds: ["depends", true]',
+      ],
+    ],
+  },
   {
     label: "empty selector `tags` list",
     rules: [
@@ -1089,6 +1147,22 @@ const RULE_MATRIX: readonly {
         'name: "r"',
         'type: "forbidden"',
         "from: { tags: [] }",
+        'to: { group: "aux" }',
+      ],
+    ],
+  },
+  {
+    label:
+      "selector `tags` holding the non-string element `true` (`[true]`, as " +
+      "TEST-SPEC T7.5-1 spells the fixture) — the boolean literal the " +
+      "declarative form of 7 admits, so the refusal is 14.14's invalid rule " +
+      "shape; a product stringifying or silently tolerating the element " +
+      "accepts the configuration and builds, so exit 0 discriminates it",
+    rules: [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        "from: { tags: [true] }",
         'to: { group: "aux" }',
       ],
     ],
@@ -1190,10 +1264,13 @@ const T7_5_1 = defineProductTest({
   id: "T7.5-1",
   title:
     "rule validation: duplicate names, each missing required field, an " +
-    "invalid type, empty kinds/tags lists, selectors with zero or two of " +
-    "group/files/tags, unknown, wrong-kind, and ambiguous group references, " +
-    "a capture used twice in `from`, and a `to` referencing an absent " +
-    "capture are configuration errors (SPEC 7.5, 14.14, exit 2)",
+    "invalid type, empty kinds/tags lists, `kinds` not a subset of the " +
+    "dependency edge kinds (a `contains` member, an unknown token, a " +
+    "non-string element), a non-string selector `tags` element, selectors " +
+    "with zero or two of group/files/tags, unknown, wrong-kind, and " +
+    "ambiguous group references, a capture used twice in `from`, and a " +
+    "`to` referencing an absent capture are configuration errors (SPEC " +
+    "7.5, 14.14, exit 2)",
   run: async (product) => {
     for (const arm of RULE_MATRIX) {
       await expectConfigRefused(

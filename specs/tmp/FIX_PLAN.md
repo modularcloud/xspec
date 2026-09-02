@@ -65,18 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 36 — T7.5-1: policy `kinds` non-subset and non-string selector `tags` element → 14.14
-
-Cites: TEST-SPEC T7.5-1 (revised: `kinds` values `"contains"`, `"depend"`,
-`true`, and a selector `tags` list holding `true` are 14.14 configuration
-errors); SPEC 7.5, 14.14.
-
-Now: `test/suite/registry/section-7.4-7.5.ts` ≈ lines 1055–1061 lack them.
-
-Do: add the four arms as in Task 35.
-
-Verify: `npx vitest run … test/suite/section-7.4-7.5.test.ts`.
-
 ### Task 37 — T10.5-1: `parent-consistency` context sets over A → B → C with only C changed
 
 Cites: TEST-SPEC T10.5-1 (revised: with A → B → C and only C `changed`, A's
