@@ -33,6 +33,15 @@
 // `markdown` is absent, and wildcards never match the dot segment — the
 // CERTIFICATIONS.md CONF-DISC staging constraints for these two tests.
 //
+// T7-6's code-group exclusion arm observes the code side through `query
+// edges --from <path>` (11.1), T7-3's idiom for code discovery: a discovered
+// code source's whole-file location (4.6) answers exit 0 with its edge
+// enumeration — empty, nothing staged here giving a code file an edge —
+// while a path in no configured group, an excluded derived path above all,
+// is unknown to `--from`: the usage error of 12.0, judged after
+// configuration loading and before the 13.3 gate, exit 2 with the 12.7
+// error document (the CONF-DISC staging constraint for that arm).
+//
 // Conservative operationalizations (H-3/H-4):
 // - Listing comparisons sort both sides bytewise by file path: these tests
 //   assert discovery membership; the report's file ordering is 12.3's own
@@ -51,7 +60,10 @@
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { decodeIdsReport } from "../../helpers/adapters/index.js";
+import {
+  decodeEdgesReport,
+  decodeIdsReport,
+} from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
   fail,
@@ -60,17 +72,22 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
-import { runProduct } from "../../helpers/subprocess.js";
+import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
+  assertEdgeSetEqual,
   assertFindingLocated,
   assertSameJson,
   buildFindings,
   buildOk,
   byteWindow,
   expectConfigurationError,
+  expectErrorDocument,
+  expectExit,
+  runJson,
 } from "./support.js";
 
 // ---------------------------------------------------------------------------
@@ -601,9 +618,9 @@ const T7_5 = defineProductTest({
 
 // Exclusion arms (SPEC 13.4: derived files are never sources — paths whose
 // file name contains `.xspec.`, files under `.xspec/`, and files at the
-// configured Markdown emit destinations are excluded from every group), all
-// staged over spec groups (the CERTIFICATIONS.md CONF-DISC staging
-// constraint; `code` appears in this test only as the empty map):
+// configured Markdown emit destinations are excluded from every spec and
+// code group), staged on both group sides (the CERTIFICATIONS.md CONF-DISC
+// staging constraint). The spec side, observed through `ids`:
 //
 //   specs/A.mdx        the one real source (id `a`)
 //   specs/A.md         user-authored file at A.mdx's emit destination —
@@ -636,6 +653,87 @@ const EXCLUSION_EXPECTED: readonly ListingEntry[] = [
   { file: "specs/A.mdx", ids: ["a"] },
 ];
 
+// The code side, observed through `query edges --from <path>` (SPEC 11.1;
+// module header). The spec group `specs/*.mdx` matches specs/A.mdx alone;
+// the code group's globs match:
+//
+//   src/plain.ts       the one code source: well-formed TypeScript spelling
+//                      no marker, no spec-module import, no `text` call
+//                      (4) — discovered, its whole-file code location (4.6)
+//                      a graph node with no edges
+//   specs/A.xspec.ts   the module `build` generates beside specs/A.mdx
+//                      (13.1), matched by `specs/*.ts` — a file the product
+//                      itself wrote under an everyday code glob: excluded
+//   .xspec/staged.ts   a staged `.ts` file under `.xspec/`, matched by
+//                      `.xspec/*.ts` (the dot segment spelled literally):
+//                      excluded
+//   specs/A.md         specs/A.mdx's enabled Markdown emit destination
+//                      (7.3) — user-authored before `build`, emitted by it
+//                      — matched by `specs/*.md`: excluded
+//
+// and no spec-group file: `specs/*.md` does not match `specs/A.mdx`, so
+// 14.14's both-groups rule stays dormant; `specs/*.ts` also matches
+// whatever `.xspec.`-named companions the module has (13.1), derived like
+// the module. No pattern carries a bracket or brace character and nothing
+// is a symbolic link (the VIOL-DISC-DIALECT and VIOL-DISC-SYMLINK staging
+// constraints). Each excluded path, in no configured group, is unknown to
+// `--from` — the usage error of 12.0, judged after configuration loading
+// and before the 13.3 gate: exit 2 with the 12.7 error document, never a
+// finding, nothing modified — beside the discovered source's exit-0 control
+// showing the group live.
+const CODE_EXCLUSION_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  code: {
+    impl: ["src/**/*.ts", "specs/*.ts", ".xspec/*.ts", "specs/*.md"]
+  },
+  markdown: { emit: true }
+})
+`;
+
+/** The staged code source: well-formed, no marker, spec import, or text call. */
+const PLAIN_TS = "export const plain = 1;\n";
+
+/** A well-formed `.ts` file staged under `.xspec/` — derived by path alone. */
+const STAGED_UNDER_XSPEC_TS = "export const staged = 2;\n";
+
+/** The excluded paths the code globs match: each arm's premise and rule. */
+const CODE_EXCLUDED: readonly {
+  readonly path: string;
+  readonly premise: string;
+  readonly why: string;
+}[] = [
+  {
+    path: "specs/A.xspec.ts",
+    premise:
+      "NAME.mdx generates NAME.xspec.ts in the source file's directory " +
+      "(SPEC 13.1)",
+    why:
+      "the module `build` generated beside specs/A.mdx (13.1), matched by " +
+      "specs/*.ts",
+  },
+  {
+    path: ".xspec/staged.ts",
+    premise:
+      "the staged file under .xspec/ is a derived path of nothing and a " +
+      "recorded derived file of nothing, so `build` neither replaces nor " +
+      "removes it (SPEC 12.1, 13.4)",
+    why: "a file under .xspec/, matched by .xspec/*.ts",
+  },
+  {
+    path: "specs/A.md",
+    premise:
+      "with emission enabled, `build` emits specs/A.mdx's Markdown at " +
+      "specs/A.md (SPEC 13.2)",
+    why:
+      "specs/A.mdx's enabled Markdown emit destination (7.3), matched by " +
+      "specs/*.md",
+  },
+];
+
 // Import arms (SPEC 2.1/7: imports resolve references between files but
 // never add files to the workspace — the designated file must already be a
 // discovered source of a configured spec group, else 14.15).
@@ -648,9 +746,10 @@ const T7_6 = defineProductTest({
   title:
     "discovery boundaries: derived files (`.xspec.` names, `.xspec/` " +
     "paths, enabled Markdown emit destinations) are never discovered as " +
-    "sources even when globs match them; an import never adds an unmatched " +
-    "file (14.15); a no-match group and empty specs/code maps are valid " +
-    "with zero sources (SPEC 7, 13.4, 2.1)",
+    "sources of a spec or a code group even when globs match them — the " +
+    "code side observed through `query edges --from`; an import never " +
+    "adds an unmatched file (14.15); a no-match group and empty " +
+    "specs/code maps are valid with zero sources (SPEC 7, 13.4, 2.1, 11.1)",
   run: async (product) => {
     // (a) Derived-file exclusion, before and after a `build`.
     await withWorkspace(
@@ -687,6 +786,107 @@ const T7_6 = defineProductTest({
             "`A.xspec.*` files and the emitted specs/A.md now exist and " +
             "are matched by specs/* — still excluded, 13.4) `ids --json`",
         );
+      },
+    );
+
+    // (a') Code-group exclusion, observed through `query edges --from`
+    // (11.1): after `build`, the discovered code source answers exit 0 with
+    // its empty edge enumeration, while each excluded path the code globs
+    // match is unknown — exit 2 with the 12.7 error document, no finding,
+    // nothing modified.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": CODE_EXCLUSION_CONFIG,
+          "specs/A.mdx": mdxSection("a"),
+          "specs/A.md": "User-authored file at the emit destination.\n",
+          "src/plain.ts": PLAIN_TS,
+          ".xspec/staged.ts": STAGED_UNDER_XSPEC_TS,
+        },
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T7-6 (code-group exclusion): `build` — the workspace passes " +
+            "build's validations: src/plain.ts is a well-formed code " +
+            "source, and every other code-glob match is a derived file in " +
+            "no group (SPEC 7.2, 13.4)",
+        );
+        // Premises: each excluded path exists as a plain file after the
+        // build — the generated module at its 13.1 path, the emitted
+        // Markdown at its 13.2 destination, and the staged file under
+        // .xspec/, which `build` has no derived path to replace and no
+        // record to remove (12.1, 13.4) — so the refusals below observe the
+        // exclusion of existing, glob-matched paths, never a merely absent
+        // one.
+        for (const excluded of CODE_EXCLUDED) {
+          const kind = await workspace.kind(excluded.path);
+          if (kind !== "file") {
+            fail(
+              `T7-6 (code-group exclusion): after \`build\`, expected a ` +
+                `plain file at ${excluded.path} — ${excluded.premise}; ` +
+                `found ${kind}`,
+            );
+          }
+        }
+        const controlLabel =
+          "T7-6 (code-group exclusion) `query edges --from src/plain.ts`";
+        const edges = decodeEdgesReport(
+          await runJson(
+            product,
+            workspace,
+            ["query", "edges", "--from", "src/plain.ts"],
+            `${controlLabel} — the discovered code source's whole-file ` +
+              `location is a graph node, so the query answers (SPEC 7.2, ` +
+              `4.6, 11.1)`,
+          ),
+          controlLabel,
+        );
+        assertEdgeSetEqual(
+          edges,
+          [],
+          `${controlLabel}: the edge enumeration is empty — src/plain.ts ` +
+            `spells no marker, spec-module import, or text call, so its ` +
+            `whole-file location sources no edge (SPEC 4.3, 4.5, 4.6, 5.2)`,
+        );
+        for (const excluded of CODE_EXCLUDED) {
+          const label =
+            "T7-6 (code-group exclusion) `query edges --from " +
+            `${excluded.path}\``;
+          const result = await assertLeavesUnchanged(
+            workspace.root,
+            () =>
+              expectExit(
+                product,
+                workspace,
+                ["query", "edges", "--from", excluded.path],
+                2,
+                `${label} — ${excluded.why}: a derived file is in no ` +
+                  `spec or code group (SPEC 13.4), so the path is unknown ` +
+                  `to --from, a usage error judged after configuration ` +
+                  `loading and before the 13.3 gate — never a finding ` +
+                  `(SPEC 11.1, 12.0)`,
+              ),
+            `${label}: a refused query modifies nothing — the argument ` +
+              `check precedes the gate, and a built workspace's graph data ` +
+              `already matches its sources (SPEC 12.0, 13.3)`,
+          );
+          expectErrorDocument(
+            result,
+            `${label} — query's single JSON document is its only output ` +
+              `form, so JSON output is in effect without --json and the ` +
+              `exit-2 error document is the entire stdout (SPEC 11, 12.0, ` +
+              `12.7, H-5)`,
+          );
+          if (result.stderrBytes.length === 0) {
+            fail(
+              `${label}: the usage error must be a standard-error ` +
+                `diagnostic (SPEC 12.0); stderr is empty — ` +
+                `${summarizeResult(result)}`,
+            );
+          }
+        }
       },
     );
 

@@ -46,9 +46,9 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
   failure; a harness error (crash, stack overflow, exhausted limit, decode
   exception outside the assertion protocol) is never acceptable. For a test in
   a certification scope, additionally run `npm run test:self` and confirm C-1.
-- Work top to bottom (Stages A and B — the certification gate and the H-11
-  answer-scale capacity work — are complete): Stage C adds the CONF-DISC
-  code-group surface; Stage D is the remaining suite gaps in section order
+- Work top to bottom (Stages A–C — the certification gate, the H-11
+  answer-scale capacity work, and the CONF-DISC code-group surface — are
+  complete): Stage D is the remaining suite gaps in section order
   (independent of each other unless a task names a prerequisite).
 - Commit `sdg(phase-9): <imperative summary>`, ending every commit message with
   the two trailer lines
@@ -62,47 +62,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
   new build/lint/run knowledge in `AGENTS.md` (nothing else belongs there).
 
 ---
-
-## Stage C — CONF-DISC code-group surface (fixture and suite)
-
-### Task 12 — T7-6: code-group exclusion arm observed through `query edges --from`
-
-Cites: TEST-SPEC T7-6 ("Derived files are never discovered as sources even when
-globs match them (`.xspec.` names, `.xspec/` paths, Markdown emit destinations
-while emission is enabled, 13.4)" — for every group kind); CERTIFICATIONS.md
-§CONF-DISC staging constraints ("T7-6's exclusion arms are staged on both group
-sides — the spec side observed through `ids`, the code side through `query
-edges --from <path>` (11.1): on a workspace passing `build`'s validations, each
-excluded path a code glob matches — the module `build` generated next to its
-source (13.1) above all, a file under `.xspec/`, and an enabled emit
-destination — is refused as a path in no configured group (exit 2, 12.0),
-beside a discovered code source's whole-file location answering exit 0, T7-3's
-idiom for code discovery; and the staged code globs match, beyond those
-derived-classified paths, only the well-formed `.ts` sources above, no
-spec-group file among them"); SPEC 7.2, 11.1, 12.0, 13.1, 13.4.
-
-Now: `test/suite/registry/section-7-discovery.ts` T7-6 (≈ lines 599–812) has
-derived-file exclusion arms observed through `ids` only (spec side), the
-import arms, the no-match and empty-map arms; no code group, no `query edges`.
-
-Do: add a code-group exclusion arm to T7-6: configuration with a spec group
-and a code group whose glob (e.g. `**/*.ts` under the root, or a pattern
-covering `specs/` and `src/`) matches one well-formed `.ts` code source
-(no marker, no spec import, no `text` call), the module `build` generates next
-to the spec source, a staged `.ts` file under `.xspec/`, and, with `markdown`
-emission enabled, a staged file at a source's emit destination — and matches no
-spec-group file; `build` → exit 0; then `query edges --from <code source>` →
-exit 0 with an empty edge enumeration (decoded through the query adapter);
-`query edges --from <each excluded path>` → exit 2 with the 12.7 error document
-(the existing usage-error decoding), never a finding, nothing modified. Use
-the query adapter's existing `edges` decoding; do not add product-specific
-wording assertions.
-
-Verify: `npx vitest run --config test/vitest.config.ts --project suite
-test/suite/section-7-discovery.test.ts` (passes against the built product or a
-diagnosed product failure); `npm run test:self`: CONF-DISC conformer passes
-T7-6 (Task 10), VIOL-DISC-DERIVED fails exactly T7-6 (Task 11), DIALECT and
-SYMLINK unchanged.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
