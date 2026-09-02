@@ -65,34 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 24 — T6.5-3: third-file arm — a third spec source's `d`-chain reference rewritten to the target module
-
-Cites: TEST-SPEC T6.5-3 third-file arm ("a spec source that is neither origin
-nor target, importing the origin module and referencing a moved node through
-it (a `d` chain), has that reference rewritten to the target module under an
-import of it added there (bytes per T6.5-8's discipline), the origin import
-removed when the moved reference was its binding's last and kept when another
-reference through it remains (one arm each); `query edges` reports the third
-file's edge under the moved node's new identity and `check` is clean"); SPEC
-6.5, 2.1.
-
-Now: `test/suite/registry/section-6.5.ts` ≈ lines 1321–1323 have no third
-file.
-
-Do: two arms over three spec sources (origin, target, third): (a) the third
-file's only reference through the origin binding is to the moved node → after
-the section move the reference is rewritten to the target module under an
-added import (added-import bytes asserted with T6.5-8's discipline: isolate the
-single added run by diff, value-unpinned identifier, `\n` rules), the origin
-import removed with 6.5's exact extent; (b) the third file also references an
-unmoved origin node → origin import kept byte-for-byte, only the moved
-reference rewritten. In both: `query edges` lists the third file's `depends`
-edge under the moved node's new identity, `check` clean, journal mapping as the
-existing arm asserts. Share the diff-isolation helper with Task 28 (T6.5-8) if
-it already landed; otherwise write it in `test/helpers/` for both.
-
-Verify: `npx vitest run … test/suite/section-6.5.test.ts`.
-
 ### Task 25 — T6.5-4: destination occupied by a directory; symbolic-link path components → `refused-invalid-destination`
 
 Cites: TEST-SPEC T6.5-4 (revised: (a) file-form destination occupied by a

@@ -192,6 +192,7 @@ import {
   parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { assertAcrossDirectoriesDeterministic } from "../../helpers/determinism.js";
+import { assertAddedImportInsertion } from "../../helpers/import-insertion.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import {
@@ -1641,10 +1642,239 @@ const R3_SEED_FILES = [
   JOURNAL_PATH,
 ] as const;
 
+// Third-file arms (TEST-SPEC T6.5-3; SPEC 6.5: "all references across the
+// workspace are rewritten"): a spec source that is neither origin nor target
+// imports the origin module and references the moved node through it (a `d`
+// chain). After the move that reference is rewritten to the target module
+// under an import added to the third file. The added declaration's
+// identifier and insertion offset are 6.5's latitude, so the file's bytes
+// are asserted with T6.5-8's discipline (`assertAddedImportInsertion`): its
+// expected post-move bytes are composed from the rules of 6.4/6.5 and 3
+// WITHOUT the added import, the fresh identifier read off the rewritten
+// reference, and the single inserted run isolated by diff must be exactly
+// the declaration under 6.5's line rules (followed by U+000A; preceded by
+// one at a mid-line offset). The origin import's fate splits the arms (6.5:
+// removed exactly when its binding had references and the rewrite leaves it
+// with none):
+// - (a) `Org`'s only reference was to the moved node → the own-line
+//   declaration's characters are deleted and its emptied line dropped with
+//   its terminator (6.5, 3); the blank line after it was blank before the
+//   deletion, so it stays — the composed file begins with that U+000A.
+// - (b) `th2` keeps `d={Org.org}` through the binding → the declaration
+//   survives byte-for-byte; only the moved reference is rewritten.
+// The rewritten reference keeps its access form — `Org.org.mv` becomes
+// `<fresh>.tm`, dot access for the identifier-valid segment (6.4) — and the
+// fresh binding may not collide with `Org` where it stays, nor be `S`,
+// `Spec`, or `text` (2.1); `check` would fail either, but the arms name the
+// collision first.
+const R3_THIRD = "specs/Third.mdx";
+const R3_TARGET_MODULE = "specs/Target.xspec";
+
+const R3_THIRD_A_SOURCE = [
+  'import Org from "./Origin.xspec"',
+  "",
+  '<S id="th" d={Org.org.mv}>',
+  "Third text.",
+  "</S>",
+  "",
+].join("\n");
+
+/** Arm (a)'s expected post-move bytes without the added import (6.5, 3). */
+const R3_THIRD_A_BASE = (root: string): string =>
+  ["", `<S id="th" d={${root}.tm}>`, "Third text.", "</S>", ""].join("\n");
+
+const R3_THIRD_B_SOURCE = [
+  'import Org from "./Origin.xspec"',
+  "",
+  '<S id="th" d={Org.org.mv}>',
+  "Third text.",
+  "</S>",
+  "",
+  '<S id="th2" d={Org.org}>',
+  "Third keeps the origin.",
+  "</S>",
+  "",
+].join("\n");
+
+/** Arm (b)'s expected post-move bytes without the added import (6.5). */
+const R3_THIRD_B_BASE = (root: string): string =>
+  [
+    'import Org from "./Origin.xspec"',
+    "",
+    `<S id="th" d={${root}.tm}>`,
+    "Third text.",
+    "</S>",
+    "",
+    '<S id="th2" d={Org.org}>',
+    "Third keeps the origin.",
+    "</S>",
+    "",
+  ].join("\n");
+
+/** The section form's journaled mapping: the moved subtree, nothing else. */
+const R3_MAPPING = [
+  { from: `${R3_ORIGIN}#org.mv`, to: `${R3_TARGET}#tm` },
+  { from: `${R3_ORIGIN}#org.mv.k1`, to: `${R3_TARGET}#tm.k1` },
+  { from: `${R3_ORIGIN}#org.mv.k2`, to: `${R3_TARGET}#tm.k2` },
+] as const;
+
+/** The complete post-move `depends` edge set of the four-file fixture. */
+const R3_DEPENDS_EDGES: readonly GraphEdge[] = [
+  { from: `${R3_ORIGIN}#org.usemv`, to: `${R3_TARGET}#tm`, kind: "depends" },
+  { from: `${R3_TARGET}#tgt`, to: `${R3_TARGET}#tm`, kind: "depends" },
+  { from: `${R3_TARGET}#tm`, to: `${R3_KEEP}#keep`, kind: "depends" },
+  { from: `${R3_TARGET}#tm.k2`, to: `${R3_TARGET}#tm.k1`, kind: "depends" },
+];
+
+/** `<S id="th" d={<root>.tm}>` — the third file's rewritten reference. */
+const R3_THIRD_REWRITTEN = /<S id="th" d=\{([A-Za-z_$][A-Za-z0-9_$]*)\.tm\}>/g;
+
+/**
+ * The identifier the third file's rewritten reference is rooted at — the
+ * value-unpinned fresh binding (SPEC 6.5), read off the one place 6.4's
+ * pinned spelling makes it observable.
+ */
+function thirdFileReferenceRoot(text: string, context: string): string {
+  const matches = [...text.matchAll(R3_THIRD_REWRITTEN)];
+  const root = matches.length === 1 ? matches[0]?.[1] : undefined;
+  if (root === undefined) {
+    fail(
+      `${context}: ${R3_THIRD} must hold exactly one ` +
+        `\`<S id="th" d={<binding>.tm}>\` — the third file's reference to ` +
+        `the moved node rewritten to the target module under the new ` +
+        `identity, its access form kept (dot access for the ` +
+        `identifier-valid segment; SPEC 6.5, 6.4); found ` +
+        `${String(matches.length)} in ${JSON.stringify(text)}`,
+    );
+  }
+  return root;
+}
+
+/**
+ * One third-file arm: stage the four-file fixture plus `Third.mdx`, run the
+ * identical section-form move, and assert the third file's rewrite — the
+ * moved reference re-rooted at a fresh binding of the target module, added
+ * under 6.5's line discipline; the origin import removed or kept as
+ * `originImportKept` says — beside the applied-mapping report, the journal
+ * entry, the complete `depends` edge set, and a clean `check`.
+ */
+async function runThirdFileArm(
+  product: ProductBinding,
+  created: TestWorkspace[],
+  arm: {
+    readonly label: string;
+    readonly source: string;
+    readonly base: (root: string) => string;
+    readonly originImportKept: boolean;
+    readonly thirdEdges: readonly GraphEdge[];
+  },
+): Promise<void> {
+  const context = `T6.5-3 third-file arm ${arm.label}`;
+  const workspace = await TestWorkspace.create({
+    files: { ...R3_FILES, [R3_THIRD]: arm.source },
+  });
+  created.push(workspace);
+  const result = await runProduct(product, {
+    cwd: workspace.root,
+    argv: [...R3_MOVE_ARGV],
+  });
+  assertExitCode(
+    result,
+    0,
+    `${context} \`move specs/Origin.mdx#org.mv specs/Target.mdx#tm --json\``,
+  );
+  assertAppliedMapping(
+    decodeAppliedMappingReport(
+      parseJsonStdout(result, `${context} report (SPEC 12.0)`),
+      context,
+    ),
+    [...R3_MAPPING],
+    `${context}: the applied mapping is exactly the moved subtree's ` +
+      `prefix-replaced pairs — the third file's rewrite maps no identity ` +
+      `(SPEC 6.5, 6.4)`,
+  );
+
+  const text = await readSourceText(workspace, R3_THIRD, context);
+  const root = thirdFileReferenceRoot(text, context);
+  if (arm.originImportKept) {
+    assertContains(
+      text,
+      R3_THIRD,
+      'import Org from "./Origin.xspec"\n',
+      "the `Org` binding keeps a reference (`th2`'s `d={Org.org}`) after " +
+        "the rewrite, so its import stays byte-for-byte (SPEC 6.5, 2.1)",
+      context,
+    );
+    if (root === "Org") {
+      fail(
+        `${context}: the added import binds \`Org\`, an identifier the ` +
+          `file's retained origin import already binds — an added import ` +
+          `binds fresh identifiers colliding with no binding already in ` +
+          `the file (SPEC 6.5, 2.1, 14.15)`,
+      );
+    }
+  } else {
+    assertLacks(
+      text,
+      R3_THIRD,
+      "Origin.xspec",
+      "the `Org` binding's only reference was to the moved node, so the " +
+        "rewrite leaves it with none and the import is removed (SPEC 6.5, " +
+        "2.1)",
+      context,
+    );
+  }
+  for (const reserved of ["S", "Spec", "text"]) {
+    if (root === reserved) {
+      fail(
+        `${context}: the added import binds \`${reserved}\`, a ` +
+          `compiler-provided name no import may bind (SPEC 2.1, 14.15)`,
+      );
+    }
+  }
+  // Composed from the rules of 6.4/6.5 and 3 up to the two unknowns — the
+  // fresh identifier (now known) and the insertion offset (isolated below).
+  assertAddedImportInsertion(
+    {
+      rel: R3_THIRD,
+      base: Buffer.from(arm.base(root), "utf8"),
+      actual: await workspace.readBytes(R3_THIRD),
+      importerDir: posixPath.dirname(R3_THIRD),
+      expectedModule: R3_TARGET_MODULE,
+      identifier: root,
+    },
+    `${context}: the third file's rewrite is its composed post-move bytes ` +
+      `with exactly one import of the target module added under 6.5's ` +
+      `line discipline (SPEC 6.5, 2.1, 6.4, 3; T6.5-8)`,
+  );
+
+  await assertJournalHoldsOneEntry(workspace, `${context} after the move`);
+  assertEdgeSetEqual(
+    await queryEdgesOfKind(product, workspace, "depends", context),
+    [...R3_DEPENDS_EDGES, ...arm.thirdEdges],
+    `${context}: the complete \`depends\` edge set — the third file's ` +
+      `edge is reported under the moved node's new identity` +
+      (arm.originImportKept
+        ? ", its other edge through the retained origin binding unchanged"
+        : "") +
+      ` (SPEC 6.5, 5.2)`,
+  );
+  await expectExit(
+    product,
+    workspace,
+    ["check"],
+    0,
+    `${context} \`check\` immediately after the move — the third file's ` +
+      `rewritten reference and added import resolve, the fresh binding ` +
+      `collides with nothing (14.15), and no staleness remains (SPEC 6.5, ` +
+      `12.2, 14.10)`,
+  );
+}
+
 const T6_5_3 = defineProductTest({
   id: "T6.5-3",
   title:
-    "re-identification and reference conversion: the moved subtree is re-identified by prefix replacement; references convert between local and imported forms; needed spec imports are added binding fresh, non-colliding identifiers and unneeded ones removed exactly (an import unreferenced before the move stays); rewritten content is byte-deterministic across two identical fixtures; the full mapping is appended to the journal and reported as the command's own applied-mapping report — the section form reports as rename does, T6.4-1's protocol (SPEC 6.5, 2.1, 6.1, 6.4, 12.0, 12.1, 14.10; H-3 adapter, report shape unpinned)",
+    "re-identification and reference conversion: the moved subtree is re-identified by prefix replacement; references convert between local and imported forms; needed spec imports are added binding fresh, non-colliding identifiers and unneeded ones removed exactly (an import unreferenced before the move stays); rewritten content is byte-deterministic across two identical fixtures; the full mapping is appended to the journal and reported as the command's own applied-mapping report — the section form reports as rename does, T6.4-1's protocol (SPEC 6.5, 2.1, 6.1, 6.4, 12.0, 12.1, 14.10; H-3 adapter, report shape unpinned); third-file arms — a spec source neither origin nor target, importing the origin module and referencing the moved node through a `d` chain, has that reference rewritten to the target module under an import added there (bytes per T6.5-8's discipline: the single inserted run isolated by diff against bytes composed from 6.4/6.5 and 3, its identifier and offset the product's), the origin import removed exactly when the moved reference was its binding's last and kept byte-for-byte when another reference through it remains, `query edges` listing the third file's `depends` edge under the new identity and `check` clean (SPEC 6.5, 2.1, 6.4, 3)",
   run: async (product) => {
     const created: TestWorkspace[] = [];
     try {
@@ -1694,11 +1924,7 @@ const T6_5_3 = defineProductTest({
           ),
           "T6.5-3",
         ),
-        [
-          { from: `${R3_ORIGIN}#org.mv`, to: `${R3_TARGET}#tm` },
-          { from: `${R3_ORIGIN}#org.mv.k1`, to: `${R3_TARGET}#tm.k1` },
-          { from: `${R3_ORIGIN}#org.mv.k2`, to: `${R3_TARGET}#tm.k2` },
-        ],
+        [...R3_MAPPING],
         "T6.5-3: the successful section-form move's report is the applied " +
           "mapping — exactly the identity pairs the operation journaled: " +
           "the moved subtree's prefix-replaced identities, nothing else " +
@@ -1827,20 +2053,7 @@ const T6_5_3 = defineProductTest({
           "depends",
           "T6.5-3 post-move",
         ),
-        [
-          {
-            from: `${R3_ORIGIN}#org.usemv`,
-            to: `${R3_TARGET}#tm`,
-            kind: "depends",
-          },
-          { from: `${R3_TARGET}#tgt`, to: `${R3_TARGET}#tm`, kind: "depends" },
-          { from: `${R3_TARGET}#tm`, to: `${R3_KEEP}#keep`, kind: "depends" },
-          {
-            from: `${R3_TARGET}#tm.k2`,
-            to: `${R3_TARGET}#tm.k1`,
-            kind: "depends",
-          },
-        ],
+        R3_DEPENDS_EDGES,
         "T6.5-3: the complete `depends` edge set — every converted, added, " +
           "and re-identified reference resolves to the new identities " +
           "(SPEC 6.5, 5.2)",
@@ -1907,6 +2120,29 @@ const T6_5_3 = defineProductTest({
           "must be byte-identical (SPEC 6.5, 6.4, 12.0; H-4/H-6, " +
           "normalizing nothing)",
       );
+
+      // Third-file arms (SPEC 6.5: all references across the workspace):
+      // (a) the moved reference was the origin binding's last — import
+      // removed; (b) another reference through it remains — import kept.
+      await runThirdFileArm(product, created, {
+        label: "(a) origin import removed",
+        source: R3_THIRD_A_SOURCE,
+        base: R3_THIRD_A_BASE,
+        originImportKept: false,
+        thirdEdges: [
+          { from: `${R3_THIRD}#th`, to: `${R3_TARGET}#tm`, kind: "depends" },
+        ],
+      });
+      await runThirdFileArm(product, created, {
+        label: "(b) origin import kept",
+        source: R3_THIRD_B_SOURCE,
+        base: R3_THIRD_B_BASE,
+        originImportKept: true,
+        thirdEdges: [
+          { from: `${R3_THIRD}#th`, to: `${R3_TARGET}#tm`, kind: "depends" },
+          { from: `${R3_THIRD}#th2`, to: `${R3_ORIGIN}#org`, kind: "depends" },
+        ],
+      });
     } finally {
       for (const workspace of created) {
         await workspace.dispose();
