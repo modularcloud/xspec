@@ -65,24 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 31 — T6.6-4: rename-preview mapping-order fixture with descendants in document order opposite to byte order
-
-Cites: TEST-SPEC T6.6-4 (the preview's mapping lists the renamed section's
-descendants in an order the decoder checks by `from` byte order, and the
-fixture must be able to discriminate a document-order product: descendants
-whose document order differs from the byte order of their `from` spellings —
-`a.z` before `a.c`); SPEC 6.6, 6.4.
-
-Now: `test/suite/registry/section-6.6.ts` ≈ lines 508–553 rename `core.mid`
-with the single descendant `core.mid.leaf`, so the ordering check is vacuous.
-
-Do: restage with at least two descendants whose document order is `a.z` then
-`a.c` (byte order of the mapping's `from` values reversed relative to document
-order); keep the decoder's check and assert the mapping's order per the spec's
-pinned tie-break; keep every other assertion of the test.
-
-Verify: `npx vitest run … test/suite/section-6.6.test.ts`.
-
 ### Task 32 — T6.6-5: lagging-record counterpart (emission enabled after the build, no rebuild)
 
 Cites: TEST-SPEC T6.6-5 (revised: with Markdown emission enabled after the

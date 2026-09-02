@@ -87,7 +87,10 @@
 //   multi-byte characters sit before every located construct so byte
 //   offsets diverge from code-point and UTF-16 counts — and compared
 //   list-for-list: an extra file entry, a missing edit, a phantom class, or
-//   a one-byte range drift each fail. Judgment calls pinned here (H-4): an
+//   a one-byte range drift each fail; the rename arm's descendants `z` and
+//   `c` stand in document order opposite to `from`-byte order, so a mapping
+//   in document order fails the decoder's 12.7 order check and the exact
+//   list alike (TEST-SPEC T6.6-4). Judgment calls pinned here (H-4): an
 //   `id`-attribute rewrite spans the attribute's own characters (`id="…"`,
 //   name through closing quote — SPEC 6.6 "the `id` attribute's own
 //   characters", the construct-spelling reading its sibling clauses use for
@@ -1755,14 +1758,25 @@ export default defineConfig({
 `;
 
 // --- Arm (a): rename preview — id-rewrites and the four 5.7 occurrence
-// kinds across MDX and TS. `core.mid` (with descendant `core.mid.leaf`) is
-// renamed to `core.hub`; affected references: two `d` entries and one MDX
+// kinds across MDX and TS. `core.mid` (with descendants `core.mid.z` and
+// `core.mid.c`, in that document order) is renamed to `core.hub`; affected
+// references, all through `core.mid.z`: two `d` entries and one MDX
 // embedding in the origin file (string form), a `d` chain and an embedding
 // in a second MDX file (external form), and a marker plus a `text(...)` call
 // in a TS file. Controls that must produce NO edit: `d={"core.plain"}` (its
 // target keeps its identity), every unaffected `id` attribute, and the
 // unrelocated `./Core.xspec` import specifiers. Multi-byte text ("hölder",
 // "ünicode", "Δ") precedes every located construct.
+//
+// The mapping-order fixture (TEST-SPEC T6.6-4): the descendants stand in
+// document order (`z` before `c`) opposite to the byte order of their
+// `from` identities (`…#core.mid.c` < `…#core.mid.z`), so a product listing
+// the mapping in document order — the order its subtree traversal yields —
+// fails both decodePreviewReport's `from`-byte order check (SPEC 12.7, H-3)
+// and the exact-list comparison against the expected mapping. `c` bears no
+// reference (its only edit is its `id-rewrite`), keeping the discriminator
+// in the mapping alone; mappingInFromByteOrder composes the expectation and
+// guards that the two orders really differ.
 const A4_CORE = "specs/Core.mdx";
 const A4_OTHER = "specs/Other.mdx";
 const A4_USE = "src/use.ts";
@@ -1773,13 +1787,17 @@ const A4_CORE_SOURCE = [
   '<S id="core.mid" d={"core.plain"}>',
   "Mid text.",
   "",
-  '<S id="core.mid.leaf">',
-  "Leaf text.",
+  '<S id="core.mid.z">',
+  "Z text.",
+  "</S>",
+  "",
+  '<S id="core.mid.c">',
+  "C text.",
   "</S>",
   "</S>",
   "",
-  '<S id="core.sib" d={["core.mid", "core.mid.leaf"]}>',
-  'Sib embeds: {text("core.mid.leaf")}',
+  '<S id="core.sib" d={["core.mid", "core.mid.z"]}>',
+  'Sib embeds: {text("core.mid.z")}',
   "</S>",
   "",
   '<S id="core.plain">',
@@ -1797,7 +1815,7 @@ const A4_OTHER_SOURCE = [
   '<S id="oth.dep" d={CORE.core.mid}>',
   "Dep text.",
   "",
-  "{text(CORE.core.mid.leaf)}",
+  "{text(CORE.core.mid.z)}",
   "</S>",
   "</S>",
   "",
@@ -1807,24 +1825,65 @@ const A4_USE_SOURCE = [
   'import SPEC, { text } from "../specs/Core.xspec"',
   "",
   "export function useMid(): string {",
-  "  SPEC.core.mid.leaf;",
+  "  SPEC.core.mid.z;",
   "  return text(SPEC.core.mid);",
   "}",
   "",
 ].join("\n");
 const A4_RENAME_ARGV = ["rename", A4_CORE, "core.mid", "core.hub"] as const;
 
+/**
+ * The expected mapping in `from`-byte order (SPEC 12.7), composed from the
+ * mapped pairs of one spec file — order of listing immaterial — with a
+ * staging guard: the pairs' DOCUMENT order, read off the staged bytes as
+ * the order of the mapped IDs' `id` attributes, must differ from the byte
+ * order, or the fixture could not fail a product emitting document order
+ * (TEST-SPEC T6.6-4) — a re-staging whose descendants happen to sort alike
+ * is a staging defect (harness error), never a weaker test.
+ */
+function mappingInFromByteOrder(
+  source: string,
+  pairs: readonly AppliedMappingPair[],
+  where: string,
+): readonly AppliedMappingPair[] {
+  const documentIndex = (pair: AppliedMappingPair): number =>
+    uniqueCharIndex(
+      source,
+      `id="${pair.from.slice(pair.from.indexOf("#") + 1)}"`,
+      `${where}: ${pair.from}`,
+    );
+  const documentOrder = [...pairs].sort(
+    (a, b) => documentIndex(a) - documentIndex(b),
+  );
+  const byteOrder = [...pairs].sort((a, b) =>
+    Buffer.compare(Buffer.from(a.from, "utf8"), Buffer.from(b.from, "utf8")),
+  );
+  if (byteOrder.every((pair, index) => pair === documentOrder[index])) {
+    throw new Error(
+      `T6.6-4 staging (${where}): the mapping's document order coincides ` +
+        `with its \`from\`-byte order, so the fixture cannot discriminate a ` +
+        `product emitting document order (TEST-SPEC T6.6-4)`,
+    );
+  }
+  return byteOrder;
+}
+
 function armAPlan(): ExpectedPreviewPlan {
   const core = A4_CORE_SOURCE;
-  const dArray = 'd={["core.mid", "core.mid.leaf"]}';
+  const dArray = 'd={["core.mid", "core.mid.z"]}';
   return {
-    mapping: [
-      { from: "specs/Core.mdx#core.mid", to: "specs/Core.mdx#core.hub" },
-      {
-        from: "specs/Core.mdx#core.mid.leaf",
-        to: "specs/Core.mdx#core.hub.leaf",
-      },
-    ],
+    // The complete mapping — the renamed ID and every descendant — in
+    // `from`-byte order: `…#core.mid.c` before `…#core.mid.z`, the reverse
+    // of the document order the pairs are listed in (SPEC 12.7, 6.4).
+    mapping: mappingInFromByteOrder(
+      core,
+      [
+        { from: "specs/Core.mdx#core.mid", to: "specs/Core.mdx#core.hub" },
+        { from: "specs/Core.mdx#core.mid.z", to: "specs/Core.mdx#core.hub.z" },
+        { from: "specs/Core.mdx#core.mid.c", to: "specs/Core.mdx#core.hub.c" },
+      ],
+      "a: mapping",
+    ),
     files: [
       {
         file: A4_CORE,
@@ -1837,7 +1896,11 @@ function armAPlan(): ExpectedPreviewPlan {
           },
           {
             class: "id-rewrite",
-            range: uniqueSpan(core, 'id="core.mid.leaf"', "a: leaf id"),
+            range: uniqueSpan(core, 'id="core.mid.z"', "a: z id"),
+          },
+          {
+            class: "id-rewrite",
+            range: uniqueSpan(core, 'id="core.mid.c"', "a: c id"),
           },
           // Each `d` array entry is its own occurrence spanning that one
           // reference's own expression (SPEC 5.7) — located through the
@@ -1848,18 +1911,13 @@ function armAPlan(): ExpectedPreviewPlan {
           },
           {
             class: "reference-rewrite",
-            range: spanWithin(
-              core,
-              dArray,
-              '"core.mid.leaf"',
-              "a: d core.mid.leaf",
-            ),
+            range: spanWithin(core, dArray, '"core.mid.z"', "a: d core.mid.z"),
           },
           // An MDX embedding spans the entire `{text(...)}` container,
           // opening brace through closing brace (SPEC 5.7).
           {
             class: "reference-rewrite",
-            range: uniqueSpan(core, '{text("core.mid.leaf")}', "a: embedding"),
+            range: uniqueSpan(core, '{text("core.mid.z")}', "a: embedding"),
           },
         ]),
       },
@@ -1879,7 +1937,7 @@ function armAPlan(): ExpectedPreviewPlan {
             class: "reference-rewrite",
             range: uniqueSpan(
               A4_OTHER_SOURCE,
-              "{text(CORE.core.mid.leaf)}",
+              "{text(CORE.core.mid.z)}",
               "a: external embedding",
             ),
           },
@@ -1892,7 +1950,7 @@ function armAPlan(): ExpectedPreviewPlan {
           // exclusive of the statement terminator (SPEC 5.7).
           {
             class: "reference-rewrite",
-            range: uniqueSpan(A4_USE_SOURCE, "SPEC.core.mid.leaf", "a: marker"),
+            range: uniqueSpan(A4_USE_SOURCE, "SPEC.core.mid.z", "a: marker"),
           },
           // A TS `text(...)` occurrence spans the entire call expression,
           // callee through closing parenthesis (SPEC 5.7).
@@ -2340,7 +2398,7 @@ function armEPlan(): ExpectedPreviewPlan {
 const T6_6_4 = defineProductTest({
   id: "T6.6-4",
   title:
-    "report content: byte-precise fixtures asserted against precomputed pre-operation offsets, form-exact per 12.7 — (a) a rename preview reports the complete identity mapping (the renamed ID and every descendant) and, per rewritten file, `id-rewrite` edits spanning each rewritten `id` attribute's own characters and `reference-rewrite` edits spanning each affected occurrence's span (5.7) across MDX and TS; (b) a section-move preview into an existing target file reports the `origin-deletion` as one contiguous range (the construct's own characters extended over the adjunct-dropped leftover whitespace and line terminator), the re-identification's `id-rewrite` edits and the moved text's reference rewrites nested inside that range, `target-insertion` zero-length at the insertion offset, `target-parent-rewrite` spanning the self-closing target parent's tag, `import-addition` zero-length at the exact offset the real operation then uses (byte-asserted by running the operation on the preview-pinned state), and `import-removal` spanning the declaration plus its adjunct drops; (c) a file-form move preview reports `import-specifier-rewrite` edits spanning the specifier literals and `file-relocation` spanning the entire moved file under its pre-operation path; (d) a created-target section-move preview reports exactly one `file-creation` edit at the new file's start — the insertion and import additions there subsumed — with the moved text's own rewrites inside the origin deletion; every edit class-plus-range only, every class one of the ten 12.7 names, and the full 12.7 edit comparator asserted over whatever edits are emitted, staged (e) where an import addition can coincide with the end-of-file target insertion (SPEC 6.6, 12.7, 6.4, 6.5, 5.7, 1.7, 2.1, 3; H-3, H-4)",
+    "report content: byte-precise fixtures asserted against precomputed pre-operation offsets, form-exact per 12.7 — (a) a rename preview reports the complete identity mapping (the renamed ID and every descendant) ordered by `from` bytes — the descendants `core.mid.z` and `core.mid.c` standing in document order opposite to byte order, so a product emitting document order fails — and, per rewritten file, `id-rewrite` edits spanning each rewritten `id` attribute's own characters and `reference-rewrite` edits spanning each affected occurrence's span (5.7) across MDX and TS; (b) a section-move preview into an existing target file reports the `origin-deletion` as one contiguous range (the construct's own characters extended over the adjunct-dropped leftover whitespace and line terminator), the re-identification's `id-rewrite` edits and the moved text's reference rewrites nested inside that range, `target-insertion` zero-length at the insertion offset, `target-parent-rewrite` spanning the self-closing target parent's tag, `import-addition` zero-length at the exact offset the real operation then uses (byte-asserted by running the operation on the preview-pinned state), and `import-removal` spanning the declaration plus its adjunct drops; (c) a file-form move preview reports `import-specifier-rewrite` edits spanning the specifier literals and `file-relocation` spanning the entire moved file under its pre-operation path; (d) a created-target section-move preview reports exactly one `file-creation` edit at the new file's start — the insertion and import additions there subsumed — with the moved text's own rewrites inside the origin deletion; every edit class-plus-range only, every class one of the ten 12.7 names, and the full 12.7 edit comparator asserted over whatever edits are emitted, staged (e) where an import addition can coincide with the end-of-file target insertion (SPEC 6.6, 12.7, 6.4, 6.5, 5.7, 1.7, 2.1, 3; H-3, H-4)",
   run: async (product) => {
     // --- Arm (a): rename preview across MDX and TS ---
     await withWorkspace(
