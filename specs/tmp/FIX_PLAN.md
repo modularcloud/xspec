@@ -65,39 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage C — CONF-DISC code-group surface (fixture and suite)
 
-### Task 11 — VIOL-DISC-DERIVED: code-group side of the dropped 13.4 exclusion
-
-Cites: CERTIFICATIONS.md §VIOL-DISC-DERIVED Deviation (revised): "a path …
-when matched by a spec-group or code-group glob, is treated as an ordinary
-match — on the code side an edgeless whole-file location"; Expected failures:
-"on the code-group side, each excluded path the code glob matches — the module
-`build` generated next to its source, the staged file under `.xspec/`, the
-enabled destination — enters the discovered code set, so `query edges --from`
-answers it exit 0 where the arm asserts the unknown-path refusal (12.0)".
-
-Now: since Task 10 (the commit adding code groups and `query edges` to the
-fixture), `discoverSources` in `test/fixtures/conf-disc/product.mjs` passes
-the spec-glob matches and the code-glob matches through one 13.4 exclusion
-filter, and `noDerivedExclusion` skips it for both kinds — verified by hand
-on a workspace whose code globs match the generated module, a `.ts` file
-under `.xspec/`, and the enabled emit destination: `bin-derived.mjs query
-edges --from specs/A.xspec.ts` (likewise `--from .xspec/staged.ts` and
-`--from specs/A.md`) → exit 0 with the empty enumeration, while `bin.mjs` →
-exit 2. Only `bin-derived.mjs`'s header comment still describes the
-spec-side-only deviation ("when matched by a spec-group glob … a non-`.mdx`
-occupant then surfaces as 14.19").
-
-Do: update `bin-derived.mjs`'s header comment to the revised deviation text
-(both group sides — on the code side each such path an edgeless whole-file
-location that `query edges --from` answers exit 0). No behavior changes.
-
-Verify: re-run the hand check above (stage `xspec.config.ts` with
-`specs: { main: ["specs/*.mdx"] }`, `code: { src: ["src/**/*.ts",
-"specs/*.ts", ".xspec/*.ts", "specs/*.md"] }`, `markdown: { emit: true }`,
-one `specs/A.mdx`, `src/a.ts`, `.xspec/staged.ts`, `specs/A.md`; `build`
-first); `npm run test:self` green. Once Task 12 lands, the certification
-shows DERIVED failing T7-6 on both group sides.
-
 ### Task 12 — T7-6: code-group exclusion arm observed through `query edges --from`
 
 Cites: TEST-SPEC T7-6 ("Derived files are never discovered as sources even when
