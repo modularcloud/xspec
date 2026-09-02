@@ -165,9 +165,19 @@
 //   imported → local, the one rewrite direction free of implementation
 //   latitude (SPEC 6.5: identifier choice and insertion offset attach to
 //   added imports alone), so the two files' post-move bytes are the rules'
-//   unique composition. A premise `build` pins the staging valid (the
-//   shared-line two-declaration import block parses, SPEC 2.1) and a
-//   post-move `check` guards the composition's soundness: if the product's
+//   unique composition; the moved subtree spells a descendant's `id`
+//   attribute single-quoted (SPEC 2.7), re-identified with its quotes kept
+//   (SPEC 6.4: minimal in-place edits bind the `id`-attribute rewrite as
+//   they bind references, T6.4-2). The code-source counterpart, two `.ts`
+//   files in the same workspace, each importing the origin, target, and
+//   third modules with the origin binding referenced only by markers on
+//   moved nodes (SPEC 4.5): the origin declaration alone on its line in one
+//   file and following the third module's on a shared line in the other,
+//   removed with 6.5's exact extent as in MDX, the moved markers re-rooted
+//   at the existing target binding (no import added), each file byte-equal
+//   to its composed expectation. A premise `build` pins the staging valid
+//   (the shared-line two-declaration import blocks parse, SPEC 2.1, 4) and
+//   a post-move `check` guards the composition's soundness: if the product's
 //   bytes equal the expected bytes yet something failed to resolve, the
 //   staging itself was defective and must fail loud.
 // - T6.5-6's unstageable clauses are documented at the test, per TEST-SPEC:
@@ -3597,10 +3607,12 @@ const T6_5_6 = defineProductTest({
 // line. Every reference through the two bindings — the `d` chain
 // `d={TWO.hub}` and the embedding `{text(TB.aux)}` — lies inside the moved
 // subtree `org.mv`, which also holds the single-quoted local string
-// reference `d={'org.mv.leaf'}` to a moved descendant; no reference to a
-// moved node lies outside the subtree, and no moved reference targets a
-// node remaining in the origin — so the rewrite adds no import anywhere,
-// the one direction free of implementation latitude (SPEC 6.5).
+// reference `d={'org.mv.leaf'}` to a moved descendant and spells that
+// descendant's `id` attribute single-quoted (`id='org.mv.leaf'`, SPEC 2.7:
+// single- or double-quoted alike); no reference to a moved node lies
+// outside the subtree, and no moved reference targets a node remaining in
+// the origin — so the rewrite adds no import anywhere, the one direction
+// free of implementation latitude (SPEC 6.5).
 const B7_ORIGIN = "specs/Origin.mdx";
 const B7_TARGET = "specs/Target.mdx";
 const B7_KEEP = "specs/Keep.mdx";
@@ -3617,7 +3629,7 @@ const B7_ORIGIN_BEFORE = [
   "",
   "{text(TB.aux)}",
   "",
-  '<S id="org.mv.leaf">',
+  "<S id='org.mv.leaf'>",
   "Moved leaf text.",
   "</S>",
   "",
@@ -3694,7 +3706,12 @@ const B7_ORIGIN_AFTER = [
 //   reference single-quoted fails here.
 // - The local reference stays local, re-identified by prefix replacement
 //   with its single-quote spelling preserved: `d={'mv.leaf'}` (SPEC 6.4:
-//   minimal in-place edits preserve quote style).
+//   minimal in-place edits preserve quote style); the descendant's
+//   single-quoted `id` attribute is re-identified the same way, its quotes
+//   kept: `id='mv.leaf'` (SPEC 6.4 binds the `id`-attribute rewrite as it
+//   binds references — the double-quoted fallback applies only where a form
+//   cannot be kept, and `mv.leaf` holds no quote character). A product
+//   re-emitting a rewritten `id` attribute double-quoted fails here.
 const B7_TARGET_AFTER = [
   '<S id="hub">',
   "Hub text.",
@@ -3708,7 +3725,7 @@ const B7_TARGET_AFTER = [
   "",
   '{text("aux")}',
   "",
-  '<S id="mv.leaf">',
+  "<S id='mv.leaf'>",
   "Moved leaf text.",
   "</S>",
   "",
@@ -3716,6 +3733,99 @@ const B7_TARGET_AFTER = [
   "Moved user text.",
   "</S>",
   "</S>",
+  "",
+].join("\n");
+
+// The code-source counterpart (TEST-SPEC T6.5-7), fully composed — no
+// import is added, so no latitude: two `.ts` files of the configured code
+// group, each importing the origin module, the target module, and the
+// retained third module (SPEC 4: default bindings, `.xspec` specifiers
+// resolved as 2.1), whose only references through the origin binding
+// (`ORG`) are markers (SPEC 4.5) on nodes of the moved subtree — the moved
+// root `org.mv` and its descendant `org.mv.leaf` — beside a marker through
+// the target binding (`TGT.hub`) and one through the third (`Keep.keep`).
+// The variants differ in the origin declaration's line alone: alone on its
+// line (between the other two) in `src/own-line.ts`; following the third
+// module's declaration on a shared line in `src/shared-line.ts`. As in the
+// MDX fixture, the removed declaration carries no `;` — the declaration
+// spans `import ORG from "../specs/Origin.xspec"` exactly, so its extent
+// reaches no terminator character whose membership could be argued — while
+// the retained declarations keep theirs (TypeScript's grammar admits both,
+// a line break ending the `;`-less declaration).
+const B7_TS_OWN = "src/own-line.ts";
+const B7_TS_SHARED = "src/shared-line.ts";
+
+const B7_TS_OWN_BEFORE = [
+  'import TGT from "../specs/Target.xspec";',
+  'import ORG from "../specs/Origin.xspec"',
+  'import Keep from "../specs/Keep.xspec";',
+  "",
+  "export function ownLine(): void {",
+  "  ORG.org.mv;",
+  "  ORG.org.mv.leaf; // moved descendant",
+  "  TGT.hub;",
+  "  Keep.keep;",
+  "}",
+  "",
+].join("\n");
+
+const B7_TS_SHARED_BEFORE = [
+  'import Keep from "../specs/Keep.xspec"; import ORG from "../specs/Origin.xspec"',
+  'import TGT from "../specs/Target.xspec";',
+  "",
+  "export function sharedLine(): void {",
+  "  ORG.org.mv;",
+  "  ORG.org.mv.leaf; // moved descendant",
+  "  TGT.hub;",
+  "  Keep.keep;",
+  "}",
+  "",
+].join("\n");
+
+// Expected code bytes, composed from the rules of SPEC 6.4/6.5 and 3 — not
+// from any product output:
+// - The moved markers are rewritten through the EXISTING target binding
+//   (SPEC 6.5: an import is added only where the file lacks the binding):
+//   re-rooted at `TGT` with the prefix `org.mv` replaced by `mv`, dot access
+//   kept (SPEC 6.4: minimal in-place edits preserve access form; every
+//   segment is an identifier), so `ORG.org.mv` → `TGT.mv` and
+//   `ORG.org.mv.leaf` → `TGT.mv.leaf`, each marker's `;`, indentation, and
+//   trailing comment untouched.
+// - The origin binding is left without references, so its declaration is
+//   removed with 6.5's exact extent: in the own-line variant, the line left
+//   empty purely by the deletion is dropped with its terminator (SPEC 6.5,
+//   3); in the shared-line variant, the declaration's own characters ALONE
+//   are deleted, so the retained `Keep` import, its `;`, AND the separating
+//   U+0020 survive byte-for-byte — the kept line ends
+//   `"../specs/Keep.xspec"; ` with a trailing space before its terminator
+//   (an explicit concatenation below, so the byte is loud).
+// - The `TGT.hub` and `Keep.keep` markers, the retained imports, and every
+//   other byte are unchanged: a product reprinting the code file on removal
+//   — re-indenting, dropping the comment, or normalizing `;` or whitespace
+//   — fails here while passing every resolution-only assertion.
+const B7_TS_OWN_AFTER = [
+  'import TGT from "../specs/Target.xspec";',
+  'import Keep from "../specs/Keep.xspec";',
+  "",
+  "export function ownLine(): void {",
+  "  TGT.mv;",
+  "  TGT.mv.leaf; // moved descendant",
+  "  TGT.hub;",
+  "  Keep.keep;",
+  "}",
+  "",
+].join("\n");
+
+const B7_TS_SHARED_AFTER = [
+  'import Keep from "../specs/Keep.xspec";' + " ",
+  'import TGT from "../specs/Target.xspec";',
+  "",
+  "export function sharedLine(): void {",
+  "  TGT.mv;",
+  "  TGT.mv.leaf; // moved descendant",
+  "  TGT.hub;",
+  "  Keep.keep;",
+  "}",
   "",
 ].join("\n");
 
@@ -3728,19 +3838,22 @@ const B7_MOVE_ARGV = [
 const T6_5_7 = defineProductTest({
   id: "T6.5-7",
   title:
-    "operation-side rewrite bytes for the real move: import-edit extents and reference-conversion spellings byte-asserted against independently composed expected files, staged so no import is added (the one rewrite direction free of implementation latitude) — the own-line target-module import's line dropped with its terminator, the shared-line declaration's own characters alone deleted with the retained third-module import kept byte-for-byte on its kept line, the moved references converted to local form as double-quoted string literals, and the single-quoted local reference re-identified by prefix replacement with its quote spelling preserved (SPEC 6.5, 6.4, 3, 2.1; H-4, normalizing nothing)",
+    "operation-side rewrite bytes for the real move: import-edit extents and reference-conversion spellings byte-asserted against independently composed expected files, staged so no import is added (the one rewrite direction free of implementation latitude) — the own-line target-module import's line dropped with its terminator, the shared-line declaration's own characters alone deleted with the retained third-module import kept byte-for-byte on its kept line, the moved references converted to local form as double-quoted string literals, the single-quoted local reference and the single-quoted descendant `id` attribute each re-identified by prefix replacement with their quote spellings preserved; and the code-source counterpart — two `.ts` files whose origin-module import, its binding referenced only by markers on moved nodes, is removed with the same exact extent (own-line and shared-line variants) while the moved markers are rewritten through the existing target binding, each file byte-equal to its composed expectation (SPEC 6.5, 6.4, 3, 2.1, 2.7, 4.5; H-4, normalizing nothing)",
   run: async (product) => {
     await withWorkspace(
-      SPECS_ONLY_CONFIG,
+      SPEC_AND_CODE_CONFIG,
       {
         [B7_ORIGIN]: B7_ORIGIN_BEFORE,
         [B7_TARGET]: B7_TARGET_BEFORE,
         [B7_KEEP]: B7_KEEP_SOURCE,
+        [B7_TS_OWN]: B7_TS_OWN_BEFORE,
+        [B7_TS_SHARED]: B7_TS_SHARED_BEFORE,
       },
       async (workspace) => {
-        // Premise: the staging is valid — most acutely, the shared line's
-        // two import declarations parse as two bindings (SPEC 2.1), so a
-        // later failure is the move's, not the staging's.
+        // Premise: the staging is valid — most acutely, the shared lines'
+        // two import declarations parse as two bindings in MDX (SPEC 2.1)
+        // and in TypeScript (SPEC 4) alike, and every marker resolves (SPEC
+        // 4.5) — so a later failure is the move's, not the staging's.
         await buildOk(product, workspace, "T6.5-7 `build` over the staging");
 
         await expectExit(
@@ -3782,6 +3895,36 @@ const T6_5_7 = defineProductTest({
             "changes no bytes (SPEC 6.5)",
         );
 
+        // The code-source counterpart: the import-removal rule binds code
+        // sources as it binds MDX, and the moved markers are rewritten
+        // through the binding the file already has.
+        await assertFileBytes(
+          workspace.path(B7_TS_OWN),
+          B7_TS_OWN_AFTER,
+          "T6.5-7: the own-line code variant after the move — the " +
+            "origin-module import, its binding left without references, " +
+            "is removed with 6.5's exact extent (its line dropped with its " +
+            "terminator), the moved markers are rewritten through the " +
+            "existing target binding (`TGT.mv`, `TGT.mv.leaf`; no import " +
+            "added), and every other byte — the retained imports, the " +
+            "`TGT.hub` and `Keep.keep` markers, indentation, `;`, and the " +
+            "trailing comment — is unchanged (SPEC 6.5, 6.4, 4.5, 3; H-4, " +
+            "normalizing nothing: a product reprinting the code file on " +
+            "removal fails here)",
+        );
+        await assertFileBytes(
+          workspace.path(B7_TS_SHARED),
+          B7_TS_SHARED_AFTER,
+          "T6.5-7: the shared-line code variant after the move — the " +
+            "origin-module declaration's own characters alone are deleted " +
+            "from the line it shares with the retained third-module " +
+            "import, which is kept byte-for-byte (its `;` and the " +
+            "separating space included) on its kept line, the moved " +
+            "markers are rewritten through the existing target binding, " +
+            "and every other byte is unchanged (SPEC 6.5, 6.4, 4.5, 3; " +
+            "H-4, normalizing nothing)",
+        );
+
         // Soundness guard on the composed expectation itself: everything
         // resolves after the move — if the product's bytes matched the
         // expected bytes yet a reference or import failed to resolve, the
@@ -3792,8 +3935,9 @@ const T6_5_7 = defineProductTest({
           workspace,
           ["check"],
           0,
-          "T6.5-7 `check` immediately after the move — every converted and " +
-            "re-identified reference resolves and no staleness remains " +
+          "T6.5-7 `check` immediately after the move — every converted, " +
+            "re-identified, and re-rooted reference (MDX references and " +
+            "TS markers alike) resolves and no staleness remains " +
             "(SPEC 6.5, 12.2, 14.10)",
         );
       },

@@ -65,39 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 27 — T6.5-7: single-quoted descendant `id`; code-source counterpart (import removal in `.ts`, byte-composed)
-
-Cites: TEST-SPEC T6.5-7 (revised: the moved subtree "spells that descendant's
-`id` attribute single-quoted (2.7)" and after the move "the local reference and
-the single-quoted `id` attribute are each re-identified by prefix replacement
-with their single-quote spellings preserved"; and "The code-source counterpart,
-fully composed (no import added, so no latitude): a `.ts` file importing the
-origin module, the target module, and a retained third module — the third
-module's declaration and the origin's sharing one line in a second variant,
-the origin's following it — whose only references through the origin binding
-are markers on nodes of the moved subtree, beside a marker through the target
-binding and one through the third; after the section move, the origin-module
-import … is removed with 6.5's exact extent (own-line: the line dropped with
-its terminator; shared-line: the declaration's own characters alone deleted,
-the retained declaration kept byte-for-byte), the moved markers are rewritten
-through the existing target binding, and the file is asserted byte-equal to
-expected bytes composed from the rules of 6.4/6.5 and 3"); SPEC 6.4, 6.5, 2.7,
-4.5.
-
-Now: `test/suite/registry/section-6.5.ts` ≈ lines 2723–2910 (T6.5-7) stage the
-MDX origin/target with double-quoted `id`s and no code file.
-
-Do: (a) spell the moved descendant's `id` attribute single-quoted in the
-fixture and compose the expected target bytes with the re-identified value
-still single-quoted; (b) add the code-source arm in two variants (own-line
-origin import; origin import following the third-module import on a shared
-line) with markers through all three bindings; after the move assert the
-`.ts` file byte-equal to the composed expectation (origin import removed with
-exact extent, moved markers rewritten through the existing target binding,
-everything else byte-identical); `check` clean.
-
-Verify: `npx vitest run … test/suite/section-6.5.test.ts`.
-
 ### Task 28 — T6.5-8 Added-import insertion discipline (new test: TS, MDX-origin, MDX-target arms)
 
 Cites: TEST-SPEC T6.5-8 (full text in §6.5): an added import is a line of its
