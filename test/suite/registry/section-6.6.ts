@@ -237,9 +237,13 @@ import {
 } from "./section-6.4.js";
 import type { RefusalExpectation } from "./section-6.5.js";
 import {
+  MOVE_DERIVED_LINK_CASE,
+  MOVE_DERIVED_LINK_FILES,
   MOVE_DERIVED_PATH_CASE,
   MOVE_DERIVED_PATH_CONFIG,
   MOVE_DERIVED_PATH_FILES,
+  MOVE_LINK_OUTSIDE_CASES,
+  MOVE_LINK_OUTSIDE_FILES,
   MOVE_MIXED_SYNOPSIS_CASES,
   MOVE_NON_UTF8_ARGV,
   MOVE_PRECONDITION_BREAK_FILE,
@@ -256,6 +260,8 @@ import {
   MOVE_USAGE_CONFIG,
   MOVE_USAGE_ORDERING_FILES,
   MOVE_WRONG_KIND_CASES,
+  stageMoveDerivedLinkComponent,
+  stageMoveLinkOutsideComponent,
   stageMoveRefusalOccupants,
 } from "./section-6.5.js";
 import {
@@ -844,6 +850,39 @@ const T6_6_3 = defineProductTest({
       },
     );
 
+    // T6.5-4's outside-root link-component arms, staged identically on
+    // their own workspace: the real operation and the preview alike leave
+    // the link's target directory outside the root byte-identical.
+    await withWorkspace(
+      MOVE_REFUSAL_CONFIG,
+      MOVE_LINK_OUTSIDE_FILES,
+      async (workspace) => {
+        const outside = await stageMoveLinkOutsideComponent(workspace);
+        await buildOk(
+          product,
+          workspace,
+          "T6.6-3 outside-root link staging `build` (the link staged before " +
+            "it lies under no current source's write path; T6.5-4's protocol)",
+        );
+        for (const { argv, expected, reason } of MOVE_LINK_OUTSIDE_CASES) {
+          await assertLeavesUnchanged(
+            outside,
+            () =>
+              expectRefusedPreviewEquivalence(
+                product,
+                workspace,
+                argv,
+                expected,
+                `T6.6-3 move refusal (${reason})`,
+              ),
+            `T6.6-3 move refusal (${reason}): the link's target directory ` +
+              `outside the workspace root stays byte-identical across the ` +
+              `real operation and its preview (SPEC 6.5, 6.6, 13.4)`,
+          );
+        }
+      },
+    );
+
     // T6.5-4's derived-path arm, staged identically on its own workspace.
     await withWorkspace(
       MOVE_DERIVED_PATH_CONFIG,
@@ -862,6 +901,30 @@ const T6_6_3 = defineProductTest({
           MOVE_DERIVED_PATH_CASE.argv,
           MOVE_DERIVED_PATH_CASE.expected,
           `T6.6-3 move refusal (${MOVE_DERIVED_PATH_CASE.reason})`,
+        );
+      },
+    );
+
+    // T6.5-4's derived-path link sibling, staged identically on its own
+    // workspace.
+    await withWorkspace(
+      MOVE_DERIVED_PATH_CONFIG,
+      MOVE_DERIVED_LINK_FILES,
+      async (workspace) => {
+        await stageMoveDerivedLinkComponent(workspace);
+        await buildOk(
+          product,
+          workspace,
+          "T6.6-3 derived-path link-sibling staging `build` — the link " +
+            "mdout/new lies under no current source's write path (T6.5-4's " +
+            "sibling arm), so the refusal previewed below is the move's own",
+        );
+        await expectRefusedPreviewEquivalence(
+          product,
+          workspace,
+          MOVE_DERIVED_LINK_CASE.argv,
+          MOVE_DERIVED_LINK_CASE.expected,
+          `T6.6-3 move refusal (${MOVE_DERIVED_LINK_CASE.reason})`,
         );
       },
     );

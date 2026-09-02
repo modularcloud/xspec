@@ -65,30 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 25 — T6.5-4: destination occupied by a directory; symbolic-link path components → `refused-invalid-destination`
-
-Cites: TEST-SPEC T6.5-4 (revised: (a) file-form destination occupied by a
-directory is refused like the plain-file/symlink/broken-symlink occupants;
-(b) a destination path with a symbolic-link component — file-form move to
-`specs/sub/b.mdx` and section-form move creating `specs/sub/new.mdx`, with
-`specs/sub` a symlink to a real empty directory, staged once inside and once
-outside the workspace root — is `refused-invalid-destination`, never 14.22,
-exit 1, nothing modified, the link and its target byte-identical; and
-`<outDir>/new` staged as such a link beside the derived-path arm); SPEC 6.5,
-14.
-
-Now: `test/suite/registry/section-6.5.ts` ≈ lines 1664–1666 (title 2003)
-stage plain file, symlink, broken symlink only; no link-component arms.
-
-Do: add the directory-occupant arm and the four link-component arms (file
-form × {inside, outside root}, section form × {inside, outside root}) using the
-workspace builder's symlink support (S-2 covers it), plus the `<outDir>/new`
-link beside the derived-path arm. Each: exit 1, exactly one
-`refused-invalid-destination` finding (never 14.22), sources/journal/link/
-target byte-identical after the run, the link still a link.
-
-Verify: `npx vitest run … test/suite/section-6.5.test.ts`.
-
 ### Task 26 — T6.5-5: origin `<file>` present on disk but undiscovered (both forms)
 
 Cites: TEST-SPEC T6.5-5 (an origin `<file>` naming no discovered spec source is

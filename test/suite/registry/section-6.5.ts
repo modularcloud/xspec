@@ -170,7 +170,8 @@
 //   resolve" clause is unstageable for T6.4-3's reason.
 
 import { Buffer } from "node:buffer";
-import { posix as posixPath } from "node:path";
+import * as fsp from "node:fs/promises";
+import { join as joinPath, posix as posixPath } from "node:path";
 import type {
   GraphEdge,
   PreviewFileEntry,
@@ -2167,7 +2168,8 @@ const T6_5_3 = defineProductTest({
 // - The destination-path arms use the file form of the reference-free A.mdx,
 //   each violating exactly one destination rule under REFUSAL_CONFIG.
 // - Destination occupants (SPEC 6.5): the file form refuses on ANY occupant
-//   — a plain file (B.mdx), a symbolic link, a broken symbolic link (target
+//   — a plain file (B.mdx), a directory (a product probing for a file alone
+//   sees none and proceeds), a symbolic link, a broken symbolic link (target
 //   absent; a product probing existence through link-following stat sees
 //   that path absent and proceeds to relocate) — and the section form on
 //   any occupant that is not a discovered spec source: a directory, a
@@ -2223,6 +2225,7 @@ const V4_B_SOURCE = [
 // `build`, plus the out-of-group plain `.mdx` file (in the files map).
 const V4_SYM_DEST = "specs/SymDest.mdx"; // file form: symlink → B.mdx
 const V4_GONE_DEST = "specs/GoneDest.mdx"; // file form: broken symlink
+const V4_DIR_DEST = "specs/DirDest.mdx"; // file form: directory
 const V4_DIR_TARGET = "specs/DirTarget.mdx"; // section form: directory
 const V4_LINK_TARGET = "specs/LinkTarget.mdx"; // section form: symlink → B.mdx
 const V4_OCC = "docs/Occ.mdx"; // section form: out-of-group `.mdx` file
@@ -2288,6 +2291,39 @@ const V4_SOLO_SOURCE = ['<S id="solo">', "Solo text.", "</S>", ""].join("\n");
 const V4_MDOUT_OCCUPANT = "mdout/new";
 const V4_MDOUT_OCCUPANT_CONTENT = "not a directory\n";
 
+// The symbolic-link arms of the same clause (SPEC 6.5: a workspace-relative
+// directory component of the destination path, or of a derived path the
+// destination would generate, occupied by a symbolic link — whatever it
+// targets: discovery never traverses one, 7, and writes never traverse or
+// replace one, 13.4, 14.22). `specs/sub` is a symbolic link to a real, empty
+// directory, so the file-form destination `specs/sub/b.mdx` and the section
+// form's created target file `specs/sub/new.mdx` each have that link as a
+// directory component. Staged twice: with the link targeting the empty
+// directory `linked/` inside the workspace root (on the main refusal
+// workspace, beside the occupant arms), and, on its own workspace, a real
+// directory outside the root — beside the workspace in the test-owned
+// temporary directory, disposed with it. These discriminate a product
+// vetting components through link-following stat: it sees a directory at
+// the link, proceeds, and writes the moved file — and its regenerated
+// derived files — through the link, possibly outside the workspace; the
+// outside-root arms therefore also compare the link's target directory
+// around each refusal, since the whole-root compare cannot see a write
+// landing there. The link lies under no current source's write path and is
+// never a source (SPEC 7), so the premise `build` passes; through the link
+// the destination path itself is absent (the target directory is empty), so
+// no occupant refusal applies beside the component one — one finding,
+// refused-invalid-destination concerning the destination path (14, T14-7),
+// never 14.22. The derived-path arm's sibling stages `mdout/new` — the emit
+// destination's directory component — as such a link (to `linked/`) instead
+// of a plain file, refused identically.
+const V4_LINK_COMPONENT = "specs/sub";
+const V4_LINKED_DIR = "linked"; // the real, empty inside-root target
+const V4_LINKED_TARGET = "../linked"; // spelled from one level below the root
+const V4_OUTSIDE_DIR = "outside"; // beside the root in the temporary directory
+const V4_OUTSIDE_TARGET = "../../outside"; // work/specs/sub → tempRoot/outside
+const V4_LINK_FILE_DEST = "specs/sub/b.mdx";
+const V4_LINK_SECTION_DEST = "specs/sub/new.mdx";
+
 /**
  * One T6.5-4 refusal case: the full move argv (without `--json`), the
  * expected refusal finding — or one expectation per applicable reason where
@@ -2297,6 +2333,47 @@ export interface MoveRefusalCase {
   readonly argv: readonly string[];
   readonly expected: RefusalExpectation | readonly RefusalExpectation[];
   readonly reason: string;
+}
+
+/**
+ * The two link-component arms (V4_LINK_COMPONENT's note) for one staging of
+ * `specs/sub` — the file-form destination and the section form's created
+ * target file — each refused refused-invalid-destination concerning the
+ * destination path (SPEC 6.5, 14, T14-7), never 14.22; `target` names what
+ * the staged link resolves to, for diagnosis.
+ */
+function linkComponentCases(target: string): readonly MoveRefusalCase[] {
+  return [
+    {
+      argv: ["move", "specs/A.mdx", V4_LINK_FILE_DEST],
+      expected: {
+        finding: "refused-invalid-destination",
+        path: V4_LINK_FILE_DEST,
+      },
+      reason:
+        "file form whose destination path has its directory component " +
+        `specs/sub occupied by a symbolic link to ${target} — a component ` +
+        "occupied by anything other than a directory, a symbolic link " +
+        "whatever it targets, is the move's own refusal, never 14.22; a " +
+        "product vetting components through link-following stat sees a " +
+        "directory there, proceeds, and writes the moved file through the " +
+        "link (SPEC 6.5, 7, 13.4, 14)",
+    },
+    {
+      argv: ["move", "specs/A.mdx#x", `${V4_LINK_SECTION_DEST}#tnew`],
+      expected: {
+        finding: "refused-invalid-destination",
+        path: V4_LINK_SECTION_DEST,
+      },
+      reason:
+        "section form creating the target file specs/sub/new.mdx, whose " +
+        `directory component specs/sub is a symbolic link to ${target} — ` +
+        "the created target file's path is vetted like the file form's " +
+        "destination, refused never 14.22; through the link the path is " +
+        "absent, so no occupant reason applies beside it (SPEC 6.5, 7, " +
+        "13.4, 14)",
+    },
+  ];
 }
 
 /**
@@ -2321,15 +2398,20 @@ export const MOVE_REFUSAL_FILES: Readonly<Record<string, string>> = {
  * in-group `.mdx` paths discovery ignores, staged before the pre-refusal
  * `build` — a directory is no source file and discovery never yields a
  * symbolic link (SPEC 7), so the build stays valid and each occupant arm
- * refuses on exactly its staged ground.
+ * refuses on exactly its staged ground — plus the inside-root staging of
+ * the link-component arms (V4_LINK_COMPONENT's note): `specs/sub` a
+ * symbolic link to the real, empty directory `linked/` at the root.
  */
 export async function stageMoveRefusalOccupants(
   workspace: TestWorkspace,
 ): Promise<void> {
   await workspace.dir(V4_DIR_TARGET);
+  await workspace.dir(V4_DIR_DEST);
   await workspace.symlink(V4_SYM_DEST, "B.mdx");
   await workspace.symlink(V4_LINK_TARGET, "B.mdx");
   await workspace.symlink(V4_GONE_DEST, "missing-target.mdx");
+  await workspace.dir(V4_LINKED_DIR);
+  await workspace.symlink(V4_LINK_COMPONENT, V4_LINKED_TARGET, "dir");
 }
 
 // Each case's expected refusal finding (SPEC 14): the exact stable code with
@@ -2382,6 +2464,14 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
       "file form whose destination path is occupied by a broken symbolic " +
       "link, target absent — a product probing existence through " +
       "link-following stat sees the path absent and proceeds (SPEC 6.5)",
+  },
+  {
+    argv: ["move", "specs/A.mdx", V4_DIR_DEST],
+    expected: { finding: "refused-destination-exists", path: V4_DIR_DEST },
+    reason:
+      "file form whose destination path is occupied by a directory — " +
+      "whatever kind of filesystem object occupies it; a product probing " +
+      "for a file alone sees none there and proceeds (SPEC 6.5)",
   },
   {
     argv: ["move", "specs/A.mdx#x", `${V4_DIR_TARGET}#tdir`],
@@ -2504,6 +2594,12 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
       "`specs/plain/**` spec glob, isolating 14.19's extension rule " +
       "(SPEC 6.5, 7.1, 14.19)",
   },
+  // The inside-root staging of the link-component arms (V4_LINK_COMPONENT's
+  // note): `specs/sub` → `linked/`, staged by stageMoveRefusalOccupants; the
+  // whole-root compare sees any write landing through the link.
+  ...linkComponentCases(
+    "the empty directory linked/ inside the workspace root",
+  ),
 ];
 
 /**
@@ -2529,6 +2625,64 @@ export const MOVE_DERIVED_PATH_CASE: MoveRefusalCase = {
     "refused refused-invalid-destination concerning the destination path, " +
     "never 14.22 — a product vetting only the destination path's own " +
     "components sees new/ absent and proceeds (SPEC 6.5, 7.3, 13.1, 13.2, 14)",
+};
+
+/**
+ * T6.5-4's outside-root staging of the link-component arms
+ * (V4_LINK_COMPONENT's note), exported for T6.6-3: MOVE_LINK_OUTSIDE_FILES
+ * under MOVE_REFUSAL_CONFIG, `specs/sub` a symbolic link to a real, empty
+ * directory created beside the workspace root in the test-owned temporary
+ * directory (disposed with the workspace). Returns that directory's
+ * absolute path: the caller compares its byte state around each refusal
+ * (`assertLeavesUnchanged`), since the whole-root compare cannot see a
+ * write landing through the link outside the root.
+ */
+export const MOVE_LINK_OUTSIDE_FILES: Readonly<Record<string, string>> = {
+  [V4_A]: V4_A_SOURCE,
+  [V4_B]: V4_B_SOURCE,
+};
+export async function stageMoveLinkOutsideComponent(
+  workspace: TestWorkspace,
+): Promise<string> {
+  const outside = joinPath(workspace.tempRoot, V4_OUTSIDE_DIR);
+  await fsp.mkdir(outside);
+  await workspace.symlink(V4_LINK_COMPONENT, V4_OUTSIDE_TARGET, "dir");
+  return outside;
+}
+export const MOVE_LINK_OUTSIDE_CASES: readonly MoveRefusalCase[] =
+  linkComponentCases("an empty directory outside the workspace root");
+
+/**
+ * The derived-path arm's symbolic-link sibling (V4_LINK_COMPONENT's note),
+ * exported for T6.6-3: MOVE_DERIVED_LINK_FILES under
+ * MOVE_DERIVED_PATH_CONFIG, with `mdout/new` — the emit destination's
+ * directory component — staged as a symbolic link to the real, empty
+ * directory `linked/` instead of a plain file; the link lies under no
+ * current source's write path (specs/Solo.mdx emits mdout/specs/Solo.md),
+ * so the premise `build` passes, and the move is refused identically —
+ * refused-invalid-destination concerning the destination path, never
+ * 14.22, the link and its target byte-identical afterward.
+ */
+export const MOVE_DERIVED_LINK_FILES: Readonly<Record<string, string>> = {
+  [V4_SOLO]: V4_SOLO_SOURCE,
+};
+export async function stageMoveDerivedLinkComponent(
+  workspace: TestWorkspace,
+): Promise<void> {
+  await workspace.dir(V4_LINKED_DIR);
+  await workspace.symlink(V4_MDOUT_OCCUPANT, V4_LINKED_TARGET, "dir");
+}
+export const MOVE_DERIVED_LINK_CASE: MoveRefusalCase = {
+  argv: MOVE_DERIVED_PATH_CASE.argv,
+  expected: MOVE_DERIVED_PATH_CASE.expected,
+  reason:
+    "derived-path arm's symbolic-link sibling — the emit destination's " +
+    "directory component mdout/new occupied by a symbolic link to the " +
+    "empty directory linked/ instead of a plain file (a component occupied " +
+    "by a symbolic link, whatever it targets; writes never traverse one): " +
+    "refused refused-invalid-destination concerning the destination path, " +
+    "never 14.22, the link and its target byte-identical (SPEC 6.5, 7.3, " +
+    "13.1, 13.2, 13.4, 14)",
 };
 
 /**
@@ -2560,7 +2714,7 @@ export const MOVE_PRECONDITION_CASE: MoveRefusalCase = {
 const T6_5_4 = defineProductTest({
   id: "T6.5-4",
   title:
-    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle (refused-cycle, the dependency arm locating the participating `d` spelling); file form whose destination exists — occupied by a plain file, by a symbolic link, and by a broken symbolic link with its target absent, one arm each, the broken-link arm discriminating a product probing existence through link-following stat (refused-destination-exists, concerning that path); section form whose target path is occupied by anything other than a discovered spec source — a directory; a symbolic link resolving to a discovered spec source (discovery never yields a symlink); and an existing `.mdx` file outside every configured spec group, the latter refusing under refused-destination-exists and refused-invalid-destination together, one finding per applicable reason; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment; the empty `<new-id>` of destination operand `specs/B.mdx#`, a well-formed 12.0 split with zero id segments, never the exit-2 generalization of 11.3's `--to` spelling rule — refused-invalid-id, concerning that identity); the ordinary cross-file `<new-id>` collision (refused-id-collision, locating the remaining bearer); a missing target parent and a target parent within the moved subtree (refused-missing-target-parent, concerning the target-parent identity); destination paths in no configured spec group, in a code group as well, or lacking `.mdx`, and the derived-path arm — emission enabled under `markdown.outDir`, the otherwise-valid destination's emit-destination directory component `mdout/new` occupied by a plain file lying under no current source's write path, refused never 14.22 (refused-invalid-destination, concerning the destination path) — each refusal the form-exact 12.7 findings-only report holding exactly one finding per applicable reason with its exact stable code; the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6, reporting the workspace's numbered findings alone (SPEC 6.5, 7, 7.3, 5.3, 2.1, 1.4, 1.3, 13.1, 13.2, 13.4, 14.14, 14.19, 14.22, 12.0, 12.7, 14)",
+    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle (refused-cycle, the dependency arm locating the participating `d` spelling); file form whose destination exists — occupied by a plain file, by a directory, by a symbolic link, and by a broken symbolic link with its target absent, one arm each, the directory arm discriminating a product probing for a file alone and the broken-link arm discriminating a product probing existence through link-following stat (refused-destination-exists, concerning that path); section form whose target path is occupied by anything other than a discovered spec source — a directory; a symbolic link resolving to a discovered spec source (discovery never yields a symlink); and an existing `.mdx` file outside every configured spec group, the latter refusing under refused-destination-exists and refused-invalid-destination together, one finding per applicable reason; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment; the empty `<new-id>` of destination operand `specs/B.mdx#`, a well-formed 12.0 split with zero id segments, never the exit-2 generalization of 11.3's `--to` spelling rule — refused-invalid-id, concerning that identity); the ordinary cross-file `<new-id>` collision (refused-id-collision, locating the remaining bearer); a missing target parent and a target parent within the moved subtree (refused-missing-target-parent, concerning the target-parent identity); destination paths in no configured spec group, in a code group as well, or lacking `.mdx`, and the derived-path arm — emission enabled under `markdown.outDir`, the otherwise-valid destination's emit-destination directory component `mdout/new` occupied by a plain file lying under no current source's write path, refused never 14.22 (refused-invalid-destination, concerning the destination path); the symbolic-link arms of the same clause — a file-form move to `specs/sub/b.mdx` and a section-form move creating the target file `specs/sub/new.mdx`, `specs/sub` a symbolic link to a real, empty directory, staged with the link targeting a directory inside the workspace root and, on its own workspace, one outside it — each refused-invalid-destination concerning the destination path, never 14.22, nothing written through the link inside or outside the workspace (the link and its target directory byte-identical afterward), and the derived-path arm's sibling staging `mdout/new` as such a link instead of a plain file, refused identically — each refusal the form-exact 12.7 findings-only report holding exactly one finding per applicable reason with its exact stable code; the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6, reporting the workspace's numbered findings alone (SPEC 6.5, 7, 7.3, 5.3, 2.1, 1.4, 1.3, 13.1, 13.2, 13.4, 14.14, 14.19, 14.22, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       MOVE_REFUSAL_CONFIG,
@@ -2595,6 +2749,44 @@ const T6_5_4 = defineProductTest({
       },
     );
 
+    // The outside-root staging of the link-component arms
+    // (V4_LINK_COMPONENT's note): `specs/sub` a symbolic link to a real,
+    // empty directory beside the workspace root. Each refusal is compared
+    // over the link's target directory as well — a product writing the
+    // moved file, or its regenerated derived files, through the link lands
+    // them outside the root, where the whole-root compare cannot see them.
+    await withWorkspace(
+      MOVE_REFUSAL_CONFIG,
+      MOVE_LINK_OUTSIDE_FILES,
+      async (workspace) => {
+        const outside = await stageMoveLinkOutsideComponent(workspace);
+        await buildOk(
+          product,
+          workspace,
+          "T6.5-4 outside-root link staging `build` — the link specs/sub " +
+            "is never discovered nor traversed and lies under no current " +
+            "source's write path (SPEC 7, 13.4), so the workspace passes " +
+            "`build`'s validations and each refusal below is the move's own",
+        );
+        for (const { argv, expected, reason } of MOVE_LINK_OUTSIDE_CASES) {
+          await assertLeavesUnchanged(
+            outside,
+            () =>
+              expectRefusalModifiesNothing(
+                product,
+                workspace,
+                argv,
+                expected,
+                `T6.5-4 (${reason})`,
+              ),
+            `T6.5-4 (${reason}): the link's target directory outside the ` +
+              `workspace root stays byte-identical — nothing is written ` +
+              `through the link (SPEC 6.5, 13.4)`,
+          );
+        }
+      },
+    );
+
     // The derived-path arm of refused-invalid-destination, on its own
     // workspace (V4_OUTDIR_CONFIG's note): the destination `new/b.mdx` is
     // otherwise valid and its own directory components unobstructed (`new/`
@@ -2620,6 +2812,33 @@ const T6_5_4 = defineProductTest({
           MOVE_DERIVED_PATH_CASE.argv,
           MOVE_DERIVED_PATH_CASE.expected,
           `T6.5-4 (${MOVE_DERIVED_PATH_CASE.reason})`,
+        );
+      },
+    );
+
+    // The derived-path arm's symbolic-link sibling (V4_LINK_COMPONENT's
+    // note): `mdout/new` a symbolic link to the empty directory `linked/`
+    // instead of a plain file — refused identically, the link and its
+    // target byte-identical (both inside the root: the whole-root compare).
+    await withWorkspace(
+      MOVE_DERIVED_PATH_CONFIG,
+      MOVE_DERIVED_LINK_FILES,
+      async (workspace) => {
+        await stageMoveDerivedLinkComponent(workspace);
+        await buildOk(
+          product,
+          workspace,
+          "T6.5-4 derived-path link sibling `build` — the link mdout/new " +
+            "lies under no current source's write path (SPEC 13.4), so the " +
+            "workspace passes `build`'s validations and the refusal below " +
+            "is the move's own",
+        );
+        await expectRefusalModifiesNothing(
+          product,
+          workspace,
+          MOVE_DERIVED_LINK_CASE.argv,
+          MOVE_DERIVED_LINK_CASE.expected,
+          `T6.5-4 (${MOVE_DERIVED_LINK_CASE.reason})`,
         );
       },
     );
