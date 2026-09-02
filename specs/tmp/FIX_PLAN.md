@@ -65,22 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 26 — T6.5-5: origin `<file>` present on disk but undiscovered (both forms)
-
-Cites: TEST-SPEC T6.5-5 (an origin `<file>` naming no discovered spec source is
-a usage error, exit 2, in both spellings — absent, and present but matched by
-no spec group — for the file form and the section form); SPEC 6.5, 12.0.
-
-Now: `test/suite/registry/section-6.5.ts` ≈ lines 2322–2324 stage only the
-absent spelling.
-
-Do: add the present-but-undiscovered spelling for each form (as Task 21 does
-for `rename`): a valid `.mdx` outside every glob; `move docs/stray.mdx …` and
-`move docs/stray.mdx#a …` → exit 2 with the 12.7 error document, nothing
-modified.
-
-Verify: `npx vitest run … test/suite/section-6.5.test.ts`.
-
 ### Task 27 — T6.5-7: single-quoted descendant `id`; code-source counterpart (import removal in `.ts`, byte-composed)
 
 Cites: TEST-SPEC T6.5-7 (revised: the moved subtree "spells that descendant's

@@ -119,13 +119,21 @@
 //   on stderr (presence, not wording). The existence and kind checks ride
 //   both a valid workspace and the ordering arm's failing one (12.0:
 //   checked before source validation, as T6.4-4): a nonexistent origin
-//   file or origin ID, and a discovered code source as the origin in each
+//   file — in each form, both of T6.4-4's spellings: absent on disk, and a
+//   valid `.mdx` present on disk (holding a section spelling the origin
+//   ID) but matched by no spec group, its absence from the discovered set
+//   pinned through `ids --json` on the valid workspace (a file named in an
+//   argument exists as a member of the discovered set, SPEC 12.0) — or
+//   origin ID, and a discovered code source as the origin in each
 //   form — both forms' origin operands name discovered spec sources
 //   (SPEC 6.5), so a code-source origin is a wrong-kind operand, judged
 //   like existence before any content question — the wrong-kind arms on
 //   the valid workspace inside whole-root modifies-nothing snapshot
 //   compares (a product accepting a code origin would relocate the file or
-//   act on its named unit). The masking arm asserts exit 1 with exactly
+//   act on its named unit), and the existence table inside one such
+//   compare in the valid-workspace and ordering arms alike (a product
+//   probing the filesystem for the stray origin would move it). The
+//   masking arm asserts exit 1 with exactly
 //   one 14.20 finding naming the unparseable origin file, and origin-ID
 //   existence is parse-local over spelled identities, as T6.4-4
 //   (SPEC 6.5, 6.4, 11.2): an origin ID two sections both spell, or one
@@ -181,6 +189,7 @@ import {
   decodeAppliedMappingReport,
   decodeEdgesReport,
   decodeFindingsReport,
+  decodeIdsReport,
   decodeNodeRowsReport,
   decodePreviewReport,
   renderPathValue,
@@ -2920,6 +2929,30 @@ const U5_BROKEN_SOURCE = [
 const U5_CODE = "src/app.ts";
 const U5_CODE_SOURCE = "export function noop(): void {}\n";
 
+// The second nonexistent-`<file>` spelling (TEST-SPEC T6.5-5: "both of
+// T6.4-4's spellings"): a valid `.mdx` present on disk, holding a section
+// spelling the origin ID `a`, but outside every configured spec group
+// (`specs/**/*.mdx`, SPEC 7) — both forms' origin operands name discovered
+// spec sources (SPEC 6.5), and a file named in an argument exists as a
+// member of the discovered set (SPEC 12.0), so this operand is as
+// nonexistent as an absent path in either form. A product probing the
+// filesystem for the operand finds the file (file form) and the origin ID
+// it spells (section form) and proceeds — moving the stray file to
+// `specs/New.mdx`, or inserting its `a` subtree into `specs/B.mdx` as `z` —
+// instead of exiting 2, so the existence table runs inside whole-root
+// modifies-nothing compares. Its `a` beside `specs/A.mdx`'s is no
+// duplicate-ID condition even when discovered (SPEC 14 condition 3 is a
+// duplicate within a file), so the base arm pins the stray file's absence
+// from the discovered set directly, through `ids --json` (SPEC 12.3), as
+// T6.4-4 does.
+const U5_STRAY = "docs/Stray.mdx";
+const U5_STRAY_SOURCE = [
+  '<S id="a">',
+  "Stray text outside every spec group.",
+  "</S>",
+  "",
+].join("\n");
+
 // Parse-local existence fixtures, mirroring T6.4-4 (SPEC 6.5, 6.4, 11.2).
 // Two sections both spelling the same ID: every bearer's node identity is
 // undefined (11.2, duplicate spellings), yet each spells `dup`, so the
@@ -2989,11 +3022,24 @@ export const MOVE_USAGE_CASES: readonly (readonly [
 ])[] = [
   [
     ["move", "specs/Missing.mdx", "specs/New.mdx"],
-    "file form, nonexistent origin file",
+    "file form, nonexistent origin file, absent on disk",
+  ],
+  [
+    ["move", U5_STRAY, "specs/New.mdx"],
+    "file form, nonexistent origin file — an .mdx present on disk but " +
+      "matched by no spec group (a file named in an argument exists as a " +
+      "member of the discovered set, SPEC 12.0; both forms' origin " +
+      "operands name discovered spec sources, SPEC 6.5)",
   ],
   [
     ["move", "specs/Missing.mdx#a", "specs/B.mdx#z"],
-    "section form, nonexistent origin file",
+    "section form, nonexistent origin file, absent on disk",
+  ],
+  [
+    ["move", `${U5_STRAY}#a`, "specs/B.mdx#z"],
+    "section form, nonexistent origin file — an .mdx present on disk " +
+      "(holding a section spelling the origin ID) but matched by no spec " +
+      "group (SPEC 6.5, 12.0)",
   ],
   [
     ["move", "specs/A.mdx#nope", "specs/B.mdx#z"],
@@ -3071,14 +3117,16 @@ export const MOVE_NON_UTF8_ARGV: readonly ArgvValue[] = [
 ];
 
 /** The base/ordering staging shared by the usage cases (T6.4-4's mirror):
- * valid sources, the discovered code source, and — in the ordering variant —
- * the failing Bad.mdx, exported for T6.6-3's preview sweep. */
+ * valid sources, the discovered code source, the undiscovered stray `.mdx`,
+ * and — in the ordering variant — the failing Bad.mdx, exported for
+ * T6.6-3's preview sweep. */
 export const MOVE_USAGE_CONFIG = SPEC_AND_CODE_CONFIG;
 export const MOVE_USAGE_ORDERING_FILES: Readonly<Record<string, string>> = {
   [U5_A]: U5_A_SOURCE,
   [U5_B]: U5_B_SOURCE,
   [U5_BAD]: U5_BAD_SOURCE,
   [U5_CODE]: U5_CODE_SOURCE,
+  [U5_STRAY]: U5_STRAY_SOURCE,
 };
 
 /**
@@ -3100,7 +3148,7 @@ export const MOVE_SOLO_ARGV: readonly string[] = [
 const T6_5_5 = defineProductTest({
   id: "T6.5-5",
   title:
-    "usage errors (exit 2): a nonexistent origin file (either form), a nonexistent origin ID, and a discovered code source as the origin in each form — both forms' origin operands name discovered spec sources, so a code-source origin is a wrong-kind operand, judged like existence before any content question — are usage errors checked before source validation, the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering, as T6.4-4); an origin ID inside an unparseable origin file is masked: the validation findings are reported and the command exits 1; origin-ID existence is parse-local over spelled identities: an ID two sections both spell, or one whose sole bearer spells it beneath an ancestor spelling no identity, exists — the duplicate-ID or ancestor finding refuses instead (exit 1, never exit 2, nothing modified) — while an ID whose only would-be bearer spells no identity (its `id` attribute repeated on the tag) is nonexistent, exit 2 even beside that file's findings; operand classification is by spelling alone: the three mixed-synopsis invocations — bare-file origin with pair destination, pair origin with bare-file destination, and a `#`-containing file-form destination classified as a pair — match neither synopsis (exit 2), and a non-UTF-8 destination operand (raw argv bytes, Linux leg) is a usage-error argument value (exit 2) — the latter two the stagings T6.5-4's dead-letter note sets aside — the wrong-kind, mixed-synopsis, dead-letter, and refusal arms each proving nothing modified (SPEC 6.5, 6.4, 11.2, 12.0, 14, 14.20)",
+    "usage errors (exit 2): a nonexistent origin file in either form — absent on disk, or an `.mdx` present on disk but matched by no spec group (a file named in an argument exists as a member of the discovered set), its absence from the discovered set pinned through `ids --json` — a nonexistent origin ID, and a discovered code source as the origin in each form — both forms' origin operands name discovered spec sources, so a code-source origin is a wrong-kind operand, judged like existence before any content question — are usage errors checked before source validation, the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering, as T6.4-4); an origin ID inside an unparseable origin file is masked: the validation findings are reported and the command exits 1; origin-ID existence is parse-local over spelled identities: an ID two sections both spell, or one whose sole bearer spells it beneath an ancestor spelling no identity, exists — the duplicate-ID or ancestor finding refuses instead (exit 1, never exit 2, nothing modified) — while an ID whose only would-be bearer spells no identity (its `id` attribute repeated on the tag) is nonexistent, exit 2 even beside that file's findings; operand classification is by spelling alone: the three mixed-synopsis invocations — bare-file origin with pair destination, pair origin with bare-file destination, and a `#`-containing file-form destination classified as a pair — match neither synopsis (exit 2), and a non-UTF-8 destination operand (raw argv bytes, Linux leg) is a usage-error argument value (exit 2) — the latter two the stagings T6.5-4's dead-letter note sets aside — the existence, wrong-kind, mixed-synopsis, dead-letter, and refusal arms each proving nothing modified (SPEC 6.5, 6.4, 11.2, 12.0, 14, 14.20)",
   run: async (product) => {
     // --- Base arm: a valid workspace ---
     await withWorkspace(
@@ -3109,18 +3157,49 @@ const T6_5_5 = defineProductTest({
         [U5_A]: U5_A_SOURCE,
         [U5_B]: U5_B_SOURCE,
         [U5_CODE]: U5_CODE_SOURCE,
+        [U5_STRAY]: U5_STRAY_SOURCE,
       },
       async (workspace) => {
         const context = "T6.5-5 valid-workspace arm";
         await buildOk(product, workspace, `${context}: \`build\``);
-        for (const [argv, label] of MOVE_USAGE_CASES) {
-          await expectMoveUsageError(
-            product,
-            workspace,
-            argv,
-            `${context}, ${label}`,
+        // Staging premise: the stray file is outside the discovered set —
+        // `ids --json` lists the discovered spec sources (SPEC 12.3), and it
+        // lists `specs/A.mdx` but never `docs/Stray.mdx`. Pinning this makes
+        // the exit-2 assertions on the stray origin demonstrably a
+        // discovered-set judgement over a file present on disk, not a
+        // filesystem miss (as T6.4-4).
+        const idsLabel = `${context}: \`ids --json\` premise`;
+        const listed = decodeIdsReport(
+          await runJson(product, workspace, ["ids", "--json"], idsLabel),
+          idsLabel,
+        ).files.map((entry) => entry.file);
+        if (!listed.includes(U5_A) || listed.includes(U5_STRAY)) {
+          fail(
+            `${context}: staging premise — the discovered spec sources must ` +
+              `include ${U5_A} and exclude the stray ${U5_STRAY} (outside ` +
+              `every spec group, SPEC 7; a file named in an argument exists ` +
+              `as a member of the discovered set, SPEC 12.0), but \`ids ` +
+              `--json\` listed ${JSON.stringify(listed)}`,
           );
         }
+        // Every usage error modifies nothing (SPEC 12.0): one whole-root
+        // byte compare around the existence table — derived files, sources,
+        // and the stray file alike (a product probing the filesystem for the
+        // stray origin would move it, or insert its subtree into B.mdx).
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            for (const [argv, label] of MOVE_USAGE_CASES) {
+              await expectMoveUsageError(
+                product,
+                workspace,
+                argv,
+                `${context}, ${label}`,
+              );
+            }
+          },
+          `${context}: the usage errors modify nothing (SPEC 6.5, 12.0)`,
+        );
 
         // Wrong-kind origins (SPEC 6.5: both forms' origin operands name
         // discovered spec sources), each inside a whole-root
@@ -3215,25 +3294,33 @@ const T6_5_5 = defineProductTest({
               `at least one validation finding (SPEC 14)`,
           );
         }
-        for (const [argv, label] of MOVE_USAGE_CASES) {
-          await expectMoveUsageError(
-            product,
-            workspace,
-            argv,
-            `${context}, ${label}, with unrelated validation errors present ` +
-              `— the existence checks precede source validation (SPEC 12.0)`,
-          );
-        }
-        for (const [argv, label] of MOVE_WRONG_KIND_CASES) {
-          await expectMoveUsageError(
-            product,
-            workspace,
-            argv,
-            `${context}, ${label}, with unrelated validation errors present ` +
-              `— the wrong-kind operand is judged like existence, before ` +
-              `source validation (SPEC 6.5, 6.4, 12.0)`,
-          );
-        }
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            for (const [argv, label] of MOVE_USAGE_CASES) {
+              await expectMoveUsageError(
+                product,
+                workspace,
+                argv,
+                `${context}, ${label}, with unrelated validation errors ` +
+                  `present — the existence checks precede source ` +
+                  `validation (SPEC 12.0)`,
+              );
+            }
+            for (const [argv, label] of MOVE_WRONG_KIND_CASES) {
+              await expectMoveUsageError(
+                product,
+                workspace,
+                argv,
+                `${context}, ${label}, with unrelated validation errors ` +
+                  `present — the wrong-kind operand is judged like ` +
+                  `existence, before source validation (SPEC 6.5, 6.4, ` +
+                  `12.0)`,
+              );
+            }
+          },
+          `${context}: the usage errors modify nothing (SPEC 6.5, 12.0)`,
+        );
       },
     );
 
