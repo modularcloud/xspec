@@ -65,27 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 15 — T2.7-3: valueless `<S id>`, `<S id="x" coverage>`, `<S id="x" tags>` arms; export the shared `tags` fixture
-
-Cites: TEST-SPEC T2.7-3 (every prop of 2.7 spelled valueless is form-invalid —
-14.17; `<S id>` reports 14.17 and no 14.1); T11.4-3 ("the valueless prop must be
-staged as T2.7-3's `<S id="x" tags>` — one fixture shared by build and view");
-SPEC 2.5, 2.6, 2.7, 14.17.
-
-Now: `test/suite/registry/section-2.7.ts` stages only valueless `d`.
-
-Do: add three arms — valueless `id` (exactly one 14.17 on the bearer, zero
-14.1), valueless `coverage` on `<S id="x" coverage>`, valueless `tags` on
-`<S id="x" tags>` — each exit 1 with exactly one 14.17 finding located at the
-prop, no other finding. Define the `<S id="x" tags>` source bytes as an
-exported constant (with its expected finding location) so
-`section-11.4.ts` (Task 39) stages byte-identical content for `view`; keep
-the module's canonical ID ordering.
-
-Verify: `npx vitest run … test/suite/section-2.7.test.ts`; `npm run test:self`
-green (CONF-AVAIL's revised bare-valueless → 14.17 behavior is in scope for
-T11.4-3; nothing to change for T2.7-3 itself).
-
 ### Task 16 — T4.5-4: callee-side arm — a shadowing local `text` makes `text(SPEC.a)` a condition-18 finding
 
 Cites: TEST-SPEC T4.5-4 (callee side: an inner-scope `function text(x:

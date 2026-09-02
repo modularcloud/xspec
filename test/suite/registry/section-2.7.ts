@@ -16,8 +16,10 @@
 // prop (defined or unknown), an unknown prop, and a spread attribute are
 // invalid (14.17); `id`/`coverage`/`tags` values MUST be quoted-form static
 // string literals — single- or double-quoted alike (2.4) — and any other
-// value form is invalid (14.17); `d` MUST be a braced expression — a quoted
-// or valueless `d` is invalid (14.17), and a braced `d` value that is not a
+// value form, a braced expression or the bare valueless name alike, is
+// invalid (14.17) — a bare `<S id>` is condition 17, never the missing-id
+// condition 1 (14.1); `d` MUST be a braced expression — a quoted or
+// valueless `d` is invalid (14.17), and a braced `d` value that is not a
 // static reference or an array literal of them is a dynamic argument (14.8).
 //
 // Location assertions follow the SUITE-08 discipline: negative fixtures are
@@ -27,14 +29,22 @@
 // support.ts byteWindow); the valid sibling section and every other staged
 // construct lie outside the widened window.
 //
+// The valueless-`tags` file is exported as VALUELESS_TAGS_FIXTURE — its exact
+// bytes, attribute offsets, and finding location — because TEST-SPEC T11.4-3
+// stages the same bytes for `view`: build and view share one fixture, the
+// 14.17 beside the view being the condition the build reports here.
+//
 // No certification fixture scopes any T2.7 test (CERTIFICATIONS.md keeps the
 // 2.7 negative matrix among the representatively-certified ones), so only
 // TEST-SPEC's own requirements bind these fixtures.
+
+import { Buffer } from "node:buffer";
 
 import type {
   ImpactReport,
   ImpactRequirementEntry,
   NodeReport,
+  SourceRange,
 } from "../../helpers/adapters/index.js";
 import {
   decodeImpactReport,
@@ -49,6 +59,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { FindingSourceExpectation } from "./support.js";
 import {
   assertConditionCounts,
   assertFindingLocated,
@@ -87,6 +98,17 @@ export default defineConfig({
 // first, so the offending construct is a proper sub-range of the file and the
 // location assertion has teeth.
 const SIBLING = '<S id="ok">\nA valid sibling section.\n</S>\n\n';
+
+// T2.7-3's one-defect file: the sibling, then the offending section — its
+// opening tag the staged construct, its body and closing tag fixed — at one
+// workspace-relative path.
+const INVALID_PROP_FILE = "specs/A.mdx";
+const INVALID_PROP_BODY = "\nBody text.\n</S>";
+
+/** The one-defect file's exact bytes for an offending opening tag. */
+function invalidPropSource(construct: string): string {
+  return `${SIBLING}${construct}${INVALID_PROP_BODY}\n`;
+}
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
@@ -628,10 +650,17 @@ const T2_7_2 = defineProductTest({
 // ---------------------------------------------------------------------------
 
 // The invalid-prop matrix (SPEC 2.7 → 14.17/14.8), each arm a fresh minimal
-// workspace whose offending opening tag is the one staged defect. The quoted
+// workspace whose offending opening tag is the one staged defect, reported
+// as exactly one finding of the arm's condition and nothing else. The quoted
 // `d` names the existing sibling, so a product wrongly accepting quoted-form
 // `d` resolves it and builds clean — caught by the exit-1 expectation rather
-// than accidentally passing via an unresolved-reference finding.
+// than accidentally passing via an unresolved-reference finding. The three
+// valueless string-prop arms are the bare-name forms — `<S id>`,
+// `<S id="x" coverage>`, `<S id="x" tags>` — of 2.7's "any other value
+// form" (14.17); the bare `<S id>` is condition 17, never the missing-id
+// condition 1 (14.1), so a product reading it as an absent `id` fails on the
+// bearer's own code (its masking of children: T1.3-6; the view side of the
+// bare-name forms: T11.2-2, T11.4-3).
 interface InvalidPropArm {
   /** Which SPEC 2.7 prop rule this violates (failure diagnostics). */
   readonly name: string;
@@ -639,6 +668,109 @@ interface InvalidPropArm {
   readonly construct: string;
   /** The SPEC 14 condition the arm must report. */
   readonly condition: "14.17" | "14.8";
+  /**
+   * A condition the arm discriminates against — the one a product misreading
+   * the construct would report instead — checked ahead of the exact count so
+   * the failure states the SPEC reason (the count alone rejects it too).
+   */
+  readonly forbids?: { readonly condition: string; readonly reason: string };
+}
+
+/** A staged attribute's exact bytes — the `view` entry form of SPEC 11.4. */
+export interface StagedAttribute {
+  /** The attribute's name as spelled. */
+  readonly name: string;
+  /** Its byte range within the file (SPEC 1.7). */
+  readonly range: SourceRange;
+  /** Its source text: the name through its value's last character, or the bare name. */
+  readonly text: string;
+}
+
+/**
+ * T2.7-3's valueless-`tags` file, the fixture T11.4-3 shares for `view`
+ * (TEST-SPEC T11.4-3: one fixture for build and view). Pure ASCII, so string
+ * indices are byte offsets; every offset derives from the exact parts, and
+ * T2.7-3 slices each back against `source` before staging.
+ */
+export interface ValuelessTagsFixture {
+  /** Workspace-relative path the file is staged at. */
+  readonly file: string;
+  /** The file's exact bytes: the valid sibling section, then the bearer. */
+  readonly source: string;
+  /** The bearer's spelled `id` value — well-formed, its identity defined (SPEC 11.2). */
+  readonly id: string;
+  /** The bearer's opening tag, exactly — the one staged defect. */
+  readonly construct: string;
+  /** The bearer's construct range, opening tag through closing tag (SPEC 1.7). */
+  readonly sectionRange: SourceRange;
+  /** The bearer's attributes in tag order: `id="x"`, then the bare `tags`. */
+  readonly attributes: readonly StagedAttribute[];
+  /** Where the one 14.17 finding must locate: the opening tag's window (SPEC 14). */
+  readonly finding: FindingSourceExpectation;
+}
+
+function valuelessTagsFixture(): ValuelessTagsFixture {
+  const construct = '<S id="x" tags>';
+  const idText = 'id="x"';
+  const tagsText = "tags";
+  const tagStart = Buffer.byteLength(SIBLING, "utf8");
+  const idStart = tagStart + Buffer.byteLength("<S ", "utf8");
+  const tagsStart = idStart + Buffer.byteLength(`${idText} `, "utf8");
+  return {
+    file: INVALID_PROP_FILE,
+    source: invalidPropSource(construct),
+    id: "x",
+    construct,
+    sectionRange: {
+      start: tagStart,
+      end: tagStart + Buffer.byteLength(construct + INVALID_PROP_BODY, "utf8"),
+    },
+    attributes: [
+      {
+        name: "id",
+        range: { start: idStart, end: idStart + idText.length },
+        text: idText,
+      },
+      {
+        name: "tags",
+        range: { start: tagsStart, end: tagsStart + tagsText.length },
+        text: tagsText,
+      },
+    ],
+    finding: {
+      file: INVALID_PROP_FILE,
+      window: byteWindow(SIBLING, construct),
+    },
+  };
+}
+
+export const VALUELESS_TAGS_FIXTURE: ValuelessTagsFixture =
+  valuelessTagsFixture();
+
+/**
+ * The exported fixture's declared offsets against its own bytes (staging
+ * integrity, T11.4-3's slice-check precedent): each attribute's range slices
+ * to its text and the section range to the bearer's whole construct, so
+ * T11.4-3 asserts `view` against offsets the build arm has verified.
+ */
+function assertValuelessTagsFixture(): void {
+  const fixture = VALUELESS_TAGS_FIXTURE;
+  const context = "T2.7-3 staging: the exported valueless-`tags` fixture";
+  const bytes = Buffer.from(fixture.source, "utf8");
+  const slice = (range: SourceRange): string =>
+    bytes.subarray(range.start, range.end).toString("utf8");
+  for (const attribute of fixture.attributes) {
+    assertSameJson(
+      slice(attribute.range),
+      attribute.text,
+      `${context}: the \`${attribute.name}\` attribute's range slices to its text`,
+    );
+  }
+  assertSameJson(
+    slice(fixture.sectionRange),
+    fixture.construct + INVALID_PROP_BODY,
+    `${context}: the section range slices to the bearer's whole construct`,
+  );
 }
 
 const INVALID_PROP_ARMS: readonly InvalidPropArm[] = [
@@ -670,6 +802,28 @@ const INVALID_PROP_ARMS: readonly InvalidPropArm[] = [
   {
     name: "a braced `tags` value",
     construct: '<S id="sec" tags={"a"}>',
+    condition: "14.17",
+  },
+  {
+    name: "a valueless `id` (the bare name `<S id>`)",
+    construct: "<S id>",
+    condition: "14.17",
+    forbids: {
+      condition: "14.1",
+      reason:
+        "a bare `<S id>` spells an id value not in quoted static-string " +
+        "form — condition 17, never condition 1 (SPEC 14.1, 2.7): a product " +
+        "reading the bare name as an absent `id` and reporting missing-id fails",
+    },
+  },
+  {
+    name: 'a valueless `coverage` (`<S id="x" coverage>`)',
+    construct: '<S id="x" coverage>',
+    condition: "14.17",
+  },
+  {
+    name: 'a valueless `tags` (`<S id="x" tags>`, the file T11.4-3 shares)',
+    construct: VALUELESS_TAGS_FIXTURE.construct,
     condition: "14.17",
   },
   {
@@ -721,20 +875,36 @@ const T2_7_3_QUOTED_IDENTITIES = ["specs/A.mdx", "specs/A.mdx#login"] as const;
 const T2_7_3 = defineProductTest({
   id: "T2.7-3",
   title:
-    "repeated props (defined or unknown), unknown props, spread attributes, braced `id`/`coverage`/`tags` values, and quoted or valueless `d` fail with 14.17; a braced `d` holding a non-reference expression fails with 14.8; single-quoted `id`/`coverage`/`tags` build byte-identically in outputs to the double-quoted variants (SPEC 2.7, 2.4)",
+    'repeated props (defined or unknown), unknown props, spread attributes, braced or valueless `id`/`coverage`/`tags` values — the bare `<S id>` reporting 14.17 and never 14.1 — and quoted or valueless `d` fail with 14.17, each arm exactly one finding located at its opening tag; a braced `d` holding a non-reference expression fails with 14.8; single-quoted `id`/`coverage`/`tags` build byte-identically in outputs to the double-quoted variants (SPEC 2.7, 2.4, 14.1); the `<S id="x" tags>` file is exported as the fixture T11.4-3 shares for `view`',
   run: async (product) => {
+    // The exported fixture's offsets are verified before its arm stages it
+    // (T11.4-3 stages the same bytes for `view`).
+    assertValuelessTagsFixture();
+
     for (const arm of INVALID_PROP_ARMS) {
       const context = `T2.7-3 \`build --json\` with ${arm.name}`;
+      const { forbids } = arm;
       await withWorkspace(
         SPECS_ONLY_CONFIG,
-        { "specs/A.mdx": `${SIBLING}${arm.construct}\nBody text.\n</S>\n` },
+        { [INVALID_PROP_FILE]: invalidPropSource(arm.construct) },
         async (workspace) => {
           const findings = await buildFindings(product, workspace, context);
+          if (forbids !== undefined) {
+            const wrong = findings.find(
+              (finding) => finding.condition === forbids.condition,
+            );
+            if (wrong !== undefined) {
+              fail(
+                `${context}: ${forbids.reason}; got a ${forbids.condition} ` +
+                  `finding (message: ${JSON.stringify(wrong.message)})`,
+              );
+            }
+          }
           assertConditionCounts(findings, { [arm.condition]: 1 }, context);
           assertFindingLocated(
             findings[0]!,
             {
-              file: "specs/A.mdx",
+              file: INVALID_PROP_FILE,
               window: byteWindow(SIBLING, arm.construct),
             },
             `${context}: the ${arm.condition} finding (SPEC 2.7)`,
@@ -748,9 +918,7 @@ const T2_7_3 = defineProductTest({
       "T2.7-3 `build --json` with a repeated unknown prop";
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      {
-        "specs/A.mdx": `${SIBLING}${REPEATED_UNKNOWN_CONSTRUCT}\nBody text.\n</S>\n`,
-      },
+      { [INVALID_PROP_FILE]: invalidPropSource(REPEATED_UNKNOWN_CONSTRUCT) },
       async (workspace) => {
         const findings = await buildFindings(
           product,
@@ -774,7 +942,7 @@ const T2_7_3 = defineProductTest({
           assertFindingLocated(
             finding,
             {
-              file: "specs/A.mdx",
+              file: INVALID_PROP_FILE,
               window: byteWindow(SIBLING, REPEATED_UNKNOWN_CONSTRUCT),
             },
             `${repeatedUnknown}: a 14.17 finding`,
