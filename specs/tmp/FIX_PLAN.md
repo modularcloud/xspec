@@ -65,25 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 22 — T6.4-5: `move` arm — a `typeof` reference to a section-moved node stays byte-unchanged
-
-Cites: TEST-SPEC T6.4-5 (revised: a code-file `typeof` reference to a node is
-not a reference the operation rewrites — after a section move of that node
-the referencing `.ts` file is byte-unchanged, the workspace valid, and the
-applied mapping and journal entry identical to the same move on a twin
-workspace without the reference); SPEC 6.4, 6.5, 4.5.
-
-Now: `test/suite/registry/section-6.4.ts` ≈ lines 1575–1600 cover `rename`
-only.
-
-Do: add the move arm mirroring the rename arm: twin workspaces differing only
-by a `.ts` file holding a `typeof SPEC.a.b` reference; section-move `a.b` in
-both; assert the `.ts` file byte-identical to its staged bytes, `check` clean,
-and the journal's appended entry and the preview's mapping byte-identical
-across the twins (H-4/H-6 product-to-itself compare).
-
-Verify: `npx vitest run … test/suite/section-6.4.test.ts`.
-
 ### Task 23 — T6.5-1: specifier-rewrite byte contract for the file-form move
 
 Cites: TEST-SPEC T6.5-1 (revised: after a file move, every importing `.ts`

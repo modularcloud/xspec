@@ -102,6 +102,15 @@
 //   14.17 — a repeated `id` is condition 17, never 14.1, and spells no
 //   identity, SPEC 14, 11.2) so its exit-2 assertion demonstrably runs
 //   beside that file's findings.
+// - T6.4-5's move arm compares the product to itself across twin workspaces
+//   (H-6; H-4's product-to-itself exception for the journal's opaque entry):
+//   the twins differ only by the code file holding the `typeof` reference,
+//   so the section move's preview plan — `mapping` and `files`, form-exact
+//   12.7 members; a file bearing only a type-level reference is no file the
+//   operation would rewrite (SPEC 6.6, 6.4) — its applied mapping, and the
+//   journal's one appended entry must agree byte-for-byte between them,
+//   while the code file keeps its staged bytes and the workspace stays
+//   valid.
 // - T6.4-7 "byte-identical to a fresh build of the rewritten sources" is the
 //   H-6 two-directory protocol: a second workspace is seeded with the
 //   post-rename configuration, sources, and journal (derived files are
@@ -112,7 +121,12 @@
 
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
-import type { GraphEdge, NodeReport } from "../../helpers/adapters/index.js";
+import type {
+  AppliedMappingPair,
+  GraphEdge,
+  NodeReport,
+  PreviewFileEntry,
+} from "../../helpers/adapters/index.js";
 import {
   decodeAppliedMappingReport,
   decodeEdgesReport,
@@ -120,8 +134,10 @@ import {
   decodeIdsReport,
   decodeNodeReport,
   decodeNodeRowsReport,
+  decodePreviewReport,
 } from "../../helpers/adapters/index.js";
 import {
+  assertBytesEqual,
   assertFileBytes,
   fail,
   parseJsonStdout,
@@ -1832,11 +1848,171 @@ const T5_APP_AFTER = [
   "",
 ].join("\n");
 
+// Move arm (SPEC 6.4: a rename or move alike can leave type-level references
+// naming vacated identities). Twin workspaces differing only by the code
+// file: `core.mid` is moved by the section form into an existing target
+// parent in another file; the `typeof` reference to it is left naming the
+// vacated identity byte-for-byte, and the move's plan, applied mapping, and
+// journal entry are the same as without the reference. The code file holds
+// the type-level reference alone — nothing the operation rewrites — so its
+// staged bytes are its expected bytes.
+const T5_TARGET = "specs/Target.mdx";
+const T5_TARGET_SOURCE = ['<S id="hub">', "Hub text.", "</S>", ""].join("\n");
+const T5_MOVE_APP_SOURCE = [
+  'import CORE from "../specs/Core.xspec";',
+  "",
+  "type MidNode = typeof CORE.core.mid;",
+  "",
+].join("\n");
+const T5_MOVE_ARGV: readonly string[] = [
+  "move",
+  `${T5_CORE}#core.mid`,
+  `${T5_TARGET}#hub.mid`,
+];
+// The complete mapping the section move journals: the moved node alone,
+// re-identified by prefix replacement of `core.mid` with `hub.mid` (SPEC
+// 6.5) — it has no descendants, and no identity outside the subtree moves.
+const T5_MOVE_MAPPING: readonly AppliedMappingPair[] = [
+  { from: `${T5_CORE}#core.mid`, to: `${T5_TARGET}#hub.mid` },
+];
+
+interface T5MoveTwinOutcome {
+  /** The preview's `files` plan (form-exact 12.7). */
+  readonly files: readonly PreviewFileEntry[];
+  /** The journal's exact bytes after the move: its one appended entry. */
+  readonly journal: Uint8Array;
+}
+
+/**
+ * Drive the T6.4-5 section move on one twin: `build` (the valid-workspace
+ * precondition), the `--preview --json` plan, then the real move with
+ * `--json` — its report the applied mapping (SPEC 6.5: reported as rename
+ * does; T6.4-1's protocol) — and the journal's one appended entry (SPEC
+ * 6.1). Returns the preview's `files` and the journal bytes for the
+ * cross-twin compare.
+ */
+async function driveT5MoveTwin(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+): Promise<T5MoveTwinOutcome> {
+  const context = `T6.4-5 move arm, ${label}`;
+  await buildOk(
+    product,
+    workspace,
+    `${context}: \`build\` over the staged workspace`,
+  );
+  const journalBefore = await workspace.kind(JOURNAL_PATH);
+  if (journalBefore !== "absent") {
+    fail(
+      `${context}: staging premise — no journal file exists before the ` +
+        `first journaled operation (SPEC 6.1); found ${journalBefore} at ` +
+        `${JOURNAL_PATH}`,
+    );
+  }
+  const previewArgv = [...T5_MOVE_ARGV, "--preview", "--json"];
+  const preview = decodePreviewReport(
+    await runJson(
+      product,
+      workspace,
+      previewArgv,
+      `${context}: \`${previewArgv.join(" ")}\` — the preview succeeds ` +
+        `exactly when the real operation would proceed (SPEC 6.6)`,
+    ),
+    context,
+  );
+  assertSameJson(
+    preview.findings,
+    [],
+    `${context}: a preview whose real operation would proceed reports ` +
+      `findings [] (SPEC 6.6, 12.7)`,
+  );
+  if (
+    preview.mapping === null ||
+    preview.files === null ||
+    preview.delta === null
+  ) {
+    fail(
+      `${context}: a successful preview reports its plan — \`mapping\`, ` +
+        `\`files\`, and \`delta\` are null exactly on refusal (SPEC 6.6, ` +
+        `12.7); got mapping ${preview.mapping === null ? "null" : "present"}, ` +
+        `files ${preview.files === null ? "null" : "present"}, delta ` +
+        `${preview.delta === null ? "null" : "present"}`,
+    );
+  }
+  assertSameJson(
+    preview.mapping,
+    T5_MOVE_MAPPING,
+    `${context}: the preview's \`mapping\` is the complete identity mapping ` +
+      `the move would journal — the moved node alone, re-identified by ` +
+      `prefix replacement (SPEC 6.6, 6.5, 12.7)`,
+  );
+  const moveArgv = [...T5_MOVE_ARGV, "--json"];
+  assertAppliedMapping(
+    decodeAppliedMappingReport(
+      await runJson(
+        product,
+        workspace,
+        moveArgv,
+        `${context}: \`${moveArgv.join(" ")}\``,
+      ),
+      context,
+    ),
+    T5_MOVE_MAPPING,
+    `${context}: the successful section move's report is the applied ` +
+      `mapping — exactly the identity pair the operation journaled (SPEC ` +
+      `6.5, 6.4, 6.6, 12.0)`,
+  );
+  const journal = await readJournal(
+    workspace,
+    `${context}: the journal after the move`,
+  );
+  const lines = journalLineCount(journal);
+  if (lines !== 1) {
+    fail(
+      `${context}: the move must append its full mapping to the journal as ` +
+        `exactly one line-oriented entry — the journal came into existence ` +
+        `with this first journaled operation (SPEC 6.5, 6.1); found ` +
+        `${String(lines)} line(s) in ${String(journal.length)} bytes`,
+    );
+  }
+  return { files: preview.files, journal };
+}
+
+/**
+ * The moved workspace stays xspec-valid: neither `build` nor `check`
+ * reports any finding — in particular none for a type-level reference to
+ * the vacated identity (SPEC 6.4: a consumer type error outside xspec's
+ * validations; 4.5: type-level references are unrestricted).
+ */
+async function assertT5ValidAfterMove(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+): Promise<void> {
+  const context = `T6.4-5 move arm, ${label}`;
+  await buildOk(
+    product,
+    workspace,
+    `${context}: \`build\` after the move — no finding for the type-level ` +
+      `reference to the vacated identity (SPEC 6.4, 4.5)`,
+  );
+  await expectExit(
+    product,
+    workspace,
+    ["check"],
+    0,
+    `${context}: \`check\` after the move — no finding for the type-level ` +
+      `reference to the vacated identity (SPEC 6.4, 4.5, 12.2)`,
+  );
+}
+
 const T6_4_5 = defineProductTest({
   id: "T6.4-5",
   title:
-    "type-level references: a `typeof`-level reference to the old identity is not rewritten by rename, and the workspace stays xspec-valid — the consumer type error is outside xspec's validations, so `build` and `check` report no finding for it (SPEC 6.4, 4.5)",
+    "type-level references: a `typeof`-level reference to the old identity is not rewritten by rename, and the workspace stays xspec-valid — the consumer type error is outside xspec's validations, so `build` and `check` report no finding for it; move arm: the same `typeof` reference to a node then section-moved into another file is left byte-unchanged, naming the vacated identity, the workspace valid, and the move's preview plan, applied mapping, and journal entry the same as on a twin workspace without the reference (SPEC 6.4, 6.5, 4.5)",
   run: async (product) => {
+    // Rename arm.
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
       { [T5_CORE]: T5_CORE_SOURCE, [T5_APP]: T5_APP_BEFORE },
@@ -1880,6 +2056,79 @@ const T6_4_5 = defineProductTest({
             "reference to the vacated identity (SPEC 6.4, 4.5, 12.2)",
         );
       },
+    );
+
+    // Move arm: twin workspaces differing only by the code file holding the
+    // `typeof` reference to the node the section move re-identifies.
+    const withReference = await withWorkspace(
+      SPEC_AND_CODE_CONFIG,
+      {
+        [T5_CORE]: T5_CORE_SOURCE,
+        [T5_TARGET]: T5_TARGET_SOURCE,
+        [T5_APP]: T5_MOVE_APP_SOURCE,
+      },
+      async (workspace) => {
+        const outcome = await driveT5MoveTwin(
+          product,
+          workspace,
+          "with the `typeof` reference",
+        );
+        await assertFileBytes(
+          workspace.path(T5_APP),
+          T5_MOVE_APP_SOURCE,
+          "T6.4-5 move arm: the code file after the section move — its " +
+            "`typeof`-level reference keeps naming the vacated identity " +
+            "byte-for-byte, and its import stays (its binding had no " +
+            "references, SPEC 6.5): type-level references record no edges " +
+            "and are not rewritten, by a rename or move alike (SPEC 6.4, 4.5)",
+        );
+        await assertT5ValidAfterMove(
+          product,
+          workspace,
+          "with the `typeof` reference",
+        );
+        return outcome;
+      },
+    );
+    const withoutReference = await withWorkspace(
+      SPEC_AND_CODE_CONFIG,
+      { [T5_CORE]: T5_CORE_SOURCE, [T5_TARGET]: T5_TARGET_SOURCE },
+      async (workspace) => {
+        const outcome = await driveT5MoveTwin(
+          product,
+          workspace,
+          "twin without the reference",
+        );
+        await assertT5ValidAfterMove(
+          product,
+          workspace,
+          "twin without the reference",
+        );
+        return outcome;
+      },
+    );
+    // Product-to-itself compare across the twins (H-6; H-4's exception for
+    // the journal's opaque entry): the type-level reference changes nothing
+    // the move plans, reports, or journals. Both twins' preview `mapping`
+    // and applied mapping were asserted above against the same fixture
+    // pair, so they agree; the `files` plan and the journal entry are
+    // compared here directly.
+    assertSameJson(
+      withReference.files,
+      withoutReference.files,
+      "T6.4-5 move arm: the preview's `files` plan with the `typeof` " +
+        "reference vs the twin without it — every file the operation would " +
+        "rewrite, with every edit, must be the same: a code file bearing " +
+        "only a type-level reference is no file the move rewrites (SPEC 6.6, " +
+        "6.4, 12.7; H-6)",
+    );
+    assertBytesEqual(
+      withReference.journal,
+      withoutReference.journal,
+      "T6.4-5 move arm: the journal's one appended entry with the `typeof` " +
+        "reference vs the twin without it — the move's journaled mapping is " +
+        "the same as without the reference (SPEC 6.4, 6.1; H-4/H-6 " +
+        "product-to-itself compare, normalizing nothing)",
     );
   },
 });
