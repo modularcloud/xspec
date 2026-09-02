@@ -33,6 +33,17 @@
 //   temporary directory (H-1) whose filesystem ancestors (the OS temp
 //   directory and its parents) hold no `xspec.config.ts`, so the upward
 //   search exhausts without a hit.
+// - T7-1 `--config` naming a nonexistent file: run from the location
+//   fixture's root, whose own `xspec.config.ts` the upward search would
+//   find, naming `alt/missing.config.ts` — absent, beside `alt/`'s valid
+//   configuration — so a product falling back to the search, or to a
+//   configuration near the named path, builds and exits 0, and a product
+//   classing the failed `--config` as a plain usage error reports `code`
+//   and `path` null (T12.7-3). The concerned path is asserted exactly as
+//   the argument spells it: zero ascent segments, two descending ones, no
+//   `.` segment — already 11.6's canonical form (the sibling-directory
+//   ascent spelling is T12.7-3's arm); a whole-root snapshot compare around
+//   the invocation pins that nothing is written (SPEC 12.1).
 // - T7-2 single-deviation staging: every invalid fixture is the valid
 //   canonical configuration with exactly one deviation, so the refusal is
 //   attributable to the arm's malformation and nothing else.
@@ -77,6 +88,10 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import {
+  assertSnapshotsEqual,
+  snapshotDirectory,
+} from "../../helpers/snapshot.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -177,6 +192,11 @@ const LOCATION_FILES: Readonly<Record<string, string>> = {
 const SEARCH_CWD = "nested/inner";
 const OVERRIDE_CWD = "nested";
 const OVERRIDE_CONFIG_ARG = "../alt/xspec.config.ts";
+// The nonexistent --config path, run from the workspace root: two
+// descending segments, no `.` segment — the argument's own spelling is
+// already the canonical anchoring form (SPEC 11.6), so the concerned path is
+// asserted exactly as given (SPEC 14; T12.7-3).
+const MISSING_CONFIG_ARG = "alt/missing.config.ts";
 
 const T7_1 = defineProductTest({
   id: "T7-1",
@@ -184,7 +204,9 @@ const T7_1 = defineProductTest({
     "configuration location: upward search from a nested working " +
     "directory; --config, resolved against the working directory, " +
     "overrides the search; no configuration reachable is a configuration " +
-    "error (SPEC 7, 12.0, 14.14)",
+    "error — by a failed upward search, and by --config naming a " +
+    "nonexistent file, never a plain usage error (SPEC 7, 12.0, 12.7, " +
+    "14.14)",
   run: async (product) => {
     await withWorkspace(
       { files: LOCATION_FILES, dirs: [SEARCH_CWD] },
@@ -245,6 +267,61 @@ const T7_1 = defineProductTest({
             `upward search would find, and its own directory (alt/) is the ` +
             `workspace root — the listing carries alt/specs/B.mdx as ` +
             `specs/B.mdx and nothing of the root project (SPEC 7, 12.0)`,
+        );
+
+        // --config naming a nonexistent file: missing configuration, a
+        // configuration error (SPEC 14.14) — never a plain usage error and
+        // never a fallback. Run from the root, whose own xspec.config.ts the
+        // upward search would find, naming alt/missing.config.ts — absent,
+        // beside alt/'s valid configuration — so a product falling back to
+        // the search, or to a configuration near the named path, builds and
+        // exits 0 (module header). The error document's finding carries the
+        // stable code, locations [] (an unlocated condition, SPEC 14), and
+        // the concerned path: the path --config names, in the anchoring
+        // form of 11.6 — spelled here exactly as given (SPEC 14, 12.7; the
+        // sibling-directory ascent spelling is T12.7-3's arm). A build
+        // failing at configuration load modifies nothing (SPEC 12.1):
+        // whole-root compare around the run.
+        const missingLabel =
+          `T7-1 \`build --config ${MISSING_CONFIG_ARG} --json\` run from ` +
+          `the workspace root (--config naming a nonexistent file)`;
+        const beforeMissing = await snapshotDirectory(workspace.root);
+        const missingRun = await expectConfigurationError(
+          product,
+          workspace,
+          ["build", "--config", MISSING_CONFIG_ARG],
+          missingLabel,
+        );
+        const missingFinding = expectErrorDocument(missingRun, missingLabel);
+        assertSameJson(
+          {
+            code: missingFinding.code,
+            path: missingFinding.path,
+            locations: missingFinding.locations.map(
+              (location) => location.file,
+            ),
+          },
+          {
+            code: "configuration-error",
+            path: MISSING_CONFIG_ARG,
+            locations: [],
+          },
+          `${missingLabel}: --config naming a nonexistent file is missing ` +
+            `configuration (SPEC 14.14) — the error document's one finding ` +
+            `carries the stable code "configuration-error", locations [] ` +
+            `(an unlocated condition), and as its concerned path the path ` +
+            `--config names, in the anchoring form of 11.6 relative to the ` +
+            `invocation working directory (SPEC 14, 12.7; T12.7-3) — never ` +
+            `a plain usage error's null code and path, and never "." (the ` +
+            `failed-upward-search spelling, reserved for no --config given)`,
+        );
+        assertSnapshotsEqual(
+          beforeMissing,
+          await snapshotDirectory(workspace.root),
+          `${missingLabel}: a build failing at configuration load modifies ` +
+            `nothing (SPEC 12.1, 12.0) — the configurations at the root and ` +
+            `beside the named path are never consulted, so no derived file ` +
+            `or graph data appears anywhere under the root`,
         );
       },
     );

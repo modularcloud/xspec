@@ -65,23 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 33 — T7-1: `--config <nonexistent file>` is configuration error 14.14 (exit 2, concerned path per T12.7-3)
-
-Cites: TEST-SPEC T7-1 (an explicit `--config` naming no file is reported as
-14.14 — exit 2 with the 12.7 error document naming the concerned path as
-T12.7-3 spells it — never a plain usage error); SPEC 7, 12.0, 12.7, 14.14.
-
-Now: `test/suite/registry/section-7-basics.ts` ≈ line 228 has only the
-override run.
-
-Do: add the arm: `build --config <missing path>` → exit 2, error document
-decoded through the existing error adapter with the 14.14 stable code and the
-concerned path spelled as given (relative to the invocation directory, per
-T12.7-3 — see Task 43 for the sibling-directory ascent form, which this arm
-need not repeat); nothing written.
-
-Verify: `npx vitest run … test/suite/section-7-basics.test.ts`.
-
 ### Task 34 — T7-3: configuration value-shape arms → 14.14
 
 Cites: TEST-SPEC T7-3 (revised: a spec or code group whose value is a single
