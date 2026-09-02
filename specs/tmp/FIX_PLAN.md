@@ -65,23 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 13 — T1.2-3: locate the root's ignored reason through the adapter, not a literal
-
-Cites: TEST-SPEC T1.2-3 (the root's reason is adapter-located; no wording is
-pinned — the same discipline T8.2-1 applies through `classifyIgnoredReasons`);
-SPEC 1.2, 8.
-
-Now: `test/suite/registry/section-1.1-1.2.ts` ≈ lines 742–745 asserts the reason
-list literally as `["root node"]`.
-
-Do: replace the literal with the adapter classification used by T8.2-1
-(`classifyIgnoredReasons` or the helper the coverage adapter exports): assert
-the root's entry classifies as the root-node reason and nothing else; keep the
-count/identity assertions.
-
-Verify: `npx vitest run --config test/vitest.config.ts --project suite
-test/suite/section-1.1-1.2.test.ts`; `npm run test:self` green.
-
 ### Task 14 — T1.3-6: valueless-`id` (`<S id>`) masking arm — bearer's own code is 14.17, never 14.1
 
 Cites: TEST-SPEC T1.3-6 (masking: a bearer whose `id` is not a plain static

@@ -15,6 +15,7 @@
 // specifier `./NAME.xspec` (SPEC 4) resolves by Node's extension lookup.
 
 import {
+  classifyIgnoredReasons,
   decodeCoverageReport,
   decodeNodeReport,
   decodeNodeRowsReport,
@@ -672,7 +673,7 @@ export default defineConfig({
 const T1_2_3 = defineProductTest({
   id: "T1.2-3",
   title:
-    "roots are never coverage targets: ignored with reason `root node`, absent from required/covered/uncovered, unmatched by `--coverage`, coverage attribute absent (SPEC 1.2, 8, 11)",
+    "roots are never coverage targets: ignored with the root-node reason (adapter-located, no wording pinned), absent from required/covered/uncovered, unmatched by `--coverage`, coverage attribute absent (SPEC 1.2, 8, 11)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -739,10 +740,18 @@ const T1_2_3 = defineProductTest({
             JSON.stringify(profile.ignored.map((entry) => entry.identity)),
         );
       }
+      // The reason's spelling is output shape (SPEC 8.2 names it in prose and
+      // pins no wording): classify each reported reason string onto its SPEC
+      // 8.2 identity through the coverage adapter — the discipline T8.2-1
+      // applies — and assert the identities: the root-node reason, alone.
       assertSameJson(
-        rootEntry.reasons,
-        ["root node"],
-        `${coverageLabel}: the root's exclusion reasons (SPEC 8.2 — only the root-node reason applies here)`,
+        classifyIgnoredReasons(
+          rootEntry.reasons,
+          `${coverageLabel} ignored ${rootEntry.identity}`,
+        ),
+        ["root"],
+        `${coverageLabel}: the root's exclusion reasons — the root-node reason and nothing else ` +
+          `(SPEC 8.2; adapter-located, H-3)`,
       );
 
       // `query nodes --coverage …` matches no root (SPEC 11).

@@ -28,6 +28,7 @@ import { Buffer } from "node:buffer";
 import type { Finding } from "../../helpers/adapters/index.js";
 import {
   assertReportMentions,
+  classifyIgnoredReasons,
   decodeCoverageReport,
   decodeIdsReport,
   decodeImpactReport,
@@ -392,10 +393,16 @@ const T1_5_1 = defineProductTest({
         `${coverageLabel}: the ignored roots are identified by bare workspace-relative path (SPEC 1.5)`,
       );
       for (const ignored of profile.ignored) {
+        // Reason spellings are output shape (SPEC 8.2 pins no wording):
+        // classified onto their SPEC 8.2 identities through the coverage
+        // adapter, as T8.2-1 and T1.2-3 do (H-3).
         assertSameJson(
-          ignored.reasons,
-          ["root node"],
-          `${coverageLabel}: ${ignored.identity} exclusion reasons (targets: "all" — only the root-node reason applies, SPEC 8.2)`,
+          classifyIgnoredReasons(
+            ignored.reasons,
+            `${coverageLabel} ignored ${ignored.identity}`,
+          ),
+          ["root"],
+          `${coverageLabel}: ${ignored.identity} exclusion reasons (targets: "all" — the root-node reason and nothing else, SPEC 8.2)`,
         );
       }
       const coverageHumanLabel = "T1.5-1 `coverage` (human report)";
