@@ -65,27 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 23 — T6.5-1: specifier-rewrite byte contract for the file-form move
-
-Cites: TEST-SPEC T6.5-1 (revised: after a file move, every importing `.ts`
-and the moved file are byte-identical outside the `import-specifier-rewrite`
-ranges reported by a `--preview` taken on a copy, and each such range holds a
-2.1-form specifier designating the moved module); SPEC 6.5, 6.6, 2.1.
-
-Now: `test/suite/registry/section-6.5.ts` ≈ lines 770–772 assert resolution
-only.
-
-Do: on a copy of the fixture take `move --preview` and decode its
-`import-specifier-rewrite` ranges (existing preview adapter); run the real move
-on the original; for each importing `.ts` and for the moved file, assert the
-bytes outside the reported ranges equal the pre-move bytes at the same
-positions (splice check: pre-move bytes with the ranges replaced by the
-post-move contents equals the post-move file) and that each range's new
-content is a string-literal specifier that resolves (2.1 relative form) to
-the moved module; nothing else changed.
-
-Verify: `npx vitest run … test/suite/section-6.5.test.ts`.
-
 ### Task 24 — T6.5-3: third-file arm — a third spec source's `d`-chain reference rewritten to the target module
 
 Cites: TEST-SPEC T6.5-3 third-file arm ("a spec source that is neither origin

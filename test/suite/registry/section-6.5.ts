@@ -28,12 +28,19 @@
 // ID is a usage error (12.0).
 //
 // Conservative operationalizations (noted per H-4):
-// - T6.5-1 "rewritten so everything resolves": SPEC pins resolution, not the
-//   rewritten specifier's spelling (several relative paths resolve to one
-//   file), so specifiers are asserted as: the stale quoted spelling gone, a
-//   spelling naming the moved module's file stem present (every resolving
-//   specifier ends in `Moved.xspec` / `Other.xspec`), and `check` exit 0 —
-//   which enforces that all imports and references actually resolve (12.2).
+// - T6.5-1 "rewritten so everything resolves" is asserted as the specifier
+//   rewrite's byte contract (TEST-SPEC T6.5-1): the `import-specifier-rewrite`
+//   ranges are read by running the preview on a copy of the fixture (SPEC
+//   6.6: a rewrite's range is the specifier literal's characters, in
+//   pre-operation coordinates), and after the real move each rewritten file
+//   — the moved file, the importing `.mdx`, the importing `.ts` — must be
+//   its pre-move bytes with exactly those ranges replaced by one string
+//   literal of 2.1's form designating the right module from the file's
+//   post-move directory (6.5: beyond its exact edits a move changes no
+//   bytes). SPEC pins the form, not a canonical spelling (several relative
+//   paths resolve to one file), so the literal's quote kind and relative
+//   spelling are the product's, resolved rather than compared; `check`
+//   exit 0 then enforces that everything actually resolves (12.2).
 // - "Mapping appended to the journal" uses the SUITE-21 operationalization:
 //   the journal (absent before the first journaled operation, SPEC 6.1) is a
 //   plain file holding exactly one line-oriented entry after the one move;
@@ -163,12 +170,19 @@
 //   resolve" clause is unstageable for T6.4-3's reason.
 
 import { Buffer } from "node:buffer";
-import type { GraphEdge } from "../../helpers/adapters/index.js";
+import { posix as posixPath } from "node:path";
+import type {
+  GraphEdge,
+  PreviewFileEntry,
+  SourceRange,
+} from "../../helpers/adapters/index.js";
 import {
   decodeAppliedMappingReport,
   decodeEdgesReport,
   decodeFindingsReport,
   decodeNodeRowsReport,
+  decodePreviewReport,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
@@ -440,6 +454,204 @@ function assertLacks(
   if (text.includes(needle)) {
     fail(
       `${context}: ${rel} still contains ${JSON.stringify(needle)} — ${why}`,
+    );
+  }
+}
+
+/** UTF-8 byte length of `text` — SPEC 1.7 ranges are byte offsets. */
+function utf8Length(text: string): number {
+  return Buffer.byteLength(text, "utf8");
+}
+
+/**
+ * Byte span (SPEC 1.7) of exactly one occurrence of `fragment` in `source`.
+ * An absent or ambiguous fragment is a staging defect — a harness error,
+ * never a product failure: a precomputed span must name its bytes uniquely.
+ */
+function uniqueSpan(
+  source: string,
+  fragment: string,
+  where: string,
+): SourceRange {
+  const first = source.indexOf(fragment);
+  if (first === -1) {
+    throw new Error(
+      `${where}: staging locator — fragment ${JSON.stringify(fragment)} ` +
+        `not found`,
+    );
+  }
+  if (source.indexOf(fragment, first + 1) !== -1) {
+    throw new Error(
+      `${where}: staging locator — fragment ${JSON.stringify(fragment)} ` +
+        `is ambiguous`,
+    );
+  }
+  const start = utf8Length(source.slice(0, first));
+  return { start, end: start + utf8Length(fragment) };
+}
+
+/**
+ * The `import-specifier-rewrite` ranges a completed preview reports for the
+ * file at `rel` — its current, pre-operation path — in the report's own
+ * order (SPEC 6.6: every file the operation would rewrite, with every edit
+ * it would make there, each classed; 12.7: edits ordered by range start).
+ * A file the preview lists other than exactly once, or without a specifier
+ * rewrite, fails diagnosed: the caller's fixture stages in each such file
+ * one specifier the file-form move must rewrite.
+ */
+function specifierRewriteRanges(
+  files: readonly PreviewFileEntry[],
+  rel: string,
+  context: string,
+): readonly SourceRange[] {
+  const entries = files.filter((entry) => entry.file === rel);
+  if (entries.length !== 1) {
+    fail(
+      `${context}: the preview must list ${rel} exactly once among the ` +
+        `files the move would rewrite (SPEC 6.6, 12.7); found it ` +
+        `${entries.length} time(s) in [${files
+          .map((entry) => renderPathValue(entry.file))
+          .join(", ")}]`,
+    );
+  }
+  const ranges = entries[0]!.edits
+    .filter((edit) => edit.class === "import-specifier-rewrite")
+    .map((edit) => edit.range);
+  if (ranges.length === 0) {
+    fail(
+      `${context}: the preview's entry for ${rel} reports no ` +
+        `\`import-specifier-rewrite\` edit, yet the relocation must rewrite ` +
+        `the specifier staged there (SPEC 6.5, 6.6)`,
+    );
+  }
+  return ranges;
+}
+
+/** The first offset at which two byte runs differ, or -1 when equal. */
+function firstDifference(a: Uint8Array, b: Uint8Array): number {
+  const shared = Math.min(a.length, b.length);
+  for (let i = 0; i < shared; i += 1) {
+    if (a[i] !== b[i]) return i;
+  }
+  return a.length === b.length ? -1 : shared;
+}
+
+/** Up to 24 bytes of `bytes` from `offset`, rendered for a diagnosis. */
+function excerpt(bytes: Uint8Array, offset: number): string {
+  return JSON.stringify(
+    Buffer.from(bytes.subarray(offset, offset + 24)).toString("utf8"),
+  );
+}
+
+/**
+ * The file-form move's specifier-rewrite byte contract (TEST-SPEC T6.5-1).
+ * `post` must be `pre` with each previewed range — read on a copy, in
+ * pre-operation coordinates (SPEC 6.6, 1.7) — replaced by one string
+ * literal and nothing else (6.5: beyond its exact edits a move changes no
+ * bytes): the splice walks `pre` and `post` together, requiring every byte
+ * outside the ranges to recur at its spliced position, and reads each
+ * range's post-move content as one quoted literal — the quote kind the
+ * product's, no quote byte inside — whose text has 2.1's form (a relative
+ * path beginning with `./` or `../` and ending in `.xspec`) and, resolved
+ * against `importerDir`, the importing file's post-move directory,
+ * designates `expectedModule` (2.1: `DIR/NAME.xspec` designates
+ * `DIR/NAME.mdx`). The relative spelling is the product's — 2.1 pins the
+ * form, not a canonical spelling — so it is resolved, never compared.
+ */
+function assertSpecifierRewriteByteContract(
+  options: {
+    readonly rel: string;
+    readonly pre: Uint8Array;
+    readonly post: Uint8Array;
+    readonly ranges: readonly SourceRange[];
+    readonly importerDir: string;
+    readonly expectedModule: string;
+  },
+  context: string,
+): void {
+  const { rel, pre, post, ranges, importerDir, expectedModule } = options;
+  const postBuf = Buffer.from(post.buffer, post.byteOffset, post.byteLength);
+  let preCursor = 0;
+  let postCursor = 0;
+  for (const range of ranges) {
+    if (
+      range.start < preCursor ||
+      range.end <= range.start ||
+      range.end > pre.length
+    ) {
+      fail(
+        `${context}: ${rel} — the previewed import-specifier-rewrite range ` +
+          `[${range.start}, ${range.end}) must be non-empty, lie within the ` +
+          `${pre.length} pre-move bytes, and follow the preceding range ` +
+          `(SPEC 6.6, 1.7)`,
+      );
+    }
+    // Bytes outside the ranges: the pre-move run before this range recurs
+    // verbatim at its spliced position.
+    const kept = pre.subarray(preCursor, range.start);
+    const spliced = post.subarray(postCursor, postCursor + kept.length);
+    const drift = firstDifference(kept, spliced);
+    if (drift !== -1) {
+      fail(
+        `${context}: ${rel} — bytes outside the previewed ` +
+          `import-specifier-rewrite ranges changed: from pre-move byte ` +
+          `${preCursor + drift} the file held ${excerpt(kept, drift)}… and ` +
+          `now holds ${excerpt(spliced, drift)}… there — a file-form move ` +
+          `rewrites nothing beyond the specifier literals (SPEC 6.5, 6.6)`,
+      );
+    }
+    postCursor += kept.length;
+    // The range's post-move content: exactly one quoted string literal.
+    const quote = post[postCursor];
+    if (quote !== 0x22 && quote !== 0x27) {
+      fail(
+        `${context}: ${rel} — at the previewed import-specifier-rewrite ` +
+          `range [${range.start}, ${range.end}) the file must hold one ` +
+          `quoted specifier literal; found ${excerpt(post, postCursor)}… ` +
+          `(SPEC 6.6, 2.1)`,
+      );
+    }
+    const close = postBuf.indexOf(quote, postCursor + 1);
+    if (close === -1) {
+      fail(
+        `${context}: ${rel} — the specifier literal opened at post-move ` +
+          `byte ${postCursor} is never closed (SPEC 2.1)`,
+      );
+    }
+    const specifier = postBuf.subarray(postCursor + 1, close).toString("utf8");
+    const relative = specifier.startsWith("./") || specifier.startsWith("../");
+    if (!relative || !specifier.endsWith(".xspec")) {
+      fail(
+        `${context}: ${rel} — the rewritten specifier ` +
+          `${JSON.stringify(specifier)} must be a relative path beginning ` +
+          `with \`./\` or \`../\` and ending in \`.xspec\` (SPEC 2.1)`,
+      );
+    }
+    const resolved = posixPath.join(importerDir, specifier);
+    if (resolved !== expectedModule) {
+      fail(
+        `${context}: ${rel} — the rewritten specifier ` +
+          `${JSON.stringify(specifier)}, resolved against the file's ` +
+          `directory ${importerDir}/, designates ${resolved}; the ` +
+          `relocation must make it designate ${expectedModule} so the ` +
+          `import resolves (SPEC 6.5, 2.1)`,
+      );
+    }
+    postCursor = close + 1;
+    preCursor = range.end;
+  }
+  // After the last range: the pre-move tail recurs and nothing follows it.
+  const preTail = pre.subarray(preCursor);
+  const postTail = post.subarray(postCursor);
+  const drift = firstDifference(preTail, postTail);
+  if (drift !== -1) {
+    fail(
+      `${context}: ${rel} — after the last previewed ` +
+        `import-specifier-rewrite range the file must end with its ` +
+        `pre-move bytes verbatim; they diverge at pre-move byte ` +
+        `${preCursor + drift} (pre ${excerpt(preTail, drift)}…, post ` +
+        `${excerpt(postTail, drift)}…) — a file-form move rewrites nothing ` +
+        `beyond the specifier literals (SPEC 6.5, 6.6)`,
     );
   }
 }
@@ -766,10 +978,46 @@ const F1_SEED_FILES = [
   JOURNAL_PATH,
 ] as const;
 
+/**
+ * The specifier rewrites the file-form move must make (SPEC 6.5), one per
+ * rewritten file: the file's pre-operation path — the preview lists it
+ * there (6.6) — and its post-move path, the staged source holding exactly
+ * one specifier literal, that literal, and the module the rewritten
+ * specifier must designate (2.1) from the file's post-move directory: the
+ * moved module for its `.mdx` and `.ts` importers; for the moved file's
+ * own import, the unmoved `Other` module, now reached from `specs/sub/`.
+ */
+const F1_SPECIFIER_REWRITES = [
+  {
+    pre: F1_CORE,
+    post: F1_MOVED,
+    source: F1_CORE_SOURCE,
+    literal: '"./Other.xspec"',
+    module: "specs/Other.xspec",
+  },
+  {
+    pre: F1_REFS,
+    post: F1_REFS,
+    source: F1_REFS_SOURCE,
+    literal: '"./Core.xspec"',
+    module: "specs/sub/Moved.xspec",
+  },
+  {
+    pre: F1_APP,
+    post: F1_APP,
+    source: F1_APP_SOURCE,
+    literal: '"../specs/Core.xspec"',
+    module: "specs/sub/Moved.xspec",
+  },
+] as const;
+
+/** Staged sources the file-form move rewrites nothing in (SPEC 6.5). */
+const F1_UNTOUCHED = ["xspec.config.ts", F1_OTHER] as const;
+
 const T6_5_1 = defineProductTest({
   id: "T6.5-1",
   title:
-    "file form: `xspec move old.mdx new.mdx` keeps IDs unchanged and changes identities only in their file part; the moved file's own import specifiers and other files' imports of its generated module are rewritten so everything resolves; the mapping is appended to the journal; finishing regeneration as T6.4-7 — byte-identical to a fresh `build`, `check` clean; and the command's own report is the applied mapping as T6.4-1 — every journaled identity pair, carried in JSON per 12.0 (SPEC 6.5, 6.4, 6.1, 12.0, 12.1, 14.10; H-3 adapter, report shape unpinned; 6.5: both forms report as rename does — the section form's report is T6.5-3's assertion)",
+    "file form: `xspec move old.mdx new.mdx` keeps IDs unchanged and changes identities only in their file part; the moved file's own import specifiers and other files' imports of its generated module are rewritten so everything resolves — under the specifier rewrite's byte contract: the moved file, the importing `.mdx`, and the importing `.ts` (T6.2-2's shape — a marker and a `text(...)` call through one `.xspec` import) are each byte-identical to their pre-move bytes outside the `import-specifier-rewrite` ranges a `--preview` taken on a copy reports, and within each such range hold one string literal of 2.1's form designating the moved module (the moved file's own import: the unmoved one) from the file's post-move directory, its quote kind and relative spelling the product's, while every other staged source is byte-unchanged; the mapping is appended to the journal; finishing regeneration as T6.4-7 — byte-identical to a fresh `build`, `check` clean; and the command's own report is the applied mapping as T6.4-1 — every journaled identity pair, carried in JSON per 12.0 (SPEC 6.5, 6.6, 2.1, 1.7, 6.4, 6.1, 12.0, 12.1, 12.7, 14.10; H-3 adapter, report shape unpinned; 6.5: both forms report as rename does — the section form's report is T6.5-3's assertion)",
   run: async (product) => {
     await withWorkspace(
       FULL_CONFIG,
@@ -806,6 +1054,92 @@ const T6_5_1 = defineProductTest({
           "T6.5-1 pre-move",
         );
         await assertF1Edges(product, workspace, F1_CORE, "T6.5-1 pre-move");
+
+        // Specifier-rewrite byte contract, the preview side (TEST-SPEC
+        // T6.5-1): the `import-specifier-rewrite` ranges — in current,
+        // pre-operation coordinates (SPEC 6.6, 1.7) — are read by running
+        // the preview on a copy of the fixture, staged and built like the
+        // original, whose pre-move state no preview then touches.
+        // Premises: the preview completes with its full plan (6.6), and
+        // each rewritten file's ranges are exactly its one staged
+        // specifier literal's characters, quotes included (6.6: a
+        // specifier rewrite's range is the literal's characters).
+        const previewRanges = await withWorkspace(
+          FULL_CONFIG,
+          {
+            [F1_OTHER]: F1_OTHER_SOURCE,
+            [F1_CORE]: F1_CORE_SOURCE,
+            [F1_REFS]: F1_REFS_SOURCE,
+            [F1_APP]: F1_APP_SOURCE,
+          },
+          async (copy) => {
+            await buildOk(
+              product,
+              copy,
+              "T6.5-1 `build` over the copy staged for the preview",
+            );
+            const context = "T6.5-1 `move … --preview --json` on the copy";
+            const report = decodePreviewReport(
+              await runJson(
+                product,
+                copy,
+                ["move", F1_CORE, F1_MOVED, "--preview", "--json"],
+                context,
+              ),
+              context,
+            );
+            assertSameJson(
+              report.findings,
+              [],
+              `${context}: the preview of the valid file-form move ` +
+                `completes with findings [] (SPEC 6.6)`,
+            );
+            if (report.files === null) {
+              fail(
+                `${context}: the completed preview reports its plan — ` +
+                  `\`files\` non-null (SPEC 6.6, 12.7)`,
+              );
+            }
+            const files = report.files;
+            return new Map(
+              F1_SPECIFIER_REWRITES.map((rewrite) => {
+                const ranges = specifierRewriteRanges(
+                  files,
+                  rewrite.pre,
+                  context,
+                );
+                assertSameJson(
+                  ranges,
+                  [uniqueSpan(rewrite.source, rewrite.literal, "T6.5-1")],
+                  `${context}: ${rewrite.pre} — the previewed ` +
+                    `import-specifier-rewrite ranges are exactly the one ` +
+                    `staged specifier literal's characters, quotes ` +
+                    `included (SPEC 6.6, 1.7)`,
+                );
+                return [rewrite.pre, ranges] as const;
+              }),
+            );
+          },
+        );
+
+        // The pre-move bytes of every source the contract reads, taken from
+        // the original just before the move (staging premise: as staged —
+        // `build` rewrites no source, T6.1-1).
+        const preMoveBytes = new Map<string, Uint8Array>();
+        for (const rel of [
+          ...F1_SPECIFIER_REWRITES.map((rewrite) => rewrite.pre),
+          ...F1_UNTOUCHED,
+        ]) {
+          preMoveBytes.set(rel, await workspace.readBytes(rel));
+        }
+        for (const rewrite of F1_SPECIFIER_REWRITES) {
+          assertBytesEqual(
+            preMoveBytes.get(rewrite.pre)!,
+            rewrite.source,
+            `T6.5-1: staging premise — ${rewrite.pre} holds its staged ` +
+              `source before the move`,
+          );
+        }
 
         // The command's own report is the applied mapping — every identity
         // pair the operation journaled, the information of the preview's
@@ -852,56 +1186,46 @@ const T6_5_1 = defineProductTest({
           );
         }
 
-        // Specifier rewrites (module header, H-4): the stale quoted spelling
-        // is gone and a spelling naming the resolving module remains — the
-        // moved file's own import, a spec file's import, a code file's
-        // import (SPEC 6.5).
-        const movedText = await readSourceText(
-          workspace,
-          F1_MOVED,
-          "T6.5-1 rewrite check",
-        );
-        assertLacks(
-          movedText,
-          F1_MOVED,
-          '"./Other.xspec"',
-          "the moved file's own import specifiers are rewritten for its new " +
-            "directory (SPEC 6.5); from specs/sub/ the old spelling no " +
-            "longer resolves",
-          "T6.5-1 rewrite check",
-        );
-        assertContains(
-          movedText,
-          F1_MOVED,
-          "Other.xspec",
-          "every resolving specifier for specs/Other.mdx ends in " +
-            "`Other.xspec` (SPEC 2.1)",
-          "T6.5-1 rewrite check",
-        );
-        for (const [rel, stale] of [
-          [F1_REFS, '"./Core.xspec"'],
-          [F1_APP, '"../specs/Core.xspec"'],
-        ] as const) {
-          const text = await readSourceText(
-            workspace,
-            rel,
+        // Specifier-rewrite byte contract, the operation side (TEST-SPEC
+        // T6.5-1; SPEC 6.5: relocation rewrites the moved file's own import
+        // specifiers and the paths by which other files import its
+        // generated module, and beyond its exact edits a move changes no
+        // bytes): each rewritten file — the moved file under its new path,
+        // the importing `.mdx`, the importing `.ts` — is its pre-move
+        // bytes with exactly the previewed ranges replaced by one string
+        // literal of 2.1's form designating the right module from the
+        // file's post-move directory, the quote kind and relative spelling
+        // the product's (2.1 pins the form; T6.1-2/H-6 pin the spelling
+        // product-to-itself).
+        for (const rewrite of F1_SPECIFIER_REWRITES) {
+          const kind = await workspace.kind(rewrite.post);
+          if (kind !== "file") {
+            fail(
+              `T6.5-1 rewrite check: expected a plain file at ` +
+                `${rewrite.post} after the move (SPEC 6.5, 13.4); found ` +
+                `${kind}`,
+            );
+          }
+          assertSpecifierRewriteByteContract(
+            {
+              rel: rewrite.post,
+              pre: preMoveBytes.get(rewrite.pre)!,
+              post: await workspace.readBytes(rewrite.post),
+              ranges: previewRanges.get(rewrite.pre)!,
+              importerDir: posixPath.dirname(rewrite.post),
+              expectedModule: rewrite.module,
+            },
             "T6.5-1 rewrite check",
           );
-          assertLacks(
-            text,
-            rel,
-            stale,
-            "imports of the moved file's generated module are rewritten so " +
-              "all references continue to resolve (SPEC 6.5)",
-            "T6.5-1 rewrite check",
-          );
-          assertContains(
-            text,
-            rel,
-            "Moved.xspec",
-            "every resolving specifier for the moved module ends in " +
-              "`Moved.xspec` (SPEC 2.1, 4)",
-            "T6.5-1 rewrite check",
+        }
+        // Nothing else changed: a source the move rewrites nothing in is
+        // byte-identical to its pre-move bytes (SPEC 6.5).
+        for (const rel of F1_UNTOUCHED) {
+          await assertFileBytes(
+            workspace.path(rel),
+            preMoveBytes.get(rel)!,
+            `T6.5-1: ${rel} — a source the file-form move rewrites nothing ` +
+              `in must be byte-identical to its pre-move bytes (SPEC 6.5)`,
           );
         }
 
