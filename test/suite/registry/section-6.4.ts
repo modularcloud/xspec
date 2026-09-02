@@ -125,12 +125,17 @@ import {
 } from "../../helpers/snapshot.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { ConcernedIdentity, FindingSourceExpectation } from "./support.js";
+import type {
+  BearerLocationExpectation,
+  ConcernedIdentity,
+  FindingSourceExpectation,
+} from "./support.js";
 import {
   assertAppliedMapping,
   assertConditionCounts,
   assertEdgeSetEqual,
   assertFindingLocated,
+  assertFindingLocatesExactly,
   assertFindingMentionsLocation,
   assertFindingNamesIdentity,
   assertSameJson,
@@ -362,6 +367,15 @@ export interface RefusalExpectation {
   readonly finding: string;
   /** At least one location names this file (and byte window when given). */
   readonly locatedAt?: FindingSourceExpectation;
+  /**
+   * The finding's complete location set — exactly one location per listed
+   * bearer, none beside, index-wise in 12.7's within-finding order (SPEC 14:
+   * `refused-id-collision` locates every colliding bearer — the
+   * every-participant strictness of T6.4-3's two-bearer arm, T14-7).
+   * Declared beside `locatedAt`, whose SOME-quantified check consumers
+   * asserting it alone still apply.
+   */
+  readonly locatedAtEach?: readonly BearerLocationExpectation[];
   /** At least one identities entry names this concerned identity. */
   readonly identity?: ConcernedIdentity;
 }
@@ -414,6 +428,13 @@ async function expectRefusalModifiesNothing(
           finding,
           expected.locatedAt,
           `${context}: the refusal's concerned construct`,
+        );
+      }
+      if (expected.locatedAtEach !== undefined) {
+        assertFindingLocatesExactly(
+          finding,
+          expected.locatedAtEach,
+          `${context}: the refusal's complete located-bearer set`,
         );
       }
       if (expected.identity !== undefined) {
@@ -1135,7 +1156,8 @@ const T6_4_2 = defineProductTest({
 // only the differs-from-old check, `a.sib` only the collision check, `x.mid`
 // and `b.c` only the structural parent rules. The remaining 6.4 clause — all
 // rewritten references resolve — admits no discriminating fixture (TEST-SPEC
-// T6.4-3) and is exercised as the always-passing side of T6.4-1.
+// T6.4-3) and is exercised as the always-passing side of T6.4-1. The
+// two-bearer collision arm stages its own file beside this one (below).
 const V3_FILE = "specs/A.mdx";
 const V3_SOURCE = [
   '<S id="a">',
@@ -1167,6 +1189,95 @@ const V3_SIB_WINDOW = byteWindow(
   V3_SIB_CONSTRUCT,
 );
 
+// T6.4-3's two-bearer collision arm (TEST-SPEC T6.4-3, T14-7): a second
+// file holding `a` with child `a.c` beside `b` with child `b.c`, so that
+// `rename a b` makes the new ID `b` AND the prefix-replaced `b.c` each
+// collide with an ID remaining in the file (SPEC 6.4: the new ID, and each
+// ID the prefix replacement produces; IDs are unique within a source file,
+// 1.3, so this file's `a` beside V3_SOURCE's `a` is valid, and rename's
+// collision check reads the origin file alone). The refusal is ONE
+// `refused-id-collision` finding locating BOTH bearers (SPEC 14: one
+// finding per reason, locating every colliding bearer) — a product
+// locating the first alone fails. `b.c`'s construct lies inside `b`'s, so
+// the bearer expectations carry the start bound that attributes the first
+// location to `b` alone (support.ts BearerLocationExpectation). Exported
+// whole — file, source bytes, argv, and the two expected bearer locations —
+// so T14-7 asserts the same collision over the shared staging.
+export const TWO_BEARER_COLLISION_FILE = "specs/B.mdx";
+const TWO_BEARER_CHILD_CONSTRUCT = '<S id="b.c">\nBeta child text.\n</S>';
+const TWO_BEARER_PARENT_CONSTRUCT = [
+  '<S id="b">',
+  "Beta text.",
+  "",
+  TWO_BEARER_CHILD_CONSTRUCT,
+  "</S>",
+].join("\n");
+export const TWO_BEARER_COLLISION_SOURCE = [
+  '<S id="a">',
+  "Alpha text.",
+  "",
+  '<S id="a.c">',
+  "Alpha child text.",
+  "</S>",
+  "</S>",
+  "",
+  TWO_BEARER_PARENT_CONSTRUCT,
+  "",
+].join("\n");
+export const TWO_BEARER_COLLISION_ARGV: readonly string[] = [
+  "rename",
+  TWO_BEARER_COLLISION_FILE,
+  "a",
+  "b",
+];
+const TWO_BEARER_CHILD_WINDOW = byteWindow(
+  TWO_BEARER_COLLISION_SOURCE.slice(
+    0,
+    TWO_BEARER_COLLISION_SOURCE.indexOf(TWO_BEARER_CHILD_CONSTRUCT),
+  ),
+  TWO_BEARER_CHILD_CONSTRUCT,
+);
+/**
+ * The two colliding bearers in 12.7's within-finding order: `b`, whose
+ * construct encloses `b.c`'s — its location starts before the child's
+ * construct at any precision — then `b.c`.
+ */
+export const TWO_BEARER_COLLISION_BEARERS: readonly BearerLocationExpectation[] =
+  [
+    {
+      file: TWO_BEARER_COLLISION_FILE,
+      window: byteWindow(
+        TWO_BEARER_COLLISION_SOURCE.slice(
+          0,
+          TWO_BEARER_COLLISION_SOURCE.indexOf(TWO_BEARER_PARENT_CONSTRUCT),
+        ),
+        TWO_BEARER_PARENT_CONSTRUCT,
+      ),
+      startBefore: TWO_BEARER_CHILD_WINDOW.start,
+    },
+    {
+      file: TWO_BEARER_COLLISION_FILE,
+      window: TWO_BEARER_CHILD_WINDOW,
+    },
+  ];
+/** The arm as one T6.4-3 refusal case (a member of RENAME_REFUSAL_CASES). */
+export const TWO_BEARER_COLLISION_CASE: RenameRefusalCase = {
+  argv: TWO_BEARER_COLLISION_ARGV,
+  expected: {
+    finding: "refused-id-collision",
+    // The SOME-quantified concern every consumer asserts: the SECOND bearer,
+    // so a product locating the first alone fails there too.
+    locatedAt: {
+      file: TWO_BEARER_COLLISION_FILE,
+      window: TWO_BEARER_CHILD_WINDOW,
+    },
+    locatedAtEach: TWO_BEARER_COLLISION_BEARERS,
+  },
+  reason:
+    "new ID `b` and the prefix-replaced `b.c` each colliding with an ID " +
+    "remaining in the file — one finding locating both bearers",
+};
+
 /**
  * One T6.4-3 refusal case: the full rename argv (without `--json`), the one
  * refusal finding the staging isolates (SPEC 14), and its diagnosis context.
@@ -1189,6 +1300,7 @@ export interface RenameRefusalCase {
 export const RENAME_REFUSAL_CONFIG = SPECS_ONLY_CONFIG;
 export const RENAME_REFUSAL_FILES: Readonly<Record<string, string>> = {
   [V3_FILE]: V3_SOURCE,
+  [TWO_BEARER_COLLISION_FILE]: TWO_BEARER_COLLISION_SOURCE,
 };
 
 // Each arm's expected refusal finding (SPEC 14): the exact stable code, with
@@ -1231,6 +1343,7 @@ export const RENAME_REFUSAL_CASES: readonly RenameRefusalCase[] = [
     },
     reason: "new ID colliding with an existing ID in the file",
   },
+  TWO_BEARER_COLLISION_CASE,
   {
     argv: ["rename", V3_FILE, "a.mid", "x.mid"],
     expected: {
@@ -1256,7 +1369,7 @@ export const RENAME_REFUSAL_CASES: readonly RenameRefusalCase[] = [
 const T6_4_3 = defineProductTest({
   id: "T6.4-3",
   title:
-    "validation refusals (exit 1): a new ID that is invalid (1.4), equal to the old ID, colliding with an existing ID, or violating structural parent rules each refuses the rename and modifies nothing (workspace byte-compare) — each refusal reported as the form-exact 12.7 findings-only report holding exactly one finding with its exact stable refusal code (refused-invalid-id, refused-identity-unchanged, refused-id-collision, refused-structural-parent) and the concerned identity or located colliding bearer (SPEC 6.4, 1.4, 1.3, 12.0, 12.7, 14)",
+    "validation refusals (exit 1): a new ID that is invalid (1.4), equal to the old ID, colliding with an existing ID, or violating structural parent rules each refuses the rename and modifies nothing (workspace byte-compare) — each refusal reported as the form-exact 12.7 findings-only report holding exactly one finding with its exact stable refusal code (refused-invalid-id, refused-identity-unchanged, refused-id-collision, refused-structural-parent) and the concerned identity or located colliding bearer — the collision staged with one bearer and with two (`rename a b` where `a.c` sits beside `b` and `b.c`: the new ID and the prefix-replaced `b.c` each collide, one refused-id-collision finding locating exactly both bearers `b` and `b.c`, a product locating the first alone failing) (SPEC 6.4, 1.4, 1.3, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       RENAME_REFUSAL_CONFIG,

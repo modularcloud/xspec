@@ -343,6 +343,102 @@ export function assertFindingMentionsLocation(
   );
 }
 
+/**
+ * One expected bearer of a jointly located concern whose bearers may nest —
+ * a colliding section and its colliding child (SPEC.md 14, 6.4): its
+ * containing file, its whole construct's byte window (the module-header
+ * window convention: any in-construct precision passes), and, for a bearer
+ * whose construct encloses another expected bearer's, `startBefore` — the
+ * byte offset where the first enclosed construct begins, an exclusive bound
+ * the location's start must fall before. An enclosed bearer's construct
+ * lies within its parent's window, so windows alone cannot tell "the parent
+ * and the child" from "the child twice"; the bound attributes each location
+ * to one bearer at whatever precision the product locates — the opening
+ * tag, the `id` attribute, and the whole construct all start inside the
+ * parent's own leading bytes, before any enclosed construct.
+ */
+export interface BearerLocationExpectation {
+  /** The workspace-relative, `/`-separated source file (SPEC.md 1.5, 14). */
+  readonly file: string;
+  /** The bearer's whole construct as a byte window (`byteWindow`). */
+  readonly window: { readonly start: number; readonly end: number };
+  /** Exclusive bound on the location's start: where an enclosed bearer begins. */
+  readonly startBefore?: number;
+}
+
+/**
+ * Assert a finding locates EVERY expected bearer and nothing else (SPEC.md
+ * 14's location-cardinality rule — a condition several constructs jointly
+ * violate is one finding carrying a location for every participating
+ * construct, no representative chosen; the every-participant strictness,
+ * with none of `assertFindingMentionsLocation`'s SOME-quantified
+ * tolerance): exactly one location per bearer, index-wise in 12.7's
+ * within-finding order (file bytes, then start, then end — an enclosing
+ * bearer precedes the bearers it encloses at any precision), each in its
+ * bearer's file within the bearer's byte window and, where a `startBefore`
+ * bound is declared, starting before it; and, locating in source, the
+ * finding concerns no path (12.7: `path` null for located conditions).
+ */
+export function assertFindingLocatesExactly(
+  finding: Finding,
+  bearers: readonly BearerLocationExpectation[],
+  context: string,
+): void {
+  const rendered = (): string =>
+    finding.locations
+      .map(
+        (location) =>
+          `${renderPathValue(location.file)} [${String(location.range.start)}, ` +
+          `${String(location.range.end)})`,
+      )
+      .join("; ");
+  if (finding.locations.length !== bearers.length) {
+    fail(
+      `${context}: one finding carries a location for every participating ` +
+        `bearer and none beside — expected exactly ${String(bearers.length)} ` +
+        `location(s), got ${String(finding.locations.length)} ` +
+        `[${rendered()}] (SPEC.md 14, 12.7; message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+  bearers.forEach((bearer, index) => {
+    const location = finding.locations[index]!;
+    const inFile = location.file === bearer.file;
+    const inWindow =
+      location.range.start >= bearer.window.start &&
+      location.range.end <= bearer.window.end;
+    const attributable =
+      bearer.startBefore === undefined ||
+      location.range.start < bearer.startBefore;
+    if (!inFile || !inWindow || !attributable) {
+      fail(
+        `${context}: location #${String(index + 1)} must locate bearer ` +
+          `#${String(index + 1)} — in ${JSON.stringify(bearer.file)} within ` +
+          `its byte window [${String(bearer.window.start)}, ` +
+          `${String(bearer.window.end)}]` +
+          (bearer.startBefore === undefined
+            ? ""
+            : `, starting before byte ${String(bearer.startBefore)} (the ` +
+              `bearer's own leading bytes: an enclosed bearer's location ` +
+              `is never this one's)`) +
+          ` — in 12.7's within-finding order (file bytes, then start, then ` +
+          `end); got ${renderPathValue(location.file)} ` +
+          `[${String(location.range.start)}, ${String(location.range.end)}) ` +
+          `among [${rendered()}] (SPEC.md 14, 12.7; message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+  });
+  if (finding.path !== null) {
+    fail(
+      `${context}: a finding locating in source concerns no path — ` +
+        `\`path\` is null for located conditions (SPEC.md 12.7, 14); got ` +
+        `${renderPathValue(finding.path)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+}
+
 /** A concerned identity, named by its containing file and its ID (SPEC.md 1.5). */
 export interface ConcernedIdentity {
   /** The workspace-relative file whose `#`-form identity names the concern. */

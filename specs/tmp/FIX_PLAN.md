@@ -65,27 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 20 — T6.4-3: two-bearer collision — one `refused-id-collision` locating both `b` and `b.c`
-
-Cites: TEST-SPEC T6.4-3 (rename `a`→`b` where `a.c` exists beside `b` and `b.c`:
-refused with one `refused-id-collision` finding locating every colliding
-bearer — `b` and `b.c`; nothing modified); T14-7 (the finding locates every
-colliding bearer); SPEC 6.4, 14.
-
-Now: `test/suite/registry/section-6.4.ts` ≈ lines 1060–1130 stage the single
-bearer `a.sib` only.
-
-Do: add the arm (or restage the existing one) with sections `a`, `a.c`, `b`,
-`b.c` in one or two files; `rename a b` → exit 1, exactly one
-`refused-id-collision` finding whose locations are exactly the two bearers
-`b` and `b.c` (tag ranges as the adapter decodes them), journal and sources
-byte-identical. Export the fixture (source bytes and the two expected
-locations) so Task 46 (T14-7) asserts the same collision without a second
-staging.
-
-Verify: `npx vitest run … test/suite/section-6.4.test.ts`; `npm run test:self`
-green.
-
 ### Task 21 — T6.4-4: nonexistent `<file>` spelled as an `.mdx` present on disk but in no spec group (exit 2)
 
 Cites: TEST-SPEC T6.4-4 (a `<file>` operand naming no discovered spec source is
