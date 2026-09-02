@@ -1673,10 +1673,18 @@ async function expectUsageErrorDocument(
 // contains it; harness-prefixed so a collision is impossible by staging).
 const PRECEDENCE_NO_SUCH_ITEM = "xspec-harness-no-such-item";
 
+// The within-class-2 rows' staging: the session name `review create --name n`
+// spells and the `<file>` the lone-operand `at` row names, each staged beside
+// the invalid configuration so the syntax-alone check is seen to precede what
+// the same command would consult next (SPEC 12.0, 10.7, 11.5).
+const SYNTAX_SESSION_NAME = "n";
+const SYNTAX_SESSION_REL = `.xspec/reviews/${SYNTAX_SESSION_NAME}.json`;
+const SYNTAX_AT_FILE = "specs/A.mdx";
+
 const T12_0_10 = defineProductTest({
   id: "T12.0-10",
   title:
-    "argument-check precedence: the rename/move and baseline arms ride on T6.4-4/T6.5-5/T6.3-4; on one workspace failing `build`'s validations each gated read given a usage-error argument exits 2 with that error and reports no validation findings (the exit-2 stdout is exactly the one 12.7 error document) — `coverage <unknown-profile>`, `query nodes --group <code-group>`, `review status <unknown-session>`, `show <file>#<unspelled-id>`, `query node <code-source-path>`, `query edges --from <code-source-path>#<unspelled-unit>` — each check judged from what it consults (configuration; the session directory; parse-local spelled identities or named units of the named file), the same names on a valid twin workspace giving the same exit-2 errors (byte-identical error documents); masking: `show <unparseable-file>#<id>` on the failing workspace yields the gated report of 13.3, exit 1, carrying exactly the workspace's findings; past the gate: on a passing workspace `review resolve <corrupt-session> <any-item-id> --status updated` reports the corruption, exit 1 — the item ID judged only against session content, which the corruption withholds (the same unknown item ID in the well-formed session exits 2 as the pre-corruption premise); within class 2: an unknown command, a repeated flag, and the malformed value `show a#b#c` are reported without loading configuration — byte-identical error documents with the configuration file invalid or missing, each the plain usage error (`code` and `path` null) — while a configuration error precedes every check that consults configuration: `coverage <unknown-profile>` with invalid configuration reports 14.14 (`configuration-error`), not the unknown profile (SPEC 12.0, 13.3, 11.1, 11.2, 4.6, 10.1, 14.14, 14.20, 14.21, 12.7)",
+    "argument-check precedence: the rename/move and baseline arms ride on T6.4-4/T6.5-5/T6.3-4; on one workspace failing `build`'s validations each gated read given a usage-error argument exits 2 with that error and reports no validation findings (the exit-2 stdout is exactly the one 12.7 error document) — `coverage <unknown-profile>`, `query nodes --group <code-group>`, `review status <unknown-session>`, `show <file>#<unspelled-id>`, `query node <code-source-path>`, `query edges --from <code-source-path>#<unspelled-unit>` — each check judged from what it consults (configuration; the session directory; parse-local spelled identities or named units of the named file), the same names on a valid twin workspace giving the same exit-2 errors (byte-identical error documents); masking: `show <unparseable-file>#<id>` on the failing workspace yields the gated report of 13.3, exit 1, carrying exactly the workspace's findings; past the gate: on a passing workspace `review resolve <corrupt-session> <any-item-id> --status updated` reports the corruption, exit 1 — the item ID judged only against session content, which the corruption withholds (the same unknown item ID in the well-formed session exits 2 as the pre-corruption premise); within class 2: an unknown command, a repeated flag, a missing required flag (`review create --name n` with none of `--base`, `--strategy audit`, or `--coverage`) or argument (`at <file>` alone), and the malformed value `show a#b#c` are reported without loading configuration and modify nothing — byte-identical error documents with the configuration file invalid or missing, each the plain usage error (`code` and `path` null), the syntax-alone check preceding what the command would consult next (a session already named `n` and the named `<file>`, staged beside the invalid configuration, go unconsulted) — while a configuration error precedes every check that consults configuration: `coverage <unknown-profile>` with invalid configuration reports 14.14 (`configuration-error`), not the unknown profile (SPEC 12.0, 13.3, 11.1, 11.2, 4.6, 10.1, 10.7, 11.5, 14.14, 14.20, 14.21, 12.7)",
   timeoutMs: 240_000,
   run: async (product) => {
     // --- Gated reads: usage-error arguments precede the 13.3 gate, judged
@@ -1915,6 +1923,17 @@ export default defineConfig({
   bogus: true
 })
 `,
+          // What the missing-flag and missing-argument rows would consult
+          // next, staged so a product judging it before the syntax check is
+          // observed: a session already named `n` — SPEC 10.7 refuses
+          // `review create` with an existing session's name, exit 1; a
+          // conforming invocation never reads it, so any bytes serve — and
+          // the `at` row's `<file>`, present here and absent from the
+          // missing-configuration workspace, so a product judging the file
+          // before the argument count answers the two states differently
+          // and fails the byte-identical compare below.
+          [SYNTAX_SESSION_REL]: "xspec-harness pre-existing session\n",
+          [SYNTAX_AT_FILE]: '<S id="alpha">\nAlpha text.\n</S>\n',
         },
       },
       async (invalidConfig) => {
@@ -1932,28 +1951,63 @@ export default defineConfig({
               argv: ["ids", "--json", "--json"],
             },
             {
+              what:
+                "a missing required flag (`review create --name n` with " +
+                "none of `--base`, `--strategy audit`, or `--coverage`, " +
+                "SPEC 10.7)",
+              argv: [
+                "review",
+                "create",
+                "--name",
+                SYNTAX_SESSION_NAME,
+                "--json",
+              ],
+            },
+            {
+              what:
+                "a missing required argument (`at <file>` alone, its " +
+                "`<offset>` absent, SPEC 11.5)",
+              argv: ["at", SYNTAX_AT_FILE, "--json"],
+            },
+            {
               what: "the malformed multi-`#` value (T12.0-13's spelling)",
               argv: ["show", "a#b#c", "--json"],
             },
           ];
           for (const row of syntaxRows) {
             const command = row.argv.join(" ");
-            const onInvalid = await expectUsageErrorDocument(
-              product,
-              invalidConfig,
-              row.argv,
+            // An error the syntax alone determines is reported before
+            // anything else, so the invocation modifies nothing — the
+            // mutating `review create` included, whose session directory
+            // already holds `n` (whole-root compare, `.xspec/` included).
+            const onInvalid = await assertLeavesUnchanged(
+              invalidConfig.root,
+              () =>
+                expectUsageErrorDocument(
+                  product,
+                  invalidConfig,
+                  row.argv,
+                  `T12.0-10 \`${command}\` with the configuration file ` +
+                    `invalid — ${row.what} is determined by the ` +
+                    `invocation's syntax alone and reported without ` +
+                    `loading configuration (SPEC 12.0)`,
+                ),
               `T12.0-10 \`${command}\` with the configuration file invalid ` +
-                `— ${row.what} is determined by the invocation's syntax ` +
-                `alone and reported without loading configuration ` +
-                `(SPEC 12.0)`,
+                `— a syntax-alone usage error modifies nothing (SPEC 12.0)`,
             );
-            const onMissing = await expectUsageErrorDocument(
-              product,
-              missingConfig,
-              row.argv,
+            const onMissing = await assertLeavesUnchanged(
+              missingConfig.root,
+              () =>
+                expectUsageErrorDocument(
+                  product,
+                  missingConfig,
+                  row.argv,
+                  `T12.0-10 \`${command}\` with the configuration file ` +
+                    `missing — ${row.what} is reported without loading ` +
+                    `configuration (SPEC 12.0)`,
+                ),
               `T12.0-10 \`${command}\` with the configuration file missing ` +
-                `— ${row.what} is reported without loading configuration ` +
-                `(SPEC 12.0)`,
+                `— a syntax-alone usage error modifies nothing (SPEC 12.0)`,
             );
             for (const [error, state] of [
               [onInvalid.error, "invalid"],

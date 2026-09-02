@@ -65,23 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 40 — T12.0-10: missing required flag/argument rows in the syntax class (no configuration load)
-
-Cites: TEST-SPEC T12.0-10 (§12.0 revised: within class 2 the rows include "a
-missing required flag or argument" — `review create --name n` with none of
-`--base`/`--strategy audit`/`--coverage`, and `at <file>` alone — each reported
-as a usage error without loading configuration); SPEC 12.0.
-
-Now: `test/suite/registry/section-12.0-ii.ts` `syntaxRows` (≈ lines
-1920–1940) hold only unknown command, repeated flag, and `show a#b#c`.
-
-Do: add the two rows to `syntaxRows` so they run under the same
-no-configuration-load proof the existing rows use (a deliberately broken
-configuration that must not be reported): exit 2, 12.7 error document, nothing
-modified.
-
-Verify: `npx vitest run … test/suite/section-12.0-ii.test.ts`.
-
 ### Task 41 — T12.7-1: `unavailable`-marker exclusivity walk on every captured JSON document; unpinned-surface range arms
 
 Cites: TEST-SPEC T12.7-1 and the §11 preamble (the marker-exclusivity walk
