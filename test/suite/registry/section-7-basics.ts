@@ -18,7 +18,10 @@
 // configuration load as a usage error (exit 2), before all source analysis.
 // `specs` is required; `code`, `markdown`, `coverage`, and `policy` are
 // optional with defined omission semantics; empty `coverage`/`policy` lists
-// equal omission; unknown keys anywhere in the argument are 14.14.
+// equal omission; unknown keys anywhere in the argument are 14.14, as is a
+// value of the wrong shape — 14.14's "otherwise invalid group shape" (7.1,
+// 7.2, 7.4, 7.5: `specs` and `code` are maps of named groups, each a list
+// of glob strings; `coverage` and `policy` are lists).
 //
 // Conservative operationalizations (noted per H-3/H-4):
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — run
@@ -72,6 +75,23 @@
 //   emit the error document) and a non-empty stderr diagnostic (12.0: usage
 //   error messages are standard-error content). This usage error is not a
 //   14.14, so no /config/i duty applies.
+// - T7-3 value shapes: seven fixtures — TEST-SPEC's "one arm each" over a
+//   spec group and a code group valued by a single string, a glob list
+//   holding `true`, `coverage` and `policy` given as `{}`, and `specs` and
+//   `code` given as lists — each SPECS_ONLY_CONFIG with one shape deviation
+//   the declarative form of 7 admits, so the refusal is 14.14's
+//   non-conformance (an invalid group shape), never a form error (T7-2).
+//   The `[true]` fixture matches no staged file: a product tolerating it
+//   (dropping or stringifying the element) discovers no source and builds
+//   anyway — a group matching no files is valid (7) — so exit 0 still
+//   discriminates it.
+// - every `expectConfigRefused` arm (T7-2, T7-3): the finding's concerned
+//   path is exactly `xspec.config.ts` — the file the upward search found,
+//   in 11.6's anchoring form relative to the invocation working directory,
+//   the workspace root (SPEC 14, 12.7) — its locations [] (a configuration
+//   condition carries the file it concerns, no source range; 14), and a
+//   whole-root snapshot compare around the invocation pins that nothing is
+//   written (12.1).
 
 import * as fsp from "node:fs/promises";
 import type { GraphEdge } from "../../helpers/adapters/index.js";
@@ -143,10 +163,19 @@ async function withWorkspace<T>(
 /**
  * Stage a workspace whose only defect is the given configuration text and
  * assert `build --json` refuses it per 14.14. The staged source file is
- * valid and matched by every fixture's `specs/**\/*.mdx` glob, so a product
- * that wrongly accepts the configuration proceeds to a successful build
- * (exit 0) and fails the exit-code assertion — never exits 2 for a
- * side reason.
+ * valid and matched by every fixture's `specs/**\/*.mdx` glob (or, where
+ * the deviation replaces that glob, by nothing — a group matching no files
+ * is valid, SPEC 7), so a product that wrongly accepts the configuration
+ * proceeds to a successful build (exit 0) and fails the exit-code
+ * assertion — never exits 2 for a side reason. Beyond the shared 14.14
+ * contract (`expectConfigurationError`), the finding is pinned to the
+ * configuration file: its concerned path is exactly `xspec.config.ts` —
+ * the file the upward search found, in the anchoring form of 11.6
+ * relative to the invocation working directory, here the workspace root,
+ * so the bare name (SPEC 14, 12.7) — and its locations are [] (a
+ * configuration condition carries the file it concerns, no source range;
+ * SPEC 14); a whole-root snapshot compare around the invocation pins that
+ * a build failing at configuration load writes nothing (SPEC 12.1).
  */
 async function expectConfigRefused(
   product: ProductBinding,
@@ -161,7 +190,40 @@ async function expectConfigRefused(
       },
     },
     async (workspace) => {
-      await expectConfigurationError(product, workspace, ["build"], context);
+      const before = await snapshotDirectory(workspace.root);
+      const result = await expectConfigurationError(
+        product,
+        workspace,
+        ["build"],
+        context,
+      );
+      const finding = expectErrorDocument(result, context);
+      assertSameJson(
+        {
+          code: finding.code,
+          path: finding.path,
+          locations: finding.locations.map((location) => location.file),
+        },
+        {
+          code: "configuration-error",
+          path: "xspec.config.ts",
+          locations: [],
+        },
+        `${context}: the error document's one finding carries the stable ` +
+          `code "configuration-error", locations [] (a configuration ` +
+          `condition carries the file it concerns, never a source range), ` +
+          `and as its concerned path the configuration file the upward ` +
+          `search found, in the anchoring form of 11.6 relative to the ` +
+          `invocation working directory — the workspace root, so exactly ` +
+          `"xspec.config.ts" (SPEC 14, 12.7, 11.6)`,
+      );
+      assertSnapshotsEqual(
+        before,
+        await snapshotDirectory(workspace.root),
+        `${context}: a build failing at configuration load modifies ` +
+          `nothing (SPEC 12.1, 12.0) — no derived file or graph data ` +
+          `appears anywhere under the root`,
+      );
     },
   );
 }
@@ -858,6 +920,101 @@ export default defineConfig({
   },
 ];
 
+// Value shapes (SPEC 7, 7.1, 7.2; 14.14: a configuration that does not
+// conform, an otherwise invalid group shape) — TEST-SPEC T7-3's "one arm
+// each": seven fixtures, every one SPECS_ONLY_CONFIG with exactly one shape
+// deviation, so the refusal is attributable to it alone. Each deviating
+// value is admitted by the declarative form of 7 (a static string literal,
+// the boolean literal `true`, an object or array literal — never a T7-2
+// form error) and excluded by the shapes 7.1, 7.2, 7.4, and 7.5 prescribe:
+// a group's value is a list of globs, a glob is a string, `coverage` and
+// `policy` are lists, and `specs` and `code` are maps of named groups —
+// discriminating a product that reads the declarative form loosely,
+// accepting whatever its own loader tolerates.
+const VALUE_SHAPE_VIOLATIONS: readonly { label: string; config: string }[] = [
+  {
+    label: "a spec group whose value is a single string rather than a list",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: "specs/**/*.mdx"
+  }
+})
+`,
+  },
+  {
+    label: "a code group whose value is a single string rather than a list",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    impl: "src/**/*.ts"
+  }
+})
+`,
+  },
+  {
+    label: "a glob list holding a non-string element ([true])",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: [true]
+  }
+})
+`,
+  },
+  {
+    label: "`coverage` given as an object rather than a list ({})",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  coverage: {}
+})
+`,
+  },
+  {
+    label: "`policy` given as an object rather than a list ({})",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  policy: {}
+})
+`,
+  },
+  {
+    label: "`specs` given as a list rather than a map of groups",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: ["specs/**/*.mdx"]
+})
+`,
+  },
+  {
+    label: "`code` given as a list rather than a map of groups",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: ["src/**/*.ts"]
+})
+`,
+  },
+];
+
 // `code` omitted: a marker-bearing TypeScript file that WOULD be a valid
 // code source (a spec module import plus a marker recording a `references`
 // edge, SPEC 4.5) — so a product that wrongly discovers `.ts` files without
@@ -975,10 +1132,19 @@ const T7_3 = defineProductTest({
     "keys: specs is required; omitted code/markdown/coverage/policy mean " +
     "no code groups, no emission, zero profiles, and no policy findings; " +
     "empty coverage/policy lists equal omission; unknown keys at every " +
-    "position are configuration errors (SPEC 7, 14.14)",
+    "position, and values of the wrong shape (a group valued by a single " +
+    "string, a glob list holding true, coverage/policy given as objects, " +
+    "specs/code given as lists), are configuration errors (SPEC 7, 7.1, " +
+    "7.2, 14.14)",
   run: async (product) => {
     // (a) `specs` missing and the unknown-key matrix — each 14.14, exit 2.
     for (const arm of KEY_VIOLATIONS) {
+      await expectConfigRefused(product, arm.config, `T7-3 (${arm.label})`);
+    }
+
+    // (a′) value shapes — each 14.14, exit 2, the configuration file named
+    // and nothing written (SPEC 7, 7.1, 7.2; 14.14).
+    for (const arm of VALUE_SHAPE_VIOLATIONS) {
       await expectConfigRefused(product, arm.config, `T7-3 (${arm.label})`);
     }
 

@@ -65,21 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 34 — T7-3: configuration value-shape arms → 14.14
-
-Cites: TEST-SPEC T7-3 (revised: a spec or code group whose value is a single
-string; a glob list holding `true`; `coverage: {}` / `policy: {}`; `specs` or
-`code` given as lists — each a 14.14 configuration error, exit 2); SPEC 7,
-14.14.
-
-Now: `test/suite/registry/section-7-basics.ts` ≈ lines 896–901 lack these
-shapes.
-
-Do: add one arm per shape (six configurations), each `build` → exit 2 with the
-14.14 error document naming the configuration file; nothing written.
-
-Verify: `npx vitest run … test/suite/section-7-basics.test.ts`.
-
 ### Task 35 — T7.4-1: `edgeKinds` non-subset and non-string `targetTags` element → 14.14
 
 Cites: TEST-SPEC T7.4-1 (revised: `edgeKinds` values `"contains"`, `"depend"`,
