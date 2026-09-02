@@ -2078,9 +2078,26 @@ async function runMutating(
   // `rename` and file-form `move` finish with a full regeneration instead
   // (SPEC 6.4, 6.5) — and the conformer runs it below, after exclusivity is
   // acquired and the hold has been released, before the operation's writes.
+  // The closure is position-independent so that one deviation can move it.
   const refreshIfStale = async () => {
     if (refreshesGraphData) await refreshStaleGraphData(config);
   };
+  let refreshAfterHold = refreshIfStale;
+  if (deviations.refreshBeforeExclusivity) {
+    // VIOL-CORE-EARLYREFRESH (CERTIFICATIONS.md): the 13.3 refresh a
+    // mutating `review` subcommand performs on a stale workspace runs here,
+    // before workspace exclusivity is acquired — before the lock and the
+    // hold — so stale graph data is rewritten before the hold file is
+    // created; the refresh after the hold (below) becomes a no-op, so the
+    // refresh runs exactly once, at this position. Everything else — the
+    // lock; the hold file created after exclusivity and before every other
+    // write (the session write, `rename`/`move`'s edits, journal appends,
+    // the finishing regeneration of 6.4/6.5); the refresh's own bytes — is
+    // exactly the conformer's behavior, and a workspace whose graph data is
+    // current is refreshed by nothing, where the deviation is unobservable.
+    await refreshIfStale();
+    refreshAfterHold = async () => {};
+  }
   // VIOL-CORE-NOLOCK (CERTIFICATIONS.md): mutating commands do not exclude
   // one another — exclusivity is neither acquired nor checked, so a second
   // mutating command started while another runs or is held proceeds normally
@@ -2111,13 +2128,13 @@ async function runMutating(
       // exits normally with the operation's outcome. The hold seam's own
       // semantics (empty file, occupied path fails exit 2) and everything
       // else are exactly the conformer's behavior.
-      await refreshIfStale();
+      await refreshAfterHold();
       const code = await operate(config);
       await holdIfRequested();
       return code;
     }
     await holdIfRequested();
-    await refreshIfStale();
+    await refreshAfterHold();
     return await operate(config);
   } finally {
     await lock.release();
@@ -3154,6 +3171,11 @@ async function commandReview(io, cwd, argv) {
  * - `writesBeforeHold` (VIOL-CORE-EARLYWRITE): a mutating command performs
  *   its workspace modifications before creating the hold file; see
  *   runMutating.
+ * - `refreshBeforeExclusivity` (VIOL-CORE-EARLYREFRESH): the 13.3 refresh a
+ *   mutating `review` subcommand performs on a stale workspace runs before
+ *   workspace exclusivity is acquired, so stale graph data is rewritten
+ *   before the hold file is created; the hold file is still created after
+ *   exclusivity and before every other write; see runMutating.
  * - `staleLockBlocks` (VIOL-CORE-STALELOCK): workspace exclusivity is not
  *   released by abnormal termination — a lock file left by a killed holder
  *   refuses every later mutating command; see acquireExclusivity.

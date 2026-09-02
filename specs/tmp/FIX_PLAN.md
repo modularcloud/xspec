@@ -65,36 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage A — certification gate: CONF-CORE refresh, T13.5-1 stale arm, VIOL-CORE-EARLYREFRESH, manifest
 
-### Task 3 — VIOL-CORE-EARLYREFRESH executable and deviation switch
-
-Cites: CERTIFICATIONS.md §VIOL-CORE-EARLYREFRESH (Scope CONF-CORE; Deviation:
-"The 13.3 refresh a mutating `review` subcommand performs on a stale workspace
-(T10.1-1) runs before workspace exclusivity is acquired, so stale graph data is
-rewritten before the hold file is created. A single deviation … the hold file is
-still created after exclusivity and before every other write … and a workspace
-whose graph data is current is refreshed by nothing"; Certifies: T13.5-1;
-Expected failures: exactly T13.5-1, on the stale arm's while-held compare).
-
-Now: no `test/fixtures/conf-core/bin-earlyrefresh.mjs`; `product.mjs` has no
-corresponding switch (existing switches: `noMutualExclusion`, `writesBeforeHold`,
-`staleLockBlocks`, `partialDerivedWrites`, `chattyReads`, `persistReadInvalidation`).
-
-Do: add a `deviations.refreshBeforeExclusivity` (name free) switch in
-`product.mjs` consumed at exactly one point: in the mutating `review`
-subcommands, run Task 1's refresh before exclusivity is acquired (before the
-lock and the hold) instead of after the hold; everything else identical to the
-conformer. Add `bin-earlyrefresh.mjs` mirroring `bin-earlywrite.mjs` (header
-comment quoting the deviation and the certified set; `runXspec(argv, cwd,
-{ <switch>: true })`).
-
-Verify: by hand, on a stale workspace as in Task 1, `node
-test/fixtures/conf-core/bin-earlyrefresh.mjs review create --name n --strategy
-audit --test-hold <path>`: while held, `.xspec/graph.json` already holds the
-refreshed bytes; on a current workspace nothing differs from `bin.mjs`. Then run
-T13.5-1 (its stale-workspace arm landed with the Task 2 commit) against this binding through the certification runner or a
-one-off binding: it fails on the stale arm's while-held compare; T6.1-2,
-T10.4-5, T13.4-5, T13.5-2..5 pass. (The manifest entry is Task 4.)
-
 ### Task 4 — Certification manifest and whole-document pins for the revised CERTIFICATIONS.md
 
 Cites: TEST-SPEC C-1 (whole-document gate); CERTIFICATIONS.md §CONF-CORE
@@ -113,7 +83,9 @@ Do: edit the manifest verbatim to the document (drop T6.1-1 from both sets; add
 `violator("VIOL-CORE-EARLYREFRESH", "conf-core/bin-earlyrefresh.mjs",
 ["T13.5-1"])` between EARLYWRITE and STALELOCK); set the pin to 17 and the title
 to match; re-read the manifest header comment and the per-fixture generation in
-`certification.test.ts` for any other count or ID pin. Prerequisites: Tasks 1–3.
+`certification.test.ts` for any other count or ID pin. Prerequisites: Tasks 1–3, all landed (f218488, f7e6054, and the commit
+that added `test/fixtures/conf-core/bin-earlyrefresh.mjs` with the conformer's
+`refreshBeforeExclusivity` switch).
 
 Verify: `npm run test:self` fully green — the document gate, the manifest
 equality, and every per-fixture certification (EARLYREFRESH fails exactly
