@@ -46,10 +46,10 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
   failure; a harness error (crash, stack overflow, exhausted limit, decode
   exception outside the assertion protocol) is never acceptable. For a test in
   a certification scope, additionally run `npm run test:self` and confirm C-1.
-- Work top to bottom: Stage A turns the self project green (its four tasks form
-  one dependency chain); Stage B removes the H-11 harness error; Stage C adds the
-  CONF-DISC code-group surface; Stage D is the remaining suite gaps in section
-  order (independent of each other unless a task names a prerequisite).
+- Work top to bottom (Stage A, the certification gate, is complete): Stage B
+  removes the H-11 harness error; Stage C adds the CONF-DISC code-group
+  surface; Stage D is the remaining suite gaps in section order (independent
+  of each other unless a task names a prerequisite).
 - Commit `sdg(phase-9): <imperative summary>`, ending every commit message with
   the two trailer lines
   `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` and
@@ -62,35 +62,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
   new build/lint/run knowledge in `AGENTS.md` (nothing else belongs there).
 
 ---
-
-## Stage A — certification gate: CONF-CORE refresh, T13.5-1 stale arm, VIOL-CORE-EARLYREFRESH, manifest
-
-### Task 4 — Certification manifest and whole-document pins for the revised CERTIFICATIONS.md
-
-Cites: TEST-SPEC C-1 (whole-document gate); CERTIFICATIONS.md §CONF-CORE
-"In-scope tests: T6.1-2, T10.4-5, T13.4-5, T13.5-1, T13.5-2, T13.5-3, T13.5-4,
-T13.5-5" (T6.1-1 excluded — see its Exclusions entry); §VIOL-CORE-CHATTYREADS
-"Certifies: T13.4-5"; §VIOL-CORE-EARLYREFRESH "Certifies: T13.5-1", placed in
-document order after VIOL-CORE-EARLYWRITE and before VIOL-CORE-STALELOCK; the
-document now defines 5 conformers and 17 violators.
-
-Now: `test/self/certification-fixtures.ts` lists T6.1-1 in CONF-CORE's in-scope
-set and in CHATTYREADS's certified set and has no EARLYREFRESH entry;
-`test/self/certification-document.test.ts` pins `EXPECTED_VIOLATORS = 16` (line
-35) and its test title says "16 violators" (line 268). Both gate tests fail.
-
-Do: edit the manifest verbatim to the document (drop T6.1-1 from both sets; add
-`violator("VIOL-CORE-EARLYREFRESH", "conf-core/bin-earlyrefresh.mjs",
-["T13.5-1"])` between EARLYWRITE and STALELOCK); set the pin to 17 and the title
-to match; re-read the manifest header comment and the per-fixture generation in
-`certification.test.ts` for any other count or ID pin. Prerequisites: Tasks 1–3, all landed (f218488, f7e6054, and the commit
-that added `test/fixtures/conf-core/bin-earlyrefresh.mjs` with the conformer's
-`refreshBeforeExclusivity` switch).
-
-Verify: `npm run test:self` fully green — the document gate, the manifest
-equality, and every per-fixture certification (EARLYREFRESH fails exactly
-T13.5-1; CHATTYREADS fails exactly T13.4-5; CONF-CORE passes its eight in-scope
-tests).
 
 ## Stage B — H-11 answer-scale capacity (P-11 harness error), S-8, S-2, T1.3-7
 

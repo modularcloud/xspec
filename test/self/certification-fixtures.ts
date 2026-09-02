@@ -96,7 +96,6 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
     "CONF-CORE",
     "conf-core/bin.mjs",
     [
-      "T6.1-1",
       "T6.1-2",
       "T10.4-5",
       "T13.4-5",
@@ -122,6 +121,17 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
         "T13.5-1",
         "T13.5-4",
       ]),
+      // VIOL-CORE-EARLYREFRESH: the 13.3 refresh a mutating `review`
+      // subcommand performs on a stale workspace runs before workspace
+      // exclusivity is acquired, so stale graph data is rewritten before the
+      // hold file is created — one ordering rule of 13.5 (the hold precedes
+      // every modification, the refresh included) broken for the refresh
+      // alone; the hold file is still created after exclusivity and before
+      // every other write, and a workspace whose graph data is current is
+      // refreshed by nothing.
+      violator("VIOL-CORE-EARLYREFRESH", "conf-core/bin-earlyrefresh.mjs", [
+        "T13.5-1",
+      ]),
       // VIOL-CORE-STALELOCK: workspace exclusivity is not released by
       // abnormal termination — after a mutating command's process is killed,
       // every later mutating command in that workspace is refused with the
@@ -143,7 +153,6 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // `.xspec/journal`, creating the file when absent. Mutating commands,
       // and the entries `rename`/`move` append, are unchanged.
       violator("VIOL-CORE-CHATTYREADS", "conf-core/bin-chattyreads.mjs", [
-        "T6.1-1",
         "T13.4-5",
       ]),
       // VIOL-CORE-PERSISTREADS: review reads persist read-time invalidation —
