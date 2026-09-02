@@ -48,8 +48,19 @@ import { fileURLToPath } from "node:url";
 
 /** Hang guard applied to every invocation unless overridden (H-8). */
 export const DEFAULT_TIMEOUT_MS = 30_000;
-/** Runaway-output guard: combined stdout+stderr cap per invocation. */
-export const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+/**
+ * Runaway-output guard: combined stdout+stderr cap per invocation. H-11
+ * dimensions it to the largest answer SPEC.md permits a conforming product
+ * over the inputs the suite stages — S-8 (test/self/s8-answer-scale-
+ * capacity.test.ts) derives that scale from the suite's own generators
+ * (about 204 MB: `view --text` over two depth-4096 section towers whose
+ * line feeds a P-8 rewrite turned into U+2028 separators, every level's
+ * subtree text re-emitting the levels below, spelled JSON-escaped) and gates
+ * this constant at no less than twice it. Memory is committed only as output
+ * arrives, so the cap costs ordinary runs nothing; exceeding it is a loud
+ * `ProductRunOutputOverflowError`, never a silent truncation.
+ */
+export const DEFAULT_MAX_OUTPUT_BYTES = 512 * 1024 * 1024;
 /** Default bound on hold-file waits (H-8: waits always terminate). */
 export const DEFAULT_WAIT_FOR_FILE_TIMEOUT_MS = 10_000;
 

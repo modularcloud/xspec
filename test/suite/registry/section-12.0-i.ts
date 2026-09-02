@@ -404,7 +404,7 @@ interface SweepStoryOptions {
  * mapped element-wise, never reordered — array order stays significant;
  * object key order is formatting, not information (TEST-SPEC §11).
  */
-function canonicalizeJson(value: unknown): unknown {
+export function canonicalizeJson(value: unknown): unknown {
   // H-11: an explicit stack, never native recursion per nesting level.
   type Container = unknown[] | Record<string, unknown>;
   const isContainer = (candidate: unknown): candidate is Container =>

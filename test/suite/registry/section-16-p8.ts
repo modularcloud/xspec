@@ -269,7 +269,7 @@ const UTF16LE_BOM: readonly number[] = [0xff, 0xfe];
 const UTF16BE_BOM: readonly number[] = [0xfe, 0xff];
 
 /** Line-terminator sequences LF is rewritten to / runs are built from. */
-const TERMINATOR_SEQUENCES: ReadonlyArray<
+export const TERMINATOR_SEQUENCES: ReadonlyArray<
   readonly [string, readonly number[]]
 > = [
   ["CR", [0x0d]],
@@ -282,8 +282,22 @@ const TERMINATOR_SEQUENCES: ReadonlyArray<
 ];
 
 // Every nesting draw is genuinely giant (P-8 "giant nesting"); the smallest
-// entry first so counterexamples shrink toward the shallowest tower.
-const NESTING_DEPTHS: readonly number[] = [512, 2048, 4096];
+// entry first so counterexamples shrink toward the shallowest tower. Exported
+// (with `sectionTowerSource` and `MAX_MUTATIONS_PER_TRIAL`) so S-8's capacity
+// gate derives the suite's staged maxima from the generator itself (H-11).
+export const NESTING_DEPTHS: readonly number[] = [512, 2048, 4096];
+
+/**
+ * The MDX section tower a nesting mutation stages: `depth` nested `<S id="g">`
+ * openers, balanced ones closing around one content line, unclosed ones left
+ * open (an unparseable file). Byte-exact — S-2/S-8 stage and size the same
+ * tower the fuzz draws stage.
+ */
+export function sectionTowerSource(depth: number, balanced: boolean): string {
+  return balanced
+    ? `${'<S id="g">\n'.repeat(depth)}deep.\n${"</S>\n".repeat(depth)}`
+    : '<S id="g">\n'.repeat(depth);
+}
 
 function spliceBytes(
   bytes: Uint8Array,
@@ -400,9 +414,7 @@ function mutateNesting(
   let shape: string;
   if (path.endsWith(".mdx")) {
     shape = balanced ? "balanced section tower" : "unclosed section tower";
-    tower = balanced
-      ? `${'<S id="g">\n'.repeat(depth)}deep.\n${"</S>\n".repeat(depth)}`
-      : '<S id="g">\n'.repeat(depth);
+    tower = sectionTowerSource(depth, balanced);
   } else {
     shape = balanced
       ? "balanced parenthesis tower"
@@ -506,6 +518,9 @@ export interface FuzzTrial {
   readonly commands: ReadonlyArray<readonly string[]>;
 }
 
+/** Mutations applied per trial: 1 + a draw in [0, MAX_MUTATIONS_PER_TRIAL - 1]. */
+export const MAX_MUTATIONS_PER_TRIAL = 3;
+
 /** The P-8 trial generator (see the module header). */
 export const genFuzzTrial: Gen<FuzzTrial> = (choices) => {
   const files = new Map<string, Uint8Array>(
@@ -515,7 +530,8 @@ export const genFuzzTrial: Gen<FuzzTrial> = (choices) => {
     ]),
   );
   const mutations: string[] = [];
-  const mutationCount = 1 + choices.intInclusive(0, 2);
+  const mutationCount =
+    1 + choices.intInclusive(0, MAX_MUTATIONS_PER_TRIAL - 1);
   for (let i = 0; i < mutationCount; i += 1) {
     const path = choices.pick(MUTATION_TARGETS);
     const current = files.get(path);

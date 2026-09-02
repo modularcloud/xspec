@@ -102,7 +102,11 @@ import {
   runProduct,
 } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { drawFuzzMutation, FUZZ_BASE_FILES } from "./section-16-p8.js";
+import {
+  drawFuzzMutation,
+  FUZZ_BASE_FILES,
+  MAX_MUTATIONS_PER_TRIAL,
+} from "./section-16-p8.js";
 
 // ---------------------------------------------------------------------------
 // The mutable surface: the spec and code sources of the shared fuzz base
@@ -366,7 +370,8 @@ export const genAvailabilityTrial: Gen<AvailabilityTrial> = (choices) => {
     ]),
   );
   const mutations: string[] = [];
-  const mutationCount = 1 + choices.intInclusive(0, 2);
+  const mutationCount =
+    1 + choices.intInclusive(0, MAX_MUTATIONS_PER_TRIAL - 1);
   for (let i = 0; i < mutationCount; i += 1) {
     const path = choices.pick(MUTATION_TARGETS);
     const current = files.get(path);
@@ -449,9 +454,10 @@ async function runAvailabilityCommand(
  * form decode has already run `assertUnavailabilityMarkerForms` over the
  * whole document (adapters/forms.ts), so every object spelling a member
  * named `unavailable` is exactly the marker `{"unavailable": true}`
- * (SPEC 12.7) — presence of the member is presence of the marker.
+ * (SPEC 12.7) — presence of the member is presence of the marker. Exported
+ * for S-8, which drives this walk at the suite's staged answer scale.
  */
-function documentCarriesUnavailability(value: unknown): boolean {
+export function documentCarriesUnavailability(value: unknown): boolean {
   // H-11: an explicit stack, never native recursion per nesting level — the
   // fuzzed `view` answers carry the depth-2048 and depth-4096 section towers
   // the suite stages (P-8, P-11), past V8's frame budget; no depth cap.

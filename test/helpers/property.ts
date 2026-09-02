@@ -430,6 +430,34 @@ export async function checkProperty<T>(
   }
 }
 
+/**
+ * Draw a generator's trials exactly as {@link checkProperty} draws them under
+ * the fixed seed plan (E-5: the CI seed set) — per seed a fresh PRNG and
+ * `runs` sequential trials — without running any property body. S-8 replays
+ * the suite's generators through this to measure the scales the fixed seed
+ * set actually stages against the harness's derived capacity bounds (H-11).
+ */
+export function drawFixedSeedTrials<T>(
+  generator: Gen<T>,
+  runs: number,
+  seeds: readonly number[] = DEFAULT_PROPERTY_SEEDS,
+): T[] {
+  if (!Number.isInteger(runs) || runs <= 0) {
+    throw new Error(
+      `drawFixedSeedTrials: runs must be a positive integer, got ${String(runs)}`,
+    );
+  }
+  validateSeeds("drawFixedSeedTrials", seeds);
+  const values: T[] = [];
+  for (const seed of seeds) {
+    const rng = new Mulberry32(seed);
+    for (let trial = 1; trial <= runs; trial += 1) {
+      values.push(generateTrial(generator, rng).value);
+    }
+  }
+  return values;
+}
+
 // ---------------------------------------------------------------------------
 // Seeded generation: PRNG, choice source, trials.
 

@@ -65,57 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage B — H-11 answer-scale capacity (P-11 harness error), S-8, S-2, T1.3-7
 
-### Task 7 — S-8 answer-scale capacity self-test (decoders, walks, capture gate)
-
-Cites: TEST-SPEC §17 S-8 ("The H-3/12.7 decoders and every answer-document
-walk the suite performs succeed, every datum evaluated without harness error,
-on synthetic conforming-form documents at the maximum answer scale H-11
-obliges … expansion blowup included, a `view --text` answer multiplying
-embedded subtree text through each expansion level past its staged input's own
-size … among them a `view` document nested at least as deep as P-8's
-giant-nesting floor. Capture is gated at the same scale through S-3's stand-in
-mechanism: a stand-in command emitting the largest of these synthetic documents
-on standard output is driven through the H-2 capture path product invocations
-use, and the captured bytes MUST be complete and identical to what the stand-in
-emitted"); §0 H-11 (an exhausted capture limit must surface as a loud harness
-error, never silent truncation).
-
-Now: no `test/self/s8-*` file; nothing under `test/` references S-8 or H-11.
-The capture cap is `DEFAULT_MAX_OUTPUT_BYTES` (64 MiB) in
-`test/helpers/subprocess.ts` ≈ line 52; overflow raises
-`ProductRunOutputOverflowError` (plain `Error`, runner outcome "error" — the
-H-11 classification, already correct). S-3's stand-in pattern is in
-`test/self/s3-subprocess-driver.test.ts` (`STANDIN_SOURCE`, `standin()`).
-
-Do: add `test/self/s8-answer-scale-capacity.test.ts` (S-8 in its header
-comment). (a) Derive and document, in the test, the maximum answer scale over
-the suite's staged inputs: the deepest staged nesting (4096 from P-8's
-`NESTING_DEPTHS`; floor 2048 from T1.3-7), the largest staged document size
-(sweep deterministic fixtures and every generator's size bounds in
-`test/suite/registry/section-16-*.ts` and `test/helpers/`), and the `view
---text` expansion blowup (embedded subtree text re-emitted at each expansion
-level: compute the bound from the deepest/largest embedding chain any staged
-input can hold, per SPEC 11.4). (b) Synthesize conforming-form documents at
-those scales in memory (a `view` document nested ≥ 4096 levels; a `view --text`
-document at the blowup size; the largest `query`/`occurrences`/`build --json`
-shapes if any walk consumes them at scale) and drive each through every H-3/12.7
-decoder in `test/helpers/adapters/` and every answer-document walk the suite
-performs (the P-11 walk, `assertUnavailabilityMarkerForms`, any decoder-level
-ordering checks), asserting no exception and the expected datum count.
-(c) Capture gate: a stand-in Node script that writes the largest synthetic
-document to stdout (streamed in chunks, then exit 0), driven through the same
-`ProductBinding`/run path product invocations use; assert the captured stdout
-bytes are complete and byte-identical to the emitted document and that the
-run's outcome is a normal completion. If the document exceeds
-`DEFAULT_MAX_OUTPUT_BYTES`, raise the default (H-11: dimensioned to staged
-scales) and keep a separate assertion that an over-cap stand-in surfaces as
-`ProductRunOutputOverflowError` (loud, never truncation). Prerequisites: Tasks
-5–6 (otherwise the gate is red).
-
-Verify: `npm run test:self` green including the new file; the test runs in the
-`self` project under the CI `harness-self` job (check `test/vitest.config.ts`
-project globs include it); `npm run typecheck`.
-
 ### Task 8 — S-2 scale vectors: ≥ 2048-deep document and the largest staged document, read back byte-complete
 
 Cites: TEST-SPEC §17 S-2 ("with scale vectors at the suite's staged maxima — a

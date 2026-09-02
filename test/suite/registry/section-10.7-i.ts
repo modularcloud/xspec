@@ -395,7 +395,7 @@ function assertStoredCounts(
  * recursively — equality of information content where concrete member order
  * is shape territory (H-3/H-4).
  */
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   // H-11: an explicit stack, never native recursion per nesting level.
   type Item = { readonly render: unknown } | { readonly text: string };
   const pieces: string[] = [];
@@ -452,7 +452,10 @@ function assertSameInformation(
 }
 
 /** Every string leaf of a decoded JSON value (array elements and members). */
-function collectStringLeaves(value: unknown, into: string[] = []): string[] {
+export function collectStringLeaves(
+  value: unknown,
+  into: string[] = [],
+): string[] {
   // H-11: an explicit stack, never native recursion per nesting level.
   const stack: unknown[] = [value];
   while (stack.length > 0) {

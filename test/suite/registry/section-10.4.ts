@@ -287,7 +287,10 @@ async function expectItemStatus(
 }
 
 /** Every string leaf of a decoded JSON value (array elements and members). */
-function collectStringLeaves(value: unknown, into: string[] = []): string[] {
+export function collectStringLeaves(
+  value: unknown,
+  into: string[] = [],
+): string[] {
   // H-11: an explicit stack, never native recursion per nesting level.
   const stack: unknown[] = [value];
   while (stack.length > 0) {
