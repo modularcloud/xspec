@@ -23,6 +23,15 @@
 //   position, targeting the same section — so the two set-equality
 //   assertions accept only a product attributing both forms to the table's
 //   one unit per placement.
+// - T4.6-3 "value-side boundary … never to a unit named `s` (asserted via
+//   `query edges`)": the two value-side `text(...)` calls target dedicated
+//   sections, so the workspace's complete `embeds` edge set (`--kinds
+//   embeds`) pins each call's attributed unit — `path#f` and `path` —
+//   exactly; additionally every endpoint of the unfiltered `query edges`
+//   answer is swept for a unit chain spelled after either constant (`#s`,
+//   `#t`, the nested `#f.s`, and their `@N`-suffixed forms), so a product
+//   that made a plain-identifier constant a named unit fails on the whole
+//   answer, not only on the `embeds` set.
 // - T4.6-4 "coverage boundary membership": SPEC 8 covers a target when a
 //   permitted path exists from a boundary node to it, and 8.2 reports one
 //   shortest covering path as a node-identity sequence (12.0) — from the
@@ -112,6 +121,19 @@ async function queryEdgesFrom(
       ["query", "edges", "--from", from],
       label,
     ),
+    label,
+  );
+}
+
+/** Unfiltered workspace-wide `query edges` — every kind, decoded (SPEC 11.1). */
+async function queryAllEdges(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<readonly GraphEdge[]> {
+  const label = `${context} \`query edges\``;
+  return decodeEdgesReport(
+    await runJson(product, workspace, ["query", "edges"], label),
     label,
   );
 }
@@ -545,6 +567,15 @@ const T4_6_2 = defineProductTest({
 // section, so the complete `references` edge set pins each arm's attribution
 // — in particular, an edge sourced at a `#`-named unit such as
 // `src/app.ts#Carrier.#priv` fails the equality.
+//
+// Value-side boundary (SPEC 4.6: a variable declaration is a named unit only
+// when its initializer is a function expression, an arrow function, or a
+// class expression): `const s = text(SPEC.valfn)` inside `f` and
+// `const t = text(SPEC.valtop)` at top level bind the calls' returned
+// strings — no node and no `text` binding is stored, so 4.5 is untouched and
+// `build` succeeds — and each call's `embeds` edge (4.3, from the calling
+// code location) attributes to the innermost enclosing named unit,
+// `src/app.ts#f`, or to the file, never to a unit named after the constant.
 const T4_6_3_SPEC_SOURCE = [
   '<S id="iife">',
   "Target for the top-level IIFE placement.",
@@ -574,10 +605,18 @@ const T4_6_3_SPEC_SOURCE = [
   "Target for the private-name class member.",
   "</S>",
   "",
+  '<S id="valfn">',
+  "Target for the value-side text call inside a named function.",
+  "</S>",
+  "",
+  '<S id="valtop">',
+  "Target for the value-side text call at file top level.",
+  "</S>",
+  "",
 ].join("\n");
 
 const T4_6_3_APP_SOURCE = [
-  'import SPEC from "../specs/N.xspec";',
+  'import SPEC, { text } from "../specs/N.xspec";',
   "",
   "(function () {",
   "  SPEC.iife;",
@@ -615,12 +654,36 @@ const T4_6_3_APP_SOURCE = [
   "  }",
   "}",
   "",
+  "function f(): void {",
+  "  const s = text(SPEC.valfn);",
+  "}",
+  "",
+  "const t = text(SPEC.valtop);",
+  "",
 ].join("\n");
+
+/** The value-side arm's plain-identifier constants — never named units. */
+const T4_6_3_VALUE_CONSTANTS: readonly string[] = ["s", "t"];
+
+/**
+ * Whether a graph-node identity names a code unit chain of `src/app.ts` with
+ * a segment spelled after a value-side constant — `src/app.ts#s`,
+ * `src/app.ts#t`, the nested `src/app.ts#f.s`, and their `@N`-suffixed
+ * forms — the misattribution the value-side arm forbids (SPEC 4.6).
+ */
+function namesValueConstantUnit(identity: string): boolean {
+  const prefix = "src/app.ts#";
+  if (!identity.startsWith(prefix)) return false;
+  const chain = identity.slice(prefix.length).replace(/@\d+$/u, "");
+  return chain
+    .split(".")
+    .some((segment) => T4_6_3_VALUE_CONSTANTS.includes(segment));
+}
 
 const T4_6_3 = defineProductTest({
   id: "T4.6-3",
   title:
-    "markers inside constructs that are not named units — an IIFE, a function stored via destructuring, and computed-name, string-literal-name, numeric-literal-name (`123() {}`), and private (`#priv() {}`) class members — attribute to the nearest enclosing named unit or the file; the private-member arm attributes to the bare class unit, never to a `#`-named unit (SPEC 4.6)",
+    "markers inside constructs that are not named units — an IIFE, a function stored via destructuring, and computed-name, string-literal-name, numeric-literal-name (`123() {}`), and private (`#priv() {}`) class members — attribute to the nearest enclosing named unit or the file; the private-member arm attributes to the bare class unit, never to a `#`-named unit; value-side boundary: `const s = text(SPEC.a)` attributes to `path#f` inside `f` and to `path` at top level, never to a unit named after the constant (SPEC 4.6)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -683,6 +746,44 @@ const T4_6_3 = defineProductTest({
             "destructuring-stored function to the file, the nested IIFE to " +
             "its hosting function, and every oddly-named class member to " +
             "the bare class unit — never to a `#`-named unit (SPEC 4.6)",
+        );
+        // Value-side boundary: the complete `embeds` set pins each call's
+        // attributed unit — the constant's enclosing function, or the file.
+        assertEdgeSetEqual(
+          await queryEdgesOfKind(product, workspace, "embeds", "T4.6-3"),
+          [
+            {
+              from: "src/app.ts#f",
+              to: "specs/N.mdx#valfn",
+              kind: "embeds",
+            },
+            {
+              from: "src/app.ts",
+              to: "specs/N.mdx#valtop",
+              kind: "embeds",
+            },
+          ],
+          "T4.6-3 value-side boundary: `const s = text(SPEC.valfn)` inside " +
+            "`f` attributes its `embeds` edge to `src/app.ts#f`, and the " +
+            "top-level `const t = text(SPEC.valtop)` to the file " +
+            "`src/app.ts` — never to a unit named after the constant " +
+            "(SPEC 4.6; the stored value is the returned string, 4.5)",
+        );
+        // … and no location spelled after either constant exists anywhere
+        // in the unfiltered edge enumeration — as a source or a target.
+        const allEdges = await queryAllEdges(product, workspace, "T4.6-3");
+        assertSameJson(
+          allEdges
+            .flatMap((edge) => [edge.from, edge.to])
+            .filter(namesValueConstantUnit)
+            .sort(),
+          [],
+          "T4.6-3 value-side boundary: no endpoint of the unfiltered " +
+            "`query edges` answer names a code unit spelled after the " +
+            "plain-identifier constants `s` or `t` (`src/app.ts#s`, " +
+            "`src/app.ts#t`, `src/app.ts#f.s`, or an `@N`-suffixed form) " +
+            "— a variable declaration whose initializer is a call is no " +
+            "named unit (SPEC 4.6)",
         );
       },
     );

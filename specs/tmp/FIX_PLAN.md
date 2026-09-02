@@ -65,24 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 17 — T4.6-3: value-side boundary — `const s = text(SPEC.a)` attributes to `path#f` inside `f`, `path` at top level, never `path#s`
-
-Cites: TEST-SPEC T4.6-3 (attribution boundary: a `text(...)` call whose value
-is bound by a `const` is attributed to the enclosing function's unit — `path#f`
-inside `f`, the whole-file `path` at top level — never to the constant's own
-name); SPEC 4.6.
-
-Now: `test/suite/registry/section-4.6.ts` has no value-side arm.
-
-Do: add the arm: one code file with `function f() { const s = text(SPEC.a); }`
-and a top-level `const t = text(SPEC.b);`; after `build`, the graph/edge
-enumeration (through the query adapter) attributes the first embedding to
-`<path>#f` and the second to `<path>`, and no location `<path>#s` or `<path>#t`
-exists anywhere in the answer.
-
-Verify: `npx vitest run … test/suite/section-4.6.test.ts`; `npm run test:self`
-green.
-
 ### Task 18 — T6.1-1: never-modifies sweep over every command surface
 
 Cites: TEST-SPEC T6.1-1 (the journal is appended only by `rename`/`move`;
