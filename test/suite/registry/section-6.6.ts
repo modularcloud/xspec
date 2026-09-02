@@ -148,7 +148,20 @@
 //   14.23 unavailability of T6.6-6, which covers recorded state that exists
 //   but cannot be read — and the preview never refreshes it (whole-root
 //   compare around the invocation; graph data asserted still absent
-//   afterward).
+//   afterward). The lagging-record arm builds WITHOUT emission, then enables
+//   `markdown.emit` in the configuration and takes the same move preview
+//   with no rebuild: the record holds modules and companions alone — a
+//   lagging record alone is never staleness (SPEC 13.3), and a preview
+//   never refreshes it — so `generated` is exactly the destination's
+//   module, companions, and Markdown together with every OTHER discovered
+//   source's Markdown emit destination (the paths the current configuration
+//   generates that the stale record lacks; the staying sources' recorded
+//   modules and companions regenerate in place, in neither direction; the
+//   origin's Markdown, never recorded and not generated post-move, in
+//   neither) and `removed` exactly the recorded pre-move module and
+//   companions, no Markdown among them — a product composing either
+//   direction from the configuration alone, or from presence, fails a set
+//   equality; whole-root compare around the invocation.
 // - T6.6-6 stages the unreadable record through the H-3 corrupt-record
 //   adapter (record-staging.ts): shape-blind garbage — files present, their
 //   bytes readable as no record, not even valid UTF-8 — over every
@@ -2793,7 +2806,7 @@ function assertDeltaContent(
 const T6_6_5 = defineProductTest({
   id: "T6.6-5",
   title:
-    "delta: after a build, a file-form move preview reports the derived-file delta both directions — under `generated` the destination's module, companion, and (emission enabled) Markdown paths, nothing being recorded there, and under `removed` the recorded pre-move module, companions, and Markdown the operation would leave no longer generated; a rename preview on the same workspace reports [] in both directions (regeneration rewrites recorded paths in place); the created-target move of T6.6-4(d) reports the new file's derived paths under `generated`; record-based, not presence-based: with graph data deleted (T13.3-2's operational definition) the same move preview's `generated` is the full post-move regeneration set and its `removed` [] — nothing being recorded, presence on disk deciding neither direction — and the preview still writes nothing: no refresh, graph data still absent afterward (SPEC 6.6, 12.7, 13.1, 13.2, 13.3, 7.3, 12.1; H-3, H-4)",
+    "delta: after a build, a file-form move preview reports the derived-file delta both directions — under `generated` the destination's module, companion, and (emission enabled) Markdown paths, nothing being recorded there, and under `removed` the recorded pre-move module, companions, and Markdown the operation would leave no longer generated; a rename preview on the same workspace reports [] in both directions (regeneration rewrites recorded paths in place); the created-target move of T6.6-4(d) reports the new file's derived paths under `generated`; record-based, not presence-based: with graph data deleted (T13.3-2's operational definition) the same move preview's `generated` is the full post-move regeneration set and its `removed` [] — nothing being recorded, presence on disk deciding neither direction — and the preview still writes nothing: no refresh, graph data still absent afterward; lagging-record counterpart: with emission enabled in the configuration after the build and no rebuild, the same preview's `generated` is exactly the destination's module, companions, and Markdown together with every other discovered spec source's Markdown emit destination — the paths the current configuration generates that the stale record lacks — and its `removed` exactly the recorded pre-move module and companions, the preview writing nothing and the record left lagging (SPEC 6.6, 12.7, 13.1, 13.2, 13.3, 7.3, 12.1; H-3, H-4)",
   run: async (product) => {
     // --- File-form move, rename, and the record-deleted arm: one
     // Markdown-emitting workspace (arm (c)'s sources) ---
@@ -2971,6 +2984,82 @@ const T6_6_5 = defineProductTest({
             );
           },
           `${context}: the preview modifies nothing (SPEC 6.6)`,
+        );
+      },
+    );
+
+    // --- Lagging-record counterpart: arm (c)'s sources built WITHOUT
+    // emission, then `markdown.emit` enabled in the configuration with no
+    // rebuild, and the same file-form move previewed ---
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      {
+        [C4_MV]: C4_MV_SOURCE,
+        [C4_PAL]: C4_PAL_SOURCE,
+        [C4_USER]: C4_USER_SOURCE,
+      },
+      async (workspace) => {
+        const context = "T6.6-5 file-form move (record lagging)";
+        const before = await snapshotDirectory(workspace.root);
+        await buildOk(
+          product,
+          workspace,
+          `${context}: staging premise \`build\` with emission disabled — ` +
+            `the record then holds modules and companions alone (SPEC ` +
+            `12.1, 13.3)`,
+        );
+        const after = await snapshotDirectory(workspace.root);
+        assertGraphDataPresent(
+          after,
+          `${context}: staging premise — the record the delta consults`,
+        );
+        const observed = observeDerivedWrites(
+          addedFiles(before, after),
+          [C4_MV, C4_PAL, C4_USER],
+          false,
+          `${context} staging observation`,
+        );
+        const mv = observed.get(C4_MV)!;
+
+        // Enable emission in the configuration, no rebuild: the record now
+        // lags the configuration — no Markdown path recorded — and a
+        // lagging record alone is never staleness (SPEC 13.3); the preview
+        // plans under the current configuration and consults the record as
+        // it stands (6.6).
+        await workspace.file("xspec.config.ts", SPECS_MD_CONFIG);
+
+        // `generated`: the paths the current configuration generates that
+        // the stale record lacks — the destination's module, companions,
+        // and Markdown (nothing recorded there) together with every OTHER
+        // discovered source's Markdown emit destination (unrecorded, the
+        // record predating emission). The staying sources' recorded modules
+        // and companions regenerate in place, in neither direction; the
+        // origin's Markdown — never recorded, not generated post-move — is
+        // in neither direction either.
+        const generated = byteSortedPaths([
+          ...transposeModuleCompanions(mv, C4_MV, F5_DEST),
+          markdownDestination(F5_DEST),
+          markdownDestination(C4_PAL),
+          markdownDestination(C4_USER),
+        ]);
+        // `removed`: exactly the recorded pre-move module and companions —
+        // the premise build's observed writes for the origin, no Markdown
+        // among them (SPEC 13.3).
+        const removed = byteSortedPaths(derivedPathsOf(mv));
+
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const report = await runPreviewJson(
+              product,
+              workspace,
+              C4_MOVE_ARGV,
+              context,
+            );
+            assertDeltaContent(report, { generated, removed }, context);
+          },
+          `${context}: the preview writes nothing — the record stays ` +
+            `lagging, never refreshed by a preview (SPEC 6.6, 13.3)`,
         );
       },
     );

@@ -65,24 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 32 — T6.6-5: lagging-record counterpart (emission enabled after the build, no rebuild)
-
-Cites: TEST-SPEC T6.6-5 (revised: with Markdown emission enabled after the
-last `build` and no rebuild, the move preview's `generated` set is exactly the
-destination's module + companions + Markdown emit destination plus every other
-spec source's Markdown emit destination, and `removed` is exactly the recorded
-pre-move module and companions); SPEC 6.6, 13.1, 13.2, 13.4.
-
-Now: `test/suite/registry/section-6.6.ts` ≈ lines 2673–2675 cover the
-current-record case only.
-
-Do: add the arm: build, then enable `markdown.emit` in the configuration
-without rebuilding, take `move --preview`, decode `generated`/`removed`
-(existing preview adapter) and assert the exact sets above (paths composed
-from SPEC 13.1/13.2's naming rules), nothing written.
-
-Verify: `npx vitest run … test/suite/section-6.6.test.ts`.
-
 ### Task 33 — T7-1: `--config <nonexistent file>` is configuration error 14.14 (exit 2, concerned path per T12.7-3)
 
 Cites: TEST-SPEC T7-1 (an explicit `--config` naming no file is reported as
