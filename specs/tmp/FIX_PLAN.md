@@ -65,19 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 35 — T7.4-1: `edgeKinds` non-subset and non-string `targetTags` element → 14.14
-
-Cites: TEST-SPEC T7.4-1 (revised: `edgeKinds` values `"contains"`, `"depend"`,
-and `true` — one arm each — and a `targetTags` list holding `true` are 14.14
-configuration errors); SPEC 7.4, 14.14.
-
-Now: `test/suite/registry/section-7.4-7.5.ts` ≈ lines 542–550 lack them.
-
-Do: add the four arms, each `build` → exit 2, 14.14 error document, nothing
-written.
-
-Verify: `npx vitest run … test/suite/section-7.4-7.5.test.ts`.
-
 ### Task 36 — T7.5-1: policy `kinds` non-subset and non-string selector `tags` element → 14.14
 
 Cites: TEST-SPEC T7.5-1 (revised: `kinds` values `"contains"`, `"depend"`,

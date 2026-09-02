@@ -33,6 +33,22 @@
 //   the staged deviation is the workspace's only defect: a product that
 //   wrongly accepts the configuration proceeds to a clean build (exit 0) and
 //   fails the exit-code assertion — never exits 2 for a side reason.
+//   Every `expectConfigRefused` arm (T7.4-1, T7.5-1) further pins the
+//   finding's concerned path to exactly `xspec.config.ts` — the file the
+//   upward search found, in 11.6's anchoring form relative to the invocation
+//   working directory, the workspace root (SPEC 14, 12.7) — its locations []
+//   (a configuration condition carries the file it concerns, no source
+//   range; 14), and, by a whole-root snapshot compare around the invocation,
+//   that nothing is written (12.1).
+// - T7.4-1 stray-member arms (`edgeKinds` not a subset of the three
+//   dependency kinds; a non-string `targetTags` element): each `edgeKinds`
+//   stray member — "contains", "depend", `true` — is staged last beside the
+//   valid kind "depends", so a product that drops unknown members (or
+//   filters them and only then applies the empty-list rule) keeps a valid
+//   list and builds, exit 0, instead of refusing by the wrong rule;
+//   `targetTags: [true]` is staged as TEST-SPEC spells it. `true` is the
+//   boolean literal the declarative form of 7 admits, so those refusals are
+//   14.14's invalid profile shape, never a form error.
 // - Unknown profile name at `coverage <name>` (T7.4-1) is a 12.0 usage error,
 //   not a 14.14: asserted as exit 2 with the single 12.7 error document as
 //   the entire stdout under --json (12.0: with JSON output in effect, an
@@ -100,6 +116,10 @@ import {
 import { assertRunTwiceDeterministic } from "../../helpers/determinism.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import {
+  assertSnapshotsEqual,
+  snapshotDirectory,
+} from "../../helpers/snapshot.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -143,6 +163,14 @@ async function withWorkspace<T>(
  * Stage a workspace with the given configuration and source files and assert
  * `build --json` refuses it per 14.14 (module header: the deviation is the
  * only defect, so wrong acceptance surfaces as a failed exit-code assertion).
+ * Beyond the shared 14.14 contract (`expectConfigurationError`), the finding
+ * is pinned to the configuration file: its concerned path is exactly
+ * `xspec.config.ts` — the file the upward search found, in the anchoring
+ * form of 11.6 relative to the invocation working directory, here the
+ * workspace root, so the bare name (SPEC 14, 12.7) — and its locations are
+ * [] (a configuration condition carries the file it concerns, no source
+ * range; SPEC 14); a whole-root snapshot compare around the invocation pins
+ * that a build failing at configuration load writes nothing (SPEC 12.1).
  */
 async function expectConfigRefused(
   product: ProductBinding,
@@ -153,7 +181,40 @@ async function expectConfigRefused(
   await withWorkspace(
     { files: { "xspec.config.ts": config, ...files } },
     async (workspace) => {
-      await expectConfigurationError(product, workspace, ["build"], context);
+      const before = await snapshotDirectory(workspace.root);
+      const result = await expectConfigurationError(
+        product,
+        workspace,
+        ["build"],
+        context,
+      );
+      const finding = expectErrorDocument(result, context);
+      assertSameJson(
+        {
+          code: finding.code,
+          path: finding.path,
+          locations: finding.locations.map((location) => location.file),
+        },
+        {
+          code: "configuration-error",
+          path: "xspec.config.ts",
+          locations: [],
+        },
+        `${context}: the error document's one finding carries the stable ` +
+          `code "configuration-error", locations [] (a configuration ` +
+          `condition carries the file it concerns, never a source range), ` +
+          `and as its concerned path the configuration file the upward ` +
+          `search found, in the anchoring form of 11.6 relative to the ` +
+          `invocation working directory — the workspace root, so exactly ` +
+          `"xspec.config.ts" (SPEC 14, 12.7, 11.6)`,
+      );
+      assertSnapshotsEqual(
+        before,
+        await snapshotDirectory(workspace.root),
+        `${context}: a build failing at configuration load modifies ` +
+          `nothing (SPEC 12.1, 12.0) — no derived file or graph data ` +
+          `appears anywhere under the root`,
+      );
     },
   );
 }
@@ -492,6 +553,78 @@ const PROFILE_MATRIX: readonly {
       ],
     ],
   },
+  // `edgeKinds` not a subset of ["depends", "embeds", "references"] (7.4) —
+  // an otherwise invalid profile shape (14.14), one arm per kind of stray
+  // member. Each stray member sits last beside the valid kind "depends", so
+  // the list is non-empty and non-subset at once: a product that drops or
+  // ignores members it does not know, or that filters them out and only then
+  // applies the empty-list rule, keeps a well-formed ["depends"] and builds
+  // (exit 0) — where a lone stray member would let such a product refuse by
+  // the wrong rule (an emptied list) and pass by accident.
+  {
+    label:
+      '`edgeKinds` holding the non-dependency kind "contains" beside ' +
+      '"depends" — not a subset of the three dependency kinds (7.4), ' +
+      "discriminating a product that lets `contains` grant coverage (8) or " +
+      "ignores the stray member",
+    profiles: [
+      [
+        'name: "p"',
+        'target: "main"',
+        'boundary: "aux"',
+        'mode: "direct"',
+        'edgeKinds: ["depends", "contains"]',
+      ],
+    ],
+  },
+  {
+    label:
+      '`edgeKinds` holding the unknown token "depend" beside "depends" — ' +
+      "not a subset (7.4), discriminating a product that accepts and " +
+      "ignores a stray member",
+    profiles: [
+      [
+        'name: "p"',
+        'target: "main"',
+        'boundary: "aux"',
+        'mode: "direct"',
+        'edgeKinds: ["depends", "depend"]',
+      ],
+    ],
+  },
+  {
+    label:
+      "`edgeKinds` holding the non-string element `true` beside " +
+      '"depends" — the boolean literal the declarative form of 7 admits, ' +
+      "so the refusal is 14.14's invalid profile shape, not a form error",
+    profiles: [
+      [
+        'name: "p"',
+        'target: "main"',
+        'boundary: "aux"',
+        'mode: "direct"',
+        'edgeKinds: ["depends", true]',
+      ],
+    ],
+  },
+  {
+    label:
+      "`targetTags` holding the non-string element `true` (`[true]`, as " +
+      "TEST-SPEC T7.4-1 spells the fixture) — the boolean literal the " +
+      "declarative form of 7 admits, so the refusal is 14.14's invalid " +
+      "profile shape; a product tolerating it (dropping or stringifying the " +
+      "element) accepts the configuration and builds, so exit 0 " +
+      "discriminates it",
+    profiles: [
+      [
+        'name: "p"',
+        'target: "main"',
+        "targetTags: [true]",
+        'boundary: "aux"',
+        'mode: "direct"',
+      ],
+    ],
+  },
 ];
 
 // `boundary: "dual"` where dual is both a spec and a code group, boundaryKind
@@ -543,11 +676,13 @@ const T7_4_1 = defineProductTest({
   title:
     "profile validation: duplicate names, each missing required field, " +
     "invalid targets/mode/boundaryKind values, unknown and wrong-kind " +
-    "target/boundary references, empty targetTags/edgeKinds, and an " +
-    "ambiguous boundary without boundaryKind are configuration errors " +
-    "(14.14, exit 2); boundaryKind is inferred when unambiguous; an unknown " +
-    "profile name at `coverage <name>` is a usage error (SPEC 7.4, 14.14, " +
-    "12.0)",
+    "target/boundary references, empty targetTags/edgeKinds, edgeKinds " +
+    'holding "contains", an unknown token, or a non-string element, a ' +
+    "non-string targetTags element, and an ambiguous boundary without " +
+    "boundaryKind are configuration errors (14.14, exit 2, the finding " +
+    "naming xspec.config.ts, nothing written); boundaryKind is inferred " +
+    "when unambiguous; an unknown profile name at `coverage <name>` is a " +
+    "usage error (SPEC 7.4, 14.14, 12.0)",
   run: async (product) => {
     // (a) The 14.14 matrix over the standard group layout.
     for (const arm of PROFILE_MATRIX) {
