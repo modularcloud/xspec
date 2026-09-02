@@ -42,6 +42,14 @@
 // - T4.5-5 arms likewise stage exactly one unsanctioned value-level use
 //   each; the exact condition-count assertion {"14.18": 1} pins the
 //   classification (SPEC 4.5, 14.18).
+// - T4.5-4's callee-side arm stages exactly one shadowed `text(SPEC.a)` call
+//   beside one module-scope control call. The workspace fails `build`, so
+//   `query` reports the findings without answering (SPEC 13.3): the arm's
+//   edge-level observation is `occurrences --file` over the code file,
+//   which answers on the failing workspace (11.2) — a construct that
+//   records no edge records no occurrence (5.7), so the exact record set
+//   (the control's `embeds` record alone, its range, source, and target
+//   pinned) is simultaneously the no-edge assertion for the shadowed call.
 // - Location assertions: every offending statement is staged at a known byte
 //   offset in a pure-ASCII `src/app.ts`, so string indices are byte offsets
 //   and each finding must fall within the offending statement's own byte
@@ -53,17 +61,21 @@ import type {
   CoverageReport,
   GraphEdge,
   ImpactedCodeEntry,
+  OccurrenceRecord,
 } from "../../helpers/adapters/index.js";
 import {
   decodeCoverageReport,
   decodeEdgesReport,
+  decodeFindingsReport,
   decodeImpactReport,
+  decodeOccurrencesReport,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
   assertExitCode,
   assertStderrEmpty,
   fail,
+  parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -203,6 +215,38 @@ interface OffendingStatementArm {
   readonly offending: string;
 }
 
+/** An arm's staged `src/app.ts` text and its offending statement's window. */
+interface StagedOffendingStatement {
+  /** The whole file: every line LF-terminated. */
+  readonly source: string;
+  /** The offending statement's byte window (support.ts byteWindow). */
+  readonly window: { readonly start: number; readonly end: number };
+}
+
+/**
+ * Lay out an arm's `src/app.ts` and locate its offending statement's byte
+ * window. The statement must appear exactly once among the staged lines —
+ * otherwise a harness defect (never a product failure).
+ */
+function stageOffendingStatement(
+  testId: string,
+  arm: OffendingStatementArm,
+): StagedOffendingStatement {
+  const at = arm.lines.indexOf(arm.offending);
+  if (at === -1 || arm.lines.lastIndexOf(arm.offending) !== at) {
+    throw new Error(
+      `${testId} fixture broke: the offending statement must appear exactly ` +
+        `once (${arm.name}) — fix the arm table in section-4.5.ts`,
+    );
+  }
+  const source = arm.lines.map((line) => line + "\n").join("");
+  const prefix = arm.lines
+    .slice(0, at)
+    .map((line) => line + "\n")
+    .join("");
+  return { source, window: byteWindow(prefix, arm.offending) };
+}
+
 /**
  * Stage one arm over the shared `a`/`a.b` spec source and assert `build
  * --json` reports exactly one finding of `condition`, located within the
@@ -215,21 +259,7 @@ async function assertArmFailsWith(
   arm: OffendingStatementArm,
   condition: string,
 ): Promise<void> {
-  const at = arm.lines.indexOf(arm.offending);
-  if (at === -1 || arm.lines.lastIndexOf(arm.offending) !== at) {
-    // A harness defect (never a product failure): the offending statement
-    // must appear exactly once among the staged lines.
-    throw new Error(
-      `${testId} fixture broke: the offending statement must appear exactly ` +
-        `once (${arm.name}) — fix the arm table in section-4.5.ts`,
-    );
-  }
-  const source = arm.lines.map((line) => line + "\n").join("");
-  const prefix = arm.lines
-    .slice(0, at)
-    .map((line) => line + "\n")
-    .join("");
-  const window = byteWindow(prefix, arm.offending);
+  const { source, window } = stageOffendingStatement(testId, arm);
   const context = `${testId} \`build --json\` over ${arm.name}`;
   await withWorkspace(
     SPEC_AND_CODE_CONFIG,
@@ -792,10 +822,187 @@ const T4_5_4_APP_SOURCE = [
   "",
 ].join("\n");
 
+// Callee side (SPEC 4.5: rooting is scope-aware and value-level for the
+// `text` binding as for the node chain). Inside `shadowScope`, a local
+// `function text` shadows the imported `text`, so `text(SPEC.a)` there has a
+// non-spec callee and a node argument — the "passing to any other function"
+// of 4.5, 14.18 (T4.5-5) — while the identical call at module scope (the
+// control) is an ordinary `text` call recording its `embeds` edge (4.3), and
+// the import binding, used by the control alone, stays a valid import (2.1,
+// 4). The two targets differ (`a` shadowed, `a.b` control), so a record a
+// by-name product would emit for the shadowed call is distinguishable from
+// the control's by target, not only by range.
+const T4_5_4_CALLEE_IMPORT = 'import SPEC, { text } from "../specs/A.xspec";';
+const T4_5_4_CALLEE_CONTROL_CALL = "text(SPEC.a.b)";
+const T4_5_4_CALLEE_SHADOWED_LINE = "  text(SPEC.a);";
+const T4_5_4_CALLEE_ARM: OffendingStatementArm = {
+  name: "a shadowing local `text` as the callee (SPEC 4.5)",
+  lines: [
+    T4_5_4_CALLEE_IMPORT,
+    "",
+    `${T4_5_4_CALLEE_CONTROL_CALL};`,
+    "",
+    "function shadowScope(): void {",
+    "  function text(x: unknown): void { void x; }",
+    T4_5_4_CALLEE_SHADOWED_LINE,
+    "}",
+    "",
+    "shadowScope();",
+  ],
+  offending: T4_5_4_CALLEE_SHADOWED_LINE,
+};
+
+/**
+ * An occurrence record's every datum (SPEC 5.7) as one JSON-safe tuple —
+ * file, own range, kind, source (identity plus range, or the unavailability
+ * marker), target — so whole records compare key-order-free.
+ */
+function occurrenceTuple(record: OccurrenceRecord): readonly unknown[] {
+  const source =
+    "unavailable" in record.source
+      ? "(source unavailable)"
+      : [
+          record.source.identity,
+          record.source.range.start,
+          record.source.range.end,
+        ];
+  return [
+    record.file,
+    record.range.start,
+    record.range.end,
+    record.kind,
+    source,
+    record.target,
+  ];
+}
+
+/**
+ * The T4.5-4 callee-side arm: `build` and `check` report exactly one
+ * condition-18 finding located at the shadowed use (exit 1), and
+ * `occurrences --file` over the code file — answering on the failing
+ * workspace (SPEC 11.2) — carries that finding and lists exactly the control
+ * call's `embeds` record, none for the shadowed call (5.7, 11.3).
+ */
+async function assertT454CalleeSide(product: ProductBinding): Promise<void> {
+  const { source, window } = stageOffendingStatement(
+    "T4.5-4",
+    T4_5_4_CALLEE_ARM,
+  );
+  const shadowedUse = { file: "src/app.ts", window } as const;
+  // The control record: its own range spans the call expression, callee
+  // through closing parenthesis, the statement terminator excluded; its
+  // source is the whole-file location, no named unit enclosing it —
+  // identity the path alone, range the entire file (SPEC 5.7, 4.6, 1.7).
+  const controlStart = Buffer.byteLength(`${T4_5_4_CALLEE_IMPORT}\n\n`, "utf8");
+  const controlEnd =
+    controlStart + Buffer.byteLength(T4_5_4_CALLEE_CONTROL_CALL, "utf8");
+  const expectedRecords: readonly (readonly unknown[])[] = [
+    [
+      "src/app.ts",
+      controlStart,
+      controlEnd,
+      "embeds",
+      ["src/app.ts", 0, Buffer.byteLength(source, "utf8")],
+      "specs/A.mdx#a.b",
+    ],
+  ];
+  await withWorkspace(
+    SPEC_AND_CODE_CONFIG,
+    { ...AB_SPEC_FILES, "src/app.ts": source },
+    async (workspace) => {
+      // `build`: exactly one finding, condition 18, located at the shadowed
+      // use. The exact count pins the classification and, with it, the
+      // import's validity — nothing is reported beside the one 14.18
+      // (SPEC 2.1, 4.5, 14.18).
+      const buildContext =
+        "T4.5-4 `build --json` with a shadowing local `text` as the callee";
+      const buildFound = await buildFindings(product, workspace, buildContext);
+      assertConditionCounts(buildFound, { "14.18": 1 }, buildContext);
+      assertFindingLocated(
+        buildFound[0]!,
+        shadowedUse,
+        `${buildContext}: the 14.18 finding locates at the shadowed use ` +
+          `(SPEC 4.5, 14.18)`,
+      );
+
+      // `check`: the same validation, exit 1 (SPEC 12.2). Staleness of the
+      // never-built workspace's derived files is 14.10's own business
+      // (12.2, 14) — set aside, the findings are exactly the one 14.18,
+      // located at the shadowed use.
+      const checkContext =
+        "T4.5-4 `check --json` with a shadowing local `text` as the callee";
+      const checkResult = await expectExit(
+        product,
+        workspace,
+        ["check", "--json"],
+        1,
+        `${checkContext} — \`check\` performs all build validations and ` +
+          `exits 1 on the finding (SPEC 12.2, 4.5, 14.18)`,
+      );
+      const checkFound = decodeFindingsReport(
+        parseJsonStdout(checkResult, checkContext),
+        checkContext,
+      ).findings.filter((finding) => finding.condition !== "14.10");
+      assertConditionCounts(checkFound, { "14.18": 1 }, checkContext);
+      assertFindingLocated(
+        checkFound[0]!,
+        shadowedUse,
+        `${checkContext}: the 14.18 finding locates at the shadowed use ` +
+          `(SPEC 4.5, 14.18)`,
+      );
+
+      // `occurrences --file src/app.ts`, answering on the failing workspace
+      // (SPEC 11.2): the code file's finding accompanies (exit 1, the full
+      // answer still emitted), and the record set is exactly the control
+      // call's `embeds` record — the shadowed call records no edge and so
+      // no occurrence (5.7). A product resolving the callee by name would
+      // list a second record (target `specs/A.mdx#a`) and carry no finding.
+      const occContext =
+        "T4.5-4 `occurrences --file src/app.ts` on the failing workspace";
+      const occResult = await expectExit(
+        product,
+        workspace,
+        ["occurrences", "--file", "src/app.ts"],
+        1,
+        `${occContext} — the answer carries the domain's 14.18 finding, so ` +
+          `exit 1 with the full answer document (SPEC 11.2, 11.3)`,
+      );
+      const report = decodeOccurrencesReport(
+        parseJsonStdout(
+          occResult,
+          `${occContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        occContext,
+      );
+      assertConditionCounts(
+        report.findings,
+        { "14.18": 1 },
+        `${occContext}: the code file's one finding accompanies the answer ` +
+          `(SPEC 11.2, 11.3)`,
+      );
+      assertFindingLocated(
+        report.findings[0]!,
+        shadowedUse,
+        `${occContext}: the accompanying 14.18 locates at the shadowed use ` +
+          `(SPEC 11.2, 14)`,
+      );
+      assertSameJson(
+        report.occurrences.map(occurrenceTuple),
+        expectedRecords,
+        `${occContext}: exactly the control call's \`embeds\` record — file, ` +
+          `own range (callee through closing parenthesis), kind, whole-file ` +
+          `source, target — and none for the shadowed call, which records ` +
+          `no edge and no occurrence (SPEC 4.5, 5.7, 4.6, 1.7, 11.3)`,
+      );
+    },
+  );
+}
+
 const T4_5_4 = defineProductTest({
   id: "T4.5-4",
   title:
-    "a local declaration shadowing the import binding: chains rooted at the local are not spec references — no edge, no error, the program builds — while the identical statement rooted at the import records its marker edge (SPEC 4.5)",
+    "a local declaration shadowing the import binding: chains rooted at the local are not spec references — no edge, no error, the program builds — while the identical statement rooted at the import records its marker edge; callee side: an inner-scope `function text` shadowing the imported `text` makes `text(SPEC.a)` in that scope a call to another function — `build` and `check` report exactly one condition-18 finding located at that use, exit 1, and `occurrences --file` over the code file, answering on the failing workspace, carries the finding and lists no record for it while the identical call outside the scope lists its `embeds` occurrence (SPEC 4.5, 5.7, 11.2, 11.3, 14.18)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -839,6 +1046,9 @@ const T4_5_4 = defineProductTest({
         );
       },
     );
+
+    // Callee side: the shadowing local as the callee of `text(...)`.
+    await assertT454CalleeSide(product);
   },
 });
 

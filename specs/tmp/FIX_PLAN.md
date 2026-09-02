@@ -65,31 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 16 — T4.5-4: callee-side arm — a shadowing local `text` makes `text(SPEC.a)` a condition-18 finding
-
-Cites: TEST-SPEC T4.5-4 (callee side: an inner-scope `function text(x:
-unknown) {}` shadows the imported `text`; `text(SPEC.a)` inside that scope is
-a condition-18 finding at that use; `build`/`check` exit 1; no `embeds` edge
-or occurrence for it; `occurrences --file` answers on the failing workspace
-with the finding; a control call outside the scope lists its `embeds`
-occurrence); SPEC 4.5, 5.7, 11.3, 14.18.
-
-Now: `test/suite/registry/section-4.5.ts` ≈ lines 772–830 hold only the
-`const SPEC` (binding-side) arm.
-
-Do: add the callee-side arm: a code file importing `SPEC` and `text`, with a
-block/function that declares `function text(x: unknown) {}` and calls
-`text(SPEC.a)` inside it, plus one control `text(SPEC.b)` at module scope.
-Assert: `build` and `check` exit 1 with exactly one condition-18 finding at
-the shadowed use's range; `query edges` (or the graph read the file already
-uses) shows no `embeds` edge from the shadowed call and one from the control;
-`occurrences --file <code file>` (11.2: answers per file on a failing
-workspace) lists the control's `embeds` occurrence and reports the finding
-for the shadowed call, in the adapter's decoded form.
-
-Verify: `npx vitest run … test/suite/section-4.5.test.ts`; `npm run test:self`
-green.
-
 ### Task 17 — T4.6-3: value-side boundary — `const s = text(SPEC.a)` attributes to `path#f` inside `f`, `path` at top level, never `path#s`
 
 Cites: TEST-SPEC T4.6-3 (attribution boundary: a `text(...)` call whose value
