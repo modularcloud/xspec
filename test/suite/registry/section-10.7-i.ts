@@ -396,19 +396,43 @@ function assertStoredCounts(
  * is shape territory (H-3/H-4).
  */
 function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map((element) => canonicalJson(element)).join(",")}]`;
+  // H-11: an explicit stack, never native recursion per nesting level.
+  type Item = { readonly render: unknown } | { readonly text: string };
+  const pieces: string[] = [];
+  const stack: Item[] = [{ render: value }];
+  while (stack.length > 0) {
+    const item = stack.pop();
+    if (item === undefined) break;
+    if ("text" in item) {
+      pieces.push(item.text);
+      continue;
+    }
+    const current = item.render;
+    if (Array.isArray(current)) {
+      pieces.push("[");
+      stack.push({ text: "]" });
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        stack.push({ render: current[index] });
+        if (index > 0) stack.push({ text: "," });
+      }
+    } else if (current !== null && typeof current === "object") {
+      const entries = Object.entries(current as Record<string, unknown>)
+        .filter(([, member]) => member !== undefined)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+      pieces.push("{");
+      stack.push({ text: "}" });
+      let remaining = entries.length;
+      for (const [key, member] of entries.reverse()) {
+        stack.push({ render: member });
+        stack.push({ text: `${JSON.stringify(key)}:` });
+        remaining -= 1;
+        if (remaining > 0) stack.push({ text: "," });
+      }
+    } else {
+      pieces.push(JSON.stringify(current) ?? "null");
+    }
   }
-  if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, member]) => member !== undefined)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(
-        ([key, member]) => `${JSON.stringify(key)}:${canonicalJson(member)}`,
-      );
-    return `{${entries.join(",")}}`;
-  }
-  return JSON.stringify(value) ?? "null";
+  return pieces.join("");
 }
 
 /** Diagnosed canonical-JSON (key-order-insensitive) deep equality. */
@@ -429,13 +453,21 @@ function assertSameInformation(
 
 /** Every string leaf of a decoded JSON value (array elements and members). */
 function collectStringLeaves(value: unknown, into: string[] = []): string[] {
-  if (typeof value === "string") {
-    into.push(value);
-  } else if (Array.isArray(value)) {
-    for (const element of value) collectStringLeaves(element, into);
-  } else if (value !== null && typeof value === "object") {
-    for (const member of Object.values(value)) {
-      collectStringLeaves(member, into);
+  // H-11: an explicit stack, never native recursion per nesting level.
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (typeof current === "string") {
+      into.push(current);
+    } else if (Array.isArray(current)) {
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        stack.push(current[index]);
+      }
+    } else if (current !== null && typeof current === "object") {
+      const members = Object.values(current);
+      for (let index = members.length - 1; index >= 0; index -= 1) {
+        stack.push(members[index]);
+      }
     }
   }
   return into;

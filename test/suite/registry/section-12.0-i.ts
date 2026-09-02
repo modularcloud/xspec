@@ -405,18 +405,41 @@ interface SweepStoryOptions {
  * object key order is formatting, not information (TEST-SPEC §11).
  */
 function canonicalizeJson(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(canonicalizeJson);
-  }
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    const sorted: Record<string, unknown> = {};
-    for (const key of Object.keys(record).sort()) {
-      sorted[key] = canonicalizeJson(record[key]);
+  // H-11: an explicit stack, never native recursion per nesting level.
+  type Container = unknown[] | Record<string, unknown>;
+  const isContainer = (candidate: unknown): candidate is Container =>
+    candidate !== null && typeof candidate === "object";
+  if (!isContainer(value)) return value;
+  const root: Container = Array.isArray(value) ? [] : {};
+  const pending: { readonly source: Container; readonly copy: Container }[] = [
+    { source: value, copy: root },
+  ];
+  // A leaf is placed as is; a container is placed as a fresh empty copy —
+  // attached in its parent's sorted member order, filled when its own frame
+  // is popped.
+  const placed = (member: unknown): unknown => {
+    if (!isContainer(member)) return member;
+    const copy: Container = Array.isArray(member) ? [] : {};
+    pending.push({ source: member, copy });
+    return copy;
+  };
+  while (pending.length > 0) {
+    const frame = pending.pop();
+    if (frame === undefined) break;
+    const { source, copy } = frame;
+    if (Array.isArray(source)) {
+      const target = copy as unknown[];
+      for (let index = 0; index < source.length; index += 1) {
+        target[index] = placed(source[index]);
+      }
+    } else {
+      const target = copy as Record<string, unknown>;
+      for (const key of Object.keys(source).sort()) {
+        target[key] = placed(source[key]);
+      }
     }
-    return sorted;
   }
-  return value;
+  return root;
 }
 
 /**
