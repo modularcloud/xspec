@@ -65,34 +65,45 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage B — H-11 answer-scale capacity (P-11 harness error), S-8, S-2, T1.3-7
 
-### Task 9 — T1.3-7 Depth: deterministic ≥ 2048-deep workspace (new test)
+### Task 9a — P-11: size the per-invocation hang guard to the staged answer scale (H-11)
 
-Cites: TEST-SPEC T1.3-7 ("a valid workspace whose one file nests sections at
-least 2048 levels deep (P-8's giant-nesting floor, 16) builds with exit 0;
-`query subtree` on the root returns the root plus every section, in document
-order, the count asserted; `view` serves the full positional tree. The
-deterministic anchor of P-8's floor outside the generator machinery, and a
-deterministic exercise of the harness's answer-scale capacity (H-11, S-8)");
-SPEC 1.3, 11.1, 11.4.
+Cites: TEST-SPEC H-11 (the harness is dimensioned to the staged scale), H-8/H-10
+(the hang guard bounds only "the invocation terminates" and is never an
+assertion input), P-11 (its answer arms request `view --text` over the mutated
+base), S-8; AGENTS.md's S-8 note (the `view --text` blowup: two depth-4096
+towers under P-8's LF → U+2028 rewrite, ~204 MB in the `\u2028` spelling — the
+largest answer SPEC.md permits over a staged input).
 
-Now: no registry entry, no H-7 map entry, nothing named T1.3-7 under `test/`.
+Now: `FUZZ_COMMAND_TIMEOUT_MS = 10_000` in `test/suite/registry/section-16-p11.ts`
+("generously above any plausible answer time for these staged inputs") is sized
+to parse time, not to a conforming product emitting P-11's largest answer.
+Measured at fd7216b against the built product on this branch: `view --text
+specs/A.mdx` over two balanced depth-4096 towers (`sectionTowerSource(4096,
+true)` twice) with every LF rewritten to U+0020 — a one-line 163,856-byte file
+with the same quadratic expansion as the U+2028 rewrite, in a smaller JSON
+spelling — exits 1 (the towers' 14.2 findings accompany the document) with a
+125,810,349-byte pretty-printed answer after 16.6 s wall clock (14.2 s user,
+6.7 s sys); the `\u2028` spelling is larger, so slower still. Past the guard,
+the driver kills the invocation and the P-11 module's hang-guard conversion
+(near its line 415) reports "invocation was still running when the harness's
+hang guard killed" — a diagnosed failure against a conforming product, H-8
+inverted. Relayed by iterations 8 and 9 outside their tasks; substantiated by
+iteration 10; no earlier task covered it.
 
-Do: in `test/suite/registry/section-1.3.ts` add a `T1.3-7` body: stage one
-`.mdx` file with a 2048-deep chain of nested sections (distinct valid IDs;
-build the bytes iteratively; keep every other section-1.3 fixture untouched),
-`build` → exit 0 (no findings); `query subtree` on the root (existing
-query-adapter decoding) → exactly the root plus 2048 sections, in document
-order, IDs asserted by count and by first/last/sampled identities; `view` on
-the file → the full positional tree decoded through `decodeViewReport`, depth
-asserted by iterative walk. Register the ID in the module's exported array,
-add `"T1.3-7": ["1.3"]` (plus 11.1/11.4 if the H-7 map convention lists every
-cited section — follow the neighbouring entries) to `traceability.ts`.
-Prerequisite: Task 5 — done (the `view` decode no longer overflows).
+Do: rederive the guard from the staged answer scale and state the derivation in
+its comment — a constant with margin over the measured blowup (≥ 4×, so 60 s or
+more: CI runners are slower than the measuring machine), or a budget that grows
+with the captured output — keeping it purely the H-8 termination bound (H-10),
+never an assertion input. Check the P-11 entry's body budget (`timeoutMs:
+420_000`: three fixed seeds × 2–4 mutations × the availability arms) against
+the new worst case (invocations per body × guard) and raise it if needed, so a
+slow-but-terminating product fails as a hang-guard diagnosis of one invocation,
+never as a Vitest body timeout. Never lower the staged scale (S-8 pins it).
 
 Verify: `npx vitest run --config test/vitest.config.ts --project suite
-test/suite/section-1.3.test.ts` — passes against the built product or fails as
-a diagnosed product failure, never a harness error; `npm run test:self` green
-(S-1, S-7).
+test/suite/section-16-p11.test.ts` — passes against the built product (no
+hang-guard kill of an invocation still emitting its answer) or fails as a
+diagnosed product failure; `npm run test:self` green (S-8 unchanged).
 
 ## Stage C — CONF-DISC code-group surface (fixture and suite)
 

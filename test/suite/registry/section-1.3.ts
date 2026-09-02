@@ -1,4 +1,4 @@
-// TEST-SPEC §1.3 (requirement IDs) — SUITE-02: T1.3-1 … T1.3-6.
+// TEST-SPEC §1.3 (requirement IDs) — SUITE-02: T1.3-1 … T1.3-7.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -14,7 +14,10 @@
 // props, code groups, `markdown`, `coverage`, `policy`, or git; the command
 // surface is `build` (error reporting of 14.1–14.4, plus 14.17 as T1.3-6's
 // invalid-form arms stage it) plus `query nodes`. T1.3-5's cross-file
-// duplicate-ID arm is the multi-file case.
+// duplicate-ID arm is the multi-file case. T1.3-7 stands outside that
+// scope — its command surface is `query subtree` and `view`, and
+// CERTIFICATIONS.md places the scale-capacity class outside certification
+// by construction.
 //
 // Location assertions: fixtures are staged as prefix + offending construct +
 // suffix, all pure ASCII (string indices are byte offsets), and each negative
@@ -24,10 +27,11 @@
 // terminator) still passes; every other staged construct lies outside the
 // widened window, so a finding attributed to the wrong construct fails.
 
-import type { Finding } from "../../helpers/adapters/index.js";
+import type { Finding, ViewNode } from "../../helpers/adapters/index.js";
 import {
   assertReportMentions,
   decodeNodeRowsReport,
+  decodeViewReport,
 } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -520,6 +524,202 @@ const T1_3_6 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T1.3-7 Depth — the deterministic anchor of P-8's giant-nesting floor.
+//
+// SPEC 1.3 bounds no nesting depth: its structural rule — a child's id is its
+// parent's id plus "." plus exactly one segment — holds at every level. One
+// valid file nests sections DEPTH_FLOOR levels deep. Because every id spells
+// its whole ancestor chain, the file is quadratic in the depth (~4.2 MB at
+// 2048 with one-letter segments) and both it and the expected identities are
+// built iteratively; the answers (~4.5 MB of `query subtree` rows, ~13 MB of
+// `view`) are walked iteratively too — H-11, S-8: never one frame per level.
+// P-8's own tower repeats `id="g"` at every level, which 1.3 rejects (14.2)
+// from the second level on — right for a robustness draw, wrong for the valid
+// workspace T1.3-7 stages, so this fixture chains its ids instead.
+
+/** P-8's giant-nesting floor (TEST-SPEC P-8, 16), staged here deterministically. */
+const DEPTH_FLOOR = 2048;
+
+/**
+ * One-letter segments cycling through the alphabet: a level's identity is a
+ * function of its position, so a level the product drops, duplicates, or
+ * reorders shifts every deeper identity and the sequence comparison names
+ * the first shifted position.
+ */
+const DEPTH_SEGMENTS = "abcdefghijklmnopqrstuvwxyz";
+
+interface DepthTower {
+  /** The file's bytes. */
+  readonly source: string;
+  /** Each level's `id` value, outermost first. */
+  readonly ids: readonly string[];
+}
+
+/** Build the chain iteratively: level k's id is level k−1's id plus "." plus its own segment. */
+function depthTower(depth: number): DepthTower {
+  const ids: string[] = [];
+  const openers: string[] = [];
+  let id = "";
+  for (let level = 1; level <= depth; level += 1) {
+    const segment = DEPTH_SEGMENTS[(level - 1) % DEPTH_SEGMENTS.length]!;
+    id = level === 1 ? segment : `${id}.${segment}`;
+    ids.push(id);
+    openers.push(`<S id="${id}">\n`);
+  }
+  return {
+    source: `${openers.join("")}deep.\n${"</S>\n".repeat(depth)}`,
+    ids,
+  };
+}
+
+/** A long identity rendered within bounds for a diagnosis. */
+function abbreviateIdentity(identity: string): string {
+  const limit = 48;
+  return identity.length <= limit
+    ? JSON.stringify(identity)
+    : `${JSON.stringify(identity.slice(0, limit))}… (${identity.length} characters)`;
+}
+
+/**
+ * Diagnosed, position-by-position comparison of a reported identity sequence
+ * against the expected one — the count and every position, so first, last,
+ * and every sampled identity are covered — without rendering either
+ * multi-megabyte sequence whole (`assertSameJson` would).
+ */
+function assertIdentitySequence(
+  actual: readonly string[],
+  expected: readonly string[],
+  context: string,
+): void {
+  const shared = Math.min(actual.length, expected.length);
+  for (let index = 0; index < shared; index += 1) {
+    if (actual[index] !== expected[index]) {
+      fail(
+        `${context}: the identity at position ${index} differs\n` +
+          `  actual:   ${abbreviateIdentity(actual[index]!)}\n` +
+          `  expected: ${abbreviateIdentity(expected[index]!)}`,
+      );
+    }
+  }
+  if (actual.length !== expected.length) {
+    const detail =
+      actual.length > expected.length
+        ? `the first surplus identity is ${abbreviateIdentity(actual[expected.length]!)}`
+        : `the first missing identity is ${abbreviateIdentity(expected[actual.length]!)}`;
+    fail(
+      `${context}: ${expected.length} identities expected (the root plus ` +
+        `${expected.length - 1} sections), got ${actual.length}; ${detail}`,
+    );
+  }
+}
+
+/**
+ * Walk the positional tree iteratively (H-11): the staged file nests exactly
+ * one section per level, so the tree must be one chain — every node has one
+ * child until the deepest, which has none — and its preorder identities are
+ * returned for the sequence comparison.
+ */
+function chainIdentities(root: ViewNode, context: string): string[] {
+  const identities: string[] = [];
+  let node = root;
+  for (let level = 0; ; level += 1) {
+    if (typeof node.identity !== "string") {
+      fail(
+        `${context}: the node at nesting level ${level} reports its identity as ` +
+          "unavailable, but the file carries no finding — every identity of a " +
+          "valid file is defined (SPEC 11.2, 1.5)",
+      );
+    }
+    identities.push(node.identity);
+    if (node.children.length === 0) return identities;
+    if (node.children.length !== 1) {
+      fail(
+        `${context}: the node at nesting level ${level} ` +
+          `(${abbreviateIdentity(node.identity)}) reports ${node.children.length} ` +
+          "children, but the staged file nests exactly one section per level " +
+          "(SPEC 11.4: the positional tree is defined by construct nesting alone)",
+      );
+    }
+    node = node.children[0]!;
+  }
+}
+
+const T1_3_7 = defineProductTest({
+  id: "T1.3-7",
+  title:
+    "Depth: a valid 2048-deep section chain builds, and `query subtree` and `view` serve every level",
+  async run(product) {
+    const tower = depthTower(DEPTH_FLOOR);
+    const expectedIdentities = [
+      "specs/A.mdx",
+      ...tower.ids.map((id) => `specs/A.mdx#${id}`),
+    ];
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        "specs/A.mdx": tower.source,
+      },
+    });
+    try {
+      await buildOk(
+        product,
+        workspace,
+        `T1.3-7 \`build\` over one file nesting sections ${DEPTH_FLOOR} levels deep — ` +
+          "a valid workspace, SPEC 1.3 bounding no depth",
+      );
+
+      // `query subtree` on the root: the root plus every section, in document
+      // order (SPEC 11.1) — the count and each identity by position.
+      const subtreeLabel = "T1.3-7 `query subtree specs/A.mdx` (the root)";
+      const rows = decodeNodeRowsReport(
+        await runJson(
+          product,
+          workspace,
+          ["query", "subtree", "specs/A.mdx"],
+          subtreeLabel,
+        ),
+        subtreeLabel,
+      );
+      assertIdentitySequence(
+        rows.map((row) => row.identity),
+        expectedIdentities,
+        `${subtreeLabel}: the root plus every section, in document order (SPEC 11.1)`,
+      );
+
+      // `view` on the file: the full positional tree — one chain, DEPTH_FLOOR
+      // levels deep, every identity defined (SPEC 11.4).
+      const viewLabel = "T1.3-7 `view specs/A.mdx`";
+      const report = decodeViewReport(
+        await runJson(product, workspace, ["view", "specs/A.mdx"], viewLabel),
+        { text: false },
+        viewLabel,
+      );
+      if (report.findings.length !== 0) {
+        fail(
+          `${viewLabel}: ${report.findings.length} finding(s) accompany the answer, ` +
+            `but the workspace is valid — the ${DEPTH_FLOOR}-deep chain satisfies ` +
+            "1.3 at every level",
+        );
+      }
+      if (report.views.length !== 1) {
+        fail(
+          `${viewLabel}: expected exactly one per-file view (the one requested ` +
+            `file), got ${report.views.length} (SPEC 11.4)`,
+        );
+      }
+      assertIdentitySequence(
+        chainIdentities(report.views[0]!.root, viewLabel),
+        expectedIdentities,
+        `${viewLabel}: the full positional tree — the root and one section per ` +
+          `level, ${DEPTH_FLOOR} deep, in document order (SPEC 11.4)`,
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
 /** TEST-SPEC §1.3, in canonical ID order (SUITE-02). */
 export const section13Tests: readonly ProductTestEntry[] = [
   T1_3_1,
@@ -528,4 +728,5 @@ export const section13Tests: readonly ProductTestEntry[] = [
   T1_3_4,
   T1_3_5,
   T1_3_6,
+  T1_3_7,
 ];
