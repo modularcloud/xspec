@@ -65,22 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 38 — T11-6: `query subtree` / `query ancestors` on a code-group `path` or `path#unit` → exit 2
-
-Cites: TEST-SPEC T11-6 (§11.1: wrong-kind operands — `subtree` and
-`ancestors` take a spec node; given a code-group whole-file `path` or a
-`path#unit` location they are usage errors, exit 2); SPEC 11.1, 12.0.
-
-Now: `test/suite/registry/section-11.ts` T11-6 (≈ line 1466) covers `query
-node` and `show` only; every `subtree`/`ancestors` invocation names a spec
-source.
-
-Do: add four arms (`subtree`/`ancestors` × `path`/`path#unit`) on a workspace
-with a discovered code file holding one unit; each → exit 2 with the 12.7
-error document, nothing modified.
-
-Verify: `npx vitest run … test/suite/section-11.test.ts`.
-
 ### Task 39 — T11.4-3: stage the valueless prop as T2.7-3's shared `<S id="x" tags>` fixture
 
 Cites: TEST-SPEC T11.4-3 (§11.4: the valueless-prop case is staged as T2.7-3's

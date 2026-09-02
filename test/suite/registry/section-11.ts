@@ -84,6 +84,7 @@ import {
 } from "../../helpers/determinism.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -1463,7 +1464,7 @@ const T11_6_S1_ID = "specs/S.mdx#s1";
 const T11_6 = defineProductTest({
   id: "T11-6",
   title:
-    "identity resolution: a bare `path` resolves to the root node for a spec-group file and to a code location for a code-group file; `path#unit` and `path#unit@N` address code locations (a getter/setter pair as the duplicate unit chain); a path in no configured group is unknown, exit 2; wrong-kind operands — `query node` and `show` given a code-group `path` or `path#unit` — each exit 2; an unspelled unit name on a discovered code source is unknown in every graph-node argument position (`edges --from`/`--to`, `reachable --from`/`--to`), exit 2, as are an out-of-range disambiguator (`@2` on a once-occurring chain) and `@1` at every occurrence count — no occurrence bears `@1`, staged at one and at two occurrences (SPEC 11, 1.5, 4.6, 12.0, 12.4)",
+    "identity resolution: a bare `path` resolves to the root node for a spec-group file and to a code location for a code-group file; `path#unit` and `path#unit@N` address code locations (a getter/setter pair as the duplicate unit chain); a path in no configured group is unknown, exit 2; wrong-kind operands — `query node`, `query subtree`, `query ancestors`, and `show` given a code-group `path` or `path#unit` — each exit 2, modifying nothing; an unspelled unit name on a discovered code source is unknown in every graph-node argument position (`edges --from`/`--to`, `reachable --from`/`--to`), exit 2, as are an out-of-range disambiguator (`@2` on a once-occurring chain) and `@1` at every occurrence count — no occurrence bears `@1`, staged at one and at two occurrences (SPEC 11, 1.5, 4.6, 12.0, 12.4)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -1580,27 +1581,40 @@ const T11_6 = defineProductTest({
           "T11-6 `query edges --from docs/N.mdx`",
         );
 
-        // Wrong-kind operands (SPEC 12.0; 11.1, 12.4): `query node` and
-        // `show` take a requirement-node identity, so a code-group `path` or
+        // Wrong-kind operands (SPEC 12.0; 11.1, 12.4): `query node`, `query
+        // subtree`, and `query ancestors` each take a `<node>` — a
+        // requirement-node identity, `path#id` or a bare spec-group `path`
+        // (11.1) — and so does `show` (12.4), so a code-group `path` or
         // `path#unit` — a code source named where a requirement-node identity
-        // is required — is a usage error for each command, in each form.
-        for (const operand of ["src/code.ts", "src/code.ts#Box.v"]) {
-          await expectUsageError(
-            product,
-            workspace,
-            ["query", "node", operand],
-            "a code source named where a requirement-node identity is " +
-              "required (wrong-kind operand)",
-            `T11-6 \`query node ${operand}\``,
-          );
-          await expectUsageError(
-            product,
-            workspace,
-            ["show", operand],
-            "a code source named where a requirement-node identity is " +
-              "required (wrong-kind operand)",
-            `T11-6 \`show ${operand}\``,
-          );
+        // is required — is a usage error for each command, in each form. A
+        // read command never writes and the argument check is judged before
+        // anything else (12.0), so each arm runs under the modifies-nothing
+        // compare: the whole workspace root, derived files included (13), is
+        // byte-identical around the invocation.
+        const wrongKindCommands: readonly (readonly string[])[] = [
+          ["query", "node"],
+          ["query", "subtree"],
+          ["query", "ancestors"],
+          ["show"],
+        ];
+        for (const command of wrongKindCommands) {
+          for (const operand of ["src/code.ts", "src/code.ts#Box.v"]) {
+            const argv = [...command, operand];
+            const context = `T11-6 \`${argv.join(" ")}\``;
+            await assertLeavesUnchanged(
+              workspace.root,
+              () =>
+                expectUsageError(
+                  product,
+                  workspace,
+                  argv,
+                  "a code source named where a requirement-node identity is " +
+                    "required (wrong-kind operand)",
+                  context,
+                ),
+              context,
+            );
+          }
         }
 
         // Unknown code units (SPEC 12.0, 4.6): the check is judged
