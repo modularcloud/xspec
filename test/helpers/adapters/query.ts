@@ -423,39 +423,54 @@ export function assertNodeEdgeListsBare(doc: unknown, context?: string): void {
   walkForRangeData(requiredKey(obj, "edges", site), at(site, "edges"));
 }
 
-function walkForRangeData(value: unknown, site: DecodeSite): void {
-  if (Array.isArray(value)) {
-    value.forEach((element, index) => {
-      walkForRangeData(element, at(site, index));
-    });
-    return;
-  }
-  if (typeof value !== "object" || value === null) return;
-  const obj = value as Record<string, unknown>;
-  for (const name of ["range", "sourceRange"]) {
-    if (Object.hasOwn(obj, name)) {
+function walkForRangeData(root: unknown, rootSite: DecodeSite): void {
+  // H-11: an explicit stack, never native recursion per nesting level — the
+  // suite stages documents past V8's frame budget (P-8, P-11), and no depth
+  // cap of any kind. Children are pushed last-first so each datum is checked
+  // in exactly the order a recursive descent checks it: a value's own members
+  // first, then each element or member completely (subtree included), in
+  // index and then property-enumeration order — the first failure reported
+  // is the same one.
+  const stack: { readonly value: unknown; readonly site: DecodeSite }[] = [
+    { value: root, site: rootSite },
+  ];
+  while (stack.length > 0) {
+    const { value, site } = stack.pop()!;
+    if (Array.isArray(value)) {
+      for (let index = value.length - 1; index >= 0; index -= 1) {
+        stack.push({ value: value[index], site: at(site, index) });
+      }
+      continue;
+    }
+    if (typeof value !== "object" || value === null) continue;
+    const obj = value as Record<string, unknown>;
+    for (const name of ["range", "sourceRange"]) {
+      if (Object.hasOwn(obj, name)) {
+        decodeFail(
+          at(site, name),
+          "no range datum on an edge surface — everywhere a graph node " +
+            "appears as an edge endpoint it is a bare identity, requirement " +
+            "node and code location alike; a code location's source range is " +
+            "presented in exactly two outputs, occurrence records and review " +
+            "payloads (SPEC 1.7)",
+          obj[name],
+        );
+      }
+    }
+    if (Object.hasOwn(obj, "start") && Object.hasOwn(obj, "end")) {
       decodeFail(
-        at(site, name),
-        "no range datum on an edge surface — everywhere a graph node " +
-          "appears as an edge endpoint it is a bare identity, requirement " +
-          "node and code location alike; a code location's source range is " +
-          "presented in exactly two outputs, occurrence records and review " +
-          "payloads (SPEC 1.7)",
-        obj[name],
+        site,
+        'no range-shaped {"start", "end"} datum on an edge surface — edge ' +
+          "endpoints are bare identities with no range datum accompanying " +
+          "them (SPEC 1.7)",
+        value,
       );
     }
-  }
-  if (Object.hasOwn(obj, "start") && Object.hasOwn(obj, "end")) {
-    decodeFail(
-      site,
-      'no range-shaped {"start", "end"} datum on an edge surface — edge ' +
-        "endpoints are bare identities with no range datum accompanying " +
-        "them (SPEC 1.7)",
-      value,
-    );
-  }
-  for (const [key, member] of Object.entries(obj)) {
-    walkForRangeData(member, at(site, key));
+    const entries = Object.entries(obj);
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const [key, member] = entries[index]!;
+      stack.push({ value: member, site: at(site, key) });
+    }
   }
 }
 
@@ -484,15 +499,58 @@ export function decodeIdsReport(doc: unknown, context?: string): IdsReport {
   return { files };
 }
 
+/**
+ * One `ids --tree` node per section nesting level, decoded through an
+ * explicit stack.
+ *
+ * H-11: never native recursion per nesting level — the suite stages section
+ * towers 2048 and 4096 deep (P-8, P-11, T1.3-7), past V8's frame budget —
+ * and no depth cap of any kind. The checks run per node in exactly the order
+ * a recursive descent runs them: the node's own members first (`id`, then
+ * the array form of `children`), then each child completely (subtree
+ * included) in document order.
+ */
 function decodeIdsTreeNode(value: unknown, site: DecodeSite): IdsTreeNode {
+  const stack: IdsTreeFrame[] = [enterIdsTreeNode(value, site)];
+  for (;;) {
+    const top = stack[stack.length - 1]!;
+    if (top.nextChild < top.rawChildren.length) {
+      const index = top.nextChild;
+      top.nextChild += 1;
+      stack.push(
+        enterIdsTreeNode(top.rawChildren[index], at(top.childrenSite, index)),
+      );
+      continue;
+    }
+    const node: IdsTreeNode = { id: top.id, children: top.children };
+    stack.pop();
+    const parent = stack[stack.length - 1];
+    if (parent === undefined) return node;
+    parent.children.push(node);
+  }
+}
+
+/** One node's decode in flight: its own members decoded, children pending. */
+interface IdsTreeFrame {
+  readonly id: string;
+  readonly childrenSite: DecodeSite;
+  readonly rawChildren: readonly unknown[];
+  /** The children decoded so far, in document order. */
+  readonly children: IdsTreeNode[];
+  /** The index of the next raw child to decode. */
+  nextChild: number;
+}
+
+/** A node's own members, in form order — everything before its children. */
+function enterIdsTreeNode(value: unknown, site: DecodeSite): IdsTreeFrame {
   const obj = expectObject(value, site);
   const childrenSite = at(site, "children");
-  return {
-    id: expectNonEmptyString(requiredKey(obj, "id", site), at(site, "id")),
-    children: expectArray(requiredKey(obj, "children", site), childrenSite).map(
-      (element, index) => decodeIdsTreeNode(element, at(childrenSite, index)),
-    ),
-  };
+  const id = expectNonEmptyString(requiredKey(obj, "id", site), at(site, "id"));
+  const rawChildren = expectArray(
+    requiredKey(obj, "children", site),
+    childrenSite,
+  );
+  return { id, childrenSite, rawChildren, children: [], nextChild: 0 };
 }
 
 /** `ids --tree` (T12.3-1): per-file nesting in file and document order. */

@@ -65,36 +65,74 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage B — H-11 answer-scale capacity (P-11 harness error), S-8, S-2, T1.3-7
 
-### Task 6 — De-recurse every other per-datum walk over answer documents (H-11 audit)
+### Task 6 — Convert the remaining answer-document JSON walkers in the registry modules (H-11 audit remainder)
 
-Cites: TEST-SPEC §0 H-11 (every subsequent per-datum traversal, "16's property
-walks included"); §16 P-8, P-11; §17 S-8.
+Cites: TEST-SPEC §0 H-11 (every subsequent per-datum traversal of an answer
+document, "16's property walks included"); §16 P-8, P-11; §17 S-8.
 
-Now: Task 5 (done; `git log` — "de-recurse the view decode path") converted the
-walks on the `view` decode path — `decodeViewNodeForm` and
-`assertUnavailabilityMarkerForms` in `test/helpers/adapters/forms.ts`,
-`documentCarriesUnavailability` in `test/suite/registry/section-16-p11.ts` —
-to explicit stacks, and gave `describeJsonValue` (`test/helpers/adapters/
-decode.ts`) a non-recursive fallback for the `RangeError` V8's `JSON.stringify`
-throws at tower depth 4096 (`structuredClone` throws the same; `JSON.parse` is
-iterative; this Node's plain frame budget is ~9.9k frames). The P-11
-reproduction (`npm run build && XSPEC_PROPERTY_SEED=271828183 npx vitest run
---config test/vitest.config.ts --project suite test/suite/section-16-p11.test.ts`)
-and `test/suite/section-16-p8.test.ts` run without harness errors. Others may
-still recurse per level: Markdown/oracle walks over nested sections, `query
-subtree` row handling, the E-6 comparators, fixture generators that emit nested
-towers recursively, `test/helpers/property.ts` shrinkers.
+Now: the H-11 audit is complete (`git log` — "finish de-recursing the H-3
+decoders"): a per-file call-graph survey over `test/helpers/` and
+`test/suite/registry/` (TypeScript compiler API; self- and mutual recursion
+among named functions, arrows, and methods; no walker calls itself through an
+object-literal method) found 61 recursive sites. Every walk a deep staged input
+reaches is now explicit-stack: P-8's 4096-deep towers go through
+`assertJsonOutputConvention`/`parseJsonStdout` only (plain iterative
+`JSON.parse`), P-11's `view` documents through `decodeViewNodeForm`,
+`assertUnavailabilityMarkerForms`, `documentCarriesUnavailability` and
+`describeJsonValue`'s fallback (Task 5), and `walkForRangeData` and
+`decodeIdsTreeNode` in `test/helpers/adapters/query.ts` — the last two
+recursive H-3 decoders (`ids --tree` nests one node per section level) — are
+converted, so T1.3-7's `query subtree`/`view` (Task 9) and S-8's synthetic
+documents (Task 7) meet no recursive decoder. `sorted-keys.ts` is a
+hand-written iterative scanner; `property.ts` (shrinkers), the Markdown
+oracle, `e6.ts`, and the `query subtree` row decoder hold no per-level
+recursion.
 
-Do: grep `test/helpers/` and `test/suite/registry/` for functions that call
-themselves (or mutually) per nesting level of an answer document or of a staged
-tree, and convert each to an explicit stack/queue with identical semantics and
-ordering. Dimension: depth 4096 (the largest staged nesting) must pass with
-margin; do not introduce depth caps. Leave a one-line comment at each converted
-site citing H-11.
+What remains recursive, by class:
+(a) Generic JSON walkers over answer documents in registry modules — the sole
+remaining conversion work: `canonicalJson` (section-10.2-10.3.ts ≈252,
+section-10.6.ts ≈299, section-10.7-i.ts ≈398, section-10.7-ii.ts ≈462),
+`collectStringLeaves` (section-10.2-10.3.ts ≈285, section-10.4.ts ≈290,
+section-10.6.ts ≈332, section-10.7-i.ts ≈431, section-10.7-ii.ts ≈495), and
+`canonicalizeJson` (section-12.0-i.ts ≈407). They recurse per JSON nesting
+level of the review-record/session documents those tests decode — nested by
+member structure, from the tests' own small fixtures — so no staged input
+reaches V8's budget through them today; convert them anyway, so that no
+answer-document walk in the suite recurses per level.
+(b) Staged-model and oracle walks whose depth is set by their inputs'
+construction, never by an answer: the section-16 generators bound section
+nesting at `depth < 2` (p2-p3 `genBlocks`/`genBlock`/`genBlockSection`, p4
+`genSection`/`renderItems`/`walkItems`/`collectDotted`/`walkSection`/
+`walkBody`, p9 `genSection`/`renderSectionLines`/`walk`/`visit`, p12
+`emitSection`), at three fixed levels (p13 `visit`/`renderSectionLines`), or
+by a dotted id's segment count (p5-p6 `subtreeDotteds`/`walkDotteds`/
+`collectInside`/`nonempty`/`walk`); the coverage oracle's `visit`
+(coverage.ts ≈275), graph-diff's `resolve` (graph-diff.ts ≈137) and the
+section-move oracle's ten walkers (section-move.ts ≈253–1183) are reached only
+from P-5/P-6, P-13 and shallow deterministic fixtures. Leave these as they are:
+a generator's draw order is tape-significant (H-10 replay and shrinking), and
+their bound is the generator's own, not a depth cap on any answer. Revisit only
+if a test raises a staged model's depth toward the H-11 scale through them.
+(c) Not document walks: directory/path/glob/process-tree recursion
+(`snapshot.ts walk`, `workspace.ts path`/`symlink`/`makeTreeWritable`,
+`record-staging.ts collectGraphDataFiles`, `glob.ts matchAt`/`matchFrom`,
+`subprocess.ts kill`, `section-7-basics.ts listFiles`) — bounded by fixture
+layout.
 
-Verify: `npm run test:self` green; the P-11 reproduction above and
-`test/suite/section-16-p8.test.ts` run without harness errors; `npm run
-typecheck`.
+Do: convert each site in (a) to an explicit stack with identical output —
+`canonicalJson` renders the same string (keys sorted the same way, `undefined`
+members dropped where the copy drops them, `JSON.stringify` for keys and
+leaves); `collectStringLeaves` yields the same leaves in the same order
+(depth-first: array elements in index order, members in enumeration order);
+`canonicalizeJson` builds the same key-sorted structure. Keep each module's
+copy in place (the modules are independent by design). Leave a one-line
+comment at each converted site citing H-11. Do not introduce depth caps.
+
+Verify: `npm run typecheck`; `npm run test:self` green; each changed module's
+wrapper against the built product — `npx vitest run --config
+test/vitest.config.ts --project suite test/suite/section-10.2-10.3.test.ts`
+(likewise 10.4, 10.6, 10.7-i, 10.7-ii, 12.0-i) — passes or fails only as
+diagnosed product failures, never a harness error.
 
 ### Task 7 — S-8 answer-scale capacity self-test (decoders, walks, capture gate)
 
