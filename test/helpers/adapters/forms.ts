@@ -1619,12 +1619,74 @@ function decodeViewTextMember(
  * 11.4); `attributes` entries are in tag order and `children` in document
  * order — both strictly ascending by range start (distinct constructs occupy
  * distinct spans).
+ *
+ * H-11: the tree is walked through an explicit stack, never by native
+ * recursion per nesting level — the suite stages section towers 2048 and
+ * 4096 deep (P-8, P-11), past V8's frame budget — and no depth cap of any
+ * kind. The checks run per node in exactly the order a recursive descent
+ * runs them: the node's own members first, then each child completely
+ * (subtree included) in document order, then the children's order and the
+ * text members.
  */
 function decodeViewNodeForm(
   value: unknown,
   site: DecodeSite,
   text: boolean,
 ): ViewNode {
+  const stack: ViewNodeFrame[] = [enterViewNode(value, site, text)];
+  for (;;) {
+    const top = stack[stack.length - 1]!;
+    if (top.nextChild < top.rawChildren.length) {
+      const index = top.nextChild;
+      top.nextChild += 1;
+      stack.push(
+        enterViewNode(
+          top.rawChildren[index],
+          at(top.childrenSite, index),
+          text,
+        ),
+      );
+      continue;
+    }
+    const node = leaveViewNode(top, text);
+    stack.pop();
+    const parent = stack[stack.length - 1];
+    if (parent === undefined) return node;
+    parent.children.push(node);
+  }
+}
+
+/** One node's decode in flight: its own members decoded, children pending. */
+interface ViewNodeFrame {
+  readonly site: DecodeSite;
+  readonly obj: Record<string, unknown>;
+  readonly identity: ViewNode["identity"];
+  readonly range: SourceRange;
+  readonly opening: SourceRange | null;
+  readonly closing: SourceRange | null;
+  readonly attributes: ViewAttributeEntry[];
+  readonly tags: ViewNode["tags"];
+  readonly coverage: ViewNode["coverage"];
+  readonly childrenSite: DecodeSite;
+  readonly rawChildren: readonly unknown[];
+  /** The children decoded so far, in document order. */
+  readonly children: ViewNode[];
+  /** The index of the next raw child to decode. */
+  nextChild: number;
+}
+
+/**
+ * A node's own members, in form order — everything that precedes its
+ * children's decode: the member allow-list (with or without `--text`), the
+ * identity datum (never `null`), the range, the opening and closing tag
+ * ranges, the attribute entries in tag order, the tags and coverage datums,
+ * and the array form of the children member.
+ */
+function enterViewNode(
+  value: unknown,
+  site: DecodeSite,
+  text: boolean,
+): ViewNodeFrame {
   const obj = expectObject(value, site);
   const allowed = text
     ? [...VIEW_NODE_MEMBERS, ...VIEW_NODE_TEXT_MEMBERS]
@@ -1688,12 +1750,48 @@ function decodeViewNodeForm(
   );
 
   const childrenSite = at(site, "children");
-  const children = expectArray(
+  const rawChildren = expectArray(
     requiredKey(obj, "children", site),
     childrenSite,
-  ).map((element, index) =>
-    decodeViewNodeForm(element, at(childrenSite, index), text),
   );
+
+  return {
+    site,
+    obj,
+    identity:
+      identityDatum.state === "value"
+        ? identityDatum.value
+        : { unavailable: true as const },
+    range,
+    opening,
+    closing,
+    attributes,
+    tags:
+      tagsDatum.state === "value"
+        ? tagsDatum.value
+        : tagsDatum.state === "null"
+          ? null
+          : { unavailable: true as const },
+    coverage:
+      coverageDatum.state === "value"
+        ? coverageDatum.value
+        : coverageDatum.state === "null"
+          ? null
+          : { unavailable: true as const },
+    childrenSite,
+    rawChildren,
+    children: [],
+    nextChild: 0,
+  };
+}
+
+/**
+ * A node's completion once every child is decoded: the children's document
+ * order (strictly ascending by start), the node itself, and the text
+ * members exactly when `--text` is given.
+ */
+function leaveViewNode(frame: ViewNodeFrame, text: boolean): ViewNode {
+  const { site, obj, childrenSite, children } = frame;
   for (let i = 1; i < children.length; i += 1) {
     if (children[i - 1]!.range.start >= children[i]!.range.start) {
       formFail(
@@ -1717,26 +1815,13 @@ function decodeViewNodeForm(
     ownText?: ViewNode["ownText"];
     subtreeText?: ViewNode["subtreeText"];
   } = {
-    identity:
-      identityDatum.state === "value"
-        ? identityDatum.value
-        : { unavailable: true as const },
-    range,
-    opening,
-    closing,
-    attributes,
-    tags:
-      tagsDatum.state === "value"
-        ? tagsDatum.value
-        : tagsDatum.state === "null"
-          ? null
-          : { unavailable: true as const },
-    coverage:
-      coverageDatum.state === "value"
-        ? coverageDatum.value
-        : coverageDatum.state === "null"
-          ? null
-          : { unavailable: true as const },
+    identity: frame.identity,
+    range: frame.range,
+    opening: frame.opening,
+    closing: frame.closing,
+    attributes: frame.attributes,
+    tags: frame.tags,
+    coverage: frame.coverage,
     children,
   };
   if (text) {
@@ -2158,14 +2243,24 @@ export function assertUnavailabilityMarkerForms(
   doc: unknown,
   context?: string,
 ): void {
-  const walk = (value: unknown, site: DecodeSite): void => {
+  // H-11: an explicit stack, never native recursion per nesting level — the
+  // documents this walk covers include `view` towers 4096 sections deep
+  // (P-8, P-11), past V8's frame budget; no depth cap of any kind. The visit
+  // order is a recursive descent's: each value before its members, array
+  // elements by index and object members in property order, each subtree
+  // completely before the next sibling.
+  const pending: { readonly value: unknown; readonly site: DecodeSite }[] = [
+    { value: doc, site: rootSite("12.7 unavailability-marker walk", context) },
+  ];
+  while (pending.length > 0) {
+    const { value, site } = pending.pop()!;
     if (Array.isArray(value)) {
-      value.forEach((element, index) => {
-        walk(element, at(site, index));
-      });
-      return;
+      for (let index = value.length - 1; index >= 0; index -= 1) {
+        pending.push({ value: value[index], site: at(site, index) });
+      }
+      continue;
     }
-    if (typeof value !== "object" || value === null) return;
+    if (typeof value !== "object" || value === null) continue;
     const obj = value as Record<string, unknown>;
     if (
       Object.hasOwn(obj, "unavailable") &&
@@ -2179,9 +2274,10 @@ export function assertUnavailabilityMarkerForms(
         value,
       );
     }
-    for (const [key, member] of Object.entries(obj)) {
-      walk(member, at(site, key));
+    const entries = Object.entries(obj);
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const [key, member] = entries[index]!;
+      pending.push({ value: member, site: at(site, key) });
     }
-  };
-  walk(doc, rootSite("12.7 unavailability-marker walk", context));
+  }
 }

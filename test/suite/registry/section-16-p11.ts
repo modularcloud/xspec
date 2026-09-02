@@ -452,15 +452,27 @@ async function runAvailabilityCommand(
  * (SPEC 12.7) — presence of the member is presence of the marker.
  */
 function documentCarriesUnavailability(value: unknown): boolean {
-  if (Array.isArray(value)) {
-    return value.some((element) => documentCarriesUnavailability(element));
+  // H-11: an explicit stack, never native recursion per nesting level — the
+  // fuzzed `view` answers carry the depth-2048 and depth-4096 section towers
+  // the suite stages (P-8, P-11), past V8's frame budget; no depth cap.
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (Array.isArray(current)) {
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        pending.push(current[index]);
+      }
+      continue;
+    }
+    if (typeof current !== "object" || current === null) continue;
+    const obj = current as Record<string, unknown>;
+    if (Object.hasOwn(obj, "unavailable")) return true;
+    const members = Object.values(obj);
+    for (let index = members.length - 1; index >= 0; index -= 1) {
+      pending.push(members[index]);
+    }
   }
-  if (typeof value !== "object" || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  if (Object.hasOwn(obj, "unavailable")) return true;
-  return Object.values(obj).some((member) =>
-    documentCarriesUnavailability(member),
-  );
+  return false;
 }
 
 /** Decode an answer through its surface's form-exact 12.7 decoder (H-3). */

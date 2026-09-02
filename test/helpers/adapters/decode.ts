@@ -63,14 +63,63 @@ export function describeJsonValue(value: unknown): string {
   let rendered: string;
   try {
     rendered = JSON.stringify(value) ?? String(value);
-  } catch {
-    rendered = String(value);
+  } catch (error) {
+    // H-11: V8's serializer recurses per nesting level and exhausts its frame
+    // budget (a RangeError) on the towers the suite stages, 4096 sections deep
+    // (P-8, P-11); the diagnosis then renders the same text without recursion.
+    rendered =
+      error instanceof RangeError
+        ? renderJsonWithoutRecursion(value)
+        : String(value);
   }
   const LIMIT = 256;
   if (rendered.length > LIMIT) {
     rendered = `${rendered.slice(0, LIMIT)}… (${String(rendered.length)} chars)`;
   }
   return `${kind} ${rendered}`;
+}
+
+/**
+ * `JSON.stringify` for decoded-JSON data (objects, arrays, strings, numbers,
+ * booleans, `null`) through an explicit stack — the text `JSON.stringify`
+ * renders, produced without native recursion per nesting level (H-11).
+ */
+function renderJsonWithoutRecursion(value: unknown): string {
+  const out: string[] = [];
+  const work: ({ readonly text: string } | { readonly value: unknown })[] = [
+    { value },
+  ];
+  while (work.length > 0) {
+    const item = work.pop()!;
+    if ("text" in item) {
+      out.push(item.text);
+      continue;
+    }
+    const current = item.value;
+    if (Array.isArray(current)) {
+      work.push({ text: "]" });
+      for (let index = current.length - 1; index >= 0; index -= 1) {
+        work.push({ value: current[index] });
+        if (index > 0) work.push({ text: "," });
+      }
+      work.push({ text: "[" });
+    } else if (typeof current === "object" && current !== null) {
+      const entries = Object.entries(current).filter(
+        ([, member]) => member !== undefined,
+      );
+      work.push({ text: "}" });
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const [key, member] = entries[index]!;
+        work.push({ value: member });
+        work.push({ text: `${JSON.stringify(key)}:` });
+        if (index > 0) work.push({ text: "," });
+      }
+      work.push({ text: "{" });
+    } else {
+      out.push(JSON.stringify(current) ?? "null");
+    }
+  }
+  return out.join("");
 }
 
 /** The decoded value must be a JSON object (not null, not an array). */

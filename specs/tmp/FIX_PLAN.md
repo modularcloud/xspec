@@ -65,61 +65,34 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage B — H-11 answer-scale capacity (P-11 harness error), S-8, S-2, T1.3-7
 
-### Task 5 — Make `decodeViewNodeForm` non-recursive (H-11)
-
-Cites: TEST-SPEC §0 H-11 ("the H-3/12.7 decoding, and every subsequent
-per-datum traversal of an answer document … succeed, with harness-internal
-capacity limits … dimensioned to the scales the suite itself stages … A
-harness-side failure while capturing or evaluating an answer — a crash, hang, or
-exhausted internal limit — is reported as a defect in the harness"); §16 P-8
-(staged nesting floor ≥ 2048; the suite stages `NESTING_DEPTHS = [512, 2048,
-4096]` in `test/suite/registry/section-16-p8.ts` ≈ line 286) and P-11; §1.3
-T1.3-7; §17 S-8.
-
-Now: `test/helpers/adapters/forms.ts` `decodeViewNodeForm` (≈ lines 1623–1695)
-calls itself once per `children` level, building nested `DecodeSite`s through
-`at(site, …)`; at the depth-2048 tower it throws `RangeError: Maximum call
-stack size exceeded` (frames `forms.ts:1694 → :1650 → decodeRangeForm :161`).
-Reproduce: `npm run build && XSPEC_PROPERTY_SEED=271828183 npx vitest run
---config test/vitest.config.ts --project suite test/suite/section-16-p11.test.ts`
-(trial 1, "specs/B.mdx: append a depth-2048 balanced section tower", arm `view`).
-
-Do: rewrite the `view` node decoding as an explicit-stack (iterative) traversal
-that performs exactly the same checks in the same order per node — member
-allow-list with/without `--text`, identity datum never `null`, range, opening/
-closing, attributes in tag order strictly ascending, tags/coverage three-state
-datums, children in document order strictly ascending — and produces the same
-`ViewNode` tree and the same `formFail` sites/messages (S-5's output-adapter
-self-tests must stay green). Node's V8 `JSON.parse` is iterative, but confirm
-with the depth-4096 vector that no other step in `decodeViewReport` (path
-building, `at`, error rendering, `structuredClone`/`JSON.stringify` on failure)
-recurses per level. No depth cap of any kind.
-
-Verify: the reproduction above no longer reports a harness error (P-11 passes
-or fails as a diagnosed product failure); `npm run test:self` green
-(`s5-output-adapters.test.ts` in particular); `npm run typecheck`.
-
 ### Task 6 — De-recurse every other per-datum walk over answer documents (H-11 audit)
 
 Cites: TEST-SPEC §0 H-11 (every subsequent per-datum traversal, "16's property
 walks included"); §16 P-8, P-11; §17 S-8.
 
-Now: at least two more walks recurse natively over `view` trees:
-`assertUnavailabilityMarkerForms` in `test/helpers/adapters/forms.ts` (the
-`unavailable`-exclusivity walk) and `documentCarriesUnavailability` in
-`test/suite/registry/section-16-p11.ts`. Others may exist (Markdown/oracle
-walks over nested sections, `query subtree` row handling, the E-6 comparators,
-fixture generators that emit nested towers recursively, `test/helpers/
-property.ts` shrinkers).
+Now: Task 5 (done; `git log` — "de-recurse the view decode path") converted the
+walks on the `view` decode path — `decodeViewNodeForm` and
+`assertUnavailabilityMarkerForms` in `test/helpers/adapters/forms.ts`,
+`documentCarriesUnavailability` in `test/suite/registry/section-16-p11.ts` —
+to explicit stacks, and gave `describeJsonValue` (`test/helpers/adapters/
+decode.ts`) a non-recursive fallback for the `RangeError` V8's `JSON.stringify`
+throws at tower depth 4096 (`structuredClone` throws the same; `JSON.parse` is
+iterative; this Node's plain frame budget is ~9.9k frames). The P-11
+reproduction (`npm run build && XSPEC_PROPERTY_SEED=271828183 npx vitest run
+--config test/vitest.config.ts --project suite test/suite/section-16-p11.test.ts`)
+and `test/suite/section-16-p8.test.ts` run without harness errors. Others may
+still recurse per level: Markdown/oracle walks over nested sections, `query
+subtree` row handling, the E-6 comparators, fixture generators that emit nested
+towers recursively, `test/helpers/property.ts` shrinkers.
 
 Do: grep `test/helpers/` and `test/suite/registry/` for functions that call
 themselves (or mutually) per nesting level of an answer document or of a staged
 tree, and convert each to an explicit stack/queue with identical semantics and
-ordering. Cover the two named walks first. Dimension: depth 4096 (the largest
-staged nesting) must pass with margin; do not introduce depth caps. Leave a
-one-line comment at each converted site citing H-11.
+ordering. Dimension: depth 4096 (the largest staged nesting) must pass with
+margin; do not introduce depth caps. Leave a one-line comment at each converted
+site citing H-11.
 
-Verify: `npm run test:self` green; the P-11 reproduction from Task 5 and
+Verify: `npm run test:self` green; the P-11 reproduction above and
 `test/suite/section-16-p8.test.ts` run without harness errors; `npm run
 typecheck`.
 
@@ -222,7 +195,7 @@ the file → the full positional tree decoded through `decodeViewReport`, depth
 asserted by iterative walk. Register the ID in the module's exported array,
 add `"T1.3-7": ["1.3"]` (plus 11.1/11.4 if the H-7 map convention lists every
 cited section — follow the neighbouring entries) to `traceability.ts`.
-Prerequisite: Task 5 (the `view` decode must not overflow).
+Prerequisite: Task 5 — done (the `view` decode no longer overflows).
 
 Verify: `npx vitest run --config test/vitest.config.ts --project suite
 test/suite/section-1.3.test.ts` — passes against the built product or fails as
