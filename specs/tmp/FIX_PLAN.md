@@ -65,23 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 37 — T10.5-1: `parent-consistency` context sets over A → B → C with only C changed
-
-Cites: TEST-SPEC T10.5-1 (revised: with A → B → C and only C `changed`, A's
-`parent-consistency` context is exactly `{B}` — never `C` — and B's exactly
-`{C}`; identities asserted); SPEC 10.5, 5.6.
-
-Now: `test/suite/registry/section-10.5.ts` T10.5-1 lacks the chain arm; T10.5-2's
-`a > a.b > a.b.c` fixture asserts blocking only, no context sets.
-
-Do: add the arm to T10.5-1: three sections with `d` edges A→B→C (or the
-section nesting the spec's arm names), a session, then edit C; decode the
-review payload (existing review adapter) and assert each item's
-`parent-consistency` context set by identity: A's `{B}`, B's `{C}`, C's
-empty/absent as the spec states.
-
-Verify: `npx vitest run … test/suite/section-10.5.test.ts`.
-
 ### Task 38 — T11-6: `query subtree` / `query ancestors` on a code-group `path` or `path#unit` → exit 2
 
 Cites: TEST-SPEC T11-6 (§11.1: wrong-kind operands — `subtree` and
