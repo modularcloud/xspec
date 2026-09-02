@@ -4,7 +4,12 @@
 // (contents, and byte-string file names on Linux — T1.5-2 staging), symbolic
 // links (verbatim targets: live, dangling, directory, cyclic, external —
 // T7-5, T13.4-6), and git fixtures with scripted commits carrying pinned,
-// platform-independent identities and timestamps (E-6). Certification cannot
+// platform-independent identities and timestamps (E-6) — and scale vectors
+// at the suite's staged maxima (`staged-scale.ts`, shared with S-8): the
+// 4096-deep section tower P-8's giant-nesting draws stage and the largest
+// document any draw stages, each read back byte-complete, so a truncating
+// writer or recursion-limited serializer cannot silently stage shallower or
+// smaller inputs than declared (H-11's input side). Certification cannot
 // exercise builder bugs that make fixtures diverge from their declarations,
 // so this self-test must pass before any fixture is trusted.
 //
@@ -26,6 +31,15 @@ import {
   TestWorkspace,
 } from "../helpers/workspace.js";
 import type { WorkspaceDecl } from "../helpers/workspace.js";
+import { FUZZ_BASE_FILES } from "../suite/registry/section-16-p8.js";
+import {
+  DEEPEST_STAGED_TOWER,
+  GIANT_NESTING_FLOOR,
+  LARGEST_BASE_FILE,
+  LARGEST_STAGED_INPUT_BYTES,
+  largestStagedDocument,
+  TOWER_SOURCE,
+} from "./staged-scale.js";
 
 const onLinux = process.platform === "linux";
 const onPosix = process.platform !== "win32";
@@ -380,4 +394,121 @@ test("dispose() removes the workspace entirely, read-only git objects included",
   await expect(fsp.lstat(workspace.tempRoot)).rejects.toMatchObject({
     code: "ENOENT",
   });
+});
+
+// ---------------------------------------------------------------------------
+// Scale vectors (S-2): the suite's staged maxima, read back byte-complete.
+// Both vectors are built by string repetition and buffer concatenation —
+// never by recursion — and compared as whole byte arrays read back from disk
+// through plain `fs`, independently of the builder's own readers.
+
+/** Whole-array comparison with a diagnosable first-mismatch report. */
+function expectByteComplete(actual: Uint8Array, expected: Uint8Array): void {
+  expect(actual.length).toBe(expected.length);
+  let mismatch = -1;
+  for (let index = 0; index < expected.length; index += 1) {
+    if (actual[index] !== expected[index]) {
+      mismatch = index;
+      break;
+    }
+  }
+  expect(mismatch, "first differing byte offset (-1 = identical)").toBe(-1);
+}
+
+/** Occurrences of `needle` in `haystack`, scanned iteratively. */
+function countOccurrences(haystack: Uint8Array, needle: string): number {
+  const buffer = Buffer.from(
+    haystack.buffer,
+    haystack.byteOffset,
+    haystack.length,
+  );
+  let count = 0;
+  for (
+    let index = buffer.indexOf(needle, 0, "utf8");
+    index >= 0;
+    index = buffer.indexOf(needle, index + 1, "utf8")
+  ) {
+    count += 1;
+  }
+  return count;
+}
+
+test("scale vector: one `.mdx` file nesting sections 4096 deep — P-8's staged tower, read back byte-complete", async () => {
+  // The tower the suite stages (sectionTowerSource(4096, balanced), the
+  // bytes a P-8 nesting draw appends): 11 bytes per opener line, one
+  // six-byte content line, 5 bytes per closer line.
+  const expected = utf8(TOWER_SOURCE);
+  expect(DEEPEST_STAGED_TOWER).toBe(4096);
+  expect(DEEPEST_STAGED_TOWER).toBeGreaterThanOrEqual(GIANT_NESTING_FLOOR);
+  expect(expected.length).toBe(
+    DEEPEST_STAGED_TOWER * 11 + 6 + DEEPEST_STAGED_TOWER * 5,
+  );
+
+  // Declared through the builder's declarative path (create → file).
+  const workspace = await makeWorkspace({
+    files: { "specs/tower.mdx": TOWER_SOURCE },
+  });
+
+  // The builder's own listing reports the file once, as a regular file, at
+  // the full declared size.
+  expect(await workspace.readdirNames()).toEqual(["specs"]);
+  expect(await workspace.readdirNames("specs")).toEqual(["tower.mdx"]);
+  expect(await workspace.kind("specs/tower.mdx")).toBe("file");
+  const abs = path.join(workspace.root, "specs", "tower.mdx");
+  expect((await fsp.stat(abs)).size).toBe(expected.length);
+
+  // Read back from disk with plain fs: byte-complete, and still 4096 levels
+  // deep — every opener and closer present, so the staged depth is the
+  // declared depth, at or past P-8's floor.
+  const actual = new Uint8Array(await fsp.readFile(abs));
+  expectByteComplete(actual, expected);
+  expect(countOccurrences(actual, '<S id="g">\n')).toBe(DEEPEST_STAGED_TOWER);
+  expect(countOccurrences(actual, "</S>\n")).toBe(DEEPEST_STAGED_TOWER);
+  expect(countOccurrences(actual, "deep.\n")).toBe(1);
+});
+
+test("scale vector: the largest document the suite stages (fuzz base plus the whole mutation budget of towers), read back byte-complete", async () => {
+  // Derivation (staged-scale.ts, shared with S-8): the largest staged file
+  // is the largest fuzz base file (`specs/A.mdx`) with all three mutations
+  // of P-8's budget appending the deepest balanced tower — 204 + 3 × 65 542
+  // = 196 830 bytes; every deterministic fixture is far smaller (the
+  // largest, T4.1's own-text probe, ~33 KiB) and so is every P-2/P-3, P-4,
+  // and P-9 draw. Staged exactly as P-8's driver stages a trial: the base
+  // workspace declared, then the mutated bytes written over the base file
+  // through `file` — the imperative path.
+  const [basePath] = LARGEST_BASE_FILE;
+  const expected = largestStagedDocument();
+  expect(expected.length).toBe(LARGEST_STAGED_INPUT_BYTES);
+  expect(LARGEST_STAGED_INPUT_BYTES).toBe(196_830);
+  expect(basePath).toBe("specs/A.mdx");
+
+  const workspace = await makeWorkspace({
+    files: Object.fromEntries(FUZZ_BASE_FILES),
+  });
+  await workspace.file(basePath, expected);
+
+  // The builder's own listing reports the file once, as a regular file, at
+  // the full declared size — the base workspace's other entries untouched.
+  expect(await workspace.readdirNames("specs")).toEqual(["A.mdx", "B.mdx"]);
+  expect(await workspace.kind(basePath)).toBe("file");
+  const abs = path.join(workspace.root, ...basePath.split("/"));
+  expect((await fsp.stat(abs)).size).toBe(LARGEST_STAGED_INPUT_BYTES);
+
+  // Read back from disk with plain fs, byte-complete: the base text intact
+  // at the front, all three towers behind it.
+  const actual = new Uint8Array(await fsp.readFile(abs));
+  expectByteComplete(actual, expected);
+  expectSameBytes(
+    actual.subarray(0, Buffer.byteLength(LARGEST_BASE_FILE[1], "utf8")),
+    utf8(LARGEST_BASE_FILE[1]),
+  );
+  expect(countOccurrences(actual, '<S id="g">\n')).toBe(
+    3 * DEEPEST_STAGED_TOWER,
+  );
+  expect(countOccurrences(actual, "deep.\n")).toBe(3);
+  for (const [rel, text] of FUZZ_BASE_FILES) {
+    if (rel !== basePath) {
+      expectSameBytes(await workspace.readBytes(rel), utf8(text));
+    }
+  }
 });

@@ -10,8 +10,10 @@
 //
 //   1. the scale is DERIVED from the suite's own generators — P-8/P-11's
 //      towers and mutation budget, P-2/P-3's expansion oracle — never
-//      assumed; the constants below state the derivation, and the fixed CI
-//      seed set (E-5) is replayed to confirm the staged draws stay inside it;
+//      assumed; `staged-scale.ts` states the derivation (shared with S-2,
+//      which stages the same maxima through the workspace builder), and the
+//      fixed CI seed set (E-5) is replayed to confirm the staged draws stay
+//      inside it;
 //   2. synthetic conforming-form documents at that scale are built
 //      iteratively (never by recursion — `JSON.stringify` itself overflows
 //      at these depths) and driven through every H-3/12.7 decoder and every
@@ -86,84 +88,34 @@ import {
   specSubtreeTexts,
 } from "../suite/registry/section-16-p2-p3.js";
 import {
-  FUZZ_BASE_FILES,
   genFuzzTrial,
   MAX_MUTATIONS_PER_TRIAL,
-  NESTING_DEPTHS,
-  sectionTowerSource,
-  TERMINATOR_SEQUENCES,
 } from "../suite/registry/section-16-p8.js";
+import {
+  DEEPEST_STAGED_TOWER,
+  FATTEST_TERMINATOR,
+  GIANT_NESTING_FLOOR,
+  LARGEST_BASE_BYTES,
+  LARGEST_BASE_FILE,
+  LARGEST_STAGED_INPUT_BYTES,
+  largestStagedDocument,
+  TOWER_BYTES,
+} from "./staged-scale.js";
 
 // ---------------------------------------------------------------------------
 // 1. The scale the suite stages — derived from the generators, not assumed
 //
-// Nesting. P-8's giant-nesting draws stage balanced towers `<S id="g">` ×
-// depth (NESTING_DEPTHS; the deepest 4096, the floor 2048 that T1.3-7
-// anchors). A trial applies up to MAX_MUTATIONS_PER_TRIAL mutations to the
-// same file, and a shuffle mutation relocates one contiguous byte range, so
-// tower + tower + shuffle can drop the second tower into the first's
-// innermost level: the deepest section chain any P-8/P-11 draw can stage is
-// 2 × 4096 = 8192 (a third tower would need a fourth mutation). Every `view`
-// and `ids --tree` answer over such an input nests one node per level.
-const GIANT_NESTING_FLOOR = 2048;
-const DEEPEST_STAGED_TOWER = Math.max(...NESTING_DEPTHS);
+// Nesting and document size are derived once, in `staged-scale.ts`
+// (GIANT_NESTING_FLOOR, DEEPEST_STAGED_TOWER, TOWER_BYTES,
+// LARGEST_STAGED_INPUT_BYTES and their derivation comments) — the same
+// constants S-2 stages through the workspace builder. A trial applies up to
+// MAX_MUTATIONS_PER_TRIAL mutations to the same file, and a shuffle mutation
+// relocates one contiguous byte range, so tower + tower + shuffle can drop
+// the second tower into the first's innermost level: the deepest section
+// chain any P-8/P-11 draw can stage is 2 × 4096 = 8192 (a third tower would
+// need a fourth mutation). Every `view` and `ids --tree` answer over such an
+// input nests one node per level.
 const SYNTHETIC_DEPTH = 2 * DEEPEST_STAGED_TOWER;
-
-// Document size. The largest staged file is the largest fuzz base file with
-// every mutation of the budget appending the deepest balanced tower. The
-// competing growth is a terminator rewrite (every LF → the fattest sequence
-// of TERMINATOR_SEQUENCES, U+2028 at three bytes): `towers` towers plus
-// `rewrites` rewrites grow each line feed to at most 2^(rewrites − 1) × 3
-// bytes (LFLF doublings, then the fattest sequence), and every such mix is
-// computed below — the all-towers mix wins. Splices (≤ 8 bytes), garbage
-// (≤ 64), BOMs (≤ 3), and terminator runs (≤ 64 × 3) are smaller than any
-// tower; truncate and shuffle never grow a file. P-2/P-3 documents (≤ 3
-// files × ≤ 6 sections of single-line constructs), P-4/P-9's (≤ 3 sections
-// per file, prose runs ≤ 8 characters), and every deterministic fixture
-// (the largest: T4.1's ~33 KiB own-text probe) are far smaller.
-const TOWER_SOURCE = sectionTowerSource(DEEPEST_STAGED_TOWER, true);
-const TOWER_BYTES = Buffer.byteLength(TOWER_SOURCE, "utf8");
-const FATTEST_TERMINATOR = Math.max(
-  ...TERMINATOR_SEQUENCES.map(([, sequence]) => sequence.length),
-);
-
-function countLineFeeds(text: string): number {
-  let count = 0;
-  for (
-    let index = text.indexOf("\n");
-    index >= 0;
-    index = text.indexOf("\n", index + 1)
-  ) {
-    count += 1;
-  }
-  return count;
-}
-
-/** Every tower/rewrite mix of the mutation budget over one base file. */
-function stagedSizeCandidates(base: string): number[] {
-  const bytes = Buffer.byteLength(base, "utf8");
-  const feeds = countLineFeeds(base);
-  const towerFeeds = countLineFeeds(TOWER_SOURCE);
-  const candidates: number[] = [];
-  for (let towers = 0; towers <= MAX_MUTATIONS_PER_TRIAL; towers += 1) {
-    const rewrites = MAX_MUTATIONS_PER_TRIAL - towers;
-    const bytesPerFeed =
-      rewrites === 0 ? 1 : 2 ** (rewrites - 1) * FATTEST_TERMINATOR;
-    candidates.push(
-      bytes +
-        towers * TOWER_BYTES +
-        (feeds + towers * towerFeeds) * (bytesPerFeed - 1),
-    );
-  }
-  return candidates;
-}
-
-const LARGEST_BASE_BYTES = Math.max(
-  ...FUZZ_BASE_FILES.map(([, text]) => Buffer.byteLength(text, "utf8")),
-);
-const LARGEST_STAGED_INPUT_BYTES = Math.max(
-  ...FUZZ_BASE_FILES.flatMap(([, text]) => stagedSizeCandidates(text)),
-);
 
 // Expansion blowup. SPEC 3 defines a line terminator as CRLF, a lone LF, or
 // a lone CR — nothing else — so after P-8's LF → U+2028 rewrite a tower's
@@ -207,6 +159,11 @@ test("S-8: the derived scale — deepest chain, largest staged input, blowup inp
   );
   expect(LARGEST_STAGED_INPUT_BYTES).toBeGreaterThan(190_000);
   expect(LARGEST_STAGED_INPUT_BYTES).toBeLessThan(200_000);
+  // Attained, not merely bounded: the largest base is an `.mdx` file, so a
+  // nesting draw over it appends the section tower the mix is sized with,
+  // and the document S-2 stages is exactly that mix.
+  expect(LARGEST_BASE_FILE[0].endsWith(".mdx")).toBe(true);
+  expect(largestStagedDocument().length).toBe(LARGEST_STAGED_INPUT_BYTES);
 });
 
 test("S-8: the fixed CI seed set stages within the derived scale (E-5 replay)", () => {

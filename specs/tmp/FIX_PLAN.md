@@ -65,32 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage B — H-11 answer-scale capacity (P-11 harness error), S-8, S-2, T1.3-7
 
-### Task 8 — S-2 scale vectors: ≥ 2048-deep document and the largest staged document, read back byte-complete
-
-Cites: TEST-SPEC §17 S-2 ("with scale vectors at the suite's staged maxima — a
-document nested at least at P-8's giant-nesting floor and one at the largest
-document size the suite stages (deterministic fixtures and generator draws
-alike, 16), each read back byte-complete — so a truncating writer or
-recursion-limited serializer cannot silently stage shallower or smaller inputs
-than declared"); §16 P-8.
-
-Now: `test/self/s2-workspace-builder.test.ts` covers newline kinds, BOMs,
-invalid UTF-8, tree fidelity, scripted git, root escape, dispose — no nesting or
-size vector.
-
-Do: add two vectors to that file: (a) a workspace whose one `.mdx` file nests
-sections 4096 levels deep (build the bytes iteratively; reuse or mirror the
-generator P-8 uses so the vector is the tower the suite actually stages), and
-(b) a file at the largest document size the suite stages (state the derivation
-in a comment: the max over deterministic fixtures and generator size bounds,
-sharing Task 7's derivation if it landed — otherwise compute it here and let
-Task 7 reuse it). Write each through `test/helpers/workspace.ts`'s builder and
-read it back from disk with plain `fs`, asserting byte-for-byte equality and
-the declared byte length; assert the builder's own file/tree listing reports the
-file once with the full size. No recursion in the vector construction.
-
-Verify: `npm run test:self` green; `npm run typecheck`.
-
 ### Task 9 — T1.3-7 Depth: deterministic ≥ 2048-deep workspace (new test)
 
 Cites: TEST-SPEC T1.3-7 ("a valid workspace whose one file nests sections at
