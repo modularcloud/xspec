@@ -46,10 +46,10 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
   failure; a harness error (crash, stack overflow, exhausted limit, decode
   exception outside the assertion protocol) is never acceptable. For a test in
   a certification scope, additionally run `npm run test:self` and confirm C-1.
-- Work top to bottom (Stage A, the certification gate, is complete): Stage B
-  removes the H-11 harness error; Stage C adds the CONF-DISC code-group
-  surface; Stage D is the remaining suite gaps in section order (independent
-  of each other unless a task names a prerequisite).
+- Work top to bottom (Stages A and B — the certification gate and the H-11
+  answer-scale capacity work — are complete): Stage C adds the CONF-DISC
+  code-group surface; Stage D is the remaining suite gaps in section order
+  (independent of each other unless a task names a prerequisite).
 - Commit `sdg(phase-9): <imperative summary>`, ending every commit message with
   the two trailer lines
   `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>` and
@@ -62,48 +62,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
   new build/lint/run knowledge in `AGENTS.md` (nothing else belongs there).
 
 ---
-
-## Stage B — H-11 answer-scale capacity (P-11 harness error), S-8, S-2, T1.3-7
-
-### Task 9a — P-11: size the per-invocation hang guard to the staged answer scale (H-11)
-
-Cites: TEST-SPEC H-11 (the harness is dimensioned to the staged scale), H-8/H-10
-(the hang guard bounds only "the invocation terminates" and is never an
-assertion input), P-11 (its answer arms request `view --text` over the mutated
-base), S-8; AGENTS.md's S-8 note (the `view --text` blowup: two depth-4096
-towers under P-8's LF → U+2028 rewrite, ~204 MB in the `\u2028` spelling — the
-largest answer SPEC.md permits over a staged input).
-
-Now: `FUZZ_COMMAND_TIMEOUT_MS = 10_000` in `test/suite/registry/section-16-p11.ts`
-("generously above any plausible answer time for these staged inputs") is sized
-to parse time, not to a conforming product emitting P-11's largest answer.
-Measured at fd7216b against the built product on this branch: `view --text
-specs/A.mdx` over two balanced depth-4096 towers (`sectionTowerSource(4096,
-true)` twice) with every LF rewritten to U+0020 — a one-line 163,856-byte file
-with the same quadratic expansion as the U+2028 rewrite, in a smaller JSON
-spelling — exits 1 (the towers' 14.2 findings accompany the document) with a
-125,810,349-byte pretty-printed answer after 16.6 s wall clock (14.2 s user,
-6.7 s sys); the `\u2028` spelling is larger, so slower still. Past the guard,
-the driver kills the invocation and the P-11 module's hang-guard conversion
-(near its line 415) reports "invocation was still running when the harness's
-hang guard killed" — a diagnosed failure against a conforming product, H-8
-inverted. Relayed by iterations 8 and 9 outside their tasks; substantiated by
-iteration 10; no earlier task covered it.
-
-Do: rederive the guard from the staged answer scale and state the derivation in
-its comment — a constant with margin over the measured blowup (≥ 4×, so 60 s or
-more: CI runners are slower than the measuring machine), or a budget that grows
-with the captured output — keeping it purely the H-8 termination bound (H-10),
-never an assertion input. Check the P-11 entry's body budget (`timeoutMs:
-420_000`: three fixed seeds × 2–4 mutations × the availability arms) against
-the new worst case (invocations per body × guard) and raise it if needed, so a
-slow-but-terminating product fails as a hang-guard diagnosis of one invocation,
-never as a Vitest body timeout. Never lower the staged scale (S-8 pins it).
-
-Verify: `npx vitest run --config test/vitest.config.ts --project suite
-test/suite/section-16-p11.test.ts` — passes against the built product (no
-hang-guard kill of an invocation still emitting its answer) or fails as a
-diagnosed product failure; `npm run test:self` green (S-8 unchanged).
 
 ## Stage C — CONF-DISC code-group surface (fixture and suite)
 

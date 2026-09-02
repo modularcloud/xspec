@@ -48,6 +48,14 @@
 // rethrows it as a plain `Error` (never a diagnosed assertion failure) with
 // the seed attached for reproduction, matching the certification runner's
 // and the S-7 sweep's outcome taxonomy (H-8).
+//
+// A failure may decline shrinking (`fail(message, { shrinkable: false })`,
+// helpers/assertions.ts): its drawn counterexample is reported as is, with
+// its seed. The shrink budget is counted in property executions, so it
+// bounds wall clock only while an execution is cheap; a failure whose every
+// re-observation costs a full hang guard — an invocation the subprocess
+// driver killed (P-11's termination clause) — would otherwise turn a bounded
+// shrink into hours, past the body's own hang guard.
 
 import { HarnessAssertionError } from "./assertions.js";
 
@@ -235,6 +243,8 @@ export class PropertyFalsifiedError extends HarnessAssertionError {
   readonly shrinkSteps: number;
   /** Property executions spent shrinking. */
   readonly shrinkExecutions: number;
+  /** True when the failure declined shrinking (`HarnessAssertionError.shrinkable`). */
+  readonly shrinkDeclined: boolean;
 
   constructor(details: {
     readonly propertyName: string;
@@ -248,9 +258,11 @@ export class PropertyFalsifiedError extends HarnessAssertionError {
     readonly assertionMessage: string;
     readonly shrinkSteps: number;
     readonly shrinkExecutions: number;
+    readonly shrinkDeclined: boolean;
   }) {
-    const shrinkNote =
-      details.shrinkSteps > 0
+    const shrinkNote = details.shrinkDeclined
+      ? "\n  (reported as drawn: this failure declines shrinking — each re-observation would cost a full hang guard)"
+      : details.shrinkSteps > 0
         ? `\n  shrunk from: ${details.renderedInitialValue}\n  (${String(details.shrinkSteps)} accepted shrink steps, ${String(details.shrinkExecutions)} property executions)`
         : "\n  (already minimal: no shrink candidate was accepted)";
     super(
@@ -269,6 +281,7 @@ export class PropertyFalsifiedError extends HarnessAssertionError {
     this.assertionMessage = details.assertionMessage;
     this.shrinkSteps = details.shrinkSteps;
     this.shrinkExecutions = details.shrinkExecutions;
+    this.shrinkDeclined = details.shrinkDeclined;
   }
 }
 
@@ -405,13 +418,15 @@ export async function checkProperty<T>(
             renderedInput: renderValue(generated.value, options.render),
           });
         }
-        const shrunk = await shrinkFalsification(
-          generator,
-          property,
-          { trial: generated, error },
-          maxShrinkExecutions,
-          { name, seed, render: options.render },
-        );
+        const shrunk: ShrinkResult<T> = error.shrinkable
+          ? await shrinkFalsification(
+              generator,
+              property,
+              { trial: generated, error },
+              maxShrinkExecutions,
+              { name, seed, render: options.render },
+            )
+          : { final: { trial: generated, error }, steps: 0, executions: 0 };
         throw new PropertyFalsifiedError({
           propertyName: name,
           seed,
@@ -424,6 +439,7 @@ export async function checkProperty<T>(
           assertionMessage: shrunk.final.error.message,
           shrinkSteps: shrunk.steps,
           shrinkExecutions: shrunk.executions,
+          shrinkDeclined: !error.shrinkable,
         });
       }
     }

@@ -12,7 +12,10 @@
 //     driver's hang guard (helpers/subprocess.ts): a run killed by the
 //     per-invocation timeout or the runaway-output cap is converted into a
 //     *diagnosed assertion failure* (H-8), because termination is this
-//     property's assertion, not merely harness hygiene;
+//     property's assertion, not merely harness hygiene; the timeout is
+//     dimensioned to the staged answer scale (H-11; `FUZZ_COMMAND_TIMEOUT_MS`
+//     below), and a killed invocation is reported unshrunk, since every
+//     shrink candidate re-observing a kill would cost the full guard;
 //   * stdout is one complete JSON document, never partial — the three
 //     surfaces are JSON-only (SPEC 11: a single JSON document is the only
 //     output form, with or without `--json`), so the entire stdout must
@@ -405,11 +408,28 @@ export function renderAvailabilityTrial(trial: AvailabilityTrial): string {
 
 /**
  * Per-invocation hang guard. Purely the H-8 guard bounding the observation
- * "the invocation terminates" — never an assertion input beyond that (H-10);
- * generously above any plausible answer time for these staged inputs and
- * small enough that a falsified termination clause shrinks in budget.
+ * "the invocation terminates" — never an assertion input beyond that (H-10)
+ * — dimensioned to the staged answer scale (H-11), not to parse time. The
+ * largest answer SPEC.md permits over a P-11 draw is `view --text` over
+ * `specs/A.mdx` carrying two appended depth-4096 section towers under P-8's
+ * LF → U+2028 rewrite (the whole mutation budget), whose quadratic text
+ * expansion S-8 sizes the capture to (~204 MB in the `\u2028` spelling).
+ * Measured at 20ee9fd through `runProduct` against the built product on a
+ * 4-core machine: that invocation emits 58.6 MB and terminates in 17.0 s
+ * (bare `view --text` over the same workspace 16.5 s; the same input with
+ * LF → U+0020, 9.3 s; the other surfaces at that scale — `view`,
+ * `occurrences`, `at` — 1.0–1.5 s; any arm over an unmutated-scale draw
+ * ~0.3 s). 120 s is 7× that maximum: the ≥ 4× margin a conforming product
+ * is owed over its measured answer time, plus headroom for the up-to-3.5×
+ * larger `\u2028` spelling and slower CI runners. So a conforming product
+ * is never killed while still emitting its answer (H-11: an exhausted
+ * harness limit is a harness defect, never a diagnosed product failure),
+ * and a genuinely hanging one costs one guard per diagnosis, reported
+ * unshrunk (runAvailabilityCommand). Re-measure with a temporary self-test
+ * staging `FUZZ_BASE_FILES` with `sectionTowerSource(4096, true)` appended
+ * twice to `specs/A.mdx` and every LF rewritten to U+2028 (see AGENTS.md).
  */
-const FUZZ_COMMAND_TIMEOUT_MS = 10_000;
+const FUZZ_COMMAND_TIMEOUT_MS = 120_000;
 
 /**
  * Run one availability invocation, converting the hang-guard and
@@ -429,12 +449,20 @@ async function runAvailabilityCommand(
       timeoutMs: FUZZ_COMMAND_TIMEOUT_MS,
     });
   } catch (error) {
+    // Both driver kills are reported unshrunk (`shrinkable: false`): a
+    // shrink candidate can re-observe a kill only by waiting out the guard
+    // (or filling the output cap) again — one full guard per candidate — so
+    // shrinking's execution budget would stop bounding the body's wall
+    // clock (the entry's `timeoutMs` below). The drawn trial, at most three
+    // mutations and four invocations, is the reported counterexample, and
+    // its seed replays it (H-10).
     if (error instanceof ProductRunTimeoutError) {
       fail(
         `P-11: every invocation of the availability surfaces must terminate ` +
           `on fuzzed sources (TEST-SPEC §16 P-11; SPEC 11.2, 12.0), but the ` +
           `invocation was still running when the harness's hang guard killed ` +
           `it — ${error.message}`,
+        { shrinkable: false },
       );
     }
     if (error instanceof ProductRunOutputOverflowError) {
@@ -443,6 +471,7 @@ async function runAvailabilityCommand(
           `complete JSON document (TEST-SPEC §16 P-11; SPEC 11, 12.0) — but ` +
           `the invocation emitted unbounded output until the harness's ` +
           `runaway-output guard killed it — ${error.message}`,
+        { shrinkable: false },
       );
     }
     throw error;
@@ -608,10 +637,24 @@ const P_11 = defineProductTest({
     "argument errors), answer in the three-state 12.7 datum forms, and exit " +
     "1 exactly when the answer carries a finding or an unavailable datum " +
     "(SPEC 11.2, 11.4, 12.7; TEST-SPEC §16 P-11)",
-  // Wall-clock hang guard only (H-10): three fixed seeds (E-5), a 2–4
-  // invocation sweep per trial with no staging build, plus the shrink budget
-  // on falsification.
-  timeoutMs: 420_000,
+  // Wall-clock hang guard on the body only (H-10), sized to the diagnosis
+  // path, never an assertion input. The sweep is three fixed seeds (E-5) ×
+  // 12 trials × 2–4 invocations, ≤ 144, each bounded by
+  // FUZZ_COMMAND_TIMEOUT_MS and with no staging build. A conforming product
+  // answers within the measured scale that guard is derived from — ≤ 17 s
+  // for a `view --text` arm at the staged maximum, ≤ 1.5 s for any other arm
+  // at tower scale (the pinned seeds draw 18 `view --text` answer arms, 2 of
+  // them over towers, and 5 tower trials in all; dry run at 20ee9fd) — so a
+  // sweep whose every text arm reached the maximum runs ≈ 8.5 min; a
+  // slow-but-terminating product then fails as one hang-guard kill on top,
+  // unshrunk (≈ 10.5 min in all), and 20 min doubles that for CI runners:
+  // the failure is the guard's diagnosis of one invocation, never this body
+  // timeout. Shrinking any other failure class costs answer time, not guard
+  // time (≤ 100 executions at ≤ 17 s per maximal-scale text arm). The
+  // adversarial bound — every invocation just under the guard — is ≈ 4.8 h,
+  // past the 45-minute CI job ceiling governing the whole suite; no body
+  // budget can cover it.
+  timeoutMs: 1_200_000,
   run: async (product) => {
     await checkProperty(
       "P-11 availability robustness",

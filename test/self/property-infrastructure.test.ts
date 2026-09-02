@@ -147,6 +147,50 @@ test("a forced failure reports its seed and shrinks to the minimal counterexampl
   expect(error.assertionMessage).toBe("generated value 100 is >= 100");
 });
 
+test("a failure that declines shrinking is reported as drawn, with its seed (P-11's killed invocations)", async () => {
+  let executions = 0;
+  const thrown = await captureRejection(
+    checkProperty(
+      "demo: every value stays below 100, unshrunk",
+      (choices) => choices.intInclusive(0, 100000),
+      (value) => {
+        executions += 1;
+        if (value >= 100) {
+          fail(`generated value ${String(value)} is >= 100`, {
+            shrinkable: false,
+          });
+        }
+      },
+      { runs: 50, seeds: [123456], env: {} },
+    ),
+  );
+
+  // Still a diagnosed falsification naming its seed (H-8, H-10) …
+  expect(thrown).toBeInstanceOf(PropertyFalsifiedError);
+  const error = thrown as PropertyFalsifiedError;
+  expect(error.seed).toBe(123456);
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=123456`);
+
+  // … but no shrink candidate was executed: the property ran exactly once per
+  // trial up to the failing one, and the counterexample is the drawn value …
+  expect(error.shrinkDeclined).toBe(true);
+  expect(error.shrinkSteps).toBe(0);
+  expect(error.shrinkExecutions).toBe(0);
+  expect(executions).toBe(error.trial);
+  expect(error.value).toBe(error.initialValue);
+  expect(error.value).toBeGreaterThanOrEqual(100);
+  expect(error.assertionMessage).toBe(
+    `generated value ${String(error.value)} is >= 100`,
+  );
+
+  // … and the report says so rather than claiming minimality.
+  expect(error.message).toContain("reported as drawn");
+  expect(error.message).not.toContain("already minimal");
+
+  // The default is unchanged: a plain failure shrinks.
+  expect(new HarnessAssertionError("plain").shrinkable).toBe(true);
+});
+
 test("structured counterexamples shrink, deterministically across runs (TEST-SPEC 16, E-5)", async () => {
   // Inline generic combinator + inferred property parameter: the composition
   // style every section-16 property will use.

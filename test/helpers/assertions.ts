@@ -33,15 +33,33 @@ import { summarizeResult } from "./subprocess.js";
  * below); any other exception escaping a test body is a harness error.
  */
 export class HarnessAssertionError extends Error {
-  constructor(message: string) {
+  /**
+   * Whether a property this failure falsifies is shrunk before it is
+   * reported (helpers/property.ts `checkProperty`); default true. Shrinking
+   * is bounded in property executions, and that bound stops bounding wall
+   * clock when every re-observation of the failure costs a full hang guard —
+   * an invocation the subprocess driver killed (P-11's termination clause,
+   * TEST-SPEC §16): such a failure declines shrinking, and the drawn
+   * counterexample is reported as is, with its seed (H-10).
+   */
+  readonly shrinkable: boolean;
+
+  constructor(message: string, options: FailOptions = {}) {
     super(message);
     this.name = "HarnessAssertionError";
+    this.shrinkable = options.shrinkable ?? true;
   }
 }
 
+/** Options of {@link fail}. */
+export interface FailOptions {
+  /** See {@link HarnessAssertionError.shrinkable}; default true. */
+  readonly shrinkable?: boolean;
+}
+
 /** Throw a diagnosed assertion failure (H-8). */
-export function fail(message: string): never {
-  throw new HarnessAssertionError(message);
+export function fail(message: string, options?: FailOptions): never {
+  throw new HarnessAssertionError(message, options);
 }
 
 /** View assertion input as bytes: strings are UTF-8, byte inputs are as-is. */
