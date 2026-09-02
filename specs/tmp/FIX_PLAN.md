@@ -65,27 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 14 — T1.3-6: valueless-`id` (`<S id>`) masking arm — bearer's own code is 14.17, never 14.1
-
-Cites: TEST-SPEC T1.3-6 (masking: a bearer whose `id` is not a plain static
-string withdraws identity for its subtree; the valueless spelling `<S id>` is
-the 2.7 form-invalid prop — condition 14.17 on the bearer, and never 14.1);
-SPEC 1.3, 2.7, 14.1, 14.17.
-
-Now: `test/suite/registry/section-1.3.ts` ≈ lines 409–414 stages only the
-repeated-`id` and braced-`id` bearers.
-
-Do: add a third bearer arm in the same fixture family: `<S id>` (no value)
-enclosing a valid descendant; `build` → the bearer reports exactly one 14.17
-finding located at the prop/tag as the existing arms locate theirs, no 14.1
-anywhere, and the descendants' masking outcome identical to the other two
-arms (same identities/unavailability). Use exact per-condition counts as
-`section-11.2.ts` 968–971 does.
-
-Verify: `npx vitest run … test/suite/section-1.3.test.ts`; `npm run test:self`
-green (CONF-VALID's in-scope T1.3-6 still passes the conformer, both VALID
-violators still fail exactly their sets).
-
 ### Task 15 — T2.7-3: valueless `<S id>`, `<S id="x" coverage>`, `<S id="x" tags>` arms; export the shared `tags` fixture
 
 Cites: TEST-SPEC T2.7-3 (every prop of 2.7 spelled valueless is form-invalid —

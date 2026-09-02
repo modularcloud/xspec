@@ -388,12 +388,16 @@ const MASK_SOURCE = `${MASK_PREFIX}${MASK_GRANDCHILD}${MASK_MID}${MASK_BAD_CHILD
 // children exactly as a missing `id` does — SPEC 2.7, 14.2, 14.17). Each arm
 // stages one bearer with an immediate child whose ID the structural rule
 // would otherwise judge — `a.b` extends none of the bearer's spelled value
-// candidates (`one`, `two`, `x`) and is multi-segment against the empty
-// prefix, so a product that fails to mask, or silently adopts one of the
-// spelled values as the identity, reports an extra 14.2 — and a grandchild
-// whose structural check runs normally against its parent's spelled id
-// `a.b`. A valid sibling precedes the bearer so the bearer's construct is a
-// proper sub-range of the file and its location assertion has teeth.
+// candidates (`one`, `two`, `x`; the valueless bearer spells none) and is
+// multi-segment against the empty prefix, so a product that fails to mask,
+// or silently adopts one of the spelled values as the identity, reports an
+// extra 14.2 — and a grandchild whose structural check runs normally
+// against its parent's spelled id `a.b`. The valueless arm (`<S id>`, the
+// bare name — T2.7-3's form) masks the same children whether a product
+// reads it as condition 17 or as an absent `id` (condition 1), so its
+// discriminating assertion is the bearer's own code: exactly one 14.17 and
+// no 14.1. A valid sibling precedes the bearer so the bearer's construct is
+// a proper sub-range of the file and its location assertion has teeth.
 interface InvalidIdFormArm {
   /** Which T1.3-6 invalid-form case this is (failure diagnostics). */
   readonly name: string;
@@ -418,6 +422,11 @@ const INVALID_ID_FORM_ARMS: readonly InvalidIdFormArm[] = [
     name: 'a braced-`id` section (`<S id={"x"}>`)',
     bearerOpen:
       '<S id={"x"}>\nBearer: the id value is not a quoted static string literal.\n\n',
+  },
+  {
+    name: "a valueless-`id` section (`<S id>`)",
+    bearerOpen:
+      "<S id>\nBearer: the id prop is the bare name, spelling no value at all.\n\n",
   },
 ];
 
@@ -471,7 +480,7 @@ async function runInvalidIdFormArm(
 const T1_3_6 = defineProductTest({
   id: "T1.3-6",
   title:
-    "missing-id masking: immediate children of an id-less section report no 14.2, while their other conditions and the grandchildren's structural checks still report; a repeated-`id` or braced-`id` bearer reports 14.17 — never 14.1 — masking the same way (SPEC 1.3, 2.7, 14.1, 14.2, 14.17)",
+    "missing-id masking: immediate children of an id-less section report no 14.2, while their other conditions and the grandchildren's structural checks still report; a repeated-`id`, braced-`id`, or valueless-`id` (`<S id>`) bearer reports 14.17 — never 14.1 — masking the same way (SPEC 1.3, 2.7, 14.1, 14.2, 14.17)",
   run: async (product) => {
     const context =
       "T1.3-6 `build --json` over an id-less section with children";
@@ -516,8 +525,9 @@ const T1_3_6 = defineProductTest({
       `${context}: the immediate child's own 14.4 finding (other conditions are not masked)`,
     );
 
-    // Invalid-form arms: a repeated `id` and a braced `id={"x"}` each report
-    // condition 17 and mask 14.2 for the immediate children the same way.
+    // Invalid-form arms: a repeated `id`, a braced `id={"x"}`, and a
+    // valueless `<S id>` each report condition 17 — the bare name is never
+    // `missing-id` — and mask 14.2 for the immediate children the same way.
     for (const arm of INVALID_ID_FORM_ARMS) {
       await runInvalidIdFormArm(product, arm);
     }
