@@ -65,45 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage A — certification gate: CONF-CORE refresh, T13.5-1 stale arm, VIOL-CORE-EARLYREFRESH, manifest
 
-### Task 1 — CONF-CORE conformer: 13.3 refresh inside mutating `review` subcommands, after the hold
-
-Cites: CERTIFICATIONS.md §CONF-CORE Scope ("on a workspace whose graph data is
-stale but whose sources are valid … the 13.3 refresh a mutating `review`
-subcommand performs after the hold and before its own writes, writing graph
-data byte-identical to what `build` writes (13.3, T10.1-1), as T13.5-1's
-stale-workspace arm observes it"); §VIOL-CORE-EARLYREFRESH (whose passing side
-needs the conformer's refresh to be distinguishable); TEST-SPEC T13.5-1
-stale-workspace arm; SPEC 13.3, 13.5.
-
-Now: in `test/fixtures/conf-core/product.mjs` graph data (`.xspec/graph.json`)
-is written only by `regenerate()` (≈ line 1112), whose call sites are `build`
-(≈ 2021), `rename` (≈ 2390) and file-form `move` (≈ 2452). `review create`,
-`resolve`, `split` call `loadGraph` only (≈ 2545, 2626, 2724), so a stale
-workspace stays stale across a mutating `review` subcommand and the conformer
-would fail T13.5-1's stale arm (Task 2).
-
-Do: in `runMutating` (≈ 1971) — or in each mutating `review` subcommand's
-`operate` body — after exclusivity is acquired and the hold has been created and
-released (`holdIfRequested`, the `writesBeforeHold` deviation's ordering
-untouched), and before the subcommand's own writes (session file, journal),
-refresh stale graph data: compare the stored graph against the current sources
-exactly as the read path decides staleness, and when stale write graph data
-byte-identical to what `build` writes (reuse `regenerate` or the same
-serialization; nothing else written). A workspace whose graph data is current
-must be refreshed by nothing (byte-identical graph data). Keep `rename`/`move`
-and every read command as they are. Add a short comment naming the CERTIFICATIONS
-§CONF-CORE scope sentence. Design the insertion so Task 3's single deviation
-switch can move the refresh to before exclusivity is acquired.
-
-Verify: stage by hand a workspace (one spec group, two `.mdx` sections), `node
-test/fixtures/conf-core/bin.mjs build`, edit a section's text, run `… review
-create --name n --strategy audit --test-hold <path outside the workspace>` in
-the background: while the hold file exists, `.xspec/graph.json` is byte-identical
-to its pre-invocation bytes; delete the hold file; after exit 0 the graph data
-equals the bytes a fresh `build` on a twin workspace writes and the session
-exists. `npm run test:self` shows no new failures (the two
-`certification-document` failures remain until Task 4).
-
 ### Task 2 — T13.5-1: stale-workspace arm (`review create --strategy audit --test-hold` on stale graph data)
 
 Cites: TEST-SPEC T13.5-1 ("Stale-workspace arm (13.5: the hold precedes every

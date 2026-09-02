@@ -15,7 +15,11 @@
 // - `rename` and file-form `move` with journal append (SPEC 6.1, 6.2).
 // - `review` with the `audit` strategy (SPEC 10.6) through `create`,
 //   `resolve`, `split`, and the read subcommands, including read-time
-//   invalidation over the recorded state of SPEC 10.4.
+//   invalidation over the recorded state of SPEC 10.4, and — on a workspace
+//   whose graph data is stale but whose sources are valid — the SPEC 13.3
+//   refresh a mutating `review` subcommand performs after the hold and
+//   before its own writes, writing graph data byte-identical to what
+//   `build` writes (T13.5-1's stale-workspace arm, T10.1-1).
 // - SPEC 13.4 durable protection and SPEC 13.5 in full, `--test-hold`
 //   included.
 //
@@ -31,6 +35,12 @@
 //   with O_EXCL (anything already there — a symbolic link included — fails
 //   the command exit 2 without modifying anything); the command proceeds
 //   only once that file has been deleted.
+// - 13.3 refresh (SPEC 13.3): a mutating `review` subcommand, after the hold
+//   and before its own writes, compares the stored graph data against the
+//   current sources (the recorded derived-file paths excluded) and rewrites
+//   stale graph data alone, exactly as `build` writes it — see
+//   refreshStaleGraphData; `rename` and `move` regenerate every derived file
+//   at their end instead (SPEC 6.4, 6.5).
 // - Atomic visibility (SPEC 13.5): every derived and durable write goes
 //   through a temp file in the target's directory renamed over the target,
 //   so a concurrent reader observes prior content, complete new content, or
@@ -152,10 +162,11 @@ const PARTIAL_WRITE_INTERVAL_MS = 50;
  * and only then receives the remainder, completing the content. The path is
  * never unlinked, so a concurrent reader observes the partial file — never
  * absence — and after the call resolves the path holds the complete bytes
- * (each completed command still leaves the conformer's final state). Used by
- * regenerate() alone, under the `partialDerivedWrites` deviation: derived
- * files only — durable files (journal, sessions, sources) keep the
- * conformer's atomic writes everywhere.
+ * (each completed command still leaves the conformer's final state). Used
+ * through derivedWriter() alone — regenerate() and refreshStaleGraphData() —
+ * under the `partialDerivedWrites` deviation: derived files only — durable
+ * files (journal, sessions, sources) keep the conformer's atomic writes
+ * everywhere.
  */
 async function writeFilePartialThenComplete(absPath, data) {
   const bytes = Buffer.from(data);
@@ -1061,7 +1072,18 @@ function moduleContent(model) {
   );
 }
 
-function graphDataContent(graph) {
+/** Derived-file paths as `build` records them: the modules generated now. */
+function currentDerivedPaths(graph) {
+  return graph.files.map((model) => modulePathFor(model.rel)).sort();
+}
+
+/**
+ * Graph data exactly as `build` writes it (SPEC 13.3, 13.4): per-file
+ * section ids, node hashes, and source ranges, plus the recorded derived-file
+ * paths — the paths generated now or, for the 13.3 refresh, the stored
+ * record left unchanged (`derived`).
+ */
+function graphDataContent(graph, derived = currentDerivedPaths(graph)) {
   const filesData = {};
   for (const model of graph.files) {
     const nodes = {};
@@ -1081,7 +1103,6 @@ function graphDataContent(graph) {
       nodes,
     };
   }
-  const derived = graph.files.map((model) => modulePathFor(model.rel)).sort();
   return canonicalJson({ derived, files: filesData }) + "\n";
 }
 
@@ -1104,25 +1125,34 @@ async function readRecordedDerived(root) {
 }
 
 /**
+ * The writer every derived-file write goes through — regenerate() and the
+ * 13.3 refresh (refreshStaleGraphData) are this fixture's only derived-file
+ * writers; durable files (journal, sessions, sources) are written atomically
+ * everywhere.
+ *
+ * VIOL-CORE-PARTIALWRITE (CERTIFICATIONS.md): derived-file writes are not
+ * atomic in their observable effect — while a derived file is being written,
+ * its path holds a strict prefix of the new content for a sustained interval,
+ * long relative to a concurrent reader's polling cadence, before the
+ * complete content appears (see writeFilePartialThenComplete). Switching the
+ * writer here deviates every derived write — generated modules and graph
+ * data — and nothing else: durable files are unaffected, orphan removal and
+ * each command's completed final bytes are unchanged.
+ */
+function derivedWriter() {
+  return deviations.partialDerivedWrites
+    ? writeFilePartialThenComplete
+    : writeFileAtomic;
+}
+
+/**
  * Regenerate every derived file exactly as `build` writes it: modules per
  * source, orphan removal via the recorded derived paths, graph data
  * (SPEC 12.1, 13.3, 13.4). Rename and move finish with this same
  * regeneration (SPEC 6.4, 6.5).
  */
 async function regenerate(graph) {
-  // VIOL-CORE-PARTIALWRITE (CERTIFICATIONS.md): derived-file writes are not
-  // atomic in their observable effect — while a derived file is being
-  // written, its path holds a strict prefix of the new content for a
-  // sustained interval, long relative to a concurrent reader's polling
-  // cadence, before the complete content appears (see
-  // writeFilePartialThenComplete). regenerate() is this fixture's only
-  // derived-file writer, so switching the writer here deviates every derived
-  // write — generated modules and graph data — and nothing else: durable
-  // files (journal, sessions, sources) are unaffected, orphan removal and
-  // each command's completed final bytes are unchanged.
-  const write = deviations.partialDerivedWrites
-    ? writeFilePartialThenComplete
-    : writeFileAtomic;
+  const write = derivedWriter();
   const recorded = await readRecordedDerived(graph.root);
   const current = new Set(graph.files.map((model) => modulePathFor(model.rel)));
   for (const orphan of recorded) {
@@ -1137,6 +1167,64 @@ async function regenerate(graph) {
     );
   }
   await write(path.join(graph.root, GRAPH_DATA_REL), graphDataContent(graph));
+}
+
+/**
+ * The stored graph data as the 13.3 refresh consults it: `missing` (no
+ * file), `unreadable` (present but not readable as a record, SPEC 14.23 — a
+ * state refresh neither repairs nor replaces), or `readable` with its exact
+ * bytes and its recorded derived-file paths.
+ */
+async function readGraphDataRecord(root) {
+  let text;
+  try {
+    text = await fsp.readFile(path.join(root, GRAPH_DATA_REL), "utf8");
+  } catch (error) {
+    return { state: error.code === "ENOENT" ? "missing" : "unreadable" };
+  }
+  try {
+    const parsed = JSON.parse(text);
+    if (
+      Array.isArray(parsed?.derived) &&
+      parsed.derived.every((entry) => typeof entry === "string") &&
+      typeof parsed.files === "object" &&
+      parsed.files !== null
+    ) {
+      return { state: "readable", text, derived: parsed.derived };
+    }
+  } catch {
+    // Not JSON: not readable as a record.
+  }
+  return { state: "unreadable" };
+}
+
+/**
+ * The 13.3 refresh of stale graph data, as a mutating `review` subcommand
+ * performs it (CERTIFICATIONS.md §CONF-CORE Scope: "on a workspace whose
+ * graph data is stale but whose sources are valid … the 13.3 refresh a
+ * mutating `review` subcommand performs after the hold and before its own
+ * writes, writing graph data byte-identical to what `build` writes (13.3,
+ * T10.1-1), as T13.5-1's stale-workspace arm observes it"). Graph data is
+ * stale when it is missing or does not match the current sources — a
+ * comparison from which the recorded derived-file paths are excluded — and
+ * is then rewritten exactly as `build` writes it, except that no module is
+ * generated or removed and the recorded derived-file paths are left
+ * unchanged (SPEC 13.3); nothing else is written. Current graph data is
+ * refreshed by nothing (its bytes untouched), and a record that exists but
+ * cannot be read (SPEC 14.23) is neither repaired nor replaced. The graph is
+ * loaded exactly as the subcommand loads it, so an invalid workspace reports
+ * its findings here, before anything is written (SPEC 13.3, 12.0).
+ */
+async function refreshStaleGraphData(config) {
+  const graph = await loadGraph(config.root, config.groups);
+  const record = await readGraphDataRecord(config.root);
+  if (record.state === "unreadable") return;
+  const content = graphDataContent(
+    graph,
+    record.state === "readable" ? record.derived : undefined,
+  );
+  if (record.state === "readable" && record.text === content) return;
+  await derivedWriter()(path.join(config.root, GRAPH_DATA_REL), content);
 }
 
 // ---------------------------------------------------------------------------
@@ -1968,8 +2056,31 @@ const MUTATING_FLAGS = { ...READ_FLAGS, "--test-hold": "value" };
  * release. The lock is released on every path; a killed process releases by
  * dying (the next command detects the dead holder).
  */
-async function runMutating(cwd, configFlag, holdFlag, operate) {
+/**
+ * Run a mutating command (SPEC 13.5): configuration, then workspace
+ * exclusivity, then the `--test-hold` seam, then — for the mutating `review`
+ * subcommands (`refreshesGraphData`) — the 13.3 refresh of stale graph data,
+ * then the operation's own writes (`operate`); exclusivity ends with the
+ * command.
+ */
+async function runMutating(
+  cwd,
+  configFlag,
+  holdFlag,
+  operate,
+  { refreshesGraphData = false } = {},
+) {
   const config = await loadConfig(cwd, configFlag);
+  // The 13.3 refresh of stale graph data (CERTIFICATIONS.md §CONF-CORE Scope:
+  // "the 13.3 refresh a mutating `review` subcommand performs after the hold
+  // and before its own writes, writing graph data byte-identical to what
+  // `build` writes"): only the mutating `review` subcommands refresh —
+  // `rename` and file-form `move` finish with a full regeneration instead
+  // (SPEC 6.4, 6.5) — and the conformer runs it below, after exclusivity is
+  // acquired and the hold has been released, before the operation's writes.
+  const refreshIfStale = async () => {
+    if (refreshesGraphData) await refreshStaleGraphData(config);
+  };
   // VIOL-CORE-NOLOCK (CERTIFICATIONS.md): mutating commands do not exclude
   // one another — exclusivity is neither acquired nor checked, so a second
   // mutating command started while another runs or is held proceeds normally
@@ -1995,15 +2106,18 @@ async function runMutating(cwd, configFlag, holdFlag, operate) {
       // VIOL-CORE-EARLYWRITE (CERTIFICATIONS.md): the mutating command
       // performs its workspace modifications before creating the hold file —
       // it acquires exclusivity (above, unchanged), completes the operation's
-      // writes (journal append included), then creates the hold file, waits
-      // for its deletion, and exits normally with the operation's outcome.
-      // The hold seam's own semantics (empty file, occupied path fails
-      // exit 2) and everything else are exactly the conformer's behavior.
+      // writes (the 13.3 refresh of stale graph data and the journal append
+      // included), then creates the hold file, waits for its deletion, and
+      // exits normally with the operation's outcome. The hold seam's own
+      // semantics (empty file, occupied path fails exit 2) and everything
+      // else are exactly the conformer's behavior.
+      await refreshIfStale();
       const code = await operate(config);
       await holdIfRequested();
       return code;
     }
     await holdIfRequested();
+    await refreshIfStale();
     return await operate(config);
   } finally {
     await lock.release();
@@ -2602,6 +2716,7 @@ async function reviewCreate(io, cwd, argv) {
       ]);
       return 0;
     },
+    { refreshesGraphData: true },
   );
 }
 
@@ -2645,6 +2760,7 @@ async function reviewResolve(io, cwd, argv) {
       ]);
       return 0;
     },
+    { refreshesGraphData: true },
   );
 }
 
@@ -2839,6 +2955,7 @@ async function reviewSplit(io, cwd, argv) {
       ]);
       return 0;
     },
+    { refreshesGraphData: true },
   );
 }
 
