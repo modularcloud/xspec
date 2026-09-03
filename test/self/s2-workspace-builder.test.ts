@@ -6,12 +6,15 @@
 // T7-5, T13.4-6), and git fixtures with scripted commits carrying pinned,
 // platform-independent identities and timestamps (E-6) — and scale vectors
 // at the suite's staged maxima (`staged-scale.ts`, shared with S-8): the
-// 4096-deep section tower P-8's giant-nesting draws stage and the largest
-// document any draw stages, each read back byte-complete, so a truncating
-// writer or recursion-limited serializer cannot silently stage shallower or
-// smaller inputs than declared (H-11's input side). Certification cannot
-// exercise builder bugs that make fixtures diverge from their declarations,
-// so this self-test must pass before any fixture is trusted.
+// 4096-deep section tower P-8's giant-nesting draws stage, the largest
+// document any generator draw stages, and the largest document any
+// deterministic fixture stages (T1.3-7's 2048-deep chained-id tower — the
+// largest document the suite stages), each read back byte-complete, so a
+// truncating writer or recursion-limited serializer cannot silently stage
+// shallower or smaller inputs than declared (H-11's input side).
+// Certification cannot exercise builder bugs that make fixtures diverge from
+// their declarations, so this self-test must pass before any fixture is
+// trusted.
 //
 // Platform gates mirror TEST-SPEC's own staging notes, not CI skips: the
 // `self` project runs on Linux in CI (harness-self job), where every test
@@ -34,9 +37,14 @@ import type { WorkspaceDecl } from "../helpers/workspace.js";
 import { FUZZ_BASE_FILES } from "../suite/registry/section-16-p8.js";
 import {
   DEEPEST_STAGED_TOWER,
+  DEPTH_FLOOR,
+  depthTower,
   GIANT_NESTING_FLOOR,
   LARGEST_BASE_FILE,
+  LARGEST_DETERMINISTIC_INPUT_BYTES,
   LARGEST_GENERATED_INPUT_BYTES,
+  LARGEST_STAGED_INPUT_BYTES,
+  largestDeterministicDocument,
   largestGeneratedDocument,
   TOWER_SOURCE,
 } from "./staged-scale.js";
@@ -398,9 +406,10 @@ test("dispose() removes the workspace entirely, read-only git objects included",
 
 // ---------------------------------------------------------------------------
 // Scale vectors (S-2): the suite's staged maxima, read back byte-complete.
-// Both vectors are built by string repetition and buffer concatenation —
-// never by recursion — and compared as whole byte arrays read back from disk
-// through plain `fs`, independently of the builder's own readers.
+// Every vector is built iteratively — string repetition, buffer
+// concatenation, one loop over the levels — never by recursion, and compared
+// as whole byte arrays read back from disk through plain `fs`, independently
+// of the builder's own readers.
 
 /** Whole-array comparison with a diagnosable first-mismatch report. */
 function expectByteComplete(actual: Uint8Array, expected: Uint8Array): void {
@@ -467,13 +476,14 @@ test("scale vector: one `.mdx` file nesting sections 4096 deep — P-8's staged 
   expect(countOccurrences(actual, "deep.\n")).toBe(1);
 });
 
-test("scale vector: the largest document the suite stages (fuzz base plus the whole mutation budget of towers), read back byte-complete", async () => {
-  // Derivation (staged-scale.ts, shared with S-8): the largest staged file
-  // is the largest fuzz base file (`specs/A.mdx`) with all three mutations
-  // of P-8's budget appending the deepest balanced tower — 204 + 3 × 65 542
-  // = 196 830 bytes; every deterministic fixture is far smaller (the
-  // largest, T4.1's own-text probe, ~33 KiB) and so is every P-2/P-3, P-4,
-  // and P-9 draw. Staged exactly as P-8's driver stages a trial: the base
+test("scale vector: the largest document any generator draw stages (fuzz base plus the whole mutation budget of towers), read back byte-complete", async () => {
+  // Derivation (staged-scale.ts, shared with S-8): the largest file any
+  // generator draw stages is the largest fuzz base file (`specs/A.mdx`) with
+  // all three mutations of P-8's budget appending the deepest balanced tower
+  // — 204 + 3 × 65 542 = 196 830 bytes; every P-2/P-3, P-4, and P-9 draw is
+  // far smaller. The deterministic fixture T1.3-7 stages a document ~21×
+  // larger — the largest document the suite stages, the next vector's
+  // subject. Staged exactly as P-8's driver stages a trial: the base
   // workspace declared, then the mutated bytes written over the base file
   // through `file` — the imperative path.
   const [basePath] = LARGEST_BASE_FILE;
@@ -511,4 +521,62 @@ test("scale vector: the largest document the suite stages (fuzz base plus the wh
       expectSameBytes(await workspace.readBytes(rel), utf8(text));
     }
   }
+});
+
+test("scale vector: the largest document the suite stages — T1.3-7's 2048-deep chained-id tower (4 225 030 bytes), read back byte-complete", async () => {
+  // Derivation (staged-scale.ts, shared with S-8): the largest document the
+  // suite stages is deterministic — T1.3-7's `specs/A.mdx`, nesting sections
+  // DEPTH_FLOOR deep with chained ids (`a`, `a.b`, `a.b.c`, …;
+  // section-1.3.ts). Every id spells its whole ancestor chain, so the file is
+  // quadratic in the depth: 9·D + D·(D + 1) + 6 + 5·D = 4 225 030 bytes at
+  // D = 2048, ~21× the generator maximum above — the truncation window the
+  // two vectors above cannot see. `expected` is the document byte for byte;
+  // the exact-size pins move only when DEPTH_FLOOR does — deliberately.
+  const tower = depthTower(DEPTH_FLOOR);
+  const expected = largestDeterministicDocument();
+  expect(DEPTH_FLOOR).toBe(2048);
+  expect(DEPTH_FLOOR).toBeGreaterThanOrEqual(GIANT_NESTING_FLOOR);
+  expect(expected.length).toBe(LARGEST_DETERMINISTIC_INPUT_BYTES);
+  expect(expected.length).toBe(4_225_030);
+  expectByteComplete(expected, utf8(tower.source));
+  // The vector's subject is the suite's staged maximum, not merely the
+  // deterministic one: this pin fails the day a generator bound outgrows
+  // T1.3-7's document, when the title above stops being true and the vector
+  // must move with it.
+  expect(LARGEST_STAGED_INPUT_BYTES).toBe(expected.length);
+
+  // Staged exactly as T1.3-7 stages it: `specs/A.mdx` declared through the
+  // builder's declarative path (create → file), the byte class the fixture
+  // exercises — its `xspec.config.ts` is irrelevant to the builder.
+  const workspace = await makeWorkspace({
+    files: { "specs/A.mdx": tower.source },
+  });
+
+  // The builder's own listing reports the file once, as a regular file, at
+  // the full declared size.
+  expect(await workspace.readdirNames()).toEqual(["specs"]);
+  expect(await workspace.readdirNames("specs")).toEqual(["A.mdx"]);
+  expect(await workspace.kind("specs/A.mdx")).toBe("file");
+  const abs = path.join(workspace.root, "specs", "A.mdx");
+  expect((await fsp.stat(abs)).size).toBe(4_225_030);
+
+  // Read back from disk with plain fs: byte-complete, and still the declared
+  // chain end to end — not merely DEPTH_FLOOR openers of any ids: every
+  // opener and closer, the one content line, every line feed, and the
+  // outermost (`a`) and innermost (4 095-character) ids each exactly once.
+  const actual = new Uint8Array(await fsp.readFile(abs));
+  expectByteComplete(actual, expected);
+  expect(countOccurrences(actual, '<S id="')).toBe(DEPTH_FLOOR);
+  expect(countOccurrences(actual, "</S>\n")).toBe(DEPTH_FLOOR);
+  expect(countOccurrences(actual, "deep.\n")).toBe(1);
+  expect(countOccurrences(actual, "\n")).toBe(2 * DEPTH_FLOOR + 1);
+  expect(2 * DEPTH_FLOOR + 1).toBe(4_097);
+  expect(tower.ids).toHaveLength(DEPTH_FLOOR);
+  const outermost = tower.ids[0]!;
+  const innermost = tower.ids[DEPTH_FLOOR - 1]!;
+  expect(outermost).toBe("a");
+  expect(innermost).toHaveLength(2 * DEPTH_FLOOR - 1);
+  expect(innermost).toHaveLength(4_095);
+  expect(countOccurrences(actual, `<S id="${outermost}">\n`)).toBe(1);
+  expect(countOccurrences(actual, `<S id="${innermost}">\n`)).toBe(1);
 });
