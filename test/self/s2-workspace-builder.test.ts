@@ -36,8 +36,8 @@ import {
   DEEPEST_STAGED_TOWER,
   GIANT_NESTING_FLOOR,
   LARGEST_BASE_FILE,
-  LARGEST_STAGED_INPUT_BYTES,
-  largestStagedDocument,
+  LARGEST_GENERATED_INPUT_BYTES,
+  largestGeneratedDocument,
   TOWER_SOURCE,
 } from "./staged-scale.js";
 
@@ -477,9 +477,9 @@ test("scale vector: the largest document the suite stages (fuzz base plus the wh
   // workspace declared, then the mutated bytes written over the base file
   // through `file` — the imperative path.
   const [basePath] = LARGEST_BASE_FILE;
-  const expected = largestStagedDocument();
-  expect(expected.length).toBe(LARGEST_STAGED_INPUT_BYTES);
-  expect(LARGEST_STAGED_INPUT_BYTES).toBe(196_830);
+  const expected = largestGeneratedDocument();
+  expect(expected.length).toBe(LARGEST_GENERATED_INPUT_BYTES);
+  expect(LARGEST_GENERATED_INPUT_BYTES).toBe(196_830);
   expect(basePath).toBe("specs/A.mdx");
 
   const workspace = await makeWorkspace({
@@ -492,7 +492,7 @@ test("scale vector: the largest document the suite stages (fuzz base plus the wh
   expect(await workspace.readdirNames("specs")).toEqual(["A.mdx", "B.mdx"]);
   expect(await workspace.kind(basePath)).toBe("file");
   const abs = path.join(workspace.root, ...basePath.split("/"));
-  expect((await fsp.stat(abs)).size).toBe(LARGEST_STAGED_INPUT_BYTES);
+  expect((await fsp.stat(abs)).size).toBe(LARGEST_GENERATED_INPUT_BYTES);
 
   // Read back from disk with plain fs, byte-complete: the base text intact
   // at the front, all three towers behind it.

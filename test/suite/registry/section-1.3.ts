@@ -548,8 +548,13 @@ const T1_3_6 = defineProductTest({
 // from the second level on — right for a robustness draw, wrong for the valid
 // workspace T1.3-7 stages, so this fixture chains its ids instead.
 
-/** P-8's giant-nesting floor (TEST-SPEC P-8, 16), staged here deterministically. */
-const DEPTH_FLOOR = 2048;
+/**
+ * P-8's giant-nesting floor (TEST-SPEC P-8, 16), staged here deterministically.
+ * Exported, with `depthTower`, for `test/self/staged-scale.ts`, which derives
+ * the suite's deterministic staged maximum from `depthTower(DEPTH_FLOOR)`
+ * (S-2, S-8): a change here moves their exact-size pins — deliberately.
+ */
+export const DEPTH_FLOOR = 2048;
 
 /**
  * One-letter segments cycling through the alphabet: a level's identity is a
@@ -559,7 +564,7 @@ const DEPTH_FLOOR = 2048;
  */
 const DEPTH_SEGMENTS = "abcdefghijklmnopqrstuvwxyz";
 
-interface DepthTower {
+export interface DepthTower {
   /** The file's bytes. */
   readonly source: string;
   /** Each level's `id` value, outermost first. */
@@ -567,7 +572,7 @@ interface DepthTower {
 }
 
 /** Build the chain iteratively: level k's id is level k−1's id plus "." plus its own segment. */
-function depthTower(depth: number): DepthTower {
+export function depthTower(depth: number): DepthTower {
   const ids: string[] = [];
   const openers: string[] = [];
   let id = "";

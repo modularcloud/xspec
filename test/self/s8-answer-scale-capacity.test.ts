@@ -8,12 +8,14 @@
 // a spurious fail, not a missed deviation), so it is gated here, before any
 // product exists (H-8's ordering):
 //
-//   1. the scale is DERIVED from the suite's own generators — P-8/P-11's
-//      towers and mutation budget, P-2/P-3's expansion oracle — never
-//      assumed; `staged-scale.ts` states the derivation (shared with S-2,
-//      which stages the same maxima through the workspace builder), and the
-//      fixed CI seed set (E-5) is replayed to confirm the staged draws stay
-//      inside it;
+//   1. the scale is DERIVED from what the suite stages — the generator
+//      draws (P-8/P-11's towers and mutation budget, P-2/P-3's expansion
+//      oracle) and the deterministic fixtures (T1.3-7's chained-id tower,
+//      the anchor of P-8's floor and the largest document the suite stages)
+//      — never assumed; `staged-scale.ts` states the derivation (shared with
+//      S-2, which stages the same maxima through the workspace builder), and
+//      the fixed CI seed set (E-5) is replayed to confirm the staged draws
+//      stay inside the generator maxima;
 //   2. synthetic conforming-form documents at that scale are built
 //      iteratively (never by recursion — `JSON.stringify` itself overflows
 //      at these depths) and driven through every H-3/12.7 decoder and every
@@ -93,11 +95,16 @@ import {
 } from "../suite/registry/section-16-p8.js";
 import {
   DEEPEST_STAGED_TOWER,
+  DEPTH_FLOOR,
   FATTEST_TERMINATOR,
   GIANT_NESTING_FLOOR,
   LARGEST_BASE_BYTES,
   LARGEST_BASE_FILE,
+  LARGEST_DETERMINISTIC_INPUT_BYTES,
+  LARGEST_GENERATED_INPUT_BYTES,
   LARGEST_STAGED_INPUT_BYTES,
+  largestDeterministicDocument,
+  largestGeneratedDocument,
   largestStagedDocument,
   TOWER_BYTES,
 } from "./staged-scale.js";
@@ -106,9 +113,12 @@ import {
 // 1. The scale the suite stages — derived from the generators, not assumed
 //
 // Nesting and document size are derived once, in `staged-scale.ts`
-// (GIANT_NESTING_FLOOR, DEEPEST_STAGED_TOWER, TOWER_BYTES,
-// LARGEST_STAGED_INPUT_BYTES and their derivation comments) — the same
-// constants S-2 stages through the workspace builder. A trial applies up to
+// (GIANT_NESTING_FLOOR, DEEPEST_STAGED_TOWER, TOWER_BYTES, the generator
+// maximum LARGEST_GENERATED_INPUT_BYTES, the deterministic maximum
+// LARGEST_DETERMINISTIC_INPUT_BYTES — T1.3-7's tower at DEPTH_FLOOR — and
+// their larger, LARGEST_STAGED_INPUT_BYTES, with their derivation comments)
+// — the same constants S-2 stages through the workspace builder; every S-8
+// pin binds to the kind it sizes. A trial applies up to
 // MAX_MUTATIONS_PER_TRIAL mutations to the same file, and a shuffle mutation
 // relocates one contiguous byte range, so tower + tower + shuffle can drop
 // the second tower into the first's innermost level: the deepest section
@@ -143,7 +153,7 @@ const BLOWUP_DEPTH = DEEPEST_STAGED_TOWER;
 const SEPARATOR_ESCAPED = "\\u2028";
 const SEPARATOR = "\u2028";
 
-test("S-8: the derived scale — deepest chain, largest staged input, blowup input", () => {
+test("S-8: the derived scale — deepest chain, largest generated and deterministic staged inputs, blowup input", () => {
   expect(DEEPEST_STAGED_TOWER).toBeGreaterThanOrEqual(GIANT_NESTING_FLOOR);
   expect(SYNTHETIC_DEPTH).toBe(8192);
   // The tower the suite stages, byte for byte (sectionTowerSource is what
@@ -153,17 +163,43 @@ test("S-8: the derived scale — deepest chain, largest staged input, blowup inp
     DEEPEST_STAGED_TOWER * 11 + 6 + DEEPEST_STAGED_TOWER * 5,
   );
   expect(FATTEST_TERMINATOR).toBe(3);
-  // The derivation's claim: the all-towers mix is the largest staged file.
-  expect(LARGEST_STAGED_INPUT_BYTES).toBe(
+  // The derivation's claim: the all-towers mix is the largest generated file.
+  expect(LARGEST_GENERATED_INPUT_BYTES).toBe(
     LARGEST_BASE_BYTES + MAX_MUTATIONS_PER_TRIAL * TOWER_BYTES,
   );
-  expect(LARGEST_STAGED_INPUT_BYTES).toBeGreaterThan(190_000);
-  expect(LARGEST_STAGED_INPUT_BYTES).toBeLessThan(200_000);
+  expect(LARGEST_GENERATED_INPUT_BYTES).toBeGreaterThan(190_000);
+  expect(LARGEST_GENERATED_INPUT_BYTES).toBeLessThan(200_000);
   // Attained, not merely bounded: the largest base is an `.mdx` file, so a
   // nesting draw over it appends the section tower the mix is sized with,
   // and the document S-2 stages is exactly that mix.
   expect(LARGEST_BASE_FILE[0].endsWith(".mdx")).toBe(true);
+  expect(largestGeneratedDocument().length).toBe(LARGEST_GENERATED_INPUT_BYTES);
+
+  // The deterministic maximum: T1.3-7's chained-id tower (section-1.3.ts),
+  // quadratic in the depth because every id spells its whole ancestor chain
+  // — per level k an opener `<S id="` (7 bytes) plus a (2k − 1)-byte id plus
+  // `">\n` (3 bytes), then `deep.\n` (6 bytes), then `</S>\n` × D (5 bytes
+  // each): 9·D + D·(D + 1) + 6 + 5·D, 4,225,030 bytes at D = 2048. The
+  // exact size moves only when T1.3-7's DEPTH_FLOOR does — deliberately.
+  expect(LARGEST_DETERMINISTIC_INPUT_BYTES).toBe(
+    9 * DEPTH_FLOOR + DEPTH_FLOOR * (DEPTH_FLOOR + 1) + 6 + 5 * DEPTH_FLOOR,
+  );
+  expect(LARGEST_DETERMINISTIC_INPUT_BYTES).toBe(4_225_030);
+  expect(largestDeterministicDocument().length).toBe(
+    LARGEST_DETERMINISTIC_INPUT_BYTES,
+  );
+  // The suite's staged maximum is the larger kind's — today the
+  // deterministic one, ~21× the generator maximum — and the document staged
+  // under that name is exactly that large.
+  expect(LARGEST_STAGED_INPUT_BYTES).toBe(
+    Math.max(LARGEST_GENERATED_INPUT_BYTES, LARGEST_DETERMINISTIC_INPUT_BYTES),
+  );
   expect(largestStagedDocument().length).toBe(LARGEST_STAGED_INPUT_BYTES);
+  // The deterministic anchor sits inside the synthetic answer scale: T1.3-7
+  // anchors P-8's floor (TEST-SPEC T1.3-7), and the synthetic `view` and
+  // `ids --tree` documents below nest at least as deep as it.
+  expect(DEPTH_FLOOR).toBeGreaterThanOrEqual(GIANT_NESTING_FLOOR);
+  expect(SYNTHETIC_DEPTH).toBeGreaterThanOrEqual(DEPTH_FLOOR);
 });
 
 test("S-8: the fixed CI seed set stages within the derived scale (E-5 replay)", () => {
@@ -187,7 +223,7 @@ test("S-8: the fixed CI seed set stages within the derived scale (E-5 replay)", 
         deepestTower = Math.max(deepestTower, Number(depth[1]));
     }
   }
-  expect(largestFile).toBeLessThanOrEqual(LARGEST_STAGED_INPUT_BYTES);
+  expect(largestFile).toBeLessThanOrEqual(LARGEST_GENERATED_INPUT_BYTES);
   expect(deepestTower).toBeLessThanOrEqual(DEEPEST_STAGED_TOWER);
   // P-8's test-strength floor on staged draws (TEST-SPEC §16 P-8): the fixed
   // seed set must itself stage nesting at least 2048 deep.
@@ -202,7 +238,7 @@ test("S-8: the fixed CI seed set stages within the derived scale (E-5 replay)", 
     }
   }
   expect(largestText).toBeGreaterThan(0);
-  expect(largestText).toBeLessThan(LARGEST_STAGED_INPUT_BYTES);
+  expect(largestText).toBeLessThan(LARGEST_GENERATED_INPUT_BYTES);
 });
 
 // ---------------------------------------------------------------------------
@@ -727,7 +763,16 @@ test("S-8: capture gate — the largest synthetic document (`view --text` blowup
   expect(documentBytes).toBeLessThan(
     BLOWUP_TOWERS * perTowerText + 16 * 1024 * 1024,
   );
-  expect(documentBytes).toBeGreaterThan(500 * LARGEST_STAGED_INPUT_BYTES);
+  expect(documentBytes).toBeGreaterThan(500 * LARGEST_GENERATED_INPUT_BYTES);
+  // …and past the largest document the suite stages at all (today T1.3-7's
+  // deterministic tower) by a documented factor: that fixture's largest
+  // answer is ~13 MB of `view` over its ~4.2 MB input (section-1.3.ts's
+  // T1.3-7 comment), about 3×, so a synthetic scale at least 8× the staged
+  // maximum keeps every answer the deterministic anchor elicits inside what
+  // the decoders and the capture are gated at, with margin — ~48× today;
+  // this pin trips once a grown DEPTH_FLOOR (a quadratic file) brings
+  // T1.3-7's answers near the synthetic scale.
+  expect(documentBytes).toBeGreaterThan(8 * LARGEST_STAGED_INPUT_BYTES);
   // The capture cap is dimensioned to this scale with headroom (H-11).
   expect(DEFAULT_MAX_OUTPUT_BYTES).toBeGreaterThanOrEqual(2 * documentBytes);
 
