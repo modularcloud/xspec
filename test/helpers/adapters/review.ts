@@ -2,7 +2,11 @@
 // `next`, `show`, `export` (SPEC.md 10; TEST-SPEC §10).
 //
 // Shape-aware, value-blind, fail-loud (H-3) — see query.ts for the layer's
-// contract. Adjust the ASSUMED SHAPE below when the real product's output
+// contract: every document entry runs the 12.7 unavailability-marker walk
+// over the whole raw document first (`documentRootSite`, forms.ts), and
+// every source range decodes through the literal 12.7 range form
+// (`decodeSourceRange`) — value forms are never adapted (T12.7-1). Adjust
+// the ASSUMED SHAPE below when the real product's output
 // shape legitimately differs; never adjust values. `baseline`, `current`,
 // `creationParameters`, and `decompositions` are recorded, product-shaped
 // data: the adapter requires their presence and passes their decoded JSON
@@ -71,8 +75,8 @@ import {
   optionalKey,
   requiredKey,
   requiredMember,
-  rootSite,
 } from "./decode.js";
+import { documentRootSite } from "./forms.js";
 import { decodeSourceRange } from "./query.js";
 
 /** Counts keyed by status: every value a non-negative integer. */
@@ -128,7 +132,7 @@ export function decodeSessionListReport(
   doc: unknown,
   context?: string,
 ): SessionListReport {
-  const site = rootSite("review list", context);
+  const site = documentRootSite(doc, "review list", context);
   const obj = expectObject(doc, site);
   const sessionsSite = at(site, "sessions");
   const sessions = expectArray(
@@ -174,7 +178,7 @@ export function decodeSessionStatusReport(
   doc: unknown,
   context?: string,
 ): SessionStatusReport {
-  const site = rootSite("review status", context);
+  const site = documentRootSite(doc, "review status", context);
   const obj = expectObject(doc, site);
   const itemsSite = at(site, "items");
   return {
@@ -354,7 +358,10 @@ export function decodeReviewItemValue(
 
 /** `review show <name> <item-id>` (T10.7-8): the full item. */
 export function decodeItemReport(doc: unknown, context?: string): ReviewItem {
-  return decodeReviewItemValue(doc, rootSite("review show", context));
+  return decodeReviewItemValue(
+    doc,
+    documentRootSite(doc, "review show", context),
+  );
 }
 
 /**
@@ -363,7 +370,7 @@ export function decodeItemReport(doc: unknown, context?: string): ReviewItem {
  * no item. A document claiming both (or neither) is contradictory.
  */
 export function decodeNextReport(doc: unknown, context?: string): NextReport {
-  const site = rootSite("review next", context);
+  const site = documentRootSite(doc, "review next", context);
   const obj = expectObject(doc, site);
   const fullyResolved = expectBoolean(
     requiredKey(obj, "fullyResolved", site),
@@ -396,7 +403,7 @@ export function decodeExportReport(
   doc: unknown,
   context?: string,
 ): ExportReport {
-  const site = rootSite("review export", context);
+  const site = documentRootSite(doc, "review export", context);
   const obj = expectObject(doc, site);
   const itemsSite = at(site, "items");
   return {

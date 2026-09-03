@@ -65,33 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 41 — T12.7-1: `unavailable`-marker exclusivity walk on every captured JSON document; unpinned-surface range arms
-
-Cites: TEST-SPEC T12.7-1 and the §11 preamble (the marker-exclusivity walk
-covers every captured JSON document, unpinned surfaces included; on unpinned
-surfaces a range is decoded only as `{"start","end"}` — arms: `query node`,
-`nodes`/`subtree`/`ancestors` rows, `show --json`, and the review payload's
-present scope node and present code-impact location); H-3 (fail loudly);
-SPEC 11.2, 12.7.
-
-Now: `assertUnavailabilityMarkerForms` (`test/helpers/adapters/forms.ts`) is
-called only inside forms.ts; `adapters/query.ts`, `review.ts`, `model.ts`
-never run it. T12.7-1's run body (`section-12.7.ts` ≈ 2236–2254) calls only the
-located-findings, policy, cross-module, review-refusal and byte-paths arms;
-`decodeSourceRange` (query.ts ≈ 64) is already form-exact.
-
-Do: (a) invoke the walk (its iterative form — every answer-document walk is explicit-stack now; see `git log`) on every captured JSON
-document at the single decode entry of each adapter (query, review, model,
-and any other adapter that parses product JSON), so an `unavailable` marker in
-a non-exclusive position fails loudly everywhere; (b) add the listed
-unpinned-surface arms to T12.7-1 asserting each present range decodes as
-exactly `{"start","end"}` (no extra member) through the existing decoders.
-
-Verify: `npx vitest run … test/suite/section-12.7.test.ts` and the full
-`--project suite` run (the new walk must not misfire on any surface: any
-failure it raises must be a diagnosed product form failure, never a harness
-error); `npm run test:self` green (S-5).
-
 ### Task 42 — T12.7-2: clean-workspace `build --json` is exactly the findings-only form `{"findings": []}`
 
 Cites: TEST-SPEC T12.7-2 (§12.7: on a clean workspace `build --json` emits

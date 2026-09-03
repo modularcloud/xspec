@@ -2235,9 +2235,13 @@ export function decodePreviewReport(
  *
  * Every public document decoder in this module runs this walk over the
  * whole raw document before decoding members (the scoped decoders included,
- * whose unread members the walk still covers), so it runs over every 12.7
- * document the suite captures (T12.7-1; S-5 guards the walk and the
- * integration). Tests may additionally call it directly.
+ * whose unread members the walk still covers), and every adjustable adapter
+ * (query.ts, review.ts, reports.ts, operations.ts) runs it through
+ * {@link documentRootSite} at each of its document-decode entries, so it
+ * runs over every JSON document the suite captures — the pinned 12.7
+ * document forms and the unpinned-shape surfaces of H-3 alike, the marker's
+ * exclusivity being universal like the value forms (T12.7-1; S-5 guards the
+ * walk and both integrations). Tests may additionally call it directly.
  */
 export function assertUnavailabilityMarkerForms(
   doc: unknown,
@@ -2280,4 +2284,26 @@ export function assertUnavailabilityMarkerForms(
       pending.push({ value: member, site: at(site, key) });
     }
   }
+}
+
+/**
+ * The document-decode entry of an adjustable H-3 adapter (query.ts,
+ * review.ts, reports.ts, operations.ts): run the 12.7 marker walk over the
+ * whole raw document — the members the adapter reads, the ones it ignores,
+ * and the product-shaped ones it passes through whole alike — then return
+ * the root site the adapter decodes from. 12.7's value forms are universal
+ * (H-3), so the marker's exclusivity binds on an unpinned-shape surface
+ * exactly as on a pinned document form: an object of any other form
+ * carrying a member named `unavailable` fails loudly at every adapter, never
+ * decoding (T12.7-1; S-5 guards the integration). The diagnosis names the
+ * adapter and its context.
+ */
+export function documentRootSite(
+  doc: unknown,
+  adapter: string,
+  context?: string,
+): DecodeSite {
+  const site = rootSite(adapter, context);
+  assertUnavailabilityMarkerForms(doc, site.adapter);
+  return site;
 }

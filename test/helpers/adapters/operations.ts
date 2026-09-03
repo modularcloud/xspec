@@ -2,7 +2,9 @@
 // `xspec rename` / `xspec move` (SPEC.md 6.4, 6.5, 12.0; T6.4-1, T6.5-1).
 //
 // Shape-aware, value-blind, fail-loud (H-3) — see query.ts for the layer's
-// contract. SPEC.md 6.4 fixes the report's information — "the complete
+// contract: the document entry runs the 12.7 unavailability-marker walk over
+// the whole raw document first (`documentRootSite`, forms.ts; T12.7-1).
+// SPEC.md 6.4 fixes the report's information — "the complete
 // identity mapping the operation journaled — the information of the preview's
 // `mapping` (6.6), carried in JSON per 12.0" — while leaving the successful
 // operation's report SHAPE unpinned (H-3 lists the applied-mapping reports of
@@ -30,8 +32,8 @@ import {
   expectNonEmptyString,
   expectObject,
   requiredKey,
-  rootSite,
 } from "./decode.js";
+import { documentRootSite } from "./forms.js";
 
 /**
  * Decode a successful `rename`/`move` invocation's JSON report (T6.4-1,
@@ -45,7 +47,7 @@ export function decodeAppliedMappingReport(
   doc: unknown,
   context?: string,
 ): AppliedMappingPair[] {
-  const site = rootSite("applied-mapping", context);
+  const site = documentRootSite(doc, "applied-mapping", context);
   const obj = expectObject(doc, site);
   const mappingSite = at(site, "mapping");
   return expectArray(requiredKey(obj, "mapping", site), mappingSite).map(

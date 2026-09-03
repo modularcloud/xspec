@@ -8,7 +8,11 @@
 // (diagnosed test error, never a default) when required information is
 // absent or malformed. It is one of the only places aware of concrete output
 // shape (H-3); adjust the ASSUMED SHAPE below when the real product's shape
-// legitimately differs — never adjust values.
+// legitimately differs — never adjust values. Every document entry first runs
+// the 12.7 unavailability-marker walk over the whole raw document
+// (`documentRootSite`, forms.ts), and every source range decodes through the
+// literal 12.7 range form (`decodeSourceRange` below): 12.7's value forms are
+// universal, so they are never adapted here (H-3, T12.7-1).
 //
 // ASSUMED SHAPE (per command; `?` marks optional-per-model information):
 //   query node / show →
@@ -49,7 +53,6 @@ import {
   expectBoolean,
   expectNonEmptyString,
   expectNonEmptyStringArray,
-  expectNonNegativeInteger,
   expectObject,
   expectString,
   expectStringArray,
@@ -57,27 +60,24 @@ import {
   forbiddenKey,
   optionalKey,
   requiredKey,
-  rootSite,
 } from "./decode.js";
+import { decodeRangeForm, documentRootSite } from "./forms.js";
 
-/** Decode a source range (SPEC.md 1.7: zero-based byte offsets). */
+/**
+ * Decode a source range (SPEC.md 1.7: zero-based byte offsets) in the
+ * literal 12.7 value form — `{"start", "end"}` exactly, non-negative
+ * integers, no other member. 12.7's value forms bind every JSON output
+ * (H-3), so this adapter's latitude over its surrounding unpinned shape
+ * never reaches the range itself: a range carried as `[start, end]`,
+ * `{"from", "to"}`, or with an extra member fails the form decode here, and
+ * the decode is never adjusted to admit it (T12.7-1's unpinned-surface
+ * arms).
+ */
 export function decodeSourceRange(
   value: unknown,
   site: DecodeSite,
 ): SourceRange {
-  const obj = expectObject(value, site);
-  const start = expectNonNegativeInteger(
-    requiredKey(obj, "start", site),
-    at(site, "start"),
-  );
-  const end = expectNonNegativeInteger(
-    requiredKey(obj, "end", site),
-    at(site, "end"),
-  );
-  if (end < start) {
-    decodeFail(site, "a range with end >= start", value);
-  }
-  return { start, end };
+  return decodeRangeForm(value, site);
 }
 
 /** Decode one edge: from/to graph-node identities plus a spec-fixed kind. */
@@ -131,7 +131,7 @@ function decodeCoverage(
  * and incoming and outgoing edges by kind.
  */
 export function decodeNodeReport(doc: unknown, context?: string): NodeReport {
-  const site = rootSite("query node/show", context);
+  const site = documentRootSite(doc, "query node/show", context);
   const obj = expectObject(doc, site);
   const edgesSite = at(site, "edges");
   const edges = expectObject(requiredKey(obj, "edges", site), edgesSite);
@@ -176,7 +176,11 @@ export function decodeNodeReport(doc: unknown, context?: string): NodeReport {
  * is ignored, not validated.
  */
 export function decodeNodeSummary(doc: unknown, context?: string): NodeSummary {
-  const site = rootSite("query node (identity/tags summary)", context);
+  const site = documentRootSite(
+    doc,
+    "query node (identity/tags summary)",
+    context,
+  );
   const obj = expectObject(doc, site);
   return {
     identity: expectNonEmptyString(
@@ -199,7 +203,11 @@ export function decodeNodeMetadataSummary(
   doc: unknown,
   context?: string,
 ): NodeMetadataSummary {
-  const site = rootSite("query node (identity/tags/metadataHash)", context);
+  const site = documentRootSite(
+    doc,
+    "query node (identity/tags/metadataHash)",
+    context,
+  );
   const obj = expectObject(doc, site);
   const hashesSite = at(site, "hashes");
   const hashes = expectObject(requiredKey(obj, "hashes", site), hashesSite);
@@ -230,7 +238,11 @@ export function decodeNodeTextSummary(
   doc: unknown,
   context?: string,
 ): NodeTextSummary {
-  const site = rootSite("query node (own/subtree text summary)", context);
+  const site = documentRootSite(
+    doc,
+    "query node (own/subtree text summary)",
+    context,
+  );
   const obj = expectObject(doc, site);
   return {
     ownText: expectString(
@@ -256,7 +268,11 @@ export function decodeNodeSummaryRowsReport(
   doc: unknown,
   context?: string,
 ): NodeSummary[] {
-  const site = rootSite("query nodes (identity/tags summary rows)", context);
+  const site = documentRootSite(
+    doc,
+    "query nodes (identity/tags summary rows)",
+    context,
+  );
   const obj = expectObject(doc, site);
   const rowsSite = at(site, "nodes");
   return expectArray(requiredKey(obj, "nodes", site), rowsSite).map(
@@ -292,7 +308,11 @@ export function decodeNodeIdentityRowsReport(
   doc: unknown,
   context?: string,
 ): string[] {
-  const site = rootSite("query nodes (identity-only rows)", context);
+  const site = documentRootSite(
+    doc,
+    "query nodes (identity-only rows)",
+    context,
+  );
   const obj = expectObject(doc, site);
   const rowsSite = at(site, "nodes");
   return expectArray(requiredKey(obj, "nodes", site), rowsSite).map(
@@ -332,7 +352,7 @@ export function decodeNodeRowsReport(
   doc: unknown,
   context?: string,
 ): NodeRow[] {
-  const site = rootSite("query nodes/subtree/ancestors", context);
+  const site = documentRootSite(doc, "query nodes/subtree/ancestors", context);
   const obj = expectObject(doc, site);
   const rowsSite = at(site, "nodes");
   return expectArray(requiredKey(obj, "nodes", site), rowsSite).map(
@@ -342,7 +362,7 @@ export function decodeNodeRowsReport(
 
 /** `query edges` (T11-4): the edge list in the reported order. */
 export function decodeEdgesReport(doc: unknown, context?: string): GraphEdge[] {
-  const site = rootSite("query edges", context);
+  const site = documentRootSite(doc, "query edges", context);
   const obj = expectObject(doc, site);
   return decodeEdgeArray(requiredKey(obj, "edges", site), at(site, "edges"));
 }
@@ -357,7 +377,7 @@ export function decodeReachableReport(
   doc: unknown,
   context?: string,
 ): ReachableReport {
-  const site = rootSite("query reachable", context);
+  const site = documentRootSite(doc, "query reachable", context);
   const obj = expectObject(doc, site);
   const reachable = expectBoolean(
     requiredKey(obj, "reachable", site),
@@ -404,7 +424,10 @@ export function decodeReachableReport(
  * `edges` member (the queried node's own source range is contract, T11-1).
  */
 export function assertBareEdgeEndpoints(doc: unknown, context?: string): void {
-  walkForRangeData(doc, rootSite("1.7 bare edge-endpoint walk", context));
+  walkForRangeData(
+    doc,
+    documentRootSite(doc, "1.7 bare edge-endpoint walk", context),
+  );
 }
 
 /**
@@ -415,7 +438,8 @@ export function assertBareEdgeEndpoints(doc: unknown, context?: string): void {
  * endpoint's member — fails loudly.
  */
 export function assertNodeEdgeListsBare(doc: unknown, context?: string): void {
-  const site = rootSite(
+  const site = documentRootSite(
+    doc,
     "1.7 bare edge-endpoint walk (query node/show edge lists)",
     context,
   );
@@ -476,7 +500,7 @@ function walkForRangeData(root: unknown, rootSite: DecodeSite): void {
 
 /** `ids` (T12.3-1): files in byte order, IDs within a file in document order. */
 export function decodeIdsReport(doc: unknown, context?: string): IdsReport {
-  const site = rootSite("ids", context);
+  const site = documentRootSite(doc, "ids", context);
   const obj = expectObject(doc, site);
   const filesSite = at(site, "files");
   const files: IdsFileEntry[] = expectArray(
@@ -558,7 +582,7 @@ export function decodeIdsTreeReport(
   doc: unknown,
   context?: string,
 ): IdsTreeReport {
-  const site = rootSite("ids --tree", context);
+  const site = documentRootSite(doc, "ids --tree", context);
   const obj = expectObject(doc, site);
   const filesSite = at(site, "files");
   const files: IdsTreeFileEntry[] = expectArray(

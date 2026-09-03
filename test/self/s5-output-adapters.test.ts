@@ -841,6 +841,19 @@ const DECODERS: readonly DecoderSpec[] = [
         label: "range with end < start",
         doc: put(GOOD_NODE, 5, "sourceRange", "end"),
       },
+      {
+        label:
+          "range carrying an extra member (12.7 value form: exactly start and end)",
+        doc: put(GOOD_NODE, { start: 12, end: 96, from: 12 }, "sourceRange"),
+      },
+      {
+        label: "range as an array [start, end] (never re-mapped, H-3)",
+        doc: put(GOOD_NODE, [12, 96], "sourceRange"),
+      },
+      {
+        label: 'range as {"from", "to"} (never re-mapped, H-3)',
+        doc: put(GOOD_NODE, { from: 12, to: 96 }, "sourceRange"),
+      },
       { label: "missing ownText", doc: omit(GOOD_NODE, "ownText") },
       { label: "non-string ownText", doc: put(GOOD_NODE, 7, "ownText") },
       { label: "missing subtreeText", doc: omit(GOOD_NODE, "subtreeText") },
@@ -1082,6 +1095,20 @@ const DECODERS: readonly DecoderSpec[] = [
       {
         label: "row missing sourceRange",
         doc: omit(GOOD_ROWS, "nodes", 0, "sourceRange"),
+      },
+      {
+        label: "row range carrying an extra member (12.7 value form)",
+        doc: put(
+          GOOD_ROWS,
+          { start: 12, end: 96, length: 84 },
+          "nodes",
+          0,
+          "sourceRange",
+        ),
+      },
+      {
+        label: "row range as an array [start, end] (never re-mapped, H-3)",
+        doc: put(GOOD_ROWS, [0, 120], "nodes", 1, "sourceRange"),
       },
       { label: "row missing tags", doc: omit(GOOD_ROWS, "nodes", 1, "tags") },
       {
@@ -3695,6 +3722,21 @@ const DECODERS: readonly DecoderSpec[] = [
         label: "absent context node carrying a source range (contradiction)",
         doc: put(GOOD_ITEM, { start: 3, end: 9 }, "context", 1, "sourceRange"),
       },
+      {
+        label:
+          "present scope node's range carrying an extra member (12.7 value form)",
+        doc: put(
+          GOOD_ITEM,
+          { start: 12, end: 96, unit: "bytes" },
+          "scope",
+          "sourceRange",
+        ),
+      },
+      {
+        label:
+          'present scope node\'s range as {"from", "to"} (never re-mapped, H-3)',
+        doc: put(GOOD_ITEM, { from: 12, to: 96 }, "scope", "sourceRange"),
+      },
       { label: "missing context", doc: omit(GOOD_ITEM, "context") },
       { label: "missing origin", doc: omit(GOOD_ITEM, "origin") },
       {
@@ -4030,6 +4072,99 @@ test("S-5: the 12.7 document decoders run the marker walk over the whole documen
       "walk integration",
     ),
   ).toEqual({ state: "unavailable" });
+});
+
+// The adjustable adapters' document entries (T12.7-1): the DECODERS entries
+// decoding an unpinned-shape surface — query, review, reports, operations;
+// everything that is not a form-exact 12.7 or 11.6 document decoder. Each
+// runs the marker walk over the whole raw document first
+// (`documentRootSite`, forms.ts), so a near-marker in a member the adapter
+// never reads — or passes through whole — still rejects, while an exact
+// marker there is a legitimate value and decodes.
+const UNPINNED_ADAPTER_NAMES: readonly string[] = [
+  "query node/show",
+  "query node (identity/tags summary)",
+  "query node (identity/tags/metadataHash summary)",
+  "query node (own/subtree text summary)",
+  "query nodes (identity/tags summary rows)",
+  "query nodes (identity-only rows)",
+  "query nodes/subtree/ancestors",
+  "query edges",
+  "query reachable",
+  "ids",
+  "ids --tree",
+  "coverage",
+  "impact",
+  "applied mapping (rename/move success report)",
+  "review list",
+  "review status",
+  "review show (full item)",
+  "review next",
+  "review export",
+];
+
+test("S-5: every adjustable adapter runs the marker walk over the whole document at its entry (T12.7-1)", () => {
+  const covered = DECODERS.filter((spec) =>
+    UNPINNED_ADAPTER_NAMES.includes(spec.name),
+  );
+  // Every listed adapter is a DECODERS entry (a renamed entry is caught).
+  expect(covered.map((spec) => spec.name).sort()).toEqual(
+    [...UNPINNED_ADAPTER_NAMES].sort(),
+  );
+  for (const spec of covered) {
+    // A near-marker in a top-level member no adapter reads: only the walk
+    // can reject it, and its diagnosis names the JSON path.
+    const nearMarker = expectDiagnosed(
+      `${spec.name}: near-marker in an unread member`,
+      () =>
+        spec.decode(
+          put(spec.good, { unavailable: "soon", note: 1 }, "unreadByAdapter"),
+        ),
+    );
+    expect(nearMarker.message).toContain("adapter");
+    expect(nearMarker.message).toContain("$.unreadByAdapter");
+    expectDiagnosed(`${spec.name}: unavailable false in an unread member`, () =>
+      spec.decode(put(spec.good, { unavailable: false }, "unreadByAdapter")),
+    );
+    // Positive control: an exact marker there is a legitimate value — the
+    // adapter decodes the document as before.
+    spec.decode(put(spec.good, { unavailable: true }, "unreadByAdapter"));
+  }
+  // A member passed through whole (an item's recorded `baseline`,
+  // product-shaped and opaque, T10.2-2) is walked too: only the walk can
+  // reject a near-marker inside it.
+  const opaque = expectDiagnosed(
+    "review export: near-marker inside the opaque baseline record",
+    () =>
+      decodeExportReport(
+        put(GOOD_EXPORT, { unavailable: 1 }, "items", 0, "baseline"),
+        "walk integration",
+      ),
+  );
+  expect(opaque.message).toContain("$.items[0].baseline");
+  // The two 1.7 walks take captured documents at their entries as well.
+  expectDiagnosed("bare edge-endpoint walk: near-marker in the document", () =>
+    assertBareEdgeEndpoints(
+      put(GOOD_EDGES, { unavailable: "x" }, "meta"),
+      "walk integration",
+    ),
+  );
+  expectDiagnosed(
+    "node edge-list walk: near-marker outside the edge lists",
+    () =>
+      assertNodeEdgeListsBare(
+        put(GOOD_NODE, { unavailable: "x" }, "meta"),
+        "walk integration",
+      ),
+  );
+  assertBareEdgeEndpoints(
+    put(GOOD_EDGES, { unavailable: true }, "meta"),
+    "walk integration",
+  );
+  assertNodeEdgeListsBare(
+    put(GOOD_NODE, { unavailable: true }, "meta"),
+    "walk integration",
+  );
 });
 
 // --- the bare edge-endpoint walk (T1.7-1) ------------------------------------

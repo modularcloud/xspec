@@ -2,7 +2,9 @@
 // `impact --base` (SPEC.md 5.6, 9; T9.1-1, T9.2-*, T9.3-*).
 //
 // Shape-aware, value-blind, fail-loud (H-3) — see query.ts for the layer's
-// contract. Adjust the ASSUMED SHAPE below when the real product's output
+// contract: each document entry runs the 12.7 unavailability-marker walk
+// over the whole raw document first (`documentRootSite`, forms.ts;
+// T12.7-1). Adjust the ASSUMED SHAPE below when the real product's output
 // shape legitimately differs; never adjust values. Findings and findings-only
 // reports are NOT here: they are form-exact 12.7 surfaces, decoded literally
 // and never adjusted (forms.ts).
@@ -47,6 +49,7 @@ import {
   requiredKey,
   rootSite,
 } from "./decode.js";
+import { documentRootSite } from "./forms.js";
 import { decodeEdge } from "./query.js";
 
 function decodeCoveredNode(value: unknown, site: DecodeSite): CoveredNode {
@@ -140,7 +143,7 @@ export function decodeCoverageReport(
   doc: unknown,
   context?: string,
 ): CoverageReport {
-  const site = rootSite("coverage", context);
+  const site = documentRootSite(doc, "coverage", context);
   const obj = expectObject(doc, site);
   const profilesSite = at(site, "profiles");
   const profiles = expectArray(
@@ -302,7 +305,7 @@ export function decodeImpactReport(
   doc: unknown,
   context?: string,
 ): ImpactReport {
-  const site = rootSite("impact", context);
+  const site = documentRootSite(doc, "impact", context);
   const obj = expectObject(doc, site);
   const requirementsSite = at(site, "requirements");
   const codeSite = at(site, "code");

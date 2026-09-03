@@ -54,7 +54,19 @@
 //   (every identity of an invalid-path file; the occurrence records'
 //   `source`), so the walk's accepting side is exercised on marker-bearing
 //   answers, and marker exactness at the datum sites is value-asserted
-//   (`source` exactly `{"unavailable": true}`).
+//   (`source` exactly `{"unavailable": true}`). The walk equally runs at
+//   every adjustable adapter's document entry (`documentRootSite`,
+//   forms.ts), the exclusivity clause being universal like the value forms:
+//   arm F's captured unpinned-shape documents pass through it too.
+// - Arm F asserts 12.7's range form where SPEC leaves the document shape
+//   unpinned (H-3): the adjustable adapters' range decode is the literal form
+//   decode itself (`decodeSourceRange` delegates to `decodeRangeForm` —
+//   exactly {"start", "end"}, non-negative integers; S-5 feeds it
+//   `[start, end]`, `{"from", "to"}`, and an extra member), so a decoded
+//   range IS a form-exact one, never re-mapped, and each is then asserted
+//   byte-exact against the staged construct (SPEC 1.7, 4.6) — every present
+//   node of the review payload included, since 10.7 gives every present
+//   scope, context, and origin node its source range.
 // - The review-refusal finding's cardinality is unpinned (SPEC 10.7/14 state
 //   no per-reason finding count for review-operation refusals, unlike the
 //   6.4/6.5 reasons): the arm asserts a nonempty findings-only report every
@@ -200,8 +212,10 @@
 import { Buffer } from "node:buffer";
 import type {
   Finding,
+  NodeRow,
   OccurrenceRecord,
   PathValue,
+  ReviewItem,
   SourceRange,
   ViewNode,
   ViewReport,
@@ -209,8 +223,11 @@ import type {
 import {
   assertUnavailabilityMarkerForms,
   decodeAtReport,
+  decodeExportReport,
   decodeFindingsReport,
   decodeInventoryResolvedMap,
+  decodeNodeReport,
+  decodeNodeRowsReport,
   decodeOccurrencesReport,
   decodeVersionDocument,
   decodeViewReport,
@@ -1006,6 +1023,401 @@ async function runBytePathsArm(product: ProductBinding): Promise<void> {
   } finally {
     await workspace.dispose();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Arm F — the unpinned surfaces' ranges (11.1, 12.4, 10.7) through the H-3
+// decode: exactly {"start", "end"}, byte-exact against the staged constructs
+// ---------------------------------------------------------------------------
+//
+// 12.7's value forms bind every JSON output (H-3), pinned document form or
+// not: on the shape-unpinned surfaces — `query node`, the `query nodes`/
+// `subtree`/`ancestors` rows (11.1), `show --json` (12.4), and a review
+// payload's node states (10.7) — a range reaches the assertion through the
+// adjustable adapters' decode, whose range decode is the literal 12.7 form
+// (`decodeSourceRange` = `decodeRangeForm`: exactly the two members,
+// non-negative integers; a range carried as `[start, end]`, `{"from", "to"}`,
+// or with an extra member fails there and is never re-mapped — S-5). This
+// arm drives every listed surface over one fixture whose construct byte
+// offsets are composed from the same parts that stage the files (the arm-A
+// discipline), so each decoded range is additionally asserted byte-exact
+// (SPEC 1.7: a non-root requirement node's range spans its section
+// construct, a root's the entire file, a named code unit's the construct
+// binding its name, 4.6).
+//
+// The review half stages SPEC 10.5's smallest change under a code
+// reference: `top > top.leaf`, only the leaf's text edited between the
+// baseline commit and `review create --base`, and `src/ref.ts#unit`
+// referencing the leaf — a subtree-coherence item scoped at the leaf (its
+// context the ancestor chain: the file root and `top`), a parent-consistency
+// item at `top` (context: the leaf), and a code-impact item at the unit
+// (context: the leaf; SPEC 10.5, 9.2), the leaf every item's origin — so the
+// payload carries a present requirement-node scope, a present code-location
+// scope, and present context and origin nodes, every one of which enters
+// with its source range (SPEC 10.7, 1.7). Every range the payload carries is
+// asserted: a present payload node without a range, or with a range other
+// than its construct's, fails.
+
+const UR_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  }
+})
+`;
+
+const UR_FILE = "specs/A.mdx";
+const UR_ROOT_ID = UR_FILE;
+const UR_TOP_ID = `${UR_FILE}#top`;
+const UR_LEAF_ID = `${UR_FILE}#top.leaf`;
+
+// The current (post-edit) spec source, composed so the top section's range
+// spans its opening tag through its closing tag with the leaf nested inside.
+const UR = new ByteFixture();
+UR.add("Überschrift — multi-byte prefix.\n\n");
+const UR_TOP_OPEN = '<S id="top">\nTop own text.\n\n';
+const UR_LEAF_TEXT = '<S id="top.leaf">\nLeaf text, edited.\n</S>';
+const UR_TOP_CLOSE = "\n</S>";
+const UR_TOP_TEXT = `${UR_TOP_OPEN}${UR_LEAF_TEXT}${UR_TOP_CLOSE}`;
+const UR_TOP_START = UR.add(UR_TOP_OPEN).start;
+const UR_LEAF_RANGE = UR.add(UR_LEAF_TEXT);
+const UR_TOP_RANGE: SourceRange = {
+  start: UR_TOP_START,
+  end: UR.add(UR_TOP_CLOSE).end,
+};
+UR.add("\n");
+const UR_SOURCE = UR.source;
+// A root node's range is the entire file (SPEC 1.7).
+const UR_ROOT_RANGE: SourceRange = {
+  start: 0,
+  end: Buffer.byteLength(UR_SOURCE, "utf8"),
+};
+// The baseline: the same layout, the leaf's text alone differing (SPEC 5.6:
+// the leaf is `changed`, `top` and the root descendant-changed).
+const UR_BASELINE_SOURCE = UR_SOURCE.replace(
+  "Leaf text, edited.",
+  "Leaf text.",
+);
+
+const UR_CODE_FILE = "src/ref.ts";
+const UR_UNIT_ID = `${UR_CODE_FILE}#unit`;
+const UR_CODE = new ByteFixture();
+UR_CODE.add(
+  'import A from "../specs/A.xspec";\n\n// Präzise Bytes vor der Einheit (multi-byte prefix).\n\n',
+);
+// The named unit's range is the construct binding its name — the function
+// declaration's own bytes, keyword through closing brace (SPEC 1.7, 4.6).
+const UR_UNIT_TEXT = "function unit() {\n  A.top.leaf;\n}";
+const UR_UNIT_RANGE = UR_CODE.add(UR_UNIT_TEXT);
+UR_CODE.add("\n");
+const UR_CODE_SOURCE = UR_CODE.source;
+
+/** Every node this fixture stages, with its construct's byte range. */
+const UR_RANGES: ReadonlyMap<string, SourceRange> = new Map([
+  [UR_ROOT_ID, UR_ROOT_RANGE],
+  [UR_TOP_ID, UR_TOP_RANGE],
+  [UR_LEAF_ID, UR_LEAF_RANGE],
+  [UR_UNIT_ID, UR_UNIT_RANGE],
+]);
+
+/** identity → range over the given identities, keys in byte order. */
+function urExpectedRanges(ids: readonly string[]): Record<string, SourceRange> {
+  const out: Record<string, SourceRange> = {};
+  for (const id of [...ids].sort()) {
+    const range = UR_RANGES.get(id);
+    if (range === undefined) {
+      throw new Error(
+        `section-12.7 fixture self-check: no staged range for ${id}`,
+      );
+    }
+    out[id] = range;
+  }
+  return out;
+}
+
+/**
+ * Rows projected to identity → range, keys in byte order (T11-2/3 pin the
+ * row order; this arm asserts membership and each row's range).
+ */
+function urRowRanges(
+  rows: readonly NodeRow[],
+  context: string,
+): Record<string, SourceRange> {
+  const out: Record<string, SourceRange> = {};
+  const sorted = [...rows].sort((a, b) =>
+    a.identity < b.identity ? -1 : a.identity > b.identity ? 1 : 0,
+  );
+  for (const row of sorted) {
+    if (Object.hasOwn(out, row.identity)) {
+      fail(
+        `${context}: each node is reported once; ${row.identity} appears ` +
+          `more than once among the rows (SPEC 11.1)`,
+      );
+    }
+    out[row.identity] = row.sourceRange;
+  }
+  return out;
+}
+
+/** The unique item of a kind and scope node (SPEC 10.1, 10.5). */
+function urRequireItem(
+  items: readonly ReviewItem[],
+  kind: ReviewItem["kind"],
+  scope: string,
+  context: string,
+): ReviewItem {
+  const matches = items.filter(
+    (item) => item.kind === kind && item.scope.node === scope,
+  );
+  if (matches.length !== 1) {
+    fail(
+      `${context}: expected exactly one ${kind} item scoped at ${scope} ` +
+        `(SPEC 10.5: the leaf edit yields the leaf's subtree-coherence item, ` +
+        `top's parent-consistency item, and the referencing unit's ` +
+        `code-impact item); found ${String(matches.length)} among ` +
+        JSON.stringify(items.map((item) => `${item.kind} ${item.scope.node}`)),
+    );
+  }
+  return matches[0]!;
+}
+
+function urRequireContext(
+  item: ReviewItem,
+  node: string,
+  context: string,
+): void {
+  if (!item.context.some((state) => state.node === node)) {
+    fail(
+      `${context}: the item's context must carry ${node} (SPEC 10.5) — the ` +
+        `present context node whose range this arm asserts; got ` +
+        JSON.stringify(item.context.map((state) => state.node)),
+    );
+  }
+}
+
+/**
+ * Every present node of a payload — scope, context, and origin (an origin
+ * entry's presence is its after side's, SPEC 10.7) — enters with its
+ * construct's range, decoded as exactly {"start", "end"} (SPEC 10.7, 1.7,
+ * 12.7); an absent node carries none (the decode forbids one there).
+ */
+function urAssertPayloadRanges(item: ReviewItem, context: string): void {
+  const states = [
+    {
+      what: "scope",
+      node: item.scope.node,
+      present: item.scope.present,
+      range: item.scope.sourceRange,
+    },
+    ...item.context.map((state, index) => ({
+      what: `context[${String(index)}]`,
+      node: state.node,
+      present: state.present,
+      range: state.sourceRange,
+    })),
+    ...item.origin.map((entry, index) => ({
+      what: `origin[${String(index)}]`,
+      node: entry.node,
+      present: entry.after.present,
+      range: entry.sourceRange,
+    })),
+  ];
+  for (const state of states) {
+    if (!state.present) continue;
+    const expected = UR_RANGES.get(state.node);
+    if (expected === undefined) {
+      fail(
+        `${context}: ${state.what} presents ${state.node}, a node this ` +
+          `fixture never staged`,
+      );
+    }
+    if (state.range === undefined) {
+      fail(
+        `${context}: ${state.what} (${state.node}) is present but carries ` +
+          `no source range — every present scope, context, and origin node, ` +
+          `requirement node and code location alike, enters the payload ` +
+          `with its source range (SPEC 10.7, 1.7)`,
+      );
+    }
+    assertSameJson(
+      state.range,
+      expected,
+      `${context}: ${state.what} (${state.node})'s range — decoded as ` +
+        `exactly {"start", "end"} (12.7's universal value form, H-3) and ` +
+        `byte-exact: the construct's own bytes (SPEC 1.7, 4.6, 10.7)`,
+    );
+  }
+}
+
+async function runUnpinnedRangesArm(product: ProductBinding): Promise<void> {
+  sliceCheck(UR_SOURCE, UR_LEAF_RANGE, UR_LEAF_TEXT, "the leaf construct");
+  sliceCheck(UR_SOURCE, UR_TOP_RANGE, UR_TOP_TEXT, "the top construct");
+  sliceCheck(UR_CODE_SOURCE, UR_UNIT_RANGE, UR_UNIT_TEXT, "the named unit");
+  if (UR_BASELINE_SOURCE === UR_SOURCE) {
+    throw new Error(
+      "section-12.7 fixture self-check: the baseline must differ from the " +
+        "current source in the leaf's text",
+    );
+  }
+
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": UR_CONFIG,
+        [UR_FILE]: UR_BASELINE_SOURCE,
+        [UR_CODE_FILE]: UR_CODE_SOURCE,
+      },
+    },
+    async (workspace) => {
+      const prefix = "T12.7-1 (unpinned-surface ranges)";
+      await workspace.gitInit();
+      const base = await workspace.gitCommitAll("baseline");
+      await workspace.file(UR_FILE, UR_SOURCE);
+      await buildOk(
+        product,
+        workspace,
+        `${prefix} \`build\` after the leaf edit`,
+      );
+
+      // `query node` (11.1) and `show --json` (12.4): the node's own range.
+      for (const argv of [
+        ["query", "node", UR_LEAF_ID, "--json"],
+        ["show", UR_LEAF_ID, "--json"],
+      ]) {
+        const context = `${prefix} \`${argv.join(" ")}\``;
+        const report = decodeNodeReport(
+          await runJson(product, workspace, argv, context),
+          context,
+        );
+        if (report.identity !== UR_LEAF_ID) {
+          fail(
+            `${context}: the report must present the queried node ` +
+              `${UR_LEAF_ID}; got ${JSON.stringify(report.identity)}`,
+          );
+        }
+        assertSameJson(
+          report.sourceRange,
+          UR_LEAF_RANGE,
+          `${context} — the node's source range decodes as exactly ` +
+            `{"start", "end"} (12.7's universal value form, through the H-3 ` +
+            `decode, never re-mapped) and is byte-exact: the section ` +
+            `construct from its opening tag through its closing tag ` +
+            `(SPEC 1.7, 11.1, 12.4)`,
+        );
+      }
+
+      // The row surfaces (11.1): every row's range, membership per T11-2/3.
+      const rowArms: readonly {
+        readonly argv: readonly string[];
+        readonly ids: readonly string[];
+        readonly what: string;
+      }[] = [
+        {
+          argv: ["query", "nodes", "--json"],
+          ids: [UR_ROOT_ID, UR_TOP_ID, UR_LEAF_ID],
+          what: "every node of the workspace",
+        },
+        {
+          argv: ["query", "subtree", UR_TOP_ID, "--json"],
+          ids: [UR_TOP_ID, UR_LEAF_ID],
+          what: "top and its descendant",
+        },
+        {
+          argv: ["query", "ancestors", UR_LEAF_ID, "--json"],
+          ids: [UR_TOP_ID, UR_ROOT_ID],
+          what: "the leaf's ancestors, top and the file root",
+        },
+      ];
+      for (const arm of rowArms) {
+        const context = `${prefix} \`${arm.argv.join(" ")}\``;
+        const rows = decodeNodeRowsReport(
+          await runJson(product, workspace, arm.argv, context),
+          context,
+        );
+        assertSameJson(
+          urRowRanges(rows, context),
+          urExpectedRanges(arm.ids),
+          `${context} — ${arm.what}, each row's range decoded as exactly ` +
+            `{"start", "end"} (12.7, H-3) and byte-exact: a non-root ` +
+            `node's section construct, the root's entire file (SPEC 1.7, 11.1)`,
+        );
+      }
+
+      // The review payload (10.7): a present requirement-node scope, a
+      // present code-location scope, and present context and origin nodes.
+      await expectExit(
+        product,
+        workspace,
+        ["review", "create", "--base", base, "--name", "s"],
+        0,
+        `${prefix} \`review create --base <baseline> --name s\` (SPEC 10.7)`,
+      );
+      const exportContext = `${prefix} \`review export s --json\``;
+      const exported = decodeExportReport(
+        await runJson(
+          product,
+          workspace,
+          ["review", "export", "s", "--json"],
+          exportContext,
+        ),
+        exportContext,
+      );
+      const leafItem = urRequireItem(
+        exported.items,
+        "subtree-coherence",
+        UR_LEAF_ID,
+        exportContext,
+      );
+      const topItem = urRequireItem(
+        exported.items,
+        "parent-consistency",
+        UR_TOP_ID,
+        exportContext,
+      );
+      const unitItem = urRequireItem(
+        exported.items,
+        "code-impact",
+        UR_UNIT_ID,
+        exportContext,
+      );
+      // The present context nodes the range assertion then covers.
+      urRequireContext(
+        leafItem,
+        UR_ROOT_ID,
+        `${exportContext} subtree-coherence`,
+      );
+      urRequireContext(
+        leafItem,
+        UR_TOP_ID,
+        `${exportContext} subtree-coherence`,
+      );
+      urRequireContext(
+        topItem,
+        UR_LEAF_ID,
+        `${exportContext} parent-consistency`,
+      );
+      urRequireContext(unitItem, UR_LEAF_ID, `${exportContext} code-impact`);
+      for (const item of exported.items) {
+        if (!item.origin.some((entry) => entry.node === UR_LEAF_ID)) {
+          fail(
+            `${exportContext}: the ${item.kind} item at ${item.scope.node} ` +
+              `must carry the changed leaf ${UR_LEAF_ID} among its origin ` +
+              `entries (SPEC 10.5) — the present origin node whose range ` +
+              `this arm asserts; got ` +
+              JSON.stringify(item.origin.map((entry) => entry.node)),
+          );
+        }
+        urAssertPayloadRanges(
+          item,
+          `${exportContext} ${item.kind} item at ${item.scope.node}`,
+        );
+      }
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -2235,12 +2647,20 @@ const T12_7_1 = defineProductTest({
     "the concerned path otherwise, `identities` contractual where 14 states " +
     "them: a policy finding [rule, source, kind token, target] with " +
     "locations [] and path null (14.12), a cross-module call naming the " +
-    "foreign module (14.11) (SPEC 12.7, 12.0, 14, 11.2-11.6)",
+    "foreign module (14.11); on the shape-unpinned surfaces — `query node`, " +
+    "the `query nodes`/`subtree`/`ancestors` rows (11.1), `show --json` " +
+    "(12.4), and a review payload's present scope node (a requirement " +
+    "node's and a `code-impact` location's), context, and origin nodes " +
+    "(10.7) — every range decodes through the H-3 adapters as exactly " +
+    '{"start", "end"}, never re-mapped, and byte-exact against the staged ' +
+    "constructs (1.7, 4.6) (SPEC 12.7, 12.0, 14, 11.2-11.6, 11.1, 12.4, " +
+    "10.7, 1.7)",
   run: async (product) => {
     await runLocatedFindingsArm(product);
     await runPolicyFindingArm(product);
     await runCrossModuleArm(product);
     await runReviewRefusalArm(product);
+    await runUnpinnedRangesArm(product);
     if (NON_UTF8_STAGED) {
       await runBytePathsArm(product);
     }
