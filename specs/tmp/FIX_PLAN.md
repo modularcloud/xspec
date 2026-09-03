@@ -65,27 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 44 — T13.3-3: `impact --base` leaves the journal-error staging; stays in the obstructed-write staging only
-
-Cites: TEST-SPEC T13.3-3 (revised: on the garbage-journal fixture each of
-`ids`, `show`, `coverage`, `review status`, `query` reports the 14.13 journal
-finding, exit 1; "`impact` is absent from the journal-error staging by
-necessity" — a garbage line meets baseline resolution first (exit 2 per
-6.3/T6.3-4); `impact --base` is driven "in the obstructed-write staging alone …
-against a commit taken before the obstruction was staged, its baseline
-resolving and 14.22 the operative gate finding"); SPEC 13.3, 6.3, 12.0.
-
-Now: `section-13.3.ts` `gatedReadInvocations` (≈ line 2086) includes `impact
---base` and feeds both whole-gate arms; the garbage-journal arm (≈ 2576)
-expects `impact` to exit 1 with 14.13 — contradicting the spec.
-
-Do: split the invocation list: the journal-error arm drives the five read
-commands only; the obstructed-write arm drives the five plus `impact --base
-<commit before the obstruction>` expecting 14.22 as the operative finding.
-Keep both fixtures' `audit` session and the modifies-nothing compares.
-
-Verify: `npx vitest run … test/suite/section-13.3.test.ts`.
-
 ### Task 45 — T13.4-3: unreadable-record half — corrupted record before the configuration change
 
 Cites: TEST-SPEC T13.4-3 (§13.4: with the record made unreadable — corrupted

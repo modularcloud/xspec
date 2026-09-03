@@ -59,26 +59,32 @@
 //   serving/refresh behaviors those answers demonstrate.
 // - T13.3-3's whole-gate arms (SPEC 13.3: the gate is over every finding a
 //   `build` would report — source validation errors, journal errors, and
-//   refused writes alike): the garbage journal line rides line 2 behind one
-//   legitimate journaled entry (T6.1-3's staging, so "naming the line" has
-//   teeth and refresh really must consume the journal for canonical
-//   identities, SPEC 5.4), and the baseline commit for `impact --base` is
-//   taken WITH the garbage line in place: 12.0 orders baseline resolution
-//   before the gate, and per 6.3 it succeeds here — the baseline journal is
-//   byte-identical to the current journal (the append-only prefix invariant
-//   holds), zero entries replay (T6.3-4's replay-failure arm is the garbage
-//   line appended AFTER the baseline commit, exit 2 — TEST-SPEC's
-//   deliberate contrast), and the baseline's sources and configuration
-//   parse and validate (6.3's baseline-content validation, operationalized
-//   as source/configuration validity per T6.3-4's "a baseline whose sources
-//   fail parse/validation" arm) — so the whole gate is the operative error,
-//   exit 1 with the journal finding. The obstructed write path stages a
-//   plain file over the emptied `markdown.outDir` directory after a
-//   successful build: the emit write path's workspace-relative component
+//   refused writes alike): each staging holds an `audit` session created
+//   while the workspace was valid — no baseline to resolve, so the gate
+//   alone stands between `review status` and an answer. The garbage journal
+//   line rides line 2 behind one legitimate journaled entry (T6.1-3's
+//   staging, so "naming the line" has teeth and refresh really must consume
+//   the journal for canonical identities, SPEC 5.4); that staging drives the
+//   five reads `ids`, `show`, `coverage`, `review status`, and `query` only
+//   — `impact` is absent from it by necessity, not oversight (TEST-SPEC
+//   T13.3-3): `impact` always takes `--base` (SPEC 9), baseline resolution
+//   precedes the gate (12.0), and no journal-error staging reaches the gate
+//   at `impact` — a garbage line appended after the baseline commit meets
+//   6.3's suffix replay as an unresolvable mapping (exit 2, the usage error
+//   T6.3-4 pins), and a garbage line already committed at the baseline ref
+//   makes a baseline that cannot be validated as a workspace (exit 2 again,
+//   6.3); neither verdict is asserted here. The obstructed write path
+//   stages a plain file over the emptied `markdown.outDir` directory after
+//   a successful build: the emit write path's workspace-relative component
 //   `mdout` is then occupied by a non-directory (13.4) — the workspace's
 //   one offending component, nonexistent deeper components never being the
 //   condition — so `build` would report exactly the one condition-22
-//   finding (14.22: one finding per distinct offending component). 14.13
+//   finding (14.22: one finding per distinct offending component); this
+//   staging alone also drives `impact --base`, against a commit taken
+//   before the obstruction was staged — the baseline's sources and
+//   configuration validate and the journal is absent on both sides (an
+//   empty journal is a prefix of every journal, 6.3) — so its baseline
+//   resolves and 14.22 is the operative gate finding (12.0). 14.13
 //   line naming follows T6.1-3's H-4 operationalization: the message
 //   echoing the garbage text or citing line/entry 2, or (tolerated) a
 //   location within the garbage line's byte window — a journal condition
@@ -2079,22 +2085,32 @@ function findingNamesGarbageLine(
 }
 
 /**
- * The six gated reads' invocations (SPEC 13.3; `review` represented by
- * `status`, the read subcommand — the mutating subcommands are the
- * invalid-sources workspace's subject).
+ * The gated reads' whole-gate invocations (SPEC 13.3; `review` represented
+ * by `status`, the read subcommand — the mutating subcommands are the
+ * invalid-sources workspace's subject): the five reads taking no baseline,
+ * plus `impact --base <impactBase>` when a baseline is supplied — the
+ * obstructed-write staging alone, against a commit taken before the
+ * obstruction was staged; the journal-error staging supplies none, `impact`
+ * being absent from it by necessity (TEST-SPEC T13.3-3; module header).
  */
 function gatedReadInvocations(
-  base: string,
   alpha: string,
+  impactBase?: string,
 ): readonly { readonly argv: readonly string[]; readonly what: string }[] {
+  const impact =
+    impactBase === undefined
+      ? []
+      : [
+          {
+            argv: ["impact", "--base", impactBase, "--json"],
+            what: "`impact --base <ref> --json`",
+          },
+        ];
   return [
     { argv: ["ids", "--json"], what: "`ids --json`" },
     { argv: ["show", alpha, "--json"], what: `\`show ${alpha} --json\`` },
     { argv: ["coverage", "--json"], what: "`coverage --json`" },
-    {
-      argv: ["impact", "--base", base, "--json"],
-      what: "`impact --base <ref> --json`",
-    },
+    ...impact,
     {
       argv: ["review", "status", "s", "--json"],
       what: "`review status s --json`",
@@ -2264,7 +2280,7 @@ async function assertNeverGatedAnswers(
 const T13_3_3 = defineProductTest({
   id: "T13.3-3",
   title:
-    "with invalid sources, each read command and each mutating review subcommand (create under --base/--strategy audit/--coverage, resolve, split) reports the validation errors, exits 1, answers nothing, and modifies nothing — no session created, and session file, journal, derived files, and graph data byte-identical; the gate is over every finding a `build` would report: with a garbage journal line staged (the baseline commit including it) and separately an obstructed write path, ids, show, coverage, impact, review status, and query each report exactly that finding — the journal error (14.13) naming the line, the refused write (14.22) its offending component — exit 1, answer nothing, and modify nothing, while on the same workspaces occurrences, view, and at answer per file finding-free at exit 0 and inventory answers, none of them modifying anything (SPEC 13.3, 11.2, 11.6, 12.0, 14)",
+    "with invalid sources, each read command and each mutating review subcommand (create under --base/--strategy audit/--coverage, resolve, split) reports the validation errors, exits 1, answers nothing, and modifies nothing — no session created, and session file, journal, derived files, and graph data byte-identical; the gate is over every finding a `build` would report: with a garbage journal line staged, ids, show, coverage, review status, and query each report exactly the journal error (14.13) naming the line — `impact` absent from that staging by necessity, a garbage line meeting baseline resolution first (exit 2, T6.3-4) — and with an obstructed write path staged, the same five and `impact --base` against a commit taken before the obstruction (its baseline resolving) each report exactly the refused write (14.22) naming its offending component — exit 1, answer nothing, and modify nothing, while on the same workspaces occurrences, view, and at answer per file finding-free at exit 0 and inventory answers, none of them modifying anything (SPEC 13.3, 11.2, 11.6, 12.0, 14)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -2492,10 +2508,14 @@ const T13_3_3 = defineProductTest({
 
     // --- Whole-gate arm 1: garbage journal line (14.13). The gate is over
     // every finding a `build` would report, source validity or not (SPEC
-    // 13.3); the staging and the baseline-commit placement are explained in
-    // the module header. Discriminates a product that gates on source
-    // validity alone and answers `query` from a broken journal with exit 0
-    // (refresh consumes the journal for canonical identities, SPEC 5.4).
+    // 13.3); the staging is explained in the module header. The five reads
+    // taking no baseline are driven — `impact` is absent from this staging
+    // by necessity (a garbage line meets baseline resolution first, exit 2,
+    // T6.3-4; module header) — so no git repository is staged: no baseline
+    // to resolve, the gate alone standing between each invocation and an
+    // answer. Discriminates a product that gates on source validity alone
+    // and answers `query` from a broken journal with exit 0 (refresh
+    // consumes the journal for canonical identities, SPEC 5.4).
     await withWorkspace(
       {
         "xspec.config.ts": GRAPH_CONFIG,
@@ -2506,7 +2526,6 @@ const T13_3_3 = defineProductTest({
         const context = "T13.3-3 (garbage journal)";
         const ALPHA = "specs/A.mdx#alpha";
 
-        await workspace.gitInit();
         await buildOk(product, workspace, `${context} staging \`build\``);
         // Journal line 1: one legitimate journaled operation — the rename
         // of the unreferenced tmp section — so the garbage lands on line 2
@@ -2565,15 +2584,7 @@ const T13_3_3 = defineProductTest({
           end: garbageStart + Buffer.byteLength(GATE_GARBAGE_LINE, "utf8"),
         };
 
-        // The baseline commit INCLUDES the garbage line, so baseline
-        // resolution — which precedes the gate (SPEC 12.0) — succeeds and
-        // the gate is `impact --base`'s operative error (module header;
-        // the post-baseline garbage position is T6.3-4's exit-2 arm).
-        const base = await workspace.gitCommitAll(
-          "gate baseline (garbage journal line included)",
-        );
-
-        for (const probe of gatedReadInvocations(base, ALPHA)) {
+        for (const probe of gatedReadInvocations(ALPHA)) {
           await probeWholeGate(
             product,
             workspace,
@@ -2617,7 +2628,9 @@ const T13_3_3 = defineProductTest({
     // write path `mdout/specs/A.md` then has its workspace-relative
     // component `mdout` occupied by a non-directory — the one offending
     // component, so `build` would report exactly the one condition-22
-    // finding (SPEC 13.4, 14.22; module header).
+    // finding (SPEC 13.4, 14.22; module header). This staging alone drives
+    // `impact --base` beside the five other reads, against the commit taken
+    // before the obstruction was staged (TEST-SPEC T13.3-3).
     await withWorkspace(
       {
         "xspec.config.ts": T13_3_3_OUTDIR_CONFIG,
@@ -2628,11 +2641,14 @@ const T13_3_3 = defineProductTest({
         const ALPHA = "specs/A.mdx#alpha";
 
         await workspace.gitInit();
-        // Pristine valid sources at the baseline; the journal is absent on
-        // both sides (an empty journal is a prefix of every journal), so
-        // baseline resolution succeeds and the gate is `impact --base`'s
-        // operative error (SPEC 6.3, 12.0).
-        const base = await workspace.gitCommitAll("baseline (valid sources)");
+        // The commit taken before the obstruction is staged — `impact
+        // --base`'s baseline: pristine valid sources and configuration at
+        // the ref, the journal absent on both sides (an empty journal is a
+        // prefix of every journal), so the baseline resolves and 14.22 is
+        // the operative gate finding (SPEC 6.3, 12.0).
+        const base = await workspace.gitCommitAll(
+          "baseline (valid sources, before the obstruction)",
+        );
         await buildOk(
           product,
           workspace,
@@ -2674,7 +2690,7 @@ const T13_3_3 = defineProductTest({
         await fsp.rm(workspace.path("mdout"), { recursive: true, force: true });
         await workspace.file("mdout", "not a directory\n");
 
-        for (const probe of gatedReadInvocations(base, ALPHA)) {
+        for (const probe of gatedReadInvocations(ALPHA, base)) {
           await probeWholeGate(
             product,
             workspace,
