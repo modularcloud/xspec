@@ -119,16 +119,25 @@
 //   applicable reason, none beside), and each finding's stable code with
 //   its concerned file/range/identity. The modifies-nothing compares,
 //   journal discipline, and preview equivalence stay the home tests'
-//   subject (T6.4-3, T6.5-4, T6.6-3). Location assertions are
-//   SOME-quantified per the home operationalization (support.ts
-//   assertFindingMentionsLocation): every-participant location cardinality
-//   is T14-8's subject, so "locating every colliding bearer" and "the
-//   would-be cycle's full path" are asserted as the staged fixtures' one
-//   assertable participant each — the remaining colliding bearer's
-//   construct; the dependency cycle's participating `d` spelling (the
-//   would-be spec import cycle's participating import declarations exist
-//   in no pre-operation source, so that arm pins code and form alone, the
-//   home note). `refused-unresolvable-reference` admits no fixture
+//   subject (T6.4-3, T6.5-4, T6.6-3). "Locating every colliding bearer"
+//   is asserted every-participant strict (support.ts
+//   assertFindingLocatesExactly, honoring a case's declared complete
+//   bearer set, `locatedAtEach`): T6.4-3's exported two-bearer
+//   prefix-replacement arm — rename `a`→`b` over `a`/`a.c` beside
+//   `b`/`b.c` — is one `refused-id-collision` finding whose location set
+//   is exactly `b` then `b.c` (12.7's within-finding order, the enclosing
+//   bearer's location start-bounded before its child's construct, path
+//   null), a product locating the first alone failing; T14-7's own
+//   collision arms declare their one remaining bearer the same way — the
+//   section move's occupant `keep.mv`, the control rename's `a.sib` —
+//   exactly one location, none beside. The cycle's location stays
+//   SOME-quantified (support.ts assertFindingMentionsLocation): "the
+//   would-be cycle's full path" is asserted as the dependency cycle's
+//   participating `d` spelling (the would-be spec import cycle's
+//   participating import declarations exist in no pre-operation source, so
+//   that arm pins code and form alone, the home note); the remaining
+//   every-participant cardinality contract is T14-8's subject.
+//   `refused-unresolvable-reference` admits no fixture
 //   (TEST-SPEC T6.4-3, T6.5-6) and is asserted only as the always-passing
 //   side of successful operations (T6.4-1, T6.5-1/2/3): no arm here. The
 //   exact self-move's refused-identity-unchanged is staged at its home
@@ -144,7 +153,8 @@
 //   then the broken workspace reports the validation findings alone.
 // - T14-8 owns the every-participant strictness the home tests SOME-quantify
 //   (T1.3-5's and T2.1-5's per-file tolerance, T5.3-1's file-dimension
-//   binding, T14-7's mentions-location): exact finding counts and an
+//   binding, T14-7's cycle mentions-location — its collision arms are
+//   every-participant strict, above): exact finding counts and an
 //   index-wise per-participant assertion — exactly one location per
 //   participating construct, each within its construct's byte window (the
 //   module-header window convention). Participant sequences are declared in
@@ -215,6 +225,7 @@ import {
   assertEdgeSetEqual,
   assertFindingConcernsPath,
   assertFindingLocated,
+  assertFindingLocatesExactly,
   assertFindingMentionsLocation,
   assertFindingNamesIdentity,
   assertSameJson,
@@ -2137,7 +2148,9 @@ const T14_6 = defineProductTest({
  * finding per applicable reason (or per staged numbered condition, for the
  * invalid-workspace refusal), never only the first found, none beside — and
  * assert each expected finding's concerned file/range/identity (the
- * SOME-quantified location of the home operationalization; module header).
+ * SOME-quantified location of the home operationalization; module header)
+ * or, where the case declares its complete bearer set (`locatedAtEach`),
+ * exactly that set — every colliding bearer, none beside (SPEC 14).
  * The modifies-nothing compares are the home tests' subject (T6.4-3,
  * T6.5-4). Per-reason concern lookup is by counting key, total because a
  * refusal report never carries two findings of one reason (SPEC 14: one
@@ -2195,6 +2208,14 @@ async function assertRefusalReport(
         finding,
         expectation.locatedAt,
         `${context}: the ${expectation.finding} finding's concerned construct`,
+      );
+    }
+    if (expectation.locatedAtEach !== undefined) {
+      assertFindingLocatesExactly(
+        finding,
+        expectation.locatedAtEach,
+        `${context}: the ${expectation.finding} finding's complete ` +
+          `located-bearer set — every colliding bearer, none beside`,
       );
     }
     if (expectation.identity !== undefined) {
@@ -2257,10 +2278,13 @@ const T14_7_MULTI_SOURCE = [
   "",
 ].join("\n");
 
-// The remaining colliding bearer's whole construct (the collision locates
-// every colliding bearer, SPEC 14; the fixture's one assertable participant)
-// and the dependency cycle's participating reference spelling (the home
-// operationalization of "locating the would-be cycle's full path").
+// The remaining colliding bearer's whole construct — the collision's
+// complete bearer set (SPEC 14: every colliding bearer; the occupant is the
+// one ID remaining after the removal that the new ID collides with, so the
+// finding locates it exactly, none beside — the moved section bears `mv`,
+// not `keep.mv`) — and the dependency cycle's participating reference
+// spelling (the home operationalization of "locating the would-be cycle's
+// full path").
 const T14_7_OCCUPANT_CONSTRUCT = '<S id="keep.mv">\nOccupant child text.\n</S>';
 const T14_7_OCCUPANT_WINDOW = byteWindow(
   T14_7_MULTI_SOURCE.slice(
@@ -2314,14 +2338,18 @@ const T14_7_BAD_INVALID =
 const T14_7 = defineProductTest({
   id: "T14-7",
   title:
-    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename, no collision reason beside it; refused-id-collision locating the colliding bearer; refused-structural-parent concerning the violated identity; refused-cycle locating the would-be cycle's participating spelling; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination; refused-unresolvable-reference admits no fixture and is asserted only as the always-passing side of successful operations; every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them (SPEC 14, 6.4, 6.5, 5.3, 12.0, 12.7)",
+    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename, no collision reason beside it; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing; refused-structural-parent concerning the violated identity; refused-cycle locating the would-be cycle's participating spelling; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination; refused-unresolvable-reference admits no fixture and is asserted only as the always-passing side of successful operations; every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them (SPEC 14, 6.4, 6.5, 5.3, 12.0, 12.7)",
   timeoutMs: 300_000,
   run: async (product) => {
     // --- The rename reasons, staged via T6.4-3's exported fixture: the
     // 1.4-invalid new IDs (refused-invalid-id concerning the invalid
     // identity), the identity-unchanged rename (alone — the exact one-entry
-    // multiset holds no collision reason beside it, SPEC 6.4), the
-    // collision (locating the remaining bearer), and the structurally
+    // multiset holds no collision reason beside it, SPEC 6.4), the two
+    // collisions — the single-bearer arm locating the remaining bearer;
+    // the two-bearer prefix-replacement arm, one refused-id-collision
+    // finding whose location set is exactly `b` then `b.c`, the case's
+    // declared complete bearer set (SPEC 14: every colliding bearer — a
+    // product locating the first alone fails) — and the structurally
     // misplaced but intrinsically valid new IDs (refused-structural-parent
     // alone, never refused-invalid-id beside it — the same exact-multiset
     // teeth; SPEC 14 "intrinsic form only").
@@ -2473,6 +2501,9 @@ const T14_7 = defineProductTest({
                 file: T14_7_MULTI_FILE,
                 window: T14_7_OCCUPANT_WINDOW,
               },
+              locatedAtEach: [
+                { file: T14_7_MULTI_FILE, window: T14_7_OCCUPANT_WINDOW },
+              ],
             },
             {
               finding: "refused-cycle",
@@ -2517,6 +2548,9 @@ const T14_7 = defineProductTest({
           {
             finding: "refused-id-collision",
             locatedAt: { file: T14_7_RENAME_FILE, window: T14_7_SIB_WINDOW },
+            locatedAtEach: [
+              { file: T14_7_RENAME_FILE, window: T14_7_SIB_WINDOW },
+            ],
           },
           "T14-7 rename control (the valid twin: the rename is staged to " +
             "collide with the remaining `a.sib` bearer — the premise the " +

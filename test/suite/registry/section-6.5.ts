@@ -230,13 +230,18 @@ import {
   assertNoCompileErrors,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { ConcernedIdentity, FindingSourceExpectation } from "./support.js";
+import type {
+  BearerLocationExpectation,
+  ConcernedIdentity,
+  FindingSourceExpectation,
+} from "./support.js";
 import {
   assertAppliedMapping,
   assertConditionCounts,
   assertEdgeSetEqual,
   assertFindingConcernsPath,
   assertFindingLocated,
+  assertFindingLocatesExactly,
   assertFindingMentionsLocation,
   assertFindingNamesIdentity,
   assertSameJson,
@@ -712,6 +717,16 @@ export interface RefusalExpectation {
   readonly finding: string;
   /** At least one location names this file (and byte window when given). */
   readonly locatedAt?: FindingSourceExpectation;
+  /**
+   * The finding's complete location set — exactly one location per listed
+   * bearer, none beside, index-wise in 12.7's within-finding order (SPEC 14:
+   * `refused-id-collision` locates every colliding bearer — the
+   * every-participant strictness of T6.4-3's two-bearer arm, asserted by
+   * its home test and by T14-7 over the shared case table; section-6.4.ts
+   * declares the same member). Declared beside `locatedAt`, whose
+   * SOME-quantified check consumers asserting it alone still apply.
+   */
+  readonly locatedAtEach?: readonly BearerLocationExpectation[];
   /** At least one identities entry names this concerned identity. */
   readonly identity?: ConcernedIdentity;
   /** The finding's 12.7 path member equals this workspace-relative path. */
@@ -790,6 +805,14 @@ async function expectRefusalModifiesNothing(
             expectation.locatedAt,
             `${context}: the ${expectation.finding} refusal's concerned ` +
               `construct`,
+          );
+        }
+        if (expectation.locatedAtEach !== undefined) {
+          assertFindingLocatesExactly(
+            finding,
+            expectation.locatedAtEach,
+            `${context}: the ${expectation.finding} refusal's complete ` +
+              `located-bearer set`,
           );
         }
         if (expectation.identity !== undefined) {

@@ -65,20 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 46 — T14-7: `refused-id-collision` locates every colliding bearer
-
-Cites: TEST-SPEC T14-7 (§14: a jointly-violated condition locates every
-participant — `refused-id-collision` locates every colliding bearer, two in
-T6.4-3's prefix-replacement arm, `b` and `b.c`); SPEC 14, 6.4.
-
-Now: `section-14.ts` T14-7 (≈ lines 118–132, 2260–2262) asserts
-SOME-quantified over "the fixture's one assertable participant".
-
-Do: stage Task 20's exported two-bearer fixture and assert the single finding's
-location set equals exactly the two bearers. Prerequisite: Task 20.
-
-Verify: `npx vitest run … test/suite/section-14.test.ts`.
-
 ### Task 47 — P-1: stage `.`-containing draws as nested segments; quote discipline for `'`/`"` draws
 
 Cites: TEST-SPEC P-1 (§16 revised: "a draw containing `.` can be spelled as no
