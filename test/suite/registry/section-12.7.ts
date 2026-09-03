@@ -160,6 +160,18 @@
 //   distinction stays T11.4-3's. Own/subtree text values are asserted as
 //   plain strings containing the embedded target's text (1.6: expanded
 //   values) — byte-exact expansion is T11.2-1's business.
+// - The clean-workspace pin — a successful `build --json` and `check --json`
+//   each emitting exactly `{"findings": []}` as the entire stdout — is
+//   asserted on the document-forms workspace right after its premise
+//   `build`, through `expectFindingFreeReport` (support.ts): exit 0, the
+//   single JSON document the entire stdout (H-5), decoded form-exact as the
+//   findings-only report (the one member `findings`, nothing beside it) and
+//   its array asserted empty. "Exactly" is the form: SPEC 12.0/12.7 pin no
+//   byte layout for the serialization (12.0's byte-determinism is a
+//   per-input property, not a byte form), so the bytes are not compared
+//   (H-3) — the pin exercised on the report form itself, beside the
+//   JSON-only surfaces (TEST-SPEC T12.7-2; T12.1-1 and T12.2-1 keep their
+//   plain exit assertions).
 //
 // T12.7-3's conservative operationalizations (per H-3/H-5/H-9):
 // - The anchoring form is asserted byte-exactly where SPEC 14 + 11.6 fix the
@@ -251,6 +263,7 @@ import {
   buildOk,
   expectErrorDocument,
   expectExit,
+  expectFindingFreeReport,
   runCli,
   runJson,
 } from "./support.js";
@@ -1902,8 +1915,11 @@ async function runIdentitiesOrderingArm(
 // ---------------------------------------------------------------------------
 //
 // One small valid workspace drives each form-catalog surface this test owns
-// (module header note names the delegations): a finding-free `check` report
-// (`{"findings": []}` — a finding-free `findings` is [], never null),
+// (module header note names the delegations): a successful `build --json`
+// and a finding-free `check --json` on the clean, freshly built workspace
+// (each exactly `{"findings": []}` as the entire stdout — the findings-only
+// form with the empty array, its one member and nothing beside it; a
+// finding-free `findings` is [], never null),
 // `occurrences` (`{"findings", "occurrences"}` with the one byte-exact
 // record), `view` without and with `--text` (the eight node members with
 // `ownText`/`subtreeText` present exactly under the flag — decoder-enforced
@@ -2186,20 +2202,27 @@ async function runDocumentFormsArm(product: ProductBinding): Promise<void> {
         "T12.7-2 (document forms) `build` — the staged workspace is valid",
       );
 
-      // --- A finding-free `check` report: `{"findings": []}` exactly.
-      const checkContext = "T12.7-2 (document forms) `check --json`";
-      const checkDoc = await runJson(
+      // --- A successful `build --json` on the clean, freshly built
+      // workspace: exactly `{"findings": []}` as the entire stdout — the pin
+      // exercised on the report form itself (SPEC 12.1, 12.7).
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["build", "--json"],
+        "T12.7-2 (document forms) `build --json` on the clean, freshly " +
+          "built workspace (SPEC 12.1: a successful build; 12.7: the " +
+          "findings-only form with the empty array)",
+      );
+
+      // --- A finding-free `check --json` on the same freshly built
+      // workspace: exactly `{"findings": []}` as the entire stdout.
+      await expectFindingFreeReport(
         product,
         workspace,
         ["check", "--json"],
-        `${checkContext} — a finding-free workspace's check exits 0 ` +
-          `(SPEC 12.0, 12.2)`,
-      );
-      assertSameJson(
-        decodeFindingsReport(checkDoc, checkContext).findings,
-        [],
-        `${checkContext} — the check report is {"findings": […]} with a ` +
-          `finding-free findings member [], never null (SPEC 12.7)`,
+        "T12.7-2 (document forms) `check --json` on the clean, freshly " +
+          "built workspace (SPEC 12.2: no finding; 12.7: the findings-only " +
+          "form with the empty array)",
       );
 
       // --- `occurrences`: `{"findings", "occurrences"}` with the byte-exact
@@ -2690,7 +2713,10 @@ const T12_7_2 = defineProductTest({
     "name sort by identities element-wise, not configuration order; " +
     "document forms are asserted literally (H-3): build/check/gated-read/" +
     'refused-operation reports are {"findings": […]} (a finding-free ' +
-    'findings is [], never null), occurrences is {"findings", ' +
+    "findings is [], never null — on a clean, freshly built workspace a " +
+    "successful build --json and check --json each emit exactly " +
+    '{"findings": []} as the entire stdout, the one member and nothing ' +
+    'beside it), occurrences is {"findings", ' +
     '"occurrences"}, view is {"findings", "views"} with the eight-member ' +
     "node form plus ownText/subtreeText exactly when --text is given, " +
     'attribute entries {"name", "range", "text"}, imports {"range", ' +
@@ -2701,7 +2727,7 @@ const T12_7_2 = defineProductTest({
     "refused preview's four-member form is T6.6-3's, the full inventory/" +
     "preview forms T11.6-*'s and T6.6-4/5's, a root's tags/coverage null " +
     "T11.4-3's, an absent targetTags T11.6-2's) (SPEC 12.7, 14, 13.3, " +
-    "11.3-11.5, 12.6, 7.3)",
+    "11.3-11.5, 12.6, 7.3, 12.1, 12.2)",
   run: async (product) => {
     await runConditionOrderingArm(product);
     await runRefusalOrderingArm(product);

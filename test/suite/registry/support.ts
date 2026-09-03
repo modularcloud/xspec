@@ -155,6 +155,26 @@ export async function expectConfigurationError(
 }
 
 /**
+ * Run a findings-report surface — `build --json`, `check --json`, a gated
+ * read or refused operation with `--json` — asserting the exact exit code
+ * (H-5) with exactly one JSON document as the entire stdout (SPEC.md 12.0),
+ * decoded form-exact as the findings-only report `{"findings": […]}`
+ * (SPEC.md 12.7; H-3): the one member, the literal finding form, the pinned
+ * order. Returns the decoded findings.
+ */
+export async function runFindingsReport(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  exitCode: number,
+  context: string,
+): Promise<readonly Finding[]> {
+  const result = await expectExit(product, workspace, argv, exitCode, context);
+  return decodeFindingsReport(parseJsonStdout(result, context), context)
+    .findings;
+}
+
+/**
  * Run `build --json` over a workspace staged with validation errors: assert
  * exit 1 (findings are exit-1 outcomes, SPEC.md 12.0; H-5) with exactly one
  * JSON document as the entire stdout, decoded as the findings report (H-3).
@@ -164,15 +184,46 @@ export async function buildFindings(
   workspace: TestWorkspace,
   context: string,
 ): Promise<readonly Finding[]> {
-  const result = await expectExit(
+  return await runFindingsReport(
     product,
     workspace,
     ["build", "--json"],
     1,
     context,
   );
-  return decodeFindingsReport(parseJsonStdout(result, context), context)
-    .findings;
+}
+
+/**
+ * Run a findings-report surface on a workspace expected to be finding-free —
+ * a successful `build --json`, or `check --json` on a clean, freshly built
+ * workspace — asserting exit 0 (SPEC.md 12.0: success; a report carrying
+ * any finding exits 1) and exactly `{"findings": []}` as the entire stdout:
+ * the findings-only form with the empty array — its one member and nothing
+ * beside it (SPEC.md 12.7: a finding-free `findings` is `[]`, never `null`,
+ * never omitted). "Exactly" is the form (H-3): the document's member set
+ * and the array's emptiness, asserted through the form-exact decode —
+ * SPEC.md 12.0/12.7 pin no byte layout for the serialization, so none is
+ * compared.
+ */
+export async function expectFindingFreeReport(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<void> {
+  const findings = await runFindingsReport(
+    product,
+    workspace,
+    argv,
+    0,
+    `${context} — a finding-free report exits 0 (SPEC 12.0)`,
+  );
+  assertSameJson(
+    findings,
+    [],
+    `${context} — the report is exactly {"findings": []}: the findings-only ` +
+      `form's one member holding the empty array, never null (SPEC 12.7)`,
+  );
 }
 
 /**

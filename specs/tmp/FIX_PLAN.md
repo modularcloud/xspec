@@ -65,22 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 42 — T12.7-2: clean-workspace `build --json` is exactly the findings-only form `{"findings": []}`
-
-Cites: TEST-SPEC T12.7-2 (§12.7: on a clean workspace `build --json` emits
-exactly `{"findings": []}` — the findings-only form with an empty list and no
-other member); SPEC 12.1, 12.7.
-
-Now: T12.7-2 (`section-12.7.ts` ≈ line 1777) asserts only `check --json` and
-runs `build` without `--json`; `support.ts` `buildFindings` expects exit 1.
-
-Do: add the `build --json` run to T12.7-2 on the clean workspace: exit 0, the
-decoded document has exactly one member `findings` holding an empty list (and
-the byte form T12.7-2 pins, if it pins one); add or extend a `support.ts`
-helper for the exit-0 findings-only decode so other tests can reuse it.
-
-Verify: `npx vitest run … test/suite/section-12.7.test.ts`.
-
 ### Task 43 — T12.7-3: `--config ../cfg/xspec.config.ts` from a sibling directory, reported as spelled
 
 Cites: TEST-SPEC T12.7-3 (§12.7 revised: the nonexistent and the malformed
