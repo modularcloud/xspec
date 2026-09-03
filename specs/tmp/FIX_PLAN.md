@@ -65,24 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 45 — T13.4-3: unreadable-record half — corrupted record before the configuration change
-
-Cites: TEST-SPEC T13.4-3 (§13.4: with the record made unreadable — corrupted
-shape-blind — before the configuration change, `build` replaces the record and
-leaves the previous derived file as an orphan, the missing-record half's twin);
-SPEC 13.4.
-
-Now: `section-13.4.ts` covers only the missing-record half (no
-`record-staging` import, no corruption arm).
-
-Do: add the arm using `test/helpers/adapters/record-staging.ts` (H-3's
-shape-blind garbage over the operational path set): corrupt the record, change
-the configuration so the derived path moves, `build` → the record is
-rewritten (valid, current), the old derived file still present (orphan), the
-new one generated; assertions mirror the missing-record arm.
-
-Verify: `npx vitest run … test/suite/section-13.4.test.ts`.
-
 ### Task 46 — T14-7: `refused-id-collision` locates every colliding bearer
 
 Cites: TEST-SPEC T14-7 (§14: a jointly-violated condition locates every

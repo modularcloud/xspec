@@ -33,6 +33,26 @@
 //   output is a function of sources, configuration, and the journal alone
 //   (13.4), so conforming builds of both workspaces yield byte-identical
 //   trees.
+// - T13.4-3's two halves — the record missing (deleted per T13.3-2's
+//   operational definition) and unreadable (corrupted shape-blind through
+//   the H-3 record-staging adapter, T6.6-6's staging, before the
+//   configuration change) — walk one procedure, so their assertions mirror
+//   each other exactly. "`build` replaces the record" (13.3, 14.23) is
+//   asserted at the record-consulting surfaces — `check` exits 0 (the record
+//   readable and current: no condition-23 unit form, no graph-data
+//   staleness; the orphan, recorded nowhere, names no stale file) and
+//   `inventory`'s `recorded` datum is the plain current generation, naming
+//   A's module and no B path (13.3: the paths most recently generated) —
+//   and, whole and opaque (H-4), by the cross-half byte compare of the graph
+//   data the narrowed `build` wrote: derived output is a function of
+//   sources, configuration, and the journal alone (13.4), identical across
+//   the halves, so the garbage-overwritten and the deleted record are
+//   replaced with the same bytes — a product leaving garbage beside a fresh
+//   record fails it. The unreadable half's staging premise is read through
+//   `inventory` inside a whole-root compare (exit 1 with `recorded`
+//   explicitly unavailable — T11.6-4's pin; 11.6: neither refreshing nor
+//   writing), so the configuration change is known to find the record
+//   unreadable and untouched.
 // - T13.4-5 stays inside CERTIFICATIONS.md §CONF-CORE's scope (the test is
 //   in-scope there): one spec group of importless, tagless `.mdx` sources;
 //   no `code`, `markdown`, `coverage`, or `policy` keys; no git; mutating
@@ -119,7 +139,9 @@ import type {
 import {
   assertJsonKeysByteSorted,
   assertReportMentions,
+  corruptGraphDataShapeBlind,
   decodeFindingsReport,
+  decodeInventoryRecordedDatum,
   decodeSessionStatusReport,
 } from "../../helpers/adapters/index.js";
 import {
@@ -686,43 +708,242 @@ export default defineConfig({
 })
 `;
 
+const A_MODULE_REL = "specs/A.xspec.ts";
+const B_DERIVED_PREFIX = "specs/B.xspec.";
+
+/** A snapshot's graph-data entries (T13.3-2's operational path set). */
+function graphDataEntries(
+  snapshot: DirectorySnapshot,
+): Map<string, SnapshotEntry> {
+  return filteredEntries(snapshot.entries, (key) => isGraphDataKey(key));
+}
+
+/**
+ * One half of the orphan knowledge boundary (SPEC 13.4: a derived file
+ * orphaned while the record was itself missing or unreadable, 14.23): how
+ * the product-written record is put out of xspec's knowledge after the
+ * initial `build` and before the configuration change.
+ */
+interface OrphanBoundaryHalf {
+  readonly label: string;
+  readonly disturbRecord: (
+    workspace: TestWorkspace,
+    tag: string,
+  ) => Promise<void>;
+}
+
+/**
+ * The record is replaced by the successful `build` (SPEC 13.3, 14.23):
+ * asserted at the record-consulting surfaces — `check` exits 0 (the record
+ * readable and current: no condition-23 or graph-data staleness, and the
+ * orphan, unrecorded, names no stale file) and `inventory`'s `recorded`
+ * datum is the plain current generation, naming A's module and no B path
+ * (13.3: the paths of the derived files most recently generated) — both
+ * reads modifying nothing (13.3, 11.6).
+ */
+async function assertRecordReplaced(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  tag: string,
+): Promise<void> {
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      await expectExit(
+        product,
+        workspace,
+        ["check"],
+        0,
+        `${tag} \`check\` after the narrowed build — clean: the successful ` +
+          `build replaced the record, so it is readable and current (no ` +
+          `condition-23 unit form, no graph-data staleness), and the ` +
+          `orphan, recorded nowhere, is outside \`check\`'s knowledge too ` +
+          `— no stale-file finding names it (SPEC 13.3, 13.4, 14.10, ` +
+          `14.23, 12.2)`,
+      );
+      const context = `${tag} \`inventory\` after the narrowed build`;
+      const recorded = decodeInventoryRecordedDatum(
+        await runJson(product, workspace, ["inventory"], context),
+        context,
+      );
+      if (recorded.state !== "value") {
+        fail(
+          `${context}: the successful \`build\` replaces the record, so ` +
+            `the record-supplied datum is the plain recorded derived-file ` +
+            `paths again — never unavailability, never null (SPEC 13.3, ` +
+            `14.23, 11.6, 12.7); got state ${JSON.stringify(recorded.state)}`,
+        );
+      }
+      // ASCII paths are plain strings in every 12.7 path value (the decoder
+      // rejects a valid-UTF-8 path in byte form), so the string compares
+      // are exact.
+      const paths = recorded.value;
+      if (!paths.some((p) => typeof p === "string" && p === A_MODULE_REL)) {
+        fail(
+          `${context}: the replaced record is the current generation — it ` +
+            `names A's generated module ${JSON.stringify(A_MODULE_REL)} ` +
+            `(SPEC 13.3, 13.1, 11.6); got ${JSON.stringify(paths)}`,
+        );
+      }
+      const strays = paths.filter(
+        (p) => typeof p === "string" && p.startsWith(B_DERIVED_PREFIX),
+      );
+      if (strays.length > 0) {
+        fail(
+          `${context}: the replaced record holds the paths of the derived ` +
+            `files most recently generated — B.mdx is no longer a ` +
+            `configured source, so no B-derived path is recorded (the ` +
+            `orphans are outside xspec's knowledge, SPEC 13.3, 13.4); got ` +
+            JSON.stringify(strays),
+        );
+      }
+    },
+    `${tag}: \`check\` and \`inventory\` after the narrowed build modify ` +
+      `nothing — \`check\` never refreshes and \`inventory\` never writes ` +
+      `(SPEC 13.3, 11.6)`,
+  );
+}
+
+/**
+ * Walk one half of the boundary: build so B's derived files exist and are
+ * recorded; disturb the record; narrow the configuration so B's files are no
+ * longer generated; `build` — the record is replaced (`assertRecordReplaced`)
+ * and B's orphaned files, outside xspec's knowledge, survive byte-exactly; a
+ * subsequent `build` leaves them alone; deleted manually, they stay gone.
+ * Returns the graph data as the narrowed `build` wrote it, for the
+ * cross-half byte compare.
+ */
+async function walkOrphanBoundary(
+  product: ProductBinding,
+  half: OrphanBoundaryHalf,
+): Promise<DirectorySnapshot> {
+  const tag = `T13.4-3 (${half.label})`;
+  return await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        "specs/A.mdx": A_MDX,
+        "specs/B.mdx": ['<S id="b">', "Beta text.", "</S>", ""].join("\n"),
+      },
+    },
+    async (workspace) => {
+      // Build so B's derived files exist and are recorded (SPEC 13.3).
+      await buildOk(product, workspace, `${tag} initial \`build\``);
+      const s1 = await snapshotDirectory(workspace.root);
+      const bDerived = [
+        ...filteredEntries(s1.entries, (key, entry) => {
+          return entry.kind === "file" && key.startsWith(B_DERIVED_PREFIX);
+        }).keys(),
+      ].sort();
+      if (!bDerived.includes("specs/B.xspec.ts")) {
+        fail(
+          `${tag}: staging premise — after \`build\`, B.mdx's generated ` +
+            `module specs/B.xspec.ts exists as a plain file (SPEC 13.1); ` +
+            `found B-derived files: ${JSON.stringify(bDerived)}`,
+        );
+      }
+
+      // Put the record out of xspec's knowledge — missing or unreadable —
+      // before the configuration change (SPEC 13.4, 14.23).
+      await half.disturbRecord(workspace, tag);
+
+      // Narrow the configuration so B's files are no longer generated, then
+      // build: B's former derived files are orphaned, but the record that
+      // would identify them was missing or unreadable — they are outside
+      // xspec's knowledge and must not be removed; the build replaces the
+      // record.
+      await workspace.file("xspec.config.ts", A_ONLY_CONFIG);
+      await buildOk(
+        product,
+        workspace,
+        `${tag} \`build\` under the narrowed configuration (SPEC 12.1)`,
+      );
+      const s2 = await snapshotDirectory(workspace.root);
+      for (const key of bDerived) {
+        const before = s1.entries.get(key);
+        const after = s2.entries.get(key);
+        if (before === undefined || before.kind !== "file") {
+          throw new Error(`${tag} internal error: no file entry for ${key}`);
+        }
+        if (after === undefined || after.kind !== "file") {
+          fail(
+            `${tag}: the orphaned derived file ${key} must survive the ` +
+              `build — it was orphaned while the recorded derived-file ` +
+              `paths were ${half.label === "missing record" ? "missing" : "unreadable"}, ` +
+              `so it is outside xspec's knowledge and is not removed ` +
+              `(SPEC 13.4, 13.3, 14.23); found ` +
+              `${after === undefined ? "absent" : after.kind}`,
+          );
+        }
+        assertBytesEqual(
+          after.bytes,
+          before.bytes,
+          `${tag}: the orphaned derived file ${key} after the build — ` +
+            `left alone byte-exactly (SPEC 13.4)`,
+        );
+      }
+      if (s2.entries.get(A_MODULE_REL)?.kind !== "file") {
+        fail(
+          `${tag}: ${A_MODULE_REL} must exist after the build — A.mdx is ` +
+            `still a configured source (SPEC 13.1, 12.1)`,
+        );
+      }
+      await assertRecordReplaced(product, workspace, tag);
+
+      // A subsequent build leaves the stray files (and everything else at
+      // the fixed point) alone.
+      await buildOk(product, workspace, `${tag} subsequent \`build\``);
+      const s3 = await snapshotDirectory(workspace.root);
+      assertSnapshotsEqual(
+        s2,
+        s3,
+        `${tag}: the workspace after a subsequent build vs before it — ` +
+          `subsequent builds leave the stray files alone (SPEC 13.4, 12.0)`,
+      );
+
+      // The orphans may be deleted manually; builds do not resurrect them
+      // (they are not generated by the current configuration and not
+      // recorded).
+      for (const key of bDerived) {
+        await fsp.rm(workspace.path(key), { force: true });
+      }
+      await buildOk(
+        product,
+        workspace,
+        `${tag} \`build\` after the manual deletion (SPEC 12.1)`,
+      );
+      const s4 = await snapshotDirectory(workspace.root);
+      const expected = filteredEntries(s3.entries, (key) => {
+        return !bDerived.includes(key);
+      });
+      assertSnapshotsEqual(
+        asSnapshot(workspace.root, expected),
+        s4,
+        `${tag}: the workspace after deleting the strays and rebuilding — ` +
+          `the manually deleted orphans stay gone and nothing else changes ` +
+          `(SPEC 13.4, 12.0)`,
+      );
+      return asSnapshot(workspace.root, graphDataEntries(s2));
+    },
+  );
+}
+
 const T13_4_3 = defineProductTest({
   id: "T13.4-3",
   title:
-    "a derived file orphaned while the recorded derived-file paths were missing is outside xspec's knowledge: builds under the narrowed configuration leave it alone byte-exactly, and after manual deletion it stays gone (SPEC 13.4, 13.3, 12.1)",
+    "a derived file orphaned while the recorded derived-file paths were missing (deleted) or unreadable (corrupted shape-blind before the configuration change) is outside xspec's knowledge: `build` under the narrowed configuration replaces the record — `check` clean, `recorded` the current generation, the graph data byte-identical across the two halves — and leaves the orphan alone byte-exactly, subsequent builds likewise, and after manual deletion it stays gone (SPEC 13.4, 13.3, 14.23, 12.1)",
   run: async (product) => {
-    await withWorkspace(
-      {
-        files: {
-          "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/A.mdx": A_MDX,
-          "specs/B.mdx": ['<S id="b">', "Beta text.", "</S>", ""].join("\n"),
-        },
-      },
-      async (workspace) => {
-        // Build so B's derived files exist and are recorded (SPEC 13.3).
-        await buildOk(product, workspace, "T13.4-3 initial `build`");
-        const s1 = await snapshotDirectory(workspace.root);
-        const bDerived = [
-          ...filteredEntries(s1.entries, (key, entry) => {
-            return entry.kind === "file" && key.startsWith("specs/B.xspec.");
-          }).keys(),
-        ].sort();
-        if (!bDerived.includes("specs/B.xspec.ts")) {
-          fail(
-            "T13.4-3: staging premise — after `build`, B.mdx's generated " +
-              "module specs/B.xspec.ts exists as a plain file (SPEC 13.1); " +
-              `found B-derived files: ${JSON.stringify(bDerived)}`,
-          );
-        }
-
-        // Destroy the graph data — and with it the recorded derived-file
-        // paths (T13.3-2's operational definition: everything under .xspec/
-        // except the durable journal and reviews/; neither exists here).
+    // The missing half: destroy the graph data — and with it the recorded
+    // derived-file paths (T13.3-2's operational definition: everything
+    // under .xspec/ except the durable journal and reviews/; neither
+    // exists here).
+    const missing = await walkOrphanBoundary(product, {
+      label: "missing record",
+      disturbRecord: async (workspace, tag) => {
         const xspecKind = await workspace.kind(".xspec");
         if (xspecKind !== "dir") {
           fail(
-            "T13.4-3: staging premise — after `build`, the .xspec/ " +
+            `${tag}: staging premise — after \`build\`, the .xspec/ ` +
               `directory exists (SPEC 13.3); found ${xspecKind}`,
           );
         }
@@ -733,81 +954,73 @@ const T13_4_3 = defineProductTest({
             force: true,
           });
         }
+      },
+    });
 
-        // Narrow the configuration so B's files are no longer generated,
-        // then build: B's former derived files are orphaned, but the record
-        // that would identify them is gone — they are outside xspec's
-        // knowledge and must not be removed.
-        await workspace.file("xspec.config.ts", A_ONLY_CONFIG);
-        await buildOk(
-          product,
-          workspace,
-          "T13.4-3 `build` under the narrowed configuration (SPEC 12.1)",
-        );
-        const s2 = await snapshotDirectory(workspace.root);
-        for (const key of bDerived) {
-          const before = s1.entries.get(key);
-          const after = s2.entries.get(key);
-          if (before === undefined || before.kind !== "file") {
-            throw new Error(`T13.4-3 internal error: no file entry for ${key}`);
-          }
-          if (after === undefined || after.kind !== "file") {
-            fail(
-              `T13.4-3: the orphaned derived file ${key} must survive the ` +
-                `build — it was orphaned while the recorded derived-file ` +
-                `paths were missing, so it is outside xspec's knowledge and ` +
-                `is not removed (SPEC 13.4, 13.3); found ` +
-                `${after === undefined ? "absent" : after.kind}`,
+    // The unreadable half: corrupt the product-written record shape-blind
+    // (T6.6-6's staging; H-3 record-staging adapter — garbage over
+    // T13.3-2's operational path set, files present but readable as no
+    // record, SPEC 14.23). Premise, read through the record-consulting
+    // surface inside a whole-root compare: `inventory` exits 1 with
+    // `recorded` explicitly unavailable (T11.6-4's pin) and leaves the
+    // state intact (11.6: it neither refreshes nor writes), so the
+    // configuration change finds the record unreadable.
+    const unreadable = await walkOrphanBoundary(product, {
+      label: "unreadable record",
+      disturbRecord: async (workspace, tag) => {
+        await corruptGraphDataShapeBlind(workspace.root, `${tag} staging`);
+        const context =
+          `${tag} premise \`inventory\` with the record corrupted ` +
+          `shape-blind before the configuration change`;
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const result = await expectExit(
+              product,
+              workspace,
+              ["inventory"],
+              1,
+              `${context} — an answer carrying the condition-23 finding ` +
+                `exits 1, emitted in full (SPEC 14.23, 12.0)`,
             );
-          }
-          assertBytesEqual(
-            after.bytes,
-            before.bytes,
-            `T13.4-3: the orphaned derived file ${key} after the build — ` +
-              `left alone byte-exactly (SPEC 13.4)`,
-          );
-        }
-        if (s2.entries.get("specs/A.xspec.ts")?.kind !== "file") {
-          fail(
-            "T13.4-3: specs/A.xspec.ts must exist after the build — A.mdx " +
-              "is still a configured source (SPEC 13.1, 12.1)",
-          );
-        }
-
-        // A subsequent build leaves the stray files (and everything else at
-        // the fixed point) alone.
-        await buildOk(product, workspace, "T13.4-3 subsequent `build`");
-        const s3 = await snapshotDirectory(workspace.root);
-        assertSnapshotsEqual(
-          s2,
-          s3,
-          "T13.4-3: the workspace after a subsequent build vs before it — " +
-            "subsequent builds leave the stray files alone (SPEC 13.4, 12.0)",
-        );
-
-        // The orphans may be deleted manually; builds do not resurrect them
-        // (they are not generated by the current configuration and not
-        // recorded).
-        for (const key of bDerived) {
-          await fsp.rm(workspace.path(key), { force: true });
-        }
-        await buildOk(
-          product,
-          workspace,
-          "T13.4-3 `build` after the manual deletion (SPEC 12.1)",
-        );
-        const s4 = await snapshotDirectory(workspace.root);
-        const expected = filteredEntries(s3.entries, (key) => {
-          return !bDerived.includes(key);
-        });
-        assertSnapshotsEqual(
-          asSnapshot(workspace.root, expected),
-          s4,
-          "T13.4-3: the workspace after deleting the strays and rebuilding " +
-            "— the manually deleted orphans stay gone and nothing else " +
-            "changes (SPEC 13.4, 12.0)",
+            const recorded = decodeInventoryRecordedDatum(
+              parseJsonStdout(
+                result,
+                `${context} — inventory is JSON-only: a single JSON ` +
+                  `document as the entire stdout (SPEC 11, 12.0)`,
+              ),
+              context,
+            );
+            if (recorded.state !== "unavailable") {
+              fail(
+                `${context}: staging premise — recorded state that exists ` +
+                  `but cannot be read as a record reports \`recorded\` ` +
+                  `explicitly unavailable (SPEC 14.23, 11.6, 12.7); got ` +
+                  `state ${JSON.stringify(recorded.state)}`,
+              );
+            }
+          },
+          `${context}: modifies nothing — the corrupt state is neither ` +
+            `read, repaired, nor replaced by \`inventory\` (SPEC 11.6, 13.3)`,
         );
       },
+    });
+
+    // Cross-half compare, whole and opaque (H-4 self-comparison): derived
+    // output is a function of sources, configuration, and the journal alone
+    // (SPEC 13.4), identical across the halves — so the graph data the
+    // narrowed `build` wrote over the garbage is byte-identical to what it
+    // wrote over nothing: the record replaced with exactly what `build`
+    // writes, no garbage left beside it (13.3, 12.0).
+    assertSnapshotsEqual(
+      missing,
+      unreadable,
+      "T13.4-3: the graph data the narrowed `build` wrote over the " +
+        "unreadable record vs over the missing one — byte-identical: " +
+        "derived files are reproducible from sources, configuration, and " +
+        "the journal alone, identical across the halves, so a successful " +
+        "build replaces the unreadable record with exactly what it writes " +
+        "(SPEC 13.4, 13.3, 14.23, 12.0; H-4 self-comparison)",
     );
   },
 });
