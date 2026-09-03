@@ -80,12 +80,23 @@ jobs:
         env:
           XSPEC_E6_EXCHANGE_DIR: ${{ github.workspace }}/.e6-exchange
       - name: Upload E-6 exchange outputs for the Windows leg
-        # No files exist until the harness writes the representative fixture's
-        # outputs into XSPEC_E6_EXCHANGE_DIR on this leg. The exchange lives
-        # in a dot-directory, which upload-artifact v4 excludes by default
-        # (include-hidden-files: false since v4.4) — without the override the
-        # written exchange uploads as nothing and the Windows comparison
-        # fails loudly on a missing manifest (E-6, H-9).
+        # Runs regardless of the suite step's verdict (a step without `if:` is
+        # skipped once an earlier step fails), so an exchange written by the
+        # passing E-6 writer test (test/suite/e6-exchange-writer.test.ts)
+        # always reaches the Windows leg even while unrelated Linux product
+        # tests are red — the Phase 9 red-green period included. `!cancelled()`
+        # rather than `always()`: a cancelled job uploads nothing. The Windows
+        # byte-identity test still fails loudly (H-9) exactly when no exchange
+        # was written — never because some other Linux test failed. No files
+        # exist until the harness writes the representative fixture's outputs
+        # into XSPEC_E6_EXCHANGE_DIR on this leg; `if-no-files-found: ignore`
+        # keeps this step harmless when the suite step never ran or the writer
+        # test wrote nothing. The exchange lives in a dot-directory, which
+        # upload-artifact v4 excludes by default (include-hidden-files: false
+        # since v4.4) — without the override the written exchange uploads as
+        # nothing and the Windows comparison fails loudly on a missing
+        # manifest (E-6, H-9).
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: e6-linux-outputs
@@ -111,9 +122,12 @@ jobs:
       - name: Build the product
         run: npm run build
       - name: Download E-6 exchange outputs from the Linux leg
-        # The artifact does not exist until the Linux leg produces outputs; the
-        # harness's E-6 comparison must itself fail loudly when the exchange
-        # directory is missing while the product exists.
+        # The artifact is absent only when the Linux job produced no exchange
+        # (it died before its suite step, or the E-6 writer test itself did not
+        # complete) — its upload step runs whenever that job is not cancelled,
+        # red product tests notwithstanding. The harness's E-6 comparison must
+        # itself fail loudly when the exchange directory is missing while the
+        # product exists.
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
