@@ -5,13 +5,21 @@
 // against a hand-written, non-xspec fixture project
 // (test/fixtures/s4-tooling/): a known type error, a known definition
 // location, and a known hover text must all be detected, so section 4's
-// consumer assertions cannot pass vacuously. Alongside the three S-4 probes,
-// the driver's remaining surfaces are pinned the same way: compiled
-// consumers run under plain Node with no runtime dependency in the consumer
-// workspace (SPEC.md 13.1; IMPLEMENTATION.md), an import nothing makes
-// resolvable is a diagnosed compile error (the red path for section 4 tests
-// against the stub product, H-8), and marker addressing and project loading
-// fail loudly rather than vacuously green.
+// consumer assertions cannot pass vacuously. A driver blind to a diagnostic
+// kind passes conformer and violator alike wherever no violator targets that
+// kind, so each kind's detection is checked directly (S-4): beside the
+// argument-type error (TS2345), an import binding conflicting with a
+// module-scope local declaration (TS2440) — the kind T6.5-9's compile-clean
+// observation turns on when a product-chosen import identifier collides
+// with the receiving file's own `const`, `function`, or `class`, and one no
+// certification fixture targets (CERTIFICATIONS.md, Exclusions: "Section 4
+// consumer-side and type-level tests"). Alongside the S-4 probes, the
+// driver's remaining surfaces are pinned the same way: compiled consumers
+// run under plain Node with no runtime dependency in the consumer workspace
+// (SPEC.md 13.1; IMPLEMENTATION.md), an import nothing makes resolvable is a
+// diagnosed compile error (the red path for section 4 tests against the
+// stub product, H-8), and marker addressing and project loading fail loudly
+// rather than vacuously green.
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
@@ -64,6 +72,52 @@ test("S-4: detects the known type error at its exact location", async () => {
   expect(marker.column).toBe(36);
   // And it is the only error: detection is specific, not "everything fails".
   expect(project.errors()).toHaveLength(1);
+});
+
+test("S-4: detects an import binding conflicting with a module-scope local declaration (TS2440, the kind T6.5-9 turns on)", async () => {
+  // T6.5-9's compile-clean observation rides assertNoCompileErrors over a
+  // consumer whose receiving file pre-empts the product-chosen import
+  // identifier with its own `const` — a collision TypeScript reports as
+  // TS2440 on the import binding. No certification fixture targets the kind,
+  // so its detection is pinned here directly (S-4), on a fixture file whose
+  // only defect is that collision.
+  const project = await loadFixtureProject([
+    "greeting.ts",
+    "import-conflict.ts",
+  ]);
+  const marker = project.locate("import-conflict.ts", "import { greet }", {
+    charOffset: "import { ".length,
+  });
+  const diagnostic = assertCompileErrorAt(project, marker, {
+    code: 2440,
+    messageIncludes: [
+      "Import declaration conflicts with local declaration",
+      "greet",
+    ],
+  });
+  // The error spans exactly the import clause's binding identifier, and the
+  // location math is pinned against hand-counted ground truth in the frozen
+  // fixture file.
+  expect(diagnostic.start).toEqual(marker);
+  expect(diagnostic.length).toBe("greet".length);
+  expect(marker.file).toBe("import-conflict.ts");
+  expect(marker.line).toBe(10);
+  expect(marker.column).toBe(10);
+  // Detection is specific: the import binding is the only error — the local
+  // declaration it collides with (and the use) carry no diagnostic.
+  expect(project.errors()).toHaveLength(1);
+  const local = project.locate("import-conflict.ts", "const greet", {
+    charOffset: "const ".length,
+  });
+  expect(() =>
+    assertCompileErrorAt(project, local, { code: 2440 }),
+  ).toThrowError(HarnessAssertionError);
+  // The clean-compile assertion T6.5-9 rides diagnoses the state instead of
+  // passing.
+  expect(() => assertNoCompileErrors(project)).toThrowError(
+    HarnessAssertionError,
+  );
+  expect(() => assertNoCompileErrors(project)).toThrowError(/TS2440/);
 });
 
 test("S-4 control: the fixture's clean files compile with zero errors", async () => {
