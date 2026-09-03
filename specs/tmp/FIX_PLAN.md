@@ -65,25 +65,6 @@ fail, but only as diagnosed product failures (H-8) — never as harness errors.
 
 ## Stage D — remaining suite gaps, in TEST-SPEC section order
 
-### Task 43 — T12.7-3: `--config ../cfg/xspec.config.ts` from a sibling directory, reported as spelled
-
-Cites: TEST-SPEC T12.7-3 (§12.7 revised: the nonexistent and the malformed
-`--config <path>` cases are each staged from a sibling directory as `--config
-../cfg/xspec.config.ts` and the error document reports the concerned path as
-`../cfg/xspec.config.ts` — the ascent form); SPEC 12.7, 11.6, 14.14.
-
-Now: `runErrorConfigPathsArm` (`section-12.7.ts` ≈ 2051, 2063) stages
-`./cfg/broken.config.ts` and `missing.config.ts` from the root — no ascent
-spelling.
-
-Do: restage both cases: invoke from a sibling directory (`<root>/work`) with
-`--config ../cfg/xspec.config.ts` — once absent, once malformed — and assert
-the decoded error document's concerned path is exactly `../cfg/xspec.config.ts`
-(exit 2, nothing written). Keep the root-relative cases if the spec still
-lists them.
-
-Verify: `npx vitest run … test/suite/section-12.7.test.ts`.
-
 ### Task 44 — T13.3-3: `impact --base` leaves the journal-error staging; stays in the obstructed-write staging only
 
 Cites: TEST-SPEC T13.3-3 (revised: on the garbage-journal fixture each of

@@ -179,11 +179,21 @@
 //   file from the workspace root (`xspec.config.ts`) and from a nested
 //   working directory two levels down (`../../xspec.config.ts` — ascent
 //   spelled `..`, joined with `/`, failing a product that reports the path
-//   workspace-relative); a `--config`-named file whose argument is spelled
-//   with a leading `./` segment reporting the canonical
+//   workspace-relative); a `--config`-named file in TEST-SPEC's own staging
+//   (T11.6-1's form) — from the sibling working directory `work/`,
+//   `--config ../cfg/xspec.config.ts` naming no file and, separately, a
+//   file that is not well-formed TypeScript, each reporting
+//   `../cfg/xspec.config.ts` (SPEC 14: "the path `--config` names — it is
+//   that file"; with `--config` given, a missing file is missing
+//   configuration, 14.14, never a plain usage error — reported never as `.`
+//   and never as `../xspec.config.ts`, the invalid root file the upward
+//   search from `work/` would find, failing a product that falls back to
+//   the search when the named file is absent), each failing `build`
+//   snapshot-compared over the whole root (SPEC 12.1: a build failing at
+//   configuration load modifies nothing); from the root, an argument
+//   spelled with a leading `./` segment reporting the canonical
 //   `cfg/broken.config.ts` (11.6: no `.` segments — failing a
-//   verbatim-echoing product), present and missing alike (SPEC 14: "the
-//   path `--config` names — it is that file"); and the failed upward search
+//   verbatim-echoing product); and the failed upward search
 //   with no `--config` concerning the working directory itself, spelled `.`
 //   — from the root and from a nested cwd equally (the search starts at the
 //   invocation working directory).
@@ -251,6 +261,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -2381,6 +2392,28 @@ export default defineConfig({
 `;
 
 /**
+ * Not well-formed TypeScript — the "malformed" `--config` target of
+ * T12.7-3's sibling-directory staging (SPEC 14 condition 14: "a
+ * configuration file that is not well-formed TypeScript"), one defect by
+ * the T7-2 attribution discipline: the file is not a program at all, so
+ * the refusal is attributable to nothing but its form.
+ */
+const ERR_MALFORMED_CONFIG =
+  "this is not TypeScript ((( and so not a configuration\n";
+
+/**
+ * T12.7-3's sibling-directory staging (T11.6-1's form): the invocation
+ * working directory `work/` and the configuration directory `cfg/` are
+ * siblings under the workspace root, so `--config ../cfg/xspec.config.ts`
+ * names the file by one ascent segment then two descent segments, joined
+ * with `/` — already the canonical anchoring spelling of SPEC 11.6, which
+ * the error document must therefore report as spelled, never `.`.
+ */
+const ERR_SIBLING_CWD = "work";
+const ERR_SIBLING_CONFIG_FILE = "cfg/xspec.config.ts";
+const ERR_SIBLING_CONFIG_ARG = "../cfg/xspec.config.ts";
+
+/**
  * Diagnostics are standard-error content (SPEC 12.0; T12.7-3: "each the
  * error document on stdout, diagnostics on stderr"): non-empty stderr on
  * every exit-2 arm. Stderr byte-invariance across output forms and the
@@ -2448,7 +2481,7 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
         "cfg/broken.config.ts": ERR_UNKNOWN_KEY_CONFIG,
         "specs/A.mdx": ERR_SOURCE,
       },
-      dirs: ["nested/inner"],
+      dirs: ["nested/inner", ERR_SIBLING_CWD],
     },
     async (workspace) => {
       // The upward-search-found file from the workspace root: zero ascent
@@ -2488,17 +2521,59 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
         "T12.7-3 `build --json --config ./cfg/broken.config.ts` (invalid " +
           "named configuration)",
       );
-      // A missing `--config`-named file is missing configuration WITH
-      // --config given: the concerned path is still the named file, never
-      // "." (SPEC 14 reserves "." for a failed upward search with no
-      // --config).
-      await expectAnchoredConfigurationError(
-        product,
+      // TEST-SPEC's own staging (T11.6-1's form): from the sibling working
+      // directory work/, `--config ../cfg/xspec.config.ts` — first naming
+      // no file (cfg/ exists; that file does not), then a file that is not
+      // well-formed TypeScript. Each is a configuration error (SPEC 14.14:
+      // missing or invalid configuration — with --config given, a missing
+      // file is missing configuration, never a plain usage error) whose
+      // concerned path is the named file in the canonical anchoring
+      // spelling relative to the invocation working directory: one ascent
+      // segment then the descent, joined with `/` — `../cfg/xspec.config.ts`
+      // (SPEC 14: "the path --config names — it is that file"), never "."
+      // (reserved for a failed upward search with no --config), and never
+      // `../xspec.config.ts`, the invalid root file the upward search from
+      // work/ would find — failing a product that falls back to the search
+      // when the named file is absent. A build failing at configuration
+      // load modifies nothing (SPEC 12.1): the whole root is
+      // snapshot-compared around each invocation.
+      const siblingCwd = workspace.path(ERR_SIBLING_CWD);
+      const siblingArgv = [
+        "build",
+        "--json",
+        "--config",
+        ERR_SIBLING_CONFIG_ARG,
+      ];
+      await assertLeavesUnchanged(
         workspace.root,
-        ["build", "--json", "--config", "missing.config.ts"],
-        "missing.config.ts",
-        "T12.7-3 `build --json --config missing.config.ts` (missing named " +
-          "configuration)",
+        () =>
+          expectAnchoredConfigurationError(
+            product,
+            siblingCwd,
+            siblingArgv,
+            ERR_SIBLING_CONFIG_ARG,
+            "T12.7-3 `build --json --config ../cfg/xspec.config.ts` from " +
+              "the sibling directory work/ (the named file nonexistent)",
+          ),
+        "T12.7-3 sibling-directory `--config` naming a nonexistent file: " +
+          "a build failing at configuration load modifies nothing (SPEC " +
+          "12.1)",
+      );
+      await workspace.file(ERR_SIBLING_CONFIG_FILE, ERR_MALFORMED_CONFIG);
+      await assertLeavesUnchanged(
+        workspace.root,
+        () =>
+          expectAnchoredConfigurationError(
+            product,
+            siblingCwd,
+            siblingArgv,
+            ERR_SIBLING_CONFIG_ARG,
+            "T12.7-3 `build --json --config ../cfg/xspec.config.ts` from " +
+              "the sibling directory work/ (the named file not well-formed " +
+              "TypeScript)",
+          ),
+        "T12.7-3 sibling-directory `--config` naming a malformed file: a " +
+          "build failing at configuration load modifies nothing (SPEC 12.1)",
       );
       // A JSON-only surface without `--json`: bare `inventory` under the
       // invalid configuration — JSON output is in effect (SPEC 12.0, 11),
@@ -2749,9 +2824,13 @@ const T12_7_3 = defineProductTest({
     "locations [], and its concerned path in the anchoring form of 11.6 " +
     "relative to the invocation working directory (the found " +
     "xspec.config.ts from the root; ../../xspec.config.ts from a nested " +
-    "cwd; a --config-named file in the canonical spelling — a ./-spelled " +
-    'argument reports without the "." segment — present or missing alike; ' +
-    '"." for a failed upward search with no --config); a plain usage error ' +
+    "cwd; a --config-named file in the canonical spelling — from the " +
+    "sibling working directory work/, --config ../cfg/xspec.config.ts " +
+    "reports ../cfg/xspec.config.ts, the named file nonexistent and, " +
+    'separately, not well-formed TypeScript, never ".", each failing build ' +
+    "modifying nothing; from the root a ./-spelled argument reports " +
+    'without the "." segment; "." for a failed upward search with no ' +
+    "--config); a plain usage error " +
     "carries code and path null; one finding however many defects (a " +
     "configuration file with three distinct defects yields a single " +
     "condition-14 finding); JSON is in effect for a JSON-only surface " +
@@ -2759,7 +2838,7 @@ const T12_7_3 = defineProductTest({
     "an invalid configuration) and whenever --json appears among the " +
     "arguments, the arguments themselves erroneous included (an unknown " +
     "command beside --json) — each the error document on stdout with " +
-    "diagnostics on stderr (SPEC 12.0, 12.7, 14, 11.6)",
+    "diagnostics on stderr (SPEC 12.0, 12.7, 14, 11.6, 12.1)",
   run: async (product) => {
     await runErrorConfigPathsArm(product);
     await runErrorSearchFailureArm(product);
