@@ -8,12 +8,15 @@
 // consumer assertions cannot pass vacuously. A driver blind to a diagnostic
 // kind passes conformer and violator alike wherever no violator targets that
 // kind, so each kind's detection is checked directly (S-4): beside the
-// argument-type error (TS2345), an import binding conflicting with a
-// module-scope local declaration (TS2440) — the kind T6.5-9's compile-clean
-// observation turns on when a product-chosen import identifier collides
-// with the receiving file's own `const`, `function`, or `class`, and one no
-// certification fixture targets (CERTIFICATIONS.md, Exclusions: "Section 4
-// consumer-side and type-level tests"). Alongside the S-4 probes, the
+// argument-type error (TS2345), the two collision kinds T6.5-9's
+// compile-clean observation turns on when a product-chosen import
+// identifier collides with a binding the receiving file already holds — an
+// import binding conflicting with a module-scope local declaration (TS2440:
+// the file's own `const`, `function`, or `class`) and an import binding
+// duplicated by another import binding (TS2300: a non-spec import the file
+// already carries) — neither of which any certification fixture targets
+// (CERTIFICATIONS.md, Exclusions: "Section 4 consumer-side and type-level
+// tests"). Alongside the S-4 probes, the
 // driver's remaining surfaces are pinned the same way: compiled consumers
 // run under plain Node with no runtime dependency in the consumer workspace
 // (SPEC.md 13.1; IMPLEMENTATION.md), an import nothing makes resolvable is a
@@ -118,6 +121,62 @@ test("S-4: detects an import binding conflicting with a module-scope local decla
     HarnessAssertionError,
   );
   expect(() => assertNoCompileErrors(project)).toThrowError(/TS2440/);
+});
+
+test("S-4: detects an import binding duplicated by another import binding (TS2300, the other collision kind T6.5-9 turns on)", async () => {
+  // T6.5-9's pre-empted set also holds a non-spec import binding: a
+  // product-chosen import identifier equal to one the receiving file already
+  // imports is a collision TypeScript reports as TS2300 on both import
+  // bindings. No certification fixture targets the kind, so its detection is
+  // pinned here directly (S-4), on a fixture file whose only defect is that
+  // duplication. Fixture self-check first: both imported modules are valid
+  // on their own, so every diagnostic below is the duplication's.
+  assertNoCompileErrors(
+    await loadFixtureProject(["greeting.ts", "other-greeting.ts"]),
+    "s4-tooling duplicate-import premise",
+  );
+  const project = await loadFixtureProject([
+    "greeting.ts",
+    "other-greeting.ts",
+    "import-duplicate.ts",
+  ]);
+  // The marker occurs once per import declaration, so each binding is
+  // addressed by occurrence index; the offset lands on the identifier.
+  const bindings = [
+    { index: 0, line: 9 },
+    { index: 1, line: 10 },
+  ] as const;
+  for (const { index, line } of bindings) {
+    const marker = project.locate("import-duplicate.ts", "import { greet }", {
+      index,
+      charOffset: "import { ".length,
+    });
+    const diagnostic = assertCompileErrorAt(project, marker, {
+      code: 2300,
+      messageIncludes: ["Duplicate identifier", "greet"],
+    });
+    // Each error spans exactly its import clause's binding identifier, and
+    // the location math is pinned against hand-counted ground truth in the
+    // frozen fixture file.
+    expect(diagnostic.start).toEqual(marker);
+    expect(diagnostic.length).toBe("greet".length);
+    expect(marker.file).toBe("import-duplicate.ts");
+    expect(marker.line).toBe(line);
+    expect(marker.column).toBe(10);
+  }
+  // Detection is specific: the two import bindings are the only errors — the
+  // use carries no diagnostic.
+  expect(project.errors()).toHaveLength(2);
+  const use = project.locate("import-duplicate.ts", 'greet("world")');
+  expect(() => assertCompileErrorAt(project, use, { code: 2300 })).toThrowError(
+    HarnessAssertionError,
+  );
+  // The clean-compile assertion T6.5-9 rides diagnoses the state instead of
+  // passing.
+  expect(() => assertNoCompileErrors(project)).toThrowError(
+    HarnessAssertionError,
+  );
+  expect(() => assertNoCompileErrors(project)).toThrowError(/TS2300/);
 });
 
 test("S-4 control: the fixture's clean files compile with zero errors", async () => {
