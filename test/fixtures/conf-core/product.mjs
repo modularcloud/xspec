@@ -12,7 +12,19 @@
 //   valid state, `ids`, `show`, `query`, `coverage` reporting zero profiles,
 //   the `review` read subcommands; `impact --base` without git is the exit-2
 //   unreadable-baseline case of SPEC 6.3/12.0).
-// - `rename` and file-form `move` with journal append (SPEC 6.1, 6.2).
+// - `rename` and file-form `move` with journal append (SPEC 6.1, 6.2),
+//   their argument checks of 12.0 and valid-workspace precondition (6.4,
+//   6.5) judged after acquisition and the hold; `rename --preview` only as
+//   T13.5-8's non-mutating boundary drives it — the refused form (a
+//   nonexistent old ID's usage error) acquiring nothing and creating no
+//   hold file (SPEC 6.6), `--test-hold` beside `--preview` the
+//   syntax-class usage error of 12.0 — a performable preview lying outside
+//   this surface (a fixture scope error, exit 70).
+// - Validation within scope: the one condition an in-scope failing workspace
+//   stages — a spec source beginning with a byte-order mark (SPEC 14.20,
+//   1.6), its finding the zero-length range at offset 0 (SPEC 14) — is
+//   detected and reported by `build`, `check`, the gate of 13.3, and the
+//   precondition of `rename`/`move`, exit 1, nothing written.
 // - `review` with the `audit` strategy (SPEC 10.6) through `create`,
 //   `resolve`, `split`, and the read subcommands, including read-time
 //   invalidation over the recorded state of SPEC 10.4, and — on a workspace
@@ -21,7 +33,10 @@
 //   before its own writes, writing graph data byte-identical to what
 //   `build` writes (T13.5-1's stale-workspace arm, T10.1-1).
 // - SPEC 13.4 durable protection and SPEC 13.5 in full, `--test-hold`
-//   included.
+//   included: acquisition and the hold precede every later check — the
+//   argument checks of 12.0, baseline resolution (6.3), the gate and refresh
+//   of 13.3, and the operation's own validation (T13.5-8) — so the seam
+//   engages on an invocation a later check refuses or the gate turns back.
 //
 // Key mechanisms:
 // - Exclusivity (SPEC 13.5): a lock file in the OS temp directory keyed by
@@ -90,6 +105,14 @@ class FindingsError extends Error {
  * goes to stdout as the report.
  */
 class RefusalError extends Error {}
+
+/**
+ * An invocation outside this fixture's certified surface (CERTIFICATIONS.md
+ * §CONF-CORE): refused loudly with exit 70 — outside the 12.0 partition —
+ * never answered and never misreported as a usage error, so a test driving
+ * it fails on the fixture side rather than passing vacuously.
+ */
+class FixtureScopeError extends Error {}
 
 /**
  * @typedef {{ condition: string, message: string, file?: string,
@@ -996,7 +1019,12 @@ async function loadGraph(root, groups) {
     const bytes = await fsp.readFile(path.join(root, rel));
     let text;
     try {
-      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      // A leading byte-order mark is kept (ignoreBOM), so it is seen below
+      // as the unparseable-source condition it is (SPEC 1.6, 14.20) rather
+      // than silently stripped by the decoder's default.
+      text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+        bytes,
+      );
     } catch {
       findings.push({
         condition: "14.20",
@@ -1011,7 +1039,9 @@ async function loadGraph(root, groups) {
         condition: "14.20",
         message: `unparseable source: begins with a byte-order mark (SPEC 1.6): ${rel}`,
         file: rel,
-        location: { start: 0, end: 3 },
+        // One zero-length range at the failure's offset — 0 for a byte-order
+        // mark (SPEC 14; CERTIFICATIONS.md §CONF-CORE's staging constraint).
+        location: { start: 0, end: 0 },
       });
       continue;
     }
@@ -2051,24 +2081,25 @@ const MUTATING_FLAGS = { ...READ_FLAGS, "--test-hold": "value" };
 // ---------------------------------------------------------------------------
 
 /**
- * Run one mutating command (SPEC 13.5): acquire exclusivity, honor the
- * `--test-hold` seam before modifying anything, perform the operation, and
- * release. The lock is released on every path; a killed process releases by
- * dying (the next command detects the dead holder).
- */
-/**
  * Run a mutating command (SPEC 13.5): configuration, then workspace
- * exclusivity, then the `--test-hold` seam, then — for the mutating `review`
- * subcommands (`refreshesGraphData`) — the 13.3 refresh of stale graph data,
- * then the operation's own writes (`operate`); exclusivity ends with the
- * command.
+ * exclusivity, then the `--test-hold` seam, then the checks a command judges
+ * ahead of source validation (`check`: the usage-class argument checks of
+ * 12.0 and baseline resolution, 6.3), then — for the mutating `review`
+ * subcommands (`refreshesGraphData`) — the gate and refresh of 13.3 over
+ * the current sources, then the operation's own checks and writes
+ * (`operate`); exclusivity ends with the command — released on every path,
+ * a killed process releasing by dying (the next command detects the dead
+ * holder). Acquisition and the hold precede every later check (SPEC 13.5;
+ * T13.5-8), so an invocation a later check refuses or the gate turns back
+ * creates the hold file too and exits with its own outcome only after the
+ * hold's deletion, having written nothing.
  */
 async function runMutating(
   cwd,
   configFlag,
   holdFlag,
   operate,
-  { refreshesGraphData = false } = {},
+  { refreshesGraphData = false, check = async () => {} } = {},
 ) {
   const config = await loadConfig(cwd, configFlag);
   // The 13.3 refresh of stale graph data (CERTIFICATIONS.md §CONF-CORE Scope:
@@ -2094,8 +2125,17 @@ async function runMutating(
     // write (the session write, `rename`/`move`'s edits, journal appends,
     // the finishing regeneration of 6.4/6.5); the refresh's own bytes — is
     // exactly the conformer's behavior, and a workspace whose graph data is
-    // current is refreshed by nothing, where the deviation is unobservable.
-    await refreshIfStale();
+    // current is refreshed by nothing, where the deviation is unobservable —
+    // as is a workspace failing `build`'s validations, on which the refresh
+    // writes nothing early or late (SPEC 13.3): the early refresh's gate
+    // findings are set aside here, and the gate's findings, like every usage
+    // error, are reported only after acquisition and the hold, at the
+    // conformer's position below (T13.5-8's failing-workspace arms).
+    try {
+      await refreshIfStale();
+    } catch (error) {
+      if (!(error instanceof FindingsError)) throw error;
+    }
     refreshAfterHold = async () => {};
   }
   // VIOL-CORE-NOLOCK (CERTIFICATIONS.md): mutating commands do not exclude
@@ -2118,6 +2158,14 @@ async function runMutating(
       );
     }
   };
+  // Everything that follows the hold, in the conformer's order: the checks
+  // judged ahead of source validation, the gate and refresh of 13.3, the
+  // operation's own checks and writes.
+  const proceed = async () => {
+    await check(config);
+    await refreshAfterHold();
+    return await operate(config);
+  };
   try {
     if (deviations.writesBeforeHold) {
       // VIOL-CORE-EARLYWRITE (CERTIFICATIONS.md): the mutating command
@@ -2125,20 +2173,45 @@ async function runMutating(
       // it acquires exclusivity (above, unchanged), completes the operation's
       // writes (the 13.3 refresh of stale graph data and the journal append
       // included), then creates the hold file, waits for its deletion, and
-      // exits normally with the operation's outcome. The hold seam's own
-      // semantics (empty file, occupied path fails exit 2) and everything
-      // else are exactly the conformer's behavior.
-      await refreshAfterHold();
-      const code = await operate(config);
+      // exits normally with the operation's outcome. The argument checks of
+      // 12.0, baseline resolution (6.3), the gate of 13.3, and the
+      // valid-workspace precondition of rename/move (6.4, 6.5) are judged
+      // after acquisition and before the writes they gate, as the conformer
+      // judges them, while the exit they refuse with is deferred as the
+      // writes' completion is: an invocation they refuse creates the hold
+      // file having written nothing, waits for its deletion, and only then
+      // exits with its error. The hold seam's own semantics (empty file,
+      // occupied path fails exit 2) and everything else are exactly the
+      // conformer's behavior.
+      let code;
+      try {
+        code = await proceed();
+      } catch (error) {
+        if (!isRefusedOutcome(error)) throw error;
+        await holdIfRequested();
+        throw error;
+      }
       await holdIfRequested();
       return code;
     }
     await holdIfRequested();
-    await refreshAfterHold();
-    return await operate(config);
+    return await proceed();
   } finally {
     await lock.release();
   }
+}
+
+/**
+ * Whether an error is one of the outcomes a check or validation refuses an
+ * invocation with (SPEC 12.0: a usage error, exit 2; findings or a refused
+ * operation, exit 1) — as opposed to a fixture crash.
+ */
+function isRefusedOutcome(error) {
+  return (
+    error instanceof UsageError ||
+    error instanceof FindingsError ||
+    error instanceof RefusalError
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -2434,9 +2507,14 @@ async function commandImpact(io, cwd, argv) {
 
 // --- rename / move (SPEC 6.4, 6.5) ---
 
+const RENAME_FLAGS = { ...MUTATING_FLAGS, "--preview": "bool" };
+
 async function commandRename(io, cwd, argv) {
-  const { flags, positionals } = parseArgs(argv, MUTATING_FLAGS, [3, 3]);
+  const { flags, positionals } = parseArgs(argv, RENAME_FLAGS, [3, 3]);
   const [file, oldId, newId] = positionals;
+  if (flags["--preview"] === true) {
+    return await previewRename(cwd, flags, file, oldId, newId);
+  }
   return await runMutating(
     cwd,
     flags["--config"],
@@ -2527,13 +2605,47 @@ async function commandRename(io, cwd, argv) {
   );
 }
 
+/**
+ * `rename --preview` (SPEC 6.6), within this fixture's surface only as
+ * T13.5-8's non-mutating boundary drives it (CERTIFICATIONS.md §CONF-CORE).
+ * A preview is a non-mutating command under 13.5: it acquires no workspace
+ * exclusivity, creates no hold file, and does not take the acquisition-tied
+ * seam — `--test-hold` beside `--preview` is a usage error of the syntax
+ * class (SPEC 12.0), judged before configuration is loaded — and it is
+ * refused exactly as the real operation would be: the argument checks of
+ * 12.0 (a nonexistent origin file or old ID, 6.4) exit 2 at once, modifying
+ * nothing. A preview of a performable rename lies outside this surface and
+ * is refused loudly, outside the 12.0 partition, never answered.
+ */
+async function previewRename(cwd, flags, file, oldId, newId) {
+  if (flags["--test-hold"] !== undefined) {
+    throw new UsageError(
+      "--test-hold is excluded under --preview: a preview acquires no exclusivity and takes no seam (SPEC 6.6, 12.0)",
+    );
+  }
+  const config = await loadConfig(cwd, flags["--config"]);
+  const graph = await loadGraph(config.root, config.groups);
+  const model = graph.files.find((candidate) => candidate.rel === file);
+  if (model === undefined) {
+    throw new UsageError(
+      `unknown file ${file}: not a discovered spec source (SPEC 6.4, 12.0)`,
+    );
+  }
+  if (!model.sections.some((section) => section.id === oldId)) {
+    throw new UsageError(`unknown id ${oldId} in ${file} (SPEC 6.4, 12.0)`);
+  }
+  throw new FixtureScopeError(
+    `rename --preview of a performable operation (${file} ${oldId} -> ${newId}) lies outside this fixture's certified surface (§CONF-CORE)`,
+  );
+}
+
 async function commandMove(io, cwd, argv) {
   const { flags, positionals } = parseArgs(argv, MUTATING_FLAGS, [2, 2]);
   const [oldPath, newPath] = positionals;
   if (oldPath.includes("#") || newPath.includes("#")) {
     // The section form is outside this fixture's certified scope
     // (CERTIFICATIONS.md §CONF-CORE: file-form move only).
-    throw new UsageError(
+    throw new FixtureScopeError(
       "this fixture implements the file form of move only (§CONF-CORE scope)",
     );
   }
@@ -2658,16 +2770,24 @@ async function reviewCreate(io, cwd, argv) {
       `unknown strategy ${flags["--strategy"]} (SPEC 10.7, 12.0)`,
     );
   }
-  if (flags["--base"] !== undefined) {
-    throw new UsageError(
-      `cannot read the baseline ${flags["--base"]}: the workspace has no git repository (SPEC 6.3, 12.0)`,
-    );
-  }
-  if (flags["--coverage"] !== undefined) {
-    throw new UsageError(
-      `unknown coverage profile ${flags["--coverage"]} (SPEC 12.0)`,
-    );
-  }
+  // Baseline resolution (SPEC 6.3) and the profile name under `--coverage`
+  // (SPEC 7.4, 12.0) consult the workspace and the configuration: judged
+  // after acquisition and the hold and before the gate and refresh of 13.3
+  // (SPEC 13.5, 12.0; T13.5-8's baseline arm). In this git-less scope no
+  // ref can be read — the exit-2 unreadable-baseline case of 6.3, as
+  // `impact --base` is — and no coverage profile is configured.
+  const check = async () => {
+    if (flags["--base"] !== undefined) {
+      throw new UsageError(
+        `cannot read the baseline ${flags["--base"]}: the workspace has no git repository (SPEC 6.3, 12.0)`,
+      );
+    }
+    if (flags["--coverage"] !== undefined) {
+      throw new UsageError(
+        `unknown coverage profile ${flags["--coverage"]} (SPEC 12.0)`,
+      );
+    }
+  };
   return await runMutating(
     cwd,
     flags["--config"],
@@ -2733,7 +2853,7 @@ async function reviewCreate(io, cwd, argv) {
       ]);
       return 0;
     },
-    { refreshesGraphData: true },
+    { check, refreshesGraphData: true },
   );
 }
 
@@ -3324,6 +3444,13 @@ async function dispatchCommand(io, cwd, argv) {
         io.stdout(`${error.message}\n`);
       }
       return 1;
+    }
+    if (error instanceof FixtureScopeError) {
+      // Outside this fixture's scope (CERTIFICATIONS.md §CONF-CORE): refused
+      // loudly, outside the 12.0 partition — never answered, never
+      // misreported as a usage error.
+      io.stderr(`xspec: fixture scope error: ${error.message}\n`);
+      return 70;
     }
     // A crash is a fixture bug: exit outside the 12.0 partition so every
     // exit-code assertion fails loudly and the diagnosis carries the stack.
