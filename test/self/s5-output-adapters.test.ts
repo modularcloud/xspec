@@ -60,6 +60,7 @@ import {
   decodeNodeSummary,
   decodeNodeSummaryRowsReport,
   decodeNodeTextSummary,
+  decodePerformedOperationReport,
   decodePreviewReport,
   decodeReachableReport,
   decodeSessionListReport,
@@ -3472,16 +3473,41 @@ const DECODERS: readonly DecoderSpec[] = [
     ],
   },
   {
-    name: "applied mapping (rename/move success report)",
-    decode: decodeAppliedMappingReport,
+    name: "performed rename/move document (12.7: {findings, mapping})",
+    decode: decodePerformedOperationReport,
     good: GOOD_APPLIED_MAPPING,
-    verify: (decoded: ReturnType<typeof decodeAppliedMappingReport>) => {
-      expect(decoded).toEqual([
-        { from: "specs/A.mdx#login", to: "specs/A.mdx#signin" },
-        { from: "specs/A.mdx#login.form", to: "specs/A.mdx#signin.form" },
-      ]);
+    verify: (decoded: ReturnType<typeof decodePerformedOperationReport>) => {
+      expect(decoded).toEqual({
+        findings: [],
+        mapping: [
+          { from: "specs/A.mdx#login", to: "specs/A.mdx#signin" },
+          { from: "specs/A.mdx#login.form", to: "specs/A.mdx#signin.form" },
+        ],
+      });
     },
     bad: [
+      {
+        label: "a member beside findings and mapping (form-exact member set)",
+        doc: put(GOOD_APPLIED_MAPPING, [], "files"),
+      },
+      {
+        label: "findings absent (never omission)",
+        doc: omit(GOOD_APPLIED_MAPPING, "findings"),
+      },
+      {
+        label: "null findings (an empty list is [], never null)",
+        doc: put(GOOD_APPLIED_MAPPING, null, "findings"),
+      },
+      {
+        label: "findings not an array",
+        doc: put(GOOD_APPLIED_MAPPING, {}, "findings"),
+      },
+      {
+        label:
+          "non-empty findings (a refused operation reports the " +
+          "findings-only form, never a mapping beside findings)",
+        doc: put(GOOD_APPLIED_MAPPING, [GOOD_FINDINGS.findings[0]], "findings"),
+      },
       {
         label:
           "mapping absent (a findings-only shape reports no applied mapping)",
@@ -3498,6 +3524,31 @@ const DECODERS: readonly DecoderSpec[] = [
           { "specs/A.mdx#login": "specs/A.mdx#signin" },
           "mapping",
         ),
+      },
+      {
+        label: "mapping entries out of `from`-byte order",
+        doc: put(
+          GOOD_APPLIED_MAPPING,
+          [...structuredClone(GOOD_APPLIED_MAPPING.mapping)].reverse(),
+          "mapping",
+        ),
+      },
+      {
+        label:
+          "two mapping entries for one identity (one {from, to} per " +
+          "mapped identity)",
+        doc: put(
+          GOOD_APPLIED_MAPPING,
+          [
+            { from: "specs/A.mdx#login", to: "specs/A.mdx#signin" },
+            { from: "specs/A.mdx#login", to: "specs/A.mdx#other" },
+          ],
+          "mapping",
+        ),
+      },
+      {
+        label: "pair with a member beside from and to",
+        doc: put(GOOD_APPLIED_MAPPING, "rename", "mapping", 0, "via"),
       },
       {
         label: "pair missing from",
@@ -3518,6 +3569,35 @@ const DECODERS: readonly DecoderSpec[] = [
           "specs/A.mdx#login -> specs/A.mdx#signin",
           "mapping",
           1,
+        ),
+      },
+    ],
+  },
+  {
+    name: "applied mapping entry point (thin alias of the performed decoder)",
+    decode: decodeAppliedMappingReport,
+    good: GOOD_APPLIED_MAPPING,
+    verify: (decoded: ReturnType<typeof decodeAppliedMappingReport>) => {
+      expect(decoded).toEqual([
+        { from: "specs/A.mdx#login", to: "specs/A.mdx#signin" },
+        { from: "specs/A.mdx#login.form", to: "specs/A.mdx#signin.form" },
+      ]);
+    },
+    bad: [
+      {
+        label: "a member beside findings and mapping is not ignored",
+        doc: put(GOOD_APPLIED_MAPPING, [], "files"),
+      },
+      {
+        label: "non-empty findings",
+        doc: put(GOOD_APPLIED_MAPPING, [GOOD_FINDINGS.findings[0]], "findings"),
+      },
+      {
+        label: "mapping entries out of `from`-byte order",
+        doc: put(
+          GOOD_APPLIED_MAPPING,
+          [...structuredClone(GOOD_APPLIED_MAPPING.mapping)].reverse(),
+          "mapping",
         ),
       },
     ],
@@ -4095,7 +4175,6 @@ const UNPINNED_ADAPTER_NAMES: readonly string[] = [
   "ids --tree",
   "coverage",
   "impact",
-  "applied mapping (rename/move success report)",
   "review list",
   "review status",
   "review show (full item)",

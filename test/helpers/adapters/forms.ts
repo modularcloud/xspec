@@ -74,6 +74,7 @@ import type {
   OccurrenceSourceNode,
   OccurrencesReport,
   PathValue,
+  PerformedOperationReport,
   PreviewDelta,
   PreviewDeltaDatum,
   PreviewEdit,
@@ -2118,6 +2119,39 @@ function decodePreviewDelta(value: unknown, site: DecodeSite): PreviewDelta {
 }
 
 /**
+ * The `mapping` value form the preview (6.6) and the performed operation
+ * (6.4, 6.5) documents share: one `{"from", "to"}` per mapped identity,
+ * ordered by `from` bytes (SPEC 12.7) — a duplicated identity or an
+ * out-of-order pair is no 12.7 form.
+ */
+function decodeMappingArray(
+  value: unknown,
+  site: DecodeSite,
+): AppliedMappingPair[] {
+  const mapping = expectArray(value, site).map((element, index) =>
+    decodePreviewMappingPair(element, at(site, index)),
+  );
+  for (let i = 1; i < mapping.length; i += 1) {
+    const order = compareStringBytes(mapping[i - 1]!.from, mapping[i]!.from);
+    if (order === 0) {
+      formFail(
+        at(site, i),
+        'one {"from", "to"} per mapped identity (SPEC 12.7)',
+        value,
+      );
+    }
+    if (order > 0) {
+      formFail(
+        at(site, i),
+        "mapping entries ordered by `from` bytes (SPEC 12.7)",
+        value,
+      );
+    }
+  }
+  return mapping;
+}
+
+/**
  * The `rename`/`move` preview document (SPEC 6.6) — `{"findings", "mapping",
  * "files", "delta"}` exactly (SPEC 12.7). Form-exact (H-3): `mapping` one
  * `{"from", "to"}` per mapped identity, ordered by `from` bytes; `files` one
@@ -2144,30 +2178,10 @@ export function decodePreviewReport(
   );
 
   const mappingValue = requiredMember(obj, "mapping", site);
-  let mapping: AppliedMappingPair[] | null = null;
-  if (mappingValue !== null) {
-    const mappingSite = at(site, "mapping");
-    mapping = expectArray(mappingValue, mappingSite).map((element, index) =>
-      decodePreviewMappingPair(element, at(mappingSite, index)),
-    );
-    for (let i = 1; i < mapping.length; i += 1) {
-      const order = compareStringBytes(mapping[i - 1]!.from, mapping[i]!.from);
-      if (order === 0) {
-        formFail(
-          at(mappingSite, i),
-          'one {"from", "to"} per mapped identity (SPEC 12.7)',
-          mappingValue,
-        );
-      }
-      if (order > 0) {
-        formFail(
-          at(mappingSite, i),
-          "mapping entries ordered by `from` bytes (SPEC 12.7)",
-          mappingValue,
-        );
-      }
-    }
-  }
+  const mapping: AppliedMappingPair[] | null =
+    mappingValue === null
+      ? null
+      : decodeMappingArray(mappingValue, at(site, "mapping"));
 
   const filesValue = requiredMember(obj, "files", site);
   let files: PreviewFileEntry[] | null = null;
@@ -2223,6 +2237,48 @@ export function decodePreviewReport(
     );
   }
   return { findings, mapping, files, delta };
+}
+
+// --- the performed rename/move document (6.4, 6.5, 12.7) -----------------------
+
+/**
+ * The performed `rename`/`move` document (SPEC 6.4, 6.5) — on success
+ * exactly `{"findings", "mapping"}` (SPEC 12.7): `findings` `[]`, a
+ * successful operation carrying none, and `mapping` the applied mapping in
+ * the preview's `mapping` form — one `{"from", "to"}` per mapped identity,
+ * ordered by `from` bytes. Form-exact (H-3; T6.4-1, T6.5-1, T6.6-2,
+ * T12.7-2): any other member set, a `findings` that is not the empty
+ * array, a missing or `null` `mapping`, an unordered or duplicated
+ * `mapping`, or a pair with members beside `from`/`to` rejects. A refused
+ * operation reports the findings-only form (`decodeFindingsReport`), never
+ * this one.
+ */
+export function decodePerformedOperationReport(
+  doc: unknown,
+  context?: string,
+): PerformedOperationReport {
+  assertUnavailabilityMarkerForms(doc, context);
+  const site = rootSite("12.7 performed rename/move document", context);
+  const obj = expectObject(doc, site);
+  expectOnlyMembers(obj, ["findings", "mapping"], site);
+  const findingsSite = at(site, "findings");
+  const findings = expectArray(
+    requiredKey(obj, "findings", site),
+    findingsSite,
+  );
+  if (findings.length !== 0) {
+    formFail(
+      findingsSite,
+      "`findings` [] — a successful operation carries none, and a refused " +
+        "operation reports the findings-only form (SPEC 6.4, 6.5, 12.7)",
+      obj["findings"],
+    );
+  }
+  const mapping = decodeMappingArray(
+    requiredKey(obj, "mapping", site),
+    at(site, "mapping"),
+  );
+  return { findings: [], mapping };
 }
 
 // --- the unavailability-marker structural walk (T12.7-1) -----------------------

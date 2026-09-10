@@ -251,6 +251,7 @@ import {
   decodeNodeReport,
   decodeNodeRowsReport,
   decodeOccurrencesReport,
+  decodePerformedOperationReport,
   decodeVersionDocument,
   decodeViewReport,
 } from "../../helpers/adapters/index.js";
@@ -2332,6 +2333,40 @@ async function runDocumentFormsArm(product: ProductBinding): Promise<void> {
       decodeVersionDocument(
         await runJson(product, workspace, ["version"], versionContext),
         versionContext,
+      );
+
+      // --- A performed `rename --json` (last: it rewrites the workspace):
+      // exactly `{"findings", "mapping"}` — `findings` `[]`, a successful
+      // operation carrying none, and `mapping` in the preview's form, one
+      // `{"from", "to"}` per mapped identity ordered by `from` bytes (SPEC
+      // 6.4, 12.7; T6.4-1). Renaming `f` maps `f` and its descendant
+      // `f.leaf` by prefix replacement and nothing else — F references W's
+      // `w`, never the reverse — so the mapping is the renamed node then its
+      // descendant, `#f` a proper prefix of `#f.leaf` (SPEC 6.4).
+      const renameContext =
+        "T12.7-2 (document forms) `rename specs/F.mdx f g --json`";
+      const performed = decodePerformedOperationReport(
+        await runJson(
+          product,
+          workspace,
+          ["rename", DF_F_FILE, "f", "g", "--json"],
+          `${renameContext} — the valid workspace's rename proceeds, ` +
+            `exit 0 (SPEC 6.4, 12.0)`,
+        ),
+        renameContext,
+      );
+      assertSameJson(
+        performed,
+        {
+          findings: [],
+          mapping: [
+            { from: `${DF_F_FILE}#f`, to: `${DF_F_FILE}#g` },
+            { from: `${DF_F_FILE}#f.leaf`, to: `${DF_F_FILE}#g.leaf` },
+          ],
+        },
+        `${renameContext} — the performed-operation document: findings [] ` +
+          `and the applied mapping, the renamed node then its descendant in ` +
+          `\`from\`-byte order, no member beside the two (SPEC 6.4, 12.7)`,
       );
     },
   );

@@ -45,14 +45,16 @@
 //   (H-4).
 // - T6.4-1 "the command's own report is the applied mapping": the rename runs
 //   with `--json` (12.0: a single JSON document as the entire stdout) and its
-//   report is decoded through the H-3 applied-mapping adapter
-//   (adapters/operations.ts — the successful operation's report shape is
-//   unpinned, so the adapter owns the shape) and asserted to carry exactly
-//   the identity pairs the operation journaled, as a complete set: journal
-//   entry content being opaque (H-4), the expected pairs are the fixture's —
-//   the renamed node and its descendant, which SPEC 6.4 pins as the complete
-//   mapping (the renamed ID plus the prefix-replaced descendants, nothing
-//   else). Pair order is unasserted (shape, not information).
+//   report is decoded through the form-exact performed-operation decoder
+//   (adapters/forms.ts — exactly `{"findings", "mapping"}`, `findings` `[]`,
+//   `mapping` one `{"from", "to"}` per mapped identity ordered by `from`
+//   bytes, SPEC 12.7; H-3) and asserted to carry exactly the identity pairs
+//   the operation journaled, as that ordered array: journal entry content
+//   being opaque (H-4), the expected pairs are the fixture's — the renamed
+//   node and its descendant, which SPEC 6.4 pins as the complete mapping
+//   (the renamed ID plus the prefix-replaced descendants, nothing else),
+//   listed in `from`-byte order. Any other member set, or the mapping in
+//   another shape or order, fails (T6.4-1).
 // - T6.4-2 stages every keepable form on the *affected* segment itself —
 //   computed access in both quote kinds, dot access, local string literals
 //   and `id` attributes in both quote kinds — and composes each expected
@@ -673,9 +675,10 @@ const T6_4_1 = defineProductTest({
 
         // The command's own report is the applied mapping — every identity
         // pair the operation journaled, the information of the preview's
-        // `mapping` (SPEC 6.4, 6.6) — carried in JSON per 12.0 and decoded
-        // through the H-3 adapter (the successful operation's report shape is
-        // unpinned). The fixture pins the journaled mapping completely: the
+        // `mapping` (SPEC 6.4, 6.6) — carried in JSON in the form-exact
+        // performed-operation document of 12.7 (H-3: exactly `{"findings",
+        // "mapping"}`, `findings` `[]`, pairs ordered by `from` bytes). The
+        // fixture pins the journaled mapping completely and in order: the
         // renamed node and its one descendant re-identified by prefix
         // replacement, and nothing else — every other identity is unchanged
         // and unmapped.

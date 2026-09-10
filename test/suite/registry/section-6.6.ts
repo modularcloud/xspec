@@ -36,10 +36,11 @@
 //   plan" is operationalized exactly as the TEST-SPEC entry states it: the
 //   real operation on the untouched workspace succeeds (exit 0, `--json`,
 //   a single JSON document as the entire stdout, 12.0) and its
-//   applied-mapping report (T6.4-1's protocol; H-3 adapter, report shape
-//   unpinned) carries exactly the preview's `mapping` pairs, compared as
-//   complete sets (assertAppliedMapping; the preview document's `from`-byte
-//   order is decode-enforced, SPEC 12.7). The mapping's fixture-expected
+//   performed-operation document (T6.4-1's protocol; the form-exact 12.7
+//   form, exactly `{"findings", "mapping"}` with `findings` `[]`, H-3)
+//   carries a `mapping` equal to the preview's, pair for pair in order — both
+//   documents' `from`-byte order is decode-enforced (SPEC 12.7), and the raw
+//   decoded arrays compare as ordered arrays. The mapping's fixture-expected
 //   CONTENT is T6.6-4's business — here the contract is the equality.
 // - A successful preview's `mapping`, `files`, and `delta` are non-`null`
 //   (`null` is the refusal encoding, SPEC 6.6/12.7, and T6.6-2 stages
@@ -211,8 +212,8 @@ import type {
 import {
   GRAPH_DATA_AREA_PATH,
   corruptGraphDataShapeBlind,
-  decodeAppliedMappingReport,
   decodeFindingsReport,
+  decodePerformedOperationReport,
   decodePreviewReport,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
@@ -445,8 +446,10 @@ async function assertPreviewPremises(
 
 /**
  * The subsequent real run on the same (untouched) state: exit 0 with
- * `--json`, the applied-mapping report decoded through T6.4-1's H-3 adapter
- * and asserted equal — as a complete set — to the preview's `mapping`.
+ * `--json`, its performed-operation document decoded form-exact (SPEC 12.7:
+ * exactly `{"findings", "mapping"}`, `findings` `[]`; T6.4-1's protocol)
+ * and its `mapping` asserted equal — as the ordered array, pair for pair —
+ * to the preview's `mapping` (T6.6-2: byte-equal mappings).
  */
 async function assertRealRunPerformsPlan(
   product: ProductBinding,
@@ -456,7 +459,7 @@ async function assertRealRunPerformsPlan(
   context: string,
 ): Promise<void> {
   const argv = [...operationArgv, "--json"];
-  const applied = decodeAppliedMappingReport(
+  const performed = decodePerformedOperationReport(
     await runJson(
       product,
       workspace,
@@ -465,12 +468,14 @@ async function assertRealRunPerformsPlan(
     ),
     context,
   );
-  assertAppliedMapping(
-    applied,
+  assertSameJson(
+    performed.mapping,
     previewMapping,
     `${context}: a subsequent real run on the same state performs the ` +
-      `previewed plan — its applied mapping (T6.4-1's report) equals the ` +
-      `preview's \`mapping\`, pair for pair (SPEC 6.6, 6.4, 6.5)`,
+      `previewed plan — its performed-operation document's \`mapping\` ` +
+      `(T6.4-1's report, form-exact per 12.7) is byte-equal to the ` +
+      `preview's \`mapping\`, the raw decoded arrays compared pair for ` +
+      `pair in order (SPEC 6.6, 6.4, 6.5, 12.7; T6.6-2)`,
   );
 }
 
@@ -3360,7 +3365,7 @@ const T6_6_6 = defineProductTest({
         // the corrupt record (SPEC 6.4, 6.5).
         const realContext = `${context} (record corrupt), real move`;
         const realArgv = [...R6_MOVE_ARGV, "--json"];
-        const applied = decodeAppliedMappingReport(
+        const applied = decodePerformedOperationReport(
           await runJson(
             product,
             workspace,
@@ -3371,7 +3376,7 @@ const T6_6_6 = defineProductTest({
           realContext,
         );
         assertAppliedMapping(
-          applied,
+          applied.mapping,
           R6_EXPECTED_MAPPING,
           `${realContext}: the applied mapping is the previewed mapping — ` +
             `the corrupt-state preview reported the complete identity ` +

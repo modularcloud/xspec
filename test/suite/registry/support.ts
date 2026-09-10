@@ -593,19 +593,20 @@ export function assertEdgeSetEqual(
 }
 
 /**
- * Assert a successful `rename`/`move`'s applied-mapping report carries
- * exactly the expected identity pairs — every identity pair the operation
- * journaled, no more (SPEC.md 6.4, 6.5: the complete identity mapping, the
- * information of the preview's `mapping`, 6.6; T6.4-1, T6.5-1). The report's
- * shape is unpinned (H-3), so pair order is not asserted: both sides compare
- * as complete sorted multisets (a duplicated or extra pair still fails).
+ * Assert a successful `rename`/`move`'s applied mapping is exactly the
+ * expected ordered array of identity pairs — every identity pair the
+ * operation journaled, no more, in the pinned order (SPEC.md 6.4, 6.5: the
+ * complete identity mapping, the preview's `mapping`, 6.6; 12.7: one
+ * `{"from", "to"}` per mapped identity ordered by `from` bytes; T6.4-1,
+ * T6.5-1). The performed document is a form-exact 12.7 surface (H-3), so the
+ * comparison is order-sensitive: a product emitting the right pairs in
+ * another order fails, as does a duplicated or extra pair. Callers list the
+ * expected pairs in `from`-byte order.
  */
 export function assertAppliedMapping(
   actual: readonly AppliedMappingPair[],
   expected: readonly AppliedMappingPair[],
   context: string,
 ): void {
-  const render = (pairs: readonly AppliedMappingPair[]): string[] =>
-    pairs.map((pair) => `${pair.from} -> ${pair.to}`).sort();
-  assertSameJson(render(actual), render(expected), context);
+  assertSameJson(actual, expected, context);
 }

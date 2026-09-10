@@ -696,16 +696,28 @@ export interface ImpactedCodeEntry {
 }
 
 /**
- * One identity pair of a successful `rename`/`move`'s applied-mapping report
- * (SPEC.md 6.4, 6.5; T6.4-1, T6.5-1): the operation's report is the complete
- * identity mapping it journaled — the information of the preview's `mapping`
- * (6.6) — carried in JSON per 12.0. The successful operation's report shape
- * is unpinned (H-3), so pair order is a shape choice: tests assert the pairs
- * as a complete set (adapters/operations.ts).
+ * One identity pair of a `rename`/`move` mapping — the preview's `mapping`
+ * (SPEC.md 6.6) and the performed operation's applied mapping (6.4, 6.5),
+ * one `{"from", "to"}` per mapped identity, ordered by `from` bytes (12.7;
+ * T6.4-1, T6.5-1): the array's order is part of the pinned form, so tests
+ * assert the ordered array, never a set (adapters/forms.ts).
  */
 export interface AppliedMappingPair {
   readonly from: string;
   readonly to: string;
+}
+
+/**
+ * The performed `rename`/`move` document (SPEC.md 6.4, 6.5) — on success
+ * exactly `{"findings", "mapping"}`, a form-exact 12.7 surface (H-3;
+ * T6.4-1, T6.5-1, T6.6-2, T12.7-2): `findings` `[]` — a successful
+ * operation carries none, a refused one reporting the findings-only form
+ * instead — and `mapping` the applied mapping in the preview's `mapping`
+ * form, one `{"from", "to"}` per mapped identity ordered by `from` bytes.
+ */
+export interface PerformedOperationReport {
+  readonly findings: readonly Finding[];
+  readonly mapping: readonly AppliedMappingPair[];
 }
 
 /**

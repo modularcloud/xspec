@@ -49,11 +49,13 @@
 // - The applied-mapping report — "a successful move … reports its applied
 //   mapping, as rename does" (SPEC 6.5, 6.4) — is asserted with T6.4-1's
 //   protocol: the move runs with `--json` (a single JSON document as the
-//   entire stdout, 12.0), its report decodes through the H-3
-//   `decodeAppliedMappingReport` adapter (the successful operation's report
-//   shape is unpinned), and the decoded pairs are asserted as a complete set
-//   (`assertAppliedMapping`) — every identity pair the operation journaled,
-//   the information of the preview's `mapping` (SPEC 6.4, 6.6). Both forms
+//   entire stdout, 12.0), its report decodes through the form-exact
+//   performed-operation decoder (`decodeAppliedMappingReport`, a thin alias
+//   of forms.ts's `decodePerformedOperationReport`: exactly `{"findings",
+//   "mapping"}`, `findings` `[]`, SPEC 12.7; H-3), and the decoded pairs are
+//   asserted as the ordered array (`assertAppliedMapping`) — every identity
+//   pair the operation journaled, the preview's `mapping`, one `{"from",
+//   "to"}` per node ordered by `from` bytes (SPEC 6.4, 6.6, 12.7). Both forms
 //   report as rename does, split as the journal clause is: T6.5-1 decodes
 //   the file form's report — every node of the moved file mapped, the
 //   implicit root included (its identity is the path alone, 1.2, 1.5), IDs
@@ -1192,9 +1194,11 @@ const T6_5_1 = defineProductTest({
         // The command's own report is the applied mapping — every identity
         // pair the operation journaled, the information of the preview's
         // `mapping` (SPEC 6.5: both forms report as rename does; 6.4, 6.6) —
-        // carried in JSON per 12.0 and decoded through the H-3 adapter (the
-        // successful operation's report shape is unpinned; T6.4-1's
-        // protocol). The fixture pins the journaled mapping completely: the
+        // carried in JSON in the form-exact performed-operation document of
+        // 12.7 (H-3; T6.4-1's protocol: exactly `{"findings", "mapping"}`,
+        // pairs ordered by `from` bytes — the root's bare-path pair first, a
+        // proper prefix of every `<path>#<id>` identity). The fixture pins
+        // the journaled mapping completely and in that order: the
         // file form changes every moved-file identity in its file part alone
         // — the implicit root included, its identity being the path alone
         // (SPEC 1.2, 1.5), and its pair journaled like every other, else a
@@ -1954,9 +1958,10 @@ const T6_5_3 = defineProductTest({
 
       // The command's own report is the applied mapping — the section form
       // reports as rename does (SPEC 6.5, 6.4; the file form is T6.5-1's
-      // assertion) — carried in JSON per 12.0 and decoded through the H-3
-      // adapter (report shape unpinned; T6.4-1's protocol). The fixture pins
-      // the journaled mapping completely: the section form maps exactly the
+      // assertion) — carried in JSON in the form-exact performed-operation
+      // document of 12.7 (H-3; T6.4-1's protocol, pairs ordered by `from`
+      // bytes). The fixture pins the journaled mapping completely and in
+      // order: the section form maps exactly the
       // moved subtree, `org.mv` and its two descendants re-identified by
       // prefix replacement of `org.mv` with `tm` (SPEC 6.5), while every
       // identity outside the subtree — both files' roots, `org`,
