@@ -448,6 +448,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // home passage "14" carries the asserted numbered conditions (14.3,
   // 14.15, 14.9, 14.6, 14.12).
   "T14-8": ["14"],
+  // T14-9: the 14.24 contract (home "14") with the exit classes and the
+  // error document it asserts (12.0, 12.7), the refreshing reads whose
+  // graph-data write is refused (13.3), and the seam-held stagings, the
+  // hold-file usage error, and the pinned "nothing written" states (13.5);
+  // 6.4/6.5/10.7/11.6 (the staged operations, the area naming) are context
+  // with home coverage at T6.4-*/T6.5-*/T10.7-*/T11.6-*.
+  "T14-9": ["14", "12.0", "12.7", "13.3", "13.5"],
   "T15-1": ["15"],
   "P-1": ["1.4", "2.6"],
   "P-2": ["3"],
