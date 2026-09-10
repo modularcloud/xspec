@@ -1,5 +1,6 @@
 // TEST-SPEC §14 II (the environment refusals: the reporting contract of a
-// refused write) — SUITE-49: T14-9.
+// refused write, and the outcomes of a refused read) — SUITE-49: T14-9,
+// T14-10.
 //
 // T14-9 (write failures, 14.24) is the reporting-contract test of a write the
 // environment refuses: a usage error — exit 2, the 12.7 error document as
@@ -45,27 +46,94 @@
 //   operation's first; the journal or the session file byte-unchanged) are
 //   whole-entry byte compares against the workspace's own pre-invocation
 //   snapshot, never harness-composed content (H-6).
+//
+// T14-10 (read failures, 14.25): the object read decides the outcome, one
+// arm per row of 14.25, each refusal staged by permission removal alone
+// (E-1, Linux leg; `stageReadRefusalOfFile`: mode 0o200, the write
+// permission kept so a regeneration replacing or rewriting the object is
+// never itself refused; `stageReadRefusalOfDirectory`: mode 0o100, search
+// kept so entries stay reachable by name; nonexistence never staged as a
+// refusal), each staging verified on the harness's own process first.
+// Snapshots for the "nothing modified" laws are taken outside the staging
+// windows (a staged object cannot be snapshotted), before staging and after
+// restoring.
+//
+// Conservative operationalizations (H-3):
+// - Arm (a)'s fixture: `specs/A.mdx` → `specs/B.mdx` → `specs/C.mdx` ←
+//   `specs/D.mdx`, plus the code source `src/app.ts` marking A's section.
+//   A premise asserts that B's `d` reference and the marker each record an
+//   occurrence when readable, so "no record for its spellings" under the
+//   refusal is the masking of 14.25, not an absence; D's record stays as
+//   the per-file answer the surface keeps.
+// - "`ids` exits 1 answering nothing" (b) and "`review status` reports
+//   exactly one finding" (c) are the findings-only document `{"findings":
+//   […]}` (12.7: a report whose defined content is findings alone), decoded
+//   form-exact.
+// - Arm (f)'s "every path under `.xspec/` other than the journal and the
+//   session directory staged unreadable" is every plain file in T13.3-2's
+//   operational path set (`isGraphDataKey`), recursively, at mode 0o200;
+//   directories keep their listing and write permission so the
+//   regeneration `ids` owes (13.3) is never itself refused, whatever the
+//   product's layout. A staged file the regeneration has since removed is
+//   not restored (nothing to reinstate). The preview is the file-form
+//   `move specs/c/C.mdx specs/c/D.mdx` — same directory, C imported nowhere
+//   — a plan valid on the readable record.
+// - Arm (g)'s "a malformed value" is `at specs/a/A.mdx zz` (an offset
+//   spelled as anything but decimal digits, 11.5 — a syntax-class member,
+//   12.0); "nothing modified" is the whole-tree snapshot around the sweep.
+// - Unstageable, recorded here as T14-10 records them (and as T6.5-6
+//   records its unstageable clauses): a refused read of a path occupant's
+//   kind — whether a product learns a kind by a separate examination the
+//   environment can refuse or from a listing it already made is its own
+//   (7, 13.4) — and a refused read of a directory above the workspace root,
+//   which the working directory lies beneath and cannot be entered without
+//   traversing. Neither is asserted.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import type { Finding } from "../../helpers/adapters/index.js";
-import { decodeFindingsReport } from "../../helpers/adapters/index.js";
+import type {
+  Finding,
+  OccurrencesReport,
+} from "../../helpers/adapters/index.js";
+import {
+  decodeAtReport,
+  decodeFindingsReport,
+  decodeIdsReport,
+  decodeInventoryDocument,
+  decodeOccurrencesReport,
+  decodePreviewReport,
+  decodeSessionListReport,
+  decodeViewReport,
+  isGraphDataKey,
+} from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
-import { stageWriteRefusal } from "../../helpers/permissions.js";
+import type { PermissionStaging } from "../../helpers/permissions.js";
+import {
+  HarnessStagingError,
+  stageReadRefusalOfDirectory,
+  stageReadRefusalOfFile,
+  stageWriteRefusal,
+} from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { DirectorySnapshot } from "../../helpers/snapshot.js";
 import { assertSnapshotsEqual } from "../../helpers/snapshot.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
-import type { TestWorkspace } from "../../helpers/workspace.js";
+import { pathExists } from "../../helpers/subprocess.js";
+import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
+  assertFindingConcernsPath,
+  assertFindingLocated,
+  assertSameJson,
   buildOk,
+  expectConfigurationError,
   expectErrorDocument,
   expectExit,
   runJson,
@@ -83,10 +151,13 @@ import {
   MOVE_ORIGIN,
   RENAME_A_PATH,
   RENAME_B_DIR,
+  RENAME_B_MODULE,
   RENAME_B_PATH,
+  RENAME_C_PATH,
   RENAME_FIXTURE,
   REVIEWS_DIR,
   WRITE_REFUSALS_STAGED,
+  assertStalenessAlone,
   expectWriteFailure,
   isDerivedFile,
   prepareRefusalWorkspace,
@@ -1003,5 +1074,1455 @@ const T14_9 = defineProductTest({
   },
 });
 
-/** TEST-SPEC §14 II — T14-9, in canonical ID order (SUITE-49). */
-export const section14iiTests: readonly ProductTestEntry[] = [T14_9];
+// ---------------------------------------------------------------------------
+// T14-10 — read failures (14.25): fixtures and shared helpers
+// ---------------------------------------------------------------------------
+
+/** E-1: the read-refusal stagings belong to the same Linux leg (T14-9's gate). */
+const READ_REFUSALS_STAGED = WRITE_REFUSALS_STAGED;
+
+/** 14.25's stable code, carried only by the exit-2 error document (SPEC 14). */
+const READ_FAILURE_CODE = "read-failure";
+/** The configuration path in the anchoring form, from the root (SPEC 11.6). */
+const CONFIG_PATH = "xspec.config.ts";
+/** Arm (f)'s file-form move of C within its own directory (SPEC 6.5, 6.6). */
+const MOVE_C_DESTINATION = "specs/c/D.mdx";
+
+// Arm (a)'s fixture: `specs/A.mdx` references `specs/B.mdx` (a `d`
+// reference — the one 14.5 the masking leaves), B references `specs/C.mdx`
+// (B's own spelling, the occurrence the masking hides), `specs/D.mdx`
+// references C too (the record that stays on view), and the code source
+// `src/app.ts` marks A's section (the marker's occurrence, hidden when the
+// code source is the refused one). No cycle: A → B → C ← D.
+const SOURCE_A_PATH = "specs/A.mdx";
+const SOURCE_B_PATH = "specs/B.mdx";
+const SOURCE_C_PATH = "specs/C.mdx";
+const SOURCE_D_PATH = "specs/D.mdx";
+const SOURCE_CODE_PATH = "src/app.ts";
+const SOURCE_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    ${CODE_GROUP}: ["src/**/*.ts"]
+  }
+})
+`;
+const SOURCE_DECL: WorkspaceDecl = {
+  files: {
+    [CONFIG_PATH]: SOURCE_CONFIG,
+    [SOURCE_A_PATH]: [
+      'import B from "./B.xspec"',
+      "",
+      '<S id="a" d={B.b}>',
+      "Alpha text.",
+      "</S>",
+      "",
+    ].join("\n"),
+    [SOURCE_B_PATH]: [
+      'import C from "./C.xspec"',
+      "",
+      '<S id="b" d={C.c}>',
+      "Beta text.",
+      "</S>",
+      "",
+    ].join("\n"),
+    [SOURCE_C_PATH]: ['<S id="c">', "Ceta text.", "</S>", ""].join("\n"),
+    [SOURCE_D_PATH]: [
+      'import C from "./C.xspec"',
+      "",
+      '<S id="d" d={C.c}>',
+      "Delta text.",
+      "</S>",
+      "",
+    ].join("\n"),
+    [SOURCE_CODE_PATH]: [
+      'import A from "../specs/A.xspec";',
+      "",
+      "A.a;",
+      "",
+    ].join("\n"),
+  },
+};
+
+// Arm (g)'s fixture: the rename fixture plus a source under `specs/sub`, a
+// directory the discovery of SPEC 7 lists under the glob `specs/**/*.mdx`.
+const SUB_DIR = "specs/sub";
+const SUB_PATH = `${SUB_DIR}/S.mdx`;
+const LISTING_FIXTURE: RefusalFixture = {
+  decl: {
+    files: {
+      ...RENAME_FIXTURE.decl.files,
+      [SUB_PATH]: ['<S id="s">', "Sub text.", "</S>", ""].join("\n"),
+    },
+  },
+  priorRename: RENAME_FIXTURE.priorRename,
+};
+/** The rename fixture's configuration with an unknown top-level key (14.14). */
+const INVALID_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  bogus: true
+})
+`;
+
+/** A freshly built, valid workspace and its pre-staging snapshot. */
+interface BuiltWorkspace {
+  readonly workspace: TestWorkspace;
+  readonly before: DirectorySnapshot;
+}
+
+/** Stage a declared workspace, `build` it, and see `check` clean (SPEC 12.1, 12.2). */
+async function prepareBuiltWorkspace(
+  product: ProductBinding,
+  decl: WorkspaceDecl,
+  context: string,
+): Promise<BuiltWorkspace> {
+  const workspace = await TestWorkspace.create(decl);
+  try {
+    await buildOk(
+      product,
+      workspace,
+      `${context} staging \`build\` (SPEC 12.1)`,
+    );
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context} staging \`check\` — a freshly built, valid workspace (SPEC 12.2)`,
+    );
+    return { workspace, before: await snapshotWorkspace(workspace.root) };
+  } catch (error) {
+    await workspace.dispose();
+    throw error;
+  }
+}
+
+/**
+ * A refused read's 14.25 contract: exit 2; the error document as the entire
+ * stdout, its finding's stable code `read-failure` and `path` the object's
+ * workspace-relative path; the diagnostic on stderr (12.0).
+ */
+function expectReadFailure(
+  result: RunResult,
+  concerned: string,
+  context: string,
+): Finding {
+  assertExitCode(
+    result,
+    2,
+    `${context} — a read the environment refuses is a usage error: the ` +
+      `command stops at that read, attempting nothing further, and exits ` +
+      `2 — never a finding, never an internal error (SPEC 14.25, 12.0)`,
+  );
+  const finding = expectErrorDocument(result, context);
+  if (finding.code !== READ_FAILURE_CODE) {
+    fail(
+      `${context} — the error document's finding carries the stable code ` +
+        `${JSON.stringify(READ_FAILURE_CODE)} (SPEC 14.25, 14, 12.7); got ` +
+        `${JSON.stringify(finding.code)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+  if (finding.path !== concerned) {
+    fail(
+      `${context} — the concerned path is the refused object's ` +
+        `workspace-relative path ${JSON.stringify(concerned)} (SPEC 14.25, ` +
+        `12.7); got ${JSON.stringify(finding.path)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+  if (result.stderr.trim().length === 0) {
+    fail(
+      `${context} — the diagnostic accompanies the error document on ` +
+        `standard error (SPEC 14.25, 12.0: usage-error messages are ` +
+        `standard-error content); got an empty stderr beside ` +
+        `${JSON.stringify(finding.message)}`,
+    );
+  }
+  return finding;
+}
+
+/** An exit-2 error of the syntax class: `code` null, no configuration loaded. */
+function expectSyntaxClassError(
+  result: RunResult,
+  why: string,
+  context: string,
+): void {
+  assertExitCode(
+    result,
+    2,
+    `${context} — ${why} is a syntax-class usage error, exit 2, reported ` +
+      `without loading configuration and so before the discovery read the ` +
+      `environment refuses (SPEC 12.0, 14.25)`,
+  );
+  const finding = expectErrorDocument(result, context);
+  if (finding.code !== null) {
+    fail(
+      `${context} — ${why} carries no stable code: \`code\` is null where ` +
+        `14 assigns none, never \`read-failure\` (SPEC 14, 12.7, 12.0); got ` +
+        `${JSON.stringify(finding.code)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+}
+
+/**
+ * A findings-report surface under a staging: the exact exit code (a hang
+ * becomes a diagnosed failure), the findings-only document `{"findings":
+ * […]}` as the entire stdout, decoded form-exact (SPEC 12.7).
+ */
+async function stagedFindings(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  exitCode: number,
+  context: string,
+): Promise<readonly Finding[]> {
+  const result = await runSettled(product, workspace, argv, context);
+  assertExitCode(result, exitCode, context);
+  return decodeFindingsReport(parseJsonStdout(result, context), context)
+    .findings;
+}
+
+/** A staged run expected to exit `exitCode`, its stdout parsed as one document. */
+async function stagedDocument(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  exitCode: number,
+  context: string,
+): Promise<unknown> {
+  const result = await runSettled(product, workspace, argv, context);
+  assertExitCode(result, exitCode, context);
+  return parseJsonStdout(result, context);
+}
+
+/**
+ * The one condition-20 finding for the refused source `file`: its one
+ * location the zero-length range at offset 0 (SPEC 14: an unparseable
+ * source carries one zero-length range at the failure's offset — for a
+ * refused read, 0; 14.25).
+ */
+function requireRefusedSourceFinding(
+  findings: readonly Finding[],
+  file: string,
+  context: string,
+): Finding {
+  const matching = findings.filter((finding) => finding.condition === "14.20");
+  const finding = matching[0];
+  if (matching.length !== 1 || finding === undefined) {
+    return fail(
+      `${context}: exactly one condition-20 finding — the refused source, ` +
+        `masked exactly as an unparseable one (SPEC 14.25, 14.20); got ` +
+        `${String(matching.length)}: ` +
+        JSON.stringify(
+          matching.map(({ code, message }) => ({ code, message })),
+        ),
+    );
+  }
+  assertSameJson(
+    finding.locations,
+    [{ file, range: { start: 0, end: 0 } }],
+    `${context}: the refused read's one location is the zero-length range ` +
+      `at offset 0 in ${file} — content that cannot be read parses as ` +
+      `nothing (SPEC 14, 14.20, 14.25, 12.7)`,
+  );
+  return finding;
+}
+
+/** Nothing inside the refused source reports: no other finding locates in it. */
+function assertMaskedFile(
+  findings: readonly Finding[],
+  file: string,
+  context: string,
+): void {
+  for (const finding of findings) {
+    if (finding.condition === "14.20") continue;
+    if (finding.locations.some((location) => location.file === file)) {
+      fail(
+        `${context}: nothing inside the refused source reports — its ` +
+          `content parses as nothing, so the file is masked exactly as an ` +
+          `unparseable one (SPEC 14.20, 14.25, 11.2); got ` +
+          `${JSON.stringify(finding.code)} located in ${file} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+  }
+}
+
+/** The occurrence records a report lists for `file`. */
+function recordsIn(report: OccurrencesReport, file: string): number {
+  return report.occurrences.filter((record) => record.file === file).length;
+}
+
+/**
+ * Every plain file under `rel` that is graph data (T13.3-2's operational
+ * path set: under `.xspec/`, outside the durable journal and the session
+ * directory), recursively, as workspace-relative paths.
+ */
+async function collectGraphDataFiles(
+  rootAbs: string,
+  rel: string,
+): Promise<string[]> {
+  const collected: string[] = [];
+  const entries = await fsp.readdir(path.join(rootAbs, rel), {
+    withFileTypes: true,
+  });
+  for (const entry of entries) {
+    const key = `${rel}/${entry.name}`;
+    if (!isGraphDataKey(key)) continue;
+    if (entry.isDirectory()) {
+      collected.push(...(await collectGraphDataFiles(rootAbs, key)));
+    } else if (entry.isFile()) {
+      collected.push(key);
+    }
+  }
+  return collected;
+}
+
+/**
+ * Restore each staging whose object still exists — a regeneration may have
+ * replaced or removed a staged file, and a replaced file's mode is its own
+ * (nothing to reinstate on an absent path). Reverse order of staging.
+ */
+async function restoreSurviving(
+  stagings: readonly PermissionStaging[],
+): Promise<void> {
+  for (let i = stagings.length - 1; i >= 0; i--) {
+    const staging = stagings[i]!;
+    if (await pathExists(staging.path)) await staging.restore();
+  }
+}
+
+/**
+ * Arm (f)'s staging: every plain file under `.xspec/` other than the journal
+ * and the session directory unreadable (mode 0o200, each verified). Files
+ * only — directories keep their listing and write permission, so the
+ * regeneration a refreshing read owes (13.3) is never itself refused,
+ * whatever the product's layout. At least one file must exist: the staging
+ * applies to record files the product itself wrote (H-3), and staging
+ * nothing would be no staging (H-11).
+ */
+async function stageGraphDataUnreadable(
+  workspace: TestWorkspace,
+  context: string,
+): Promise<PermissionStaging[]> {
+  const files = (
+    await collectGraphDataFiles(workspace.root, GRAPH_DATA_AREA)
+  ).sort();
+  if (files.length === 0) {
+    throw new HarnessStagingError(
+      "read-refusal-of-file",
+      workspace.path(GRAPH_DATA_AREA),
+      `${context}: no graph-data file found under ${GRAPH_DATA_AREA}/ ` +
+        `outside the journal and the session directory — the staging ` +
+        `applies to record files the product itself wrote after a ` +
+        `successful build (SPEC 13.3, 12.1)`,
+    );
+  }
+  const stagings: PermissionStaging[] = [];
+  try {
+    for (const rel of files) {
+      stagings.push(await stageReadRefusalOfFile(workspace.path(rel)));
+    }
+  } catch (error) {
+    await restoreSurviving(stagings).catch(() => undefined);
+    throw error;
+  }
+  return stagings;
+}
+
+// ---------------------------------------------------------------------------
+// (a) A discovered source's content — condition 20 (SPEC 14.25, 14.20, 11.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The spec source `specs/B.mdx` staged unreadable: `build` and `check`
+ * report the one condition-20 finding at offset 0 beside A's unresolved
+ * reference (14.5) and nothing from inside B; `view` serves A's view, B
+ * contributing none; `occurrences` lists no record for B's spelling while
+ * D's stays; `at` on B reports the resolution explicitly unavailable at 0,
+ * 7, and 999999 — never the out-of-range usage error. Nothing is modified;
+ * restored, the workspace builds clean.
+ */
+async function specSourceSubArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const before = await snapshotWorkspace(workspace.root);
+  const staging = await stageReadRefusalOfFile(workspace.path(SOURCE_B_PATH));
+  try {
+    for (const argv of [
+      ["build", "--json"],
+      ["check", "--json"],
+    ] as const) {
+      const label = `${context} \`${argv.join(" ")}\` with ${SOURCE_B_PATH} unreadable`;
+      const findings = await stagedFindings(
+        product,
+        workspace,
+        argv,
+        1,
+        `${label} — a discovered source whose content the environment ` +
+          `refuses is condition 20, a finding: exit 1 (SPEC 14.25, 14.20, ` +
+          `12.0)`,
+      );
+      assertConditionCounts(
+        findings,
+        { "14.20": 1, "14.5": 1 },
+        `${label} — the refused source is one condition-20 finding and A's ` +
+          `reference into it reports as unresolved, nothing else (SPEC ` +
+          `14.25, 14.20, 14.5)`,
+      );
+      requireRefusedSourceFinding(findings, SOURCE_B_PATH, label);
+      const unresolved = findings.find(
+        (finding) => finding.condition === "14.5",
+      )!;
+      assertFindingLocated(
+        unresolved,
+        { file: SOURCE_A_PATH },
+        `${label} — the unresolved reference locates in ${SOURCE_A_PATH}, ` +
+          `the referencing file (SPEC 14, 14.5)`,
+      );
+      assertMaskedFile(findings, SOURCE_B_PATH, label);
+    }
+
+    const viewArgv = ["view", SOURCE_A_PATH, SOURCE_B_PATH];
+    const viewLabel = `${context} \`${viewArgv.join(" ")}\` with ${SOURCE_B_PATH} unreadable`;
+    const view = decodeViewReport(
+      await stagedDocument(
+        product,
+        workspace,
+        viewArgv,
+        1,
+        `${viewLabel} — an answer carrying a finding exits 1 with the full ` +
+          `answer document still emitted (SPEC 11.2, 12.0)`,
+      ),
+      { text: false },
+      viewLabel,
+    );
+    assertSameJson(
+      view.views.map((fileView) => fileView.file),
+      [SOURCE_A_PATH],
+      `${viewLabel} — the surface still answers per file: A's view is ` +
+        `served and the refused B contributes none (SPEC 11.2, 11.4, 14.25)`,
+    );
+    assertConditionCounts(
+      view.findings,
+      { "14.20": 1, "14.5": 1 },
+      `${viewLabel} — the findings of every domain file accompany the ` +
+        `answer: B's condition-20 finding and A's unresolved reference ` +
+        `(SPEC 11.2, 14.25)`,
+    );
+    requireRefusedSourceFinding(view.findings, SOURCE_B_PATH, viewLabel);
+
+    const occLabel = `${context} \`occurrences\` with ${SOURCE_B_PATH} unreadable`;
+    const occurrences = decodeOccurrencesReport(
+      await stagedDocument(
+        product,
+        workspace,
+        ["occurrences"],
+        1,
+        `${occLabel} — the domain's findings accompany the answer, exit 1 ` +
+          `(SPEC 11.3, 11.2)`,
+      ),
+      occLabel,
+    );
+    if (recordsIn(occurrences, SOURCE_B_PATH) !== 0) {
+      fail(
+        `${occLabel} — no record for B's spellings: a spelling inside the ` +
+          `refused source is hidden with the rest of it, pointed to only ` +
+          `by the condition-20 finding (SPEC 11.2, 5.7, 14.25); got ` +
+          `${String(recordsIn(occurrences, SOURCE_B_PATH))} record(s)`,
+      );
+    }
+    if (recordsIn(occurrences, SOURCE_D_PATH) === 0) {
+      fail(
+        `${occLabel} — the surface still answers per file: D's resolving ` +
+          `reference keeps its record while B is masked (SPEC 11.2, 11.3)`,
+      );
+    }
+    assertConditionCounts(
+      occurrences.findings,
+      { "14.20": 1, "14.5": 1 },
+      `${occLabel} — the entire discovered set's findings accompany the ` +
+        `answer (SPEC 11.3, 11.2)`,
+    );
+
+    for (const offset of ["0", "7", "999999"]) {
+      const atArgv = ["at", SOURCE_B_PATH, offset];
+      const atLabel = `${context} \`${atArgv.join(" ")}\` with ${SOURCE_B_PATH} unreadable`;
+      const report = decodeAtReport(
+        await stagedDocument(
+          product,
+          workspace,
+          atArgv,
+          1,
+          `${atLabel} — the resolution is reported explicitly unavailable ` +
+            `beside the condition-20 finding, exit 1 — never the ` +
+            `out-of-range usage error: the offset bound is judged only ` +
+            `where the content was read (SPEC 11.5, 14.25)`,
+        ),
+        atLabel,
+      );
+      assertSameJson(
+        report.resolution,
+        { unavailable: true },
+        `${atLabel} — the resolution is exactly the unavailability marker: ` +
+          `never null, never a fabricated root resolution (SPEC 11.5, 11.2, ` +
+          `12.7)`,
+      );
+      assertConditionCounts(
+        report.findings,
+        { "14.20": 1 },
+        `${atLabel} — the consulted domain is the named file alone, its ` +
+          `condition-20 finding accompanying (SPEC 11.5, 11.2)`,
+      );
+      requireRefusedSourceFinding(report.findings, SOURCE_B_PATH, atLabel);
+    }
+  } finally {
+    await staging.restore();
+  }
+  assertSnapshotsEqual(
+    before,
+    await snapshotWorkspace(workspace.root),
+    `${context}: nothing modified — a failing build and check, and the ` +
+      `surfaces of 11.2 on a failing workspace, write nothing (SPEC 12.1, ` +
+      `13.3, 11.2)`,
+  );
+  await assertRecovers(product, workspace, context);
+}
+
+/**
+ * Separately, the code source `src/app.ts` staged unreadable: `build` and
+ * `check` report its one condition-20 finding at offset 0 alone (no spec
+ * source references a code source), and `occurrences` lists no record for
+ * its marker while D's record stays. Nothing is modified; restored, the
+ * workspace builds clean.
+ */
+async function codeSourceSubArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  const before = await snapshotWorkspace(workspace.root);
+  const staging = await stageReadRefusalOfFile(
+    workspace.path(SOURCE_CODE_PATH),
+  );
+  try {
+    for (const argv of [
+      ["build", "--json"],
+      ["check", "--json"],
+    ] as const) {
+      const label = `${context} \`${argv.join(" ")}\` with ${SOURCE_CODE_PATH} unreadable`;
+      const findings = await stagedFindings(
+        product,
+        workspace,
+        argv,
+        1,
+        `${label} — a discovered code source whose content the environment ` +
+          `refuses is condition 20, a finding: exit 1 (SPEC 14.25, 14.20, ` +
+          `12.0)`,
+      );
+      assertConditionCounts(
+        findings,
+        { "14.20": 1 },
+        `${label} — the refused code source is one condition-20 finding ` +
+          `and nothing else: nothing inside it reports, and no spec source ` +
+          `references a code source (SPEC 14.25, 14.20)`,
+      );
+      requireRefusedSourceFinding(findings, SOURCE_CODE_PATH, label);
+    }
+    const occLabel = `${context} \`occurrences\` with ${SOURCE_CODE_PATH} unreadable`;
+    const occurrences = decodeOccurrencesReport(
+      await stagedDocument(
+        product,
+        workspace,
+        ["occurrences"],
+        1,
+        `${occLabel} — the entire discovered set is the domain, the code ` +
+          `source's condition-20 finding accompanying: exit 1 (SPEC 11.3, ` +
+          `11.2)`,
+      ),
+      occLabel,
+    );
+    if (recordsIn(occurrences, SOURCE_CODE_PATH) !== 0) {
+      fail(
+        `${occLabel} — no record for the refused code source's marker: a ` +
+          `spelling inside a masked file is hidden with the rest of it ` +
+          `(SPEC 11.2, 5.7, 14.25); got ` +
+          `${String(recordsIn(occurrences, SOURCE_CODE_PATH))} record(s)`,
+      );
+    }
+    if (recordsIn(occurrences, SOURCE_D_PATH) === 0) {
+      fail(
+        `${occLabel} — the surface still answers per file: D's resolving ` +
+          `reference keeps its record (SPEC 11.2, 11.3)`,
+      );
+    }
+    assertConditionCounts(
+      occurrences.findings,
+      { "14.20": 1 },
+      `${occLabel} — the domain's findings are the code source's ` +
+        `condition-20 finding alone (SPEC 11.3, 11.2)`,
+    );
+  } finally {
+    await staging.restore();
+  }
+  assertSnapshotsEqual(
+    before,
+    await snapshotWorkspace(workspace.root),
+    `${context}: nothing modified on the failing workspace (SPEC 12.1, 13.3, 11.2)`,
+  );
+  await assertRecovers(product, workspace, context);
+}
+
+/**
+ * (a) A discovered source's content: the fixture built and clean, the
+ * premise that B's `d` reference and the code source's marker each record an
+ * occurrence when readable (so "no record" below is a masking, not an
+ * absence), then the spec source and the code source each refused in turn.
+ */
+async function sourceContentArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (a) a discovered source's content";
+  const { workspace } = await prepareBuiltWorkspace(
+    product,
+    SOURCE_DECL,
+    context,
+  );
+  try {
+    const premiseLabel = `${context} premise \`occurrences\` on the readable workspace`;
+    const premise = decodeOccurrencesReport(
+      await runJson(product, workspace, ["occurrences"], premiseLabel),
+      premiseLabel,
+    );
+    for (const file of [SOURCE_B_PATH, SOURCE_CODE_PATH, SOURCE_D_PATH]) {
+      if (recordsIn(premise, file) === 0) {
+        fail(
+          `${premiseLabel}: ${file}'s resolving reference records an ` +
+            `occurrence — a \`d\` reference or a dependency marker whose ` +
+            `target resolves (SPEC 5.7, 4.5) — so that its absence under ` +
+            `the refusal below is the masking of 14.25, not an absence`,
+        );
+      }
+    }
+    await specSourceSubArm(product, workspace, `${context}, the spec source`);
+    await codeSourceSubArm(product, workspace, `${context}, the code source`);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (b) The journal's content — condition 13 (SPEC 14.25, 14.13, 13.3, 6.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * `.xspec/journal` staged unreadable on the journal-bearing rename fixture:
+ * `build`, `check`, the gated `ids` (answering nothing), and the `rename`
+ * (refused) each report the one condition-13 finding concerning the journal
+ * and exit 1; `inventory` reports `journal.occupied` true, finding-free,
+ * exit 0 — the kind read, permitted, is the only read it makes there.
+ * Nothing is modified; restored, the workspace builds clean.
+ */
+async function journalContentArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (b) the journal's content";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const staging = await stageReadRefusalOfFile(workspace.path(JOURNAL_PATH));
+    try {
+      const reporters: readonly (readonly string[])[] = [
+        ["build", "--json"],
+        ["check", "--json"],
+        ["ids", "--json"],
+        RENAME_B_TO_B2,
+      ];
+      for (const argv of reporters) {
+        const label = `${context} \`${argv.join(" ")}\` with ${JOURNAL_PATH} unreadable`;
+        const findings = await stagedFindings(
+          product,
+          workspace,
+          argv,
+          1,
+          `${label} — a journal the environment refuses to read is ` +
+            `condition 13, a finding the workspace fails on: \`build\` and ` +
+            `\`check\` report it, a gated read answers nothing but the ` +
+            `findings, and a \`rename\` is refused — exit 1 with the ` +
+            `findings-only document (SPEC 14.25, 14.13, 13.3, 6.4, 12.7)`,
+        );
+        assertConditionCounts(
+          findings,
+          { "14.13": 1 },
+          `${label} — the journal error alone (SPEC 14.13, 14.25)`,
+        );
+        assertFindingConcernsPath(
+          findings[0]!,
+          JOURNAL_PATH,
+          `${label} — the journal is the concerned path (SPEC 14, 14.13)`,
+        );
+      }
+      const invLabel = `${context} \`inventory\` with ${JOURNAL_PATH} unreadable`;
+      const inventory = decodeInventoryDocument(
+        await stagedDocument(
+          product,
+          workspace,
+          ["inventory"],
+          0,
+          `${invLabel} — the inventory reads the journal path's kind alone, ` +
+            `permitted, never its content: a complete, finding-free ` +
+            `answer, exit 0 (SPEC 11.6, 14.25)`,
+        ),
+        invLabel,
+      );
+      assertSameJson(
+        inventory.findings,
+        [],
+        `${invLabel} — finding-free: the inventory reads no journal ` +
+          `content, so it meets no condition-13 (SPEC 11.6, 14.25)`,
+      );
+      if (inventory.journal.occupied !== true) {
+        fail(
+          `${invLabel} — \`journal.occupied\` is true: occupancy by ` +
+            `presence alone, the content unread (SPEC 11.6); got ` +
+            `${String(inventory.journal.occupied)}`,
+        );
+      }
+    } finally {
+      await staging.restore();
+    }
+    assertSnapshotsEqual(
+      prepared.before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: nothing modified — a failing build, a gated read, a ` +
+        `refused rename, and the inventory write nothing (SPEC 12.1, 13.3, ` +
+        `6.4, 11.6)`,
+    );
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (c) A session file's content — condition 21 (SPEC 14.25, 14.21, 10.1, 10.7)
+// ---------------------------------------------------------------------------
+
+/**
+ * The audit session `s` created, its file staged unreadable: `check` and
+ * `review status s` each report exactly one condition-21 finding concerning
+ * the session file, exit 1, nothing modified; `review list` reports the
+ * session corrupt by name, exit 1; `inventory` lists the session, finding-
+ * free, exit 0 (selected by name alone, content unread).
+ */
+async function sessionContentArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (c) a session file's content";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    await expectExit(
+      product,
+      workspace,
+      ["review", "create", "--strategy", "audit", "--name", SESSION],
+      0,
+      `${context} staging \`review create --strategy audit --name s\` (SPEC 10.7)`,
+    );
+    const before = await snapshotWorkspace(workspace.root);
+    const staging = await stageReadRefusalOfFile(workspace.path(SESSION_FILE));
+    try {
+      for (const argv of [
+        ["check", "--json"],
+        ["review", "status", SESSION, "--json"],
+      ] as const) {
+        const label = `${context} \`${argv.join(" ")}\` with ${SESSION_FILE} unreadable`;
+        const findings = await stagedFindings(
+          product,
+          workspace,
+          argv,
+          1,
+          `${label} — a session file the environment refuses to read is ` +
+            `corrupt, condition 21: reported by \`check\` and by the ` +
+            `\`review\` subcommand naming it, exit 1, the findings-only ` +
+            `document (SPEC 14.25, 14.21, 10.1, 12.7)`,
+        );
+        assertConditionCounts(
+          findings,
+          { "14.21": 1 },
+          `${label} — exactly one finding, \`corrupt-session\` (SPEC 14.21, 10.1)`,
+        );
+        assertFindingConcernsPath(
+          findings[0]!,
+          SESSION_FILE,
+          `${label} — the session file is the concerned path (SPEC 14, 14.21)`,
+        );
+      }
+      const listLabel = `${context} \`review list --json\` with ${SESSION_FILE} unreadable`;
+      const list = decodeSessionListReport(
+        await stagedDocument(
+          product,
+          workspace,
+          ["review", "list", "--json"],
+          1,
+          `${listLabel} — \`list\` exits 1 when any session is corrupt ` +
+            `(SPEC 10.7, 14.21)`,
+        ),
+        listLabel,
+      );
+      assertSameJson(
+        list.sessions,
+        [{ name: SESSION, corrupt: true }],
+        `${listLabel} — the session reported corrupt by name, in place of ` +
+          `its fields (SPEC 10.7, 14.21)`,
+      );
+      const invLabel = `${context} \`inventory\` with ${SESSION_FILE} unreadable`;
+      const inventory = decodeInventoryDocument(
+        await stagedDocument(
+          product,
+          workspace,
+          ["inventory"],
+          0,
+          `${invLabel} — the inventory lists sessions by name alone, ` +
+            `reading no session content: finding-free, exit 0 (SPEC 11.6, ` +
+            `14.25)`,
+        ),
+        invLabel,
+      );
+      assertSameJson(
+        inventory.findings,
+        [],
+        `${invLabel} — finding-free (SPEC 11.6)`,
+      );
+      assertSameJson(
+        inventory.sessions,
+        [SESSION_FILE],
+        `${invLabel} — the session listed by its file path (SPEC 11.6)`,
+      );
+    } finally {
+      await staging.restore();
+    }
+    assertSnapshotsEqual(
+      before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: nothing modified — a corrupt session is reported, never ` +
+        `repaired or replaced, and the reads write nothing (SPEC 14.21, ` +
+        `10.1, 11.6)`,
+    );
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (d) The configuration file's content — condition 14 (SPEC 14.25, 14.14, 7)
+// ---------------------------------------------------------------------------
+
+/**
+ * `xspec.config.ts` staged unreadable: `build`, `ids`, `inventory`, and
+ * `view` (representatives of every command but `version`) exit 2 with the
+ * error document — `code` `configuration-error`, `path` the configuration
+ * path in the anchoring form — while `version` answers, exit 0. Nothing is
+ * modified; restored, the workspace builds clean.
+ */
+async function configurationContentArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (d) the configuration file's content";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const staging = await stageReadRefusalOfFile(workspace.path(CONFIG_PATH));
+    try {
+      const loaders: readonly (readonly string[])[] = [
+        ["build"],
+        ["ids"],
+        ["inventory"],
+        ["view", RENAME_A_PATH],
+      ];
+      for (const argv of loaders) {
+        const label = `${context} \`${argv.join(" ")} --json\` with ${CONFIG_PATH} unreadable`;
+        const result = await expectConfigurationError(
+          product,
+          workspace,
+          argv,
+          `${label} — a configuration file the environment refuses to read ` +
+            `is invalid configuration, condition 14, from every command ` +
+            `that loads it (SPEC 14.25, 14.14, 7)`,
+        );
+        const finding = expectErrorDocument(result, label);
+        if (finding.path !== CONFIG_PATH) {
+          fail(
+            `${label} — the concerned path is the configuration path in ` +
+              `the anchoring form, ${JSON.stringify(CONFIG_PATH)} from the ` +
+              `root (SPEC 14, 11.6); got ${JSON.stringify(finding.path)} ` +
+              `(message: ${JSON.stringify(finding.message)})`,
+          );
+        }
+      }
+      const versionLabel = `${context} \`version\` with ${CONFIG_PATH} unreadable`;
+      await stagedDocument(
+        product,
+        workspace,
+        ["version"],
+        0,
+        `${versionLabel} — \`version\` loads no configuration, so the ` +
+          `refused read never occurs: exit 0 with its answer (SPEC 12.6, ` +
+          `14.14, 14.25)`,
+      );
+    } finally {
+      await staging.restore();
+    }
+    assertSnapshotsEqual(
+      prepared.before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: nothing modified — a configuration error precedes every ` +
+        `write (SPEC 14.14, 12.0)`,
+    );
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (e) A derived file's content — condition 10 (SPEC 14.25, 14.10, 12.1, 13.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * B's generated module staged unreadable: `check` reports exactly one
+ * condition-10 finding, the per-file form concerning that path (the graph
+ * data matches, so no unit form), exit 1; `build` exits 0 — it reads no
+ * derived file, and its write replaces the occupant; afterwards `check` is
+ * clean.
+ */
+async function derivedContentArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (e) a derived file's content";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const kind = await workspace.kind(RENAME_B_MODULE);
+    if (kind !== "file") {
+      fail(
+        `${context}: the built workspace holds B's generated module as a ` +
+          `plain file at ${RENAME_B_MODULE} (SPEC 13.1, 13.4); found ${kind}`,
+      );
+    }
+    const staging = await stageReadRefusalOfFile(
+      workspace.path(RENAME_B_MODULE),
+    );
+    try {
+      const checkLabel = `${context} \`check --json\` with ${RENAME_B_MODULE} unreadable`;
+      const findings = await stagedFindings(
+        product,
+        workspace,
+        ["check", "--json"],
+        1,
+        `${checkLabel} — a derived file whose content the environment ` +
+          `refuses to deliver is stale: condition 10, exit 1 (SPEC 14.25, ` +
+          `14.10, 12.2)`,
+      );
+      assertStalenessAlone(
+        findings,
+        { perFile: [RENAME_B_MODULE], unit: false },
+        `${checkLabel} — exactly one condition-10 finding, the per-file ` +
+          `form concerning the unreadable module; the graph data matches, ` +
+          `so no unit form (SPEC 14.10, 14.25)`,
+      );
+      const buildLabel = `${context} \`build\` with ${RENAME_B_MODULE} unreadable`;
+      assertExitCode(
+        await runSettled(product, workspace, ["build"], buildLabel),
+        0,
+        `${buildLabel} — \`build\` reads no derived file: its write ` +
+          `replaces the occupant, so the refused content read never occurs ` +
+          `and the build exits 0 (SPEC 14.25, 12.1, 13.4)`,
+      );
+    } finally {
+      await staging.restore();
+    }
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context}: after the build, \`check\` is clean — the module ` +
+        `regenerated (SPEC 12.2, 13.4)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (f) Graph data — the state of condition 23 (SPEC 14.25, 14.23, 14.10, 13.3)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every graph-data file staged unreadable: `inventory` reports `recorded`
+ * unavailable with the condition-23 finding concerning `.xspec`, exit 1; a
+ * `move --preview` reports its `delta` unavailable likewise; `check`
+ * reports one condition-10 finding in the unit form alone; `ids` exits 0
+ * with its answer, regenerating the data rather than failing; `build` exits
+ * 0, `inventory` then reporting `recorded` in full — the same paths as
+ * before the staging.
+ */
+async function graphDataArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (f) graph data";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const intactLabel = `${context} premise \`inventory\` on the readable record`;
+    const intact = decodeInventoryDocument(
+      await runJson(product, workspace, ["inventory"], intactLabel),
+      intactLabel,
+    );
+    if (intact.recorded.state !== "value") {
+      fail(
+        `${intactLabel}: on the freshly built workspace the record is ` +
+          `readable and \`recorded\` lists the recorded derived paths ` +
+          `(SPEC 11.6, 13.3); got state ${intact.recorded.state}`,
+      );
+    }
+    const stagings = await stageGraphDataUnreadable(workspace, context);
+    try {
+      const invLabel = `${context} \`inventory\` with every graph-data file unreadable`;
+      const inventory = decodeInventoryDocument(
+        await stagedDocument(
+          product,
+          workspace,
+          ["inventory"],
+          1,
+          `${invLabel} — a refused read of graph data is the state of ` +
+            `condition 23 to a surface consulting the record: the finding ` +
+            `accompanies the answer, exit 1 (SPEC 14.25, 14.23, 11.6)`,
+        ),
+        invLabel,
+      );
+      assertConditionCounts(
+        inventory.findings,
+        { "14.23": 1 },
+        `${invLabel} — exactly the one condition-23 finding (SPEC 14.23, 11.6)`,
+      );
+      assertFindingConcernsPath(
+        inventory.findings[0]!,
+        GRAPH_DATA_AREA,
+        `${invLabel} — the concerned path is the graph-data area (SPEC 14.23, 11.6)`,
+      );
+      assertSameJson(
+        inventory.findings[0]!.locations,
+        [],
+        `${invLabel} — no path inside the area is named (SPEC 14.23, 13.3, 12.7)`,
+      );
+      assertSameJson(
+        inventory.recorded,
+        { state: "unavailable" },
+        `${invLabel} — \`recorded\` is explicitly unavailable, never ` +
+          `fabricated and never read as an empty record (SPEC 14.23, 11.6, ` +
+          `12.7)`,
+      );
+
+      const previewArgv = [
+        "move",
+        RENAME_C_PATH,
+        MOVE_C_DESTINATION,
+        "--preview",
+        "--json",
+      ];
+      const previewLabel = `${context} \`${previewArgv.join(" ")}\` with every graph-data file unreadable`;
+      const preview = decodePreviewReport(
+        await stagedDocument(
+          product,
+          workspace,
+          previewArgv,
+          1,
+          `${previewLabel} — a preview consulting the record reports its ` +
+            `delta unavailable beside the condition-23 finding, exit 1, ` +
+            `the full preview still emitted (SPEC 14.23, 6.6, 12.0)`,
+        ),
+        previewLabel,
+      );
+      assertConditionCounts(
+        preview.findings,
+        { "14.23": 1 },
+        `${previewLabel} — exactly the one condition-23 finding (SPEC 14.23, 6.6)`,
+      );
+      assertFindingConcernsPath(
+        preview.findings[0]!,
+        GRAPH_DATA_AREA,
+        `${previewLabel} — the concerned path is the graph-data area (SPEC 14.23, 11.6)`,
+      );
+      if (
+        preview.mapping === null ||
+        preview.files === null ||
+        preview.delta === null
+      ) {
+        fail(
+          `${previewLabel} — the plan is reported: \`mapping\`, \`files\`, ` +
+            `and \`delta\` are null exactly on refusal, and this move is ` +
+            `not refused (SPEC 6.6, 12.7)`,
+        );
+      }
+      if (!("unavailable" in preview.delta)) {
+        fail(
+          `${previewLabel} — the record-supplied datum, the delta, is ` +
+            `reported explicitly unavailable as one datum, never read as ` +
+            `an empty record (SPEC 14.23, 6.6, 12.7); got ` +
+            `${JSON.stringify(preview.delta)}`,
+        );
+      }
+
+      const checkLabel = `${context} \`check --json\` with every graph-data file unreadable`;
+      assertStalenessAlone(
+        await stagedFindings(
+          product,
+          workspace,
+          ["check", "--json"],
+          1,
+          `${checkLabel} — unreadable recorded state is staleness to ` +
+            `\`check\`: exit 1 (SPEC 14.25, 14.10)`,
+        ),
+        { perFile: [], unit: true },
+        `${checkLabel} — one condition-10 finding in the unit form alone: ` +
+          `the unreadable-record form, never the mismatch form beside it, ` +
+          `and no per-file form — every derived file is intact (SPEC ` +
+          `14.10, 14.25)`,
+      );
+
+      const idsLabel = `${context} \`ids --json\` with every graph-data file unreadable`;
+      decodeIdsReport(
+        await stagedDocument(
+          product,
+          workspace,
+          ["ids", "--json"],
+          0,
+          `${idsLabel} — to a refreshing read, graph data it cannot read ` +
+            `is graph data that does not match: it regenerates the data ` +
+            `and answers, exit 0, never a failure (SPEC 14.25, 13.3)`,
+        ),
+        idsLabel,
+      );
+
+      const buildLabel = `${context} \`build\` after the refreshing read`;
+      assertExitCode(
+        await runSettled(product, workspace, ["build"], buildLabel),
+        0,
+        `${buildLabel} — \`build\` replaces the record, unreadable state ` +
+          `included: exit 0 (SPEC 12.1, 13.4, 14.23)`,
+      );
+      const afterLabel = `${context} \`inventory\` after the build`;
+      const after = decodeInventoryDocument(
+        await stagedDocument(
+          product,
+          workspace,
+          ["inventory"],
+          0,
+          `${afterLabel} — the rebuilt record is readable: a complete, ` +
+            `finding-free answer, exit 0 (SPEC 12.1, 11.6)`,
+        ),
+        afterLabel,
+      );
+      assertSameJson(
+        after.findings,
+        [],
+        `${afterLabel} — finding-free (SPEC 11.6)`,
+      );
+      assertSameJson(
+        after.recorded,
+        intact.recorded,
+        `${afterLabel} — \`recorded\` in full: the rebuilt record lists ` +
+          `the same derived paths as the intact one — the same sources and ` +
+          `configuration generate the same set (SPEC 12.1, 11.6, 13.3)`,
+      );
+    } finally {
+      await restoreSurviving(stagings);
+    }
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context}: recovery — after the rebuild, \`check\` is clean (SPEC 12.2)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (g) A directory discovery lists — a usage error (SPEC 14.25, 7, 12.0)
+// ---------------------------------------------------------------------------
+
+/**
+ * `specs/sub` staged unlistable under the glob `specs/**\/*.mdx`: every
+ * command that loads the configuration — `build`, `check`, `ids`, `view`,
+ * `inventory`, `review list`, and a `rename` — exits 2 with the error
+ * document (`code` `read-failure`, `path` `specs/sub`), nothing modified.
+ * Precedence, at the read in read order: with A also failing validation,
+ * `build` still exits 2 with the read failure; `coverage <unknown-profile>`
+ * reports the read failure; the syntax class — a surplus operand, a
+ * `--file` pattern outside the root, a malformed offset — is reported
+ * without loading configuration (`code` null); and with the configuration
+ * file itself invalid the configuration error precedes the read.
+ */
+async function discoveryListingArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (g) a directory discovery lists";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    LISTING_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    const staging = await stageReadRefusalOfDirectory(workspace.path(SUB_DIR));
+    try {
+      const loaders: readonly (readonly string[])[] = [
+        ["build", "--json"],
+        ["check", "--json"],
+        ["ids", "--json"],
+        ["view", RENAME_A_PATH],
+        ["inventory"],
+        ["review", "list", "--json"],
+        RENAME_B_TO_B2,
+      ];
+      for (const argv of loaders) {
+        const label = `${context} \`${argv.join(" ")}\` with ${SUB_DIR} unlistable`;
+        expectReadFailure(
+          await runSettled(product, workspace, argv, label),
+          SUB_DIR,
+          `${label} — a directory the discovery of 7 lists, refused: every ` +
+            `command that loads the configuration stops at the read (SPEC ` +
+            `14.25, 7, 12.0)`,
+        );
+      }
+      const coverageArgv = ["coverage", "no-such-profile", "--json"];
+      const coverageLabel = `${context} \`${coverageArgv.join(" ")}\` with ${SUB_DIR} unlistable`;
+      expectReadFailure(
+        await runSettled(product, workspace, coverageArgv, coverageLabel),
+        SUB_DIR,
+        `${coverageLabel} — discovery precedes every error consulting the ` +
+          `configuration: the unknown profile is judged after the reads ` +
+          `its load makes, so the read failure is reported (SPEC 12.0, ` +
+          `14.25, 7.4)`,
+      );
+      const syntaxClass: readonly (readonly [readonly string[], string])[] = [
+        [["ids", "extra", "--json"], "a surplus operand"],
+        [
+          ["ids", "--file", "../x", "--json"],
+          "a `--file` pattern outside the workspace root, decided by its spelling alone",
+        ],
+        [
+          ["at", RENAME_A_PATH, "zz"],
+          "an offset spelled as anything but decimal digits — a malformed value",
+        ],
+      ];
+      for (const [argv, why] of syntaxClass) {
+        const label = `${context} \`${argv.join(" ")}\` with ${SUB_DIR} unlistable`;
+        expectSyntaxClassError(
+          await runSettled(product, workspace, argv, label),
+          why,
+          label,
+        );
+      }
+    } finally {
+      await staging.restore();
+    }
+    assertSnapshotsEqual(
+      prepared.before,
+      await snapshotWorkspace(workspace.root),
+      `${context}: nothing modified — every command stops at the refused ` +
+        `read, attempting nothing further, the rename included (SPEC ` +
+        `14.25, 13.5)`,
+    );
+
+    // The failing twin on the same workspace: A's reference respelled to
+    // resolve nowhere (14.5) — the read failure is still what `build`
+    // reports, never the findings.
+    await editSource(workspace, RENAME_A_PATH, A_REFERENCE, A_UNRESOLVED);
+    const twinStaging = await stageReadRefusalOfDirectory(
+      workspace.path(SUB_DIR),
+    );
+    try {
+      const label = `${context} \`build --json\` with ${SUB_DIR} unlistable and ${RENAME_A_PATH} failing validation`;
+      expectReadFailure(
+        await runSettled(product, workspace, ["build", "--json"], label),
+        SUB_DIR,
+        `${label} — a read failure is met at the read, in read order: the ` +
+          `discovery of 7 precedes every validation consulting it, so the ` +
+          `findings are never reported (SPEC 12.0, 14.25)`,
+      );
+    } finally {
+      await twinStaging.restore();
+    }
+    await editSource(workspace, RENAME_A_PATH, A_UNRESOLVED, A_REFERENCE);
+    await assertRecovers(product, workspace, context);
+  } finally {
+    await workspace.dispose();
+  }
+
+  // With the configuration file itself invalid, the configuration error
+  // precedes the read: the configuration is read before discovery (14.14).
+  const invalid = await TestWorkspace.create({
+    files: { ...LISTING_FIXTURE.decl.files, [CONFIG_PATH]: INVALID_CONFIG },
+  });
+  try {
+    const staging = await stageReadRefusalOfDirectory(invalid.path(SUB_DIR));
+    try {
+      const label = `${context} \`build --json\` with the configuration invalid and ${SUB_DIR} unlistable`;
+      const finding = expectErrorDocument(
+        await expectConfigurationError(
+          product,
+          invalid,
+          ["build"],
+          `${label} — a configuration error precedes every other error of ` +
+            `exit class 2, the read failure included: the configuration is ` +
+            `read before the discovery it defines (SPEC 14.14, 12.0, 14.25)`,
+        ),
+        label,
+      );
+      assertFindingConcernsPath(
+        finding,
+        CONFIG_PATH,
+        `${label} — the configuration path is the concerned path (SPEC 14, 14.14)`,
+      );
+    } finally {
+      await staging.restore();
+    }
+  } finally {
+    await invalid.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (h) The session directory's listing — a usage error (SPEC 14.25, 10.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * `.xspec/reviews` staged unlistable on a valid workspace holding a session:
+ * `review list`, `inventory`, and `check` each exit 2 with the error
+ * document concerning `.xspec/reviews`, while `build` (reading no session)
+ * and `ids` exit 0. `review status <name>`, which may find its session by
+ * name without listing, is asserted nowhere.
+ */
+async function sessionDirectoryArm(product: ProductBinding): Promise<void> {
+  const context = "T14-10 (h) the session directory's listing";
+  const prepared = await prepareRefusalWorkspace(
+    product,
+    RENAME_FIXTURE,
+    context,
+  );
+  const { workspace } = prepared;
+  try {
+    await expectExit(
+      product,
+      workspace,
+      ["review", "create", "--strategy", "audit", "--name", SESSION],
+      0,
+      `${context} staging \`review create --strategy audit --name s\` (SPEC 10.7)`,
+    );
+    const staging = await stageReadRefusalOfDirectory(
+      workspace.path(REVIEWS_DIR),
+    );
+    try {
+      const listers: readonly (readonly string[])[] = [
+        ["review", "list", "--json"],
+        ["inventory"],
+        ["check", "--json"],
+      ];
+      for (const argv of listers) {
+        const label = `${context} \`${argv.join(" ")}\` with ${REVIEWS_DIR} unlistable`;
+        expectReadFailure(
+          await runSettled(product, workspace, argv, label),
+          REVIEWS_DIR,
+          `${label} — the session directory's listing, refused, is a usage ` +
+            `error from every command making it (SPEC 14.25, 10.1, 11.6, ` +
+            `14.21)`,
+        );
+      }
+      const buildLabel = `${context} \`build\` with ${REVIEWS_DIR} unlistable`;
+      assertExitCode(
+        await runSettled(product, workspace, ["build"], buildLabel),
+        0,
+        `${buildLabel} — \`build\` reads no session, so the refused listing ` +
+          `never occurs: exit 0 (SPEC 14.21, 12.1, 14.25)`,
+      );
+      const idsLabel = `${context} \`ids --json\` with ${REVIEWS_DIR} unlistable`;
+      decodeIdsReport(
+        await stagedDocument(
+          product,
+          workspace,
+          ["ids", "--json"],
+          0,
+          `${idsLabel} — a refreshing read lists no session: exit 0 with ` +
+            `its answer (SPEC 13.3, 14.25)`,
+        ),
+        idsLabel,
+      );
+    } finally {
+      await staging.restore();
+    }
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${context}: recovery — the listing permitted again, \`check\` is ` +
+        `clean and the session intact (SPEC 12.2, 14.21)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// T14-10 — read failures (14.25)
+// ---------------------------------------------------------------------------
+
+const T14_10 = defineProductTest({
+  id: "T14-10",
+  title:
+    "read failures (14.25): the object read decides the outcome, one arm per row, each refusal staged by permission removal alone (a file's content: mode 0o200, its write permission kept; a directory's listing: mode 0o100, search kept; nonexistence never a refusal) — (a) a discovered source's content is condition 20 at `build` and `check`, exit 1, its one location the zero-length range at offset 0, the file masked exactly as an unparseable one (A's reference reports 14.5, nothing inside reports) while `view` serves the other requested file, `occurrences` lists no record for its spellings, and `at` at 0, 7, and 999999 reports the resolution explicitly unavailable, never the out-of-range usage error — a spec source and, separately, a code source; (b) the journal's content is condition 13 concerning .xspec/journal from `build`, `check`, `ids` (answering nothing), and a refused `rename`, while `inventory` reports `journal.occupied` true, finding-free; (c) a session file's content is condition 21 from `check`, `review status` (one finding, nothing modified), and `review list` (the session reported corrupt), `inventory` listing the session; (d) the configuration file's content is condition 14 from `build`, `ids`, `inventory`, and `view` (`code` configuration-error, `path` xspec.config.ts), `version` exiting 0; (e) a generated module's content is one per-file condition-10 finding to `check` while `build` exits 0; (f) every graph-data file unreadable is the state of condition 23 — `inventory` and a `move --preview` report their record-supplied datum unavailable beside the finding, `check` one unit-form condition-10 finding alone, `ids` regenerates and answers (exit 0), and after `build` the inventory reports `recorded` in full; (g) a directory discovery lists, unlistable: `build`, `check`, `ids`, `view`, `inventory`, `review list`, and a `rename` each exit 2 with the error document (`code` read-failure, `path` specs/sub), nothing modified, the read failure preceding a failing source's findings and an unknown profile, the syntax class (`code` null) and an invalid configuration preceding it; (h) the session directory unlistable: `review list`, `inventory`, and `check` exit 2 concerning .xspec/reviews while `build` and `ids` exit 0; two clauses — a refused read of a path occupant's kind, and of a directory above the workspace root — admit no product-independent staging and are recorded so (SPEC 14.25, 14, 11.2, 11.5, 11.6, 13.3, 10.7, 12.0, 12.7)",
+  // A hang guard only (H-10): nine workspaces, each built, checked, and
+  // driven through a handful of invocations — generous under a saturated box.
+  timeoutMs: 600_000,
+  run: async (product) => {
+    // E-1: permission stagings belong to the Linux leg; elsewhere the arms
+    // are not staged (the NU3_STAGED pattern of section-11.5) and no other
+    // leg selects T14-10 (E-6).
+    if (!READ_REFUSALS_STAGED) return;
+    await sourceContentArm(product);
+    await journalContentArm(product);
+    await sessionContentArm(product);
+    await configurationContentArm(product);
+    await derivedContentArm(product);
+    await graphDataArm(product);
+    await discoveryListingArm(product);
+    await sessionDirectoryArm(product);
+  },
+});
+
+/** TEST-SPEC §14 II — T14-9 and T14-10, in canonical ID order (SUITE-49). */
+export const section14iiTests: readonly ProductTestEntry[] = [T14_9, T14_10];

@@ -455,6 +455,17 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // 6.4/6.5/10.7/11.6 (the staged operations, the area naming) are context
   // with home coverage at T6.4-*/T6.5-*/T10.7-*/T11.6-*.
   "T14-9": ["14", "12.0", "12.7", "13.3", "13.5"],
+  // T14-10: the 14.25 contract (home "14": conditions 20, 13, 21, 14, 10,
+  // 23 and the read-failure usage error) with the exit classes, the read
+  // order, and the syntax-class precedence it asserts (12.0), the error
+  // document (12.7), the corrupt-session reports of `review status`/`list`
+  // (10.7), the per-file availability and masking of the refused source
+  // (11.2), `at`'s unavailable resolution on it (11.5), the inventory's
+  // journal, session, and record answers (11.6), and the gated and
+  // refreshing reads over the unreadable journal and graph data (13.3);
+  // 6.6/7/14.14's staged surfaces are context with home coverage at
+  // T6.6-6/T7-*/T12.7-3.
+  "T14-10": ["14", "10.7", "11.2", "11.5", "11.6", "12.0", "12.7", "13.3"],
   "T15-1": ["15"],
   "P-1": ["1.4", "2.6"],
   "P-2": ["3"],
