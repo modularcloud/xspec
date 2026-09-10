@@ -140,8 +140,12 @@
 //   `refused-unresolvable-reference` admits no fixture
 //   (TEST-SPEC T6.4-3, T6.5-6) and is asserted only as the always-passing
 //   side of successful operations (T6.4-1, T6.5-1/2/3): no arm here. The
-//   exact self-move's refused-identity-unchanged is staged at its home
-//   (T6.5-6); T14-7's identity-unchanged arm is the rename, per its entry.
+//   exact self-move's modifies-nothing and journal discipline are staged
+//   at its home (T6.5-6); T14-7 asserts the identity-unchanged rename and
+//   the exact self-move of either form for their `identities` — the
+//   unchanged identity as the sole element, the bare `<new-file>` for the
+//   file form (its entry) — every identity-pinned reason's `identities`
+//   being asserted exact (support.ts assertRefusalIdentities).
 //   T14-7's own stagings add what no home table stages: the plain file as
 //   a directory component of the destination path itself (the other
 //   destination-side directory-component case of 6.5 beside T6.5-4's
@@ -227,7 +231,7 @@ import {
   assertFindingLocated,
   assertFindingLocatesExactly,
   assertFindingMentionsLocation,
-  assertFindingNamesIdentity,
+  assertRefusalIdentities,
   assertSameJson,
   buildFindings,
   buildOk,
@@ -2218,13 +2222,12 @@ async function assertRefusalReport(
           `located-bearer set — every colliding bearer, none beside`,
       );
     }
-    if (expectation.identity !== undefined) {
-      assertFindingNamesIdentity(
-        finding,
-        expectation.identity,
-        `${context}: the ${expectation.finding} finding's concerned identity`,
-      );
-    }
+    assertRefusalIdentities(
+      finding,
+      expectation.finding,
+      expectation.identities,
+      `${context}: the ${expectation.finding} finding's concerned identity`,
+    );
     if (expectation.path !== undefined) {
       assertFindingConcernsPath(
         finding,
@@ -2338,7 +2341,7 @@ const T14_7_BAD_INVALID =
 const T14_7 = defineProductTest({
   id: "T14-7",
   title:
-    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename, no collision reason beside it; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing; refused-structural-parent concerning the violated identity; refused-cycle locating the would-be cycle's participating spelling; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination; refused-unresolvable-reference admits no fixture and is asserted only as the always-passing side of successful operations; every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them (SPEC 14, 6.4, 6.5, 5.3, 12.0, 12.7)",
+    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity — its identities exactly the one 1.5 identity over the destination file, the invalid ID spelled verbatim, no prefix-produced identity beside it (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename and by the exact self-move of either form, no collision or occupied-destination reason beside it, its identities the unchanged identity as the sole element — the bare `<new-file>` root identity for the file form; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing — its identities exactly the located bearers' identities in location order; refused-structural-parent and refused-missing-target-parent concerning the violated and the target-parent identity, each the sole identities element; refused-cycle locating the would-be cycle's participating spelling; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination; refused-unresolvable-reference admits no fixture and is asserted only as the always-passing side of successful operations; every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them (SPEC 14, 6.4, 6.5, 5.3, 12.0, 12.7)",
   timeoutMs: 300_000,
   run: async (product) => {
     // --- The rename reasons, staged via T6.4-3's exported fixture: the
@@ -2504,6 +2507,7 @@ const T14_7 = defineProductTest({
               locatedAtEach: [
                 { file: T14_7_MULTI_FILE, window: T14_7_OCCUPANT_WINDOW },
               ],
+              identities: [`${T14_7_MULTI_FILE}#keep.mv`],
             },
             {
               finding: "refused-cycle",
@@ -2551,10 +2555,44 @@ const T14_7 = defineProductTest({
             locatedAtEach: [
               { file: T14_7_RENAME_FILE, window: T14_7_SIB_WINDOW },
             ],
+            identities: [`${T14_7_RENAME_FILE}#a.sib`],
           },
           "T14-7 rename control (the valid twin: the rename is staged to " +
             "collide with the remaining `a.sib` bearer — the premise the " +
             "invalid-workspace arm rides)",
+        );
+        // The exact self-move of either form reports
+        // refused-identity-unchanged alone — no collision reason beside it
+        // (SPEC 6.4: the after-removal check collides with nothing) and no
+        // refused-destination-exists for the file form (SPEC 14: the origin
+        // path itself is the one occupant that reason never reports) — its
+        // `identities` the unchanged identity in 1.5's form over the
+        // destination: `<target-file>#<id>` for the section form, the bare
+        // `<new-file>`, its root identity, for the file form (SPEC 14).
+        await assertRefusalReport(
+          product,
+          workspace,
+          ["move", `${T14_7_RENAME_FILE}#a.mid`, `${T14_7_RENAME_FILE}#a.mid`],
+          {
+            finding: "refused-identity-unchanged",
+            identities: [`${T14_7_RENAME_FILE}#a.mid`],
+          },
+          "T14-7 move (the exact section-form self-move — " +
+            "refused-identity-unchanged alone, its identities the unchanged " +
+            "`<target-file>#<id>` identity)",
+        );
+        await assertRefusalReport(
+          product,
+          workspace,
+          ["move", T14_7_RENAME_FILE, T14_7_RENAME_FILE],
+          {
+            finding: "refused-identity-unchanged",
+            identities: [T14_7_RENAME_FILE],
+          },
+          "T14-7 move (the exact file-form self-move — " +
+            "refused-identity-unchanged alone, never " +
+            "refused-destination-exists beside it, its identities the bare " +
+            "`<new-file>` root identity)",
         );
         await workspace.file(T14_7_BAD_FILE, T14_7_BAD_INVALID);
         await assertRefusalReport(

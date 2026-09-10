@@ -77,9 +77,12 @@
 //   stable refusal code (SPEC 14: one finding per applicable reason,
 //   TEST-SPEC preamble: a code is contract) with the concerned identity or
 //   located bearer §14 assigns the reason (T14-7's staging record names
-//   T6.4-3). Identity concerns accept the full 1.5 identity or its bare ID
-//   (§14 requires identification, not spelling); the collision arm's window
-//   spans the remaining colliding bearer's whole construct, admitting any
+//   T6.4-3). Identity concerns are asserted exact — `identities` the
+//   concerned identity as the sole element, in 1.5's form over the
+//   destination file, or the collision's located bearers in location order
+//   (SPEC 14, 12.7; support.ts assertRefusalIdentities); the collision
+//   arm's window spans the remaining colliding bearer's whole construct,
+//   admitting any
 //   in-construct precision while rejecting wrong-construct attribution.
 //   T6.4-6's invalid-workspace refusal instead reports the workspace's
 //   numbered findings alone (SPEC 14, 6.4) — exactly its one 14.5 finding
@@ -152,7 +155,6 @@ import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type {
   BearerLocationExpectation,
-  ConcernedIdentity,
   FindingSourceExpectation,
 } from "./support.js";
 import {
@@ -162,7 +164,7 @@ import {
   assertFindingLocated,
   assertFindingLocatesExactly,
   assertFindingMentionsLocation,
-  assertFindingNamesIdentity,
+  assertRefusalIdentities,
   assertSameJson,
   buildFindings,
   buildOk,
@@ -377,8 +379,9 @@ function assertRewriteHappened(
 /**
  * What a refused rename's report must hold (SPEC 14, 12.7): the arm's one
  * finding — its exact stable code — plus whichever concern §14 assigns the
- * reason: a located bearer/spelling, a concerned identity, or nothing further
- * where the concern's rendering is the reason's message alone. Exported for
+ * reason: a located bearer/spelling, the exact `identities` where 14 pins
+ * them, or nothing further where the concern's rendering is the reason's
+ * message alone. Exported for
  * T6.6-3, which stages T6.4-3's refusals identically and asserts the
  * `--preview` invocation's refusal equivalence (TEST-SPEC §6.6).
  */
@@ -401,8 +404,15 @@ export interface RefusalExpectation {
    * asserting it alone still apply.
    */
   readonly locatedAtEach?: readonly BearerLocationExpectation[];
-  /** At least one identities entry names this concerned identity. */
-  readonly identity?: ConcernedIdentity;
+  /**
+   * The finding's exact `identities` (SPEC 12.7, 14): stated for every
+   * reason SPEC 14 pins — the concerned identity as the sole element, in
+   * 1.5's form over the operation's destination file (whether or not the ID
+   * is valid), or `refused-id-collision`'s located bearers' identities in
+   * location order — and omitted where 12.7 leaves the composition unpinned
+   * (support.ts assertRefusalIdentities guards both ways).
+   */
+  readonly identities?: readonly string[];
 }
 
 /**
@@ -462,13 +472,12 @@ async function expectRefusalModifiesNothing(
           `${context}: the refusal's complete located-bearer set`,
         );
       }
-      if (expected.identity !== undefined) {
-        assertFindingNamesIdentity(
-          finding,
-          expected.identity,
-          `${context}: the refusal's concerned identity`,
-        );
-      }
+      assertRefusalIdentities(
+        finding,
+        expected.finding,
+        expected.identities,
+        `${context}: the refusal's concerned identity`,
+      );
     },
     `${context}: \`${command}\` refused — modifies nothing (SPEC 6.4)`,
   );
@@ -1298,6 +1307,12 @@ export const TWO_BEARER_COLLISION_CASE: RenameRefusalCase = {
       window: TWO_BEARER_CHILD_WINDOW,
     },
     locatedAtEach: TWO_BEARER_COLLISION_BEARERS,
+    // The located bearers' identities in location order — `b` then `b.c`,
+    // matching the bearer set (SPEC 14, 12.7).
+    identities: [
+      `${TWO_BEARER_COLLISION_FILE}#b`,
+      `${TWO_BEARER_COLLISION_FILE}#b.c`,
+    ],
   },
   reason:
     "new ID `b` and the prefix-replaced `b.c` each colliding with an ID " +
@@ -1330,18 +1345,21 @@ export const RENAME_REFUSAL_FILES: Readonly<Record<string, string>> = {
 };
 
 // Each arm's expected refusal finding (SPEC 14): the exact stable code, with
-// the concerned identity (`refused-invalid-id` and `refused-structural-parent`
-// concern the offending identity; `refused-identity-unchanged` concerns the
-// unchanged one) or the located remaining colliding bearer
-// (`refused-id-collision` locates every colliding bearer). The final case is
-// the top-level structural arm: a top-level section's ID is checked against
-// the empty prefix — exactly one segment (SPEC 1.3).
+// its exact `identities` — the concerned identity as the sole element, in
+// 1.5's form over the file (`refused-invalid-id` and
+// `refused-structural-parent` concern the offending identity;
+// `refused-identity-unchanged` the unchanged one), or the located colliding
+// bearers' identities in location order (`refused-id-collision` locates
+// every colliding bearer, the collision arms also locating each remaining
+// bearer) — SPEC 14, 12.7. The final case is the top-level structural arm: a
+// top-level section's ID is checked against the empty prefix — exactly one
+// segment (SPEC 1.3).
 export const RENAME_REFUSAL_CASES: readonly RenameRefusalCase[] = [
   {
     argv: ["rename", V3_FILE, "a.mid", "a.then"],
     expected: {
       finding: "refused-invalid-id",
-      identity: { file: V3_FILE, id: "a.then" },
+      identities: [`${V3_FILE}#a.then`],
     },
     reason: "new ID invalid per 1.4 — its segment is the forbidden name `then`",
   },
@@ -1349,7 +1367,7 @@ export const RENAME_REFUSAL_CASES: readonly RenameRefusalCase[] = [
     argv: ["rename", V3_FILE, "a.mid", "a.mi d"],
     expected: {
       finding: "refused-invalid-id",
-      identity: { file: V3_FILE, id: "a.mi d" },
+      identities: [`${V3_FILE}#a.mi d`],
     },
     reason: "new ID invalid per 1.4 — its segment contains whitespace",
   },
@@ -1357,7 +1375,7 @@ export const RENAME_REFUSAL_CASES: readonly RenameRefusalCase[] = [
     argv: ["rename", V3_FILE, "a.mid", "a.mid"],
     expected: {
       finding: "refused-identity-unchanged",
-      identity: { file: V3_FILE, id: "a.mid" },
+      identities: [`${V3_FILE}#a.mid`],
     },
     reason: "new ID equal to the old ID",
   },
@@ -1366,6 +1384,7 @@ export const RENAME_REFUSAL_CASES: readonly RenameRefusalCase[] = [
     expected: {
       finding: "refused-id-collision",
       locatedAt: { file: V3_FILE, window: V3_SIB_WINDOW },
+      identities: [`${V3_FILE}#a.sib`],
     },
     reason: "new ID colliding with an existing ID in the file",
   },
@@ -1374,7 +1393,7 @@ export const RENAME_REFUSAL_CASES: readonly RenameRefusalCase[] = [
     argv: ["rename", V3_FILE, "a.mid", "x.mid"],
     expected: {
       finding: "refused-structural-parent",
-      identity: { file: V3_FILE, id: "x.mid" },
+      identities: [`${V3_FILE}#x.mid`],
     },
     reason:
       "new ID violating the structural parent rules — the node is nested " +
@@ -1384,7 +1403,7 @@ export const RENAME_REFUSAL_CASES: readonly RenameRefusalCase[] = [
     argv: ["rename", V3_FILE, "a", "b.c"],
     expected: {
       finding: "refused-structural-parent",
-      identity: { file: V3_FILE, id: "b.c" },
+      identities: [`${V3_FILE}#b.c`],
     },
     reason:
       "new ID violating the structural parent rules — a top-level section's " +

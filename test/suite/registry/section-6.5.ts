@@ -91,8 +91,10 @@
 //   out-of-group `.mdx` occupant stages two applicable reasons at once —
 //   with the concern §14 assigns the reason: the concerned identity
 //   (refused-invalid-id, refused-identity-unchanged,
-//   refused-missing-target-parent; the full 1.5 identity or its bare ID —
-//   §14 requires identification, not spelling), the concerned path
+//   refused-missing-target-parent; `identities` exactly the 1.5 identity
+//   over the target file as its sole element, and the collision's located
+//   bearers in location order — support.ts assertRefusalIdentities), the
+//   concerned path
 //   (refused-destination-exists, refused-invalid-destination), or a located
 //   participant (refused-id-collision locates every colliding bearer — the
 //   remaining bearer's construct is the window where the staged bytes are
@@ -234,7 +236,6 @@ import {
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type {
   BearerLocationExpectation,
-  ConcernedIdentity,
   FindingSourceExpectation,
 } from "./support.js";
 import {
@@ -245,7 +246,7 @@ import {
   assertFindingLocated,
   assertFindingLocatesExactly,
   assertFindingMentionsLocation,
-  assertFindingNamesIdentity,
+  assertRefusalIdentities,
   assertSameJson,
   buildFindings,
   buildOk,
@@ -702,7 +703,8 @@ function renderArgv(argv: readonly ArgvValue[]): string {
 /**
  * What one finding of a refused move's report must hold (SPEC 14, 12.7):
  * its exact stable code plus whichever concern §14 assigns the reason: a
- * located participant, a concerned identity, a concerned path, or nothing
+ * located participant, the exact `identities` where 14 pins them, a
+ * concerned path, or nothing
  * further where no pre-operation construct renders the concern. An arm
  * staging several applicable reasons passes one expectation per reason
  * (SPEC 14: every applicable reason reports together, one finding each).
@@ -729,8 +731,15 @@ export interface RefusalExpectation {
    * SOME-quantified check consumers asserting it alone still apply.
    */
   readonly locatedAtEach?: readonly BearerLocationExpectation[];
-  /** At least one identities entry names this concerned identity. */
-  readonly identity?: ConcernedIdentity;
+  /**
+   * The finding's exact `identities` (SPEC 12.7, 14): stated for every
+   * reason SPEC 14 pins — the concerned identity as the sole element, in
+   * 1.5's form over the operation's destination file (whether or not the ID
+   * is valid), or `refused-id-collision`'s located bearers' identities in
+   * location order — and omitted where 12.7 leaves the composition unpinned
+   * (support.ts assertRefusalIdentities guards both ways).
+   */
+  readonly identities?: readonly string[];
   /** The finding's 12.7 path member equals this workspace-relative path. */
   readonly path?: string;
 }
@@ -817,14 +826,13 @@ async function expectRefusalModifiesNothing(
               `located-bearer set`,
           );
         }
-        if (expectation.identity !== undefined) {
-          assertFindingNamesIdentity(
-            finding,
-            expectation.identity,
-            `${context}: the ${expectation.finding} refusal's concerned ` +
-              `identity`,
-          );
-        }
+        assertRefusalIdentities(
+          finding,
+          expectation.finding,
+          expectation.identities,
+          `${context}: the ${expectation.finding} refusal's concerned ` +
+            `identity`,
+        );
         if (expectation.path !== undefined) {
           assertFindingConcernsPath(
             finding,
@@ -2558,7 +2566,7 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
     argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#then"],
     expected: {
       finding: "refused-invalid-id",
-      identity: { file: V4_B, id: "then" },
+      identities: [`${V4_B}#then`],
     },
     reason:
       "section form whose <new-id> is invalid per 1.4 — the forbidden " +
@@ -2568,7 +2576,7 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
     argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#ha lf"],
     expected: {
       finding: "refused-invalid-id",
-      identity: { file: V4_B, id: "ha lf" },
+      identities: [`${V4_B}#ha lf`],
     },
     reason:
       "section form whose <new-id> is invalid per 1.4 — a " +
@@ -2578,7 +2586,7 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
     argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#"],
     expected: {
       finding: "refused-invalid-id",
-      identity: { file: V4_B, id: "" },
+      identities: [`${V4_B}#`],
     },
     reason:
       "section form whose <new-id> is empty — the destination operand " +
@@ -2593,6 +2601,7 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
     expected: {
       finding: "refused-id-collision",
       locatedAt: { file: V4_B, window: V4_Y_WINDOW },
+      identities: [`${V4_B}#y`],
     },
     reason:
       "the ordinary cross-file collision — <new-id> `y` collides with the " +
@@ -2602,7 +2611,7 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
     argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#nope.k"],
     expected: {
       finding: "refused-missing-target-parent",
-      identity: { file: V4_B, id: "nope" },
+      identities: [`${V4_B}#nope`],
     },
     reason:
       "section form whose target parent (`nope`, the <new-id> minus its " +
@@ -2612,7 +2621,7 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
     argv: ["move", "specs/A.mdx#x", "specs/A.mdx#x.sub.q"],
     expected: {
       finding: "refused-missing-target-parent",
-      identity: { file: V4_A, id: "x.sub" },
+      identities: [`${V4_A}#x.sub`],
     },
     reason:
       "section form whose target parent (`x.sub`) lies within the moved " +
@@ -3589,7 +3598,7 @@ const T6_5_6 = defineProductTest({
             // after-removal check collides with nothing (SPEC 6.4, 14,
             // T14-7) — concerning the unchanged identity.
             finding: "refused-identity-unchanged",
-            identity: { file: I6_B, id: "x" },
+            identities: [`${I6_B}#x`],
           },
           "T6.5-6 (the exact self-move — the new identity equals the old " +
             "one, SPEC 6.5)",
@@ -3618,6 +3627,7 @@ const T6_5_6 = defineProductTest({
             // the bearer's file without a byte window.
             finding: "refused-id-collision",
             locatedAt: { file: I6_B },
+            identities: [`${I6_B}#b`],
           },
           "T6.5-6 (same-file move whose <new-id> `b` collides with the ID " +
             "`b` remaining in the target file after the removal, SPEC 6.5)",

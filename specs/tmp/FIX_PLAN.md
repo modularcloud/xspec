@@ -18,14 +18,6 @@ Ordering: Part A turns the three red self-tests green (certification manifest/ga
 
 ## Part B — shared helpers (land before their consumers)
 
-## Task 6 — Form-exact refusal `identities` expectation; T6.4-3, T6.5-4, T14-7 assert the exact arrays
-
-- **Source:** reviewer A gaps 15 (identities clause) and 17; reviewer B gap 30 (identities clause).
-- **Requirement:** SPEC.md 12.7 refusal document, 14 refusal reasons; TEST-SPEC.md **T6.4-3** (line 263: `refused-invalid-id` carries `identities` exactly `["<file>#<new-id>"]`), **T6.5-4** (line 274: exactly `["<target-file>#<new-id>"]`, and `["b.mdx#"]` for the empty-ID arm), **T14-7** (line 567: the sole element in 1.5's identity form — `["specs/A.mdx#a.then"]`, `["specs/B.mdx#x y"]` — the self-move forms, and collision bearers in location order).
-- **Files:** `test/suite/registry/support.ts` ~504–525 (the refusal expectation T6.4-3 uses: accepts "some entry, full or bare" — replace), `test/suite/registry/section-6.5.ts` ~730 (`identity?` optional expectation — replace with a required exact array), `test/suite/registry/section-14.ts` `assertRefusalReport` ~2159 ("at least one identities entry names" — replace); call sites T6.4-3 (`section-6.4.ts` ~1340), T6.5-4 (`section-6.5.ts` ~2555–2578), T14-7.
-- **Do:** one shared expectation (in `support.ts`) taking the exact ordered `identities` array and comparing with `toEqual`; every call site passes its exact expected array per its spec entry. Leave T14-7's non-identities arms to Task 13.
-- **Verify:** typecheck; the three tests pass or fail as diagnosed against the product; none is in a certification scope (confirm against CERTIFICATIONS.md in-scope lists), so `npm run test:self` is unchanged.
-
 ## Task 7 — CONF-VALID conformer: 1.4's alphabet excludes `"`, `'`, `\`, `&`, and U+FFFD; values read verbatim
 
 - **Source:** reviewer A gap 28; reviewer C dependency note.
@@ -87,7 +79,7 @@ Ordering: Part A turns the three red self-tests green (certification manifest/ga
 - **Files:** `test/suite/registry/section-14.ts` T14-7.
 - **Do:** `refused-invalid-destination` alone (no second reason) for destinations `./a.mdx`, `specs//b.mdx`, `specs/../specs/b.mdx`; the import-cycle location arm — an existing import declaration plus a local reference spelling whose rewrite would add the import, the refusal locating the declaration per the entry; assert that no report carries a code outside SPEC.md 14's list (`assertRefusalReport` rejects unknown codes).
 - **Verify:** passes or fails as diagnosed.
-- **Depends on:** Task 6.
+- **Depends on:** Task 6 (landed: `assertRefusalIdentities` / `assertFindingIdentities` in `test/suite/registry/support.ts`; every `RefusalExpectation` now states `identities` exactly where SPEC 14 pins it).
 
 ## Task 14 — Register T14-11 (per-condition ranges)
 

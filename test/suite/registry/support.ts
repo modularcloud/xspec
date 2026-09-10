@@ -490,40 +490,91 @@ export function assertFindingLocatesExactly(
   }
 }
 
-/** A concerned identity, named by its containing file and its ID (SPEC.md 1.5). */
-export interface ConcernedIdentity {
-  /** The workspace-relative file whose `#`-form identity names the concern. */
-  readonly file: string;
-  /** The concerned ID — possibly one no node bears (a refused new ID). */
-  readonly id: string;
+/**
+ * The refusal reasons whose `identities` content SPEC.md 14 pins: a reason
+ * concerning an identity — `refused-invalid-id`, `refused-identity-unchanged`,
+ * `refused-structural-parent`, `refused-missing-target-parent` — carries it
+ * as the sole element, in 1.5's form over the operation's destination file
+ * (`<file>#id` for a rename, `<target-file>#id` for a section move, the bare
+ * `<new-file>` for a file move), whether or not the ID is valid;
+ * `refused-id-collision` carries the located bearers' identities in location
+ * order. For every other reason — `refused-cycle` and the path-concerning
+ * `refused-destination-exists` and `refused-invalid-destination` — 12.7
+ * leaves the member informational, its composition unpinned, so no consumer
+ * asserts it (H-4).
+ */
+export const IDENTITY_PINNED_REFUSAL_CODES: ReadonlySet<string> = new Set([
+  "refused-invalid-id",
+  "refused-identity-unchanged",
+  "refused-id-collision",
+  "refused-structural-parent",
+  "refused-missing-target-parent",
+]);
+
+/**
+ * Assert a finding's `identities` is exactly the expected ordered array
+ * (SPEC.md 12.7: the member's content is contractual exactly where 14 states
+ * it — a refusal reason's concerned identity as the sole element, the
+ * collision's located bearers in location order, 14.11's foreign module,
+ * 14.12's enumeration): the same entries in the same order, none beside — a
+ * bare ID in place of the 1.5 identity, a further informational entry, or a
+ * differently ordered bearer list fails (T6.4-3, T6.5-4, T14-7).
+ */
+export function assertFindingIdentities(
+  finding: Finding,
+  expected: readonly string[],
+  context: string,
+): void {
+  const actual = finding.identities;
+  const equal =
+    actual.length === expected.length &&
+    expected.every((entry, index) => actual[index] === entry);
+  if (!equal) {
+    fail(
+      `${context}: the finding's \`identities\` must be exactly ` +
+        `${JSON.stringify(expected)} — the same entries in the same order, ` +
+        `none beside (SPEC.md 14, 12.7); got ${JSON.stringify(actual)} ` +
+        `(message: ${JSON.stringify(finding.message)})`,
+    );
+  }
 }
 
 /**
- * Assert a finding names a concerned identity (SPEC.md 14: a refusal reason's
- * concerned identity is contractual identity data on the finding, 12.7): at
- * least one `identities` entry identifies it — as the full 1.5 identity
- * `<file>#<id>` or as the ID alone, either spelling identifying it
- * unambiguously within the staged fixture (§14 requires identification, not
- * wording). Further informational entries are permitted (12.7).
+ * Assert a refusal finding's `identities` per SPEC.md 14's pin for its
+ * reason: a case states the exact array for every reason in
+ * IDENTITY_PINNED_REFUSAL_CODES and states none for a refusal reason whose
+ * composition 12.7 leaves unpinned — either slip is a harness defect (a
+ * plain error, never `fail`: H-8's taxonomy), so no identity-concerning
+ * refusal is under-asserted and no unpinned one over-asserted. A numbered
+ * condition (the invalid-workspace refusal's findings) is asserted exactly
+ * when the case states an array.
  */
-export function assertFindingNamesIdentity(
+export function assertRefusalIdentities(
   finding: Finding,
-  expected: ConcernedIdentity,
+  code: string,
+  expected: readonly string[] | undefined,
   context: string,
 ): void {
-  const full = `${expected.file}#${expected.id}`;
-  if (
-    finding.identities.some((entry) => entry === full || entry === expected.id)
-  ) {
+  const pinned = IDENTITY_PINNED_REFUSAL_CODES.has(code);
+  if (expected === undefined) {
+    if (pinned) {
+      throw new Error(
+        `harness defect: ${context} — SPEC.md 14 pins the \`identities\` of ` +
+          `${JSON.stringify(code)} (its concerned identity as the sole ` +
+          `element; the located bearers for refused-id-collision), so the ` +
+          `case must state the exact array`,
+      );
+    }
     return;
   }
-  fail(
-    `${context}: the finding must name the concerned identity ` +
-      `${JSON.stringify(full)} (or its ID ${JSON.stringify(expected.id)}) in ` +
-      `its identities (SPEC.md 14, 12.7); got ` +
-      `${JSON.stringify(finding.identities)} (message: ` +
-      `${JSON.stringify(finding.message)})`,
-  );
+  if (!pinned && code.startsWith("refused-")) {
+    throw new Error(
+      `harness defect: ${context} — SPEC.md 12.7 leaves the \`identities\` ` +
+        `of ${JSON.stringify(code)} informational (composition unpinned), ` +
+        `so the case must not state one`,
+    );
+  }
+  assertFindingIdentities(finding, expected, context);
 }
 
 /**
