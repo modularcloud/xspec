@@ -6,9 +6,9 @@
 // T13.5-2 (mutual exclusion),
 // T13.5-3 (exclusivity ends with the process), T13.5-4 (readers during
 // mutation + build/query storm), T13.5-5 (atomic visibility via a polling
-// reader), T13.5-6 (workspace isolation), T13.5-7 (interrupted mutation:
-// held-point kill and a post-release kill-timing spread with the disjunctive
-// `check` assertion), T13.5-8 (acquisition before every later check: the
+// reader), T13.5-6 (workspace isolation), T13.5-7 (interrupted or
+// write-refused mutation: the pinned write order — the refusal arms (a)–(f)
+// composed from write-refusal-staging.ts, and the kill arm), T13.5-8 (acquisition before every later check: the
 // exclusion-first refusals on a failing workspace, the hold seam engaging on
 // invocations the 12.0 argument checks, baseline resolution, or the 13.3
 // gate refuse, and the non-mutating preview boundary).
@@ -107,13 +107,19 @@
 //   concurrent-vs-serial compare of a six-command script (per-step exit
 //   codes and stdout bytes, and the final workspace trees, H-6
 //   two-directory style).
-// - T13.5-7's kill-timing spread is a fixed delay list — kill scheduling is
-//   choreography, never an assertion input (H-10); the operative assertion
-//   is delay-independent and disjunctive exactly as specified: after a
-//   post-release kill, `check` exits 0 or 1 (never a signal death, never
-//   another code — the configuration is intact, so the exit-2 class is not
-//   stageable), and after a held-point kill it exits 0 (the hold precedes
-//   all modification).
+// - T13.5-7's refusal arms stage each 14.24 refusal by permission removal
+//   while the command is held at the seam (after acquisition, before any
+//   modification — seam neutrality) and read every rewritten-byte
+//   expectation from a twin on which the same operation ran unrefused
+//   (H-6); the states are asserted entry by entry against 13.5's pinned
+//   per-command write order (write-refusal-staging.ts). Its kill-timing
+//   spread is a fixed delay list — kill scheduling is choreography, never
+//   an assertion input (H-10); the operative assertion is delay-independent
+//   and disjunctive exactly as 13.5 admits: after a post-release kill,
+//   `check` exits 0 or 1 (never a signal death, never another code — the
+//   configuration is intact, so the exit-2 class is not stageable) with
+//   condition 5–7 findings alone or condition 10 findings alone, and after
+//   a held-point kill it exits 0 (the hold precedes all modification).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -169,6 +175,14 @@ import {
   runCli,
   runJson,
 } from "./support.js";
+import {
+  awaitHoldFile,
+  holdPathFor,
+  renameTwin,
+  runKillArm,
+  runWriteRefusalArms,
+  WRITE_REFUSALS_STAGED,
+} from "./write-refusal-staging.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
 // other keys — the CONF-CORE workspace shape (CERTIFICATIONS.md).
@@ -228,37 +242,11 @@ async function withWorkspace<T>(
   }
 }
 
-/**
- * An absolute hold-file path in the workspace's temporary directory — beside
- * the workspace root, never inside it, so whole-root byte snapshots are
- * unaffected and disposal cleans it up. Exported for T6.6-3, which shares
- * this module's drive-during-hold choreography (CERTIFICATIONS.md).
- */
-export function holdPathFor(workspace: TestWorkspace, name: string): string {
-  return path.join(workspace.tempRoot, name);
-}
-
-/**
- * Await the hold file's appearance, converting the driver's diagnosed
- * rejection (the process exited first, or the wait timed out) into a
- * diagnosed assertion failure (H-8).
- */
-export async function awaitHoldFile(
-  running: RunningProduct,
-  absPath: string,
-  context: string,
-): Promise<void> {
-  try {
-    await running.waitForFile(absPath);
-  } catch (error) {
-    fail(
-      `${context}: the mutating command must create the hold file at ` +
-        `${absPath} immediately after acquiring workspace exclusivity and ` +
-        `before modifying anything (SPEC 13.5) — ` +
-        `${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
+// The hold-path and hold-await helpers live in write-refusal-staging.ts (the
+// seam-held staging choreography shared with T14-9); re-exported here for
+// T6.6-3, which shares this module's drive-during-hold choreography
+// (CERTIFICATIONS.md).
+export { awaitHoldFile, holdPathFor };
 
 /** The hold file must be an empty plain file ("creates an empty file"). */
 async function assertEmptyHoldFile(
@@ -1708,152 +1696,29 @@ const T13_5_6 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T13.5-7 — interrupted mutation
+// T13.5-7 — interrupted or write-refused mutation: the pinned write order
 // ---------------------------------------------------------------------------
 
-// A multi-file rename fixture (outside CONF-CORE's in-scope set, so imports
-// and references are fine here): renaming `a` rewrites A.mdx (its own and
-// descendant IDs), B.mdx (a `d` chain reference and a `text(...)` target),
-// and C.mdx (a `d` chain reference), then regenerates modules, emitted
-// Markdown, and graph data and appends the journal — a wide write set for
-// the kill spread (SPEC 6.4, 13.5).
-const MULTI_CONFIG = `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/**/*.mdx"]
-  },
-  markdown: { emit: true }
-})
-`;
-
-const MULTI_A = [
-  '<S id="a">',
-  "Alpha root text.",
-  '<S id="a.k1">',
-  "Kid one text.",
-  "</S>",
-  '<S id="a.k2">',
-  "Kid two text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
-
-const MULTI_B = [
-  'import A from "./A.xspec"',
-  "",
-  '<S id="b" d={A.a.k1}>',
-  "Beta text embeds: {text(A.a.k2)}",
-  "</S>",
-  "",
-].join("\n");
-
-const MULTI_C = [
-  'import A from "./A.xspec"',
-  "",
-  '<S id="c" d={A.a}>',
-  "Ceta text.",
-  "</S>",
-  "",
-].join("\n");
-
-const MULTI_DECL: WorkspaceDecl = {
-  files: {
-    "xspec.config.ts": MULTI_CONFIG,
-    "specs/A.mdx": MULTI_A,
-    "specs/B.mdx": MULTI_B,
-    "specs/C.mdx": MULTI_C,
-  },
-};
-
-// Post-release kill delays in milliseconds — scheduling choreography only,
-// never an assertion input (H-10): the operative assertion is
-// delay-independent.
-const KILL_DELAYS_MS: readonly number[] = [0, 2, 5, 10, 20, 40, 80, 160];
-
+// The refusal arms (a)–(f), their fixtures, stagings, twins, and the
+// pinned-state laws live in write-refusal-staging.ts (shared with T14-9);
+// this entry composes them: the rename twin once (arms (a), (b), and the
+// kill arm read their expectations from it), the refusal arms on the Linux
+// leg (E-1: permission stagings are Linux-only; elsewhere they are not
+// staged — the NU3_STAGED pattern of section-11.5 — and the Windows subset
+// selects T13.5-7 nowhere), then the platform-safe kill arm.
 const T13_5_7 = defineProductTest({
   id: "T13.5-7",
   title:
-    "a mutating command killed mid-operation can leave the workspace inconsistent and `check` reports such states rather than passing silently: a kill at the held point demonstrably leaves the workspace consistent (`check` passes), and across a spread of post-release kill timings on a multi-file `rename`, `check` never crashes and either passes on a consistent state or reports findings (SPEC 13.5, 14)",
+    "interrupted or write-refused mutation: a write the environment refuses stops the command at that write — exit 2 with the error document (`write-failure`, the concerned path) — leaving every earlier write of 13.5's pinned per-command order complete and no later one attempted, each state read from a twin on which the same operation ran unrefused: (a) source edits first in preview `files` order, (b) the journal append as the commit point, (c) the identity effect complete once appended, (d) a relocation's two writes, (e) `review` mutators writing the session file once, last, after the refresh, (f) `build` and a refresh each file complete with the order unpinned, and a refreshing read refused at its graph-data write; the kill arm: `check` never crashes and reports exactly a state 13.5 admits (SPEC 13.5, 14.24, 12.0, 12.7, 6.4, 6.7, 13.3)",
+  // A hang guard only (H-10): some twenty workspaces, each built, renamed,
+  // checked, and driven — generous under a saturated box.
+  timeoutMs: 600_000,
   run: async (product) => {
-    const probeKill = async (delayMs: number | null): Promise<void> => {
-      const label =
-        delayMs === null ? "held point" : `${String(delayMs)} ms after release`;
-      await withWorkspace(MULTI_DECL, async (workspace) => {
-        await buildOk(
-          product,
-          workspace,
-          `T13.5-7 (${label}) staging \`build\``,
-        );
-        await expectExit(
-          product,
-          workspace,
-          ["check"],
-          0,
-          `T13.5-7 (${label}) staging \`check\` — the staged workspace is ` +
-            `consistent before the kill (SPEC 12.2)`,
-        );
-
-        const hold = holdPathFor(workspace, "hold-kill.tmp");
-        const context = `T13.5-7 (${label}) \`rename specs/A.mdx a a2 --test-hold <path>\``;
-        const running = await startProduct(product, {
-          cwd: workspace.root,
-          argv: ["rename", "specs/A.mdx", "a", "a2", "--test-hold", hold],
-        });
-        try {
-          await awaitHoldFile(running, hold, context);
-          if (delayMs === null) {
-            // Held-point kill: the hold file is never deleted.
-            running.kill("SIGKILL");
-          } else {
-            await releaseHoldFile(hold);
-            if (delayMs > 0) await sleep(delayMs);
-            running.kill("SIGKILL");
-          }
-          // The run settles for kills and for completions that beat the
-          // kill alike; the death's shape is not asserted (kills after the
-          // hold's release land nondeterministically).
-          await running.waitForExit();
-        } finally {
-          running.kill();
-          await releaseHoldFile(hold);
-        }
-
-        const checkContext = `T13.5-7 (${label}) \`check\` after the kill`;
-        const result = await runBounded(
-          product,
-          workspace.root,
-          ["check"],
-          checkContext,
-        );
-        if (delayMs === null) {
-          assertExitCode(
-            result,
-            0,
-            `${checkContext}: a kill at the held point demonstrably leaves ` +
-              `the workspace consistent — the hold precedes all ` +
-              `modification (SPEC 13.5), so \`check\` passes`,
-          );
-        } else if (
-          result.signal !== null ||
-          (result.exitCode !== 0 && result.exitCode !== 1)
-        ) {
-          fail(
-            `${checkContext}: \`check\` never crashes and either passes on ` +
-              `a consistent state (exit 0) or reports findings (exit 1) — ` +
-              `the workspace's configuration is intact, so no other ` +
-              `outcome is stageable (SPEC 13.5, 14, 12.0); got ` +
-              summarizeResult(result),
-          );
-        }
-      });
-    };
-
-    await probeKill(null);
-    for (const delayMs of KILL_DELAYS_MS) {
-      await probeKill(delayMs);
+    const rename = await renameTwin(product);
+    if (WRITE_REFUSALS_STAGED) {
+      await runWriteRefusalArms(product, rename);
     }
+    await runKillArm(product, rename);
   },
 });
 
