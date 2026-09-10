@@ -14,17 +14,11 @@ Planned 2026-09-10 from: reviewer A (TEST-SPEC.md §0–8, 28 gaps), reviewer B 
 
 Ordering: Part A turns the three red self-tests green (certification manifest/gate cluster). Part B lands shared helpers. Parts C–E are consumers, ordered by dependency; within a part, order is free. Parts A and B are complete: the CONF-VALID conformer (`test/fixtures/conf-valid/product.mjs`) now rejects `"`, `'`, `\`, `&`, and U+FFFD in segments and tags (14.4), reads attribute values verbatim, emits one 14.4 finding per offending `id`/`tags` attribute located at the attribute's own characters (name through closing quote), and emits tag sets in UTF-8 byte order with duplicates collapsed; P-1's oracle (`valueVerdict` in `test/suite/registry/section-16-p1.ts`) judges the same five characters invalid, since its alphabet already staged both quote characters.
 
+Task 8 landed (459ea19, ca381ee): the harness vocabulary (`test/helpers/adapters/model.ts`) holds SPEC 14's 25 condition tokens — `USAGE_ERROR_CONDITION_CODE_TOKENS` names 14.24 `write-failure` and 14.25 `read-failure`, which the findings-array decode rejects and only the exit-2 error document's `code` admits — and no `refused-unresolvable-reference`. T14-6's 14.24/14.25 arms stage T14-9 (f) (`.xspec` unwritable on a stale workspace, `stageWriteRefusalUnder`) and T14-10 (g) (`specs/sub` unlistable, `stageReadRefusalOfDirectory`) through `test/helpers/permissions.ts`, Linux-gated by the NU3_STAGED pattern; a discovered source's refused content read is condition 20 (SPEC 14.25, T14-10 (a)), never `read-failure`, so Tasks 10–11 must not stage it as one. Against the built product both refusals end in exit 70 (an internal error at the `EACCES`), so T14-6 fails as a diagnosed product failure at its 14.24 arm and T14-9/T14-10 will diagnose the same.
+
 ---
 
 ## Part C — §13.5 / §14 consumers (after Part B)
-
-## Task 8 — Error-document codes `write-failure`/`read-failure`; drop the stale `refused-unresolvable-reference`; T14-6 covers all 25 conditions
-
-- **Source:** reviewer B gap 29; reviewer A advisory (stale code in the shared decoder).
-- **Requirement:** SPEC.md 14 (conditions 1–25; 14.24 write failure and 14.25 read failure are exit-2 error-document codes, in no findings array; the refusal reason `refused-unresolvable-reference` no longer exists); SPEC.md 12.7 error document (`{"error": …}` with `code`, `path`); TEST-SPEC.md **T14-6** (line 566: for each of the 25 conditions, staged via its primary test's fixture, the stable code read from every reporter — `write-failure`/`read-failure` as the exit-2 error document's `code`).
-- **Files:** `test/helpers/adapters/model.ts` (~218: the code vocabulary — add the two codes, remove `refused-unresolvable-reference`), `test/suite/registry/section-14.ts` (~140 the same list; T14-6 title and body: 23 → 25 conditions, the two new arms staged with the permission-staging helper `test/helpers/permissions.ts`: a write refused at `.xspec` on a stale workspace for `write-failure`; a source with read permission removed for `read-failure` — Linux leg, gated like the other permission arms), `test/self/s5-output-adapters.test.ts` if it pins the vocabulary.
-- **Verify:** typecheck; S-5 and `npm run test:self` green; T14-6 passes or fails as diagnosed; `grep -rn refused-unresolvable-reference test/` is empty.
-- **Depends on:** `test/helpers/permissions.ts` (the permission-staging helper; landed).
 
 ## Task 9 — Rewrite T13.5-7 as "interrupted or write-refused mutation: the pinned write order"
 
