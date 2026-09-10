@@ -32,7 +32,7 @@ const CERTIFICATIONS_PATH = fileURLToPath(
 // this gate when the document's fixture set changes, and guard against a
 // parser regression losing entries wholesale.
 const EXPECTED_CONFORMERS = 5;
-const EXPECTED_VIOLATORS = 17;
+const EXPECTED_VIOLATORS = 18;
 
 /** A violator entry as parsed from CERTIFICATIONS.md. */
 interface DocumentViolator {

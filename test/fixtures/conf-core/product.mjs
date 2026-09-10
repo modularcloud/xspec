@@ -1241,12 +1241,12 @@ async function readGraphDataRecord(root) {
  * generated or removed and the recorded derived-file paths are left
  * unchanged (SPEC 13.3); nothing else is written. Current graph data is
  * refreshed by nothing (its bytes untouched), and a record that exists but
- * cannot be read (SPEC 14.23) is neither repaired nor replaced. The graph is
- * loaded exactly as the subcommand loads it, so an invalid workspace reports
- * its findings here, before anything is written (SPEC 13.3, 12.0).
+ * cannot be read (SPEC 14.23) is neither repaired nor replaced. `graph` is
+ * the current sources' graph as the gate of 13.3 loaded it (runMutating's
+ * `judge`): an invalid workspace reported its findings there, before
+ * anything is written (SPEC 13.3, 12.0), so the refresh only ever writes.
  */
-async function refreshStaleGraphData(config) {
-  const graph = await loadGraph(config.root, config.groups);
+async function refreshStaleGraphData(config, graph) {
   const record = await readGraphDataRecord(config.root);
   if (record.state === "unreadable") return;
   const content = graphDataContent(
@@ -2083,23 +2083,28 @@ const MUTATING_FLAGS = { ...READ_FLAGS, "--test-hold": "value" };
 /**
  * Run a mutating command (SPEC 13.5): configuration, then workspace
  * exclusivity, then the `--test-hold` seam, then the checks a command judges
- * ahead of source validation (`check`: the usage-class argument checks of
- * 12.0 and baseline resolution, 6.3), then — for the mutating `review`
- * subcommands (`refreshesGraphData`) — the gate and refresh of 13.3 over
- * the current sources, then the operation's own checks and writes
- * (`operate`); exclusivity ends with the command — released on every path,
- * a killed process releasing by dying (the next command detects the dead
- * holder). Acquisition and the hold precede every later check (SPEC 13.5;
- * T13.5-8), so an invocation a later check refuses or the gate turns back
- * creates the hold file too and exits with its own outcome only after the
- * hold's deletion, having written nothing.
+ * ahead of the refresh and its own writes (`judge`: the usage-class argument
+ * checks of 12.0 and baseline resolution, 6.3, and — over the current
+ * sources — the gate of 13.3 binding the mutating `review` subcommands or
+ * the valid-workspace precondition of `rename`/`move`, 6.4/6.5, each
+ * command in its own order; its result, the loaded graph included, is what
+ * the refresh and the operation act on), then — for the mutating `review`
+ * subcommands (`refreshesGraphData`) — the refresh of 13.3, then the
+ * operation's own validation and writes (`operate`); exclusivity ends with
+ * the command — released on every path, a killed process releasing by dying
+ * (the next command detects the dead holder). Acquisition and the hold
+ * precede every later check (SPEC 13.5; T13.5-8), so an invocation a later
+ * check refuses or the gate turns back creates the hold file too and exits
+ * with its own outcome only after the hold's deletion, having written
+ * nothing. Acquisition, the hold, the judged checks, and the refresh are
+ * each position-independent so that one deviation can move one of them.
  */
 async function runMutating(
   cwd,
   configFlag,
   holdFlag,
   operate,
-  { refreshesGraphData = false, check = async () => {} } = {},
+  { refreshesGraphData = false, judge },
 ) {
   const config = await loadConfig(cwd, configFlag);
   // The 13.3 refresh of stale graph data (CERTIFICATIONS.md §CONF-CORE Scope:
@@ -2108,10 +2113,11 @@ async function runMutating(
   // `build` writes"): only the mutating `review` subcommands refresh —
   // `rename` and file-form `move` finish with a full regeneration instead
   // (SPEC 6.4, 6.5) — and the conformer runs it below, after exclusivity is
-  // acquired and the hold has been released, before the operation's writes.
-  // The closure is position-independent so that one deviation can move it.
-  const refreshIfStale = async () => {
-    if (refreshesGraphData) await refreshStaleGraphData(config);
+  // acquired and the hold has been released, before the operation's writes,
+  // over the graph the gate loaded. The closure is position-independent so
+  // that one deviation can move it.
+  const refreshIfStale = async (graph) => {
+    if (refreshesGraphData) await refreshStaleGraphData(config, graph);
   };
   let refreshAfterHold = refreshIfStale;
   if (deviations.refreshBeforeExclusivity) {
@@ -2132,21 +2138,28 @@ async function runMutating(
     // error, are reported only after acquisition and the hold, at the
     // conformer's position below (T13.5-8's failing-workspace arms).
     try {
-      await refreshIfStale();
+      if (refreshesGraphData) {
+        await refreshIfStale(await loadGraph(config.root, config.groups));
+      }
     } catch (error) {
       if (!(error instanceof FindingsError)) throw error;
     }
     refreshAfterHold = async () => {};
   }
-  // VIOL-CORE-NOLOCK (CERTIFICATIONS.md): mutating commands do not exclude
-  // one another — exclusivity is neither acquired nor checked, so a second
-  // mutating command started while another runs or is held proceeds normally
-  // instead of failing with the usage error of 13.5/12.0. Everything else,
-  // the hold file created below before any modification and honored
-  // included, is exactly the conformer's behavior.
-  const lock = deviations.noMutualExclusion
-    ? { release: async () => {} }
-    : await acquireExclusivity(config.root);
+  // Workspace exclusivity (SPEC 13.5), acquired at the conformer's position
+  // below — before the hold and every later check; released on every path
+  // (a lock never acquired releases nothing).
+  let lock = { release: async () => {} };
+  const acquire = async () => {
+    // VIOL-CORE-NOLOCK (CERTIFICATIONS.md): mutating commands do not exclude
+    // one another — exclusivity is neither acquired nor checked, so a second
+    // mutating command started while another runs or is held proceeds
+    // normally instead of failing with the usage error of 13.5/12.0.
+    // Everything else, the hold file created before any modification and
+    // honored included, is exactly the conformer's behavior.
+    if (deviations.noMutualExclusion) return;
+    lock = await acquireExclusivity(config.root);
+  };
   const holdIfRequested = async () => {
     if (holdFlag === undefined) return;
     try {
@@ -2158,15 +2171,34 @@ async function runMutating(
       );
     }
   };
-  // Everything that follows the hold, in the conformer's order: the checks
-  // judged ahead of source validation, the gate and refresh of 13.3, the
-  // operation's own checks and writes.
-  const proceed = async () => {
-    await check(config);
-    await refreshAfterHold();
-    return await operate(config);
+  // Everything that follows the judged checks, in the conformer's order: the
+  // refresh of 13.3 over the graph the gate loaded, then the operation's own
+  // validation and writes.
+  const proceed = async (judged) => {
+    await refreshAfterHold(judged.graph);
+    return await operate(config, judged);
   };
   try {
+    if (deviations.lateAcquisition) {
+      // VIOL-CORE-LATELOCK (CERTIFICATIONS.md): workspace exclusivity is
+      // acquired late — a mutating command acquires it, and creates its hold
+      // file, only once the checks it judges ahead of the refresh (the
+      // argument checks of 12.0, baseline resolution of 6.3, the gate of
+      // 13.3, and the valid-workspace precondition of rename/move, 6.4/6.5)
+      // have all passed, instead of before them. A single deviation: 13.5's
+      // acquisition point moved past those checks; the refresh's writes, the
+      // operation's own validation, and every other modification still
+      // follow acquisition and the hold, a second mutating command is still
+      // refused on acquisition — now after those checks — and the hold file
+      // still precedes every write. An invocation one of those checks
+      // refuses exits with that outcome at once, having acquired nothing and
+      // created no hold file, `--test-hold` or not (T13.5-8).
+      const judged = await judge(config);
+      await acquire();
+      await holdIfRequested();
+      return await proceed(judged);
+    }
+    await acquire();
     if (deviations.writesBeforeHold) {
       // VIOL-CORE-EARLYWRITE (CERTIFICATIONS.md): the mutating command
       // performs its workspace modifications before creating the hold file —
@@ -2185,7 +2217,7 @@ async function runMutating(
       // conformer's behavior.
       let code;
       try {
-        code = await proceed();
+        code = await proceed(await judge(config));
       } catch (error) {
         if (!isRefusedOutcome(error)) throw error;
         await holdIfRequested();
@@ -2195,7 +2227,7 @@ async function runMutating(
       return code;
     }
     await holdIfRequested();
-    return await proceed();
+    return await proceed(await judge(config));
   } finally {
     await lock.release();
   }
@@ -2515,22 +2547,29 @@ async function commandRename(io, cwd, argv) {
   if (flags["--preview"] === true) {
     return await previewRename(cwd, flags, file, oldId, newId);
   }
+  // The checks judged ahead of the operation (runMutating's `judge`): the
+  // valid-workspace precondition of 6.4 — the graph loaded over the current
+  // sources, findings exit 1 — then the argument checks of 12.0 (an unknown
+  // file or old id a usage error, exit 2).
+  const judge = async (config) => {
+    const graph = await loadGraph(config.root, config.groups);
+    const model = graph.files.find((candidate) => candidate.rel === file);
+    if (model === undefined) {
+      throw new UsageError(
+        `unknown file ${file}: not a discovered spec source (SPEC 6.4, 12.0)`,
+      );
+    }
+    const target = model.sections.find((section) => section.id === oldId);
+    if (target === undefined) {
+      throw new UsageError(`unknown id ${oldId} in ${file} (SPEC 6.4, 12.0)`);
+    }
+    return { graph, model, target };
+  };
   return await runMutating(
     cwd,
     flags["--config"],
     flags["--test-hold"],
-    async (config) => {
-      const graph = await loadGraph(config.root, config.groups);
-      const model = graph.files.find((candidate) => candidate.rel === file);
-      if (model === undefined) {
-        throw new UsageError(
-          `unknown file ${file}: not a discovered spec source (SPEC 6.4, 12.0)`,
-        );
-      }
-      const target = model.sections.find((section) => section.id === oldId);
-      if (target === undefined) {
-        throw new UsageError(`unknown id ${oldId} in ${file} (SPEC 6.4, 12.0)`);
-      }
+    async (config, { model, target }) => {
       // Validation (SPEC 6.4): new id valid, differs, collides with nothing,
       // structural parent rules remain satisfied.
       const refusal = (message) => new RefusalError(message);
@@ -2602,6 +2641,7 @@ async function commandRename(io, cwd, argv) {
       ]);
       return 0;
     },
+    { judge },
   );
 }
 
@@ -2649,17 +2689,24 @@ async function commandMove(io, cwd, argv) {
       "this fixture implements the file form of move only (§CONF-CORE scope)",
     );
   }
+  // The checks judged ahead of the operation (runMutating's `judge`): the
+  // valid-workspace precondition of 6.5 — the graph loaded over the current
+  // sources, findings exit 1 — then the argument check of 12.0 (an unknown
+  // file a usage error, exit 2).
+  const judge = async (config) => {
+    const graph = await loadGraph(config.root, config.groups);
+    if (!graph.files.some((model) => model.rel === oldPath)) {
+      throw new UsageError(
+        `unknown file ${oldPath}: not a discovered spec source (SPEC 6.5, 12.0)`,
+      );
+    }
+    return { graph };
+  };
   return await runMutating(
     cwd,
     flags["--config"],
     flags["--test-hold"],
     async (config) => {
-      const graph = await loadGraph(config.root, config.groups);
-      if (!graph.files.some((model) => model.rel === oldPath)) {
-        throw new UsageError(
-          `unknown file ${oldPath}: not a discovered spec source (SPEC 6.5, 12.0)`,
-        );
-      }
       const refusal = (message) => new RefusalError(message);
       if (await pathOccupied(path.join(config.root, newPath))) {
         throw refusal(
@@ -2698,6 +2745,7 @@ async function commandMove(io, cwd, argv) {
       ]);
       return 0;
     },
+    { judge },
   );
 }
 
@@ -2770,13 +2818,15 @@ async function reviewCreate(io, cwd, argv) {
       `unknown strategy ${flags["--strategy"]} (SPEC 10.7, 12.0)`,
     );
   }
-  // Baseline resolution (SPEC 6.3) and the profile name under `--coverage`
-  // (SPEC 7.4, 12.0) consult the workspace and the configuration: judged
-  // after acquisition and the hold and before the gate and refresh of 13.3
-  // (SPEC 13.5, 12.0; T13.5-8's baseline arm). In this git-less scope no
-  // ref can be read — the exit-2 unreadable-baseline case of 6.3, as
-  // `impact --base` is — and no coverage profile is configured.
-  const check = async () => {
+  // The checks judged ahead of the refresh (runMutating's `judge`): baseline
+  // resolution (SPEC 6.3) and the profile name under `--coverage` (SPEC 7.4,
+  // 12.0) consult the workspace and the configuration — judged after
+  // acquisition and the hold and before the gate and refresh of 13.3 (SPEC
+  // 13.5, 12.0; T13.5-8's baseline arm); in this git-less scope no ref can
+  // be read — the exit-2 unreadable-baseline case of 6.3, as `impact --base`
+  // is — and no coverage profile is configured — then the gate of 13.3: the
+  // graph loaded over the current sources, findings exit 1.
+  const judge = async (config) => {
     if (flags["--base"] !== undefined) {
       throw new UsageError(
         `cannot read the baseline ${flags["--base"]}: the workspace has no git repository (SPEC 6.3, 12.0)`,
@@ -2787,13 +2837,13 @@ async function reviewCreate(io, cwd, argv) {
         `unknown coverage profile ${flags["--coverage"]} (SPEC 12.0)`,
       );
     }
+    return { graph: await loadGraph(config.root, config.groups) };
   };
   return await runMutating(
     cwd,
     flags["--config"],
     flags["--test-hold"],
-    async (config) => {
-      const graph = await loadGraph(config.root, config.groups);
+    async (config, { graph }) => {
       // Create-time restriction (SPEC 10.1): a name matching an existing
       // session's name ignoring ASCII case is refused.
       const existing = await listSessionNames(config.root);
@@ -2853,8 +2903,18 @@ async function reviewCreate(io, cwd, argv) {
       ]);
       return 0;
     },
-    { check, refreshesGraphData: true },
+    { judge, refreshesGraphData: true },
   );
+}
+
+/**
+ * The judged checks of a mutating `review` subcommand with no argument check
+ * of its own ahead of the gate (runMutating's `judge`): exactly the gate of
+ * 13.3 — the graph loaded over the current sources, findings exit 1 (SPEC
+ * 13.3, 12.0); the subcommand's own validation (10.7) follows the refresh.
+ */
+async function judgeGate(config) {
+  return { graph: await loadGraph(config.root, config.groups) };
 }
 
 async function reviewResolve(io, cwd, argv) {
@@ -2874,8 +2934,7 @@ async function reviewResolve(io, cwd, argv) {
     cwd,
     flags["--config"],
     flags["--test-hold"],
-    async (config) => {
-      const graph = await loadGraph(config.root, config.groups);
+    async (config, { graph }) => {
       const session = await requireSession(config.root, name);
       const item = requireItem(session, itemId);
       const journal = await readJournal(config.root);
@@ -2897,7 +2956,7 @@ async function reviewResolve(io, cwd, argv) {
       ]);
       return 0;
     },
-    { refreshesGraphData: true },
+    { judge: judgeGate, refreshesGraphData: true },
   );
 }
 
@@ -2973,8 +3032,7 @@ async function reviewSplit(io, cwd, argv) {
     cwd,
     flags["--config"],
     flags["--test-hold"],
-    async (config) => {
-      const graph = await loadGraph(config.root, config.groups);
+    async (config, { graph }) => {
       const session = await requireSession(config.root, name);
       const original = requireItem(session, itemId);
       const journal = await readJournal(config.root);
@@ -3092,7 +3150,7 @@ async function reviewSplit(io, cwd, argv) {
       ]);
       return 0;
     },
-    { refreshesGraphData: true },
+    { judge: judgeGate, refreshesGraphData: true },
   );
 }
 
@@ -3288,6 +3346,13 @@ async function commandReview(io, cwd, argv) {
  *
  * - `noMutualExclusion` (VIOL-CORE-NOLOCK): mutating commands do not exclude
  *   one another; see runMutating.
+ * - `lateAcquisition` (VIOL-CORE-LATELOCK): workspace exclusivity is
+ *   acquired — and the hold file created — only once the argument checks of
+ *   12.0, baseline resolution (6.3), the gate of 13.3, and the
+ *   valid-workspace precondition of rename/move (6.4, 6.5) have all passed,
+ *   instead of before them; an invocation one of those checks refuses exits
+ *   at once, having acquired nothing and created no hold file; see
+ *   runMutating.
  * - `writesBeforeHold` (VIOL-CORE-EARLYWRITE): a mutating command performs
  *   its workspace modifications before creating the hold file; see
  *   runMutating.

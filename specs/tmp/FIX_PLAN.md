@@ -16,18 +16,6 @@ Ordering: Part A turns the three red self-tests green (certification manifest/ga
 
 ---
 
-## Part A — certification cluster (self-tests red at 8342cdc)
-
-## Task 3 — Add VIOL-CORE-LATELOCK, wire the manifest, bump the pinned violator count
-
-- **Source:** reviewer C gaps 1–2; VERIFY red 1–2.
-- **Requirement:** CERTIFICATIONS.md §VIOL-CORE-LATELOCK (lines 67–72: exclusivity acquired — and the hold file created — only after the 12.0 argument checks, 6.3 baseline resolution, the 13.3 gate, and the 6.4/6.5 precondition all pass; a refused invocation exits at once with no hold file, `--test-hold` or not; a second mutating command on a failing workspace exits 1 at the gate/precondition, never 2; expected failures exactly T13.5-8, every other in-scope test passes); §CONF-CORE in-scope list (line 13, now nine IDs incl. T13.5-8); §VIOL-CORE-NOLOCK certifies `T13.5-2, T13.5-8` (line 21); TEST-SPEC §17 C-1.
-- **Files:** new `test/fixtures/conf-core/bin-latelock.mjs` (mirror `bin-nolock.mjs`: a shim threading one switch, e.g. `lateAcquisition: true`); `test/fixtures/conf-core/product.mjs` (the switch moves the acquisition/hold closure past those checks — a single deviation); `test/self/certification-fixtures.ts` (append `violator("VIOL-CORE-LATELOCK", "conf-core/bin-latelock.mjs", ["T13.5-8"])` last in CONF-CORE's list — document order; add `"T13.5-8"` to CONF-CORE's `inScope` and to NOLOCK's `certifies`, verbatim order as the document); `test/self/certification-document.test.ts` (`EXPECTED_VIOLATORS = 18`).
-- **Verify:** `npm run test:self` fully green: all five `certification-document` tests; `certification.test.ts` shows CONF-CORE passing nine tests, LATELOCK failing exactly T13.5-8, NOLOCK failing exactly T13.5-2 and T13.5-8. Record in `AGENTS.md` only genuinely new run knowledge (e.g. how to drive one test against one fixture), nothing else.
-- **Depends on:** Tasks 1, 2.
-
----
-
 ## Part B — shared helpers (land before their consumers)
 
 ## Task 4 — Permission-removal staging helper with E-1 self-verification (harness error when ineffective)

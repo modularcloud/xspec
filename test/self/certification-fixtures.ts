@@ -104,6 +104,7 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       "T13.5-3",
       "T13.5-4",
       "T13.5-5",
+      "T13.5-8",
     ],
     [
       // VIOL-CORE-NOLOCK: mutating commands do not exclude one another — the
@@ -111,7 +112,10 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       // a second mutating command started while another runs or is held
       // proceeds normally instead of failing with the usage error of SPEC
       // 13.5/12.0.
-      violator("VIOL-CORE-NOLOCK", "conf-core/bin-nolock.mjs", ["T13.5-2"]),
+      violator("VIOL-CORE-NOLOCK", "conf-core/bin-nolock.mjs", [
+        "T13.5-2",
+        "T13.5-8",
+      ]),
       // VIOL-CORE-EARLYWRITE: a mutating command performs its workspace
       // modifications before creating the hold file — it acquires
       // exclusivity, completes the operation's writes (journal append
@@ -163,6 +167,16 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       violator("VIOL-CORE-PERSISTREADS", "conf-core/bin-persistreads.mjs", [
         "T10.4-5",
       ]),
+      // VIOL-CORE-LATELOCK: workspace exclusivity is acquired late — a
+      // mutating command acquires it, and creates its hold file, only once
+      // the argument checks of 12.0, baseline resolution (6.3), the gate of
+      // 13.3, and the valid-workspace precondition of rename/move (6.4, 6.5)
+      // have all passed, instead of before them; an invocation one of those
+      // checks refuses exits at once having acquired nothing and created no
+      // hold file, and a mutating command started while another is held on
+      // a workspace failing `build`'s validations exits 1 at the gate or
+      // precondition rather than 2 on exclusion.
+      violator("VIOL-CORE-LATELOCK", "conf-core/bin-latelock.mjs", ["T13.5-8"]),
     ],
   ),
   // CONF-VALID (§CONF-VALID): segment and tag validity — `build` with the
