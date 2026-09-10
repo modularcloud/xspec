@@ -262,67 +262,31 @@ syntax-class members and its configuration-precedence arm enumerated) while
 
 ---
 
-## Task 6 — Register T4.5-8 (same-scope collisions) in the harness (TEST-SPEC T4.5-8; SPEC 2.4, 4.5, 5.7, 14, 14.15, 14.5–14.7; Phase 9, harness scope)
-
-**Scope.** A Phase 9 harness task, the replacement for Task 4's collision
-arm (see its removal note above): `test/` only. The rules block's "Phase 10:
-never modify the test harness" line is the product plan's; this phase's own
-scope guard governs — never touch `src/`. Commit `sdg(phase-9): …`.
-
-**Requirement.** TEST-SPEC T4.5-8 (line 182 at 0c5a2b7), verbatim the
-authority; in outline: a code source importing `SPEC` from `./A.xspec` (with
-the module's `text` export bound too, so `text(SPEC.b)` is a spec-module
-call — the exact import spelling is the harness's, within 4) holds a marker
-`SPEC.a` and a call `text(SPEC.b)`, both targets existing in `specs/A.mdx`;
-one arm per colliding form at module scope — `const SPEC = 1`, `function
-SPEC() {}`, `class SPEC {}`, `enum SPEC {}`, `namespace SPEC { export const
-v = 1 }`: `build` and `check` report the condition-15 collision beside
-condition 7 for each chain (unresolved), exit 1; `query edges` reports no
-edge from the file; `occurrences` reports no record for its spellings (5.7,
-T5.7-4); and the condition-15 finding locates every colliding declaration —
-the import by its own characters and the non-import by the construct binding
-the name (14, T14-11): the variable declarator's own characters (`SPEC = 1`,
-the `const` statement excluded) and the function, class, enum, or namespace
-declaration's own characters, an `export` prefix excluded. Condition-7
-ranges are 14's: the marker's bare chain and the `text(...)` call, callee
-through closing parenthesis, terminators excluded; findings in 12.7 order
-(ordinal, then location). Type-level controls in the same file (2.4, 4.5:
-colliding with nothing) — `interface SPEC {}`, `type SPEC = number`,
-`namespace SPEC { export type T = number }` — each leave the import rooting
-the chain: edges recorded, no finding, exit 0 (the inner-scope shadowing
-arm is T4.5-4's, already registered). The spec-source case: a file holding
-`export const BASE = 1` beside `import BASE from "./BASE.xspec"` reports
-14.16 for the export statement, 14.15 for the collision (locating the import
-and the declarator), and 14.5/14.6 for the `d` and `text(...)` spellings
-rooted at `BASE`, no edge and no occurrence recorded for them.
-
-**Location.** `test/suite/registry/section-4.5.ts`: header "SUITE-15:
-T4.5-1 … T4.5-7" (to read … T4.5-8); `section45Tests` (~1257) listing
-`T4_5_1` … `T4_5_7`; helpers `queryEdgesFrom` (~158), `queryEdgesOfKind`
-(~177), `stageOffendingStatement` (~231); the T4.5-4 arms (~802 on) and
-`assertT454CalleeSide` (~886) as the template for asserting findings and
-`occurrences --file` records on a failing workspace (SPEC 11.2). The suite
-file `test/suite/section-4.5.test.ts` (`declareProductTests(section45Tests)`)
-needs no change. Certification: CERTIFICATIONS.md's Exclusions (line 188)
-place T4.5-8 among the Section 4 consumer-side tests outside fixture
-certification, its two-sidedness the paired condition-15/condition-7
-findings and the type-level controls' recorded edges — no fixture or
-manifest work; `test/self/certification-document.test.ts` checks only
-in-scope tests named by CERTIFICATIONS.md (~312), which T4.5-8 is not.
-
-**Expected result against the product.** T4.5-8 must fail against the build
-of 0c5a2b7 as a diagnosed assertion failure at the missing condition-7
-findings (the product masks chains rooted at a "poisoned" binding — Task 4's
-removal note — while its condition-15 finding already locates every
-colliding declaration), and the type-level control arms must pass. Red-check
-per `AGENTS.md` ("Red-checking a strengthened product test") that it fails
-for exactly that reason, not a staging error.
-
-**Verification.** `npm run build`; `npx vitest run --config
-test/vitest.config.ts --project suite test/suite/section-4.5.test.ts
---reporter=verbose` (T4.5-1 … T4.5-7 stay green; T4.5-8 red as diagnosed);
-`npm run test:self` (self-tests and certification stay green); `npm run
-typecheck`; `npm run format`.
+**Task 6 completion (2026-09-10, the next Phase 9 iteration).** T4.5-8 is
+registered (`test/suite/registry/section-4.5.ts`, `T4_5_8`; SUITE-15 now
+T4.5-1 … T4.5-8) and fails against the build of b4c4661 as a diagnosed product
+failure — one correcting Task 4's pointer above: the product reports NO
+condition-15 collision for a non-import declaration of the module scope
+(`src/core/code-analysis.ts` 606–645 pairs import-bound names only —
+`bound` is filled by the import scanners alone, and the rule skips any name
+with fewer than two import statements), so beside `const SPEC = 1`,
+`function SPEC() {}`, `class SPEC {}`, `enum SPEC {}`, and `namespace SPEC {
+export const v = 1 }` alike `build` exits 0 with no finding, resolving
+`SPEC.a` and `text(SPEC.b)` through the import (both edges and both
+occurrences recorded), and the spec-source case (`export const BASE = 1`
+beside `import BASE from "./BASE.xspec"`) reports the 14.16 alone, resolving
+the `d` and `text(...)` spellings likewise — hand-staged per `AGENTS.md`,
+every arm parsing (no 14.20) and the occurrence ranges matching the
+harness's expected finding ranges byte for byte; the three type-level
+controls (`interface SPEC {}`, `type SPEC = number`, `namespace SPEC { export
+type T = number }`) pass (exit 0, both edges). The Phase 10 re-plan's task is
+thus the collision rule of 2.4 itself for non-import declarations — a
+module-scope value-level declaration (variable, function, class, enum, or
+value-binding namespace; in a spec source, one an export statement holds)
+sharing an import binding's identifier: the 14.15 locating the import and
+the construct binding the name (the declarator, the `const` statement
+excluded), every chain rooted at it unresolved (14.5–14.7) with no edge and
+no occurrence — beside the masking of Task 4's note.
 
 ## Task 7 — Register T6.3-5 (repository and path of the baseline) in the harness (TEST-SPEC T6.3-5; SPEC 6.3, 7, 10.7, 12.0; Phase 9, harness scope)
 

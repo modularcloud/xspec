@@ -1,4 +1,4 @@
-// TEST-SPEC §4.5 (dependency markers) — SUITE-15: T4.5-1 … T4.5-7.
+// TEST-SPEC §4.5 (dependency markers) — SUITE-15: T4.5-1 … T4.5-8.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -50,6 +50,15 @@
 //   records no edge records no occurrence (5.7), so the exact record set
 //   (the control's `embeds` record alone, its range, source, and target
 //   pinned) is simultaneously the no-edge assertion for the shadowed call.
+// - T4.5-8 "`query edges` reports no edge from the file": every colliding
+//   arm's workspace fails `build`, so `query` reports exactly the build
+//   findings and exits 1 without answering (SPEC 13.3) — the observation is
+//   that findings-only document (the form-exact decode admits no `edges`
+//   member beside it) together with `occurrences --file`, which answers on
+//   the failing workspace (11.2) and lists no record for the spellings (5.7).
+//   Reference-spelling findings (14.5–14.7) are asserted byte-exact at the
+//   span 14 fixes — terminators and delimiters excluded — while the
+//   declarations a 14.15 or 14.16 locates use the end-widened window below.
 // - Location assertions: every offending statement is staged at a known byte
 //   offset in a pure-ASCII `src/app.ts`, so string indices are byte offsets
 //   and each finding must fall within the offending statement's own byte
@@ -59,6 +68,7 @@
 import type {
   CoverageProfileReport,
   CoverageReport,
+  Finding,
   GraphEdge,
   ImpactedCodeEntry,
   OccurrenceRecord,
@@ -93,6 +103,7 @@ import {
   assertConditionCounts,
   assertEdgeSetEqual,
   assertFindingLocated,
+  assertFindingLocatesExactly,
   assertSameJson,
   buildFindings,
   buildOk,
@@ -1253,6 +1264,575 @@ const T4_5_7 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T4.5-8 — same-scope collisions: an identifier the import and a value-level
+// declaration of the module scope both bind roots no resolving chain
+// ---------------------------------------------------------------------------
+
+// Sibling targets `a` and `b`: both staged chains (`SPEC.a`, `text(SPEC.b)`)
+// resolve if the import roots them, so the same-scope declaration is each
+// arm's sole defect (SPEC 2.4, 4.5) — a product reporting the chains as
+// unresolved for any other reason has nothing else to point at.
+const T4_5_8_SPEC_FILES = {
+  "specs/A.mdx":
+    '<S id="a">\nAlpha behavior.\n</S>\n\n<S id="b">\nBeta behavior.\n</S>\n',
+} as const;
+
+// The import binds both the default export and `text`, so `text(SPEC.b)` is
+// a spec module `text` call (4.3) whose argument chain is rooted at `SPEC`.
+const T4_5_8_IMPORT = 'import SPEC, { text } from "../specs/A.xspec";';
+const T4_5_8_MARKER_CHAIN = "SPEC.a";
+const T4_5_8_TEXT_CALL = "text(SPEC.b)";
+
+/** One module-scope declaration staged beside the import (SPEC 2.4, 4.5). */
+interface SameScopeDeclarationArm {
+  /** Which declaration form this is (failure diagnostics). */
+  readonly name: string;
+  /** The declaration's line of `src/app.ts`, exactly (pure ASCII). */
+  readonly line: string;
+  /**
+   * For a colliding form: the construct binding the name — the characters
+   * a condition-15 finding locates (SPEC 14, 1.7) — exactly as it occurs
+   * within `line`. A type-level control collides with nothing and locates
+   * nothing.
+   */
+  readonly construct: string;
+}
+
+// The colliding forms: a variable, function, class, or enum declaration, or
+// a namespace binding a value (SPEC 2.4). The located construct is the
+// variable DECLARATOR (`SPEC = 1`, the `const` statement excluded) or the
+// declaration's own characters (14, 1.7); none carries an `export` prefix,
+// so the exclusion of one (14) is not exercised here.
+const T4_5_8_COLLIDING_ARMS: readonly SameScopeDeclarationArm[] = [
+  {
+    name: "a variable declaration `const SPEC = 1` (SPEC 2.4)",
+    line: "const SPEC = 1;",
+    construct: "SPEC = 1",
+  },
+  {
+    name: "a function declaration `function SPEC() {}` (SPEC 2.4)",
+    line: "function SPEC() {}",
+    construct: "function SPEC() {}",
+  },
+  {
+    name: "a class declaration `class SPEC {}` (SPEC 2.4)",
+    line: "class SPEC {}",
+    construct: "class SPEC {}",
+  },
+  {
+    name: "an enum declaration `enum SPEC {}` (SPEC 2.4)",
+    line: "enum SPEC {}",
+    construct: "enum SPEC {}",
+  },
+  {
+    name: "a namespace binding a value `namespace SPEC { export const v = 1 }` (SPEC 2.4)",
+    line: "namespace SPEC { export const v = 1 }",
+    construct: "namespace SPEC { export const v = 1 }",
+  },
+];
+
+// The type-level controls: an interface, a type alias, and a namespace
+// binding no value collide with nothing — the import roots the chains, the
+// edges are recorded, no finding, exit 0 (SPEC 2.4, 4.5). An inner-scope
+// `const SPEC = 1` shadows instead — T4.5-4's business.
+const T4_5_8_CONTROL_ARMS: readonly SameScopeDeclarationArm[] = [
+  {
+    name: "an interface `interface SPEC {}` (type-level, SPEC 2.4)",
+    line: "interface SPEC {}",
+    construct: "",
+  },
+  {
+    name: "a type alias `type SPEC = number` (type-level, SPEC 2.4)",
+    line: "type SPEC = number;",
+    construct: "",
+  },
+  {
+    name: "a namespace binding no value `namespace SPEC { export type T = number }` (type-level, SPEC 2.4)",
+    line: "namespace SPEC { export type T = number }",
+    construct: "",
+  },
+];
+
+/** A staged `src/app.ts` for one arm and its constructs' byte positions. */
+interface StagedSameScopeArm {
+  /** The whole file: import, blank, declaration, blank, marker, `text` call. */
+  readonly source: string;
+  /** The import declaration's end-widened byte window (support.ts byteWindow). */
+  readonly importWindow: { readonly start: number; readonly end: number };
+  /** The colliding construct's end-widened byte window (`""` construct: unused). */
+  readonly constructWindow: { readonly start: number; readonly end: number };
+  /** The marker's bare chain, exactly (SPEC 14: terminator excluded). */
+  readonly markerRange: { readonly start: number; readonly end: number };
+  /** The `text(...)` call, callee through closing parenthesis, exactly (14). */
+  readonly textCallRange: { readonly start: number; readonly end: number };
+}
+
+/**
+ * Lay out an arm's `src/app.ts` — the import, the declaration, then the
+ * marker statement and the `text(...)` call statement, each on its own line
+ * — and fix every construct's byte position from the exact bytes. The file
+ * is pure ASCII, so string indices are byte offsets. A construct missing
+ * from its line is a harness defect, never a product failure.
+ */
+function stageSameScopeArm(arm: SameScopeDeclarationArm): StagedSameScopeArm {
+  const constructAt = arm.line.indexOf(arm.construct);
+  if (constructAt === -1) {
+    throw new Error(
+      `T4.5-8 fixture broke: the located construct must occur within the ` +
+        `declaration line (${arm.name}) — fix the arm table in section-4.5.ts`,
+    );
+  }
+  const declarationPrefix = `${T4_5_8_IMPORT}\n\n`;
+  const markerPrefix = `${declarationPrefix}${arm.line}\n\n`;
+  const textCallPrefix = `${markerPrefix}${T4_5_8_MARKER_CHAIN};\n`;
+  const source = `${textCallPrefix}${T4_5_8_TEXT_CALL};\n`;
+  const exact = (
+    prefix: string,
+    construct: string,
+  ): { start: number; end: number } => {
+    const start = Buffer.byteLength(prefix, "utf8");
+    return { start, end: start + Buffer.byteLength(construct, "utf8") };
+  };
+  return {
+    source,
+    importWindow: byteWindow("", T4_5_8_IMPORT),
+    constructWindow: byteWindow(
+      declarationPrefix + arm.line.slice(0, constructAt),
+      arm.construct,
+    ),
+    markerRange: exact(markerPrefix, T4_5_8_MARKER_CHAIN),
+    textCallRange: exact(textCallPrefix, T4_5_8_TEXT_CALL),
+  };
+}
+
+/** A finding's locations as JSON-safe `[file, start, end]` tuples (12.7 order). */
+function locationTuples(finding: Finding): readonly (readonly unknown[])[] {
+  return finding.locations.map((location) => [
+    location.file,
+    location.range.start,
+    location.range.end,
+  ]);
+}
+
+/**
+ * Assert a reference-spelling finding locates exactly one range — the span
+ * its occurrence would occupy (SPEC 14, 5.7), byte-exact — in `file`, and
+ * concerns no path (12.7).
+ */
+function assertSpellingFinding(
+  finding: Finding,
+  file: string,
+  range: { readonly start: number; readonly end: number },
+  context: string,
+): void {
+  assertFindingLocatesExactly(finding, [{ file, window: range }], context);
+  assertSameJson(
+    locationTuples(finding),
+    [[file, range.start, range.end]],
+    `${context}: the one location is byte-exact — the spelling's own span, ` +
+      `terminators and delimiters excluded (SPEC 14, 5.7, 1.7)`,
+  );
+}
+
+/**
+ * Assert the findings a colliding arm's workspace reports, in 12.7 order:
+ * condition 7 for the marker chain, condition 7 for the `text(...)` call
+ * (each byte-exact at the span its occurrence would occupy, SPEC 14), then
+ * the one condition-15 collision locating the import declaration and the
+ * colliding construct, both within their own byte windows and nothing
+ * else (14: every colliding declaration, no representative chosen).
+ */
+function assertSameScopeCollisionFindings(
+  findings: readonly Finding[],
+  staged: StagedSameScopeArm,
+  context: string,
+): void {
+  assertSameJson(
+    findings.map((finding) => finding.condition),
+    ["14.7", "14.7", "14.15"],
+    `${context}: exactly the two unresolved chains (condition 7, one per ` +
+      `spelling) beside the one collision (condition 15), in 12.7 order — ` +
+      `numbered conditions in numeric order, then by location (SPEC 2.4, ` +
+      `4.5, 14.7, 14.15, 12.7)`,
+  );
+  assertSpellingFinding(
+    findings[0]!,
+    "src/app.ts",
+    staged.markerRange,
+    `${context}: the marker's 14.7 locates the bare reference chain, ` +
+      `exclusive of the statement terminator (SPEC 14, 5.7)`,
+  );
+  assertSpellingFinding(
+    findings[1]!,
+    "src/app.ts",
+    staged.textCallRange,
+    `${context}: the \`text(...)\` call's 14.7 locates the call expression, ` +
+      `callee through closing parenthesis (SPEC 14, 5.7)`,
+  );
+  assertFindingLocatesExactly(
+    findings[2]!,
+    [
+      { file: "src/app.ts", window: staged.importWindow },
+      { file: "src/app.ts", window: staged.constructWindow },
+    ],
+    `${context}: the 14.15 locates every colliding declaration — the import ` +
+      `by its own characters and the non-import by the construct binding ` +
+      `the name, a declarator by its own characters with the \`const\` ` +
+      `statement excluded (SPEC 14, 1.7, 2.4)`,
+  );
+}
+
+/**
+ * One colliding arm: `build` and `check` report the collision beside
+ * condition 7 for each chain, exit 1; `query edges --from src/app.ts` on the
+ * failing workspace reports exactly those findings and exits 1 without
+ * answering — the findings-only document, no edge (SPEC 13.3, 12.7); and
+ * `occurrences --file src/app.ts`, answering on the failing workspace
+ * (11.2), carries them and lists no record — a chain rooted at the collided
+ * identifier records no edge and no occurrence (5.7).
+ */
+async function assertSameScopeCollisionArm(
+  product: ProductBinding,
+  arm: SameScopeDeclarationArm,
+): Promise<void> {
+  const staged = stageSameScopeArm(arm);
+  await withWorkspace(
+    SPEC_AND_CODE_CONFIG,
+    { ...T4_5_8_SPEC_FILES, "src/app.ts": staged.source },
+    async (workspace) => {
+      const buildContext = `T4.5-8 \`build --json\` beside ${arm.name}`;
+      assertSameScopeCollisionFindings(
+        await buildFindings(product, workspace, buildContext),
+        staged,
+        buildContext,
+      );
+
+      // `check`: the same validation, exit 1 (SPEC 12.2). Staleness of the
+      // never-built workspace's derived files is 14.10's own business —
+      // set aside, the findings are exactly the collision arm's.
+      const checkContext = `T4.5-8 \`check --json\` beside ${arm.name}`;
+      const checkResult = await expectExit(
+        product,
+        workspace,
+        ["check", "--json"],
+        1,
+        `${checkContext} — \`check\` performs all build validations and ` +
+          `exits 1 on the findings (SPEC 12.2, 2.4, 4.5)`,
+      );
+      assertSameScopeCollisionFindings(
+        decodeFindingsReport(
+          parseJsonStdout(checkResult, checkContext),
+          checkContext,
+        ).findings.filter((finding) => finding.condition !== "14.10"),
+        staged,
+        checkContext,
+      );
+
+      // `query edges --from src/app.ts`: the workspace fails `build`'s
+      // validations, so the read reports exactly those findings and exits 1
+      // without answering (SPEC 13.3) — the findings-only document, which
+      // the form-exact decode enforces: no `edges` member beside it, so no
+      // edge from the file is reported (SPEC 2.4, 5.7, 12.7).
+      const queryContext = `T4.5-8 \`query edges --from src/app.ts\` beside ${arm.name}`;
+      const queryResult = await expectExit(
+        product,
+        workspace,
+        ["query", "edges", "--from", "src/app.ts"],
+        1,
+        `${queryContext} — a failing workspace's read reports the findings ` +
+          `a \`build\` would now report and exits 1 without answering ` +
+          `(SPEC 13.3, 12.0)`,
+      );
+      assertSameScopeCollisionFindings(
+        decodeFindingsReport(
+          parseJsonStdout(queryResult, queryContext),
+          `${queryContext} — a refusing read's report is the findings-only ` +
+            `document {"findings": […]}: no edge answered (SPEC 12.7, 13.3)`,
+        ).findings,
+        staged,
+        queryContext,
+      );
+
+      // `occurrences --file src/app.ts`, answering on the failing workspace
+      // (SPEC 11.2): the code file's findings accompany (exit 1, the full
+      // answer still emitted), and the record set is empty — the two chains
+      // rooted at the collided identifier record no edge and no occurrence
+      // (5.7); their positions reach consumers through the findings alone.
+      const occContext = `T4.5-8 \`occurrences --file src/app.ts\` beside ${arm.name}`;
+      const occResult = await expectExit(
+        product,
+        workspace,
+        ["occurrences", "--file", "src/app.ts"],
+        1,
+        `${occContext} — the answer carries the domain's findings, so exit ` +
+          `1 with the full answer document (SPEC 11.2, 11.3)`,
+      );
+      const report = decodeOccurrencesReport(
+        parseJsonStdout(
+          occResult,
+          `${occContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        occContext,
+      );
+      assertSameScopeCollisionFindings(
+        report.findings,
+        staged,
+        `${occContext}: the code file's findings accompany the answer ` +
+          `(SPEC 11.2, 11.3)`,
+      );
+      assertSameJson(
+        report.occurrences.map(occurrenceTuple),
+        [],
+        `${occContext}: no record for the marker or the \`text(...)\` call — ` +
+          `a chain rooted at an identifier the import and a same-scope ` +
+          `value-level declaration both bind records no edge and no ` +
+          `occurrence, its position reported by its finding's range alone ` +
+          `(SPEC 2.4, 5.7, 11.2)`,
+      );
+    },
+  );
+}
+
+/**
+ * One type-level control arm: the declaration collides with nothing, so the
+ * import roots both chains — `build` and `check` exit 0 (no finding), and
+ * the file's complete outgoing edge set is the marker's `references` edge
+ * and the call's `embeds` edge (SPEC 2.4, 4.5, 4.3).
+ */
+async function assertSameScopeControlArm(
+  product: ProductBinding,
+  arm: SameScopeDeclarationArm,
+): Promise<void> {
+  const staged = stageSameScopeArm(arm);
+  await withWorkspace(
+    SPEC_AND_CODE_CONFIG,
+    { ...T4_5_8_SPEC_FILES, "src/app.ts": staged.source },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `T4.5-8 \`build\` beside ${arm.name} — a type-level declaration of ` +
+          `the module scope collides with nothing (SPEC 2.4, 4.5)`,
+      );
+      await expectExit(
+        product,
+        workspace,
+        ["check"],
+        0,
+        `T4.5-8 \`check\` beside ${arm.name} — no finding (SPEC 2.4, 4.5)`,
+      );
+      assertEdgeSetEqual(
+        await queryEdgesFrom(product, workspace, "src/app.ts", "T4.5-8"),
+        [
+          { from: "src/app.ts", to: "specs/A.mdx#a", kind: "references" },
+          { from: "src/app.ts", to: "specs/A.mdx#b", kind: "embeds" },
+        ],
+        `T4.5-8 beside ${arm.name}: the import roots both chains — the ` +
+          `marker's \`references\` edge and the call's \`embeds\` edge are ` +
+          `the file's complete outgoing edge set (SPEC 2.4, 4.5, 4.3, 4.6)`,
+      );
+    },
+  );
+}
+
+// The spec-source case (SPEC 2.4, 2.1, 2.7): `specs/COL.mdx` holds an
+// export statement declaring `BASE` beside the import binding `BASE`. The
+// export statement is itself invalid (14.16), the collision is 14.15
+// (locating the import and the declarator), and the `d` and `text(...)`
+// spellings rooted at `BASE` are unresolved (14.5, 14.6) — no edge, no
+// occurrence — though both targets exist in `specs/BASE.mdx`.
+const T4_5_8_BASE_FILES = {
+  "specs/BASE.mdx":
+    '<S id="a">\nAlpha behavior.\n</S>\n\n<S id="b">\nBeta behavior.\n</S>\n',
+} as const;
+const T4_5_8_MDX_IMPORT = 'import BASE from "./BASE.xspec"';
+const T4_5_8_MDX_EXPORT = "export const BASE = 1";
+const T4_5_8_MDX_DECLARATOR = "BASE = 1";
+const T4_5_8_MDX_D_REFERENCE = "BASE.a";
+const T4_5_8_MDX_EMBEDDING = "{text(BASE.b)}";
+const T4_5_8_MDX_SECTION_OPEN = `<S id="c" d={${T4_5_8_MDX_D_REFERENCE}}>`;
+const T4_5_8_MDX_BODY_PREFIX = "Gamma behavior ";
+const T4_5_8_MDX_SOURCE =
+  `${T4_5_8_MDX_IMPORT}\n${T4_5_8_MDX_EXPORT}\n\n` +
+  `${T4_5_8_MDX_SECTION_OPEN}\n` +
+  `${T4_5_8_MDX_BODY_PREFIX}${T4_5_8_MDX_EMBEDDING}\n</S>\n`;
+
+/**
+ * The spec-source case's findings in 12.7 order: 14.5 at the `d` value's
+ * expression (the braces excluded), 14.6 at the embedding's full braced
+ * container, 14.15 locating the import declaration and the declarator
+ * `BASE = 1`, and 14.16 at the export statement whole (SPEC 14, 2.4, 2.7).
+ */
+function assertSpecSourceCollisionFindings(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  const file = "specs/COL.mdx";
+  const exportPrefix = `${T4_5_8_MDX_IMPORT}\n`;
+  const sectionPrefix = `${exportPrefix}${T4_5_8_MDX_EXPORT}\n\n`;
+  const dPrefix = `${sectionPrefix}<S id="c" d={`;
+  const embeddingPrefix = `${sectionPrefix}${T4_5_8_MDX_SECTION_OPEN}\n${T4_5_8_MDX_BODY_PREFIX}`;
+  const exact = (
+    prefix: string,
+    construct: string,
+  ): { start: number; end: number } => {
+    const start = Buffer.byteLength(prefix, "utf8");
+    return { start, end: start + Buffer.byteLength(construct, "utf8") };
+  };
+  assertSameJson(
+    findings.map((finding) => finding.condition),
+    ["14.5", "14.6", "14.15", "14.16"],
+    `${context}: exactly the unresolved \`d\` reference (14.5), the ` +
+      `unresolved embedding (14.6), the collision (14.15), and the export ` +
+      `statement's invalidity (14.16), in 12.7 order (SPEC 2.4, 2.1, 2.7, 14)`,
+  );
+  assertSpellingFinding(
+    findings[0]!,
+    file,
+    exact(dPrefix, T4_5_8_MDX_D_REFERENCE),
+    `${context}: the 14.5 locates the \`d\` value's expression, the braces ` +
+      `excluded (SPEC 14, 5.7)`,
+  );
+  assertSpellingFinding(
+    findings[1]!,
+    file,
+    exact(embeddingPrefix, T4_5_8_MDX_EMBEDDING),
+    `${context}: the 14.6 locates the embedding's full braced container, ` +
+      `opening brace through closing brace (SPEC 14, 5.7)`,
+  );
+  assertFindingLocatesExactly(
+    findings[2]!,
+    [
+      { file, window: byteWindow("", T4_5_8_MDX_IMPORT) },
+      {
+        file,
+        window: byteWindow(
+          `${exportPrefix}export const `,
+          T4_5_8_MDX_DECLARATOR,
+        ),
+      },
+    ],
+    `${context}: the 14.15 locates the import by its own characters and ` +
+      `the declarator the export statement holds by its own characters ` +
+      `(SPEC 14, 1.7, 2.4, 2.1)`,
+  );
+  assertFindingLocatesExactly(
+    findings[3]!,
+    [{ file, window: byteWindow(exportPrefix, T4_5_8_MDX_EXPORT) }],
+    `${context}: the 14.16 locates the export statement whole (SPEC 14, 2.7)`,
+  );
+}
+
+/**
+ * The spec-source case: `build` and `check` report the four findings, exit
+ * 1; the gated `query edges --from specs/COL.mdx#c` reports them without
+ * answering (SPEC 13.3); and `occurrences --file specs/COL.mdx` carries
+ * them and lists no record — no edge and no occurrence for the spellings
+ * rooted at the collided identifier (5.7, 11.2).
+ */
+async function assertSpecSourceCollision(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace(
+    SPEC_AND_CODE_CONFIG,
+    { ...T4_5_8_BASE_FILES, "specs/COL.mdx": T4_5_8_MDX_SOURCE },
+    async (workspace) => {
+      const buildContext =
+        "T4.5-8 `build --json` over the spec source declaring its import binding";
+      assertSpecSourceCollisionFindings(
+        await buildFindings(product, workspace, buildContext),
+        buildContext,
+      );
+
+      const checkContext =
+        "T4.5-8 `check --json` over the spec source declaring its import binding";
+      const checkResult = await expectExit(
+        product,
+        workspace,
+        ["check", "--json"],
+        1,
+        `${checkContext} — \`check\` performs all build validations and ` +
+          `exits 1 on the findings (SPEC 12.2, 2.4)`,
+      );
+      assertSpecSourceCollisionFindings(
+        decodeFindingsReport(
+          parseJsonStdout(checkResult, checkContext),
+          checkContext,
+        ).findings.filter((finding) => finding.condition !== "14.10"),
+        checkContext,
+      );
+
+      const queryContext =
+        "T4.5-8 `query edges --from specs/COL.mdx#c` on the failing workspace";
+      const queryResult = await expectExit(
+        product,
+        workspace,
+        ["query", "edges", "--from", "specs/COL.mdx#c"],
+        1,
+        `${queryContext} — a failing workspace's read reports the findings ` +
+          `a \`build\` would now report and exits 1 without answering ` +
+          `(SPEC 13.3, 12.0)`,
+      );
+      assertSpecSourceCollisionFindings(
+        decodeFindingsReport(
+          parseJsonStdout(queryResult, queryContext),
+          `${queryContext} — a refusing read's report is the findings-only ` +
+            `document {"findings": […]}: no edge answered (SPEC 12.7, 13.3)`,
+        ).findings,
+        queryContext,
+      );
+
+      const occContext =
+        "T4.5-8 `occurrences --file specs/COL.mdx` on the failing workspace";
+      const occResult = await expectExit(
+        product,
+        workspace,
+        ["occurrences", "--file", "specs/COL.mdx"],
+        1,
+        `${occContext} — the answer carries the domain's findings, so exit ` +
+          `1 with the full answer document (SPEC 11.2, 11.3)`,
+      );
+      const report = decodeOccurrencesReport(
+        parseJsonStdout(
+          occResult,
+          `${occContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        occContext,
+      );
+      assertSpecSourceCollisionFindings(
+        report.findings,
+        `${occContext}: the spec source's findings accompany the answer ` +
+          `(SPEC 11.2, 11.3)`,
+      );
+      assertSameJson(
+        report.occurrences.map(occurrenceTuple),
+        [],
+        `${occContext}: no record for the \`d\` reference or the embedding ` +
+          `rooted at the collided identifier — no edge, no occurrence, each ` +
+          `positioned by its finding's range alone (SPEC 2.4, 5.7, 11.2)`,
+      );
+    },
+  );
+}
+
+const T4_5_8 = defineProductTest({
+  id: "T4.5-8",
+  title:
+    "same-scope collisions: an identifier the spec module import binds that a module-scope `const`, `function`, `class`, `enum`, or value-binding `namespace` declaration also binds at value level roots no resolving chain — `build` and `check` report the condition-15 collision, locating the import by its own characters and the non-import by the construct binding the name (the declarator `SPEC = 1`, the `const` statement excluded), beside condition 7 for the marker `SPEC.a` and the call `text(SPEC.b)`, each at the span its occurrence would occupy, exit 1; the gated `query edges` reports no edge from the file and `occurrences` no record for the spellings; type-level `interface`, `type`, and value-free `namespace` declarations collide with nothing — edges recorded, no finding, exit 0; and a spec source holding `export const BASE = 1` beside `import BASE` reports 14.16 for the export statement, 14.15 locating the import and the declarator, and 14.5/14.6 for the `d` and `text(...)` spellings rooted at `BASE`, no edge and no occurrence recorded for them (SPEC 2.4, 4.5, 2.1, 2.7, 5.7, 11.2, 12.7, 13.3, 14, 14.15)",
+  run: async (product) => {
+    for (const arm of T4_5_8_COLLIDING_ARMS) {
+      await assertSameScopeCollisionArm(product, arm);
+    }
+    for (const arm of T4_5_8_CONTROL_ARMS) {
+      await assertSameScopeControlArm(product, arm);
+    }
+    await assertSpecSourceCollision(product);
+  },
+});
+
 /** TEST-SPEC §4.5, in canonical ID order (SUITE-15). */
 export const section45Tests: readonly ProductTestEntry[] = [
   T4_5_1,
@@ -1262,4 +1842,5 @@ export const section45Tests: readonly ProductTestEntry[] = [
   T4_5_5,
   T4_5_6,
   T4_5_7,
+  T4_5_8,
 ];
