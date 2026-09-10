@@ -35,6 +35,38 @@ binding of its after it (a type-level spelling is no occurrence), which pins
 the `text`-binding case the task left "conservative". Its diagnosis and code
 pointers remain in git history at 72ad038.
 
+**Task 2 removal (2026-09-10, the next Phase 9 iteration).** Task 2 (an
+added code-file import binding a fresh identifier colliding with no
+module-scope binding, T6.5-9) was removed on this date for this phase's scope
+alone: it is not implemented — the code-file `taken` set in
+`src/core/move.ts` (the section-move code loop, "Code files: chain retargets
+plus added imports") is still seeded from `analysis.imports`' default and
+`text` bindings only, and T6.5-9 run alone against the build of 090c72a
+(`npx vitest run --config test/vitest.config.ts --project suite
+test/suite/section-6.5.test.ts -t "T6.5-9"`) fails at the real move exactly
+as diagnosed ("a valid move over the workspace the premise `build` accepted
+succeeds (SPEC 6.5); a finding located in src/app.ts") — but, unlike Task 1,
+nothing in it is stale: the freshness clause it quotes persists verbatim in
+the rewritten 6.5 ("An added import binds fresh identifiers colliding with no
+binding already in the file (2.1, 4) … the identifier choice and the
+insertion offset are implementation latitude, exercised deterministically"),
+the T6.5-9 paragraph of TEST-SPEC.md is byte-identical to 72ad038, and
+the revisit's edits to T6.5-8 all concern the added declaration's specifier
+(a 2.1-form specifier designating the module, its spelling and quote style
+the product's; the harness asserts form and designation, never bytes) — what
+`test/helpers/import-insertion.ts` already asserts (its `DECLARATION` pattern
+accepts either quote kind and an optional semicolon), so no harness task
+follows. Its requirement, diagnosis, and code pointers —
+in git history at 090c72a — remain valid inputs to the Phase 10 re-plan, and
+Task 3's references to "Task 2's staging" point at that history. One pointer
+for that re-plan, not verified here: a clause the revisit added to 6.5 (absent
+at 72ad038) requires a rewritten reference spelled through a binding the file
+already holds to be one "no local declaration shadows at the occurrence
+(4.5)", so the
+existing-binding branch of the same loop (`analysis.imports.find(...)`, taken
+before the fresh-name branch) needs the module-scope knowledge Task 2's step
+1 collected as much as the fresh-name branch does.
+
 **Rules for every task (read once per spawn):**
 
 - Phase 10: never modify the test harness (`test/`). Product code (`src/`)
@@ -69,74 +101,6 @@ pointers remain in git history at 72ad038.
   below — the relevant fixtures were checked while planning (noted per task).
 
 ---
-
-## Task 2 — An added code-file import binds a fresh identifier colliding with no module-scope binding (SPEC 6.5, 2.1, 4, 4.5, 14.18; T6.5-9)
-
-**Requirement.** SPEC 6.5: "An added import binds fresh identifiers colliding
-with no binding already in the file (2.1, 4) … the identifier choice … [is]
-implementation latitude, exercised deterministically." A collision with a
-local `const`/`function`/`class` is TS2440, with an import binding TS2300; a
-collision with a `type` alias is accepted silently by tooling but still a
-binding already in the file. After the move the pre-existing local uses of
-the colliding name must not read as value-level uses of a spec binding
-(14.18).
-
-**Observed (reviewer A, gap 2; VERIFY).** With `src/app.ts` holding
-`import ORG from "../specs/Origin.xspec"`, `const Target = 1; void Target;`
-and a marker `ORG.org.mv`, `move specs/Origin.mdx#org.mv
-specs/Target.mdx#mv` adds `import Target from "../specs/Target.xspec";`, then
-the real move exits 1 with `src/app.ts:…: unsupported-node-usage` (the local
-`Target` use read as a spec-binding value use) and modifies nothing, where
-the valid move must succeed (exit 0). T6.5-9 (`section-6.5.ts`, `id:
-"T6.5-9"` at ~line 4713) re-stages T6.5-8's TS arm with a receiving code file
-declaring at module scope — a `const`, a `function`, a `class`, a `type`
-alias, and a non-spec import binding, each used trivially — every identifier
-a product would plausibly derive: the target file's basename as written,
-lower- and upper-cased, `Spec`- and `SPEC`-suffixed (`Target`, `target`,
-`TARGET`, `TargetSpec`, `TargetSPEC`), and the origin binding's name with a
-digit and an underscore appended (`ORG1`, `ORG2`, `ORG_`). It then requires:
-the rewritten file compiles clean through standard tooling; the fresh root
-read off the rewritten marker is none of the pre-empted names nor the
-retained origin binding; `query edges` reports the moved marker's edge to the
-new identity and the unmoved marker's through the retained origin binding;
-`check` clean.
-
-**Location.** `src/core/move.ts` lines ~1389–1401: the code-file `taken` set
-holds only spec-module default bindings and `text` bindings from
-`analysis.imports` before `freshBindingName(targetPath, taken)` (line ~649:
-`stemIdentifierBase(modulePath)`, then `${base}${counter}` from 2; excludes
-`RESERVED_BINDING_NAMES` and `COMPILER_PROVIDED_NAMES`). The analysis in
-`src/core/code-analysis.ts` (`CodeAnalysis`, line ~176: `units`, `imports`,
-`references`, `findings`) exposes no module-scope declaration names, though
-its walker already visits function/class/module/interface/type-alias nodes
-(lines ~1022–1090, ~1575–1660).
-
-**Change.**
-1. Extend `CodeAnalysis` with the set of every identifier bound at the
-   file's module scope, value- and type-level: `var`/`let`/`const`
-   declarations (every name in destructuring patterns included),
-   `function`, `class`, `enum`, `interface`, `type` alias,
-   `namespace`/`module` declarations, `declare` forms, and every binding of
-   every import declaration — default, named (aliases: the local name),
-   namespace, `import X = require(…)`, type-only — spec-module or not.
-   Collect it in document order into a deterministic structure; it is
-   analysis data, not a finding.
-2. Seed the code-file `taken` set from that set (plus the existing
-   spec-module bindings, which it now subsumes) so `freshBindingName`
-   deterministically skips every pre-empted name; keep the candidate
-   derivation as it is (the stem, then numbered), so an unpressured file
-   still receives the stem. The spec-file side (`SpecImportPlan.taken`,
-   import bindings only) is complete as it stands — a validated MDX file
-   binds nothing else at module scope (exports are 14.16).
-3. Do not change graph data content for a valid workspace (SPEC 13.3
-   byte-determinism is over the same content); if the new set is recorded
-   anywhere, it must be deterministic.
-
-**Verification.** `npm run build`; `section-6.5.test.ts` (T6.5-9 green, and
-the whole file with Task 1), `section-6.6.test.ts`, `section-4.5.test.ts`,
-`section-4.6.test.ts`; reproduce the finding's staging in a scratch
-workspace: the real move exits 0 and the added import binds none of the
-pre-empted names.
 
 ## Task 3 — A successful preview is emitted only after the same in-memory re-validation that can refuse the real operation (SPEC 6.6; reviewer A, gap 3)
 
