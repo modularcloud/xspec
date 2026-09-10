@@ -1,0 +1,421 @@
+# FIX_PLAN — Phase 9 (test harness), second re-descent, compliance determination 1
+
+Planned 2026-09-10 from: reviewer A (TEST-SPEC.md §0–8, 28 gaps), reviewer B (§9–16, 31 gaps), reviewer C (§17–18 + CERTIFICATIONS.md, 4 gaps), and the VERIFY report at 8342cdc (three red self-tests in `test/self/certification-document.test.ts`; T4.5-8, T6.5-7, T6.5-9 diagnosed product failures — allowed at this phase, no task). Governing IP: `specs/patches/0001-external-ui-apis.md` (Stage: Tested). Bundle: `specs/SPEC.md`, `specs/TEST-SPEC.md`, `specs/CERTIFICATIONS.md`, `specs/IMPLEMENTATION.md`.
+
+## Rules for every task (read before starting any of them)
+
+- **Phase 9 scope guard.** Edit only under `test/`, `.github/`, harness configuration, `AGENTS.md` (build/lint/run knowledge only), and this file. Never touch `src/`. Product tests are expected to fail against the product; harness self-tests and certifications must pass.
+- **Definition of done for a task:** `npm run typecheck` clean; `npm run format:check` clean (use the repository's format script to fix); `npm run test:self` fully green (certification included — any task touching a test named in a CERTIFICATIONS.md in-scope list re-certifies that fixture); the touched product-facing tests run against the built product (`npm run build` first, then `npx vitest run --config test/vitest.config.ts --project suite test/suite/<section file>.test.ts --reporter=verbose`) either pass or fail as a *diagnosed product failure* (a `HarnessAssertionError` whose message states what the product did wrong, TEST-SPEC H-8) — never a harness error, timeout, or crash. Commit `sdg(phase-9): <imperative summary>` ending with the two trailer lines the spawn prompt gives, push to `origin claude/xspec-ui-apis-4df8fa` (retry on network errors with 2s/4s/8s/16s backoff), then delete the finished task from this file (or the whole file when it is the last task).
+- **Registration mechanics** (new test IDs): the body is a `ProductTestEntry` (`{ id, title, run }`) in the section's module under `test/suite/registry/section-*.ts`, spread into `test/suite/registry/index.ts`, mapped to its SPEC.md passages in `test/suite/registry/traceability.ts` (H-7; checked by `test/self/s1-traceability.test.ts`), and declared where the thin wrapper `test/suite/section-*.test.ts` / `test/suite/declare.ts` requires. Mirror the file set of commit 8342cdc (T6.3-5) or 24c9487 (T4.5-8): `git show --stat <sha>`.
+- **Escape spellings.** The tool-parameter layer decodes `\uXXXX` in edit payloads; when a test needs the six-character source spelling (e.g. `id="a\u002Eb"`), write it as `\u002E` in the payload and verify the file bytes with `grep -c 'u002E'` afterwards.
+- **Platform-gated arms.** Linux-only stagings (non-UTF-8 path bytes; permission removal) follow the existing pattern `const NU3_STAGED = process.platform === "linux"` in `test/suite/registry/section-11.5.ts`; a Linux-leg test (T13.5-7, T14-9, T14-10) must not be selected by the Windows project's registry-ID subset (E-6) unless its body is platform-safe — check the selection list before registering.
+- **H-11 harness errors vs H-8 product failures.** `HarnessAssertionError` (`test/helpers/assertions.ts`) means "diagnosed product failure". An ineffective staging, an unreachable precondition, or a harness bug must surface as a distinct error class (see Task 4), never as a `HarnessAssertionError`, a pass, or a skip (H-9).
+- **Infrastructure caution.** Keep each spawn's edits bounded: a few tool calls per response, modest payloads, no single giant write. Large section files (section-6.5.ts, section-13.5.ts, section-14.ts, section-12.7.ts) are edited with targeted `Edit`s, not rewrites.
+
+Ordering: Part A turns the three red self-tests green (certification manifest/gate cluster). Part B lands shared helpers. Parts C–E are consumers, ordered by dependency; within a part, order is free.
+
+---
+
+## Part A — certification cluster (self-tests red at 8342cdc)
+
+## Task 1 — Register T13.5-8 (acquisition before every later check)
+
+- **Source:** reviewer B gap 4; reviewer C gap 3; VERIFY red 3 (`every CERTIFICATIONS.md in-scope test is implemented in the product-test registry`).
+- **Requirement:** TEST-SPEC.md §13.5 **T13.5-8** (line 555); SPEC.md 13.5 (acquisition point), 13.3 (gate), 6.3, 6.6, 12.0; CERTIFICATIONS.md §CONF-CORE scope (lines 9–13) and its staging constraints for T13.5-8: the failing workspace is a **second spec source beginning with a UTF-8 byte-order mark** (condition 14.20, zero-length range at offset 0, the file masked and never an operand of any arm's command) added after the workspace was built valid and after the `review resolve` session was created under `--strategy audit`; T13.5-8's **excluded commands carry no `--test-hold`** (VIOL-CORE-NOLOCK's staging constraint, CERTIFICATIONS.md line 22).
+- **Files:** `test/suite/registry/section-13.5.ts` (new entry beside T13.5-7), `test/suite/registry/index.ts`, `test/suite/registry/traceability.ts` (passages "13.5", "13.3", "6.3", "6.6", "12.0" as the body asserts them).
+- **Do:** implement every arm of the entry: (1) exclusion first — while `review resolve <s> <item> --status skipped --test-hold <hold>` is held on the failing workspace, `review create --strategy audit --name n`, `review resolve s <item> --status skipped`, and `rename specs/A.mdx a b` each exit 2 promptly with the exclusion usage error, never 1, nothing modified (reuse T13.5-2's byte-compare helper); (2) seam ordering, each under `--test-hold` with no other holder — `rename specs/A.mdx nope x` (exit 2), `review create --base <unresolvable-ref> --name n` (exit 2; the workspace has no git), and on the failing workspace `review create --strategy audit --name n` (exit 1 with the condition-20 finding) — each creates the hold file first, the workspace byte-identical while held, and exits only after the harness deletes the hold; the wait for the hold file must **fail loud** (diagnosed product failure) if the command exits before creating it — never proceed on exit or timeout (CERTIFICATIONS.md §CONF-CORE justification, line 15); (3) non-mutating boundary — `rename specs/A.mdx nope x --preview` creates no hold file and exits 2 at once; `--test-hold` beside `--preview` exits 2 (T6.6-3). Reuse the hold-seam driver T13.5-1/T13.5-2 already use (`test/helpers/adapters/session-staging.ts` / section-13.5.ts helpers).
+- **Verify:** self-test 3 of `certification-document.test.ts` green (`npm run test:self` — Tasks 2–3 still leave tests 1–2 red until done); the new test runs against the built product with pass or diagnosed failure; S-1 traceability green.
+
+## Task 2 — Extend the CONF-CORE conformer to T13.5-8's scope (every existing violator's passing side intact)
+
+- **Source:** reviewer C gap 3; VERIFY note ("certifying T13.5-8 may also require conformer work").
+- **Requirement:** CERTIFICATIONS.md §CONF-CORE scope (lines 9–13): `rename --preview` only as T13.5-8's non-mutating boundary drives it (the refused form — a nonexistent old ID's usage error — acquiring nothing and creating no hold file, 6.6; `--test-hold` beside `--preview` the syntax-class usage error of 12.0); `review create --base <ref> --name n` git-less → exit 2 after acquisition and the hold; the BOM failing-workspace gate (14.20 at offset 0) reported exit 1 only after acquisition and the hold; acquisition before the 12.0 argument checks (`rename specs/A.mdx nope x --test-hold` creates the hold first, exit 2 after its deletion); exclusion-first refusals exit 2, never 1, while `review resolve` is held on the failing workspace. Each existing violator's stated passing side on T13.5-8 must hold: VIOL-CORE-EARLYWRITE's deferred-exit clause (line 27: a refused invocation under `--test-hold` creates the hold having written nothing, waits, then exits with its error), EARLYREFRESH (line 34: the gate's findings reported only after acquisition and the hold; a failing workspace refreshes nothing), STALELOCK, PARTIALWRITE, CHATTYREADS, PERSISTREADS (their T13.5-8 clauses, lines 43–66); VIOL-CORE-NOLOCK must **fail** T13.5-8 exactly on its exclusion-first arm (line 22: the excluded commands proceed to the gate/precondition and exit 1).
+- **Files:** `test/fixtures/conf-core/product.mjs` (the shared conformer; deviations are switches threaded from each `bin-*.mjs`, see `runXspec(argv, cwd, options)` at ~line 3256 and the acquisition closure at ~2081–2130); `test/fixtures/conf-core/bin.mjs` only if the entry point needs it.
+- **Do:** move nothing in the conformer's ordering that the document already pins; add what the scope now names (preview handling for the refused form; BOM masking → 14.20 finding at offset 0, exit 1, after the hold; git-less `--base` → exit 2 after the hold; argument checks after acquisition; exclusion → exit 2 before the gate). Keep `product.mjs` the single implementation; violators stay one-switch shims.
+- **Verify:** drive the registered T13.5-8 (Task 1) against the conformer binding and against each existing violator binding through the certification runner (`test/self/certification-runner.ts`, C-2: `productTestSuite.select([...])` with `nodeFixtureBinding` from `test/self/certification-fixtures.ts`) — pass against CONF-CORE and every violator except NOLOCK (fails on the exclusion-first arm only); all other CONF-CORE in-scope tests unchanged (`npm run test:self`).
+
+## Task 3 — Add VIOL-CORE-LATELOCK, wire the manifest, bump the pinned violator count
+
+- **Source:** reviewer C gaps 1–2; VERIFY red 1–2.
+- **Requirement:** CERTIFICATIONS.md §VIOL-CORE-LATELOCK (lines 67–72: exclusivity acquired — and the hold file created — only after the 12.0 argument checks, 6.3 baseline resolution, the 13.3 gate, and the 6.4/6.5 precondition all pass; a refused invocation exits at once with no hold file, `--test-hold` or not; a second mutating command on a failing workspace exits 1 at the gate/precondition, never 2; expected failures exactly T13.5-8, every other in-scope test passes); §CONF-CORE in-scope list (line 13, now nine IDs incl. T13.5-8); §VIOL-CORE-NOLOCK certifies `T13.5-2, T13.5-8` (line 21); TEST-SPEC §17 C-1.
+- **Files:** new `test/fixtures/conf-core/bin-latelock.mjs` (mirror `bin-nolock.mjs`: a shim threading one switch, e.g. `lateAcquisition: true`); `test/fixtures/conf-core/product.mjs` (the switch moves the acquisition/hold closure past those checks — a single deviation); `test/self/certification-fixtures.ts` (append `violator("VIOL-CORE-LATELOCK", "conf-core/bin-latelock.mjs", ["T13.5-8"])` last in CONF-CORE's list — document order; add `"T13.5-8"` to CONF-CORE's `inScope` and to NOLOCK's `certifies`, verbatim order as the document); `test/self/certification-document.test.ts` (`EXPECTED_VIOLATORS = 18`).
+- **Verify:** `npm run test:self` fully green: all five `certification-document` tests; `certification.test.ts` shows CONF-CORE passing nine tests, LATELOCK failing exactly T13.5-8, NOLOCK failing exactly T13.5-2 and T13.5-8. Record in `AGENTS.md` only genuinely new run knowledge (e.g. how to drive one test against one fixture), nothing else.
+- **Depends on:** Tasks 1, 2.
+
+---
+
+## Part B — shared helpers (land before their consumers)
+
+## Task 4 — Permission-removal staging helper with E-1 self-verification (harness error when ineffective)
+
+- **Source:** reviewer C gap 4; prerequisite of Tasks 8, 9, 10, 11, 12.
+- **Requirement:** TEST-SPEC.md §18 **E-1** (the harness verifies each permission-based staging on itself before invoking the product and treats an ineffective one — a privileged runner — as a harness error, H-11, never a pass or a skip, H-9); **T14-9** (line 569) staging discipline: an environment refusal is staged by permission removal alone — the directory holding the path made read-only and, where the path is occupied, its occupant made unwritable — so creation, replacement in place or by renaming, appending, and removal are all refused whatever write strategy the product uses; symbolic links and non-directory components never involved; **T14-10** (line 570): a refused content read is the file's read permission removed with write kept (mode `-w-------`, `0o200`); a refused directory listing is the directory's read permission removed with search kept (`--x`, `0o100`), entries reachable by name; nonexistence is never staged as a refusal.
+- **Files:** new `test/helpers/permissions.ts` (export the staging functions and a `HarnessStagingError extends Error` — deliberately **not** a `HarnessAssertionError`); `test/helpers/workspace.ts` only to expose what the builder needs (its best-effort cleanup chmod at ~397–411 stays); a self-test in `test/self/s2-workspace-builder.test.ts` (or a new `test/self/permission-staging.test.ts` if the self project's include glob in `test/vitest.config.ts` picks it up).
+- **Do:** three staging modes — `stageWriteRefusal(path)`, `stageReadRefusalOfFile(path)`, `stageReadRefusalOfDirectory(path)` — each recording the prior modes and returning a `restore()`; after applying, each verifies itself: write mode attempts, in the harness's own process, creation of a fresh entry in the directory, opening the occupant for writing and for appending, renaming a fresh sibling over it, and unlinking it — every attempt must be refused (`EACCES`/`EPERM`) and any file created by an unrefused attempt removed; file-read mode attempts `readFile` (must be refused) and a write-open (must succeed, the object still replaceable); directory-read mode attempts `readdir` (refused) and `stat` of a known entry by name (succeeds). Any unrefused attempt throws `HarnessStagingError` naming path and mode. On a non-Linux platform the helper throws `HarnessStagingError` immediately (E-1: Linux leg) — the Linux-leg tests are never selected on Windows (preamble). The self-test asserts each mode refuses the harness's own attempt and that `restore()` reinstates the recorded modes (on non-Linux it asserts the immediate throw).
+- **Verify:** `npm run test:self` green; `.github/workflows/ci.yml`'s statement that the harness self-verifies its stagings is now backed (edit the workflow comment only if it names a file). Record the helper's usage in `AGENTS.md` only if it changes how tests are run locally (e.g. "run the suite as a non-root user or the permission stagings raise HarnessStagingError").
+
+## Task 5 — H-3 form-exact decoder for the performed `rename`/`move` report; T6.4-1, T6.5-1 (mapping cardinality), T6.6-2, T12.7-2 consume it
+
+- **Source:** reviewer A gap 3 (and the root-pair clause of gap 16); reviewer B gap 23.
+- **Requirement:** TEST-SPEC.md §0 **H-3** (every JSON datum decoded form-exact); SPEC.md 12.7 "`rename`/`move` performed" bullet — exactly the members `{"findings","mapping"}`, `findings` `[]`, `mapping` an array of `{"from","to"}` pairs **ordered by `from` bytes**; **T6.4-1**; **T6.5-1** (one mapping entry per node of the moved subtree, the root's bare-path pair included); **T6.6-2** (the performed `mapping` byte-equal to the preview's `mapping`); **T12.7-2** (line 512: document forms). CERTIFICATIONS.md §CONF-CORE scope names "reporting the applied mapping in the performed-operation form of 12.7" — the conformer `test/fixtures/conf-core/product.mjs` must emit exactly that form if any in-scope test decodes it.
+- **Files:** `test/helpers/adapters/forms.ts` (new `decodePerformedOperationReport`, beside the preview decoder, rejecting any extra or missing member, non-empty `findings`, an unordered or duplicated `mapping`, or a pair with members other than `from`/`to`); `test/helpers/adapters/operations.ts` (`decodeAppliedMappingReport` retired or made a thin alias of the form-exact decoder — no "members beside `mapping` are ignored"); `test/helpers/adapters/model.ts` ~699–708 (delete the "shape is unpinned" statement); `test/suite/registry/support.ts` (`assertAppliedMapping` compares the ordered array with `toEqual`, not a set); call sites `section-6.4.ts` (T6.4-1), `section-6.5.ts` ~1211/1833/1965 (T6.5-1: expected arrays built per node, root pair first by byte order), `section-6.6.ts` ~459 (T6.6-2: `expect(performed.mapping).toEqual(preview.mapping)` on the raw decoded values), `section-12.7.ts` `runDocumentFormsArm` ~2166–2422 (add the performed document beside the other forms); `test/self/s5-output-adapters.test.ts` (cases for the new decoder's acceptance and each rejection).
+- **Verify:** S-5 green; `npm run test:self` green (certification unchanged or conformer fixed in the same task); touched product tests pass or fail as diagnosed.
+
+## Task 6 — Form-exact refusal `identities` expectation; T6.4-3, T6.5-4, T14-7 assert the exact arrays
+
+- **Source:** reviewer A gaps 15 (identities clause) and 17; reviewer B gap 30 (identities clause).
+- **Requirement:** SPEC.md 12.7 refusal document, 14 refusal reasons; TEST-SPEC.md **T6.4-3** (line 263: `refused-invalid-id` carries `identities` exactly `["<file>#<new-id>"]`), **T6.5-4** (line 274: exactly `["<target-file>#<new-id>"]`, and `["b.mdx#"]` for the empty-ID arm), **T14-7** (line 567: the sole element in 1.5's identity form — `["specs/A.mdx#a.then"]`, `["specs/B.mdx#x y"]` — the self-move forms, and collision bearers in location order).
+- **Files:** `test/suite/registry/support.ts` ~504–525 (the refusal expectation T6.4-3 uses: accepts "some entry, full or bare" — replace), `test/suite/registry/section-6.5.ts` ~730 (`identity?` optional expectation — replace with a required exact array), `test/suite/registry/section-14.ts` `assertRefusalReport` ~2159 ("at least one identities entry names" — replace); call sites T6.4-3 (`section-6.4.ts` ~1340), T6.5-4 (`section-6.5.ts` ~2555–2578), T14-7.
+- **Do:** one shared expectation (in `support.ts`) taking the exact ordered `identities` array and comparing with `toEqual`; every call site passes its exact expected array per its spec entry. Leave T14-7's non-identities arms to Task 13.
+- **Verify:** typecheck; the three tests pass or fail as diagnosed against the product; none is in a certification scope (confirm against CERTIFICATIONS.md in-scope lists), so `npm run test:self` is unchanged.
+
+## Task 7 — CONF-VALID conformer: 1.4's alphabet excludes `"`, `'`, `\`, `&`, and U+FFFD; values read verbatim
+
+- **Source:** reviewer A gap 28; reviewer C dependency note.
+- **Requirement:** SPEC.md 1.4 (segment and tag validity — the rewritten alphabet; every attribute value read verbatim, escape and entity spellings never decoded); CERTIFICATIONS.md §CONF-VALID (lines 74–80: the verbatim-read arms are in the conformer's scope, line 76); in-scope tests T1.3-1..6, T1.4-1, T1.4-2, T1.4-4, T2.6-1, T2.6-2, P-1.
+- **Files:** `test/fixtures/conf-valid/product.mjs` — `valueViolation` (~540–585) and the attribute/tag readers; the violators `VIOL-VALID-CTRL`/`VIOL-VALID-WIDE` keep exactly their one deviation each.
+- **Do:** reject a segment or tag containing any of `"`, `'`, `\`, `&`, U+FFFD with the same condition/location the existing rules use (the finding located at the attribute — T14-11's per-attribute location, which Task 18 asserts); read `id="a\u002Eb"` and `id="a&#46;b"` as the literal seven/eight-character values (condition 4 — invalid characters), `tags="x\u0079"` as a tag containing `\` (14.4); emit tag sets in byte order with duplicates collapsed (Task 37 compares T2.6-1/2's datum literally against this conformer).
+- **Verify:** `npm run test:self` green now (CONF-VALID's in-scope tests unchanged yet); after Tasks 18 and 19 the new arms must still certify green against it and its two violators.
+
+---
+
+## Part C — §13.5 / §14 consumers (after Part B)
+
+## Task 8 — Error-document codes `write-failure`/`read-failure`; drop the stale `refused-unresolvable-reference`; T14-6 covers all 25 conditions
+
+- **Source:** reviewer B gap 29; reviewer A advisory (stale code in the shared decoder).
+- **Requirement:** SPEC.md 14 (conditions 1–25; 14.24 write failure and 14.25 read failure are exit-2 error-document codes, in no findings array; the refusal reason `refused-unresolvable-reference` no longer exists); SPEC.md 12.7 error document (`{"error": …}` with `code`, `path`); TEST-SPEC.md **T14-6** (line 566: for each of the 25 conditions, staged via its primary test's fixture, the stable code read from every reporter — `write-failure`/`read-failure` as the exit-2 error document's `code`).
+- **Files:** `test/helpers/adapters/model.ts` (~218: the code vocabulary — add the two codes, remove `refused-unresolvable-reference`), `test/suite/registry/section-14.ts` (~140 the same list; T14-6 title and body: 23 → 25 conditions, the two new arms staged with Task 4's helper: a write refused at `.xspec` on a stale workspace for `write-failure`; a source with read permission removed for `read-failure` — Linux leg, gated like the other permission arms), `test/self/s5-output-adapters.test.ts` if it pins the vocabulary.
+- **Verify:** typecheck; S-5 and `npm run test:self` green; T14-6 passes or fails as diagnosed; `grep -rn refused-unresolvable-reference test/` is empty.
+- **Depends on:** Task 4.
+
+## Task 9 — Rewrite T13.5-7 as "interrupted or write-refused mutation: the pinned write order"
+
+- **Source:** reviewer B gap 27; reviewer C gap 4.
+- **Requirement:** TEST-SPEC.md **T13.5-7** (line 554 — read it whole); SPEC.md 13.5 (the state a mutating command leaves when a write is refused or the process is killed: every earlier write complete, no later one attempted, the pinned per-command write order), 14.24; TEST-SPEC.md T14-9 (line 569) names T13.5-7's stagings (a)–(f): (a) the rewritten source `specs/b/B.mdx`; (b) the journal `.xspec/journal`; (c) an emitted Markdown file's creation or removal `out/specs/sub/B.md`, `out/specs/A.md`; (d) a relocation's origin removal `specs/A.mdx` and, with `specs/sub` staged unwritable instead, the destination's production `specs/sub/B.mdx` (origin then still present, nothing relocated); (e) a session file `.xspec/reviews/<name>.json`; (f) a generated module or companion under `specs/b/` and graph data (concerning `.xspec`, never a path inside it).
+- **Files:** `test/suite/registry/section-13.5.ts` T13.5-7 (~1682–1830, today kill-only); put the (a)–(f) stagings in an exported helper (same module or a new `test/suite/registry/write-refusal-staging.ts`) so Task 10's T14-9 reuses them; `traceability.ts` if the passage set changes ("13.5", "14").
+- **Do:** each arm: build the workspace, start the mutating command with `--test-hold`, wait for the hold (fail loud if absent), apply the staging with Task 4's helper (self-verified), release the hold, and compare the resulting workspace bytes with a **twin**: the same operation completed unrefused on a byte-identical twin, taking per 13.5's pinned order exactly the files written before the refused write and the pre-state of every later one — asserted file by file with the byte-compare helpers T13.5-1/T13.5-2 use; exit 2, the error document `code` `"write-failure"`, `path` the concerned path (Task 8's decoder). Keep the kill arm, constrained to the states 13.5 admits (13.5 pins them). Linux leg: gate as the preamble says; ensure the Windows subset does not select T13.5-7.
+- **Verify:** passes or fails as diagnosed against the product; a `HarnessStagingError` (privileged runner) is a harness error, never a pass.
+- **Depends on:** Tasks 4, 8.
+
+## Task 10 — Register T14-9 (write failures, 14.24)
+
+- **Source:** reviewer B gap 5; reviewer C gap 4.
+- **Requirement:** TEST-SPEC.md **T14-9** (line 569 — read it whole; it is truncated in the findings): contract (a refused write is a usage error, exit 2, never a finding; stdout the error document under `--json` and on JSON-only surfaces, `code` `"write-failure"`, `path` the concerned path; stderr the diagnostic; the command stops at that write), concerned paths one arm each through T13.5-7's stagings (Task 9's helper), graph data concerning the area `.xspec`, the reporter set (`build`, `rename`, `move`, every refreshing read of 13.3 on a stale workspace with `.xspec` unwritable — `ids`, `show`, `coverage`, `impact --base`, `review status`, `query`, `occurrences`, `view`, `at` — and the mutating `review` subcommands; never `check` (exit 1 with the staleness), `inventory` (exit 0), `version`, or a `--preview` (exit 0)), and the precedence arms (on (f)'s stale staging `query nodes --group <code-group>` exits 2 with the invalid-flag-value error, `code` `null`; `query node specs/a/A.mdx#missing` the unknown-node error; on a twin also failing validation `ids` exits 1 with the findings; a rename refused by validation (T6.4-3) under (a)'s staging exits 1, no write attempted; a hold file that cannot be created is 13.5's usage error, never this condition).
+- **Files:** `test/suite/registry/section-14.ts` (new entry), `index.ts`, `traceability.ts` ("14", "12.0", "12.7", "13.3", "13.5").
+- **Verify:** registered, Linux-gated, passes or fails as diagnosed; S-1 green.
+- **Depends on:** Tasks 4, 8, 9.
+
+## Task 11 — Register T14-10 (read failures, 14.25)
+
+- **Source:** reviewer B gap 6; reviewer C gap 4.
+- **Requirement:** TEST-SPEC.md **T14-10** (line 570 — read it whole): staging (file `0o200`, directory `0o100`, nonexistence never a refusal); one arm per row of 14.25: (a) a discovered source's content — spec source `specs/B.mdx` referenced from `specs/A.mdx`, and separately a code source: condition 20 at `build` and `check`, exit 1, one location `{"start": 0, "end": 0}`, masked as unparseable (A's reference reports 14.5, nothing inside B reports); `view specs/A.mdx specs/B.mdx` serves A's view with B's condition-20 finding, exit 1; `occurrences` lists no record for B's spellings; `at specs/B.mdx 0`, `7`, `999999` each report the resolution explicitly unavailable beside the finding, exit 1, never the out-of-range usage error; (b) the journal's content — condition 13 concerning `.xspec/journal` from `build`, `check`, the gated reads (`ids` exits 1 answering nothing), `rename` refused with that finding alone, `inventory` `journal.occupied` `true` finding-free exit 0; (c) a session file's content — condition 21 from `check`, `review status <name>` (exit 1, exactly one `corrupt-session` finding, nothing modified), `review list` (session reported corrupt, exit 1), `inventory` listing the session; and every further row the entry lists after (c).
+- **Files:** `test/suite/registry/section-14.ts` (new entry), `index.ts`, `traceability.ts` ("14", "11.2", "11.5", "11.6", "13.3", "10.7" as asserted).
+- **Verify:** registered, Linux-gated, passes or fails as diagnosed; S-1 green.
+- **Depends on:** Tasks 4, 8.
+
+## Task 12 — T12.7-3: nonexistent `--config` byte-for-byte, symlink physical resolution, `write-failure`/`read-failure` documents
+
+- **Source:** reviewer B gap 24.
+- **Requirement:** TEST-SPEC.md **T12.7-3** (line 513); SPEC.md 12.7 error document, 7 (configuration location and anchoring), 14.24/14.25.
+- **Files:** `test/suite/registry/section-12.7.ts` `runErrorConfigPathsArm` (stages only the canonical `../cfg/xspec.config.ts` today).
+- **Do:** add arms: a nonexistent `--config` reported byte-for-byte as given — `./../cfg//xspec.config.ts` and an absolute path — versus a malformed *existing* file reported in the anchoring form; the symlink physical-resolution arm (`--config ./../xspec.config.ts` from `R/L`, where `R/L` is a symlink to `R/a/b`, reported as `../xspec.config.ts`); `write-failure` and `read-failure` error documents with their concerned `path` (stage with Task 4's helper, Linux-gated).
+- **Verify:** passes or fails as diagnosed; the `--config` arms run on every platform, the permission arms on Linux only.
+- **Depends on:** Tasks 4, 8.
+
+## Task 13 — T14-7 remaining arms: destination-only refusals, import-cycle location, no unlisted code
+
+- **Source:** reviewer B gap 30 (non-identities clauses).
+- **Requirement:** TEST-SPEC.md **T14-7** (line 567); SPEC.md 14 refusal reasons, 6.5.
+- **Files:** `test/suite/registry/section-14.ts` T14-7.
+- **Do:** `refused-invalid-destination` alone (no second reason) for destinations `./a.mdx`, `specs//b.mdx`, `specs/../specs/b.mdx`; the import-cycle location arm — an existing import declaration plus a local reference spelling whose rewrite would add the import, the refusal locating the declaration per the entry; assert that no report carries a code outside SPEC.md 14's list (`assertRefusalReport` rejects unknown codes).
+- **Verify:** passes or fails as diagnosed.
+- **Depends on:** Task 6.
+
+## Task 14 — Register T14-11 (per-condition ranges)
+
+- **Source:** reviewer B gap 7; reviewer A gaps 4–5 cite it for the per-attribute location.
+- **Requirement:** TEST-SPEC.md **T14-11** (line 571): byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC.md 14 (the attribute range for 1.4's conditions, the zero-length `{"start":0,"end":0}` range for masked files, the container range for 2.7's condition 16, and every other rule the entry enumerates).
+- **Files:** `test/suite/registry/section-14.ts` (new entry), `index.ts`, `traceability.ts` ("14" plus each condition's home passage as asserted).
+- **Do:** stage each fixture with offsets computed from the staged bytes (`Buffer.byteLength` over the exact prefix), never from string indices; assert `{"start","end"}` exactly (T12.7-1's range form decoder).
+- **Verify:** registered; passes or fails as diagnosed; S-1 green.
+
+## Task 15 — T13.5-1: `build --test-hold --json` consumes `--json` as the hold path
+
+- **Source:** reviewer B gap 26.
+- **Requirement:** TEST-SPEC.md **T13.5-1** (line 548); SPEC.md 13.5/12.0 (`--test-hold` takes a value; `build` is not a mutating command — the arm exits 2 with empty stdout). T13.5-1 is in CONF-CORE's scope: the conformer `test/fixtures/conf-core/product.mjs` must pass the arm (its argument parsing may need the fix), and every CONF-CORE violator's expected outcome on T13.5-1 (only EARLYWRITE and EARLYREFRESH fail it) must be unchanged.
+- **Files:** `test/suite/registry/section-13.5.ts` T13.5-1 (~860–900, beside the non-mutating unknown-flag arm); `test/fixtures/conf-core/product.mjs` only if it fails the arm.
+- **Verify:** `npm run test:self` green (certification of CONF-CORE re-run); passes or fails as diagnosed against the product.
+
+## Task 16 — T13.3-2: an absent record stays absent after a refreshing read
+
+- **Source:** reviewer B gap 25.
+- **Requirement:** TEST-SPEC.md **T13.3-2** (§13.3); SPEC.md 13.3, 11.6.
+- **Files:** `test/suite/registry/section-13.3.ts` T13.3-2 (probes `inventory` on the corrupt-record arm only).
+- **Do:** on the graph-data deletion arm, after a refreshing read (e.g. `ids`), assert `inventory` reports `recorded` `[]` and `check` is clean (exit 0, no findings).
+- **Verify:** passes or fails as diagnosed.
+
+## Task 17 — T14-2: escape-spelled `d` reference and marker resolve nowhere
+
+- **Source:** reviewer B gap 28.
+- **Requirement:** TEST-SPEC.md **T14-2** (line 562); SPEC.md 2.2/2.4 (verbatim literals), 4.5, 14.5, 14.7.
+- **Files:** `test/suite/registry/section-14.ts` T14-2.
+- **Do:** add `d={"lo\u0067in"}` → condition 14.5 (the seven-character literal, never `login`), and a TypeScript marker `SPEC.lo\u0067in` → condition 14.7 with no type error reported (the identifier is `login` to TypeScript but the marker text is read verbatim). Write both spellings doubled and verify the file bytes (preamble).
+- **Verify:** passes or fails as diagnosed.
+
+---
+
+## Part D — §1–8 arms (after Part B)
+
+## Task 18 — T1.4-1 and T1.4-4: the rewritten 1.4 alphabet, verbatim spellings, per-attribute location
+
+- **Source:** reviewer A gaps 4, 5.
+- **Requirement:** TEST-SPEC.md **T1.4-1** (line 57) and **T1.4-4** (line 60); SPEC.md 1.4 (segments and tags may not contain `"`, `'`, `\`, `&`, or U+FFFD; attribute values read verbatim — escape and entity spellings are their literal characters), 14 (the finding located at the attribute, T14-11). Both tests are in CONF-VALID's in-scope list (CERTIFICATIONS.md line 78).
+- **Files:** `test/suite/registry/section-1.4.ts`.
+- **Do:** T1.4-1 — one arm per new character in a segment (`"`, `'`, `\`, `&`, U+FFFD), each a workspace differing in one segment; verbatim arms `id="a\u002Eb"` and `id="a&#46;b"` → condition 4 (invalid characters, never a `.`-separated two-segment ID); every finding located at the attribute (its exact range, precomputed from bytes). T1.4-4 — the same five characters in a tag; `tags="x\u0079"` → 14.4 (a tag containing `\`); per-attribute location. Write escape spellings doubled and verify the bytes (preamble).
+- **Verify:** `npm run test:self` green — T1.4-1/T1.4-4 pass against CONF-VALID and fail against VIOL-VALID-CTRL / VIOL-VALID-WIDE exactly as their entries state (CERTIFICATIONS.md lines 82–94); against the product, pass or diagnosed failure.
+- **Depends on:** Task 7.
+
+## Task 19 — P-1: `"`, `'`, `\`, `&`, U+FFFD are invalid boundary classes; quote-bearing draws staged and predicted rejected
+
+- **Source:** reviewer B gap 31.
+- **Requirement:** TEST-SPEC.md §16 **P-1** (line 581) and the §16 preamble; SPEC.md 1.4. In CONF-VALID's scope (line 78).
+- **Files:** `test/suite/registry/section-16-p1.ts` (header ~60–95, `quoteKindFor`, the redraw of both-quote draws).
+- **Do:** each of the five characters becomes an invalid boundary class of the generator (drawn with the boundary weighting the entry fixes); a draw bearing one quote kind is staged inside an attribute delimited by the other quote kind and predicted **rejected** — never set aside or redrawn; a draw bearing both quote kinds is staged in either and predicted rejected; `&` and `\` are no longer "ordinary valid"; U+FFFD is drawn and staged. Keep the fixed seed set of E-5 (`XSPEC_PROPERTY_SEED`, `test/helpers/property.ts`); if a self-test pins P-1's draw statistics (`test/self/property-infrastructure.test.ts`), update the pin deliberately with the reason.
+- **Verify:** `npm run test:self` green (P-1 certifies against CONF-VALID and its violators per the document); against the product, pass or diagnosed failure.
+- **Depends on:** Task 7.
+
+## Task 20 — T1.5-2 and T11.5-3: U+FFFD-pathed sources on both legs, staging shared
+
+- **Source:** reviewer A gap 6; reviewer B gap 17.
+- **Requirement:** TEST-SPEC.md **T1.5-2** (§1.5) — a source at `specs/A�.mdx` on either leg (the path spelled with U+FFFD; the path's bytes non-UTF-8, which decode to U+FFFD — Linux only) → condition 14.19 with the concerned path a plain string; `view` by a glob serves it with identities unavailable; it is nameable by no argument. **T11.5-3** (§11.5) — `at 'specs/A�.mdx' 0` on either leg is a malformed value, exit 2, never an answer. SPEC.md 1.5, 11.5, 12.0, 14.19.
+- **Files:** `test/helpers/workspace.ts` (extract the non-UTF-8 path staging that `test/suite/registry/section-11.5.ts` performs around lines 1031–1060 and 1205 (`NU3_STAGED`) into an exported helper, e.g. `stageNonUtf8Path`, so both tests share it); `test/suite/registry/section-1.5.ts` (T1.5-2 arms); `test/suite/registry/section-11.5.ts` (T11.5-3: today the U+FFFD spelling is staged only as an *unknown* file against a non-UTF-8-pathed source; add the U+FFFD-spelled-path leg on every platform and assert exit 2 on both legs).
+- **Verify:** T11.5-3's existing arms unchanged; both tests pass or fail as diagnosed; `npm run test:self` green (S-2 if the builder gains the helper — add a builder self-test case for it).
+
+## Task 21 — T2.1-2 and T4-2: lexical specifier resolution, code-group-only targets, above-root ascent, escape-spelled specifiers
+
+- **Source:** reviewer A gaps 7, 11.
+- **Requirement:** TEST-SPEC.md **T2.1-2** (§2.1) and **T4-2** (§4); SPEC.md 2.1 (import specifiers resolved lexically against the importing file — `./sub/../BASE.xspec` resolves without `sub/` existing; `.//`, `././`, `../specs/BASE.xspec` resolve; a target that is an `.mdx` matched only by a code group, an ascent above the workspace root — even to a real `outside/BASE.mdx` — and an escape-spelled specifier `"./B\u0041SE.xspec"` are condition 14.15), 4 (generated modules resolve the same way; markers record the edges).
+- **Files:** `test/suite/registry/section-2.1.ts` (T2.1-2: the lexical positives with `view` reporting `specs/BASE.mdx`; the code-group-only `.mdx` arm; the above-root arm with a real file outside; the escape-spelled arm), `test/suite/registry/section-4.ts` (T4-2: the above-root arm, `"./N\u0041ME.xspec"`, and the lexical positives `./sub/../NAME.xspec`, `.//NAME.xspec` resolving with edges recorded by the markers).
+- **Verify:** both tests pass or fail as diagnosed; escape bytes verified.
+
+## Task 22 — Register T2.4-5 (verbatim literals)
+
+- **Source:** reviewer A gap 1.
+- **Requirement:** TEST-SPEC.md **T2.4-5** (line 110): 2.4 reads every static string literal and quoted attribute value exactly as spelled — read the entry whole for its arms; SPEC.md 2.4. Excluded from certification (CERTIFICATIONS.md §Exclusions, ~line 195).
+- **Files:** `test/suite/registry/section-2.4.ts` (new entry after T2.4-4), `index.ts`, `traceability.ts` ("2.4", "14" as asserted).
+- **Verify:** registered (S-1 green); passes or fails as diagnosed; escape bytes verified.
+
+## Task 23 — T2.5-3: escape- and entity-spelled coverage values are invalid, located at the attribute
+
+- **Source:** reviewer A gap 8.
+- **Requirement:** TEST-SPEC.md **T2.5-3** (line 116); SPEC.md 2.5 (values read verbatim), 14.17.
+- **Files:** `test/suite/registry/section-2.5-2.6.ts` (T2.5-3).
+- **Do:** arms `coverage="n\u006Fne"` and `coverage="&#110;one"` → condition 14.17, the finding located at the attribute (exact range from bytes). T2.5-3 is in no certification scope (confirm) — no fixture work.
+- **Verify:** passes or fails as diagnosed; escape bytes verified.
+
+## Task 24 — T2.7-1: a section element inside an expression container is condition 16 at the container
+
+- **Source:** reviewer A gap 9.
+- **Requirement:** TEST-SPEC.md **T2.7-1** (§2.7); SPEC.md 2.7, 14.16.
+- **Files:** `test/suite/registry/section-2.7.ts`.
+- **Do:** arm `{<S id="x">…</S>}`: no node `x` exists (`ids`/`query` do not list it), exactly one condition-16 finding located at the container, and `view --text` preserves the container's bytes verbatim.
+- **Verify:** passes or fails as diagnosed.
+
+## Task 25 — T3-3: a multi-line opening tag merges its lines
+
+- **Source:** reviewer A gap 10.
+- **Requirement:** TEST-SPEC.md **T3-3** (§3); SPEC.md 3 (an opening tag spanning three lines — `<S`, LF, `  id="x"`, LF, `>` — is one tag: the three lines merge, dropped or kept per the residue rule, byte-asserted). In CONF-MD's scope (CERTIFICATIONS.md lines 96–100; the scope names this arm at line 98).
+- **Files:** `test/suite/registry/section-3.ts`; `test/fixtures/conf-md/` only if the conformer fails the arm (VIOL-MD-CLASS / VIOL-MD-CR outcomes must stay exactly as documented).
+- **Verify:** `npm run test:self` green (CONF-MD certification re-run); passes or fails as diagnosed against the product.
+
+## Task 26 — T4.4-1: the branding-collision message names both workspace-relative source paths
+
+- **Source:** reviewer A gap 12.
+- **Requirement:** TEST-SPEC.md **T4.4-1** (§4.4); SPEC.md 4.4 (the error **message** contains both `/`-separated workspace-relative source paths, `specs/A.mdx` and `specs/B.mdx`, as substrings — not generated-file paths, native separators, or stems).
+- **Files:** `test/suite/registry/section-4.3-4.4.ts` (~555–580: today any standard rendering containing the module stem passes).
+- **Do:** assert the message string contains `specs/A.mdx` and `specs/B.mdx` (exact substrings) and reject a rendering that names only stems or generated files.
+- **Verify:** passes or fails as diagnosed.
+
+## Task 27 — T4.6-3: wrapper and value forms, default exports, body-less declarations, escape-spelled names
+
+- **Source:** reviewer A gap 13.
+- **Requirement:** TEST-SPEC.md **T4.6-3** (§4.6); SPEC.md 4.6 (code locations and attribution).
+- **Files:** `test/suite/registry/section-4.6.ts`.
+- **Do:** arms for wrapper/value forms — `(() => …)`, `as`, `satisfies`, `!` — attributing to the declared unit; default-export forms; overloads, body-less, `abstract`, and `declare` declarations are not units (`path#f` rather than `path#f@3`, `path#C.m`, `path#C.v` rather than `@2`); `function f\u006Fo()` binds no unit (the escape-spelled name is read verbatim).
+- **Verify:** passes or fails as diagnosed; escape bytes verified.
+
+## Task 28 — T5.7-4: a chain rooted at a doubly-bound identifier records no occurrence
+
+- **Source:** reviewer A gap 14.
+- **Requirement:** TEST-SPEC.md **T5.7-4** (§5.7); SPEC.md 5.7 (reference occurrences), 4.5 (same-scope collisions, T4.5-8 at line 182).
+- **Files:** `test/suite/registry/section-5.7.ts` (reuse T4.5-8's staging from `test/suite/registry/section-4.5.ts`: an identifier bound by both a spec-module import and a same-scope value declaration).
+- **Do:** a member chain rooted at that identifier records **no** occurrence (`occurrences` lists none for it; the graph carries no edge from it).
+- **Verify:** passes or fails as diagnosed (T4.5-8 itself is a diagnosed product failure today — T5.7-4's arm may fail the same way; state the diagnosis).
+
+## Task 29 — T6.5-1: canonical import spellings over three geometries; same-directory relocation
+
+- **Source:** reviewer A gap 16 (remaining clauses; the mapping's root pair is Task 5).
+- **Requirement:** TEST-SPEC.md **T6.5-1** (§6.5); SPEC.md 6.5 (rewritten specifiers are canonical: `./sub/A.xspec`; an importer's quote kind kept — `'../C.xspec'`; `../x/A.xspec`; a file relocated within its own directory — `A.mdx` → `A2.mdx` — leaves its own `./C.xspec` / `.//C.xspec` specifiers untouched and unreported while every importer is rewritten, the preview's `files` holding exactly two entries).
+- **Files:** `test/suite/registry/section-6.5.ts` (T6.5-1; targeted edits — the file is large).
+- **Do:** the three-geometry canonical-spelling contract (one arm each, byte-asserted rewrites); the same-directory relocation arm with the preview `files` cardinality asserted through the form-exact preview decoder.
+- **Verify:** passes or fails as diagnosed.
+- **Depends on:** Task 5.
+
+## Task 30 — T6.5-6: no-op rewrites are not reported and moved text is byte-identical
+
+- **Source:** reviewer A gap 19.
+- **Requirement:** TEST-SPEC.md **T6.5-6** (line 276); SPEC.md 6.5 (identity terms; a descendant `x.c` referenced as `d={"x.c"}` inside the moved subtree needs no rewrite: the origin deletion carries no `id-rewrite`/`reference-rewrite` and the moved text is byte-identical).
+- **Files:** `test/suite/registry/section-6.5.ts` (T6.5-6).
+- **Verify:** passes or fails as diagnosed.
+
+## Task 31 — Register T6.5-11 (TypeScript `text(...)` calls across the move)
+
+- **Source:** reviewer A gap 2.
+- **Requirement:** TEST-SPEC.md **T6.5-11** (line 283) — read whole; SPEC.md 6.5, 4.3. Excluded from certification (CERTIFICATIONS.md §Exclusions, ~line 185).
+- **Files:** a new module `test/suite/registry/section-6.5-ii.ts` (precedent: `section-10.7-i.ts`/`-ii.ts`; keeps the edit bounded — `section-6.5.ts` is very large), `index.ts`, `traceability.ts` ("6.5", "4.3" as asserted), the wrapper/declaration per the preamble.
+- **Verify:** registered (S-1 green); passes or fails as diagnosed.
+
+## Task 32 — T7-1: an occupied configuration path is condition 14.14
+
+- **Source:** reviewer A gap 20.
+- **Requirement:** TEST-SPEC.md **T7-1** (line 301); SPEC.md 7 (location), 14.14.
+- **Files:** `test/suite/registry/section-7-basics.ts` (T7-1).
+- **Do:** a directory named `xspec.config.ts` and, separately, a symbolic link named `xspec.config.ts` in the working directory → 14.14, exit 2, for every command but `version`, the concerned path the working directory's entry; `--config` naming such an object → exit 2.
+- **Verify:** passes or fails as diagnosed.
+
+## Task 33 — T7-2 and T7-3: verbatim literals, encoding, repeated keys, empty and U+FFFD names
+
+- **Source:** reviewer A gaps 21, 22.
+- **Requirement:** TEST-SPEC.md **T7-2** and **T7-3** (§7); SPEC.md 7 (the configuration is read verbatim — a `\u002A` in a glob is not `*`, `prod\u0075ct` is not the group `product`; non-UTF-8 content and a BOM are 14.14; a repeated key, an empty name, and a U+FFFD group/profile/rule name are 14.14; comments are permitted where the entry says), 14.14.
+- **Files:** `test/suite/registry/section-7-basics.ts` (T7-2, T7-3).
+- **Do:** T7-2 — the verbatim-literal arms, the encoding arms (non-UTF-8 bytes; BOM), repeated-key, empty-name, and comments arms exactly as the entry lists them; T7-3 — U+FFFD group, profile, and rule names → 14.14. Escape bytes verified.
+- **Verify:** passes or fails as diagnosed.
+
+## Task 34 — T7-4: patterns outside the root by spelling; inside-but-empty spellings; platform-ordinary spellings
+
+- **Source:** reviewer A gap 23.
+- **Requirement:** TEST-SPEC.md **T7-4** (§7); SPEC.md 7 (discovery patterns: `a/../../x`, `**/../x`, `/specs/*.mdx` escape the root by spelling → 14.14; `a/../b`, `./specs`, `specs//`, `specs/*.mdx/` are inside and match nothing; `C:/…` is an ordinary relative spelling on Linux; `a**b.mdx` as the entry states). In CONF-DISC's scope (CERTIFICATIONS.md lines 118–122; the scope names this contract at line 120).
+- **Files:** `test/suite/registry/section-7-discovery.ts` (T7-4); `test/fixtures/conf-disc/` only if the conformer fails an arm (VIOL-DISC-DIALECT / SYMLINK / DERIVED outcomes must stay as documented).
+- **Verify:** `npm run test:self` green (CONF-DISC re-certified); passes or fails as diagnosed against the product.
+
+## Task 35 — T7.3-1: `outDir` value validity
+
+- **Source:** reviewer A gap 24.
+- **Requirement:** TEST-SPEC.md **T7.3-1** (§7.1–7.3); SPEC.md 7.3, 14.14.
+- **Files:** `test/suite/registry/section-7.1-7.3.ts` (T7.3-1).
+- **Do:** `outDir` `""`, `"/out"`, `"./out"`, `"out/../x"`, `"out//x"`, `"out/"` → 14.14 (exit 2, concerned path the configuration); `"out/sub"` valid.
+- **Verify:** passes or fails as diagnosed.
+
+## Task 36 — Configured sets are read as sets: T7.4-1, T7.5-1, T11.6-2
+
+- **Source:** reviewer A gaps 25, 26; reviewer B gap 19.
+- **Requirement:** SPEC.md 7.4, 7.5 (list-valued configuration read as a set), 11.6 and 12.7 (a set datum is byte-ordered with duplicates collapsed); TEST-SPEC.md **T7.4-1**, **T7.5-1** (§7), **T11.6-2** (§11.6).
+- **Files:** `test/suite/registry/section-7.4-7.5.ts` (T7.4-1, T7.5-1), `test/suite/registry/section-11.6.ts` (T11.6-2 asserts only the default `targetTags: null` / all kinds today).
+- **Do:** T7.4-1 — `targetTags: ["z","a","a"]`, `edgeKinds: ["references","depends","depends"]` → `inventory` reports `["a","z"]` / `["depends","references"]` and the coverage report equals the collapsed twin's byte for byte; T7.5-1 — rule `kinds` and selector `tags` collapsed and ordered, `check` equal to the twin; T11.6-2 — `targetTags ["z","a","a"]` → `["a","z"]`, `edgeKinds ["references","depends"]` → `["depends","references"]`, rule `kinds ["embeds","depends"]` → `["depends","embeds"]`, tags selector `["b","a","b"]` → `["a","b"]`, each compared literally (`toEqual` on the decoded arrays, no sorting in the harness).
+- **Verify:** all three pass or fail as diagnosed; none is in a certification scope (confirm).
+
+## Task 37 — Tag-set datum compared literally: T2.6-1/2/3 drop `sortedTags`; T11.4-3 tag-set form arms
+
+- **Source:** reviewer A gap 27; reviewer B gap 15.
+- **Requirement:** TEST-SPEC.md §0 **H-3** (value forms asserted, never normalized away); SPEC.md 12.7 (a tag set is emitted in byte order with duplicates collapsed — the datum, not merely the set); TEST-SPEC.md **T2.6-1/2/3** (§2.6), **T11.4-3** (§11.4: `tags="b a a"` → `["a","b"]`, `tags="z A"` → `["A","z"]`, on the view node and through `query node` and `show --json`). T2.6-1 and T2.6-2 are in CONF-VALID's scope (line 78), T11.4-3 in CONF-AVAIL's (line 151).
+- **Files:** `test/suite/registry/section-2.5-2.6.ts` (`sortedTags` at ~194, applied at ~844/880/955/1103 — remove; compare the decoded arrays literally), `test/suite/registry/section-11.4.ts` (T11.4-3, ~1385: only `tags="solo"` today); `test/fixtures/conf-avail/` if the conformer does not emit byte-ordered collapsed sets (CONF-VALID's emission is Task 7).
+- **Verify:** `npm run test:self` green (CONF-VALID and CONF-AVAIL re-certified, violator outcomes unchanged); the tests pass or fail as diagnosed against the product.
+
+---
+
+## Part E — §10–12 arms (after Part B)
+
+## Task 38 — Register T10.1-6 (session-directory and area occupancy; `create`'s ordering)
+
+- **Source:** reviewer B gap 1.
+- **Requirement:** TEST-SPEC.md **T10.1-6** (line 350) — read whole; SPEC.md 10.1, 13.4, 14 (the occupancy conditions the entry names).
+- **Files:** `test/suite/registry/section-10.1.ts` (new entry), `index.ts`, `traceability.ts` ("10.1", "13.4", "14" as asserted).
+- **Verify:** registered (S-1 green); passes or fails as diagnosed.
+
+## Task 39 — T10.7-1: `review create --name` of an existing corrupt session
+
+- **Source:** reviewer B gap 8.
+- **Requirement:** TEST-SPEC.md **T10.7-1** (§10.7); SPEC.md 10.7, 14.21.
+- **Files:** `test/suite/registry/section-10.7-i.ts` (T10.7-1 stages no corrupt session today; reuse `test/helpers/adapters/session-staging.ts`).
+- **Do:** stage a corrupt session file named `<name>`; `review create --name <name>` → exit 1 with exactly one condition-21 `corrupt-session` finding, no code-less refusal, nothing modified.
+- **Verify:** passes or fails as diagnosed.
+
+## Task 40 — `--file` pattern spellings on `query`, `occurrences`, `view`, `ids`: T11-2, T11.3-2, T11.4-2, T12.3-1
+
+- **Source:** reviewer B gaps 9 (`--file` clauses), 12, 14, 22.
+- **Requirement:** SPEC.md 11.1, 11.3, 11.4, 12.3, 12.0 (a `--file` pattern escaping the root by spelling — `a/../../x`, `/specs/*.mdx` — is a usage error, exit 2; an inside pattern with a `.` or empty segment — `./specs/*.mdx`, `specs//*.mdx` — is admitted and matches nothing: exit 0, no rows / empty listing); TEST-SPEC.md **T11-2** (§11.1), **T11.3-2** (§11.3), **T11.4-2** (§11.4), **T12.3-1** (§12.3).
+- **Files:** `test/suite/registry/section-11.ts` (T11-2 ~834: only `../*.mdx` today), `test/suite/registry/section-11.3.ts` (T11.3-2 ~1140–1160: outside arms only), `test/suite/registry/section-11.4.ts` (T11.4-2: `nosuch/**/*.mdx` only, no outside-root arm), `test/suite/registry/section-12.3-12.5.ts` (T12.3-1: `../*.mdx` and `apecs/**` only); a shared arm table in `test/suite/registry/support.ts` (spelling → expected class) is welcome.
+- **Do:** per test the arms its entry lists — outside-by-spelling → exit 2 (`code` `null`), inside-matching-nothing → exit 0 with the surface's empty answer form (form-exact decoders).
+- **Verify:** the four tests pass or fail as diagnosed.
+
+## Task 41 — 1.4's alphabet in command values: T11-2 `--tag` syntactic acceptance; T11.3-3 `--to` segments
+
+- **Source:** reviewer B gaps 9 (`--tag` clause), 13.
+- **Requirement:** SPEC.md 1.4, 12.0 (a malformed tag or identity spelling is a syntax-class usage error, exit 2, judged before configuration is loaded and before any identity reading); TEST-SPEC.md **T11-2** (§11.1: a well-formed absent tag → exit 0 empty; each malformed spelling — empty, `'a b'`, `#`, `then`, a control character, `"`, `'`, `\`, `&`, U+FFFD — → exit 2 without loading configuration), **T11.3-3** (§11.3: `--to` segments containing `"`, `'`, `\`, `&` — one arm each — and U+FFFD in the path or the id part → exit 2 before identity reading).
+- **Files:** `test/suite/registry/section-11.ts` (T11-2), `test/suite/registry/section-11.3.ts` (`TO_MALFORMED` lacks all five).
+- **Do:** add the arms; prove "without loading configuration" as T12.0-10 does (the same exit and error document with the configuration invalid or absent).
+- **Verify:** both pass or fail as diagnosed.
+
+## Task 42 — T11-4: `--kinds` list grammar
+
+- **Source:** reviewer B gap 10.
+- **Requirement:** TEST-SPEC.md **T11-4** (line 411); SPEC.md 11.1, 12.0 (`--kinds depends,`, `,depends`, `depends,,embeds` → exit 2; `depends,depends` reads as `depends` — answers byte-identical).
+- **Files:** `test/suite/registry/section-11.ts` (T11-4 ~1152: only `--kinds nonsense` today).
+- **Verify:** passes or fails as diagnosed.
+
+## Task 43 — T11.2-6: the obstructing component is itself a discovered file
+
+- **Source:** reviewer B gap 11.
+- **Requirement:** TEST-SPEC.md **T11.2-6** (§11.2); SPEC.md 11.2, 13.4, 14.22.
+- **Files:** `test/suite/registry/section-11.2.ts` (T11.2-6 stages only the outDir directory replaced by a non-source plain file today).
+- **Do:** `outDir: "specs/A.mdx"` (a discovered source): `build` and `check` report condition 22 concerning `specs/A.mdx`; `view specs/A.mdx` is finding-free, exit 0.
+- **Verify:** passes or fails as diagnosed.
+
+## Task 44 — T11.4-4: `.xspec` specifier naming a code-group `.mdx`; non-canonical specifier reported canonical (CONF-AVAIL extended)
+
+- **Source:** reviewer B gap 16; reviewer C dependency note (CONF-AVAIL's code-group wrong-kind target and BOM-masked target).
+- **Requirement:** TEST-SPEC.md **T11.4-4** (§11.4); SPEC.md 11.4, 2.1, 14.15. In CONF-AVAIL's scope (CERTIFICATIONS.md line 151).
+- **Files:** `test/suite/registry/section-11.4.ts` (T11.4-4: the unparseable-target arm exists; add the `.xspec` specifier designating a discovered code source — an `.mdx` matched only by a code group — and the non-canonical `./sub/../BASE.xspec` reporting `specs/BASE.mdx`); `test/fixtures/conf-avail/product.mjs` (extend the conformer to the reworked scope: the code-group wrong-kind target and the BOM-masked target, per the document's CONF-AVAIL scope text, lines 147–151; VIOL-AVAIL-NULLMARKER / OMIT / NOFILE outcomes unchanged).
+- **Verify:** `npm run test:self` green (CONF-AVAIL re-certified); passes or fails as diagnosed against the product.
+
+## Task 45 — T11.6-1: physical anchoring through a symlinked working directory
+
+- **Source:** reviewer B gap 18.
+- **Requirement:** TEST-SPEC.md **T11.6-1** (§11.6); SPEC.md 11.6, 7 (paths anchored at the physical workspace root).
+- **Files:** `test/suite/registry/section-11.6.ts` (T11.6-1, ~411–806: no `symlink(` today).
+- **Do:** `R/L → R/a/b` (a symlink inside the workspace): from `R/L`, `inventory` reports the root as `../..` and the configuration as `../../xspec.config.ts`; with a link located above both, `..`. Symlink creation must be an ordinary `fs.symlink` on Linux and macOS; on Windows the arm follows the harness's existing symlink handling (see T13.4-6's staging) — never a skip.
+- **Verify:** passes or fails as diagnosed.
+
+## Task 46 — U+FFFD in every argument position and normalization negatives: T12.0-5; U+FFFD arms of T6.4-3 and T6.5-5
+
+- **Source:** reviewer B gap 20; reviewer A gaps 15 (U+FFFD clause) and 18.
+- **Requirement:** SPEC.md 12.0 (a U+FFFD anywhere in an argument is a malformed value — syntax class, exit 2, judged before configuration is loaded, error document `code` `null`; `./specs/A.mdx` and `specs//A.mdx` are not normalized — exit 2); TEST-SPEC.md **T12.0-5** (§12.0: the two normalization negatives on `show` and `view`; U+FFFD in each position — node, file operand, `--file`, `--tag`, `--to`, `<new-id>`, session name, `--note`, `--base`, `--config`, `--test-hold`), **T6.4-3** (line 263: a U+FFFD or non-UTF-8 `<new-id>` → exit 2, never the `refused-invalid-id` refusal), **T6.5-5** (§6.5: destinations `specs/B�.mdx` and `specs/B.mdx#x�` → exit 2, `code` `null`).
+- **Files:** `test/suite/registry/section-12.0-i.ts` (T12.0-5: four `show` arms today), `test/suite/registry/section-6.4.ts` (T6.4-3 ~1340), `test/suite/registry/section-6.5.ts` (T6.5-5). If T6.4-3's non-UTF-8 leg requires raw argv bytes the subprocess driver cannot pass (Node spawns strings), extend `test/helpers/subprocess.ts` with a Linux-only raw-bytes path (e.g. through `/bin/sh -c` with `$'\xff'` quoting) rather than dropping the leg.
+- **Verify:** the three tests pass or fail as diagnosed; each U+FFFD arm proven configuration-independent (invalid or absent configuration, same outcome).
+- **Depends on:** Task 6 (T6.4-3's exact-identities expectation).
+
+## Task 47 — T12.0-10: one arm per syntax-class member, configuration-independent
+
+- **Source:** reviewer B gap 21.
+- **Requirement:** TEST-SPEC.md **T12.0-10** (line 469) — read whole; SPEC.md 12.0 (the syntax class: `--name=value`, a value-taking flag last, surplus operands, `--status`/`--strategy`/`--coverage bogus`, `--kinds` empty or with a foreign element, two exactly-one-of flags together, `--test-hold` beside `--preview`, a `view` operand beside `--file`, a `.x` session name, `+7`, a malformed `--to`, `--tag a\b`, `--file ../x`, and the rest the entry lists), each identical with the configuration invalid or missing, `code` `null`; plus `query nodes --group` of the wrong kind.
+- **Files:** `test/suite/registry/section-12.0-ii.ts` (T12.0-10 stages five arms today; a table of `{argv, expectation}` rows keeps the edit bounded).
+- **Verify:** passes or fails as diagnosed.
+
+## Task 48 — Register T12.0-14 (invocation grammar)
+
+- **Source:** reviewer B gap 2.
+- **Requirement:** TEST-SPEC.md **T12.0-14** (line 473) — read whole (12.0's token rules, each arm discriminating a lenient parser: `--name=value`, `ids extra`, `ids --file --json`, `--`, `-a` names, `--kinds depends,`, and the remaining arms it lists); SPEC.md 12.0.
+- **Files:** `test/suite/registry/section-12.0-ii.ts` or a new `section-12.0-iii.ts` (precedent `-i`/`-ii`), `index.ts`, `traceability.ts` ("12.0", plus each surface's passage as asserted).
+- **Verify:** registered (S-1 green); passes or fails as diagnosed.
+
+## Task 49 — Register T12.2-4 (staleness and policy on a failing workspace)
+
+- **Source:** reviewer B gap 3.
+- **Requirement:** TEST-SPEC.md **T12.2-4** (line 487) — read whole (14.10 and 14.12 confine themselves on a workspace failing validation as the entry states); SPEC.md 12.2, 13.3, 14.10, 14.12.
+- **Files:** `test/suite/registry/section-12.1-12.2.ts` (new entry), `index.ts`, `traceability.ts` ("12.2", "13.3", "14" as asserted).
+- **Verify:** registered (S-1 green); passes or fails as diagnosed.
+
+---
+
+End of plan: 49 tasks. When the last task is done, delete this file.
