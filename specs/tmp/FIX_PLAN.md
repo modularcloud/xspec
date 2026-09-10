@@ -18,13 +18,6 @@ Ordering: Part A turns the three red self-tests green (certification manifest/ga
 
 ## Part B — shared helpers (land before their consumers)
 
-## Task 5 — H-3 form-exact decoder for the performed `rename`/`move` report; T6.4-1, T6.5-1 (mapping cardinality), T6.6-2, T12.7-2 consume it
-
-- **Source:** reviewer A gap 3 (and the root-pair clause of gap 16); reviewer B gap 23.
-- **Requirement:** TEST-SPEC.md §0 **H-3** (every JSON datum decoded form-exact); SPEC.md 12.7 "`rename`/`move` performed" bullet — exactly the members `{"findings","mapping"}`, `findings` `[]`, `mapping` an array of `{"from","to"}` pairs **ordered by `from` bytes**; **T6.4-1**; **T6.5-1** (one mapping entry per node of the moved subtree, the root's bare-path pair included); **T6.6-2** (the performed `mapping` byte-equal to the preview's `mapping`); **T12.7-2** (line 512: document forms). CERTIFICATIONS.md §CONF-CORE scope names "reporting the applied mapping in the performed-operation form of 12.7" — the conformer `test/fixtures/conf-core/product.mjs` must emit exactly that form if any in-scope test decodes it.
-- **Files:** `test/helpers/adapters/forms.ts` (new `decodePerformedOperationReport`, beside the preview decoder, rejecting any extra or missing member, non-empty `findings`, an unordered or duplicated `mapping`, or a pair with members other than `from`/`to`); `test/helpers/adapters/operations.ts` (`decodeAppliedMappingReport` retired or made a thin alias of the form-exact decoder — no "members beside `mapping` are ignored"); `test/helpers/adapters/model.ts` ~699–708 (delete the "shape is unpinned" statement); `test/suite/registry/support.ts` (`assertAppliedMapping` compares the ordered array with `toEqual`, not a set); call sites `section-6.4.ts` (T6.4-1), `section-6.5.ts` ~1211/1833/1965 (T6.5-1: expected arrays built per node, root pair first by byte order), `section-6.6.ts` ~459 (T6.6-2: `expect(performed.mapping).toEqual(preview.mapping)` on the raw decoded values), `section-12.7.ts` `runDocumentFormsArm` ~2166–2422 (add the performed document beside the other forms); `test/self/s5-output-adapters.test.ts` (cases for the new decoder's acceptance and each rejection).
-- **Verify:** S-5 green; `npm run test:self` green (certification unchanged or conformer fixed in the same task); touched product tests pass or fail as diagnosed.
-
 ## Task 6 — Form-exact refusal `identities` expectation; T6.4-3, T6.5-4, T14-7 assert the exact arrays
 
 - **Source:** reviewer A gaps 15 (identities clause) and 17; reviewer B gap 30 (identities clause).

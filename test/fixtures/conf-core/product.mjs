@@ -1886,6 +1886,11 @@ function descendantIdentities(node) {
 // Output helpers (SPEC 12.0 streams)
 // ---------------------------------------------------------------------------
 
+/** Byte order of two identity strings (SPEC 12.0: strings compare bytewise). */
+function compareIdentityBytes(a, b) {
+  return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+}
+
 function emitDoc(io, json, doc, humanLines) {
   if (json) {
     io.stdout(canonicalJson(doc) + "\n");
@@ -2636,7 +2641,21 @@ async function commandRename(io, cwd, argv) {
       // Finishing regeneration exactly as `build` (SPEC 6.4).
       const regenerated = await loadGraph(config.root, config.groups);
       await regenerate(regenerated);
-      emitDoc(io, flags["--json"] === true, { ok: true }, [
+      // The applied mapping in the performed-operation form of 12.7 (SPEC
+      // 6.4): exactly {"findings", "mapping"} — `findings` [] and `mapping`
+      // one {"from", "to"} per mapped identity, the renamed node and its
+      // descendants by prefix replacement, ordered by `from` bytes.
+      const mapping = model.sections
+        .filter(
+          (section) =>
+            section.id === oldId || section.id.startsWith(`${oldId}.`),
+        )
+        .map((section) => ({
+          from: `${file}#${section.id}`,
+          to: `${file}#${rewrittenOf(section.id)}`,
+        }))
+        .sort((a, b) => compareIdentityBytes(a.from, b.from));
+      emitDoc(io, flags["--json"] === true, { findings: [], mapping }, [
         `rename: ${file} ${oldId} -> ${newId}`,
       ]);
       return 0;
@@ -2706,7 +2725,7 @@ async function commandMove(io, cwd, argv) {
     cwd,
     flags["--config"],
     flags["--test-hold"],
-    async (config) => {
+    async (config, { graph }) => {
       const refusal = (message) => new RefusalError(message);
       if (await pathOccupied(path.join(config.root, newPath))) {
         throw refusal(
@@ -2740,7 +2759,20 @@ async function commandMove(io, cwd, argv) {
       });
       const regenerated = await loadGraph(config.root, config.groups);
       await regenerate(regenerated);
-      emitDoc(io, flags["--json"] === true, { ok: true }, [
+      // The applied mapping in the performed-operation form of 12.7 (SPEC
+      // 6.5): one pair per node of the moved file — the root's bare-path
+      // pair (old path to new) and every section, its ID kept and its file
+      // part changed — ordered by `from` bytes (the bare path a proper
+      // prefix of every `<path>#<id>` identity, so it sorts first).
+      const moved = graph.files.find((model) => model.rel === oldPath);
+      const mapping = [
+        { from: oldPath, to: newPath },
+        ...moved.sections.map((section) => ({
+          from: `${oldPath}#${section.id}`,
+          to: `${newPath}#${section.id}`,
+        })),
+      ].sort((a, b) => compareIdentityBytes(a.from, b.from));
+      emitDoc(io, flags["--json"] === true, { findings: [], mapping }, [
         `move: ${oldPath} -> ${newPath}`,
       ]);
       return 0;
