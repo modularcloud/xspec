@@ -1097,7 +1097,7 @@ const execFileAsync = promisify(execFile);
  * itself under the product's isolation — ambient `GIT_*` dropped, no
  * ceiling — the way the product's own git reads discover a repository.
  */
-async function assertOutsideAnyRepository(
+export async function assertOutsideAnyRepository(
   root: string,
   context: string,
 ): Promise<void> {

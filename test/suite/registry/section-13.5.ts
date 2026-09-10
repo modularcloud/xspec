@@ -8,7 +8,10 @@
 // mutation + build/query storm), T13.5-5 (atomic visibility via a polling
 // reader), T13.5-6 (workspace isolation), T13.5-7 (interrupted mutation:
 // held-point kill and a post-release kill-timing spread with the disjunctive
-// `check` assertion).
+// `check` assertion), T13.5-8 (acquisition before every later check: the
+// exclusion-first refusals on a failing workspace, the hold seam engaging on
+// invocations the 12.0 argument checks, baseline resolution, or the 13.3
+// gate refuse, and the non-mutating preview boundary).
 //
 // All mutual-exclusion choreography goes through the `--test-hold <path>`
 // seam (SPEC 13.5) via the subprocess driver's background-start, hold-file,
@@ -17,8 +20,8 @@
 // snapshots never see them; `--test-hold` resolves against the working
 // directory (SPEC 12.0; T12.0-5), so the absolute path is exact.
 //
-// CERTIFICATIONS.md staging constraints (binding; T13.5-1…T13.5-5 are
-// §CONF-CORE in-scope):
+// CERTIFICATIONS.md staging constraints (binding; T13.5-1…T13.5-5 and
+// T13.5-8 are §CONF-CORE in-scope):
 // - Every mutating command these tests drive is `rename`, file-form `move`
 //   (never the section form), or a mutating `review` subcommand with
 //   `create` under `--strategy audit` (§CONF-CORE), and the in-scope
@@ -41,6 +44,18 @@
 //   and its modifies-nothing compare brackets each excluded command alone,
 //   with the baseline snapshot taken while command 1 is already held
 //   (§VIOL-CORE-EARLYWRITE).
+// - T13.5-8's failing workspace is a second spec source beginning with a
+//   byte-order mark (14.20 at offset 0), added after the valid `build` and
+//   the audit session's creation, masked and never an operand; the `build`
+//   establishing it runs outside every bracket and before anything is held
+//   (§VIOL-CORE-CHATTYREADS); its excluded commands carry no `--test-hold`
+//   (§VIOL-CORE-NOLOCK) and its modifies-nothing compares bracket each
+//   excluded or refused invocation alone (§VIOL-CORE-EARLYWRITE); its
+//   refused valid-workspace commands start on a freshly built workspace
+//   lying in no repository, where every `--base` ref is unresolvable
+//   (§CONF-CORE); and its waits for a refused invocation's hold file fail
+//   loud, never proceeding on the command's exit or on a timeout
+//   (§VIOL-CORE-LATELOCK).
 // - T13.5-3's subsequent mutating command succeeds whether or not the killed
 //   operation's writes landed — `rename specs/A.mdx g g2`, independent of
 //   the killed `a`→`a2` and never a retry of it (§VIOL-CORE-EARLYWRITE).
@@ -105,16 +120,21 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import type {
+  Finding,
   SessionStatusReport,
   SessionStatusRow,
 } from "../../helpers/adapters/index.js";
-import { decodeSessionStatusReport } from "../../helpers/adapters/index.js";
+import {
+  decodeFindingsReport,
+  decodeSessionStatusReport,
+} from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
   assertExitCode,
   describeByteDifference,
   fail,
   HarnessAssertionError,
+  parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -139,7 +159,16 @@ import {
 } from "../../helpers/subprocess.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import { buildOk, expectExit, runCli, runJson } from "./support.js";
+import { assertOutsideAnyRepository } from "./section-6.3.js";
+import {
+  assertConditionCounts,
+  assertFindingLocated,
+  buildFindings,
+  buildOk,
+  expectExit,
+  runCli,
+  runJson,
+} from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
 // other keys — the CONF-CORE workspace shape (CERTIFICATIONS.md).
@@ -1829,6 +1858,445 @@ const T13_5_7 = defineProductTest({
 });
 
 /** TEST-SPEC §13.5, in canonical ID order (SUITE-48). */
+// ---------------------------------------------------------------------------
+// T13.5-8 — acquisition before every later check
+// ---------------------------------------------------------------------------
+
+// The one condition CONF-CORE's failing workspace stages (CERTIFICATIONS.md
+// §CONF-CORE's staging constraint on T13.5-8): a second spec source beginning
+// with a UTF-8 byte-order mark — unparseable (SPEC 1.6, 14.20), its finding
+// the zero-length range at offset 0 (SPEC 14), the file masked and never an
+// operand of any arm's command — added after the workspace was built valid
+// and after the session the held `review resolve` names was created under
+// `--strategy audit`. U+FEFF encodes to EF BB BF; the workspace builder
+// writes string contents with BOMs kept (S-2). The code point is spelled
+// numerically so the source carries no escape sequence to misread.
+const BOM_FILE = "specs/B.mdx";
+const BOM_MDX =
+  String.fromCodePoint(0xfeff) + '<S id="b">\nBom content.\n</S>\n';
+
+/**
+ * The failing workspace's findings as `build` and the gate of 13.3 report
+ * them: exactly one finding, condition 20 (unparseable source), located in
+ * the BOM-led file — the one condition the staging presents (§CONF-CORE).
+ * The finding's identity and file carry the arm; the range SPEC 14 pins for
+ * a byte-order mark (zero-length, at offset 0) is 14.20's own subject
+ * (T1.6-5, T14), not this test's, so it is not re-asserted here.
+ */
+function assertGateFindings(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertConditionCounts(
+    findings,
+    { "14.20": 1 },
+    `${context}: exactly the one condition the failing workspace stages — ` +
+      `the BOM-led source's unparseability (SPEC 14.20, 13.3)`,
+  );
+  assertFindingLocated(
+    findings[0]!,
+    { file: BOM_FILE },
+    `${context}: the condition-20 finding locates the BOM-led file ` +
+      `${BOM_FILE} — the masked source, never an operand (SPEC 14, 14.20)`,
+  );
+}
+
+/**
+ * Drive one invocation a later check refuses or the gate turns back, under
+ * `--test-hold` with no other holder (SPEC 13.5: exclusivity is acquired
+ * before the argument checks of 12.0, baseline resolution (6.3), and the
+ * gate of 13.3, so the seam engages on such an invocation too): the hold
+ * file is created first — the wait fails loud, a diagnosed product failure,
+ * when the command exits before creating it, as a product acquiring late
+ * does, reporting the refusal at once with no hold file (§CONF-CORE's
+ * justification; H-8, H-9: never a pass on the command's exit or on a
+ * timeout) — the workspace is byte-identical while held, the command is
+ * still running after the while-held snapshot, and only once the harness
+ * deletes the hold file does it exit, with `expectedExit` and nothing
+ * modified. Returns the run for the caller's own report assertions.
+ */
+async function refusedSeamArm(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  holdName: string,
+  expectedExit: number,
+  context: string,
+  ordering: string,
+): Promise<RunResult> {
+  const hold = holdPathFor(workspace, holdName);
+  const before = await snapshotDirectory(workspace.root);
+  const running = await startProduct(product, {
+    cwd: workspace.root,
+    argv: [...argv, "--test-hold", hold],
+  });
+  try {
+    await awaitHoldFile(
+      running,
+      hold,
+      `${context}: ${ordering}, so the hold file is created before the ` +
+        `refusal is judged — a product judging it first reports it without ` +
+        `ever creating the hold file`,
+    );
+    await assertEmptyHoldFile(hold, context);
+    const whileHeld = await snapshotDirectory(workspace.root);
+    assertSnapshotsEqual(
+      before,
+      whileHeld,
+      `${context}: the workspace while held vs before the command started — ` +
+        `byte-identical: the hold precedes every later check and every ` +
+        `modification, and a refused invocation modifies nothing (SPEC 13.5)`,
+    );
+    if (running.hasExited()) {
+      fail(
+        `${context}: the command must exit only after the hold file is ` +
+          `deleted — its refusal follows the hold — but it exited while the ` +
+          `hold file still existed (SPEC 13.5) — ${await describeExit(running)}`,
+      );
+    }
+    await releaseHoldFile(hold);
+    let result: RunResult;
+    try {
+      result = await running.waitForExit();
+    } catch (error) {
+      return fail(
+        `${context}: once the hold file is deleted the command must proceed ` +
+          `to its own refusal and exit (SPEC 13.5) — ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    assertExitCode(
+      result,
+      expectedExit,
+      `${context}: after the hold's deletion the command exits with its ` +
+        `own outcome — ${ordering} (SPEC 13.5, 12.0)`,
+    );
+    assertSnapshotsEqual(
+      before,
+      await snapshotDirectory(workspace.root),
+      `${context}: the refused invocation modifies nothing — before, while ` +
+        `held, and after (SPEC 13.5, 12.0)`,
+    );
+    return result;
+  } finally {
+    running.kill();
+    await releaseHoldFile(hold);
+  }
+}
+
+/**
+ * The failing-workspace arms — exclusion first, then the gate's seam
+ * ordering — on one workspace built valid, its audit session created, and
+ * only then failed by the BOM-led second source (§CONF-CORE): the gate
+ * writes nothing on it (SPEC 13.3), so every command here starts where no
+ * refresh is pending (§VIOL-CORE-EARLYREFRESH's passing side). The `build`
+ * that establishes the failing workspace runs outside every bracket and
+ * before anything is held (§VIOL-CORE-CHATTYREADS's passing side).
+ */
+async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
+  await withWorkspace(CORE_DECL, async (workspace) => {
+    await buildOk(product, workspace, "T13.5-8 staging `build`");
+    await expectExit(
+      product,
+      workspace,
+      ["review", "create", "--strategy", "audit", "--name", "s"],
+      0,
+      "T13.5-8 staging `review create --strategy audit --name s`",
+    );
+    const status = await sessionStatus(
+      product,
+      workspace,
+      "s",
+      "T13.5-8 staging",
+    );
+    const gItem = requireRowByScope(
+      status,
+      "specs/A.mdx#g",
+      "T13.5-8 staging (leaf item)",
+    );
+
+    // The workspace now fails `build`'s validations: the staging premise,
+    // established through `build --json` itself — exit 1, exactly the
+    // condition-20 finding at the BOM file's offset 0 — before any command
+    // is held and outside every bracket.
+    await workspace.file(BOM_FILE, BOM_MDX);
+    const premise =
+      "T13.5-8 staging premise `build --json` on the failing workspace " +
+      `(${BOM_FILE} begins with a byte-order mark)`;
+    assertGateFindings(
+      await buildFindings(product, workspace, premise),
+      premise,
+    );
+
+    // Exclusion first (SPEC 13.5: the refusal precedes the gate's findings
+    // and the precondition's): command 1 is `review resolve` under
+    // `--test-hold` — acquisition precedes the gate of 13.3, so it holds
+    // rather than exiting 1 at the gate — and each other mutating command,
+    // valid in its own right and carrying no `--test-hold`
+    // (§VIOL-CORE-NOLOCK's staging constraint), is refused exit 2 while it
+    // is held, never the gate's or the precondition's exit 1, modifying
+    // nothing — the compare bracketing each excluded command alone with its
+    // baseline taken while command 1 is already held (§CONF-CORE,
+    // §VIOL-CORE-EARLYWRITE; T13.5-2's compare).
+    const hold = holdPathFor(workspace, "hold-resolve.tmp");
+    const context1 =
+      "T13.5-8 command 1 `review resolve s <leaf item> --status skipped " +
+      "--test-hold <path>` on the failing workspace";
+    const running = await startProduct(product, {
+      cwd: workspace.root,
+      argv: [
+        "review",
+        "resolve",
+        "s",
+        gItem.id,
+        "--status",
+        "skipped",
+        "--test-hold",
+        hold,
+      ],
+    });
+    try {
+      await awaitHoldFile(
+        running,
+        hold,
+        `${context1}: exclusivity is acquired before the gate of 13.3, so ` +
+          `the hold file is created before the gate turns the command back ` +
+          `— a product running the gate first exits 1 there without ever ` +
+          `creating it`,
+      );
+      await assertEmptyHoldFile(hold, context1);
+      const heldBaseline = await snapshotDirectory(workspace.root);
+      const excluded: readonly (readonly [
+        readonly string[],
+        string,
+        string,
+      ])[] = [
+        [
+          ["review", "create", "--strategy", "audit", "--name", "n"],
+          "`review create --strategy audit --name n`",
+          "the gate of 13.3",
+        ],
+        [
+          ["review", "resolve", "s", gItem.id, "--status", "skipped"],
+          "`review resolve s <leaf item> --status skipped`",
+          "the gate of 13.3",
+        ],
+        [
+          ["rename", "specs/A.mdx", "a", "b"],
+          "`rename specs/A.mdx a b`",
+          "rename's valid-workspace precondition (6.4)",
+        ],
+      ];
+      for (const [argv, what, later] of excluded) {
+        const context = `T13.5-8 excluded ${what} while command 1 is held on the failing workspace`;
+        const result = await runBounded(product, workspace.root, argv, context);
+        assertExitCode(
+          result,
+          2,
+          `${context}: the mutual-exclusion refusal precedes ${later} — a ` +
+            `usage error, exit 2, never the exit 1 of a product that runs ` +
+            `${later} before acquiring exclusivity (SPEC 13.5, 13.3, 12.0)`,
+        );
+        if (running.hasExited()) {
+          fail(
+            `${context}: command 1 must still be held when the excluded ` +
+              `command exits — the refusal is prompt, not a wait for ` +
+              `command 1 (SPEC 13.5) — ${await describeExit(running)}`,
+          );
+        }
+        assertSnapshotsEqual(
+          heldBaseline,
+          await snapshotDirectory(workspace.root),
+          `${context}: modifies nothing — journal, sessions, and sources ` +
+            `byte-identical (SPEC 13.5; T13.5-2's compare)`,
+        );
+      }
+
+      await releaseHoldFile(hold);
+      let result1: RunResult;
+      try {
+        result1 = await running.waitForExit();
+      } catch (error) {
+        return fail(
+          `${context1}: once the hold file is deleted command 1 must ` +
+            `proceed to the gate and exit (SPEC 13.5, 13.3) — ` +
+            `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      assertExitCode(
+        result1,
+        1,
+        `${context1}: after the hold's deletion the gate of 13.3 turns the ` +
+          `command back with the failing workspace's findings, exit 1 (SPEC ` +
+          `13.3, 13.5)`,
+      );
+      assertSnapshotsEqual(
+        heldBaseline,
+        await snapshotDirectory(workspace.root),
+        `${context1}: the gate writes nothing — the session file unchanged, ` +
+          `no refresh on a failing workspace (SPEC 13.3)`,
+      );
+    } finally {
+      running.kill();
+      await releaseHoldFile(hold);
+    }
+
+    // Seam ordering at the gate (SPEC 13.3: for a mutating `review`
+    // subcommand, exclusivity acquisition precedes the gate's report; 13.5):
+    // with no other holder, `review create --strategy audit --name n` on the
+    // failing workspace creates the hold file first, holds the workspace
+    // byte-identical, and only after the hold's deletion exits 1 with the
+    // condition-20 finding, creating no session.
+    const gateContext =
+      "T13.5-8 (seam ordering at the gate: `review create --strategy audit " +
+      "--name n --json --test-hold <path>` on the failing workspace)";
+    const gateResult = await refusedSeamArm(
+      product,
+      workspace,
+      ["review", "create", "--strategy", "audit", "--name", "n", "--json"],
+      "hold-gate.tmp",
+      1,
+      gateContext,
+      "exclusivity is acquired before the gate of 13.3",
+    );
+    assertGateFindings(
+      decodeFindingsReport(
+        parseJsonStdout(
+          gateResult,
+          `${gateContext} — the gate's report is the findings report of ` +
+            `12.7 as the entire stdout (SPEC 13.3, 12.0, H-5)`,
+        ),
+        gateContext,
+      ).findings,
+      gateContext,
+    );
+  });
+}
+
+/**
+ * The valid-workspace arms: the seam ordering of the 12.0 argument checks
+ * and of baseline resolution (6.3), then the non-mutating boundary of 6.6 —
+ * each refused invocation started on a freshly built workspace with no
+ * refresh pending (§CONF-CORE's freshness constraint) that lies in no
+ * repository (§CONF-CORE's staging constraint on the baseline arm: every
+ * ref is unresolvable there, whatever its spelling).
+ */
+async function validWorkspaceArms(product: ProductBinding): Promise<void> {
+  await withWorkspace(CORE_DECL, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      "T13.5-8 staging `build` (valid workspace)",
+    );
+    await assertOutsideAnyRepository(
+      workspace.root,
+      "T13.5-8 (seam ordering: `review create --base <unresolvable-ref>`)",
+    );
+
+    // A nonexistent old ID: the argument checks of 12.0 refuse it (6.4),
+    // after acquisition and the hold.
+    await refusedSeamArm(
+      product,
+      workspace,
+      ["rename", "specs/A.mdx", "nope", "x"],
+      "hold-nope.tmp",
+      2,
+      "T13.5-8 (seam ordering: `rename specs/A.mdx nope x --test-hold " +
+        "<path>`, a nonexistent old ID)",
+      "exclusivity is acquired before the argument checks of 12.0 — a " +
+        "nonexistent old ID's usage error (6.4)",
+    );
+
+    // An unresolvable baseline: in no repository, no ref can be read — a
+    // usage error (6.3, 12.0), judged after acquisition and the hold.
+    await refusedSeamArm(
+      product,
+      workspace,
+      ["review", "create", "--base", "no-such-ref", "--name", "n"],
+      "hold-base.tmp",
+      2,
+      "T13.5-8 (seam ordering: `review create --base no-such-ref --name n " +
+        "--test-hold <path>`, the workspace in no repository)",
+      "exclusivity is acquired before baseline resolution — a baseline " +
+        "that cannot be read is a usage error (6.3)",
+    );
+
+    // The non-mutating boundary (SPEC 6.6: a preview acquires no
+    // exclusivity and does not take the acquisition-tied seam): the refused
+    // preview exits 2 at once, and `--test-hold` beside `--preview` is
+    // itself a usage error creating no hold file (T6.6-3).
+    const previewContext =
+      "T13.5-8 (non-mutating boundary: `rename specs/A.mdx nope x --preview`)";
+    await assertLeavesUnchanged(
+      workspace.root,
+      async () => {
+        const result = await runBounded(
+          product,
+          workspace.root,
+          ["rename", "specs/A.mdx", "nope", "x", "--preview"],
+          previewContext,
+        );
+        assertExitCode(
+          result,
+          2,
+          `${previewContext}: the refused preview — a nonexistent old ID's ` +
+            `usage error — exits 2 at once, a preview acquiring no ` +
+            `exclusivity and taking no seam (SPEC 6.6, 6.4, 12.0)`,
+        );
+      },
+      `${previewContext}: a preview modifies nothing (SPEC 6.6)`,
+    );
+    const previewHold = holdPathFor(workspace, "hold-preview.tmp");
+    const combinedContext =
+      "T13.5-8 (non-mutating boundary: `rename specs/A.mdx nope x --preview " +
+      "--test-hold <path>`)";
+    await assertLeavesUnchanged(
+      workspace.root,
+      async () => {
+        const result = await runBounded(
+          product,
+          workspace.root,
+          [
+            "rename",
+            "specs/A.mdx",
+            "nope",
+            "x",
+            "--preview",
+            "--test-hold",
+            previewHold,
+          ],
+          combinedContext,
+        );
+        assertExitCode(
+          result,
+          2,
+          `${combinedContext}: --test-hold beside --preview is a usage ` +
+            `error — a preview does not take the acquisition-tied seam ` +
+            `(SPEC 6.6, 12.0; T6.6-3)`,
+        );
+        if (await pathExists(previewHold)) {
+          fail(
+            `${combinedContext}: no hold file may be created — a preview ` +
+              `acquires nothing, and the flag is refused, not honored ` +
+              `(SPEC 6.6, 13.5)`,
+          );
+        }
+      },
+      `${combinedContext}: the usage error modifies nothing (SPEC 6.6, 12.0)`,
+    );
+  });
+}
+
+const T13_5_8 = defineProductTest({
+  id: "T13.5-8",
+  title:
+    "acquisition precedes every later check: while `review resolve --test-hold` is held on a workspace failing `build`'s validations (a second spec source beginning with a byte-order mark, 14.20), `review create --strategy audit --name n`, `review resolve s <item> --status skipped`, and `rename specs/A.mdx a b` each fail promptly with the exclusion usage error, exit 2 — never the gate's or the precondition's exit 1 — modifying nothing; under `--test-hold` with no other holder, `rename specs/A.mdx nope x` (a nonexistent old ID, 12.0), `review create --base <unresolvable-ref> --name n` (6.3, the workspace in no repository), and, on the failing workspace, `review create --strategy audit --name n` (13.3's gate) each create the hold file first — the wait failing loud when the command exits without creating it — the workspace byte-identical while held, and exit 2, 2, and 1 with their own usage error or the condition-20 finding only after the hold's deletion, nothing modified; the non-mutating boundary: `rename specs/A.mdx nope x --preview` exits 2 at once acquiring nothing, and `--test-hold` beside `--preview` is exit 2 creating no hold file (SPEC 13.5, 13.3, 6.3, 6.4, 6.6, 12.0, 14)",
+  run: async (product) => {
+    await failingWorkspaceArms(product);
+    await validWorkspaceArms(product);
+  },
+});
+
 export const section135Tests: readonly ProductTestEntry[] = [
   T13_5_1,
   T13_5_2,
@@ -1837,4 +2305,5 @@ export const section135Tests: readonly ProductTestEntry[] = [
   T13_5_5,
   T13_5_6,
   T13_5_7,
+  T13_5_8,
 ];
