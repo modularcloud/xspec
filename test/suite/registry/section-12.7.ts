@@ -260,6 +260,10 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import {
+  stageReadRefusalOfDirectory,
+  stageWriteRefusalUnder,
+} from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
@@ -286,6 +290,17 @@ import {
 
 /** Whether non-UTF-8 file names are stageable (module-header note). */
 const NON_UTF8_STAGED = process.platform === "linux";
+
+/**
+ * Whether T12.7-3's Linux-leg arms run (the NU3_STAGED pattern of
+ * section-11.5): a working directory that is a symbolic link (11.6's
+ * physical resolution) and the environment refusals of 14.24/14.25, staged by
+ * permission removal alone through `test/helpers/permissions.ts` (E-1 —
+ * each staging verifies itself on the harness's own process and reports an
+ * ineffective one, a privileged runner, as a harness error, never a pass or
+ * a skip; H-9, H-11). On any other platform the `--config` arms alone run.
+ */
+const LINUX_LEG_STAGED = process.platform === "linux";
 
 /** The 12.7 unavailability marker, as decoded (one-datum state). */
 const UNAVAILABLE = { unavailable: true } as const;
@@ -2447,6 +2462,14 @@ const ERR_MALFORMED_CONFIG =
 const ERR_SIBLING_CWD = "work";
 const ERR_SIBLING_CONFIG_FILE = "cfg/xspec.config.ts";
 const ERR_SIBLING_CONFIG_ARG = "../cfg/xspec.config.ts";
+// The same file named non-canonically — a `.` segment and an empty segment
+// (the doubled `/`): the spelling a product must echo byte-for-byte while
+// nothing occupies the path (SPEC 14), and must reduce to
+// ERR_SIBLING_CONFIG_ARG (11.6's canonical anchoring spelling) once the
+// malformed file exists.
+const ERR_SIBLING_CONFIG_ARG_NONCANONICAL = "./../cfg//xspec.config.ts";
+// A path under cfg/ that nothing ever occupies, named absolutely.
+const ERR_ABSENT_CONFIG_FILE = "cfg/absent.config.ts";
 
 /**
  * Diagnostics are standard-error content (SPEC 12.0; T12.7-3: "each the
@@ -2503,10 +2526,48 @@ async function expectAnchoredConfigurationError(
 }
 
 /**
+ * Assert an environment refusal's error document (SPEC 14.24, 14.25, 12.0,
+ * 12.7; T14-9 and T14-10 pin the per-command contracts and states): exit 2
+ * exactly — a usage error, never a finding and never an internal error —
+ * stderr diagnostics present, and stdout exactly the single 12.7 error
+ * document whose one finding carries the stable code `expectedCode`,
+ * locations [] (write and read conditions carry no in-source location,
+ * SPEC 14), and the concerned path exactly `expectedPath`.
+ */
+function assertEnvironmentRefusalDocument(
+  result: RunResult,
+  expectedCode: "write-failure" | "read-failure",
+  expectedPath: string,
+  context: string,
+): void {
+  const condition = expectedCode === "write-failure" ? "14.24" : "14.25";
+  const access = expectedCode === "write-failure" ? "write" : "read";
+  assertExitCode(
+    result,
+    2,
+    `${context} — a ${access} the environment refuses is a usage error: ` +
+      `the command stops at it and exits 2, never a finding, never an ` +
+      `internal error (SPEC ${condition}, 12.0)`,
+  );
+  assertStderrDiagnostic(result, context);
+  const finding = expectErrorDocument(result, context);
+  assertSameJson(
+    projectFindingForm(finding),
+    { code: expectedCode, path: expectedPath, locations: [] },
+    `${context} — the error document's one finding: the stable code ` +
+      `${JSON.stringify(expectedCode)} (SPEC ${condition}, 14), locations ` +
+      `[] (an unlocated condition, SPEC 14), and the concerned path ` +
+      `${JSON.stringify(expectedPath)} (SPEC ${condition}, 12.7; message: ` +
+      `${JSON.stringify(finding.message)})`,
+  );
+}
+
+/**
  * Arm: configuration-error concerned paths — the found and the
  * `--config`-named configuration file, each in the canonical anchoring
  * spelling (SPEC 14, 11.6), on `build --json` and on the bare JSON-only
- * `inventory` surface.
+ * `inventory` surface; a `--config` path nothing occupies echoed exactly as
+ * given (SPEC 14, 12.0).
  */
 async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
   await withWorkspace(
@@ -2594,6 +2655,46 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
           "a build failing at configuration load modifies nothing (SPEC " +
           "12.1)",
       );
+      // Naming a path nothing occupies, the argument value is echoed EXACTLY
+      // as given (SPEC 14: the one concerned path no physical resolution can
+      // spell; 12.0): the non-canonical spelling `./../cfg//xspec.config.ts`
+      // — a `.` segment and a doubled `/` — byte-for-byte, never reduced to
+      // `../cfg/xspec.config.ts`; and an absolute path as given, 12.0's sole
+      // absolute-form echo beside 11.6's drive case — failing a product that
+      // canonicalizes a nonexistent argument, and one that reports the
+      // invalid root file the upward search would find.
+      const absentAbsoluteArg = workspace.path(ERR_ABSENT_CONFIG_FILE);
+      await assertLeavesUnchanged(
+        workspace.root,
+        async () => {
+          await expectAnchoredConfigurationError(
+            product,
+            siblingCwd,
+            [
+              "build",
+              "--json",
+              "--config",
+              ERR_SIBLING_CONFIG_ARG_NONCANONICAL,
+            ],
+            ERR_SIBLING_CONFIG_ARG_NONCANONICAL,
+            "T12.7-3 `build --json --config ./../cfg//xspec.config.ts` from " +
+              "the sibling directory work/ (the named path unoccupied: the " +
+              "argument value echoed byte-for-byte, SPEC 14)",
+          );
+          await expectAnchoredConfigurationError(
+            product,
+            siblingCwd,
+            ["build", "--json", "--config", absentAbsoluteArg],
+            absentAbsoluteArg,
+            `T12.7-3 \`build --json --config ${absentAbsoluteArg}\` from ` +
+              "the sibling directory work/ (an absolute path nothing " +
+              "occupies: echoed as given, SPEC 14, 12.0)",
+          );
+        },
+        "T12.7-3 sibling-directory `--config` naming unoccupied paths " +
+          "non-canonically and absolutely: a build failing at " +
+          "configuration load modifies nothing (SPEC 12.1)",
+      );
       await workspace.file(ERR_SIBLING_CONFIG_FILE, ERR_MALFORMED_CONFIG);
       await assertLeavesUnchanged(
         workspace.root,
@@ -2609,6 +2710,34 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
           ),
         "T12.7-3 sibling-directory `--config` naming a malformed file: a " +
           "build failing at configuration load modifies nothing (SPEC 12.1)",
+      );
+      // The malformed file now existing, the same non-canonical spelling and
+      // the absolute path name IT — a path its occupant makes resolvable —
+      // so each reports 11.6's canonical anchoring spelling relative to the
+      // invocation working directory, `../cfg/xspec.config.ts` (SPEC 14:
+      // the path --config names, whatever occupies it, in the anchoring
+      // form), never the argument as given: existence, not spelling, decides
+      // the form.
+      const existingAbsoluteArg = workspace.path(ERR_SIBLING_CONFIG_FILE);
+      await expectAnchoredConfigurationError(
+        product,
+        siblingCwd,
+        ["build", "--json", "--config", ERR_SIBLING_CONFIG_ARG_NONCANONICAL],
+        ERR_SIBLING_CONFIG_ARG,
+        "T12.7-3 `build --json --config ./../cfg//xspec.config.ts` from " +
+          "the sibling directory work/ (the named file existing and " +
+          "malformed: the canonical anchoring spelling, never the argument " +
+          "as given)",
+      );
+      await expectAnchoredConfigurationError(
+        product,
+        siblingCwd,
+        ["build", "--json", "--config", existingAbsoluteArg],
+        ERR_SIBLING_CONFIG_ARG,
+        `T12.7-3 \`build --json --config ${existingAbsoluteArg}\` from ` +
+          "the sibling directory work/ (the named file existing and " +
+          "malformed: the canonical anchoring spelling relative to the " +
+          "working directory, never the absolute argument as given)",
       );
       // A JSON-only surface without `--json`: bare `inventory` under the
       // invalid configuration — JSON output is in effect (SPEC 12.0, 11),
@@ -2846,6 +2975,133 @@ const T12_7_2 = defineProductTest({
   },
 });
 
+/**
+ * Arm (Linux leg): 11.6's physical resolution of the invocation working
+ * directory. From `R/L`, a symbolic link to `R/a/b`, `--config
+ * ./../xspec.config.ts` names `R/a/xspec.config.ts` — the argument resolved
+ * against the physical working directory (SPEC 12.0, 7) — a malformed
+ * existing file, so the concerned path is its canonical anchoring spelling
+ * over the PHYSICAL relation between the working directory and the file:
+ * `../xspec.config.ts` (SPEC 11.6: the working directory enters the spelling
+ * with every symbolic link among its components resolved). Never
+ * `../a/xspec.config.ts`, the relation spelled from the link's lexical
+ * position, and never the argument as given, `./../xspec.config.ts` — the
+ * form reserved for a path nothing occupies (SPEC 14), which a product
+ * resolving the argument lexically from `R/L` (finding nothing at
+ * `R/xspec.config.ts`) would report.
+ */
+async function runErrorSymlinkWorkingDirectoryArm(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace(
+    {
+      files: { "a/xspec.config.ts": ERR_MALFORMED_CONFIG },
+      dirs: ["a/b"],
+      symlinks: { L: "a/b" },
+    },
+    async (workspace) => {
+      await expectAnchoredConfigurationError(
+        product,
+        workspace.path("L"),
+        ["build", "--json", "--config", "./../xspec.config.ts"],
+        "../xspec.config.ts",
+        "T12.7-3 `build --json --config ./../xspec.config.ts` from the " +
+          "working directory R/L, a symbolic link to R/a/b (the malformed " +
+          "configuration at R/a/xspec.config.ts: the physical relation " +
+          "between the working directory and the file, SPEC 11.6)",
+      );
+    },
+  );
+}
+
+/** A second valid source, under the directory staged unlistable. */
+const ERR_SUB_SOURCE = '<S id="s">\nSigma.\n</S>\n';
+
+/**
+ * Arms (Linux leg): the error documents of the two environment refusals,
+ * each staged by permission removal alone (E-1) through the shared
+ * permission-staging helpers — T14-6's stagings, the documents here asserted
+ * form-exact on code AND concerned path (T14-9 and T14-10 pin the
+ * per-command contracts and the states left):
+ * - 14.24: a stale workspace whose graph-data area `.xspec` is unwritable —
+ *   `build --json` regenerates the derived files under the writable `specs/`
+ *   and is refused at its graph-data write, whatever its write order — the
+ *   error document `{"code": "write-failure", "path": ".xspec"}`: a write of
+ *   graph data concerns the graph-data area, no path inside it named (SPEC
+ *   14.24, 11.6);
+ * - 14.25: a directory discovery lists, `specs/sub`, staged unlistable with
+ *   search kept — `build --json` stops at the refused listing — the error
+ *   document `{"code": "read-failure", "path": "specs/sub"}`: the concerned
+ *   path is the object's workspace-relative path (SPEC 14.25).
+ */
+async function runErrorEnvironmentRefusalArms(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        "specs/A.mdx": ERR_SOURCE,
+      },
+    },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T12.7-3 (14.24) staging `build` (SPEC 12.1)",
+      );
+      await workspace.file("specs/A.mdx", '<S id="a">\nAlpha, edited.\n</S>\n');
+      const staging = await stageWriteRefusalUnder(workspace.path(".xspec"));
+      try {
+        const context =
+          "T12.7-3 `build --json` with the graph-data area .xspec " +
+          "unwritable on the stale workspace";
+        const result = await runProduct(product, {
+          cwd: workspace.root,
+          argv: ["build", "--json"],
+        });
+        assertEnvironmentRefusalDocument(
+          result,
+          "write-failure",
+          ".xspec",
+          context,
+        );
+      } finally {
+        await staging.restore();
+      }
+    },
+  );
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        "specs/A.mdx": ERR_SOURCE,
+        "specs/sub/S.mdx": ERR_SUB_SOURCE,
+      },
+    },
+    async (workspace) => {
+      const staging = await stageReadRefusalOfDirectory(
+        workspace.path("specs/sub"),
+      );
+      try {
+        const context = "T12.7-3 `build --json` with specs/sub unlistable";
+        const result = await runProduct(product, {
+          cwd: workspace.root,
+          argv: ["build", "--json"],
+        });
+        assertEnvironmentRefusalDocument(
+          result,
+          "read-failure",
+          "specs/sub",
+          context,
+        );
+      } finally {
+        await staging.restore();
+      }
+    },
+  );
+}
+
 // ---------------------------------------------------------------------------
 // T12.7-3 — error document
 // ---------------------------------------------------------------------------
@@ -2873,12 +3129,29 @@ const T12_7_3 = defineProductTest({
     "an invalid configuration) and whenever --json appears among the " +
     "arguments, the arguments themselves erroneous included (an unknown " +
     "command beside --json) — each the error document on stdout with " +
-    "diagnostics on stderr (SPEC 12.0, 12.7, 14, 11.6, 12.1)",
+    "diagnostics on stderr; a --config path nothing occupies is reported as " +
+    "the argument value exactly as given — ./../cfg//xspec.config.ts " +
+    "byte-for-byte and an absolute path — while the same spellings naming " +
+    "the malformed existing file report the canonical " +
+    "../cfg/xspec.config.ts; (Linux leg) from a working directory R/L that " +
+    "is a symbolic link to R/a/b, --config ./../xspec.config.ts naming the " +
+    "malformed R/a/xspec.config.ts reports ../xspec.config.ts, the physical " +
+    "relation, never ../a/xspec.config.ts and never the spelling as given; " +
+    "(Linux leg, permission-staged) a write the environment refuses — " +
+    ".xspec unwritable on a stale workspace — is " +
+    '{"code": "write-failure", "path": ".xspec"} and a read it refuses — ' +
+    'specs/sub unlistable — is {"code": "read-failure", "path": ' +
+    '"specs/sub"}, each locations [] with diagnostics on stderr (SPEC 12.0, ' +
+    "12.7, 14, 11.6, 7, 12.1, 14.24, 14.25)",
   run: async (product) => {
     await runErrorConfigPathsArm(product);
     await runErrorSearchFailureArm(product);
     await runErrorSingleFindingArm(product);
     await runErrorUsageArm(product);
+    if (LINUX_LEG_STAGED) {
+      await runErrorSymlinkWorkingDirectoryArm(product);
+      await runErrorEnvironmentRefusalArms(product);
+    }
   },
 });
 
