@@ -1325,18 +1325,6 @@ const DECODERS: readonly DecoderSpec[] = [
       },
       {
         label:
-          "the retired refusal code refused-unresolvable-reference (no such " +
-          "reason in SPEC 14)",
-        doc: put(
-          GOOD_FINDINGS,
-          "refused-unresolvable-reference",
-          "findings",
-          4,
-          "code",
-        ),
-      },
-      {
-        label:
           "a write failure inside a findings array (14.24 is a usage error " +
           "carried only as the exit-2 error document's code, SPEC 14, 12.7)",
         doc: {

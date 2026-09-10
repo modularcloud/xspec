@@ -137,9 +137,9 @@
 //   participating import declarations exist in no pre-operation source, so
 //   that arm pins code and form alone, the home note); the remaining
 //   every-participant cardinality contract is T14-8's subject.
-//   `refused-unresolvable-reference` admits no fixture
-//   (TEST-SPEC T6.4-3, T6.5-6) and is asserted only as the always-passing
-//   side of successful operations (T6.4-1, T6.5-1/2/3): no arm here. The
+//   SPEC 14 lists exactly eight refusal reasons — no unresolvable-reference
+//   reason exists (its retired code is unknown to the form-exact decode,
+//   S-5), so no arm stages one. The
 //   exact self-move's modifies-nothing and journal discipline are staged
 //   at its home (T6.5-6); T14-7 asserts the identity-unchanged rename and
 //   the exact self-move of either form for their `identities` — the
@@ -182,6 +182,7 @@
 //   SPEC 2.1) isolates the import cycle as exactly one 14.9 finding.
 
 import { Buffer } from "node:buffer";
+import * as path from "node:path";
 import type { Finding, GraphEdge } from "../../helpers/adapters/index.js";
 import {
   CONDITION_CODE_TOKENS,
@@ -200,6 +201,10 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import {
+  stageReadRefusalOfDirectory,
+  stageWriteRefusalUnder,
+} from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
@@ -1943,10 +1948,29 @@ function assertCodeNull(finding: Finding, why: string, context: string): void {
   }
 }
 
+// The environment refusals of 14.24/14.25 are staged by permission removal
+// (E-1), the Linux leg's discipline: elsewhere the arms are not staged (the
+// NU3_STAGED pattern of section-11.5); the Windows subset (E-6) selects
+// T14-6 nowhere.
+const ENVIRONMENT_REFUSALS_STAGED = process.platform === "linux";
+
+// 14.25 (T14-10 (g)'s fixture): a directory the discovery of SPEC 7 lists,
+// under the glob `specs/**/*.mdx`, holding a valid source — staged unlistable
+// with search permission kept (its entry reachable by name; nonexistence is
+// never staged as a refusal, 14.25).
+const UNLISTABLE_DIR = "specs/sub";
+const READ_REFUSAL_DECL: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": SPECS_ONLY_CONFIG,
+    "specs/a.mdx": '<S id="a1">\nValid behavior.\n</S>\n',
+    [`${UNLISTABLE_DIR}/b.mdx`]: '<S id="b1">\nValid behavior.\n</S>\n',
+  },
+};
+
 const T14_6 = defineProductTest({
   id: "T14-6",
   title:
-    "stable codes: for each of the 23 conditions, staged via its primary test's fixture and read from its stated reporter, the finding carries the exact token 14 lists (`missing-id` … `unreadable-record`) as its `code` in the JSON report form — the value is the token string alone, the ordinal numeral no part of it — so a product omitting or misspelling a code fails even where exit class and located information are right; a plain usage error and a review-operation refusal carry no stable code — `code` null (SPEC 14, 12.7, 12.0)",
+    "stable codes: for each of the 25 conditions, staged via its primary test's fixture and read from its stated reporter: conditions 1–23 carry the exact token 14 lists (`missing-id` … `unreadable-record`) as the `code` of their finding in the JSON report form, and conditions 24 and 25 — usage errors, never findings — carry `write-failure` and `read-failure` as the `code` of the exit-2 error document, appearing in no findings array (environment refusals staged by permission removal, Linux leg) — the value is the token string alone, the ordinal numeral no part of it — so a product omitting or misspelling a code fails even where exit class and located information are right; a plain usage error and a review-operation refusal carry no stable code — `code` null (SPEC 14, 12.7, 12.0)",
   timeoutMs: 300_000,
   run: async (product) => {
     // --- The 18 conditions `build` reports, staged as T14-4 sweeps them
@@ -2071,6 +2095,83 @@ const T14_6 = defineProductTest({
         context,
       );
     });
+
+    // --- 14.24 `write-failure` and 14.25 `read-failure`: usage errors,
+    // never findings (SPEC 14.24, 14.25, 12.0) — each carries its stable
+    // code as the exit-2 error document's `code`, in no findings array
+    // (12.7). Both are environment refusals staged by permission removal
+    // alone (E-1, Linux leg): the harness verifies each staging on itself
+    // before the product runs and reports an ineffective one — a privileged
+    // runner — as a harness error, never a pass or a skip (H-9, H-11).
+    if (ENVIRONMENT_REFUSALS_STAGED) {
+      // 14.24, T14-9 (f)'s staging: a stale workspace whose graph-data area
+      // `.xspec` is unwritable — `build` (14.24's first-listed reporter)
+      // regenerates the derived files under the writable `specs/` and is
+      // refused at its graph-data write, whatever its write order: the
+      // command stops at the refused write and exits 2 (12.0: met only at
+      // the write it refuses, after every check and validation — the stale
+      // workspace passes them all).
+      await withWorkspace(STALE_DECL, async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T14-6 (14.24) staging `build` (SPEC 12.1)",
+        );
+        await workspace.file("specs/a.mdx", STALE_EDIT);
+        const staging = await stageWriteRefusalUnder(
+          path.join(workspace.root, ".xspec"),
+        );
+        try {
+          const context =
+            "T14-6 (14.24) `build --json` with `.xspec` unwritable on the " +
+            "stale workspace";
+          const result = await expectExit(
+            product,
+            workspace,
+            ["build", "--json"],
+            2,
+            `${context} — a write the environment refuses is a usage ` +
+              `error, exit 2, never a finding (SPEC 14.24, 12.0)`,
+          );
+          assertExactCodeToken(
+            [expectErrorDocument(result, context)],
+            24,
+            `${context} — the error document's finding`,
+          );
+        } finally {
+          await staging.restore();
+        }
+      });
+
+      // 14.25, T14-10 (g)'s staging: a directory discovery lists, staged
+      // unlistable — every command that loads the configuration exits 2
+      // with the error document at the read (14.25: reported by every
+      // command making the read); `build` is the representative.
+      await withWorkspace(READ_REFUSAL_DECL, async (workspace) => {
+        const staging = await stageReadRefusalOfDirectory(
+          path.join(workspace.root, UNLISTABLE_DIR),
+        );
+        try {
+          const context =
+            "T14-6 (14.25) `build --json` with `specs/sub` unlistable";
+          const result = await expectExit(
+            product,
+            workspace,
+            ["build", "--json"],
+            2,
+            `${context} — a read the environment refuses is a usage ` +
+              `error, exit 2, never a finding (SPEC 14.25, 12.0)`,
+          );
+          assertExactCodeToken(
+            [expectErrorDocument(result, context)],
+            25,
+            `${context} — the error document's finding`,
+          );
+        } finally {
+          await staging.restore();
+        }
+      });
+    }
 
     // --- `code` null: a plain usage error (T12.7-3's staging — an unknown
     // command, the error determined by the invocation's syntax alone)
@@ -2341,7 +2442,7 @@ const T14_7_BAD_INVALID =
 const T14_7 = defineProductTest({
   id: "T14-7",
   title:
-    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity — its identities exactly the one 1.5 identity over the destination file, the invalid ID spelled verbatim, no prefix-produced identity beside it (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename and by the exact self-move of either form, no collision or occupied-destination reason beside it, its identities the unchanged identity as the sole element — the bare `<new-file>` root identity for the file form; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing — its identities exactly the located bearers' identities in location order; refused-structural-parent and refused-missing-target-parent concerning the violated and the target-parent identity, each the sole identities element; refused-cycle locating the would-be cycle's participating spelling; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination; refused-unresolvable-reference admits no fixture and is asserted only as the always-passing side of successful operations; every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them (SPEC 14, 6.4, 6.5, 5.3, 12.0, 12.7)",
+    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity — its identities exactly the one 1.5 identity over the destination file, the invalid ID spelled verbatim, no prefix-produced identity beside it (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename and by the exact self-move of either form, no collision or occupied-destination reason beside it, its identities the unchanged identity as the sole element — the bare `<new-file>` root identity for the file form; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing — its identities exactly the located bearers' identities in location order; refused-structural-parent and refused-missing-target-parent concerning the violated and the target-parent identity, each the sole identities element; refused-cycle locating the would-be cycle's participating spelling; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination; the eight reasons 14 lists are the whole refusal vocabulary (no unresolvable-reference reason exists); every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them (SPEC 14, 6.4, 6.5, 5.3, 12.0, 12.7)",
   timeoutMs: 300_000,
   run: async (product) => {
     // --- The rename reasons, staged via T6.4-3's exported fixture: the
