@@ -67,6 +67,55 @@ existing-binding branch of the same loop (`analysis.imports.find(...)`, taken
 before the fresh-name branch) needs the module-scope knowledge Task 2's step
 1 collected as much as the fresh-name branch does.
 
+**Task 3 removal (2026-09-10, the next Phase 9 iteration).** Task 3 (a
+successful preview emitted before the in-memory re-validation that can
+refuse the real operation, SPEC 6.6) was removed on this date for this
+phase's scope alone: it is not implemented — `src/` is unchanged since
+72ad038; in `src/cli/commands/move.ts` `runMoveFile` still returns
+`emitSuccessfulPreview` (line 412) before `reanalyzeMoved` (431) and
+`runMoveSection` does so at 649 before `reanalyzeSectionMoved` (667), as
+`src/cli/commands/rename.ts` does at 224 before `reanalyzeRewritten` (240),
+each re-validation guard still commented "Unreachable" — and it reproduces
+against the build of 54b53a4 on a hand-staged workspace (the harness's E-6
+configuration; `specs/Origin.mdx` holding `org` > `org.mv`;
+`specs/Target.mdx` holding `hub`; `src/app.ts` holding `import ORG from
+"../specs/Origin.xspec"`, `const Target = 1; void Target;`, and the marker
+`ORG.org.mv`; `build --json` clean): `move specs/Origin.mdx#org.mv
+specs/Target.mdx#mv --preview --json` exits 0 with `"findings": []`,
+non-null `mapping`/`files`/`delta`, and an `import-addition` at `src/app.ts`
+offset 40 (the text form exits 0 likewise), while the real move exits 1
+with one `unsupported-node-usage` finding — `src/app.ts` 108–114, the local
+`Target` of `void Target;` located in the in-memory rewritten bytes'
+coordinates (shifted by the added declaration), not the on-disk file's —
+every source byte unchanged after every run. Nothing in it is stale: the
+6.6 sentence it quotes and the 13.5 exception persist verbatim in the
+rewritten SPEC, as does the refused-preview encoding (`mapping`, `files`,
+and `delta` `null`, 12.7); the revisit's only 6.6 edits are to the report
+bullets (the mapping's one entry per node whose identity changes, the
+specifier literal's delimiters, the self-closing target parent's insertion
+point), none touching refusal equivalence; T6.6-3, T6.6-5, and T6.6-6 of
+TEST-SPEC.md are byte-identical to 72ad038, and the re-wordings of T6.6-2
+(the real run compared through the 12.7 performed-operation document,
+`findings` `[]` and a byte-equal `mapping`) and T6.6-4 (the
+self-closing-parent insertion offset; a file-move preview's `mapping`
+entries) concern the success side only; and `emitFindingsRefusal(preview,
+json, stdout, findings)` (move.ts 146, rename.ts 95) already routes a
+preview refusal through `emitRefusedPreview`, so the change reads as
+written. No harness task follows: T6.6-3's refusal arms are T6.4-3's and
+T6.5-4's stagings, refusals both paths evaluate before either emits
+(`core/refusal.ts`, ahead of the preview return), so no arm reaches the
+post-planning re-validation, and none can once Task 2 lands (T6.5-9
+requires that move to succeed) — the divergence is reachable today only
+through Task 2's collision, as the task states, and the task's value is
+holding 6.6's equivalence by construction. Its requirement, diagnosis, and
+code pointers — in git history at 54b53a4 — remain valid inputs to the
+Phase 10 re-plan. Two pointers, not verified here: the harness's
+`test/suite/registry/section-6.6.ts` has no commit since 72ad038 while
+T6.6-2 and T6.6-4 were re-worded (a matter for the Phase 9 compliance
+determination, not this task); and a refusal raised by the re-validation
+locates its finding in the rewritten bytes' coordinates (above), which the
+re-plan should weigh wherever it keeps such a refusal reachable.
+
 **Rules for every task (read once per spawn):**
 
 - Phase 10: never modify the test harness (`test/`). Product code (`src/`)
@@ -101,46 +150,6 @@ before the fresh-name branch) needs the module-scope knowledge Task 2's step
   below — the relevant fixtures were checked while planning (noted per task).
 
 ---
-
-## Task 3 — A successful preview is emitted only after the same in-memory re-validation that can refuse the real operation (SPEC 6.6; reviewer A, gap 3)
-
-**Requirement.** SPEC 6.6: "A preview is refused exactly when — reporting
-what, and exiting as — the real operation would be refused, and succeeds
-exactly when the real operation would proceed" — over workspace state
-(validation and planning), the 13.5 exclusivity refusal excepted.
-
-**Observed.** On Task 2's staging, `move … --preview --json` exits 0 with
-`"findings": []` (reporting an `import-addition` at `src/app.ts` offset 41)
-while the real `move` exits 1 with one `unsupported-node-usage` finding. Today
-the divergence is reachable only through Task 2's collision; the preview
-nonetheless skips a step that can refuse, so the equivalence is not held by
-construction.
-
-**Location.** `src/cli/commands/move.ts`: `runMoveFile` returns
-`emitSuccessfulPreview` (line ~412) before `reanalyzeMoved` (line ~431) and
-its `configurationErrors`/`findings` checks; `runMoveSection` likewise
-(`emitSuccessfulPreview` line ~649, `reanalyzeSectionMoved` line ~667, the
-checks at ~674–698, each commented "Unreachable … Guarded so a regression
-refuses"). `src/cli/commands/rename.ts` has the same shape
-(`emitSuccessfulPreview` line ~224 before `reanalyzeRewritten` line ~240 and
-its checks at ~241–262).
-
-**Change.** In all three paths, run the in-memory re-validation first and
-emit the successful preview only when it passes; when it yields findings,
-refuse the preview exactly as the real operation refuses — the same findings,
-exit 1, through `emitFindingsRefusal` with the preview flag set so the 12.7
-refused-preview form (`mapping`, `files`, `delta` `null`) is used; a
-configuration error there exits 2 identically for both. Confirm the
-re-validation modifies nothing (it is in-memory: a preview must leave every
-byte of the workspace identical — T6.6-2) and that the preview still takes no
-workspace exclusivity and reads no journal past what planning already reads.
-Update the "Unreachable" comments: the guard now realizes 6.6's equivalence
-for previews too.
-
-**Verification.** `npm run build`; `section-6.6.test.ts` (T6.6-2…T6.6-6),
-`section-6.4.test.ts`, `section-6.5.test.ts`; with Task 2 not yet landed,
-reproduce reviewer A's gap-3 staging in a scratch workspace: preview and real
-move both exit 1 with the same finding; with Task 2 landed, both exit 0.
 
 ## Task 4 — Report references rooted at invalid or colliding import bindings as unresolved, at their own ranges (SPEC 11.2, 11.3, 11.4, 14, 14.5–14.7, 14.15; reviewer B)
 
