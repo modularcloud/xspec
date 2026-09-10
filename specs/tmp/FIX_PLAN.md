@@ -17,6 +17,24 @@ It is logged, dated 2026-09-03, in `specs/tmp/SPEC-PROBLEMS.md`; do not
 implement or work around it — leave `isValidUtf8ArgumentValue` as it is until
 the problem is resolved through the process.
 
+**Re-descent note (2026-09-10, written by the Phase 9 loop).** This plan
+predates the revisit that rewrote `specs/SPEC.md` (af2b468 … dcf3034) and
+re-aligned `specs/TEST-SPEC.md` (664487b … dc09301) and
+`specs/CERTIFICATIONS.md` (035b088, cbb0a35); `src/` is unchanged since
+72ad038. The loop consuming this plan now runs under Phase 9, whose scope
+guard forbids modifying `src/`, so each remaining task is researched and then
+removed or amended here, never implemented; product gaps are re-derived by the
+Phase 10 compliance determination against the revised SPEC once no plan file
+exists (PROCESS.md, Ralph Loop, step 3). Task 1 (code-source import removal on
+a section move, T6.5-7) was removed on this date: not implemented (the
+code-file loop of `src/core/move.ts`, "Code files: chain retargets plus added
+imports", still emits additions only), out of this phase's scope, and its
+quoted 6.5 clause superseded — the rewritten 6.5 removes a declaration exactly
+when an occurrence used a binding of its before the rewrite and none uses any
+binding of its after it (a type-level spelling is no occurrence), which pins
+the `text`-binding case the task left "conservative". Its diagnosis and code
+pointers remain in git history at 72ad038.
+
 **Rules for every task (read once per spawn):**
 
 - Phase 10: never modify the test harness (`test/`). Product code (`src/`)
@@ -51,72 +69,6 @@ the problem is resolved through the process.
   below — the relevant fixtures were checked while planning (noted per task).
 
 ---
-
-## Task 1 — Remove departed spec-module imports from code sources on a section move (SPEC 6.5, 6.6; T6.5-7)
-
-**Requirement.** SPEC 6.5: "an existing spec module import is removed
-exactly when its binding had references and the rewrite leaves it with none
-(an import whose binding was already unreferenced stays, 2.1) … An import
-removal deletes the declaration's own characters in place, and lines left
-empty or whitespace-only purely by that deletion are dropped with their line
-terminators, exactly as in Markdown compilation (3): the removal's extent is
-the declaration plus any such adjunct drop." SPEC 6.6: the preview reports
-each such edit as an `import-removal` whose range "spans every byte its edit
-removes". The rule applies to code sources exactly as to spec sources.
-
-**Observed (reviewer A, gap 1; VERIFY).** After
-`move specs/Origin.mdx#org.mv specs/Target.mdx#mv`, a `.ts` code source whose
-`ORG` binding (`import ORG from "../specs/Origin.xspec"`) was referenced only
-by markers on the moved subtree keeps that import byte-for-byte — own-line
-variant (expected 187 bytes, product 227) and shared-line variant alike —
-while the markers are correctly re-rooted at the existing `TGT` binding and
-`check` is clean. `move … --preview --json` reports only `reference-rewrite`
-edits for those files, never an `import-removal`. T6.5-7
-(`test/suite/registry/section-6.5.ts`, `id: "T6.5-7"` at ~line 3866; the
-failing byte assertion at ~line 3928) composes the expected files
-independently: the own-line origin import's line dropped with its terminator;
-the shared-line declaration's own characters alone deleted, the retained
-third-module import kept byte-for-byte on its kept line.
-
-**Location.** `src/core/move.ts`, `planMoveSection` (line ~1015). The spec-file
-side implements the rule in `SpecImportPlan` (lines ~719–812: `beforeRefs`,
-`departures`, `arrivals`, `removedImports()` = `before > 0 && after === 0`),
-applied through the import-edit closure at lines ~1455–1500 (`removalSpan`
-for the 6.5/6.6 extent, `preview.add(path, "import-removal", …)`, addition
-offset anchored after the last *surviving* import or at the line start of the
-first removed one). The code-file side has no such bookkeeping: the reference
-loop at lines ~1348–1410 re-roots each moved-subtree reference (`rootName`
-from an existing target-module import or a fresh addition) and the assembly
-loop at lines ~1724–1770 ("Code files: chain retargets plus added imports")
-emits only additions — anchored after `analysis.imports[last]`, which may
-itself be an import this task removes.
-
-**Change.**
-1. Per code file, count references per root binding before the rewrite
-   (`analysis.references` whose `spelling.form === "chain"`, keyed by
-   `spelling.rootName`), record a departure for every reference the rewrite
-   re-roots away from its old root (a moved-subtree reference whose new root
-   binding differs from its old one; in the same-file case nothing departs),
-   and an arrival for every reference re-rooted at an existing binding. A
-   spec-module import declaration is removed exactly when its default
-   binding had references before and has none after. Where a declaration
-   also binds `text` (a `text` import), remove it only when that binding is
-   left unreferenced too — otherwise leave it (conservative; note the choice
-   in the commit message). T6.5-7 stages markers only.
-2. Emit the removal with the exact 6.5 extent — reuse `removalSpan` (the
-   declaration's `statement`/`range` plus the line-drop adjunct) — as a
-   deletion edit in `fileEdits` and as `preview.add(path, "import-removal",
-   span)`; keep the additions' insertion offset the exact one the preview
-   reports, anchored like the spec-file closure: after the line of the last
-   surviving spec-module import, else at the line start of the first removed
-   one.
-3. A code file with removals and no other edits is still rewritten.
-
-**Verification.** `npm run build`; `section-6.5.test.ts` (T6.5-7 green; all
-of T6.5-1…T6.5-10 green except T6.5-9 until Task 2 lands),
-`section-6.6.test.ts` (T6.6-2…T6.6-6), `section-6.4.test.ts`; reproduce the
-finding in a scratch workspace outside the repository (own-line and
-shared-line variants, real move and `--preview --json`) before and after.
 
 ## Task 2 — An added code-file import binds a fresh identifier colliding with no module-scope binding (SPEC 6.5, 2.1, 4, 4.5, 14.18; T6.5-9)
 
