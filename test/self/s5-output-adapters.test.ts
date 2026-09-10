@@ -280,7 +280,7 @@ const GOOD_FINDINGS = {
       identities: [],
     },
     {
-      code: "refused-id-collision", // refusal reasons sort after 14.1–14.23
+      code: "refused-id-collision", // refusal reasons sort after the numbered conditions
       message: "the new id collides with a remaining bearer",
       locations: [{ file: "specs/A.mdx", range: { start: 3, end: 9 } }],
       path: null,
@@ -1322,6 +1322,50 @@ const DECODERS: readonly DecoderSpec[] = [
       {
         label: "unknown code token",
         doc: put(GOOD_FINDINGS, "oops", "findings", 0, "code"),
+      },
+      {
+        label:
+          "the retired refusal code refused-unresolvable-reference (no such " +
+          "reason in SPEC 14)",
+        doc: put(
+          GOOD_FINDINGS,
+          "refused-unresolvable-reference",
+          "findings",
+          4,
+          "code",
+        ),
+      },
+      {
+        label:
+          "a write failure inside a findings array (14.24 is a usage error " +
+          "carried only as the exit-2 error document's code, SPEC 14, 12.7)",
+        doc: {
+          findings: [
+            {
+              code: "write-failure",
+              message: "cannot write .xspec: permission denied",
+              locations: [],
+              path: ".xspec",
+              identities: [],
+            },
+          ],
+        },
+      },
+      {
+        label:
+          "a read failure inside a findings array (14.25 is a usage error " +
+          "carried only as the exit-2 error document's code, SPEC 14, 12.7)",
+        doc: {
+          findings: [
+            {
+              code: "read-failure",
+              message: "cannot list specs/sub: permission denied",
+              locations: [],
+              path: "specs/sub",
+              identities: [],
+            },
+          ],
+        },
       },
       {
         label:
@@ -2604,6 +2648,44 @@ const DECODERS: readonly DecoderSpec[] = [
         },
         verify: (decoded: ReturnType<typeof decodeErrorDocument>): void => {
           expect(decoded.error.path).toBe(".");
+        },
+      },
+      {
+        label:
+          "a write failure: code write-failure concerning the graph-data " +
+          "area (SPEC 14.24, 12.7)",
+        doc: {
+          error: {
+            code: "write-failure",
+            message: "cannot write .xspec: permission denied",
+            locations: [],
+            path: ".xspec",
+            identities: [],
+          },
+        },
+        verify: (decoded: ReturnType<typeof decodeErrorDocument>): void => {
+          expect(decoded.error.code).toBe("write-failure");
+          expect(decoded.error.condition).toBe("14.24");
+          expect(decoded.error.path).toBe(".xspec");
+        },
+      },
+      {
+        label:
+          "a read failure: code read-failure concerning the unlistable " +
+          "directory (SPEC 14.25, 12.7)",
+        doc: {
+          error: {
+            code: "read-failure",
+            message: "cannot list specs/sub: permission denied",
+            locations: [],
+            path: "specs/sub",
+            identities: [],
+          },
+        },
+        verify: (decoded: ReturnType<typeof decodeErrorDocument>): void => {
+          expect(decoded.error.code).toBe("read-failure");
+          expect(decoded.error.condition).toBe("14.25");
+          expect(decoded.error.path).toBe("specs/sub");
         },
       },
     ],

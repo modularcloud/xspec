@@ -90,6 +90,7 @@ import type {
 } from "./model.js";
 import {
   CONDITION_CODE_TOKENS,
+  USAGE_ERROR_CONDITION_CODE_TOKENS,
   COVERAGE_ATTRIBUTE_VALUES,
   COVERAGE_MODES,
   COVERAGE_TARGETS_VALUES,
@@ -288,7 +289,7 @@ export function decodeFindingForm(value: unknown, site: DecodeSite): Finding {
       formFail(
         codeSite,
         "a stable code: one of SPEC 14's condition tokens " +
-          "(missing-id … unreadable-record) or refusal codes " +
+          "(missing-id … read-failure) or refusal codes " +
           "(refused-invalid-id … refused-invalid-destination), or null " +
           "where 14 assigns none",
         codeValue,
@@ -415,9 +416,12 @@ export function compareFindings(a: Finding, b: Finding): number {
 
 /**
  * Decode a `"findings"` array value in the literal 12.7 form: every element
- * a well-formed finding, the array in the pinned findings order, findings
- * identical in every member collapsed to one (adjacent equality is an
- * uncollapsed duplicate; both violations reject, form-exact per H-3).
+ * a well-formed finding whose code is a finding's — never 14.24's
+ * `write-failure` or 14.25's `read-failure`, usage errors carried only by
+ * the exit-2 error document (SPEC 14, 12.7) — the array in the pinned
+ * findings order, findings identical in every member collapsed to one
+ * (adjacent equality is an uncollapsed duplicate; every violation rejects,
+ * form-exact per H-3).
  */
 export function decodeFindingsArray(
   value: unknown,
@@ -426,6 +430,23 @@ export function decodeFindingsArray(
   const findings = expectArray(value, site).map((element, index) =>
     decodeFindingForm(element, at(site, index)),
   );
+  findings.forEach((finding, index) => {
+    if (
+      finding.code !== null &&
+      (USAGE_ERROR_CONDITION_CODE_TOKENS as readonly string[]).includes(
+        finding.code,
+      )
+    ) {
+      formFail(
+        at(at(site, index), "code"),
+        "a finding's stable code — a numbered condition 14.1–14.23 or a " +
+          "refusal reason; write-failure (14.24) and read-failure (14.25) " +
+          "are usage errors carried only as the exit-2 error document's " +
+          "code, in no findings array (SPEC 14, 12.7)",
+        finding.code,
+      );
+    }
+  });
   for (let i = 1; i < findings.length; i += 1) {
     const order = compareFindings(findings[i - 1]!, findings[i]!);
     if (order === 0) {
