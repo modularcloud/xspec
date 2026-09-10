@@ -63,30 +63,34 @@
 // normalization); the builder encodes the resulting strings to the identical
 // raw bytes.
 //
-// Staging discipline (SPEC 2.7: an `id` or `tags` value is a plain single-
-// or double-quoted static string, and no escape or character-reference form
-// is defined): each draw is spelled in the quote kind its content admits —
-// single quotes for a draw containing `"`, double quotes for one containing
-// `'`; either kind is admissible for a draw containing neither, and this
-// module spells those double — and a draw containing both quote characters
-// admits no static-string spelling, so it lies outside both properties'
-// domains and is never staged: the oracle would predict acceptance for such
-// a valid-but-unspellable draw while the staged file could only be
-// unparseable (14.20) or prop-invalid (14.17) — a harness artifact of
-// exactly the class H-11 forbids reporting as a product failure. The
-// generators redraw such a draw (`spellable` below), keeping each property's
-// trial count. That the product accepts both quote kinds alike is T2.7-3's
-// deterministic question, not this generator's.
+// Staging discipline (SPEC 2.7, 2.4: an `id` or `tags` value is a plain
+// single- or double-quoted static string read verbatim, no escape or
+// character-reference form being interpreted): each draw is spelled in the
+// quote kind its content admits — single quotes for a draw containing `"`,
+// double quotes for one containing `'`; either kind is admissible for a draw
+// containing neither, and this module spells those double. Since 1.4 makes
+// every draw containing `"` or `'` invalid (the quote, escape, and
+// character-reference characters), such a draw is staged in the other quote
+// kind and predicted rejected (14.4), never set aside. A draw containing
+// both quote characters admits no static-string spelling, so it is never
+// staged: the staged file could only be unparseable (14.20) or prop-invalid
+// (14.17) — a harness artifact of exactly the class H-11 forbids reporting
+// as a product failure — and it is invalid under the oracle too, so its
+// exclusion loses no prediction. The generators redraw such a draw
+// (`spellable` below), keeping each property's trial count. That the product
+// accepts both quote kinds alike is T2.7-3's deterministic question, not
+// this generator's.
 //
 // Two further staging guards keep the generated values inside that model,
 // and are deliberate alphabet/shape choices, not oracle behavior:
-//   * The alphabet omits `&` (MDX decodes character references in attribute
-//     values) and a few other MDX-structural ASCII characters (`<`, `>`,
-//     backslash): all are ordinary valid segment characters but none is a
-//     P-1 boundary class, and staging them would exercise MDX attribute
-//     lexing, not 1.4 validity. The two quote characters — equally ordinary
-//     as segment characters — are in the alphabet under the staging
-//     discipline above.
+//   * The alphabet omits the MDX-structural ASCII characters `<` and `>`:
+//     ordinary valid segment characters that are no P-1 boundary class, and
+//     staging them would exercise MDX attribute lexing, not 1.4 validity.
+//     The two quote characters — invalid boundary classes of 1.4 — are in
+//     the alphabet under the staging discipline above. The remaining
+//     members of 1.4's quote, escape, and character-reference class, `\`
+//     and `&`, and U+FFFD are judged invalid by the oracle below but not yet
+//     drawn: their alphabet entries are still to land.
 //   * Generated values never stage a blank line inside an opening tag (a
 //     line-terminator sequence enclosing only spaces/tabs): MDX flow tags do
 //     not admit blank lines, so such staging would test parseability (14.20)
@@ -156,6 +160,15 @@ function isSpecControl(codePoint: number): boolean {
   return codePoint <= 0x001f || codePoint === 0x007f;
 }
 
+/**
+ * The quote, escape, and character-reference characters SPEC 1.4 excludes
+ * from segments and tags — `"`, `'`, `\`, `&` — so that every segment and
+ * tag is spelled verbatim in every form (2.4, 2.7, 6.4).
+ */
+const QUOTE_ESCAPE_REFERENCE_CODE_POINTS: ReadonlySet<number> = new Set([
+  0x0022, 0x0027, 0x005c, 0x0026,
+]);
+
 type Verdict =
   { readonly valid: true } | { readonly valid: false; readonly reason: string };
 
@@ -192,6 +205,18 @@ function valueVerdict(value: string, role: "segment" | "tag"): Verdict {
       return {
         valid: false,
         reason: `the ${role} contains the control character ${codePointName(codePoint)} (1.4)`,
+      };
+    }
+    if (QUOTE_ESCAPE_REFERENCE_CODE_POINTS.has(codePoint)) {
+      return {
+        valid: false,
+        reason: `the ${role} contains the quote, escape, or character-reference character ${codePointName(codePoint)} (1.4)`,
+      };
+    }
+    if (codePoint === 0xfffd) {
+      return {
+        valid: false,
+        reason: `the ${role} contains U+FFFD, the replacement character (1.4)`,
       };
     }
   }
@@ -380,10 +405,11 @@ const ALPHABET: ReadonlyArray<readonly [number, string]> = [
   [2, "+"],
   [2, "("],
   [2, ")"],
-  // The two quote characters — ordinary valid segment characters, each
-  // spellable only inside the other quote kind (SPEC 2.7; the staging
-  // discipline in the module header chooses the kind per draw and never
-  // stages a draw holding both).
+  // The two quote characters — invalid boundary classes (SPEC 1.4's quote,
+  // escape, and character-reference characters), each spellable only inside
+  // the other quote kind (SPEC 2.7; the staging discipline in the module
+  // header chooses the kind per draw, predicts rejection, and never stages a
+  // draw holding both).
   [3, DOUBLE_QUOTE],
   [3, SINGLE_QUOTE],
   // The boundary code points SPEC 1.4 excludes from both classes — valid

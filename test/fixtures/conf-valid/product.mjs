@@ -46,9 +46,23 @@
 //   empty segment is a 1.4 violation (14.4), never a structural one:
 //   `<S id="">` is one (empty) top-level segment and `a.` → `a..b` nests by
 //   exactly one segment per level (T1.4-1's staging).
-// - Findings carry the offending construct's own byte range per SPEC 1.7
-//   (opening tag through closing tag, byte offsets), so every report lands
-//   within its construct's window and never on a sibling construct.
+// - SPEC 1.4's alphabet, exactly: beyond `.`, `#`, the whitespace and
+//   control classes, and the forbidden names, a segment or tag containing
+//   `"`, `'`, `\`, `&`, or U+FFFD is invalid (14.4). Attribute values are
+//   read verbatim (SPEC 2.4): no escape sequence or character reference is
+//   interpreted, so `id="a\u002Eb"` is a one-segment ID containing `\`
+//   and `id="a&#46;b"` one containing `&` — condition 4, never the
+//   two-segment ID `a.b` — and `tags="x\u0079"` a tag containing `\`.
+// - Findings of 14.1–14.3 and 14.17 carry the offending construct's own
+//   byte range per SPEC 1.7 (opening tag through closing tag, byte
+//   offsets); a 14.4 finding is one per offending `id` or `tags` attribute,
+//   however many of its segments or tokens violate 1.4 (SPEC 14), located
+//   at the attribute's own characters — name through closing quote
+//   (T14-11). Every report thus lands within its construct's window and
+//   never on a sibling construct.
+// - Tag sets (`query node`/`query nodes`; the set form of SPEC 12.7): tags
+//   in byte order — UTF-8 bytes, not UTF-16 code units — duplicates
+//   collapsed, `[]` when tagless.
 // - `build` writes nothing: the scope observes validation and the query
 //   surface only, and every query recomputes from the sources, so reads need
 //   no stored graph data.
@@ -529,6 +543,13 @@ const FORBIDDEN_NAMES = new Set([
   "then",
 ]);
 
+/**
+ * The quote, escape, and character-reference characters SPEC 1.4 excludes
+ * from segments and tags — `"`, `'`, `\`, `&` — so that every segment and
+ * tag is spelled verbatim in every form (SPEC 2.4, 2.7, 6.4).
+ */
+const QUOTE_ESCAPE_REFERENCE_CHARACTERS = new Set(['"', "'", "\\", "&"]);
+
 function codePointName(codePoint) {
   return `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
 }
@@ -580,6 +601,19 @@ function valueViolation(value, role) {
     ) {
       return `the ${role} contains the control character ${codePointName(codePoint)} (SPEC 1.4)`;
     }
+    // The quote, escape, and character-reference characters (SPEC 1.4):
+    // attribute values are read verbatim (SPEC 2.4), so an escape- or
+    // reference-spelled value is a value containing `\` or `&` — condition
+    // 4, never its interpreted spelling.
+    if (QUOTE_ESCAPE_REFERENCE_CHARACTERS.has(character)) {
+      return `the ${role} contains the quote, escape, or character-reference character ${JSON.stringify(character)} (SPEC 1.4)`;
+    }
+    // U+FFFD (REPLACEMENT CHARACTER), which no argument value carries (SPEC
+    // 1.4, 12.0): only a literal U+FFFD in the source bytes reaches here —
+    // an undecodable byte is 14.20 (`analyzeFile` decodes fatally).
+    if (codePoint === 0xfffd) {
+      return `the ${role} contains U+FFFD (REPLACEMENT CHARACTER) (SPEC 1.4)`;
+    }
   }
   return null;
 }
@@ -611,10 +645,20 @@ function splitTags(value) {
   return tokens;
 }
 
-/** The collapsed, sorted tag set of a `tags` value (SPEC 2.6). */
+/** Byte order of two strings: their UTF-8 bytes (SPEC 12.0). */
+function compareBytes(a, b) {
+  return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
+}
+
+/**
+ * The tag set of a `tags` value (SPEC 2.6) in the set form of SPEC 12.7:
+ * tags in byte order — UTF-8 bytes, never UTF-16 code units (the two orders
+ * differ between a BMP character above the surrogate range and an astral
+ * one) — duplicates collapsed, `[]` when tagless.
+ */
 function collapsedTags(tagsRaw) {
   if (tagsRaw === undefined) return [];
-  return [...new Set(splitTags(tagsRaw))].sort();
+  return [...new Set(splitTags(tagsRaw))].sort(compareBytes);
 }
 
 // ---------------------------------------------------------------------------
@@ -744,6 +788,10 @@ function parseMdx(text) {
       id: null,
       idMissing: false,
       tagsRaw: undefined,
+      /** @type {{ start: number, end: number } | null} */
+      idAttr: null,
+      /** @type {{ start: number, end: number } | null} */
+      tagsAttr: null,
       /** @type {{ name: string, kind: "repeated" | "value-form" }[]} */
       invalidProps: [],
       parent: stack.at(-1),
@@ -759,6 +807,8 @@ function parseMdx(text) {
     const occurrences = new Map();
     let idValue;
     let tagsValue;
+    let idAttr;
+    let tagsAttr;
     for (;;) {
       while (j < text.length && TAG_WHITESPACE.has(text[j])) j += 1;
       if (j >= text.length) {
@@ -774,6 +824,7 @@ function parseMdx(text) {
         j += 2;
         break;
       }
+      const attrStart = j;
       const attr = /^[A-Za-z][\w-]*/.exec(text.slice(j));
       if (!attr) {
         fail20(j, "malformed attribute in a section tag");
@@ -822,8 +873,16 @@ function parseMdx(text) {
       // ignored: out of the accepted workspace shapes (§CONF-VALID Scope).
       if ((name === "id" || name === "tags") && count === 1) {
         if (form === "quoted") {
-          if (name === "id") idValue = value;
-          else tagsValue = value;
+          // The attribute's own characters, name through closing quote —
+          // where a 14.4 finding on it is located (SPEC 14; T14-11).
+          const range = { start: attrStart, end: j };
+          if (name === "id") {
+            idValue = value;
+            idAttr = range;
+          } else {
+            tagsValue = value;
+            tagsAttr = range;
+          }
         } else {
           node.invalidProps.push({ name, kind: "value-form" });
         }
@@ -834,10 +893,12 @@ function parseMdx(text) {
     // condition 1 (SPEC 14.1) — and only a wholly absent `id` is condition 1.
     const idInvalid = node.invalidProps.some((entry) => entry.name === "id");
     node.id = idInvalid ? null : (idValue ?? null);
+    node.idAttr = node.id === null ? null : idAttr;
     node.idMissing = !idInvalid && idValue === undefined;
     node.tagsRaw = node.invalidProps.some((entry) => entry.name === "tags")
       ? undefined
       : tagsValue;
+    node.tagsAttr = node.tagsRaw === undefined ? null : tagsAttr;
     node.openEnd = j;
     if (node.selfClosing) {
       node.closeStart = node.openEnd;
@@ -868,10 +929,12 @@ function segmentsOf(id) {
 }
 
 /**
- * Validate one parsed file's sections in document order. Every finding
- * carries the offending construct's own byte range (SPEC 14: file, location,
- * condition identity; SPEC 1.7 byte offsets), so it falls within that
- * construct's window and never on a sibling.
+ * Validate one parsed file's sections in document order. A finding of
+ * 14.1–14.3 or 14.17 carries the offending construct's own byte range (SPEC
+ * 14: file, location, condition identity; SPEC 1.7 byte offsets); a 14.4
+ * finding carries its `id` or `tags` attribute's own characters (SPEC 14,
+ * T14-11) — so every finding falls within its construct's window and never
+ * on a sibling.
  *
  * @returns {Finding[]}
  */
@@ -914,17 +977,27 @@ function validateSections(rel, sections, byteOf) {
       });
     } else if (node.id !== null) {
       const segments = segmentsOf(node.id);
-      // Condition 14.4 (SPEC 1.4), one finding per invalid segment.
-      for (const segment of segments) {
+      // Condition 14.4 (SPEC 1.4): one finding per offending `id` attribute,
+      // however many of its segments violate 1.4 (SPEC 14 — a descendant
+      // spelling a malformed ancestor segment as its own prefix reports in
+      // its own attribute too), located at the attribute's own characters
+      // (T14-11), never at the whole construct.
+      const segmentViolations = segments.flatMap((segment) => {
         const violation = valueViolation(segment, "segment");
-        if (violation !== null) {
-          findings.push({
-            condition: "14.4",
-            message: `invalid segment ${JSON.stringify(segment)} in id ${JSON.stringify(node.id)}: ${violation}`,
-            file: rel,
-            location,
-          });
-        }
+        return violation === null
+          ? []
+          : [`segment ${JSON.stringify(segment)}: ${violation}`];
+      });
+      if (segmentViolations.length > 0) {
+        findings.push({
+          condition: "14.4",
+          message: `invalid id ${JSON.stringify(node.id)}: ${segmentViolations.join("; ")}`,
+          file: rel,
+          location: {
+            start: byteOf(node.idAttr.start),
+            end: byteOf(node.idAttr.end),
+          },
+        });
       }
       // Condition 14.2 (SPEC 1.3): the child ID equals the parent ID plus
       // exactly one segment, compared as segment sequences (an empty segment
@@ -971,18 +1044,25 @@ function validateSections(rel, sections, byteOf) {
     }
     // Condition 14.4 for tags (SPEC 1.4, 2.6): every token of the 2.6 split
     // follows the segment rules with `.` allowed. Zero tokens behave as an
-    // omitted prop and validate nothing.
+    // omitted prop and validate nothing. One finding per offending `tags`
+    // attribute, however many tokens violate, located at the attribute.
     if (node.tagsRaw !== undefined) {
-      for (const token of splitTags(node.tagsRaw)) {
+      const tokenViolations = splitTags(node.tagsRaw).flatMap((token) => {
         const violation = valueViolation(token, "tag");
-        if (violation !== null) {
-          findings.push({
-            condition: "14.4",
-            message: `invalid tag ${JSON.stringify(token)}: ${violation} (SPEC 2.6)`,
-            file: rel,
-            location,
-          });
-        }
+        return violation === null
+          ? []
+          : [`tag ${JSON.stringify(token)}: ${violation}`];
+      });
+      if (tokenViolations.length > 0) {
+        findings.push({
+          condition: "14.4",
+          message: `invalid tags ${JSON.stringify(node.tagsRaw)}: ${tokenViolations.join("; ")} (SPEC 2.6)`,
+          file: rel,
+          location: {
+            start: byteOf(node.tagsAttr.start),
+            end: byteOf(node.tagsAttr.end),
+          },
+        });
       }
     }
   }

@@ -12,19 +12,7 @@ Planned 2026-09-10 from: reviewer A (TEST-SPEC.md §0–8, 28 gaps), reviewer B 
 - **H-11 harness errors vs H-8 product failures.** `HarnessAssertionError` (`test/helpers/assertions.ts`) means "diagnosed product failure". An ineffective staging, an unreachable precondition, or a harness bug must surface as a distinct error class (`HarnessStagingError` in `test/helpers/permissions.ts`), never as a `HarnessAssertionError`, a pass, or a skip (H-9).
 - **Infrastructure caution.** Keep each spawn's edits bounded: a few tool calls per response, modest payloads, no single giant write. Large section files (section-6.5.ts, section-13.5.ts, section-14.ts, section-12.7.ts) are edited with targeted `Edit`s, not rewrites.
 
-Ordering: Part A turns the three red self-tests green (certification manifest/gate cluster). Part B lands shared helpers. Parts C–E are consumers, ordered by dependency; within a part, order is free.
-
----
-
-## Part B — shared helpers (land before their consumers)
-
-## Task 7 — CONF-VALID conformer: 1.4's alphabet excludes `"`, `'`, `\`, `&`, and U+FFFD; values read verbatim
-
-- **Source:** reviewer A gap 28; reviewer C dependency note.
-- **Requirement:** SPEC.md 1.4 (segment and tag validity — the rewritten alphabet; every attribute value read verbatim, escape and entity spellings never decoded); CERTIFICATIONS.md §CONF-VALID (lines 74–80: the verbatim-read arms are in the conformer's scope, line 76); in-scope tests T1.3-1..6, T1.4-1, T1.4-2, T1.4-4, T2.6-1, T2.6-2, P-1.
-- **Files:** `test/fixtures/conf-valid/product.mjs` — `valueViolation` (~540–585) and the attribute/tag readers; the violators `VIOL-VALID-CTRL`/`VIOL-VALID-WIDE` keep exactly their one deviation each.
-- **Do:** reject a segment or tag containing any of `"`, `'`, `\`, `&`, U+FFFD with the same condition/location the existing rules use (the finding located at the attribute — T14-11's per-attribute location, which Task 18 asserts); read `id="a\u002Eb"` and `id="a&#46;b"` as the literal seven/eight-character values (condition 4 — invalid characters), `tags="x\u0079"` as a tag containing `\` (14.4); emit tag sets in byte order with duplicates collapsed (Task 37 compares T2.6-1/2's datum literally against this conformer).
-- **Verify:** `npm run test:self` green now (CONF-VALID's in-scope tests unchanged yet); after Tasks 18 and 19 the new arms must still certify green against it and its two violators.
+Ordering: Part A turns the three red self-tests green (certification manifest/gate cluster). Part B lands shared helpers. Parts C–E are consumers, ordered by dependency; within a part, order is free. Parts A and B are complete: the CONF-VALID conformer (`test/fixtures/conf-valid/product.mjs`) now rejects `"`, `'`, `\`, `&`, and U+FFFD in segments and tags (14.4), reads attribute values verbatim, emits one 14.4 finding per offending `id`/`tags` attribute located at the attribute's own characters (name through closing quote), and emits tag sets in UTF-8 byte order with duplicates collapsed; P-1's oracle (`valueVerdict` in `test/suite/registry/section-16-p1.ts`) judges the same five characters invalid, since its alphabet already staged both quote characters.
 
 ---
 
@@ -121,18 +109,18 @@ Ordering: Part A turns the three red self-tests green (certification manifest/ga
 - **Source:** reviewer A gaps 4, 5.
 - **Requirement:** TEST-SPEC.md **T1.4-1** (line 57) and **T1.4-4** (line 60); SPEC.md 1.4 (segments and tags may not contain `"`, `'`, `\`, `&`, or U+FFFD; attribute values read verbatim — escape and entity spellings are their literal characters), 14 (the finding located at the attribute, T14-11). Both tests are in CONF-VALID's in-scope list (CERTIFICATIONS.md line 78).
 - **Files:** `test/suite/registry/section-1.4.ts`.
-- **Do:** T1.4-1 — one arm per new character in a segment (`"`, `'`, `\`, `&`, U+FFFD), each a workspace differing in one segment; verbatim arms `id="a\u002Eb"` and `id="a&#46;b"` → condition 4 (invalid characters, never a `.`-separated two-segment ID); every finding located at the attribute (its exact range, precomputed from bytes). T1.4-4 — the same five characters in a tag; `tags="x\u0079"` → 14.4 (a tag containing `\`); per-attribute location. Write escape spellings doubled and verify the bytes (preamble).
+- **Do:** T1.4-1 — one arm per new character in a segment (`"`, `'`, `\`, `&`, U+FFFD), each a workspace differing in one segment; verbatim arms `id="a\u002Eb"` and `id="a&#46;b"` → condition 4 (invalid characters, never a `.`-separated two-segment ID); every finding located at the attribute (its exact range, precomputed from bytes — the conformer locates a 14.4 finding at the attribute's own characters, `id`/`tags` name through the closing quote, one finding per offending attribute however many segments or tokens violate). T1.4-4 — the same five characters in a tag; `tags="x\u0079"` → 14.4 (a tag containing `\`); per-attribute location. Write escape spellings doubled and verify the bytes (preamble).
 - **Verify:** `npm run test:self` green — T1.4-1/T1.4-4 pass against CONF-VALID and fail against VIOL-VALID-CTRL / VIOL-VALID-WIDE exactly as their entries state (CERTIFICATIONS.md lines 82–94); against the product, pass or diagnosed failure.
-- **Depends on:** Task 7.
+- **Depends on:** Task 7 (landed).
 
 ## Task 19 — P-1: `"`, `'`, `\`, `&`, U+FFFD are invalid boundary classes; quote-bearing draws staged and predicted rejected
 
 - **Source:** reviewer B gap 31.
 - **Requirement:** TEST-SPEC.md §16 **P-1** (line 581) and the §16 preamble; SPEC.md 1.4. In CONF-VALID's scope (line 78).
 - **Files:** `test/suite/registry/section-16-p1.ts` (header ~60–95, `quoteKindFor`, the redraw of both-quote draws).
-- **Do:** each of the five characters becomes an invalid boundary class of the generator (drawn with the boundary weighting the entry fixes); a draw bearing one quote kind is staged inside an attribute delimited by the other quote kind and predicted **rejected** — never set aside or redrawn; a draw bearing both quote kinds is staged in either and predicted rejected; `&` and `\` are no longer "ordinary valid"; U+FFFD is drawn and staged. Keep the fixed seed set of E-5 (`XSPEC_PROPERTY_SEED`, `test/helpers/property.ts`); if a self-test pins P-1's draw statistics (`test/self/property-infrastructure.test.ts`), update the pin deliberately with the reason.
+- **Do:** the oracle part landed with Task 7: `valueVerdict` judges `"`, `'`, `\`, `&`, U+FFFD invalid, the header and alphabet comments state that the two quote characters are invalid boundary classes staged in the other quote kind and predicted **rejected** (never set aside), and the fixed seeds certify green that way. Remaining: `\`, `&`, and U+FFFD are not yet drawn — add each to `ALPHABET` as an invalid boundary class with the boundary weighting the entry fixes, and rewrite the header bullet that says their entries are "still to land". A draw bearing both quote kinds stays unstaged: TEST-SPEC P-1 says it "admits no static-string spelling and is not staged — invalid under the oracle too, so its exclusion loses no prediction" (`spellable`'s redraw), and TEST-SPEC governs over this plan's earlier "staged in either" wording. Keep the fixed seed set of E-5 (`XSPEC_PROPERTY_SEED`, `test/helpers/property.ts`); if a self-test pins P-1's draw statistics (`test/self/property-infrastructure.test.ts`), update the pin deliberately with the reason.
 - **Verify:** `npm run test:self` green (P-1 certifies against CONF-VALID and its violators per the document); against the product, pass or diagnosed failure.
-- **Depends on:** Task 7.
+- **Depends on:** Task 7 (landed).
 
 ## Task 20 — T1.5-2 and T11.5-3: U+FFFD-pathed sources on both legs, staging shared
 
