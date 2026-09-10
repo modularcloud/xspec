@@ -116,6 +116,62 @@ determination, not this task); and a refusal raised by the re-validation
 locates its finding in the rewritten bytes' coordinates (above), which the
 re-plan should weigh wherever it keeps such a refusal reachable.
 
+**Task 4 removal (2026-09-10, the next Phase 9 iteration).** Task 4
+(references rooted at the binding of an invalid import or at a colliding
+identifier masked instead of reported as unresolved at their own ranges,
+SPEC 11.2, 14) was removed on this date for this phase's scope alone: it is
+not implemented — `src/` is unchanged since 72ad038; the `"poisoned"` binding
+kind still masks every chain rooted at such a binding
+(`src/core/spec-references.ts` 120, 556–557, 588–602, 721, 779, 1072;
+`src/core/code-analysis.ts` 424, 643, 814, 897, 1157, 1188, 1205–1207,
+1313–1315, 1421–1425) — and its three scratch fixtures reproduce against the
+build of 0c5a2b7 (a hand-staged workspace per `AGENTS.md`; `specs: { spec:
+["specs/**/*.mdx"] }`, `code: { app: ["src/**/*.ts"] }`; `specs/SPEC.mdx`
+holding `<S id="a">A</S>`): `specs/REF.mdx` as the task spells it reports
+`unknown-dependency` 79–88, `unknown-text-target` 101–118, and
+`invalid-import` 32–63 only — nothing for `NOPE.x` (90–96), `{text(NOPE.y)}`,
+or `{text(NOPE)}`; `specs/COL.mdx` (`import A from "./SPEC.xspec"` twice,
+then `<S id="c" d={[A.print]}>X {text(A.derived)}</S>`) reports the one
+`invalid-import` locating both declarations (0–28, 29–57) and nothing else;
+`src/bad.ts` (`import SPEC from "../specs/SPEC.xspec";`, `import NOPE from
+"../specs/NOPE.xspec";`, `NOPE.x;`, `SPEC.print.nope;`) reports
+`invalid-import` 40–79 and `unknown-ts-reference` 88–103 for the valid-import
+chain, nothing for `NOPE.x` — identically on `build --json`, `check --json`,
+and `view <file> --json`, exit 1 each. Nothing in it is stale; the revisit
+pinned its collision arm harder: the rewritten 2.4 states that an identifier
+a spec module import and another import, or a same-scope value-level
+declaration, both bind "roots no resolving chain … no edge, no occurrence
+(5.7) — and its spelling reports as unresolved (14.5–14.7) beside the
+collision finding (14.15)"; 4.5 repeats it ("its chains unresolved (14.7)
+beside the collision (14.15)"); 11.2's resolution paragraph now lists "a
+chain rooted at an identifier a spec module import and another declaration
+of its scope both bind (2.4)" among the spellings that record no edge and no
+occurrence and are positioned by their finding's range; and the quoted 14
+intro, 14's location rule for a no-occurrence spelling, 11.2's
+"Unavailability is explicit" (now naming "an import's resolved target when
+specifier form or discovery defines none"), and 11.4's closing persist in
+substance. The invalid-import arm (a chain rooted at the binding of an
+import designating nothing, or of invalid form) rests on those general
+clauses alone: no TEST-SPEC test stages a reference through such a binding —
+T2.1-2, T2.1-3, T4-2, and T11.4-4 exercise the import declarations
+themselves, and `test/suite/registry/section-2.1.ts`, `section-4.ts`, and
+`section-11.4.ts` are unchanged since 72ad038 — so the task's harness check
+still holds there. A harness task does follow, for the collision arm:
+TEST-SPEC's **T4.5-8 Same-scope collisions** (added by 3031926, after this
+plan's baseline) asserts exactly the reporting Task 4 demands — condition 15
+beside condition 7 for each chain, no edge, no occurrence, the spec-source
+case's 14.5/14.6 — and the harness does not register it
+(`test/suite/registry/section-4.5.ts` lists `T4_5_1` … `T4_5_7` in
+`section45Tests`; no `T4.5-8` anywhere under `test/`), while
+CERTIFICATIONS.md's Exclusions (line 188) keep it outside fixture
+certification; it is Task 6 below. Task 4's requirement, diagnosis, and code
+pointers — in git history at 0c5a2b7 — remain valid inputs to the Phase 10
+re-plan, where T4.5-8, once registered, is the collision arm's failing test.
+One pointer, verified by grep alone: T14-11 — cited by T4.5-8 for locating
+every colliding declaration — is registered nowhere under
+`test/suite/registry/` (`section-14.ts` covers T14-1 … T14-8), a matter for
+the Phase 9 compliance determination, not this task.
+
 **Rules for every task (read once per spawn):**
 
 - Phase 10: never modify the test harness (`test/`). Product code (`src/`)
@@ -150,85 +206,6 @@ re-plan should weigh wherever it keeps such a refusal reachable.
   below — the relevant fixtures were checked while planning (noted per task).
 
 ---
-
-## Task 4 — Report references rooted at invalid or colliding import bindings as unresolved, at their own ranges (SPEC 11.2, 11.3, 11.4, 14, 14.5–14.7, 14.15; reviewer B)
-
-**Requirement.** SPEC 14 intro: every present condition is reported; "a
-condition goes unreported only where another error makes it undetectable —
-an unparseable file (14.20) masks the conditions inside itself, and a
-reference into it reports as unresolved (14.5–14.7)". SPEC 11.2
-("Resolution"): a spelling that does not resolve "records no edge and no
-occurrence, and never reports an unavailable target: its position reaches
-consumers through its finding's range (14). The two surfaces jointly locate
-every reference spelling in every parseable file"; ("Unavailability is
-explicit"): never silently omitted. SPEC 14 (locations): "A reference
-spelling that records no occurrence (5.7, 11.2) is located here: for a
-spelling of the MDX embedding form, its finding's range is the full braced
-container". SPEC 11.4 (closing): constructs producing no occurrence and no
-view entry "are located by their findings' ranges (14), and the two surfaces
-together still position every removable construct". 4.5/5.7 exempt only
-shadowed and type-only bindings; nothing exempts a chain rooted at an
-invalid import's binding.
-
-**Observed (reviewer B).** The product masks every reference whose chain is
-rooted at the binding of an invalid import (14.15: undiscovered or invalid
-target, invalid specifier form) or at an identifier bound by two imports,
-reporting only the import's own 14.15. Scratch fixture `specs/REF.mdx`:
-`import NOPE from "./NOPE.xspec"` (NOPE.mdx absent) plus
-`<S id="r" d={[SPEC.nope, NOPE.x]}>A {text(SPEC.nope)} B {text(NOPE.y)} C {text(NOPE)}</S>`
-— `view specs/REF.mdx` reports `unknown-dependency` (79–88) and
-`unknown-text-target` (102–119) for the valid-import spellings, but `NOPE.x`
-(90–96), `{text(NOPE.y)}` (122–136), and `{text(NOPE)}` (139–151) get no
-finding and no occurrence; the only finding is `invalid-import` at the
-declaration (32–63). Same with a colliding binding (`import A` twice;
-`d={A.print}` 75–82 and `text(A.derived)` 88–103 unlocated) and on the code
-side (`src/bad.ts` marker `NOPE.x` at 27–33 gets nothing while
-`SPEC.print.nope` gets `unknown-ts-reference`); `build`/`check` omit them
-identically. Consequence: the `{text(NOPE.y)}` container — a construct
-Markdown compilation removes (3) — is positioned by no occurrence, no view
-entry, and no finding range, so an editor cannot classify those bytes from
-`view` + findings (11.4), and 11.2's guarantee fails.
-
-**Location.** `src/core/spec-references.ts`: the masking rationale in the
-header (lines ~15–24), the "poisoned" binding of a colliding identifier
-(~584–592), `EmbeddingReference.reference === null` for a poisoned root
-(~716–726). `src/core/code-analysis.ts`: the `"poisoned"` binding kind
-(header ~28; ~225; ~422–424; ~610; ~643; ~814; ~896–897; the masking checks
-at ~1157, ~1188, ~1205–1207, and the "poisoned callee masks its arguments"
-rule at ~1313–1315).
-
-**Change.** Replace the masking with unresolved reporting: a `d` reference,
-an MDX `{text(...)}` embedding, a TypeScript marker, or a TypeScript
-`text(...)` call whose chain is rooted at the binding of an invalid import
-or at a colliding identifier is a reference spelling that does not resolve
-— condition 5, 6, or 7 respectively, located at the spelling's own range
-(the embedding's full braced container; the ranges 5.7 defines for
-occurrences), reported in addition to the import's 14.15 — on `build`,
-`check`, and as domain-file findings accompanying `occurrences`, `view`, and
-`at` (11.2–11.5); no occurrence and no edge is recorded for it (11.2), and
-expanded text through it is explicitly unavailable (11.2 "Expanded text").
-Keep unchanged: 14.20 masking of an unparseable file's own contents; a chain
-rooted at an identifier no import binds (a dynamic reference, 14.8, per
-2.4); references through a valid import of an unparseable file (already
-unresolved); the shadowed/type-only exemptions of 4.5; finding order (12.7:
-ordinal, then location). A `text(...)` call whose callee is the `text`
-binding of an invalid `.xspec` import does not resolve either (14.7). The
-14.15 finding itself stays exactly as it is (one per collided identifier
-locating every colliding declaration; one per invalid import).
-
-**Harness check (done while planning).** No suite fixture references the
-invalid binding: T2.1-2/T2.1-3 stage `IMPORTING_FILE_REST` (a bare `<S
-id="alpha">`) after the import line and assert exactly one 14.15; T4-2's
-arms stage the import statements alone; T11.4-4's `./typo.xspec` import is
-never referenced. So no test pins the masking; if one surfaces, follow the
-rules block.
-
-**Verification.** `npm run build`; `section-2.1.test.ts`, `section-4.test.ts`,
-`section-4.5.test.ts`, `section-4.6.test.ts`, `section-11.2.test.ts`,
-`section-11.3.test.ts`, `section-11.4.test.ts`, `section-11.5.test.ts`,
-`section-14.test.ts`, `section-12.0-i.test.ts`, `section-12.0-ii.test.ts`;
-reproduce the three scratch fixtures above and check the expected findings
-and ranges on `build --json`, `check --json`, and `view --json`.
 
 ## Task 5 — Validate the baseline's content before the 13.3 gate, so a baseline that cannot be reconstructed exits 2 even when the current workspace also fails `build`'s validations (SPEC 12.0, 6.3, 13.3; reviewer C, gap 1)
 
@@ -301,3 +278,65 @@ files (`ls test/suite/ | grep -E "section-(9|10)"`); reproduce (a) and (b)
 in scratch git workspaces for both commands, with and without `--json`,
 expecting exit 2 and the baseline error, and confirm a valid current
 workspace with the same invalid baseline still exits 2 with the same message.
+
+## Task 6 — Register T4.5-8 (same-scope collisions) in the harness (TEST-SPEC T4.5-8; SPEC 2.4, 4.5, 5.7, 14, 14.15, 14.5–14.7; Phase 9, harness scope)
+
+**Scope.** A Phase 9 harness task, the replacement for Task 4's collision
+arm (see its removal note above): `test/` only. The rules block's "Phase 10:
+never modify the test harness" line is the product plan's; this phase's own
+scope guard governs — never touch `src/`. Commit `sdg(phase-9): …`.
+
+**Requirement.** TEST-SPEC T4.5-8 (line 182 at 0c5a2b7), verbatim the
+authority; in outline: a code source importing `SPEC` from `./A.xspec` (with
+the module's `text` export bound too, so `text(SPEC.b)` is a spec-module
+call — the exact import spelling is the harness's, within 4) holds a marker
+`SPEC.a` and a call `text(SPEC.b)`, both targets existing in `specs/A.mdx`;
+one arm per colliding form at module scope — `const SPEC = 1`, `function
+SPEC() {}`, `class SPEC {}`, `enum SPEC {}`, `namespace SPEC { export const
+v = 1 }`: `build` and `check` report the condition-15 collision beside
+condition 7 for each chain (unresolved), exit 1; `query edges` reports no
+edge from the file; `occurrences` reports no record for its spellings (5.7,
+T5.7-4); and the condition-15 finding locates every colliding declaration —
+the import by its own characters and the non-import by the construct binding
+the name (14, T14-11): the variable declarator's own characters (`SPEC = 1`,
+the `const` statement excluded) and the function, class, enum, or namespace
+declaration's own characters, an `export` prefix excluded. Condition-7
+ranges are 14's: the marker's bare chain and the `text(...)` call, callee
+through closing parenthesis, terminators excluded; findings in 12.7 order
+(ordinal, then location). Type-level controls in the same file (2.4, 4.5:
+colliding with nothing) — `interface SPEC {}`, `type SPEC = number`,
+`namespace SPEC { export type T = number }` — each leave the import rooting
+the chain: edges recorded, no finding, exit 0 (the inner-scope shadowing
+arm is T4.5-4's, already registered). The spec-source case: a file holding
+`export const BASE = 1` beside `import BASE from "./BASE.xspec"` reports
+14.16 for the export statement, 14.15 for the collision (locating the import
+and the declarator), and 14.5/14.6 for the `d` and `text(...)` spellings
+rooted at `BASE`, no edge and no occurrence recorded for them.
+
+**Location.** `test/suite/registry/section-4.5.ts`: header "SUITE-15:
+T4.5-1 … T4.5-7" (to read … T4.5-8); `section45Tests` (~1257) listing
+`T4_5_1` … `T4_5_7`; helpers `queryEdgesFrom` (~158), `queryEdgesOfKind`
+(~177), `stageOffendingStatement` (~231); the T4.5-4 arms (~802 on) and
+`assertT454CalleeSide` (~886) as the template for asserting findings and
+`occurrences --file` records on a failing workspace (SPEC 11.2). The suite
+file `test/suite/section-4.5.test.ts` (`declareProductTests(section45Tests)`)
+needs no change. Certification: CERTIFICATIONS.md's Exclusions (line 188)
+place T4.5-8 among the Section 4 consumer-side tests outside fixture
+certification, its two-sidedness the paired condition-15/condition-7
+findings and the type-level controls' recorded edges — no fixture or
+manifest work; `test/self/certification-document.test.ts` checks only
+in-scope tests named by CERTIFICATIONS.md (~312), which T4.5-8 is not.
+
+**Expected result against the product.** T4.5-8 must fail against the build
+of 0c5a2b7 as a diagnosed assertion failure at the missing condition-7
+findings (the product masks chains rooted at a "poisoned" binding — Task 4's
+removal note — while its condition-15 finding already locates every
+colliding declaration), and the type-level control arms must pass. Red-check
+per `AGENTS.md` ("Red-checking a strengthened product test") that it fails
+for exactly that reason, not a staging error.
+
+**Verification.** `npm run build`; `npx vitest run --config
+test/vitest.config.ts --project suite test/suite/section-4.5.test.ts
+--reporter=verbose` (T4.5-1 … T4.5-7 stay green; T4.5-8 red as diagnosed);
+`npm run test:self` (self-tests and certification stay green); `npm run
+typecheck`; `npm run format`.
