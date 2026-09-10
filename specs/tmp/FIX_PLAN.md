@@ -172,6 +172,61 @@ every colliding declaration — is registered nowhere under
 `test/suite/registry/` (`section-14.ts` covers T14-1 … T14-8), a matter for
 the Phase 9 compliance determination, not this task.
 
+**Task 5 removal (2026-09-10, the next Phase 9 iteration).** Task 5 (a
+baseline whose content cannot be validated as a workspace reported as the
+usage error of 6.3/12.0 — exit 2 — before the 13.3 gate, ahead of the current
+workspace's own `build` findings) was removed on this date for this phase's
+scope alone: it is not implemented — `src/` is unchanged since 72ad038;
+`src/cli/commands/impact.ts` still runs `readBaseline` (147), then
+`analyzeGraphForRead` (156) and the `assessWorkspaceRead` gate (161), then
+`validateBaselineContent` (171), the create path of
+`src/cli/commands/review.ts` likewise (145, 165, 170, 181), and the module
+header of `src/workspace/baseline.ts` (18–40) still states the post-gate
+design — and both observations reproduce against the build of d4aabcb on
+hand-staged git workspaces (the harness's E-6 configuration plus `src/app.ts`
+holding `export {};`): (a) a commit whose `specs/A.mdx` is `<S>A</S>` with the
+working copy holding two `<S id="a">` sections, and (b) a commit holding
+`.xspec/journal` with one garbage line, unchanged in the working copy —
+`impact --base HEAD` and `review create --base HEAD --name <n>` each exit 1
+with the current workspace's findings (`duplicate-id` at 3–9 and 19–25 in (a);
+`journal-error` naming line 1 in (b)), text and `--json` alike, nothing
+written; with a valid working copy the same baseline as (a) exits 2 with "the
+workspace content at baseline ref 'HEAD' cannot be parsed and validated as a
+workspace (SPEC 6.3, 12.0): specs/A.mdx: missing ID …" (under `--json` the
+12.7 error document, `code` `null`), nothing written. Nothing in it is stale:
+6.3's closing sentence, 12.0's precedence bullet ("baseline resolution (6.3)
+precede source validation … exits 2, even when the current workspace also
+fails the validations of `xspec build`"), exit class 2's "a baseline that
+cannot be read or reconstructed (6.3)", and 13.3's counting of journal errors
+(14.13) among `build`'s validations persist verbatim in the rewritten SPEC;
+T6.3-1 … T6.3-4 and T13.3-3 of TEST-SPEC.md are byte-identical to 72ad038; and
+`test/suite/registry/section-6.3.ts` and `section-13.3.ts` have no commit
+since. No registered test reaches the divergence: T6.3-4's precedence arm
+resolves an unresolvable ref (a `readBaseline` failure, ahead of the gate
+today) over failing current sources, its baseline-sources arm stages valid
+current sources, and T13.3-3 states the exit-2 verdict for a garbage line
+committed at the baseline ref but asserts it nowhere ("neither verdict is
+asserted here", `section-13.3.ts` 68–76) — TEST-SPEC pins no staging of an
+invalid-content baseline beside a failing current workspace, so the gap stays
+the compliance determination's (reviewer C, gap 1); that coverage is a pointer
+for the Phase 9 compliance determination, not this task. Its requirement,
+diagnosis, and code pointers — in git history at d4aabcb — remain valid inputs
+to the Phase 10 re-plan. Two pointers for that re-plan, verified by code
+reading alone: the rewritten 12.0 now orders exit class 2 internally — "A
+configuration error (14.14) precedes every other error of exit class 2 … and a
+baseline (6.3)" — while the product validates the configuration inside
+`analyzeGraphForRead` (`analyzeWorkspaceForRead`, `src/cli/prepare.ts` 69–78),
+after `readBaseline` has already reported repository, ref, and replay
+failures, so the task's step 1 ("leave the relative order of the current
+workspace's configuration loading and `readBaseline` as it stands") no longer
+holds under the revised SPEC (T12.0-10's configuration-precedence arm stages
+`coverage` and `query` only, no baseline); and the revisit added **T6.3-5
+Repository and path of the baseline** (3031926), which the harness registers
+nowhere — Task 7 below. One pointer for the Phase 9 compliance determination,
+verified by diff alone: T12.0-10 was re-worded by the revisit (its
+syntax-class members and its configuration-precedence arm enumerated) while
+`section-12.0-i.ts` and `section-12.0-ii.ts` have no commit since 72ad038.
+
 **Rules for every task (read once per spawn):**
 
 - Phase 10: never modify the test harness (`test/`). Product code (`src/`)
@@ -206,78 +261,6 @@ the Phase 9 compliance determination, not this task.
   below — the relevant fixtures were checked while planning (noted per task).
 
 ---
-
-## Task 5 — Validate the baseline's content before the 13.3 gate, so a baseline that cannot be reconstructed exits 2 even when the current workspace also fails `build`'s validations (SPEC 12.0, 6.3, 13.3; reviewer C, gap 1)
-
-**Requirement.** SPEC 12.0: "The argument checks of `rename` and `move` …
-and baseline resolution (6.3) precede source validation: these usage errors
-are reported, and the command exits 2, even when the current workspace also
-fails the validations of `xspec build` (6.4, 13.3)"; exit class 2 includes
-"a baseline that cannot be read or reconstructed (6.3)". SPEC 6.3: "if the
-baseline content cannot be parsed and validated as a workspace, the command
-MUST fail with an actionable error naming the offending entries or files; a
-baseline that cannot be read or reconstructed is a usage error (12.0)".
-Journal errors (14.13) are among `build`'s validations (13.3), so a baseline
-whose own journal holds a malformed line cannot be validated as a workspace.
-
-**Observed (reviewer C).** `impact --base <ref>` and `review create --base
-<ref> --name <n>` validate the baseline content only after the current
-workspace's gate. (a) Baseline commit whose `specs/A.mdx` has a section
-without `id`; current `specs/A.mdx` with a duplicate id → exit 1,
-`{"findings":[duplicate-id …]}`; expected exit 2 with the error document
-naming the baseline's offending file. (b) A garbage line in `.xspec/journal`
-committed at the baseline and unchanged in the current workspace → exit 1,
-`journal-error` findings; expected exit 2 (the baseline journal is
-unreplayable, so the baseline cannot be reconstructed). With a valid current
-workspace the same invalid baseline already exits 2 — only the ordering
-relative to the gate is wrong.
-
-**Location.** `src/cli/commands/impact.ts` lines ~143–175: `readBaseline` →
-`analyzeGraphForRead` (configuration errors, exit 2) → `assessWorkspaceRead`
-gate (exit 1) → `validateBaselineContent` (exit 2). `src/cli/commands/review.ts`
-create path, lines ~145–185: the same order. The design is stated in the
-module header of `src/workspace/baseline.ts` (lines ~22–40: "The callers run
-it only past the gate … a baseline whose own findings the gate would report
-(the shared-journal case: baseline journal bytes = current journal bytes) is
-therefore never an exit-2 resolution error"), and `readBaseline`'s replay
-judges only the suffix lines. This ordering was introduced deliberately by
-commit 9003712 ("sequence baseline-content validation past the read gate")
-to satisfy an earlier harness version; the current harness agrees with SPEC:
-T13.3-3's garbage-journal arm omits `impact` precisely because "a garbage
-line meets baseline resolution first, exit 2, T6.3-4"
-(`test/suite/registry/section-13.3.ts` ~lines 229–246 and its module header
-~lines 70–76: "a garbage line already committed at the baseline ref makes a
-baseline that cannot be validated as a workspace (exit 2 again, 6.3)"), and
-T6.3-4 pins each baseline-resolution failure as exit 2 with an actionable
-stderr error naming the offending entries or files.
-
-**Change.**
-1. In both commands, call `validateBaselineContent` immediately after
-   `readBaseline` succeeds — before `analyzeGraphForRead`'s source analysis
-   is gated (`assessWorkspaceRead`) — so every baseline failure is the usage
-   error of 6.3/12.0 (exit 2, the 12.7 error document when JSON is in
-   effect, stderr text otherwise, naming the offending files or entries),
-   whatever findings the current workspace carries. Leave the relative order
-   of the current workspace's configuration loading and `readBaseline` as it
-   stands today (not this task's subject); nothing is written on either
-   failure.
-2. Make a malformed or unreplayable line inside the baseline's own journal
-   content a baseline failure (exit 2) even when the current journal shares
-   those bytes: the baseline's journal must itself load as a valid journal
-   for the baseline to be reconstructed (6.3: hashes are computed with it).
-3. Keep `resolveBaseline`'s post-gate use for a session's recorded baseline
-   (`review-session.ts`): a review subcommand reads no session on a failing
-   workspace (13.3, 12.0), so that ordering is correct as it is.
-4. Rewrite the module header of `baseline.ts` and the step comments of
-   `impact.ts`/`review.ts` to state the new order and its SPEC basis.
-
-**Verification.** `npm run build`; `section-6.3.test.ts` (T6.3-1…T6.3-4),
-`section-13.3.test.ts` (T13.3-3 included), `section-12.0-i.test.ts`,
-`section-12.0-ii.test.ts`, `section-9.test.ts` and the `section-10*.test.ts`
-files (`ls test/suite/ | grep -E "section-(9|10)"`); reproduce (a) and (b)
-in scratch git workspaces for both commands, with and without `--json`,
-expecting exit 2 and the baseline error, and confirm a valid current
-workspace with the same invalid baseline still exits 2 with the same message.
 
 ## Task 6 — Register T4.5-8 (same-scope collisions) in the harness (TEST-SPEC T4.5-8; SPEC 2.4, 4.5, 5.7, 14, 14.15, 14.5–14.7; Phase 9, harness scope)
 
@@ -340,3 +323,67 @@ test/vitest.config.ts --project suite test/suite/section-4.5.test.ts
 --reporter=verbose` (T4.5-1 … T4.5-7 stay green; T4.5-8 red as diagnosed);
 `npm run test:self` (self-tests and certification stay green); `npm run
 typecheck`; `npm run format`.
+
+## Task 7 — Register T6.3-5 (repository and path of the baseline) in the harness (TEST-SPEC T6.3-5; SPEC 6.3, 7, 10.7, 12.0; Phase 9, harness scope)
+
+**Scope.** A Phase 9 harness task, found while removing Task 5 (its note
+above): `test/` only; this phase's own scope guard governs — never touch
+`src/`. Commit `sdg(phase-9): …`.
+
+**Requirement.** TEST-SPEC T6.3-5 (line 257 at d4aabcb), verbatim the
+authority; in outline: (a) a workspace rooted in a repository subdirectory —
+the repository at `R`, the configuration at `R/sub/xspec.config.ts`, sources
+under `R/sub/specs/`; a commit `c1`, then an edit — `impact --base c1` run
+from `R/sub`, and from `R` with `--config sub/xspec.config.ts`, reports the
+edit against the baseline reconstructed from `sub/` at `c1`, the configuration
+read from `sub/xspec.config.ts` in that tree, identities workspace-relative to
+`sub/` (`specs/A.mdx#a`, never `sub/specs/A.mdx#a`); (b) nested repositories —
+an outer repository at `R` and an inner one at `R/inner`, staged twice: a
+nested repository whose files the outer committed before the inner was
+initialized, and a submodule — the configuration at `R/inner/xspec.config.ts`,
+both repositories holding a tag `v1` whose trees differ (the outer's holding
+the inner workspace's files with an extra section, or, for the submodule, a
+gitlink and no such files; the inner's the workspace without the extra
+section): `impact --base v1 --config inner/xspec.config.ts` run from `R`
+resolves `v1` in the inner repository — the extra section on neither side,
+neither deleted nor present — and `review create --base v1` records the inner
+commit (T10.5-6, registered in `section-10.5.ts`); a product resolving the ref
+in the working directory's repository fails both; (c) a configuration outside
+any working tree — a workspace directory that is no repository and lies inside
+none — makes `impact --base HEAD` a usage error, exit 2; (d) so does a ref
+whose tree holds no file at the configuration's repository-relative path — a
+commit predating `sub/xspec.config.ts`, and one in which the file bore another
+name — each exit 2 with an actionable error, nothing modified (6.3, 12.0).
+
+**Location.** `test/suite/registry/section-6.3.ts`: header "SUITE-23:
+T6.3-1…T6.3-4" (to read … T6.3-5); `section63Tests` (905) listing `T6_3_1` …
+`T6_3_4`; its helpers `withWorkspace` (99), `impactAgainst` (170),
+`assertNoChanges` (192), `expectBaselineUsageError` (219), and
+`assertStderrNames` (247), and T6.3-1's config-at-ref staging (395 on), as the
+templates; the workspace builder's git surface in `test/helpers/workspace.ts`
+(`runGit` init at 221, the commit helper at 242, the public `git(...)` at 258
+— for `tag`, a nested `init`, and `submodule add`; a local-path `submodule
+add` needs `-c protocol.file.allow=always` on git 2.38 and later, unverified
+here). The suite file `test/suite/section-6.3.test.ts`
+(`declareProductTests(section63Tests)`) needs no change. Certification:
+CERTIFICATIONS.md's Exclusions (line 195) place "6.3 baseline failures —
+T6.3-5's exit-2 arms beside its positive repository-resolution arms" outside
+fixture certification (line 11 cites T6.3-5 only for T13.5-8's git-less
+refused-baseline staging) — no fixture or manifest work;
+`test/self/certification-document.test.ts` checks only in-scope tests, which
+T6.3-5 is not.
+
+**Expected result against the product.** Not established here.
+`src/workspace/baseline.ts` runs its git plumbing from the workspace root —
+the configuration file's directory — (`rev-parse --show-prefix` at 302, the
+ref and tree reads at 326–391), so (a), (c), and (d) read as likely green and
+(b) turns on git's innermost-repository behaviour from that directory.
+Whatever the verdict, red-check any failing arm per `AGENTS.md` ("Red-checking
+a strengthened product test") so a failure is a diagnosed product failure,
+never a staging error, and state the verdict per arm in the commit message.
+
+**Verification.** `npm run build`; `npx vitest run --config
+test/vitest.config.ts --project suite test/suite/section-6.3.test.ts
+--reporter=verbose` (T6.3-1 … T6.3-4 stay green; T6.3-5 green, or red as
+diagnosed); `npm run test:self` (self-tests and certification stay green);
+`npm run typecheck`; `npm run format`.
