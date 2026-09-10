@@ -10,9 +10,14 @@
 #
 #   suite-linux    Linux. The full suite — sections 1–17, certification
 #                  included (E-1) — run with network access disabled after
-#                  dependency installation, so product invocations run with
-#                  network denied. Expected red until the product conforms to
-#                  SPEC.md; green is required from then on.
+#                  dependency installation and as an unprivileged identity
+#                  (.github/scripts/run-without-network.sh), so product
+#                  invocations run with network denied and the permission-
+#                  based stagings of environment refusals (T13.5-7, T14-9,
+#                  T14-10) take effect; the harness verifies each staging on
+#                  itself and reports a privileged runner as a harness error.
+#                  Expected red until the product conforms to SPEC.md; green
+#                  is required from then on.
 #
 #   suite-windows  Windows. The E-6 platform-sensitive subset. The E-6
 #                  byte-identity comparison reads the Linux leg's
@@ -59,7 +64,7 @@ jobs:
         run: npm run typecheck
       - name: Build the product
         run: npm run build
-      - name: Run harness self-tests and certification (network disabled)
+      - name: Run harness self-tests and certification (network disabled, unprivileged)
         run: bash .github/scripts/run-without-network.sh npm run test:self
 
   suite-linux:
@@ -75,7 +80,7 @@ jobs:
       - run: npm ci
       - name: Build the product
         run: npm run build
-      - name: Run the full suite (network disabled after setup, E-1)
+      - name: Run the full suite (network disabled after setup, unprivileged, E-1)
         run: bash .github/scripts/run-without-network.sh npm test
         env:
           XSPEC_E6_EXCHANGE_DIR: ${{ github.workspace }}/.e6-exchange
