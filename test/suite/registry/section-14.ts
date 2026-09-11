@@ -130,12 +130,18 @@
 //   null), a product locating the first alone failing; T14-7's own
 //   collision arms declare their one remaining bearer the same way — the
 //   section move's occupant `keep.mv`, the control rename's `a.sib` —
-//   exactly one location, none beside. The cycle's location stays
-//   SOME-quantified (support.ts assertFindingMentionsLocation): "the
+//   exactly one location, none beside. The home tables' cycle locations
+//   stay SOME-quantified (support.ts assertFindingMentionsLocation): "the
 //   would-be cycle's full path" is asserted as the dependency cycle's
-//   participating `d` spelling (the would-be spec import cycle's
+//   participating `d` spelling (T6.5-4's would-be spec import cycle's
 //   participating import declarations exist in no pre-operation source, so
-//   that arm pins code and form alone, the home note); the remaining
+//   that arm pins code and form alone, the home note); T14-7's own spec
+//   import cycle — `B` imports `A`, and `user` in `A` references the
+//   moved `x` in local form, its rewrite adding `B`'s import to `A` —
+//   declares the complete participant set every-participant strict
+//   (`locatedAtEach`): `B`'s existing import declaration by its own
+//   characters and that local reference's spelling (5.7), never a range
+//   for the import that does not yet exist. The remaining
 //   every-participant cardinality contract is T14-8's subject.
 //   SPEC 14 lists exactly eight refusal reasons — no unresolvable-reference
 //   reason exists (its retired code is unknown to the form-exact decode,
@@ -150,11 +156,21 @@
 //   a directory component of the destination path itself (the other
 //   destination-side directory-component case of 6.5 beside T6.5-4's
 //   derived-path arm — refused-invalid-destination, never 14.22); the
+//   destination spellings `./a.mdx` for the origin `a.mdx`, `specs//b.mdx`,
+//   and `specs/../specs/b.mdx`, in the file form and as a section form's
+//   target path — each naming an occupied path were it normalized, refused
+//   refused-invalid-destination alone concerning the path as spelled,
+//   occupancy being judged in discovered-path form alone (14, 6.5, 12.0);
+//   the spec import cycle's complete located participant set (above); the
 //   both-collide-and-cycle section move (every applicable reason together,
 //   never only the first found); and the invalid-workspace refusal with
 //   the rename staged to ALSO collide — the control arm on the valid twin
 //   pins the staged-to-collide premise (exactly the collision refusal),
-//   then the broken workspace reports the validation findings alone.
+//   then the broken workspace reports the validation findings alone. No
+//   report carries a code outside 14's list: the form-exact decode admits
+//   only 14's codes (forms.ts, S-5), so an unlisted code fails as an H-3
+//   form failure before any count, and the exact multiset excludes every
+//   listed code beside the staged reasons — asserted on every arm.
 // - T14-8 owns the every-participant strictness the home tests SOME-quantify
 //   (T1.3-5's and T2.1-5's per-file tolerance, T5.3-1's file-dimension
 //   binding, T14-7's cycle mentions-location — its collision arms are
@@ -2259,7 +2275,12 @@ const T14_6 = defineProductTest({
  * The modifies-nothing compares are the home tests' subject (T6.4-3,
  * T6.5-4). Per-reason concern lookup is by counting key, total because a
  * refusal report never carries two findings of one reason (SPEC 14: one
- * finding per reason).
+ * finding per reason). No report carries a code outside 14's list: the
+ * form-exact decode admits only 14's codes (forms.ts KNOWN_CODE_TOKENS —
+ * the 25 condition tokens and the eight refusal reasons), so an unlisted
+ * code, the retired `refused-unresolvable-reference` included, fails as an
+ * H-3 form failure before any count, and the exact multiset excludes every
+ * listed code beside the expected ones.
  */
 async function assertRefusalReport(
   product: ProductBinding,
@@ -2439,10 +2460,94 @@ const T14_7_BAD_VALID =
 const T14_7_BAD_INVALID =
   '<S id="bad" d={"nope"}>\nUnresolved dependency target.\n</S>\n';
 
+// The destination-spelling staging (T14-7's own; SPEC 14, 6.5, 12.0):
+// occupancy is judged at a path in discovered-path form alone, so a
+// destination spelled with a `.`, `..`, or empty segment — `./a.mdx` for the
+// origin `a.mdx` (the self-move by spelling), `specs//b.mdx`, and
+// `specs/../specs/b.mdx`, each naming an occupied path were it normalized —
+// is refused-invalid-destination alone, concerning the path as spelled:
+// never refused-destination-exists, never refused-identity-unchanged (the
+// exact one-entry multiset excludes both), and never performed (exit 1). The
+// root-level origin `a.mdx` needs a root-level glob (SPEC 7.1: any glob list,
+// every match `.mdx`). The section form's target path so spelled is refused
+// alike; its `<new-id>` `z` collides with nothing anywhere, so no second
+// reason could apply even to a product normalizing the spelling.
+const T14_7_SPELLING_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["*.mdx", "specs/**/*.mdx"]
+  }
+})
+`;
+const T14_7_SPELLING_ORIGIN = "a.mdx";
+const T14_7_SPELLING_FILES: Readonly<Record<string, string>> = {
+  "xspec.config.ts": T14_7_SPELLING_CONFIG,
+  [T14_7_SPELLING_ORIGIN]: '<S id="x">\nX text.\n</S>\n',
+  "specs/b.mdx": '<S id="b">\nB text.\n</S>\n',
+};
+const T14_7_SPELLED_DESTINATIONS: readonly string[] = [
+  "./a.mdx",
+  "specs//b.mdx",
+  "specs/../specs/b.mdx",
+];
+
+// The spec-import-cycle location staging (T14-7's own; SPEC 14, 6.5, 5.7):
+// `B` imports `A` (the declaration `b`'s external reference to `keep` uses),
+// and `user`, a section of `A` outside the moved subtree, references `x` in
+// local form. Moving `x` into `B` rewrites that reference to `B`'s external
+// form, which needs a binding of `B`'s module `A` lacks — the rewrite adds
+// `B`'s import to `A`, closing the cycle A → B → A. The refusal locates the
+// would-be cycle's full path in pre-operation coordinates: `B`'s existing
+// import declaration by its own characters, and the import the move would
+// add — existing in no pre-operation source — by the one reference spelling
+// whose rewrite requires it (its occurrence span, the reference's own
+// expression, 5.7), never a range for the import that does not yet exist.
+// Bearers in 12.7's within-finding order: `specs/A.mdx` precedes
+// `specs/B.mdx` by path bytes. No dependency cycle arises beside it (`user`
+// → `x`, `b` → `keep`), so the finding is the report's only one.
+const T14_7_CYCLE_A = "specs/A.mdx";
+const T14_7_CYCLE_B = "specs/B.mdx";
+const T14_7_CYCLE_A_SOURCE = [
+  '<S id="keep">',
+  "Keep text.",
+  "</S>",
+  "",
+  '<S id="x">',
+  "X text.",
+  "</S>",
+  "",
+  '<S id="user" d={"x"}>',
+  "User text.",
+  "</S>",
+  "",
+].join("\n");
+const T14_7_IMPORT_DECLARATION = 'import A from "./A.xspec"';
+const T14_7_CYCLE_B_SOURCE = [
+  T14_7_IMPORT_DECLARATION,
+  "",
+  '<S id="b" d={A.keep}>',
+  "B text.",
+  "</S>",
+  "",
+].join("\n");
+const T14_7_LOCAL_REFERENCE = 'd={"x"}';
+const T14_7_LOCAL_REFERENCE_WINDOW = byteWindow(
+  T14_7_CYCLE_A_SOURCE.slice(
+    0,
+    T14_7_CYCLE_A_SOURCE.indexOf(T14_7_LOCAL_REFERENCE),
+  ),
+  T14_7_LOCAL_REFERENCE,
+);
+const T14_7_IMPORT_DECLARATION_WINDOW = byteWindow(
+  "",
+  T14_7_IMPORT_DECLARATION,
+);
+
 const T14_7 = defineProductTest({
   id: "T14-7",
   title:
-    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity — its identities exactly the one 1.5 identity over the destination file, the invalid ID spelled verbatim, no prefix-produced identity beside it (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename and by the exact self-move of either form, no collision or occupied-destination reason beside it, its identities the unchanged identity as the sole element — the bare `<new-file>` root identity for the file form; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing — its identities exactly the located bearers' identities in location order; refused-structural-parent and refused-missing-target-parent concerning the violated and the target-parent identity, each the sole identities element; refused-cycle locating the would-be cycle's participating spelling; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination; the eight reasons 14 lists are the whole refusal vocabulary (no unresolvable-reference reason exists); every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them (SPEC 14, 6.4, 6.5, 5.3, 12.0, 12.7)",
+    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity — its identities exactly the one 1.5 identity over the destination file, the invalid ID spelled verbatim, no prefix-produced identity beside it (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename and by the exact self-move of either form, no collision or occupied-destination reason beside it, its identities the unchanged identity as the sole element — the bare `<new-file>` root identity for the file form; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing — its identities exactly the located bearers' identities in location order; refused-structural-parent and refused-missing-target-parent concerning the violated and the target-parent identity, each the sole identities element; refused-cycle locating the would-be cycle's full path in pre-operation coordinates — a dependency cycle's participating `d` spelling; a spec import cycle's existing import declaration by its own characters and, for the import the move would add, the local reference spelling whose rewrite requires it, exactly those two, never a range for the import that does not yet exist; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included — occupancy judged in discovered-path form alone: a destination spelled `./a.mdx` for the origin `a.mdx`, `specs//b.mdx`, or `specs/../specs/b.mdx`, each naming an occupied path were it normalized, is refused-invalid-destination alone concerning the path as spelled, never reported occupied, and a section-form target path so spelled likewise; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination; the eight reasons 14 lists are the whole refusal vocabulary — a code 14 does not list never appears in any report, the form-exact decode admitting only 14's codes (no unresolvable-reference reason exists); every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them (SPEC 14, 6.4, 6.5, 5.3, 12.0, 12.7)",
   timeoutMs: 300_000,
   run: async (product) => {
     // --- The rename reasons, staged via T6.4-3's exported fixture: the
@@ -2622,6 +2727,87 @@ const T14_7 = defineProductTest({
             "target file, remaining after the removal — and create a " +
             "dependency cycle — the moved node depends on `keep`, its " +
             "would-be ancestor: both findings, never only the first)",
+        );
+      },
+    );
+
+    // --- refused-invalid-destination alone for a destination spelled with a
+    // `.`, `..`, or empty segment (the spelling fixture note): each spelling
+    // names an occupied path were it normalized — the origin itself for
+    // `./a.mdx`, the discovered `specs/b.mdx` for the other two — yet
+    // occupancy is judged in discovered-path form alone, so the exact
+    // one-entry multiset holds no refused-destination-exists and no
+    // refused-identity-unchanged beside it, the concerned path the
+    // destination as spelled; the section form's target path so spelled
+    // likewise (SPEC 14, 6.5, 12.0).
+    await withWorkspace({ files: T14_7_SPELLING_FILES }, async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T14-7 destination-spelling staging `build` (a root-level origin " +
+          "under a root-level glob beside `specs/b.mdx`)",
+      );
+      for (const spelled of T14_7_SPELLED_DESTINATIONS) {
+        await assertRefusalReport(
+          product,
+          workspace,
+          ["move", T14_7_SPELLING_ORIGIN, spelled],
+          { finding: "refused-invalid-destination", path: spelled },
+          `T14-7 move (file form; destination spelled \`${spelled}\` — no ` +
+            "discovered path carries a `.`, `..`, or empty segment: " +
+            "refused-invalid-destination alone, concerning the path as " +
+            "spelled, never reported occupied)",
+        );
+        await assertRefusalReport(
+          product,
+          workspace,
+          ["move", `${T14_7_SPELLING_ORIGIN}#x`, `${spelled}#z`],
+          { finding: "refused-invalid-destination", path: spelled },
+          `T14-7 move (section form; target path spelled \`${spelled}\` — ` +
+            "refused-invalid-destination alone, concerning the target file " +
+            "path as spelled, never reported occupied)",
+        );
+      }
+    });
+
+    // --- refused-cycle locating a would-be spec import cycle's full path
+    // (the import-cycle fixture note): the existing import declaration by
+    // its own characters and, for the import the move would add, the local
+    // reference spelling whose rewrite requires it — exactly those two
+    // participants, in 12.7's within-finding order, never a range for the
+    // import that does not yet exist, path null (SPEC 14, 6.5, 5.7, 12.7).
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [T14_7_CYCLE_A]: T14_7_CYCLE_A_SOURCE,
+          [T14_7_CYCLE_B]: T14_7_CYCLE_B_SOURCE,
+        },
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T14-7 import-cycle staging `build` over the valid workspace " +
+            "(`B` imports `A`; `user` references `x` in local form)",
+        );
+        await assertRefusalReport(
+          product,
+          workspace,
+          ["move", `${T14_7_CYCLE_A}#x`, `${T14_7_CYCLE_B}#x`],
+          {
+            finding: "refused-cycle",
+            locatedAtEach: [
+              { file: T14_7_CYCLE_A, window: T14_7_LOCAL_REFERENCE_WINDOW },
+              { file: T14_7_CYCLE_B, window: T14_7_IMPORT_DECLARATION_WINDOW },
+            ],
+          },
+          "T14-7 move (spec import cycle: carrying `x` from A into B, where " +
+            "B imports A and `user` references `x` locally — the rewrite " +
+            "adds B's import to A, closing the cycle; the finding locates " +
+            "B's existing import declaration and that local reference's " +
+            "spelling, exactly those two, never the import that does not " +
+            "yet exist)",
         );
       },
     );
