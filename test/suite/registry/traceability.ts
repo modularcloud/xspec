@@ -466,6 +466,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // 6.6/7/14.14's staged surfaces are context with home coverage at
   // T6.6-6/T7-*/T12.7-3.
   "T14-10": ["14", "10.7", "11.2", "11.5", "11.6", "12.0", "12.7", "13.3"],
+  // T14-11: the per-condition range rules (home "14") with the byte-offset
+  // convention they use (1.7), the `d`-entry, marker, and `text(...)` spans
+  // (5.7), the attribute, opening-tag, and import ranges (11.4), and the
+  // per-spelling resolution inside a repeated `d` with the occurrence it
+  // records (11.2); 2.4/2.7/4.5's staged forms are context with home
+  // coverage at T2.4-*/T2.7-*/T4.5-*.
+  "T14-11": ["14", "1.7", "5.7", "11.2", "11.4"],
   "T15-1": ["15"],
   "P-1": ["1.4", "2.6"],
   "P-2": ["3"],

@@ -1,5 +1,6 @@
 // TEST-SPEC §14 (validation errors: the reporting contract) — SUITE-49:
-// T14-1 … T14-8.
+// T14-1 … T14-8 and T14-11 (T14-9 and T14-10, the Linux-leg 14.24/14.25
+// tests, live in section-14-ii.ts).
 //
 // Sections 1–13 exercise each numbered condition in its home context; these
 // are the reporting-contract tests: multi-error completeness with
@@ -16,7 +17,9 @@
 // (T14-7) — and the location-cardinality contract: a condition several
 // constructs jointly violate is one finding locating every participant,
 // each in its containing file, in the pinned within-finding location order
-// (T14-8).
+// (T14-8) — and the per-condition range contract: each located condition's
+// range byte-exact per SPEC 14's rule, against offsets precomputed from the
+// staged bytes (T14-11).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -196,6 +199,24 @@
 //   (import windows), disjoint by construction — while the pure
 //   mutual-import staging (bindings unused, so no dependency edge exists,
 //   SPEC 2.1) isolates the import cycle as exactly one 14.9 finding.
+// - T14-11 pins ranges byte-EXACT, no end-widening: every offset is the
+//   UTF-8 byte length of the staged text before the pinned construct
+//   (`assemble`/`pin`), fixtures carrying a multibyte character before it so
+//   a character-indexed or line/column report fails; per arm the condition
+//   multiset is exact and each condition's complete location lists are
+//   compared as a multiset (order among same-condition findings is 12.7's
+//   ordering contract, T12.7-*'s subject). TS declaration forms are staged
+//   without `;` so "own characters" is unambiguous, while the dynamic
+//   `import()`, the marker, the `text(...)` call, and the optional-chain
+//   statement carry a `;` the range must exclude. The 14.20 arms pin the
+//   offsets SPEC 14 fixes — 0 for a byte-order mark and a refused read, the
+//   first undecodable byte, the longest well-formed-prefix length — where
+//   T14-3/T14-5 assert presence alone; the refused-read arm is a
+//   permission staging (E-1), Linux leg, run last. `d={}` is pinned as
+//   SPEC 14 and TEST-SPEC T14-11 state it (14.8, a zero-length span at the
+//   closing brace) although the reference MDX grammar rejects an empty
+//   attribute value expression — a tension recorded in
+//   specs/tmp/SPEC-PROBLEMS.md, not resolved here.
 
 import { Buffer } from "node:buffer";
 import * as path from "node:path";
@@ -219,6 +240,7 @@ import {
 } from "../../helpers/assertions.js";
 import {
   stageReadRefusalOfDirectory,
+  stageReadRefusalOfFile,
   stageWriteRefusalUnder,
 } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -228,7 +250,7 @@ import {
   assertCompileErrorAt,
   ConsumerProject,
 } from "../../helpers/tooling.js";
-import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import type { FileContents, WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   RENAME_REFUSAL_CASES,
@@ -3370,7 +3392,732 @@ const T14_8 = defineProductTest({
   },
 });
 
-/** TEST-SPEC §14 T14-1…T14-8, in canonical ID order (SUITE-49). */
+// ---------------------------------------------------------------------------
+// T14-11 — per-condition ranges, byte-exact
+// ---------------------------------------------------------------------------
+
+// Every fixture below is assembled from exactly known parts (`assemble`), and
+// every pinned offset is the UTF-8 byte length of the text before the pinned
+// part — never a string index: the shared preamble and the 14.20 fixtures put
+// a multibyte character (`é`) before the pinned construct, so a product
+// reporting character indices or line/column pairs fails. Ranges are asserted
+// byte-EXACT — no end-widening: the module-header window convention is set
+// aside here, since SPEC 14 fixes each condition's range.
+
+/** A part of a fixture whose exact byte range the arm pins (`pin`). */
+interface PinnedPart {
+  readonly pin: string;
+}
+
+/** Mark a fixture part as pinned; `pin("")` pins a zero-length range. */
+function pin(text: string): PinnedPart {
+  return { pin: text };
+}
+
+/** A fixture text with the byte range of each pinned part, in part order. */
+interface AssembledFixture {
+  readonly text: string;
+  readonly ranges: readonly { readonly start: number; readonly end: number }[];
+}
+
+/**
+ * Concatenate the parts; each pinned part's range is [bytes before it, bytes
+ * through it) over the assembled UTF-8 text (SPEC 1.7: zero-based byte
+ * offsets, start-inclusive, end-exclusive).
+ */
+function assemble(parts: readonly (string | PinnedPart)[]): AssembledFixture {
+  let text = "";
+  const ranges: { start: number; end: number }[] = [];
+  for (const part of parts) {
+    if (typeof part === "string") {
+      text += part;
+      continue;
+    }
+    const start = Buffer.byteLength(text, "utf8");
+    text += part.pin;
+    ranges.push({ start, end: Buffer.byteLength(text, "utf8") });
+  }
+  return { text, ranges };
+}
+
+/** One pinned location: a file and its exact `{start, end}` (SPEC 12.7). */
+interface ExactLocation {
+  readonly file: string;
+  readonly range: { readonly start: number; readonly end: number };
+}
+
+/** The pinned ranges of `fixture` (by pin index) as locations in `file`. */
+function located(
+  file: string,
+  fixture: AssembledFixture,
+  ...indices: readonly number[]
+): readonly ExactLocation[] {
+  return indices.map((index) => {
+    const range = fixture.ranges[index];
+    if (range === undefined) {
+      throw new Error(
+        `T14-11 fixture ${file} pins no part #${String(index)} (harness bug)`,
+      );
+    }
+    return { file, range };
+  });
+}
+
+/** A finding whose condition and complete location list are pinned. */
+interface ExactFindingExpectation {
+  readonly condition: string;
+  readonly locations: readonly ExactLocation[];
+}
+
+/** One range-rule arm: a workspace whose `build --json` findings are pinned. */
+interface RangeRuleCase {
+  /** The arm's letter (diagnostics). */
+  readonly arm: string;
+  /** The SPEC 14 range rule under test (diagnostics). */
+  readonly rule: string;
+  readonly config: string;
+  readonly files: Readonly<Record<string, FileContents>>;
+  /** Every staged finding, with its complete location list. */
+  readonly expected: readonly ExactFindingExpectation[];
+}
+
+/** A valid section every MDX fixture opens with — `ok` is a resolvable target. */
+const T14_11_PREAMBLE = '<S id="ok">\nTarget: café.\n</S>\n\n';
+
+/** The spec source the code-file arms import: `a`, `a.b`, and `b` resolve. */
+const T14_11_A_MDX =
+  '<S id="a">\nA.\n<S id="a.b">\nA.b.\n</S>\n</S>\n\n<S id="b">\nB.\n</S>\n';
+
+// (a) 14.5 — an unresolved entry of a `d` array literal: the entry's own
+// expression, its quotes included, no bracket, comma, or whitespace.
+const T14_11_D_ENTRY = assemble([
+  T14_11_PREAMBLE,
+  '<S id="a" d={["ok", ',
+  pin('"absent"'),
+  "]}>\nUnknown second entry.\n</S>\n",
+]);
+
+// (b) 14.8 — a non-array braced `d` value: the expression the braces enclose,
+// the braces excluded.
+const T14_11_D_IDENT = assemble([
+  T14_11_PREAMBLE,
+  '<S id="a" d={',
+  pin("foo"),
+  "}>\nA dynamic d value.\n</S>\n",
+]);
+
+// (c) 14.8 — braces enclosing no expression: a zero-length span at the
+// closing brace.
+const T14_11_D_EMPTY = assemble([
+  T14_11_PREAMBLE,
+  '<S id="a" d={',
+  pin(""),
+  "}>\nAn empty d value.\n</S>\n",
+]);
+
+// (d) 14.8 — a non-static bare reference in expression-statement position:
+// the statement's expression, exclusive of the `;`.
+const T14_11_OPTIONAL_CHAIN = assemble([
+  'import SPEC from "../specs/A.xspec"\n\n',
+  pin("SPEC?.a"),
+  ";\n",
+]);
+
+// (e) 14.2 — each bearer's `id` attribute: a two-segment top-level ID and a
+// level-skipping child, one finding each.
+const T14_11_STRUCTURAL = assemble([
+  T14_11_PREAMBLE,
+  "<S ",
+  pin('id="top.two"'),
+  '>\nTwo segments at top level.\n</S>\n\n<S id="p">\n<S ',
+  pin('id="p.q.r"'),
+  ">\nSkips a level.\n</S>\n</S>\n",
+]);
+
+// (f) 14.3 — one finding locating each bearer's `id` attribute.
+const T14_11_DUPLICATE = assemble([
+  T14_11_PREAMBLE,
+  "<S ",
+  pin('id="dup"'),
+  ">\nFirst bearer.\n</S>\n\n<S ",
+  pin('id="dup"'),
+  ">\nSecond bearer.\n</S>\n",
+]);
+
+// (g) 14.4 — one finding per violating attribute, each at the attribute: the
+// parent's `id`, the child's own `id` (spelling the malformed segment as its
+// prefix), and a `tags` attribute.
+const T14_11_SEGMENT_TAG = assemble([
+  T14_11_PREAMBLE,
+  "<S ",
+  pin('id="a b"'),
+  ">\n<S ",
+  pin('id="a b.c"'),
+  '>\nChild of a malformed segment.\n</S>\n</S>\n\n<S id="t" ',
+  pin('tags="bad#tag"'),
+  ">\nA malformed tag.\n</S>\n",
+]);
+
+// (h) 14.17 per form — a repeated prop locating every attribute spelling the
+// name, an unknown prop, a spread attribute (its whole braced construct), and
+// an invalid `coverage` value, each at the attribute's own characters.
+const T14_11_INVALID_PROP = assemble([
+  T14_11_PREAMBLE,
+  "<S ",
+  pin('id="rep"'),
+  " ",
+  pin('id="rep2"'),
+  '>\nRepeated id.\n</S>\n\n<S id="unk" ',
+  pin('wibble="x"'),
+  '>\nUnknown prop.\n</S>\n\n<S id="spr" ',
+  pin("{...extra}"),
+  '>\nSpread attribute.\n</S>\n\n<S id="cov" ',
+  pin('coverage="maybe"'),
+  ">\nInvalid coverage value.\n</S>\n",
+]);
+
+// (i) 14.1 — the section's opening tag, its own characters alone.
+const T14_11_MISSING_ID = assemble([
+  T14_11_PREAMBLE,
+  pin('<S coverage="none">'),
+  "\nMissing id.\n</S>\n",
+]);
+
+// (j) 14.15 per form: an import declaration (the second of an MDX file's two,
+// alone), an export declaration, and `import X = require(…)` by their own
+// characters — each staged without `;`, so "own characters" is unambiguous —
+// a dynamic `import()` by its call expression (its `;` excluded), and the
+// colliding non-import declaration by the construct binding the name — the
+// variable declarator `SPEC = 1`, the `const` statement excluded — beside the
+// import declaration it collides with (T4.5-8). The chains rooted at the
+// collided identifier are unresolved (14.7, SPEC 2.4): the marker by its bare
+// chain exclusive of the `;`, the `text(...)` call callee through closing
+// parenthesis (5.7) — `a` and `b` exist, so a product ignoring the collision
+// resolves them and reports nothing.
+const T14_11_IMPORT_MDX = assemble([
+  'import A from "./A.xspec"\n',
+  pin('import NOPE from "./Missing.xspec"'),
+  '\n\n<S id="b" d={A.a}>\nUses A.\n</S>\n',
+]);
+const T14_11_EXPORT_TS = assemble([
+  "const before = 1\n\n",
+  pin('export * from "../specs/A.xspec"'),
+  "\n",
+]);
+const T14_11_REQUIRE_TS = assemble([
+  "const before = 1\n\n",
+  pin('import X = require("../specs/A.xspec")'),
+  "\n",
+]);
+const T14_11_DYNAMIC_TS = assemble([
+  "const before = 1\n\n",
+  pin('import("../specs/A.xspec")'),
+  ";\n",
+]);
+const T14_11_COLLISION_TS = assemble([
+  pin('import SPEC, { text } from "../specs/A.xspec"'),
+  "\n\nconst ",
+  pin("SPEC = 1"),
+  "\n\n",
+  pin("SPEC.a"),
+  ";\n",
+  pin("text(SPEC.b)"),
+  ";\n",
+]);
+
+// (k) 14.16 per form: an element from the first character of its opening tag
+// through the last of its closing tag, a self-closing element its own tag, an
+// expression container brace through brace, an export statement whole.
+const T14_11_CONSTRUCTS = assemble([
+  T14_11_PREAMBLE,
+  pin("<div>Not a section.</div>"),
+  "\n\n",
+  pin("<br />"),
+  "\n\n",
+  pin("{1 + 1}"),
+  "\n\n",
+  pin("export const x = 1"),
+  "\n",
+]);
+
+// (l) 14.18: a node binding's identifier extended by the longest static chain
+// it roots at the offending use (`a.b` exists, so nothing else reports); a
+// `text` binding passed to another function, its identifier alone.
+const T14_11_USAGE_TS = assemble([
+  'import SPEC, { text } from "../specs/A.xspec"\n\n' +
+    "declare function f(x: unknown): void\n\nconst n = ",
+  pin("SPEC.a.b"),
+  "\n\nf(",
+  pin("text"),
+  ")\n",
+]);
+
+// (m) 14.20's one zero-length range at the failure's offset: 0 for a
+// byte-order mark; for an encoding failure the offset of the first byte at
+// which UTF-8 decoding fails — a valid 5-byte prefix (`Café`: four characters,
+// five bytes) then 0xFF; for a syntax failure the byte length of the longest
+// whole-character prefix with which some well-formed file begins — an MDX file
+// ending inside an unclosed section (the whole file such a prefix: its byte
+// length, past the multibyte `é`) and the TypeScript file `let x = ;` (the
+// prefix `let x = `: 8) — never past the file's length.
+const T14_11_BOM_MDX = assemble([
+  pin(""),
+  `${BOM}<S id="bom">\nA byte-order mark.\n</S>\n`,
+]);
+const T14_11_ENCODING_PREFIX = "Café";
+const T14_11_ENCODING_MDX = withInvalidUtf8Byte(
+  T14_11_ENCODING_PREFIX,
+  '\n<S id="enc">\nBody.\n</S>\n',
+);
+const T14_11_ENCODING_OFFSET = Buffer.byteLength(
+  T14_11_ENCODING_PREFIX,
+  "utf8",
+);
+const T14_11_UNCLOSED_MDX = assemble([
+  '<S id="open">\nEnds inside an unclosed section: café.\n',
+  pin(""),
+]);
+const T14_11_SYNTAX_TS = assemble(["let x = ", pin(""), ";\n"]);
+
+const T14_11_SPEC = "specs/A.mdx";
+const T14_11_CODE = "src/app.ts";
+
+const T14_11_CASES: readonly RangeRuleCase[] = [
+  {
+    arm: "a",
+    rule: "14.5 — an unresolved `d` array entry: the entry's own expression alone",
+    config: SPECS_ONLY_CONFIG,
+    files: { [T14_11_SPEC]: T14_11_D_ENTRY.text },
+    expected: [
+      { condition: "14.5", locations: located(T14_11_SPEC, T14_11_D_ENTRY, 0) },
+    ],
+  },
+  {
+    arm: "b",
+    rule: "14.8 — `d={foo}`: the expression the braces enclose, braces excluded",
+    config: SPECS_ONLY_CONFIG,
+    files: { [T14_11_SPEC]: T14_11_D_IDENT.text },
+    expected: [
+      { condition: "14.8", locations: located(T14_11_SPEC, T14_11_D_IDENT, 0) },
+    ],
+  },
+  {
+    arm: "c",
+    rule: "14.8 — `d={}`: a zero-length span at the closing brace",
+    config: SPECS_ONLY_CONFIG,
+    files: { [T14_11_SPEC]: T14_11_D_EMPTY.text },
+    expected: [
+      { condition: "14.8", locations: located(T14_11_SPEC, T14_11_D_EMPTY, 0) },
+    ],
+  },
+  {
+    arm: "d",
+    rule: "14.8 — `SPEC?.a;`: the statement's expression, exclusive of the `;`",
+    config: SPEC_AND_CODE_CONFIG,
+    files: {
+      [T14_11_SPEC]: T14_11_A_MDX,
+      [T14_11_CODE]: T14_11_OPTIONAL_CHAIN.text,
+    },
+    expected: [
+      {
+        condition: "14.8",
+        locations: located(T14_11_CODE, T14_11_OPTIONAL_CHAIN, 0),
+      },
+    ],
+  },
+  {
+    arm: "e",
+    rule: "14.2 — each bearer's `id` attribute, one finding per bearer",
+    config: SPECS_ONLY_CONFIG,
+    files: { [T14_11_SPEC]: T14_11_STRUCTURAL.text },
+    expected: [
+      {
+        condition: "14.2",
+        locations: located(T14_11_SPEC, T14_11_STRUCTURAL, 0),
+      },
+      {
+        condition: "14.2",
+        locations: located(T14_11_SPEC, T14_11_STRUCTURAL, 1),
+      },
+    ],
+  },
+  {
+    arm: "f",
+    rule: "14.3 — one finding locating each bearer's `id` attribute",
+    config: SPECS_ONLY_CONFIG,
+    files: { [T14_11_SPEC]: T14_11_DUPLICATE.text },
+    expected: [
+      {
+        condition: "14.3",
+        locations: located(T14_11_SPEC, T14_11_DUPLICATE, 0, 1),
+      },
+    ],
+  },
+  {
+    arm: "g",
+    rule: "14.4 — one finding per violating `id` or `tags` attribute, at the attribute",
+    config: SPECS_ONLY_CONFIG,
+    files: { [T14_11_SPEC]: T14_11_SEGMENT_TAG.text },
+    expected: [0, 1, 2].map((index) => ({
+      condition: "14.4",
+      locations: located(T14_11_SPEC, T14_11_SEGMENT_TAG, index),
+    })),
+  },
+  {
+    arm: "h",
+    rule: "14.17 per form — a repeated prop at every attribute spelling the name; an unknown prop, a spread attribute, and an invalid `coverage` value at the attribute",
+    config: SPECS_ONLY_CONFIG,
+    files: { [T14_11_SPEC]: T14_11_INVALID_PROP.text },
+    expected: [
+      {
+        condition: "14.17",
+        locations: located(T14_11_SPEC, T14_11_INVALID_PROP, 0, 1),
+      },
+      ...[2, 3, 4].map((index) => ({
+        condition: "14.17",
+        locations: located(T14_11_SPEC, T14_11_INVALID_PROP, index),
+      })),
+    ],
+  },
+  {
+    arm: "i",
+    rule: "14.1 — the section's opening tag",
+    config: SPECS_ONLY_CONFIG,
+    files: { [T14_11_SPEC]: T14_11_MISSING_ID.text },
+    expected: [
+      {
+        condition: "14.1",
+        locations: located(T14_11_SPEC, T14_11_MISSING_ID, 0),
+      },
+    ],
+  },
+  {
+    arm: "j",
+    rule: "14.15 per form — declarations by their own characters, a dynamic `import()` by its call expression, a colliding declarator beside its import (14.7 for the chains it roots)",
+    config: SPEC_AND_CODE_CONFIG,
+    files: {
+      [T14_11_SPEC]: T14_11_A_MDX,
+      "specs/B.mdx": T14_11_IMPORT_MDX.text,
+      "src/exp.ts": T14_11_EXPORT_TS.text,
+      "src/req.ts": T14_11_REQUIRE_TS.text,
+      "src/dyn.ts": T14_11_DYNAMIC_TS.text,
+      "src/collide.ts": T14_11_COLLISION_TS.text,
+    },
+    expected: [
+      {
+        condition: "14.15",
+        locations: located("specs/B.mdx", T14_11_IMPORT_MDX, 0),
+      },
+      {
+        condition: "14.15",
+        locations: located("src/exp.ts", T14_11_EXPORT_TS, 0),
+      },
+      {
+        condition: "14.15",
+        locations: located("src/req.ts", T14_11_REQUIRE_TS, 0),
+      },
+      {
+        condition: "14.15",
+        locations: located("src/dyn.ts", T14_11_DYNAMIC_TS, 0),
+      },
+      {
+        condition: "14.15",
+        locations: located("src/collide.ts", T14_11_COLLISION_TS, 0, 1),
+      },
+      {
+        condition: "14.7",
+        locations: located("src/collide.ts", T14_11_COLLISION_TS, 2),
+      },
+      {
+        condition: "14.7",
+        locations: located("src/collide.ts", T14_11_COLLISION_TS, 3),
+      },
+    ],
+  },
+  {
+    arm: "k",
+    rule: "14.16 per form — an element through its closing tag, a self-closing tag, an expression container brace through brace, an export statement whole",
+    config: SPECS_ONLY_CONFIG,
+    files: { [T14_11_SPEC]: T14_11_CONSTRUCTS.text },
+    expected: [0, 1, 2, 3].map((index) => ({
+      condition: "14.16",
+      locations: located(T14_11_SPEC, T14_11_CONSTRUCTS, index),
+    })),
+  },
+  {
+    arm: "l",
+    rule: "14.18 — the binding's identifier extended by the longest static chain it roots; a `text` binding alone",
+    config: SPEC_AND_CODE_CONFIG,
+    files: { [T14_11_SPEC]: T14_11_A_MDX, [T14_11_CODE]: T14_11_USAGE_TS.text },
+    expected: [0, 1].map((index) => ({
+      condition: "14.18",
+      locations: located(T14_11_CODE, T14_11_USAGE_TS, index),
+    })),
+  },
+  {
+    arm: "m",
+    rule: "14.20 — one zero-length range at the failure's offset: a byte-order mark, an encoding failure, an MDX and a TypeScript syntax failure",
+    config: SPEC_AND_CODE_CONFIG,
+    files: {
+      "specs/bom.mdx": T14_11_BOM_MDX.text,
+      "specs/enc.mdx": T14_11_ENCODING_MDX,
+      "specs/open.mdx": T14_11_UNCLOSED_MDX.text,
+      "src/bad.ts": T14_11_SYNTAX_TS.text,
+    },
+    expected: [
+      {
+        condition: "14.20",
+        locations: located("specs/bom.mdx", T14_11_BOM_MDX, 0),
+      },
+      {
+        condition: "14.20",
+        locations: [
+          {
+            file: "specs/enc.mdx",
+            range: {
+              start: T14_11_ENCODING_OFFSET,
+              end: T14_11_ENCODING_OFFSET,
+            },
+          },
+        ],
+      },
+      {
+        condition: "14.20",
+        locations: located("specs/open.mdx", T14_11_UNCLOSED_MDX, 0),
+      },
+      {
+        condition: "14.20",
+        locations: located("src/bad.ts", T14_11_SYNTAX_TS, 0),
+      },
+    ],
+  },
+];
+
+/**
+ * The T14-11 contract over one arm's findings: the exact condition multiset
+ * (one finding per offending construct — 14.4's and 14.17's per-attribute
+ * cardinality, 14.3's one finding); every finding concerning no path (12.7:
+ * located conditions carry `path` null); and, per condition, the complete
+ * location lists compared as a multiset — each list in 12.7's within-finding
+ * order, each range `{"start", "end"}` exactly the pinned bytes (1.7). Order
+ * among same-condition findings is 12.7's ordering contract, not this
+ * test's, so the lists are sorted before comparison.
+ */
+function assertExactRanges(
+  findings: readonly Finding[],
+  expected: readonly ExactFindingExpectation[],
+  context: string,
+): void {
+  const counts: Record<string, number> = {};
+  for (const expectation of expected) {
+    counts[expectation.condition] = (counts[expectation.condition] ?? 0) + 1;
+  }
+  assertConditionCounts(
+    findings,
+    counts,
+    `${context} — the staged conditions, one finding per offending ` +
+      `construct and none beside (SPEC 14)`,
+  );
+  for (const finding of findings) {
+    if (finding.path !== null) {
+      fail(
+        `${context}: a finding locating in source concerns no path — \`path\` ` +
+          `is null for located conditions (SPEC 12.7, 14); got ` +
+          `${JSON.stringify(finding.path)} on the condition-` +
+          `${String(finding.condition)} finding (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+  }
+  const byJson = (a: unknown, b: unknown): number => {
+    const left = JSON.stringify(a);
+    const right = JSON.stringify(b);
+    return left < right ? -1 : left > right ? 1 : 0;
+  };
+  for (const condition of new Set(expected.map((e) => e.condition))) {
+    const want = expected
+      .filter((expectation) => expectation.condition === condition)
+      .map((expectation) => expectation.locations)
+      .sort(byJson);
+    const got = findings
+      .filter((finding) => finding.condition === condition)
+      .map((finding) =>
+        finding.locations.map((location) => ({
+          file: location.file,
+          range: { start: location.range.start, end: location.range.end },
+        })),
+      )
+      .sort(byJson);
+    assertSameJson(
+      got,
+      want,
+      `${context}: the condition-${condition} finding(s) locate exactly the ` +
+        `pinned byte ranges — every offending construct, each by the range ` +
+        `SPEC 14 fixes for the condition, \`{"start", "end"}\` as zero-based ` +
+        `byte offsets, end-exclusive (SPEC 14, 1.7, 12.7)`,
+    );
+  }
+}
+
+/** One range-rule arm: `build --json` over its workspace, findings pinned. */
+async function runRangeRuleArm(
+  product: ProductBinding,
+  kase: RangeRuleCase,
+): Promise<void> {
+  const context = `T14-11 (${kase.arm}) ${kase.rule}`;
+  await withWorkspace(
+    { files: { "xspec.config.ts": kase.config, ...kase.files } },
+    async (workspace) => {
+      const findings = await buildFindings(
+        product,
+        workspace,
+        `${context} — \`build --json\` exits 1 with the findings report ` +
+          `(SPEC 12.0, 12.7)`,
+      );
+      assertExactRanges(findings, kase.expected, context);
+    },
+  );
+}
+
+// (n) Per-spelling resolution inside a repeated `d` (SPEC 11.2): the 14.17
+// repetition locates both `d` attributes; the resolving entry records one
+// occurrence spanning its own expression; the unresolved entry is one 14.5
+// finding at its expression.
+const T14_11_REPEATED_D = assemble([
+  T14_11_PREAMBLE,
+  '<S id="r" ',
+  pin('d={"ok"}'),
+  " ",
+  pin('d={"absent"}'),
+  ">\nRepeated d.\n</S>\n",
+]);
+
+/**
+ * The expression a `d={…}` attribute's braces enclose: after the three ASCII
+ * bytes `d={`, before the one-byte closing brace (SPEC 14, 5.7).
+ */
+function enclosedExpression(attribute: {
+  readonly start: number;
+  readonly end: number;
+}): { start: number; end: number } {
+  return { start: attribute.start + 3, end: attribute.end - 1 };
+}
+
+async function runRepeatedDependencyArm(
+  product: ProductBinding,
+): Promise<void> {
+  const context =
+    "T14-11 (n) per-spelling resolution inside a repeated `d` (SPEC 11.2)";
+  const file = T14_11_SPEC;
+  const attributes = located(file, T14_11_REPEATED_D, 0, 1);
+  const resolving = enclosedExpression(attributes[0]!.range);
+  const unresolved = enclosedExpression(attributes[1]!.range);
+  const expected: readonly ExactFindingExpectation[] = [
+    { condition: "14.17", locations: attributes },
+    { condition: "14.5", locations: [{ file, range: unresolved }] },
+  ];
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [file]: T14_11_REPEATED_D.text,
+      },
+    },
+    async (workspace) => {
+      const buildContext = `${context} — \`build --json\``;
+      assertExactRanges(
+        await buildFindings(product, workspace, buildContext),
+        expected,
+        buildContext,
+      );
+      const occurrencesContext = `${context} — \`occurrences\``;
+      const report = decodeOccurrencesReport(
+        await runJsonExpecting(
+          product,
+          workspace,
+          ["occurrences"],
+          1,
+          `${occurrencesContext} exits 1: the answer carries the domain ` +
+            `file's findings (SPEC 11.2, 12.0)`,
+        ),
+        occurrencesContext,
+      );
+      assertExactRanges(report.findings, expected, occurrencesContext);
+      assertSameJson(
+        report.occurrences.map(({ file: recorded, range, kind, target }) => ({
+          file: recorded,
+          range: { start: range.start, end: range.end },
+          kind,
+          target,
+        })),
+        [{ file, range: resolving, kind: "depends", target: `${file}#ok` }],
+        `${occurrencesContext}: exactly one occurrence — the resolving ` +
+          `entry's, spanning its own expression, kind depends, target ` +
+          `${file}#ok — the unresolved entry recording none (SPEC 11.2, 5.7)`,
+      );
+    },
+  );
+}
+
+// (o) 14.20 for a refused read (SPEC 14.25): the zero-length range at offset
+// 0. A permission-based staging (E-1): Linux leg only, run last (the
+// NU3_STAGED pattern of section-11.5.ts; the runner must be unprivileged).
+const T14_11_REFUSAL_STAGED = process.platform === "linux";
+
+async function runRefusedReadArm(product: ProductBinding): Promise<void> {
+  const context =
+    "T14-11 (o) 14.20 for a refused read: the zero-length range at offset 0 " +
+    "(SPEC 14.25; Linux leg, E-1)";
+  const file = "specs/R.mdx";
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [T14_11_SPEC]: T14_11_A_MDX,
+        [file]: '<S id="r">\nRefused content.\n</S>\n',
+      },
+    },
+    async (workspace) => {
+      const staging = await stageReadRefusalOfFile(workspace.path(file));
+      try {
+        const findings = await buildFindings(
+          product,
+          workspace,
+          `${context} — \`build --json\``,
+        );
+        assertExactRanges(
+          findings,
+          [
+            {
+              condition: "14.20",
+              locations: [{ file, range: { start: 0, end: 0 } }],
+            },
+          ],
+          context,
+        );
+      } finally {
+        await staging.restore();
+      }
+    },
+  );
+}
+
+const T14_11 = defineProductTest({
+  id: "T14-11",
+  title:
+    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `d={}`'s zero-length span at the closing brace), a non-static bare reference exclusive of its `;`, the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms and colliding declarator, 14.16's construct forms, 14.18's chain-extended binding, 14.20's zero-length offsets (byte-order mark, encoding, syntax, and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.7, 5.7, 11.2, 11.4, 12.7)",
+  run: async (product) => {
+    for (const kase of T14_11_CASES) {
+      await runRangeRuleArm(product, kase);
+    }
+    await runRepeatedDependencyArm(product);
+    if (T14_11_REFUSAL_STAGED) {
+      await runRefusedReadArm(product);
+    }
+  },
+});
+
+/** TEST-SPEC §14 T14-1…T14-8 and T14-11, in canonical ID order (SUITE-49). */
 export const section14ValidationTests: readonly ProductTestEntry[] = [
   T14_1,
   T14_2,
@@ -3380,4 +4127,5 @@ export const section14ValidationTests: readonly ProductTestEntry[] = [
   T14_6,
   T14_7,
   T14_8,
+  T14_11,
 ];
