@@ -1,4 +1,4 @@
-// TEST-SPEC §2.4 (static argument rule) — SUITE-08: T2.4-1 … T2.4-4.
+// TEST-SPEC §2.4 (static argument rule) — SUITE-08: T2.4-1 … T2.4-5.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -19,7 +19,12 @@
 // dynamic references and other arities are invalid (14.8). A chain segment is
 // exactly one ID segment, and no segment contains `.` (1.4), so a dotted
 // computed index resolves to nothing (14.5/14.6/14.7 by context), while a
-// local string names a whole dotted path (2.2).
+// local string names a whole dotted path (2.2). The value of a static
+// string literal is the characters between its delimiters exactly as
+// spelled — no escape sequence or character reference interpreted — and a
+// chain segment's identifier is read as spelled likewise, so an
+// escape-spelled segment names no node (2.4; T2.4-5, whose code-source
+// half rides the same standard-tooling channel as T2.4-4's type-error arm).
 //
 // Location assertions: fixtures are pure ASCII and composed as
 // `prefix + construct + suffix` with exactly known parts, so string indices
@@ -28,23 +33,33 @@
 // locations, see support.ts byteWindow); every other staged construct lies
 // outside the widened window.
 
-import type { GraphEdge } from "../../helpers/adapters/index.js";
-import { decodeEdgesReport } from "../../helpers/adapters/index.js";
+import type { Finding, GraphEdge } from "../../helpers/adapters/index.js";
+import {
+  decodeEdgesReport,
+  decodeOccurrencesReport,
+} from "../../helpers/adapters/index.js";
+import { parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
+  assertNoCompileErrors,
   ConsumerProject,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { OccurrenceUnit } from "./section-5.7.js";
+import { expectedUnitMultiset, renderOccurrenceUnit } from "./section-5.7.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
   assertFindingLocated,
+  assertSameJson,
   buildFindings,
   buildOk,
   byteWindow,
+  expectExit,
+  findingsInSourceOrder,
   runJson,
 } from "./support.js";
 
@@ -651,10 +666,347 @@ const T2_4_4 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T2.4-5
+// ---------------------------------------------------------------------------
+
+// Verbatim literals (SPEC 2.4): the value of a static string literal is the
+// characters between its delimiters exactly as spelled — no escape sequence
+// or character reference interpreted — so a spelling whose interpreted value
+// would name a node names nothing: a local value containing `\` or `&` names
+// no valid identity (1.4) and a computed key spelled with an escape is a
+// segment no node has. Every negative arm is staged beside the node its
+// interpreted value would name — the local `login` and local path `a.b` in
+// the declaring file, and `a.b` and `login` in the imported BASE — so a
+// product interpreting the spelling resolves it, reports nothing for it,
+// and fails the exact condition counts. (The escape-spelled computed key
+// `BASE["a\u002Eb"]` is 14.5 for a verbatim reader and for an interpreting
+// one alike — its interpreted key `a.b` is a single segment naming nothing,
+// T2.4-4 — while `text(BASE["\u0061"]["b"])` discriminates: interpreted,
+// its keys would resolve to `a.b`.)
+//
+// The code-source half: the marker `BASE.lo\u0067in` — a chain segment
+// carrying a Unicode escape spells a name containing `\`, which no segment
+// contains (2.4) — is 14.7, records no edge and no occurrence (5.7), while
+// the escape-free control `BASE.login` beside it records its edge, witnessed
+// through `occurrences` (11.3), which answers on the failing workspace
+// (11.2) — `query edges` does not (13.3), so the edge behind the control's
+// occurrence record is the witness, and a second record for the escaped
+// spelling (its tuple identical to the control's) is a phantom the exact
+// multiset rejects. The discriminating half rides H-2's standard-tooling
+// channel: the consumer file type-checks clean against the prior valid
+// generation (TypeScript reads the escaped identifier as `login`, which the
+// generated module exports), so a product deriving resolution from the
+// interpreted name — no finding, an edge, a record — fails this arm, and
+// 14.7's type-error clause is not what makes the finding (SPEC 14.7: it
+// holds only for a spelling free of escape sequences).
+//
+// The escape spellings are composed from the backslash's code point (the
+// Task 18 pattern) so they stand in the staged files as their six-character
+// sequences, never decoded on the way in; the character reference `&#46;` is
+// plain ASCII. Fixtures stay pure ASCII, so string indices are byte offsets.
+const BACKSLASH = String.fromCodePoint(0x5c);
+/** The ten characters `lo\u0067in` as spelled; interpreted they read `login`. */
+const ESCAPED_LOGIN = `lo${BACKSLASH}u0067in`;
+/** The eight characters `a\u002Eb` as spelled; interpreted they read `a.b`. */
+const ESCAPED_DOTTED_KEY = `a${BACKSLASH}u002Eb`;
+/** The six characters `\u0061` as spelled; interpreted they read `a`. */
+const ESCAPED_A_KEY = `${BACKSLASH}u0061`;
+/** The character-reference spelling whose interpreted value reads `a.b`. */
+const REFERENCE_DOTTED_PATH = "a&#46;b";
+
+// The imported module: `login` (what the escaped marker's interpreted name,
+// and TypeScript's reading of it, would name) and `a` with child `a.b` (what
+// the interpreted computed keys would name).
+const T2_4_5_BASE = [
+  '<S id="login">',
+  "The node an interpreted escape spelling would name.",
+  "</S>",
+  "",
+  '<S id="a">',
+  "A text.",
+  "",
+  '<S id="a.b">',
+  "B text.",
+  "</S>",
+  "</S>",
+  "",
+].join("\n");
+
+// The declaring file's valid head — the initial state (its import unused,
+// SPEC 2.1) — holding the local `login` and the local path `a.b` the
+// interpreted local spellings would name.
+const T2_4_5_HEAD = [
+  'import BASE from "./BASE.xspec"',
+  "",
+  '<S id="login">',
+  "The local node an interpreted escape spelling would name.",
+  "</S>",
+  "",
+  '<S id="a">',
+  "Local a text.",
+  "",
+  '<S id="a.b">',
+  "Local b text.",
+  "</S>",
+  "</S>",
+  "",
+  "",
+].join("\n");
+
+/** One verbatim-literal spelling and the condition it must report. */
+interface VerbatimArm {
+  /** The spelling as it stands in the source (failure diagnostics). */
+  readonly name: string;
+  readonly condition: "14.5" | "14.6";
+  /** The offending construct: the opening tag for `d`, the container for `text`. */
+  readonly construct: string;
+}
+
+// specs/A.mdx after the edit, as an exact sequence of parts: the head, then
+// each arm's construct with its surrounding text, so every construct's byte
+// window follows from the parts before it. Arm order within a condition is
+// source order — the order `findingsInSourceOrder` selects.
+const T2_4_5_MDX_PARTS: readonly (string | VerbatimArm)[] = [
+  T2_4_5_HEAD,
+  {
+    name: `d={"${ESCAPED_LOGIN}"}`,
+    condition: "14.5",
+    construct: `<S id="e1" d={"${ESCAPED_LOGIN}"}>`,
+  },
+  "\nEscape-spelled local dependency.\n</S>\n\n",
+  '<S id="e2">\n',
+  {
+    name: `{text("${ESCAPED_LOGIN}")}`,
+    condition: "14.6",
+    construct: `{text("${ESCAPED_LOGIN}")}`,
+  },
+  "\n</S>\n\n",
+  {
+    name: `d={"${REFERENCE_DOTTED_PATH}"}`,
+    condition: "14.5",
+    construct: `<S id="e3" d={"${REFERENCE_DOTTED_PATH}"}>`,
+  },
+  "\nReference-spelled local dependency.\n</S>\n\n",
+  {
+    name: `d={BASE["${ESCAPED_DOTTED_KEY}"]}`,
+    condition: "14.5",
+    construct: `<S id="e4" d={BASE["${ESCAPED_DOTTED_KEY}"]}>`,
+  },
+  "\nEscape-spelled computed key.\n</S>\n\n",
+  '<S id="e5">\n',
+  {
+    name: `{text(BASE["${ESCAPED_A_KEY}"]["b"])}`,
+    condition: "14.6",
+    construct: `{text(BASE["${ESCAPED_A_KEY}"]["b"])}`,
+  },
+  "\n</S>\n",
+];
+
+const T2_4_5_MDX_SOURCE = T2_4_5_MDX_PARTS.map((part) =>
+  typeof part === "string" ? part : part.construct,
+).join("");
+
+/** The staged arms of one condition in source order, each with its byte window. */
+function verbatimArmsOf(
+  condition: VerbatimArm["condition"],
+): readonly { arm: VerbatimArm; window: { start: number; end: number } }[] {
+  const arms: { arm: VerbatimArm; window: { start: number; end: number } }[] =
+    [];
+  let prefix = "";
+  for (const part of T2_4_5_MDX_PARTS) {
+    if (typeof part === "string") {
+      prefix += part;
+      continue;
+    }
+    if (part.condition === condition) {
+      arms.push({ arm: part, window: byteWindow(prefix, part.construct) });
+    }
+    prefix += part.construct;
+  }
+  return arms;
+}
+
+// src/app.ts: the escape-free control marker at the top level (the initial
+// state, valid), then — the edit — the escape-spelled marker beside it.
+const T2_4_5_APP_PREFIX = 'import BASE from "../specs/BASE.xspec";\n\n';
+const T2_4_5_APP_CONTROL_CHAIN = "BASE.login";
+const T2_4_5_APP_INITIAL = `${T2_4_5_APP_PREFIX}${T2_4_5_APP_CONTROL_CHAIN};\n`;
+const T2_4_5_APP_ESCAPED_MARKER = `BASE.${ESCAPED_LOGIN};`;
+const T2_4_5_APP_EDITED = `${T2_4_5_APP_INITIAL}${T2_4_5_APP_ESCAPED_MARKER}\n`;
+
+// The control's occurrence: from the whole file (no named unit encloses it,
+// SPEC 4.6) to BASE's `login`, spanning the bare chain alone, exclusive of
+// the statement terminator (5.7).
+const T2_4_5_CONTROL_UNIT: OccurrenceUnit = {
+  what: "the escape-free control marker `BASE.login` at the top level of src/app.ts",
+  file: "src/app.ts",
+  kind: "references",
+  source: "src/app.ts",
+  target: "specs/BASE.mdx#login",
+  count: 1,
+};
+const T2_4_5_CONTROL_RANGE = {
+  start: Buffer.byteLength(T2_4_5_APP_PREFIX, "utf8"),
+  end:
+    Buffer.byteLength(T2_4_5_APP_PREFIX, "utf8") +
+    Buffer.byteLength(T2_4_5_APP_CONTROL_CHAIN, "utf8"),
+};
+
+/**
+ * The six staged spellings and nothing else: exactly three 14.5, two 14.6,
+ * one 14.7 (SPEC 14: every condition reported, and nothing for the control
+ * marker or the nodes beside the arms), each located within its own
+ * construct's byte window.
+ */
+function assertVerbatimFindings(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertConditionCounts(
+    findings,
+    { "14.5": 3, "14.6": 2, "14.7": 1 },
+    `${context}: exactly the six verbatim spellings are reported — the ` +
+      `escape-spelled local \`d\` literal, the reference-spelled local \`d\` ` +
+      `literal, and the escape-spelled computed key are 14.5; the ` +
+      `escape-spelled local \`text\` literal and the escape-spelled computed ` +
+      `keys in \`text\` are 14.6; the escape-spelled marker is 14.7 — and ` +
+      `nothing for the escape-free control \`BASE.login\` (SPEC 2.4, 1.4, ` +
+      `14.5–14.7): a product interpreting a spelling resolves it to the node ` +
+      `staged beside it and drops its finding`,
+  );
+  for (const condition of ["14.5", "14.6"] as const) {
+    const reported = findingsInSourceOrder(findings, condition);
+    const staged = verbatimArmsOf(condition);
+    staged.forEach(({ arm, window }, index) => {
+      assertFindingLocated(
+        reported[index]!,
+        { file: "specs/A.mdx", window },
+        `${context}: the ${condition} finding for \`${arm.name}\` locates ` +
+          `that spelling's own construct (SPEC 14, 2.4)`,
+      );
+    });
+  }
+  assertFindingLocated(
+    findingsInSourceOrder(findings, "14.7")[0]!,
+    {
+      file: "src/app.ts",
+      window: byteWindow(T2_4_5_APP_INITIAL, T2_4_5_APP_ESCAPED_MARKER),
+    },
+    `${context}: the 14.7 finding locates the escape-spelled marker ` +
+      `\`${T2_4_5_APP_ESCAPED_MARKER}\` — a segment carrying a Unicode ` +
+      `escape spells a name containing \`\\\`, which no segment contains, so ` +
+      `the reference resolves nowhere (SPEC 2.4, 1.4, 4.5, 14.7) — never ` +
+      `the control beside it`,
+  );
+}
+
+const T2_4_5 = defineProductTest({
+  id: "T2.4-5",
+  title: `verbatim literals: every static string literal is read exactly as spelled, no escape sequence or character reference interpreted, so a spelling whose interpreted value would name a node names nothing — beside the local \`login\` and \`a.b\` and BASE's \`a.b\` and \`login\`, \`d={"${ESCAPED_LOGIN}"}\` and \`{text("${ESCAPED_LOGIN}")}\` are 14.5 and 14.6, \`d={"${REFERENCE_DOTTED_PATH}"}\` 14.5, \`d={BASE["${ESCAPED_DOTTED_KEY}"]}\` and \`{text(BASE["${ESCAPED_A_KEY}"]["b"])}\` 14.5 and 14.6, each at its own construct; the TypeScript marker \`BASE.${ESCAPED_LOGIN}\` is 14.7 and records no edge and no occurrence — \`occurrences\` lists exactly the escape-free control \`BASE.login\`'s record beside it, spanning the bare chain — while the consumer file type-checks clean against the prior valid generation (TypeScript reads the escaped identifier as \`login\`, which exists), so a product resolving the interpreted name fails (SPEC 2.4, 1.4, 4.5, 5.7, 11.3, 14.5–14.7)`,
+  run: async (product) => {
+    await withWorkspace(
+      SPEC_AND_CODE_CONFIG,
+      {
+        "specs/BASE.mdx": T2_4_5_BASE,
+        "specs/A.mdx": T2_4_5_HEAD,
+        "src/app.ts": T2_4_5_APP_INITIAL,
+      },
+      async (workspace) => {
+        // Staging: the initial state is valid, so the workspace shape (the
+        // configuration, both import forms, the control marker) is proven
+        // accepted before the verbatim spellings become the only defects,
+        // and the build generates the spec modules (SPEC 13.1) — the prior
+        // valid generation the type-check arm compiles against, which the
+        // failing build below leaves in place (12.1).
+        await buildOk(
+          product,
+          workspace,
+          "T2.4-5 initial `build` (staging: the valid head with the " +
+            "escape-free control marker; generates specs/BASE.xspec.ts, " +
+            "SPEC 13.1)",
+        );
+
+        await workspace.file("specs/A.mdx", T2_4_5_MDX_SOURCE);
+        await workspace.file("src/app.ts", T2_4_5_APP_EDITED);
+
+        const buildContext =
+          "T2.4-5 `build --json` over the six verbatim spellings";
+        assertVerbatimFindings(
+          await buildFindings(product, workspace, buildContext),
+          buildContext,
+        );
+
+        // The discriminating half (H-2's standard-tooling channel): against
+        // the prior valid generation, the consumer file — the control and
+        // the escape-spelled marker — type-checks clean, since TypeScript
+        // reads `BASE.lo\u0067in` as `BASE.login`, which the generated
+        // module exports (SPEC 4.1). So the 14.7 finding above is owed to
+        // the verbatim reading alone (SPEC 2.4), not to a missing property:
+        // 14.7's type-error clause holds only for a spelling free of escape
+        // sequences (14.7).
+        const consumer = await ConsumerProject.load({
+          rootDir: workspace.root,
+          rootFiles: ["src/app.ts"],
+        });
+        assertNoCompileErrors(
+          consumer,
+          `T2.4-5 the consumer file holding the control \`BASE.login\` and ` +
+            `the escape-spelled marker \`${T2_4_5_APP_ESCAPED_MARKER}\` must ` +
+            `type-check clean against the prior valid generation — ` +
+            `TypeScript reads the escaped identifier as \`login\`, which the ` +
+            `generated module exports (SPEC 14.7, 2.4, 4.1)`,
+        );
+
+        // No edge, no occurrence for the escaped marker; the control records
+        // its edge. `occurrences` answers on the failing workspace, the
+        // domain's findings accompanying (SPEC 11.2, 11.3; exit 1), and the
+        // complete record multiset is exactly the control's one record —
+        // its (file, kind, source, target) tuple and its exact span — so a
+        // record for the escaped spelling (a tuple identical to the
+        // control's, at another span) is caught by count, and a record at
+        // the escaped span in place of the control's by the span.
+        const occContext = "T2.4-5 `occurrences` over the failing workspace";
+        const result = await expectExit(
+          product,
+          workspace,
+          ["occurrences"],
+          1,
+          `${occContext} — an answer carrying any finding exits 1, the full ` +
+            `answer document still emitted (SPEC 11.2, 11.3)`,
+        );
+        const report = decodeOccurrencesReport(
+          parseJsonStdout(result, occContext),
+          occContext,
+        );
+        assertVerbatimFindings(report.findings, occContext);
+        assertSameJson(
+          report.occurrences.map(renderOccurrenceUnit).sort(),
+          expectedUnitMultiset([T2_4_5_CONTROL_UNIT]),
+          `${occContext}: the complete (file, [kind], source -> target) ` +
+            `record multiset is exactly the escape-free control's one record ` +
+            `— \`BASE.login\` from the whole file to \`specs/BASE.mdx#login\` ` +
+            `— and no record for the escape-spelled marker, which resolves ` +
+            `nowhere and so records no edge and no occurrence (SPEC 2.4, 5.7, ` +
+            `4.5, 11.3)`,
+        );
+        assertSameJson(
+          report.occurrences[0]!.range,
+          T2_4_5_CONTROL_RANGE,
+          `${occContext}: the one record spans the control's bare chain ` +
+            `\`${T2_4_5_APP_CONTROL_CHAIN}\` alone, exclusive of the ` +
+            `terminator (SPEC 5.7) — never the escape-spelled marker's span`,
+        );
+      },
+    );
+  },
+});
+
 /** TEST-SPEC §2.4, in canonical ID order (SUITE-08). */
 export const section24Tests: readonly ProductTestEntry[] = [
   T2_4_1,
   T2_4_2,
   T2_4_3,
   T2_4_4,
+  T2_4_5,
 ];
