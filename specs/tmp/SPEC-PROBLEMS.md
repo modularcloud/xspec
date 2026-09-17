@@ -65,3 +65,24 @@ specification chooses. Whichever it is, 6.2's example, 6.5's insertion rule
 and refusal list, and 6.5's validity promise must agree, and the outcome must
 be observable through the command surface so TEST-SPEC.md can pin it
 (T6.2-3's plain-remainder arm, P-5's generator, S-6's vector).
+
+**Resolution (2026-09-17, Phase 4 iteration 1):** SPEC.md now decides every
+shape above and the five the Reviewer added (in-line target parents, origin
+deletions leaving an interrupting line start, EOF insertion after a terminal
+ESM block, import additions with no admissible offset, import removals
+uncovering a comment that heads the block). 6.5 refuses a section-form move
+whose exact edits would leave the origin or target file other than well-formed
+MDX, or for which a needed import addition has no admissible offset, under the
+new reason `refused-invalid-rewrite` (14: located at the moved construct and,
+for an unplaceable addition, at the spellings needing it; `identities` the
+paths of the files the rewrite would leave invalid); import additions are
+placed only at admissible offsets (well-formed result, the added line an
+import declaration); a created target file's initial content is fixed
+(declarations, an empty line, the moved text); an import whose removal would
+demote its block's other declarations stays, unused. 6.2's example is restated
+over the realization that derives on both sides with plain whitespace — a
+section whose opening tag ends its line and whose closing tag begins its line
+(`foo <S id="m">`, `body`, `</S> bar`), verified against the full MDX 3 parse —
+and states that the `body</S>` realization is refused unless the remainder is
+U+000B or U+000C. The entry is addressed once the Reviewer confirms the text;
+delete this file on HALT.
