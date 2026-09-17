@@ -23,6 +23,7 @@ import type { Finding } from "../../helpers/adapters/index.js";
 import {
   DEPENDENCY_EDGE_KINDS,
   decodeEdgesReport,
+  decodeViewReport,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
@@ -34,10 +35,12 @@ import {
   assertConditionCounts,
   assertEdgeSetEqual,
   assertFindingLocated,
+  assertSameJson,
   buildFindings,
   buildOk,
   byteWindow,
   runJson,
+  stageBesideRoot,
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. Files
@@ -51,13 +54,35 @@ export default defineConfig({
 })
 `;
 
+// The same plus one code group whose glob matches `.mdx` files under `docs/`
+// (SPEC 7.2): a file so matched is a discovered code source and no spec
+// source, the target class of T2.1-2's code-group-only arm (2.1; T11.4-4's
+// unavailable view target).
+const SPECS_AND_DOCS_CODE_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    docs: ["docs/**/*.mdx"]
+  }
+})
+`;
+
+// The escape character, built from its code point so that no tool layer
+// decodes the six-character escape spellings staged below on their way into
+// the file (the pattern of section-1.4.ts).
+const BACKSLASH = String.fromCodePoint(0x5c);
+
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   files: Readonly<Record<string, string>>,
   body: (workspace: TestWorkspace) => Promise<T>,
+  config: string = SPECS_ONLY_CONFIG,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
-    files: { "xspec.config.ts": SPECS_ONLY_CONFIG, ...files },
+    files: { "xspec.config.ts": config, ...files },
   });
   try {
     return await body(workspace);
@@ -89,6 +114,14 @@ interface InvalidImportArm {
   readonly importLine: string;
   /** Files staged beside the importing file and the configuration. */
   readonly extraFiles: Readonly<Record<string, string>>;
+  /** Configuration override (defaults to SPECS_ONLY_CONFIG). */
+  readonly config?: string;
+  /**
+   * Files staged OUTSIDE the workspace root, at paths relative to the root's
+   * parent directory (support.ts stageBesideRoot) — the above-root arm's real
+   * `outside/BASE.mdx`, which resolution must never reach (SPEC 2.1).
+   */
+  readonly outsideFiles?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -108,6 +141,7 @@ async function runInvalidImportArm(
       "specs/A.mdx": arm.importLine + IMPORTING_FILE_REST,
     },
     async (workspace) => {
+      await stageBesideRoot(workspace, arm.outsideFiles ?? {});
       const findings = await buildFindings(product, workspace, context);
       assertConditionCounts(findings, { "14.15": 1 }, context);
       assertFindingLocated(
@@ -116,6 +150,7 @@ async function runInvalidImportArm(
         `${context}: the 14.15 finding`,
       );
     },
+    arm.config,
   );
 }
 
@@ -224,6 +259,41 @@ const INVALID_SPECIFIER_ARMS: readonly InvalidImportArm[] = [
     importLine: 'import TYPO from "./typo.xspec"',
     extraFiles: VALID_BASE_FILES,
   },
+  {
+    // `docs/EXTRA.mdx` is matched only by the code group `docs` (SPEC 7.2):
+    // a discovered code source, never a spec source. Its content is
+    // well-formed TypeScript, so the code source itself contributes no
+    // finding and the import's 14.15 stands alone.
+    name: "a specifier designating an `.mdx` file matched only by a code group (a discovered code source)",
+    importLine: 'import EXTRA from "../docs/EXTRA.xspec"',
+    extraFiles: {
+      ...VALID_BASE_FILES,
+      "docs/EXTRA.mdx": "export {};\n",
+    },
+    config: SPECS_AND_DOCS_CODE_CONFIG,
+  },
+  {
+    // From `specs/` (depth 1) the two `..` segments reach depth -1: the
+    // ascent passes above the workspace root, so the specifier designates
+    // nothing (SPEC 2.1) although the root's parent really holds
+    // `outside/BASE.mdx` — the discriminator against filesystem resolution.
+    name: "a specifier whose ascent passes above the workspace root, the root's parent holding a real `outside/BASE.mdx`",
+    importLine: 'import BASE from "../../outside/BASE.xspec"',
+    extraFiles: VALID_BASE_FILES,
+    outsideFiles: {
+      "outside/BASE.mdx": '<S id="core">\nCore behavior, outside.\n</S>\n',
+    },
+  },
+  {
+    // The six-character escape of `A` in the name segment is read verbatim
+    // (SPEC 2.4): the segment spells a name containing the escape character,
+    // which no discovered path spells. `specs/BASE.mdx` exists, so a product
+    // interpreting the escape resolves the import, builds clean, and fails
+    // the arm.
+    name: `a specifier spelled with an escape sequence ("./B${BACKSLASH}u0041SE.xspec"), read verbatim`,
+    importLine: `import BASE from "./B${BACKSLASH}u0041SE.xspec"`,
+    extraFiles: VALID_BASE_FILES,
+  },
 ];
 
 // T2.1-2, positive arm: `../` resolves against the importing file's
@@ -240,10 +310,42 @@ const PARENT_SPECIFIER_IMPORTER = [
   "",
 ].join("\n");
 
+// T2.1-2, lexical positives (SPEC 2.1: resolution is lexical — a `.` or
+// empty segment designates the same directory and `..` the parent — and no
+// spelling is required to be canonical). Four importers in `specs/`, each
+// spelling `specs/BASE.mdx` non-canonically, share one workspace that holds
+// no `specs/sub/` at all, so `./sub/../BASE.xspec` resolves only lexically —
+// a product resolving through the filesystem, or requiring the canonical
+// spelling, fails that arm. Each import line is its file's only import
+// declaration.
+const LEXICAL_IMPORTERS: readonly {
+  readonly file: string;
+  readonly section: string;
+  readonly specifier: string;
+}[] = [
+  { file: "specs/P1.mdx", section: "p1", specifier: "./sub/../BASE.xspec" },
+  { file: "specs/P2.mdx", section: "p2", specifier: ".//BASE.xspec" },
+  { file: "specs/P3.mdx", section: "p3", specifier: "././BASE.xspec" },
+  { file: "specs/P4.mdx", section: "p4", specifier: "../specs/BASE.xspec" },
+];
+
+function lexicalImporterSource(importer: {
+  readonly section: string;
+  readonly specifier: string;
+}): string {
+  return [
+    `import BASE from "${importer.specifier}"`,
+    "",
+    `<S id="${importer.section}" d={BASE.core}>`,
+    "Derived behavior.",
+    "</S>",
+    "",
+  ].join("\n");
+}
+
 const T2_1_2 = defineProductTest({
   id: "T2.1-2",
-  title:
-    "`../` specifiers resolve against the importing file's directory; absolute, bare, non-`.xspec`, undiscovered-target, and nonexistent-target specifiers each fail with 14.15 (SPEC 2.1, 14.15)",
+  title: `\`../\` specifiers resolve against the importing file's directory, and resolution is lexical: \`./sub/../BASE.xspec\` (no \`sub/\` on disk), \`.//BASE.xspec\`, \`././BASE.xspec\`, and \`../specs/BASE.xspec\` each designate specs/BASE.mdx — the import valid, the reference through it resolving, \`view\` reporting the resolved target; absolute, bare, non-\`.xspec\`, undiscovered-target (an \`.mdx\` matched by no group; one matched only by a code group), nonexistent-target, above-the-root (a real \`outside/BASE.mdx\` at the root's parent), and escape-spelled ("./B${BACKSLASH}u0041SE.xspec", read verbatim) specifiers each fail with 14.15 (SPEC 2.1, 2.4, 14.15; T11.4-4)`,
   run: async (product) => {
     await withWorkspace(
       {
@@ -278,6 +380,84 @@ const T2_1_2 = defineProductTest({
           `${context}: \`../BASE.xspec\` resolves against the importing file's ` +
             "directory (specs/sub/) to specs/BASE.mdx (SPEC 2.1)",
         );
+      },
+    );
+    // Lexical positives: one workspace, four non-canonical spellings of
+    // specs/BASE.mdx, no specs/sub/ on disk (module comment above).
+    await withWorkspace(
+      {
+        ...VALID_BASE_FILES,
+        ...Object.fromEntries(
+          LEXICAL_IMPORTERS.map((importer) => [
+            importer.file,
+            lexicalImporterSource(importer),
+          ]),
+        ),
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T2.1-2 `build` with four non-canonical specifiers of " +
+            "specs/BASE.mdx (`./sub/../`, `.//`, `././`, `../specs/`; no " +
+            "specs/sub/ on disk) — each import is valid (SPEC 2.1)",
+        );
+        for (const importer of LEXICAL_IMPORTERS) {
+          const node = `${importer.file}#${importer.section}`;
+          const context = `T2.1-2 \`query edges --from ${node}\``;
+          const edges = decodeEdgesReport(
+            await runJson(
+              product,
+              workspace,
+              ["query", "edges", "--from", node],
+              context,
+            ),
+            context,
+          );
+          assertEdgeSetEqual(
+            edges,
+            [{ from: node, to: "specs/BASE.mdx#core", kind: "depends" }],
+            `${context}: \`${importer.specifier}\` resolves lexically to ` +
+              "specs/BASE.mdx, so the reference through the binding " +
+              "resolves to its node (SPEC 2.1, 2.2)",
+          );
+        }
+        // `view` reports each import's resolved target — the designated
+        // file, never the specifier's spelling (SPEC 11.4; T11.4-4). One
+        // bare whole-domain `view`: the five discovered sources in byte
+        // order of path, BASE first.
+        const viewContext = "T2.1-2 bare `view` over the lexical workspace";
+        const report = decodeViewReport(
+          await runJson(product, workspace, ["view"], viewContext),
+          { text: false },
+          viewContext,
+        );
+        assertConditionCounts(
+          report.findings,
+          {},
+          `${viewContext}: every non-canonical specifier is valid, so no ` +
+            "finding accompanies the view (SPEC 2.1, 11.4)",
+        );
+        assertSameJson(
+          report.views.map((view) => view.file),
+          ["specs/BASE.mdx", ...LEXICAL_IMPORTERS.map((i) => i.file)],
+          `${viewContext}: every discovered spec source is viewed, in byte ` +
+            "order of workspace-relative path (SPEC 11.4, 12.7)",
+        );
+        for (const [index, importer] of LEXICAL_IMPORTERS.entries()) {
+          const view = report.views[index + 1]!;
+          assertSameJson(
+            view.imports.map((entry) => ({
+              name: entry.name,
+              target: entry.target,
+            })),
+            [{ name: "BASE", target: "specs/BASE.mdx" }],
+            `${viewContext} — ${importer.file}: its one import declaration ` +
+              `(\`${importer.specifier}\`) binds BASE and reports the ` +
+              "resolved target specs/BASE.mdx — the designated file, not " +
+              "the specifier's spelling (SPEC 2.1, 11.4; T11.4-4)",
+          );
+        }
       },
     );
     for (const arm of INVALID_SPECIFIER_ARMS) {

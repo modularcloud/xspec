@@ -69,6 +69,7 @@ import {
   expectExit,
   readGeneratedModule,
   runJson,
+  stageBesideRoot,
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
@@ -109,6 +110,24 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   },
   markdown: { emit: true }
+})
+`;
+
+// A spec group reaching `.mdx` files under `src/`, beside the code group's
+// `.ts` files (SPEC 7.1, 7.2: the two globs match disjoint sets; the
+// generated `src/NAME.xspec.ts` is a derived file, excluded from every group,
+// 13.4), for the T4-2 arms whose specifier TEST-SPEC pins relative to the
+// spec source's own directory — the lexical positives and the escape-spelled
+// name segment.
+const COLOCATED_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx", "src/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  }
 })
 `;
 
@@ -250,6 +269,15 @@ const T4_2_BASE_FILES = {
   "specs/BASE.mdx": '<S id="core">\nCore behavior.\n</S>\n',
 } as const;
 
+// The spec source the colocated arms discover beside the code files
+// (COLOCATED_CONFIG): `src/NAME.mdx`, one node `core`.
+const COLOCATED_SPEC_SOURCE = '<S id="core">\nCore behavior.\n</S>\n';
+
+// The escape character, built from its code point so that no tool layer
+// decodes the six-character escape spelling staged below on its way into the
+// file (the pattern of section-1.4.ts).
+const BACKSLASH = String.fromCodePoint(0x5c);
+
 /** One invalid TS import-rule arm: a workspace differing only in src/app.ts. */
 interface InvalidTsImportArm {
   /** Which SPEC 4 invalid case this is (failure diagnostics). */
@@ -266,6 +294,12 @@ interface InvalidTsImportArm {
   readonly config?: string;
   /** Files staged beside the base files. */
   readonly extraFiles?: Readonly<Record<string, string>>;
+  /**
+   * Files staged OUTSIDE the workspace root, at paths relative to the root's
+   * parent directory (support.ts stageBesideRoot) — the above-root arm's real
+   * `outside/NAME.mdx`, which resolution must never reach (SPEC 2.1, 4).
+   */
+  readonly outsideFiles?: Readonly<Record<string, string>>;
 }
 
 // The `.xspec`-specifier rules (SPEC 4: target must be a discovered spec
@@ -291,6 +325,29 @@ const XSPEC_RULE_ARMS: readonly InvalidTsImportArm[] = [
   {
     name: "an absolute specifier ending `.xspec`",
     statements: ['import MOD from "/specs/BASE.xspec";'],
+  },
+  {
+    // From `src/` (depth 1) the two `..` segments reach depth -1: the ascent
+    // passes above the workspace root, so the specifier designates nothing
+    // (SPEC 2.1, 4) although the root's parent really holds
+    // `outside/NAME.mdx` — the discriminator against filesystem resolution.
+    name: "a `.xspec` specifier whose ascent passes above the workspace root, the root's parent holding a real `outside/NAME.mdx`",
+    statements: ['import MOD from "../../outside/NAME.xspec";'],
+    outsideFiles: {
+      "outside/NAME.mdx": '<S id="core">\nCore behavior, outside.\n</S>\n',
+    },
+  },
+  {
+    // The six-character escape of `A` in the name segment is read verbatim
+    // (SPEC 2.4): the segment spells a name containing the escape character,
+    // which no discovered path spells. `src/NAME.mdx` is a discovered spec
+    // source beside the code file (COLOCATED_CONFIG), so a product
+    // interpreting the escape resolves the import, builds clean, and fails
+    // the arm.
+    name: `a \`.xspec\` specifier spelled with an escape sequence in a name segment ("./N${BACKSLASH}u0041ME.xspec"), read verbatim`,
+    statements: [`import MOD from "./N${BACKSLASH}u0041ME.xspec";`],
+    config: COLOCATED_CONFIG,
+    extraFiles: { "src/NAME.mdx": COLOCATED_SPEC_SOURCE },
   },
   {
     name: "a named binding other than `text`",
@@ -447,6 +504,7 @@ async function runInvalidTsImportArm(
       "src/app.ts": prefix,
     },
     async (workspace) => {
+      await stageBesideRoot(workspace, arm.outsideFiles ?? {});
       const findings = await buildFindings(product, workspace, context);
       const max = arm.maxFindings ?? 1;
       if (max === 1) {
@@ -512,13 +570,32 @@ const NON_SPEC_COLLISION_SOURCE = [
   "",
 ].join("\n");
 
+// Positive arms: lexical resolution in TS (SPEC 4: the resolution of 2.1).
+// The spec source `src/NAME.mdx` sits beside its consumers under
+// COLOCATED_CONFIG, and the workspace holds no `src/sub/` at all, so
+// `./sub/../NAME.xspec` resolves only lexically; `.//NAME.xspec` spells the
+// same directory through an empty segment. Each consumer's bare marker
+// records a `references` edge to the resolved node (4.5): a product failing
+// to resolve either spelling reports 14.15 and fails the build, and one
+// resolving it elsewhere records the wrong edge target.
+const LEXICAL_TS_CONSUMERS: readonly {
+  readonly file: string;
+  readonly specifier: string;
+}[] = [
+  { file: "src/one.ts", specifier: "./sub/../NAME.xspec" },
+  { file: "src/two.ts", specifier: ".//NAME.xspec" },
+];
+
+function lexicalTsConsumerSource(specifier: string): string {
+  return [`import NAME from "${specifier}";`, "", "NAME.core;", ""].join("\n");
+}
+
 const T4_2 = defineProductTest({
   id: "T4-2",
-  title:
-    "TS import rules: undiscovered/nonexistent/bare/absolute `.xspec` specifiers, bindings other than the default and `text`, static-specifier dynamic `import()`, every export-declaration form, `import X = require(…)`, and derived-path specifiers through each module-linking form all fail with 14.15; a non-static dynamic `import()` is not analyzed; binding collisions are 14.15 when either import is a spec module import, and no finding otherwise (SPEC 4, 2.1, 13.4, 14.15)",
-  // Many small workspaces (27 negative arms plus two positive ones), each
-  // one product invocation: a wider hang budget than the default (H-8 hang
-  // guard only, never an assertion — H-10).
+  title: `TS import rules: undiscovered/nonexistent/bare/absolute \`.xspec\` specifiers, one whose ascent passes above the root (a real \`outside/NAME.mdx\` at the root's parent), one escape-spelled in a name segment ("./N${BACKSLASH}u0041ME.xspec", read verbatim), bindings other than the default and \`text\`, static-specifier dynamic \`import()\`, every export-declaration form, \`import X = require(…)\`, and derived-path specifiers through each module-linking form all fail with 14.15; \`./sub/../NAME.xspec\` (no \`sub/\` on disk) and \`.//NAME.xspec\` resolve lexically to NAME.mdx and markers through them record edges; a non-static dynamic \`import()\` is not analyzed; binding collisions are 14.15 when either import is a spec module import, and no finding otherwise (SPEC 4, 2.1, 2.4, 13.4, 14.15)`,
+  // Many small workspaces (29 negative arms plus three positive ones), each
+  // one product invocation or a few: a wider hang budget than the default
+  // (H-8 hang guard only, never an assertion — H-10).
   timeoutMs: 240_000,
   run: async (product) => {
     for (const arm of [
@@ -528,6 +605,47 @@ const T4_2 = defineProductTest({
     ]) {
       await runInvalidTsImportArm(product, arm, "T4-2");
     }
+
+    // Lexical positives: `./sub/../NAME.xspec` (no src/sub/ on disk) and
+    // `.//NAME.xspec` resolve to src/NAME.mdx; the markers record edges.
+    await withWorkspace(
+      COLOCATED_CONFIG,
+      {
+        ...T4_2_BASE_FILES,
+        "src/NAME.mdx": COLOCATED_SPEC_SOURCE,
+        ...Object.fromEntries(
+          LEXICAL_TS_CONSUMERS.map((consumer) => [
+            consumer.file,
+            lexicalTsConsumerSource(consumer.specifier),
+          ]),
+        ),
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T4-2 `build` with `./sub/../NAME.xspec` (no src/sub/ on disk) " +
+            "and `.//NAME.xspec` imported by code files beside src/NAME.mdx " +
+            "— each resolves lexically to the discovered spec source " +
+            "(SPEC 4, 2.1)",
+        );
+        for (const consumer of LEXICAL_TS_CONSUMERS) {
+          assertEdgeSetEqual(
+            await queryEdgesFrom(product, workspace, consumer.file, "T4-2"),
+            [
+              {
+                from: consumer.file,
+                to: "src/NAME.mdx#core",
+                kind: "references",
+              },
+            ],
+            `T4-2 the marker through \`${consumer.specifier}\` records its ` +
+              "`references` edge to src/NAME.mdx#core — the specifier " +
+              "resolved lexically (SPEC 4, 2.1, 4.5)",
+          );
+        }
+      },
+    );
 
     // Non-static dynamic import: build succeeds, no edges recorded.
     await withWorkspace(

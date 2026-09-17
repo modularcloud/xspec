@@ -8,6 +8,8 @@
 // product only via diagnosed assertion failures (H-8).
 
 import { Buffer } from "node:buffer";
+import * as fsp from "node:fs/promises";
+import * as path from "node:path";
 import type {
   AppliedMappingPair,
   Finding,
@@ -45,6 +47,26 @@ export const REPLACEMENT_CHARACTER = String.fromCodePoint(0xfffd);
  * usage error of the syntax class (12.0).
  */
 export const REPLACEMENT_CHARACTER_SPEC_PATH = `specs/A${REPLACEMENT_CHARACTER}.mdx`;
+
+/**
+ * Stage plain files OUTSIDE the workspace root, at paths relative to the
+ * root's parent — the workspace's own temporary directory (`tempRoot`, whose
+ * `work/` is the root), disposed with it. For arms whose subject is what a
+ * product must never reach: an import specifier whose ascent passes above
+ * the root designates nothing whatever the root's parent holds (SPEC 2.1,
+ * 4), so a real file there discriminates lexical resolution from a
+ * filesystem lookup.
+ */
+export async function stageBesideRoot(
+  workspace: TestWorkspace,
+  files: Readonly<Record<string, string>>,
+): Promise<void> {
+  for (const [rel, contents] of Object.entries(files)) {
+    const abs = path.join(workspace.tempRoot, rel);
+    await fsp.mkdir(path.dirname(abs), { recursive: true });
+    await fsp.writeFile(abs, contents);
+  }
+}
 
 /** Run one product command with the workspace root as working directory. */
 export async function runCli(
