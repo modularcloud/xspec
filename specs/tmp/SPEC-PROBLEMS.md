@@ -86,3 +86,21 @@ section whose opening tag ends its line and whose closing tag begins its line
 and states that the `body</S>` realization is refused unless the remainder is
 U+000B or U+000C. The entry is addressed once the Reviewer confirms the text;
 delete this file on HALT.
+
+**Resolution (2026-09-17, Phase 4 iteration 2):** The round-2 cases under the
+same validity promise are decided in SPEC.md: coincident zero-width edits
+compose in a fixed order (6.5: replaced ranges whole, no addition strictly
+inside another edit's range, at one offset the target insertion before the
+added declarations, admissible offsets inside no section construct); a moved
+text holding an import declaration is refused before any modification
+(`refused-moved-import`, 14, locating each declaration); every spelling the
+moved text carries is judged from the target file, external chains respelled
+through a binding the target holds or an added import, and a reference whose
+target's module is the referencing file's own spelled in local form; joint
+import removals are judged over the ESM block as all would leave it, the
+block's first declaration staying where the rest would demote it; and 6.2 draws
+the U+000B/U+000C boundary by grammar whitespace on both boundary lines (the
+`body</S>` realization refused unless such a character follows the opening
+tag; the worked shape refused with one on a single boundary line), each shape
+verified against the full MDX 3 parse. Retained pending the Reviewer's
+confirmation; delete on HALT.
