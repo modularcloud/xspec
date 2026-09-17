@@ -10,7 +10,13 @@
 // SPEC 2.7: beyond standard Markdown content, a source file may contain only
 // spec module imports, `<S>`/`<Spec>` sections, `{text(...)}` embeddings, and
 // MDX comments — any other JSX element, any other expression container, and
-// any export statement are invalid (14.16). Comments are pure annotations:
+// any export statement are invalid (14.16); a section is an MDX element
+// node, so `<S>` spelled inside an expression container is part of that
+// container's expression — content under 3, never a section (T2.7-1's
+// container arm: one 14.16 brace through brace, no node in the view's tree,
+// the container's bytes preserved in the enclosing text, 11.2, 11.4; `ids`
+// and `query` are gated on the failing workspace, 13.3, so the absence is
+// asserted in the view alone). Comments are pure annotations:
 // they do not enter own text or any hash, and Markdown output removes them
 // (3). The defined props are `id`, `d`, `coverage`, and `tags`; a repeated
 // prop (defined or unknown), an unknown prop, and a spread attribute are
@@ -27,7 +33,10 @@
 // parts, so string indices are byte offsets and each finding must fall within
 // the offending construct's own byte window (end-widened by one byte, see
 // support.ts byteWindow); the valid sibling section and every other staged
-// construct lie outside the widened window.
+// construct lie outside the widened window. T2.7-1's container arm pins an
+// exact range instead — the container brace through brace (14) — and its
+// fixture carries one multibyte character before the container, so every
+// pinned offset is a UTF-8 byte length (1.7) that a code-unit count misses.
 //
 // The valueless-`tags` file is exported as VALUELESS_TAGS_FIXTURE — its exact
 // bytes, attribute offsets, and finding location — because TEST-SPEC T11.4-3
@@ -41,19 +50,23 @@
 import { Buffer } from "node:buffer";
 
 import type {
+  Finding,
   ImpactReport,
   ImpactRequirementEntry,
   NodeReport,
   SourceRange,
+  ViewNode,
 } from "../../helpers/adapters/index.js";
 import {
   decodeImpactReport,
   decodeNodeReport,
+  decodeViewReport,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
   assertFileBytes,
   fail,
+  parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -67,6 +80,7 @@ import {
   buildFindings,
   buildOk,
   byteWindow,
+  expectExit,
   runJson,
 } from "./support.js";
 
@@ -224,10 +238,242 @@ const FOREIGN_CONSTRUCT_ARMS: readonly ForeignConstructArm[] = [
   },
 ];
 
+// The section-in-container arm. SPEC 2.7: a section is an MDX element node,
+// so `<S>` spelled inside an expression container is part of that
+// container's expression — content under 3, never a section. The container
+// is one invalid expression container (14.16), located from its opening
+// brace through its closing brace (14); its bytes match no removal rule's
+// form and are content, preserved byte-for-byte in the enclosing section's
+// own and subtree text (11.2, 1.6); the view's section tree — defined by
+// construct nesting alone, existing whatever findings the file carries —
+// holds no node for the enclosed `<S>` (11.4). `ids` and `query` are gated
+// on this failing workspace (13.3), so the absence is asserted in the view's
+// tree alone. The fixture is the module's ASCII template plus one multibyte
+// character (`é`, two bytes) before the container, so the pinned container
+// and section ranges are byte offsets (1.7) — a product counting code units
+// mislocates every construct after it.
+const T2_7_1_X_FILE = "specs/A.mdx";
+const T2_7_1_X_CONTAINER = '{<S id="x">Inner x text.</S>}';
+const T2_7_1_X_HEAD = "Section text é.\n\n";
+const T2_7_1_X_TAIL_LINES = "\n\nTail text.\n";
+const T2_7_1_X_PREFIX = `${SIBLING}<S id="sec">\n${T2_7_1_X_HEAD}`;
+const T2_7_1_X_SEC_CLOSE = `${T2_7_1_X_TAIL_LINES}</S>`;
+const T2_7_1_X_SOURCE = `${T2_7_1_X_PREFIX}${T2_7_1_X_CONTAINER}${T2_7_1_X_SEC_CLOSE}\n`;
+
+/** UTF-8 byte length of `text` — the offset unit of SPEC 1.7. */
+function utf8Bytes(text: string): number {
+  return Buffer.byteLength(text, "utf8");
+}
+
+/** The container's own characters: opening brace through closing brace. */
+const T2_7_1_X_CONTAINER_RANGE: SourceRange = {
+  start: utf8Bytes(T2_7_1_X_PREFIX),
+  end: utf8Bytes(T2_7_1_X_PREFIX + T2_7_1_X_CONTAINER),
+};
+const T2_7_1_X_OK_RANGE: SourceRange = {
+  start: 0,
+  end: utf8Bytes(SIBLING_CONSTRUCT),
+};
+const T2_7_1_X_SEC_RANGE: SourceRange = {
+  start: utf8Bytes(SIBLING),
+  end: utf8Bytes(T2_7_1_X_PREFIX + T2_7_1_X_CONTAINER + T2_7_1_X_SEC_CLOSE),
+};
+const T2_7_1_X_ROOT_RANGE: SourceRange = {
+  start: 0,
+  end: utf8Bytes(T2_7_1_X_SOURCE),
+};
+
+// Text values per SPEC 1.6 and 3: each section's tag lines are emptied
+// purely by removals and drop with their terminators; the blank line between
+// the sibling and `sec` is the root's own contribution and keeps; the
+// container is content and stays byte-for-byte; the root's subtree text is
+// the children's contributions interleaved with its own in document order.
+const T2_7_1_X_OK_TEXT = "A valid sibling section.\n";
+const T2_7_1_X_SEC_TEXT =
+  T2_7_1_X_HEAD + T2_7_1_X_CONTAINER + T2_7_1_X_TAIL_LINES;
+const T2_7_1_X_ROOT_OWN = "\n";
+const T2_7_1_X_ROOT_SUBTREE =
+  T2_7_1_X_OK_TEXT + T2_7_1_X_ROOT_OWN + T2_7_1_X_SEC_TEXT;
+
+/** The view's tree projected to what this arm pins (T11.2-4's projection). */
+interface TextTreeExpectation {
+  readonly identity: ViewNode["identity"];
+  readonly range: SourceRange;
+  readonly ownText: string | { readonly unavailable: true };
+  readonly subtreeText: string | { readonly unavailable: true };
+  readonly children: readonly TextTreeExpectation[];
+}
+
+function projectTextNode(node: ViewNode): TextTreeExpectation {
+  return {
+    identity: node.identity,
+    range: node.range,
+    ownText: node.ownText!,
+    subtreeText: node.subtreeText!,
+    children: node.children.map(projectTextNode),
+  };
+}
+
+const T2_7_1_X_TREE: TextTreeExpectation = {
+  identity: T2_7_1_X_FILE,
+  range: T2_7_1_X_ROOT_RANGE,
+  ownText: T2_7_1_X_ROOT_OWN,
+  subtreeText: T2_7_1_X_ROOT_SUBTREE,
+  children: [
+    {
+      identity: `${T2_7_1_X_FILE}#ok`,
+      range: T2_7_1_X_OK_RANGE,
+      ownText: T2_7_1_X_OK_TEXT,
+      subtreeText: T2_7_1_X_OK_TEXT,
+      children: [],
+    },
+    {
+      identity: `${T2_7_1_X_FILE}#sec`,
+      range: T2_7_1_X_SEC_RANGE,
+      ownText: T2_7_1_X_SEC_TEXT,
+      subtreeText: T2_7_1_X_SEC_TEXT,
+      children: [],
+    },
+  ],
+};
+
+/** Every node of a view tree, document order (explicit stack, AGENTS.md). */
+function everyViewNode(root: ViewNode): ViewNode[] {
+  const nodes: ViewNode[] = [];
+  const stack: ViewNode[] = [root];
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    nodes.push(node);
+    for (let index = node.children.length - 1; index >= 0; index -= 1) {
+      stack.push(node.children[index]!);
+    }
+  }
+  return nodes;
+}
+
+/**
+ * The container fixture's findings: exactly one, condition 16, located once —
+ * the container from its opening brace through its closing brace, in byte
+ * offsets — and concerning no path.
+ */
+function assertContainerFinding(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertConditionCounts(
+    findings,
+    { "14.16": 1 },
+    `${context}: exactly one condition-16 finding, the container's, and ` +
+      "none beside — the `<S>` spelled inside it is part of the " +
+      "container's expression, earning no finding of its own (SPEC 2.7, 14.16)",
+  );
+  const finding = findings[0]!;
+  assertSameJson(
+    finding.locations.map((location) => ({
+      file: location.file,
+      range: { start: location.range.start, end: location.range.end },
+    })),
+    [{ file: T2_7_1_X_FILE, range: T2_7_1_X_CONTAINER_RANGE }],
+    `${context}: the 14.16 finding locates the expression container from ` +
+      "its opening brace through its closing brace, as byte offsets (SPEC " +
+      `14, 1.7; message: ${JSON.stringify(finding.message)})`,
+  );
+  if (finding.path !== null) {
+    fail(
+      `${context}: a finding locating in source concerns no path — \`path\` ` +
+        `is null for located conditions (SPEC 12.7, 14); got ` +
+        `${JSON.stringify(finding.path)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+}
+
+/** T2.7-1's container arm: `build --json`, then the bare `view --text`. */
+async function runSectionInContainerArm(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    { [T2_7_1_X_FILE]: T2_7_1_X_SOURCE },
+    async (workspace) => {
+      const buildContext =
+        "T2.7-1 `build --json` with a section spelled inside an expression container";
+      assertContainerFinding(
+        await buildFindings(product, workspace, buildContext),
+        buildContext,
+      );
+
+      const viewContext =
+        "T2.7-1 bare `view --text` with a section spelled inside an expression container";
+      const result = await expectExit(
+        product,
+        workspace,
+        ["view", "--text"],
+        1,
+        `${viewContext}: the container's finding accompanies the answer, so ` +
+          "exit 1 with the full view (SPEC 11.2, 12.0)",
+      );
+      const report = decodeViewReport(
+        parseJsonStdout(
+          result,
+          `${viewContext}: a single JSON document is the only output form (SPEC 11)`,
+        ),
+        { text: true },
+        viewContext,
+      );
+      assertContainerFinding(
+        report.findings,
+        `${viewContext}: the accompanying findings (SPEC 11.2)`,
+      );
+      assertSameJson(
+        report.views.map((view) => view.file),
+        [T2_7_1_X_FILE],
+        `${viewContext}: one per-file view, the parseable file's (SPEC 11.4)`,
+      );
+      const view = report.views[0]!;
+      const { start, end } = T2_7_1_X_CONTAINER_RANGE;
+      const intruders = everyViewNode(view.root).filter(
+        (node) => node.range.start >= start && node.range.start < end,
+      );
+      if (intruders.length > 0) {
+        fail(
+          `${viewContext}: no node for the \`<S id="x">\` spelled inside the ` +
+            "expression container — it is part of the container's " +
+            "expression, never a section, so the view's tree holds no node " +
+            `within the container's range [${String(start)}, ${String(end)}) ` +
+            `(SPEC 2.7, 11.4); got ${intruders
+              .map(
+                (node) =>
+                  `${JSON.stringify(node.identity)} [${String(node.range.start)}, ` +
+                  `${String(node.range.end)})`,
+              )
+              .join(", ")}`,
+        );
+      }
+      assertSameJson(
+        projectTextNode(view.root),
+        T2_7_1_X_TREE,
+        `${viewContext}: the section tree by construct nesting — the root, ` +
+          '`ok`, and `sec`, no node for the enclosed `<S id="x">` — with ' +
+          "the container's bytes preserved byte-for-byte as content in " +
+          "`sec`'s own and subtree text, the tag lines dropped, and the " +
+          "root's subtree text in document order (SPEC 2.7, 11.2, 11.4, 1.6, 3)",
+      );
+      assertSameJson(
+        [view.imports, view.occurrences, view.comments],
+        [[], [], []],
+        `${viewContext}: the container is no embedding and no comment — no ` +
+          "occurrence record and no comment range; no import staged (SPEC " +
+          "2.7, 5.7, 12.7)",
+      );
+    },
+  );
+}
+
 const T2_7_1 = defineProductTest({
   id: "T2.7-1",
   title:
-    "a JSX element other than `<S>`/`<Spec>`, an expression container other than `text(...)` or an MDX comment, and an export statement each fail with 14.16 (SPEC 2.7)",
+    "a JSX element other than `<S>`/`<Spec>`, an expression container other than `text(...)` or an MDX comment, and an export statement each fail with 14.16; a section spelled inside an expression container is part of the container's expression — one 14.16 brace through brace, no node in the view's tree, its bytes content in the enclosing text (SPEC 2.7, 11.2, 11.4)",
   run: async (product) => {
     for (const arm of FOREIGN_CONSTRUCT_ARMS) {
       const context = `T2.7-1 \`build --json\` with ${arm.name}`;
@@ -249,6 +495,7 @@ const T2_7_1 = defineProductTest({
         },
       );
     }
+    await runSectionInContainerArm(product);
   },
 });
 
