@@ -37,6 +37,7 @@ import type {
   NodeReport,
   NodeRow,
   NodeSummary,
+  SourceRange,
 } from "../../helpers/adapters/index.js";
 import {
   decodeCoverageReport,
@@ -60,11 +61,9 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
-  assertFindingLocated,
   assertSameJson,
   buildFindings,
   buildOk,
-  byteWindow,
   expectExit,
   runJson,
   sortedIdentities,
@@ -649,13 +648,107 @@ const T2_5_3_NODE = "specs/A.mdx#node";
 // location assertion has teeth.
 const SIBLING = '<S id="ok">\nA valid sibling section.\n</S>\n\n';
 
+/** `\` (U+005C), built from its code point (the SUITE-03 discipline). */
+const BACKSLASH = String.fromCodePoint(0x5c);
+
+/**
+ * Verbatim spellings (SPEC 2.4): the six-character Unicode escape of `o`
+ * (backslash, `u`, `006F`) and the decimal character reference of `n`
+ * (`&#110;`), each embedded so that an interpreting reader would spell
+ * `none`. A quoted attribute value is the characters between its delimiters
+ * exactly as spelled — no escape sequence or character reference is
+ * interpreted — so each is neither `required` nor `none` (SPEC 2.4, 2.5 →
+ * 14.17).
+ */
+const ESCAPE_SPELLED_NONE = `n${BACKSLASH}u006Fne`;
+const REFERENCE_SPELLED_NONE = "&#110;one";
+
 // Representatives of "any other value" (SPEC 2.5, 2.7 → 14.17): an unknown
 // token, a case variant (values compare byte-wise, no case folding — SPEC
-// 12.0), and the empty string.
-const INVALID_COVERAGE_VALUES: readonly string[] = ["optional", "None", ""];
+// 12.0), the empty string, and the two verbatim spellings above.
+const INVALID_COVERAGE_VALUES: readonly string[] = [
+  "optional",
+  "None",
+  "",
+  ESCAPE_SPELLED_NONE,
+  REFERENCE_SPELLED_NONE,
+];
 
-function coverageConstruct(value: string): string {
-  return `<S id="sec" coverage="${value}">\nSection with the coverage value under test.\n</S>`;
+/** Why a staged value is invalid — the clause a diagnosis must cite. */
+function coverageValueRationale(value: string): string {
+  if (value === ESCAPE_SPELLED_NONE || value === REFERENCE_SPELLED_NONE) {
+    return (
+      "SPEC 2.4: a quoted attribute value is read verbatim — no escape sequence " +
+      "or character reference interpreted — so this spelling is neither " +
+      "`required` nor `none` (14.17)"
+    );
+  }
+  return "SPEC 2.5: the only defined values are `required` and `none` (14.17)";
+}
+
+/** A staged file whose `coverage` attribute is under test. */
+interface CoverageStaging {
+  readonly source: string;
+  /**
+   * The `coverage` attribute's own characters — name through closing quote,
+   * the attribute range of SPEC 11.4 — as byte offsets (SPEC 1.7).
+   */
+  readonly attribute: SourceRange;
+}
+
+/**
+ * One section after the sibling whose `coverage` attribute carries the value
+ * under test; the attribute is pinned by its own characters as the range a
+ * 14.17 finding on it must locate (SPEC 14; T14-11). Offsets are UTF-8 byte
+ * lengths of the text before the attribute.
+ */
+function coverageStaging(value: string): CoverageStaging {
+  const prefix = `${SIBLING}<S id="sec" `;
+  const attribute = `coverage="${value}"`;
+  const start = Buffer.byteLength(prefix, "utf8");
+  return {
+    source: `${prefix}${attribute}>\nSection with the coverage value under test.\n</S>\n`,
+    attribute: { start, end: start + Buffer.byteLength(attribute, "utf8") },
+  };
+}
+
+/**
+ * Assert `build --json` reported exactly one finding, condition 14.17,
+ * locating exactly one range — the offending `coverage` attribute's own
+ * characters in `specs/A.mdx` (SPEC 14: an attribute condition locates the
+ * attribute range of 11.4; 12.7 locations).
+ */
+function assertSingle1417AtAttribute(
+  findings: readonly Finding[],
+  attribute: SourceRange,
+  context: string,
+): void {
+  assertConditionCounts(findings, { "14.17": 1 }, context);
+  const finding = findings[0]!;
+  if (finding.locations.length !== 1) {
+    fail(
+      `${context}: a 14.17 finding on a \`coverage\` value locates exactly one ` +
+        "construct — the offending attribute (SPEC 14: an attribute condition " +
+        "locates the attribute's own characters); got " +
+        `${String(finding.locations.length)} locations (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+  const location = finding.locations[0]!;
+  if (location.file !== "specs/A.mdx") {
+    fail(
+      `${context}: the 14.17 finding must locate in the workspace-relative source ` +
+        `file (SPEC 14, 1.5, 12.7); expected "specs/A.mdx", got ` +
+        `${JSON.stringify(location.file)} (message: ${JSON.stringify(finding.message)})`,
+    );
+  }
+  assertSameJson(
+    { start: location.range.start, end: location.range.end },
+    attribute,
+    `${context}: the 14.17 finding locates exactly the \`coverage\` attribute's ` +
+      "own characters — name through closing quote, the attribute range of SPEC " +
+      "11.4 — as zero-based byte offsets, end-exclusive (SPEC 14, 1.7, 12.7)",
+  );
 }
 
 async function expectVariantRequired(
@@ -705,7 +798,7 @@ async function expectVariantRequired(
 const T2_5_3 = defineProductTest({
   id: "T2.5-3",
   title:
-    '`coverage="required"` is accepted and behaves as the default (same required-set membership, reported attribute, and metadataHash as the omitted variant); any other value fails with 14.17 (SPEC 2.5, 2.7)',
+    '`coverage="required"` is accepted and behaves as the default (same required-set membership, reported attribute, and metadataHash as the omitted variant); any other value fails with 14.17 located at the attribute — a value spelled with an escape sequence or character reference included, read verbatim (SPEC 2.4, 2.5, 2.7, 14)',
   run: async (product) => {
     await withWorkspace(
       PROFILE_CONFIG,
@@ -745,20 +838,16 @@ const T2_5_3 = defineProductTest({
     );
 
     for (const value of INVALID_COVERAGE_VALUES) {
-      const construct = coverageConstruct(value);
-      const context = `T2.5-3 \`build --json\` with coverage=${JSON.stringify(value)}`;
+      const staged = coverageStaging(value);
+      const context =
+        `T2.5-3 \`build --json\` with coverage=${JSON.stringify(value)} ` +
+        `(${coverageValueRationale(value)})`;
       await withWorkspace(
         SPECS_ONLY_CONFIG,
-        { "specs/A.mdx": `${SIBLING}${construct}\n` },
+        { "specs/A.mdx": staged.source },
         async (workspace) => {
           const findings = await buildFindings(product, workspace, context);
-          assertConditionCounts(findings, { "14.17": 1 }, context);
-          assertFindingLocated(
-            findings[0]!,
-            { file: "specs/A.mdx", window: byteWindow(SIBLING, construct) },
-            `${context}: the 14.17 finding (SPEC 2.5: the only defined values are ` +
-              "`required` and `none`)",
-          );
+          assertSingle1417AtAttribute(findings, staged.attribute, context);
         },
       );
     }
