@@ -29,12 +29,27 @@
 // T1.4-3 is in no certification entry's scope: it exercises the generated
 // module under standard TypeScript tooling (HARNESS-05, SPEC 13.1).
 //
-// Location assertions follow the SUITE-02 discipline: fixtures are staged as
-// prefix + offending construct + suffix with exactly known bytes, and each
-// negative arm asserts the finding's location falls within the offending
-// construct's end-widened byte window (support.ts `byteWindow`).
+// Location assertions follow the SUITE-02 discipline, pinned exactly: each
+// fixture is assembled from parts with exactly known bytes (`assemble`), and
+// every negative arm asserts that its 14.4 finding locates exactly the
+// offending attribute's own characters — the `id`/`tags` name through the
+// closing quote, the attribute range of SPEC 11.4 that an attribute condition
+// locates (SPEC 14; T14-11) — one finding per offending attribute, however
+// many segments or tokens of its value violate 1.4.
+//
+// Verbatim reading (SPEC 2.4): a quoted attribute value is the characters
+// between its delimiters exactly as spelled, so the six-character escape
+// spelling of `.` (a backslash followed by `u002E`) and the character
+// reference `&#46;` are a segment containing `\` or `&` — condition 4, never
+// the two-segment ID `a.b` — and the escape spelling of `y` (a backslash then
+// `u0079`) a tag containing `\`, never the tag `xy`. Those spellings are built
+// here from the backslash's code point, so no tool layer decodes them on the
+// way into this file, and the arms staging them assert exactly one 14.4
+// finding: a product interpreting the escape or the reference reads a
+// different ID or tag — the two-segment `a.b`, structurally invalid at the
+// top level (SPEC 1.3), or the accepted tag `xy` — and fails the arm.
 
-import type { Finding } from "../../helpers/adapters/index.js";
+import type { Finding, SourceRange } from "../../helpers/adapters/index.js";
 import { decodeNodeSummary } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
@@ -48,11 +63,9 @@ import {
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
-  assertFindingLocated,
   assertSameJson,
   buildFindings,
   buildOk,
-  byteWindow,
   runJson,
 } from "./support.js";
 
@@ -111,12 +124,108 @@ const BOUNDARY_CODE_POINTS: readonly (readonly [number, string])[] = [
   [0x2028, "line separator"],
 ];
 
+/** The backslash, built from its code point (see the module header). */
+const BACKSLASH = String.fromCodePoint(0x5c);
+
+/** An attribute value's delimiter — either quote kind (SPEC 2.7). */
+type QuoteKind = '"' | "'";
+
+/**
+ * The quote, escape, and character-reference characters SPEC 1.4 forbids in
+ * segments and tags — `"` `'` `\` `&` — each staged in the quote kind that
+ * keeps the value spellable: a `"` inside a single-quoted value, the rest
+ * double-quoted.
+ */
+interface ForbiddenCharacterClass {
+  readonly name: string;
+  readonly character: string;
+  readonly quote: QuoteKind;
+}
+
+const QUOTE_ESCAPE_REFERENCE_CHARACTERS: readonly ForbiddenCharacterClass[] = [
+  {
+    name: 'the double quote `"` (single-quoted value)',
+    character: '"',
+    quote: "'",
+  },
+  { name: "the single quote `'`", character: "'", quote: '"' },
+  {
+    name: "the escape character (backslash)",
+    character: BACKSLASH,
+    quote: '"',
+  },
+  { name: "the character-reference character `&`", character: "&", quote: '"' },
+];
+
+/** U+FFFD (REPLACEMENT CHARACTER), which no argument value carries (SPEC 1.4, 12.0). */
+const REPLACEMENT_CHARACTER = 0xfffd;
+
+/**
+ * Verbatim spellings (SPEC 2.4; module header): the six-character Unicode
+ * escape and the decimal character reference an interpreting reader would
+ * turn into `.`, and the escape it would turn into `y`. Read verbatim, each
+ * is a value containing `\` or `&` — condition 4.
+ */
+const ESCAPE_SPELLED_DOT = `${BACKSLASH}u002E`;
+const REFERENCE_SPELLED_DOT = "&#46;";
+const ESCAPE_SPELLED_Y = `${BACKSLASH}u0079`;
+
 // --- shared staging ----------------------------------------------------------
 
-// Shared fixture template: a valid sibling first, so each offending construct
-// is a proper sub-range of the file and the location assertions have teeth.
-// Arms differ from one another only in the one segment or tag under test.
+// Shared fixture template: a valid sibling first, so each offending attribute
+// is a proper sub-range of the file and the location assertions have teeth —
+// the sibling's own `id` attribute is a different range, so a finding
+// attributed to the wrong attribute fails. Arms differ from one another only
+// in the one segment or tag under test.
 const SIBLING = '<S id="ok">\nA valid sibling section.\n</S>\n\n';
+
+/** A fixture assembled from parts, with the pinned attributes' byte ranges. */
+interface Assembled {
+  readonly source: string;
+  /** The pinned attributes' ranges in source order (SPEC 1.7 byte offsets). */
+  readonly pinned: readonly SourceRange[];
+}
+
+/**
+ * Assemble a fixture from string parts; a `{ pin }` part is an attribute
+ * whose own characters — name through closing quote — are pinned as the
+ * range a 14.4 finding on it must locate (SPEC 14, 11.4). Each offset is the
+ * UTF-8 byte length of the text before the pinned part (SPEC 1.7).
+ */
+function assemble(
+  parts: readonly (string | { readonly pin: string })[],
+): Assembled {
+  let source = "";
+  const pinned: SourceRange[] = [];
+  for (const part of parts) {
+    if (typeof part === "string") {
+      source += part;
+      continue;
+    }
+    const start = Buffer.byteLength(source, "utf8");
+    pinned.push({ start, end: start + Buffer.byteLength(part.pin, "utf8") });
+    source += part.pin;
+  }
+  return { source, pinned };
+}
+
+/** One section after the sibling whose `id` attribute is under test. */
+function segmentStaging(segment: string, quote: QuoteKind = '"'): Assembled {
+  return assemble([
+    `${SIBLING}<S `,
+    { pin: `id=${quote}${segment}${quote}` },
+    ">\nSection with the segment under test.\n</S>\n",
+  ]);
+}
+
+/** One section after the sibling whose `tags` attribute is under test. */
+function tagStaging(tags: string, quote: QuoteKind = '"'): Assembled {
+  return assemble([
+    `${SIBLING}<S id="sec" `,
+    { pin: `tags=${quote}${tags}${quote}` },
+    ">\nTagged section.\n</S>\n",
+  ]);
+}
 
 /** Stage one single-file workspace and collect its `build --json` findings. */
 async function findingsOf(
@@ -135,39 +244,77 @@ async function findingsOf(
 }
 
 /**
+ * Assert `build --json` reported exactly one 14.4 finding per pinned
+ * attribute and nothing else, each finding locating exactly one range — its
+ * attribute's own characters in `specs/A.mdx`, name through closing quote,
+ * the attribute range of SPEC 11.4 (SPEC 14: file, location, condition
+ * identity; T14-11). The ranges are compared as a multiset: which finding
+ * comes first is 12.7's ordering, not this test's concern.
+ */
+function assertOnly144AtAttributes(
+  findings: readonly Finding[],
+  attributes: readonly SourceRange[],
+  context: string,
+): void {
+  assertConditionCounts(findings, { "14.4": attributes.length }, context);
+  const got = findings.map((finding) => {
+    if (finding.locations.length !== 1) {
+      fail(
+        `${context}: a 14.4 finding locates exactly one construct — the offending ` +
+          "attribute (SPEC 14: one finding per offending `id`/`tags` attribute); got " +
+          `${String(finding.locations.length)} locations (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+    const location = finding.locations[0]!;
+    if (location.file !== "specs/A.mdx") {
+      fail(
+        `${context}: the 14.4 finding must locate in the workspace-relative source ` +
+          `file (SPEC 14, 1.5, 12.7); expected "specs/A.mdx", got ` +
+          `${JSON.stringify(location.file)} (message: ${JSON.stringify(finding.message)})`,
+      );
+    }
+    return { start: location.range.start, end: location.range.end };
+  });
+  const byStart = (a: SourceRange, b: SourceRange): number => a.start - b.start;
+  assertSameJson(
+    [...got].sort(byStart),
+    [...attributes].sort(byStart),
+    `${context}: the 14.4 finding(s) locate exactly the offending attribute's own ` +
+      "characters — name through closing quote, the attribute range of SPEC 11.4 — " +
+      "as zero-based byte offsets, end-exclusive (SPEC 14, 1.7, 12.7)",
+  );
+}
+
+/**
  * Run one negative arm over the shared template: `build --json` reports
- * exactly one finding, condition 14.4, located within the offending
- * construct's byte window (SPEC 14: file, location, condition identity).
+ * exactly one finding, condition 14.4, located exactly at the one pinned
+ * attribute.
  */
 async function expectSingle144(
   product: ProductBinding,
-  construct: string,
+  staged: Assembled,
   context: string,
 ): Promise<void> {
-  const findings = await findingsOf(
-    product,
-    `${SIBLING}${construct}\n`,
-    context,
-  );
-  assertConditionCounts(findings, { "14.4": 1 }, context);
-  assertFindingLocated(
-    findings[0]!,
-    { file: "specs/A.mdx", window: byteWindow(SIBLING, construct) },
-    `${context}: the 14.4 finding`,
-  );
+  const findings = await findingsOf(product, staged.source, context);
+  assertOnly144AtAttributes(findings, staged.pinned, context);
 }
 
 // --- T1.4-1 ------------------------------------------------------------------
 
 // The segment-validity matrix. Every representative is staged as its raw
 // character between two ordinary letters (or as the whole segment, for the
-// forbidden names). U+00A0, U+0085, and U+2028 belong to neither 1.4 class
-// and are deliberately absent from this test — they are T1.4-2's (and
+// forbidden names) — the quote, escape, and character-reference characters
+// and U+FFFD included (SPEC 1.4) — plus the two verbatim spellings of SPEC
+// 2.4 (module header). U+00A0, U+0085, and U+2028 belong to neither 1.4
+// class and are deliberately absent from this test — they are T1.4-2's (and
 // §VIOL-VALID-WIDE's) subject.
 interface SegmentArm {
   /** Which SPEC 1.4 rule this segment violates (failure diagnostics). */
   readonly name: string;
   readonly segment: string;
+  /** The `id` value's delimiter — single quotes only where the segment holds `"`. */
+  readonly quote?: QuoteKind;
 }
 
 const INVALID_SEGMENT_ARMS: readonly SegmentArm[] = [
@@ -184,35 +331,49 @@ const INVALID_SEGMENT_ARMS: readonly SegmentArm[] = [
     name: `forbidden name "${name}" as a segment`,
     segment: name,
   })),
+  ...QUOTE_ESCAPE_REFERENCE_CHARACTERS.map(({ name, character, quote }) => ({
+    name: `${name} in a segment`,
+    segment: `a${character}b`,
+    quote,
+  })),
+  {
+    name: "U+FFFD (REPLACEMENT CHARACTER) in a segment",
+    segment: between(REPLACEMENT_CHARACTER),
+  },
+  {
+    name:
+      "the verbatim escape spelling of `.` (a backslash then `u002E`) in a segment — " +
+      "a segment containing the escape character, never the two-segment ID `a.b` " +
+      "(SPEC 2.4)",
+    segment: `a${ESCAPE_SPELLED_DOT}b`,
+  },
+  {
+    name:
+      "the verbatim character reference `&#46;` in a segment — a segment containing " +
+      "`&`, never the two-segment ID `a.b` (SPEC 2.4)",
+    segment: `a${REFERENCE_SPELLED_DOT}b`,
+  },
 ];
-
-function segmentConstruct(segment: string): string {
-  return `<S id="${segment}">\nSection with the segment under test.\n</S>`;
-}
 
 // Empty segment, nested spelling: `a..b` is reachable only via the chain
 // `a` → `a.` → `a..b`, where every level adds exactly one segment — 1.3 is
 // satisfied and the empty segment (1.4 → 14.4) is the only condition staged.
-// Both `a.` and `a..b` contain an empty segment; whether a product reports
-// the violation once or per offending ID is not fixed by SPEC 14, so one or
-// two findings are accepted — each must be 14.4 and located within the outer
-// offending construct (which contains the inner one).
-const EMPTY_NESTED_PREFIX = `${SIBLING}<S id="a">\nAlpha.\n\n`;
-const EMPTY_NESTED_CONSTRUCT = [
-  '<S id="a.">',
-  "Introduces the empty segment.",
-  "",
-  '<S id="a..b">',
-  "Nested under the empty segment.",
-  "</S>",
-  "</S>",
-].join("\n");
-const EMPTY_NESTED_SOURCE = `${EMPTY_NESTED_PREFIX}${EMPTY_NESTED_CONSTRUCT}\n</S>\n`;
+// Both `a.` and `a..b` contain an empty segment, so both `id` attributes
+// offend: one 14.4 finding per offending attribute, each located at its own
+// attribute — the descendant spelling the malformed ancestor segment as its
+// own prefix reports in its own attribute too (SPEC 14; T14-11).
+const EMPTY_NESTED = assemble([
+  `${SIBLING}<S id="a">\nAlpha.\n\n<S `,
+  { pin: 'id="a."' },
+  ">\nIntroduces the empty segment.\n\n<S ",
+  { pin: 'id="a..b"' },
+  ">\nNested under the empty segment.\n</S>\n</S>\n</S>\n",
+]);
 
 const T1_4_1 = defineProductTest({
   id: "T1.4-1",
   title:
-    'segment validity matrix: empty segments (`a..b` via nesting and a lone `id=""`), `#`, each whitespace character, each control-class representative, and each forbidden name fail with 14.4 (SPEC 1.4, 14.4)',
+    'segment validity matrix: empty segments (`a..b` via nesting and a lone `id=""`), `#`, each whitespace character, each control-class representative, each forbidden name, the quote, escape, and character-reference characters (`"` single-quoted, `\'`, backslash, `&`), and U+FFFD fail with 14.4, one finding per offending `id` attribute located exactly at it; the verbatim escape and character-reference spellings of `.` are segments containing the backslash and `&` — condition 4, never the two-segment ID `a.b` (SPEC 1.4, 2.4, 14, 14.4)',
   run: async (product) => {
     // Template control: the base workspace differs from every negative arm
     // only in the one segment, so each arm's 14.4 is attributable to the
@@ -220,7 +381,7 @@ const T1_4_1 = defineProductTest({
     const control = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        "specs/A.mdx": `${SIBLING}${segmentConstruct("okseg")}\n`,
+        "specs/A.mdx": segmentStaging("okseg").source,
       },
     });
     try {
@@ -233,53 +394,27 @@ const T1_4_1 = defineProductTest({
       await control.dispose();
     }
 
-    // Empty segment via nesting (`a..b`).
+    // Empty segment via nesting (`a..b`): two offending `id` attributes.
     const nestedContext =
       "T1.4-1 `build --json` over the nested empty segment (`a` -> `a.` -> `a..b`)";
-    const nested = await TestWorkspace.create({
-      files: {
-        "xspec.config.ts": SPECS_ONLY_CONFIG,
-        "specs/A.mdx": EMPTY_NESTED_SOURCE,
-      },
-    });
-    try {
-      const findings = await buildFindings(product, nested, nestedContext);
-      const conditions = findings.map((finding) => finding.condition);
-      if (
-        findings.length < 1 ||
-        findings.length > 2 ||
-        conditions.some((condition) => condition !== "14.4")
-      ) {
-        fail(
-          `${nestedContext}: expected the empty segment to report condition 14.4 — one ` +
-            `finding, or one per offending ID (\`a.\` and \`a..b\` both contain it) — and ` +
-            `nothing else (the nesting keeps 1.3 satisfied); got ${JSON.stringify(conditions)}`,
-        );
-      }
-      const window = byteWindow(EMPTY_NESTED_PREFIX, EMPTY_NESTED_CONSTRUCT);
-      for (const finding of findings) {
-        assertFindingLocated(
-          finding,
-          { file: "specs/A.mdx", window },
-          `${nestedContext}: a 14.4 finding`,
-        );
-      }
-    } finally {
-      await nested.dispose();
-    }
+    assertOnly144AtAttributes(
+      await findingsOf(product, EMPTY_NESTED.source, nestedContext),
+      EMPTY_NESTED.pinned,
+      nestedContext,
+    );
 
     // Empty segment as a lone empty id: one empty segment, so 1.3's
     // exactly-one-segment top-level rule holds and 14.4 alone reports.
     await expectSingle144(
       product,
-      '<S id="">\nLone empty id.\n</S>',
+      segmentStaging(""),
       'T1.4-1 `build --json` over a lone empty `id=""`',
     );
 
     for (const arm of INVALID_SEGMENT_ARMS) {
       await expectSingle144(
         product,
-        segmentConstruct(arm.segment),
+        segmentStaging(arm.segment, arm.quote),
         `T1.4-1 \`build --json\` with ${arm.name}`,
       );
     }
@@ -420,10 +555,14 @@ const T1_4_3 = defineProductTest({
 // splits on runs of 1.4 whitespace with leading/trailing whitespace ignored
 // (2.6), so no tag token can be empty or contain whitespace — whitespace-only
 // values behave as omitted (T2.6-2), and the whitespace control characters
-// U+0009–U+000D are split away as separators.
+// U+0009–U+000D are split away as separators. The quote, escape, and
+// character-reference characters and U+FFFD are invalid in a tag as in a
+// segment, and the escape spelling of `y` is read verbatim (module header).
 interface TagArm {
   readonly name: string;
   readonly tag: string;
+  /** The `tags` value's delimiter — single quotes only where the tag holds `"`. */
+  readonly quote?: QuoteKind;
 }
 
 const VALID_TAG_ARMS: readonly TagArm[] = [
@@ -441,22 +580,33 @@ const INVALID_TAG_ARMS: readonly TagArm[] = [
     name: `a tag containing the non-whitespace control character ${codePointName(codePoint)}`,
     tag: between(codePoint),
   })),
+  ...QUOTE_ESCAPE_REFERENCE_CHARACTERS.map(({ name, character, quote }) => ({
+    name: `a tag containing ${name}`,
+    tag: `x${character}y`,
+    quote,
+  })),
+  {
+    name: "a tag containing U+FFFD (REPLACEMENT CHARACTER)",
+    tag: `x${String.fromCodePoint(REPLACEMENT_CHARACTER)}y`,
+  },
+  {
+    name:
+      "the verbatim escape spelling of `y` (`x`, a backslash, then `u0079`) — a tag " +
+      "containing the escape character, never the tag `xy` (SPEC 2.4)",
+    tag: `x${ESCAPE_SPELLED_Y}`,
+  },
 ];
-
-function taggedConstruct(tags: string): string {
-  return `<S id="sec" tags="${tags}">\nTagged section.\n</S>`;
-}
 
 const T1_4_4 = defineProductTest({
   id: "T1.4-4",
   title:
-    "tags: `.` is valid; `#`, a forbidden name, and non-whitespace control characters fail with 14.4; the T1.4-2 boundary code points are valid in tags and never split (SPEC 1.4, 2.6, 14.4)",
+    "tags: `.` is valid; `#`, a forbidden name, non-whitespace control characters, the quote, escape, and character-reference characters (`\"` single-quoted, `'`, backslash, `&`), and U+FFFD fail with 14.4, one finding per offending `tags` attribute located exactly at it; the verbatim escape spelling of `y` is a tag containing the backslash — condition 4, never the tag `xy`; the T1.4-2 boundary code points are valid in tags and never split (SPEC 1.4, 2.4, 2.6, 14, 14.4)",
   run: async (product) => {
     for (const arm of VALID_TAG_ARMS) {
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/A.mdx": `${SIBLING}${taggedConstruct(arm.tag)}\n`,
+          "specs/A.mdx": tagStaging(arm.tag).source,
         },
       });
       try {
@@ -484,7 +634,7 @@ const T1_4_4 = defineProductTest({
     for (const arm of INVALID_TAG_ARMS) {
       await expectSingle144(
         product,
-        taggedConstruct(arm.tag),
+        tagStaging(arm.tag, arm.quote),
         `T1.4-4 \`build --json\` with ${arm.name}`,
       );
     }
