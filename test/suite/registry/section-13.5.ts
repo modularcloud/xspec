@@ -2,7 +2,9 @@
 // basics: five held mutating-command arms each compared byte-identically
 // against its no-seam twin (seam neutrality), the stale-workspace arm — the
 // hold precedes the 13.3 refresh, graph data byte-identical while held — the
-// occupied-hold-path exit-2 arms, and the non-mutating unknown-flag arm),
+// occupied-hold-path exit-2 arms, the non-mutating unknown-flag arm, and
+// `build --test-hold --json` consuming `--json` as the hold path — the flag
+// value-taking by name on every command, JSON out of effect, stdout empty),
 // T13.5-2 (mutual exclusion),
 // T13.5-3 (exclusivity ends with the process), T13.5-4 (readers during
 // mutation + build/query storm), T13.5-5 (atomic visibility via a polling
@@ -555,7 +557,7 @@ async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
 const T13_5_1 = defineProductTest({
   id: "T13.5-1",
   title:
-    "each mutating command (`rename`, file-form `move`, `review create/resolve/split`) with `--test-hold` creates an empty file at the path after acquiring exclusivity and before modifying anything (workspace byte-identical while held), proceeds only once the file is deleted, and completes normally, the held-then-released run's final workspace state — sources, journal, sessions, derived files, and graph data — byte-identical to the same operation run without `--test-hold` on an identical twin workspace (seam neutrality: the seam changes no other behavior; H-4/H-6); on a workspace whose graph data is stale (a section's text edited after `build`, the workspace still valid) `review create --strategy audit --test-hold` leaves graph data and every other workspace file byte-identical while held — the hold precedes the 13.3 refresh too — and after release creates the session and refreshes the graph data to what `build` writes on an identical twin; anything at the hold path — file, directory, or symlink — fails the command exit 2 without modifying anything; `build` and `query` given `--test-hold` fail exit 2 as an unknown flag (SPEC 13.5, 13.3, 12.0)",
+    "each mutating command (`rename`, file-form `move`, `review create/resolve/split`) with `--test-hold` creates an empty file at the path after acquiring exclusivity and before modifying anything (workspace byte-identical while held), proceeds only once the file is deleted, and completes normally, the held-then-released run's final workspace state — sources, journal, sessions, derived files, and graph data — byte-identical to the same operation run without `--test-hold` on an identical twin workspace (seam neutrality: the seam changes no other behavior; H-4/H-6); on a workspace whose graph data is stale (a section's text edited after `build`, the workspace still valid) `review create --strategy audit --test-hold` leaves graph data and every other workspace file byte-identical while held — the hold precedes the 13.3 refresh too — and after release creates the session and refreshes the graph data to what `build` writes on an identical twin; anything at the hold path — file, directory, or symlink — fails the command exit 2 without modifying anything; `build` and `query` given `--test-hold` fail exit 2 as an unknown flag, and `build --test-hold --json` — the flag value-taking by name on every command — consumes `--json` as the hold path and leaves JSON out of effect: exit 2, stdout empty, no hold file (SPEC 13.5, 13.3, 12.0)",
   run: async (product) => {
     // Every arm below stages itself on a freshly built workspace with no
     // refresh pending (CERTIFICATIONS.md §CONF-CORE's freshness constraint);
@@ -906,6 +908,58 @@ const T13_5_1 = defineProductTest({
               fail(
                 `${context}: no hold file may be created at the path — the ` +
                   `flag is refused, not honored (SPEC 13.5, 12.0)`,
+              );
+            }
+          },
+          `${context}: the usage error modifies nothing (SPEC 12.0)`,
+        );
+      }
+
+      // `--test-hold` is value-taking by name on every command (SPEC 12.0: a
+      // flag's arity is fixed by its name, known before the command word is
+      // identified, and a value-taking flag takes the whole next token
+      // whatever it looks like), so `build --test-hold --json` consumes
+      // `--json` as the hold path — a filesystem path resolved against the
+      // working directory, the workspace root here — and leaves JSON out of
+      // effect: the unknown flag's usage error exits 2 with empty stdout. A
+      // product reading `--json` as the JSON flag answers the error document
+      // on stdout and fails here; one honoring the flag would create
+      // `./--json` and wait, failing the bounded run or the absence check.
+      {
+        const context =
+          "T13.5-1 (`build --test-hold --json`: `--json` consumed as the " +
+          "hold path)";
+        const consumed = path.join(workspace.root, "--json");
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const result = await runBounded(
+              product,
+              workspace.root,
+              ["build", "--test-hold", "--json"],
+              context,
+            );
+            assertExitCode(
+              result,
+              2,
+              `${context}: --test-hold on \`build\` is an unknown flag — a ` +
+                `usage error (SPEC 13.5, 12.0)`,
+            );
+            if (result.stdoutBytes.length !== 0) {
+              fail(
+                `${context}: \`--json\` is the value of \`--test-hold\`, not ` +
+                  `the JSON flag (SPEC 12.0: a value-taking flag takes the ` +
+                  `whole next token, a \`--\`-prefixed one included), so ` +
+                  `JSON is out of effect and stdout is empty — got ` +
+                  `${String(result.stdoutBytes.length)} bytes; ` +
+                  summarizeResult(result),
+              );
+            }
+            if (await pathExists(consumed)) {
+              fail(
+                `${context}: no hold file may be created at the consumed ` +
+                  `path \`--json\` (resolved against the working directory) ` +
+                  `— the flag is refused, not honored (SPEC 13.5, 12.0)`,
               );
             }
           },
