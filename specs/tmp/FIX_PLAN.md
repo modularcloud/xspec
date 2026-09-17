@@ -30,17 +30,11 @@ Task 14 landed: T14-11 is registered in `test/suite/registry/section-14.ts` (spr
 
 Task 15 landed: T13.5-1 (`test/suite/registry/section-13.5.ts`) gained, after its non-mutating unknown-flag arms, the `build --test-hold --json` arm — `--test-hold` being value-taking by name on every command (SPEC 12.0), `--json` is consumed as the hold path (a filesystem path resolved against the working directory, so `<root>/--json`) and JSON is out of effect: exit 2, stdout byte-empty, no hold file at `./--json`, the workspace unchanged (`assertLeavesUnchanged`); the title and module header record the arm. The CONF-CORE conformer needed no change: its `parseArgs` refuses `--test-hold` on `build` before any token is consumed and its usage errors print to stderr alone, so it passes the arm, and the certification's expected outcomes are unmoved (T13.5-1 fails on exactly VIOL-CORE-EARLYWRITE and VIOL-CORE-EARLYREFRESH, passes on the conformer and the other six). Against the built product T13.5-1 now fails diagnosed at this arm — the product reads `--json` as the JSON flag and answers the 12.7 error document on stdout (151 bytes, `code` null, `message` "build: unknown flag '--test-hold'") where 12.0 makes it the hold path — every earlier arm passing; a new diagnosed product failure beside the known ones. Self project 357 passed / 1 skipped (19 files) under the unprivileged namespace.
 
+Task 16 landed: T13.3-2 (`test/suite/registry/section-13.3.ts`) gained the absent-record clause on its deletion arm, and the arm itself was reshaped — its whole-workspace byte compare against the post-build fixed point W0 could hold only for a product whose refresh writes a fresh record (the record is part of the graph data the operational deletion removes, and a conforming refresh leaves it absent, SPEC 13.3, while every `build` writes one; the arm predated the clause, which entered SPEC.md at 0cc11e6 and TEST-SPEC.md at 3031926), so it now follows Arm B's shape: outside the graph data byte-identical to W0 (no TypeScript or Markdown generated or removed, durables untouched), graph data present after each read and byte-identical across the nine reads (12.0), and — inside one compare-around — `inventory` reporting `recorded` exactly `[]` (new local helper `assertEmptyRecord`: the value state, never unavailable or null) and `check --json` clean (`expectFindingFreeReport`) after every read, with a premise `inventory` on the deleted state before any read (`recorded` `[]`, modifying nothing). The module header records why the deletion arm admits no build reference and that `check` clean is the product's own 14.10 comparison standing in for "as `build` would write it"; the title carries the clause; traceability gained "11.6". Green through a stand-in that empties the record the product's refresh writes (AGENTS.md); against the built product T13.3-2 now fails diagnosed at the first post-read `inventory` in ~3 s (`refreshedGraphData(null, build)` writes `build`'s eight-path record where 13.3 pins the absent record) — a new diagnosed product failure beside the known ones, no harness error. Self project 357 passed / 1 skipped (19 files) under the unprivileged namespace.
+
 ---
 
 ## Part C — §13.5 / §14 consumers (after Part B)
-
-## Task 16 — T13.3-2: an absent record stays absent after a refreshing read
-
-- **Source:** reviewer B gap 25.
-- **Requirement:** TEST-SPEC.md **T13.3-2** (§13.3); SPEC.md 13.3, 11.6.
-- **Files:** `test/suite/registry/section-13.3.ts` T13.3-2 (probes `inventory` on the corrupt-record arm only).
-- **Do:** on the graph-data deletion arm, after a refreshing read (e.g. `ids`), assert `inventory` reports `recorded` `[]` and `check` is clean (exit 0, no findings).
-- **Verify:** passes or fails as diagnosed.
 
 ## Task 17 — T14-2: escape-spelled `d` reference and marker resolve nowhere
 

@@ -14,16 +14,35 @@
 // - "The graph data", operationally (T13.3-2, binding here and for T13.4-3):
 //   every path under `.xspec/` except the durable `.xspec/journal` and
 //   `.xspec/reviews/` (SPEC 13.4). Tests only ever remove or compare it whole.
-// - "Rewritten as `build` would write it" is asserted as byte equality
-//   against graph data an actual `build` of the identical workspace state
-//   wrote (12.0/13.3 byte determinism makes that reference exact). The
-//   reference build runs *after* all durable staging (session creation and
-//   resolves), so the compare never conflates refresh output with any
-//   build-input difference. In the source-edit arm the staged edit keeps the
-//   generated file set identical (content-only edits to one existing source),
-//   so "recorded derived-file paths are left unchanged" cannot make a
-//   conforming refresh's bytes differ from the reference build's; the
-//   record-survival clause itself is asserted behaviorally in the
+// - "Rewritten as `build` would write it" is asserted, in the source-edit
+//   arm, as byte equality against graph data an actual `build` of the
+//   identical workspace state wrote (12.0/13.3 byte determinism makes that
+//   reference exact). The reference build runs *after* all durable staging
+//   (session creation and resolves), so the compare never conflates refresh
+//   output with any build-input difference, and the staged edit keeps the
+//   generated file set identical (content-only edits to one existing
+//   source), so "recorded derived-file paths are left unchanged" cannot make
+//   a conforming refresh's bytes differ from the reference build's. The
+//   deletion arm admits no such reference: the operational deletion removes
+//   the record with the graph data, and an absent record stays absent (SPEC
+//   13.3) — a conforming refresh writes graph data beside no record where
+//   every `build` writes one, and the record's location inside the area is
+//   unenumerated (11.6) — so no byte compare against a build's graph data
+//   can hold there (a compare against the post-build state passes only a
+//   product whose refresh writes a fresh record). That arm asserts instead
+//   that every refreshing read rewrites the same graph-data bytes for the
+//   same workspace state (12.0), that `inventory` afterwards reports
+//   `recorded` exactly `[]` (11.6: the empty record, never a fresh one —
+//   the same `inventory` on the deleted state before any read is the
+//   premise that the deletion emptied the record), and that `check` is
+//   clean: 14.10's unit form is the product's own comparison of the graph
+//   data against the current sources and configuration with the recorded
+//   paths excluded, so a clean `check` with every derived file still
+//   matching is "as `build` would write it" as far as H-4 lets the harness
+//   see, and the pair discriminates a refresh that writes a fresh record
+//   from a `check` that reads the absent record as a mismatch (TEST-SPEC
+//   T13.3-2). The record-survival clause itself is asserted behaviorally
+//   in the
 //   set-changing sub-arm (delete a source; the refresh leaves the stale
 //   module in place, `check` reports 14.10 against the recorded orphan, and
 //   the next `build` removes it — removal is possible only if the refresh
@@ -168,6 +187,7 @@ import {
   assertSameJson,
   buildOk,
   expectExit,
+  expectFindingFreeReport,
   runCli,
   runJson,
 } from "./support.js";
@@ -264,6 +284,32 @@ export function assertGraphDataPresent(
         `and reviews/ paths`,
     );
   }
+}
+
+/**
+ * Assert the inventory's record-supplied datum is the plain empty record:
+ * `recorded` exactly `[]` — a value, never the unavailability marker, never
+ * null (SPEC 11.6: the record is empty wherever none exists, after recorded
+ * state was removed without a rebuild included; 14.23: a record's absence
+ * meets no condition; 12.7: the empty list is `[]`).
+ */
+function assertEmptyRecord(
+  recorded: ReturnType<typeof decodeInventoryRecordedDatum>,
+  label: string,
+  why: string,
+): void {
+  if (recorded.state !== "value") {
+    fail(
+      `${label}: ${why} — expected the plain empty record, \`recorded\` ` +
+        `exactly [] (SPEC 11.6, 14.23, 12.7); got state ` +
+        JSON.stringify(recorded.state),
+    );
+  }
+  assertSameJson(
+    recorded.value,
+    [],
+    `${label}: ${why} — \`recorded\` must be exactly [] (SPEC 11.6, 12.7)`,
+  );
 }
 
 /**
@@ -845,7 +891,7 @@ const T13_3_2_RECORD_A = [
 const T13_3_2 = defineProductTest({
   id: "T13.3-2",
   title:
-    "deleting the graph data (every path under .xspec/ except the durable journal and reviews/) or editing a source makes each of ids, show, coverage, impact, review status, query, occurrences, view, at answer from current sources and rewrite graph data as `build` would write it — while no TypeScript or Markdown is generated or removed and the recorded derived-file paths stay unchanged (a stale module stays stale, `check` reports 14.10; a later `build` removes the recorded orphan); with the record corrupted shape-blind instead, each refreshing read answers finding-free at exit 0, leaving the corrupt state neither read, repaired, nor replaced — `inventory` still reports `recorded` unavailable — until a successful `build` replaces the state (SPEC 13.3, 13.4, 12.1, 14.23)",
+    "deleting the graph data (every path under .xspec/ except the durable journal and reviews/) or editing a source makes each of ids, show, coverage, impact, review status, query, occurrences, view, at answer from current sources and rewrite graph data as `build` would write it — while no TypeScript or Markdown is generated or removed and the recorded derived-file paths stay unchanged (a stale module stays stale, `check` reports 14.10; a later `build` removes the recorded orphan); an absent record stays absent — after a refreshing read on the deletion arm `inventory` reports `recorded` [] and, every derived file still matching, `check` is clean; with the record corrupted shape-blind instead, each refreshing read answers finding-free at exit 0, leaving the corrupt state neither read, repaired, nor replaced — `inventory` still reports `recorded` unavailable — until a successful `build` replaces the state (SPEC 13.3, 13.4, 11.6, 12.1, 14.10, 14.23)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -1106,11 +1152,56 @@ const T13_3_2 = defineProductTest({
         ];
 
         // --- Arm A: deletion trigger. Before each command the graph data is
-        // deleted whole; the command answers from current sources and must
-        // leave the workspace byte-identical to the fixed point W0: graph
-        // data rewritten exactly as `build` wrote it (12.0/13.3
-        // determinism), durables untouched, no TypeScript or Markdown
-        // generated or removed.
+        // deleted whole — the record with it (SPEC 13.3: the recorded
+        // derived-file paths are part of graph data, and the operational
+        // deletion removes every non-durable path under .xspec/) — and the
+        // command answers from current sources. Outside the graph data the
+        // workspace must stay byte-identical to the fixed point W0 (no
+        // TypeScript or Markdown generated or removed, durables untouched);
+        // the graph data is rewritten — present again, every read writing
+        // the same bytes (12.0) — but never byte-compared against W0's: an
+        // absent record stays absent (13.3), so a conforming refresh writes
+        // graph data beside no record where W0 holds `build`'s (module
+        // header). "As `build` would write it" is the product's own
+        // comparison instead: `inventory` reports `recorded` exactly []
+        // and `check` is clean afterwards (14.10, 11.6; TEST-SPEC T13.3-2).
+        //
+        // Premise, on the deleted state before any read: the deletion
+        // emptied the record — `inventory` reports `recorded` [] (11.6: the
+        // record is empty after recorded state was removed without a
+        // rebuild) — and `inventory` itself neither refreshes nor writes
+        // (compare-around; a refreshing inventory would leave the reads
+        // below nothing to refresh, so it fails loud here rather than
+        // hollowing out the arm, H-11).
+        await deleteGraphData(
+          workspace,
+          "T13.3-2 (deleted graph data) premise",
+        );
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const label =
+              "T13.3-2 (deleted graph data) premise `inventory` on the " +
+              "deleted state";
+            assertEmptyRecord(
+              decodeInventoryRecordedDatum(
+                await runJson(product, workspace, ["inventory"], label),
+                label,
+              ),
+              label,
+              "the operational deletion removes the record with the graph " +
+                "data, and the inventory reads an absent record as the " +
+                "empty record (SPEC 13.3, 11.6, 14.23)",
+            );
+          },
+          "T13.3-2 (deleted graph data) premise: `inventory` neither " +
+            "refreshes nor writes (SPEC 11.6)",
+        );
+        const expectedOutsideGraphA = filteredEntries(
+          w0.entries,
+          (key) => !isGraphDataKey(key),
+        );
+        let refreshedGraphA: Map<string, SnapshotEntry> | undefined;
         for (const probe of armAProbes) {
           await deleteGraphData(
             workspace,
@@ -1119,13 +1210,70 @@ const T13_3_2 = defineProductTest({
           await probe.run();
           const after = await snapshotDirectory(workspace.root);
           assertSnapshotsEqual(
-            w0,
-            after,
-            `T13.3-2 (deleted graph data) after ${probe.label}: the ` +
-              `workspace must be byte-identical to the post-build state — ` +
-              `graph data rewritten exactly as \`build\` would write it, ` +
-              `no TypeScript or Markdown generated or removed, journal and ` +
-              `session files untouched (SPEC 13.3, 13.4)`,
+            asSnapshot(workspace.root, expectedOutsideGraphA),
+            asSnapshot(
+              workspace.root,
+              filteredEntries(after.entries, (key) => !isGraphDataKey(key)),
+            ),
+            `T13.3-2 (deleted graph data) after ${probe.label}: outside ` +
+              `the graph data the workspace must be byte-identical to the ` +
+              `post-build state — no TypeScript or Markdown generated or ` +
+              `removed, journal and session files untouched (SPEC 13.3, ` +
+              `13.4)`,
+          );
+          const graphNow = graphDataEntries(after);
+          if (refreshedGraphA === undefined) {
+            assertGraphDataPresent(
+              after,
+              `T13.3-2 (deleted graph data) after ${probe.label} — the ` +
+                `read must have rewritten the deleted graph data`,
+            );
+            refreshedGraphA = graphNow;
+          } else {
+            assertSnapshotsEqual(
+              asSnapshot(workspace.root, refreshedGraphA),
+              asSnapshot(workspace.root, graphNow),
+              `T13.3-2 (deleted graph data) after ${probe.label}: every ` +
+                `refreshing read rewrites the same graph-data bytes for ` +
+                `the same workspace state (SPEC 13.3, 12.0)`,
+            );
+          }
+
+          // An absent record stays absent (SPEC 13.3): the refresh wrote
+          // graph data beside the absent record and never a record, so
+          // `inventory` reports `recorded` exactly [] (11.6) — and, every
+          // derived file still matching and the graph data now present and
+          // matching, `check` is clean: a lagging record alone is never
+          // staleness (14.10). Neither surface refreshes or writes (11.6,
+          // 12.2, 13.3), so both run inside one compare-around.
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              const invLabel = `T13.3-2 (deleted graph data) \`inventory\` after ${probe.label}`;
+              assertEmptyRecord(
+                decodeInventoryRecordedDatum(
+                  await runJson(product, workspace, ["inventory"], invLabel),
+                  invLabel,
+                ),
+                invLabel,
+                "an absent record stays absent: the refresh writes graph " +
+                  "data beside the absent record and never a record (SPEC " +
+                  "13.3, 11.6)",
+              );
+              await expectFindingFreeReport(
+                product,
+                workspace,
+                ["check", "--json"],
+                `T13.3-2 (deleted graph data) \`check --json\` after ` +
+                  `${probe.label} — every derived file still matches and ` +
+                  `the refreshed graph data matches the current sources ` +
+                  `and configuration; a lagging (here absent) record alone ` +
+                  `is never staleness (SPEC 14.10, 13.3)`,
+              );
+            },
+            `T13.3-2 (deleted graph data) after ${probe.label}: ` +
+              `\`inventory\` and \`check\` neither refresh nor write (SPEC ` +
+              `11.6, 12.2, 13.3)`,
           );
         }
 
