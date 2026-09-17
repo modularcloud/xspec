@@ -360,6 +360,7 @@ const T3_2 = defineProductTest({
 const NBSP = "\u{00A0}";
 const NEL = "\u{0085}";
 const LS = "\u{2028}";
+const PS = "\u{2029}";
 
 // One fixture, one arm per line, with distinct kept marker lines between arms
 // so a misplaced drop is diagnosed precisely. LF terminators throughout, a
@@ -368,6 +369,24 @@ const LS = "\u{2028}";
 // subtree text, SPEC 1.1) are defined before use; embeddings sit at root
 // level, so the root embeds its own root-level sections — forward edges only,
 // no cycle (SPEC 5.3 forbids embedding an *ancestor*).
+// Multi-line constructs (SPEC 3: a terminator among a removed construct's own
+// characters is deleted with it, joining the lines it spanned into one, judged
+// by the drop rule as a whole): the two multi-line comments, and — TEST-SPEC
+// T3-3's merged-lines arm — an opening tag spelled `<S`, LF, `  id="…"`, LF,
+// `>`, once on its own lines (the merged line is left empty purely by the
+// removal and drops) and once with retained non-whitespace after the `>`
+// (the merged line keeps its residue and its terminator). The kept form
+// starts its tag at line start rather than after retained text: with the
+// bare `>` on the third line, MDX's grammar (SPEC 14.20) admits only that
+// shape — a paragraph-continuation line beginning with `>` after any
+// indentation interrupts the paragraph as a block quote (MDX disables
+// indented code), so `foo <S`, LF, `  id="x"`, LF, `> bar` is unparseable,
+// while a tag opening at line start is attempted as a concrete flow tag,
+// whose lines no container may pierce, and its `> bar` line then joins the
+// paragraph the fallback yields. Recorded in TEST-SPEC-PROBLEMS.md.
+// The class-boundary arms stage every code point TEST-SPEC T3-3 names:
+// U+00A0, U+0085, U+2028 (the three §VIOL-MD-CLASS widens) and U+2029 (which
+// neither violator touches — its arm is expected unmoved under both).
 const DROP_SOURCE = [
   'import BASE from "./BASE.xspec"', // drop: a line holding only an import
   "K1 after-import",
@@ -394,16 +413,29 @@ const DROP_SOURCE = [
   "K10 after-nel",
   "{/* c */}" + LS, // kept: left holding only U+2028 — not whitespace (1.4)
   "K11 after-ls",
+  "{/* c */}" + PS, // kept: left holding only U+2029 — not whitespace (1.4)
+  "K12 after-ps",
   "{/* c */}\t", // drop: left holding only U+0009 — whitespace (1.4)
-  "K12 after-tab-drop",
+  "K13 after-tab-drop",
   "{/* c */} ", // drop: left holding only U+0020 — whitespace (1.4)
-  "K13 after-space-drop",
+  "K14 after-space-drop",
   "foo {/* first", // multi-line comment with retained residue on both sides…
   "tail */} bar", // …deleted exactly: lines merge to "foo  bar"
-  "K14 after-merge",
+  "K15 after-merge",
   "{/* own-lines", // own-lines multi-line comment (empty residues)…
   "multiline */}", // …merged line left empty purely by removals → drops
-  "K15 final",
+  "K16 after-own-lines",
+  "<S", // a multi-line opening tag on its own lines: `<S`, LF, `  id="mt1"`,…
+  '  id="mt1"', // …LF, `>` — one construct whose two interior terminators are
+  ">", // deleted with it; the three lines merge into one, left empty → drops
+  "mt1 body", // kept: a line keeping content keeps its terminator
+  "</S>", // drop: a line holding only a closing tag
+  "K17 after-multiline-tag-drop",
+  "<S", // a multi-line opening tag at line start, retained non-whitespace…
+  '  id="mt2"', // …after its `>`: the three lines merge into one line, kept
+  "> bar", // with its residue ` bar` and its terminator (see the note above)
+  "</S>", // drop: a line holding only a closing tag
+  "K18 final",
   "",
 ].join("\n");
 
@@ -428,18 +460,24 @@ const DROP_COMPILED = [
   "K10 after-nel",
   LS,
   "K11 after-ls",
-  "K12 after-tab-drop",
-  "K13 after-space-drop",
+  PS,
+  "K12 after-ps",
+  "K13 after-tab-drop",
+  "K14 after-space-drop",
   "foo  bar", // the comment's own line terminator deleted with it: one line
-  "K14 after-merge",
-  "K15 final",
+  "K15 after-merge",
+  "K16 after-own-lines",
+  "mt1 body", // the tag's three lines merged into one empty line, dropped
+  "K17 after-multiline-tag-drop",
+  " bar", // the tag's three lines merged into one, kept with its residue
+  "K18 final",
   "",
 ].join("\n");
 
 const T3_3 = defineProductTest({
   id: "T3-3",
   title:
-    "line-drop rule: lines left empty or whitespace-only purely by removals (import, tags, comments, empty expansion) drop with their terminators; already-empty, content-retaining, and whitespace-only-but-non-empty-expansion lines are kept; U+00A0/U+0085/U+2028 are not whitespace while U+0009/U+0020 are; multi-line comment deletion merges the surrounding residues (SPEC 3, 1.4)",
+    "line-drop rule: lines left empty or whitespace-only purely by removals (import, tags, comments, empty expansion) drop with their terminators; already-empty, content-retaining, and whitespace-only-but-non-empty-expansion lines are kept; U+00A0/U+0085/U+2028/U+2029 are not whitespace while U+0009/U+0020 are; a multi-line comment and a multi-line opening tag are each deleted exactly, merging the lines they span into one — dropped when left empty purely by the removal, kept with its residue otherwise (SPEC 3, 1.4)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
