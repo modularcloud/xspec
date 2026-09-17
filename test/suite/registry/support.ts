@@ -324,6 +324,36 @@ export function assertConditionCounts(
 }
 
 /**
+ * A condition's findings in (file, range start) order — for a test staging
+ * one condition more than once in a single `build --json` sweep (T14-2,
+ * T2.4-5), where an exactly-one selection does not apply (the count is
+ * `assertConditionCounts`'s). A finding without a location sorts first;
+ * `assertFindingLocated` then rejects it.
+ */
+export function findingsInSourceOrder(
+  findings: readonly Finding[],
+  condition: string,
+): Finding[] {
+  const key = (finding: Finding): readonly [string, number] => {
+    const first = finding.locations[0];
+    if (first === undefined) return ["", -1];
+    return [
+      typeof first.file === "string" ? first.file : first.file.bytes,
+      first.range.start,
+    ];
+  };
+  return findings
+    .filter((finding) => finding.condition === condition)
+    .slice()
+    .sort((a, b) => {
+      const [fileA, startA] = key(a);
+      const [fileB, startB] = key(b);
+      if (fileA !== fileB) return fileA < fileB ? -1 : 1;
+      return startA - startB;
+    });
+}
+
+/**
  * A staged construct's byte window within a `prefix + construct + suffix`
  * fixture whose parts are known exactly: the construct's own byte range,
  * end-widened by one byte so a product reporting a line-granular location

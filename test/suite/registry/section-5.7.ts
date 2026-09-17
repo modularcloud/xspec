@@ -305,7 +305,7 @@ const T5_7_1_EXPECTED_EDGES: readonly GraphEdge[] = [
  * defined (11.2), so a marked byte-form file or an unavailable source renders
  * to a value no expected tuple matches and fails the comparison visibly.
  */
-function renderOccurrenceUnit(record: OccurrenceRecord): string {
+export function renderOccurrenceUnit(record: OccurrenceRecord): string {
   const source =
     "unavailable" in record.source
       ? "(source unavailable)"
@@ -314,7 +314,9 @@ function renderOccurrenceUnit(record: OccurrenceRecord): string {
 }
 
 /** The expected multiset, each unit expanded to its count, sorted. */
-function expectedUnitMultiset(units: readonly OccurrenceUnit[]): string[] {
+export function expectedUnitMultiset(
+  units: readonly OccurrenceUnit[],
+): string[] {
   return units
     .flatMap((unit) =>
       Array<string>(unit.count).fill(

@@ -284,6 +284,7 @@ import {
   expectConfigurationError,
   expectErrorDocument,
   expectExit,
+  findingsInSourceOrder,
   runCli,
   runJson,
 } from "./support.js";
@@ -656,35 +657,6 @@ const T14_2_APP_CALL = "text(BASE.nocall);";
 const T14_2_ESCAPED_PREFIX =
   'import BASE from "../specs/base.xspec";\n\nBASE.login;\n';
 const T14_2_ESCAPED_MARKER = `BASE.${T14_2_ESCAPED_LOGIN};`;
-
-/**
- * A condition's findings in (file, range start) order — for the conditions
- * T14-2 stages more than once, where `findingOf`'s exactly-one rule does not
- * apply (the count is `assertConditionCounts`'s). A finding without a
- * location sorts first; `assertFindingLocated` then rejects it.
- */
-function findingsInSourceOrder(
-  findings: readonly Finding[],
-  condition: string,
-): Finding[] {
-  const key = (finding: Finding): readonly [string, number] => {
-    const first = finding.locations[0];
-    if (first === undefined) return ["", -1];
-    return [
-      typeof first.file === "string" ? first.file : first.file.bytes,
-      first.range.start,
-    ];
-  };
-  return findings
-    .filter((finding) => finding.condition === condition)
-    .slice()
-    .sort((a, b) => {
-      const [fileA, startA] = key(a);
-      const [fileB, startB] = key(b);
-      if (fileA !== fileB) return fileA < fileB ? -1 : 1;
-      return startA - startB;
-    });
-}
 
 const T14_2 = defineProductTest({
   id: "T14-2",
