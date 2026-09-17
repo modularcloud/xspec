@@ -5,7 +5,8 @@
 // Sections 1–13 exercise each numbered condition in its home context; these
 // are the reporting-contract tests: multi-error completeness with
 // file/location/correction information (T14-1), the unresolved-reference
-// conditions 14.5/14.6/14.7 plus the consumer-side type error (T14-2),
+// conditions 14.5/14.6/14.7 plus the consumer-side type error, and the
+// escape-spelled forms read verbatim (T14-2),
 // masking by unparseable files and by configuration errors (T14-3), the
 // reporter matrix — which of `build`/`check`/`review`/the machine-interface
 // surfaces reports which condition (T14-4) — grammar selection by file
@@ -248,6 +249,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
+  assertNoCompileErrors,
   ConsumerProject,
 } from "../../helpers/tooling.js";
 import type { FileContents, WorkspaceDecl } from "../../helpers/workspace.js";
@@ -582,10 +584,23 @@ const T14_1 = defineProductTest({
 
 // Initial, fully valid staging: `build` succeeds, so a prior valid
 // generation of specs/base.xspec.ts exists — the state the type-error facet
-// is asserted in (a later failing `build` modifies nothing, SPEC 12.1).
+// is asserted in (a later failing `build` modifies nothing, SPEC 12.1). The
+// base module holds `login` beside `b1`: the node the escape-spelled marker
+// below would name if its spelling were interpreted (SPEC 2.4), and the
+// property TypeScript reads that marker as (4.5) — so the prior valid
+// generation exports it and the marker is no type error.
 const T14_2_INITIAL_FILES: Readonly<Record<string, string>> = {
   "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-  "specs/base.mdx": '<S id="b1">\nBase behavior.\n</S>\n',
+  "specs/base.mdx": [
+    '<S id="b1">',
+    "Base behavior.",
+    "</S>",
+    "",
+    '<S id="login">',
+    "The node an interpreted escape spelling would name.",
+    "</S>",
+    "",
+  ].join("\n"),
   "specs/ref.mdx": [
     'import BASE from "./base.xspec"',
     "",
@@ -611,15 +626,70 @@ const T14_2_REF_MID = "\n\n";
 const T14_2_REF_TEXT_CONSTRUCT =
   '<S id="r2">\nUnknown text target:\n\n{text("notext")}\n</S>';
 
+// The escape spelling: the ten characters `lo\u0067in` as they stand in the
+// source (the doubled backslash keeps the `\` in the harness's own string).
+// Read verbatim (SPEC 2.4), the literal's value contains `\` and names no
+// identity (1.4); interpreted, it would spell `login`.
+const T14_2_ESCAPED_LOGIN = "lo\\u0067in";
+
+// The escape-spelled local `d` reference after the node `login` its
+// interpreted value would name (T2.4-5's premise): a product resolving the
+// interpreted spelling reports nothing for it and fails the 14.5 count.
+const T14_2_REF_LOGIN_CONSTRUCT =
+  '<S id="login">\nThe local node an interpreted escape spelling would name.\n</S>';
+const T14_2_REF_ESCAPED_CONSTRUCT =
+  `<S id="r3" d={"${T14_2_ESCAPED_LOGIN}"}>\n` +
+  "Escape-spelled local dependency.\n</S>";
+
 const T14_2_APP_PREFIX =
   'import BASE, { text } from "../specs/base.xspec";\n\n';
 const T14_2_APP_MARKER = "BASE.nomark;";
 const T14_2_APP_CALL = "text(BASE.nocall);";
 
+// A second consumer file: the escape-free control `BASE.login` (resolving,
+// no finding) followed by the escape-spelled marker `BASE.lo\u0067in` — a
+// chain segment carrying a Unicode escape spells a name containing `\`,
+// which no segment contains (SPEC 2.4), so the marker resolves nowhere
+// (14.7). TypeScript reads the escaped identifier as `login`, which the
+// generated module exports, so the file type-checks clean: 14.7's type-error
+// clause holds only for a spelling free of escape sequences.
+const T14_2_ESCAPED_PREFIX =
+  'import BASE from "../specs/base.xspec";\n\nBASE.login;\n';
+const T14_2_ESCAPED_MARKER = `BASE.${T14_2_ESCAPED_LOGIN};`;
+
+/**
+ * A condition's findings in (file, range start) order — for the conditions
+ * T14-2 stages more than once, where `findingOf`'s exactly-one rule does not
+ * apply (the count is `assertConditionCounts`'s). A finding without a
+ * location sorts first; `assertFindingLocated` then rejects it.
+ */
+function findingsInSourceOrder(
+  findings: readonly Finding[],
+  condition: string,
+): Finding[] {
+  const key = (finding: Finding): readonly [string, number] => {
+    const first = finding.locations[0];
+    if (first === undefined) return ["", -1];
+    return [
+      typeof first.file === "string" ? first.file : first.file.bytes,
+      first.range.start,
+    ];
+  };
+  return findings
+    .filter((finding) => finding.condition === condition)
+    .slice()
+    .sort((a, b) => {
+      const [fileA, startA] = key(a);
+      const [fileB, startB] = key(b);
+      if (fileA !== fileB) return fileA < fileB ? -1 : 1;
+      return startA - startB;
+    });
+}
+
 const T14_2 = defineProductTest({
   id: "T14-2",
   title:
-    "a `d` reference, a `text(...)` target, and a TypeScript marker and `text` call that do not resolve are 14.5, 14.6, and 14.7 respectively, each locating its reference; the TypeScript case is also a type error against the generated module, asserted while a prior valid generation exists (SPEC 14.5, 14.6, 14.7, 4.1)",
+    'a `d` reference, a `text(...)` target, and a TypeScript marker and `text` call that do not resolve are 14.5, 14.6, and 14.7 respectively, each locating its reference; the TypeScript case is also a type error against the generated module, asserted while a prior valid generation exists; escape-spelled forms are unresolved likewise, read verbatim — `d={"lo\\u0067in"}` is 14.5 and the marker `BASE.lo\\u0067in` is 14.7 beside the node `login` their interpreted spellings would name, the marker no type error (SPEC 14.5, 14.6, 14.7, 4.1, 2.4)',
   run: async (product) => {
     await withWorkspace({ files: T14_2_INITIAL_FILES }, async (workspace) => {
       // Prior valid generation: the modules specs/base.xspec.ts and
@@ -631,33 +701,46 @@ const T14_2 = defineProductTest({
           "exist for the type-error facet, SPEC 12.1, 13.1)",
       );
 
-      // Break every reference form: external `d`, local `text(...)`, and
-      // the two TypeScript forms (marker; `text` call).
+      // Break every reference form: external `d`, local `text(...)`, the
+      // escape-spelled local `d`, and the TypeScript forms (marker; `text`
+      // call; escape-spelled marker).
       await workspace.file(
         "specs/ref.mdx",
         T14_2_REF_PREFIX +
           T14_2_REF_D_CONSTRUCT +
           T14_2_REF_MID +
           T14_2_REF_TEXT_CONSTRUCT +
+          T14_2_REF_MID +
+          T14_2_REF_LOGIN_CONSTRUCT +
+          T14_2_REF_MID +
+          T14_2_REF_ESCAPED_CONSTRUCT +
           "\n",
       );
       await workspace.file(
         "src/app.ts",
         `${T14_2_APP_PREFIX}${T14_2_APP_MARKER}\n${T14_2_APP_CALL}\n`,
       );
+      await workspace.file(
+        "src/escaped.ts",
+        `${T14_2_ESCAPED_PREFIX}${T14_2_ESCAPED_MARKER}\n`,
+      );
 
-      const context =
-        "T14-2 `build --json` over the four unresolved references";
+      const context = "T14-2 `build --json` over the six unresolved references";
       const findings = await buildFindings(product, workspace, context);
       assertConditionCounts(
         findings,
-        { "14.5": 1, "14.6": 1, "14.7": 2 },
-        `${context} — an unresolved \`d\` reference is 14.5, an unresolved ` +
-          `\`text(...)\` target is 14.6, and each unresolved TypeScript ` +
-          `reference (marker; \`text\` call) is 14.7 (SPEC 14.5–14.7)`,
+        { "14.5": 2, "14.6": 1, "14.7": 3 },
+        `${context} — an unresolved \`d\` reference is 14.5 (the external ` +
+          `\`BASE.nodep\` and the escape-spelled local \`"lo\\u0067in"\`, ` +
+          `read verbatim, SPEC 2.4), an unresolved \`text(...)\` target is ` +
+          `14.6, and each unresolved TypeScript reference (marker; \`text\` ` +
+          `call; the escape-spelled marker \`BASE.lo\\u0067in\`) is 14.7 ` +
+          `(SPEC 14.5–14.7)`,
       );
+      const [dependencyFinding, escapedDependencyFinding] =
+        findingsInSourceOrder(findings, "14.5");
       assertFindingLocated(
-        findingOf(findings, "14.5", context),
+        dependencyFinding!,
         {
           file: "specs/ref.mdx",
           window: byteWindow(T14_2_REF_PREFIX, T14_2_REF_D_CONSTRUCT),
@@ -675,16 +758,28 @@ const T14_2 = defineProductTest({
         },
         `${context}: the 14.6 finding`,
       );
-      const typescriptFindings = findings
-        .filter((finding) => finding.condition === "14.7")
-        .slice()
-        .sort(
-          (a, b) =>
-            (a.locations[0]?.range.start ?? -1) -
-            (b.locations[0]?.range.start ?? -1),
-        );
       assertFindingLocated(
-        typescriptFindings[0]!,
+        escapedDependencyFinding!,
+        {
+          file: "specs/ref.mdx",
+          window: byteWindow(
+            T14_2_REF_PREFIX +
+              T14_2_REF_D_CONSTRUCT +
+              T14_2_REF_MID +
+              T14_2_REF_TEXT_CONSTRUCT +
+              T14_2_REF_MID +
+              T14_2_REF_LOGIN_CONSTRUCT +
+              T14_2_REF_MID,
+            T14_2_REF_ESCAPED_CONSTRUCT,
+          ),
+        },
+        `${context}: the escape-spelled \`d\` reference's 14.5 finding — ` +
+          `\`"lo\\u0067in"\` is read verbatim, never as \`login\` (SPEC 2.4)`,
+      );
+      const [markerFinding, callFinding, escapedMarkerFinding] =
+        findingsInSourceOrder(findings, "14.7");
+      assertFindingLocated(
+        markerFinding!,
         {
           file: "src/app.ts",
           window: byteWindow(T14_2_APP_PREFIX, T14_2_APP_MARKER),
@@ -692,7 +787,7 @@ const T14_2 = defineProductTest({
         `${context}: the marker's 14.7 finding`,
       );
       assertFindingLocated(
-        typescriptFindings[1]!,
+        callFinding!,
         {
           file: "src/app.ts",
           window: byteWindow(
@@ -701,6 +796,16 @@ const T14_2 = defineProductTest({
           ),
         },
         `${context}: the \`text\` call's 14.7 finding`,
+      );
+      assertFindingLocated(
+        escapedMarkerFinding!,
+        {
+          file: "src/escaped.ts",
+          window: byteWindow(T14_2_ESCAPED_PREFIX, T14_2_ESCAPED_MARKER),
+        },
+        `${context}: the escape-spelled marker's 14.7 finding — ` +
+          `\`BASE.lo\\u0067in\` spells a segment containing \`\\\` and ` +
+          `resolves nowhere (SPEC 2.4), never the node \`login\``,
       );
 
       // The type-error facet: the failed build modified nothing (SPEC
@@ -729,6 +834,24 @@ const T14_2 = defineProductTest({
         {},
         "T14-2 the unresolved `text` argument must be a TypeScript type " +
           "error against the generated module (SPEC 14.7, 4.1)",
+      );
+
+      // The escape-spelled marker is no type error: 14.7's type-error
+      // clause holds only for a spelling free of escape sequences (SPEC
+      // 14.7, 2.4) — TypeScript reads `BASE.lo\u0067in` as `BASE.login`,
+      // which the prior valid generation exports, so the consumer file
+      // holding it (and the escape-free control) compiles clean.
+      const escapedProject = await ConsumerProject.load({
+        rootDir: workspace.root,
+        rootFiles: ["src/escaped.ts"],
+      });
+      assertNoCompileErrors(
+        escapedProject,
+        "T14-2 the escape-spelled marker `BASE.lo\\u0067in` must be no " +
+          "type error against the generated module — TypeScript reads the " +
+          "escaped identifier as `login`, which the prior valid generation " +
+          "exports; 14.7's type-error clause holds only for a spelling free " +
+          "of escape sequences (SPEC 14.7, 2.4)",
       );
     });
   },
