@@ -76,6 +76,7 @@ import {
   decodeViewReport,
 } from "../../helpers/adapters/index.js";
 import {
+  assertBytesEqual,
   assertExitCode,
   fail,
   parseJsonStdout,
@@ -83,7 +84,11 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
-import type { ArgvValue, ProductBinding } from "../../helpers/subprocess.js";
+import type {
+  ArgvValue,
+  ProductBinding,
+  RunResult,
+} from "../../helpers/subprocess.js";
 import type { TestWorkspace as Workspace } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -96,7 +101,9 @@ import {
   assertFindingLocated,
   assertSameJson,
   buildFindings,
+  expectErrorDocument,
   expectExit,
+  REPLACEMENT_CHARACTER_SPEC_PATH,
   runCli,
   runJson,
 } from "./support.js";
@@ -993,11 +1000,11 @@ const T11_5_2 = defineProductTest({
 // range convention of 1.7 (start-inclusive, end-exclusive); "on an
 // unparseable file the resolution is reported explicitly unavailable, the
 // parse-failure finding accompanying it (11.2)"; and "a discovered spec
-// source whose path is not valid UTF-8 is nameable by no argument value
-// (12.0), so `at` cannot address it: for such a file (14.19) the view,
-// reached by glob (11.4), is the one route to position data".
+// source whose path is not valid UTF-8 or contains U+FFFD is nameable by no
+// argument value (12.0), so `at` cannot address it: for such a file (14.19)
+// the view, reached by glob (11.4), is the one route to position data".
 //
-// One workspace (SPECS_ONLY_CONFIG), four spec sources:
+// One workspace (SPECS_ONLY_CONFIG), five spec sources:
 //
 // - specs/occ.mdx — the containment ground, finding-free: behind a
 //   multi-byte prose head (SPEC 1.7), a blank-line-separated import binding
@@ -1038,8 +1045,12 @@ const T11_5_2 = defineProductTest({
 //   filesystem finds the file and answers), the lossy U+FFFD decode, the
 //   marked-byte-form JSON rendering (the product's OWN output spelling for
 //   the path, 12.7 — still no argument value), and a percent-encoded
-//   rendering — each an unknown file, exit 2 with the single 12.7 error
-//   document, via the shared T11.2-5 protocol. The glob-reached view stays
+//   rendering — each a malformed value (the raw bytes are not valid UTF-8,
+//   the lossy decode contains U+FFFD: 12.0's argument-value rule) or an
+//   unknown file (the two renderings name undiscovered paths), exit 2 with
+//   the single 12.7 error document either way — T11.5-3 pins the exit and
+//   the document for this file, not which of the two errors — via the
+//   shared T11.2-5 protocol. The glob-reached view stays
 //   the one route to its positions: `view --file specs/nu*.mdx` (the
 //   byte-wise glob rules of SPEC 7 match the 0xFF byte; the pattern admits
 //   no other staged file) answers exit 1 with exactly the file's
@@ -1048,9 +1059,34 @@ const T11_5_2 = defineProductTest({
 //   marked byte form, the full positional tree byte-exact with every node
 //   identity, root included, explicitly unavailable (SPEC 11.2, 11.4,
 //   12.0, 12.7; T11.2-3 owns the whole-domain sweep).
+// - specs/A<U+FFFD>.mdx — U+FFFD-pathed (14.19), staged on EVERY platform
+//   (REPLACEMENT_CHARACTER_SPEC_PATH, the spelling shared with T1.5-2
+//   through support.ts: valid UTF-8, EF BF BD, a name any filesystem
+//   holds). Its condition-19 finding presents the concerned path as a plain
+//   string — never the marked byte form, which 12.0 reserves for a
+//   non-UTF-8 path. `at specs/A<U+FFFD>.mdx 0` is a malformed value —
+//   12.0's argument-value rule: a value containing U+FFFD is a usage error
+//   of the syntax class, judged before every per-operand check — exit 2
+//   with the single 12.7 error document, never an answer (a product naming
+//   the discovered file answers exit 1 with a resolution and fails the exit
+//   assertion) and never the unknown-file error: a syntax-class error is
+//   reported without loading configuration, while a configuration error
+//   precedes every check consulting configuration or discovery — the
+//   unknown-file check among them — so the same invocation on a
+//   configuration-less workspace holding the same file must still answer
+//   the plain usage error (`code` and `path` null; the T12.0-10
+//   discipline) — a product judging the file as unknown answers 14.14
+//   there instead — and the two error documents are byte-identical (the
+//   document depends on the arguments alone; H-4). The glob-reached view
+//   (`view --file specs/A*.mdx`, admitting no other staged file) answers
+//   exit 1 with exactly the file's condition-19 finding (stable code, no
+//   locations, the plain-string concerned path) and its one view — `file`
+//   the plain string, the full positional tree byte-exact, every node
+//   identity, root included, explicitly unavailable (SPEC 11.2, 11.4).
 //
 // The gate `build --json` doubles as staging integrity (exactly casse's
-// 14.20 plus — where staged — nu's 14.19, so occ.mdx and cible.mdx are
+// 14.20 plus A<U+FFFD>'s 14.19 and — where staged — nu's 14.19, so
+// occ.mdx and cible.mdx are
 // proven finding-free on pinned ground), and the whole sweep rides one
 // whole-root snapshot compare: the failing build writes nothing (SPEC 12.1)
 // and on a failing workspace these surfaces answer from current sources and
@@ -1218,10 +1254,27 @@ NU3.add("\n");
 const NU3_SOURCE = NU3.source;
 const NU3_ROOT_RANGE: SourceRange = { start: 0, end: NU3.pos };
 
+// --- specs/A<U+FFFD>.mdx — U+FFFD-pathed spec source (14.19, every leg) ------
+// The path is valid UTF-8 (U+FFFD encodes as EF BF BD), so every platform
+// holds the name and the byte-wise glob rules of SPEC 7 discover it; a path
+// containing U+FFFD is an invalid source path with a plain string form
+// (SPEC 14.19, 12.0). The spelling is shared with T1.5-2 (support.ts).
+const RC_PATH = REPLACEMENT_CHARACTER_SPEC_PATH;
+const RC = new ByteFixture();
+RC.add("Préambule — U+FFFD dans le chemin.\n\n");
+const RC_SEC_START = RC.pos;
+RC.add('<S id="seule">\nTexte positionné aussi.\n</S>');
+const RC_SEC_RANGE: SourceRange = { start: RC_SEC_START, end: RC.pos };
+RC.add("\n");
+const RC_SOURCE = RC.source;
+const RC_ROOT_RANGE: SourceRange = { start: 0, end: RC.pos };
+
 /**
  * Representative `at` spellings for the non-UTF-8-pathed source (SPEC 12.0:
- * argument values are UTF-8, so NO value names it — each is an unknown
- * file, exit 2, whatever the spelling's provenance).
+ * argument values are valid UTF-8 without U+FFFD, so NO value names it —
+ * each is a malformed value or an unknown file, exit 2, whatever the
+ * spelling's provenance; T11.5-3 pins the exit and the error document for
+ * this file, not which of the two).
  */
 const NU3_AT_SPELLINGS: readonly {
   readonly value: ArgvValue;
@@ -1230,16 +1283,16 @@ const NU3_AT_SPELLINGS: readonly {
   {
     value: NU3_PATH_BYTES,
     what:
-      "the exact on-disk path bytes as raw argv — argument values are " +
-      "UTF-8 (SPEC 12.0), so the byte string names no discovered file; a " +
-      "product resolving byte argv against the filesystem finds the file " +
-      "and answers instead",
+      "the exact on-disk path bytes as raw argv — a malformed value: " +
+      "argument values are valid UTF-8 (SPEC 12.0), so the byte string " +
+      "names no discovered file; a product resolving byte argv against " +
+      "the filesystem finds the file and answers instead",
   },
   {
     value: "specs/nu�.mdx",
     what:
-      "the lossy UTF-8 decode (U+FFFD replacing the invalid byte) names a " +
-      "different, undiscovered path",
+      "the lossy UTF-8 decode (U+FFFD replacing the invalid byte) — a " +
+      "malformed value under 12.0's argument-value rule, naming nothing",
   },
   {
     value: JSON.stringify(NU3_MARKED_PATH),
@@ -1254,12 +1307,13 @@ const NU3_AT_SPELLINGS: readonly {
 ];
 
 /**
- * The asserted projection of the condition-19 finding (the T11.2-3
+ * The asserted projection of a condition-19 finding (the T11.2-3
  * discipline): stable code token, the empty locations of a path-level
- * condition, the concerned path in the marked byte form (SPEC 14, 12.7).
- * Message and identities stay unpinned.
+ * condition, the concerned path in the form 12.0 fixes for it — the marked
+ * byte form for a non-UTF-8 path, the plain string for a U+FFFD path
+ * (SPEC 14, 12.0, 12.7). Message and identities stay unpinned.
  */
-function projectNu3Finding(finding: Finding): {
+function projectPathFinding(finding: Finding): {
   readonly code: string | null;
   readonly locations: readonly unknown[];
   readonly path: unknown;
@@ -1271,6 +1325,55 @@ function projectNu3Finding(finding: Finding): {
   };
 }
 
+type PathFindingProjection = ReturnType<typeof projectPathFinding>;
+
+/**
+ * The projections in one canonical order — SPEC 14 fixes no order among
+ * unlocated findings, so both sides of a compare pass through this.
+ */
+function inCanonicalOrder(
+  projections: readonly PathFindingProjection[],
+): PathFindingProjection[] {
+  return [...projections].sort((a, b) => {
+    const [x, y] = [JSON.stringify(a), JSON.stringify(b)];
+    return x < y ? -1 : x > y ? 1 : 0;
+  });
+}
+
+/**
+ * Run one `at` invocation expected to fail as a plain usage error: exit 2
+ * exactly, stdout the single 12.7 error document (the surface is JSON-only,
+ * SPEC 11), its finding carrying `code` and `path` null — the plain usage
+ * error, never a configuration error's stable code and concerned path
+ * (SPEC 12.7, 14) — and the usage message on stderr (12.0). Returns the run
+ * for the byte compare across workspaces (the T12.0-10 discipline).
+ */
+async function expectPlainUsageError(
+  product: ProductBinding,
+  workspace: Workspace,
+  argv: readonly string[],
+  context: string,
+): Promise<RunResult> {
+  const result = await expectExit(product, workspace, argv, 2, context);
+  const error = expectErrorDocument(result, context);
+  if (error.code !== null || error.path !== null) {
+    fail(
+      `${context}: the reported error must be the plain usage error — ` +
+        `\`code\` and \`path\` null (SPEC 12.7, 14) — never a ` +
+        `configuration error; got code ${JSON.stringify(error.code)}, path ` +
+        `${JSON.stringify(error.path)} (message: ` +
+        `${JSON.stringify(error.message)})`,
+    );
+  }
+  if (result.stderrBytes.length === 0) {
+    fail(
+      `${context}: usage error messages are standard-error content ` +
+        `(SPEC 12.0), but stderr is empty`,
+    );
+  }
+  return result;
+}
+
 /** Range containment under SPEC 1.7 (start-inclusive, end-exclusive). */
 function containsOffset(range: SourceRange, offset: number): boolean {
   return range.start <= offset && offset < range.end;
@@ -1279,7 +1382,7 @@ function containsOffset(range: SourceRange, offset: number): boolean {
 const T11_5_3 = defineProductTest({
   id: "T11.5-3",
   title:
-    "occurrence containment ends and imperfect files: on a finding-free file whose section `host` bears `d={CIBLE.but}` and embeds `{text(CIBLE.but)}` — both resolving into specs/cible.mdx#but — offsets at the d reference expression's start and end − 1 report the containing occurrence's full 12.7 record (file, byte-exact range, kind `depends`, source graph node {identity, range} = host, resolved target) while the end offset and the byte before the start report none, and likewise for the embedding container (opening brace through closing brace, kind `embeds`) — start-inclusive, end-exclusive (SPEC 1.7) — every answer findings [] at exit 0, the consulted domain being the named file alone whatever the workspace's other findings; the unparseable specs/casse.mdx (unclosed section tag) answers `at` offset 0 AND the EOF caret with `resolution` exactly the unavailability marker — no root fallback bypasses the mask — beside exactly its one located 14.20, exit 1; and — staged where file names are byte strings (Linux leg) — the non-UTF-8-pathed specs/nu<0xFF>.mdx is nameable by no argument value: the exact on-disk path bytes as raw argv, the lossy U+FFFD decode, the marked-byte-form JSON rendering, and a percent-encoded rendering each exit 2 as an unknown file with the single 12.7 error document, while the glob-reached view (`view --file specs/nu*.mdx`, byte-wise glob) stays the one route to its positions: exit 1 with exactly its condition-19 finding (stable code `invalid-source-path`, locations [], the marked-byte-form concerned path) and its full positional tree byte-exact, every node identity — root included — explicitly unavailable; no invocation of the sweep modifies anything (SPEC 11.5, 11.2, 5.7, 1.7, 12.0, 12.7; T11.2-3, T11.2-5)",
+    "occurrence containment ends and imperfect files: on a finding-free file whose section `host` bears `d={CIBLE.but}` and embeds `{text(CIBLE.but)}` — both resolving into specs/cible.mdx#but — offsets at the d reference expression's start and end − 1 report the containing occurrence's full 12.7 record (file, byte-exact range, kind `depends`, source graph node {identity, range} = host, resolved target) while the end offset and the byte before the start report none, and likewise for the embedding container (opening brace through closing brace, kind `embeds`) — start-inclusive, end-exclusive (SPEC 1.7) — every answer findings [] at exit 0, the consulted domain being the named file alone whatever the workspace's other findings; the unparseable specs/casse.mdx (unclosed section tag) answers `at` offset 0 AND the EOF caret with `resolution` exactly the unavailability marker — no root fallback bypasses the mask — beside exactly its one located 14.20, exit 1; and — staged where file names are byte strings (Linux leg) — the non-UTF-8-pathed specs/nu<0xFF>.mdx is nameable by no argument value: the exact on-disk path bytes as raw argv, the lossy U+FFFD decode, the marked-byte-form JSON rendering, and a percent-encoded rendering each exit 2 — a malformed value or an unknown file — with the single 12.7 error document, while the glob-reached view (`view --file specs/nu*.mdx`, byte-wise glob) stays the one route to its positions: exit 1 with exactly its condition-19 finding (stable code `invalid-source-path`, locations [], the marked-byte-form concerned path) and its full positional tree byte-exact, every node identity — root included — explicitly unavailable; the U+FFFD-pathed specs/A<U+FFFD>.mdx, staged on either leg, bears its condition-19 finding with the concerned path as a plain string (never the byte form); `at specs/A<U+FFFD>.mdx 0` is a malformed value — exit 2 with the plain usage error document (`code` and `path` null), never an answer and never the unknown-file error: reported identically, byte for byte, on a configuration-less workspace holding the same file, where an unknown-file check would be preceded by the configuration error — and `view --file specs/A*.mdx` serves it exit 1 with exactly its finding (plain-string concerned path) and its positional tree byte-exact with every identity explicitly unavailable; no invocation of the sweep modifies anything (SPEC 11.5, 11.2, 5.7, 1.7, 12.0, 12.7, 14.19; T11.2-3, T11.2-5, T12.0-10)",
   run: async (product) => {
     // Fixture self-checks (T5.7-2 discipline) — composed-range arithmetic
     // proven against the staged bytes before any product invocation.
@@ -1297,6 +1400,12 @@ const T11_5_3 = defineProductTest({
       NU3_SEC_RANGE,
       '<S id="solo">\nTexte positionné.\n</S>',
       "the non-UTF-8-named file's section construct",
+    );
+    sliceCheck(
+      RC_SOURCE,
+      RC_SEC_RANGE,
+      '<S id="seule">\nTexte positionné aussi.\n</S>',
+      "the U+FFFD-pathed file's section construct",
     );
     if (Buffer.byteLength(OC_CASSE_SOURCE, "utf8") !== OC_CASSE_LENGTH) {
       fail(
@@ -1343,6 +1452,7 @@ const T11_5_3 = defineProductTest({
         [OC_FILE]: OC_SOURCE,
         [OC_TGT_FILE]: OC_TGT_SOURCE,
         [OC_CASSE_FILE]: OC_CASSE_SOURCE,
+        [RC_PATH]: RC_SOURCE,
       },
     });
     try {
@@ -1359,7 +1469,8 @@ const T11_5_3 = defineProductTest({
           // or unparsed spelling would surface here as 14.5/14.8).
           const gateContext =
             "T11.5-3 `build --json` (staging integrity: one 14.20 in " +
-            "specs/casse.mdx" +
+            "specs/casse.mdx, one 14.19 for the U+FFFD-pathed " +
+            "specs/A<U+FFFD>.mdx" +
             (NU3_STAGED
               ? ", one 14.19 for the non-UTF-8-named specs/nu<0xFF>.mdx"
               : "") +
@@ -1371,7 +1482,9 @@ const T11_5_3 = defineProductTest({
           );
           assertConditionCounts(
             gateFindings,
-            NU3_STAGED ? { "14.20": 1, "14.19": 1 } : { "14.20": 1 },
+            NU3_STAGED
+              ? { "14.20": 1, "14.19": 2 }
+              : { "14.20": 1, "14.19": 1 },
             `${gateContext} — exactly the staged conditions (SPEC 14)`,
           );
           assertFindingLocated(
@@ -1380,22 +1493,36 @@ const T11_5_3 = defineProductTest({
             `${gateContext} — the parse failure locates in the ` +
               `unparseable file (SPEC 14.20, 14)`,
           );
-          if (NU3_STAGED) {
-            assertSameJson(
-              projectNu3Finding(
-                gateFindings.find((finding) => finding.condition === "14.19")!,
-              ),
-              {
-                code: "invalid-source-path",
-                locations: [],
-                path: NU3_MARKED_PATH,
-              },
-              `${gateContext} — the condition-19 finding carries the ` +
-                `stable code, no in-source locations, and the non-UTF-8 ` +
-                `concerned path in the marked byte form (SPEC 14, 12.0, ` +
-                `12.7)`,
-            );
-          }
+          // Each condition-19 finding: the stable code, no in-source
+          // locations, and its concerned path in the form 12.0 fixes — the
+          // plain string for the U+FFFD path (never the byte form), the
+          // marked byte form for the non-UTF-8 path. SPEC 14 fixes no order
+          // among unlocated findings, so both sides are compared in one
+          // canonical order.
+          assertSameJson(
+            inCanonicalOrder(
+              gateFindings
+                .filter((finding) => finding.condition === "14.19")
+                .map(projectPathFinding),
+            ),
+            inCanonicalOrder([
+              { code: "invalid-source-path", locations: [], path: RC_PATH },
+              ...(NU3_STAGED
+                ? [
+                    {
+                      code: "invalid-source-path",
+                      locations: [],
+                      path: NU3_MARKED_PATH,
+                    },
+                  ]
+                : []),
+            ]),
+            `${gateContext} — each condition-19 finding carries the stable ` +
+              `code, no in-source locations, and its concerned path in the ` +
+              `form 12.0 fixes: the plain string for the U+FFFD path, never ` +
+              `the byte form; the marked byte form for the non-UTF-8 path ` +
+              `(SPEC 14, 12.0, 12.7)`,
+          );
 
           // --- Occurrence containment (SPEC 11.5, 5.7, 1.7): within-range
           // offsets report the containing occurrence's record and resolved
@@ -1522,7 +1649,7 @@ const T11_5_3 = defineProductTest({
               viewContext,
             );
             assertSameJson(
-              viewReport.findings.map(projectNu3Finding),
+              viewReport.findings.map(projectPathFinding),
               [
                 {
                   code: "invalid-source-path",
@@ -1562,6 +1689,123 @@ const T11_5_3 = defineProductTest({
                 `(SPEC 11.2, 11.4, 1.7)`,
             );
           }
+
+          // --- The U+FFFD-pathed source (SPEC 12.0, 11.5; either leg):
+          // `at specs/A<U+FFFD>.mdx 0` is a malformed value — a usage error
+          // of the syntax class, judged before every per-operand check —
+          // exit 2 with the plain usage error document, never an answer.
+          const rcAtArgv: readonly string[] = ["at", RC_PATH, "0"];
+          const rcAtContext =
+            "T11.5-3 `at specs/A<U+FFFD>.mdx 0` (the U+FFFD-pathed source " +
+            "named by its own spelling — a malformed value under 12.0's " +
+            "argument-value rule, the file nameable by no argument value)";
+          const rcAtOnWorkspace = await expectPlainUsageError(
+            product,
+            workspace,
+            rcAtArgv,
+            `${rcAtContext} — exit 2 with the single 12.7 error document, ` +
+              `never an answer: a product naming the discovered file would ` +
+              `answer a resolution (SPEC 12.0, 11.5)`,
+          );
+          // Never the unknown-file error: a syntax-class error is reported
+          // without loading configuration, while the unknown-file check
+          // consults discovery and so is preceded by the configuration
+          // error (14.14) — on a configuration-less workspace holding the
+          // same file, the same invocation must still answer the plain
+          // usage error, byte-identically (SPEC 12.0; the T12.0-10
+          // discipline, H-4).
+          const configless = await TestWorkspace.create({
+            files: { [RC_PATH]: RC_SOURCE },
+          });
+          try {
+            const rcAtConfigless = await assertLeavesUnchanged(
+              configless.root,
+              () =>
+                expectPlainUsageError(
+                  product,
+                  configless,
+                  rcAtArgv,
+                  `${rcAtContext} on a configuration-less workspace holding ` +
+                    `the same file — the malformed value is a syntax-class ` +
+                    `error, reported without loading configuration; an ` +
+                    `unknown-file check would be preceded by the ` +
+                    `configuration error, code \`configuration-error\` ` +
+                    `(SPEC 12.0, 14.14)`,
+                ),
+              `${rcAtContext} on a configuration-less workspace — a ` +
+                `syntax-alone usage error modifies nothing (SPEC 12.0)`,
+            );
+            assertBytesEqual(
+              rcAtOnWorkspace.stdoutBytes,
+              rcAtConfigless.stdoutBytes,
+              `${rcAtContext}: reported identically with and without a ` +
+                `configuration — the error document depends on the ` +
+                `invocation's arguments alone, never on configuration ` +
+                `state or discovery (SPEC 12.0; H-4's product-to-itself ` +
+                `compare)`,
+            );
+          } finally {
+            await configless.dispose();
+          }
+
+          // The glob-reached view is the one route to its positions:
+          // `view --file specs/A*.mdx` admits exactly the U+FFFD-pathed
+          // file (every other staged name starts in lowercase).
+          const rcViewContext =
+            "T11.5-3 `view --file specs/A*.mdx` (the glob-reached view: " +
+            "the one route to the U+FFFD-pathed file's positions)";
+          const rcViewResult = await runCli(product, workspace, [
+            "view",
+            "--file",
+            "specs/A*.mdx",
+          ]);
+          assertExitCode(
+            rcViewResult,
+            1,
+            `${rcViewContext} — the answer carries the file's ` +
+              `condition-19 finding and explicitly-unavailable ` +
+              `identities, so exit 1 with the full document still ` +
+              `emitted (SPEC 11.2, 11.4)`,
+          );
+          const rcViewReport = decodeViewReport(
+            parseJsonStdout(
+              rcViewResult,
+              `${rcViewContext} — a single JSON document is the only ` +
+                `output form (SPEC 11)`,
+            ),
+            { text: false },
+            rcViewContext,
+          );
+          assertSameJson(
+            rcViewReport.findings.map(projectPathFinding),
+            [{ code: "invalid-source-path", locations: [], path: RC_PATH }],
+            `${rcViewContext} — exactly the admitted file's condition-19 ` +
+              `finding accompanies: stable code, no in-source locations, ` +
+              `the concerned path as a plain string, never the byte form ` +
+              `(SPEC 11.2, 14, 12.0, 12.7)`,
+          );
+          assertSameJson(
+            rcViewReport.views.map((view) => view.file),
+            [RC_PATH],
+            `${rcViewContext} — the glob admits exactly the U+FFFD-pathed ` +
+              `file, its \`file\` member the plain string form (SPEC 7, ` +
+              `11.4, 12.0, 12.7)`,
+          );
+          assertSameJson(
+            projectResolution(rcViewReport.views[0]!.root),
+            {
+              identity: UNAVAILABLE,
+              range: RC_ROOT_RANGE,
+              children: [
+                { identity: UNAVAILABLE, range: RC_SEC_RANGE, children: [] },
+              ],
+            },
+            `${rcViewContext} — the view serves the file's full ` +
+              `positional tree with byte-exact construct ranges — the ` +
+              `position data \`at\` cannot address — while every node ` +
+              `identity, root included, is explicitly unavailable ` +
+              `(SPEC 11.2, 11.4, 1.7)`,
+          );
         },
         "T11.5-3 — no invocation of the sweep modifies anything: the gate " +
           "build fails writing nothing (SPEC 12.1) and on a failing " +

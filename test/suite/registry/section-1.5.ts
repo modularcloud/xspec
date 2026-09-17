@@ -18,7 +18,14 @@
 // - T1.5-2's non-UTF-8 arm is staged on the Linux leg per its TEST-SPEC text
 //   ("where file names are byte strings"): other platforms' filesystems
 //   refuse such names outright, so the arm runs exactly where the fixture is
-//   realizable. The `#` arms run everywhere.
+//   realizable; its finding's concerned path is the marked byte form (SPEC
+//   12.0, 12.7). The `#` arms and the U+FFFD-pathed arm run everywhere: the
+//   latter stages specs/A<U+FFFD>.mdx (the spelling shared with T11.5-3
+//   through support.ts; valid UTF-8, so a name every platform holds) and
+//   pins its finding's concerned path as the plain string form, never the
+//   byte form (SPEC 12.0: a U+FFFD path has a plain string form). That the
+//   file is reachable by glob through `view` and nameable by no argument is
+//   T11.5-3's business (T11.2-3's discipline).
 // - T1.5-3 exercises the `path#id` vs bare `path` addressing duality across
 //   `query node`, `show`, and `rename`/`move` arguments; sections and roots
 //   carry distinct byte-anchored texts so the two address forms are
@@ -53,6 +60,7 @@ import {
   buildFindings,
   buildOk,
   expectExit,
+  REPLACEMENT_CHARACTER_SPEC_PATH,
   runJson,
   sortedIdentities,
 } from "./support.js";
@@ -543,6 +551,31 @@ const NON_UTF8_SPEC_PATH = Buffer.concat([
   Buffer.from(".mdx", "utf8"),
 ]);
 
+// The marked byte form of that path — the concerned path a 14.19 finding
+// presents for a non-UTF-8 path (SPEC 12.0, 12.7) — composed from the SAME
+// bytes that stage the file, never measured from product output.
+const NON_UTF8_MARKED_PATH = {
+  bytes: NON_UTF8_SPEC_PATH.toString("hex"),
+} as const;
+
+/**
+ * The asserted projection of a 14.19 finding (the T11.2-3 discipline): the
+ * stable code, the empty locations of a path-level condition, and the
+ * concerned path in the form 12.0 fixes for it (SPEC 14, 12.7). Message and
+ * identities stay unpinned.
+ */
+function projectPathFinding(finding: Finding): {
+  readonly code: string | null;
+  readonly locations: readonly unknown[];
+  readonly path: unknown;
+} {
+  return {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+  };
+}
+
 /**
  * A 14.19 finding must identify the offending source by its exact
  * workspace-relative path (SPEC 14, 1.5). The condition is about the path
@@ -568,7 +601,7 @@ function assertFindingFile(
 const T1_5_2 = defineProductTest({
   id: "T1.5-2",
   title:
-    "a discovered source path containing `#` fails with 14.19 (spec-group and code-group arms); a non-UTF-8 discovered path fails with 14.19, staged on the Linux leg (SPEC 1.5, 7, 14.19)",
+    "a discovered source path containing `#` fails with 14.19 (spec-group and code-group arms); a non-UTF-8 discovered path fails with 14.19 with its concerned path in the marked byte form, staged on the Linux leg; a discovered path containing U+FFFD (specs/A<U+FFFD>.mdx) fails with 14.19 on both legs — stable code `invalid-source-path`, locations [], the concerned path presented as the plain string, never the byte form (SPEC 1.5, 7, 12.0, 12.7, 14.19)",
   run: async (product) => {
     // Spec-group arm: a discovered `.mdx` whose path contains `#`.
     const specArm = await TestWorkspace.create({
@@ -608,10 +641,11 @@ const T1_5_2 = defineProductTest({
     }
 
     // Non-UTF-8 arm, staged on the Linux leg per T1.5-2's own text: Linux
-    // file names are byte strings, so the fixture stages verbatim; other
-    // platforms' filesystems cannot hold the path at all. The finding's file
-    // rendering is not asserted — the path has no UTF-8 spelling, and how a
-    // report spells an unspellable path is not fixed by SPEC.md.
+    // file names are byte strings, so the fixture stages verbatim (the
+    // builder's byte-path `file`, S-2's round-trip); other platforms'
+    // filesystems cannot hold the path at all. The finding's concerned path
+    // is the marked byte form — the path's exact bytes, the one presentation
+    // 12.0 admits for a non-UTF-8 path (SPEC 12.0, 12.7).
     if (process.platform === "linux") {
       const nonUtf8Arm = await TestWorkspace.create({
         files: { "xspec.config.ts": SPECS_ONLY_CONFIG },
@@ -622,9 +656,55 @@ const T1_5_2 = defineProductTest({
           "T1.5-2 `build --json` with a discovered spec source whose path is not valid UTF-8 (Linux leg)";
         const findings = await buildFindings(product, nonUtf8Arm, context);
         assertConditionCounts(findings, { "14.19": 1 }, context);
+        assertSameJson(
+          projectPathFinding(findings[0]!),
+          {
+            code: "invalid-source-path",
+            locations: [],
+            path: NON_UTF8_MARKED_PATH,
+          },
+          `${context} — the condition-19 finding carries the stable code, ` +
+            `no in-source locations, and the non-UTF-8 concerned path in ` +
+            `the marked byte form (SPEC 14, 12.0, 12.7)`,
+        );
       } finally {
         await nonUtf8Arm.dispose();
       }
+    }
+
+    // U+FFFD arm, both legs: the path is valid UTF-8 (U+FFFD encodes as
+    // EF BF BD), so every platform holds the name and the byte-wise glob
+    // `specs/**/*.mdx` discovers it (SPEC 7); a path containing U+FFFD is an
+    // invalid source path (14.19) with a plain string form — the finding's
+    // concerned path is exactly that string, never the marked byte form,
+    // which 12.0 reserves for a non-UTF-8 path (SPEC 12.0, 12.7). A product
+    // discovering the file as valid builds finding-free and fails the count;
+    // one presenting the path in the byte form fails the projection.
+    const replacementArm = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [REPLACEMENT_CHARACTER_SPEC_PATH]: VALID_SECTION_SOURCE,
+      },
+    });
+    try {
+      const context =
+        "T1.5-2 `build --json` with a discovered spec source whose path contains U+FFFD (specs/A<U+FFFD>.mdx, both legs)";
+      const findings = await buildFindings(product, replacementArm, context);
+      assertConditionCounts(findings, { "14.19": 1 }, context);
+      assertSameJson(
+        projectPathFinding(findings[0]!),
+        {
+          code: "invalid-source-path",
+          locations: [],
+          path: REPLACEMENT_CHARACTER_SPEC_PATH,
+        },
+        `${context} — the condition-19 finding carries the stable code, no ` +
+          `in-source locations, and the U+FFFD concerned path as a plain ` +
+          `string — never the marked byte form, which 12.0 reserves for a ` +
+          `non-UTF-8 path (SPEC 14, 12.0, 12.7)`,
+      );
+    } finally {
+      await replacementArm.dispose();
     }
   },
 });

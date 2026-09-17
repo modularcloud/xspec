@@ -28,6 +28,24 @@ import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import type { TestWorkspace } from "../../helpers/workspace.js";
 
+/**
+ * U+FFFD (REPLACEMENT CHARACTER), built from its code point so no tool layer
+ * can decode or normalize the spelling on the way into this file.
+ */
+export const REPLACEMENT_CHARACTER = String.fromCodePoint(0xfffd);
+
+/**
+ * The U+FFFD-pathed spec source T1.5-2 and T11.5-3 both stage — TEST-SPEC's
+ * `specs/A\uFFFD.mdx`, one spelling shared so the two tests stage the same
+ * file. Stageable on every platform: the path is valid UTF-8 (U+FFFD encodes
+ * as EF BF BD, a name any filesystem holds), unlike the non-UTF-8 byte paths
+ * of the Linux leg. It is an invalid source path (SPEC 14.19) presented in
+ * its plain string form — never the marked byte form (12.0) — that no
+ * argument value names: a value containing U+FFFD is a malformed value, a
+ * usage error of the syntax class (12.0).
+ */
+export const REPLACEMENT_CHARACTER_SPEC_PATH = `specs/A${REPLACEMENT_CHARACTER}.mdx`;
+
 /** Run one product command with the workspace root as working directory. */
 export async function runCli(
   product: ProductBinding,
