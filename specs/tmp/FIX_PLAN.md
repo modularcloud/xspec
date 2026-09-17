@@ -48,14 +48,6 @@ Task 22 landed: T2.4-5 is registered in `test/suite/registry/section-2.4.ts` (SU
 
 ## Part D — §1–8 arms (after Part B)
 
-## Task 23 — T2.5-3: escape- and entity-spelled coverage values are invalid, located at the attribute
-
-- **Source:** reviewer A gap 8.
-- **Requirement:** TEST-SPEC.md **T2.5-3** (line 116); SPEC.md 2.5 (values read verbatim), 14.17.
-- **Files:** `test/suite/registry/section-2.5-2.6.ts` (T2.5-3).
-- **Do:** arms `coverage="n\u006Fne"` and `coverage="&#110;one"` → condition 14.17, the finding located at the attribute (exact range from bytes). T2.5-3 is in no certification scope (confirm) — no fixture work.
-- **Verify:** passes or fails as diagnosed; escape bytes verified.
-
 ## Task 24 — T2.7-1: a section element inside an expression container is condition 16 at the container
 
 - **Source:** reviewer A gap 9.
