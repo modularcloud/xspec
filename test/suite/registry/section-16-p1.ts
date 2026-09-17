@@ -5,9 +5,11 @@
 // E-5) produce segment draws and `tags`-prop values over a code-point
 // alphabet weighted toward the SPEC 1.4 boundary classes P-1 names — the
 // whitespace and control classes of 1.4, the excluded boundary code points
-// U+00A0/U+0085/U+2028, `.` and `#`, the forbidden names, and the glob
-// metacharacters of common dialects (`[` `]` `{` `}` `!` `+` `(` `)`), which
-// are ordinary valid segment characters. Each trial stages its draw in a
+// U+00A0/U+0085/U+2028, `.` and `#`, the quote, escape, and
+// character-reference characters `"` `'` `\` `&` and U+FFFD (each invalid,
+// 1.4), the forbidden names, and the glob metacharacters of common dialects
+// (`[` `]` `{` `}` `!` `+` `(` `)`), which are ordinary valid segment
+// characters. Each trial stages its draw in a
 // fresh workspace (H-1), drives `build` strictly as a subprocess (H-2/H-5),
 // and asserts acceptance iff the harness-side oracle — an independent
 // restatement of SPEC 1.4 (exact character classes), 1.3 (`.` is the ID
@@ -86,11 +88,18 @@
 //   * The alphabet omits the MDX-structural ASCII characters `<` and `>`:
 //     ordinary valid segment characters that are no P-1 boundary class, and
 //     staging them would exercise MDX attribute lexing, not 1.4 validity.
-//     The two quote characters — invalid boundary classes of 1.4 — are in
-//     the alphabet under the staging discipline above. The remaining
-//     members of 1.4's quote, escape, and character-reference class, `\`
-//     and `&`, and U+FFFD are judged invalid by the oracle below but not yet
-//     drawn: their alphabet entries are still to land.
+//     The quote, escape, and character-reference characters `"` `'` `\` `&`
+//     and U+FFFD — invalid boundary classes of 1.4 — are all in the
+//     alphabet: the two quote characters under the staging discipline
+//     above; `\` and `&` as raw characters inside the quoted value, where
+//     2.4 reads them verbatim — no escape sequence or character reference
+//     is interpreted — so the oracle predicts 14.4 on the character itself,
+//     and a product interpreting an escape or reference form (reading the
+//     six-character escape of `.` or the reference `&#46;` as `.`) answers
+//     for a value it was never given; the verbatim spellings themselves are
+//     T1.4-1's and T1.4-4's deterministic arms. U+FFFD is staged as the
+//     literal, validly encoded code point (its UTF-8 bytes EF BF BD), so
+//     validity (14.4) — never source encoding (14.20) — is at stake.
 //   * Generated values never stage a blank line inside an opening tag (a
 //     line-terminator sequence enclosing only spaces/tabs): MDX flow tags do
 //     not admit blank lines, so such staging would test parseability (14.20)
@@ -134,7 +143,10 @@ const CR = cp(0x000d);
 const SPACE = cp(0x0020);
 const DOUBLE_QUOTE = cp(0x0022);
 const SINGLE_QUOTE = cp(0x0027);
+const AMPERSAND = cp(0x0026);
+const BACKSLASH = cp(0x005c);
 const DOT = cp(0x002e);
+const REPLACEMENT_CHARACTER = cp(0xfffd);
 
 // --- the SPEC 1.3 / 1.4 / 2.6 oracle -------------------------------------------
 //
@@ -405,13 +417,20 @@ const ALPHABET: ReadonlyArray<readonly [number, string]> = [
   [2, "+"],
   [2, "("],
   [2, ")"],
-  // The two quote characters — invalid boundary classes (SPEC 1.4's quote,
-  // escape, and character-reference characters), each spellable only inside
-  // the other quote kind (SPEC 2.7; the staging discipline in the module
-  // header chooses the kind per draw, predicts rejection, and never stages a
-  // draw holding both).
+  // The quote, escape, and character-reference characters and U+FFFD —
+  // invalid boundary classes (SPEC 1.4). Each quote character is spellable
+  // only inside the other quote kind (SPEC 2.7; the staging discipline in
+  // the module header chooses the kind per draw, predicts rejection, and
+  // never stages a draw holding both). `\` and `&` are staged raw inside
+  // the quoted value, which SPEC 2.4 reads verbatim (no escape sequence or
+  // character reference interpreted), so a draw holding one is predicted
+  // rejected on the character itself. U+FFFD is staged as the literal,
+  // validly encoded code point, so 14.4 — never 14.20 — is at stake.
   [3, DOUBLE_QUOTE],
   [3, SINGLE_QUOTE],
+  [3, BACKSLASH],
+  [3, AMPERSAND],
+  [3, REPLACEMENT_CHARACTER],
   // The boundary code points SPEC 1.4 excludes from both classes — valid
   // (T1.4-2 anchors; §VIOL-VALID-WIDE's flip class): no-break space, next
   // line, line separator.
@@ -521,7 +540,7 @@ const caseFlippedForbiddenName: Gen<string> = (choices) => {
 
 /**
  * The alphabet's 1.4-valid segment characters at their alphabet weights —
- * the ordinary, glob, quote, boundary, and breadth entries — selected
+ * the ordinary, glob, boundary, and breadth entries — selected
  * through the oracle so the two never disagree.
  */
 const VALID_SEGMENT_ALPHABET: ReadonlyArray<readonly [number, string]> =
