@@ -120,3 +120,16 @@ insertion point exists, the refusal evaluated only under an intrinsically
 valid new ID; and an admissible offset never turns comment-headed or indented
 text into declarations. Retained pending the Reviewer's confirmation; delete
 on HALT.
+
+**Resolution (2026-09-21, Phase 4 iteration 4):** The Reviewer's round-4
+review again judged the 2026-09-17 entry resolved by the text — each grammar
+claim re-decided against the full MDX 3 parse — and cleared the file for
+deletion on HALT. This round applied one further finding on 6.2 without
+reopening that resolution: an import addition placed elsewhere than at a
+line's start no longer asserts the receiving file's root `changed`
+unconditionally — the root keeps its own content exactly when the offset is
+the file's end and the line the added terminator ends is dropped (1.6, 3), and
+is `changed` otherwise — and two 6.5 cross-references were tightened (only a
+moved section holding an import is refused; a created target file's content is
+the fixed composition). Retained pending the Reviewer's confirmation; delete
+on HALT.
