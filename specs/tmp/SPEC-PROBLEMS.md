@@ -147,3 +147,18 @@ adds no terminator, the added declarations stay contiguous in one ESM block,
 and every composed rewrite has one byte sequence; the line-start preference
 and 6.2's account of an import addition's own-content effect read the same
 judgement. Retained pending the Reviewer's confirmation; delete on HALT.
+
+**Resolution (2026-09-21, Phase 4 iteration 6):** The Reviewer's round-6
+review judged the 2026-09-17 entry resolved by the text a fourth time — each
+grammar claim re-decided against the full MDX 3 parse — and cleared the file
+for deletion on HALT once its one critical item, on an adjacent rule, was
+settled. This round settled it without reopening that resolution: 6.5's
+composition rule now excepts the target insertion alone at the end of a
+self-closing target parent's rewrite range, so a declaration added at that
+offset stands after the appended closing tag, outside the parent — preceded by
+the tag's `>`, hence by an added terminator, the added declarations contiguous
+among themselves, the offset admissible where the result derives, and 6.2
+already giving the root's outcome for that placement; the joint-removal rule
+keeps a block's first declaration whether or not any other would remain; and
+1.5 acknowledges the refusal spellings of 14. Retained pending the Reviewer's
+confirmation; delete on HALT.
