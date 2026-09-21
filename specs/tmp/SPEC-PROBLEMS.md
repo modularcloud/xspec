@@ -104,3 +104,19 @@ the U+000B/U+000C boundary by grammar whitespace on both boundary lines (the
 tag; the worked shape refused with one on a single boundary line), each shape
 verified against the full MDX 3 parse. Retained pending the Reviewer's
 confirmation; delete on HALT.
+
+**Resolution (2026-09-21, Phase 4 iteration 3):** The Reviewer's round-3
+review judged the 2026-09-17 entry resolved by the text: 6.2's worked example,
+6.5's insertion rule and refusal list, and 6.5's validity promise agree, each
+grammar claim decided against the full MDX 3 parse. This round applied the
+round-3 findings on the same rules without reopening that resolution: an
+import addition keeps every node's own content at a line-start offset, taken
+wherever the file admits one, and 6.2 enumerates the nodes a successful
+section move can leave `changed`; reference spellings are rooted before the
+character-change test, so an added import is triggered by need and located by
+every spelling rooted at its binding; the added declaration's form is fixed;
+the target file's arms of `refused-invalid-rewrite` are judged exactly when an
+insertion point exists, the refusal evaluated only under an intrinsically
+valid new ID; and an admissible offset never turns comment-headed or indented
+text into declarations. Retained pending the Reviewer's confirmation; delete
+on HALT.
