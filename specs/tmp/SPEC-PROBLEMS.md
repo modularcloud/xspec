@@ -133,3 +133,17 @@ is `changed` otherwise — and two 6.5 cross-references were tightened (only a
 moved section holding an import is refused; a created target file's content is
 the fixed composition). Retained pending the Reviewer's confirmation; delete
 on HALT.
+
+**Resolution (2026-09-21, Phase 4 iteration 5):** The Reviewer's round-5
+review judged the 2026-09-17 entry resolved by the text a third time — each
+grammar claim re-decided against the full MDX 3 parse — and cleared the file
+for deletion on HALT. This round applied one further finding on 6.5's
+insertion rule without reopening that resolution: whether an insertion point —
+the target insertion's or an added declaration's — is at the start of a line,
+which decides the U+000A before it, is now judged over the composed text with
+that insertion's own result absent, never the pre-operation text alone, so a
+declaration sharing an offset with the target insertion or another declaration
+adds no terminator, the added declarations stay contiguous in one ESM block,
+and every composed rewrite has one byte sequence; the line-start preference
+and 6.2's account of an import addition's own-content effect read the same
+judgement. Retained pending the Reviewer's confirmation; delete on HALT.
