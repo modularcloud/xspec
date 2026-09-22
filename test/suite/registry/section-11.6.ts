@@ -42,7 +42,26 @@
 //   own rule over the realpath'd directory pair (self-checked against fixed
 //   vectors before any product invocation), and the invocation is repeated:
 //   byte-identical stdout, deterministic per invocation (SPEC 12.0; a
-//   product-to-itself comparison, H-4).
+//   product-to-itself comparison, H-4);
+// - physical anchoring, Linux leg (SPEC 11.6): the working directory and
+//   the workspace root enter the spelling as physical directory paths,
+//   every symbolic link among their components resolved. With the root `R`
+//   holding `a/b`, the product is driven from a working directory reached
+//   through the symbolic link `R/L` → `R/a/b` — the link path given as the
+//   child's working directory and as `PWD`, exactly as a shell that `cd`ed
+//   through the link presents the invocation (the T13.4-6 staging; the
+//   kernel resolves the working directory physically while `PWD` still
+//   names the link, so a product anchoring on the logical spelling would
+//   report the link's lexical relation) — and reports `root` `../..` and
+//   `config` `../../xspec.config.ts`: the physical relation between the
+//   working directory and the root, never the link's lexical `..`. A link
+//   above both (`elsewhere/link` → `R`, beside the root in the fixture's
+//   temporary directory; the working directory `elsewhere/link/a`) reports
+//   `..` and `../xspec.config.ts`, unchanged — a link above both changes
+//   nothing, and the configuration file enters as its own name under the
+//   root so spelled. Staged with an ordinary directory symlink on every
+//   platform (never a skip); the expected spellings are fixed by the
+//   physical relation alone, so no realpath arithmetic is involved.
 //
 // T11.6-2 — configuration, sources, derived map (SPEC 11.6, 12.7, 7.3,
 // 13.1). The resolved configuration view with every default and inferred
@@ -228,7 +247,11 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
-import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
+import type {
+  ProductBinding,
+  RunOptions,
+  RunResult,
+} from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -380,6 +403,8 @@ function assertAnchoringMember(
  * (a complete, finding-free answer, SPEC 12.0/11.6; H-5); exactly one JSON
  * document as the entire stdout (JSON-only, SPEC 11); `findings` decoding to
  * [] (form-exact, 12.7); and the `root`/`config` anchoring byte-exact.
+ * `env`, when given, is merged last into the child's environment: the
+ * physical-anchoring arms set `PWD` to the link path a shell would present.
  */
 async function expectAnchoredInventory(
   product: ProductBinding,
@@ -387,8 +412,13 @@ async function expectAnchoredInventory(
   argv: readonly string[],
   expected: AnchoringExpectation,
   context: string,
+  env?: RunOptions["env"],
 ): Promise<RunResult> {
-  const result = await runProduct(product, { cwd, argv });
+  const result = await runProduct(product, {
+    cwd,
+    argv,
+    ...(env === undefined ? {} : { env }),
+  });
   assertExitCode(
     result,
     0,
@@ -420,7 +450,7 @@ async function expectAnchoredInventory(
 const T11_6_1 = defineProductTest({
   id: "T11.6-1",
   title:
-    "inventory anchoring: `root` and `config` are identified relative to the invocation working directory in the canonical spelling — from the workspace root `.` and `xspec.config.ts` (flag-less and `--json` forms carrying the same information, JSON-only), from nested `a/b` `../..` and `../../xspec.config.ts`, from sibling directories with `--config` the ascent-`..`-then-descent form joined with `/` (multi-segment ascent and descent included), no `.` segments, no trailing separator — byte-exact, a pure function of invocation input whatever the `--config` spelling (relative or absolute); drive-mismatch arm, Linux side (E-6): from an unrelated directory tree the anchoring is still the pure relative form — no absolute form ever appears on the Linux leg — and repeated invocations are byte-identical, deterministic per invocation; every answer complete and finding-free at exit 0 (SPEC 11.6, 12.7, 12.0, 11)",
+    "inventory anchoring: `root` and `config` are identified relative to the invocation working directory in the canonical spelling — from the workspace root `.` and `xspec.config.ts` (flag-less and `--json` forms carrying the same information, JSON-only), from nested `a/b` `../..` and `../../xspec.config.ts`, from sibling directories with `--config` the ascent-`..`-then-descent form joined with `/` (multi-segment ascent and descent included), no `.` segments, no trailing separator — byte-exact, a pure function of invocation input whatever the `--config` spelling (relative or absolute); drive-mismatch arm, Linux side (E-6): from an unrelated directory tree the anchoring is still the pure relative form — no absolute form ever appears on the Linux leg — and repeated invocations are byte-identical, deterministic per invocation; physical anchoring, Linux leg: from a working directory reached through the symbolic link `R/L` → `R/a/b` inside the root (the link path as working directory and `PWD`) `root` is `../..` and `config` `../../xspec.config.ts` — the physical relation, never the link's lexical `..` — and from `elsewhere/link/a` under a link above both (`elsewhere/link` → `R`) `..` and `../xspec.config.ts`, unchanged, the configuration file entering as its own name under the root so spelled; every answer complete and finding-free at exit 0 (SPEC 11.6, 12.7, 12.0, 11)",
   run: async (product) => {
     selfCheckSpellingRule();
     const workspace = await TestWorkspace.create({
@@ -587,6 +617,63 @@ const T11_6_1 = defineProductTest({
       } finally {
         await farTree.dispose();
       }
+
+      // --- physical anchoring, Linux leg (SPEC 11.6): the working directory
+      // and the workspace root enter the spelling as physical directory
+      // paths, every symbolic link among their components resolved. Each
+      // link path is given as the child's working directory AND as `PWD` —
+      // exactly as a shell that `cd`ed through the link presents the
+      // invocation (the T13.4-6 staging): the kernel resolves the working
+      // directory physically while `PWD` still names the link, so a product
+      // anchoring on the logical spelling reports the link's lexical
+      // relation, which 11.6 forbids. The expected spellings are fixed by
+      // the physical relation alone (whatever links the temporary prefix
+      // holds), so no realpath arithmetic is involved. Staged with an
+      // ordinary directory symlink on every platform — never a skip.
+
+      // (a) a link inside the root: `R/L` → `R/a/b` (the nested directory
+      // staged above). From `R/L` the physical working directory is
+      // `R/a/b`, two levels below the root: `../..`, never the link's
+      // lexical `..`.
+      const insideLink = workspace.path("L");
+      await workspace.symlink("L", "a/b", "dir");
+      await expectAnchoredInventory(
+        product,
+        insideLink,
+        ["inventory"],
+        { root: "../..", config: "../../xspec.config.ts" },
+        "T11.6-1 — `inventory` from the working directory `R/L`, a symbolic " +
+          "link inside the root resolving to `R/a/b` (the link path as " +
+          "working directory and `PWD`): the anchoring spells the physical " +
+          "relation between the working directory and the root — `../..` " +
+          "and `../../xspec.config.ts` — never the link's lexical `..` " +
+          "(SPEC 11.6)",
+        { PWD: insideLink },
+      );
+
+      // (b) a link above both: `elsewhere/link` → `R` (beside the root, in
+      // the fixture's own temporary directory), the working directory
+      // `elsewhere/link/a`. Physically `R/a` under `R`: `..`, unchanged — a
+      // link above both changes nothing — and the configuration file
+      // enters as its own name under the root so spelled.
+      const elsewhere = path.join(workspace.tempRoot, "elsewhere");
+      await fsp.mkdir(elsewhere);
+      const aboveLink = path.join(elsewhere, "link");
+      await fsp.symlink(path.join("..", rootBase), aboveLink, "dir");
+      const aboveCwd = path.join(aboveLink, "a");
+      await expectAnchoredInventory(
+        product,
+        aboveCwd,
+        ["inventory"],
+        { root: "..", config: "../xspec.config.ts" },
+        "T11.6-1 — `inventory` from `elsewhere/link/a`, where " +
+          "`elsewhere/link` is a symbolic link above both the working " +
+          "directory and the root, resolving to the root (the link path as " +
+          "working directory and `PWD`): a link above both changes nothing " +
+          "— `..` — and the configuration file enters as its own name " +
+          "under the root so spelled, `../xspec.config.ts` (SPEC 11.6)",
+        { PWD: aboveCwd },
+      );
     } finally {
       await workspace.dispose();
     }
