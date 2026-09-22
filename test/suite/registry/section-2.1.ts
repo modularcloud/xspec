@@ -31,6 +31,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -80,9 +81,11 @@ async function withWorkspace<T>(
   files: Readonly<Record<string, string>>,
   body: (workspace: TestWorkspace) => Promise<T>,
   config: string = SPECS_ONLY_CONFIG,
+  mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
+    mdx,
   });
   try {
     return await body(workspace);
@@ -640,6 +643,10 @@ const T2_1_3 = defineProductTest({
           }
         }
       },
+      SPECS_ONLY_CONFIG,
+      // S-9: two imports binding one identifier are an ECMAScript early error
+      // 14.20 admits — the named allowance.
+      { allowances: { "specs/A.mdx": ["duplicate-import-binding"] } },
     );
   },
 });

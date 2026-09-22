@@ -48,6 +48,7 @@ import {
   ConsumerProject,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
 import type { OccurrenceUnit } from "./section-5.7.js";
 import { expectedUnitMultiset, renderOccurrenceUnit } from "./section-5.7.js";
 import {
@@ -93,9 +94,11 @@ async function withWorkspace<T>(
   config: string,
   files: Readonly<Record<string, string>>,
   body: (workspace: TestWorkspace) => Promise<T>,
+  mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
+    mdx,
   });
   try {
     return await body(workspace);
@@ -321,6 +324,11 @@ interface DynamicFormArm {
   readonly name: string;
   /** The offending reference expression, used verbatim in `d` and `text`. */
   readonly expression: string;
+  /**
+   * A TypeScript-only spelling, not ECMAScript: the document reads it as
+   * 14.20 (S-9's declaration; Task 17 re-pins the arm's expectation).
+   */
+  readonly typescriptOnly?: true;
 }
 
 const DYNAMIC_FORM_ARMS: readonly DynamicFormArm[] = [
@@ -328,7 +336,11 @@ const DYNAMIC_FORM_ARMS: readonly DynamicFormArm[] = [
   { name: "an identifier as index", expression: "BASE[key]" },
   { name: "a call as index", expression: "BASE[getKey()]" },
   { name: "optional chaining", expression: "BASE?.auth" },
-  { name: "a non-null assertion", expression: "BASE!.auth" },
+  {
+    name: "a non-null assertion",
+    expression: "BASE!.auth",
+    typescriptOnly: true,
+  },
   { name: "a parenthesized chain", expression: "(BASE.auth)" },
   {
     name: "a conditional expression",
@@ -352,11 +364,17 @@ const DYNAMIC_ARM_BASE_FILES = {
  * condition 14.8, located within the offending construct's own byte window in
  * `specs/A.mdx` (SPEC 14: errors identify file and location).
  */
+/** S-9: a TypeScript-only form is a 14.20 staging; the ECMAScript forms derive. */
+function armDeclaration(arm: DynamicFormArm): WorkspaceMdxDecl | undefined {
+  return arm.typescriptOnly ? { unparseable: ["specs/A.mdx"] } : undefined;
+}
+
 async function runRejectedFormArm(
   product: ProductBinding,
   source: string,
   window: { readonly start: number; readonly end: number },
   context: string,
+  mdx?: WorkspaceMdxDecl,
 ): Promise<void> {
   await withWorkspace(
     SPECS_ONLY_CONFIG,
@@ -370,6 +388,7 @@ async function runRejectedFormArm(
         `${context}: the 14.8 finding`,
       );
     },
+    mdx,
   );
 }
 
@@ -388,6 +407,7 @@ const T2_4_2 = defineProductTest({
         DYNAMIC_ARM_PREAMBLE + dConstruct + "\nBad reference.\n</S>\n",
         byteWindow(DYNAMIC_ARM_PREAMBLE, dConstruct),
         `T2.4-2 \`build --json\` with ${arm.name} in \`d\``,
+        armDeclaration(arm),
       );
 
       // In `text(...)`: the offending construct is the embedding expression
@@ -399,6 +419,7 @@ const T2_4_2 = defineProductTest({
         textPrefix + textConstruct + "\n</S>\n",
         byteWindow(textPrefix, textConstruct),
         `T2.4-2 \`build --json\` with ${arm.name} in \`text(...)\``,
+        armDeclaration(arm),
       );
     }
   },

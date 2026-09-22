@@ -3079,6 +3079,8 @@ const T11_4_5 = defineProductTest({
           [MKM_FILE]: MKM_SOURCE,
           [MK_GONE_FILE]: MK_GONE_SOURCE,
         },
+        // S-9: the requested file is the staged parse failure (14.20).
+        mdx: { unparseable: [MK_GONE_FILE] },
       });
       try {
         const gateContext =

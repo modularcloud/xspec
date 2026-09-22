@@ -881,7 +881,11 @@ const T6_3_4 = defineProductTest({
         const base = await workspace.gitCommitAll(
           "baseline with an unparseable source",
         );
-        await workspace.file(F4_BROKEN_FILE, F4_FIXED_SOURCE);
+        // S-9: the fixed source derives — the per-call declaration overrides
+        // the workspace's `unparseable` entry for this write.
+        await workspace.file(F4_BROKEN_FILE, F4_FIXED_SOURCE, {
+          mdx: "well-formed",
+        });
         await buildOk(
           product,
           workspace,

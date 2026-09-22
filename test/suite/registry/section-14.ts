@@ -252,7 +252,11 @@ import {
   assertNoCompileErrors,
   ConsumerProject,
 } from "../../helpers/tooling.js";
-import type { FileContents, WorkspaceDecl } from "../../helpers/workspace.js";
+import type {
+  FileContents,
+  WorkspaceDecl,
+  WorkspaceMdxDecl,
+} from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   RENAME_REFUSAL_CASES,
@@ -1100,6 +1104,11 @@ function specArm(condition: string, label: string, source: string): SweepEntry {
     label,
     decl: {
       files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/a.mdx": source },
+      // S-9: the 14.20 entry's source is the one the document declares
+      // unparseable; every other entry's source must derive.
+      ...(condition === "14.20"
+        ? { mdx: { unparseable: ["specs/a.mdx"] } }
+        : {}),
     },
     answers: { kind: "spec-source", file: "specs/a.mdx" },
   };
@@ -3313,6 +3322,9 @@ const T14_8 = defineProductTest({
           "specs/One.mdx": '<S id="one">\nTarget one text.\n</S>\n',
           "specs/Two.mdx": '<S id="two">\nTarget two text.\n</S>\n',
         },
+        // S-9: two imports binding one identifier — an early error 14.20
+        // admits, the named allowance.
+        mdx: { allowances: { [T14_8_COL_FILE]: ["duplicate-import-binding"] } },
       },
       async (workspace) => {
         const context = "T14-8 `build --json` over an import-binding collision";
@@ -3580,6 +3592,8 @@ interface RangeRuleCase {
   readonly rule: string;
   readonly config: string;
   readonly files: Readonly<Record<string, FileContents>>;
+  /** S-9: the staged MDX sources the document declares unparseable, if any. */
+  readonly mdx?: WorkspaceMdxDecl;
   /** Every staged finding, with its complete location list. */
   readonly expected: readonly ExactFindingExpectation[];
 }
@@ -3809,6 +3823,9 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     rule: "14.8 — `d={}`: a zero-length span at the closing brace",
     config: SPECS_ONLY_CONFIG,
     files: { [T14_11_SPEC]: T14_11_D_EMPTY.text },
+    // S-9: the stock grammar rejects an empty attribute expression, and the
+    // document reads `d={}` as condition 20 (Task 42 re-pins this arm).
+    mdx: { unparseable: [T14_11_SPEC] },
     expected: [
       { condition: "14.8", locations: located(T14_11_SPEC, T14_11_D_EMPTY, 0) },
     ],
@@ -3961,6 +3978,9 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "m",
     rule: "14.20 — one zero-length range at the failure's offset: a byte-order mark, an encoding failure, an MDX and a TypeScript syntax failure",
     config: SPEC_AND_CODE_CONFIG,
+    // S-9: the three MDX sources are 14.20's declared-unparseable forms (the
+    // TypeScript one is the product's alone to judge).
+    mdx: { unparseable: ["specs/bom.mdx", "specs/enc.mdx", "specs/open.mdx"] },
     files: {
       "specs/bom.mdx": T14_11_BOM_MDX.text,
       "specs/enc.mdx": T14_11_ENCODING_MDX,
@@ -4069,7 +4089,7 @@ async function runRangeRuleArm(
 ): Promise<void> {
   const context = `T14-11 (${kase.arm}) ${kase.rule}`;
   await withWorkspace(
-    { files: { "xspec.config.ts": kase.config, ...kase.files } },
+    { files: { "xspec.config.ts": kase.config, ...kase.files }, mdx: kase.mdx },
     async (workspace) => {
       const findings = await buildFindings(
         product,
