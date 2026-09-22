@@ -124,6 +124,7 @@
 //   whole byte trees — generated modules, Markdown output, and graph data
 //   all included, normalizing nothing.
 
+import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type {
@@ -151,13 +152,18 @@ import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
 } from "../../helpers/snapshot.js";
-import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
+import type {
+  ArgvValue,
+  ProductBinding,
+  RunResult,
+} from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type {
   BearerLocationExpectation,
   FindingSourceExpectation,
 } from "./support.js";
 import {
+  REPLACEMENT_CHARACTER,
   assertAppliedMapping,
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -171,8 +177,10 @@ import {
   byteWindow,
   expectErrorDocument,
   expectExit,
+  expectSyntaxClassUsageError,
   runJson,
   sortedIdentities,
+  stageConfigurationStateTwins,
 } from "./support.js";
 
 // One spec group plus one code group (SPEC 7.2), for fixtures whose rewrites
@@ -1411,10 +1419,38 @@ export const RENAME_REFUSAL_CASES: readonly RenameRefusalCase[] = [
   },
 ];
 
+// A `<new-id>` containing U+FFFD, and one that is not valid UTF-8 (raw bytes
+// in the OS argument vector, Linux leg): each a malformed argument value, a
+// usage error of the syntax class judged before every per-operand check
+// (SPEC 12.0), so neither ever reaches the 1.4 check — exit 2, never
+// `refused-invalid-id` (SPEC 6.4; T12.0-5). Both rename the existing
+// `a.mid`, so the malformed value is each invocation's only defect. The
+// character is built from its code point so no tool layer can normalize the
+// spelling away; the bytes are 0xFF, which no valid UTF-8 contains.
+const V3_REPLACEMENT_NEW_ID = `a.m${REPLACEMENT_CHARACTER}d`;
+const V3_NON_UTF8_NEW_ID: Uint8Array = Buffer.concat([
+  Buffer.from("a.m", "utf8"),
+  Buffer.from([0xff]),
+  Buffer.from("d", "utf8"),
+]);
+const V3_MALFORMED_NEW_ID_ARGVS: readonly (readonly [
+  readonly ArgvValue[],
+  string,
+])[] = [
+  [
+    ["rename", V3_FILE, "a.mid", V3_REPLACEMENT_NEW_ID, "--json"],
+    "new ID containing U+FFFD",
+  ],
+  [
+    ["rename", V3_FILE, "a.mid", V3_NON_UTF8_NEW_ID, "--json"],
+    "new ID not valid UTF-8 (raw argv bytes, Linux leg)",
+  ],
+];
+
 const T6_4_3 = defineProductTest({
   id: "T6.4-3",
   title:
-    "validation refusals (exit 1): a new ID that is invalid (1.4), equal to the old ID, colliding with an existing ID, or violating structural parent rules each refuses the rename and modifies nothing (workspace byte-compare) — each refusal reported as the form-exact 12.7 findings-only report holding exactly one finding with its exact stable refusal code (refused-invalid-id, refused-identity-unchanged, refused-id-collision, refused-structural-parent) and the concerned identity or located colliding bearer — the collision staged with one bearer and with two (`rename a b` where `a.c` sits beside `b` and `b.c`: the new ID and the prefix-replaced `b.c` each collide, one refused-id-collision finding locating exactly both bearers `b` and `b.c`, a product locating the first alone failing) (SPEC 6.4, 1.4, 1.3, 12.0, 12.7, 14)",
+    "validation refusals (exit 1): a new ID that is invalid (1.4), equal to the old ID, colliding with an existing ID, or violating structural parent rules each refuses the rename and modifies nothing (workspace byte-compare) — each refusal reported as the form-exact 12.7 findings-only report holding exactly one finding with its exact stable refusal code (refused-invalid-id, refused-identity-unchanged, refused-id-collision, refused-structural-parent) and the concerned identity or located colliding bearer — the collision staged with one bearer and with two (`rename a b` where `a.c` sits beside `b` and `b.c`: the new ID and the prefix-replaced `b.c` each collide, one refused-id-collision finding locating exactly both bearers `b` and `b.c`, a product locating the first alone failing); a `<new-id>` containing U+FFFD, or not valid UTF-8 (raw argv bytes, Linux leg), never reaches the 1.4 check — a malformed argument value, a syntax-class usage error: exit 2 with the plain usage error's document (`code` null), byte-identical with the configuration file invalid or missing, modifying nothing — never `refused-invalid-id` (SPEC 6.4, 1.4, 1.3, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       RENAME_REFUSAL_CONFIG,
@@ -1437,6 +1473,42 @@ const T6_4_3 = defineProductTest({
             expected,
             `T6.4-3 (${reason})`,
           );
+        }
+
+        // Malformed `<new-id>` values never reach the 1.4 check (SPEC 6.4,
+        // 12.0): each is a syntax-class usage error — exit 2 with the plain
+        // usage error's document (`code` null), never `refused-invalid-id`
+        // (exit 1 with a finding) — reported without loading configuration
+        // (byte-identical with the configuration file invalid or missing,
+        // T12.0-10's discipline) and modifying nothing. The byte arm is
+        // Linux-leg staging: argv is a byte channel there (the driver's
+        // POSIX trampoline); other platforms cannot carry the argument.
+        const twins = await stageConfigurationStateTwins(RENAME_REFUSAL_FILES);
+        try {
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              for (const [argv, reason] of V3_MALFORMED_NEW_ID_ARGVS) {
+                if (
+                  process.platform !== "linux" &&
+                  argv.some((arg) => typeof arg !== "string")
+                ) {
+                  continue;
+                }
+                await expectSyntaxClassUsageError(
+                  product,
+                  workspace,
+                  twins,
+                  argv,
+                  `T6.4-3 (${reason} — a malformed argument value, never ` +
+                    `\`refused-invalid-id\`)`,
+                );
+              }
+            },
+            "T6.4-3: a malformed <new-id> modifies nothing (SPEC 6.4, 12.0)",
+          );
+        } finally {
+          await twins.dispose();
         }
       },
     );

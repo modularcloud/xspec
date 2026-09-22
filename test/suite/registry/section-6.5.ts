@@ -244,6 +244,7 @@ import type {
   FindingSourceExpectation,
 } from "./support.js";
 import {
+  REPLACEMENT_CHARACTER,
   assertAppliedMapping,
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -258,8 +259,10 @@ import {
   byteWindow,
   expectErrorDocument,
   expectExit,
+  expectSyntaxClassUsageError,
   runJson,
   sortedIdentities,
+  stageConfigurationStateTwins,
 } from "./support.js";
 
 // Exactly one spec group (SPEC 7), for the byte-exact edit and identity-terms
@@ -3445,6 +3448,31 @@ export const MOVE_NON_UTF8_ARGV: readonly ArgvValue[] = [
   U5_NON_UTF8_DESTINATION,
 ];
 
+/**
+ * The U+FFFD destination operands (either leg): the file form's
+ * `specs/B<U+FFFD>.mdx` and the section form's `specs/B.mdx#x<U+FFFD>`,
+ * each a malformed argument value — a usage error of the syntax class,
+ * judged before any refusal is evaluated (SPEC 12.0, 6.5; T12.0-5) — so
+ * neither ever reaches `refused-invalid-destination` or `refused-invalid-id`.
+ * The origins exist (`specs/A.mdx`; its `a.mid`), so the malformed value is
+ * each invocation's only defect. The character is built from its code point
+ * so no tool layer can normalize the spelling away. Exported beside
+ * MOVE_NON_UTF8_ARGV for T6.6-3's preview variants.
+ */
+export const MOVE_REPLACEMENT_DESTINATION_CASES: readonly (readonly [
+  readonly string[],
+  string,
+])[] = [
+  [
+    ["move", U5_A, `specs/B${REPLACEMENT_CHARACTER}.mdx`],
+    "file-form destination containing U+FFFD",
+  ],
+  [
+    ["move", `${U5_A}#a.mid`, `${U5_B}#x${REPLACEMENT_CHARACTER}`],
+    "section-form destination whose id part contains U+FFFD",
+  ],
+];
+
 /** The base/ordering staging shared by the usage cases (T6.4-4's mirror):
  * valid sources, the discovered code source, the undiscovered stray `.mdx`,
  * and — in the ordering variant — the failing Bad.mdx, exported for
@@ -3477,7 +3505,7 @@ export const MOVE_SOLO_ARGV: readonly string[] = [
 const T6_5_5 = defineProductTest({
   id: "T6.5-5",
   title:
-    "usage errors (exit 2): a nonexistent origin file in either form — absent on disk, or an `.mdx` present on disk but matched by no spec group (a file named in an argument exists as a member of the discovered set), its absence from the discovered set pinned through `ids --json` — a nonexistent origin ID, and a discovered code source as the origin in each form — both forms' origin operands name discovered spec sources, so a code-source origin is a wrong-kind operand, judged like existence before any content question — are usage errors checked before source validation, the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering, as T6.4-4); an origin ID inside an unparseable origin file is masked: the validation findings are reported and the command exits 1; origin-ID existence is parse-local over spelled identities: an ID two sections both spell, or one whose sole bearer spells it beneath an ancestor spelling no identity, exists — the duplicate-ID or ancestor finding refuses instead (exit 1, never exit 2, nothing modified) — while an ID whose only would-be bearer spells no identity (its `id` attribute repeated on the tag) is nonexistent, exit 2 even beside that file's findings; operand classification is by spelling alone: the three mixed-synopsis invocations — bare-file origin with pair destination, pair origin with bare-file destination, and a `#`-containing file-form destination classified as a pair — match neither synopsis (exit 2), and a non-UTF-8 destination operand (raw argv bytes, Linux leg) is a usage-error argument value (exit 2) — the latter two the stagings T6.5-4's dead-letter note sets aside — the existence, wrong-kind, mixed-synopsis, dead-letter, and refusal arms each proving nothing modified (SPEC 6.5, 6.4, 11.2, 12.0, 14, 14.20)",
+    "usage errors (exit 2): a nonexistent origin file in either form — absent on disk, or an `.mdx` present on disk but matched by no spec group (a file named in an argument exists as a member of the discovered set), its absence from the discovered set pinned through `ids --json` — a nonexistent origin ID, and a discovered code source as the origin in each form — both forms' origin operands name discovered spec sources, so a code-source origin is a wrong-kind operand, judged like existence before any content question — are usage errors checked before source validation, the same exit 2 even when the workspace also has unrelated validation errors (12.0 ordering, as T6.4-4); an origin ID inside an unparseable origin file is masked: the validation findings are reported and the command exits 1; origin-ID existence is parse-local over spelled identities: an ID two sections both spell, or one whose sole bearer spells it beneath an ancestor spelling no identity, exists — the duplicate-ID or ancestor finding refuses instead (exit 1, never exit 2, nothing modified) — while an ID whose only would-be bearer spells no identity (its `id` attribute repeated on the tag) is nonexistent, exit 2 even beside that file's findings; operand classification is by spelling alone: the three mixed-synopsis invocations — bare-file origin with pair destination, pair origin with bare-file destination, and a `#`-containing file-form destination classified as a pair — match neither synopsis (exit 2), and a destination operand containing U+FFFD (the file form's path, the section form's id part; either leg) or not valid UTF-8 (raw argv bytes, Linux leg) is a malformed argument value — a syntax-class usage error, exit 2 with the plain usage error's document (`code` null), byte-identical with the configuration file invalid or missing, never `refused-invalid-destination` or `refused-invalid-id` — the latter the stagings T6.5-4's unspellable-destination note sets aside — the existence, wrong-kind, mixed-synopsis, dead-letter, and refusal arms each proving nothing modified (SPEC 6.5, 6.4, 11.2, 12.0, 14, 14.20)",
   run: async (product) => {
     // --- Base arm: a valid workspace ---
     await withWorkspace(
@@ -3574,29 +3602,59 @@ const T6_5_5 = defineProductTest({
           );
         }
 
-        // Non-UTF-8 destination operand — the other staging T6.5-4's
-        // dead-letter note sets aside (SPEC 6.5's non-UTF-8 destination
-        // clause: a non-UTF-8 argument value is a usage error before any
-        // refusal is evaluated) — staged on the Linux leg only (mirroring
-        // T1.5-2's platform note): Linux argv is a byte channel, so the
-        // destination is passed as raw bytes (driver trampoline); other
-        // platforms cannot carry the argument at all.
-        if (process.platform === "linux") {
+        // Malformed destination operands — the stagings T6.5-4's
+        // unspellable-destination note sets aside (SPEC 6.5: a destination
+        // containing U+FFFD or not valid UTF-8 is unspellable as an
+        // argument): a destination operand containing U+FFFD (either leg;
+        // the file form and the section form's id part) and a non-UTF-8
+        // destination operand (raw argv bytes, Linux leg only — Linux argv
+        // is a byte channel, the driver's trampoline; other platforms
+        // cannot carry the argument at all, T1.5-2's platform note) are
+        // each a malformed argument value, a usage error of the syntax
+        // class judged before any refusal is evaluated: exit 2 with the
+        // plain usage error's document (`code` null) — never
+        // `refused-invalid-destination` or `refused-invalid-id` — reported
+        // without loading configuration (byte-identical with the
+        // configuration file invalid or missing, T12.0-10's discipline)
+        // and modifying nothing.
+        const twins = await stageConfigurationStateTwins({
+          [U5_A]: U5_A_SOURCE,
+          [U5_B]: U5_B_SOURCE,
+          [U5_CODE]: U5_CODE_SOURCE,
+          [U5_STRAY]: U5_STRAY_SOURCE,
+        });
+        try {
           await assertLeavesUnchanged(
             workspace.root,
             async () => {
-              await expectMoveUsageError(
-                product,
-                workspace,
-                MOVE_NON_UTF8_ARGV,
-                `${context}, non-UTF-8 destination operand (raw argv ` +
-                  `bytes, Linux leg) — a non-UTF-8 argument value is a ` +
-                  `usage error (SPEC 12.0)`,
-              );
+              for (const [argv, label] of MOVE_REPLACEMENT_DESTINATION_CASES) {
+                await expectSyntaxClassUsageError(
+                  product,
+                  workspace,
+                  twins,
+                  [...argv, "--json"],
+                  `${context}, ${label} — a malformed argument value, never ` +
+                    `\`refused-invalid-destination\` or ` +
+                    `\`refused-invalid-id\` (SPEC 12.0, 6.5)`,
+                );
+              }
+              if (process.platform === "linux") {
+                await expectSyntaxClassUsageError(
+                  product,
+                  workspace,
+                  twins,
+                  [...MOVE_NON_UTF8_ARGV, "--json"],
+                  `${context}, non-UTF-8 destination operand (raw argv ` +
+                    `bytes, Linux leg) — a malformed argument value, never ` +
+                    `\`refused-invalid-destination\` (SPEC 12.0, 6.5)`,
+                );
+              }
             },
-            `${context}: \`move ${U5_A} <non-UTF-8 bytes>\` — the usage ` +
-              `error modifies nothing (SPEC 6.5, 12.0)`,
+            `${context}: the malformed destination operands modify nothing ` +
+              `(SPEC 6.5, 12.0)`,
           );
+        } finally {
+          await twins.dispose();
         }
       },
     );
