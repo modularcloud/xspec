@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 11 — P-2 generator: the refined comment, whitespace, and embedding forms (CONF-MD re-certified)
-- Cites: TEST-SPEC §16 P-2 (refined forms: T3-7's ESM-block comments, T2.7-4's comment and brace classes, T2.3-3's embedding forms); SPEC 3, 2.7, 2.3. Finding B-8. Depends on Task 9.
-- Change: in `section-16-p2-p3.ts` (comments generated ~L724–800 are `{/* … */}` single-/multi-line and own-line comment lines only) add: ESM blocks carrying JavaScript comments beside their imports (T3-7); the `{}` form; block-comment sequences; line-comment containers and the run-on `{// c}` form (T2.7-4); ECMAScript-only whitespace (U+00A0, U+FEFF, U+2028, U+2029) between braces; embeddings with whitespace and comments beside the call — block comments before/after, a line comment before, the run-on `{// c}` form holding the call (T2.3-3). Keep the markdown oracle (`test/helpers/oracles/markdown.ts`) in step with SPEC 3 over the new forms, adding S-6 markdown vectors for each; add the forms to P-2's S-9 vector set (Task 9). P-2 is in CONF-MD's scope: the conformer must pass P-2 over the widened space and VIOL-MD-CLASS/VIOL-MD-CR must still fail it — extend `test/fixtures/conf-md/` only where the conformer's accepting-side lexer does not yet handle a new form (it must conform to SPEC 3 for it), re-certifying in this task.
-- Verify: self project green (certification report: CONF-MD PASS on P-2, the two violators FAIL on P-2); `-t 'P-2 '` no harness errors.
-
 ### Task 12 — P-8 mutation menu: fragment, brace-content, and ESM-block classes
 - Cites: TEST-SPEC §16 P-8 (refined mutation classes); SPEC 2.7, 14.20. Finding B-9. Depends on Task 3.
 - Change: `section-16-p8.ts` (menu ~L28–65: splice, invalidUtf8, bom, terminators, nesting, truncate, shuffle, garbage) gains: a fragment class (`<>…</>` insertion/unbalancing); brace-content mutations at the comment/expression/parse-failure boundaries of 2.7 and 14.20 (comment ↔ expression, expression → ill-formed, spread comma forms, empty braces, unbalanced braces at EOF); ESM-block mutations (comment insertion, terminator changes, indentation, splitting/joining blocks, a statement at a line start). Mutated documents are staged `unchecked` (Task 3). The property's invariants stay as the entry states (no crash, diagnosed findings, exit codes, the well-formedness boundary of T14-12).

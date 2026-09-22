@@ -86,11 +86,28 @@
 //     runs as non-whitespace, and interior blank or whitespace-only lines
 //     are untouched lines, kept), and the direct byte-preservation
 //     assertion sees them as ordinary untouched lines.
-//   * Section tags, imports, and embeddings are single-line and ASCII; the
-//     exotic bytes live in content, where P-2 aims them. Multi-line comments
+//   * Section tags and imports are single-line and ASCII; the exotic bytes
+//     live in content, where P-2 aims them. Comments take every form of
+//     SPEC 2.7 and embeddings every form of 2.3 (`mdxComment`,
+//     `embeddingContainer` below: `{}`, block-comment sequences,
+//     line-comment containers ended by a drawn terminator, the run-on
+//     `{// c}` form, ECMAScript-only whitespace between braces; whitespace
+//     and comments beside a `text(...)` call — T2.7-4's and T2.3-3's positive
+//     forms), and an ESM block carries JavaScript comments beside its
+//     imports and `;`-terminated declarations (T3-7). Multi-line containers
 //     carry 1–2 internal terminators and no internal blank line (MDX
-//     expressions admit none); the comment alphabet contains no `/`, so a
-//     premature `*/` cannot form.
+//     expressions admit none); the comment alphabets contain no `/` or `*`,
+//     so a premature `*/` cannot form, and a line comment's alphabet has no
+//     U+2028 or U+2029, at which the lexical grammar would end it while
+//     14.20's deletion judgement runs on (T2.7-4's negative arms).
+//   * A generated line's lead never opens a CommonMark container (a list
+//     item: `-` or digits with `.`/`)`, then whitespace, after any
+//     indentation) or an ATX heading (`#`s then whitespace): inside a
+//     container the continuation line of a multi-line expression is a lazy
+//     line the grammar rejects, and a heading ends at its line, so a
+//     multi-line container it hosts never closes (`opensBlockConstruct`,
+//     applied by `keptProse`). Every other lead — `-a`, `9.a`, `#{`, `---`
+//     (a thematic break), a setext underline — is harmless.
 //   * Line terminators are drawn per line; a deterministic guard keeps a
 //     lone-CR terminator from being followed by an empty line's LF (the two
 //     bytes would merge into one CRLF terminator and desynchronize the
@@ -158,6 +175,11 @@ const CRLF = CR + LF;
 const NBSP = cp(0x00a0);
 const NEL = cp(0x0085);
 const LS = cp(0x2028);
+// ECMAScript's remaining line terminator and its zero-width no-break space:
+// whitespace between braces and within an ESM block (SPEC 14.20), content
+// bytes everywhere else (1.4).
+const PS = cp(0x2029);
+const FEFF = cp(0xfeff);
 // Fence and code-span marker characters — staged only inside deliberately
 // constructed fences and spans, never drawn into free prose (module header).
 const BACKTICK = cp(0x0060);
@@ -317,7 +339,7 @@ const PROSE_ALPHABET: ReadonlyArray<readonly [number, string]> = [
   // (JS regex `\s`-style) classifier would misclassify, plus multi-byte and
   // astral content so byte counting is exercised.
   [1, cp(0x2000)],
-  [1, cp(0x2029)],
+  [1, PS],
   [1, cp(0x3000)],
   [2, cp(0x00e9)],
   [1, cp(0x4e2d)],
@@ -371,12 +393,49 @@ function run(element: Gen<string>, min: number, max: number): Gen<string> {
 /** Free prose (may be empty or whitespace-only). */
 const prose: Gen<string> = run(proseChar, 0, 10);
 
-/** Prose guaranteed to contain a plain non-whitespace character. */
+/**
+ * Whether a line beginning with `lead` would open a CommonMark container or
+ * an ATX heading: after any indentation (MDX disables indented code, so no
+ * amount of leading whitespace makes a code block), a list marker — `-`, or
+ * one to nine digits then `.` or `)` — or one to six `#`, followed by
+ * whitespace or by the end of the lead (whatever follows the lead is judged
+ * as if it were whitespace, the conservative reading). `+`, `*`, and `>` are
+ * not in the prose alphabet. A container makes the continuation line of a
+ * multi-line expression a lazy line, which the expression grammar rejects,
+ * and a heading ends at its line, so a multi-line container hosted on one
+ * never closes (S-9; both found by the per-draw check).
+ */
+function opensBlockConstruct(lead: string): boolean {
+  const isWhitespace = (char: string | undefined): boolean =>
+    char === undefined || INLINE_WHITESPACE.includes(char as never);
+  let i = 0;
+  while (i < lead.length && isWhitespace(lead[i])) i += 1;
+  let j = i;
+  if (lead[j] === "-") {
+    j += 1;
+  } else if (lead[j] === "#") {
+    while (j < lead.length && j - i < 6 && lead[j] === "#") j += 1;
+  } else {
+    while (j < lead.length && j - i < 9 && lead[j] >= "0" && lead[j] <= "9") {
+      j += 1;
+    }
+    if (j === i || (lead[j] !== "." && lead[j] !== ")")) return false;
+    j += 1;
+  }
+  return isWhitespace(lead[j]);
+}
+
+/**
+ * Prose guaranteed to contain a plain non-whitespace character — a line's
+ * lead, so it never opens a container or a heading (`opensBlockConstruct`:
+ * a letter is prepended when the draw would; no choice is consumed).
+ */
 const keptProse: Gen<string> = (choices) => {
   const before = run(proseChar, 0, 4)(choices);
   const anchor = plainChar(choices);
   const after = run(proseChar, 0, 4)(choices);
-  return before + anchor + after;
+  const text = before + anchor + after;
+  return opensBlockConstruct(text) ? `a${text}` : text;
 };
 
 /** Plain-only prose (letters/digits/space) with a guaranteed anchor. */
@@ -409,6 +468,171 @@ const terminator: Gen<string> = (choices) =>
     [3, CRLF],
     [3, CR],
   ]);
+
+// ---------------------------------------------------------------------------
+// The refined container and ESM-block forms (TEST-SPEC §16 P-2: T2.7-4's
+// comment forms, T2.3-3's embedding forms, T3-7's ESM-block comments)
+
+// Line-comment interiors: the prose alphabet minus ECMAScript's line
+// terminators U+2028 and U+2029 — the lexical grammar ends a line comment at
+// either while 14.20's deletion judgement runs it through the first U+000A or
+// U+000D alone, and the two disagreeing makes the file unparseable (T2.7-4's
+// negative arms, never staged here). A block comment may hold them (a
+// terminator inside one changes nothing), so block-comment interiors keep
+// the whole alphabet (`commentProse`). Neither alphabet spells `/` or `*`.
+const LINE_COMMENT_ALPHABET: ReadonlyArray<readonly [number, string]> =
+  PROSE_ALPHABET.filter(([, char]) => char !== LS && char !== PS);
+
+const lineCommentProse: Gen<string> = (choices) =>
+  ` ${run((c: Choices) => c.weightedPick(LINE_COMMENT_ALPHABET), 0, 6)(choices)} `;
+
+/** ECMAScript's whitespace and line terminators that 1.4 excludes (14.20). */
+const ECMASCRIPT_ONLY_WHITESPACE = [NBSP, FEFF, LS, PS] as const;
+
+const ecmascriptOnlyWhitespaceChar: Gen<string> = (choices) =>
+  choices.pick(ECMASCRIPT_ONLY_WHITESPACE);
+
+/** Whitespace beside a `text(...)` call or between comments in a container:
+ * 1.4's inline whitespace and, less often, ECMAScript's own. */
+const containerWhitespace: Gen<string> = run(
+  (choices: Choices) =>
+    choices.weightedPick<string>([
+      [6, SPACE],
+      [1, TAB],
+      [1, NBSP],
+      [1, LS],
+    ]),
+  1,
+  2,
+);
+
+/**
+ * An MDX comment container in one of 2.7's forms (T2.7-4's positive forms),
+ * the usual block-comment form dominant — the certified flip classes ride the
+ * residues beside it, not the form: `{}`; a block-comment sequence with
+ * whitespace (ECMAScript's included) or nothing between the comments;
+ * ECMAScript-only whitespace between the braces; and, when `multiLine`
+ * allows, the line-comment containers — ended by a drawn terminator (LF,
+ * CRLF, lone CR: 14.20 ends a line comment at U+000A or U+000D alike)
+ * before the closing brace, the run-on `{// c}` form whose first brace lies
+ * on the commented-out line and closes nothing, and mixed sequences. A
+ * multi-line container's terminator is among its own characters: deleted
+ * with it, the lines it spans merging (SPEC 3), never a line of the
+ * generator's line model.
+ */
+function mdxComment(choices: Choices, multiLine = true): string {
+  type Form =
+    | "usual"
+    | "empty"
+    | "sequence"
+    | "ecmascriptWhitespace"
+    | "lineComment"
+    | "runOn"
+    | "blockThenLine"
+    | "lineThenBlock"
+    | "twoLines";
+  const forms: (readonly [number, Form])[] = [
+    [12, "usual"],
+    [2, "empty"],
+    [2, "sequence"],
+    [2, "ecmascriptWhitespace"],
+  ];
+  if (multiLine) {
+    forms.push(
+      [2, "lineComment"],
+      [2, "runOn"],
+      [1, "blockThenLine"],
+      [1, "lineThenBlock"],
+      [1, "twoLines"],
+    );
+  }
+  const block = (): string => `/*${commentProse(choices)}*/`;
+  const line = (): string => `//${lineCommentProse(choices)}`;
+  const gap = (): string =>
+    choices.weightedPick<string>([
+      [3, " "],
+      [1, ""],
+      [1, NBSP],
+      [1, LS],
+    ]);
+  switch (choices.weightedPick(forms)) {
+    case "usual":
+      return `{${block()}}`;
+    case "empty":
+      return "{}";
+    case "sequence":
+      return `{${gap()}${block()}${gap()}${block()}${gap()}}`;
+    case "ecmascriptWhitespace":
+      return `{${run(ecmascriptOnlyWhitespaceChar, 1, 2)(choices)}}`;
+    case "lineComment":
+      return `{${line()}${terminator(choices)}}`;
+    case "runOn":
+      return `{${line()}}${terminator(choices)}}`;
+    case "blockThenLine":
+      return `{${block()} ${line()}${terminator(choices)}}`;
+    case "lineThenBlock":
+      return `{${line()}${terminator(choices)}${block()}}`;
+    case "twoLines":
+      return `{${line()}${terminator(choices)}${line()}${terminator(choices)}}`;
+  }
+}
+
+/**
+ * An embedding container around `text(<argText>)` in one of 2.3's forms
+ * (T2.3-3's positive forms), the bare `{text(...)}` dominant: whitespace
+ * beside the call (ECMAScript's included), a block comment before it, after
+ * it, or both, and, when `multiLine` allows, a line comment before the call
+ * ended by a drawn terminator, the run-on `{// c}` form holding the call on
+ * the next line, and a line comment after the call ended before the closing
+ * brace. The whole container is the embedding's own characters (SPEC 3, 2.3:
+ * replaced whole, interior terminator included).
+ */
+function embeddingContainer(
+  choices: Choices,
+  argText: string,
+  multiLine = true,
+): string {
+  type Form =
+    | "bare"
+    | "whitespace"
+    | "blockBefore"
+    | "blockAfter"
+    | "blockBoth"
+    | "lineBefore"
+    | "runOn"
+    | "lineAfter";
+  const forms: (readonly [number, Form])[] = [
+    [12, "bare"],
+    [2, "whitespace"],
+    [2, "blockBefore"],
+    [2, "blockAfter"],
+    [1, "blockBoth"],
+  ];
+  if (multiLine) {
+    forms.push([2, "lineBefore"], [2, "runOn"], [1, "lineAfter"]);
+  }
+  const call = `text(${argText})`;
+  const block = (): string => `/*${commentProse(choices)}*/`;
+  const line = (): string => `//${lineCommentProse(choices)}`;
+  switch (choices.weightedPick(forms)) {
+    case "bare":
+      return `{${call}}`;
+    case "whitespace":
+      return `{${containerWhitespace(choices)}${call}${containerWhitespace(choices)}}`;
+    case "blockBefore":
+      return `{${block()} ${call}}`;
+    case "blockAfter":
+      return `{${call} ${block()}}`;
+    case "blockBoth":
+      return `{ ${block()} ${call} ${block()} }`;
+    case "lineBefore":
+      return `{${line()}${terminator(choices)}${call}}`;
+    case "runOn":
+      return `{${line()}}${terminator(choices)}${call}}`;
+    case "lineAfter":
+      return `{${call} ${line()}${terminator(choices)}}`;
+  }
+}
 
 // Construct-like literal bytes (T3-1's grammar-boundary set, the P-2 entry's
 // named inclusion): spelled inside fenced code blocks and inline code spans,
@@ -618,7 +842,7 @@ function genBlock(
       }
       out.push({
         kind: "embed",
-        text: `{text(${ref.argText})}`,
+        text: embeddingContainer(choices, ref.argText),
         targetKey: ref.targetKey,
       });
       endLine(choices, ctx, out, false);
@@ -687,7 +911,7 @@ function genProseLine(
   const pieces: DocEntry[] = [{ kind: "content", text: lead }];
   switch (inline) {
     case "comment":
-      pieces.push({ kind: "removal", text: `{/*${commentProse(choices)}*/}` });
+      pieces.push({ kind: "removal", text: mdxComment(choices) });
       break;
     case "codeSpan":
       // Literal span bytes amid prose — content, never a construct (T3-1).
@@ -698,7 +922,7 @@ function genProseLine(
       if (ref !== null) {
         pieces.push({
           kind: "embed",
-          text: `{text(${ref.argText})}`,
+          text: embeddingContainer(choices, ref.argText),
           targetKey: ref.targetKey,
         });
       }
@@ -748,10 +972,7 @@ function genCommentLine(
   ctx: FileContext,
   out: DocEntry[],
 ): void {
-  const comment: DocEntry = {
-    kind: "removal",
-    text: `{/*${commentProse(choices)}*/}`,
-  };
+  const comment: DocEntry = { kind: "removal", text: mdxComment(choices) };
   const residue = choices.weightedPick<Gen<string>>([
     [4, () => ""],
     [4, run(boundaryChar, 1, 3)],
@@ -944,12 +1165,44 @@ export const generatedDoc: Gen<GeneratedDoc> = (choices) => {
       },
     };
 
-    for (const { binding, path: p } of imports) {
+    // The ESM block (SPEC 14.20): one declaration per line, each optionally
+    // `;`-terminated (the `;` among its own characters, T3-7's terminator
+    // arm), with JavaScript comments beside the declarations — content under
+    // SPEC 3, no MDX comment (T3-7): a line or block comment after an import
+    // on its line, an own-line `// note` between two imports or after the
+    // last, and a block comment before an import on the block's second line
+    // onward. Never before the first line: an ESM block begins at an import
+    // keyword, so a comment there would make the block a paragraph.
+    const jsLineComment = (): string => `//${lineCommentProse(choices)}`;
+    const jsBlockComment = (): string => `/*${commentProse(choices)}*/`;
+    imports.forEach(({ binding, path: p }, importIndex) => {
       const name = p.slice("specs/".length, -".mdx".length);
+      if (importIndex > 0 && choices.boolean(0.2)) {
+        entries.push({ kind: "content", text: jsLineComment() });
+        endLine(choices, ctx, entries, false);
+      }
+      if (importIndex > 0 && choices.boolean(0.2)) {
+        entries.push({ kind: "content", text: `${jsBlockComment()} ` });
+      }
+      const semicolon = choices.boolean(0.25) ? ";" : "";
       entries.push({
         kind: "removal",
-        text: `import ${binding} from "./${name}.xspec"`,
+        text: `import ${binding} from "./${name}.xspec"${semicolon}`,
       });
+      const trailing = choices.weightedPick<"none" | "line" | "block">([
+        [7, "none"],
+        [2, "line"],
+        [1, "block"],
+      ]);
+      if (trailing === "line") {
+        entries.push({ kind: "content", text: ` ${jsLineComment()}` });
+      } else if (trailing === "block") {
+        entries.push({ kind: "content", text: ` ${jsBlockComment()}` });
+      }
+      endLine(choices, ctx, entries, false);
+    });
+    if (imports.length > 0 && choices.boolean(0.15)) {
+      entries.push({ kind: "content", text: jsLineComment() });
       endLine(choices, ctx, entries, false);
     }
     // A mandatory blank line after the import block: MDX ESM blocks extend
@@ -1003,6 +1256,10 @@ export const generatedDoc: Gen<GeneratedDoc> = (choices) => {
 
 /** Every character of the prose alphabet, once, in alphabet order. */
 const ALL_PROSE_CHARS = PROSE_ALPHABET.map(([, char]) => char).join("");
+/** Every character of the line-comment alphabet, once, in alphabet order. */
+const ALL_LINE_COMMENT_CHARS = LINE_COMMENT_ALPHABET.map(
+  ([, char]) => char,
+).join("");
 /** The mandatory construct-free plain-prose first line (module header). */
 const FORM_FIRST_LINE = "a0 first";
 const FORM_TRAIL_LINE = "z9 trail";
@@ -1128,6 +1385,74 @@ const BLOCK_FORMS: readonly FormSpelling[] = [
     name: "multi-line comment, mixed internal terminators",
     lines: () => [`{/* ab${LF}cd${CR}ef */}`],
   },
+  // The refined comment forms of 2.7 (mdxComment), own-line.
+  { name: "comment line, `{}`", lines: () => ["{}"] },
+  {
+    name: "comment line, block-comment sequence with spaces between",
+    lines: () => [`{ /* ${ALL_PROSE_CHARS} */ /* ab */ }`],
+  },
+  {
+    name: "comment line, block-comment sequence with nothing between",
+    lines: () => ["{/* ab *//* cd */}"],
+  },
+  {
+    name: "comment line, block-comment sequence with ECMAScript-only whitespace between",
+    lines: () => [`{${NBSP}/* ab */${LS}/* cd */${FEFF}}`],
+  },
+  ...ECMASCRIPT_ONLY_WHITESPACE.map((char): FormSpelling => ({
+    name: `comment line, ${codePointName(char)} between the braces`,
+    lines: () => [`{${char}}`],
+  })),
+  {
+    name: "comment line, every ECMAScript-only whitespace between the braces",
+    lines: () => [`{${ECMASCRIPT_ONLY_WHITESPACE.join("")}}`],
+  },
+  ...FORM_TERMINATORS.flatMap(
+    ([terminatorName, terminator]): FormSpelling[] => [
+      {
+        name: `line-comment container ended by ${terminatorName}, alphabet interior`,
+        lines: () => [`{// ${ALL_LINE_COMMENT_CHARS}${terminator}}`],
+      },
+      {
+        name: `line-comment container ended by ${terminatorName}, empty interior`,
+        lines: () => [`{//  ${terminator}}`],
+      },
+      {
+        name: `run-on line-comment container, ${terminatorName}`,
+        lines: () => [`{// ${ALL_LINE_COMMENT_CHARS}}${terminator}}`],
+      },
+      {
+        name: `block comment then line comment, ${terminatorName}`,
+        lines: () => [`{/* ${ALL_PROSE_CHARS} */ // ab${terminator}}`],
+      },
+      {
+        name: `line comment then block comment, ${terminatorName}`,
+        lines: () => [`{// ab${terminator}/* ${ALL_PROSE_CHARS} */}`],
+      },
+      {
+        name: `two line comments, ${terminatorName}`,
+        lines: () => [`{// ab${terminator}// cd${terminator}}`],
+      },
+      {
+        name: `line-comment container with residues, ${terminatorName}`,
+        lines: () => [`a0 lead{// ab${terminator}}${ALL_PROSE_CHARS}`],
+      },
+      {
+        name: `run-on container with residues, ${terminatorName}`,
+        lines: () => [`a0 lead{// ab}${terminator}}${ALL_PROSE_CHARS}`],
+      },
+      ...FORM_RESIDUES.flatMap(([residueName, residue]): FormSpelling[] => [
+        {
+          name: `line-comment container, ${residueName} residue before, ${terminatorName}`,
+          lines: () => [`${residue}{// ab${terminator}}`],
+        },
+        {
+          name: `line-comment container, ${residueName} residue after, ${terminatorName}`,
+          lines: () => [`{// ab${terminator}}${residue}`],
+        },
+      ]),
+    ],
+  ),
   ...FORM_FENCE_MARKERS.flatMap((marker) =>
     FORM_FENCE_INFOS.map((info): FormSpelling => ({
       name: `fenced code block ${marker}${info}, full interior`,
@@ -1153,6 +1478,41 @@ const BLOCK_FORMS: readonly FormSpelling[] = [
     name: "embedding line, external reference",
     lines: () => ["{text(M1.s0)}"],
   },
+  // The refined embedding forms of 2.3 (embeddingContainer), own-line.
+  {
+    name: "embedding line, whitespace beside the call",
+    lines: () => [`{ ${TAB}text("s0")${NBSP}${LS} }`],
+  },
+  {
+    name: "embedding line, block comment before the call",
+    lines: () => [`{/* ${ALL_PROSE_CHARS} */ text(M1.s0)}`],
+  },
+  {
+    name: "embedding line, block comment after the call",
+    lines: () => [`{text("s0") /* ${ALL_PROSE_CHARS} */}`],
+  },
+  {
+    name: "embedding line, block comments on both sides",
+    lines: () => ["{ /* ab */ text(M1.s0) /* cd */ }"],
+  },
+  ...FORM_TERMINATORS.flatMap(
+    ([terminatorName, terminator]): FormSpelling[] => [
+      {
+        name: `embedding line, line comment before the call, ${terminatorName}`,
+        lines: () => [`{// ${ALL_LINE_COMMENT_CHARS}${terminator}text("s0")}`],
+      },
+      {
+        name: `embedding line, run-on line comment holding the call, ${terminatorName}`,
+        lines: () => [
+          `{// ${ALL_LINE_COMMENT_CHARS}}${terminator}text(M1.s0)}`,
+        ],
+      },
+      {
+        name: `embedding line, line comment after the call, ${terminatorName}`,
+        lines: () => [`{text("s0") // ${ALL_LINE_COMMENT_CHARS}${terminator}}`],
+      },
+    ],
+  ),
   ...TAG_NAMES.flatMap((tag): FormSpelling[] => [
     {
       name: `self-closing section line <${tag}>`,
@@ -1192,6 +1552,42 @@ const INLINE_ELEMENTS: ReadonlyArray<
   ["inline comment", () => "{/* ab */}"],
   ["inline embedding, local reference", () => '{text("s0")}'],
   ["inline embedding, external reference", () => "{text(M1.s0)}"],
+  // The refined comment and embedding forms, in text position.
+  ["inline comment `{}`", () => "{}"],
+  ["inline block-comment sequence", () => `{ /* ab */${NBSP}/* cd */ }`],
+  [
+    "inline comment of ECMAScript-only whitespace",
+    () => `{${ECMASCRIPT_ONLY_WHITESPACE.join("")}}`,
+  ],
+  ["inline embedding, whitespace beside the call", () => `{ text("s0")${LS}}`],
+  [
+    "inline embedding, block comments beside the call",
+    () => "{/* ab */ text(M1.s0) /* cd */}",
+  ],
+  ...FORM_TERMINATORS.flatMap(
+    ([terminatorName, terminator]): (readonly [string, () => string])[] => [
+      [
+        `inline line-comment container, ${terminatorName}`,
+        () => `{// ${ALL_LINE_COMMENT_CHARS}${terminator}}`,
+      ],
+      [
+        `inline run-on container, ${terminatorName}`,
+        () => `{// ab}${terminator}}`,
+      ],
+      [
+        `inline embedding, line comment before the call, ${terminatorName}`,
+        () => `{// ab${terminator}text("s0")}`,
+      ],
+      [
+        `inline embedding, run-on line comment holding the call, ${terminatorName}`,
+        () => `{// ab}${terminator}text(M1.s0)}`,
+      ],
+      [
+        `inline embedding, line comment after the call, ${terminatorName}`,
+        () => `{text("s0") // ab${terminator}}`,
+      ],
+    ],
+  ),
   ...FORM_CODE_SPANS.map(
     ([spanName, span]): readonly [string, () => string] => [
       spanName,
@@ -1250,7 +1646,29 @@ const PROSE_LINE_FORMS: readonly FormSpelling[] = [
       name: `inline comment adjoined by ${codePointName(char)} on both sides`,
       lines: () => [`a${char}{/* ab */}${char}a`],
     },
+    {
+      name: `run-on container adjoined by ${codePointName(char)} on both sides`,
+      lines: () => [`a${char}{// ab}${LF}}${char}a`],
+    },
   ]),
+  // Leads the container/heading guard leaves reachable (opensBlockConstruct):
+  // a marker character not followed by whitespace opens nothing.
+  {
+    name: "prose line led by U+002D then a letter, hosting a run-on container",
+    lines: () => [`-a {// ab}${LF}}`],
+  },
+  {
+    name: "prose line led by a digit and U+002E then a letter, hosting a line-comment container",
+    lines: () => [`9.a {// ab${LF}}`],
+  },
+  {
+    name: "prose line led by U+0023 then a letter (no heading), hosting a two-line embedding",
+    lines: () => [`#a {// ab${LF}text("s0")}`],
+  },
+  {
+    name: "prose line led by whitespace, U+0023, and a letter, hosting a multi-line comment",
+    lines: () => [` ${TAB}#a {/* ab${LF}cd */}`],
+  },
 ];
 
 /** The import block: one import per earlier file, then the mandatory blank. */
@@ -1258,6 +1676,68 @@ const FORM_IMPORT_LINES = [
   'import M1 from "./A.xspec"',
   'import M2 from "./B.xspec"',
 ] as const;
+
+/**
+ * The ESM-block forms of generatedDoc (T3-7): `;`-terminated declarations
+ * and JavaScript comments beside the imports — each block's lines, the
+ * mandatory blank line after it excluded. The last entry spells every form
+ * in one block; the composites below carry it under every terminator.
+ */
+const FORM_ESM_BLOCKS: ReadonlyArray<readonly [string, readonly string[]]> = [
+  ["one import", [FORM_IMPORT_LINES[0]]],
+  ["two imports", [...FORM_IMPORT_LINES]],
+  [
+    "`;`-terminated imports",
+    ['import M1 from "./A.xspec";', 'import M2 from "./B.xspec";'],
+  ],
+  [
+    "a line comment after an import",
+    [
+      `import M1 from "./A.xspec" // ${ALL_LINE_COMMENT_CHARS}`,
+      FORM_IMPORT_LINES[1],
+    ],
+  ],
+  [
+    "a block comment after an import",
+    [
+      `import M1 from "./A.xspec" /* ${ALL_PROSE_CHARS} */`,
+      FORM_IMPORT_LINES[1],
+    ],
+  ],
+  [
+    "an own-line line comment between two imports",
+    [
+      FORM_IMPORT_LINES[0],
+      `// ${ALL_LINE_COMMENT_CHARS}`,
+      FORM_IMPORT_LINES[1],
+    ],
+  ],
+  [
+    "a block comment before an import on the block's second line",
+    [
+      FORM_IMPORT_LINES[0],
+      `/* ${ALL_PROSE_CHARS} */ import M2 from "./B.xspec"`,
+    ],
+  ],
+  [
+    "an own-line line comment after the last import",
+    [FORM_IMPORT_LINES[0], `// ${ALL_LINE_COMMENT_CHARS}`],
+  ],
+  [
+    "a `;`-terminated single import with a line comment after it",
+    [`import M1 from "./A.xspec"; // ${ALL_LINE_COMMENT_CHARS}`],
+  ],
+  [
+    "every ESM-block form in one block",
+    [
+      `import M1 from "./A.xspec"; // ${ALL_LINE_COMMENT_CHARS}`,
+      `// ${ALL_LINE_COMMENT_CHARS}`,
+      `/* ${ALL_PROSE_CHARS} */ import M2 from "./B.xspec" /* ${ALL_PROSE_CHARS} */`,
+      `// ${ALL_LINE_COMMENT_CHARS}`,
+    ],
+  ],
+];
+const FORM_ESM_BLOCK_ALL = FORM_ESM_BLOCKS[FORM_ESM_BLOCKS.length - 1][1];
 
 /**
  * One form's document: the form after the first prose line, after a blank
@@ -1282,8 +1762,9 @@ function formDocument(form: FormSpelling): string {
 /**
  * Every form in one document under one terminator drawn for every line
  * (the composite the generator's per-line terminator draw can reach; the
- * multi-line comment forms keep their own internal terminators). `cycle`
- * draws LF, CRLF, CR in turn, applying endLine's lone-CR guard.
+ * multi-line container forms keep their own internal terminators), the
+ * all-forms ESM block at its head. `cycle` draws LF, CRLF, CR in turn,
+ * applying endLine's lone-CR guard.
  */
 function compositeDocument(
   terminatorOf: (
@@ -1295,7 +1776,7 @@ function compositeDocument(
 ): string {
   const id = formIds("");
   const lines = [
-    ...FORM_IMPORT_LINES,
+    ...FORM_ESM_BLOCK_ALL,
     "",
     FORM_FIRST_LINE,
     ...BLOCK_FORMS.flatMap((form) => form.lines(id)),
@@ -1328,14 +1809,15 @@ export const P2_P3_FORM_VECTORS: ReadonlyArray<
     form.name,
     formDocument(form),
   ]),
-  [
-    "import block, one import, then the mandatory blank line",
-    [FORM_IMPORT_LINES[0], "", FORM_FIRST_LINE, "{text(M1.s0)}"].join(LF) + LF,
-  ],
-  [
-    "import block, two imports",
-    [...FORM_IMPORT_LINES, "", FORM_FIRST_LINE].join(LF) + LF,
-  ],
+  ...FORM_ESM_BLOCKS.flatMap(([blockName, block]) =>
+    FORM_TERMINATORS.map(
+      ([terminatorName, terminator]): readonly [string, string] => [
+        `import block, ${blockName}, then the mandatory blank line, under ${terminatorName}`,
+        [...block, "", FORM_FIRST_LINE, "{text(M1.s0)}"].join(terminator) +
+          terminator,
+      ],
+    ),
+  ),
   [
     "lone-CR terminator followed by an empty line (endLine's guard: CR, never LF)",
     `a${CR}${CR}b${LF}`,
@@ -1676,8 +2158,11 @@ const P_2 = defineProductTest({
   id: "P-2",
   title:
     "property: random documents (prose, fenced code blocks and inline code spans spelling " +
-    "tag-, import-, and expression-like bytes as literal content, nested sections, imports, " +
-    "single- and multi-line comments, embeddings, mixed line terminators, " +
+    "tag-, import-, and expression-like bytes as literal content, nested sections, imports " +
+    "with JavaScript comments and `;` terminators beside them in their ESM block, comments " +
+    "in every form of 2.7 — `{}`, block-comment sequences, line-comment containers, the " +
+    "run-on `{// c}` form, ECMAScript-only whitespace between braces — embeddings with " +
+    "whitespace and comments beside the call, mixed line terminators, " +
     "boundary-code-point-weighted content) compile to Markdown byte-equal to the harness's " +
     "SPEC 3 oracle, deterministically across directories, preserving content bytes outside " +
     "removed constructs (SPEC 3, 1.4, 1.6, 7.3; TEST-SPEC §16 P-2)",
