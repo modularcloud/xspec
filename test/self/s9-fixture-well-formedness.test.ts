@@ -31,6 +31,7 @@ import {
 import { HarnessStagingError } from "../helpers/permissions.js";
 import { TestWorkspace, type WorkspaceDecl } from "../helpers/workspace.js";
 import { REMOVALS_SOURCE } from "../suite/registry/section-3.js";
+import { P2_P3_FORM_VECTORS } from "../suite/registry/section-16-p2-p3.js";
 import {
   I3_HALL_MOVED_SOURCE,
   I3_ROOM_MOVED_SOURCE,
@@ -309,6 +310,25 @@ describe("S-9: the document's well-formed shapes derive", () => {
   test.each(WELL_FORMED)("%s", (_name, source) => {
     expectDerives(source);
     expectDerives(Buffer.from(source, "utf8"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The generators' fixed form vectors (S-9: "every form P-2, P-3, and P-5's
+// generators compose … in the fixed vector set of those forms") — each
+// enumerated form as its generator module spells it, judged here before any
+// product exists; each draw is judged the same way at property time
+// (helpers/property.ts `mdxSources`).
+
+describe("S-9: every form the P-2/P-3 generator composes derives", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(P2_P3_FORM_VECTORS.length).toBeGreaterThan(100);
+    expect(new Set(P2_P3_FORM_VECTORS.map(([name]) => name)).size).toBe(
+      P2_P3_FORM_VECTORS.length,
+    );
+  });
+  test.each(P2_P3_FORM_VECTORS)("%s", (_name, source) => {
+    expectDerives(source);
   });
 });
 

@@ -59,8 +59,14 @@
 //     `\` — so a prose byte can never open a fence, JSX tag, expression
 //     container, blockquote lazy-continuation, or character reference that
 //     would make the product's construct parse diverge from the generator's
-//     structure. Everything else (Markdown punctuation included) is plain
-//     content to SPEC 3, which never interprets Markdown semantics.
+//     structure — and the inline-delimiter punctuation `*`, `_`, `[`, `]`,
+//     `(`, `)`, whose CommonMark pairs (emphasis, links) can straddle an
+//     inline section's tag within a paragraph, a shape the MDX grammar
+//     rejects (S-9: every composed form derives; `P2_P3_FORM_VECTORS`
+//     below is the fixed vector set, and every draw is checked before the
+//     product sees it). Everything else (the remaining Markdown
+//     punctuation included) is plain content to SPEC 3, which never
+//     interprets Markdown semantics.
 //   * Backticks and `~` appear only inside deliberately staged fenced code
 //     blocks and inline code spans (T3-1's grammar boundary, the P-2 entry's
 //     named inclusion) — complete by construction and within the grammar
@@ -114,7 +120,7 @@ import {
 } from "../../helpers/assertions.js";
 import type { MarkdownPiece } from "../../helpers/oracles/markdown.js";
 import { compileMarkdown } from "../../helpers/oracles/markdown.js";
-import type { Choices, Gen } from "../../helpers/property.js";
+import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -317,18 +323,25 @@ const PROSE_ALPHABET: ReadonlyArray<readonly [number, string]> = [
   [1, cp(0x4e2d)],
   [1, cp(0x1f600)],
   // Markdown punctuation — plain content to SPEC 3 (compilation never
-  // interprets Markdown semantics).
+  // interprets Markdown semantics) — restricted to characters that open no
+  // CommonMark inline construct: the emphasis delimiters `*` and `_` and
+  // the link characters `[`, `]`, `(`, `)` are excluded because their pairs
+  // can straddle an inline section's tag — within one line or across a
+  // paragraph's lines — and the MDX grammar rejects a JSX element whose tag
+  // lies inside an emphasis or link that closes outside it (S-9; found by
+  // the fixed form vectors below). Block-level punctuation (`#`, `-`, `|`,
+  // `:`, `!`, `.`) cannot pair across a tag.
   [2, "."],
   [2, "-"],
-  [1, "_"],
+  [1, ";"],
   [1, "#"],
-  [1, "*"],
+  [1, ","],
   [1, "|"],
   [1, ":"],
-  [1, "["],
-  [1, "]"],
-  [1, "("],
-  [1, ")"],
+  [1, "%"],
+  [1, "@"],
+  [1, "?"],
+  [1, "$"],
   [1, "!"],
 ];
 
@@ -975,6 +988,380 @@ export const generatedDoc: Gen<GeneratedDoc> = (choices) => {
 };
 
 // ---------------------------------------------------------------------------
+// Fixed form vectors (TEST-SPEC 17 S-9; 16 preamble)
+//
+// The enumerated forms this generator can compose — not draws — each spelled
+// from the generator's own constants and templates as a complete source, in
+// every context the generator can place it (directly after a prose line,
+// after a blank line, and as a block section's interior, all in one
+// document), so that S-9's self-test
+// (test/self/s9-fixture-well-formedness.test.ts) proves before any product
+// exists that every form derives under the grammar 14.20 fixes; at property
+// time every draw is checked the same way before the product sees it
+// (`mdxSources` on the registrations below; helpers/property.ts). A form
+// added to the generator is added here.
+
+/** Every character of the prose alphabet, once, in alphabet order. */
+const ALL_PROSE_CHARS = PROSE_ALPHABET.map(([, char]) => char).join("");
+/** The mandatory construct-free plain-prose first line (module header). */
+const FORM_FIRST_LINE = "a0 first";
+const FORM_TRAIL_LINE = "z9 trail";
+
+function codePointName(char: string): string {
+  const codePoint = char.codePointAt(0);
+  if (codePoint === undefined) throw new Error("empty character");
+  return `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+/** A fresh dotted id allocator under a prefix (`""` at root level). */
+function formIds(prefix: string): () => string {
+  let counter = 0;
+  return () => {
+    const dotted = `${prefix}s${String(counter)}`;
+    counter += 1;
+    return dotted;
+  };
+}
+
+/** One form: its lines, given an id allocator for the sections it spells. */
+interface FormSpelling {
+  readonly name: string;
+  readonly lines: (id: () => string) => readonly string[];
+}
+
+const FORM_TERMINATORS: ReadonlyArray<readonly [string, string]> = [
+  ["LF", LF],
+  ["CRLF", CRLF],
+  ["CR", CR],
+];
+
+/** The comment-line residue classes of genCommentLine. */
+const FORM_RESIDUES: ReadonlyArray<readonly [string, string]> = [
+  ["boundary-only", NBSP + NEL + LS],
+  ["whitespace-only", SPACE + TAB + VT],
+  ["mixed", SPACE + NBSP + NEL + LS + TAB],
+  ["plain", "ab9"],
+  ["code-span", `${BACKTICK}${CONSTRUCT_LIKE_SPAN_INTERIORS[0]}${BACKTICK}`],
+];
+
+/** Every code span: 1–2 backtick runs around each interior (codeSpan). */
+const FORM_CODE_SPANS: ReadonlyArray<readonly [string, string]> = [
+  1, 2,
+].flatMap((length) =>
+  CONSTRUCT_LIKE_SPAN_INTERIORS.map((interior): readonly [string, string] => [
+    `code span, ${String(length)}-backtick runs around ${JSON.stringify(interior)}`,
+    `${BACKTICK.repeat(length)}${interior}${BACKTICK.repeat(length)}`,
+  ]),
+);
+
+/** The prop combinations of extraProps, in its spelling order (d, coverage, tags). */
+const FORM_PROPS: ReadonlyArray<readonly [string, string]> = [
+  ["no props", ""],
+  ["d single local", ' d={"s0"}'],
+  ["d single external", " d={M1.s0}"],
+  ["d pair", ' d={["s0", M1.s0]}'],
+  ["coverage required", ' coverage="required"'],
+  ["coverage none", ' coverage="none"'],
+  ["tags one", ' tags="t1"'],
+  ["tags two", ' tags="t1 t2"'],
+  ["tags alpha", ' tags="alpha"'],
+  ["all props", ' d={["s0", M1.s0]} coverage="required" tags="t1 t2"'],
+];
+
+const FORM_FENCE_MARKERS = [3, 4].flatMap((length) => [
+  BACKTICK.repeat(length),
+  TILDE.repeat(length),
+]);
+const FORM_FENCE_INFOS = ["", "ts", "md"] as const;
+
+/** The block forms of genBlock (and the import lines), one entry each. */
+const BLOCK_FORMS: readonly FormSpelling[] = [
+  { name: "blank line", lines: () => [""] },
+  ...INLINE_WHITESPACE.map((char): FormSpelling => ({
+    name: `whitespace-only line of ${codePointName(char)}`,
+    lines: () => [char],
+  })),
+  {
+    name: "whitespace-only line, a run of all four whitespace characters",
+    lines: () => [INLINE_WHITESPACE.join("")],
+  },
+  {
+    name: "prose line of every alphabet character",
+    lines: () => [ALL_PROSE_CHARS],
+  },
+  ...PROSE_ALPHABET.map(([, char]): FormSpelling => ({
+    name: `prose line of ${codePointName(char)} alone`,
+    lines: () => [char],
+  })),
+  {
+    name: "comment line, alphabet interior",
+    lines: () => [`{/* ${ALL_PROSE_CHARS} */}`],
+  },
+  { name: "comment line, empty interior", lines: () => ["{/*  */}"] },
+  ...FORM_RESIDUES.flatMap(([residueName, residue]): FormSpelling[] => [
+    {
+      name: `comment line, ${residueName} residue before`,
+      lines: () => [`${residue}{/* ab */}`],
+    },
+    {
+      name: `comment line, ${residueName} residue after`,
+      lines: () => [`{/* ab */}${residue}`],
+    },
+  ]),
+  ...FORM_TERMINATORS.flatMap(
+    ([terminatorName, terminator]): FormSpelling[] => [
+      {
+        name: `multi-line comment, one internal ${terminatorName}`,
+        lines: () => [`{/* ab${terminator}cd */}`],
+      },
+      {
+        name: `multi-line comment, two internal ${terminatorName}`,
+        lines: () => [`{/* ab${terminator}cd${terminator}ef */}`],
+      },
+      {
+        name: `multi-line comment with residues, internal ${terminatorName}`,
+        lines: () => [`a0 lead{/* ab${terminator}cd */}${ALL_PROSE_CHARS}`],
+      },
+    ],
+  ),
+  {
+    name: "multi-line comment, mixed internal terminators",
+    lines: () => [`{/* ab${LF}cd${CR}ef */}`],
+  },
+  ...FORM_FENCE_MARKERS.flatMap((marker) =>
+    FORM_FENCE_INFOS.map((info): FormSpelling => ({
+      name: `fenced code block ${marker}${info}, full interior`,
+      lines: () => [
+        `${marker}${info}`,
+        ...CONSTRUCT_LIKE_LINES,
+        ALL_PROSE_CHARS,
+        "",
+        marker,
+      ],
+    })),
+  ),
+  ...CONSTRUCT_LIKE_LINES.map((line): FormSpelling => ({
+    name: `fenced code block holding ${JSON.stringify(line)} alone`,
+    lines: () => [FORM_FENCE_MARKERS[0], line, FORM_FENCE_MARKERS[0]],
+  })),
+  {
+    name: "fenced code block, empty",
+    lines: () => [FORM_FENCE_MARKERS[0], FORM_FENCE_MARKERS[0]],
+  },
+  { name: "embedding line, local reference", lines: () => ['{text("s0")}'] },
+  {
+    name: "embedding line, external reference",
+    lines: () => ["{text(M1.s0)}"],
+  },
+  ...TAG_NAMES.flatMap((tag): FormSpelling[] => [
+    {
+      name: `self-closing section line <${tag}>`,
+      lines: (id) => [`<${tag} id="${id()}" />`],
+    },
+    {
+      name: `block section <${tag}>`,
+      lines: (id) => [`<${tag} id="${id()}">`, "interior a", `</${tag}>`],
+    },
+  ]),
+  ...FORM_PROPS.map(([propsName, props]): FormSpelling => ({
+    name: `block section, ${propsName}`,
+    lines: (id) => [`<S id="${id()}"${props}>`, "interior a", "</S>"],
+  })),
+  { name: "block section, empty", lines: (id) => [`<S id="${id()}">`, "</S>"] },
+  {
+    name: "block sections nested three deep",
+    lines: (id) => {
+      const outer = id();
+      return [
+        `<S id="${outer}">`,
+        `<Spec id="${outer}.s0">`,
+        `<S id="${outer}.s0.s0">`,
+        "x",
+        "</S>",
+        "</Spec>",
+        "</S>",
+      ];
+    },
+  },
+];
+
+/** The inline elements of genProseLine, each spelled once. */
+const INLINE_ELEMENTS: ReadonlyArray<
+  readonly [string, (id: () => string) => string]
+> = [
+  ["inline comment", () => "{/* ab */}"],
+  ["inline embedding, local reference", () => '{text("s0")}'],
+  ["inline embedding, external reference", () => "{text(M1.s0)}"],
+  ...FORM_CODE_SPANS.map(
+    ([spanName, span]): readonly [string, () => string] => [
+      spanName,
+      () => span,
+    ],
+  ),
+  ...TAG_NAMES.flatMap(
+    (tag): (readonly [string, (id: () => string) => string])[] => [
+      [
+        `inline section <${tag}>, alphabet interior`,
+        (id) => `<${tag} id="${id()}">${ALL_PROSE_CHARS}</${tag}>`,
+      ],
+      ...INLINE_WHITESPACE.map(
+        (char): readonly [string, (id: () => string) => string] => [
+          `inline section <${tag}>, ${codePointName(char)} interior`,
+          (id) => `<${tag} id="${id()}">${char}</${tag}>`,
+        ],
+      ),
+      [
+        `inline section <${tag}>, two-character whitespace interior`,
+        (id) => `<${tag} id="${id()}">${FF}${VT}</${tag}>`,
+      ],
+      [
+        `inline section <${tag}>, empty interior`,
+        (id) => `<${tag} id="${id()}"></${tag}>`,
+      ],
+      [
+        `inline self-closing section <${tag}>`,
+        (id) => `<${tag} id="${id()}" />`,
+      ],
+    ],
+  ),
+];
+
+/** The prose-line forms: a kept lead, an inline element, an optional tail. */
+const PROSE_LINE_FORMS: readonly FormSpelling[] = [
+  ...INLINE_ELEMENTS.flatMap(([elementName, element]): FormSpelling[] => [
+    {
+      name: `prose line hosting ${elementName}, no tail`,
+      lines: (id) => [`a0 ${element(id)}`],
+    },
+    {
+      name: `prose line hosting ${elementName}, alphabet tail`,
+      lines: (id) => [`a0 ${element(id)}${ALL_PROSE_CHARS}`],
+    },
+  ]),
+  // The character adjoining a construct on either side: each alphabet
+  // character directly before the opening tag and directly after the
+  // closing tag of an inline section, and around an inline comment.
+  ...PROSE_ALPHABET.flatMap(([, char]): FormSpelling[] => [
+    {
+      name: `inline section adjoined by ${codePointName(char)} on both sides`,
+      lines: (id) => [`a${char}<S id="${id()}">x</S>${char}a`],
+    },
+    {
+      name: `inline comment adjoined by ${codePointName(char)} on both sides`,
+      lines: () => [`a${char}{/* ab */}${char}a`],
+    },
+  ]),
+];
+
+/** The import block: one import per earlier file, then the mandatory blank. */
+const FORM_IMPORT_LINES = [
+  'import M1 from "./A.xspec"',
+  'import M2 from "./B.xspec"',
+] as const;
+
+/**
+ * One form's document: the form after the first prose line, after a blank
+ * line, and as a block section's interior (with dotted ids beneath it).
+ */
+function formDocument(form: FormSpelling): string {
+  const lines = [
+    FORM_FIRST_LINE,
+    ...form.lines(formIds("")),
+    FORM_TRAIL_LINE,
+    "",
+    ...form.lines(formIds("t")),
+    "",
+    '<S id="u">',
+    ...form.lines(formIds("u.")),
+    "</S>",
+    FORM_TRAIL_LINE,
+  ];
+  return lines.join(LF) + LF;
+}
+
+/**
+ * Every form in one document under one terminator drawn for every line
+ * (the composite the generator's per-line terminator draw can reach; the
+ * multi-line comment forms keep their own internal terminators). `cycle`
+ * draws LF, CRLF, CR in turn, applying endLine's lone-CR guard.
+ */
+function compositeDocument(
+  terminatorOf: (
+    index: number,
+    lineIsEmpty: boolean,
+    previous: string,
+  ) => string,
+  stripFinal: boolean,
+): string {
+  const id = formIds("");
+  const lines = [
+    ...FORM_IMPORT_LINES,
+    "",
+    FORM_FIRST_LINE,
+    ...BLOCK_FORMS.flatMap((form) => form.lines(id)),
+    ...PROSE_LINE_FORMS.flatMap((form) => form.lines(id)),
+    FORM_TRAIL_LINE,
+  ];
+  let text = "";
+  let previous = "";
+  lines.forEach((line, index) => {
+    const terminator = terminatorOf(index, line === "", previous);
+    text += line + terminator;
+    previous = terminator;
+  });
+  return stripFinal ? text.slice(0, -previous.length) : text;
+}
+
+const CYCLED_TERMINATORS = [LF, CRLF, CR] as const;
+
+/**
+ * The fixed form-vector set of the P-2/P-3 generator (S-9): name and source.
+ */
+export const P2_P3_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [
+  ...BLOCK_FORMS.map((form): readonly [string, string] => [
+    form.name,
+    formDocument(form),
+  ]),
+  ...PROSE_LINE_FORMS.map((form): readonly [string, string] => [
+    form.name,
+    formDocument(form),
+  ]),
+  [
+    "import block, one import, then the mandatory blank line",
+    [FORM_IMPORT_LINES[0], "", FORM_FIRST_LINE, "{text(M1.s0)}"].join(LF) + LF,
+  ],
+  [
+    "import block, two imports",
+    [...FORM_IMPORT_LINES, "", FORM_FIRST_LINE].join(LF) + LF,
+  ],
+  [
+    "lone-CR terminator followed by an empty line (endLine's guard: CR, never LF)",
+    `a${CR}${CR}b${LF}`,
+  ],
+  ...FORM_TERMINATORS.flatMap(
+    ([terminatorName, terminator]): (readonly [string, string])[] => [
+      [
+        `every form under ${terminatorName} terminators`,
+        compositeDocument(() => terminator, false),
+      ],
+      [
+        `every form under ${terminatorName} terminators, final terminator stripped`,
+        compositeDocument(() => terminator, true),
+      ],
+    ],
+  ),
+  [
+    "every form under cycled terminators (endLine's lone-CR guard applied)",
+    compositeDocument((index, lineIsEmpty, previous) => {
+      const drawn = CYCLED_TERMINATORS[index % CYCLED_TERMINATORS.length];
+      return lineIsEmpty && previous === CR && drawn === LF ? CR : drawn;
+    }, false),
+  ],
+];
+
+// ---------------------------------------------------------------------------
 // Rendering
 
 /** Counterexample rendering: per-file sources with escapes readable. */
@@ -995,6 +1382,14 @@ function workspaceFiles(doc: GeneratedDoc): Record<string, string> {
   const files: Record<string, string> = { "xspec.config.ts": EMIT_TRUE_CONFIG };
   for (const file of doc.files) files[file.path] = sourceOf(file);
   return files;
+}
+
+/**
+ * S-9's per-draw check (helpers/property.ts `mdxSources`): every file a
+ * draw stages — the `.mdx` sources are judged before the product sees them.
+ */
+function stagedSources(doc: GeneratedDoc): DrawSource[] {
+  return Object.entries(workspaceFiles(doc));
 }
 
 /**
@@ -1296,7 +1691,12 @@ const P_2 = defineProductTest({
       async (doc) => {
         await runP2Trial(product, doc);
       },
-      { runs: 12, maxShrinkExecutions: 150, render: renderDoc },
+      {
+        runs: 12,
+        maxShrinkExecutions: 150,
+        render: renderDoc,
+        mdxSources: stagedSources,
+      },
     );
   },
 });
@@ -1318,7 +1718,12 @@ const P_3 = defineProductTest({
       async (doc) => {
         await runP3Trial(product, doc);
       },
-      { runs: 6, maxShrinkExecutions: 100, render: renderDoc },
+      {
+        runs: 6,
+        maxShrinkExecutions: 100,
+        render: renderDoc,
+        mdxSources: stagedSources,
+      },
     );
   },
 });
