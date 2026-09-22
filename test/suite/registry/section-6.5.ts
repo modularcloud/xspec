@@ -3792,7 +3792,7 @@ const T6_5_5 = defineProductTest({
 // T6.5-6 — identity terms
 // ---------------------------------------------------------------------------
 
-// The new-identity checks read in identity terms (SPEC 6.5). Two clauses
+// The new-identity checks read in identity terms (SPEC 6.5). Three clauses
 // admit no discriminating fixture, per TEST-SPEC T6.5-6, and are documented
 // rather than staged:
 // - The collision clause's after-the-removal qualifier: structural IDs (1.3)
@@ -3804,25 +3804,176 @@ const T6_5_5 = defineProductTest({
 //   reason: a move rewrites only valid workspaces and retargets every
 //   affected reference to identities that exist after the operation; it is
 //   exercised as the always-passing side of every successful move.
+// - The mirrored "structural parent rules remain satisfied" check, in both
+//   forms: the file form changes no ID and no within-file nesting; in the
+//   section form the target parent is located as the target file's section
+//   bearing `<new-id>` minus its final segment — absent, or lying within the
+//   moved subtree, it is `refused-missing-target-parent` (T6.5-4) — prefix
+//   replacement preserves the subtree's relative nesting, a single-segment
+//   `<new-id>` inserts at top level (exactly one segment, 1.3), and the
+//   origin's removal disturbs no remaining ID; on a workspace passing the
+//   valid-workspace precondition 1.3 therefore holds by construction after
+//   every non-refused move — the check is the always-passing side of every
+//   successful move (T6.5-1/2/3), and `refused-structural-parent` is staged
+//   through rename alone (T6.4-3, T14-7).
+//
+// The kept-ID move's fixture: the moved subtree `x` holds a descendant `x.c`
+// — its `id` attribute single-quoted, a spelling 2.7 admits, so a product
+// re-emitting the unchanged attribute in a normalized form is caught at the
+// byte compare — and a sibling `x.u` carrying the local reference
+// `d={"x.c"}` to it. The move changes every moved node's identity in its
+// file part alone: `x.c` keeps its ID, and the local spelling `"x.c"`, read
+// in the target file, already resolves to `specs/B.mdx#x.c` (2.2) — a
+// rewrite is made and reported exactly when it changes the construct's
+// characters (SPEC 6.5), so the preview reports the origin deletion and the
+// target insertion alone, with no `id-rewrite` and no `reference-rewrite`
+// nested inside the deletion, and the moved text lands byte-identical.
 const I6_A = "specs/A.mdx";
-const I6_A_SOURCE = [
-  '<S id="a">',
-  "Alpha text.",
-  "</S>",
-  "",
+const I6_B = "specs/B.mdx";
+
+/** The moved text: the `x` construct's own characters (SPEC 6.5, 1.1). */
+const I6_MOVED_TEXT = [
   '<S id="x">',
   "Ex text.",
+  "",
+  "<S id='x.c'>",
+  "Ex-c text.",
   "</S>",
   "",
+  '<S id="x.u" d={"x.c"}>',
+  "Ex-u text.",
+  "</S>",
+  "</S>",
 ].join("\n");
 
-const I6_B = "specs/B.mdx";
+/** The origin's text before the construct: one section, then a blank line. */
+const I6_A_HEAD = ['<S id="a">', "Alpha text.", "</S>", "", ""].join("\n");
+const I6_A_SOURCE = I6_A_HEAD + I6_MOVED_TEXT + "\n";
+
+// Expected origin bytes after the move, composed from SPEC 6.5 and 3 — not
+// from any product output: the construct's own characters are deleted in
+// place, and the merged line that deletion leaves — holding only the closing
+// tag's terminator — is dropped with it; the blank line before the construct
+// was blank in the source and is kept (3 drops only lines a removal blanked).
+const I6_A_AFTER = I6_A_HEAD;
+
 const I6_B_SOURCE = ['<S id="b">', "Bee text.", "</S>", ""].join("\n");
+
+// Expected target bytes: a top-level `<new-id>` inserts the moved text at
+// the end of the file followed by U+000A; the file's final line is
+// terminated, so the insertion point is at the start of a line and no
+// preceding U+000A is added (SPEC 6.5). The moved text is byte-identical to
+// the construct's own characters — no `id` attribute and no local-form
+// reference rewritten to its unchanged spelling (SPEC 6.5).
+const I6_B_AFTER = I6_B_SOURCE + I6_MOVED_TEXT + "\n";
+
+/**
+ * The preview's complete plan for the kept-ID move (SPEC 6.6, 12.7): in the
+ * origin, the `origin-deletion` alone — one range spanning the construct's
+ * own characters extended over the terminator of the merged line the
+ * deletion drops (6.6, 3) — and in the target, the `target-insertion` alone,
+ * zero-length at the end of the file.
+ */
+const I6_ORIGIN_DELETION: SourceRange = {
+  start: utf8Length(I6_A_HEAD),
+  end: utf8Length(I6_A_HEAD) + utf8Length(I6_MOVED_TEXT) + 1,
+};
+const I6_TARGET_INSERTION: SourceRange = {
+  start: utf8Length(I6_B_SOURCE),
+  end: utf8Length(I6_B_SOURCE),
+};
+const I6_EXPECTED_FILES: readonly ExpectedPreviewFile[] = [
+  {
+    file: I6_A,
+    edits: [{ class: "origin-deletion", range: I6_ORIGIN_DELETION }],
+  },
+  {
+    file: I6_B,
+    edits: [{ class: "target-insertion", range: I6_TARGET_INSERTION }],
+  },
+];
+
+/** The kept-ID move's mapping: three IDs kept, the file part changed. */
+const I6_MAPPING: readonly AppliedMappingPair[] = [
+  { from: `${I6_A}#x`, to: `${I6_B}#x` },
+  { from: `${I6_A}#x.c`, to: `${I6_B}#x.c` },
+  { from: `${I6_A}#x.u`, to: `${I6_B}#x.u` },
+];
+
+/**
+ * The kept-ID move's preview plan (TEST-SPEC T6.5-6): first the no-op
+ * discipline — a rewrite is made and reported exactly when it changes the
+ * construct's characters (SPEC 6.5), so no `id-rewrite` and no
+ * `reference-rewrite` may stand anywhere in the plan, the origin deletion's
+ * interior included — then the complete `files`, form-exact: the origin's
+ * one `origin-deletion` and the target's one `target-insertion`, in file
+ * path byte order, class-plus-range only (SPEC 6.6, 12.7).
+ */
+function assertKeptIdMovePlan(
+  files: readonly PreviewFileEntry[],
+  context: string,
+): void {
+  const noOps = files.flatMap((entry) =>
+    entry.edits
+      .filter(
+        (edit) =>
+          edit.class === "id-rewrite" || edit.class === "reference-rewrite",
+      )
+      .map(
+        (edit) =>
+          `${renderPathValue(entry.file)} ${edit.class} ` +
+          `[${String(edit.range.start)}, ${String(edit.range.end)})`,
+      ),
+  );
+  if (noOps.length > 0) {
+    fail(
+      `${context}: a cross-file section move keeping its ID rewrites no ` +
+        `\`id\` attribute and no local-form reference inside the moved ` +
+        `text — \`x.c\` keeps its ID, and \`"x.c"\` read in the target ` +
+        `file already resolves to ${I6_B}#x.c — because a rewrite is made ` +
+        `and reported exactly when it changes the construct's characters ` +
+        `(SPEC 6.5, 6.6); the plan reports ${String(noOps.length)} ` +
+        `no-op edit(s): ${noOps.join(", ")}`,
+    );
+  }
+  if (files.length !== I6_EXPECTED_FILES.length) {
+    fail(
+      `${context}: \`files\` must hold exactly one entry per file the move ` +
+        `would rewrite — the origin and the target — expected ` +
+        `[${I6_EXPECTED_FILES.map((entry) => entry.file).join(", ")}], got ` +
+        `[${files.map((entry) => renderPathValue(entry.file)).join(", ")}] ` +
+        `(SPEC 6.6, 12.7)`,
+    );
+  }
+  for (let i = 0; i < I6_EXPECTED_FILES.length; i += 1) {
+    const want = I6_EXPECTED_FILES[i]!;
+    const got = files[i]!;
+    if (got.file !== want.file) {
+      fail(
+        `${context}: files[${String(i)}] must be ${JSON.stringify(want.file)} ` +
+          `— entries under pre-operation paths, ordered by file path bytes ` +
+          `(SPEC 6.6, 12.7); got ${renderPathValue(got.file)}`,
+      );
+    }
+    assertSameJson(
+      projectEdits(got.edits),
+      projectEdits(want.edits),
+      `${context}: ${want.file} — exactly the edits the kept-ID move would ` +
+        `make there, class-plus-range only: the origin's \`origin-deletion\` ` +
+        `spanning the construct's own characters extended over the ` +
+        `terminator of the merged line the deletion drops, the target's ` +
+        `zero-length \`target-insertion\` at the end of the file ` +
+        `(SPEC 6.6, 6.5, 3, 12.7)`,
+    );
+  }
+}
 
 const T6_5_6 = defineProductTest({
   id: "T6.5-6",
   title:
-    "identity terms: a cross-file section move keeping its ID (`a.mdx#x` → `b.mdx#x`, no `x` in `b.mdx`) is valid — the new identity differs in its file part; the exact self-move (`<target-file>#<new-id>` equal to `<file>#<id>`) is refused with exit 1 as exactly one refused-identity-unchanged finding concerning that identity (no collision reason beside it), modifies nothing, and appends no journal entry (journal byte-compared around the attempt); a same-file move whose `<new-id>` collides with an ID remaining in the target file after the removal is refused as exactly one refused-id-collision finding locating the remaining bearer (SPEC 6.5, 1.5, 6.1, 12.7, 14)",
+    "identity terms: a cross-file section move keeping its ID (`a.mdx#x` → `b.mdx#x`, no `x` in `b.mdx`) is valid — the new identity differs in its file part — and rewrites no `id` attribute and no local-form reference inside the moved text: with the moved subtree holding a descendant `x.c` (its `id` single-quoted) and the local reference " +
+    'd={"x.c"}' +
+    ", the preview reports no `id-rewrite` and no `reference-rewrite` inside the origin deletion — its `files` exactly the origin's `origin-deletion` and the target's end-of-file `target-insertion`, its `mapping` the three kept IDs under the new file part — and the real move (its applied mapping the same) lands the moved text in `b.mdx` byte-identical (the construct's own characters, appended after U+000A discipline) with the origin's construct deleted in place and its emptied line dropped, `check` clean after it; a product rewriting attributes or references to their unchanged spellings, or reporting such no-op edits, fails; the exact self-move (`<target-file>#<new-id>` equal to `<file>#<id>`) is refused with exit 1 as exactly one refused-identity-unchanged finding concerning that identity (no collision reason beside it), modifies nothing, and appends no journal entry (journal byte-compared around the attempt); a same-file move whose `<new-id>` collides with an ID remaining in the target file after the removal is refused as exactly one refused-id-collision finding locating the remaining bearer; the collision clause's after-the-removal qualifier, the mirrored all-rewritten-references-resolve clause, and the mirrored structural-parent check admit no discriminating fixture and are documented at the module (SPEC 6.5, 6.6, 1.5, 6.1, 3, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -3837,22 +3988,107 @@ const T6_5_6 = defineProductTest({
         // Valid: the cross-file move keeping its ID — the new identity
         // specs/B.mdx#x differs from specs/A.mdx#x in its file part
         // (SPEC 6.5: "a cross-file section move keeping its ID is
-        // therefore valid").
+        // therefore valid"). First its preview, whose plan makes the no-op
+        // discipline observable: no rewrite of an `id` attribute or a
+        // local-form reference whose characters the move leaves unchanged
+        // is reported (SPEC 6.5, 6.6).
+        const moveArgv = ["move", "specs/A.mdx#x", "specs/B.mdx#x"] as const;
+        const previewLabel = `T6.5-6 \`${moveArgv.join(" ")} --preview --json\``;
+        const preview = decodePreviewReport(
+          await runJson(
+            product,
+            workspace,
+            [...moveArgv, "--preview", "--json"],
+            previewLabel,
+          ),
+          previewLabel,
+        );
+        assertSameJson(
+          preview.findings,
+          [],
+          `${previewLabel}: a cross-file section move keeping its ID is ` +
+            `valid — the identity check compares identities, not IDs, and ` +
+            `${I6_B}#x differs from ${I6_A}#x in its file part — so the ` +
+            `preview completes with findings [] (SPEC 6.5, 1.5, 6.6)`,
+        );
+        if (preview.mapping === null || preview.files === null) {
+          fail(
+            `${previewLabel}: the completed preview reports its plan — ` +
+              `\`mapping\` and \`files\` non-null (SPEC 6.6, 12.7)`,
+          );
+        }
+        assertAppliedMapping(
+          preview.mapping,
+          I6_MAPPING,
+          `${previewLabel}: \`mapping\` is one entry per node of the moved ` +
+            `subtree — \`x\`, \`x.c\`, \`x.u\` — each ID kept and its file ` +
+            `part changed, ordered by \`from\` bytes (SPEC 6.5, 6.6, 12.7)`,
+        );
+        assertKeptIdMovePlan(preview.files, previewLabel);
+
+        // The real move: its applied mapping, then the bytes it leaves —
+        // the moved text landing byte-identical, the origin's construct
+        // deleted with 6.5's exact extent — and its soundness (`check`).
+        const moveLabel = `T6.5-6 \`${moveArgv.join(" ")} --json\``;
+        assertAppliedMapping(
+          decodeAppliedMappingReport(
+            await runJson(
+              product,
+              workspace,
+              [...moveArgv, "--json"],
+              moveLabel,
+            ),
+            moveLabel,
+          ),
+          I6_MAPPING,
+          `${moveLabel}: the successful move's report is its applied ` +
+            `mapping — exactly the identity pairs the preview planned and ` +
+            `the operation journaled (SPEC 6.5, 6.4, 6.6, 12.0)`,
+        );
+        await assertFileBytes(
+          workspace.path(I6_B),
+          I6_B_AFTER,
+          "T6.5-6: the target after the kept-ID move — the moved text lands " +
+            "byte-identical to the construct's own characters, its " +
+            "single-quoted descendant `id` attribute and its local " +
+            'reference `d={"x.c"}` untouched (a rewrite is made exactly ' +
+            "when it changes the construct's characters), inserted at the " +
+            "end of the file followed by U+000A with none added before it " +
+            "(the final line was terminated) (SPEC 6.5, 1.1; H-4, " +
+            "normalizing nothing)",
+        );
+        await assertFileBytes(
+          workspace.path(I6_A),
+          I6_A_AFTER,
+          "T6.5-6: the origin after the kept-ID move — the construct's own " +
+            "characters deleted in place, the merged line the deletion " +
+            "emptied dropped with its terminator, the pre-existing blank " +
+            "line kept, and no other byte changed (SPEC 6.5, 3; H-4, " +
+            "normalizing nothing)",
+        );
         await expectExit(
           product,
           workspace,
-          ["move", "specs/A.mdx#x", "specs/B.mdx#x"],
+          ["check"],
           0,
-          "T6.5-6 `move specs/A.mdx#x specs/B.mdx#x` — a cross-file section " +
-            "move keeping its ID is valid: the identity check compares " +
-            "identities, not IDs (SPEC 6.5, 1.5)",
+          "T6.5-6 `check` after the kept-ID move — the local reference the " +
+            "moved text carries resolves in the target file and nothing is " +
+            "stale (SPEC 6.5, 2.2, 12.2)",
         );
         await assertNodeIdentities(
           product,
           workspace,
-          [I6_A, `${I6_A}#a`, I6_B, `${I6_B}#b`, `${I6_B}#x`],
-          "the kept-ID move relocated the node: same ID, new file part " +
-            "(SPEC 6.5, 1.5)",
+          [
+            I6_A,
+            `${I6_A}#a`,
+            I6_B,
+            `${I6_B}#b`,
+            `${I6_B}#x`,
+            `${I6_B}#x.c`,
+            `${I6_B}#x.u`,
+          ],
+          "the kept-ID move relocated the subtree: every ID kept, the file " +
+            "part new (SPEC 6.5, 1.5)",
           "T6.5-6 post-move",
         );
         await assertJournalHoldsOneEntry(
