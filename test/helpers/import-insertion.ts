@@ -247,3 +247,107 @@ export function assertAddedImportInsertion(
       reasons.join("; "),
   );
 }
+
+/** Options for {@link assertExactDeclarationInsertion}. */
+export interface ExactInsertionOptions {
+  /** Workspace-relative path of the receiving file, for diagnoses. */
+  readonly rel: string;
+  /** Expected post-operation bytes composed WITHOUT the added import. */
+  readonly base: Uint8Array;
+  /** The product's post-operation bytes. */
+  readonly actual: Uint8Array;
+  /** The added declaration's exact characters, no terminator (SPEC 6.5). */
+  readonly declaration: string;
+}
+
+/** One admissible reading of an exactly spelled added declaration. */
+export interface ExactInsertionReading {
+  /** Insertion offset into `base` (pre-insertion coordinates). */
+  readonly offset: number;
+  /** Whether that offset lies at the start of a line of `base`. */
+  readonly atLineStart: boolean;
+}
+
+/**
+ * Read one admissible offset as the exactly spelled declaration under 6.5's
+ * line discipline; `null` with a reason when it does not read as one.
+ */
+function readExactInsertion(
+  options: ExactInsertionOptions,
+  offset: number,
+  length: number,
+): { reading: ExactInsertionReading } | { reason: string } {
+  const { base, actual, declaration } = options;
+  const run = actual.subarray(offset, offset + length);
+  const atLineStart = offset === 0 || base[offset - 1] === LF;
+  let body = run;
+  if (!atLineStart) {
+    if (run[0] !== LF) {
+      return {
+        reason:
+          "the offset is not at the start of a line, so the run must begin " +
+          "with the preceding U+000A terminator",
+      };
+    }
+    body = run.subarray(1);
+  }
+  if (body.length === 0 || body[body.length - 1] !== LF) {
+    return { reason: "the run must end with a U+000A line terminator" };
+  }
+  const held = body.subarray(0, body.length - 1);
+  if (Buffer.compare(held, Buffer.from(declaration, "utf8")) !== 0) {
+    return {
+      reason:
+        `between its terminators the run must hold exactly the declaration ` +
+        `${JSON.stringify(declaration)}; it holds ` +
+        `${JSON.stringify(Buffer.from(held).toString("utf8"))}`,
+    };
+  }
+  return { reading: { offset, atLineStart } };
+}
+
+/**
+ * Assert that `actual` is `base` with exactly one declaration inserted
+ * under SPEC 6.5's line discipline — the declaration's characters followed
+ * by U+000A at an offset lying at the start of a line, and U+000A, the
+ * declaration, then U+000A at one that does not — the declaration
+ * byte-exactly `declaration` (6.5's spelling rule: single spaces as
+ * shown, no statement terminator, the specifier double-quoted in its
+ * canonical spelling — the caller composes it with the fresh identifiers
+ * substituted), no other byte inserted. Bytes are the only observable, so
+ * every admissible offset that reads as such an insertion is returned
+ * (several describe one byte string where the run's terminators repeat the
+ * bytes beside it); the offset among them is the product's.
+ */
+export function assertExactDeclarationInsertion(
+  options: ExactInsertionOptions,
+  context: string,
+): readonly ExactInsertionReading[] {
+  const label = `${context}: ${options.rel}`;
+  const insertion = isolateSingleInsertion(options.base, options.actual, label);
+  const readings: ExactInsertionReading[] = [];
+  const reasons: string[] = [];
+  for (
+    let offset = insertion.highestOffset;
+    offset >= insertion.lowestOffset;
+    offset -= 1
+  ) {
+    const read = readExactInsertion(options, offset, insertion.length);
+    if ("reading" in read) readings.push(read.reading);
+    else reasons.push(`at offset ${String(offset)}: ${read.reason}`);
+  }
+  if (readings.length > 0) return readings;
+  const shown = options.actual.subarray(
+    insertion.highestOffset,
+    insertion.highestOffset + insertion.length,
+  );
+  fail(
+    `${label} — the single inserted run ` +
+      `${JSON.stringify(Buffer.from(shown).toString("utf8"))} is not the ` +
+      `added declaration ${JSON.stringify(options.declaration)} under 6.5's ` +
+      `line discipline (the declaration's characters followed by U+000A, ` +
+      `preceded by one when the insertion point is not at the start of a ` +
+      `line; no other byte inserted — SPEC 6.5, 2.1) under any admissible ` +
+      `reading: ${reasons.join("; ")}`,
+  );
+}

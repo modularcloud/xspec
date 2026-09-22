@@ -17,6 +17,7 @@ import { expect, test } from "vitest";
 import { HarnessAssertionError } from "../helpers/assertions.js";
 import {
   assertAddedImportInsertion,
+  assertExactDeclarationInsertion,
   isolateSingleInsertion,
 } from "../helpers/import-insertion.js";
 
@@ -164,4 +165,88 @@ test("every violation of the line discipline fails diagnosed", () => {
   );
   // Nothing added at all.
   expectDiagnosed(() => check(BASE), "no bytes were inserted");
+});
+
+// The exact-declaration reader (T6.5-11): the added declaration's characters
+// are pinned byte-exactly by the caller — 6.5's TypeScript spellings with the
+// fresh identifiers substituted — and the line discipline is read as the
+// default-import reader reads it.
+const TS_BASE = [
+  "",
+  "export function f(): string {",
+  "  return txt(Tgt.y);",
+  "}",
+  "",
+].join("\n");
+const TS_DECL = 'import Tgt, { text as txt } from "../specs/target.xspec"';
+
+function checkExact(actual: string, declaration = TS_DECL) {
+  return assertExactDeclarationInsertion(
+    {
+      rel: "src/c.ts",
+      base: bytes(TS_BASE),
+      actual: bytes(actual),
+      declaration,
+    },
+    "self",
+  );
+}
+
+test("an exactly spelled declaration is accepted at a line-start offset, every admissible reading returned", () => {
+  // At the file's start.
+  expect(checkExact(TS_DECL + "\n" + TS_BASE)).toEqual([
+    { offset: 0, atLineStart: true },
+  ]);
+  // After the blank line: the run's terminator repeats the LF beside it, so
+  // the isolated run admits offsets 0 and 1, of which only 1 reads as the
+  // declaration followed by U+000A.
+  expect(checkExact("\n" + TS_DECL + "\n" + TS_BASE.slice(1))).toEqual([
+    { offset: 1, atLineStart: true },
+  ]);
+  // The `{ text }` spelling is the caller's to pin.
+  const textDecl = 'import { text } from "../specs/target.xspec"';
+  expect(checkExact(textDecl + "\n" + TS_BASE, textDecl)).toEqual([
+    { offset: 0, atLineStart: true },
+  ]);
+});
+
+test("the mid-line form is read with its preceding terminator", () => {
+  const head = "\nexport";
+  expect(
+    checkExact(head + "\n" + TS_DECL + "\n" + TS_BASE.slice(head.length)),
+  ).toEqual([{ offset: head.length, atLineStart: false }]);
+});
+
+test("every deviation from the exact declaration fails diagnosed", () => {
+  const notDecl = "is not the added declaration";
+  // Joined to the file with a `;`.
+  expectDiagnosed(
+    () => checkExact(TS_DECL + ";\n" + TS_BASE),
+    notDecl,
+    "must hold exactly the declaration",
+  );
+  // Single-quoted specifier.
+  expectDiagnosed(
+    () => checkExact(TS_DECL.replace(/"/g, "'") + "\n" + TS_BASE),
+    notDecl,
+  );
+  // A spurious blank line after the declaration.
+  expectDiagnosed(() => checkExact(TS_DECL + "\n\n" + TS_BASE), notDecl);
+  // CRLF terminator.
+  expectDiagnosed(() => checkExact(TS_DECL + "\r\n" + TS_BASE), notDecl);
+  // A second declaration kept beside the added one (an import not removed).
+  expectDiagnosed(
+    () =>
+      checkExact(
+        TS_DECL + "\n" + 'import O from "../specs/origin.xspec";\n' + TS_BASE,
+      ),
+    notDecl,
+  );
+  // Nothing added at all.
+  expectDiagnosed(() => checkExact(TS_BASE), "no bytes were inserted");
+  // Edits beyond one inserted run.
+  expectDiagnosed(
+    () => checkExact(TS_DECL + "\n" + TS_BASE.replace("}\n", "};\n")),
+    "more than one edit",
+  );
 });
