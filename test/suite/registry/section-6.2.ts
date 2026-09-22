@@ -2138,126 +2138,480 @@ const T6_2_3 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T6.2-4 — same-parent final-position move
+// T6.2-4 — same-parent final-position move: the two pinned pure shapes and
+// the `changed` twin
 // ---------------------------------------------------------------------------
 
-// The parent's last child is moved onto itself under a new ID: removal plus
-// re-insertion at its own former position reproduces the parent's own content
-// exactly (SPEC 6.2), so the move changes no hash and is pure in effect —
-// asserted with the same full-workspace sweep and empty impact as T6.2-1.
-// A referencing file's `d` and `text(...)` spellings are rewritten to the new
-// identity while its hashes stay put (SPEC 5.4).
-const P4_FILE = "specs/P.mdx";
-const P4_TOP = "specs/P.mdx#p";
-const P4_FIRST = "specs/P.mdx#p.first";
-const P4_LAST_PRE = "specs/P.mdx#p.last";
-const P4_LAST_POST = "specs/P.mdx#p.final";
-const P4_WATCH = "specs/Watch.mdx";
-const P4_W_TOP = "specs/Watch.mdx#watch";
+// Moving a parent's last child onto itself (same parent, same final position,
+// new ID) is pure in effect exactly when the re-insertion reproduces the
+// parent's own content sequence byte for byte — SPEC 6.2's `may`, which the
+// fixture's shape decides, not the operation. TEST-SPEC pins two shapes whose
+// re-insertion does (a harness deriving them from an arbitrary last child,
+// whose closing tag may share a kept line with the parent's, fails):
+//
+// (1) a flow-form last child, its opening and closing tags alone on their
+//     lines, the parent's closing tag alone on the following line: the
+//     deletion removes exactly the construct's lines (the joined line it
+//     leaves empty dropping with line 4's terminator, SPEC 6.5, 3), leaving
+//     `<S id="p">`, U+000A, `</S>`, U+000A, and the insertion before that
+//     `</S>`, at a line start (no terminator added), restores them — the
+//     composed file byte-identical to the original but for the `id`
+//     attribute;
+// (2) T6.5-13(f)'s top-level shape — the file's unterminated last section
+//     moved onto its own position, the root the coincident parent: what the
+//     deletion leaves before the file's end is line 1's terminator, so none
+//     is added, and the result gains only the moved text's own terminator.
+//
+// In each, no hash changes — the parent's own content sequence reproduced,
+// the re-inserted child entering by its canonical identity (SPEC 5.4) — and
+// no node carries any category apart from the identity mapping; a dependent
+// of the moved node in another file, whose `d` and `text(...)` spellings the
+// move rewrites (SPEC 6.5), keeps its hashes like every other node (the
+// purity claim covers a real rewrite). The parents' and the moved nodes' own
+// texts are byte-asserted through `query node` on both sides as the sharp
+// witness of SPEC 3's drop-rule decisions (SPEC 1.6: exact bytes).
+//
+// The `changed` twin — 6.2's `may` on its other side — is T6.5-13(e)'s
+// shape under the same command: the composed text derives (S-9) and gives
+// `p`'s run after its child the moved text's terminator, U+000A, where it
+// was empty, so `p` is `changed`, its ownHash with it, its metadataHash
+// kept, with the 5.6 cascades attributed to it (the root
+// `descendant-changed`; a dependent of `p` in another file and that file's
+// root `upstream-changed`); the moved node keeps its hashes (`x` on a kept
+// line at both sides) and carries no category; the root keeps its own
+// content; no other node is `changed`.
 
-const P4_SOURCE = [
-  '<S id="p">',
-  "Parent text.",
-  "",
-  '<S id="p.first">',
-  "First child text.",
-  "</S>",
-  "",
-  '<S id="p.last" coverage="none" tags="tail">',
-  "Tail child text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const P4_FILE = "specs/a.mdx";
+const P4_DEPS = "specs/Deps.mdx";
+const P4_W_TOP = "specs/Deps.mdx#watch";
 
-const P4_WATCH_SOURCE = [
-  'import P from "./P.xspec"',
-  "",
-  '<S id="watch" d={P.p.last}>',
-  "Depends on the tail child. Embeds: {text(P.p.last)}",
-  "</S>",
-  "",
-].join("\n");
+/**
+ * The other-file dependent: `d` plus an embedding of one node of
+ * `specs/a.mdx` (two edge kinds, one target) — the exact `upstream-changed`
+ * attribution in the twin; a rewritten spelling with unchanged hashes in the
+ * pure shapes.
+ */
+function p4DepsSource(target: string, role: string): string {
+  return [
+    'import A from "./a.xspec"',
+    "",
+    `<S id="watch" d={A.${target}}>`,
+    `Depends on the ${role}. Embeds: {text(A.${target})}`,
+    "</S>",
+    "",
+  ].join("\n");
+}
 
-const P4_PRE_IDENTITIES = [
-  P4_FILE,
-  P4_TOP,
-  P4_FIRST,
-  P4_LAST_PRE,
-  P4_WATCH,
-  P4_W_TOP,
-];
-const P4_IDENTITY_MAP: Readonly<Record<string, string>> = {
-  [P4_LAST_PRE]: P4_LAST_POST,
+// Pinned shape (1): the flow-form last child.
+const F1_P = "specs/a.mdx#p";
+const F1_M_PRE = "specs/a.mdx#p.m";
+const F1_M_POST = "specs/a.mdx#p.n";
+const F1_SOURCE = '<S id="p">\n<S id="p.m">\ny\n</S>\n</S>\n';
+const F1_MOVED = '<S id="p">\n<S id="p.n">\ny\n</S>\n</S>\n';
+
+// Pinned shape (2): T6.5-13(f)'s top-level shape, no final terminator.
+const F2_A = "specs/a.mdx#a";
+const F2_M_PRE = "specs/a.mdx#m";
+const F2_M_POST = "specs/a.mdx#n";
+const F2_SOURCE = '<S id="a">x</S>\n<S id="m">\ny\n</S>';
+const F2_MOVED = '<S id="a">x</S>\n<S id="n">\ny\n</S>\n';
+
+// The `changed` twin: T6.5-13(e)'s shape, under shape (1)'s command.
+const F3_SOURCE = 'foo <S id="p">\n<S id="p.m">x</S></S> baz\n';
+const F3_MOVED = 'foo <S id="p">\n<S id="p.n">x</S>\n</S> baz\n';
+
+/** One pinned pure shape of T6.2-4 (module header). */
+interface PureFinalPositionStaging {
+  readonly label: string;
+  readonly source: string;
+  /** The composed file, byte-exact. */
+  readonly moved: string;
+  /** Why the composition is what it is (the byte assertion's diagnosis). */
+  readonly composition: string;
+  readonly movedPre: string;
+  readonly movedPost: string;
+  /** The moved node's ID at both sides, as the dependent spells it. */
+  readonly idPre: string;
+  readonly idPost: string;
+  /** The coincident parent, and its own text at both sides. */
+  readonly parent: string;
+  readonly parentOwnText: string;
+  readonly parentOwnTextWhy: string;
+  /** The moved node's own text at both sides. */
+  readonly movedOwnText: string;
+  /** Every requirement node of the fixture before the move. */
+  readonly preIdentities: readonly string[];
+}
+
+const F1_STAGING: PureFinalPositionStaging = {
+  label: "T6.2-4 pinned shape (1), the flow-form last child",
+  source: F1_SOURCE,
+  moved: F1_MOVED,
+  composition:
+    "the deletion removes exactly the construct's lines — the joined line it " +
+    "leaves empty dropping with line 4's terminator — and the insertion " +
+    "before the parent's `</S>`, at a line start with no terminator added, " +
+    "restores them: byte-identical to the original but for the `id` " +
+    "attribute (SPEC 6.5, 3)",
+  movedPre: F1_M_PRE,
+  movedPost: F1_M_POST,
+  idPre: "p.m",
+  idPost: "p.n",
+  parent: F1_P,
+  parentOwnText: "",
+  parentOwnTextWhy:
+    "both of its runs empty: its opening tag's line, the child's closing " +
+    "tag's line, and its own closing tag's line each dropped, left empty " +
+    "purely by removals (SPEC 3)",
+  movedOwnText: "y\n",
+  preIdentities: [P4_FILE, F1_P, F1_M_PRE, P4_DEPS, P4_W_TOP],
 };
-const P4_POST_IDENTITIES = P4_PRE_IDENTITIES.map(
-  (identity) => P4_IDENTITY_MAP[identity] ?? identity,
-);
+
+const F2_STAGING: PureFinalPositionStaging = {
+  label: "T6.2-4 pinned shape (2), T6.5-13(f)'s top-level shape",
+  source: F2_SOURCE,
+  moved: F2_MOVED,
+  composition:
+    "what the deletion leaves before the file's end is line 1's terminator, " +
+    "so none is added before the moved text, which its own U+000A follows: " +
+    "the original with `m` re-identified and a final terminator (SPEC 6.5)",
+  movedPre: F2_M_PRE,
+  movedPost: F2_M_POST,
+  idPre: "m",
+  idPost: "n",
+  parent: P4_FILE,
+  parentOwnText: "\n",
+  parentOwnTextWhy:
+    "U+000A at both sides — line 1's terminator after `a`'s excised " +
+    "contribution on that kept line, the construct's own lines dropped, the " +
+    "added final terminator dropping with the closing tag's line (SPEC 3)",
+  movedOwnText: "y\n",
+  preIdentities: [P4_FILE, F2_A, F2_M_PRE, P4_DEPS, P4_W_TOP],
+};
+
+/** A pinned pure shape: byte-exact composition, full sweep, empty impact. */
+async function runPureFinalPositionStaging(
+  product: ProductBinding,
+  staging: PureFinalPositionStaging,
+): Promise<void> {
+  const context = staging.label;
+  const identityMap: Readonly<Record<string, string>> = {
+    [staging.movedPre]: staging.movedPost,
+  };
+  const postIdentities = staging.preIdentities.map(
+    (identity) => identityMap[identity] ?? identity,
+  );
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    {
+      [P4_FILE]: staging.source,
+      [P4_DEPS]: p4DepsSource(staging.idPre, "moved node"),
+    },
+    async (workspace) => {
+      await workspace.gitInit();
+      const base = await workspace.gitCommitAll("pre-move baseline");
+      await buildOk(product, workspace, `${context}: \`build\``);
+
+      const before = await sweepHashes(
+        product,
+        workspace,
+        staging.preIdentities,
+        `${context} pre-move sweep`,
+      );
+      const parentBefore = await queryNode(
+        product,
+        workspace,
+        staging.parent,
+        `${context} pre-move`,
+      );
+      const movedBefore = await queryNode(
+        product,
+        workspace,
+        staging.movedPre,
+        `${context} pre-move`,
+      );
+
+      await expectExit(
+        product,
+        workspace,
+        ["move", staging.movedPre, staging.movedPost],
+        0,
+        `${context}: \`move ${staging.movedPre} ${staging.movedPost}\``,
+      );
+
+      await assertFileBytes(
+        workspace.path(P4_FILE),
+        staging.moved,
+        `${context}: ${P4_FILE} after the move — ${staging.composition}`,
+      );
+
+      // Premise: the dependent's spellings were rewritten to the new identity
+      // (SPEC 6.5) — the purity claim covers a real rewrite.
+      assertRewriteHappened(
+        await readSourceText(workspace, P4_DEPS, `${context} rewrite premise`),
+        P4_DEPS,
+        `A.${staging.idPre}`,
+        `A.${staging.idPost}`,
+        `${context} rewrite premise`,
+      );
+
+      const after = await sweepHashes(
+        product,
+        workspace,
+        postIdentities,
+        `${context} post-move sweep`,
+      );
+      assertHashesPreserved(
+        before,
+        after,
+        identityMap,
+        "the same-parent final-position `move` of a pinned shape",
+        context,
+      );
+
+      const parentAfter = await queryNode(
+        product,
+        workspace,
+        staging.parent,
+        `${context} post-move`,
+      );
+      const movedAfter = await queryNode(
+        product,
+        workspace,
+        staging.movedPost,
+        `${context} post-move`,
+      );
+      for (const [report, side] of [
+        [parentBefore, "before"],
+        [parentAfter, "after"],
+      ] as const) {
+        assertBytesEqual(
+          report.ownText,
+          staging.parentOwnText,
+          `${context}: the coincident parent ${staging.parent}'s own text ` +
+            `${side} the move — ${staging.parentOwnTextWhy}; the re-insertion ` +
+            `reproduces its sequence (SPEC 6.2; 1.6: exact bytes)`,
+        );
+      }
+      for (const [report, identity, side] of [
+        [movedBefore, staging.movedPre, "before"],
+        [movedAfter, staging.movedPost, "after"],
+      ] as const) {
+        assertBytesEqual(
+          report.ownText,
+          staging.movedOwnText,
+          `${context}: the moved node ${identity}'s own text ${side} the ` +
+            `move — \`y\`, U+000A on its kept interior line, its tags' lines ` +
+            `dropped at both sides (SPEC 1.6, 3)`,
+        );
+      }
+
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        `${context}: \`check --json\` after the move — clean: the composed ` +
+          `file derives (SPEC 6.5; S-9)`,
+      );
+
+      const label = `${context}: \`impact --base <pre-move ref> --json\``;
+      assertPureImpact(
+        await impactAgainst(product, workspace, base, label),
+        "a same-parent final-position `move` of a pinned shape",
+        label,
+      );
+    },
+  );
+}
+
+/** The `changed` twin: the coincident parent alone `changed`. */
+async function runChangedTwinStaging(product: ProductBinding): Promise<void> {
+  const context = "T6.2-4 `changed` twin, T6.5-13(e)'s shape";
+  const depsSource = p4DepsSource("p", "coincident parent");
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    { [P4_FILE]: F3_SOURCE, [P4_DEPS]: depsSource },
+    async (workspace) => {
+      await workspace.gitInit();
+      const base = await workspace.gitCommitAll("pre-move baseline");
+      await buildOk(product, workspace, `${context}: \`build\``);
+
+      const parentBefore = await queryNode(
+        product,
+        workspace,
+        F1_P,
+        `${context} pre-move`,
+      );
+      const rootBefore = await queryNode(
+        product,
+        workspace,
+        P4_FILE,
+        `${context} pre-move`,
+      );
+      const movedBefore = await queryNode(
+        product,
+        workspace,
+        F1_M_PRE,
+        `${context} pre-move`,
+      );
+
+      await expectExit(
+        product,
+        workspace,
+        ["move", F1_M_PRE, F1_M_POST],
+        0,
+        `${context}: \`move ${F1_M_PRE} ${F1_M_POST}\``,
+      );
+
+      await assertFileBytes(
+        workspace.path(P4_FILE),
+        F3_MOVED,
+        `${context}: ${P4_FILE} after the move — the origin deletion's range ` +
+          `ends exactly at the insertion point, which line 1's terminator ` +
+          `precedes in the composed text, so no terminator is added before ` +
+          `the moved text, and its own U+000A follows it (SPEC 6.5; ` +
+          `T6.5-13(e))`,
+      );
+      await assertFileBytes(
+        workspace.path(P4_DEPS),
+        depsSource,
+        `${context}: ${P4_DEPS} after the move — its spellings resolve to ` +
+          `\`p\`, whose identity the mapping leaves alone: nothing rewritten, ` +
+          `no other byte changed (SPEC 6.5)`,
+      );
+
+      const parentAfter = await queryNode(
+        product,
+        workspace,
+        F1_P,
+        `${context} post-move`,
+      );
+      const rootAfter = await queryNode(
+        product,
+        workspace,
+        P4_FILE,
+        `${context} post-move`,
+      );
+      const movedAfter = await queryNode(
+        product,
+        workspace,
+        F1_M_POST,
+        `${context} post-move`,
+      );
+
+      assertBytesEqual(
+        parentBefore.ownText,
+        "\n",
+        `${context}: \`p\`'s own text before the move — line 1's terminator, ` +
+          `on a kept line, before its child; its run after the child empty, ` +
+          `its closing tag following the child's at once (SPEC 1.6, 3)`,
+      );
+      assertBytesEqual(
+        parentAfter.ownText,
+        "\n\n",
+        `${context}: \`p\`'s own text after the move — its run after the ` +
+          `child now the moved text's terminator, U+000A, on the kept line ` +
+          `holding \`x\`, where it was empty (SPEC 6.2, 6.5, 3)`,
+      );
+      if (parentAfter.hashes.ownHash === parentBefore.hashes.ownHash) {
+        fail(
+          `${context}: \`p\`'s ownHash must change — its own content ` +
+            `sequence gained the run U+000A after its child (SPEC 6.2, 5.5); ` +
+            `both sides report ownHash ` +
+            `${JSON.stringify(parentAfter.hashes.ownHash)}`,
+        );
+      }
+      assertSameJson(
+        parentAfter.hashes.metadataHash,
+        parentBefore.hashes.metadataHash,
+        `${context}: \`p\` keeps its metadataHash — a section move changes ` +
+          `no node's \`d\` targets, coverage, or tags (SPEC 6.2, 5.5)`,
+      );
+      for (const [report, side] of [
+        [rootBefore, "before"],
+        [rootAfter, "after"],
+      ] as const) {
+        assertBytesEqual(
+          report.ownText,
+          "foo  baz\n",
+          `${context}: the root's own text ${side} the move — \`foo \` and ` +
+            `\` baz\`, U+000A on kept lines at both sides, joined at \`p\`'s ` +
+            `excision point (SPEC 1.6, 3; T6.5-13(e))`,
+        );
+      }
+      assertSameJson(
+        rootAfter.hashes.ownHash,
+        rootBefore.hashes.ownHash,
+        `${context}: the root keeps its ownHash — its own content is ` +
+          `unchanged, \`p\` the one parent between its runs (SPEC 6.2)`,
+      );
+      for (const [report, identity, side] of [
+        [movedBefore, F1_M_PRE, "before"],
+        [movedAfter, F1_M_POST, "after"],
+      ] as const) {
+        assertBytesEqual(
+          report.ownText,
+          "x",
+          `${context}: the moved node ${identity}'s own text ${side} the ` +
+            `move — \`x\` on a kept line at both sides (SPEC 1.6, 3)`,
+        );
+      }
+      assertSameJson(
+        movedAfter.hashes,
+        movedBefore.hashes,
+        `${context}: the moved node ${F1_M_PRE} (now ${F1_M_POST}) keeps its ` +
+          `hashes — the identity mapping changes no hash, its one run rides ` +
+          `a kept line at both sides, and it has no children and no ` +
+          `dependency edges (SPEC 6.2, 5.4, 5.5)`,
+      );
+
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        `${context}: \`check --json\` after the move — clean: the composed ` +
+          `text derives (SPEC 6.5; S-9)`,
+      );
+
+      const label = `${context}: \`impact --base <pre-move ref> --json\``;
+      assertImpactTable(
+        await impactAgainst(product, workspace, base, label),
+        [
+          {
+            identity: F1_P,
+            categories: [{ category: "changed", within: [F1_P] }],
+          },
+          {
+            identity: P4_FILE,
+            categories: [{ category: "descendant-changed", exact: [F1_P] }],
+          },
+          { identity: F1_M_POST, categories: [] },
+          {
+            identity: P4_W_TOP,
+            categories: [{ category: "upstream-changed", exact: [F1_P] }],
+          },
+          {
+            identity: P4_DEPS,
+            categories: [{ category: "upstream-changed", exact: [F1_P] }],
+          },
+        ],
+        label,
+      );
+    },
+  );
+}
 
 const T6_2_4 = defineProductTest({
   id: "T6.2-4",
+  // Three stagings (~40 CLI invocations, ~12 s alone): headroom for a
+  // saturated box.
+  timeoutMs: 180_000,
   title:
-    "same-parent final-position move: moving a parent's last child onto itself (same parent, same final position, new ID) changes no hash in the workspace (full sweep) and is pure in effect — `impact --base <pre-move ref>` reports no categories and no impacted code — apart from the identity mapping (SPEC 6.2, 6.5)",
+    "same-parent final-position move: moving a parent's last child onto itself (same parent, same final position, new ID) is pure in effect exactly when the re-insertion reproduces the parent's own content sequence — in the two pinned shapes (a flow-form last child whose tags, and its parent's closing tag, stand alone on their lines; T6.5-13(f)'s top-level shape) the composed file is byte-exact, no hash in the workspace changes (full sweep), and `impact --base <pre-move ref>` reports no categories apart from the identity mapping; in the `changed` twin (T6.5-13(e)'s shape) the coincident parent alone is `changed`, its ownHash with it and its metadataHash kept, with the 5.6 cascades attributed to it, the moved node and the root keeping their content (SPEC 6.2, 6.5, 3, 5.4, 5.6)",
   run: async (product) => {
-    await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      { [P4_FILE]: P4_SOURCE, [P4_WATCH]: P4_WATCH_SOURCE },
-      async (workspace) => {
-        await workspace.gitInit();
-        const base = await workspace.gitCommitAll("pre-move baseline");
-        await buildOk(
-          product,
-          workspace,
-          "T6.2-4 `build` over the staged workspace",
-        );
-
-        const before = await sweepHashes(
-          product,
-          workspace,
-          P4_PRE_IDENTITIES,
-          "T6.2-4 pre-move sweep",
-        );
-
-        await expectExit(
-          product,
-          workspace,
-          ["move", "specs/P.mdx#p.last", "specs/P.mdx#p.final"],
-          0,
-          "T6.2-4 `move specs/P.mdx#p.last specs/P.mdx#p.final`",
-        );
-
-        // Premise: the referencing file's spellings were rewritten to the new
-        // identity (SPEC 6.5) — the purity claim covers a real rewrite.
-        assertRewriteHappened(
-          await readSourceText(workspace, P4_WATCH, "T6.2-4 rewrite premise"),
-          P4_WATCH,
-          "p.last",
-          "p.final",
-          "T6.2-4 rewrite premise",
-        );
-
-        const after = await sweepHashes(
-          product,
-          workspace,
-          P4_POST_IDENTITIES,
-          "T6.2-4 post-move sweep",
-        );
-        assertHashesPreserved(
-          before,
-          after,
-          P4_IDENTITY_MAP,
-          "the same-parent final-position `move`",
-          "T6.2-4",
-        );
-
-        const label = "T6.2-4 `impact --base <pre-move ref> --json`";
-        assertPureImpact(
-          await impactAgainst(product, workspace, base, label),
-          "a same-parent final-position `move`",
-          label,
-        );
-      },
-    );
+    await runPureFinalPositionStaging(product, F1_STAGING);
+    await runPureFinalPositionStaging(product, F2_STAGING);
+    await runChangedTwinStaging(product);
   },
 });
 

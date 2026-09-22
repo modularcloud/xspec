@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 8 — T6.2-4: the pinned final-position shapes and the `changed` twin
-- Cites: TEST-SPEC T6.2-4 (rewritten); SPEC 6.2, 5.6. Finding A-17. Depends on Task 3.
-- Change: `section-6.2.ts` `P4_SOURCE` (~L1279) stages a different last-child shape (blank lines, `coverage`/`tags`); the text pins two shapes — `<S id="p">`, U+000A, `<S id="p.m">`, U+000A, `y`, U+000A, `</S>`, U+000A, `</S>`, U+000A and T6.5-13(f)'s top-level shape (`<S id="a">x</S>`, U+000A, `<S id="m">`, U+000A, `y`, U+000A, `</S>` with no final terminator) — plus the `changed` twin `foo <S id="p">`, U+000A, `<S id="p.m">x</S></S> baz` (`p` `changed`, the moved node no category). Stage all three with the category and byte assertions the entry states; keep the former shape only if the entry still covers it.
-- Verify: as Task 7 (`-t 'T6.2-4 '`).
-
 ### Task 9 — Per-draw derivability in the property runner; the P-2/P-3/P-5 form vectors under S-9
 - Cites: TEST-SPEC §16 preamble ("each draw is checked the same way before the product is driven on it, a failing draw reported as a harness error with its seed (H-10, H-11's rule), never as a product failure and never as a draw to skip"), §17 S-9 ("every form P-2, P-3, and P-5's generators compose … in the fixed vector set of those forms and, at property time, in each draw"), H-10. Findings B-7, C-1 (vectors part). Depends on Tasks 1, 3.
 - Change: (1) `test/helpers/property.ts` (phases "generating" and "running", ~L396–418): add a "checking" phase between them for every property whose generator composes MDX (at least P-2, P-3, P-5 in `section-16-p2-p3.ts` and `section-16-p5-p6.ts`; any other generator staging MDX too): each draw's MDX sources go through `deriveMdx` before the product is driven; a non-deriving draw is a harness error carrying the seed in the H-10 spelling — never a product failure, never a skipped draw. The builder's staging-time check (Task 3) must also attribute the seed when it fires inside a property run (catch `HarnessStagingError` in the runner and rethrow with the seed). (2) Add each generator's fixed form-vector set — the enumerated forms it can compose, not draws — as an exported constant of the generator module, and assert in `s9-fixture-well-formedness.test.ts` that every vector derives. (3) Replace p5-p6's one-time "implementation-time probe" note (~L55) with the live check.

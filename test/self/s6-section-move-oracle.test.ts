@@ -418,7 +418,10 @@ test("S-6 (SPEC 6.2 worked case): the impure-boundary moved node contributes the
 });
 
 // =============================================================================
-// T6.2-4 final position (the P4 shapes) and its non-final contrast
+// A further final-position shape — the former T6.2-4 fixture (blank lines,
+// `coverage` and `tags`; a flow-form last child beyond the pinned ones, its
+// re-insertion reproducing the parent's sequence all the same) — and its
+// non-final contrast
 // =============================================================================
 
 const P_FILE = "specs/P.mdx";
@@ -452,7 +455,7 @@ const P_WATCH_NODES: readonly SectionMoveGraphNode[] = [
   node(P_W_TOP, [], [P_LAST, P_LAST]),
 ];
 
-test("S-6 (T6.2-4): a parent's last child moved onto itself reproduces the parent's sequence — no node changed, no categories", () => {
+test("S-6 (T6.2-4, a further final-position shape): a parent's last child moved onto itself reproduces the parent's sequence — no node changed, no categories", () => {
   const document = pDoc();
   expectDerives("P before", sectionMoveSourceText(document.pieces));
   expectDerives(
@@ -524,9 +527,75 @@ test("S-6 (T6.2-4 contrast): a non-final child re-inserted at the end fails to r
 });
 
 // =============================================================================
-// T6.2-4's top-level pinned shape (T6.5-13(f)) and its `changed` twin
-// (T6.5-13(e)): 6.2's `may` on both of its sides
+// T6.2-4's pinned shapes — (1) the flow-form last child, (2) T6.5-13(f)'s
+// top-level shape — and its `changed` twin (T6.5-13(e)): 6.2's `may` on
+// both of its sides
 // =============================================================================
+
+const G_A = "specs/ga.mdx";
+const G_AP = "specs/ga.mdx#p";
+const G_APM = "specs/ga.mdx#p.m";
+const G_APN = "specs/ga.mdx#p.n";
+
+test("S-6 (T6.2-4, pinned shape (1)): a flow-form last child, its tags and its parent's closing tag alone on their lines, moved onto its own final position reproduces the coincident parent's sequence — no node changed, no categories", () => {
+  // `<S id="p">`, U+000A, `<S id="p.m">`, U+000A, `y`, U+000A, `</S>`,
+  // U+000A, `</S>`, U+000A under `move specs/ga.mdx#p.m specs/ga.mdx#p.n`:
+  // the deletion removes exactly the construct's lines (the joined line it
+  // leaves empty dropping with line 4's terminator), leaving `<S id="p">`,
+  // U+000A, `</S>`, U+000A, and the insertion before that `</S>`, at a line
+  // start (no terminator added), restores them — the composed file
+  // byte-identical but for the `id` attribute. Both of `p`'s runs are empty
+  // at both sides (its tags' lines and the child's closing tag's line each
+  // dropped, 3), so its sequence is reproduced: no hash changes, no node
+  // carries any category.
+  const document = doc(G_A, [
+    sec("p", "", [
+      content("\n"),
+      sec("p.m", "", [content("\ny\n")]),
+      content("\n"),
+    ]),
+    content("\n"),
+  ]);
+  expectDerives("ga before", sectionMoveSourceText(document.pieces));
+  expectDerives("ga after", '<S id="p">\n<S id="p.n">\ny\n</S>\n</S>\n');
+
+  const prediction = predictSectionMoveImpact({
+    origin: document,
+    target: document,
+    movedId: "p.m",
+    newId: "p.n",
+  });
+
+  expect(Object.fromEntries(prediction.identityMap)).toEqual({
+    [G_APM]: G_APN,
+  });
+  expect(prediction.beforeOwnTokens.get(G_AP)).toEqual([
+    ["run", ""],
+    ["child", G_APM],
+    ["run", ""],
+  ]);
+  expect(prediction.afterOwnTokens.get(G_AP)).toEqual([
+    ["run", ""],
+    ["child", G_APN],
+    ["run", ""],
+  ]);
+  const rootTokens = [
+    ["run", ""],
+    ["child", G_AP],
+    ["run", ""],
+  ];
+  expect(prediction.beforeOwnTokens.get(G_A)).toEqual(rootTokens);
+  expect(prediction.afterOwnTokens.get(G_A)).toEqual(rootTokens);
+  expect(prediction.beforeOwnTokens.get(G_APM)).toEqual([["run", "y\n"]]);
+  expect(prediction.afterOwnTokens.get(G_APN)).toEqual([["run", "y\n"]]);
+  expect(sortedSet(prediction.changed)).toEqual([]);
+  expect(sortedSet(prediction.added)).toEqual([]);
+  expect(tableOf(prediction)).toEqual({
+    [G_A]: {},
+    [G_AP]: {},
+    [G_APN]: {},
+  });
+});
 
 const F_A = "specs/fa.mdx";
 const F_AA = "specs/fa.mdx#a";
