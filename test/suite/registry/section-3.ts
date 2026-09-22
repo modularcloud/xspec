@@ -371,24 +371,36 @@ const PS = "\u{2029}";
 // no cycle (SPEC 5.3 forbids embedding an *ancestor*).
 // Multi-line constructs (SPEC 3: a terminator among a removed construct's own
 // characters is deleted with it, joining the lines it spanned into one, judged
-// by the drop rule as a whole): the two multi-line comments, and — TEST-SPEC
-// T3-3's merged-lines arm — an opening tag spelled `<S`, LF, `  id="…"`, LF,
-// `>`, once on its own lines (the merged line is left empty purely by the
-// removal and drops) and once with retained non-whitespace after the `>`
-// (the merged line keeps its residue and its terminator). The kept form
-// starts its tag at line start rather than after retained text: with the
-// bare `>` on the third line, MDX's grammar (SPEC 14.20) admits only that
-// shape — a paragraph-continuation line beginning with `>` after any
-// indentation interrupts the paragraph as a block quote (MDX disables
-// indented code), so `foo <S`, LF, `  id="x"`, LF, `> bar` is unparseable,
-// while a tag opening at line start is attempted as a concrete flow tag,
-// whose lines no container may pierce, and its `> bar` line then joins the
-// paragraph the fallback yields. Recorded in TEST-SPEC-PROBLEMS.md.
+// by the drop rule as a whole): the two multi-line comments, and TEST-SPEC
+// T3-3's three multi-line opening-tag arms — each a three-line tag whose two
+// interior terminators are among its own characters: the own-lines drop form
+// (`<S`, LF, `  id="mt1"`, LF, `>` alone on its lines, a flow tag; the
+// merged line is left empty purely by the removal and drops), the flow-start
+// kept form with residue after the `>` alone (`> bar</S>` its third line;
+// ` bar` kept with its terminator), and the in-line kept form with residue
+// on both sides (`foo <S`, LF, `  id="mt3"`, LF, `  coverage="required">
+// bar</S>`, merging to `foo  bar`). Every shape derives under the MDX 3
+// grammar SPEC 14.20 fixes (TEST-SPEC S-9 gates it; AGENTS.md's parser
+// recipe checks it): a tag opening after text on its line is an in-line tag
+// inside a paragraph, whose later lines — the section's included — are
+// paragraph-continuation lines, none beginning a construct that interrupts
+// a paragraph (a `>` whatever its indentation, among others), with the
+// closing tag standing within that paragraph, never at the start of a later
+// line, where it is a flow tag that interrupts the paragraph and leaves the
+// in-line element unclosed — so both kept forms close on the residue's
+// line; a tag opening at line start may end on a bare `>` line (the concrete
+// flow attempt takes it, fails on the residue, and the fallback paragraph
+// spans all three lines). For the same reason a blank line ends the ESM
+// block: MDX 3's ESM construct runs to a blank line, so an import directly
+// followed by text does not derive. Not yet staged: T3-3's ESM-block arm
+// (two imports on one physical line separated by U+2028; CONF-MD's scope
+// names it).
 // The class-boundary arms stage every code point TEST-SPEC T3-3 names:
 // U+00A0, U+0085, U+2028 (the three §VIOL-MD-CLASS widens) and U+2029 (which
 // neither violator touches — its arm is expected unmoved under both).
 const DROP_SOURCE = [
   'import BASE from "./BASE.xspec"', // drop: a line holding only an import
+  "", // kept: already empty in the source — and the ESM block's end (14.20)
   "K1 after-import",
   'defs: x <S id="sp"> </S> y', // kept: removal-affected line retaining content
   '<S id="empty" />', // drop: left empty purely by removals
@@ -431,16 +443,20 @@ const DROP_SOURCE = [
   "mt1 body", // kept: a line keeping content keeps its terminator
   "</S>", // drop: a line holding only a closing tag
   "K17 after-multiline-tag-drop",
-  "<S", // a multi-line opening tag at line start, retained non-whitespace…
-  '  id="mt2"', // …after its `>`: the three lines merge into one line, kept
-  "> bar", // with its residue ` bar` and its terminator (see the note above)
-  "</S>", // drop: a line holding only a closing tag
-  "K18 final",
+  "<S", // the flow-start kept form: a tag at line start with retained…
+  '  id="mt2"', // …non-whitespace after its `>` alone; the three lines merge
+  "> bar</S>", // into one, kept with its residue ` bar` and its terminator
+  "K18 after-flow-start-kept",
+  "foo <S", // the in-line kept form: retained non-whitespace before the…
+  '  id="mt3"', // …`<S` and after the `>`; the tag's two interior terminators
+  '  coverage="required"> bar</S>', // deleted with it: merges to `foo  bar`
+  "K19 final",
   "",
 ].join("\n");
 
 // Hand-derived compiled output: exactly the kept lines above, in order.
 const DROP_COMPILED = [
+  "", // the blank line ending the ESM block: already empty, kept
   "K1 after-import",
   "defs: x   y", // both of sp's tags deleted in place; the space content stays
   "K2 after-defs",
@@ -469,15 +485,17 @@ const DROP_COMPILED = [
   "K16 after-own-lines",
   "mt1 body", // the tag's three lines merged into one empty line, dropped
   "K17 after-multiline-tag-drop",
-  " bar", // the tag's three lines merged into one, kept with its residue
-  "K18 final",
+  " bar", // mt2: the tag's three lines merged into one, kept with its residue
+  "K18 after-flow-start-kept",
+  "foo  bar", // mt3: the merged line keeps the residue on both sides
+  "K19 final",
   "",
 ].join("\n");
 
 const T3_3 = defineProductTest({
   id: "T3-3",
   title:
-    "line-drop rule: lines left empty or whitespace-only purely by removals (import, tags, comments, empty expansion) drop with their terminators; already-empty, content-retaining, and whitespace-only-but-non-empty-expansion lines are kept; U+00A0/U+0085/U+2028/U+2029 are not whitespace while U+0009/U+0020 are; a multi-line comment and a multi-line opening tag are each deleted exactly, merging the lines they span into one — dropped when left empty purely by the removal, kept with its residue otherwise (SPEC 3, 1.4)",
+    "line-drop rule: lines left empty or whitespace-only purely by removals (import, tags, comments, empty expansion) drop with their terminators; already-empty, content-retaining, and whitespace-only-but-non-empty-expansion lines are kept; U+00A0/U+0085/U+2028/U+2029 are not whitespace while U+0009/U+0020 are; a multi-line comment and a multi-line opening tag (own-lines, flow-start, and in-line forms) are each deleted exactly, merging the lines they span into one — dropped when left empty purely by the removal, kept with its residue otherwise (SPEC 3, 1.4)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
