@@ -47,6 +47,31 @@
 //   `.` segment — already 11.6's canonical form (the sibling-directory
 //   ascent spelling is T12.7-3's arm); a whole-root snapshot compare around
 //   the invocation pins that nothing is written (SPEC 12.1).
+// - T7-1 occupancy (SPEC 7: the upward search stops at the nearest directory
+//   holding an entry named `xspec.config.ts`, whatever occupies it, and the
+//   occupant is read only when it is a plain file; a directory or a symbolic
+//   link, whatever it targets, is missing or invalid configuration, 14.14,
+//   never read through): one workspace with a valid root configuration and
+//   two working directories beneath it, `dirocc/` holding an empty directory
+//   named `xspec.config.ts` and `linkocc/` a symbolic link of that name to
+//   the valid root configuration itself — so a product skipping the
+//   occupant, or following the link, loads a valid configuration and exits
+//   0. "Every command but `version`" is operationalized as the complete
+//   command set of SPEC 12 with `review` and `query` by every subcommand
+//   (26 invocations), each spelled syntactically complete so that no
+//   syntax-class usage error, reported without loading configuration (12.0),
+//   can precede the configuration load; every invocation is pinned to exit
+//   2 with the error document's finding — `configuration-error`, locations
+//   [], the concerned path the occupied entry itself in 11.6's anchoring
+//   form: `xspec.config.ts` from its own directory, never `../xspec.config.ts`
+//   (the valid file above) and never the link's target. The same set names
+//   each entry through `--config` from the root (`dirocc/xspec.config.ts`,
+//   `linkocc/xspec.config.ts`: the path as given, already canonical, so the
+//   two conventions of T12.7-3 coincide). `version` answers exit 0 from both
+//   working directories (12.6), a whole-root compare brackets the sweeps
+//   (12.1), and the premise — the root configuration valid, discovering
+//   `specs/A.mdx` — is driven last (`ids` regenerates graph data, 13.3) so
+//   the sweeps observe a tree holding no derived file or graph data.
 // - T7-2 single-deviation staging: every invalid fixture is the valid
 //   canonical configuration with exactly one deviation, so the refusal is
 //   attributable to the arm's malformation and nothing else.
@@ -100,6 +125,7 @@ import {
   decodeEdgesReport,
   decodeFindingsReport,
   decodeIdsReport,
+  decodeVersionDocument,
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
@@ -260,6 +286,261 @@ const OVERRIDE_CONFIG_ARG = "../alt/xspec.config.ts";
 // asserted exactly as given (SPEC 14; T12.7-3).
 const MISSING_CONFIG_ARG = "alt/missing.config.ts";
 
+// --- T7-1 occupancy (SPEC 7, 14.14) ---------------------------------------
+
+// A valid configuration at the root discovers specs/A.mdx; beneath it, two
+// working directories each hold an entry named `xspec.config.ts` that is not
+// a plain file: OCCUPANCY_DIR_CWD's is an empty directory, OCCUPANCY_LINK_CWD's
+// a symbolic link to the valid root configuration itself. SPEC 7: the upward
+// search stops at the nearest directory holding an entry of that name —
+// whatever occupies it — and the occupant is read only when it is a plain
+// file; any other occupant is missing or invalid configuration (14.14), never
+// read through. The discriminating structure: a product skipping a non-file
+// entry and continuing upward finds the valid root configuration and exits 0;
+// a product following the link loads that same valid configuration and exits
+// 0 (rooted at the link's directory or at the root, either way exit 0) —
+// both fail the exit-2 assertion, and a product reporting the file above
+// (`../xspec.config.ts`) or the link's target fails the concerned-path pin.
+const OCCUPANCY_DIR_CWD = "dirocc";
+const OCCUPANCY_LINK_CWD = "linkocc";
+const OCCUPANT_NAME = "xspec.config.ts";
+const OCCUPANCY_DIR_ENTRY = `${OCCUPANCY_DIR_CWD}/${OCCUPANT_NAME}`;
+const OCCUPANCY_LINK_ENTRY = `${OCCUPANCY_LINK_CWD}/${OCCUPANT_NAME}`;
+const OCCUPANCY_WORKSPACE: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": SPECS_ONLY_CONFIG,
+    "specs/A.mdx": mdxSection("a"),
+  },
+  dirs: [OCCUPANCY_DIR_ENTRY],
+  // The link's target is spelled relative to the link's own directory: the
+  // valid configuration one level up.
+  symlinks: { [OCCUPANCY_LINK_ENTRY]: `../${OCCUPANT_NAME}` },
+};
+
+// Every command but `version` (SPEC 14 condition 14 is reported by every
+// command that loads the configuration; 12.6: `version` loads none), `review`
+// and `query` by every subcommand, each spelled syntactically complete — its
+// required operands and flags present, every value well-formed and inside its
+// fixed vocabulary — so that no syntax-class usage error, which 12.0 reports
+// without loading configuration, can precede the configuration load. The
+// operands name nothing that must exist: a configuration error precedes every
+// other exit-2 error consulting the configuration or the workspace (12.0), so
+// an unknown node, session, item, profile, or baseline is never reached; the
+// mutating commands (`review create`, `review split`, `review resolve`,
+// `rename`, `move`) fail before acquisition and modify nothing (12.0, 13.5).
+// The driver appends `--json`.
+const EVERY_LOADING_COMMAND: readonly (readonly string[])[] = [
+  ["build"],
+  ["check"],
+  ["ids"],
+  ["show", "specs/A.mdx#a"],
+  ["coverage"],
+  ["impact", "--base", "HEAD"],
+  ["review", "create", "--strategy", "audit", "--name", "s"],
+  ["review", "list"],
+  ["review", "status", "s"],
+  ["review", "next", "s"],
+  ["review", "show", "s", "i1"],
+  ["review", "split", "s", "i1"],
+  ["review", "resolve", "s", "i1", "--status", "updated"],
+  ["review", "export", "s"],
+  ["query", "node", "specs/A.mdx#a"],
+  ["query", "nodes"],
+  ["query", "edges"],
+  ["query", "subtree", "specs/A.mdx#a"],
+  ["query", "ancestors", "specs/A.mdx#a"],
+  ["query", "reachable", "--from", "specs/A.mdx#a", "--to", "specs/A.mdx#a"],
+  ["occurrences"],
+  ["view"],
+  ["at", "specs/A.mdx", "0"],
+  ["inventory"],
+  ["rename", "specs/A.mdx", "a", "b"],
+  ["move", "specs/A.mdx", "specs/B.mdx"],
+];
+
+interface OccupancySweep {
+  /** Workspace-relative working directory, or "." for the root. */
+  readonly cwd: string;
+  /** The `--config` value, spelled as given; absent for the upward search. */
+  readonly configArg?: string;
+  /** The concerned path 14 pins: the occupied entry, in 11.6's form. */
+  readonly expectedPath: string;
+  /** What occupies the entry, for the diagnosis. */
+  readonly occupant: string;
+}
+
+/**
+ * Drive every configuration-loading command from `sweep.cwd` (naming the
+ * entry through `--config` when `sweep.configArg` is given) and assert each
+ * reports 14.14 concerning exactly `sweep.expectedPath`: exit 2, the error
+ * document's one finding carrying the stable code `configuration-error`,
+ * locations [] (an unlocated condition), and as its concerned path the
+ * occupied entry itself in the anchoring form of 11.6 — for the search, the
+ * working directory's own `xspec.config.ts`; for `--config`, the path as
+ * given, which from the root is already canonical (SPEC 14, 12.7; T12.7-3) —
+ * never the valid file above it and never what the link targets.
+ */
+async function sweepOccupiedConfiguration(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  sweep: OccupancySweep,
+): Promise<void> {
+  const cwd = sweep.cwd === "." ? workspace.root : workspace.path(sweep.cwd);
+  const where =
+    sweep.cwd === "."
+      ? "the workspace root"
+      : `the working directory ${sweep.cwd}`;
+  for (const command of EVERY_LOADING_COMMAND) {
+    const argv =
+      sweep.configArg === undefined
+        ? command
+        : [...command, "--config", sweep.configArg];
+    const label =
+      `T7-1 \`${argv.join(" ")} --json\` run from ${where} ` +
+      `(${sweep.occupant})`;
+    const result = await expectConfigurationError(
+      product,
+      workspace,
+      argv,
+      `${label} — the ${sweep.configArg === undefined ? "upward search stops at the nearest directory holding an entry named xspec.config.ts, whatever occupies it, and the" : "named path's"} ` +
+        `occupant is read only when it is a plain file: a directory or a ` +
+        `symbolic link, whatever it targets, is missing or invalid ` +
+        `configuration, never read through — reported by every command but ` +
+        `version at configuration load (SPEC 7, 14.14, 12.0)`,
+      cwd,
+    );
+    const finding = expectErrorDocument(result, label);
+    assertSameJson(
+      {
+        code: finding.code,
+        path: finding.path,
+        locations: finding.locations.map((location) => location.file),
+      },
+      {
+        code: "configuration-error",
+        path: sweep.expectedPath,
+        locations: [],
+      },
+      `${label}: the error document's one finding carries the stable code ` +
+        `"configuration-error", locations [] (an unlocated condition), and ` +
+        `as its concerned path the occupied entry itself in the anchoring ` +
+        `form of 11.6 — ${JSON.stringify(sweep.expectedPath)} — never the ` +
+        `valid configuration above it (../xspec.config.ts) and never the ` +
+        `link's target (SPEC 14, 12.7, 7; T12.7-3)`,
+    );
+  }
+}
+
+/**
+ * T7-1's occupancy arms (SPEC 7, 14.14): the directory and the symbolic-link
+ * occupants found by the upward search from their own directories, then each
+ * named through `--config` from the root; `version` answering beside them
+ * (12.6); a whole-root compare around all of it (12.1); and, last — so the
+ * arms observe a tree holding no graph data or derived file — the premise
+ * that the root configuration is valid and discovers specs/A.mdx, without
+ * which every exit 2 above would be vacuous.
+ */
+async function runOccupancyArms(product: ProductBinding): Promise<void> {
+  await withWorkspace(OCCUPANCY_WORKSPACE, async (workspace) => {
+    // Staging self-check (H-9): an ineffective staging is a harness error,
+    // never a pass and never a diagnosed product failure.
+    const stagedKinds: readonly (readonly [string, "dir" | "symlink"])[] = [
+      [OCCUPANCY_DIR_ENTRY, "dir"],
+      [OCCUPANCY_LINK_ENTRY, "symlink"],
+    ];
+    for (const [rel, expected] of stagedKinds) {
+      const kind = await workspace.kind(rel);
+      if (kind !== expected) {
+        throw new Error(
+          `T7-1 harness staging: expected a ${expected} at ${rel}, found ` +
+            `${kind} — the occupancy arms cannot run (H-9)`,
+        );
+      }
+    }
+
+    const before = await snapshotDirectory(workspace.root);
+    const sweeps: readonly OccupancySweep[] = [
+      {
+        cwd: OCCUPANCY_DIR_CWD,
+        expectedPath: OCCUPANT_NAME,
+        occupant: "the working directory's xspec.config.ts is a directory",
+      },
+      {
+        cwd: OCCUPANCY_LINK_CWD,
+        expectedPath: OCCUPANT_NAME,
+        occupant:
+          "the working directory's xspec.config.ts is a symbolic link to " +
+          "the valid root configuration",
+      },
+      {
+        cwd: ".",
+        configArg: OCCUPANCY_DIR_ENTRY,
+        expectedPath: OCCUPANCY_DIR_ENTRY,
+        occupant: "--config names a directory",
+      },
+      {
+        cwd: ".",
+        configArg: OCCUPANCY_LINK_ENTRY,
+        expectedPath: OCCUPANCY_LINK_ENTRY,
+        occupant:
+          "--config names a symbolic link to the valid root configuration",
+      },
+    ];
+    for (const sweep of sweeps) {
+      await sweepOccupiedConfiguration(product, workspace, sweep);
+    }
+
+    // `version` loads no configuration (SPEC 12.6): from either occupied
+    // working directory it answers, exit 0, the version document decoded
+    // form-exact — the occupant is met only by a configuration load.
+    for (const cwd of [OCCUPANCY_DIR_CWD, OCCUPANCY_LINK_CWD]) {
+      const versionLabel = `T7-1 \`version --json\` run from the working directory ${cwd} (its xspec.config.ts occupied)`;
+      const versionRun = await runProduct(product, {
+        cwd: workspace.path(cwd),
+        argv: ["version", "--json"],
+      });
+      assertExitCode(
+        versionRun,
+        0,
+        `${versionLabel} — version consults no configuration, so the ` +
+          `occupied entry is never met: exit 0 with its answer (SPEC 12.6, ` +
+          `14.14)`,
+      );
+      decodeVersionDocument(
+        parseJsonStdout(versionRun, versionLabel),
+        versionLabel,
+      );
+    }
+
+    assertSnapshotsEqual(
+      before,
+      await snapshotDirectory(workspace.root),
+      `T7-1 occupancy sweeps: a command failing at configuration load ` +
+        `modifies nothing (SPEC 12.1, 12.0) — no derived file, graph data, ` +
+        `session, or hold file appears anywhere under the root, the ` +
+        `occupants and the valid configuration are byte-untouched`,
+    );
+
+    // The premise, last: the root configuration is valid and discovers
+    // specs/A.mdx — the configuration a product skipping the occupant, or
+    // reading through the link, would have loaded (module header).
+    const premiseLabel =
+      "T7-1 occupancy premise: `ids --json` run from the workspace root";
+    const premise = decodeIdsReport(
+      await runJson(product, workspace, ["ids", "--json"], premiseLabel),
+      premiseLabel,
+    );
+    assertSameJson(
+      premise.files,
+      [{ file: "specs/A.mdx", ids: ["a"] }],
+      `${premiseLabel}: the root configuration is valid and discovers ` +
+        `specs/A.mdx (SPEC 7) — the occupancy arms' exit-2 answers are ` +
+        `meaningful only because a product reading past the occupant would ` +
+        `have found this configuration and exited 0`,
+    );
+  });
+}
+
 const T7_1 = defineProductTest({
   id: "T7-1",
   title:
@@ -267,8 +548,15 @@ const T7_1 = defineProductTest({
     "directory; --config, resolved against the working directory, " +
     "overrides the search; no configuration reachable is a configuration " +
     "error — by a failed upward search, and by --config naming a " +
-    "nonexistent file, never a plain usage error (SPEC 7, 12.0, 12.7, " +
-    "14.14)",
+    "nonexistent file, never a plain usage error; occupancy — the search " +
+    "stops at the nearest entry named xspec.config.ts whatever occupies " +
+    "it, and a found or named entry that is a directory or a symbolic " +
+    "link is 14.14 for every command but version, the concerned path that " +
+    "entry, never read through (SPEC 7, 12.0, 12.6, 12.7, 14.14)",
+  // Four sweeps of every configuration-loading command (~26 invocations
+  // each) join the location arms; the default budget is kept only for
+  // margin under suite contention.
+  timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
       { files: LOCATION_FILES, dirs: [SEARCH_CWD] },
@@ -403,6 +691,10 @@ const T7_1 = defineProductTest({
         );
       },
     );
+
+    // Occupancy: a found or named xspec.config.ts that is a directory or a
+    // symbolic link (SPEC 7, 14.14; helpers above).
+    await runOccupancyArms(product);
   },
 });
 
