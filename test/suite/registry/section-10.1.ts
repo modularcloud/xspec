@@ -1,4 +1,4 @@
-// TEST-SPEC §10.1 (review sessions) — SUITE-33: T10.1-1…T10.1-5.
+// TEST-SPEC §10.1 (review sessions) — SUITE-33: T10.1-1…T10.1-6.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -60,16 +60,46 @@
 // malformed-recorded-decompositions state first has the product perform a
 // `split` — the decomposition is recorded durably in the session (SPEC 10.7)
 // — so the garbled member holds a genuine product-recorded decomposition.
+//
+// T10.1-6 (session-directory and area occupancy; `create`'s ordering):
+// - Non-directory occupants are staged at `.xspec/reviews` and at `.xspec`
+//   as a plain file and, separately, as a symbolic link to a real directory
+//   holding product-written content (a valid session `s.json`; a journal,
+//   graph data, and a valid session) — the staging the product must not
+//   list, read, or write through (SPEC 10.1, 13.4). The link's target lives
+//   inside the workspace root, outside the area, so one whole-root snapshot
+//   compare covers the occupant, the link, and its target at once (H-4:
+//   "byte-unchanged", "byte-identical", "nothing written through it").
+//   Symbolic links are never followed by the snapshot (helpers/snapshot.ts),
+//   so a product writing through the link changes the target's entries.
+// - "graph data has been refreshed" is observed the way SPEC.md defines it
+//   (13.3, 14.10): `check` afterwards reports no graph-data unit form —
+//   graph-data content is opaque (H-4), so its bytes are never compared.
+//   The per-file staleness `check` reports is the edited source's: every
+//   14.10 finding concerns a derived path of `specs/A.mdx` — `specs/A.xspec.`
+//   plus a suffix, the module and its companions (SPEC 13.1) — and the
+//   module itself is among them, since it embeds the edited text (SPEC 4.2).
+// - `review status s` against the occupied session directory is an unknown
+//   session — a plain usage error, so the exit-2 error document's `code` and
+//   `path` are `null` (SPEC 12.0, 12.7).
+// - The concerned path of the code-less existing-name refusal and of the
+//   condition-21 finding reported in its place is pinned nowhere (SPEC 10.7,
+//   14.21), so only their identity, count, and empty locations are asserted.
 
+import * as fsp from "node:fs/promises";
 import type {
   Finding,
   SessionStatusRow,
 } from "../../helpers/adapters/index.js";
 import {
+  GRAPH_DATA_AREA_PATH,
   assertReportMentions,
   decodeFindingsReport,
+  decodeIdsReport,
+  decodeInventoryDocument,
   decodeSessionListReport,
   decodeSessionStatusReport,
+  decodeViewReport,
   stageBlockedByAbsentItem,
   stageBlockedByCycle,
   stageDeleteItemField,
@@ -95,12 +125,15 @@ import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
+  assertFindingConcernsPath,
   assertFindingLocated,
   assertSameJson,
   buildOk,
   expectErrorDocument,
   expectExit,
+  expectFindingFreeReport,
   runCli,
+  runFindingsReport,
   runJson,
 } from "./support.js";
 
@@ -1448,6 +1481,692 @@ const T10_1_5 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T10.1-6 — session-directory and area occupancy; `create`'s ordering
+// ---------------------------------------------------------------------------
+
+// The non-directory occupant staged at `.xspec/reviews` and at `.xspec`
+// (SPEC 14.22's plain-file kind; content arbitrary — the occupant is never
+// read).
+const T10_1_6_OCCUPANT = "not a directory\n";
+
+// The derived paths of `specs/A.mdx`: its module and companions are
+// `specs/A.xspec.` plus a suffix (SPEC 13.1); the module itself embeds the
+// node text (SPEC 4.2), so a text edit makes it stale for certain.
+const T10_1_6_A_DERIVED_PREFIX = "specs/A.xspec.";
+const T10_1_6_A_MODULE = "specs/A.xspec.ts";
+
+/** The product-written session every staging starts from (`s`). */
+const T10_1_6_SESSION = "s";
+/** The name `create` is refused for on every occupied session directory. */
+const T10_1_6_NEW_SESSION = "n";
+
+const T10_1_6_CREATE_S: readonly string[] = [
+  "review",
+  "create",
+  "--strategy",
+  "audit",
+  "--name",
+  T10_1_6_SESSION,
+];
+
+/** How a path comes to hold a non-directory (SPEC 13.4). */
+type T1016Occupant =
+  | { readonly kind: "plain-file" }
+  | {
+      readonly kind: "symlink";
+      /** Where the relocated product-written directory goes (root-relative). */
+      readonly targetRel: string;
+      /** The link's stored target, spelled relative to the link's directory. */
+      readonly linkTarget: string;
+    };
+
+const T10_1_6_PLAIN_FILE: T1016Occupant = { kind: "plain-file" };
+// `.xspec/reviews` → `../elsewhere-reviews`: a real directory inside the
+// workspace root, outside the area, holding the product-written `s.json`.
+const T10_1_6_REVIEWS_LINK: T1016Occupant = {
+  kind: "symlink",
+  targetRel: "elsewhere-reviews",
+  linkTarget: "../elsewhere-reviews",
+};
+// `.xspec` → `elsewhere-area`: the relocated area — journal, graph data, and
+// the valid session — beside the link.
+const T10_1_6_AREA_LINK: T1016Occupant = {
+  kind: "symlink",
+  targetRel: "elsewhere-area",
+  linkTarget: "elsewhere-area",
+};
+
+/**
+ * Stage a non-directory occupant at `rel` (SPEC 13.4): `plain-file`
+ * replaces whatever the path holds with a plain file; `symlink` relocates
+ * the directory the path holds to `targetRel` and leaves a symbolic link
+ * spelled `linkTarget` in its place, so the link's target holds exactly what
+ * the product wrote there. The staging is verified on the harness's own
+ * process before any product runs: a wrong occupant kind is machinery
+ * misuse, thrown as a plain `Error` — never a diagnosed failure (H-11).
+ */
+async function stageNonDirectoryOccupant(
+  workspace: TestWorkspace,
+  rel: string,
+  occupant: T1016Occupant,
+): Promise<void> {
+  if (occupant.kind === "plain-file") {
+    await fsp.rm(workspace.path(rel), { recursive: true, force: true });
+    await workspace.file(rel, T10_1_6_OCCUPANT);
+  } else {
+    const held = await workspace.kind(rel);
+    if (held !== "dir") {
+      throw new Error(
+        `T10.1-6 staging: ${rel} must hold the product-written directory ` +
+          `to relocate to ${occupant.targetRel}; found ${held}`,
+      );
+    }
+    await fsp.rename(workspace.path(rel), workspace.path(occupant.targetRel));
+    await workspace.symlink(rel, occupant.linkTarget, "dir");
+  }
+  const expected = occupant.kind === "plain-file" ? "file" : "symlink";
+  const staged = await workspace.kind(rel);
+  if (staged !== expected) {
+    throw new Error(
+      `T10.1-6 staging: expected ${rel} to hold a ${expected} once staged; ` +
+        `found ${staged} (a harness staging error, not a product observation)`,
+    );
+  }
+}
+
+/**
+ * Exactly one finding, of the given counting identity — a condition token of
+ * 14, or `(code-less)` for a refusal carrying no stable code (10.7) — with
+ * no in-source location (locations [], SPEC 12.7) and, where SPEC pins one,
+ * the concerned path.
+ */
+function assertExactlyOneFinding(
+  findings: readonly Finding[],
+  identity: string,
+  concernedPath: string | null,
+  context: string,
+): Finding {
+  assertConditionCounts(findings, { [identity]: 1 }, context);
+  const finding = findings[0]!;
+  if (concernedPath !== null) {
+    assertFindingConcernsPath(finding, concernedPath, context);
+  }
+  assertSameJson(
+    finding.locations,
+    [],
+    `${context}: the finding has no in-source location — locations [] ` +
+      `(SPEC 12.7)`,
+  );
+  return finding;
+}
+
+/**
+ * `check`'s report once a refused `create` has refreshed graph data on the
+ * edited-source twin (SPEC 13.5, 13.3): every condition-10 finding is per
+ * file, concerning a derived path of `specs/A.mdx` — `specs/A.xspec.` plus
+ * a suffix (SPEC 13.1) — with the module itself among them (it embeds the
+ * edited text, SPEC 4.2), and none is the graph-data unit form, whose
+ * concerned path would be `.xspec` (SPEC 14.10). Beside the staleness,
+ * exactly `beside` (counted by identity) and nothing else.
+ */
+function assertPerFileStalenessOfA(
+  findings: readonly Finding[],
+  beside: Readonly<Record<string, number>>,
+  context: string,
+): void {
+  const stale = findings.filter((finding) => finding.condition === "14.10");
+  assertConditionCounts(
+    findings.filter((finding) => finding.condition !== "14.10"),
+    beside,
+    `${context} — beside the per-file staleness, exactly the expected ` +
+      `findings and nothing else (SPEC 14, 12.2)`,
+  );
+  if (stale.length === 0) {
+    fail(
+      `${context}: the edited source's generated module no longer matches ` +
+        `what the current sources generate — its documentation comment ` +
+        `embeds the edited text (SPEC 4.2) — so \`check\` reports per-file ` +
+        `staleness (SPEC 14.10, 12.2); got no condition-10 finding`,
+    );
+  }
+  for (const finding of stale) {
+    if (
+      typeof finding.path !== "string" ||
+      !finding.path.startsWith(T10_1_6_A_DERIVED_PREFIX)
+    ) {
+      fail(
+        `${context}: graph data was refreshed before the refusal (SPEC ` +
+          `13.5, 13.3), so no graph-data unit form is reported and every ` +
+          `condition-10 finding is per file, concerning a derived path of ` +
+          `specs/A.mdx — ${T10_1_6_A_DERIVED_PREFIX}* (SPEC 13.1, 14.10); ` +
+          `got a condition-10 finding concerning ` +
+          `${JSON.stringify(finding.path)} (message: ` +
+          `${JSON.stringify(finding.message)})`,
+      );
+    }
+    assertSameJson(
+      finding.locations,
+      [],
+      `${context}: a per-file staleness finding names its path and has no ` +
+        `in-source location — locations [] (SPEC 14.10, 12.7)`,
+    );
+  }
+  if (!stale.some((finding) => finding.path === T10_1_6_A_MODULE)) {
+    fail(
+      `${context}: the module ${T10_1_6_A_MODULE} itself is stale — it ` +
+        `embeds the edited text (SPEC 4.2, 13.1) — so a condition-10 ` +
+        `finding concerns it (SPEC 14.10); got ` +
+        JSON.stringify(stale.map((finding) => finding.path)),
+    );
+  }
+}
+
+/**
+ * The session directory holds sessions only while a directory occupies its
+ * path (SPEC 10.1, 13.4): on a freshly built valid workspace whose
+ * `.xspec/reviews` holds a non-directory, no command lists through the
+ * occupant — `review list` reports no sessions, `review status s` is an
+ * unknown session, `inventory` reports `sessions` [] — `check` is clean and
+ * the gate carries nothing (14.22 is `create`'s finding there, never
+ * `check`'s or the gate's), `ids` answers, and `create` refuses its own
+ * obstructed write path with one condition-22 finding concerning
+ * `.xspec/reviews`. One whole-root compare around the sweep (the workspace
+ * is fresh, so no 13.3 refresh legitimately intervenes): nothing written —
+ * the occupant byte-unchanged, the link and its target byte-identical.
+ */
+async function assertSessionDirectoryOccupied(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+): Promise<void> {
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const listContext =
+        `${label} \`review list --json\` — no command lists through the ` +
+        `occupant: no sessions, exit 0 (SPEC 10.1, 13.4, 10.7)`;
+      const list = decodeSessionListReport(
+        await runJson(
+          product,
+          workspace,
+          ["review", "list", "--json"],
+          listContext,
+        ),
+        listContext,
+      );
+      assertSameJson(list.sessions, [], `${listContext}: sessions`);
+
+      const statusContext =
+        `${label} \`review status s --json\` — \`s\` names no session ` +
+        `through the occupant: exit 2, unknown session (SPEC 10.1, 12.0)`;
+      const status = await expectExit(
+        product,
+        workspace,
+        ["review", "status", T10_1_6_SESSION, "--json"],
+        2,
+        statusContext,
+      );
+      const error = expectErrorDocument(status, statusContext);
+      assertSameJson(
+        { code: error.code, path: error.path },
+        { code: null, path: null },
+        `${statusContext} — a plain usage error's document carries code ` +
+          `and path null (SPEC 12.7)`,
+      );
+
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        `${label} \`check --json\` — the occupied session directory is ` +
+          `\`create\`'s condition-22 finding, never \`check\`'s or the ` +
+          `gate's, and it holds no session to find corrupt (SPEC 14.22, ` +
+          `12.2, 10.1)`,
+      );
+
+      const inventoryContext =
+        `${label} \`inventory --json\` — sessions [] while the session ` +
+        `directory holds no directory, and no finding (SPEC 11.6, 13.4)`;
+      const inventory = decodeInventoryDocument(
+        await runJson(
+          product,
+          workspace,
+          ["inventory", "--json"],
+          inventoryContext,
+        ),
+        inventoryContext,
+      );
+      assertSameJson(inventory.findings, [], `${inventoryContext}: findings`);
+      assertSameJson(inventory.sessions, [], `${inventoryContext}: sessions`);
+
+      const idsContext =
+        `${label} \`ids --json\` — the gate carries no finding, so \`ids\` ` +
+        `answers, exit 0 (SPEC 13.3, 14.22)`;
+      decodeIdsReport(
+        await runJson(product, workspace, ["ids", "--json"], idsContext),
+        idsContext,
+      );
+
+      const createContext =
+        `${label} \`review create --strategy audit --name n --json\` — the ` +
+        `occupant obstructs the session write: exit 1, exactly one ` +
+        `condition-22 finding concerning .xspec/reviews, locations [] ` +
+        `(SPEC 10.1, 14.22)`;
+      assertExactlyOneFinding(
+        await runFindingsReport(
+          product,
+          workspace,
+          [
+            "review",
+            "create",
+            "--strategy",
+            "audit",
+            "--name",
+            T10_1_6_NEW_SESSION,
+            "--json",
+          ],
+          1,
+          createContext,
+        ),
+        "14.22",
+        REVIEWS_DIR,
+        createContext,
+      );
+    },
+    `${label}: nothing is written — the occupant byte-unchanged, the link ` +
+      `and its target byte-identical, nothing written through it, and no ` +
+      `session file anywhere (SPEC 10.1, 13.4, 14.22)`,
+  );
+}
+
+/** The one refusal finding a stale twin's `create` reports. */
+interface ExpectedRefusal {
+  /** A condition token of 14, or `(code-less)` for the 10.7 refusal. */
+  readonly identity: string;
+  /** The concerned path where SPEC pins one, else null (left unasserted). */
+  readonly concernedPath: string | null;
+}
+
+/**
+ * `create`'s ordering on a stale twin (SPEC 13.5, 14.22): a section's text
+ * is edited after `build`, then `create --name <name>` is refused — the one
+ * finding of `expected` (condition 22, the code-less existing-name refusal,
+ * or condition 21 in its place), exit 1. The refusal follows the gate and
+ * refresh of 13.3, so graph data has been refreshed: the compare around
+ * `create` confines every change to `.xspec/` outside `.xspec/reviews/`
+ * (the refresh's opaque writes, H-4 — nothing outside the area, the
+ * occupant and every session file byte-unchanged, no session file
+ * written), and `check` afterwards reports the edited source's per-file
+ * staleness beside exactly `besideStaleness` and no graph-data unit form —
+ * where a product examining the session directory before refreshing leaves
+ * graph data stale (the unit form then reported).
+ */
+async function assertCreateFollowsRefresh(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  name: string,
+  expected: ExpectedRefusal,
+  besideStaleness: Readonly<Record<string, number>>,
+  label: string,
+): Promise<void> {
+  await workspace.file("specs/A.mdx", A_MDX_EDITED);
+  const argv = [
+    "review",
+    "create",
+    "--strategy",
+    "audit",
+    "--name",
+    name,
+    "--json",
+  ];
+  const createContext =
+    `${label} \`${argv.join(" ")}\` on the stale twin — exit 1 with the ` +
+    `one refusal finding, judged after the gate and refresh (SPEC 13.5, ` +
+    `14.22, 10.7, 14.21)`;
+  const before = await snapshotDirectory(workspace.root);
+  const findings = await runFindingsReport(
+    product,
+    workspace,
+    argv,
+    1,
+    createContext,
+  );
+  const after = await snapshotDirectory(workspace.root);
+  assertExactlyOneFinding(
+    findings,
+    expected.identity,
+    expected.concernedPath,
+    createContext,
+  );
+  for (const change of diffSnapshots(before, after)) {
+    const underArea =
+      change.key === GRAPH_DATA_AREA_PATH ||
+      change.key.startsWith(`${GRAPH_DATA_AREA_PATH}/`);
+    const underReviews =
+      change.key === REVIEWS_DIR || change.key.startsWith(`${REVIEWS_DIR}/`);
+    if (!underArea || underReviews) {
+      fail(
+        `${label}: the refused \`create\` on a stale twin writes nothing ` +
+          `but the 13.3 refresh, confined to .xspec/ outside ` +
+          `.xspec/reviews/ — no session file written or changed, the ` +
+          `occupant byte-unchanged, nothing outside the area touched ` +
+          `(SPEC 13.5, 13.3, 14.22); found ${change.change} ` +
+          `${change.path}: ${change.detail}`,
+      );
+    }
+  }
+  const checkContext = `${label} \`check --json\` after the refused \`create\``;
+  assertPerFileStalenessOfA(
+    await runFindingsReport(
+      product,
+      workspace,
+      ["check", "--json"],
+      1,
+      `${checkContext} — the edited source's generated module is stale, ` +
+        `so \`check\` exits 1 (SPEC 12.2, 14.10)`,
+    ),
+    besideStaleness,
+    checkContext,
+  );
+}
+
+/**
+ * The graph-data area's own path occupied by a non-directory (SPEC 13.4,
+ * 14.22, 14.23): `inventory` meets condition 23 in its record-supplied
+ * datum — `recorded` explicitly unavailable, `journal.occupied` false and
+ * `sessions` [] (nothing is read below the occupant), that one finding
+ * concerning `.xspec`, exit 1 (11.6); `build`, `ids`, and `review list`
+ * each refuse on `build`'s obstructed graph-data write path — exactly one
+ * condition-22 finding concerning `.xspec`, the gate's report for the reads
+ * (13.3), exit 1; `check` reports that finding beside condition 10 in the
+ * unreadable-record unit form and nothing else (14.10, 14.23: reported
+ * whatever the workspace's validity); and `view` of a clean file answers
+ * finding-free (11.2, T11.2-6). One whole-root compare around the sweep:
+ * nothing written, the link's target byte-identical.
+ */
+async function assertAreaOccupied(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  label: string,
+): Promise<void> {
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const inventoryContext =
+        `${label} \`inventory --json\` — the area's own path holds no ` +
+        `directory: recorded unavailable with the one condition-23 ` +
+        `finding, exit 1 (SPEC 11.6, 14.23, 13.4)`;
+      const inventoryRun = await expectExit(
+        product,
+        workspace,
+        ["inventory", "--json"],
+        1,
+        inventoryContext,
+      );
+      const inventory = decodeInventoryDocument(
+        parseJsonStdout(inventoryRun, inventoryContext),
+        inventoryContext,
+      );
+      assertExactlyOneFinding(
+        inventory.findings,
+        "14.23",
+        GRAPH_DATA_AREA_PATH,
+        `${inventoryContext} — that finding alone, concerning the area`,
+      );
+      assertSameJson(
+        inventory.recorded,
+        { state: "unavailable" },
+        `${inventoryContext} — the record-supplied datum is reported ` +
+          `explicitly unavailable, never read as an empty record (SPEC ` +
+          `14.23, 11.6)`,
+      );
+      assertSameJson(
+        inventory.journal.occupied,
+        false,
+        `${inventoryContext} — the journal is unoccupied to the inventory ` +
+          `below an area path holding no directory (SPEC 11.6, 13.4)`,
+      );
+      assertSameJson(
+        inventory.sessions,
+        [],
+        `${inventoryContext} — no session while the area's own path holds ` +
+          `no directory (SPEC 11.6, 10.1)`,
+      );
+
+      for (const argv of [["build"], ["ids"], ["review", "list"]] as const) {
+        const context =
+          `${label} \`${argv.join(" ")} --json\` — a directory component ` +
+          `of graph data's write path is occupied by a non-directory: ` +
+          `exactly one condition-22 finding concerning .xspec, exit 1, ` +
+          `nothing written (SPEC 14.22, 13.3, 13.4)`;
+        assertExactlyOneFinding(
+          await runFindingsReport(
+            product,
+            workspace,
+            [...argv, "--json"],
+            1,
+            context,
+          ),
+          "14.22",
+          GRAPH_DATA_AREA_PATH,
+          context,
+        );
+      }
+
+      const checkContext =
+        `${label} \`check --json\` — the obstructed graph-data write path ` +
+        `beside condition 10 in the unreadable-record unit form, and ` +
+        `nothing else (SPEC 14.22, 14.10, 14.23, 12.2)`;
+      const checkFindings = await runFindingsReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        1,
+        checkContext,
+      );
+      assertConditionCounts(
+        checkFindings,
+        { "14.22": 1, "14.10": 1 },
+        checkContext,
+      );
+      for (const finding of checkFindings) {
+        assertFindingConcernsPath(
+          finding,
+          GRAPH_DATA_AREA_PATH,
+          finding.condition === "14.22"
+            ? `${checkContext}: the offending component's ` +
+                `workspace-relative path (SPEC 14.22, 13.4)`
+            : `${checkContext}: the unit form's concerned path is the ` +
+                `graph-data area, no path inside it named (SPEC 14.10, ` +
+                `14.23, 11.6)`,
+        );
+        assertSameJson(
+          finding.locations,
+          [],
+          `${checkContext}: a path-concerned condition is unlocated — ` +
+            `locations [] (SPEC 12.7)`,
+        );
+        if (finding.condition === "14.10" && !/build/i.test(finding.message)) {
+          fail(
+            `${checkContext}: the unit form instructs rebuilding (SPEC ` +
+              `14.10) — any message naming \`build\` qualifies (H-3); got ` +
+              JSON.stringify(finding.message),
+          );
+        }
+      }
+
+      const viewContext =
+        `${label} \`view specs/A.mdx --json\` — \`view\` answers from the ` +
+        `current sources: the clean file finding-free, exit 0 (SPEC 11.2, ` +
+        `T11.2-6)`;
+      const view = decodeViewReport(
+        await runJson(
+          product,
+          workspace,
+          ["view", "specs/A.mdx", "--json"],
+          viewContext,
+        ),
+        { text: false },
+        viewContext,
+      );
+      assertSameJson(view.findings, [], `${viewContext}: findings`);
+    },
+    `${label}: nothing is written — the occupant byte-unchanged, the link ` +
+      `and its target byte-identical, nothing written through it (SPEC ` +
+      `14.22, 13.4)`,
+  );
+}
+
+const T10_1_6 = defineProductTest({
+  id: "T10.1-6",
+  title:
+    "session-directory and area occupancy; `create`'s ordering: `.xspec/reviews` occupied by a plain file, or by a symbolic link to a directory holding a valid session, holds no sessions (`list` none, `status s` exit 2, `check` clean, `inventory` sessions [], `ids` answers) and `create` is refused with one condition-22 finding concerning `.xspec/reviews`, nothing written; on stale twins the refused `create` — condition 22, the code-less existing-name refusal, or condition 21 in its place — follows the refresh (`check` then reports the edited source's per-file staleness and no unit form; no session written or changed); `.xspec` occupied by a plain file, or by a symbolic link to a directory holding a journal and valid sessions: `inventory` recorded unavailable with the one condition-23 finding, `build`/`ids`/`review list` one condition-22 finding concerning `.xspec`, `check` that finding beside the unreadable-record unit form, `view` finding-free (10.1, 10.7, 11.6, 13.3–13.5, 14.10, 14.21–14.23)",
+  timeoutMs: 360_000,
+  run: async (product) => {
+    // --- Session-directory occupancy on a freshly built valid workspace --
+    // Plain file: no session has been created, so `.xspec/reviews` is
+    // absent after `build` (SPEC 10.1) and the plain file takes its path.
+    await withWorkspace(CORE_FILES, async (workspace) => {
+      const label = "T10.1-6 [.xspec/reviews: plain file]";
+      await buildOk(product, workspace, `${label} \`build\``);
+      await stageNonDirectoryOccupant(
+        workspace,
+        REVIEWS_DIR,
+        T10_1_6_PLAIN_FILE,
+      );
+      await assertSessionDirectoryOccupied(product, workspace, label);
+    });
+    // Symbolic link: the product writes `s` first; its session directory
+    // is then relocated outside the area and linked from its path, so the
+    // link's target holds the valid product-written `s.json`.
+    await withWorkspace(CORE_FILES, async (workspace) => {
+      const label =
+        "T10.1-6 [.xspec/reviews: symbolic link to a directory holding s.json]";
+      await buildOk(product, workspace, `${label} \`build\``);
+      await expectExit(
+        product,
+        workspace,
+        T10_1_6_CREATE_S,
+        0,
+        `${label} \`review create --strategy audit --name s\` — the valid ` +
+          `session the link's target then holds (SPEC 10.1)`,
+      );
+      await stageNonDirectoryOccupant(
+        workspace,
+        REVIEWS_DIR,
+        T10_1_6_REVIEWS_LINK,
+      );
+      await assertSessionDirectoryOccupied(product, workspace, label);
+    });
+
+    // --- Ordering: `create` examines the session directory only past the
+    // gate and refresh of 13.3 (SPEC 13.5) — three stale twins.
+    await withWorkspace(CORE_FILES, async (workspace) => {
+      const label = "T10.1-6 [stale twin, .xspec/reviews: plain file]";
+      await buildOk(product, workspace, `${label} \`build\``);
+      await stageNonDirectoryOccupant(
+        workspace,
+        REVIEWS_DIR,
+        T10_1_6_PLAIN_FILE,
+      );
+      await assertCreateFollowsRefresh(
+        product,
+        workspace,
+        T10_1_6_NEW_SESSION,
+        { identity: "14.22", concernedPath: REVIEWS_DIR },
+        {},
+        label,
+      );
+    });
+    await withWorkspace(CORE_FILES, async (workspace) => {
+      const label = "T10.1-6 [stale twin holding a valid s]";
+      await buildOk(product, workspace, `${label} \`build\``);
+      await expectExit(
+        product,
+        workspace,
+        T10_1_6_CREATE_S,
+        0,
+        `${label} \`review create --strategy audit --name s\` (SPEC 10.1)`,
+      );
+      await assertCreateFollowsRefresh(
+        product,
+        workspace,
+        T10_1_6_SESSION,
+        { identity: "(code-less)", concernedPath: null },
+        {},
+        label,
+      );
+    });
+    await withWorkspace(CORE_FILES, async (workspace) => {
+      const label = "T10.1-6 [stale twin holding a corrupt s]";
+      await buildOk(product, workspace, `${label} \`build\``);
+      await expectExit(
+        product,
+        workspace,
+        T10_1_6_CREATE_S,
+        0,
+        `${label} \`review create --strategy audit --name s\` (SPEC 10.1)`,
+      );
+      // Shape-independent corruption (module header): unparseable bytes
+      // over the product-written session (SPEC 14.21).
+      await workspace.file(sessionRel(T10_1_6_SESSION), NON_SESSION_GARBAGE);
+      await assertCreateFollowsRefresh(
+        product,
+        workspace,
+        T10_1_6_SESSION,
+        { identity: "14.21", concernedPath: null },
+        { "14.21": 1 },
+        label,
+      );
+    });
+
+    // --- The graph-data area's own path (SPEC 13.4, 14.22, 14.23) --------
+    // Built first: the derived files exist and match, so `check` meets no
+    // per-file staleness beside the two findings the staging pins.
+    await withWorkspace(CORE_FILES, async (workspace) => {
+      const label = "T10.1-6 [.xspec: plain file]";
+      await buildOk(product, workspace, `${label} \`build\``);
+      await stageNonDirectoryOccupant(
+        workspace,
+        GRAPH_DATA_AREA_PATH,
+        T10_1_6_PLAIN_FILE,
+      );
+      await assertAreaOccupied(product, workspace, label);
+    });
+    // Symbolic link: a journaled rename brings the journal into existence
+    // (SPEC 6.1) and regenerates; `create` writes the valid session; the
+    // area is then relocated and linked from its path.
+    await withWorkspace(CORE_FILES, async (workspace) => {
+      const label =
+        "T10.1-6 [.xspec: symbolic link to a directory holding a journal and s.json]";
+      await buildOk(product, workspace, `${label} \`build\``);
+      await expectExit(
+        product,
+        workspace,
+        ["rename", "specs/A.mdx", "a.k", "a.k2"],
+        0,
+        `${label} \`rename specs/A.mdx a.k a.k2\` — the journal the link's ` +
+          `target then holds (SPEC 6.1, 6.4)`,
+      );
+      await expectExit(
+        product,
+        workspace,
+        T10_1_6_CREATE_S,
+        0,
+        `${label} \`review create --strategy audit --name s\` — the valid ` +
+          `session the link's target then holds (SPEC 10.1)`,
+      );
+      await stageNonDirectoryOccupant(
+        workspace,
+        GRAPH_DATA_AREA_PATH,
+        T10_1_6_AREA_LINK,
+      );
+      await assertAreaOccupied(product, workspace, label);
+    });
+  },
+});
+
 /** TEST-SPEC §10.1, in canonical ID order (SUITE-33). */
 export const section101Tests: readonly ProductTestEntry[] = [
   T10_1_1,
@@ -1455,4 +2174,5 @@ export const section101Tests: readonly ProductTestEntry[] = [
   T10_1_3,
   T10_1_4,
   T10_1_5,
+  T10_1_6,
 ];
