@@ -5,10 +5,10 @@
 // included) follow, relative to a baseline committed immediately before the
 // move. Per S-6, the oracle passes its fixed vector suite
 // (test/self/s6-section-move-oracle.test.ts) — derived from SPEC.md 6.2's
-// worked straddling-line case plus the clean-boundary and final-position
-// cases of TEST-SPEC T6.2-3/T6.2-4 — before any property test trusts it.
-// Harness machinery only: pure functions, no product imports, no I/O, no
-// test-framework dependence.
+// worked straddling-line case in T6.2-3's stagings, T6.2-3's clean-boundary
+// case and sibling stagings, and T6.2-4's final-position shapes — before
+// any property test trusts it. Harness machinery only: pure functions, no
+// product imports, no I/O, no test-framework dependence.
 //
 // The oracle does not parse MDX (the markdown oracle's independence
 // discipline): its caller — the P-5 generator, the S-6 vectors — composed
@@ -20,8 +20,13 @@
 //
 // SPEC.md 6.2/5.6 via TEST-SPEC P-5, as implemented here:
 //
-// * The `changed` set is drawn from exactly the origin parent, the target
-//   parent, and the moved subtree's nodes — each `changed` iff its own
+// * The `changed` set is drawn from exactly 6.2's enumeration of what a
+//   successful move leaves `changed`: the origin parent, the target parent,
+//   the moved subtree's nodes, and each other node with own-content bytes
+//   on a line the deletion joins or drops or the insertion splits — the
+//   construct's boundary lines at the origin, the insertion point's line at
+//   the destination (the import-addition member of the enumeration is
+//   undrawn; its anchors are T6.5-13(h)/(j)) — each `changed` iff its own
 //   content sequence (1.6) differs across the move:
 //     - distinct parents necessarily (one loses a child reference, one
 //       gains one — reference tokens enter the sequence at their positions);
@@ -30,27 +35,38 @@
 //       and per 5.6 carries no other category;
 //     - a coincident parent iff the re-insertion fails to reproduce its
 //       sequence (a final child re-inserted at its own former position is
-//       pure in effect, 6.2);
-//     - a moved-subtree node iff the straddling-line drops of 6.2 change
-//       its runs, computed by the line-drop rules of 3 — the oracle
-//       delegates every logical line's keep/drop decision to P-2's markdown
-//       oracle (`compileMarkdown`), so the two oracles cannot disagree on 3.
-//   Any other node whose sequence differs (a sibling whose whitespace-only
-//   residue rides a straddling line whose keep/drop status the move flips,
-//   an ancestor's bytes on the deletion's merged line) is outside P-5's
-//   staged input space and throws: the generator must never stage it.
+//       pure in effect, 6.2: T6.2-4's pinned shapes reproduce it, its
+//       `changed` twin does not);
+//     - every other enumerated node — a moved-subtree node, an ancestor or
+//       a sibling with bytes on those lines — iff the line-drop rules of 3,
+//       judged on each side, change its runs: a line kept before and
+//       dropped after (a sibling's whitespace residue left alone on the
+//       deletion's merged line, T6.2-3(d); a line the insertion splits
+//       into a whitespace-only remainder, T6.2-3(e); a boundary line whose
+//       within-construct bytes are 1.4 whitespace — nothing, spaces, tabs,
+//       U+000B, U+000C — dropping at the destination whatever the tag's
+//       position there, T6.2-3(a)–(c)) or dropped before and kept after (a
+//       residue joined to prose). The oracle delegates every logical line's
+//       keep/drop decision to P-2's markdown oracle (`compileMarkdown`), so
+//       the two oracles cannot disagree on 3, and U+000B/U+000C count as
+//       whitespace exactly as 1.4 classifies them.
+//   The enumeration is complete (6.2: a successful section move leaves
+//   `changed` no node but these), so a node outside it whose sequence
+//   differs is an oracle defect — the edit model contradicting 6.2 — and
+//   throws; it is never a prediction.
 // * `metadata-changed` on no node (6.2: every moved node keeps its
 //   metadataHash, and canonical identities preserve every other node's) —
 //   the prediction's category vocabulary simply excludes it.
 // * `descendant-changed` and `upstream-changed` exactly per 5.6's cascades
-//   from the changed nodes, attributions included, with the two-sided
-//   tolerance T6.2-3 documents: SPEC 5.6's baseline comparison is defined
-//   for nodes present on both sides, and the relocated moved subtree is a
-//   descendant of each parent's chain on only one side — so a cascade whose
-//   only cause is a relocated (one-side-only) member is predicted as
-//   tolerated-optional (accepted present or absent), while a both-sides
-//   cause makes the category required with the causing originators pinned
-//   into its attribution.
+//   from the changed nodes, attributions included, with one two-sided
+//   tolerance the suite's T6.2-3 body shares: SPEC 5.6's baseline
+//   comparison is defined for nodes present on both sides, and the
+//   relocated moved subtree is a descendant of each parent's chain on only
+//   one side — so a cascade whose only cause is a relocated (one-side-only)
+//   member is predicted as tolerated-optional (accepted present or absent,
+//   attributed within that member), while a both-sides cause makes the
+//   category required with the causing originators pinned into its
+//   attribution.
 //
 // Own-content sequences (SPEC 1.6, 5.5, as the P-4 model pins them): per
 // node, its own-text runs in document order interleaved with one reference
@@ -81,8 +97,14 @@
 // or reference tokens.
 //
 // Staged-scope contracts (guarded where checkable, documented where not):
-// section tags are single-line; a self-closing section has an empty body;
-// an embedding's `expansion` is emptiness-stable across the move — only
+// a self-closing section has an empty body; a section tag may span lines
+// (a terminator among a tag's own characters is deleted with the construct,
+// joining the lines it spanned — 3 — which the delegated compile handles as
+// any multi-line removal); multi-line in-line sections with agreeing
+// boundary lines (T6.2-3's stagings) need no position knowledge — the
+// oracle never parses MDX, and the drop rule consults 1.4 whitespace alone,
+// whatever the tag's position at the destination; an embedding's
+// `expansion` is emptiness-stable across the move — only
 // emptiness enters the drop decision (a non-empty expansion keeps its line
 // regardless of content), and the P-5 generator stages no empty subtree
 // texts, so the before-side expansion decides both sides.
@@ -231,10 +253,6 @@ function misuse(message: string): never {
 
 function defect(message: string): never {
   throw new Error(`section-move oracle defect: ${message}`);
-}
-
-function hasTerminator(text: string): boolean {
-  return text.includes("\n") || text.includes("\r");
 }
 
 function isTerminatorCode(code: number): boolean {
@@ -560,11 +578,50 @@ function insertionPoint(
 // line is kept; the terminator-less final line borrows a sentinel
 // terminator, which cannot change the decision).
 
+/** One logical line of a compiled document (SPEC 3's line model). */
+interface LineRecord {
+  /** Source-text span of the line, its terminator (if any) included. */
+  readonly start: number;
+  readonly end: number;
+  readonly terminated: boolean;
+  /**
+   * The nodes owning own-content bytes on the line — content bytes, the
+   * terminator included — whether the line is kept or dropped.
+   */
+  readonly owners: ReadonlySet<string>;
+}
+
 interface DocumentStructure {
   /** Identity → own-content token sequence, this document's nodes. */
   readonly sequences: Map<string, SectionMoveOwnToken[]>;
   /** Identity → declared `d` targets, this document's sections. */
   readonly depends: Map<string, readonly string[]>;
+  /**
+   * The logical lines in source order — a removed construct's internal
+   * terminators join the lines it spans into one (SPEC 3) — for 6.2's
+   * enumeration of the nodes with bytes on a line the move's edits touch.
+   */
+  readonly lines: readonly LineRecord[];
+}
+
+/**
+ * The owners of own-content bytes on the line holding source offset
+ * `offset` (the end of an unterminated last line included); none at the
+ * file's end after a final terminator, where no line stands.
+ */
+function ownersOnLineAt(
+  structure: DocumentStructure,
+  offset: number,
+): ReadonlySet<string> {
+  for (const line of structure.lines) {
+    if (
+      offset >= line.start &&
+      (offset < line.end || (offset === line.end && !line.terminated))
+    ) {
+      return line.owners;
+    }
+  }
+  return new Set<string>();
 }
 
 type FlatEntry =
@@ -608,13 +665,9 @@ function flattenInto(
         });
         break;
       case "section": {
-        if (hasTerminator(piece.open) || hasTerminator(piece.close ?? "")) {
-          misuse(
-            `section tags are single-line in the staged scope (the P-5 ` +
-              `generator and SPEC 6.2's worked material stage no multi-line ` +
-              `tag); got ${JSON.stringify(piece.open)}`,
-          );
-        }
+        // A tag's own characters may hold terminators (a multi-line tag):
+        // they are deleted with the construct, joining its lines (SPEC 3),
+        // exactly as the delegated compile treats any multi-line removal.
         const identity = `${path}#${piece.id}`;
         register(identity, piece.depends);
         entries.push({ kind: "token", owner, token: ["child", identity] });
@@ -707,7 +760,12 @@ function compileDocument(document: SectionMoveDocument): DocumentStructure {
       };
   let linePieces: MarkdownPiece[] = [];
   let lineEvents: LineEvent[] = [];
+  const lines: LineRecord[] = [];
+  // Source-text offsets: the consumed prefix and the current line's start.
+  let offset = 0;
+  let lineStart = 0;
 
+  // `offset` already stands past `terminator` when this is called.
   const finalizeLine = (terminator: string, owner: string | null): void => {
     if (
       linePieces.length === 0 &&
@@ -721,13 +779,26 @@ function compileDocument(document: SectionMoveDocument): DocumentStructure {
       { kind: "content", text: terminator === "" ? "\n" : terminator },
     ];
     const dropped = compileMarkdown(probe) === "";
+    const owners = new Set<string>();
     for (const event of lineEvents) {
-      if (event.kind === "token") flushToken(event.owner, event.token);
-      else if (!dropped) appendRun(event.owner, event.text);
+      if (event.kind === "token") {
+        flushToken(event.owner, event.token);
+        continue;
+      }
+      owners.add(event.owner);
+      if (!dropped) appendRun(event.owner, event.text);
     }
-    if (!dropped && terminator !== "" && owner !== null) {
-      appendRun(owner, terminator);
+    if (terminator !== "" && owner !== null) {
+      owners.add(owner);
+      if (!dropped) appendRun(owner, terminator);
     }
+    lines.push({
+      start: lineStart,
+      end: offset,
+      terminated: terminator !== "",
+      owners,
+    });
+    lineStart = offset;
     linePieces = [];
     lineEvents = [];
   };
@@ -735,6 +806,7 @@ function compileDocument(document: SectionMoveDocument): DocumentStructure {
   for (const entry of coalesceEntries(entries)) {
     if (entry.kind === "construct") {
       linePieces.push(entry.piece);
+      offset += entry.piece.text.length;
       continue;
     }
     if (entry.kind === "token") {
@@ -765,6 +837,7 @@ function compileDocument(document: SectionMoveDocument): DocumentStructure {
         linePieces.push({ kind: "content", text: chunk });
         lineEvents.push({ kind: "bytes", owner: entry.owner, text: chunk });
       }
+      offset += chunk.length + terminator.length;
       finalizeLine(terminator, entry.owner);
       i += terminator.length;
       start = i;
@@ -773,6 +846,7 @@ function compileDocument(document: SectionMoveDocument): DocumentStructure {
     if (tail.length > 0) {
       linePieces.push({ kind: "content", text: tail });
       lineEvents.push({ kind: "bytes", owner: entry.owner, text: tail });
+      offset += tail.length;
     }
   }
   finalizeLine("", null);
@@ -780,7 +854,7 @@ function compileDocument(document: SectionMoveDocument): DocumentStructure {
   for (const [identity, sequence] of sequences) {
     sequence.push(["run", runs.get(identity) ?? ""]);
   }
-  return { sequences, depends };
+  return { sequences, depends, lines };
 }
 
 // ---------------------------------------------------------------------------
@@ -936,10 +1010,43 @@ export function predictSectionMoveImpact(
       ? targetPath
       : `${targetPath}#${targetParentDotted}`;
 
+  // --- The insertion point (6.5), an offset into the pre-move target
+  // bytes: the target parent's closing tag, or the end of the document for
+  // a top-level new id; none when the move creates the target file ---
+  const targetInsertAt =
+    targetDocument === null
+      ? null
+      : insertionPoint(
+          targetDocument.pieces,
+          targetParentDotted,
+          sectionMoveSourceText(targetDocument.pieces).length,
+        );
+
   // --- Before-side compilation ---
-  const beforeDocs: DocumentStructure[] = [compileDocument(origin)];
-  if (!coincident && targetDocument !== null) {
-    beforeDocs.push(compileDocument(targetDocument));
+  const originBefore = compileDocument(origin);
+  const targetBefore =
+    coincident || targetDocument === null
+      ? null
+      : compileDocument(targetDocument);
+  const beforeDocs: DocumentStructure[] =
+    targetBefore === null ? [originBefore] : [originBefore, targetBefore];
+
+  // --- 6.2's enumeration of what a successful move leaves `changed`: the
+  // parents, the moved subtree's nodes, and each other node with
+  // own-content bytes on a line the deletion joins or drops (the
+  // construct's boundary lines at the origin) or the insertion splits (the
+  // insertion point's line at the destination) — in current identities ---
+  const enumerated = new Set<string>(identityMap.values());
+  enumerated.add(originParent);
+  if (targetParent !== null) enumerated.add(targetParent);
+  const enumerateOwners = (owners: ReadonlySet<string>): void => {
+    for (const owner of owners) enumerated.add(mapIdentity(owner));
+  };
+  enumerateOwners(ownersOnLineAt(originBefore, located.start));
+  enumerateOwners(ownersOnLineAt(originBefore, located.end - 1));
+  const destinationBefore = coincident ? originBefore : targetBefore;
+  if (targetInsertAt !== null && destinationBefore !== null) {
+    enumerateOwners(ownersOnLineAt(destinationBefore, targetInsertAt));
   }
 
   // --- After-side trees (6.5's edits at the piece level) ---
@@ -951,11 +1058,8 @@ export function predictSectionMoveImpact(
   const afterDocs: DocumentStructure[] = [];
   if (coincident) {
     const source = sectionMoveSourceText(origin.pieces);
-    const insertAt = insertionPoint(
-      origin.pieces,
-      targetParentDotted,
-      source.length,
-    );
+    const insertAt =
+      targetInsertAt ?? defect("a same-file move has an insertion point");
     const atLineStart = atLineStartAfterDeletion(source, insertAt, {
       start: located.start,
       end: located.end,
@@ -998,11 +1102,9 @@ export function predictSectionMoveImpact(
       );
     } else {
       const source = sectionMoveSourceText(targetDocument.pieces);
-      const insertAt = insertionPoint(
-        targetDocument.pieces,
-        targetParentDotted,
-        source.length,
-      );
+      const insertAt =
+        targetInsertAt ??
+        defect("a move into an existing file has an insertion point");
       const atLineStart = atLineStartAfterDeletion(source, insertAt, null);
       const spliced = insertMoved(
         targetDocument.pieces,
@@ -1113,22 +1215,22 @@ export function predictSectionMoveImpact(
     );
   }
 
-  // --- The changed set (P-5's exactly-three-groups pin) ---
-  const candidates = new Set<string>(identityMap.values());
-  candidates.add(originParent);
-  if (targetParent !== null) candidates.add(targetParent);
+  // --- The changed set: each enumerated node iff its own-content
+  // sequence differs across the move (P-5); a differing node outside the
+  // enumeration contradicts 6.2's completeness — an oracle defect ---
   const changed = new Set<string>();
   for (const [identity, beforeTokens] of mappedBefore) {
     const afterTokens = after.get(identity);
     if (afterTokens === undefined) continue; // unreachable: guarded above
     if (tokensJson(beforeTokens) === tokensJson(afterTokens)) continue;
-    if (!candidates.has(identity)) {
-      misuse(
+    if (!enumerated.has(identity)) {
+      defect(
         `the own-content sequence of ${identity} differs across the move, ` +
-          `but P-5 draws the changed set from exactly the origin parent, ` +
-          `the target parent, and the moved subtree's nodes — the generator ` +
-          `must never stage another node's bytes on a line whose keep/drop ` +
-          `status the move flips (TEST-SPEC 16 P-5; SPEC 6.2, 3)`,
+          `but the node is outside 6.2's enumeration of what a successful ` +
+          `move leaves changed — the parents, the moved subtree's nodes, ` +
+          `and each node with own-content bytes on a line the deletion ` +
+          `joins or drops or the insertion splits — so the oracle's edit ` +
+          `model contradicts SPEC 6.2 (TEST-SPEC 16 P-5)`,
       );
     }
     changed.add(identity);

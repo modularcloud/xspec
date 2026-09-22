@@ -27,8 +27,11 @@
 //     The impact report against the pre-move baseline must satisfy the
 //     section-move category oracle (helpers/oracles/section-move.ts, vetted
 //     by its S-6 suite before this arm trusts it): the `changed` set drawn
-//     from exactly the origin parent, the target parent, and the moved
-//     subtree's nodes — a moved node `changed` iff the straddling-line
+//     from exactly 6.2's enumeration — the origin parent, the target
+//     parent, the moved subtree's nodes, and each other node with
+//     own-content bytes on a line the deletion joins or drops or the
+//     insertion splits — each `changed` iff its own-content sequence
+//     differs across the move, a moved node's iff the straddling-line
 //     drops of 6.2 change its runs, computed by the line-drop rules of 3
 //     (every keep/drop decision delegated to P-2's markdown oracle) — a
 //     created target file's root `changed` as an added node carrying no
@@ -83,9 +86,12 @@
 // bytes are owned by exactly the origin parent (outside the tags) and the
 // moved root (inside them), and the construct's first and last body lines
 // carry no other node's bytes, so no line whose keep/drop status the move
-// flips holds a third node's bytes — the oracle's exactly-three-groups
-// misuse guard enforces this, throwing a harness defect (H-8), never a
-// diagnosed product failure. Embeddings keep the PROP-03 prose-flanked
+// flips holds a third node's bytes (P-5: the boundary lines hold prose
+// outside the construct alone) — were one staged, the oracle would predict
+// it `changed` by the same own-content comparison, 6.2's enumeration
+// reaching every node with bytes on such a line (T6.2-3's sibling
+// stagings (d)/(e) are its deterministic anchors). Embeddings keep the
+// PROP-03 prose-flanked
 // staging everywhere (never on a straddling or decorated line), so no
 // line-drop decision ever consults an expansion's emptiness and the
 // oracle's emptiness-stability contract holds trivially; expansion values
@@ -1786,9 +1792,12 @@ async function runSectionMoveTrial(
       await impactAgainst(product, workspace, base, label),
       prediction,
       `${label} — the report must match the section-move oracle's ` +
-        `prediction: the changed set drawn from exactly the origin parent, ` +
-        `the target parent, and the moved subtree's nodes (straddling-line ` +
-        `drops computed by the line-drop rules of 3), a created target ` +
+        `prediction: the changed set drawn from exactly 6.2's enumeration ` +
+        `— the origin parent, the target parent, the moved subtree's nodes, ` +
+        `and each other node with bytes on a line the deletion joins or ` +
+        `drops or the insertion splits — each changed iff its own-content ` +
+        `sequence differs (straddling-line drops computed by the line-drop ` +
+        `rules of 3), a created target ` +
         `file's root changed as an added node, a coincident parent pure ` +
         `when re-insertion reproduces its sequence, metadata-changed on no ` +
         `node, and the 5.6 cascades with their attributions (TEST-SPEC §16 ` +
