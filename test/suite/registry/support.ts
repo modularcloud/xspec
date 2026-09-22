@@ -574,7 +574,12 @@ export function assertFindingLocatesExactly(
  * (`<file>#id` for a rename, `<target-file>#id` for a section move, the bare
  * `<new-file>` for a file move), whether or not the ID is valid;
  * `refused-id-collision` carries the located bearers' identities in location
- * order. For every other reason — `refused-cycle` and the path-concerning
+ * order; `refused-invalid-rewrite` carries the workspace-relative paths of
+ * the files concerned — each a spec source's root identity or a code
+ * source's whole-file identity, a created target file's spelled whatever
+ * its path's validity — in byte order; `refused-moved-import` carries
+ * none (its `identities` empty). For every other reason —
+ * `refused-cycle` and the path-concerning
  * `refused-destination-exists` and `refused-invalid-destination` — 12.7
  * leaves the member informational, its composition unpinned, so no consumer
  * asserts it (H-4).
@@ -585,6 +590,8 @@ export const IDENTITY_PINNED_REFUSAL_CODES: ReadonlySet<string> = new Set([
   "refused-id-collision",
   "refused-structural-parent",
   "refused-missing-target-parent",
+  "refused-invalid-rewrite",
+  "refused-moved-import",
 ]);
 
 /**
@@ -637,8 +644,10 @@ export function assertRefusalIdentities(
       throw new Error(
         `harness defect: ${context} — SPEC.md 14 pins the \`identities\` of ` +
           `${JSON.stringify(code)} (its concerned identity as the sole ` +
-          `element; the located bearers for refused-id-collision), so the ` +
-          `case must state the exact array`,
+          `element; the located bearers for refused-id-collision; the ` +
+          `concerned files' paths in byte order for refused-invalid-rewrite; ` +
+          `none for refused-moved-import), so the case must state the exact ` +
+          `array`,
       );
     }
     return;

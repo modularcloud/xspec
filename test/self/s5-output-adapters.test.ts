@@ -1393,6 +1393,52 @@ const DECODERS: readonly DecoderSpec[] = [
           expect(decoded.findings[0]!.path).toEqual({ bytes: "ff2f61" });
         },
       },
+      {
+        label:
+          "the two refusal codes SPEC 14 lists last: refused-invalid-rewrite " +
+          "(locating the moved construct, identities the concerned files' " +
+          "paths in byte order) then refused-moved-import (locating the " +
+          "moved declaration, identities empty) (SPEC 14; T6.5-16, T6.5-17, " +
+          "T14-7)",
+        doc: {
+          findings: [
+            {
+              code: "refused-invalid-rewrite",
+              message: "the exact edits would leave specs/B.mdx unparseable",
+              locations: [
+                { file: "specs/A.mdx", range: { start: 12, end: 60 } },
+              ],
+              path: null,
+              identities: ["specs/B.mdx", "specs/new.mdx"],
+            },
+            {
+              code: "refused-moved-import",
+              message: "the moved text holds an import declaration",
+              locations: [
+                { file: "specs/A.mdx", range: { start: 20, end: 48 } },
+              ],
+              path: null,
+              identities: [],
+            },
+          ],
+        },
+        verify: (decoded: ReturnType<typeof decodeFindingsReport>): void => {
+          expect(decoded.findings.map((finding) => finding.code)).toEqual([
+            "refused-invalid-rewrite",
+            "refused-moved-import",
+          ]);
+          // Refusal reasons derive no 14.N condition identity.
+          expect(decoded.findings.map((finding) => finding.condition)).toEqual([
+            null,
+            null,
+          ]);
+          expect(decoded.findings[0]!.identities).toEqual([
+            "specs/B.mdx",
+            "specs/new.mdx",
+          ]);
+          expect(decoded.findings[1]!.identities).toEqual([]);
+        },
+      },
     ],
     bad: [
       { label: "missing findings list", doc: {} },
@@ -1411,6 +1457,19 @@ const DECODERS: readonly DecoderSpec[] = [
       {
         label: "unknown code token",
         doc: put(GOOD_FINDINGS, "oops", "findings", 0, "code"),
+      },
+      {
+        label:
+          "the retired refused-unresolvable-reference code (a code 14 does " +
+          "not list never appears in any report: no reason exists for a " +
+          "rewritten reference failing to resolve, SPEC 6.4, 6.5, 14; T14-7)",
+        doc: put(
+          GOOD_FINDINGS,
+          "refused-unresolvable-reference",
+          "findings",
+          4,
+          "code",
+        ),
       },
       {
         label:
@@ -4352,9 +4411,26 @@ test("S-5: the findings comparator orders codes numerically, refusals in 14's or
     compareFindings(findingWith({ code: "unreadable-record" }), refusalFirst),
   ).toBeLessThan(0);
   expect(compareFindings(refusalFirst, refusalLater)).toBeLessThan(0);
-  // Code-less findings sort last.
+  // 14's listed order, not lexicographic: refused-missing-target-parent
+  // (7th listed) precedes refused-invalid-destination (8th) although "m"
+  // sorts after "i"; the two codes 14 lists last follow in its order,
+  // refused-invalid-rewrite (9th) then refused-moved-import (10th).
+  const refusalSeventh = findingWith({
+    code: "refused-missing-target-parent",
+  });
+  const refusalEighth = findingWith({ code: "refused-invalid-destination" });
+  const refusalNinth = findingWith({ code: "refused-invalid-rewrite" });
+  const refusalTenth = findingWith({ code: "refused-moved-import" });
+  expect(compareFindings(refusalLater, refusalSeventh)).toBeLessThan(0);
+  expect(compareFindings(refusalSeventh, refusalEighth)).toBeLessThan(0);
+  expect(compareFindings(refusalEighth, refusalNinth)).toBeLessThan(0);
+  expect(compareFindings(refusalNinth, refusalTenth)).toBeLessThan(0);
+  // Code-less findings sort last, after the last listed refusal reason.
   expect(
     compareFindings(refusalLater, findingWith({ code: null })),
+  ).toBeLessThan(0);
+  expect(
+    compareFindings(refusalTenth, findingWith({ code: null })),
   ).toBeLessThan(0);
 });
 

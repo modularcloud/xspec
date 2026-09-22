@@ -1809,7 +1809,7 @@ async function runRefusalOrderingArm(product: ProductBinding): Promise<void> {
         `${context} — the multi-reason refusal report: one finding per ` +
           `applicable reason and no reason beside them (SPEC 14), in 14's ` +
           `LISTED order — refused-id-collision (3rd listed) before ` +
-          `refused-cycle (6th listed), the inverse of their alphabetical ` +
+          `refused-cycle (5th listed), the inverse of their alphabetical ` +
           `order — with \`path\` null on located findings (SPEC 12.7)`,
       );
       assertFindingMentionsLocation(

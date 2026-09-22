@@ -236,6 +236,8 @@ export const REFUSAL_CODE_TOKENS = [
   "refused-destination-exists",
   "refused-missing-target-parent",
   "refused-invalid-destination",
+  "refused-invalid-rewrite",
+  "refused-moved-import",
 ] as const;
 export type RefusalCodeToken = (typeof REFUSAL_CODE_TOKENS)[number];
 

@@ -293,7 +293,7 @@ export function decodeFindingForm(value: unknown, site: DecodeSite): Finding {
         codeSite,
         "a stable code: one of SPEC 14's condition tokens " +
           "(missing-id … read-failure) or refusal codes " +
-          "(refused-invalid-id … refused-invalid-destination), or null " +
+          "(refused-invalid-id … refused-moved-import), or null " +
           "where 14 assigns none",
         codeValue,
       );
