@@ -137,7 +137,16 @@
 //   (`ok`), the roots' stated `null`, and unavailable (the braced
 //   `coverage={"none"}` — quoted-static form required, 2.7).
 // - specs/clean.mdx is finding-free (`<S id="ok" tags="solo"
-//   coverage="none">`); the second invocation names it as a `<file>`
+//   coverage="none">`, then the tag-set-form bearers `<S id="bset"
+//   tags="b a a">` and `<S id="zset" tags="z A">`, each reporting its
+//   interpreted tags in the 12.7 value form — exactly `["a", "b"]` (byte
+//   order, duplicates collapsed) and `["A", "z"]` (bytes, never
+//   case-folded) — compared literally on the `view` node, never re-sorted
+//   by the harness: a product echoing the spelled order or the duplicate
+//   fails the form-exact decode (H-3, T12.7-1); the form's `query node`
+//   and `show --json` carriage is T2.6-1's and T12.4-1's, not driven here
+//   (CERTIFICATIONS.md §CONF-AVAIL: T11.4-3 drives `view` alone)); the
+//   second invocation names it as a `<file>`
 //   operand and asserts SPEC 11.4's root sentence sharply: a root's `tags`
 //   and `coverage` are structurally absent — the stated `null`, never the
 //   unavailability marker, NO finding and NO exit-1 consequence — so the
@@ -1191,6 +1200,25 @@ CN.add(" ");
 const CN_OK_COVERAGE = CN.attr("coverage", 'coverage="none"');
 CN.add(">\nOk text.\n</S>");
 const CN_OK_RANGE: SourceRange = { start: CN_OK_START, end: CN.pos };
+CN.add("\n\n");
+// The tag-set-form bearers (SPEC 12.7; TEST-SPEC T11.4-3): `tags="b a a"`
+// reports exactly ["a", "b"] — byte order, duplicates collapsed — and
+// `tags="z A"` exactly ["A", "z"] — bytes (0x41 < 0x7a), never case-folded.
+const CN_BSET_START = CN.pos;
+CN.add("<S ");
+const CN_BSET_ID = CN.attr("id", 'id="bset"');
+CN.add(" ");
+const CN_BSET_TAGS = CN.attr("tags", 'tags="b a a"');
+CN.add(">\nBset text.\n</S>");
+const CN_BSET_RANGE: SourceRange = { start: CN_BSET_START, end: CN.pos };
+CN.add("\n\n");
+const CN_ZSET_START = CN.pos;
+CN.add("<S ");
+const CN_ZSET_ID = CN.attr("id", 'id="zset"');
+CN.add(" ");
+const CN_ZSET_TAGS = CN.attr("tags", 'tags="z A"');
+CN.add(">\nZset text.\n</S>");
+const CN_ZSET_RANGE: SourceRange = { start: CN_ZSET_START, end: CN.pos };
 CN.add("\n");
 const CLEAN_SOURCE = CN.source;
 const CLEAN_ROOT_RANGE: SourceRange = { start: 0, end: CN.pos };
@@ -1293,6 +1321,26 @@ const CLEAN_TREE: AttributeDataShape = {
       coverage: "none",
       children: [],
     },
+    {
+      // `tags="b a a"`: the interpreted tags in the 12.7 tag-set form —
+      // byte order, duplicates collapsed — compared literally, never
+      // re-sorted by the harness (H-3); coverage the absent-prop default.
+      identity: `${CLEAN_FILE}#bset`,
+      range: CN_BSET_RANGE,
+      attributes: [CN_BSET_ID, CN_BSET_TAGS],
+      tags: ["a", "b"],
+      coverage: "required",
+      children: [],
+    },
+    {
+      // `tags="z A"`: byte order is never case-folded (0x41 < 0x7a).
+      identity: `${CLEAN_FILE}#zset`,
+      range: CN_ZSET_RANGE,
+      attributes: [CN_ZSET_ID, CN_ZSET_TAGS],
+      tags: ["A", "z"],
+      coverage: "required",
+      children: [],
+    },
   ],
 };
 
@@ -1343,7 +1391,7 @@ const SHARED_TREE: AttributeDataShape = {
 const T11_4_3 = defineProductTest({
   id: "T11.4-3",
   title:
-    'raw attribute spellings as parsed, one entry per spelled attribute in tag order on the five-attribute tag `<S id="dup" id="dup" note="mystery" {...extras} tags>` — a repeated `id` (BOTH entries), an unknown prop, a spread attribute (its `name` structurally absent — the stated `null` — its source text the whole braced construct), a valueless bare-name `tags` — each entry\'s name, range, and source text byte-asserted against precomputed offsets behind a multi-byte prefix; inclusion is by form: every invalid form stays a listed entry, its invalidity a located finding beside the view, never a view omission — exactly five 14.17 (those four plus a braced `coverage={"none"}` on a second section), each located in the matrix file; per-node `identity`, `tags`, `coverage` each plain or explicitly unavailable per T11.2-2, every state carried once (identity unavailable on the repeated-`id` bearer; tags unavailable on the valueless `tags` beside its absent-prop default coverage "required"; coverage unavailable on the braced value beside its defined identity and default empty tags; all three plain in the sibling file); a root\'s `tags` and `coverage` are structurally absent — the stated `null`, never the unavailability marker, no finding and no exit-1 consequence: the finding-free specs/clean.mdx named as a `<file>` operand exits 0 with them `null`, the bare whole-domain view exiting 1 for the matrix file\'s findings and markers; T2.7-3\'s shared `<S id="x" tags>` fixture (specs/A.mdx, the exact bytes its build arm stages) viewed bare in its own workspace: the bearer\'s identity the plain `specs/A.mdx#x` — exactly one quoted static `id`, well-formed and unique, keeps its defined identity whatever invalid-form prop stands beside it — its `id` and bare-name `tags` entries listed in tag order at the fixture\'s declared offsets, its interpreted tags unavailable beside the absent-prop default coverage "required", the one 14.17 the build reports located within the opening tag\'s window and nothing else (never 14.1), exit 1, the valid sibling every datum plain (SPEC 11.4, 11.2, 2.7, 12.7, 14; CERTIFICATIONS.md CONF-AVAIL in scope)',
+    'raw attribute spellings as parsed, one entry per spelled attribute in tag order on the five-attribute tag `<S id="dup" id="dup" note="mystery" {...extras} tags>` — a repeated `id` (BOTH entries), an unknown prop, a spread attribute (its `name` structurally absent — the stated `null` — its source text the whole braced construct), a valueless bare-name `tags` — each entry\'s name, range, and source text byte-asserted against precomputed offsets behind a multi-byte prefix; inclusion is by form: every invalid form stays a listed entry, its invalidity a located finding beside the view, never a view omission — exactly five 14.17 (those four plus a braced `coverage={"none"}` on a second section), each located in the matrix file; per-node `identity`, `tags`, `coverage` each plain or explicitly unavailable per T11.2-2, every state carried once (identity unavailable on the repeated-`id` bearer; tags unavailable on the valueless `tags` beside its absent-prop default coverage "required"; coverage unavailable on the braced value beside its defined identity and default empty tags; all three plain in the sibling file); a root\'s `tags` and `coverage` are structurally absent — the stated `null`, never the unavailability marker, no finding and no exit-1 consequence: the finding-free specs/clean.mdx named as a `<file>` operand exits 0 with them `null`, the bare whole-domain view exiting 1 for the matrix file\'s findings and markers; T2.7-3\'s shared `<S id="x" tags>` fixture (specs/A.mdx, the exact bytes its build arm stages) viewed bare in its own workspace: the bearer\'s identity the plain `specs/A.mdx#x` — exactly one quoted static `id`, well-formed and unique, keeps its defined identity whatever invalid-form prop stands beside it — its `id` and bare-name `tags` entries listed in tag order at the fixture\'s declared offsets, its interpreted tags unavailable beside the absent-prop default coverage "required", the one 14.17 the build reports located within the opening tag\'s window and nothing else (never 14.1), exit 1, the valid sibling every datum plain; tag-set form (12.7): the finding-free file\'s bearers `tags="b a a"` and `tags="z A"` report `tags` exactly `["a", "b"]` and `["A", "z"]` on the `view` node — byte order, duplicates collapsed, never case-folded — compared literally through the form-exact decode, a product echoing the spelled order or the duplicate failing (T12.7-1\'s discipline; the form\'s `query node`/`show --json` carriage is T2.6-1\'s and T12.4-1\'s) (SPEC 11.4, 11.2, 2.7, 12.7, 14; CERTIFICATIONS.md CONF-AVAIL in scope)',
   run: async (product) => {
     // Fixture self-checks (T5.7-2 discipline) — composed-range arithmetic
     // proven against the staged bytes before any product invocation.
@@ -1375,6 +1423,10 @@ const T11_4_3 = defineProductTest({
       [CN_OK_ID, "the ok id"],
       [CN_OK_TAGS, "the ok tags"],
       [CN_OK_COVERAGE, "the ok coverage"],
+      [CN_BSET_ID, "the bset id"],
+      [CN_BSET_TAGS, "the bset tags"],
+      [CN_ZSET_ID, "the zset id"],
+      [CN_ZSET_TAGS, "the zset tags"],
     ] as const) {
       sliceCheck(CLEAN_SOURCE, entry.range, entry.text, what);
     }
@@ -1383,6 +1435,18 @@ const T11_4_3 = defineProductTest({
       CN_OK_RANGE,
       '<S id="ok" tags="solo" coverage="none">\nOk text.\n</S>',
       "the clean construct",
+    );
+    sliceCheck(
+      CLEAN_SOURCE,
+      CN_BSET_RANGE,
+      '<S id="bset" tags="b a a">\nBset text.\n</S>',
+      "the bset construct",
+    );
+    sliceCheck(
+      CLEAN_SOURCE,
+      CN_ZSET_RANGE,
+      '<S id="zset" tags="z A">\nZset text.\n</S>',
+      "the zset construct",
     );
     sliceCheck(CLEAN_SOURCE, CLEAN_ROOT_RANGE, CLEAN_SOURCE, "the clean file");
     // The shared fixture's declared offsets against its own bytes: the
@@ -1483,8 +1547,13 @@ const T11_4_3 = defineProductTest({
         `${context} — ${CLEAN_FILE}: the sibling file's section carries ` +
           `all three interpreted data plain (identity "ok", tags ` +
           `["solo"], coverage "none") with its three attribute entries ` +
-          `byte-exact, and the root's tags/coverage stay the stated null ` +
-          `(SPEC 11.4, 11.2, 12.7)`,
+          `byte-exact; the tag-set-form bearers report their interpreted ` +
+          `tags in the 12.7 value form, compared literally — tags="b a a" ` +
+          `exactly ["a", "b"] (byte order, duplicates collapsed) and ` +
+          `tags="z A" exactly ["A", "z"] (bytes, never case-folded) — a ` +
+          `product echoing the spelled order or the duplicate fails; and ` +
+          `the root's tags/coverage stay the stated null (SPEC 11.4, ` +
+          `11.2, 12.7)`,
       );
       [ATTRS_FILE, CLEAN_FILE].forEach((file, index) => {
         const view = report.views[index]!;
@@ -1538,7 +1607,8 @@ const T11_4_3 = defineProductTest({
         CLEAN_TREE,
         `${cleanContext}: the same tree as the whole-domain answer — the ` +
           `root's tags/coverage the stated null, never the unavailability ` +
-          `marker, on the exit-0 side too (SPEC 11.4, 12.7)`,
+          `marker, on the exit-0 side too, and the tag-set-form bearers' ` +
+          `["a", "b"] and ["A", "z"] literal (SPEC 11.4, 12.7)`,
       );
     } finally {
       await workspace.dispose();

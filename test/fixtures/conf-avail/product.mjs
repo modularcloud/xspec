@@ -583,7 +583,7 @@ function isDerivedPath(rel) {
   );
 }
 
-/** Byte-order comparison of workspace-relative paths (SPEC 12.7). */
+/** Byte-order comparison of paths and tag strings (SPEC 12.7, 12.0). */
 function compareRelBytes(a, b) {
   return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 }
@@ -659,7 +659,8 @@ function isWellFormedIdentity(spelling) {
 
 /**
  * SPEC 2.6 tag splitting: tags split on runs of 1.4 whitespace with
- * leading/trailing whitespace ignored, then collapse to a sorted set.
+ * leading/trailing whitespace ignored; the caller collapses the tokens to
+ * the 12.7 tag set — byte order, duplicates collapsed.
  */
 function splitTags(value) {
   const tokens = [];
@@ -1564,7 +1565,11 @@ async function loadWorkspace(cwd, configFlag) {
             );
           }
         }
-        info.tags = valid ? [...new Set(tokens)].sort() : UNAVAILABLE;
+        // The 12.7 tag set: UTF-8 byte order (never UTF-16 code-unit
+        // order, never case-folded), duplicates collapsed.
+        info.tags = valid
+          ? [...new Set(tokens)].sort(compareRelBytes)
+          : UNAVAILABLE;
       }
 
       // Interpreted coverage (SPEC 2.5, 11.2): "required"/"none", or
