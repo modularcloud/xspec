@@ -27,6 +27,14 @@ import { defineConfig } from "vitest/config";
 // test/helpers/. Certification fixture products (CERTIFICATIONS.md) and
 // consumer fixture projects belong in test/fixtures/.
 //
+// Harness-only dependencies are the devDependencies of package.json (the
+// product's runtime dependencies are its `dependencies`): the stock MDX 3
+// parser S-9 judges fixture well-formedness with — `micromark` with
+// `micromark-extension-mdxjs`, `mdast-util-from-markdown` with
+// `mdast-util-mdx` (JSX tag matching lives in that mdast layer, not in the
+// tokenizer) — is declared there in its own right so the check stays
+// independent of the product's `remark-mdx` (TEST-SPEC S-9).
+//
 // Paths below are relative to the repository root: the npm scripts are the
 // canonical entry points and always run from the package root.
 export default defineConfig({
