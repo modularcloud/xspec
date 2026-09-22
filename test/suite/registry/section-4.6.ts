@@ -32,6 +32,18 @@
 //   `#t`, the nested `#f.s`, and their `@N`-suffixed forms), so a product
 //   that made a plain-identifier constant a named unit fails on the whole
 //   answer, not only on the `embeds` set.
+// - T4.6-3 "binds no unit" (wrappers, default exports of non-constructs,
+//   body-less and `declare` declarations, the escape-spelled name, the
+//   declaration files): `query nodes` lists requirement nodes only (SPEC
+//   11.1), so a unit's non-existence is observed through attribution —
+//   every marker targets a dedicated section, so the complete `references`
+//   set pins the file (or the enclosing named unit) as its source, and the
+//   unfiltered endpoint sweep additionally rejects any identity spelled
+//   after a forbidden name (`#w1`, `#default`, `#foo`, a `.d.ts` file's
+//   `#f`) or `@N`-suffixed in the body-less file. The escape spelling is
+//   composed from the backslash's code point (`BACKSLASH`), never written
+//   as a six-character sequence in this source (the tool-parameter layer
+//   would decode it), and the fixture is byte-checked for it.
 // - T4.6-4 "coverage boundary membership": SPEC 8 covers a target when a
 //   permitted path exists from a boundary node to it, and 8.2 reports one
 //   shortest covering path as a node-identity sequence (12.0) — from the
@@ -53,6 +65,7 @@ import {
   assertEdgeSetEqual,
   assertSameJson,
   buildOk,
+  expectFindingFreeReport,
   runJson,
 } from "./support.js";
 
@@ -613,6 +626,62 @@ const T4_6_3_SPEC_SOURCE = [
   "Target for the value-side text call at file top level.",
   "</S>",
   "",
+  '<S id="wrapparen">',
+  "Target for the parenthesized arrow initializer.",
+  "</S>",
+  "",
+  '<S id="wrapas">',
+  "Target for the as-cast arrow initializer.",
+  "</S>",
+  "",
+  '<S id="wrapsat">',
+  "Target for the satisfies-qualified function-expression initializer.",
+  "</S>",
+  "",
+  '<S id="wrapnn">',
+  "Target for the non-null-asserted arrow initializer.",
+  "</S>",
+  "",
+  '<S id="wraphosted">',
+  "Target for the wrapped initializer inside a named function.",
+  "</S>",
+  "",
+  '<S id="dobj">',
+  "Target for the arrow held by a default-exported object literal.",
+  "</S>",
+  "",
+  '<S id="dident">',
+  "Target for the arrow-valued variable exported by identifier.",
+  "</S>",
+  "",
+  '<S id="dcall">',
+  "Target for the arrow argument of a default-exported call.",
+  "</S>",
+  "",
+  '<S id="dlit">',
+  "Target for the top-level marker beside a default-exported literal.",
+  "</S>",
+  "",
+  '<S id="overload">',
+  "Target for the function implementation behind two overloads.",
+  "</S>",
+  "",
+  '<S id="methodoverload">',
+  "Target for the method implementation behind two overloads.",
+  "</S>",
+  "",
+  '<S id="abstractgetter">',
+  "Target for the getter behind a sibling class's abstract getter.",
+  "</S>",
+  "",
+  '<S id="ambient">',
+  "Target for the method behind a declare class's body-less method.",
+  "</S>",
+  "",
+  '<S id="escaped">',
+  "Target for the function whose name is spelled with an escape.",
+  "</S>",
+  "",
 ].join("\n");
 
 const T4_6_3_APP_SOURCE = [
@@ -662,34 +731,375 @@ const T4_6_3_APP_SOURCE = [
   "",
 ].join("\n");
 
-/** The value-side arm's plain-identifier constants — never named units. */
-const T4_6_3_VALUE_CONSTANTS: readonly string[] = ["s", "t"];
+// Wrappers and value forms (SPEC 4.6: an initializer that merely wraps a
+// named form — parenthesized, `as`-cast, `satisfies`-qualified, or non-null-
+// asserted — is another expression and binds no unit): four top-level
+// constants whose markers attribute to the file, and one inside `wrapHost`
+// whose marker attributes to that enclosing named unit — never to `#w1` …
+// `#w5`.
+const T4_6_3_WRAP_SOURCE = [
+  'import SPEC from "../specs/N.xspec";',
+  "",
+  "const w1 = (() => {",
+  "  SPEC.wrapparen;",
+  "});",
+  "",
+  "const w2 = ((): void => {",
+  "  SPEC.wrapas;",
+  "}) as () => void;",
+  "",
+  "const w3 = (function () {",
+  "  SPEC.wrapsat;",
+  "}) satisfies () => void;",
+  "",
+  "const w4 = (() => {",
+  "  SPEC.wrapnn;",
+  "})!;",
+  "",
+  "function wrapHost(): void {",
+  "  const w5 = ((): void => {",
+  "    SPEC.wraphosted;",
+  "  }) as () => void;",
+  "}",
+  "",
+].join("\n");
+
+// Default exports of an object literal, an identifier, a call, and a literal
+// value bind no unit (SPEC 4.6) — a file holds at most one default export, so
+// each form has its own file. The marker inside the arrow held by the object
+// literal's property attributes to the file (an object-literal property is no
+// class member); the arrow argument of the exported call is anonymous and
+// nothing named encloses it — the file; the identifier form's marker sits in
+// the arrow-valued variable `impl`, a named unit in its own right, so the
+// export adds no `default` unit above or beside it; the literal form can hold
+// no marker, so its file carries a top-level one. A product making any of
+// these a `default` unit sources an edge at `path#default`, failing the set.
+const T4_6_3_DEFAULT_OBJECT_SOURCE = [
+  'import SPEC from "../specs/N.xspec";',
+  "",
+  "export default {",
+  "  run: () => {",
+  "    SPEC.dobj;",
+  "  },",
+  "};",
+  "",
+].join("\n");
+
+const T4_6_3_DEFAULT_IDENTIFIER_SOURCE = [
+  'import SPEC from "../specs/N.xspec";',
+  "",
+  "const impl = (): void => {",
+  "  SPEC.dident;",
+  "};",
+  "",
+  "export default impl;",
+  "",
+].join("\n");
+
+const T4_6_3_DEFAULT_CALL_SOURCE = [
+  'import SPEC from "../specs/N.xspec";',
+  "",
+  "function wrap(fn: () => void): () => void {",
+  "  return fn;",
+  "}",
+  "",
+  "export default wrap(() => {",
+  "  SPEC.dcall;",
+  "});",
+  "",
+].join("\n");
+
+const T4_6_3_DEFAULT_LITERAL_SOURCE = [
+  'import SPEC from "../specs/N.xspec";',
+  "",
+  "SPEC.dlit;",
+  "",
+  "export default 42;",
+  "",
+].join("\n");
+
+// Declarations binding no executable code — overload signatures, body-less
+// method signatures, abstract members, and `declare` ambient declarations —
+// are no units and occupy no document-order slot (SPEC 4.6): the function
+// implementation behind two overloads is `#f`, never `#f@3`; the method
+// implementation behind two overloads is `#M.m`; with two block-scoped
+// classes `C` in sibling blocks, the first abstract with `abstract get v()`,
+// the second's getter is `#C.v`, never `#C.v@2` (the chain `C.v` occurs once
+// — the abstract getter takes no slot); and the method of the block-scoped
+// class `Amb` behind a top-level `declare class Amb` with a body-less `m` is
+// `#Amb.m`, never `#Amb.m@2`.
+const T4_6_3_DECL_SOURCE = [
+  'import SPEC from "../specs/N.xspec";',
+  "",
+  "function f(a: string): void;",
+  "function f(a: number): void;",
+  "function f(a: string | number): void {",
+  "  SPEC.overload;",
+  "  void a;",
+  "}",
+  "",
+  "class M {",
+  "  m(a: string): void;",
+  "  m(a: number): void;",
+  "  m(a: string | number): void {",
+  "    SPEC.methodoverload;",
+  "    void a;",
+  "  }",
+  "}",
+  "",
+  "{",
+  "  abstract class C {",
+  "    abstract get v(): number;",
+  "  }",
+  "}",
+  "",
+  "{",
+  "  class C {",
+  "    get v(): number {",
+  "      SPEC.abstractgetter;",
+  "      return 1;",
+  "    }",
+  "  }",
+  "}",
+  "",
+  "declare class Amb {",
+  "  m(): void;",
+  "}",
+  "",
+  "{",
+  "  class Amb {",
+  "    m(): void {",
+  "      SPEC.ambient;",
+  "    }",
+  "  }",
+  "}",
+  "",
+].join("\n");
+
+/** The backslash, built from its code point (see the module header). */
+const BACKSLASH = String.fromCodePoint(0x5c);
+
+/** The escape-spelled function name: `f`, the six-character escape of `o`, `o`. */
+const T4_6_3_ESCAPED_NAME = `f${BACKSLASH}u006Fo`;
+
+// A unit name spelled with an escape sequence binds no unit (SPEC 4.6, 2.4:
+// read as spelled, never interpreted to `foo`), so the marker attributes to
+// the file — never to `#foo`, nor to a unit spelled after the escape.
+const T4_6_3_ESCAPED_SOURCE = [
+  'import SPEC from "../specs/N.xspec";',
+  "",
+  `function ${T4_6_3_ESCAPED_NAME}(): void {`,
+  "  SPEC.escaped;",
+  "}",
+  "",
+].join("\n");
+
+/** The edges the wrapper, default-export, body-less, and escape arms owe. */
+const T4_6_3_FORM_REFERENCES: readonly GraphEdge[] = [
+  { from: "src/wrap.ts", to: "specs/N.mdx#wrapparen", kind: "references" },
+  { from: "src/wrap.ts", to: "specs/N.mdx#wrapas", kind: "references" },
+  { from: "src/wrap.ts", to: "specs/N.mdx#wrapsat", kind: "references" },
+  { from: "src/wrap.ts", to: "specs/N.mdx#wrapnn", kind: "references" },
+  {
+    from: "src/wrap.ts#wrapHost",
+    to: "specs/N.mdx#wraphosted",
+    kind: "references",
+  },
+  { from: "src/dobj.ts", to: "specs/N.mdx#dobj", kind: "references" },
+  { from: "src/dident.ts#impl", to: "specs/N.mdx#dident", kind: "references" },
+  { from: "src/dcall.ts", to: "specs/N.mdx#dcall", kind: "references" },
+  { from: "src/dlit.ts", to: "specs/N.mdx#dlit", kind: "references" },
+  { from: "src/decl.ts#f", to: "specs/N.mdx#overload", kind: "references" },
+  {
+    from: "src/decl.ts#M.m",
+    to: "specs/N.mdx#methodoverload",
+    kind: "references",
+  },
+  {
+    from: "src/decl.ts#C.v",
+    to: "specs/N.mdx#abstractgetter",
+    kind: "references",
+  },
+  { from: "src/decl.ts#Amb.m", to: "specs/N.mdx#ambient", kind: "references" },
+  { from: "src/esc.ts", to: "specs/N.mdx#escaped", kind: "references" },
+];
 
 /**
- * Whether a graph-node identity names a code unit chain of `src/app.ts` with
- * a segment spelled after a value-side constant — `src/app.ts#s`,
- * `src/app.ts#t`, the nested `src/app.ts#f.s`, and their `@N`-suffixed
- * forms — the misattribution the value-side arm forbids (SPEC 4.6).
+ * Per file, the unit-chain segments no named unit may be spelled after: the
+ * value-side constants `s` and `t` of `src/app.ts` (`src/app.ts#s`, the
+ * nested `src/app.ts#f.s`), the wrapper constants `w1` … `w5`, `default` and
+ * the object-literal property `run` in the four default-export files, and
+ * `foo` beside the escape spelling itself in `src/esc.ts` — each in its bare
+ * and `@N`-suffixed forms — the misattributions the arms forbid (SPEC 4.6).
  */
-function namesValueConstantUnit(identity: string): boolean {
-  const prefix = "src/app.ts#";
-  if (!identity.startsWith(prefix)) return false;
-  const chain = identity.slice(prefix.length).replace(/@\d+$/u, "");
+const T4_6_3_FORBIDDEN_SEGMENTS: Readonly<Record<string, readonly string[]>> = {
+  "src/app.ts": ["s", "t"],
+  "src/wrap.ts": ["w1", "w2", "w3", "w4", "w5"],
+  "src/dobj.ts": ["default", "run"],
+  "src/dident.ts": ["default"],
+  "src/dcall.ts": ["default"],
+  "src/dlit.ts": ["default"],
+  "src/esc.ts": ["foo", T4_6_3_ESCAPED_NAME],
+};
+
+/**
+ * Whether a graph-node identity names a forbidden code unit: a chain of a
+ * listed file with a segment spelled after one of its forbidden names, or
+ * any `@N`-suffixed chain of `src/decl.ts` — its body-less declarations
+ * occupy no document-order slot, so no unit there is disambiguated.
+ */
+function namesForbiddenUnit(identity: string): boolean {
+  const hash = identity.indexOf("#");
+  if (hash < 0) return false;
+  const file = identity.slice(0, hash);
+  const chain = identity.slice(hash + 1);
+  if (file === "src/decl.ts") return /@\d+$/u.test(chain);
+  const forbidden = T4_6_3_FORBIDDEN_SEGMENTS[file];
+  if (forbidden === undefined) return false;
   return chain
+    .replace(/@\d+$/u, "")
     .split(".")
-    .some((segment) => T4_6_3_VALUE_CONSTANTS.includes(segment));
+    .some((segment) => forbidden.includes(segment));
+}
+
+// Declaration files, ambient by kind (SPEC 4.6; TypeScript's file-name rule:
+// a name ending in `.d.mts` or `.d.cts`, or in `.ts` with `.d.` earlier in
+// its last path segment): `x.d.ts`, `x.d.mts`, `x.d.cts`, and `x.d.css.ts`
+// are code-group sources under the group's three globs, each holding a
+// body-bearing `function f` around a marker and a top-level marker. Every
+// such file is well-formed (14.20: TypeScript's ambient-context checks are
+// post-parse), so `build` and `check` exit 0 on the otherwise valid
+// workspace; `f` is no unit, so both markers attribute to the whole file —
+// never to `path#f` — while the control `x.dts.ts` (no `.d.` in its last
+// segment) keeps `path#f`. Each marker targets its own section, so the
+// complete `references` set pins every attribution. The occurrence's
+// whole-file `source` range is T1.7-2's assertion.
+const T4_6_3_DECLARATION_FILE_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts", "src/**/*.mts", "src/**/*.cts"]
+  }
+})
+`;
+
+/** One code file of the declaration-file arm. */
+interface DeclarationFileArm {
+  readonly file: string;
+  /** The section the marker inside `f` targets. */
+  readonly inner: string;
+  /** The section the top-level marker targets. */
+  readonly top: string;
+  /** The inner marker's attributed location — the file, or `#f` for the control. */
+  readonly innerUnit: string;
+}
+
+const T4_6_3_DECLARATION_FILE_ARMS: readonly DeclarationFileArm[] = [
+  {
+    file: "src/x.d.ts",
+    inner: "dtsfn",
+    top: "dtstop",
+    innerUnit: "src/x.d.ts",
+  },
+  {
+    file: "src/x.d.mts",
+    inner: "dmtsfn",
+    top: "dmtstop",
+    innerUnit: "src/x.d.mts",
+  },
+  {
+    file: "src/x.d.cts",
+    inner: "dctsfn",
+    top: "dctstop",
+    innerUnit: "src/x.d.cts",
+  },
+  {
+    file: "src/x.d.css.ts",
+    inner: "dcssfn",
+    top: "dcsstop",
+    innerUnit: "src/x.d.css.ts",
+  },
+  {
+    file: "src/x.dts.ts",
+    inner: "ctrlfn",
+    top: "ctrltop",
+    innerUnit: "src/x.dts.ts#f",
+  },
+];
+
+/** The declaration-file arm's control: no `.d.` in its last path segment. */
+const T4_6_3_DECLARATION_CONTROL = "src/x.dts.ts";
+
+const T4_6_3_DECLARATION_SPEC_SOURCE = T4_6_3_DECLARATION_FILE_ARMS.flatMap(
+  (arm) => [
+    `<S id="${arm.inner}">`,
+    `Target for the marker inside f of ${arm.file}.`,
+    "</S>",
+    "",
+    `<S id="${arm.top}">`,
+    `Target for the top-level marker of ${arm.file}.`,
+    "</S>",
+    "",
+  ],
+).join("\n");
+
+/** The one shape every declaration-arm file takes (the control included). */
+function declarationFileSource(arm: DeclarationFileArm): string {
+  return [
+    'import SPEC from "../specs/D.xspec";',
+    "",
+    "function f(): void {",
+    `  SPEC.${arm.inner};`,
+    "}",
+    "",
+    `SPEC.${arm.top};`,
+    "",
+  ].join("\n");
+}
+
+const T4_6_3_DECLARATION_FILES: Readonly<Record<string, string>> =
+  Object.fromEntries(
+    T4_6_3_DECLARATION_FILE_ARMS.map((arm) => [
+      arm.file,
+      declarationFileSource(arm),
+    ]),
+  );
+
+const T4_6_3_DECLARATION_REFERENCES: readonly GraphEdge[] =
+  T4_6_3_DECLARATION_FILE_ARMS.flatMap((arm): GraphEdge[] => [
+    { from: arm.innerUnit, to: `specs/D.mdx#${arm.inner}`, kind: "references" },
+    { from: arm.file, to: `specs/D.mdx#${arm.top}`, kind: "references" },
+  ]);
+
+/** Whether an identity names a code unit of a declaration file (never one). */
+function namesDeclarationFileUnit(identity: string): boolean {
+  return T4_6_3_DECLARATION_FILE_ARMS.some(
+    (arm) =>
+      arm.file !== T4_6_3_DECLARATION_CONTROL &&
+      identity.startsWith(`${arm.file}#`),
+  );
 }
 
 const T4_6_3 = defineProductTest({
   id: "T4.6-3",
   title:
-    "markers inside constructs that are not named units — an IIFE, a function stored via destructuring, and computed-name, string-literal-name, numeric-literal-name (`123() {}`), and private (`#priv() {}`) class members — attribute to the nearest enclosing named unit or the file; the private-member arm attributes to the bare class unit, never to a `#`-named unit; value-side boundary: `const s = text(SPEC.a)` attributes to `path#f` inside `f` and to `path` at top level, never to a unit named after the constant (SPEC 4.6)",
+    "markers inside constructs that are not named units — an IIFE, a function stored via destructuring, and computed-name, string-literal-name, numeric-literal-name (`123() {}`), and private (`#priv() {}`) class members — attribute to the nearest enclosing named unit or the file; the private-member arm attributes to the bare class unit, never to a `#`-named unit; value-side boundary: `const s = text(SPEC.a)` attributes to `path#f` inside `f` and to `path` at top level, never to a unit named after the constant; wrappers and value forms — a parenthesized, `as`-cast, `satisfies`-qualified, or non-null-asserted initializer — bind no unit (the file, or the enclosing named unit); a default export of an object literal, an identifier, a call, or a literal value binds no unit; overload signatures, body-less method signatures, abstract members, and `declare` ambient declarations are no units and occupy no document-order slot (`path#f`, never `path#f@3`; `path#C.m`; `path#C.v`, never `path#C.v@2`); an escape-spelled function name binds no unit (the file, never `path#foo`); declaration files ambient by kind (`x.d.ts`, `x.d.mts`, `x.d.cts`, `x.d.css.ts`) are well-formed, `build` and `check` exit 0, and both their markers attribute to the whole file, never to `path#f`, while the control `x.dts.ts` keeps `path#f` (SPEC 4.6, 2.4, 14.20)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
       {
         "specs/N.mdx": T4_6_3_SPEC_SOURCE,
         "src/app.ts": T4_6_3_APP_SOURCE,
+        "src/wrap.ts": T4_6_3_WRAP_SOURCE,
+        "src/dobj.ts": T4_6_3_DEFAULT_OBJECT_SOURCE,
+        "src/dident.ts": T4_6_3_DEFAULT_IDENTIFIER_SOURCE,
+        "src/dcall.ts": T4_6_3_DEFAULT_CALL_SOURCE,
+        "src/dlit.ts": T4_6_3_DEFAULT_LITERAL_SOURCE,
+        "src/decl.ts": T4_6_3_DECL_SOURCE,
+        "src/esc.ts": T4_6_3_ESCAPED_SOURCE,
       },
       async (workspace) => {
         await buildOk(
@@ -740,12 +1150,24 @@ const T4_6_3 = defineProductTest({
               to: "specs/N.mdx#priv",
               kind: "references",
             },
+            // The wrapper, default-export, body-less/`declare`, and
+            // escape-spelled arms, one dedicated target each.
+            ...T4_6_3_FORM_REFERENCES,
           ],
           "T4.6-3 markers inside not-named-units attribute to the nearest " +
             "enclosing named unit or the file: the top-level IIFE and the " +
             "destructuring-stored function to the file, the nested IIFE to " +
             "its hosting function, and every oddly-named class member to " +
-            "the bare class unit — never to a `#`-named unit (SPEC 4.6)",
+            "the bare class unit — never to a `#`-named unit; a merely " +
+            "wrapping initializer (parenthesized, `as`, `satisfies`, `!`) " +
+            "binds no unit — the file, or the enclosing `wrapHost`; a " +
+            "default export of an object literal, an identifier, a call, or " +
+            "a literal binds no `default` unit; overload signatures, " +
+            "body-less methods, abstract members, and `declare` " +
+            "declarations are no units and take no document-order slot " +
+            "(`#f`, `#M.m`, `#C.v`, `#Amb.m` — never `@N`); and an " +
+            "escape-spelled function name binds no unit — the file, never " +
+            "`#foo` (SPEC 4.6, 2.4)",
         );
         // Value-side boundary: the complete `embeds` set pins each call's
         // attributed unit — the constant's enclosing function, or the file.
@@ -775,15 +1197,70 @@ const T4_6_3 = defineProductTest({
         assertSameJson(
           allEdges
             .flatMap((edge) => [edge.from, edge.to])
-            .filter(namesValueConstantUnit)
+            .filter(namesForbiddenUnit)
             .sort(),
           [],
-          "T4.6-3 value-side boundary: no endpoint of the unfiltered " +
-            "`query edges` answer names a code unit spelled after the " +
-            "plain-identifier constants `s` or `t` (`src/app.ts#s`, " +
-            "`src/app.ts#t`, `src/app.ts#f.s`, or an `@N`-suffixed form) " +
-            "— a variable declaration whose initializer is a call is no " +
-            "named unit (SPEC 4.6)",
+          "T4.6-3: no endpoint of the unfiltered `query edges` answer names " +
+            "a forbidden code unit — one spelled after the plain-identifier " +
+            "constants `s` or `t` (`src/app.ts#s`, `src/app.ts#f.s`), the " +
+            "wrapper constants `w1` … `w5`, `default` or `run` in a " +
+            "default-export file, `foo` or the escape spelling itself in " +
+            "`src/esc.ts`, or any `@N`-suffixed chain of `src/decl.ts` — " +
+            "a variable whose initializer is a call or a mere wrapper, a " +
+            "default export of a non-construct, a body-less declaration, " +
+            "and an escape-spelled name are no named units (SPEC 4.6, 2.4)",
+        );
+      },
+    );
+    // Declaration files, ambient by kind: a second workspace whose code group
+    // spans `.ts`, `.mts`, and `.cts` (SPEC 4.6, 14.20).
+    await withWorkspace(
+      T4_6_3_DECLARATION_FILE_CONFIG,
+      {
+        "specs/D.mdx": T4_6_3_DECLARATION_SPEC_SOURCE,
+        ...T4_6_3_DECLARATION_FILES,
+      },
+      async (workspace) => {
+        const context = "T4.6-3 declaration files";
+        await buildOk(
+          product,
+          workspace,
+          `${context}: \`build\` exits 0 — \`x.d.ts\`, \`x.d.mts\`, ` +
+            "`x.d.cts`, and `x.d.css.ts`, each holding a body-bearing " +
+            "`function f` and a top-level marker, are well-formed (14.20: " +
+            "TypeScript's ambient-context checks are post-parse), so the " +
+            "otherwise valid workspace builds",
+        );
+        await expectFindingFreeReport(
+          product,
+          workspace,
+          ["check", "--json"],
+          `${context}: \`check\` exits 0 finding-free over the built ` +
+            "workspace — the declaration files carry no finding (SPEC 12.2, " +
+            "14.20)",
+        );
+        assertEdgeSetEqual(
+          await queryEdgesOfKind(product, workspace, "references", context),
+          T4_6_3_DECLARATION_REFERENCES,
+          `${context}: in \`x.d.ts\`, \`x.d.mts\`, \`x.d.cts\`, and ` +
+            "`x.d.css.ts` the body-bearing `function f` is no unit — a " +
+            "declaration in an ambient context, the file ambient by kind — " +
+            "so its marker and the top-level marker both attribute to the " +
+            "whole file `path`, never to `path#f`, while the control " +
+            "`x.dts.ts` (no `.d.` in its last path segment) keeps `path#f` " +
+            "(SPEC 4.6)",
+        );
+        const allEdges = await queryAllEdges(product, workspace, context);
+        assertSameJson(
+          allEdges
+            .flatMap((edge) => [edge.from, edge.to])
+            .filter(namesDeclarationFileUnit)
+            .sort(),
+          [],
+          `${context}: no endpoint of the unfiltered \`query edges\` answer ` +
+            "names a code unit of a declaration file (`src/x.d.ts#f` or any " +
+            "other chain) — a declaration in an ambient context is no unit " +
+            "(SPEC 4.6)",
         );
       },
     );
