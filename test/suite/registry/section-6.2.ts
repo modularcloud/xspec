@@ -71,7 +71,11 @@ import {
   decodeNodeReport,
   decodeNodeRowsReport,
 } from "../../helpers/adapters/index.js";
-import { fail, parseJsonStdout } from "../../helpers/assertions.js";
+import {
+  assertFileBytes,
+  fail,
+  parseJsonStdout,
+} from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
@@ -922,13 +926,27 @@ const C3_WATCH_SOURCE = [
   "",
 ].join("\n");
 
-// Impure-boundary arm (SPEC 6.2's worked case): the moved section's opening
-// tag is preceded on its origin line by non-whitespace (`Lead-in prose.`) and
-// followed there only by whitespace (two spaces before the terminator). The
-// within-construct remainder and terminator contribute to its own content at
-// the origin — the line is kept, `Lead-in prose.` remains after tag removal —
-// but not at the destination, where insertion starts the construct at line
-// start and the tag-only line is dropped (SPEC 3, 6.5).
+// Impure-boundary arm (SPEC 6.2's worked case; T6.2-3's staging (a)): the
+// moved section's opening tag is preceded on its origin line by non-whitespace
+// (`Lead-in prose. `) and followed there by nothing but the terminator, and
+// its closing tag is preceded on its line by two spaces and followed there by
+// non-whitespace (` Trailing prose.`). Both boundary lines are kept at the
+// origin (each retains content outside the construct), so the opening line's
+// terminator and the closing line's two spaces — within-construct characters
+// — contribute to the moved node's own content there: its own text is U+000A,
+// `Impure line one.`, U+000A, `Impure line two.`, U+000A, two spaces. At the
+// destination the moved text lands at a line's start followed by U+000A
+// (SPEC 6.5), each tag alone on its line — a flow-position tag — and both
+// boundary lines are dropped, left empty or whitespace-only purely by the
+// removals (SPEC 3): its own text there is `Impure line one.`, U+000A,
+// `Impure line two.`, U+000A. The shape derives at both sides (S-9): at the
+// origin the opening tag, following non-whitespace, is a text-position tag,
+// and `  </S> Trailing prose.` is a paragraph-continuation line — the flow
+// attempt fails on the prose after the tag — closing the element within its
+// paragraph (T3-3's staging constraint); the former staging, whose closing
+// tag stood alone at a later line's start, left the in-line element unclosed
+// under the grammar 14.20 fixes and is kept as a non-derivation in
+// `test/self/s9-fixture-well-formedness.test.ts`.
 const I3_ROOM = "specs/Room.mdx";
 const I3_OP = "specs/Room.mdx#op";
 const I3_IMP_PRE = "specs/Room.mdx#op.imp";
@@ -939,14 +957,15 @@ const I3_DEPS = "specs/Deps.mdx";
 const I3_W_TOP = "specs/Deps.mdx#watch";
 const I3_W_ONIMP = "specs/Deps.mdx#watch.onimp";
 
-const I3_ROOM_SOURCE = [
+/** The impure origin, exported for the S-9 self-test (its exact staged bytes). */
+export const I3_ROOM_SOURCE = [
   '<S id="op">',
   "Op holder text.",
   "",
-  'Lead-in prose.<S id="op.imp" coverage="none" tags="edge imp">  ',
+  'Lead-in prose. <S id="op.imp" coverage="none" tags="edge imp">', // a text-position tag after non-whitespace
   "Impure line one.",
   "Impure line two.",
-  "</S>",
+  "  </S> Trailing prose.", // two spaces, the closing tag, non-whitespace after it
   "</S>",
   "",
 ].join("\n");
@@ -954,6 +973,36 @@ const I3_ROOM_SOURCE = [
 const I3_HALL_SOURCE = ['<S id="tp">', "Hall parent text.", "</S>", ""].join(
   "\n",
 );
+
+// The two rewritten files as SPEC 6.5 fixes them — the premise of the hash
+// reasoning above, exported for the S-9 self-test. Origin: the moved text (the
+// construct's own characters, `<S id="op.imp" …>` through `</S>`) is deleted
+// in place, joining `Lead-in prose. ` and ` Trailing prose.` into one line
+// that is kept (neither empty nor whitespace-only); Room.mdx needs no import
+// edit. Destination: the moved text, its `id` rewritten by prefix replacement
+// to `tp.imp`, is inserted immediately before `tp`'s closing tag — an offset
+// at the start of a line, so no terminator precedes it — followed by U+000A;
+// Hall.mdx needs no import edit either, the moved text carrying no reference.
+// Deps.mdx is not pinned: its rewritten `d` reference is rooted at an added
+// import's fresh identifier, implementation latitude (SPEC 6.5).
+export const I3_ROOM_MOVED_SOURCE = [
+  '<S id="op">',
+  "Op holder text.",
+  "",
+  "Lead-in prose.  Trailing prose.",
+  "</S>",
+  "",
+].join("\n");
+export const I3_HALL_MOVED_SOURCE = [
+  '<S id="tp">',
+  "Hall parent text.",
+  '<S id="tp.imp" coverage="none" tags="edge imp">',
+  "Impure line one.",
+  "Impure line two.",
+  "  </S>",
+  "</S>",
+  "",
+].join("\n");
 
 // A dependent of the moved node itself: its dependency edge is
 // identity-mapped through the journal, so its `upstream-changed` — caused by
@@ -1143,6 +1192,24 @@ const T6_2_3 = defineProductTest({
           `${context}: \`move specs/Room.mdx#op.imp specs/Hall.mdx#tp.imp\``,
         );
 
+        // Premise of the hash reasoning: the two rewritten files hold exactly
+        // the bytes SPEC 6.5 fixes — the origin's boundary lines joined into
+        // one kept line, the moved text at the destination's line start
+        // followed by U+000A with each tag alone on its line.
+        await assertFileBytes(
+          workspace.path(I3_ROOM),
+          I3_ROOM_MOVED_SOURCE,
+          `${context}: specs/Room.mdx after the move — the moved text deleted ` +
+            `in place, the joined boundary line kept (SPEC 6.5, 3)`,
+        );
+        await assertFileBytes(
+          workspace.path(I3_HALL),
+          I3_HALL_MOVED_SOURCE,
+          `${context}: specs/Hall.mdx after the move — the moved text, its ` +
+            `\`id\` rewritten, inserted before the parent's closing tag at a ` +
+            `line start and followed by U+000A (SPEC 6.5)`,
+        );
+
         const impAfter = await queryNode(
           product,
           workspace,
@@ -1159,10 +1226,12 @@ const T6_2_3 = defineProductTest({
         if (impAfter.hashes.ownHash === impBefore.hashes.ownHash) {
           fail(
             `${context}: the moved node's ownHash must change — at the origin ` +
-              `its opening tag's line is kept (preceded by non-whitespace), so ` +
-              `the within-construct remainder and terminator contribute to its ` +
-              `own content, while at the destination the tag-only line is ` +
-              `dropped (SPEC 6.2's worked case, 3); both sides report ownHash ` +
+              `both boundary lines are kept (the opening tag preceded by ` +
+              `non-whitespace, the closing tag followed by it), so the opening ` +
+              `line's terminator and the closing line's two spaces contribute ` +
+              `to its own content, while at the destination each tag stands ` +
+              `alone on its line and both lines are dropped (SPEC 6.2's worked ` +
+              `case, 3); both sides report ownHash ` +
               `${JSON.stringify(impAfter.hashes.ownHash)}`,
           );
         }

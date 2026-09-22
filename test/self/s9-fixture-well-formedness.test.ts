@@ -8,8 +8,11 @@
 // a section, T3-7's comment forms, T14-12's positive arms, and the composed
 // forms of T6.5-13/T6.5-19 — and every shape the document declares
 // unparseable must not: a leading byte-order mark, invalid UTF-8, an unclosed
-// tag, a text-position tag closed by a flow tag on a later line (T3-1's
-// former shape), the empty attribute expressions, the spread with extra
+// tag, a text-position tag closed by a flow tag on a later line (the former
+// stagings of T3-1's `gamma` and of T6.2-3's impure origin, spelled exactly;
+// their restaged sources are judged verbatim from the registry modules, with
+// the two files T6.2-3's move leaves), the empty attribute expressions, the
+// spread with extra
 // content, an ESM block holding a statement, the one-sided section spellings
 // 6.2/6.5 refuse, and T14-12's negative arms. S-9's allowances — ECMAScript's
 // early errors, which the stock parser enforces beyond derivability — apply
@@ -24,6 +27,12 @@ import {
   deriveMdx,
   type MdxAllowance,
 } from "../helpers/mdx-derivability.js";
+import { REMOVALS_SOURCE } from "../suite/registry/section-3.js";
+import {
+  I3_HALL_MOVED_SOURCE,
+  I3_ROOM_MOVED_SOURCE,
+  I3_ROOM_SOURCE,
+} from "../suite/registry/section-6.2.js";
 
 const LF = String.fromCodePoint(0x000a);
 const CR = String.fromCodePoint(0x000d);
@@ -35,6 +44,40 @@ const ASTRAL = String.fromCodePoint(0x1f600);
 
 /** Lines joined by U+000A, the last one terminated. */
 const doc = (...lines: readonly string[]): string => lines.join(LF) + LF;
+
+const GAMMA_OPENING = '<S id="gamma">Gamma keeps this line.';
+
+/**
+ * T3-1's `specs/A.mdx` as formerly staged: the registry staging's head, up to
+ * `gamma`, verbatim, then the former `gamma` region — a text-position tag
+ * with same-line content whose closing tag stood alone at a line's start
+ * after the second fence, a flow tag that interrupts the paragraph and leaves
+ * the in-line element unclosed (T3-3's staging constraint). The staging now
+ * closes `gamma` within its paragraph, at the end of the code-span line, the
+ * fence following at top level.
+ */
+function formerRemovalsSource(): string {
+  const at = REMOVALS_SOURCE.indexOf(GAMMA_OPENING);
+  if (at <= 0) {
+    throw new Error(
+      "T3-1's staged specs/A.mdx no longer opens `gamma` as expected",
+    );
+  }
+  return (
+    REMOVALS_SOURCE.slice(0, at) +
+    doc(
+      GAMMA_OPENING,
+      "More gamma prose.",
+      'Inline code span: `<S id="x">{text("a")}` stays literal.',
+      "```md",
+      '<S id="x">',
+      'import X from "./X.xspec"',
+      '{text("a")}',
+      "```",
+      "</S>",
+    )
+  );
+}
 
 function expectDerives(
   source: string | Uint8Array,
@@ -241,6 +284,14 @@ const WELL_FORMED: ReadonlyArray<readonly [name: string, source: string]> = [
       'import X from "./x.xspec"',
     ),
   ],
+  // Deterministic fixtures judged verbatim from their registry modules:
+  // T3-1's specs/A.mdx (`gamma` an in-line section closed within its
+  // paragraph, the second fence at top level) and T6.2-3's impure origin in
+  // 6.2's worked shape, with the two files its move leaves (SPEC 6.5).
+  ["T3-1 specs/A.mdx as staged", REMOVALS_SOURCE],
+  ["T6.2-3 impure origin specs/Room.mdx as staged", I3_ROOM_SOURCE],
+  ["T6.2-3 impure origin after the move", I3_ROOM_MOVED_SOURCE],
+  ["T6.2-3 impure destination after the move", I3_HALL_MOVED_SOURCE],
   // Boundary forms that derive without any allowance.
   ["a leading empty line", doc("", '<S id="m">', "body", "</S>")],
   [
@@ -264,16 +315,21 @@ describe("S-9: the document's well-formed shapes derive", () => {
 const UNPARSEABLE: ReadonlyArray<readonly [name: string, source: string]> = [
   ["an unclosed tag", doc('<S id="x">')],
   ["a mismatched closing tag", doc('<S id="x">', "", "</T>")],
-  // T3-1's former `gamma`: a text-position tag with same-line content, closed
-  // by a flow closing tag on a later line after a fenced block.
+  // The former stagings of T3-1's `gamma` and of T6.2-3's impure origin: a
+  // text-position tag with same-line content whose closing tag stood alone at
+  // a later line's start — a flow tag that interrupts the paragraph and leaves
+  // the in-line element unclosed (T3-3's staging constraint).
+  ["T3-1's former specs/A.mdx", formerRemovalsSource()],
   [
-    "T3-1's former shape",
+    "T6.2-3's former impure origin",
     doc(
-      '<S id="gamma">Gamma keeps this line.',
+      '<S id="op">',
+      "Op holder text.",
       "",
-      "```",
-      "code",
-      "```",
+      'Lead-in prose.<S id="op.imp" coverage="none" tags="edge imp">  ',
+      "Impure line one.",
+      "Impure line two.",
+      "</S>",
       "</S>",
     ),
   ],

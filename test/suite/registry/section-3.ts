@@ -99,8 +99,22 @@ const REMOVALS_BASE_COMPILED = "Base text.\n";
 // recognizing constructs by textual pattern rather than by parse trips at
 // least one of the arm's assertions: a finding (build/check no longer exit
 // 0), a phantom node or edge, or bytes missing from the compiled output.
+//
+// `gamma` is an in-line (text-position) section (S-9; T3-3's staging
+// constraint): its opening tag stands at a line start but is followed there
+// by content, so the flow attempt fails and the paragraph fallback applies,
+// and its closing tag stands within that paragraph — at the end of the
+// code-span line — never at the start of a later line, where a flow closing
+// tag interrupts the paragraph and leaves the in-line element unclosed (the
+// fixture's former shape, a non-derivation under the grammar 14.20 fixes,
+// kept as such in `test/self/s9-fixture-well-formedness.test.ts`). The
+// second fence follows at top level: a fence interrupts a paragraph, so no
+// in-line section can span it. Both tags are deleted in place on lines that
+// keep other content — the opening tag at its line's start, the closing tag
+// at its line's end — so both lines are kept (SPEC 3).
 const SPAN_LINE = 'Inline code span: `<S id="x">{text("a")}` stays literal.';
-const REMOVALS_SOURCE = [
+/** The staged `specs/A.mdx`, exported for the S-9 self-test (its exact bytes). */
+export const REMOVALS_SOURCE = [
   'import BASE from "./BASE.xspec"', // removed; line drops (SPEC 3)
   "",
   "# Removals fixture",
@@ -125,22 +139,23 @@ const REMOVALS_SOURCE = [
   "Beta prose.",
   "</Spec>",
   "",
-  '<S id="gamma">Gamma keeps this line.', // tag deleted in place, content kept
+  '<S id="gamma">Gamma keeps this line.', // in-line tag deleted in place, content kept
   "More gamma prose.",
-  SPAN_LINE, // construct-like bytes inside an inline code span, literal
-  "```md", // a second fence: construct-like bytes on every line, literal
+  `${SPAN_LINE}</S>`, // code-span bytes literal; the closing tag deleted in place at the line's end
+  "```md", // a second fence, at top level: construct-like bytes on every line, literal
   '<S id="x">',
   'import X from "./X.xspec"',
   '{text("a")}',
   "```",
-  "</S>",
   "",
 ].join("\n");
 
 // Hand-derived (SPEC 3): each construct is deleted exactly, in place; every
 // line left empty purely by removals drops with its terminator; every other
 // line — author whitespace and the fence/code-span bytes included — is
-// preserved byte-for-byte.
+// preserved byte-for-byte. `gamma`'s two tag lines both keep content beside
+// the deleted tag, so both are kept; the second fence, outside every section,
+// is preserved as it is.
 const REMOVALS_COMPILED = [
   "",
   "# Removals fixture",
@@ -162,7 +177,7 @@ const REMOVALS_COMPILED = [
   "",
   "Gamma keeps this line.", // the in-place-deleted opening tag's line, kept
   "More gamma prose.",
-  SPAN_LINE,
+  SPAN_LINE, // the in-place-deleted closing tag's line, kept with the code span
   "```md",
   '<S id="x">',
   'import X from "./X.xspec"',

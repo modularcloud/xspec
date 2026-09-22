@@ -40,13 +40,14 @@
 //   `coverage`, `tags`; quote-aware braced `d`), MDX comments (single- and
 //   multi-line), and `{text(...)}` embeddings with local (string) or external
 //   (property chain) arguments. Deliberately no stock MDX parser: a committed
-//   SUITE-11 fixture stages a shape remark-mdx cannot parse — an opening tag
-//   with trailing same-line content whose closing tag sits on a later line
-//   (T3-1's `gamma`; T3-3's import line directly followed by a non-blank
-//   line was restaged with a blank line ending its block) — and the
-//   line-drop fixtures depend on exact exotic bytes (boundary code points,
-//   lone-CR terminators) that tooling silently normalizes. That mis-staging
-//   hazard is exactly what §CONF-MD certifies against.
+//   SUITE-11 fixture once staged a shape remark-mdx cannot parse — an opening
+//   tag with trailing same-line content whose closing tag sat alone on a
+//   later line (T3-1's `gamma`, since restaged under S-9 to close within its
+//   paragraph; T3-3's import line directly followed by a non-blank line was
+//   restaged with a blank line ending its block) — and the line-drop
+//   fixtures depend on exact exotic bytes (boundary code points, lone-CR
+//   terminators) that tooling silently normalizes. That mis-staging hazard
+//   is exactly what §CONF-MD certifies against.
 // - Grammar boundary (T3-1): before the lexer runs, `markdownLiteralRegions`
 //   marks fenced code blocks and inline code spans; the lexer treats every
 //   byte inside a marked region as plain content — no import, tag, comment,
