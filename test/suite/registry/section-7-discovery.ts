@@ -12,9 +12,17 @@
 // whole segments, including none) — every other character is a literal;
 // matching is byte-wise (workspace-relative paths as their UTF-8 bytes) and
 // case-sensitive; a path segment beginning with `.` is matched only by a
-// pattern segment written with a leading `.`; patterns resolve relative to
-// the configuration file's directory, and one resolving outside the workspace
-// root is a configuration error (14.14). Discovery never follows symbolic
+// pattern segment written with a leading `.`; `**` means any segments only
+// as a whole pattern segment (elsewhere each `*` of a `**` is the
+// single-segment wildcard); patterns resolve relative to the configuration
+// file's directory, and whether one lies outside the workspace root is
+// decided by its spelling alone — reading its `/`-separated segments from a
+// depth of zero, `..` lowers the depth by one, `.`, an empty segment, and
+// `**` leave it unchanged, every other segment (a drive-qualified `C:`
+// included) raises it by one; a glob beginning with `/`, or whose depth ever
+// falls below zero, is a configuration error (14.14), and every other glob
+// is inside, its `.`, `..`, and empty segments matching nothing, since a
+// discovered path carries no such segment. Discovery never follows symbolic
 // links; derived files are never sources (13.4); imports resolve references
 // but never add files to the workspace (2.1, else 14.15); a no-match group
 // and an empty `specs`/`code` map are valid with zero sources.
@@ -27,11 +35,15 @@
 // ID unique in its workspace, and every decoy (a file that must NOT be
 // discovered) is equally valid with its own unique ID: a product that wrongly
 // discovers a decoy lists it cleanly instead of crashing, keeping failures
-// diagnosed (H-8). T7-4 and T7-5 never run `build`, so the only
-// product-written path is graph data under `.xspec/` (13.3), which no fixture
-// pattern can reach: none names `.xspec/`, no staged name carries `.xspec.`,
-// `markdown` is absent, and wildcards never match the dot segment — the
-// CERTIFICATIONS.md CONF-DISC staging constraints for these two tests.
+// diagnosed (H-8). T7-4's inside-root arms add `inventory --json` (11.6) as
+// a second observation — the glob reported exactly as configured, `sources`
+// exactly the control file — and its outside-root arms drive `build`, which
+// fails at configuration load and writes nothing (12.1); otherwise T7-4 and
+// T7-5 never run `build`, so the only product-written path is graph data
+// under `.xspec/` (13.3), which no fixture pattern can reach: none names
+// `.xspec/`, no staged name carries `.xspec.`, `markdown` is absent, and
+// wildcards never match the dot segment — the CERTIFICATIONS.md CONF-DISC
+// staging constraints for these two tests.
 //
 // T7-6's code-group exclusion arm observes the code side through `query
 // edges --from <path>` (11.1), T7-3's idiom for code discovery: a discovered
@@ -63,6 +75,7 @@ import * as path from "node:path";
 import {
   decodeEdgesReport,
   decodeIdsReport,
+  decodeInventoryDocument,
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
@@ -88,6 +101,7 @@ import {
   expectErrorDocument,
   expectExit,
   runJson,
+  stageBesideRoot,
 } from "./support.js";
 
 // ---------------------------------------------------------------------------
@@ -230,6 +244,9 @@ const SEMANTICS_GROUPS: Readonly<Record<string, readonly string[]>> = {
   literalBraces: ["litbrace/b{a,c}.mdx"],
   literalBang: ["litbang/!x.mdx"],
   literalExtglob: ["litext/+(x).mdx"],
+  // In-segment `**` (SPEC 7: `**` means any segments only as a whole pattern
+  // segment; elsewhere each `*` of a `**` is the single-segment wildcard).
+  inSegmentDoubleStar: ["dstar/a**b.mdx"],
 };
 
 const SEMANTICS_PROBES: readonly DiscoveryProbe[] = [
@@ -277,6 +294,11 @@ const SEMANTICS_PROBES: readonly DiscoveryProbe[] = [
   { path: "litext/+(x).mdx", id: "l8", discovered: true },
   { path: "litext/x.mdx", id: "l9", discovered: false },
   { path: "litext/xx.mdx", id: "l10", discovered: false },
+  // In-segment `**`: each `*` a possibly empty single-segment run, so
+  // `axxb.mdx` and `ab.mdx` match and the two-segment `a/b.mdx` never does.
+  { path: "dstar/axxb.mdx", id: "g1", discovered: true },
+  { path: "dstar/ab.mdx", id: "g2", discovered: true },
+  { path: "dstar/a/b.mdx", id: "g3", discovered: false },
 ];
 
 // Single-casing case-sensitivity probes (T7-4: stageable on any filesystem —
@@ -366,25 +388,124 @@ const CONFIG_DIR_PROBES: readonly DiscoveryProbe[] = [
   { path: "sub/specs/B.mdx", id: "nested", discovered: false },
 ];
 
-// Outside-root patterns (SPEC 7: a pattern that resolves outside the
-// workspace root is a configuration error, 14.14) — a plain `../` escape and
-// a `..` traversal buried mid-pattern. Each fixture also stages a valid group
-// and source, so a product that ignores or no-match-treats the escaping
-// pattern proceeds to a successful run (exit 0) and fails the exit-2
-// assertion — never exits 2 for a side reason.
+// Outside-root patterns by spelling alone (SPEC 7, 14.14; module header):
+// the three spellings T7-4 pins plus the plain ascent. Each fixture also
+// stages a valid group and source, so a product that ignores or
+// no-match-treats the escaping pattern proceeds to a successful run (exit 0)
+// and fails the exit-2 assertion — never exits 2 for a side reason — and the
+// root's parent holds `x/M.mdx`, the file the `x` spellings name when
+// resolved: a product deciding by what it finds rather than by spelling
+// discovers it and exits 0 too. (No file can be staged at the absolute
+// `/specs/`, so that arm's premise is the spelling alone.)
 const OUTSIDE_ROOT_PATTERNS: readonly string[] = [
-  "../outside/*.mdx",
-  "specs/../../outside/*.mdx",
+  "a/../../x/*.mdx", // the depth falls below zero at the second `..`
+  "**/../x/*.mdx", // `**` leaves the depth at zero, so `..` falls below it
+  "/specs/*.mdx", // a leading `/`
+  "../x/*.mdx", // the plain ascent
 ];
+const BESIDE_ROOT_MATCH: Readonly<Record<string, string>> = {
+  "x/M.mdx": mdxSection("m"),
+};
+
+// Inside-root spellings that match nothing (SPEC 7: every glob not outside
+// the root is inside, its `.`, `..`, and empty segments matching nothing,
+// since a discovered file's workspace-relative path — the directory-entry
+// names descending from the root, `/`-joined — carries no such segment). Each
+// spelling runs in its own workspace beside a control group, over the files
+// a normalizing product would match through it: `specs/A.mdx` for
+// `./specs/*.mdx`, `specs//*.mdx`, `specs/*.mdx/`, and `C:/specs/*.mdx` (a
+// drive prefix stripped), and `b/M.mdx` for `a/../b/*.mdx` — `a/N.mdx`
+// making `a/` a real directory, so a product walking `a` and then `..`
+// reaches `b/` as well.
+const INSIDE_NO_MATCH_SPELLINGS: readonly string[] = [
+  "a/../b/*.mdx",
+  "./specs/*.mdx",
+  "specs//*.mdx",
+  "specs/*.mdx/",
+];
+// A drive-qualified spelling is ordinary segments — inside the root and
+// matching nothing — on the Linux leg (T7-4), where `C:` is a plain
+// directory name; other platforms' semantics for `C:` are not staged.
+const DRIVE_QUALIFIED_SPELLING = "C:/specs/*.mdx";
+const CONTROL_GLOB = "ctl/*.mdx";
+const INSIDE_NO_MATCH_PROBES: readonly DiscoveryProbe[] = [
+  { path: "ctl/C.mdx", id: "c", discovered: true },
+  { path: "specs/A.mdx", id: "a", discovered: false },
+  { path: "b/M.mdx", id: "m", discovered: false },
+  { path: "a/N.mdx", id: "n", discovered: false },
+];
+
+/**
+ * One inside-root spelling that matches nothing (SPEC 7): a group holding
+ * only the spelling discovers zero sources beside the control group —
+ * `ids --json` (12.3) lists exactly the control, exit 0 — and
+ * `inventory --json` (11.6) reports the glob exactly as configured, with
+ * `sources` exactly the control file under its own group. A product
+ * normalizing the spelling lists the decoy it then matches.
+ */
+async function expectInsideMatchingNothing(
+  product: ProductBinding,
+  spelling: string,
+): Promise<void> {
+  const shown = JSON.stringify(spelling);
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": specGroupsConfig({
+          probe: [spelling],
+          control: [CONTROL_GLOB],
+        }),
+        ...probeFiles(INSIDE_NO_MATCH_PROBES),
+      },
+    },
+    async (workspace) => {
+      await expectDiscovered(
+        product,
+        workspace,
+        expectedListing(INSIDE_NO_MATCH_PROBES),
+        `T7-4 (the inside-root spelling ${shown} matches nothing: a ` +
+          `discovered path carries no ".", "..", or empty segment) ` +
+          "`ids --json`",
+      );
+      const label = `T7-4 (the inside-root spelling ${shown}) \`inventory --json\``;
+      const inventory = decodeInventoryDocument(
+        await runJson(product, workspace, ["inventory", "--json"], label),
+        label,
+      );
+      assertSameJson(
+        inventory.configuration.specs,
+        [
+          { name: "probe", globs: [spelling] },
+          { name: "control", globs: [CONTROL_GLOB] },
+        ],
+        `${label}: the glob is reported exactly as configured — never a ` +
+          `normalized spelling (SPEC 7, 11.6)`,
+      );
+      assertSameJson(
+        inventory.sources,
+        [{ path: "ctl/C.mdx", groups: [{ name: "control", kind: "spec" }] }],
+        `${label}: the group holding only ${shown} discovers zero sources — ` +
+          `the control file under its own group is the whole discovered ` +
+          `set (SPEC 7, 11.6)`,
+      );
+    },
+  );
+}
 
 const T7_4 = defineProductTest({
   id: "T7-4",
   title:
-    "glob semantics: `*`/`?`/`**` per SPEC 7, byte-wise case-sensitive " +
-    "matching incl. the single-casing SPECS/specs probe and the Linux-leg " +
-    "é.mdx byte probes, the dot-segment rule, literal metacharacters " +
-    "([1], {a,c}, !, +(x)), configuration-directory-relative resolution, " +
-    "and outside-root patterns as configuration errors (SPEC 7, 14.14)",
+    "glob semantics: `*`/`?`/`**` per SPEC 7 (in-segment `a**b.mdx` each " +
+    "`*` the single-segment wildcard), byte-wise case-sensitive matching " +
+    "incl. the single-casing SPECS/specs probe and the Linux-leg é.mdx " +
+    "byte probes, the dot-segment rule, literal metacharacters ([1], " +
+    "{a,c}, !, +(x)), configuration-directory-relative resolution, " +
+    "outside-root patterns by spelling alone (`a/../../x`, `**/../x`, a " +
+    "leading `/`) as configuration errors even with a matching file " +
+    "beside the root (SPEC 7, 14.14), and inside-root spellings " +
+    "(`a/../b`, `./specs`, `specs//`, `specs/*.mdx/`, Linux-leg `C:/`) " +
+    "matching nothing with the inventory reporting them as configured " +
+    "(SPEC 7, 11.6)",
   run: async (product) => {
     // Wildcard, dot-segment, and literal-metacharacter semantics — disjoint
     // per-directory groups over one workspace, asserted as one exact set.
@@ -469,7 +590,11 @@ const T7_4 = defineProductTest({
       );
     }
 
-    // A pattern resolving outside the workspace root → 14.14 (exit 2).
+    // A pattern outside the workspace root by its spelling alone → 14.14
+    // (exit 2), the root's parent holding the file the `x` spellings name
+    // when resolved; the error document's finding carries the stable code
+    // and the configuration file as its concerned path (SPEC 14, 12.7), and
+    // a build failing at configuration load writes nothing (12.1).
     for (const pattern of OUTSIDE_ROOT_PATTERNS) {
       await withWorkspace(
         {
@@ -482,15 +607,47 @@ const T7_4 = defineProductTest({
           },
         },
         async (workspace) => {
-          await expectConfigurationError(
-            product,
-            workspace,
-            ["build"],
-            `T7-4 (pattern ${JSON.stringify(pattern)} resolves outside the ` +
-              `workspace root) \`build --json\``,
+          await stageBesideRoot(workspace, BESIDE_ROOT_MATCH);
+          const context =
+            `T7-4 (the pattern ${JSON.stringify(pattern)} lies outside the ` +
+            `workspace root by its spelling alone, a matching file beside ` +
+            `the root notwithstanding) \`build --json\``;
+          const result = await assertLeavesUnchanged(
+            workspace.root,
+            () =>
+              expectConfigurationError(product, workspace, ["build"], context),
+            context,
+          );
+          const finding = expectErrorDocument(result, context);
+          assertSameJson(
+            {
+              code: finding.code,
+              path: finding.path,
+              locations: finding.locations.map((location) => location.file),
+            },
+            {
+              code: "configuration-error",
+              path: "xspec.config.ts",
+              locations: [],
+            },
+            `${context}: the error document's one finding carries the ` +
+              `stable code "configuration-error", locations [] (an ` +
+              `unlocated condition), and the configuration file as its ` +
+              `concerned path (SPEC 14.14, 14, 12.7)`,
           );
         },
       );
+    }
+
+    // Inside-root spellings match nothing: a group holding only such a glob
+    // discovers zero sources (exit 0), the inventory reporting the glob as
+    // configured (SPEC 7, 11.6); the drive-qualified spelling is ordinary
+    // segments on the Linux leg.
+    for (const spelling of INSIDE_NO_MATCH_SPELLINGS) {
+      await expectInsideMatchingNothing(product, spelling);
+    }
+    if (process.platform === "linux") {
+      await expectInsideMatchingNothing(product, DRIVE_QUALIFIED_SPELLING);
     }
   },
 });
