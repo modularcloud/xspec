@@ -15,8 +15,14 @@
 // code group is a configuration error (14.14). SPEC 7.3: `markdown` absent →
 // no emission; when present, `emit` (boolean) is REQUIRED and controls
 // emission; `outDir` redirects emitted files preserving workspace-relative
-// paths, resolves against the workspace root, and MUST resolve within it
-// (else 14.14); the configured emit destinations exist exactly while emission
+// paths and is a directory path relative to the workspace root spelled as
+// one or more non-empty `/`-separated segments, none `.` or `..` — the form
+// of every workspace-relative path (1.5, 7) — so that each emit destination
+// (`outDir` joined by `/` to the default workspace-relative path) is itself a
+// plain workspace-relative path; any other spelling — empty, beginning with
+// `/`, or carrying a `.`, `..`, or empty segment — is a configuration error
+// (14.14), decided by spelling alone, never by where the path would resolve;
+// the configured emit destinations exist exactly while emission
 // is enabled — with `emit: true` they are the destination paths whether or
 // not emission has yet run, with `markdown` absent or `emit: false` no path
 // is a destination, so the 13.4 exclusion and the import rule of 4 have no
@@ -26,7 +32,22 @@
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts) — exit
 //   2 exactly, the single 12.7 error document (stable code
 //   `configuration-error`, concerned path) as the entire stdout under
-//   --json, stderr matching /config/i.
+//   --json, stderr matching /config/i. T7.3-1's own refusal arms (the local
+//   `expectConfigRefused`) further pin the document's `path` to exactly
+//   `xspec.config.ts` — the configuration file the upward search found, in
+//   the anchoring form of 11.6 relative to the invocation working directory,
+//   the workspace root — and `locations` to `[]` (a configuration condition
+//   carries the file it concerns, never a source range: SPEC 14, 12.7), and
+//   compare the workspace around the refused `build`: a build failing at
+//   configuration load modifies nothing (SPEC 12.1, 12.0).
+// - T7.3-1 `outDir` validity is decided by spelling (SPEC 7.3): one arm per
+//   pinned spelling — `""`, `"/out"`, `"./out"`, `"out/../x"`, `"out//x"`,
+//   `"out/"` — each 14.14, beside the two `..`-bearing spellings the arm
+//   always drove (`"../out"`, `"docs/../../out"`), while `"out/sub"` is the
+//   pinned valid multi-segment spelling, asserted through the emission it
+//   redirects. No arm depends on where a spelling would resolve: a product
+//   normalizing `./out`, `out//x`, or `out/` to a path inside the root, or
+//   reading `""` as "next to each source", fails its arm at the exit code.
 // - T7.1-1 coverage: profiles are looked up by name (T8.2-1 owns report
 //   ordering and the full report contract — counts and the ignored-node
 //   composition are not asserted here); "sees it in both" is asserted as the
@@ -77,6 +98,10 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import {
+  assertSnapshotsEqual,
+  snapshotDirectory,
+} from "../../helpers/snapshot.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -170,7 +195,40 @@ async function expectConfigRefused(
       },
     },
     async (workspace) => {
-      await expectConfigurationError(product, workspace, ["build"], context);
+      const before = await snapshotDirectory(workspace.root);
+      const result = await expectConfigurationError(
+        product,
+        workspace,
+        ["build"],
+        context,
+      );
+      const finding = expectErrorDocument(result, context);
+      assertSameJson(
+        {
+          code: finding.code,
+          path: finding.path,
+          locations: finding.locations.map((location) => location.file),
+        },
+        {
+          code: "configuration-error",
+          path: "xspec.config.ts",
+          locations: [],
+        },
+        `${context}: the error document's one finding carries the stable ` +
+          `code "configuration-error", locations [] (a configuration ` +
+          `condition carries the file it concerns, never a source range), ` +
+          `and as its concerned path the configuration file the upward ` +
+          `search found, in the anchoring form of 11.6 relative to the ` +
+          `invocation working directory — the workspace root, so exactly ` +
+          `"xspec.config.ts" (SPEC 14, 12.7, 11.6)`,
+      );
+      assertSnapshotsEqual(
+        before,
+        await snapshotDirectory(workspace.root),
+        `${context}: a build failing at configuration load modifies ` +
+          `nothing (SPEC 12.1, 12.0) — no derived file or graph data ` +
+          `appears anywhere under the root`,
+      );
     },
   );
 }
@@ -574,9 +632,34 @@ const OUTDIR_CONFIG = specsMainConfig(
   ',\n  markdown: { emit: true, outDir: "docs" }',
 );
 
-// `outDir` resolving outside the workspace root → 14.14: a plain `../`
-// escape and a `..` traversal buried mid-path.
-const OUTSIDE_OUTDIRS: readonly string[] = ["../out", "docs/../../out"];
+// `outDir` not in plain workspace-relative form → 14.14 (SPEC 7.3: one or
+// more non-empty `/`-separated segments, none `.` or `..`; any other
+// spelling — empty, beginning with `/`, or carrying a `.`, `..`, or empty
+// segment — is a configuration error, by spelling alone). One arm per
+// pinned spelling (TEST-SPEC T7.3-1), then the two `..`-bearing spellings
+// the arm always drove. Each is serialized into the configuration through
+// `JSON.stringify`, so the literal the product reads is exactly the
+// spelling listed.
+const INVALID_OUTDIRS: readonly { outDir: string; why: string }[] = [
+  { outDir: "", why: "empty" },
+  { outDir: "/out", why: "begins with `/`" },
+  { outDir: "./out", why: "carries a `.` segment" },
+  { outDir: "out/../x", why: "carries a `..` segment" },
+  { outDir: "out//x", why: "carries an empty segment" },
+  { outDir: "out/", why: "carries a trailing empty segment" },
+  { outDir: "../out", why: "begins with a `..` segment" },
+  {
+    outDir: "docs/../../out",
+    why: "carries `..` segments (resolving outside the root besides)",
+  },
+];
+
+// The pinned valid multi-segment spelling (SPEC 7.3, TEST-SPEC T7.3-1):
+// `out/sub` redirects the emission under `out/sub/`, preserving each
+// source's workspace-relative path beneath it.
+const OUTDIR_SUB_CONFIG = specsMainConfig(
+  ',\n  markdown: { emit: true, outDir: "out/sub" }',
+);
 
 // Classification-follows-emit, discovery channel (module header): the
 // destination path `specs/A.md` staged as a *valid code source* — plain-TS
@@ -673,8 +756,9 @@ async function assertNotEmitted(
     fail(
       `${context}: expected nothing at ${rel} — with \`markdown\` absent or ` +
         `\`emit: false\` no path is a Markdown emit destination, and with ` +
-        `outDir the default next-to-source paths are not destinations ` +
-        `(SPEC 7.3) — but found: ${kind}`,
+        `outDir only the paths beneath outDir itself, joined by \`/\` to ` +
+        `each source's default workspace-relative destination, are ` +
+        `destinations (SPEC 7.3, 13.2) — but found: ${kind}`,
     );
   }
 }
@@ -684,8 +768,11 @@ const T7_3_1 = defineProductTest({
   title:
     "markdown configuration: absent and emit:false mean no emission, " +
     "emit:true emits next to each source; markdown without emit is 14.14; " +
-    "outDir redirects preserving workspace-relative paths and must resolve " +
-    "within the root (else 14.14); emit-destination classification follows " +
+    "outDir redirects preserving workspace-relative paths and must be " +
+    "spelled in plain workspace-relative form — non-empty `/`-separated " +
+    "segments, none `.` or `..` — decided by spelling alone (else 14.14: " +
+    '"", "/out", "./out", "out/../x", "out//x", "out/"; "out/sub" valid); ' +
+    "emit-destination classification follows " +
     "emit — by configuration alone, whether or not emission has yet run " +
     "(SPEC 7.3, 13.2, 13.4, 14.14)",
   run: async (product) => {
@@ -772,17 +859,62 @@ const T7_3_1 = defineProductTest({
       },
     );
 
-    // (d) `outDir` resolving outside the workspace root → 14.14 (exit 2).
-    for (const outDir of OUTSIDE_OUTDIRS) {
+    // (d) `outDir` not in plain workspace-relative form → 14.14 (exit 2,
+    // the configuration the concerned path, nothing modified), one arm per
+    // spelling.
+    for (const arm of INVALID_OUTDIRS) {
       await expectConfigRefused(
         product,
         specsMainConfig(
-          `,\n  markdown: { emit: true, outDir: ${JSON.stringify(outDir)} }`,
+          `,\n  markdown: { emit: true, outDir: ${JSON.stringify(arm.outDir)} }`,
         ),
-        `T7.3-1 (outDir ${JSON.stringify(outDir)} resolves outside the ` +
-          `workspace root) \`build --json\` (SPEC 7.3, 14.14)`,
+        `T7.3-1 (outDir ${JSON.stringify(arm.outDir)} ${arm.why}: not in ` +
+          `plain workspace-relative form — one or more non-empty ` +
+          `\`/\`-separated segments, none \`.\` or \`..\`, decided by ` +
+          `spelling alone) \`build --json\` (SPEC 7.3, 14.14)`,
       );
     }
+
+    // (d') `outDir` `"out/sub"` is valid: a multi-segment plain spelling
+    // redirects the emission under `out/sub/`, preserving each source's
+    // workspace-relative path — and redirects rather than duplicates.
+    await withWorkspace(
+      { files: { "xspec.config.ts": OUTDIR_SUB_CONFIG, ...EMISSION_FILES } },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T7.3-1 `build` with outDir out/sub — a multi-segment plain " +
+            "workspace-relative spelling is valid (SPEC 7.3)",
+        );
+        await assertFileBytes(
+          workspace.path("out/sub/specs/A.md"),
+          A_COMPILED,
+          "T7.3-1 (outDir out/sub): specs/A.mdx emits out/sub/specs/A.md — " +
+            "outDir prefixes the preserved workspace-relative path (SPEC 7.3)",
+        );
+        await assertFileBytes(
+          workspace.path("out/sub/specs/sub/B.md"),
+          B_COMPILED,
+          "T7.3-1 (outDir out/sub): specs/sub/B.mdx emits " +
+            "out/sub/specs/sub/B.md — subdirectory structure preserved " +
+            "under outDir (SPEC 7.3)",
+        );
+        for (const vacant of [
+          "specs/A.md",
+          "specs/sub/B.md",
+          "out/specs/A.md",
+          "out/specs/sub/B.md",
+        ]) {
+          await assertNotEmitted(
+            workspace,
+            vacant,
+            "T7.3-1 (outDir out/sub redirects, not duplicates; every " +
+              "segment of the spelling is honored)",
+          );
+        }
+      },
+    );
 
     // (e) Classification follows `emit`, discovery channel: with emission
     // off the destination path IS a discovered (code) source — its marker
