@@ -29,6 +29,14 @@
 // (§VIOL-VALID-WIDE, §VIOL-VALID-CTRL): T2.6-1/T2.6-2 split only on the true
 // whitespace characters of SPEC 1.4 — U+00A0/U+0085/U+2028 and non-whitespace
 // control characters appear nowhere in their fixtures.
+//
+// Tag sets are compared literally in the 12.7 value form — an array in byte
+// order, duplicates collapsed, the datum the H-3 decode enforces
+// (`decodeTagSet`; T12.7-1) — never re-sorted or de-duplicated by the harness
+// (H-3): T2.6-1's reversed spelling `tags="b a"` and T2.6-2's `tags="a b a a"`
+// each report exactly `["a", "b"]` through `query node` and `query nodes`,
+// the surface where the form is asserted for those commands (CERTIFICATIONS.md
+// §CONF-VALID, §CONF-AVAIL: T11.4-3 asserts it on the `view` node).
 
 import type {
   CoverageProfileReport,
@@ -187,11 +195,6 @@ async function withWorkspace<T>(
   } finally {
     await workspace.dispose();
   }
-}
-
-/** Reported tags in byte order — SPEC fixes the set, not the row order. */
-function sortedTags(tags: readonly string[]): string[] {
-  return [...tags].sort();
 }
 
 /**
@@ -858,20 +861,26 @@ const T2_5_3 = defineProductTest({
 // T2.6-1
 // ---------------------------------------------------------------------------
 
-// Four spellings that must all yield exactly the tag set {a, b} (SPEC 2.6):
-// a single space; a run mixing tab, vertical tab, form feed, and space; a
-// run containing the line terminators CR LF plus a tab (line endings inside
-// a quoted attribute value are well-formed MDX in flow context, and both CR
-// and LF are 1.4 whitespace, so the split result is terminator-normalization
-// independent); and leading/trailing whitespace around a single-space
-// separator. Every separator character is drawn from SPEC 1.4's exact
-// whitespace class — never U+00A0/U+0085/U+2028 (CERTIFICATIONS.md
-// §VIOL-VALID-WIDE: T2.6-1 splits only on true 1.4 whitespace).
+// Five spellings that must all yield exactly the tag set {a, b} (SPEC 2.6),
+// reported as exactly `["a", "b"]` — the 12.7 tag-set form, byte order,
+// compared literally: a single space; a run mixing tab, vertical tab, form
+// feed, and space; a run containing the line terminators CR LF plus a tab
+// (line endings inside a quoted attribute value are well-formed MDX in flow
+// context, and both CR and LF are 1.4 whitespace, so the split result is
+// terminator-normalization independent); leading/trailing whitespace around
+// a single-space separator; and the reversed spelling `b a`, whose tokens
+// arrive in the opposite order — a product echoing the spelled order
+// (`["b", "a"]`) fails the form-exact decode (SPEC 12.7, 12.0), and its
+// metadataHash still equals the others' (SPEC 5.5 hashes the sorted tags).
+// Every separator character is drawn from SPEC 1.4's exact whitespace class
+// — never U+00A0/U+0085/U+2028 (CERTIFICATIONS.md §VIOL-VALID-WIDE: T2.6-1
+// splits only on true 1.4 whitespace).
 const T2_6_1_ARM_IDS = [
   "plain",
   "mixed",
   "terminators",
   "padded",
+  "reversed",
 ] as readonly string[];
 
 const T2_6_1_SOURCE = [
@@ -891,6 +900,10 @@ const T2_6_1_SOURCE = [
   "Leading and trailing whitespace ignored.",
   "</S>",
   "",
+  '<S id="reversed" tags="b a">',
+  "Reversed spelling - reported in byte order.",
+  "</S>",
+  "",
   '<S id="other" tags="c">',
   "Different tag - the filter discriminator.",
   "</S>",
@@ -904,7 +917,7 @@ const T2_6_1_SOURCE = [
 const T2_6_1 = defineProductTest({
   id: "T2.6-1",
   title:
-    '`tags="a b"`, runs of mixed 1.4 whitespace as separators, and leading/trailing whitespace all yield tags {a, b} — asserted via `query node` and `query nodes --tag` (SPEC 2.6, 1.4)',
+    '`tags="a b"`, runs of mixed 1.4 whitespace as separators, leading/trailing whitespace, and the reversed spelling `tags="b a"` all yield tags {a, b} — reported as exactly `["a", "b"]`, the 12.7 tag-set form in byte order, compared literally and never re-sorted, with one metadataHash across the five spellings — asserted via `query node` and `query nodes --tag` (SPEC 2.6, 1.4, 12.7, 5.5)',
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -916,10 +929,12 @@ const T2_6_1 = defineProductTest({
           "T2.6-1 `build` over the tag-splitting spellings",
         );
 
-        // Every arm reports exactly the set {a, b} (as sorted tags), and —
-        // since the metadataHash input is the split, sorted tag set together
-        // with the (empty) `d` set and default coverage (SPEC 5.5) — all
-        // arms' metadataHashes are identical: the spellings are equivalent.
+        // Every arm reports exactly `["a", "b"]` — the 12.7 tag-set form,
+        // byte order, compared literally (the reversed spelling included) —
+        // and, since the metadataHash input is the split, sorted tag set
+        // together with the (empty) `d` set and default coverage (SPEC
+        // 5.5), all arms' metadataHashes are identical: the spellings are
+        // equivalent.
         const hashes = new Set<string>();
         for (const id of T2_6_1_ARM_IDS) {
           const identity = `specs/A.mdx#${id}`;
@@ -930,15 +945,16 @@ const T2_6_1 = defineProductTest({
             "T2.6-1",
           );
           assertSameJson(
-            sortedTags(summary.tags),
+            summary.tags,
             ["a", "b"],
-            `T2.6-1 tags of ${identity} — the spelling splits to exactly {a, b} (SPEC 2.6)`,
+            `T2.6-1 tags of ${identity} — the spelling splits to exactly {a, b}, ` +
+              "reported in the 12.7 tag-set form, byte order (SPEC 2.6, 12.7)",
           );
           hashes.add(summary.metadataHash);
         }
         if (hashes.size !== 1) {
           fail(
-            "T2.6-1 all four spellings carry identical metadata (empty `d` set, " +
+            "T2.6-1 all five spellings carry identical metadata (empty `d` set, " +
               "default coverage, tag set {a, b}), so their metadataHashes must be " +
               `identical (SPEC 2.6, 5.5); got ${String(hashes.size)} distinct values: ` +
               JSON.stringify([...hashes]),
@@ -946,7 +962,7 @@ const T2_6_1 = defineProductTest({
         }
 
         // The `--tag` filter view (SPEC 2.6, 11): each of `a` and `b`
-        // selects exactly the four arms — never `other` or `untagged` — and
+        // selects exactly the five arms — never `other` or `untagged` — and
         // `c` selects exactly `other`.
         const armIdentities = T2_6_1_ARM_IDS.map(
           (id) => `specs/A.mdx#${id}`,
@@ -961,14 +977,15 @@ const T2_6_1 = defineProductTest({
           assertSameJson(
             sortedIdentities(rows),
             armIdentities,
-            `T2.6-1 \`query nodes --tag ${tag}\` lists exactly the four spellings' ` +
+            `T2.6-1 \`query nodes --tag ${tag}\` lists exactly the five spellings' ` +
               "nodes (SPEC 2.6, 11)",
           );
           for (const row of rows) {
             assertSameJson(
-              sortedTags(row.tags),
+              row.tags,
               ["a", "b"],
-              `T2.6-1 tags reported for ${row.identity} by \`query nodes --tag ${tag}\``,
+              `T2.6-1 tags reported for ${row.identity} by \`query nodes --tag ${tag}\` ` +
+                "— the 12.7 tag-set form, byte order (SPEC 12.7)",
             );
           }
         }
@@ -1031,9 +1048,10 @@ const T2_6_2 = defineProductTest({
           "T2.6-2 `build` with duplicate tags and the omitted-variant node",
         );
 
-        // Duplicates collapse: the reported tags are the two-element set, and
-        // the metadataHash equals the plain spelling's (the hash input is the
-        // collapsed, sorted tag set, SPEC 2.6, 5.5).
+        // Duplicates collapse: the reported tags are exactly `["a", "b"]` —
+        // the 12.7 tag-set form, compared literally — and the metadataHash
+        // equals the plain spelling's (the hash input is the collapsed,
+        // sorted tag set, SPEC 2.6, 5.5).
         const dup = await queryNodeMetadata(
           product,
           workspace,
@@ -1041,10 +1059,10 @@ const T2_6_2 = defineProductTest({
           "T2.6-2",
         );
         assertSameJson(
-          sortedTags(dup.tags),
+          dup.tags,
           ["a", "b"],
           'T2.6-2 tags of the `tags="a b a a"` node — duplicates collapse to the set ' +
-            "{a, b} (SPEC 2.6)",
+            "{a, b}, reported in the 12.7 tag-set form (SPEC 2.6, 12.7)",
         );
         const plain = await queryNodeMetadata(
           product,
@@ -1189,9 +1207,10 @@ const T2_6_3 = defineProductTest({
           "T2.6-3",
         );
         assertSameJson(
-          sortedTags(parent.tags),
+          parent.tags,
           ["ptag", "render-probe"],
-          "T2.6-3 the parent carries its own tags (the inheritance control)",
+          "T2.6-3 the parent carries its own tags (the inheritance control), " +
+            "in the 12.7 tag-set form (SPEC 12.7)",
         );
         const child = await queryNode(
           product,
