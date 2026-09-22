@@ -117,7 +117,7 @@ import {
   decodeSessionStatusReport,
 } from "../../helpers/adapters/index.js";
 import { assertBytesEqual, fail } from "../../helpers/assertions.js";
-import type { Choices, Gen } from "../../helpers/property.js";
+import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -1128,6 +1128,25 @@ async function executeOp(
   }
 }
 
+/**
+ * S-9's per-draw check (helpers/property.ts `mdxSources`): the initial
+ * workspace and, after each edit operation, the re-rendered files — the
+ * model evolved exactly as runP9Op evolves it (the session operations touch
+ * no source).
+ */
+function stagedP9Sources(trial: P9Trial): DrawSource[] {
+  const model = structuredClone(trial.initial);
+  const sources: DrawSource[] = Object.entries(renderP9Workspace(model));
+  trial.ops.forEach((op, index) => {
+    if (op.kind !== "edit") return;
+    applyP9Edit(model, op.edit);
+    for (const [rel, contents] of Object.entries(renderP9Workspace(model))) {
+      sources.push([rel, contents, `after op ${String(index + 1)} (edit)`]);
+    }
+  });
+  return sources;
+}
+
 /** One trial: stage, create, run the op sequence, sweep after every step. */
 async function runP9Trial(
   product: ProductBinding,
@@ -1194,7 +1213,12 @@ const P_9 = defineProductTest({
       async (trial) => {
         await runP9Trial(product, trial);
       },
-      { runs: 3, maxShrinkExecutions: 50, render: renderP9Trial },
+      {
+        runs: 3,
+        maxShrinkExecutions: 50,
+        render: renderP9Trial,
+        mdxSources: stagedP9Sources,
+      },
     );
   },
 });

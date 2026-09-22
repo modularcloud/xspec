@@ -117,7 +117,7 @@ import {
   decodeViewReport,
 } from "../../helpers/adapters/index.js";
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
-import type { Choices, Gen } from "../../helpers/property.js";
+import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -418,6 +418,15 @@ async function runAnswer(
   return result;
 }
 
+/**
+ * S-9's per-draw check (helpers/property.ts `mdxSources`): every composed
+ * file but the break-parse twist's, which the staging declares unparseable
+ * (the builder judges that declaration at staging time).
+ */
+function stagedP12Sources(trial: P12Trial): DrawSource[] {
+  return trial.files.filter(([path]) => path !== trial.unparseable);
+}
+
 /** The P-12 property body for one generated trial (module header). */
 async function runP12Trial(
   product: ProductBinding,
@@ -598,7 +607,12 @@ const P_12 = defineProductTest({
       async (trial) => {
         await runP12Trial(product, trial);
       },
-      { runs: 3, maxShrinkExecutions: 25, render: renderP12Trial },
+      {
+        runs: 3,
+        maxShrinkExecutions: 25,
+        render: renderP12Trial,
+        mdxSources: stagedP12Sources,
+      },
     );
   },
 });

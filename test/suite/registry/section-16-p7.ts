@@ -131,7 +131,7 @@ import {
   matchFromPattern,
   matchToPattern,
 } from "../../helpers/oracles/glob.js";
-import type { Choices, Gen } from "../../helpers/property.js";
+import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -676,6 +676,23 @@ function mdxSection(id: string): string {
   return `<S id="${id}">\nText for ${id}.\n</S>\n`;
 }
 
+// S-9's per-draw check (helpers/property.ts `mdxSources`): the spec sources
+// each arm stages — one `mdxSection` per drawn path (the `.mdx` ones are
+// judged; code sources and non-spec paths are not MDX).
+function stagedDiscoverySources(trial: DiscoveryTrial): DrawSource[] {
+  return trial.paths.map((path, index): DrawSource => [
+    path,
+    mdxSection(`s${String(index)}`),
+  ]);
+}
+
+function stagedCaptureSources(trial: CaptureTrial): DrawSource[] {
+  return trial.targets.map((target, j): DrawSource => [
+    target,
+    mdxSection(`t${String(j)}`),
+  ]);
+}
+
 /** One `{file, ids}` listing entry, and a bytewise-sorted copy for compare. */
 interface ListingEntry {
   readonly file: string;
@@ -1169,7 +1186,12 @@ const P_7 = defineProductTest({
       async (trial) => {
         await assertDiscoveryAgreement(product, trial);
       },
-      { runs: 8, maxShrinkExecutions: 120, render: renderDiscoveryTrial },
+      {
+        runs: 8,
+        maxShrinkExecutions: 120,
+        render: renderDiscoveryTrial,
+        mdxSources: stagedDiscoverySources,
+      },
     );
     await checkProperty(
       "P-7 captures (policy)",
@@ -1177,7 +1199,12 @@ const P_7 = defineProductTest({
       async (trial) => {
         await assertCaptureAgreement(product, trial);
       },
-      { runs: 5, maxShrinkExecutions: 120, render: renderCaptureTrial },
+      {
+        runs: 5,
+        maxShrinkExecutions: 120,
+        render: renderCaptureTrial,
+        mdxSources: stagedCaptureSources,
+      },
     );
   },
 });

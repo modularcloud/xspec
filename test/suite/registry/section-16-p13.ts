@@ -106,7 +106,7 @@ import type {
   CoverageOracleResult,
 } from "../../helpers/oracles/coverage.js";
 import { computeCoverage } from "../../helpers/oracles/coverage.js";
-import type { Choices, Gen } from "../../helpers/property.js";
+import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -847,6 +847,11 @@ function assertProfileMatchesOracle(
   );
 }
 
+/** S-9's per-draw check (helpers/property.ts `mdxSources`): the staged files. */
+function stagedP13Sources(trial: P13Trial): DrawSource[] {
+  return Object.entries(renderP13Files(trial));
+}
+
 /** The P-13 property body for one generated trial (module header). */
 async function runP13Trial(
   product: ProductBinding,
@@ -920,7 +925,12 @@ const P_13 = defineProductTest({
       async (trial) => {
         await runP13Trial(product, trial);
       },
-      { runs: 8, maxShrinkExecutions: 30, render: renderP13Trial },
+      {
+        runs: 8,
+        maxShrinkExecutions: 30,
+        render: renderP13Trial,
+        mdxSources: stagedP13Sources,
+      },
     );
   },
 });
