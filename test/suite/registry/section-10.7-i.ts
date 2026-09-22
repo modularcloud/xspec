@@ -56,7 +56,16 @@
 // - Corrupt-session staging (T10.7-5) uses the shape-independent state
 //   (unparseable bytes written over a session file the product itself
 //   wrote), per the T10.1-4 staging conventions — no session file is ever
-//   fabricated from an assumed layout.
+//   fabricated from an assumed layout. T10.7-1's existing-corrupt-session
+//   arms stage T10.1-4's states the same way: unparseable bytes, a
+//   directory, and a symbolic link (to a valid session the product wrote)
+//   directly; an invariant violation (an unknown item status) through the
+//   H-3 adapter over the product-written file. `create` naming the corrupt
+//   session then reports condition 21 in the code-less refusal's place —
+//   exactly one finding, exit 1, nothing modified (SPEC 10.1, 10.7, 14.21).
+//   The concerned path of the code-less existing-name refusal and of the
+//   condition-21 finding is pinned nowhere (SPEC 10.7, 14.21), so identity,
+//   count, and empty locations are asserted (T10.1-6's reading).
 // - Workspaces are git-less wherever no baseline is involved (T10.7-2,
 //   T10.7-4, T10.7-6): coverage and audit sessions require no git.
 // - Every fixture edit is followed by an explicit `build` before any read,
@@ -65,6 +74,7 @@
 import * as fsp from "node:fs/promises";
 import type {
   ExportReport,
+  Finding,
   ItemKind,
   ItemStatus,
   NodeReport,
@@ -80,6 +90,7 @@ import {
   decodeNodeReport,
   decodeSessionListReport,
   decodeSessionStatusReport,
+  stageUnknownItemStatus,
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
@@ -92,11 +103,13 @@ import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
+  assertConditionCounts,
   assertSameJson,
   buildOk,
   expectErrorDocument,
   expectExit,
   runCli,
+  runFindingsReport,
   runJson,
 } from "./support.js";
 
@@ -508,10 +521,165 @@ async function expectCreateUsageError(
 const W1_FILE = "specs/W.mdx";
 const W1_SOURCE = ['<S id="w">', "Dub text.", "</S>", ""].join("\n");
 
+/** The session every refusal arm of T10.7-1 names, and its file (10.1). */
+const W1_SESSION = "s";
+const W1_SESSION_REL = `.xspec/reviews/${W1_SESSION}.json`;
+
+/**
+ * The staged occupant of the session path must be what the arm claims — a
+ * harness staging check (a plain error, never a diagnosed failure, H-8).
+ */
+async function requireStagedKind(
+  workspace: TestWorkspace,
+  expected: "file" | "dir" | "symlink",
+  context: string,
+): Promise<void> {
+  const staged = await workspace.kind(W1_SESSION_REL);
+  if (staged !== expected) {
+    throw new Error(
+      `${context} staging: expected ${W1_SESSION_REL} to hold a ` +
+        `${expected} once staged; found ${staged} (a harness staging ` +
+        `error, not a product observation)`,
+    );
+  }
+}
+
+/**
+ * `review create --strategy audit --name s --json` refused (SPEC 10.7):
+ * exit 1 with the findings-only report holding exactly one finding of the
+ * given counting identity — `(code-less)` for the existing-name refusal,
+ * which 14 assigns no stable code, or `14.21` where the existing session is
+ * corrupt and its corruption stands in the refusal's place, no code-less
+ * refusal beside it — with no in-source location (locations [], SPEC 12.7),
+ * and nothing modified anywhere under the root (the whole-root compare; the
+ * snapshot never follows links, so a link occupant and its target are both
+ * covered). The finding's concerned path is pinned nowhere (SPEC 10.7,
+ * 14.21; module header), so it is left unasserted (H-4).
+ */
+async function expectCreateRefused(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  identity: "(code-less)" | "14.21",
+  context: string,
+): Promise<Finding> {
+  const argv = [
+    "review",
+    "create",
+    "--strategy",
+    "audit",
+    "--name",
+    W1_SESSION,
+    "--json",
+  ];
+  const label = `${context} \`${argv.join(" ")}\``;
+  const why =
+    identity === "(code-less)"
+      ? "the code-less existing-name refusal of 10.7 — one finding, " +
+        "carrying no stable code (SPEC 14)"
+      : "the existing session is corrupt, so its corruption is reported " +
+        "in the refusal's place — one finding, condition 21 " +
+        "`corrupt-session`, no code-less refusal beside it (SPEC 10.7, " +
+        "14.21)";
+  let refusal: Finding | undefined;
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const findings = await runFindingsReport(
+        product,
+        workspace,
+        argv,
+        1,
+        `${label} — a refused review operation exits 1 with the ` +
+          `findings-only report as the entire stdout (SPEC 10.7, 12.0, 12.7)`,
+      );
+      assertConditionCounts(
+        findings,
+        { [identity]: 1 },
+        `${label} — exactly one finding: ${why}`,
+      );
+      refusal = findings[0];
+      assertSameJson(
+        refusal.locations,
+        [],
+        `${label}: the finding has no in-source location — locations [] ` +
+          `(SPEC 12.7)`,
+      );
+    },
+    `${label} — the refused create modifies nothing: no session written, ` +
+      `the existing session's file, occupant, and link target ` +
+      `byte-unchanged (SPEC 10.1, 10.7)`,
+  );
+  if (refusal === undefined) {
+    throw new Error(`${label}: the compare-around body did not run`);
+  }
+  return refusal;
+}
+
+/**
+ * One corrupt state of the existing session `s`, staged T10.1-4's way on a
+ * built workspace: the shape-independent states directly, the invariant
+ * violation through the H-3 adapter over a session file the product wrote.
+ */
+interface CorruptCreateArm {
+  readonly state: string;
+  readonly stage: (
+    product: ProductBinding,
+    workspace: TestWorkspace,
+    context: string,
+  ) => Promise<void>;
+}
+
+const CORRUPT_CREATE_ARMS: readonly CorruptCreateArm[] = [
+  {
+    // Cannot be parsed (SPEC 10.1, 14.21): garbage bytes at the session
+    // path — shape-independent, so no product-written session is needed.
+    state: "unparseable JSON (garbage bytes)",
+    stage: async (_product, workspace, context) => {
+      await workspace.file(
+        W1_SESSION_REL,
+        "this is deliberately not a JSON document ][}{\n",
+      );
+      await requireStagedKind(workspace, "file", context);
+    },
+  },
+  {
+    // Violates a session invariant (SPEC 10.1: statuses drawn from 10.3)
+    // while staying one well-formed JSON document — the state a `create`
+    // that merely checks the name's existence, without reading the session,
+    // cannot tell from a valid one.
+    state: "unknown item status (H-3 adapter over the product-written file)",
+    stage: async (product, workspace, context) => {
+      await createAuditSession(product, workspace, W1_SESSION, context);
+      await stageUnknownItemStatus(workspace.path(W1_SESSION_REL));
+      await requireStagedKind(workspace, "file", context);
+    },
+  },
+  {
+    // Not a plain file (SPEC 13.4): a directory at the session path.
+    state: "session path occupied by a directory",
+    stage: async (_product, workspace, context) => {
+      await workspace.dir(W1_SESSION_REL);
+      await requireStagedKind(workspace, "dir", context);
+    },
+  },
+  {
+    // Not a plain file (SPEC 13.4): a symbolic link at the session path,
+    // targeting the valid session `real` the product wrote beside it — a
+    // product reading through the link sees a healthy existing session and
+    // answers the code-less refusal instead of condition 21.
+    state: "session path occupied by a symbolic link to a valid session",
+    stage: async (product, workspace, context) => {
+      await createAuditSession(product, workspace, "real", context);
+      await workspace.symlink(W1_SESSION_REL, "real.json");
+      await requireStagedKind(workspace, "symlink", context);
+    },
+  },
+];
+
 const T10_7_1 = defineProductTest({
   id: "T10.7-1",
   title:
-    "`review create` flag exclusivity: exactly one of `--base`, `--strategy audit`, `--coverage` is required — supplying none, any two, all three, or `--strategy` with any other value (`path-blocks`, `coverage`, garbage) is a usage error, exit 2, as is a missing `--name`; `--coverage` naming no configured profile is exit 2 (an unknown profile named in arguments) with nothing created — no session file exists and `list` reports no such session; `create` with an existing session's exact name is refused, exit 1 (SPEC 10.1, 10.7, 12.0)",
+    "`review create` flag exclusivity: exactly one of `--base`, `--strategy audit`, `--coverage` is required — supplying none, any two, all three, or `--strategy` with any other value (`path-blocks`, `coverage`, garbage) is a usage error, exit 2, as is a missing `--name`; `--coverage` naming no configured profile is exit 2 (an unknown profile named in arguments) with nothing created — no session file exists and `list` reports no such session; `create` with an existing session's exact name is refused: exit 1 with exactly one code-less finding, nothing modified; naming an existing corrupt session — unparseable bytes, an invariant violation staged through the H-3 adapter over the product-written file, a directory or a symbolic link at the session path (T10.1-4's stagings) — reports the corruption in the refusal's place: exactly one finding, condition 21 `corrupt-session`, no code-less refusal beside it, exit 1, nothing modified (SPEC 10.1, 10.7, 12.0, 13.4, 14.21)",
   timeoutMs: 240_000,
   run: async (product) => {
     await withWorkspace(
@@ -657,21 +825,37 @@ const T10_7_1 = defineProductTest({
           `${prefix} \`review create --strategy audit\` — missing --name`,
         );
 
-        // An existing name is refused: exit 1, a refused review operation
-        // (SPEC 10.7, 12.0; the ASCII-case-fold variant is T10.1-2's
-        // business — this arm stages the exact name).
-        await createAuditSession(product, workspace, "s", prefix);
-        await expectExit(
+        // An existing name is refused: exit 1, a refused review operation —
+        // exactly one code-less finding, nothing modified (SPEC 10.7, 12.0;
+        // the ASCII-case-fold variant is T10.1-2's business — this arm
+        // stages the exact name).
+        await createAuditSession(product, workspace, W1_SESSION, prefix);
+        await expectCreateRefused(
           product,
           workspace,
-          ["review", "create", "--strategy", "audit", "--name", "s"],
-          1,
-          `${prefix} \`review create --strategy audit --name s\` again — ` +
-            `\`create\` with the name of an existing session is refused ` +
-            `(exit 1, SPEC 10.7, 12.0)`,
+          "(code-less)",
+          `${prefix} [existing valid session]`,
         );
       },
     );
+
+    // Naming an existing corrupt session (SPEC 10.7, 14.21): the corruption
+    // stands in the refusal's place. One fresh workspace per state, so no
+    // other session's state can enter the report: each is built, the
+    // session `s` staged corrupt T10.1-4's way, then `create --name s`
+    // driven against it.
+    for (const arm of CORRUPT_CREATE_ARMS) {
+      await withWorkspace(
+        COVERAGE_CONFIG,
+        { [W1_FILE]: W1_SOURCE },
+        async (workspace) => {
+          const context = `T10.7-1 [existing corrupt session: ${arm.state}]`;
+          await buildOk(product, workspace, `${context} \`build\``);
+          await arm.stage(product, workspace, context);
+          await expectCreateRefused(product, workspace, "14.21", context);
+        },
+      );
+    }
   },
 });
 
