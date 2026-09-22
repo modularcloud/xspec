@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 7 — T6.2-3: the three stagings at two positions and the sibling stagings
-- Cites: TEST-SPEC T6.2-3 (rewritten over be65052…d9e986c; the U+000B/U+000C pin at 743cae8); SPEC 6.2, 5.6, 3. Finding A-16 (remainder). Depends on Tasks 2, 3, 6 (the S-6 vectors give the hand-derived expectations).
-- Change: in `test/suite/registry/section-6.2.ts` extend T6.2-3 beyond the restaged worked arm: staging (a) two spaces before the closing tag, (b) the both-sided U+000C/U+000B spelling, (c) `body</S>` with a U+000C/U+000B remainder — each moved both to top level and into a flow-position parent (today only `Hall.mdx#tp.imp` is used) — plus the sibling stagings (d) origin `p.s` `changed` and (e) destination `p.s` `changed`; assert everything the entry pins per arm (own text and ownHash via `query node` before and after, the `changed`/`descendant-changed`/`upstream-changed` sets with the two-sided tolerance the entry documents, byte-asserted files where the entry says, `check` clean). Build U+000B/U+000C from code points; every staged source is declared well-formed (the default), so the builder's S-9 check is the derivability evidence.
-- Verify: `-t 'T6.2-3 '` against the built product runs without harness error; self project green.
-
 ### Task 8 — T6.2-4: the pinned final-position shapes and the `changed` twin
 - Cites: TEST-SPEC T6.2-4 (rewritten); SPEC 6.2, 5.6. Finding A-17. Depends on Task 3.
 - Change: `section-6.2.ts` `P4_SOURCE` (~L1279) stages a different last-child shape (blank lines, `coverage`/`tags`); the text pins two shapes — `<S id="p">`, U+000A, `<S id="p.m">`, U+000A, `y`, U+000A, `</S>`, U+000A, `</S>`, U+000A and T6.5-13(f)'s top-level shape (`<S id="a">x</S>`, U+000A, `<S id="m">`, U+000A, `y`, U+000A, `</S>` with no final terminator) — plus the `changed` twin `foo <S id="p">`, U+000A, `<S id="p.m">x</S></S> baz` (`p` `changed`, the moved node no category). Stage all three with the category and byte assertions the entry states; keep the former shape only if the entry still covers it.

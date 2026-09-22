@@ -1839,6 +1839,9 @@ async function runSiblingDestinationStaging(
 
 const T6_2_3 = defineProductTest({
   id: "T6.2-3",
+  // Fourteen stagings (~90 CLI invocations, ~22 s alone): headroom for a
+  // saturated box.
+  timeoutMs: 240_000,
   title:
     "section move impurity: on a clean-boundary fixture every moved node keeps ownHash, subtreeHash, and metadataHash, the origin and target parents are each `changed` with ordinary cascades attributed to them, and no other node is `changed`; a moved section with an impure origin boundary (SPEC 6.2's worked case) is itself additionally `changed` with the 5.6 cascades attributed to it, its metadataHash still unchanged — in each of the three impure stagings (the worked shape with spaces before its closing tag, the both-sided U+000B/U+000C spelling, the `body</S>` variant with such a remainder), moved to top level and into a flow-position parent alike, the bytes named gone from its own text at the destination; and a sibling with bytes on the deletion's merged line or on the line the insertion splits is `changed` exactly when the drop rule of 3 decides that line differently, the moved node keeping its hashes and carrying no category (SPEC 6.2, 3, 1.4, 5.6, 6.5)",
   run: async (product) => {
