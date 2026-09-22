@@ -48,19 +48,28 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-/** The staging modes, named in every `HarnessStagingError`. */
+/**
+ * The staging modes, named in every `HarnessStagingError`: the permission
+ * stagings of this module, and the workspace builder's S-9 derivability
+ * check of a staged MDX source (`mdx-derivability`, helpers/workspace.ts).
+ */
 export type StagingMode =
   | "write-refusal"
   | "write-refusal-under"
   | "read-refusal-of-file"
-  | "read-refusal-of-directory";
+  | "read-refusal-of-directory"
+  | "mdx-derivability";
 
 /**
- * An ineffective or impossible permission staging (E-1, H-11): the harness's
- * own attempt at the staged object was not refused (a privileged runner), a
- * kept permission was not granted, the object cannot be staged (absent,
- * symlinked, wrong kind), or the platform is not the Linux leg's. Never a
- * `HarnessAssertionError`: nothing here is a product verdict.
+ * An ineffective or impossible staging: a permission staging (E-1, H-11)
+ * whose object the harness's own attempt reached unrefused (a privileged
+ * runner), a kept permission not granted, an object that cannot be staged
+ * (absent, symlinked, wrong kind), a platform that is not the Linux leg's —
+ * or a staged MDX source contradicting its S-9 declaration (declared
+ * well-formed yet rejected by the stock parser, or declared unparseable yet
+ * deriving; helpers/workspace.ts). Never a `HarnessAssertionError`: nothing
+ * here is a product verdict — it is a harness error, never a diagnosed
+ * product failure and never a skip.
  */
 export class HarnessStagingError extends Error {
   readonly mode: StagingMode;

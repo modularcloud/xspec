@@ -22,6 +22,21 @@
 //   identical commit hashes on every platform and CI leg. Every git
 //   invocation runs with ambient configuration disabled: no system or global
 //   config, an isolated HOME, and all inherited `GIT_*` environment dropped.
+// - Every staged file whose path ends in `.mdx` is judged by S-9's
+//   derivability check (`deriveMdx`, helpers/mdx-derivability.ts — the stock
+//   MDX 3 parser, independent of the product) at staging time, before any
+//   product exists (H-8): it is declared well-formed by default, and a
+//   staging declares the exceptions per path — `unparseable` for a source
+//   TEST-SPEC declares unparseable (SPEC 14.20: invalid UTF-8, a byte-order
+//   mark, an MDX-syntax rejection), `allowances` for a source relying on an
+//   ECMAScript early error 14.20 admits (S-9's named allowances), and
+//   `unchecked` only for a source whose derivability the document does not
+//   declare (a fuzz mutation, a noise file no discovery reaches). A source
+//   contradicting its declaration throws `HarnessStagingError` (mode
+//   `mdx-derivability`, naming the path and the parser's reason) — a harness
+//   error, never an assertion failure, never a skip. The parse is in-process
+//   and cheap at every scale the suite stages (the 4096-deep tower in ~0.3 s,
+//   T1.3-7's 4.2 MB document in ~1.4 s), so no staging is exempted for size.
 
 import { Buffer } from "node:buffer";
 import { execFile } from "node:child_process";
@@ -29,6 +44,12 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { promisify } from "node:util";
+import {
+  MDX_ALLOWANCES,
+  deriveMdx,
+  type MdxAllowance,
+} from "./mdx-derivability.js";
+import { HarnessStagingError } from "./permissions.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -50,6 +71,48 @@ export type RelPath = string | Uint8Array;
  */
 export type FileContents = string | Uint8Array;
 
+/**
+ * A staging's S-9 declaration of its MDX sources' well-formedness, by
+ * workspace-relative path (`/`-separated, as the file is staged; a byte
+ * path is keyed by its UTF-8 decoding with replacement characters). Every
+ * staged `.mdx` file not named here is declared well-formed and must derive
+ * under SPEC 14.20's grammar; a path belongs to at most one list.
+ */
+export interface WorkspaceMdxDecl {
+  /**
+   * Sources TEST-SPEC declares unparseable (14.20): each must NOT derive —
+   * invalid UTF-8, a leading byte-order mark, an MDX-syntax rejection.
+   */
+  readonly unparseable?: readonly string[];
+  /**
+   * Sources whose derivability the document does not declare — fuzz
+   * mutations (P-8), noise files no discovery reaches, byte-level probes.
+   * Never a way to hide an ill-formed deterministic fixture.
+   */
+  readonly unchecked?: readonly string[];
+  /**
+   * Sources relying on an ECMAScript early error 14.20 admits (S-9's named
+   * allowances): each derives under exactly the allowances named for it.
+   */
+  readonly allowances?: Readonly<Record<string, readonly MdxAllowance[]>>;
+}
+
+/**
+ * One file's S-9 declaration, for a `file()` call after creation; overrides
+ * the workspace declaration for that write alone.
+ */
+export type MdxFileDeclaration =
+  | "well-formed"
+  | "unparseable"
+  | "unchecked"
+  | { readonly allowances: readonly MdxAllowance[] };
+
+/** Options of a single `file()` staging. */
+export interface FileOptions {
+  /** The file's S-9 declaration; defaults to the workspace declaration's. */
+  readonly mdx?: MdxFileDeclaration;
+}
+
 /** Declarative form of a workspace's initial content. */
 export interface WorkspaceDecl {
   /** Regular files: workspace-relative path → exact contents. */
@@ -58,6 +121,12 @@ export interface WorkspaceDecl {
   readonly symlinks?: Readonly<Record<string, string>>;
   /** Directories created explicitly (parents of files are implicit). */
   readonly dirs?: readonly string[];
+  /**
+   * S-9 declaration of the staged `.mdx` sources — those in `files` and
+   * those a later `file()` call stages; every `.mdx` path absent from it is
+   * declared well-formed (see the module header).
+   */
+  readonly mdx?: WorkspaceMdxDecl;
 }
 
 export interface GitPerson {
@@ -99,31 +168,48 @@ export class TestWorkspace {
 
   private gitCommitCount = 0;
   private gitScratch: Promise<{ home: string; configFile: string }> | undefined;
+  /** The S-9 declaration, resolved per normalized path (see `mdxDeclarationOf`). */
+  private readonly mdxDeclarations: ReadonlyMap<string, MdxFileDeclaration>;
 
-  private constructor(tempRoot: string, root: string) {
+  private constructor(
+    tempRoot: string,
+    root: string,
+    mdxDeclarations: ReadonlyMap<string, MdxFileDeclaration>,
+  ) {
     this.tempRoot = tempRoot;
     this.root = root;
+    this.mdxDeclarations = mdxDeclarations;
   }
 
   /**
    * Create a fresh workspace in a unique temporary directory and populate it
-   * with the declared entries (directories, then files, then symlinks).
+   * with the declared entries (directories, then files, then symlinks); each
+   * `.mdx` file is judged against the staging's S-9 declaration as it is
+   * written (a contradiction throws `HarnessStagingError`).
    */
   static async create(decl: WorkspaceDecl = {}): Promise<TestWorkspace> {
+    const mdxDeclarations = resolveMdxDeclaration(decl.mdx ?? {});
     const tempRoot = await fsp.mkdtemp(
       path.join(os.tmpdir(), "xspec-harness-"),
     );
     const root = path.join(tempRoot, "work");
     await fsp.mkdir(root);
-    const workspace = new TestWorkspace(tempRoot, root);
-    for (const dir of decl.dirs ?? []) {
-      await workspace.dir(dir);
-    }
-    for (const [rel, contents] of Object.entries(decl.files ?? {})) {
-      await workspace.file(rel, contents);
-    }
-    for (const [rel, target] of Object.entries(decl.symlinks ?? {})) {
-      await workspace.symlink(rel, target);
+    const workspace = new TestWorkspace(tempRoot, root, mdxDeclarations);
+    try {
+      for (const dir of decl.dirs ?? []) {
+        await workspace.dir(dir);
+      }
+      for (const [rel, contents] of Object.entries(decl.files ?? {})) {
+        await workspace.file(rel, contents);
+      }
+      for (const [rel, target] of Object.entries(decl.symlinks ?? {})) {
+        await workspace.symlink(rel, target);
+      }
+    } catch (error) {
+      // A refused staging (an S-9 contradiction, an unwritable entry) leaves
+      // no temporary directory behind; the error itself is what matters.
+      await workspace.dispose().catch(() => undefined);
+      throw error;
     }
     return workspace;
   }
@@ -143,13 +229,80 @@ export class TestWorkspace {
     return abs;
   }
 
-  /** Write a regular file with exactly the declared bytes, creating parents. */
-  async file(rel: RelPath, contents: FileContents): Promise<void> {
-    const abs = this.resolve(rel);
-    await ensureParent(abs);
+  /**
+   * Write a regular file with exactly the declared bytes, creating parents.
+   * A `.mdx` path is first judged against its S-9 declaration — the option's,
+   * else the workspace declaration's, else well-formed — and a contradiction
+   * throws `HarnessStagingError` before anything is written.
+   */
+  async file(
+    rel: RelPath,
+    contents: FileContents,
+    options: FileOptions = {},
+  ): Promise<void> {
     const data =
       typeof contents === "string" ? Buffer.from(contents, "utf8") : contents;
+    this.checkMdx(rel, data, options.mdx);
+    const abs = this.resolve(rel);
+    await ensureParent(abs);
     await fsp.writeFile(abs, data);
+  }
+
+  /** The S-9 declaration in effect for a staged path (`.mdx` paths only). */
+  mdxDeclarationOf(rel: RelPath): MdxFileDeclaration | undefined {
+    if (!isMdxPath(rel)) return undefined;
+    return this.mdxDeclarations.get(mdxKey(rel)) ?? "well-formed";
+  }
+
+  private checkMdx(
+    rel: RelPath,
+    data: Uint8Array,
+    override: MdxFileDeclaration | undefined,
+  ): void {
+    if (!isMdxPath(rel)) return;
+    const declaration = override ?? this.mdxDeclarationOf(rel);
+    if (declaration === undefined || declaration === "unchecked") return;
+    const key = mdxKey(rel);
+    const allowances =
+      typeof declaration === "object" ? declaration.allowances : undefined;
+    if (allowances !== undefined) assertKnownAllowances(key, allowances);
+    const verdict = deriveMdx(
+      data,
+      allowances === undefined ? undefined : { allowances },
+    );
+    if (declaration === "unparseable") {
+      if (verdict.derives) {
+        throw new HarnessStagingError(
+          "mdx-derivability",
+          key,
+          "declared unparseable (`mdx.unparseable`) but the source derives " +
+            "under the stock MDX 3 parser — SPEC 14.20 admits it; declare " +
+            "it well-formed (the default) or, if it relies on an early " +
+            "error 14.20 admits, name its allowance",
+        );
+      }
+      return;
+    }
+    if (!verdict.derives) {
+      const where =
+        verdict.position === undefined
+          ? ""
+          : ` at line ${verdict.position.line}, column ${verdict.position.column} (offset ${verdict.position.offset})`;
+      const declared =
+        allowances === undefined
+          ? "declared well-formed (S-9's default)"
+          : `declared well-formed under the allowances ${JSON.stringify(allowances)}`;
+      throw new HarnessStagingError(
+        "mdx-derivability",
+        key,
+        `${declared} but the stock MDX 3 parser rejects it${where}: ` +
+          `${verdict.reason} — list the path under \`mdx.unparseable\` if ` +
+          "TEST-SPEC declares the source unparseable (SPEC 14.20), name " +
+          "its allowance if it relies on an early error 14.20 admits, or " +
+          "under `mdx.unchecked` only if the document does not declare " +
+          "its derivability (S-9)",
+      );
+    }
   }
 
   /** Create a directory (and parents). */
@@ -347,6 +500,89 @@ export class TestWorkspace {
       );
     }
   }
+}
+
+const MDX_SUFFIX = Buffer.from(".mdx", "utf8");
+
+/** Whether a staged path names an MDX source: it ends in `.mdx`. */
+function isMdxPath(rel: RelPath): boolean {
+  if (typeof rel === "string") return rel.endsWith(".mdx");
+  return (
+    rel.length >= MDX_SUFFIX.length &&
+    Buffer.from(rel.subarray(rel.length - MDX_SUFFIX.length)).equals(MDX_SUFFIX)
+  );
+}
+
+/**
+ * The declaration key of a staged path: the `/`-separated relative path,
+ * normalized (`./a`, `a//b` and `a/./b` spell `a`, `a/b`); a byte path is
+ * decoded as UTF-8 with replacement characters.
+ */
+function mdxKey(rel: RelPath): string {
+  const text =
+    typeof rel === "string" ? rel : Buffer.from(rel).toString("utf8");
+  return path.posix.normalize(text);
+}
+
+function assertKnownAllowances(
+  key: string,
+  allowances: readonly MdxAllowance[],
+): void {
+  for (const allowance of allowances) {
+    if (!(MDX_ALLOWANCES as readonly string[]).includes(allowance)) {
+      throw new HarnessStagingError(
+        "mdx-derivability",
+        key,
+        `unknown allowance ${JSON.stringify(allowance)} — S-9's allowances are ${JSON.stringify(MDX_ALLOWANCES)}`,
+      );
+    }
+  }
+}
+
+/**
+ * Resolve a workspace's S-9 declaration to one entry per path, refusing a
+ * declaration defect: a path in two lists, a path that is not an MDX
+ * source, an unknown allowance, an empty allowance list.
+ */
+function resolveMdxDeclaration(
+  decl: WorkspaceMdxDecl,
+): ReadonlyMap<string, MdxFileDeclaration> {
+  const resolved = new Map<string, MdxFileDeclaration>();
+  const declare = (rel: string, declaration: MdxFileDeclaration): void => {
+    if (!isMdxPath(rel)) {
+      throw new HarnessStagingError(
+        "mdx-derivability",
+        rel,
+        "the S-9 declaration names a path that is not an MDX source (only " +
+          "`.mdx` paths are judged)",
+      );
+    }
+    const key = mdxKey(rel);
+    if (resolved.has(key)) {
+      throw new HarnessStagingError(
+        "mdx-derivability",
+        key,
+        "the S-9 declaration names the path in more than one of " +
+          "`unparseable`, `unchecked`, and `allowances`",
+      );
+    }
+    resolved.set(key, declaration);
+  };
+  for (const rel of decl.unparseable ?? []) declare(rel, "unparseable");
+  for (const rel of decl.unchecked ?? []) declare(rel, "unchecked");
+  for (const [rel, allowances] of Object.entries(decl.allowances ?? {})) {
+    if (allowances.length === 0) {
+      throw new HarnessStagingError(
+        "mdx-derivability",
+        rel,
+        "the S-9 declaration names an empty allowance list — omit the path " +
+          "instead (well-formed is the default)",
+      );
+    }
+    assertKnownAllowances(rel, allowances);
+    declare(rel, { allowances });
+  }
+  return resolved;
 }
 
 /** Create the parent directory chain for an absolute (string or byte) path. */

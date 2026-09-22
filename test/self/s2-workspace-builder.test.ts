@@ -122,6 +122,8 @@ test("writes BOM-prefixed content byte-exactly (string and byte declarations)", 
       "bom-bytes.bin": bytes(0xef, 0xbb, 0xbf, 0x0d),
       "bom-utf16le.bin": bytes(0xff, 0xfe, 0x41, 0x00),
     },
+    // A byte-level probe of the builder, not a 14.20 fixture (S-9).
+    mdx: { unchecked: ["bom-string.mdx"] },
   });
   expectSameBytes(
     await workspace.readBytes("bom-string.mdx"),
@@ -146,6 +148,8 @@ test("writes invalid-UTF-8 blob contents byte-exactly", async () => {
       "malformed.mdx": malformed,
       "empty.bin": bytes(),
     },
+    // A byte-level probe of the builder, not a 14.20 fixture (S-9).
+    mdx: { unchecked: ["malformed.mdx"] },
   });
   expectSameBytes(await workspace.readBytes("all-bytes.bin"), allByteValues);
   expectSameBytes(await workspace.readBytes("malformed.mdx"), malformed);
@@ -168,7 +172,8 @@ test.runIf(onLinux)(
     );
     const relBytes = concatBytes(utf8("specs/"), nameBytes);
     const contents = concatBytes(utf8("# Title\n"), bytes(0x80, 0xfe));
-    await workspace.file(relBytes, contents);
+    // A byte-level probe of the builder, not a 14.20 fixture (S-9).
+    await workspace.file(relBytes, contents, { mdx: "unchecked" });
 
     // The directory holds exactly the declared byte-string name.
     expect((await workspace.readdirBytes("specs")).map(hex)).toEqual([

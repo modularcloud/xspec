@@ -21,12 +21,15 @@
 // its code point.
 
 import { Buffer } from "node:buffer";
-import { describe, expect, test } from "vitest";
+import { describe, expect, onTestFinished, test } from "vitest";
+import { HarnessAssertionError } from "../helpers/assertions.js";
 import {
   MDX_ALLOWANCES,
   deriveMdx,
   type MdxAllowance,
 } from "../helpers/mdx-derivability.js";
+import { HarnessStagingError } from "../helpers/permissions.js";
+import { TestWorkspace, type WorkspaceDecl } from "../helpers/workspace.js";
 import { REMOVALS_SOURCE } from "../suite/registry/section-3.js";
 import {
   I3_HALL_MOVED_SOURCE,
@@ -626,5 +629,293 @@ describe("S-9: the named allowances", () => {
     );
     expectDerives(all, MDX_ALLOWANCES);
     expectRejects(all, ["duplicate-import-binding"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The builder-side wiring (helpers/workspace.ts): every staged `.mdx` file is
+// judged at staging time against the staging's S-9 declaration — well-formed
+// by default — and a contradiction is a harness error (`HarnessStagingError`,
+// mode `mdx-derivability`), never an assertion failure and never a skip.
+
+const STAGED_ILL_FORMED = doc('<S id="x">', "", "never closed");
+const STAGED_WELL_FORMED = doc('<S id="x">', "", "closed below", "", "</S>");
+const DUPLICATE_BINDING = doc(
+  'import { a } from "./x.xspec"',
+  'import { a } from "./y.xspec"',
+  "",
+  "# Doc",
+);
+const BOM_BYTES = Buffer.concat([
+  Buffer.from([0xef, 0xbb, 0xbf]),
+  Buffer.from("# Doc" + LF, "utf8"),
+]);
+const INVALID_UTF8_BYTES = Buffer.from([0x23, 0x20, 0xff, 0x0a]);
+
+async function stage(decl: WorkspaceDecl): Promise<TestWorkspace> {
+  const workspace = await TestWorkspace.create(decl);
+  onTestFinished(() => workspace.dispose());
+  return workspace;
+}
+
+async function staged(workspace: TestWorkspace, rel: string): Promise<string> {
+  return Buffer.from(await workspace.readBytes(rel)).toString("utf8");
+}
+
+async function expectStagingError(
+  action: () => Promise<unknown>,
+  path: string,
+  ...fragments: readonly string[]
+): Promise<HarnessStagingError> {
+  let thrown: unknown;
+  try {
+    await action();
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(HarnessStagingError);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as HarnessStagingError;
+  expect(error.name).toBe("HarnessStagingError");
+  expect(error.mode).toBe("mdx-derivability");
+  expect(error.path).toBe(path);
+  expect(error.message).toContain(`mdx-derivability staging of ${path}: `);
+  for (const fragment of fragments) {
+    expect(error.message).toContain(fragment);
+  }
+  return error;
+}
+
+describe("S-9: the builder judges every staged `.mdx` source against its declaration", () => {
+  test("the default is well-formed: an ill-formed source throws at staging, naming the path and the parser's reason", async () => {
+    const error = await expectStagingError(
+      () =>
+        TestWorkspace.create({ files: { "specs/A.mdx": STAGED_ILL_FORMED } }),
+      "specs/A.mdx",
+      "declared well-formed (S-9's default)",
+      "the stock MDX 3 parser rejects it",
+      "mdast-util-mdx-jsx",
+      "`mdx.unparseable`",
+    );
+    expect(error.message).toContain(expectRejects(STAGED_ILL_FORMED).reason);
+  });
+
+  test("a well-formed source stages under the default, wherever it lies", async () => {
+    const workspace = await stage({
+      files: {
+        "specs/A.mdx": STAGED_WELL_FORMED,
+        "specs/deep/B.mdx": "# B" + LF,
+      },
+    });
+    expect(await staged(workspace, "specs/A.mdx")).toBe(STAGED_WELL_FORMED);
+    expect(workspace.mdxDeclarationOf("specs/A.mdx")).toBe("well-formed");
+    expect(workspace.mdxDeclarationOf("specs/deep/B.mdx")).toBe("well-formed");
+  });
+
+  test("`unparseable`: the source must not derive; a deriving one throws", async () => {
+    const workspace = await stage({
+      files: { "specs/A.mdx": STAGED_ILL_FORMED },
+      mdx: { unparseable: ["specs/A.mdx"] },
+    });
+    expect(await staged(workspace, "specs/A.mdx")).toBe(STAGED_ILL_FORMED);
+    expect(workspace.mdxDeclarationOf("specs/A.mdx")).toBe("unparseable");
+    await expectStagingError(
+      () =>
+        TestWorkspace.create({
+          files: { "specs/A.mdx": STAGED_WELL_FORMED },
+          mdx: { unparseable: ["specs/A.mdx"] },
+        }),
+      "specs/A.mdx",
+      "declared unparseable",
+      "derives",
+    );
+  });
+
+  test("14.20's encoding rules: a byte-order mark and invalid UTF-8 are unparseable stagings", async () => {
+    await expectStagingError(
+      () => TestWorkspace.create({ files: { "specs/A.mdx": BOM_BYTES } }),
+      "specs/A.mdx",
+      "byte-order mark",
+    );
+    await expectStagingError(
+      () =>
+        TestWorkspace.create({
+          files: { "specs/A.mdx": BOM + "# Doc" + LF },
+        }),
+      "specs/A.mdx",
+      "byte-order mark",
+    );
+    await expectStagingError(
+      () =>
+        TestWorkspace.create({ files: { "specs/A.mdx": INVALID_UTF8_BYTES } }),
+      "specs/A.mdx",
+      "not valid UTF-8",
+    );
+    const workspace = await stage({
+      files: { "specs/A.mdx": BOM_BYTES, "specs/B.mdx": INVALID_UTF8_BYTES },
+      mdx: { unparseable: ["specs/A.mdx", "specs/B.mdx"] },
+    });
+    expect(Buffer.from(await workspace.readBytes("specs/A.mdx"))).toEqual(
+      BOM_BYTES,
+    );
+    expect(Buffer.from(await workspace.readBytes("specs/B.mdx"))).toEqual(
+      INVALID_UTF8_BYTES,
+    );
+  });
+
+  test("`unchecked` skips the check, whatever the source", async () => {
+    const workspace = await stage({
+      files: {
+        "specs/A.mdx": STAGED_ILL_FORMED,
+        "specs/B.mdx": STAGED_WELL_FORMED,
+        "specs/C.mdx": INVALID_UTF8_BYTES,
+      },
+      mdx: { unchecked: ["specs/A.mdx", "specs/B.mdx", "specs/C.mdx"] },
+    });
+    expect(await staged(workspace, "specs/A.mdx")).toBe(STAGED_ILL_FORMED);
+    expect(workspace.mdxDeclarationOf("specs/A.mdx")).toBe("unchecked");
+  });
+
+  test("`allowances`: the source derives under exactly the early errors named for it", async () => {
+    const workspace = await stage({
+      files: { "specs/A.mdx": DUPLICATE_BINDING },
+      mdx: { allowances: { "specs/A.mdx": ["duplicate-import-binding"] } },
+    });
+    expect(workspace.mdxDeclarationOf("specs/A.mdx")).toEqual({
+      allowances: ["duplicate-import-binding"],
+    });
+    await expectStagingError(
+      () =>
+        TestWorkspace.create({ files: { "specs/A.mdx": DUPLICATE_BINDING } }),
+      "specs/A.mdx",
+      "declared well-formed (S-9's default)",
+      "already been declared",
+    );
+    await expectStagingError(
+      () =>
+        TestWorkspace.create({
+          files: { "specs/A.mdx": DUPLICATE_BINDING },
+          mdx: { allowances: { "specs/A.mdx": ["legacy-octal"] } },
+        }),
+      "specs/A.mdx",
+      'declared well-formed under the allowances ["legacy-octal"]',
+      "already been declared",
+    );
+    // No allowance passes an MDX-syntax rejection.
+    await expectStagingError(
+      () =>
+        TestWorkspace.create({
+          files: { "specs/A.mdx": STAGED_ILL_FORMED },
+          mdx: { allowances: { "specs/A.mdx": [...MDX_ALLOWANCES] } },
+        }),
+      "specs/A.mdx",
+      "mdast-util-mdx-jsx",
+    );
+  });
+
+  test("the workspace declaration governs later `file()` stagings; a call option overrides it for that write", async () => {
+    const workspace = await stage({ mdx: { unparseable: ["specs/A.mdx"] } });
+    await workspace.file("specs/A.mdx", STAGED_ILL_FORMED);
+    await expectStagingError(
+      () => workspace.file("specs/A.mdx", STAGED_WELL_FORMED),
+      "specs/A.mdx",
+      "declared unparseable",
+    );
+    await workspace.file("specs/A.mdx", STAGED_WELL_FORMED, {
+      mdx: "well-formed",
+    });
+    expect(await staged(workspace, "specs/A.mdx")).toBe(STAGED_WELL_FORMED);
+    await expectStagingError(
+      () => workspace.file("specs/B.mdx", STAGED_ILL_FORMED),
+      "specs/B.mdx",
+      "declared well-formed (S-9's default)",
+    );
+    await workspace.file("specs/B.mdx", STAGED_ILL_FORMED, {
+      mdx: "unparseable",
+    });
+    await workspace.file("specs/B.mdx", STAGED_WELL_FORMED, {
+      mdx: "unchecked",
+    });
+    await workspace.file("specs/C.mdx", DUPLICATE_BINDING, {
+      mdx: { allowances: ["duplicate-import-binding"] },
+    });
+    await expectStagingError(
+      () => workspace.file("specs/C.mdx", DUPLICATE_BINDING),
+      "specs/C.mdx",
+      "already been declared",
+    );
+  });
+
+  test("a refused staging writes nothing", async () => {
+    const workspace = await stage({
+      files: { "specs/A.mdx": STAGED_WELL_FORMED },
+    });
+    await expectStagingError(
+      () => workspace.file("specs/A.mdx", STAGED_ILL_FORMED),
+      "specs/A.mdx",
+    );
+    expect(await staged(workspace, "specs/A.mdx")).toBe(STAGED_WELL_FORMED);
+    await expectStagingError(
+      () => workspace.file("specs/deep/D.mdx", STAGED_ILL_FORMED),
+      "specs/deep/D.mdx",
+    );
+    expect(await workspace.kind("specs/deep")).toBe("absent");
+  });
+
+  test("only `.mdx` paths are judged; declaration keys are normalized paths; a byte path is keyed by its decoding", async () => {
+    const workspace = await stage({
+      files: {
+        "notes.md": STAGED_ILL_FORMED,
+        "specs/A.mdx.txt": STAGED_ILL_FORMED,
+        "specs/A.MDX": STAGED_ILL_FORMED,
+        "./specs/B.mdx": STAGED_ILL_FORMED,
+      },
+      mdx: { unparseable: ["specs//B.mdx"] },
+    });
+    expect(workspace.mdxDeclarationOf("notes.md")).toBeUndefined();
+    expect(workspace.mdxDeclarationOf("specs/A.MDX")).toBeUndefined();
+    expect(workspace.mdxDeclarationOf("specs/./B.mdx")).toBe("unparseable");
+    const bytePath = Buffer.from("specs/E.mdx", "utf8");
+    expect(workspace.mdxDeclarationOf(bytePath)).toBe("well-formed");
+    await expectStagingError(
+      () => workspace.file(bytePath, STAGED_ILL_FORMED),
+      "specs/E.mdx",
+    );
+    await workspace.file(bytePath, STAGED_ILL_FORMED, { mdx: "unparseable" });
+    expect(await staged(workspace, "specs/E.mdx")).toBe(STAGED_ILL_FORMED);
+  });
+
+  test("a declaration defect is refused at creation", async () => {
+    await expectStagingError(
+      () =>
+        TestWorkspace.create({
+          mdx: { unparseable: ["specs/A.mdx"], unchecked: ["specs/A.mdx"] },
+        }),
+      "specs/A.mdx",
+      "more than one",
+    );
+    await expectStagingError(
+      () => TestWorkspace.create({ mdx: { unchecked: ["specs/A.md"] } }),
+      "specs/A.md",
+      "not an MDX source",
+    );
+    await expectStagingError(
+      () =>
+        TestWorkspace.create({ mdx: { allowances: { "specs/A.mdx": [] } } }),
+      "specs/A.mdx",
+      "empty allowance list",
+    );
+    await expectStagingError(
+      () =>
+        TestWorkspace.create({
+          mdx: {
+            allowances: {
+              "specs/A.mdx": ["no-such-allowance" as MdxAllowance],
+            },
+          },
+        }),
+      "specs/A.mdx",
+      "unknown allowance",
+    );
   });
 });
