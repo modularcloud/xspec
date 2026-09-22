@@ -73,8 +73,8 @@
 //   finding of which carries `code` null — exactly the T12.7-1 clause ("null
 //   where 14 assigns none"), with the five-member form enforced by decode.
 // - The 14.11 identities clause ("a cross-module call names the foreign
-//   module") is asserted by distinctive-stem containment, the T4.4-1
-//   operationalization: every rendering of the foreign module's identity —
+//   module") is asserted by distinctive-stem containment, T4.4-1's former
+//   operationalization (it now pins the literal root identity): every rendering of the foreign module's identity —
 //   file name, workspace-relative path, `.xspec` specifier, root-node
 //   identity — contains its stem, and the stem occurs in no other module of
 //   the fixture, so SOME identities element containing it names that module;
@@ -653,7 +653,7 @@ async function runPolicyFindingArm(product: ProductBinding): Promise<void> {
 // Arm C — the cross-module call names the foreign module (14.11)
 // ---------------------------------------------------------------------------
 //
-// Distinctive name stems (the T4.4-1 operationalization): every rendering of
+// Distinctive name stems (T4.4-1's former operationalization): every rendering of
 // a module's identity — file name, workspace-relative path, `.xspec`
 // specifier, root-node identity — contains its stem, and neither stem names
 // any other module of the fixture, so an identities element containing
