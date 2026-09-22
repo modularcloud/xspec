@@ -20,7 +20,9 @@
 //   file an edge — under the same glob grammar; no `coverage`, `policy`, or
 //   git; content of derived and emitted files beyond path is out of scope.
 // - Command surface: `build` and `ids` (12.3) as the observation of the
-//   discovered spec set; `query edges --from <path>` (11.1) as the
+//   discovered spec set, and `inventory` (11.6) in its full 12.7 document
+//   form — T7-4's observation that a glob matching nothing is configured as
+//   spelled; `query edges --from <path>` (11.1) as the
 //   observation of the discovered code set — a discovered code source's
 //   whole-file location answers exit 0 with its empty edge enumeration, and
 //   a path in no configured group (an excluded derived path included) is the
@@ -28,9 +30,14 @@
 //   configuration-error behavior of 14.14/12.0 for patterns resolving
 //   outside the workspace root, and the source-error reporting of 14.15 and
 //   14.19.
-// - Contracts under certification: glob semantics of 7 — `*`, `?`, `**`,
-//   byte-wise case-sensitive matching, the dot-segment rule, every other
-//   character a literal — discovery's refusal to follow symbolic links, and
+// - Contracts under certification: glob semantics of 7 — `*`, `?`, `**`
+//   (any segments only as a whole pattern segment; each `*` of an in-segment
+//   `**` the single-segment wildcard), byte-wise case-sensitive matching,
+//   the dot-segment rule, every other character a literal, and the
+//   outside-root decision by spelling alone (a leading `/` or a depth
+//   falling below zero a configuration error, 14.14; a `.`, `..`, or empty
+//   segment inside the root matching nothing; a drive-qualified spelling
+//   ordinary segments) — discovery's refusal to follow symbolic links, and
 //   the source exclusion of 13.4 (`.xspec.` names, `.xspec/` paths, and
 //   enabled Markdown emit destinations in no spec or code group).
 //
@@ -47,14 +54,20 @@
 //   `**`), and every character outside `*`/`?`/`**` a literal — bracket,
 //   brace, bang, and extglob characters included.
 // - Pattern resolution (SPEC 7): patterns resolve relative to the
-//   configuration file's directory (the workspace root). `.` and `..`
-//   segments resolve lexically (wildcard segments count as ordinary names);
-//   an absolute pattern, or one whose resolution escapes the root, is a
+//   configuration file's directory (the workspace root), and whether one
+//   lies outside the root is decided by its spelling alone — reading its
+//   `/`-separated segments from a depth of zero, `..` lowers the depth by
+//   one, `.`, an empty segment, and `**` leave it unchanged, and every other
+//   segment (a drive-qualified `C:` included) raises it by one; a pattern
+//   beginning with `/`, or whose depth ever falls below zero, is a
 //   configuration error (14.14) reported at load by every command as a usage
 //   error (12.0) — exit 2, message on stderr; with `--json` the single 12.7
 //   error document ({"error": …} carrying the stable code
 //   `configuration-error` and the concerned path in the anchoring form) is
-//   the entire stdout, and without it stdout stays empty.
+//   the entire stdout, and without it stdout stays empty. Every other
+//   pattern is inside the root and is matched exactly as spelled, never
+//   normalized: its `.`, `..`, and empty segments are literal segments no
+//   discovered path carries (7), so they match nothing.
 // - Discovery pipeline order (SPEC 7, 13.4): walk plain files (symbolic links
 //   never discovered, never traversed — so link cycles cannot hang the walk),
 //   match the spec groups' globs and the code groups' globs — one matcher,
@@ -98,6 +111,11 @@
 //   workspace-relative path (UTF-8 byte comparison, not code-unit order), IDs
 //   within a file in document order; `--json` emits the single JSON document
 //   as the entire stdout (12.0).
+// - `inventory` (11.6): the full 12.7 inventory document — anchoring, the
+//   resolved configuration view with every glob exactly as configured, the
+//   discovered sources with their group memberships, the derived-file map,
+//   the (empty) record, the graph-data area, the journal's occupancy, and
+//   the (empty) session list — parsing no source and writing nothing.
 // - `query edges [--from <graph-node>]` (11.1): JSON-only — the single edge
 //   enumeration `{"edges": [{"from", "to", "kind"}, …]}` is the entire
 //   stdout with or without `--json`, and so is the 12.7 error document on
@@ -477,6 +495,21 @@ class LiteralParser {
  * pattern, or one resolving outside the workspace root, is a configuration
  * error (14.14) — reported at load, before any source analysis.
  */
+/**
+ * Validate one configured glob (SPEC 7): a non-empty string, kept exactly
+ * as spelled — never normalized. Whether it lies outside the workspace root
+ * is decided by its spelling alone: reading its `/`-separated segments in
+ * order from a depth of zero, a `..` segment lowers the depth by one; a `.`
+ * segment, an empty segment (a doubled or trailing `/`), and a `**` segment
+ * (which may match no segment at all) leave it unchanged; every other
+ * segment — a drive-qualified spelling such as `C:` included — raises it by
+ * one. A glob beginning with `/`, or whose depth ever falls below zero, is
+ * outside the root, a configuration error (14.14); every other glob is
+ * inside, its `.`, `..`, and empty segments matching nothing — they are
+ * literal segments no discovered path carries (7: a discovered file's
+ * workspace-relative path is the directory-entry names descending from the
+ * root), so the unnormalized spelling matches exactly what 7 says it does.
+ */
 function validatedPattern(glob, groupName) {
   if (typeof glob !== "string" || glob === "") {
     throw new UsageError(
@@ -485,16 +518,23 @@ function validatedPattern(glob, groupName) {
   }
   if (glob.startsWith("/")) {
     throw new UsageError(
-      `configuration error: pattern ${glob} is absolute and resolves outside the workspace root (SPEC 7, 14.14)`,
+      `configuration error: pattern ${glob} begins with "/" and lies outside the workspace root (SPEC 7, 14.14)`,
     );
   }
-  const normalized = path.posix.normalize(glob);
-  if (normalized === ".." || normalized.startsWith("../")) {
-    throw new UsageError(
-      `configuration error: pattern ${glob} resolves outside the workspace root (SPEC 7, 14.14)`,
-    );
+  let depth = 0;
+  for (const segment of glob.split("/")) {
+    if (segment === "..") {
+      depth -= 1;
+      if (depth < 0) {
+        throw new UsageError(
+          `configuration error: pattern ${glob} lies outside the workspace root — its depth falls below zero at a ".." segment (SPEC 7, 14.14)`,
+        );
+      }
+    } else if (segment !== "." && segment !== "" && segment !== "**") {
+      depth += 1;
+    }
   }
-  return normalized;
+  return glob;
 }
 
 /**
@@ -613,7 +653,13 @@ async function parseAndValidateConfig(configPath) {
     }
     emit = markdown.emit;
   }
-  return { root: path.dirname(configPath), groups, codeGroups, emit };
+  return {
+    root: path.dirname(configPath),
+    configPath,
+    groups,
+    codeGroups,
+    emit,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1118,9 +1164,11 @@ async function discoverSources(config) {
     message: `invalid source path: the discovered path ${JSON.stringify(rel)} contains "#" (SPEC 7, 1.5, 14.19)`,
     file: rel,
   });
+  const keptSpec = kept(specMatched);
+  const keptCode = kept(codeMatched);
   /** @type {string[]} */
   const sources = [];
-  for (const rel of kept(specMatched)) {
+  for (const rel of keptSpec) {
     if (rel.includes("#")) {
       findings.push(hashFinding(rel));
       continue;
@@ -1137,14 +1185,16 @@ async function discoverSources(config) {
   }
   /** @type {string[]} */
   const codeSources = [];
-  for (const rel of kept(codeMatched)) {
+  for (const rel of keptCode) {
     if (rel.includes("#")) {
       findings.push(hashFinding(rel));
       continue;
     }
     codeSources.push(rel);
   }
-  return { sources, codeSources, findings };
+  // `keptSpec`/`keptCode`: every surviving match of each kind, the 14.19
+  // paths included — the discovered set the inventory lists (11.6).
+  return { sources, codeSources, findings, keptSpec, keptCode };
 }
 
 // ---------------------------------------------------------------------------
@@ -1710,6 +1760,122 @@ async function commandIds(io, cwd, argv) {
   return 0;
 }
 
+// The graph-data area and its durable paths (SPEC 13.3, 6.1, 10.1), reported
+// by `inventory` (11.6); this conformer never writes under the area.
+const GRAPH_DATA_AREA = ".xspec";
+const JOURNAL_PATH = ".xspec/journal";
+const SESSION_DIRECTORY = ".xspec/reviews";
+
+/**
+ * Whether the workspace-relative `rel` is occupied by anything at all:
+ * presence alone, whatever occupies it (SPEC 11.6). ENOENT and ENOTDIR — a
+ * path below an area path holding no directory (13.4) — alike mean nothing
+ * is there.
+ */
+async function occupiedUnderRoot(rootAbs, rel) {
+  try {
+    await fsp.lstat(path.join(rootAbs, ...rel.split("/")));
+    return true;
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR") return false;
+    throw error;
+  }
+}
+
+/**
+ * `xspec inventory` (SPEC 11.6, scoped): the machine-readable shape of the
+ * workspace in the full 12.7 document form — the anchoring (root and
+ * configuration file relative to the working directory), the resolved
+ * configuration view (groups with their globs exactly as configured, the
+ * emission state, and the empty coverage and policy lists), every discovered
+ * source with its group memberships in configuration order, the derived-file
+ * map (the module `X.xspec.ts` and, while emission is enabled, `X.md` beside
+ * each `.mdx` spec source; both structurally absent for a spec-group file
+ * without the extension, 14.19/13.1), the recorded derived paths, the
+ * graph-data area, the journal's occupancy, and the session files. It parses
+ * no source, so it answers whatever the sources' validity — configuration
+ * errors keep their precedence (14.14) — and it writes nothing. This
+ * conformer keeps no graph data, so the record is empty (11.6: empty
+ * wherever none exists) and no 14.23 arises; review sessions are outside the
+ * scope, so a present session directory is refused loudly, never answered.
+ */
+async function commandInventory(io, cwd, argv) {
+  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
+  const config = await loadConfig(cwd, flags["--config"]);
+  const discovery = await discoverSources(config);
+  const groupView = (map) =>
+    Object.entries(map).map(([name, globs]) => ({ name, globs: [...globs] }));
+  const memberships = (rel) => {
+    const groups = [];
+    for (const [kind, map] of [
+      ["spec", config.groups],
+      ["code", config.codeGroups],
+    ]) {
+      for (const [name, globs] of Object.entries(map)) {
+        if (globs.some((pattern) => globMatches(pattern, rel))) {
+          groups.push({ kind, name });
+        }
+      }
+    }
+    return groups;
+  };
+  const discovered = [
+    ...new Set([...discovery.keptSpec, ...discovery.keptCode]),
+  ].sort(compareUtf8);
+  const sources = discovered.map((rel) => ({
+    path: rel,
+    groups: memberships(rel),
+  }));
+  const derived = [...discovery.keptSpec].sort(compareUtf8).map((rel) => {
+    if (!rel.endsWith(".mdx")) {
+      return { source: rel, module: null, markdown: null };
+    }
+    const stem = rel.slice(0, -".mdx".length);
+    return {
+      source: rel,
+      module: stem + ".xspec.ts",
+      markdown: config.emit ? stem + ".md" : null,
+    };
+  });
+  if (await occupiedUnderRoot(config.root, SESSION_DIRECTORY)) {
+    throw new ScopeError(
+      `a review-session directory (${SESSION_DIRECTORY}) is present: review sessions are outside this fixture's scope (CERTIFICATIONS.md §CONF-DISC; SPEC 10.1, 11.6)`,
+    );
+  }
+  const doc = {
+    findings: [],
+    root: anchoringPath(cwd, config.root),
+    config: anchoringPath(cwd, config.configPath),
+    configuration: {
+      specs: groupView(config.groups),
+      code: groupView(config.codeGroups),
+      markdown: { emit: config.emit, outDir: null },
+      coverage: [],
+      policy: [],
+    },
+    sources,
+    derived,
+    recorded: [],
+    graphData: GRAPH_DATA_AREA,
+    journal: {
+      path: JOURNAL_PATH,
+      occupied: await occupiedUnderRoot(config.root, JOURNAL_PATH),
+    },
+    sessions: [],
+  };
+  if (flags["--json"]) {
+    io.stdout(canonicalJson(doc) + "\n");
+  } else {
+    const lines = [`root: ${doc.root}`, `config: ${doc.config}`];
+    for (const entry of sources) {
+      const groups = entry.groups.map((g) => `${g.kind}:${g.name}`).join(", ");
+      lines.push(`${entry.path} [${groups}]`);
+    }
+    io.stdout(lines.map((line) => line + "\n").join(""));
+  }
+  return 0;
+}
+
 const QUERY_FLAGS = {
   "--from": "value",
   "--to": "value",
@@ -1888,11 +2054,13 @@ async function dispatchCommand(io, cwd, argv) {
         return await commandBuild(io, cwd, rest);
       case "ids":
         return await commandIds(io, cwd, rest);
+      case "inventory":
+        return await commandInventory(io, cwd, rest);
       case "query":
         return await commandQuery(io, cwd, rest);
       default:
         throw new UsageError(
-          `unknown command ${String(command)} (SPEC 12.0; this fixture's surface is build, ids, and query edges, CERTIFICATIONS.md §CONF-DISC)`,
+          `unknown command ${String(command)} (SPEC 12.0; this fixture's surface is build, ids, inventory, and query edges, CERTIFICATIONS.md §CONF-DISC)`,
         );
     }
   } catch (error) {
