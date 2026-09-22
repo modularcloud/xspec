@@ -37,9 +37,19 @@
 //   U+2028 — the separator staying content, since SPEC 3 removes a
 //   declaration's own characters alone; `<S>`/`<Spec>`
 //   opening/closing/self-closing tags with the 2.7 prop set (quoted `id`,
-//   `coverage`, `tags`; quote-aware braced `d`), MDX comments (single- and
-//   multi-line), and `{text(...)}` embeddings with local (string) or external
-//   (property chain) arguments. Deliberately no stock MDX parser: a committed
+//   `coverage`, `tags`; quote-aware braced `d`), and expression containers
+//   judged as 14.20's accepting side fixes them for the scope's forms: once
+//   ECMAScript's whitespace, line terminators, and comments are deleted — a
+//   brace on a commented-out line closing nothing, so the run-on `{// c}`
+//   form runs on to a later `}` — nothing left is an MDX comment (`{/* … */}`
+//   single- and multi-line, `{}`, block-comment sequences, line-comment
+//   containers ended by U+000A or U+000D, ECMAScript-only whitespace between
+//   the braces; T2.7-4's positive forms) and exactly one `text(...)` call
+//   with local (string) or external (property chain) argument is an
+//   embedding whatever whitespace and comments stand beside the call
+//   (T2.3-3's positive forms), replaced whole; and JavaScript comments beside
+//   an import in its ESM block are content (T3-7). Deliberately no stock MDX
+//   parser: a committed
 //   SUITE-11 fixture once staged a shape remark-mdx cannot parse — an opening
 //   tag with trailing same-line content whose closing tag sat alone on a
 //   later line (T3-1's `gamma`, since restaged under S-9 to close within its
@@ -715,8 +725,6 @@ function isEcmascriptWhitespaceCode(code) {
   );
 }
 
-const EMBED_OPEN_RE = /^\{[ \t]*text[ \t]*\(/;
-
 /**
  * The Markdown literal regions of a source — fenced code blocks and inline
  * code spans — as sorted, disjoint `{ start, end }` string-index ranges
@@ -836,6 +844,144 @@ function markdownLiteralRegions(text) {
  * pieces, failure } where `failure` is null or { at, message } (an
  * unparseable source, SPEC 14.20 — masking the conditions inside).
  */
+/**
+ * ECMAScript's trivia between braces and within an ESM block — WhiteSpace,
+ * LineTerminator, and comments, the characters 14.20's judgement deletes:
+ * skip from `from` and report where the next token would begin, whether a
+ * LineTerminator lay among the skipped characters (outside a comment, or a
+ * block comment spanning one — ECMAScript's syntactic grammar treats such a
+ * comment as a LineTerminator, automatic semicolon insertion included), and,
+ * when a block comment lacks its `*` `/` or a line comment runs to the end
+ * of the text, the unterminated comment's start. A line comment runs through
+ * the first U+000A or U+000D — the deletion judgement of 14.20 — U+2028 and
+ * U+2029 notwithstanding: no form staged in scope spells either inside a
+ * line comment (T2.7-4's negative arms lie outside §CONF-MD), so the lexical
+ * grammar's own brace-token check on the undeleted content stays dormant.
+ */
+function skipEcmascriptTrivia(text, from) {
+  let j = from;
+  let sawTerminator = false;
+  while (j < text.length) {
+    const code = text.charCodeAt(j);
+    if (ECMASCRIPT_LINE_TERMINATOR_CODE_POINTS.has(code)) {
+      sawTerminator = true;
+      j += 1;
+      continue;
+    }
+    if (isEcmascriptWhitespaceCode(code)) {
+      j += 1;
+      continue;
+    }
+    if (text.startsWith("/*", j)) {
+      const end = text.indexOf("*/", j + 2);
+      if (end === -1) {
+        return { at: j, sawTerminator, unterminated: "block comment" };
+      }
+      for (let k = j + 2; k < end; k += 1) {
+        if (ECMASCRIPT_LINE_TERMINATOR_CODE_POINTS.has(text.charCodeAt(k))) {
+          sawTerminator = true;
+          break;
+        }
+      }
+      j = end + 2;
+      continue;
+    }
+    if (text.startsWith("//", j)) {
+      let k = j + 2;
+      while (
+        k < text.length &&
+        text.charCodeAt(k) !== 0x000a &&
+        text.charCodeAt(k) !== 0x000d
+      ) {
+        k += 1;
+      }
+      if (k >= text.length) {
+        return { at: j, sawTerminator, unterminated: "line comment" };
+      }
+      j = k; // the terminator itself is skipped on the next round
+      continue;
+    }
+    break;
+  }
+  return { at: j, sawTerminator, unterminated: null };
+}
+
+const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*/;
+
+/**
+ * The expression container opening at `i` (`text[i] === "{"`), judged as
+ * 14.20's accepting side fixes it for the forms in scope (2.7, 2.3): once
+ * ECMAScript's whitespace, line terminators, and comments are deleted from
+ * the content between the braces — a brace on a commented-out line closing
+ * nothing, so the run-on `{// c}` form runs on to a later `}` — what remains
+ * is either nothing (an MDX comment: the usual block-comment form, `{}`, a
+ * block-comment sequence, a line-comment container, ECMAScript-only
+ * whitespace between the braces) or exactly one `text(...)` call with
+ * whitespace and comments
+ * alone beside it (an embedding, replaced whole). Returns the container's
+ * end and kind (the embedding's parsed reference with it), a failure for an
+ * unterminated comment or a line comment reaching the end of the text (the
+ * container never closes: 14.20), or null when the content is anything else
+ * — outside the fixture's scope, left as content exactly as a stray brace
+ * is.
+ */
+function scanExpressionContainer(text, i) {
+  const failure = (trivia) => ({
+    failure: {
+      at: trivia.at,
+      message: `unterminated ${trivia.unterminated} in an expression container`,
+    },
+  });
+  const lead = skipEcmascriptTrivia(text, i + 1);
+  if (lead.unterminated !== null) return failure(lead);
+  let j = lead.at;
+  if (text[j] === "}") return { kind: "comment", end: j + 1 };
+  if (!text.startsWith("text", j)) return null;
+  j = skipEcmascriptTrivia(text, j + 4).at;
+  if (text[j] !== "(") return null;
+  j = skipEcmascriptTrivia(text, j + 1).at;
+  let ref;
+  const q = text[j];
+  if (q === '"' || q === "'") {
+    const end = text.indexOf(q, j + 1);
+    if (end === -1) return null;
+    ref = { form: "local", id: text.slice(j + 1, end) };
+    j = end + 1;
+  } else {
+    const ident = IDENTIFIER_RE.exec(text.slice(j));
+    if (!ident) return null;
+    const binding = ident[0];
+    j += binding.length;
+    const segments = [];
+    for (;;) {
+      if (text[j] === ".") {
+        const seg = IDENTIFIER_RE.exec(text.slice(j + 1));
+        if (!seg) return null;
+        segments.push(seg[0]);
+        j += 1 + seg[0].length;
+        continue;
+      }
+      if (text[j] === "[") {
+        const qq = text[j + 1];
+        if (qq !== '"' && qq !== "'") return null;
+        const end = text.indexOf(qq, j + 2);
+        if (end === -1 || text[end + 1] !== "]") return null;
+        segments.push(text.slice(j + 2, end));
+        j = end + 2;
+        continue;
+      }
+      break;
+    }
+    ref = { form: "external", binding, segments };
+  }
+  j = skipEcmascriptTrivia(text, j).at;
+  if (text[j] !== ")") return null;
+  const trail = skipEcmascriptTrivia(text, j + 1);
+  if (trail.unterminated !== null) return failure(trail);
+  if (text[trail.at] !== "}") return null;
+  return { kind: "embed", end: trail.at + 1, ref };
+}
+
 function parseMdx(text) {
   const root = {
     isRoot: true,
@@ -862,28 +1008,27 @@ function parseMdx(text) {
   const literalRegions = markdownLiteralRegions(text);
   let regionIndex = 0;
   // The open ESM block (SPEC 14.20): the end of its last import declaration,
-  // or -1 when none is open. A block runs on through ECMAScript's WhiteSpace
-  // and LineTerminator code points alone — U+2028 and U+2029 beside LF and
-  // CR — and ECMAScript admits the next ImportDeclaration there when a
-  // LineTerminator lies between (automatic semicolon insertion) or the
-  // previous declaration spelled its `;`; any other character closes the
-  // block for good, so the backward scan costs each closed block once. The
-  // separator characters stay content: SPEC 3 removes a declaration's own
-  // characters alone (T3-3's ESM-block arm: the line left holding U+2028).
+  // or -1 when none is open. A block runs on through ECMAScript's trivia
+  // alone — WhiteSpace and LineTerminator code points (U+2028 and U+2029
+  // beside LF and CR) and JavaScript comments beside the declarations, `//`
+  // and `/* */` alike (T3-7) — and ECMAScript admits the next
+  // ImportDeclaration there when a LineTerminator lies between (automatic
+  // semicolon insertion) or the previous declaration spelled its `;`; any
+  // other character closes the block for good, so the scan costs each closed
+  // block once. The trivia stays content: SPEC 3 removes a declaration's own
+  // characters alone (T3-3's ESM-block arm: the line left holding U+2028;
+  // T3-7: `// note` after an import, an own-line `// note` between two
+  // imports, a block comment before one).
   let lastImportEnd = -1;
   const continuesEsmBlock = (at) => {
     if (lastImportEnd === -1) return false;
-    let sawTerminator = false;
-    for (let k = at - 1; k >= lastImportEnd; k -= 1) {
-      const code = text.charCodeAt(k);
-      if (ECMASCRIPT_LINE_TERMINATOR_CODE_POINTS.has(code)) {
-        sawTerminator = true;
-      } else if (!isEcmascriptWhitespaceCode(code)) {
-        lastImportEnd = -1;
-        return false;
-      }
+    const trivia = skipEcmascriptTrivia(text, lastImportEnd);
+    if (trivia.unterminated !== null || trivia.at < at) {
+      lastImportEnd = -1; // a token (or a broken comment) closed the block
+      return false;
     }
-    return sawTerminator || text[lastImportEnd - 1] === ";";
+    if (trivia.at > at) return false; // `at` lies inside a comment
+    return trivia.sawTerminator || text[lastImportEnd - 1] === ";";
   };
 
   const flushContent = (end) => {
@@ -1074,100 +1219,30 @@ function parseMdx(text) {
       continue;
     }
     if (ch === "{") {
-      if (text.startsWith("{/*", i)) {
-        const end = text.indexOf("*/}", i + 3);
-        if (end === -1) {
-          fail20(i, "unterminated MDX comment");
-          return result();
-        }
-        flushContent(i);
-        pieces.push({ kind: "removal", text: text.slice(i, end + 3) });
-        i = end + 3;
-        contentStart = i;
+      const container = scanExpressionContainer(text, i);
+      if (container === null) {
+        i += 1; // a stray `{` is ordinary content in this scope
         continue;
       }
-      const embedMatch = EMBED_OPEN_RE.exec(text.slice(i));
-      if (embedMatch) {
-        let j = i + embedMatch[0].length;
-        const skipWs = () => {
-          while (j < text.length && TAG_WHITESPACE.has(text[j])) j += 1;
-        };
-        skipWs();
-        let ref;
-        const q = text[j];
-        if (q === '"' || q === "'") {
-          const end = text.indexOf(q, j + 1);
-          if (end === -1) {
-            fail20(j, "unterminated text(...) string argument");
-            return result();
-          }
-          ref = { form: "local", id: text.slice(j + 1, end) };
-          j = end + 1;
-        } else {
-          const ident = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(text.slice(j));
-          if (!ident) {
-            fail20(j, "malformed text(...) argument");
-            return result();
-          }
-          const binding = ident[0];
-          j += binding.length;
-          const segments = [];
-          for (;;) {
-            if (text[j] === ".") {
-              const seg = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(text.slice(j + 1));
-              if (!seg) {
-                fail20(j, "malformed property chain in text(...)");
-                return result();
-              }
-              segments.push(seg[0]);
-              j += 1 + seg[0].length;
-              continue;
-            }
-            if (text[j] === "[") {
-              const qq = text[j + 1];
-              if (qq !== '"' && qq !== "'") {
-                fail20(j, "malformed computed access in text(...)");
-                return result();
-              }
-              const end = text.indexOf(qq, j + 2);
-              if (end === -1 || text[end + 1] !== "]") {
-                fail20(j, "malformed computed access in text(...)");
-                return result();
-              }
-              segments.push(text.slice(j + 2, end));
-              j = end + 2;
-              continue;
-            }
-            break;
-          }
-          ref = { form: "external", binding, segments };
-        }
-        skipWs();
-        if (text[j] !== ")") {
-          fail20(j, "text(...) takes exactly one argument");
-          return result();
-        }
-        j += 1;
-        skipWs();
-        if (text[j] !== "}") {
-          fail20(j, "unterminated text(...) expression container");
-          return result();
-        }
-        j += 1;
-        flushContent(i);
+      if (container.failure !== undefined) {
+        fail20(container.failure.at, container.failure.message);
+        return result();
+      }
+      flushContent(i);
+      if (container.kind === "comment") {
+        pieces.push({ kind: "removal", text: text.slice(i, container.end) });
+      } else {
         pieces.push({
           kind: "embed",
-          text: text.slice(i, j),
+          text: text.slice(i, container.end),
           owner: stack[stack.length - 1],
-          ref,
+          ref: container.ref,
           start: i,
           target: null,
         });
-        i = j;
-        contentStart = i;
-        continue;
       }
-      i += 1; // a stray `{` is ordinary content in this scope
+      i = container.end;
+      contentStart = i;
       continue;
     }
     i += 1;
