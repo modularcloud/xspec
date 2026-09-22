@@ -27,6 +27,10 @@
 //     ("path" present exactly when reachable)
 //   ids → { "files": [ { "file", "ids": [id...] } ] }
 //   ids --tree → { "files": [ { "file", "nodes": [ { "id", "children": [...] } ] } ] }
+//   "tags" on every node surface above is a 12.7 tag set — byte order,
+//   duplicates collapsed — decoded form-exact through forms.ts's decodeTagSet
+//   and never re-sorted here: the value forms are universal (H-3, T12.7-1;
+//   T2.6-1's `query node` tags, T12.4-1's `show`).
 
 import type {
   GraphEdge,
@@ -55,13 +59,12 @@ import {
   expectNonEmptyStringArray,
   expectObject,
   expectString,
-  expectStringArray,
   expectToken,
   forbiddenKey,
   optionalKey,
   requiredKey,
 } from "./decode.js";
-import { decodeRangeForm, documentRootSite } from "./forms.js";
+import { decodeRangeForm, decodeTagSet, documentRootSite } from "./forms.js";
 
 /**
  * Decode a source range (SPEC.md 1.7: zero-based byte offsets) in the
@@ -153,7 +156,7 @@ export function decodeNodeReport(doc: unknown, context?: string): NodeReport {
       at(site, "subtreeText"),
     ),
     hashes: decodeHashes(requiredKey(obj, "hashes", site), at(site, "hashes")),
-    tags: expectStringArray(requiredKey(obj, "tags", site), at(site, "tags")),
+    tags: decodeTagSet(requiredKey(obj, "tags", site), at(site, "tags")),
     coverage: decodeCoverage(obj, site),
     incomingEdges: decodeEdgeArray(
       requiredKey(edges, "incoming", edgesSite),
@@ -187,7 +190,7 @@ export function decodeNodeSummary(doc: unknown, context?: string): NodeSummary {
       requiredKey(obj, "identity", site),
       at(site, "identity"),
     ),
-    tags: expectStringArray(requiredKey(obj, "tags", site), at(site, "tags")),
+    tags: decodeTagSet(requiredKey(obj, "tags", site), at(site, "tags")),
   };
 }
 
@@ -216,7 +219,7 @@ export function decodeNodeMetadataSummary(
       requiredKey(obj, "identity", site),
       at(site, "identity"),
     ),
-    tags: expectStringArray(requiredKey(obj, "tags", site), at(site, "tags")),
+    tags: decodeTagSet(requiredKey(obj, "tags", site), at(site, "tags")),
     metadataHash: expectNonEmptyString(
       requiredKey(hashes, "metadataHash", hashesSite),
       at(hashesSite, "metadataHash"),
@@ -284,7 +287,7 @@ export function decodeNodeSummaryRowsReport(
           requiredKey(row, "identity", rowSite),
           at(rowSite, "identity"),
         ),
-        tags: expectStringArray(
+        tags: decodeTagSet(
           requiredKey(row, "tags", rowSite),
           at(rowSite, "tags"),
         ),
@@ -338,7 +341,7 @@ function decodeNodeRow(value: unknown, site: DecodeSite): NodeRow {
       requiredKey(obj, "sourceRange", site),
       at(site, "sourceRange"),
     ),
-    tags: expectStringArray(requiredKey(obj, "tags", site), at(site, "tags")),
+    tags: decodeTagSet(requiredKey(obj, "tags", site), at(site, "tags")),
     coverage: decodeCoverage(obj, site),
   };
 }

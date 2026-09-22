@@ -825,6 +825,15 @@ const DECODERS: readonly DecoderSpec[] = [
           expect(decoded.coverage).toBeUndefined();
         },
       },
+      {
+        // The 12.7 tag set is byte-ordered, never case-folded (T11.4-3's
+        // `tags="z A"` → ["A", "z"]): 0x5a sorts before 0x61.
+        label: "a tag set in byte order across cases (SPEC 12.7, 12.0)",
+        doc: put(GOOD_NODE, ["Zed", "auth"], "tags"),
+        verify: (decoded: ReturnType<typeof decodeNodeReport>) => {
+          expect(decoded.tags).toEqual(["Zed", "auth"]);
+        },
+      },
     ],
     bad: [
       { label: "missing identity", doc: omit(GOOD_NODE, "identity") },
@@ -866,6 +875,22 @@ const DECODERS: readonly DecoderSpec[] = [
       { label: "empty ownHash", doc: put(GOOD_NODE, "", "hashes", "ownHash") },
       { label: "missing tags", doc: omit(GOOD_NODE, "tags") },
       { label: "non-string tag", doc: put(GOOD_NODE, [3], "tags") },
+      {
+        label:
+          "tags out of byte order (12.7 tag-set form: byte order, never " +
+          "re-sorted by the harness, H-3)",
+        doc: put(GOOD_NODE, ["v2", "auth"], "tags"),
+      },
+      {
+        label: "a repeated tag (12.7 tag-set form: duplicates collapsed)",
+        doc: put(GOOD_NODE, ["auth", "auth"], "tags"),
+      },
+      {
+        label:
+          "tags in case-folded order (12.7: byte order, never case-folded — " +
+          "0x5a sorts before 0x61)",
+        doc: put(GOOD_NODE, ["auth", "Zed"], "tags"),
+      },
       {
         label: "wrong-typed coverage (must reject, not default to absent)",
         doc: put(GOOD_NODE, 42, "coverage"),
@@ -916,6 +941,22 @@ const DECODERS: readonly DecoderSpec[] = [
       { label: "empty identity", doc: put(GOOD_NODE, "", "identity") },
       { label: "missing tags", doc: omit(GOOD_NODE, "tags") },
       { label: "non-string tag", doc: put(GOOD_NODE, [3], "tags") },
+      {
+        label:
+          "tags out of byte order (12.7 tag-set form: byte order, never " +
+          "re-sorted by the harness, H-3)",
+        doc: put(GOOD_NODE, ["v2", "auth"], "tags"),
+      },
+      {
+        label: "a repeated tag (12.7 tag-set form: duplicates collapsed)",
+        doc: put(GOOD_NODE, ["auth", "auth"], "tags"),
+      },
+      {
+        label:
+          "tags in case-folded order (12.7: byte order, never case-folded — " +
+          "0x5a sorts before 0x61)",
+        doc: put(GOOD_NODE, ["auth", "Zed"], "tags"),
+      },
     ],
   },
   {
@@ -951,6 +992,22 @@ const DECODERS: readonly DecoderSpec[] = [
     bad: [
       { label: "missing identity", doc: omit(GOOD_NODE, "identity") },
       { label: "missing tags", doc: omit(GOOD_NODE, "tags") },
+      {
+        label:
+          "tags out of byte order (12.7 tag-set form: byte order, never " +
+          "re-sorted by the harness, H-3)",
+        doc: put(GOOD_NODE, ["v2", "auth"], "tags"),
+      },
+      {
+        label: "a repeated tag (12.7 tag-set form: duplicates collapsed)",
+        doc: put(GOOD_NODE, ["auth", "auth"], "tags"),
+      },
+      {
+        label:
+          "tags in case-folded order (12.7: byte order, never case-folded — " +
+          "0x5a sorts before 0x61)",
+        doc: put(GOOD_NODE, ["auth", "Zed"], "tags"),
+      },
       { label: "missing hashes", doc: omit(GOOD_NODE, "hashes") },
       {
         label: "missing metadataHash",
@@ -1032,6 +1089,22 @@ const DECODERS: readonly DecoderSpec[] = [
       },
       { label: "row missing tags", doc: omit(GOOD_ROWS, "nodes", 1, "tags") },
       {
+        label:
+          "tags out of byte order (12.7 tag-set form: byte order, never " +
+          "re-sorted by the harness, H-3)",
+        doc: put(GOOD_ROWS, ["v2", "auth"], "nodes", 0, "tags"),
+      },
+      {
+        label: "a repeated tag (12.7 tag-set form: duplicates collapsed)",
+        doc: put(GOOD_ROWS, ["auth", "auth"], "nodes", 0, "tags"),
+      },
+      {
+        label:
+          "tags in case-folded order (12.7: byte order, never case-folded — " +
+          "0x5a sorts before 0x61)",
+        doc: put(GOOD_ROWS, ["auth", "Zed"], "nodes", 0, "tags"),
+      },
+      {
         label: "row with a non-string tag",
         doc: put(GOOD_ROWS, [3], "nodes", 0, "tags"),
       },
@@ -1112,6 +1185,22 @@ const DECODERS: readonly DecoderSpec[] = [
         doc: put(GOOD_ROWS, [0, 120], "nodes", 1, "sourceRange"),
       },
       { label: "row missing tags", doc: omit(GOOD_ROWS, "nodes", 1, "tags") },
+      {
+        label:
+          "tags out of byte order (12.7 tag-set form: byte order, never " +
+          "re-sorted by the harness, H-3)",
+        doc: put(GOOD_ROWS, ["v2", "auth"], "nodes", 0, "tags"),
+      },
+      {
+        label: "a repeated tag (12.7 tag-set form: duplicates collapsed)",
+        doc: put(GOOD_ROWS, ["auth", "auth"], "nodes", 0, "tags"),
+      },
+      {
+        label:
+          "tags in case-folded order (12.7: byte order, never case-folded — " +
+          "0x5a sorts before 0x61)",
+        doc: put(GOOD_ROWS, ["auth", "Zed"], "nodes", 0, "tags"),
+      },
       {
         label: "row with wrong-typed coverage",
         doc: put(GOOD_ROWS, false, "nodes", 0, "coverage"),
@@ -2061,6 +2150,49 @@ const DECODERS: readonly DecoderSpec[] = [
         doc: put(GOOD_VIEW_FULL, "x", "views", 0, "root", "ownText"),
       },
       {
+        label:
+          "tags out of byte order (12.7 tag-set form: byte order, never " +
+          "re-sorted by the harness, H-3)",
+        doc: put(
+          GOOD_VIEW_FULL,
+          ["v2", "auth"],
+          "views",
+          0,
+          "root",
+          "children",
+          0,
+          "tags",
+        ),
+      },
+      {
+        label: "a repeated tag (12.7 tag-set form: duplicates collapsed)",
+        doc: put(
+          GOOD_VIEW_FULL,
+          ["auth", "auth"],
+          "views",
+          0,
+          "root",
+          "children",
+          0,
+          "tags",
+        ),
+      },
+      {
+        label:
+          "tags in case-folded order (12.7: byte order, never case-folded — " +
+          "0x5a sorts before 0x61)",
+        doc: put(
+          GOOD_VIEW_FULL,
+          ["auth", "Zed"],
+          "views",
+          0,
+          "root",
+          "children",
+          0,
+          "tags",
+        ),
+      },
+      {
         label: "node missing its identity member",
         doc: omit(GOOD_VIEW_FULL, "views", 0, "root", "identity"),
       },
@@ -2285,6 +2417,49 @@ const DECODERS: readonly DecoderSpec[] = [
           "text members absent under --text (12.7 conditional presence: " +
           "present exactly when the flag is given)",
         doc: structuredClone(GOOD_VIEW_FULL),
+      },
+      {
+        label:
+          "tags out of byte order (12.7 tag-set form: byte order, never " +
+          "re-sorted by the harness, H-3)",
+        doc: put(
+          GOOD_VIEW_FULL_TEXT,
+          ["v2", "auth"],
+          "views",
+          0,
+          "root",
+          "children",
+          0,
+          "tags",
+        ),
+      },
+      {
+        label: "a repeated tag (12.7 tag-set form: duplicates collapsed)",
+        doc: put(
+          GOOD_VIEW_FULL_TEXT,
+          ["auth", "auth"],
+          "views",
+          0,
+          "root",
+          "children",
+          0,
+          "tags",
+        ),
+      },
+      {
+        label:
+          "tags in case-folded order (12.7: byte order, never case-folded — " +
+          "0x5a sorts before 0x61)",
+        doc: put(
+          GOOD_VIEW_FULL_TEXT,
+          ["auth", "Zed"],
+          "views",
+          0,
+          "root",
+          "children",
+          0,
+          "tags",
+        ),
       },
       {
         label: "node missing its subtreeText under --text",

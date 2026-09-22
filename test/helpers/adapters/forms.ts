@@ -803,13 +803,18 @@ function decodeKindSet(value: unknown, site: DecodeSite): DependencyEdgeKind[] {
 }
 
 /**
- * A tag set member (a profile's `targetTags`, a selector's `tags`) in SPEC
- * 12.7's value form: an array of tag strings in byte order (12.0),
- * duplicates collapsed — strictly ascending UTF-8 byte order (7.4/7.5 read
- * the configured list as a set; 11.6 reports tag sets in their value
- * forms). A tag out of that order, or repeated, is a form failure (H-3).
+ * A tag set in SPEC 12.7's value form — a node's interpreted tags (2.6,
+ * 11.2: a `view` node's `tags` and the `tags` of `query node`, `query
+ * nodes`, and `show`), a profile's `targetTags`, a selector's `tags` (7.4,
+ * 7.5): an array of tag strings in byte order (12.0), duplicates collapsed —
+ * strictly ascending UTF-8 byte order, never case-folded, `[]` for a tagless
+ * section. 12.7's value forms bind every JSON output (H-3, T12.7-1), so the
+ * datum is decoded as the product emits it and never re-sorted or
+ * de-duplicated on the way to an assertion: a tag out of that order, or
+ * repeated, is a form failure — a diagnosed product failure (T2.6-1,
+ * T11.4-3).
  */
-function decodeTagSet(value: unknown, site: DecodeSite): string[] {
+export function decodeTagSet(value: unknown, site: DecodeSite): string[] {
   const tags = expectNonEmptyStringArray(value, site);
   for (let i = 1; i < tags.length; i += 1) {
     if (
@@ -1799,14 +1804,9 @@ function enterViewNode(
     }
   }
 
-  const tagsDatum = decodeDatum(
-    obj["tags"],
-    at(site, "tags"),
-    (tagsValue, tagsSite) =>
-      expectArray(tagsValue, tagsSite).map((element, index) =>
-        expectNonEmptyString(element, at(tagsSite, index)),
-      ),
-  );
+  // The plain state is the 12.7 tag set — byte order, duplicates collapsed
+  // (T11.4-3's form arms) — never a bare string array re-sorted later.
+  const tagsDatum = decodeDatum(obj["tags"], at(site, "tags"), decodeTagSet);
   const coverageDatum = decodeDatum(
     obj["coverage"],
     at(site, "coverage"),
