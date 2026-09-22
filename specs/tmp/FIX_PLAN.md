@@ -42,3 +42,108 @@
 - Cites: TEST-SPEC §17 S-6 (the section-move oracle's fixed vectors), T6.2-3, T6.2-4; SPEC 6.2, 5.6. Finding C-5. Depends on Tasks 1, 5.
 - Change: in `test/self/s6-section-move-oracle.test.ts` (today: one worked-case vector `impureRoom` → `impureHall`, the clean-boundary case, T6.2-4 with its contrast) add every vector S-6 enumerates: 6.2's worked straddling-line shape in T6.2-3's three stagings — (a) spaces before its closing tag, (b) the both-sided U+000B/U+000C spelling, (c) the `body</S>` variant with such a remainder — each moved to top level and into a flow-position parent; T6.2-3's clean-boundary case; T6.2-4's pinned final-position shapes and its `changed` twin; T6.2-3's sibling stagings (d) origin `p.s` `changed` and (e) destination `p.s` `changed`. Derive each expected category set by hand from SPEC 6.2/5.6 in the vector (no product involved) and run each vector's composed documents (before and after) through `deriveMdx` inside the test (S-9: the form vectors derive). Fix any oracle defect the vectors expose.
 - Verify: self project green.
+
+### Task 7 — T6.2-3: the three stagings at two positions and the sibling stagings
+- Cites: TEST-SPEC T6.2-3 (rewritten over be65052…d9e986c; the U+000B/U+000C pin at 743cae8); SPEC 6.2, 5.6, 3. Finding A-16 (remainder). Depends on Tasks 2, 3, 6 (the S-6 vectors give the hand-derived expectations).
+- Change: in `test/suite/registry/section-6.2.ts` extend T6.2-3 beyond the restaged worked arm: staging (a) two spaces before the closing tag, (b) the both-sided U+000C/U+000B spelling, (c) `body</S>` with a U+000C/U+000B remainder — each moved both to top level and into a flow-position parent (today only `Hall.mdx#tp.imp` is used) — plus the sibling stagings (d) origin `p.s` `changed` and (e) destination `p.s` `changed`; assert everything the entry pins per arm (own text and ownHash via `query node` before and after, the `changed`/`descendant-changed`/`upstream-changed` sets with the two-sided tolerance the entry documents, byte-asserted files where the entry says, `check` clean). Build U+000B/U+000C from code points; every staged source is declared well-formed (the default), so the builder's S-9 check is the derivability evidence.
+- Verify: `-t 'T6.2-3 '` against the built product runs without harness error; self project green.
+
+### Task 8 — T6.2-4: the pinned final-position shapes and the `changed` twin
+- Cites: TEST-SPEC T6.2-4 (rewritten); SPEC 6.2, 5.6. Finding A-17. Depends on Task 3.
+- Change: `section-6.2.ts` `P4_SOURCE` (~L1279) stages a different last-child shape (blank lines, `coverage`/`tags`); the text pins two shapes — `<S id="p">`, U+000A, `<S id="p.m">`, U+000A, `y`, U+000A, `</S>`, U+000A, `</S>`, U+000A and T6.5-13(f)'s top-level shape (`<S id="a">x</S>`, U+000A, `<S id="m">`, U+000A, `y`, U+000A, `</S>` with no final terminator) — plus the `changed` twin `foo <S id="p">`, U+000A, `<S id="p.m">x</S></S> baz` (`p` `changed`, the moved node no category). Stage all three with the category and byte assertions the entry states; keep the former shape only if the entry still covers it.
+- Verify: as Task 7 (`-t 'T6.2-4 '`).
+
+### Task 9 — Per-draw derivability in the property runner; the P-2/P-3/P-5 form vectors under S-9
+- Cites: TEST-SPEC §16 preamble ("each draw is checked the same way before the product is driven on it, a failing draw reported as a harness error with its seed (H-10, H-11's rule), never as a product failure and never as a draw to skip"), §17 S-9 ("every form P-2, P-3, and P-5's generators compose … in the fixed vector set of those forms and, at property time, in each draw"), H-10. Findings B-7, C-1 (vectors part). Depends on Tasks 1, 3.
+- Change: (1) `test/helpers/property.ts` (phases "generating" and "running", ~L396–418): add a "checking" phase between them for every property whose generator composes MDX (at least P-2, P-3, P-5 in `section-16-p2-p3.ts` and `section-16-p5-p6.ts`; any other generator staging MDX too): each draw's MDX sources go through `deriveMdx` before the product is driven; a non-deriving draw is a harness error carrying the seed in the H-10 spelling — never a product failure, never a skipped draw. The builder's staging-time check (Task 3) must also attribute the seed when it fires inside a property run (catch `HarnessStagingError` in the runner and rethrow with the seed). (2) Add each generator's fixed form-vector set — the enumerated forms it can compose, not draws — as an exported constant of the generator module, and assert in `s9-fixture-well-formedness.test.ts` that every vector derives. (3) Replace p5-p6's one-time "implementation-time probe" note (~L55) with the live check.
+- Verify: self project green; `-t 'P-2 '`, `-t 'P-3 '`, `-t 'P-5 '` run without harness errors at the fixed seeds and under `XSPEC_PROPERTY_SEED=random`.
+
+### Task 10 — P-5 draw space: T6.2-3's multi-line in-line shapes, U+000B/U+000C, the leading empty line
+- Cites: TEST-SPEC §16 P-5 and its preamble staging constraint ("P-5 draws a multi-line in-line section for a move only in the shapes T6.2-3 stages — its boundary lines agreeing, both flow-position or both text-position at the destination, never the one-sided spellings 6.2 and 6.5 refuse"; every generated spec source begins with an empty line). Finding B-10 (draw-space part). Depends on Tasks 5, 9.
+- Change: in `section-16-p5-p6.ts` (moved-section layouts ~L920–1034: `flow | inline (single-line) | collapse | selfClose`) add draws of a multi-line in-line moved section in T6.2-3's three stagings with agreeing boundary lines, U+000B/U+000C prose remainders and leads (built from code points; none occurs in the file today), and make the generator guarantee — and assert in its own self-check — that every generated spec source begins with an empty line (the line-start admissible offset the import-addition placement relies on). Extend the oracle expectations through Task 5's refined `changed` set; the per-draw check (Task 9) stays green over the widened space.
+- Verify: `-t 'P-5 '` without harness errors at the default seeds and several random seeds; self project green.
+
+### Task 11 — P-2 generator: the refined comment, whitespace, and embedding forms (CONF-MD re-certified)
+- Cites: TEST-SPEC §16 P-2 (refined forms: T3-7's ESM-block comments, T2.7-4's comment and brace classes, T2.3-3's embedding forms); SPEC 3, 2.7, 2.3. Finding B-8. Depends on Task 9.
+- Change: in `section-16-p2-p3.ts` (comments generated ~L724–800 are `{/* … */}` single-/multi-line and own-line comment lines only) add: ESM blocks carrying JavaScript comments beside their imports (T3-7); the `{}` form; block-comment sequences; line-comment containers and the run-on `{// c}` form (T2.7-4); ECMAScript-only whitespace (U+00A0, U+FEFF, U+2028, U+2029) between braces; embeddings with whitespace and comments beside the call — block comments before/after, a line comment before, the run-on `{// c}` form holding the call (T2.3-3). Keep the markdown oracle (`test/helpers/oracles/markdown.ts`) in step with SPEC 3 over the new forms, adding S-6 markdown vectors for each; add the forms to P-2's S-9 vector set (Task 9). P-2 is in CONF-MD's scope: the conformer must pass P-2 over the widened space and VIOL-MD-CLASS/VIOL-MD-CR must still fail it — extend `test/fixtures/conf-md/` only where the conformer's accepting-side lexer does not yet handle a new form (it must conform to SPEC 3 for it), re-certifying in this task.
+- Verify: self project green (certification report: CONF-MD PASS on P-2, the two violators FAIL on P-2); `-t 'P-2 '` no harness errors.
+
+### Task 12 — P-8 mutation menu: fragment, brace-content, and ESM-block classes
+- Cites: TEST-SPEC §16 P-8 (refined mutation classes); SPEC 2.7, 14.20. Finding B-9. Depends on Task 3.
+- Change: `section-16-p8.ts` (menu ~L28–65: splice, invalidUtf8, bom, terminators, nesting, truncate, shuffle, garbage) gains: a fragment class (`<>…</>` insertion/unbalancing); brace-content mutations at the comment/expression/parse-failure boundaries of 2.7 and 14.20 (comment ↔ expression, expression → ill-formed, spread comma forms, empty braces, unbalanced braces at EOF); ESM-block mutations (comment insertion, terminator changes, indentation, splitting/joining blocks, a statement at a line start). Mutated documents are staged `unchecked` (Task 3). The property's invariants stay as the entry states (no crash, diagnosed findings, exit codes, the well-formedness boundary of T14-12).
+- Verify: `-t 'P-8 '` no harness errors at fixed and random seeds; self project green.
+
+### Task 13 — T1.6-5: assert the 14.20 finding's offset
+- Cites: TEST-SPEC T1.6-5; T14-11's rule (the byte length of the longest well-formed UTF-8 prefix; 0 for a BOM); SPEC 14.20, 1.7. Finding A-18. Depends on Task 3.
+- Change: `assertUnparseableFinding` (`test/suite/registry/section-1.6-1.7.ts` ~L981–1012) checks only condition 14.20 and the file; assert the location offset per arm, precomputed from the staged bytes (declared `mdx.unparseable`).
+- Verify: `-t 'T1.6-5 '` no harness error; self project green.
+
+### Task 14 — T1.7-2: the further source-range forms
+- Cites: TEST-SPEC T1.7-2 "Further forms"; SPEC 1.7, 4.6. Finding A-19.
+- Change: add arms for the constructor unit; decorated class/member (range from the first `@`); export exclusion (`export @dec class`, `@dec export class`, `export   function f` with multiple spaces); the `default` unit forms (`export default () => {};` through `;`, `export default function () {}`, `@dec export default class {}`); legacy `module A.B`; and the declaration-file whole-file range (`section-4.6.ts` ~L976 defers it to T1.7-2, where no `.d.ts` staging exists — stage one). Assert through the surfaces the entry names with precomputed offsets.
+- Verify: `-t 'T1.7-2 '` no harness error; self project green.
+
+### Task 15 — T2.1-3's separate-blocks arm; T2.1-6 registration
+- Cites: TEST-SPEC T2.1-3 (duplicate identifier across separate ESM blocks); T2.1-6 (an ESM block inside a section derives — 14.20 not reported; T6.5-17's positive observation); SPEC 2.1, 14.20, 3. Findings A-20, A-1. Depends on Task 3.
+- Change: `section-2.1.ts`: beside `DUP_BINDING_SOURCE` (~L538, the single-block consecutive-lines form, which now names the `duplicate-import-binding` allowance) add the separate-blocks arm (two ESM blocks each binding the identifier; derives without an allowance) with the entry's findings; register T2.1-6 per its entry (a blank-line-separated ESM block inside `<S id="m">` … `</S>`: `build` exit 0, the binding usable in the section, the block's lines dropping from Markdown per 3, the entry's other observations); traceability keys for T2.1-6.
+- Verify: `-t 'T2.1-3 '`, `-t 'T2.1-6 '` no harness error; self project green.
+
+### Task 16 — T2.3-3 registration: the embedding form
+- Cites: TEST-SPEC T2.3-3 (positive comment/whitespace arms around the call, the run-on form, negative 14.16 arms, the `{text("a") text("b")}` 14.20 arm, `view --text` classification); SPEC 2.3, 2.7, 14.16, 14.20. Finding A-2. Depends on Task 3.
+- Change: register T2.3-3 in `test/suite/registry/section-2.2-2.3.ts` (or a new `section-2.3.ts` module with wrapper and index entry) per its entry: each positive arm's embedding recognized (edges/occurrences as the entry states, Markdown per 3), the run-on `{// c` U+000A `text("a")}` form, the negative 14.16 arms at their ranges, the `{text("a") text("b")}` arm as 14.20 at the offset T14-11's rule gives (precompute from the parser's position via `deriveMdx` at authoring time; Task 46 re-asserts it in T14-11), and `view --text` classification; declare the 14.20 staging `mdx.unparseable`; traceability keys.
+- Verify: `-t 'T2.3-3 '` no harness error; self project green.
+
+### Task 17 — T2.4-2: TypeScript-only forms as 14.20 at pinned offsets; `d={BASE.a<X>y}`
+- Cites: TEST-SPEC T2.4-2 (rewritten: non-null and `as` forms in a spec source are 14.20 alone at precomputed zero-length offsets — the closing brace / the closing parenthesis / the offset of `as`; `d={BASE.a<X>y}` is 14.8 at the whole expression); SPEC 2.4, 14.8, 14.20. Finding A-21. Depends on Task 3.
+- Change: `DYNAMIC_FORM_ARMS` (`section-2.4.ts` ~L326–338) asserts 14.8 for `BASE!.auth`; re-pin it and add the `as` forms as 14.20 alone at the entry's offsets (declared `mdx.unparseable`; confirm each offset against `deriveMdx`'s reported position — the grammar's expression parser has no TypeScript), and add the `d={BASE.a<X>y}` 14.8-at-whole-expression arm (well-formed). If the stock parser accepts a form the entry declares unparseable, that is a declaration defect: record it in `specs/tmp/TEST-SPEC-PROBLEMS.md` per the mission rules instead of pinning either way.
+- Verify: `-t 'T2.4-2 '` no harness error; self project green.
+
+### Task 18 — T2.7-1's fragment and attribute-expression arms; T2.7-3's spread grammar pair
+- Cites: TEST-SPEC T2.7-1 (the fragment `<>…</>` arm: one 14.16 from `<>` through `</>`, no node, content preserved under `view --text`; `<S id="x" d={1}>` → 14.8 alone; `<div a={1}></div>` → exactly one 14.16); T2.7-3 (`<S id="x" {...(a, b)}>` → 14.17 at the braced construct vs `<S id="x" {...a, b}>` → 14.20 at the comma offset); SPEC 2.7, 14.16, 14.17, 14.20. Findings A-22, A-23. Depends on Task 3.
+- Change: extend `FOREIGN_CONSTRUCT_ARMS` (`section-2.7.ts` ~L220; today `<div>`, `{40 + 2}`, `export`, the section-in-container arm) and T2.7-3's spread staging (today `{...extra}` only); declare the `{...a, b}` staging `mdx.unparseable`.
+- Verify: `-t 'T2.7-1 '`, `-t 'T2.7-3 '` no harness error; self project green.
+
+### Task 19 — T2.7-4 registration: comment forms and brace content classes
+- Cites: TEST-SPEC T2.7-4; SPEC 2.7, 14.20, 3. Finding A-3. Depends on Task 3.
+- Change: register T2.7-4 in `section-2.7.ts` per its entry — every comment form (block comments, block-comment sequences, line-comment containers, the run-on `{// c}` form), the `{}` form, the whitespace classes between braces (U+00A0, U+FEFF, U+2028, U+2029 and ASCII), each classified as the entry states (comment container vs expression vs 14.20) with its findings, offsets, Markdown output, and `view --text` behavior; declare the 14.20 stagings `mdx.unparseable`; traceability keys.
+- Verify: `-t 'T2.7-4 '` no harness error; self project green.
+
+### Task 20 — T3-7 registration: ESM-block comments and the `;`-terminated import
+- Cites: TEST-SPEC T3-7; SPEC 3, 2.1. Finding A-4. Depends on Task 3.
+- Change: register T3-7 in `section-3.ts` per its entry — JavaScript comments inside an ESM block (own-line and beside a declaration) with the compiled Markdown byte-asserted (comment lines staying as content or dropping exactly as 3 states), and `import X from "./a.xspec";` with the `;` terminator (parsing, binding usable, Markdown as 3 states). T3-7 is not in CONF-MD's scope (manifest); no fixture change; traceability keys.
+- Verify: `-t 'T3-7 '` no harness error; self project green.
+
+### Task 21 — T4-2: side-effect-only import arms
+- Cites: TEST-SPEC T4-2 (the valid `import "./NAME.xspec"` — exit 0, no edge, no occurrence; the 14.15 arms `import "./missing.xspec"` and `import "../specs/NAME.xspec.ts"`); SPEC 4, 14.15, 5.7. Finding A-24.
+- Change: add the three arms to T4-2's body (`section-4.ts` or `section-4.1-4.2.ts`, wherever T4-2 lives) with the entry's findings, locations, and the negative edge/occurrence assertions.
+- Verify: `-t 'T4-2 '` no harness error; self project green.
+
+### Task 22 — T4-5 registration: type-only import collisions
+- Cites: TEST-SPEC T4-5 (four pairings, both orders); SPEC 4, 14.15. Finding A-5.
+- Change: register T4-5 in `section-4.ts` per its entry — each of the four pairings of a type-only import with a colliding binding, staged in both orders, with the entry's findings, ranges, and the compile/attribution observations; traceability keys.
+- Verify: `-t 'T4-5 '` no harness error; self project green.
+
+### Task 23 — T4.3-2 and T4.5-3: TypeScript-only expression forms
+- Cites: TEST-SPEC T4.3-2 (`text(SPEC.a!)`, `text(SPEC.a as X)`, `text(<X>SPEC.a)`, `text(SPEC.a satisfies X)` → 14.8 at the call, the file well-formed); T4.5-3 (`SPEC.a as X;`, `<X>SPEC.a;`, `SPEC.a satisfies X;`); SPEC 4.3, 4.5, 14.8. Findings A-25, A-26.
+- Change: extend the arm table in `section-4.3-4.4.ts` (~L340–380) and `T4_5_3_ARMS` in `section-4.5.ts` (~L765); the `<X>…` angle-bracket assertion needs a `.ts` (never `.tsx`) source; findings and ranges per the entries.
+- Verify: `-t 'T4.3-2 '`, `-t 'T4.5-3 '` no harness error; self project green.
+
+### Task 24 — T4.5-8's located forms and two-block arm; T4.5-9 registration
+- Cites: TEST-SPEC T4.5-8 (further located forms: `let SPEC;` at `SPEC`; `const { SPEC } = o` at `{ SPEC } = o`; `@dec class SPEC {}` from `@`; `export class SPEC {}` / `export function SPEC() {}` from `class`/`function`; the spec-source case's second arm across two ESM blocks); T4.5-9 (a call through a colliding `text` identifier); T14-11 (the same located forms); SPEC 4.5, 14.15. Findings A-27, A-6. Depends on Task 3.
+- Change: `section-4.5.ts`: add the located forms to T4.5-8 with precomputed ranges; add the two-ESM-block spec-source arm beside `T4_5_8_MDX_SOURCE` (~L1657; the one-block form names the `duplicate-import-binding` allowance, the two-block form derives without it); register T4.5-9 per its entry; traceability keys.
+- Verify: `-t 'T4.5-8 '`, `-t 'T4.5-9 '` no harness error; self project green.
+
+### Task 25 — T4.6-1's constructor, legacy-module, and decorated attribution; T11-6's unit-name arm
+- Cites: TEST-SPEC T4.6-1 (the constructor unit `path#C.constructor`, legacy `module X` / `module A.B`, decorated-declaration attribution); T11-6 (`query edges --from <path>#C.constructor` — a class `C` whose constructor holds a marker — and `--from <path>#C.then`, each answering with the unit's edges, exit 0); SPEC 4.6, 11.1. Findings A-28, B-5.
+- Change: `section-4.6.ts` gains the three attribution arms (no `constructor`, `module `, or `@dec` staging exists there today); `section-11.ts` gains T11-6's two unit-name arms (the names occur only in section-4.6.ts today).
+- Verify: `-t 'T4.6-1 '`, `-t 'T11-6 '` no harness error; self project green.
+
+### Task 26 — T5.7-2: line-comment forms inside a `d` value
+- Cites: TEST-SPEC T5.7-2 (`d={// c` U+000A `BASE.a}` and its run-on twin: well-formed, the occurrence spanning `BASE.a`); SPEC 5.7, 2.7. Finding A-29. Depends on Task 3.
+- Change: `section-5.7.ts`: stage both forms (well-formed — the default declaration; confirm with `deriveMdx`) and assert the occurrence span and the edge as the entry states, beside the existing token-bound U+00A0/U+FEFF/block-comment arms.
+- Verify: `-t 'T5.7-2 '` no harness error; self project green.
+
+### Task 27 — T11.2-6 fixture 2: stop over-pinning `check`
+- Cites: TEST-SPEC T11.2-6 (the state surfaces through `build`, `check`, and the gated reads — condition 22 concerning the component); SPEC 14.10 (on a workspace failing `build`'s validations the per-file and graph-data mismatch forms go unreported), 13.3 (refused writes among the states failing `build`'s validations). Finding B-6.
+- Change: `section-11.2.ts` ~L4115 pins `check`'s counts to exactly `{ "14.10": 1, "14.22": 1 }`; fixture 3 (~L4237) filters 14.10 out before counting and T13.4-6's `assertObstructionFindings` (`section-13.4.ts` ~L1442–1470) tolerates 14.10 beside 14.22. Decide the reading SPEC 14.10's text fixes (14.22 alone on a failing workspace, or 14.22 with 14.10 optional), apply it at fixture 2, and make the three sites consistent.
+- Verify: `-t 'T11.2-6 '` no harness error; self project green (CONF-AVAIL's scope excludes T11.2-6; no certification change expected).
