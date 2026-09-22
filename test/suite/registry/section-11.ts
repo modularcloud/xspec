@@ -89,13 +89,19 @@ import type { ProductBinding } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
+  BESIDE_ROOT_FILE_PATTERN_DECOY,
+  INSIDE_NO_MATCH_FILE_PATTERNS,
+  OUTSIDE_ROOT_FILE_PATTERNS,
   assertEdgeSetEqual,
   assertSameJson,
   buildOk,
   expectErrorDocument,
   expectExit,
+  expectFilePatternUsageError,
+  insideNoMatchFilePatterns,
   runJson,
   sortedIdentities,
+  stageBesideRoot,
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
@@ -186,10 +192,6 @@ function wholeFileRange(source: string): SourceRange {
   return { start: 0, end: utf8Length(source) };
 }
 
-function sortedTags(tags: readonly string[]): string[] {
-  return [...tags].sort();
-}
-
 function edgeSortKey(edge: GraphEdge): string {
   return `${edge.kind}\u0000${edge.from}\u0000${edge.to}`;
 }
@@ -211,19 +213,23 @@ function normalizedNodeReport(report: NodeReport): unknown {
     ownText: report.ownText,
     subtreeText: report.subtreeText,
     hashes: report.hashes,
-    tags: sortedTags(report.tags),
+    tags: report.tags,
     coverage: report.coverage,
     incomingEdges: sortedEdges(report.incomingEdges),
     outgoingEdges: sortedEdges(report.outgoingEdges),
   };
 }
 
-/** One row with tag order normalized (row order handled by the caller). */
+/**
+ * One row projected for comparison (row order handled by the caller); its
+ * tags are compared literally — the decoder already enforces 12.7's tag-set
+ * form, strictly ascending by UTF-8 bytes.
+ */
 function normalizedRow(row: NodeRow): unknown {
   return {
     identity: row.identity,
     sourceRange: row.sourceRange,
-    tags: sortedTags(row.tags),
+    tags: row.tags,
     coverage: row.coverage,
   };
 }
@@ -337,9 +343,10 @@ function assertRowFields(
         `offsets, start-inclusive and end-exclusive (SPEC 1.7, 11)`,
     );
     assertSameJson(
-      sortedTags(row.tags),
-      sortedTags(want.tags),
-      `${context}: tags of ${row.identity} (SPEC 2.6, 11)`,
+      row.tags,
+      want.tags,
+      `${context}: tags of ${row.identity} — the 12.7 tag-set form, ` +
+        `strictly ascending by UTF-8 bytes (SPEC 2.6, 11, 12.7)`,
     );
     if (row.coverage !== want.coverage) {
       fail(
@@ -487,7 +494,7 @@ const T11_1 = defineProductTest({
             `contribution with the embedding fully expanded (SPEC 1.6, 3)`,
         );
         assertSameJson(
-          sortedTags(alpha.tags),
+          alpha.tags,
           ["core", "deep"],
           `${alphaContext}: tags (SPEC 2.6, 11)`,
         );
@@ -709,7 +716,7 @@ function expectedRows(
 const T11_2 = defineProductTest({
   id: "T11-2",
   title:
-    "`query nodes` rows are requirement nodes carrying identity, source range, tags, and coverage attribute (absent for roots); `--group`, `--file <glob>`, `--tag`, and `--coverage` combine conjunctively; `--coverage` matches no root; a `--file` pattern resolving outside the workspace root and a `--group` naming a code group are invalid flag values, exit 2 (SPEC 11, 7, 12.0, 14.14)",
+    "`query nodes` rows are requirement nodes carrying identity, source range, tags, and coverage attribute (absent for roots); `--group`, `--file <glob>`, `--tag`, and `--coverage` combine conjunctively; `--coverage` matches no root; a `--file` pattern outside the workspace root by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`) is an invalid flag value — exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding — while an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`, and their twins over `specs/alpha`) is admitted and matches nothing, exit 0 with no rows; a `--group` naming a code group is an invalid flag value, exit 2 (SPEC 11, 7, 12.0, 12.7, 14.14)",
   run: async (product) => {
     await withWorkspace(
       TWO_SPEC_GROUP_CONFIG,
@@ -824,17 +831,52 @@ const T11_2 = defineProductTest({
           assertRowSet(rows, expectedRows(T11_2_ROWS, arm.ids), context);
         }
 
-        // Invalid flag values (SPEC 11, 12.0): a `--file` pattern resolving
-        // outside the workspace root (the outside-root rule of 7, exit 2
-        // like its configuration-time counterpart 14.14), and a `--group`
-        // naming a code group (the wrong-kind group reference of 14.14).
-        await expectUsageError(
-          product,
-          workspace,
-          ["query", "nodes", "--file", "../*.mdx"],
-          "a `--file` pattern resolving outside the workspace root",
-          "T11-2 `query nodes --file ../*.mdx`",
-        );
+        // Invalid flag values (SPEC 11, 12.0): a `--file` pattern outside
+        // the workspace root by its spelling alone — decided as 7 decides
+        // a configured glob (T7-4), exit 2 like its configuration-time
+        // counterpart 14.14 — with the file the ascending spellings name
+        // when resolved staged beside the root, so exit 2 never comes from
+        // a side reason; and a `--group` naming a code group (the
+        // wrong-kind group reference of 14.14).
+        await stageBesideRoot(workspace, BESIDE_ROOT_FILE_PATTERN_DECOY);
+        for (const { spelling, why } of OUTSIDE_ROOT_FILE_PATTERNS) {
+          await expectFilePatternUsageError(
+            product,
+            workspace,
+            ["query", "nodes", "--file", spelling, "--json"],
+            `T11-2 \`query nodes --file ${JSON.stringify(spelling)}\` (${why})`,
+          );
+        }
+
+        // An inside pattern spelled with a `.` or an empty segment is
+        // admitted and matches nothing — a discovered path carries no such
+        // segment (SPEC 7, 12.0): exit 0 with no rows. TEST-SPEC's pinned
+        // `specs` spellings run beside their twins over `specs/alpha`,
+        // whose normalized form (`specs/alpha/*.mdx`) matches A.mdx — the
+        // arm a normalizing product fails.
+        for (const { spelling, why } of [
+          ...INSIDE_NO_MATCH_FILE_PATTERNS,
+          ...insideNoMatchFilePatterns("specs/alpha"),
+        ]) {
+          const context = `T11-2 \`query nodes --file ${JSON.stringify(spelling)}\` (${why})`;
+          const rows = decodeNodeRowsReport(
+            await runJson(
+              product,
+              workspace,
+              ["query", "nodes", "--file", spelling, "--json"],
+              `${context} — an inside pattern matching nothing is admitted: ` +
+                `exit 0 (SPEC 11.1, 7)`,
+            ),
+            context,
+          );
+          assertSameJson(
+            rows,
+            [],
+            `${context}: no rows — the pattern matches no discovered file, ` +
+              `whose path carries no \`.\` or empty segment (SPEC 7, 12.0); ` +
+              `an empty row set is [], never null (12.7)`,
+          );
+        }
         await expectUsageError(
           product,
           workspace,

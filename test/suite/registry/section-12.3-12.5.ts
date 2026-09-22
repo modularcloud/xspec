@@ -10,8 +10,10 @@
 // order of workspace-relative path, IDs within a file in document order —
 // with `--json` per 12.0. `--tree` renders each file's IDs as a tree
 // following section nesting, in the same file and document order. `--file
-// <glob>` restricts to files the glob matches (the rules of 7; a pattern
-// resolving outside the workspace root is an invalid flag value, exit 2).
+// <glob>` restricts to files the glob matches (the rules of 7: a pattern
+// outside the workspace root by its spelling alone — 7's depth rule — is an
+// invalid flag value, exit 2, while an inside pattern spelled with a `.` or
+// empty segment is admitted and matches nothing, an empty listing at exit 0).
 // `--unreferenced` restricts to requirement nodes with no incoming dependency
 // edges from specs or code (`contains` does not count); unreferenced is not
 // uncovered. When the listing is restricted and a listed node's parent is not
@@ -47,8 +49,9 @@
 //   asserted — the ordered content lives in the JSON assertions.
 // - T12.4-1's primary assertion is the adapter comparison: `show --json` and
 //   `query node --json` for the same node are both decoded by the one node
-//   adapter and compared field by field (orders SPEC fixes nothing about —
-//   tag order, edge-list order — normalized first). Symmetric omission is
+//   adapter and compared field by field (the edge-list order, which SPEC
+//   fixes nothing about, normalized first; tags are compared literally, the
+//   decoder enforcing 12.7's tag-set form). Symmetric omission is
 //   caught by pinning the discriminating fields on the `show` side directly:
 //   tags, `coverage="none"`, and the root arm's absent coverage attribute.
 //   The human form is asserted for distinctive information presence,
@@ -100,12 +103,18 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
+  BESIDE_ROOT_FILE_PATTERN_DECOY,
+  INSIDE_NO_MATCH_FILE_PATTERNS,
+  OUTSIDE_ROOT_FILE_PATTERNS,
   assertSameJson,
   buildOk,
   expectErrorDocument,
   expectExit,
+  expectFilePatternUsageError,
+  insideNoMatchFilePatterns,
   runJson,
   sortedIdentities,
+  stageBesideRoot,
 } from "./support.js";
 
 // ---------------------------------------------------------------------------
@@ -294,10 +303,6 @@ async function expectHumanListing(
   );
 }
 
-function sortedTags(tags: readonly string[]): string[] {
-  return [...tags].sort();
-}
-
 function edgeSortKey(edge: GraphEdge): string {
   return `${edge.kind}\u0000${edge.from}\u0000${edge.to}`;
 }
@@ -319,7 +324,7 @@ function normalizedNodeReport(report: NodeReport): unknown {
     ownText: report.ownText,
     subtreeText: report.subtreeText,
     hashes: report.hashes,
-    tags: sortedTags(report.tags),
+    tags: report.tags,
     coverage: report.coverage,
     incomingEdges: sortedEdges(report.incomingEdges),
     outgoingEdges: sortedEdges(report.outgoingEdges),
@@ -432,7 +437,7 @@ const T12_3_1_APP = [
 const T12_3_1 = defineProductTest({
   id: "T12.3-1",
   title:
-    "`ids` groups requirement IDs by file — files in byte order of workspace-relative path (differing from configuration order), IDs within a file in document order (differing from their byte order); `--tree` renders per-file nesting in the same orders; `--file <glob>` restricts by the rules of SPEC 7 with an outside-root pattern an invalid flag value (exit 2); a restricted `--tree` (`--unreferenced`) nests a listed node under its nearest listed ancestor or at its file's top level, containing exactly the listed IDs; the human form carries the same information as `--json` (SPEC 12.3, 7, 12.0)",
+    "`ids` groups requirement IDs by file — files in byte order of workspace-relative path (differing from configuration order), IDs within a file in document order (differing from their byte order); `--tree` renders per-file nesting in the same orders; `--file <glob>` restricts by the rules of SPEC 7 — an outside-root pattern by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`) is an invalid flag value, exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding, while an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`, and their twins over `apecs`) is admitted and matches nothing, an empty listing at exit 0; a restricted `--tree` (`--unreferenced`) nests a listed node under its nearest listed ancestor or at its file's top level, containing exactly the listed IDs; the human form carries the same information as `--json` (SPEC 12.3, 7, 12.0)",
   run: async (product) => {
     await withWorkspace(
       T12_3_1_ORDERING_CONFIG,
@@ -519,16 +524,54 @@ const T12_3_1 = defineProductTest({
             "crosses `/`, SPEC 7)",
         );
 
-        // A `--file` pattern resolving outside the workspace root is an
-        // invalid flag value — exit 2, like its configuration-time
-        // counterpart (SPEC 12.3, 7, 14.14, 12.0).
-        await expectUsageError(
-          product,
-          workspace,
-          ["ids", "--file", "../*.mdx"],
-          "a `--file` pattern resolving outside the workspace root",
-          "T12.3-1 `ids --file ../*.mdx`",
-        );
+        // A `--file` pattern outside the workspace root by its spelling
+        // alone — decided as 7 decides a configured glob (T7-4) — is an
+        // invalid flag value: exit 2 with the plain usage error's document,
+        // like its configuration-time counterpart (SPEC 12.3, 7, 14.14,
+        // 12.0), the file the ascending spellings name when resolved staged
+        // beside the root so exit 2 never comes from a side reason.
+        await stageBesideRoot(workspace, BESIDE_ROOT_FILE_PATTERN_DECOY);
+        for (const { spelling, why } of OUTSIDE_ROOT_FILE_PATTERNS) {
+          await expectFilePatternUsageError(
+            product,
+            workspace,
+            ["ids", "--file", spelling, "--json"],
+            `T12.3-1 \`ids --file ${JSON.stringify(spelling)} --json\` (${why})`,
+          );
+        }
+
+        // An inside pattern spelled with a `.` or an empty segment is
+        // admitted and matches nothing — a discovered path carries no such
+        // segment (SPEC 7, 12.0) — so the restricted listing holds no file
+        // at all: `files` exactly [] (the module header's ID-less-entry
+        // caveat concerns matched files; here none is matched). TEST-SPEC's
+        // pinned `specs` spellings run beside their twins over `apecs`,
+        // whose normalized form (`apecs/*.mdx`) matches M.mdx — the arm a
+        // normalizing product fails.
+        for (const { spelling, why } of [
+          ...INSIDE_NO_MATCH_FILE_PATTERNS,
+          ...insideNoMatchFilePatterns("apecs"),
+        ]) {
+          const context = `T12.3-1 \`ids --file ${JSON.stringify(spelling)} --json\` (${why})`;
+          const report = decodeIdsReport(
+            await runJson(
+              product,
+              workspace,
+              ["ids", "--file", spelling, "--json"],
+              `${context} — an inside pattern matching nothing is admitted: ` +
+                `an empty listing, exit 0 (SPEC 12.3, 7)`,
+            ),
+            context,
+          );
+          assertSameJson(
+            report.files,
+            [],
+            `${context}: the listing restricted to the files the pattern ` +
+              `matches holds no file — a discovered path carries no \`.\` ` +
+              `or empty segment (SPEC 12.3, 7, 12.0); an empty list is [], ` +
+              `never null (12.7)`,
+          );
+        }
       },
     );
 
@@ -853,7 +896,7 @@ const T12_4_1 = defineProductTest({
         // the adapter compare alone would accept a symmetric omission.
         const star = await decodeBoth(T12_4_1_STAR, "path#id arm");
         assertSameJson(
-          sortedTags(star.show.tags),
+          star.show.tags,
           ["amber", "vital"],
           `T12.4-1: \`show ${T12_4_1_STAR}\` reports the staged tags — a ` +
             `show omitting tags fails (SPEC 12.4, 2.6)`,

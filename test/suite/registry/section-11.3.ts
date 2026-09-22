@@ -162,13 +162,18 @@ import {
   SPECS_ONLY_CONFIG,
 } from "./section-11.2.js";
 import {
+  BESIDE_ROOT_FILE_PATTERN_DECOY,
+  INSIDE_NO_MATCH_FILE_PATTERNS,
+  OUTSIDE_ROOT_FILE_PATTERNS,
   assertConditionCounts,
   assertFindingLocated,
   assertSameJson,
   buildFindings,
   buildOk,
   expectExit,
+  expectFilePatternUsageError,
   runJson,
+  stageBesideRoot,
 } from "./support.js";
 
 /** The 12.7 unavailability marker, as decoded (one-datum state). */
@@ -936,7 +941,7 @@ function findingByCondition(
 const T11_3_2 = defineProductTest({
   id: "T11.3-2",
   title:
-    "`--file` is a set restriction over discovered files, spec and code alike: one glob (`**/ap*`) admitting a spec source and a code source restricts the consulted domain to exactly the admitted files — only their findings accompany (never the excluded file's 14.3) and only their occurrences are enumerated, the admitted spec file's record into the excluded file still resolving and recording (the domain restricts consultation, not resolution), exit 1; the complementary literal glob flips the domain (exactly the 14.3, exactly the excluded file's record); a glob matching no discovered file — one matching an on-disk file no configured group discovers, and one matching nothing at all — admits the empty set: an empty, finding-free answer, exit 0, no unknown-file usage error on this filter, whatever findings the workspace carries; an outside-root pattern (a leading and an embedded `..` traversal) exits 2 as an invalid flag value with the single 12.7 error document, the argument check preceding answering; `--file` and `--to` combine conjunctively — a fixture where each filter alone admits more records than the intersection (SPEC 11.3, 11.2, 11.1, 7, 12.0, 12.7)",
+    "`--file` is a set restriction over discovered files, spec and code alike: one glob (`**/ap*`) admitting a spec source and a code source restricts the consulted domain to exactly the admitted files — only their findings accompany (never the excluded file's 14.3) and only their occurrences are enumerated, the admitted spec file's record into the excluded file still resolving and recording (the domain restricts consultation, not resolution), exit 1; the complementary literal glob flips the domain (exactly the 14.3, exactly the excluded file's record); a glob matching no discovered file — one matching an on-disk file no configured group discovers, and one matching nothing at all — admits the empty set: an empty, finding-free answer, exit 0, no unknown-file usage error on this filter, whatever findings the workspace carries; an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`) admits the empty set the same way, its normalized form matching the staged spec files; an outside-root pattern by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx` — SPEC 7's depth rule) exits 2 as an invalid flag value with the single 12.7 error document, code and path null, a matching file beside the root notwithstanding, the argument check preceding answering; `--file` and `--to` combine conjunctively — a fixture where each filter alone admits more records than the intersection (SPEC 11.3, 11.2, 11.1, 7, 12.0, 12.7)",
   run: async (product) => {
     // --- Workspace 1: the restriction ground (failing on purpose). ------------
     {
@@ -949,6 +954,9 @@ const T11_3_2 = defineProductTest({
           [FILTER_TRAP_FILE]: FILTER_TRAP_SOURCE,
         },
       });
+      // The file the ascending outside-root spellings name when resolved,
+      // beside the root (T7-4's discipline: exit 2 never from a side reason).
+      await stageBesideRoot(workspace, BESIDE_ROOT_FILE_PATTERN_DECOY);
       try {
         await assertLeavesUnchanged(
           workspace.root,
@@ -1101,13 +1109,25 @@ const T11_3_2 = defineProductTest({
             // product globbing the filesystem consults the unparseable
             // decoy and answers nonempty), then with one matching nothing
             // at all.
-            for (const [glob, what] of [
+            // Then the inside-root spellings with a `.` or an empty segment
+            // (SPEC 7, 12.0): admitted, matching nothing — a discovered
+            // path carries no such segment — while their normalized form
+            // `specs/*.mdx` matches apple and beta, the files a normalizing
+            // product then consults (exit 1, their findings accompanying).
+            const emptySetGlobs: readonly (readonly [string, string])[] = [
               [
                 "docs/*.mdx",
                 "matching the on-disk but UNDISCOVERED docs/note.mdx",
               ],
               ["nosuch/**/*.mdx", "matching nothing at all"],
-            ] as const) {
+              ...INSIDE_NO_MATCH_FILE_PATTERNS.map(
+                ({ spelling, why }): readonly [string, string] => [
+                  spelling,
+                  `inside the root by spelling, ${why}`,
+                ],
+              ),
+            ];
+            for (const [glob, what] of emptySetGlobs) {
               const context = `T11.3-2 \`occurrences --file "${glob}"\` (${what})`;
               const report = decodeOccurrencesReport(
                 await runJson(
@@ -1135,26 +1155,22 @@ const T11_3_2 = defineProductTest({
               );
             }
 
-            // --- An outside-root pattern is an invalid flag value, exit 2
-            // (SPEC 11.3, 11.1, 7): the argument check precedes answering
-            // (11.2), whatever findings the named files carry — asserted on
-            // this failing workspace via the shared JSON-only usage-error
-            // protocol (single 12.7 error document, message on stderr).
-            await expectAvailabilityUsageError(
-              product,
-              workspace,
-              ["occurrences", "--file", "../elsewhere/**/*.mdx"],
-              "T11.3-2 outside-root `--file` pattern (leading `..` " +
-                "traversal) on the failing workspace",
-            );
-            await expectAvailabilityUsageError(
-              product,
-              workspace,
-              ["occurrences", "--file", "specs/../../evil/*.mdx"],
-              "T11.3-2 outside-root `--file` pattern (embedded `..` " +
-                "traversal escaping the root mid-pattern) on the failing " +
-                "workspace",
-            );
+            // --- An outside-root pattern by spelling alone (SPEC 7's depth
+            // rule, as 11.1) is an invalid flag value, exit 2 (SPEC 11.3,
+            // 12.0): the argument check precedes answering (11.2), whatever
+            // findings the named files carry — asserted on this failing
+            // workspace, the matching file beside the root notwithstanding,
+            // through the shared plain-usage-error protocol (single 12.7
+            // error document, code and path null, message on stderr).
+            for (const { spelling, why } of OUTSIDE_ROOT_FILE_PATTERNS) {
+              await expectFilePatternUsageError(
+                product,
+                workspace,
+                ["occurrences", "--file", spelling],
+                `T11.3-2 \`occurrences --file ${JSON.stringify(spelling)}\` ` +
+                  `(${why}) on the failing workspace`,
+              );
+            }
           },
           "T11.3-2 workspace 1 — no invocation of the sweep modifies " +
             "anything: the gate build fails writing nothing (SPEC 12.1) " +

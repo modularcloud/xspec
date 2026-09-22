@@ -731,3 +731,116 @@ export function assertAppliedMapping(
 ): void {
   assertSameJson(actual, expected, context);
 }
+
+// ---------------------------------------------------------------------------
+// `--file` pattern spellings (SPEC 7, 11.1, 11.3, 11.4, 12.3, 12.0)
+// ---------------------------------------------------------------------------
+
+/** One `--file` spelling with the reason SPEC 7's depth rule classes it. */
+export interface FilePatternSpelling {
+  readonly spelling: string;
+  readonly why: string;
+}
+
+/**
+ * `--file` patterns outside the workspace root by spelling alone — decided
+ * as SPEC 7 decides a configured glob (T7-4): reading the `/`-separated
+ * segments from a depth of zero, a `..` segment lowers the depth, a `.`,
+ * empty, or `**` segment leaves it, every other segment raises it; a glob
+ * beginning with `/`, or whose depth ever falls below zero, is outside.
+ * Each is an invalid flag value on every `--file` surface (11.1, 11.3,
+ * 11.4, 12.3): a plain usage error, exit 2, whatever the workspace or the
+ * root's parent holds — callers stage {@link BESIDE_ROOT_FILE_PATTERN_DECOY}
+ * so the ascending spellings, resolved, name a real file, and exit 2 never
+ * comes from a side reason (T7-4's discipline); the absolute spelling's
+ * premise is the spelling alone.
+ */
+export const OUTSIDE_ROOT_FILE_PATTERNS: readonly FilePatternSpelling[] = [
+  {
+    spelling: "../x/*.mdx",
+    why: "the plain ascent: the depth falls below zero at the first segment",
+  },
+  {
+    spelling: "../x",
+    why: "the plain ascent naming a directory, no wildcard segment",
+  },
+  {
+    spelling: "a/../../x",
+    why:
+      "an embedded ascent: `a` raises the depth to one, the two `..` " +
+      "segments take it to minus one",
+  },
+  { spelling: "/specs/*.mdx", why: "a leading `/`" },
+];
+
+/**
+ * The file the ascending spellings of {@link OUTSIDE_ROOT_FILE_PATTERNS}
+ * name when resolved against the root's parent (`stageBesideRoot`): a
+ * product deciding by what it finds rather than by spelling finds it.
+ */
+export const BESIDE_ROOT_FILE_PATTERN_DECOY: Readonly<Record<string, string>> =
+  { "x/M.mdx": '<S id="m">\nM text.\n</S>\n' };
+
+/**
+ * Inside-root `--file` spellings over `dir` that match nothing (SPEC 7,
+ * 12.0): a `.` segment and an empty segment (a doubled `/`) leave the depth
+ * unchanged — the pattern is inside the root — and match no discovered
+ * path, which carries no such segment. Each admits the empty set on every
+ * `--file` surface: exit 0 with the surface's empty answer form. Sharp only
+ * where `dir` holds a discovered `.mdx` at its top level — the file a
+ * product normalizing the spelling (`./specs/*.mdx` → `specs/*.mdx`)
+ * would match.
+ */
+export function insideNoMatchFilePatterns(
+  dir: string,
+): readonly FilePatternSpelling[] {
+  return [
+    { spelling: `./${dir}/*.mdx`, why: "a `.` segment matches nothing" },
+    {
+      spelling: `${dir}//*.mdx`,
+      why: "an empty segment (a doubled `/`) matches nothing",
+    },
+  ];
+}
+
+/** TEST-SPEC's pinned inside spellings: `./specs/*.mdx`, `specs//*.mdx`. */
+export const INSIDE_NO_MATCH_FILE_PATTERNS: readonly FilePatternSpelling[] =
+  insideNoMatchFilePatterns("specs");
+
+/**
+ * One `--file` spelling outside the root: the invocation (`--file` and its
+ * value in place; `--json` where the surface takes it, T12.3-1 and T11-2,
+ * omitted on the JSON-only surfaces of 11.3 and 11.4) exits 2 exactly with
+ * the 12.7 error document as its entire stdout — a plain usage error's
+ * finding, `code` null, `path` null, `locations` [] (SPEC 12.7) — and a
+ * message on standard error (12.0).
+ */
+export async function expectFilePatternUsageError(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<void> {
+  const result = await expectExit(
+    product,
+    workspace,
+    argv,
+    2,
+    `${context} — a \`--file\` pattern outside the workspace root by its ` +
+      `spelling alone is an invalid flag value, a usage error, exit 2 ` +
+      `(SPEC 7, 11.1, 11.3, 11.4, 12.3, 12.0)`,
+  );
+  const finding = expectErrorDocument(result, context);
+  assertSameJson(
+    { code: finding.code, path: finding.path, locations: finding.locations },
+    { code: null, path: null, locations: [] },
+    `${context}: a plain usage error's error document carries \`code\` ` +
+      `null, \`path\` null, and no locations (SPEC 12.7)`,
+  );
+  if (result.stderrBytes.length === 0) {
+    fail(
+      `${context}: usage error messages are standard-error content (SPEC ` +
+        `12.0), but stderr is empty`,
+    );
+  }
+}

@@ -402,13 +402,18 @@ import {
   VALUELESS_TAGS_FIXTURE,
 } from "./section-2.7.js";
 import {
+  BESIDE_ROOT_FILE_PATTERN_DECOY,
+  INSIDE_NO_MATCH_FILE_PATTERNS,
+  OUTSIDE_ROOT_FILE_PATTERNS,
   assertConditionCounts,
   assertFindingLocated,
   assertSameJson,
   buildFindings,
   buildOk,
   expectExit,
+  expectFilePatternUsageError,
   runJson,
+  stageBesideRoot,
 } from "./support.js";
 
 /**
@@ -937,7 +942,7 @@ const OV_DUP_IDENTITY_TREE: IdentityShape = {
 const T11_4_2 = defineProductTest({
   id: "T11.4-2",
   title:
-    '`<file>` operands assert membership in the DISCOVERED spec-source domain while `--file` is a set restriction over it: an undiscovered operand — a file existing nowhere, and an on-disk `docs/note.mdx` no configured group discovers — exits 2 as an unknown file, and a discovered code source exits 2 as a wrong-kind operand (12.0), its own staged 14.8 notwithstanding — the argument checks precede answering — each with the single 12.7 error document; the SAME `src/app.ts` spelling as a `--file` value instead admits the empty set — a glob matching only code sources, one matching the undiscovered on-disk decoy, and one matching nothing at all each answer `{"findings": [], "views": []}`, exit 0, no unknown-file usage error on this filter, whatever findings the workspace carries; combining `<file>` operands with `--file`, each part individually valid, exits 2; and the requested files form a set — the discovered `specs/dup.mdx` named twice yields ONE view, its finding-free domain exiting 0 with the root and section identities served while the rest of the workspace stays failing, no invocation of the sweep modifying anything (SPEC 11.4, 11.2, 12.0, 12.7, 7)',
+    '`<file>` operands assert membership in the DISCOVERED spec-source domain while `--file` is a set restriction over it: an undiscovered operand — a file existing nowhere, and an on-disk `docs/note.mdx` no configured group discovers — exits 2 as an unknown file, and a discovered code source exits 2 as a wrong-kind operand (12.0), its own staged 14.8 notwithstanding — the argument checks precede answering — each with the single 12.7 error document; the SAME `src/app.ts` spelling as a `--file` value instead admits the empty set — a glob matching only code sources, one matching the undiscovered on-disk decoy, and one matching nothing at all each answer `{"findings": [], "views": []}`, exit 0, no unknown-file usage error on this filter, whatever findings the workspace carries, as does an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`) whose normalized form would match the staged spec files; an outside-root glob by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx` — the depth rule of SPEC 7) exits 2 as an invalid flag value with the single 12.7 error document, code and path null, a matching file beside the root notwithstanding; combining `<file>` operands with `--file`, each part individually valid, exits 2; and the requested files form a set — the discovered `specs/dup.mdx` named twice yields ONE view, its finding-free domain exiting 0 with the root and section identities served while the rest of the workspace stays failing, no invocation of the sweep modifying anything (SPEC 11.4, 11.2, 12.0, 12.7, 7)',
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -948,6 +953,9 @@ const T11_4_2 = defineProductTest({
         [OV_DECOY_FILE]: OV_DECOY_SOURCE,
       },
     });
+    // The file the ascending outside-root spellings name when resolved,
+    // beside the root (T7-4's discipline: exit 2 never from a side reason).
+    await stageBesideRoot(workspace, BESIDE_ROOT_FILE_PATTERN_DECOY);
     try {
       await assertLeavesUnchanged(
         workspace.root,
@@ -1030,7 +1038,13 @@ const T11_4_2 = defineProductTest({
           // operand — and the sharp half of "only code sources": a
           // product reusing 11.3's spec-and-code-alike filter consults
           // the code file, carries its staged 14.8, and exits 1.
-          for (const [glob, what] of [
+          // The inside-root spellings with a `.` or an empty segment (SPEC
+          // 7, 12.0) join the table: admitted, matching nothing — a
+          // discovered path carries no such segment — while their
+          // normalized form `specs/*.mdx` matches dup.mdx and bad.mdx, the
+          // files a normalizing product then serves (bad.mdx's 14.3
+          // accompanying, exit 1).
+          const emptySetGlobs: readonly (readonly [string, string])[] = [
             [
               "docs/*.mdx",
               "matching the on-disk but UNDISCOVERED docs/note.mdx — a " +
@@ -1045,7 +1059,14 @@ const T11_4_2 = defineProductTest({
                 "11.4), so the finding-laden src/app.ts is never " +
                 "consulted, unlike 11.3's spec-and-code-alike filter",
             ],
-          ] as const) {
+            ...INSIDE_NO_MATCH_FILE_PATTERNS.map(
+              ({ spelling, why }): readonly [string, string] => [
+                spelling,
+                `inside the root by spelling, ${why}`,
+              ],
+            ),
+          ];
+          for (const [glob, what] of emptySetGlobs) {
             const context = `T11.4-2 \`view --file "${glob}"\` (${what})`;
             const report = decodeViewReport(
               await runJson(
@@ -1072,6 +1093,23 @@ const T11_4_2 = defineProductTest({
               [],
               `${context}: the empty set of views — an empty list is [], ` +
                 `never null (SPEC 11.4, 12.7)`,
+            );
+          }
+
+          // --- An outside-root glob by spelling alone (SPEC 7's depth
+          // rule, as 11.3 and 11.1) is an invalid flag value, exit 2 (SPEC
+          // 11.4, 12.0): the argument check precedes answering (11.2),
+          // whatever findings the workspace carries — the matching file
+          // beside the root notwithstanding — through the shared
+          // plain-usage-error protocol (single 12.7 error document, code
+          // and path null, message on stderr).
+          for (const { spelling, why } of OUTSIDE_ROOT_FILE_PATTERNS) {
+            await expectFilePatternUsageError(
+              product,
+              workspace,
+              ["view", "--file", spelling],
+              `T11.4-2 \`view --file ${JSON.stringify(spelling)}\` (${why}) ` +
+                `on the failing workspace`,
             );
           }
 
