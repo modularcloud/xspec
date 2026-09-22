@@ -32,6 +32,8 @@ import { HarnessStagingError } from "../helpers/permissions.js";
 import { TestWorkspace, type WorkspaceDecl } from "../helpers/workspace.js";
 import { REMOVALS_SOURCE } from "../suite/registry/section-3.js";
 import { P2_P3_FORM_VECTORS } from "../suite/registry/section-16-p2-p3.js";
+import { P4_FORM_VECTORS } from "../suite/registry/section-16-p4.js";
+import { P5_FORM_VECTORS } from "../suite/registry/section-16-p5-p6.js";
 import {
   I3_HALL_MOVED_SOURCE,
   I3_ROOM_MOVED_SOURCE,
@@ -328,6 +330,30 @@ describe("S-9: every form the P-2/P-3 generator composes derives", () => {
     );
   });
   test.each(P2_P3_FORM_VECTORS)("%s", (_name, source) => {
+    expectDerives(source);
+  });
+});
+
+describe("S-9: every form the PROP-03 rendering (P-4, P-5, P-6) composes derives", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(P4_FORM_VECTORS.length).toBeGreaterThan(2);
+    expect(new Set(P4_FORM_VECTORS.map(([name]) => name)).size).toBe(
+      P4_FORM_VECTORS.length,
+    );
+  });
+  test.each(P4_FORM_VECTORS)("%s", (_name, source) => {
+    expectDerives(source);
+  });
+});
+
+describe("S-9: every decorated form the P-5 section-move staging composes derives", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(P5_FORM_VECTORS.length).toBeGreaterThan(40);
+    expect(new Set(P5_FORM_VECTORS.map(([name]) => name)).size).toBe(
+      P5_FORM_VECTORS.length,
+    );
+  });
+  test.each(P5_FORM_VECTORS)("%s", (_name, source) => {
     expectDerives(source);
   });
 });

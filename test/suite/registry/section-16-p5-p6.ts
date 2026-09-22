@@ -54,9 +54,13 @@
 // move textually touches are staged from piece trees (the FP-083 oracle's
 // input form) built to reproduce renderWorkspace byte-for-byte when
 // undecorated — asserted every trial — and then decorated at the moved
-// construct's boundaries. Every decorated byte form was vetted against
-// remark-mdx by an implementation-time probe (staged sources must parse,
-// SPEC 1; findings below), which pinned this validity rule: a multi-line
+// construct's boundaries. Every decorated byte form is checked live under
+// S-9 (SPEC 14.20): `P5_FORM_VECTORS` (below buildSectionMove) spells each
+// layout the generator can draw, the S-9 self-test
+// (test/self/s9-fixture-well-formedness.test.ts) proves every one derives
+// before any product exists, and every draw's staged files are judged the
+// same way before the product sees them (`mdxSources` on the registrations;
+// helpers/property.ts). The forms obey this validity rule: a multi-line
 // element parses only fully flow (tags at line starts, at most trailing
 // whitespace sharing a tag's line) or fully inline (the whole element
 // inside one paragraph, non-whitespace forcers on BOTH sides — an element
@@ -197,7 +201,7 @@ import {
   predictSectionMoveImpact,
   sectionMoveSourceText,
 } from "../../helpers/oracles/section-move.js";
-import type { Choices, Gen } from "../../helpers/property.js";
+import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -710,14 +714,18 @@ function currentFileBytes(state: TrialState, fileIndex: number): string {
 }
 
 /**
- * Apply one staged edit: mutate the model and rewrite the changed files in
- * the workspace at their current paths. Returns a description for contexts.
+ * Apply one staged edit to the state: mutate the model and return the
+ * changed files' bytes at their current paths, with a description for
+ * contexts. Pure over the state (no workspace I/O), so the S-9 per-draw
+ * check replays it before the product sees the trial.
  */
-async function applyEditStep(
+function applyEditToState(
   state: TrialState,
-  workspace: TestWorkspace,
   edit: Edit,
-): Promise<string> {
+): {
+  readonly description: string;
+  readonly files: readonly (readonly [path: string, bytes: string])[];
+} {
   const beforeFiles = renderWorkspace(state.model);
   const { after, description } = applyEdit(state.model, edit);
   state.model = after;
@@ -730,8 +738,27 @@ async function applyEditStep(
       `P-6 harness defect: the edit "${description}" staged no byte change`,
     );
   }
-  for (const index of changedIndexes) {
-    await workspace.file(state.paths[index], currentFileBytes(state, index));
+  return {
+    description,
+    files: changedIndexes.map((index): readonly [string, string] => [
+      state.paths[index],
+      currentFileBytes(state, index),
+    ]),
+  };
+}
+
+/**
+ * Apply one staged edit: mutate the model and rewrite the changed files in
+ * the workspace at their current paths. Returns a description for contexts.
+ */
+async function applyEditStep(
+  state: TrialState,
+  workspace: TestWorkspace,
+  edit: Edit,
+): Promise<string> {
+  const { description, files } = applyEditToState(state, edit);
+  for (const [path, bytes] of files) {
+    await workspace.file(path, bytes);
   }
   return description;
 }
@@ -952,7 +979,7 @@ const TAIL_OUTSIDE = "ptail";
 const WS_RESIDUE = "  ";
 
 /**
- * Every inline combination the remark-mdx probe accepts (module header's
+ * Every inline combination the validity rule admits (module header's
  * balance rule): a non-whitespace open-side forcer — parent lead before the
  * tag, or moved-root text after it — iff a non-whitespace close-side forcer;
  * whitespace residues force nothing and ride either side. Enumerated in a
@@ -984,7 +1011,7 @@ const INLINE_LAYOUTS: readonly MovedLayout[] = (() => {
 })();
 
 /**
- * The probed inline form for an empty moved section (`plead. <S …>` +
+ * The inline form for an empty moved section (`plead. <S …>` +
  * terminator + `</S>ptail`): parent prose on both sides, nothing inside.
  */
 const EMPTY_INLINE_LAYOUT: MovedLayout = {
@@ -1010,7 +1037,7 @@ function isPlainProse(item: BodyItem): item is ProseItem {
 /**
  * One random byte layout valid for the moved section's shape (module
  * header): inline requires a childless all-plain-prose body (or an empty
- * one, in the probed both-sides form), collapse a single prose item.
+ * one, in the both-sides form), collapse a single prose item.
  */
 function genMovedLayout(choices: Choices, section: SectionItem): MovedLayout {
   const options: (readonly [number, () => MovedLayout])[] = [
@@ -1039,7 +1066,7 @@ function genMovedLayout(choices: Choices, section: SectionItem): MovedLayout {
         () => ({
           form: "collapse",
           // Embeddings stay valid only in the undecorated line-start
-          // collapse (module header / the probe).
+          // collapse (module header's validity rule).
           leadOutside: plain ? choices.pick(OUTSIDE_LEADS) : null,
           leadInside: null,
           tailInside: null,
@@ -1629,6 +1656,250 @@ function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
   };
 }
 
+// --- fixed form vectors (TEST-SPEC 17 S-9; 16 preamble) ----------------------
+//
+// Every decorated byte form the arm-2 staging can draw (module header) —
+// each inline layout on a single-prose and on a multi-prose moved section,
+// the empty section's inline form, every self-closing and collapse
+// decoration, the undecorated collapse with an embedding, the flow layout
+// on every body shape, the target-side forms (an empty target parent
+// rendered self-closing, the root target's final terminator stripped) on
+// the coincident file and on a separate target file — plus the P-6 replay
+// rewrite after a file move (the import header naming the moved path),
+// each spelled through the very builder the draws use, over one fixed
+// model. The S-9 self-test proves every vector derives before any product
+// exists; every draw's staged files are judged the same way before the
+// product sees them (`mdxSources` on the registrations below).
+
+function vectorProse(text: string): ProseItem {
+  return { kind: "prose", parts: [{ kind: "text", text }] };
+}
+
+function vectorEmbedProse(dotted: string): ProseItem {
+  return {
+    kind: "prose",
+    parts: [
+      { kind: "text", text: "k9 lead " },
+      { kind: "embed", ref: { file: 0, dotted, spell: 0 } },
+      { kind: "text", text: " k9 tail" },
+    ],
+  };
+}
+
+function vectorSection(
+  seg: string,
+  items: BodyItem[],
+  props: Partial<
+    Pick<SectionItem, "tags" | "coverageNone" | "deps" | "depsSingle">
+  > = {},
+): SectionItem {
+  return {
+    kind: "section",
+    seg,
+    tags: null,
+    coverageNone: false,
+    deps: null,
+    depsSingle: false,
+    items,
+    ...props,
+  };
+}
+
+const P5_FORM_MODEL: WorkspaceModel = {
+  files: [
+    {
+      nextSeg: 5,
+      items: [
+        vectorProse("a0 first"),
+        // s0: one plain prose item — flow, inline, collapse.
+        vectorSection("s0", [vectorProse("k9 body")]),
+        // s1: empty — flow, self-closing, the empty inline form.
+        vectorSection("s1", []),
+        // s2: several plain prose items — flow, inline.
+        vectorSection("s2", [vectorProse("k9 one"), vectorProse("k9 two")]),
+        // s3: a rich subtree — flow only.
+        vectorSection("s3", [
+          vectorEmbedProse("s0"),
+          { kind: "blank" },
+          { kind: "comment", words: "note am" },
+          vectorSection("s0", [vectorProse("k9 deep")], {
+            tags: ["t1", "beta.x"],
+            coverageNone: true,
+            deps: [{ file: 0, dotted: "s0", spell: 1 }],
+            depsSingle: true,
+          }),
+        ]),
+        // s4: one prose item holding an embedding — undecorated collapse.
+        vectorSection("s4", [vectorEmbedProse("s1")]),
+      ],
+    },
+    {
+      nextSeg: 1,
+      items: [
+        vectorProse("b0 first"),
+        // The empty target parent, and a root target with a single final
+        // terminator (strippable).
+        vectorSection("s0", [], {
+          deps: [
+            { file: 0, dotted: "s2", spell: 2 },
+            { file: 0, dotted: "", spell: 0 },
+          ],
+        }),
+      ],
+    },
+  ],
+};
+
+function p5Vector(
+  name: string,
+  fileIndex: number,
+  deco: FileDecorations,
+): readonly [string, string] {
+  const modelPaths = Object.keys(renderWorkspace(P5_FORM_MODEL));
+  const expansionOf = expansionSentinels(semanticsOf(P5_FORM_MODEL));
+  return [
+    name,
+    sectionMoveSourceText(
+      buildFilePieces(P5_FORM_MODEL, fileIndex, modelPaths, expansionOf, deco),
+    ),
+  ];
+}
+
+function layoutName(layout: MovedLayout): string {
+  const part = (label: string, value: string | null): string =>
+    `${label}=${value === null ? "none" : JSON.stringify(value)}`;
+  return (
+    `${layout.form} layout (${part("leadOutside", layout.leadOutside)}, ` +
+    `${part("leadInside", layout.leadInside)}, ` +
+    `${part("tailInside", layout.tailInside)}, ` +
+    `${part("tailOutside", layout.tailOutside)})`
+  );
+}
+
+function outsideLayout(
+  form: "selfClose" | "collapse",
+  leadOutside: string | null,
+  tailOutside: string | null,
+): MovedLayout {
+  return { form, leadOutside, leadInside: null, tailInside: null, tailOutside };
+}
+
+/** The P-6 replay rewrite of file 1 after file 0 moved to `specs/N0.mdx`. */
+function movedHeaderVector(): string {
+  const state = initTrialState(P5_FORM_MODEL);
+  applyMoveFile(state, { kind: "moveFile", file: 0, newName: "N0" });
+  return currentFileBytes(state, 1);
+}
+
+/** The fixed form-vector set of the P-5 staging (S-9): name and source. */
+export const P5_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [
+  ...["s0", "s1", "s2", "s3", "s4"].map((dotted) =>
+    p5Vector(`flow layout on ${dotted}`, 0, {
+      moved: { dotted, layout: FLOW_LAYOUT },
+    }),
+  ),
+  ...INLINE_LAYOUTS.flatMap((layout) =>
+    ["s0", "s2"].map((dotted) =>
+      p5Vector(`${layoutName(layout)} on ${dotted}`, 0, {
+        moved: { dotted, layout },
+      }),
+    ),
+  ),
+  p5Vector(`${layoutName(EMPTY_INLINE_LAYOUT)} on the empty s1`, 0, {
+    moved: { dotted: "s1", layout: EMPTY_INLINE_LAYOUT },
+  }),
+  ...OUTSIDE_LEADS.flatMap((leadOutside) =>
+    OUTSIDE_TAILS.map((tailOutside) => {
+      const layout = outsideLayout("selfClose", leadOutside, tailOutside);
+      return p5Vector(`${layoutName(layout)} on the empty s1`, 0, {
+        moved: { dotted: "s1", layout },
+      });
+    }),
+  ),
+  ...OUTSIDE_LEADS.flatMap((leadOutside) =>
+    OUTSIDE_TAILS.map((tailOutside) => {
+      const layout = outsideLayout("collapse", leadOutside, tailOutside);
+      return p5Vector(`${layoutName(layout)} on s0`, 0, {
+        moved: { dotted: "s0", layout },
+      });
+    }),
+  ),
+  p5Vector(
+    "collapse layout, undecorated, on s4 (an embedding in its prose)",
+    0,
+    {
+      moved: { dotted: "s4", layout: outsideLayout("collapse", null, null) },
+    },
+  ),
+  p5Vector(
+    "coincident target side: the empty s1 rendered self-closing beside a flow-moved s0",
+    0,
+    { moved: { dotted: "s0", layout: FLOW_LAYOUT }, selfCloseDotted: "s1" },
+  ),
+  p5Vector(
+    "coincident target side: the final terminator stripped beside a flow-moved s0",
+    0,
+    { moved: { dotted: "s0", layout: FLOW_LAYOUT }, stripFinalNewline: true },
+  ),
+  p5Vector("target file, undecorated (importing the earlier file)", 1, {}),
+  p5Vector("target file: the empty target parent rendered self-closing", 1, {
+    selfCloseDotted: "s0",
+  }),
+  p5Vector(
+    "target file: the final terminator stripped (mid-line root insertion)",
+    1,
+    {
+      stripFinalNewline: true,
+    },
+  ),
+  p5Vector("target file: both target-side forms", 1, {
+    selfCloseDotted: "s0",
+    stripFinalNewline: true,
+  }),
+  [
+    "P-6 replay rewrite after a file move: the import header names the moved path",
+    movedHeaderVector(),
+  ],
+];
+
+// --- S-9's per-draw check (helpers/property.ts `mdxSources`) ----------------
+
+function stagedPuritySources(trial: PurityTrial): DrawSource[] {
+  return Object.entries(renderWorkspace(trial.model));
+}
+
+function stagedSectionMoveSources(trial: SectionMoveTrial): DrawSource[] {
+  return Object.entries(buildSectionMove(trial).files);
+}
+
+/**
+ * The replay's staged sources: the initial workspace and, per edit step,
+ * the files the edit rewrites at their then-current paths — the state
+ * evolved exactly as runReplayTrial evolves it (edits applied, pure
+ * operations replayed on the path table and the model).
+ */
+function stagedReplaySources(trial: ReplayTrial): DrawSource[] {
+  const state = initTrialState(trial.model);
+  const sources: DrawSource[] = Object.entries(renderWorkspace(state.model));
+  trial.steps.forEach((step, index) => {
+    if (step.kind === "edit") {
+      const { description, files } = applyEditToState(state, step.edit);
+      for (const [path, bytes] of files) {
+        sources.push([
+          path,
+          bytes,
+          `after step ${String(index + 1)} — ${description}`,
+        ]);
+      }
+    } else if (step.kind === "op") {
+      applyPureOp(state, step.op);
+    }
+  });
+  return sources;
+}
+
 // --- prediction assertion (SPEC 6.2, 5.6, 9.1, 9.3; SUITE-20 merging) --------
 
 function assertImpactMatchesPrediction(
@@ -2083,7 +2354,12 @@ const P_5 = defineProductTest({
       async (trial) => {
         await runPurityTrial(product, trial);
       },
-      { runs: 3, maxShrinkExecutions: 60, render: renderPurityTrial },
+      {
+        runs: 3,
+        maxShrinkExecutions: 60,
+        render: renderPurityTrial,
+        mdxSources: stagedPuritySources,
+      },
     );
     await checkProperty(
       "P-5 random section moves",
@@ -2091,7 +2367,12 @@ const P_5 = defineProductTest({
       async (trial) => {
         await runSectionMoveTrial(product, trial);
       },
-      { runs: 8, maxShrinkExecutions: 80, render: renderSectionMoveTrial },
+      {
+        runs: 8,
+        maxShrinkExecutions: 80,
+        render: renderSectionMoveTrial,
+        mdxSources: stagedSectionMoveSources,
+      },
     );
   },
 });
@@ -2116,7 +2397,12 @@ const P_6 = defineProductTest({
       async (trial) => {
         await runReplayTrial(product, trial);
       },
-      { runs: 4, maxShrinkExecutions: 60, render: renderReplayTrial },
+      {
+        runs: 4,
+        maxShrinkExecutions: 60,
+        render: renderReplayTrial,
+        mdxSources: stagedReplaySources,
+      },
     );
   },
 });

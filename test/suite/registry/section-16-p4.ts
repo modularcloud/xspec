@@ -57,9 +57,13 @@
 // dependency or embedding target), structure, metadata, dependency, no-op —
 // so the fixed seed set (E-5) exercises every law deterministically; the
 // class mix under the committed seeds was verified by an implementation-time
-// dry-run (all six classes and every law-relevant prediction pattern occur,
-// and every staged source — before and after each edit — parses under
-// remark-mdx).
+// dry-run (all six classes and every law-relevant prediction pattern occur).
+// That every staged source — before and after each edit — derives (SPEC
+// 14.20) is S-9's live check: `P4_FORM_VECTORS` below spells the
+// rendering's forms for the S-9 self-test
+// (test/self/s9-fixture-well-formedness.test.ts), and every draw's sources,
+// the edited files included, are judged before the product sees them
+// (`mdxSources`, helpers/property.ts).
 //
 // P-4 is outside every CERTIFICATIONS.md fixture scope (its preamble:
 // conformers for P-4/P-5/P-6 would be near-complete second products), so
@@ -105,7 +109,7 @@ import {
   decodeNodeRowsReport,
 } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
-import type { Choices, Gen } from "../../helpers/property.js";
+import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -1899,6 +1903,177 @@ export const genP4Trial: Gen<P4Trial> = (choices) => {
   return { model, edits };
 };
 
+// ---------------------------------------------------------------------------
+// Fixed form vectors (TEST-SPEC 17 S-9; 16 preamble)
+//
+// Every form renderWorkspace can spell — the import header, the first prose
+// line, prose hosting embeddings in every reference spelling (local quote
+// flavors; external dot, double- and single-quoted computed access; the bare
+// binding for a file root), blank and comment lines, sections with every
+// prop form (`tags` omitted, empty, dotted, duplicated; `coverage="none"`;
+// `d` omitted, empty, single as `d={ref}` and `d={[ref]}`, a pair, a
+// duplicate), nested three deep, and an empty section — in one fixed model,
+// plus the added section of an addChild edit; the S-9 self-test proves every
+// vector derives before any product exists, and each draw's sources are
+// judged the same way before the product sees them (`mdxSources` below).
+// P-5 and P-6 stage through this rendering too (section-16-p5-p6.ts adds
+// its own decorated forms).
+
+function vectorProse(text: string): ProseItem {
+  return { kind: "prose", parts: [{ kind: "text", text }] };
+}
+
+function vectorSection(
+  seg: string,
+  items: BodyItem[],
+  props: Partial<
+    Pick<SectionItem, "tags" | "coverageNone" | "deps" | "depsSingle">
+  > = {},
+): SectionItem {
+  return {
+    kind: "section",
+    seg,
+    tags: null,
+    coverageNone: false,
+    deps: null,
+    depsSingle: false,
+    items,
+    ...props,
+  };
+}
+
+const P4_FORM_MODEL: WorkspaceModel = {
+  files: [
+    {
+      nextSeg: 5,
+      items: [
+        vectorProse("a0 first"),
+        vectorSection("s0", [vectorProse("k9 body")]),
+        { kind: "blank" },
+        { kind: "comment", words: "note am q" },
+        vectorSection("s1", [], { tags: [], coverageNone: true, deps: [] }),
+        vectorSection(
+          "s2",
+          [
+            {
+              kind: "prose",
+              parts: [
+                { kind: "text", text: "a0 lead " },
+                { kind: "embed", ref: { file: 0, dotted: "s0", spell: 0 } },
+                { kind: "text", text: " b1 mid " },
+                { kind: "embed", ref: { file: 0, dotted: "s0", spell: 1 } },
+                { kind: "text", text: " c2 tail" },
+              ],
+            },
+            vectorSection(
+              "s0",
+              [vectorSection("s0", [vectorProse("k9 deep")])],
+              {
+                tags: ["t1", "t2", "beta.x", "t1"],
+                deps: [{ file: 0, dotted: "s0", spell: 1 }],
+                depsSingle: true,
+              },
+            ),
+          ],
+          { deps: [{ file: 0, dotted: "s0", spell: 0 }], depsSingle: false },
+        ),
+        vectorSection("s3", [vectorProse("k9 pair")], {
+          deps: [
+            { file: 0, dotted: "s0", spell: 0 },
+            { file: 0, dotted: "s1", spell: 1 },
+          ],
+        }),
+        vectorSection("s4", [vectorProse("k9 dup")], {
+          deps: [
+            { file: 0, dotted: "s0", spell: 0 },
+            { file: 0, dotted: "s0", spell: 1 },
+          ],
+        }),
+      ],
+    },
+    {
+      nextSeg: 1,
+      items: [
+        {
+          kind: "prose",
+          parts: [
+            { kind: "text", text: "b0 first " },
+            { kind: "embed", ref: { file: 0, dotted: "", spell: 0 } },
+            { kind: "text", text: " root " },
+            { kind: "embed", ref: { file: 0, dotted: "s2.s0", spell: 0 } },
+            { kind: "text", text: " dot " },
+            { kind: "embed", ref: { file: 0, dotted: "s2.s0", spell: 1 } },
+            { kind: "text", text: " dq " },
+            { kind: "embed", ref: { file: 0, dotted: "s2.s0", spell: 2 } },
+            { kind: "text", text: " sq" },
+          ],
+        },
+        vectorSection("s0", [vectorProse("k9 ext")], {
+          deps: [{ file: 0, dotted: "s3", spell: 2 }],
+          depsSingle: true,
+        }),
+      ],
+    },
+    {
+      nextSeg: 1,
+      items: [
+        vectorProse("c0 first"),
+        vectorSection("s0", [], {
+          tags: ["zeta"],
+          coverageNone: true,
+          deps: [
+            { file: 0, dotted: "", spell: 0 },
+            { file: 1, dotted: "s0", spell: 1 },
+          ],
+        }),
+      ],
+    },
+  ],
+};
+
+/** The fixed form-vector set of the PROP-03 rendering (S-9): name, source. */
+export const P4_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [
+  ...Object.entries(renderWorkspace(P4_FORM_MODEL)).map(
+    ([path, source]): readonly [string, string] => [
+      `rendering forms of ${path}`,
+      source,
+    ],
+  ),
+  ...Object.entries(
+    renderWorkspace(
+      applyEdit(P4_FORM_MODEL, {
+        kind: "addChild",
+        node: "specs/A.mdx",
+        at: 1,
+        text: "added body alpha",
+      }).after,
+    ),
+  )
+    .filter(([path]) => path === "specs/A.mdx")
+    .map(([path, source]): readonly [string, string] => [
+      `rendering forms of ${path} after an addChild edit`,
+      source,
+    ]),
+];
+
+/**
+ * S-9's per-draw check (helpers/property.ts `mdxSources`): the staged
+ * workspace and, per edit, the files the edit rewrites — every source the
+ * trial stages, judged before the product sees it.
+ */
+function stagedP4Sources(trial: P4Trial): DrawSource[] {
+  const sources: DrawSource[] = Object.entries(renderWorkspace(trial.model));
+  for (const edit of trial.edits) {
+    const { after, description } = applyEdit(trial.model, edit);
+    for (const [path, source] of Object.entries(renderWorkspace(after))) {
+      sources.push([path, source, `after the edit — ${description}`]);
+    }
+  }
+  return sources;
+}
+
 /** Counterexample rendering: staged sources plus the edit data. */
 function renderTrial(trial: P4Trial): string {
   return JSON.stringify({
@@ -2123,7 +2298,12 @@ const P_4 = defineProductTest({
       async (trial) => {
         await runP4Trial(product, trial);
       },
-      { runs: 6, maxShrinkExecutions: 100, render: renderTrial },
+      {
+        runs: 6,
+        maxShrinkExecutions: 100,
+        render: renderTrial,
+        mdxSources: stagedP4Sources,
+      },
     );
   },
 });
