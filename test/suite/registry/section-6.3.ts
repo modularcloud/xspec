@@ -103,6 +103,7 @@ import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
 import {
   assertSameJson,
   buildFindings,
@@ -134,8 +135,9 @@ const GARBAGE_LINE = "?? harness-injected garbage: not a journal entry ??";
 async function withWorkspace<T>(
   files: Readonly<Record<string, string>>,
   body: (workspace: TestWorkspace) => Promise<T>,
+  mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
-  const workspace = await TestWorkspace.create({ files });
+  const workspace = await TestWorkspace.create({ files, mdx });
   try {
     return await body(workspace);
   } finally {
@@ -901,6 +903,8 @@ const T6_3_4 = defineProductTest({
           context,
         );
       },
+      // S-9: the baseline's broken source is the staged parse failure.
+      { unparseable: [F4_BROKEN_FILE] },
     );
 
     // --- Unresolvable ref ---

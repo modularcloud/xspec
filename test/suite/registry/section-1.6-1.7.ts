@@ -1025,6 +1025,8 @@ const T1_6_5 = defineProductTest({
         ),
         "specs/bom.mdx": BOM + '<S id="b">\nBom content.\n</S>\n',
       },
+      // S-9: both spec sources are forms 14.20 declares unparseable.
+      mdx: { unparseable: ["specs/bad-utf8.mdx", "specs/bom.mdx"] },
     });
     try {
       const context =

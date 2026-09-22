@@ -987,6 +987,8 @@ const T11_4_2 = defineProductTest({
         [OV_CODE_FILE]: OV_CODE_SOURCE,
         [OV_DECOY_FILE]: OV_DECOY_SOURCE,
       },
+      // S-9: the undiscovered decoy is deliberately unparseable (14.20).
+      mdx: { unparseable: [OV_DECOY_FILE] },
     });
     // The file the ascending outside-root spellings name when resolved,
     // beside the root (T7-4's discipline: exit 2 never from a side reason).
@@ -2041,6 +2043,8 @@ const T11_4_4 = defineProductTest({
         [CODE_TARGET_FILE]: CODE_TARGET_SOURCE,
         [IMPORTS_FILE]: IMPORTS_SOURCE,
       },
+      // S-9: the masked target begins with a byte-order mark (14.20).
+      mdx: { unparseable: [MASKED_TARGET_FILE] },
     });
     try {
       // Invocation 1 (CONF-AVAIL's enumerated surface: no gate-reference

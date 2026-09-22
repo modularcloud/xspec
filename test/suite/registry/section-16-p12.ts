@@ -197,6 +197,8 @@ export interface P12Trial {
   readonly files: ReadonlyArray<readonly [string, string]>;
   /** Human-readable twist description (`"none"` when none applied). */
   readonly twist: string;
+  /** The file the break-parse twist left unparseable (14.20), if any. */
+  readonly unparseable?: string;
 }
 
 /**
@@ -313,7 +315,11 @@ export const genP12Trial: Gen<P12Trial> = (choices) => {
   const appendix =
     twistKind === "duplicate-id" ? DUPLICATE_ID_APPENDIX : BREAK_PARSE_APPENDIX;
   files[target] = [path, content + appendix];
-  return { files, twist: `${twistKind} on ${path}` };
+  return {
+    files,
+    ...(twistKind === "break-parse" ? { unparseable: path } : {}),
+    twist: `${twistKind} on ${path}`,
+  };
 };
 
 /** Counterexample rendering: the twist and the staged sources, in full. */
@@ -421,6 +427,11 @@ async function runP12Trial(
     files: {
       "xspec.config.ts": SPECS_ONLY_CONFIG,
       ...Object.fromEntries(trial.files),
+    },
+    // S-9: the break-parse twist's file is the one unparseable source the
+    // document declares; every other composed file must derive.
+    mdx: {
+      unparseable: trial.unparseable === undefined ? [] : [trial.unparseable],
     },
   });
   try {

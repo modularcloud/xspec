@@ -239,6 +239,7 @@ import {
   assertNoCompileErrors,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
 import type {
   BearerLocationExpectation,
   FindingSourceExpectation,
@@ -344,9 +345,11 @@ async function withWorkspace<T>(
   config: string,
   files: Readonly<Record<string, string>>,
   body: (workspace: TestWorkspace) => Promise<T>,
+  mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
+    mdx,
   });
   try {
     return await body(workspace);
@@ -3749,6 +3752,8 @@ const T6_5_5 = defineProductTest({
             `file and the location of the parse failure (SPEC 14, 14.20)`,
         );
       },
+      // S-9: the origin file is the staged parse failure (14.20).
+      { unparseable: [U5_BROKEN] },
     );
 
     // --- Parse-local existence: duplicate spellings still establish it ---

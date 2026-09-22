@@ -794,6 +794,8 @@ const T11_5_2 = defineProductTest({
         [OS_CODE_FILE]: OS_CODE_SOURCE,
         [OS_DECOY_FILE]: OS_DECOY_SOURCE,
       },
+      // S-9: the undiscovered decoy is deliberately unparseable (14.20).
+      mdx: { unparseable: [OS_DECOY_FILE] },
     });
     try {
       await assertLeavesUnchanged(
@@ -1454,6 +1456,8 @@ const T11_5_3 = defineProductTest({
         [OC_CASSE_FILE]: OC_CASSE_SOURCE,
         [RC_PATH]: RC_SOURCE,
       },
+      // S-9: casse.mdx is the staged parse failure (14.20).
+      mdx: { unparseable: [OC_CASSE_FILE] },
     });
     try {
       if (NU3_STAGED) {

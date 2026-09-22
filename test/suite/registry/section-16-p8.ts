@@ -685,7 +685,8 @@ async function runFuzzTrial(
         "state for the modifies-nothing arm, SPEC 12.1)",
     );
     for (const [path, bytes] of trial.files) {
-      await workspace.file(path, bytes);
+      // S-9: a mutated document's derivability is undeclared (fuzz).
+      await workspace.file(path, bytes, { mdx: "unchecked" });
     }
     await runFuzzArm(product, workspace, ["build", "--json"], trial);
     for (const argv of trial.commands) {

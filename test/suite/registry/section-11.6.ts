@@ -2165,6 +2165,8 @@ const T11_6_4 = defineProductTest({
         [JOURNAL_PATH]: "pas une entree de journal valide\n",
         [CORRUPT_SESSION_PATH]: "{{{ pas du JSON — session corrompue\n",
       },
+      // S-9: casse.mdx is the imperfect workspace's parse failure (14.20).
+      mdx: { unparseable: ["specs/casse.mdx"] },
     });
     try {
       // Staging premise (SPEC 14; the Exclusions' positively-reported

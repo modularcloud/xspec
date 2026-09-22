@@ -1938,7 +1938,7 @@ async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
     // established through `build --json` itself — exit 1, exactly the
     // condition-20 finding at the BOM file's offset 0 — before any command
     // is held and outside every bracket.
-    await workspace.file(BOM_FILE, BOM_MDX);
+    await workspace.file(BOM_FILE, BOM_MDX, { mdx: "unparseable" });
     const premise =
       "T13.5-8 staging premise `build --json` on the failing workspace " +
       `(${BOM_FILE} begins with a byte-order mark)`;

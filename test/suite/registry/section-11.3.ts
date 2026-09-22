@@ -963,6 +963,8 @@ const T11_3_2 = defineProductTest({
           [FILTER_APP_FILE]: FILTER_APP_SOURCE,
           [FILTER_TRAP_FILE]: FILTER_TRAP_SOURCE,
         },
+        // S-9: the undiscovered decoy is deliberately unparseable (14.20).
+        mdx: { unparseable: [FILTER_TRAP_FILE] },
       });
       // The file the ascending outside-root spellings name when resolved,
       // beside the root (T7-4's discipline: exit 2 never from a side reason).
@@ -1594,6 +1596,8 @@ const T11_3_3 = defineProductTest({
           [TO_DUP_FILE]: TO_DUP_SOURCE,
           [TO_DECOY_FILE]: TO_DECOY_SOURCE,
         },
+        // S-9: the masked file is the staged parse failure (14.20).
+        mdx: { unparseable: [TO_MASKED_FILE] },
       });
       let twins: ConfigurationStateTwins | undefined;
       try {

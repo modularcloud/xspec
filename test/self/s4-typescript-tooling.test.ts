@@ -345,6 +345,9 @@ test(
       "",
     ].join("\n");
     const workspace = await makeWorkspace({
+      // S-9: doc.mdx is a source-map decoy holding TypeScript, not an MDX
+      // fixture — no discovery reaches it.
+      mdx: { unchecked: ["doc.mdx"] },
       files: {
         "gen/orig.ts": original,
         // The pseudo-original the map will point at: same shape (line/column

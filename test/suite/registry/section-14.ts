@@ -862,6 +862,11 @@ const T14_3_BROKEN_TS = [
 ].join("\n");
 
 const T14_3_FILES: WorkspaceDecl = {
+  // S-9: the MDX sources 14.20 declares unparseable (the TypeScript one is
+  // the product's alone to judge).
+  mdx: {
+    unparseable: ["specs/brokenmdx.mdx", "specs/badutf8.mdx", "specs/bom.mdx"],
+  },
   files: {
     "xspec.config.ts": SPEC_AND_CODE_CONFIG,
     "specs/brokenmdx.mdx": T14_3_BROKEN_MDX,
@@ -1026,7 +1031,10 @@ const T14_3 = defineProductTest({
     // the configuration — for `build` and `check` alike, with invalid
     // sources present.
     await withWorkspace(
-      { files: T14_3_CONFIG_ARM_FILES },
+      {
+        files: T14_3_CONFIG_ARM_FILES,
+        mdx: { unparseable: ["specs/broken.mdx"] },
+      },
       async (workspace) => {
         await expectConfigurationError(
           product,

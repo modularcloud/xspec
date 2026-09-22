@@ -489,6 +489,8 @@ const T11_2_1 = defineProductTest({
         [B_FILE]: B_SOURCE,
         [C_FILE]: C_SOURCE,
       },
+      // S-9: B is the staged parse failure (14.20).
+      mdx: { unparseable: [B_FILE] },
     });
     try {
       // --- The gate reference and staging integrity: `build` fails with
@@ -3345,6 +3347,7 @@ const T11_2_5 = defineProductTest({
           [C_FILE]: C_SOURCE,
           [WRONG_KIND_CODE_FILE]: WRONG_KIND_CODE_SOURCE,
         },
+        mdx: { unparseable: [B_FILE] },
       });
       try {
         await assertLeavesUnchanged(

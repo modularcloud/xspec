@@ -609,12 +609,28 @@ async function runAvailabilityArm(
 }
 
 /** The P-11 property body for one trial (see the module header). */
+/** The `.mdx` paths whose staged bytes differ from the base file's. */
+function mutatedMdxPaths(trial: AvailabilityTrial): string[] {
+  const base = new Map(
+    FUZZ_BASE_FILES.map(([path, text]) => [path, Buffer.from(text, "utf8")]),
+  );
+  return trial.files
+    .filter(
+      ([path, bytes]) =>
+        path.endsWith(".mdx") && !(base.get(path)?.equals(bytes) ?? false),
+    )
+    .map(([path]) => path);
+}
+
 async function runAvailabilityTrial(
   product: ProductBinding,
   trial: AvailabilityTrial,
 ): Promise<void> {
   const workspace = await TestWorkspace.create({
     files: Object.fromEntries(trial.files),
+    // S-9: a mutated document is a fuzz staging whose derivability the
+    // document does not declare; the unmutated base files stay judged.
+    mdx: { unchecked: mutatedMdxPaths(trial) },
   });
   try {
     for (const arm of trial.arms) {

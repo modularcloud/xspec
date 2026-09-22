@@ -1878,7 +1878,10 @@ const T12_0_10 = defineProductTest({
     // valid twin; masking flips `show` on the unparseable file to the gated
     // report.
     await withWorkspace(
-      { files: PRECEDENCE_FAILING_FILES },
+      {
+        files: PRECEDENCE_FAILING_FILES,
+        mdx: { unparseable: [PREC_BROKEN_FILE] },
+      },
       async (failing) => {
         await withWorkspace({ files: PRECEDENCE_TWIN_FILES }, async (twin) => {
           // Twin premises: the twin is valid, and every name the rows turn
