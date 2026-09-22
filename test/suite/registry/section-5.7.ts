@@ -50,16 +50,20 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
+  assertFindingIdentities,
   assertFindingLocated,
+  assertFindingLocatesExactly,
   assertSameJson,
   buildFindings,
   buildOk,
   byteWindow,
   expectExit,
+  findingsInSourceOrder,
   runJson,
 } from "./support.js";
 
@@ -1300,6 +1304,15 @@ const T5_7_3 = defineProductTest({
 // spells an EXISTING id (`` `ok` ``), so a product that evaluates it instead
 // of classifying it dynamic both drops the 14.8 finding and emits a phantom
 // resolved record — failing twice, visibly.
+//
+// The entry's collision and cross-module classes — a chain rooted at an
+// identifier an import and a same-scope value-level declaration both bind
+// (T4.5-8), a type-only collision's chains (T4-5), a call through a
+// colliding `text` identifier (T4.5-9), and a cross-module call whose
+// argument does not resolve or is not static beside the resolving one
+// that records its occurrence (T4.4-1) — are staged in a second workspace
+// of their own (below the expected table), so the exported table this
+// workspace pins, which T11.3-1 expands by position, is untouched.
 
 export const NO_OCC_BASE_SOURCE = '<S id="a">\nA text.\n</S>\n';
 export const NO_OCC_SPARE_SOURCE = '<S id="sp">\nSpare text.\n</S>\n';
@@ -1560,10 +1573,373 @@ function assertNoOccFindings(
   );
 }
 
+// ---------------------------------------------------------------------------
+// T5.7-4 (second workspace) — the collision and cross-module classes
+// ---------------------------------------------------------------------------
+
+// The entry's further no-occurrence classes (SPEC 5.7, 2.4, 4, 4.4, 4.5),
+// staged in one workspace beside two resolving control spellings so the
+// complete record multiset individuates each class:
+//
+// - `src/collide.ts` (T4.5-8's class): an identifier the spec module import
+//   and a same-scope value-level declaration (`const SPEC = 1`) both bind
+//   roots no resolving chain — the marker `SPEC.a` and the call
+//   `text(SPEC.b)` are condition 7 each, beside the one condition-15
+//   collision locating both declarations; no edge, no occurrence.
+// - `src/typed.ts` (T4-5's class): the value import beside a type-only
+//   `import type SPEC from "../specs/B.xspec"` — a colliding identifier
+//   roots a chain at no binding whether or not either import is type-only
+//   (4): 14.15 locating both imports, 14.7 for each chain, no record —
+//   never the type-only exemption's silence (T4-4), which a product rooting
+//   the chain at whichever binding TypeScript's own resolution prefers
+//   exhibits instead.
+// - `src/calltext.ts` (T4.5-9's class): `text` bound by the import and by a
+//   same-scope `function text(x: unknown) {}` — the call `text(SPEC.a)` is
+//   no spec module's `text` call: 14.15 locating both declarations, 14.18
+//   at `SPEC.a` (no 14.6, 14.7, 14.8, or 14.11), no record.
+// - `src/cross.ts` (T4.4-1's class): `textB(A.missing)` is condition 7
+//   alone and `textB(A.a!)` condition 8 alone — no record for either — while
+//   the resolving cross-module call `textB(A.a)` records its `embeds`
+//   occurrence beside its condition-11 finding (`identities` exactly the
+//   called module), 5.7's one occurrence-bearing finding.
+// - `src/ctrl.ts` (the positive control): the same import, marker, and call
+//   colliding with nothing, recording their two edges — so a product that
+//   answers no records at all fails by count, and one that roots a colliding
+//   chain at one of its bindings emits a phantom tuple the exact comparison
+//   rejects.
+//
+// Every code file is pure ASCII and composed from exact parts, so each
+// pinned construct's window is the UTF-8 byte length of the parts before it
+// (`partWindow`): a 14.15 finding is pinned to exactly two locations, one
+// per colliding declaration, and every spelling finding to one location
+// within its construct's window (the byte-exact spans are T4.5-8's,
+// T4.5-9's, and T4.4-1's own business).
+
+const COLLISION_A_SOURCE =
+  '<S id="a">\nAlpha text.\n</S>\n\n<S id="b">\nBeta text.\n</S>\n';
+const COLLISION_B_SOURCE = '<S id="bb">\nBravo text.\n</S>\n';
+
+/** The positive control: the import roots both chains (SPEC 2.4, 4.5). */
+const COLLISION_CTRL_SOURCE =
+  'import SPEC, { text } from "../specs/A.xspec";\n\nSPEC.a;\ntext(SPEC.b);\n';
+
+// T4.5-8's class — parts: [0] the import, [2] the declarator `SPEC = 1`
+// (the located construct, the `const` statement excluded, SPEC 14), [4]
+// the marker chain, [6] the `text(...)` call.
+const COLLIDE_PARTS: readonly string[] = [
+  'import SPEC, { text } from "../specs/A.xspec";',
+  "\n\nconst ",
+  "SPEC = 1",
+  ";\n\n",
+  "SPEC.a",
+  ";\n",
+  "text(SPEC.b)",
+  ";\n",
+];
+
+// T4-5's class — parts: [0] the value import, [2] the type-only import of
+// a second spec module, then `text` bound by a separate import of A (two
+// declarations of one module binding distinct identifiers, valid under 4),
+// [4] the marker chain, [6] the `text(...)` call.
+const TYPED_PARTS: readonly string[] = [
+  'import SPEC from "../specs/A.xspec";',
+  "\n",
+  'import type SPEC from "../specs/B.xspec";',
+  '\nimport { text } from "../specs/A.xspec";\n\n',
+  "SPEC.a",
+  ";\n",
+  "text(SPEC.b)",
+  ";\n",
+];
+
+// T4.5-9's class — parts: [0] the import binding `text`, [2] the same-scope
+// function declaration binding it too, [4] the argument chain `SPEC.a` the
+// 14.18 locates (the identifier extended by its longest static chain).
+const CALLTEXT_PARTS: readonly string[] = [
+  'import SPEC, { text } from "../specs/A.xspec";',
+  "\n\n",
+  "function text(x: unknown) {}",
+  "\n\ntext(",
+  "SPEC.a",
+  ");\n",
+];
+
+// T4.4-1's class — parts: [1] the unresolved-argument call (14.7 alone),
+// [3] the non-static-argument call (14.8 alone), [5] the resolving
+// cross-module call (14.11, its occurrence recorded beside it).
+const CROSS_PARTS: readonly string[] = [
+  'import A from "../specs/A.xspec";\n' +
+    'import { text as textB } from "../specs/B.xspec";\n\n',
+  "textB(A.missing)",
+  ";\n",
+  "textB(A.a!)",
+  ";\n",
+  "textB(A.a)",
+  ";\n",
+];
+
+const COLLISION_CODE_FILES = {
+  "src/calltext.ts": CALLTEXT_PARTS.join(""),
+  "src/collide.ts": COLLIDE_PARTS.join(""),
+  "src/cross.ts": CROSS_PARTS.join(""),
+  "src/ctrl.ts": COLLISION_CTRL_SOURCE,
+  "src/typed.ts": TYPED_PARTS.join(""),
+} as const;
+
+/** A part's end-widened byte window from the exact parts before it. */
+function partWindow(
+  parts: readonly string[],
+  index: number,
+): { readonly start: number; readonly end: number } {
+  return byteWindow(parts.slice(0, index).join(""), parts[index]!);
+}
+
+// The complete expected record multiset: the control's two spellings and the
+// resolving cross-module call — nothing for the colliding classes' spellings
+// (four chains rooted at a colliding identifier, the call through the
+// colliding `text`, the two non-resolving cross-module calls). Every source
+// is the whole file — no named unit encloses a top-level statement (SPEC
+// 4.6) — so a record's source identity is the file's own path.
+const COLLISION_UNITS: readonly OccurrenceUnit[] = [
+  {
+    what: "control marker `SPEC.a` in src/ctrl.ts",
+    file: "src/ctrl.ts",
+    kind: "references",
+    source: "src/ctrl.ts",
+    target: "specs/A.mdx#a",
+    count: 1,
+  },
+  {
+    what: "control call `text(SPEC.b)` in src/ctrl.ts",
+    file: "src/ctrl.ts",
+    kind: "embeds",
+    source: "src/ctrl.ts",
+    target: "specs/A.mdx#b",
+    count: 1,
+  },
+  {
+    what: "resolving cross-module call `textB(A.a)` in src/cross.ts",
+    file: "src/cross.ts",
+    kind: "embeds",
+    source: "src/cross.ts",
+    target: "specs/A.mdx#a",
+    count: 1,
+  },
+];
+
+// The staged defects, exactly (SPEC 14: every condition reported and nothing
+// else — so the control file and the resolving cross-module call's argument
+// provably trigger nothing beside these).
+const COLLISION_EXPECTED_CONDITIONS = {
+  "14.7": 5,
+  "14.8": 1,
+  "14.11": 1,
+  "14.15": 3,
+  "14.18": 1,
+} as const;
+
+/** One expected finding: its file and, in location order, its bearers' windows. */
+interface CollisionFindingExpectation {
+  /** What the finding reports (failure diagnostics). */
+  readonly what: string;
+  /** The workspace-relative file every location names. */
+  readonly file: string;
+  /** One window per expected location, in 12.7 location order. */
+  readonly windows: readonly { readonly start: number; readonly end: number }[];
+}
+
+// Per condition, the expected findings in (file, first-location start) order
+// — `findingsInSourceOrder`'s — each pinned to exactly one location per
+// bearer within the bearer's window. File order is byte order:
+// `src/calltext.ts` < `src/collide.ts` < `src/cross.ts` < `src/typed.ts`.
+const COLLISION_EXPECTED_FINDINGS: Readonly<
+  Record<
+    keyof typeof COLLISION_EXPECTED_CONDITIONS,
+    readonly CollisionFindingExpectation[]
+  >
+> = {
+  "14.7": [
+    {
+      what: "the marker `SPEC.a` rooted at the doubly-bound `SPEC`",
+      file: "src/collide.ts",
+      windows: [partWindow(COLLIDE_PARTS, 4)],
+    },
+    {
+      what: "the call `text(SPEC.b)` rooted at the doubly-bound `SPEC`",
+      file: "src/collide.ts",
+      windows: [partWindow(COLLIDE_PARTS, 6)],
+    },
+    {
+      what: "the cross-module call `textB(A.missing)`, its argument unresolved (condition 7 alone, SPEC 14.11)",
+      file: "src/cross.ts",
+      windows: [partWindow(CROSS_PARTS, 1)],
+    },
+    {
+      what: "the marker `SPEC.a` rooted at the type-only-collided `SPEC`",
+      file: "src/typed.ts",
+      windows: [partWindow(TYPED_PARTS, 4)],
+    },
+    {
+      what: "the call `text(SPEC.b)` rooted at the type-only-collided `SPEC`",
+      file: "src/typed.ts",
+      windows: [partWindow(TYPED_PARTS, 6)],
+    },
+  ],
+  "14.8": [
+    {
+      what: "the cross-module call `textB(A.a!)`, its argument not static (condition 8 alone, SPEC 14.11)",
+      file: "src/cross.ts",
+      windows: [partWindow(CROSS_PARTS, 3)],
+    },
+  ],
+  "14.11": [
+    {
+      what: "the resolving cross-module call `textB(A.a)`",
+      file: "src/cross.ts",
+      windows: [partWindow(CROSS_PARTS, 5)],
+    },
+  ],
+  "14.15": [
+    {
+      what: "`text` bound by the import and by `function text(x: unknown) {}`",
+      file: "src/calltext.ts",
+      windows: [partWindow(CALLTEXT_PARTS, 0), partWindow(CALLTEXT_PARTS, 2)],
+    },
+    {
+      what: "`SPEC` bound by the import and by the declarator `SPEC = 1`",
+      file: "src/collide.ts",
+      windows: [partWindow(COLLIDE_PARTS, 0), partWindow(COLLIDE_PARTS, 2)],
+    },
+    {
+      what: "`SPEC` bound by the value import and by the type-only import",
+      file: "src/typed.ts",
+      windows: [partWindow(TYPED_PARTS, 0), partWindow(TYPED_PARTS, 2)],
+    },
+  ],
+  "14.18": [
+    {
+      what: "`SPEC.a` passed to the call through the colliding `text` identifier (no `text` call)",
+      file: "src/calltext.ts",
+      windows: [partWindow(CALLTEXT_PARTS, 4)],
+    },
+  ],
+};
+
+/**
+ * The collision workspace's findings: the condition multiset exact, then
+ * every finding pinned to its file and, in location order, to exactly one
+ * location per bearer within the bearer's window — a 14.15 locating every
+ * colliding declaration, a spelling finding its one construct — and the
+ * 14.11's `identities` exactly the called module.
+ */
+function assertCollisionFindings(
+  findings: readonly Finding[],
+  context: string,
+): void {
+  assertConditionCounts(
+    findings,
+    COLLISION_EXPECTED_CONDITIONS,
+    `${context}: exactly the staged defects are reported — five condition-7 ` +
+      `chains (two rooted at the doubly-bound \`SPEC\`, two at the ` +
+      `type-only-collided \`SPEC\`, the unresolved-argument cross-module ` +
+      `call), one 14.8 (the non-static cross-module argument), one 14.11 ` +
+      `(the resolving cross-module call), three 14.15 collisions, one 14.18 ` +
+      `(the argument of the call through the colliding \`text\`) — and ` +
+      `NOTHING for the control file or beside them (SPEC 14, 2.4, 4, 4.4, ` +
+      `4.5)`,
+  );
+  for (const [condition, expectations] of Object.entries(
+    COLLISION_EXPECTED_FINDINGS,
+  )) {
+    // The count is pinned above, so each expectation has its finding.
+    const actual = findingsInSourceOrder(findings, condition);
+    expectations.forEach((expectation, index) => {
+      assertFindingLocatesExactly(
+        actual[index]!,
+        expectation.windows.map((window) => ({
+          file: expectation.file,
+          window,
+        })),
+        `${context}: the ${condition} finding for ${expectation.what} locates ` +
+          (expectation.windows.length === 1
+            ? "its one construct"
+            : "every colliding declaration, one location each,") +
+          ` within the construct's window and nothing else (SPEC 14, 1.7)`,
+      );
+    });
+  }
+  assertFindingIdentities(
+    findingsInSourceOrder(findings, "14.11")[0]!,
+    ["specs/B.mdx"],
+    `${context}: the 14.11's \`identities\` hold exactly the called module's ` +
+      `root identity (SPEC 14.11, 12.7)`,
+  );
+}
+
+/**
+ * The second workspace: `build --json` pins the staging premise, then a bare
+ * `occurrences` (exit 1, the domain's findings accompanying, SPEC 11.2)
+ * reports records for exactly the three resolving spellings — none for a
+ * chain rooted at a colliding identifier, the call through a colliding
+ * `text`, or a non-resolving cross-module call, while the resolving
+ * cross-module call's record stands beside its finding (5.7).
+ */
+async function assertCollisionClassesRecordNothing(
+  product: ProductBinding,
+): Promise<void> {
+  const workspace = await TestWorkspace.create({
+    files: {
+      "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+      "specs/A.mdx": COLLISION_A_SOURCE,
+      "specs/B.mdx": COLLISION_B_SOURCE,
+      ...COLLISION_CODE_FILES,
+    },
+  });
+  try {
+    const buildContext =
+      "T5.7-4 collision workspace `build --json` (staging premise)";
+    assertCollisionFindings(
+      await buildFindings(product, workspace, buildContext),
+      buildContext,
+    );
+
+    const context = "T5.7-4 collision workspace `occurrences`";
+    const result = await expectExit(
+      product,
+      workspace,
+      ["occurrences"],
+      1,
+      `${context} — an answer carrying any finding exits 1, the full ` +
+        `answer document still emitted (SPEC 11.2, 11.3)`,
+    );
+    const report = decodeOccurrencesReport(
+      parseJsonStdout(result, context),
+      context,
+    );
+    assertCollisionFindings(report.findings, context);
+    assertSameJson(
+      report.occurrences.map(renderOccurrenceUnit).sort(),
+      expectedUnitMultiset(COLLISION_UNITS),
+      `${context}: the complete (file, [kind], source -> target) record ` +
+        `multiset — exactly the control's marker and call and the resolving ` +
+        `cross-module call (SPEC 5.7, 11.2): no record for a chain rooted at ` +
+        `an identifier an import and a same-scope value-level declaration ` +
+        `both bind (T4.5-8), a type-only collision's chains (T4-5), a call ` +
+        `through a colliding \`text\` identifier (T4.5-9), or a cross-module ` +
+        `call whose argument does not resolve or is not static (T4.4-1) — ` +
+        `each reaching consumers only through its finding's range — while ` +
+        `the resolving cross-module call records its occurrence beside its ` +
+        `condition-11 finding`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
 const T5_7_4 = defineProductTest({
   id: "T5.7-4",
   title:
-    "constructs that record no edge record no occurrence — an import declaration (binding used and unused), a type-only binding's marker-shaped uses, a chain rooted at a shadowing local declaration, a dynamic reference spelling and unresolving ones (each also its finding, 14.8/14.5–14.7) — so `occurrences` reports records for exactly the resolving spellings, never a record with an unavailable target, the unresolved spelling's position reaching consumers only through its finding's range (the MDX embedding form's spanning its full braced container), the answer carrying the domain's findings, exit 1 (SPEC 5.7, 2.1, 2.4, 4.5, 11.2, 11.3, 14)",
+    "constructs that record no edge record no occurrence — an import declaration (binding used and unused), a type-only binding's marker-shaped uses, a chain rooted at a shadowing local declaration, a chain rooted at an identifier an import and a same-scope value-level declaration both bind (its collision and unresolved findings beside it), a type-only collision's chains, a call through a colliding `text` identifier, a cross-module call whose argument does not resolve or is not static (the resolving cross-module call recording its occurrence beside its condition-11 finding), a dynamic reference spelling and unresolving ones (each also its finding, 14.8/14.5–14.7) — so `occurrences` reports records for exactly the resolving spellings, never a record with an unavailable target, the unresolved spelling's position reaching consumers only through its finding's range (the MDX embedding form's spanning its full braced container), the answer carrying the domain's findings, exit 1 (SPEC 5.7, 2.1, 2.4, 4, 4.4, 4.5, 11.2, 11.3, 14)",
   run: async (product) => {
     assertNoOccContainerRange();
 
@@ -1629,6 +2005,10 @@ const T5_7_4 = defineProductTest({
     } finally {
       await workspace.dispose();
     }
+
+    // The second workspace: the entry's collision and cross-module classes
+    // beside resolving controls (SPEC 5.7, 2.4, 4, 4.4, 4.5).
+    await assertCollisionClassesRecordNothing(product);
   },
 });
 
