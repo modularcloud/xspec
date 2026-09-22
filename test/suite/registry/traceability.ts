@@ -368,6 +368,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // precedent), so no "14"; 11.2-11.5/12.7/6.5 are carriage context with
   // home coverage at T11.2-3/T11.3-*/T11.4-*/T11.5-*/T12.7-*/T6.5-*.
   "T12.0-13": ["12.0"],
+  // T12.0-14: the grammar arms assert `ids --file`'s restriction (12.3),
+  // `build`'s flag set (12.1), the session name `-a` and its file (10.1),
+  // `review create` and `resolve --note` (10.7), `--kinds` list values
+  // (11.1), the `--config` path's directory as the root (7), and the
+  // error document (12.7); no "14": the missing-configuration arm pins
+  // the stream contract, not the finding (T12.0-13's precedent).
+  "T12.0-14": ["12.0", "12.3", "12.1", "10.1", "10.7", "11.1", "7", "12.7"],
   "T12.1-1": ["12.1"],
   "T12.1-3": ["12.1"],
   "T12.1-4": ["12.1"],
