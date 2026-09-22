@@ -56,7 +56,8 @@
 // undecorated — asserted every trial — and then decorated at the moved
 // construct's boundaries. Every decorated byte form is checked live under
 // S-9 (SPEC 14.20): `P5_FORM_VECTORS` (below buildSectionMove) spells each
-// layout the generator can draw, the S-9 self-test
+// layout the generator can draw — at the origin, and as its moved text
+// lands at the destination — the S-9 self-test
 // (test/self/s9-fixture-well-formedness.test.ts) proves every one derives
 // before any product exists, and every draw's staged files are judged the
 // same way before the product sees them (`mdxSources` on the registrations;
@@ -65,18 +66,33 @@
 // whitespace sharing a tag's line) or fully inline (the whole element
 // inside one paragraph, non-whitespace forcers on BOTH sides — an element
 // opened inline must also close inline, so SPEC 6.2's worked shape is
-// staged with a balanced close such as `</S>ptail`). The staged layouts:
+// staged with a balanced close such as `</S>ptail`) — and it must parse
+// again at the destination, where the moved text lands at a line start
+// followed by a terminator with the parent's forcers gone (SPEC 6.5), so
+// an inline layout's boundary lines agree: the opening tag's remainder and
+// the closing tag's lead are both grammar whitespace (nothing, spaces, a
+// tab — each tag then a flow-position tag there; T6.2-3's staging (a)) or
+// both prose the flow attempt cannot take (`k9 lead`/`k9 tail`, U+000B,
+// U+000C — each tag then staying in text position; staging (b)), the
+// `body</S>` variant (staging (c)) closing inside the paragraph its last
+// body line makes under a prose remainder; the one-sided spellings SPEC
+// 6.2 and 6.5 refuse are never drawn (TEST-SPEC §16 P-5; T6.5-16's arms).
+// The staged layouts:
 //   * flow — the PROP-03 form; any subtree (child sections, blanks,
 //     comments, embeddings); clean boundaries, moved subtree keeps every
 //     hash;
-//   * inline — parent prose immediately before the opening tag
-//     (`plead. <S …>`), moved-root text or whitespace-only residue after it
-//     on the same line (the SPEC 6.2 worked straddling case), moved-root
-//     text or residue before the closing tag, parent prose after it —
-//     balanced combinations only; requires a childless subtree of
-//     plain-text prose items (no embeddings, blanks, comments — an inline
-//     element's interior must stay inside one paragraph), or an empty body
-//     with parent prose on both sides;
+//   * inline — a multi-line in-line element: parent prose immediately
+//     before the opening tag (`plead. <S …>`), the tag's remainder on that
+//     line (nothing, spaces, a tab, `k9 lead`, U+000B, or U+000C), the
+//     body's prose lines, then the closing tag's lead (alike) with parent
+//     prose after it — remainder and lead agreeing in kind as above, the
+//     flow-bound kind forced in-line at the origin by parent prose on both
+//     sides, the text-bound kind by its own remainder and lead (the
+//     parent's decorations then free) — or, under a prose remainder, the
+//     closing tag joined to the last body line (`body</S>`); requires a
+//     childless subtree of plain-text prose items (no embeddings, blanks,
+//     comments — an inline element's interior must stay inside one
+//     paragraph), or an empty body with parent prose on both sides;
 //   * collapse — a single-prose-item section as one line (`<S …>text</S>`,
 //     SPEC 3's in-line example): complete on its line, valid in every
 //     context, optional parent prose on either side (with embeddings in the
@@ -104,7 +120,18 @@
 // fires here. Import rewrites the move performs (additions as own lines,
 // removals with their adjunct drops, 6.5) touch no node's runs, and
 // reference respells never enter any hash (SPEC 5.4), so the oracle's
-// derived after-side stays exact without modeling them.
+// derived after-side stays exact without modeling them. Every staged spec
+// source begins with an empty line (TEST-SPEC §16 P-5; `renderP5Workspace`,
+// the piece builder, and buildSectionMove's own check): offset 0 is then a
+// line-start admissible offset for any import addition — the added
+// declaration an ESM block that empty line ends, whatever the file's first
+// item — which SPEC 6.5's preference takes over any other, so no root's
+// own content changes through an addition (6.2; the drawn space needs none
+// — PROP-03's complete downward import DAG already binds, at every
+// admissible destination, each file a moved subtree references — and
+// T6.5-13(h)/(j) anchor the case deterministically); the kept empty line is
+// each root's first run on both sides alike. The purity arm's workspaces
+// are staged the same way.
 //
 // P-6's category oracle is the baseline graph-diff oracle
 // (helpers/oracles/graph-diff.ts, vetted by its S-6 suite — SPEC 5.6's
@@ -867,7 +894,7 @@ async function runPurityTrial(
   const workspace = await TestWorkspace.create({
     files: {
       "xspec.config.ts": SPECS_ONLY_CONFIG,
-      ...renderWorkspace(state.model),
+      ...renderP5Workspace(state.model),
     },
   });
   try {
@@ -953,12 +980,24 @@ interface MovedLayout {
   readonly form: "flow" | "inline" | "collapse" | "selfClose";
   /** Origin-parent prose immediately before the opening tag (same line). */
   readonly leadOutside: string | null;
-  /** Moved-root bytes after the opening tag on its line (`inline` only). */
+  /**
+   * The opening tag's remainder: moved-root bytes after it on its line,
+   * inside the construct (`inline` only).
+   */
   readonly leadInside: string | null;
-  /** Moved-root bytes before the closing tag on its line (`inline` only). */
+  /**
+   * The closing tag's lead: moved-root bytes before it on its line, inside
+   * the construct (`inline` only; null when `closeJoined`).
+   */
   readonly tailInside: string | null;
   /** Origin-parent bytes immediately after the closing tag (same line). */
   readonly tailOutside: string | null;
+  /**
+   * `inline` only: the closing tag follows the last body line's prose
+   * directly (`body</S>`, T6.2-3's staging (c)) instead of standing on a
+   * line of its own — that prose is then the closing tag's lead.
+   */
+  readonly closeJoined: boolean;
 }
 
 const FLOW_LAYOUT: MovedLayout = {
@@ -967,48 +1006,104 @@ const FLOW_LAYOUT: MovedLayout = {
   leadInside: null,
   tailInside: null,
   tailOutside: null,
+  closeJoined: false,
 };
 
 // Fixed decoration bytes (deterministic staging, HARNESS-01): MDX-safe plain
-// prose per the PROP-03 alphabet, whitespace residues two spaces (never four
-// or more — line-start indentation must not open a Markdown code block).
+// prose per the PROP-03 alphabet; the grammar-whitespace residues two spaces
+// and one tab (SPEC 6.2's "spaces and tabs"); and U+000B and U+000C —
+// whitespace under SPEC 1.4, none to the grammar — built from code points,
+// never escape spellings.
 const LEAD_OUTSIDE = "plead. ";
 const LEAD_INSIDE = "k9 lead";
 const TAIL_INSIDE = "k9 tail";
 const TAIL_OUTSIDE = "ptail";
 const WS_RESIDUE = "  ";
+const TAB_RESIDUE = String.fromCodePoint(0x0009);
+const VT = String.fromCodePoint(0x000b);
+const FF = String.fromCodePoint(0x000c);
 
 /**
- * Every inline combination the validity rule admits (module header's
- * balance rule): a non-whitespace open-side forcer — parent lead before the
- * tag, or moved-root text after it — iff a non-whitespace close-side forcer;
- * whitespace residues force nothing and ride either side. Enumerated in a
- * fixed order, simplest first (shrinking).
+ * Grammar-whitespace remainders and leads: nothing, spaces, a tab. The tag
+ * one adjoins, alone on its line at the destination, is a flow-position tag
+ * there (SPEC 6.2; T6.2-3's staging (a)).
  */
-const INLINE_LAYOUTS: readonly MovedLayout[] = (() => {
-  const layouts: MovedLayout[] = [];
-  for (const leadOutside of [null, LEAD_OUTSIDE]) {
-    for (const leadInside of [null, WS_RESIDUE, LEAD_INSIDE]) {
-      for (const tailInside of [null, WS_RESIDUE, TAIL_INSIDE]) {
-        for (const tailOutside of [null, WS_RESIDUE, TAIL_OUTSIDE]) {
-          const openForced = leadOutside !== null || leadInside === LEAD_INSIDE;
-          const closeForced =
-            tailInside === TAIL_INSIDE || tailOutside === TAIL_OUTSIDE;
-          if (openForced && closeForced) {
-            layouts.push({
-              form: "inline",
-              leadOutside,
-              leadInside,
-              tailInside,
-              tailOutside,
-            });
-          }
-        }
-      }
-    }
-  }
-  return layouts;
-})();
+const WHITESPACE_RESIDUES: readonly (string | null)[] = [
+  null,
+  WS_RESIDUE,
+  TAB_RESIDUE,
+];
+/**
+ * Remainders the flow attempt cannot take — prose, U+000B, U+000C — which
+ * keep the opening tag in text position at the destination (T6.2-3's
+ * stagings (b) and (c)).
+ */
+const PROSE_REMAINDERS: readonly string[] = [LEAD_INSIDE, VT, FF];
+/** Leads alike, for a closing tag on a line of its own (staging (b)). */
+const PROSE_LEADS: readonly string[] = [TAIL_INSIDE, VT, FF];
+
+const OUTSIDE_LEADS: readonly (string | null)[] = [null, LEAD_OUTSIDE];
+const OUTSIDE_TAILS: readonly (string | null)[] = [
+  null,
+  WS_RESIDUE,
+  TAIL_OUTSIDE,
+];
+
+/**
+ * The multi-line in-line layouts whose moved text opens and closes in flow
+ * position at the destination: remainder and lead both grammar whitespace
+ * (T6.2-3's staging (a)), the origin's in-line form then forced by the
+ * parent's prose on both sides (module header's balance rule). Fixed order,
+ * simplest first (shrinking).
+ */
+const INLINE_FLOW_BOUND_LAYOUTS: readonly MovedLayout[] =
+  WHITESPACE_RESIDUES.flatMap((leadInside) =>
+    WHITESPACE_RESIDUES.map((tailInside): MovedLayout => ({
+      form: "inline",
+      leadOutside: LEAD_OUTSIDE,
+      leadInside,
+      tailInside,
+      tailOutside: TAIL_OUTSIDE,
+      closeJoined: false,
+    })),
+  );
+
+/**
+ * The multi-line in-line layouts whose moved text stays in text position on
+ * both sides at the destination: a prose remainder (U+000B/U+000C included)
+ * with a prose lead on the closing tag's own line (T6.2-3's staging (b)) or
+ * with the closing tag joined to the last body line (staging (c)); the
+ * remainder and lead force the origin's in-line form themselves, so the
+ * parent's decorations vary freely. Fixed order, simplest first.
+ */
+const INLINE_TEXT_BOUND_LAYOUTS: readonly MovedLayout[] = OUTSIDE_LEADS.flatMap(
+  (leadOutside) =>
+    PROSE_REMAINDERS.flatMap((leadInside) =>
+      [...PROSE_LEADS, null].flatMap((tailInside) =>
+        OUTSIDE_TAILS.map((tailOutside): MovedLayout => ({
+          form: "inline",
+          leadOutside,
+          leadInside,
+          tailInside,
+          tailOutside,
+          closeJoined: tailInside === null,
+        })),
+      ),
+    ),
+);
+
+/**
+ * Every multi-line in-line layout the generator draws: the boundary lines
+ * agree in kind — both flow-bound or both text-bound at the destination —
+ * so the moved text derives at a line start (SPEC 6.5, 14.20); the
+ * one-sided spellings SPEC 6.2 and 6.5 refuse (a whitespace remainder with
+ * a prose lead or the reverse, `body</S>` under a whitespace remainder) are
+ * never drawn (TEST-SPEC §16 P-5; T6.5-16's arms).
+ */
+const INLINE_LAYOUTS: readonly MovedLayout[] = [
+  ...INLINE_FLOW_BOUND_LAYOUTS,
+  ...INLINE_TEXT_BOUND_LAYOUTS,
+];
 
 /**
  * The inline form for an empty moved section (`plead. <S …>` +
@@ -1020,14 +1115,8 @@ const EMPTY_INLINE_LAYOUT: MovedLayout = {
   leadInside: null,
   tailInside: null,
   tailOutside: TAIL_OUTSIDE,
+  closeJoined: false,
 };
-
-const OUTSIDE_LEADS: readonly (string | null)[] = [null, LEAD_OUTSIDE];
-const OUTSIDE_TAILS: readonly (string | null)[] = [
-  null,
-  WS_RESIDUE,
-  TAIL_OUTSIDE,
-];
 
 /** A prose item whose parts are all plain text (no embeddings). */
 function isPlainProse(item: BodyItem): item is ProseItem {
@@ -1052,12 +1141,21 @@ function genMovedLayout(choices: Choices, section: SectionItem): MovedLayout {
         leadInside: null,
         tailInside: null,
         tailOutside: choices.pick(OUTSIDE_TAILS),
+        closeJoined: false,
       }),
     ]);
     options.push([2, () => EMPTY_INLINE_LAYOUT]);
   } else {
     if (section.items.every(isPlainProse)) {
-      options.push([10, () => choices.pick(INLINE_LAYOUTS)]);
+      // Half flow-bound, half text-bound: a flat pick over the union would
+      // underdraw the smaller family.
+      options.push([
+        10,
+        () =>
+          choices.boolean(0.5)
+            ? choices.pick(INLINE_FLOW_BOUND_LAYOUTS)
+            : choices.pick(INLINE_TEXT_BOUND_LAYOUTS),
+      ]);
     }
     if (section.items.length === 1 && section.items[0].kind === "prose") {
       const plain = isPlainProse(section.items[0]);
@@ -1071,6 +1169,7 @@ function genMovedLayout(choices: Choices, section: SectionItem): MovedLayout {
           leadInside: null,
           tailInside: null,
           tailOutside: plain ? choices.pick(OUTSIDE_TAILS) : null,
+          closeJoined: false,
         }),
       ]);
     }
@@ -1362,6 +1461,23 @@ function stagingDefect(message: string): never {
  * `deco` is empty — locked by an equality assertion per trial — with the
  * arm-2 boundary decorations applied where staged (module header).
  */
+/** The empty line every P-5 spec source begins with (module header). */
+const LEADING_EMPTY_LINE = "\n";
+
+/**
+ * The PROP-03 rendering with every spec source begun by an empty line — the
+ * bytes P-5 stages, both arms (module header: TEST-SPEC §16 P-5's line-start
+ * admissible offset for any import addition).
+ */
+function renderP5Workspace(model: WorkspaceModel): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(renderWorkspace(model)).map(([path, source]) => [
+      path,
+      LEADING_EMPTY_LINE + source,
+    ]),
+  );
+}
+
 function buildFilePieces(
   model: WorkspaceModel,
   fileIndex: number,
@@ -1480,7 +1596,8 @@ function buildFilePieces(
               depends,
             });
           } else {
-            if (!item.items.every(isPlainProse)) {
+            const proseItems = item.items.filter(isPlainProse);
+            if (proseItems.length !== item.items.length) {
               stagingDefect(
                 `inline layout on ${dotted}, whose body is not all ` +
                   `plain-text prose (module header)`,
@@ -1488,10 +1605,25 @@ function buildFilePieces(
             }
             const body: SectionMovePiece[] = [
               { kind: "content", text: `${layout.leadInside ?? ""}\n` },
-              ...walk(item.items, dotted),
             ];
-            if (layout.tailInside !== null) {
-              body.push({ kind: "content", text: layout.tailInside });
+            if (layout.closeJoined) {
+              // T6.2-3's staging (c): the closing tag follows the last body
+              // line's prose directly, that prose being its lead.
+              if (proseItems.length === 0 || layout.tailInside !== null) {
+                stagingDefect(
+                  `joined-close inline layout on ${dotted} without a body ` +
+                    `line, or with a lead of its own`,
+                );
+              }
+              const last = proseItems.length - 1;
+              proseItems.forEach((prose, index) => {
+                body.push(...prosePieces(prose, index !== last));
+              });
+            } else {
+              body.push(...walk(proseItems, dotted));
+              if (layout.tailInside !== null) {
+                body.push({ kind: "content", text: layout.tailInside });
+              }
             }
             out.push({
               kind: "section",
@@ -1513,7 +1645,9 @@ function buildFilePieces(
     return out;
   };
 
-  const pieces: SectionMovePiece[] = [];
+  // Every staged spec source begins with an empty line (TEST-SPEC §16 P-5;
+  // module header) — a kept line, the root's first run.
+  const pieces: SectionMovePiece[] = [newline];
   for (let j = 0; j < fileIndex; j += 1) {
     pieces.push({
       kind: "removal",
@@ -1564,7 +1698,7 @@ interface BuiltSectionMove {
  */
 function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
   const { model, target } = trial;
-  const rendered = renderWorkspace(model);
+  const rendered = renderP5Workspace(model);
   const modelPaths = Object.keys(rendered);
   const sems = semanticsOf(model);
   const expansionOf = expansionSentinels(sems);
@@ -1641,6 +1775,13 @@ function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
   if ("pieces" in targetDocument && !coincident) {
     files[targetPath] = sectionMoveSourceText(targetDocument.pieces);
   }
+  // The generator's own guarantee (TEST-SPEC §16 P-5): every staged spec
+  // source begins with an empty line, decorated or not.
+  for (const [path, source] of Object.entries(files)) {
+    if (!source.startsWith(LEADING_EMPTY_LINE)) {
+      stagingDefect(`${path} does not begin with an empty line`);
+    }
+  }
   return {
     origin,
     target: targetDocument,
@@ -1650,7 +1791,9 @@ function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
     files,
     description:
       `move section ${originPath}#${trial.dotted} -> ${targetPath}#${newId} ` +
-      `(${trial.layout.form} layout${toFile === null ? ", created target" : ""}` +
+      `(${trial.layout.form} layout` +
+      `${trial.layout.closeJoined ? ", joined close" : ""}` +
+      `${toFile === null ? ", created target" : ""}` +
       `${trial.selfCloseTargetParent ? ", self-closing target parent" : ""}` +
       `${trial.stripFinalNewline ? ", terminator-less EOF" : ""})`,
   };
@@ -1660,7 +1803,11 @@ function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
 //
 // Every decorated byte form the arm-2 staging can draw (module header) —
 // each inline layout on a single-prose and on a multi-prose moved section,
-// the empty section's inline form, every self-closing and collapse
+// the moved text of each distinct inline layout as it lands (SPEC 6.5: at
+// a line start, followed by a terminator, the parent's decorations gone)
+// at top level and inside a flow-position parent, which is what excludes
+// the one-sided spellings, the empty section's inline form, every
+// self-closing and collapse
 // decoration, the undecorated collapse with an embedding, the flow layout
 // on every body shape, the target-side forms (an empty target parent
 // rendered self-closing, the root target's final terminator stripped) on
@@ -1772,8 +1919,27 @@ function layoutName(layout: MovedLayout): string {
     `${layout.form} layout (${part("leadOutside", layout.leadOutside)}, ` +
     `${part("leadInside", layout.leadInside)}, ` +
     `${part("tailInside", layout.tailInside)}, ` +
-    `${part("tailOutside", layout.tailOutside)})`
+    `${part("tailOutside", layout.tailOutside)}` +
+    `${layout.closeJoined ? ", joined close" : ""})`
   );
+}
+
+/**
+ * The moved text of each inline layout as it lands (SPEC 6.5): the layout
+ * stripped of the parent's decorations, at a line start and followed by a
+ * terminator — distinct forms only, in first-seen order.
+ */
+function landedLayouts(layouts: readonly MovedLayout[]): MovedLayout[] {
+  const seen = new Map<string, MovedLayout>();
+  for (const layout of layouts) {
+    const landed: MovedLayout = {
+      ...layout,
+      leadOutside: null,
+      tailOutside: null,
+    };
+    if (!seen.has(layoutName(landed))) seen.set(layoutName(landed), landed);
+  }
+  return [...seen.values()];
 }
 
 function outsideLayout(
@@ -1781,7 +1947,14 @@ function outsideLayout(
   leadOutside: string | null,
   tailOutside: string | null,
 ): MovedLayout {
-  return { form, leadOutside, leadInside: null, tailInside: null, tailOutside };
+  return {
+    form,
+    leadOutside,
+    leadInside: null,
+    tailInside: null,
+    tailOutside,
+    closeJoined: false,
+  };
 }
 
 /** The P-6 replay rewrite of file 1 after file 0 moved to `specs/N0.mdx`. */
@@ -1810,6 +1983,19 @@ export const P5_FORM_VECTORS: ReadonlyArray<
   p5Vector(`${layoutName(EMPTY_INLINE_LAYOUT)} on the empty s1`, 0, {
     moved: { dotted: "s1", layout: EMPTY_INLINE_LAYOUT },
   }),
+  ...landedLayouts(INLINE_LAYOUTS).flatMap((layout) => [
+    p5Vector(
+      `${layoutName(layout)} as the moved text lands at top level (s0)`,
+      0,
+      { moved: { dotted: "s0", layout } },
+    ),
+    p5Vector(
+      `${layoutName(layout)} as the moved text lands inside the ` +
+        `flow-position parent s3 (s3.s0)`,
+      0,
+      { moved: { dotted: "s3.s0", layout } },
+    ),
+  ]),
   ...OUTSIDE_LEADS.flatMap((leadOutside) =>
     OUTSIDE_TAILS.map((tailOutside) => {
       const layout = outsideLayout("selfClose", leadOutside, tailOutside);
@@ -1867,7 +2053,7 @@ export const P5_FORM_VECTORS: ReadonlyArray<
 // --- S-9's per-draw check (helpers/property.ts `mdxSources`) ----------------
 
 function stagedPuritySources(trial: PurityTrial): DrawSource[] {
-  return Object.entries(renderWorkspace(trial.model));
+  return Object.entries(renderP5Workspace(trial.model));
 }
 
 function stagedSectionMoveSources(trial: SectionMoveTrial): DrawSource[] {
@@ -2303,7 +2489,7 @@ async function runReplayTrial(
 
 function renderPurityTrial(trial: PurityTrial): string {
   return JSON.stringify({
-    files: renderWorkspace(trial.model),
+    files: renderP5Workspace(trial.model),
     ops: trial.ops,
   });
 }
