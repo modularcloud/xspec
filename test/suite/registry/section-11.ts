@@ -33,7 +33,13 @@
 // three dependency kinds, never `contains`) and, when one does, one shortest
 // witness path with the 12.0 byte-least tie-break; `reachable --kinds`
 // rejects `contains` while `edges --kinds` filters over all four kinds and
-// defaults to no filter. All results use stable, deterministic ordering.
+// defaults to no filter. A list-valued flag (`--kinds`) takes one
+// comma-separated value read as a set drawn from its command's vocabulary
+// (11.1): an element that is empty — a leading, trailing, or doubled comma
+// — or outside the vocabulary is an invalid flag value, a usage error of the
+// syntax class reported without loading configuration (12.0), and a
+// repeated element collapses, `depends,depends` answering byte-identically
+// to `depends`. All results use stable, deterministic ordering.
 //
 // Conservative operationalizations (noted per H-4/H-3):
 // - Both-forms comparison (the §11 preamble): each subcommand's primary arm
@@ -78,6 +84,7 @@ import {
   decodeReachableReport,
 } from "../../helpers/adapters/index.js";
 import {
+  assertBytesEqual,
   assertExitCode,
   fail,
   parseJsonStdout,
@@ -1169,7 +1176,7 @@ const T11_3 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T11-4 — `query edges`: --from/--to over both node kinds, --kinds, exit 2
+// T11-4 — `query edges`: --from/--to over both node kinds, --kinds as a set
 // ---------------------------------------------------------------------------
 
 const T11_4_HUB = '<S id="hub" d={"leaf"}>\nHub: {text("leaf")}\n</S>';
@@ -1194,6 +1201,37 @@ const T11_4_LEAF_ID = "specs/E.mdx#leaf";
 const T11_4_EMBEDDER = "src/app.ts#embedder";
 const T11_4_REFERRER = "src/app.ts#referrer";
 
+const T11_4_FILES: Readonly<Record<string, string>> = {
+  "specs/E.mdx": T11_4_SOURCE,
+  "src/app.ts": T11_4_APP,
+};
+
+// `--kinds` is read as a set drawn from `edges`'s vocabulary — the four
+// kinds of 5.2 (SPEC 11.1): an element that is empty — a leading, trailing,
+// or doubled comma — or outside the vocabulary is an invalid flag value, a
+// usage error the arguments alone determine (12.0). One arm per defect;
+// where the form allows, the defect stands beside a valid element, so the
+// element alone is what a product accepts or rejects.
+const T11_4_MALFORMED_KINDS: ReadonlyArray<{
+  readonly spelling: string;
+  readonly what: string;
+}> = [
+  { spelling: "nonsense", what: "an element outside the vocabulary" },
+  {
+    spelling: "depends,nonsense",
+    what: "an element outside the vocabulary beside a valid one",
+  },
+  { spelling: "depends,", what: "a trailing comma — an empty element" },
+  { spelling: ",depends", what: "a leading comma — an empty element" },
+  {
+    spelling: "depends,,embeds",
+    what: "a doubled comma — an empty element between two valid ones",
+  },
+];
+
+// The two invocation forms of a JSON-only surface (SPEC 11, 12.0).
+const T11_4_FORMS: readonly (readonly string[])[] = [["--json"], []];
+
 // The workspace's complete edge set — all four kinds present.
 const T11_4_ALL_EDGES: readonly GraphEdge[] = [
   { from: T11_4_FILE, to: T11_4_HUB_ID, kind: "contains" },
@@ -1213,11 +1251,11 @@ function edgesWhere(
 const T11_4 = defineProductTest({
   id: "T11-4",
   title:
-    "`query edges`: `--from`/`--to` accept requirement nodes and code locations; `--kinds` filters over all four kinds via one comma-separated value and defaults to no filter, `contains` edges included; an unknown kind value is an invalid flag value, exit 2 (SPEC 11, 5.2, 12.0)",
+    "`query edges`: `--from`/`--to` accept requirement nodes and code locations; `--kinds` filters over all four kinds via one comma-separated value read as a set and defaults to no filter, `contains` edges included; a repeated element collapses — `depends,depends` answers byte-identically to `depends` — while an element outside the vocabulary or empty (`depends,`, `,depends`, `depends,,embeds`) is an invalid flag value, a syntax-class usage error at exit 2 reported without loading configuration (SPEC 11, 11.1, 5.2, 12.0, 12.7)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
-      { "specs/E.mdx": T11_4_SOURCE, "src/app.ts": T11_4_APP },
+      T11_4_FILES,
       async (workspace) => {
         await buildOk(product, workspace, "T11-4 `build`");
 
@@ -1293,13 +1331,77 @@ const T11_4 = defineProductTest({
           assertEdgeSetEqual(edges, arm.expected, context);
         }
 
-        await expectUsageError(
-          product,
-          workspace,
-          ["query", "edges", "--kinds", "nonsense"],
-          "an unknown edge-kind value",
-          "T11-4 `query edges --kinds nonsense`",
-        );
+        // A repeated element collapses (SPEC 11.1): `--kinds depends,depends`
+        // is read as the set {depends}, so on each form its answer is
+        // byte-identical to `--kinds depends`'s (T12.0-14) — the single
+        // spelling pinned first as the `depends` edges alone.
+        const singleArgv = ["query", "edges", "--kinds", "depends"];
+        const repeatedArgv = ["query", "edges", "--kinds", "depends,depends"];
+        for (const form of T11_4_FORMS) {
+          const formLabel = form.length === 0 ? "without --json" : "--json";
+          const singleContext = `T11-4 \`${singleArgv.join(" ")}\` (${formLabel})`;
+          const single = await expectExit(
+            product,
+            workspace,
+            [...singleArgv, ...form],
+            0,
+            singleContext,
+          );
+          assertEdgeSetEqual(
+            decodeEdgesReport(
+              parseJsonStdout(single, singleContext),
+              singleContext,
+            ),
+            edgesWhere((edge) => edge.kind === "depends"),
+            `${singleContext}: the \`depends\` edges alone (SPEC 11.1)`,
+          );
+          const repeatedContext = `T11-4 \`${repeatedArgv.join(" ")}\` (${formLabel})`;
+          const repeated = await expectExit(
+            product,
+            workspace,
+            [...repeatedArgv, ...form],
+            0,
+            `${repeatedContext} — a repeated element collapses to the set ` +
+              `{depends}: exit 0, never an invalid flag value (SPEC 11.1)`,
+          );
+          assertBytesEqual(
+            repeated.stdoutBytes,
+            single.stdoutBytes,
+            `${repeatedContext}: the answer is byte-identical to ` +
+              `\`--kinds depends\`'s — a repeated element collapses (SPEC ` +
+              `11.1, 12.0; T12.0-14)`,
+          );
+        }
+
+        // Each malformed `--kinds` value is a usage error of the syntax
+        // class: exit 2 with the plain usage error's document, reported
+        // without loading configuration — identically, byte for byte, on
+        // the twins holding the same files under an invalid and under no
+        // configuration (T12.0-10's discipline; a product loading
+        // configuration before judging the value answers 14.14 there) —
+        // the whole sweep modifying nothing on the built workspace.
+        const twins = await stageConfigurationStateTwins(T11_4_FILES);
+        try {
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              for (const { spelling, what } of T11_4_MALFORMED_KINDS) {
+                await expectSyntaxClassUsageError(
+                  product,
+                  workspace,
+                  twins,
+                  ["query", "edges", "--kinds", spelling, "--json"],
+                  `T11-4 \`query edges --kinds ${spelling}\` (${what}: an ` +
+                    `invalid flag value, SPEC 11.1)`,
+                );
+              }
+            },
+            "T11-4 malformed `--kinds` sweep — a syntax-class usage error " +
+              "modifies nothing (SPEC 12.0)",
+          );
+        } finally {
+          await twins.dispose();
+        }
       },
     );
   },
