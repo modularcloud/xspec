@@ -28,6 +28,9 @@
 //     configuration/sources/derived map (11.6), plus the full ten-member
 //     inventory document decode composing them with the `graphData`,
 //     `journal`, and `sessions` forms (T11.6-3)
+//   - the tag-set and kind-set value forms of the configured sets those
+//     views carry (7.4, 7.5, 11.6): tag strings in byte order with
+//     duplicates collapsed; dependency-kind tokens in 5.2's order
 //   - the occurrence-record form {"file","range","kind","source","target"}
 //     and the occurrences document {"findings","occurrences"} (5.7, 11.3)
 //   - the at document {"findings","resolution"} (11.5)
@@ -770,14 +773,60 @@ function decodeInventoryGroupList(
   );
 }
 
-/** An edge-kind list member (`edgeKinds`/`kinds`): 5.2's tokens only. */
-function decodeEdgeKindList(
-  value: unknown,
-  site: DecodeSite,
-): DependencyEdgeKind[] {
-  return expectArray(value, site).map((element, index) =>
+/**
+ * A kind set member (`edgeKinds`/`kinds`) in SPEC 12.7's value form: an
+ * array of dependency-kind tokens in the order 5.2 lists them — "depends",
+ * "embeds", "references" — each at most once, configured or defaulted
+ * (7.4/7.5 read the configured list as a set, a repeated element
+ * collapsing; 11.6 reports kind sets in their value forms). A token out of
+ * that order, or repeated, is a form failure (H-3).
+ */
+function decodeKindSet(value: unknown, site: DecodeSite): DependencyEdgeKind[] {
+  const kinds = expectArray(value, site).map((element, index) =>
     expectToken(element, DEPENDENCY_EDGE_KINDS, at(site, index)),
   );
+  for (let i = 1; i < kinds.length; i += 1) {
+    if (
+      DEPENDENCY_EDGE_KINDS.indexOf(kinds[i - 1]!) >=
+      DEPENDENCY_EDGE_KINDS.indexOf(kinds[i]!)
+    ) {
+      formFail(
+        site,
+        "a kind set — dependency-kind tokens in the order 5.2 lists them " +
+          '("depends", "embeds", "references"), each at most once (SPEC ' +
+          "12.7, 7.4, 7.5)",
+        value,
+      );
+    }
+  }
+  return kinds;
+}
+
+/**
+ * A tag set member (a profile's `targetTags`, a selector's `tags`) in SPEC
+ * 12.7's value form: an array of tag strings in byte order (12.0),
+ * duplicates collapsed — strictly ascending UTF-8 byte order (7.4/7.5 read
+ * the configured list as a set; 11.6 reports tag sets in their value
+ * forms). A tag out of that order, or repeated, is a form failure (H-3).
+ */
+function decodeTagSet(value: unknown, site: DecodeSite): string[] {
+  const tags = expectNonEmptyStringArray(value, site);
+  for (let i = 1; i < tags.length; i += 1) {
+    if (
+      Buffer.compare(
+        Buffer.from(tags[i - 1]!, "utf8"),
+        Buffer.from(tags[i]!, "utf8"),
+      ) >= 0
+    ) {
+      formFail(
+        site,
+        "a tag set — tag strings in byte order, duplicates collapsed (SPEC " +
+          "12.7, 12.0)",
+        value,
+      );
+    }
+  }
+  return tags;
 }
 
 const COVERAGE_PROFILE_VIEW_MEMBERS = [
@@ -815,7 +864,7 @@ function decodeCoverageProfileView(
     targetTags:
       targetTagsValue === null
         ? null
-        : expectNonEmptyStringArray(targetTagsValue, at(site, "targetTags")),
+        : decodeTagSet(targetTagsValue, at(site, "targetTags")),
     targets: expectToken(
       requiredKey(obj, "targets", site),
       COVERAGE_TARGETS_VALUES,
@@ -835,7 +884,7 @@ function decodeCoverageProfileView(
       COVERAGE_MODES,
       at(site, "mode"),
     ),
-    edgeKinds: decodeEdgeKindList(
+    edgeKinds: decodeKindSet(
       requiredKey(obj, "edgeKinds", site),
       at(site, "edgeKinds"),
     ),
@@ -877,10 +926,7 @@ function decodePolicySelectorView(
   if (Object.hasOwn(obj, "tags")) {
     expectOnlyMembers(obj, ["tags"], site);
     return {
-      tags: expectNonEmptyStringArray(
-        requiredKey(obj, "tags", site),
-        at(site, "tags"),
-      ),
+      tags: decodeTagSet(requiredKey(obj, "tags", site), at(site, "tags")),
     };
   }
   formFail(
@@ -913,10 +959,7 @@ function decodePolicyRuleView(
       at(site, "from"),
     ),
     to: decodePolicySelectorView(requiredKey(obj, "to", site), at(site, "to")),
-    kinds: decodeEdgeKindList(
-      requiredKey(obj, "kinds", site),
-      at(site, "kinds"),
-    ),
+    kinds: decodeKindSet(requiredKey(obj, "kinds", site), at(site, "kinds")),
   };
 }
 

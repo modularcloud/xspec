@@ -3106,6 +3106,52 @@ const DECODERS: readonly DecoderSpec[] = [
           });
         },
       },
+      {
+        label:
+          "configured sets in their 12.7 value forms decode literally — a " +
+          'tag set in byte order ("Z" before "a": 0x5a < 0x61, inverted by ' +
+          "case folding) and kind sets in 5.2's order as proper subsets " +
+          "(SPEC 12.7, 7.4, 7.5, 11.6)",
+        doc: put(
+          put(
+            put(
+              put(
+                GOOD_RESOLVED_INVENTORY,
+                ["Z", "a"],
+                "configuration",
+                "coverage",
+                0,
+                "targetTags",
+              ),
+              ["depends", "references"],
+              "configuration",
+              "coverage",
+              0,
+              "edgeKinds",
+            ),
+            { tags: ["a", "b"] },
+            "configuration",
+            "policy",
+            0,
+            "to",
+          ),
+          ["depends", "embeds"],
+          "configuration",
+          "policy",
+          0,
+          "kinds",
+        ),
+        verify: (
+          decoded: ReturnType<typeof decodeInventoryResolvedMap>,
+        ): void => {
+          const profile = decoded.configuration.coverage[0]!;
+          expect(profile.targetTags).toEqual(["Z", "a"]);
+          expect(profile.edgeKinds).toEqual(["depends", "references"]);
+          const rule = decoded.configuration.policy[0]!;
+          expect(rule.to).toEqual({ tags: ["a", "b"] });
+          expect(rule.kinds).toEqual(["depends", "embeds"]);
+        },
+      },
     ],
     bad: [
       {
@@ -3181,6 +3227,108 @@ const DECODERS: readonly DecoderSpec[] = [
           "coverage",
           0,
           "edgeKinds",
+        ),
+      },
+      {
+        label:
+          'edgeKinds out of 5.2\'s order (["references", "depends"]: a kind ' +
+          "set lists its tokens in the order 5.2 lists them, however " +
+          "configured; SPEC 12.7, 7.4)",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          ["references", "depends"],
+          "configuration",
+          "coverage",
+          0,
+          "edgeKinds",
+        ),
+      },
+      {
+        label:
+          "edgeKinds with a repeated token (a kind set collapses a repeated " +
+          "element; SPEC 12.7, 7.4)",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          ["depends", "depends", "embeds"],
+          "configuration",
+          "coverage",
+          0,
+          "edgeKinds",
+        ),
+      },
+      {
+        label:
+          'targetTags out of byte order (["z", "a"]: a tag set is in byte ' +
+          "order; SPEC 12.7, 12.0)",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          ["z", "a"],
+          "configuration",
+          "coverage",
+          0,
+          "targetTags",
+        ),
+      },
+      {
+        label:
+          'targetTags in case-folded rather than byte order (["a", "Z"]: ' +
+          "0x5a sorts before 0x61; SPEC 12.7, 12.0)",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          ["a", "Z"],
+          "configuration",
+          "coverage",
+          0,
+          "targetTags",
+        ),
+      },
+      {
+        label:
+          "targetTags with a repeated tag (a tag set collapses duplicates; " +
+          "SPEC 12.7, 7.4)",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          ["a", "a"],
+          "configuration",
+          "coverage",
+          0,
+          "targetTags",
+        ),
+      },
+      {
+        label: 'a tags selector out of byte order (["b", "a"]; SPEC 12.7, 7.5)',
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          { tags: ["b", "a"] },
+          "configuration",
+          "policy",
+          0,
+          "to",
+        ),
+      },
+      {
+        label:
+          'a tags selector with a repeated tag (["a", "a"]; SPEC 12.7, 7.5)',
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          { tags: ["a", "a"] },
+          "configuration",
+          "policy",
+          0,
+          "to",
+        ),
+      },
+      {
+        label:
+          'a rule\'s kinds out of 5.2\'s order (["embeds", "depends"]; SPEC ' +
+          "12.7, 7.5)",
+        doc: put(
+          GOOD_RESOLVED_INVENTORY,
+          ["embeds", "depends"],
+          "configuration",
+          "policy",
+          0,
+          "kinds",
         ),
       },
       {
