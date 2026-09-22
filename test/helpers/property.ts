@@ -56,8 +56,22 @@
 // re-observation costs a full hang guard — an invocation the subprocess
 // driver killed (P-11's termination clause) — would otherwise turn a bounded
 // shrink into hours, past the body's own hang guard.
+//
+// S-9's per-draw check (TEST-SPEC 16 preamble, 17 S-9): a property whose
+// generator composes MDX names the sources a draw stages through
+// `mdxSources`. Before the body — and so the product — sees a draw, the
+// initial trial and every shrunk candidate alike, each `.mdx` source is
+// judged by `deriveMdx` (helpers/mdx-derivability.ts, the check the S-9
+// vectors and the workspace builder use), and a source that does not derive
+// is a harness error carrying the seed (H-10): never a diagnosed failure,
+// never a draw to skip — a generator composing an ill-formed form is a
+// harness defect. The workspace builder's own staging-time check is the
+// second line: a `HarnessStagingError` it throws while the body runs is
+// rethrown as a harness error naming the seed and the refused staging.
 
 import { HarnessAssertionError } from "./assertions.js";
+import { deriveMdx } from "./mdx-derivability.js";
+import { HarnessStagingError } from "./permissions.js";
 
 /** Environment variable selecting the seed mode (E-5); see the module header. */
 export const PROPERTY_SEED_ENV = "XSPEC_PROPERTY_SEED";
@@ -210,7 +224,31 @@ export interface PropertyOptions<T> {
    * other mode (H-10).
    */
   readonly entropy?: () => number;
+  /**
+   * S-9's per-draw check (TEST-SPEC 16 preamble; module header): the files
+   * a draw stages, each as `[path, contents]` with an optional label (e.g.
+   * which edit of the trial stages it). Every entry whose path ends in
+   * `.mdx` is judged for derivability under the grammar 14.20 fixes before
+   * the property body runs on the draw — the initial trial and each shrunk
+   * candidate alike; other entries are ignored, so a generator may hand over
+   * its whole staged file map. A non-deriving source is a harness error
+   * naming the path, the parser's reason, and the seed (H-10) — never a
+   * diagnosed failure, never a skipped draw. Generated MDX carries no S-9
+   * allowance: the generators compose valid MDX by construction (16).
+   */
+  readonly mdxSources?: (value: T) => Iterable<DrawSource>;
 }
+
+/**
+ * One file a draw stages, for {@link PropertyOptions.mdxSources}: its
+ * workspace-relative path, its bytes, and an optional label distinguishing
+ * several stagings of one path within a trial.
+ */
+export type DrawSource = readonly [
+  path: string,
+  contents: string | Uint8Array,
+  label?: string,
+];
 
 /** How the effective seed set was chosen; see the module header. */
 export type SeedMode = "fixed" | "env" | "randomized";
@@ -406,6 +444,17 @@ export async function checkProperty<T>(
         });
       }
       try {
+        checkDrawMdx(generated.value, options.mdxSources);
+      } catch (error) {
+        throw harnessError({
+          name,
+          seed,
+          phase: `checking trial ${String(trial)} of ${String(runs)} (S-9: every MDX source a draw stages derives)`,
+          cause: error,
+          renderedInput: renderValue(generated.value, options.render),
+        });
+      }
+      try {
         await property(generated.value);
         continue;
       } catch (error) {
@@ -413,7 +462,10 @@ export async function checkProperty<T>(
           throw harnessError({
             name,
             seed,
-            phase: `running trial ${String(trial)} of ${String(runs)}`,
+            phase: nonAssertionPhase(
+              `running trial ${String(trial)} of ${String(runs)}`,
+              error,
+            ),
             cause: error,
             renderedInput: renderValue(generated.value, options.render),
           });
@@ -424,7 +476,12 @@ export async function checkProperty<T>(
               property,
               { trial: generated, error },
               maxShrinkExecutions,
-              { name, seed, render: options.render },
+              {
+                name,
+                seed,
+                render: options.render,
+                mdxSources: options.mdxSources,
+              },
             )
           : { final: { trial: generated, error }, steps: 0, executions: 0 };
         throw new PropertyFalsifiedError({
@@ -731,6 +788,7 @@ async function shrinkFalsification<T>(
     readonly name: string;
     readonly seed: number;
     readonly render: ((value: T) => string) | undefined;
+    readonly mdxSources: ((value: T) => Iterable<DrawSource>) | undefined;
   },
 ): Promise<ShrinkResult<T>> {
   let current = initial;
@@ -748,6 +806,22 @@ async function shrinkFalsification<T>(
     const replayed = replayTrial(generator, candidate);
     if (replayed === null) return false;
     if (!shortlexLess(replayed.tape, current.trial.tape)) return false;
+    // A shrunk candidate is a draw like any other: its staged MDX is checked
+    // before the body sees it (S-9), and a non-deriving one is a harness
+    // defect — never "candidate rejected" (a generator composing it on any
+    // tape is the defect).
+    try {
+      checkDrawMdx(replayed.value, context.mdxSources);
+    } catch (error) {
+      throw harnessError({
+        name: context.name,
+        seed: context.seed,
+        phase:
+          "shrinking (S-9: an MDX source a shrunk input stages does not derive)",
+        cause: error,
+        renderedInput: renderValue(replayed.value, context.render),
+      });
+    }
     executions += 1;
     try {
       await property(replayed.value);
@@ -759,8 +833,10 @@ async function shrinkFalsification<T>(
         throw harnessError({
           name: context.name,
           seed: context.seed,
-          phase:
+          phase: nonAssertionPhase(
             "shrinking (the property threw a non-assertion error on a shrunk input)",
+            error,
+          ),
           cause: error,
           renderedInput: renderValue(replayed.value, context.render),
         });
@@ -884,6 +960,47 @@ function harnessError(details: {
       `  reproduce with ${PROPERTY_SEED_ENV}=${String(details.seed)}`,
     { cause: details.cause },
   );
+}
+
+/**
+ * S-9's per-draw check (module header): judge every `.mdx` source the draw
+ * stages; the first that does not derive throws a `HarnessStagingError` of
+ * mode `mdx-derivability`, spelled as the workspace builder spells its own
+ * refusal, so both lines of the check report alike.
+ */
+function checkDrawMdx<T>(
+  value: T,
+  mdxSources: ((value: T) => Iterable<DrawSource>) | undefined,
+): void {
+  if (mdxSources === undefined) return;
+  for (const [path, contents, label] of mdxSources(value)) {
+    if (!path.endsWith(".mdx")) continue;
+    const verdict = deriveMdx(contents);
+    if (verdict.derives) continue;
+    const where =
+      verdict.position === undefined
+        ? ""
+        : ` at line ${String(verdict.position.line)}, column ${String(verdict.position.column)} (offset ${String(verdict.position.offset)})`;
+    throw new HarnessStagingError(
+      "mdx-derivability",
+      label === undefined ? path : `${path} (${label})`,
+      "composed by the generator as well-formed (TEST-SPEC 16: generated " +
+        "workspaces are valid by construction) but the stock MDX 3 parser " +
+        `rejects it${where}: ${verdict.reason} — a generator defect (S-9), ` +
+        "not a product failure",
+    );
+  }
+}
+
+/**
+ * The phase a non-assertion error is attributed to: a workspace-builder
+ * refusal (`HarnessStagingError`, e.g. the S-9 staging-time check) names the
+ * refused staging; anything else keeps the base phase.
+ */
+function nonAssertionPhase(base: string, error: unknown): string {
+  return error instanceof HarnessStagingError
+    ? `${base} (the workspace builder refused the ${error.mode} staging of ${error.path})`
+    : base;
 }
 
 function describeCause(cause: unknown): string {

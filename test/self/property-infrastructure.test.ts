@@ -18,6 +18,12 @@
 //   * H-8 classification — generator defects and non-assertion property
 //     errors surface as plain harness errors (with the seed for
 //     reproduction), never as diagnosed assertion failures.
+//   * S-9 per-draw check (TEST-SPEC 16 preamble) — a draw whose staged MDX
+//     does not derive is a harness error carrying the seed, raised before
+//     the body sees the draw (the initial trial and shrunk candidates
+//     alike), never a diagnosed failure and never a skipped draw; a
+//     workspace-builder refusal thrown inside the body is attributed the
+//     same way, naming the refused staging.
 //
 // Every checkProperty call here injects env (and, where relevant, report and
 // entropy) — the ambient process environment must not leak into self-test
@@ -25,8 +31,10 @@
 // unannotated: checkProperty's positional signature must keep inferring T
 // for exactly this style (see the checkProperty doc comment).
 
+import { Buffer } from "node:buffer";
 import { expect, test } from "vitest";
 import { fail, HarnessAssertionError } from "../helpers/assertions.js";
+import { HarnessStagingError } from "../helpers/permissions.js";
 import {
   checkProperty,
   DEFAULT_PROPERTY_SEEDS,
@@ -373,4 +381,133 @@ test("listOf stays within its bounds across generation", async () => {
   // bounds assertion above is not vacuous.
   expect(lengths).toContain(2);
   expect(lengths).toContain(5);
+});
+
+// ---------------------------------------------------------------------------
+// S-9's per-draw check (TEST-SPEC 16 preamble, 17 S-9).
+
+const LF = String.fromCodePoint(0x000a);
+const WELL_FORMED_MDX = `<S id="a">ok</S>${LF}`;
+const UNCLOSED_MDX = `<S id="a">${LF}${LF}never closed${LF}`;
+
+test("S-9 per-draw check: a draw staging a non-deriving MDX source is a harness error carrying the seed, raised before the body runs on it", async () => {
+  const seen: number[] = [];
+  const thrown = await captureRejection(
+    checkProperty(
+      "ill-formed draw",
+      (choices) => choices.intInclusive(0, 3),
+      (value) => {
+        seen.push(value);
+      },
+      {
+        runs: 8,
+        seeds: [7],
+        env: {},
+        mdxSources: (value) => [
+          ["xspec.config.ts", "not judged: only `.mdx` paths are"],
+          [
+            "specs/A.mdx",
+            value === 2 ? UNCLOSED_MDX : WELL_FORMED_MDX,
+            `draw ${String(value)}`,
+          ],
+        ],
+      },
+    ),
+  );
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while checking trial");
+  expect(error.message).toContain("S-9");
+  expect(error.message).toContain("seed 7");
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=7`);
+  expect(error.message).toContain("specs/A.mdx (draw 2)");
+  expect(error.cause).toBeInstanceOf(HarnessStagingError);
+  expect((error.cause as HarnessStagingError).mode).toBe("mdx-derivability");
+  // The body never ran on the ill-formed draw: the check precedes it.
+  expect(seen).not.toContain(2);
+  expect(seen.length).toBeGreaterThan(0);
+});
+
+test("S-9 per-draw check: a generator whose every draw derives runs unhindered, non-`.mdx` entries ignored", async () => {
+  let ran = 0;
+  await checkProperty(
+    "well-formed draws",
+    (choices) => choices.pick(["S", "Spec"] as const),
+    () => {
+      ran += 1;
+    },
+    {
+      runs: 5,
+      seeds: [7],
+      env: {},
+      mdxSources: (tag) => [
+        ["specs/A.mdx", `<${tag} id="a">ok</${tag}>${LF}`],
+        ["specs/B.mdx", Buffer.from(WELL_FORMED_MDX, "utf8")],
+        ["notes.txt", UNCLOSED_MDX],
+      ],
+    },
+  );
+  expect(ran).toBe(5);
+});
+
+test("S-9 per-draw check: a shrunk candidate is checked before the body runs on it — a non-deriving one is a harness error, never a rejected candidate", async () => {
+  // Value 0 stages an ill-formed source; every other value falsifies the
+  // property. Seed 7's first draw is non-zero (asserted), so the initial
+  // trial passes the check, fails the body, and shrinking then tries 0.
+  const bodies: number[] = [];
+  const thrown = await captureRejection(
+    checkProperty(
+      "shrinks into an ill-formed draw",
+      (choices) => choices.intInclusive(0, 9),
+      (value) => {
+        bodies.push(value);
+        fail(`falsified on ${String(value)}`);
+      },
+      {
+        runs: 1,
+        seeds: [7],
+        env: {},
+        mdxSources: (value) => [
+          ["specs/A.mdx", value === 0 ? UNCLOSED_MDX : WELL_FORMED_MDX],
+        ],
+      },
+    ),
+  );
+  expect(bodies.length).toBeGreaterThan(0);
+  expect(bodies[0]).not.toBe(0);
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while shrinking (S-9");
+  expect(error.message).toContain("seed 7");
+  expect(error.cause).toBeInstanceOf(HarnessStagingError);
+  expect(bodies).not.toContain(0);
+});
+
+test("a workspace-builder refusal thrown inside the body is a harness error carrying the seed and naming the refused staging (H-8, S-9)", async () => {
+  const thrown = await captureRejection(
+    checkProperty(
+      "builder refusal",
+      (choices) => choices.intInclusive(0, 9),
+      () => {
+        throw new HarnessStagingError(
+          "mdx-derivability",
+          "specs/A.mdx",
+          "declared well-formed (S-9's default) but the stock MDX 3 parser rejects it",
+        );
+      },
+      { runs: 3, seeds: [7], env: {} },
+    ),
+  );
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while running trial 1 of 3");
+  expect(error.message).toContain(
+    "the workspace builder refused the mdx-derivability staging of specs/A.mdx",
+  );
+  expect(error.message).toContain("seed 7");
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=7`);
+  expect(error.cause).toBeInstanceOf(HarnessStagingError);
 });
