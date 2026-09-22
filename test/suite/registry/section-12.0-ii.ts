@@ -153,6 +153,8 @@ import {
   expectConfigurationError,
   expectErrorDocument,
   expectExit,
+  expectPlainUsageError,
+  REPLACEMENT_CHARACTER_SPEC_PATH,
   runCli,
   runJson,
 } from "./support.js";
@@ -1681,10 +1683,194 @@ const SYNTAX_SESSION_NAME = "n";
 const SYNTAX_SESSION_REL = `.xspec/reviews/${SYNTAX_SESSION_NAME}.json`;
 const SYNTAX_AT_FILE = "specs/A.mdx";
 
+/** One syntax-class row: an error the invocation's arguments alone determine. */
+interface SyntaxClassRow {
+  /** Which member of the syntax class the row exercises (SPEC 12.0). */
+  readonly what: string;
+  /**
+   * The invocation. `--json` rides along wherever the surface takes it, so
+   * the error document is the entire stdout; the JSON-only surfaces of 11.3
+   * and 11.4 (`occurrences`, `view`) emit it with or without the flag.
+   */
+  readonly argv: readonly string[];
+}
+
+// One row per member of the syntax class as SPEC 12.0 enumerates it — every
+// error the arguments alone determine: an unknown command, subcommand, or
+// flag, a repeated flag, a missing required flag or argument, a surplus
+// operand, a malformed value, and every invalid flag value or operand
+// spelling that a fixed vocabulary, a spelling rule, or a co-occurrence rule
+// decides. Each is reported without loading configuration, so a product
+// that loads it first answers 14.14 on the invalid-configuration workspace
+// and fails the plain-error pin; the rows naming `specs/A.mdx` or the
+// session `n` name what the same command would consult next, staged beside
+// the invalid configuration (above) so a product consulting it before the
+// syntax check is observed. The escape character is built from its code
+// point (no tool layer decodes a `\\` on the way in).
+const T12_0_10_SYNTAX_ROWS: readonly SyntaxClassRow[] = [
+  {
+    what: "an unknown command",
+    argv: ["definitely-not-a-command", "--json"],
+  },
+  {
+    what: "an unknown subcommand (`query bogus`, T12.0-14)",
+    argv: ["query", "bogus", "--json"],
+  },
+  {
+    what: "an unknown flag (`--bogus`)",
+    argv: ["ids", "--bogus", "--json"],
+  },
+  {
+    what:
+      "the `--name=value` token, which spells no flag (an unknown flag, " +
+      "T12.0-14)",
+    argv: ["review", "create", "--strategy", "audit", "--name=n", "--json"],
+  },
+  {
+    what: "a repeated flag",
+    argv: ["ids", "--json", "--json"],
+  },
+  {
+    what:
+      "a missing required flag (`review create --name n` with none of " +
+      "`--base`, `--strategy audit`, or `--coverage`, SPEC 10.7)",
+    argv: ["review", "create", "--name", SYNTAX_SESSION_NAME, "--json"],
+  },
+  {
+    what:
+      "a missing required argument (`at <file>` alone, its `<offset>` " +
+      "absent, SPEC 11.5)",
+    argv: ["at", SYNTAX_AT_FILE, "--json"],
+  },
+  {
+    what:
+      "a value-taking flag as the last token (`--file` lacking its value, " +
+      "T12.0-14)",
+    argv: ["ids", "--json", "--file"],
+  },
+  {
+    what: "a surplus operand (`ids extra`)",
+    argv: ["ids", "extra", "--json"],
+  },
+  {
+    what: "a fourth `rename` operand (SPEC 6.4's three-operand synopsis)",
+    argv: ["rename", SYNTAX_AT_FILE, "alpha", "beta", "gamma", "--json"],
+  },
+  {
+    what: "the malformed multi-`#` value (T12.0-13's spelling)",
+    argv: ["show", "a#b#c", "--json"],
+  },
+  {
+    what: "a U+FFFD-bearing value (T12.0-5; SPEC 12.0's argument-value rule)",
+    argv: ["show", REPLACEMENT_CHARACTER_SPEC_PATH, "--json"],
+  },
+  {
+    what: "`--status bogus`, outside `resolve`'s fixed vocabulary (SPEC 10.7)",
+    argv: [
+      "review",
+      "resolve",
+      SYNTAX_SESSION_NAME,
+      "item",
+      "--status",
+      "bogus",
+      "--json",
+    ],
+  },
+  {
+    what: "`--strategy bogus`, outside `create`'s fixed vocabulary (SPEC 10.7)",
+    argv: [
+      "review",
+      "create",
+      "--strategy",
+      "bogus",
+      "--name",
+      SYNTAX_SESSION_NAME,
+      "--json",
+    ],
+  },
+  {
+    what: "`query nodes --coverage bogus`, outside `required|none` (SPEC 11.1)",
+    argv: ["query", "nodes", "--coverage", "bogus", "--json"],
+  },
+  {
+    what: "a `--kinds` element outside its vocabulary (SPEC 11.1)",
+    argv: ["query", "edges", "--kinds", "bogus", "--json"],
+  },
+  {
+    what: "an empty `--kinds` element (`depends,`, a trailing comma, SPEC 11.1)",
+    argv: ["query", "edges", "--kinds", "depends,", "--json"],
+  },
+  {
+    what:
+      "`review create` with two of its exactly-one-of flags (`--strategy " +
+      "audit` beside `--base`, SPEC 10.7)",
+    argv: [
+      "review",
+      "create",
+      "--strategy",
+      "audit",
+      "--base",
+      "HEAD",
+      "--name",
+      SYNTAX_SESSION_NAME,
+      "--json",
+    ],
+  },
+  {
+    what: "`--test-hold` beside `--preview` (excluded under `--preview`, SPEC 6.6)",
+    argv: [
+      "rename",
+      SYNTAX_AT_FILE,
+      "alpha",
+      "beta",
+      "--preview",
+      "--test-hold",
+      "hold",
+      "--json",
+    ],
+  },
+  {
+    what: "a `<file>` operand beside `--file` on `view` (SPEC 11.4)",
+    argv: ["view", SYNTAX_AT_FILE, "--file", "specs/*.mdx"],
+  },
+  {
+    what: "a session name outside the form of 10.1 (`.x`, a leading `.`)",
+    argv: ["review", "create", "--strategy", "audit", "--name", ".x", "--json"],
+  },
+  {
+    what: "an `<offset>` spelled `+7` — a sign is no decimal digit (SPEC 11.5)",
+    argv: ["at", SYNTAX_AT_FILE, "+7", "--json"],
+  },
+  {
+    what:
+      "a `--to` malformed as an identity (a whitespace-bearing id segment, " +
+      "SPEC 11.3, 1.4)",
+    argv: ["occurrences", "--to", `${SYNTAX_AT_FILE}#a b`],
+  },
+  {
+    what:
+      "a `--tag` malformed as a tag (`a\\b`, the escape character, SPEC " +
+      "11.1, 1.4)",
+    argv: [
+      "query",
+      "nodes",
+      "--tag",
+      `a${String.fromCodePoint(0x5c)}b`,
+      "--json",
+    ],
+  },
+  {
+    what:
+      "a `--file` pattern outside the workspace root (`../x`, decided by " +
+      "its spelling alone, SPEC 7, 11.1)",
+    argv: ["ids", "--file", "../x", "--json"],
+  },
+];
+
 const T12_0_10 = defineProductTest({
   id: "T12.0-10",
   title:
-    "argument-check precedence: the rename/move and baseline arms ride on T6.4-4/T6.5-5/T6.3-4; on one workspace failing `build`'s validations each gated read given a usage-error argument exits 2 with that error and reports no validation findings (the exit-2 stdout is exactly the one 12.7 error document) — `coverage <unknown-profile>`, `query nodes --group <code-group>`, `review status <unknown-session>`, `show <file>#<unspelled-id>`, `query node <code-source-path>`, `query edges --from <code-source-path>#<unspelled-unit>` — each check judged from what it consults (configuration; the session directory; parse-local spelled identities or named units of the named file), the same names on a valid twin workspace giving the same exit-2 errors (byte-identical error documents); masking: `show <unparseable-file>#<id>` on the failing workspace yields the gated report of 13.3, exit 1, carrying exactly the workspace's findings; past the gate: on a passing workspace `review resolve <corrupt-session> <any-item-id> --status updated` reports the corruption, exit 1 — the item ID judged only against session content, which the corruption withholds (the same unknown item ID in the well-formed session exits 2 as the pre-corruption premise); within class 2: an unknown command, a repeated flag, a missing required flag (`review create --name n` with none of `--base`, `--strategy audit`, or `--coverage`) or argument (`at <file>` alone), and the malformed value `show a#b#c` are reported without loading configuration and modify nothing — byte-identical error documents with the configuration file invalid or missing, each the plain usage error (`code` and `path` null), the syntax-alone check preceding what the command would consult next (a session already named `n` and the named `<file>`, staged beside the invalid configuration, go unconsulted) — while a configuration error precedes every check that consults configuration: `coverage <unknown-profile>` with invalid configuration reports 14.14 (`configuration-error`), not the unknown profile (SPEC 12.0, 13.3, 11.1, 11.2, 4.6, 10.1, 10.7, 11.5, 14.14, 14.20, 14.21, 12.7)",
+    "argument-check precedence: the rename/move and baseline arms ride on T6.4-4/T6.5-5/T6.3-4; on one workspace failing `build`'s validations each gated read given a usage-error argument exits 2 with that error and reports no validation findings (the exit-2 stdout is exactly the one 12.7 error document) — `coverage <unknown-profile>`, `query nodes --group <code-group>`, `review status <unknown-session>`, `show <file>#<unspelled-id>`, `query node <code-source-path>`, `query edges --from <code-source-path>#<unspelled-unit>` — each check judged from what it consults (configuration; the session directory; parse-local spelled identities or named units of the named file), the same names on a valid twin workspace giving the same exit-2 errors (byte-identical error documents); masking: `show <unparseable-file>#<id>` on the failing workspace yields the gated report of 13.3, exit 1, carrying exactly the workspace's findings; past the gate: on a passing workspace `review resolve <corrupt-session> <any-item-id> --status updated` reports the corruption, exit 1 — the item ID judged only against session content, which the corruption withholds (the same unknown item ID in the well-formed session exits 2 as the pre-corruption premise); within class 2, one arm per member of the syntax class (every error the arguments alone determine): an unknown command, subcommand (`query bogus`), or flag (`--bogus`; the `--name=value` token, T12.0-14); a repeated flag; a missing required flag (`review create --name n` with none of `--base`, `--strategy audit`, or `--coverage`) or argument (`at <file>` alone; a value-taking flag as the last token); a surplus operand (`ids extra`; a fourth `rename` operand); a malformed value (`show a#b#c`, T12.0-13; a U+FFFD-bearing value, T12.0-5); `--status bogus`; `--strategy bogus`; `query nodes --coverage bogus`; a `--kinds` element outside its vocabulary or empty (`depends,`); `review create` with two of its exactly-one-of flags; `--test-hold` beside `--preview`; a `<file>` operand beside `--file` on `view`; a session name outside the form of 10.1 (`.x`); an `<offset>` spelled `+7`; a `--to` malformed as an identity and a `--tag` malformed as a tag (`a\\b`); and a `--file` pattern outside the workspace root (`../x`, by spelling alone) — each reported without loading configuration and modifying nothing: byte-identical error documents with the configuration file invalid or missing, each the plain usage error (`code` and `path` null, no locations), the syntax-alone check preceding what the command would consult next (a session already named `n` and the named `<file>`, staged beside the invalid configuration, go unconsulted) — while a configuration error precedes every check that consults configuration or discovery: `coverage <unknown-profile>` and `query nodes --group <code-group>` with invalid configuration each report 14.14 (`configuration-error`), not the unknown profile or the wrong-kind group (SPEC 12.0, 13.3, 11.1, 11.2, 4.6, 10.1, 10.7, 11.3, 11.4, 11.5, 6.4, 6.6, 7, 14.14, 14.20, 14.21, 12.7)",
   timeoutMs: 240_000,
   run: async (product) => {
     // --- Gated reads: usage-error arguments precede the 13.3 gate, judged
@@ -1938,101 +2124,54 @@ export default defineConfig({
       },
       async (invalidConfig) => {
         await withWorkspace({}, async (missingConfig) => {
-          const syntaxRows: readonly {
-            readonly what: string;
-            readonly argv: readonly string[];
-          }[] = [
-            {
-              what: "an unknown command",
-              argv: ["definitely-not-a-command", "--json"],
-            },
-            {
-              what: "a repeated flag",
-              argv: ["ids", "--json", "--json"],
-            },
-            {
-              what:
-                "a missing required flag (`review create --name n` with " +
-                "none of `--base`, `--strategy audit`, or `--coverage`, " +
-                "SPEC 10.7)",
-              argv: [
-                "review",
-                "create",
-                "--name",
-                SYNTAX_SESSION_NAME,
-                "--json",
-              ],
-            },
-            {
-              what:
-                "a missing required argument (`at <file>` alone, its " +
-                "`<offset>` absent, SPEC 11.5)",
-              argv: ["at", SYNTAX_AT_FILE, "--json"],
-            },
-            {
-              what: "the malformed multi-`#` value (T12.0-13's spelling)",
-              argv: ["show", "a#b#c", "--json"],
-            },
-          ];
-          for (const row of syntaxRows) {
+          for (const row of T12_0_10_SYNTAX_ROWS) {
             const command = row.argv.join(" ");
-            // An error the syntax alone determines is reported before
+            // An error the arguments alone determine is reported before
             // anything else, so the invocation modifies nothing — the
-            // mutating `review create` included, whose session directory
-            // already holds `n` (whole-root compare, `.xspec/` included).
+            // mutating `review create`, `review resolve`, and `rename`
+            // rows included, whose session directory already holds `n`
+            // and whose named file is present (whole-root compare,
+            // `.xspec/` included; a `--test-hold` file created beside
+            // `--preview` would appear at the root).
             const onInvalid = await assertLeavesUnchanged(
               invalidConfig.root,
               () =>
-                expectUsageErrorDocument(
+                expectPlainUsageError(
                   product,
                   invalidConfig,
                   row.argv,
                   `T12.0-10 \`${command}\` with the configuration file ` +
                     `invalid — ${row.what} is determined by the ` +
-                    `invocation's syntax alone and reported without ` +
-                    `loading configuration (SPEC 12.0)`,
+                    `invocation's arguments alone and reported without ` +
+                    `loading configuration: the plain usage error, ` +
+                    `\`code\` and \`path\` null, never 14.14 (SPEC 12.0, ` +
+                    `12.7)`,
                 ),
               `T12.0-10 \`${command}\` with the configuration file invalid ` +
-                `— a syntax-alone usage error modifies nothing (SPEC 12.0)`,
+                `— a syntax-class usage error modifies nothing (SPEC 12.0)`,
             );
             const onMissing = await assertLeavesUnchanged(
               missingConfig.root,
               () =>
-                expectUsageErrorDocument(
+                expectPlainUsageError(
                   product,
                   missingConfig,
                   row.argv,
                   `T12.0-10 \`${command}\` with the configuration file ` +
                     `missing — ${row.what} is reported without loading ` +
-                    `configuration (SPEC 12.0)`,
+                    `configuration: the plain usage error, \`code\` and ` +
+                    `\`path\` null, never 14.14 (SPEC 12.0, 12.7)`,
                 ),
               `T12.0-10 \`${command}\` with the configuration file missing ` +
-                `— a syntax-alone usage error modifies nothing (SPEC 12.0)`,
+                `— a syntax-class usage error modifies nothing (SPEC 12.0)`,
             );
-            for (const [error, state] of [
-              [onInvalid.error, "invalid"],
-              [onMissing.error, "missing"],
-            ] as const) {
-              if (error.code !== null || error.path !== null) {
-                fail(
-                  `T12.0-10 \`${command}\` (configuration ${state}): the ` +
-                    `reported error must be the plain usage error — ` +
-                    `\`code\` and \`path\` null (SPEC 12.7, 14) — never a ` +
-                    `configuration error: the syntax-alone check loads no ` +
-                    `configuration (SPEC 12.0); got code ` +
-                    `${JSON.stringify(error.code)}, path ` +
-                    `${JSON.stringify(error.path)} (message: ` +
-                    `${JSON.stringify(error.message)})`,
-                );
-              }
-            }
             assertBytesEqual(
-              onInvalid.result.stdoutBytes,
-              onMissing.result.stdoutBytes,
+              onInvalid.stdoutBytes,
+              onMissing.stdoutBytes,
               `T12.0-10 \`${command}\`: reported identically with the ` +
                 `workspace's configuration file invalid or missing — the ` +
-                `error document depends on the invocation's syntax alone, ` +
-                `never on configuration state (SPEC 12.0; H-4's ` +
+                `error document depends on the invocation's arguments ` +
+                `alone, never on configuration state (SPEC 12.0; H-4's ` +
                 `product-to-itself compare)`,
             );
           }
@@ -2051,6 +2190,19 @@ export default defineConfig({
               "argument check that consults configuration or discovery: " +
               "14.14 is reported, not the unknown profile (SPEC 12.0, " +
               "14.14)",
+          );
+          // Likewise the wrong-kind group check of 11.1: whether `app`
+          // names a code group, a spec group, or nothing is read from the
+          // configuration, so the configuration error precedes it.
+          await expectConfigurationError(
+            product,
+            invalidConfig,
+            ["query", "nodes", "--group", "app"],
+            "T12.0-10 `query nodes --group app` with invalid " +
+              "configuration — the group check of 11.1 consults the " +
+              "configuration, so the configuration error precedes it: " +
+              "14.14 is reported, not the wrong-kind or unknown group " +
+              "(SPEC 12.0, 11.1, 14.14)",
           );
         });
       },
