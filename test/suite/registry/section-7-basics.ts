@@ -117,7 +117,40 @@
 //   condition carries the file it concerns, no source range; 14), and a
 //   whole-root snapshot compare around the invocation pins that nothing is
 //   written (12.1).
+// - T7-2 verbatim literals (SPEC 7, 2.4): the escape spellings are built
+//   from the backslash's code point (`BACKSLASH`), never written as an
+//   escape in harness source, which would interpret it. "Matching no
+//   discovered file, discovering zero sources" is observed twice — the
+//   inventory's `sources` (discovery reported directly, no source parsed,
+//   11.6) and `ids`'s file listing, both exactly empty — beside the
+//   inventory's resolved configuration view carrying the glob and, in the
+//   group-name arm, the group name as spelled (the six escape characters
+//   included), so a product interpreting the escape fails on the
+//   reported spelling as well as on the file it then discovers. "Resolves"
+//   for the escape-spelled target is the profile's reported rows: with the
+//   boundary the same group, the target set is the group's one leaf,
+//   uncovered (8.1, 8.2); the `target: "product"` twin differs in that one
+//   value alone and is refused as an unknown group (7.4, 14.14).
+// - T7-2 encoding: the non-UTF-8 fixture carries its one invalid byte
+//   (0xFF) inside a trailing line comment, so the decoded text is a valid
+//   configuration and the encoding is the sole defect; the BOM fixture is
+//   the canonical text prefixed by EF BB BF. Both are staged as bytes
+//   (`FileContents`), never as strings.
+// - T7-2 repeated keys: 14.14 whatever TypeScript's own diagnosis of the
+//   repetition (SPEC 7) — the arms pin the 14.14 contract alone, so a
+//   product reporting it through a compiler diagnostic and one detecting
+//   it itself pass alike, while one taking the last member loads and
+//   builds (exit 0).
+// - T7-2 comments: "inventory's `configuration` byte-identical to its
+//   comment-free twin's" is compared as the `configuration` member of each
+//   `inventory --json` document (form-decoded first), as values and as
+//   serializations — member order included.
+// - T7-3 U+FFFD names: the character is staged as the validly encoded code
+//   point EF BF BD between two letters — a string-literal group key, a
+//   profile name, a rule name — so 14.14's name rule, never the encoding
+//   rule, is at stake; each fixture is otherwise valid.
 
+import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import type { GraphEdge } from "../../helpers/adapters/index.js";
 import {
@@ -125,6 +158,7 @@ import {
   decodeEdgesReport,
   decodeFindingsReport,
   decodeIdsReport,
+  decodeInventoryDocument,
   decodeVersionDocument,
 } from "../../helpers/adapters/index.js";
 import {
@@ -141,7 +175,7 @@ import {
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import type { FileContents, WorkspaceDecl } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -150,6 +184,7 @@ import {
   expectConfigurationError,
   expectErrorDocument,
   expectExit,
+  REPLACEMENT_CHARACTER,
   runJson,
 } from "./support.js";
 
@@ -205,7 +240,7 @@ async function withWorkspace<T>(
  */
 async function expectConfigRefused(
   product: ProductBinding,
-  config: string,
+  config: FileContents,
   context: string,
 ): Promise<void> {
   await withWorkspace(
@@ -934,6 +969,198 @@ const QUOTED_KEYS_EDGES: readonly GraphEdge[] = [
   { from: "src/impl.ts", to: "specs/A.mdx#a", kind: "references" },
 ];
 
+// Verbatim literals (SPEC 7, 2.4: configuration literals are static string
+// literals read exactly as spelled). The escape spellings below are built
+// from the backslash's code point so the six characters reach the staged
+// file exactly — a template literal would itself interpret a backslash-u
+// escape (the header's verbatim-literal note).
+const BACKSLASH = String.fromCodePoint(0x5c);
+
+// A glob spelled with the six-character escape of `*` (backslash, `u002A`)
+// is read as those characters: it names only a file literally so called,
+// so with `specs/A.mdx` the sole source the group discovers nothing — valid,
+// a group matching no files being valid (7). A product interpreting the
+// escape reads `specs/*.mdx`, discovers `specs/A.mdx`, and fails the empty
+// listings and the inventory's verbatim glob.
+const VERBATIM_GLOB = `specs/${BACKSLASH}u002A.mdx`;
+const VERBATIM_GLOB_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["${VERBATIM_GLOB}"]
+  }
+})
+`;
+
+// A group name spelled with the escape of `u` (`prod`, backslash, `u0075`,
+// `ct`) names a group whose spelling contains a backslash: a profile's
+// `target: "product"` is then an unknown group (14.14, SPEC 7.4) while the
+// same escape spelling resolves. `boundary` carries the verbatim spelling
+// in both fixtures, so the profile's target is their only difference.
+const VERBATIM_GROUP_NAME = `prod${BACKSLASH}u0075ct`;
+function verbatimNameConfig(target: string): string {
+  return `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    "${VERBATIM_GROUP_NAME}": ["specs/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "verbatim",
+      target: "${target}",
+      boundary: "${VERBATIM_GROUP_NAME}",
+      mode: "direct"
+    }
+  ]
+})
+`;
+}
+
+// Encoding (SPEC 7: the file's bytes MUST be valid UTF-8 and MUST NOT begin
+// with a byte-order mark; either violation is 14.14). The non-UTF-8 fixture
+// is the canonical configuration plus one trailing line comment holding the
+// byte 0xFF, valid in no UTF-8 sequence: a product decoding leniently (0xFF
+// → U+FFFD) sees the valid configuration and a comment contributing nothing,
+// loads, and builds (exit 0). The BOM fixture is the canonical text prefixed
+// by EF BB BF, which TypeScript tooling strips silently, so a product
+// reading through the compiler alone loads it too.
+const NON_UTF8_CONFIG: Uint8Array = Buffer.concat([
+  Buffer.from(SPECS_ONLY_CONFIG, "utf8"),
+  Buffer.from("// ", "utf8"),
+  Buffer.from([0xff]),
+  Buffer.from("\n", "utf8"),
+]);
+const BOM_CONFIG: Uint8Array = Buffer.concat([
+  Buffer.from([0xef, 0xbb, 0xbf]),
+  Buffer.from(SPECS_ONLY_CONFIG, "utf8"),
+]);
+
+// Object-literal keys and names (SPEC 7, 14.14): a key repeated within one
+// object literal — an identifier key and a string-literal key spelling the
+// same name included, whatever TypeScript's own diagnosis of the
+// repetition — and an empty group, profile, or rule name (`""`). Every
+// fixture is otherwise valid: each repeated member is a valid group, and
+// the empty-named profile and rule reference the existing unambiguous
+// group `main`, so the repetition or the empty name is the only defect.
+const KEY_AND_NAME_VIOLATIONS: readonly { label: string; config: string }[] = [
+  {
+    label: "repeated key: `specs` twice within the top-level object literal",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label:
+      "repeated key: an identifier key and a string-literal key spelling " +
+      "the same group name within `specs`",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    product: ["specs/**/*.mdx"],
+    "product": ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label: 'empty name: a spec group ""',
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    "": ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label: 'empty name: a coverage profile whose name is ""',
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "",
+      target: "main",
+      boundary: "main",
+      mode: "direct"
+    }
+  ]
+})
+`,
+  },
+  {
+    label: 'empty name: a policy rule whose name is ""',
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "",
+      type: "forbidden",
+      from: { group: "main" },
+      to: { group: "main" }
+    }
+  ]
+})
+`,
+  },
+];
+
+// Comments (SPEC 7: permitted anywhere, contributing nothing). The commented
+// fixture places line and block comments before the import, after it,
+// before the first key, between keys, inside the glob list (after a glob
+// and between two globs), after the list, after the export, and after
+// everything; its twin is the same configuration with every comment
+// removed. Two globs and a `markdown` key give the "between" positions
+// something to stand between (`docs/` matches nothing: valid, 7).
+const COMMENT_FREE_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: [
+      "specs/**/*.mdx",
+      "docs/**/*.mdx"
+    ]
+  },
+  markdown: { emit: false }
+})
+`;
+const COMMENTED_CONFIG = `// a line comment before the import
+/* a block comment
+   before the import */
+import { defineConfig } from "xspec" // after the import
+
+export default defineConfig({
+  // before the first key
+  specs: {
+    main: [
+      "specs/**/*.mdx", // after a glob
+      /* between two globs */ "docs/**/*.mdx"
+    ] /* after the glob list */
+  }, // after a key
+  /* between keys */
+  markdown: { emit: false }
+}) // after the export
+/* after everything */
+`;
+
 const T7_2 = defineProductTest({
   id: "T7-2",
   title:
@@ -943,7 +1170,13 @@ const T7_2 = defineProductTest({
     "exit 2); an aliased defineConfig import is valid; string-literal " +
     "group-name keys are part of the accepted form — they load, discover, " +
     "and resolve in a coverage profile and a policy selector (SPEC 7, 7.4, " +
-    "7.5, 8)",
+    "7.5, 8); literals are read verbatim — an escape-spelled glob matches " +
+    "nothing and an escape-spelled group name is named only by the same " +
+    "spelling (2.4); a non-UTF-8 file, a byte-order mark, a repeated key, " +
+    "and an empty group, profile, or rule name are configuration errors; " +
+    "comments anywhere contribute nothing (inventory's configuration " +
+    "byte-identical to the comment-free twin's)",
+  timeoutMs: 240_000,
   run: async (product) => {
     for (const arm of FORM_VIOLATIONS) {
       await expectConfigRefused(product, arm.config, `T7-2 (${arm.label})`);
@@ -1104,6 +1337,202 @@ const T7_2 = defineProductTest({
           `quoted group's nodes`,
       );
     });
+
+    // Verbatim literals (SPEC 7, 2.4): the glob spelled with the escape of
+    // `*` is read as its characters — the inventory reports it as spelled
+    // and its group discovers nothing.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": VERBATIM_GLOB_CONFIG,
+          "specs/A.mdx": mdxSection("a"),
+        },
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T7-2 (verbatim glob): `build` — the escape-spelled glob names " +
+            "no file, and a group matching no files is valid, discovery " +
+            "yielding zero sources (SPEC 7, 2.4)",
+        );
+        const inventoryLabel = "T7-2 (verbatim glob) `inventory --json`";
+        const inventory = decodeInventoryDocument(
+          await runJson(
+            product,
+            workspace,
+            ["inventory", "--json"],
+            inventoryLabel,
+          ),
+          inventoryLabel,
+        );
+        assertSameJson(
+          inventory.configuration.specs,
+          [{ name: "main", globs: [VERBATIM_GLOB] }],
+          `${inventoryLabel}: the configured glob is reported as spelled — ` +
+            `thirteen characters, the six of the escape included — never ` +
+            `the interpreted "specs/*.mdx" (SPEC 7, 2.4, 11.6)`,
+        );
+        assertSameJson(
+          inventory.sources,
+          [],
+          `${inventoryLabel}: the verbatim glob matches no discovered ` +
+            `file — specs/A.mdx is not "specs/${BACKSLASH}u002A.mdx" — so ` +
+            `the group discovers zero sources (SPEC 7, 2.4)`,
+        );
+        const idsLabel = "T7-2 (verbatim glob) `ids --json`";
+        const ids = decodeIdsReport(
+          await runJson(product, workspace, ["ids", "--json"], idsLabel),
+          idsLabel,
+        );
+        assertSameJson(
+          ids.files,
+          [],
+          `${idsLabel}: zero discovered spec sources list zero files ` +
+            `(SPEC 7, 2.4, 12.3)`,
+        );
+      },
+    );
+
+    // A group name spelled with the escape of `u` names a group whose
+    // spelling contains a backslash: a profile's target spelled `product`
+    // is an unknown group (14.14), the escape spelling resolves.
+    await expectConfigRefused(
+      product,
+      verbatimNameConfig("product"),
+      'T7-2 (verbatim group name: a profile\'s target "product" names no ' +
+        "configured group — the group's spelling contains a backslash)",
+    );
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": verbatimNameConfig(VERBATIM_GROUP_NAME),
+          "specs/A.mdx": mdxSection("a"),
+        },
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T7-2 (verbatim group name): `build` — the profile's target and " +
+            "boundary, spelled as the group's key is, resolve (SPEC 7, " +
+            "2.4, 7.4)",
+        );
+        const inventoryLabel = "T7-2 (verbatim group name) `inventory --json`";
+        const inventory = decodeInventoryDocument(
+          await runJson(
+            product,
+            workspace,
+            ["inventory", "--json"],
+            inventoryLabel,
+          ),
+          inventoryLabel,
+        );
+        assertSameJson(
+          inventory.configuration.specs.map((group) => group.name),
+          [VERBATIM_GROUP_NAME],
+          `${inventoryLabel}: the group is named as spelled — eleven ` +
+            `characters, the six of the escape included — never the ` +
+            `interpreted "product" (SPEC 7, 2.4, 11.6)`,
+        );
+        const coverageLabel = "T7-2 (verbatim group name) `coverage --json`";
+        const coverage = decodeCoverageReport(
+          await runJson(
+            product,
+            workspace,
+            ["coverage", "--json"],
+            coverageLabel,
+          ),
+          coverageLabel,
+        );
+        assertSameJson(
+          coverage.profiles.map((row) => ({
+            name: row.name,
+            covered: row.covered.map((entry) => entry.identity),
+            uncovered: [...row.uncovered].sort(),
+          })),
+          [{ name: "verbatim", covered: [], uncovered: ["specs/A.mdx#a"] }],
+          `${coverageLabel}: the profile resolved its target — the ` +
+            `group's one leaf is its target set, uncovered under a ` +
+            `boundary sourcing no edge into it (SPEC 7, 2.4, 7.4, 8.1, 8.2)`,
+        );
+      },
+    );
+
+    // Encoding (SPEC 7, 14.14): bytes that are not valid UTF-8; a
+    // byte-order mark.
+    await expectConfigRefused(
+      product,
+      NON_UTF8_CONFIG,
+      "T7-2 (encoding: the byte 0xFF inside a trailing line comment — the " +
+        "file's bytes are not valid UTF-8)",
+    );
+    await expectConfigRefused(
+      product,
+      BOM_CONFIG,
+      "T7-2 (encoding: the file begins with a byte-order mark)",
+    );
+
+    // Object-literal keys and names (SPEC 7, 14.14): repeated keys, empty
+    // names — each 14.14, exit 2.
+    for (const arm of KEY_AND_NAME_VIOLATIONS) {
+      await expectConfigRefused(product, arm.config, `T7-2 (${arm.label})`);
+    }
+
+    // Comments (SPEC 7): the commented configuration loads, and the
+    // inventory's resolved `configuration` view is byte-identical to its
+    // comment-free twin's — compared as the member's serialization, member
+    // order and spellings included.
+    const configurationViewOf = async (
+      config: string,
+      label: string,
+    ): Promise<unknown> =>
+      await withWorkspace(
+        {
+          files: {
+            "xspec.config.ts": config,
+            "specs/A.mdx": mdxSection("a"),
+          },
+        },
+        async (workspace) => {
+          await buildOk(
+            product,
+            workspace,
+            `${label}: \`build\` — the configuration loads (SPEC 7)`,
+          );
+          const inventoryLabel = `${label} \`inventory --json\``;
+          const raw = await runJson(
+            product,
+            workspace,
+            ["inventory", "--json"],
+            inventoryLabel,
+          );
+          decodeInventoryDocument(raw, inventoryLabel);
+          return (raw as { readonly configuration: unknown }).configuration;
+        },
+      );
+    const commented = await configurationViewOf(
+      COMMENTED_CONFIG,
+      "T7-2 (comments)",
+    );
+    const commentFree = await configurationViewOf(
+      COMMENT_FREE_CONFIG,
+      "T7-2 (comment-free twin)",
+    );
+    const commentsContext =
+      "T7-2 (comments): `inventory`'s `configuration` member under the " +
+      "commented configuration is byte-identical to the comment-free " +
+      "twin's — line and block comments before the import, after it, " +
+      "between keys, inside the glob list, and after the export " +
+      "contribute nothing (SPEC 7, 11.6)";
+    assertSameJson(commented, commentFree, commentsContext);
+    if (JSON.stringify(commented) !== JSON.stringify(commentFree)) {
+      fail(
+        `${commentsContext}; the members are equal as values but ` +
+          `serialize differently (member order): ` +
+          `${JSON.stringify(commented)} vs ${JSON.stringify(commentFree)}`,
+      );
+    }
   },
 });
 
@@ -1418,16 +1847,80 @@ async function assertViolatingEdgePresent(
   );
 }
 
+// Names containing U+FFFD (SPEC 7, 14.14; 12.0: no argument value carries
+// the character, and configured names are named in arguments): a spec
+// group, a profile, and a rule, one arm each. The character is staged as
+// its validly encoded code point (EF BF BD) between two letters, so 14.14's
+// name rule — never the encoding rule — is at stake; the group key takes
+// the string-literal form (U+FFFD is no identifier character), and the
+// profile and rule reference the existing unambiguous group `main`, so the
+// name is each fixture's only defect. A product not checking names loads
+// each and builds (exit 0).
+const REPLACEMENT_NAME_VIOLATIONS: readonly {
+  label: string;
+  config: string;
+}[] = [
+  {
+    label: "a spec group named with U+FFFD",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    "a${REPLACEMENT_CHARACTER}b": ["specs/**/*.mdx"]
+  }
+})
+`,
+  },
+  {
+    label: "a coverage profile named with U+FFFD",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "p${REPLACEMENT_CHARACTER}q",
+      target: "main",
+      boundary: "main",
+      mode: "direct"
+    }
+  ]
+})
+`,
+  },
+  {
+    label: "a policy rule named with U+FFFD",
+    config: `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "r${REPLACEMENT_CHARACTER}s",
+      type: "forbidden",
+      from: { group: "main" },
+      to: { group: "main" }
+    }
+  ]
+})
+`,
+  },
+];
+
 const T7_3 = defineProductTest({
   id: "T7-3",
   title:
     "keys: specs is required; omitted code/markdown/coverage/policy mean " +
     "no code groups, no emission, zero profiles, and no policy findings; " +
     "empty coverage/policy lists equal omission; unknown keys at every " +
-    "position, and values of the wrong shape (a group valued by a single " +
+    "position, values of the wrong shape (a group valued by a single " +
     "string, a glob list holding true, coverage/policy given as objects, " +
-    "specs/code given as lists), are configuration errors (SPEC 7, 7.1, " +
-    "7.2, 14.14)",
+    "specs/code given as lists), and a spec group, a profile, or a rule " +
+    "named with U+FFFD are configuration errors (SPEC 7, 7.1, 7.2, 14.14)",
   run: async (product) => {
     // (a) `specs` missing and the unknown-key matrix — each 14.14, exit 2.
     for (const arm of KEY_VIOLATIONS) {
@@ -1437,6 +1930,12 @@ const T7_3 = defineProductTest({
     // (a′) value shapes — each 14.14, exit 2, the configuration file named
     // and nothing written (SPEC 7, 7.1, 7.2; 14.14).
     for (const arm of VALUE_SHAPE_VIOLATIONS) {
+      await expectConfigRefused(product, arm.config, `T7-3 (${arm.label})`);
+    }
+
+    // (a″) names containing U+FFFD — a spec group, a profile, a rule —
+    // each 14.14, exit 2 (SPEC 7, 14.14).
+    for (const arm of REPLACEMENT_NAME_VIOLATIONS) {
       await expectConfigRefused(product, arm.config, `T7-3 (${arm.label})`);
     }
 
