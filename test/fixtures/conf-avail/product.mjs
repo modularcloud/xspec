@@ -6,9 +6,20 @@
 //
 // Scope implemented (see CERTIFICATIONS.md §CONF-AVAIL):
 // - Workspaces of configured spec groups of `.mdx` sources at valid-UTF-8,
-//   `#`-free workspace-relative paths — imports (2.1), `d` props, and
-//   `{text(...)}` embeddings as the in-scope fixtures stage them; no code
-//   groups, `markdown`, `coverage`, `policy`, or git.
+//   `#`-free workspace-relative paths — imports (2.1, resolved lexically:
+//   a non-canonical specifier designates the same discovered source), `d`
+//   props, and `{text(...)}` embeddings as the in-scope fixtures stage
+//   them; a spec source unparseable by encoding — a file beginning with a
+//   byte-order mark (1.6), its 14.20 the zero-length range at offset 0 —
+//   masked: no view, its finding accompanying only when it is itself
+//   requested, an import designating it valid with the plain target, an
+//   embedding into it the embedding file's own 14.6 (T11.4-4's
+//   masked-target arm); one code group (7.2) only as T11.4-4's
+//   wrong-kind-target arm stages it — its glob matching one `.mdx` file no
+//   spec glob matches, a discovered code source known by path alone (a
+//   specifier designating it names no spec source, 14.15; no view domain
+//   holds it; its content is never read); no `markdown`, `coverage`,
+//   `policy`, or git.
 // - Command surface: `view`, with and without `--text` — the bare
 //   whole-domain form (neither operands nor `--file`: every discovered spec
 //   source viewed, 11.4) and the operand and `--file` forms — and
@@ -33,7 +44,8 @@
 //   `--file` domain restriction and `--to` selection of 11.3; the raw
 //   attribute and import data of 11.4; findings per 11.2/14 with stable
 //   codes and located ranges for the staged conditions (14.1, 14.3, 14.4,
-//   14.5, 14.6, 14.9, 14.15, 14.16, 14.17); and the exit discipline of 11.2
+//   14.5, 14.6, 14.9, 14.15, 14.16, 14.17, and 14.20 at offset 0 for the
+//   byte-order-mark file); and the exit discipline of 11.2
 //   (any finding or explicitly-unavailable datum in the emitted answer →
 //   exit 1 with the full answer still emitted; complete and finding-free →
 //   exit 0). Graph data and refresh behavior are out of scope: the two
@@ -462,7 +474,7 @@ async function loadConfig(cwd, configFlag) {
   }
   const data = parseConfigSource(text);
   for (const key of Object.keys(data)) {
-    if (key !== "specs") {
+    if (key !== "specs" && key !== "code") {
       throw new UsageError(
         `configuration error: the key ${JSON.stringify(key)} is unknown or outside this fixture's scope (CERTIFICATIONS.md §CONF-AVAIL; SPEC 7, 14.14)`,
       );
@@ -479,24 +491,43 @@ async function loadConfig(cwd, configFlag) {
       "configuration error: `specs` is required and must be a map of groups (SPEC 7)",
     );
   }
-  /** @type {Record<string, string[]>} */
-  const groups = {};
-  for (const [name, globs] of Object.entries(specs)) {
-    if (!Array.isArray(globs) || globs.some((g) => typeof g !== "string")) {
-      throw new UsageError(
-        `configuration error: spec group ${name} must be a list of glob strings (SPEC 7.1)`,
-      );
-    }
-    for (const glob of globs) {
-      if (glob.startsWith("/") || glob.split("/").includes("..")) {
+  /** Validate one `specs`/`code` map of named glob lists (SPEC 7.1, 7.2). */
+  const readGroups = (map, kind, section) => {
+    /** @type {Record<string, string[]>} */
+    const groups = {};
+    for (const [name, globs] of Object.entries(map)) {
+      if (!Array.isArray(globs) || globs.some((g) => typeof g !== "string")) {
         throw new UsageError(
-          `configuration error: pattern ${glob} resolves outside the workspace root (SPEC 7, 14.14)`,
+          `configuration error: ${kind} group ${name} must be a list of glob strings (SPEC ${section})`,
         );
       }
+      for (const glob of globs) {
+        if (glob.startsWith("/") || glob.split("/").includes("..")) {
+          throw new UsageError(
+            `configuration error: pattern ${glob} resolves outside the workspace root (SPEC 7, 14.14)`,
+          );
+        }
+      }
+      groups[name] = globs;
     }
-    groups[name] = globs;
+    return groups;
+  };
+  const groups = readGroups(specs, "spec", "7.1");
+  // One code group only as T11.4-4's wrong-kind-target arm stages it
+  // (§CONF-AVAIL): its glob matches an `.mdx` file no spec glob matches — a
+  // discovered code source, no spec source (SPEC 7.2), whose content no
+  // in-scope invocation reads.
+  const code = data.code;
+  if (
+    code !== undefined &&
+    (code === null || typeof code !== "object" || Array.isArray(code))
+  ) {
+    throw new UsageError(
+      "configuration error: `code` must be a map of groups (SPEC 7.2)",
+    );
   }
-  return { root: path.dirname(configPath), groups };
+  const codeGroups = code === undefined ? {} : readGroups(code, "code", "7.2");
+  return { root: path.dirname(configPath), groups, codeGroups };
 }
 
 // ---------------------------------------------------------------------------
@@ -588,17 +619,34 @@ function compareRelBytes(a, b) {
   return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 }
 
-async function discoverSources(root, groups) {
+/**
+ * Discovery (SPEC 7): the spec sources (matched by a spec group's glob) and
+ * the code sources (matched by a code group's glob), each in byte order of
+ * path. A file matched by both kinds is a configuration error (SPEC 7.2,
+ * 14.14) — outside the scope's stagings, refused loudly.
+ */
+async function discoverSources(root, groups, codeGroups) {
   const all = (await walkPlainFiles(root)).sort(compareRelBytes);
-  const discovered = [];
-  for (const rel of all) {
-    if (isDerivedPath(rel)) continue;
-    const matched = Object.values(groups).some((globs) =>
+  const matchedBy = (kindGroups, rel) =>
+    Object.values(kindGroups).some((globs) =>
       globs.some((glob) => globMatches(glob, rel)),
     );
-    if (matched) discovered.push(rel);
+  const specs = [];
+  const code = [];
+  for (const rel of all) {
+    if (isDerivedPath(rel)) continue;
+    const isSpec = matchedBy(groups, rel);
+    const isCode = matchedBy(codeGroups, rel);
+    if (isSpec && isCode) {
+      throw new UsageError(
+        `configuration error: ${rel} is matched by both a spec group and a code group (SPEC 7.2, 14.14)`,
+        { code: "configuration-error", path: null },
+      );
+    }
+    if (isSpec) specs.push(rel);
+    else if (isCode) code.push(rel);
   }
-  return discovered;
+  return { specs, code };
 }
 
 // ---------------------------------------------------------------------------
@@ -1396,22 +1444,34 @@ function analyzeFile(rel, bytes) {
     info: new Map(),
     failure: null,
   };
-  let text;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return {
-      ...base,
-      failure: { at: 0, message: `${rel} is not valid UTF-8 (SPEC 1.6)` },
-    };
-  }
-  if (text.charCodeAt(0) === 0xfeff) {
+  // A byte-order mark is judged on the raw bytes (EF BB BF): a UTF-8
+  // decoder strips a leading BOM from its output unless told otherwise, so a
+  // check on the decoded text would never see it. The file is unparseable
+  // (SPEC 1.6, 14.20), its one zero-length location at offset 0 (SPEC 14) —
+  // the masked target T11.4-4's masked-target arm stages (§CONF-AVAIL).
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xef &&
+    bytes[1] === 0xbb &&
+    bytes[2] === 0xbf
+  ) {
     return {
       ...base,
       failure: {
         at: 0,
         message: `${rel} begins with a byte-order mark (SPEC 1.6)`,
       },
+    };
+  }
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      bytes,
+    );
+  } catch {
+    return {
+      ...base,
+      failure: { at: 0, message: `${rel} is not valid UTF-8 (SPEC 1.6)` },
     };
   }
   const byteOf = byteOffsetMapper(text, bytes.length);
@@ -1440,14 +1500,23 @@ function byteRange(record, startIndex, endIndex) {
  */
 async function loadWorkspace(cwd, configFlag) {
   const config = await loadConfig(cwd, configFlag);
-  const rels = await discoverSources(config.root, config.groups);
+  const discovered = await discoverSources(
+    config.root,
+    config.groups,
+    config.codeGroups,
+  );
   /** @type {{condition: string, message: string, locations: {file: string, range: {start: number, end: number}}[]}[]} */
   const findings = [];
   const files = new Map();
-  for (const rel of rels) {
+  for (const rel of discovered.specs) {
     const bytes = await fsp.readFile(path.join(config.root, ...rel.split("/")));
     files.set(rel, analyzeFile(rel, bytes));
   }
+  // Discovered code sources: known by path alone — no spec source, so no
+  // view domain holds one and no `.xspec` specifier designates one (SPEC
+  // 2.1, 11.4) — their content never read (§CONF-AVAIL's staging
+  // constraint: no in-scope invocation consults a code source's content).
+  const codeSources = new Set(discovered.code);
 
   const addFinding = (condition, message, locations) => {
     findings.push({ condition, message, locations });
@@ -1457,15 +1526,15 @@ async function loadWorkspace(cwd, configFlag) {
   // interpreted tags/coverage, invalid elements, imports.
   for (const record of files.values()) {
     if (record.failure !== null) {
+      // One zero-length range at the failure's offset (SPEC 14): 0 for a
+      // byte-order mark or an encoding failure at the file's start — the
+      // encoding failures the scope admits — and the parser's failure
+      // index, mapped to bytes, for a syntax failure (out of scope).
+      const at = byteRange(record, record.failure.at, record.failure.at).start;
       addFinding(
         "14.20",
         `unparseable source: ${record.failure.message} (SPEC 14.20)`,
-        [
-          {
-            file: record.rel,
-            range: byteRange(record, record.failure.at, record.failure.at + 1),
-          },
-        ],
+        [{ file: record.rel, range: { start: at, end: at } }],
       );
       continue;
     }
@@ -1976,7 +2045,7 @@ async function loadWorkspace(cwd, configFlag) {
     }
   }
 
-  return { config, files, findings, records, nodeIdentity };
+  return { config, files, codeSources, findings, records, nodeIdentity };
 }
 
 /** The size of a key's SCC (helper for the cycle pass above). */
@@ -2460,6 +2529,13 @@ async function commandView(io, cwd, argv) {
   if (positionals.length > 0) {
     const set = new Set();
     for (const operand of positionals) {
+      if (ws.codeSources.has(operand)) {
+        // A discovered code source has no structural view: a wrong-kind
+        // operand, a usage error (SPEC 11.4, 12.0).
+        throw new UsageError(
+          `wrong kind: ${operand} is a discovered code source, and \`view\` takes spec sources (SPEC 11.4, 12.0)`,
+        );
+      }
       if (!ws.files.has(operand)) {
         throw new UsageError(
           `unknown file: ${operand} is not a discovered spec source (SPEC 11.4, 12.0)`,
@@ -2540,6 +2616,20 @@ async function commandOccurrences(io, cwd, argv) {
   // domain; `--to` selection and `view` are unchanged.
   const restriction =
     deviations.ignoreFileRestriction === true ? undefined : flags["--file"];
+  // `--file` admits spec and code sources alike (SPEC 11.3), but a code
+  // source's occurrences are its TypeScript analysis (4.x), which this
+  // fixture does not carry: no in-scope staging drives `occurrences` on a
+  // workspace holding a code source (§CONF-AVAIL), so such a glob is a
+  // fixture-scope breach, failed loudly rather than answered incompletely.
+  if (restriction !== undefined) {
+    for (const rel of ws.codeSources) {
+      if (globMatches(restriction, rel)) {
+        throw new Error(
+          `§CONF-AVAIL scope breach: --file ${restriction} admits the code source ${rel}, whose occurrences this fixture does not analyze`,
+        );
+      }
+    }
+  }
   const domain = new Set(
     restriction === undefined
       ? ws.files.keys()
