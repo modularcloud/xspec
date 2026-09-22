@@ -19,7 +19,12 @@
 // `--coverage` matches no root; `--group` accepts only a spec group's name —
 // a code group's name is an invalid flag value (12.0, the wrong-kind group
 // reference of 14.14); `--file` uses the glob rules of 7, the outside-root
-// rule included. `nodes`, `subtree`, and `ancestors` share one row contract:
+// rule included; `--tag` accepts any well-formed tag (1.4) — acceptance is
+// syntactic, as on `occurrences --to` (11.3): a spelling no tag can have is
+// a malformed value, a usage error of the syntax class reported without
+// loading configuration (12.0), while a well-formed tag no node carries
+// matches nothing, exit 0. `nodes`, `subtree`, and `ancestors` share one row
+// contract:
 // identity, source range, tags, coverage attribute (absent for roots).
 // `subtree` returns the queried node plus all descendants in document order;
 // `ancestors` returns the proper ancestors nearest-first ending at the file
@@ -92,16 +97,19 @@ import {
   BESIDE_ROOT_FILE_PATTERN_DECOY,
   INSIDE_NO_MATCH_FILE_PATTERNS,
   OUTSIDE_ROOT_FILE_PATTERNS,
+  REPLACEMENT_CHARACTER,
   assertEdgeSetEqual,
   assertSameJson,
   buildOk,
   expectErrorDocument,
   expectExit,
   expectFilePatternUsageError,
+  expectSyntaxClassUsageError,
   insideNoMatchFilePatterns,
   runJson,
   sortedIdentities,
   stageBesideRoot,
+  stageConfigurationStateTwins,
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
@@ -713,18 +721,61 @@ function expectedRows(
   });
 }
 
+// T11-2's file set; the configuration stands apart, since the `--tag`
+// sweep's configuration-state twins stage these same files under an invalid
+// and under no configuration.
+const T11_2_FILES: Readonly<Record<string, string>> = {
+  "specs/alpha/A.mdx": T11_2_A_SOURCE,
+  "specs/beta/B.mdx": T11_2_B_SOURCE,
+  "src/app.ts": "export {};\n",
+};
+
+// `--tag` acceptance is syntactic (SPEC 11.1, 1.4, 12.0): the spellings no
+// tag can have, one arm per TEST-SPEC class, each exit 2. Where the form
+// allows, the defect stands between two ordinary letters, so the character
+// alone is what a product accepts or rejects. The control characters are
+// built from their code points — U+0000 can be no argument value at all (no
+// argument vector carries a NUL), so the class is represented by its two
+// remaining boundaries, U+001F and U+007F — and U+FFFD is the shared
+// `REPLACEMENT_CHARACTER`, so no tool layer decodes a spelling on the way
+// into this file.
+const T11_2_MALFORMED_TAGS: ReadonlyArray<{
+  readonly spelling: string;
+  readonly what: string;
+}> = [
+  { spelling: "", what: "the empty string (a segment MUST be non-empty)" },
+  { spelling: "a b", what: "a whitespace-bearing spelling (U+0020 inside)" },
+  { spelling: "#", what: "`#` (no segment contains one)" },
+  { spelling: "then", what: "a forbidden name" },
+  {
+    spelling: `a${String.fromCodePoint(0x1f)}b`,
+    what: "a control character (U+001F)",
+  },
+  {
+    spelling: `a${String.fromCodePoint(0x7f)}b`,
+    what: "a control character (U+007F)",
+  },
+  { spelling: 'a"b', what: 'the quote character `"`' },
+  { spelling: "a'b", what: "the quote character `'`" },
+  {
+    spelling: "a\\b",
+    what: "the escape character `\\` (the `a\\b` spelling of T12.0-10)",
+  },
+  { spelling: "a&b", what: "the character-reference character `&`" },
+  {
+    spelling: `a${REPLACEMENT_CHARACTER}b`,
+    what: "U+FFFD (12.0's argument-value rule: no argument value carries it)",
+  },
+];
+
 const T11_2 = defineProductTest({
   id: "T11-2",
   title:
-    "`query nodes` rows are requirement nodes carrying identity, source range, tags, and coverage attribute (absent for roots); `--group`, `--file <glob>`, `--tag`, and `--coverage` combine conjunctively; `--coverage` matches no root; a `--file` pattern outside the workspace root by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`) is an invalid flag value — exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding — while an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`, and their twins over `specs/alpha`) is admitted and matches nothing, exit 0 with no rows; a `--group` naming a code group is an invalid flag value, exit 2 (SPEC 11, 7, 12.0, 12.7, 14.14)",
+    "`query nodes` rows are requirement nodes carrying identity, source range, tags, and coverage attribute (absent for roots); `--group`, `--file <glob>`, `--tag`, and `--coverage` combine conjunctively; `--coverage` matches no root; a `--file` pattern outside the workspace root by spelling alone (`../x/*.mdx`, `../x`, `a/../../x`, `/specs/*.mdx`) is an invalid flag value — exit 2 with the plain usage error's document, code and path null, a matching file beside the root notwithstanding — while an inside pattern spelled with a `.` or empty segment (`./specs/*.mdx`, `specs//*.mdx`, and their twins over `specs/alpha`) is admitted and matches nothing, exit 0 with no rows; a `--group` naming a code group is an invalid flag value, exit 2; `--tag` acceptance is syntactic, as on `occurrences --to`: a well-formed tag no node carries (`green`; `a.b`, since a tag may contain `.`) matches nothing — exit 0, an empty row set — while a spelling no tag can have, one arm each — the empty string, `a b`, `#`, `then`, a control character (U+001F and U+007F, the class's argument-bearable boundaries), `\"`, `'`, `\\`, `&`, and U+FFFD — is a malformed value of the syntax class: exit 2 with the plain usage error's document (`code` and `path` null), reported without loading configuration — byte-identical with the configuration file invalid or missing (T12.0-10's discipline) — nothing modified (SPEC 11, 11.1, 1.4, 7, 12.0, 12.7, 14.14)",
   run: async (product) => {
     await withWorkspace(
       TWO_SPEC_GROUP_CONFIG,
-      {
-        "specs/alpha/A.mdx": T11_2_A_SOURCE,
-        "specs/beta/B.mdx": T11_2_B_SOURCE,
-        "src/app.ts": "export {};\n",
-      },
+      T11_2_FILES,
       async (workspace) => {
         await buildOk(product, workspace, "T11-2 `build`");
 
@@ -884,6 +935,58 @@ const T11_2 = defineProductTest({
           "a `--group` value naming a code group (a wrong-kind group reference, 14.14)",
           "T11-2 `query nodes --group app`",
         );
+
+        // `--tag` acceptance is syntactic (SPEC 11.1, 1.4, 12.0; as on
+        // `occurrences --to`, 11.3). A well-formed tag no node carries
+        // matches nothing — exit 0, an empty row set — `a.b` beside `green`
+        // since a tag MAY contain `.` (1.4): a product applying the segment
+        // rule to tags refuses it and fails the exit assertion.
+        for (const tag of ["green", "a.b"]) {
+          const context = `T11-2 \`query nodes --tag ${tag}\` — a well-formed tag no node carries`;
+          const rows = decodeNodeRowsReport(
+            await runJson(
+              product,
+              workspace,
+              ["query", "nodes", "--tag", tag, "--json"],
+              `${context} matches nothing: exit 0, never a usage error (SPEC 11.1, 1.4)`,
+            ),
+            context,
+          );
+          assertSameJson(
+            rows,
+            [],
+            `${context}: an empty row set — [], never null (SPEC 11.1, 12.7)`,
+          );
+        }
+
+        // Each spelling no tag can have is a malformed value of the syntax
+        // class: exit 2 with the plain usage error's document, reported
+        // without loading configuration — identically, byte for byte, on
+        // the twins holding the same files under an invalid and under no
+        // configuration (T12.0-10's discipline; a product loading
+        // configuration before judging the tag answers 14.14 there) — the
+        // whole sweep modifying nothing on the built workspace.
+        const twins = await stageConfigurationStateTwins(T11_2_FILES);
+        try {
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              for (const { spelling, what } of T11_2_MALFORMED_TAGS) {
+                await expectSyntaxClassUsageError(
+                  product,
+                  workspace,
+                  twins,
+                  ["query", "nodes", "--tag", spelling, "--json"],
+                  `T11-2 \`query nodes --tag ${JSON.stringify(spelling)}\` (${what})`,
+                );
+              }
+            },
+            "T11-2 malformed `--tag` sweep — a syntax-class usage error " +
+              "modifies nothing (SPEC 12.0)",
+          );
+        } finally {
+          await twins.dispose();
+        }
       },
     );
   },

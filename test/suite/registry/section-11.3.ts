@@ -65,15 +65,22 @@
 // (14.20; its pre-breakage sections and reference spellings recorded by a
 // recovering product), and duplicate bearers (14.3) with an ambiguous
 // reference to them (14.5; recorded by a winner-picking product) — plus the
-// no-such-node spellings in both syntactic forms. Malformed spellings ride
-// T11.2-5's exported usage-error protocol on this same failing workspace
-// (the argument checks precede answering, whatever findings the workspace
-// carries); each malformed arm spells its defect over the DISCOVERED
-// specs/OK.mdx path where the form allows, so a resolve-first product that
-// finds the file and answers (empty or otherwise) instead of erring is
-// discriminated — TEST-SPEC's parenthetical `a#b..c`/`a#then`/`a.mdx#`
-// spellings give the malformed classes, not byte-exact operands (the
-// FP-018/T6.5-4 `b.mdx#` precedent). (2) The exact-selection ground
+// no-such-node spellings in both syntactic forms. Malformed spellings —
+// TEST-SPEC's classes plus the four quote, escape, and character-reference
+// characters in a segment and U+FFFD in the path or the id part — are
+// syntax-class usage errors (SPEC 12.0): each runs through the shared
+// `expectSyntaxClassUsageError` (registry/support.ts) on this same failing
+// workspace (the plain usage error's document, the argument check preceding
+// answering whatever findings the workspace carries) and again on two twins
+// holding the discovered specs/OK.mdx under an invalid and under no
+// configuration, byte-identically — reported without loading configuration,
+// so before every identity reading, which discovery would have to precede
+// (T12.0-10's discipline); each malformed arm spells its defect over the
+// DISCOVERED specs/OK.mdx path where the form allows, so a resolve-first
+// product that finds the file and answers (empty or otherwise) instead of
+// erring is discriminated — TEST-SPEC's parenthetical `a#b..c`/`a#then`/
+// `a.mdx#` spellings give the malformed classes, not byte-exact operands
+// (the FP-018/T6.5-4 `b.mdx#` precedent). (2) The exact-selection ground
 // (valid): a two-file workspace whose four records make every mis-selection
 // nonempty-visible — a resolving identity selects the occurrences targeting
 // it (both edge kinds), never its descendant's records and never the
@@ -151,7 +158,6 @@ import {
   CS_EXPECTED_OCCURRENCES,
   CS_FILE,
   CS_SOURCE,
-  expectAvailabilityUsageError,
   OK_FILE,
   OK_SOURCE,
   R_CONDITION_COUNTS,
@@ -161,10 +167,12 @@ import {
   SPEC_AND_CODE_CONFIG as AVAILABILITY_SPEC_AND_CODE_CONFIG,
   SPECS_ONLY_CONFIG,
 } from "./section-11.2.js";
+import type { ConfigurationStateTwins } from "./support.js";
 import {
   BESIDE_ROOT_FILE_PATTERN_DECOY,
   INSIDE_NO_MATCH_FILE_PATTERNS,
   OUTSIDE_ROOT_FILE_PATTERNS,
+  REPLACEMENT_CHARACTER,
   assertConditionCounts,
   assertFindingLocated,
   assertSameJson,
@@ -172,8 +180,10 @@ import {
   buildOk,
   expectExit,
   expectFilePatternUsageError,
+  expectSyntaxClassUsageError,
   runJson,
   stageBesideRoot,
+  stageConfigurationStateTwins,
 } from "./support.js";
 
 /** The 12.7 unavailability marker, as decoded (one-datum state). */
@@ -1443,10 +1453,16 @@ const TO_ACCEPTED_EMPTY: ReadonlyArray<readonly [string, string]> = [
 
 /**
  * The malformed spellings, one arm per TEST-SPEC class (whitespace-bearing
- * and forbidden-name staged one arm each), each exit 2 (SPEC 11.3, 1.4,
- * 12.0). Where the form allows, the defect is spelled over the DISCOVERED
- * specs/OK.mdx path, so a product that resolves first and errs only on
- * unknown names answers (empty or otherwise) and fails the exit assertion.
+ * and forbidden-name staged one arm each; the quote, escape, and
+ * character-reference characters one arm each of the four; U+FFFD in the
+ * path part — bare, and beside a well-formed id — and in the id part), each
+ * exit 2 (SPEC 11.3, 1.4, 12.0). Where the form allows, the defect is
+ * spelled over the DISCOVERED specs/OK.mdx path — inside its real id `ok`
+ * for the character arms — so a product that resolves first and errs only
+ * on unknown names answers (empty or otherwise) and fails the exit
+ * assertion. The characters are built from their code points or the shared
+ * `REPLACEMENT_CHARACTER`, so no tool layer decodes a spelling on the way
+ * into this file.
  */
 const TO_MALFORMED: ReadonlyArray<readonly [string, string]> = [
   [`${TO_OK_FILE}#ok#use`, "more than one `#`"],
@@ -1454,7 +1470,37 @@ const TO_MALFORMED: ReadonlyArray<readonly [string, string]> = [
   [`${TO_OK_FILE}#ok..use`, "an empty segment (the `a#b..c` class)"],
   [`${TO_OK_FILE}#ok use`, "a whitespace-bearing segment (U+0020 inside)"],
   [`${TO_OK_FILE}#then`, "a forbidden-name segment (the `a#then` class)"],
+  [
+    `${TO_OK_FILE}#o${String.fromCodePoint(0x22)}k`,
+    'a segment containing the quote character `"`',
+  ],
+  [
+    `${TO_OK_FILE}#o${String.fromCodePoint(0x27)}k`,
+    "a segment containing the quote character `'`",
+  ],
+  [
+    `${TO_OK_FILE}#o${String.fromCodePoint(0x5c)}k`,
+    "a segment containing the escape character `\\` (the `a.mdx#x\\y` class)",
+  ],
+  [
+    `${TO_OK_FILE}#o&k`,
+    "a segment containing the character-reference character `&` (the " +
+      "`a.mdx#x&y` class)",
+  ],
   [`${TO_OK_FILE}#`, "a trailing empty id part (the `a.mdx#` class)"],
+  [
+    `specs/O${REPLACEMENT_CHARACTER}K.mdx#ok`,
+    "U+FFFD in the path part beside a well-formed id (12.0's argument-value " +
+      "rule: no argument value carries it)",
+  ],
+  [
+    `specs/O${REPLACEMENT_CHARACTER}K.mdx`,
+    "U+FFFD in a bare path — the whole spelling is the path part",
+  ],
+  [
+    `${TO_OK_FILE}#o${REPLACEMENT_CHARACTER}k`,
+    "U+FFFD in the id part (12.0's argument-value rule)",
+  ],
 ];
 
 // The exact-selection workspace (valid): four records, all in specs/USE.mdx
@@ -1536,7 +1582,7 @@ const SEL_ALL_TUPLES: readonly RecordTuple[] = [
 const T11_3_3 = defineProductTest({
   id: "T11.3-3",
   title:
-    "`--to` acceptance is syntactic: well-formed spellings naming identities that do not currently resolve — a discovered file's nonexistent id (`path#id`), a bare `path` no file bears, an undiscovered on-disk file's identity, a masked (14.20) file's, an undefined duplicate bearer's — are each accepted and select the empty set while the domain's one real occurrence stays enumerable (pinned bare) and the domain's findings stay on the answer (exactly {14.20, 14.3, 14.5}, exit 1), never an error; malformed spellings — more than one `#`, an empty path part, an empty segment, a whitespace-bearing segment, a forbidden-name segment (`then`), a trailing empty id part — each exit 2 with the single 12.7 error document, the argument check preceding answering whatever findings the workspace carries; selection is exact over a valid workspace: a resolving identity selects the occurrences targeting it — both its `d`-entry and its embedding record, never the descendant `top.sub`'s record and never the root's — the descendant's own identity selects exactly its record, and a bare path selects exactly the module-form root reference (T2.2-2), never the file's section-targeted records (SPEC 11.3, 11.2, 1.4, 1.5, 12.0, 12.7)",
+    "`--to` acceptance is syntactic: well-formed spellings naming identities that do not currently resolve — a discovered file's nonexistent id (`path#id`), a bare `path` no file bears, an undiscovered on-disk file's identity, a masked (14.20) file's, an undefined duplicate bearer's — are each accepted and select the empty set while the domain's one real occurrence stays enumerable (pinned bare) and the domain's findings stay on the answer (exactly {14.20, 14.3, 14.5}, exit 1), never an error; malformed spellings — more than one `#`, an empty path part, an empty segment, a whitespace-bearing segment, a forbidden-name segment (`then`), a segment containing `\"`, `'`, `\\`, or `&` (one arm each), a trailing empty id part, and U+FFFD in the path part (bare, and beside a well-formed id) or in the id part — each exit 2 with the single 12.7 error document (the plain usage error: `code` and `path` null), the argument check preceding answering whatever findings the workspace carries and preceding every identity reading — reported without loading configuration, byte-identically with the configuration file invalid or missing (T12.0-10's discipline), nothing modified; selection is exact over a valid workspace: a resolving identity selects the occurrences targeting it — both its `d`-entry and its embedding record, never the descendant `top.sub`'s record and never the root's — the descendant's own identity selects exactly its record, and a bare path selects exactly the module-form root reference (T2.2-2), never the file's section-targeted records (SPEC 11.3, 11.2, 1.4, 1.5, 12.0, 12.7)",
   run: async (product) => {
     // --- Workspace 1: the acceptance ground (failing on purpose). -------------
     {
@@ -1549,7 +1595,15 @@ const T11_3_3 = defineProductTest({
           [TO_DECOY_FILE]: TO_DECOY_SOURCE,
         },
       });
+      let twins: ConfigurationStateTwins | undefined;
       try {
+        // The configuration-state twins of the malformed sweep: the
+        // discovered OK.mdx alone, under an invalid and under no
+        // configuration (SPEC 12.0; T12.0-10's discipline).
+        twins = await stageConfigurationStateTwins({
+          [TO_OK_FILE]: TO_OK_SOURCE,
+        });
+        const stagedTwins = twins;
         await assertLeavesUnchanged(
           workspace.root,
           async () => {
@@ -1672,15 +1726,21 @@ const T11_3_3 = defineProductTest({
               );
             }
 
-            // --- The malformed spellings: each exit 2 via the shared
-            // JSON-only usage-error protocol (single 12.7 error document,
-            // message on stderr), the argument check preceding answering,
-            // whatever findings the workspace carries (SPEC 11.2, 11.3,
-            // 1.4, 12.0).
+            // --- The malformed spellings (SPEC 11.3, 1.4, 12.0): each a
+            // malformed value of the syntax class — exit 2 with the plain
+            // usage error's document (the surface is JSON-only, so JSON
+            // output is in effect; `code` and `path` null), the argument
+            // check preceding answering whatever findings the workspace
+            // carries — reported without loading configuration:
+            // identically, byte for byte, on the twins holding the same
+            // discovered file under an invalid and under no configuration
+            // (T12.0-10's discipline), so the check precedes every identity
+            // reading, which discovery would have to precede.
             for (const [spelling, what] of TO_MALFORMED) {
-              await expectAvailabilityUsageError(
+              await expectSyntaxClassUsageError(
                 product,
                 workspace,
+                stagedTwins,
                 ["occurrences", "--to", spelling],
                 `T11.3-3 malformed \`--to\` spelling ` +
                   `${JSON.stringify(spelling)} — ${what} — on the failing ` +
@@ -1695,6 +1755,7 @@ const T11_3_3 = defineProductTest({
             "clauses live at T11.2-1/T11.2-6)",
         );
       } finally {
+        await twins?.dispose();
         await workspace.dispose();
       }
     }

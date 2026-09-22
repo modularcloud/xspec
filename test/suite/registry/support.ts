@@ -22,13 +22,15 @@ import {
   renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
+  assertBytesEqual,
   assertExitCode,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
-import type { TestWorkspace } from "../../helpers/workspace.js";
+import { TestWorkspace } from "../../helpers/workspace.js";
 
 /**
  * U+FFFD (REPLACEMENT CHARACTER), built from its code point so no tool layer
@@ -843,4 +845,156 @@ export async function expectFilePatternUsageError(
         `12.0), but stderr is empty`,
     );
   }
+}
+
+/**
+ * One invocation expected to fail as a plain usage error — the syntax class
+ * of SPEC 12.0, or any usage error no condition of 14 codes: exit 2 exactly
+ * (H-5); stdout the single 12.7 error document (the caller's argv puts JSON
+ * output in effect: `--json` among the arguments, or a JSON-only surface),
+ * its finding carrying `code` null, `path` null, and no locations — never
+ * a configuration error's stable code and concerned path (SPEC 12.7, 14);
+ * and the usage message on standard error (12.0). Returns the run for byte
+ * compares across workspaces (`expectSyntaxClassUsageError`).
+ */
+export async function expectPlainUsageError(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  argv: readonly string[],
+  context: string,
+): Promise<RunResult> {
+  const result = await expectExit(product, workspace, argv, 2, context);
+  const error = expectErrorDocument(result, context);
+  assertSameJson(
+    { code: error.code, path: error.path, locations: error.locations },
+    { code: null, path: null, locations: [] },
+    `${context}: the reported error must be the plain usage error — ` +
+      `\`code\` null, \`path\` null, no locations (SPEC 12.7, 14) — never ` +
+      `a configuration error's stable code and concerned path (message: ` +
+      `${JSON.stringify(error.message)})`,
+  );
+  if (result.stderrBytes.length === 0) {
+    fail(
+      `${context}: usage error messages are standard-error content (SPEC ` +
+        `12.0), but stderr is empty`,
+    );
+  }
+  return result;
+}
+
+/**
+ * A configuration whose one defect is an unknown top-level key: every
+ * command but `version` that loads it reports 14.14 (`configuration-error`,
+ * SPEC 7, 14.14), so an invocation answering the plain usage error on a
+ * workspace holding it demonstrably never loaded the configuration (12.0).
+ */
+export const UNKNOWN_KEY_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  bogus: true
+})
+`;
+
+/**
+ * The two configuration states under which a syntax-class usage error must
+ * be reported exactly as on the configured workspace under test (SPEC 12.0:
+ * an error the invocation's arguments alone determine is reported without
+ * loading configuration — T12.0-10's discipline): a workspace whose
+ * `xspec.config.ts` is invalid (`UNKNOWN_KEY_CONFIG`) and one holding
+ * none. Both hold the caller's file set, so whatever the invocation would
+ * consult next — discovery, a named file — is present in each and only the
+ * configuration state differs.
+ */
+export interface ConfigurationStateTwins {
+  readonly invalid: TestWorkspace;
+  readonly missing: TestWorkspace;
+  dispose(): Promise<void>;
+}
+
+/** Stage the twins from one file set, which stages no configuration. */
+export async function stageConfigurationStateTwins(
+  files: Readonly<Record<string, string>>,
+): Promise<ConfigurationStateTwins> {
+  if ("xspec.config.ts" in files) {
+    throw new Error(
+      "stageConfigurationStateTwins: the file set must not stage " +
+        "xspec.config.ts — the twins stage their own configuration states",
+    );
+  }
+  const invalid = await TestWorkspace.create({
+    files: { "xspec.config.ts": UNKNOWN_KEY_CONFIG, ...files },
+  });
+  let missing: TestWorkspace;
+  try {
+    missing = await TestWorkspace.create({ files });
+  } catch (error) {
+    await invalid.dispose();
+    throw error;
+  }
+  return {
+    invalid,
+    missing,
+    dispose: async () => {
+      await missing.dispose();
+      await invalid.dispose();
+    },
+  };
+}
+
+/**
+ * The T12.0-10 discipline for one syntax-class usage error (SPEC 12.0): the
+ * invocation answers the plain usage error on `workspace` — the workspace
+ * under test, whatever its configuration and findings — and again on each
+ * configuration-state twin, each twin's error document byte-identical to
+ * the workspace's (the document depends on the invocation's syntax alone,
+ * never on configuration state; H-4's product-to-itself compare) and each
+ * twin's tree unchanged around the run. A product that loads configuration
+ * before judging the value answers 14.14 on the twins and fails at the
+ * plain-error pin. Returns the workspace's run.
+ */
+export async function expectSyntaxClassUsageError(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  twins: ConfigurationStateTwins,
+  argv: readonly string[],
+  context: string,
+): Promise<RunResult> {
+  const reference = await expectPlainUsageError(
+    product,
+    workspace,
+    argv,
+    `${context} — a malformed value is a usage error of the syntax class: ` +
+      `exit 2 with the plain usage error's document (SPEC 12.0, 12.7)`,
+  );
+  for (const [state, twin] of [
+    ["invalid", twins.invalid],
+    ["missing", twins.missing],
+  ] as const) {
+    const run = await assertLeavesUnchanged(
+      twin.root,
+      () =>
+        expectPlainUsageError(
+          product,
+          twin,
+          argv,
+          `${context} (configuration file ${state}) — an error the ` +
+            `arguments alone determine is reported without loading ` +
+            `configuration: the plain usage error, never 14.14 (SPEC 12.0)`,
+        ),
+      `${context} (configuration file ${state}) — a syntax-class usage ` +
+        `error modifies nothing (SPEC 12.0)`,
+    );
+    assertBytesEqual(
+      run.stdoutBytes,
+      reference.stdoutBytes,
+      `${context} (configuration file ${state}): reported identically, ` +
+        `byte for byte, to the configured workspace's answer — the error ` +
+        `document depends on the invocation's syntax alone, never on ` +
+        `configuration state (SPEC 12.0; H-4's product-to-itself compare)`,
+    );
+  }
+  return reference;
 }
