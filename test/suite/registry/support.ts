@@ -28,7 +28,11 @@ import {
   parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
-import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
+import type {
+  ArgvValue,
+  ProductBinding,
+  RunResult,
+} from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 
@@ -74,7 +78,7 @@ export async function stageBesideRoot(
 export async function runCli(
   product: ProductBinding,
   workspace: TestWorkspace,
-  argv: readonly string[],
+  argv: readonly ArgvValue[],
 ): Promise<RunResult> {
   return await runProduct(product, { cwd: workspace.root, argv });
 }
@@ -83,7 +87,7 @@ export async function runCli(
 export async function expectExit(
   product: ProductBinding,
   workspace: TestWorkspace,
-  argv: readonly string[],
+  argv: readonly ArgvValue[],
   exitCode: number,
   context: string,
 ): Promise<RunResult> {
@@ -860,7 +864,7 @@ export async function expectFilePatternUsageError(
 export async function expectPlainUsageError(
   product: ProductBinding,
   workspace: TestWorkspace,
-  argv: readonly string[],
+  argv: readonly ArgvValue[],
   context: string,
 ): Promise<RunResult> {
   const result = await expectExit(product, workspace, argv, 2, context);
@@ -959,7 +963,7 @@ export async function expectSyntaxClassUsageError(
   product: ProductBinding,
   workspace: TestWorkspace,
   twins: ConfigurationStateTwins,
-  argv: readonly string[],
+  argv: readonly ArgvValue[],
   context: string,
 ): Promise<RunResult> {
   const reference = await expectPlainUsageError(

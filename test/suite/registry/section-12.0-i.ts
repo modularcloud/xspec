@@ -67,7 +67,13 @@
 //   `<node>`/`<graph-node>`/`<file>` arguments — resolved against the cwd
 //   each would name a nonexistent file and exit 2 — and content for `--file`,
 //   where a glob matching nothing is a valid empty restriction that exit
-//   codes cannot discriminate.
+//   codes cannot discriminate. Its malformed-value table (U+FFFD in every
+//   argument position; the non-UTF-8 bytes on the Linux leg) runs through
+//   the shared syntax-class discipline (`expectSyntaxClassUsageError`,
+//   T12.0-10: the plain usage error, byte-identical with the configuration
+//   invalid or missing) ahead of the `show`/`view` normalization negatives,
+//   so a product normalizing `./` or `//` spellings fails at those after
+//   the value-level arms have run.
 // - T12.0-6 stages the two-casing tree (`specs/A.mdx` beside `specs/a.mdx`)
 //   on Linux only — such trees exist only on case-sensitive filesystems (the
 //   suite leg is Linux); the single-casing probe, tag, ID, and session-name
@@ -99,17 +105,23 @@ import {
   runProduct,
   startProduct,
 } from "../../helpers/subprocess.js";
+import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import {
+  REPLACEMENT_CHARACTER,
+  REPLACEMENT_CHARACTER_SPEC_PATH,
   assertSameJson,
   buildOk,
   expectConfigurationError,
   expectErrorDocument,
   expectExit,
+  expectPlainUsageError,
+  expectSyntaxClassUsageError,
   runCli,
   runJson,
   sortedIdentities,
+  stageConfigurationStateTwins,
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
@@ -1032,10 +1044,97 @@ const NON_UTF8_NODE_ARG = Uint8Array.from([
   ...Buffer.from("A.mdx", "utf8"),
 ]);
 
+// The native-separator and normalization negatives (SPEC 12.0: arguments
+// naming files are read as spelled and compared byte-wise against
+// workspace-relative paths, which no normalization touches): each spelling
+// names no discovered file — discovered paths carry no `\`, `.` segment, or
+// empty segment (SPEC 7) — so each is an unknown-file usage error on `show`
+// and `view` alike. The `\` arm discriminates on the Windows leg (E-6),
+// where `\` is the native separator; the other two on either leg.
+const UNNORMALIZED_SPELLINGS: readonly (readonly [string, string])[] = [
+  ["specs\\A.mdx", "the native separator `\\`"],
+  ["./specs/A.mdx", "a `.` segment"],
+  ["specs//A.mdx", "an empty segment"],
+];
+
+// U+FFFD in every argument position (SPEC 12.0, the value-level rule: an
+// argument value containing U+FFFD is a malformed value, a usage error of
+// the syntax class judged before every per-flag and per-operand check).
+// Every other value of each invocation is well-formed and, where a later
+// check would consult it, names something that exists (the `<new-id>` arm
+// renames an existing ID; the `--test-hold` arm is an otherwise-performable
+// rename), so the malformed value is each invocation's only defect and the
+// arm is sharp against a product judging positions in another order. The
+// character is built from its code point (REPLACEMENT_CHARACTER) so no
+// tool layer can normalize the spelling away.
+const T12_0_5_MALFORMED_VALUES: readonly (readonly [
+  readonly string[],
+  string,
+])[] = [
+  [["show", `${SWEEP_ALPHA}${REPLACEMENT_CHARACTER}`, "--json"], "a `<node>`"],
+  [["view", REPLACEMENT_CHARACTER_SPEC_PATH, "--json"], "a `<file>` operand"],
+  [
+    ["ids", "--file", REPLACEMENT_CHARACTER_SPEC_PATH, "--json"],
+    "a `--file` glob",
+  ],
+  [
+    ["query", "nodes", "--tag", `green${REPLACEMENT_CHARACTER}`, "--json"],
+    "a `--tag`",
+  ],
+  [
+    ["occurrences", "--to", `${SWEEP_ALPHA}${REPLACEMENT_CHARACTER}`, "--json"],
+    "a `--to`",
+  ],
+  [
+    ["rename", SWEEP_FILE, "alpha", `alpha${REPLACEMENT_CHARACTER}`, "--json"],
+    "a `<new-id>` (never `refused-invalid-id`: the value never reaches the " +
+      "1.4 check, SPEC 6.4)",
+  ],
+  [
+    ["review", "status", `s${REPLACEMENT_CHARACTER}`, "--json"],
+    "a session name",
+  ],
+  [
+    [
+      "review",
+      "resolve",
+      "s",
+      "r1",
+      "--status",
+      "updated",
+      "--note",
+      `note${REPLACEMENT_CHARACTER}`,
+      "--json",
+    ],
+    "a `--note` text",
+  ],
+  [
+    ["impact", "--base", `main${REPLACEMENT_CHARACTER}`, "--json"],
+    "a `--base` ref",
+  ],
+  [
+    ["ids", "--config", `xspec${REPLACEMENT_CHARACTER}.config.ts`, "--json"],
+    "a `--config` path",
+  ],
+  [
+    [
+      "rename",
+      SWEEP_FILE,
+      "alpha",
+      "alpha2",
+      "--test-hold",
+      `hold${REPLACEMENT_CHARACTER}.tmp`,
+      "--json",
+    ],
+    "a `--test-hold` path (no hold file appears: the value is judged before " +
+      "acquisition, SPEC 12.0, 13.5)",
+  ],
+];
+
 const T12_0_5 = defineProductTest({
   id: "T12.0-5",
   title:
-    "argument addressing: `<node>`, `<graph-node>`, and `<file>` arguments and `--file` globs are workspace-relative with `/` separators, independent of the working directory (representative commands run from a subdirectory), while `--test-hold <path>` resolves against the working directory; an argument spelled with `\\` names no workspace file — paths compare byte-wise — and is an unknown-file usage error, exit 2 (discriminating on the Windows leg, E-6); a non-UTF-8 argument value (raw bytes in the OS argument vector, Linux leg) is a usage error, exit 2 (SPEC 12.0, 13.5, 1.5)",
+    "argument addressing: `<node>`, `<graph-node>`, and `<file>` arguments and `--file` globs are workspace-relative with `/` separators, independent of the working directory (representative commands run from a subdirectory), while `--test-hold <path>` resolves against the working directory; native-separator and normalization negatives — an argument spelled with `\\` (`specs\\A.mdx`), with a `.` segment (`./specs/A.mdx`), or with an empty segment (`specs//A.mdx`) is read as spelled and compared byte-wise, so it names no workspace file: an unknown-file usage error, exit 2, on `show` and `view` as representatives (the `\\` arm discriminating on the Windows leg, E-6); malformed values — an argument value that is not valid UTF-8 (raw bytes in the OS argument vector, Linux leg) and an argument value containing U+FFFD in every position (a `<node>`, a `<file>` operand, a `--file` glob, a `--tag`, a `--to`, a `<new-id>` — never `refused-invalid-id` — a session name, a `--note` text, a `--base` ref, a `--config` path, and a `--test-hold` path) — are usage errors of the syntax class: exit 2 with the plain usage error's document (`code` null), reported without loading configuration — byte-identical with the configuration file invalid or missing (T12.0-10's discipline) — and modifying nothing (SPEC 12.0, 12.7, 13.5, 6.4, 1.5)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -1121,47 +1220,92 @@ const T12_0_5 = defineProductTest({
             `listing is restricted to exactly specs/A.mdx (SPEC 12.0, 12.3)`,
         );
 
-        // Native-separator negative: `\` is an ordinary byte in a path
-        // argument, so `specs\A.mdx` names no workspace file.
-        const backslashContext = String.raw`T12.0-5 \`show specs\A.mdx --json\``;
-        const backslash = await runCli(product, workspace, [
-          "show",
-          "specs\\A.mdx",
-          "--json",
-        ]);
-        assertExitCode(
-          backslash,
-          2,
-          `${backslashContext} — paths compare byte-wise, so an argument ` +
-            `spelled with \\ names no workspace file: an unknown-file usage ` +
-            `error (SPEC 12.0; discriminating on the Windows leg, E-6)`,
-        );
-        expectErrorDocument(
-          backslash,
-          `${backslashContext} — under --json, the exit-2 error document ` +
-            `is the entire stdout (SPEC 12.0, 12.7, H-5)`,
-        );
+        // Malformed values (SPEC 12.0, the value-level rule): an argument
+        // value containing U+FFFD — stageable on both legs — is a malformed
+        // value in every position, a usage error of the syntax class judged
+        // before every per-flag and per-operand check: exit 2 with the plain
+        // usage error's document (`code` null, 12.7), reported without
+        // loading configuration — byte-identical with the workspace's
+        // configuration file invalid or missing (T12.0-10's discipline,
+        // through the shared helper) — never the check the position would
+        // otherwise reach (the `<new-id>` arm: never `refused-invalid-id`,
+        // 6.4; the `--test-hold` arm: no hold file, no acquisition, 13.5).
+        // The whole table runs inside one modifies-nothing compare over the
+        // built workspace; the twins hold the same source under the two
+        // other configuration states.
+        const twins = await stageConfigurationStateTwins({
+          [SWEEP_FILE]: ADDRESSING_SOURCE,
+        });
+        try {
+          await assertLeavesUnchanged(
+            workspace.root,
+            async () => {
+              for (const [argv, position] of T12_0_5_MALFORMED_VALUES) {
+                await expectSyntaxClassUsageError(
+                  product,
+                  workspace,
+                  twins,
+                  argv,
+                  `T12.0-5 \`${argv.join(" ")}\` — U+FFFD in ${position}`,
+                );
+              }
+              // Non-UTF-8 argument value — Linux leg only: argv is a byte
+              // channel there (the driver's POSIX trampoline); other
+              // platforms cannot carry the argument at all.
+              if (process.platform === "linux") {
+                await expectSyntaxClassUsageError(
+                  product,
+                  workspace,
+                  twins,
+                  ["show", NON_UTF8_NODE_ARG, "--json"],
+                  "T12.0-5 `show <specs/\\xffA.mdx bytes> --json` (Linux " +
+                    "leg) — an argument value that is not valid UTF-8 is a " +
+                    "malformed value, the same syntax-class usage error",
+                );
+              }
+            },
+            "T12.0-5: a malformed argument value modifies nothing — the " +
+              "usage error precedes every per-flag and per-operand check " +
+              "(SPEC 12.0)",
+          );
+        } finally {
+          await twins.dispose();
+        }
 
-        // Non-UTF-8 argument value — Linux leg only: argv is a byte channel
-        // there; other platforms cannot carry the argument at all.
-        if (process.platform === "linux") {
-          const nonUtf8Context =
-            "T12.0-5 `show <specs/\\xffA.mdx bytes> --json` (Linux leg)";
-          const nonUtf8 = await runProduct(product, {
-            cwd: workspace.root,
-            argv: ["show", NON_UTF8_NODE_ARG, "--json"],
-          });
-          assertExitCode(
-            nonUtf8,
-            2,
-            `${nonUtf8Context} — argument values are interpreted as UTF-8; ` +
-              `a value that is not valid UTF-8 is a usage error (SPEC 12.0)`,
+        // Native-separator and normalization negatives (SPEC 12.0: read as
+        // spelled, compared byte-wise, no normalization) on `show` and
+        // `view` as representatives. Controls first: the exactly-spelled
+        // path resolves on both commands, so each negative is attributable
+        // to its spelling alone.
+        for (const command of ["show", "view"] as const) {
+          const controlContext = `T12.0-5 \`${command} ${SWEEP_FILE} --json\` (control)`;
+          parseJsonStdout(
+            await expectExit(
+              product,
+              workspace,
+              [command, SWEEP_FILE, "--json"],
+              0,
+              `${controlContext} — the exactly-spelled path names the ` +
+                `discovered file, so the negatives below are attributable ` +
+                `to their spellings alone (SPEC 12.0)`,
+            ),
+            controlContext,
           );
-          expectErrorDocument(
-            nonUtf8,
-            `${nonUtf8Context} — under --json, the exit-2 error document ` +
-              `is the entire stdout (SPEC 12.0, 12.7, H-5)`,
-          );
+          for (const [spelling, defect] of UNNORMALIZED_SPELLINGS) {
+            await expectPlainUsageError(
+              product,
+              workspace,
+              [command, spelling, "--json"],
+              `T12.0-5 \`${command} ${spelling} --json\` — an argument ` +
+                `spelled with ${defect} is read as spelled and compared ` +
+                `byte-wise, so it names no workspace file (discovered ` +
+                `paths carry none, SPEC 7): an unknown-file usage error, ` +
+                `exit 2, never a normalized match (SPEC 12.0` +
+                (spelling.includes("\\")
+                  ? "; discriminating on the Windows leg, E-6)"
+                  : ")"),
+            );
+          }
         }
 
         // --test-hold resolves against the working directory (13.5); the
