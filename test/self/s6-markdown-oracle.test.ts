@@ -23,6 +23,13 @@
 //     gains one (T3-4);
 //   * in-line tags are transparent annotations (T3-5; SPEC.md 3's own
 //     example);
+//   * the refined construct forms P-2 composes: JavaScript comments beside
+//     an import in its ESM block are content and a spelled `;` goes with
+//     the declaration (T3-7); every comment form of 2.7 — `{}`,
+//     block-comment sequences, line-comment containers, the run-on
+//     `{// c}` form, ECMAScript-only whitespace between braces — is
+//     removed whole (T2.7-4); an embedding with whitespace and comments
+//     beside its call is replaced whole (T2.3-3);
 // plus misuse guards: degenerate construct pieces and bad spans throw plain
 // errors (harness defects), never diagnosed product failures.
 
@@ -389,6 +396,175 @@ test('S-6 (T3-5): <S id="a">Example:</S><S id="b">1. A</S> strips to Example:1. 
   ];
   expect(sourceTextOf(pieces)).toBe('<S id="a">Example:</S><S id="b">1. A</S>');
   expectCompiled(pieces, "Example:1. A");
+});
+
+// --- refined construct forms (T3-7, T2.7-4, T2.3-3; the forms P-2 composes) --
+
+// Characters ECMAScript counts as whitespace or line terminators between
+// braces (SPEC.md 14.20) but SPEC.md 1.4 does not — spelled from code points.
+const NBSP = String.fromCodePoint(0x00a0);
+const BOM = String.fromCodePoint(0xfeff);
+const LS = String.fromCodePoint(0x2028);
+const PS = String.fromCodePoint(0x2029);
+
+test("S-6 (T3-7): an import's removal is its declaration's characters alone — a JavaScript comment beside it in its ESM block is content that stays", () => {
+  // A line comment after the import: the line keeps ` // note` and its
+  // terminator, not left whitespace-only.
+  expectCompiled(
+    [
+      removal('import A from "./A.xspec"'),
+      content(" // note\n"),
+      removal('import B from "./B.xspec"'),
+      content("\n\nBody.\n"),
+    ],
+    " // note\n\nBody.\n",
+  );
+  // An own-line `// note` between two imports of one block: the import
+  // lines drop, the comment line survives with its terminator.
+  expectCompiled(
+    [
+      removal('import A from "./A.xspec"'),
+      content("\n// note\n"),
+      removal('import B from "./B.xspec"'),
+      content("\n\nBody.\n"),
+    ],
+    "// note\n\nBody.\n",
+  );
+  // A block comment preceding an import on the block's second line: the
+  // line keeps `/* c */ ` and its terminator.
+  expectCompiled(
+    [
+      removal('import A from "./A.xspec"'),
+      content("\n/* c */ "),
+      removal('import B from "./B.xspec"'),
+      content("\n\nBody.\n"),
+    ],
+    "/* c */ \n\nBody.\n",
+  );
+  // A block comment after the import on its line.
+  expectCompiled(
+    [removal('import A from "./A.xspec"'), content(" /* c */\n\nBody.\n")],
+    " /* c */\n\nBody.\n",
+  );
+  // Every form in one block over lone-CR terminators.
+  expectCompiled(
+    [
+      removal('import A from "./A.xspec";'),
+      content(" // note\r// note\r/* c */ "),
+      removal('import B from "./B.xspec"'),
+      content(" /* c */\r\rBody."),
+    ],
+    " // note\r// note\r/* c */  /* c */\r\rBody.",
+  );
+});
+
+test("S-6 (T3-7, T11.4-4): a spelled `;` is among the import declaration's own characters — removed with it, the line dropped as left empty purely by the removal", () => {
+  expectCompiled(
+    [removal('import C from "./C.xspec";'), content("\n\nBody.\n")],
+    "\nBody.\n",
+  );
+  expectCompiled(
+    [
+      removal('import A from "./A.xspec";'),
+      content("\n"),
+      removal('import B from "./B.xspec";'),
+      content("\n\nBody.\n"),
+    ],
+    "\nBody.\n",
+  );
+});
+
+test("S-6 (T2.7-4): every comment form of 2.7 is removed whole, opening brace through closing brace — `{}`, block-comment sequences, ECMAScript-only whitespace between braces", () => {
+  expectCompiled([content("A\n"), removal("{}"), content("\nB\n")], "A\nB\n");
+  expectCompiled(
+    [content("x "), removal("{ /* a */ /* b */ }"), content(" y\n")],
+    "x  y\n",
+  );
+  // U+00A0, U+FEFF, U+2028, U+2029 between the braces: comments likewise; a
+  // boundary-code-point residue beside one is no 1.4 whitespace (the line
+  // is kept), a 1.4-whitespace residue is (the line drops).
+  for (const inner of [NBSP, BOM, LS, PS, ` ${NBSP}${LS} `]) {
+    expectCompiled(
+      [content("A\n"), removal(`{${inner}}`), content("\nB\n")],
+      "A\nB\n",
+    );
+    expectCompiled([removal(`{${inner}}`), content(`${NBSP}\n`)], `${NBSP}\n`);
+    expectCompiled([removal(`{${inner}}`), content(" \n")], "");
+  }
+});
+
+test("S-6 (T2.7-4): line-comment containers — ended by U+000A or U+000D before the closing brace, and the run-on `{// c}` form — are multi-line constructs removed under the merge-and-drop rule", () => {
+  for (const terminator of ["\n", "\r\n", "\r"]) {
+    for (const container of [
+      `{// c${terminator}}`,
+      `{// c}${terminator}}`,
+      `{// a${terminator}// b${terminator}}`,
+      `{/* a */ // c${terminator}}`,
+      `{// c${terminator}/* b */}`,
+    ]) {
+      // Own line: the two source lines merge into one, left empty purely
+      // by the removal, dropped with its terminator.
+      expectCompiled(
+        [content("A\n"), removal(container), content("\nB\n")],
+        "A\nB\n",
+      );
+      // Residues on both source lines join into one kept line; the
+      // construct's interior terminator is never reintroduced.
+      expectCompiled(
+        [content("lead "), removal(container), content(" tail\n")],
+        "lead  tail\n",
+      );
+      // A boundary-code-point residue after the closing brace keeps the
+      // merged line (1.4); a whitespace residue does not.
+      expectCompiled([removal(container), content(`${NBSP}\n`)], `${NBSP}\n`);
+      expectCompiled([removal(container), content(" \n")], "");
+    }
+  }
+});
+
+test("S-6 (T2.3-3): an embedding is replaced whole, whatever whitespace and comments stand beside the call — comment, whitespace, and interior terminator included", () => {
+  for (const container of [
+    '{ text("a") }',
+    '{/* n */ text("a")}',
+    '{text("a") /* n */}',
+    `{${NBSP}text(M1.a)${LS}}`,
+  ]) {
+    expectCompiled(
+      [content("p "), embedding(container, "X"), content(" q\n")],
+      "p X q\n",
+    );
+  }
+  for (const terminator of ["\n", "\r\n", "\r"]) {
+    for (const container of [
+      `{// n${terminator}text("a")}`,
+      `{// c}${terminator}text("a")}`,
+      `{text("a") // n${terminator}}`,
+    ]) {
+      // In line: the lines the container spans merge, the expansion joining
+      // the residues.
+      expectCompiled(
+        [content("lead "), embedding(container, "X"), content(" tail\n")],
+        "lead X tail\n",
+      );
+      // Own line: the merged line holds the expansion alone.
+      expectCompiled(
+        [content("A\n"), embedding(container, "X\nY"), content("\nB\n")],
+        "A\nX\nY\nB\n",
+      );
+      // An empty expansion leaves the merged line empty: dropped with the
+      // terminator after the container, its own having gone with it.
+      expectCompiled(
+        [content("A\n"), embedding(container, ""), content("\nB\n")],
+        "A\nB\n",
+      );
+    }
+  }
+  // Under lone-CR terminators the container's own U+000D goes with it
+  // while the surrounding ones stay.
+  expectCompiled(
+    [content("A\r"), embedding('{// n\rtext("a")}', "X"), content("\rB")],
+    "A\rX\rB",
+  );
 });
 
 // --- trivial documents -------------------------------------------------------
