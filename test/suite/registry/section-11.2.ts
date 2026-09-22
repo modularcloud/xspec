@@ -355,19 +355,29 @@ const A_TREE: TreeExpectation = {
   ],
 };
 
-const C_TREE: TreeExpectation = {
-  identity: C_FILE,
-  range: C_ROOT_RANGE,
-  attributes: [],
-  children: [
-    {
-      identity: `${C_FILE}#c`,
-      range: C_SECTION_RANGE,
-      attributes: [C_ID],
-      children: [],
-    },
-  ],
-};
+/**
+ * The finding-free C-shaped document's tree projection at `file`: a node
+ * identity is formed over the file's path (SPEC 1.5), so the same bytes
+ * staged at another path project the same ranges and attribute entries
+ * under that path's identities (T11.2-6 stages them at `specs/A.mdx`).
+ */
+function cShapedTreeAt(file: string): TreeExpectation {
+  return {
+    identity: file,
+    range: C_ROOT_RANGE,
+    attributes: [],
+    children: [
+      {
+        identity: `${file}#c`,
+        range: C_SECTION_RANGE,
+        attributes: [C_ID],
+        children: [],
+      },
+    ],
+  };
+}
+
+const C_TREE: TreeExpectation = cShapedTreeAt(C_FILE);
 
 // A's complete occurrence enumeration (SPEC 5.7): the self-cycle's `d`
 // spelling and the embedding — the unresolved `d={"nosuch"}` records none,
@@ -3710,11 +3720,13 @@ const T11_2_5 = defineProductTest({
 // without answering) is T13.3-3's whole-gate arms; and the
 // `occurrences`/`at` finding-free contrast on the same states rides
 // T13.3-3's never-gated sweep and T14-4's availability rows. This test owns
-// the two fixtures and the entry's own arms: a gate condition that is NO
+// the three fixtures and the entry's own arms: a gate condition that is NO
 // domain file's finding — the journal's 14.13, a write-path component's
-// 14.22, each carrying a concerned path that is never a requested file and
-// no in-source location — accompanies no answer of these surfaces, while
-// the state surfaces through `build` and `check`.
+// 14.22, each carrying no in-source location and a concerned path that
+// names a domain file's own finding for condition 19 alone (SPEC 11.2: an
+// obstructing component that is itself a discovered file attaches
+// nothing) — accompanies no answer of these surfaces, while the state
+// surfaces through `build` and `check`.
 //
 // Fixture 1 (garbage journal, 14.13): a passing `build` first — derived
 // files and graph data then exist and match, so the later `check` stands on
@@ -3753,6 +3765,34 @@ const T11_2_5 = defineProductTest({
 // obstructed, and the write-path condition is still no domain file's
 // finding (its concerned path is the component, never the source).
 //
+// Fixture 3 (the obstructing component is itself a discovered file — 14.22
+// under 11.2's concerned-path clause): `markdown.outDir` names the
+// discovered spec source `specs/A.mdx`, a plain file holding the
+// finding-free C-shaped bytes, so every emit destination
+// (`specs/A.mdx/specs/A.md`, and `specs/A.mdx/specs/C.md` for the second
+// source staged beside it) lies below that file — the one offending
+// component whatever write paths it refuses (SPEC 14.22: one finding per
+// distinct offending component). The source stays discovered: 13.4
+// excludes the files AT the emit destinations alone, and 7.3 admits the
+// spelling, the occupant judged only where the write is made (13.4). The
+// workspace is never built: the refusal precedes every write of the
+// command's own (SPEC 14.22, 12.1), so the whole-root compares are at
+// their sharpest — a product generating the modules or graph data before
+// refusing the emission, or refreshing graph data on the failing side at
+// `view`, is caught byte-wise where a pre-built ground would hide an
+// identical rewrite. `build --json` reports exactly {14.22: 1} concerning
+// `specs/A.mdx`, exit 1, nothing written. `check --json` reports that
+// finding, exact over the non-14.10 findings (the T12.2-2 set-aside:
+// whether the unemittable destinations, the never-generated modules, and
+// the absent graph data are reported stale on a workspace whose `build`
+// is refused — 14.10 reads its mismatch forms as undetectable on a
+// workspace failing `build`'s validations — is not this entry's pin), exit
+// 1, nothing written. Then `view specs/A.mdx`: complete and finding-free,
+// exit 0 — the concerned path IS the requested file, and still the finding
+// is no domain file's, a concerned path naming a domain file's own finding
+// for condition 19 alone (SPEC 11.2): the discriminating arm against a
+// product attaching findings by concerned path.
+//
 // Every invocation runs under a whole-root snapshot compare (the
 // CERTIFICATIONS.md Exclusions note's answer-side no-write compares): the
 // view answers write nothing — the garbage journal not repaired or
@@ -3775,14 +3815,31 @@ export default defineConfig({
 const T11_2_6_OUTDIR = "mdout";
 const T11_2_6_EMITTED = "mdout/specs/C.md";
 
+// Fixture 3: the emit directory is the discovered spec source itself — a
+// well-formed outDir spelling (SPEC 7.3: non-empty segments, none `.` or
+// `..`), its occupant judged only where the write is made (13.4, 14.22).
+const T11_2_6_SOURCE_OUTDIR_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "${A_FILE}" }
+})
+`;
+
 /**
- * The T11.2-6 never-attach arm: `view` naming the finding-free C answers
- * complete and finding-free at exit 0 — whatever journal or write-path
- * state the workspace holds (SPEC 11.2) — modifying nothing.
+ * The T11.2-6 never-attach arm: `view` naming the finding-free file
+ * (C-shaped bytes at `file`, projecting `tree`) answers complete and
+ * finding-free at exit 0 — whatever journal or write-path state the
+ * workspace holds, the obstructing component being the viewed file itself
+ * included (SPEC 11.2) — modifying nothing.
  */
-async function assertViewOfCFindingFree(
+async function assertViewFindingFree(
   product: ProductBinding,
   workspace: TestWorkspace,
+  file: string,
+  tree: TreeExpectation,
   context: string,
 ): Promise<void> {
   await assertLeavesUnchanged(
@@ -3792,7 +3849,7 @@ async function assertViewOfCFindingFree(
         await runJson(
           product,
           workspace,
-          ["view", C_FILE],
+          ["view", file],
           `${context} — a complete, finding-free answer exits 0 whatever ` +
             `journal or write-path state the workspace holds (SPEC 11.2)`,
         ),
@@ -3803,27 +3860,29 @@ async function assertViewOfCFindingFree(
         report.findings,
         [],
         `${context} — the gate condition is the finding of no domain file ` +
-          `(no in-source location, its concerned path never a requested ` +
-          `file), so it accompanies no answer of this surface (SPEC 11.2, ` +
-          `14; the gated reads report it instead, T13.3-3)`,
+          `(no in-source location; a concerned path names a domain file's ` +
+          `own finding for condition 19 alone, never for a write-path ` +
+          `component, discovered file or not), so it accompanies no answer ` +
+          `of this surface (SPEC 11.2, 14; the gated reads report it ` +
+          `instead, T13.3-3)`,
       );
       assertSameJson(
         report.views.map((view) => view.file),
-        [C_FILE],
+        [file],
         `${context} — exactly the requested file's view (SPEC 11.4)`,
       );
-      const cView = report.views[0]!;
+      const fileView = report.views[0]!;
       assertSameJson(
-        projectNode(cView.root),
-        C_TREE,
-        `${context} — C's complete view: the answer is served whole, from ` +
-          `the current sources (SPEC 11.2, 11.4)`,
+        projectNode(fileView.root),
+        tree,
+        `${context} — ${file}'s complete view: the answer is served ` +
+          `whole, from the current sources (SPEC 11.2, 11.4)`,
       );
       assertSameJson(
-        [cView.imports, cView.occurrences, cView.comments],
+        [fileView.imports, fileView.occurrences, fileView.comments],
         [[], [], []],
-        `${context} — C holds no imports, occurrences, or comments: empty ` +
-          `arrays, never null (SPEC 12.7)`,
+        `${context} — ${file} holds no imports, occurrences, or comments: ` +
+          `empty arrays, never null (SPEC 12.7)`,
       );
     },
     `${context} — the answer consults no journal and no record and writes ` +
@@ -3835,7 +3894,7 @@ async function assertViewOfCFindingFree(
 const T11_2_6 = defineProductTest({
   id: "T11.2-6",
   title:
-    "gate findings never attach: on an otherwise-valid pre-built workspace with a garbage journal line staged (14.13), and separately with the `markdown.outDir` directory replaced by a plain file (14.22, the obstructed emit write path's one offending component), `view` of the finding-free file answers complete and finding-free at exit 0, writing nothing — the state surfaces through `build` (exactly the gate condition; a failing build modifies nothing) and `check` (the gate condition beside the obstruction fixture's one definite per-file staleness, each concerned path pinned: the journal path, the offending component, the deleted emitted file), and through the gated reads (T13.3-3), never these answers; the passing-workspace refresh participation is T13.3-2's sweep and the failing-side answering discipline T11.2-1's (SPEC 11.2, 13.3, 12.1, 12.2, 14.13, 14.22, 14.10)",
+    "gate findings never attach: on an otherwise-valid pre-built workspace with a garbage journal line staged (14.13), separately with the `markdown.outDir` directory replaced by a plain file (14.22, the obstructed emit write path's one offending component), and separately, on a never-built workspace, with `markdown.outDir` naming the discovered finding-free spec source `specs/A.mdx` itself (14.22 whose one offending component is a discovered file, every emit destination lying below that plain file), `view` of the finding-free file — in the third fixture `specs/A.mdx` itself, a concerned path naming a domain file's own finding for condition 19 alone (11.2) — answers complete and finding-free at exit 0, writing nothing — the state surfaces through `build` (exactly the gate condition; a failing build modifies nothing) and `check` (the gate condition beside the obstruction fixture's one definite per-file staleness, each concerned path pinned: the journal path, the offending component, the deleted emitted file; in the third fixture the gate condition exact over the non-14.10 findings, concerning `specs/A.mdx`), and through the gated reads (T13.3-3), never these answers; the passing-workspace refresh participation is T13.3-2's sweep and the failing-side answering discipline T11.2-1's (SPEC 11.2, 13.3, 13.4, 7.3, 12.1, 12.2, 14.13, 14.22, 14.10)",
   run: async (product) => {
     // --- Fixture 1: garbage journal line (14.13) --------------------------
     {
@@ -3933,9 +3992,11 @@ const T11_2_6 = defineProductTest({
         );
 
         // ...never this answer: `view` of the finding-free file (SPEC 11.2).
-        await assertViewOfCFindingFree(
+        await assertViewFindingFree(
           product,
           workspace,
+          C_FILE,
+          C_TREE,
           `${context} \`view ${C_FILE}\``,
         );
       } finally {
@@ -4077,10 +4138,129 @@ const T11_2_6 = defineProductTest({
         // ...never this answer: `view` of the very file whose emission
         // path is obstructed (SPEC 11.2 — the condition's concerned path
         // is the component, never the source file).
-        await assertViewOfCFindingFree(
+        await assertViewFindingFree(
           product,
           workspace,
+          C_FILE,
+          C_TREE,
           `${context} \`view ${C_FILE}\``,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+
+    // --- Fixture 3: the obstructing component is a discovered file (14.22) --
+    {
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": T11_2_6_SOURCE_OUTDIR_CONFIG,
+          [A_FILE]: C_SOURCE,
+          [C_FILE]: C_SOURCE,
+        },
+      });
+      try {
+        const context = "T11.2-6 (obstructing component a discovered file)";
+
+        // Never built: the refusal precedes every write of the command's
+        // own (SPEC 14.22, 12.1), so `build` writes no module, companion,
+        // Markdown, or graph data here — the whole-root compare sees any.
+        const buildContext = `${context} \`build --json\``;
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const result = await expectExit(
+              product,
+              workspace,
+              ["build", "--json"],
+              1,
+              `${buildContext} — every emit destination lies below the ` +
+                `plain file ${A_FILE}, a workspace-relative directory ` +
+                `component occupied by a non-directory: the write is ` +
+                `refused and reported; the spelling is a well-formed ` +
+                `outDir, no configuration error (SPEC 14.22, 13.4, 7.3)`,
+            );
+            const findings = decodeFindingsReport(
+              parseJsonStdout(result, buildContext),
+              buildContext,
+            ).findings;
+            assertConditionCounts(
+              findings,
+              { "14.22": 1 },
+              `${buildContext} — one finding per distinct offending ` +
+                `component whatever write paths it refuses: both refused ` +
+                `destinations share the component ${A_FILE}, and the ` +
+                `valid sources stage nothing else (SPEC 14.22, 12.1)`,
+            );
+            assertFindingConcernsPath(
+              findings[0]!,
+              A_FILE,
+              `${buildContext} — the concerned path is the offending ` +
+                `component's workspace-relative path: the discovered ` +
+                `source itself (SPEC 14.22, 13.4)`,
+            );
+          },
+          `${buildContext} — the write is refused before any write of the ` +
+            `command's own: no module, companion, Markdown, or graph data ` +
+            `written, the source byte-unchanged (SPEC 14.22, 12.1)`,
+        );
+
+        // `check` judges exactly `build`'s write paths (SPEC 14.22, 12.2):
+        // the obstruction, exact over the non-14.10 findings (the T12.2-2
+        // set-aside: whether the unemittable destinations, the
+        // never-generated modules, and the absent graph data are stale on
+        // a workspace whose `build` is refused is not this entry's pin —
+        // SPEC 14.10 reads its mismatch forms as undetectable on a
+        // workspace failing `build`'s validations), writing nothing.
+        const checkContext = `${context} \`check --json\``;
+        await assertLeavesUnchanged(
+          workspace.root,
+          async () => {
+            const result = await expectExit(
+              product,
+              workspace,
+              ["check", "--json"],
+              1,
+              `${checkContext} — \`check\` judges \`build\`'s write paths ` +
+                `and reports the obstruction without writing (SPEC 14.22, ` +
+                `12.2)`,
+            );
+            const findings = decodeFindingsReport(
+              parseJsonStdout(result, checkContext),
+              checkContext,
+            ).findings;
+            const nonStale = findings.filter(
+              (finding) => finding.condition !== "14.10",
+            );
+            assertConditionCounts(
+              nonStale,
+              { "14.22": 1 },
+              `${checkContext} — the one offending component, and no ` +
+                `condition beside it save 14.10 (SPEC 14.22, 12.2)`,
+            );
+            assertFindingConcernsPath(
+              nonStale[0]!,
+              A_FILE,
+              `${checkContext} — the refused write's concerned path is the ` +
+                `discovered source occupying the component (SPEC 14.22, ` +
+                `13.4)`,
+            );
+          },
+          `${checkContext} — \`check\` writes nothing (SPEC 12.2, 13.3)`,
+        );
+
+        // ...never this answer: `view` of the discovered file that IS the
+        // obstructing component. Its concerned path names the requested
+        // file, and still the finding is no domain file's — a concerned
+        // path names a domain file's own finding for condition 19 alone
+        // (SPEC 11.2) — so the answer is complete and finding-free at exit
+        // 0, served from the current sources, nothing written.
+        await assertViewFindingFree(
+          product,
+          workspace,
+          A_FILE,
+          cShapedTreeAt(A_FILE),
+          `${context} \`view ${A_FILE}\``,
         );
       } finally {
         await workspace.dispose();
