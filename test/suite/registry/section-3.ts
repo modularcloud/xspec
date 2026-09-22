@@ -13,8 +13,9 @@
 // Certification staging constraints (CERTIFICATIONS.md §CONF-MD,
 // §VIOL-MD-CLASS, §VIOL-MD-CR), binding alongside the test text:
 // - U+00A0, U+0085, and U+2028 appear on removal-affected lines only in
-//   T3-3's class-boundary arms; every other fixture in this module keeps
-//   them out entirely.
+//   T3-3's class-boundary arms (its ESM-block arm, a line left holding
+//   U+2028 alone between two removed imports, among them); every other
+//   fixture in this module keeps them out entirely.
 // - A lone U+000D appears only in T3-4's fixtures; every other fixture uses
 //   LF terminators exclusively (CRLF appears only in T3-4).
 // - T3-1 stages sections carrying the full prop set of 2.7 — `id`, `d`
@@ -390,14 +391,28 @@ const PS = "\u{2029}";
 // in-line element unclosed — so both kept forms close on the residue's
 // line; a tag opening at line start may end on a bare `>` line (the concrete
 // flow attempt takes it, fails on the residue, and the fallback paragraph
-// spans all three lines). For the same reason a blank line ends the ESM
-// block: MDX 3's ESM construct runs to a blank line, so an import directly
-// followed by text does not derive. Not yet staged: T3-3's ESM-block arm
-// (two imports on one physical line separated by U+2028; CONF-MD's scope
-// names it).
+// spans all three lines). For the same reason a blank line ends each ESM
+// block — MDX 3's ESM construct runs to a blank line, so an import directly
+// followed by text does not derive — and a blank line precedes the second
+// one, which interrupts no paragraph.
 // The class-boundary arms stage every code point TEST-SPEC T3-3 names:
 // U+00A0, U+0085, U+2028 (the three §VIOL-MD-CLASS widens) and U+2029 (which
-// neither violator touches — its arm is expected unmoved under both).
+// neither violator touches — its arm is expected unmoved under both). The
+// classes hold inside an ESM block too — the ESM-block arm, which CONF-MD's
+// scope names: a second ESM block spelling two imports on one physical line
+// separated by U+2028, an ECMAScript line terminator, so the block derives
+// under 14.20 (AGENTS.md's parser recipe: one `mdxjsEsm` node holding two
+// `ImportDeclaration`s); each declaration is removed by its own characters
+// alone (SPEC 3), and the line, left holding U+2028 plus its terminator, is
+// kept — U+2028 is no whitespace and no terminator of 3 (1.4) — where a
+// product applying ECMAScript's line terminators to line dropping drops it
+// (§VIOL-MD-CLASS's expected failure; §VIOL-MD-CR leaves it unmoved). Each
+// import resolves to a base file of its own (`specs/BASE2.mdx`,
+// `specs/BASE3.mdx`), the bindings unused as `BASE` is (2.1).
+const ESM_ARM_BASE2_SOURCE = '<S id="base2">\nBase two.\n</S>\n';
+const ESM_ARM_BASE3_SOURCE = '<S id="base3">\nBase three.\n</S>\n';
+const ESM_BLOCK_LINE =
+  'import B2 from "./BASE2.xspec"' + LS + 'import B3 from "./BASE3.xspec"';
 const DROP_SOURCE = [
   'import BASE from "./BASE.xspec"', // drop: a line holding only an import
   "", // kept: already empty in the source — and the ESM block's end (14.20)
@@ -450,7 +465,11 @@ const DROP_SOURCE = [
   "foo <S", // the in-line kept form: retained non-whitespace before the…
   '  id="mt3"', // …`<S` and after the `>`; the tag's two interior terminators
   '  coverage="required"> bar</S>', // deleted with it: merges to `foo  bar`
-  "K19 final",
+  "K19 after-inline-kept",
+  "", // kept: already empty in the source — the second ESM block's lead-in
+  ESM_BLOCK_LINE, // the ESM-block arm: both imports removed by their own characters; kept holding U+2028 alone
+  "", // kept: already empty in the source — the second ESM block's end (14.20)
+  "K20 final",
   "",
 ].join("\n");
 
@@ -488,20 +507,26 @@ const DROP_COMPILED = [
   " bar", // mt2: the tag's three lines merged into one, kept with its residue
   "K18 after-flow-start-kept",
   "foo  bar", // mt3: the merged line keeps the residue on both sides
-  "K19 final",
+  "K19 after-inline-kept",
+  "", // the blank line before the second ESM block: already empty, kept
+  LS, // the ESM-block arm: U+2028 alone, kept with its terminator — not whitespace (1.4)
+  "", // the blank line ending the second ESM block: already empty, kept
+  "K20 final",
   "",
 ].join("\n");
 
 const T3_3 = defineProductTest({
   id: "T3-3",
   title:
-    "line-drop rule: lines left empty or whitespace-only purely by removals (import, tags, comments, empty expansion) drop with their terminators; already-empty, content-retaining, and whitespace-only-but-non-empty-expansion lines are kept; U+00A0/U+0085/U+2028/U+2029 are not whitespace while U+0009/U+0020 are; a multi-line comment and a multi-line opening tag (own-lines, flow-start, and in-line forms) are each deleted exactly, merging the lines they span into one — dropped when left empty purely by the removal, kept with its residue otherwise (SPEC 3, 1.4)",
+    "line-drop rule: lines left empty or whitespace-only purely by removals (import, tags, comments, empty expansion) drop with their terminators; already-empty, content-retaining, and whitespace-only-but-non-empty-expansion lines are kept; U+00A0/U+0085/U+2028/U+2029 are not whitespace while U+0009/U+0020 are, inside an ESM block too (two imports on one physical line separated by U+2028 leave their line holding U+2028 alone, kept with its terminator); a multi-line comment and a multi-line opening tag (own-lines, flow-start, and in-line forms) are each deleted exactly, merging the lines they span into one — dropped when left empty purely by the removal, kept with its residue otherwise (SPEC 3, 1.4)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
         "xspec.config.ts": EMIT_TRUE_CONFIG,
         "specs/A.mdx": DROP_SOURCE,
         "specs/BASE.mdx": REMOVALS_BASE_SOURCE,
+        "specs/BASE2.mdx": ESM_ARM_BASE2_SOURCE,
+        "specs/BASE3.mdx": ESM_ARM_BASE3_SOURCE,
       },
     });
     try {
@@ -513,7 +538,7 @@ const T3_3 = defineProductTest({
       await assertFileBytes(
         workspace.path("specs/A.md"),
         DROP_COMPILED,
-        "T3-3 emitted specs/A.md — every drop arm, counter-case, class boundary, and multi-line-construct merge of the line-drop rule (SPEC 3, 1.4)",
+        "T3-3 emitted specs/A.md — every drop arm, counter-case, class boundary (the ESM-block arm included), and multi-line-construct merge of the line-drop rule (SPEC 3, 1.4)",
       );
     } finally {
       await workspace.dispose();

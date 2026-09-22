@@ -29,18 +29,24 @@
 //
 // Key mechanisms:
 // - Sources are scanned by a hand-rolled MDX-lite lexer recognizing exactly
-//   the scope's constructs: spec module imports at line start, `<S>`/`<Spec>`
+//   the scope's constructs: spec module imports at a Markdown line start (the
+//   MDX ESM position) or continuing an open ESM block after ECMAScript
+//   whitespace and line terminators alone — U+2028/U+2029 beside LF/CR, the
+//   block deriving under 14.20 by ECMAScript's own line model, as T3-3's
+//   ESM-block arm spells two imports on one physical line separated by
+//   U+2028 — the separator staying content, since SPEC 3 removes a
+//   declaration's own characters alone; `<S>`/`<Spec>`
 //   opening/closing/self-closing tags with the 2.7 prop set (quoted `id`,
 //   `coverage`, `tags`; quote-aware braced `d`), MDX comments (single- and
 //   multi-line), and `{text(...)}` embeddings with local (string) or external
-//   (property chain) arguments. Deliberately no stock MDX parser: the
-//   committed SUITE-11 fixtures stage shapes remark-mdx cannot parse — an
-//   import line directly followed by a non-blank line (T3-3), and an opening
-//   tag with trailing same-line content whose closing tag sits on a later
-//   line (T3-1's `gamma`) — and the line-drop fixtures depend on exact exotic
-//   bytes (boundary code points, lone-CR terminators) that tooling silently
-//   normalizes. That mis-staging hazard is exactly what §CONF-MD certifies
-//   against.
+//   (property chain) arguments. Deliberately no stock MDX parser: a committed
+//   SUITE-11 fixture stages a shape remark-mdx cannot parse — an opening tag
+//   with trailing same-line content whose closing tag sits on a later line
+//   (T3-1's `gamma`; T3-3's import line directly followed by a non-blank
+//   line was restaged with a blank line ending its block) — and the
+//   line-drop fixtures depend on exact exotic bytes (boundary code points,
+//   lone-CR terminators) that tooling silently normalizes. That mis-staging
+//   hazard is exactly what §CONF-MD certifies against.
 // - Grammar boundary (T3-1): before the lexer runs, `markdownLiteralRegions`
 //   marks fenced code blocks and inline code spans; the lexer treats every
 //   byte inside a marked region as plain content — no import, tag, comment,
@@ -683,6 +689,31 @@ const TAG_WHITESPACE = new Set(["\t", "\n", "\v", "\f", "\r", " "]);
 const IMPORT_RE =
   /^import[ \t]+([A-Za-z_$][A-Za-z0-9_$]*)[ \t]+from[ \t]+(?:"([^"\r\n]*)"|'([^'\r\n]*)');?/;
 
+/**
+ * ECMAScript's LineTerminator code points — U+000A, U+000D, U+2028, U+2029 —
+ * the line model of an ESM block's own grammar (SPEC 14.20), under which two
+ * imports separated by U+2028 on one physical line derive (T3-3's ESM-block
+ * arm). Distinct from SPEC 3's line model, where U+2028 and U+2029 are
+ * ordinary characters (1.4): the compile never consults this set.
+ */
+const ECMASCRIPT_LINE_TERMINATOR_CODE_POINTS = new Set([
+  0x000a, 0x000d, 0x2028, 0x2029,
+]);
+
+/** ECMAScript's WhiteSpace — U+0009, U+000B, U+000C, U+FEFF, and every
+ * Space_Separator (U+0020 and U+00A0 among them) — again the ESM block's own
+ * class (14.20), never SPEC 1.4's. */
+const SPACE_SEPARATOR_RE = /\p{Zs}/u;
+function isEcmascriptWhitespaceCode(code) {
+  return (
+    code === 0x0009 ||
+    code === 0x000b ||
+    code === 0x000c ||
+    code === 0xfeff ||
+    SPACE_SEPARATOR_RE.test(String.fromCharCode(code))
+  );
+}
+
 const EMBED_OPEN_RE = /^\{[ \t]*text[ \t]*\(/;
 
 /**
@@ -829,6 +860,30 @@ function parseMdx(text) {
   // the pending content run — no construct is recognized inside them.
   const literalRegions = markdownLiteralRegions(text);
   let regionIndex = 0;
+  // The open ESM block (SPEC 14.20): the end of its last import declaration,
+  // or -1 when none is open. A block runs on through ECMAScript's WhiteSpace
+  // and LineTerminator code points alone — U+2028 and U+2029 beside LF and
+  // CR — and ECMAScript admits the next ImportDeclaration there when a
+  // LineTerminator lies between (automatic semicolon insertion) or the
+  // previous declaration spelled its `;`; any other character closes the
+  // block for good, so the backward scan costs each closed block once. The
+  // separator characters stay content: SPEC 3 removes a declaration's own
+  // characters alone (T3-3's ESM-block arm: the line left holding U+2028).
+  let lastImportEnd = -1;
+  const continuesEsmBlock = (at) => {
+    if (lastImportEnd === -1) return false;
+    let sawTerminator = false;
+    for (let k = at - 1; k >= lastImportEnd; k -= 1) {
+      const code = text.charCodeAt(k);
+      if (ECMASCRIPT_LINE_TERMINATOR_CODE_POINTS.has(code)) {
+        sawTerminator = true;
+      } else if (!isEcmascriptWhitespaceCode(code)) {
+        lastImportEnd = -1;
+        return false;
+      }
+    }
+    return sawTerminator || text[lastImportEnd - 1] === ";";
+  };
 
   const flushContent = (end) => {
     if (end > contentStart) {
@@ -861,9 +916,15 @@ function parseMdx(text) {
     const ch = text[i];
     if (
       ch === "i" &&
-      (i === 0 || text[i - 1] === "\n" || text[i - 1] === "\r")
+      (i === 0 ||
+        text[i - 1] === "\n" ||
+        text[i - 1] === "\r" ||
+        continuesEsmBlock(i))
     ) {
-      // A spec module import (SPEC 2.1) at line start — the MDX ESM position.
+      // A spec module import (SPEC 2.1) at a Markdown line start — the MDX
+      // ESM position — or continuing the open ESM block after ECMAScript
+      // whitespace and line terminators alone (two imports on one physical
+      // line separated by U+2028: T3-3's ESM-block arm).
       const m = IMPORT_RE.exec(text.slice(i));
       if (m) {
         flushContent(i);
@@ -876,6 +937,7 @@ function parseMdx(text) {
         pieces.push({ kind: "removal", text: m[0] });
         i += m[0].length;
         contentStart = i;
+        lastImportEnd = i;
         continue;
       }
       i += 1;
