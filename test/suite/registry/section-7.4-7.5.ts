@@ -52,6 +52,18 @@
 //   them. `true` is the boolean literal the declarative form of 7 admits, so
 //   those refusals are 14.14's invalid profile or rule shape, never a form
 //   error.
+// - Set reading (T7.4-1, T7.5-1; SPEC 7.4, 7.5, 12.7, 11.6): `targetTags`,
+//   `edgeKinds`, a rule's `kinds`, and a selector's `tags` are read as sets
+//   — a repeated element collapses — and reported in 12.7's value forms:
+//   tag sets in byte order with duplicates collapsed, kind sets in 5.2's
+//   order however configured. Each arm stages the spelled list beside its
+//   collapsed twin (the same workspace under the canonical spellings) and
+//   asserts `inventory`'s view form-exact (`decodeInventoryResolvedMap`
+//   rejects a verbatim echo) and literally, then the report the sets
+//   govern — the profile's `coverage --json`, the rule's `check --json` —
+//   equal to the twin's: the decoded reports compared member for member and
+//   the stdout bytes identical (a product-to-itself comparison, H-4; one
+//   resolved configuration, one deterministic answer, 12.0).
 // - Unknown profile name at `coverage <name>` (T7.4-1) is a 12.0 usage error,
 //   not a 14.14: asserted as exit 2 with the single 12.7 error document as
 //   the entire stdout under --json (12.0: with JSON output in effect, an
@@ -110,8 +122,10 @@ import {
   decodeCoverageReport,
   decodeEdgesReport,
   decodeFindingsReport,
+  decodeInventoryResolvedMap,
 } from "../../helpers/adapters/index.js";
 import {
+  assertBytesEqual,
   assertFileBytes,
   fail,
   parseJsonStdout,
@@ -418,6 +432,290 @@ function profileNamed(
 }
 
 // ---------------------------------------------------------------------------
+// Set reading (T7.4-1, T7.5-1) — configured lists read as sets
+// ---------------------------------------------------------------------------
+
+/**
+ * The set-reading coverage fixture, parametrized by the two spellings (the
+ * spelled profile and its collapsed twin). Three leaves under the root of
+ * `tgt/T.mdx`: `a` (tagged a) covered over a depends edge, `z` (tagged z)
+ * reachable over an embeds edge alone — a kind outside the configured
+ * edgeKinds — and the untagged `n`, lacking every targetTags tag (8.1/8.2),
+ * so both configured sets shape the report the twins must agree on.
+ */
+function setReadingProfileFiles(
+  targetTags: string,
+  edgeKinds: string,
+): Readonly<Record<string, string>> {
+  return {
+    "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    tgt: ["tgt/**/*.mdx"],
+    bnd: ["bnd/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "p",
+      target: "tgt",
+      targetTags: ${targetTags},
+      boundary: "bnd",
+      mode: "direct",
+      edgeKinds: ${edgeKinds}
+    }
+  ]
+})
+`,
+    "tgt/T.mdx": `<S id="a" tags="a">
+Leaf a.
+</S>
+
+<S id="z" tags="z">
+Leaf z.
+</S>
+
+<S id="n">
+Leaf n.
+</S>
+`,
+    "bnd/B.mdx": `import T from "../tgt/T.xspec"
+
+<S id="dep" d={T.a}>
+Depends on a.
+</S>
+
+<S id="emb">
+Embeds z:
+
+{text(T.z)}
+</S>
+`,
+  };
+}
+
+const SET_READING_PROFILE_FILES = setReadingProfileFiles(
+  '["z", "a", "a"]',
+  '["references", "depends", "depends"]',
+);
+const SET_READING_PROFILE_TWIN_FILES = setReadingProfileFiles(
+  '["a", "z"]',
+  '["depends", "references"]',
+);
+
+/**
+ * Run one set-reading coverage workspace: `build` accepts the configuration
+ * (the spelled lists are valid — a repeated element collapses, SPEC 7.4),
+ * `inventory` reports the profile with its sets in their 12.7 value forms
+ * (form-exact through `decodeInventoryResolvedMap`, then compared
+ * literally), and `coverage --json` answers the report the sets govern —
+ * `a` covered over its depends edge, `z` uncovered (its embeds edge lies
+ * outside the configured kinds), the untagged `n` required by neither
+ * (8.1) — returned decoded with its stdout bytes for the twin compare.
+ */
+async function runSetReadingProfile(
+  product: ProductBinding,
+  files: Readonly<Record<string, string>>,
+  context: string,
+): Promise<{ report: CoverageReport; stdoutBytes: Uint8Array }> {
+  return await withWorkspace({ files }, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      `${context} \`build\` — the spelled lists are valid: a repeated ` +
+        `element collapses (SPEC 7.4)`,
+    );
+    const inventoryLabel = `${context} \`inventory\``;
+    const view = decodeInventoryResolvedMap(
+      await runJson(product, workspace, ["inventory"], inventoryLabel),
+      inventoryLabel,
+    );
+    assertSameJson(
+      view.configuration.coverage,
+      [
+        {
+          name: "p",
+          target: "tgt",
+          targetTags: ["a", "z"],
+          targets: "leaves",
+          boundary: "bnd",
+          boundaryKind: "spec",
+          mode: "direct",
+          edgeKinds: ["depends", "references"],
+        },
+      ],
+      `${inventoryLabel}: the profile's \`targetTags\` exactly ["a", "z"] ` +
+        `(byte order, the repeated element collapsed) and \`edgeKinds\` ` +
+        `exactly ["depends", "references"] (5.2's order, however ` +
+        `configured) — 12.7's value forms, compared literally (SPEC 7.4, ` +
+        `12.7, 11.6)`,
+    );
+    const label = `${context} \`coverage --json\``;
+    const result = await expectExit(
+      product,
+      workspace,
+      ["coverage", "--json"],
+      0,
+      label,
+    );
+    const report = decodeCoverageReport(parseJsonStdout(result, label), label);
+    const profile = profileNamed(report, "p", label);
+    assertSameJson(
+      coveredWithPaths(profile),
+      [{ identity: "tgt/T.mdx#a", path: ["bnd/B.mdx#dep", "tgt/T.mdx#a"] }],
+      `${label}: exactly the a-tagged leaf is covered, over its depends ` +
+        `edge — both listed tags select the required set and depends is ` +
+        `among the configured kinds (SPEC 7.4, 8, 8.1)`,
+    );
+    assertSameJson(
+      [...profile.uncovered].sort(),
+      ["tgt/T.mdx#z"],
+      `${label}: the z-tagged leaf is required (it carries a listed tag) ` +
+        `and uncovered — its only edge is embeds, outside the configured ` +
+        `kinds — while the untagged leaf is required by neither (SPEC 7.4, ` +
+        `8, 8.1)`,
+    );
+    return { report, stdoutBytes: result.stdoutBytes };
+  });
+}
+
+/**
+ * The set-reading policy fixture, parametrized by the two spellings. One
+ * edge per (tag, kind) pair the sets admit — `pa` (tagged a) depends on `t`,
+ * `pb` (tagged b) embeds it — beside the two the rule must leave unflagged:
+ * the untagged `pu` and `pc`, tagged c (matching means carrying at least
+ * one listed tag, SPEC 7.5).
+ */
+function setReadingRuleFiles(
+  kinds: string,
+  tags: string,
+): Readonly<Record<string, string>> {
+  return {
+    "xspec.config.ts": `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    pol: ["pol/**/*.mdx"],
+    tgt: ["tgt/**/*.mdx"]
+  },
+  policy: [
+    {
+      name: "r",
+      type: "forbidden",
+      from: { tags: ${tags} },
+      to: { group: "tgt" },
+      kinds: ${kinds}
+    }
+  ]
+})
+`,
+    "pol/P.mdx": `import T from "../tgt/T.xspec"
+
+<S id="pa" tags="a" d={T.t}>
+Tagged a, depends.
+</S>
+
+<S id="pb" tags="b">
+Tagged b, embeds:
+
+{text(T.t)}
+</S>
+
+<S id="pu" d={T.t}>
+Untagged.
+</S>
+
+<S id="pc" tags="c" d={T.t}>
+Tagged c.
+</S>
+`,
+    "tgt/T.mdx": mdxSection("t"),
+  };
+}
+
+const SET_READING_RULE_FILES = setReadingRuleFiles(
+  '["embeds", "depends", "embeds"]',
+  '["b", "a", "b"]',
+);
+const SET_READING_RULE_TWIN_FILES = setReadingRuleFiles(
+  '["depends", "embeds"]',
+  '["a", "b"]',
+);
+
+/** The rule's findings: one per (listed tag, configured kind) edge. */
+const SET_READING_RULE_EXPECTED: readonly PolicyExpectation[] = [
+  {
+    rule: "r",
+    edge: { from: "pol/P.mdx#pa", to: "tgt/T.mdx#t", kind: "depends" },
+  },
+  {
+    rule: "r",
+    edge: { from: "pol/P.mdx#pb", to: "tgt/T.mdx#t", kind: "embeds" },
+  },
+];
+
+/**
+ * Run one set-reading policy workspace: `build` accepts the configuration
+ * (valid — a repeated element collapses, SPEC 7.5 — and build never
+ * evaluates policy, 12.1), `inventory` reports the rule with `kinds` and
+ * the selector's `tags` in their 12.7 value forms (form-exact, then
+ * literal), and `check --json` reports exactly the rule's findings —
+ * returned decoded with the stdout bytes for the twin compare.
+ */
+async function runSetReadingRule(
+  product: ProductBinding,
+  files: Readonly<Record<string, string>>,
+  context: string,
+): Promise<{ findings: readonly Finding[]; stdoutBytes: Uint8Array }> {
+  return await withWorkspace({ files }, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      `${context} \`build\` — the spelled lists are valid: a repeated ` +
+        `element collapses (SPEC 7.5), and build never evaluates policy ` +
+        `(SPEC 12.1)`,
+    );
+    const inventoryLabel = `${context} \`inventory\``;
+    const view = decodeInventoryResolvedMap(
+      await runJson(product, workspace, ["inventory"], inventoryLabel),
+      inventoryLabel,
+    );
+    assertSameJson(
+      view.configuration.policy,
+      [
+        {
+          name: "r",
+          type: "forbidden",
+          from: { tags: ["a", "b"] },
+          to: { group: "tgt", kind: "spec" },
+          kinds: ["depends", "embeds"],
+        },
+      ],
+      `${inventoryLabel}: the rule's \`kinds\` exactly ["depends", ` +
+        `"embeds"] (5.2's order, however configured) and the selector's ` +
+        `\`tags\` exactly ["a", "b"] (byte order, the repeated element ` +
+        `collapsed) — 12.7's value forms, compared literally (SPEC 7.5, ` +
+        `12.7, 11.6)`,
+    );
+    const label = `${context} \`check --json\``;
+    const result = await expectExit(
+      product,
+      workspace,
+      ["check", "--json"],
+      1,
+      `${label} — policy violations are findings of check and cause exit 1 ` +
+        `(SPEC 7.5, 14.12, 12.0)`,
+    );
+    const findings = decodeFindingsReport(
+      parseJsonStdout(result, label),
+      label,
+    ).findings;
+    assertPolicyFindings(findings, SET_READING_RULE_EXPECTED, label);
+    return { findings, stdoutBytes: result.stdoutBytes };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // T7.4-1 — profile validation
 // ---------------------------------------------------------------------------
 
@@ -685,7 +983,13 @@ const T7_4_1 = defineProductTest({
     "boundaryKind are configuration errors (14.14, exit 2, the finding " +
     "naming xspec.config.ts, nothing written); boundaryKind is inferred " +
     "when unambiguous; an unknown profile name at `coverage <name>` is a " +
-    "usage error (SPEC 7.4, 14.14, 12.0)",
+    'usage error (12.0); set reading: `targetTags: ["z", "a", "a"]` and ' +
+    '`edgeKinds: ["references", "depends", "depends"]` are valid — a ' +
+    "repeated element collapses — `inventory` reporting `targetTags` " +
+    'exactly ["a", "z"] (byte order, collapsed) and `edgeKinds` exactly ' +
+    '["depends", "references"] (5.2\'s order, however configured), and the ' +
+    "profile's coverage report equal to its collapsed twin's (SPEC 7.4, " +
+    "14.14, 12.0, 12.7, 11.6)",
   run: async (product) => {
     // (a) The 14.14 matrix over the standard group layout.
     for (const arm of PROFILE_MATRIX) {
@@ -770,6 +1074,39 @@ const T7_4_1 = defineProductTest({
           );
         }
       },
+    );
+
+    // (e) Set reading (7.4, 12.7): `targetTags: ["z", "a", "a"]` and
+    // `edgeKinds: ["references", "depends", "depends"]` are valid — a
+    // repeated element collapses — `inventory` reports the sets in their
+    // value forms, and the profile's coverage report equals its collapsed
+    // twin's (T11.6-2).
+    const spelled = await runSetReadingProfile(
+      product,
+      SET_READING_PROFILE_FILES,
+      'T7.4-1 (set reading: the profile spelled `targetTags: ["z", "a", ' +
+        '"a"]`, `edgeKinds: ["references", "depends", "depends"]`)',
+    );
+    const twin = await runSetReadingProfile(
+      product,
+      SET_READING_PROFILE_TWIN_FILES,
+      'T7.4-1 (set reading: the collapsed twin `targetTags: ["a", "z"]`, ' +
+        '`edgeKinds: ["depends", "references"]`)',
+    );
+    assertSameJson(
+      spelled.report,
+      twin.report,
+      "T7.4-1 (set reading): the profile's coverage report equals its " +
+        "collapsed twin's — the decoded reports, member for member: one " +
+        "resolved configuration, one report (SPEC 7.4, 12.7, 8.2)",
+    );
+    assertBytesEqual(
+      spelled.stdoutBytes,
+      twin.stdoutBytes,
+      "T7.4-1 (set reading): the two `coverage --json` answers are " +
+        "byte-identical — the same resolved configuration answers " +
+        "deterministically (SPEC 7.4, 12.0; a product-to-itself " +
+        "comparison, H-4)",
     );
   },
 });
@@ -1270,7 +1607,12 @@ const T7_5_1 = defineProductTest({
     "with zero or two of group/files/tags, unknown, wrong-kind, and " +
     "ambiguous group references, a capture used twice in `from`, and a " +
     "`to` referencing an absent capture are configuration errors (SPEC " +
-    "7.5, 14.14, exit 2)",
+    '7.5, 14.14, exit 2); set reading: a rule\'s `kinds: ["embeds", ' +
+    '"depends", "embeds"]` and a selector\'s `tags: ["b", "a", "b"]` are ' +
+    'valid, `inventory` reporting `kinds` exactly ["depends", "embeds"] ' +
+    "(5.2's order, however configured) and the selector's `tags` exactly " +
+    '["a", "b"] (byte order, collapsed), and the rule\'s `check` findings ' +
+    "equal to its collapsed twin's (SPEC 7.5, 12.7, 11.6)",
   run: async (product) => {
     for (const arm of RULE_MATRIX) {
       await expectConfigRefused(
@@ -1286,6 +1628,37 @@ const T7_5_1 = defineProductTest({
       DUAL_FILES,
       "T7.5-1 (selector naming the ambiguous group dual — both a spec and a " +
         "code group — without kind)",
+    );
+
+    // Set reading (7.5, 12.7): a rule's `kinds: ["embeds", "depends",
+    // "embeds"]` and a selector's `tags: ["b", "a", "b"]` are valid,
+    // `inventory` reports them in their value forms, and the rule's `check`
+    // findings equal its collapsed twin's.
+    const spelled = await runSetReadingRule(
+      product,
+      SET_READING_RULE_FILES,
+      'T7.5-1 (set reading: the rule spelled `kinds: ["embeds", "depends", ' +
+        '"embeds"]`, `from: { tags: ["b", "a", "b"] }`)',
+    );
+    const twin = await runSetReadingRule(
+      product,
+      SET_READING_RULE_TWIN_FILES,
+      'T7.5-1 (set reading: the collapsed twin `kinds: ["depends", ' +
+        '"embeds"]`, `from: { tags: ["a", "b"] }`)',
+    );
+    assertSameJson(
+      spelled.findings,
+      twin.findings,
+      "T7.5-1 (set reading): the rule's `check` findings equal its " +
+        "collapsed twin's — the decoded findings arrays, every member " +
+        "(SPEC 7.5, 12.7, 12.0)",
+    );
+    assertBytesEqual(
+      spelled.stdoutBytes,
+      twin.stdoutBytes,
+      "T7.5-1 (set reading): the two `check --json` answers are " +
+        "byte-identical — one resolved configuration, one deterministic " +
+        "report (SPEC 7.5, 12.0; a product-to-itself comparison, H-4)",
     );
   },
 });

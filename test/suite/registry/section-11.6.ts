@@ -48,7 +48,7 @@
 // 13.1). The resolved configuration view with every default and inferred
 // kind explicit, every discovered source with its group memberships, and the
 // per-spec-source derived map — all determined by configuration and
-// discovery, asserted before any build has ever run. Four workspaces:
+// discovery, asserted before any build has ever run. Five workspaces:
 //
 // - defaults: `markdown` key absent → the view reports `{"emit": false,
 //   "outDir": null}` (7.3) and `derived[*].markdown` null for every source
@@ -76,13 +76,23 @@
 //   (7.3), nested source included;
 // - emission disabled explicitly: `emit` false with `outDir` configured —
 //   the view reports both, and `derived[*].markdown` is null for every
-//   source (destinations exist exactly while emission is enabled, 7.3).
+//   source (destinations exist exactly while emission is enabled, 7.3);
+// - configured sets: a profile's `targetTags: ["z", "a", "a"]` and
+//   `edgeKinds: ["references", "depends"]`, a rule's `kinds: ["embeds",
+//   "depends"]`, and a `tags` selector `["b", "a", "b"]` — each valid, read
+//   as a set (7.4, 7.5) — reported in their 12.7 value forms, form-exact:
+//   `targetTags` `["a", "z"]` and the selector's `tags` `["a", "b"]` (byte
+//   order, the repeated element collapsed), `edgeKinds` `["depends",
+//   "references"]` and `kinds` `["depends", "embeds"]` (5.2's order,
+//   however configured) — the inventory arms T7.4-1 and T7.5-1 cite.
 //
-// `edgeKinds`/`kinds` element order is no pinned order (11.6 orders files/
-// paths, groups, profiles, rules, and session files only), so those two
-// members are compared as sets (sorted before the exact compare); every
-// other list is asserted in its pinned order — sources/derived in byte order
-// of workspace-relative path, groups/profiles/rules in configuration order.
+// Every list is asserted in its pinned order, the set-valued members
+// included: a tag set in byte order with duplicates collapsed and a kind
+// set in 5.2's order are 12.7 value forms, decoder-enforced
+// (`decodeInventoryResolvedMap`, H-3) and compared literally here — never
+// sorted or otherwise normalized harness-side — while sources/derived
+// arrive in byte order of workspace-relative path and groups/profiles/rules
+// in configuration order.
 //
 // Every answer here is complete and finding-free — `findings` decodes to []
 // and the exit code is 0 (SPEC 12.0, 11.6) — T11.6-1's workspaces being
@@ -670,42 +680,52 @@ export default defineConfig({
 `;
 
 /**
- * The three dependency edge kinds in byte order — the shape `edgeKinds` and
- * `kinds` normalize to for the set compare (SPEC 7.4/7.5: both default to
- * all three; 11.6 pins no element order for them).
+ * Configured sets (SPEC 7.4, 7.5, 12.7; the inventory arms of T7.4-1 and
+ * T7.5-1): a profile's `targetTags` and `edgeKinds`, a rule's `kinds`, and
+ * a `tags` selector each spelled with a repeated element or out of order —
+ * valid, read as sets — so the view must report the 12.7 value forms, never
+ * the spellings: tag sets in byte order with duplicates collapsed, kind sets
+ * in 5.2's order.
  */
-const ALL_EDGE_KINDS_SORTED: readonly DependencyEdgeKind[] = [
+const RESOLVED_SETS_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"],
+    aux: ["aux/**/*.mdx"]
+  },
+  coverage: [
+    {
+      name: "ensemble",
+      target: "main",
+      targetTags: ["z", "a", "a"],
+      boundary: "aux",
+      mode: "direct",
+      edgeKinds: ["references", "depends"]
+    }
+  ],
+  policy: [
+    {
+      name: "etiquettes",
+      type: "forbidden",
+      from: { tags: ["b", "a", "b"] },
+      to: { group: "aux" },
+      kinds: ["embeds", "depends"]
+    }
+  ]
+})
+`;
+
+/**
+ * The three dependency edge kinds in the order 5.2 lists them — the 12.7
+ * value form of a defaulted `edgeKinds`/`kinds` (SPEC 7.4/7.5: both default
+ * to all three; 12.7: a kind set is in 5.2's order, however configured).
+ */
+const ALL_EDGE_KINDS: readonly DependencyEdgeKind[] = [
   "depends",
   "embeds",
   "references",
 ];
-
-/**
- * Normalize the two set-valued members (`edgeKinds`, `kinds`) to byte-sorted
- * copies so `assertSameJson` compares them as sets: SPEC 11.6 orders files/
- * paths, groups, profiles, rules, and session files — not edge-kind lists —
- * so element order there is no contract. A duplicated or missing kind still
- * fails the exact compare (the normalized list's length changes). Every
- * other list is left exactly as reported: sources/derived arrive byte-
- * ordered (decoder-enforced) and groups/profiles/rules must arrive in
- * configuration order (asserted by the exact compare).
- */
-function normalizeKindSets(map: InventoryResolvedMap): InventoryResolvedMap {
-  return {
-    ...map,
-    configuration: {
-      ...map.configuration,
-      coverage: map.configuration.coverage.map((profile) => ({
-        ...profile,
-        edgeKinds: [...profile.edgeKinds].sort(),
-      })),
-      policy: map.configuration.policy.map((rule) => ({
-        ...rule,
-        kinds: [...rule.kinds].sort(),
-      })),
-    },
-  };
-}
 
 /**
  * SPEC 11.6: "A group reference inside a profile or rule stays the
@@ -805,7 +825,7 @@ async function expectResolvedInventory(
 const T11_6_2 = defineProductTest({
   id: "T11.6-2",
   title:
-    'inventory configuration, sources, derived map: the resolved configuration view with every default and inferred kind explicit — `markdown` key absent resolving to {"emit": false, "outDir": null}; a defaulted profile reporting `targets` "leaves", `edgeKinds` all three, `boundaryKind` explicit though inferred, `targetTags` null; a defaulted rule reporting `kinds` all three with each group selector\'s `kind` explicit though inferred; group references inside profiles and rules staying configured names resolving against the reported group list — every discovered source with its group memberships (a two-group file carrying both, in configuration order); the derived map per spec source: generated-module path (13.1) and Markdown emit destination exactly while emission is enabled (default next-to-source and `markdown.outDir`-redirected placements alike), both present before any build has run — determined by configuration and discovery; a spec-group file without the `.mdx` extension (14.19 staged beside it) listed in `sources` while `module` and `markdown` are the stated structural-absence null; with emission disabled — the key absent, or `emit` false with `outDir` configured — `markdown` null for every source; every answer complete and finding-free at exit 0, the defaults workspace asserted in the flag-less and `--json` forms against one expectation (SPEC 11.6, 12.7, 7.3, 7.4, 7.5, 13.1, 12.0, 11)',
+    'inventory configuration, sources, derived map: the resolved configuration view with every default and inferred kind explicit — `markdown` key absent resolving to {"emit": false, "outDir": null}; a defaulted profile reporting `targets` "leaves", `edgeKinds` all three, `boundaryKind` explicit though inferred, `targetTags` null; a defaulted rule reporting `kinds` all three with each group selector\'s `kind` explicit though inferred; group references inside profiles and rules staying configured names resolving against the reported group list — every discovered source with its group memberships (a two-group file carrying both, in configuration order); the derived map per spec source: generated-module path (13.1) and Markdown emit destination exactly while emission is enabled (default next-to-source and `markdown.outDir`-redirected placements alike), both present before any build has run — determined by configuration and discovery; a spec-group file without the `.mdx` extension (14.19 staged beside it) listed in `sources` while `module` and `markdown` are the stated structural-absence null; with emission disabled — the key absent, or `emit` false with `outDir` configured — `markdown` null for every source; every answer complete and finding-free at exit 0, the defaults workspace asserted in the flag-less and `--json` forms against one expectation; configured sets — a profile\'s `targetTags: ["z", "a", "a"]` and `edgeKinds: ["references", "depends"]`, a rule\'s `kinds: ["embeds", "depends"]`, and a `tags` selector `["b", "a", "b"]`, each valid and read as a set — reported in their 12.7 value forms, form-exact and compared literally: ["a", "z"] and ["a", "b"] in byte order with the repeated element collapsed, ["depends", "references"] and ["depends", "embeds"] in 5.2\'s order however configured (SPEC 11.6, 12.7, 7.3, 7.4, 7.5, 13.1, 12.0, 11)',
   run: async (product) => {
     // --- defaults workspace: every default and inferred kind explicit ------
     const defaults = await TestWorkspace.create({
@@ -846,7 +866,7 @@ const T11_6_2 = defineProductTest({
               boundary: "impl",
               boundaryKind: "code",
               mode: "direct",
-              edgeKinds: ALL_EDGE_KINDS_SORTED,
+              edgeKinds: ALL_EDGE_KINDS,
             },
           ],
           policy: [
@@ -856,7 +876,7 @@ const T11_6_2 = defineProductTest({
               // Group selectors with the inferred kind explicit (7.5, 12.7).
               from: { group: "aux", kind: "spec" },
               to: { group: "core", kind: "spec" },
-              kinds: ALL_EDGE_KINDS_SORTED,
+              kinds: ALL_EDGE_KINDS,
             },
           ],
         },
@@ -912,7 +932,7 @@ const T11_6_2 = defineProductTest({
           "(SPEC 11.6)",
       );
       assertSameJson(
-        normalizeKindSets(flagless),
+        flagless,
         expected,
         "T11.6-2 — the defaults workspace's configuration/sources/derived " +
           "projection: `markdown` absent resolving to emit-false/outDir-" +
@@ -931,7 +951,7 @@ const T11_6_2 = defineProductTest({
           "information as the flag-less form (JSON-only, SPEC 11, 11.6)",
       );
       assertSameJson(
-        normalizeKindSets(withJson),
+        withJson,
         expected,
         "T11.6-2 — the `--json` form carries the same configuration/" +
           "sources/derived information as the flag-less form (SPEC 11, " +
@@ -962,7 +982,7 @@ const T11_6_2 = defineProductTest({
           "(SPEC 11.6, 7.3)",
       );
       assertSameJson(
-        normalizeKindSets(map),
+        map,
         {
           configuration: {
             specs: [{ name: "main", globs: ["specs/*"] }],
@@ -1029,7 +1049,7 @@ const T11_6_2 = defineProductTest({
           "`markdown.outDir` (SPEC 7.3, 11.6)",
       );
       assertSameJson(
-        normalizeKindSets(map),
+        map,
         {
           configuration: {
             specs: [{ name: "docs", globs: ["specs/**/*.mdx"] }],
@@ -1085,7 +1105,7 @@ const T11_6_2 = defineProductTest({
           "false, `outDir` configured) (SPEC 7.3, 11.6)",
       );
       assertSameJson(
-        normalizeKindSets(map),
+        map,
         {
           configuration: {
             specs: [{ name: "main", globs: ["specs/**/*.mdx"] }],
@@ -1121,6 +1141,86 @@ const T11_6_2 = defineProductTest({
       );
     } finally {
       await disabled.dispose();
+    }
+
+    // --- configured sets in their value forms -----------------------------
+    const sets = await TestWorkspace.create({
+      files: {
+        [CONFIG_FILE]: RESOLVED_SETS_CONFIG,
+        "specs/m.mdx": '<S id="m" tags="a">\nPrincipal.\n</S>\n',
+        "aux/x.mdx": '<S id="x">\nAnnexe.\n</S>\n',
+      },
+    });
+    try {
+      const map = await expectResolvedInventory(
+        product,
+        sets.root,
+        ["inventory"],
+        "T11.6-2 — `inventory` with the configured sets spelled repeated " +
+          "and out of order (SPEC 7.4, 7.5, 12.7, 11.6)",
+      );
+      assertSameJson(
+        map,
+        {
+          configuration: {
+            specs: [
+              { name: "main", globs: ["specs/**/*.mdx"] },
+              { name: "aux", globs: ["aux/**/*.mdx"] },
+            ],
+            code: [],
+            markdown: { emit: false, outDir: null },
+            coverage: [
+              {
+                name: "ensemble",
+                target: "main",
+                // `targetTags: ["z", "a", "a"]` read as a set (7.4) and
+                // reported in its 12.7 value form: byte order, the repeated
+                // element collapsed.
+                targetTags: ["a", "z"],
+                targets: "leaves",
+                boundary: "aux",
+                boundaryKind: "spec",
+                mode: "direct",
+                // `edgeKinds: ["references", "depends"]` → 5.2's order,
+                // however configured (12.7).
+                edgeKinds: ["depends", "references"],
+              },
+            ],
+            policy: [
+              {
+                name: "etiquettes",
+                type: "forbidden",
+                // The `tags` selector `["b", "a", "b"]` → byte order,
+                // duplicates collapsed (7.5, 12.7).
+                from: { tags: ["a", "b"] },
+                to: { group: "aux", kind: "spec" },
+                // `kinds: ["embeds", "depends"]` → 5.2's order (12.7).
+                kinds: ["depends", "embeds"],
+              },
+            ],
+          },
+          sources: [
+            { path: "aux/x.mdx", groups: [{ name: "aux", kind: "spec" }] },
+            { path: "specs/m.mdx", groups: [{ name: "main", kind: "spec" }] },
+          ],
+          derived: [
+            { source: "aux/x.mdx", module: "aux/x.xspec.ts", markdown: null },
+            {
+              source: "specs/m.mdx",
+              module: "specs/m.xspec.ts",
+              markdown: null,
+            },
+          ],
+        } satisfies InventoryResolvedMap,
+        "T11.6-2 — configured sets in their value forms, form-exact and " +
+          'compared literally: `targetTags` ["a", "z"] and the selector\'s ' +
+          '`tags` ["a", "b"] in byte order with the repeated element ' +
+          'collapsed, `edgeKinds` ["depends", "references"] and `kinds` ' +
+          '["depends", "embeds"] in 5.2\'s order however configured — ' +
+          "never the configured spellings (SPEC 7.4, 7.5, 12.7, 11.6)",
+      );
+    } finally {
+      await sets.dispose();
     }
   },
 });
