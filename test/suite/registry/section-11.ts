@@ -1688,7 +1688,11 @@ const T11_6_S_SOURCE = `${T11_6_S1}\n`;
 // One code file staging all three code-location identity forms (SPEC 4.6):
 // a top-level marker attributed to the whole file (bare path), a getter
 // (the first `Box.v` occurrence), and a setter (the second — `Box.v@2`,
-// the spec's own getter/setter duplicate-chain example).
+// the spec's own getter/setter duplicate-chain example). Class `C` stages
+// the two unit names 1.4 forbids as ID segments: a constructor holding a
+// marker (`C.constructor`) and a method named `then` holding a marker and a
+// `text(...)` call (`C.then`) — each a named unit judged over the file's
+// named units, never by 1.4's segment rules (SPEC 4.6, 12.0).
 const T11_6_CODE = [
   'import SPEC, { text } from "../specs/S.xspec";',
   "",
@@ -1703,6 +1707,16 @@ const T11_6_CODE = [
   "  }",
   "}",
   "",
+  "export class C {",
+  "  constructor() {",
+  "    SPEC.s1;",
+  "  }",
+  "  then(): void {",
+  "    SPEC.s1;",
+  "    text(SPEC.s1);",
+  "  }",
+  "}",
+  "",
 ].join("\n");
 
 const T11_6_ROOT = "specs/S.mdx";
@@ -1711,7 +1725,7 @@ const T11_6_S1_ID = "specs/S.mdx#s1";
 const T11_6 = defineProductTest({
   id: "T11-6",
   title:
-    "identity resolution: a bare `path` resolves to the root node for a spec-group file and to a code location for a code-group file; `path#unit` and `path#unit@N` address code locations (a getter/setter pair as the duplicate unit chain); a path in no configured group is unknown, exit 2; wrong-kind operands — `query node`, `query subtree`, `query ancestors`, and `show` given a code-group `path` or `path#unit` — each exit 2, modifying nothing; an unspelled unit name on a discovered code source is unknown in every graph-node argument position (`edges --from`/`--to`, `reachable --from`/`--to`), exit 2, as are an out-of-range disambiguator (`@2` on a once-occurring chain) and `@1` at every occurrence count — no occurrence bears `@1`, staged at one and at two occurrences (SPEC 11, 1.5, 4.6, 12.0, 12.4)",
+    "identity resolution: a bare `path` resolves to the root node for a spec-group file and to a code location for a code-group file; `path#unit` and `path#unit@N` address code locations (a getter/setter pair as the duplicate unit chain); a path in no configured group is unknown, exit 2; wrong-kind operands — `query node`, `query subtree`, `query ancestors`, and `show` given a code-group `path` or `path#unit` — each exit 2, modifying nothing; an unspelled unit name on a discovered code source is unknown in every graph-node argument position (`edges --from`/`--to`, `reachable --from`/`--to`), exit 2, as are an out-of-range disambiguator (`@2` on a once-occurring chain) and `@1` at every occurrence count — no occurrence bears `@1`, staged at one and at two occurrences; unit names 1.4 forbids as ID segments are named units all the same — `path#C.constructor`, a class `C` whose constructor holds a marker, and `path#C.then`, a method named `then` — each answering `query edges --from` with that unit's edges, exit 0: a code unit is judged over the file's named units, never by 1.4's segment rules (SPEC 11, 1.4, 1.5, 4.6, 12.0, 12.4)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -1794,6 +1808,40 @@ const T11_6 = defineProductTest({
             what:
               "`path#unit@N` addresses the N-th occurrence of a duplicate " +
               "unit chain — the setter of the getter/setter pair (SPEC 4.6)",
+          },
+          // Unit names 1.4 forbids as ID segments (SPEC 4.6; 12.0: a code
+          // unit is judged over the file's named units, never by 1.4's
+          // segment rules): a product pre-validating every `<graph-node>`
+          // spelling with 1.4's forbidden-name rule — as `occurrences --to`
+          // applies it to requirement identities (T11.3-3) — exits 2 here
+          // and fails the exit-0 answer.
+          {
+            from: "src/code.ts#C.constructor",
+            expected: [
+              {
+                from: "src/code.ts#C.constructor",
+                to: T11_6_S1_ID,
+                kind: "references",
+              },
+            ],
+            what:
+              "a constructor is a unit named `constructor` — a name 1.4 " +
+              "forbids as an ID segment — answering with its edges, exit 0 " +
+              "(SPEC 4.6, 12.0)",
+          },
+          {
+            from: "src/code.ts#C.then",
+            expected: [
+              {
+                from: "src/code.ts#C.then",
+                to: T11_6_S1_ID,
+                kind: "references",
+              },
+              { from: "src/code.ts#C.then", to: T11_6_S1_ID, kind: "embeds" },
+            ],
+            what:
+              "a method named `then` — likewise a name 1.4 forbids as an ID " +
+              "segment — answering with its edges, exit 0 (SPEC 4.6, 12.0)",
           },
         ];
         for (const arm of codeArms) {
