@@ -3211,6 +3211,10 @@ const R16_K = '<S id="k">z</S>\n';
 // U+000B and U+000C, built from code points (never escape spellings).
 const R16_VT = String.fromCodePoint(0x000b);
 const R16_FF = String.fromCodePoint(0x000c);
+/** The flow-form section, its tags alone on their lines (arms (f)–(i) and the applicability arms). */
+const R16_FLOW_SECTION = '<S id="m">\nx\n</S>';
+/** The text-position parent of (c)'s first arm, as a whole target file. */
+const R16_TEXT_PARENT = 'foo <S id="p">bar</S> baz\n';
 
 /** One expected `locations` entry: a file and a 1.7 byte range. */
 interface R16Location {
@@ -3238,8 +3242,54 @@ interface R16RefusedArm {
    * every reference spelling rooted at its binding (Task 36's arms).
    */
   readonly locations: readonly R16Location[];
-  /** Every other applicable reason's code, reported beside (Task 36's applicability arms). */
+  /** Every other applicable reason's code, reported beside (the applicability arms). */
   readonly beside?: readonly string[];
+  /** A beside reason's finding `path`, where the entry pins it (`refused-invalid-destination`, T14-7). */
+  readonly besidePath?: Readonly<Record<string, string>>;
+  /** For a file holding no admissible offset for an addition it needs: the (g) family's premise. */
+  readonly noOffset?: R16NoOffset;
+}
+
+/**
+ * One offset the entry names for an addition no offset admits: the file
+ * with the declaration's line inserted there — U+000A after it, one before
+ * it when the offset is not at a line start (SPEC 6.5) — and whether the
+ * text derives. An underivable probe is inadmissible outright (14.20); a
+ * deriving one is inadmissible on 6.5's other grounds — the added line
+ * paragraph text after a paragraph line, no declaration, or a block joining
+ * lines that were no ESM block's before the edit — which the arm's comment
+ * reasons and no parse decides (T6.5-13 pins the same rule's admissible
+ * side by hand).
+ */
+interface R16OffsetProbe {
+  readonly name: string;
+  readonly text: string;
+  readonly derives: boolean;
+}
+
+/**
+ * The concerned file of an addition no offset admits, as every other edit
+ * of the rewrite leaves it — verified deriving (S-9), so the refusal's
+ * ground is the offsets alone — and the entry's named offsets probed.
+ */
+interface R16NoOffset {
+  readonly file: string;
+  readonly composed: string;
+  readonly probes: readonly R16OffsetProbe[];
+}
+
+/**
+ * An arm refused for another reason alone — `refused-invalid-rewrite` not
+ * applicable, no would-be text existing to judge — exit 1, nothing
+ * modified, exactly the expected reasons reported (SPEC 6.5, 14).
+ */
+interface R16AloneArm {
+  readonly key: string;
+  readonly summary: string;
+  readonly files: Readonly<Record<string, string>>;
+  readonly argv: readonly string[];
+  /** The report's codes, exactly, as a set. */
+  readonly codes: readonly string[];
 }
 
 interface R16ControlArm {
@@ -3590,6 +3640,178 @@ const R16_E_CONTROL: R16ControlArm = {
   },
 };
 
+// (f) a moved section standing in a block quote — `> <S id="m">`, `> x`,
+// `> </S>` — whose moved text, the construct's own characters from its
+// opening tag through its closing tag (SPEC 6.5), carries the `>` prefixes
+// of its interior lines: at the destination's line start its opening tag
+// stands outside any quote while `> </S>` puts its closing tag inside one,
+// where it closes no tag standing outside (SPEC 6.5, 14.20). The deletion
+// leaves `> `, U+000A — the line keeps its quote marker, so 3 drops
+// nothing, and an empty quote derives. The control — the same section
+// standing in no quote — is T6.5-2's flow-form arms.
+const R16_F_MOVED = '<S id="m">\n> x\n> </S>';
+const R16_F_ARM: R16RefusedArm = {
+  key: "(f) a section standing in a block quote",
+  summary:
+    "the moved text carries the `>` prefixes of its interior lines, so at " +
+    "the destination its closing tag stands inside a quote its opening tag " +
+    "stands outside, closing nothing there (SPEC 6.5, 14.20)",
+  files: { [R16_ORIGIN]: `> ${R16_F_MOVED}\n`, [R16_TARGET]: R16_K },
+  argv: ["move", "specs/a.mdx#m", "specs/b.mdx#m"],
+  illFormed: { [R16_TARGET]: `${R16_K}${R16_F_MOVED}\n` },
+  wellFormed: { [R16_ORIGIN]: "> \n" },
+  identities: [R16_TARGET],
+  locations: [r16Construct(R16_ORIGIN, "> ", R16_F_MOVED)],
+};
+
+// (h) the same-file variant: the flow-form section `m` moved into the
+// text-position parent `p` of its own file — the one file as deletion and
+// insertion both leave it not well-formed (SPEC 6.5, 14.20), its path once
+// in `identities`. The control is the same-file move of T6.5-13(e).
+const R16_H_ARM: R16RefusedArm = {
+  key: "(h) the same-file variant",
+  summary:
+    "origin and target coincide: the deletion drops the section's lines and " +
+    "the insertion puts its flow-position tags inside the text-position " +
+    "parent `p`, the one file not well-formed — its path once in " +
+    "`identities` (SPEC 6.5, 6.2, 14.20)",
+  files: { [R16_ORIGIN]: `${R16_TEXT_PARENT}${R16_FLOW_SECTION}\n` },
+  argv: ["move", "specs/a.mdx#m", "specs/a.mdx#p.n"],
+  illFormed: {
+    [R16_ORIGIN]: 'foo <S id="p">bar\n<S id="p.n">\nx\n</S>\n</S> baz\n',
+  },
+  wellFormed: {},
+  identities: [R16_ORIGIN],
+  locations: [r16Construct(R16_ORIGIN, R16_TEXT_PARENT, R16_FLOW_SECTION)],
+};
+
+// Applicability (SPEC 6.5): the refusal is reported beside every other
+// applicable reason; judged only under an intrinsically valid `<new-id>`;
+// the origin's would-be text judged always, the target's only when an
+// insertion point exists; and a created target's path spelled whatever its
+// validity, the creation's composition judged on its own.
+
+// (c)'s first shape staged beside `refused-id-collision` — a section `p.n`
+// already in the target — reports both reasons.
+const R16_COLLISION_ARM: R16RefusedArm = {
+  key: "(c) beside refused-id-collision: a section p.n already in the target",
+  summary:
+    "the flow-form section's tags would stand alone on their lines inside " +
+    "the text-position parent (SPEC 6.5, 14.20) and `p.n` collides with " +
+    "the section the target already holds: both reasons reported, each " +
+    "once (SPEC 6.5, 14)",
+  files: {
+    [R16_ORIGIN]: `${R16_K}${R16_FLOW_SECTION}\n`,
+    [R16_TARGET]: 'foo <S id="p">bar <S id="p.n">n</S></S> baz\n',
+  },
+  argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
+  illFormed: {
+    [R16_TARGET]:
+      'foo <S id="p">bar <S id="p.n">n</S>\n<S id="p.n">\nx\n</S>\n</S> baz\n',
+  },
+  wellFormed: { [R16_ORIGIN]: R16_K },
+  identities: [R16_TARGET],
+  locations: [r16Construct(R16_ORIGIN, R16_K, R16_FLOW_SECTION)],
+  beside: ["refused-id-collision"],
+};
+
+// A missing target parent beside an origin deletion of shape (d): no
+// insertion point exists, so the target's text is not judged, while the
+// origin's, judged always, is not well-formed — both reasons, `identities`
+// the origin path alone.
+const R16_D_MISSING_PARENT_ARM: R16RefusedArm = {
+  key: "(d) beside refused-missing-target-parent: the origin judged, the target not",
+  summary:
+    "the target holds no `q`, so no insertion point exists and the target's " +
+    "text is not judged, while the origin's deletion, judged always, leaves " +
+    "`- item` at its line's start (SPEC 6.5, 14.20): both reasons reported, " +
+    "`identities` the origin path alone (SPEC 14)",
+  files: {
+    [R16_ORIGIN]: `${R16_D_PREFIX}${R16_D_MOVED}- item\n</S> baz\n`,
+    [R16_TARGET]: R16_K,
+  },
+  argv: ["move", "specs/a.mdx#p.m", "specs/b.mdx#q.n"],
+  illFormed: { [R16_ORIGIN]: `${R16_D_PREFIX}- item\n</S> baz\n` },
+  wellFormed: {},
+  identities: [R16_ORIGIN],
+  locations: [r16Construct(R16_ORIGIN, R16_D_PREFIX, R16_D_MOVED)],
+  beside: ["refused-missing-target-parent"],
+};
+
+// A created target: (a)'s shape (a space after its opening tag) moved to an
+// absent path, its content composed as T6.5-14 fixes — the re-identified
+// moved text and U+000A, no declaration needed — underivable: at the line's
+// start its opening tag is a flow-position tag, its closing tag inside the
+// paragraph `body</S>` (SPEC 6.5, 6.2, 14.20). The path is spelled in
+// `identities` whatever its validity: `specs/new.txt`, lacking the `.mdx`
+// extension, beside `refused-invalid-destination` with that path (T14-7);
+// the valid `specs/new.mdx` alone — exit 1, nothing created (the
+// whole-root compare).
+const R16_CREATED_MOVED = '<S id="m"> \nbody</S>';
+function r16CreatedArm(
+  created: string,
+  beside: readonly string[],
+): R16RefusedArm {
+  const alone = beside.length === 0;
+  return {
+    key: `the created target ${created}${alone ? " alone" : ` beside ${beside.join(", ")}`}`,
+    summary:
+      `the creation's composition — the re-identified moved text and ` +
+      `U+000A — is judged on its own: at the line's start its opening tag ` +
+      `is a flow-position tag, which the text-position closing tag of ` +
+      `\`body</S>\` cannot close (SPEC 6.5, 6.2, 14.20), the path spelled ` +
+      (alone
+        ? `alone, valid, nothing created`
+        : `beside its own invalidity, ${beside.join(", ")} with that path`),
+    files: { [R16_ORIGIN]: `foo ${R16_CREATED_MOVED}\n` },
+    argv: ["move", "specs/a.mdx#m", `${created}#y`],
+    illFormed: { [created]: '<S id="y"> \nbody</S>\n' },
+    wellFormed: { [R16_ORIGIN]: "foo \n" },
+    identities: [created],
+    locations: [r16Construct(R16_ORIGIN, "foo ", R16_CREATED_MOVED)],
+    beside,
+    ...(beside.includes("refused-invalid-destination")
+      ? { besidePath: { "refused-invalid-destination": created } }
+      : {}),
+  };
+}
+
+// Refused for another reason alone, `refused-invalid-rewrite` not
+// applicable: (c)'s first shape under the intrinsically invalid `<new-id>`
+// `p.then` (`then` a forbidden segment, SPEC 1.4) — an invalid one spelled
+// verbatim leaves the would-be text undefined; and a missing target parent
+// beside the flow-form section and a text-position target file, the
+// origin's deletion leaving it well-formed — no target text exists to
+// judge.
+const R16_ALONE_ARMS: readonly R16AloneArm[] = [
+  {
+    key: "(c)'s shape under the invalid new-id p.then: refused-invalid-id alone",
+    summary:
+      "the refusal is judged only under an intrinsically valid `<new-id>`: " +
+      "`then` is a forbidden segment (SPEC 1.4), so `refused-invalid-id` is " +
+      "reported alone, no would-be text judged (SPEC 6.5, 14)",
+    files: {
+      [R16_ORIGIN]: `${R16_K}${R16_FLOW_SECTION}\n`,
+      [R16_TARGET]: R16_TEXT_PARENT,
+    },
+    argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.then"],
+    codes: ["refused-invalid-id"],
+  },
+  {
+    key: "a missing target parent beside a clean origin: refused-missing-target-parent alone",
+    summary:
+      "the flow-form section's deletion leaves the origin well-formed and " +
+      "the target holds no `q`, so no insertion point exists and no target " +
+      "text is judged: `refused-missing-target-parent` alone (SPEC 6.5, 14)",
+    files: {
+      [R16_ORIGIN]: `${R16_K}${R16_FLOW_SECTION}\n`,
+      [R16_TARGET]: R16_TEXT_PARENT,
+    },
+    argv: ["move", "specs/a.mdx#m", "specs/b.mdx#q.n"],
+    codes: ["refused-missing-target-parent"],
+  },
+];
+
 const R16_REFUSED_ARMS: readonly R16RefusedArm[] = [
   r16ArmA("a space", " "),
   r16ArmA("a tab", "\t"),
@@ -3609,6 +3831,12 @@ const R16_REFUSED_ARMS: readonly R16RefusedArm[] = [
   R16_D_INSERTION_ARM,
   r16ArmE("terminated", `${R16_E_DECLARATION}\n`),
   r16ArmE("unterminated", R16_E_DECLARATION),
+  R16_F_ARM,
+  R16_H_ARM,
+  R16_COLLISION_ARM,
+  R16_D_MISSING_PARENT_ARM,
+  r16CreatedArm("specs/new.txt", ["refused-invalid-destination"]),
+  r16CreatedArm("specs/new.mdx", []),
 ];
 
 const R16_CONTROL_ARMS: readonly R16ControlArm[] = [
@@ -3648,6 +3876,11 @@ export const R16_FORM_VECTORS: ReadonlyArray<
         [`T6.5-16 ${arm.key}: ${rel} after the move`, text] as const,
     ),
   ]),
+  ...R16_ALONE_ARMS.flatMap((arm) =>
+    Object.entries(arm.files).map(
+      ([rel, text]) => [`T6.5-16 ${arm.key}: ${rel} as staged`, text] as const,
+    ),
+  ),
 ];
 
 /**
@@ -3689,6 +3922,25 @@ function r16AssertDerives(text: string, rel: string, key: string): void {
   );
 }
 
+/** The report's codes, as `condition ?? code` (the H-3 decoder's derived condition where one is pinned). */
+function r16Codes(findings: readonly Finding[]): string[] {
+  return findings.map(
+    (finding) => finding.condition ?? finding.code ?? "(code-less)",
+  );
+}
+
+/** Two code lists hold the same multiset. */
+function r16SameCodes(
+  actual: readonly string[],
+  expected: readonly string[],
+): boolean {
+  const sortedActual = [...actual].sort();
+  return (
+    actual.length === expected.length &&
+    [...expected].sort().every((code, index) => sortedActual[index] === code)
+  );
+}
+
 function r16RenderLocations(locations: readonly R16Location[]): string {
   return locations
     .map(
@@ -3711,15 +3963,8 @@ function r16AssertFinding(
   context: string,
 ): void {
   const expectedCodes = ["refused-invalid-rewrite", ...(arm.beside ?? [])];
-  const actualCodes = findings.map(
-    (finding) => finding.condition ?? finding.code ?? "(code-less)",
-  );
-  const sameCodes =
-    actualCodes.length === expectedCodes.length &&
-    [...expectedCodes]
-      .sort()
-      .every((code, index) => [...actualCodes].sort()[index] === code);
-  if (!sameCodes) {
+  const actualCodes = r16Codes(findings);
+  if (!r16SameCodes(actualCodes, expectedCodes)) {
     fail(
       `${context}: the report holds exactly one finding per applicable ` +
         `reason — ${JSON.stringify(expectedCodes)}, \`refused-invalid-rewrite\` ` +
@@ -3777,6 +4022,18 @@ function r16AssertFinding(
         `${JSON.stringify(finding.message)})`,
     );
   }
+  for (const [code, path] of Object.entries(arm.besidePath ?? {})) {
+    const beside = findings.find((candidate) => candidate.code === code)!;
+    if (beside.path !== path) {
+      fail(
+        `${context}: the \`${code}\` finding reported beside carries ` +
+          `\`path\` ${JSON.stringify(path)} — the destination spelled ` +
+          `whatever its validity (SPEC 6.5, 14; T14-7); got ` +
+          `${renderPathValue(beside.path)} (message: ` +
+          `${JSON.stringify(beside.message)})`,
+      );
+    }
+  }
 }
 
 async function runR16RefusedArm(
@@ -3814,6 +4071,48 @@ async function runR16RefusedArm(
             `(SPEC 6.5, 14, 12.0, 12.7)`,
         );
         r16AssertFinding(findings, arm, context);
+      },
+      `${context}: \`${command}\` refused — modifies nothing: every source ` +
+        `and derived file byte-identical, the journal absent or ` +
+        `byte-unchanged (SPEC 6.5, 14)`,
+    );
+  });
+}
+
+async function runR16AloneArm(
+  product: ProductBinding,
+  arm: R16AloneArm,
+): Promise<void> {
+  const context = `T6.5-16 ${arm.key}`;
+  const command = arm.argv.join(" ");
+  await withWorkspace(arm.files, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      `${context} \`build\` over the staging — the pre-move workspace is ` +
+        `valid, every staged file well-formed (SPEC 6.4, 6.5, 14.20)`,
+    );
+    await assertLeavesUnchanged(
+      workspace.root,
+      async () => {
+        const findings = await runFindingsReport(
+          product,
+          workspace,
+          [...arm.argv, "--json"],
+          1,
+          `${context} \`${command} --json\` — refused: ${arm.summary}; ` +
+            `exit 1 with the form-exact 12.7 findings-only report ` +
+            `(SPEC 6.5, 14, 12.0, 12.7)`,
+        );
+        const actualCodes = r16Codes(findings);
+        if (!r16SameCodes(actualCodes, arm.codes)) {
+          fail(
+            `${context}: the report holds exactly one finding per applicable ` +
+              `reason — ${JSON.stringify(arm.codes)} and no ` +
+              `\`refused-invalid-rewrite\` beside it: ${arm.summary} ` +
+              `(SPEC 6.5, 14, 12.7); got ${JSON.stringify(actualCodes)}`,
+          );
+        }
       },
       `${context}: \`${command}\` refused — modifies nothing: every source ` +
         `and derived file byte-identical, the journal absent or ` +
@@ -3871,6 +4170,9 @@ const T6_5_16 = defineProductTest({
   run: async (product) => {
     for (const arm of R16_REFUSED_ARMS) {
       await runR16RefusedArm(product, arm);
+    }
+    for (const arm of R16_ALONE_ARMS) {
+      await runR16AloneArm(product, arm);
     }
     for (const arm of R16_CONTROL_ARMS) {
       await runR16ControlArm(product, arm);
