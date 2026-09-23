@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 38 — T6.5-18: shadow-aware binding choice
-- Cites: TEST-SPEC T6.5-18 (fixture: `specs/origin.mdx` holding `x`, `specs/target.mdx` holding `z`, `src/c.ts` = `import O from "../specs/origin.xspec"`, `import T from "../specs/target.xspec"`, a module-scope marker `T.z`, and a function `f` holding `const T = 1` beside the marker `O.x` — valid, compiling clean (H-2); after `move specs/origin.mdx#x specs/target.mdx#y` a declaration binding a fresh `<F>` (value unpinned, never `T`) is added and `O.x` is rewritten through it, `T.z` untouched; the entry's remaining assertions); SPEC 6.5, 4.5. Finding A-13. Depends on Tasks 28, 31.
-- Change: register T6.5-18 in `section-6.5-iii.ts` per its entry; assert compile-cleanliness through the TypeScript tooling driver (`test/helpers/tooling.ts`).
-- Verify: `-t 'T6.5-18 '` no harness error; self project green.
-
 ### Task 39 — T6.5-19: the in-section exclusion
 - Cites: TEST-SPEC T6.5-19 (two byte-asserted arms: (a) the target side — result exactly `<S id="p">`, U+000A, U+000A, `x`, U+000A, the moved text, U+000A, `</S>`, U+000A, the declaration, U+000A, the preview's `import-addition` at the file's byte length, the root's own text and ownHash unchanged; (b) the origin side — `<S id="m">`, U+000A, `z`, U+000A, `</S>`, U+000A, `<S id="a" d={"m"}>`, U+000A, U+000A, `y`, U+000A, `</S>` unterminated, `move specs/a.mdx#m specs/b.mdx#m`, result exactly `<S id="a" d={<T>.m}>`, U+000A, U+000A, `y`, U+000A, `</S>`, U+000A, `import <T> from "./b.xspec"`, U+000A; each receiving root's own text and ownHash compared through `query node` before and after; the real operation's bytes agreeing with the preview's offsets, T6.6-4(b); every form deriving, S-9); SPEC 6.5, 6.2, 3. Finding A-14. Depends on Task 33.
 - Change: register T6.5-19 in `section-6.5-iii.ts` per its entry, verifying each composed form with `deriveMdx` inside the test.
