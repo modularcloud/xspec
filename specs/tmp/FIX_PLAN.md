@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 42 — T14-11: the refined `d`-value ranges; `d={}` as condition 20
-- Cites: TEST-SPEC T14-11 (`d={(BASE.a)}` located with its parentheses; `d={BASE.a, BASE.b}` located whole as 14.8; `d={ /* c */ BASE.missing }` with braces, whitespace, comment, and U+00A0/U+FEFF excluded; the spread entry `d={[...BASE.a]}` with `...` included; elisions — one finding per array literal at the whole literal, two literals → two findings; `d={}` and `d={ /* c */ }` as condition 20 at the closing brace); SPEC 14.8, 14.20 ("`d={}` is not well-formed MDX"), 1.7. Finding B-4 (first group). Depends on Task 3.
-- Change: `section-14.ts` (T14-11's rules ~L3783–3954): add the missing forms and replace the `d={}` 14.8 pin (~L3801) with the condition-20-at-closing-brace pin, declaring `d={}` / `d={ /* c */ }` stagings `mdx.unparseable` (confirm with `deriveMdx` that the stock parser rejects the empty attribute-value expression; if it derives, record a TEST-SPEC problem per the mission rules instead of pinning).
-- Verify: `-t 'T14-11 '` no harness error; self project green.
-
 ### Task 43 — T14-11: colliding-declaration located forms, the fragment 14.16 form, UTF-8 offsets
 - Cites: TEST-SPEC T14-11 (`let SPEC;` at `SPEC`; `const { SPEC } = o` at `{ SPEC } = o`; `@dec class SPEC {}` from `@`; `export class SPEC {}` from `class`; the fragment `<>`…`</>` form of 14.16; the UTF-8 offsets `41 E2 82 41` → 1, `C0 80` → 0, `ED A0 80` → 0, `41 E2 82` truncated by EOF → 1, in a spec source and a code source alike); SPEC 14.15, 14.16, 14.20, 1.7. Finding B-4 (second group). Depends on Tasks 3, 24 (share the located-form stagings with T4.5-8 through exported constants).
 - Change: `section-14.ts`: add the arms; byte-level stagings for the UTF-8 cases (spec sources declared `mdx.unparseable`; code sources are not MDX).
