@@ -40,9 +40,20 @@
 //   byte offsets and each 14.15 finding must fall within the offending
 //   statement's own byte window (end-widened by one byte for line-granular
 //   locations, support.ts byteWindow).
+// - T4-2 "no occurrence": the side-effect-only import's positive arm compares
+//   the `occurrences` document's complete (file, kind, target) multiset with
+//   the two ordinary consumers' records — a phantom record is an extra tuple
+//   — leaving each record's source datum and exact span to T5.7-2/T5.7-3.
 
-import type { GraphEdge } from "../../helpers/adapters/index.js";
-import { decodeEdgesReport } from "../../helpers/adapters/index.js";
+import type {
+  DependencyEdgeKind,
+  GraphEdge,
+} from "../../helpers/adapters/index.js";
+import {
+  decodeEdgesReport,
+  decodeOccurrencesReport,
+  renderPathValue,
+} from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
   assertExitCode,
@@ -385,6 +396,25 @@ const XSPEC_RULE_ARMS: readonly InvalidTsImportArm[] = [
   },
 ];
 
+// The side-effect-only form (SPEC 4): `import "./NAME.xspec"` binds nothing,
+// records nothing, and is valid in a code-group file (the positive arm
+// below) — "its specifier held to the rule above like any other's" — so the
+// two specifier defects TEST-SPEC pins fail with 14.15 through it: a `.xspec`
+// specifier designating no discovered spec source (`./missing.xspec`
+// designates `src/missing.mdx`, no such file), and a relative specifier
+// designating a derived-file path (`../specs/BASE.xspec.ts`, a file name
+// containing `.xspec.`, 13.4) without being a spec module import.
+const SIDE_EFFECT_IMPORT_ARMS: readonly InvalidTsImportArm[] = [
+  {
+    name: 'a side-effect-only import whose `.xspec` specifier designates a nonexistent file (`import "./missing.xspec"`)',
+    statements: ['import "./missing.xspec";'],
+  },
+  {
+    name: 'a side-effect-only import whose relative specifier designates a derived-file path (`import "../specs/BASE.xspec.ts"`)',
+    statements: ['import "../specs/BASE.xspec.ts";'],
+  },
+];
+
 // Derived-path arms (SPEC 4, 13.4): the full cross product of the four
 // module-linking forms SPEC 4 names and the three derived-file path kinds of
 // 13.4 — a file name containing `.xspec.` (the generated module's own path,
@@ -590,16 +620,65 @@ function lexicalTsConsumerSource(specifier: string): string {
   return [`import NAME from "${specifier}";`, "", "NAME.core;", ""].join("\n");
 }
 
+// Positive arm: a side-effect-only import in a code-group file (SPEC 4: it
+// binds nothing, records nothing, and is valid). It is staged alone in
+// `src/side.ts` beside two ordinary consumers — a bare marker (`references`,
+// 4.5) and a `text(...)` call (`embeds`, 4.3) — so both consulted surfaces
+// are live: the consumers' edges and occurrences are the workspace's only
+// ones, and a product that treats the side-effect form as an import defect
+// (14.15 at `build` or `check`) or records anything from it is caught — an
+// edge by `query edges --from src/side.ts`, a phantom occurrence as an extra
+// tuple in the exact (file, kind, target) multiset (SPEC 5.7: an import
+// declaration, its binding used or not, records no occurrence).
+const SIDE_EFFECT_IMPORT_FILE = "src/side.ts";
+const SIDE_EFFECT_IMPORT_SOURCE = 'import "../specs/BASE.xspec";\n';
+
+const SIDE_EFFECT_ORDINARY_CONSUMERS: Readonly<Record<string, string>> = {
+  "src/one.ts": [
+    'import BASE from "../specs/BASE.xspec";',
+    "",
+    "BASE.core;",
+    "",
+  ].join("\n"),
+  "src/two.ts": [
+    'import BASE, { text } from "../specs/BASE.xspec";',
+    "",
+    "process.stdout.write(text(BASE.core));",
+    "",
+  ].join("\n"),
+};
+
+// The consumers' edges (SPEC 4.3, 4.5; top-level statements, so each source
+// node is the code file itself) and, behind them, the workspace's complete
+// occurrence multiset as (file, kind, target) units (SPEC 5.7).
+const SIDE_EFFECT_CONSUMER_EDGES: readonly {
+  readonly from: string;
+  readonly to: string;
+  readonly kind: DependencyEdgeKind;
+}[] = [
+  { from: "src/one.ts", to: "specs/BASE.mdx#core", kind: "references" },
+  { from: "src/two.ts", to: "specs/BASE.mdx#core", kind: "embeds" },
+];
+
+function renderOccurrenceTriple(
+  file: string,
+  kind: DependencyEdgeKind,
+  target: string,
+): string {
+  return `${file} [${kind}] -> ${target}`;
+}
+
 const T4_2 = defineProductTest({
   id: "T4-2",
-  title: `TS import rules: undiscovered/nonexistent/bare/absolute \`.xspec\` specifiers, one whose ascent passes above the root (a real \`outside/NAME.mdx\` at the root's parent), one escape-spelled in a name segment ("./N${BACKSLASH}u0041ME.xspec", read verbatim), bindings other than the default and \`text\`, static-specifier dynamic \`import()\`, every export-declaration form, \`import X = require(…)\`, and derived-path specifiers through each module-linking form all fail with 14.15; \`./sub/../NAME.xspec\` (no \`sub/\` on disk) and \`.//NAME.xspec\` resolve lexically to NAME.mdx and markers through them record edges; a non-static dynamic \`import()\` is not analyzed; binding collisions are 14.15 when either import is a spec module import, and no finding otherwise (SPEC 4, 2.1, 2.4, 13.4, 14.15)`,
-  // Many small workspaces (29 negative arms plus three positive ones), each
+  title: `TS import rules: undiscovered/nonexistent/bare/absolute \`.xspec\` specifiers, one whose ascent passes above the root (a real \`outside/NAME.mdx\` at the root's parent), one escape-spelled in a name segment ("./N${BACKSLASH}u0041ME.xspec", read verbatim), bindings other than the default and \`text\`, static-specifier dynamic \`import()\`, every export-declaration form, \`import X = require(…)\`, and derived-path specifiers through each module-linking form all fail with 14.15; \`./sub/../NAME.xspec\` (no \`sub/\` on disk) and \`.//NAME.xspec\` resolve lexically to NAME.mdx and markers through them record edges; a non-static dynamic \`import()\` is not analyzed; binding collisions are 14.15 when either import is a spec module import, and no finding otherwise; a side-effect-only \`import "./NAME.xspec"\` binds nothing and is valid in a code-group file — \`build\` and \`check\` exit 0, no edge, no occurrence — while \`import "./missing.xspec"\` and \`import "../specs/NAME.xspec.ts"\` fail with 14.15 (SPEC 4, 2.1, 2.4, 5.7, 13.4, 14.15)`,
+  // Many small workspaces (31 negative arms plus four positive ones), each
   // one product invocation or a few: a wider hang budget than the default
   // (H-8 hang guard only, never an assertion — H-10).
   timeoutMs: 240_000,
   run: async (product) => {
     for (const arm of [
       ...XSPEC_RULE_ARMS,
+      ...SIDE_EFFECT_IMPORT_ARMS,
       ...DERIVED_PATH_ARMS,
       ...DUPLICATE_BINDING_ARMS,
     ]) {
@@ -642,6 +721,84 @@ const T4_2 = defineProductTest({
             `T4-2 the marker through \`${consumer.specifier}\` records its ` +
               "`references` edge to src/NAME.mdx#core — the specifier " +
               "resolved lexically (SPEC 4, 2.1, 4.5)",
+          );
+        }
+      },
+    );
+
+    // Side-effect-only import: valid in a code-group file beside ordinary
+    // consumers — `build` and `check` exit 0, no edge, no occurrence.
+    await withWorkspace(
+      SPEC_AND_CODE_CONFIG,
+      {
+        ...T4_2_BASE_FILES,
+        [SIDE_EFFECT_IMPORT_FILE]: SIDE_EFFECT_IMPORT_SOURCE,
+        ...SIDE_EFFECT_ORDINARY_CONSUMERS,
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          'T4-2 `build` with a side-effect-only `import "../specs/BASE.xspec"` ' +
+            "alone in src/side.ts beside two ordinary consumers (SPEC 4: the " +
+            "form binds nothing and is valid in a code-group file)",
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["check"],
+          0,
+          "T4-2 `check` over the same workspace (SPEC 4: the side-effect-only " +
+            "import is valid)",
+        );
+        assertEdgeSetEqual(
+          await queryEdgesFrom(
+            product,
+            workspace,
+            SIDE_EFFECT_IMPORT_FILE,
+            "T4-2",
+          ),
+          [],
+          "T4-2 the side-effect-only import records no edge: none leaves " +
+            "src/side.ts (SPEC 4)",
+        );
+        for (const edge of SIDE_EFFECT_CONSUMER_EDGES) {
+          assertEdgeSetEqual(
+            await queryEdgesFrom(product, workspace, edge.from, "T4-2"),
+            [edge],
+            `T4-2 the ordinary consumer ${edge.from} beside it records its ` +
+              `\`${edge.kind}\` edge (SPEC 4.3, 4.5) — the edge surface is live`,
+          );
+        }
+        const context = "T4-2 `occurrences`";
+        const report = decodeOccurrencesReport(
+          await runJson(product, workspace, ["occurrences"], context),
+          context,
+        );
+        if (report.findings.length !== 0) {
+          fail(
+            `${context}: the valid workspace consults finding-free (SPEC 11.2) ` +
+              `— got ${JSON.stringify(report.findings.map((finding) => finding.condition ?? finding.code))}`,
+          );
+        }
+        const actual = report.occurrences
+          .map((record) =>
+            renderOccurrenceTriple(
+              renderPathValue(record.file),
+              record.kind,
+              record.target,
+            ),
+          )
+          .sort();
+        const expected = SIDE_EFFECT_CONSUMER_EDGES.map((edge) =>
+          renderOccurrenceTriple(edge.from, edge.kind, edge.to),
+        ).sort();
+        if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+          fail(
+            `${context}: the workspace's occurrences are exactly the two ` +
+              `ordinary consumers' — the side-effect-only import records none ` +
+              `(SPEC 4, 5.7); expected ${JSON.stringify(expected)}, got ` +
+              JSON.stringify(actual),
           );
         }
       },
