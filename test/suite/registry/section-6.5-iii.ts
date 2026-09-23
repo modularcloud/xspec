@@ -1,6 +1,7 @@
 // TEST-SPEC §6.5 (move), third part — SUITE-25 (continued): T6.5-12, the
-// target file's own references to moved nodes, and T6.5-14, a created target
-// file's fixed content. T6.5-1…T6.5-10 are section-6.5.ts's business and
+// target file's own references to moved nodes, T6.5-13, admissible offsets
+// and composition in pre-operation coordinates, and T6.5-14, a created
+// target file's fixed content. T6.5-1…T6.5-10 are section-6.5.ts's business and
 // T6.5-11 section-6.5-ii.ts's; this module keeps both files' edits bounded
 // (the section-10.7-i/-ii precedent).
 //
@@ -72,20 +73,45 @@
 //   5.5) and at most the two-sided `descendant-changed` T6.2-3 tolerates,
 //   attributed to the moved node; no entry is `deleted`; no code location
 //   is impacted (no code group is configured).
+// - T6.5-13 (arms (a) through (f)) composes the receiving file whole for
+//   each arm, value-blind in the fresh identifier alone, read from the
+//   added declaration line (exactly one `import <X> from "./x.xspec"`);
+//   the cross-file origin keeps a second use of `X` in a sibling, so its
+//   declaration stays and the origin's expectation is the deletion's
+//   alone (the removal side is T6.5-10's and T6.5-14's business). The
+//   preview is taken before the real move and its edits for the
+//   receiving file are asserted exactly afterwards (12.7's order, the
+//   class-name tie-break included); for the same-file arms (e)/(f) the
+//   `target-insertion` is admitted at the insertion point or at the
+//   collapsed deletion's start (two pre-operation offsets, one composed
+//   position: T6.6-4(b)'s latitude). The root's own content is observed
+//   through `query node` (own text and ownHash) — (d)'s `changed` root
+//   through its ownHash changing; `impact` is the business of the
+//   entry's arms (h) and (j). Each composed expectation is checked to
+//   derive (S-9's premise) before the move — a `HarnessStagingError`,
+//   never a verdict — and again, diagnosed, with the product's
+//   identifier substituted.
 
 import { Buffer } from "node:buffer";
 import type {
   ChangeCategory,
   GraphEdge,
   ImpactReport,
+  NodeReport,
+  PreviewEdit,
+  PreviewEditClass,
+  PreviewFileEntry,
 } from "../../helpers/adapters/index.js";
 import {
   decodeEdgesReport,
   decodeImpactReport,
+  decodeNodeReport,
+  decodePreviewReport,
 } from "../../helpers/adapters/index.js";
 import { assertFileBytes, fail } from "../../helpers/assertions.js";
 import { canonicalSpecifier } from "../../helpers/import-insertion.js";
 import { deriveMdx } from "../../helpers/mdx-derivability.js";
+import { HarnessStagingError } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
@@ -1063,8 +1089,717 @@ const T6_5_14 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T6.5-13 Admissible offsets, the line-start preference, and composition in
+// pre-operation coordinates — arms (a) through (f); the entry's further arms
+// ((g) onward) extend A13_ARMS.
+// ---------------------------------------------------------------------------
+
+const A13_ORIGIN = "specs/a.mdx";
+const A13_TARGET = "specs/b.mdx";
+const A13_THIRD = "specs/x.mdx";
+const A13_THIRD_MODULE = "specs/x.xspec";
+const A13_THIRD_SOURCE = ['<S id="a">', "A text.", "</S>", ""].join("\n");
+/** The canonical specifier the receiving file's added declaration carries (SPEC 6.5, 2.1). */
+const A13_THIRD_SPECIFIER = canonicalSpecifier("specs", A13_THIRD_MODULE);
+
+/**
+ * The moved section of the cross-file arms — a clean-boundary flow-form
+ * section (T6.2-3's shape: opening and closing tags each alone on their
+ * lines) whose one body line carries, beside prose, the `{text(X.a)}`
+ * embedding through the origin's binding of the third module (T6.5-10's
+ * shape) — spelled with the ID it bears and the binding its embedding is
+ * rooted at.
+ */
+function a13MovedLines(id: string, root: string): string[] {
+  return [`<S id="${id}">`, `Moved {text(${root}.a)} text.`, "</S>"];
+}
+
+// The cross-file origin: the `X` declaration heads the file and the sibling
+// `s` keeps a use of `X`, so the declaration stays after the move (SPEC 6.5:
+// an import is removed exactly when no occurrence uses a binding of its
+// after the rewrite) and the origin's post-move bytes are the deletion's
+// alone — the construct deleted in place, its three lines joined into one
+// empty line dropped with its terminator, the blank line before it kept
+// (SPEC 6.5, 3).
+const A13_ORIGIN_HEAD: readonly string[] = [
+  'import X from "./x.xspec"',
+  "",
+  '<S id="s">',
+  "Sib {text(X.a)} text.",
+  "</S>",
+  "",
+];
+const A13_ORIGIN_BEFORE = [
+  ...A13_ORIGIN_HEAD,
+  ...a13MovedLines("m", "X"),
+  "",
+].join("\n");
+const A13_ORIGIN_AFTER = [...A13_ORIGIN_HEAD, ""].join("\n");
+
+/** 6.5's exact spelling of the declaration the receiving file needs. */
+function a13Declaration(ident: string): string {
+  return `import ${ident} from "${A13_THIRD_SPECIFIER}"`;
+}
+
+/** A zero-length preview edit at `offset` (SPEC 6.6: an insertion point). */
+function a13At(cls: PreviewEditClass, offset: number): PreviewEdit {
+  return { class: cls, range: { start: offset, end: offset } };
+}
+
+/** A preview edit spanning `[start, end)` in pre-operation coordinates. */
+function a13Span(
+  cls: PreviewEditClass,
+  start: number,
+  end: number,
+): PreviewEdit {
+  return { class: cls, range: { start, end } };
+}
+
+/** One byte-asserted arm of T6.5-13. */
+interface A13Arm {
+  /** The entry's letter, e.g. `(a)`, `(b, terminated)`. */
+  readonly key: string;
+  /** The placement 6.5 fixes here, for diagnoses. */
+  readonly summary: string;
+  /** The staging beside the configuration. */
+  readonly files: Readonly<Record<string, string>>;
+  /** The move's argv. */
+  readonly argv: readonly string[];
+  /** The receiving file: the one whose post-move bytes the arm composes. */
+  readonly receiving: string;
+  /** Whether the receiving file needs the third module's declaration. */
+  readonly needsDeclaration: boolean;
+  /**
+   * The receiving file's expected post-move bytes given the fresh
+   * identifier the added declaration binds (`""` where none is needed).
+   */
+  readonly compose: (ident: string) => string;
+  /** Every other file's expected post-move bytes. */
+  readonly others: Readonly<Record<string, string>>;
+  /** The admissible edit lists of the receiving file's preview entry, each in 12.7's order. */
+  readonly previewEdits: readonly (readonly PreviewEdit[])[];
+  /** The receiving file's root: its own text before and after, and whether its ownHash changes. */
+  readonly root: {
+    readonly identity: string;
+    readonly ownTextBefore: string;
+    readonly ownTextAfter: string;
+    readonly ownHashChanges: boolean;
+  };
+}
+
+/** A cross-file arm: `m` moved out of the shared origin into a target file. */
+function a13CrossArm(spec: {
+  readonly key: string;
+  readonly summary: string;
+  readonly target: string;
+  readonly newId: string;
+  readonly compose: (ident: string) => string;
+  readonly previewEdits: readonly PreviewEdit[];
+  readonly ownTextBefore: string;
+  readonly ownTextAfter: string;
+  readonly ownHashChanges: boolean;
+}): A13Arm {
+  return {
+    key: spec.key,
+    summary: spec.summary,
+    files: {
+      [A13_ORIGIN]: A13_ORIGIN_BEFORE,
+      [A13_THIRD]: A13_THIRD_SOURCE,
+      [A13_TARGET]: spec.target,
+    },
+    argv: ["move", `${A13_ORIGIN}#m`, `${A13_TARGET}#${spec.newId}`],
+    receiving: A13_TARGET,
+    needsDeclaration: true,
+    compose: spec.compose,
+    others: { [A13_ORIGIN]: A13_ORIGIN_AFTER, [A13_THIRD]: A13_THIRD_SOURCE },
+    previewEdits: [spec.previewEdits],
+    root: {
+      identity: A13_TARGET,
+      ownTextBefore: spec.ownTextBefore,
+      ownTextAfter: spec.ownTextAfter,
+      ownHashChanges: spec.ownHashChanges,
+    },
+  };
+}
+
+/**
+ * A same-file arm's admissible preview entries: the origin deletion
+ * spanning the moved construct's own characters extended to `deletionEnd`
+ * (over the terminator of a line the deletion leaves empty, when one is
+ * there to drop), the `id-rewrite` of the moved section's own `id`
+ * attribute nested inside it, and the target insertion zero-length at the
+ * insertion point — or at the deletion's start: the two pre-operation
+ * offsets a collapsed deletion makes one composed position, the bytes the
+ * same either way (T6.6-4(b)'s latitude) — each list in 12.7's order.
+ */
+function a13SameFileEdits(
+  source: string,
+  movedText: string,
+  idAttribute: string,
+  insertion: number,
+  deletionEnd: number,
+): readonly (readonly PreviewEdit[])[] {
+  const start = source.indexOf(movedText);
+  const idStart = start + movedText.indexOf(idAttribute);
+  const deletion = a13Span("origin-deletion", start, deletionEnd);
+  const rewrite = a13Span("id-rewrite", idStart, idStart + idAttribute.length);
+  return [
+    [deletion, rewrite, a13At("target-insertion", insertion)],
+    [a13At("target-insertion", start), deletion, rewrite],
+  ];
+}
+
+// (a): the target holds two admissible offsets — the file's end after its
+// final terminator (a line start) and the end of the `</S>` line before that
+// terminator (mid-line, which would leave a kept empty line).
+const A13_A_TARGET = ['<S id="p">', "x", "</S>", ""].join("\n");
+// (a)'s sibling: the only line-start admissible offset is the start of the
+// empty line after the `</S>` line — an added line at the file's end would
+// follow a paragraph line as paragraph text, and one at the start of the
+// `trailing` line would absorb it.
+const A13_A_SIBLING_TARGET = ['<S id="p">', "x", "</S>", "", "trailing"].join(
+  "\n",
+);
+// (b): 6.5's worked self-closing case, the tag's line lacking a terminator.
+const A13_B_TARGET = '<S id="p" />';
+// (c): no final terminator, so the file's end — mid-line — is the only
+// admissible offset (offset 0 absorbs the tag line; every other line start
+// lies inside the section).
+const A13_C_TARGET = ['<S id="p">', "x", "</S>"].join("\n");
+// (d): a paragraph line alone, unterminated; the target parent of a
+// top-level `new-id` is the root.
+const A13_D_TARGET = "para";
+
+/** (a)/(c)'s composition: the moved text before `</S>`, then the declaration. */
+function a13ComposeIntoP(ident: string, tail: readonly string[]): string {
+  return [
+    '<S id="p">',
+    "x",
+    ...a13MovedLines("p.n", ident),
+    "</S>",
+    a13Declaration(ident),
+    ...tail,
+  ].join("\n");
+}
+
+/** (b)'s composition, both variants: the paired form around the moved text, then the declaration. */
+function a13ComposeSelfClosing(ident: string): string {
+  return [
+    '<S id="p">',
+    ...a13MovedLines("p.n", ident),
+    "</S>",
+    a13Declaration(ident),
+    "",
+  ].join("\n");
+}
+
+/** (d)'s composition, both variants: `para`, the moved text, the declaration. */
+function a13ComposeAfterPara(ident: string): string {
+  return ["para", ...a13MovedLines("n", ident), a13Declaration(ident), ""].join(
+    "\n",
+  );
+}
+
+// (e): a same-file move inside a text-position parent; the origin
+// deletion's range ends exactly at the insertion point.
+const A13_E_MOVED = '<S id="p.m">x</S>';
+const A13_E_BEFORE = ['foo <S id="p">', `${A13_E_MOVED}</S> baz`, ""].join(
+  "\n",
+);
+const A13_E_AFTER = [
+  'foo <S id="p">',
+  '<S id="p.n">x</S>',
+  "</S> baz",
+  "",
+].join("\n");
+// (f): a same-file top-level move of the file's last section, whose
+// unterminated last line the deletion drops.
+const A13_F_MOVED = ['<S id="m">', "y", "</S>"].join("\n");
+const A13_F_BEFORE = ['<S id="a">x</S>', A13_F_MOVED].join("\n");
+const A13_F_AFTER = ['<S id="a">x</S>', '<S id="n">', "y", "</S>", ""].join(
+  "\n",
+);
+
+const A13_ARMS: readonly A13Arm[] = [
+  a13CrossArm({
+    key: "(a)",
+    summary:
+      "the preference — of the target's two admissible offsets, the file's " +
+      "end after its final terminator (a line start) is taken over the end " +
+      "of the `</S>` line before that terminator (mid-line, which would " +
+      "leave a kept empty line): the moved text and its terminator inserted " +
+      "before `</S>`, the declaration plus U+000A appended after the final " +
+      "terminator, nothing else",
+    target: A13_A_TARGET,
+    newId: "p.n",
+    compose: (ident) => a13ComposeIntoP(ident, [""]),
+    previewEdits: [
+      a13At("target-insertion", A13_A_TARGET.indexOf("</S>")),
+      a13At("import-addition", A13_A_TARGET.length),
+    ],
+    ownTextBefore: "",
+    ownTextAfter: "",
+    ownHashChanges: false,
+  }),
+  a13CrossArm({
+    key: "(a, sibling)",
+    summary:
+      "the only line-start admissible offset is the start of the empty line " +
+      "after the `</S>` line — the file's end would follow a paragraph line " +
+      "as paragraph text, and the start of the `trailing` line would absorb " +
+      "it — so the declaration stands at that empty line's start, the empty " +
+      "line kept after it",
+    target: A13_A_SIBLING_TARGET,
+    newId: "p.n",
+    compose: (ident) => a13ComposeIntoP(ident, ["", "trailing"]),
+    previewEdits: [
+      a13At("target-insertion", A13_A_SIBLING_TARGET.indexOf("</S>")),
+      a13At("import-addition", A13_A_SIBLING_TARGET.indexOf("\n\n") + 1),
+    ],
+    ownTextBefore: "\ntrailing",
+    ownTextAfter: "\ntrailing",
+    ownHashChanges: false,
+  }),
+  a13CrossArm({
+    key: "(b)",
+    summary:
+      "6.5's worked self-closing case — an addition at offset 0 would absorb " +
+      "the tag's line into its ESM block, so the tag's end is the only " +
+      "admissible offset: the parent rewritten to the paired form, the moved " +
+      "text between its tags, the declaration after the appended closing " +
+      "tag, each preceded by the terminator a tag's `>` requires",
+    target: A13_B_TARGET,
+    newId: "p.n",
+    compose: a13ComposeSelfClosing,
+    previewEdits: [
+      a13Span("target-parent-rewrite", 0, A13_B_TARGET.length),
+      a13At("import-addition", A13_B_TARGET.length),
+      a13At("target-insertion", A13_B_TARGET.length),
+    ],
+    ownTextBefore: "",
+    ownTextAfter: "",
+    ownHashChanges: false,
+  }),
+  a13CrossArm({
+    key: "(b, terminated)",
+    summary:
+      "the self-closing case with a final terminator after the tag — the " +
+      "same bytes result, the addition at the file's end, a line start, " +
+      "taken over the tag's end",
+    target: `${A13_B_TARGET}\n`,
+    newId: "p.n",
+    compose: a13ComposeSelfClosing,
+    previewEdits: [
+      a13Span("target-parent-rewrite", 0, A13_B_TARGET.length),
+      a13At("target-insertion", A13_B_TARGET.length),
+      a13At("import-addition", A13_B_TARGET.length + 1),
+    ],
+    ownTextBefore: "",
+    ownTextAfter: "",
+    ownHashChanges: false,
+  }),
+  a13CrossArm({
+    key: "(c)",
+    summary:
+      "the forced mid-line case — offset 0 absorbs the tag line and every " +
+      "other line start lies inside the section, so the file's end, " +
+      "mid-line, is the only admissible offset: the added terminator ends " +
+      "the `</S>` line, which drops as it did before, then the declaration " +
+      "and its terminator",
+    target: A13_C_TARGET,
+    newId: "p.n",
+    compose: (ident) => a13ComposeIntoP(ident, [""]),
+    previewEdits: [
+      a13At("target-insertion", A13_C_TARGET.indexOf("</S>")),
+      a13At("import-addition", A13_C_TARGET.length),
+    ],
+    ownTextBefore: "",
+    ownTextAfter: "",
+    ownHashChanges: false,
+  }),
+  a13CrossArm({
+    key: "(d)",
+    summary:
+      "a top-level `new-id` at the end of a file whose unterminated last " +
+      "line is a paragraph line — the moved text, preceded by a terminator, " +
+      "then the declaration at the same offset, admissible after the flow " +
+      "closing tag's line where the reverse order would make it paragraph " +
+      "text; no empty line between",
+    target: A13_D_TARGET,
+    newId: "n",
+    compose: a13ComposeAfterPara,
+    previewEdits: [
+      a13At("import-addition", A13_D_TARGET.length),
+      a13At("target-insertion", A13_D_TARGET.length),
+    ],
+    ownTextBefore: "para",
+    ownTextAfter: "para\n",
+    ownHashChanges: true,
+  }),
+  a13CrossArm({
+    key: "(d, terminated)",
+    summary:
+      "the terminated variant — the target insertion at a line start, so no " +
+      "terminator is added before the moved text, and the declaration's " +
+      "only line-start admissible offset is the file's end again (offset 0 " +
+      "would absorb `para` into the block; the end of the `para` line " +
+      "before its terminator would leave the declaration paragraph text)",
+    target: `${A13_D_TARGET}\n`,
+    newId: "n",
+    compose: a13ComposeAfterPara,
+    previewEdits: [
+      a13At("import-addition", A13_D_TARGET.length + 1),
+      a13At("target-insertion", A13_D_TARGET.length + 1),
+    ],
+    ownTextBefore: "para\n",
+    ownTextAfter: "para\n",
+    ownHashChanges: true,
+  }),
+  {
+    key: "(e)",
+    summary:
+      "the target insertion judged over the composed text — the origin " +
+      "deletion's range ends exactly at the insertion point, which line 1's " +
+      "terminator precedes once the deletion is composed, so no terminator " +
+      "is added; a product judging the pre-operation text (the point " +
+      "preceded by `>`) emits an empty line before the moved text, ending " +
+      "the paragraph with `p` unclosed",
+    files: { [A13_ORIGIN]: A13_E_BEFORE },
+    argv: ["move", `${A13_ORIGIN}#p.m`, `${A13_ORIGIN}#p.n`],
+    receiving: A13_ORIGIN,
+    needsDeclaration: false,
+    compose: () => A13_E_AFTER,
+    others: {},
+    previewEdits: a13SameFileEdits(
+      A13_E_BEFORE,
+      A13_E_MOVED,
+      'id="p.m"',
+      A13_E_BEFORE.indexOf("</S> baz"),
+      A13_E_BEFORE.indexOf(A13_E_MOVED) + A13_E_MOVED.length,
+    ),
+    root: {
+      identity: A13_ORIGIN,
+      ownTextBefore: "foo  baz\n",
+      ownTextAfter: "foo  baz\n",
+      ownHashChanges: false,
+    },
+  },
+  {
+    key: "(f)",
+    summary:
+      "an insertion at the end of a file whose unterminated last line the " +
+      "origin deletion drops — what the deletion leaves before the file's " +
+      "end is line 1's terminator, so none is added: T6.2-4's " +
+      "pure-in-effect final-position move",
+    files: { [A13_ORIGIN]: A13_F_BEFORE },
+    argv: ["move", `${A13_ORIGIN}#m`, `${A13_ORIGIN}#n`],
+    receiving: A13_ORIGIN,
+    needsDeclaration: false,
+    compose: () => A13_F_AFTER,
+    others: {},
+    previewEdits: a13SameFileEdits(
+      A13_F_BEFORE,
+      A13_F_MOVED,
+      'id="m"',
+      A13_F_BEFORE.length,
+      A13_F_BEFORE.length,
+    ),
+    root: {
+      identity: A13_ORIGIN,
+      ownTextBefore: "\n",
+      ownTextAfter: "\n",
+      ownHashChanges: false,
+    },
+  },
+];
+
+/**
+ * S-9's premise: a composed expectation derives under the stock MDX 3
+ * grammar. A failure here is the arm's own defect — a harness error, never
+ * a product verdict.
+ */
+function a13AssertPremiseDerives(text: string, arm: A13Arm): void {
+  const verdict = deriveMdx(text);
+  if (verdict.derives) return;
+  throw new HarnessStagingError(
+    "mdx-derivability",
+    arm.receiving,
+    `T6.5-13 ${arm.key}: the composed expectation does not derive under ` +
+      `the stock MDX 3 grammar (${verdict.reason}) — the arm's premise, not ` +
+      `a product verdict; the text reads ${JSON.stringify(text)}`,
+  );
+}
+
+/**
+ * The fresh identifier the receiving file's added declaration binds, read
+ * off the declaration line — exactly one `import <X> from "./x.xspec"` line,
+ * its other characters T6.5-8's (SPEC 6.5, 2.1) — and none of the
+ * compiler-provided names.
+ */
+function a13ReadAddedIdentifier(actual: string, context: string): string {
+  const specifier = A13_THIRD_SPECIFIER.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const pattern = new RegExp(
+    `^import ([A-Za-z_$][A-Za-z0-9_$]*) from "${specifier}"$`,
+    "gm",
+  );
+  const matches = [...actual.matchAll(pattern)];
+  const ident = matches.length === 1 ? matches[0]?.[1] : undefined;
+  if (ident === undefined) {
+    fail(
+      `${context}: ${A13_TARGET} after the move holds exactly one added ` +
+        `declaration of ${A13_THIRD}'s module — a line of its own spelled ` +
+        `\`import <X> from "${A13_THIRD_SPECIFIER}"\`, single spaces, no ` +
+        `statement terminator, the specifier double-quoted in its canonical ` +
+        `spelling — the one binding the moved embedding is rooted at (SPEC ` +
+        `6.5, 2.1); found ${String(matches.length)} in ${JSON.stringify(actual)}`,
+    );
+  }
+  if (MDX_RESERVED_NAMES.includes(ident)) {
+    fail(
+      `${context}: the added declaration binds \`${ident}\`, one of the ` +
+        `compiler-provided names an added import in a spec source may not ` +
+        `bind (SPEC 6.5, 2.1)`,
+    );
+  }
+  return ident;
+}
+
+/** Name the headline deviation of a receiving file that is not byte-equal to its composed expectation. */
+function a13Deviation(actual: string, expected: string, ident: string): string {
+  if (ident !== "" && actual.startsWith(`${a13Declaration(ident)}\n`)) {
+    return (
+      "the declaration heads the file at offset 0 — an inadmissible offset: " +
+      "the ESM block it begins absorbs the line after it (14.20), and 6.5 " +
+      "takes the admissible line-start offset the arm names"
+    );
+  }
+  if (actual === `${expected}\n`) {
+    return (
+      "a kept empty line follows the declaration — the mid-line offset " +
+      "before the closing-tag line's terminator was taken over the " +
+      "line-start offset at the file's end"
+    );
+  }
+  return "";
+}
+
+/** `query node <root>` decoded, for the root's own text and ownHash (SPEC 1.6, 5.5). */
+async function a13QueryRoot(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  identity: string,
+  context: string,
+): Promise<NodeReport> {
+  const label = `${context} \`query node ${identity}\``;
+  const node = decodeNodeReport(
+    await runJson(product, workspace, ["query", "node", identity], label),
+    label,
+  );
+  if (node.identity !== identity) {
+    fail(
+      `${label}: the report is about ${JSON.stringify(node.identity)}, not ` +
+        `the root ${JSON.stringify(identity)} (SPEC 1.5, 11.1)`,
+    );
+  }
+  return node;
+}
+
+/** The receiving file's entry of the move's preview (SPEC 6.6, 12.7). */
+async function a13PreviewEntry(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  arm: A13Arm,
+  context: string,
+): Promise<PreviewFileEntry> {
+  const label = `${context} \`${arm.argv.join(" ")} --preview --json\``;
+  const report = decodePreviewReport(
+    await runJson(
+      product,
+      workspace,
+      [...arm.argv, "--preview", "--json"],
+      label,
+    ),
+    label,
+  );
+  if (report.files === null) {
+    fail(
+      `${label}: a preview exiting 0 succeeds as the real operation would ` +
+        `and reports its \`files\` — \`null\` is a refused preview's form ` +
+        `(SPEC 6.6, 12.7); findings: ${JSON.stringify(report.findings)}`,
+    );
+  }
+  const entry = report.files.find(
+    (candidate) => candidate.file === arm.receiving,
+  );
+  if (entry === undefined) {
+    fail(
+      `${label}: \`files\` holds an entry for ${arm.receiving}, the file the ` +
+        `operation rewrites — its target insertion` +
+        (arm.needsDeclaration ? " and import addition" : "") +
+        ` (SPEC 6.6, 12.7); got ` +
+        `[${report.files.map((candidate) => JSON.stringify(candidate.file)).join(", ")}]`,
+    );
+  }
+  return entry;
+}
+
+/**
+ * The preview's edits for the receiving file are exactly one of the arm's
+ * admissible lists: each class plus a range in current, pre-operation
+ * coordinates, the insertion points zero-length at the offsets the real
+ * operation then uses, in 12.7's order — class-name bytes breaking the
+ * tie between coinciding insertion points (SPEC 6.6, 12.7; T6.6-4(b)).
+ */
+function a13AssertPreviewEdits(
+  entry: PreviewFileEntry,
+  arm: A13Arm,
+  context: string,
+): void {
+  const actual = entry.edits.map((edit) => ({
+    class: edit.class,
+    range: { start: edit.range.start, end: edit.range.end },
+  }));
+  const shown = JSON.stringify(actual);
+  if (
+    arm.previewEdits.some((candidate) => JSON.stringify(candidate) === shown)
+  ) {
+    return;
+  }
+  fail(
+    `${context} preview: ${arm.receiving}'s edits are exactly ` +
+      arm.previewEdits
+        .map((candidate) => JSON.stringify(candidate))
+        .join(" or ") +
+      ` — each class plus a range in current, pre-operation coordinates, ` +
+      `the insertion points zero-length at the offsets the real operation ` +
+      `then uses (the bytes above agree with them), ordered by range start, ` +
+      `then range end, then class-name bytes (SPEC 6.6, 12.7; T6.6-4(b)); ` +
+      `got ${shown}`,
+  );
+}
+
+/** Run one arm: preview, move, bytes, preview agreement, the root's own content, clean `check`/`build`. */
+async function runA13Arm(product: ProductBinding, arm: A13Arm): Promise<void> {
+  const context = `T6.5-13 ${arm.key}`;
+  a13AssertPremiseDerives(arm.compose(arm.needsDeclaration ? "X" : ""), arm);
+  await withWorkspace(arm.files, async (workspace) => {
+    await buildOk(product, workspace, `${context} \`build\` over the staging`);
+    const before = await a13QueryRoot(
+      product,
+      workspace,
+      arm.root.identity,
+      context,
+    );
+    if (before.ownText !== arm.root.ownTextBefore) {
+      fail(
+        `${context}: before the move, the root ${arm.root.identity}'s own ` +
+          `text is ${JSON.stringify(arm.root.ownTextBefore)} — its runs ` +
+          `outside the child constructs joined at the excision points, the ` +
+          `lines the removals leave empty dropped with their terminators ` +
+          `(SPEC 1.6, 3); \`query node\` reports ${JSON.stringify(before.ownText)}`,
+      );
+    }
+    const entry = await a13PreviewEntry(product, workspace, arm, context);
+    await expectExit(
+      product,
+      workspace,
+      [...arm.argv],
+      0,
+      `${context} \`${arm.argv.join(" ")}\` — a performable move (SPEC 6.5)`,
+    );
+
+    const actual = await readSourceText(workspace, arm.receiving, context);
+    const ident = arm.needsDeclaration
+      ? a13ReadAddedIdentifier(actual, context)
+      : "";
+    const expected = arm.compose(ident);
+    if (ident !== "") {
+      const verdict = deriveMdx(expected);
+      if (!verdict.derives) {
+        fail(
+          `${context}: composed with the identifier the product bound, ` +
+            `\`${ident}\`, the expected ${arm.receiving} does not derive ` +
+            `under the stock MDX 3 grammar (${verdict.reason}) — the added ` +
+            `declaration binds no admissible identifier (SPEC 6.5, 2.1, 14.20)`,
+        );
+      }
+    }
+    if (actual !== expected) {
+      const deviation = a13Deviation(actual, expected, ident);
+      fail(
+        `${context}: ${arm.receiving} after the move — ` +
+          (deviation === "" ? "" : `${deviation}; `) +
+          `${arm.summary} (SPEC 6.5, 6.4, 3; H-4, normalizing nothing)\n` +
+          `  actual:   ${JSON.stringify(actual)}\n` +
+          `  expected: ${JSON.stringify(expected)}`,
+      );
+    }
+    for (const [rel, bytes] of Object.entries(arm.others)) {
+      await assertFileBytes(
+        workspace.path(rel),
+        bytes,
+        `${context}: ${rel} after the move — ` +
+          (rel === A13_ORIGIN
+            ? "the moved construct deleted in place, its emptied line " +
+              "dropped with its terminator, the blank line before it kept, " +
+              "the `X` declaration kept for the sibling's use"
+            : "the third module, embedded but not moved, untouched") +
+          " (SPEC 6.5, 3; H-4)",
+      );
+    }
+    a13AssertPreviewEdits(entry, arm, context);
+
+    const after = await a13QueryRoot(
+      product,
+      workspace,
+      arm.root.identity,
+      context,
+    );
+    if (after.ownText !== arm.root.ownTextAfter) {
+      fail(
+        `${context}: after the move, the root ${arm.root.identity}'s own ` +
+          `text is ${JSON.stringify(arm.root.ownTextAfter)} — ` +
+          (arm.root.ownTextAfter === arm.root.ownTextBefore
+            ? "unchanged: an added line at a line's start is dropped whole, " +
+              "and a boundary line the drop rule decides as before " +
+              "contributes as before"
+            : "the added terminator ends the previously unterminated " +
+              "paragraph line, kept with its content") +
+          ` (SPEC 6.2, 1.6, 3); \`query node\` reports ${JSON.stringify(after.ownText)}`,
+      );
+    }
+    const changed = after.hashes.ownHash !== before.hashes.ownHash;
+    if (changed !== arm.root.ownHashChanges) {
+      fail(
+        `${context}: the root ${arm.root.identity}'s ownHash ` +
+          (arm.root.ownHashChanges
+            ? "changes — the gained child reference enters its own content " +
+              "at its position (SPEC 5.5, 6.2)"
+            : "is unchanged — its own content sequence keeps the same runs " +
+              "around the same child references by canonical identity " +
+              "(SPEC 6.2, 5.5, 5.4)") +
+          `; before ${before.hashes.ownHash}, after ${after.hashes.ownHash}`,
+      );
+    }
+    await assertCleanAfterMove(product, workspace, arm.summary, context);
+  });
+}
+
+const T6_5_13 = defineProductTest({
+  id: "T6.5-13",
+  title:
+    "admissible offsets, the line-start preference, and composition in pre-operation coordinates: byte-asserted section-move arms whose receiving file is composed whole from 6.4/6.5 and 3, value-blind in the fresh identifier alone (read from the added declaration, whose other characters are T6.5-8's), the moved text carrying `{text(X.a)}` through the origin's binding of a third module the target lacks so that exactly `import <X> from \"./x.xspec\"` is added — (a) the preference: a target holding a line-start admissible offset (the file's end after its final terminator) and a mid-line one takes the line start, the declaration appended after the final terminator; its sibling, whose only line-start admissible offset is the start of an empty line after the `</S>` line, places the declaration there with the empty line kept; (b) the self-closing target parent, its line unterminated: the tag's end the only admissible offset, the result `<S id=\"p\">`, U+000A, the moved text, U+000A, `</S>`, U+000A, the declaration, U+000A, the preview's `target-parent-rewrite` spanning the tag and `target-insertion` and `import-addition` both zero-length at the tag's end in 12.7's tie-break order; with a final terminator the same bytes, the addition at the file's end; (c) the forced mid-line case, the file's end the only admissible offset, the added terminator ending the `</S>` line; (d) a top-level `new-id` at the end of a paragraph-ended file, terminated or not: `para`, U+000A, the moved text, U+000A, the declaration, U+000A, `target-insertion` and `import-addition` both zero-length at the file's byte length; (e) a same-file move in `foo <S id=\"p\">` / `<S id=\"p.m\">x</S></S> baz`, the insertion judged over the composed text so that no terminator is added; (f) a same-file top-level move of a file's last section whose unterminated last line the deletion drops, no terminator added — each arm's preview offsets agreeing with the real bytes, the receiving root's own text and ownHash compared through `query node` before and after (unchanged in (a), (b), (c), (e), (f); (d)'s root `changed`, its own text `para` gaining the added terminator in the unterminated variant), `build` and `check` clean after each move, every composed form verified to derive (S-9) (SPEC 6.5, 6.4, 6.6, 6.2, 3, 5.5, 12.7; H-4)",
+  run: async (product) => {
+    for (const arm of A13_ARMS) {
+      await runA13Arm(product, arm);
+    }
+  },
+});
+
 /** TEST-SPEC §6.5, third part, in canonical ID order (SUITE-25). */
 export const section65iiiTests: readonly ProductTestEntry[] = [
   T6_5_12,
+  T6_5_13,
   T6_5_14,
 ];

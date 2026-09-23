@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 32 — T6.5-13, arms (a)–(f)
-- Cites: TEST-SPEC T6.5-13 (admissible offsets, the line-start preference, composition in pre-operation coordinates: insertions sharing an offset stand in the order target insertion, appended closing tag where one applies, then the added declarations, contiguous; the moved text of every arm whose receiving file needs a declaration carries, beside prose, `{text(X.a)}` through the origin's binding `X` of a third module `specs/x.mdx` the receiving file lacks, so exactly `import <X> from "./x.xspec"` is needed there); SPEC 6.5, 6.4, 3. Finding A-8. Depends on Task 31.
-- Change: register T6.5-13 in `section-6.5-iii.ts` with its lettered arms (a) through (f) exactly as the entry states them — including (b) the self-closing target parent (`import-addition` before `target-insertion`, both zero-length at the tag end), (e) the same-file move in `foo <S id="p">`, U+000A, `<S id="p.m">x</S></S> baz`, U+000A judged over the composed text (result exactly `foo <S id="p">`, U+000A, `<S id="p.n">x</S>`, U+000A, `</S> baz`, U+000A; the root's own text `foo ` and ` baz` with its runs), and (f) the EOF arm whose unterminated last line the deletion drops (result exactly `<S id="a">x</S>`, U+000A, `<S id="n">`, U+000A, `y`, U+000A, `</S>`, U+000A) — each byte-asserted against expectations composed from 6.4/6.5 and 3, value-blind in the fresh identifier, `build` and `check` clean after each move, and each composed form verified to derive with `deriveMdx` inside the test (S-9's premise). Leave the body structured so Task 33 appends the remaining arms.
-- Verify: `-t 'T6.5-13 '` no harness error; self project green.
-
 ### Task 33 — T6.5-13, arms (g) onward
 - Cites: TEST-SPEC T6.5-13 (the remaining lettered arms: (g) two `import-addition` entries at one offset, count asserted; (h) the forced mid-line placement; (i) and (k) the declarations asserted being the origin's and a third file's, with a moved text local to its subtree; (l) the paragraph-headed exclusion control the entry ties to T6.5-16(g) and T6.5-19; and every further arm the entry letters); T6.6-4(b) (the preview's offsets agree with the real operation's bytes). Finding A-8 (remainder). Depends on Task 32.
 - Change: complete T6.5-13 in `section-6.5-iii.ts` with arms (g) through the entry's last, composed and verified as Task 32's are.
