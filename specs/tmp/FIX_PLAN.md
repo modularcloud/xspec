@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 39 — T6.5-19: the in-section exclusion
-- Cites: TEST-SPEC T6.5-19 (two byte-asserted arms: (a) the target side — result exactly `<S id="p">`, U+000A, U+000A, `x`, U+000A, the moved text, U+000A, `</S>`, U+000A, the declaration, U+000A, the preview's `import-addition` at the file's byte length, the root's own text and ownHash unchanged; (b) the origin side — `<S id="m">`, U+000A, `z`, U+000A, `</S>`, U+000A, `<S id="a" d={"m"}>`, U+000A, U+000A, `y`, U+000A, `</S>` unterminated, `move specs/a.mdx#m specs/b.mdx#m`, result exactly `<S id="a" d={<T>.m}>`, U+000A, U+000A, `y`, U+000A, `</S>`, U+000A, `import <T> from "./b.xspec"`, U+000A; each receiving root's own text and ownHash compared through `query node` before and after; the real operation's bytes agreeing with the preview's offsets, T6.6-4(b); every form deriving, S-9); SPEC 6.5, 6.2, 3. Finding A-14. Depends on Task 33.
-- Change: register T6.5-19 in `section-6.5-iii.ts` per its entry, verifying each composed form with `deriveMdx` inside the test.
-- Verify: `-t 'T6.5-19 '` no harness error; self project green.
-
 ### Task 40 — T6.6-3: the preview twins
 - Cites: TEST-SPEC T6.6-3 (extended: preview twins for T6.5-6's refusals, T6.5-16's and T6.5-17's refusals — the same finding, exit 1, `mapping`, `files`, `delta` `null` — the exact self-move of either form, the same-file after-removal collision, and the exit-2 twins over the U+FFFD destinations); SPEC 6.6, 12.7. Finding A-34. Depends on Tasks 36, 37.
 - Change: `section-6.6.ts` T6.6-3 iterates only `RENAME_REFUSAL_CASES`, `MOVE_REFUSAL_CASES`, `MOVE_LINK_OUTSIDE_CASES` and the usage tables; add the missing twins, reusing T6.5-16/T6.5-17's stagings through exported constants of `section-6.5-iii.ts` rather than duplicating them, and the exit-2 twins over the exported `MOVE_REPLACEMENT_DESTINATION_CASES` (`section-6.5.ts` ~L3462).
