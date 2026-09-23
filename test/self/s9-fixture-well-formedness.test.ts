@@ -5,8 +5,9 @@
 // derivability alone. Every shape TEST-SPEC works through as well-formed must
 // derive — T3-3's multi-line-tag arms and its U+2028 ESM arm, T6.2-3's worked
 // and U+000B/U+000C shapes, T6.2-4's pinned shapes, T2.1-6's ESM block inside
-// a section, T3-7's comment forms, T14-12's positive arms, and the composed
-// forms of T6.5-13/T6.5-19 — and every shape the document declares
+// a section, T3-7's comment forms, T14-12's positive arms, the composed
+// forms of T6.5-13/T6.5-19, and every composed form T6.5-2 asserts as a
+// performed move's result — and every shape the document declares
 // unparseable must not: a leading byte-order mark, invalid UTF-8, an unclosed
 // tag, a text-position tag closed by a flow tag on a later line (the former
 // stagings of T3-1's `gamma` and of T6.2-3's impure origin, spelled exactly;
@@ -39,6 +40,7 @@ import {
   I3_ROOM_MOVED_SOURCE,
   I3_ROOM_SOURCE,
 } from "../suite/registry/section-6.2.js";
+import { X2_COMPOSED_FORMS } from "../suite/registry/section-6.5.js";
 
 const LF = String.fromCodePoint(0x000a);
 const CR = String.fromCodePoint(0x000d);
@@ -361,6 +363,23 @@ describe("S-9: every decorated form the P-5 section-move staging composes derive
   });
 });
 
+// T6.5-2's byte-exact arms pin each geometry's composed text as a performed
+// move's result (TEST-SPEC T6.5-2: "the composed form deriving (S-9)"); an
+// expectation the parser rejects would bless a text SPEC 6.5 refuses
+// (`refused-invalid-rewrite`, T6.5-16) — as the former mid-line arm did, its
+// composed target listed among the unparseable shapes below.
+describe("S-9: every composed form T6.5-2 asserts as a move's result derives", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(X2_COMPOSED_FORMS.length).toBeGreaterThan(8);
+    expect(new Set(X2_COMPOSED_FORMS.map(([name]) => name)).size).toBe(
+      X2_COMPOSED_FORMS.length,
+    );
+  });
+  test.each(X2_COMPOSED_FORMS)("%s", (_name, source) => {
+    expectDerives(source);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Declared-unparseable shapes.
 
@@ -450,6 +469,21 @@ const UNPARSEABLE: ReadonlyArray<readonly [name: string, source: string]> = [
   [
     "an import line directly followed by a tag line",
     doc('import X from "./x.xspec"', '<S id="p" />'),
+  ],
+  // T6.5-16 (c): a flow-form section — its tags alone on their lines —
+  // inside a text-position parent: the opening tag's line interrupts the
+  // paragraph holding the parent's opening tag, which is then never closed
+  // (T3-3's staging constraint). T6.5-2's former mid-line arm asserted
+  // exactly this composed target as a performed move's result.
+  [
+    "a flow-form section inside a text-position parent (T6.5-2's former mid-line arm)",
+    doc(
+      '<S id="c">Gamma holder.',
+      '<S id="c.mv">',
+      "Moved text.",
+      "</S>",
+      "</S>",
+    ),
   ],
 ];
 

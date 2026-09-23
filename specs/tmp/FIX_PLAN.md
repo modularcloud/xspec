@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 29 — T6.5-2: the missing byte-exact arms
-- Cites: TEST-SPEC T6.5-2 (the indented `  </S>` sibling arm — terminator added, the two spaces left on a line of their own, kept in Markdown; the EOF-with-terminator and EOF-without-terminator arms; the in-line parent `foo <S id="p">bar</S> baz` receiving `<S id="m">x</S>`); SPEC 6.5, 3. Finding A-30. Depends on Task 3.
-- Change: extend `X2_ARMS` (`section-6.5.ts` ~L1679; today line-start insertion, mid-line insertion point, created target) with the four arms, byte-asserted against expectations composed from 6.5 and 3, with the Markdown assertion for the indented arm.
-- Verify: `-t 'T6.5-2 '` no harness error; self project green.
-
 ### Task 30 — T6.5-9's spec-source arm; T6.5-10's staging (c)
 - Cites: TEST-SPEC T6.5-9 (a target lacking imports of `specs/S.mdx` and `specs/text.mdx`; `view` lists two added declarations with distinct names, contiguous in one ESM block; edges rooted per module); T6.5-10 (staging (c): the target holding `import X from "./z.xspec"` with `z.mdx` a fourth source (`q`, `foo` lure), byte-exact `import <F> from "./x.xspec"` added with `<F>` ≠ `X`); SPEC 6.5, 2.1, 4. Findings A-32, A-33. Depends on Task 28.
 - Change: `section-6.5.ts`: T6.5-9's body is the TS compile-clean arm only — add the spec-source arm; T6.5-10 (title still "two section-move arms") — add staging (c) and retitle.

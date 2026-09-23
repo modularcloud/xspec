@@ -1665,6 +1665,22 @@ const X2_ORIGIN_AFTER = ['<S id="a">', "Alpha holder.", "", "</S>", ""].join(
   "\n",
 );
 
+// The fourth geometry's origin: the moved construct `a.m` is a single-line
+// in-line section holding prose outside its tags, alone on its line — a
+// paragraph line (`x</S>` follows its opening tag on the line, so the flow
+// attempt fails and both tags stand in text position). Deleting its own
+// characters leaves that line empty purely by the deletion, so it drops
+// with its terminator (rule of 3), leaving exactly `X2_ORIGIN_AFTER`
+// (SPEC 6.5, 3).
+const X2_INLINE_ORIGIN_BEFORE = [
+  '<S id="a">',
+  "Alpha holder.",
+  "",
+  '<S id="a.m">x</S>',
+  "</S>",
+  "",
+].join("\n");
+
 // Uninvolved bystander, asserted byte-identical in every arm: beyond the
 // stated edits, the identity and reference rewrites, and the finishing
 // regeneration, a move changes no bytes (SPEC 6.5).
@@ -1674,9 +1690,17 @@ const X2_ZED_SOURCE = ['<S id="zed">', "Zed text.", "</S>", ""].join("\n");
 /** One byte-exact arm: staged files, the move argv, expected file bytes. */
 interface ByteExactArm {
   readonly name: string;
+  /** The staged configuration; `SPECS_ONLY_CONFIG` unless the arm reads compiled Markdown. */
+  readonly config?: string;
   readonly files: Readonly<Record<string, string>>;
   readonly argv: readonly string[];
   readonly expected: Readonly<Record<string, string>>;
+  /**
+   * Compiled Markdown asserted after a post-move `build`: the moved-to
+   * file's output under SPEC 3, compiled over the composed source, at 7.3's
+   * default destination beside the source (`specs/G.mdx` → `specs/G.md`).
+   */
+  readonly markdown?: Readonly<Record<string, string>>;
 }
 
 const X2_ARMS: readonly ByteExactArm[] = [
@@ -1706,22 +1730,71 @@ const X2_ARMS: readonly ByteExactArm[] = [
     },
   },
   {
-    // The target parent's closing tag is mid-line (preceded by `.`), so the
-    // insertion is preceded by one U+000A as well as followed by one.
-    name: "mid-line insertion point",
+    // Sibling of the line-start arm: the target parent's closing tag is
+    // indented on its line, `  </S>` after two spaces — a flow-position tag
+    // still (SPEC 14.20: the flow attempt consumes the line prefix). The
+    // insertion point, immediately before the tag, is preceded by the two
+    // spaces, so it is no line start (a terminator immediately precedes it
+    // exactly when it is): one U+000A is added, leaving the spaces a line of
+    // their own before the moved text, and the closing tag follows the
+    // moved text's own terminator at a line start. The composed form derives
+    // (S-9: the whitespace-only line ends the holder's paragraph; the moved
+    // text's tags are flow-position tags). In the compiled Markdown the
+    // two-space line is kept with its terminator: no non-whitespace stood on
+    // it, so 3's drop rule — a line that contained non-whitespace left
+    // empty or whitespace-only purely by removals — does not reach it. A
+    // product reading T3-3's `alone on its line` as `at a line start`, and
+    // so inserting at the tag's line start without a terminator, fails.
+    name: "indented closing tag: terminator added, the spaces left a line of their own",
+    config: SPECS_MD_CONFIG,
     files: {
       [X2_ORIGIN]: X2_ORIGIN_BEFORE,
-      "specs/C.mdx": '<S id="c">Gamma holder.</S>\n',
+      "specs/G.mdx": ['<S id="g">', "Golf holder.", "  </S>", ""].join("\n"),
     },
-    argv: ["move", "specs/A.mdx#a.mv", "specs/C.mdx#c.mv"],
+    argv: ["move", "specs/A.mdx#a.mv", "specs/G.mdx#g.mv"],
     expected: {
       [X2_ORIGIN]: X2_ORIGIN_AFTER,
-      "specs/C.mdx": [
-        '<S id="c">Gamma holder.',
-        '<S id="c.mv">',
+      "specs/G.mdx": [
+        '<S id="g">',
+        "Golf holder.",
+        "  ",
+        '<S id="g.mv">',
         "Moved text.",
         "</S>",
         "</S>",
+        "",
+      ].join("\n"),
+    },
+    markdown: {
+      "specs/G.md": ["Golf holder.", "  ", "Moved text.", ""].join("\n"),
+    },
+  },
+  {
+    // The fourth geometry: before a closing tag sharing its line with
+    // preceding content — the text-position parent `foo <S id="p">bar</S>
+    // baz` receiving a single-line in-line section holding prose outside its
+    // tags, `<S id="a.m">x</S>`. The insertion point, preceded by `bar`, is
+    // no line start, so one U+000A precedes the moved text as well as
+    // following it; the moved text's line is then a paragraph continuation
+    // at the destination (the prose outside its tags denies the flow
+    // attempt), so the composed form derives (S-9). A flow-form section
+    // here — its tags alone on their lines — would interrupt the paragraph
+    // holding `p`'s opening tag and leave `p` unclosed (14.20, T3-3's
+    // constraint): T6.5-16(c)'s refused shape, which this arm's former
+    // staging (`<S id="c">Gamma holder.</S>` receiving `a.mv`) pinned as a
+    // performed move's result.
+    name: "mid-line insertion point: a text-position parent receiving an in-line section",
+    files: {
+      [X2_ORIGIN]: X2_INLINE_ORIGIN_BEFORE,
+      "specs/C.mdx": 'foo <S id="p">bar</S> baz\n',
+    },
+    argv: ["move", "specs/A.mdx#a.m", "specs/C.mdx#p.m"],
+    expected: {
+      [X2_ORIGIN]: X2_ORIGIN_AFTER,
+      "specs/C.mdx": [
+        'foo <S id="p">bar',
+        '<S id="p.m">x</S>',
+        "</S> baz",
         "",
       ].join("\n"),
     },
@@ -1838,14 +1911,33 @@ const X2_ARMS: readonly ByteExactArm[] = [
   },
 ];
 
+/**
+ * Every composed (post-move) MDX text T6.5-2 asserts, for the S-9 self-test
+ * (test/self/s9-fixture-well-formedness.test.ts): T6.5-2 stages geometries
+ * whose composed form derives, so an expectation here the stock MDX 3 parser
+ * rejects would pin a text SPEC 6.5 refuses (`refused-invalid-rewrite`,
+ * T6.5-16) as a performed move's result. The staged pre-move files are judged
+ * by the workspace builder as they are staged.
+ */
+export const X2_COMPOSED_FORMS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = X2_ARMS.flatMap((arm) =>
+  Object.entries(arm.expected)
+    .filter(([rel]) => rel.endsWith(".mdx"))
+    .map(([rel, source]): readonly [string, string] => [
+      `T6.5-2 (${arm.name}) ${rel} after the move`,
+      source,
+    ]),
+);
+
 const T6_5_2 = defineProductTest({
   id: "T6.5-2",
   title:
-    "section form text edits, byte-exact: moved text spans the opening tag's first character through the closing tag's last; origin deletion drops lines left empty/whitespace-only (rule of 3); insertion immediately before the target parent's closing tag (or end of file for top-level `new-id`), followed by U+000A and preceded by one when not at line start; target file created when absent; self-closing sections move as exactly their tag's characters and a self-closing target parent is first rewritten to paired form; no other byte changes (SPEC 6.5, 3, 1.1)",
+    "section form text edits, byte-exact: moved text spans the opening tag's first character through the closing tag's last; origin deletion drops lines left empty/whitespace-only (rule of 3); insertion immediately before the target parent's closing tag (or end of file for top-level `new-id`), followed by U+000A and preceded by one when the insertion point is not at the start of a line, judged over the composed text — staged over four geometries: a closing tag alone on its line (no terminator added), with its sibling indented on its line, `  </S>` (one added, the two spaces left a line of their own, kept in the compiled Markdown); the end of a file with a final terminator (none added) and without one (one added); and a closing tag sharing its line with preceding content, a text-position parent receiving a single-line in-line section whose line is a paragraph continuation there (one added); target file created when absent; self-closing sections move as exactly their tag's characters and a self-closing target parent is first rewritten to paired form; no other byte changes (SPEC 6.5, 3, 1.1, 14.20)",
   run: async (product) => {
     for (const arm of X2_ARMS) {
       await withWorkspace(
-        SPECS_ONLY_CONFIG,
+        arm.config ?? SPECS_ONLY_CONFIG,
         { ...arm.files, [X2_ZED]: X2_ZED_SOURCE },
         async (workspace) => {
           const context = `T6.5-2 (${arm.name})`;
@@ -1872,6 +1964,27 @@ const T6_5_2 = defineProductTest({
               `and the finishing regeneration, a move changes no bytes ` +
               `(SPEC 6.5)`,
           );
+          if (arm.markdown !== undefined) {
+            await expectExit(
+              product,
+              workspace,
+              ["build"],
+              0,
+              `${context}: \`build\` over the moved-to workspace, every ` +
+                `source well-formed (SPEC 14.20) — its compiled Markdown is ` +
+                `asserted next`,
+            );
+            for (const [rel, bytes] of Object.entries(arm.markdown)) {
+              await assertFileBytes(
+                workspace.path(rel),
+                bytes,
+                `${context}: ${rel}, the compiled Markdown of the composed ` +
+                  `source — a line that held no non-whitespace is kept with ` +
+                  `its terminator; 3's drop rule reaches only lines left ` +
+                  `empty or whitespace-only purely by removals (SPEC 3, 7.3)`,
+              );
+            }
+          }
         },
       );
     }
