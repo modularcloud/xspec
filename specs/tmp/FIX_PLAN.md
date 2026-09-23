@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 24 — T4.5-8's located forms and two-block arm; T4.5-9 registration
-- Cites: TEST-SPEC T4.5-8 (further located forms: `let SPEC;` at `SPEC`; `const { SPEC } = o` at `{ SPEC } = o`; `@dec class SPEC {}` from `@`; `export class SPEC {}` / `export function SPEC() {}` from `class`/`function`; the spec-source case's second arm across two ESM blocks); T4.5-9 (a call through a colliding `text` identifier); T14-11 (the same located forms); SPEC 4.5, 14.15. Findings A-27, A-6. Depends on Task 3.
-- Change: `section-4.5.ts`: add the located forms to T4.5-8 with precomputed ranges; add the two-ESM-block spec-source arm beside `T4_5_8_MDX_SOURCE` (~L1657; the one-block form names the `duplicate-import-binding` allowance, the two-block form derives without it); register T4.5-9 per its entry; traceability keys.
-- Verify: `-t 'T4.5-8 '`, `-t 'T4.5-9 '` no harness error; self project green.
-
 ### Task 25 — T4.6-1's constructor, legacy-module, and decorated attribution; T11-6's unit-name arm
 - Cites: TEST-SPEC T4.6-1 (the constructor unit `path#C.constructor`, legacy `module X` / `module A.B`, decorated-declaration attribution); T11-6 (`query edges --from <path>#C.constructor` — a class `C` whose constructor holds a marker — and `--from <path>#C.then`, each answering with the unit's edges, exit 0); SPEC 4.6, 11.1. Findings A-28, B-5.
 - Change: `section-4.6.ts` gains the three attribution arms (no `constructor`, `module `, or `@dec` staging exists there today); `section-11.ts` gains T11-6's two unit-name arms (the names occur only in section-4.6.ts today).
