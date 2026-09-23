@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 28 — T6.5-8: byte-exact added declarations in `assertAddedImportInsertion`
-- Cites: TEST-SPEC T6.5-8 (the declaration is byte-exactly `import <X> from "../specs/target.xspec"` in the TS arm, `import <X> from "./target.xspec"` in the MDX origin arm, `import <X> from "./origin.xspec"` in the MDX target arm — single spaces, no statement terminator, the specifier double-quoted in the canonical relative spelling from the importing file's directory, no other byte inserted, only the identifier's value unpinned; listed failure spellings: a `;`-joined neighbor, a mid-line offset while a line-start one exists, a spurious blank line, any terminator but U+000A, single quotes, a `;`, other spacing, `./sub/../target.xspec`, no `./` prefix, a `.mdx` extension, a `.` segment); SPEC 6.5, 6.4. Finding A-31.
-- Change: `test/helpers/import-insertion.ts` `assertAddedImportInsertion` (~L219) accepts any `import X from <quote>…<quote>[;]` with tabs/spaces, either quote style, optional `;`, and any specifier that `posix.join`-resolves to the expected module. Tighten it to the byte-exact spelling (`import `, identifier, ` from "`, the canonical specifier, `"`, then U+000A), identifier value-blind, every listed failure spelling failing; keep `assertExactDeclarationInsertion` (~L322, T6.5-11) as strict as it is. Update `test/self/import-insertion.test.ts` (acceptance and one rejection per listed spelling) and every consumer in `section-6.5.ts`/`section-6.5-ii.ts` (T6.5-8/9/10 and any other) so no consumer passes an alternative spelling.
-- Verify: self project green; `-t 'T6.5-8 '` no harness error.
-
 ### Task 29 — T6.5-2: the missing byte-exact arms
 - Cites: TEST-SPEC T6.5-2 (the indented `  </S>` sibling arm — terminator added, the two spaces left on a line of their own, kept in Markdown; the EOF-with-terminator and EOF-without-terminator arms; the in-line parent `foo <S id="p">bar</S> baz` receiving `<S id="m">x</S>`); SPEC 6.5, 3. Finding A-30. Depends on Task 3.
 - Change: extend `X2_ARMS` (`section-6.5.ts` ~L1679; today line-start insertion, mid-line insertion point, created target) with the four arms, byte-asserted against expectations composed from 6.5 and 3, with the Markdown assertion for the indented arm.

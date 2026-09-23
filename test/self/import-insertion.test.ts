@@ -170,9 +170,12 @@ test("every failure spelling T6.5-8 names fails diagnosed", () => {
   const tail = '\n\n<S id="th" d={T.tm}>\nThird text.\n</S>\n';
   const notImport = "is not the added import";
   // Joined to the neighbour with `;` — still parsing, still resolving.
+  // (The run's `.xspec"` repeats the neighbour's, so offsets 25..32 all
+  // describe it; same-reason offsets are reported as one range.)
   expectDiagnosed(
     () => check(head + '; import T from "./Target.xspec"' + tail),
     notImport,
+    "at offsets 25–32: the offset is not at the start of a line",
     "join the preceding line",
   );
   // The mid-line form while a line-start offset (33) exists: inserted after
