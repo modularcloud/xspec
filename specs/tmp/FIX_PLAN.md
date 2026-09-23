@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 16 — T2.3-3 registration: the embedding form
-- Cites: TEST-SPEC T2.3-3 (positive comment/whitespace arms around the call, the run-on form, negative 14.16 arms, the `{text("a") text("b")}` 14.20 arm, `view --text` classification); SPEC 2.3, 2.7, 14.16, 14.20. Finding A-2. Depends on Task 3.
-- Change: register T2.3-3 in `test/suite/registry/section-2.2-2.3.ts` (or a new `section-2.3.ts` module with wrapper and index entry) per its entry: each positive arm's embedding recognized (edges/occurrences as the entry states, Markdown per 3), the run-on `{// c` U+000A `text("a")}` form, the negative 14.16 arms at their ranges, the `{text("a") text("b")}` arm as 14.20 at the offset T14-11's rule gives (precompute from the parser's position via `deriveMdx` at authoring time; Task 46 re-asserts it in T14-11), and `view --text` classification; declare the 14.20 staging `mdx.unparseable`; traceability keys.
-- Verify: `-t 'T2.3-3 '` no harness error; self project green.
-
 ### Task 17 — T2.4-2: TypeScript-only forms as 14.20 at pinned offsets; `d={BASE.a<X>y}`
 - Cites: TEST-SPEC T2.4-2 (rewritten: non-null and `as` forms in a spec source are 14.20 alone at precomputed zero-length offsets — the closing brace / the closing parenthesis / the offset of `as`; `d={BASE.a<X>y}` is 14.8 at the whole expression); SPEC 2.4, 14.8, 14.20. Finding A-21. Depends on Task 3.
 - Change: `DYNAMIC_FORM_ARMS` (`section-2.4.ts` ~L326–338) asserts 14.8 for `BASE!.auth`; re-pin it and add the `as` forms as 14.20 alone at the entry's offsets (declared `mdx.unparseable`; confirm each offset against `deriveMdx`'s reported position — the grammar's expression parser has no TypeScript), and add the `d={BASE.a<X>y}` 14.8-at-whole-expression arm (well-formed). If the stock parser accepts a form the entry declares unparseable, that is a declaration defect: record it in `specs/tmp/TEST-SPEC-PROBLEMS.md` per the mission rules instead of pinning either way.
