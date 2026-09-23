@@ -3757,13 +3757,21 @@ const T11_2_5 = defineProductTest({
 // `build --json` reports exactly {14.22: 1} concerning `mdout` and
 // modifies nothing — the refusal precedes every write (byte-level, H-4: an
 // identical regeneration would be invisible, which is exactly the
-// contract's grain). `check --json` reports exactly {14.10: 1, 14.22: 1}:
-// the swap deleted the emitted Markdown, and on this valid-source
-// workspace what the current sources generate is defined, so the missing
-// emitted file is definite per-file staleness (the T12.2-2 exactness
-// position) — pinning the swap's entire fallout rather than setting it
-// aside — the 14.22 concerning `mdout`, the 14.10 concerning the deleted
-// `mdout/specs/C.md`. Then `view specs/C.mdx`: finding-free, complete,
+// contract's grain). `check --json` reports exactly {14.22: 1} concerning
+// `mdout`: the swap deleted the emitted Markdown, but a workspace whose
+// `build` is refused fails `build`'s validations — source validation
+// errors, journal errors, and refused writes alike (SPEC 13.3) — and on
+// such a workspace 14.10's mismatch forms, per file and graph data, are
+// undetectable and go unreported (SPEC 14.10, 14), the missing
+// `mdout/specs/C.md` included; the two forms reported whatever the
+// validity have nothing here — the record is readable (no 14.23 state;
+// contrast T10.1-6's `.xspec`-obstructed arm, where `check` reports the
+// unreadable-record unit form beside the refusal) and every recorded
+// derived path is still generated (no recorded-file form). The exact pin
+// discriminates a product reporting the deleted emission as per-file
+// staleness beside the refusal — the deviation the earlier
+// {14.10: 1, 14.22: 1} pin demanded. Then `view specs/C.mdx`: finding-free,
+// complete,
 // exit 0 — the viewed file is the very file whose emission path is
 // obstructed, and the write-path condition is still no domain file's
 // finding (its concerned path is the component, never the source).
@@ -3784,13 +3792,15 @@ const T11_2_5 = defineProductTest({
 // refusing the emission, or refreshing graph data on the failing side at
 // `view`, is caught byte-wise where a pre-built ground would hide an
 // identical rewrite. `build --json` reports exactly {14.22: 1} concerning
-// `specs/A.mdx`, exit 1, nothing written. `check --json` reports that
-// finding, exact over the non-14.10 findings (the T12.2-2 set-aside:
-// whether the unemittable destinations, the never-generated modules, and
-// the absent graph data are reported stale on a workspace whose `build`
-// is refused — 14.10 reads its mismatch forms as undetectable on a
-// workspace failing `build`'s validations — is not this entry's pin), exit
-// 1, nothing written. Then `view specs/A.mdx`: complete and finding-free,
+// `specs/A.mdx`, exit 1, nothing written. `check --json` reports exactly
+// that finding, {14.22: 1}: the workspace fails `build`'s validations (a
+// refused write, SPEC 13.3), so the unemittable destinations and the
+// never-generated modules — per-file mismatch — and the absent graph data
+// — the unit mismatch form — are undetectable and go unreported (SPEC
+// 14.10), and no record exists to be unreadable (14.23) or to hold a
+// recorded path the configuration no longer generates (the two forms
+// reported whatever the validity); exit 1, nothing written. Then `view
+// specs/A.mdx`: complete and finding-free,
 // exit 0 — the concerned path IS the requested file, and still the finding
 // is no domain file's, a concerned path naming a domain file's own finding
 // for condition 19 alone (SPEC 11.2): the discriminating arm against a
@@ -3897,7 +3907,7 @@ async function assertViewFindingFree(
 const T11_2_6 = defineProductTest({
   id: "T11.2-6",
   title:
-    "gate findings never attach: on an otherwise-valid pre-built workspace with a garbage journal line staged (14.13), separately with the `markdown.outDir` directory replaced by a plain file (14.22, the obstructed emit write path's one offending component), and separately, on a never-built workspace, with `markdown.outDir` naming the discovered finding-free spec source `specs/A.mdx` itself (14.22 whose one offending component is a discovered file, every emit destination lying below that plain file), `view` of the finding-free file — in the third fixture `specs/A.mdx` itself, a concerned path naming a domain file's own finding for condition 19 alone (11.2) — answers complete and finding-free at exit 0, writing nothing — the state surfaces through `build` (exactly the gate condition; a failing build modifies nothing) and `check` (the gate condition beside the obstruction fixture's one definite per-file staleness, each concerned path pinned: the journal path, the offending component, the deleted emitted file; in the third fixture the gate condition exact over the non-14.10 findings, concerning `specs/A.mdx`), and through the gated reads (T13.3-3), never these answers; the passing-workspace refresh participation is T13.3-2's sweep and the failing-side answering discipline T11.2-1's (SPEC 11.2, 13.3, 13.4, 7.3, 12.1, 12.2, 14.13, 14.22, 14.10)",
+    "gate findings never attach: on an otherwise-valid pre-built workspace with a garbage journal line staged (14.13), separately with the `markdown.outDir` directory replaced by a plain file (14.22, the obstructed emit write path's one offending component), and separately, on a never-built workspace, with `markdown.outDir` naming the discovered finding-free spec source `specs/A.mdx` itself (14.22 whose one offending component is a discovered file, every emit destination lying below that plain file), `view` of the finding-free file — in the third fixture `specs/A.mdx` itself, a concerned path naming a domain file's own finding for condition 19 alone (11.2) — answers complete and finding-free at exit 0, writing nothing — the state surfaces through `build` (exactly the gate condition; a failing build modifies nothing) and `check` (the journal error exact over the non-14.10 findings, concerning the journal path; in each obstruction fixture exactly the gate condition — a workspace whose `build` is refused fails `build`'s validations (13.3), so 14.10's mismatch forms, the deleted emission and the never-generated derived files included, go unreported and neither whatever-validity form is staged (14.10) — concerning the offending component, `mdout` and `specs/A.mdx`), and through the gated reads (T13.3-3), never these answers; the passing-workspace refresh participation is T13.3-2's sweep and the failing-side answering discipline T11.2-1's (SPEC 11.2, 13.3, 13.4, 7.3, 12.1, 12.2, 14.13, 14.22, 14.10)",
   run: async (product) => {
     // --- Fixture 1: garbage journal line (14.13) --------------------------
     {
@@ -4045,9 +4055,10 @@ const T11_2_6 = defineProductTest({
         }
 
         // Obstruct: replace the directory with a plain file. The emitted
-        // Markdown goes with it — definite per-file staleness for `check`
-        // on this valid-source workspace, invisible to `build`, which
-        // refuses at the obstruction (SPEC 13.4, 14.22, 14.10).
+        // Markdown goes with it — a per-file mismatch `check` leaves
+        // unreported on a workspace failing `build`'s validations, refused
+        // writes included (SPEC 14.10, 13.3), and invisible to `build`,
+        // which refuses at the obstruction (SPEC 13.4, 14.22).
         await fsp.rm(workspace.path(T11_2_6_OUTDIR), {
           recursive: true,
           force: true,
@@ -4093,10 +4104,13 @@ const T11_2_6 = defineProductTest({
             `modified (SPEC 14.22, 12.1)`,
         );
 
-        // ...and through `check`: the obstruction beside the swap's one
-        // definite per-file staleness — exact counts, each concerned path
-        // pinned (SPEC 12.2, 14.22, 14.10; SPEC 14: when several error
-        // conditions are present, each is reported).
+        // ...and through `check`: exactly the obstruction. The swap's
+        // deleted emission is a per-file mismatch, and a workspace whose
+        // `build` is refused fails `build`'s validations (SPEC 13.3), where
+        // 14.10's mismatch forms are undetectable and go unreported (SPEC
+        // 14.10); the record stays readable and every recorded derived
+        // path still generated, so neither whatever-validity form is
+        // staged (module header).
         const checkContext = `${context} \`check --json\``;
         await assertLeavesUnchanged(
           workspace.root,
@@ -4115,24 +4129,20 @@ const T11_2_6 = defineProductTest({
             ).findings;
             assertConditionCounts(
               findings,
-              { "14.10": 1, "14.22": 1 },
-              `${checkContext} — the obstructed component and the deleted ` +
-                `emitted file, nothing else: sources are valid, so what ` +
-                `the current sources generate is defined and the missing ` +
-                `${T11_2_6_EMITTED} is definite per-file staleness (SPEC ` +
-                `14.22, 14.10, 12.2, 14)`,
+              { "14.22": 1 },
+              `${checkContext} — exactly the obstructed component: a ` +
+                `refused write fails \`build\`'s validations, so the ` +
+                `deleted ${T11_2_6_EMITTED} is a per-file mismatch 14.10 ` +
+                `leaves unreported there, and the readable record with ` +
+                `every recorded path still generated stages neither form ` +
+                `reported whatever the validity (SPEC 14.22, 13.3, 14.10, ` +
+                `12.2, 14)`,
             );
             assertFindingConcernsPath(
-              findings.find((finding) => finding.condition === "14.22")!,
+              findings[0]!,
               T11_2_6_OUTDIR,
               `${checkContext} — the refused write's concerned path (SPEC ` +
                 `14.22, 13.4)`,
-            );
-            assertFindingConcernsPath(
-              findings.find((finding) => finding.condition === "14.10")!,
-              T11_2_6_EMITTED,
-              `${checkContext} — the per-file staleness finding names the ` +
-                `stale file as its concerned path (SPEC 14.10, 12.7)`,
             );
           },
           `${checkContext} — \`check\` writes nothing (SPEC 12.2, 13.3)`,
@@ -4209,12 +4219,12 @@ const T11_2_6 = defineProductTest({
         );
 
         // `check` judges exactly `build`'s write paths (SPEC 14.22, 12.2):
-        // the obstruction, exact over the non-14.10 findings (the T12.2-2
-        // set-aside: whether the unemittable destinations, the
-        // never-generated modules, and the absent graph data are stale on
-        // a workspace whose `build` is refused is not this entry's pin —
-        // SPEC 14.10 reads its mismatch forms as undetectable on a
-        // workspace failing `build`'s validations), writing nothing.
+        // exactly the obstruction. The workspace fails `build`'s
+        // validations (a refused write, SPEC 13.3), so the unemittable
+        // destinations, the never-generated modules, and the absent graph
+        // data are 14.10's mismatch forms, undetectable and unreported
+        // there (SPEC 14.10), and no record exists for its two
+        // whatever-validity forms (module header); writing nothing.
         const checkContext = `${context} \`check --json\``;
         await assertLeavesUnchanged(
           workspace.root,
@@ -4232,17 +4242,17 @@ const T11_2_6 = defineProductTest({
               parseJsonStdout(result, checkContext),
               checkContext,
             ).findings;
-            const nonStale = findings.filter(
-              (finding) => finding.condition !== "14.10",
-            );
             assertConditionCounts(
-              nonStale,
+              findings,
               { "14.22": 1 },
-              `${checkContext} — the one offending component, and no ` +
-                `condition beside it save 14.10 (SPEC 14.22, 12.2)`,
+              `${checkContext} — exactly the one offending component: on ` +
+                `this never-built workspace whose \`build\` is refused, ` +
+                `14.10's mismatch forms go unreported and no record exists ` +
+                `for its whatever-validity forms (SPEC 14.22, 13.3, 14.10, ` +
+                `12.2)`,
             );
             assertFindingConcernsPath(
-              nonStale[0]!,
+              findings[0]!,
               A_FILE,
               `${checkContext} — the refused write's concerned path is the ` +
                 `discovered source occupying the component (SPEC 14.22, ` +

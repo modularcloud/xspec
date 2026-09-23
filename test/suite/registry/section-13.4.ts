@@ -68,10 +68,13 @@
 //   workspace root (no outside-root confound, 14.14). With one source file,
 //   exactly one write path (`out/specs/A.md`) traverses the link, so `build
 //   --json` must report exactly one 14.22 and nothing else (the sources are
-//   valid, and build cannot observe 14.10, 12.1). `check` must report the
-//   same 14.22 without writing; 14.10 staleness findings are tolerated
-//   beside it (no build has ever succeeded, so every derived file is
-//   missing); any other condition fails.
+//   valid, and build cannot observe 14.10, 12.1). `check` must report
+//   exactly the same 14.22 without writing: a workspace whose `build` is
+//   refused fails `build`'s validations (SPEC 13.3), so 14.10's mismatch
+//   forms — the never-generated derived files, the absent graph data — are
+//   undetectable and go unreported (SPEC 14.10), and no record exists for
+//   its two whatever-validity forms (an unreadable record, 14.23; a
+//   recorded path no longer generated); any other condition fails.
 // - T13.4-6 plain-file occupant and cardinality arms: every staging is a
 //   first emission — no build has ever run and the occupant is staged in the
 //   workspace declaration — and no move operand is involved (a plain-file
@@ -86,9 +89,10 @@
 //   refuses; a product refusing at a different component, once per refused
 //   write, or per occupant kind rather than per component fails the count
 //   or the path equality). The `build`-side finding set is exact (sources
-//   valid; `build` cannot observe 14.10, 12.1); the `check` side counts
-//   the condition-22 findings exactly and tolerates 14.10 beside them (as
-//   above). The cardinality arms — one occupant under which two derived
+//   valid; `build` cannot observe 14.10, 12.1), and so is the `check`
+//   side's (as above: 14.10's mismatch forms go unreported on a workspace
+//   failing `build`'s validations, SPEC 14.10, 13.3). The cardinality
+//   arms — one occupant under which two derived
 //   files would be written yields one finding; two distinct offending
 //   components yield two — are asserted via `check`, where TEST-SPEC pins
 //   them; among equal-code findings with empty locations the pinned 12.7
@@ -1435,14 +1439,16 @@ function requireCondition(
  * component, whatever write paths it refuses). `components` is given in
  * concerned-path byte order — the pinned 12.7 findings order among
  * equal-code findings whose locations are empty (module header) — so the
- * comparison is per index. With `besideStaleness` (the `check` side), 14.10
- * findings are tolerated beside the counted set; any other condition fails
- * either way (module header).
+ * comparison is per index. The set is exact on both sides: `build` cannot
+ * observe 14.10 (SPEC 12.1), and `check`, on a workspace whose `build` is
+ * refused — one failing `build`'s validations (SPEC 13.3) — leaves 14.10's
+ * mismatch forms unreported and has no record for its whatever-validity
+ * forms (SPEC 14.10; module header); `command` picks the failure wording.
  */
 function assertObstructionFindings(
   findings: readonly Finding[],
   components: readonly string[],
-  besideStaleness: boolean,
+  command: "build" | "check",
   context: string,
 ): void {
   const obstructions = findings.filter(
@@ -1466,12 +1472,14 @@ function assertObstructionFindings(
   });
   for (const finding of findings) {
     if (finding.condition === "14.22") continue;
-    if (besideStaleness && finding.condition === "14.10") continue;
     fail(
       `${context}: beside the staged condition-22 finding(s), ` +
-        (besideStaleness
-          ? `only 14.10 staleness is stageable here (no build has ever ` +
-            `succeeded, so every derived file is missing; SPEC 14.10, 12.2)`
+        (command === "check"
+          ? `nothing else is reportable: the refused write fails ` +
+            `\`build\`'s validations, so 14.10's mismatch forms — the ` +
+            `never-generated derived files, the absent graph data — go ` +
+            `unreported, and no record exists for its whatever-validity ` +
+            `forms (SPEC 14.10, 13.3, 12.2)`
           : `nothing else is stageable (the sources are valid, and ` +
             `\`build\` cannot observe 14.10; SPEC 14.22, 12.1)`) +
         `; got ${JSON.stringify(finding.condition)} (message: ` +
@@ -1510,7 +1518,7 @@ async function expectObstructionReport(
         decodeFindingsReport(parseJsonStdout(result, context), context)
           .findings,
         components,
-        command === "check",
+        command,
         context,
       );
     },
