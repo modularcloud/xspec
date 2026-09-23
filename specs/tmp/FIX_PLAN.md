@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 43 — T14-11: colliding-declaration located forms, the fragment 14.16 form, UTF-8 offsets
-- Cites: TEST-SPEC T14-11 (`let SPEC;` at `SPEC`; `const { SPEC } = o` at `{ SPEC } = o`; `@dec class SPEC {}` from `@`; `export class SPEC {}` from `class`; the fragment `<>`…`</>` form of 14.16; the UTF-8 offsets `41 E2 82 41` → 1, `C0 80` → 0, `ED A0 80` → 0, `41 E2 82` truncated by EOF → 1, in a spec source and a code source alike); SPEC 14.15, 14.16, 14.20, 1.7. Finding B-4 (second group). Depends on Tasks 3, 24 (share the located-form stagings with T4.5-8 through exported constants).
-- Change: `section-14.ts`: add the arms; byte-level stagings for the UTF-8 cases (spec sources declared `mdx.unparseable`; code sources are not MDX).
-- Verify: `-t 'T14-11 '` no harness error; self project green.
-
 ### Task 44 — T14-12 registration, positive arms (new module `section-14-iii.ts`)
 - Cites: TEST-SPEC T14-12 (the well-formedness contract: `export { nope }` → one condition-16 finding at the statement, no 14.20/14.15, its import still listed by `view` with its target and the rooted embedding recorded by `occurrences --file`; `{1 = 2}`, `{let}`, `{010}`, `{a, b}`, `d={BASE.a, BASE.b}`, `{await x}`, `{function(){}}`, `{...(a, b)}`, `export const x = <b/>` each well-formed with the findings the entry states; TypeScript post-parse checks leaving a code file well-formed with its marker attributed); SPEC 14.20 (derivability alone), 14.16; S-9's allowance boundary. Finding B-1 (positive half). Depends on Tasks 3, 4.
 - Change: create `test/suite/registry/section-14-iii.ts` (export `section14iiiTests`), spread into `index.ts`, wrapper `test/suite/section-14-iii.test.ts`, traceability keys; register T14-12's positive arms, naming the S-9 allowance for each early-error form (`undefined-export`, `invalid-assignment-target`, `let-as-identifier`, `legacy-octal`) and declaring every other form well-formed (the default).
