@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 44 — T14-12 registration, positive arms (new module `section-14-iii.ts`)
-- Cites: TEST-SPEC T14-12 (the well-formedness contract: `export { nope }` → one condition-16 finding at the statement, no 14.20/14.15, its import still listed by `view` with its target and the rooted embedding recorded by `occurrences --file`; `{1 = 2}`, `{let}`, `{010}`, `{a, b}`, `d={BASE.a, BASE.b}`, `{await x}`, `{function(){}}`, `{...(a, b)}`, `export const x = <b/>` each well-formed with the findings the entry states; TypeScript post-parse checks leaving a code file well-formed with its marker attributed); SPEC 14.20 (derivability alone), 14.16; S-9's allowance boundary. Finding B-1 (positive half). Depends on Tasks 3, 4.
-- Change: create `test/suite/registry/section-14-iii.ts` (export `section14iiiTests`), spread into `index.ts`, wrapper `test/suite/section-14-iii.test.ts`, traceability keys; register T14-12's positive arms, naming the S-9 allowance for each early-error form (`undefined-export`, `invalid-assignment-target`, `let-as-identifier`, `legacy-octal`) and declaring every other form well-formed (the default).
-- Verify: `-t 'T14-12 '` no harness error; self project green.
-
 ### Task 45 — T14-12 negative arms, masking, the three surfaces; T14-4's stagings
 - Cites: TEST-SPEC T14-12 (`010`/`09` in `.ts` at the second digit; `{...a, b}` at its comma; an ESM block holding a `const` statement at the line start; import attributes at `with`; `d={]}` at `]`; `{text(}` at `}`; an unbalanced trailing `{text("a")` at the file's byte length; masking; reported by `build`, `check`, and the 11.2 surfaces); T14-4 ("the 14.16 and 14.20 arms of … T14-12 (all three surfaces)"); SPEC 14.20, 14.16, 11.2. Finding B-1 (negative half). Depends on Task 44.
 - Change: complete T14-12 in `section-14-iii.ts` (spec-source stagings declared `mdx.unparseable`; offsets confirmed against `deriveMdx`'s positions) and add T14-4's stagings over T14-12's arms (export the staged sources for T14-4 and Task 46).
