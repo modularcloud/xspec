@@ -1,4 +1,4 @@
-// TEST-SPEC §4.5 (dependency markers) — SUITE-15: T4.5-1 … T4.5-8.
+// TEST-SPEC §4.5 (dependency markers) — SUITE-15: T4.5-1 … T4.5-9.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -66,6 +66,30 @@
 //   Reference-spelling findings (14.5–14.7) are asserted byte-exact at the
 //   span 14 fixes — terminators and delimiters excluded — while the
 //   declarations a 14.15 or 14.16 locates use the end-widened window below.
+// - T4.5-8's further located forms stage the supporting declaration the
+//   spelled construct needs on the line before it — an ambient
+//   `declare const o: Record<string, number>;` for the binding pattern
+//   `const { SPEC } = o`, an ambient `declare function dec(...)` for the
+//   decorated `@dec class SPEC {}` — each binding no `SPEC`, so the
+//   collision stays the arm's sole defect; the located construct is fixed
+//   from the exact bytes as for the original forms (SPEC 14, 1.7). The
+//   spec-source case's two arms both declare S-9's `duplicate-import-binding`
+//   allowance: the stock parser judges all of a file's ESM blocks as one
+//   module, so an export declaration binding the import's identifier is the
+//   same early error in one block and across two — 14.20 admits both, each
+//   a finding in a well-formed file (T14-12).
+// - T4.5-9 stages `src/t.ts`, a non-spec module exporting a `text`
+//   function, so the `./t` imports of its non-spec and type-only arms name
+//   an existing module — the import's validity is a consumer-side matter
+//   outside xspec's validations (SPEC 6.4), staged so that the collision is
+//   each cell's sole defect. The argument forms (`SPEC.a`, `"x"`, `B.a`)
+//   run against every colliding declaration; the second module `B.a` needs
+//   is bound by the colliding import itself in the second-spec-`text` arm
+//   and by a further `import B from "../specs/B.xspec"` otherwise, an
+//   unused spec import recording nothing (2.1). As for T4.5-8, the no-edge
+//   observation on the failing workspace is `occurrences --file` (11.2,
+//   5.7); the type-level control is the one cell where `query edges`
+//   answers.
 // - Location assertions: every offending statement is staged at a known byte
 //   offset in a pure-ASCII `src/app.ts`, so string indices are byte offsets
 //   and each finding must fall within the offending statement's own byte
@@ -104,6 +128,7 @@ import {
   runConsumer,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
 import { assertRequirementCategories, impactAgainst } from "./section-5.6.js";
 import { assertImpactedCode } from "./section-9.js";
 import {
@@ -156,14 +181,20 @@ const AB_SPEC_FILES = {
     '<S id="a">\nAlpha behavior.\n<S id="a.b">\nBeta behavior.\n</S>\n</S>\n',
 } as const;
 
-/** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
+/**
+ * Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1).
+ * `mdx` is the staging's S-9 declaration of its `.mdx` sources (helpers/
+ * workspace.ts) — omitted, every staged `.mdx` file must derive plainly.
+ */
 async function withWorkspace<T>(
   config: string,
   files: Readonly<Record<string, string>>,
   body: (workspace: TestWorkspace) => Promise<T>,
+  mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
+    ...(mdx === undefined ? {} : { mdx }),
   });
   try {
     return await body(workspace);
@@ -1333,7 +1364,10 @@ const T4_5_8_TEXT_CALL = "text(SPEC.b)";
 interface SameScopeDeclarationArm {
   /** Which declaration form this is (failure diagnostics). */
   readonly name: string;
-  /** The declaration's line of `src/app.ts`, exactly (pure ASCII). */
+  /**
+   * The declaration's line(s) of `src/app.ts`, exactly (pure ASCII) — a
+   * form needing a supporting declaration carries it on a preceding line.
+   */
   readonly line: string;
   /**
    * For a colliding form: the construct binding the name — the characters
@@ -1347,8 +1381,13 @@ interface SameScopeDeclarationArm {
 // The colliding forms: a variable, function, class, or enum declaration, or
 // a namespace binding a value (SPEC 2.4). The located construct is the
 // variable DECLARATOR (`SPEC = 1`, the `const` statement excluded) or the
-// declaration's own characters (14, 1.7); none carries an `export` prefix,
-// so the exclusion of one (14) is not exercised here.
+// declaration's own characters (14, 1.7). The further located forms follow
+// 14's declarator and decorator rules as 1.7 reads them: a declarator
+// without initializer is its name alone; a binding pattern spans the pattern
+// through the initializer; a decorator list is part of the class it
+// decorates, whose own characters begin at its first decorator; and a
+// leading `export`, with whatever separates it from the construct's first
+// token, is excluded.
 const T4_5_8_COLLIDING_ARMS: readonly SameScopeDeclarationArm[] = [
   {
     name: "a variable declaration `const SPEC = 1` (SPEC 2.4)",
@@ -1374,6 +1413,31 @@ const T4_5_8_COLLIDING_ARMS: readonly SameScopeDeclarationArm[] = [
     name: "a namespace binding a value `namespace SPEC { export const v = 1 }` (SPEC 2.4)",
     line: "namespace SPEC { export const v = 1 }",
     construct: "namespace SPEC { export const v = 1 }",
+  },
+  {
+    name: "a declarator without initializer `let SPEC;` (SPEC 2.4, 14)",
+    line: "let SPEC;",
+    construct: "SPEC",
+  },
+  {
+    name: "a binding pattern `const { SPEC } = o` (SPEC 2.4, 14)",
+    line: "declare const o: Record<string, number>;\nconst { SPEC } = o;",
+    construct: "{ SPEC } = o",
+  },
+  {
+    name: "a decorated class `@dec class SPEC {}` (SPEC 2.4, 14, 1.7)",
+    line: "declare function dec(value: unknown, context: unknown): void;\n@dec class SPEC {}",
+    construct: "@dec class SPEC {}",
+  },
+  {
+    name: "an exported class `export class SPEC {}` (SPEC 2.4, 14, 1.7)",
+    line: "export class SPEC {}",
+    construct: "class SPEC {}",
+  },
+  {
+    name: "an exported function `export function SPEC() {}` (SPEC 2.4, 14, 1.7)",
+    line: "export function SPEC() {}",
+    construct: "function SPEC() {}",
   },
 ];
 
@@ -1699,26 +1763,57 @@ const T4_5_8_MDX_D_REFERENCE = "BASE.a";
 const T4_5_8_MDX_EMBEDDING = "{text(BASE.b)}";
 const T4_5_8_MDX_SECTION_OPEN = `<S id="c" d={${T4_5_8_MDX_D_REFERENCE}}>`;
 const T4_5_8_MDX_BODY_PREFIX = "Gamma behavior ";
-const T4_5_8_MDX_SOURCE =
-  `${T4_5_8_MDX_IMPORT}\n${T4_5_8_MDX_EXPORT}\n\n` +
-  `${T4_5_8_MDX_SECTION_OPEN}\n` +
-  `${T4_5_8_MDX_BODY_PREFIX}${T4_5_8_MDX_EMBEDDING}\n</S>\n`;
+/**
+ * One staging of the spec-source case: how the import and the export
+ * statement are laid out in `specs/COL.mdx` (SPEC 2.7, 2.1).
+ */
+interface SpecSourceCollisionArm {
+  /** Which layout this is (failure diagnostics). */
+  readonly name: string;
+  /**
+   * What separates the import's line from the export statement: U+000A
+   * alone keeps both in one ESM block (the export on the line after the
+   * import); a blank line ends the block, so the export opens a second one.
+   */
+  readonly separator: string;
+}
+
+const T4_5_8_SPEC_SOURCE_ARMS: readonly SpecSourceCollisionArm[] = [
+  { name: "the two declarations in one ESM block", separator: "\n" },
+  { name: "the two declarations across two ESM blocks", separator: "\n\n" },
+];
+
+/** A staged `specs/COL.mdx` of one arm and its constructs' byte positions. */
+interface StagedSpecSourceCollision {
+  /** The whole file: import, export statement, blank, section `c`. */
+  readonly source: string;
+  /** The import declaration's end-widened byte window (support.ts byteWindow). */
+  readonly importWindow: { readonly start: number; readonly end: number };
+  /** The declarator `BASE = 1`'s end-widened byte window. */
+  readonly declaratorWindow: { readonly start: number; readonly end: number };
+  /** The export statement's end-widened byte window. */
+  readonly exportWindow: { readonly start: number; readonly end: number };
+  /** The `d` value's expression, exactly (SPEC 14: braces excluded). */
+  readonly dReferenceRange: { readonly start: number; readonly end: number };
+  /** The embedding's full braced container, exactly (14). */
+  readonly embeddingRange: { readonly start: number; readonly end: number };
+}
 
 /**
- * The spec-source case's findings in 12.7 order: 14.5 at the `d` value's
- * expression (the braces excluded), 14.6 at the embedding's full braced
- * container, 14.15 locating the import declaration and the declarator
- * `BASE = 1`, and 14.16 at the export statement whole (SPEC 14, 2.4, 2.7).
+ * Lay out an arm's `specs/COL.mdx` — the import, the arm's separator, the
+ * export statement, a blank line, then section `c` — and fix every
+ * construct's byte position from the exact bytes (pure ASCII, so string
+ * indices are byte offsets). The one-block layout is byte-for-byte the
+ * document's staging (the export on the line after the import).
  */
-function assertSpecSourceCollisionFindings(
-  findings: readonly Finding[],
-  context: string,
-): void {
-  const file = "specs/COL.mdx";
-  const exportPrefix = `${T4_5_8_MDX_IMPORT}\n`;
+function stageSpecSourceCollision(
+  arm: SpecSourceCollisionArm,
+): StagedSpecSourceCollision {
+  const exportPrefix = `${T4_5_8_MDX_IMPORT}${arm.separator}`;
   const sectionPrefix = `${exportPrefix}${T4_5_8_MDX_EXPORT}\n\n`;
   const dPrefix = `${sectionPrefix}<S id="c" d={`;
-  const embeddingPrefix = `${sectionPrefix}${T4_5_8_MDX_SECTION_OPEN}\n${T4_5_8_MDX_BODY_PREFIX}`;
+  const bodyPrefix = `${sectionPrefix}${T4_5_8_MDX_SECTION_OPEN}\n${T4_5_8_MDX_BODY_PREFIX}`;
+  const source = `${bodyPrefix}${T4_5_8_MDX_EMBEDDING}\n</S>\n`;
   const exact = (
     prefix: string,
     construct: string,
@@ -1726,38 +1821,60 @@ function assertSpecSourceCollisionFindings(
     const start = Buffer.byteLength(prefix, "utf8");
     return { start, end: start + Buffer.byteLength(construct, "utf8") };
   };
+  return {
+    source,
+    importWindow: byteWindow("", T4_5_8_MDX_IMPORT),
+    declaratorWindow: byteWindow(
+      `${exportPrefix}export const `,
+      T4_5_8_MDX_DECLARATOR,
+    ),
+    exportWindow: byteWindow(exportPrefix, T4_5_8_MDX_EXPORT),
+    dReferenceRange: exact(dPrefix, T4_5_8_MDX_D_REFERENCE),
+    embeddingRange: exact(bodyPrefix, T4_5_8_MDX_EMBEDDING),
+  };
+}
+
+/**
+ * The spec-source case's findings in 12.7 order: 14.5 at the `d` value's
+ * expression (the braces excluded), 14.6 at the embedding's full braced
+ * container, 14.15 locating the import declaration and the declarator
+ * `BASE = 1`, and 14.16 at the export statement whole (SPEC 14, 2.4, 2.7)
+ * — the same four whichever ESM block holds the export (T14-12: a finding
+ * in a well-formed file, never a parse failure).
+ */
+function assertSpecSourceCollisionFindings(
+  findings: readonly Finding[],
+  staged: StagedSpecSourceCollision,
+  context: string,
+): void {
+  const file = "specs/COL.mdx";
   assertSameJson(
     findings.map((finding) => finding.condition),
     ["14.5", "14.6", "14.15", "14.16"],
     `${context}: exactly the unresolved \`d\` reference (14.5), the ` +
       `unresolved embedding (14.6), the collision (14.15), and the export ` +
-      `statement's invalidity (14.16), in 12.7 order (SPEC 2.4, 2.1, 2.7, 14)`,
+      `statement's invalidity (14.16), in 12.7 order — never 14.20, the ` +
+      `file being well-formed (SPEC 2.4, 2.1, 2.7, 14, 14.20)`,
   );
   assertSpellingFinding(
     findings[0]!,
     file,
-    exact(dPrefix, T4_5_8_MDX_D_REFERENCE),
+    staged.dReferenceRange,
     `${context}: the 14.5 locates the \`d\` value's expression, the braces ` +
       `excluded (SPEC 14, 5.7)`,
   );
   assertSpellingFinding(
     findings[1]!,
     file,
-    exact(embeddingPrefix, T4_5_8_MDX_EMBEDDING),
+    staged.embeddingRange,
     `${context}: the 14.6 locates the embedding's full braced container, ` +
       `opening brace through closing brace (SPEC 14, 5.7)`,
   );
   assertFindingLocatesExactly(
     findings[2]!,
     [
-      { file, window: byteWindow("", T4_5_8_MDX_IMPORT) },
-      {
-        file,
-        window: byteWindow(
-          `${exportPrefix}export const `,
-          T4_5_8_MDX_DECLARATOR,
-        ),
-      },
+      { file, window: staged.importWindow },
+      { file, window: staged.declaratorWindow },
     ],
     `${context}: the 14.15 locates the import by its own characters and ` +
       `the declarator the export statement holds by its own characters ` +
@@ -1765,34 +1882,39 @@ function assertSpecSourceCollisionFindings(
   );
   assertFindingLocatesExactly(
     findings[3]!,
-    [{ file, window: byteWindow(exportPrefix, T4_5_8_MDX_EXPORT) }],
+    [{ file, window: staged.exportWindow }],
     `${context}: the 14.16 locates the export statement whole (SPEC 14, 2.7)`,
   );
 }
 
 /**
- * The spec-source case: `build` and `check` report the four findings, exit
+ * One spec-source arm: `build` and `check` report the four findings, exit
  * 1; the gated `query edges --from specs/COL.mdx#c` reports them without
  * answering (SPEC 13.3); and `occurrences --file specs/COL.mdx` carries
  * them and lists no record — no edge and no occurrence for the spellings
- * rooted at the collided identifier (5.7, 11.2).
+ * rooted at the collided identifier (5.7, 11.2). The staging names S-9's
+ * `duplicate-import-binding` allowance: the export declaration binding the
+ * import's identifier is the early error the stock parser raises for one
+ * module, which every ESM block of a file is to it, so both layouts need
+ * it — and 14.20 admits both (a finding in a well-formed file, T14-12).
  */
 async function assertSpecSourceCollision(
   product: ProductBinding,
+  arm: SpecSourceCollisionArm,
 ): Promise<void> {
+  const staged = stageSpecSourceCollision(arm);
   await withWorkspace(
     SPEC_AND_CODE_CONFIG,
-    { ...T4_5_8_BASE_FILES, "specs/COL.mdx": T4_5_8_MDX_SOURCE },
+    { ...T4_5_8_BASE_FILES, "specs/COL.mdx": staged.source },
     async (workspace) => {
-      const buildContext =
-        "T4.5-8 `build --json` over the spec source declaring its import binding";
+      const buildContext = `T4.5-8 \`build --json\` over the spec source declaring its import binding, ${arm.name}`;
       assertSpecSourceCollisionFindings(
         await buildFindings(product, workspace, buildContext),
+        staged,
         buildContext,
       );
 
-      const checkContext =
-        "T4.5-8 `check --json` over the spec source declaring its import binding";
+      const checkContext = `T4.5-8 \`check --json\` over the spec source declaring its import binding, ${arm.name}`;
       const checkResult = await expectExit(
         product,
         workspace,
@@ -1806,11 +1928,11 @@ async function assertSpecSourceCollision(
           parseJsonStdout(checkResult, checkContext),
           checkContext,
         ).findings.filter((finding) => finding.condition !== "14.10"),
+        staged,
         checkContext,
       );
 
-      const queryContext =
-        "T4.5-8 `query edges --from specs/COL.mdx#c` on the failing workspace";
+      const queryContext = `T4.5-8 \`query edges --from specs/COL.mdx#c\` on the failing workspace, ${arm.name}`;
       const queryResult = await expectExit(
         product,
         workspace,
@@ -1826,11 +1948,11 @@ async function assertSpecSourceCollision(
           `${queryContext} — a refusing read's report is the findings-only ` +
             `document {"findings": […]}: no edge answered (SPEC 12.7, 13.3)`,
         ).findings,
+        staged,
         queryContext,
       );
 
-      const occContext =
-        "T4.5-8 `occurrences --file specs/COL.mdx` on the failing workspace";
+      const occContext = `T4.5-8 \`occurrences --file specs/COL.mdx\` on the failing workspace, ${arm.name}`;
       const occResult = await expectExit(
         product,
         workspace,
@@ -1849,6 +1971,7 @@ async function assertSpecSourceCollision(
       );
       assertSpecSourceCollisionFindings(
         report.findings,
+        staged,
         `${occContext}: the spec source's findings accompany the answer ` +
           `(SPEC 11.2, 11.3)`,
       );
@@ -1860,13 +1983,17 @@ async function assertSpecSourceCollision(
           `positioned by its finding's range alone (SPEC 2.4, 5.7, 11.2)`,
       );
     },
+    // S-9: the export declaration binding the import's identifier is an
+    // ECMAScript early error 14.20 admits — the named allowance (its scope
+    // spans both layouts; helpers/mdx-derivability.ts).
+    { allowances: { "specs/COL.mdx": ["duplicate-import-binding"] } },
   );
 }
 
 const T4_5_8 = defineProductTest({
   id: "T4.5-8",
   title:
-    "same-scope collisions: an identifier the spec module import binds that a module-scope `const`, `function`, `class`, `enum`, or value-binding `namespace` declaration also binds at value level roots no resolving chain — `build` and `check` report the condition-15 collision, locating the import by its own characters and the non-import by the construct binding the name (the declarator `SPEC = 1`, the `const` statement excluded), beside condition 7 for the marker `SPEC.a` and the call `text(SPEC.b)`, each at the span its occurrence would occupy, exit 1; the gated `query edges` reports no edge from the file and `occurrences` no record for the spellings; type-level `interface`, `type`, and value-free `namespace` declarations collide with nothing — edges recorded, no finding, exit 0; and a spec source holding `export const BASE = 1` beside `import BASE` reports 14.16 for the export statement, 14.15 locating the import and the declarator, and 14.5/14.6 for the `d` and `text(...)` spellings rooted at `BASE`, no edge and no occurrence recorded for them (SPEC 2.4, 4.5, 2.1, 2.7, 5.7, 11.2, 12.7, 13.3, 14, 14.15)",
+    "same-scope collisions: an identifier the spec module import binds that a module-scope `const`, `function`, `class`, `enum`, or value-binding `namespace` declaration also binds at value level roots no resolving chain — `build` and `check` report the condition-15 collision, locating the import by its own characters and the non-import by the construct binding the name (the declarator `SPEC = 1`, the `const` statement excluded; the further forms `let SPEC;` at `SPEC` alone, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from its `@`, and `export class SPEC {}` / `export function SPEC() {}` from `class` / `function`, the `export` excluded), beside condition 7 for the marker `SPEC.a` and the call `text(SPEC.b)`, each at the span its occurrence would occupy, exit 1; the gated `query edges` reports no edge from the file and `occurrences` no record for the spellings; type-level `interface`, `type`, and value-free `namespace` declarations collide with nothing — edges recorded, no finding, exit 0; and a spec source holding `export const BASE = 1` beside `import BASE` reports 14.16 for the export statement, 14.15 locating the import and the declarator, and 14.5/14.6 for the `d` and `text(...)` spellings rooted at `BASE`, no edge and no occurrence recorded for them — the two declarations in one ESM block and, a second arm, across two blocks, each a finding in a well-formed file, never 14.20 (SPEC 2.4, 4.5, 2.1, 2.7, 5.7, 11.2, 12.7, 13.3, 14, 14.15, 14.20)",
   run: async (product) => {
     for (const arm of T4_5_8_COLLIDING_ARMS) {
       await assertSameScopeCollisionArm(product, arm);
@@ -1874,7 +2001,9 @@ const T4_5_8 = defineProductTest({
     for (const arm of T4_5_8_CONTROL_ARMS) {
       await assertSameScopeControlArm(product, arm);
     }
-    await assertSpecSourceCollision(product);
+    for (const arm of T4_5_8_SPEC_SOURCE_ARMS) {
+      await assertSpecSourceCollision(product, arm);
+    }
   },
 });
 
