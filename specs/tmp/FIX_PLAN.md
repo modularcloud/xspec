@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 30 — T6.5-9's spec-source arm; T6.5-10's staging (c)
-- Cites: TEST-SPEC T6.5-9 (a target lacking imports of `specs/S.mdx` and `specs/text.mdx`; `view` lists two added declarations with distinct names, contiguous in one ESM block; edges rooted per module); T6.5-10 (staging (c): the target holding `import X from "./z.xspec"` with `z.mdx` a fourth source (`q`, `foo` lure), byte-exact `import <F> from "./x.xspec"` added with `<F>` ≠ `X`); SPEC 6.5, 2.1, 4. Findings A-32, A-33. Depends on Task 28.
-- Change: `section-6.5.ts`: T6.5-9's body is the TS compile-clean arm only — add the spec-source arm; T6.5-10 (title still "two section-move arms") — add staging (c) and retitle.
-- Verify: `-t 'T6.5-9 '`, `-t 'T6.5-10 '` no harness error; self project green.
-
 ### Task 31 — New registry module `section-6.5-iii.ts`: T6.5-12 and T6.5-14
 - Cites: TEST-SPEC T6.5-12 (the target file's own references to moved nodes: `specs/b.mdx` importing `specs/a.mdx` as `A` and spelling `d={A.x}` and `{text(A.x)}` in a section of its own; after `move specs/a.mdx#x specs/b.mdx#y` they read `d={"y"}` and `{text("y")}`; the `A` import removed with its line when those were its last uses (one arm) and kept byte-for-byte when `d={A.w}` remains (the other); the target otherwise byte-identical; `query edges` reporting `depends` and `embeds` to `specs/b.mdx#y`; `build`/`check` clean); T6.5-14 (a created target's fixed content: with no declaration needed exactly the moved text followed by U+000A — a leading empty line, a trailing one, or no terminator failing; with declarations, each followed by U+000A in an unpinned order, then one further U+000A, then the moved text and its terminator; the staging constraints on the referenced sibling leaf and the category expectations the entry gives; the preview's `file-creation` class subsuming it — T6.6-4(d), T6.6-5); SPEC 6.5, 6.4, 3, 5.5, 5.6. Findings A-7, A-9. Depends on Tasks 3, 28.
 - Change: create `test/suite/registry/section-6.5-iii.ts` (export `section65iiiTests`), spread it into `index.ts`, add the wrapper `test/suite/section-6.5-iii.test.ts`, and traceability entries; register T6.5-12 and T6.5-14 per their entries with expectations composed from 6.4/6.5 and 3 (value-blind in fresh identifiers only, through Task 28's helper).
