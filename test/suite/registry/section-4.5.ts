@@ -2007,6 +2007,397 @@ const T4_5_8 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T4.5-9 — a call through a colliding `text` identifier is no spec module's
+// `text` call: no edge, no occurrence, no condition of a `text` call, while
+// the spec binding or node its argument spells is used outside the
+// sanctioned uses (14.18), beside the collision (14.15)
+// ---------------------------------------------------------------------------
+
+// Two spec modules each holding a node `a` (the second for the cross-module
+// argument), and a non-spec module exporting `text` so the `./t` imports
+// name an existing module (a consumer-side matter, SPEC 6.4).
+const T4_5_9_FILES = {
+  "specs/A.mdx": '<S id="a">\nAlpha behavior.\n</S>\n',
+  "specs/B.mdx": '<S id="a">\nBravo behavior.\n</S>\n',
+  "src/t.ts":
+    "export function text(value: unknown): string {\n  return String(value);\n}\n",
+} as const;
+
+// The spec import binding `SPEC` and `text` — the `text` every arm's
+// colliding declaration also binds (SPEC 4.5, 2.4).
+const T4_5_9_IMPORT = 'import SPEC, { text } from "../specs/A.xspec";';
+// The second module's default binding for the cross-module argument, staged
+// where the colliding declaration does not bind it already (SPEC 4.4).
+const T4_5_9_B_IMPORT = 'import B from "../specs/B.xspec";';
+
+/** One module-scope declaration binding `text` beside the spec import. */
+interface CollidingTextArm {
+  /** Which colliding form this is (failure diagnostics). */
+  readonly name: string;
+  /** The declaration's line of `src/app.ts`, exactly (pure ASCII). */
+  readonly line: string;
+  /**
+   * The construct a condition-15 finding locates (SPEC 14): an import
+   * declaration by its own characters, a function declaration whole, or a
+   * variable declarator — exactly as it occurs within `line`.
+   */
+  readonly construct: string;
+  /** Whether `line` itself binds `B` to the second spec module. */
+  readonly bindsB: boolean;
+}
+
+const T4_5_9_COLLIDING_ARMS: readonly CollidingTextArm[] = [
+  {
+    name: 'a second, non-spec import binding `text` (`import { text } from "./t"`)',
+    line: 'import { text } from "./t";',
+    construct: 'import { text } from "./t";',
+    bindsB: false,
+  },
+  {
+    name: 'a second spec module\'s `text` (`import B, { text } from "../specs/B.xspec"`)',
+    line: 'import B, { text } from "../specs/B.xspec";',
+    construct: 'import B, { text } from "../specs/B.xspec";',
+    bindsB: true,
+  },
+  {
+    name: 'a type-only import (`import type { text } from "./t"`)',
+    line: 'import type { text } from "./t";',
+    construct: 'import type { text } from "./t";',
+    bindsB: false,
+  },
+  {
+    name: "a function declaration `function text(x: unknown) {}`",
+    line: "function text(x: unknown) {}",
+    construct: "function text(x: unknown) {}",
+    bindsB: false,
+  },
+  {
+    name: 'a variable declaration `const text = (x: unknown) => ""`',
+    line: 'const text = (x: unknown) => "";',
+    construct: 'text = (x: unknown) => ""',
+    bindsB: false,
+  },
+];
+
+/** One argument of the call through the colliding `text` (SPEC 4.5). */
+interface CollidingCallArgument {
+  /** Which argument this is (failure diagnostics). */
+  readonly name: string;
+  /** The argument's characters, exactly (pure ASCII). */
+  readonly spelling: string;
+  /**
+   * Whether the argument spells a spec module node — used there outside the
+   * sanctioned uses, one 14.18 at its whole static chain (14) — or a string
+   * literal spelling no binding or node (no 14.18, and no 14.8).
+   */
+  readonly spellsNode: boolean;
+  /** Whether the argument spells the second module's node, needing `B` bound. */
+  readonly needsB: boolean;
+}
+
+const T4_5_9_ARGUMENTS: readonly CollidingCallArgument[] = [
+  {
+    name: "the imported module's node `SPEC.a`",
+    spelling: "SPEC.a",
+    spellsNode: true,
+    needsB: false,
+  },
+  {
+    name: 'the string literal `"x"`',
+    spelling: '"x"',
+    spellsNode: false,
+    needsB: false,
+  },
+  {
+    name: "a valid second module's node `B.a`",
+    spelling: "B.a",
+    spellsNode: true,
+    needsB: true,
+  },
+];
+
+/** A staged `src/app.ts` for one cell and its constructs' byte positions. */
+interface StagedCollidingTextCall {
+  /** The whole file: the imports and the declaration, a blank line, the call. */
+  readonly source: string;
+  /** The spec import's end-widened byte window (support.ts byteWindow). */
+  readonly importWindow: { readonly start: number; readonly end: number };
+  /** The colliding construct's end-widened byte window. */
+  readonly constructWindow: { readonly start: number; readonly end: number };
+  /** The argument's static chain, exactly — the 14.18 range; none for the literal. */
+  readonly argumentRange:
+    { readonly start: number; readonly end: number } | undefined;
+}
+
+/**
+ * Lay out a cell's `src/app.ts` — the spec import, then `import B` where
+ * the argument needs it and the colliding declaration does not bind it,
+ * then the colliding declaration, a blank line, and the call statement —
+ * and fix every construct's byte position from the exact bytes (pure
+ * ASCII, so string indices are byte offsets). A construct missing from its
+ * line is a harness defect, never a product failure.
+ */
+function stageCollidingTextCall(
+  arm: CollidingTextArm,
+  argument: CollidingCallArgument,
+): StagedCollidingTextCall {
+  const constructAt = arm.line.indexOf(arm.construct);
+  if (constructAt === -1) {
+    throw new Error(
+      `T4.5-9 fixture broke: the located construct must occur within the ` +
+        `declaration line (${arm.name}) — fix the arm table in section-4.5.ts`,
+    );
+  }
+  const bImport = argument.needsB && !arm.bindsB ? `${T4_5_9_B_IMPORT}\n` : "";
+  const declarationPrefix = `${T4_5_9_IMPORT}\n${bImport}`;
+  const argumentPrefix = `${declarationPrefix}${arm.line}\n\ntext(`;
+  const source = `${argumentPrefix}${argument.spelling});\n`;
+  const argumentStart = Buffer.byteLength(argumentPrefix, "utf8");
+  return {
+    source,
+    importWindow: byteWindow("", T4_5_9_IMPORT),
+    constructWindow: byteWindow(
+      declarationPrefix + arm.line.slice(0, constructAt),
+      arm.construct,
+    ),
+    argumentRange: argument.spellsNode
+      ? {
+          start: argumentStart,
+          end: argumentStart + Buffer.byteLength(argument.spelling, "utf8"),
+        }
+      : undefined,
+  };
+}
+
+/**
+ * Assert the findings a cell's workspace reports, in 12.7 order: the one
+ * condition-15 collision locating the spec import and the colliding
+ * declaration (each within its own byte window, nothing else), then — for
+ * an argument spelling a node — one 14.18 byte-exact at the argument's
+ * whole static chain; no condition of a `text` call (14.6, 14.7, 14.8,
+ * 14.11) beside them, the call being no spec module's (SPEC 4.5, 14).
+ */
+function assertCollidingTextCallFindings(
+  findings: readonly Finding[],
+  staged: StagedCollidingTextCall,
+  argument: CollidingCallArgument,
+  context: string,
+): void {
+  assertSameJson(
+    findings.map((finding) => finding.condition),
+    argument.spellsNode ? ["14.15", "14.18"] : ["14.15"],
+    `${context}: exactly the collision (condition 15)` +
+      (argument.spellsNode
+        ? ` beside the unsupported use of the node the argument spells ` +
+          `(condition 18)`
+        : `, the argument spelling no binding or node`) +
+      `, in 12.7 order — no 14.6, 14.7, 14.8, or 14.11: a call through a ` +
+      `colliding \`text\` identifier is no spec module's \`text\` call ` +
+      `(SPEC 4.5, 2.4, 14.15, 14.18)`,
+  );
+  assertFindingLocatesExactly(
+    findings[0]!,
+    [
+      { file: "src/app.ts", window: staged.importWindow },
+      { file: "src/app.ts", window: staged.constructWindow },
+    ],
+    `${context}: the 14.15 locates both declarations binding \`text\` — ` +
+      `the spec import and the colliding declaration, each by the ` +
+      `construct binding the name (SPEC 14, 1.7, 2.4)`,
+  );
+  if (staged.argumentRange !== undefined) {
+    assertSpellingFinding(
+      findings[1]!,
+      "src/app.ts",
+      staged.argumentRange,
+      `${context}: the 14.18 locates the binding's identifier extended by ` +
+        `its longest static chain — the argument \`${argument.spelling}\` ` +
+        `exactly (SPEC 14, 14.18)`,
+    );
+  }
+}
+
+/**
+ * One cell: `build` and `check` report the cell's findings, exit 1, and
+ * `occurrences --file src/app.ts`, answering on the failing workspace
+ * (11.2), carries them and lists no record — the call records no edge and
+ * no occurrence (SPEC 4.5, 5.7, T5.7-4).
+ */
+async function assertCollidingTextCallCell(
+  product: ProductBinding,
+  arm: CollidingTextArm,
+  argument: CollidingCallArgument,
+): Promise<void> {
+  const staged = stageCollidingTextCall(arm, argument);
+  const cell = `${arm.name}, the argument ${argument.name}`;
+  await withWorkspace(
+    SPEC_AND_CODE_CONFIG,
+    { ...T4_5_9_FILES, "src/app.ts": staged.source },
+    async (workspace) => {
+      const buildContext = `T4.5-9 \`build --json\` beside ${cell}`;
+      assertCollidingTextCallFindings(
+        await buildFindings(product, workspace, buildContext),
+        staged,
+        argument,
+        buildContext,
+      );
+
+      // `check`: the same validation, exit 1 (SPEC 12.2); the never-built
+      // workspace's staleness is 14.10's own business — set aside.
+      const checkContext = `T4.5-9 \`check --json\` beside ${cell}`;
+      const checkResult = await expectExit(
+        product,
+        workspace,
+        ["check", "--json"],
+        1,
+        `${checkContext} — \`check\` performs all build validations and ` +
+          `exits 1 on the findings (SPEC 12.2, 4.5)`,
+      );
+      assertCollidingTextCallFindings(
+        decodeFindingsReport(
+          parseJsonStdout(checkResult, checkContext),
+          checkContext,
+        ).findings.filter((finding) => finding.condition !== "14.10"),
+        staged,
+        argument,
+        checkContext,
+      );
+
+      // `occurrences --file src/app.ts`, answering on the failing workspace
+      // (SPEC 11.2): the code file's findings accompany (exit 1, the full
+      // answer still emitted), and the record set is empty — the call
+      // records no edge and so no occurrence (5.7).
+      const occContext = `T4.5-9 \`occurrences --file src/app.ts\` beside ${cell}`;
+      const occResult = await expectExit(
+        product,
+        workspace,
+        ["occurrences", "--file", "src/app.ts"],
+        1,
+        `${occContext} — the answer carries the domain's findings, so exit ` +
+          `1 with the full answer document (SPEC 11.2, 11.3)`,
+      );
+      const report = decodeOccurrencesReport(
+        parseJsonStdout(
+          occResult,
+          `${occContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        occContext,
+      );
+      assertCollidingTextCallFindings(
+        report.findings,
+        staged,
+        argument,
+        `${occContext}: the code file's findings accompany the answer ` +
+          `(SPEC 11.2, 11.3)`,
+      );
+      assertSameJson(
+        report.occurrences.map(occurrenceTuple),
+        [],
+        `${occContext}: no record for the call — a call through a ` +
+          `colliding \`text\` identifier is no spec module's \`text\` call, ` +
+          `recording no edge and no occurrence, its argument positioned by ` +
+          `the 14.18 range alone (SPEC 4.5, 5.7, 11.2)`,
+      );
+    },
+  );
+}
+
+// The control: a type alias `type text = number` beside the import collides
+// with nothing (SPEC 2.4), so `text(SPEC.a)` is the spec module's `text`
+// call — its `embeds` edge and occurrence recorded, no finding (4.3, 5.7).
+const T4_5_9_CONTROL_LINE = "type text = number;";
+const T4_5_9_CONTROL_CALL = "text(SPEC.a)";
+
+async function assertCollidingTextControl(
+  product: ProductBinding,
+): Promise<void> {
+  const callPrefix = `${T4_5_9_IMPORT}\n${T4_5_9_CONTROL_LINE}\n\n`;
+  const source = `${callPrefix}${T4_5_9_CONTROL_CALL};\n`;
+  const callStart = Buffer.byteLength(callPrefix, "utf8");
+  const callEnd = callStart + Buffer.byteLength(T4_5_9_CONTROL_CALL, "utf8");
+  // The record's own range spans the call, callee through closing
+  // parenthesis, the terminator excluded; its source is the whole-file
+  // location, no named unit enclosing it (SPEC 5.7, 4.6, 1.7).
+  const expectedRecords: readonly (readonly unknown[])[] = [
+    [
+      "src/app.ts",
+      callStart,
+      callEnd,
+      "embeds",
+      ["src/app.ts", 0, Buffer.byteLength(source, "utf8")],
+      "specs/A.mdx#a",
+    ],
+  ];
+  await withWorkspace(
+    SPEC_AND_CODE_CONFIG,
+    { ...T4_5_9_FILES, "src/app.ts": source },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        "T4.5-9 `build` beside the type alias `type text = number` — a " +
+          "type-level declaration of the module scope collides with " +
+          "nothing (SPEC 2.4, 4.5)",
+      );
+      await expectExit(
+        product,
+        workspace,
+        ["check"],
+        0,
+        "T4.5-9 `check` beside the type alias `type text = number` — no " +
+          "finding (SPEC 2.4, 4.5)",
+      );
+      assertEdgeSetEqual(
+        await queryEdgesFrom(product, workspace, "src/app.ts", "T4.5-9"),
+        [{ from: "src/app.ts", to: "specs/A.mdx#a", kind: "embeds" }],
+        "T4.5-9 beside the type alias: the import roots the call — its " +
+          "`embeds` edge is the file's complete outgoing edge set (SPEC " +
+          "2.4, 4.5, 4.3, 4.6)",
+      );
+      const occContext =
+        "T4.5-9 `occurrences --file src/app.ts` beside the type alias `type text = number`";
+      const report = decodeOccurrencesReport(
+        await runJson(
+          product,
+          workspace,
+          ["occurrences", "--file", "src/app.ts"],
+          `${occContext} — a clean domain answers with no finding, exit 0 ` +
+            `(SPEC 11.2, 11.3)`,
+        ),
+        occContext,
+      );
+      assertConditionCounts(
+        report.findings,
+        {},
+        `${occContext}: no finding accompanies the answer (SPEC 2.4, 11.2)`,
+      );
+      assertSameJson(
+        report.occurrences.map(occurrenceTuple),
+        expectedRecords,
+        `${occContext}: exactly the call's \`embeds\` record — file, own ` +
+          `range (callee through closing parenthesis), kind, whole-file ` +
+          `source, target (SPEC 5.7, 11.3, 4.3)`,
+      );
+    },
+  );
+}
+
+const T4_5_9 = defineProductTest({
+  id: "T4.5-9",
+  title:
+    'call through a colliding `text` identifier: a call whose callee `text` the spec import and a second non-spec import, a second spec module\'s `text` import, a type-only import, a `function text(x: unknown) {}`, or a `const text = (x: unknown) => ""` of the same module scope also bind is no spec module\'s `text` call — `build` and `check` report 14.15 locating both declarations and, for `text(SPEC.a)`, 14.18 at `SPEC.a` (the identifier extended by its longest static chain), exit 1, no 14.6, 14.7, 14.8, or 14.11; `text("x")` beside the same collision reports no 14.8 and no 14.18; `text(B.a)`, `B` a valid second module\'s default binding, reports 14.18 at `B.a`, never 14.11; no edge and no occurrence — `occurrences --file` on the failing workspace lists none beside the findings; and the type alias `type text = number` beside the import collides with nothing, the call recording its `embeds` edge and occurrence, no finding (SPEC 4.5, 2.4, 5.7, 11.2, 14, 14.15, 14.18)',
+  run: async (product) => {
+    for (const arm of T4_5_9_COLLIDING_ARMS) {
+      for (const argument of T4_5_9_ARGUMENTS) {
+        await assertCollidingTextCallCell(product, arm, argument);
+      }
+    }
+    await assertCollidingTextControl(product);
+  },
+});
+
 /** TEST-SPEC §4.5, in canonical ID order (SUITE-15). */
 export const section45Tests: readonly ProductTestEntry[] = [
   T4_5_1,
@@ -2017,4 +2408,5 @@ export const section45Tests: readonly ProductTestEntry[] = [
   T4_5_6,
   T4_5_7,
   T4_5_8,
+  T4_5_9,
 ];
