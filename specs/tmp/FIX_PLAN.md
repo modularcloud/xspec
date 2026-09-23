@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 46 — T14-11: the syntax-failure offsets of T2.3-3, T2.4-2, T2.7-3, T2.7-4, T14-12 "asserted the same way"
-- Cites: TEST-SPEC T14-11 (its closing clause over those tests' syntax-failure offsets); SPEC 14.20, 1.7. Finding B-4 (third group). Depends on Tasks 16, 17, 18, 19, 45.
-- Change: `section-14.ts` T14-11 gains one arm per such offset, reusing each source through constants exported by its home module (no duplicated staging), asserting the finding's offset exactly as T14-11's other 14.20 arms do.
-- Verify: `-t 'T14-11 '` no harness error; self project green.
-
 ### Task 47 — T14-7: the refined refusal arms
 - Cites: TEST-SPEC T14-7 (rewritten: (a) `refused-invalid-rewrite` — identities the concerned files' paths in byte order, `path` `null` — and `refused-moved-import` — import ranges, `identities` `[]`; (b) identities over invalid paths: `move specs/A.mdx#x 'specs/new.txt#x y'` → `refused-invalid-destination` (`path` `specs/new.txt`) beside `refused-invalid-id` with `identities` exactly `["specs/new.txt#x y"]`; `move specs/A.mdx#x specs/new.txt#p.y` → `refused-invalid-destination` beside `refused-missing-target-parent` with `["specs/new.txt#p"]`; `query node` on such an identity exit 2; (c) the `refused-cycle` sibling arm — A imports a third module C, the moved text carries `d={C.foo}`, C imports B; the finding locates C's existing import of B and the chain spelling in A, a product choosing `C` as the fresh identifier rewriting nothing there — and the located-set rule "spellings rooted at the added binding, independent of whether each appears as a `reference-rewrite`"); SPEC 14, 12.7, 6.5. Finding B-2. Depends on Tasks 4, 36, 37.
 - Change: `section-14.ts` T14-7: add (a) by reusing `section-6.5-iii.ts`'s exported stagings, (b) with a `specs/new.txt` fixture (none exists in the registry today), and (c) the `C.foo` staging; the whole-sweep assertion "a code 14 does not list never appears" now covers ten codes.
