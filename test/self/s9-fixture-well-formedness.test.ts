@@ -41,6 +41,7 @@ import {
   I3_ROOM_SOURCE,
 } from "../suite/registry/section-6.2.js";
 import { X2_COMPOSED_FORMS } from "../suite/registry/section-6.5.js";
+import { J15_FORM_VECTORS } from "../suite/registry/section-6.5-iii.js";
 
 const LF = String.fromCodePoint(0x000a);
 const CR = String.fromCodePoint(0x000d);
@@ -376,6 +377,21 @@ describe("S-9: every composed form T6.5-2 asserts as a move's result derives", (
     );
   });
   test.each(X2_COMPOSED_FORMS)("%s", (_name, source) => {
+    expectDerives(source);
+  });
+});
+
+// T6.5-15's stagings and composed expectations: every origin and target as
+// staged and as the joint import-removal judgment and the move leave it (the
+// kept block headed by a declaration at its first line's start, or emptied).
+describe("S-9: every form T6.5-15 stages or asserts as a move's result derives", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(J15_FORM_VECTORS.length).toBe(20);
+    expect(new Set(J15_FORM_VECTORS.map(([name]) => name)).size).toBe(
+      J15_FORM_VECTORS.length,
+    );
+  });
+  test.each(J15_FORM_VECTORS)("%s", (_name, source) => {
     expectDerives(source);
   });
 });

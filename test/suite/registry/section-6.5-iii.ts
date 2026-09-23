@@ -1,7 +1,8 @@
 // TEST-SPEC §6.5 (move), third part — SUITE-25 (continued): T6.5-12, the
 // target file's own references to moved nodes, T6.5-13, admissible offsets
-// and composition in pre-operation coordinates, and T6.5-14, a created
-// target file's fixed content. T6.5-1…T6.5-10 are section-6.5.ts's business and
+// and composition in pre-operation coordinates, T6.5-14, a created target
+// file's fixed content, and T6.5-15, joint import removals over an ESM
+// block. T6.5-1…T6.5-10 are section-6.5.ts's business and
 // T6.5-11 section-6.5-ii.ts's; this module keeps both files' edits bounded
 // (the section-10.7-i/-ii precedent).
 //
@@ -113,6 +114,18 @@
 //   indented twin assert the pre-move `build --json` clean and `view`'s
 //   `imports` empty before, the added declaration alone after (its range
 //   the declaration's own characters, as T11.4-4 pins an import's).
+// - T6.5-15 stages its target already binding, under the origin's own
+//   identifiers, every module the moved text references, so no import is
+//   added and no spelling rewritten (each moved spelling is rooted at a
+//   binding the target holds, 6.5) and both files compose whole with no
+//   latitude; the preview assertion is over the origin entry's
+//   `import-removal` edits alone — the class the entry pins — each spanning
+//   the declaration plus the terminator of the line its deletion leaves
+//   empty (6.5's extent, 6.6's range rule), compared in the preview's order;
+//   the compiled Markdown is read from `specs/o.md` after `check --json` and
+//   `build --json`, `markdown.emit` on (7.3); each composed expectation is
+//   checked to derive (S-9) before its move, a `HarnessStagingError`, never
+//   a verdict.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -2705,9 +2718,427 @@ const T6_5_13 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T6.5-15 Joint import removals over an ESM block
+// ---------------------------------------------------------------------------
+//
+// SPEC 6.5 (import edits): in a spec source, whose ESM block the grammar
+// bounds line-sensitively (14.20), the removals in one block are judged
+// together, over the block as all of them would leave it. Where they would
+// leave it headed by anything but a declaration at the start of its first
+// line — a JavaScript comment or an indented declaration — the remaining
+// declarations would derive as paragraph text, so the block's first
+// declaration stays, whether or not any other declaration would remain, its
+// binding unused (2.1) and no removal reported for it (6.6), and the others
+// are removed; a block they would leave with no line at all, every line
+// dropped (3), is headed by nothing, its first declaration removed with the
+// rest. Every arm moves `specs/o.mdx#m`, whose subtree carries every use of
+// the bindings said to lose theirs, into `specs/t.mdx#m`, a target already
+// binding, under the origin's identifiers, each module the moved text
+// references: the moved spellings are rooted at bindings the target holds
+// (6.5), so no import is added and nothing is rewritten, and both files
+// compose whole from 6.5 and 3 with no latitude. The origin's compiled
+// Markdown (3) is read after the move from `specs/o.md`, emission on (7.3).
+
+const J15_ORIGIN = "specs/o.mdx";
+const J15_ORIGIN_MARKDOWN = "specs/o.md";
+const J15_TARGET = "specs/t.mdx";
+const J15_MOVE_ARGV = ["move", "specs/o.mdx#m", "specs/t.mdx#m"] as const;
+
+/** The module's configuration with Markdown emission on (SPEC 7.3, 13.2). */
+const J15_EMIT_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true }
+})
+`;
+
+/** `import <B> from "./<B>.xspec"` — 2.1's one permitted form. */
+function j15Declaration(binding: string): string {
+  return `import ${binding} from "./${binding}.xspec"`;
+}
+
+const J15_A = j15Declaration("A");
+const J15_B = j15Declaration("B");
+const J15_C = j15Declaration("C");
+
+/** The imported modules: `specs/A.mdx` holds the section `a`, and so on. */
+const J15_MODULES: Readonly<Record<string, string>> = Object.fromEntries(
+  ["A", "B", "C"].map((binding) => [
+    `specs/${binding}.mdx`,
+    `<S id="${binding.toLowerCase()}">\n${binding} text.\n</S>\n`,
+  ]),
+);
+
+/** Lines each followed by U+000A (SPEC 3). */
+function j15Join(lines: readonly string[]): string {
+  return lines.map((line) => `${line}\n`).join("");
+}
+
+/** A section alone on its lines, its `d` value optional (SPEC 2.2, 1.1). */
+function j15Section(id: string, d: string | undefined, text: string): string[] {
+  return [`<S id="${id}"${d === undefined ? "" : ` d={${d}}`}>`, text, "</S>"];
+}
+
+/**
+ * The `import-removal` edit for line `index` of the staged block: the
+ * declaration's own characters plus the terminator of the line its deletion
+ * leaves empty — 6.5's extent, spanned whole as 6.6 has a removal's range
+ * span every byte its edit removes — in pre-operation coordinates.
+ */
+function j15Removal(block: readonly string[], index: number): PreviewEdit {
+  const before = j15Join(block.slice(0, index));
+  const through = j15Join(block.slice(0, index + 1));
+  return a13Span(
+    "import-removal",
+    Buffer.byteLength(before, "utf8"),
+    Buffer.byteLength(through, "utf8"),
+  );
+}
+
+interface J15Arm {
+  readonly key: string;
+  /** The joint judgment's outcome over this block, for the diagnosis. */
+  readonly summary: string;
+  /** The origin's ESM block, line by line, as staged. */
+  readonly block: readonly string[];
+  /** Indices into `block` of the declarations the joint judgment removes. */
+  readonly removed: readonly number[];
+  /** The block as the removals leave it. */
+  readonly blockAfter: readonly string[];
+  /**
+   * The kept block's compiled Markdown lines (SPEC 3): each declaration
+   * removed by its own characters, its line dropped when left empty or
+   * whitespace-only, a JavaScript comment staying as content (T3-7).
+   */
+  readonly compiledBlock: readonly string[];
+  /** The kept section's `d` value: a use a binding keeps outside the moved subtree. */
+  readonly keptUse?: string;
+  /** The moved section's `d` value: every use of the bindings losing theirs. */
+  readonly movedUse: string;
+  /** The modules the moved text references, bound by the target under these identifiers. */
+  readonly targetBindings: readonly string[];
+}
+
+const J15_ARMS: readonly J15Arm[] = [
+  {
+    key: "(a) own-line comment between two declarations",
+    summary:
+      "both bindings lose their last use; removing both would leave the " +
+      "block headed by `// note`, a comment, so A's declaration stays " +
+      "byte-for-byte, its binding unused, and B's alone is removed with its " +
+      "line",
+    block: [J15_A, "// note", J15_B],
+    removed: [2],
+    blockAfter: [J15_A, "// note"],
+    compiledBlock: ["// note"],
+    movedUse: "[A.a, B.b]",
+    targetBindings: ["A", "B"],
+  },
+  {
+    key: "(b) trailing comment on the first declaration's line",
+    summary:
+      "both bindings lose their last use; removing A's declaration alone " +
+      "from its line would leave ` // note` heading the block, a comment, " +
+      "so A's declaration stays byte-for-byte, its binding unused, and B's " +
+      "alone is removed with its line",
+    block: [`${J15_A} // note`, J15_B],
+    removed: [1],
+    blockAfter: [`${J15_A} // note`],
+    compiledBlock: [" // note"],
+    movedUse: "[A.a, B.b]",
+    targetBindings: ["A", "B"],
+  },
+  {
+    key: "(c) indented second declaration, its binding still used",
+    summary:
+      "A loses its last use while B keeps one in the kept section; removing " +
+      "A's declaration would leave the block headed by the indented " +
+      "`  import B …`, deriving as paragraph text, so A's declaration stays " +
+      "byte-for-byte, its binding unused, and nothing is removed",
+    block: [J15_A, `  ${J15_B}`],
+    removed: [],
+    blockAfter: [J15_A, `  ${J15_B}`],
+    compiledBlock: [],
+    keptUse: "B.b",
+    movedUse: "A.a",
+    targetBindings: ["A"],
+  },
+  {
+    key: "(d) every declaration losing its use, no line left",
+    summary:
+      "both bindings lose their last use and the removals leave the block " +
+      "no line at all, so it is headed by nothing: every declaration is " +
+      "removed, the first included, both lines dropped with their " +
+      "terminators",
+    block: [J15_A, J15_B],
+    removed: [0, 1],
+    blockAfter: [],
+    compiledBlock: [],
+    movedUse: "[A.a, B.b]",
+    targetBindings: ["A", "B"],
+  },
+  {
+    key: "(e) the control: the first declaration keeps its use",
+    summary:
+      "A keeps its use in the kept section while B and C lose theirs: B's " +
+      "and C's declarations are removed with their lines and the block is " +
+      "left headed by A at its first line's start, `// note` its second " +
+      "line",
+    block: [J15_A, J15_B, "// note", J15_C],
+    removed: [1, 3],
+    blockAfter: [J15_A, "// note"],
+    compiledBlock: ["// note"],
+    keptUse: "A.a",
+    movedUse: "[B.b, C.c]",
+    targetBindings: ["B", "C"],
+  },
+];
+
+interface J15Staging {
+  readonly originBefore: string;
+  readonly originAfter: string;
+  readonly targetBefore: string;
+  readonly targetAfter: string;
+  /** The origin's compiled Markdown after the move (SPEC 3). */
+  readonly compiled: string;
+  /** The origin's `import-removal` preview edits, in 12.7's order. */
+  readonly removals: readonly PreviewEdit[];
+}
+
+/**
+ * Compose an arm's files whole (no latitude, H-4): the origin as staged —
+ * the block, an empty line, the kept section `k`, then the moved section
+ * `m`, each tag alone on its line — and as the joint judgment and the
+ * deletion leave it (the moved construct's emptied line dropped with its
+ * terminator, 3); the target as staged — its declarations, an empty line,
+ * its own section `t` using the same bindings — and with the moved text
+ * appended after its final terminator (6.5: the end of the file for a
+ * top-level `new-id`, a line-start offset, so no terminator precedes it).
+ */
+function j15Compose(arm: J15Arm): J15Staging {
+  const kept = j15Section("k", arm.keptUse, "K text.");
+  const moved = j15Section("m", arm.movedUse, "M text.");
+  const targetBefore = j15Join([
+    ...arm.targetBindings.map((binding) => j15Declaration(binding)),
+    "",
+    ...j15Section("t", arm.movedUse, "T text."),
+  ]);
+  return {
+    originBefore: j15Join([...arm.block, "", ...kept, ...moved]),
+    originAfter: j15Join([...arm.blockAfter, "", ...kept]),
+    targetBefore,
+    targetAfter: targetBefore + j15Join(moved),
+    compiled: j15Join([...arm.compiledBlock, "", "K text."]),
+    removals: arm.removed.map((index) => j15Removal(arm.block, index)),
+  };
+}
+
+/**
+ * Every MDX text T6.5-15 stages or asserts as a move's result, for the S-9
+ * self-test (test/self/s9-fixture-well-formedness.test.ts): the staged
+ * pre-move files are judged by the workspace builder as they are staged and
+ * the composed expectations before each move, so an expectation the stock
+ * MDX 3 grammar rejects would pin a text 6.5 refuses as a move's result.
+ */
+export const J15_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = J15_ARMS.flatMap((arm) => {
+  const staging = j15Compose(arm);
+  return [
+    [`T6.5-15 ${arm.key}: ${J15_ORIGIN} as staged`, staging.originBefore],
+    [`T6.5-15 ${arm.key}: ${J15_ORIGIN} after the move`, staging.originAfter],
+    [`T6.5-15 ${arm.key}: ${J15_TARGET} as staged`, staging.targetBefore],
+    [`T6.5-15 ${arm.key}: ${J15_TARGET} after the move`, staging.targetAfter],
+  ];
+});
+
+/** A composed expectation must derive (S-9): a staging defect, never a verdict. */
+function j15AssertPremiseDerives(text: string, rel: string, arm: J15Arm): void {
+  const verdict = deriveMdx(text);
+  if (verdict.derives) return;
+  throw new HarnessStagingError(
+    "mdx-derivability",
+    rel,
+    `T6.5-15 ${arm.key}: the composed expectation for ${rel} does not ` +
+      `derive under the stock MDX 3 grammar (${verdict.reason}) — the arm's ` +
+      `premise, not a product verdict; the text reads ${JSON.stringify(text)}`,
+  );
+}
+
+/**
+ * The preview's `import-removal` edits for the origin — the class the entry
+ * pins — with their ranges, in the preview's order (SPEC 6.6, 12.7).
+ */
+async function j15PreviewRemovals(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<readonly PreviewEdit[]> {
+  const label = `${context} \`${J15_MOVE_ARGV.join(" ")} --preview --json\``;
+  const report = decodePreviewReport(
+    await runJson(
+      product,
+      workspace,
+      [...J15_MOVE_ARGV, "--preview", "--json"],
+      label,
+    ),
+    label,
+  );
+  if (report.files === null) {
+    fail(
+      `${label}: a preview exiting 0 succeeds as the real operation would ` +
+        `and reports its \`files\` — \`null\` is a refused preview's form ` +
+        `(SPEC 6.6, 12.7); findings: ${JSON.stringify(report.findings)}`,
+    );
+  }
+  const entry = report.files.find((candidate) => candidate.file === J15_ORIGIN);
+  if (entry === undefined) {
+    fail(
+      `${label}: \`files\` holds an entry for ${J15_ORIGIN}, the file the ` +
+        `operation deletes the section from (SPEC 6.6, 12.7); got ` +
+        `[${report.files.map((candidate) => JSON.stringify(candidate.file)).join(", ")}]`,
+    );
+  }
+  return entry.edits
+    .filter((edit) => edit.class === "import-removal")
+    .map((edit) => a13Span("import-removal", edit.range.start, edit.range.end));
+}
+
+/** The removals as `[start, end)` ranges, for the messages. */
+function j15DescribeRemovals(removals: readonly PreviewEdit[]): string {
+  if (removals.length === 0) return "none";
+  return removals
+    .map((edit) => `[${String(edit.range.start)}, ${String(edit.range.end)})`)
+    .join(", ");
+}
+
+/** Which declarations the origin keeps or loses against the joint judgment. */
+function j15Deviation(actual: string, arm: J15Arm): string {
+  const notes: string[] = [];
+  for (const binding of ["A", "B", "C"]) {
+    const declaration = j15Declaration(binding);
+    if (!arm.block.some((line) => line.includes(declaration))) continue;
+    const stays = arm.blockAfter.some((line) => line.includes(declaration));
+    const present = actual.includes(declaration);
+    if (present && !stays) {
+      notes.push(
+        `${binding}'s declaration is kept where the joint judgment removes it`,
+      );
+    } else if (!present && stays) {
+      notes.push(
+        `${binding}'s declaration is removed where it stays` +
+          (arm.blockAfter.indexOf(arm.block[0] ?? "") === 0 &&
+          arm.block[0]?.includes(declaration) === true
+            ? " (the block's first declaration, whose removal would leave " +
+              "the block headed by a comment or an indented declaration)"
+            : " (its binding still used)"),
+      );
+    }
+  }
+  return notes.join("; ");
+}
+
+async function runJ15Arm(product: ProductBinding, arm: J15Arm): Promise<void> {
+  const context = `T6.5-15 ${arm.key}`;
+  const staging = j15Compose(arm);
+  j15AssertPremiseDerives(staging.originAfter, J15_ORIGIN, arm);
+  j15AssertPremiseDerives(staging.targetAfter, J15_TARGET, arm);
+  await withWorkspace(
+    {
+      "xspec.config.ts": J15_EMIT_CONFIG,
+      [J15_ORIGIN]: staging.originBefore,
+      [J15_TARGET]: staging.targetBefore,
+      ...J15_MODULES,
+    },
+    async (workspace) => {
+      // Premise: the staging is valid — every block well-formed, every
+      // import valid and used — so a later failure is the move's.
+      await buildOk(
+        product,
+        workspace,
+        `${context} \`build\` over the staging — every ESM block ` +
+          `well-formed, every import valid and used (SPEC 14.20, 2.1)`,
+      );
+      const removals = await j15PreviewRemovals(product, workspace, context);
+      assertSameJson(
+        removals,
+        staging.removals,
+        `${context} preview: ${J15_ORIGIN}'s \`import-removal\` edits are ` +
+          `exactly ${j15DescribeRemovals(staging.removals)} — ` +
+          `${arm.summary}; each removal spans the declaration plus the ` +
+          `terminator of the line its deletion leaves empty, in ` +
+          `pre-operation coordinates, and none is reported for a ` +
+          `declaration that stays (SPEC 6.5, 6.6, 12.7, 3)`,
+      );
+      await expectExit(
+        product,
+        workspace,
+        [...J15_MOVE_ARGV],
+        0,
+        `${context} \`${J15_MOVE_ARGV.join(" ")}\``,
+      );
+      const actual = await readSourceText(workspace, J15_ORIGIN, context);
+      if (actual !== staging.originAfter) {
+        const deviation = j15Deviation(actual, arm);
+        fail(
+          `${context}: ${J15_ORIGIN} after the move — ` +
+            (deviation === "" ? "" : `${deviation}; `) +
+            `${arm.summary}; the moved construct is deleted in place, its ` +
+            `emptied line dropped with its terminator, and every other byte ` +
+            `is unchanged (SPEC 6.5, 3, 2.1; H-4, normalizing nothing)\n` +
+            `  actual:   ${JSON.stringify(actual)}\n` +
+            `  expected: ${JSON.stringify(staging.originAfter)}`,
+        );
+      }
+      await assertFileBytes(
+        workspace.path(J15_TARGET),
+        staging.targetAfter,
+        `${context}: ${J15_TARGET} after the move — the moved text lands at ` +
+          `the end of the file plus U+000A with no preceding terminator ` +
+          `(the final line was terminated), its spellings rooted at the ` +
+          `bindings the target already holds under the origin's ` +
+          `identifiers, so no import is added and nothing is rewritten; ` +
+          `every other byte is unchanged (SPEC 6.5, 3; H-4)`,
+      );
+      await assertCleanAfterMove(
+        product,
+        workspace,
+        "every kept declaration's binding is unused yet valid (2.1) and " +
+          "every moved spelling resolves through a binding the target holds",
+        context,
+      );
+      await assertFileBytes(
+        workspace.path(J15_ORIGIN_MARKDOWN),
+        staging.compiled,
+        `${context}: the origin's compiled Markdown after the move — each ` +
+          `kept declaration removed by its own characters alone, its line ` +
+          `dropped when left empty or whitespace-only, a JavaScript comment ` +
+          `staying as content with its line, \`k\`'s tags removed with ` +
+          `their lines (SPEC 3, 2.7; T3-7)`,
+      );
+    },
+  );
+}
+
+const T6_5_15 = defineProductTest({
+  id: "T6.5-15",
+  title:
+    "joint import removals over an ESM block: in a spec source the removals in one block are judged together, over the block as all of them would leave it — where they would leave it headed by a JavaScript comment or an indented declaration, the block's first declaration stays byte-for-byte, its binding unused and valid, no removal reported for it, while the others are removed with their lines; a block they would leave with no line at all loses its first declaration with the rest — byte-asserted arms each moving `specs/o.mdx#m`, whose subtree carries every use of the bindings said to lose theirs, into `specs/t.mdx#m`, a target already binding the referenced modules under the origin's identifiers (no import added, nothing rewritten): (a) `import A …`, `// note`, `import B …` on successive lines, both losing their last use — A stays, B is removed with its line, the preview reporting one `import-removal`, B's, none for A; (b) `import A … // note` above `import B …` — the same outcome; (c) `import A …` above the indented `  import B …`, A losing its last use and B keeping one in the kept section — A stays, nothing removed, no removal reported; (d) `import A …`, `import B …` both losing theirs, the removals leaving no line — every declaration removed, both lines dropped, two removals reported; (e) the control `import A …`, `import B …`, `// note`, `import C …`, A keeping its use, B and C losing theirs — B's and C's lines removed, the block left headed by A at its first line's start with `// note` its second line; the origin and the target each asserted byte-equal to expectations composed from 6.5 and 3, `check` and `build` clean after each move, and the origin's compiled Markdown asserted with the comment lines staying as content and the kept declarations removed by their own characters (SPEC 6.5, 3, 2.1, 6.6, 12.7, 14.20)",
+  run: async (product) => {
+    for (const arm of J15_ARMS) {
+      await runJ15Arm(product, arm);
+    }
+  },
+});
+
 /** TEST-SPEC §6.5, third part, in canonical ID order (SUITE-25). */
 export const section65iiiTests: readonly ProductTestEntry[] = [
   T6_5_12,
   T6_5_13,
   T6_5_14,
+  T6_5_15,
 ];
