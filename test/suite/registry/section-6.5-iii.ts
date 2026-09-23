@@ -1128,6 +1128,13 @@ const A13_THIRD_MODULE = "specs/x.xspec";
 const A13_THIRD_SOURCE = ['<S id="a">', "A text.", "</S>", ""].join("\n");
 /** The canonical specifier the receiving file's added declaration carries (SPEC 6.5, 2.1). */
 const A13_THIRD_SPECIFIER = canonicalSpecifier("specs", A13_THIRD_MODULE);
+/** (g)'s second third module, `specs/y.mdx`, and its canonical specifier. */
+const A13_FOURTH = "specs/y.mdx";
+const A13_FOURTH_MODULE = "specs/y.xspec";
+const A13_FOURTH_SPECIFIER = canonicalSpecifier("specs", A13_FOURTH_MODULE);
+/** The target file's module — the declaration (i) and (k) assert is of it. */
+const A13_TARGET_MODULE = "specs/b.xspec";
+const A13_TARGET_SPECIFIER = canonicalSpecifier("specs", A13_TARGET_MODULE);
 
 /**
  * The moved section of the cross-file arms — a clean-boundary flow-form
@@ -1163,9 +1170,12 @@ const A13_ORIGIN_BEFORE = [
 ].join("\n");
 const A13_ORIGIN_AFTER = [...A13_ORIGIN_HEAD, ""].join("\n");
 
-/** 6.5's exact spelling of the declaration the receiving file needs. */
-function a13Declaration(ident: string): string {
-  return `import ${ident} from "${A13_THIRD_SPECIFIER}"`;
+/** 6.5's exact spelling of the declaration the receiving file needs (the third module's unless `specifier` says otherwise). */
+function a13Declaration(
+  ident: string,
+  specifier: string = A13_THIRD_SPECIFIER,
+): string {
+  return `import ${ident} from "${specifier}"`;
 }
 
 /** A zero-length preview edit at `offset` (SPEC 6.6: an insertion point). */
@@ -1253,6 +1263,8 @@ interface A13Arm {
 /** The source each added declaration's canonical specifier designates (SPEC 2.1, 11.4). */
 const A13_MODULE_SOURCES: Readonly<Record<string, string>> = {
   [A13_THIRD_SPECIFIER]: A13_THIRD,
+  [A13_FOURTH_SPECIFIER]: A13_FOURTH,
+  [A13_TARGET_SPECIFIER]: A13_TARGET,
 };
 
 /** The shared origin after a cross-file arm's move (SPEC 6.5, 3). */
@@ -1399,6 +1411,131 @@ const A13_F_BEFORE = ['<S id="a">x</S>', A13_F_MOVED].join("\n");
 const A13_F_AFTER = ['<S id="a">x</S>', '<S id="n">', "y", "</S>", ""].join(
   "\n",
 );
+
+// (g): two declarations added to one spec file — the moved text carries
+// embeddings through two third-module bindings the target lacks, into (b)'s
+// self-closing target; the origin's sibling keeps a use of each, so both
+// declarations stay there (SPEC 6.5).
+const A13_FOURTH_SOURCE = ['<S id="b">', "B text.", "</S>", ""].join("\n");
+
+/** The moved section of (g): one body line embedding through both third-module bindings. */
+function a13TwiceMovedLines(id: string, x: string, y: string): string[] {
+  return [
+    `<S id="${id}">`,
+    `Moved {text(${x}.a)} and {text(${y}.b)} text.`,
+    "</S>",
+  ];
+}
+
+const A13_G_ORIGIN_HEAD: readonly string[] = [
+  'import X from "./x.xspec"',
+  'import Y from "./y.xspec"',
+  "",
+  '<S id="s">',
+  "Sib {text(X.a)} and {text(Y.b)} text.",
+  "</S>",
+  "",
+];
+const A13_G_ORIGIN_BEFORE = [
+  ...A13_G_ORIGIN_HEAD,
+  ...a13TwiceMovedLines("m", "X", "Y"),
+  "",
+].join("\n");
+const A13_G_ORIGIN_AFTER = [...A13_G_ORIGIN_HEAD, ""].join("\n");
+
+/**
+ * (g)'s composition: the paired form around the moved text, the appended
+ * closing tag, then the two declarations contiguous — in either order, the
+ * one the implementation fixes read from the result (SPEC 6.5).
+ */
+function a13ComposeTwoDeclarations(
+  idents: readonly string[],
+): readonly string[] {
+  const [x = "", y = ""] = idents;
+  const declarations = [
+    a13Declaration(x),
+    a13Declaration(y, A13_FOURTH_SPECIFIER),
+  ];
+  return [declarations, [...declarations].reverse()].map((order) =>
+    [
+      '<S id="p">',
+      ...a13TwiceMovedLines("p.n", x, y),
+      "</S>",
+      ...order,
+      "",
+    ].join("\n"),
+  );
+}
+
+// (i): the third line-start kind 6.2 names — the origin deletion drops the
+// file's unterminated last line, so the composed file's end, line 1's
+// terminator preceding it, is a line start; the declaration asserted is
+// the origin's own, its `d={"m"}` converting to imported form through the
+// target module's declaration (T6.5-8's origin direction). The target is an
+// existing file ending in a terminator, needing no declaration.
+const A13_I_MOVED = ['<S id="m">', "y", "</S>"].join("\n");
+const A13_I_ORIGIN_BEFORE = ['<S id="a" d={"m"} />', A13_I_MOVED].join("\n");
+const A13_EXISTING_TARGET = '<S id="k">z</S>\n';
+const A13_I_TARGET_AFTER = `${A13_EXISTING_TARGET}${A13_I_MOVED}\n`;
+const A13_I_LINE_2 = A13_I_ORIGIN_BEFORE.indexOf(A13_I_MOVED);
+const A13_I_REFERENCE = A13_I_ORIGIN_BEFORE.indexOf('"m"');
+
+/** (i)'s composition: the converted reference, then the target module's declaration at the composed file's end. */
+function a13ComposeOriginDeclaration(
+  idents: readonly string[],
+): readonly string[] {
+  const [t = ""] = idents;
+  return [
+    [
+      `<S id="a" d={${t}.m} />`,
+      a13Declaration(t, A13_TARGET_SPECIFIER),
+      "",
+    ].join("\n"),
+  ];
+}
+
+// (l): the admissibility exclusion for lines that were no ESM block's
+// before the edit — the target's first two lines are one paragraph (an ESM
+// block cannot interrupt a paragraph, 14.20), so its `import B …` line is
+// content: `specs/B.mdx` is absent and the pre-move `build` is clean all
+// the same; the indented twin heads the file with a paragraph line likewise.
+const A13_L_HEAD: readonly string[] = [
+  "// note",
+  'import B from "./B.xspec"',
+  "",
+];
+const A13_L_INDENTED_HEAD: readonly string[] = [
+  '  import B from "./B.xspec"',
+  "",
+];
+
+/** A paragraph-headed (l) arm: the head's lines, then (a)'s target; the root's own text the head verbatim. */
+function a13ParagraphHeadedArm(
+  key: string,
+  summary: string,
+  head: readonly string[],
+): A13Arm {
+  const target = [...head, '<S id="p">', "x", "</S>", ""].join("\n");
+  const ownText = `${head.join("\n")}\n`;
+  return {
+    ...a13CrossArm({
+      key,
+      summary,
+      target,
+      newId: "p.n",
+      compose: (ident) => [...head, a13ComposeIntoP(ident, [""])].join("\n"),
+      previewEdits: [
+        a13At("target-insertion", target.indexOf("</S>")),
+        a13At("import-addition", target.length),
+      ],
+      ownTextBefore: ownText,
+      ownTextAfter: ownText,
+      ownHashChanges: false,
+    }),
+    cleanBefore: true,
+    viewImports: true,
+  };
+}
 
 const A13_ARMS: readonly A13Arm[] = [
   a13CrossArm({
@@ -1591,6 +1728,128 @@ const A13_ARMS: readonly A13Arm[] = [
       ownHashChanges: false,
     },
   },
+  {
+    key: "(g)",
+    summary:
+      "two declarations added to one spec file — after the appended closing " +
+      "tag, U+000A, then the two declarations on contiguous lines, each " +
+      "followed by U+000A alone, one ESM block with no empty line between " +
+      "them, in an order the product fixes, the first preceded by the " +
+      "terminator the tag's `>` requires; the preview holds exactly two " +
+      "`import-addition` entries, one per added declaration, both " +
+      "zero-length at the tag's end and ordered before the " +
+      "`target-insertion` there",
+    files: {
+      [A13_ORIGIN]: A13_G_ORIGIN_BEFORE,
+      [A13_THIRD]: A13_THIRD_SOURCE,
+      [A13_FOURTH]: A13_FOURTH_SOURCE,
+      [A13_TARGET]: A13_B_TARGET,
+    },
+    argv: ["move", `${A13_ORIGIN}#m`, `${A13_TARGET}#p.n`],
+    receiving: A13_TARGET,
+    added: [A13_THIRD_SPECIFIER, A13_FOURTH_SPECIFIER],
+    compose: a13ComposeTwoDeclarations,
+    others: [
+      {
+        rel: A13_ORIGIN,
+        bytes: A13_G_ORIGIN_AFTER,
+        reason:
+          "the moved construct deleted in place, its emptied line dropped " +
+          "with its terminator, the blank line before it kept, both " +
+          "declarations kept for the sibling's uses",
+      },
+      { rel: A13_THIRD, bytes: A13_THIRD_SOURCE, reason: A13_BYSTANDER_REASON },
+      {
+        rel: A13_FOURTH,
+        bytes: A13_FOURTH_SOURCE,
+        reason: A13_BYSTANDER_REASON,
+      },
+    ],
+    previewEdits: [
+      [
+        a13Span("target-parent-rewrite", 0, A13_B_TARGET.length),
+        a13At("import-addition", A13_B_TARGET.length),
+        a13At("import-addition", A13_B_TARGET.length),
+        a13At("target-insertion", A13_B_TARGET.length),
+      ],
+    ],
+    root: {
+      identity: A13_TARGET,
+      ownTextBefore: "",
+      ownTextAfter: "",
+      ownHashChanges: false,
+    },
+    repeatable: true,
+  },
+  {
+    key: "(i)",
+    summary:
+      "the third line-start kind — the deletion's range runs from the start " +
+      'of line 2 to the file\'s end, leaving the converted `<S id="a" ' +
+      "d={<T>.m} />` line and its terminator; offset 0 would absorb the " +
+      "tag's line into the block, so the composed file's end — line 1's " +
+      "terminator preceding it, a line start — is taken with no terminator " +
+      "added: an insertion where the origin deletion's range ends reads " +
+      "what the deletion leaves",
+    files: {
+      [A13_ORIGIN]: A13_I_ORIGIN_BEFORE,
+      [A13_TARGET]: A13_EXISTING_TARGET,
+    },
+    argv: ["move", `${A13_ORIGIN}#m`, `${A13_TARGET}#m`],
+    receiving: A13_ORIGIN,
+    added: [A13_TARGET_SPECIFIER],
+    compose: a13ComposeOriginDeclaration,
+    others: [
+      {
+        rel: A13_TARGET,
+        bytes: A13_I_TARGET_AFTER,
+        reason:
+          "the moved text appended at the file's end after its final " +
+          "terminator — a line start, so none is added before it — followed " +
+          "by its own, the ID kept",
+      },
+    ],
+    previewEdits: [
+      [
+        a13Span("reference-rewrite", A13_I_REFERENCE, A13_I_REFERENCE + 3),
+        a13At("import-addition", A13_I_LINE_2),
+        a13Span("origin-deletion", A13_I_LINE_2, A13_I_ORIGIN_BEFORE.length),
+      ],
+      [
+        a13Span("reference-rewrite", A13_I_REFERENCE, A13_I_REFERENCE + 3),
+        a13Span("origin-deletion", A13_I_LINE_2, A13_I_ORIGIN_BEFORE.length),
+        a13At("import-addition", A13_I_ORIGIN_BEFORE.length),
+      ],
+    ],
+    root: {
+      identity: A13_ORIGIN,
+      ownTextBefore: "",
+      ownTextAfter: "",
+      ownHashChanges: true,
+    },
+  },
+  a13ParagraphHeadedArm(
+    "(l)",
+    "the admissibility exclusion for lines that were no ESM block's before " +
+      "the edit — offset 0 heads a block joining the paragraph's lines, " +
+      "deriving yet inadmissible; the start of line 2, the start of the " +
+      "empty line, and every mid-line offset of the paragraph leave the " +
+      'added line paragraph text; every line start from `<S id="p">` on ' +
+      "absorbs the tag's line or lies inside `p`; so the file's end after " +
+      "the final terminator is the only admissible offset: the moved text " +
+      "and its terminator inserted before `</S>`, the declaration plus " +
+      "U+000A appended, the paragraph's bytes untouched",
+    A13_L_HEAD,
+  ),
+  a13ParagraphHeadedArm(
+    "(l, indented)",
+    'the indented twin — `  import B from "./B.xspec"` heading the file ' +
+      "in the paragraph's place, a paragraph line likewise: offset 0 and " +
+      "the offset after its two spaces each head a block absorbing that " +
+      "line, deriving yet inadmissible, so the file's end is again the " +
+      "only admissible offset, the expectations the same",
+    A13_L_INDENTED_HEAD,
+  ),
 ];
 
 /**
@@ -1732,8 +1991,8 @@ async function a13PreviewEntry(
   );
   if (entry === undefined) {
     fail(
-      `${label}: \`files\` holds an entry for ${arm.receiving}, the file the ` +
-        `operation rewrites — its target insertion` +
+      `${label}: \`files\` holds an entry for ${arm.receiving}, a file the ` +
+        `operation rewrites — its insertion or deletion` +
         (arm.added.length > 0 ? " and import addition" : "") +
         ` (SPEC 6.6, 12.7); got ` +
         `[${report.files.map((candidate) => JSON.stringify(candidate.file)).join(", ")}]`,
