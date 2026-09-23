@@ -215,11 +215,18 @@
 //   offsets SPEC 14 fixes — 0 for a byte-order mark and a refused read, the
 //   first undecodable byte, the longest well-formed-prefix length — where
 //   T14-3/T14-5 assert presence alone; the refused-read arm is a
-//   permission staging (E-1), Linux leg, run last. `d={}` is pinned as
-//   SPEC 14 and TEST-SPEC T14-11 state it (14.8, a zero-length span at the
-//   closing brace) although the reference MDX grammar rejects an empty
-//   attribute value expression — a tension recorded in
-//   specs/tmp/SPEC-PROBLEMS.md, not resolved here.
+//   permission staging (E-1), Linux leg, run last. `d={}` and
+//   `d={ /* c */ }` are condition 20 (SPEC 2.7, 14.20: an attribute value
+//   admits no empty expression), never 14.8 — the one zero-length range at
+//   the offset of the closing brace, the prefix before `}` beginning some
+//   well-formed file — and are staged `mdx.unparseable` (the stock grammar
+//   rejects both, `unexpected-empty-expression`, its position the byte
+//   after the opening brace: the rule's offset for `d={}` alone). The
+//   refined `d`-value ranges (p)–(t) follow the occurrence-span rule of
+//   SPEC 14 (5.7) over a module imported as `BASE`: `(BASE.a)` with its
+//   parentheses, a comma sequence whole, `BASE.missing` alone past a block
+//   comment and past U+00A0/U+FEFF, a spread entry with its `...`, and the
+//   elisions of one array literal as one finding at the whole literal.
 
 import { Buffer } from "node:buffer";
 import * as path from "node:path";
@@ -3625,13 +3632,22 @@ const T14_11_D_IDENT = assemble([
   "}>\nA dynamic d value.\n</S>\n",
 ]);
 
-// (c) 14.8 — braces enclosing no expression: a zero-length span at the
-// closing brace.
+// (c) 14.20 — braces enclosing no expression: an attribute value admits no
+// empty expression (SPEC 2.7), so `d={}` and `d={ /* c */ }` are not
+// well-formed MDX — condition 20, never 14.8 — the one zero-length range at
+// the offset of the closing brace (the prefix before `}` begins some
+// well-formed file: `d={1}` continues either).
 const T14_11_D_EMPTY = assemble([
   T14_11_PREAMBLE,
   '<S id="a" d={',
   pin(""),
   "}>\nAn empty d value.\n</S>\n",
+]);
+const T14_11_D_COMMENT_ONLY = assemble([
+  T14_11_PREAMBLE,
+  '<S id="a" d={ /* c */ ',
+  pin(""),
+  "}>\nA comment-only d value.\n</S>\n",
 ]);
 
 // (d) 14.8 — a non-static bare reference in expression-statement position:
@@ -3798,6 +3814,76 @@ const T14_11_UNCLOSED_MDX = assemble([
 ]);
 const T14_11_SYNTAX_TS = assemble(["let x = ", pin(""), ";\n"]);
 
+// (p)–(t) The refined `d`-value ranges (the occurrence-span rule of SPEC 14,
+// 5.7) over a module imported as `BASE` — `T14_11_A_MDX`, whose `a` and `b`
+// resolve and whose `missing` does not. Each fixture opens with the import
+// and the preamble, so the multibyte `é` precedes every pinned construct.
+const T14_11_BASE = "specs/BASE.mdx";
+const T14_11_BASE_IMPORT = 'import BASE from "./BASE.xspec"\n\n';
+const NBSP = String.fromCodePoint(0xa0); // U+00A0 — ECMAScript whitespace
+const ZWNBSP = String.fromCodePoint(0xfeff); // U+FEFF — inside the file, so no byte-order mark
+
+// (p) 14.8 — `d={(BASE.a)}`: the expression the braces enclose, first token
+// through last, so the parentheses are included (parentheses join no static
+// chain, SPEC 2.4).
+const T14_11_D_PAREN = assemble([
+  T14_11_BASE_IMPORT,
+  T14_11_PREAMBLE,
+  '<S id="p" d={',
+  pin("(BASE.a)"),
+  "}>\nA parenthesized chain.\n</S>\n",
+]);
+
+// (q) 14.8 — `d={BASE.a, BASE.b}`: a comma sequence is one expression
+// (SPEC 14.20), located whole — never two references.
+const T14_11_D_COMMA = assemble([
+  T14_11_BASE_IMPORT,
+  T14_11_PREAMBLE,
+  '<S id="q" d={',
+  pin("BASE.a, BASE.b"),
+  "}>\nA comma sequence.\n</S>\n",
+]);
+
+// (r) 14.5 — the unresolved expression alone: the braces, and the whitespace
+// and comment between them and the expression, excluded — a block comment
+// with ASCII whitespace, U+00A0 on each side, and U+FEFF before it
+// (ECMAScript whitespace, SPEC 1.4, T5.7-2), the latter two shifting the
+// pinned start by their own byte lengths (2 and 3).
+const T14_11_D_TRIVIA = assemble([
+  T14_11_BASE_IMPORT,
+  T14_11_PREAMBLE,
+  '<S id="m1" d={ /* c */ ',
+  pin("BASE.missing"),
+  ' }>\nA block comment before the reference.\n</S>\n\n<S id="m2" d={' + NBSP,
+  pin("BASE.missing"),
+  NBSP + '}>\nU+00A0 on each side.\n</S>\n\n<S id="m3" d={' + ZWNBSP,
+  pin("BASE.missing"),
+  "}>\nU+FEFF before the reference.\n</S>\n",
+]);
+
+// (s) 14.8 — a spread entry `d={[...BASE.a]}`: `...BASE.a`, the `...`
+// included, no bracket.
+const T14_11_D_SPREAD = assemble([
+  T14_11_BASE_IMPORT,
+  T14_11_PREAMBLE,
+  '<S id="s" d={[',
+  pin("...BASE.a"),
+  "]}>\nA spread entry.\n</S>\n",
+]);
+
+// (t) 14.8 — the elisions of one array literal as one finding at the whole
+// literal, brackets included, however many holes; two literals, two findings
+// (the resolving entries beside the holes report nothing).
+const T14_11_D_ELISIONS = assemble([
+  T14_11_BASE_IMPORT,
+  T14_11_PREAMBLE,
+  '<S id="e1" d={',
+  pin("[BASE.a, , , BASE.b]"),
+  '}>\nTwo holes.\n</S>\n\n<S id="e2" d={',
+  pin("[, BASE.b]"),
+  "}>\nOne hole.\n</S>\n",
+]);
+
 const T14_11_SPEC = "specs/A.mdx";
 const T14_11_CODE = "src/app.ts";
 
@@ -3822,14 +3908,24 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
   },
   {
     arm: "c",
-    rule: "14.8 — `d={}`: a zero-length span at the closing brace",
+    rule: "14.20 — `d={}` and `d={ /* c */ }`: not well-formed MDX, the zero-length range at the closing brace, never 14.8",
     config: SPECS_ONLY_CONFIG,
-    files: { [T14_11_SPEC]: T14_11_D_EMPTY.text },
-    // S-9: the stock grammar rejects an empty attribute expression, and the
-    // document reads `d={}` as condition 20 (Task 42 re-pins this arm).
-    mdx: { unparseable: [T14_11_SPEC] },
+    files: {
+      "specs/empty.mdx": T14_11_D_EMPTY.text,
+      "specs/comment-only.mdx": T14_11_D_COMMENT_ONLY.text,
+    },
+    // S-9: an attribute value admits no empty expression (SPEC 2.7, 14.20);
+    // the stock grammar rejects both (`unexpected-empty-expression`).
+    mdx: { unparseable: ["specs/empty.mdx", "specs/comment-only.mdx"] },
     expected: [
-      { condition: "14.8", locations: located(T14_11_SPEC, T14_11_D_EMPTY, 0) },
+      {
+        condition: "14.20",
+        locations: located("specs/empty.mdx", T14_11_D_EMPTY, 0),
+      },
+      {
+        condition: "14.20",
+        locations: located("specs/comment-only.mdx", T14_11_D_COMMENT_ONLY, 0),
+      },
     ],
   },
   {
@@ -4015,6 +4111,59 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
         locations: located("src/bad.ts", T14_11_SYNTAX_TS, 0),
       },
     ],
+  },
+  {
+    arm: "p",
+    rule: "14.8 — `d={(BASE.a)}`: the enclosed expression first token through last, its parentheses included",
+    config: SPECS_ONLY_CONFIG,
+    files: { [T14_11_BASE]: T14_11_A_MDX, [T14_11_SPEC]: T14_11_D_PAREN.text },
+    expected: [
+      { condition: "14.8", locations: located(T14_11_SPEC, T14_11_D_PAREN, 0) },
+    ],
+  },
+  {
+    arm: "q",
+    rule: "14.8 — `d={BASE.a, BASE.b}`: the whole comma sequence, one expression",
+    config: SPECS_ONLY_CONFIG,
+    files: { [T14_11_BASE]: T14_11_A_MDX, [T14_11_SPEC]: T14_11_D_COMMA.text },
+    expected: [
+      { condition: "14.8", locations: located(T14_11_SPEC, T14_11_D_COMMA, 0) },
+    ],
+  },
+  {
+    arm: "r",
+    rule: "14.5 — `BASE.missing` alone: the braces and the whitespace and comment between them and the expression excluded, U+00A0 and U+FEFF spelled there likewise",
+    config: SPECS_ONLY_CONFIG,
+    files: { [T14_11_BASE]: T14_11_A_MDX, [T14_11_SPEC]: T14_11_D_TRIVIA.text },
+    expected: [0, 1, 2].map((index) => ({
+      condition: "14.5",
+      locations: located(T14_11_SPEC, T14_11_D_TRIVIA, index),
+    })),
+  },
+  {
+    arm: "s",
+    rule: "14.8 — a spread entry `d={[...BASE.a]}`: `...BASE.a`, the `...` included",
+    config: SPECS_ONLY_CONFIG,
+    files: { [T14_11_BASE]: T14_11_A_MDX, [T14_11_SPEC]: T14_11_D_SPREAD.text },
+    expected: [
+      {
+        condition: "14.8",
+        locations: located(T14_11_SPEC, T14_11_D_SPREAD, 0),
+      },
+    ],
+  },
+  {
+    arm: "t",
+    rule: "14.8 — elisions: one finding per array literal at the whole literal, brackets included, however many holes",
+    config: SPECS_ONLY_CONFIG,
+    files: {
+      [T14_11_BASE]: T14_11_A_MDX,
+      [T14_11_SPEC]: T14_11_D_ELISIONS.text,
+    },
+    expected: [0, 1].map((index) => ({
+      condition: "14.8",
+      locations: located(T14_11_SPEC, T14_11_D_ELISIONS, index),
+    })),
   },
 ];
 
@@ -4230,7 +4379,7 @@ async function runRefusedReadArm(product: ProductBinding): Promise<void> {
 const T14_11 = defineProductTest({
   id: "T14-11",
   title:
-    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `d={}`'s zero-length span at the closing brace), a non-static bare reference exclusive of its `;`, the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms and colliding declarator, 14.16's construct forms, 14.18's chain-extended binding, 14.20's zero-length offsets (byte-order mark, encoding, syntax, and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.7, 5.7, 11.2, 11.4, 12.7)",
+    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), a non-static bare reference exclusive of its `;`, the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms and colliding declarator, 14.16's construct forms, 14.18's chain-extended binding, 14.20's zero-length offsets (byte-order mark, encoding, syntax, and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.7, 5.7, 11.2, 11.4, 12.7)",
   run: async (product) => {
     for (const kase of T14_11_CASES) {
       await runRangeRuleArm(product, kase);
