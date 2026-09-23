@@ -107,6 +107,7 @@ import {
   decodeImpactReport,
   decodeNodeReport,
   decodePreviewReport,
+  decodeViewReport,
 } from "../../helpers/adapters/index.js";
 import { assertFileBytes, fail } from "../../helpers/assertions.js";
 import { canonicalSpecifier } from "../../helpers/import-insertion.js";
@@ -671,6 +672,16 @@ interface CategoryPin {
     readonly category: ChangeCategory;
     readonly within: readonly string[];
   }[];
+  /**
+   * Attribution of required categories other than `changed`: bounded by
+   * `within`, and, where given, including each of `mustInclude` (SPEC 5.6:
+   * every category is attributed to its originating nodes).
+   */
+  readonly attributed?: readonly {
+    readonly category: ChangeCategory;
+    readonly within: readonly string[];
+    readonly mustInclude?: readonly string[];
+  }[];
 }
 
 /**
@@ -791,6 +802,21 @@ function assertImpactPins(
           attributed,
           entry.within,
         );
+      }
+    }
+    for (const entry of pin.attributed ?? []) {
+      const attributed = actual.get(entry.category) ?? [];
+      checkAttribution(pin.identity, entry.category, attributed, entry.within);
+      for (const source of entry.mustInclude ?? []) {
+        if (!attributed.includes(source)) {
+          fail(
+            `${context}: the ${entry.category} category of ${pin.identity} ` +
+              `is attributed to ${JSON.stringify([...new Set(attributed)].sort())}, ` +
+              `which omits ${JSON.stringify(source)}, an originating node of ` +
+              `the change it cascades from (SPEC 5.6: every category is ` +
+              `attributed to its originating nodes)`,
+          );
+        }
       }
     }
   }
@@ -1156,6 +1182,24 @@ function a13Span(
   return { class: cls, range: { start, end } };
 }
 
+/** One other file's expected post-move bytes, with the reason they are what they are. */
+interface A13Other {
+  readonly rel: string;
+  readonly bytes: string;
+  readonly reason: string;
+}
+
+/**
+ * The category expectation of an arm asserting `impact --base <pre-move
+ * ref> --json` (SPEC 5.6, 6.2): every current identity the report may name,
+ * the pins, and the reason the enumeration is what it is.
+ */
+interface A13ImpactExpectation {
+  readonly known: readonly string[];
+  readonly pins: readonly CategoryPin[];
+  readonly reason: string;
+}
+
 /** One byte-asserted arm of T6.5-13. */
 interface A13Arm {
   /** The entry's letter, e.g. `(a)`, `(b, terminated)`. */
@@ -1166,17 +1210,22 @@ interface A13Arm {
   readonly files: Readonly<Record<string, string>>;
   /** The move's argv. */
   readonly argv: readonly string[];
-  /** The receiving file: the one whose post-move bytes the arm composes. */
+  /** The receiving file: the one whose post-move bytes the arm composes value-blind. */
   readonly receiving: string;
-  /** Whether the receiving file needs the third module's declaration. */
-  readonly needsDeclaration: boolean;
   /**
-   * The receiving file's expected post-move bytes given the fresh
-   * identifier the added declaration binds (`""` where none is needed).
+   * The canonical specifiers of the declarations the receiving file gains —
+   * one per module it lacks a binding of (SPEC 6.5); `compose` takes the
+   * fresh identifiers they bind in this order. Empty where none is needed.
    */
-  readonly compose: (ident: string) => string;
+  readonly added: readonly string[];
+  /**
+   * The receiving file's admissible post-move byte forms given the fresh
+   * identifiers, in `added`'s order: one form, or one per order the
+   * implementation may fix among several added declarations (SPEC 6.5).
+   */
+  readonly compose: (idents: readonly string[]) => readonly string[];
   /** Every other file's expected post-move bytes. */
-  readonly others: Readonly<Record<string, string>>;
+  readonly others: readonly A13Other[];
   /** The admissible edit lists of the receiving file's preview entry, each in 12.7's order. */
   readonly previewEdits: readonly (readonly PreviewEdit[])[];
   /** The receiving file's root: its own text before and after, and whether its ownHash changes. */
@@ -1186,7 +1235,34 @@ interface A13Arm {
     readonly ownTextAfter: string;
     readonly ownHashChanges: boolean;
   };
+  /** `build --json` exactly `{"findings": []}` over the staging too, not exit 0 alone. */
+  readonly cleanBefore?: boolean;
+  /**
+   * The receiving file's `view` (SPEC 11.4): `imports` empty before the
+   * move and, after it, exactly the added declarations — each `name` the
+   * identifier read off the bytes, each `target` the module's source, each
+   * range the declaration's own characters.
+   */
+  readonly viewImports?: boolean;
+  /** The `impact --base` expectation against a baseline committed before the move. */
+  readonly impact?: (idents: readonly string[]) => A13ImpactExpectation;
+  /** Repeat the move in a fresh workspace and require byte-identical receiving bytes (H-6). */
+  readonly repeatable?: boolean;
 }
+
+/** The source each added declaration's canonical specifier designates (SPEC 2.1, 11.4). */
+const A13_MODULE_SOURCES: Readonly<Record<string, string>> = {
+  [A13_THIRD_SPECIFIER]: A13_THIRD,
+};
+
+/** The shared origin after a cross-file arm's move (SPEC 6.5, 3). */
+const A13_ORIGIN_REASON =
+  "the moved construct deleted in place, its emptied line dropped with its " +
+  "terminator, the blank line before it kept, the `X` declaration kept for " +
+  "the sibling's use";
+/** A module embedded but not moved (SPEC 6.5). */
+const A13_BYSTANDER_REASON =
+  "the third module, embedded but not moved, untouched";
 
 /** A cross-file arm: `m` moved out of the shared origin into a target file. */
 function a13CrossArm(spec: {
@@ -1210,9 +1286,12 @@ function a13CrossArm(spec: {
     },
     argv: ["move", `${A13_ORIGIN}#m`, `${A13_TARGET}#${spec.newId}`],
     receiving: A13_TARGET,
-    needsDeclaration: true,
-    compose: spec.compose,
-    others: { [A13_ORIGIN]: A13_ORIGIN_AFTER, [A13_THIRD]: A13_THIRD_SOURCE },
+    added: [A13_THIRD_SPECIFIER],
+    compose: (idents) => [spec.compose(idents[0] ?? "")],
+    others: [
+      { rel: A13_ORIGIN, bytes: A13_ORIGIN_AFTER, reason: A13_ORIGIN_REASON },
+      { rel: A13_THIRD, bytes: A13_THIRD_SOURCE, reason: A13_BYSTANDER_REASON },
+    ],
     previewEdits: [spec.previewEdits],
     root: {
       identity: A13_TARGET,
@@ -1468,9 +1547,9 @@ const A13_ARMS: readonly A13Arm[] = [
     files: { [A13_ORIGIN]: A13_E_BEFORE },
     argv: ["move", `${A13_ORIGIN}#p.m`, `${A13_ORIGIN}#p.n`],
     receiving: A13_ORIGIN,
-    needsDeclaration: false,
-    compose: () => A13_E_AFTER,
-    others: {},
+    added: [],
+    compose: () => [A13_E_AFTER],
+    others: [],
     previewEdits: a13SameFileEdits(
       A13_E_BEFORE,
       A13_E_MOVED,
@@ -1495,9 +1574,9 @@ const A13_ARMS: readonly A13Arm[] = [
     files: { [A13_ORIGIN]: A13_F_BEFORE },
     argv: ["move", `${A13_ORIGIN}#m`, `${A13_ORIGIN}#n`],
     receiving: A13_ORIGIN,
-    needsDeclaration: false,
-    compose: () => A13_F_AFTER,
-    others: {},
+    added: [],
+    compose: () => [A13_F_AFTER],
+    others: [],
     previewEdits: a13SameFileEdits(
       A13_F_BEFORE,
       A13_F_MOVED,
@@ -1532,49 +1611,68 @@ function a13AssertPremiseDerives(text: string, arm: A13Arm): void {
 }
 
 /**
- * The fresh identifier the receiving file's added declaration binds, read
- * off the declaration line — exactly one `import <X> from "./x.xspec"` line,
- * its other characters T6.5-8's (SPEC 6.5, 2.1) — and none of the
- * compiler-provided names.
+ * The fresh identifiers the receiving file's added declarations bind, read
+ * off the declaration lines — for each lacked module exactly one line
+ * `import <X> from "<specifier>"`, its other characters T6.5-8's (SPEC 6.5,
+ * 2.1) — distinct from one another and none of the compiler-provided names.
  */
-function a13ReadAddedIdentifier(actual: string, context: string): string {
-  const specifier = A13_THIRD_SPECIFIER.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-  const pattern = new RegExp(
-    `^import ([A-Za-z_$][A-Za-z0-9_$]*) from "${specifier}"$`,
-    "gm",
-  );
-  const matches = [...actual.matchAll(pattern)];
-  const ident = matches.length === 1 ? matches[0]?.[1] : undefined;
-  if (ident === undefined) {
-    fail(
-      `${context}: ${A13_TARGET} after the move holds exactly one added ` +
-        `declaration of ${A13_THIRD}'s module — a line of its own spelled ` +
-        `\`import <X> from "${A13_THIRD_SPECIFIER}"\`, single spaces, no ` +
-        `statement terminator, the specifier double-quoted in its canonical ` +
-        `spelling — the one binding the moved embedding is rooted at (SPEC ` +
-        `6.5, 2.1); found ${String(matches.length)} in ${JSON.stringify(actual)}`,
+function a13ReadAddedIdentifiers(
+  actual: string,
+  arm: A13Arm,
+  context: string,
+): readonly string[] {
+  const idents: string[] = [];
+  for (const specifier of arm.added) {
+    const escaped = specifier.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+    const pattern = new RegExp(
+      `^import ([A-Za-z_$][A-Za-z0-9_$]*) from "${escaped}"$`,
+      "gm",
     );
+    const matches = [...actual.matchAll(pattern)];
+    const ident = matches.length === 1 ? matches[0]?.[1] : undefined;
+    if (ident === undefined) {
+      fail(
+        `${context}: ${arm.receiving} after the move holds exactly one added ` +
+          `declaration of the module "${specifier}" — a line of its own ` +
+          `spelled \`import <X> from "${specifier}"\`, single spaces, no ` +
+          `statement terminator, the specifier double-quoted in its ` +
+          `canonical spelling — the one binding the spellings rooted at it ` +
+          `(SPEC 6.5, 2.1); found ${String(matches.length)} in ${JSON.stringify(actual)}`,
+      );
+    }
+    if (MDX_RESERVED_NAMES.includes(ident)) {
+      fail(
+        `${context}: the added declaration binds \`${ident}\`, one of the ` +
+          `compiler-provided names an added import in a spec source may not ` +
+          `bind (SPEC 6.5, 2.1)`,
+      );
+    }
+    if (idents.includes(ident)) {
+      fail(
+        `${context}: the added declarations bind \`${ident}\` twice — each ` +
+          `binds a fresh identifier distinct from the others added there ` +
+          `(SPEC 6.5)`,
+      );
+    }
+    idents.push(ident);
   }
-  if (MDX_RESERVED_NAMES.includes(ident)) {
-    fail(
-      `${context}: the added declaration binds \`${ident}\`, one of the ` +
-        `compiler-provided names an added import in a spec source may not ` +
-        `bind (SPEC 6.5, 2.1)`,
-    );
-  }
-  return ident;
+  return idents;
 }
 
-/** Name the headline deviation of a receiving file that is not byte-equal to its composed expectation. */
-function a13Deviation(actual: string, expected: string, ident: string): string {
-  if (ident !== "" && actual.startsWith(`${a13Declaration(ident)}\n`)) {
+/** Name the headline deviation of a receiving file byte-equal to none of its composed forms. */
+function a13Deviation(
+  actual: string,
+  expected: readonly string[],
+  added: number,
+): string {
+  if (added > 0 && actual.startsWith("import ")) {
     return (
-      "the declaration heads the file at offset 0 — an inadmissible offset: " +
+      "a declaration heads the file at offset 0 — an inadmissible offset: " +
       "the ESM block it begins absorbs the line after it (14.20), and 6.5 " +
       "takes the admissible line-start offset the arm names"
     );
   }
-  if (actual === `${expected}\n`) {
+  if (expected.some((form) => actual === `${form}\n`)) {
     return (
       "a kept empty line follows the declaration — the mid-line offset " +
       "before the closing-tag line's terminator was taken over the " +
@@ -1636,7 +1734,7 @@ async function a13PreviewEntry(
     fail(
       `${label}: \`files\` holds an entry for ${arm.receiving}, the file the ` +
         `operation rewrites — its target insertion` +
-        (arm.needsDeclaration ? " and import addition" : "") +
+        (arm.added.length > 0 ? " and import addition" : "") +
         ` (SPEC 6.6, 12.7); got ` +
         `[${report.files.map((candidate) => JSON.stringify(candidate.file)).join(", ")}]`,
     );
@@ -1679,12 +1777,158 @@ function a13AssertPreviewEdits(
   );
 }
 
-/** Run one arm: preview, move, bytes, preview agreement, the root's own content, clean `check`/`build`. */
-async function runA13Arm(product: ProductBinding, arm: A13Arm): Promise<void> {
-  const context = `T6.5-13 ${arm.key}`;
-  a13AssertPremiseDerives(arm.compose(arm.needsDeclaration ? "X" : ""), arm);
+/**
+ * The receiving file's `view` entry lists under `imports` exactly the
+ * declarations `idents` names (SPEC 11.4): none before the move — the
+ * paragraph's `import B …` line being content, no ESM block's (14.20) —
+ * and afterwards the added declaration alone, its range the declaration's
+ * own characters in the rewritten bytes, its name the fresh identifier, its
+ * target the module's source.
+ */
+async function a13AssertViewImports(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  arm: A13Arm,
+  idents: readonly string[],
+  actual: string,
+  context: string,
+  when: "before" | "after",
+): Promise<void> {
+  const label = `${context} \`view ${arm.receiving}\` ${when} the move`;
+  const report = decodeViewReport(
+    await runJson(product, workspace, ["view", arm.receiving], label),
+    { text: false },
+    label,
+  );
+  const view = report.views.find(
+    (candidate) => candidate.file === arm.receiving,
+  );
+  if (view === undefined) {
+    fail(
+      `${label}: \`views\` holds the requested file's view — a parseable ` +
+        `discovered spec source (SPEC 11.4); got ` +
+        `[${report.views.map((candidate) => JSON.stringify(candidate.file)).join(", ")}]`,
+    );
+  }
+  const expected = idents.map((ident, index) => {
+    const specifier = arm.added[index] ?? "";
+    const line = `import ${ident} from "${specifier}"`;
+    const start = actual.indexOf(line);
+    return {
+      range: { start, end: start + line.length },
+      name: ident,
+      target: A13_MODULE_SOURCES[specifier] ?? "",
+    };
+  });
+  assertSameJson(
+    view.imports,
+    expected,
+    `${label}: \`imports\` lists ` +
+      (when === "before"
+        ? "no declaration — the file's `import B …` line is a paragraph's, " +
+          "content and no ESM block's (SPEC 14.20, 11.4; T3-1's grammar boundary)"
+        : "the added declaration alone — its range the declaration's own " +
+          "characters, its name the fresh identifier, its target the third " +
+          "module's source; the paragraph's line still content (SPEC 11.4, 6.5)"),
+  );
+}
+
+/** `impact --base <pre-move ref> --json` against the arm's pins (SPEC 5.6, 6.2). */
+async function a13AssertImpact(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  base: string,
+  expectation: A13ImpactExpectation,
+  context: string,
+): Promise<void> {
+  const label = `${context} \`impact --base <pre-move ref> --json\``;
+  const report = decodeImpactReport(
+    await runJson(
+      product,
+      workspace,
+      ["impact", "--base", base, "--json"],
+      label,
+    ),
+    label,
+  );
+  assertImpactPins(
+    report,
+    expectation.known,
+    expectation.pins,
+    `${label} — ${expectation.reason}`,
+  );
+}
+
+/**
+ * H-6: the order the implementation fixes among several added declarations
+ * is byte-identical across repeated runs — the move performed again in a
+ * fresh workspace of the same staging yields the same receiving bytes.
+ */
+async function a13AssertRepeatable(
+  product: ProductBinding,
+  arm: A13Arm,
+  first: string,
+): Promise<void> {
+  const context = `T6.5-13 ${arm.key} (repeated run)`;
   await withWorkspace(arm.files, async (workspace) => {
     await buildOk(product, workspace, `${context} \`build\` over the staging`);
+    await expectExit(
+      product,
+      workspace,
+      [...arm.argv],
+      0,
+      `${context} \`${arm.argv.join(" ")}\` — a performable move (SPEC 6.5)`,
+    );
+    const again = await readSourceText(workspace, arm.receiving, context);
+    if (again !== first) {
+      fail(
+        `${context}: ${arm.receiving} after the same move in a fresh ` +
+          `workspace is byte-identical to the first run's — the order the ` +
+          `implementation fixes among the added declarations, and their ` +
+          `identifiers, are deterministic for a given operation and ` +
+          `workspace state (SPEC 6.5, 6.1; H-6)\n` +
+          `  first: ${JSON.stringify(first)}\n` +
+          `  again: ${JSON.stringify(again)}`,
+      );
+    }
+  });
+}
+
+/** The placeholder identifiers the premise check composes with (any valid identifiers serve). */
+const A13_PLACEHOLDER_IDENTS: readonly string[] = ["X", "Y", "Z"];
+
+/**
+ * Run one arm: preview, move, bytes, preview agreement, the root's own
+ * content, clean `check`/`build`, and the arm's `view` and `impact`
+ * expectations where it states them; returns the receiving file's bytes.
+ */
+async function runA13Arm(
+  product: ProductBinding,
+  arm: A13Arm,
+): Promise<string> {
+  const context = `T6.5-13 ${arm.key}`;
+  for (const form of arm.compose(
+    A13_PLACEHOLDER_IDENTS.slice(0, arm.added.length),
+  )) {
+    a13AssertPremiseDerives(form, arm);
+  }
+  return await withWorkspace(arm.files, async (workspace) => {
+    await buildOk(product, workspace, `${context} \`build\` over the staging`);
+    if (arm.cleanBefore === true) {
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["build", "--json"],
+        `${context} \`build --json\` over the staging — clean: the target's ` +
+          `paragraph-headed \`import B …\` line is content, no declaration ` +
+          `of an absent module (SPEC 14.20, 12.1; T3-1's grammar boundary)`,
+      );
+    }
+    let base = "";
+    if (arm.impact !== undefined) {
+      await workspace.gitInit();
+      base = await workspace.gitCommitAll("pre-move baseline");
+    }
     const before = await a13QueryRoot(
       product,
       workspace,
@@ -1700,6 +1944,17 @@ async function runA13Arm(product: ProductBinding, arm: A13Arm): Promise<void> {
           `(SPEC 1.6, 3); \`query node\` reports ${JSON.stringify(before.ownText)}`,
       );
     }
+    if (arm.viewImports === true) {
+      await a13AssertViewImports(
+        product,
+        workspace,
+        arm,
+        [],
+        "",
+        context,
+        "before",
+      );
+    }
     const entry = await a13PreviewEntry(product, workspace, arm, context);
     await expectExit(
       product,
@@ -1710,42 +1965,37 @@ async function runA13Arm(product: ProductBinding, arm: A13Arm): Promise<void> {
     );
 
     const actual = await readSourceText(workspace, arm.receiving, context);
-    const ident = arm.needsDeclaration
-      ? a13ReadAddedIdentifier(actual, context)
-      : "";
-    const expected = arm.compose(ident);
-    if (ident !== "") {
-      const verdict = deriveMdx(expected);
+    const idents = a13ReadAddedIdentifiers(actual, arm, context);
+    const expected = arm.compose(idents);
+    for (const form of idents.length > 0 ? expected : []) {
+      const verdict = deriveMdx(form);
       if (!verdict.derives) {
         fail(
-          `${context}: composed with the identifier the product bound, ` +
-            `\`${ident}\`, the expected ${arm.receiving} does not derive ` +
-            `under the stock MDX 3 grammar (${verdict.reason}) — the added ` +
-            `declaration binds no admissible identifier (SPEC 6.5, 2.1, 14.20)`,
+          `${context}: composed with the identifiers the product bound, ` +
+            `${JSON.stringify(idents)}, the expected ${arm.receiving} does ` +
+            `not derive under the stock MDX 3 grammar (${verdict.reason}) — ` +
+            `an added declaration binds no admissible identifier (SPEC 6.5, ` +
+            `2.1, 14.20)`,
         );
       }
     }
-    if (actual !== expected) {
-      const deviation = a13Deviation(actual, expected, ident);
+    if (!expected.includes(actual)) {
+      const deviation = a13Deviation(actual, expected, arm.added.length);
       fail(
         `${context}: ${arm.receiving} after the move — ` +
           (deviation === "" ? "" : `${deviation}; `) +
           `${arm.summary} (SPEC 6.5, 6.4, 3; H-4, normalizing nothing)\n` +
           `  actual:   ${JSON.stringify(actual)}\n` +
-          `  expected: ${JSON.stringify(expected)}`,
+          expected
+            .map((form) => `  expected: ${JSON.stringify(form)}`)
+            .join("\n"),
       );
     }
-    for (const [rel, bytes] of Object.entries(arm.others)) {
+    for (const other of arm.others) {
       await assertFileBytes(
-        workspace.path(rel),
-        bytes,
-        `${context}: ${rel} after the move — ` +
-          (rel === A13_ORIGIN
-            ? "the moved construct deleted in place, its emptied line " +
-              "dropped with its terminator, the blank line before it kept, " +
-              "the `X` declaration kept for the sibling's use"
-            : "the third module, embedded but not moved, untouched") +
-          " (SPEC 6.5, 3; H-4)",
+        workspace.path(other.rel),
+        other.bytes,
+        `${context}: ${other.rel} after the move — ${other.reason} (SPEC 6.5, 3; H-4)`,
       );
     }
     a13AssertPreviewEdits(entry, arm, context);
@@ -1782,7 +2032,28 @@ async function runA13Arm(product: ProductBinding, arm: A13Arm): Promise<void> {
           `; before ${before.hashes.ownHash}, after ${after.hashes.ownHash}`,
       );
     }
+    if (arm.viewImports === true) {
+      await a13AssertViewImports(
+        product,
+        workspace,
+        arm,
+        idents,
+        actual,
+        context,
+        "after",
+      );
+    }
     await assertCleanAfterMove(product, workspace, arm.summary, context);
+    if (arm.impact !== undefined) {
+      await a13AssertImpact(
+        product,
+        workspace,
+        base,
+        arm.impact(idents),
+        context,
+      );
+    }
+    return actual;
   });
 }
 
@@ -1792,7 +2063,10 @@ const T6_5_13 = defineProductTest({
     "admissible offsets, the line-start preference, and composition in pre-operation coordinates: byte-asserted section-move arms whose receiving file is composed whole from 6.4/6.5 and 3, value-blind in the fresh identifier alone (read from the added declaration, whose other characters are T6.5-8's), the moved text carrying `{text(X.a)}` through the origin's binding of a third module the target lacks so that exactly `import <X> from \"./x.xspec\"` is added — (a) the preference: a target holding a line-start admissible offset (the file's end after its final terminator) and a mid-line one takes the line start, the declaration appended after the final terminator; its sibling, whose only line-start admissible offset is the start of an empty line after the `</S>` line, places the declaration there with the empty line kept; (b) the self-closing target parent, its line unterminated: the tag's end the only admissible offset, the result `<S id=\"p\">`, U+000A, the moved text, U+000A, `</S>`, U+000A, the declaration, U+000A, the preview's `target-parent-rewrite` spanning the tag and `target-insertion` and `import-addition` both zero-length at the tag's end in 12.7's tie-break order; with a final terminator the same bytes, the addition at the file's end; (c) the forced mid-line case, the file's end the only admissible offset, the added terminator ending the `</S>` line; (d) a top-level `new-id` at the end of a paragraph-ended file, terminated or not: `para`, U+000A, the moved text, U+000A, the declaration, U+000A, `target-insertion` and `import-addition` both zero-length at the file's byte length; (e) a same-file move in `foo <S id=\"p\">` / `<S id=\"p.m\">x</S></S> baz`, the insertion judged over the composed text so that no terminator is added; (f) a same-file top-level move of a file's last section whose unterminated last line the deletion drops, no terminator added — each arm's preview offsets agreeing with the real bytes, the receiving root's own text and ownHash compared through `query node` before and after (unchanged in (a), (b), (c), (e), (f); (d)'s root `changed`, its own text `para` gaining the added terminator in the unterminated variant), `build` and `check` clean after each move, every composed form verified to derive (S-9) (SPEC 6.5, 6.4, 6.6, 6.2, 3, 5.5, 12.7; H-4)",
   run: async (product) => {
     for (const arm of A13_ARMS) {
-      await runA13Arm(product, arm);
+      const bytes = await runA13Arm(product, arm);
+      if (arm.repeatable === true) {
+        await a13AssertRepeatable(product, arm, bytes);
+      }
     }
   },
 });
