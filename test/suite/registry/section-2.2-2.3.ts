@@ -41,6 +41,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { UnparseableStaging } from "./support.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -826,6 +827,29 @@ const T2_3_3_INVALID_FORMS: readonly {
 const T2_3_3_UNPARSEABLE_PREFIX = '{text("a") ';
 const T2_3_3_UNPARSEABLE_FORM = `${T2_3_3_UNPARSEABLE_PREFIX}text("b")}`;
 
+/**
+ * The unparseable staging and its pinned offset — the very bytes the arm
+ * below drives, staged alone in section `u`, the offset the container's
+ * start plus the byte length of the prefix through the space after the
+ * first call — exported for T14-11's re-assertion of the offset the same
+ * way (TEST-SPEC T14-11's closing clause; the S-9 `unparseable` declaration
+ * accompanies it wherever it is staged).
+ */
+export const T2_3_3_UNPARSEABLE_STAGING: UnparseableStaging = (() => {
+  const staging = stageT233("u", T2_3_3_UNPARSEABLE_FORM);
+  return {
+    name:
+      `\`${T2_3_3_UNPARSEABLE_FORM}\` — no expression the grammar derives, ` +
+      "the zero-length range at the offset of the second `text` (T2.3-3)",
+    kind: "spec-source",
+    file: T2_3_3_FILE,
+    files: { [T2_3_3_FILE]: staging.source },
+    offset:
+      staging.container.start +
+      Buffer.byteLength(T2_3_3_UNPARSEABLE_PREFIX, "utf8"),
+  };
+})();
+
 /** The one finding of `condition` (its count asserted beforehand). */
 function t233FindingOf(
   findings: readonly Finding[],
@@ -1062,14 +1086,11 @@ const T2_3_3 = defineProductTest({
     }
 
     // --- `{text("a") text("b")}`: unparseable, at the second `text` -----------
-    const unparseable = stageT233("u", T2_3_3_UNPARSEABLE_FORM);
-    const offset =
-      unparseable.container.start +
-      Buffer.byteLength(T2_3_3_UNPARSEABLE_PREFIX, "utf8");
+    const { offset } = T2_3_3_UNPARSEABLE_STAGING;
     const workspace = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [T2_3_3_FILE]: unparseable.source,
+        ...T2_3_3_UNPARSEABLE_STAGING.files,
       },
       // S-9: the one form TEST-SPEC declares unparseable (14.20).
       mdx: { unparseable: [T2_3_3_FILE] },

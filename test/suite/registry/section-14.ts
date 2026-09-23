@@ -287,7 +287,17 @@ import {
 } from "./section-6.4.js";
 import type { SameScopeDeclarationArm } from "./section-4.5.js";
 import { T4_5_8_FURTHER_LOCATED_FORMS } from "./section-4.5.js";
-import { T14_12_REPORTER_STAGINGS } from "./section-14-iii.js";
+import { T2_3_3_UNPARSEABLE_STAGING } from "./section-2.2-2.3.js";
+import { T2_4_2_UNPARSEABLE_STAGINGS } from "./section-2.4.js";
+import {
+  T2_7_3_SPREAD_UNPARSEABLE_STAGING,
+  T2_7_4_UNPARSEABLE_STAGINGS,
+} from "./section-2.7.js";
+import type { UnparseableArm } from "./section-14-iii.js";
+import {
+  T14_12_REPORTER_STAGINGS,
+  T14_12_UNPARSEABLE_ARMS,
+} from "./section-14-iii.js";
 import type { RefusalExpectation } from "./section-6.5.js";
 import {
   MOVE_DERIVED_PATH_CASE,
@@ -298,6 +308,7 @@ import {
   MOVE_REFUSAL_FILES,
   stageMoveRefusalOccupants,
 } from "./section-6.5.js";
+import type { UnparseableStaging } from "./support.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -4001,6 +4012,79 @@ const T14_11_ENCODING_FILES = T14_11_ENCODING_FORMS.flatMap((form) =>
   })),
 );
 
+// (w) The syntax-failure offsets other tests pin, re-asserted the same way
+// (TEST-SPEC T14-11's closing clause: "the syntax-failure offsets of T2.3-3,
+// T2.4-2, T2.7-3, T2.7-4, and T14-12 asserted the same way"). Each home
+// module exports its staging — the very bytes its own arm drives, never
+// re-spelled here (`UnparseableStaging`, support.ts) — and T14-11 runs
+// `build --json` over it as one more range-rule arm: exactly one finding,
+// 14.20, `path` null, its one location the zero-length range at the offset
+// SPEC 14's rule fixes — the byte length of the longest whole-character
+// prefix with which some well-formed file begins, never a line/column pair
+// and never past the file's length. The stagings: T2.3-3's
+// `{text("a") text("b")}` at the second `text`; T2.4-2's TypeScript-only
+// forms in a spec source — `d={BASE.auth!}` at its closing brace,
+// `{text(BASE.auth!)}` at its closing parenthesis, and the `as` forms at the
+// offset of `as`; T2.7-3's spread attribute `{...a, b}` at its comma;
+// T2.7-4's comment-grammar failures — U+0085 and U+200B between braces at
+// the code point, `{// c` U+2028/U+2029 `}` U+000A `}` at the first `}`,
+// and `{// c}` with no later `}` at the file's byte length; and T14-12's
+// negative arms — `010` and `09` in a `.ts` file at the second digit, the
+// spread's comma, an ESM block's statement at the `const` line's start,
+// import attributes at `with`, `d={]}` at the `]`, `{text(}` at its `}`,
+// and an unbalanced `{text("a")` at the file's byte length. Every spec
+// source is declared unparseable (S-9) as in its home test; a code source is
+// the product's alone to judge; the configuration is this module's for the
+// staging's kind (the home modules stage the same text).
+
+/** T14-12's arm as an `UnparseableStaging`: its sources beside the configuration. */
+function t1412Staging(arm: UnparseableArm): UnparseableStaging {
+  return {
+    name: `(${arm.arm}) ${arm.name} (T14-12)`,
+    kind: arm.kind,
+    file: arm.file,
+    files: Object.fromEntries(
+      Object.entries(arm.files).filter(([file]) => file !== "xspec.config.ts"),
+    ),
+    offset: arm.offset,
+  };
+}
+
+/** Every re-asserted staging, in the order of T14-11's closing clause. */
+const T14_11_REASSERTED_STAGINGS: readonly UnparseableStaging[] = [
+  T2_3_3_UNPARSEABLE_STAGING,
+  ...T2_4_2_UNPARSEABLE_STAGINGS,
+  T2_7_3_SPREAD_UNPARSEABLE_STAGING,
+  ...T2_7_4_UNPARSEABLE_STAGINGS,
+  ...T14_12_UNPARSEABLE_ARMS.map(t1412Staging),
+];
+
+/** One re-asserted staging as a range-rule arm: `{14.20: 1}` at its offset. */
+function reassertedCase(
+  index: number,
+  staging: UnparseableStaging,
+): RangeRuleCase {
+  const { kind, file, files, offset } = staging;
+  return {
+    arm: `w.${String(index)}`,
+    rule: `14.20 — a syntax-failure offset another test pins, re-asserted: ${staging.name}`,
+    config: kind === "code-source" ? SPEC_AND_CODE_CONFIG : SPECS_ONLY_CONFIG,
+    ...(kind === "spec-source" ? { mdx: { unparseable: [file] } } : {}),
+    files,
+    expected: [
+      {
+        condition: "14.20",
+        locations: [{ file, range: { start: offset, end: offset } }],
+      },
+    ],
+  };
+}
+
+const T14_11_REASSERTED_CASES: readonly RangeRuleCase[] =
+  T14_11_REASSERTED_STAGINGS.map((staging, index) =>
+    reassertedCase(index + 1, staging),
+  );
+
 const T14_11_SPEC = "specs/A.mdx";
 const T14_11_CODE = "src/app.ts";
 
@@ -4319,6 +4403,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
       locations: [entry.location],
     })),
   },
+  ...T14_11_REASSERTED_CASES,
 ];
 
 /**
@@ -4533,7 +4618,7 @@ async function runRefusedReadArm(product: ProductBinding): Promise<void> {
 const T14_11 = defineProductTest({
   id: "T14-11",
   title:
-    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), a non-static bare reference exclusive of its `;`, the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms and colliding declarations (the declarator `SPEC = 1`, `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`), 14.16's construct forms (a fragment `<>` through `</>` included), 14.18's chain-extended binding, 14.20's zero-length offsets (a byte-order mark; an encoding failure at the first byte of the first ill-formed sequence — `41 E2 82 41` and `41 E2 82` at the file's end → 1, `C0 80` and `ED A0 80` → 0 — in a spec and a code source alike; syntax; and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.6, 1.7, 2.4, 5.7, 11.2, 11.4, 12.7)",
+    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), a non-static bare reference exclusive of its `;`, the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms and colliding declarations (the declarator `SPEC = 1`, `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`), 14.16's construct forms (a fragment `<>` through `</>` included), 14.18's chain-extended binding, 14.20's zero-length offsets (a byte-order mark; an encoding failure at the first byte of the first ill-formed sequence — `41 E2 82 41` and `41 E2 82` at the file's end → 1, `C0 80` and `ED A0 80` → 0 — in a spec and a code source alike; syntax — its own two forms and, re-asserted the same way, the offsets T2.3-3, T2.4-2, T2.7-3, T2.7-4, and T14-12 pin; and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.6, 1.7, 2.4, 5.7, 11.2, 11.4, 12.7)",
   run: async (product) => {
     for (const kase of T14_11_CASES) {
       await runRangeRuleArm(product, kase);

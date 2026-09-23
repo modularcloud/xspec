@@ -51,6 +51,7 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
 import type { OccurrenceUnit } from "./section-5.7.js";
 import { expectedUnitMultiset, renderOccurrenceUnit } from "./section-5.7.js";
+import type { UnparseableStaging } from "./support.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -454,6 +455,80 @@ interface RejectedFormStaging {
 }
 
 /**
+ * One form's two stagings of `specs/A.mdx` (SPEC 2.4: each form is run in
+ * `d` and in `text(...)`): in `d`, the offending construct is the opening
+ * tag carrying the braced reference (2.7: a braced `d` value that is not a
+ * static reference or array literal of them is a dynamic argument, 14.8),
+ * its expression starting right after `d={`; in `text(...)`, the embedding
+ * container on its own line inside an otherwise valid section, its
+ * expression starting right after `{text(`.
+ */
+function stageDynamicForm(arm: DynamicFormArm): {
+  readonly d: RejectedFormStaging;
+  readonly text: RejectedFormStaging;
+} {
+  const dTagPrefix = '<S id="bad" d={';
+  const dConstruct = `${dTagPrefix}${arm.expression}}>`;
+  const textPrefix = DYNAMIC_ARM_PREAMBLE + '<S id="bad">\n';
+  const callPrefix = "{text(";
+  const textConstruct = `${callPrefix}${arm.expression})}`;
+  return {
+    d: {
+      source: DYNAMIC_ARM_PREAMBLE + dConstruct + "\nBad reference.\n</S>\n",
+      window: byteWindow(DYNAMIC_ARM_PREAMBLE, dConstruct),
+      expression: expressionRange(
+        DYNAMIC_ARM_PREAMBLE + dTagPrefix,
+        arm.expression,
+      ),
+    },
+    text: {
+      source: textPrefix + textConstruct + "\n</S>\n",
+      window: byteWindow(textPrefix, textConstruct),
+      expression: expressionRange(textPrefix + callPrefix, arm.expression),
+    },
+  };
+}
+
+/**
+ * A TypeScript-only form's syntax-failure offset: `unparseableAt` bytes past
+ * its expression's start (SPEC 14's rule, precomputed per form above).
+ */
+function syntaxFailureOffset(
+  staging: RejectedFormStaging,
+  unparseableAt: number,
+): number {
+  return staging.expression.start + unparseableAt;
+}
+
+/**
+ * The TypeScript-only forms' stagings — the very bytes the arms below drive,
+ * `specs/A.mdx` beside `specs/BASE.mdx`, in `d` and in `text(...)` — each
+ * with its syntax failure's offset, exported for T14-11's re-assertion of
+ * the offsets the same way (TEST-SPEC T14-11's closing clause); `specs/A.mdx`
+ * is declared unparseable under S-9 wherever it is staged.
+ */
+export const T2_4_2_UNPARSEABLE_STAGINGS: readonly UnparseableStaging[] =
+  DYNAMIC_FORM_ARMS.flatMap((arm) => {
+    const { unparseableAt } = arm;
+    if (unparseableAt === undefined) {
+      return [];
+    }
+    const { d, text } = stageDynamicForm(arm);
+    return (
+      [
+        ["`d`", d],
+        ["`text(...)`", text],
+      ] as const
+    ).map(([position, staging]): UnparseableStaging => ({
+      name: `${arm.name} in ${position}: \`${arm.expression}\` (T2.4-2)`,
+      kind: "spec-source",
+      file: "specs/A.mdx",
+      files: { ...DYNAMIC_ARM_BASE_FILES, "specs/A.mdx": staging.source },
+      offset: syntaxFailureOffset(staging, unparseableAt),
+    }));
+  });
+
+/**
  * Run one dynamic-form arm: `build --json` exits 1 with exactly one finding,
  * condition 14.8, located within the offending construct's own byte window
  * in `specs/A.mdx` (SPEC 14: errors identify file and location) — or, where
@@ -539,20 +614,10 @@ const T2_4_2 = defineProductTest({
     'each dynamic form — template literal argument; identifier or call as index; optional chaining; parenthesized chain; conditional expression; the "another meaning" case `BASE.a<X>y`, two comparisons, its `d` finding at the whole expression — fails with 14.8, in `d` and in `text(...)`, in MDX, while TypeScript-only syntax — a non-null assertion, a type assertion — is 14.20 alone at the offset SPEC 14\'s syntax-failure rule fixes (SPEC 2.4, 14.8, 14.20)',
   run: async (product) => {
     for (const arm of DYNAMIC_FORM_ARMS) {
-      // In `d`: the offending construct is the opening tag carrying the
-      // braced reference (SPEC 2.7: a braced `d` value that is not a static
-      // reference or array literal of them is a dynamic argument, 14.8); its
-      // expression starts right after `d={`.
-      const dTagPrefix = '<S id="bad" d={';
-      const dConstruct = `${dTagPrefix}${arm.expression}}>`;
-      const dStaging: RejectedFormStaging = {
-        source: DYNAMIC_ARM_PREAMBLE + dConstruct + "\nBad reference.\n</S>\n",
-        window: byteWindow(DYNAMIC_ARM_PREAMBLE, dConstruct),
-        expression: expressionRange(
-          DYNAMIC_ARM_PREAMBLE + dTagPrefix,
-          arm.expression,
-        ),
-      };
+      // The form in `d` and in `text(...)` (`stageDynamicForm`): the
+      // TypeScript-only forms' stagings are the exported
+      // `T2_4_2_UNPARSEABLE_STAGINGS`, driven here by the same construction.
+      const { d: dStaging, text: textStaging } = stageDynamicForm(arm);
       const dContext = `T2.4-2 \`build --json\` with ${arm.name} in \`d\``;
       if (arm.unparseableAt === undefined) {
         await runDynamicFormArm(
@@ -565,22 +630,11 @@ const T2_4_2 = defineProductTest({
         await runUnparseableFormArm(
           product,
           dStaging.source,
-          dStaging.expression.start + arm.unparseableAt,
+          syntaxFailureOffset(dStaging, arm.unparseableAt),
           dContext,
         );
       }
 
-      // In `text(...)`: the offending construct is the embedding container
-      // on its own line inside an otherwise valid section; its expression
-      // starts right after `{text(`.
-      const textPrefix = DYNAMIC_ARM_PREAMBLE + '<S id="bad">\n';
-      const callPrefix = "{text(";
-      const textConstruct = `${callPrefix}${arm.expression})}`;
-      const textStaging: RejectedFormStaging = {
-        source: textPrefix + textConstruct + "\n</S>\n",
-        window: byteWindow(textPrefix, textConstruct),
-        expression: expressionRange(textPrefix + callPrefix, arm.expression),
-      };
       const textContext = `T2.4-2 \`build --json\` with ${arm.name} in \`text(...)\``;
       if (arm.unparseableAt === undefined) {
         // An embedding's 14.8 is located by its full braced container (SPEC
@@ -590,7 +644,7 @@ const T2_4_2 = defineProductTest({
         await runUnparseableFormArm(
           product,
           textStaging.source,
-          textStaging.expression.start + arm.unparseableAt,
+          syntaxFailureOffset(textStaging, arm.unparseableAt),
           textContext,
         );
       }

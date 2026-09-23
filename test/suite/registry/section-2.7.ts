@@ -90,7 +90,10 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
-import type { FindingSourceExpectation } from "./support.js";
+import type {
+  FindingSourceExpectation,
+  UnparseableStaging,
+} from "./support.js";
 import {
   assertConditionCounts,
   assertFindingLocated,
@@ -1378,6 +1381,24 @@ const REPEATED_UNKNOWN_CONSTRUCT = '<S id="sec" wibble="a" wibble="b">';
 const T2_7_3_SPREAD_UNPARSEABLE_CONSTRUCT = '<S id="x" {...a, b}>';
 const T2_7_3_SPREAD_COMMA_OFFSET = utf8Bytes(`${SIBLING}<S id="x" {...a`);
 
+/**
+ * The failing half's staging — the very bytes the arm below drives, the
+ * one-defect file `invalidPropSource` composes — with the comma's offset,
+ * exported for T14-11's re-assertion of the offset the same way (TEST-SPEC
+ * T14-11's closing clause); declared unparseable under S-9 wherever staged.
+ */
+export const T2_7_3_SPREAD_UNPARSEABLE_STAGING: UnparseableStaging = {
+  name:
+    "a spread attribute `{...a, b}` — `...` followed by more than one " +
+    "assignment expression, the zero-length range at its comma (T2.7-3)",
+  kind: "spec-source",
+  file: INVALID_PROP_FILE,
+  files: {
+    [INVALID_PROP_FILE]: invalidPropSource(T2_7_3_SPREAD_UNPARSEABLE_CONSTRUCT),
+  },
+  offset: T2_7_3_SPREAD_COMMA_OFFSET,
+};
+
 // The positive quoting arm (SPEC 2.7: single- or double-quoted alike; 2.4):
 // the two spellings of one workspace, rebuilt in place. Byte equality is
 // asserted where SPEC.md fixes bytes — the emitted Markdown (3) — and the
@@ -1459,11 +1480,7 @@ const T2_7_3 = defineProductTest({
       "bare comma sequence (`{...a, b}`, not well-formed)";
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      {
-        [INVALID_PROP_FILE]: invalidPropSource(
-          T2_7_3_SPREAD_UNPARSEABLE_CONSTRUCT,
-        ),
-      },
+      T2_7_3_SPREAD_UNPARSEABLE_STAGING.files,
       async (workspace) => {
         const findings = await buildFindings(
           product,
@@ -1992,6 +2009,21 @@ const T2_7_4_UNPARSEABLE_ARMS: readonly UnparseableCommentArm[] = [
       "container (SPEC 14, 14.20, 2.7; T14-12)",
   },
 ];
+
+/**
+ * The five stagings as T14-11 re-asserts them (TEST-SPEC T14-11's closing
+ * clause): each arm's bytes as `specs/A.mdx` with its offset — the same
+ * staging `runUnparseableCommentArm` drives; declared unparseable under S-9
+ * wherever staged.
+ */
+export const T2_7_4_UNPARSEABLE_STAGINGS: readonly UnparseableStaging[] =
+  T2_7_4_UNPARSEABLE_ARMS.map((arm): UnparseableStaging => ({
+    name: `${arm.name} (T2.7-4)`,
+    kind: "spec-source",
+    file: T2_7_4_UNPARSEABLE_FILE,
+    files: { [T2_7_4_UNPARSEABLE_FILE]: arm.source },
+    offset: arm.offset,
+  }));
 
 /** One unparseable form: `build --json`, then the bare `view --text`. */
 async function runUnparseableCommentArm(

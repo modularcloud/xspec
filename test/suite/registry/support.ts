@@ -375,6 +375,33 @@ export function byteWindow(
   return { start, end: start + Buffer.byteLength(construct, "utf8") + 1 };
 }
 
+/**
+ * A staging TEST-SPEC declares unparseable (14.20) whose syntax-failure
+ * offset its home test pins and T14-11 re-asserts the same way (TEST-SPEC
+ * T14-11's closing clause over T2.3-3, T2.4-2, T2.7-3, T2.7-4, and T14-12):
+ * exported by the home module from the very bytes its own arm drives, never
+ * re-spelled by the consumer. `files` holds every source the arm stages —
+ * the unparseable `file` and whatever valid sources stand beside it — the
+ * configuration excluded (the consumer supplies one discovering them);
+ * `offset` is the byte length of the longest whole-character prefix with
+ * which some well-formed file begins (SPEC 14, 1.7), the one zero-length
+ * range `{offset, offset}` of the file's sole 14.20 finding. A spec source is
+ * declared unparseable under S-9 wherever it is staged; a code source is the
+ * product's alone to judge.
+ */
+export interface UnparseableStaging {
+  /** The form under test (diagnostics). */
+  readonly name: string;
+  /** Where the failing file lies: a spec source (`.mdx`) or a code source (`.ts`). */
+  readonly kind: "spec-source" | "code-source";
+  /** The unparseable file's workspace-relative path. */
+  readonly file: string;
+  /** Every staged source, the configuration excluded. */
+  readonly files: Readonly<Record<string, string>>;
+  /** The failure's byte offset: SPEC 14's zero-length range `{offset, offset}`. */
+  readonly offset: number;
+}
+
 /** What a finding must identify about its source (SPEC.md 14 preamble). */
 export interface FindingSourceExpectation {
   /** The workspace-relative, `/`-separated source file (SPEC.md 1.5, 14). */
