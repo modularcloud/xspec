@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 37 — T6.5-17 `refused-moved-import`
-- Cites: TEST-SPEC T6.5-17 (a move whose moved text holds an import declaration is refused, judged over the moved text as it stands: exit 1, nothing modified, exactly one `refused-moved-import` finding whose `locations` are each declaration's import range of 11.4 in the origin, `identities` exactly `[]`, `path` `null`; fixture: a valid pre-move workspace whose origin section holds a blank-line-separated ESM block `<S id="m">`, U+000A, U+000A, `import X from "./x.xspec"`, U+000A, U+000A, `body {text(X.a)}`, U+000A, `</S>` — T2.1-6's form — one arm with one declaration, one with two (`import X …`, `import Y …` on successive lines: two locations); an unused-binding arm refused all the same; reported beside every other applicable reason with no intrinsic-validity qualifier — an arm with `<new-id>` `then` reports `refused-invalid-id` and `refused-moved-import` both; the positive counterpart with the declaration in the file's top-level block moving successfully, the moved reference re-rooted through an added binding in the target (T6.5-10), the origin's declaration kept for its remaining use, `check` clean); SPEC 6.5, 14, 11.4, 12.7. Finding A-12. Depends on Tasks 4, 15, 31.
-- Change: register T6.5-17 in `section-6.5-iii.ts` per its entry (the preview twin is Task 40's).
-- Verify: `-t 'T6.5-17 '` no harness error; self project green.
-
 ### Task 38 — T6.5-18: shadow-aware binding choice
 - Cites: TEST-SPEC T6.5-18 (fixture: `specs/origin.mdx` holding `x`, `specs/target.mdx` holding `z`, `src/c.ts` = `import O from "../specs/origin.xspec"`, `import T from "../specs/target.xspec"`, a module-scope marker `T.z`, and a function `f` holding `const T = 1` beside the marker `O.x` — valid, compiling clean (H-2); after `move specs/origin.mdx#x specs/target.mdx#y` a declaration binding a fresh `<F>` (value unpinned, never `T`) is added and `O.x` is rewritten through it, `T.z` untouched; the entry's remaining assertions); SPEC 6.5, 4.5. Finding A-13. Depends on Tasks 28, 31.
 - Change: register T6.5-18 in `section-6.5-iii.ts` per its entry; assert compile-cleanliness through the TypeScript tooling driver (`test/helpers/tooling.ts`).
