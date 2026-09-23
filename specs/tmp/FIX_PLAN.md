@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 17 — T2.4-2: TypeScript-only forms as 14.20 at pinned offsets; `d={BASE.a<X>y}`
-- Cites: TEST-SPEC T2.4-2 (rewritten: non-null and `as` forms in a spec source are 14.20 alone at precomputed zero-length offsets — the closing brace / the closing parenthesis / the offset of `as`; `d={BASE.a<X>y}` is 14.8 at the whole expression); SPEC 2.4, 14.8, 14.20. Finding A-21. Depends on Task 3.
-- Change: `DYNAMIC_FORM_ARMS` (`section-2.4.ts` ~L326–338) asserts 14.8 for `BASE!.auth`; re-pin it and add the `as` forms as 14.20 alone at the entry's offsets (declared `mdx.unparseable`; confirm each offset against `deriveMdx`'s reported position — the grammar's expression parser has no TypeScript), and add the `d={BASE.a<X>y}` 14.8-at-whole-expression arm (well-formed). If the stock parser accepts a form the entry declares unparseable, that is a declaration defect: record it in `specs/tmp/TEST-SPEC-PROBLEMS.md` per the mission rules instead of pinning either way.
-- Verify: `-t 'T2.4-2 '` no harness error; self project green.
-
 ### Task 18 — T2.7-1's fragment and attribute-expression arms; T2.7-3's spread grammar pair
 - Cites: TEST-SPEC T2.7-1 (the fragment `<>…</>` arm: one 14.16 from `<>` through `</>`, no node, content preserved under `view --text`; `<S id="x" d={1}>` → 14.8 alone; `<div a={1}></div>` → exactly one 14.16); T2.7-3 (`<S id="x" {...(a, b)}>` → 14.17 at the braced construct vs `<S id="x" {...a, b}>` → 14.20 at the comma offset); SPEC 2.7, 14.16, 14.17, 14.20. Findings A-22, A-23. Depends on Task 3.
 - Change: extend `FOREIGN_CONSTRUCT_ARMS` (`section-2.7.ts` ~L220; today `<div>`, `{40 + 2}`, `export`, the section-in-container arm) and T2.7-3's spread staging (today `{...extra}` only); declare the `{...a, b}` staging `mdx.unparseable`.

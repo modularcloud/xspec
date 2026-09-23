@@ -313,22 +313,52 @@ const T2_4_1 = defineProductTest({
 // T2.4-2
 // ---------------------------------------------------------------------------
 
-// The dynamic forms of SPEC 2.4, each run in `d` and in `text(...)`, in MDX.
-// Every arm's workspace is otherwise valid — `specs/BASE.mdx` provides the
-// `auth` node the chain forms name, and the local `alpha` node exists so a
-// product wrongly treating the template literal as a static string would
-// resolve it and exit 0 (caught by the exit-1 expectation) — making the one
-// dynamic reference the only condition present (the exact count has teeth).
+// The dynamic forms of SPEC 2.4, each run in `d` and in `text(...)`, in MDX,
+// and beside them the TypeScript-only spellings a spec source's grammar does
+// not derive. Every arm's workspace is otherwise valid — `specs/BASE.mdx`
+// provides the `auth` node the chain forms name, and the local `alpha` node
+// exists so a product wrongly treating the template literal as a static
+// string would resolve it and exit 0 (caught by the exit-1 expectation) —
+// making the one offending construct the only condition present (the exact
+// count has teeth).
+//
+// Two kinds of arm (SPEC 2.4): a form ECMAScript 2024 derives that makes the
+// reference dynamic is 14.8 — the "another meaning" case `d={BASE.a<X>y}`
+// included: two comparisons, a well-formed container holding no static
+// chain, never 14.20, its finding located at the whole expression (SPEC 14;
+// T14-11) — while TypeScript-only syntax (a non-null assertion `BASE.a!`, a
+// type assertion `BASE.a as X`) is a parse failure of the file, 14.20 alone
+// and never 14.8, with the one zero-length range at the offset SPEC 14's
+// syntax-failure rule fixes: the byte length of the longest whole-character
+// prefix of the file with which some well-formed file begins. Precomputed
+// per form from the fixture's exact bytes: for `BASE.a!` the byte after `!`
+// — the closing brace in `d`, the closing parenthesis in `text(...)` — since
+// `!` may begin `!=`, so the prefix through `!` begins a well-formed file;
+// for `BASE.a as X` the offset of `as`, no well-formed file continuing a
+// member expression with an identifier (the prefix through the space before
+// it does begin one). The stock MDX 3 parser (S-9, `deriveMdx`) rejects each
+// of the four stagings at that offset or one byte before it — its own
+// position, not the rule's — and the workspace builder holds each to its
+// `unparseable` declaration. The TypeScript-source counterparts, where the
+// same spellings are dynamic (14.8), are T4.5-3's and T4.3-2's.
 interface DynamicFormArm {
-  /** Which SPEC 2.4 dynamic form this is (failure diagnostics). */
+  /** Which SPEC 2.4 form this is (failure diagnostics). */
   readonly name: string;
-  /** The offending reference expression, used verbatim in `d` and `text`. */
+  /** The offending expression, used verbatim in `d` and in `text(...)`. */
   readonly expression: string;
   /**
-   * A TypeScript-only spelling, not ECMAScript: the document reads it as
-   * 14.20 (S-9's declaration; Task 17 re-pins the arm's expectation).
+   * TypeScript-only syntax (14.20, never 14.8): the syntax failure's offset
+   * relative to the expression's first byte, `expression.length` naming the
+   * byte after it (the closing brace in `d`, the closing parenthesis in
+   * `text(...)`).
    */
-  readonly typescriptOnly?: true;
+  readonly unparseableAt?: number;
+  /**
+   * The `d` arm's 14.8 finding is pinned exactly at the whole expression —
+   * first token through last, the braces excluded (SPEC 14; T14-11) — where
+   * the entry fixes that range, rather than within the widened byte window.
+   */
+  readonly exactExpressionRange?: true;
 }
 
 const DYNAMIC_FORM_ARMS: readonly DynamicFormArm[] = [
@@ -336,15 +366,32 @@ const DYNAMIC_FORM_ARMS: readonly DynamicFormArm[] = [
   { name: "an identifier as index", expression: "BASE[key]" },
   { name: "a call as index", expression: "BASE[getKey()]" },
   { name: "optional chaining", expression: "BASE?.auth" },
-  {
-    name: "a non-null assertion",
-    expression: "BASE!.auth",
-    typescriptOnly: true,
-  },
   { name: "a parenthesized chain", expression: "(BASE.auth)" },
   {
     name: "a conditional expression",
     expression: "true ? BASE.auth : BASE.auth",
+  },
+  {
+    // ECMAScript reads `BASE.auth<X>y` as two comparisons, `(BASE.auth < X)
+    // > y`: a well-formed container holding no static chain (SPEC 2.4).
+    name: 'the "another meaning" case, two comparisons',
+    expression: "BASE.auth<X>y",
+    exactExpressionRange: true,
+  },
+  {
+    // `!` may begin `!=`: the prefix through `!` begins a well-formed file,
+    // the one through the next byte (`}` or `)`) does not.
+    name: "a non-null assertion (TypeScript-only)",
+    expression: "BASE.auth!",
+    unparseableAt: "BASE.auth!".length,
+  },
+  {
+    // No well-formed file continues a member expression with an identifier:
+    // the prefix through the space before `as` begins one, the one through
+    // its `a` does not.
+    name: "a type assertion (TypeScript-only)",
+    expression: "BASE.auth as X",
+    unparseableAt: "BASE.auth ".length,
   },
 ];
 
@@ -359,68 +406,194 @@ const DYNAMIC_ARM_BASE_FILES = {
   "specs/BASE.mdx": '<S id="auth">\nAuth behavior.\n</S>\n',
 } as const;
 
-/**
- * Run one rejected-form arm: `build --json` exits 1 with exactly one finding,
- * condition 14.8, located within the offending construct's own byte window in
- * `specs/A.mdx` (SPEC 14: errors identify file and location).
- */
-/** S-9: a TypeScript-only form is a 14.20 staging; the ECMAScript forms derive. */
-function armDeclaration(arm: DynamicFormArm): WorkspaceMdxDecl | undefined {
-  return arm.typescriptOnly ? { unparseable: ["specs/A.mdx"] } : undefined;
+/** The byte range of `expression` when it follows `prefix` in the file. */
+function expressionRange(
+  prefix: string,
+  expression: string,
+): { readonly start: number; readonly end: number } {
+  const start = Buffer.byteLength(prefix, "utf8");
+  return { start, end: start + Buffer.byteLength(expression, "utf8") };
 }
 
-async function runRejectedFormArm(
+/**
+ * Assert a located finding's concern exactly (SPEC 14, 12.7): `path` null,
+ * and exactly one location — in specs/A.mdx, at exactly `range`.
+ */
+function assertT242FindingRange(
+  finding: Finding,
+  range: { readonly start: number; readonly end: number },
+  context: string,
+): void {
+  assertSameJson(
+    finding.path,
+    null,
+    `${context} — a located condition's concerned path is null (SPEC 12.7)`,
+  );
+  assertSameJson(
+    finding.locations.map((location) => ({
+      file: location.file,
+      range: { start: location.range.start, end: location.range.end },
+    })),
+    [{ file: "specs/A.mdx", range: { start: range.start, end: range.end } }],
+    `${context} (message: ${JSON.stringify(finding.message)})`,
+  );
+}
+
+/** One arm's staged `specs/A.mdx` and where its offending bytes stand. */
+interface RejectedFormStaging {
+  /** The whole staged source. */
+  readonly source: string;
+  /**
+   * The offending construct's byte window — the opening tag carrying the
+   * braced `d` value, or the embedding container (end-widened by one byte,
+   * `byteWindow`).
+   */
+  readonly window: { readonly start: number; readonly end: number };
+  /** The expression's own byte range, first token through last. */
+  readonly expression: { readonly start: number; readonly end: number };
+}
+
+/**
+ * Run one dynamic-form arm: `build --json` exits 1 with exactly one finding,
+ * condition 14.8, located within the offending construct's own byte window
+ * in `specs/A.mdx` (SPEC 14: errors identify file and location) — or, where
+ * `exactRange` is given, exactly at that range (SPEC 14; T14-11).
+ */
+async function runDynamicFormArm(
+  product: ProductBinding,
+  staging: RejectedFormStaging,
+  exactRange: { readonly start: number; readonly end: number } | undefined,
+  context: string,
+): Promise<void> {
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    { ...DYNAMIC_ARM_BASE_FILES, "specs/A.mdx": staging.source },
+    async (workspace) => {
+      const findings = await buildFindings(product, workspace, context);
+      assertConditionCounts(
+        findings,
+        { "14.8": 1 },
+        `${context} — a form ECMAScript 2024 derives that makes the ` +
+          `reference dynamic: 14.8, never 14.20 (SPEC 2.4)`,
+      );
+      if (exactRange === undefined) {
+        assertFindingLocated(
+          findings[0]!,
+          { file: "specs/A.mdx", window: staging.window },
+          `${context}: the 14.8 finding`,
+        );
+      } else {
+        assertT242FindingRange(
+          findings[0]!,
+          exactRange,
+          `${context}: the 14.8 finding, located at the whole expression ` +
+            `its braces enclose — first token through last, the braces ` +
+            `excluded (SPEC 14; T14-11)`,
+        );
+      }
+    },
+  );
+}
+
+/**
+ * Run one TypeScript-only arm: the file is not well-formed MDX (SPEC 2.4,
+ * 14.20), so `build --json` exits 1 with exactly one finding, 14.20 — the
+ * masked file reports nothing else, never 14.8 — carrying the one
+ * zero-length range at `offset`, the syntax failure's offset under SPEC 14's
+ * rule. S-9: the staging is declared unparseable.
+ */
+async function runUnparseableFormArm(
   product: ProductBinding,
   source: string,
-  window: { readonly start: number; readonly end: number },
+  offset: number,
   context: string,
-  mdx?: WorkspaceMdxDecl,
 ): Promise<void> {
   await withWorkspace(
     SPECS_ONLY_CONFIG,
     { ...DYNAMIC_ARM_BASE_FILES, "specs/A.mdx": source },
     async (workspace) => {
       const findings = await buildFindings(product, workspace, context);
-      assertConditionCounts(findings, { "14.8": 1 }, context);
-      assertFindingLocated(
+      assertConditionCounts(
+        findings,
+        { "14.20": 1 },
+        `${context} — TypeScript-only syntax in a spec source is a parse ` +
+          `failure of the file: 14.20 alone, never a dynamic reference ` +
+          `(SPEC 2.4, 14.20)`,
+      );
+      assertT242FindingRange(
         findings[0]!,
-        { file: "specs/A.mdx", window },
-        `${context}: the 14.8 finding`,
+        { start: offset, end: offset },
+        `${context} — the one zero-length range at the offset SPEC 14's ` +
+          `syntax-failure rule fixes: the byte length of the longest ` +
+          `whole-character prefix with which some well-formed file begins ` +
+          `(SPEC 14; T14-11)`,
       );
     },
-    mdx,
+    { unparseable: ["specs/A.mdx"] },
   );
 }
 
 const T2_4_2 = defineProductTest({
   id: "T2.4-2",
   title:
-    "each dynamic form — template literal argument; identifier or call as index; optional chaining; non-null assertion; parenthesized chain; conditional expression — fails with 14.8, in `d` and in `text(...)`, in MDX (SPEC 2.4, 14.8)",
+    'each dynamic form — template literal argument; identifier or call as index; optional chaining; parenthesized chain; conditional expression; the "another meaning" case `BASE.a<X>y`, two comparisons, its `d` finding at the whole expression — fails with 14.8, in `d` and in `text(...)`, in MDX, while TypeScript-only syntax — a non-null assertion, a type assertion — is 14.20 alone at the offset SPEC 14\'s syntax-failure rule fixes (SPEC 2.4, 14.8, 14.20)',
   run: async (product) => {
     for (const arm of DYNAMIC_FORM_ARMS) {
       // In `d`: the offending construct is the opening tag carrying the
       // braced reference (SPEC 2.7: a braced `d` value that is not a static
-      // reference or array literal of them is a dynamic argument, 14.8).
-      const dConstruct = `<S id="bad" d={${arm.expression}}>`;
-      await runRejectedFormArm(
-        product,
-        DYNAMIC_ARM_PREAMBLE + dConstruct + "\nBad reference.\n</S>\n",
-        byteWindow(DYNAMIC_ARM_PREAMBLE, dConstruct),
-        `T2.4-2 \`build --json\` with ${arm.name} in \`d\``,
-        armDeclaration(arm),
-      );
+      // reference or array literal of them is a dynamic argument, 14.8); its
+      // expression starts right after `d={`.
+      const dTagPrefix = '<S id="bad" d={';
+      const dConstruct = `${dTagPrefix}${arm.expression}}>`;
+      const dStaging: RejectedFormStaging = {
+        source: DYNAMIC_ARM_PREAMBLE + dConstruct + "\nBad reference.\n</S>\n",
+        window: byteWindow(DYNAMIC_ARM_PREAMBLE, dConstruct),
+        expression: expressionRange(
+          DYNAMIC_ARM_PREAMBLE + dTagPrefix,
+          arm.expression,
+        ),
+      };
+      const dContext = `T2.4-2 \`build --json\` with ${arm.name} in \`d\``;
+      if (arm.unparseableAt === undefined) {
+        await runDynamicFormArm(
+          product,
+          dStaging,
+          arm.exactExpressionRange === true ? dStaging.expression : undefined,
+          dContext,
+        );
+      } else {
+        await runUnparseableFormArm(
+          product,
+          dStaging.source,
+          dStaging.expression.start + arm.unparseableAt,
+          dContext,
+        );
+      }
 
-      // In `text(...)`: the offending construct is the embedding expression
-      // on its own line inside an otherwise valid section.
-      const textConstruct = `{text(${arm.expression})}`;
+      // In `text(...)`: the offending construct is the embedding container
+      // on its own line inside an otherwise valid section; its expression
+      // starts right after `{text(`.
       const textPrefix = DYNAMIC_ARM_PREAMBLE + '<S id="bad">\n';
-      await runRejectedFormArm(
-        product,
-        textPrefix + textConstruct + "\n</S>\n",
-        byteWindow(textPrefix, textConstruct),
-        `T2.4-2 \`build --json\` with ${arm.name} in \`text(...)\``,
-        armDeclaration(arm),
-      );
+      const callPrefix = "{text(";
+      const textConstruct = `${callPrefix}${arm.expression})}`;
+      const textStaging: RejectedFormStaging = {
+        source: textPrefix + textConstruct + "\n</S>\n",
+        window: byteWindow(textPrefix, textConstruct),
+        expression: expressionRange(textPrefix + callPrefix, arm.expression),
+      };
+      const textContext = `T2.4-2 \`build --json\` with ${arm.name} in \`text(...)\``;
+      if (arm.unparseableAt === undefined) {
+        // An embedding's 14.8 is located by its full braced container (SPEC
+        // 14), asserted within the construct's window as the sibling arms are.
+        await runDynamicFormArm(product, textStaging, undefined, textContext);
+      } else {
+        await runUnparseableFormArm(
+          product,
+          textStaging.source,
+          textStaging.expression.start + arm.unparseableAt,
+          textContext,
+        );
+      }
     }
   },
 });
