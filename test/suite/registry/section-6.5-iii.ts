@@ -3300,6 +3300,18 @@ interface R16ControlArm {
   readonly argv: readonly string[];
   /** Every rewritten file's bytes after the move, composed from 6.5 and 3 with no latitude. */
   readonly expected: Readonly<Record<string, string>>;
+  /**
+   * A receiving file whose added declaration binds a fresh identifier —
+   * 6.5's latitude — its bytes composed from the identifier read back off
+   * the one line `import <X> from "<specifier>"` (T6.5-13's reading).
+   */
+  readonly added?: {
+    readonly rel: string;
+    readonly specifier: string;
+    readonly compose: (ident: string) => string;
+  };
+  /** `impact --base <pre-move ref>` against pins (SPEC 5.6, 6.2), the baseline committed before the move. */
+  readonly impact?: A13ImpactExpectation;
 }
 
 /** The moved section's construct range (1.7): the bytes of `prefix` to its end. */
@@ -3664,6 +3676,339 @@ const R16_F_ARM: R16RefusedArm = {
   locations: [r16Construct(R16_ORIGIN, "> ", R16_F_MOVED)],
 };
 
+// (g) an addition no offset admits. The moved text `<S id="m">x
+// {text(X.a)}</S>` — a single-line in-line section alone on its origin line
+// — carries an embedding rooted at the origin's binding `X` of a third
+// module `specs/x.mdx` the target lacks, so the rewrite must add a
+// declaration of that module to the target (its identifier the product's
+// latitude, SPEC 6.5; the probes spell `X`) at an admissible offset: one at
+// which the file, as every edit leaves it, derives with the added line an
+// ESM block's declaration standing inside no section, the block's other
+// lines an ESM block's before the edit (SPEC 6.5, 14.20). The origin's
+// binding is used by the kept sibling `k` too, so the deletion alone leaves
+// the origin (no removal, 6.5), deriving. The finding locates, beside the
+// construct, the embedding's braced container — the spelling rooted at the
+// lacked binding, by its occurrence span (SPEC 5.7, 14) — both in the
+// origin, in start order (12.7).
+const R16_G_THIRD = "specs/x.mdx";
+const R16_G_THIRD_SOURCE = '<S id="a">\nA text.\n</S>\n';
+const R16_G_SPECIFIER = canonicalSpecifier("specs", "specs/x.xspec");
+/** The origin's declaration of the third module, and the line a receiving file would need. */
+const R16_G_DECLARATION = `import X from "${R16_G_SPECIFIER}"`;
+const R16_G_CONTAINER = "{text(X.a)}";
+const R16_G_MOVED = `<S id="m">x ${R16_G_CONTAINER}</S>`;
+/** The origin as the deletion leaves it: the declaration, an empty line, the kept sibling. */
+const R16_G_ORIGIN_KEPT = `${R16_G_DECLARATION}\n\n<S id="k">z ${R16_G_CONTAINER}</S>\n`;
+const R16_G_ORIGIN_BEFORE = `${R16_G_ORIGIN_KEPT}${R16_G_MOVED}\n`;
+const R16_G_LOCATIONS: readonly R16Location[] = [
+  r16Construct(R16_ORIGIN, R16_G_ORIGIN_KEPT, R16_G_MOVED),
+  r16Construct(R16_ORIGIN, `${R16_G_ORIGIN_KEPT}<S id="m">x `, R16_G_CONTAINER),
+];
+/** (c)'s first parent as the target insertion into `p.n` leaves it, the declaration absent, terminated or not. */
+function r16ComposedIntoP(terminated: boolean): string {
+  return `foo <S id="p">bar\n<S id="p.n">x ${R16_G_CONTAINER}</S>\n</S> baz${terminated ? "\n" : ""}`;
+}
+
+/**
+ * 6.5's line of an added declaration at `offset` of `text` — the file as the
+ * other edits leave it: U+000A after the declaration, and one before it
+ * when the offset is not at a line start, judged over `text`.
+ */
+function r16Declared(
+  text: string,
+  offset: number,
+  declaration: string,
+): string {
+  const lineStart = offset === 0 || text[offset - 1] === "\n";
+  return `${text.slice(0, offset)}${lineStart ? "" : "\n"}${declaration}\n${text.slice(offset)}`;
+}
+
+function r16Probe(
+  name: string,
+  text: string,
+  offset: number,
+  derives: boolean,
+  declaration: string = R16_G_DECLARATION,
+): R16OffsetProbe {
+  return { name, text: r16Declared(text, offset, declaration), derives };
+}
+
+// The text-position target `foo <S id="p">bar</S> baz`, with and without a
+// final terminator: offset 0 would absorb the paragraph line into the
+// block, the file's end follows a paragraph line, and every other offset
+// splits the paragraph.
+function r16ArmG(name: string, terminated: boolean): R16RefusedArm {
+  const composed = r16ComposedIntoP(terminated);
+  return {
+    key: `(g) no admissible offset in the text-position target, ${name}`,
+    summary:
+      `the target lacks the third module's binding the embedding is rooted ` +
+      `at, and no offset admits the declaration: offset 0 absorbs the ` +
+      `paragraph's first line into the block (14.20), the file's end ` +
+      `follows a paragraph line, leaving the added line paragraph text, and ` +
+      `every other offset splits the paragraph (SPEC 6.5)`,
+    files: {
+      [R16_ORIGIN]: R16_G_ORIGIN_BEFORE,
+      [R16_TARGET]: terminated ? R16_TEXT_PARENT : R16_TEXT_PARENT.slice(0, -1),
+      [R16_G_THIRD]: R16_G_THIRD_SOURCE,
+    },
+    argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
+    illFormed: {},
+    wellFormed: { [R16_ORIGIN]: R16_G_ORIGIN_KEPT },
+    identities: [R16_TARGET],
+    locations: R16_G_LOCATIONS,
+    noOffset: {
+      file: R16_TARGET,
+      composed,
+      probes: [
+        r16Probe("offset 0", composed, 0, false),
+        r16Probe("the file's end", composed, composed.length, true),
+      ],
+    },
+  };
+}
+
+// The pseudo-block twin: the same target headed by T6.5-13(l)'s paragraph
+// `// note`, U+000A, `import B from "./B.xspec"`, U+000A, U+000A — content,
+// no block (an ESM block cannot interrupt a paragraph; `specs/B.mdx` is
+// absent and the pre-move `build` clean all the same). Offset 0 heads a
+// block joining the paragraph's lines — deriving yet inadmissible, lines
+// that were no ESM block's before the edit; the start of line 2, the start
+// of the empty line, and the file's end each follow a paragraph line; the
+// start of the `foo` line heads a block absorbing that line (14.20); every
+// other offset splits a paragraph line. A product judging admissibility by
+// derivability alone performs the move at offset 0, the paragraph turned
+// into live declarations.
+const R16_G_PSEUDO_HEAD = '// note\nimport B from "./B.xspec"\n\n';
+const R16_G_PSEUDO_COMPOSED = `${R16_G_PSEUDO_HEAD}${r16ComposedIntoP(true)}`;
+const R16_G_PSEUDO_ARM: R16RefusedArm = {
+  key: "(g) the pseudo-block twin: the target headed by a paragraph of declarations",
+  summary:
+    "offset 0 heads a block joining the paragraph's lines — deriving yet " +
+    "inadmissible, lines that were no ESM block's before the edit — the " +
+    "start of line 2, the start of the empty line, and the file's end each " +
+    "follow a paragraph line, the start of the `foo` line heads a block " +
+    "absorbing that line (14.20), and every other offset splits a paragraph " +
+    "line (SPEC 6.5); a product judging admissibility by derivability alone " +
+    "performs the move at offset 0",
+  files: {
+    [R16_ORIGIN]: R16_G_ORIGIN_BEFORE,
+    [R16_TARGET]: `${R16_G_PSEUDO_HEAD}${R16_TEXT_PARENT}`,
+    [R16_G_THIRD]: R16_G_THIRD_SOURCE,
+  },
+  argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
+  illFormed: {},
+  wellFormed: { [R16_ORIGIN]: R16_G_ORIGIN_KEPT },
+  identities: [R16_TARGET],
+  locations: R16_G_LOCATIONS,
+  noOffset: {
+    file: R16_TARGET,
+    composed: R16_G_PSEUDO_COMPOSED,
+    probes: [
+      r16Probe(
+        "offset 0, a block joining the paragraph's lines",
+        R16_G_PSEUDO_COMPOSED,
+        0,
+        true,
+      ),
+      r16Probe(
+        "the start of line 2",
+        R16_G_PSEUDO_COMPOSED,
+        "// note\n".length,
+        true,
+      ),
+      r16Probe(
+        "the start of the empty line",
+        R16_G_PSEUDO_COMPOSED,
+        R16_G_PSEUDO_HEAD.length - 1,
+        true,
+      ),
+      r16Probe(
+        "the start of the `foo` line",
+        R16_G_PSEUDO_COMPOSED,
+        R16_G_PSEUDO_HEAD.length,
+        false,
+      ),
+      r16Probe(
+        "the file's end",
+        R16_G_PSEUDO_COMPOSED,
+        R16_G_PSEUDO_COMPOSED.length,
+        true,
+      ),
+    ],
+  },
+};
+
+// The top-level twin: the same moved text to the top level of a
+// paragraph-ended target `para`, U+000A, terminated and unterminated — the
+// composed text `para`, U+000A, the moved text, U+000A either way (the
+// target insertion at a line start in the terminated variant, preceded by
+// an added terminator in the other), deriving: the moved text's line is a
+// paragraph continuation of `para`, the prose outside its tags denying the
+// flow attempt (14.20), whatever precedes the line. No offset admits the
+// declaration: offset 0 absorbs `para` into the block; the end of the
+// `para` line and every offset inside it leave the added line after a
+// paragraph line; and the file's end, the target insertion's offset, where
+// the declaration stands after the moved text (6.5's fixed order), leaves
+// it after the moved text's own paragraph line — 6.5's end-of-file
+// qualifier decided on its refusing side. The controls are T6.5-13(d) and
+// R16_G_CONTROL below.
+const R16_G_TOP_COMPOSED = `para\n${R16_G_MOVED}\n`;
+function r16ArmGTop(name: string, target: string): R16RefusedArm {
+  return {
+    key: `(g) the top-level twin: the paragraph-ended target, ${name}`,
+    summary:
+      "the in-line moved text's line is a paragraph continuation of `para` " +
+      "(14.20), and no offset admits the declaration: offset 0 absorbs " +
+      "`para` into the block, the end of the `para` line and every offset " +
+      "inside it leave the added line after a paragraph line, and the " +
+      "file's end — where the declaration stands after the moved text, " +
+      "6.5's fixed order — leaves it after the moved text's own paragraph " +
+      "line (SPEC 6.5)",
+    files: {
+      [R16_ORIGIN]: R16_G_ORIGIN_BEFORE,
+      [R16_TARGET]: target,
+      [R16_G_THIRD]: R16_G_THIRD_SOURCE,
+    },
+    argv: ["move", "specs/a.mdx#m", "specs/b.mdx#m"],
+    illFormed: {},
+    wellFormed: { [R16_ORIGIN]: R16_G_ORIGIN_KEPT },
+    identities: [R16_TARGET],
+    locations: R16_G_LOCATIONS,
+    noOffset: {
+      file: R16_TARGET,
+      composed: R16_G_TOP_COMPOSED,
+      probes: [
+        r16Probe("offset 0", R16_G_TOP_COMPOSED, 0, false),
+        r16Probe(
+          "the end of the `para` line",
+          R16_G_TOP_COMPOSED,
+          "para".length,
+          true,
+        ),
+        r16Probe(
+          "the file's end, after the moved text",
+          R16_G_TOP_COMPOSED,
+          R16_G_TOP_COMPOSED.length,
+          true,
+        ),
+      ],
+    },
+  };
+}
+
+// The origin-side twin: an origin `foo <S id="p">bar <S id="p.m">x</S></S>
+// {text("p.m")} baz` with no terminator, `p.m` moved into a clean
+// flow-position target; the kept reference's conversion to imported form
+// needs an import of the target module, which the origin holds no
+// admissible offset for — offset 0 absorbs its one line into the block
+// (14.20), the file's end, after an unterminated paragraph line, leaves the
+// added line paragraph text, and every other offset splits the line. The
+// deletion's result derives; the reference's rewritten spelling falls
+// inside its braces, an expression either way. The controls are T6.5-13's
+// arms, whose receiving files each hold an admissible offset.
+const R16_G_SIDE_PREFIX = 'foo <S id="p">bar ';
+const R16_G_SIDE_MOVED = '<S id="p.m">x</S>';
+const R16_G_SIDE_REFERENCE = '{text("p.m")}';
+const R16_G_SIDE_TAIL = `</S> ${R16_G_SIDE_REFERENCE} baz`;
+const R16_G_SIDE_COMPOSED = `${R16_G_SIDE_PREFIX}${R16_G_SIDE_TAIL}`;
+const R16_G_SIDE_DECLARATION = `import B from "${canonicalSpecifier("specs", "specs/b.xspec")}"`;
+const R16_G_SIDE_ARM: R16RefusedArm = {
+  key: "(g) the origin-side twin: the kept reference's import the origin has no offset for",
+  summary:
+    'the origin\'s kept `{text("p.m")}` converts to imported form, rooted ' +
+    "at a binding of the target module the origin lacks, and no offset " +
+    "admits the declaration: offset 0 absorbs the file's one line into the " +
+    "block (14.20), the file's end, after an unterminated paragraph line, " +
+    "leaves the added line paragraph text, and every other offset splits " +
+    "the line (SPEC 6.5)",
+  files: {
+    [R16_ORIGIN]: `${R16_G_SIDE_PREFIX}${R16_G_SIDE_MOVED}${R16_G_SIDE_TAIL}`,
+    [R16_TARGET]: '<S id="q">\nz\n</S>\n',
+  },
+  argv: ["move", "specs/a.mdx#p.m", "specs/b.mdx#q.n"],
+  illFormed: {},
+  wellFormed: { [R16_TARGET]: '<S id="q">\nz\n<S id="q.n">x</S>\n</S>\n' },
+  identities: [R16_ORIGIN],
+  locations: [
+    r16Construct(R16_ORIGIN, R16_G_SIDE_PREFIX, R16_G_SIDE_MOVED),
+    r16Construct(
+      R16_ORIGIN,
+      `${R16_G_SIDE_PREFIX}${R16_G_SIDE_MOVED}</S> `,
+      R16_G_SIDE_REFERENCE,
+    ),
+  ],
+  noOffset: {
+    file: R16_ORIGIN,
+    composed: R16_G_SIDE_COMPOSED,
+    probes: [
+      r16Probe(
+        "offset 0",
+        R16_G_SIDE_COMPOSED,
+        0,
+        false,
+        R16_G_SIDE_DECLARATION,
+      ),
+      r16Probe(
+        "the file's end, after the unterminated line",
+        R16_G_SIDE_COMPOSED,
+        R16_G_SIDE_COMPOSED.length,
+        true,
+        R16_G_SIDE_DECLARATION,
+      ),
+    ],
+  },
+};
+
+// (i) two files concerned, one finding: an origin `specs/z.mdx` of (d)'s
+// shape — its deletion leaving `- item` at the line's start — whose import
+// of the third module has its only occurrence in the moved text, so the
+// declaration is removed and its line dropped, the empty line kept (SPEC
+// 6.5, 3); and the target of (g)'s shape, lacking that module, no offset
+// admitting the declaration. An insertion point exists, so both texts are
+// judged: exactly one finding, `identities` both paths in byte order — the
+// target first — and `locations` the construct and the embedding's braced
+// container, both in the origin, in start order (SPEC 14, 12.7).
+const R16_I_ORIGIN = "specs/z.mdx";
+const R16_I_PREFIX = `${R16_G_DECLARATION}\n\nfoo <S id="p">bar\n`;
+const R16_I_MOVED = `<S id="p.m">x ${R16_G_CONTAINER}</S>`;
+const R16_I_COMPOSED = r16ComposedIntoP(true);
+const R16_I_ARM: R16RefusedArm = {
+  key: "(i) two files concerned, one finding",
+  summary:
+    "the origin's deletion leaves `- item` at its line's start (14.20) and " +
+    "the target, lacking the third module's binding, holds no admissible " +
+    "offset for the declaration: exactly one finding, `identities` both " +
+    "paths in byte order, the target first, `locations` the construct and " +
+    "the embedding's braced container, both in the origin, in start order " +
+    "(SPEC 6.5, 14, 12.7)",
+  files: {
+    [R16_I_ORIGIN]: `${R16_I_PREFIX}${R16_I_MOVED}- item\n</S> baz\n`,
+    [R16_TARGET]: R16_TEXT_PARENT,
+    [R16_G_THIRD]: R16_G_THIRD_SOURCE,
+  },
+  argv: ["move", "specs/z.mdx#p.m", "specs/b.mdx#p.n"],
+  illFormed: { [R16_I_ORIGIN]: '\nfoo <S id="p">bar\n- item\n</S> baz\n' },
+  wellFormed: {},
+  identities: [R16_TARGET, R16_I_ORIGIN],
+  locations: [
+    r16Construct(R16_I_ORIGIN, R16_I_PREFIX, R16_I_MOVED),
+    r16Construct(
+      R16_I_ORIGIN,
+      `${R16_I_PREFIX}<S id="p.m">x `,
+      R16_G_CONTAINER,
+    ),
+  ],
+  noOffset: {
+    file: R16_TARGET,
+    composed: R16_I_COMPOSED,
+    probes: [
+      r16Probe("offset 0", R16_I_COMPOSED, 0, false),
+      r16Probe("the file's end", R16_I_COMPOSED, R16_I_COMPOSED.length, true),
+    ],
+  },
+};
+
 // (h) the same-file variant: the flow-form section `m` moved into the
 // text-position parent `p` of its own file — the one file as deletion and
 // insertion both leave it not well-formed (SPEC 6.5, 14.20), its path once
@@ -3812,6 +4157,90 @@ const R16_ALONE_ARMS: readonly R16AloneArm[] = [
   },
 ];
 
+// (g)'s performed control: the same in-line moved text to the top level
+// of `<S id="p">`, U+000A, `x`, U+000A, `</S>`, U+000A — its only admissible
+// offset the end of the `</S>` line before its terminator (offset 0
+// absorbing the tag's line; the end of that line heading a block inside
+// `p`, deriving yet excluded, T6.5-19; the start of the `x` line absorbing
+// it; the end of the `x` line and the start of the `</S>` line leaving the
+// added line paragraph text; the file's end, a line start after a flow line
+// before the operation, following the moved text's paragraph line after
+// it), T6.5-13(h)'s forced mid-line placement: the added terminator ends
+// the `</S>` line, the declaration's line follows, and the line's original
+// terminator is left an empty line before the moved text — which pins that
+// the in-line moved text's own line is a paragraph line whatever precedes
+// it. `build` and `check` clean; the root `changed` — a parent gaining a
+// child reference, its run after `p` now U+000A, the kept remainder line,
+// and its run after `m` U+000A — beside the origin root, which loses one;
+// `p` keeps its own content (the added terminator ends its closing tag's
+// line, dropped as before), the moved node keeps its hashes (its one line
+// contributes at the destination what it did at the origin), and the third
+// module is untouched (SPEC 6.2, 5.6). A product treating the file's end
+// after a top-level target insertion as admissible outright, or judging
+// admissibility over the pre-operation text, places the declaration after
+// the moved text.
+const R16_G_CONTROL_TARGET = '<S id="p">\nx\n</S>\n';
+const R16_G_CONTROL: R16ControlArm = {
+  key: "(g) control: the in-line moved text to the top level of a flow-ended target",
+  summary:
+    "the end of the `</S>` line before its terminator is the only " +
+    "admissible offset — offset 0 absorbing the tag's line, the end of the " +
+    "opening tag's line heading a block inside `p` (excluded), the start " +
+    "of the `x` line absorbing it, the end of the `x` line and the start of " +
+    "the `</S>` line leaving the added line paragraph text, and the file's " +
+    "end following the moved text's own paragraph line — so the added " +
+    "terminator ends the `</S>` line, the declaration's line follows, and " +
+    "the line's original terminator is left an empty line before the moved " +
+    "text (SPEC 6.5, 6.2, 14.20)",
+  files: {
+    [R16_ORIGIN]: R16_G_ORIGIN_BEFORE,
+    [R16_TARGET]: R16_G_CONTROL_TARGET,
+    [R16_G_THIRD]: R16_G_THIRD_SOURCE,
+  },
+  argv: ["move", "specs/a.mdx#m", "specs/b.mdx#m"],
+  expected: { [R16_ORIGIN]: R16_G_ORIGIN_KEPT },
+  added: {
+    rel: R16_TARGET,
+    specifier: R16_G_SPECIFIER,
+    compose: (ident) =>
+      `${R16_G_CONTROL_TARGET.slice(0, -1)}\nimport ${ident} from "${R16_G_SPECIFIER}"\n\n<S id="m">x {text(${ident}.a)}</S>\n`,
+  },
+  impact: {
+    known: [
+      R16_ORIGIN,
+      `${R16_ORIGIN}#k`,
+      R16_TARGET,
+      `${R16_TARGET}#p`,
+      `${R16_TARGET}#m`,
+      R16_G_THIRD,
+      `${R16_G_THIRD}#a`,
+    ],
+    pins: [
+      {
+        identity: R16_TARGET,
+        required: ["changed"],
+        changedWithin: [R16_TARGET],
+      },
+      {
+        identity: R16_ORIGIN,
+        required: ["changed"],
+        changedWithin: [R16_ORIGIN],
+      },
+      { identity: `${R16_TARGET}#p`, required: [] },
+      { identity: `${R16_TARGET}#m`, required: [] },
+      { identity: `${R16_ORIGIN}#k`, required: [] },
+      { identity: R16_G_THIRD, required: [] },
+      { identity: `${R16_G_THIRD}#a`, required: [] },
+    ],
+    reason:
+      "the target root is `changed` — a parent gaining a child reference, " +
+      "its run after `p` now U+000A, the kept remainder line, and its run " +
+      "after `m` U+000A — beside the origin root, which loses one, each " +
+      "attributed to itself; `p` keeps its own content, the moved node its " +
+      "hashes, and the third module is untouched (SPEC 6.2, 5.6)",
+  },
+};
+
 const R16_REFUSED_ARMS: readonly R16RefusedArm[] = [
   r16ArmA("a space", " "),
   r16ArmA("a tab", "\t"),
@@ -3832,7 +4261,14 @@ const R16_REFUSED_ARMS: readonly R16RefusedArm[] = [
   r16ArmE("terminated", `${R16_E_DECLARATION}\n`),
   r16ArmE("unterminated", R16_E_DECLARATION),
   R16_F_ARM,
+  r16ArmG("terminated", true),
+  r16ArmG("unterminated", false),
+  R16_G_PSEUDO_ARM,
+  r16ArmGTop("terminated", "para\n"),
+  r16ArmGTop("unterminated", "para"),
+  R16_G_SIDE_ARM,
   R16_H_ARM,
+  R16_I_ARM,
   R16_COLLISION_ARM,
   R16_D_MISSING_PARENT_ARM,
   r16CreatedArm("specs/new.txt", ["refused-invalid-destination"]),
@@ -3843,6 +4279,7 @@ const R16_CONTROL_ARMS: readonly R16ControlArm[] = [
   ...R16_C_PARENTS.map((parent) => r16ControlC(parent)),
   R16_D_CONTROL,
   R16_E_CONTROL,
+  R16_G_CONTROL,
 ];
 
 /**
@@ -3866,6 +4303,23 @@ export const R16_FORM_VECTORS: ReadonlyArray<
           text,
         ] as const,
     ),
+    ...(arm.noOffset === undefined
+      ? []
+      : [
+          [
+            `T6.5-16 ${arm.key}: ${arm.noOffset.file} as the other edits leave it`,
+            arm.noOffset.composed,
+          ] as const,
+          ...arm.noOffset.probes
+            .filter((probe) => probe.derives)
+            .map(
+              (probe) =>
+                [
+                  `T6.5-16 ${arm.key}: ${arm.noOffset!.file} with the declaration at ${probe.name}`,
+                  probe.text,
+                ] as const,
+            ),
+        ]),
   ]),
   ...R16_CONTROL_ARMS.flatMap((arm) => [
     ...Object.entries(arm.files).map(
@@ -3875,6 +4329,14 @@ export const R16_FORM_VECTORS: ReadonlyArray<
       ([rel, text]) =>
         [`T6.5-16 ${arm.key}: ${rel} after the move`, text] as const,
     ),
+    ...(arm.added === undefined
+      ? []
+      : [
+          [
+            `T6.5-16 ${arm.key}: ${arm.added.rel} after the move, the declaration binding X`,
+            arm.added.compose("X"),
+          ] as const,
+        ]),
   ]),
   ...R16_ALONE_ARMS.flatMap((arm) =>
     Object.entries(arm.files).map(
@@ -3890,12 +4352,21 @@ export const R16_FORM_VECTORS: ReadonlyArray<
  */
 export const R16_REFUSED_VECTORS: ReadonlyArray<
   readonly [name: string, source: string]
-> = R16_REFUSED_ARMS.flatMap((arm) =>
-  Object.entries(arm.illFormed).map(
+> = R16_REFUSED_ARMS.flatMap((arm) => [
+  ...Object.entries(arm.illFormed).map(
     ([rel, text]) =>
       [`T6.5-16 ${arm.key}: ${rel} as the edits would leave it`, text] as const,
   ),
-);
+  ...(arm.noOffset?.probes ?? [])
+    .filter((probe) => !probe.derives)
+    .map(
+      (probe) =>
+        [
+          `T6.5-16 ${arm.key}: ${arm.noOffset!.file} with the declaration at ${probe.name}`,
+          probe.text,
+        ] as const,
+    ),
+]);
 
 /** A would-be text the entry declares underivable must not derive (S-9): a staging defect, never a verdict. */
 function r16AssertUnderivable(text: string, rel: string, key: string): void {
@@ -4047,6 +4518,17 @@ async function runR16RefusedArm(
   for (const [rel, text] of Object.entries(arm.wellFormed)) {
     r16AssertDerives(text, rel, arm.key);
   }
+  if (arm.noOffset !== undefined) {
+    // The refusal's ground is the offsets alone: the concerned file derives
+    // as the other edits leave it, and each named offset holds the verdict
+    // the entry states for the declaration inserted there.
+    r16AssertDerives(arm.noOffset.composed, arm.noOffset.file, arm.key);
+    for (const probe of arm.noOffset.probes) {
+      const rel = `${arm.noOffset.file} with the declaration at ${probe.name}`;
+      if (probe.derives) r16AssertDerives(probe.text, rel, arm.key);
+      else r16AssertUnderivable(probe.text, rel, arm.key);
+    }
+  }
   const command = arm.argv.join(" ");
   await withWorkspace(arm.files, async (workspace) => {
     // Premise: the pre-move workspace is valid (6.4's precondition), every
@@ -4129,6 +4611,9 @@ async function runR16ControlArm(
   for (const [rel, text] of Object.entries(arm.expected)) {
     r16AssertDerives(text, rel, arm.key);
   }
+  if (arm.added !== undefined) {
+    r16AssertDerives(arm.added.compose("X"), arm.added.rel, arm.key);
+  }
   const command = arm.argv.join(" ");
   await withWorkspace(arm.files, async (workspace) => {
     await buildOk(
@@ -4137,6 +4622,11 @@ async function runR16ControlArm(
       `${context} \`build\` over the staging — the pre-move workspace is ` +
         `valid, every staged file well-formed (SPEC 6.4, 6.5, 14.20)`,
     );
+    let base = "";
+    if (arm.impact !== undefined) {
+      await workspace.gitInit();
+      base = await workspace.gitCommitAll("pre-move baseline");
+    }
     await expectExit(
       product,
       workspace,
@@ -4154,13 +4644,53 @@ async function runR16ControlArm(
           `other byte unchanged (SPEC 6.5, 3; H-4)`,
       );
     }
+    if (arm.added !== undefined) {
+      const { rel, specifier, compose } = arm.added;
+      const actual = await readSourceText(workspace, rel, context);
+      const ident = r16ReadAddedIdentifier(actual, specifier);
+      await assertFileBytes(
+        workspace.path(rel),
+        compose(ident ?? "X"),
+        `${context}: ${rel} after the move — ${arm.summary}; the added ` +
+          `declaration \`import <X> from "${specifier}"\` (its identifier ` +
+          `${ident === undefined ? "unreadable off the file, spelled X here" : `read back as \`${ident}\``}) ` +
+          `at the one admissible offset, the rest composed from 6.5's exact ` +
+          `edits with no latitude (SPEC 6.5, 2.1, 3; H-4)`,
+      );
+    }
     await assertCleanAfterMove(
       product,
       workspace,
       "the performed control leaves a valid workspace",
       context,
     );
+    if (arm.impact !== undefined) {
+      await a13AssertImpact(product, workspace, base, arm.impact, context);
+    }
   });
+}
+
+/**
+ * The fresh identifier a receiving file's one added declaration of
+ * `specifier` binds, read off its line (`import <X> from "<specifier>"`,
+ * SPEC 6.5); undefined when no such line stands alone — the caller then
+ * pins the composition with `X`, and the byte assertion diagnoses.
+ */
+function r16ReadAddedIdentifier(
+  actual: string,
+  specifier: string,
+): string | undefined {
+  const escaped = specifier.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+  const pattern = new RegExp(
+    `^import ([A-Za-z_$][A-Za-z0-9_$]*) from "${escaped}"$`,
+    "gm",
+  );
+  const matches = [...actual.matchAll(pattern)];
+  const ident = matches.length === 1 ? matches[0]?.[1] : undefined;
+  if (ident === undefined || MDX_RESERVED_NAMES.includes(ident)) {
+    return undefined;
+  }
+  return ident;
 }
 
 const T6_5_16 = defineProductTest({
