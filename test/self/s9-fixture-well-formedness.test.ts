@@ -15,7 +15,10 @@
 // the two files T6.2-3's move leaves), the empty attribute expressions, the
 // spread with extra
 // content, an ESM block holding a statement, the one-sided section spellings
-// 6.2/6.5 refuse, and T14-12's negative arms. S-9's allowances — ECMAScript's
+// 6.2/6.5 refuse, and T14-12's negative arms (the document's shapes below,
+// and the staged sources themselves from section-14-iii.ts, whose pinned
+// offsets the stock parser's positions confirm wherever they coincide).
+// S-9's allowances — ECMAScript's
 // early errors, which the stock parser enforces beyond derivability — apply
 // only when named and only to their own early error; none passes an
 // MDX-syntax rejection. Every non-ASCII or control character is built from
@@ -41,7 +44,10 @@ import {
   I3_ROOM_SOURCE,
 } from "../suite/registry/section-6.2.js";
 import { X2_COMPOSED_FORMS } from "../suite/registry/section-6.5.js";
-import { T14_12_FORM_VECTORS } from "../suite/registry/section-14-iii.js";
+import {
+  T14_12_FORM_VECTORS,
+  T14_12_UNPARSEABLE_VECTORS,
+} from "../suite/registry/section-14-iii.js";
 import {
   A18_FORM_VECTORS,
   A19_FORM_VECTORS,
@@ -440,6 +446,37 @@ describe("S-9: every form T14-12's positive arms stage derives under exactly its
     if (allowances.length > 0) {
       // The allowance is load-bearing: without it the form does not derive.
       expectRejects(source);
+    }
+  });
+});
+
+// T14-12's negative arms in a spec source (section-14-iii.ts): each staged
+// text is declared unparseable, and where the stock parser's rejection
+// position coincides with the offset SPEC 14's rule fixes — every arm but
+// the spread's, whose extra content the parser reports past the comma — the
+// pinned byte offset is confirmed against it (the parser's position is an
+// index into the decoded text, converted to the byte length of the prefix).
+describe("S-9: every form T14-12's negative arms stage in a spec source does not derive", () => {
+  test("the vector set is complete and uniquely named", () => {
+    expect(T14_12_UNPARSEABLE_VECTORS.length).toBe(6);
+    expect(new Set(T14_12_UNPARSEABLE_VECTORS.map(([name]) => name)).size).toBe(
+      T14_12_UNPARSEABLE_VECTORS.length,
+    );
+    expect(
+      T14_12_UNPARSEABLE_VECTORS.filter(([, , offset]) => offset !== null)
+        .length,
+    ).toBe(5);
+  });
+  test.each(T14_12_UNPARSEABLE_VECTORS)("%s", (_name, source, offset) => {
+    const verdict = expectRejects(source);
+    expectRejects(Buffer.from(source, "utf8"));
+    // No allowance makes an MDX-syntax rejection pass.
+    expectRejects(source, MDX_ALLOWANCES);
+    if (offset !== null) {
+      expect(verdict.position).toBeDefined();
+      expect(
+        Buffer.byteLength(source.slice(0, verdict.position?.offset), "utf8"),
+      ).toBe(offset);
     }
   });
 });

@@ -2,14 +2,15 @@
 // contract. SPEC 14.20 decides well-formedness by derivability alone under
 // the input languages' grammars — every rule beyond derivability excluded,
 // whether the language's own text calls its violation a syntax error or its
-// tools report it after parsing. This module holds T14-12's positive arms
-// (FIX_PLAN Task 44): each file well-formed, proceeding to its ordinary
-// outcome, never 14.20. The negative arms — 14.20 at the offset the rule of
-// 14 fixes, masking, and the three surfaces — and T14-4's stagings over them
-// are Task 45's (this module, continued). T14-11's per-condition ranges live
-// in section-14.ts, the environment refusals in section-14-ii.ts; a third
-// module keeps both files' edits bounded (the section-6.5-i/-ii/-iii
-// precedent).
+// tools report it after parsing. This module holds T14-12 whole: the
+// positive arms — each file well-formed, proceeding to its ordinary outcome,
+// never 14.20 — and the negative arms — each file unparseable, 14.20 at the
+// one zero-length offset the rule of 14 fixes, masking everything inside the
+// file, reported by `build` and `check` — and exports the 14.16 and 14.20
+// stagings for T14-4's reporter matrix (section-14.ts sweeps them over the
+// surfaces of 11.2). T14-11's per-condition ranges live in section-14.ts,
+// the environment refusals in section-14-ii.ts; a third module keeps both
+// files' edits bounded (the section-6.5-i/-ii/-iii precedent).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace per arm (H-1), drives the product strictly as a subprocess
@@ -69,6 +70,27 @@
 //       sibling function `f`;
 //   (o) a type error, `const n: number = "x"` — the marker inside `f`.
 //
+// Negative arms (TEST-SPEC T14-12, negative half) — 14.20, the one
+// zero-length range at the offset the rule of 14 fixes, precomputed from the
+// staged bytes (`assemble` with an empty pin), each arm masking everything
+// inside its file (T14-3) and reported by `build` and `check`, the surfaces
+// of 11.2 being T14-4's rows over the same stagings:
+//   (p) `010` and (q) `09` in a `.ts` file — text ECMAScript derives but
+//       TypeScript's scanner rejects — each at the literal's second digit
+//       (the prefix through its `0` begins a well-formed file);
+//   (r) a spread attribute `{...a, b}` — at its comma (T2.7-3's grammar
+//       pair, failing side);
+//   (s) an ESM block holding a statement — an import line followed on the
+//       next line, no blank line between, by `const x = 1` — at the start of
+//       the `const` line (the block derives import and export declarations
+//       only);
+//   (t) an import spelled with import attributes, `with { type: "json" }` —
+//       at the offset of `with` (syntax the edition lacks);
+//   (u) `d={]}` — at the `]`;
+//   (v) `{text(}` — at its `}`;
+//   (w) an unbalanced brace, `{text("a")` as the file's last bytes — at the
+//       file's byte length (the whole file a prefix of a well-formed one).
+//
 // Conservative operationalizations (H-3):
 // - Every spec-source container arm stands in flow position at the top
 //   level, after a valid section (T14-11's preamble), so the container's
@@ -84,7 +106,28 @@
 //   neither hides the unit nor adds one.
 // - The staged texts are exported as `T14_12_FORM_VECTORS` with their
 //   allowances for the S-9 self-test, which judges every staging without
-//   the product — the S-7 sweep reaches only a body's first staging.
+//   the product — the S-7 sweep reaches only a body's first staging — and
+//   the negative arms' spec sources as `T14_12_UNPARSEABLE_VECTORS`, each
+//   declared `mdx.unparseable` at staging and judged non-deriving by the
+//   same self-test, which also confirms the pinned offset against the stock
+//   parser's rejection position wherever the two coincide (every arm but
+//   the spread's: the stock parser reports a spread's extra content at the
+//   content, past the comma the rule of 14 fixes — the rule, not the tool,
+//   fixes the offset).
+// - Every negative spec-source staging opens with a would-be invalid segment
+//   (`id="bad name"`, 14.4) before its failing construct — for the ESM-block
+//   arms after the block, (s) also spelling an import designating no
+//   discovered spec source (14.15) before the failure — and every code-source
+//   staging a would-be unresolved marker (`A.missing`, 14.7) before the
+//   literal: the pinned multiset is exactly one 14.20, so a product
+//   reporting the masked condition, or reporting it instead of the parse
+//   failure, fails. `check --json` is pinned exactly on the never-built
+//   workspace: it holds no record, so 14.10 has nothing to report beside
+//   the parse failure (SPEC 14.10, 12.2).
+// - The 14.16 and 14.20 stagings are exported as `T14_12_REPORTER_STAGINGS`
+//   for T14-4, which sweeps them for reporter membership over `build`,
+//   `check`, and the surfaces whose domain holds the staged file (SPEC
+//   11.2); the offsets stay this module's subject.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -113,6 +156,7 @@ import {
   buildOk,
   expectExit,
   expectFindingFreeReport,
+  runFindingsReport,
   runJson,
 } from "./support.js";
 
@@ -406,6 +450,20 @@ const SPEC_FORM_ARMS: readonly SpecFormArm[] = [
   },
 ];
 
+/** The workspace one spec-form arm stages (its allowance declared, S-9). */
+function specFormDecl(arm: SpecFormArm): WorkspaceDecl {
+  return {
+    files: {
+      "xspec.config.ts": SPECS_ONLY_CONFIG,
+      ...(arm.extraFiles ?? {}),
+      [ARM_FILE]: arm.fixture.text,
+    },
+    ...(arm.allowances === undefined
+      ? {}
+      : { mdx: { allowances: { [ARM_FILE]: arm.allowances } } }),
+  };
+}
+
 /** One spec-form arm: `build --json` exits 1 with exactly the pinned findings. */
 async function runSpecFormArm(
   product: ProductBinding,
@@ -416,28 +474,16 @@ async function runSpecFormArm(
     condition,
     locations: [{ file: ARM_FILE, range: pinned(arm.fixture, index) }],
   }));
-  await withWorkspace(
-    {
-      files: {
-        "xspec.config.ts": SPECS_ONLY_CONFIG,
-        ...(arm.extraFiles ?? {}),
-        [ARM_FILE]: arm.fixture.text,
-      },
-      ...(arm.allowances === undefined
-        ? {}
-        : { mdx: { allowances: { [ARM_FILE]: arm.allowances } } }),
-    },
-    async (workspace) => {
-      const findings = await buildFindings(
-        product,
-        workspace,
-        `${context} — \`build --json\` exits 1 with the findings report: the ` +
-          `file is well-formed and proceeds to its ordinary outcome, a ` +
-          `finding (SPEC 14.20, 12.0, 12.7)`,
-      );
-      assertExactFindings(findings, expected, context);
-    },
-  );
+  await withWorkspace(specFormDecl(arm), async (workspace) => {
+    const findings = await buildFindings(
+      product,
+      workspace,
+      `${context} — \`build --json\` exits 1 with the findings report: the ` +
+        `file is well-formed and proceeds to its ordinary outcome, a ` +
+        `finding (SPEC 14.20, 12.0, 12.7)`,
+    );
+    assertExactFindings(findings, expected, context);
+  });
 }
 
 // (a) Two imports binding one identifier within one ESM block (consecutive
@@ -566,6 +612,16 @@ const NOPE_SECTION_RANGE: ByteRange = (() => {
   };
 })();
 
+/** The (b) workspace: the `BASE` module beside the arm's file, its allowance declared (S-9). */
+const NOPE_DECL: WorkspaceDecl = {
+  files: {
+    "xspec.config.ts": SPECS_ONLY_CONFIG,
+    [BASE_FILE]: BASE_MDX,
+    [ARM_FILE]: NOPE_FIXTURE.text,
+  },
+  mdx: { allowances: { [ARM_FILE]: ["undefined-export"] } },
+};
+
 /** The one finding: 14.16 at the export statement whole (SPEC 14). */
 const NOPE_EXPECTED_FINDINGS: readonly ExactFindingExpectation[] = [
   {
@@ -661,111 +717,101 @@ async function runExportNopeArm(product: ProductBinding): Promise<void> {
     "T14-12 (b) `export { nope }` after a valid, used import in one ESM " +
     "block — an export naming no declaration is an early error, 14.16 in a " +
     "well-formed file, never 14.20 and never 14.15";
-  await withWorkspace(
-    {
-      files: {
-        "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [BASE_FILE]: BASE_MDX,
-        [ARM_FILE]: NOPE_FIXTURE.text,
-      },
-      mdx: { allowances: { [ARM_FILE]: ["undefined-export"] } },
-    },
-    async (workspace) => {
-      // `build --json`: exactly one condition-16 finding located at the
-      // export statement whole (SPEC 14: "an export statement whole"), exit
-      // 1; no 14.20 (the file is well-formed) and no 14.15 (the statement
-      // holds no declaration, which 2.1's collision clause needs).
-      assertExactFindings(
-        await buildFindings(
+  await withWorkspace(NOPE_DECL, async (workspace) => {
+    // `build --json`: exactly one condition-16 finding located at the
+    // export statement whole (SPEC 14: "an export statement whole"), exit
+    // 1; no 14.20 (the file is well-formed) and no 14.15 (the statement
+    // holds no declaration, which 2.1's collision clause needs).
+    assertExactFindings(
+      await buildFindings(
+        product,
+        workspace,
+        `${context} — \`build --json\` exits 1 with the findings report ` +
+          `(SPEC 12.0, 12.7)`,
+      ),
+      NOPE_EXPECTED_FINDINGS,
+      `${context} — \`build --json\``,
+    );
+
+    // `view`: the import proceeds normally — listed under `imports` with
+    // its binding and resolved target; the statement gets no view entry
+    // (11.4: the invalid constructs of 14.16 get no view entry) — so
+    // `imports` holds exactly the one declaration and `comments` nothing;
+    // the embedding's occurrence is the file's one record; the finding
+    // accompanies the answer, exit 1 (11.2).
+    const viewContext = `${context} — \`view ${ARM_FILE}\``;
+    const view = decodeViewReport(
+      parseJsonStdout(
+        await expectExit(
           product,
           workspace,
-          `${context} — \`build --json\` exits 1 with the findings report ` +
-            `(SPEC 12.0, 12.7)`,
+          ["view", ARM_FILE],
+          1,
+          `${viewContext}: an answer carrying a finding exits 1 with the ` +
+            `full answer document still emitted (SPEC 11.2)`,
         ),
-        NOPE_EXPECTED_FINDINGS,
-        `${context} — \`build --json\``,
-      );
-
-      // `view`: the import proceeds normally — listed under `imports` with
-      // its binding and resolved target; the statement gets no view entry
-      // (11.4: the invalid constructs of 14.16 get no view entry) — so
-      // `imports` holds exactly the one declaration and `comments` nothing;
-      // the embedding's occurrence is the file's one record; the finding
-      // accompanies the answer, exit 1 (11.2).
-      const viewContext = `${context} — \`view ${ARM_FILE}\``;
-      const view = decodeViewReport(
-        parseJsonStdout(
-          await expectExit(
-            product,
-            workspace,
-            ["view", ARM_FILE],
-            1,
-            `${viewContext}: an answer carrying a finding exits 1 with the ` +
-              `full answer document still emitted (SPEC 11.2)`,
-          ),
-          viewContext,
-        ),
-        { text: false },
         viewContext,
-      );
-      assertAnswerFindings(view.findings, viewContext);
-      assertSameJson(
-        view.views.map((entry) => projectPath(entry.file)),
-        [ARM_FILE],
-        `${viewContext}: the requested, parseable file is viewed (SPEC 11.4)`,
-      );
-      const fileView = view.views[0]!;
-      assertSameJson(
-        fileView.imports.map(projectImport),
-        [NOPE_EXPECTED_IMPORT],
-        `${viewContext}: \`imports\` lists exactly the import declaration — ` +
-          `its source range, its default binding \`BASE\`, and its resolved ` +
-          `target ${BASE_FILE} — the export statement getting no entry ` +
-          `(SPEC 11.4, 14.16)`,
-      );
-      assertSameJson(
-        fileView.comments,
-        [],
-        `${viewContext}: no MDX comment is staged, and an export statement ` +
-          `is no comment — \`comments\` is [] (SPEC 11.4, 12.7)`,
-      );
-      assertSameJson(
-        fileView.occurrences.map(projectRecord),
-        [NOPE_EXPECTED_RECORD],
-        `${viewContext}: the \`{text(BASE.a)}\` embedding rooted at the ` +
-          `import records its occurrence — the full braced container, kind ` +
-          `embeds, source \`${ARM_FILE}#x\` with the section's construct ` +
-          `range, target \`${BASE_FILE}#a\` (SPEC 11.4, 5.7)`,
-      );
+      ),
+      { text: false },
+      viewContext,
+    );
+    assertAnswerFindings(view.findings, viewContext);
+    assertSameJson(
+      view.views.map((entry) => projectPath(entry.file)),
+      [ARM_FILE],
+      `${viewContext}: the requested, parseable file is viewed (SPEC 11.4)`,
+    );
+    const fileView = view.views[0]!;
+    assertSameJson(
+      fileView.imports.map(projectImport),
+      [NOPE_EXPECTED_IMPORT],
+      `${viewContext}: \`imports\` lists exactly the import declaration — ` +
+        `its source range, its default binding \`BASE\`, and its resolved ` +
+        `target ${BASE_FILE} — the export statement getting no entry ` +
+        `(SPEC 11.4, 14.16)`,
+    );
+    assertSameJson(
+      fileView.comments,
+      [],
+      `${viewContext}: no MDX comment is staged, and an export statement ` +
+        `is no comment — \`comments\` is [] (SPEC 11.4, 12.7)`,
+    );
+    assertSameJson(
+      fileView.occurrences.map(projectRecord),
+      [NOPE_EXPECTED_RECORD],
+      `${viewContext}: the \`{text(BASE.a)}\` embedding rooted at the ` +
+        `import records its occurrence — the full braced container, kind ` +
+        `embeds, source \`${ARM_FILE}#x\` with the section's construct ` +
+        `range, target \`${BASE_FILE}#a\` (SPEC 11.4, 5.7)`,
+    );
 
-      // `occurrences --file`: the embedding is recorded, the finding
-      // accompanying the answer, exit 1 (SPEC 11.3, 11.2).
-      const occurrencesContext = `${context} — \`occurrences --file ${ARM_FILE}\``;
-      const report = decodeOccurrencesReport(
-        parseJsonStdout(
-          await expectExit(
-            product,
-            workspace,
-            ["occurrences", "--file", ARM_FILE],
-            1,
-            `${occurrencesContext}: an answer carrying a finding exits 1 ` +
-              `with the full answer document still emitted (SPEC 11.2)`,
-          ),
-          occurrencesContext,
+    // `occurrences --file`: the embedding is recorded, the finding
+    // accompanying the answer, exit 1 (SPEC 11.3, 11.2).
+    const occurrencesContext = `${context} — \`occurrences --file ${ARM_FILE}\``;
+    const report = decodeOccurrencesReport(
+      parseJsonStdout(
+        await expectExit(
+          product,
+          workspace,
+          ["occurrences", "--file", ARM_FILE],
+          1,
+          `${occurrencesContext}: an answer carrying a finding exits 1 ` +
+            `with the full answer document still emitted (SPEC 11.2)`,
         ),
         occurrencesContext,
-      );
-      assertAnswerFindings(report.findings, occurrencesContext);
-      assertSameJson(
-        report.occurrences.map(projectRecord),
-        [NOPE_EXPECTED_RECORD],
-        `${occurrencesContext}: the embedding rooted at the import is the ` +
-          `domain's one occurrence record — the full braced container, kind ` +
-          `embeds, source \`${ARM_FILE}#x\`, target \`${BASE_FILE}#a\` ` +
-          `(SPEC 11.3, 5.7)`,
-      );
-    },
-  );
+      ),
+      occurrencesContext,
+    );
+    assertAnswerFindings(report.findings, occurrencesContext);
+    assertSameJson(
+      report.occurrences.map(projectRecord),
+      [NOPE_EXPECTED_RECORD],
+      `${occurrencesContext}: the embedding rooted at the import is the ` +
+        `domain's one occurrence record — the full braced container, kind ` +
+        `embeds, source \`${ARM_FILE}#x\`, target \`${BASE_FILE}#a\` ` +
+        `(SPEC 11.3, 5.7)`,
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -907,13 +953,313 @@ async function runCodeFormArm(
 }
 
 // ---------------------------------------------------------------------------
+// Negative arms: 14.20, the one zero-length range at the offset the rule of
+// 14 fixes; masking; reported by `build` and `check`
+// ---------------------------------------------------------------------------
+
+/**
+ * A would-be invalid segment (14.4) every negative spec-source staging
+ * spells before its failing construct (or, for the ESM-block arms, after
+ * the block): masked by the parse failure, so a product reporting it beside
+ * — or instead of — the one 14.20 fails (SPEC 14.20: a file that fails to
+ * parse is masked whole, T14-3). The multibyte `é` before every pinned
+ * offset puts a character-indexed or line/column report off by one from
+ * the pinned byte offset (T14-11's discipline).
+ */
+const MASKED_PREAMBLE =
+  '<S id="bad name">\nA would-be invalid segment (14.4), masked: café.\n</S>\n\n';
+
+/** A would-be unresolved marker (14.7) the code-source stagings hold, masked. */
+const MASKED_MARKER = "A.missing";
+
+/** One negative arm: a staging whose named file is unparseable at `offset`. */
+export interface UnparseableArm {
+  /** The arm's letter (diagnostics). */
+  readonly arm: string;
+  /** The form under test (diagnostics). */
+  readonly name: string;
+  /** Where the failing file lies: a spec source (`.mdx`) or a code source (`.ts`). */
+  readonly kind: "spec-source" | "code-source";
+  /** The unparseable file's workspace-relative path. */
+  readonly file: string;
+  /** Every staged file, the configuration included. */
+  readonly files: Readonly<Record<string, string>>;
+  /** The staged unparseable text (the S-9 vectors; Task 46's reuse). */
+  readonly source: string;
+  /** The failure's byte offset: SPEC 14's zero-length range `{offset, offset}`. */
+  readonly offset: number;
+  /** The condition the staged would-be construct would report, masked (diagnostics). */
+  readonly masked: string;
+  /** Why the rule of 14 fixes that offset (diagnostics). */
+  readonly rule: string;
+  /**
+   * Whether the stock MDX 3 parser's rejection position (`deriveMdx`, S-9)
+   * coincides with the rule's offset — confirmed by the S-9 self-test; the
+   * spread arm's does not (the stock parser reports the extra content past
+   * the comma), the rule alone fixing its offset.
+   */
+  readonly parserAgrees: boolean;
+}
+
+/** A spec-source negative arm: `parts` with one empty pin at the failure's offset. */
+function specUnparseableArm(
+  arm: string,
+  name: string,
+  parts: readonly (string | PinnedPart)[],
+  rule: string,
+  options: {
+    readonly extraFiles?: Readonly<Record<string, string>>;
+    readonly masked?: string;
+    readonly parserAgrees?: boolean;
+  } = {},
+): UnparseableArm {
+  const fixture = assemble(parts);
+  return {
+    arm,
+    name,
+    kind: "spec-source",
+    file: ARM_FILE,
+    files: {
+      "xspec.config.ts": SPECS_ONLY_CONFIG,
+      ...(options.extraFiles ?? {}),
+      [ARM_FILE]: fixture.text,
+    },
+    source: fixture.text,
+    offset: pinned(fixture, 0).start,
+    masked: options.masked ?? 'the invalid segment of `id="bad name"` (14.4)',
+    rule,
+    parserAgrees: options.parserAgrees ?? true,
+  };
+}
+
+/** A code-source negative arm: `src/app.ts` beside the valid `specs/A.mdx`. */
+function codeUnparseableArm(
+  arm: string,
+  name: string,
+  parts: readonly (string | PinnedPart)[],
+  rule: string,
+): UnparseableArm {
+  const fixture = assemble(parts);
+  return {
+    arm,
+    name,
+    kind: "code-source",
+    file: CODE_FILE,
+    files: {
+      "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+      "specs/A.mdx": A_MDX,
+      [CODE_FILE]: fixture.text,
+    },
+    source: fixture.text,
+    offset: pinned(fixture, 0).start,
+    masked: `the unresolved marker \`${MASKED_MARKER}\` (14.7)`,
+    rule,
+    // The harness has no TypeScript oracle: the product alone judges a
+    // code source (S-9 covers MDX), so nothing here to agree with.
+    parserAgrees: false,
+  };
+}
+
+const LEADING_ZERO_RULE =
+  "the literal's second digit: the prefix through its `0` begins a " +
+  "well-formed file, while TypeScript's scanner rejects a legacy octal " +
+  "literal and a leading-zero decimal — text ECMAScript derives — so no " +
+  "well-formed TypeScript file begins with the prefix through the second " +
+  "digit (SPEC 14.20: well-formed TypeScript is the parser's acceptance)";
+
+/** Every negative arm, in the order of the TEST-SPEC T14-12 text. */
+export const T14_12_UNPARSEABLE_ARMS: readonly UnparseableArm[] = [
+  codeUnparseableArm(
+    "p",
+    "`010` in a `.ts` file — a legacy octal literal, rejected by TypeScript's scanner (14.20 at the literal's second digit)",
+    [
+      CODE_IMPORT,
+      "\n\n",
+      MASKED_MARKER,
+      "\n\n",
+      "const n = 0",
+      pin(""),
+      "10\n",
+    ],
+    LEADING_ZERO_RULE,
+  ),
+  codeUnparseableArm(
+    "q",
+    "`09` in a `.ts` file — a leading-zero decimal, rejected by TypeScript's scanner (14.20 at the literal's second digit)",
+    [CODE_IMPORT, "\n\n", MASKED_MARKER, "\n\n", "const n = 0", pin(""), "9\n"],
+    LEADING_ZERO_RULE,
+  ),
+  specUnparseableArm(
+    "r",
+    "a spread attribute `{...a, b}` — `...` followed by more than one assignment expression (14.20 at its comma; T2.7-3's grammar pair, failing side)",
+    [
+      MASKED_PREAMBLE,
+      '<S id="s" {...a',
+      pin(""),
+      ", b}>\nA spread with extra content.\n</S>\n",
+    ],
+    "the offset of the comma: the prefix through `{...a` begins a " +
+      "well-formed file (`{...a}`), while a spread attribute's braces hold " +
+      "`...` followed by exactly one assignment expression beside whitespace " +
+      "and comments alone, so no well-formed file begins with `{...a,` " +
+      "(SPEC 14.20, 2.7)",
+    { parserAgrees: false },
+  ),
+  specUnparseableArm(
+    "s",
+    "an ESM block holding a statement — an import line followed on the next line, no blank line between, by `const x = 1` (14.20 at the start of the `const` line)",
+    [
+      'import BAD from "./missing.xspec"',
+      "\n",
+      pin(""),
+      "const x = 1",
+      "\n\n",
+      MASKED_PREAMBLE,
+    ],
+    "the start of the `const` line: the prefix through the import line's " +
+      "terminator begins a well-formed file, while the block runs to a blank " +
+      "line and derives import and export declarations only, so no " +
+      "well-formed file continues it with `c` (SPEC 14.20)",
+    {
+      masked:
+        "the import designating no discovered spec source (14.15, before " +
+        'the failure) and the invalid segment of `id="bad name"` (14.4, ' +
+        "after it)",
+    },
+  ),
+  specUnparseableArm(
+    "t",
+    'an import spelled with import attributes, `import BASE from "./BASE.xspec" with { type: "json" }` (14.20 at the offset of `with`)',
+    [
+      'import BASE from "./BASE.xspec" ',
+      pin(""),
+      'with { type: "json" }',
+      "\n\n",
+      MASKED_PREAMBLE,
+    ],
+    "the offset of `with`: the prefix through the declaration and its " +
+      "trailing space begins a well-formed file, while import attributes " +
+      "are syntax the edition lacks (ECMAScript 2024) and, no line " +
+      "terminator preceding, nothing else may follow the declaration on " +
+      "its line (SPEC 14.20)",
+    { extraFiles: { [BASE_FILE]: BASE_MDX } },
+  ),
+  specUnparseableArm(
+    "u",
+    "`d={]}` — a JavaScript syntax error inside an attribute value's braces (14.20 at the `]`)",
+    [
+      MASKED_PREAMBLE,
+      '<S id="s" d={',
+      pin(""),
+      "]}>\nA syntax error inside braces.\n</S>\n",
+    ],
+    "the offset of the `]`: the prefix through `d={` begins a well-formed " +
+      "file, while no expression begins with `]` (SPEC 14.20)",
+  ),
+  specUnparseableArm(
+    "v",
+    "`{text(}` — a JavaScript syntax error inside an expression container (14.20 at its `}`)",
+    [MASKED_PREAMBLE, "{text(", pin(""), "}\n"],
+    "the offset of the `}`: the prefix through `{text(` begins a " +
+      'well-formed file (`{text("a")}`), while no argument list continues ' +
+      "with `}` (SPEC 14.20)",
+  ),
+  specUnparseableArm(
+    "w",
+    "an unbalanced brace — `{text(\"a\")` as the file's last bytes (14.20 at the file's byte length)",
+    [MASKED_PREAMBLE, '{text("a")', pin("")],
+    "the file's byte length: the whole file is a prefix of a well-formed " +
+      "one, its bytes ending before the container's closing brace (SPEC " +
+      "14.20, 14: the offset is never past the file's length)",
+  ),
+];
+
+/** The workspace one negative arm stages (spec sources declared unparseable, S-9). */
+function unparseableDecl(arm: UnparseableArm): WorkspaceDecl {
+  return {
+    files: arm.files,
+    ...(arm.kind === "spec-source" ? { mdx: { unparseable: [arm.file] } } : {}),
+  };
+}
+
+/**
+ * Exactly one finding — 14.20, `path` null, its one location the
+ * zero-length range at the arm's offset in the arm's file — and nothing
+ * beside it: the staged would-be condition inside the file is masked.
+ */
+function assertUnparseableExactly(
+  findings: readonly Finding[],
+  arm: UnparseableArm,
+  context: string,
+): void {
+  assertConditionCounts(
+    findings,
+    { "14.20": 1 },
+    `${context} — exactly one finding, condition 14.20: the file is not ` +
+      `well-formed, and an unparseable file masks every condition inside ` +
+      `it, so ${arm.masked} is never reported (SPEC 14.20, 14; T14-3)`,
+  );
+  const finding = findings[0]!;
+  if (finding.path !== null) {
+    fail(
+      `${context}: an unparseable source locates in the file — \`path\` is ` +
+        `null (SPEC 12.7, 14); got ${JSON.stringify(finding.path)}`,
+    );
+  }
+  assertSameJson(
+    projectFinding(finding),
+    {
+      condition: "14.20",
+      locations: [
+        { file: arm.file, range: { start: arm.offset, end: arm.offset } },
+      ],
+    },
+    `${context}: the one zero-length range at the failure's offset — ` +
+      `${arm.rule} — never a non-empty range, a character index, or a ` +
+      `line/column pair (SPEC 14, 14.20, 1.7)`,
+  );
+}
+
+/**
+ * One negative arm: `build --json` and `check --json` each exit 1 with
+ * exactly the pinned 14.20 finding — the never-built workspace holds no
+ * record, so 14.10 has nothing to report beside it (SPEC 14.10, 12.2); the
+ * surfaces of 11.2 are T14-4's rows over the same staging.
+ */
+async function runUnparseableArm(
+  product: ProductBinding,
+  arm: UnparseableArm,
+): Promise<void> {
+  const context = `T14-12 (${arm.arm}) ${arm.name}`;
+  await withWorkspace(unparseableDecl(arm), async (workspace) => {
+    for (const [what, argv] of [
+      ["`build --json`", ["build", "--json"]],
+      ["`check --json`", ["check", "--json"]],
+    ] as const) {
+      assertUnparseableExactly(
+        await runFindingsReport(
+          product,
+          workspace,
+          argv,
+          1,
+          `${context} — ${what} exits 1 with the findings report: an ` +
+            `unparseable source is a finding (SPEC 14.20, 12.0, 12.7)`,
+        ),
+        arm,
+        `${context} — ${what}`,
+      );
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // T14-12
 // ---------------------------------------------------------------------------
 
 const T14_12 = defineProductTest({
   id: "T14-12",
   title:
-    "well-formedness is decided by derivability alone (SPEC 14.20) — positive arms, each file well-formed and proceeding to its ordinary outcome, never 14.20: in a spec source, ECMAScript's early errors — two imports binding one identifier in one ESM block (14.15), `export { nope }` after a valid, used import (exactly one 14.16 at the statement whole, no 14.15; the import listed by `view` with its resolved target, the statement getting no view entry, the `{text(BASE.a)}` embedding recorded by `occurrences --file`, the finding accompanying each answer, exit 1), `{1 = 2}`, `{let}`, `{010}` (14.16 each) — and the expression grammar — `{a, b}` (14.16), `d={BASE.a, BASE.b}` (14.8 located whole), `{await x}`, `{function(){}}` (14.16 each), `{...(a, b)}` (14.17 at the whole braced construct), `export const x = <b/>` (14.16 at the statement whole); in a code-group file, TypeScript's post-parse checks — a rest parameter that is not last, a misplaced `abstract` modifier, a duplicate `let` declaration, a type error — each leaving the file well-formed: `build` and `check` exit 0, a marker inside one of the file's units attributed to it and its `references` edge recorded (SPEC 14.20, 14, 2.1, 2.7, 4.5, 4.6, 5.7, 11.2, 11.3, 11.4)",
+    "well-formedness is decided by derivability alone (SPEC 14.20) — positive arms, each file well-formed and proceeding to its ordinary outcome, never 14.20: in a spec source, ECMAScript's early errors — two imports binding one identifier in one ESM block (14.15), `export { nope }` after a valid, used import (exactly one 14.16 at the statement whole, no 14.15; the import listed by `view` with its resolved target, the statement getting no view entry, the `{text(BASE.a)}` embedding recorded by `occurrences --file`, the finding accompanying each answer, exit 1), `{1 = 2}`, `{let}`, `{010}` (14.16 each) — and the expression grammar — `{a, b}` (14.16), `d={BASE.a, BASE.b}` (14.8 located whole), `{await x}`, `{function(){}}` (14.16 each), `{...(a, b)}` (14.17 at the whole braced construct), `export const x = <b/>` (14.16 at the statement whole); in a code-group file, TypeScript's post-parse checks — a rest parameter that is not last, a misplaced `abstract` modifier, a duplicate `let` declaration, a type error — each leaving the file well-formed: `build` and `check` exit 0, a marker inside one of the file's units attributed to it and its `references` edge recorded; negative arms, each file unparseable — 14.20, the one zero-length range at the offset the rule of 14 fixes, reported by `build` and by `check` and masking every condition inside the file: `010` and `09` in a `.ts` file at the literal's second digit, a spread attribute `{...a, b}` at its comma, an ESM block holding a `const` statement at the start of its line, import attributes at `with`, `d={]}` at the `]`, `{text(}` at its `}`, and an unbalanced `{text(\"a\")` ending the file at the file's byte length (the surfaces of 11.2 over the same stagings: T14-4's rows) (SPEC 14.20, 14, 1.7, 2.1, 2.7, 4.5, 4.6, 5.7, 11.2, 11.3, 11.4)",
   run: async (product) => {
     await runDuplicateBindingArm(product);
     await runExportNopeArm(product);
@@ -922,6 +1268,9 @@ const T14_12 = defineProductTest({
     }
     for (const arm of CODE_FORM_ARMS) {
       await runCodeFormArm(product, arm);
+    }
+    for (const arm of T14_12_UNPARSEABLE_ARMS) {
+      await runUnparseableArm(product, arm);
     }
   },
 });
@@ -963,6 +1312,75 @@ export const T14_12_FORM_VECTORS: readonly (readonly [
     ],
   ),
   ["T14-12 the code arms' spec source", A_MDX, []],
+];
+
+/**
+ * Every MDX source T14-12's negative arms stage — each declared unparseable
+ * (S-9) — with the pinned byte offset where the stock parser's rejection
+ * position coincides with the rule's (`null` where it does not: the spread
+ * arm), for the S-9 self-test's confirmation. `[name, source, offset]`,
+ * uniquely named.
+ */
+export const T14_12_UNPARSEABLE_VECTORS: readonly (readonly [
+  string,
+  string,
+  number | null,
+])[] = T14_12_UNPARSEABLE_ARMS.filter((arm) => arm.kind === "spec-source").map(
+  (arm): readonly [string, string, number | null] => [
+    `T14-12 (${arm.arm}) ${arm.name}`,
+    arm.source,
+    arm.parserAgrees ? arm.offset : null,
+  ],
+);
+
+/**
+ * One T14-12 staging for T14-4's reporter matrix: its condition, label,
+ * workspace, and the surfaces whose domain can hold its staged file (SPEC
+ * 11.2) — all three for a spec source, `occurrences` alone for a code
+ * source.
+ */
+export interface ReporterStaging {
+  readonly condition: "14.16" | "14.20";
+  readonly label: string;
+  readonly decl: WorkspaceDecl;
+  readonly answers:
+    | { readonly kind: "spec-source"; readonly file: string }
+    | { readonly kind: "code-source" };
+}
+
+/**
+ * The 14.16 and 14.20 arms of T14-12 (TEST-SPEC T14-4: "among the matrix's
+ * stagings … the 14.16 and 14.20 arms of … T14-12 (all three surfaces for
+ * their spec-source stagings)"): (b)'s `export { nope }`, the condition-16
+ * containers and export statement of (c)–(f), (h), (i), (k), and every
+ * negative arm — the same stagings the arms above drive, so T14-4 sweeps
+ * exactly what T14-12 pins.
+ */
+export const T14_12_REPORTER_STAGINGS: readonly ReporterStaging[] = [
+  {
+    condition: "14.16",
+    label:
+      "T14-12 (b) `export { nope }` after a valid, used import — an early error, 14.16 in a well-formed file",
+    decl: NOPE_DECL,
+    answers: { kind: "spec-source", file: ARM_FILE },
+  },
+  ...SPEC_FORM_ARMS.filter(
+    (arm) => arm.conditions.length === 1 && arm.conditions[0] === "14.16",
+  ).map((arm): ReporterStaging => ({
+    condition: "14.16",
+    label: `T14-12 (${arm.arm}) ${arm.name}`,
+    decl: specFormDecl(arm),
+    answers: { kind: "spec-source", file: ARM_FILE },
+  })),
+  ...T14_12_UNPARSEABLE_ARMS.map((arm): ReporterStaging => ({
+    condition: "14.20",
+    label: `T14-12 (${arm.arm}) ${arm.name}`,
+    decl: unparseableDecl(arm),
+    answers:
+      arm.kind === "spec-source"
+        ? { kind: "spec-source", file: arm.file }
+        : { kind: "code-source" },
+  })),
 ];
 
 export const section14iiiTests: readonly ProductTestEntry[] = [T14_12];

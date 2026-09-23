@@ -100,6 +100,13 @@
 //   breadth and modifies-nothing compares are T13.3-3's), while the three
 //   surfaces answer finding-free at exit 0 over the staged valid spec
 //   source. Per-surface semantics depth is T11.2-*..T11.5-*'s subject.
+// - T14-4 also sweeps T14-12's 14.16 and 14.20 stagings (section-14-iii.ts's
+//   exported `T14_12_REPORTER_STAGINGS`: `export { nope }` and the
+//   early-error containers under their S-9 allowances, the six unparseable
+//   spec sources declared `mdx.unparseable`, the two unparseable `.ts`
+//   sources) as further sweep entries — reporter membership by exact
+//   counts, the pinned offsets being T14-12's own subject; the `.ts`
+//   entries are code-source rows (`occurrences` alone).
 // - T14-6 stages each condition via its primary test's fixture — the same
 //   minimal home-form stagings T14-4 sweeps, plus the five specially
 //   reported conditions' stagings (14.10, 14.12, 14.14, 14.21, 14.23),
@@ -280,6 +287,7 @@ import {
 } from "./section-6.4.js";
 import type { SameScopeDeclarationArm } from "./section-4.5.js";
 import { T4_5_8_FURTHER_LOCATED_FORMS } from "./section-4.5.js";
+import { T14_12_REPORTER_STAGINGS } from "./section-14-iii.js";
 import type { RefusalExpectation } from "./section-6.5.js";
 import {
   MOVE_DERIVED_PATH_CASE,
@@ -1323,6 +1331,19 @@ export default defineConfig({
     },
     answers: { kind: "no-domain-file", file: "specs/a.mdx" },
   },
+  // The 14.16 and 14.20 arms of T14-12 (TEST-SPEC T14-4: "among the
+  // matrix's stagings … all three surfaces for their spec-source
+  // stagings"), staged by their home module — the early-error forms under
+  // their S-9 allowances, the unparseable spec sources declared so — and
+  // swept here for reporter membership: `build`, `check`, and the surfaces
+  // whose domain holds the staged file (`occurrences` alone for the `.ts`
+  // arms, 14.20 in a code source).
+  ...T14_12_REPORTER_STAGINGS.map((staging): SweepEntry => ({
+    condition: staging.condition,
+    label: staging.label,
+    decl: staging.decl,
+    answers: staging.answers,
+  })),
 ];
 
 // ---------------------------------------------------------------------------
