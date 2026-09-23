@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 22 — T4-5 registration: type-only import collisions
-- Cites: TEST-SPEC T4-5 (four pairings, both orders); SPEC 4, 14.15. Finding A-5.
-- Change: register T4-5 in `section-4.ts` per its entry — each of the four pairings of a type-only import with a colliding binding, staged in both orders, with the entry's findings, ranges, and the compile/attribution observations; traceability keys.
-- Verify: `-t 'T4-5 '` no harness error; self project green.
-
 ### Task 23 — T4.3-2 and T4.5-3: TypeScript-only expression forms
 - Cites: TEST-SPEC T4.3-2 (`text(SPEC.a!)`, `text(SPEC.a as X)`, `text(<X>SPEC.a)`, `text(SPEC.a satisfies X)` → 14.8 at the call, the file well-formed); T4.5-3 (`SPEC.a as X;`, `<X>SPEC.a;`, `SPEC.a satisfies X;`); SPEC 4.3, 4.5, 14.8. Findings A-25, A-26.
 - Change: extend the arm table in `section-4.3-4.4.ts` (~L340–380) and `T4_5_3_ARMS` in `section-4.5.ts` (~L765); the `<X>…` angle-bracket assertion needs a `.ts` (never `.tsx`) source; findings and ranges per the entries.
