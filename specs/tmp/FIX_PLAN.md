@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 25 — T4.6-1's constructor, legacy-module, and decorated attribution; T11-6's unit-name arm
-- Cites: TEST-SPEC T4.6-1 (the constructor unit `path#C.constructor`, legacy `module X` / `module A.B`, decorated-declaration attribution); T11-6 (`query edges --from <path>#C.constructor` — a class `C` whose constructor holds a marker — and `--from <path>#C.then`, each answering with the unit's edges, exit 0); SPEC 4.6, 11.1. Findings A-28, B-5.
-- Change: `section-4.6.ts` gains the three attribution arms (no `constructor`, `module `, or `@dec` staging exists there today); `section-11.ts` gains T11-6's two unit-name arms (the names occur only in section-4.6.ts today).
-- Verify: `-t 'T4.6-1 '`, `-t 'T11-6 '` no harness error; self project green.
-
 ### Task 26 — T5.7-2: line-comment forms inside a `d` value
 - Cites: TEST-SPEC T5.7-2 (`d={// c` U+000A `BASE.a}` and its run-on twin: well-formed, the occurrence spanning `BASE.a`); SPEC 5.7, 2.7. Finding A-29. Depends on Task 3.
 - Change: `section-5.7.ts`: stage both forms (well-formed — the default declaration; confirm with `deriveMdx`) and assert the occurrence span and the edge as the entry states, beside the existing token-bound U+00A0/U+FEFF/block-comment arms.
