@@ -43,9 +43,11 @@ export const DEEPEST_STAGED_TOWER = Math.max(...NESTING_DEPTHS);
 // bytes): `towers` towers plus `rewrites` rewrites grow each line feed to at
 // most 2^(rewrites − 1) × 3 bytes (LFLF doublings, then the fattest
 // sequence), and every such mix is computed below — the all-towers mix
-// wins. Splices (≤ 8 bytes), garbage (≤ 64), BOMs (≤ 3), and terminator
-// runs (≤ 64 × 3) are smaller than any tower; truncate and shuffle never
-// grow a file. P-2/P-3 documents (≤ 3 files × ≤ 6 sections of single-line
+// wins. Splices (≤ 8 bytes), garbage (≤ 64), BOMs (≤ 3), terminator runs
+// (≤ 64 × 3), and the refined classes' fixed spellings (fragments, brace
+// content, ESM-block forms: ≤ 128 bytes per draw, a seeded anchor
+// included) are smaller than any tower; truncate and shuffle never grow a
+// file. P-2/P-3 documents (≤ 3 files × ≤ 6 sections of single-line
 // constructs) and P-4/P-9's (≤ 3 sections per file, prose runs ≤ 8
 // characters) are far smaller. Deterministic fixtures are sized separately
 // below — T1.3-7's document is ~21× this generator maximum.

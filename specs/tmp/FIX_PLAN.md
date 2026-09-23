@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 12 — P-8 mutation menu: fragment, brace-content, and ESM-block classes
-- Cites: TEST-SPEC §16 P-8 (refined mutation classes); SPEC 2.7, 14.20. Finding B-9. Depends on Task 3.
-- Change: `section-16-p8.ts` (menu ~L28–65: splice, invalidUtf8, bom, terminators, nesting, truncate, shuffle, garbage) gains: a fragment class (`<>…</>` insertion/unbalancing); brace-content mutations at the comment/expression/parse-failure boundaries of 2.7 and 14.20 (comment ↔ expression, expression → ill-formed, spread comma forms, empty braces, unbalanced braces at EOF); ESM-block mutations (comment insertion, terminator changes, indentation, splitting/joining blocks, a statement at a line start). Mutated documents are staged `unchecked` (Task 3). The property's invariants stay as the entry states (no crash, diagnosed findings, exit codes, the well-formedness boundary of T14-12).
-- Verify: `-t 'P-8 '` no harness errors at fixed and random seeds; self project green.
-
 ### Task 13 — T1.6-5: assert the 14.20 finding's offset
 - Cites: TEST-SPEC T1.6-5; T14-11's rule (the byte length of the longest well-formed UTF-8 prefix; 0 for a BOM); SPEC 14.20, 1.7. Finding A-18. Depends on Task 3.
 - Change: `assertUnparseableFinding` (`test/suite/registry/section-1.6-1.7.ts` ~L981–1012) checks only condition 14.20 and the file; assert the location offset per arm, precomputed from the staged bytes (declared `mdx.unparseable`).

@@ -59,7 +59,57 @@
 //                  mid-code-point);
 //   * shuffle    — a drawn byte range removed and reinserted at a drawn
 //                  position (closers before openers, headers displaced);
-//   * garbage    — the whole file replaced by 0–64 uniformly drawn bytes.
+//   * garbage    — the whole file replaced by 0–64 uniformly drawn bytes;
+//   * fragment   — `<>…</>` insertion and unbalancing: a balanced fragment
+//                  around a drawn interior (empty, prose, a section, an
+//                  embedding, a comment, a nested fragment, a multi-line
+//                  interior), a lone `<>` or `</>`, or a fragment wrapping a
+//                  drawn byte range (crossing whatever constructs it spans);
+//   * braces     — brace content at the comment/expression/parse-failure
+//                  boundaries of SPEC 2.7 and 14.20, applied to a drawn
+//                  `{…}` container of the file (one seeded when it holds
+//                  none): comment ↔ expression rewrites (the content wrapped
+//                  in a block comment, an expression beside it, comments and
+//                  line comments before or after it — the U+000A-, U+000D-,
+//                  and U+2028-ended and run-on forms of T2.3-3/T2.7-4 —
+//                  empty braces, two comments, and the ECMAScript-whitespace
+//                  and non-whitespace singletons of T2.7-4); the content
+//                  replaced by a boundary expression (the early errors,
+//                  comma sequences, `await`, and function forms of T14-12,
+//                  the negative embedding forms of T2.3-3, JSX and a section
+//                  inside braces, two expressions, an unclosed call, a lone
+//                  `]`, an unclosed block comment); the spread grammar pair
+//                  of T2.7-3 and its neighbours inserted on a `<S ` tag;
+//                  empty braces in flow, text, and attribute-value position
+//                  (`d={}`, `d={ /* c */ }`, `coverage={}`); and unbalanced
+//                  braces at EOF (an unclosed embedding, brace, comment, or
+//                  attribute value appended, a stray `}`, or the file's last
+//                  `}` deleted);
+//   * esmBlock   — ESM-block mutations on a drawn `import`/`export` line
+//                  (one seeded at a drawn line start when the file holds
+//                  none): comment insertion (own-line line and block
+//                  comments before it, a block comment spanning lines, a
+//                  comment on its line before the declaration, trailing
+//                  comments, an own-line comment after it with no blank line
+//                  between); terminator changes (`;` appended or removed, the
+//                  line's terminator rewritten to CR, CRLF, U+2028, U+2029, a
+//                  blank line, or a space joining the next line); indentation
+//                  (spaces or a tab before the declaration); splitting and
+//                  joining blocks (a second declaration after a blank line
+//                  or directly on the next line — a duplicate binding, a
+//                  fresh binding, a side-effect-only import, import
+//                  attributes, an export naming no declaration, an export
+//                  holding JSX — or the blank line after the block deleted);
+//                  and a statement at a line start (`const x = 1` and its
+//                  kin directly after the declaration, the T14-12 negative,
+//                  or at any drawn line start).
+//
+// The refined classes stage the forms most likely to make a product
+// misjudge the well-formedness boundary (T14-12) — every spelling a fixed
+// constant of at most a few dozen bytes, so no refined draw approaches a
+// tower's growth (S-8) — while the property asserts no parse verdict on any
+// of them: its contract stays the robustness clauses above, and the verdicts
+// themselves are T2.3-3's, T2.7-3's, T2.7-4's, T3-7's, and T14-12's.
 //
 // The command sweep spans the SPEC 12 surface: `build` (both output forms —
 // the human form via the drawn menu), `check`, `ids`, `show`, all five
@@ -70,11 +120,19 @@
 // mutations happen to be benign — P-8 constrains their termination, exit
 // class, and JSON form only; the modifies-nothing arm is `build`'s
 // (SPEC 12.1). An implementation-time dry-run over the committed default
-// seeds at the registered 12 runs per seed verified that every menu entry,
-// every mutation kind, and every mutation target occurs — giant MDX section
-// towers (depths 512 and 2048), all three BOM flavors, and a mid-file BOM
-// included — so the CI-pinned trial set (E-5) exercises the full surface
-// deterministically, with staged files bounded (~32 KiB max).
+// seeds at the registered 12 runs per seed (`drawFixedSeedTrials`, the S-8
+// replay) verified that every menu entry, every mutation kind — the three
+// refined classes included — and every mutation target occurs — giant MDX
+// section towers (depths 512 and 2048), all three BOM flavors, a mid-file
+// BOM, lone and balanced fragments and a range-wrapping one, spread
+// attributes, empty braces, an EOF-unbalanced brace, a deleted closer, a
+// whitespace-singleton container, seeded and existing declaration lines
+// with comment, terminator, indentation, and split mutations included — so
+// the CI-pinned trial set (E-5) exercises every kind deterministically,
+// with staged files bounded (~32 KiB max); the refined classes' remaining
+// modes (a boundary expression replacing a container's content, a joined
+// block, a statement at a line start) are reached under
+// `XSPEC_PROPERTY_SEED=random` runs, not by the pinned set.
 //
 // P-8 is outside every CERTIFICATIONS.md fixture scope (its preamble: "P-8
 // sweeps every command, exceeding any narrow conformer scope"), so this body
@@ -470,6 +528,534 @@ function mutateGarbage(choices: Choices, bytes: Uint8Array): MutationResult {
   };
 }
 
+// ---------------------------------------------------------------------------
+// The refined mutation classes (module header: fragment, braces, esmBlock).
+// Each edits the evolving bytes at a drawn anchor found by scanning them — a
+// `{…}` container, a `<S ` tag, an `import`/`export` line, a line start — or
+// at a drawn offset, and seeds an anchor when the file holds none, so every
+// mode is meaningful on every target after every earlier mutation of the
+// trial. Byte-level throughout: a container's content is spliced as bytes,
+// never decoded, so ill-formed UTF-8 an earlier mutation staged survives
+// untouched (H-10: the staged bytes are a pure function of the tape).
+
+const LF = 0x0a;
+const CR = 0x0d;
+
+function utf8(text: string): number[] {
+  return [...Buffer.from(text, "utf8")];
+}
+
+/** Non-overlapping offsets of every occurrence of `needle` in `bytes`. */
+function findAll(bytes: Uint8Array, needle: readonly number[]): number[] {
+  const hits: number[] = [];
+  if (needle.length === 0) return hits;
+  for (let i = 0; i + needle.length <= bytes.length; i += 1) {
+    let match = true;
+    for (let j = 0; j < needle.length; j += 1) {
+      if (bytes[i + j] !== needle[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      hits.push(i);
+      i += needle.length - 1;
+    }
+  }
+  return hits;
+}
+
+/** Offsets at which a line begins: 0 and the byte after each LF, CRLF, or lone CR. */
+function lineStarts(bytes: Uint8Array): number[] {
+  const starts = [0];
+  for (let i = 0; i < bytes.length; i += 1) {
+    if (bytes[i] === LF || (bytes[i] === CR && bytes[i + 1] !== LF)) {
+      starts.push(i + 1);
+    }
+  }
+  return starts;
+}
+
+/** The offset of the terminator (or EOF) ending the line that begins at `start`. */
+function lineEnd(bytes: Uint8Array, start: number): number {
+  let i = start;
+  while (i < bytes.length && bytes[i] !== LF && bytes[i] !== CR) i += 1;
+  return i;
+}
+
+/** The length of the terminator at `offset`: 2 for CRLF, 1 for LF or CR, 0 at EOF. */
+function terminatorLength(bytes: Uint8Array, offset: number): number {
+  if (offset >= bytes.length) return 0;
+  if (bytes[offset] === CR && bytes[offset + 1] === LF) return 2;
+  return 1;
+}
+
+/** A half-open byte range [start, end). */
+interface ByteSpan {
+  readonly start: number;
+  readonly end: number;
+}
+
+/** Every `{…}` span of the file: an opening brace through the nearest later closing brace. */
+function braceContainers(bytes: Uint8Array): ByteSpan[] {
+  const spans: ByteSpan[] = [];
+  let i = 0;
+  while (i < bytes.length) {
+    if (bytes[i] !== 0x7b) {
+      i += 1;
+      continue;
+    }
+    let j = i + 1;
+    while (j < bytes.length && bytes[j] !== 0x7d) j += 1;
+    if (j >= bytes.length) break;
+    spans.push({ start: i, end: j + 1 });
+    i = j + 1;
+  }
+  return spans;
+}
+
+// Code points spelled by number (never as escape spellings in source):
+const NBSP = String.fromCharCode(0xa0); // U+00A0 — ECMAScript whitespace
+const ZWNBSP = String.fromCharCode(0xfeff); // U+FEFF — ECMAScript whitespace
+const LS = String.fromCharCode(0x2028); // U+2028 — ECMAScript line terminator
+const PS = String.fromCharCode(0x2029); // U+2029 — ECMAScript line terminator
+const NEL = String.fromCharCode(0x85); // U+0085 — neither (14.20)
+const ZWSP = String.fromCharCode(0x200b); // U+200B — neither (14.20)
+const BACKSLASH = String.fromCharCode(0x5c);
+
+// --- fragment ---------------------------------------------------------------
+
+/** Fragment interiors, [name, text]; empty first (the shrink target). */
+const FRAGMENT_INTERIORS: ReadonlyArray<readonly [string, string]> = [
+  ["empty", ""],
+  ["prose", "frag"],
+  ["a section", '<S id="f">frag.</S>'],
+  ["an embedding", '{text("a.b")}'],
+  ["a comment", "{/* c */}"],
+  ["a nested fragment", "<>nested</>"],
+  ["a multi-line interior", "\nfrag line\n"],
+];
+
+function mutateFragment(choices: Choices, bytes: Uint8Array): MutationResult {
+  const mode = choices.pick([
+    "balanced",
+    "openOnly",
+    "closeOnly",
+    "wrapRange",
+  ] as const);
+  const offset = choices.intInclusive(0, bytes.length);
+  if (mode === "balanced") {
+    const [name, interior] = choices.pick(FRAGMENT_INTERIORS);
+    return {
+      bytes: spliceBytes(bytes, offset, 0, utf8(`<>${interior}</>`)),
+      description: `insert a balanced fragment (${name}) at ${String(offset)}`,
+    };
+  }
+  if (mode === "openOnly" || mode === "closeOnly") {
+    const tag = mode === "openOnly" ? "<>" : "</>";
+    return {
+      bytes: spliceBytes(bytes, offset, 0, utf8(tag)),
+      description: `insert a lone fragment tag ${tag} at ${String(offset)}`,
+    };
+  }
+  const close = choices.intInclusive(offset, bytes.length);
+  const opened = spliceBytes(bytes, offset, 0, utf8("<>"));
+  return {
+    bytes: spliceBytes(opened, close + 2, 0, utf8("</>")),
+    description: `wrap bytes [${String(offset)}, ${String(close)}) in a fragment`,
+  };
+}
+
+// --- braces ------------------------------------------------------------------
+
+/**
+ * Content rewrites of a `{…}` container at the comment/expression boundary
+ * (SPEC 2.7, 14.20; T2.3-3, T2.7-4): [name, "wrap", prefix, suffix] keeps the
+ * content bytes between the two spellings; [name, "replace", text] replaces
+ * them. Names describe the form; the forms with U+2028 and the whitespace
+ * singletons carry their code points, so descriptions name rather than
+ * quote them.
+ */
+type ContentRewrite =
+  | readonly [string, "wrap", string, string]
+  | readonly [string, "replace", string];
+
+const CONTENT_REWRITES: readonly ContentRewrite[] = [
+  ["the content wrapped in a block comment", "wrap", "/* ", " */"],
+  ["an expression beside the content", "wrap", "", " 1"],
+  ["a block comment before the content", "wrap", "/* n */ ", ""],
+  ["a block comment after the content", "wrap", "", " /* n */"],
+  ["a line comment ended by U+000A before the content", "wrap", "// n\n", ""],
+  ["a line comment ended by U+000D before the content", "wrap", "// n\r", ""],
+  [
+    "a run-on line comment (a brace on the commented-out line)",
+    "wrap",
+    "// c}\n",
+    "",
+  ],
+  [
+    "a line comment ended by U+2028, then a brace and U+000A",
+    "wrap",
+    `// c${LS}}\n`,
+    "",
+  ],
+  ["empty braces", "replace", ""],
+  ["two block comments", "replace", " /* a */ /* b */ "],
+  ["a line comment reaching the closing brace", "replace", "// c"],
+  ["U+00A0 alone", "replace", NBSP],
+  ["U+FEFF alone", "replace", ZWNBSP],
+  ["U+2028 alone", "replace", LS],
+  ["U+2029 alone", "replace", PS],
+  ["U+0085 alone", "replace", NEL],
+  ["U+200B alone", "replace", ZWSP],
+];
+
+/**
+ * Boundary expressions replacing a container's content (SPEC 14.20's
+ * derivability contract, T14-12; the embedding forms of T2.3-3): well-formed
+ * expressions that are no embedding, early-error forms, two expressions, and
+ * syntax failures.
+ */
+const BOUNDARY_EXPRESSIONS: readonly string[] = [
+  "1",
+  "a, b",
+  "1 = 2",
+  "let",
+  "010",
+  "await x",
+  "function(){}",
+  '(text)("a")',
+  'text?.("a")',
+  'text("a"), 1',
+  `te${BACKSLASH}u0078t("a")`,
+  'text("a") text("b")',
+  "text(",
+  "]",
+  '<S id="q">in braces</S>',
+  "<b/>",
+  "<></>",
+  "/* unclosed",
+];
+
+/** Spread attributes inserted on a `<S ` tag (T2.7-3's grammar pair and neighbours). */
+const SPREAD_ATTRIBUTES: readonly string[] = [
+  " {...(a, b)}",
+  " {...a, b}",
+  " {...a}",
+  " {...}",
+  " {... /* c */ a}",
+  " {...a /* c */}",
+];
+
+/** Empty-brace insertions: [text, anchor] — on a `<S ` tag or at any offset. */
+const EMPTY_BRACE_INSERTIONS: ReadonlyArray<readonly [string, "tag" | "any"]> =
+  [
+    ["{}", "any"],
+    ["{ }", "any"],
+    ["{ /* c */ }", "any"],
+    ["{// c\n}", "any"],
+    [" d={}", "tag"],
+    [" d={ /* c */ }", "tag"],
+    [" coverage={}", "tag"],
+  ];
+
+/** Tails appended at EOF leaving a brace unbalanced (or a stray closer). */
+const EOF_BRACE_TAILS: readonly string[] = [
+  '{text("a")',
+  "{",
+  "{/* c",
+  "{// c}",
+  "{// c\n",
+  "}",
+  '<S id="z" d={',
+  '<S id="z" d={[A.a]',
+];
+
+/** The offset just after a drawn `<S ` tag name, or a drawn offset when the file spells none. */
+function drawTagOffset(choices: Choices, bytes: Uint8Array): number {
+  const tags = findAll(bytes, utf8("<S "));
+  return tags.length > 0
+    ? choices.pick(tags) + 2
+    : choices.intInclusive(0, bytes.length);
+}
+
+function mutateBraces(choices: Choices, bytes: Uint8Array): MutationResult {
+  const mode = choices.pick([
+    "rewriteContent",
+    "boundaryExpression",
+    "spreadAttribute",
+    "emptyBraces",
+    "unbalancedAtEof",
+  ] as const);
+  if (mode === "rewriteContent" || mode === "boundaryExpression") {
+    let staged = bytes;
+    let span: ByteSpan;
+    let seeded = "";
+    const spans = braceContainers(bytes);
+    if (spans.length > 0) {
+      span = choices.pick(spans);
+    } else {
+      const offset = choices.intInclusive(0, bytes.length);
+      const embedding = utf8('{text("a.b")}');
+      staged = spliceBytes(bytes, offset, 0, embedding);
+      span = { start: offset, end: offset + embedding.length };
+      seeded = " (seeded, the file holding no container)";
+    }
+    const content = staged.subarray(span.start + 1, span.end - 1);
+    if (mode === "rewriteContent") {
+      const rewrite = choices.pick(CONTENT_REWRITES);
+      const replaced =
+        rewrite[1] === "wrap"
+          ? [...utf8(rewrite[2]), ...content, ...utf8(rewrite[3])]
+          : utf8(rewrite[2]);
+      return {
+        bytes: spliceBytes(staged, span.start + 1, content.length, replaced),
+        description: `rewrite the container at ${String(span.start)}${seeded}: ${rewrite[0]}`,
+      };
+    }
+    const expression = choices.pick(BOUNDARY_EXPRESSIONS);
+    return {
+      bytes: spliceBytes(
+        staged,
+        span.start + 1,
+        content.length,
+        utf8(expression),
+      ),
+      description:
+        `replace the content of the container at ${String(span.start)}${seeded} ` +
+        `with ${JSON.stringify(expression)}`,
+    };
+  }
+  if (mode === "spreadAttribute") {
+    const attribute = choices.pick(SPREAD_ATTRIBUTES);
+    const offset = drawTagOffset(choices, bytes);
+    return {
+      bytes: spliceBytes(bytes, offset, 0, utf8(attribute)),
+      description: `insert the spread attribute ${JSON.stringify(attribute.trim())} at ${String(offset)}`,
+    };
+  }
+  if (mode === "emptyBraces") {
+    const [text, anchor] = choices.pick(EMPTY_BRACE_INSERTIONS);
+    const offset =
+      anchor === "tag"
+        ? drawTagOffset(choices, bytes)
+        : choices.intInclusive(0, bytes.length);
+    return {
+      bytes: spliceBytes(bytes, offset, 0, utf8(text)),
+      description: `insert empty braces ${JSON.stringify(text.trim())} at ${String(offset)}`,
+    };
+  }
+  const lastCloser = bytes.lastIndexOf(0x7d);
+  if (lastCloser >= 0 && choices.boolean(0.25)) {
+    return {
+      bytes: spliceBytes(bytes, lastCloser, 1, []),
+      description: `delete the file's last closing brace at ${String(lastCloser)}`,
+    };
+  }
+  const tail = choices.pick(EOF_BRACE_TAILS);
+  return {
+    bytes: spliceBytes(bytes, bytes.length, 0, utf8(tail)),
+    description: `append ${JSON.stringify(tail)} at EOF (unbalanced braces)`,
+  };
+}
+
+// --- esmBlock ----------------------------------------------------------------
+
+const ESM_LINE_LEADS: ReadonlyArray<readonly number[]> = [
+  utf8("import "),
+  utf8("export "),
+];
+
+/** Start offsets of the lines beginning with `import ` or `export `. */
+function esmLineStarts(bytes: Uint8Array): number[] {
+  return lineStarts(bytes).filter((start) =>
+    ESM_LINE_LEADS.some((lead) =>
+      lead.every((byte, i) => bytes[start + i] === byte),
+    ),
+  );
+}
+
+const SEEDED_DECLARATION = 'import Z from "./A.xspec"';
+
+/**
+ * Comment insertions around a declaration line, [name, text, anchor]: before
+ * the line (own-line forms), at its start (a comment before the declaration
+ * on its line), at its end (trailing), or on the line after it with no blank
+ * line between (SPEC 14.20's block; T3-7's forms).
+ */
+const ESM_COMMENT_INSERTIONS: ReadonlyArray<
+  readonly [string, string, "before" | "lineStart" | "lineEnd" | "after"]
+> = [
+  ["an own-line line comment before it", "// note\n", "before"],
+  ["an own-line block comment before it", "/* c */\n", "before"],
+  ["a block comment spanning lines before it", "/* a\n b */\n", "before"],
+  [
+    "a block comment before the declaration on its line",
+    "/* c */ ",
+    "lineStart",
+  ],
+  ["a trailing line comment", " // note", "lineEnd"],
+  ["a trailing block comment", " /* c */", "lineEnd"],
+  [
+    "an own-line line comment after it, no blank line between",
+    "// tail\n",
+    "after",
+  ],
+  [
+    "an own-line block comment after it, no blank line between",
+    "/* tail */\n",
+    "after",
+  ],
+];
+
+/** Terminator rewrites of a declaration line, [name, text] replacing its terminator. */
+const ESM_TERMINATOR_REWRITES: ReadonlyArray<readonly [string, string]> = [
+  ["CR", "\r"],
+  ["CRLF", "\r\n"],
+  ["U+2028", LS],
+  ["U+2029", PS],
+  ["a blank line", "\n\n"],
+  ["a space (joining the next line)", " "],
+  ["`;` and LF", ";\n"],
+];
+
+/** Indentation prefixes, [name, text]. */
+const ESM_INDENTS: ReadonlyArray<readonly [string, string]> = [
+  ["one space", " "],
+  ["three spaces", "   "],
+  ["four spaces", "    "],
+  ["a tab", "\t"],
+];
+
+/** Second declarations joining or following a block, [name, text]. */
+const ESM_SECOND_DECLARATIONS: ReadonlyArray<readonly [string, string]> = [
+  ["a duplicate binding", 'import A from "./A.xspec"'],
+  ["a fresh binding", SEEDED_DECLARATION],
+  ["a side-effect-only import", 'import "./A.xspec"'],
+  ["import attributes", 'import A from "./A.xspec" with { type: "json" }'],
+  ["an export naming no declaration", "export { nope }"],
+  ["an export holding JSX", "export const x = <b/>"],
+  ["a default export", "export default 1"],
+];
+
+/** Statements at a line start, [name, text]. */
+const ESM_STATEMENTS: ReadonlyArray<readonly [string, string]> = [
+  ["a declaration statement", "const x = 1"],
+  ["an expression statement", "x;"],
+  ["a bare `let`", "let"],
+  ["an exported declaration", "export const x = 1"],
+  ["a statement holding a spec import", 'const y = import("./A.xspec")'],
+];
+
+function mutateEsmBlock(choices: Choices, bytes: Uint8Array): MutationResult {
+  const mode = choices.pick([
+    "comment",
+    "terminator",
+    "indent",
+    "split",
+    "join",
+    "statement",
+  ] as const);
+  // Anchor: a drawn declaration line, seeded at a drawn line start when the
+  // file holds none.
+  let staged = bytes;
+  let start: number;
+  let seeded = "";
+  const declarations = esmLineStarts(bytes);
+  if (declarations.length > 0) {
+    start = choices.pick(declarations);
+  } else {
+    start = choices.pick(lineStarts(bytes));
+    staged = spliceBytes(bytes, start, 0, utf8(`${SEEDED_DECLARATION}\n\n`));
+    seeded = " (seeded, the file holding no declaration line)";
+  }
+  const end = lineEnd(staged, start);
+  const terminator = terminatorLength(staged, end);
+  const nextLine = end + terminator;
+  const at = `the declaration line at ${String(start)}${seeded}`;
+  if (mode === "comment") {
+    const [name, text, anchor] = choices.pick(ESM_COMMENT_INSERTIONS);
+    const offset =
+      anchor === "before" || anchor === "lineStart"
+        ? start
+        : anchor === "lineEnd"
+          ? end
+          : nextLine;
+    const insert = anchor === "after" && terminator === 0 ? `\n${text}` : text;
+    return {
+      bytes: spliceBytes(staged, offset, 0, utf8(insert)),
+      description: `insert ${name} around ${at}`,
+    };
+  }
+  if (mode === "terminator") {
+    if (choices.boolean(0.3)) {
+      const semicolon = end > start && staged[end - 1] === 0x3b;
+      return {
+        bytes: semicolon
+          ? spliceBytes(staged, end - 1, 1, [])
+          : spliceBytes(staged, end, 0, [0x3b]),
+        description: `${semicolon ? "remove" : "append"} the \`;\` of ${at}`,
+      };
+    }
+    const [name, text] = choices.pick(ESM_TERMINATOR_REWRITES);
+    return {
+      bytes: spliceBytes(staged, end, terminator, utf8(text)),
+      description: `rewrite the terminator of ${at} to ${name}`,
+    };
+  }
+  if (mode === "indent") {
+    const [name, text] = choices.pick(ESM_INDENTS);
+    return {
+      bytes: spliceBytes(staged, start, 0, utf8(text)),
+      description: `indent ${at} by ${name}`,
+    };
+  }
+  if (mode === "split") {
+    const [name, text] = choices.pick(ESM_SECOND_DECLARATIONS);
+    return {
+      bytes: spliceBytes(staged, end, 0, utf8(`\n\n${text}`)),
+      description: `add ${name} in a separate block after ${at}`,
+    };
+  }
+  if (mode === "join") {
+    if (choices.boolean(0.4)) {
+      // Delete the blank line(s) after the block so the following content
+      // joins it.
+      let blankEnd = nextLine;
+      while (blankEnd < staged.length) {
+        const lineTerminator = terminatorLength(staged, blankEnd);
+        if (lineTerminator === 0 || lineEnd(staged, blankEnd) !== blankEnd) {
+          break;
+        }
+        blankEnd += lineTerminator;
+      }
+      if (blankEnd > nextLine) {
+        return {
+          bytes: spliceBytes(staged, nextLine, blankEnd - nextLine, []),
+          description: `delete the blank line(s) after ${at}`,
+        };
+      }
+    }
+    const [name, text] = choices.pick(ESM_SECOND_DECLARATIONS);
+    return {
+      bytes: spliceBytes(staged, end, 0, utf8(`\n${text}`)),
+      description: `add ${name} on the line after ${at} (one block)`,
+    };
+  }
+  const [name, text] = choices.pick(ESM_STATEMENTS);
+  if (choices.boolean(0.6)) {
+    return {
+      bytes: spliceBytes(staged, end, 0, utf8(`\n${text}`)),
+      description: `add ${name} on the line after ${at} (one block)`,
+    };
+  }
+  const lineStart = choices.pick(lineStarts(staged));
+  return {
+    bytes: spliceBytes(staged, lineStart, 0, utf8(`${text}\n`)),
+    description: `insert ${name} at the line start ${String(lineStart)}${seeded}`,
+  };
+}
+
 type Mutator = (
   choices: Choices,
   bytes: Uint8Array,
@@ -486,6 +1072,9 @@ const MUTATION_KINDS: ReadonlyArray<readonly [number, Mutator]> = [
   [2, (c, b) => mutateTruncate(c, b)],
   [2, (c, b) => mutateShuffle(c, b)],
   [2, (c, b) => mutateGarbage(c, b)],
+  [2, (c, b) => mutateFragment(c, b)],
+  [3, (c, b) => mutateBraces(c, b)],
+  [3, (c, b) => mutateEsmBlock(c, b)],
 ];
 
 /**
@@ -703,8 +1292,9 @@ async function runFuzzTrial(
 const P_8 = defineProductTest({
   id: "P-8",
   title:
-    "fuzz: over byte-mutated MDX/TS/config (invalid UTF-8, BOMs, giant nesting, " +
-    "pathological line terminators), every command terminates, never emits a " +
+    "fuzz: over byte-mutated MDX/TS/config (fragments, brace content at the " +
+    "2.7/14.20 boundaries, ESM-block mutations, invalid UTF-8, BOMs, giant " +
+    "nesting, pathological line terminators), every command terminates, never emits a " +
     "partial JSON document under --json, always exits 0, 1, or 2, and failing " +
     "`build`s modify nothing (SPEC 12.0, 12.1; TEST-SPEC §16 P-8)",
   // Wall-clock hang guard only (H-10): three fixed seeds (E-5), one staging
