@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 40 — T6.6-3: the preview twins
-- Cites: TEST-SPEC T6.6-3 (extended: preview twins for T6.5-6's refusals, T6.5-16's and T6.5-17's refusals — the same finding, exit 1, `mapping`, `files`, `delta` `null` — the exact self-move of either form, the same-file after-removal collision, and the exit-2 twins over the U+FFFD destinations); SPEC 6.6, 12.7. Finding A-34. Depends on Tasks 36, 37.
-- Change: `section-6.6.ts` T6.6-3 iterates only `RENAME_REFUSAL_CASES`, `MOVE_REFUSAL_CASES`, `MOVE_LINK_OUTSIDE_CASES` and the usage tables; add the missing twins, reusing T6.5-16/T6.5-17's stagings through exported constants of `section-6.5-iii.ts` rather than duplicating them, and the exit-2 twins over the exported `MOVE_REPLACEMENT_DESTINATION_CASES` (`section-6.5.ts` ~L3462).
-- Verify: `-t 'T6.6-3 '` no harness error; self project green.
-
 ### Task 41 — T6.6-4: the pinned tie-break stagings and the full 12.7 comparator
 - Cites: TEST-SPEC T6.6-4 (arm (e) pinned at T6.5-13(b) — a self-closing target parent: `import-addition` before `target-insertion`, both zero-length at the tag end; T6.5-13(d) — the EOF paragraph line, terminated and unterminated; the within-class T6.5-13(g) — two `import-addition` entries at one offset, count asserted; the full 12.7 comparator over every edit list); SPEC 6.6, 12.7. Finding A-35. Depends on Task 33.
 - Change: `section-6.6.ts` T6.6-4's arm (e) is a generic "coincidence-capable" staging; replace it with the three pinned stagings (reuse `section-6.5-iii.ts`'s exported fixtures) and apply the full 12.7 comparator to every edit list the test decodes.
