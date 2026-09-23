@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 20 — T3-7 registration: ESM-block comments and the `;`-terminated import
-- Cites: TEST-SPEC T3-7; SPEC 3, 2.1. Finding A-4. Depends on Task 3.
-- Change: register T3-7 in `section-3.ts` per its entry — JavaScript comments inside an ESM block (own-line and beside a declaration) with the compiled Markdown byte-asserted (comment lines staying as content or dropping exactly as 3 states), and `import X from "./a.xspec";` with the `;` terminator (parsing, binding usable, Markdown as 3 states). T3-7 is not in CONF-MD's scope (manifest); no fixture change; traceability keys.
-- Verify: `-t 'T3-7 '` no harness error; self project green.
-
 ### Task 21 — T4-2: side-effect-only import arms
 - Cites: TEST-SPEC T4-2 (the valid `import "./NAME.xspec"` — exit 0, no edge, no occurrence; the 14.15 arms `import "./missing.xspec"` and `import "../specs/NAME.xspec.ts"`); SPEC 4, 14.15, 5.7. Finding A-24.
 - Change: add the three arms to T4-2's body (`section-4.ts` or `section-4.1-4.2.ts`, wherever T4-2 lives) with the entry's findings, locations, and the negative edge/occurrence assertions.

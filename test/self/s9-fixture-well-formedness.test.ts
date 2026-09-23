@@ -30,7 +30,7 @@ import {
 } from "../helpers/mdx-derivability.js";
 import { HarnessStagingError } from "../helpers/permissions.js";
 import { TestWorkspace, type WorkspaceDecl } from "../helpers/workspace.js";
-import { REMOVALS_SOURCE } from "../suite/registry/section-3.js";
+import { REMOVALS_SOURCE, T3_7_SOURCE } from "../suite/registry/section-3.js";
 import { P2_P3_FORM_VECTORS } from "../suite/registry/section-16-p2-p3.js";
 import { P4_FORM_VECTORS } from "../suite/registry/section-16-p4.js";
 import { P5_FORM_VECTORS } from "../suite/registry/section-16-p5-p6.js";
@@ -292,9 +292,12 @@ const WELL_FORMED: ReadonlyArray<readonly [name: string, source: string]> = [
   ],
   // Deterministic fixtures judged verbatim from their registry modules:
   // T3-1's specs/A.mdx (`gamma` an in-line section closed within its
-  // paragraph, the second fence at top level) and T6.2-3's impure origin in
+  // paragraph, the second fence at top level), T3-7's specs/main.mdx (four
+  // ESM blocks carrying JavaScript comments beside their imports and a
+  // `;`-terminated declaration), and T6.2-3's impure origin in
   // 6.2's worked shape, with the two files its move leaves (SPEC 6.5).
   ["T3-1 specs/A.mdx as staged", REMOVALS_SOURCE],
+  ["T3-7 specs/main.mdx as staged", T3_7_SOURCE],
   ["T6.2-3 impure origin specs/Room.mdx as staged", I3_ROOM_SOURCE],
   ["T6.2-3 impure origin after the move", I3_ROOM_MOVED_SOURCE],
   ["T6.2-3 impure destination after the move", I3_HALL_MOVED_SOURCE],

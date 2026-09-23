@@ -1,5 +1,5 @@
 // TEST-SPEC §3 (Markdown compilation) — SUITE-11: T3-1, T3-2, T3-3, T3-4,
-// T3-5, T3-6.
+// T3-5, T3-6, T3-7.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -23,12 +23,28 @@
 //   plus the grammar-boundary staging: its fenced code blocks and inline
 //   code span carry construct-like bytes that must stay literal content
 //   (constructs exist only where the MDX parse yields them).
+// - T3-7 (outside CONF-MD's scope — its `view` and `query node` surfaces
+//   are not served there) keeps the same discipline: LF only, no exotic
+//   byte; its JavaScript comments beside imports are the ESM-block class
+//   P-2 composes and the scope admits.
 
-import { assertFileBytes, fail } from "../../helpers/assertions.js";
+import { Buffer } from "node:buffer";
+
+import type {
+  SourceRange,
+  ViewImportEntry,
+} from "../../helpers/adapters/index.js";
 import {
   decodeEdgesReport,
   decodeNodeIdentityRowsReport,
+  decodeNodeReport,
+  decodeViewReport,
 } from "../../helpers/adapters/index.js";
+import {
+  assertBytesEqual,
+  assertFileBytes,
+  fail,
+} from "../../helpers/assertions.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -747,6 +763,321 @@ const T3_6 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T3-7
+// ---------------------------------------------------------------------------
+
+// ESM-block comments and the `;`-terminated import (SPEC 3, 2.1, 2.7). An
+// import's removal is its declaration's own characters alone, so a
+// JavaScript comment beside it in its ESM block is no MDX comment (2.7: an
+// MDX comment is an empty expression container) — it stays as content, and
+// the line-drop rule of 3 then judges the line with the comment's bytes
+// among its remaining content. Four blocks in one file (`specs/main.mdx`),
+// each ended by a blank line (MDX 3's ESM construct runs to a blank line,
+// 14.20; AGENTS.md's parser recipe) and followed by a kept marker line so a
+// misplaced drop is diagnosed precisely, every declaration valid and used —
+// the section `s` depends on one node of each imported file (2.1, 2.2):
+// - the trailing-comment arm: `import A from "./A.xspec" // note` — the
+//   declaration's characters deleted, the line is left ` // note` plus its
+//   terminator: non-whitespace content, kept, not dropped as
+//   whitespace-only;
+// - the own-line arm: `import D …`, `// note`, `import E …` on consecutive
+//   lines of one block — the two import lines are left empty purely by the
+//   removals and drop with their terminators; the comment line survives
+//   byte-for-byte with its terminator;
+// - the block-comment arm: `import F …` heading the block (an ESM block
+//   begins with a declaration at its first line's start, 14.20) and
+//   `/* c */ import B from "./B.xspec"` its second line — the line keeps
+//   `/* c */ ` and its terminator;
+// - the terminator arm: `import C from "./C.xspec";` alone on its line —
+//   the `;` ends ECMAScript's ImportDeclaration (14.20), so it is among the
+//   declaration's own characters: removed with it, the line dropped as left
+//   empty purely by the removal. A product deleting through the specifier
+//   literal alone leaves a stray `;` line as content and fails the byte
+//   assertion.
+// The same bytes are the root's own text (SPEC 1.6: the root's contribution
+// with the section's excised — the section's opening-tag line drops inside
+// its construct, its closing-tag line and the comment line drop after it),
+// read through `query node` and `view --text`; `view`'s `comments` lists the
+// one MDX comment the file stages (`{/* mdx */}` on its own line, dropped
+// from the output per 3) and none of the JavaScript comments (11.4: MDX
+// comments alone); and every import is listed under `imports` with its
+// declaration's byte range, the terminator arm's ending after the `;`
+// (11.4; T11.4-4), its binding name, and its resolved target. Every staged
+// shape derives under the grammar 14.20 fixes (S-9: the workspace builder
+// judges each file at staging; the S-9 self-test judges the exported
+// source). LF terminators only and no exotic byte anywhere (the module's
+// certification constraints, though T3-7 lies outside CONF-MD's scope: its
+// `view` and `query node` surfaces are not served there).
+
+/**
+ * A line of an ESM block: plain text (a comment line), or an import
+ * declaration with the bytes beside it on its line — `before` the comment
+ * preceding it in the block-comment arm, `after` the comment following it
+ * in the trailing-comment arm, empty otherwise. `declaration` is the
+ * declaration's own characters, a spelled `;` included (SPEC 3, 14.20);
+ * `binding` its default binding's identifier, also its target file's stem
+ * (`specs/<binding>.mdx`, holding the section `<binding, lower-cased>`).
+ */
+type EsmBlockLine =
+  | string
+  | {
+      readonly before: string;
+      readonly declaration: string;
+      readonly binding: string;
+      readonly after: string;
+    };
+
+interface EsmBlockArm {
+  readonly name: string;
+  /** The block's lines, each LF-terminated; a blank line then ends it. */
+  readonly lines: readonly EsmBlockLine[];
+  /** The block's compiled lines, hand-derived per SPEC 3, each LF-terminated. */
+  readonly compiled: readonly string[];
+  /** The kept marker line following the block's blank line. */
+  readonly marker: string;
+}
+
+function importLine(
+  binding: string,
+  spelling: {
+    readonly before?: string;
+    readonly after?: string;
+    readonly semicolon?: boolean;
+  } = {},
+): EsmBlockLine {
+  return {
+    before: spelling.before ?? "",
+    declaration: `import ${binding} from "./${binding}.xspec"${spelling.semicolon === true ? ";" : ""}`,
+    binding,
+    after: spelling.after ?? "",
+  };
+}
+
+const T3_7_ARMS: readonly EsmBlockArm[] = [
+  {
+    name: "trailing line comment",
+    lines: [importLine("A", { after: " // note" })],
+    // The declaration deleted; ` // note` is non-whitespace content, so the
+    // line is kept with its terminator.
+    compiled: [" // note"],
+    marker: "K1 after-trailing-comment",
+  },
+  {
+    name: "own-line line comment between two imports",
+    lines: [importLine("D"), "// note", importLine("E")],
+    // Both import lines dropped; the comment line survives with its
+    // terminator.
+    compiled: ["// note"],
+    marker: "K2 after-own-line-comment",
+  },
+  {
+    name: "block comment before the second line's import",
+    lines: [importLine("F"), importLine("B", { before: "/* c */ " })],
+    // The first line dropped; the second keeps `/* c */ ` and its terminator.
+    compiled: ["/* c */ "],
+    marker: "K3 after-block-comment",
+  },
+  {
+    name: "semicolon-terminated import",
+    lines: [importLine("C", { semicolon: true })],
+    // The `;` removed with the declaration; the line, left empty purely by
+    // the removal, drops with its terminator.
+    compiled: [],
+    marker: "K4 after-semicolon",
+  },
+];
+
+const T3_7_FILE = "specs/main.mdx";
+const T3_7_EMITTED = "specs/main.md";
+const T3_7_SECTION_BODY = "Body.\n";
+const T3_7_MDX_COMMENT = "{/* mdx */}";
+
+interface T37Fixture {
+  /** The staged `specs/main.mdx`. */
+  readonly source: string;
+  /** Its compiled Markdown — the root's subtree text (SPEC 3, 1.6). */
+  readonly compiled: string;
+  /** The root's own text: the compiled output with the section's excised. */
+  readonly rootOwnText: string;
+  /** The expected `imports` member, in document order (SPEC 11.4). */
+  readonly imports: readonly ViewImportEntry[];
+  /** The expected `comments` member: the one MDX comment (SPEC 11.4). */
+  readonly comments: readonly SourceRange[];
+  /** The imported target files, path to source. */
+  readonly targets: Readonly<Record<string, string>>;
+}
+
+/**
+ * Compose the fixture from the arms: each block's lines, a blank line, its
+ * marker line, a blank line; then the section using every binding, and the
+ * MDX comment. The compiled expectation is assembled the same way from the
+ * arms' hand-derived compiled lines, and each declaration's byte range is
+ * recorded as it is laid down (SPEC 1.7).
+ */
+function composeT37Fixture(arms: readonly EsmBlockArm[]): T37Fixture {
+  let source = "";
+  let compiled = "";
+  const imports: ViewImportEntry[] = [];
+  const bindings: string[] = [];
+  const pos = (): number => Buffer.byteLength(source, "utf8");
+  for (const arm of arms) {
+    for (const line of arm.lines) {
+      if (typeof line === "string") {
+        source += `${line}\n`;
+        continue;
+      }
+      source += line.before;
+      const start = pos();
+      source += line.declaration;
+      imports.push({
+        range: { start, end: pos() },
+        name: line.binding,
+        target: `specs/${line.binding}.mdx`,
+      });
+      bindings.push(line.binding);
+      source += `${line.after}\n`;
+    }
+    source += `\n${arm.marker}\n\n`;
+    compiled += `${arm.compiled.map((line) => `${line}\n`).join("")}\n${arm.marker}\n\n`;
+  }
+  const rootOwnText = compiled;
+  const references = bindings
+    .map((binding) => `${binding}.${binding.toLowerCase()}`)
+    .join(", ");
+  source += `<S id="s" d={[${references}]}>\n${T3_7_SECTION_BODY}</S>\n`;
+  const commentStart = pos();
+  source += `${T3_7_MDX_COMMENT}\n`;
+  compiled += T3_7_SECTION_BODY;
+  const targets = Object.fromEntries(
+    bindings.map((binding) => [
+      `specs/${binding}.mdx`,
+      `<S id="${binding.toLowerCase()}">\n${binding} text.\n</S>\n`,
+    ]),
+  );
+  return {
+    source,
+    compiled,
+    rootOwnText,
+    imports,
+    comments: [
+      {
+        start: commentStart,
+        end: commentStart + Buffer.byteLength(T3_7_MDX_COMMENT, "utf8"),
+      },
+    ],
+    targets,
+  };
+}
+
+const T3_7_FIXTURE = composeT37Fixture(T3_7_ARMS);
+/** The staged `specs/main.mdx`, exported for the S-9 self-test (its exact bytes). */
+export const T3_7_SOURCE = T3_7_FIXTURE.source;
+
+const T3_7 = defineProductTest({
+  id: "T3-7",
+  title:
+    "JavaScript comments inside an ESM block are content, not MDX comments — an import's removal is its declaration's characters alone: a line keeps its trailing ` // note` and terminator, an own-line `// note` between two imports of one block survives while the import lines drop, and a line keeps the `/* c */ ` preceding its import; a semicolon-terminated declaration's `;` is among its own characters, its line dropped as left empty purely by the removal; the same bytes are the root's own text (`query node`, `view --text`), `view`'s `comments` lists none of them, and every import is listed under `imports` with its declaration range, the `;`-terminated one's ending after the `;` (SPEC 3, 2.1, 2.7, 1.6, 11.4)",
+  run: async (product) => {
+    const workspace = await TestWorkspace.create({
+      files: {
+        "xspec.config.ts": EMIT_TRUE_CONFIG,
+        [T3_7_FILE]: T3_7_FIXTURE.source,
+        ...T3_7_FIXTURE.targets,
+      },
+    });
+    try {
+      await buildOk(
+        product,
+        workspace,
+        "T3-7 `build` of the ESM-block comment fixture — every block well-formed, every import valid and used, no finding, exit 0 (SPEC 3, 2.1, 14.20)",
+      );
+      await assertFileBytes(
+        workspace.path(T3_7_EMITTED),
+        T3_7_FIXTURE.compiled,
+        "T3-7 emitted specs/main.md — each import removed by its declaration's own characters alone, a spelled `;` included: the trailing ` // note` kept on its line, the own-line `// note` surviving between two dropped import lines, `/* c */ ` kept before a removed import, and the `;`-terminated import's line dropped (SPEC 3, 2.7)",
+      );
+
+      // The same bytes are the root's own text (SPEC 1.6): `query node`.
+      const nodeLabel = "T3-7 `query node specs/main.mdx` (the root)";
+      const node = decodeNodeReport(
+        await runJson(
+          product,
+          workspace,
+          ["query", "node", T3_7_FILE],
+          nodeLabel,
+        ),
+        nodeLabel,
+      );
+      if (node.identity !== T3_7_FILE) {
+        fail(
+          `${nodeLabel}: expected the report to be about ${JSON.stringify(T3_7_FILE)} (SPEC 1.5), ` +
+            `got identity ${JSON.stringify(node.identity)}`,
+        );
+      }
+      assertBytesEqual(
+        node.ownText,
+        T3_7_FIXTURE.rootOwnText,
+        `${nodeLabel}: own text — the JavaScript comments' bytes are content of the root, the section's contribution excised (SPEC 1.6, 3)`,
+      );
+      assertBytesEqual(
+        node.subtreeText,
+        T3_7_FIXTURE.compiled,
+        `${nodeLabel}: subtree text — for the root, the entire compiled output (SPEC 1.6)`,
+      );
+
+      // `view --text`: the root's own text again; `comments` the MDX comment
+      // alone; `imports` every declaration with its range (SPEC 11.4).
+      const viewContext = "T3-7 bare `view --text`";
+      const report = decodeViewReport(
+        await runJson(
+          product,
+          workspace,
+          ["view", "--text"],
+          `${viewContext}: a finding-free answer, exit 0 (SPEC 11.2, 12.0)`,
+        ),
+        { text: true },
+        viewContext,
+      );
+      assertSameJson(
+        report.findings,
+        [],
+        `${viewContext}: every block well-formed, every import valid — no finding (SPEC 2.1, 14.20)`,
+      );
+      const view = report.views.find(
+        (candidate) => candidate.file === T3_7_FILE,
+      );
+      if (view === undefined) {
+        fail(
+          `${viewContext}: no per-file view for ${T3_7_FILE} among ${JSON.stringify(report.views.map((candidate) => candidate.file))} (SPEC 11.4)`,
+        );
+      }
+      assertSameJson(
+        view.imports,
+        T3_7_FIXTURE.imports,
+        `${viewContext}: \`imports\` lists every declaration in document order with its byte-exact range — the \`;\`-terminated one's ending after the \`;\` — its binding name, and its resolved target (SPEC 11.4, 1.7, 2.1; T11.4-4)`,
+      );
+      assertSameJson(
+        view.comments,
+        T3_7_FIXTURE.comments,
+        `${viewContext}: \`comments\` lists the one MDX comment by its full braced container and none of the JavaScript comments — MDX comments alone (SPEC 11.4, 2.7)`,
+      );
+      if (typeof view.root.ownText !== "string") {
+        fail(
+          `${viewContext}: the root's own text under \`--text\` should be a plain string (SPEC 11.4, 11.2), got ${JSON.stringify(view.root.ownText)}`,
+        );
+      }
+      assertBytesEqual(
+        view.root.ownText,
+        T3_7_FIXTURE.rootOwnText,
+        `${viewContext}: the root's own text — the same bytes as \`query node\` reports, the JavaScript comments among them (SPEC 11.4, 1.6, 3)`,
+      );
+    } finally {
+      await workspace.dispose();
+    }
+  },
+});
+
 /** TEST-SPEC §3, in canonical ID order (SUITE-11). */
 export const section3Tests: readonly ProductTestEntry[] = [
   T3_1,
@@ -755,4 +1086,5 @@ export const section3Tests: readonly ProductTestEntry[] = [
   T3_4,
   T3_5,
   T3_6,
+  T3_7,
 ];
