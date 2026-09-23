@@ -521,6 +521,13 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // records (11.2); 2.4/2.7/4.5's staged forms are context with home
   // coverage at T2.4-*/T2.7-*/T4.5-*.
   "T14-11": ["14", "1.4", "1.6", "1.7", "2.4", "2.7", "5.7", "11.2", "11.4"],
+  // T14-12 asserts the well-formedness contract of 14.20 (the "14" key)
+  // through the ordinary outcomes of well-formed files: the import
+  // collision (2.1), the container, attribute, and export forms (2.7), the
+  // marker's attribution and edge in a code file (4.5, 4.6), the
+  // occurrence it records (5.7), and the availability contract of the
+  // consulted surfaces (11.2, 11.3, 11.4).
+  "T14-12": ["14", "2.1", "2.7", "4.5", "4.6", "5.7", "11.2", "11.3", "11.4"],
   "T15-1": ["15"],
   "P-1": ["1.4", "2.6"],
   "P-2": ["2.3", "2.7", "3"],

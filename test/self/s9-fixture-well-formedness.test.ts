@@ -41,6 +41,7 @@ import {
   I3_ROOM_SOURCE,
 } from "../suite/registry/section-6.2.js";
 import { X2_COMPOSED_FORMS } from "../suite/registry/section-6.5.js";
+import { T14_12_FORM_VECTORS } from "../suite/registry/section-14-iii.js";
 import {
   A18_FORM_VECTORS,
   A19_FORM_VECTORS,
@@ -418,6 +419,28 @@ describe("S-9: every form T6.5-16 stages, or asserts as a control's result or a 
   });
   test.each(R16_FORM_VECTORS)("%s", (_name, source) => {
     expectDerives(source);
+  });
+});
+
+// T14-12's positive arms as staged (section-14-iii.ts): every spec source
+// derives under exactly the S-9 allowance its early-error form names —
+// `duplicate-import-binding`, `undefined-export`,
+// `invalid-assignment-target`, `let-as-identifier`, `legacy-octal` — and
+// the expression-grammar forms plainly (SPEC 14.20: a finding in a
+// well-formed file, never a parse failure).
+describe("S-9: every form T14-12's positive arms stage derives under exactly its named allowances", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(T14_12_FORM_VECTORS.length).toBeGreaterThan(12);
+    expect(new Set(T14_12_FORM_VECTORS.map(([name]) => name)).size).toBe(
+      T14_12_FORM_VECTORS.length,
+    );
+  });
+  test.each(T14_12_FORM_VECTORS)("%s", (_name, source, allowances) => {
+    expectDerives(source, allowances.length === 0 ? undefined : allowances);
+    if (allowances.length > 0) {
+      // The allowance is load-bearing: without it the form does not derive.
+      expectRejects(source);
+    }
   });
 });
 
