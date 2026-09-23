@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 26 — T5.7-2: line-comment forms inside a `d` value
-- Cites: TEST-SPEC T5.7-2 (`d={// c` U+000A `BASE.a}` and its run-on twin: well-formed, the occurrence spanning `BASE.a`); SPEC 5.7, 2.7. Finding A-29. Depends on Task 3.
-- Change: `section-5.7.ts`: stage both forms (well-formed — the default declaration; confirm with `deriveMdx`) and assert the occurrence span and the edge as the entry states, beside the existing token-bound U+00A0/U+FEFF/block-comment arms.
-- Verify: `-t 'T5.7-2 '` no harness error; self project green.
-
 ### Task 27 — T11.2-6 fixture 2: stop over-pinning `check`
 - Cites: TEST-SPEC T11.2-6 (the state surfaces through `build`, `check`, and the gated reads — condition 22 concerning the component); SPEC 14.10 (on a workspace failing `build`'s validations the per-file and graph-data mismatch forms go unreported), 13.3 (refused writes among the states failing `build`'s validations). Finding B-6.
 - Change: `section-11.2.ts` ~L4115 pins `check`'s counts to exactly `{ "14.10": 1, "14.22": 1 }`; fixture 3 (~L4237) filters 14.10 out before counting and T13.4-6's `assertObstructionFindings` (`section-13.4.ts` ~L1442–1470) tolerates 14.10 beside 14.22. Decide the reading SPEC 14.10's text fixes (14.22 alone on a failing workspace, or 14.22 with 14.10 optional), apply it at fixture 2, and make the three sites consistent.
