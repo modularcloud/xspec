@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 21 — T4-2: side-effect-only import arms
-- Cites: TEST-SPEC T4-2 (the valid `import "./NAME.xspec"` — exit 0, no edge, no occurrence; the 14.15 arms `import "./missing.xspec"` and `import "../specs/NAME.xspec.ts"`); SPEC 4, 14.15, 5.7. Finding A-24.
-- Change: add the three arms to T4-2's body (`section-4.ts` or `section-4.1-4.2.ts`, wherever T4-2 lives) with the entry's findings, locations, and the negative edge/occurrence assertions.
-- Verify: `-t 'T4-2 '` no harness error; self project green.
-
 ### Task 22 — T4-5 registration: type-only import collisions
 - Cites: TEST-SPEC T4-5 (four pairings, both orders); SPEC 4, 14.15. Finding A-5.
 - Change: register T4-5 in `section-4.ts` per its entry — each of the four pairings of a type-only import with a colliding binding, staged in both orders, with the entry's findings, ranges, and the compile/attribution observations; traceability keys.
