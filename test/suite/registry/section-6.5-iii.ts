@@ -86,11 +86,33 @@
 //   collapsed deletion's start (two pre-operation offsets, one composed
 //   position: T6.6-4(b)'s latitude). The root's own content is observed
 //   through `query node` (own text and ownHash) — (d)'s `changed` root
-//   through its ownHash changing; `impact` is the business of the
-//   entry's arms (h) and (j). Each composed expectation is checked to
+//   through its ownHash changing. Each composed expectation is checked to
 //   derive (S-9's premise) before the move — a `HarnessStagingError`,
 //   never a verdict — and again, diagnosed, with the product's
-//   identifier substituted.
+//   identifiers substituted.
+// - T6.5-13 (arms (g) through (l)) keeps the same shape: the receiving
+//   file — the target, or in (i) the origin and in (k) the third file
+//   `specs/c.mdx` — is composed value-blind in the fresh identifiers of the
+//   declarations it gains, one line per lacked module read off the bytes
+//   (distinct, none reserved); (g)'s two declarations are admitted in
+//   either order (6.5 leaves it to the implementation) and the move is
+//   repeated in a fresh workspace for byte-identical bytes (H-6); (i)'s
+//   and (k)'s `import-addition` is admitted at the collapsed deletion's
+//   or removal's start or at the file's byte length (6.5's latitude, as
+//   the entry allows); (h), (j), and (k) assert `impact --base` over a
+//   baseline committed after the pre-move `build` with T6.5-14's pin
+//   convention — the parents `changed` within the SUITE-20 bound, their
+//   `descendant-changed` tolerated within the departed or arrived child,
+//   (j)'s root tolerated `upstream-changed` through its embedding of `p`,
+//   the dependent file's root tolerated `upstream-changed` as a
+//   dependent's ancestor (5.6), the `d={B}` dependent required
+//   `upstream-changed` with the target root among its attribution, and
+//   every other node named by no entry; (j)'s own text carries the
+//   `{text("p")}` embedding fully expanded (1.6: `p`'s subtree text, the
+//   moved body line's `{text(<X>.a)}` replaced by `a`'s); (l) and its
+//   indented twin assert the pre-move `build --json` clean and `view`'s
+//   `imports` empty before, the added declaration alone after (its range
+//   the declaration's own characters, as T11.4-4 pins an import's).
 
 import { Buffer } from "node:buffer";
 import type {
@@ -1117,8 +1139,8 @@ const T6_5_14 = defineProductTest({
 
 // ---------------------------------------------------------------------------
 // T6.5-13 Admissible offsets, the line-start preference, and composition in
-// pre-operation coordinates — arms (a) through (f); the entry's further arms
-// ((g) onward) extend A13_ARMS.
+// pre-operation coordinates — arms (a) through (l), the entry's variants
+// included, in the table A13_ARMS.
 // ---------------------------------------------------------------------------
 
 const A13_ORIGIN = "specs/a.mdx";
@@ -1537,6 +1559,249 @@ function a13ParagraphHeadedArm(
   };
 }
 
+// (h)/(j): a dependent of the target root in another file — `d={B}`, the
+// bare imported module (T2.2-2) — so the root's `changed` cascades to it as
+// `upstream-changed` (SPEC 5.6) though the move touched no requirement of
+// that file; the move leaves the file untouched (the root's identity, its
+// target, is unchanged).
+const A13_DEPENDENT = "specs/dep.mdx";
+const A13_DEPENDENT_SOURCE = [
+  'import B from "./b.xspec"',
+  "",
+  '<S id="k" d={B}>',
+  "Dep text.",
+  "</S>",
+  "",
+].join("\n");
+
+// (h): the mid-line addition off the file's end — the end of the `</S>`
+// line before its terminator is the only admissible offset (offset 0 would
+// absorb the tag's line, every line start from `x` through `</S>` lies
+// inside `p`, the start of the `trailing` line would absorb that line, and
+// the file's end follows a paragraph line).
+const A13_H_TARGET = ['<S id="p">', "x", "</S>", "trailing"].join("\n");
+
+// (j): the file's-end addition whose ended line is kept — the closing
+// tag's line a flow line holding a tag and an expression container alone
+// (14.20; T3-3's constraint), the root embedding its own child, no cycle
+// (5.3); own text carries the embedding fully expanded (SPEC 1.6): `p`'s
+// subtree text before the move, `p`'s grown subtree text — the moved body
+// line with `{text(<X>.a)}` replaced by `a`'s subtree text — then the added
+// terminator after it.
+const A13_J_TARGET = ['<S id="p">', "x", '</S>{text("p")}'].join("\n");
+const A13_A_SUBTREE_TEXT = "A text.\n";
+const A13_J_OWN_BEFORE = "x\n";
+const A13_J_OWN_AFTER = `x\nMoved ${A13_A_SUBTREE_TEXT} text.\n\n`;
+
+/** (j)'s composition: the moved text before the closing tag, the tag's line ended, then the declaration. */
+function a13ComposeBeforeEmbeddingLine(ident: string): string {
+  return [
+    '<S id="p">',
+    "x",
+    ...a13MovedLines("p.n", ident),
+    '</S>{text("p")}',
+    a13Declaration(ident),
+    "",
+  ].join("\n");
+}
+
+/**
+ * (h)/(j)'s category expectation against the pre-move baseline (SPEC 5.6,
+ * 6.2): the target root `changed` beside `p` and the origin parent, with
+ * their ordinary cascades (T6.2-3's tolerances: `descendant-changed`
+ * attributed within the child that departed or arrived, and, where the
+ * root embeds `p`, `upstream-changed` through that embedding); the
+ * other-file dependent `upstream-changed` with the root among the nodes it
+ * is attributed to, its own root tolerated `upstream-changed` as a
+ * dependent's ancestor (5.6); the moved node, the sibling, and the third
+ * module's nodes carrying none; no other node `changed`.
+ */
+function a13DependentImpact(rootEmbedsChild: boolean): A13ImpactExpectation {
+  const parent = `${A13_TARGET}#p`;
+  const moved = `${A13_TARGET}#p.n`;
+  const dependent = `${A13_DEPENDENT}#k`;
+  const originating = [A13_TARGET, parent, A13_ORIGIN, moved];
+  return {
+    known: [
+      A13_ORIGIN,
+      `${A13_ORIGIN}#s`,
+      A13_TARGET,
+      parent,
+      moved,
+      A13_THIRD,
+      `${A13_THIRD}#a`,
+      A13_DEPENDENT,
+      dependent,
+    ],
+    pins: [
+      {
+        identity: A13_TARGET,
+        required: ["changed"],
+        changedWithin: originating,
+        optional: [
+          { category: "descendant-changed", within: [parent, moved] },
+          ...(rootEmbedsChild
+            ? [{ category: "upstream-changed" as const, within: originating }]
+            : []),
+        ],
+      },
+      {
+        identity: parent,
+        required: ["changed"],
+        changedWithin: [parent, moved],
+        optional: [{ category: "descendant-changed", within: [moved] }],
+      },
+      {
+        identity: A13_ORIGIN,
+        required: ["changed"],
+        changedWithin: [A13_ORIGIN, moved],
+        optional: [{ category: "descendant-changed", within: [moved] }],
+      },
+      {
+        identity: dependent,
+        required: ["upstream-changed"],
+        attributed: [
+          {
+            category: "upstream-changed",
+            within: originating,
+            mustInclude: [A13_TARGET],
+          },
+        ],
+      },
+      {
+        identity: A13_DEPENDENT,
+        required: [],
+        optional: [{ category: "upstream-changed", within: originating }],
+      },
+      { identity: moved, required: [] },
+      { identity: `${A13_ORIGIN}#s`, required: [] },
+      { identity: A13_THIRD, required: [] },
+      { identity: `${A13_THIRD}#a`, required: [] },
+    ],
+    reason:
+      "the target root is `changed` — the addition, elsewhere than at a " +
+      "line's start, splits a line of its own content (SPEC 6.2) — beside " +
+      "`p` and the origin parent `changed` with their ordinary cascades " +
+      "(T6.2-3); its other-file dependent (`d={B}`) is `upstream-changed` " +
+      "with the root among the originating nodes it is attributed to (SPEC " +
+      "5.6); the moved node carries no category — its runs, its embedding's " +
+      "canonical identity, and its metadataHash unchanged (5.5); no other " +
+      "node is `changed`",
+  };
+}
+
+/** (h)/(j): a cross-file arm with the dependent file staged beside and the category expectation asserted. */
+function a13DependentArm(
+  spec: Parameters<typeof a13CrossArm>[0],
+  rootEmbedsChild: boolean,
+): A13Arm {
+  const arm = a13CrossArm(spec);
+  return {
+    ...arm,
+    files: { ...arm.files, [A13_DEPENDENT]: A13_DEPENDENT_SOURCE },
+    others: [
+      ...arm.others,
+      {
+        rel: A13_DEPENDENT,
+        bytes: A13_DEPENDENT_SOURCE,
+        reason:
+          "the dependent file untouched — its `d={B}` names the target " +
+          "root, whose identity the move keeps",
+      },
+    ],
+    impact: () => a13DependentImpact(rootEmbedsChild),
+  };
+}
+
+// (k): the removal-side line start — a third spec source `specs/c.mdx`
+// referencing the moved section through its origin-module binding, the
+// declaration the block's only line and the file's unterminated last: the
+// reference re-roots to the target module, the declaration's last use is
+// gone, and the removal drops the unterminated last line, so over the
+// composed text the file's end — line 1's terminator preceding it — is a
+// line start. The moved section is local to its subtree, beside a sibling;
+// neither the origin nor the existing target needs a declaration.
+const A13_SPEC_C = "specs/c.mdx";
+const A13_K_ORIGIN_HEAD: readonly string[] = [
+  '<S id="s">',
+  "Sib text.",
+  "</S>",
+  "",
+];
+const A13_K_MOVED = ['<S id="m">', "Moved text.", "</S>"].join("\n");
+const A13_K_ORIGIN_BEFORE = [...A13_K_ORIGIN_HEAD, A13_K_MOVED, ""].join("\n");
+const A13_K_ORIGIN_AFTER = [...A13_K_ORIGIN_HEAD, ""].join("\n");
+const A13_K_TARGET_AFTER = `${A13_EXISTING_TARGET}${A13_K_MOVED}\n`;
+const A13_K_C_BEFORE = [
+  '<S id="q" d={A.m} />',
+  'import A from "./a.xspec"',
+].join("\n");
+const A13_K_C_LINE_2 = A13_K_C_BEFORE.indexOf("import A");
+const A13_K_C_REFERENCE = A13_K_C_BEFORE.indexOf("A.m");
+
+/** (k)'s composition: the re-rooted reference, then the target module's declaration at the composed file's end. */
+function a13ComposeThirdFileDeclaration(
+  idents: readonly string[],
+): readonly string[] {
+  const [t = ""] = idents;
+  return [
+    [
+      `<S id="q" d={${t}.m} />`,
+      a13Declaration(t, A13_TARGET_SPECIFIER),
+      "",
+    ].join("\n"),
+  ];
+}
+
+/**
+ * (k)'s category expectation (SPEC 5.6, 6.2, 5.5): `c.mdx`'s root keeps
+ * its own content and `q` carries no category — its `d` target's canonical
+ * identity, mapped through the journal, and its effectiveHash unchanged;
+ * the two parents, the origin's and the target's roots, `changed` with
+ * their ordinary cascades (T6.2-3); the clean-boundary moved node, the
+ * sibling, and the target's existing child carrying none.
+ */
+function a13ThirdFileImpact(): A13ImpactExpectation {
+  const moved = `${A13_TARGET}#m`;
+  return {
+    known: [
+      A13_ORIGIN,
+      `${A13_ORIGIN}#s`,
+      A13_TARGET,
+      `${A13_TARGET}#k`,
+      moved,
+      A13_SPEC_C,
+      `${A13_SPEC_C}#q`,
+    ],
+    pins: [
+      {
+        identity: A13_ORIGIN,
+        required: ["changed"],
+        changedWithin: [A13_ORIGIN, moved],
+        optional: [{ category: "descendant-changed", within: [moved] }],
+      },
+      {
+        identity: A13_TARGET,
+        required: ["changed"],
+        changedWithin: [A13_TARGET, moved],
+        optional: [{ category: "descendant-changed", within: [moved] }],
+      },
+      { identity: A13_SPEC_C, required: [] },
+      { identity: `${A13_SPEC_C}#q`, required: [] },
+      { identity: moved, required: [] },
+      { identity: `${A13_ORIGIN}#s`, required: [] },
+      { identity: `${A13_TARGET}#k`, required: [] },
+    ],
+    reason:
+      "`c.mdx`'s root keeps its own content — the removal and the addition " +
+      "each drop a whole line (SPEC 6.2, 3) — and `q` carries no category, " +
+      "its `d` target's canonical identity, mapped through the journal, and " +
+      "its effectiveHash unchanged (5.5); the two parents, the origin's and " +
+      "the target's roots, are `changed` with their ordinary cascades " +
+      "(T6.2-3); no other node is `changed`",
+  };
+}
+
 const A13_ARMS: readonly A13Arm[] = [
   a13CrossArm({
     key: "(a)",
@@ -1781,6 +2046,32 @@ const A13_ARMS: readonly A13Arm[] = [
     },
     repeatable: true,
   },
+  a13DependentArm(
+    {
+      key: "(h)",
+      summary:
+        "the mid-line addition off the file's end — offset 0 would absorb " +
+        "the tag's line into the block, every line start from `x` through " +
+        "`</S>` lies inside `p`, the start of the `trailing` line would " +
+        "absorb that line, and the file's end follows a paragraph line, so " +
+        "the end of the `</S>` line before its terminator is the only " +
+        "admissible offset: the added terminator ends the `</S>` line, " +
+        "which drops as it did before, the declaration's line drops whole, " +
+        "and the `</S>` line's original terminator is left an empty line, " +
+        "kept",
+      target: A13_H_TARGET,
+      newId: "p.n",
+      compose: (ident) => a13ComposeIntoP(ident, ["", "trailing"]),
+      previewEdits: [
+        a13At("target-insertion", A13_H_TARGET.indexOf("</S>")),
+        a13At("import-addition", A13_H_TARGET.indexOf("</S>") + 4),
+      ],
+      ownTextBefore: "trailing",
+      ownTextAfter: "\ntrailing",
+      ownHashChanges: true,
+    },
+    false,
+  ),
   {
     key: "(i)",
     summary:
@@ -1827,6 +2118,87 @@ const A13_ARMS: readonly A13Arm[] = [
       ownTextAfter: "",
       ownHashChanges: true,
     },
+  },
+  a13DependentArm(
+    {
+      key: "(j)",
+      summary:
+        "the file's-end addition whose ended line is kept — offset 0 would " +
+        "absorb the tag's line into the block and every other line start " +
+        "lies inside `p`, so the file's end, mid-line, is the only " +
+        "admissible offset: the added terminator ends the " +
+        '`</S>{text("p")}` line, which is kept, its excised embedding ' +
+        "counting as remaining line content (1.6) so that the drop rule of " +
+        "3 spares it, unlike (c)'s bare `</S>` line",
+      target: A13_J_TARGET,
+      newId: "p.n",
+      compose: a13ComposeBeforeEmbeddingLine,
+      previewEdits: [
+        a13At("target-insertion", A13_J_TARGET.indexOf("</S>")),
+        a13At("import-addition", A13_J_TARGET.length),
+      ],
+      ownTextBefore: A13_J_OWN_BEFORE,
+      ownTextAfter: A13_J_OWN_AFTER,
+      ownHashChanges: true,
+    },
+    true,
+  ),
+  {
+    key: "(k)",
+    summary:
+      "the removal-side line start — `A.m` re-roots to `<T>.m`, `A`'s " +
+      "declaration, its last use gone, is removed with its unterminated " +
+      "last line, and over the composed text offset 0 would absorb the " +
+      "tag's line into the block, so the composed file's end — line 1's " +
+      "terminator preceding it, a line start — is the only admissible " +
+      "offset, taken with no terminator added: an insertion where a " +
+      "removal's range ends reads what the removal leaves",
+    files: {
+      [A13_ORIGIN]: A13_K_ORIGIN_BEFORE,
+      [A13_TARGET]: A13_EXISTING_TARGET,
+      [A13_SPEC_C]: A13_K_C_BEFORE,
+    },
+    argv: ["move", `${A13_ORIGIN}#m`, `${A13_TARGET}#m`],
+    receiving: A13_SPEC_C,
+    added: [A13_TARGET_SPECIFIER],
+    compose: a13ComposeThirdFileDeclaration,
+    others: [
+      {
+        rel: A13_ORIGIN,
+        bytes: A13_K_ORIGIN_AFTER,
+        reason:
+          "the moved construct deleted in place, its emptied line dropped " +
+          "with its terminator, the blank line before it kept, the sibling " +
+          "untouched",
+      },
+      {
+        rel: A13_TARGET,
+        bytes: A13_K_TARGET_AFTER,
+        reason:
+          "the moved text appended at the file's end after its final " +
+          "terminator — a line start, so none is added before it — followed " +
+          "by its own, the ID kept",
+      },
+    ],
+    previewEdits: [
+      [
+        a13Span("reference-rewrite", A13_K_C_REFERENCE, A13_K_C_REFERENCE + 3),
+        a13At("import-addition", A13_K_C_LINE_2),
+        a13Span("import-removal", A13_K_C_LINE_2, A13_K_C_BEFORE.length),
+      ],
+      [
+        a13Span("reference-rewrite", A13_K_C_REFERENCE, A13_K_C_REFERENCE + 3),
+        a13Span("import-removal", A13_K_C_LINE_2, A13_K_C_BEFORE.length),
+        a13At("import-addition", A13_K_C_BEFORE.length),
+      ],
+    ],
+    root: {
+      identity: A13_SPEC_C,
+      ownTextBefore: "",
+      ownTextAfter: "",
+      ownHashChanges: false,
+    },
+    impact: () => a13ThirdFileImpact(),
   },
   a13ParagraphHeadedArm(
     "(l)",
@@ -2273,8 +2645,11 @@ async function runA13Arm(
             ? "unchanged: an added line at a line's start is dropped whole, " +
               "and a boundary line the drop rule decides as before " +
               "contributes as before"
-            : "the added terminator ends the previously unterminated " +
-              "paragraph line, kept with its content") +
+            : "changed as 6.2's file's-end exception and its qualifier " +
+              "decide: the previously unterminated paragraph line, or the " +
+              "ended line whose excised embedding counts as content, kept " +
+              "with the added terminator, or the remainder line kept where " +
+              "the whole line was dropped") +
           ` (SPEC 6.2, 1.6, 3); \`query node\` reports ${JSON.stringify(after.ownText)}`,
       );
     }
@@ -2319,7 +2694,7 @@ async function runA13Arm(
 const T6_5_13 = defineProductTest({
   id: "T6.5-13",
   title:
-    "admissible offsets, the line-start preference, and composition in pre-operation coordinates: byte-asserted section-move arms whose receiving file is composed whole from 6.4/6.5 and 3, value-blind in the fresh identifier alone (read from the added declaration, whose other characters are T6.5-8's), the moved text carrying `{text(X.a)}` through the origin's binding of a third module the target lacks so that exactly `import <X> from \"./x.xspec\"` is added — (a) the preference: a target holding a line-start admissible offset (the file's end after its final terminator) and a mid-line one takes the line start, the declaration appended after the final terminator; its sibling, whose only line-start admissible offset is the start of an empty line after the `</S>` line, places the declaration there with the empty line kept; (b) the self-closing target parent, its line unterminated: the tag's end the only admissible offset, the result `<S id=\"p\">`, U+000A, the moved text, U+000A, `</S>`, U+000A, the declaration, U+000A, the preview's `target-parent-rewrite` spanning the tag and `target-insertion` and `import-addition` both zero-length at the tag's end in 12.7's tie-break order; with a final terminator the same bytes, the addition at the file's end; (c) the forced mid-line case, the file's end the only admissible offset, the added terminator ending the `</S>` line; (d) a top-level `new-id` at the end of a paragraph-ended file, terminated or not: `para`, U+000A, the moved text, U+000A, the declaration, U+000A, `target-insertion` and `import-addition` both zero-length at the file's byte length; (e) a same-file move in `foo <S id=\"p\">` / `<S id=\"p.m\">x</S></S> baz`, the insertion judged over the composed text so that no terminator is added; (f) a same-file top-level move of a file's last section whose unterminated last line the deletion drops, no terminator added — each arm's preview offsets agreeing with the real bytes, the receiving root's own text and ownHash compared through `query node` before and after (unchanged in (a), (b), (c), (e), (f); (d)'s root `changed`, its own text `para` gaining the added terminator in the unterminated variant), `build` and `check` clean after each move, every composed form verified to derive (S-9) (SPEC 6.5, 6.4, 6.6, 6.2, 3, 5.5, 12.7; H-4)",
+    "admissible offsets, the line-start preference, and composition in pre-operation coordinates: byte-asserted section-move arms whose receiving file is composed whole from 6.4/6.5 and 3, value-blind in the fresh identifier alone (read from the added declaration, whose other characters are T6.5-8's), the moved text carrying `{text(X.a)}` through the origin's binding of a third module the target lacks so that exactly `import <X> from \"./x.xspec\"` is added — (a) the preference: a target holding a line-start admissible offset (the file's end after its final terminator) and a mid-line one takes the line start, the declaration appended after the final terminator; its sibling, whose only line-start admissible offset is the start of an empty line after the `</S>` line, places the declaration there with the empty line kept; (b) the self-closing target parent, its line unterminated: the tag's end the only admissible offset, the result `<S id=\"p\">`, U+000A, the moved text, U+000A, `</S>`, U+000A, the declaration, U+000A, the preview's `target-parent-rewrite` spanning the tag and `target-insertion` and `import-addition` both zero-length at the tag's end in 12.7's tie-break order; with a final terminator the same bytes, the addition at the file's end; (c) the forced mid-line case, the file's end the only admissible offset, the added terminator ending the `</S>` line; (d) a top-level `new-id` at the end of a paragraph-ended file, terminated or not: `para`, U+000A, the moved text, U+000A, the declaration, U+000A, `target-insertion` and `import-addition` both zero-length at the file's byte length; (e) a same-file move in `foo <S id=\"p\">` / `<S id=\"p.m\">x</S></S> baz`, the insertion judged over the composed text so that no terminator is added; (f) a same-file top-level move of a file's last section whose unterminated last line the deletion drops, no terminator added; (g) two declarations added to (b)'s self-closing target — after the appended closing tag, U+000A, the two declarations contiguous, each followed by U+000A alone, in an order the product fixes, byte-identical across a repeated run (H-6), the preview holding exactly two `import-addition` entries zero-length at the tag's end before the `target-insertion` there; (h) the mid-line addition off the file's end — a target ending in an unterminated `trailing` paragraph line, the end of the `</S>` line before its terminator the only admissible offset, the `</S>` line's original terminator left an empty line, kept, the root's own text going from `trailing` to U+000A, `trailing` and its ownHash with it, `impact --base` against a commit made immediately before the move reporting the target root `changed` beside `p` and the origin parent, an other-file `d={B}` dependent `upstream-changed` with the root among its attribution, the moved node carrying no category, no other node `changed`; (i) the origin deletion dropping the file's unterminated last line — the origin's own `d={\"m\"}` converting to `d={<T>.m}` through the target module's declaration added at the composed file's end with no terminator, the `import-addition` at the deletion's start or the file's byte length, the origin root `changed` by its lost child alone, its own text empty before and after; (j) the file's-end addition whose ended `</S>{text(\"p\")}` line is kept, its excised embedding counting as content — the root's own text, the embedding fully expanded, gaining a trailing U+000A beside the moved text's arrival, its ownHash with it, `impact --base` reporting (h)'s enumeration; (k) the removal-side line start — a third file `<S id=\"q\" d={A.m} />`, U+000A, `import A from \"./a.xspec\"` with no final terminator, `A.m` re-rooted to `<T>.m`, `A`'s declaration removed with its unterminated last line and the target module's declaration added at the composed file's end, the preview's `reference-rewrite` spanning `A.m`, `import-removal` spanning line 2, `import-addition` at the removal's start or the file's byte length, the third file's root keeping its own content and `q` carrying no category, the two parents `changed`; (l) the admissibility exclusion for lines that were no ESM block's — a target headed by the paragraph `// note`, `import B from \"./B.xspec\"`, `specs/B.mdx` absent and the pre-move `build` clean, `view` listing no import: offset 0 heads a block joining the paragraph's lines, deriving yet inadmissible, so the declaration is appended at the file's end, the paragraph's bytes untouched, `view` listing under `imports` the added declaration alone, the root unchanged; its indented twin, `  import B from \"./B.xspec\"` heading the file, alike — each arm's preview offsets agreeing with the real bytes, the receiving root's own text and ownHash compared through `query node` before and after (unchanged in (a), (b), (c), (e), (f), (g), (k), (l); (d)'s, (h)'s, (i)'s, and (j)'s roots `changed`), `build` and `check` clean after each move, every composed form verified to derive (S-9) (SPEC 6.5, 6.4, 6.6, 6.2, 3, 1.6, 5.5, 5.6, 11.4, 12.7; H-4, H-6)",
   run: async (product) => {
     for (const arm of A13_ARMS) {
       const bytes = await runA13Arm(product, arm);

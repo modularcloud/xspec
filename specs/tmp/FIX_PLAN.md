@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 33 — T6.5-13, arms (g) onward
-- Cites: TEST-SPEC T6.5-13 (the remaining lettered arms: (g) two `import-addition` entries at one offset, count asserted; (h) the forced mid-line placement; (i) and (k) the declarations asserted being the origin's and a third file's, with a moved text local to its subtree; (l) the paragraph-headed exclusion control the entry ties to T6.5-16(g) and T6.5-19; and every further arm the entry letters); T6.6-4(b) (the preview's offsets agree with the real operation's bytes). Finding A-8 (remainder). Depends on Task 32.
-- Change: complete T6.5-13 in `section-6.5-iii.ts` with arms (g) through the entry's last, composed and verified as Task 32's are.
-- Verify: `-t 'T6.5-13 '` no harness error; self project green.
-
 ### Task 34 — T6.5-15: joint import removals over an ESM block
 - Cites: TEST-SPEC T6.5-15 (removals in one block judged together: where they would leave the block headed by a JavaScript comment or an indented declaration, the first declaration stays — its binding unused, no removal reported for it — while the others are removed; a block left with no line loses its first declaration with the rest; arms (a) `import A …`, `// note`, `import B …` on successive lines with both bindings losing their last use — A stays byte-for-byte, B removed with its line, one `import-removal` in the preview; (b) `import A from "./A.xspec" // note` above B; and the entry's further arms; the compiled Markdown of each kept form asserted, T3-7); SPEC 6.5, 3, 2.1, 14.20. Finding A-10. Depends on Task 31.
 - Change: register T6.5-15 in `section-6.5-iii.ts` per its entry, byte-asserting each origin against expectations composed from 6.5 and 3, `check` clean after each move, preview `import-removal` counts asserted.
