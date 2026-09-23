@@ -47,10 +47,13 @@
 
 import type {
   DependencyEdgeKind,
+  Finding,
   GraphEdge,
+  OccurrenceRecord,
 } from "../../helpers/adapters/index.js";
 import {
   decodeEdgesReport,
+  decodeFindingsReport,
   decodeOccurrencesReport,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
@@ -58,6 +61,7 @@ import {
   assertBytesEqual,
   assertExitCode,
   fail,
+  parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -74,6 +78,8 @@ import {
   assertConditionCounts,
   assertEdgeSetEqual,
   assertFindingLocated,
+  assertFindingLocatesExactly,
+  assertSameJson,
   buildFindings,
   buildOk,
   byteWindow,
@@ -1061,10 +1067,338 @@ const T4_4 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T4-5
+// ---------------------------------------------------------------------------
+
+// Two spec sources — `A`, the module every arm's chains name (`SPEC.a`,
+// `text(SPEC.b)`), and `B`, the second spec module the first pairing's
+// type-only import designates — plus `src/t.ts`, the non-spec module `./t`
+// the other pairings import: a discovered code source recording nothing,
+// exporting a value `SPEC` so that each non-spec import designates a real
+// binding (consumer-side resolution is outside xspec's validations either
+// way, SPEC 4.5).
+const T4_5_FILES = {
+  "specs/A.mdx":
+    '<S id="a">\nAlpha behavior.\n</S>\n\n<S id="b">\nBeta behavior.\n</S>\n',
+  "specs/B.mdx": '<S id="x">\nOther behavior.\n</S>\n',
+  "src/t.ts": "export const SPEC = 1;\n",
+} as const;
+
+// `text` bound by its own declaration — two declarations of one module
+// binding distinct identifiers, valid under SPEC 4 — so that every arm's
+// `text(SPEC.b)` is a spec module `text` call (4.3) whose argument chain is
+// rooted at the collided identifier, whatever the pairing does to `SPEC`.
+const T4_5_TEXT_IMPORT = 'import { text } from "../specs/A.xspec";';
+const T4_5_MARKER_CHAIN = "SPEC.a";
+const T4_5_TEXT_CALL = "text(SPEC.b)";
+
+/** One pairing of a spec module import with a colliding import (SPEC 4.5). */
+interface TypeOnlyCollisionPairing {
+  /** Which pairing this is (failure diagnostics). */
+  readonly name: string;
+  /** The spec module import binding `SPEC` — value-level or type-only. */
+  readonly spec: string;
+  /** The other import binding `SPEC` — spec or non-spec, type-only or not. */
+  readonly other: string;
+}
+
+// The four pairings (TEST-SPEC T4-5): the type-only exemption of SPEC 4.5
+// reaches a chain the language roots at one binding, and a colliding
+// identifier roots it at none — whether or not either import is type-only.
+const T4_5_PAIRINGS: readonly TypeOnlyCollisionPairing[] = [
+  {
+    name: "a value-level spec import beside a type-only import of a second spec module",
+    spec: 'import SPEC from "../specs/A.xspec";',
+    other: 'import type SPEC from "../specs/B.xspec";',
+  },
+  {
+    name: "a value-level spec import beside a type-only non-spec import",
+    spec: 'import SPEC from "../specs/A.xspec";',
+    other: 'import type { SPEC } from "./t";',
+  },
+  {
+    name: "a type-only spec import beside a value-level non-spec import",
+    spec: 'import type SPEC from "../specs/A.xspec";',
+    other: 'import { SPEC } from "./t";',
+  },
+  {
+    name: "a type-only spec import beside a type-only non-spec import",
+    spec: 'import type SPEC from "../specs/A.xspec";',
+    other: 'import type { SPEC } from "./t";',
+  },
+];
+
+/** A staged `src/app.ts` for one arm and its constructs' byte positions. */
+interface StagedTypeOnlyCollisionArm {
+  /** The pairing and its declaration order (failure diagnostics). */
+  readonly name: string;
+  /** The whole file: `text` import, the pair, blank, marker, `text` call. */
+  readonly source: string;
+  /**
+   * The two colliding import declarations' end-widened byte windows
+   * (support.ts byteWindow), in file order — the `text` import is no
+   * colliding declaration and lies in neither.
+   */
+  readonly collidingWindows: readonly {
+    readonly start: number;
+    readonly end: number;
+  }[];
+  /** The marker's bare chain, exactly (SPEC 14: terminator excluded). */
+  readonly markerRange: { readonly start: number; readonly end: number };
+  /** The `text(...)` call, callee through closing parenthesis, exactly (14). */
+  readonly textCallRange: { readonly start: number; readonly end: number };
+}
+
+/**
+ * Lay out an arm's `src/app.ts` — the `text` import, then the pairing's two
+ * declarations in the given order, one per line, then the marker statement
+ * and the `text(...)` call statement after a blank line — and fix every
+ * construct's byte position from the exact bytes. The file is pure ASCII,
+ * so string indices are byte offsets.
+ */
+function stageTypeOnlyCollisionArm(
+  pairing: TypeOnlyCollisionPairing,
+  order: "spec-first" | "other-first",
+): StagedTypeOnlyCollisionArm {
+  const declarations =
+    order === "spec-first"
+      ? [pairing.spec, pairing.other]
+      : [pairing.other, pairing.spec];
+  let prefix = `${T4_5_TEXT_IMPORT}\n`;
+  const collidingWindows = declarations.map((declaration) => {
+    const window = byteWindow(prefix, declaration);
+    prefix += `${declaration}\n`;
+    return window;
+  });
+  const markerPrefix = `${prefix}\n`;
+  const textCallPrefix = `${markerPrefix}${T4_5_MARKER_CHAIN};\n`;
+  const source = `${textCallPrefix}${T4_5_TEXT_CALL};\n`;
+  const exact = (
+    before: string,
+    construct: string,
+  ): { start: number; end: number } => {
+    const start = Buffer.byteLength(before, "utf8");
+    return { start, end: start + Buffer.byteLength(construct, "utf8") };
+  };
+  return {
+    name: `${pairing.name} (${order === "spec-first" ? "the spec import declared first" : "the other import declared first"})`,
+    source,
+    collidingWindows,
+    markerRange: exact(markerPrefix, T4_5_MARKER_CHAIN),
+    textCallRange: exact(textCallPrefix, T4_5_TEXT_CALL),
+  };
+}
+
+/** A finding's locations as JSON-safe `[file, start, end]` tuples (12.7 order). */
+function t45LocationTuples(finding: Finding): readonly (readonly unknown[])[] {
+  return finding.locations.map((location) => [
+    location.file,
+    location.range.start,
+    location.range.end,
+  ]);
+}
+
+/**
+ * Assert a reference-spelling finding locates exactly one range — the span
+ * its occurrence would occupy (SPEC 14, 5.7), byte-exact — in `src/app.ts`
+ * and concerns no path (12.7).
+ */
+function assertT45SpellingFinding(
+  finding: Finding,
+  range: { readonly start: number; readonly end: number },
+  context: string,
+): void {
+  assertFindingLocatesExactly(
+    finding,
+    [{ file: "src/app.ts", window: range }],
+    context,
+  );
+  assertSameJson(
+    t45LocationTuples(finding),
+    [["src/app.ts", range.start, range.end]],
+    `${context}: the one location is byte-exact — the spelling's own span, ` +
+      `terminators and delimiters excluded (SPEC 14, 5.7, 1.7)`,
+  );
+}
+
+/**
+ * Assert the findings a T4-5 arm's workspace reports, in 12.7 order:
+ * condition 7 for the marker chain, condition 7 for the `text(...)` call
+ * (each byte-exact at the span its occurrence would occupy, SPEC 14), then
+ * the one condition-15 collision locating both colliding import
+ * declarations — each within its own byte window, the `text` import not
+ * among them — and nothing else (14: every colliding declaration, no
+ * representative chosen). Never the type-only exemption's silence (T4-4) —
+ * no finding at all — nor an edge-recording resolution: both are what a
+ * product rooting the chain at whichever binding TypeScript's own
+ * resolution prefers exhibits instead (SPEC 2.4, 4.5).
+ */
+function assertTypeOnlyCollisionFindings(
+  findings: readonly Finding[],
+  staged: StagedTypeOnlyCollisionArm,
+  context: string,
+): void {
+  assertSameJson(
+    findings.map((finding) => finding.condition),
+    ["14.7", "14.7", "14.15"],
+    `${context}: exactly the two unresolved chains (condition 7, one per ` +
+      `spelling) beside the one collision (condition 15), in 12.7 order — ` +
+      `numbered conditions in numeric order, then by location; a colliding ` +
+      `identifier roots no chain whether or not either import is type-only ` +
+      `(SPEC 2.4, 4.5, 14.7, 14.15, 12.7) — never the type-only exemption's ` +
+      `silence (T4-4)`,
+  );
+  assertT45SpellingFinding(
+    findings[0]!,
+    staged.markerRange,
+    `${context}: the marker's 14.7 locates the bare reference chain, ` +
+      `exclusive of the statement terminator (SPEC 14, 5.7)`,
+  );
+  assertT45SpellingFinding(
+    findings[1]!,
+    staged.textCallRange,
+    `${context}: the \`text(...)\` call's 14.7 locates the call expression, ` +
+      `callee through closing parenthesis (SPEC 14, 5.7)`,
+  );
+  assertFindingLocatesExactly(
+    findings[2]!,
+    staged.collidingWindows.map((window) => ({ file: "src/app.ts", window })),
+    `${context}: the 14.15 locates both colliding import declarations, each ` +
+      `by its own characters, and not the \`text\` import beside them ` +
+      `(SPEC 14, 1.7, 2.1, 4)`,
+  );
+}
+
+/**
+ * An occurrence record's every datum (SPEC 5.7) as one JSON-safe tuple —
+ * file, own range, kind, source (identity plus range, or the unavailability
+ * marker), target — so whole records compare key-order-free.
+ */
+function t45OccurrenceTuple(record: OccurrenceRecord): readonly unknown[] {
+  const source =
+    "unavailable" in record.source
+      ? "(source unavailable)"
+      : [
+          record.source.identity,
+          record.source.range.start,
+          record.source.range.end,
+        ];
+  return [
+    record.file,
+    record.range.start,
+    record.range.end,
+    record.kind,
+    source,
+    record.target,
+  ];
+}
+
+/**
+ * One arm: `build` and `check` report the collision beside condition 7 for
+ * each chain, exit 1; and `occurrences --file src/app.ts`, answering on the
+ * failing workspace (SPEC 11.2), carries those findings and lists no record
+ * for the two spellings — a chain rooted at the collided identifier records
+ * no edge and no occurrence (5.7, T5.7-4).
+ */
+async function assertTypeOnlyCollisionArm(
+  product: ProductBinding,
+  staged: StagedTypeOnlyCollisionArm,
+): Promise<void> {
+  await withWorkspace(
+    SPEC_AND_CODE_CONFIG,
+    { ...T4_5_FILES, "src/app.ts": staged.source },
+    async (workspace) => {
+      const buildContext = `T4-5 \`build --json\` over ${staged.name}`;
+      assertTypeOnlyCollisionFindings(
+        await buildFindings(product, workspace, buildContext),
+        staged,
+        buildContext,
+      );
+
+      // `check`: the same validation, exit 1 (SPEC 12.2). Staleness of the
+      // never-built workspace's derived files is 14.10's own business —
+      // set aside, the findings are exactly the arm's.
+      const checkContext = `T4-5 \`check --json\` over ${staged.name}`;
+      const checkResult = await expectExit(
+        product,
+        workspace,
+        ["check", "--json"],
+        1,
+        `${checkContext} — \`check\` performs all build validations and ` +
+          `exits 1 on the findings (SPEC 12.2, 2.4, 4.5)`,
+      );
+      assertTypeOnlyCollisionFindings(
+        decodeFindingsReport(
+          parseJsonStdout(checkResult, checkContext),
+          checkContext,
+        ).findings.filter((finding) => finding.condition !== "14.10"),
+        staged,
+        checkContext,
+      );
+
+      // `occurrences --file src/app.ts`, answering on the failing workspace
+      // (SPEC 11.2): the code file's findings accompany (exit 1, the full
+      // answer still emitted), and the record set is empty — the two chains
+      // rooted at the collided identifier record no edge and no occurrence
+      // (5.7); their positions reach consumers through the findings alone.
+      const occContext = `T4-5 \`occurrences --file src/app.ts\` over ${staged.name}`;
+      const occResult = await expectExit(
+        product,
+        workspace,
+        ["occurrences", "--file", "src/app.ts"],
+        1,
+        `${occContext} — the answer carries the domain's findings, so exit ` +
+          `1 with the full answer document (SPEC 11.2, 11.3)`,
+      );
+      const report = decodeOccurrencesReport(
+        parseJsonStdout(
+          occResult,
+          `${occContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        occContext,
+      );
+      assertTypeOnlyCollisionFindings(
+        report.findings,
+        staged,
+        `${occContext}: the code file's findings accompany the answer ` +
+          `(SPEC 11.2, 11.3)`,
+      );
+      assertSameJson(
+        report.occurrences.map(t45OccurrenceTuple),
+        [],
+        `${occContext}: no record for the marker or the \`text(...)\` call — ` +
+          `a chain rooted at an identifier two imports bind, either type-only ` +
+          `or not, records no edge and no occurrence, its position reported ` +
+          `by its finding's range alone; never the type-only exemption's ` +
+          `silence (SPEC 2.4, 4.5, 5.7, 11.2, T4-4)`,
+      );
+    },
+  );
+}
+
+const T4_5 = defineProductTest({
+  id: "T4-5",
+  title:
+    "type-only import collisions — an identifier a spec module import binds that another import also binds, either or both type-only (a second spec module's type-only default, a type-only non-spec binding, a value-level non-spec binding beside a type-only spec import, both type-only), staged in both declaration orders, roots no chain: `build` and `check` report 14.15 locating both declarations and 14.7 for the marker and the `text` call (exit 1), and `occurrences --file` on the failing workspace lists no record for them beside the findings — never the type-only exemption's silence (SPEC 2.4, 4, 4.5, 5.7, 11.2, 14.7, 14.15)",
+  run: async (product) => {
+    for (const pairing of T4_5_PAIRINGS) {
+      for (const order of ["spec-first", "other-first"] as const) {
+        await assertTypeOnlyCollisionArm(
+          product,
+          stageTypeOnlyCollisionArm(pairing, order),
+        );
+      }
+    }
+  },
+});
+
 /** TEST-SPEC §4 preamble, in canonical ID order (SUITE-12). */
 export const section4Tests: readonly ProductTestEntry[] = [
   T4_1,
   T4_2,
   T4_3,
   T4_4,
+  T4_5,
 ];
