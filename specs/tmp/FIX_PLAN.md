@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 15 — T2.1-3's separate-blocks arm; T2.1-6 registration
-- Cites: TEST-SPEC T2.1-3 (duplicate identifier across separate ESM blocks); T2.1-6 (an ESM block inside a section derives — 14.20 not reported; T6.5-17's positive observation); SPEC 2.1, 14.20, 3. Findings A-20, A-1. Depends on Task 3.
-- Change: `section-2.1.ts`: beside `DUP_BINDING_SOURCE` (~L538, the single-block consecutive-lines form, which now names the `duplicate-import-binding` allowance) add the separate-blocks arm (two ESM blocks each binding the identifier; derives without an allowance) with the entry's findings; register T2.1-6 per its entry (a blank-line-separated ESM block inside `<S id="m">` … `</S>`: `build` exit 0, the binding usable in the section, the block's lines dropping from Markdown per 3, the entry's other observations); traceability keys for T2.1-6.
-- Verify: `-t 'T2.1-3 '`, `-t 'T2.1-6 '` no harness error; self project green.
-
 ### Task 16 — T2.3-3 registration: the embedding form
 - Cites: TEST-SPEC T2.3-3 (positive comment/whitespace arms around the call, the run-on form, negative 14.16 arms, the `{text("a") text("b")}` 14.20 arm, `view --text` classification); SPEC 2.3, 2.7, 14.16, 14.20. Finding A-2. Depends on Task 3.
 - Change: register T2.3-3 in `test/suite/registry/section-2.2-2.3.ts` (or a new `section-2.3.ts` module with wrapper and index entry) per its entry: each positive arm's embedding recognized (edges/occurrences as the entry states, Markdown per 3), the run-on `{// c` U+000A `text("a")}` form, the negative 14.16 arms at their ranges, the `{text("a") text("b")}` arm as 14.20 at the offset T14-11's rule gives (precompute from the parser's position via `deriveMdx` at authoring time; Task 46 re-asserts it in T14-11), and `view --text` classification; declare the 14.20 staging `mdx.unparseable`; traceability keys.

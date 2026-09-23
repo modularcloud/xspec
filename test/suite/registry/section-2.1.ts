@@ -1,4 +1,4 @@
-// TEST-SPEC §2.1 (imports) — SUITE-06: T2.1-1 … T2.1-5.
+// TEST-SPEC §2.1 (imports) — SUITE-06: T2.1-1 … T2.1-6.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -19,14 +19,19 @@
 // support.ts byteWindow); every other staged construct lies beyond the
 // following blank line, outside the widened window.
 
-import type { Finding } from "../../helpers/adapters/index.js";
+import type { Finding, ViewNode } from "../../helpers/adapters/index.js";
 import {
   DEPENDENCY_EDGE_KINDS,
   decodeEdgesReport,
+  decodeNodeReport,
   decodeViewReport,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
-import { fail } from "../../helpers/assertions.js";
+import {
+  assertBytesEqual,
+  assertFileBytes,
+  fail,
+} from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
@@ -40,6 +45,7 @@ import {
   buildFindings,
   buildOk,
   byteWindow,
+  expectFindingFreeReport,
   runJson,
   stageBesideRoot,
 } from "./support.js";
@@ -532,18 +538,105 @@ const TWO_NAMES_IMPORTER_SOURCE = [
   "",
 ].join("\n");
 
-// T2.1-3, duplicate-binding arm: two imports of two different modules binding
-// the one identifier `BASE` (SPEC 2.1: no two imports in a file may bind the
-// same identifier — 14.15, not a parse failure). Each import line is a known
-// byte range for the location assertion.
+// T2.1-3, duplicate-binding arms: two imports of two different modules
+// binding the one identifier `BASE` (SPEC 2.1: no two imports in a file may
+// bind the same identifier — 14.15 in a well-formed file, never 14.20). SPEC
+// 14.20 decides well-formedness by derivability alone, and a duplicate
+// lexically declared name is an ECMAScript early error — excluded from
+// derivability — so the file is well-formed under both stagings the condition
+// distinguishes: the two declarations in one ESM block (consecutive lines, no
+// blank line between — the arm a product delegating ECMAScript's early errors
+// to its parser fails, T14-12) and in separate blocks (a blank line between
+// them ends the first block, 2.7). Each import line is a known byte range for
+// the location assertion.
 const DUP_BINDING_FIRST = 'import BASE from "./B1.xspec"';
 const DUP_BINDING_SECOND = 'import BASE from "./B2.xspec"';
-const DUP_BINDING_SOURCE = `${DUP_BINDING_FIRST}\n${DUP_BINDING_SECOND}${IMPORTING_FILE_REST}`;
+
+/** One duplicate-binding staging: the two declarations joined by `separator`. */
+interface DuplicateBindingArm {
+  readonly name: string;
+  /** What stands between the declarations: one ESM block, or two. */
+  readonly separator: "\n" | "\n\n";
+}
+
+const DUPLICATE_BINDING_ARMS: readonly DuplicateBindingArm[] = [
+  { name: "one ESM block (consecutive lines)", separator: "\n" },
+  { name: "separate ESM blocks (a blank line between)", separator: "\n\n" },
+];
+
+/**
+ * Run one duplicate-binding arm: `build --json` exits 1 and every finding is
+ * 14.15 — never 14.20 — located within one of the two colliding import
+ * statements' byte windows. SPEC 2.1 defines one condition over the colliding
+ * pair; whether a product reports the collision once or per import is not
+ * fixed, so one or two findings are accepted — every one of them must be
+ * 14.15, name the file, and point at one of the two import statements.
+ */
+async function runDuplicateBindingArm(
+  product: ProductBinding,
+  arm: DuplicateBindingArm,
+): Promise<void> {
+  const context =
+    "T2.1-3 `build --json` over two imports binding the same identifier in " +
+    arm.name;
+  const source = `${DUP_BINDING_FIRST}${arm.separator}${DUP_BINDING_SECOND}${IMPORTING_FILE_REST}`;
+  await withWorkspace(
+    {
+      "specs/B1.mdx": '<S id="b1">\nFirst module.\n</S>\n',
+      "specs/B2.mdx": '<S id="b2">\nSecond module.\n</S>\n',
+      "specs/A.mdx": source,
+    },
+    async (workspace) => {
+      const findings = await buildFindings(product, workspace, context);
+      const conditions = findings.map((finding) => finding.condition);
+      if (
+        findings.length < 1 ||
+        findings.length > 2 ||
+        conditions.some((condition) => condition !== "14.15")
+      ) {
+        fail(
+          `${context}: expected the colliding pair to report condition 14.15 — ` +
+            `one finding for the collision, or one per import — and never ` +
+            `14.20: the file is well-formed, a duplicate lexically declared ` +
+            `name being an early error excluded from derivability (SPEC ` +
+            `14.20); got ${JSON.stringify(conditions)}`,
+        );
+      }
+      const windows = [
+        byteWindow("", DUP_BINDING_FIRST),
+        byteWindow(`${DUP_BINDING_FIRST}${arm.separator}`, DUP_BINDING_SECOND),
+      ];
+      for (const finding of findings) {
+        const findingContext = `${context}: a 14.15 finding`;
+        assertFindingLocated(finding, { file: "specs/A.mdx" }, findingContext);
+        for (const { range } of finding.locations) {
+          const within = windows.some(
+            (window) => range.start >= window.start && range.end <= window.end,
+          );
+          if (!within) {
+            fail(
+              `${findingContext}: every location [${String(range.start)}, ` +
+                `${String(range.end)}) must point at one of the two colliding ` +
+                `import statements (byte windows ${JSON.stringify(windows)})`,
+            );
+          }
+        }
+      }
+    },
+    SPECS_ONLY_CONFIG,
+    // S-9: two imports binding one identifier are an ECMAScript early error
+    // 14.20 admits — the named allowance. It covers the separate-blocks
+    // staging too: the stock parser judges all of a file's ESM blocks as one
+    // module, so it rejects the second declaration under the same rule
+    // beyond derivability ("Identifier 'BASE' has already been declared").
+    { allowances: { "specs/A.mdx": ["duplicate-import-binding"] } },
+  );
+}
 
 const T2_1_3 = defineProductTest({
   id: "T2.1-3",
   title:
-    "named, namespace, and side-effect-only imports, duplicate-identifier bindings, and bindings of `S`/`Spec`/`text` each fail with 14.15; two imports binding one module under different names are valid (SPEC 2.1, 14.15)",
+    "named, namespace, and side-effect-only imports, duplicate-identifier bindings (in one ESM block and in separate blocks — 14.15 in a well-formed file, never 14.20), and bindings of `S`/`Spec`/`text` each fail with 14.15; two imports binding one module under different names are valid (SPEC 2.1, 14.15, 14.20)",
   run: async (product) => {
     for (const arm of INVALID_BINDING_ARMS) {
       await runInvalidImportArm(product, arm, "T2.1-3");
@@ -590,64 +683,11 @@ const T2_1_3 = defineProductTest({
       },
     );
 
-    // Duplicate-binding arm. SPEC 2.1 defines one condition over the
-    // colliding pair; whether a product reports the collision once or per
-    // import is not fixed, so one or two findings are accepted — every one
-    // of them must be 14.15, name the file, and point at one of the two
-    // import statements.
-    const dupContext =
-      "T2.1-3 `build --json` over two imports binding the same identifier";
-    await withWorkspace(
-      {
-        "specs/B1.mdx": '<S id="b1">\nFirst module.\n</S>\n',
-        "specs/B2.mdx": '<S id="b2">\nSecond module.\n</S>\n',
-        "specs/A.mdx": DUP_BINDING_SOURCE,
-      },
-      async (workspace) => {
-        const findings = await buildFindings(product, workspace, dupContext);
-        const conditions = findings.map((finding) => finding.condition);
-        if (
-          findings.length < 1 ||
-          findings.length > 2 ||
-          conditions.some((condition) => condition !== "14.15")
-        ) {
-          fail(
-            `${dupContext}: expected the colliding pair to report condition 14.15 — ` +
-              `one finding for the collision, or one per import — got ` +
-              `${JSON.stringify(conditions)}`,
-          );
-        }
-        const windows = [
-          byteWindow("", DUP_BINDING_FIRST),
-          byteWindow(`${DUP_BINDING_FIRST}\n`, DUP_BINDING_SECOND),
-        ];
-        for (const finding of findings) {
-          const findingContext = `${dupContext}: a 14.15 finding`;
-          assertFindingLocated(
-            finding,
-            { file: "specs/A.mdx" },
-            findingContext,
-          );
-          for (const { range } of finding.locations) {
-            const within = windows.some(
-              (window) =>
-                range.start >= window.start && range.end <= window.end,
-            );
-            if (!within) {
-              fail(
-                `${findingContext}: every location [${String(range.start)}, ` +
-                  `${String(range.end)}) must point at one of the two colliding ` +
-                  `import statements (byte windows ${JSON.stringify(windows)})`,
-              );
-            }
-          }
-        }
-      },
-      SPECS_ONLY_CONFIG,
-      // S-9: two imports binding one identifier are an ECMAScript early error
-      // 14.20 admits — the named allowance.
-      { allowances: { "specs/A.mdx": ["duplicate-import-binding"] } },
-    );
+    // Duplicate-binding arms: the two declarations in one ESM block, then in
+    // separate blocks — 14.15 under both, never 14.20.
+    for (const arm of DUPLICATE_BINDING_ARMS) {
+      await runDuplicateBindingArm(product, arm);
+    }
   },
 });
 
@@ -819,10 +859,239 @@ const T2_1_5 = defineProductTest({
 });
 
 /** TEST-SPEC §2.1, in canonical ID order (SUITE-06). */
+// T2.1-6: an ESM block inside a section element. SPEC 14.20 decides
+// well-formedness by derivability alone, and the MDX grammar derives an ESM
+// block wherever flow content may stand — inside a section element too, the
+// form 6.5's in-section exclusion presupposes and T6.5-17 refuses as moved
+// text. The block is separated from the tag line and from the body line by a
+// blank line on each side, so it interrupts no paragraph and runs to its
+// blank line (2.7). A sibling section outside `m` references the binding
+// through its `d` value, so the binding resolves from inside the section (the
+// embedding) and from outside it (SPEC 2.1). Everything staged is ASCII, so
+// string lengths are byte counts (SPEC 1.7).
+const T2_1_6_DECLARATION = 'import X from "./X.xspec"';
+const T2_1_6_DECLARATION_PREFIX = '<S id="m">\n\n';
+const T2_1_6_SOURCE =
+  T2_1_6_DECLARATION_PREFIX +
+  T2_1_6_DECLARATION +
+  "\n\nbody {text(X.a)}\n</S>\n\n" +
+  '<S id="n" d={X.a}>\nSibling uses the binding.\n</S>\n';
+// The target: an in-line section whose subtree text is exactly `Alpha text.`
+// (SPEC 3: the tag pair deleted in place; the line's terminator lies outside
+// the construct), so the embedding above expands mid-line with no terminator
+// of its own.
+const T2_1_6_TARGET_SOURCE = '<S id="a">Alpha text.</S>\n';
+// The declaration's source range — its own characters (SPEC 11.4, 1.7).
+const T2_1_6_DECLARATION_RANGE = {
+  start: Buffer.byteLength(T2_1_6_DECLARATION_PREFIX, "utf8"),
+  end:
+    Buffer.byteLength(T2_1_6_DECLARATION_PREFIX, "utf8") +
+    Buffer.byteLength(T2_1_6_DECLARATION, "utf8"),
+};
+// Hand-derived per SPEC 3: `m`'s tag-only lines and the declaration's line
+// each drop with their terminators (left empty purely by removals); the blank
+// source lines keep theirs; the embedding is replaced in place by `a`'s
+// subtree text. `m` has no child, so its own text is its subtree text — the
+// construct's whole contribution (SPEC 1.6).
+const T2_1_6_M_TEXT = "\n\nbody Alpha text.\n";
+// The file: `m`'s contribution, the blank line between the sections, then
+// `n`'s (its tag-only lines dropping alike).
+const T2_1_6_COMPILED = `${T2_1_6_M_TEXT}\nSibling uses the binding.\n`;
+
+// SPECS_ONLY_CONFIG plus Markdown emission enabled (SPEC 7.3), for the
+// byte-asserted compiled output.
+const SPECS_ONLY_EMITTING_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true }
+})
+`;
+
+/** The positional section tree's identities and nesting (SPEC 11.4). */
+function treeShape(node: ViewNode): unknown {
+  return { identity: node.identity, children: node.children.map(treeShape) };
+}
+
+const T2_1_6 = defineProductTest({
+  id: "T2.1-6",
+  title:
+    "an ESM block inside a section element derives: the file builds with `check` clean, the binding resolves from inside the section and from a sibling outside it, the declaration's line drops from the compiled Markdown and from the section's own text, `view` lists the declaration under `imports`, and the `contains` structure is as without the block (SPEC 2.1, 14.20, 3, 1.6, 11.4)",
+  run: async (product) => {
+    await withWorkspace(
+      {
+        "specs/X.mdx": T2_1_6_TARGET_SOURCE,
+        "specs/A.mdx": T2_1_6_SOURCE,
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T2.1-6 `build` over an ESM block inside a section element — " +
+            "well-formed, derivability alone deciding (SPEC 14.20, 2.1)",
+        );
+        await expectFindingFreeReport(
+          product,
+          workspace,
+          ["check", "--json"],
+          "T2.1-6 `check` after the build (SPEC 12.2)",
+        );
+
+        // References through the binding resolve from inside the section
+        // (the embedding) and from the sibling outside it (the `d` value):
+        // exactly one edge leaves each node — in particular no `contains`
+        // edge leaves `m`, which holds no node (SPEC 2.1, 5.2).
+        const referencingNodes = [
+          { node: "specs/A.mdx#m", kind: "embeds" },
+          { node: "specs/A.mdx#n", kind: "depends" },
+        ] as const;
+        for (const { node, kind } of referencingNodes) {
+          const context = `T2.1-6 \`query edges --from ${node}\``;
+          const edges = decodeEdgesReport(
+            await runJson(
+              product,
+              workspace,
+              ["query", "edges", "--from", node],
+              context,
+            ),
+            context,
+          );
+          assertEdgeSetEqual(
+            edges,
+            [{ from: node, to: "specs/X.mdx#a", kind }],
+            `${context}: the reference through the in-section binding ` +
+              `resolves (SPEC 2.1), and no other edge leaves the node`,
+          );
+        }
+
+        // The `contains` structure is as without the block: the root
+        // containing `m` and its sibling, `m` containing no node.
+        const containsContext = "T2.1-6 `query edges --kinds contains`";
+        const contains = decodeEdgesReport(
+          await runJson(
+            product,
+            workspace,
+            ["query", "edges", "--kinds", "contains"],
+            containsContext,
+          ),
+          containsContext,
+        );
+        assertEdgeSetEqual(
+          contains,
+          [
+            { from: "specs/A.mdx", to: "specs/A.mdx#m", kind: "contains" },
+            { from: "specs/A.mdx", to: "specs/A.mdx#n", kind: "contains" },
+            { from: "specs/X.mdx", to: "specs/X.mdx#a", kind: "contains" },
+          ],
+          `${containsContext}: the root contains \`m\` and its sibling, and ` +
+            `\`m\` contains no node — the structure as without the block ` +
+            `(SPEC 1.2, 5.2)`,
+        );
+
+        // Compiled Markdown, byte-asserted with emission enabled (SPEC 3).
+        await assertFileBytes(
+          workspace.path("specs/A.md"),
+          T2_1_6_COMPILED,
+          "T2.1-6 specs/A.md: the declaration removed and its line dropped " +
+            "with its terminator, the tag-only lines dropped, the blank " +
+            "lines kept, the embedding replaced in place (SPEC 3, 13.2)",
+        );
+
+        // The section's own text (SPEC 1.6): the empty lines kept, the
+        // declaration's line gone.
+        const nodeContext = "T2.1-6 `query node specs/A.mdx#m`";
+        const node = decodeNodeReport(
+          await runJson(
+            product,
+            workspace,
+            ["query", "node", "specs/A.mdx#m"],
+            nodeContext,
+          ),
+          nodeContext,
+        );
+        if (node.identity !== "specs/A.mdx#m") {
+          fail(
+            `${nodeContext}: expected the report to be about ` +
+              `"specs/A.mdx#m" (SPEC 1.5), got identity ` +
+              `${JSON.stringify(node.identity)}`,
+          );
+        }
+        assertBytesEqual(
+          node.ownText,
+          T2_1_6_M_TEXT,
+          `${nodeContext}: own text — the empty lines kept, the ` +
+            `declaration's line gone, the embedding expanded (SPEC 1.6, 3)`,
+        );
+        assertBytesEqual(
+          node.subtreeText,
+          T2_1_6_M_TEXT,
+          `${nodeContext}: subtree text — a childless section's own text ` +
+            `(SPEC 1.6)`,
+        );
+
+        // `view`: the declaration listed under `imports` with its range and
+        // resolved target; the positional tree as without the block.
+        const viewContext = "T2.1-6 `view specs/A.mdx`";
+        const report = decodeViewReport(
+          await runJson(
+            product,
+            workspace,
+            ["view", "specs/A.mdx"],
+            viewContext,
+          ),
+          { text: false },
+          viewContext,
+        );
+        assertSameJson(
+          report.findings,
+          [],
+          `${viewContext}: the consulted domain is finding-free (SPEC 11.2)`,
+        );
+        if (report.views.length !== 1) {
+          fail(
+            `${viewContext}: expected exactly one per-file view (SPEC 11.4), ` +
+              `got ${String(report.views.length)}`,
+          );
+        }
+        const view = report.views[0]!;
+        assertSameJson(
+          view.imports,
+          [
+            {
+              range: T2_1_6_DECLARATION_RANGE,
+              name: "X",
+              target: "specs/X.mdx",
+            },
+          ],
+          `${viewContext}: the in-section declaration listed under imports ` +
+            `with the range of its own characters, its binding name, and ` +
+            `its resolved target (SPEC 11.4, 1.7, 2.1)`,
+        );
+        assertSameJson(
+          treeShape(view.root),
+          {
+            identity: "specs/A.mdx",
+            children: [
+              { identity: "specs/A.mdx#m", children: [] },
+              { identity: "specs/A.mdx#n", children: [] },
+            ],
+          },
+          `${viewContext}: the positional tree — the root containing \`m\` ` +
+            `and its sibling, \`m\` containing no node (SPEC 11.4)`,
+        );
+      },
+      SPECS_ONLY_EMITTING_CONFIG,
+    );
+  },
+});
+
 export const section21Tests: readonly ProductTestEntry[] = [
   T2_1_1,
   T2_1_2,
   T2_1_3,
   T2_1_4,
   T2_1_5,
+  T2_1_6,
 ];
