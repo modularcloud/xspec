@@ -955,7 +955,9 @@ export default defineConfig({
 `;
 
 // 0xFF can occur in no valid UTF-8 sequence; everything else in the file is
-// valid, so 14.20 is the file's only condition.
+// valid, so 14.20 is the file's only condition. The prefix is the file's
+// longest well-formed UTF-8 prefix, so its byte length is the finding's offset
+// (SPEC 14: the first byte of the first ill-formed sequence; T14-11).
 function withInvalidUtf8Byte(prefix: string, suffix: string): Uint8Array {
   return Buffer.concat([
     Buffer.from(prefix, "utf8"),
@@ -963,6 +965,28 @@ function withInvalidUtf8Byte(prefix: string, suffix: string): Uint8Array {
     Buffer.from(suffix, "utf8"),
   ]);
 }
+
+// The invalid-UTF-8 fixtures, one spec source and one code source, with the
+// offset each finding must carry precomputed from the staged bytes — never
+// from product output. Each prefix holds a multibyte character (é: one code
+// point, two bytes), so a product counting code points, or reporting the
+// byte at which its decoder notices the failure, misses the pinned offset.
+const BAD_UTF8_SPEC_PREFIX = '<S id="a">\nBad café ';
+const BAD_UTF8_SPEC_SOURCE = withInvalidUtf8Byte(
+  BAD_UTF8_SPEC_PREFIX,
+  "byte.\n</S>\n",
+);
+const BAD_UTF8_SPEC_OFFSET = Buffer.byteLength(BAD_UTF8_SPEC_PREFIX, "utf8");
+const BAD_UTF8_CODE_PREFIX = "export const a = 1; // café ";
+const BAD_UTF8_CODE_SOURCE = withInvalidUtf8Byte(
+  BAD_UTF8_CODE_PREFIX,
+  "byte\n",
+);
+const BAD_UTF8_CODE_OFFSET = Buffer.byteLength(BAD_UTF8_CODE_PREFIX, "utf8");
+
+// A byte-order mark's finding locates offset 0 (SPEC 14; T14-11), whatever
+// the mark's own byte length (three bytes in UTF-8).
+const BOM_OFFSET = 0;
 
 // A UTF-8 byte-order mark followed by otherwise-valid content: the fixture
 // isolates the BOM rule from the invalid-UTF-8 rule (SPEC 1.6: a source that
@@ -974,13 +998,18 @@ const VALID_SECTION_SOURCE = '<S id="ok">\nValid content.\n</S>\n';
 
 /**
  * Exactly one finding names the file — locating in it, or carrying it as
- * the concerned path — and it carries condition 14.20 (SPEC 14: errors
- * identify the file; where a parser fails inside an unparseable file is
- * parser-specific, so no particular range is demanded of it).
+ * the concerned path — it carries condition 14.20, and it locates exactly
+ * one zero-length range in the file at `offset`: the byte length of the
+ * longest well-formed UTF-8 prefix for an encoding failure, 0 for a
+ * byte-order mark (SPEC 14's offset rule for an unparseable source; T14-11).
+ * A range at the byte where a decoder notices the failure, a code-point
+ * count, a non-empty range, or a finding carrying the file as a path instead
+ * of locating in it each fails here.
  */
 function assertUnparseableFinding(
   findings: readonly Finding[],
   file: string,
+  offset: number,
   context: string,
 ): void {
   const matching = findings.filter(
@@ -1001,28 +1030,40 @@ function assertUnparseableFinding(
         ),
     );
   }
-  if (matching[0]!.condition !== "14.20") {
+  const finding = matching[0]!;
+  if (finding.condition !== "14.20") {
     fail(
       `${context}: the finding for ${JSON.stringify(file)} must carry condition 14.20 ` +
         `(unparseable source: invalid UTF-8 or leading BOM, SPEC 1.6); got ` +
-        `${JSON.stringify(matching[0]!.condition)} (message: ${JSON.stringify(matching[0]!.message)})`,
+        `${JSON.stringify(finding.condition)} (message: ${JSON.stringify(finding.message)})`,
     );
   }
+  assertSameJson(
+    finding.locations.map((location) => ({
+      file: location.file,
+      range: { start: location.range.start, end: location.range.end },
+    })),
+    [{ file, range: { start: offset, end: offset } }],
+    `${context}: the 14.20 finding for ${JSON.stringify(file)} locates exactly ` +
+      `one zero-length range at byte offset ${String(offset)} — the byte ` +
+      `length of the longest well-formed UTF-8 prefix for an encoding failure ` +
+      `(the first byte of the first ill-formed sequence), 0 for a byte-order ` +
+      `mark (SPEC 14, 1.7; T14-11), \`{"start", "end"}\` as zero-based byte ` +
+      `offsets, end-exclusive (message: ${JSON.stringify(finding.message)})`,
+  );
 }
 
 const T1_6_5 = defineProductTest({
   id: "T1.6-5",
   title:
-    "a spec or code source that is invalid UTF-8, or begins with a BOM, fails `build` with 14.20 (SPEC 1.6, 14.20)",
+    "a spec or code source that is invalid UTF-8, or begins with a BOM, fails `build` with 14.20 at the failure's offset (SPEC 1.6, 14.20, 14)",
   run: async (product) => {
-    // Spec-source arms: one invalid-UTF-8 file, one BOM file.
+    // Spec-source arms: one invalid-UTF-8 file, one BOM file, each finding at
+    // the offset SPEC 14 fixes, precomputed from the staged bytes (T14-11).
     const specArm = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        "specs/bad-utf8.mdx": withInvalidUtf8Byte(
-          '<S id="a">\nBad ',
-          " byte.\n</S>\n",
-        ),
+        "specs/bad-utf8.mdx": BAD_UTF8_SPEC_SOURCE,
         "specs/bom.mdx": BOM + '<S id="b">\nBom content.\n</S>\n',
       },
       // S-9: both spec sources are forms 14.20 declares unparseable.
@@ -1033,20 +1074,25 @@ const T1_6_5 = defineProductTest({
         "T1.6-5 `build --json` over the two unparseable spec sources";
       const findings = await buildFindings(product, specArm, context);
       assertConditionCounts(findings, { "14.20": 2 }, context);
-      assertUnparseableFinding(findings, "specs/bad-utf8.mdx", context);
-      assertUnparseableFinding(findings, "specs/bom.mdx", context);
+      assertUnparseableFinding(
+        findings,
+        "specs/bad-utf8.mdx",
+        BAD_UTF8_SPEC_OFFSET,
+        context,
+      );
+      assertUnparseableFinding(findings, "specs/bom.mdx", BOM_OFFSET, context);
     } finally {
       await specArm.dispose();
     }
 
     // Code-source arms: 14.20 covers discovered code sources too (SPEC 1.6
     // names spec and code sources alike); the spec source beside them is
-    // valid, so the two conditions are the code files'.
+    // valid, so the two conditions are the code files', each at its offset.
     const codeArm = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
         "specs/OK.mdx": VALID_SECTION_SOURCE,
-        "src/bad-utf8.ts": withInvalidUtf8Byte("export const a = 1; // ", "\n"),
+        "src/bad-utf8.ts": BAD_UTF8_CODE_SOURCE,
         "src/bom.ts": BOM + "export const b = 2;\n",
       },
     });
@@ -1055,8 +1101,13 @@ const T1_6_5 = defineProductTest({
         "T1.6-5 `build --json` over the two unparseable code sources";
       const findings = await buildFindings(product, codeArm, context);
       assertConditionCounts(findings, { "14.20": 2 }, context);
-      assertUnparseableFinding(findings, "src/bad-utf8.ts", context);
-      assertUnparseableFinding(findings, "src/bom.ts", context);
+      assertUnparseableFinding(
+        findings,
+        "src/bad-utf8.ts",
+        BAD_UTF8_CODE_OFFSET,
+        context,
+      );
+      assertUnparseableFinding(findings, "src/bom.ts", BOM_OFFSET, context);
     } finally {
       await codeArm.dispose();
     }

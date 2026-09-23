@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 13 — T1.6-5: assert the 14.20 finding's offset
-- Cites: TEST-SPEC T1.6-5; T14-11's rule (the byte length of the longest well-formed UTF-8 prefix; 0 for a BOM); SPEC 14.20, 1.7. Finding A-18. Depends on Task 3.
-- Change: `assertUnparseableFinding` (`test/suite/registry/section-1.6-1.7.ts` ~L981–1012) checks only condition 14.20 and the file; assert the location offset per arm, precomputed from the staged bytes (declared `mdx.unparseable`).
-- Verify: `-t 'T1.6-5 '` no harness error; self project green.
-
 ### Task 14 — T1.7-2: the further source-range forms
 - Cites: TEST-SPEC T1.7-2 "Further forms"; SPEC 1.7, 4.6. Finding A-19.
 - Change: add arms for the constructor unit; decorated class/member (range from the first `@`); export exclusion (`export @dec class`, `@dec export class`, `export   function f` with multiple spaces); the `default` unit forms (`export default () => {};` through `;`, `export default function () {}`, `@dec export default class {}`); legacy `module A.B`; and the declaration-file whole-file range (`section-4.6.ts` ~L976 defers it to T1.7-2, where no `.d.ts` staging exists — stage one). Assert through the surfaces the entry names with precomputed offsets.
