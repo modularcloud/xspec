@@ -1,4 +1,4 @@
-// TEST-SPEC §2.7 (permitted constructs) — SUITE-10: T2.7-1 … T2.7-3.
+// TEST-SPEC §2.7 (permitted constructs) — SUITE-10: T2.7-1 … T2.7-4.
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -35,7 +35,15 @@
 // attribute's grammar pair (14.20): `{...(a, b)}` is well-formed — 14.17 at
 // the whole braced construct — while `{...a, b}` is not, 14.20 at the
 // offset of its comma (T2.7-3's pair, staged under S-9's `unparseable`
-// declaration).
+// declaration). The comment forms of 2.7 beyond the usual `{/* … */}` —
+// `{}`, ECMAScript-only and ASCII whitespace between braces, a block-comment
+// sequence, line-comment containers ended by U+000A or U+000D, and the
+// run-on `{// c}` U+000A `}` — each behave as T2.7-2's comment (removed
+// from Markdown output, absent from own text, no finding, listed under
+// `view`'s `comments` brace through brace); an expression beside a comment
+// is 14.16; U+0085 or U+200B between braces, `{// c` U+2028/U+2029 `}`
+// U+000A `}`, and `{// c}` with no later `}` are 14.20 at the offsets SPEC
+// 14 fixes (T2.7-4, each 14.20 staging declared `unparseable`).
 //
 // Location assertions follow the SUITE-08 discipline: negative fixtures are
 // pure ASCII, composed as `prefix + construct + suffix` with exactly known
@@ -564,23 +572,28 @@ function assertEnclosedConstructFinding(
   );
 }
 
-/** One enclosed-construct arm: `build --json`, then the bare `view --text`. */
+/**
+ * One enclosed-construct arm of `testId`: `build --json`, then the bare
+ * `view --text` (T2.7-1's container and fragment arms, T2.7-4's expression
+ * arm).
+ */
 async function runEnclosedConstructArm(
   product: ProductBinding,
+  testId: string,
   arm: EnclosedConstructArm,
 ): Promise<void> {
   await withWorkspace(
     SPECS_ONLY_CONFIG,
     { [T2_7_1_ENCLOSED_FILE]: arm.fixture.source },
     async (workspace) => {
-      const buildContext = `T2.7-1 \`build --json\` with ${arm.name}`;
+      const buildContext = `${testId} \`build --json\` with ${arm.name}`;
       assertEnclosedConstructFinding(
         await buildFindings(product, workspace, buildContext),
         arm,
         buildContext,
       );
 
-      const viewContext = `T2.7-1 bare \`view --text\` with ${arm.name}`;
+      const viewContext = `${testId} bare \`view --text\` with ${arm.name}`;
       const result = await expectExit(
         product,
         workspace,
@@ -670,8 +683,8 @@ const T2_7_1 = defineProductTest({
         },
       );
     }
-    await runEnclosedConstructArm(product, T2_7_1_CONTAINER_ARM);
-    await runEnclosedConstructArm(product, T2_7_1_FRAGMENT_ARM);
+    await runEnclosedConstructArm(product, "T2.7-1", T2_7_1_CONTAINER_ARM);
+    await runEnclosedConstructArm(product, "T2.7-1", T2_7_1_FRAGMENT_ARM);
   },
 });
 
@@ -1589,9 +1602,479 @@ const T2_7_3 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T2.7-4
+// ---------------------------------------------------------------------------
+
+// The comment forms of SPEC 2.7 beyond T2.7-2's usual `{/* … */}`: an MDX
+// comment is an expression container whose content — the characters between
+// its braces — is nothing but whitespace and JavaScript comments as 14.20
+// counts them: whitespace and line terminators ECMAScript's (1.4), a line
+// comment running through the first U+000A or U+000D, and a brace on a
+// commented-out line closing nothing, so the run-on `{// c}` runs to the
+// next `}`. Every such form behaves as T2.7-2's comment: removed from
+// Markdown output (byte-asserted, 3), absent from own text (`query node`),
+// no finding, `build` exit 0, and listed in `view`'s `comments` with its full
+// container range, opening brace through closing brace (11.4). A container
+// holding anything else is no comment: an invalid expression container
+// (14.16) where the grammar derives its content, an unparseable file (14.20)
+// where it does not — U+0085 and U+200B being neither ECMAScript whitespace
+// nor line terminators, and the comment grammar's own failures (T14-12). The
+// code points are spelled from their values, never as escape literals.
+const CARRIAGE_RETURN = String.fromCodePoint(0x0d);
+const NO_BREAK_SPACE = String.fromCodePoint(0xa0);
+const ZERO_WIDTH_NO_BREAK_SPACE = String.fromCodePoint(0xfeff);
+const LINE_SEPARATOR = String.fromCodePoint(0x2028);
+const PARAGRAPH_SEPARATOR = String.fromCodePoint(0x2029);
+const NEXT_LINE = String.fromCodePoint(0x85);
+const ZERO_WIDTH_SPACE = String.fromCodePoint(0x200b);
+
+/** One comment form of 2.7: its container's exact characters and staging. */
+interface CommentForm {
+  /** The form's own file, workspace-relative (one file per form). */
+  readonly file: string;
+  /** The arm's name in contexts. */
+  readonly name: string;
+  /** The container's own characters, opening brace through closing brace. */
+  readonly construct: string;
+  /**
+   * `twin`: an inline occurrence sharing its line with retained
+   * non-whitespace on both sides, then an own-line occurrence between blank
+   * lines; `lone-inline`: the inline occurrence alone — the carriage-return
+   * twin is staged with no later `}` in its file, so that a product ending
+   * line comments at U+000A alone reads its `}` as lying on the
+   * commented-out line, finds the container unclosed (14.20), and fails.
+   */
+  readonly layout: "twin" | "lone-inline";
+}
+
+const T2_7_4_COMMENT_FORMS: readonly CommentForm[] = [
+  {
+    file: "specs/empty.mdx",
+    name: "the empty container `{}`",
+    construct: "{}",
+    layout: "twin",
+  },
+  {
+    file: "specs/space.mdx",
+    name: "ASCII whitespace between braces (`{ }`)",
+    construct: "{ }",
+    layout: "twin",
+  },
+  {
+    file: "specs/blocks.mdx",
+    name: "a block-comment sequence `{ /* a */ /* b */ }`",
+    construct: "{ /* a */ /* b */ }",
+    layout: "twin",
+  },
+  {
+    file: "specs/line-lf.mdx",
+    name: "a line-comment container ended by U+000A before its closing brace",
+    construct: "{// c\n}",
+    layout: "twin",
+  },
+  {
+    file: "specs/line-cr.mdx",
+    name:
+      "a line-comment container ended by U+000D before its closing brace, " +
+      "no later `}` in the file",
+    construct: `{// c${CARRIAGE_RETURN}}`,
+    layout: "lone-inline",
+  },
+  {
+    file: "specs/run-on.mdx",
+    name:
+      "the run-on form `{// c}` U+000A `}`, its first brace on the " +
+      "commented-out line closing nothing",
+    construct: "{// c}\n}",
+    layout: "twin",
+  },
+  {
+    file: "specs/nbsp.mdx",
+    name: "U+00A0 between braces",
+    construct: `{${NO_BREAK_SPACE}}`,
+    layout: "twin",
+  },
+  {
+    file: "specs/feff.mdx",
+    name: "U+FEFF between braces",
+    construct: `{${ZERO_WIDTH_NO_BREAK_SPACE}}`,
+    layout: "twin",
+  },
+  {
+    file: "specs/ls.mdx",
+    name: "U+2028 between braces",
+    construct: `{${LINE_SEPARATOR}}`,
+    layout: "twin",
+  },
+  {
+    file: "specs/ps.mdx",
+    name: "U+2029 between braces",
+    construct: `{${PARAGRAPH_SEPARATOR}}`,
+    layout: "twin",
+  },
+];
+
+// Each form's file: one section holding the form inline — `Alpha ` before
+// it and ` beta.` after it on its line — and, in the twin layout, once more
+// on a line of its own between blank lines, then a closing paragraph.
+const T2_7_4_OPEN = '<S id="sec">\nAlpha ';
+const T2_7_4_AFTER_INLINE = " beta.\n\n";
+const T2_7_4_AFTER_OWN_LINE = "\n\n";
+const T2_7_4_CLOSE = "Gamma text.\n</S>\n";
+
+/** A comment form staged: its bytes, its container ranges, its text. */
+interface CommentFormFixture {
+  readonly form: CommentForm;
+  /** The file's exact bytes. */
+  readonly source: string;
+  /** Every container's range, brace through brace, document order (11.4). */
+  readonly comments: readonly SourceRange[];
+  /** The section's own text and the file's compiled output (SPEC 1.6, 3). */
+  readonly text: string;
+}
+
+function commentFormFixture(form: CommentForm): CommentFormFixture {
+  const { construct } = form;
+  const inlineStart = utf8Bytes(T2_7_4_OPEN);
+  const inline: SourceRange = {
+    start: inlineStart,
+    end: inlineStart + utf8Bytes(construct),
+  };
+  const throughInline = T2_7_4_OPEN + construct + T2_7_4_AFTER_INLINE;
+  // Hand-derived per SPEC 3 (T3-3's rules): the tag lines are emptied purely
+  // by removals and drop with their terminators; the inline container is
+  // deleted exactly in place — a line terminator among its own characters
+  // deleted with it, joining the lines it spanned into one — leaving the
+  // author's two spaces; already-empty lines are kept. No construct byte
+  // survives anywhere in the text.
+  if (form.layout === "lone-inline") {
+    return {
+      form,
+      source: throughInline + T2_7_4_CLOSE,
+      comments: [inline],
+      text: "Alpha  beta.\n\nGamma text.\n",
+    };
+  }
+  // The own-line container's line — the lines a multi-line form spans merged
+  // into one — is left empty purely by the removal and drops with its
+  // terminator; the blank lines around it keep.
+  const ownLineStart = utf8Bytes(throughInline);
+  return {
+    form,
+    source: throughInline + construct + T2_7_4_AFTER_OWN_LINE + T2_7_4_CLOSE,
+    comments: [
+      inline,
+      { start: ownLineStart, end: ownLineStart + utf8Bytes(construct) },
+    ],
+    text: "Alpha  beta.\n\n\nGamma text.\n",
+  };
+}
+
+const T2_7_4_FIXTURES: readonly CommentFormFixture[] =
+  T2_7_4_COMMENT_FORMS.map(commentFormFixture);
+
+/** The emitted Markdown path beside a form's source (SPEC 7.3, 13.2). */
+function emittedMarkdownPath(file: string): string {
+  return file.replace(/\.mdx$/u, ".md");
+}
+
+/**
+ * The comment forms, all in one emitting workspace: `build` exit 0 with no
+ * finding, each file's emitted Markdown byte-exact with the form removed,
+ * each section's own text comment-free, and each container listed under
+ * `view`'s `comments` by its full range.
+ */
+async function runCommentForms(product: ProductBinding): Promise<void> {
+  const files: Record<string, string> = {};
+  for (const fixture of T2_7_4_FIXTURES) {
+    files[fixture.form.file] = fixture.source;
+  }
+  await withWorkspace(EMIT_TRUE_CONFIG, files, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      "T2.7-4 `build` with emission over the comment forms of 2.7 — every " +
+        "form is a comment, so no finding and exit 0 (SPEC 2.7)",
+    );
+    for (const fixture of T2_7_4_FIXTURES) {
+      const context = `T2.7-4 (${fixture.form.name})`;
+      // Removed from Markdown output: byte equality of the whole emitted
+      // file against the hand-derived compilation (SPEC 2.7, 3; T3-3).
+      await assertFileBytes(
+        workspace.path(emittedMarkdownPath(fixture.form.file)),
+        fixture.text,
+        `${context}: emitted Markdown — the comment is removed by its own ` +
+          "characters, exact deletion in place, an emptied own line dropped " +
+          "with its terminator and a multi-line form's lines merged (SPEC " +
+          "2.7, 3; T3-3)",
+      );
+      // Not part of own text (`query node`): exact bytes (SPEC 1.6).
+      const node = await queryNode(
+        product,
+        workspace,
+        `${fixture.form.file}#sec`,
+        context,
+      );
+      assertBytesEqual(
+        node.ownText,
+        fixture.text,
+        `${context}: own text — the comment is not part of it (SPEC 2.7, 1.6)`,
+      );
+    }
+
+    // Listed in `view`'s `comments` with the full container range, opening
+    // brace through closing brace, in document order (SPEC 11.4) — nothing
+    // else in the view: no import staged, no embedding.
+    const viewContext = "T2.7-4 bare `view --text` over the comment forms";
+    const report = decodeViewReport(
+      await runJson(
+        product,
+        workspace,
+        ["view", "--text"],
+        `${viewContext}: a finding-free answer, exit 0 (SPEC 11.2, 12.0)`,
+      ),
+      { text: true },
+      viewContext,
+    );
+    assertSameJson(
+      report.findings,
+      [],
+      `${viewContext}: every form is a comment — no finding (SPEC 2.7)`,
+    );
+    assertSameJson(
+      report.views.map((view) => view.file),
+      T2_7_4_FIXTURES.map((fixture) => fixture.form.file).sort(),
+      `${viewContext}: one per-file view per discovered spec source, by byte ` +
+        "order of workspace-relative path (SPEC 11.4)",
+    );
+    for (const fixture of T2_7_4_FIXTURES) {
+      const context = `${viewContext} (${fixture.form.name})`;
+      const view = report.views.find(
+        (candidate) => candidate.file === fixture.form.file,
+      )!;
+      assertSameJson(
+        view.comments,
+        fixture.comments,
+        `${context}: \`comments\` lists each container's source range — its ` +
+          "full braced container, opening brace through closing brace, as " +
+          "byte offsets (SPEC 11.4, 1.7)",
+      );
+      assertSameJson(
+        [view.imports, view.occurrences],
+        [[], []],
+        `${context}: a comment is no import and no embedding — no import ` +
+          "entry and no occurrence record (SPEC 2.7, 5.7, 11.4)",
+      );
+      const section = view.root.children[0];
+      assertSameJson(
+        [view.root.children.length, section?.identity],
+        [1, `${fixture.form.file}#sec`],
+        `${context}: the tree holds the root and the one section (SPEC 11.4)`,
+      );
+      assertBytesEqual(
+        typeof section?.ownText === "string" ? section.ownText : "",
+        fixture.text,
+        `${context}: the section's own text under \`--text\` — comment-free ` +
+          "(SPEC 11.4, 1.6)",
+      );
+    }
+  });
+}
+
+// An expression beside comments is no comment: an invalid expression
+// container (14.16), the grammar deriving its content — T2.7-1's
+// enclosed-construct machinery pins the one finding brace through brace, the
+// view's tree without a node for it, its bytes preserved as content (11.2),
+// and no `comments` entry.
+const T2_7_4_EXPRESSION_ARM: EnclosedConstructArm = {
+  fixture: enclosedConstructFixture("{/* a */ 1}"),
+  name: "an expression beside a comment (`{/* a */ 1}`)",
+  soleFinding:
+    "exactly one condition-16 finding, the container's, and none beside — " +
+    "an expression beside comments is no comment but an invalid expression " +
+    "container, the grammar deriving its content (SPEC 2.7, 14.16)",
+  rangeRule:
+    "the 14.16 finding locates the expression container from its opening " +
+    "brace through its closing brace, as byte offsets (SPEC 14, 1.7)",
+  noNode: "no node within the container — it encloses no section",
+  treeShape:
+    "the section tree by construct nesting — the root, `ok`, and `sec` — " +
+    "with the container's bytes preserved byte-for-byte as content in " +
+    "`sec`'s own and subtree text (the by-form classification of 11.2)",
+};
+
+/**
+ * A form 2.7 makes unparseable (14.20), staged alone under S-9's
+ * `unparseable` declaration: the one zero-length range at the offset SPEC 14
+ * fixes — the byte length of the longest whole-character prefix with which
+ * some well-formed file begins — precomputed from the staged bytes.
+ */
+interface UnparseableCommentArm {
+  /** The arm's name in contexts. */
+  readonly name: string;
+  /** The file's exact bytes. */
+  readonly source: string;
+  /** The pinned offset (SPEC 1.7 bytes). */
+  readonly offset: number;
+  /** Why SPEC 14 fixes that offset. */
+  readonly rule: string;
+}
+
+const T2_7_4_UNPARSEABLE_FILE = "specs/A.mdx";
+const T2_7_4_UNPARSEABLE_PREFIX = `${SIBLING}<S id="bad">\nAlpha.\n\n`;
+const T2_7_4_UNPARSEABLE_SUFFIX = "\n\nOmega.\n</S>\n";
+
+/** A construct on a line of its own inside the section after the sibling. */
+function unparseableInSection(
+  construct: string,
+  within: number,
+  name: string,
+  rule: string,
+): UnparseableCommentArm {
+  return {
+    name,
+    source: T2_7_4_UNPARSEABLE_PREFIX + construct + T2_7_4_UNPARSEABLE_SUFFIX,
+    offset: utf8Bytes(T2_7_4_UNPARSEABLE_PREFIX) + within,
+    rule,
+  };
+}
+
+const T2_7_4_CODE_POINT_RULE =
+  "the zero-length range at the offset of the code point — neither U+0085 " +
+  "nor U+200B is ECMAScript whitespace or a line terminator (14.20 excludes " +
+  "both by name), so the content is no empty expression, and neither begins " +
+  "any token of the grammar, so it derives no expression either; the prefix " +
+  "through `{` begins a well-formed file (SPEC 14, 14.20, 1.4; T14-11)";
+const T2_7_4_FIRST_BRACE_RULE =
+  "the zero-length range at the offset of the first `}` — the deletion " +
+  "judgement runs the line comment through U+000A, so the first brace " +
+  "closes nothing, while the lexical grammar ends the comment at the " +
+  "separator and finds a brace token; the prefix through the separator " +
+  "begins a well-formed file, the one through the brace none (SPEC 14, " +
+  "14.20; T14-12)";
+const T2_7_4_RUN_ON_TAIL = "{// c}\n";
+const T2_7_4_RUN_ON_SOURCE = `${SIBLING}${T2_7_4_RUN_ON_TAIL}`;
+
+const T2_7_4_UNPARSEABLE_ARMS: readonly UnparseableCommentArm[] = [
+  unparseableInSection(
+    `{${NEXT_LINE}}`,
+    utf8Bytes("{"),
+    "U+0085 between braces",
+    T2_7_4_CODE_POINT_RULE,
+  ),
+  unparseableInSection(
+    `{${ZERO_WIDTH_SPACE}}`,
+    utf8Bytes("{"),
+    "U+200B between braces",
+    T2_7_4_CODE_POINT_RULE,
+  ),
+  unparseableInSection(
+    `{// c${LINE_SEPARATOR}}\n}`,
+    utf8Bytes(`{// c${LINE_SEPARATOR}`),
+    "`{// c` U+2028 `}` U+000A `}`",
+    T2_7_4_FIRST_BRACE_RULE,
+  ),
+  unparseableInSection(
+    `{// c${PARAGRAPH_SEPARATOR}}\n}`,
+    utf8Bytes(`{// c${PARAGRAPH_SEPARATOR}`),
+    "`{// c` U+2029 `}` U+000A `}`",
+    T2_7_4_FIRST_BRACE_RULE,
+  ),
+  {
+    name: "`{// c}` as the file's last construct, no later `}` in the file",
+    source: T2_7_4_RUN_ON_SOURCE,
+    offset: utf8Bytes(T2_7_4_RUN_ON_SOURCE),
+    rule:
+      "the zero-length range at the file's byte length — the first `}` " +
+      "lies on the commented-out line and closes nothing, and the whole " +
+      "file is a prefix of a well-formed one, a later `}` closing the " +
+      "container (SPEC 14, 14.20, 2.7; T14-12)",
+  },
+];
+
+/** One unparseable form: `build --json`, then the bare `view --text`. */
+async function runUnparseableCommentArm(
+  product: ProductBinding,
+  arm: UnparseableCommentArm,
+): Promise<void> {
+  const assertUnparseable = (
+    findings: readonly Finding[],
+    context: string,
+  ): void => {
+    assertConditionCounts(
+      findings,
+      { "14.20": 1 },
+      `${context}: 14.20 alone — the container's content is no empty ` +
+        "expression and derives no expression, so the file is not " +
+        "well-formed MDX, and an unparseable file masks every other " +
+        "condition (SPEC 2.7, 14.20; T14-3)",
+    );
+    assertSoleLocationExactly(
+      findings[0]!,
+      T2_7_4_UNPARSEABLE_FILE,
+      { start: arm.offset, end: arm.offset },
+      `${context}: ${arm.rule}`,
+    );
+  };
+  await withWorkspace(
+    SPECS_ONLY_CONFIG,
+    { [T2_7_4_UNPARSEABLE_FILE]: arm.source },
+    async (workspace) => {
+      const buildContext = `T2.7-4 \`build --json\` with ${arm.name}`;
+      assertUnparseable(
+        await buildFindings(product, workspace, buildContext),
+        buildContext,
+      );
+      const viewContext = `T2.7-4 bare \`view --text\` with ${arm.name}`;
+      const result = await expectExit(
+        product,
+        workspace,
+        ["view", "--text"],
+        1,
+        `${viewContext}: the parse-failure finding accompanies the answer, ` +
+          "so exit 1 (SPEC 11.2, 11.4, 12.0; T14-4)",
+      );
+      const report = decodeViewReport(
+        parseJsonStdout(
+          result,
+          `${viewContext}: a single JSON document is the only output form (SPEC 11)`,
+        ),
+        { text: true },
+        viewContext,
+      );
+      assertUnparseable(
+        report.findings,
+        `${viewContext}: the accompanying findings (SPEC 11.2; T14-4)`,
+      );
+      assertSameJson(
+        report.views.map((view) => view.file),
+        [],
+        `${viewContext}: an unparseable requested file contributes no view ` +
+          "(SPEC 11.4), and it is the only discovered spec source",
+      );
+    },
+    { unparseable: [T2_7_4_UNPARSEABLE_FILE] },
+  );
+}
+
+const T2_7_4 = defineProductTest({
+  id: "T2.7-4",
+  title:
+    "every comment form of 2.7 — `{}`, ASCII and ECMAScript-only whitespace between braces (U+00A0, U+FEFF, U+2028, U+2029), a block-comment sequence, line-comment containers ended by U+000A or U+000D before their closing brace, and the run-on `{// c}` U+000A `}` — is removed from Markdown output byte-exactly, absent from own text, finding-free with `build` exit 0, and listed in `view`'s `comments` brace through brace; an expression beside a comment is one 14.16 brace through brace with no `comments` entry; U+0085 or U+200B between braces, `{// c` U+2028/U+2029 `}` U+000A `}`, and `{// c}` with no later `}` are 14.20 at the offsets SPEC 14 fixes (SPEC 2.7, 14.16, 14.20, 1.4, 3, 11.2, 11.4)",
+  run: async (product) => {
+    await runCommentForms(product);
+    await runEnclosedConstructArm(product, "T2.7-4", T2_7_4_EXPRESSION_ARM);
+    for (const arm of T2_7_4_UNPARSEABLE_ARMS) {
+      await runUnparseableCommentArm(product, arm);
+    }
+  },
+});
+
 /** TEST-SPEC §2.7, in canonical ID order (SUITE-10). */
 export const section27Tests: readonly ProductTestEntry[] = [
   T2_7_1,
   T2_7_2,
   T2_7_3,
+  T2_7_4,
 ];

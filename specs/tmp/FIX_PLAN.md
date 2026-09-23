@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 19 — T2.7-4 registration: comment forms and brace content classes
-- Cites: TEST-SPEC T2.7-4; SPEC 2.7, 14.20, 3. Finding A-3. Depends on Task 3.
-- Change: register T2.7-4 in `section-2.7.ts` per its entry — every comment form (block comments, block-comment sequences, line-comment containers, the run-on `{// c}` form), the `{}` form, the whitespace classes between braces (U+00A0, U+FEFF, U+2028, U+2029 and ASCII), each classified as the entry states (comment container vs expression vs 14.20) with its findings, offsets, Markdown output, and `view --text` behavior; declare the 14.20 stagings `mdx.unparseable`; traceability keys.
-- Verify: `-t 'T2.7-4 '` no harness error; self project green.
-
 ### Task 20 — T3-7 registration: ESM-block comments and the `;`-terminated import
 - Cites: TEST-SPEC T3-7; SPEC 3, 2.1. Finding A-4. Depends on Task 3.
 - Change: register T3-7 in `section-3.ts` per its entry — JavaScript comments inside an ESM block (own-line and beside a declaration) with the compiled Markdown byte-asserted (comment lines staying as content or dropping exactly as 3 states), and `import X from "./a.xspec";` with the `;` terminator (parsing, binding usable, Markdown as 3 states). T3-7 is not in CONF-MD's scope (manifest); no fixture change; traceability keys.
