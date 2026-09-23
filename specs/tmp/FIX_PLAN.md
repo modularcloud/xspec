@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 45 — T14-12 negative arms, masking, the three surfaces; T14-4's stagings
-- Cites: TEST-SPEC T14-12 (`010`/`09` in `.ts` at the second digit; `{...a, b}` at its comma; an ESM block holding a `const` statement at the line start; import attributes at `with`; `d={]}` at `]`; `{text(}` at `}`; an unbalanced trailing `{text("a")` at the file's byte length; masking; reported by `build`, `check`, and the 11.2 surfaces); T14-4 ("the 14.16 and 14.20 arms of … T14-12 (all three surfaces)"); SPEC 14.20, 14.16, 11.2. Finding B-1 (negative half). Depends on Task 44.
-- Change: complete T14-12 in `section-14-iii.ts` (spec-source stagings declared `mdx.unparseable`; offsets confirmed against `deriveMdx`'s positions) and add T14-4's stagings over T14-12's arms (export the staged sources for T14-4 and Task 46).
-- Verify: `-t 'T14-12 '`, `-t 'T14-4 '` no harness error; self project green.
-
 ### Task 46 — T14-11: the syntax-failure offsets of T2.3-3, T2.4-2, T2.7-3, T2.7-4, T14-12 "asserted the same way"
 - Cites: TEST-SPEC T14-11 (its closing clause over those tests' syntax-failure offsets); SPEC 14.20, 1.7. Finding B-4 (third group). Depends on Tasks 16, 17, 18, 19, 45.
 - Change: `section-14.ts` T14-11 gains one arm per such offset, reusing each source through constants exported by its home module (no duplicated staging), asserting the finding's offset exactly as T14-11's other 14.20 arms do.
