@@ -43,6 +43,7 @@ import {
 import { X2_COMPOSED_FORMS } from "../suite/registry/section-6.5.js";
 import {
   J15_FORM_VECTORS,
+  M17_FORM_VECTORS,
   R16_FORM_VECTORS,
   R16_REFUSED_VECTORS,
 } from "../suite/registry/section-6.5-iii.js";
@@ -428,6 +429,23 @@ describe("S-9: every would-be text T6.5-16 refuses does not derive", () => {
     expectRejects(source);
     // No allowance makes an MDX-syntax rejection pass.
     expectRejects(source, MDX_ALLOWANCES);
+  });
+});
+
+// T6.5-17 stages T2.1-6's in-section ESM block as the moved text of a
+// refused move (each staged file valid and deriving, 14.20) and, for its
+// control, composes the origin as the deletion leaves it and the target with
+// the moved text and the added declaration after its closing tag: every one
+// must derive (SPEC 6.5, 14.20).
+describe("S-9: every form T6.5-17 stages, or asserts as its control's result, derives", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(M17_FORM_VECTORS.length).toBe(18);
+    expect(new Set(M17_FORM_VECTORS.map(([name]) => name)).size).toBe(
+      M17_FORM_VECTORS.length,
+    );
+  });
+  test.each(M17_FORM_VECTORS)("%s", (_name, source) => {
+    expectDerives(source);
   });
 });
 

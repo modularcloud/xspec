@@ -2,9 +2,10 @@
 // target file's own references to moved nodes, T6.5-13, admissible offsets
 // and composition in pre-operation coordinates, T6.5-14, a created target
 // file's fixed content, T6.5-15, joint import removals over an ESM block,
-// and T6.5-16, `refused-invalid-rewrite`. T6.5-1…T6.5-10 are
-// section-6.5.ts's business and T6.5-11 section-6.5-ii.ts's; this module
-// keeps both files' edits bounded (the section-10.7-i/-ii precedent).
+// T6.5-16, `refused-invalid-rewrite`, and T6.5-17, `refused-moved-import`.
+// T6.5-1…T6.5-10 are section-6.5.ts's business and T6.5-11
+// section-6.5-ii.ts's; this module keeps both files' edits bounded (the
+// section-10.7-i/-ii precedent).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -4382,13 +4383,18 @@ function r16AssertUnderivable(text: string, rel: string, key: string): void {
 }
 
 /** A composed text the entry declares deriving must derive (S-9): a staging defect, never a verdict. */
-function r16AssertDerives(text: string, rel: string, key: string): void {
+function r16AssertDerives(
+  text: string,
+  rel: string,
+  key: string,
+  testId = "T6.5-16",
+): void {
   const verdict = deriveMdx(text);
   if (verdict.derives) return;
   throw new HarnessStagingError(
     "mdx-derivability",
     rel,
-    `T6.5-16 ${key}: the composed text for ${rel} does not derive under ` +
+    `${testId} ${key}: the composed text for ${rel} does not derive under ` +
       `the stock MDX 3 grammar (${verdict.reason}) — the arm's premise, not ` +
       `a product verdict; the text reads ${JSON.stringify(text)}`,
   );
@@ -4607,13 +4613,14 @@ async function runR16AloneArm(
 async function runR16ControlArm(
   product: ProductBinding,
   arm: R16ControlArm,
+  testId = "T6.5-16",
 ): Promise<void> {
-  const context = `T6.5-16 ${arm.key}`;
+  const context = `${testId} ${arm.key}`;
   for (const [rel, text] of Object.entries(arm.expected)) {
-    r16AssertDerives(text, rel, arm.key);
+    r16AssertDerives(text, rel, arm.key, testId);
   }
   if (arm.added !== undefined) {
-    r16AssertDerives(arm.added.compose("X"), arm.added.rel, arm.key);
+    r16AssertDerives(arm.added.compose("X"), arm.added.rel, arm.key, testId);
   }
   const command = arm.argv.join(" ");
   await withWorkspace(arm.files, async (workspace) => {
@@ -4711,6 +4718,348 @@ const T6_5_16 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T6.5-17: `refused-moved-import`. SPEC 6.5: a section-form move whose moved
+// text holds an import declaration is refused, "judged over the moved text
+// as it stands, whatever the edits would leave" — the exact edits would
+// carry the declaration into the target file, where its specifier resolves
+// from that file's directory (2.1) and its binding may collide with one the
+// file holds (14.15), while every origin-kept reference rooted at its
+// binding would lose it (2.4), outcomes no rewrite of 6.5 covers — so such
+// a section is movable once the declaration stands outside it. SPEC 14 and
+// 12.7: one finding, locating each such declaration in the origin file by
+// its own characters (the import range of 11.4), its `identities` empty,
+// its `path` null; reported beside every other applicable reason and,
+// unlike `refused-invalid-rewrite`, under no intrinsic-validity qualifier:
+// an invalid `<new-id>` reports `refused-invalid-id` beside it.
+//
+// The fixture is T2.1-6's form — an ESM block inside a section element,
+// parted from the tag line and from the body line by a blank line on each
+// side, so it interrupts no paragraph and runs to its blank line (14.20):
+// `<S id="m">`, U+000A, U+000A, `import X from "./x.xspec"`, U+000A, U+000A,
+// `body {text(X.a)}`, U+000A, `</S>` — after a sibling `k`, so no pinned
+// offset is the section's own. Everything staged is ASCII, so string
+// lengths are byte counts (1.7). The pre-move `build` (exit 0) repeats
+// T2.1-6's positive observation, so the refusal is the moved text's alone.
+// The preview twins are T6.6-3's (the arms are exported for them).
+
+const M17_ORIGIN = "specs/a.mdx";
+const M17_TARGET = "specs/b.mdx";
+const M17_X = "specs/x.mdx";
+const M17_Y = "specs/y.mdx";
+const M17_X_SOURCE = '<S id="a">\nA text.\n</S>\n';
+const M17_Y_SOURCE = '<S id="b">\nB text.\n</S>\n';
+/** The target: a flow-form section holding no ESM block, its last line terminated. */
+const M17_TARGET_SOURCE = '<S id="p">\nx\n</S>\n';
+const M17_X_SPECIFIER = canonicalSpecifier("specs", "specs/x.xspec");
+const M17_X_DECLARATION = `import X from "${M17_X_SPECIFIER}"`;
+const M17_Y_DECLARATION = `import Y from "${canonicalSpecifier("specs", "specs/y.xspec")}"`;
+/** The sibling heading the origin (`<S id="k">z</S>`, U+000A): no pinned offset is the section's own. */
+const M17_K = R16_K;
+/** The moved section's opening tag and the blank line parting it from the block. */
+const M17_OPENING = '<S id="m">\n\n';
+const M17_ARGV = ["move", "specs/a.mdx#m", "specs/b.mdx#m"] as const;
+
+/** The origin: the sibling, then the section holding `declarations` in its block, a blank line, and `body` (T2.1-6's form). */
+function m17Origin(declarations: readonly string[], body: string): string {
+  return `${M17_K}${M17_OPENING}${declarations.join("\n")}\n\n${body}\n</S>\n`;
+}
+
+/**
+ * Each declaration's own characters in the origin file — the import range of
+ * 11.4, its terminator excluded — in start order (SPEC 14, 12.7, 1.7).
+ */
+function m17Locations(declarations: readonly string[]): R16Location[] {
+  const locations: R16Location[] = [];
+  let start = Buffer.byteLength(`${M17_K}${M17_OPENING}`, "utf8");
+  for (const declaration of declarations) {
+    const end = start + Buffer.byteLength(declaration, "utf8");
+    locations.push({ file: M17_ORIGIN, start, end });
+    start = end + 1; // the declaration line's U+000A
+  }
+  return locations;
+}
+
+/** A section-form move refused as `refused-moved-import`: exit 1, nothing modified, the finding form-exact. */
+export interface M17RefusedArm {
+  readonly key: string;
+  /** Why the moved text is refused, for the diagnoses. */
+  readonly summary: string;
+  /** The pre-move spec files, each deriving (the builder's S-9 check). */
+  readonly files: Readonly<Record<string, string>>;
+  readonly argv: readonly string[];
+  /** The finding's `locations`: each declaration's own characters in the origin, in start order (SPEC 14, 11.4, 12.7). */
+  readonly locations: readonly R16Location[];
+  /** Every other applicable reason's code, reported beside (SPEC 14). */
+  readonly beside?: readonly string[];
+}
+
+const M17_A_FILES: Readonly<Record<string, string>> = {
+  [M17_ORIGIN]: m17Origin([M17_X_DECLARATION], "body {text(X.a)}"),
+  [M17_TARGET]: M17_TARGET_SOURCE,
+  [M17_X]: M17_X_SOURCE,
+};
+
+/** T6.5-17's refused arms, in the entry's order (exported for T6.6-3's preview twins). */
+export const M17_REFUSED_ARMS: readonly M17RefusedArm[] = [
+  {
+    key: "(a) one declaration in the section's block",
+    summary:
+      "the moved text holds the block's one declaration, `import X from " +
+      '"./x.xspec"`, which the moved body references through `X` ' +
+      "(SPEC 6.5, 2.1)",
+    files: M17_A_FILES,
+    argv: [...M17_ARGV],
+    locations: m17Locations([M17_X_DECLARATION]),
+  },
+  {
+    key: "(b) two declarations on successive lines: two locations",
+    summary:
+      "the moved text holds two declarations, `import X …` and `import Y …` " +
+      "on successive lines of the one block, each located by its own " +
+      "characters in start order (SPEC 6.5, 14, 12.7)",
+    files: {
+      [M17_ORIGIN]: m17Origin(
+        [M17_X_DECLARATION, M17_Y_DECLARATION],
+        "body {text(X.a)} {text(Y.b)}",
+      ),
+      [M17_TARGET]: M17_TARGET_SOURCE,
+      [M17_X]: M17_X_SOURCE,
+      [M17_Y]: M17_Y_SOURCE,
+    },
+    argv: [...M17_ARGV],
+    locations: m17Locations([M17_X_DECLARATION, M17_Y_DECLARATION]),
+  },
+  {
+    key: "(c) an unused binding: the block's declaration referenced nowhere",
+    summary:
+      "the block's declaration binds `X`, referenced nowhere (a valid, " +
+      "unused binding, SPEC 2.1), and the composition would otherwise be " +
+      "well-formed — refused all the same, judged over the moved text as " +
+      "it stands (SPEC 6.5)",
+    files: {
+      [M17_ORIGIN]: m17Origin([M17_X_DECLARATION], "body"),
+      [M17_TARGET]: M17_TARGET_SOURCE,
+      [M17_X]: M17_X_SOURCE,
+    },
+    argv: [...M17_ARGV],
+    locations: m17Locations([M17_X_DECLARATION]),
+  },
+  {
+    key: "(d) beside refused-invalid-id: the new ID `then`, no intrinsic-validity qualifier",
+    summary:
+      "(a)'s moved text under the `<new-id>` `then` — a forbidden segment " +
+      "(SPEC 1.4) — reports `refused-invalid-id` and `refused-moved-import` " +
+      "both: the reason is judged over the moved text as it stands, under no " +
+      "intrinsic-validity qualifier, unlike `refused-invalid-rewrite` " +
+      "(SPEC 6.5, 14)",
+    files: M17_A_FILES,
+    argv: ["move", "specs/a.mdx#m", "specs/b.mdx#then"],
+    locations: m17Locations([M17_X_DECLARATION]),
+    beside: ["refused-invalid-id"],
+  },
+];
+
+// (e) the positive counterpart: the same workspace with the declaration
+// moved to the file's top-level ESM block and a second reference through
+// `X` standing outside the moved subtree (the sibling `k`), so the origin's
+// declaration keeps a use. The move is performed: the origin's deletion
+// leaves the sibling and the kept declaration byte-for-byte (its emptied
+// line dropped with its terminator, 3); the moved text lands at the
+// target's end after its final terminator (a line start, no terminator
+// added) with its embedding re-rooted through an added binding of `x.mdx`'s
+// module (T6.5-10's fourth direction); and the added declaration's
+// admissible offsets, judged over the target as every other edit leaves it
+// (SPEC 6.5), are: offset 0, absorbing the `<S id="p">` line (underivable);
+// the `x` line's start and the `</S>` line's start, inside `p` (excluded);
+// the end of the `</S>` line before its terminator, deriving yet mid-line
+// (T6.5-13(h)'s forced placement, not taken while a line-start offset is
+// admissible); the pre-operation file's end, where the moved text lands,
+// absorbing its `<S id="m">` line (underivable); the moved text's interior
+// line starts, inside `m` (the blank line after its opening tag derives,
+// heading a block inside `m` — excluded); and the file's end after the
+// moved text's closing tag and terminator, deriving — the line-start
+// admissible offset "the file's end after a final terminator included,
+// taken over any other" (6.5: "the moved text's closing tag, U+000A, the
+// declaration, U+000A — no empty line between"). The composition is
+// therefore pinned, value-blind in the fresh identifier alone (read back
+// off the declaration line, T6.5-13's reading); `check` and `build` clean.
+const M17_CONTROL_ORIGIN_KEPT = `${M17_X_DECLARATION}\n\n<S id="k">z {text(X.a)}</S>\n`;
+const M17_CONTROL_MOVED = '<S id="m">\n\nbody {text(X.a)}\n</S>';
+const M17_CONTROL: R16ControlArm = {
+  key: "(e) control: the declaration in the top-level block, a second reference outside the moved subtree",
+  summary:
+    "the origin keeps its declaration byte-for-byte for the sibling's " +
+    "remaining use and loses the moved construct with its line; the target " +
+    "gains the moved text after its final terminator, the embedding " +
+    "re-rooted through an added binding of `x.mdx`'s module, the " +
+    "declaration on the line after the moved text's closing tag — the one " +
+    "line-start admissible offset (SPEC 6.5, 2.1, 3, 14.20)",
+  files: {
+    [M17_ORIGIN]: `${M17_CONTROL_ORIGIN_KEPT}${M17_CONTROL_MOVED}\n`,
+    [M17_TARGET]: M17_TARGET_SOURCE,
+    [M17_X]: M17_X_SOURCE,
+  },
+  argv: [...M17_ARGV],
+  expected: { [M17_ORIGIN]: M17_CONTROL_ORIGIN_KEPT },
+  added: {
+    rel: M17_TARGET,
+    specifier: M17_X_SPECIFIER,
+    compose: (ident) =>
+      `${M17_TARGET_SOURCE}<S id="m">\n\nbody {text(${ident}.a)}\n</S>\nimport ${ident} from "${M17_X_SPECIFIER}"\n`,
+  },
+};
+
+/**
+ * Every MDX form T6.5-17 stages or asserts as the control's result, for the
+ * S-9 self-test: each refused arm's files (T2.1-6's in-section block, which
+ * derives), the control's files, its expected origin, and its target
+ * composed with the identifier `X`.
+ */
+export const M17_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [
+  ...M17_REFUSED_ARMS.flatMap((arm) =>
+    Object.entries(arm.files).map(
+      ([rel, text]) => [`T6.5-17 ${arm.key}: ${rel} as staged`, text] as const,
+    ),
+  ),
+  ...Object.entries(M17_CONTROL.files).map(
+    ([rel, text]) =>
+      [`T6.5-17 ${M17_CONTROL.key}: ${rel} as staged`, text] as const,
+  ),
+  ...Object.entries(M17_CONTROL.expected).map(
+    ([rel, text]) =>
+      [`T6.5-17 ${M17_CONTROL.key}: ${rel} after the move`, text] as const,
+  ),
+  [
+    `T6.5-17 ${M17_CONTROL.key}: ${M17_CONTROL.added!.rel} after the move, composed with X`,
+    M17_CONTROL.added!.compose("X"),
+  ] as const,
+];
+
+/**
+ * The refusal's report: exactly one finding per applicable reason —
+ * `refused-moved-import` once per operation however many declarations the
+ * moved text holds, plus the arm's `beside` reasons, none further — the
+ * `refused-moved-import` finding's `locations` exactly each declaration's
+ * own characters in the origin in start order, its `identities` exactly
+ * `[]`, its `path` null (SPEC 6.5, 14, 11.4, 12.7).
+ */
+function m17AssertFinding(
+  findings: readonly Finding[],
+  arm: M17RefusedArm,
+  context: string,
+): void {
+  const expectedCodes = ["refused-moved-import", ...(arm.beside ?? [])];
+  const actualCodes = r16Codes(findings);
+  if (!r16SameCodes(actualCodes, expectedCodes)) {
+    fail(
+      `${context}: the report holds exactly one finding per applicable ` +
+        `reason — ${JSON.stringify(expectedCodes)}, \`refused-moved-import\` ` +
+        `once per operation however many declarations the moved text ` +
+        `holds, reported beside every other applicable reason and under no ` +
+        `intrinsic-validity qualifier — ${arm.summary} (SPEC 6.5, 14, ` +
+        `12.7); got ${JSON.stringify(actualCodes)}`,
+    );
+  }
+  const finding = findings.find(
+    (candidate) => candidate.code === "refused-moved-import",
+  )!;
+  const actualRendered = finding.locations
+    .map(
+      (location) =>
+        `${renderPathValue(location.file)} [${String(location.range.start)}, ` +
+        `${String(location.range.end)})`,
+    )
+    .join("; ");
+  const exact =
+    finding.locations.length === arm.locations.length &&
+    arm.locations.every((expected, index) => {
+      const location = finding.locations[index]!;
+      return (
+        location.file === expected.file &&
+        location.range.start === expected.start &&
+        location.range.end === expected.end
+      );
+    });
+  if (!exact) {
+    fail(
+      `${context}: the finding's \`locations\` are exactly ` +
+        `[${r16RenderLocations(arm.locations)}] — each import declaration ` +
+        `the moved text holds, by its own characters in the origin file ` +
+        `(the import range of 11.4, its terminator excluded), in start ` +
+        `order, in pre-operation coordinates (SPEC 14, 11.4, 1.7, 12.7); ` +
+        `got [${actualRendered}] (message: ${JSON.stringify(finding.message)})`,
+    );
+  }
+  assertFindingIdentities(
+    finding,
+    [],
+    `${context}: the finding's \`identities\` — empty: the reason concerns ` +
+      `no identity (SPEC 14, 12.7)`,
+  );
+  if (finding.path !== null) {
+    fail(
+      `${context}: the finding's \`path\` is null — a refusal locating in ` +
+        `source concerns no path (SPEC 14, 12.7); got ` +
+        `${renderPathValue(finding.path)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+}
+
+async function runM17RefusedArm(
+  product: ProductBinding,
+  arm: M17RefusedArm,
+): Promise<void> {
+  const context = `T6.5-17 ${arm.key}`;
+  const command = arm.argv.join(" ");
+  await withWorkspace(arm.files, async (workspace) => {
+    // Premise: the pre-move workspace is valid (6.4's precondition), the
+    // in-section block deriving (T2.1-6's positive observation repeated),
+    // so the refusal is the moved text's alone; the build also lays down
+    // the derived files the compare below covers.
+    await buildOk(
+      product,
+      workspace,
+      `${context} \`build\` over the staging — the pre-move workspace is ` +
+        `valid, the section's ESM block deriving inside it (SPEC 6.4, 6.5, ` +
+        `14.20; T2.1-6)`,
+    );
+    await assertLeavesUnchanged(
+      workspace.root,
+      async () => {
+        const findings = await runFindingsReport(
+          product,
+          workspace,
+          [...arm.argv, "--json"],
+          1,
+          `${context} \`${command} --json\` — refused: ${arm.summary}; ` +
+            `exit 1 with the form-exact 12.7 findings-only report ` +
+            `(SPEC 6.5, 14, 12.0, 12.7)`,
+        );
+        m17AssertFinding(findings, arm, context);
+      },
+      `${context}: \`${command}\` refused — modifies nothing: every source ` +
+        `and derived file byte-identical, the journal absent or ` +
+        `byte-unchanged (SPEC 6.5, 14)`,
+    );
+  });
+}
+
+const T6_5_17 = defineProductTest({
+  id: "T6.5-17",
+  title:
+    "refused-moved-import: a section-form move whose moved text holds an import declaration is refused, judged over the moved text as it stands, whatever the edits would leave — exit 1, nothing modified (the workspace byte-compared, the journal absent or byte-unchanged), exactly one `refused-moved-import` finding whose `locations` are each such declaration's own characters in the origin file (the import range of 11.4) in start order, its `identities` exactly [], its `path` null — from a valid pre-move workspace whose origin section holds T2.1-6's blank-line-separated ESM block (the pre-move `build` exit 0 repeating that positive observation): (a) one declaration in the block; (b) two, `import X …` and `import Y …` on successive lines, two locations; (c) an unused binding, the block's declaration referenced nowhere, refused all the same; (d) reported beside every other applicable reason and under no intrinsic-validity qualifier — the `<new-id>` `then` reports `refused-invalid-id` and `refused-moved-import` both; and (e) the positive counterpart performed: the declaration in the file's top-level block and a second reference through `X` in a sibling, the move succeeding with the moved embedding re-rooted through an added binding of `x.mdx`'s module in the target, placed at the one line-start admissible offset after the moved text's closing tag, the origin's declaration kept byte-for-byte for its remaining use, `check` and `build` clean (SPEC 6.5, 14, 11.4, 12.7, 2.1, 3)",
+  run: async (product) => {
+    for (const arm of M17_REFUSED_ARMS) {
+      await runM17RefusedArm(product, arm);
+    }
+    await runR16ControlArm(product, M17_CONTROL, "T6.5-17");
+  },
+});
+
 /** TEST-SPEC §6.5, third part, in canonical ID order (SUITE-25). */
 export const section65iiiTests: readonly ProductTestEntry[] = [
   T6_5_12,
@@ -4718,4 +5067,5 @@ export const section65iiiTests: readonly ProductTestEntry[] = [
   T6_5_14,
   T6_5_15,
   T6_5_16,
+  T6_5_17,
 ];
