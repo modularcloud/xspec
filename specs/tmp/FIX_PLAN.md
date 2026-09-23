@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 41 — T6.6-4: the pinned tie-break stagings and the full 12.7 comparator
-- Cites: TEST-SPEC T6.6-4 (arm (e) pinned at T6.5-13(b) — a self-closing target parent: `import-addition` before `target-insertion`, both zero-length at the tag end; T6.5-13(d) — the EOF paragraph line, terminated and unterminated; the within-class T6.5-13(g) — two `import-addition` entries at one offset, count asserted; the full 12.7 comparator over every edit list); SPEC 6.6, 12.7. Finding A-35. Depends on Task 33.
-- Change: `section-6.6.ts` T6.6-4's arm (e) is a generic "coincidence-capable" staging; replace it with the three pinned stagings (reuse `section-6.5-iii.ts`'s exported fixtures) and apply the full 12.7 comparator to every edit list the test decodes.
-- Verify: `-t 'T6.6-4 '` no harness error; self project green.
-
 ### Task 42 — T14-11: the refined `d`-value ranges; `d={}` as condition 20
 - Cites: TEST-SPEC T14-11 (`d={(BASE.a)}` located with its parentheses; `d={BASE.a, BASE.b}` located whole as 14.8; `d={ /* c */ BASE.missing }` with braces, whitespace, comment, and U+00A0/U+FEFF excluded; the spread entry `d={[...BASE.a]}` with `...` included; elisions — one finding per array literal at the whole literal, two literals → two findings; `d={}` and `d={ /* c */ }` as condition 20 at the closing brace); SPEC 14.8, 14.20 ("`d={}` is not well-formed MDX"), 1.7. Finding B-4 (first group). Depends on Task 3.
 - Change: `section-14.ts` (T14-11's rules ~L3783–3954): add the missing forms and replace the `d={}` 14.8 pin (~L3801) with the condition-20-at-closing-brace pin, declaring `d={}` / `d={ /* c */ }` stagings `mdx.unparseable` (confirm with `deriveMdx` that the stock parser rejects the empty attribute-value expression; if it derives, record a TEST-SPEC problem per the mission rules instead of pinning).
