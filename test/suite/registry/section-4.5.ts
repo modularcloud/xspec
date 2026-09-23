@@ -1361,7 +1361,7 @@ const T4_5_8_MARKER_CHAIN = "SPEC.a";
 const T4_5_8_TEXT_CALL = "text(SPEC.b)";
 
 /** One module-scope declaration staged beside the import (SPEC 2.4, 4.5). */
-interface SameScopeDeclarationArm {
+export interface SameScopeDeclarationArm {
   /** Which declaration form this is (failure diagnostics). */
   readonly name: string;
   /**
@@ -1388,6 +1388,39 @@ interface SameScopeDeclarationArm {
 // decorates, whose own characters begin at its first decorator; and a
 // leading `export`, with whatever separates it from the construct's first
 // token, is excluded.
+//
+// The four further forms T14-11 names are shared with its 14.15 range arm
+// (section-14.ts) through `T4_5_8_FURTHER_LOCATED_FORMS` — one staging of
+// each form, keyed for file naming there: each `line` exact, its
+// `construct` the characters a condition-15 finding locates (SPEC 14, 1.7).
+export const T4_5_8_FURTHER_LOCATED_FORMS: Readonly<
+  Record<
+    "let" | "pattern" | "decorated" | "exportedClass",
+    SameScopeDeclarationArm
+  >
+> = {
+  let: {
+    name: "a declarator without initializer `let SPEC;` (SPEC 2.4, 14)",
+    line: "let SPEC;",
+    construct: "SPEC",
+  },
+  pattern: {
+    name: "a binding pattern `const { SPEC } = o` (SPEC 2.4, 14)",
+    line: "declare const o: Record<string, number>;\nconst { SPEC } = o;",
+    construct: "{ SPEC } = o",
+  },
+  decorated: {
+    name: "a decorated class `@dec class SPEC {}` (SPEC 2.4, 14, 1.7)",
+    line: "declare function dec(value: unknown, context: unknown): void;\n@dec class SPEC {}",
+    construct: "@dec class SPEC {}",
+  },
+  exportedClass: {
+    name: "an exported class `export class SPEC {}` (SPEC 2.4, 14, 1.7)",
+    line: "export class SPEC {}",
+    construct: "class SPEC {}",
+  },
+};
+
 const T4_5_8_COLLIDING_ARMS: readonly SameScopeDeclarationArm[] = [
   {
     name: "a variable declaration `const SPEC = 1` (SPEC 2.4)",
@@ -1414,26 +1447,7 @@ const T4_5_8_COLLIDING_ARMS: readonly SameScopeDeclarationArm[] = [
     line: "namespace SPEC { export const v = 1 }",
     construct: "namespace SPEC { export const v = 1 }",
   },
-  {
-    name: "a declarator without initializer `let SPEC;` (SPEC 2.4, 14)",
-    line: "let SPEC;",
-    construct: "SPEC",
-  },
-  {
-    name: "a binding pattern `const { SPEC } = o` (SPEC 2.4, 14)",
-    line: "declare const o: Record<string, number>;\nconst { SPEC } = o;",
-    construct: "{ SPEC } = o",
-  },
-  {
-    name: "a decorated class `@dec class SPEC {}` (SPEC 2.4, 14, 1.7)",
-    line: "declare function dec(value: unknown, context: unknown): void;\n@dec class SPEC {}",
-    construct: "@dec class SPEC {}",
-  },
-  {
-    name: "an exported class `export class SPEC {}` (SPEC 2.4, 14, 1.7)",
-    line: "export class SPEC {}",
-    construct: "class SPEC {}",
-  },
+  ...Object.values(T4_5_8_FURTHER_LOCATED_FORMS),
   {
     name: "an exported function `export function SPEC() {}` (SPEC 2.4, 14, 1.7)",
     line: "export function SPEC() {}",

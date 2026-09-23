@@ -227,6 +227,12 @@
 //   parentheses, a comma sequence whole, `BASE.missing` alone past a block
 //   comment and past U+00A0/U+FEFF, a spread entry with its `...`, and the
 //   elisions of one array literal as one finding at the whole literal.
+//   The colliding-declaration forms (u) stage T4.5-8's shared table
+//   (`T4_5_8_FURTHER_LOCATED_FORMS`, section-4.5.ts), one code file per
+//   form beside its import; the encoding forms (v) stage SPEC 14's four
+//   ill-formed byte sequences as exact bytes, a spec and a code source
+//   each, pinning the first ill-formed byte's offset zero-length — never
+//   the byte at which a decoder notices, never a one-byte range.
 
 import { Buffer } from "node:buffer";
 import * as path from "node:path";
@@ -272,6 +278,8 @@ import {
   RENAME_REFUSAL_CONFIG,
   RENAME_REFUSAL_FILES,
 } from "./section-6.4.js";
+import type { SameScopeDeclarationArm } from "./section-4.5.js";
+import { T4_5_8_FURTHER_LOCATED_FORMS } from "./section-4.5.js";
 import type { RefusalExpectation } from "./section-6.5.js";
 import {
   MOVE_DERIVED_PATH_CASE,
@@ -3761,13 +3769,16 @@ const T14_11_COLLISION_TS = assemble([
 ]);
 
 // (k) 14.16 per form: an element from the first character of its opening tag
-// through the last of its closing tag, a self-closing element its own tag, an
-// expression container brace through brace, an export statement whole.
+// through the last of its closing tag, a self-closing element its own tag, a
+// fragment from `<>` through `</>` (an invalid element, SPEC 2.7; T2.7-1),
+// an expression container brace through brace, an export statement whole.
 const T14_11_CONSTRUCTS = assemble([
   T14_11_PREAMBLE,
   pin("<div>Not a section.</div>"),
   "\n\n",
   pin("<br />"),
+  "\n\n",
+  pin("<>Fragment.</>"),
   "\n\n",
   pin("{1 + 1}"),
   "\n\n",
@@ -3883,6 +3894,91 @@ const T14_11_D_ELISIONS = assemble([
   pin("[, BASE.b]"),
   "}>\nOne hole.\n</S>\n",
 ]);
+
+// (u) 14.15 — a colliding non-import declaration by the construct binding
+// the name, per form, as 1.7 reads one (T4.5-8's shared stagings,
+// `T4_5_8_FURTHER_LOCATED_FORMS`): `let SPEC;` at `SPEC` alone (a declarator
+// without initializer is its name), `const { SPEC } = o` at `{ SPEC } = o`
+// (the binding pattern through its initializer, the `const` statement
+// excluded), `@dec class SPEC {}` from its `@` (a decorator list is part of
+// the class it decorates), and `export class SPEC {}` from `class` (the
+// leading `export` excluded) — each in its own code file beside the import
+// declaration it collides with, located by its own characters (staged
+// without `;`, as in (j)), the chains the collided identifier roots
+// unresolved (14.7, SPEC 2.4): the marker by its bare chain exclusive of
+// the `;`, the `text(...)` call callee through closing parenthesis (5.7) —
+// `a` and `b` exist, so a product ignoring the collision resolves them and
+// reports nothing. A form's supporting declaration (`declare const o`,
+// `declare function dec`) precedes its colliding line and binds no `SPEC`.
+function collisionFixture(form: SameScopeDeclarationArm): AssembledFixture {
+  const at = form.line.indexOf(form.construct);
+  if (at === -1) {
+    throw new Error(
+      `T14-11 (u) fixture broke: the located construct must occur within ` +
+        `the declaration line (${form.name}) — fix ` +
+        `T4_5_8_FURTHER_LOCATED_FORMS in section-4.5.ts (harness bug)`,
+    );
+  }
+  return assemble([
+    pin('import SPEC, { text } from "../specs/A.xspec"'),
+    "\n\n",
+    form.line.slice(0, at),
+    pin(form.construct),
+    form.line.slice(at + form.construct.length),
+    "\n\n",
+    pin("SPEC.a"),
+    ";\n",
+    pin("text(SPEC.b)"),
+    ";\n",
+  ]);
+}
+
+/** The (u) forms as the code files of one workspace, `src/collide-<key>.ts`. */
+const T14_11_COLLISION_FILES = Object.entries(T4_5_8_FURTHER_LOCATED_FORMS).map(
+  ([key, form]) => ({
+    file: `src/collide-${key}.ts`,
+    fixture: collisionFixture(form),
+  }),
+);
+
+// (v) 14.20's encoding offset — the byte length of the file's longest
+// well-formed UTF-8 prefix: the offset of the first byte of the first
+// ill-formed sequence, whether it is malformed or truncated by the file's
+// end, never a later byte at which a decoder notices it, and — like every
+// 14.20 range — zero-length. The four sequences SPEC 14 names, staged as
+// exact bytes in a spec source and in a code source alike (SPEC 1.6: a
+// source of either kind that is not valid UTF-8 is unparseable): `41 E2 82
+// 41` — a three-byte sequence cut short, the second `41` where a decoder
+// notices — locates 1; `C0 80` — an overlong encoding of U+0000 — 0;
+// `ED A0 80` — the surrogate code point U+D800 — 0; `41 E2 82` truncated by
+// the end of the file — 1. A decoder accepting overlong or surrogate
+// encodings decodes such a file and reports nothing; one reporting where it
+// resynchronizes locates a later byte. The whole file is masked (14.20), so
+// no other finding stands beside. The pins are the document's own numbers:
+// computing them with a decoder would import the judgement under test.
+interface EncodingForm {
+  /** The file basename (`specs/<name>.mdx` and `src/<name>.ts`). */
+  readonly name: string;
+  /** The file's exact bytes. */
+  readonly bytes: readonly number[];
+  /** The byte length of the longest well-formed UTF-8 prefix (SPEC 14). */
+  readonly offset: number;
+}
+const T14_11_ENCODING_FORMS: readonly EncodingForm[] = [
+  { name: "cut", bytes: [0x41, 0xe2, 0x82, 0x41], offset: 1 },
+  { name: "overlong", bytes: [0xc0, 0x80], offset: 0 },
+  { name: "surrogate", bytes: [0xed, 0xa0, 0x80], offset: 0 },
+  { name: "eof", bytes: [0x41, 0xe2, 0x82], offset: 1 },
+];
+
+/** Each encoding form as a spec source and as a code source, its pin located. */
+const T14_11_ENCODING_FILES = T14_11_ENCODING_FORMS.flatMap((form) =>
+  [`specs/${form.name}.mdx`, `src/${form.name}.ts`].map((file) => ({
+    file,
+    bytes: Uint8Array.from(form.bytes),
+    location: { file, range: { start: form.offset, end: form.offset } },
+  })),
+);
 
 const T14_11_SPEC = "specs/A.mdx";
 const T14_11_CODE = "src/app.ts";
@@ -4054,10 +4150,10 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
   },
   {
     arm: "k",
-    rule: "14.16 per form — an element through its closing tag, a self-closing tag, an expression container brace through brace, an export statement whole",
+    rule: "14.16 per form — an element through its closing tag, a self-closing tag, a fragment `<>` through `</>`, an expression container brace through brace, an export statement whole",
     config: SPECS_ONLY_CONFIG,
     files: { [T14_11_SPEC]: T14_11_CONSTRUCTS.text },
-    expected: [0, 1, 2, 3].map((index) => ({
+    expected: [0, 1, 2, 3, 4].map((index) => ({
       condition: "14.16",
       locations: located(T14_11_SPEC, T14_11_CONSTRUCTS, index),
     })),
@@ -4163,6 +4259,43 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     expected: [0, 1].map((index) => ({
       condition: "14.8",
       locations: located(T14_11_SPEC, T14_11_D_ELISIONS, index),
+    })),
+  },
+  {
+    arm: "u",
+    rule: "14.15 — a colliding non-import declaration by the construct binding the name, per form: `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`, each beside its import (14.7 for the chains it roots)",
+    config: SPEC_AND_CODE_CONFIG,
+    files: {
+      [T14_11_SPEC]: T14_11_A_MDX,
+      ...Object.fromEntries(
+        T14_11_COLLISION_FILES.map((entry) => [entry.file, entry.fixture.text]),
+      ),
+    },
+    expected: T14_11_COLLISION_FILES.flatMap((entry) => [
+      {
+        condition: "14.15",
+        locations: located(entry.file, entry.fixture, 0, 1),
+      },
+      { condition: "14.7", locations: located(entry.file, entry.fixture, 2) },
+      { condition: "14.7", locations: located(entry.file, entry.fixture, 3) },
+    ]),
+  },
+  {
+    arm: "v",
+    rule: "14.20 — an encoding failure's zero-length range at the first byte of the first ill-formed sequence: `41 E2 82 41` → 1, `C0 80` → 0, `ED A0 80` → 0, `41 E2 82` at the file's end → 1, a spec and a code source alike",
+    config: SPEC_AND_CODE_CONFIG,
+    // S-9: every spec source here is invalid UTF-8, 14.20's declared form.
+    mdx: {
+      unparseable: T14_11_ENCODING_FILES.map((entry) => entry.file).filter(
+        (file) => file.endsWith(".mdx"),
+      ),
+    },
+    files: Object.fromEntries(
+      T14_11_ENCODING_FILES.map((entry) => [entry.file, entry.bytes]),
+    ),
+    expected: T14_11_ENCODING_FILES.map((entry) => ({
+      condition: "14.20",
+      locations: [entry.location],
     })),
   },
 ];
@@ -4379,7 +4512,7 @@ async function runRefusedReadArm(product: ProductBinding): Promise<void> {
 const T14_11 = defineProductTest({
   id: "T14-11",
   title:
-    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), a non-static bare reference exclusive of its `;`, the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms and colliding declarator, 14.16's construct forms, 14.18's chain-extended binding, 14.20's zero-length offsets (byte-order mark, encoding, syntax, and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.7, 5.7, 11.2, 11.4, 12.7)",
+    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), a non-static bare reference exclusive of its `;`, the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms and colliding declarations (the declarator `SPEC = 1`, `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`), 14.16's construct forms (a fragment `<>` through `</>` included), 14.18's chain-extended binding, 14.20's zero-length offsets (a byte-order mark; an encoding failure at the first byte of the first ill-formed sequence — `41 E2 82 41` and `41 E2 82` at the file's end → 1, `C0 80` and `ED A0 80` → 0 — in a spec and a code source alike; syntax; and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.6, 1.7, 2.4, 5.7, 11.2, 11.4, 12.7)",
   run: async (product) => {
     for (const kase of T14_11_CASES) {
       await runRangeRuleArm(product, kase);
