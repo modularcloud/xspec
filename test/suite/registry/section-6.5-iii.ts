@@ -227,9 +227,12 @@ export default defineConfig({
 `;
 
 /**
- * The configuration every T6.5-16 and T6.5-17 arm is staged under
- * (`withWorkspace`'s default) — exported for T6.6-3's preview twins, which
- * stage those arms byte for byte (TEST-SPEC T6.6-3: "staged identically").
+ * The configuration every arm of this module is staged under
+ * (`withWorkspace`'s default, T6.5-13's arms included) — exported for
+ * T6.6-3's preview twins, which stage T6.5-16's and T6.5-17's arms byte for
+ * byte (TEST-SPEC T6.6-3: "staged identically"), and for T6.6-4's tie-break
+ * stagings, T6.5-13's (b), (d), and (g) restaged likewise
+ * (`A13_TIE_BREAK_ARMS`).
  */
 export const R16_CONFIG = CONFIG;
 
@@ -1303,7 +1306,7 @@ function a13Span(
 }
 
 /** One other file's expected post-move bytes, with the reason they are what they are. */
-interface A13Other {
+export interface A13Other {
   readonly rel: string;
   readonly bytes: string;
   readonly reason: string;
@@ -2312,6 +2315,133 @@ const A13_ARMS: readonly A13Arm[] = [
   ),
 ];
 
+// ---------------------------------------------------------------------------
+// T6.6-4(e)'s tie-break stagings — the T6.5-13 entries TEST-SPEC T6.6-4
+// names for the 12.7 comparator's final tie-break, exported so that
+// section-6.6.ts restages them byte for byte (the contracts above unchanged).
+// ---------------------------------------------------------------------------
+
+/** An embedding of the moved text whose root binding the rewrite may change (SPEC 6.5). */
+export interface A13Embedding {
+  /** The occurrence's whole `{text(...)}` container as staged (SPEC 5.7). */
+  readonly container: string;
+  /** The origin's binding the chain is rooted at. */
+  readonly binding: string;
+}
+
+/**
+ * One of T6.6-4(e)'s pinned tie-break stagings: (b), the self-closing
+ * target parent (`import-addition` and `target-insertion` both zero-length
+ * at the tag's end); (d), both variants (the same cross-class coincidence
+ * at the end of a paragraph-ended file); and (g), the same-class
+ * coincidence (two `import-addition` entries at one offset, their count the
+ * observation). Beside the T6.5-13 arm's staging and contracts it carries
+ * what T6.6-4 needs to compose the origin entry of the preview's plan
+ * (SPEC 6.6): the origin's path, the moved construct's spelling as staged,
+ * its `id` attribute, and the moved text's embeddings — in `added`'s
+ * order, the i-th rooted at the origin's binding of the i-th added module,
+ * so the i-th fresh identifier decides whether its spelling changes.
+ */
+export interface A13TieBreakArm {
+  readonly key: string;
+  readonly summary: string;
+  readonly files: Readonly<Record<string, string>>;
+  readonly argv: readonly string[];
+  readonly receiving: string;
+  readonly added: readonly string[];
+  readonly compose: (idents: readonly string[]) => readonly string[];
+  readonly others: readonly A13Other[];
+  /** The receiving file's one admissible edit list, in 12.7's order. */
+  readonly receivingEdits: readonly PreviewEdit[];
+  /** The origin file — the move's first operand's path. */
+  readonly origin: string;
+  /** The moved construct exactly as the origin stages it. */
+  readonly movedConstruct: string;
+  /** The moved section's `id` attribute, e.g. `id="m"`. */
+  readonly movedIdAttribute: string;
+  readonly embeddings: readonly A13Embedding[];
+}
+
+/**
+ * The T6.5-13 arm `key` names, joined with the origin geometry T6.6-4
+ * composes from; a mismatch is a defect of this table, never a product
+ * verdict, so it throws a plain error.
+ */
+function a13TieBreakArm(
+  key: string,
+  movedLines: readonly string[],
+  embeddings: readonly A13Embedding[],
+): A13TieBreakArm {
+  const arm = A13_ARMS.find((candidate) => candidate.key === key);
+  if (arm === undefined) {
+    throw new Error(`A13_TIE_BREAK_ARMS: no T6.5-13 arm is keyed ${key}`);
+  }
+  const [receivingEdits, ...more] = arm.previewEdits;
+  if (receivingEdits === undefined || more.length > 0) {
+    throw new Error(
+      `A13_TIE_BREAK_ARMS ${key}: a tie-break arm pins exactly one ` +
+        `admissible edit list for its receiving file (TEST-SPEC T6.6-4)`,
+    );
+  }
+  const operand = arm.argv[1] ?? "";
+  const hash = operand.indexOf("#");
+  const origin = operand.slice(0, hash);
+  const movedConstruct = movedLines.join("\n");
+  if (hash === -1 || !(arm.files[origin] ?? "").includes(movedConstruct)) {
+    throw new Error(
+      `A13_TIE_BREAK_ARMS ${key}: the origin ${origin} must stage the moved ` +
+        `construct ${JSON.stringify(movedConstruct)}`,
+    );
+  }
+  if (embeddings.length !== arm.added.length) {
+    throw new Error(
+      `A13_TIE_BREAK_ARMS ${key}: one embedding per added declaration, in ` +
+        `the order of the added declarations`,
+    );
+  }
+  for (const embedding of embeddings) {
+    if (!movedConstruct.includes(embedding.container)) {
+      throw new Error(
+        `A13_TIE_BREAK_ARMS ${key}: the moved construct must hold the ` +
+          `embedding ${JSON.stringify(embedding.container)}`,
+      );
+    }
+  }
+  return {
+    key: arm.key,
+    summary: arm.summary,
+    files: arm.files,
+    argv: arm.argv,
+    receiving: arm.receiving,
+    added: arm.added,
+    compose: arm.compose,
+    others: arm.others,
+    receivingEdits,
+    origin,
+    movedConstruct,
+    movedIdAttribute: `id="${operand.slice(hash + 1)}"`,
+    embeddings,
+  };
+}
+
+/** The cross-file arms' one embedding, rooted at the origin's `X` (SPEC 6.5). */
+const A13_TIE_BREAK_EMBEDDING: A13Embedding = {
+  container: "{text(X.a)}",
+  binding: "X",
+};
+
+export const A13_TIE_BREAK_ARMS: readonly A13TieBreakArm[] = [
+  a13TieBreakArm("(b)", a13MovedLines("m", "X"), [A13_TIE_BREAK_EMBEDDING]),
+  a13TieBreakArm("(d)", a13MovedLines("m", "X"), [A13_TIE_BREAK_EMBEDDING]),
+  a13TieBreakArm("(d, terminated)", a13MovedLines("m", "X"), [
+    A13_TIE_BREAK_EMBEDDING,
+  ]),
+  a13TieBreakArm("(g)", a13TwiceMovedLines("m", "X", "Y"), [
+    A13_TIE_BREAK_EMBEDDING,
+    { container: "{text(Y.b)}", binding: "Y" },
+  ]),
+];
+
 /**
  * S-9's premise: a composed expectation derives under the stock MDX 3
  * grammar. A failure here is the arm's own defect — a harness error, never
@@ -2338,10 +2468,11 @@ function a13AssertPremiseDerives(
  * off the declaration lines — for each lacked module exactly one line
  * `import <X> from "<specifier>"`, its other characters T6.5-8's (SPEC 6.5,
  * 2.1) — distinct from one another and none of the compiler-provided names.
+ * Exported for T6.6-4's tie-break stagings, which read them the same way.
  */
-function a13ReadAddedIdentifiers(
+export function a13ReadAddedIdentifiers(
   actual: string,
-  arm: A13Arm,
+  arm: Pick<A13Arm, "added" | "receiving">,
   context: string,
 ): readonly string[] {
   const idents: string[] = [];

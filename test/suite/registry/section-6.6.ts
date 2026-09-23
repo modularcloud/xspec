@@ -123,13 +123,23 @@
 //   and one added-import line — `\n`-preceded exactly when the offset is
 //   mid-line (SPEC 6.5) — spliced in at exactly the previewed offset. The
 //   12.7 edit comparator (range start, then range end, then class-name
-//   bytes) is enforced by decodePreviewReport on every decoded document;
-//   arm (e) stages the one geometry where the final tie-break can become
-//   observable — a top-level `<new-id>` moved into an existing target file
-//   whose rewrite requires an import addition in that same file, the
-//   addition's implementation-chosen offset then free to coincide with the
-//   end-of-file target insertion (`import-addition` ordering before
-//   `target-insertion` on coincidence; TEST-SPEC T6.6-4). Delta content is
+//   bytes) is enforced by decodePreviewReport on every decoded document,
+//   and arm (e) makes its final tie-break a pinned observation: identical
+//   ranges arise only between zero-length insertion points, where 6.5's
+//   line-start preference puts an import addition at the target
+//   insertion's offset, so TEST-SPEC T6.6-4 names T6.5-13's (b) (a
+//   self-closing target parent's tag end), (d) both variants (the end of a
+//   paragraph-ended file), and (g) (two declarations added at one offset)
+//   — restaged here byte for byte from section-6.5-iii's exported
+//   `A13_TIE_BREAK_ARMS`, the receiving file's edit list compared entry for
+//   entry (`import-addition` before `target-insertion` at one offset;
+//   (g)'s two `import-addition` entries adjacent, their count the
+//   observation), then the whole plan once the real operation on the
+//   preview-pinned state has bound the fresh identifiers (the origin's
+//   deletion with the `id-rewrite` and each embedding's `reference-rewrite`
+//   nested inside it, the latter reported exactly when the chosen binding
+//   changes the spelling, SPEC 6.5), the receiving and other files
+//   byte-asserted against T6.5-13's composed forms. Delta content is
 //   T6.6-5's business — asserted here only as the decode's success
 //   encoding (non-null beside `mapping` and `files`).
 // - T6.6-5 asserts the delta's content record-based, its expected sets
@@ -232,6 +242,7 @@ import {
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
+  assertFileBytes,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
@@ -298,11 +309,14 @@ import {
   stageMoveLinkOutsideComponent,
   stageMoveRefusalOccupants,
 } from "./section-6.5.js";
+import type { A13TieBreakArm } from "./section-6.5-iii.js";
 import {
+  A13_TIE_BREAK_ARMS,
   M17_REFUSED_ARMS,
   R16_ALONE_ARMS,
   R16_CONFIG,
   R16_REFUSED_ARMS,
+  a13ReadAddedIdentifiers,
 } from "./section-6.5-iii.js";
 import {
   assertGraphDataPresent,
@@ -1694,8 +1708,8 @@ function assertPreviewPlanContent(
  * it, SPEC 6.6), a single JSON document as the entire stdout (12.0), decoded
  * as the form-exact 12.7 preview document (H-3) — the decode also enforcing
  * the full 12.7 edit comparator, range start, then range end, then
- * class-name bytes, over whatever edits are emitted (T6.6-4's tie-break
- * assertion).
+ * class-name bytes, over whatever edits are emitted (T6.6-4's comparator
+ * assertion; arm (e) pins the tie-break's observations).
  */
 async function runPreviewJson(
   product: ProductBinding,
@@ -2458,97 +2472,199 @@ function armDPlan(): ExpectedPreviewPlan {
   };
 }
 
-// --- Arm (e): the tie-break geometry. A top-level `<new-id>` moves into an
-// existing target file (target insertion at end of file) whose rewrite
-// requires an import addition in that same file (the moved section
-// references a staying origin node) — the one staging where the addition's
-// implementation-chosen offset (SPEC 6.5) can coincide with the target
-// insertion; whatever the product chooses, decodePreviewReport enforces the
-// full 12.7 comparator (`import-addition` before `target-insertion` on
-// coincidence — class-name bytes after equal range starts and ends).
-const E4_SRC = "specs/Src.mdx";
-const E4_DST = "specs/Dst.mdx";
-const E4_MOVED_CONSTRUCT = [
-  '<S id="roam" d={"anchor"}>',
-  "Roam text.",
-  "</S>",
-].join("\n");
-const E4_SRC_SOURCE = [
-  '<S id="anchor">',
-  "Anchor ünicode text.",
-  "</S>",
-  "",
-  E4_MOVED_CONSTRUCT,
-  "",
-].join("\n");
-const E4_DST_SOURCE = ['<S id="dst">', "Dst ünicode text.", "</S>", ""].join(
-  "\n",
-);
-const E4_MOVE_ARGV = ["move", `${E4_SRC}#roam`, `${E4_DST}#roamed`] as const;
+// --- Arm (e): the tie-break stagings. The comparator's final tie-break —
+// class-name bytes after range start and range end — is observable only
+// between zero-length insertion points, and 6.5's line-start preference
+// fixes where an import addition's offset coincides with the target
+// insertion's: TEST-SPEC T6.6-4 names T6.5-13's (b), (d) both variants, and
+// (g), restaged here from section-6.5-iii's exported table byte for byte.
+// The receiving file's edit list is the pinned observation; the origin
+// entry is composed here from the same staged bytes — the deletion spanning
+// the construct's own characters extended over its emptied line's
+// terminator, the re-identification's `id-rewrite` and each embedding's
+// `reference-rewrite` nested inside it, the latter present exactly when the
+// fresh identifier the real operation binds changes the spelling's
+// characters (SPEC 6.5: a spelling already resolving in the form it is
+// rooted at is neither rewritten nor reported).
 
-function armEPlan(): ExpectedPreviewPlan {
-  const src = E4_SRC_SOURCE;
-  const constructChar = uniqueCharIndex(
-    src,
-    E4_MOVED_CONSTRUCT,
-    "e: moved construct",
-  );
+/**
+ * The identifier-independent observation arm (e) exists for: the receiving
+ * file's edits exactly as pinned, in 12.7's order (SPEC 6.6, 12.7).
+ */
+function assertTieBreakEntry(
+  report: PreviewReport,
+  arm: A13TieBreakArm,
+  context: string,
+): void {
+  const pinned = projectEdits(arm.receivingEdits);
   if (
-    src.charAt(constructChar - 1) !== "\n" ||
-    src.charAt(constructChar + E4_MOVED_CONSTRUCT.length) !== "\n"
+    JSON.stringify(projectEdits(editsInPinnedOrder(arm.receivingEdits))) !==
+    JSON.stringify(pinned)
   ) {
     throw new Error(
-      "T6.6-4 staging self-check (e): the moved construct must occupy whole " +
-        "lines, so the deletion's adjunct drop is exactly the merged line's " +
-        "terminator",
+      `T6.6-4 staging self-check (e ${arm.key}): the pinned receiving edits ` +
+        "must stand in 12.7's order",
     );
   }
-  const construct = uniqueSpan(src, E4_MOVED_CONSTRUCT, "e: construct");
+  if (report.files === null) {
+    fail(
+      `${context}: a preview whose real operation would proceed reports its ` +
+        `plan — \`files\` is null exactly on refusal (SPEC 6.6, 12.7); ` +
+        `findings: ${JSON.stringify(report.findings)}`,
+    );
+  }
+  const entry = report.files.find(
+    (candidate) => candidate.file === arm.receiving,
+  );
+  if (entry === undefined) {
+    fail(
+      `${context}: \`files\` holds an entry for ${arm.receiving}, the file ` +
+        `the operation inserts the moved text and its added ` +
+        `declaration${arm.added.length > 1 ? "s" : ""} into (SPEC 6.6, ` +
+        `12.7); got [${report.files.map((candidate) => renderPathValue(candidate.file)).join(", ")}]`,
+    );
+  }
+  const additions = arm.receivingEdits.filter(
+    (edit) => edit.class === "import-addition",
+  ).length;
+  assertSameJson(
+    projectEdits(entry.edits),
+    pinned,
+    `${context}: ${arm.receiving} — ${arm.summary}; the entry's edits are ` +
+      `exactly the pinned list, in 12.7's order — range start, then range ` +
+      `end, then class-name bytes, which puts ` +
+      (additions > 1
+        ? `the ${String(additions)} \`import-addition\` entries, one per ` +
+          `added declaration and adjacent at their one offset, `
+        : "the `import-addition` ") +
+      `before the \`target-insertion\` there: the tie-break observed ` +
+      `(SPEC 6.5, 6.6, 12.7; TEST-SPEC T6.5-13 ${arm.key})`,
+  );
+}
+
+/**
+ * The whole plan of a tie-break staging, composed from the staged bytes
+ * given the fresh identifiers the real operation bound (read off the added
+ * declarations): the mapping's one entry (the moved section holds no
+ * descendant), the origin entry, and the receiving file's pinned entry, the
+ * files in path-byte order (SPEC 6.6, 12.7).
+ */
+function tieBreakPlan(
+  arm: A13TieBreakArm,
+  idents: readonly string[],
+): ExpectedPreviewPlan {
+  const where = `e ${arm.key}`;
+  const origin = arm.files[arm.origin];
+  if (origin === undefined) {
+    throw new Error(
+      `T6.6-4 staging self-check (${where}): the origin ${arm.origin} is not staged`,
+    );
+  }
+  if (arm.movedConstruct.indexOf("<S", 1) !== -1) {
+    throw new Error(
+      `T6.6-4 staging self-check (${where}): the moved section must hold no ` +
+        "descendant, so the mapping is its one entry",
+    );
+  }
+  const constructChar = uniqueCharIndex(
+    origin,
+    arm.movedConstruct,
+    `${where}: moved construct`,
+  );
+  if (
+    (constructChar !== 0 && origin.charAt(constructChar - 1) !== "\n") ||
+    origin.charAt(constructChar + arm.movedConstruct.length) !== "\n"
+  ) {
+    throw new Error(
+      `T6.6-4 staging self-check (${where}): the moved construct must occupy ` +
+        "whole lines, so the deletion's adjunct drop is exactly the emptied " +
+        "line's terminator",
+    );
+  }
+  const construct = uniqueSpan(
+    origin,
+    arm.movedConstruct,
+    `${where}: construct`,
+  );
   const originDeletion: SourceRange = {
     start: construct.start,
     end: construct.end + 1,
   };
-  const nestedEdits: readonly ExpectedEdit[] = [
-    { class: "id-rewrite", range: uniqueSpan(src, 'id="roam"', "e: id") },
+  const nestedEdits: ExpectedEdit[] = [
     {
-      class: "reference-rewrite",
-      range: spanWithin(src, 'd={"anchor"}', '"anchor"', "e: ref"),
+      class: "id-rewrite",
+      range: spanWithin(
+        origin,
+        arm.movedConstruct,
+        arm.movedIdAttribute,
+        `${where}: id`,
+      ),
     },
   ];
-  assertComposedWithin(originDeletion, nestedEdits, "e: origin");
-  return {
-    mapping: [{ from: "specs/Src.mdx#roam", to: "specs/Dst.mdx#roamed" }],
-    files: [
-      {
-        file: E4_DST,
-        // A top-level `<new-id>`'s insertion point is the end of the file
-        // (SPEC 6.5, 6.6); the required import addition rides the latitude
-        // slot, free to coincide with it.
-        edits: [
-          {
-            class: "target-insertion",
-            range: insertionPoint(utf8Length(E4_DST_SOURCE)),
-          },
-        ],
-        importAdditionLatitude: {
-          sourceByteLength: utf8Length(E4_DST_SOURCE),
-        },
-      },
-      {
-        file: E4_SRC,
-        edits: editsInPinnedOrder([
-          { class: "origin-deletion", range: originDeletion },
-          ...nestedEdits,
-        ]),
-      },
-    ],
-  };
+  arm.embeddings.forEach((embedding, index) => {
+    const ident = idents[index];
+    if (ident === undefined) {
+      throw new Error(
+        `T6.6-4 staging self-check (${where}): one fresh identifier per embedding`,
+      );
+    }
+    // Rooted at the chosen binding, the spelling keeps its characters when
+    // that binding is the origin's own: neither rewritten nor reported.
+    if (ident === embedding.binding) return;
+    nestedEdits.push({
+      class: "reference-rewrite",
+      range: spanWithin(
+        origin,
+        arm.movedConstruct,
+        embedding.container,
+        `${where}: embedding ${String(index)}`,
+      ),
+    });
+  });
+  assertComposedWithin(originDeletion, nestedEdits, `${where}: origin`);
+  const from = arm.argv[1];
+  const to = arm.argv[2];
+  if (from === undefined || to === undefined) {
+    throw new Error(
+      `T6.6-4 staging self-check (${where}): a section-form move names two operands`,
+    );
+  }
+  const files: ExpectedPreviewFile[] = [
+    {
+      file: arm.origin,
+      edits: editsInPinnedOrder([
+        { class: "origin-deletion", range: originDeletion },
+        ...nestedEdits,
+      ]),
+    },
+    { file: arm.receiving, edits: arm.receivingEdits },
+  ];
+  files.sort((a, b) =>
+    Buffer.compare(Buffer.from(a.file, "utf8"), Buffer.from(b.file, "utf8")),
+  );
+  return { mapping: [{ from, to }], files };
+}
+
+/** The rewritten `rel` as text — diagnosed when it is not valid UTF-8 (SPEC 1.6, 6.5). */
+async function readRewrittenText(
+  workspace: TestWorkspace,
+  rel: string,
+  context: string,
+): Promise<string> {
+  const bytes = await workspace.readBytes(rel);
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return fail(
+      `${context}: the rewritten ${rel} must remain valid UTF-8 (SPEC 1.6, 6.5)`,
+    );
+  }
 }
 
 const T6_6_4 = defineProductTest({
   id: "T6.6-4",
   title:
-    "report content: byte-precise fixtures asserted against precomputed pre-operation offsets, form-exact per 12.7 — (a) a rename preview reports the complete identity mapping (the renamed ID and every descendant) ordered by `from` bytes — the descendants `core.mid.z` and `core.mid.c` standing in document order opposite to byte order, so a product emitting document order fails — and, per rewritten file, `id-rewrite` edits spanning each rewritten `id` attribute's own characters and `reference-rewrite` edits spanning each affected occurrence's span (5.7) across MDX and TS; (b) a section-move preview into an existing target file reports the `origin-deletion` as one contiguous range (the construct's own characters extended over the adjunct-dropped leftover whitespace and line terminator), the re-identification's `id-rewrite` edits and the moved text's reference rewrites nested inside that range, `target-insertion` zero-length at the insertion offset, `target-parent-rewrite` spanning the self-closing target parent's tag, `import-addition` zero-length at the exact offset the real operation then uses (byte-asserted by running the operation on the preview-pinned state), and `import-removal` spanning the declaration plus its adjunct drops; (c) a file-form move preview reports `import-specifier-rewrite` edits spanning the specifier literals and `file-relocation` spanning the entire moved file under its pre-operation path; (d) a created-target section-move preview reports exactly one `file-creation` edit at the new file's start — the insertion and import additions there subsumed — with the moved text's own rewrites inside the origin deletion; every edit class-plus-range only, every class one of the ten 12.7 names, and the full 12.7 edit comparator asserted over whatever edits are emitted, staged (e) where an import addition can coincide with the end-of-file target insertion (SPEC 6.6, 12.7, 6.4, 6.5, 5.7, 1.7, 2.1, 3; H-3, H-4)",
+    "report content: byte-precise fixtures asserted against precomputed pre-operation offsets, form-exact per 12.7 — (a) a rename preview reports the complete identity mapping (the renamed ID and every descendant) ordered by `from` bytes — the descendants `core.mid.z` and `core.mid.c` standing in document order opposite to byte order, so a product emitting document order fails — and, per rewritten file, `id-rewrite` edits spanning each rewritten `id` attribute's own characters and `reference-rewrite` edits spanning each affected occurrence's span (5.7) across MDX and TS; (b) a section-move preview into an existing target file reports the `origin-deletion` as one contiguous range (the construct's own characters extended over the adjunct-dropped leftover whitespace and line terminator), the re-identification's `id-rewrite` edits and the moved text's reference rewrites nested inside that range, `target-insertion` zero-length at the insertion offset, `target-parent-rewrite` spanning the self-closing target parent's tag, `import-addition` zero-length at the exact offset the real operation then uses (byte-asserted by running the operation on the preview-pinned state), and `import-removal` spanning the declaration plus its adjunct drops; (c) a file-form move preview reports `import-specifier-rewrite` edits spanning the specifier literals and `file-relocation` spanning the entire moved file under its pre-operation path; (d) a created-target section-move preview reports exactly one `file-creation` edit at the new file's start — the insertion and import additions there subsumed — with the moved text's own rewrites inside the origin deletion; every edit class-plus-range only, every class one of the ten 12.7 names, and the full 12.7 edit comparator asserted over every emitted edit list — its final tie-break, class-name bytes between zero-length insertion points, pinned as an observation by (e), T6.5-13's stagings restaged byte for byte: the self-closing target parent's tag end (b) and the end of a paragraph-ended file, terminated or not (d), where `import-addition` orders before `target-insertion` at one offset, and (g), two `import-addition` entries adjacent at one offset, their count asserted — the real operation on the preview-pinned state then byte-asserted against the composed forms (SPEC 6.6, 12.7, 6.4, 6.5, 5.7, 1.7, 2.1, 3; H-3, H-4)",
   run: async (product) => {
     // --- Arm (a): rename preview across MDX and TS ---
     await withWorkspace(
@@ -2692,29 +2808,75 @@ const T6_6_4 = defineProductTest({
       },
     );
 
-    // --- Arm (e): the coincidence-capable tie-break staging ---
-    await withWorkspace(
-      SPECS_ONLY_CONFIG,
-      {
-        [E4_SRC]: E4_SRC_SOURCE,
-        [E4_DST]: E4_DST_SOURCE,
-      },
-      async (workspace) => {
-        const context = "T6.6-4(e) top-level move preview (tie-break staging)";
+    // --- Arm (e): the tie-break stagings — T6.5-13's (b), (d) both
+    // variants, and (g), restaged byte for byte ---
+    for (const arm of A13_TIE_BREAK_ARMS) {
+      await withWorkspace(R16_CONFIG, arm.files, async (workspace) => {
+        const context = `T6.6-4(e) tie-break staging (T6.5-13 ${arm.key})`;
         await buildOk(
           product,
           workspace,
           `${context}: staging premise \`build\` (SPEC 6.5, 6.6)`,
         );
-        const report = await runPreviewJson(
+        // The preview inside a whole-root modifies-nothing compare: the
+        // real run below then executes on the byte-identical pre-operation
+        // state (TEST-SPEC's "running the operation on a copy", H-4).
+        const report = await assertLeavesUnchanged(
+          workspace.root,
+          async () => runPreviewJson(product, workspace, arm.argv, context),
+          `${context}: the preview modifies nothing (SPEC 6.6) — pinning ` +
+            `the pre-operation state for the real run's byte assertion`,
+        );
+        assertTieBreakEntry(report, arm, context);
+        await expectExit(
           product,
           workspace,
-          E4_MOVE_ARGV,
+          [...arm.argv],
+          0,
+          `${context}: \`${arm.argv.join(" ")}\` — the real operation on ` +
+            `the preview-pinned state proceeds (SPEC 6.5; the premise build ` +
+            `passed and the preview above modified nothing)`,
+        );
+        const actual = await readRewrittenText(
+          workspace,
+          arm.receiving,
           context,
         );
-        assertPreviewPlanContent(report, armEPlan(), context);
-      },
-    );
+        const idents = a13ReadAddedIdentifiers(actual, arm, context);
+        const forms = arm.compose(idents);
+        if (!forms.includes(actual)) {
+          fail(
+            `${context}: ${arm.receiving} after the move — ${arm.summary}: ` +
+              `the moved text at the previewed insertion point and the ` +
+              `added declaration${arm.added.length > 1 ? "s" : ""} at the ` +
+              `previewed offset, composed as 6.5 and 3 fix (H-4, ` +
+              `normalizing nothing; value-blind in the fresh identifiers ` +
+              `alone)\n` +
+              `  actual:   ${JSON.stringify(actual)}\n` +
+              forms
+                .map((form) => `  expected: ${JSON.stringify(form)}`)
+                .join("\n"),
+          );
+        }
+        for (const other of arm.others) {
+          await assertFileBytes(
+            workspace.path(other.rel),
+            other.bytes,
+            `${context}: ${other.rel} after the move — ${other.reason} ` +
+              `(SPEC 6.5, 3; H-4)`,
+          );
+        }
+        assertPreviewPlanContent(report, tieBreakPlan(arm, idents), context);
+        await expectExit(
+          product,
+          workspace,
+          ["check"],
+          0,
+          `${context}: \`check\` after the real move — the rewritten ` +
+            `workspace is valid and fresh (SPEC 6.5, 12.2)`,
+        );
+      });
+    }
   },
 });
 
