@@ -27,6 +27,15 @@
 // condition 1 (14.1); `d` MUST be a braced expression — a quoted or
 // valueless `d` is invalid (14.17), and a braced `d` value that is not a
 // static reference or an array literal of them is a dynamic argument (14.8).
+// A fragment (`<>` through `</>`) is an invalid element (14.16): one finding
+// from `<>` through `</>`, no node, its enclosed content preserved under
+// `view --text` (T2.7-1's fragment arm); an attribute value expression is
+// part of its element, no container of condition 16 — `<S id="x" d={1}>`
+// reports 14.8 alone, `<div a={1}></div>` exactly one 14.16. A spread
+// attribute's grammar pair (14.20): `{...(a, b)}` is well-formed — 14.17 at
+// the whole braced construct — while `{...a, b}` is not, 14.20 at the
+// offset of its comma (T2.7-3's pair, staged under S-9's `unparseable`
+// declaration).
 //
 // Location assertions follow the SUITE-08 discipline: negative fixtures are
 // pure ASCII, composed as `prefix + construct + suffix` with exactly known
@@ -72,6 +81,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
 import type { FindingSourceExpectation } from "./support.js";
 import {
   assertConditionCounts,
@@ -125,14 +135,20 @@ function invalidPropSource(construct: string): string {
   return `${SIBLING}${construct}${INVALID_PROP_BODY}\n`;
 }
 
-/** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
+/**
+ * Stage a fresh workspace (config plus `files`, under the S-9 declaration
+ * `mdx` where a staging declares an unparseable source), run `body`,
+ * dispose (H-1).
+ */
 async function withWorkspace<T>(
   config: string,
   files: Readonly<Record<string, string>>,
   body: (workspace: TestWorkspace) => Promise<T>,
+  mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
+    mdx,
   });
   try {
     return await body(workspace);
@@ -195,6 +211,71 @@ function assertHashStable(
   }
 }
 
+/** UTF-8 byte length of `text` — the offset unit of SPEC 1.7. */
+function utf8Bytes(text: string): number {
+  return Buffer.byteLength(text, "utf8");
+}
+
+/**
+ * Assert a finding carries exactly one location — `file` at `range`, as byte
+ * offsets (SPEC 1.7) — and, locating in source, concerns no path (12.7:
+ * `path` is null for located conditions). The exact-range form of the
+ * module's location assertions, for the arms where SPEC 14 pins the range
+ * beyond a construct's window.
+ */
+function assertSoleLocationExactly(
+  finding: Finding,
+  file: string,
+  range: SourceRange,
+  context: string,
+): void {
+  assertSameJson(
+    finding.locations.map((location) => ({
+      file: location.file,
+      range: { start: location.range.start, end: location.range.end },
+    })),
+    [{ file, range: { start: range.start, end: range.end } }],
+    `${context} (message: ${JSON.stringify(finding.message)})`,
+  );
+  if (finding.path !== null) {
+    fail(
+      `${context}: a finding locating in source concerns no path — \`path\` ` +
+        `is null for located conditions (SPEC 12.7, 14); got ` +
+        `${JSON.stringify(finding.path)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+}
+
+/**
+ * Byte range (SPEC 1.7) of exactly one occurrence of `part` within
+ * `construct`, the construct itself standing at byte `constructStart` of its
+ * file. An absent or ambiguous part is a staging defect — a harness error,
+ * never a product failure: a precomputed range must name its bytes uniquely.
+ */
+function constructPartRange(
+  construct: string,
+  part: string,
+  constructStart: number,
+  where: string,
+): SourceRange {
+  const first = construct.indexOf(part);
+  if (first === -1) {
+    throw new Error(
+      `${where}: staging locator — part ${JSON.stringify(part)} not found ` +
+        `in ${JSON.stringify(construct)}`,
+    );
+  }
+  if (construct.indexOf(part, first + 1) !== -1) {
+    throw new Error(
+      `${where}: staging locator — part ${JSON.stringify(part)} is ` +
+        `ambiguous in ${JSON.stringify(construct)}`,
+    );
+  }
+  const start = constructStart + utf8Bytes(construct.slice(0, first));
+  return { start, end: start + utf8Bytes(part) };
+}
+
 // ---------------------------------------------------------------------------
 // T2.7-1
 // ---------------------------------------------------------------------------
@@ -203,7 +284,13 @@ function assertHashStable(
 // defect in its otherwise valid fixture). The JSX-element and
 // expression-container arms sit inside a section — nesting inside `<S>` earns
 // no exemption; the export statement is top-level ESM with a valid section
-// after it, so its window has content on both sides.
+// after it, so its window has content on both sides. The attribute-value
+// pair (SPEC 14.16: an attribute value expression is part of its element, no
+// container of the condition): `<S id="x" d={1}>` reports 14.8 alone — the
+// braced `d` value holding a number is a dynamic argument (2.7), its braces
+// no expression container — and `<div a={1}></div>` exactly one condition-16
+// finding, the element's; in each arm the absence of any second finding is
+// the assertion, so the count is exact over every condition.
 const T2_7_1_SECTION_PREFIX = `${SIBLING}<S id="sec">\nSection text.\n\n`;
 
 interface ForeignConstructArm {
@@ -215,6 +302,13 @@ interface ForeignConstructArm {
   readonly construct: string;
   /** Everything after the offending construct, exactly. */
   readonly suffix: string;
+  /**
+   * The one condition the arm reports: 14.16, or 14.8 for the attribute-value
+   * control, whose braced `d` value is a dynamic argument and no container.
+   */
+  readonly condition: "14.16" | "14.8";
+  /** The SPEC reason the count is exactly one (failure diagnostics). */
+  readonly reason: string;
 }
 
 const FOREIGN_CONSTRUCT_ARMS: readonly ForeignConstructArm[] = [
@@ -223,79 +317,84 @@ const FOREIGN_CONSTRUCT_ARMS: readonly ForeignConstructArm[] = [
     prefix: T2_7_1_SECTION_PREFIX,
     construct: "<div>foreign block</div>",
     suffix: "\n</S>\n",
+    condition: "14.16",
+    reason:
+      "only imports, sections, `text(...)` embeddings, and MDX comments are " +
+      "permitted; any other JSX element is invalid (SPEC 2.7, 14.16)",
   },
   {
     name: "an expression container other than `text(...)` or an MDX comment",
     prefix: T2_7_1_SECTION_PREFIX,
     construct: "{40 + 2}",
     suffix: "\n</S>\n",
+    condition: "14.16",
+    reason:
+      "only imports, sections, `text(...)` embeddings, and MDX comments are " +
+      "permitted; any other expression container is invalid (SPEC 2.7, 14.16)",
   },
   {
     name: "an export statement",
     prefix: SIBLING,
     construct: "export const flag = 1",
     suffix: '\n\n<S id="sec">\nSection text.\n</S>\n',
+    condition: "14.16",
+    reason:
+      "only imports, sections, `text(...)` embeddings, and MDX comments are " +
+      "permitted; any export statement is invalid (SPEC 2.7, 14.16)",
+  },
+  {
+    name: 'a braced `d` value holding a number (`<S id="x" d={1}>`)',
+    prefix: SIBLING,
+    construct: '<S id="x" d={1}>',
+    suffix: "\nX text.\n</S>\n",
+    condition: "14.8",
+    reason:
+      "an attribute value expression is part of its element, no container " +
+      "of condition 16 — the braced `d` value holding a number is a dynamic " +
+      "argument, 14.8 alone, never beside a second, condition-16 finding " +
+      "(SPEC 14.16, 2.7)",
+  },
+  {
+    name: "a foreign element carrying an attribute value expression (`<div a={1}></div>`)",
+    prefix: T2_7_1_SECTION_PREFIX,
+    construct: "<div a={1}></div>",
+    suffix: "\n</S>\n",
+    condition: "14.16",
+    reason:
+      "exactly one condition-16 finding, the element's — its attribute value " +
+      "expression is part of the element, no container earning a second " +
+      "finding (SPEC 14.16, 2.7)",
   },
 ];
 
-// The section-in-container arm. SPEC 2.7: a section is an MDX element node,
-// so `<S>` spelled inside an expression container is part of that
+// The enclosed-construct arms: a construct spelled on its own line inside
+// `sec`, invalid (14.16) yet creating no node and preserved as content.
+// (a) The section-in-container arm. SPEC 2.7: a section is an MDX element
+// node, so `<S>` spelled inside an expression container is part of that
 // container's expression — content under 3, never a section. The container
 // is one invalid expression container (14.16), located from its opening
-// brace through its closing brace (14); its bytes match no removal rule's
+// brace through its closing brace (14). (b) The fragment arm. SPEC 2.7: a
+// fragment (`<>` through `</>`) is an invalid element (14.16), located from
+// `<>` through `</>` (14); no node is created for it, and its enclosed
+// content stays content — a stray element is preserved by its own tags
+// (11.2; the sections and embeddings a stray element encloses are T11.2-4's
+// enclosure arm). In both, the construct's bytes match no removal rule's
 // form and are content, preserved byte-for-byte in the enclosing section's
 // own and subtree text (11.2, 1.6); the view's section tree — defined by
 // construct nesting alone, existing whatever findings the file carries —
-// holds no node for the enclosed `<S>` (11.4). `ids` and `query` are gated
-// on this failing workspace (13.3), so the absence is asserted in the view's
-// tree alone. The fixture is the module's ASCII template plus one multibyte
-// character (`é`, two bytes) before the container, so the pinned container
-// and section ranges are byte offsets (1.7) — a product counting code units
-// mislocates every construct after it.
-const T2_7_1_X_FILE = "specs/A.mdx";
-const T2_7_1_X_CONTAINER = '{<S id="x">Inner x text.</S>}';
-const T2_7_1_X_HEAD = "Section text é.\n\n";
-const T2_7_1_X_TAIL_LINES = "\n\nTail text.\n";
-const T2_7_1_X_PREFIX = `${SIBLING}<S id="sec">\n${T2_7_1_X_HEAD}`;
-const T2_7_1_X_SEC_CLOSE = `${T2_7_1_X_TAIL_LINES}</S>`;
-const T2_7_1_X_SOURCE = `${T2_7_1_X_PREFIX}${T2_7_1_X_CONTAINER}${T2_7_1_X_SEC_CLOSE}\n`;
+// holds no node for the construct or anything it encloses (11.4). `ids` and
+// `query` are gated on these failing workspaces (13.3), so the absence is
+// asserted in the view's tree alone. Each fixture is the module's ASCII
+// template plus one multibyte character (`é`, two bytes) before the
+// construct, so the pinned construct and section ranges are byte offsets
+// (1.7) — a product counting code units mislocates every construct after it.
+const T2_7_1_ENCLOSED_FILE = "specs/A.mdx";
+const T2_7_1_ENCLOSED_HEAD = "Section text é.\n\n";
+const T2_7_1_ENCLOSED_TAIL_LINES = "\n\nTail text.\n";
+const T2_7_1_ENCLOSED_PREFIX = `${SIBLING}<S id="sec">\n${T2_7_1_ENCLOSED_HEAD}`;
+const T2_7_1_ENCLOSED_SEC_CLOSE = `${T2_7_1_ENCLOSED_TAIL_LINES}</S>`;
 
-/** UTF-8 byte length of `text` — the offset unit of SPEC 1.7. */
-function utf8Bytes(text: string): number {
-  return Buffer.byteLength(text, "utf8");
-}
-
-/** The container's own characters: opening brace through closing brace. */
-const T2_7_1_X_CONTAINER_RANGE: SourceRange = {
-  start: utf8Bytes(T2_7_1_X_PREFIX),
-  end: utf8Bytes(T2_7_1_X_PREFIX + T2_7_1_X_CONTAINER),
-};
-const T2_7_1_X_OK_RANGE: SourceRange = {
-  start: 0,
-  end: utf8Bytes(SIBLING_CONSTRUCT),
-};
-const T2_7_1_X_SEC_RANGE: SourceRange = {
-  start: utf8Bytes(SIBLING),
-  end: utf8Bytes(T2_7_1_X_PREFIX + T2_7_1_X_CONTAINER + T2_7_1_X_SEC_CLOSE),
-};
-const T2_7_1_X_ROOT_RANGE: SourceRange = {
-  start: 0,
-  end: utf8Bytes(T2_7_1_X_SOURCE),
-};
-
-// Text values per SPEC 1.6 and 3: each section's tag lines are emptied
-// purely by removals and drop with their terminators; the blank line between
-// the sibling and `sec` is the root's own contribution and keeps; the
-// container is content and stays byte-for-byte; the root's subtree text is
-// the children's contributions interleaved with its own in document order.
-const T2_7_1_X_OK_TEXT = "A valid sibling section.\n";
-const T2_7_1_X_SEC_TEXT =
-  T2_7_1_X_HEAD + T2_7_1_X_CONTAINER + T2_7_1_X_TAIL_LINES;
-const T2_7_1_X_ROOT_OWN = "\n";
-const T2_7_1_X_ROOT_SUBTREE =
-  T2_7_1_X_OK_TEXT + T2_7_1_X_ROOT_OWN + T2_7_1_X_SEC_TEXT;
-
-/** The view's tree projected to what this arm pins (T11.2-4's projection). */
+/** The view's tree projected to what these arms pin (T11.2-4's projection). */
 interface TextTreeExpectation {
   readonly identity: ViewNode["identity"];
   readonly range: SourceRange;
@@ -314,27 +413,118 @@ function projectTextNode(node: ViewNode): TextTreeExpectation {
   };
 }
 
-const T2_7_1_X_TREE: TextTreeExpectation = {
-  identity: T2_7_1_X_FILE,
-  range: T2_7_1_X_ROOT_RANGE,
-  ownText: T2_7_1_X_ROOT_OWN,
-  subtreeText: T2_7_1_X_ROOT_SUBTREE,
-  children: [
-    {
-      identity: `${T2_7_1_X_FILE}#ok`,
-      range: T2_7_1_X_OK_RANGE,
-      ownText: T2_7_1_X_OK_TEXT,
-      subtreeText: T2_7_1_X_OK_TEXT,
-      children: [],
+/** One enclosed-construct fixture: its bytes, the construct's range, the tree. */
+interface EnclosedConstructFixture {
+  /** The construct's own characters, exactly. */
+  readonly construct: string;
+  /** The file's exact bytes. */
+  readonly source: string;
+  /** The construct's own characters as a byte range (SPEC 14, 1.7). */
+  readonly range: SourceRange;
+  /** The section tree with its text values (SPEC 11.4, 1.6, 3). */
+  readonly tree: TextTreeExpectation;
+}
+
+function enclosedConstructFixture(construct: string): EnclosedConstructFixture {
+  const source = `${T2_7_1_ENCLOSED_PREFIX}${construct}${T2_7_1_ENCLOSED_SEC_CLOSE}\n`;
+  // Text values per SPEC 1.6 and 3: each section's tag lines are emptied
+  // purely by removals and drop with their terminators; the blank line
+  // between the sibling and `sec` is the root's own contribution and keeps;
+  // the construct is content and stays byte-for-byte; the root's subtree
+  // text is the children's contributions interleaved with its own in
+  // document order.
+  const okText = "A valid sibling section.\n";
+  const secText = T2_7_1_ENCLOSED_HEAD + construct + T2_7_1_ENCLOSED_TAIL_LINES;
+  const rootOwn = "\n";
+  return {
+    construct,
+    source,
+    range: {
+      start: utf8Bytes(T2_7_1_ENCLOSED_PREFIX),
+      end: utf8Bytes(T2_7_1_ENCLOSED_PREFIX + construct),
     },
-    {
-      identity: `${T2_7_1_X_FILE}#sec`,
-      range: T2_7_1_X_SEC_RANGE,
-      ownText: T2_7_1_X_SEC_TEXT,
-      subtreeText: T2_7_1_X_SEC_TEXT,
-      children: [],
+    tree: {
+      identity: T2_7_1_ENCLOSED_FILE,
+      range: { start: 0, end: utf8Bytes(source) },
+      ownText: rootOwn,
+      subtreeText: okText + rootOwn + secText,
+      children: [
+        {
+          identity: `${T2_7_1_ENCLOSED_FILE}#ok`,
+          range: { start: 0, end: utf8Bytes(SIBLING_CONSTRUCT) },
+          ownText: okText,
+          subtreeText: okText,
+          children: [],
+        },
+        {
+          identity: `${T2_7_1_ENCLOSED_FILE}#sec`,
+          range: {
+            start: utf8Bytes(SIBLING),
+            end: utf8Bytes(
+              T2_7_1_ENCLOSED_PREFIX + construct + T2_7_1_ENCLOSED_SEC_CLOSE,
+            ),
+          },
+          ownText: secText,
+          subtreeText: secText,
+          children: [],
+        },
+      ],
     },
-  ],
+  };
+}
+
+/** One enclosed-construct arm: its fixture and how its assertions read. */
+interface EnclosedConstructArm {
+  readonly fixture: EnclosedConstructFixture;
+  /** The arm's name in contexts. */
+  readonly name: string;
+  /** What the one 14.16 finding is and why nothing stands beside it. */
+  readonly soleFinding: string;
+  /** How SPEC 14 bounds the finding's range. */
+  readonly rangeRule: string;
+  /** Why the tree holds no node within the construct's range. */
+  readonly noNode: string;
+  /** The pinned tree, in words. */
+  readonly treeShape: string;
+}
+
+const T2_7_1_CONTAINER_ARM: EnclosedConstructArm = {
+  fixture: enclosedConstructFixture('{<S id="x">Inner x text.</S>}'),
+  name: "a section spelled inside an expression container",
+  soleFinding:
+    "exactly one condition-16 finding, the container's, and none beside — " +
+    "the `<S>` spelled inside it is part of the container's expression, " +
+    "earning no finding of its own (SPEC 2.7, 14.16)",
+  rangeRule:
+    "the 14.16 finding locates the expression container from its opening " +
+    "brace through its closing brace, as byte offsets (SPEC 14, 1.7)",
+  noNode:
+    'no node for the `<S id="x">` spelled inside the expression container — ' +
+    "it is part of the container's expression, never a section",
+  treeShape:
+    "the section tree by construct nesting — the root, `ok`, and `sec`, no " +
+    'node for the enclosed `<S id="x">` — with the container\'s bytes ' +
+    "preserved byte-for-byte as content in `sec`'s own and subtree text",
+};
+
+const T2_7_1_FRAGMENT_ARM: EnclosedConstructArm = {
+  fixture: enclosedConstructFixture("<>Fragment text.</>"),
+  name: "a fragment (`<>` through `</>`)",
+  soleFinding:
+    "exactly one condition-16 finding, the fragment's, and none beside — a " +
+    "fragment is an invalid element, and the content it encloses earns no " +
+    "finding of its own (SPEC 2.7, 14.16)",
+  rangeRule:
+    "the 14.16 finding locates the fragment from `<>` through `</>`, as " +
+    "byte offsets (SPEC 14, 1.7)",
+  noNode:
+    "no node for the fragment — an invalid element is no section and " +
+    "creates no node, and this one encloses no section",
+  treeShape:
+    "the section tree by construct nesting — the root, `ok`, and `sec`, no " +
+    "node for the fragment — with the fragment and its enclosed content " +
+    "preserved byte-for-byte as content in `sec`'s own and subtree text (a " +
+    "stray element is preserved by its own tags, SPEC 11.2)",
 };
 
 /** Every node of a view tree, document order (explicit stack, AGENTS.md). */
@@ -352,65 +542,51 @@ function everyViewNode(root: ViewNode): ViewNode[] {
 }
 
 /**
- * The container fixture's findings: exactly one, condition 16, located once —
- * the container from its opening brace through its closing brace, in byte
- * offsets — and concerning no path.
+ * An enclosed-construct fixture's findings: exactly one, condition 16,
+ * located once — the construct's own characters, in byte offsets — and
+ * concerning no path.
  */
-function assertContainerFinding(
+function assertEnclosedConstructFinding(
   findings: readonly Finding[],
+  arm: EnclosedConstructArm,
   context: string,
 ): void {
   assertConditionCounts(
     findings,
     { "14.16": 1 },
-    `${context}: exactly one condition-16 finding, the container's, and ` +
-      "none beside — the `<S>` spelled inside it is part of the " +
-      "container's expression, earning no finding of its own (SPEC 2.7, 14.16)",
+    `${context}: ${arm.soleFinding}`,
   );
-  const finding = findings[0]!;
-  assertSameJson(
-    finding.locations.map((location) => ({
-      file: location.file,
-      range: { start: location.range.start, end: location.range.end },
-    })),
-    [{ file: T2_7_1_X_FILE, range: T2_7_1_X_CONTAINER_RANGE }],
-    `${context}: the 14.16 finding locates the expression container from ` +
-      "its opening brace through its closing brace, as byte offsets (SPEC " +
-      `14, 1.7; message: ${JSON.stringify(finding.message)})`,
+  assertSoleLocationExactly(
+    findings[0]!,
+    T2_7_1_ENCLOSED_FILE,
+    arm.fixture.range,
+    `${context}: ${arm.rangeRule}`,
   );
-  if (finding.path !== null) {
-    fail(
-      `${context}: a finding locating in source concerns no path — \`path\` ` +
-        `is null for located conditions (SPEC 12.7, 14); got ` +
-        `${JSON.stringify(finding.path)} (message: ` +
-        `${JSON.stringify(finding.message)})`,
-    );
-  }
 }
 
-/** T2.7-1's container arm: `build --json`, then the bare `view --text`. */
-async function runSectionInContainerArm(
+/** One enclosed-construct arm: `build --json`, then the bare `view --text`. */
+async function runEnclosedConstructArm(
   product: ProductBinding,
+  arm: EnclosedConstructArm,
 ): Promise<void> {
   await withWorkspace(
     SPECS_ONLY_CONFIG,
-    { [T2_7_1_X_FILE]: T2_7_1_X_SOURCE },
+    { [T2_7_1_ENCLOSED_FILE]: arm.fixture.source },
     async (workspace) => {
-      const buildContext =
-        "T2.7-1 `build --json` with a section spelled inside an expression container";
-      assertContainerFinding(
+      const buildContext = `T2.7-1 \`build --json\` with ${arm.name}`;
+      assertEnclosedConstructFinding(
         await buildFindings(product, workspace, buildContext),
+        arm,
         buildContext,
       );
 
-      const viewContext =
-        "T2.7-1 bare `view --text` with a section spelled inside an expression container";
+      const viewContext = `T2.7-1 bare \`view --text\` with ${arm.name}`;
       const result = await expectExit(
         product,
         workspace,
         ["view", "--text"],
         1,
-        `${viewContext}: the container's finding accompanies the answer, so ` +
+        `${viewContext}: the construct's finding accompanies the answer, so ` +
           "exit 1 with the full view (SPEC 11.2, 12.0)",
       );
       const report = decodeViewReport(
@@ -421,26 +597,25 @@ async function runSectionInContainerArm(
         { text: true },
         viewContext,
       );
-      assertContainerFinding(
+      assertEnclosedConstructFinding(
         report.findings,
+        arm,
         `${viewContext}: the accompanying findings (SPEC 11.2)`,
       );
       assertSameJson(
         report.views.map((view) => view.file),
-        [T2_7_1_X_FILE],
+        [T2_7_1_ENCLOSED_FILE],
         `${viewContext}: one per-file view, the parseable file's (SPEC 11.4)`,
       );
       const view = report.views[0]!;
-      const { start, end } = T2_7_1_X_CONTAINER_RANGE;
+      const { start, end } = arm.fixture.range;
       const intruders = everyViewNode(view.root).filter(
         (node) => node.range.start >= start && node.range.start < end,
       );
       if (intruders.length > 0) {
         fail(
-          `${viewContext}: no node for the \`<S id="x">\` spelled inside the ` +
-            "expression container — it is part of the container's " +
-            "expression, never a section, so the view's tree holds no node " +
-            `within the container's range [${String(start)}, ${String(end)}) ` +
+          `${viewContext}: ${arm.noNode}, so the view's tree holds no node ` +
+            `within the construct's range [${String(start)}, ${String(end)}) ` +
             `(SPEC 2.7, 11.4); got ${intruders
               .map(
                 (node) =>
@@ -452,17 +627,14 @@ async function runSectionInContainerArm(
       }
       assertSameJson(
         projectTextNode(view.root),
-        T2_7_1_X_TREE,
-        `${viewContext}: the section tree by construct nesting — the root, ` +
-          '`ok`, and `sec`, no node for the enclosed `<S id="x">` — with ' +
-          "the container's bytes preserved byte-for-byte as content in " +
-          "`sec`'s own and subtree text, the tag lines dropped, and the " +
+        arm.fixture.tree,
+        `${viewContext}: ${arm.treeShape}, the tag lines dropped, and the ` +
           "root's subtree text in document order (SPEC 2.7, 11.2, 11.4, 1.6, 3)",
       );
       assertSameJson(
         [view.imports, view.occurrences, view.comments],
         [[], [], []],
-        `${viewContext}: the container is no embedding and no comment — no ` +
+        `${viewContext}: the construct is no embedding and no comment — no ` +
           "occurrence record and no comment range; no import staged (SPEC " +
           "2.7, 5.7, 12.7)",
       );
@@ -473,7 +645,7 @@ async function runSectionInContainerArm(
 const T2_7_1 = defineProductTest({
   id: "T2.7-1",
   title:
-    "a JSX element other than `<S>`/`<Spec>`, an expression container other than `text(...)` or an MDX comment, and an export statement each fail with 14.16; a section spelled inside an expression container is part of the container's expression — one 14.16 brace through brace, no node in the view's tree, its bytes content in the enclosing text (SPEC 2.7, 11.2, 11.4)",
+    "a JSX element other than `<S>`/`<Spec>`, an expression container other than `text(...)` or an MDX comment, and an export statement each fail with 14.16; a fragment is one 14.16 from `<>` through `</>`, no node, its enclosed content preserved under `view --text`; an attribute value expression is part of its element — `<S id=\"x\" d={1}>` reports 14.8 alone and `<div a={1}></div>` exactly one 14.16; a section spelled inside an expression container is part of the container's expression — one 14.16 brace through brace, no node in the view's tree, its bytes content in the enclosing text (SPEC 2.7, 14.16, 11.2, 11.4)",
   run: async (product) => {
     for (const arm of FOREIGN_CONSTRUCT_ARMS) {
       const context = `T2.7-1 \`build --json\` with ${arm.name}`;
@@ -482,20 +654,24 @@ const T2_7_1 = defineProductTest({
         { "specs/A.mdx": arm.prefix + arm.construct + arm.suffix },
         async (workspace) => {
           const findings = await buildFindings(product, workspace, context);
-          assertConditionCounts(findings, { "14.16": 1 }, context);
+          assertConditionCounts(
+            findings,
+            { [arm.condition]: 1 },
+            `${context}: ${arm.reason}`,
+          );
           assertFindingLocated(
             findings[0]!,
             {
               file: "specs/A.mdx",
               window: byteWindow(arm.prefix, arm.construct),
             },
-            `${context}: the 14.16 finding (SPEC 2.7: only imports, sections, ` +
-              "`text(...)` embeddings, and MDX comments are permitted)",
+            `${context}: the ${arm.condition} finding (SPEC 2.7, 14)`,
           );
         },
       );
     }
-    await runSectionInContainerArm(product);
+    await runEnclosedConstructArm(product, T2_7_1_CONTAINER_ARM);
+    await runEnclosedConstructArm(product, T2_7_1_FRAGMENT_ARM);
   },
 });
 
@@ -922,6 +1098,13 @@ interface InvalidPropArm {
    * the failure states the SPEC reason (the count alone rejects it too).
    */
   readonly forbids?: { readonly condition: string; readonly reason: string };
+  /**
+   * Where the one finding locates exactly, when SPEC 14 pins it beyond the
+   * opening tag's window: the attribute's own characters — for a spread
+   * attribute its whole braced construct (14, 11.4; T14-11) — spelled
+   * exactly once in `construct`.
+   */
+  readonly locate?: string;
 }
 
 /** A staged attribute's exact bytes — the `view` entry form of SPEC 11.4. */
@@ -1085,6 +1268,21 @@ const INVALID_PROP_ARMS: readonly InvalidPropArm[] = [
     name: "a spread attribute",
     construct: '<S id="sec" {...extra}>',
     condition: "14.17",
+    locate: "{...extra}",
+  },
+  {
+    name: "a spread attribute whose braces hold a parenthesized comma sequence (`{...(a, b)}`, well-formed)",
+    construct: '<S id="x" {...(a, b)}>',
+    condition: "14.17",
+    locate: "{...(a, b)}",
+    forbids: {
+      condition: "14.20",
+      reason:
+        "a spread attribute's braces hold `...` followed by exactly one " +
+        "AssignmentExpression, and a parenthesized comma sequence is one, " +
+        "so `{...(a, b)}` is well-formed MDX — the spread is an invalid " +
+        "prop, 14.17, never a parse failure (SPEC 14.20, 2.7; T14-12)",
+    },
   },
   {
     name: "a braced `id` value",
@@ -1151,6 +1349,22 @@ const INVALID_PROP_ARMS: readonly InvalidPropArm[] = [
 // construct instead of a count.
 const REPEATED_UNKNOWN_CONSTRUCT = '<S id="sec" wibble="a" wibble="b">';
 
+// The spread grammar pair's ill-formed half (SPEC 14.20: a spread attribute's
+// braces hold `...` followed by exactly one AssignmentExpression, so
+// `{...a, b}` is not well-formed while `{...(a, b)}` — the arm above — is):
+// the file is unparseable, 14.20 alone, its one zero-length range at the
+// offset SPEC 14's syntax-failure rule fixes — the byte length of the longest
+// whole-character prefix with which some well-formed file begins: the prefix
+// through `{...a` begins one (`}>` closes the spread), the prefix through
+// the comma none (after an identifier operand only a comma operator can
+// follow, which no AssignmentExpression derives) — the comma's own offset
+// (T14-11, T14-12). Staged under S-9's `unparseable` declaration; an
+// unparseable file masks every other condition (T14-3), so the count is
+// exact over all conditions, and a product parsing past the comma and
+// reporting the spread as an invalid prop fails on the condition.
+const T2_7_3_SPREAD_UNPARSEABLE_CONSTRUCT = '<S id="x" {...a, b}>';
+const T2_7_3_SPREAD_COMMA_OFFSET = utf8Bytes(`${SIBLING}<S id="x" {...a`);
+
 // The positive quoting arm (SPEC 2.7: single- or double-quoted alike; 2.4):
 // the two spellings of one workspace, rebuilt in place. Byte equality is
 // asserted where SPEC.md fixes bytes — the emitted Markdown (3) — and the
@@ -1172,7 +1386,7 @@ const T2_7_3_QUOTED_IDENTITIES = ["specs/A.mdx", "specs/A.mdx#login"] as const;
 const T2_7_3 = defineProductTest({
   id: "T2.7-3",
   title:
-    'repeated props (defined or unknown), unknown props, spread attributes, braced or valueless `id`/`coverage`/`tags` values — the bare `<S id>` reporting 14.17 and never 14.1 — and quoted or valueless `d` fail with 14.17, each arm exactly one finding located at its opening tag; a braced `d` holding a non-reference expression fails with 14.8; single-quoted `id`/`coverage`/`tags` build byte-identically in outputs to the double-quoted variants (SPEC 2.7, 2.4, 14.1); the `<S id="x" tags>` file is exported as the fixture T11.4-3 shares for `view`',
+    'repeated props (defined or unknown), unknown props, spread attributes, braced or valueless `id`/`coverage`/`tags` values — the bare `<S id>` reporting 14.17 and never 14.1 — and quoted or valueless `d` fail with 14.17, each arm exactly one finding located at its opening tag, a spread attribute\'s at its whole braced construct; the spread grammar pair — `{...(a, b)}` well-formed, 14.17 at the braced construct, `{...a, b}` not, 14.20 at its comma; a braced `d` holding a non-reference expression fails with 14.8; single-quoted `id`/`coverage`/`tags` build byte-identically in outputs to the double-quoted variants (SPEC 2.7, 2.4, 14.1, 14.20); the `<S id="x" tags>` file is exported as the fixture T11.4-3 shares for `view`',
   run: async (product) => {
     // The exported fixture's offsets are verified before its arm stages it
     // (T11.4-3 stages the same bytes for `view`).
@@ -1198,17 +1412,84 @@ const T2_7_3 = defineProductTest({
             }
           }
           assertConditionCounts(findings, { [arm.condition]: 1 }, context);
-          assertFindingLocated(
-            findings[0]!,
-            {
-              file: INVALID_PROP_FILE,
-              window: byteWindow(SIBLING, arm.construct),
-            },
-            `${context}: the ${arm.condition} finding (SPEC 2.7)`,
-          );
+          if (arm.locate === undefined) {
+            assertFindingLocated(
+              findings[0]!,
+              {
+                file: INVALID_PROP_FILE,
+                window: byteWindow(SIBLING, arm.construct),
+              },
+              `${context}: the ${arm.condition} finding (SPEC 2.7)`,
+            );
+          } else {
+            assertSoleLocationExactly(
+              findings[0]!,
+              INVALID_PROP_FILE,
+              constructPartRange(
+                arm.construct,
+                arm.locate,
+                utf8Bytes(SIBLING),
+                context,
+              ),
+              `${context}: the ${arm.condition} finding locates the ` +
+                "attribute's own characters — the spread's whole braced " +
+                "construct, as byte offsets (SPEC 14, 11.4, 1.7; T14-11)",
+            );
+          }
         },
       );
     }
+
+    // The spread grammar pair's ill-formed half: 14.20 alone, at the comma.
+    const spreadUnparseable =
+      "T2.7-3 `build --json` with a spread attribute whose braces hold a " +
+      "bare comma sequence (`{...a, b}`, not well-formed)";
+    await withWorkspace(
+      SPECS_ONLY_CONFIG,
+      {
+        [INVALID_PROP_FILE]: invalidPropSource(
+          T2_7_3_SPREAD_UNPARSEABLE_CONSTRUCT,
+        ),
+      },
+      async (workspace) => {
+        const findings = await buildFindings(
+          product,
+          workspace,
+          spreadUnparseable,
+        );
+        const wrong = findings.find((finding) => finding.condition === "14.17");
+        if (wrong !== undefined) {
+          fail(
+            `${spreadUnparseable}: a spread attribute's braces hold \`...\` ` +
+              "followed by exactly one AssignmentExpression, which `a, b` " +
+              "is not, so the file is not well-formed MDX — 14.20, never " +
+              "the invalid-prop condition a product parsing past the comma " +
+              "would report (SPEC 14.20, 2.7; T14-12); got a 14.17 finding " +
+              `(message: ${JSON.stringify(wrong.message)})`,
+          );
+        }
+        assertConditionCounts(
+          findings,
+          { "14.20": 1 },
+          `${spreadUnparseable}: 14.20 alone — an unparseable file masks ` +
+            "every other condition (SPEC 14.20; T14-3)",
+        );
+        assertSoleLocationExactly(
+          findings[0]!,
+          INVALID_PROP_FILE,
+          {
+            start: T2_7_3_SPREAD_COMMA_OFFSET,
+            end: T2_7_3_SPREAD_COMMA_OFFSET,
+          },
+          `${spreadUnparseable}: the one zero-length range at the comma's ` +
+            "offset — the byte length of the longest whole-character prefix " +
+            "with which some well-formed file begins, the prefix through " +
+            "`{...a` beginning one and the prefix through the comma none " +
+            "(SPEC 14, 14.20; T14-11, T14-12)",
+        );
+      },
+      { unparseable: [INVALID_PROP_FILE] },
+    );
 
     // Repeated unknown prop: every finding is 14.17, at the construct.
     const repeatedUnknown =

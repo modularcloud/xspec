@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 18 — T2.7-1's fragment and attribute-expression arms; T2.7-3's spread grammar pair
-- Cites: TEST-SPEC T2.7-1 (the fragment `<>…</>` arm: one 14.16 from `<>` through `</>`, no node, content preserved under `view --text`; `<S id="x" d={1}>` → 14.8 alone; `<div a={1}></div>` → exactly one 14.16); T2.7-3 (`<S id="x" {...(a, b)}>` → 14.17 at the braced construct vs `<S id="x" {...a, b}>` → 14.20 at the comma offset); SPEC 2.7, 14.16, 14.17, 14.20. Findings A-22, A-23. Depends on Task 3.
-- Change: extend `FOREIGN_CONSTRUCT_ARMS` (`section-2.7.ts` ~L220; today `<div>`, `{40 + 2}`, `export`, the section-in-container arm) and T2.7-3's spread staging (today `{...extra}` only); declare the `{...a, b}` staging `mdx.unparseable`.
-- Verify: `-t 'T2.7-1 '`, `-t 'T2.7-3 '` no harness error; self project green.
-
 ### Task 19 — T2.7-4 registration: comment forms and brace content classes
 - Cites: TEST-SPEC T2.7-4; SPEC 2.7, 14.20, 3. Finding A-3. Depends on Task 3.
 - Change: register T2.7-4 in `section-2.7.ts` per its entry — every comment form (block comments, block-comment sequences, line-comment containers, the run-on `{// c}` form), the `{}` form, the whitespace classes between braces (U+00A0, U+FEFF, U+2028, U+2029 and ASCII), each classified as the entry states (comment container vs expression vs 14.20) with its findings, offsets, Markdown output, and `view --text` behavior; declare the 14.20 stagings `mdx.unparseable`; traceability keys.
