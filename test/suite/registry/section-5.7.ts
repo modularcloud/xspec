@@ -728,10 +728,215 @@ function assertStagedSpan(arm: SpanArm): void {
   }
 }
 
+// Token bounds inside a `d` value (TEST-SPEC T5.7-2's second staging). A `d`
+// occurrence's bounds are ECMAScript tokens' (SPEC 1.4, 14): the span is the
+// reference's own expression, whatever whitespace and comments its braces
+// hold beside it — a product excluding ASCII whitespace alone spans into a
+// U+00A0 or U+FEFF neighbor and fails the first two arms. Line comments inside
+// the value take 14.20's deletion judgement and run-on rule as a container's
+// (2.7, T2.7-4): `d={// c` U+000A `BASE.a}` ends its comment at the
+// terminator, and in the run-on twin `d={// c}` U+000A `BASE.a}` the first
+// `}` lies on the commented-out line and closes nothing, the value running to
+// the second `}` — each a well-formed `d` (no 14.20, no 14.8, `build` exit 0)
+// whose one occurrence spans `BASE.a` alone; a product scanning an attribute
+// value to its first `}` reports 14.8 or 14.20 there and fails. Each form is
+// staged in a workspace of its own, so a form the product mishandles is
+// diagnosed by name without masking the others. The first staging's
+// multi-byte `pre` section precedes the value, so byte offsets diverge from
+// code-point and UTF-16 counting for every form, and the U+00A0 (2 bytes) and
+// U+FEFF (3 bytes) spellings shift the span's own start as well. The two code
+// points are composed from their values, never spelled as escapes, so the
+// staged bytes are exactly those the entry names.
+const NBSP = String.fromCodePoint(0xa0); // U+00A0 — no-break space
+const ZWNBSP = String.fromCodePoint(0xfeff); // U+FEFF — inside the file, so no byte-order mark
+const LF = "\n"; // U+000A — the line terminator that ends a line comment
+
+interface TokenBoundArm {
+  readonly what: string;
+  /** The characters between `d={` and `BASE.a`. */
+  readonly before: string;
+  /** The characters between `BASE.a` and the value's closing `}`. */
+  readonly after: string;
+}
+
+const TOKEN_BOUND_ARMS: readonly TokenBoundArm[] = [
+  {
+    what:
+      "U+00A0 on each side of the reference — `d={` U+00A0 `BASE.a` U+00A0 " +
+      "`}` (ECMAScript whitespace, not ASCII; SPEC 1.4)",
+    before: NBSP,
+    after: NBSP,
+  },
+  {
+    what:
+      "U+FEFF before the reference — `d={` U+FEFF `BASE.a` `}` (ECMAScript " +
+      "whitespace inside the file, no byte-order mark; SPEC 1.4)",
+    before: ZWNBSP,
+    after: "",
+  },
+  {
+    what: "a block comment before the reference — `d={ /* c */ BASE.a }`",
+    before: " /* c */ ",
+    after: " ",
+  },
+  {
+    what:
+      "a line comment ended by the terminator — `d={// c` U+000A `BASE.a}` " +
+      "(14.20's deletion judgement)",
+    before: "// c" + LF,
+    after: "",
+  },
+  {
+    what:
+      "the run-on twin — `d={// c}` U+000A `BASE.a}`, its first `}` on the " +
+      "commented-out line closing nothing, the value running to the second " +
+      "`}` (14.20's run-on rule, SPEC 2.7)",
+    before: "// c}" + LF,
+    after: "",
+  },
+];
+
+// One spec group and no code group: the stagings hold no TypeScript file.
+const SPEC_ONLY_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  }
+})
+`;
+
+// The referencing source is composed from the exact parts the expected range
+// cites: the first staging's multi-byte head, the tag up to `d={`, the arm's
+// leading characters, the reference, the arm's trailing characters, and the
+// value's closing `}`.
+const TOKEN_BASE_SOURCE = '<S id="a">\nA text.\n</S>\n';
+const TOKEN_TAG_PRE = '<S id="s" d={';
+const TOKEN_REF = "BASE.a";
+const TOKEN_TAG_POST = "}>\nS text.\n</S>\n";
+const TOKEN_S_ID = "specs/MAIN.mdx#s";
+const TOKEN_A_ID = "specs/BASE.mdx#a";
+
+function tokenBoundSource(arm: TokenBoundArm): string {
+  return (
+    SPAN_MAIN_HEAD +
+    TOKEN_TAG_PRE +
+    arm.before +
+    TOKEN_REF +
+    arm.after +
+    TOKEN_TAG_POST
+  );
+}
+
+function tokenBoundRange(arm: TokenBoundArm): SourceRange {
+  return rangeAfter(SPAN_MAIN_HEAD + TOKEN_TAG_PRE + arm.before, TOKEN_REF);
+}
+
+// The workspace's complete edge set (SPEC 5.2): each file's `contains` edges
+// and the one `depends` edge the occurrence stands behind.
+const TOKEN_EXPECTED_EDGES: readonly GraphEdge[] = [
+  { from: "specs/BASE.mdx", to: TOKEN_A_ID, kind: "contains" },
+  { from: "specs/MAIN.mdx", to: SPAN_PRE_ID, kind: "contains" },
+  { from: "specs/MAIN.mdx", to: TOKEN_S_ID, kind: "contains" },
+  { from: TOKEN_S_ID, to: TOKEN_A_ID, kind: "depends" },
+];
+
+async function assertTokenBoundArm(
+  product: ProductBinding,
+  arm: TokenBoundArm,
+): Promise<void> {
+  const source = tokenBoundSource(arm);
+  const range = tokenBoundRange(arm);
+  const label = `T5.7-2 token bounds — ${arm.what}`;
+  // Fixture self-check (harness-side, before any product invocation): the
+  // precomputed range slices the staged bytes to exactly `BASE.a`.
+  const sliced = Buffer.from(source, "utf8")
+    .subarray(range.start, range.end)
+    .toString("utf8");
+  if (sliced !== TOKEN_REF) {
+    fail(
+      `${label}: fixture self-check — the precomputed byte range ` +
+        `[${String(range.start)}, ${String(range.end)}) slices the staged ` +
+        `bytes to ${JSON.stringify(sliced)}, expected ` +
+        `${JSON.stringify(TOKEN_REF)} (a harness-side staging error, not a ` +
+        `product failure)`,
+    );
+  }
+
+  const workspace = await TestWorkspace.create({
+    files: {
+      "xspec.config.ts": SPEC_ONLY_CONFIG,
+      "specs/BASE.mdx": TOKEN_BASE_SOURCE,
+      "specs/MAIN.mdx": source,
+    },
+  });
+  try {
+    await buildOk(
+      product,
+      workspace,
+      `${label}: \`build\` exit 0 — the value is a well-formed \`d\` holding ` +
+        `one static reference beside ECMAScript whitespace and comments, ` +
+        `never 14.20 and never 14.8 (SPEC 2.7, 1.4, 14)`,
+    );
+
+    const edgesContext = `${label}: \`query edges\``;
+    assertEdgeSetEqual(
+      decodeEdgesReport(
+        await runJson(product, workspace, ["query", "edges"], edgesContext),
+        edgesContext,
+      ),
+      TOKEN_EXPECTED_EDGES,
+      `${edgesContext}: the workspace's complete edge set — the reference ` +
+        `records its \`depends\` edge (SPEC 2.2, 5.2)`,
+    );
+
+    const context = `${label}: \`occurrences\``;
+    const report = decodeOccurrencesReport(
+      await runJson(product, workspace, ["occurrences"], context),
+      context,
+    );
+    assertSameJson(
+      report.findings,
+      [],
+      `${context}: the consulted domain carries no finding (SPEC 11.2, 11.3)`,
+    );
+    if (report.occurrences.length !== 1) {
+      fail(
+        `${context}: expected exactly one occurrence record — the staged ` +
+          `reference's; the import declaration records none (SPEC 5.7) — ` +
+          `got ${String(report.occurrences.length)}: ` +
+          JSON.stringify(report.occurrences.map(renderOccurrenceUnit)),
+      );
+    }
+    const record = report.occurrences[0]!;
+    if (
+      renderPathValue(record.file) !== "specs/MAIN.mdx" ||
+      record.kind !== "depends" ||
+      "unavailable" in record.source ||
+      record.source.identity !== TOKEN_S_ID ||
+      record.target !== TOKEN_A_ID
+    ) {
+      fail(
+        `${context}: expected the one record to be specs/MAIN.mdx [depends] ` +
+          `${TOKEN_S_ID} -> ${TOKEN_A_ID}; got ${renderOccurrenceUnit(record)}`,
+      );
+    }
+    assertSameJson(
+      record.range,
+      range,
+      `${context}: the occurrence spans \`BASE.a\` alone — the brace-side ` +
+        `whitespace and comments excluded as ASCII whitespace is — against ` +
+        `precomputed byte offsets (SPEC 5.7, 1.4, 1.7)`,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
 const T5_7_2 = defineProductTest({
   id: "T5.7-2",
   title:
-    "byte-precise occurrence spans per kind against precomputed offsets: a `d` occurrence spans exactly that one reference's own expression — an array's middle entry alone, no brackets, commas, or surrounding whitespace; an MDX embedding occurrence spans the entire braced container `{text(...)}`, opening brace through closing brace — the whole construct compilation replaces; a TS call occurrence spans callee through closing parenthesis, argument included — an aliased callee `t(SPEC.x)` from its `t`; a marker occurrence spans the bare reference chain alone, exclusive of the statement's terminating `;` and surrounding trivia (SPEC 5.7, 1.7, 3, 4.4, 11.3)",
+    "byte-precise occurrence spans per kind against precomputed offsets: a `d` occurrence spans exactly that one reference's own expression — an array's middle entry alone, no brackets, commas, or surrounding whitespace; an MDX embedding occurrence spans the entire braced container `{text(...)}`, opening brace through closing brace — the whole construct compilation replaces; a TS call occurrence spans callee through closing parenthesis, argument included — an aliased callee `t(SPEC.x)` from its `t`; a marker occurrence spans the bare reference chain alone, exclusive of the statement's terminating `;` and surrounding trivia; token bounds inside a `d` value take ECMAScript's whitespace and comments — `d={` U+00A0 `BASE.a` U+00A0 `}`, `d={` U+FEFF `BASE.a` `}`, `d={ /* c */ BASE.a }`, and the line-comment forms `d={// c` U+000A `BASE.a}` and its run-on twin `d={// c}` U+000A `BASE.a}` (14.20's deletion judgement and run-on rule) are each a well-formed `d` recording one occurrence spanning `BASE.a` alone (SPEC 5.7, 1.4, 1.7, 2.7, 3, 4.4, 11.3, 14)",
   run: async (product) => {
     for (const arm of SPAN_ARMS) assertStagedSpan(arm);
 
@@ -803,6 +1008,8 @@ const T5_7_2 = defineProductTest({
     } finally {
       await workspace.dispose();
     }
+
+    for (const arm of TOKEN_BOUND_ARMS) await assertTokenBoundArm(product, arm);
   },
 });
 
