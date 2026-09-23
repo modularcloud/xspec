@@ -23,6 +23,13 @@
 //   position, targeting the same section — so the two set-equality
 //   assertions accept only a product attributing both forms to the table's
 //   one unit per placement.
+// - T4.6-1 constructor, legacy `module`, and decorated arms: the constructor
+//   is a member of the matrix's class (`Service.constructor`); `module
+//   legacy` and `module P.Q` are staged beside `namespace ns` and `namespace
+//   A.B` under fresh names, so each chain occurs once (no `@N`); `dec` is a
+//   plain function declared in the file (itself a unit, `path#dec`,
+//   recording no edge). Only attribution is observed here — the decorated
+//   declarations' ranges are T1.7-2's.
 // - T4.6-3 "value-side boundary … never to a unit named `s` (asserted via
 //   `query edges`)": the two value-side `text(...)` calls target dedicated
 //   sections, so the workspace's complete `embeds` edge set (`--kinds
@@ -202,6 +209,12 @@ const T4_6_1_PLACEMENTS: readonly AttributionPlacement[] = [
     forms: "text-only",
   },
   {
+    name: "inside a constructor (a unit named `constructor`: `Service.constructor`)",
+    unit: "src/app.ts#Service.constructor",
+    target: "ctor",
+    forms: "both",
+  },
+  {
     name: "a class member property initialized with an arrow function",
     unit: "src/app.ts#Service.arrowProp",
     target: "arrowprop",
@@ -286,6 +299,44 @@ const T4_6_1_PLACEMENTS: readonly AttributionPlacement[] = [
     forms: "both",
   },
   {
+    name:
+      "directly inside a legacy `module X` namespace (the same declaration " +
+      "as `namespace X`: the unit named exactly as `namespace X` derives)",
+    unit: "src/app.ts#legacy",
+    target: "legacy",
+    forms: "both",
+  },
+  {
+    name:
+      "directly inside a legacy dotted `module P.Q` (as `namespace P.Q`: one " +
+      "unit per dot-separated name)",
+    unit: "src/app.ts#P.Q",
+    target: "legacydotted",
+    forms: "both",
+  },
+  {
+    name:
+      "inside a decorated method of a decorated class (`@dec class Deco { " +
+      "@dec m() { ... } }`, `dec` declared in the file)",
+    unit: "src/app.ts#Deco.m",
+    target: "decomethod",
+    forms: "both",
+  },
+  {
+    name: "in a decorated class's static block (bare class unit)",
+    unit: "src/app.ts#Deco",
+    target: "decostatic",
+    forms: "marker-only",
+  },
+  {
+    name:
+      "inside a method of an exported decorated class (`export @dec class " +
+      "DecoExport { m() { ... } }`)",
+    unit: "src/app.ts#DecoExport.m",
+    target: "expdeco",
+    forms: "both",
+  },
+  {
     name: "inside a named default export",
     unit: "src/named.ts#namedDefault",
     target: "nameddefault",
@@ -316,6 +367,11 @@ const T4_6_1_APP_SOURCE = [
   "class Service {",
   "  static {",
   "    SPEC.staticblock;",
+  "  }",
+  "",
+  "  constructor() {",
+  "    SPEC.ctor;",
+  "    text(SPEC.ctor);",
   "  }",
   "",
   "  plainProp = text(SPEC.plainprop);",
@@ -392,6 +448,36 @@ const T4_6_1_APP_SOURCE = [
   "  }",
   "}",
   "",
+  "module legacy {",
+  "  SPEC.legacy;",
+  "  text(SPEC.legacy);",
+  "}",
+  "",
+  "module P.Q {",
+  "  SPEC.legacydotted;",
+  "  text(SPEC.legacydotted);",
+  "}",
+  "",
+  "function dec(_value: unknown, _context: unknown): void {}",
+  "",
+  "@dec class Deco {",
+  "  static {",
+  "    SPEC.decostatic;",
+  "  }",
+  "",
+  "  @dec m(): void {",
+  "    SPEC.decomethod;",
+  "    text(SPEC.decomethod);",
+  "  }",
+  "}",
+  "",
+  "export @dec class DecoExport {",
+  "  m(): void {",
+  "    SPEC.expdeco;",
+  "    text(SPEC.expdeco);",
+  "  }",
+  "}",
+  "",
 ].join("\n");
 
 // A file holds at most one default export, so the named-default arm lives in
@@ -460,7 +546,7 @@ const T4_6_1_EXPECTED_EMBEDS: readonly GraphEdge[] = T4_6_1_PLACEMENTS.filter(
 const T4_6_1 = defineProductTest({
   id: "T4.6-1",
   title:
-    "markers and `text(...)` calls attribute to the innermost enclosing named unit — file top level to the file; function declarations, class methods, getters, setters, function-, arrow-, and class-valued class properties and variables, namespaces, and a named default export to `path#unit` with the dot-joined chain outermost first (`Service.method`, `ns.fn`); a class static block and a plain non-function property initializer to the bare class unit; `namespace A.B` declares one unit per dot-separated name — with each placement's `references` and `embeds` edges sourced at the same unit (SPEC 4.6, 4.5, 4.3)",
+    "markers and `text(...)` calls attribute to the innermost enclosing named unit — file top level to the file; function declarations, class methods, a constructor (`Service.constructor`, a unit named `constructor`), getters, setters, function-, arrow-, and class-valued class properties and variables, namespaces — `namespace X` and the legacy `module X`, the same declaration — and a named default export to `path#unit` with the dot-joined chain outermost first (`Service.method`, `ns.fn`); a class static block and a plain non-function property initializer to the bare class unit; `namespace A.B` and the legacy `module P.Q` each declare one unit per dot-separated name; decorated declarations are units like undecorated ones (`dec` declared in the file: `@dec class Deco { @dec m() { ... } }` to `Deco.m`, its static block to the bare `Deco`, `export @dec class DecoExport { m() { ... } }` to `DecoExport.m`) — with each placement's `references` and `embeds` edges sourced at the same unit (SPEC 4.6, 4.5, 4.3)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
