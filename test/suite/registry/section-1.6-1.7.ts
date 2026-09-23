@@ -39,6 +39,7 @@ import {
   assertExitCode,
   assertFileBytes,
   fail,
+  HarnessAssertionError,
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -1415,9 +1416,13 @@ const T1_7_1 = defineProductTest({
 // ---------------------------------------------------------------------------
 
 // Occurrence records (SPEC 5.7, 11.3) are the surface making every code
-// unit's range reachable (SPEC 1.7): each fixture file below stages exactly
-// one sanctioned TypeScript reference — a dependency marker (4.5) or a
-// `text(...)` call (4.3) — inside one named-code-unit shape of SPEC 4.6, and
+// unit's range reachable (SPEC 1.7): each fixture file below stages one
+// sanctioned TypeScript reference (`deco.ts` two, one per decorated unit) —
+// a dependency marker (4.5) or a `text(...)` call (4.3) — inside one
+// named-code-unit shape of SPEC 4.6 (TEST-SPEC T1.7-2's further forms
+// included: the constructor, a decorated class and member, the export
+// exclusion, the `default` unit's spellings, a legacy `module`, and a
+// declaration file), and
 // the test asserts the complete `occurrences` document, a form-exact 12.7
 // surface (H-3: no adapter in the path, and a JSON-only surface, so no
 // `--json` flag is passed), against precomputed byte offsets. Every file
@@ -1455,12 +1460,23 @@ function rangeAfter(prefix: string, span: string): SourceRange {
 
 // src/anon.ts — a default export of an ANONYMOUS construct: unit `default`,
 // whose range is the WHOLE export declaration, `export` through the closing
-// `}` (SPEC 1.7, 4.6).
+// `}` — the declaration spells no terminator, so the range ends at that
+// brace (SPEC 1.7, 4.6; contrast `arrow.ts`).
 const OCC_ANON_HEAD =
   '// prélude 🦄 anon\nimport SPEC from "../specs/R.xspec";\n\n';
 const OCC_ANON_DECL_PRE = "export default function () {\n  ";
 const OCC_ANON_DECL = OCC_ANON_DECL_PRE + OCC_MARKER + ";\n}";
 const OCC_ANON_SOURCE = OCC_ANON_HEAD + OCC_ANON_DECL + "\n";
+
+// src/arrow.ts — a default export of an ANONYMOUS arrow function spelled
+// with a statement terminator: unit `default` spans the WHOLE export
+// declaration, `export` through the `;` the declaration spells (SPEC 1.7:
+// "`export default () => {};` spans through its `;`").
+const OCC_ARROW_HEAD =
+  '// prélude 🦄 arrow\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_ARROW_DECL_PRE = "export default () => {\n  ";
+const OCC_ARROW_DECL = OCC_ARROW_DECL_PRE + OCC_MARKER + ";\n};";
+const OCC_ARROW_SOURCE = OCC_ARROW_HEAD + OCC_ARROW_DECL + "\n";
 
 // src/cls.ts — a class declaration: the property initializer is a `text(...)`
 // call (a call expression, so `greeting` is no named unit, SPEC 4.6), and the
@@ -1473,12 +1489,97 @@ const OCC_CLS_DECL_PRE = "class Cls {\n  greeting = ";
 const OCC_CLS_DECL = OCC_CLS_DECL_PRE + OCC_CLS_CALL + ";\n}";
 const OCC_CLS_SOURCE = OCC_CLS_HEAD + OCC_CLS_DECL + "\n";
 
+// src/ctor.ts — a constructor: a class member unit named `constructor`
+// (`Ctor.constructor`, SPEC 4.6) whose range spans the constructor member
+// itself, `constructor` through its closing `}` — not the class.
+const OCC_CTOR_HEAD =
+  '// prélude 🦄 ctor\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_CTOR_CLASS_PRE = "class Ctor {\n  ";
+const OCC_CTOR_MEMBER_PRE = "constructor() {\n    ";
+const OCC_CTOR_MEMBER = OCC_CTOR_MEMBER_PRE + OCC_MARKER + ";\n  }";
+const OCC_CTOR_SOURCE =
+  OCC_CTOR_HEAD + OCC_CTOR_CLASS_PRE + OCC_CTOR_MEMBER + "\n}\n";
+
+// The decorator every decorated staging applies: an ambient declaration,
+// which binds no unit of its own (SPEC 4.6) and sources no occurrence.
+const OCC_DEC_DECL = "declare function dec(...args: unknown[]): void;\n\n";
+
+// src/decdef.ts — `@dec export default class {}`: the anonymous exported
+// construct derives unit `default`, whose range is the whole export
+// declaration INCLUDING the decorator list preceding its `export` — from
+// the `@` through the closing `}` (SPEC 1.7). The class's range is pinned
+// through the `text(...)` embed in its non-unit property initializer,
+// attributed to the bare class (SPEC 4.6), as `cls.ts` does.
+const OCC_DECDEF_HEAD =
+  '// prélude 🦄 decdef\nimport SPEC, { text } from "../specs/R.xspec";\n\n' +
+  OCC_DEC_DECL;
+const OCC_DECDEF_DECL_PRE = "@dec export default class {\n  greeting = ";
+const OCC_DECDEF_DECL = OCC_DECDEF_DECL_PRE + OCC_CLS_CALL + ";\n}";
+const OCC_DECDEF_SOURCE = OCC_DECDEF_HEAD + OCC_DECDEF_DECL + "\n";
+
+// src/decexp.ts — `@dec export class DecExp {}`: the decorator list leads,
+// so nothing is excluded — the unit spans whole from its `@`, the `export`
+// inside (SPEC 1.7).
+const OCC_DECEXP_HEAD =
+  '// prélude 🦄 decexp\nimport SPEC, { text } from "../specs/R.xspec";\n\n' +
+  OCC_DEC_DECL;
+const OCC_DECEXP_DECL_PRE = "@dec export class DecExp {\n  greeting = ";
+const OCC_DECEXP_DECL = OCC_DECEXP_DECL_PRE + OCC_CLS_CALL + ";\n}";
+const OCC_DECEXP_SOURCE = OCC_DECEXP_HEAD + OCC_DECEXP_DECL + "\n";
+
+// src/deco.ts — a decorated class holding a decorated member, each under
+// TWO decorators: the class unit `Deco` spans from the class's FIRST `@`
+// through its closing `}`, and the member unit `Deco.m` from the member's
+// first `@` through the method's closing `}` (SPEC 1.7: a decorator list
+// is part of the class declaration or member it decorates, whose own
+// characters begin at its first decorator). The class's range is pinned
+// through the `text(...)` embed in its non-unit property initializer
+// (attributed to the bare class, SPEC 4.6), the member's through the
+// marker in its body.
+const OCC_DECO_HEAD =
+  '// prélude 🦄 deco\nimport SPEC, { text } from "../specs/R.xspec";\n\n' +
+  OCC_DEC_DECL;
+const OCC_DECO_CLASS_PRE = "@dec @dec class Deco {\n  greeting = ";
+const OCC_DECO_CLASS_MID = ";\n  ";
+const OCC_DECO_MEMBER_PRE = "@dec\n  @dec\n  m() {\n    ";
+const OCC_DECO_MEMBER = OCC_DECO_MEMBER_PRE + OCC_MARKER + ";\n  }";
+const OCC_DECO_CLASS =
+  OCC_DECO_CLASS_PRE +
+  OCC_CLS_CALL +
+  OCC_DECO_CLASS_MID +
+  OCC_DECO_MEMBER +
+  "\n}";
+const OCC_DECO_SOURCE = OCC_DECO_HEAD + OCC_DECO_CLASS + "\n";
+
+// src/expdec.ts — `export @dec class ExpDec {}`: only what LEADS is
+// excluded, so the unit spans `@dec class ExpDec {…}` — the `export `
+// prefix out, the decorator in (SPEC 1.7).
+const OCC_EXPDEC_HEAD =
+  '// prélude 🦄 expdec\nimport SPEC, { text } from "../specs/R.xspec";\n\n' +
+  OCC_DEC_DECL;
+const OCC_EXPDEC_EXPORT_PRE = "export ";
+const OCC_EXPDEC_CONSTRUCT_PRE = "@dec class ExpDec {\n  greeting = ";
+const OCC_EXPDEC_CONSTRUCT = OCC_EXPDEC_CONSTRUCT_PRE + OCC_CLS_CALL + ";\n}";
+const OCC_EXPDEC_SOURCE =
+  OCC_EXPDEC_HEAD + OCC_EXPDEC_EXPORT_PRE + OCC_EXPDEC_CONSTRUCT + "\n";
+
 // src/fn.ts — a function declaration: the construct binding the name.
 const OCC_FN_HEAD =
   '// prélude 🦄 fn\nimport SPEC from "../specs/R.xspec";\n\n';
 const OCC_FN_DECL_PRE = "function fn() {\n  ";
 const OCC_FN_DECL = OCC_FN_DECL_PRE + OCC_MARKER + ";\n}";
 const OCC_FN_SOURCE = OCC_FN_HEAD + OCC_FN_DECL + "\n";
+
+// src/mod.ts — a legacy-keyword dotted namespace (`module Legacy.Inner`):
+// the same declaration as `namespace Legacy.Inner` (SPEC 4.6), so its
+// nested units share the SINGLE declaration's range, pinned as `ns.ts`
+// pins `Outer.Inner` — through the reachable unit `Legacy.Inner`, from
+// `module` through the closing `}` (SPEC 1.7).
+const OCC_MOD_HEAD =
+  '// prélude 🦄 mod\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_MOD_DECL_PRE = "module Legacy.Inner {\n  ";
+const OCC_MOD_DECL = OCC_MOD_DECL_PRE + OCC_MARKER + ";\n}";
+const OCC_MOD_SOURCE = OCC_MOD_HEAD + OCC_MOD_DECL + "\n";
 
 // src/multi.ts — a function-valued variable declaration inside a
 // multi-declaration statement (`const one = 1, handler = () => {…};`): unit
@@ -1540,6 +1641,17 @@ const OCC_PAIR_SOURCE =
   OCC_PAIR_SET +
   "\n}\n";
 
+// src/spaced.ts — `export   function spaced() {}` (three spaces): the
+// leading `export` and whatever separates it from the construct's first
+// token are excluded, so the unit spans from `function` (SPEC 1.7).
+const OCC_SPACED_HEAD =
+  '// prélude 🦄 spaced\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_SPACED_EXPORT_PRE = "export   ";
+const OCC_SPACED_CONSTRUCT_PRE = "function spaced() {\n  ";
+const OCC_SPACED_CONSTRUCT = OCC_SPACED_CONSTRUCT_PRE + OCC_MARKER + ";\n}";
+const OCC_SPACED_SOURCE =
+  OCC_SPACED_HEAD + OCC_SPACED_EXPORT_PRE + OCC_SPACED_CONSTRUCT + "\n";
+
 // src/top.ts — a top-level marker: no named unit encloses it, so it
 // attributes to the file (SPEC 4.6) and the source node is the whole-file
 // location — identity the path alone, range the entire file, start 0, end
@@ -1547,6 +1659,17 @@ const OCC_PAIR_SOURCE =
 const OCC_TOP_HEAD =
   '// prélude 🦄 top\nimport SPEC from "../specs/R.xspec";\n\n';
 const OCC_TOP_SOURCE = OCC_TOP_HEAD + OCC_MARKER + ";\n";
+
+// src/types.d.ts — a declaration file, ambient by kind (SPEC 4.6: `.d.` in
+// its last path segment), matched by the code group's `src/**/*.ts` glob and
+// well-formed (14.20: TypeScript's ambient-context checks are post-parse):
+// its body-bearing `function f` binds no unit (T4.6-3), so the marker
+// inside it attributes to the whole file, and the source is the whole-file
+// location — identity the path alone, range the entire file (SPEC 1.7).
+const OCC_DTS_HEAD =
+  '// prélude 🦄 decl\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_DTS_FN_PRE = "function f(): void {\n  ";
+const OCC_DTS_SOURCE = OCC_DTS_HEAD + OCC_DTS_FN_PRE + OCC_MARKER + ";\n}\n";
 
 /** One staged occurrence: its expected record plus fixture-self-check data. */
 interface OccurrenceArm {
@@ -1563,15 +1686,19 @@ interface OccurrenceArm {
 }
 
 // The complete expected enumeration, in occurrence order (SPEC 5.7: by
-// referencing file path bytes — anon < cls < fn < multi < named < ns < pair
-// < top — then by range start): the spec source stages no `d` prop, no MDX
-// embedding, and no import, and import declarations record no occurrence
-// (5.7), so the nine staged references are the workspace's only occurrences.
+// referencing file path bytes — anon < arrow < cls < ctor < decdef < decexp
+// < deco < expdec < fn < mod < multi < named < ns < pair < spaced < top <
+// types.d.ts — then by range start, which places `deco.ts`'s property embed
+// before the marker in its decorated member): the spec source stages no `d`
+// prop, no MDX embedding, and no import, and import declarations record no
+// occurrence (5.7), so the nineteen staged references are the workspace's
+// only occurrences.
 const OCC_EXPECTED: readonly OccurrenceArm[] = [
   {
     what:
-      "anonymous default export — unit `default` carries the WHOLE export " +
-      "declaration's range (SPEC 1.7, 4.6)",
+      "anonymous default export spelling no terminator — unit `default` " +
+      "carries the WHOLE export declaration's range, ending at the closing " +
+      "brace (SPEC 1.7, 4.6)",
     fileSource: OCC_ANON_SOURCE,
     occurrenceSpan: OCC_MARKER,
     unitSpan: OCC_ANON_DECL,
@@ -1582,6 +1709,25 @@ const OCC_EXPECTED: readonly OccurrenceArm[] = [
       source: {
         identity: "src/anon.ts#default",
         range: rangeAfter(OCC_ANON_HEAD, OCC_ANON_DECL),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "anonymous default arrow function spelled with a terminator — unit " +
+      "`default` spans the WHOLE export declaration through its `;` (SPEC " +
+      "1.7)",
+    fileSource: OCC_ARROW_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_ARROW_DECL,
+    record: {
+      file: "src/arrow.ts",
+      range: rangeAfter(OCC_ARROW_HEAD + OCC_ARROW_DECL_PRE, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/arrow.ts#default",
+        range: rangeAfter(OCC_ARROW_HEAD, OCC_ARROW_DECL),
       },
       target: OCC_REQ_ID,
     },
@@ -1607,6 +1753,140 @@ const OCC_EXPECTED: readonly OccurrenceArm[] = [
     },
   },
   {
+    what:
+      "constructor — the member unit `Ctor.constructor` (SPEC 4.6) spans " +
+      "the constructor member, `constructor` through its closing `}`, not " +
+      "the class (SPEC 1.7)",
+    fileSource: OCC_CTOR_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_CTOR_MEMBER,
+    record: {
+      file: "src/ctor.ts",
+      range: rangeAfter(
+        OCC_CTOR_HEAD + OCC_CTOR_CLASS_PRE + OCC_CTOR_MEMBER_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/ctor.ts#Ctor.constructor",
+        range: rangeAfter(OCC_CTOR_HEAD + OCC_CTOR_CLASS_PRE, OCC_CTOR_MEMBER),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "`@dec export default class {}` — unit `default` spans the whole " +
+      "export declaration from its `@`, the decorator list preceding " +
+      "`export` included (SPEC 1.7)",
+    fileSource: OCC_DECDEF_SOURCE,
+    occurrenceSpan: OCC_CLS_CALL,
+    unitSpan: OCC_DECDEF_DECL,
+    record: {
+      file: "src/decdef.ts",
+      range: rangeAfter(OCC_DECDEF_HEAD + OCC_DECDEF_DECL_PRE, OCC_CLS_CALL),
+      kind: "embeds",
+      source: {
+        identity: "src/decdef.ts#default",
+        range: rangeAfter(OCC_DECDEF_HEAD, OCC_DECDEF_DECL),
+      },
+      target: OCC_ALT_ID,
+    },
+  },
+  {
+    what:
+      "`@dec export class DecExp {}` — spans whole from its `@`, the " +
+      "`export` inside (SPEC 1.7)",
+    fileSource: OCC_DECEXP_SOURCE,
+    occurrenceSpan: OCC_CLS_CALL,
+    unitSpan: OCC_DECEXP_DECL,
+    record: {
+      file: "src/decexp.ts",
+      range: rangeAfter(OCC_DECEXP_HEAD + OCC_DECEXP_DECL_PRE, OCC_CLS_CALL),
+      kind: "embeds",
+      source: {
+        identity: "src/decexp.ts#DecExp",
+        range: rangeAfter(OCC_DECEXP_HEAD, OCC_DECEXP_DECL),
+      },
+      target: OCC_ALT_ID,
+    },
+  },
+  {
+    what:
+      "decorated class under two decorators — unit `Deco` spans from the " +
+      "class's FIRST `@` through its closing `}` (SPEC 1.7, 4.6)",
+    fileSource: OCC_DECO_SOURCE,
+    occurrenceSpan: OCC_CLS_CALL,
+    unitSpan: OCC_DECO_CLASS,
+    record: {
+      file: "src/deco.ts",
+      range: rangeAfter(OCC_DECO_HEAD + OCC_DECO_CLASS_PRE, OCC_CLS_CALL),
+      kind: "embeds",
+      source: {
+        identity: "src/deco.ts#Deco",
+        range: rangeAfter(OCC_DECO_HEAD, OCC_DECO_CLASS),
+      },
+      target: OCC_ALT_ID,
+    },
+  },
+  {
+    what:
+      "decorated member under two decorators — unit `Deco.m` spans from " +
+      "the member's FIRST `@` through the method's closing `}` (SPEC 1.7, " +
+      "4.6)",
+    fileSource: OCC_DECO_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_DECO_MEMBER,
+    record: {
+      file: "src/deco.ts",
+      range: rangeAfter(
+        OCC_DECO_HEAD +
+          OCC_DECO_CLASS_PRE +
+          OCC_CLS_CALL +
+          OCC_DECO_CLASS_MID +
+          OCC_DECO_MEMBER_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/deco.ts#Deco.m",
+        range: rangeAfter(
+          OCC_DECO_HEAD +
+            OCC_DECO_CLASS_PRE +
+            OCC_CLS_CALL +
+            OCC_DECO_CLASS_MID,
+          OCC_DECO_MEMBER,
+        ),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "`export @dec class ExpDec {}` — only what leads is excluded: the " +
+      "unit spans `@dec class ExpDec {…}`, the `export ` prefix out and " +
+      "the decorator in (SPEC 1.7)",
+    fileSource: OCC_EXPDEC_SOURCE,
+    occurrenceSpan: OCC_CLS_CALL,
+    unitSpan: OCC_EXPDEC_CONSTRUCT,
+    record: {
+      file: "src/expdec.ts",
+      range: rangeAfter(
+        OCC_EXPDEC_HEAD + OCC_EXPDEC_EXPORT_PRE + OCC_EXPDEC_CONSTRUCT_PRE,
+        OCC_CLS_CALL,
+      ),
+      kind: "embeds",
+      source: {
+        identity: "src/expdec.ts#ExpDec",
+        range: rangeAfter(
+          OCC_EXPDEC_HEAD + OCC_EXPDEC_EXPORT_PRE,
+          OCC_EXPDEC_CONSTRUCT,
+        ),
+      },
+      target: OCC_ALT_ID,
+    },
+  },
+  {
     what: "function declaration — the construct binding the name (SPEC 1.7, 4.6)",
     fileSource: OCC_FN_SOURCE,
     occurrenceSpan: OCC_MARKER,
@@ -1618,6 +1898,25 @@ const OCC_EXPECTED: readonly OccurrenceArm[] = [
       source: {
         identity: "src/fn.ts#fn",
         range: rangeAfter(OCC_FN_HEAD, OCC_FN_DECL),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "legacy `module Legacy.Inner` — the same declaration as a dotted " +
+      "`namespace`: its nested units share the SINGLE declaration's range, " +
+      "pinned through the reachable unit `Legacy.Inner` (SPEC 1.7, 4.6)",
+    fileSource: OCC_MOD_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_MOD_DECL,
+    record: {
+      file: "src/mod.ts",
+      range: rangeAfter(OCC_MOD_HEAD + OCC_MOD_DECL_PRE, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/mod.ts#Legacy.Inner",
+        range: rangeAfter(OCC_MOD_HEAD, OCC_MOD_DECL),
       },
       target: OCC_REQ_ID,
     },
@@ -1739,6 +2038,31 @@ const OCC_EXPECTED: readonly OccurrenceArm[] = [
   },
   {
     what:
+      "`export   function spaced() {}` (several spaces) — the leading " +
+      "`export` and whatever separates it from the construct are excluded: " +
+      "the unit spans from `function` (SPEC 1.7)",
+    fileSource: OCC_SPACED_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_SPACED_CONSTRUCT,
+    record: {
+      file: "src/spaced.ts",
+      range: rangeAfter(
+        OCC_SPACED_HEAD + OCC_SPACED_EXPORT_PRE + OCC_SPACED_CONSTRUCT_PRE,
+        OCC_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/spaced.ts#spaced",
+        range: rangeAfter(
+          OCC_SPACED_HEAD + OCC_SPACED_EXPORT_PRE,
+          OCC_SPACED_CONSTRUCT,
+        ),
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
       "top-level marker — a whole-file location: identity the path alone, " +
       "range the entire file, start 0, end the file's byte length (SPEC " +
       "1.7, 4.6)",
@@ -1752,6 +2076,26 @@ const OCC_EXPECTED: readonly OccurrenceArm[] = [
       source: {
         identity: "src/top.ts",
         range: { start: 0, end: utf8Length(OCC_TOP_SOURCE) },
+      },
+      target: OCC_REQ_ID,
+    },
+  },
+  {
+    what:
+      "marker inside a body-bearing function of a declaration file " +
+      "(`src/types.d.ts`, ambient by kind) — `f` is no unit (SPEC 4.6; " +
+      "T4.6-3), so the source is the whole-file location: identity the " +
+      "path alone, range the entire file (SPEC 1.7)",
+    fileSource: OCC_DTS_SOURCE,
+    occurrenceSpan: OCC_MARKER,
+    unitSpan: OCC_DTS_SOURCE,
+    record: {
+      file: "src/types.d.ts",
+      range: rangeAfter(OCC_DTS_HEAD + OCC_DTS_FN_PRE, OCC_MARKER),
+      kind: "references",
+      source: {
+        identity: "src/types.d.ts",
+        range: { start: 0, end: utf8Length(OCC_DTS_SOURCE) },
       },
       target: OCC_REQ_ID,
     },
@@ -1786,7 +2130,7 @@ function assertStagedSpan(
 const T1_7_2 = defineProductTest({
   id: "T1.7-2",
   title:
-    "code-location ranges via occurrence records: against precomputed byte offsets, the `source` node of a marker or TS `text(...)` occurrence carries the entire file for a whole-file location; the construct binding the name for a function and a class declaration; the unit's own name through its initializer — not the enclosing multi-declaration statement; the single dotted-namespace declaration's shared range; the named construct's own range vs the whole export declaration under unit `default` for default exports; and the second occurrence's construct for `path#unit@2` (SPEC 1.7, 4.6, 5.7, 11.3, 12.7)",
+    "code-location ranges via occurrence records: against precomputed byte offsets, the `source` node of a marker or TS `text(...)` occurrence carries the entire file for a whole-file location; the construct binding the name for a function and a class declaration; the unit's own name through its initializer — not the enclosing multi-declaration statement; the single dotted-namespace declaration's shared range; the named construct's own range vs the whole export declaration under unit `default` for default exports; the second occurrence's construct for `path#unit@2`; and the further forms — the constructor member, a decorated class and member from their first `@`, the export exclusion (`export @dec class`, `@dec export class`, `export   function`), the `default` unit through a spelled `;` or from a leading `@`, a legacy `module A.B`, and a declaration file's whole-file range (SPEC 1.7, 4.6, 5.7, 11.3, 12.7)",
   run: async (product) => {
     for (const arm of OCC_EXPECTED) {
       assertStagedSpan(
@@ -1808,13 +2152,22 @@ const T1_7_2 = defineProductTest({
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
         "specs/R.mdx": OCC_TARGET_SOURCE,
         "src/anon.ts": OCC_ANON_SOURCE,
+        "src/arrow.ts": OCC_ARROW_SOURCE,
         "src/cls.ts": OCC_CLS_SOURCE,
+        "src/ctor.ts": OCC_CTOR_SOURCE,
+        "src/decdef.ts": OCC_DECDEF_SOURCE,
+        "src/decexp.ts": OCC_DECEXP_SOURCE,
+        "src/deco.ts": OCC_DECO_SOURCE,
+        "src/expdec.ts": OCC_EXPDEC_SOURCE,
         "src/fn.ts": OCC_FN_SOURCE,
+        "src/mod.ts": OCC_MOD_SOURCE,
         "src/multi.ts": OCC_MULTI_SOURCE,
         "src/named.ts": OCC_NAMED_SOURCE,
         "src/ns.ts": OCC_NS_SOURCE,
         "src/pair.ts": OCC_PAIR_SOURCE,
+        "src/spaced.ts": OCC_SPACED_SOURCE,
         "src/top.ts": OCC_TOP_SOURCE,
+        "src/types.d.ts": OCC_DTS_SOURCE,
       },
     });
     try {
@@ -1859,16 +2212,32 @@ const T1_7_2 = defineProductTest({
         );
       }
       // Per-index equality over the length-checked enumeration pins the
-      // occurrence order of 5.7 along with every record member.
+      // occurrence order of 5.7 along with every record member. Every
+      // record is compared before the verdict, so one run diagnoses each
+      // deviating form at once rather than only the first in file order.
+      const mismatches: string[] = [];
       OCC_EXPECTED.forEach((arm, index) => {
-        assertSameJson(
-          report.occurrences[index],
-          arm.record,
-          `${context} record [${String(index)}] — ${arm.what}; zero-based ` +
-            `byte offsets, start-inclusive end-exclusive, so code-point, ` +
-            `UTF-16, line/column, or 1-based ranges all fail (SPEC 1.7)`,
-        );
+        try {
+          assertSameJson(
+            report.occurrences[index],
+            arm.record,
+            `${context} record [${String(index)}] — ${arm.what}; zero-based ` +
+              `byte offsets, start-inclusive end-exclusive, so code-point, ` +
+              `UTF-16, line/column, or 1-based ranges all fail (SPEC 1.7)`,
+          );
+        } catch (error) {
+          if (!(error instanceof HarnessAssertionError)) throw error;
+          mismatches.push(error.message);
+        }
       });
+      if (mismatches.length > 0) {
+        fail(
+          `${context}: ${String(mismatches.length)} of ` +
+            `${String(OCC_EXPECTED.length)} occurrence records differ from ` +
+            `the pinned ones:\n` +
+            mismatches.join("\n"),
+        );
+      }
     } finally {
       await workspace.dispose();
     }

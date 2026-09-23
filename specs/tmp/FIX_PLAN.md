@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 14 — T1.7-2: the further source-range forms
-- Cites: TEST-SPEC T1.7-2 "Further forms"; SPEC 1.7, 4.6. Finding A-19.
-- Change: add arms for the constructor unit; decorated class/member (range from the first `@`); export exclusion (`export @dec class`, `@dec export class`, `export   function f` with multiple spaces); the `default` unit forms (`export default () => {};` through `;`, `export default function () {}`, `@dec export default class {}`); legacy `module A.B`; and the declaration-file whole-file range (`section-4.6.ts` ~L976 defers it to T1.7-2, where no `.d.ts` staging exists — stage one). Assert through the surfaces the entry names with precomputed offsets.
-- Verify: `-t 'T1.7-2 '` no harness error; self project green.
-
 ### Task 15 — T2.1-3's separate-blocks arm; T2.1-6 registration
 - Cites: TEST-SPEC T2.1-3 (duplicate identifier across separate ESM blocks); T2.1-6 (an ESM block inside a section derives — 14.20 not reported; T6.5-17's positive observation); SPEC 2.1, 14.20, 3. Findings A-20, A-1. Depends on Task 3.
 - Change: `section-2.1.ts`: beside `DUP_BINDING_SOURCE` (~L538, the single-block consecutive-lines form, which now names the `duplicate-import-binding` allowance) add the separate-blocks arm (two ESM blocks each binding the identifier; derives without an allowance) with the entry's findings; register T2.1-6 per its entry (a blank-line-separated ESM block inside `<S id="m">` … `</S>`: `build` exit 0, the binding usable in the section, the block's lines dropping from Markdown per 3, the entry's other observations); traceability keys for T2.1-6.
