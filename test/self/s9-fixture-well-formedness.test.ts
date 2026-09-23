@@ -42,6 +42,7 @@ import {
 } from "../suite/registry/section-6.2.js";
 import { X2_COMPOSED_FORMS } from "../suite/registry/section-6.5.js";
 import {
+  A18_FORM_VECTORS,
   J15_FORM_VECTORS,
   M17_FORM_VECTORS,
   R16_FORM_VECTORS,
@@ -445,6 +446,22 @@ describe("S-9: every form T6.5-17 stages, or asserts as its control's result, de
     );
   });
   test.each(M17_FORM_VECTORS)("%s", (_name, source) => {
+    expectDerives(source);
+  });
+});
+
+// T6.5-18 (section-6.5-iii.ts): the origin and target as staged and as the
+// move leaves them — the origin opening with its kept blank line's
+// terminator after the deletion's line drop, the moved text appended to the
+// target after its final terminator: every one must derive (SPEC 6.5, 3).
+describe("S-9: every form T6.5-18 stages or asserts as the move's result derives", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(A18_FORM_VECTORS.length).toBe(4);
+    expect(new Set(A18_FORM_VECTORS.map(([name]) => name)).size).toBe(
+      A18_FORM_VECTORS.length,
+    );
+  });
+  test.each(A18_FORM_VECTORS)("%s", (_name, source) => {
     expectDerives(source);
   });
 });
