@@ -206,6 +206,28 @@ function isParserMessage(error: unknown): error is ParserMessage {
   );
 }
 
+/**
+ * A `devlop` assertion — `name` "Assertion", `code` "ERR_ASSERTION" — from
+ * the development build of the parser stack, which a test runner resolving
+ * the `development` export condition (Vitest) loads in place of the
+ * production build. The mdast layer asserts its node stack's consistency at
+ * each construct's exit, and ill-formed nesting — a setext heading ending
+ * while the JSX element opened inside its paragraph is still open, as
+ * T6.5-16(d)'s `===` remainder leaves it — trips that assertion before the
+ * element-matching rejection the production build raises for the same text
+ * (verified: the production build rejects it with "Expected a closing tag
+ * for `<S>` … before the end of `setextHeading`"); the assertion is that
+ * rejection, a non-derivation. An exhausted stack is a `RangeError`, never
+ * this.
+ */
+function isDevelopmentAssertion(error: unknown): error is Error {
+  return (
+    error instanceof Error &&
+    error.name === "Assertion" &&
+    (error as { code?: unknown }).code === "ERR_ASSERTION"
+  );
+}
+
 function isPoint(value: unknown): value is MdxPosition {
   return (
     typeof value === "object" &&
@@ -275,6 +297,12 @@ export function deriveMdx(
     });
     return { derives: true };
   } catch (error) {
+    if (isDevelopmentAssertion(error)) {
+      return {
+        derives: false,
+        reason: `parser development-build assertion: ${error.message}`,
+      };
+    }
     if (!isParserMessage(error)) {
       // Not a grammar verdict (an internal failure such as exhausted stack):
       // never reported as a non-derivation.

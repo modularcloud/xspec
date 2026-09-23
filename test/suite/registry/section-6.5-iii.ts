@@ -1,10 +1,10 @@
 // TEST-SPEC §6.5 (move), third part — SUITE-25 (continued): T6.5-12, the
 // target file's own references to moved nodes, T6.5-13, admissible offsets
 // and composition in pre-operation coordinates, T6.5-14, a created target
-// file's fixed content, and T6.5-15, joint import removals over an ESM
-// block. T6.5-1…T6.5-10 are section-6.5.ts's business and
-// T6.5-11 section-6.5-ii.ts's; this module keeps both files' edits bounded
-// (the section-10.7-i/-ii precedent).
+// file's fixed content, T6.5-15, joint import removals over an ESM block,
+// and T6.5-16, `refused-invalid-rewrite`. T6.5-1…T6.5-10 are
+// section-6.5.ts's business and T6.5-11 section-6.5-ii.ts's; this module
+// keeps both files' edits bounded (the section-10.7-i/-ii precedent).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -126,10 +126,29 @@
 //   `build --json`, `markdown.emit` on (7.3); each composed expectation is
 //   checked to derive (S-9) before its move, a `HarnessStagingError`, never
 //   a verdict.
+// - T6.5-16 composes every rewritten file's would-be text from 6.5's exact
+//   edits and 3's line drops — the deletion, the insertion before the target
+//   parent's closing tag or at the file's end with its terminators, the
+//   self-closing parent's paired-form rewrite — and verifies in the test
+//   that each concerned file's text does not derive and every other
+//   rewritten file's does (S-9; a `HarnessStagingError` either way, never a
+//   verdict); "nothing modified" is the whole-root byte snapshot around the
+//   `move … --json` (sources, derived files, the journal absent or
+//   byte-unchanged); the refusal report holds exactly one finding per
+//   applicable reason, its codes compared as a set, and the
+//   `refused-invalid-rewrite` finding's `locations`, `identities`, and
+//   `path` exactly; the controls the entry composes here — the in-line
+//   section into each of (c)'s three parents (T6.5-2's fourth geometry
+//   stages the first alone), (d)'s prose remainder, (e)'s block-ending empty
+//   line — are performed and byte-asserted with `check` and `build` clean,
+//   those it names by ID (T6.2-3(a), (b), (c), (e)) being that test's
+//   stagings. Arms (f)–(i), the applicability arms, and the created-target
+//   arm are still to be registered; the preview twins are T6.6-3's.
 
 import { Buffer } from "node:buffer";
 import type {
   ChangeCategory,
+  Finding,
   GraphEdge,
   ImpactReport,
   NodeReport,
@@ -143,21 +162,25 @@ import {
   decodeNodeReport,
   decodePreviewReport,
   decodeViewReport,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import { assertFileBytes, fail } from "../../helpers/assertions.js";
 import { canonicalSpecifier } from "../../helpers/import-insertion.js";
 import { deriveMdx } from "../../helpers/mdx-derivability.js";
 import { HarnessStagingError } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
+import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertEdgeSetEqual,
+  assertFindingIdentities,
   assertSameJson,
   buildOk,
   expectExit,
   expectFindingFreeReport,
+  runFindingsReport,
   runJson,
 } from "./support.js";
 
@@ -3135,10 +3158,731 @@ const T6_5_15 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T6.5-16 `refused-invalid-rewrite` — the finding form and arms (a)–(e)
+// ---------------------------------------------------------------------------
+//
+// SPEC 6.5 (validation and refusals): a section-form move whose exact edits
+// would leave a rewritten file other than well-formed MDX (14.20) — the
+// origin as its deletion leaves it, the target as its parent rewrite and
+// insertion leave it or as its creation composes it — or a file the rewrite
+// must add an import to holding no admissible offset, is refused: exit 1,
+// nothing modified, and exactly one `refused-invalid-rewrite` finding per
+// operation however many files or shapes it covers — locating the moved
+// section's construct in the origin file (1.7) plus, for each addition no
+// offset admits, every reference spelling rooted at its binding by its
+// occurrence span (5.7; Task 36's arms), its `identities` the
+// workspace-relative paths of the files concerned in byte order, its `path`
+// null (SPEC 14, 12.7). The grammar reads the edited text line-sensitively:
+// a tag alone on its line is a flow-position tag, which interrupts a
+// paragraph and closes no text-position tag; a U+000B or U+000C — whitespace
+// under 1.4, none to the grammar — keeps the tag it adjoins in text position
+// at a line's start; and an ESM block absorbs the non-blank lines after it
+// (SPEC 6.2, 6.5, 14.20).
+//
+// Each refused arm composes the would-be text of every rewritten file from
+// 6.5's exact edits — the deletion with 3's line drops; the insertion
+// immediately before the target parent's closing tag or at the file's end,
+// U+000A after it and one before it when the point is not at a line start;
+// the self-closing parent's paired-form rewrite — and verifies in the test
+// that each concerned file's would-be text does not derive and every other
+// rewritten file's does (S-9's `deriveMdx`; a `HarnessStagingError` either
+// way, never a verdict), so the refusal stands on the stated ground alone;
+// the pre-move workspace derives (the builder's S-9 check) and builds (the
+// valid-workspace precondition, 6.4). Nothing modified is the whole-root
+// byte snapshot compare around the command — sources, derived files, and
+// the journal, absent or byte-unchanged. The controls the entry composes
+// here — (c)'s in-line section into each text-position parent (T6.5-2's
+// fourth geometry stages the first parent alone), (d)'s prose remainder,
+// and (e)'s block-ending empty line — are performed and byte-asserted with
+// `check` and `build` clean; those it names by ID — T6.2-3(a), (b), (c),
+// and (e) — are that test's stagings. The preview twins are T6.6-3's.
+
+const R16_ORIGIN = "specs/a.mdx";
+const R16_TARGET = "specs/b.mdx";
+/**
+ * (e)'s origin: the entry spells the target's imported module `specs/A.mdx`,
+ * and `a.mdx` beside `A.mdx` would collide on a case-insensitive filesystem.
+ */
+const R16_E_ORIGIN = "specs/o.mdx";
+const R16_E_MODULE_SOURCE = "specs/A.mdx";
+/** A bystander section: the target's existing content and the origin's kept sibling. */
+const R16_K = '<S id="k">z</S>\n';
+// U+000B and U+000C, built from code points (never escape spellings).
+const R16_VT = String.fromCodePoint(0x000b);
+const R16_FF = String.fromCodePoint(0x000c);
+
+/** One expected `locations` entry: a file and a 1.7 byte range. */
+interface R16Location {
+  readonly file: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+interface R16RefusedArm {
+  readonly key: string;
+  /** Why the would-be text does not derive, for the diagnoses. */
+  readonly summary: string;
+  /** The pre-move spec files, each deriving (the builder's S-9 check). */
+  readonly files: Readonly<Record<string, string>>;
+  readonly argv: readonly string[];
+  /** The would-be text of each file the refusal concerns: verified underivable (S-9). */
+  readonly illFormed: Readonly<Record<string, string>>;
+  /** The would-be text of every other rewritten file: verified to derive (S-9). */
+  readonly wellFormed: Readonly<Record<string, string>>;
+  /** The finding's `identities`: the concerned files' paths in byte order (SPEC 14). */
+  readonly identities: readonly string[];
+  /**
+   * The finding's `locations` in 12.7's order: the moved section's construct
+   * range in the origin file (1.7), and, for an addition no offset admits,
+   * every reference spelling rooted at its binding (Task 36's arms).
+   */
+  readonly locations: readonly R16Location[];
+  /** Every other applicable reason's code, reported beside (Task 36's applicability arms). */
+  readonly beside?: readonly string[];
+}
+
+interface R16ControlArm {
+  readonly key: string;
+  /** What the performed move leaves, for the diagnoses. */
+  readonly summary: string;
+  readonly files: Readonly<Record<string, string>>;
+  readonly argv: readonly string[];
+  /** Every rewritten file's bytes after the move, composed from 6.5 and 3 with no latitude. */
+  readonly expected: Readonly<Record<string, string>>;
+}
+
+/** The moved section's construct range (1.7): the bytes of `prefix` to its end. */
+function r16Construct(
+  file: string,
+  prefix: string,
+  construct: string,
+): R16Location {
+  const start = Buffer.byteLength(prefix, "utf8");
+  return { file, start, end: start + Buffer.byteLength(construct, "utf8") };
+}
+
+// (a) the `body</S>` variant: `foo <S id="m">`, then a space, a tab, or
+// nothing, U+000A, `body</S>`, moved to top level — at a line's start its
+// opening tag is a flow-position tag, which the text-position closing tag
+// cannot close (SPEC 6.2); the deletion leaves `foo `, U+000A, deriving. The
+// control is T6.2-3(c)'s U+000B/U+000C remainder.
+function r16ArmA(name: string, ws: string): R16RefusedArm {
+  const moved = `<S id="m">${ws}\nbody</S>`;
+  return {
+    key: `(a) the body</S> variant, ${name} after its opening tag`,
+    summary:
+      `at the target's line start the opening tag \`<S id="m">\`, followed ` +
+      `by ${name}, is a flow-position tag, which the text-position closing ` +
+      `tag of \`body</S>\` cannot close (SPEC 6.2, 14.20)`,
+    files: { [R16_ORIGIN]: `foo ${moved}\n`, [R16_TARGET]: R16_K },
+    argv: ["move", "specs/a.mdx#m", "specs/b.mdx#m"],
+    illFormed: { [R16_TARGET]: `${R16_K}${moved}\n` },
+    wellFormed: { [R16_ORIGIN]: "foo \n" },
+    identities: [R16_TARGET],
+    locations: [r16Construct(R16_ORIGIN, "foo ", moved)],
+  };
+}
+
+// (b) the one-sided spellings of 6.2's worked three-line shape — the
+// character among the whitespace following the opening tag, the closing tag
+// then alone on its line at the destination, or preceding the closing tag,
+// the opening tag then alone on its line there — the tag it adjoins staying
+// in text position while the other is a flow-position tag, and neither
+// closes the other (SPEC 6.2); at the origin the closing tag is followed by
+// ` bar`, and the deletion leaves `foo  bar`, U+000A, deriving. The
+// both-sided and none-sided spellings are the movable controls T6.2-3(b)
+// and (a).
+function r16ArmB(
+  side: "opening" | "closing",
+  name: string,
+  ws: string,
+): R16RefusedArm {
+  const moved =
+    side === "opening"
+      ? `<S id="m">${ws}\nbody\n</S>`
+      : `<S id="m">\nbody\n${ws}</S>`;
+  return {
+    key: `(b) the worked shape with ${name} ${side === "opening" ? "following its opening tag" : "preceding its closing tag"}`,
+    summary:
+      side === "opening"
+        ? `the ${name} following the opening tag keeps it in text position ` +
+          `at the target's line start while the closing tag, alone on its ` +
+          `line, is a flow-position tag that closes no text-position tag ` +
+          `(SPEC 6.2, 14.20)`
+        : `the opening tag alone on its line at the target is a flow-position ` +
+          `tag while the ${name} preceding the closing tag keeps that tag in ` +
+          `text position, closing no flow-position tag (SPEC 6.2, 14.20)`,
+    files: { [R16_ORIGIN]: `foo ${moved} bar\n`, [R16_TARGET]: R16_K },
+    argv: ["move", "specs/a.mdx#m", "specs/b.mdx#m"],
+    illFormed: { [R16_TARGET]: `${R16_K}${moved}\n` },
+    wellFormed: { [R16_ORIGIN]: "foo  bar\n" },
+    identities: [R16_TARGET],
+    locations: [r16Construct(R16_ORIGIN, "foo ", moved)],
+  };
+}
+
+// (c) a section opening a flow-position tag — its tags alone on their
+// lines; a self-closing tag; a single-line section whose line holds nothing
+// outside its tags and expression containers, a flow line whose tags are
+// flow-position tags (14.20; T3-3's constraint) — moved into a parent whose
+// tags stand in text position: the moved text lands alone on its line, a
+// flow line interrupting the paragraph that holds the parent's opening tag,
+// which then closes nothing (SPEC 6.5, 6.2). The control is a single-line
+// in-line section holding prose outside its tags, whose line is a paragraph
+// continuation there (T6.5-2's fourth geometry).
+interface R16MovedShape {
+  readonly name: string;
+  /** The construct as staged in the origin, alone on its line after `R16_K`. */
+  readonly origin: string;
+  /** The construct re-identified under `p.n` (prefix replacement). */
+  readonly moved: string;
+}
+
+const R16_C_SHAPES: readonly R16MovedShape[] = [
+  {
+    name: "a flow-position section",
+    origin: '<S id="m">\nx\n</S>',
+    moved: '<S id="p.n">\nx\n</S>',
+  },
+  {
+    name: "a self-closing section",
+    origin: '<S id="m" />',
+    moved: '<S id="p.n" />',
+  },
+  {
+    name: "a single-line section holding nothing outside its tags",
+    origin: '<S id="m"><S id="m.q" /></S>',
+    moved: '<S id="p.n"><S id="p.n.q" /></S>',
+  },
+];
+
+const R16_C_CONTROL_SHAPE: R16MovedShape = {
+  name: 'the in-line section `<S id="m">x</S>`',
+  origin: '<S id="m">x</S>',
+  moved: '<S id="p.n">x</S>',
+};
+
+interface R16Parent {
+  readonly name: string;
+  /** The staged target file. */
+  readonly source: string;
+  /** How 6.5's edits leave the target around the moved text. */
+  readonly compose: (moved: string) => string;
+}
+
+const R16_C_PARENTS: readonly R16Parent[] = [
+  {
+    // The insertion point, before `</S>` after `bar`, is not at a line
+    // start: U+000A before the moved text and after it.
+    name: 'the text-position parent `foo <S id="p">bar</S> baz`',
+    source: 'foo <S id="p">bar</S> baz\n',
+    compose: (moved) => `foo <S id="p">bar\n${moved}\n</S> baz\n`,
+  },
+  {
+    // The closing tag on a later line: the insertion point, at that line's
+    // start, takes no terminator before the moved text.
+    name: "the text-position parent with its closing tag on a later line",
+    source: 'foo <S id="p">bar\n</S> baz\n',
+    compose: (moved) => `foo <S id="p">bar\n${moved}\n</S> baz\n`,
+  },
+  {
+    // The self-closing parent is first rewritten to the paired form — its
+    // `/` and the whitespace before it deleted, `</S>` appended after `>` —
+    // and the insertion before that closing tag is not at a line start.
+    name: "the self-closing parent after its paired-form rewrite",
+    source: 'foo <S id="p" /> baz\n',
+    compose: (moved) => `foo <S id="p">\n${moved}\n</S> baz\n`,
+  },
+];
+
+function r16ArmC(shape: R16MovedShape, parent: R16Parent): R16RefusedArm {
+  return {
+    key: `(c) ${shape.name} into ${parent.name}`,
+    summary:
+      `the moved text stands alone on its line inside the parent, a flow ` +
+      `line whose tags are flow-position tags interrupting the paragraph ` +
+      `that holds the parent's text-position opening tag, which then closes ` +
+      `nothing (SPEC 6.5, 6.2, 14.20; T3-3's constraint)`,
+    files: {
+      [R16_ORIGIN]: `${R16_K}${shape.origin}\n`,
+      [R16_TARGET]: parent.source,
+    },
+    argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
+    illFormed: { [R16_TARGET]: parent.compose(shape.moved) },
+    wellFormed: { [R16_ORIGIN]: R16_K },
+    identities: [R16_TARGET],
+    locations: [r16Construct(R16_ORIGIN, R16_K, shape.origin)],
+  };
+}
+
+function r16ControlC(parent: R16Parent): R16ControlArm {
+  return {
+    key: `(c) control: ${R16_C_CONTROL_SHAPE.name} into ${parent.name}`,
+    summary:
+      `the in-line section's line is a paragraph continuation inside the ` +
+      `parent — the prose outside its tags denies the flow attempt — so the ` +
+      `composed target derives and the move is performed, the origin's ` +
+      `emptied line dropped with its terminator (SPEC 6.5, 3, 14.20)`,
+    files: {
+      [R16_ORIGIN]: `${R16_K}${R16_C_CONTROL_SHAPE.origin}\n`,
+      [R16_TARGET]: parent.source,
+    },
+    argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
+    expected: {
+      [R16_ORIGIN]: R16_K,
+      [R16_TARGET]: parent.compose(R16_C_CONTROL_SHAPE.moved),
+    },
+  };
+}
+
+// (d) a deletion leaving what followed the construct on its line at the
+// line's start, inside the text-position parent `foo <S id="p">bar`,
+// U+000A, the line, U+000A, `</S> baz`: each pre-move file derives (its
+// second line a paragraph continuation, the bytes after the construct
+// text), and each deletion leaves a list marker, a setext underline, a
+// flow-position tag, or a flow-position expression interrupting the
+// paragraph that holds the parent's opening tag; and, one arm more, the
+// parent's own closing tag as the remainder, left alone on its line — a
+// flow-position tag closing no text-position tag (SPEC 6.5, 6.2). The moved
+// section `p.m` lands at the top level of a clean target, its line a
+// paragraph line, deriving.
+const R16_D_MOVED = '<S id="p.m">x</S>';
+const R16_D_PREFIX = 'foo <S id="p">bar\n';
+const R16_D_TARGET_AFTER = `${R16_K}<S id="m">x</S>\n`;
+
+function r16ArmD(name: string, remainder: string): R16RefusedArm {
+  return {
+    key: `(d) the deletion leaving ${name} at its line's start`,
+    summary:
+      `deleting the construct leaves ${JSON.stringify(remainder)} at its ` +
+      `line's start, ${name} interrupting the paragraph that holds the ` +
+      `parent's text-position opening tag, which then closes nothing ` +
+      `(SPEC 6.5, 6.2, 14.20)`,
+    files: {
+      [R16_ORIGIN]: `${R16_D_PREFIX}${R16_D_MOVED}${remainder}\n</S> baz\n`,
+      [R16_TARGET]: R16_K,
+    },
+    argv: ["move", "specs/a.mdx#p.m", "specs/b.mdx#m"],
+    illFormed: { [R16_ORIGIN]: `${R16_D_PREFIX}${remainder}\n</S> baz\n` },
+    wellFormed: { [R16_TARGET]: R16_D_TARGET_AFTER },
+    identities: [R16_ORIGIN],
+    locations: [r16Construct(R16_ORIGIN, R16_D_PREFIX, R16_D_MOVED)],
+  };
+}
+
+const R16_D_CLOSING_ARM: R16RefusedArm = {
+  key: "(d) the deletion leaving the parent's own closing tag alone on its line",
+  summary:
+    "deleting the construct leaves `</S>` alone on its line, a " +
+    "flow-position tag closing no text-position tag, the paragraph holding " +
+    "the parent's opening tag interrupted (SPEC 6.5, 6.2, 14.20)",
+  files: {
+    [R16_ORIGIN]: `${R16_D_PREFIX}${R16_D_MOVED}</S>\n`,
+    [R16_TARGET]: R16_K,
+  },
+  argv: ["move", "specs/a.mdx#p.m", "specs/b.mdx#m"],
+  illFormed: { [R16_ORIGIN]: `${R16_D_PREFIX}</S>\n` },
+  wellFormed: { [R16_TARGET]: R16_D_TARGET_AFTER },
+  identities: [R16_ORIGIN],
+  locations: [r16Construct(R16_ORIGIN, R16_D_PREFIX, R16_D_MOVED)],
+};
+
+const R16_D_CONTROL: R16ControlArm = {
+  key: "(d) control: plain prose after the construct",
+  summary:
+    "the deletion leaves ` more` a paragraph-continuation line — the line " +
+    "keeps content, so 3 drops nothing — and the moved section's line is a " +
+    "paragraph line at the target's end (SPEC 6.5, 3, 14.20)",
+  files: {
+    [R16_ORIGIN]: `${R16_D_PREFIX}${R16_D_MOVED} more\n</S> baz\n`,
+    [R16_TARGET]: R16_K,
+  },
+  argv: ["move", "specs/a.mdx#p.m", "specs/b.mdx#m"],
+  expected: {
+    [R16_ORIGIN]: `${R16_D_PREFIX} more\n</S> baz\n`,
+    [R16_TARGET]: R16_D_TARGET_AFTER,
+  },
+};
+
+// The insertion-side counterpart: a target `foo <S id="p">`, U+000A,
+// `<S id="p.s"> </S></S> tail`, U+000A — deriving, its second line a
+// paragraph continuation — receives `<S id="m">text</S>`, alone on its
+// origin line, into `p.n`; the insertion, preceded on its line by `p.s`'s
+// closing tag, splits the line with an added terminator (6.5), leaving
+// `<S id="p.s"> </S>` alone on its line — a flow line, its tags
+// flow-position tags closing no text-position tag and interrupting the
+// paragraph that holds `p`'s opening tag. The control is T6.2-3(e), the
+// U+000C spelling of that line, kept in text position and performed.
+const R16_D_INSERTION_MOVED = '<S id="m">text</S>';
+const R16_D_INSERTION_ARM: R16RefusedArm = {
+  key: "(d) the insertion leaving a sibling's tags alone on their line",
+  summary:
+    "the insertion, preceded on its line by `p.s`'s closing tag, splits " +
+    'the line with an added terminator, leaving `<S id="p.s"> </S>` ' +
+    "alone on its line — a flow line whose tags close no text-position " +
+    "tag and interrupt the paragraph holding `p`'s opening tag (SPEC 6.5, " +
+    "6.2, 14.20)",
+  files: {
+    [R16_ORIGIN]: `${R16_K}${R16_D_INSERTION_MOVED}\n`,
+    [R16_TARGET]: 'foo <S id="p">\n<S id="p.s"> </S></S> tail\n',
+  },
+  argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
+  illFormed: {
+    [R16_TARGET]:
+      'foo <S id="p">\n<S id="p.s"> </S>\n<S id="p.n">text</S>\n</S> tail\n',
+  },
+  wellFormed: { [R16_ORIGIN]: R16_K },
+  identities: [R16_TARGET],
+  locations: [r16Construct(R16_ORIGIN, R16_K, R16_D_INSERTION_MOVED)],
+};
+
+// (e) a top-level `new-id` insertion at the end of a file whose last line
+// belongs to an ESM block — a target holding only `import A from
+// "./A.xspec"` (`specs/A.mdx` discovered, the binding unused, 2.1),
+// terminated and unterminated — is absorbed into the block (the
+// unterminated variant's insertion point, not at a line start, takes an
+// added terminator first: the same composed text). The control: the same
+// declaration followed by U+000A, U+000A — the empty line ending the
+// block — receives the moved text at its end, a line start, none added.
+const R16_E_DECLARATION = 'import A from "./A.xspec"';
+const R16_E_MOVED = '<S id="m">\nx\n</S>';
+const R16_E_ORIGIN_BEFORE = `${R16_K}${R16_E_MOVED}\n`;
+const R16_E_MODULE = '<S id="q">Q text.</S>\n';
+const R16_E_ARGV = ["move", "specs/o.mdx#m", "specs/b.mdx#m"] as const;
+
+function r16ArmE(name: string, target: string): R16RefusedArm {
+  return {
+    key: `(e) the insertion after a block's last line, the target ${name}`,
+    summary:
+      `the moved text, inserted at the end of a file whose last line is an ` +
+      `ESM block's, is absorbed into the block, which runs to the next ` +
+      `blank line or the file's end (SPEC 6.5, 14.20)`,
+    files: {
+      [R16_E_ORIGIN]: R16_E_ORIGIN_BEFORE,
+      [R16_TARGET]: target,
+      [R16_E_MODULE_SOURCE]: R16_E_MODULE,
+    },
+    argv: [...R16_E_ARGV],
+    illFormed: { [R16_TARGET]: `${R16_E_DECLARATION}\n${R16_E_MOVED}\n` },
+    wellFormed: { [R16_E_ORIGIN]: R16_K },
+    identities: [R16_TARGET],
+    locations: [r16Construct(R16_E_ORIGIN, R16_K, R16_E_MOVED)],
+  };
+}
+
+const R16_E_CONTROL: R16ControlArm = {
+  key: "(e) control: the empty line ending the block",
+  summary:
+    "the target's empty line ends its ESM block, so the moved text and " +
+    "U+000A are appended after that line's terminator — a line start, no " +
+    "terminator added — and the declaration's binding stays unused and " +
+    "valid (SPEC 6.5, 2.1, 14.20)",
+  files: {
+    [R16_E_ORIGIN]: R16_E_ORIGIN_BEFORE,
+    [R16_TARGET]: `${R16_E_DECLARATION}\n\n`,
+    [R16_E_MODULE_SOURCE]: R16_E_MODULE,
+  },
+  argv: [...R16_E_ARGV],
+  expected: {
+    [R16_E_ORIGIN]: R16_K,
+    [R16_TARGET]: `${R16_E_DECLARATION}\n\n${R16_E_MOVED}\n`,
+  },
+};
+
+const R16_REFUSED_ARMS: readonly R16RefusedArm[] = [
+  r16ArmA("a space", " "),
+  r16ArmA("a tab", "\t"),
+  r16ArmA("nothing", ""),
+  r16ArmB("opening", "U+000C", R16_FF),
+  r16ArmB("closing", "U+000C", R16_FF),
+  r16ArmB("opening", "U+000B", R16_VT),
+  r16ArmB("closing", "U+000B", R16_VT),
+  ...R16_C_SHAPES.flatMap((shape) =>
+    R16_C_PARENTS.map((parent) => r16ArmC(shape, parent)),
+  ),
+  r16ArmD("a list marker", "- item"),
+  r16ArmD("a setext underline", "==="),
+  r16ArmD("a flow-position tag", '<S id="p.q" />'),
+  r16ArmD("a flow-position expression", "{/* c */}"),
+  R16_D_CLOSING_ARM,
+  R16_D_INSERTION_ARM,
+  r16ArmE("terminated", `${R16_E_DECLARATION}\n`),
+  r16ArmE("unterminated", R16_E_DECLARATION),
+];
+
+const R16_CONTROL_ARMS: readonly R16ControlArm[] = [
+  ...R16_C_PARENTS.map((parent) => r16ControlC(parent)),
+  R16_D_CONTROL,
+  R16_E_CONTROL,
+];
+
+/**
+ * Every MDX text T6.5-16 stages, or asserts as a move's result or as the
+ * deriving side of a refused rewrite, for the S-9 self-test
+ * (test/self/s9-fixture-well-formedness.test.ts): a staged file the stock
+ * MDX 3 grammar rejects would fail the valid-workspace precondition, and a
+ * control's expectation it rejects would pin a text 6.5 refuses.
+ */
+export const R16_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [
+  ...R16_REFUSED_ARMS.flatMap((arm) => [
+    ...Object.entries(arm.files).map(
+      ([rel, text]) => [`T6.5-16 ${arm.key}: ${rel} as staged`, text] as const,
+    ),
+    ...Object.entries(arm.wellFormed).map(
+      ([rel, text]) =>
+        [
+          `T6.5-16 ${arm.key}: ${rel} as the edits would leave it`,
+          text,
+        ] as const,
+    ),
+  ]),
+  ...R16_CONTROL_ARMS.flatMap((arm) => [
+    ...Object.entries(arm.files).map(
+      ([rel, text]) => [`T6.5-16 ${arm.key}: ${rel} as staged`, text] as const,
+    ),
+    ...Object.entries(arm.expected).map(
+      ([rel, text]) =>
+        [`T6.5-16 ${arm.key}: ${rel} after the move`, text] as const,
+    ),
+  ]),
+];
+
+/**
+ * Every would-be text T6.5-16 refuses, for the S-9 self-test: each is the
+ * concerned file as 6.5's exact edits would leave it, which must not derive
+ * — the ground of the refusal.
+ */
+export const R16_REFUSED_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = R16_REFUSED_ARMS.flatMap((arm) =>
+  Object.entries(arm.illFormed).map(
+    ([rel, text]) =>
+      [`T6.5-16 ${arm.key}: ${rel} as the edits would leave it`, text] as const,
+  ),
+);
+
+/** A would-be text the entry declares underivable must not derive (S-9): a staging defect, never a verdict. */
+function r16AssertUnderivable(text: string, rel: string, key: string): void {
+  if (!deriveMdx(text).derives) return;
+  throw new HarnessStagingError(
+    "mdx-derivability",
+    rel,
+    `T6.5-16 ${key}: the would-be text of ${rel} derives under the stock ` +
+      `MDX 3 grammar, so it is no ground for refused-invalid-rewrite — the ` +
+      `arm's premise, not a product verdict; the text reads ${JSON.stringify(text)}`,
+  );
+}
+
+/** A composed text the entry declares deriving must derive (S-9): a staging defect, never a verdict. */
+function r16AssertDerives(text: string, rel: string, key: string): void {
+  const verdict = deriveMdx(text);
+  if (verdict.derives) return;
+  throw new HarnessStagingError(
+    "mdx-derivability",
+    rel,
+    `T6.5-16 ${key}: the composed text for ${rel} does not derive under ` +
+      `the stock MDX 3 grammar (${verdict.reason}) — the arm's premise, not ` +
+      `a product verdict; the text reads ${JSON.stringify(text)}`,
+  );
+}
+
+function r16RenderLocations(locations: readonly R16Location[]): string {
+  return locations
+    .map(
+      ({ file, start, end }) =>
+        `${JSON.stringify(file)} [${String(start)}, ${String(end)})`,
+    )
+    .join("; ");
+}
+
+/**
+ * The refusal's report: exactly one finding per applicable reason —
+ * `refused-invalid-rewrite` and the arm's `beside` reasons, none further —
+ * the `refused-invalid-rewrite` finding's `locations` exactly the arm's in
+ * 12.7's order, its `identities` exactly the concerned paths in byte
+ * order, its `path` null (SPEC 14, 12.7, 1.7).
+ */
+function r16AssertFinding(
+  findings: readonly Finding[],
+  arm: R16RefusedArm,
+  context: string,
+): void {
+  const expectedCodes = ["refused-invalid-rewrite", ...(arm.beside ?? [])];
+  const actualCodes = findings.map(
+    (finding) => finding.condition ?? finding.code ?? "(code-less)",
+  );
+  const sameCodes =
+    actualCodes.length === expectedCodes.length &&
+    [...expectedCodes]
+      .sort()
+      .every((code, index) => [...actualCodes].sort()[index] === code);
+  if (!sameCodes) {
+    fail(
+      `${context}: the report holds exactly one finding per applicable ` +
+        `reason — ${JSON.stringify(expectedCodes)}, \`refused-invalid-rewrite\` ` +
+        `once per operation however many files or shapes it covers, and no ` +
+        `reason beside — ${arm.summary} (SPEC 6.5, 14, 12.7); got ` +
+        `${JSON.stringify(actualCodes)}`,
+    );
+  }
+  const finding = findings.find(
+    (candidate) => candidate.code === "refused-invalid-rewrite",
+  )!;
+  const actualRendered = finding.locations
+    .map(
+      (location) =>
+        `${renderPathValue(location.file)} [${String(location.range.start)}, ` +
+        `${String(location.range.end)})`,
+    )
+    .join("; ");
+  const exact =
+    finding.locations.length === arm.locations.length &&
+    arm.locations.every((expected, index) => {
+      const location = finding.locations[index]!;
+      return (
+        location.file === expected.file &&
+        location.range.start === expected.start &&
+        location.range.end === expected.end
+      );
+    });
+  if (!exact) {
+    fail(
+      `${context}: the finding's \`locations\` are exactly ` +
+        `[${r16RenderLocations(arm.locations)}] — the moved section's ` +
+        `construct range in the origin file, in pre-operation coordinates` +
+        (arm.locations.length > 1
+          ? `, then every reference spelling rooted at an addition no offset ` +
+            `admits, by its occurrence span, in 12.7's order`
+          : "") +
+        ` (SPEC 14, 1.7, 5.7, 12.7); got [${actualRendered}] ` +
+        `(message: ${JSON.stringify(finding.message)})`,
+    );
+  }
+  assertFindingIdentities(
+    finding,
+    arm.identities,
+    `${context}: the finding's \`identities\` — the workspace-relative ` +
+      `paths of the files concerned, each whose would-be text is not ` +
+      `well-formed MDX or which holds no admissible offset for an addition ` +
+      `it needs, in byte order (SPEC 14, 12.7)`,
+  );
+  if (finding.path !== null) {
+    fail(
+      `${context}: the finding's \`path\` is null — a refusal locating in ` +
+        `source concerns no path (SPEC 14, 12.7); got ` +
+        `${renderPathValue(finding.path)} (message: ` +
+        `${JSON.stringify(finding.message)})`,
+    );
+  }
+}
+
+async function runR16RefusedArm(
+  product: ProductBinding,
+  arm: R16RefusedArm,
+): Promise<void> {
+  const context = `T6.5-16 ${arm.key}`;
+  for (const [rel, text] of Object.entries(arm.illFormed)) {
+    r16AssertUnderivable(text, rel, arm.key);
+  }
+  for (const [rel, text] of Object.entries(arm.wellFormed)) {
+    r16AssertDerives(text, rel, arm.key);
+  }
+  const command = arm.argv.join(" ");
+  await withWorkspace(arm.files, async (workspace) => {
+    // Premise: the pre-move workspace is valid (6.4's precondition), every
+    // staged file well-formed, so the refusal is the rewrite's alone; the
+    // build also lays down the derived files the compare below covers.
+    await buildOk(
+      product,
+      workspace,
+      `${context} \`build\` over the staging — the pre-move workspace is ` +
+        `valid, every staged file well-formed (SPEC 6.4, 6.5, 14.20)`,
+    );
+    await assertLeavesUnchanged(
+      workspace.root,
+      async () => {
+        const findings = await runFindingsReport(
+          product,
+          workspace,
+          [...arm.argv, "--json"],
+          1,
+          `${context} \`${command} --json\` — refused: ${arm.summary}; ` +
+            `exit 1 with the form-exact 12.7 findings-only report ` +
+            `(SPEC 6.5, 14, 12.0, 12.7)`,
+        );
+        r16AssertFinding(findings, arm, context);
+      },
+      `${context}: \`${command}\` refused — modifies nothing: every source ` +
+        `and derived file byte-identical, the journal absent or ` +
+        `byte-unchanged (SPEC 6.5, 14)`,
+    );
+  });
+}
+
+async function runR16ControlArm(
+  product: ProductBinding,
+  arm: R16ControlArm,
+): Promise<void> {
+  const context = `T6.5-16 ${arm.key}`;
+  for (const [rel, text] of Object.entries(arm.expected)) {
+    r16AssertDerives(text, rel, arm.key);
+  }
+  const command = arm.argv.join(" ");
+  await withWorkspace(arm.files, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      `${context} \`build\` over the staging — the pre-move workspace is ` +
+        `valid, every staged file well-formed (SPEC 6.4, 6.5, 14.20)`,
+    );
+    await expectExit(
+      product,
+      workspace,
+      [...arm.argv],
+      0,
+      `${context} \`${command}\` — the movable control is performed: ` +
+        `${arm.summary}`,
+    );
+    for (const [rel, text] of Object.entries(arm.expected)) {
+      await assertFileBytes(
+        workspace.path(rel),
+        text,
+        `${context}: ${rel} after the move — ${arm.summary}; composed from ` +
+          `6.5's exact edits and 3's line drops with no latitude, every ` +
+          `other byte unchanged (SPEC 6.5, 3; H-4)`,
+      );
+    }
+    await assertCleanAfterMove(
+      product,
+      workspace,
+      "the performed control leaves a valid workspace",
+      context,
+    );
+  });
+}
+
+const T6_5_16 = defineProductTest({
+  id: "T6.5-16",
+  title:
+    "refused-invalid-rewrite: a section-form move whose exact edits would leave a rewritten file other than well-formed MDX — the origin as its deletion leaves it, the target as its parent rewrite and insertion leave it — is refused: exit 1, nothing modified (the workspace byte-compared, the journal absent or byte-unchanged), exactly one `refused-invalid-rewrite` finding per operation locating the moved section's construct range in the origin file, its `identities` the concerned files' workspace-relative paths in byte order, its `path` null; each arm's would-be text verified underivable and every other rewritten file's verified to derive (S-9) from a valid pre-move workspace: (a) the `body</S>` variant — `foo <S id=\"m\">`, then a space, a tab, or nothing, U+000A, `body</S>` — moved to top level; (b) the one-sided U+000C and U+000B spellings of 6.2's worked three-line shape, the character following the opening tag or preceding the closing tag; (c) a flow-position section, a self-closing section, and a single-line section holding nothing outside its tags, each moved into `foo <S id=\"p\">bar</S> baz`, into the parent with its closing tag on a later line, and into the self-closing parent after its paired-form rewrite; (d) a deletion leaving a list marker, a setext underline, a flow-position tag, a flow-position expression, or the parent's own closing tag at its line's start inside a text-position parent, and the insertion-side counterpart leaving `<S id=\"p.s\"> </S>` alone on its line; (e) a top-level insertion at the end of a file whose last line is an ESM block's, terminated and unterminated; with the movable controls performed and byte-asserted, `check` and `build` clean — the in-line section `<S id=\"m\">x</S>` into each of (c)'s parents, (d)'s plain-prose remainder ` more` kept as a paragraph-continuation line, and (e)'s declaration followed by the empty line ending its block, the moved text appended after it (SPEC 6.5, 6.2, 3, 2.1, 1.7, 14, 12.7, 14.20)",
+  run: async (product) => {
+    for (const arm of R16_REFUSED_ARMS) {
+      await runR16RefusedArm(product, arm);
+    }
+    for (const arm of R16_CONTROL_ARMS) {
+      await runR16ControlArm(product, arm);
+    }
+  },
+});
+
 /** TEST-SPEC §6.5, third part, in canonical ID order (SUITE-25). */
 export const section65iiiTests: readonly ProductTestEntry[] = [
   T6_5_12,
   T6_5_13,
   T6_5_14,
   T6_5_15,
+  T6_5_16,
 ];

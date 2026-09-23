@@ -41,7 +41,11 @@ import {
   I3_ROOM_SOURCE,
 } from "../suite/registry/section-6.2.js";
 import { X2_COMPOSED_FORMS } from "../suite/registry/section-6.5.js";
-import { J15_FORM_VECTORS } from "../suite/registry/section-6.5-iii.js";
+import {
+  J15_FORM_VECTORS,
+  R16_FORM_VECTORS,
+  R16_REFUSED_VECTORS,
+} from "../suite/registry/section-6.5-iii.js";
 
 const LF = String.fromCodePoint(0x000a);
 const CR = String.fromCodePoint(0x000d);
@@ -396,6 +400,37 @@ describe("S-9: every form T6.5-15 stages or asserts as a move's result derives",
   });
 });
 
+// T6.5-16's stagings, the deriving side of each refused rewrite (the other
+// rewritten file as 6.5's edits would leave it), and each control's composed
+// expectation: every one must derive, while every would-be text the entry
+// refuses — the concerned file as the exact edits would leave it — must not,
+// the ground of `refused-invalid-rewrite` (SPEC 6.5, 14.20).
+describe("S-9: every form T6.5-16 stages, or asserts as a control's result or a refused rewrite's deriving side, derives", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(R16_FORM_VECTORS.length).toBe(95);
+    expect(new Set(R16_FORM_VECTORS.map(([name]) => name)).size).toBe(
+      R16_FORM_VECTORS.length,
+    );
+  });
+  test.each(R16_FORM_VECTORS)("%s", (_name, source) => {
+    expectDerives(source);
+  });
+});
+
+describe("S-9: every would-be text T6.5-16 refuses does not derive", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(R16_REFUSED_VECTORS.length).toBe(24);
+    expect(new Set(R16_REFUSED_VECTORS.map(([name]) => name)).size).toBe(
+      R16_REFUSED_VECTORS.length,
+    );
+  });
+  test.each(R16_REFUSED_VECTORS)("%s", (_name, source) => {
+    expectRejects(source);
+    // No allowance makes an MDX-syntax rejection pass.
+    expectRejects(source, MDX_ALLOWANCES);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Declared-unparseable shapes.
 
@@ -500,6 +535,17 @@ const UNPARSEABLE: ReadonlyArray<readonly [name: string, source: string]> = [
       "</S>",
       "</S>",
     ),
+  ],
+  // T6.5-16(d)'s setext remainder: the deletion leaves `===` under the
+  // paragraph holding the parent's text-position opening tag, a setext
+  // heading ending while the element opened inside it is still open. The
+  // parser's development build (the `development` export condition Vitest
+  // resolves) trips its stack-consistency assertion here before the
+  // element-matching rejection the production build raises; `deriveMdx`
+  // reports that assertion as the non-derivation it is.
+  [
+    "setext underline under a text-position parent's opening tag",
+    doc('foo <S id="p">bar', "===", "</S> baz"),
   ],
 ];
 
