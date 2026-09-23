@@ -2,8 +2,9 @@
 // target file's own references to moved nodes, T6.5-13, admissible offsets
 // and composition in pre-operation coordinates, T6.5-14, a created target
 // file's fixed content, T6.5-15, joint import removals over an ESM block,
-// T6.5-16, `refused-invalid-rewrite`, T6.5-17, `refused-moved-import`, and
-// T6.5-18, the shadow-aware binding choice.
+// T6.5-16, `refused-invalid-rewrite`, T6.5-17, `refused-moved-import`,
+// T6.5-18, the shadow-aware binding choice, and T6.5-19, the in-section
+// exclusion.
 // T6.5-1…T6.5-10 are section-6.5.ts's business and T6.5-11
 // section-6.5-ii.ts's; this module keeps both files' edits bounded (the
 // section-10.7-i/-ii precedent).
@@ -158,6 +159,15 @@
 //   addition composes to the file's start (T6.6-4(b)'s latitude); the
 //   compile-clean premise and observation ride the TypeScript tooling
 //   driver (H-2) as T6.5-9's do.
+// - T6.5-19 rides T6.5-13's arm runner (`runA13Arm`, its diagnoses under
+//   the caller's test ID): (a) is a cross-file arm over T6.5-13's shared
+//   origin and third module (the origin keeps a second use of `X`, so
+//   its expectation is the deletion's alone), (b) stages T6.5-13(i)'s
+//   existing target `<S id="k">z</S>`, U+000A, the moved `m` appended
+//   after its final terminator; the entry's named offsets are probed
+//   under `deriveMdx` over the receiving file as the other edits leave
+//   it, the declaration inserted per 6.5's terminator rule
+//   (`r16Declared`), as staging premises.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -2300,13 +2310,17 @@ const A13_ARMS: readonly A13Arm[] = [
  * grammar. A failure here is the arm's own defect — a harness error, never
  * a product verdict.
  */
-function a13AssertPremiseDerives(text: string, arm: A13Arm): void {
+function a13AssertPremiseDerives(
+  text: string,
+  arm: A13Arm,
+  testId = "T6.5-13",
+): void {
   const verdict = deriveMdx(text);
   if (verdict.derives) return;
   throw new HarnessStagingError(
     "mdx-derivability",
     arm.receiving,
-    `T6.5-13 ${arm.key}: the composed expectation does not derive under ` +
+    `${testId} ${arm.key}: the composed expectation does not derive under ` +
       `the stock MDX 3 grammar (${verdict.reason}) — the arm's premise, not ` +
       `a product verdict; the text reads ${JSON.stringify(text)}`,
   );
@@ -2603,16 +2617,18 @@ const A13_PLACEHOLDER_IDENTS: readonly string[] = ["X", "Y", "Z"];
  * Run one arm: preview, move, bytes, preview agreement, the root's own
  * content, clean `check`/`build`, and the arm's `view` and `impact`
  * expectations where it states them; returns the receiving file's bytes.
+ * `testId` heads the diagnoses (T6.5-19's arms share this runner).
  */
 async function runA13Arm(
   product: ProductBinding,
   arm: A13Arm,
+  testId = "T6.5-13",
 ): Promise<string> {
-  const context = `T6.5-13 ${arm.key}`;
+  const context = `${testId} ${arm.key}`;
   for (const form of arm.compose(
     A13_PLACEHOLDER_IDENTS.slice(0, arm.added.length),
   )) {
-    a13AssertPremiseDerives(form, arm);
+    a13AssertPremiseDerives(form, arm, testId);
   }
   return await withWorkspace(arm.files, async (workspace) => {
     await buildOk(product, workspace, `${context} \`build\` over the staging`);
@@ -5549,6 +5565,411 @@ const T6_5_18 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T6.5-19 The in-section exclusion
+// ---------------------------------------------------------------------------
+//
+// SPEC 6.5: in a spec source an admissible offset is one at which the file,
+// as every edit of the rewrite leaves it, is well-formed with the added line
+// an import declaration of an ESM block standing inside no section
+// construct of the file so left, the inserted one included. An ESM block
+// derives inside a section element (14.20; T2.1-6), so derivability does
+// not decide the exclusion — and no arm of T6.5-13 or T6.5-16(g) does
+// either: each in-section line start there also absorbs the following line
+// or follows a paragraph line, and the in-section offsets that derive are
+// mid-line, never preferred. Each receiving file here holds exactly one
+// line start at which the added line derives as a declaration — inside a
+// section, at the start of an interior empty line — and exactly one
+// admissible offset, mid-line at the file's end, so the two readings take
+// different offsets: a product judging admissibility by derivability and
+// T6.5-13(l)'s exclusion alone, then applying the line-start preference,
+// inserts at the empty line's start — the workspace valid, `check` clean,
+// every node's own content as it was, the declaration's line dropping
+// whole (3) — and fails the byte contract and the preview's offset while
+// passing T6.5-13 whole. (a) judges the target file; (b) the origin file as
+// its deletion leaves it ("of the file so left"), the declaration it
+// asserts being the origin's own (T6.5-13(i)'s conversion). Both arms are
+// composed and observed as T6.5-13's are (`runA13Arm`): value-blind in the
+// fresh identifier alone, the receiving root's own text and ownHash through
+// `query node` before and after, the real bytes agreeing with the preview's
+// offsets (T6.6-4(b)), `build` and `check` clean after each move. Every
+// form here derives under the grammar 14.20 fixes (S-9), the excluded
+// in-section forms included: the entry's named offsets are probed under
+// `deriveMdx` before the move — the in-section and paragraph-text forms
+// deriving, the absorbing ones not — a staging premise (a
+// `HarnessStagingError`), never a verdict.
+
+/** (a)'s target: an interior empty line inside `p`, the `</S>` line unterminated. */
+const A19_A_TARGET = ['<S id="p">', "", "x", "</S>"].join("\n");
+/** (a)'s target as the target insertion alone leaves it, the declaration absent (6.5's composed text; the identifier `X`). */
+const A19_A_COMPOSED = [
+  '<S id="p">',
+  "",
+  "x",
+  ...a13MovedLines("p.n", "X"),
+  "</S>",
+].join("\n");
+const A19_A_DECLARATION = a13Declaration("X");
+/** The end of (a)'s tag line before its terminator; the empty line starts one byte on, the `x` line two. */
+const A19_A_TAG_END = A19_A_COMPOSED.indexOf("\n");
+
+/** (a)'s composition: the moved text before `</S>`, the tag's line ended by the added terminator, then the declaration. */
+function a19ComposeIntoP(ident: string): string {
+  return [
+    '<S id="p">',
+    "",
+    "x",
+    ...a13MovedLines("p.n", ident),
+    "</S>",
+    a13Declaration(ident),
+    "",
+  ].join("\n");
+}
+
+const A19_A_ARM: A13Arm = a13CrossArm({
+  key: "(a)",
+  summary:
+    "the target side — offset 0 would absorb the tag's line into the " +
+    "block; the start of the empty line heads a block that empty line " +
+    "ends, deriving inside `p`: a line start, yet inadmissible; the end of " +
+    "the tag's line heads such a block too, mid-line; the start of the `x` " +
+    "line would absorb that line; the end of the `x` line leaves the added " +
+    "line paragraph text; at the start of the `</S>` line, the insertion " +
+    "point, the declaration would stand after the moved text and absorb " +
+    "the `</S>` line; so the file's end, mid-line after `</S>`, is the " +
+    "only admissible offset: the added terminator ends the `</S>` line, " +
+    "which drops as it did before, then the declaration and its terminator",
+  target: A19_A_TARGET,
+  newId: "p.n",
+  compose: a19ComposeIntoP,
+  previewEdits: [
+    a13At("target-insertion", A19_A_TARGET.indexOf("</S>")),
+    a13At("import-addition", A19_A_TARGET.length),
+  ],
+  ownTextBefore: "",
+  ownTextAfter: "",
+  ownHashChanges: false,
+});
+
+// (b): the origin `<S id="m">`, U+000A, `z`, U+000A, `</S>`, U+000A,
+// `<S id="a" d={"m"}>`, U+000A, U+000A, `y`, U+000A, `</S>` with no final
+// terminator; `m` moved to the top level of an existing target needing no
+// declaration (the moved text local to its subtree), its ID kept; the
+// origin's own `d={"m"}` converts to `d={<T>.m}` through the target
+// module's declaration the origin lacks. The deletion's range runs from the
+// file's start through line 3's terminator — the construct's own
+// characters and the terminator of the line their removal leaves empty
+// (SPEC 3, 6.6) — leaving `<S id="a" d={<T>.m}>`, U+000A, U+000A, `y`,
+// U+000A, `</S>`, over which the file's end is the only admissible offset.
+const A19_B_MOVED = ['<S id="m">', "z", "</S>"].join("\n");
+const A19_B_ORIGIN_BEFORE = [
+  A19_B_MOVED,
+  '<S id="a" d={"m"}>',
+  "",
+  "y",
+  "</S>",
+].join("\n");
+/** The origin deletion's end: the construct's own characters plus line 3's terminator. */
+const A19_B_DELETION_END = A19_B_MOVED.length + 1;
+/** The `d` reference occurrence: that one reference's own expression, `"m"` (SPEC 5.7). */
+const A19_B_REFERENCE = A19_B_ORIGIN_BEFORE.indexOf('d={"m"}') + 3;
+const A19_B_TARGET_AFTER = `${A13_EXISTING_TARGET}${A19_B_MOVED}\n`;
+/** (b)'s origin as the deletion and the reference rewrite leave it, the declaration absent (the identifier `X`). */
+const A19_B_COMPOSED = ['<S id="a" d={X.m}>', "", "y", "</S>"].join("\n");
+const A19_B_DECLARATION = a13Declaration("X", A13_TARGET_SPECIFIER);
+/** The end of (b)'s tag line before its terminator; the empty line starts one byte on, the `y` line two. */
+const A19_B_TAG_END = A19_B_COMPOSED.indexOf("\n");
+
+/** (b)'s composition: the converted reference, the `</S>` line ended by the added terminator, then the target module's declaration. */
+function a19ComposeOriginDeclaration(
+  idents: readonly string[],
+): readonly string[] {
+  const [t = ""] = idents;
+  return [
+    [
+      `<S id="a" d={${t}.m}>`,
+      "",
+      "y",
+      "</S>",
+      a13Declaration(t, A13_TARGET_SPECIFIER),
+      "",
+    ].join("\n"),
+  ];
+}
+
+const A19_B_ARM: A13Arm = {
+  key: "(b)",
+  summary:
+    "the origin side, `of the file so left` — over the origin as the " +
+    "deletion leaves it, the composed file's start would absorb the tag's " +
+    "line into the block; the start of the empty line heads a block that " +
+    "line ends, deriving inside `a`: a line start, yet inadmissible; the " +
+    "end of the tag's line heads such a block mid-line; the start of the " +
+    "`y` line would absorb that line; the end of the `y` line and the " +
+    "start of the `</S>` line each leave the added line paragraph text; so " +
+    "the file's end, mid-line after `</S>`, is the only admissible offset: " +
+    "the added terminator ends the `</S>` line, which drops as it did " +
+    "before, then the target module's declaration and its terminator",
+  files: {
+    [A13_ORIGIN]: A19_B_ORIGIN_BEFORE,
+    [A13_TARGET]: A13_EXISTING_TARGET,
+  },
+  argv: ["move", `${A13_ORIGIN}#m`, `${A13_TARGET}#m`],
+  receiving: A13_ORIGIN,
+  added: [A13_TARGET_SPECIFIER],
+  compose: a19ComposeOriginDeclaration,
+  others: [
+    {
+      rel: A13_TARGET,
+      bytes: A19_B_TARGET_AFTER,
+      reason:
+        "the moved text appended at the file's end after its final " +
+        "terminator — a line start, so none is added before it — followed " +
+        "by its own, the ID kept",
+    },
+  ],
+  previewEdits: [
+    [
+      a13Span("origin-deletion", 0, A19_B_DELETION_END),
+      a13Span("reference-rewrite", A19_B_REFERENCE, A19_B_REFERENCE + 3),
+      a13At("import-addition", A19_B_ORIGIN_BEFORE.length),
+    ],
+  ],
+  root: {
+    identity: A13_ORIGIN,
+    ownTextBefore: "",
+    ownTextAfter: "",
+    ownHashChanges: true,
+  },
+};
+
+/**
+ * One arm of T6.5-19: T6.5-13's arm plus the entry's named offsets over the
+ * receiving file as every other edit leaves it, each probed with the
+ * declaration inserted per 6.5's terminator rule (`r16Declared`).
+ */
+interface A19Arm {
+  readonly arm: A13Arm;
+  /** The receiving file as every other edit of the rewrite leaves it, the declaration absent. */
+  readonly composed: string;
+  /** The entry's named offsets, each with the verdict it states. */
+  readonly probes: readonly R16OffsetProbe[];
+}
+
+const A19_A: A19Arm = {
+  arm: A19_A_ARM,
+  composed: A19_A_COMPOSED,
+  probes: [
+    r16Probe(
+      "offset 0, absorbing the tag's line into the block",
+      A19_A_COMPOSED,
+      0,
+      false,
+      A19_A_DECLARATION,
+    ),
+    r16Probe(
+      "the end of the tag's line before its terminator, heading a block inside `p` (mid-line)",
+      A19_A_COMPOSED,
+      A19_A_TAG_END,
+      true,
+      A19_A_DECLARATION,
+    ),
+    r16Probe(
+      "the start of the empty line, heading a block that line ends inside `p` (a line start, inadmissible)",
+      A19_A_COMPOSED,
+      A19_A_TAG_END + 1,
+      true,
+      A19_A_DECLARATION,
+    ),
+    r16Probe(
+      "the start of the `x` line, absorbing that line",
+      A19_A_COMPOSED,
+      A19_A_TAG_END + 2,
+      false,
+      A19_A_DECLARATION,
+    ),
+    r16Probe(
+      "the end of the `x` line, leaving the added line paragraph text",
+      A19_A_COMPOSED,
+      A19_A_TAG_END + 3,
+      true,
+      A19_A_DECLARATION,
+    ),
+    r16Probe(
+      "the start of the `</S>` line after the moved text (the insertion point), absorbing the `</S>` line",
+      A19_A_COMPOSED,
+      A19_A_COMPOSED.lastIndexOf("</S>"),
+      false,
+      A19_A_DECLARATION,
+    ),
+    r16Probe(
+      "the file's end, mid-line after `</S>` — the one admissible offset, the result",
+      A19_A_COMPOSED,
+      A19_A_COMPOSED.length,
+      true,
+      A19_A_DECLARATION,
+    ),
+  ],
+};
+
+const A19_B: A19Arm = {
+  arm: A19_B_ARM,
+  composed: A19_B_COMPOSED,
+  probes: [
+    r16Probe(
+      "the composed file's start, absorbing the tag's line into the block",
+      A19_B_COMPOSED,
+      0,
+      false,
+      A19_B_DECLARATION,
+    ),
+    r16Probe(
+      "the end of the tag's line before its terminator, heading a block inside `a` (mid-line)",
+      A19_B_COMPOSED,
+      A19_B_TAG_END,
+      true,
+      A19_B_DECLARATION,
+    ),
+    r16Probe(
+      "the start of the empty line, heading a block that line ends inside `a` (a line start, inadmissible)",
+      A19_B_COMPOSED,
+      A19_B_TAG_END + 1,
+      true,
+      A19_B_DECLARATION,
+    ),
+    r16Probe(
+      "the start of the `y` line, absorbing that line",
+      A19_B_COMPOSED,
+      A19_B_TAG_END + 2,
+      false,
+      A19_B_DECLARATION,
+    ),
+    r16Probe(
+      "the end of the `y` line, leaving the added line paragraph text",
+      A19_B_COMPOSED,
+      A19_B_TAG_END + 3,
+      true,
+      A19_B_DECLARATION,
+    ),
+    r16Probe(
+      "the start of the `</S>` line, leaving the added line paragraph text",
+      A19_B_COMPOSED,
+      A19_B_COMPOSED.lastIndexOf("</S>"),
+      true,
+      A19_B_DECLARATION,
+    ),
+    r16Probe(
+      "the file's end, mid-line after `</S>` — the one admissible offset, the result",
+      A19_B_COMPOSED,
+      A19_B_COMPOSED.length,
+      true,
+      A19_B_DECLARATION,
+    ),
+  ],
+};
+
+const A19_ARMS: readonly A19Arm[] = [A19_A, A19_B];
+
+/** The vectors of `entry`'s probes holding the verdict `derives`, named by arm, file, and offset. */
+function a19ProbeVectors(
+  entry: A19Arm,
+  derives: boolean,
+): readonly (readonly [name: string, source: string])[] {
+  return entry.probes
+    .filter((probe) => probe.derives === derives)
+    .map(
+      (probe) =>
+        [
+          `T6.5-19 ${entry.arm.key}: ${entry.arm.receiving} with the declaration at ${probe.name}`,
+          probe.text,
+        ] as const,
+    );
+}
+
+/**
+ * Every MDX form T6.5-19 stages, composes as the other edits leave a file,
+ * or names as deriving — the excluded in-section forms included, the
+ * exclusion, not derivability, deciding them (S-9).
+ */
+export const A19_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [
+  [`T6.5-19 (a): ${A13_ORIGIN} as staged`, A13_ORIGIN_BEFORE],
+  [`T6.5-19 (a): ${A13_THIRD} as staged`, A13_THIRD_SOURCE],
+  [`T6.5-19 (a): ${A13_TARGET} as staged`, A19_A_TARGET],
+  [`T6.5-19 (a): ${A13_ORIGIN} after the move`, A13_ORIGIN_AFTER],
+  [
+    `T6.5-19 (a): ${A13_TARGET} as the target insertion leaves it`,
+    A19_A_COMPOSED,
+  ],
+  ...a19ProbeVectors(A19_A, true),
+  [`T6.5-19 (b): ${A13_ORIGIN} as staged`, A19_B_ORIGIN_BEFORE],
+  [`T6.5-19 (b): ${A13_TARGET} as staged`, A13_EXISTING_TARGET],
+  [`T6.5-19 (b): ${A13_TARGET} after the move`, A19_B_TARGET_AFTER],
+  [
+    `T6.5-19 (b): ${A13_ORIGIN} as the deletion and the reference rewrite leave it`,
+    A19_B_COMPOSED,
+  ],
+  ...a19ProbeVectors(A19_B, true),
+];
+
+/**
+ * Every offset T6.5-19 names as absorbing the line after it — offset 0, the
+ * start of the body line, and (a)'s insertion point after the moved text —
+ * heads a block that runs on into a tag or prose line: none derives (S-9).
+ */
+export const A19_UNDERIVABLE_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [...a19ProbeVectors(A19_A, false), ...a19ProbeVectors(A19_B, false)];
+
+/** A form the entry names as absorbing must not derive (S-9): a staging defect, never a verdict. */
+function a19AssertUnderivable(text: string, rel: string, key: string): void {
+  if (!deriveMdx(text).derives) return;
+  throw new HarnessStagingError(
+    "mdx-derivability",
+    rel,
+    `T6.5-19 ${key}: ${rel} derives under the stock MDX 3 grammar, where ` +
+      `the entry names the offset as absorbing the line after it — the ` +
+      `arm's premise, not a product verdict; the text reads ${JSON.stringify(text)}`,
+  );
+}
+
+/**
+ * The entry's premises (S-9): the receiving file as every other edit
+ * leaves it derives, and each named offset holds the verdict the entry
+ * states — the in-section and paragraph-text forms deriving, the absorbing
+ * ones not. A contradiction is a staging defect, never a verdict.
+ */
+function a19AssertPremises(entry: A19Arm): void {
+  const rel = entry.arm.receiving;
+  r16AssertDerives(
+    entry.composed,
+    `${rel} as every other edit leaves it`,
+    entry.arm.key,
+    "T6.5-19",
+  );
+  for (const probe of entry.probes) {
+    const where = `${rel} with the declaration at ${probe.name}`;
+    if (probe.derives) {
+      r16AssertDerives(probe.text, where, entry.arm.key, "T6.5-19");
+    } else {
+      a19AssertUnderivable(probe.text, where, entry.arm.key);
+    }
+  }
+}
+
+const T6_5_19 = defineProductTest({
+  id: "T6.5-19",
+  title:
+    "the in-section exclusion: in a spec source 6.5 admits only an offset whose added declaration's ESM block stands inside no section construct of the file as every edit of the rewrite leaves it, the inserted one included — an ESM block derives inside a section element (14.20), so derivability does not decide the exclusion, and no arm of T6.5-13 or T6.5-16(g) does either; two byte-asserted arms composed and observed as T6.5-13's are (value-blind in the fresh identifier alone, `build` and `check` clean after each move, the receiving root's own text and ownHash compared through `query node` before and after, the real operation's bytes agreeing with the preview's offsets, T6.6-4(b)), each receiving file holding exactly one line start at which the added line derives as a declaration — inside a section, at an interior empty line's start — and exactly one admissible offset, mid-line at the file's end, so that the two readings take different offsets: (a) the target side — `<S id=\"p\">`, U+000A, U+000A, `x`, U+000A, `</S>` with no final terminator, moved into `p.n` with T6.5-13(h)'s moved text, the result exactly `<S id=\"p\">`, U+000A, U+000A, `x`, U+000A, the moved text, U+000A, `</S>`, U+000A, `import <X> from \"./x.xspec\"`, U+000A, the preview's `target-insertion` at the `</S>` line's start and `import-addition` at the file's byte length, the root's own text and ownHash unchanged; (b) the origin side, `of the file so left` — `<S id=\"m\">`, U+000A, `z`, U+000A, `</S>`, U+000A, `<S id=\"a\" d={\"m\"}>`, U+000A, U+000A, `y`, U+000A, `</S>` with no final terminator, `move specs/a.mdx#m specs/b.mdx#m` into an existing target needing no declaration, the origin's own `d={\"m\"}` converting to `d={<T>.m}` through the target module's declaration the origin lacks, the deletion's range from the file's start through line 3's terminator, the result exactly `<S id=\"a\" d={<T>.m}>`, U+000A, U+000A, `y`, U+000A, `</S>`, U+000A, `import <T> from \"./b.xspec\"`, U+000A, the preview's `origin-deletion` spanning that range, `reference-rewrite` spanning `\"m\"`, and `import-addition` at the file's byte length, the origin root `changed` by its lost child reference alone, its own text empty before and after — every form verified to derive under the stock grammar (S-9), the excluded in-section forms included, and every absorbing offset verified not to; a product reading the exclusion out of 6.5, applying it in the target file alone, or judging it by derivability inserts at the empty line's start and fails the byte contract and the preview's offset while passing T6.5-13 whole (SPEC 6.5, 6.4, 6.2, 3, 6.6, 12.7, 1.6, 5.5; H-4)",
+  run: async (product) => {
+    for (const entry of A19_ARMS) {
+      a19AssertPremises(entry);
+      await runA13Arm(product, entry.arm, "T6.5-19");
+    }
+  },
+});
+
 /** TEST-SPEC §6.5, third part, in canonical ID order (SUITE-25). */
 export const section65iiiTests: readonly ProductTestEntry[] = [
   T6_5_12,
@@ -5558,4 +5979,5 @@ export const section65iiiTests: readonly ProductTestEntry[] = [
   T6_5_16,
   T6_5_17,
   T6_5_18,
+  T6_5_19,
 ];

@@ -43,6 +43,8 @@ import {
 import { X2_COMPOSED_FORMS } from "../suite/registry/section-6.5.js";
 import {
   A18_FORM_VECTORS,
+  A19_FORM_VECTORS,
+  A19_UNDERIVABLE_VECTORS,
   J15_FORM_VECTORS,
   M17_FORM_VECTORS,
   R16_FORM_VECTORS,
@@ -463,6 +465,41 @@ describe("S-9: every form T6.5-18 stages or asserts as the move's result derives
   });
   test.each(A18_FORM_VECTORS)("%s", (_name, source) => {
     expectDerives(source);
+  });
+});
+
+// T6.5-19 (section-6.5-iii.ts): each arm's stagings, the receiving file as
+// every other edit leaves it, and the entry's named offsets that derive —
+// the in-section forms at the interior empty line's start and at the tag
+// line's end (deriving, yet excluded by 6.5), the paragraph-text forms, and
+// the result at the file's end: every one must derive, the exclusion, not
+// derivability, deciding the in-section ones (SPEC 6.5, 14.20).
+describe("S-9: every form T6.5-19 stages, composes, or names as deriving derives", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(A19_FORM_VECTORS.length).toBe(18);
+    expect(new Set(A19_FORM_VECTORS.map(([name]) => name)).size).toBe(
+      A19_FORM_VECTORS.length,
+    );
+  });
+  test.each(A19_FORM_VECTORS)("%s", (_name, source) => {
+    expectDerives(source);
+  });
+});
+
+// The offsets T6.5-19 names as absorbing the line after them — offset 0,
+// the start of the body line, and (a)'s insertion point after the moved
+// text — head a block that runs on into a tag or prose line: none derives.
+describe("S-9: every absorbing offset T6.5-19 names does not derive", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(A19_UNDERIVABLE_VECTORS.length).toBe(5);
+    expect(new Set(A19_UNDERIVABLE_VECTORS.map(([name]) => name)).size).toBe(
+      A19_UNDERIVABLE_VECTORS.length,
+    );
+  });
+  test.each(A19_UNDERIVABLE_VECTORS)("%s", (_name, source) => {
+    expectRejects(source);
+    // No allowance makes an MDX-syntax rejection pass.
+    expectRejects(source, MDX_ALLOWANCES);
   });
 });
 
