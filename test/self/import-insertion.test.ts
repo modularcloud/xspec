@@ -1,16 +1,22 @@
 // Self-checks for the added-import insertion discipline helper
 // (`test/helpers/import-insertion.ts`; TEST-SPEC 17 preamble — harness
-// machinery certification does not exercise; SPEC 6.5's line discipline,
-// asserted value-blind as T6.5-8 reads it). Conforming insertions are
-// accepted at a line-start offset and at a mid-line offset — including the
-// ambiguous-offset case where the run's own terminators repeat the bytes
-// beside it, so several offsets describe one byte string — and every
-// violation T6.5-8 names fails as a diagnosed HarnessAssertionError: a
-// declaration joined to a neighbour with `;`, a mid-line offset without
-// its preceding terminator, a spurious blank line, a CRLF terminator, a
-// declaration binding an identifier the rewritten references do not use,
-// a specifier designating the wrong module, nothing inserted, and edits
-// beyond one inserted run.
+// machinery certification does not exercise; SPEC 6.5's spelling and line
+// discipline, asserted value-blind in the fresh identifier and byte-exact in
+// every other character, as T6.5-8 reads it). The disciplined insertion —
+// `import <X> from "<canonical specifier>"` followed by U+000A at a
+// line-start offset — is accepted, including the ambiguous-offset case where
+// the run's own terminator repeats the byte beside it, so several offsets
+// describe one byte string; the canonical specifier is spelled by 6.5's
+// rule; and every failure spelling T6.5-8 names fails as a diagnosed
+// HarnessAssertionError: a declaration joined to a neighbour with `;`, the
+// mid-line form while a line-start offset exists (and a mid-line offset
+// without its preceding terminator), a spurious blank line, a CRLF
+// terminator, single quotes, a `;`, other spacing, a non-canonical
+// specifier (`./sub/../Target.xspec`, a `.` segment, an ascent into the
+// importer's own directory, no `./` prefix, a `.mdx` extension), a
+// declaration binding an identifier the rewritten references are not
+// rooted at, a specifier designating the wrong module, nothing inserted,
+// and edits beyond one inserted run.
 
 import { Buffer } from "node:buffer";
 import { expect, test } from "vitest";
@@ -18,6 +24,7 @@ import { HarnessAssertionError } from "../helpers/assertions.js";
 import {
   assertAddedImportInsertion,
   assertExactDeclarationInsertion,
+  canonicalSpecifier,
   isolateSingleInsertion,
 } from "../helpers/import-insertion.js";
 
@@ -84,11 +91,37 @@ test("isolateSingleInsertion reports every admissible offset of one run", () => 
   );
 });
 
-test("a disciplined added import is accepted at a line-start offset", () => {
+test("canonicalSpecifier spells 6.5's canonical relative form", () => {
+  // No ascent: `./` prefixed.
+  expect(canonicalSpecifier("specs", "specs/Target.xspec")).toBe(
+    "./Target.xspec",
+  );
+  expect(canonicalSpecifier("specs", "specs/sub/t.xspec")).toBe(
+    "./sub/t.xspec",
+  );
+  expect(canonicalSpecifier("", "specs/t.xspec")).toBe("./specs/t.xspec");
+  expect(canonicalSpecifier(".", "specs/t.xspec")).toBe("./specs/t.xspec");
+  // Ascents, then the descending segments.
+  expect(canonicalSpecifier("src", "specs/target.xspec")).toBe(
+    "../specs/target.xspec",
+  );
+  expect(canonicalSpecifier("src/a/b", "specs/t.xspec")).toBe(
+    "../../../specs/t.xspec",
+  );
+  expect(canonicalSpecifier("specs/sub", "specs/t.xspec")).toBe("../t.xspec");
+  expect(canonicalSpecifier("specs/sub", "specs/other/t.xspec")).toBe(
+    "../other/t.xspec",
+  );
+  // The module's basename is a file, never a shared directory segment.
+  expect(canonicalSpecifier("specs", "specs.xspec")).toBe("../specs.xspec");
+  expect(canonicalSpecifier("a/b", "a/b.xspec")).toBe("../b.xspec");
+});
+
+test("the disciplined added import is accepted at a line-start offset", () => {
   const atTop = check('import T from "./Target.xspec"\n' + BASE);
-  expect(atTop).toMatchObject({
+  expect(atTop).toEqual({
     offset: 0,
-    atLineStart: true,
+    declaration: 'import T from "./Target.xspec"',
     identifier: "T",
     specifier: "./Target.xspec",
   });
@@ -99,51 +132,123 @@ test("a disciplined added import is accepted at a line-start offset", () => {
   const second = check(
     'import Org from "./Origin.xspec"\nimport T from "./Target.xspec"\n\n<S id="th" d={T.tm}>\nThird text.\n</S>\n',
   );
-  expect(second).toMatchObject({ offset: 33, atLineStart: true });
-  // Spelling latitude: single quotes, a `../` relative form, a `;`.
+  expect(second.offset).toBe(33);
+  // At the file's end after its final terminator — a line-start admissible
+  // offset (SPEC 6.5), the one every receiving file of the consumers holds.
+  expect(check(BASE + 'import T from "./Target.xspec"\n').offset).toBe(
+    BASE.length,
+  );
+  // The identifier's value is the product's: another root, read off the
+  // rewritten references, is accepted alike.
   expect(
-    check("import T from '../specs/Target.xspec';\n" + BASE).specifier,
+    check('import Tgt from "./Target.xspec"\n' + BASE, "Tgt").identifier,
+  ).toBe("Tgt");
+  // The TS arm's ascent spelling from `src/` (T6.5-8).
+  const tsBase = [
+    'import ORG from "../specs/Origin.xspec";',
+    "",
+    "T.mv;",
+    "",
+  ].join("\n");
+  expect(
+    assertAddedImportInsertion(
+      {
+        rel: "src/app.ts",
+        base: bytes(tsBase),
+        actual: bytes('import T from "../specs/Target.xspec"\n' + tsBase),
+        importerDir: "src",
+        expectedModule: "specs/Target.xspec",
+        identifier: "T",
+      },
+      "self",
+    ).specifier,
   ).toBe("../specs/Target.xspec");
 });
 
-test("a disciplined added import is accepted at a mid-line offset", () => {
-  // Inserted after the first declaration's closing quote, before its
-  // terminator: `\n` + declaration + `\n`, leaving the neighbour's own
-  // terminator to start the blank line.
-  const midLine =
-    'import Org from "./Origin.xspec"' +
-    '\nimport T from "./Target.xspec"\n' +
-    '\n\n<S id="th" d={T.tm}>\nThird text.\n</S>\n';
-  const reading = check(midLine);
-  expect(reading.atLineStart).toBe(false);
-  expect(reading.declaration).toBe('import T from "./Target.xspec"');
-});
-
-test("every violation of the line discipline fails diagnosed", () => {
+test("every failure spelling T6.5-8 names fails diagnosed", () => {
   const head = 'import Org from "./Origin.xspec"';
   const tail = '\n\n<S id="th" d={T.tm}>\nThird text.\n</S>\n';
-  const notImport = "not an added import under 6.5's line discipline";
+  const notImport = "is not the added import";
   // Joined to the neighbour with `;` — still parsing, still resolving.
   expectDiagnosed(
     () => check(head + '; import T from "./Target.xspec"' + tail),
     notImport,
+    "join the preceding line",
+  );
+  // The mid-line form while a line-start offset (33) exists: inserted after
+  // the first declaration's closing quote, before its terminator, as `\n` +
+  // declaration + `\n` — bytes no line-start insertion produces (a blank
+  // line more), so 6.5's preference fails it.
+  expectDiagnosed(
+    () => check(head + '\nimport T from "./Target.xspec"\n' + tail),
+    notImport,
+    "mid-line form",
   );
   // Mid-line offset without the preceding terminator.
   expectDiagnosed(
     () => check(head + 'import T from "./Target.xspec"\n' + tail),
     notImport,
-    "must begin with the preceding U+000A",
+    "join the preceding line",
   );
   // A spurious blank line after the declaration.
   expectDiagnosed(
     () => check('import T from "./Target.xspec"\n\n' + BASE),
     notImport,
-    "exactly one default import declaration",
+    "spurious blank line",
   );
   // CRLF terminator.
   expectDiagnosed(
     () => check('import T from "./Target.xspec"\r\n' + BASE),
     notImport,
+    "ends in U+000D",
+  );
+  // Single quotes.
+  expectDiagnosed(
+    () => check("import T from './Target.xspec'\n" + BASE),
+    notImport,
+    "single-quoted",
+  );
+  // A statement terminator.
+  expectDiagnosed(
+    () => check('import T from "./Target.xspec";\n' + BASE),
+    notImport,
+    "statement terminator",
+  );
+  // Other spacing: a doubled space, a tab.
+  expectDiagnosed(
+    () => check('import  T from "./Target.xspec"\n' + BASE),
+    notImport,
+    "single spaces",
+  );
+  expectDiagnosed(
+    () => check('import T\tfrom "./Target.xspec"\n' + BASE),
+    notImport,
+    "single spaces",
+  );
+  // Non-canonical specifiers designating the right module: a `..` ascent
+  // and re-descent, a `.` segment, an ascent into the importer's own
+  // directory.
+  for (const spelled of [
+    "./sub/../Target.xspec",
+    "././Target.xspec",
+    "../specs/Target.xspec",
+  ]) {
+    expectDiagnosed(
+      () => check(`import T from "${spelled}"\n` + BASE),
+      notImport,
+      "not the canonical relative spelling",
+    );
+  }
+  // No `./` prefix; a `.mdx` extension (2.1's form).
+  expectDiagnosed(
+    () => check('import T from "Target.xspec"\n' + BASE),
+    notImport,
+    "relative path",
+  );
+  expectDiagnosed(
+    () => check('import T from "./Target.mdx"\n' + BASE),
+    notImport,
+    "ending in `.xspec`",
   );
   // Binds an identifier the rewritten references are not rooted at.
   expectDiagnosed(
@@ -156,12 +261,6 @@ test("every violation of the line discipline fails diagnosed", () => {
     () => check('import T from "./Origin.xspec"\n' + BASE),
     notImport,
     "designates specs/Origin.xspec rather than specs/Target.xspec",
-  );
-  // Not 2.1's form.
-  expectDiagnosed(
-    () => check('import T from "Target.xspec"\n' + BASE),
-    notImport,
-    "relative path",
   );
   // Nothing added at all.
   expectDiagnosed(() => check(BASE), "no bytes were inserted");

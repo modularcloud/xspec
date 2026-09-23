@@ -1994,9 +1994,11 @@ const R3_SEED_FILES = [
 // are asserted with T6.5-8's discipline (`assertAddedImportInsertion`): its
 // expected post-move bytes are composed from the rules of 6.4/6.5 and 3
 // WITHOUT the added import, the fresh identifier read off the rewritten
-// reference, and the single inserted run isolated by diff must be exactly
-// the declaration under 6.5's line rules (followed by U+000A; preceded by
-// one at a mid-line offset). The origin import's fate splits the arms (6.5:
+// reference, and the single inserted run isolated by diff must be
+// byte-exactly 6.5's spelling, `import <X> from "./Target.xspec"`, followed
+// by U+000A at a line-start offset — the file holds one (its end after the
+// final terminator), which 6.5 takes over any other (T6.5-8). The origin
+// import's fate splits the arms (6.5:
 // removed exactly when its binding had references and the rewrite leaves it
 // with none):
 // - (a) `Org`'s only reference was to the moved node → the own-line
@@ -2187,8 +2189,9 @@ async function runThirdFileArm(
       identifier: root,
     },
     `${context}: the third file's rewrite is its composed post-move bytes ` +
-      `with exactly one import of the target module added under 6.5's ` +
-      `line discipline (SPEC 6.5, 2.1, 6.4, 3; T6.5-8)`,
+      `with exactly one import of the target module added in 6.5's exact ` +
+      `spelling as a line of its own at a line-start offset (SPEC 6.5, ` +
+      `2.1, 6.4, 3; T6.5-8)`,
   );
 
   await assertJournalHoldsOneEntry(workspace, `${context} after the move`);
@@ -2217,7 +2220,7 @@ async function runThirdFileArm(
 const T6_5_3 = defineProductTest({
   id: "T6.5-3",
   title:
-    "re-identification and reference conversion: the moved subtree is re-identified by prefix replacement; references convert between local and imported forms; needed spec imports are added binding fresh, non-colliding identifiers and unneeded ones removed exactly (an import unreferenced before the move stays); rewritten content is byte-deterministic across two identical fixtures; the full mapping is appended to the journal and reported as the command's own applied-mapping report — the section form reports as rename does, T6.4-1's protocol (SPEC 6.5, 2.1, 6.1, 6.4, 12.0, 12.1, 14.10; H-3 adapter, report shape unpinned); third-file arms — a spec source neither origin nor target, importing the origin module and referencing the moved node through a `d` chain, has that reference rewritten to the target module under an import added there (bytes per T6.5-8's discipline: the single inserted run isolated by diff against bytes composed from 6.4/6.5 and 3, its identifier and offset the product's), the origin import removed exactly when the moved reference was its binding's last and kept byte-for-byte when another reference through it remains, `query edges` listing the third file's `depends` edge under the new identity and `check` clean (SPEC 6.5, 2.1, 6.4, 3)",
+    "re-identification and reference conversion: the moved subtree is re-identified by prefix replacement; references convert between local and imported forms; needed spec imports are added binding fresh, non-colliding identifiers and unneeded ones removed exactly (an import unreferenced before the move stays); rewritten content is byte-deterministic across two identical fixtures; the full mapping is appended to the journal and reported as the command's own applied-mapping report — the section form reports as rename does, T6.4-1's protocol (SPEC 6.5, 2.1, 6.1, 6.4, 12.0, 12.1, 14.10; H-3 adapter, report shape unpinned); third-file arms — a spec source neither origin nor target, importing the origin module and referencing the moved node through a `d` chain, has that reference rewritten to the target module under an import added there (bytes per T6.5-8's discipline: the single inserted run isolated by diff against bytes composed from 6.4/6.5 and 3 is byte-exactly `import <X> from \"./Target.xspec\"` followed by U+000A at a line-start offset, its identifier alone the product's), the origin import removed exactly when the moved reference was its binding's last and kept byte-for-byte when another reference through it remains, `query edges` listing the third file's `depends` edge under the new identity and `check` clean (SPEC 6.5, 2.1, 6.4, 3)",
   run: async (product) => {
     const created: TestWorkspace[] = [];
     try {
@@ -4570,14 +4573,21 @@ const T6_5_7 = defineProductTest({
 // addition-side byte contract of SPEC 6.5 — an added import is inserted as
 // a line of its own, the declaration's characters followed by U+000A,
 // preceded by one when the insertion point is not at the start of a line —
-// asserted with the identifier choice and the insertion offset left free
-// (6.5's latitude). Each arm's receiving file has its expected post-move
-// bytes composed from the rules of 6.4/6.5 and 3 up to exactly those two
-// unknowns: the fresh identifier is read off the rewritten references (the
-// one place 6.4's pinned spellings make it observable), and
+// and the declaration's exact spelling, asserted with the identifier choice
+// alone left free and the offset confined by 6.5's preference (a line-start
+// admissible offset, which each arm's receiving file holds, is taken over
+// any other, so the mid-line form is never conforming here; T6.5-13 forces
+// it). Each arm's receiving file has its expected post-move bytes composed
+// from the rules of 6.4/6.5 and 3 up to exactly those two unknowns: the
+// fresh identifier is read off the rewritten references (the one place
+// 6.4's pinned spellings make it observable), and
 // `assertAddedImportInsertion` isolates the single inserted run by diff
-// against the composed bytes and reads it under the line discipline at
-// whatever offset the product made observable. Three section-move arms,
+// against the composed bytes and reads it as byte-exactly 6.5's spelling —
+// `import <X> from "../specs/Target.xspec"` in the TS arm (the canonical
+// ascent from `src/`), `"./Target.xspec"` in the MDX origin arm,
+// `"./Origin.xspec"` in the MDX target arm: single spaces, no statement
+// terminator, the specifier double-quoted — followed by U+000A at a
+// line-start offset. Three section-move arms,
 // each moving `org.mv` out of `specs/Origin.mdx` to the top-level `mv` of
 // `specs/Target.mdx`:
 // - TS (the grammar-freest case): `src/app.ts` imports the origin module and
@@ -4935,7 +4945,8 @@ async function runAddedImportArm(
     }
     // Composed from the rules of 6.4/6.5 and 3 up to the two unknowns —
     // the fresh identifier (now known) and the insertion offset (isolated
-    // by the helper, which reads the run at every admissible offset).
+    // by the helper, which reads the run at every admissible offset and
+    // accepts a line-start one alone: each receiving file holds one).
     assertAddedImportInsertion(
       {
         rel: arm.receiving,
@@ -4947,10 +4958,12 @@ async function runAddedImportArm(
       },
       `${context}: ${arm.receiving} after the move is its composed ` +
         `post-move bytes with exactly one import of ${arm.moduleLabel} ` +
-        `added as a line of its own — the declaration followed by U+000A ` +
-        `at a line-start offset, preceded by one as well at any other — ` +
-        `binding the fresh identifier the rewritten reference uses, no ` +
-        `other byte inserted (SPEC 6.5, 2.1, 6.4, 3)`,
+        `added as a line of its own — byte-exactly 6.5's spelling (single ` +
+        `spaces, no statement terminator, the specifier double-quoted in ` +
+        `its canonical relative spelling) followed by U+000A at a ` +
+        `line-start offset, which the file holds and 6.5 takes over any ` +
+        `other — binding the fresh identifier the rewritten reference is ` +
+        `rooted at, no other byte inserted (SPEC 6.5, 2.1, 6.4, 3; T6.5-8)`,
     );
     for (const file of arm.composed) {
       await assertFileBytes(
@@ -5122,7 +5135,7 @@ const A8_ARMS: readonly AddedImportArm[] = [
 const T6_5_8 = defineProductTest({
   id: "T6.5-8",
   title:
-    "added-import insertion discipline: the addition-side byte contract of 6.5 asserted value-blind — in three section-move arms (a TS file importing the origin module with markers on one moved and one unmoved node, so a target-module binding is added while the origin import stays; an MDX origin holding a retained third-module import and a local string reference to a moved descendant, converted to imported form so the origin itself gains the target module's import; an MDX target gaining the origin module's import for a moved local reference to an origin node with a non-identifier segment, converted to dot then double-quoted computed access) the receiving file's post-move bytes are composed from the rules of 6.4/6.5 and 3 up to the fresh identifier (read off the rewritten reference) and the insertion offset, and the single inserted run isolated by diff is exactly the declaration followed by U+000A at a line-start offset, or U+000A, the declaration, U+000A at any other — one 2.1-form import of the needed module binding that fresh identifier, no other byte inserted; the fully composed files byte-equal, the edge set exact, `check` clean (SPEC 6.5, 6.4, 2.1, 3; H-4, normalizing nothing)",
+    'added-import insertion discipline: the addition-side byte contract of 6.5 asserted value-blind — in three section-move arms (a TS file importing the origin module with markers on one moved and one unmoved node, so a target-module binding is added while the origin import stays; an MDX origin holding a retained third-module import and a local string reference to a moved descendant, converted to imported form so the origin itself gains the target module\'s import; an MDX target gaining the origin module\'s import for a moved local reference to an origin node with a non-identifier segment, converted to dot then double-quoted computed access) the receiving file\'s post-move bytes are composed from the rules of 6.4/6.5 and 3 up to the fresh identifier (read off the rewritten reference) and the choice among the receiving file\'s line-start admissible offsets, and the single inserted run isolated by diff is byte-exactly 6.5\'s spelling of the declaration — `import <X> from "../specs/Target.xspec"` in the TS arm, `"./Target.xspec"` in the MDX origin arm, `"./Origin.xspec"` in the MDX target arm: single spaces, no statement terminator, the specifier double-quoted in its canonical relative spelling — followed by U+000A at a line-start offset (which each file holds, 6.5 taking it over any other, so the mid-line form is never conforming here), the fresh identifier its only unpinned run, no other byte inserted; the fully composed files byte-equal, the edge set exact, `check` clean (SPEC 6.5, 6.4, 2.1, 3; H-4, normalizing nothing)',
   run: async (product) => {
     for (const arm of A8_ARMS) {
       await runAddedImportArm(product, arm);
@@ -5431,8 +5444,9 @@ const T6_5_9 = defineProductTest({
 //   spelling and cross-checked against the rewritten embedding; `X` itself
 //   admissible, being fresh in that file — and the insertion offset,
 //   `assertAddedImportInsertion` isolating the single inserted run as
-//   exactly one 2.1-form import designating `x.mdx`'s module under 6.5's
-//   line discipline; the origin loses the section and, its `X` binding left
+//   byte-exactly `import <X> from "./x.xspec"` followed by U+000A at a
+//   line-start offset (6.5's spelling and line discipline, T6.5-8); the
+//   origin loses the section and, its `X` binding left
 //   without references, its own-line `X` declaration with the line's
 //   terminator (6.5's exact extent, T6.5-7), and is otherwise
 //   byte-identical.
@@ -5692,7 +5706,7 @@ async function c10AssertPostMove(
 const T6_5_10 = defineProductTest({
   id: "T6.5-10",
   title:
-    "third-module bindings carried with moved text: two section-move arms over three spec sources in one directory (origin `a.mdx`, target `b.mdx`, and `x.mdx`), the moved subtree holding a `d={X.foo}` reference and a `{text(X[\"bar-baz\"])}` embedding through the origin's `X` binding and no reference to a moved node lying outside it — (a) value-blind: the target holds no import of `x.mdx`'s module and the origin's only `X` references lie in the moved subtree, so the target's post-move bytes are composed from the rules of 6.4/6.5 and 3 up to the fresh identifier (read off the rewritten references in 6.4's pinned spelling, `X` itself admissible) and the insertion offset, the single inserted run isolated by diff being exactly one 2.1-form import of `x.mdx`'s module under 6.5's line discipline, each moved reference rooted at its binding with access form kept, while the origin loses the section and its own-line `X` declaration with the line's terminator and is otherwise byte-identical; (b) byte-composable: the target already imports `x.mdx`'s module as `Z`, referenced by its own section, and the origin keeps an `X` reference outside the subtree, so no import is added, `X.foo` → `Z.foo` and `X[\"bar-baz\"]` → `Z[\"bar-baz\"]`, the origin's `X` declaration stays, and both files are byte-equal to composed expectations; in both arms `x.mdx` is untouched, `query edges` reports the moved nodes' `depends` and `embeds` edges under their new identities to `x.mdx`'s unchanged nodes, and `check` and `build` are clean (SPEC 6.5, 6.4, 2.1, 3; H-4, normalizing nothing)",
+    "third-module bindings carried with moved text: two section-move arms over three spec sources in one directory (origin `a.mdx`, target `b.mdx`, and `x.mdx`), the moved subtree holding a `d={X.foo}` reference and a `{text(X[\"bar-baz\"])}` embedding through the origin's `X` binding and no reference to a moved node lying outside it — (a) value-blind: the target holds no import of `x.mdx`'s module and the origin's only `X` references lie in the moved subtree, so the target's post-move bytes are composed from the rules of 6.4/6.5 and 3 up to the fresh identifier (read off the rewritten references in 6.4's pinned spelling, `X` itself admissible) and the insertion offset, the single inserted run isolated by diff being byte-exactly `import <X> from \"./x.xspec\"` followed by U+000A at a line-start offset (6.5's spelling and line discipline, T6.5-8), each moved reference rooted at its binding with access form kept, while the origin loses the section and its own-line `X` declaration with the line's terminator and is otherwise byte-identical; (b) byte-composable: the target already imports `x.mdx`'s module as `Z`, referenced by its own section, and the origin keeps an `X` reference outside the subtree, so no import is added, `X.foo` → `Z.foo` and `X[\"bar-baz\"]` → `Z[\"bar-baz\"]`, the origin's `X` declaration stays, and both files are byte-equal to composed expectations; in both arms `x.mdx` is untouched, `query edges` reports the moved nodes' `depends` and `embeds` edges under their new identities to `x.mdx`'s unchanged nodes, and `check` and `build` are clean (SPEC 6.5, 6.4, 2.1, 3; H-4, normalizing nothing)",
   run: async (product) => {
     {
       const context = "T6.5-10 arm (a) value-blind";
@@ -5755,7 +5769,8 @@ const T6_5_10 = defineProductTest({
           // Composed from the rules of 6.4/6.5 and 3 up to the two unknowns —
           // the fresh identifier (now known) and the insertion offset
           // (isolated by the helper, which reads the run at every
-          // admissible offset).
+          // admissible offset and accepts a line-start one alone: the
+          // target holds one, its end after the final terminator).
           assertAddedImportInsertion(
             {
               rel: C10_TARGET,
@@ -5767,10 +5782,11 @@ const T6_5_10 = defineProductTest({
             },
             `${context}: ${C10_TARGET} after the move is its composed ` +
               `post-move bytes with exactly one import of ${C10_THIRD}'s ` +
-              `module added as a line of its own — the declaration followed ` +
-              `by U+000A at a line-start offset, preceded by one as well at ` +
-              `any other — binding the identifier the moved references are ` +
-              `rooted at, no other byte inserted (SPEC 6.5, 2.1, 6.4, 3)`,
+              `module added as a line of its own — byte-exactly 6.5's ` +
+              `spelling followed by U+000A at a line-start offset, which ` +
+              `the file holds and 6.5 takes over any other — binding the ` +
+              `identifier the moved references are rooted at, no other ` +
+              `byte inserted (SPEC 6.5, 2.1, 6.4, 3; T6.5-8)`,
           );
           await assertFileBytes(
             workspace.path(C10_ORIGIN),
