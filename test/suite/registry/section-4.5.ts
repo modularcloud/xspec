@@ -39,6 +39,13 @@
 //   product cannot legitimately reclassify the finding as an unresolved
 //   reference (14.7): the sole present condition is 14.8, and the exact
 //   condition-count assertion simultaneously pins "not 14.18" (SPEC 4.5).
+// - T4.5-3's TypeScript-only arms (`SPEC.a!;`, `SPEC.a as X;`, `<X>SPEC.a;`,
+//   `SPEC.a satisfies X;`) are dynamic references in a TypeScript source —
+//   14.8 at the statement's expression, the file well-formed — never a parse
+//   failure: 14.20 is the spec-source reading of the same spellings (T2.4-2),
+//   and the exact count {"14.8": 1} excludes it. The angle-bracket form
+//   parses only as plain TypeScript, which the `.ts` file name selects (SPEC
+//   2.4, 14.20).
 // - T4.5-5 arms likewise stage exactly one unsanctioned value-level use
 //   each; the exact condition-count assertion {"14.18": 1} pins the
 //   classification (SPEC 4.5, 14.18).
@@ -784,6 +791,44 @@ const T4_5_3_ARMS: readonly OffendingStatementArm[] = [
     lines: [T4_5_3_IMPORT, "", "SPEC.a!.b;"],
     offending: "SPEC.a!.b;",
   },
+  // The TypeScript-only forms SPEC 2.4 makes dynamic in a TypeScript source
+  // — never a parse failure there (the spec-source counterparts are T2.4-2's
+  // 14.20 arms). `type X = unknown;` declares the asserted type so the file
+  // carries no TypeScript error at all — a type alias is type-level and
+  // collides with no binding (SPEC 2.4, 4.5) — keeping the form each arm's
+  // sole defect. The angle-bracket assertion parses only under the
+  // plain-TypeScript grammar the staged `.ts` file name selects (SPEC
+  // 14.20) — never `.tsx`.
+  {
+    name:
+      "a non-null assertion ending the chain as a bare expression statement " +
+      "(TEST-SPEC's `SPEC.a!;`; TypeScript-only syntax, dynamic in a " +
+      "TypeScript source, SPEC 2.4, 4.5)",
+    lines: [T4_5_3_IMPORT, "", "SPEC.a!;"],
+    offending: "SPEC.a!;",
+  },
+  {
+    name:
+      "a type assertion `as X` as a bare expression statement " +
+      "(TypeScript-only syntax, dynamic in a TypeScript source, SPEC 2.4, 4.5)",
+    lines: [T4_5_3_IMPORT, "", "type X = unknown;", "SPEC.a as X;"],
+    offending: "SPEC.a as X;",
+  },
+  {
+    name:
+      "an angle-bracket assertion `<X>` as a bare expression statement, in a " +
+      "`.ts` file where it parses (TypeScript-only syntax, dynamic in a " +
+      "TypeScript source, SPEC 2.4, 4.5)",
+    lines: [T4_5_3_IMPORT, "", "type X = unknown;", "<X>SPEC.a;"],
+    offending: "<X>SPEC.a;",
+  },
+  {
+    name:
+      "a `satisfies X` operator as a bare expression statement " +
+      "(TypeScript-only syntax, dynamic in a TypeScript source, SPEC 2.4, 4.5)",
+    lines: [T4_5_3_IMPORT, "", "type X = unknown;", "SPEC.a satisfies X;"],
+    offending: "SPEC.a satisfies X;",
+  },
   {
     name: "a parenthesized chain as a bare expression statement (SPEC 2.4, 4.5)",
     lines: [T4_5_3_IMPORT, "", "(SPEC.a).b;"],
@@ -801,7 +846,7 @@ const T4_5_3_ARMS: readonly OffendingStatementArm[] = [
 const T4_5_3 = defineProductTest({
   id: "T4.5-3",
   title:
-    "a non-static bare reference in expression-statement position — computed index by variable, optional chaining, non-null assertion, parentheses, template-literal index — fails with exactly one located 14.8 finding (invalid argument, not 14.18) (SPEC 4.5, 2.4, 14.8)",
+    "a non-static bare reference in expression-statement position — computed index by variable, optional chaining, non-null assertion, parentheses, template-literal index, and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`SPEC.a as X;`, `<X>SPEC.a;` in a `.ts` file, `SPEC.a satisfies X;`) — fails with exactly one located 14.8 finding (invalid argument, not 14.18), the file well-formed (SPEC 4.5, 2.4, 14.8)",
   run: async (product) => {
     for (const arm of T4_5_3_ARMS) {
       await assertArmFailsWith(product, "T4.5-3", arm, "14.8");

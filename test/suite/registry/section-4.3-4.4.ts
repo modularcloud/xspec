@@ -37,6 +37,13 @@
 //   `text` arguments; 2.4 assigns any other arity to 14.8). Each finding
 //   must fall within the offending statement's byte window (support.ts
 //   byteWindow).
+// - T4.3-2's TypeScript-only arms (`SPEC.a!`, `SPEC.a as X`, `<X>SPEC.a`,
+//   `SPEC.a satisfies X` as the `text` argument) are dynamic references in a
+//   TypeScript source — 14.8 at the call, the file well-formed — never a
+//   parse failure: 14.20 is the spec-source reading of the same spellings
+//   (T2.4-2), and the exact count {"14.8": 1} excludes it. The angle-bracket
+//   form parses only as plain TypeScript, which the `.ts` file name selects
+//   (SPEC 2.4, 14.20).
 // - T4.4-1 asserts the condition's facets (SPEC 14.11: reported by
 //   `build`/`check`, its edge and occurrence standing beside it,
 //   "additionally a TypeScript type error and a runtime throw per 4.4";
@@ -364,6 +371,62 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
     ],
     offending: "text(SPEC.a?.b);",
   },
+  // The four TypeScript-only forms SPEC 2.4 makes dynamic in a TypeScript
+  // source — never a parse failure there (the spec-source counterparts are
+  // T2.4-2's 14.20 arms). `type X = unknown;` declares the asserted type so
+  // the file carries no TypeScript error at all — a type alias is type-level
+  // and collides with no binding (SPEC 2.4, 4.5) — keeping the form each
+  // arm's sole defect. The angle-bracket assertion parses only under the
+  // plain-TypeScript grammar the staged `.ts` file name selects (SPEC
+  // 14.20) — never `.tsx`.
+  {
+    name:
+      "a non-null assertion on the chain as the `text` argument " +
+      "(TypeScript-only syntax, dynamic in a TypeScript source, SPEC 2.4)",
+    lines: [
+      'import SPEC, { text } from "../specs/A.xspec";',
+      "",
+      "text(SPEC.a!);",
+    ],
+    offending: "text(SPEC.a!);",
+  },
+  {
+    name:
+      "a type assertion `as X` on the chain as the `text` argument " +
+      "(TypeScript-only syntax, dynamic in a TypeScript source, SPEC 2.4)",
+    lines: [
+      'import SPEC, { text } from "../specs/A.xspec";',
+      "",
+      "type X = unknown;",
+      "text(SPEC.a as X);",
+    ],
+    offending: "text(SPEC.a as X);",
+  },
+  {
+    name:
+      "an angle-bracket assertion `<X>` on the chain as the `text` argument, " +
+      "in a `.ts` file where it parses (TypeScript-only syntax, dynamic in a " +
+      "TypeScript source, SPEC 2.4)",
+    lines: [
+      'import SPEC, { text } from "../specs/A.xspec";',
+      "",
+      "type X = unknown;",
+      "text(<X>SPEC.a);",
+    ],
+    offending: "text(<X>SPEC.a);",
+  },
+  {
+    name:
+      "a `satisfies X` operator on the chain as the `text` argument " +
+      "(TypeScript-only syntax, dynamic in a TypeScript source, SPEC 2.4)",
+    lines: [
+      'import SPEC, { text } from "../specs/A.xspec";',
+      "",
+      "type X = unknown;",
+      "text(SPEC.a satisfies X);",
+    ],
+    offending: "text(SPEC.a satisfies X);",
+  },
   {
     name: "a zero-argument `text()` call (arity, SPEC 2.4)",
     lines: ['import { text } from "../specs/A.xspec";', "", "text();"],
@@ -385,7 +448,7 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
 const T4_3_2 = defineProductTest({
   id: "T4.3-2",
   title:
-    "a string argument to `text` in a TypeScript file fails with 14.8; so does a dynamic node-form argument there — a computed index by variable and an optional-chaining chain, each as the `text` argument — and so do a zero-argument and a two-argument `text(...)` call: 14.8's arity clause holds in either language, the MDX arms being T2.4-3 (SPEC 4.3, 2.4, 4.5)",
+    "a string argument to `text` in a TypeScript file fails with 14.8; so does a dynamic node-form argument there — a computed index by variable, an optional-chaining chain, and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`text(SPEC.a!)`, `text(SPEC.a as X)`, `text(<X>SPEC.a)` in a `.ts` file, `text(SPEC.a satisfies X)`), each as the `text` argument, the file well-formed — and so do a zero-argument and a two-argument `text(...)` call: 14.8's arity clause holds in either language, the MDX arms being T2.4-3 (SPEC 4.3, 2.4, 4.5)",
   run: async (product) => {
     for (const arm of T4_3_2_ARMS) {
       const at = arm.lines.indexOf(arm.offending);

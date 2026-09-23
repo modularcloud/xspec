@@ -12,11 +12,6 @@
 
 ## Tasks
 
-### Task 23 — T4.3-2 and T4.5-3: TypeScript-only expression forms
-- Cites: TEST-SPEC T4.3-2 (`text(SPEC.a!)`, `text(SPEC.a as X)`, `text(<X>SPEC.a)`, `text(SPEC.a satisfies X)` → 14.8 at the call, the file well-formed); T4.5-3 (`SPEC.a as X;`, `<X>SPEC.a;`, `SPEC.a satisfies X;`); SPEC 4.3, 4.5, 14.8. Findings A-25, A-26.
-- Change: extend the arm table in `section-4.3-4.4.ts` (~L340–380) and `T4_5_3_ARMS` in `section-4.5.ts` (~L765); the `<X>…` angle-bracket assertion needs a `.ts` (never `.tsx`) source; findings and ranges per the entries.
-- Verify: `-t 'T4.3-2 '`, `-t 'T4.5-3 '` no harness error; self project green.
-
 ### Task 24 — T4.5-8's located forms and two-block arm; T4.5-9 registration
 - Cites: TEST-SPEC T4.5-8 (further located forms: `let SPEC;` at `SPEC`; `const { SPEC } = o` at `{ SPEC } = o`; `@dec class SPEC {}` from `@`; `export class SPEC {}` / `export function SPEC() {}` from `class`/`function`; the spec-source case's second arm across two ESM blocks); T4.5-9 (a call through a colliding `text` identifier); T14-11 (the same located forms); SPEC 4.5, 14.15. Findings A-27, A-6. Depends on Task 3.
 - Change: `section-4.5.ts`: add the located forms to T4.5-8 with precomputed ranges; add the two-ESM-block spec-source arm beside `T4_5_8_MDX_SOURCE` (~L1657; the one-block form names the `duplicate-import-binding` allowance, the two-block form derives without it); register T4.5-9 per its entry; traceability keys.
