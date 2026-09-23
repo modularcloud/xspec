@@ -60,6 +60,19 @@
 //   contract (H-4). Both arrays come out of the form-exact decode in 12.7's
 //   total findings order, whose keys precede the message tie-break exactly
 //   on the compared members, so element-wise comparison is exact.
+// - T6.6-3's T6.5-6, T6.5-16, and T6.5-17 twins: the identity-terms
+//   refusals run on T6.5-6's post-move workspace staged directly from the
+//   bytes that test asserts (section-6.5.ts's MOVE_IDENTITY_* exports) —
+//   the exact self-move of either form, the file form refused as
+//   identity-unchanged alone (SPEC 6.5, 14), and the same-file
+//   after-removal collision — and every refused arm of T6.5-16 (its alone
+//   arms included) and of T6.5-17 is staged from the arm tables
+//   section-6.5-iii.ts exports (R16_REFUSED_ARMS, R16_ALONE_ARMS,
+//   M17_REFUSED_ARMS under R16_CONFIG), the premise re-pinning each arm's
+//   code set alone — the finding's concerned data and the S-9 premises stay
+//   the home test's — before the equivalence compare. The U+FFFD
+//   destination operands (T6.5-5's MOVE_REPLACEMENT_DESTINATION_CASES,
+//   either leg) join the usage sweep below.
 // - T6.6-3 usage errors "exit 2 identically (argument checks precede either
 //   way)": each T6.4-4/T6.5-5 usage-error invocation runs once — the real
 //   invocation, then the `--preview` one — on the ordering-shaped staging
@@ -259,6 +272,9 @@ import {
   MOVE_DERIVED_PATH_CASE,
   MOVE_DERIVED_PATH_CONFIG,
   MOVE_DERIVED_PATH_FILES,
+  MOVE_IDENTITY_CONFIG,
+  MOVE_IDENTITY_FILES_AFTER,
+  MOVE_IDENTITY_REFUSAL_CASES,
   MOVE_LINK_OUTSIDE_CASES,
   MOVE_LINK_OUTSIDE_FILES,
   MOVE_MIXED_SYNOPSIS_CASES,
@@ -270,6 +286,7 @@ import {
   MOVE_REFUSAL_CASES,
   MOVE_REFUSAL_CONFIG,
   MOVE_REFUSAL_FILES,
+  MOVE_REPLACEMENT_DESTINATION_CASES,
   MOVE_SOLO_ARGV,
   MOVE_SOLO_CONFIG,
   MOVE_SOLO_FILES,
@@ -281,6 +298,12 @@ import {
   stageMoveLinkOutsideComponent,
   stageMoveRefusalOccupants,
 } from "./section-6.5.js";
+import {
+  M17_REFUSED_ARMS,
+  R16_ALONE_ARMS,
+  R16_CONFIG,
+  R16_REFUSED_ARMS,
+} from "./section-6.5-iii.js";
 import {
   assertGraphDataPresent,
   deleteGraphData,
@@ -637,7 +660,7 @@ function comparableFinding(finding: Finding): unknown {
 
 /**
  * One T6.6-3 refusal-equivalence arm over a staging where the real operation
- * is refused (T6.4-3/T6.5-4, staged identically): inside one whole-root
+ * is refused (its home test's staging, staged identically): inside one whole-root
  * modifies-nothing compare, run the real invocation with `--json` — exit 1,
  * the form-exact 12.7 findings-only report, its per-arm code counts re-pinned
  * — then the `--preview --json` invocation: exit 1, the 12.7 preview document
@@ -668,7 +691,8 @@ async function expectRefusedPreviewEquivalence(
         [...argv, "--json"],
         1,
         `${context}: \`${command} --json\` — the real operation is refused ` +
-          `on this staging, exit 1 (SPEC 6.4, 6.5, 12.0; T6.4-3/T6.5-4)`,
+          `on this staging, exit 1 (SPEC 6.4, 6.5, 12.0; the twinned refusal's ` +
+          `home test)`,
       );
       const realFindings = decodeFindingsReport(
         parseJsonStdout(real, `${context}: \`${command} --json\``),
@@ -680,7 +704,8 @@ async function expectRefusedPreviewEquivalence(
         counts,
         `${context}: staging premise — the arm still isolates exactly its ` +
           `staged refusal cause(s), one finding per applicable reason ` +
-          `(SPEC 14; the concerned-data assertions live in T6.4-3/T6.5-4)`,
+          `(SPEC 14; the concerned-data assertions live in the refusal's home ` +
+          `test)`,
       );
 
       // The `--preview` invocation on the identical state: refused exactly
@@ -728,6 +753,41 @@ async function expectRefusedPreviewEquivalence(
     `${context}: \`${command}\` — neither the refused operation nor its ` +
       `refused \`--preview\` modifies anything (SPEC 6.4, 6.5, 6.6)`,
   );
+}
+
+/**
+ * One T6.6-3 twin of a T6.5-16/T6.5-17 arm (their exported arm tables,
+ * staged identically: the pre-move files under those arms' configuration,
+ * the premise `build` laying down the derived files the modifies-nothing
+ * compare covers): the real refusal, then its `--preview`, through
+ * expectRefusedPreviewEquivalence. The premise re-pins the arm's code set
+ * alone — `refused-invalid-rewrite` or `refused-moved-import` beside every
+ * other applicable reason, or an alone arm's reasons — while the finding's
+ * concerned data and the S-9 premises stay the home test's; the equivalence
+ * compare then covers every contractual member (SPEC 6.5, 6.6, 14).
+ */
+async function expectRefusedArmPreviewTwin(
+  product: ProductBinding,
+  files: Readonly<Record<string, string>>,
+  argv: readonly string[],
+  codes: readonly string[],
+  context: string,
+): Promise<void> {
+  await withWorkspace(R16_CONFIG, files, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      `${context}: \`build\` over the staging — the pre-move workspace is ` +
+        `valid, every staged file well-formed (SPEC 6.4, 6.5, 14.20)`,
+    );
+    await expectRefusedPreviewEquivalence(
+      product,
+      workspace,
+      argv,
+      codes.map((finding) => ({ finding })),
+      context,
+    );
+  });
 }
 
 /**
@@ -820,7 +880,10 @@ async function runSoloUsageArm(
 const T6_6_3 = defineProductTest({
   id: "T6.6-3",
   title:
-    "refusal and scheduling equivalence: each refusal of T6.4-3 and T6.5-4 — the invalid-workspace precondition included — staged identically, the `--preview` invocation exits 1 reporting the same findings (same stable codes, locations, concerned paths, identities) in the form-exact 12.7 preview document with `mapping`, `files`, and `delta` null, modifying nothing; each usage error of T6.4-4/T6.5-5 exits 2 identically under `--preview` (argument checks precede either way — asserted beside unrelated validation errors and beside a spells-no-identity origin's findings, nothing modified); the equivalence is over workspace state, never scheduling: while another mutating command is held (`--test-hold`, T13.5-2's staging), a `--preview` invocation runs to completion with its full successful report — it takes no exclusivity and never meets the mutual-exclusion refusal — and `--test-hold` combined with `--preview` is a usage error, exit 2, creating no hold file (SPEC 6.6, 6.4, 6.5, 13.5, 12.0, 12.7, 14)",
+    "refusal and scheduling equivalence: each refusal of T6.4-3, T6.5-4, T6.5-6, T6.5-16, and T6.5-17 — the invalid-workspace precondition, the exact self-move of either form (the file form refused as identity-unchanged alone, never `refused-destination-exists` beside it), the same-file after-removal collision, every `refused-invalid-rewrite` and `refused-moved-import` arm with the reasons reported beside it, and T6.5-16's alone arms included — staged identically (T6.5-6's post-move workspace staged directly from the bytes it asserts; T6.5-16's and T6.5-17's arms from their exported tables), the `--preview` invocation exits 1 reporting the same findings (same stable codes, locations, concerned paths, identities) in the form-exact 12.7 preview document with `mapping`, `files`, and `delta` null, modifying nothing; each usage error of T6.4-4/T6.5-5 — the U+FFFD destination operands of either leg and the Linux leg's non-UTF-8 operand included — exits 2 identically under `--preview` (argument checks precede either way — asserted beside unrelated validation errors and beside a spells-no-identity origin's findings, nothing modified); the equivalence is over workspace state, never scheduling: while another mutating command is held (`--test-hold`, T13.5-2's staging), a `--preview` invocation runs to completion with its full successful report — it takes no exclusivity and never meets the mutual-exclusion refusal — and `--test-hold` combined with `--preview` is a usage error, exit 2, creating no hold file (SPEC 6.6, 6.4, 6.5, 13.5, 12.0, 12.7, 14)",
+  // The twins of T6.5-16's and T6.5-17's arms add some fifty stagings, each
+  // with its premise `build` and two invocations: a wider hang guard (H-8).
+  timeoutMs: 240_000,
   run: async (product) => {
     // --- Refusal equivalence: T6.4-3's cases, staged identically ---
     await withWorkspace(
@@ -976,6 +1039,71 @@ const T6_6_3 = defineProductTest({
       },
     );
 
+    // --- Refusal equivalence: T6.5-6's identity-terms refusals, staged
+    // identically — the post-kept-ID-move workspace that test asserts
+    // byte-exact, staged directly from those bytes (SPEC 6.5, 6.6): the
+    // exact self-move of either form (the file form refused as
+    // identity-unchanged alone) and the same-file after-removal collision,
+    // each reported alike by the real operation and its preview ---
+    await withWorkspace(
+      MOVE_IDENTITY_CONFIG,
+      MOVE_IDENTITY_FILES_AFTER,
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T6.6-3 identity-terms staging `build` (T6.5-6's post-move " +
+            "workspace, staged directly; the derived files sit under the " +
+            "modifies-nothing compares)",
+        );
+        for (const { argv, expected, reason } of MOVE_IDENTITY_REFUSAL_CASES) {
+          await expectRefusedPreviewEquivalence(
+            product,
+            workspace,
+            argv,
+            expected,
+            `T6.6-3 move refusal (${reason})`,
+          );
+        }
+      },
+    );
+
+    // --- Refusal equivalence: T6.5-16's `refused-invalid-rewrite` arms —
+    // every refused shape beside the reasons reported with it, and the
+    // alone arms refused for another reason with no would-be text judged —
+    // staged identically from the exported arm tables (SPEC 6.5, 6.6, 14)
+    // ---
+    for (const arm of R16_REFUSED_ARMS) {
+      await expectRefusedArmPreviewTwin(
+        product,
+        arm.files,
+        arm.argv,
+        ["refused-invalid-rewrite", ...(arm.beside ?? [])],
+        `T6.6-3 move refusal (T6.5-16 ${arm.key})`,
+      );
+    }
+    for (const arm of R16_ALONE_ARMS) {
+      await expectRefusedArmPreviewTwin(
+        product,
+        arm.files,
+        arm.argv,
+        arm.codes,
+        `T6.6-3 move refusal (T6.5-16 ${arm.key})`,
+      );
+    }
+
+    // --- Refusal equivalence: T6.5-17's `refused-moved-import` arms,
+    // staged identically from the exported arm table (SPEC 6.5, 6.6, 14) ---
+    for (const arm of M17_REFUSED_ARMS) {
+      await expectRefusedArmPreviewTwin(
+        product,
+        arm.files,
+        arm.argv,
+        ["refused-moved-import", ...(arm.beside ?? [])],
+        `T6.6-3 move refusal (T6.5-17 ${arm.key})`,
+      );
+    }
+
     // --- Usage-error equivalence: T6.4-4's usage errors on its
     // ordering-shaped staging ---
     await withWorkspace(
@@ -1051,10 +1179,14 @@ const T6_6_3 = defineProductTest({
         await assertLeavesUnchanged(
           workspace.root,
           async () => {
+            // T6.5-5's usage tables, the U+FFFD destination operands of
+            // either leg included: malformed argument values, exit 2
+            // before any refusal is evaluated (SPEC 12.0, 6.5; T12.0-5).
             for (const [argv, label] of [
               ...MOVE_USAGE_CASES,
               ...MOVE_WRONG_KIND_CASES,
               ...MOVE_MIXED_SYNOPSIS_CASES,
+              ...MOVE_REPLACEMENT_DESTINATION_CASES,
             ]) {
               await expectUsageErrorEitherWay(
                 product,

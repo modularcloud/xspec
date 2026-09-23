@@ -4092,6 +4092,83 @@ const I6_B_SOURCE = ['<S id="b">', "Bee text.", "</S>", ""].join("\n");
 const I6_B_AFTER = I6_B_SOURCE + I6_MOVED_TEXT + "\n";
 
 /**
+ * The identity-terms workspace as the kept-ID move leaves it — the
+ * post-move state T6.5-6 asserts byte-exact (composed above from SPEC 6.5
+ * and 3, never from product output): `specs/A.mdx` keeping `a` alone and
+ * `specs/B.mdx` holding `b` then the landed `x` subtree — the state
+ * T6.5-6's refusals are judged on. Exported with the refusal cases below
+ * for T6.6-3's preview twins, which stage this state directly (TEST-SPEC
+ * T6.6-3: "staged identically") rather than through the product's move.
+ */
+export const MOVE_IDENTITY_CONFIG = SPECS_ONLY_CONFIG;
+export const MOVE_IDENTITY_FILES_AFTER: Readonly<Record<string, string>> = {
+  [I6_A]: I6_A_AFTER,
+  [I6_B]: I6_B_AFTER,
+};
+
+/**
+ * The exact self-move, section form — `<target-file>#<new-id>` equal to
+ * `<file>#<id>` — refused as `refused-identity-unchanged` alone, no
+ * collision reason beside it (the after-removal check collides with
+ * nothing), concerning the unchanged identity (SPEC 6.5, 14, T14-7).
+ */
+export const MOVE_IDENTITY_SELF_MOVE_CASE: MoveRefusalCase = {
+  argv: ["move", `${I6_B}#x`, `${I6_B}#x`],
+  expected: {
+    finding: "refused-identity-unchanged",
+    identities: [`${I6_B}#x`],
+  },
+  reason:
+    "the exact self-move, section form — `<target-file>#<new-id>` equal " +
+    "to `<file>#<id>` — refused as identity-unchanged alone (SPEC 6.5)",
+};
+
+/**
+ * A same-file move whose `<new-id>` `b` collides with the ID `b` remaining
+ * in the target file after the removal: `refused-id-collision` locating the
+ * remaining bearer, its identity the sole `identities` entry (SPEC 6.5, 14).
+ */
+export const MOVE_IDENTITY_COLLISION_CASE: MoveRefusalCase = {
+  argv: ["move", `${I6_B}#x`, `${I6_B}#b`],
+  expected: {
+    finding: "refused-id-collision",
+    locatedAt: { file: I6_B },
+    identities: [`${I6_B}#b`],
+  },
+  reason:
+    "same-file move whose <new-id> `b` collides with the ID `b` remaining " +
+    "in the target file after the removal (SPEC 6.5)",
+};
+
+/**
+ * The exact self-move, file form — `<new-file>` equal to `<old-file>`,
+ * compared byte-wise (12.0) — refused as `refused-identity-unchanged`
+ * alone: its only occupant is the origin the relocation would remove, so
+ * `refused-destination-exists` is never reported beside it (SPEC 6.5, 14);
+ * the concerned identity is the bare `<new-file>`, the root identity (14,
+ * 1.5). T6.6-3's "the exact self-move of either form" stages this form.
+ */
+export const MOVE_IDENTITY_FILE_SELF_MOVE_CASE: MoveRefusalCase = {
+  argv: ["move", I6_B, I6_B],
+  expected: {
+    finding: "refused-identity-unchanged",
+    identities: [I6_B],
+  },
+  reason:
+    "the exact self-move, file form — `<new-file>` equal to `<old-file>` " +
+    "— refused as identity-unchanged alone, never " +
+    "`refused-destination-exists` beside it, its only occupant being the " +
+    "origin the relocation would remove (SPEC 6.5, 14)",
+};
+
+/** T6.5-6's refusals on the post-move workspace, the file-form self-move beside them (T6.6-3). */
+export const MOVE_IDENTITY_REFUSAL_CASES: readonly MoveRefusalCase[] = [
+  MOVE_IDENTITY_SELF_MOVE_CASE,
+  MOVE_IDENTITY_COLLISION_CASE,
+  MOVE_IDENTITY_FILE_SELF_MOVE_CASE,
+];
+
+/**
  * The preview's complete plan for the kept-ID move (SPEC 6.6, 12.7): in the
  * origin, the `origin-deletion` alone — one range spanning the construct's
  * own characters extended over the terminator of the merged line the
@@ -4330,16 +4407,12 @@ const T6_5_6 = defineProductTest({
         await expectRefusalModifiesNothing(
           product,
           workspace,
-          ["move", "specs/B.mdx#x", "specs/B.mdx#x"],
-          {
-            // Reported alone — no collision reason beside it: the
-            // after-removal check collides with nothing (SPEC 6.4, 14,
-            // T14-7) — concerning the unchanged identity.
-            finding: "refused-identity-unchanged",
-            identities: [`${I6_B}#x`],
-          },
-          "T6.5-6 (the exact self-move — the new identity equals the old " +
-            "one, SPEC 6.5)",
+          MOVE_IDENTITY_SELF_MOVE_CASE.argv,
+          // Reported alone — no collision reason beside it: the
+          // after-removal check collides with nothing (SPEC 6.4, 14,
+          // T14-7) — concerning the unchanged identity.
+          MOVE_IDENTITY_SELF_MOVE_CASE.expected,
+          `T6.5-6 (${MOVE_IDENTITY_SELF_MOVE_CASE.reason})`,
         );
         assertBytesEqual(
           await readJournal(
@@ -4357,18 +4430,13 @@ const T6_5_6 = defineProductTest({
         await expectRefusalModifiesNothing(
           product,
           workspace,
-          ["move", "specs/B.mdx#x", "specs/B.mdx#b"],
-          {
-            // The collision locates every colliding bearer (SPEC 14); the
-            // remaining bearer `b` lives in B.mdx, whose bytes the earlier
-            // successful move rewrote (product-written), so the arm asserts
-            // the bearer's file without a byte window.
-            finding: "refused-id-collision",
-            locatedAt: { file: I6_B },
-            identities: [`${I6_B}#b`],
-          },
-          "T6.5-6 (same-file move whose <new-id> `b` collides with the ID " +
-            "`b` remaining in the target file after the removal, SPEC 6.5)",
+          MOVE_IDENTITY_COLLISION_CASE.argv,
+          // The collision locates every colliding bearer (SPEC 14); the
+          // remaining bearer `b` lives in B.mdx, whose bytes the earlier
+          // successful move rewrote (product-written), so the case asserts
+          // the bearer's file without a byte window.
+          MOVE_IDENTITY_COLLISION_CASE.expected,
+          `T6.5-6 (${MOVE_IDENTITY_COLLISION_CASE.reason})`,
         );
       },
     );

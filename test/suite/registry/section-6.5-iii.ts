@@ -226,6 +226,13 @@ export default defineConfig({
 })
 `;
 
+/**
+ * The configuration every T6.5-16 and T6.5-17 arm is staged under
+ * (`withWorkspace`'s default) — exported for T6.6-3's preview twins, which
+ * stage those arms byte for byte (TEST-SPEC T6.6-3: "staged identically").
+ */
+export const R16_CONFIG = CONFIG;
+
 // One spec group plus one code group (SPEC 7.1), for T6.5-18's code file.
 const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
 
@@ -3269,13 +3276,13 @@ const R16_FLOW_SECTION = '<S id="m">\nx\n</S>';
 const R16_TEXT_PARENT = 'foo <S id="p">bar</S> baz\n';
 
 /** One expected `locations` entry: a file and a 1.7 byte range. */
-interface R16Location {
+export interface R16Location {
   readonly file: string;
   readonly start: number;
   readonly end: number;
 }
 
-interface R16RefusedArm {
+export interface R16RefusedArm {
   readonly key: string;
   /** Why the would-be text does not derive, for the diagnoses. */
   readonly summary: string;
@@ -3313,7 +3320,7 @@ interface R16RefusedArm {
  * reasons and no parse decides (T6.5-13 pins the same rule's admissible
  * side by hand).
  */
-interface R16OffsetProbe {
+export interface R16OffsetProbe {
   readonly name: string;
   readonly text: string;
   readonly derives: boolean;
@@ -3324,7 +3331,7 @@ interface R16OffsetProbe {
  * of the rewrite leaves it — verified deriving (S-9), so the refusal's
  * ground is the offsets alone — and the entry's named offsets probed.
  */
-interface R16NoOffset {
+export interface R16NoOffset {
   readonly file: string;
   readonly composed: string;
   readonly probes: readonly R16OffsetProbe[];
@@ -3335,7 +3342,7 @@ interface R16NoOffset {
  * applicable, no would-be text existing to judge — exit 1, nothing
  * modified, exactly the expected reasons reported (SPEC 6.5, 14).
  */
-interface R16AloneArm {
+export interface R16AloneArm {
   readonly key: string;
   readonly summary: string;
   readonly files: Readonly<Record<string, string>>;
@@ -4180,7 +4187,7 @@ function r16CreatedArm(
 // beside the flow-form section and a text-position target file, the
 // origin's deletion leaving it well-formed — no target text exists to
 // judge.
-const R16_ALONE_ARMS: readonly R16AloneArm[] = [
+export const R16_ALONE_ARMS: readonly R16AloneArm[] = [
   {
     key: "(c)'s shape under the invalid new-id p.then: refused-invalid-id alone",
     summary:
@@ -4293,7 +4300,8 @@ const R16_G_CONTROL: R16ControlArm = {
   },
 };
 
-const R16_REFUSED_ARMS: readonly R16RefusedArm[] = [
+/** T6.5-16's refused arms, in the entry's order (exported for T6.6-3's preview twins). */
+export const R16_REFUSED_ARMS: readonly R16RefusedArm[] = [
   r16ArmA("a space", " "),
   r16ArmA("a tab", "\t"),
   r16ArmA("nothing", ""),
