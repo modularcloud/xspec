@@ -38,6 +38,12 @@
 //   informational, SPEC 9.3) and, with differences present, that the report
 //   on stdout mentions the changed node's identity (12.0: reports are
 //   standard-output content; H-3 robust matching, never wording).
+//
+// Sources staged after a body's first product invocation are staged-source
+// records (helpers/staged-mdx.ts, S-9: judged before any product exists)
+// or, for product-rewritten bytes, `workspace.edit()` after a diagnosed
+// premise; every other staging precedes the body's first invocation, so
+// S-7's sweep reaches it against the stub.
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -48,6 +54,7 @@ import { assertReportMentions } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -177,6 +184,14 @@ const p1Source = (alphaText: string): string =>
     "",
   ].join("\n");
 
+// The edited workspace (staged after the baseline build): `alpha`'s text
+// run at v2 — a staged-source record (helpers/staged-mdx.ts), the same
+// template call moved to module level.
+const T9_1_ALPHA_V2 = stagedMdx(
+  "T9-1 specs/Main.mdx with alpha's text run at v2",
+  p1Source("Alpha text v2."),
+);
+
 const T9_1 = defineProductTest({
   id: "T9-1",
   title:
@@ -249,7 +264,7 @@ const T9_1 = defineProductTest({
         // changed node's identity, and the JSON report the 5.6 categories —
         // the difference is computed against the ref's content, not the
         // working tree (SPEC 6.3).
-        await workspace.file(P1_MAIN, p1Source("Alpha text v2."));
+        await workspace.file(P1_MAIN, T9_1_ALPHA_V2);
         await buildOk(
           product,
           workspace,
@@ -297,6 +312,15 @@ const T9_1 = defineProductTest({
 // T9.1-1 — categories equal 5.6 (fixtures shared with T5.6-*)
 // ---------------------------------------------------------------------------
 
+// Arm B's edit (staged after arm A's build): onmid.dep's `d` list gaining
+// Tree.top.other — a staged-source record (helpers/staged-mdx.ts), the same
+// template call moved to module level. Arm A's leaf edit precedes the
+// body's first product invocation and stays a plain staging.
+const T9_1_1_DEPS_EDITED = stagedMdx(
+  "T9.1-1 specs/Deps.mdx with onmid.dep's d list gaining Tree.top.other",
+  workedExample.depsSource("[Tree.top.mid, Tree.top.other]"),
+);
+
 const T9_1_1 = defineProductTest({
   id: "T9.1-1",
   title:
@@ -340,10 +364,7 @@ const T9_1_1 = defineProductTest({
         // `descendant-changed`; D's ancestors are `upstream-changed`
         // attributed to D; the gained target and the whole tree side stay
         // uncategorized (SPEC 5.6's d-target example).
-        await workspace.file(
-          wx.depsFile,
-          wx.depsSource("[Tree.top.mid, Tree.top.other]"),
-        );
+        await workspace.file(wx.depsFile, T9_1_1_DEPS_EDITED);
         await buildOk(
           product,
           workspace,
@@ -867,8 +888,12 @@ const T9_2_5 = defineProductTest({
         }
 
         // The real edit: the renamed node's own text run, applied to the
-        // rewritten source (read-modify-write keeps the test independent of
-        // the rename's exact byte-level rewrite, T6.4-2's business).
+        // product-rewritten source through `workspace.edit()` — an edit of
+        // bytes the product wrote, judged at staging time (no harness
+        // constant equals them; helpers/staged-mdx.ts), after the diagnosed
+        // premise that the run is still present. The edit keeps the test
+        // independent of the rename's exact byte-level rewrite (T6.4-2's
+        // business).
         const specText = await readSourceText(
           workspace,
           C5_SPEC,
@@ -882,9 +907,10 @@ const T9_2_5 = defineProductTest({
               `(SPEC 6.2, 6.4); got: ${JSON.stringify(specText)}`,
           );
         }
-        await workspace.file(
+        await workspace.edit(
           C5_SPEC,
-          specText.replace("Renamed node text v1.", "Renamed node text v2."),
+          "Renamed node text v1.",
+          "Renamed node text v2.",
         );
         await buildOk(
           product,

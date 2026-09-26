@@ -41,6 +41,7 @@ import type {
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   SPECS_ONLY_CONFIG,
@@ -71,12 +72,14 @@ async function withWorkspace<T>(
 }
 
 /**
- * Apply a manual edit to a source file the product may have rewritten:
- * read it, require `expected` to occur exactly once (a crisp premise
- * diagnosis ahead of the impact assertions, the T9.2-5 pattern — rename
- * rewrites are minimal in-place edits, SPEC 6.4, so the staged construct must
- * still be present verbatim up to its rewritten identity), and replace it
- * with `replacement`.
+ * Apply a manual edit to a source file the product has rewritten: read it,
+ * require `expected` to occur exactly once (a crisp premise diagnosis ahead
+ * of the impact assertions, the T9.2-5 pattern — rename rewrites are
+ * minimal in-place edits, SPEC 6.4, so the staged construct must still be
+ * present verbatim up to its rewritten identity), and replace it with
+ * `replacement` through `workspace.edit()` — an edit of bytes the product
+ * wrote, judged at staging time (no harness constant equals them, so it is
+ * no staged-source record; helpers/staged-mdx.ts).
  */
 async function editSourceExpecting(
   workspace: TestWorkspace,
@@ -95,7 +98,7 @@ async function editSourceExpecting(
         `6.4); got: ${JSON.stringify(text)}`,
     );
   }
-  await workspace.file(rel, text.replace(expected, replacement));
+  await workspace.edit(rel, expected, replacement);
 }
 
 // ---------------------------------------------------------------------------
@@ -531,6 +534,14 @@ const mdepSource = (d: string): string =>
     "</S>",
     "",
   ].join("\n");
+// The metadata-terminus edit (staged after run 1's build and `impact`): `dd`'s
+// `d` list gaining MTgts.t2 — a staged-source record (helpers/staged-mdx.ts),
+// the same template call moved to module level. The run-1 edits precede the
+// body's first product invocation and stay plain stagings.
+const T9_3_2_MDEP_EDITED = stagedMdx(
+  "T9.3-2 specs/MDep.mdx with dd's d list gaining MTgts.t2",
+  mdepSource("[MTgts.t1, MTgts.t2]"),
+);
 const S2_MX_SOURCE = [
   'import MDep from "./MDep.xspec"',
   "",
@@ -694,7 +705,7 @@ const T9_3_2 = defineProductTest({
 
         // Metadata terminus: edit only `dd`'s `d` list against the second
         // baseline.
-        await workspace.file(S2_MDEP, mdepSource("[MTgts.t1, MTgts.t2]"));
+        await workspace.file(S2_MDEP, T9_3_2_MDEP_EDITED);
         await buildOk(
           product,
           workspace,
