@@ -36,6 +36,8 @@ import {
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -59,10 +61,16 @@ export default defineConfig({
 })
 `;
 
-/** Stage one single-file workspace and collect its `build --json` findings. */
+/**
+ * Stage one single-file workspace and collect its `build --json` findings.
+ * `source` is a staged-source record wherever the calling body has already
+ * invoked the product (S-9's timing clause: a later workspace's initial file
+ * is judged by the S-9 self-test before any product exists); a body's first
+ * workspace may stage plain contents.
+ */
 async function findingsOf(
   product: ProductBinding,
-  source: string,
+  source: string | StagedMdx,
   context: string,
 ): Promise<readonly Finding[]> {
   const workspace = await TestWorkspace.create({
@@ -113,7 +121,8 @@ const VALID_NESTING_SOURCE = [
   "",
 ].join("\n");
 
-interface StructuralArm {
+/** The parts a structural arm's `specs/A.mdx` is composed from. */
+interface StructuralArmParts {
   /** Which SPEC 1.3 invalid case this is (failure diagnostics). */
   readonly name: string;
   readonly prefix: string;
@@ -131,30 +140,54 @@ interface StructuralArm {
   readonly expectedFormMention?: string;
 }
 
+interface StructuralArm extends StructuralArmParts {
+  /**
+   * The composed source, `prefix + construct + suffix`, as a staged-source
+   * record: every arm but a body's first runs after that body's first
+   * product invocation, so the S-9 self-test judges each before any product
+   * exists (the parts stay for `byteWindow`).
+   */
+  readonly source: StagedMdx;
+}
+
+/** Compose an arm's source from its parts, registering it under `recordName`. */
+function structuralArm(
+  recordName: string,
+  parts: StructuralArmParts,
+): StructuralArm {
+  return {
+    ...parts,
+    source: stagedMdx(
+      recordName,
+      parts.prefix + parts.construct + parts.suffix,
+    ),
+  };
+}
+
 const STRUCTURAL_ARMS: readonly StructuralArm[] = [
-  {
+  structuralArm("T1.3-2 arm validCredentials-in-login specs/A.mdx", {
     name: '`<S id="validCredentials">` nested inside `login`',
     prefix: '<S id="login">\nLogin behavior.\n\n',
     construct:
       '<S id="validCredentials">\nDoes not equal the parent id plus one segment.\n</S>',
     suffix: "\n</S>\n",
     expectedFormMention: "login.",
-  },
-  {
+  }),
+  structuralArm("T1.3-2 arm login.validCredentials-in-account specs/A.mdx", {
     name: '`<S id="login.validCredentials">` nested inside `account`',
     prefix: '<S id="account">\nAccount behavior.\n\n',
     construct:
       '<S id="login.validCredentials">\nExtends a different parent id.\n</S>',
     suffix: "\n</S>\n",
     expectedFormMention: "account.",
-  },
-  {
+  }),
+  structuralArm("T1.3-2 arm top-level-auth.login specs/A.mdx", {
     name: 'top-level `<S id="auth.login">` with no enclosing `auth`',
     prefix: "",
     construct:
       '<S id="auth.login">\nTop-level, yet the id has two segments.\n</S>',
     suffix: "\n",
-  },
+  }),
 ];
 
 /**
@@ -167,11 +200,7 @@ async function runStructuralArm(
   testId: string,
 ): Promise<void> {
   const context = `${testId} \`build --json\` over ${arm.name}`;
-  const findings = await findingsOf(
-    product,
-    arm.prefix + arm.construct + arm.suffix,
-    context,
-  );
+  const findings = await findingsOf(product, arm.source, context);
   assertConditionCounts(findings, { "14.2": 1 }, context);
   const finding = findings[0]!;
   assertFindingLocated(
@@ -216,38 +245,44 @@ const T1_3_2 = defineProductTest({
   },
 });
 
+// T1.3-3's one arm — its body's first workspace, a record all the same (the
+// structural arms convert uniformly).
+const SKIPPED_LEVEL_ARM = structuralArm("T1.3-3 arm a.b.c-in-a specs/A.mdx", {
+  name: "`a` containing `a.b.c` with no `a.b` section",
+  prefix: '<S id="a">\nAlpha.\n\n',
+  construct: '<S id="a.b.c">\nSkips the level a.b.\n</S>',
+  suffix: "\n</S>\n",
+  // The offending id `a.b.c` itself contains every prefix-shaped substring
+  // of the expected form (`a.`), so no message content is
+  // implementation-independently assertable here.
+});
+
 const T1_3_3 = defineProductTest({
   id: "T1.3-3",
   title:
     "an ID that skips a level (`a` containing `a.b.c` with no `a.b`) fails with 14.2 (SPEC 1.3, 14.2)",
   run: async (product) => {
-    await runStructuralArm(
-      product,
-      {
-        name: "`a` containing `a.b.c` with no `a.b` section",
-        prefix: '<S id="a">\nAlpha.\n\n',
-        construct: '<S id="a.b.c">\nSkips the level a.b.\n</S>',
-        suffix: "\n</S>\n",
-        // The offending id `a.b.c` itself contains every prefix-shaped
-        // substring of the expected form (`a.`), so no message content is
-        // implementation-independently assertable here.
-      },
-      "T1.3-3",
-    );
+    await runStructuralArm(product, SKIPPED_LEVEL_ARM, "T1.3-3");
   },
 });
 
-const TOP_LEVEL_MULTI_SEGMENT: StructuralArm = {
-  name: "a top-level section with a multi-segment ID",
-  prefix: "",
-  construct: '<S id="alpha.beta">\nTwo segments at top level.\n</S>',
-  suffix: "\n",
-  // Checked against the empty prefix (14.2): the expected form — exactly one
-  // segment — has no implementation-independent substring to require.
-};
+const TOP_LEVEL_MULTI_SEGMENT = structuralArm(
+  "T1.3-4 arm alpha.beta specs/A.mdx",
+  {
+    name: "a top-level section with a multi-segment ID",
+    prefix: "",
+    construct: '<S id="alpha.beta">\nTwo segments at top level.\n</S>',
+    suffix: "\n",
+    // Checked against the empty prefix (14.2): the expected form — exactly
+    // one segment — has no implementation-independent substring to require.
+  },
+);
 
-const TOP_LEVEL_ONE_SEGMENT_SOURCE =
-  '<S id="alpha">\nOne segment at top level.\n</S>\n';
+// Staged after the multi-segment arm's invocation: a record (S-9).
+const TOP_LEVEL_ONE_SEGMENT_SOURCE = stagedMdx(
+  "T1.3-4 one-segment specs/A.mdx",
+  '<S id="alpha">\nOne segment at top level.\n</S>\n',
+);
 
 const T1_3_4 = defineProductTest({
   id: "T1.3-4",
@@ -278,6 +313,17 @@ const DUP_FIRST = '<S id="dup">\nFirst occurrence.\n</S>';
 const DUP_GAP = "\n\n";
 const DUP_SECOND = '<S id="dup">\nSecond occurrence.\n</S>';
 const DUP_SOURCE = `${DUP_FIRST}${DUP_GAP}${DUP_SECOND}\n`;
+
+// T1.3-5, cross-file arm: staged after the same-file arm's invocation, so
+// both sources are records (S-9).
+const CROSS_FILE_A = stagedMdx(
+  "T1.3-5 cross-file specs/A.mdx",
+  '<S id="dup">\nIn file A.\n</S>\n',
+);
+const CROSS_FILE_B = stagedMdx(
+  "T1.3-5 cross-file specs/B.mdx",
+  '<S id="dup">\nIn file B.\n</S>\n',
+);
 
 const T1_3_5 = defineProductTest({
   id: "T1.3-5",
@@ -330,8 +376,8 @@ const T1_3_5 = defineProductTest({
     const crossFile = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        "specs/A.mdx": '<S id="dup">\nIn file A.\n</S>\n',
-        "specs/B.mdx": '<S id="dup">\nIn file B.\n</S>\n',
+        "specs/A.mdx": CROSS_FILE_A,
+        "specs/B.mdx": CROSS_FILE_B,
       },
     });
     try {
@@ -398,11 +444,20 @@ const MASK_SOURCE = `${MASK_PREFIX}${MASK_GRANDCHILD}${MASK_MID}${MASK_BAD_CHILD
 // discriminating assertion is the bearer's own code: exactly one 14.17 and
 // no 14.1. A valid sibling precedes the bearer so the bearer's construct is
 // a proper sub-range of the file and its location assertion has teeth.
-interface InvalidIdFormArm {
+interface InvalidIdFormArmParts {
   /** Which T1.3-6 invalid-form case this is (failure diagnostics). */
   readonly name: string;
   /** The bearer's opening tag plus its own text, up to the child. */
   readonly bearerOpen: string;
+}
+
+interface InvalidIdFormArm extends InvalidIdFormArmParts {
+  /**
+   * The composed file — the sibling, then the bearer construct — as a
+   * staged-source record: the arms run after T1.3-6's masking invocation,
+   * so the S-9 self-test judges each before any product exists.
+   */
+  readonly source: StagedMdx;
 }
 
 const FORM_SIBLING = '<S id="ok">\nA valid sibling section.\n</S>\n\n';
@@ -412,22 +467,35 @@ const FORM_GRANDCHILD =
   '<S id="zzz">\nGrandchild: checked against its parent id normally.\n</S>';
 const FORM_TAIL = "\n</S>\n</S>";
 
+/** Compose an arm's file from its bearer, registering it under `recordName`. */
+function invalidIdFormArm(
+  recordName: string,
+  parts: InvalidIdFormArmParts,
+): InvalidIdFormArm {
+  const bearerConstruct =
+    parts.bearerOpen + FORM_CHILD_OPEN + FORM_GRANDCHILD + FORM_TAIL;
+  return {
+    ...parts,
+    source: stagedMdx(recordName, `${FORM_SIBLING}${bearerConstruct}\n`),
+  };
+}
+
 const INVALID_ID_FORM_ARMS: readonly InvalidIdFormArm[] = [
-  {
+  invalidIdFormArm("T1.3-6 arm repeated-id specs/A.mdx", {
     name: 'a repeated-`id` section (`<S id="one" id="two">`)',
     bearerOpen:
       '<S id="one" id="two">\nBearer: the id attribute is repeated.\n\n',
-  },
-  {
+  }),
+  invalidIdFormArm("T1.3-6 arm braced-id specs/A.mdx", {
     name: 'a braced-`id` section (`<S id={"x"}>`)',
     bearerOpen:
       '<S id={"x"}>\nBearer: the id value is not a quoted static string literal.\n\n',
-  },
-  {
+  }),
+  invalidIdFormArm("T1.3-6 arm valueless-id specs/A.mdx", {
     name: "a valueless-`id` section (`<S id>`)",
     bearerOpen:
       "<S id>\nBearer: the id prop is the bare name, spelling no value at all.\n\n",
-  },
+  }),
 ];
 
 /**
@@ -442,11 +510,7 @@ async function runInvalidIdFormArm(
   const context = `T1.3-6 \`build --json\` over ${arm.name}`;
   const bearerConstruct =
     arm.bearerOpen + FORM_CHILD_OPEN + FORM_GRANDCHILD + FORM_TAIL;
-  const findings = await findingsOf(
-    product,
-    `${FORM_SIBLING}${bearerConstruct}\n`,
-    context,
-  );
+  const findings = await findingsOf(product, arm.source, context);
   // Exactly one 14.17 and one 14.2 in the whole report: the bearer reports
   // condition 17 — never 14.1 and never 14.20, the value form is a validity
   // matter, not a parse failure — the immediate child's 14.2 is masked, and
