@@ -105,18 +105,22 @@
 //   or removal's start or at the file's byte length (6.5's latitude, as
 //   the entry allows); (h), (j), and (k) assert `impact --base` over a
 //   baseline committed after the pre-move `build` with T6.5-14's pin
-//   convention — the parents `changed` within the SUITE-20 bound, their
-//   `descendant-changed` tolerated within the departed or arrived child,
-//   (j)'s root tolerated `upstream-changed` through its embedding of `p`,
-//   the dependent file's root tolerated `upstream-changed` as a
-//   dependent's ancestor (5.6), the `d={B}` dependent required
-//   `upstream-changed` with the target root among its attribution, and
-//   every other node named by no entry; (j)'s own text carries the
-//   `{text("p")}` embedding fully expanded (1.6: `p`'s subtree text, the
-//   moved body line's `{text(<X>.a)}` replaced by `a`'s); (l) and its
-//   indented twin assert the pre-move `build --json` clean and `view`'s
-//   `imports` empty before, the added declaration alone after (its range
-//   the declaration's own characters, as T11.4-4 pins an import's).
+//   convention — the parents `changed` within the SUITE-20 bound, `p`'s
+//   and the origin parent's `descendant-changed` tolerated within the
+//   departed or arrived child, the target root (`p`'s ancestor) required
+//   `descendant-changed` attributed to `p` with the arrived child
+//   tolerated beside it, (j)'s root required `upstream-changed` through
+//   its embedding of `p` (5.6: a dependency-edge target's effectiveHash
+//   changed; `embeds` is an edge kind, 5.2), the dependent file's root
+//   required `upstream-changed` as a dependent's ancestor (5.6), the
+//   `d={B}` dependent required `upstream-changed` with the target root
+//   among its attribution, and every other node named by no entry; (j)'s
+//   own text carries the `{text("p")}` embedding fully expanded (1.6:
+//   `p`'s subtree text, the moved body line's `{text(<X>.a)}` replaced by
+//   `a`'s); (l) and its indented twin assert the pre-move `build --json`
+//   clean and `view`'s `imports` empty before, the added declaration alone
+//   after (its range the declaration's own characters, as T11.4-4 pins an
+//   import's).
 // - T6.5-15 stages its target already binding, under the origin's own
 //   identifiers, every module the moved text references, so no import is
 //   added and no spelling rewritten (each moved spelling is rooted at a
@@ -1699,13 +1703,17 @@ function a13ComposeBeforeEmbeddingLine(ident: string): string {
 /**
  * (h)/(j)'s category expectation against the pre-move baseline (SPEC 5.6,
  * 6.2): the target root `changed` beside `p` and the origin parent, with
- * their ordinary cascades (T6.2-3's tolerances: `descendant-changed`
- * attributed within the child that departed or arrived, and, where the
- * root embeds `p`, `upstream-changed` through that embedding); the
- * other-file dependent `upstream-changed` with the root among the nodes it
- * is attributed to, its own root tolerated `upstream-changed` as a
- * dependent's ancestor (5.6); the moved node, the sibling, and the third
- * module's nodes carrying none; no other node `changed`.
+ * their ordinary cascades — the root, `p`'s ancestor, `descendant-changed`
+ * attributed to `p` (5.6: every ancestor of a `changed` node; the arrived
+ * child tolerated beside it, T6.2-3's bound) and, where the root embeds
+ * `p` through `{text("p")}`, `upstream-changed` attributed to `p` (5.6: a
+ * dependency-edge target's effectiveHash changed; `embeds` is an edge
+ * kind, 5.2); `p` and the origin parent at most `descendant-changed`
+ * within the child that arrived or departed (T6.2-3's two-sided
+ * tolerance); the other-file dependent `upstream-changed` with the root
+ * among the nodes it is attributed to, and its own root `upstream-changed`
+ * likewise, as a dependent's ancestor (5.6); the moved node, the sibling,
+ * and the third module's nodes carrying none; no other node `changed`.
  */
 function a13DependentImpact(rootEmbedsChild: boolean): A13ImpactExpectation {
   const parent = `${A13_TARGET}#p`;
@@ -1727,12 +1735,26 @@ function a13DependentImpact(rootEmbedsChild: boolean): A13ImpactExpectation {
     pins: [
       {
         identity: A13_TARGET,
-        required: ["changed"],
+        required: [
+          "changed",
+          "descendant-changed",
+          ...(rootEmbedsChild ? ["upstream-changed" as const] : []),
+        ],
         changedWithin: originating,
-        optional: [
-          { category: "descendant-changed", within: [parent, moved] },
+        attributed: [
+          {
+            category: "descendant-changed",
+            within: [parent, moved],
+            mustInclude: [parent],
+          },
           ...(rootEmbedsChild
-            ? [{ category: "upstream-changed" as const, within: originating }]
+            ? [
+                {
+                  category: "upstream-changed" as const,
+                  within: originating,
+                  mustInclude: [parent],
+                },
+              ]
             : []),
         ],
       },
@@ -1761,8 +1783,14 @@ function a13DependentImpact(rootEmbedsChild: boolean): A13ImpactExpectation {
       },
       {
         identity: A13_DEPENDENT,
-        required: [],
-        optional: [{ category: "upstream-changed", within: originating }],
+        required: ["upstream-changed"],
+        attributed: [
+          {
+            category: "upstream-changed",
+            within: originating,
+            mustInclude: [A13_TARGET],
+          },
+        ],
       },
       { identity: moved, required: [] },
       { identity: `${A13_ORIGIN}#s`, required: [] },
@@ -1773,9 +1801,12 @@ function a13DependentImpact(rootEmbedsChild: boolean): A13ImpactExpectation {
       "the target root is `changed` — the addition, elsewhere than at a " +
       "line's start, splits a line of its own content (SPEC 6.2) — beside " +
       "`p` and the origin parent `changed` with their ordinary cascades " +
-      "(T6.2-3); its other-file dependent (`d={B}`) is `upstream-changed` " +
-      "with the root among the originating nodes it is attributed to (SPEC " +
-      "5.6); the moved node carries no category — its runs, its embedding's " +
+      "(T6.2-3) — the root `descendant-changed` attributed to `p`, its " +
+      "`changed` child, and, where it embeds `p`, `upstream-changed` (SPEC " +
+      "5.6, 5.2); its other-file dependent (`d={B}`) is `upstream-changed` " +
+      "with the root among the originating nodes it is attributed to, as " +
+      "is that dependent's own root, a dependent's ancestor (SPEC 5.6); " +
+      "the moved node carries no category — its runs, its embedding's " +
       "canonical identity, and its metadataHash unchanged (5.5); no other " +
       "node is `changed`",
   };

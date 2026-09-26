@@ -54,55 +54,6 @@ sound (both parser builds agree on every probed verdict).
 
 ## Tasks
 
-### Task 2 — T6.5-13 (h)/(j): require the receiving root's cascades and the dependent root's `upstream-changed`
-
-**Requirement.** TEST-SPEC.md §6.5 T6.5-13 (line 291), arms (h) and (j): `impact --base`
-against the pre-move commit reports "6.2's enumeration exactly — the target root
-`changed`, beside `p` and the origin parent `changed` with their ordinary cascades
-(T6.2-3), a dependent of the target root in another file (`d={B}`, T2.2-2)
-`upstream-changed` with the root among the originating nodes it is attributed to
-(5.6)"; (j) "reports (h)'s enumeration exactly". SPEC 5.6: every ancestor of a `changed`
-node is `descendant-changed` attributed to it (T5.6-2: P `changed` and
-`descendant-changed`); a dependent of a `changed` node, and that dependent's
-ancestors, are `upstream-changed` attributed to it. T6.2-3's own pins
-(`test/suite/registry/section-6.2.ts` ~1928–1935) make the file roots'
-`descendant-changed` required with `exact: [<parent>]`.
-
-**Observed.** `a13DependentImpact` (`test/suite/registry/section-6.5-iii.ts` ~1710–1780,
-used by (h) with `rootEmbedsChild=false` and (j) with `true`) requires only `changed` on
-`A13_TARGET` and lists `descendant-changed` (within `[parent, moved]`) and, for (j),
-`upstream-changed` (within `originating`) under `optional`; `A13_DEPENDENT` (the
-dependent file's root, a dependent's ancestor) has `required: []` with
-`upstream-changed` optional. A product reporting the target root as `changed` alone,
-or the dependent file's root uncategorized, passes both arms.
-
-**Change** (pins only; no staging, no other arm, no helper semantics change):
-- `A13_TARGET`: `required: ["changed", "descendant-changed"]` plus `"upstream-changed"`
-  when `rootEmbedsChild`; move the two entries from `optional` to `attributed`:
-  `{ category: "descendant-changed", within: [parent, moved], mustInclude: [parent] }`
-  (the departed/arrived-child tolerance T6.2-3 documents — the SUITE-20 convention in
-  the module header — is kept as the bound; `p`, an originating node, is required) and,
-  under `rootEmbedsChild`, `{ category: "upstream-changed", within: originating,
-  mustInclude: [parent] }` (the root embeds `p` through `{text("p")}`; `p` is `changed`).
-- `A13_DEPENDENT`: `required: ["upstream-changed"]`,
-  `attributed: [{ category: "upstream-changed", within: originating, mustInclude: [A13_TARGET] }]`
-  (SPEC 5.6: dependents' ancestors are `upstream-changed`, attributed to the
-  originating node; the target root is the dependent's `d` target and is `changed`).
-- Update the helper's doc comment and the module header's (h)/(j) paragraph (~line 104–112)
-  so they no longer describe these categories as tolerated.
-
-**Checks.** `npx tsc -p test`; the self project green (T6.5-13 is not certification-
-scoped: CERTIFICATIONS.md places the 6.4/6.5 rewrite byte contracts outside
-certification; S-7's sweep still fails the test at its first product assertion). Run
-T6.5-13 alone against the built product (`-t 'T6.5-13 '`) and read the diagnosis:
-if the product now fails at (h)/(j)'s impact assertion, confirm the failure message
-names the missing category and cites SPEC 5.6 — a diagnosed product failure allowed
-at this phase; record it in the commit message and `AGENTS.md`'s per-task bullet.
-Red check of the pin itself: with a scratch copy of the module, relax one
-`mustInclude` and confirm the diagnosis changes accordingly against the product's
-actual report (or, if the product passes, mutate the expected attribution and
-confirm the failure), then restore the module.
-
 ### Task 3 — T11.2-4: add the Enclosure arm (a stray `<div>` enclosing a section and an embedding at the root level)
 
 **Requirement.** TEST-SPEC.md §11.2 T11.2-4 (line 437), the Enclosure clause: "(11.2: a
