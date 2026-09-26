@@ -26,7 +26,13 @@
 // unsealed instance, the builder's record overload (a record stages exactly
 // its bytes under its own declaration, which overrides the workspace's for
 // the path; an `mdx` option beside it, or a non-`.mdx` path, throws with
-// nothing written), the builder's `edit()` (a rewrite of the current bytes,
+// nothing written), the record-accepting initial `files` of a workspace
+// declaration (`InitialFileContents` — the form of a later-arm workspace's
+// initial `.mdx` files, which S-7's sweep never reaches: `create()` stages
+// a record under the record's declaration; a record at a non-`.mdx` key, or
+// beside a workspace-declaration entry naming its path, throws; the
+// declaration's `perDraw` list judges a draw's initial file as well-formed
+// and declares the path `per-draw`), the builder's `edit()` (a rewrite of the current bytes,
 // judged under the path's declaration), and the judge's own red checks (an
 // ill-formed source declared well-formed and a deriving source declared
 // unparseable both throw; `unchecked` judges nothing).
@@ -43,7 +49,7 @@ import {
   stagedMdxLedger,
 } from "../helpers/staged-mdx.js";
 import { TestWorkspace, judgeMdxDeclaration } from "../helpers/workspace.js";
-import type { WorkspaceDecl } from "../helpers/workspace.js";
+import type { WorkspaceDecl, WorkspaceMdxDecl } from "../helpers/workspace.js";
 // The E-6 exchange fixture (helpers/e6.ts) is no registry entry, yet stages
 // one `.mdx` source after its first invocations — a record of its own, which
 // this import registers BEFORE the registry manifest below seals the ledger.
@@ -135,6 +141,67 @@ function someWellFormedRecord(): StagedMdx {
     throw new Error("the ledger holds no well-formed record");
   }
   return record;
+}
+
+/** A record of the registry's own declared unparseable, for the builder checks. */
+function someUnparseableRecord(): StagedMdx {
+  const record = LEDGER.find((entry) => entry.mdx === "unparseable");
+  if (record === undefined) {
+    throw new Error("the ledger holds no unparseable record");
+  }
+  return record;
+}
+
+/**
+ * `TestWorkspace.create(decl)` must be refused with an S-9 staging error
+ * naming `key`; a workspace it unexpectedly yields is disposed.
+ */
+async function createRejected(
+  decl: WorkspaceDecl,
+  key: string,
+  ...fragments: readonly string[]
+): Promise<void> {
+  await expectStagingRejected(
+    async () => {
+      const workspace = await TestWorkspace.create(decl);
+      onTestFinished(() => workspace.dispose());
+    },
+    key,
+    ...fragments,
+  );
+}
+
+/**
+ * A fresh, unsealed ledger and the builder bound to it — both modules
+ * re-evaluated after `vi.resetModules()`, so the fresh builder's `StagedMdx`
+ * is the fresh ledger's class — for the checks that need a record
+ * contradicting its declaration: the sealed registry ledger holds none,
+ * this file having judged every record. The fresh builder's errors are the
+ * fresh permissions module's, matched by name and mode, not `instanceof`.
+ */
+async function freshBuilder(): Promise<{
+  readonly ledger: typeof import("../helpers/staged-mdx.js");
+  readonly builder: typeof import("../helpers/workspace.js");
+}> {
+  vi.resetModules();
+  const ledger = await import("../helpers/staged-mdx.js");
+  const builder = await import("../helpers/workspace.js");
+  return { ledger, builder };
+}
+
+function expectFreshStagingError(
+  thrown: unknown,
+  key: string,
+  ...fragments: readonly string[]
+): void {
+  expect(thrown).toBeInstanceOf(Error);
+  const error = thrown as Error & { mode?: unknown; path?: unknown };
+  expect(error.name).toBe("HarnessStagingError");
+  expect(error.mode).toBe("mdx-derivability");
+  expect(error.path).toBe(key);
+  for (const fragment of fragments) {
+    expect(error.message).toContain(fragment);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -337,6 +404,142 @@ describe("S-9: the builder stages a record's bytes under the record's declaratio
         judgeMdxDeclaration(record.name, bytesOf(record.source), record.mdx),
       record.name,
       "declared well-formed (S-9's default) but the stock MDX 3 parser rejects it",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The record-accepting initial `files` (`InitialFileContents`): the form of a
+// later-arm workspace's initial `.mdx` files — a workspace the body creates
+// after its first product invocation, which S-7's sweep never reaches — so
+// `create()` stages a record under the record's declaration as `file()`
+// does. A refusal is `create()`'s: the workspace is disposed, nothing left.
+
+describe("S-9: the builder stages an initial `files` record under the record's declaration", () => {
+  test("a record in `files` stages exactly its bytes, under its own declaration: a well-formed record and an unparseable one alike, whatever the workspace's default for the path", async () => {
+    const wellFormed = someWellFormedRecord();
+    const unparseable = someUnparseableRecord();
+    const workspace = await stage({
+      files: {
+        "specs/record.mdx": wellFormed,
+        "specs/unparseable.mdx": unparseable,
+        "notes.txt": "plain text\n",
+      },
+    });
+    expect(
+      Buffer.compare(
+        Buffer.from(await workspace.readBytes("specs/record.mdx")),
+        Buffer.from(bytesOf(wellFormed.source)),
+      ),
+    ).toBe(0);
+    expect(
+      Buffer.compare(
+        Buffer.from(await workspace.readBytes("specs/unparseable.mdx")),
+        Buffer.from(bytesOf(unparseable.source)),
+      ),
+    ).toBe(0);
+    expect(text(await workspace.readBytes("notes.txt"))).toBe("plain text\n");
+    // The path's workspace declaration is the default (well-formed), under
+    // which the unparseable record's bytes are refused as plain contents:
+    // the record's own declaration governed the staging.
+    expect(workspace.mdxDeclarationOf("specs/unparseable.mdx")).toBe(
+      "well-formed",
+    );
+    await expectStagingRejected(
+      () => workspace.file("specs/unparseable.mdx", unparseable.source),
+      "specs/unparseable.mdx",
+      "declared well-formed (S-9's default) but the stock MDX 3 parser rejects it",
+    );
+  });
+
+  test("a record is judged at creation (the same judge): a fresh ledger's contradicting record makes `create()` throw, either way round", async () => {
+    const { ledger, builder } = await freshBuilder();
+    const deriving = ledger.stagedMdx(
+      "T0-5 deriving, declared unparseable",
+      WELL_FORMED,
+      "unparseable",
+    );
+    const illFormed = ledger.stagedMdx(
+      "T0-5 ill-formed, declared well-formed",
+      ILL_FORMED,
+    );
+    for (const [record, fragment] of [
+      [
+        deriving,
+        "declared unparseable (`mdx.unparseable`) but the source derives",
+      ],
+      [
+        illFormed,
+        "declared well-formed (S-9's default) but the stock MDX 3 parser rejects it",
+      ],
+    ] as const) {
+      let thrown: unknown;
+      try {
+        const workspace = await builder.TestWorkspace.create({
+          files: { "specs/record.mdx": record },
+        });
+        onTestFinished(() => workspace.dispose());
+      } catch (error) {
+        thrown = error;
+      }
+      expectFreshStagingError(thrown, "specs/record.mdx", fragment);
+    }
+  });
+
+  test("a record at a key S-9 does not judge is a mistake: `create()` throws", async () => {
+    const record = someWellFormedRecord();
+    await createRejected(
+      { files: { "src/record.ts": record } },
+      "src/record.ts",
+      "not an `.mdx` path",
+      JSON.stringify(record.name),
+    );
+  });
+
+  test("a record beside a workspace declaration naming its path is a contradiction, whichever list names it: `create()` throws", async () => {
+    const record = someWellFormedRecord();
+    const P = "specs/record.mdx";
+    const declarations: readonly WorkspaceMdxDecl[] = [
+      { unparseable: [P] },
+      { unchecked: [P] },
+      { allowances: { [P]: ["duplicate-import-binding"] } },
+      { perDraw: [P] },
+    ];
+    for (const mdx of declarations) {
+      await createRejected(
+        { files: { [P]: record }, mdx },
+        P,
+        "contradiction",
+        JSON.stringify(record.name),
+        "drop the declaration entry",
+      );
+    }
+  });
+
+  test("`perDraw`: a listed path's initial contents are judged well-formed at creation and the path is declared `per-draw`; an ill-formed entry throws; a path in two lists, or not an MDX source, throws", async () => {
+    const draw = "specs/draw.mdx";
+    const workspace = await stage({
+      files: { [draw]: WELL_FORMED },
+      mdx: { perDraw: [draw] },
+    });
+    expect(workspace.mdxDeclarationOf(draw)).toBe("per-draw");
+    expect(text(await workspace.readBytes(draw))).toBe(WELL_FORMED);
+    await createRejected(
+      { files: { [draw]: ILL_FORMED }, mdx: { perDraw: [draw] } },
+      draw,
+      "declared well-formed per draw",
+      "but the stock MDX 3 parser rejects it",
+    );
+    await createRejected(
+      { mdx: { perDraw: [draw], unchecked: [draw] } },
+      draw,
+      "more than one of",
+      "`perDraw`",
+    );
+    await createRejected(
+      { mdx: { perDraw: ["specs/draw.md"] } },
+      "specs/draw.md",
+      "not an MDX source",
     );
   });
 });

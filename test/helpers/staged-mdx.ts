@@ -29,10 +29,22 @@
 // never `unchecked` (that declaration is P-8's fuzz mutations' alone; a
 // record exists to be judged).
 //
-// What is NOT a ledger record: the initial files of a workspace declaration
-// (S-7's sweep reaches them against the stub); a property draw (judged per
+// The initial files of a workspace declaration are records too, wherever
+// S-7's sweep does not reach them: a body's FIRST workspace's initial files
+// are reached against the stub and may stay plain contents, but the initial
+// `.mdx` files of a workspace the body creates after its first product
+// invocation — a later arm's, a helper's twin — are deterministic fixtures
+// the sweep never sees, so each is a record passed in the declaration's
+// `files` (the record-accepting `InitialFileContents`) and staged by
+// `TestWorkspace.create()` under the record's declaration, exactly as
+// `file()` stages one (the workspace declaration naming the record's path
+// is a contradiction and throws).
+//
+// What is NOT a ledger record: a property draw (judged per
 // draw by the property runner, S-9's property clause, and staged under the
-// `per-draw` declaration by the section-16 modules alone); a P-8 mutation
+// `per-draw` declaration — `file()`'s option, or the workspace
+// declaration's `perDraw` list for a draw's initial files — by the
+// section-16 modules alone); a P-8 mutation
 // (`unchecked`); and an edit of bytes the product itself wrote — a rename's
 // or move's rewritten source, which no harness constant equals — which
 // `TestWorkspace.edit()` stages from the workspace's current bytes, judged at

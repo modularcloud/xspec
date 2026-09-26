@@ -34,6 +34,7 @@ import type {
   RunResult,
 } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 
 /**
@@ -954,9 +955,13 @@ export interface ConfigurationStateTwins {
   dispose(): Promise<void>;
 }
 
-/** Stage the twins from one file set, which stages no configuration. */
+/**
+ * Stage the twins from one file set, which stages no configuration. The
+ * twins are created after the body's first invocation, so an `.mdx` entry
+ * is a staged-source record (the record-accepting initial `files`).
+ */
 export async function stageConfigurationStateTwins(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
 ): Promise<ConfigurationStateTwins> {
   if ("xspec.config.ts" in files) {
     throw new Error(

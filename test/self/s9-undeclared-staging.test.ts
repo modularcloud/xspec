@@ -23,11 +23,17 @@
 // the root, a background `startProduct`, never a sibling workspace; the
 // per-body reach — a fresh later-arm workspace's `file()` is refused inside
 // a body that has invoked the product elsewhere, its initial `files` are
-// not (the standing observation, outside the guard), and outside a body
-// context only the per-workspace mark applies; the registry's bookkeeping
-// (`dispose` unregisters); and that `per-draw` is a `file()` declaration
-// only (the judge treats it as well-formed, a ledger record refuses it). The
-// guard's error is a harness error, never a `HarnessAssertionError`.
+// not (outside the guard: a plain entry passes, and a staged-source record
+// entry — the record-accepting `InitialFileContents`, the form such a
+// workspace's initial `.mdx` files take — stages under the record's
+// declaration), and outside a body context only the per-workspace mark
+// applies; the registry's bookkeeping (`dispose` unregisters); that
+// `per-draw` is a `file()` declaration only (the judge treats it as
+// well-formed, a ledger record refuses it); and that the workspace
+// declaration's `perDraw` list is its initial-file form — the listed path's
+// initial contents judged well-formed at creation, a later plain `file()`
+// there exempt from the guard and still judged. The guard's error is a
+// harness error, never a `HarnessAssertionError`.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -280,6 +286,32 @@ test("per-body reach: inside a registered body, an invocation anywhere makes a p
     expect(text(await later.readBytes("specs/B.mdx"))).toBe(WELL_FORMED);
     await later.file("specs/C.mdx", ILL_FORMED, { mdx: "unchecked" });
     await later.file("specs/D.mdx", WELL_FORMED, { mdx: "per-draw" });
+
+    // A later-arm workspace's initial `.mdx` files as records (the
+    // record-accepting `files`): `create()` stages each under the record's
+    // declaration, inside the body that has invoked; a `perDraw` entry is
+    // judged well-formed and its path takes plain contents past the guard.
+    const arm = await stage({
+      files: {
+        "specs/E.mdx": stagedMdx(
+          "T0-2 guard: the later-arm initial source",
+          WELL_FORMED,
+        ),
+        "specs/draw.mdx": WELL_FORMED,
+        "notes.txt": "plain text\n",
+      },
+      mdx: { perDraw: ["specs/draw.mdx"] },
+    });
+    expect(arm.productInvoked).toBe(false);
+    expect(text(await arm.readBytes("specs/E.mdx"))).toBe(WELL_FORMED);
+    expect(text(await arm.readBytes("specs/draw.mdx"))).toBe(WELL_FORMED);
+    await arm.file("specs/draw.mdx", EDITED);
+    expect(text(await arm.readBytes("specs/draw.mdx"))).toBe(EDITED);
+    await expectRefused(
+      () => arm.file("specs/E.mdx", EDITED),
+      "specs/E.mdx",
+      "in the running body of T0-2",
+    );
   });
   expect(productInvokedInBody()).toBeUndefined();
 
@@ -337,6 +369,46 @@ test("`dispose()` unregisters the workspace, so a later invocation in its direct
   onTestFinished(() => workspace.dispose());
   await invoke(root);
   expect(workspace.productInvoked).toBe(false);
+});
+
+test("`perDraw` in the workspace declaration: the listed path's initial contents are judged well-formed at creation, and after an invocation a plain `file()` there passes the guard — still judged", async () => {
+  const draw = "specs/draw.mdx";
+  const workspace = await stage({
+    files: { [A]: WELL_FORMED, [draw]: WELL_FORMED },
+    mdx: { perDraw: [draw] },
+  });
+  expect(workspace.mdxDeclarationOf(draw)).toBe("per-draw");
+  await invoke(workspace.root);
+  await workspace.file(draw, EDITED);
+  expect(text(await workspace.readBytes(draw))).toBe(EDITED);
+  let thrown: unknown;
+  try {
+    await workspace.file(draw, ILL_FORMED);
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(HarnessStagingError);
+  expect((thrown as HarnessStagingError).mode).toBe("mdx-derivability");
+  expect((thrown as HarnessStagingError).message).toContain("per draw");
+  expect(text(await workspace.readBytes(draw))).toBe(EDITED);
+  // The unlisted path is guarded as before.
+  await expectRefused(() => workspace.file(A, EDITED), A, "in this workspace");
+
+  // An ill-formed `perDraw` initial entry is refused at creation.
+  thrown = undefined;
+  try {
+    const refused = await TestWorkspace.create({
+      files: { [draw]: ILL_FORMED },
+      mdx: { perDraw: [draw] },
+    });
+    onTestFinished(() => refused.dispose());
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(HarnessStagingError);
+  expect((thrown as HarnessStagingError).mode).toBe("mdx-derivability");
+  expect((thrown as HarnessStagingError).path).toBe(draw);
+  expect((thrown as HarnessStagingError).message).toContain("per draw");
 });
 
 test("`per-draw` is a `file()` declaration only: the judge treats it as well-formed, and a ledger record refuses it", () => {

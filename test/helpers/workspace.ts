@@ -65,10 +65,20 @@
 //   H-6 two-directory seeding of T6.4-7, T6.5-1, T6.5-3) — except out of a
 //   workspace no product has been invoked in, where the bytes are the
 //   harness's own staging and the guard applies as to plain contents. A
-//   workspace declaration's initial `files` are outside
-//   the guard: a body's first workspace's are reached by S-7's sweep, and a
-//   later-arm workspace's stay plain contents by the declaration's shape —
-//   a standing observation, not this guard's.
+//   workspace declaration's initial `files` take a record too
+//   (`InitialFileContents`): the initial `.mdx` files of a workspace a body
+//   creates AFTER its first product invocation — a later arm's, a helper's
+//   twin — are deterministic fixtures S-7's sweep never reaches (the body
+//   fails at that invocation), so each is a record `create()` stages under
+//   the record's declaration (a record at a non-`.mdx` key, or beside a
+//   workspace-declaration entry for its path, throws as a record beside an
+//   `mdx` option does); a body's first workspace's initial files may stay
+//   plain contents, reached by the sweep. The guard does not cover
+//   `create()`'s initial entries: a plain `.mdx` entry of a later-arm
+//   workspace is a convention the S-9 self-test cannot see, not a refusal.
+//   The declaration's `perDraw` list is the initial-file form of
+//   `per-draw`: a section-16 module's draw-derived initial files, judged by
+//   the property runner before the body saw them.
 
 import { Buffer } from "node:buffer";
 import { execFile } from "node:child_process";
@@ -111,6 +121,18 @@ export type RelPath = string | Uint8Array;
 export type FileContents = string | Uint8Array;
 
 /**
+ * An initial `files` entry of a workspace declaration: plain contents, or a
+ * staged-source record (helpers/staged-mdx.ts) whose bytes `create()` stages
+ * under the record's own S-9 declaration — the form of every `.mdx` initial
+ * file of a workspace a body creates after its first product invocation, so
+ * that the S-9 self-test judged it before any product existed (module
+ * header). A record belongs at an `.mdx` key the workspace's `mdx`
+ * declaration does not name; a body's first workspace's initial files may
+ * stay plain contents.
+ */
+export type InitialFileContents = FileContents | StagedMdx;
+
+/**
  * A staging's S-9 declaration of its MDX sources' well-formedness, by
  * workspace-relative path (`/`-separated, as the file is staged; a byte
  * path is keyed by its UTF-8 decoding with replacement characters). Every
@@ -134,6 +156,16 @@ export interface WorkspaceMdxDecl {
    * allowances): each derives under exactly the allowances named for it.
    */
   readonly allowances?: Readonly<Record<string, readonly MdxAllowance[]>>;
+  /**
+   * Sources whose initial contents are a property draw the runner already
+   * judged (helpers/property.ts `mdxSources`; TEST-SPEC 16, S-9's property
+   * clause): each is judged well-formed at creation exactly as the default
+   * is, and a later plain `file()` staging of the path is exempt from the
+   * undeclared-staging guard — the initial-file form of `per-draw`. Only
+   * the section-16 modules list a path here; a deterministic test never
+   * does (a later-arm workspace's initial `.mdx` files are records).
+   */
+  readonly perDraw?: readonly string[];
 }
 
 /**
@@ -143,8 +175,9 @@ export interface WorkspaceMdxDecl {
  * at staging exactly as `well-formed` is — and already judged per draw by the
  * property runner before the body saw it (helpers/property.ts `mdxSources`),
  * so the undeclared-staging guard exempts it. Only the section-16 modules
- * (section-16-p4.ts, -p5-p6.ts, -p9.ts) pass it; a deterministic test never
- * does, and a staged-source record never carries it.
+ * (section-16-p4.ts, -p5-p6.ts, -p9.ts) pass it — to `file()`, or as the
+ * workspace declaration's `perDraw` list for a draw's initial files; a
+ * deterministic test never does, and a staged-source record never carries it.
  */
 export type MdxFileDeclaration =
   | "well-formed"
@@ -161,16 +194,21 @@ export interface FileOptions {
 
 /** Declarative form of a workspace's initial content. */
 export interface WorkspaceDecl {
-  /** Regular files: workspace-relative path → exact contents. */
-  readonly files?: Readonly<Record<string, FileContents>>;
+  /**
+   * Regular files: workspace-relative path → exact contents, or a
+   * staged-source record at an `.mdx` path (`InitialFileContents`).
+   */
+  readonly files?: Readonly<Record<string, InitialFileContents>>;
   /** Symbolic links: workspace-relative link path → verbatim target. */
   readonly symlinks?: Readonly<Record<string, string>>;
   /** Directories created explicitly (parents of files are implicit). */
   readonly dirs?: readonly string[];
   /**
-   * S-9 declaration of the staged `.mdx` sources — those in `files` and
-   * those a later `file()` call stages; every `.mdx` path absent from it is
-   * declared well-formed (see the module header).
+   * S-9 declaration of the staged `.mdx` sources — those in `files` staged
+   * as plain contents (a record carries its own declaration, and naming its
+   * path here contradicts it) and those a later `file()` call stages; every
+   * `.mdx` path absent from it is declared well-formed (see the module
+   * header).
    */
   readonly mdx?: WorkspaceMdxDecl;
 }
@@ -311,29 +349,12 @@ export class TestWorkspace {
     let data: Uint8Array;
     let declaration = options.mdx;
     if (contents instanceof StagedMdx) {
-      const key = mdxKey(rel);
-      if (!isMdxPath(rel)) {
-        throw new HarnessStagingError(
-          "mdx-derivability",
-          key,
-          `the staged-source record ${JSON.stringify(contents.name)} is an ` +
-            "MDX source and the path is not an `.mdx` path — a path S-9 " +
-            "does not judge takes plain contents",
-        );
-      }
-      if (declaration !== undefined) {
-        throw new HarnessStagingError(
-          "mdx-derivability",
-          key,
-          `the staged-source record ${JSON.stringify(contents.name)} ` +
-            `carries its own S-9 declaration ${JSON.stringify(contents.mdx)}; ` +
-            `the \`mdx\` option ${JSON.stringify(declaration)} beside it is ` +
-            "a contradiction — the record's declaration is the one the S-9 " +
-            "self-test verified, so drop the option (or change the record)",
-        );
-      }
-      data = toBytes(contents.source);
-      declaration = contents.mdx;
+      ({ data, declaration } = this.recordStaging(
+        rel,
+        contents,
+        declaration,
+        "option",
+      ));
     } else {
       data = toBytes(contents);
       if (isMdxPath(rel)) {
@@ -356,18 +377,75 @@ export class TestWorkspace {
   }
 
   /**
-   * An initial `files` entry of the workspace declaration: judged like every
-   * `.mdx` staging, outside the undeclared-staging guard (module header — a
-   * body's first workspace's initial files are reached by S-7's sweep; a
-   * later-arm workspace's are the standing observation).
+   * An initial `files` entry of the workspace declaration: plain contents,
+   * judged under the workspace declaration like every `.mdx` staging, or a
+   * staged-source record, staged under the record's own declaration (module
+   * header — the form of a later-arm workspace's initial `.mdx` files, which
+   * S-7's sweep never reaches; a body's first workspace's may stay plain).
+   * Outside the undeclared-staging guard: a plain entry is not refused after
+   * an invocation.
    */
   private async stageInitial(
     rel: string,
-    contents: FileContents,
+    contents: InitialFileContents,
   ): Promise<void> {
-    const data = toBytes(contents);
-    this.checkMdx(rel, data, undefined);
+    let data: Uint8Array;
+    let declaration: MdxFileDeclaration | undefined;
+    if (contents instanceof StagedMdx) {
+      ({ data, declaration } = this.recordStaging(
+        rel,
+        contents,
+        this.mdxDeclarations.get(mdxKey(rel)),
+        "declaration entry",
+      ));
+    } else {
+      data = toBytes(contents);
+      declaration = undefined;
+    }
+    this.checkMdx(rel, data, declaration);
     await this.write(rel, data);
+  }
+
+  /**
+   * A staged-source record's staging — `file()`'s and an initial `files`
+   * entry's alike: the record's bytes under the record's declaration, the
+   * one the S-9 self-test verified. A record at a path S-9 does not judge
+   * is a mistake, and a second declaration for the path beside the record
+   * (`file()`'s `mdx` option, the workspace declaration's entry) is a
+   * contradiction; both throw before anything is written.
+   */
+  private recordStaging(
+    rel: RelPath,
+    record: StagedMdx,
+    beside: MdxFileDeclaration | undefined,
+    besideForm: "option" | "declaration entry",
+  ): { readonly data: Uint8Array; readonly declaration: MdxFileDeclaration } {
+    const key = mdxKey(rel);
+    if (!isMdxPath(rel)) {
+      throw new HarnessStagingError(
+        "mdx-derivability",
+        key,
+        `the staged-source record ${JSON.stringify(record.name)} is an ` +
+          "MDX source and the path is not an `.mdx` path — a path S-9 " +
+          "does not judge takes plain contents",
+      );
+    }
+    if (beside !== undefined) {
+      const what =
+        besideForm === "option"
+          ? `the \`mdx\` option ${JSON.stringify(beside)} beside it`
+          : `the workspace declaration's entry ${JSON.stringify(beside)} for the path beside it`;
+      throw new HarnessStagingError(
+        "mdx-derivability",
+        key,
+        `the staged-source record ${JSON.stringify(record.name)} ` +
+          `carries its own S-9 declaration ${JSON.stringify(record.mdx)}; ` +
+          `${what} is a contradiction — the record's declaration is the ` +
+          `one the S-9 self-test verified, so drop the ${besideForm} (or ` +
+          "change the record)",
+      );
+    }
+    return { data: toBytes(record.source), declaration: record.mdx };
   }
 
   /**
@@ -804,13 +882,14 @@ function resolveMdxDeclaration(
         "mdx-derivability",
         key,
         "the S-9 declaration names the path in more than one of " +
-          "`unparseable`, `unchecked`, and `allowances`",
+          "`unparseable`, `unchecked`, `perDraw`, and `allowances`",
       );
     }
     resolved.set(key, declaration);
   };
   for (const rel of decl.unparseable ?? []) declare(rel, "unparseable");
   for (const rel of decl.unchecked ?? []) declare(rel, "unchecked");
+  for (const rel of decl.perDraw ?? []) declare(rel, "per-draw");
   for (const [rel, allowances] of Object.entries(decl.allowances ?? {})) {
     if (allowances.length === 0) {
       throw new HarnessStagingError(
