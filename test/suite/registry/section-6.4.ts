@@ -1572,10 +1572,13 @@ const T6_4_3 = defineProductTest({
 // in place (S-9's before-any-product clause; helpers/staged-mdx.ts), the base
 // arm's — the body's first workspace — converted uniformly; a record an
 // exported set stages under T6.6-3 too is named with both. The masking arm's
-// unparseable origin carries its declaration on the record.
+// unparseable origin carries its declaration on the record. T6.5-5's usage
+// stagings (section-6.5.ts) mirror these byte for byte, and identical bytes
+// are ONE record (S-9's naming rule), so the seven records below are exported
+// to that module and named with T6.5-5 too, never registered twice.
 const U4_FILE = "specs/A.mdx";
-const U4_SOURCE = stagedMdx(
-  "T6.4-4/T6.6-3 specs/A.mdx",
+export const U4_SOURCE = stagedMdx(
+  "T6.4-4/T6.5-5/T6.6-3 specs/A.mdx",
   [
     '<S id="a">',
     "Alpha text.",
@@ -1591,8 +1594,8 @@ const U4_SOURCE = stagedMdx(
 // The ordering arm's unrelated validation error: an unresolved local `d`
 // reference (14.5) in a file untouched by the rename arguments.
 const U4_BAD_FILE = "specs/Bad.mdx";
-const U4_BAD_SOURCE = stagedMdx(
-  "T6.4-4/T6.6-3 specs/Bad.mdx",
+export const U4_BAD_SOURCE = stagedMdx(
+  "T6.4-4/T6.5-5/T6.6-3 specs/Bad.mdx",
   [
     '<S id="bad" d={"nope"}>',
     "Bad text depending on nothing that exists.",
@@ -1603,8 +1606,8 @@ const U4_BAD_SOURCE = stagedMdx(
 
 // The masking arm's unparseable origin file: an unclosed section tag (14.20).
 const U4_BROKEN_FILE = "specs/Broken.mdx";
-const U4_BROKEN_SOURCE = stagedMdx(
-  "T6.4-4 masking arm specs/Broken.mdx",
+export const U4_BROKEN_SOURCE = stagedMdx(
+  "T6.4-4/T6.5-5 masking arm specs/Broken.mdx",
   ['<S id="broken">', "Text that never closes.", ""].join("\n"),
   "unparseable",
 );
@@ -1629,8 +1632,8 @@ const U4_CODE_SOURCE = "export function noop(): void {}\n";
 // duplicate within a file), so the base arm pins the stray file's absence
 // from the discovered set directly, through `ids --json` (SPEC 12.3).
 const U4_STRAY_FILE = "docs/Stray.mdx";
-const U4_STRAY_SOURCE = stagedMdx(
-  "T6.4-4/T6.6-3 docs/Stray.mdx",
+export const U4_STRAY_SOURCE = stagedMdx(
+  "T6.4-4/T6.5-5/T6.6-3 docs/Stray.mdx",
   ['<S id="a">', "Stray text outside every spec group.", "</S>", ""].join("\n"),
 );
 
@@ -1639,8 +1642,8 @@ const U4_STRAY_SOURCE = stagedMdx(
 // duplicate spellings), yet each spells `dup`, so the old ID exists and the
 // duplicate-ID finding (14.3) refuses instead of any usage error.
 const U4_DUP_FILE = "specs/Dup.mdx";
-const U4_DUP_SOURCE = stagedMdx(
-  "T6.4-4 duplicate-spellings arm specs/Dup.mdx",
+export const U4_DUP_SOURCE = stagedMdx(
+  "T6.4-4/T6.5-5 duplicate-spellings arm specs/Dup.mdx",
   [
     '<S id="dup">',
     "First bearer text.",
@@ -1660,8 +1663,8 @@ const U4_DUP_SOURCE = stagedMdx(
 // check (14.2) is masked by the parent's condition (SPEC 14 condition 2), so
 // the workspace's findings are exactly the one 14.1.
 const U4_ANC_FILE = "specs/Anc.mdx";
-const U4_ANC_SOURCE = stagedMdx(
-  "T6.4-4 undefined-ancestor arm specs/Anc.mdx",
+export const U4_ANC_SOURCE = stagedMdx(
+  "T6.4-4/T6.5-5 undefined-ancestor arm specs/Anc.mdx",
   [
     "<S>",
     "Ancestor text spelling no identity.",
@@ -1678,8 +1681,8 @@ const U4_ANC_SOURCE = stagedMdx(
 // repeated on the tag (11.2; condition 17, never 14.1) — so the old ID is
 // nonexistent: exit 2 even beside that file's findings.
 const U4_SOLO_FILE = "specs/Solo.mdx";
-const U4_SOLO_SOURCE = stagedMdx(
-  "T6.4-4/T6.6-3 specs/Solo.mdx",
+export const U4_SOLO_SOURCE = stagedMdx(
+  "T6.4-4/T6.5-5/T6.6-3 specs/Solo.mdx",
   ['<S id="solo" id="solo">', "Sole would-be bearer text.", "</S>", ""].join(
     "\n",
   ),

@@ -231,6 +231,7 @@ import { deriveMdx } from "../../helpers/mdx-derivability.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
@@ -246,7 +247,16 @@ import {
   assertNoCompileErrors,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
+import {
+  U4_ANC_SOURCE,
+  U4_BAD_SOURCE,
+  U4_BROKEN_SOURCE,
+  U4_DUP_SOURCE,
+  U4_SOLO_SOURCE,
+  U4_SOURCE,
+  U4_STRAY_SOURCE,
+} from "./section-6.4.js";
 import type {
   BearerLocationExpectation,
   FindingSourceExpectation,
@@ -347,16 +357,19 @@ export default defineConfig({
 const JOURNAL_PATH = ".xspec/journal";
 const LF = 0x0a;
 
-/** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
+/**
+ * Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1).
+ * An `.mdx` entry of a workspace created after the body's first product
+ * invocation is a staged-source record (the record-accepting initial
+ * `files`; helpers/staged-mdx.ts), staged under the record's declaration.
+ */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
-  mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
-    mdx,
   });
   try {
     return await body(workspace);
@@ -964,8 +977,36 @@ async function expectMoveUsageError(
 // located by fragment (`uniqueSpan`); every source is ASCII, so byte offsets
 // are character offsets (1.7).
 const A_SECTION_IDS = ["a", "a.mid", "a.mid.leaf"] as const;
-const C_SOURCE = ['<S id="c">', "C text.", "</S>", ""].join("\n");
+// T6.5-1's stagings: arm (a)'s workspace is the body's first; its preview
+// copy and every later arm follow (a)'s invocations, so each `.mdx` source
+// is a ledger record (S-9's before-any-product clause; helpers/staged-mdx.ts),
+// (a)'s converted uniformly. The geometries share sources — all four the
+// other file, (a) and (c) the moved file, (a) and (d) the importer — and
+// identical bytes one test stages at several sites are ONE record staged at
+// each, so `fileMoveArm` composes each source as before and registers it
+// through `t651Record` under a name spelling its composition inputs, the
+// record reused where a later geometry composes the same bytes.
+const C_SOURCE = stagedMdx(
+  "T6.5-1 every arm's other file specs/C.mdx (specs/w/C.mdx in arm (c))",
+  ['<S id="c">', "C text.", "</S>", ""].join("\n"),
+);
 const CONSUMER = "src/app.ts";
+const T6_5_1_RECORDS = new Map<string, StagedMdx>();
+function t651Record(what: string, source: string): StagedMdx {
+  const name = `T6.5-1 ${what}`;
+  const known = T6_5_1_RECORDS.get(name);
+  if (known !== undefined) {
+    if (known.source !== source) {
+      throw new Error(
+        `T6.5-1 staging: ${name} is composed twice with different bytes`,
+      );
+    }
+    return known;
+  }
+  const record = stagedMdx(name, source);
+  T6_5_1_RECORDS.set(name, record);
+  return record;
+}
 
 /** The moved file's source: its import line(s), then the three sections. */
 function movedFileSource(
@@ -1080,7 +1121,7 @@ interface FileMoveArm {
   readonly name: string;
   readonly origin: string;
   readonly destination: string;
-  readonly files: Readonly<Record<string, string>>;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
   /** The rewrites the move must make, one per rewritten file. */
   readonly rewrites: readonly SpecifierRewrite[];
   /** Staged files the move rewrites nothing in (the configuration included). */
@@ -1117,10 +1158,16 @@ function fileMoveArm(geometry: FileMoveGeometry): FileMoveArm {
     geometry.embedBinding,
   );
   const importerText = importerSource(geometry.importerRewrite.before);
-  const files: Record<string, string> = {
+  const files: Record<string, InitialFileContents> = {
     [other]: C_SOURCE,
-    [origin]: movedSource,
-    [importer]: importerText,
+    [origin]: t651Record(
+      `the moved file importing ${geometry.ownImports.join("; ")} and embedding ${geometry.embedBinding}`,
+      movedSource,
+    ),
+    [importer]: t651Record(
+      `the spec importer importing ${geometry.importerRewrite.before}`,
+      importerText,
+    ),
   };
   const rewrites: SpecifierRewrite[] = [];
   if (geometry.ownRewrite !== null) {
@@ -1697,16 +1744,19 @@ const T6_5_1 = defineProductTest({
 // it is dropped with its terminator (rule of 3), while the blank line above
 // it — already empty in the source — is kept (SPEC 6.5, 3).
 const X2_ORIGIN = "specs/A.mdx";
-const X2_ORIGIN_BEFORE = [
-  '<S id="a">',
-  "Alpha holder.",
-  "",
-  '<S id="a.mv">',
-  "Moved text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const X2_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-2 specs/A.mdx (the shared origin)",
+  [
+    '<S id="a">',
+    "Alpha holder.",
+    "",
+    '<S id="a.mv">',
+    "Moved text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 const X2_ORIGIN_AFTER = ['<S id="a">', "Alpha holder.", "", "</S>", ""].join(
   "\n",
 );
@@ -1718,27 +1768,40 @@ const X2_ORIGIN_AFTER = ['<S id="a">', "Alpha holder.", "", "</S>", ""].join(
 // characters leaves that line empty purely by the deletion, so it drops
 // with its terminator (rule of 3), leaving exactly `X2_ORIGIN_AFTER`
 // (SPEC 6.5, 3).
-const X2_INLINE_ORIGIN_BEFORE = [
-  '<S id="a">',
-  "Alpha holder.",
-  "",
-  '<S id="a.m">x</S>',
-  "</S>",
-  "",
-].join("\n");
+const X2_INLINE_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-2 mid-line insertion arm specs/A.mdx (the in-line origin)",
+  ['<S id="a">', "Alpha holder.", "", '<S id="a.m">x</S>', "</S>", ""].join(
+    "\n",
+  ),
+);
 
 // Uninvolved bystander, asserted byte-identical in every arm: beyond the
 // stated edits, the identity and reference rewrites, and the finishing
 // regeneration, a move changes no bytes (SPEC 6.5).
 const X2_ZED = "specs/Zed.mdx";
 const X2_ZED_SOURCE = ['<S id="zed">', "Zed text.", "</S>", ""].join("\n");
+const X2_ZED_STAGED = stagedMdx(
+  "T6.5-2 specs/Zed.mdx (the uninvolved bystander)",
+  X2_ZED_SOURCE,
+);
+
+// The arms' stagings: the first arm's workspace is the body's first, every
+// later arm follows its invocations, so each staged `.mdx` source is a
+// ledger record (S-9's before-any-product clause; helpers/staged-mdx.ts),
+// the first arm's converted uniformly; the Beta holder two arms stage at
+// `specs/B.mdx` — the line-start and the self-closing-section arms — is one
+// record (identical bytes). The `expected` texts stay strings.
+const X2_B_HOLDER = stagedMdx(
+  "T6.5-2 line-start and self-closing-section arms specs/B.mdx",
+  ['<S id="b">', "Beta holder.", "</S>", ""].join("\n"),
+);
 
 /** One byte-exact arm: staged files, the move argv, expected file bytes. */
 interface ByteExactArm {
   readonly name: string;
   /** The staged configuration; `SPECS_ONLY_CONFIG` unless the arm reads compiled Markdown. */
   readonly config?: string;
-  readonly files: Readonly<Record<string, string>>;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
   readonly argv: readonly string[];
   readonly expected: Readonly<Record<string, string>>;
   /**
@@ -1759,7 +1822,7 @@ const X2_ARMS: readonly ByteExactArm[] = [
     name: "line-start insertion + origin line-drop",
     files: {
       [X2_ORIGIN]: X2_ORIGIN_BEFORE,
-      "specs/B.mdx": ['<S id="b">', "Beta holder.", "</S>", ""].join("\n"),
+      "specs/B.mdx": X2_B_HOLDER,
     },
     argv: ["move", "specs/A.mdx#a.mv", "specs/B.mdx#b.mv"],
     expected: {
@@ -1795,7 +1858,10 @@ const X2_ARMS: readonly ByteExactArm[] = [
     config: SPECS_MD_CONFIG,
     files: {
       [X2_ORIGIN]: X2_ORIGIN_BEFORE,
-      "specs/G.mdx": ['<S id="g">', "Golf holder.", "  </S>", ""].join("\n"),
+      "specs/G.mdx": stagedMdx(
+        "T6.5-2 indented-closing-tag arm specs/G.mdx",
+        ['<S id="g">', "Golf holder.", "  </S>", ""].join("\n"),
+      ),
     },
     argv: ["move", "specs/A.mdx#a.mv", "specs/G.mdx#g.mv"],
     expected: {
@@ -1832,7 +1898,10 @@ const X2_ARMS: readonly ByteExactArm[] = [
     name: "mid-line insertion point: a text-position parent receiving an in-line section",
     files: {
       [X2_ORIGIN]: X2_INLINE_ORIGIN_BEFORE,
-      "specs/C.mdx": 'foo <S id="p">bar</S> baz\n',
+      "specs/C.mdx": stagedMdx(
+        "T6.5-2 mid-line insertion arm specs/C.mdx",
+        'foo <S id="p">bar</S> baz\n',
+      ),
     },
     argv: ["move", "specs/A.mdx#a.m", "specs/C.mdx#p.m"],
     expected: {
@@ -1864,7 +1933,10 @@ const X2_ARMS: readonly ByteExactArm[] = [
     name: "end-of-file insertion after a terminated final line",
     files: {
       [X2_ORIGIN]: X2_ORIGIN_BEFORE,
-      "specs/D.mdx": ['<S id="d">', "Delta text.", "</S>", ""].join("\n"),
+      "specs/D.mdx": stagedMdx(
+        "T6.5-2 terminated-final-line arm specs/D.mdx",
+        ['<S id="d">', "Delta text.", "</S>", ""].join("\n"),
+      ),
     },
     argv: ["move", "specs/A.mdx#a.mv", "specs/D.mdx#dm"],
     expected: {
@@ -1887,7 +1959,10 @@ const X2_ARMS: readonly ByteExactArm[] = [
     name: "end-of-file insertion after an unterminated final line",
     files: {
       [X2_ORIGIN]: X2_ORIGIN_BEFORE,
-      "specs/E.mdx": ['<S id="e">', "Echo text.", "</S>"].join("\n"),
+      "specs/E.mdx": stagedMdx(
+        "T6.5-2 unterminated-final-line arm specs/E.mdx",
+        ['<S id="e">', "Echo text.", "</S>"].join("\n"),
+      ),
     },
     argv: ["move", "specs/A.mdx#a.mv", "specs/E.mdx#em"],
     expected: {
@@ -1909,14 +1984,13 @@ const X2_ARMS: readonly ByteExactArm[] = [
     // destination, re-identified; its origin line is dropped (rule of 3).
     name: "self-closing moved section",
     files: {
-      [X2_ORIGIN]: [
-        '<S id="a">',
-        "Alpha holder.",
-        '<S id="a.todo" />',
-        "</S>",
-        "",
-      ].join("\n"),
-      "specs/B.mdx": ['<S id="b">', "Beta holder.", "</S>", ""].join("\n"),
+      [X2_ORIGIN]: stagedMdx(
+        "T6.5-2 self-closing-section arm specs/A.mdx",
+        ['<S id="a">', "Alpha holder.", '<S id="a.todo" />', "</S>", ""].join(
+          "\n",
+        ),
+      ),
+      "specs/B.mdx": X2_B_HOLDER,
     },
     argv: ["move", "specs/A.mdx#a.todo", "specs/B.mdx#b.todo"],
     expected: {
@@ -1940,7 +2014,10 @@ const X2_ARMS: readonly ByteExactArm[] = [
     name: "self-closing target parent rewritten to paired form",
     files: {
       [X2_ORIGIN]: X2_ORIGIN_BEFORE,
-      "specs/P.mdx": '<Spec id="p" />\n',
+      "specs/P.mdx": stagedMdx(
+        "T6.5-2 self-closing-target-parent arm specs/P.mdx",
+        '<Spec id="p" />\n',
+      ),
     },
     argv: ["move", "specs/A.mdx#a.mv", "specs/P.mdx#p.mv"],
     expected: {
@@ -1984,7 +2061,7 @@ const T6_5_2 = defineProductTest({
     for (const arm of X2_ARMS) {
       await withWorkspace(
         arm.config ?? SPECS_ONLY_CONFIG,
-        { ...arm.files, [X2_ZED]: X2_ZED_SOURCE },
+        { ...arm.files, [X2_ZED]: X2_ZED_STAGED },
         async (workspace) => {
           const context = `T6.5-2 (${arm.name})`;
           await expectExit(
@@ -2063,45 +2140,62 @@ const R3_SPARE = "specs/Spare.mdx";
 const R3_ORIGIN = "specs/Origin.mdx";
 const R3_TARGET = "specs/Target.mdx";
 
-const R3_KEEP_SOURCE = ['<S id="keep">', "Keep text.", "</S>", ""].join("\n");
-const R3_SPARE_SOURCE = ['<S id="sp">', "Spare text.", "</S>", ""].join("\n");
+// The determinism directories are the body's first workspaces (both created
+// before the first run); the third-file arms follow, staging R3_FILES again
+// with their own third file, so every `.mdx` source is a ledger record (S-9's
+// before-any-product clause; helpers/staged-mdx.ts), the first workspaces'
+// converted uniformly.
+const R3_KEEP_SOURCE = stagedMdx(
+  "T6.5-3 specs/Keep.mdx",
+  ['<S id="keep">', "Keep text.", "</S>", ""].join("\n"),
+);
+const R3_SPARE_SOURCE = stagedMdx(
+  "T6.5-3 specs/Spare.mdx",
+  ['<S id="sp">', "Spare text.", "</S>", ""].join("\n"),
+);
 
-const R3_ORIGIN_SOURCE = [
-  'import Keep from "./Keep.xspec"',
-  "",
-  '<S id="org">',
-  "Origin holder text.",
-  "",
-  '<S id="org.mv" d={Keep.keep}>',
-  "Moved root text.",
-  "",
-  '<S id="org.mv.k1">',
-  "Moved first kid.",
-  "</S>",
-  "",
-  '<S id="org.mv.k2" d={"org.mv.k1"}>',
-  "Moved second kid.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="org.usemv" d={"org.mv"}>',
-  'Uses the moved node: {text("org.mv.k1")}',
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const R3_ORIGIN_SOURCE = stagedMdx(
+  "T6.5-3 specs/Origin.mdx",
+  [
+    'import Keep from "./Keep.xspec"',
+    "",
+    '<S id="org">',
+    "Origin holder text.",
+    "",
+    '<S id="org.mv" d={Keep.keep}>',
+    "Moved root text.",
+    "",
+    '<S id="org.mv.k1">',
+    "Moved first kid.",
+    "</S>",
+    "",
+    '<S id="org.mv.k2" d={"org.mv.k1"}>',
+    "Moved second kid.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="org.usemv" d={"org.mv"}>',
+    'Uses the moved node: {text("org.mv.k1")}',
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
-const R3_TARGET_SOURCE = [
-  'import Org from "./Origin.xspec"',
-  'import Keep from "./Spare.xspec"',
-  "",
-  '<S id="tgt" d={Org.org.mv}>',
-  "Target text: {text(Org.org.mv.k1)}",
-  "</S>",
-  "",
-].join("\n");
+const R3_TARGET_SOURCE = stagedMdx(
+  "T6.5-3 specs/Target.mdx",
+  [
+    'import Org from "./Origin.xspec"',
+    'import Keep from "./Spare.xspec"',
+    "",
+    '<S id="tgt" d={Org.org.mv}>',
+    "Target text: {text(Org.org.mv.k1)}",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
-const R3_FILES: Readonly<Record<string, string>> = {
+const R3_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPECS_MD_CONFIG,
   [R3_KEEP]: R3_KEEP_SOURCE,
   [R3_SPARE]: R3_SPARE_SOURCE,
@@ -2174,31 +2268,37 @@ const R3_SEED_FILES = [
 const R3_THIRD = "specs/Third.mdx";
 const R3_TARGET_MODULE = "specs/Target.xspec";
 
-const R3_THIRD_A_SOURCE = [
-  'import Org from "./Origin.xspec"',
-  "",
-  '<S id="th" d={Org.org.mv}>',
-  "Third text.",
-  "</S>",
-  "",
-].join("\n");
+const R3_THIRD_A_SOURCE = stagedMdx(
+  "T6.5-3 third-file arm (a) specs/Third.mdx",
+  [
+    'import Org from "./Origin.xspec"',
+    "",
+    '<S id="th" d={Org.org.mv}>',
+    "Third text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 /** Arm (a)'s expected post-move bytes without the added import (6.5, 3). */
 const R3_THIRD_A_BASE = (root: string): string =>
   ["", `<S id="th" d={${root}.tm}>`, "Third text.", "</S>", ""].join("\n");
 
-const R3_THIRD_B_SOURCE = [
-  'import Org from "./Origin.xspec"',
-  "",
-  '<S id="th" d={Org.org.mv}>',
-  "Third text.",
-  "</S>",
-  "",
-  '<S id="th2" d={Org.org}>',
-  "Third keeps the origin.",
-  "</S>",
-  "",
-].join("\n");
+const R3_THIRD_B_SOURCE = stagedMdx(
+  "T6.5-3 third-file arm (b) specs/Third.mdx",
+  [
+    'import Org from "./Origin.xspec"',
+    "",
+    '<S id="th" d={Org.org.mv}>',
+    "Third text.",
+    "</S>",
+    "",
+    '<S id="th2" d={Org.org}>',
+    "Third keeps the origin.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 /** Arm (b)'s expected post-move bytes without the added import (6.5). */
 const R3_THIRD_B_BASE = (root: string): string =>
@@ -2267,7 +2367,7 @@ async function runThirdFileArm(
   created: TestWorkspace[],
   arm: {
     readonly label: string;
-    readonly source: string;
+    readonly source: StagedMdx;
     readonly base: (root: string) => string;
     readonly originImportKept: boolean;
     readonly thirdEdges: readonly GraphEdge[];
@@ -2725,6 +2825,16 @@ const V4_B_SOURCE = [
   "",
 ].join("\n");
 
+// The A and B sources stay strings for the location windows below; the
+// records made from them serve every set staging them — MOVE_REFUSAL_FILES
+// (T6.5-4's first workspace; T6.6-3 and T14-7 stage it after their first
+// invocations), MOVE_LINK_OUTSIDE_FILES, and MOVE_PRECONDITION_FILES — one
+// record per byte sequence, named with every staging test (S-9's
+// before-any-product clause; helpers/staged-mdx.ts); the sets' other `.mdx`
+// sources are wrapped in place below.
+const V4_A_STAGED = stagedMdx("T6.5-4/T6.6-3/T14-7 specs/A.mdx", V4_A_SOURCE);
+const V4_B_STAGED = stagedMdx("T6.5-4/T6.6-3/T14-7 specs/B.mdx", V4_B_SOURCE);
+
 // Destination-occupant paths (the staging note above): non-file occupants at
 // in-group `.mdx` paths, staged in the test body before the pre-refusal
 // `build`, plus the out-of-group plain `.mdx` file (in the files map).
@@ -2734,7 +2844,10 @@ const V4_DIR_DEST = "specs/DirDest.mdx"; // file form: directory
 const V4_DIR_TARGET = "specs/DirTarget.mdx"; // section form: directory
 const V4_LINK_TARGET = "specs/LinkTarget.mdx"; // section form: symlink → B.mdx
 const V4_OCC = "docs/Occ.mdx"; // section form: out-of-group `.mdx` file
-const V4_OCC_SOURCE = ['<S id="occ">', "Occupant text.", "</S>", ""].join("\n");
+const V4_OCC_SOURCE = stagedMdx(
+  "T6.5-4/T6.6-3/T14-7 docs/Occ.mdx",
+  ['<S id="occ">', "Occupant text.", "</S>", ""].join("\n"),
+);
 
 // Location windows within the staged sources (SPEC 14): the dependency-cycle
 // arm locates the reference spelling recording the participating dependency
@@ -2756,7 +2869,10 @@ const V4_Y_WINDOW = byteWindow(
 // `build` succeeds), then overwritten with an unresolved local `d` reference
 // (14.5) — the pre-existing validation error elsewhere (as T6.4-6).
 const V4_OTHER = "specs/Other.mdx";
-const V4_OTHER_VALID = ['<S id="oth">', "Other text.", "</S>", ""].join("\n");
+const V4_OTHER_VALID = stagedMdx(
+  "T6.5-4/T6.6-3 precondition arm specs/Other.mdx as staged (valid)",
+  ['<S id="oth">', "Other text.", "</S>", ""].join("\n"),
+);
 const V4_OTHER_INVALID = [
   '<S id="oth" d={"nope"}>',
   "Other text.",
@@ -2792,7 +2908,10 @@ export default defineConfig({
 })
 `;
 const V4_SOLO = "specs/Solo.mdx";
-const V4_SOLO_SOURCE = ['<S id="solo">', "Solo text.", "</S>", ""].join("\n");
+const V4_SOLO_SOURCE = stagedMdx(
+  "T6.5-4/T6.6-3/T14-7 derived-path arms specs/Solo.mdx",
+  ['<S id="solo">', "Solo text.", "</S>", ""].join("\n"),
+);
 const V4_MDOUT_OCCUPANT = "mdout/new";
 const V4_MDOUT_OCCUPANT_CONTENT = "not a directory\n";
 
@@ -2892,11 +3011,12 @@ function linkComponentCases(target: string): readonly MoveRefusalCase[] {
  * pass — the staging note above the V4 fixtures).
  */
 export const MOVE_REFUSAL_CONFIG = REFUSAL_CONFIG;
-export const MOVE_REFUSAL_FILES: Readonly<Record<string, string>> = {
-  [V4_A]: V4_A_SOURCE,
-  [V4_B]: V4_B_SOURCE,
-  [V4_OCC]: V4_OCC_SOURCE,
-};
+export const MOVE_REFUSAL_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    [V4_A]: V4_A_STAGED,
+    [V4_B]: V4_B_STAGED,
+    [V4_OCC]: V4_OCC_SOURCE,
+  };
 
 /**
  * Destination occupants (the V4 staging note): non-file occupants at
@@ -3117,7 +3237,9 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
  * destination path, never 14.22.
  */
 export const MOVE_DERIVED_PATH_CONFIG = V4_OUTDIR_CONFIG;
-export const MOVE_DERIVED_PATH_FILES: Readonly<Record<string, string>> = {
+export const MOVE_DERIVED_PATH_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
   [V4_SOLO]: V4_SOLO_SOURCE,
   [V4_MDOUT_OCCUPANT]: V4_MDOUT_OCCUPANT_CONTENT,
 };
@@ -3143,9 +3265,11 @@ export const MOVE_DERIVED_PATH_CASE: MoveRefusalCase = {
  * (`assertLeavesUnchanged`), since the whole-root compare cannot see a
  * write landing through the link outside the root.
  */
-export const MOVE_LINK_OUTSIDE_FILES: Readonly<Record<string, string>> = {
-  [V4_A]: V4_A_SOURCE,
-  [V4_B]: V4_B_SOURCE,
+export const MOVE_LINK_OUTSIDE_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  [V4_A]: V4_A_STAGED,
+  [V4_B]: V4_B_STAGED,
 };
 export async function stageMoveLinkOutsideComponent(
   workspace: TestWorkspace,
@@ -3169,7 +3293,9 @@ export const MOVE_LINK_OUTSIDE_CASES: readonly MoveRefusalCase[] =
  * refused-invalid-destination concerning the destination path, never
  * 14.22, the link and its target byte-identical afterward.
  */
-export const MOVE_DERIVED_LINK_FILES: Readonly<Record<string, string>> = {
+export const MOVE_DERIVED_LINK_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
   [V4_SOLO]: V4_SOLO_SOURCE,
 };
 export async function stageMoveDerivedLinkComponent(
@@ -3199,9 +3325,11 @@ export const MOVE_DERIVED_LINK_CASE: MoveRefusalCase = {
  * elsewhere (14.5) — and the otherwise-valid move refuses reporting the
  * workspace's numbered findings alone.
  */
-export const MOVE_PRECONDITION_FILES: Readonly<Record<string, string>> = {
-  [V4_A]: V4_A_SOURCE,
-  [V4_B]: V4_B_SOURCE,
+export const MOVE_PRECONDITION_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  [V4_A]: V4_A_STAGED,
+  [V4_B]: V4_B_STAGED,
   [V4_OTHER]: V4_OTHER_VALID,
 };
 export const MOVE_PRECONDITION_BREAK_FILE = V4_OTHER;
@@ -3392,37 +3520,32 @@ const T6_5_4 = defineProductTest({
 // ---------------------------------------------------------------------------
 
 const U5_A = "specs/A.mdx";
-const U5_A_SOURCE = [
-  '<S id="a">',
-  "Alpha text.",
-  "",
-  '<S id="a.mid">',
-  "Mid text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+// T6.5-5's sources mirror T6.4-4's byte for byte (section-6.4.ts's U4_*
+// records, exported for this module): identical bytes are ONE record (S-9's
+// naming rule; helpers/staged-mdx.ts), named there with T6.5-5 too, so this
+// module aliases the records rather than registering the bytes twice. The
+// base arm's workspace is the body's first; the configuration-state twins
+// and the ordering, masking, duplicate-spellings, undefined-ancestor, and
+// solo arms follow its invocations, and T6.6-3 stages the exported sets
+// after its first invocation — so every `.mdx` source here is a record, the
+// base arm's converted uniformly. Only `specs/B.mdx`, the section form's
+// target, is this module's own.
+const U5_A_SOURCE = U4_SOURCE;
 
 const U5_B = "specs/B.mdx";
-const U5_B_SOURCE = ['<S id="b">', "Beta text.", "</S>", ""].join("\n");
+const U5_B_SOURCE = stagedMdx(
+  "T6.5-5/T6.6-3 specs/B.mdx",
+  ['<S id="b">', "Beta text.", "</S>", ""].join("\n"),
+);
 
 // The ordering arm's unrelated validation error: an unresolved local `d`
 // reference (14.5) in a file untouched by the move arguments.
 const U5_BAD = "specs/Bad.mdx";
-const U5_BAD_SOURCE = [
-  '<S id="bad" d={"nope"}>',
-  "Bad text depending on nothing that exists.",
-  "</S>",
-  "",
-].join("\n");
+const U5_BAD_SOURCE = U4_BAD_SOURCE;
 
 // The masking arm's unparseable origin file: an unclosed section tag (14.20).
 const U5_BROKEN = "specs/Broken.mdx";
-const U5_BROKEN_SOURCE = [
-  '<S id="broken">',
-  "Text that never closes.",
-  "",
-].join("\n");
+const U5_BROKEN_SOURCE = U4_BROKEN_SOURCE;
 
 // The wrong-kind arms' discovered code source (SPEC 7.2): valid TypeScript
 // with no spec references, so the base arm's workspace still builds clean —
@@ -3450,12 +3573,7 @@ const U5_CODE_SOURCE = "export function noop(): void {}\n";
 // from the discovered set directly, through `ids --json` (SPEC 12.3), as
 // T6.4-4 does.
 const U5_STRAY = "docs/Stray.mdx";
-const U5_STRAY_SOURCE = [
-  '<S id="a">',
-  "Stray text outside every spec group.",
-  "</S>",
-  "",
-].join("\n");
+const U5_STRAY_SOURCE = U4_STRAY_SOURCE;
 
 // Parse-local existence fixtures, mirroring T6.4-4 (SPEC 6.5, 6.4, 11.2).
 // Two sections both spelling the same ID: every bearer's node identity is
@@ -3463,16 +3581,7 @@ const U5_STRAY_SOURCE = [
 // origin ID exists and the duplicate-ID finding (14.3) refuses instead of
 // any usage error.
 const U5_DUP = "specs/Dup.mdx";
-const U5_DUP_SOURCE = [
-  '<S id="dup">',
-  "First bearer text.",
-  "</S>",
-  "",
-  '<S id="dup">',
-  "Second bearer text.",
-  "</S>",
-  "",
-].join("\n");
+const U5_DUP_SOURCE = U4_DUP_SOURCE;
 
 // A sole bearer spelling its ID beneath an ancestor spelling no identity —
 // no `id` attribute at all (14.1): the bearer's node identity is undefined
@@ -3481,27 +3590,13 @@ const U5_DUP_SOURCE = [
 // check (14.2) is masked by the parent's condition (SPEC 14 condition 2), so
 // the workspace's findings are exactly the one 14.1.
 const U5_ANC = "specs/Anc.mdx";
-const U5_ANC_SOURCE = [
-  "<S>",
-  "Ancestor text spelling no identity.",
-  "",
-  '<S id="kid">',
-  "Kid text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const U5_ANC_SOURCE = U4_ANC_SOURCE;
 
 // The origin ID's only would-be bearer spells no identity — its `id`
 // attribute repeated on the tag (11.2; condition 17, never 14.1) — so the
 // origin ID is nonexistent: exit 2 even beside that file's findings.
 const U5_SOLO = "specs/Solo.mdx";
-const U5_SOLO_SOURCE = [
-  '<S id="solo" id="solo">',
-  "Sole would-be bearer text.",
-  "</S>",
-  "",
-].join("\n");
+const U5_SOLO_SOURCE = U4_SOLO_SOURCE;
 
 // Destination operand that is not valid UTF-8: `specs/<0xFF>.mdx` (Linux-leg
 // staging — argv is a byte channel there; T6.5-5, T12.0-5, T1.5-2's note).
@@ -3650,7 +3745,9 @@ export const MOVE_REPLACEMENT_DESTINATION_CASES: readonly (readonly [
  * and — in the ordering variant — the failing Bad.mdx, exported for
  * T6.6-3's preview sweep. */
 export const MOVE_USAGE_CONFIG = SPEC_AND_CODE_CONFIG;
-export const MOVE_USAGE_ORDERING_FILES: Readonly<Record<string, string>> = {
+export const MOVE_USAGE_ORDERING_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
   [U5_A]: U5_A_SOURCE,
   [U5_B]: U5_B_SOURCE,
   [U5_BAD]: U5_BAD_SOURCE,
@@ -3665,7 +3762,7 @@ export const MOVE_USAGE_ORDERING_FILES: Readonly<Record<string, string>> = {
  * under MOVE_SOLO_CONFIG and pin the one-14.17 premise before invoking.
  */
 export const MOVE_SOLO_CONFIG = SPECS_ONLY_CONFIG;
-export const MOVE_SOLO_FILES: Readonly<Record<string, string>> = {
+export const MOVE_SOLO_FILES: Readonly<Record<string, InitialFileContents>> = {
   [U5_SOLO]: U5_SOLO_SOURCE,
 };
 export const MOVE_SOLO_ARGV: readonly string[] = [
@@ -3921,8 +4018,6 @@ const T6_5_5 = defineProductTest({
             `file and the location of the parse failure (SPEC 14, 14.20)`,
         );
       },
-      // S-9: the origin file is the staged parse failure (14.20).
-      { unparseable: [U5_BROKEN] },
     );
 
     // --- Parse-local existence: duplicate spellings still establish it ---
@@ -4106,12 +4201,16 @@ const I6_B_AFTER = I6_B_SOURCE + I6_MOVED_TEXT + "\n";
  * `specs/B.mdx` holding `b` then the landed `x` subtree — the state
  * T6.5-6's refusals are judged on. Exported with the refusal cases below
  * for T6.6-3's preview twins, which stage this state directly (TEST-SPEC
- * T6.6-3: "staged identically") rather than through the product's move.
+ * T6.6-3: "staged identically") rather than through the product's move —
+ * after T6.6-3's first invocation, so the entries are ledger records made
+ * from the strings T6.5-6 asserts (helpers/staged-mdx.ts).
  */
 export const MOVE_IDENTITY_CONFIG = SPECS_ONLY_CONFIG;
-export const MOVE_IDENTITY_FILES_AFTER: Readonly<Record<string, string>> = {
-  [I6_A]: I6_A_AFTER,
-  [I6_B]: I6_B_AFTER,
+export const MOVE_IDENTITY_FILES_AFTER: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  [I6_A]: stagedMdx("T6.6-3 identity-terms twins specs/A.mdx", I6_A_AFTER),
+  [I6_B]: stagedMdx("T6.6-3 identity-terms twins specs/B.mdx", I6_B_AFTER),
 };
 
 /**
@@ -4861,27 +4960,40 @@ const A8_MOVE_ARGV = [
   "specs/Target.mdx#mv",
 ] as const;
 
+// T6.5-8's stagings: the TS arm's workspace is the body's first; the
+// MDX-origin and MDX-target arms follow its invocations, so every `.mdx`
+// source is a ledger record (S-9's before-any-product clause;
+// helpers/staged-mdx.ts), the TS arm's converted uniformly and shared with
+// T6.5-9's first workspace (A9_FILES); the Keep source stays a string for
+// the composed-file compare, its record made from it.
 const A8_KEEP_SOURCE = ['<S id="keep">', "Keep text.", "</S>", ""].join("\n");
+const A8_KEEP_STAGED = stagedMdx("T6.5-8 specs/Keep.mdx", A8_KEEP_SOURCE);
 
 /** A plain target file: one top-level section, no imports. */
-const A8_PLAIN_TARGET = ['<S id="tgt">', "Target text.", "</S>", ""].join("\n");
+const A8_PLAIN_TARGET = stagedMdx(
+  "T6.5-8/T6.5-9 specs/Target.mdx (the plain target)",
+  ['<S id="tgt">', "Target text.", "</S>", ""].join("\n"),
+);
 
 // TS arm. The origin's moved section is a leaf; `org.stay` keeps the origin
 // binding referenced after the move.
-const A8_TS_ORIGIN_BEFORE = [
-  '<S id="org">',
-  "Origin holder text.",
-  "",
-  '<S id="org.mv">',
-  "Moved text.",
-  "</S>",
-  "",
-  '<S id="org.stay">',
-  "Staying text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const A8_TS_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-8/T6.5-9 TS arm specs/Origin.mdx",
+  [
+    '<S id="org">',
+    "Origin holder text.",
+    "",
+    '<S id="org.mv">',
+    "Moved text.",
+    "</S>",
+    "",
+    '<S id="org.stay">',
+    "Staying text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // Composed from SPEC 6.5 and 3: the moved construct's own characters are
 // deleted in place; the merged line that deletion leaves holds only the
@@ -4946,30 +5058,33 @@ const A8_APP_BASE = (root: string): string =>
 const A8_APP_REWRITTEN = /(?<![A-Za-z0-9_$.])([A-Za-z_$][A-Za-z0-9_$]*)\.mv;/g;
 
 // MDX origin arm.
-const A8_ORG_ORIGIN_BEFORE = [
-  'import Keep from "./Keep.xspec"',
-  "",
-  '<S id="org">',
-  "Origin holder text.",
-  "",
-  '<S id="org.mv">',
-  "Moved head text.",
-  "",
-  '<S id="org.mv.leaf">',
-  "Moved leaf text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="org.use" d={"org.mv.leaf"}>',
-  "Uses the moved leaf.",
-  "</S>",
-  "",
-  '<S id="org.stay" d={Keep.keep}>',
-  "Staying text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const A8_ORG_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-8 MDX-origin arm specs/Origin.mdx",
+  [
+    'import Keep from "./Keep.xspec"',
+    "",
+    '<S id="org">',
+    "Origin holder text.",
+    "",
+    '<S id="org.mv">',
+    "Moved head text.",
+    "",
+    '<S id="org.mv.leaf">',
+    "Moved leaf text.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="org.use" d={"org.mv.leaf"}>',
+    "Uses the moved leaf.",
+    "</S>",
+    "",
+    '<S id="org.stay" d={Keep.keep}>',
+    "Staying text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // The origin's expected post-move bytes WITHOUT the added import (SPEC
 // 6.4/6.5, 3): the moved construct deleted in place with its emptied merged
@@ -5019,20 +5134,23 @@ const A8_ORG_REWRITTEN =
 // MDX target arm. `org.base-line` is a valid ID (SPEC 1.4 forbids `.`, `#`,
 // whitespace, and control characters alone) whose second segment is not a
 // TypeScript identifier.
-const A8_TGT_ORIGIN_BEFORE = [
-  '<S id="org">',
-  "Origin holder text.",
-  "",
-  '<S id="org.mv" d={"org.base-line"}>',
-  "Moved text.",
-  "</S>",
-  "",
-  '<S id="org.base-line">',
-  "Base line text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const A8_TGT_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-8 MDX-target arm specs/Origin.mdx",
+  [
+    '<S id="org">',
+    "Origin holder text.",
+    "",
+    '<S id="org.mv" d={"org.base-line"}>',
+    "Moved text.",
+    "</S>",
+    "",
+    '<S id="org.base-line">',
+    "Base line text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // Composed from SPEC 6.5 and 3 (as the TS arm's origin): the section gone,
 // its merged line dropped, the blank neighbours kept; no import gained.
@@ -5048,14 +5166,17 @@ const A8_TGT_ORIGIN_AFTER = [
   "",
 ].join("\n");
 
-const A8_TGT_TARGET_BEFORE = [
-  'import Keep from "./Keep.xspec"',
-  "",
-  '<S id="tgt" d={Keep.keep}>',
-  "Target text.",
-  "</S>",
-  "",
-].join("\n");
+const A8_TGT_TARGET_BEFORE = stagedMdx(
+  "T6.5-8 MDX-target arm specs/Target.mdx",
+  [
+    'import Keep from "./Keep.xspec"',
+    "",
+    '<S id="tgt" d={Keep.keep}>',
+    "Target text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // The target's expected post-move bytes WITHOUT the added import (SPEC
 // 6.4/6.5): the moved text appended at end of file plus U+000A, its `id`
@@ -5090,7 +5211,7 @@ const A8_MDX_RESERVED = ["S", "Spec", "text"].map((name) => ({
 interface AddedImportArm {
   readonly label: string;
   readonly config: string;
-  readonly files: Readonly<Record<string, string>>;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
   /** Workspace-relative path of the file gaining the import. */
   readonly receiving: string;
   /** Matches the one rewritten reference; group 1 is the fresh root. */
@@ -5278,7 +5399,7 @@ const A8_ARMS: readonly AddedImportArm[] = [
     label: "MDX origin",
     config: SPECS_ONLY_CONFIG,
     files: {
-      [A8_KEEP]: A8_KEEP_SOURCE,
+      [A8_KEEP]: A8_KEEP_STAGED,
       [A8_ORIGIN]: A8_ORG_ORIGIN_BEFORE,
       [A8_TARGET]: A8_PLAIN_TARGET,
     },
@@ -5323,7 +5444,7 @@ const A8_ARMS: readonly AddedImportArm[] = [
     label: "MDX target",
     config: SPECS_ONLY_CONFIG,
     files: {
-      [A8_KEEP]: A8_KEEP_SOURCE,
+      [A8_KEEP]: A8_KEEP_STAGED,
       [A8_ORIGIN]: A8_TGT_ORIGIN_BEFORE,
       [A8_TARGET]: A8_TGT_TARGET_BEFORE,
     },
@@ -5514,7 +5635,7 @@ const A9_APP_BEFORE = [
   "",
 ].join("\n");
 
-const A9_FILES: Readonly<Record<string, string>> = {
+const A9_FILES: Readonly<Record<string, InitialFileContents>> = {
   [A8_ORIGIN]: A8_TS_ORIGIN_BEFORE,
   [A8_TARGET]: A8_PLAIN_TARGET,
   [A8_APP]: A9_APP_BEFORE,
@@ -5579,6 +5700,18 @@ const S9_MOVE_ARGV = ["move", "specs/a.mdx#a.mv", "specs/b.mdx#mv"] as const;
 
 const S9_S_SOURCE = ['<S id="foo">', "Foo text.", "</S>", ""].join("\n");
 const S9_TEXT_SOURCE = ['<S id="bar">', "Bar text.", "</S>", ""].join("\n");
+// The spec-source arm follows the code arm's invocations, so its four
+// sources are ledger records (S-9's before-any-product clause;
+// helpers/staged-mdx.ts) — S and text kept as strings for the untouched-file
+// compare, their records made from them.
+const S9_S_STAGED = stagedMdx(
+  "T6.5-9 spec-source arm specs/S.mdx",
+  S9_S_SOURCE,
+);
+const S9_TEXT_STAGED = stagedMdx(
+  "T6.5-9 spec-source arm specs/text.mdx",
+  S9_TEXT_SOURCE,
+);
 
 /**
  * The moved subtree's lines: the head's `d` reference to `S.mdx`'s `foo`
@@ -5608,23 +5741,26 @@ function s9MovedLines(
 // and keeps a reference through each outside the moved subtree (`a.stay`),
 // so both declarations stay byte-for-byte after the move (SPEC 6.5) and the
 // arm turns on the target's additions alone.
-const S9_ORIGIN_BEFORE = [
-  'import SM from "./S.xspec"',
-  'import TM from "./text.xspec"',
-  "",
-  '<S id="a">',
-  "Origin holder text.",
-  "",
-  ...s9MovedLines("a.mv", "SM", "TM"),
-  "",
-  '<S id="a.stay" d={SM.foo}>',
-  "Staying text, as specified:",
-  "",
-  "{text(TM.bar)}",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const S9_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-9 spec-source arm specs/a.mdx",
+  [
+    'import SM from "./S.xspec"',
+    'import TM from "./text.xspec"',
+    "",
+    '<S id="a">',
+    "Origin holder text.",
+    "",
+    ...s9MovedLines("a.mv", "SM", "TM"),
+    "",
+    '<S id="a.stay" d={SM.foo}>',
+    "Staying text, as specified:",
+    "",
+    "{text(TM.bar)}",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // Composed from SPEC 6.5 and 3, no latitude: the moved construct deleted in
 // place, its two emptied lines dropped with their terminators, the blank
@@ -5646,7 +5782,10 @@ const S9_ORIGIN_AFTER = [
   "",
 ].join("\n");
 
-const S9_TARGET_BEFORE = ['<S id="b">', "Target text.", "</S>", ""].join("\n");
+const S9_TARGET_BEFORE = stagedMdx(
+  "T6.5-9 spec-source arm specs/b.mdx",
+  ['<S id="b">', "Target text.", "</S>", ""].join("\n"),
+);
 
 /**
  * The target's expected post-move bytes WITHOUT the added declarations
@@ -5809,8 +5948,8 @@ const T6_5_9 = defineProductTest({
       await withWorkspace(
         SPECS_MD_CONFIG,
         {
-          [S9_S]: S9_S_SOURCE,
-          [S9_TEXT]: S9_TEXT_SOURCE,
+          [S9_S]: S9_S_STAGED,
+          [S9_TEXT]: S9_TEXT_STAGED,
           [S9_ORIGIN]: S9_ORIGIN_BEFORE,
           [S9_TARGET]: S9_TARGET_BEFORE,
         },
@@ -6128,6 +6267,17 @@ const C10_THIRD_SOURCE = [
   "</S>",
   "",
 ].join("\n");
+// T6.5-10's stagings: arm (a)'s workspace is the body's first; arms (b),
+// (c), and (c)'s sibling follow its invocations, so every `.mdx` source is a
+// ledger record (S-9's before-any-product clause; helpers/staged-mdx.ts),
+// (a)'s converted uniformly — the third and fourth sources and (a)'s origin
+// kept as strings for the untouched-file compares and the occurrence spans,
+// their records made from them; identical bytes staged by several arms are
+// one record each.
+const C10_THIRD_STAGED = stagedMdx(
+  "T6.5-10 every arm's third module specs/x.mdx",
+  C10_THIRD_SOURCE,
+);
 
 /**
  * The moved subtree's lines, spelled with its ID prefix (`a.mv` in the
@@ -6163,6 +6313,10 @@ const C10_A_ORIGIN_BEFORE = [
   "</S>",
   "",
 ].join("\n");
+const C10_A_ORIGIN_STAGED = stagedMdx(
+  "T6.5-10 arms (a) and (c) specs/a.mdx",
+  C10_A_ORIGIN_BEFORE,
+);
 
 // Composed from SPEC 6.5 and 3, no latitude: the moved construct deleted in
 // place, the lines holding its opening and closing tags (left empty) dropped
@@ -6179,8 +6333,9 @@ const C10_A_ORIGIN_AFTER = [
   "",
 ].join("\n");
 
-const C10_A_TARGET_BEFORE = ['<S id="b">', "Target text.", "</S>", ""].join(
-  "\n",
+const C10_A_TARGET_BEFORE = stagedMdx(
+  "T6.5-10 arm (a) specs/b.mdx",
+  ['<S id="b">', "Target text.", "</S>", ""].join("\n"),
 );
 
 // The target's expected post-move bytes WITHOUT the added import (SPEC
@@ -6201,20 +6356,23 @@ const C10_REWRITTEN_EMBEDS =
 // Arm (b). The origin keeps `a.stay`'s reference through `X` outside the
 // moved subtree; the target already binds `x.mdx`'s module as `Z`, used by
 // its own section.
-const C10_B_ORIGIN_BEFORE = [
-  'import X from "./x.xspec"',
-  "",
-  '<S id="a">',
-  "Origin holder text.",
-  "",
-  ...c10MovedLines("a.mv", "X"),
-  "",
-  '<S id="a.stay" d={X.foo}>',
-  "Staying text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const C10_B_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-10 arms (b) and (c)-sibling specs/a.mdx",
+  [
+    'import X from "./x.xspec"',
+    "",
+    '<S id="a">',
+    "Origin holder text.",
+    "",
+    ...c10MovedLines("a.mv", "X"),
+    "",
+    '<S id="a.stay" d={X.foo}>',
+    "Staying text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // Composed from SPEC 6.5 and 3: the moved construct deleted in place with
 // its two emptied lines dropped, the blank neighbours kept; the `X` binding
@@ -6233,14 +6391,17 @@ const C10_B_ORIGIN_AFTER = [
   "",
 ].join("\n");
 
-const C10_B_TARGET_BEFORE = [
-  'import Z from "./x.xspec"',
-  "",
-  '<S id="b" d={Z.foo}>',
-  "Target text.",
-  "</S>",
-  "",
-].join("\n");
+const C10_B_TARGET_BEFORE = stagedMdx(
+  "T6.5-10 arm (b) specs/b.mdx",
+  [
+    'import Z from "./x.xspec"',
+    "",
+    '<S id="b" d={Z.foo}>',
+    "Target text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // Composed from SPEC 6.5 and 6.4, no latitude: the moved text appended at
 // end of file plus U+000A, re-identified, each third-module reference
@@ -6272,17 +6433,24 @@ const C10_FOURTH_SOURCE = [
   "</S>",
   "",
 ].join("\n");
+const C10_FOURTH_STAGED = stagedMdx(
+  "T6.5-10 arms (c) and (c)-sibling specs/z.mdx",
+  C10_FOURTH_SOURCE,
+);
 
 // (c): the target binds `X` itself to `z.mdx`'s module, used by its own
 // section, and holds no binding of `x.mdx`'s module; the origin is (a)'s.
-const C10_C_TARGET_BEFORE = [
-  'import X from "./z.xspec"',
-  "",
-  '<S id="b" d={X.q}>',
-  "Target text.",
-  "</S>",
-  "",
-].join("\n");
+const C10_C_TARGET_BEFORE = stagedMdx(
+  "T6.5-10 arm (c) specs/b.mdx",
+  [
+    'import X from "./z.xspec"',
+    "",
+    '<S id="b" d={X.q}>',
+    "Target text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // The target's expected post-move bytes WITHOUT the added import (SPEC
 // 6.4/6.5, 3): the moved text appended at end of file plus U+000A,
@@ -6304,19 +6472,22 @@ const C10_C_TARGET_BASE = (root: string): string =>
 // used by a section of its own ((b)'s shape; the origin staged as (b)), so
 // nothing is added and each moved spelling is re-rooted to `Z` — (b)'s
 // whole-file contract, `X.q` and both declarations byte-untouched.
-const C10_CS_TARGET_BEFORE = [
-  'import X from "./z.xspec"',
-  'import Z from "./x.xspec"',
-  "",
-  '<S id="b" d={X.q}>',
-  "Target text.",
-  "</S>",
-  "",
-  '<S id="c" d={Z.foo}>',
-  "Other text.",
-  "</S>",
-  "",
-].join("\n");
+const C10_CS_TARGET_BEFORE = stagedMdx(
+  "T6.5-10 arm (c) sibling specs/b.mdx",
+  [
+    'import X from "./z.xspec"',
+    'import Z from "./x.xspec"',
+    "",
+    '<S id="b" d={X.q}>',
+    "Target text.",
+    "</S>",
+    "",
+    '<S id="c" d={Z.foo}>',
+    "Other text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const C10_CS_TARGET_AFTER = [
   'import X from "./z.xspec"',
@@ -6583,8 +6754,8 @@ const T6_5_10 = defineProductTest({
       await withWorkspace(
         SPECS_MD_CONFIG,
         {
-          [C10_THIRD]: C10_THIRD_SOURCE,
-          [C10_ORIGIN]: C10_A_ORIGIN_BEFORE,
+          [C10_THIRD]: C10_THIRD_STAGED,
+          [C10_ORIGIN]: C10_A_ORIGIN_STAGED,
           [C10_TARGET]: C10_A_TARGET_BEFORE,
         },
         async (workspace) => {
@@ -6685,7 +6856,7 @@ const T6_5_10 = defineProductTest({
       await withWorkspace(
         SPECS_MD_CONFIG,
         {
-          [C10_THIRD]: C10_THIRD_SOURCE,
+          [C10_THIRD]: C10_THIRD_STAGED,
           [C10_ORIGIN]: C10_B_ORIGIN_BEFORE,
           [C10_TARGET]: C10_B_TARGET_BEFORE,
         },
@@ -6751,9 +6922,9 @@ const T6_5_10 = defineProductTest({
       await withWorkspace(
         SPECS_MD_CONFIG,
         {
-          [C10_THIRD]: C10_THIRD_SOURCE,
-          [C10_FOURTH]: C10_FOURTH_SOURCE,
-          [C10_ORIGIN]: C10_A_ORIGIN_BEFORE,
+          [C10_THIRD]: C10_THIRD_STAGED,
+          [C10_FOURTH]: C10_FOURTH_STAGED,
+          [C10_ORIGIN]: C10_A_ORIGIN_STAGED,
           [C10_TARGET]: C10_C_TARGET_BEFORE,
         },
         async (workspace) => {
@@ -6869,8 +7040,8 @@ const T6_5_10 = defineProductTest({
       await withWorkspace(
         SPECS_MD_CONFIG,
         {
-          [C10_THIRD]: C10_THIRD_SOURCE,
-          [C10_FOURTH]: C10_FOURTH_SOURCE,
+          [C10_THIRD]: C10_THIRD_STAGED,
+          [C10_FOURTH]: C10_FOURTH_STAGED,
           [C10_ORIGIN]: C10_B_ORIGIN_BEFORE,
           [C10_TARGET]: C10_CS_TARGET_BEFORE,
         },
