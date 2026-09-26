@@ -43,6 +43,21 @@
 //   other tests (T6.1-1, T13.4-5, T12.0-11).
 // - Fixture edits are followed by an explicit `build` before any read, so no
 //   read relies on the 13.3 refresh path (that path is T13.3-*'s business).
+//
+// Sources staged after a body's first product invocation — T10.4-1's
+// sensitivity edits (each scenario's former `write()` closure over mutable
+// version variables enumerated into its successive states, in staging order,
+// every state carrying the earlier edits forward), T10.4-2's presence flips,
+// T10.4-3's context-set edit, T10.4-4's post-rename deletion, T10.4-5's
+// staleness edit — are staged-source records (helpers/staged-mdx.ts, S-9:
+// judged before any product exists), the same template calls moved to module
+// level. A staging that precedes a body's first invocation stays plain (S-7's
+// sweep reaches it against the stub): T10.4-1's subtree-coherence pre-`create`
+// edit and T10.4-3's a.k edit, each between `gitCommitAll` and the first
+// `build`; every workspace's initial files stay plain `files` entries.
+// T10.4-4's reintroduction appends to bytes the rename wrote — no harness
+// constant equals them — so it is an anchored `workspace.edit()` (the tail's
+// uniqueness and end position diagnosed first, SPEC 6.4).
 
 import { Buffer } from "node:buffer";
 import type {
@@ -69,6 +84,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
@@ -1483,6 +1499,43 @@ function t2oDSpec(dAttrs: string | null): string {
   return [...d, '<S id="e">', "Ee text.", "</S>", ""].join("\n");
 }
 
+// T10.4-2's presence flips — every one staged after the body's first
+// `build` — are staged-source records (helpers/staged-mdx.ts, S-9: judged
+// before any product exists), the same template calls moved to module level;
+// each arm's initial files stay plain `files` entries.
+const T10_4_2_X_DELETED = stagedMdx(
+  "T10.4-2 specs/X.mdx with the scope node x deleted (y at v0)",
+  t2Spec(false, "Wye text v0."),
+);
+const T10_4_2_X_ABSENT_Y_EDITED = stagedMdx(
+  "T10.4-2 specs/X.mdx with x still absent across the unrelated y edit (y at v1)",
+  t2Spec(false, "Wye text v1."),
+);
+const T10_4_2_X_RESTORED = stagedMdx(
+  "T10.4-2 specs/X.mdx with x restored (y at v1)",
+  t2Spec(true, "Wye text v1."),
+);
+const T10_4_2_C_REFERENCE_REMOVED = stagedMdx(
+  "T10.4-2 specs/C.mdx with dd's d reference removed and tt deleted (context arm)",
+  t2cSpec("", false),
+);
+const T10_4_2_C_T_REAUTHORED = stagedMdx(
+  "T10.4-2 specs/C.mdx with tt re-authored, dd still bearing no d reference (context arm)",
+  t2cSpec("", true),
+);
+const T10_4_2_O_D_LIST_EDITED = stagedMdx(
+  "T10.4-2 specs/O.mdx with the d-list edit on d (origin arm)",
+  t2oDSpec(' d={"e"}'),
+);
+const T10_4_2_T_REFERENCE_REMOVED = stagedMdx(
+  "T10.4-2 specs/T.mdx with t's reference to D removed (origin arm)",
+  t2oTSpec(false),
+);
+const T10_4_2_O_D_DELETED = stagedMdx(
+  "T10.4-2 specs/O.mdx with d's section deleted (origin arm)",
+  t2oDSpec(null),
+);
+
 /** Assert an item's context is exactly one node with the given presence. */
 function assertSoleContext(
   item: ReviewItem,
@@ -1588,7 +1641,7 @@ const T10_4_2 = defineProductTest({
         );
 
         // Deleting the scope node after resolve invalidates.
-        await workspace.file(T2_FILE, t2Spec(false, "Wye text v0."));
+        await workspace.file(T2_FILE, T10_4_2_X_DELETED);
         await buildOk(product, workspace, "T10.4-2 `build` after deleting x");
         await expectItemStatus(
           product,
@@ -1639,7 +1692,7 @@ const T10_4_2 = defineProductTest({
 
         // Remaining absent does not invalidate — even across an unrelated
         // edit that moves the graph.
-        await workspace.file(T2_FILE, t2Spec(false, "Wye text v1."));
+        await workspace.file(T2_FILE, T10_4_2_X_ABSENT_Y_EDITED);
         await buildOk(product, workspace, "T10.4-2 `build` after the y edit");
         await expectItemStatus(
           product,
@@ -1654,7 +1707,7 @@ const T10_4_2 = defineProductTest({
 
         // Restoring the node invalidates the resolution recorded against
         // absence.
-        await workspace.file(T2_FILE, t2Spec(true, "Wye text v1."));
+        await workspace.file(T2_FILE, T10_4_2_X_RESTORED);
         await buildOk(product, workspace, "T10.4-2 `build` after restoring x");
         await expectItemStatus(
           product,
@@ -1703,7 +1756,7 @@ const T10_4_2 = defineProductTest({
         );
 
         // One edit removes D's `d` reference and deletes T's section.
-        await workspace.file(T2C_FILE, t2cSpec("", false));
+        await workspace.file(T2C_FILE, T10_4_2_C_REFERENCE_REMOVED);
         await buildOk(
           product,
           workspace,
@@ -1781,7 +1834,7 @@ const T10_4_2 = defineProductTest({
         // Re-author T. The item's only relevant hash (D's metadataHash) and
         // its generated context set are untouched; only the context node's
         // presence diverges from the recorded state.
-        await workspace.file(T2C_FILE, t2cSpec("", true));
+        await workspace.file(T2C_FILE, T10_4_2_C_T_REAUTHORED);
         await buildOk(
           product,
           workspace,
@@ -1863,7 +1916,7 @@ const T10_4_2 = defineProductTest({
 
         // The d-list edit on D: D `metadata-changed`, nothing `changed`; T
         // and X are upstream-changed, attributed to D (SPEC 5.6).
-        await workspace.file(T2O_D_FILE, t2oDSpec(' d={"e"}'));
+        await workspace.file(T2O_D_FILE, T10_4_2_O_D_LIST_EDITED);
         await buildOk(
           product,
           workspace,
@@ -1967,8 +2020,8 @@ const T10_4_2 = defineProductTest({
         // item's relevant hashes (X's ownHash and metadataHash, T's
         // subtreeHash) and its generated context set are untouched; only the
         // origin node's presence diverges from the recorded state.
-        await workspace.file(T2O_T_FILE, t2oTSpec(false));
-        await workspace.file(T2O_D_FILE, t2oDSpec(null));
+        await workspace.file(T2O_T_FILE, T10_4_2_T_REFERENCE_REMOVED);
+        await workspace.file(T2O_D_FILE, T10_4_2_O_D_DELETED);
         await buildOk(
           product,
           workspace,
@@ -2080,6 +2133,15 @@ function t3Spec(kText: string, sText: string): string {
   ].join("\n");
 }
 
+// T10.4-3's context-set change — the a.s edit, staged after the body's first
+// `build` — is a staged-source record (helpers/staged-mdx.ts, S-9: judged
+// before any product exists); the a.k edit precedes that `build` (staged
+// between `gitCommitAll` and it) and stays plain.
+const T10_4_3_AS_EDITED = stagedMdx(
+  "T10.4-3 specs/A.mdx with the sibling branch a.s at v1 (the context-set change)",
+  t3Spec("Kay text v1.", "Ess text v1."),
+);
+
 const T10_4_3 = defineProductTest({
   id: "T10.4-3",
   title:
@@ -2164,7 +2226,7 @@ const T10_4_3 = defineProductTest({
         );
 
         // The context-set change: a new changed branch under a.
-        await workspace.file(T3_FILE, t3Spec("Kay text v1.", "Ess text v1."));
+        await workspace.file(T3_FILE, T10_4_3_AS_EDITED);
         await buildOk(product, workspace, "T10.4-3 `build` after the a.s edit");
         const after = await captureHashes(
           product,
@@ -2253,17 +2315,22 @@ const T4R_SOURCE = [
   "",
 ].join("\n");
 
-// The manual deletion of pp.c after the rename (SPEC 6.6: a plain edit).
-const T4R_WITHOUT_CHILD = [
-  '<S id="pp">',
-  "Parent own text.",
-  "</S>",
-  "",
-  '<S id="q">',
-  "Cue text.",
-  "</S>",
-  "",
-].join("\n");
+// The manual deletion of pp.c after the rename (SPEC 6.6: a plain edit) — a
+// staged-source record (helpers/staged-mdx.ts, S-9: judged before any
+// product exists), staged after the arm's `build` and `rename`.
+const T4R_WITHOUT_CHILD = stagedMdx(
+  "T10.4-4 specs/R.mdx with pp.c deleted after the rename (rename arm)",
+  [
+    '<S id="pp">',
+    "Parent own text.",
+    "</S>",
+    "",
+    '<S id="q">',
+    "Cue text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // Part 2 (file-move order flip): specs/b.mdx before specs/d.mdx in byte
 // order; moving d.mdx to a.mdx flips which file sorts first.
@@ -2325,6 +2392,38 @@ const T4I_NEW_SECTION = [
   "</S>",
   "",
 ].join("\n");
+
+// The rename-rewritten file's tail — s's closing run, which the rename's
+// minimal in-place edits leave as the file's end (SPEC 6.4) — the anchor the
+// reintroduction's append extends through `workspace.edit()`: the appended
+// bytes follow the product's, which no harness constant equals, so the
+// staging is judged at staging time, not a staged-source record.
+const T4I_TAIL = ['<S id="s">', "Ess text.", "</S>", ""].join("\n");
+
+/**
+ * Diagnose that `search` occurs exactly once in the product-rewritten
+ * `content` before `edit()` stages the append at it: SPEC 6.4 fixes the
+ * rewritten form (minimal in-place edits), so a missing or ambiguous anchor
+ * is a diagnosed assertion failure about the product's rewriting, never
+ * `edit()`'s plain refusal (H-8).
+ */
+function anchorOnce(content: string, search: string, context: string): void {
+  const first = content.indexOf(search);
+  if (first === -1) {
+    fail(
+      `${context}: expected the rewritten source to contain ` +
+        `${JSON.stringify(search)} exactly once (SPEC 6.4 fixes the rewritten ` +
+        `form), but it does not appear; source: ${JSON.stringify(content)}`,
+    );
+  }
+  if (content.includes(search, first + search.length)) {
+    fail(
+      `${context}: the anchor ${JSON.stringify(search)} appears more than once, ` +
+        `so the manual edit cannot be staged unambiguously; source: ` +
+        JSON.stringify(content),
+    );
+  }
+}
 
 const T10_4_4 = defineProductTest({
   id: "T10.4-4",
@@ -2784,17 +2883,27 @@ const T10_4_4 = defineProductTest({
           `${prefix} \`rename specs/E.mdx a b\``,
         );
 
-        // Author a new top-level leaf section `a` — appended to whatever the
+        // Author a new top-level leaf section `a` — appended to what the
         // rename left on disk, so the reintroduced identity starts a new
         // canonical chain after the journal entry that vacated it (SPEC 5.4).
-        const renamed = await workspace.readBytes(T4I_FILE);
-        await workspace.file(
-          T4I_FILE,
-          Buffer.concat([
-            Buffer.from(renamed),
-            Buffer.from(T4I_NEW_SECTION, "utf8"),
-          ]),
-        );
+        // The bytes are the product's, so the append is an `edit()` extending
+        // the file's tail — s's closing run, which the rename's minimal
+        // in-place edits leave as the file's end (SPEC 6.4) — its uniqueness
+        // and end position diagnosed first (H-8).
+        const renamed = Buffer.from(
+          await workspace.readBytes(T4I_FILE),
+        ).toString("utf8");
+        const appendContext = `${prefix} appending the new section a after the rename-rewritten s`;
+        anchorOnce(renamed, T4I_TAIL, appendContext);
+        if (!renamed.endsWith(T4I_TAIL)) {
+          fail(
+            `${appendContext}: expected the rewritten source to end with ` +
+              `${JSON.stringify(T4I_TAIL)} (SPEC 6.4: minimal in-place edits ` +
+              `leave the file's tail in place); source: ` +
+              JSON.stringify(renamed),
+          );
+        }
+        await workspace.edit(T4I_FILE, T4I_TAIL, T4I_TAIL + T4I_NEW_SECTION);
         await buildOk(
           product,
           workspace,
@@ -2952,6 +3061,14 @@ function t5Spec(xText: string): string {
   ].join("\n");
 }
 
+// T10.4-5's staleness edit — staged after the body's first `build` — is a
+// staged-source record (helpers/staged-mdx.ts, S-9: judged before any
+// product exists).
+const T10_4_5_X_EDITED = stagedMdx(
+  "T10.4-5 specs/W.mdx with the resolved scope node x at v1 (the staleness edit)",
+  t5Spec("Ex text v1."),
+);
+
 const T10_4_5 = defineProductTest({
   id: "T10.4-5",
   title:
@@ -2994,7 +3111,7 @@ const T10_4_5 = defineProductTest({
 
         // The staleness: edit the resolved scope node and rebuild, so every
         // subsequent read computes and reports invalidation (SPEC 10.4).
-        await workspace.file(T5_FILE, t5Spec("Ex text v1."));
+        await workspace.file(T5_FILE, T10_4_5_X_EDITED);
         await buildOk(product, workspace, "T10.4-5 `build` after the x edit");
 
         /** Run one read; assert the session file's bytes did not move. */
