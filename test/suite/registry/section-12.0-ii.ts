@@ -133,6 +133,7 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import type { SnapshotChange } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import {
   pathExists,
@@ -293,6 +294,10 @@ async function makeStoryWorkspace(): Promise<{
   try {
     await workspace.gitInit();
     const baseRef = await workspace.gitCommitAll("story baseline");
+    // Every caller (T12.0-7, T12.0-9) stages this edit before its first
+    // product invocation (git staging invokes none), so S-7's sweep reaches
+    // it against the stub: plain contents, no ledger record
+    // (helpers/staged-mdx.ts).
     await workspace.file(STORY_FILE_A, storyASource("Omega text v2."));
     return { workspace, baseRef };
   } catch (error) {
@@ -713,6 +718,14 @@ const tieImpactSpecSource = (caText: string, cbText: string): string =>
     "</S>",
     "",
   ].join("\n");
+// The impact arm's doubly-edited state, staged after T12.0-8's first product
+// invocation (the reachable arm's `build`) into a later-arm workspace S-7's
+// sweep never reaches: a staged-source record (helpers/staged-mdx.ts; S-9's
+// before-any-product clause), the same template call moved to module level.
+const T12_0_8_M_V2 = stagedMdx(
+  "T12.0-8 specs/M.mdx with ca and cb both edited (the impact arm's doubly-edited state)",
+  tieImpactSpecSource("Changed a v2.", "Changed b v2."),
+);
 const TIE_IMPACT_APP = "src/app.ts";
 const TIE_IMPACT_APP_SOURCE = [
   'import M from "../specs/M.xspec";',
@@ -832,10 +845,7 @@ const T12_0_8 = defineProductTest({
       async (workspace) => {
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("tie-break baseline");
-        await workspace.file(
-          TIE_IMPACT_SPEC,
-          tieImpactSpecSource("Changed a v2.", "Changed b v2."),
-        );
+        await workspace.file(TIE_IMPACT_SPEC, T12_0_8_M_V2);
         await buildOk(
           product,
           workspace,
@@ -2310,6 +2320,9 @@ const T12_0_11 = defineProductTest({
         // Edit omega after the commit, so the baseline session derives one
         // unblocked path-blocks item (omega's subtree-coherence item; omega
         // has no non-root ancestor, SPEC 10.5) for `next` and `resolve`.
+        // The edit precedes the body's first product invocation (the `build`
+        // below), so S-7's sweep reaches it against the stub: plain
+        // contents, no ledger record (helpers/staged-mdx.ts).
         await workspace.file(GITRO_FILE, gitroSource("Omega text v2."));
         await buildOk(product, workspace, "T12.0-11 `build` (fresh fixture)");
 

@@ -267,6 +267,7 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -855,6 +856,20 @@ const IN_SOURCE = IN.source;
 
 const TGT_SOURCE = '<S id="t">\nTarget text.\n</S>\n';
 
+// The byte-form paths arm stages both files after T12.7-1's first product
+// invocation (the located-findings arm's `build`), so S-7's sweep never
+// reaches them against the stub: staged-source records
+// (helpers/staged-mdx.ts; S-9's before-any-product clause) over the same
+// sources.
+const T12_7_1_IN = stagedMdx(
+  "T12.7-1 specs/d<0xFF>/In.mdx (the byte-form paths arm's importer, embedding OK.ok and holding an id-less section)",
+  IN_SOURCE,
+);
+const T12_7_1_TGT = stagedMdx(
+  "T12.7-1 specs/d<0xFF>/Tgt.mdx (the byte-form paths arm's import target)",
+  TGT_SOURCE,
+);
+
 // The workspace findings, identical for `build`, bare `view` (whose domain
 // is every discovered spec source = the whole workspace), and bare
 // `occurrences` (the entire discovered set): the located 14.1 (its location
@@ -892,8 +907,8 @@ async function runBytePathsArm(product: ProductBinding): Promise<void> {
     },
   });
   try {
-    await workspace.file(IN_PATH_BYTES, IN_SOURCE);
-    await workspace.file(TGT_PATH_BYTES, TGT_SOURCE);
+    await workspace.file(IN_PATH_BYTES, T12_7_1_IN);
+    await workspace.file(TGT_PATH_BYTES, T12_7_1_TGT);
 
     // --- `build --json`: a finding's location file and concerned path in
     // the marked byte form (SPEC 12.0, 12.7, 14).
@@ -1142,6 +1157,15 @@ const UR_BASELINE_SOURCE = UR_SOURCE.replace(
   "Leaf text, edited.",
   "Leaf text.",
 );
+// The current source is staged over the committed baseline after T12.7-1's
+// first product invocation (the located-findings arm's `build`), so S-7's
+// sweep never reaches it against the stub: a staged-source record
+// (helpers/staged-mdx.ts; S-9's before-any-product clause) over the same
+// source.
+const T12_7_1_UR_EDITED = stagedMdx(
+  "T12.7-1 specs/A.mdx with top.leaf's text edited (the unpinned-surface ranges arm's current source over the baseline)",
+  UR_SOURCE,
+);
 
 const UR_CODE_FILE = "src/ref.ts";
 const UR_UNIT_ID = `${UR_CODE_FILE}#unit`;
@@ -1316,7 +1340,7 @@ async function runUnpinnedRangesArm(product: ProductBinding): Promise<void> {
       const prefix = "T12.7-1 (unpinned-surface ranges)";
       await workspace.gitInit();
       const base = await workspace.gitCommitAll("baseline");
-      await workspace.file(UR_FILE, UR_SOURCE);
+      await workspace.file(UR_FILE, T12_7_1_UR_EDITED);
       await buildOk(
         product,
         workspace,
@@ -1650,6 +1674,9 @@ async function runConditionOrderingArm(product: ProductBinding): Promise<void> {
     },
   });
   try {
+    // This staging precedes T12.7-2's first product invocation (this arm's
+    // `build` below is the body's first), so S-7's sweep reaches it against
+    // the stub: plain contents, no ledger record (helpers/staged-mdx.ts).
     if (NON_UTF8_STAGED) {
       await workspace.file(ORD_NU_PATH_BYTES, ORD_NU_SOURCE);
     }
@@ -2405,6 +2432,15 @@ async function runDocumentFormsArm(product: ProductBinding): Promise<void> {
 /** A minimal valid source, matched by SPECS_ONLY_CONFIG's spec group. */
 const ERR_SOURCE = '<S id="a">\nAlpha.\n</S>\n';
 
+// The 14.24 arm's stale edit, staged after T12.7-3's first product invocation
+// (the config-paths arm's), so S-7's sweep never reaches it against the stub:
+// a staged-source record (helpers/staged-mdx.ts; S-9's before-any-product
+// clause), the literal moved into the record.
+const T12_7_3_A_EDITED = stagedMdx(
+  "T12.7-3 specs/A.mdx edited after the staging build (the stale workspace for the 14.24 write refusal)",
+  '<S id="a">\nAlpha, edited.\n</S>\n',
+);
+
 /**
  * The single-deviation invalid configuration (the T7-2 attribution
  * discipline): the canonical valid file plus one unknown top-level key, so
@@ -3050,7 +3086,7 @@ async function runErrorEnvironmentRefusalArms(
         workspace,
         "T12.7-3 (14.24) staging `build` (SPEC 12.1)",
       );
-      await workspace.file("specs/A.mdx", '<S id="a">\nAlpha, edited.\n</S>\n');
+      await workspace.file("specs/A.mdx", T12_7_3_A_EDITED);
       const staging = await stageWriteRefusalUnder(workspace.path(".xspec"));
       try {
         const context =

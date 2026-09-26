@@ -1565,6 +1565,9 @@ const T11_2_3 = defineProductTest({
       },
     });
     try {
+      // This staging precedes the body's first product invocation (the gate
+      // `build` below), so S-7's sweep reaches it against the stub: plain
+      // contents, no ledger record (helpers/staged-mdx.ts).
       if (NON_UTF8_STAGED) {
         await workspace.file(NU_PATH_BYTES, NU_SOURCE);
       }

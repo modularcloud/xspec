@@ -124,6 +124,7 @@ import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { OccurrenceUnit } from "./section-5.7.js";
 import {
@@ -1966,14 +1967,21 @@ const EMPTY_TEAMMATE_SOURCE = [
   "",
 ].join("\n");
 
-const EMPTY_HOLDER_SOURCE = [
-  'import TGT from "./target.xspec"',
-  "",
-  '<S id="user" d={TGT.tgt}>',
-  "User text.",
-  "</S>",
-  "",
-].join("\n");
+// Staged between T11.3-4's arms — after arm 1's invocation, so S-7's sweep
+// never reaches it against the stub: a staged-source record
+// (helpers/staged-mdx.ts; S-9's before-any-product clause), the same
+// expression moved into the record.
+const EMPTY_HOLDER_SOURCE = stagedMdx(
+  "T11.3-4 specs/holder.mdx holding the workspace's one resolving occurrence of tgt (staged between the arms)",
+  [
+    'import TGT from "./target.xspec"',
+    "",
+    '<S id="user" d={TGT.tgt}>',
+    "User text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T11_3_4 = defineProductTest({
   id: "T11.3-4",

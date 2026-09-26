@@ -1460,6 +1460,9 @@ const T11_5_3 = defineProductTest({
       mdx: { unparseable: [OC_CASSE_FILE] },
     });
     try {
+      // This staging precedes the body's first product invocation (the gate
+      // `build` below), so S-7's sweep reaches it against the stub: plain
+      // contents, no ledger record (helpers/staged-mdx.ts).
       if (NU3_STAGED) {
         await workspace.file(NU3_PATH_BYTES, NU3_SOURCE);
       }
