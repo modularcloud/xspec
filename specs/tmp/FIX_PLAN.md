@@ -654,6 +654,62 @@ passed, 0 skipped under the namespace (~137 s; 2698 + the 8 record tests);
 certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run
 against` lines.
 
+**Resolved by Task 13 (the §7 basics, discovery, and §7.1–7.3 modules; 362a689
+converts, the closing commit records).** Seventeen records. `section-7-basics.ts` 5 —
+the minimal sources `mdxSection("a")` and `mdxSection("b")`, staged byte-identically
+after a body's first invocation by tests of all three modules, are ONE record each
+(Task 11's sub-rule (i)), created and EXPORTED by the first module in registry order
+and imported by the two others (Task 10's sub-rule (ii)): `SECTION_A_SOURCE`
+`"T7-1/T7-2/T7-3/T7-4/T7-6/T7.1-1/T7.3-1 specs/A.mdx (the minimal section a)"` and
+`SECTION_B_SOURCE` `"T7-3/T7-4/T7-6/T7.3-1 the minimal section b (specs/sub/B.mdx;
+T7-4's specs2/B.mdx)"`; `expectConfigRefused`'s one staging site serves every arm
+(the first included), and T7-1's no-configuration and occupancy workspaces, T7-2's
+four later workspaces and `configurationViewOf`, and T7-3's (b)–(d) take them;
+`QUOTED_KEYS_FILES`'s literal (`"T7-2 string-literal keys specs/A.mdx"`),
+`PRODUCT_MDX`, and `OTHER_MDX` wrapped in place, the maps widened.
+`section-7-discovery.ts` 12 — sub-rule applied: a probe table a run-time map builder
+(`probeFiles`) renders from module-level rows gains a `source: StagedMdx` row field
+(`DiscoveryProbe.source?`, required by `StagedProbe`), the builder staging
+`probe.source ?? mdxSection(probe.id)` and returning the record-accepting map, the
+later workspaces' tables typed `StagedProbe[]` and the first workspace's
+(`SEMANTICS_PROBES`) left plain rows; a probe id several tables share is one record
+(`SECTION_C_SOURCE` for the casing and inside-root controls, `SECTION_N_SOURCE`
+`"T7-4/T7-6 …"` for T7-4's `a/N.mdx` and T7-6's `notes/N.mdx`); the `b/M.mdx`
+decoy's record is made from the kept string `M_SOURCE`, which `BESIDE_ROOT_MATCH`
+still writes beside the root through `stageBesideRoot` (Task 6's observation: a raw
+write outside the builder, no record site); the byte and configuration-directory
+probes are per-probe records named with the path as spelled (the `é` paths
+included); T7-6's import-arm sources wrapped in place and `UNLISTED_SOURCE` for
+`other/unlisted.mdx` — the task's `unchecked` premise was stale (the entry carries no
+declaration; it converts, and nothing remains for the sites check).
+`section-7.1-7.3.ts` 0 new — `expectConfigRefused`'s one site, T7.1-1's
+non-`.mdx`-match workspace, `EMISSION_FILES` (T7.3-1's five emission workspaces, the
+first included), the two destination maps, and (g) take the imported records, the
+maps widened. Left plain: T7-1's `LOCATION_FILES`, T7-4's semantics probes, T7-5's
+link workspace, T7-6's (a), T7.1-1's `TWO_GROUP_FILES`, T7.2-1's overlap workspace
+(each its body's first); the files written beside the root (T7-4's `x/M.mdx`, T7-5's
+`outside/X.mdx`); `specs/notes.txt` (no `.mdx` path). Read-based enumeration: the
+15 + 15 + 13 creation sites judged; behind the diagnosed failures — T7-4's
+inside-root arms (the reachable list lacks `b/M.mdx` and `a/N.mdx`), T7-1's occupancy
+workspace, T7-2's and T7-3's later arms — every site is a record. For the next
+tasks: `section-7.4-7.5.ts` (Task 14) spells the same `mdxSection` template and
+stages `"specs/A.mdx": mdxSection("a")` at two sites (T7.4-1's and T7.5-1's reachable
+lists name `specs/A.mdx`) — where such a site is post-invocation, reuse
+`SECTION_A_SOURCE` by import and rename it with the staging IDs in ID order (likewise
+`SECTION_B_SOURCE` for `mdxSection("b")`), never re-spell; `section-12.6.ts`'s
+`VALID_SOURCE` (Task 20; T12.6-2's post-invocation `specs/A.mdx`) is byte-identical to
+`SECTION_A_SOURCE` — reuse by import and rename (`"…/T12.6-2 …"`). Checks: the sites
+hook logged the task's 17 (test, path) pairs (57 lines, all `"well-formed"`) before
+and no file after; the sha256 capture over the three suite files (171 writes,
+compared sorted) identical; 9 tests, 4 pass (T7-5, T7-6, T7.1-1, T7.2-1) and 5 fail —
+T7-1, T7-2, T7-3, T7-4, T7.3-1 — with identical diagnoses (~20 s a run); red check:
+an unclosed tag spliced into `section-7-basics.ts`'s `mdxSection` template fails the
+A, B, and O records as `mdx-derivability` while the 14 others (discovery's own
+template) pass. Known state after Task 13: the S-9 self-test 583 tests over 557
+records (550 `T…`, 4 `E-6`, 3 `P-…`); self project 22 files, 2723 passed, 0 skipped
+under the namespace (~140 s; 2706 + the 17 record tests); certification
+144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -821,28 +877,6 @@ behind a diagnosed failure or in an arm the built product never reaches — reci
 
 ## Tasks
 
-### Task 13 — Initial-file conversion: §7 basics, discovery, §7.1–§7.3 (`section-7-basics.ts`, `section-7-discovery.ts`, `section-7.1-7.3.ts`)
-
-**Workspace creations to judge:** basics (15), discovery (15), 7.1-7.3 (13).
-**Reachable sites (the instrumented run):**
-- `section-7-basics.ts` — T7-1 (1): specs/A.mdx
-- `section-7-basics.ts` — T7-2 (1): specs/A.mdx
-- `section-7-basics.ts` — T7-3 (1): specs/A.mdx
-- `section-7-discovery.ts` — T7-4 (7): bytes/x.mdx bytes/é.mdx bytes2/é.mdx ctl/C.mdx specs/A.mdx specs2/B.mdx sub/specs/B.mdx
-- `section-7-discovery.ts` — T7-6 (4): notes/N.mdx other/unlisted.mdx specs/A.mdx specs/sub/B.mdx
-- `section-7.1-7.3.ts` — T7.1-1 (1): specs/A.mdx
-- `section-7.1-7.3.ts` — T7.3-1 (2): specs/A.mdx specs/sub/B.mdx
-**Failing here:** T7-1, T7-2, T7-3, T7-4, T7.3-1.
-**Certification scope:** T7-4, T7-5, T7-6 (CONF-DISC) — run the self project;
-144/33/0/0. T7-5 is neither flagged nor failing: its creations need only the read
-check.
-**Notes.** A noise file no discovery reaches that is declared `unchecked` (check
-T7-6's `other/unlisted.mdx`) stays plain and is an expected remainder; a key with a
-non-ASCII but valid-UTF-8 name (`bytes/é.mdx`) converts like any other; files staged
-OUTSIDE the root by `stageBesideRoot` are not workspace stagings and stay.
-**Checks.** Recipes 1–5 over `section-7-basics.test`, `section-7-discovery.test`,
-`section-7.1-7.3.test`.
-
 ### Task 14 — Initial-file conversion: §7.4–§7.5 (`section-7.4-7.5.ts`)
 
 **Workspace creations to judge:** 12 (T7.5-5's twenty paths come from module-level
@@ -855,6 +889,10 @@ move-arm tables: wrap in place).
 - `section-7.4-7.5.ts` — T7.5-5 (20): grp/abc/F.mdx m/good.mdx m/wrong.mdx pre/S.mdx pre/a$x.mdx pre/aQx.mdx pre/ax.mdx pre/d/ex.mdx pre/x.mdx tgt/P.mdx tgt/T.mdx tgt/a.mdx tgt/abc.mdx tgt/c.mdx tgt/t$0.mdx tgt/t$z.mdx tgt/t0.mdx tgt/tQz.mdx tgt/tb.mdx tg
 **Failing here:** T7.4-1, T7.5-1.
 **Certification scope:** none.
+**Notes.** The module spells the §7 `mdxSection` template: a post-invocation
+`mdxSection("a")` / `mdxSection("b")` entry reuses `section-7-basics.ts`'s exported
+`SECTION_A_SOURCE` / `SECTION_B_SOURCE` by import, the record renamed with the
+staging IDs in ID order (Task 13); every other id is this module's own record.
 **Checks.** Recipes 1–5 over `section-7.4-7.5.test`.
 
 ### Task 15 — Initial-file conversion: §8, §9, §9.3, §10.1–§10.3 (`section-8.ts`, `section-9.ts`, `section-9.3.ts`, `section-10.1.ts`, `section-10.2-10.3.ts`)
@@ -978,6 +1016,10 @@ records; every §12.7 arm after each body's first — the byte-path `file()` rec
 - `section-12.7.ts` — T12.7-2 (4): specs/F.mdx specs/MR.mdx specs/P.mdx specs/W.mdx
 **Failing here:** T12.2-4, T12.3-1, T12.7-3.
 **Certification scope:** none.
+**Notes.** `section-12.6.ts`'s `VALID_SOURCE` holds the bytes of
+`section-7-basics.ts`'s exported `SECTION_A_SOURCE` (Task 13): T12.6-2's
+post-invocation `specs/A.mdx` reuses that record by import (the constant deleted or
+aliased, never re-spelled), renamed `"…/T12.6-2 …"`.
 **Checks.** Recipes 1–5 over `section-12.1-12.2.test`, `section-12.3-12.5.test`,
 `section-12.6.test`, `section-12.7.test`.
 
