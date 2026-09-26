@@ -54,6 +54,8 @@ import { decodeNodeSummary } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
@@ -209,6 +211,22 @@ function assemble(
   return { source, pinned };
 }
 
+/**
+ * An assembled fixture registered as a staged-source record (S-9's timing
+ * clause): every fixture this module stages after a body's first product
+ * invocation — the matrix arms, the nested and lone empty segments — is
+ * staged from `record`, which the S-9 self-test judged before any product
+ * existed; `source` and `pinned` stay for the offset assertions.
+ */
+interface StagedAssembled extends Assembled {
+  readonly record: StagedMdx;
+}
+
+/** Register an assembled fixture's source under `recordName`. */
+function staged(recordName: string, assembled: Assembled): StagedAssembled {
+  return { ...assembled, record: stagedMdx(recordName, assembled.source) };
+}
+
 /** One section after the sibling whose `id` attribute is under test. */
 function segmentStaging(segment: string, quote: QuoteKind = '"'): Assembled {
   return assemble([
@@ -227,10 +245,15 @@ function tagStaging(tags: string, quote: QuoteKind = '"'): Assembled {
   ]);
 }
 
-/** Stage one single-file workspace and collect its `build --json` findings. */
+/**
+ * Stage one single-file workspace and collect its `build --json` findings.
+ * `source` is a staged-source record wherever the calling body has already
+ * invoked the product (S-9's timing clause); a body's first workspace may
+ * stage plain contents.
+ */
 async function findingsOf(
   product: ProductBinding,
-  source: string,
+  source: string | StagedMdx,
   context: string,
 ): Promise<readonly Finding[]> {
   const workspace = await TestWorkspace.create({
@@ -293,11 +316,11 @@ function assertOnly144AtAttributes(
  */
 async function expectSingle144(
   product: ProductBinding,
-  staged: Assembled,
+  fixture: StagedAssembled,
   context: string,
 ): Promise<void> {
-  const findings = await findingsOf(product, staged.source, context);
-  assertOnly144AtAttributes(findings, staged.pinned, context);
+  const findings = await findingsOf(product, fixture.record, context);
+  assertOnly144AtAttributes(findings, fixture.pinned, context);
 }
 
 // --- T1.4-1 ------------------------------------------------------------------
@@ -355,6 +378,18 @@ const INVALID_SEGMENT_ARMS: readonly SegmentArm[] = [
   },
 ];
 
+// Every matrix arm's fixture, registered at module load in arm order — the
+// template call the body used to make per arm, evaluated once here: the
+// arms run after T1.4-1's template-control invocation, so each is a record
+// the S-9 self-test judges before any product exists.
+const INVALID_SEGMENT_FIXTURES = INVALID_SEGMENT_ARMS.map((arm) => ({
+  arm,
+  fixture: staged(
+    `T1.4-1 arm ${arm.name} specs/A.mdx`,
+    segmentStaging(arm.segment, arm.quote),
+  ),
+}));
+
 // Empty segment, nested spelling: `a..b` is reachable only via the chain
 // `a` → `a.` → `a..b`, where every level adds exactly one segment — 1.3 is
 // satisfied and the empty segment (1.4 → 14.4) is the only condition staged.
@@ -362,13 +397,22 @@ const INVALID_SEGMENT_ARMS: readonly SegmentArm[] = [
 // offend: one 14.4 finding per offending attribute, each located at its own
 // attribute — the descendant spelling the malformed ancestor segment as its
 // own prefix reports in its own attribute too (SPEC 14; T14-11).
-const EMPTY_NESTED = assemble([
-  `${SIBLING}<S id="a">\nAlpha.\n\n<S `,
-  { pin: 'id="a."' },
-  ">\nIntroduces the empty segment.\n\n<S ",
-  { pin: 'id="a..b"' },
-  ">\nNested under the empty segment.\n</S>\n</S>\n</S>\n",
-]);
+const EMPTY_NESTED = staged(
+  "T1.4-1 nested empty segment specs/A.mdx",
+  assemble([
+    `${SIBLING}<S id="a">\nAlpha.\n\n<S `,
+    { pin: 'id="a."' },
+    ">\nIntroduces the empty segment.\n\n<S ",
+    { pin: 'id="a..b"' },
+    ">\nNested under the empty segment.\n</S>\n</S>\n</S>\n",
+  ]),
+);
+
+// The lone empty `id=""`, staged after the same invocation: a record too.
+const LONE_EMPTY_SEGMENT = staged(
+  'T1.4-1 lone empty id="" specs/A.mdx',
+  segmentStaging(""),
+);
 
 const T1_4_1 = defineProductTest({
   id: "T1.4-1",
@@ -398,7 +442,7 @@ const T1_4_1 = defineProductTest({
     const nestedContext =
       "T1.4-1 `build --json` over the nested empty segment (`a` -> `a.` -> `a..b`)";
     assertOnly144AtAttributes(
-      await findingsOf(product, EMPTY_NESTED.source, nestedContext),
+      await findingsOf(product, EMPTY_NESTED.record, nestedContext),
       EMPTY_NESTED.pinned,
       nestedContext,
     );
@@ -407,14 +451,14 @@ const T1_4_1 = defineProductTest({
     // exactly-one-segment top-level rule holds and 14.4 alone reports.
     await expectSingle144(
       product,
-      segmentStaging(""),
+      LONE_EMPTY_SEGMENT,
       'T1.4-1 `build --json` over a lone empty `id=""`',
     );
 
-    for (const arm of INVALID_SEGMENT_ARMS) {
+    for (const { arm, fixture } of INVALID_SEGMENT_FIXTURES) {
       await expectSingle144(
         product,
-        segmentStaging(arm.segment, arm.quote),
+        fixture,
         `T1.4-1 \`build --json\` with ${arm.name}`,
       );
     }
@@ -597,16 +641,33 @@ const INVALID_TAG_ARMS: readonly TagArm[] = [
   },
 ];
 
+// The tag arms' fixtures, registered at module load in arm order (the
+// template calls the body used to make): the first valid arm's workspace is
+// T1.4-4's first and the rest follow its invocations — the table converts
+// uniformly — and every invalid arm runs after them (S-9's timing clause).
+const VALID_TAG_FIXTURES = VALID_TAG_ARMS.map((arm) => ({
+  arm,
+  fixture: staged(`T1.4-4 arm ${arm.name} specs/A.mdx`, tagStaging(arm.tag)),
+}));
+
+const INVALID_TAG_FIXTURES = INVALID_TAG_ARMS.map((arm) => ({
+  arm,
+  fixture: staged(
+    `T1.4-4 arm ${arm.name} specs/A.mdx`,
+    tagStaging(arm.tag, arm.quote),
+  ),
+}));
+
 const T1_4_4 = defineProductTest({
   id: "T1.4-4",
   title:
     "tags: `.` is valid; `#`, a forbidden name, non-whitespace control characters, the quote, escape, and character-reference characters (`\"` single-quoted, `'`, backslash, `&`), and U+FFFD fail with 14.4, one finding per offending `tags` attribute located exactly at it; the verbatim escape spelling of `y` is a tag containing the backslash — condition 4, never the tag `xy`; the T1.4-2 boundary code points are valid in tags and never split (SPEC 1.4, 2.4, 2.6, 14, 14.4)",
   run: async (product) => {
-    for (const arm of VALID_TAG_ARMS) {
+    for (const { arm, fixture } of VALID_TAG_FIXTURES) {
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/A.mdx": tagStaging(arm.tag).source,
+          "specs/A.mdx": fixture.record,
         },
       });
       try {
@@ -631,10 +692,10 @@ const T1_4_4 = defineProductTest({
         await workspace.dispose();
       }
     }
-    for (const arm of INVALID_TAG_ARMS) {
+    for (const { arm, fixture } of INVALID_TAG_FIXTURES) {
       await expectSingle144(
         product,
-        tagStaging(arm.tag, arm.quote),
+        fixture,
         `T1.4-4 \`build --json\` with ${arm.name}`,
       );
     }
