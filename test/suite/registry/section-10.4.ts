@@ -54,7 +54,11 @@
 // level. A staging that precedes a body's first invocation stays plain (S-7's
 // sweep reaches it against the stub): T10.4-1's subtree-coherence pre-`create`
 // edit and T10.4-3's a.k edit, each between `gitCommitAll` and the first
-// `build`; every workspace's initial files stay plain `files` entries.
+// `build`, and each body's first workspace's initial files. The initial
+// `.mdx` files of every later workspace — T10.4-1's five later scenarios,
+// T10.4-2's context and origin arms, T10.4-4's move and reintroduction arms
+// — are records too, passed as the `files` entries (S-9's before-any-product
+// clause covers a workspace created after the body's first invocation).
 // T10.4-4's reintroduction appends to bytes the rename wrote — no harness
 // constant equals them — so it is an anchored `workspace.edit()` (the tail's
 // uniqueness and end position diagnosed first, SPEC 6.4).
@@ -87,6 +91,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
@@ -136,7 +141,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -692,6 +697,15 @@ function pcSpec(
   ].join("\n");
 }
 
+// The scenario's initial specs/P.mdx: its workspace is created after the
+// body's first `build` (the subtree-coherence scenario's), so the initial
+// file is a staged-source record too (S-9's before-any-product clause), the
+// same template call moved to module level.
+const T10_4_1_PC_INITIAL = stagedMdx(
+  "T10.4-1 parent-consistency specs/P.mdx at the baseline (the scenario's initial source)",
+  pcSpec("Alpha own v0.", "", "Deep leaf v0.", "Other v0."),
+);
+
 // The scenario's successive states of specs/P.mdx, in staging order (the
 // former `write()` closure enumerated, each state carrying the earlier edits
 // forward) — every one, the pre-`create` edit included, follows the body's
@@ -755,6 +769,19 @@ function dcSpec(
     "",
   ].join("\n");
 }
+
+// The scenario's initial specs/D.mdx — a workspace created after the body's
+// first `build`, so a record too (the same template call moved here).
+const T10_4_1_DC_INITIAL = stagedMdx(
+  "T10.4-1 dependency-consistency specs/D.mdx at the baseline (the scenario's initial source)",
+  dcSpec(
+    "Dep own v0.",
+    "",
+    "Target own v0.",
+    "Target child v0.",
+    "Unrelated v0.",
+  ),
+);
 
 // The scenario's successive states of specs/D.mdx, in staging order (the
 // former `write()` closure enumerated, each state carrying the earlier edits
@@ -823,6 +850,13 @@ function mcSpec(mTags: string, mText: string): string {
   return [`<S id="m" tags="${mTags}">`, mText, "</S>", ""].join("\n");
 }
 
+// The scenario's initial specs/M.mdx — a workspace created after the body's
+// first `build`, so a record too (the same template call moved here).
+const T10_4_1_MC_INITIAL = stagedMdx(
+  "T10.4-1 metadata-consistency specs/M.mdx at the baseline (the scenario's initial source)",
+  mcSpec("m0", "Em text v0."),
+);
+
 // The scenario's successive states of specs/M.mdx, in staging order (the
 // former `write()` closure enumerated), all after the body's first `build`:
 // index 0 the pre-`create` edit, then one per arm.
@@ -877,6 +911,14 @@ const CI_CODE_SOURCE = [
   "",
 ].join("\n");
 
+// The scenario's initial specs/C.mdx — a workspace created after the body's
+// first `build`, so a record too (the same template call moved here); the
+// code source beside it is `.ts`.
+const T10_4_1_CI_INITIAL = stagedMdx(
+  "T10.4-1 code-impact specs/C.mdx at the baseline (the scenario's initial source)",
+  ciSpec("Target v0.", "Upstream v0.", "Watcher v0."),
+);
+
 // The scenario's successive states of specs/C.mdx, in staging order (the
 // former `write()` closure enumerated, each state carrying the earlier edits
 // forward), all after the body's first `build`: index 0 the pre-`create`
@@ -919,6 +961,13 @@ function urSpec(uAttrs: string, uText: string, eText: string): string {
     "",
   ].join("\n");
 }
+
+// The scenario's initial specs/U.mdx — a workspace created after the body's
+// first `build`, so a record too (the same template call moved here).
+const T10_4_1_UR_INITIAL = stagedMdx(
+  "T10.4-1 uncovered-requirement specs/U.mdx at the baseline (the scenario's initial source)",
+  urSpec("", "You leaf v0.", "Elsewhere v0."),
+);
 
 // The scenario's successive states of specs/U.mdx, in staging order (the
 // former `write()` closure enumerated, each state carrying the earlier edits
@@ -1066,7 +1115,7 @@ const T10_4_1 = defineProductTest({
     await withWorkspace(
       SPECS_ONLY_CONFIG,
       {
-        [PC_FILE]: pcSpec("Alpha own v0.", "", "Deep leaf v0.", "Other v0."),
+        [PC_FILE]: T10_4_1_PC_INITIAL,
       },
       async (workspace) => {
         const prefix = "T10.4-1 parent-consistency";
@@ -1185,13 +1234,7 @@ const T10_4_1 = defineProductTest({
     await withWorkspace(
       SPECS_ONLY_CONFIG,
       {
-        [DC_FILE]: dcSpec(
-          "Dep own v0.",
-          "",
-          "Target own v0.",
-          "Target child v0.",
-          "Unrelated v0.",
-        ),
+        [DC_FILE]: T10_4_1_DC_INITIAL,
       },
       async (workspace) => {
         const prefix = "T10.4-1 dependency-consistency";
@@ -1300,7 +1343,7 @@ const T10_4_1 = defineProductTest({
     // --- metadata-consistency ----------------------------------------------
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [MC_FILE]: mcSpec("m0", "Em text v0.") },
+      { [MC_FILE]: T10_4_1_MC_INITIAL },
       async (workspace) => {
         const prefix = "T10.4-1 metadata-consistency";
 
@@ -1378,7 +1421,7 @@ const T10_4_1 = defineProductTest({
     await withWorkspace(
       SPECS_CODE_CONFIG,
       {
-        [CI_FILE]: ciSpec("Target v0.", "Upstream v0.", "Watcher v0."),
+        [CI_FILE]: T10_4_1_CI_INITIAL,
         [CI_CODE]: CI_CODE_SOURCE,
       },
       async (workspace) => {
@@ -1463,7 +1506,7 @@ const T10_4_1 = defineProductTest({
     // --- uncovered-requirement ----------------------------------------------
     await withWorkspace(
       COVERAGE_CONFIG,
-      { [UR_FILE]: urSpec("", "You leaf v0.", "Elsewhere v0.") },
+      { [UR_FILE]: T10_4_1_UR_INITIAL },
       async (workspace) => {
         const prefix = "T10.4-1 uncovered-requirement";
 
@@ -1593,14 +1636,19 @@ const T2O_X = "specs/X.mdx#x";
 const T2O_T = "specs/T.mdx#t";
 const T2O_D = "specs/O.mdx#d";
 
-const T2O_X_SOURCE = [
-  'import T from "./T.xspec"',
-  "",
-  '<S id="x" d={T.t}>',
-  "Ex own text.",
-  "</S>",
-  "",
-].join("\n");
+// The origin arm's initial X: a workspace created after the body's first
+// `build`, so a record too, wrapped in place.
+const T2O_X_SOURCE = stagedMdx(
+  "T10.4-2 specs/X.mdx with x depending on T.t (the origin arm's initial source)",
+  [
+    'import T from "./T.xspec"',
+    "",
+    '<S id="x" d={T.t}>',
+    "Ex own text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // The import stays when the `d` reference goes: an import whose binding is
 // never used is valid and records no edges (SPEC 2.1), so the reference
@@ -1627,7 +1675,8 @@ function t2oDSpec(dAttrs: string | null): string {
 // T10.4-2's presence flips — every one staged after the body's first
 // `build` — are staged-source records (helpers/staged-mdx.ts, S-9: judged
 // before any product exists), the same template calls moved to module level;
-// each arm's initial files stay plain `files` entries.
+// the context and origin arms' initial files (below) are records too, the
+// first arm's X — the body's first workspace — a plain `files` entry.
 const T10_4_2_X_DELETED = stagedMdx(
   "T10.4-2 specs/X.mdx with the scope node x deleted (y at v0)",
   t2Spec(false, "Wye text v0."),
@@ -1659,6 +1708,18 @@ const T10_4_2_T_REFERENCE_REMOVED = stagedMdx(
 const T10_4_2_O_D_DELETED = stagedMdx(
   "T10.4-2 specs/O.mdx with d's section deleted (origin arm)",
   t2oDSpec(null),
+);
+const T10_4_2_C_INITIAL = stagedMdx(
+  "T10.4-2 specs/C.mdx with dd referencing tt (the context arm's initial source)",
+  t2cSpec(' d={"tt"}', true),
+);
+const T10_4_2_T_INITIAL = stagedMdx(
+  "T10.4-2 specs/T.mdx with t referencing O.d (the origin arm's initial source)",
+  t2oTSpec(true),
+);
+const T10_4_2_O_INITIAL = stagedMdx(
+  "T10.4-2 specs/O.mdx with d beside e (the origin arm's initial source)",
+  t2oDSpec(""),
 );
 
 /** Assert an item's context is exactly one node with the given presence. */
@@ -1867,7 +1928,7 @@ const T10_4_2 = defineProductTest({
     // --- context arm: a context node's absent-to-present flip --------------
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [T2C_FILE]: t2cSpec(' d={"tt"}', true) },
+      { [T2C_FILE]: T10_4_2_C_INITIAL },
       async (workspace) => {
         const prefix = "T10.4-2 context arm (metadata-consistency)";
         await workspace.gitInit();
@@ -2024,8 +2085,8 @@ const T10_4_2 = defineProductTest({
       SPECS_ONLY_CONFIG,
       {
         [T2O_X_FILE]: T2O_X_SOURCE,
-        [T2O_T_FILE]: t2oTSpec(true),
-        [T2O_D_FILE]: t2oDSpec(""),
+        [T2O_T_FILE]: T10_4_2_T_INITIAL,
+        [T2O_D_FILE]: T10_4_2_O_INITIAL,
       },
       async (workspace) => {
         const prefix = "T10.4-2 origin arm (dependency-consistency)";
@@ -2469,27 +2530,37 @@ const T4M_W = "specs/d.mdx#w";
 const T4M_AN = "specs/a.mdx#n";
 const T4M_AW = "specs/a.mdx#w";
 
-const T4M_B_SOURCE = [
-  '<S id="m">',
-  "Emm text.",
-  "</S>",
-  "",
-  '<S id="r">',
-  "Arr text.",
-  "</S>",
-  "",
-].join("\n");
+// The move and reintroduction arms follow the rename arm's invocations, so
+// their initial sources are staged-source records (S-9's before-any-product
+// clause), wrapped in place; the rename arm's `T4R_SOURCE`, the body's first
+// workspace, stays plain.
+const T4M_B_SOURCE = stagedMdx(
+  "T10.4-4 move arm specs/b.mdx",
+  [
+    '<S id="m">',
+    "Emm text.",
+    "</S>",
+    "",
+    '<S id="r">',
+    "Arr text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
-const T4M_D_SOURCE = [
-  '<S id="n">',
-  "Enn text.",
-  "</S>",
-  "",
-  '<S id="w">',
-  "Dub text.",
-  "</S>",
-  "",
-].join("\n");
+const T4M_D_SOURCE = stagedMdx(
+  "T10.4-4 move arm specs/d.mdx",
+  [
+    '<S id="n">',
+    "Enn text.",
+    "</S>",
+    "",
+    '<S id="w">',
+    "Dub text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // Part 3 (reintroduction): top-level leaves a and s; rename a -> b, then a
 // new section reintroduces the identity `a` (a fresh canonical chain, 5.4).
@@ -2499,16 +2570,19 @@ const T4I_A = "specs/E.mdx#a";
 const T4I_B = "specs/E.mdx#b";
 const T4I_S = "specs/E.mdx#s";
 
-const T4I_SOURCE = [
-  '<S id="a">',
-  "Aye original text.",
-  "</S>",
-  "",
-  '<S id="s">',
-  "Ess text.",
-  "</S>",
-  "",
-].join("\n");
+const T4I_SOURCE = stagedMdx(
+  "T10.4-4 reintroduction arm specs/E.mdx",
+  [
+    '<S id="a">',
+    "Aye original text.",
+    "</S>",
+    "",
+    '<S id="s">',
+    "Ess text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T4I_NEW_SECTION = [
   "",

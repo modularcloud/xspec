@@ -52,10 +52,13 @@
 //   invocation — T10.5-1's extended- and chain-fixture edits, T10.5-4's
 //   deletion of v.e and v.f, T10.5-5's p.b edit, r.c revert, and both
 //   decomposition edits, T10.5-6's par.s edit — is the same template call
-//   moved to module level as a record. A staging that precedes a body's
-//   first `build` (each fixture's first edit, between `gitCommitAll` and
-//   that `build`) stays plain, as does every initial `files` entry (S-7's
-//   sweep reaches them against the stub).
+//   moved to module level as a record, as is the initial `.mdx` file of
+//   every workspace created after the body's first `build` (T10.5-1's
+//   extended and chain fixtures, T10.5-5's decomposition sub-fixture). A
+//   staging that precedes a body's first `build` (each fixture's first edit,
+//   between `gitCommitAll` and that `build`) stays plain, as do each body's
+//   first workspace's initial `files` entries (S-7's sweep reaches them
+//   against the stub).
 
 import type {
   ExportReport,
@@ -80,6 +83,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
@@ -109,7 +113,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -489,8 +493,9 @@ function ySpec(cText: string): string {
 // `build` (the body's first product invocation), so they are staged-source
 // records (helpers/staged-mdx.ts, S-9: judged before any product exists) —
 // the same template calls moved to module level; the worked change's own
-// edit precedes that `build` and stays plain, and every arm's initial file
-// is a plain `files` entry.
+// edit precedes that `build` and stays plain, as does its initial file; the
+// extended and chain fixtures' initial files, staged after that `build`,
+// are records too (below).
 const T10_5_1_X1_EDITED = stagedMdx(
   "T10.5-1 specs/X.mdx with p's own text and the three leaves at v1 (extended fixture)",
   x1Spec("Pee own v1.", "Cee text v1.", "Kay text v1.", "Ess text v1."),
@@ -498,6 +503,14 @@ const T10_5_1_X1_EDITED = stagedMdx(
 const T10_5_1_Y_EDITED = stagedMdx(
   "T10.5-1 specs/Y.mdx with a.b.c at v1 (chain fixture)",
   ySpec("Cee text v1."),
+);
+const T10_5_1_X1_INITIAL = stagedMdx(
+  "T10.5-1 specs/X.mdx with p's own text and the three leaves at v0 (the extended fixture's initial source)",
+  x1Spec("Pee own v0.", "Cee text v0.", "Kay text v0.", "Ess text v0."),
+);
+const T10_5_1_Y_INITIAL = stagedMdx(
+  "T10.5-1 specs/Y.mdx with a.b.c at v0 (the chain fixture's initial source)",
+  ySpec("Cee text v0."),
 );
 
 const T10_5_1 = defineProductTest({
@@ -646,12 +659,7 @@ const T10_5_1 = defineProductTest({
     await withWorkspace(
       SPECS_ONLY_CONFIG,
       {
-        [X1_FILE]: x1Spec(
-          "Pee own v0.",
-          "Cee text v0.",
-          "Kay text v0.",
-          "Ess text v0.",
-        ),
+        [X1_FILE]: T10_5_1_X1_INITIAL,
       },
       async (workspace) => {
         const prefix = "T10.5-1 extended fixture";
@@ -770,7 +778,7 @@ const T10_5_1 = defineProductTest({
     // --- chain fixture: a change two levels beneath an ancestor -----------
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [Y_FILE]: ySpec("Cee text v0.") },
+      { [Y_FILE]: T10_5_1_Y_INITIAL },
       async (workspace) => {
         const prefix = "T10.5-1 chain fixture";
         await workspace.gitInit();
@@ -1883,8 +1891,9 @@ function vSpec(gaOwn: string, withZ: boolean): string {
 // of sub-fixture B's — follow the body's first `build`, so they are
 // staged-source records (helpers/staged-mdx.ts, S-9: judged before any
 // product exists), the same template calls moved to module level;
-// sub-fixture A's first edit precedes that `build` and stays plain, and each
-// sub-fixture's initial file is a plain `files` entry.
+// sub-fixture A's first edit precedes that `build` and stays plain, as does
+// its initial file; sub-fixture B's initial file, staged after it, is a
+// record too (below).
 const T10_5_5_W_PB_EDITED = stagedMdx(
   "T10.5-5 specs/W.mdx with p.b at v1 beside the p.a and r.c edits (re-derivation)",
   wSpec("Paa text v1.", "Pab text v1.", "Arc text v1."),
@@ -1900,6 +1909,10 @@ const T10_5_5_V_GA_EDITED = stagedMdx(
 const T10_5_5_V_WITH_Z = stagedMdx(
   "T10.5-5 specs/V.mdx with g.a.z authored after the splits (decomposition)",
   vSpec("Gaa own v1.", true),
+);
+const T10_5_5_V_INITIAL = stagedMdx(
+  "T10.5-5 specs/V.mdx with g.a's own text at v0 (the decomposition sub-fixture's initial source)",
+  vSpec("Gaa own v0.", false),
 );
 
 const T10_5_5 = defineProductTest({
@@ -2232,7 +2245,7 @@ const T10_5_5 = defineProductTest({
     // --- sub-fixture B: split decompositions govern re-derivation ------------
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [V_FILE]: vSpec("Gaa own v0.", false) },
+      { [V_FILE]: T10_5_5_V_INITIAL },
       async (workspace) => {
         const prefix = "T10.5-5 decomposition";
         await workspace.gitInit();

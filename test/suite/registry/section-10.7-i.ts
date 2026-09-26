@@ -75,10 +75,13 @@
 //   invocation — T10.7-2's B.mdx and extra/N.mdx additions (N.mdx is the
 //   same call in both arms: one record), T10.7-3's par edit, T10.7-4's two
 //   deletions, T10.7-5's w edit, T10.7-6's p.a edit — is the same template
-//   call moved to module level as a record. Every initial `files` entry
-//   stays plain, the later-arm ones (T10.7-1's corrupt-session workspaces,
-//   T10.7-2's audit arm) being the reach observation's; T10.7-1's and
-//   T10.7-5's corrupt-session bytes stage no `.mdx` path.
+//   call moved to module level as a record, as are the initial `.mdx` files
+//   of the workspaces created after a body's first invocation — T10.7-1's
+//   corrupt-session workspaces (`W1_SOURCE`, the one record serving the
+//   body's first workspace too) and T10.7-2's audit arm (leaf a, the
+//   coverage arm's same call: one record staged in both); every other
+//   initial `files` entry, a body's first workspace's, stays plain;
+//   T10.7-1's and T10.7-5's corrupt-session bytes stage no `.mdx` path.
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -112,6 +115,7 @@ import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertSameJson,
@@ -156,7 +160,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -529,7 +533,13 @@ async function expectCreateUsageError(
 // ---------------------------------------------------------------------------
 
 const W1_FILE = "specs/W.mdx";
-const W1_SOURCE = ['<S id="w">', "Dub text.", "</S>", ""].join("\n");
+// Staged by the body's first workspace and, after its invocations, by each
+// corrupt-session state's workspace: one staged-source record (S-9's
+// before-any-product clause), wrapped in place.
+const W1_SOURCE = stagedMdx(
+  "T10.7-1 specs/W.mdx (the flag-exclusivity workspace's initial source and each corrupt-session state's)",
+  ['<S id="w">', "Dub text.", "</S>", ""].join("\n"),
+);
 
 /** The session every refusal arm of T10.7-1 names, and its file (10.1). */
 const W1_SESSION = "s";
@@ -926,6 +936,14 @@ export default defineConfig({
 })
 `;
 
+// Leaf a is the same call in the coverage arm's workspace (the body's first)
+// and the audit arm's (created after the coverage arm's invocations): one
+// staged-source record (S-9's before-any-product clause), staged at both.
+const T10_7_2_A_LEAF = stagedMdx(
+  "T10.7-2 specs/A.mdx with leaf a (the coverage arm's initial source and the audit arm's)",
+  leafSpec("a", "Aye text."),
+);
+
 // Both arms' post-create additions follow the arm's first `build`, so they
 // are staged-source records (helpers/staged-mdx.ts, S-9: judged before any
 // product exists); extra/N.mdx is the same call in both arms — one record.
@@ -948,7 +966,7 @@ const T10_7_2 = defineProductTest({
     await withWorkspace(
       COVERAGE_CONFIG,
       {
-        [C2_A]: leafSpec("a", "Aye text."),
+        [C2_A]: T10_7_2_A_LEAF,
         [C2_G]: leafSpec("g", "Gee text."),
       },
       async (workspace) => {
@@ -1151,7 +1169,7 @@ const T10_7_2 = defineProductTest({
     // --- audit arm: no creation parameters are recorded ---------------------
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [C2_A]: leafSpec("a", "Aye text.") },
+      { [C2_A]: T10_7_2_A_LEAF },
       async (workspace) => {
         const prefix = "T10.7-2 audit arm";
         await buildOk(product, workspace, `${prefix} \`build\``);

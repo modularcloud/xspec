@@ -73,12 +73,14 @@
 //   invocation — T10.7-7's payload-arm edit, T10.7-8's x.k edit, T10.7-9's
 //   g.a.z authoring and both audit-arm authorings, T10.7-10's p.a edit,
 //   T10.7-11's edge swap, T10.7-12's A.mdx v1/v2 and B.mdx v1/v2 edits — is
-//   the same template call moved to module level as a record. T10.7-9's
-//   path-blocks v1 edit precedes the body's first `build` (git staging
-//   invokes no product) and stays plain, as does every initial `files`
-//   entry, the later arms' (T10.7-7's fully-resolved and payload arms,
-//   T10.7-9's audit arm, T10.7-12's provenance and coverage arms) being the
-//   reach observation's; the code sources are `.ts`.
+//   the same template call moved to module level as a record, as is the
+//   initial `.mdx` file of every workspace created after the body's first
+//   invocation (T10.7-7's payload arm, T10.7-9's audit arm, T10.7-12's
+//   provenance and coverage sub-fixtures; T10.7-7's empty-session arm
+//   stages none). T10.7-9's path-blocks v1 edit precedes the body's first
+//   `build` (git staging invokes no product) and stays plain, as do each
+//   body's first workspace's initial `files` entries; the code sources are
+//   `.ts`.
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -107,6 +109,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertSameJson,
   buildOk,
@@ -184,7 +187,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -956,9 +959,14 @@ function n7PbSpec(kidText: string): string {
   ].join("\n");
 }
 
-// The payload arm's reviewed edit follows the body's first `build` (the
-// order arm's), so it is a staged-source record (helpers/staged-mdx.ts, S-9:
-// judged before any product exists); the code source beside it is `.ts`.
+// The payload arm's initial source and reviewed edit follow the body's first
+// `build` (the order arm's), so both are staged-source records
+// (helpers/staged-mdx.ts, S-9: judged before any product exists); the code
+// source beside them is `.ts`.
+const T10_7_7_A2_KID_V0 = stagedMdx(
+  "T10.7-7 specs/A2.mdx with a.k's text at v0 (the payload arm's initial source)",
+  n7PbSpec("Kid line v0."),
+);
 const T10_7_7_A2_KID_V1 = stagedMdx(
   "T10.7-7 specs/A2.mdx with a.k's text at v1 (the payload arm's reviewed edit)",
   n7PbSpec("Kid line v1."),
@@ -1169,7 +1177,7 @@ const T10_7_7 = defineProductTest({
     // absent one (identity and absence alone — no text, no range).
     await withWorkspace(
       SPECS_CODE_CONFIG,
-      { [N7_PB_FILE]: n7PbSpec("Kid line v0.") },
+      { [N7_PB_FILE]: T10_7_7_A2_KID_V0 },
       async (workspace) => {
         const prefix = "T10.7-7 payload arm";
         await workspace.gitInit();
@@ -1826,9 +1834,13 @@ function s9HSpec(withB: boolean, withC: boolean): string {
   ].join("\n");
 }
 
-// The audit arm's two authorings follow the body's first `build`, so they
-// are staged-source records (helpers/staged-mdx.ts, S-9: judged before any
-// product exists).
+// The audit arm's initial source and two authorings follow the body's first
+// `build`, so they are staged-source records (helpers/staged-mdx.ts, S-9:
+// judged before any product exists).
+const T10_7_9_H_INITIAL = stagedMdx(
+  "T10.7-9 specs/H.mdx with h.a alone under h (the audit arm's initial source)",
+  s9HSpec(false, false),
+);
 const T10_7_9_H_WITH_B = stagedMdx(
   "T10.7-9 specs/H.mdx with h.b authored after create",
   s9HSpec(true, false),
@@ -2132,7 +2144,7 @@ const T10_7_9 = defineProductTest({
     // --- audit arm ------------------------------------------------------------
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [S9_H_FILE]: s9HSpec(false, false) },
+      { [S9_H_FILE]: T10_7_9_H_INITIAL },
       async (workspace) => {
         const prefix = "T10.7-9 audit arm";
         await buildOk(product, workspace, `${prefix} \`build\``);
@@ -3056,9 +3068,13 @@ function b12Spec(
   ].join("\n");
 }
 
-// The provenance arm's v1 and v2 edits follow the body's first `build` (the
-// matrix arm's), so they are staged-source records (helpers/staged-mdx.ts,
-// S-9: judged before any product exists).
+// The provenance arm's initial source and its v1 and v2 edits follow the
+// body's first `build` (the matrix arm's), so they are staged-source records
+// (helpers/staged-mdx.ts, S-9: judged before any product exists).
+const T10_7_12_B_T0 = stagedMdx(
+  "T10.7-12 specs/B.mdx with px.x at T0, yq.y and dm's d reference present (the provenance sub-fixture's initial source)",
+  b12Spec("Ex line T0.", true, true),
+);
 const T10_7_12_B_X_T1 = stagedMdx(
   "T10.7-12 specs/B.mdx with px.x at T1, yq.y and dm's d reference removed",
   b12Spec("Ex line T1.", false, false),
@@ -3076,20 +3092,26 @@ const U12_ROOT = "specs/U.mdx";
 const U12_TOP = "specs/U.mdx#top";
 const U12_COV = "specs/U.mdx#cov";
 
-const U12_SOURCE = [
-  '<S id="top">',
-  "Top own line.",
-  "",
-  '<S id="top.in">',
-  "Inner line.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="cov" d={"top.in"}>',
-  "Cov line.",
-  "</S>",
-  "",
-].join("\n");
+// The coverage sub-fixture follows the matrix and provenance sub-fixtures'
+// invocations, so its initial source is a staged-source record (S-9's
+// before-any-product clause), wrapped in place.
+const U12_SOURCE = stagedMdx(
+  "T10.7-12 specs/U.mdx (the coverage sub-fixture's initial source)",
+  [
+    '<S id="top">',
+    "Top own line.",
+    "",
+    '<S id="top.in">',
+    "Inner line.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="cov" d={"top.in"}>',
+    "Cov line.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T10_7_12 = defineProductTest({
   id: "T10.7-12",
@@ -3679,7 +3701,7 @@ const T10_7_12 = defineProductTest({
     // --- sub-fixture B: absent-node provenance across re-derivation ----------
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [B12_FILE]: b12Spec("Ex line T0.", true, true) },
+      { [B12_FILE]: T10_7_12_B_T0 },
       async (workspace) => {
         const prefix = "T10.7-12 provenance";
         await workspace.gitInit();

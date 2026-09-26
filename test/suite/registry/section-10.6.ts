@@ -52,8 +52,10 @@
 //   product exists): every `.mdx` edit a body stages after its first product
 //   invocation — T10.6-2's deletion of f and e, T10.6-3's authoring and
 //   editing of p.b — is the same template call moved to module level as a
-//   record; every initial `files` entry stays plain (S-7's sweep reaches a
-//   body's first workspace against the stub).
+//   record, as is the initial file of T10.6-2's split sub-fixture (a
+//   workspace created after the body's first `build`: the f-and-e deletion's
+//   record, whose bytes it spells); each body's first workspace's initial
+//   `files` entries stay plain (S-7's sweep reaches them against the stub).
 
 import type {
   ExportReport,
@@ -76,6 +78,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. Audit
@@ -91,7 +94,7 @@ export default defineConfig({
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -715,29 +718,19 @@ const F_A = "specs/F.mdx#a";
 const F_AB = "specs/F.mdx#a.b";
 const F_S = "specs/F.mdx#s";
 
-const F_SOURCE = [
-  '<S id="a">',
-  "Aye own text.",
-  "",
-  '<S id="a.b">',
-  "Abe text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="s">',
-  "Ess text.",
-  "</S>",
-  "",
-].join("\n");
-
 // The deletion of f and e (a manual edit, SPEC 6.6) follows the body's first
 // `build`, so it is a staged-source record (helpers/staged-mdx.ts, S-9:
-// judged before any product exists); each sub-fixture's initial files stay
-// plain `files` entries.
+// judged before any product exists); the first sub-fixture's initial files
+// stay plain `files` entries. The split sub-fixture's initial specs/F.mdx —
+// its workspace follows the first sub-fixture's invocations, so a record too
+// — spells exactly B.mdx's post-deletion bytes (a > a.b, then s), so it is
+// the SAME record staged at both sites (one record per byte sequence), not
+// a second spelling.
 const T10_6_2_B_WITHOUT_FE = stagedMdx(
-  "T10.6-2 specs/B.mdx with the f and e sections deleted",
+  "T10.6-2 specs/B.mdx with the f and e sections deleted (the split sub-fixture's initial specs/F.mdx: the same bytes)",
   b2Spec(false),
 );
+const F_SOURCE = T10_6_2_B_WITHOUT_FE;
 
 const T10_6_2 = defineProductTest({
   id: "T10.6-2",
