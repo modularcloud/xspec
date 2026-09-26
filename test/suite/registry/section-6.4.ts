@@ -127,7 +127,7 @@
 import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
-import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
 import type {
   AppliedMappingPair,
   GraphEdge,
@@ -159,7 +159,7 @@ import type {
   RunResult,
 } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import type {
   BearerLocationExpectation,
   FindingSourceExpectation,
@@ -227,16 +227,19 @@ export default defineConfig({
 const JOURNAL_PATH = ".xspec/journal";
 const LF = 0x0a;
 
-/** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
+/**
+ * Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1).
+ * An `.mdx` entry of a workspace created after the body's first product
+ * invocation is a staged-source record (the record-accepting initial
+ * `files`; helpers/staged-mdx.ts), staged under the record's declaration.
+ */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
-  mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
-    mdx,
   });
   try {
     return await body(workspace);
@@ -1073,6 +1076,48 @@ const OTHER_TS_M = [
 ].join("\n");
 
 /**
+ * The arms' stagings. Arm 1's workspace is the body's first; arms 2, 3, and
+ * 4 follow arm 1's invocations, so every `.mdx` entry is a ledger record
+ * (S-9's before-any-product clause; helpers/staged-mdx.ts) — the same
+ * expression the body composed, moved to module level, arm 1's entries
+ * converted uniformly — and the `.ts` entries stay plain. `runMinimalEditArm`
+ * stages a map as it is and reads a record's bytes back for the
+ * untouched-file compare.
+ */
+const T6_4_2_L_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "specs/Core.mdx": stagedMdx(
+    "T6.4-2 arms 1 and 2 specs/Core.mdx",
+    coreL("login-v2"),
+  ),
+  "specs/Refs.mdx": stagedMdx(
+    "T6.4-2 arms 1 and 2 specs/Refs.mdx",
+    refsL("login-v2"),
+  ),
+  "specs/Other.mdx": stagedMdx(
+    "T6.4-2 arms 1 and 2 specs/Other.mdx",
+    OTHER_MDX_L,
+  ),
+  "src/app.ts": appL("login-v2"),
+  "src/other.ts": OTHER_TS_L,
+};
+const T6_4_2_M_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "specs/Core.mdx": stagedMdx(
+    "T6.4-2 arms 3 and 4 specs/Core.mdx",
+    coreM("mid"),
+  ),
+  "specs/Refs.mdx": stagedMdx(
+    "T6.4-2 arms 3 and 4 specs/Refs.mdx",
+    refsM(".mid", "mid"),
+  ),
+  "specs/Other.mdx": stagedMdx(
+    "T6.4-2 arms 3 and 4 specs/Other.mdx",
+    OTHER_MDX_M,
+  ),
+  "src/app.ts": appM(".mid", "mid"),
+  "src/other.ts": OTHER_TS_M,
+};
+
+/**
  * One T6.4-2 arm: stage, build, rename, then byte-compare every staged file
  * against its composed expectation — the rewritten files against their
  * post-rename composition, the untouched ones against their staged bytes.
@@ -1081,7 +1126,7 @@ async function runMinimalEditArm(
   product: ProductBinding,
   oldId: string,
   newId: string,
-  sources: Readonly<Record<string, string>>,
+  sources: Readonly<Record<string, InitialFileContents>>,
   expected: Readonly<Record<string, string>>,
   context: string,
 ): Promise<void> {
@@ -1095,7 +1140,9 @@ async function runMinimalEditArm(
       `${context}: \`rename specs/Core.mdx ${oldId} ${newId}\``,
     );
     for (const [rel, bytes] of Object.entries(expected)) {
-      const touched = bytes !== sources[rel];
+      const staged = sources[rel];
+      const touched =
+        bytes !== (staged instanceof StagedMdx ? staged.source : staged);
       await assertFileBytes(
         workspace.path(rel),
         bytes,
@@ -1122,13 +1169,6 @@ const T6_4_2 = defineProductTest({
   title:
     "minimal edits: quote style (single vs double) and access form (dot vs computed) of untouched reference parts are preserved byte-wise and only the affected parts change; the rewritten segment keeps every keepable form — a computed segment stays computed in its own quote kind whether or not the new name is a TS identifier, dot stays dot for an identifier-valid name, single-quoted local strings and single-quoted `id` attributes keep their quotes — and only a dot segment whose new name is not a TS identifier becomes double-quoted computed access; every rewritten `.mdx` and `.ts` file is byte-equal to its composed expectation and untouched files stay byte-identical (SPEC 6.4, 2.4, 2.7)",
   run: async (product) => {
-    const stagedL = {
-      "specs/Core.mdx": coreL("login-v2"),
-      "specs/Refs.mdx": refsL("login-v2"),
-      "specs/Other.mdx": OTHER_MDX_L,
-      "src/app.ts": appL("login-v2"),
-      "src/other.ts": OTHER_TS_L,
-    };
     const expectedL = (seg: string) => ({
       "specs/Core.mdx": coreL(seg),
       "specs/Refs.mdx": refsL(seg),
@@ -1142,7 +1182,7 @@ const T6_4_2 = defineProductTest({
       product,
       "login-v2",
       "login2",
-      stagedL,
+      T6_4_2_L_FILES,
       expectedL("login2"),
       "T6.4-2 arm 1 (login-v2 → login2: computed and single-quoted forms kept)",
     );
@@ -1152,18 +1192,11 @@ const T6_4_2 = defineProductTest({
       product,
       "login-v2",
       "login-v3",
-      stagedL,
+      T6_4_2_L_FILES,
       expectedL("login-v3"),
       "T6.4-2 arm 2 (login-v2 → login-v3: computed and single-quoted forms kept)",
     );
 
-    const stagedM = {
-      "specs/Core.mdx": coreM("mid"),
-      "specs/Refs.mdx": refsM(".mid", "mid"),
-      "specs/Other.mdx": OTHER_MDX_M,
-      "src/app.ts": appM(".mid", "mid"),
-      "src/other.ts": OTHER_TS_M,
-    };
     const expectedM = (dot: string, seg: string) => ({
       "specs/Core.mdx": coreM(seg),
       "specs/Refs.mdx": refsM(dot, seg),
@@ -1177,7 +1210,7 @@ const T6_4_2 = defineProductTest({
       product,
       "top.mid",
       "top.neo",
-      stagedM,
+      T6_4_2_M_FILES,
       expectedM(".neo", "neo"),
       "T6.4-2 arm 3 (top.mid → top.neo: dot stays dot, computed keeps quotes)",
     );
@@ -1188,7 +1221,7 @@ const T6_4_2 = defineProductTest({
       product,
       "top.mid",
       "top.neo-2",
-      stagedM,
+      T6_4_2_M_FILES,
       expectedM('["neo-2"]', "neo-2"),
       "T6.4-2 arm 4 (top.mid → top.neo-2: dot falls back to double-quoted computed access, computed keeps quotes)",
     );
@@ -1351,9 +1384,19 @@ export interface RenameRefusalCase {
  * protocol: derived files sit under the modifies-nothing compares).
  */
 export const RENAME_REFUSAL_CONFIG = SPECS_ONLY_CONFIG;
-export const RENAME_REFUSAL_FILES: Readonly<Record<string, string>> = {
-  [V3_FILE]: V3_SOURCE,
-  [TWO_BEARER_COLLISION_FILE]: TWO_BEARER_COLLISION_SOURCE,
+// The `.mdx` entries are ledger records (S-9's before-any-product clause;
+// helpers/staged-mdx.ts): T6.4-3 stages the set again for its
+// configuration-state twins after its premise `build`, so each record is
+// named with every test staging the set — T6.4-3, T6.6-3, T14-7 — and made
+// from the string constant the location windows still read.
+export const RENAME_REFUSAL_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  [V3_FILE]: stagedMdx("T6.4-3/T6.6-3/T14-7 specs/A.mdx", V3_SOURCE),
+  [TWO_BEARER_COLLISION_FILE]: stagedMdx(
+    "T6.4-3/T6.6-3/T14-7 specs/B.mdx",
+    TWO_BEARER_COLLISION_SOURCE,
+  ),
 };
 
 // Each arm's expected refusal finding (SPEC 14): the exact stable code, with
@@ -1523,35 +1566,48 @@ const T6_4_3 = defineProductTest({
 // T6.4-4 — usage errors (exit 2) and unparseable-origin masking
 // ---------------------------------------------------------------------------
 
+// T6.4-4's later arms — ordering, masking, duplicate spellings, undefined
+// ancestor, spells no identity — each stage a fresh workspace after the base
+// arm's invocations, so every `.mdx` source below is a ledger record wrapped
+// in place (S-9's before-any-product clause; helpers/staged-mdx.ts), the base
+// arm's — the body's first workspace — converted uniformly; a record an
+// exported set stages under T6.6-3 too is named with both. The masking arm's
+// unparseable origin carries its declaration on the record.
 const U4_FILE = "specs/A.mdx";
-const U4_SOURCE = [
-  '<S id="a">',
-  "Alpha text.",
-  "",
-  '<S id="a.mid">',
-  "Mid text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const U4_SOURCE = stagedMdx(
+  "T6.4-4/T6.6-3 specs/A.mdx",
+  [
+    '<S id="a">',
+    "Alpha text.",
+    "",
+    '<S id="a.mid">',
+    "Mid text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // The ordering arm's unrelated validation error: an unresolved local `d`
 // reference (14.5) in a file untouched by the rename arguments.
 const U4_BAD_FILE = "specs/Bad.mdx";
-const U4_BAD_SOURCE = [
-  '<S id="bad" d={"nope"}>',
-  "Bad text depending on nothing that exists.",
-  "</S>",
-  "",
-].join("\n");
+const U4_BAD_SOURCE = stagedMdx(
+  "T6.4-4/T6.6-3 specs/Bad.mdx",
+  [
+    '<S id="bad" d={"nope"}>',
+    "Bad text depending on nothing that exists.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // The masking arm's unparseable origin file: an unclosed section tag (14.20).
 const U4_BROKEN_FILE = "specs/Broken.mdx";
-const U4_BROKEN_SOURCE = [
-  '<S id="broken">',
-  "Text that never closes.",
-  "",
-].join("\n");
+const U4_BROKEN_SOURCE = stagedMdx(
+  "T6.4-4 masking arm specs/Broken.mdx",
+  ['<S id="broken">', "Text that never closes.", ""].join("\n"),
+  "unparseable",
+);
 
 // The wrong-kind arm's discovered code source (SPEC 7.2): valid TypeScript
 // with no spec references, so the base arm's workspace still builds clean —
@@ -1573,28 +1629,29 @@ const U4_CODE_SOURCE = "export function noop(): void {}\n";
 // duplicate within a file), so the base arm pins the stray file's absence
 // from the discovered set directly, through `ids --json` (SPEC 12.3).
 const U4_STRAY_FILE = "docs/Stray.mdx";
-const U4_STRAY_SOURCE = [
-  '<S id="a">',
-  "Stray text outside every spec group.",
-  "</S>",
-  "",
-].join("\n");
+const U4_STRAY_SOURCE = stagedMdx(
+  "T6.4-4/T6.6-3 docs/Stray.mdx",
+  ['<S id="a">', "Stray text outside every spec group.", "</S>", ""].join("\n"),
+);
 
 // Parse-local existence fixtures (SPEC 6.4, 11.2). Two sections both
 // spelling the same ID: every bearer's node identity is undefined (11.2,
 // duplicate spellings), yet each spells `dup`, so the old ID exists and the
 // duplicate-ID finding (14.3) refuses instead of any usage error.
 const U4_DUP_FILE = "specs/Dup.mdx";
-const U4_DUP_SOURCE = [
-  '<S id="dup">',
-  "First bearer text.",
-  "</S>",
-  "",
-  '<S id="dup">',
-  "Second bearer text.",
-  "</S>",
-  "",
-].join("\n");
+const U4_DUP_SOURCE = stagedMdx(
+  "T6.4-4 duplicate-spellings arm specs/Dup.mdx",
+  [
+    '<S id="dup">',
+    "First bearer text.",
+    "</S>",
+    "",
+    '<S id="dup">',
+    "Second bearer text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // A sole bearer spelling its ID beneath an ancestor spelling no identity —
 // no `id` attribute at all (14.1): the bearer's node identity is undefined
@@ -1603,27 +1660,30 @@ const U4_DUP_SOURCE = [
 // check (14.2) is masked by the parent's condition (SPEC 14 condition 2), so
 // the workspace's findings are exactly the one 14.1.
 const U4_ANC_FILE = "specs/Anc.mdx";
-const U4_ANC_SOURCE = [
-  "<S>",
-  "Ancestor text spelling no identity.",
-  "",
-  '<S id="kid">',
-  "Kid text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const U4_ANC_SOURCE = stagedMdx(
+  "T6.4-4 undefined-ancestor arm specs/Anc.mdx",
+  [
+    "<S>",
+    "Ancestor text spelling no identity.",
+    "",
+    '<S id="kid">',
+    "Kid text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // The old ID's only would-be bearer spells no identity — its `id` attribute
 // repeated on the tag (11.2; condition 17, never 14.1) — so the old ID is
 // nonexistent: exit 2 even beside that file's findings.
 const U4_SOLO_FILE = "specs/Solo.mdx";
-const U4_SOLO_SOURCE = [
-  '<S id="solo" id="solo">',
-  "Sole would-be bearer text.",
-  "</S>",
-  "",
-].join("\n");
+const U4_SOLO_SOURCE = stagedMdx(
+  "T6.4-4/T6.6-3 specs/Solo.mdx",
+  ['<S id="solo" id="solo">', "Sole would-be bearer text.", "</S>", ""].join(
+    "\n",
+  ),
+);
 
 /**
  * T6.4-4's usage-error invocations over the shared U4 staging (exit 2,
@@ -1661,7 +1721,9 @@ export const RENAME_USAGE_CASES: readonly (readonly [
  * beside unrelated validation errors realizes "argument checks precede" —
  * previewed or not. */
 export const RENAME_USAGE_CONFIG = SPEC_AND_CODE_CONFIG;
-export const RENAME_USAGE_ORDERING_FILES: Readonly<Record<string, string>> = {
+export const RENAME_USAGE_ORDERING_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
   [U4_FILE]: U4_SOURCE,
   [U4_BAD_FILE]: U4_BAD_SOURCE,
   [U4_CODE_FILE]: U4_CODE_SOURCE,
@@ -1675,9 +1737,10 @@ export const RENAME_USAGE_ORDERING_FILES: Readonly<Record<string, string>> = {
  * under RENAME_REFUSAL_CONFIG (the same specs-only configuration) and pin
  * the one-14.17 premise before invoking.
  */
-export const RENAME_SOLO_FILES: Readonly<Record<string, string>> = {
-  [U4_SOLO_FILE]: U4_SOLO_SOURCE,
-};
+export const RENAME_SOLO_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    [U4_SOLO_FILE]: U4_SOLO_SOURCE,
+  };
 export const RENAME_SOLO_ARGV: readonly string[] = [
   "rename",
   U4_SOLO_FILE,
@@ -1815,8 +1878,6 @@ const T6_4_4 = defineProductTest({
             `file and the location of the parse failure (SPEC 14, 14.20)`,
         );
       },
-      // S-9: the origin file is the staged parse failure (14.20).
-      { unparseable: [U4_BROKEN_FILE] },
     );
 
     // --- Parse-local existence: duplicate spellings still establish it ---
@@ -1915,17 +1976,24 @@ const T6_4_4 = defineProductTest({
 // T6.4-5 — type-level references
 // ---------------------------------------------------------------------------
 
+// The move arm's twin workspaces follow the rename arm's invocations, so
+// both spec sources are ledger records wrapped in place (S-9's
+// before-any-product clause; helpers/staged-mdx.ts) — the rename arm's, the
+// body's first workspace, converted uniformly.
 const T5_CORE = "specs/Core.mdx";
-const T5_CORE_SOURCE = [
-  '<S id="core">',
-  "Core text.",
-  "",
-  '<S id="core.mid">',
-  "Mid text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const T5_CORE_SOURCE = stagedMdx(
+  "T6.4-5 specs/Core.mdx",
+  [
+    '<S id="core">',
+    "Core text.",
+    "",
+    '<S id="core.mid">',
+    "Mid text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // One code file bearing a value-level marker (rewritten, 6.4) and a
 // `typeof`-level reference to the same node (not rewritten, 4.5) — the
@@ -1957,7 +2025,10 @@ const T5_APP_AFTER = [
 // the type-level reference alone — nothing the operation rewrites — so its
 // staged bytes are its expected bytes.
 const T5_TARGET = "specs/Target.mdx";
-const T5_TARGET_SOURCE = ['<S id="hub">', "Hub text.", "</S>", ""].join("\n");
+const T5_TARGET_SOURCE = stagedMdx(
+  "T6.4-5 specs/Target.mdx",
+  ['<S id="hub">', "Hub text.", "</S>", ""].join("\n"),
+);
 const T5_MOVE_APP_SOURCE = [
   'import CORE from "../specs/Core.xspec";',
   "",

@@ -266,6 +266,7 @@ import {
   startProduct,
 } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   RENAME_REFUSAL_CASES,
   RENAME_REFUSAL_CONFIG,
@@ -357,10 +358,15 @@ export default defineConfig({
 
 const JOURNAL_PATH = ".xspec/journal";
 
-/** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
+/**
+ * Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1).
+ * The record-accepting initial `files`: the rename sets section-6.4.ts
+ * exports stage their `.mdx` entries as staged-source records
+ * (helpers/staged-mdx.ts).
+ */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({

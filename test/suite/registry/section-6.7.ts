@@ -45,6 +45,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertFindingLocated,
@@ -68,9 +69,14 @@ export default defineConfig({
 
 const JOURNAL_PATH = ".xspec/journal";
 
-/** Stage a fresh spec-only workspace, run `body`, dispose (H-1). */
+/**
+ * Stage a fresh spec-only workspace, run `body`, dispose (H-1). An `.mdx`
+ * entry of a workspace created after the body's first product invocation is
+ * a staged-source record (the record-accepting initial `files`;
+ * helpers/staged-mdx.ts), staged under the record's declaration.
+ */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -389,6 +395,21 @@ const T6_7_1_REWRITTEN_WATCH = stagedMdx(
   watchSource("b.neo").text,
 );
 
+// The validation arm's workspace is the body's second, created after the
+// impact arm's invocations, so its initial `.mdx` files are ledger records
+// too (the record-accepting initial `files`; helpers/staged-mdx.ts): the
+// origin with its same-file dependent naming `b.mid`, and the cross-file
+// dependent naming it — `staleWatch`'s text, its `prefix`/`construct` still
+// pinning the 14.5 finding's byte window.
+const T6_7_1_INITIAL_ORIGIN = stagedMdx(
+  "T6.7-1 validation arm: the initial origin, its same-file dependent naming b.mid (specs/B.mdx)",
+  originSource("b.mid", "b.mid").text,
+);
+const T6_7_1_STALE_WATCH = stagedMdx(
+  "T6.7-1 validation arm: the cross-file dependent naming b.mid (specs/Watch.mdx)",
+  staleWatch.text,
+);
+
 const T6_7_1 = defineProductTest({
   id: "T6.7-1",
   title:
@@ -473,10 +494,7 @@ const T6_7_1 = defineProductTest({
 
     // --- Validation arm: dependents fail 14.5 until rewritten ---
     await withWorkspace(
-      {
-        [V2_ORIGIN]: originSource("b.mid", "b.mid").text,
-        [V2_WATCH]: staleWatch.text,
-      },
+      { [V2_ORIGIN]: T6_7_1_INITIAL_ORIGIN, [V2_WATCH]: T6_7_1_STALE_WATCH },
       async (workspace) => {
         const context = "T6.7-1 validation arm";
         await buildOk(product, workspace, `${context}: \`build\``);
