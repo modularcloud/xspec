@@ -50,6 +50,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -539,7 +540,15 @@ export default defineConfig({
 
 // Valid content everywhere: the invalid-path condition (14.19) must be the
 // only condition present, so the exact-count assertion has teeth.
-const VALID_SECTION_SOURCE = '<S id="ok">\nValid content.\n</S>\n';
+// The valid section source: the `#`-path arms' initial `files` entries
+// (`.source`) and, on the Linux leg, the byte-path staging — a `file()` call
+// the body makes after the spec and code arms' invocations (a byte path
+// cannot key a `files` entry), so a staged-source record, judged before any
+// product exists (S-9, test/self/s9-staged-sources.test.ts).
+const VALID_SECTION_SOURCE = stagedMdx(
+  "T1.5-2 the valid section source at the non-UTF-8 byte path (Linux leg)",
+  '<S id="ok">\nValid content.\n</S>\n',
+);
 
 // `specs/b<0xFF>.mdx`: 0xFF can occur in no valid UTF-8 sequence, so the
 // workspace-relative path is not valid UTF-8. The glob rules of SPEC 7 match
@@ -607,7 +616,7 @@ const T1_5_2 = defineProductTest({
     const specArm = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        "specs/a#b.mdx": VALID_SECTION_SOURCE,
+        "specs/a#b.mdx": VALID_SECTION_SOURCE.source,
       },
     });
     try {
@@ -626,7 +635,7 @@ const T1_5_2 = defineProductTest({
     const codeArm = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-        "specs/OK.mdx": VALID_SECTION_SOURCE,
+        "specs/OK.mdx": VALID_SECTION_SOURCE.source,
         "src/a#b.ts": "export const ok = 1;\n",
       },
     });
@@ -683,7 +692,7 @@ const T1_5_2 = defineProductTest({
     const replacementArm = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [REPLACEMENT_CHARACTER_SPEC_PATH]: VALID_SECTION_SOURCE,
+        [REPLACEMENT_CHARACTER_SPEC_PATH]: VALID_SECTION_SOURCE.source,
       },
     });
     try {

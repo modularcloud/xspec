@@ -43,6 +43,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertNoCompileErrors,
@@ -704,12 +705,13 @@ const EMBED_TARGET_BEFORE = [
   "",
 ].join("\n");
 
-const EMBED_TARGET_AFTER = [
-  '<S id="target">',
-  "Edited target text.",
-  "</S>",
-  "",
-].join("\n");
+// Staged into specs/BASE.mdx after the pre-edit queries — a staged-source
+// record, judged before any product exists (S-9,
+// test/self/s9-staged-sources.test.ts).
+const EMBED_TARGET_AFTER = stagedMdx(
+  "T1.6-4 specs/BASE.mdx with the embedded target's text edited",
+  ['<S id="target">', "Edited target text.", "</S>", ""].join("\n"),
+);
 
 const EMBEDDER_SOURCE = [
   'import BASE from "./BASE.xspec"',

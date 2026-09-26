@@ -39,6 +39,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { UnparseableStaging } from "./support.js";
@@ -351,7 +352,12 @@ const T2_2_3 = defineProductTest({
 // byte-identical across the variants. Both variants are built in the same
 // workspace directory, so nothing but the prop's presence varies.
 const T2_2_4_EMPTY_ARRAY = '<S id="node" d={[]}>\nNode behavior.\n</S>\n';
-const T2_2_4_OMITTED = '<S id="node">\nNode behavior.\n</S>\n';
+// Staged after the `d={[]}` build and queries — a staged-source record,
+// judged before any product exists (S-9, test/self/s9-staged-sources.test.ts).
+const T2_2_4_OMITTED = stagedMdx(
+  "T2.2-4 specs/A.mdx with the d prop omitted (the rebuilt variant)",
+  '<S id="node">\nNode behavior.\n</S>\n',
+);
 const T2_2_4_NODE = "specs/A.mdx#node";
 
 const T2_2_4 = defineProductTest({

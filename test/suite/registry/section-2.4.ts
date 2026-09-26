@@ -41,6 +41,7 @@ import {
 import { parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
@@ -1051,9 +1052,15 @@ const T2_4_5_MDX_PARTS: readonly (string | VerbatimArm)[] = [
   "\n</S>\n",
 ];
 
-const T2_4_5_MDX_SOURCE = T2_4_5_MDX_PARTS.map((part) =>
-  typeof part === "string" ? part : part.construct,
-).join("");
+// Staged into specs/A.mdx after the valid initial build — a staged-source
+// record, judged before any product exists (S-9,
+// test/self/s9-staged-sources.test.ts).
+const T2_4_5_MDX_SOURCE = stagedMdx(
+  "T2.4-5 specs/A.mdx with the six verbatim spellings",
+  T2_4_5_MDX_PARTS.map((part) =>
+    typeof part === "string" ? part : part.construct,
+  ).join(""),
+);
 
 /** The staged arms of one condition in source order, each with its byte window. */
 function verbatimArmsOf(

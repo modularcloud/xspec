@@ -87,6 +87,8 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
@@ -735,32 +737,46 @@ const T2_7_2_BOUNDARY_SEC_TEXT = "Alpha text  beta.\n\n\n\nGamma text.\n";
 // The stability arms: each applies exactly one comment-only edit to the
 // committed baseline. Every variant compiles to T2_7_2_COMPILED — comments
 // (and their whole-line deletion) leave own content untouched (SPEC 1.6, 3).
-const T2_7_2_STABILITY_ARMS: readonly { name: string; source: string }[] = [
-  {
-    name: "editing only the inline comment's content",
-    source: T2_7_2_BASELINE.replace(
+// Each arm's variant is staged after the baseline capture — a staged-source
+// record per row, named with the row's name, judged before any product
+// exists (S-9, test/self/s9-staged-sources.test.ts).
+const stabilityArm = (
+  name: string,
+  source: string,
+): { name: string; source: StagedMdx } => ({
+  name,
+  source: stagedMdx(`T2.7-2 ${name}`, source),
+});
+const T2_7_2_STABILITY_ARMS: readonly { name: string; source: StagedMdx }[] = [
+  stabilityArm(
+    "editing only the inline comment's content",
+    T2_7_2_BASELINE.replace(
       "{/* inline note */}",
       "{/* inline note, reworded */}",
     ),
-  },
-  {
-    name: "editing only the own-line comment's content",
-    source: T2_7_2_BASELINE.replace(
+  ),
+  stabilityArm(
+    "editing only the own-line comment's content",
+    T2_7_2_BASELINE.replace(
       "{/* own-line note */}",
       "{/* a different remark */}",
     ),
-  },
-  {
-    name: "deleting the inline comment sharing its line with retained non-whitespace content",
-    source: T2_7_2_BASELINE.replace("{/* inline note */}", ""),
-  },
-  {
-    name: "deleting the own-line comment together with its entire line (construct plus terminator)",
-    source: T2_7_2_BASELINE.replace("{/* own-line note */}\n", ""),
-  },
+  ),
+  stabilityArm(
+    "deleting the inline comment sharing its line with retained non-whitespace content",
+    T2_7_2_BASELINE.replace("{/* inline note */}", ""),
+  ),
+  stabilityArm(
+    "deleting the own-line comment together with its entire line (construct plus terminator)",
+    T2_7_2_BASELINE.replace("{/* own-line note */}\n", ""),
+  ),
 ];
 
-const T2_7_2_BOUNDARY = T2_7_2_BASELINE.replace("{/* own-line note */}", "");
+// The boundary arm, staged after the stability arms — a staged-source record.
+const T2_7_2_BOUNDARY = stagedMdx(
+  "T2.7-2 specs/A.mdx with only the own-line comment's construct characters deleted (the boundary arm)",
+  T2_7_2_BASELINE.replace("{/* own-line note */}", ""),
+);
 
 const T2_7_2_ROOT = "specs/A.mdx";
 const T2_7_2_SEC = "specs/A.mdx#sec";
@@ -1412,8 +1428,12 @@ export const T2_7_3_SPREAD_UNPARSEABLE_STAGING: UnparseableStaging = {
 // tag-equivalence precedent.
 const T2_7_3_DOUBLE_QUOTED =
   '<S id="login" coverage="none" tags="a b">\nLogin behavior.\n</S>\n';
-const T2_7_3_SINGLE_QUOTED =
-  "<S id='login' coverage='none' tags='a b'>\nLogin behavior.\n</S>\n";
+// Staged after the double-quoted variant's build and queries — a
+// staged-source record (S-9, test/self/s9-staged-sources.test.ts).
+const T2_7_3_SINGLE_QUOTED = stagedMdx(
+  "T2.7-3 specs/A.mdx with single-quoted id/coverage/tags values",
+  "<S id='login' coverage='none' tags='a b'>\nLogin behavior.\n</S>\n",
+);
 const T2_7_3_QUOTED_COMPILED = "Login behavior.\n";
 const T2_7_3_QUOTED_IDENTITIES = ["specs/A.mdx", "specs/A.mdx#login"] as const;
 

@@ -154,17 +154,17 @@ async function readSource(
 }
 
 /**
- * Replace exactly one occurrence of `search` — the manual "author edits the
- * file" step of these fixtures. The anchors are spec-mandated rewrite forms
+ * Diagnose that `search` occurs exactly once in `content` — the anchor of
+ * the manual "author edits the file" step of these fixtures, which
+ * `TestWorkspace.edit()` then stages (the first occurrence replaced in the
+ * product-rewritten bytes, judged at staging time under the path's S-9
+ * declaration: no harness constant equals those bytes, so the staged-source
+ * ledger has nothing to hold). The anchors are spec-mandated rewrite forms
  * (SPEC 6.4), so a missing or ambiguous anchor is a diagnosed assertion
- * failure about the product's rewriting, never a harness crash (H-8).
+ * failure about the product's rewriting, never a harness crash (H-8) —
+ * checked here, before `edit()`'s own plain refusal could see it.
  */
-function replaceOnce(
-  content: string,
-  search: string,
-  replacement: string,
-  context: string,
-): string {
+function anchorOnce(content: string, search: string, context: string): void {
   const first = content.indexOf(search);
   if (first === -1) {
     fail(
@@ -180,9 +180,6 @@ function replaceOnce(
         JSON.stringify(content),
     );
   }
-  return (
-    content.slice(0, first) + replacement + content.slice(first + search.length)
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +239,12 @@ const REINTRO_APPENDED = [
   "",
 ].join("\n");
 
+// The rename-rewritten file's last bytes — `f`'s closing run (" end.", the
+// closing tag, the terminator), which the rename leaves in place (SPEC 6.4:
+// minimal in-place edits) — the anchor behind which the appended authorship
+// is staged through `TestWorkspace.edit()`.
+const REINTRO_TAIL = " end.\n</S>\n";
+
 // Fixture 2 — the journaled variant: the vacated identity is re-borne through
 // the journal (`rename a→b`, then `rename c→a`) rather than by authorship.
 // `w` depends on both bearers.
@@ -294,13 +297,35 @@ const T5_4_1 = defineProductTest({
           REINTRO_ROOT,
           "T5.4-1 reading the product-rewritten source after the rename",
         );
-        const respelled = replaceOnce(
+        anchorOnce(
           renamed,
           'Embeds: {text("b")}',
-          'Embeds: {text("a")}',
           'T5.4-1 re-spelling `e`\'s embedding back to "a" after authoring N2',
         );
-        await workspace.file(REINTRO_ROOT, respelled + REINTRO_APPENDED);
+        await workspace.edit(
+          REINTRO_ROOT,
+          'Embeds: {text("b")}',
+          'Embeds: {text("a")}',
+        );
+        // The appended authorship (N2 and `g`): an edit extending the file's
+        // last bytes, `f`'s closing run, which the rename must have left as
+        // the file's end (SPEC 6.4: minimal in-place edits) — diagnosed.
+        const appendContext =
+          "T5.4-1 appending N2 and `g` after the rename-rewritten `f`";
+        anchorOnce(renamed, REINTRO_TAIL, appendContext);
+        if (!renamed.endsWith(REINTRO_TAIL)) {
+          fail(
+            `${appendContext}: expected the rewritten source to end with ` +
+              `${JSON.stringify(REINTRO_TAIL)} (SPEC 6.4: minimal in-place ` +
+              `edits leave the file's tail in place); source: ` +
+              JSON.stringify(renamed),
+          );
+        }
+        await workspace.edit(
+          REINTRO_ROOT,
+          REINTRO_TAIL,
+          REINTRO_TAIL + REINTRO_APPENDED,
+        );
         await buildOk(
           product,
           workspace,
@@ -693,15 +718,12 @@ const T5_4_2 = defineProductTest({
           "specs/A.mdx",
           "T5.4-2 reading the source for the manual computed→dot re-spelling",
         );
-        await workspace.file(
-          "specs/A.mdx",
-          replaceOnce(
-            current,
-            'B["b3"]',
-            "B.b3",
-            "T5.4-2 manually re-spelling the computed access to dot access",
-          ),
+        anchorOnce(
+          current,
+          'B["b3"]',
+          "T5.4-2 manually re-spelling the computed access to dot access",
         );
+        await workspace.edit("specs/A.mdx", 'B["b3"]', "B.b3");
         await buildOk(
           product,
           workspace,
@@ -796,17 +818,14 @@ const T5_4_2 = defineProductTest({
         "specs/A.mdx",
         "T5.4-2 reading the source for the manual quote-style re-spelling",
       );
-      await workspace.file(
-        "specs/A.mdx",
-        replaceOnce(
-          current,
-          'd={"t"}',
-          "d={'t'}",
-          "T5.4-2 manually re-spelling the local string between quote styles " +
-            "(the move back must have produced a double-quoted local " +
-            "reference, SPEC 6.4)",
-        ),
+      anchorOnce(
+        current,
+        'd={"t"}',
+        "T5.4-2 manually re-spelling the local string between quote styles " +
+          "(the move back must have produced a double-quoted local " +
+          "reference, SPEC 6.4)",
       );
+      await workspace.edit("specs/A.mdx", 'd={"t"}', "d={'t'}");
       await buildOk(
         product,
         workspace,

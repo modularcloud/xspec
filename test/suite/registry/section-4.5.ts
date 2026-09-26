@@ -120,6 +120,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertNoCompileErrors,
@@ -494,9 +495,14 @@ const T4_5_2_APP_SOURCE = [
 // The leaf edit: one own-content run of print.hello changes, so the root's
 // subtreeHash (and effectiveHash) change through the contains chain
 // (SPEC 5.5) while no other file is touched.
-const T4_5_2_EDITED_SPEC_SOURCE = PRINT_SPEC_SOURCE.replace(
-  "Prints a greeting.",
-  "Prints a much louder greeting.",
+// Staged after the coverage queries — a staged-source record, judged before
+// any product exists (S-9, test/self/s9-staged-sources.test.ts).
+const T4_5_2_EDITED_SPEC_SOURCE = stagedMdx(
+  "T4.5-2 specs/MAIN.mdx with the leaf's text edited after the baseline commit",
+  PRINT_SPEC_SOURCE.replace(
+    "Prints a greeting.",
+    "Prints a much louder greeting.",
+  ),
 );
 
 // Upstream arm (SPEC 4.5 "in the document or upstream of it"): the marker's
@@ -524,6 +530,12 @@ const T4_5_2_UPSTREAM_MAIN_SOURCE = [
 /** The other file: the embedded target's own text is the edited run. */
 const upstreamOtherSource = (text: string): string =>
   ['<S id="upstream">', text, "</S>", ""].join("\n");
+// The upstream edit, staged after the edge queries — a staged-source record
+// (S-9, test/self/s9-staged-sources.test.ts).
+const T4_5_2_UPSTREAM_OTHER_V2 = stagedMdx(
+  "T4.5-2 specs/OTHER.mdx with the embedded target's text at v2 (the upstream edit)",
+  upstreamOtherSource("Upstream behavior, v2."),
+);
 
 /** Resolve one named profile from a coverage report, diagnosed (H-8). */
 function profileByName(
@@ -719,10 +731,7 @@ const T4_5_2 = defineProductTest({
         // Commit the baseline, then edit the embedded target's text in the
         // OTHER file — the marker's document is not touched.
         const baseline = await workspace.gitCommitAll("baseline");
-        await workspace.file(
-          "specs/OTHER.mdx",
-          upstreamOtherSource("Upstream behavior, v2."),
-        );
+        await workspace.file("specs/OTHER.mdx", T4_5_2_UPSTREAM_OTHER_V2);
         const label =
           "T4.5-2 `impact --base <baseline> --json` after the upstream edit";
         const impact = await impactAgainst(product, workspace, baseline, label);

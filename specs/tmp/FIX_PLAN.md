@@ -15,7 +15,7 @@ assertion failures only — never a harness crash, hang, or false pass, H-8).
 
 **Known state at 8f8245c.** Self project: 20 files, 2126 passed, 0 skipped under
 `unshare --map-user=1000 --map-group=1000 -- npm run test:self` (21 files, 2151 passed
-after Task 5). Certification pairs:
+after Task 5, 2167 after Task 6). Certification pairs:
 144 PASS / 33 FAIL, exactly as CERTIFICATIONS.md documents (5 conformers, 18 violators).
 The diagnosed product failures allowed at this phase are recorded in the latest commit
 messages and in `AGENTS.md`'s per-task bullets — they need no plan task. The
@@ -102,6 +102,30 @@ load that the constant contains `from`) and stage it with `file()`. `section-9.3
 (section-6.4.ts ~2407, section-6.5.ts ~1654/2613) are not deterministic fixtures and stay
 as they are.
 
+**Reach (as Task 6 resolved it):** "after a product invocation" is judged per body, not
+per workspace — S-7's sweep stops at the body's FIRST product invocation, in whatever
+workspace, so a `file()` staging into a fresh later-arm workspace the product has not yet
+touched (T1.5-2's Linux-leg byte path, staged after the spec and code arms' invocations)
+is never reached against the stub and converts too, while a staging that precedes the
+body's first invocation — `gitInit`/`gitCommitAll` invoke no product (T1.5-1's
+`IDENTITY_B_EDITED`) — stays. Task 18's per-workspace guard is weaker than this reading
+for such fresh later-arm workspaces; the conversions cover them by enumeration. The same
+reach question touches the initial `files` of a workspace declaration created after the
+body's first invocation (a later arm's `withWorkspace` / `TestWorkspace.create`): "S-7's
+sweep reaches them against the stub" holds only for a body's first workspace, so those
+later-arm initial files are judged at staging time against a real product, and neither
+the ledger (`WorkspaceDecl.files` takes plain contents) nor Task 18's guard covers them —
+an observation for the next determination (a mechanism change beyond the conversion
+tasks), not converted here.
+
+**Appending to product-written bytes (T5.4-1's pattern):** an append is an `edit()`
+extending the file's unique tail (`REINTRO_TAIL`, `f`'s closing run, which the rename
+leaves in place), the anchor's uniqueness and end position diagnosed first (`anchorOnce`
+— the former `replaceOnce`'s two `fail()` diagnoses, no rewrite — and an `endsWith`
+check), so a product deviation there is a product failure, never `edit()`'s plain
+refusal (H-8); every manual re-spelling of rename/move output in `section-5.4.ts` is
+`anchorOnce` then `edit()` — the form for Task 10's `editSourceExpecting`.
+
 **Checks after each conversion task:** `npx tsc -p test`; `npm run format:check`; the
 self project green in the namespace (the self-test lists the module's records:
 `npx vitest list --config test/vitest.config.ts --project self test/self/s9-staged-sources.test.ts | grep '> T'`);
@@ -111,22 +135,6 @@ verdict (`unshare … -- npx vitest run --config test/vitest.config.ts --project
 reached — accepted, Task 18's guard surfaces it when the product gets there).
 
 ## Tasks
-
-### Task 6 — Ledger conversion: §1–§5.4 modules
-
-Apply the preamble's conversion rule to every post-invocation `.mdx` staging in:
-`section-1.5.ts` (218 `IDENTITY_B_EDITED`; 654 `nonUtf8Arm.file(NON_UTF8_SPEC_PATH,
-VALID_SECTION_SOURCE)` — a byte path: convert if it follows an invocation),
-`section-1.6-1.7.ts` (800 `EMBED_TARGET_AFTER`), `section-2.2-2.3.ts` (385),
-`section-2.4.ts` (1178; 1179 is `.ts` — leave), `section-2.5-2.6.ts` (596, 821, 1098
-`variant.source` table), `section-2.7.ts` (887 `arm.source` table, 931, 1589),
-`section-4.5.ts` (631; 722 — read its path), `section-5.4.ts` (303 `respelled +
-REINTRO_APPENDED` — hoist if both operands are module constants; 696, 799 — read their
-paths). Re-enumerate with the grep (line numbers drift). Several §2 sources are 14.20
-forms exported to the S-9 self-test already (e.g. `UnparseableStaging` exports T14-11's
-(w) arms re-assert): keep the exports; the record wraps the same constant and carries
-`"unparseable"` where the workspace declared it. **Checks:** as the preamble's; each
-converted test alone against the built product gives its recorded verdict.
 
 ### Task 7 — Ledger conversion: §5.5
 

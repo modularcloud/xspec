@@ -64,6 +64,8 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -471,9 +473,11 @@ const T2_5_2_BASELINE = [
 
 // The same workspace with exactly one edit: `meta`'s own text (its ownHash
 // changes, so `meta` is `changed` relative to the baseline, SPEC 5.5/5.6).
-const T2_5_2_EDITED = T2_5_2_BASELINE.replace(
-  "Meta text.",
-  "Meta text, edited.",
+// Staged after the coverage queries — a staged-source record, judged before
+// any product exists (S-9, test/self/s9-staged-sources.test.ts).
+const T2_5_2_EDITED = stagedMdx(
+  "T2.5-2 specs/A.mdx with only the coverage-none node's own text edited",
+  T2_5_2_BASELINE.replace("Meta text.", "Meta text, edited."),
 );
 
 const T2_5_2_META = "specs/A.mdx#meta";
@@ -643,7 +647,12 @@ const T2_5_2 = defineProductTest({
 // (the coverage attribute is a metadataHash input, SPEC 5.5).
 const T2_5_3_EXPLICIT =
   '<S id="node" coverage="required">\nNode behavior.\n</S>\n';
-const T2_5_3_OMITTED = '<S id="node">\nNode behavior.\n</S>\n';
+// The omitted variant is staged after the explicit variant's build and
+// queries — a staged-source record (S-9, test/self/s9-staged-sources.test.ts).
+const T2_5_3_OMITTED = stagedMdx(
+  "T2.5-3 specs/A.mdx with the coverage prop omitted (the default variant)",
+  '<S id="node">\nNode behavior.\n</S>\n',
+);
 const T2_5_3_NODE = "specs/A.mdx#node";
 
 // Shared negative-arm template (the SUITE-02/03 discipline): a valid sibling
@@ -1029,8 +1038,17 @@ const T2_6_2_STATIC = [
 // omitted (SPEC 2.6), observable as an equal metadataHash (SPEC 5.5). The
 // whitespace-only value uses only true 1.4 whitespace (§VIOL-VALID-WIDE).
 const T2_6_2_OMITTED = '<S id="node">\nVariant node.\n</S>\n';
-const T2_6_2_EMPTY = '<S id="node" tags="">\nVariant node.\n</S>\n';
-const T2_6_2_WS_ONLY = `<S id="node" tags=" ${TAB} ">\nVariant node.\n</S>\n`;
+// The two variants staged into specs/B.mdx after the tag queries —
+// staged-source records, one per row of the body's variant table, named
+// with the row's label (S-9, test/self/s9-staged-sources.test.ts).
+const T2_6_2_EMPTY = stagedMdx(
+  'T2.6-2 tags=""',
+  '<S id="node" tags="">\nVariant node.\n</S>\n',
+);
+const T2_6_2_WS_ONLY = stagedMdx(
+  "T2.6-2 whitespace-only tags value",
+  `<S id="node" tags=" ${TAB} ">\nVariant node.\n</S>\n`,
+);
 const T2_6_2_NODE = "specs/B.mdx#node";
 
 const T2_6_2 = defineProductTest({
@@ -1090,7 +1108,7 @@ const T2_6_2 = defineProductTest({
           "T2.6-2 the omitted-prop variant carries no tags (SPEC 2.6)",
         );
 
-        const variants: readonly { label: string; source: string }[] = [
+        const variants: readonly { label: string; source: StagedMdx }[] = [
           { label: 'tags=""', source: T2_6_2_EMPTY },
           { label: "whitespace-only tags value", source: T2_6_2_WS_ONLY },
         ];
