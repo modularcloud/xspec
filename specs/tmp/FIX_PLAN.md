@@ -942,6 +942,61 @@ Task 17: the S-9 self-test 666 tests over 640 records (633 `T…`, 4 `E-6`, 3
 0 error / 0 hang over the 23 `certification run against` lines; the
 ledger-wide duplicate-bytes probe 640 records in 29 groups.
 
+**Resolved by Task 18 (the §11.4, §11.5, and §11.6 modules; 65da001 converts, the
+closing commit records).** Seventeen new records, one existing record reused.
+`section-11.4.ts` 7 new, 1 reused — T11.4-3's shared workspace (its third, after
+invocations 1 and 2; behind its diagnosed failure, judged by reading) stages
+T2.7-3's valueless-`tags` arm record — Task 5's note resolved: the staging IS
+post-invocation, so `section-2.7.ts` exports the record as `VALUELESS_TAGS_STAGED`
+(made from `VALUELESS_TAGS_FIXTURE.source`; the exported fixture keeps its string
+for its offsets), renamed ``"T2.7-3/T11.4-3 a valueless `tags` (`<S id="x" tags>`,
+the file T11.4-3 shares) specs/A.mdx"``, the arm row carrying it as
+`InvalidPropArm.shared` with the arm's name spelled once
+(`VALUELESS_TAGS_ARM_NAME`) and the computed table taking `arm.shared ??
+stagedMdx(…)` — sub-rule: a computed record table one of whose rows another test
+stages by import takes an optional row field naming the shared record (Task 13's
+`DiscoveryProbe.source?` form), the record created before the table from the
+exported constant; T11.4-5's cycle workspace (`CYE_STAGED`, `CYL_STAGED`), masked
+workspace (`MKM_STAGED`; `MK_GONE_SOURCE` wrapped in place carrying
+`"unparseable"`, the `mdx: { unparseable: [MK_GONE_FILE] }` declaration removed),
+and invalid-path workspace (`IP_STAGED` at `specs/vi#ew.mdx`, an ordinary key);
+T11.4-6's imperfect workspace (`BCT_SOURCE` wrapped in place, `BCI_STAGED`; behind
+its diagnosed failure). Every `ByteFixture`-derived source keeps its string (the
+slice checks read it) and the record is made from it (Task 17's form).
+`section-11.5.ts` 1 — T11.5-3's configuration-less twin (behind its diagnosed
+failure): `RC_STAGED` (`"T11.5-3 specs/A<U+FFFD>.mdx (…)"`, the U+FFFD spelled as
+the test's contexts spell it) made from `RC_SOURCE`, the operand workspace taking
+the record too. `section-11.6.ts` 9 — `ANCHOR_SOURCE` wrapped in place
+(`"T11.6-1/T11.6-4 specs/a.mdx (…)"`: T11.6-1's first workspace and T11.6-4's
+invalid-configuration workspace); T11.6-2's emit, outDir, disabled, and sets
+workspaces' six inline literals hoisted to module-level records named by workspace
+and path; T11.6-3's sessions workspace and T11.6-4's corrupt-record workspace
+likewise (the literals moved by a script extracting them from the module text,
+never re-spelled — AGENTS.md). Left plain: every body's first workspace (T11.4-1,
+T11.4-2, T11.4-3's matrix, T11.4-4, T11.4-5's chain, T11.4-6's emission, T11.5-1,
+T11.5-2, T11.5-3's operand workspace otherwise, T11.6-1, T11.6-2's defaults,
+T11.6-3's record, T11.6-4's imperfect), their `unparseable` declarations (T11.4-2,
+T11.4-4, T11.5-3, T11.6-4) staying; the file-less `create({})` twins (T11.6-1's far
+tree, T11.6-4's missing configuration). Read-based enumeration: the 11 + 4 + 13
+creation sites judged; behind the diagnosed failures lie T11.4-3's shared,
+T11.4-6's imperfect, and T11.5-3's configuration-less workspaces — records;
+T11.6-2 fails at or after its last (sets) workspace, all six later paths reached.
+Checks: the sites hook logged the task's 14 (test, path) pairs plus T2.7-3's
+deferred `specs/A.mdx` `"unparseable"` (15 lines; `section-2.7.test` run beside the
+three §11 files for the reused record's byte identity) before and that one
+remainder alone after; the sha256 capture over the four suite files (152 writes,
+compared sorted) identical; 17 tests, 9 pass and 8 fail — T11.4-2, T11.4-3,
+T11.4-4, T11.4-6, T11.5-3, T11.6-2, T2.7-3, T2.7-4 — with identical verdict lines
+and diagnoses (~57 s a run); red check: an unclosed tag spliced into the
+`aux/x.mdx` record (section-11.6.ts) and the `specs/tgt.mdx` record
+(section-11.4.ts) fails exactly those two as `mdx-derivability` under the ledger
+self-test's `-t 'T11\.[456]-|T2\.7-3'` filter (34 tests). Known state after
+Task 18: the S-9 self-test 683 tests over 657 records (650 `T…`, 4 `E-6`, 3 `P-…`);
+self project 22 files, 2823 passed, 0 skipped under the namespace (~117 s; 2806 +
+the 17 record tests); certification 144 PASS / 33 FAIL / 0 error / 0 hang over the
+23 `certification run against` lines; the ledger-wide duplicate-bytes probe 657
+records in the same 29 groups.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -1108,22 +1163,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 18 — Initial-file conversion: §11.4–§11.6 (`section-11.4.ts`, `section-11.5.ts`, `section-11.6.ts`)
-
-**Workspace creations to judge:** 11.4 (11), 11.5 (4), 11.6 (13).
-**Reachable sites (the instrumented run):**
-- `section-11.4.ts` — T11.4-5 (5): specs/entry.mdx specs/gone.mdx specs/loop.mdx specs/main.mdx specs/vi#ew.mdx
-- `section-11.6.ts` — T11.6-2 (6): aux/x.mdx specs/a.mdx specs/g.mdx specs/m.mdx specs/seul.mdx specs/sub/h.mdx
-- `section-11.6.ts` — T11.6-3 (1): specs/seul.mdx
-- `section-11.6.ts` — T11.6-4 (2): specs/a.mdx specs/seul.mdx
-**Failing here:** T11.4-2, T11.4-3, T11.4-4, T11.4-6, T11.5-3, T11.6-2.
-**Certification scope:** T11.4-1, T11.4-3, T11.4-4 (CONF-AVAIL) — run the self
-project; 144/33/0/0.
-**Notes.** `specs/vi#ew.mdx` is an ordinary key; `section-11.6.ts`'s `file()` sites
-were all non-`.mdx` (session, journal, `.bin`, `.ts` — the previous plan's Task 16) but
-its initial `.mdx` entries (`aux/x.mdx`, `specs/seul.mdx`, …) do convert.
-**Checks.** Recipes 1–5 over `section-11.4.test`, `section-11.5.test`, `section-11.6.test`.
 
 ### Task 19 — Initial-file conversion: §12.0 (`section-12.0-i.ts`, `section-12.0-ii.ts`, `section-12.0-iii.ts`)
 
