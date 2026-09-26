@@ -221,7 +221,7 @@
 
 import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
-import { StagedMdx } from "../../helpers/staged-mdx.js";
+import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type {
   AppliedMappingPair,
@@ -280,6 +280,7 @@ import {
 } from "./section-6.4.js";
 import type { RefusalExpectation } from "./section-6.5.js";
 import {
+  A8_PLAIN_TARGET,
   MOVE_DERIVED_LINK_CASE,
   MOVE_DERIVED_LINK_FILES,
   MOVE_DERIVED_PATH_CASE,
@@ -361,9 +362,11 @@ const JOURNAL_PATH = ".xspec/journal";
 
 /**
  * Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1).
- * The record-accepting initial `files`: the rename sets section-6.4.ts
- * exports stage their `.mdx` entries as staged-source records
- * (helpers/staged-mdx.ts).
+ * The record-accepting initial `files`: the sets section-6.4.ts,
+ * section-6.5.ts, and section-6.5-iii.ts export, and this module's own
+ * initial files of every workspace a body creates after its first product
+ * invocation, stage their `.mdx` entries as staged-source records
+ * (helpers/staged-mdx.ts; S-9's before-any-product clause).
  */
 async function withWorkspace<T>(
   config: string,
@@ -569,27 +572,30 @@ const P1_RENAME_ARGV = ["rename", P1_CORE, "core.mid", "core.hub"] as const;
 // target parent, and no cycle arises (Target.mdx imports nothing).
 const P2_ORIGIN = "specs/Origin.mdx";
 const P2_TARGET = "specs/Target.mdx";
-const P2_ORIGIN_SOURCE = [
-  '<S id="org">',
-  "Origin holder text.",
-  "",
-  '<S id="org.mv" d={"org.mv.k1"}>',
-  "Moved root text.",
-  "",
-  '<S id="org.mv.k1">',
-  "Moved kid.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="org.stay" d={"org.mv.k1"}>',
-  "Stays behind.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
-const P2_TARGET_SOURCE = ['<S id="tgt">', "Target text.", "</S>", ""].join(
-  "\n",
+const P2_ORIGIN_SOURCE = stagedMdx(
+  "T6.6-2 move arm specs/Origin.mdx",
+  [
+    '<S id="org">',
+    "Origin holder text.",
+    "",
+    '<S id="org.mv" d={"org.mv.k1"}>',
+    "Moved root text.",
+    "",
+    '<S id="org.mv.k1">',
+    "Moved kid.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="org.stay" d={"org.mv.k1"}>',
+    "Stays behind.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
 );
+// The plain target — the bytes T6.5-8/T6.5-9 stage at the same path, so
+// section-6.5.ts's record (one record for identical bytes across tests).
+const P2_TARGET_SOURCE = A8_PLAIN_TARGET;
 const P2_MOVE_ARGV = [
   "move",
   `${P2_ORIGIN}#org.mv`,
@@ -2199,6 +2205,20 @@ const B4_THIRD_SOURCE = [
   "</S>",
   "",
 ].join("\n");
+// Arm (b)'s initial files as staged-source records (S-9): the strings stay
+// for the offsets `armBPlan` and the real-run byte assertion pin.
+const B4_ORIGIN_STAGED = stagedMdx(
+  "T6.6-4 arm (b) specs/Origin.mdx",
+  B4_ORIGIN_SOURCE,
+);
+const B4_TARGET_STAGED = stagedMdx(
+  "T6.6-4 arm (b) specs/Target.mdx",
+  B4_TARGET_SOURCE,
+);
+const B4_THIRD_STAGED = stagedMdx(
+  "T6.6-4 arm (b) specs/Third.mdx",
+  B4_THIRD_SOURCE,
+);
 const B4_MOVE_ARGV = [
   "move",
   `${B4_ORIGIN}#org.mv`,
@@ -2336,7 +2356,6 @@ const C4_MV_SOURCE = [
   "</S>",
   "",
 ].join("\n");
-const C4_PAL_SOURCE = ['<S id="pal">', "Pal text.", "</S>", ""].join("\n");
 const C4_USER_SOURCE = [
   'import MV from "./Mv.xspec"',
   "",
@@ -2345,6 +2364,18 @@ const C4_USER_SOURCE = [
   "</S>",
   "",
 ].join("\n");
+// The file-form move's initial files as staged-source records (S-9), staged
+// by T6.6-4's arm (c) and both of T6.6-5's file-form arms: `Mv` and `User`
+// keep their strings for the spans `armCPlan` pins.
+const C4_MV_STAGED = stagedMdx("T6.6-4/T6.6-5 specs/Mv.mdx", C4_MV_SOURCE);
+const C4_PAL_STAGED = stagedMdx(
+  "T6.6-4/T6.6-5 specs/Pal.mdx",
+  ['<S id="pal">', "Pal text.", "</S>", ""].join("\n"),
+);
+const C4_USER_STAGED = stagedMdx(
+  "T6.6-4/T6.6-5 specs/User.mdx",
+  C4_USER_SOURCE,
+);
 const C4_MOVE_ARGV = ["move", C4_MV, "specs/sub/Mv2.mdx"] as const;
 
 function armCPlan(): ExpectedPreviewPlan {
@@ -2418,6 +2449,13 @@ const D4_SOLO_SOURCE = [
   "</S>",
   "",
 ].join("\n");
+// The created-target move's origin as a staged-source record (S-9), staged
+// by T6.6-4's arm (d) and T6.6-5's created-target arm: the string stays for
+// the offsets `armDPlan` pins.
+const D4_SOLO_STAGED = stagedMdx(
+  "T6.6-4/T6.6-5 specs/Solo.mdx",
+  D4_SOLO_SOURCE,
+);
 const D4_MOVE_ARGV = [
   "move",
   `${D4_SOLO}#hold.out`,
@@ -2705,9 +2743,9 @@ const T6_6_4 = defineProductTest({
     await withWorkspace(
       SPECS_ONLY_CONFIG,
       {
-        [B4_ORIGIN]: B4_ORIGIN_SOURCE,
-        [B4_TARGET]: B4_TARGET_SOURCE,
-        [B4_THIRD]: B4_THIRD_SOURCE,
+        [B4_ORIGIN]: B4_ORIGIN_STAGED,
+        [B4_TARGET]: B4_TARGET_STAGED,
+        [B4_THIRD]: B4_THIRD_STAGED,
       },
       async (workspace) => {
         const context = "T6.6-4(b) section-move preview (existing target)";
@@ -2774,9 +2812,9 @@ const T6_6_4 = defineProductTest({
     await withWorkspace(
       SPECS_ONLY_CONFIG,
       {
-        [C4_MV]: C4_MV_SOURCE,
-        [C4_PAL]: C4_PAL_SOURCE,
-        [C4_USER]: C4_USER_SOURCE,
+        [C4_MV]: C4_MV_STAGED,
+        [C4_PAL]: C4_PAL_STAGED,
+        [C4_USER]: C4_USER_STAGED,
       },
       async (workspace) => {
         const context = "T6.6-4(c) file-form move preview";
@@ -2798,7 +2836,7 @@ const T6_6_4 = defineProductTest({
     // --- Arm (d): section-move preview whose target file does not exist ---
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [D4_SOLO]: D4_SOLO_SOURCE },
+      { [D4_SOLO]: D4_SOLO_STAGED },
       async (workspace) => {
         const context = "T6.6-4(d) created-target move preview";
         await buildOk(
@@ -3120,9 +3158,9 @@ const T6_6_5 = defineProductTest({
     await withWorkspace(
       SPECS_MD_CONFIG,
       {
-        [C4_MV]: C4_MV_SOURCE,
-        [C4_PAL]: C4_PAL_SOURCE,
-        [C4_USER]: C4_USER_SOURCE,
+        [C4_MV]: C4_MV_STAGED,
+        [C4_PAL]: C4_PAL_STAGED,
+        [C4_USER]: C4_USER_STAGED,
       },
       async (workspace) => {
         const context = "T6.6-5 file-form move";
@@ -3251,7 +3289,7 @@ const T6_6_5 = defineProductTest({
     // new file's derived paths under `generated` ---
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [D4_SOLO]: D4_SOLO_SOURCE },
+      { [D4_SOLO]: D4_SOLO_STAGED },
       async (workspace) => {
         const context = "T6.6-5 created-target move (T6.6-4(d)'s staging)";
         const before = await snapshotDirectory(workspace.root);
@@ -3301,9 +3339,9 @@ const T6_6_5 = defineProductTest({
     await withWorkspace(
       SPECS_ONLY_CONFIG,
       {
-        [C4_MV]: C4_MV_SOURCE,
-        [C4_PAL]: C4_PAL_SOURCE,
-        [C4_USER]: C4_USER_SOURCE,
+        [C4_MV]: C4_MV_STAGED,
+        [C4_PAL]: C4_PAL_STAGED,
+        [C4_USER]: C4_USER_STAGED,
       },
       async (workspace) => {
         const context = "T6.6-5 file-form move (record lagging)";
@@ -3404,9 +3442,8 @@ const R6_ORIGIN_SOURCE = [
   "</S>",
   "",
 ].join("\n");
-const R6_TARGET_SOURCE = ['<S id="tgt">', "Target text.", "</S>", ""].join(
-  "\n",
-);
+// The plain target again (T6.5-8/T6.5-9's, T6.6-2's): section-6.5.ts's record.
+const R6_TARGET_SOURCE = A8_PLAIN_TARGET;
 const R6_MOVE_ARGV = [
   "move",
   `${R6_ORIGIN}#org.mv`,

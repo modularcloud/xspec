@@ -4969,9 +4969,13 @@ const A8_MOVE_ARGV = [
 const A8_KEEP_SOURCE = ['<S id="keep">', "Keep text.", "</S>", ""].join("\n");
 const A8_KEEP_STAGED = stagedMdx("T6.5-8 specs/Keep.mdx", A8_KEEP_SOURCE);
 
-/** A plain target file: one top-level section, no imports. */
-const A8_PLAIN_TARGET = stagedMdx(
-  "T6.5-8/T6.5-9 specs/Target.mdx (the plain target)",
+/**
+ * A plain target file: one top-level section, no imports — the bytes
+ * T6.6-2's move arm and T6.6-6 stage at the same path, so section-6.6.ts
+ * aliases this record (one record for identical bytes across tests).
+ */
+export const A8_PLAIN_TARGET = stagedMdx(
+  "T6.5-8/T6.5-9/T6.6-2/T6.6-6 specs/Target.mdx (the plain target)",
   ['<S id="tgt">', "Target text.", "</S>", ""].join("\n"),
 );
 
