@@ -111,7 +111,7 @@ import { checkProperty } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
+import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, runJson } from "./support.js";
 
 // ---------------------------------------------------------------------------
@@ -1005,8 +1005,14 @@ async function runP13Trial(
   product: ProductBinding,
   trial: P13Trial,
 ): Promise<void> {
+  const files = renderP13Files(trial);
+  // S-9: the draw's sources, judged by the property runner before the body
+  // saw them (`stagedP13Sources` above) — declared per draw, as every
+  // initial `.mdx` file a trial stages after the body's first product
+  // invocation must be (helpers/workspace.ts).
   const workspace = await TestWorkspace.create({
-    files: renderP13Files(trial),
+    files,
+    mdx: { perDraw: mdxPathsOf(files) },
   });
   try {
     await buildOk(

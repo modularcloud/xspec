@@ -142,7 +142,7 @@ import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
+import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
 import { buildOk, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): one spec group, emission
@@ -1961,9 +1961,14 @@ async function runP2Trial(
 ): Promise<void> {
   const expected = specCompiledOutputs(doc);
   const files = workspaceFiles(doc);
-  const first = await TestWorkspace.create({ files });
+  // S-9: the draw's sources, judged by the property runner before the body
+  // saw them (`stagedSources` above) — declared per draw, as every initial
+  // `.mdx` file a trial stages after the body's first product invocation
+  // must be (helpers/workspace.ts).
+  const mdx = { perDraw: mdxPathsOf(files) };
+  const first = await TestWorkspace.create({ files, mdx });
   try {
-    const second = await TestWorkspace.create({ files });
+    const second = await TestWorkspace.create({ files, mdx });
     try {
       await buildOk(
         product,
@@ -2107,7 +2112,12 @@ async function runP3Trial(
   product: ProductBinding,
   doc: GeneratedDoc,
 ): Promise<void> {
-  const workspace = await TestWorkspace.create({ files: workspaceFiles(doc) });
+  const files = workspaceFiles(doc);
+  // S-9: the draw's sources, declared per draw (see runP2Trial).
+  const workspace = await TestWorkspace.create({
+    files,
+    mdx: { perDraw: mdxPathsOf(files) },
+  });
   try {
     await buildOk(
       product,

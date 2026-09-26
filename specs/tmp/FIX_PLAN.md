@@ -82,7 +82,9 @@ introduced early; instead every conversion task verifies its own modules with th
 temporary sites hook below (the reviewers' instrumentation, reproduced), and Task 24's
 full-suite run is the decisive check. Tasks 1–3 build the mechanism, close gap 2, and
 cover the §16 draws; Tasks 4–23 convert module by module, in order (independent of
-each other except that Task 22 precedes Task 23); Task 24 last.
+each other except that Task 22 precedes Task 23); Task 23b (found by Task 3: the
+declaration P-12's unparseable draw needs to survive the guard) before Task 24; Task 24
+last.
 
 **Loop conventions.** One task per Engineer spawn, in order. On completing a task: run
 the checks it names, update `AGENTS.md` with anything new about building, linting, or
@@ -133,6 +135,43 @@ project 22 files, 2335 passed; certification 144/33/0/0; the exchange test passe
 against the built product with identical writes (6). Task 2's "190 tests over 170
 records" had been counted from the a2fa780 baseline, before Task 1's five self-tests:
 a later task's expected counts add to 195 tests / 170 records.
+
+**Resolved by Task 3 (the §16 draws and constants).** The `perDraw` lists are derived
+from the rendered map by `mdxPathsOf(files)`, exported from `test/helpers/workspace.ts`
+beside `isMdxPath` (the plain `.mdx` keys in map order, record entries left out — the
+decision the task asked for, taken once: one definition for the seven modules whose
+generators build the map; self-tested in `s9-staged-sources.test.ts`); P-1's
+`inStagedWorkspace` lists its one fixed path literally, and `section-16-p5-p6.ts`
+wraps its three sites in a module-local `drawWorkspace(rendered)`. Coverage verified by
+reading: every `mdxSources` renders the same map its body stages (P-1's
+`segmentSource(splitSegments(draw), quoteKindFor(draw))` is the body's
+`segmentsVerdict(draw).segments`; P-5's `initTrialState` clones the model; P-7's drawn
+paths and targets always end in `.mdx` and its code sources never — the path alphabet
+spells no `m`, `d`, or `x`); no `mdxSources` had to be added. The task's `"P-7 …"`
+record example was wrong — P-7 stages no harness-constant `.mdx` (its `mdxSection(id)`
+contents are index-derived per draw and judged by its `mdxSources`), so they are
+`perDraw`; the constants are P-8's base sources, shared with P-11, and P-10's
+`A_MDX`: `FUZZ_BASE_RECORDS` in `section-16-p8.ts` (`"P-8/P-11 specs/A.mdx"`,
+`"P-8/P-11 specs/B.mdx"`, from `BASE_SPEC_A`/`BASE_SPEC_B`, which stay strings in the
+exported `FUZZ_BASE_FILES` for the mutators; P-8 stages `fuzzBaseWorkspaceFiles()`,
+P-11 substitutes the record for each unmutated `.mdx` entry of `trial.files` — a path
+outside `mutatedMdxPaths(trial)` — while its mutated ones stay `unchecked`), and
+`"P-10 specs/A.mdx"` (`A_MDX` wrapped in place). P-8, P-10, and P-11 create no
+draw-derived well-formed `.mdx` workspace (P-8 the constant base then `unchecked`
+mutations; P-10 the constant alone; P-11 `unchecked` mutations beside the constants).
+Finding: P-12's break-parse twist stays a plain `unparseable` initial entry — Task 23b.
+Checks (the sites hook with a third, declaration column — `JSON.stringify(this.
+mdxDeclarations.get(mdxKey(rel)) ?? "well-formed")` — so the "after" log shows every
+remaining plain entry's declaration; AGENTS.md): the eleven §16 suite files in one run
+(~11 min, 4 workers) give identical verdicts and diagnoses before and after (P-1…P-5
+fail diagnosed at the same seeds, trials, and shrinks; P-6…P-13 pass); the sha256
+capture logs are identical (3655 writes each); the "after" sites log holds 0
+`"well-formed"` lines — 2205 `"per-draw"` (P-1 37, P-2 906, P-3 305, P-4 600, P-5 118,
+P-6 24, P-7 139, P-9 12, P-12 14, P-13 50), P-11's 36 `"unchecked"`, P-12's 1
+`"unparseable"` — where the "before" log's 2313 `"well-formed"` lines included P-8's
+70, P-10's 8, and P-11's 34 (the record conversions). Known state after Task 3: the
+S-9 self-test 199 tests over 173 records (166 `T…`, 4 `E-6`, 3 `P-…`); self project
+22 files, 2339 passed, 0 skipped under the namespace (~141 s; 2335 + the three record tests + the `mdxPathsOf` test); certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
 
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
@@ -229,8 +268,10 @@ sites are ONE record staged at each; an existing record whose bytes and declarat
 equal a new entry's is reused, never duplicated. The self-test checks every leading ID
 names a registered test (or `E-6`).
 
-**Where a task touches a shared helper.** `test/helpers/workspace.ts` (Tasks 1 and 24
-only), `test/helpers/staged-mdx.ts` (Task 1 only, header text), `test/helpers/e6.ts`
+**Where a task touches a shared helper.** `test/helpers/workspace.ts` (Tasks 1 and 24;
+Task 3 added `mdxPathsOf` alone; Task 23b adds the per-draw unparseable declaration),
+`test/helpers/staged-mdx.ts` (Task 1 only, header text; Task 23b where its validator
+names the refused members), `test/helpers/e6.ts`
 (Task 2 only), `test/helpers/product-invocations.ts` (untouched),
 `test/suite/registry/support.ts` (Task 1: `stageConfigurationStateTwins`'s parameter
 type; Task 22: `UnparseableStaging.files`), `test/suite/registry/write-refusal-staging.ts`
@@ -298,39 +339,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 3 — §16: draw-derived initial files declared `perDraw`; constant ones as records
-
-**Requirement.** The property modules create workspaces per trial
-(`section-16-p1.ts` ~676, `section-16-p2-p3.ts` ~1964/1966/2110, `section-16-p4.ts`
-~2183/2185, `section-16-p7.ts` ~749/1128 — check every `TestWorkspace.create(` in
-`section-16-*.ts`, P-8 and P-10…P-13 included): from the second trial on the body has
-invoked the product, so Task 24's guard would refuse their plain `.mdx` entries. S-9's
-property clause already covers a draw: `checkProperty`'s `mdxSources` judges every
-draw's sources before the body sees it (`property.ts` ~447/814/971), the initial trial
-and every shrunk candidate.
-
-**Change.** Every `.mdx` initial entry whose contents come from the draw is declared
-`perDraw` (`mdx: { perDraw: [...] }` — the module knows its paths; where the map is
-built by a function, derive the list from the map's `.mdx` keys with one small
-module-local helper, or export `mdxPathsOf(files)` from `workspace.ts` — decide once,
-say which in the commit message). Every `.mdx` initial entry that is a harness
-constant (a fixed spec staged beside the draw) becomes a record (`"P-7 …"`). Before
-declaring a path `perDraw`, VERIFY the module's `mdxSources` yields that path's contents
-for every draw the body creates a workspace from; P-8, P-10, P-11 pass no `mdxSources` —
-confirm they create no draw-derived `.mdx` workspace after their first invocation (P-8's
-mutations are `unchecked`); if one does, add the `mdxSources` function to that
-`checkProperty` call (the same rendering the body stages) and record it as a finding in
-the preamble. Property modules never pass records for draws; `per-draw` never reaches a
-record (the ledger refuses it).
-
-**Checks.** Recipes 1–3 over `section-16-p1`, `-p2-p3`, `-p4`, `-p7` (and any other
-module changed): the sites hook's "after" log holds exactly the `perDraw` entries (the
-hook logs plain contents; name them as the expected remainders); the properties'
-verdicts unchanged (P-1…P-5 fail diagnosed as before, at the same seed and shrink —
-compare the failure lines; P-7 and the rest pass; a property module runs ~3–5 min in
-the namespace); the self project green (the fixed-seed S-9 vector self-tests
-unchanged). AGENTS.md: the `perDraw` form and which modules use it.
 
 ### Task 4 — Initial-file conversion: §1 (`section-1.1-1.2.ts`, `section-1.3.ts`, `section-1.4.ts`, `section-1.5.ts`, `section-1.6-1.7.ts`)
 
@@ -766,10 +774,56 @@ form (AGENTS.md's arm-filter and stand-in recipes reach it).
 the whole suite's initial `.mdx` entries after a body's first invocation are records,
 `perDraw`, or `unchecked` — Task 24 verifies it.
 
+### Task 23b — P-12's break-parse twist: a guard-exempt, builder-judged-unparseable declaration for a draw's initial file (before Task 24)
+
+**Requirement (found by Task 3).** `section-16-p12.ts`'s `runP12Trial` stages the
+trial's composed files as plain initial entries and declares the break-parse twist's
+file (`trial.unparseable`, a drawn path of `FILE_POOL`) `mdx.unparseable`: the builder
+judges it must-not-derive at creation, inside the body, and a failure surfaces as a
+harness error with the seed through the runner's rethrow of `HarnessStagingError` —
+S-9's draw clause holds today. But no declaration Task 3 could give it survives Task 24:
+`perDraw` is judged well-formed at creation (it would refuse the twist), a record can
+never stand for a draw, and the runner's `stagedP12Sources` excludes the file because
+`checkDrawMdx` judges every source as must-derive. Task 24's guard exempts only
+`unchecked` and `per-draw`, so from the second trial on it would refuse the twist entry
+(`undeclared-staging`) — a harness error in P-12 where the plan expects 0 such lines
+and the same 82 failures. Task 3 left the entry declared `unparseable` (the one
+truthful declaration available) and its path out of the `perDraw` list
+(`mdxPathsOf(files).filter((path) => path !== trial.unparseable)`), so the Task 3 sites
+hook logs exactly one `"unparseable"` line per P-12 trial after the first.
+
+**Change** (`test/helpers/workspace.ts`; `test/helpers/staged-mdx.ts` where its
+validator names the refused members; `test/suite/registry/section-16-p12.ts`;
+`test/self/s9-staged-sources.test.ts`; `test/self/s9-undeclared-staging.test.ts`;
+headers; AGENTS.md). Give the workspace declaration a per-draw unparseable form — the
+minimal shape: `WorkspaceMdxDecl.perDrawUnparseable?: readonly string[]` resolving to
+a new `MdxFileDeclaration` member `"per-draw-unparseable"`, which `judgeMdxDeclaration`
+judges exactly as `unparseable` (must not derive; spelled "declared unparseable per
+draw"), `guardUndeclaredStaging` exempts as it exempts `per-draw`, a record refuses as
+it refuses `per-draw` (`StagedMdx.mdx` excludes it), `resolveMdxDeclaration` names in
+the two-list contradiction, and `file()` accepts as an option (section-16 modules
+only). `runP12Trial` then declares `mdx: { perDraw: <the other .mdx paths>,
+perDrawUnparseable: trial.unparseable === undefined ? [] : [trial.unparseable] }`.
+Optional, so the runner's first line covers the twist too: `DrawSource` gains an
+optional fourth element `"unparseable"`, `checkDrawMdx` judging such a source as
+must-not-derive, and `stagedP12Sources` returns the twist file marked so instead of
+filtering it out (then `test/self/property-infrastructure.test.ts` gains the red
+check: a deriving source marked unparseable is a harness error carrying the seed).
+Self-tests follow the `perDraw` tests' pattern for the new list (a listed non-deriving
+entry created; a deriving one refused with the unparseable diagnosis; a path in two
+lists, or not an MDX source, throws), plus the guard exemption after an invocation
+(`s9-undeclared-staging.test.ts`), the record refusal, and the judge.
+
+**Checks.** Recipes 1–2; P-12 alone against the built product (`-t 'P-12 '`, ~6 min,
+PASS unchanged at the fixed seeds) with the Task 3 sites hook (AGENTS.md) showing its
+twist lines declared `"per-draw-unparseable"` and no `"unparseable"` or
+`"well-formed"` line; Task 24's checks are then expected to hold with no P-12
+exception. Record the form in AGENTS.md beside the `perDraw` bullet.
+
 ### Task 24 — The undeclared-staging guard covers initial files (last: after every conversion)
 
 **Requirement.** S-9's timing clause is met only while every post-invocation initial
-`.mdx` entry is a record (Tasks 4–23) or a declared draw (Task 3); nothing enforces
+`.mdx` entry is a record (Tasks 4–23) or a declared draw (Tasks 3 and 23b); nothing enforces
 that a future entry joins the ledger. Extending the guard to `stageInitial` makes an
 omission a harness error at the first run that reaches the site — the bounded surfacing
 the `file()` guard already has (the previous plan's Task 18).
@@ -784,8 +838,9 @@ headers, AGENTS.md):
    fixture, a certification runner staging outside a body — creation never refuses. The
    diagnosis names the site (extend the message with the entry kind: "an initial
    `files` entry of a workspace created after a product invocation in the running body
-   of <ID>") and the remedies (a record in `files`; `mdx.perDraw` for a property draw;
-   `mdx.unchecked` for P-8 mutations and noise). `create()`'s catch disposes the
+   of <ID>") and the remedies (a record in `files`; `mdx.perDraw` — or Task 23b's
+   `mdx.perDrawUnparseable` — for a property draw; `mdx.unchecked` for P-8 mutations
+   and noise). `create()`'s catch disposes the
    half-built workspace — nothing left behind.
 2. `file()`, `edit()`, `copyFrom()` unchanged.
 3. Self-tests (`s9-undeclared-staging.test.ts`, inside `runProductTestBody`): after an

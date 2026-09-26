@@ -32,7 +32,9 @@
 // a record under the record's declaration; a record at a non-`.mdx` key, or
 // beside a workspace-declaration entry naming its path, throws; the
 // declaration's `perDraw` list judges a draw's initial file as well-formed
-// and declares the path `per-draw`), the builder's `edit()` (a rewrite of the current bytes,
+// and declares the path `per-draw`; `mdxPathsOf` lists a rendered map's
+// plain `.mdx` keys for such a list, records left out), the builder's
+// `edit()` (a rewrite of the current bytes,
 // judged under the path's declaration), and the judge's own red checks (an
 // ill-formed source declared well-formed and a deriving source declared
 // unparseable both throw; `unchecked` judges nothing).
@@ -48,7 +50,11 @@ import {
   stagedMdx,
   stagedMdxLedger,
 } from "../helpers/staged-mdx.js";
-import { TestWorkspace, judgeMdxDeclaration } from "../helpers/workspace.js";
+import {
+  TestWorkspace,
+  judgeMdxDeclaration,
+  mdxPathsOf,
+} from "../helpers/workspace.js";
 import type { WorkspaceDecl, WorkspaceMdxDecl } from "../helpers/workspace.js";
 // The E-6 exchange fixture (helpers/e6.ts) is no registry entry, yet stages
 // four `.mdx` sources no sweep reaches — three initial files, and one edit
@@ -542,6 +548,35 @@ describe("S-9: the builder stages an initial `files` record under the record's d
       { mdx: { perDraw: ["specs/draw.md"] } },
       "specs/draw.md",
       "not an MDX source",
+    );
+  });
+
+  test("`mdxPathsOf`: the plain `.mdx` keys of an initial `files` map, in map order — a record entry and a non-`.mdx` key left out — so a `perDraw` list derived from a rendered map never names a record's path", async () => {
+    const record = someWellFormedRecord();
+    const files = {
+      "xspec.config.ts": "export default {}",
+      "specs/b.mdx": WELL_FORMED,
+      "specs/a.mdx": WELL_FORMED,
+      "specs/note.md": "# not judged",
+      "specs/record.mdx": record,
+      "specs/bytes.mdx": Buffer.from(WELL_FORMED, "utf8"),
+    };
+    expect(mdxPathsOf(files)).toEqual([
+      "specs/b.mdx",
+      "specs/a.mdx",
+      "specs/bytes.mdx",
+    ]);
+    expect(mdxPathsOf({})).toEqual([]);
+    expect(mdxPathsOf({ "specs/record.mdx": record })).toEqual([]);
+    const workspace = await stage({
+      files,
+      mdx: { perDraw: mdxPathsOf(files) },
+    });
+    for (const rel of ["specs/b.mdx", "specs/a.mdx", "specs/bytes.mdx"]) {
+      expect(workspace.mdxDeclarationOf(rel)).toBe("per-draw");
+    }
+    expect(await workspace.readBytes("specs/record.mdx")).toEqual(
+      bytesOf(record.source),
     );
   });
 });

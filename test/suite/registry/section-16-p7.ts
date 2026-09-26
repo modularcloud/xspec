@@ -136,7 +136,7 @@ import { checkProperty } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
+import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertSameJson,
@@ -746,7 +746,14 @@ async function assertDiscoveryAgreement(
       expected.push({ file: path, ids: [id] });
     }
   });
-  const workspace = await TestWorkspace.create({ files });
+  // S-9: the draw's sources, judged by the property runner before the body
+  // saw them (`stagedDiscoverySources` above) — declared per draw, as every
+  // initial `.mdx` file a trial stages after the body's first product
+  // invocation must be (helpers/workspace.ts).
+  const workspace = await TestWorkspace.create({
+    files,
+    mdx: { perDraw: mdxPathsOf(files) },
+  });
   try {
     const context =
       `P-7 discovery: patterns ${JSON.stringify(trial.patterns)} over staged ` +
@@ -1125,7 +1132,14 @@ async function assertCaptureAgreement(
     files[source] = codeSource(source, trial.targets);
   }
   const expected = expectedFindingRenderings(trial);
-  const workspace = await TestWorkspace.create({ files });
+  // S-9: the targets are the draw's sources, judged by the property runner
+  // before the body saw them (`stagedCaptureSources` above) — declared per
+  // draw; a code source never ends in `.mdx` (the path alphabet spells no
+  // `m`, `d`, or `x`), so the list is exactly the targets.
+  const workspace = await TestWorkspace.create({
+    files,
+    mdx: { perDraw: mdxPathsOf(files) },
+  });
   try {
     const base =
       `P-7 captures: rules ${JSON.stringify(trial.rules)} over sources ` +

@@ -114,7 +114,7 @@ import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
+import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
 import {
   assertSameJson,
   buildOk,
@@ -2180,9 +2180,14 @@ async function runP4Trial(
   const beforeSem = semanticsOf(trial.model);
   const beforeIds = [...beforeSem.keys()].sort();
   const staged = { "xspec.config.ts": SPECS_ONLY_CONFIG, ...beforeFiles };
-  const first = await TestWorkspace.create({ files: staged });
+  // S-9: the draw's sources, judged by the property runner before the body
+  // saw them (`stagedP4Sources` above) — declared per draw, as every initial
+  // `.mdx` file a trial stages after the body's first product invocation
+  // must be (helpers/workspace.ts).
+  const mdx = { perDraw: mdxPathsOf(staged) };
+  const first = await TestWorkspace.create({ files: staged, mdx });
   try {
-    const second = await TestWorkspace.create({ files: staged });
+    const second = await TestWorkspace.create({ files: staged, mdx });
     try {
       await buildOk(
         product,

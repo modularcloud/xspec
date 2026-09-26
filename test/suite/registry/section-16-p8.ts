@@ -160,6 +160,9 @@ import {
   assertSnapshotsEqual,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { buildOk } from "./support.js";
 
@@ -233,6 +236,30 @@ export const FUZZ_BASE_FILES: ReadonlyArray<readonly [string, string]> = [
 const MUTATION_TARGETS: readonly string[] = FUZZ_BASE_FILES.map(
   ([path]) => path,
 );
+
+/**
+ * The base workspace's `.mdx` sources as staged-source records (S-9's
+ * before-any-product clause; helpers/staged-mdx.ts): P-8 stages the base
+ * workspace afresh per trial and P-11 its unmutated base files per trial —
+ * from the second trial on, after the body's first product invocation:
+ * initial files S-7's sweep never reaches — so the ledger self-test judges
+ * them before any product exists. `FUZZ_BASE_FILES` keeps the strings: the
+ * generators mutate their bytes.
+ */
+export const FUZZ_BASE_RECORDS: ReadonlyMap<string, StagedMdx> = new Map([
+  ["specs/A.mdx", stagedMdx("P-8/P-11 specs/A.mdx", BASE_SPEC_A)],
+  ["specs/B.mdx", stagedMdx("P-8/P-11 specs/B.mdx", BASE_SPEC_B)],
+]);
+
+/** The base workspace as initial `files`: each `.mdx` entry its record. */
+function fuzzBaseWorkspaceFiles(): Record<string, InitialFileContents> {
+  return Object.fromEntries(
+    FUZZ_BASE_FILES.map(([path, text]) => [
+      path,
+      FUZZ_BASE_RECORDS.get(path) ?? text,
+    ]),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // The command menu (SPEC 12 surface). Every entry is drawn by trials; the
@@ -1261,8 +1288,10 @@ async function runFuzzTrial(
   product: ProductBinding,
   trial: FuzzTrial,
 ): Promise<void> {
+  // S-9: the base `.mdx` sources are the harness's constants, staged afresh
+  // per trial — as records from the second trial on too (`FUZZ_BASE_RECORDS`).
   const workspace = await TestWorkspace.create({
-    files: Object.fromEntries(FUZZ_BASE_FILES),
+    files: fuzzBaseWorkspaceFiles(),
   });
   try {
     // Staging: the base workspace is SPEC-valid; a successful build leaves

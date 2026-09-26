@@ -675,6 +675,11 @@ async function inStagedWorkspace(
 ): Promise<void> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/A.mdx": source },
+    // S-9: the source is the draw's, judged by the property runner before
+    // the body saw it (`mdxSources` on the registrations below) — declared
+    // per draw, as every initial `.mdx` file a trial stages after the body's
+    // first product invocation must be (helpers/workspace.ts).
+    mdx: { perDraw: ["specs/A.mdx"] },
   });
   try {
     await body(workspace);

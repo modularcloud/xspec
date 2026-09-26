@@ -108,6 +108,7 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   drawFuzzMutation,
   FUZZ_BASE_FILES,
+  FUZZ_BASE_RECORDS,
   MAX_MUTATIONS_PER_TRIAL,
 } from "./section-16-p8.js";
 
@@ -626,11 +627,20 @@ async function runAvailabilityTrial(
   product: ProductBinding,
   trial: AvailabilityTrial,
 ): Promise<void> {
+  const mutated = mutatedMdxPaths(trial);
   const workspace = await TestWorkspace.create({
-    files: Object.fromEntries(trial.files),
     // S-9: a mutated document is a fuzz staging whose derivability the
-    // document does not declare; the unmutated base files stay judged.
-    mdx: { unchecked: mutatedMdxPaths(trial) },
+    // document does not declare; an unmutated base source is the harness's
+    // constant, staged as P-8's record (`FUZZ_BASE_RECORDS`) — judged before
+    // any product exists — since every trial after the first stages it
+    // after the body's first product invocation.
+    files: Object.fromEntries(
+      trial.files.map(([path, bytes]) => [
+        path,
+        mutated.includes(path) ? bytes : (FUZZ_BASE_RECORDS.get(path) ?? bytes),
+      ]),
+    ),
+    mdx: { unchecked: mutated },
   });
   try {
     for (const arm of trial.arms) {

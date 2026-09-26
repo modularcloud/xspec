@@ -124,7 +124,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import type { TestWorkspace as Workspace } from "../../helpers/workspace.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
+import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
 import { SPECS_ONLY_CONFIG } from "./section-11.2.js";
 import type { ResolutionData } from "./section-11.5.js";
 import { resolveAtFromView } from "./section-11.5.js";
@@ -592,15 +592,21 @@ async function runP12Trial(
   product: ProductBinding,
   trial: P12Trial,
 ): Promise<void> {
+  const files = {
+    "xspec.config.ts": SPECS_ONLY_CONFIG,
+    ...Object.fromEntries(trial.files),
+  };
   const workspace = await TestWorkspace.create({
-    files: {
-      "xspec.config.ts": SPECS_ONLY_CONFIG,
-      ...Object.fromEntries(trial.files),
-    },
+    files,
     // S-9: the break-parse twist's file is the one unparseable source the
-    // document declares; every other composed file must derive.
+    // document declares — judged so at creation (it must not derive); every
+    // other composed file is the draw's, judged by the property runner
+    // before the body saw it (`stagedP12Sources` above) — declared per
+    // draw, as every initial `.mdx` file a trial stages after the body's
+    // first product invocation must be (helpers/workspace.ts).
     mdx: {
       unparseable: trial.unparseable === undefined ? [] : [trial.unparseable],
+      perDraw: mdxPathsOf(files).filter((path) => path !== trial.unparseable),
     },
   });
   try {

@@ -122,7 +122,7 @@ import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
+import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. Audit
@@ -1263,11 +1263,17 @@ async function runP9Trial(
   trial: P9Trial,
 ): Promise<void> {
   const model = structuredClone(trial.initial);
+  const files = {
+    "xspec.config.ts": SPECS_ONLY_CONFIG,
+    ...renderP9Workspace(model),
+  };
+  // S-9: the draw's sources, judged by the property runner before the body
+  // saw them (`stagedP9Sources` above) — declared per draw, as every initial
+  // `.mdx` file a trial stages after the body's first product invocation
+  // must be (helpers/workspace.ts).
   const workspace = await TestWorkspace.create({
-    files: {
-      "xspec.config.ts": SPECS_ONLY_CONFIG,
-      ...renderP9Workspace(model),
-    },
+    files,
+    mdx: { perDraw: mdxPathsOf(files) },
   });
   try {
     await buildOk(

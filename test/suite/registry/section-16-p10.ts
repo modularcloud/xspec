@@ -148,6 +148,7 @@ import {
   startProduct,
   summarizeResult,
 } from "../../helpers/subprocess.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { buildOk, expectExit, runJson } from "./support.js";
 
@@ -166,21 +167,28 @@ export default defineConfig({
 // top-level section with a child plus a second top-level leaf — the audit
 // session holds four items (file root, `a`, `a.k`, `g`; SPEC 10.6) with a
 // non-trivial `blockedBy` chain, and both `a` and `g` are rename targets.
+// A staged-source record (helpers/staged-mdx.ts): every trial stages it
+// afresh, from the second trial on after the body's first product invocation
+// — an initial file S-7's sweep never reaches, so the ledger self-test judges
+// it before any product exists (S-9).
 const INITIAL_SOURCE_REL = "specs/A.mdx";
 const INITIAL_TOP_IDS = ["a", "g"] as const;
-const A_MDX = [
-  '<S id="a">',
-  "Alpha text.",
-  '<S id="a.k">',
-  "Kid text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="g">',
-  "Gamma text.",
-  "</S>",
-  "",
-].join("\n");
+const A_MDX = stagedMdx(
+  "P-10 specs/A.mdx",
+  [
+    '<S id="a">',
+    "Alpha text.",
+    '<S id="a.k">',
+    "Kid text.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="g">',
+    "Gamma text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const SESSION_NAME = "s";
 const JOURNAL_REL = ".xspec/journal";

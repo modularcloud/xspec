@@ -233,7 +233,8 @@ import { checkProperty } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import { TestWorkspace } from "../../helpers/workspace.js";
+import type { FileContents, WorkspaceDecl } from "../../helpers/workspace.js";
+import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
 import type {
   BodyItem,
   Edit,
@@ -889,17 +890,28 @@ const genPurityTrial: Gen<PurityTrial> = (choices) => {
   return { model, ops };
 };
 
+/**
+ * A trial's workspace declaration: the configuration beside the rendered
+ * sources, every `.mdx` one declared per draw — judged by the property
+ * runner before the body saw the draw (`mdxSources` on the registrations
+ * below; S-9), as every initial `.mdx` file a trial stages after the body's
+ * first product invocation must be (helpers/workspace.ts).
+ */
+function drawWorkspace(
+  rendered: Readonly<Record<string, FileContents>>,
+): WorkspaceDecl {
+  const files = { "xspec.config.ts": SPECS_ONLY_CONFIG, ...rendered };
+  return { files, mdx: { perDraw: mdxPathsOf(files) } };
+}
+
 async function runPurityTrial(
   product: ProductBinding,
   trial: PurityTrial,
 ): Promise<void> {
   const state = initTrialState(trial.model);
-  const workspace = await TestWorkspace.create({
-    files: {
-      "xspec.config.ts": SPECS_ONLY_CONFIG,
-      ...renderP5Workspace(state.model),
-    },
-  });
+  const workspace = await TestWorkspace.create(
+    drawWorkspace(renderP5Workspace(state.model)),
+  );
   try {
     await workspace.gitInit();
     const commits = [await workspace.gitCommitAll("baseline 0")];
@@ -2218,9 +2230,7 @@ async function runSectionMoveTrial(
     newId: built.newId,
     otherNodes: built.otherNodes,
   });
-  const workspace = await TestWorkspace.create({
-    files: { "xspec.config.ts": SPECS_ONLY_CONFIG, ...built.files },
-  });
+  const workspace = await TestWorkspace.create(drawWorkspace(built.files));
   try {
     await workspace.gitInit();
     const base = await workspace.gitCommitAll("pre-move baseline");
@@ -2379,12 +2389,9 @@ async function runReplayTrial(
   trial: ReplayTrial,
 ): Promise<void> {
   const state = initTrialState(trial.model);
-  const workspace = await TestWorkspace.create({
-    files: {
-      "xspec.config.ts": SPECS_ONLY_CONFIG,
-      ...renderWorkspace(state.model),
-    },
-  });
+  const workspace = await TestWorkspace.create(
+    drawWorkspace(renderWorkspace(state.model)),
+  );
   try {
     await workspace.gitInit();
     interface Snapshot {

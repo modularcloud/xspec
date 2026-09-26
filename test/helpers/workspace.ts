@@ -78,7 +78,8 @@
 //   workspace is a convention the S-9 self-test cannot see, not a refusal.
 //   The declaration's `perDraw` list is the initial-file form of
 //   `per-draw`: a section-16 module's draw-derived initial files, judged by
-//   the property runner before the body saw them.
+//   the property runner before the body saw them (`mdxPathsOf` lists a
+//   rendered map's plain `.mdx` keys for it).
 
 import { Buffer } from "node:buffer";
 import { execFile } from "node:child_process";
@@ -830,6 +831,24 @@ function isMdxPath(rel: RelPath): boolean {
     rel.length >= MDX_SUFFIX.length &&
     Buffer.from(rel.subarray(rel.length - MDX_SUFFIX.length)).equals(MDX_SUFFIX)
   );
+}
+
+/**
+ * The `.mdx` keys of an initial `files` map that stage plain contents, in
+ * the map's order — the paths a workspace declaration's list may name (a
+ * section-16 module's `perDraw` list over a map its generator rendered,
+ * whose `.mdx` keys are the draw's; P-11's `unchecked` mutations). A record
+ * entry is left out: it carries its own declaration, and a list naming its
+ * path is the contradiction `create()` refuses.
+ */
+export function mdxPathsOf(
+  files: Readonly<Record<string, InitialFileContents>>,
+): string[] {
+  return Object.entries(files)
+    .filter(
+      ([rel, contents]) => isMdxPath(rel) && !(contents instanceof StagedMdx),
+    )
+    .map(([rel]) => rel);
 }
 
 /**
