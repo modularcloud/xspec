@@ -96,6 +96,29 @@ gives. Never merge or fetch `main`. Check `git status` / `git log -1` before edi
 before pushing; the scratchpad is shared across spawns and holds stale files (the
 reviewers' instrumented harness copy under `hookrun/` is NOT the repository).
 
+**Resolved by Task 1 (79308be; the mechanism).** The record-accepting type is
+`InitialFileContents = FileContents | StagedMdx` (`test/helpers/workspace.ts`);
+`WorkspaceDecl.files: Readonly<Record<string, InitialFileContents>>`. `create()` stages
+a record entry under the record's declaration through the private `recordStaging`
+shared with `file()`'s record branch: a record at a non-`.mdx` key throws
+`mdx-derivability` ("not an `.mdx` path"); a record whose path the workspace `mdx`
+declaration names in ANY of its lists — `unparseable`, `unchecked`, `allowances`,
+`perDraw` — throws the contradiction ("drop the declaration entry (or change the
+record)"). Consequence for Tasks 3–23: when an initial entry becomes a record, its
+path LEAVES the workspace `mdx` declaration (the record carries the declaration —
+the former entry's, else well-formed); an entry for a plain sibling path stays.
+`WorkspaceMdxDecl.perDraw` is a path list like `unchecked`, resolved to `per-draw`
+(judged well-formed at creation; a later plain `file()` of the path is exempt from
+the guard; a path in two lists throws). The guard is unchanged (Task 24).
+`stageConfigurationStateTwins` takes `Readonly<Record<string, InitialFileContents>>`.
+Self-tests: `s9-staged-sources.test.ts` 192 tests (five new, in the describe "the
+builder stages an initial `files` record under the record's declaration"),
+`s9-undeclared-staging.test.ts` 13 tests; a contradicting record's `create()` refusal
+is exercised through a fresh unsealed ledger and a fresh builder (`vi.resetModules()`),
+since the sealed registry ledger holds no such record. Known state after Task 1: self
+project 22 files, 2332 passed; certification 144/33/0/0; T12.1-3 and T10.1-1 keep
+their verdicts.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -260,62 +283,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 1 — `WorkspaceDecl.files` accepts a staged-source record; `perDraw` at creation; self-tests
-
-**Requirement.** TEST-SPEC §17 S-9's timing clause (the preamble's finding): an initial
-`.mdx` file of a workspace created after the body's first invocation must be judged
-before any product exists, which only a ledger record is. Nothing here changes any
-test's behavior: the mechanism, its self-tests, and the type widenings alone.
-
-**Change** (`test/helpers/workspace.ts`, `test/helpers/staged-mdx.ts` header,
-`test/self/s9-staged-sources.test.ts`, `test/self/s9-undeclared-staging.test.ts`,
-`test/suite/registry/support.ts`):
-1. `export type InitialFileContents = FileContents | StagedMdx` (name it as you like;
-   the tasks below say "the record-accepting type");
-   `WorkspaceDecl.files: Readonly<Record<string, InitialFileContents>>`. In `create()`
-   an entry that is a `StagedMdx` stages the record's bytes under the record's
-   declaration exactly as `file()`'s record branch does (`stageInitial` gains the
-   branch): a record at a non-`.mdx` key throws `HarnessStagingError("mdx-derivability",
-   …)` with `file()`'s wording; a record whose key the workspace declaration names
-   (`mdx.unparseable`, `mdx.unchecked`, `mdx.allowances`, or the new `mdx.perDraw`)
-   throws the contradiction with `file()`'s wording ("drop the declaration entry (or
-   change the record)"); a refusal leaves no temporary directory (`create()`'s existing
-   catch). A plain entry stages exactly as today. Do NOT extend the guard here
-   (Task 24).
-2. `WorkspaceMdxDecl.perDraw?: readonly string[]` — paths whose initial contents are a
-   property draw the runner judged (`helpers/property.ts` `mdxSources`; S-9's property
-   clause): `resolveMdxDeclaration` maps them to the `per-draw` declaration, so they
-   are judged well-formed at staging and exempt from the guard (today's `file()` guard,
-   and Task 24's); a path in more than one list throws as today; the type's comment
-   says it is the section-16 modules' alone, like `per-draw`.
-3. `support.ts`: `stageConfigurationStateTwins(files: Readonly<Record<string,
-   InitialFileContents>>)` (its `"xspec.config.ts" in files` check unchanged). Leave
-   `UnparseableStaging.files` to Task 22.
-4. Headers: `workspace.ts`'s module header and `stageInitial`'s comment ("the standing
-   observation"), and `staged-mdx.ts`'s "What is NOT a ledger record: the initial files
-   of a workspace declaration" — an initial file of a workspace created after the
-   body's first invocation IS a record (the guard extension follows in Task 24); a
-   body's first workspace's may stay plain.
-5. Self-tests. In `s9-staged-sources.test.ts` (the "builder stages a record's bytes
-   under the record's declaration" describe, or a sibling): a record in `files` stages
-   its bytes (read back equal); a well-formed record and an `unparseable` record each
-   stage under its own declaration (a deriving source under an `unparseable` record
-   makes `create()` throw `mdx-derivability`); a record at a non-`.mdx` key throws; a
-   record beside a declaration naming its path throws; `mdx: { perDraw: [A] }` judges
-   well-formed at creation (an ill-formed `perDraw` entry throws `mdx-derivability`). In
-   `s9-undeclared-staging.test.ts`: after an invocation, a `file()` on a `perDraw`-listed
-   path with plain contents passes the guard (judged well-formed), and `create()` with a
-   record entry inside a body that has invoked passes (the guard extension is Task 24's,
-   but the record path must already be clean). Red-check one new assertion by mutation
-   (AGENTS.md's recipe).
-
-**Checks.** `npx tsc -p test`; `npm run format:check`; the self project in the namespace
-(22 files, the count up by the new tests, certification 144/33/0/0);
-`unshare … -- npx vitest run --config test/vitest.config.ts --project suite section-12.1-12.2.test -t 'T12.1-3 '`
-and `… section-10.1.test -t 'T10.1-1 '` still give their recorded verdicts — nothing in
-the suite changed. Record the new form (the record-accepting `files`, `perDraw`) in
-AGENTS.md.
 
 ### Task 2 — E-6: the fixture's three initial sources become ledger records
 
