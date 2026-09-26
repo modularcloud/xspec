@@ -42,6 +42,7 @@ import { parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
@@ -49,7 +50,10 @@ import {
   ConsumerProject,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
+import type {
+  InitialFileContents,
+  WorkspaceMdxDecl,
+} from "../../helpers/workspace.js";
 import type { OccurrenceUnit } from "./section-5.7.js";
 import { expectedUnitMultiset, renderOccurrenceUnit } from "./section-5.7.js";
 import type { UnparseableStaging } from "./support.js";
@@ -94,7 +98,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
   mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
@@ -408,6 +412,17 @@ const DYNAMIC_ARM_BASE_FILES = {
   "specs/BASE.mdx": '<S id="auth">\nAuth behavior.\n</S>\n',
 } as const;
 
+// The same module as a staged-source record for the arms' workspaces —
+// every one after the body's first is created after its first invocation
+// (S-9's timing clause); the string map above stays the exported
+// stagings' form.
+const DYNAMIC_ARM_BASE_RECORDS = {
+  "specs/BASE.mdx": stagedMdx(
+    "T2.4-2 specs/BASE.mdx",
+    DYNAMIC_ARM_BASE_FILES["specs/BASE.mdx"],
+  ),
+} as const;
+
 /** The byte range of `expression` when it follows `prefix` in the file. */
 function expressionRange(
   prefix: string,
@@ -530,20 +545,68 @@ export const T2_4_2_UNPARSEABLE_STAGINGS: readonly UnparseableStaging[] =
   });
 
 /**
+ * One arm's two stagings (`stageDynamicForm`), evaluated once at module
+ * load. A form 14.20 admits carries its two staged-source records: every
+ * arm workspace after the body's first is created after its first product
+ * invocation (S-9's timing clause), and the table converts uniformly. A
+ * TypeScript-only form's stagings stay plain, declared unparseable where
+ * staged — the exported `T2_4_2_UNPARSEABLE_STAGINGS`, the same
+ * construction.
+ */
+type DynamicFormStagings =
+  | {
+      readonly arm: DynamicFormArm;
+      readonly d: RejectedFormStaging;
+      readonly text: RejectedFormStaging;
+      /** The records of a form 14.20 admits: `d.source`, `text.source`. */
+      readonly records: { readonly d: StagedMdx; readonly text: StagedMdx };
+    }
+  | {
+      readonly arm: DynamicFormArm;
+      readonly d: RejectedFormStaging;
+      readonly text: RejectedFormStaging;
+      readonly records?: undefined;
+      /** A TypeScript-only form: `arm.unparseableAt`. */
+      readonly unparseableAt: number;
+    };
+
+const DYNAMIC_FORM_STAGINGS: readonly DynamicFormStagings[] =
+  DYNAMIC_FORM_ARMS.map((arm): DynamicFormStagings => {
+    const { d, text } = stageDynamicForm(arm);
+    if (arm.unparseableAt !== undefined) {
+      return { arm, d, text, unparseableAt: arm.unparseableAt };
+    }
+    return {
+      arm,
+      d,
+      text,
+      records: {
+        d: stagedMdx(`T2.4-2 ${arm.name} in \`d\` specs/A.mdx`, d.source),
+        text: stagedMdx(
+          `T2.4-2 ${arm.name} in \`text(...)\` specs/A.mdx`,
+          text.source,
+        ),
+      },
+    };
+  });
+
+/**
  * Run one dynamic-form arm: `build --json` exits 1 with exactly one finding,
  * condition 14.8, located within the offending construct's own byte window
  * in `specs/A.mdx` (SPEC 14: errors identify file and location) — or, where
- * `exactRange` is given, exactly at that range (SPEC 14; T14-11).
+ * `exactRange` is given, exactly at that range (SPEC 14; T14-11). `source`
+ * is `staging.source` as its staged-source record.
  */
 async function runDynamicFormArm(
   product: ProductBinding,
   staging: RejectedFormStaging,
+  source: StagedMdx,
   exactRange: { readonly start: number; readonly end: number } | undefined,
   context: string,
 ): Promise<void> {
   await withWorkspace(
     SPECS_ONLY_CONFIG,
-    { ...DYNAMIC_ARM_BASE_FILES, "specs/A.mdx": staging.source },
+    { ...DYNAMIC_ARM_BASE_RECORDS, "specs/A.mdx": source },
     async (workspace) => {
       const findings = await buildFindings(product, workspace, context);
       assertConditionCounts(
@@ -586,7 +649,7 @@ async function runUnparseableFormArm(
 ): Promise<void> {
   await withWorkspace(
     SPECS_ONLY_CONFIG,
-    { ...DYNAMIC_ARM_BASE_FILES, "specs/A.mdx": source },
+    { ...DYNAMIC_ARM_BASE_RECORDS, "specs/A.mdx": source },
     async (workspace) => {
       const findings = await buildFindings(product, workspace, context);
       assertConditionCounts(
@@ -614,16 +677,17 @@ const T2_4_2 = defineProductTest({
   title:
     'each dynamic form — template literal argument; identifier or call as index; optional chaining; parenthesized chain; conditional expression; the "another meaning" case `BASE.a<X>y`, two comparisons, its `d` finding at the whole expression — fails with 14.8, in `d` and in `text(...)`, in MDX, while TypeScript-only syntax — a non-null assertion, a type assertion — is 14.20 alone at the offset SPEC 14\'s syntax-failure rule fixes (SPEC 2.4, 14.8, 14.20)',
   run: async (product) => {
-    for (const arm of DYNAMIC_FORM_ARMS) {
+    for (const entry of DYNAMIC_FORM_STAGINGS) {
       // The form in `d` and in `text(...)` (`stageDynamicForm`): the
       // TypeScript-only forms' stagings are the exported
       // `T2_4_2_UNPARSEABLE_STAGINGS`, driven here by the same construction.
-      const { d: dStaging, text: textStaging } = stageDynamicForm(arm);
+      const { arm, d: dStaging, text: textStaging } = entry;
       const dContext = `T2.4-2 \`build --json\` with ${arm.name} in \`d\``;
-      if (arm.unparseableAt === undefined) {
+      if (entry.records !== undefined) {
         await runDynamicFormArm(
           product,
           dStaging,
+          entry.records.d,
           arm.exactExpressionRange === true ? dStaging.expression : undefined,
           dContext,
         );
@@ -631,21 +695,27 @@ const T2_4_2 = defineProductTest({
         await runUnparseableFormArm(
           product,
           dStaging.source,
-          syntaxFailureOffset(dStaging, arm.unparseableAt),
+          syntaxFailureOffset(dStaging, entry.unparseableAt),
           dContext,
         );
       }
 
       const textContext = `T2.4-2 \`build --json\` with ${arm.name} in \`text(...)\``;
-      if (arm.unparseableAt === undefined) {
+      if (entry.records !== undefined) {
         // An embedding's 14.8 is located by its full braced container (SPEC
         // 14), asserted within the construct's window as the sibling arms are.
-        await runDynamicFormArm(product, textStaging, undefined, textContext);
+        await runDynamicFormArm(
+          product,
+          textStaging,
+          entry.records.text,
+          undefined,
+          textContext,
+        );
       } else {
         await runUnparseableFormArm(
           product,
           textStaging.source,
-          syntaxFailureOffset(textStaging, arm.unparseableAt),
+          syntaxFailureOffset(textStaging, entry.unparseableAt),
           textContext,
         );
       }
@@ -666,9 +736,33 @@ const T2_4_2 = defineProductTest({
 const ARITY_PREAMBLE =
   '<S id="alpha">\nAlpha behavior.\n</S>\n\n<S id="beta">\nBeta behavior.\n</S>\n\n<S id="bad">\n';
 
-const ARITY_ARMS: readonly { name: string; construct: string }[] = [
-  { name: "zero arguments", construct: "{text()}" },
-  { name: "two arguments", construct: '{text("alpha", "beta")}' },
+/** One arity arm: the call, and the file it stands in as a record. */
+interface ArityArm {
+  readonly name: string;
+  readonly construct: string;
+  /** The preamble, the call, and the section's close, as `specs/A.mdx`. */
+  readonly source: StagedMdx;
+}
+
+/**
+ * Compose an arm's file into its staged-source record — the second arm's
+ * workspace is created after the body's first invocation (S-9's timing
+ * clause), and the table converts uniformly.
+ */
+function arityArm(name: string, construct: string): ArityArm {
+  return {
+    name,
+    construct,
+    source: stagedMdx(
+      `T2.4-3 text called with ${name} specs/A.mdx`,
+      ARITY_PREAMBLE + construct + "\n</S>\n",
+    ),
+  };
+}
+
+const ARITY_ARMS: readonly ArityArm[] = [
+  arityArm("zero arguments", "{text()}"),
+  arityArm("two arguments", '{text("alpha", "beta")}'),
 ];
 
 const T2_4_3 = defineProductTest({
@@ -680,7 +774,7 @@ const T2_4_3 = defineProductTest({
       const context = `T2.4-3 \`build --json\` with \`text\` called with ${arm.name}`;
       await withWorkspace(
         SPECS_ONLY_CONFIG,
-        { "specs/A.mdx": ARITY_PREAMBLE + arm.construct + "\n</S>\n" },
+        { "specs/A.mdx": arm.source },
         async (workspace) => {
           const findings = await buildFindings(product, workspace, context);
           assertConditionCounts(findings, { "14.8": 1 }, context);
@@ -708,8 +802,13 @@ const T2_4_3 = defineProductTest({
 // resolves to nothing — its single segment `a.b` can name no node — while
 // `BASE["a"]["b"]` and `BASE.a.b` resolve to node `a.b` and the same-file
 // local string `d={"a.b"}` names the whole dotted *path* (SPEC 2.2).
-const SEGMENT_EXACT_BASE =
-  '<S id="a">\nA text.\n\n<S id="a.b">\nB text.\n</S>\n</S>\n';
+// Staged in all four arms' workspaces, the three after the first created
+// after the body's first invocation — a staged-source record (S-9's
+// timing clause).
+const SEGMENT_EXACT_BASE = stagedMdx(
+  "T2.4-4 specs/BASE.mdx",
+  '<S id="a">\nA text.\n\n<S id="a.b">\nB text.\n</S>\n</S>\n',
+);
 
 // 14.5 arm: the dotted computed index in `d`.
 const T2_4_4_D_PREFIX = 'import BASE from "./BASE.xspec"\n\n';
@@ -720,8 +819,11 @@ const T2_4_4_D_SOURCE =
 // 14.6 arm: the same chain as the `text(...)` argument.
 const T2_4_4_TEXT_PREFIX = 'import BASE from "./BASE.xspec"\n\n<S id="bad">\n';
 const T2_4_4_TEXT_CONSTRUCT = '{text(BASE["a.b"])}';
-const T2_4_4_TEXT_SOURCE =
-  T2_4_4_TEXT_PREFIX + T2_4_4_TEXT_CONSTRUCT + "\n</S>\n";
+// The 14.6 arm's workspace follows the 14.5 arm's invocation: a record.
+const T2_4_4_TEXT_SOURCE = stagedMdx(
+  "T2.4-4 text arm specs/A.mdx",
+  T2_4_4_TEXT_PREFIX + T2_4_4_TEXT_CONSTRUCT + "\n</S>\n",
+);
 
 // 14.7 arm: the same chain as a TypeScript dependency marker (SPEC 4.5). The
 // file is staged valid first — `BASE.a` is a resolving marker — so the
@@ -743,30 +845,34 @@ const T2_4_4_MARKER_CONSUMER =
 // same-named nodes are the decoys — a product resolving the local string in
 // the imported file records `to: specs/BASE.mdx#a.b` and fails the exact
 // edge-set comparison.
-const T2_4_4_POSITIVE_SOURCE = [
-  'import BASE from "./BASE.xspec"',
-  "",
-  '<S id="a">',
-  "Local a text.",
-  "",
-  '<S id="a.b">',
-  "Local b text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="viaBrackets" d={BASE["a"]["b"]}>',
-  "Segment-per-index computed chain.",
-  "</S>",
-  "",
-  '<S id="viaDots" d={BASE.a.b}>',
-  "Dot chain.",
-  "</S>",
-  "",
-  '<S id="viaLocal" d={"a.b"}>',
-  "Local string naming the two-segment path.",
-  "</S>",
-  "",
-].join("\n");
+// The positive arms' workspace is the body's last: a record.
+const T2_4_4_POSITIVE_SOURCE = stagedMdx(
+  "T2.4-4 positive arms specs/A.mdx",
+  [
+    'import BASE from "./BASE.xspec"',
+    "",
+    '<S id="a">',
+    "Local a text.",
+    "",
+    '<S id="a.b">',
+    "Local b text.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="viaBrackets" d={BASE["a"]["b"]}>',
+    "Segment-per-index computed chain.",
+    "</S>",
+    "",
+    '<S id="viaDots" d={BASE.a.b}>',
+    "Dot chain.",
+    "</S>",
+    "",
+    '<S id="viaLocal" d={"a.b"}>',
+    "Local string naming the two-segment path.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T2_4_4 = defineProductTest({
   id: "T2.4-4",

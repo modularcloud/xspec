@@ -91,7 +91,10 @@ import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
+import type {
+  InitialFileContents,
+  WorkspaceMdxDecl,
+} from "../../helpers/workspace.js";
 import type {
   FindingSourceExpectation,
   UnparseableStaging,
@@ -155,7 +158,7 @@ function invalidPropSource(construct: string): string {
  */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
   mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
@@ -380,6 +383,25 @@ const FOREIGN_CONSTRUCT_ARMS: readonly ForeignConstructArm[] = [
   },
 ];
 
+/** A foreign-construct arm with its file as a staged-source record. */
+interface ForeignConstructStaging {
+  readonly arm: ForeignConstructArm;
+  /** `arm.prefix + arm.construct + arm.suffix`, staged as `specs/A.mdx`. */
+  readonly source: StagedMdx;
+}
+
+// The arms' files, composed once at module load: every arm workspace after
+// the body's first is created after its first invocation (S-9's timing
+// clause), and the table converts uniformly.
+const FOREIGN_CONSTRUCT_STAGINGS: readonly ForeignConstructStaging[] =
+  FOREIGN_CONSTRUCT_ARMS.map((arm) => ({
+    arm,
+    source: stagedMdx(
+      `T2.7-1 ${arm.name} specs/A.mdx`,
+      arm.prefix + arm.construct + arm.suffix,
+    ),
+  }));
+
 // The enclosed-construct arms: a construct spelled on its own line inside
 // `sec`, invalid (14.16) yet creating no node and preserved as content.
 // (a) The section-in-container arm. SPEC 2.7: a section is an MDX element
@@ -487,7 +509,7 @@ function enclosedConstructFixture(construct: string): EnclosedConstructFixture {
 }
 
 /** One enclosed-construct arm: its fixture and how its assertions read. */
-interface EnclosedConstructArm {
+interface EnclosedConstructArmParts {
   readonly fixture: EnclosedConstructFixture;
   /** The arm's name in contexts. */
   readonly name: string;
@@ -501,44 +523,68 @@ interface EnclosedConstructArm {
   readonly treeShape: string;
 }
 
-const T2_7_1_CONTAINER_ARM: EnclosedConstructArm = {
-  fixture: enclosedConstructFixture('{<S id="x">Inner x text.</S>}'),
-  name: "a section spelled inside an expression container",
-  soleFinding:
-    "exactly one condition-16 finding, the container's, and none beside — " +
-    "the `<S>` spelled inside it is part of the container's expression, " +
-    "earning no finding of its own (SPEC 2.7, 14.16)",
-  rangeRule:
-    "the 14.16 finding locates the expression container from its opening " +
-    "brace through its closing brace, as byte offsets (SPEC 14, 1.7)",
-  noNode:
-    'no node for the `<S id="x">` spelled inside the expression container — ' +
-    "it is part of the container's expression, never a section",
-  treeShape:
-    "the section tree by construct nesting — the root, `ok`, and `sec`, no " +
-    'node for the enclosed `<S id="x">` — with the container\'s bytes ' +
-    "preserved byte-for-byte as content in `sec`'s own and subtree text",
-};
+/** The arm with its fixture's bytes as a staged-source record. */
+interface EnclosedConstructArm extends EnclosedConstructArmParts {
+  /** `fixture.source` as the record `runEnclosedConstructArm` stages. */
+  readonly source: StagedMdx;
+}
 
-const T2_7_1_FRAGMENT_ARM: EnclosedConstructArm = {
-  fixture: enclosedConstructFixture("<>Fragment text.</>"),
-  name: "a fragment (`<>` through `</>`)",
-  soleFinding:
-    "exactly one condition-16 finding, the fragment's, and none beside — a " +
-    "fragment is an invalid element, and the content it encloses earns no " +
-    "finding of its own (SPEC 2.7, 14.16)",
-  rangeRule:
-    "the 14.16 finding locates the fragment from `<>` through `</>`, as " +
-    "byte offsets (SPEC 14, 1.7)",
-  noNode:
-    "no node for the fragment — an invalid element is no section and " +
-    "creates no node, and this one encloses no section",
-  treeShape:
-    "the section tree by construct nesting — the root, `ok`, and `sec`, no " +
-    "node for the fragment — with the fragment and its enclosed content " +
-    "preserved byte-for-byte as content in `sec`'s own and subtree text (a " +
-    "stray element is preserved by its own tags, SPEC 11.2)",
-};
+/**
+ * Compose an arm with its record, named for the test that runs it: the
+ * arm's workspace is created after that body's earlier invocations (S-9's
+ * timing clause).
+ */
+function enclosedConstructArm(
+  recordName: string,
+  parts: EnclosedConstructArmParts,
+): EnclosedConstructArm {
+  return { ...parts, source: stagedMdx(recordName, parts.fixture.source) };
+}
+
+const T2_7_1_CONTAINER_ARM = enclosedConstructArm(
+  "T2.7-1 a section spelled inside an expression container specs/A.mdx",
+  {
+    fixture: enclosedConstructFixture('{<S id="x">Inner x text.</S>}'),
+    name: "a section spelled inside an expression container",
+    soleFinding:
+      "exactly one condition-16 finding, the container's, and none beside — " +
+      "the `<S>` spelled inside it is part of the container's expression, " +
+      "earning no finding of its own (SPEC 2.7, 14.16)",
+    rangeRule:
+      "the 14.16 finding locates the expression container from its opening " +
+      "brace through its closing brace, as byte offsets (SPEC 14, 1.7)",
+    noNode:
+      'no node for the `<S id="x">` spelled inside the expression container — ' +
+      "it is part of the container's expression, never a section",
+    treeShape:
+      "the section tree by construct nesting — the root, `ok`, and `sec`, no " +
+      'node for the enclosed `<S id="x">` — with the container\'s bytes ' +
+      "preserved byte-for-byte as content in `sec`'s own and subtree text",
+  },
+);
+
+const T2_7_1_FRAGMENT_ARM = enclosedConstructArm(
+  "T2.7-1 a fragment specs/A.mdx",
+  {
+    fixture: enclosedConstructFixture("<>Fragment text.</>"),
+    name: "a fragment (`<>` through `</>`)",
+    soleFinding:
+      "exactly one condition-16 finding, the fragment's, and none beside — a " +
+      "fragment is an invalid element, and the content it encloses earns no " +
+      "finding of its own (SPEC 2.7, 14.16)",
+    rangeRule:
+      "the 14.16 finding locates the fragment from `<>` through `</>`, as " +
+      "byte offsets (SPEC 14, 1.7)",
+    noNode:
+      "no node for the fragment — an invalid element is no section and " +
+      "creates no node, and this one encloses no section",
+    treeShape:
+      "the section tree by construct nesting — the root, `ok`, and `sec`, no " +
+      "node for the fragment — with the fragment and its enclosed content " +
+      "preserved byte-for-byte as content in `sec`'s own and subtree text (a " +
+      "stray element is preserved by its own tags, SPEC 11.2)",
+  },
+);
 
 /** Every node of a view tree, document order (explicit stack, AGENTS.md). */
 function everyViewNode(root: ViewNode): ViewNode[] {
@@ -589,7 +635,7 @@ async function runEnclosedConstructArm(
 ): Promise<void> {
   await withWorkspace(
     SPECS_ONLY_CONFIG,
-    { [T2_7_1_ENCLOSED_FILE]: arm.fixture.source },
+    { [T2_7_1_ENCLOSED_FILE]: arm.source },
     async (workspace) => {
       const buildContext = `${testId} \`build --json\` with ${arm.name}`;
       assertEnclosedConstructFinding(
@@ -665,11 +711,11 @@ const T2_7_1 = defineProductTest({
   title:
     "a JSX element other than `<S>`/`<Spec>`, an expression container other than `text(...)` or an MDX comment, and an export statement each fail with 14.16; a fragment is one 14.16 from `<>` through `</>`, no node, its enclosed content preserved under `view --text`; an attribute value expression is part of its element — `<S id=\"x\" d={1}>` reports 14.8 alone and `<div a={1}></div>` exactly one 14.16; a section spelled inside an expression container is part of the container's expression — one 14.16 brace through brace, no node in the view's tree, its bytes content in the enclosing text (SPEC 2.7, 14.16, 11.2, 11.4)",
   run: async (product) => {
-    for (const arm of FOREIGN_CONSTRUCT_ARMS) {
+    for (const { arm, source } of FOREIGN_CONSTRUCT_STAGINGS) {
       const context = `T2.7-1 \`build --json\` with ${arm.name}`;
       await withWorkspace(
         SPECS_ONLY_CONFIG,
-        { "specs/A.mdx": arm.prefix + arm.construct + arm.suffix },
+        { "specs/A.mdx": source },
         async (workspace) => {
           const findings = await buildFindings(product, workspace, context);
           assertConditionCounts(
@@ -1375,11 +1421,35 @@ const INVALID_PROP_ARMS: readonly InvalidPropArm[] = [
   },
 ];
 
+/** An invalid-prop arm with its one-defect file as a record. */
+interface InvalidPropStaging {
+  readonly arm: InvalidPropArm;
+  /** `invalidPropSource(arm.construct)`, staged as `specs/A.mdx`. */
+  readonly source: StagedMdx;
+}
+
+// The arms' files, composed once at module load: every arm workspace after
+// the body's first is created after its first invocation (S-9's timing
+// clause), and the table converts uniformly.
+const INVALID_PROP_STAGINGS: readonly InvalidPropStaging[] =
+  INVALID_PROP_ARMS.map((arm) => ({
+    arm,
+    source: stagedMdx(
+      `T2.7-3 ${arm.name} ${INVALID_PROP_FILE}`,
+      invalidPropSource(arm.construct),
+    ),
+  }));
+
 // A repeated unknown prop is simultaneously repeated and unknown — two causes
 // of the one condition 14.17, so SPEC fixes the condition of every finding
 // but not one exact count. Its arm asserts all findings are 14.17 at the
 // construct instead of a count.
 const REPEATED_UNKNOWN_CONSTRUCT = '<S id="sec" wibble="a" wibble="b">';
+// Its workspace follows the arms' invocations: a staged-source record.
+const REPEATED_UNKNOWN_SOURCE = stagedMdx(
+  "T2.7-3 a repeated unknown prop specs/A.mdx",
+  invalidPropSource(REPEATED_UNKNOWN_CONSTRUCT),
+);
 
 // The spread grammar pair's ill-formed half (SPEC 14.20: a spread attribute's
 // braces hold `...` followed by exactly one AssignmentExpression, so
@@ -1426,8 +1496,12 @@ export const T2_7_3_SPREAD_UNPARSEABLE_STAGING: UnparseableStaging = {
 // graph-data bytes are not pinned across the *different* sources: SPEC fixes
 // their information, not their bytes (13.1, 13.3; H-4) — the T1.1-2
 // tag-equivalence precedent.
-const T2_7_3_DOUBLE_QUOTED =
-  '<S id="login" coverage="none" tags="a b">\nLogin behavior.\n</S>\n';
+// The quoting arm's workspace follows the invalid-prop arms' invocations:
+// a staged-source record (S-9's timing clause).
+const T2_7_3_DOUBLE_QUOTED = stagedMdx(
+  "T2.7-3 specs/A.mdx with double-quoted id/coverage/tags values",
+  '<S id="login" coverage="none" tags="a b">\nLogin behavior.\n</S>\n',
+);
 // Staged after the double-quoted variant's build and queries — a
 // staged-source record (S-9, test/self/s9-staged-sources.test.ts).
 const T2_7_3_SINGLE_QUOTED = stagedMdx(
@@ -1446,12 +1520,12 @@ const T2_7_3 = defineProductTest({
     // (T11.4-3 stages the same bytes for `view`).
     assertValuelessTagsFixture();
 
-    for (const arm of INVALID_PROP_ARMS) {
+    for (const { arm, source } of INVALID_PROP_STAGINGS) {
       const context = `T2.7-3 \`build --json\` with ${arm.name}`;
       const { forbids } = arm;
       await withWorkspace(
         SPECS_ONLY_CONFIG,
-        { [INVALID_PROP_FILE]: invalidPropSource(arm.construct) },
+        { [INVALID_PROP_FILE]: source },
         async (workspace) => {
           const findings = await buildFindings(product, workspace, context);
           if (forbids !== undefined) {
@@ -1546,7 +1620,7 @@ const T2_7_3 = defineProductTest({
       "T2.7-3 `build --json` with a repeated unknown prop";
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [INVALID_PROP_FILE]: invalidPropSource(REPEATED_UNKNOWN_CONSTRUCT) },
+      { [INVALID_PROP_FILE]: REPEATED_UNKNOWN_SOURCE },
       async (workspace) => {
         const findings = await buildFindings(
           product,
@@ -1924,22 +1998,25 @@ async function runCommentForms(product: ProductBinding): Promise<void> {
 // enclosed-construct machinery pins the one finding brace through brace, the
 // view's tree without a node for it, its bytes preserved as content (11.2),
 // and no `comments` entry.
-const T2_7_4_EXPRESSION_ARM: EnclosedConstructArm = {
-  fixture: enclosedConstructFixture("{/* a */ 1}"),
-  name: "an expression beside a comment (`{/* a */ 1}`)",
-  soleFinding:
-    "exactly one condition-16 finding, the container's, and none beside — " +
-    "an expression beside comments is no comment but an invalid expression " +
-    "container, the grammar deriving its content (SPEC 2.7, 14.16)",
-  rangeRule:
-    "the 14.16 finding locates the expression container from its opening " +
-    "brace through its closing brace, as byte offsets (SPEC 14, 1.7)",
-  noNode: "no node within the container — it encloses no section",
-  treeShape:
-    "the section tree by construct nesting — the root, `ok`, and `sec` — " +
-    "with the container's bytes preserved byte-for-byte as content in " +
-    "`sec`'s own and subtree text (the by-form classification of 11.2)",
-};
+const T2_7_4_EXPRESSION_ARM = enclosedConstructArm(
+  "T2.7-4 an expression beside a comment specs/A.mdx",
+  {
+    fixture: enclosedConstructFixture("{/* a */ 1}"),
+    name: "an expression beside a comment (`{/* a */ 1}`)",
+    soleFinding:
+      "exactly one condition-16 finding, the container's, and none beside — " +
+      "an expression beside comments is no comment but an invalid expression " +
+      "container, the grammar deriving its content (SPEC 2.7, 14.16)",
+    rangeRule:
+      "the 14.16 finding locates the expression container from its opening " +
+      "brace through its closing brace, as byte offsets (SPEC 14, 1.7)",
+    noNode: "no node within the container — it encloses no section",
+    treeShape:
+      "the section tree by construct nesting — the root, `ok`, and `sec` — " +
+      "with the container's bytes preserved byte-for-byte as content in " +
+      "`sec`'s own and subtree text (the by-form classification of 11.2)",
+  },
+);
 
 /**
  * A form 2.7 makes unparseable (14.20), staged alone under S-9's

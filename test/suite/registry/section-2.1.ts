@@ -34,9 +34,11 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -84,14 +86,12 @@ const BACKSLASH = String.fromCodePoint(0x5c);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
   config: string = SPECS_ONLY_CONFIG,
-  mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
-    mdx,
   });
   try {
     return await body(workspace);
@@ -110,9 +110,14 @@ async function withWorkspace<T>(
 // exact-count assertion.
 const IMPORTING_FILE_REST = '\n\n<S id="alpha">\nAlpha behavior.\n</S>\n';
 
-// A valid imported module for arms where the target file legitimately exists.
+// A valid imported module for arms where the target file legitimately
+// exists — a staged-source record, since T2.1-2's and T2.1-3's later arms
+// stage it after their bodies' first invocations (S-9's timing clause).
 const VALID_BASE_FILES = {
-  "specs/BASE.mdx": '<S id="core">\nCore behavior.\n</S>\n',
+  "specs/BASE.mdx": stagedMdx(
+    "T2.1-2/T2.1-3 specs/BASE.mdx",
+    '<S id="core">\nCore behavior.\n</S>\n',
+  ),
 } as const;
 
 /** One invalid-import arm: a workspace differing only in its import line. */
@@ -122,7 +127,7 @@ interface InvalidImportArm {
   /** The offending import statement, staged at the very start of the file. */
   readonly importLine: string;
   /** Files staged beside the importing file and the configuration. */
-  readonly extraFiles: Readonly<Record<string, string>>;
+  readonly extraFiles: Readonly<Record<string, InitialFileContents>>;
   /** Configuration override (defaults to SPECS_ONLY_CONFIG). */
   readonly config?: string;
   /**
@@ -133,6 +138,33 @@ interface InvalidImportArm {
   readonly outsideFiles?: Readonly<Record<string, string>>;
 }
 
+/** An invalid-import arm with its staged `specs/A.mdx` as a record. */
+interface InvalidImportStaging {
+  readonly arm: InvalidImportArm;
+  /** `arm.importLine + IMPORTING_FILE_REST`, the file the arm stages. */
+  readonly source: StagedMdx;
+}
+
+/**
+ * Pair each arm of `testId` with its importing file as a staged-source
+ * record, composed once at module load — the arms' workspaces (all but a
+ * body's first) are created after the body's first product invocation, so
+ * S-9's timing clause makes each a ledger record; the whole table converts
+ * uniformly.
+ */
+function invalidImportStagings(
+  testId: string,
+  arms: readonly InvalidImportArm[],
+): readonly InvalidImportStaging[] {
+  return arms.map((arm) => ({
+    arm,
+    source: stagedMdx(
+      `${testId} ${arm.name} specs/A.mdx`,
+      arm.importLine + IMPORTING_FILE_REST,
+    ),
+  }));
+}
+
 /**
  * Run one invalid-import arm: `build --json` exits 1 with exactly one
  * finding, condition 14.15, located within the import statement's own byte
@@ -140,14 +172,14 @@ interface InvalidImportArm {
  */
 async function runInvalidImportArm(
   product: ProductBinding,
-  arm: InvalidImportArm,
+  { arm, source }: InvalidImportStaging,
   testId: string,
 ): Promise<void> {
   const context = `${testId} \`build --json\` over ${arm.name}`;
   await withWorkspace(
     {
       ...arm.extraFiles,
-      "specs/A.mdx": arm.importLine + IMPORTING_FILE_REST,
+      "specs/A.mdx": source,
     },
     async (workspace) => {
       await stageBesideRoot(workspace, arm.outsideFiles ?? {});
@@ -260,7 +292,10 @@ const INVALID_SPECIFIER_ARMS: readonly InvalidImportArm[] = [
     importLine: 'import EXTRA from "../docs/EXTRA.xspec"',
     extraFiles: {
       ...VALID_BASE_FILES,
-      "docs/EXTRA.mdx": '<S id="extra">\nOutside every spec group.\n</S>\n',
+      "docs/EXTRA.mdx": stagedMdx(
+        "T2.1-2 docs/EXTRA.mdx matched by no spec group",
+        '<S id="extra">\nOutside every spec group.\n</S>\n',
+      ),
     },
   },
   {
@@ -277,7 +312,10 @@ const INVALID_SPECIFIER_ARMS: readonly InvalidImportArm[] = [
     importLine: 'import EXTRA from "../docs/EXTRA.xspec"',
     extraFiles: {
       ...VALID_BASE_FILES,
-      "docs/EXTRA.mdx": "export {};\n",
+      "docs/EXTRA.mdx": stagedMdx(
+        "T2.1-2 docs/EXTRA.mdx matched only by a code group",
+        "export {};\n",
+      ),
     },
     config: SPECS_AND_DOCS_CODE_CONFIG,
   },
@@ -304,6 +342,11 @@ const INVALID_SPECIFIER_ARMS: readonly InvalidImportArm[] = [
     extraFiles: VALID_BASE_FILES,
   },
 ];
+
+const INVALID_SPECIFIER_STAGINGS = invalidImportStagings(
+  "T2.1-2",
+  INVALID_SPECIFIER_ARMS,
+);
 
 // T2.1-2, positive arm: `../` resolves against the importing file's
 // directory. Run from the workspace root, `../BASE.xspec` resolves correctly
@@ -352,6 +395,20 @@ function lexicalImporterSource(importer: {
   ].join("\n");
 }
 
+// The lexical workspace is created after the `../` arm's invocations, so
+// its four importers are staged-source records, computed once at module
+// load from the table above (S-9's timing clause).
+const LEXICAL_IMPORTER_FILES: Readonly<Record<string, StagedMdx>> =
+  Object.fromEntries(
+    LEXICAL_IMPORTERS.map((importer) => [
+      importer.file,
+      stagedMdx(
+        `T2.1-2 lexical importer ${importer.file}`,
+        lexicalImporterSource(importer),
+      ),
+    ]),
+  );
+
 const T2_1_2 = defineProductTest({
   id: "T2.1-2",
   title: `\`../\` specifiers resolve against the importing file's directory, and resolution is lexical: \`./sub/../BASE.xspec\` (no \`sub/\` on disk), \`.//BASE.xspec\`, \`././BASE.xspec\`, and \`../specs/BASE.xspec\` each designate specs/BASE.mdx — the import valid, the reference through it resolving, \`view\` reporting the resolved target; absolute, bare, non-\`.xspec\`, undiscovered-target (an \`.mdx\` matched by no group; one matched only by a code group), nonexistent-target, above-the-root (a real \`outside/BASE.mdx\` at the root's parent), and escape-spelled ("./B${BACKSLASH}u0041SE.xspec", read verbatim) specifiers each fail with 14.15 (SPEC 2.1, 2.4, 14.15; T11.4-4)`,
@@ -394,15 +451,7 @@ const T2_1_2 = defineProductTest({
     // Lexical positives: one workspace, four non-canonical spellings of
     // specs/BASE.mdx, no specs/sub/ on disk (module comment above).
     await withWorkspace(
-      {
-        ...VALID_BASE_FILES,
-        ...Object.fromEntries(
-          LEXICAL_IMPORTERS.map((importer) => [
-            importer.file,
-            lexicalImporterSource(importer),
-          ]),
-        ),
-      },
+      { ...VALID_BASE_FILES, ...LEXICAL_IMPORTER_FILES },
       async (workspace) => {
         await buildOk(
           product,
@@ -469,8 +518,8 @@ const T2_1_2 = defineProductTest({
         }
       },
     );
-    for (const arm of INVALID_SPECIFIER_ARMS) {
-      await runInvalidImportArm(product, arm, "T2.1-2");
+    for (const staging of INVALID_SPECIFIER_STAGINGS) {
+      await runInvalidImportArm(product, staging, "T2.1-2");
     }
   },
 });
@@ -510,33 +559,46 @@ const INVALID_BINDING_ARMS: readonly InvalidImportArm[] = [
   },
 ];
 
+const INVALID_BINDING_STAGINGS = invalidImportStagings(
+  "T2.1-3",
+  INVALID_BINDING_ARMS,
+);
+
 // T2.1-3, positive arm: two imports binding the same module under different
 // names. Each binding is exercised by its own section's `d` reference, so
-// validity is grounded in both bindings actually resolving.
-const TWO_LEAF_BASE_SOURCE = [
-  '<S id="a">',
-  "Leaf a.",
-  "</S>",
-  "",
-  '<S id="b">',
-  "Leaf b.",
-  "</S>",
-  "",
-].join("\n");
+// validity is grounded in both bindings actually resolving. The arm's
+// workspace is created after the invalid-binding arms' invocations, so both
+// sources are staged-source records (S-9's timing clause).
+const TWO_LEAF_BASE_SOURCE = stagedMdx(
+  "T2.1-3 two-names arm specs/BASE.mdx",
+  [
+    '<S id="a">',
+    "Leaf a.",
+    "</S>",
+    "",
+    '<S id="b">',
+    "Leaf b.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
-const TWO_NAMES_IMPORTER_SOURCE = [
-  'import BASE from "./BASE.xspec"',
-  'import ALSO from "./BASE.xspec"',
-  "",
-  '<S id="one" d={BASE.a}>',
-  "Uses the first binding.",
-  "</S>",
-  "",
-  '<S id="two" d={ALSO.b}>',
-  "Uses the second binding.",
-  "</S>",
-  "",
-].join("\n");
+const TWO_NAMES_IMPORTER_SOURCE = stagedMdx(
+  "T2.1-3 two-names arm specs/A.mdx",
+  [
+    'import BASE from "./BASE.xspec"',
+    'import ALSO from "./BASE.xspec"',
+    "",
+    '<S id="one" d={BASE.a}>',
+    "Uses the first binding.",
+    "</S>",
+    "",
+    '<S id="two" d={ALSO.b}>',
+    "Uses the second binding.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // T2.1-3, duplicate-binding arms: two imports of two different modules
 // binding the one identifier `BASE` (SPEC 2.1: no two imports in a file may
@@ -557,12 +619,48 @@ interface DuplicateBindingArm {
   readonly name: string;
   /** What stands between the declarations: one ESM block, or two. */
   readonly separator: "\n" | "\n\n";
+  /** The staged `specs/A.mdx`: both declarations, then the file's rest. */
+  readonly source: StagedMdx;
+}
+
+/**
+ * Compose an arm's `specs/A.mdx` into its staged-source record — the arms'
+ * workspaces are created after the body's first invocation (S-9's timing
+ * clause). S-9: two imports binding one identifier are an ECMAScript early
+ * error 14.20 admits — the named allowance. It covers the separate-blocks
+ * staging too: the stock parser judges all of a file's ESM blocks as one
+ * module, so it rejects the second declaration under the same rule beyond
+ * derivability ("Identifier 'BASE' has already been declared").
+ */
+function duplicateBindingArm(
+  name: string,
+  separator: DuplicateBindingArm["separator"],
+): DuplicateBindingArm {
+  return {
+    name,
+    separator,
+    source: stagedMdx(
+      `T2.1-3 two imports binding one identifier in ${name} specs/A.mdx`,
+      `${DUP_BINDING_FIRST}${separator}${DUP_BINDING_SECOND}${IMPORTING_FILE_REST}`,
+      { allowances: ["duplicate-import-binding"] },
+    ),
+  };
 }
 
 const DUPLICATE_BINDING_ARMS: readonly DuplicateBindingArm[] = [
-  { name: "one ESM block (consecutive lines)", separator: "\n" },
-  { name: "separate ESM blocks (a blank line between)", separator: "\n\n" },
+  duplicateBindingArm("one ESM block (consecutive lines)", "\n"),
+  duplicateBindingArm("separate ESM blocks (a blank line between)", "\n\n"),
 ];
+
+// The two modules the colliding imports designate, staged in both arms.
+const DUP_BINDING_B1 = stagedMdx(
+  "T2.1-3 duplicate-binding arms specs/B1.mdx",
+  '<S id="b1">\nFirst module.\n</S>\n',
+);
+const DUP_BINDING_B2 = stagedMdx(
+  "T2.1-3 duplicate-binding arms specs/B2.mdx",
+  '<S id="b2">\nSecond module.\n</S>\n',
+);
 
 /**
  * Run one duplicate-binding arm: `build --json` exits 1 and every finding is
@@ -579,12 +677,11 @@ async function runDuplicateBindingArm(
   const context =
     "T2.1-3 `build --json` over two imports binding the same identifier in " +
     arm.name;
-  const source = `${DUP_BINDING_FIRST}${arm.separator}${DUP_BINDING_SECOND}${IMPORTING_FILE_REST}`;
   await withWorkspace(
     {
-      "specs/B1.mdx": '<S id="b1">\nFirst module.\n</S>\n',
-      "specs/B2.mdx": '<S id="b2">\nSecond module.\n</S>\n',
-      "specs/A.mdx": source,
+      "specs/B1.mdx": DUP_BINDING_B1,
+      "specs/B2.mdx": DUP_BINDING_B2,
+      "specs/A.mdx": arm.source,
     },
     async (workspace) => {
       const findings = await buildFindings(product, workspace, context);
@@ -623,13 +720,6 @@ async function runDuplicateBindingArm(
         }
       }
     },
-    SPECS_ONLY_CONFIG,
-    // S-9: two imports binding one identifier are an ECMAScript early error
-    // 14.20 admits — the named allowance. It covers the separate-blocks
-    // staging too: the stock parser judges all of a file's ESM blocks as one
-    // module, so it rejects the second declaration under the same rule
-    // beyond derivability ("Identifier 'BASE' has already been declared").
-    { allowances: { "specs/A.mdx": ["duplicate-import-binding"] } },
   );
 }
 
@@ -638,8 +728,8 @@ const T2_1_3 = defineProductTest({
   title:
     "named, namespace, and side-effect-only imports, duplicate-identifier bindings (in one ESM block and in separate blocks — 14.15 in a well-formed file, never 14.20), and bindings of `S`/`Spec`/`text` each fail with 14.15; two imports binding one module under different names are valid (SPEC 2.1, 14.15, 14.20)",
   run: async (product) => {
-    for (const arm of INVALID_BINDING_ARMS) {
-      await runInvalidImportArm(product, arm, "T2.1-3");
+    for (const staging of INVALID_BINDING_STAGINGS) {
+      await runInvalidImportArm(product, staging, "T2.1-3");
     }
 
     // Positive arm: same module, two names — valid, and both bindings work.
@@ -777,8 +867,12 @@ const CYCLE_B_SOURCE = [
 
 // The self-import arm: the import cycle of length one exists whether or not
 // the binding is used, so it stays unused — the import itself is the defect.
-const SELF_IMPORT_SOURCE =
-  'import SELF from "./SELF.xspec"' + IMPORTING_FILE_REST;
+// Its workspace is created after the two-file arm's invocation, so the
+// source is a staged-source record (S-9's timing clause).
+const SELF_IMPORT_SOURCE = stagedMdx(
+  "T2.1-5 self-import specs/SELF.mdx",
+  'import SELF from "./SELF.xspec"' + IMPORTING_FILE_REST,
+);
 
 /**
  * Assert an import-cycle report: every finding is 14.9 (nothing else is

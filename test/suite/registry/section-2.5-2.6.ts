@@ -68,6 +68,7 @@ import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -186,7 +187,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -724,6 +725,30 @@ function coverageStaging(value: string): CoverageStaging {
   };
 }
 
+/** One invalid value's staging with its record. */
+interface InvalidCoverageStaging {
+  readonly value: string;
+  readonly staged: CoverageStaging;
+  /** `staged.source` as a staged-source record. */
+  readonly source: StagedMdx;
+}
+
+// The invalid values' stagings, computed once at module load: their
+// workspaces are created after the required-variant workspace's
+// invocations, so each is a staged-source record (S-9's timing clause).
+const INVALID_COVERAGE_STAGINGS: readonly InvalidCoverageStaging[] =
+  INVALID_COVERAGE_VALUES.map((value) => {
+    const staged = coverageStaging(value);
+    return {
+      value,
+      staged,
+      source: stagedMdx(
+        `T2.5-3 coverage=${JSON.stringify(value)} specs/A.mdx`,
+        staged.source,
+      ),
+    };
+  });
+
 /**
  * Assert `build --json` reported exactly one finding, condition 14.17,
  * locating exactly one range — the offending `coverage` attribute's own
@@ -849,14 +874,13 @@ const T2_5_3 = defineProductTest({
       },
     );
 
-    for (const value of INVALID_COVERAGE_VALUES) {
-      const staged = coverageStaging(value);
+    for (const { value, staged, source } of INVALID_COVERAGE_STAGINGS) {
       const context =
         `T2.5-3 \`build --json\` with coverage=${JSON.stringify(value)} ` +
         `(${coverageValueRationale(value)})`;
       await withWorkspace(
         SPECS_ONLY_CONFIG,
-        { "specs/A.mdx": staged.source },
+        { "specs/A.mdx": source },
         async (workspace) => {
           const findings = await buildFindings(product, workspace, context);
           assertSingle1417AtAttribute(findings, staged.attribute, context);
@@ -1172,25 +1196,30 @@ const T2_6_3_MD_COMPILED = "Parent text.\n\nChild text.\n\nInline kept text.\n";
 // Tag-selection workspace (SPEC 7.4, 7.5): `tagged` carries the profile's
 // target tag; `src` carries the policy's `from` tag and depends on `tagged`;
 // `untagged` and `srcPlain` carry no tags — their edge is the negative
-// control for the policy rule, and `untagged` for `targetTags`.
-const T2_6_3_SELECT_SOURCE = [
-  '<S id="tagged" tags="core">',
-  "Core-tagged leaf.",
-  "</S>",
-  "",
-  '<S id="untagged">',
-  "Untagged leaf.",
-  "</S>",
-  "",
-  '<S id="src" tags="ui" d={"tagged"}>',
-  "The ui-tagged source depends on the core-tagged leaf.",
-  "</S>",
-  "",
-  '<S id="srcPlain" d={"untagged"}>',
-  "The untagged source depends on the untagged leaf.",
-  "</S>",
-  "",
-].join("\n");
+// control for the policy rule, and `untagged` for `targetTags`. Its
+// workspace is created after the rendering workspace's invocations, so the
+// source is a staged-source record (S-9's timing clause).
+const T2_6_3_SELECT_SOURCE = stagedMdx(
+  "T2.6-3 tag-selection specs/A.mdx",
+  [
+    '<S id="tagged" tags="core">',
+    "Core-tagged leaf.",
+    "</S>",
+    "",
+    '<S id="untagged">',
+    "Untagged leaf.",
+    "</S>",
+    "",
+    '<S id="src" tags="ui" d={"tagged"}>',
+    "The ui-tagged source depends on the core-tagged leaf.",
+    "</S>",
+    "",
+    '<S id="srcPlain" d={"untagged"}>',
+    "The untagged source depends on the untagged leaf.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T2_6_3_TAGGED = "specs/A.mdx#tagged";
 const T2_6_3_UNTAGGED = "specs/A.mdx#untagged";

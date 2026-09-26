@@ -40,8 +40,10 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import type { UnparseableStaging } from "./support.js";
 import {
   assertConditionCounts,
@@ -81,7 +83,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -819,6 +821,51 @@ const T2_3_3_INVALID_FORMS: readonly {
   },
 ];
 
+/** One form staged in its section, with its record and its arm label. */
+interface T233ArmStaging {
+  /** The arm's name in contexts. */
+  readonly arm: string;
+  readonly form: string;
+  readonly staging: T233Staging;
+  /** `staging.source` as a staged-source record. */
+  readonly source: StagedMdx;
+}
+
+/**
+ * The forms of one kind staged in section `sectionId` (`stageT233`), each
+ * with its record — computed once at module load: every workspace but the
+ * body's first is created after its first product invocation, so S-9's
+ * timing clause makes each staging a ledger record, and the table converts
+ * uniformly.
+ */
+function t233ArmStagings(
+  kind: string,
+  sectionId: string,
+  forms: readonly { readonly label: string; readonly form: string }[],
+): readonly T233ArmStaging[] {
+  return forms.map(({ label, form }) => {
+    const staging = stageT233(sectionId, form);
+    const arm = `T2.3-3 ${kind} ${JSON.stringify(form)} (${label})`;
+    return {
+      arm,
+      form,
+      staging,
+      source: stagedMdx(`${arm} ${T2_3_3_FILE}`, staging.source),
+    };
+  });
+}
+
+const T2_3_3_EMBEDDING_STAGINGS = t233ArmStagings(
+  "embedding form",
+  "p",
+  T2_3_3_EMBEDDING_FORMS,
+);
+const T2_3_3_INVALID_STAGINGS = t233ArmStagings(
+  "invalid container",
+  "n",
+  T2_3_3_INVALID_FORMS,
+);
+
 // `{text("a") text("b")}`: no expression the grammar derives — 14.20 (SPEC
 // 2.7), never 14.16 — its zero-length range at the offset SPEC 14's
 // syntax-failure rule fixes: the byte length of the longest whole-character
@@ -902,12 +949,10 @@ const T2_3_3 = defineProductTest({
     'an embedding is a container whose one expression is a plain `text(...)` call, whatever whitespace and comments stand beside it: five forms (the run-on `{// c}` form included) each build clean, record their `embeds` edge and a full-container occurrence with no `comments` entry, and compile to the target\'s subtree text (byte-asserted); five invalid-container forms are each one 14.16 finding brace through brace — never 14.6 or 14.8 — with no occurrence, their bytes content under `view --text`; and `{text("a") text("b")}` is 14.20 at the offset of the second `text` (SPEC 2.3, 2.4, 2.7, 3, 5.7, 11.2, 11.4, 14.16, 14.20)',
   run: async (product) => {
     // --- the embedding forms, each staged alone in section `p` ---------------
-    for (const { label, form } of T2_3_3_EMBEDDING_FORMS) {
-      const staging = stageT233("p", form);
-      const arm = `T2.3-3 embedding form ${JSON.stringify(form)} (${label})`;
+    for (const { arm, staging, source } of T2_3_3_EMBEDDING_STAGINGS) {
       await withWorkspace(
         EMIT_TRUE_CONFIG,
-        { [T2_3_3_FILE]: staging.source },
+        { [T2_3_3_FILE]: source },
         async (workspace) => {
           await expectFindingFreeReport(
             product,
@@ -980,12 +1025,10 @@ const T2_3_3 = defineProductTest({
     }
 
     // --- the invalid-container forms, each staged alone in section `n` ------
-    for (const { label, form } of T2_3_3_INVALID_FORMS) {
-      const staging = stageT233("n", form);
-      const arm = `T2.3-3 invalid container ${JSON.stringify(form)} (${label})`;
+    for (const { arm, form, staging, source } of T2_3_3_INVALID_STAGINGS) {
       await withWorkspace(
         SPECS_ONLY_CONFIG,
-        { [T2_3_3_FILE]: staging.source },
+        { [T2_3_3_FILE]: source },
         async (workspace) => {
           const buildContext = `${arm} \`build --json\``;
           const findings = await buildFindings(
