@@ -876,6 +876,72 @@ record tests); certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23
 `certification run against` lines; the ledger-wide duplicate-bytes probe 613 records
 in 28 groups, none changed since Task 15.
 
+**Resolved by Task 17 (the §11, §11.2, and §11.3 modules; the first commit
+converts, the closing commit records).** Twenty-seven new records, one existing
+record reused. `section-11.ts` 3 — T11-2's shared map `T11_2_FILES` (spread into
+its workspace and its configuration-state twins, the twins behind its diagnosed
+failure): `T11_2_A_STAGED` / `T11_2_B_STAGED` (`"T11-2 specs/alpha/A.mdx"`,
+`"T11-2 specs/beta/B.mdx"`) made from the strings the range pins use; T11-4's
+`T11_4_SOURCE` wrapped in place (`"T11-4 specs/E.mdx"`; its map spread into the
+workspace and the reached twins); the two maps and `withWorkspace`'s `files`
+widened; T11-7's two directories are both created before either run
+(`assertAcrossDirectoriesDeterministic`, Task 7's T5.5-1 precedent), so
+`T11_7_FILES` stays plain. `section-11.2.ts` 13 — the finding-free `specs/C.mdx`
+that T11.2-1, T11.2-5, and T11.2-6 stage (T11.2-6's third fixture at
+`specs/A.mdx` too) is ONE record `C_STAGED` (`"T11.2-1/T11.2-5/T11.2-6
+specs/C.mdx (…)"`) staged at all seven sites; `OK_STAGED` (`"T11.2-3/T11.3-1
+specs/OK.mdx …"`) and `R_STAGED` (`"T11.2-4/T11.3-1 specs/R.mdx …"`) exported
+beside the kept `OK_SOURCE` / `R_SOURCE` strings, T11.2-3's and T11.2-4's first
+workspaces taking them; T11.2-4's later workspaces — `CH_A_STAGED` /
+`CH_B_STAGED` / `CH_C_STAGED`, `CY_STAGED`, `IMP_STAGED` / `GONE_STAGED`, and
+the enclosure rows' `EnclosureStaging.staged`, registered inside
+`stageEnclosure` from the same `f.source` it returns (`` `T11.2-4 specs/ENCL.mdx
+(${label})` ``; two module-level calls); T11.2-5's `D_STAGED` / `E_STAGED`.
+Every `ByteFixture`-derived source keeps its string (the sliceChecks read it)
+and the record is made from it. `section-11.3.ts` 5 — T11.3-2's `CONJ_T_SOURCE`
+/ `CONJ_P_SOURCE` / `CONJ_Q_SOURCE` and T11.3-3's `SEL_BASE_SOURCE` /
+`SEL_USE_SOURCE` wrapped in place (each body's second workspace, behind its
+diagnosed failure in the first); T11.3-1's later workspaces take the imported
+records. `section-5.7.ts` 6 new, 1 reused — the fixtures T11.3-1 restages:
+`SPAN_BASE_STAGED` / `SPAN_MAIN_STAGED` (`"T5.7-2/T11.3-1 …"`), `ORD_ZED_STAGED`
+/ `ORD_ALPHA_STAGED` (`"T5.7-3/T11.3-1 …"`), `NO_OCC_SPARE_STAGED` /
+`NO_OCC_MAIN_STAGED` (`"T5.7-4/T11.3-1 …"`), exported records made from the kept
+strings, T5.7-2's, T5.7-3's, and T5.7-4's first workspaces taking them too (the
+record rather than a plain spelling of its bytes); `NO_OCC_BASE_STAGED` is an
+alias of the token-bounds base record `TOKEN_BASE_SOURCE` — same module, same
+bytes: the duplicate-bytes probe found the first conversion's second record
+(Task 16's sub-rule) — renamed `"T5.7-2/T5.7-4/T11.3-1 specs/BASE.mdx (…)"`,
+the `NO_OCC_BASE_SOURCE` literal deleted. Sub-rules applied: (i) a
+`stageConfigurationStateTwins` call that PRECEDES the body's first invocation
+(T11.3-3's twins, created before the gate `build --json`) is a pre-invocation
+site — its map stays plain, S-7's sweep reaching it; (ii) an exported string
+constant another module stages post-invocation converts in the exporting module
+as a record made FROM the string wherever that module's pins read the string
+(`X_STAGED` beside `X_SOURCE`), the consumer importing the record and keeping
+the string import only where it reads it (`R_SOURCE`); (iii) a same-module
+byte-identical record the probe finds is aliased after the record and renamed
+(Task 16), a cross-module one recorded (Task 14). Left plain: every body's
+first workspace (T11-1, T11-3, T11-5, T11-6, T11-7's pair, T11.2-1…T11.2-3,
+T11.2-4's matrix workspace otherwise, T11.2-5's and T11.2-6's first fixtures
+otherwise, T11.3-1's T5.7-1 fixture, T11.3-2's and T11.3-3's first workspaces
+with their `unparseable` declarations, T11.3-4), T11.3-3's twins, every
+non-`.mdx` entry. Read-based enumeration: the 10 + 13 + 12 creation sites
+judged. Observation for the determination, not acted on: `NO_OCC_SPARE_STAGED`
+spells `"T6.5-3 specs/Spare.mdx"`'s bytes — a 29th cross-module group. Checks:
+the sites hook logged the task's 19 (test, path) pairs (23 lines, all
+`"well-formed"`) before and no file after; the sha256 capture over the four
+suite files (`section-5.7.test` included; 152 writes, compared sorted)
+identical; 21 tests, 14 pass and 7 fail — T11-2, T11-6, T11-7, T11.2-6,
+T11.3-2, T11.3-3, T5.7-4 — with identical verdict lines and diagnoses (~24 s a
+run); red check: an unclosed tag spliced into `T11_4_LEAF` and into
+`CONJ_T_SOURCE` fails exactly those two records as `mdx-derivability` under the
+ledger self-test's `-t 'T11[-.]|T5\.7-'` filter (37 tests). Known state after
+Task 17: the S-9 self-test 666 tests over 640 records (633 `T…`, 4 `E-6`, 3
+`P-…`); self project 22 files, 2806 passed, 0 skipped under the namespace
+(~120 s; 2779 + the 27 record tests); certification 144 PASS / 33 FAIL /
+0 error / 0 hang over the 23 `certification run against` lines; the
+ledger-wide duplicate-bytes probe 640 records in 29 groups.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -1042,23 +1108,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 17 — Initial-file conversion: §11, §11.2, §11.3 (`section-11.ts`, `section-11.2.ts`, `section-11.3.ts`)
-
-**Workspace creations to judge:** 11 (10; a `stageConfigurationStateTwins` caller),
-11.2 (13; T11.2-4's `stageEnclosure` staging 5 ~2509 and its arm tables), 11.3 (12;
-1 record; a `stageConfigurationStateTwins` caller).
-**Reachable sites (the instrumented run):**
-- `section-11.ts` — T11-4 (1): specs/E.mdx
-- `section-11.2.ts` — T11.2-4 (7): specs/CH-A.mdx specs/CH-B.mdx specs/CH-C.mdx specs/CY.mdx specs/ENCL.mdx specs/GONE.mdx specs/IMP.mdx
-- `section-11.2.ts` — T11.2-5 (3): specs/C.mdx specs/D.mdx specs/E.mdx
-- `section-11.2.ts` — T11.2-6 (1): specs/C.mdx
-- `section-11.3.ts` — T11.3-1 (7): specs/BASE.mdx specs/MAIN.mdx specs/OK.mdx specs/R.mdx specs/SPARE.mdx specs/Zed.mdx specs/alpha.mdx
-**Failing here:** T11-2, T11-6, T11-7, T11.2-6, T11.3-2, T11.3-3.
-**Certification scope:** T11.2-2, T11.2-4, T11.3-4 (CONF-AVAIL) — run the self
-project; 144/33/0/0 (T11.2-4 is flagged with seven paths: its conformer reaches every
-one of them, so a mis-declared record here shows as a certification `error`).
-**Checks.** Recipes 1–5 over `section-11.test`, `section-11.2.test`, `section-11.3.test`.
 
 ### Task 18 — Initial-file conversion: §11.4–§11.6 (`section-11.4.ts`, `section-11.5.ts`, `section-11.6.ts`)
 
