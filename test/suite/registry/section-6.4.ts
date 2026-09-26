@@ -127,6 +127,7 @@
 import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type {
   AppliedMappingPair,
   GraphEdge,
@@ -2259,6 +2260,13 @@ const P6_OTHER_INVALID = [
   "</S>",
   "",
 ].join("\n");
+// The break is staged after the body's `build`, so it is a ledger record
+// (S-9's before-any-product clause; helpers/staged-mdx.ts) — the same
+// constant.
+const T6_4_6_OTHER_INVALID = stagedMdx(
+  "T6.4-6 specs/Other.mdx overwritten with an unresolved local d reference",
+  P6_OTHER_INVALID,
+);
 
 const T6_4_6 = defineProductTest({
   id: "T6.4-6",
@@ -2276,7 +2284,7 @@ const T6_4_6 = defineProductTest({
         );
         // Introduce the pre-existing validation error elsewhere; the rename
         // subject and its file stay untouched and its arguments valid.
-        await workspace.file(P6_OTHER_FILE, P6_OTHER_INVALID);
+        await workspace.file(P6_OTHER_FILE, T6_4_6_OTHER_INVALID);
         // The invalid-workspace refusal reports the workspace's findings
         // themselves — exactly the one 14.5 finding located in the offending
         // file, no refusal reason evaluated or reported beside it (SPEC 6.4,

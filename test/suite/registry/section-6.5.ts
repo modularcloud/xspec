@@ -230,6 +230,7 @@ import {
 import { deriveMdx } from "../../helpers/mdx-derivability.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
@@ -3204,7 +3205,14 @@ export const MOVE_PRECONDITION_FILES: Readonly<Record<string, string>> = {
   [V4_OTHER]: V4_OTHER_VALID,
 };
 export const MOVE_PRECONDITION_BREAK_FILE = V4_OTHER;
-export const MOVE_PRECONDITION_BREAK_SOURCE = V4_OTHER_INVALID;
+const MOVE_PRECONDITION_BREAK_SOURCE = V4_OTHER_INVALID;
+// The break is staged after each arm's `build` — here and in T6.6-3's
+// identically staged arm — so it is a ledger record (S-9's before-any-product
+// clause; helpers/staged-mdx.ts) shared by both tests: the same constant.
+export const MOVE_PRECONDITION_BREAK = stagedMdx(
+  "T6.5-4/T6.6-3 precondition arm: specs/Other.mdx overwritten with an unresolved local d reference",
+  MOVE_PRECONDITION_BREAK_SOURCE,
+);
 export const MOVE_PRECONDITION_CASE: MoveRefusalCase = {
   argv: ["move", "specs/A.mdx#keep", "specs/B.mdx#kp"],
   expected: { finding: "14.5", locatedAt: { file: V4_OTHER } },
@@ -3365,7 +3373,7 @@ const T6_5_4 = defineProductTest({
         );
         await workspace.file(
           MOVE_PRECONDITION_BREAK_FILE,
-          MOVE_PRECONDITION_BREAK_SOURCE,
+          MOVE_PRECONDITION_BREAK,
         );
         await expectRefusalModifiesNothing(
           product,

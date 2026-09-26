@@ -290,8 +290,8 @@ import {
   MOVE_LINK_OUTSIDE_FILES,
   MOVE_MIXED_SYNOPSIS_CASES,
   MOVE_NON_UTF8_ARGV,
+  MOVE_PRECONDITION_BREAK,
   MOVE_PRECONDITION_BREAK_FILE,
-  MOVE_PRECONDITION_BREAK_SOURCE,
   MOVE_PRECONDITION_CASE,
   MOVE_PRECONDITION_FILES,
   MOVE_REFUSAL_CASES,
@@ -1041,7 +1041,7 @@ const T6_6_3 = defineProductTest({
         );
         await workspace.file(
           MOVE_PRECONDITION_BREAK_FILE,
-          MOVE_PRECONDITION_BREAK_SOURCE,
+          MOVE_PRECONDITION_BREAK,
         );
         await expectRefusedPreviewEquivalence(
           product,

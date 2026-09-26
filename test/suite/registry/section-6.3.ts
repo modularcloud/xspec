@@ -99,6 +99,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
@@ -709,6 +710,16 @@ const F4_FIXED_SOURCE = [
   "</S>",
   "",
 ].join("\n");
+// The fix is staged after the body's earlier arms invoked the product, so
+// it is a ledger record (S-9's before-any-product clause;
+// helpers/staged-mdx.ts): the same constant, carrying the call's former
+// `well-formed` option as its declaration — the record's declaration, not
+// the workspace's `unparseable` entry for the path, governs the write.
+const T6_3_4_FIXED = stagedMdx(
+  "T6.3-4 invalid-baseline-sources arm: specs/Broken.mdx fixed in the working tree",
+  F4_FIXED_SOURCE,
+  "well-formed",
+);
 
 // The precedence arm's invalid current source: an unresolved local `d`
 // reference (14.5) — a build validation failure.
@@ -881,11 +892,10 @@ const T6_3_4 = defineProductTest({
         const base = await workspace.gitCommitAll(
           "baseline with an unparseable source",
         );
-        // S-9: the fixed source derives — the per-call declaration overrides
-        // the workspace's `unparseable` entry for this write.
-        await workspace.file(F4_BROKEN_FILE, F4_FIXED_SOURCE, {
-          mdx: "well-formed",
-        });
+        // S-9: the fixed source derives — the record's `well-formed`
+        // declaration overrides the workspace's `unparseable` entry for this
+        // write.
+        await workspace.file(F4_BROKEN_FILE, T6_3_4_FIXED);
         await buildOk(
           product,
           workspace,
@@ -1037,6 +1047,20 @@ function r5Source(text: string, withExtra: boolean): string {
   if (withExtra) lines.push('<S id="extra">', "Extra text.", "</S>");
   return lines.join("\n") + "\n";
 }
+
+// The nested-repository arms' stagings follow arm (a)'s product invocations,
+// so they are ledger records (S-9's before-any-product clause;
+// helpers/staged-mdx.ts) — the same template calls, moved to module level.
+// Arm (a)'s own edit precedes the body's first invocation and stays a plain
+// staging (S-7's sweep reaches it against the stub).
+const T6_3_5_INNER_V1 = stagedMdx(
+  "T6.3-5 (b) nested-repository arm: the inner workspace's source without the extra section, the inner repository's v1",
+  r5Source(R5_TEXT_V0, false),
+);
+const T6_3_5_INNER_EDITED = stagedMdx(
+  "T6.3-5 (b): the current edit of the inner workspace's source",
+  r5Source(R5_TEXT_V1, false),
+);
 
 // Identity for commits scripted inside the inner repository: the builder's
 // commit helper serves the workspace root's repository only, so the inner
@@ -1450,7 +1474,7 @@ const T6_3_5 = defineProductTest({
         await workspace.git(["tag", R5_TAG]);
         // The inner repository's v1: the workspace without the extra
         // section.
-        await workspace.file(R5_INNER_A, r5Source(R5_TEXT_V0, false));
+        await workspace.file(R5_INNER_A, T6_3_5_INNER_V1);
         const innerV1 = await initInnerRepositoryAtV1(workspace, R5_INNER);
         assertDistinctTags(outerV1, innerV1, context);
         const outerTree = (
@@ -1471,7 +1495,7 @@ const T6_3_5 = defineProductTest({
           );
         }
         // The current edit.
-        await workspace.file(R5_INNER_A, r5Source(R5_TEXT_V1, false));
+        await workspace.file(R5_INNER_A, T6_3_5_INNER_EDITED);
         await runNestedRepositoryArm(
           product,
           workspace,
@@ -1523,7 +1547,7 @@ const T6_3_5 = defineProductTest({
           );
         }
         // The current edit.
-        await workspace.file(R5_INNER_A, r5Source(R5_TEXT_V1, false));
+        await workspace.file(R5_INNER_A, T6_3_5_INNER_EDITED);
         await runNestedRepositoryArm(
           product,
           workspace,

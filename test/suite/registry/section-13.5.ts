@@ -146,6 +146,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
@@ -362,6 +363,13 @@ function requireRowByScope(
 // earlier `build` wrote no longer matches the sources (SPEC 13.3), while the
 // workspace stays valid.
 const A_MDX_EDITED = A_MDX.replace("Kid text.", "Kid text, edited.");
+// The staleness edit is staged after each of the three workspaces' `build`,
+// so it is a ledger record (S-9's before-any-product clause;
+// helpers/staged-mdx.ts) — the same constant, one record for all three.
+const T13_5_1_A_EDITED = stagedMdx(
+  "T13.5-1 stale arm: specs/A.mdx with Kid text edited",
+  A_MDX_EDITED,
+);
 
 /**
  * Snapshot scope "graph data alone": everything under `.xspec/` except the
@@ -422,7 +430,7 @@ async function staleWorkspaceArm(product: ProductBinding): Promise<void> {
           "T13.5-1 stale arm build twin staging `build`",
         );
         for (const staged of [workspace, twinNoSeam, twinBuild]) {
-          await staged.file("specs/A.mdx", A_MDX_EDITED);
+          await staged.file("specs/A.mdx", T13_5_1_A_EDITED);
         }
 
         // What `build` writes on the edited sources (the build twin), and the
@@ -1355,6 +1363,19 @@ function pollSource(text: string): string {
   return ['<S id="p">', text, "</S>", ""].join("\n");
 }
 
+// The alternating states are staged after the first `build`, so they are
+// ledger records (S-9's before-any-product clause; helpers/staged-mdx.ts):
+// the loop's two versions, enumerated — state two, then state one — and
+// picked by the same alternation.
+const T13_5_5_POLL_STATE_TWO = stagedMdx(
+  "T13.5-5 specs/P.mdx in state two",
+  pollSource(POLL_TEXT_TWO),
+);
+const T13_5_5_POLL_STATE_ONE = stagedMdx(
+  "T13.5-5 specs/P.mdx in state one",
+  pollSource(POLL_TEXT_ONE),
+);
+
 const T13_5_5 = defineProductTest({
   id: "T13.5-5",
   title:
@@ -1431,7 +1452,7 @@ const T13_5_5 = defineProductTest({
             const stateTwo = i % 2 === 0;
             await workspace.file(
               POLL_FILE,
-              pollSource(stateTwo ? POLL_TEXT_TWO : POLL_TEXT_ONE),
+              stateTwo ? T13_5_5_POLL_STATE_TWO : T13_5_5_POLL_STATE_ONE,
             );
             await buildAndRecord(
               `T13.5-5 \`build\` #${String(i + 2)} (state ${stateTwo ? "two" : "one"})`,
@@ -1793,6 +1814,14 @@ const T13_5_7 = defineProductTest({
 const BOM_FILE = "specs/B.mdx";
 const BOM_MDX =
   String.fromCodePoint(0xfeff) + '<S id="b">\nBom content.\n</S>\n';
+// Staged after the session was created, so a ledger record (S-9's
+// before-any-product clause; helpers/staged-mdx.ts) — the same constant under
+// the call's former `unparseable` declaration (14.20).
+const T13_5_8_BOM = stagedMdx(
+  "T13.5-8 specs/B.mdx beginning with a byte-order mark",
+  BOM_MDX,
+  "unparseable",
+);
 
 /**
  * The failing workspace's findings as `build` and the gate of 13.3 report
@@ -1938,7 +1967,7 @@ async function failingWorkspaceArms(product: ProductBinding): Promise<void> {
     // established through `build --json` itself — exit 1, exactly the
     // condition-20 finding at the BOM file's offset 0 — before any command
     // is held and outside every bracket.
-    await workspace.file(BOM_FILE, BOM_MDX, { mdx: "unparseable" });
+    await workspace.file(BOM_FILE, T13_5_8_BOM);
     const premise =
       "T13.5-8 staging premise `build --json` on the failing workspace " +
       `(${BOM_FILE} begins with a byte-order mark)`;

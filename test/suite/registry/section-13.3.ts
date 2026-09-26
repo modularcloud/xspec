@@ -169,6 +169,7 @@ import {
 } from "../../helpers/determinism.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type {
   DirectorySnapshot,
   SnapshotEntry,
@@ -871,6 +872,13 @@ const T13_3_2_A_V1 = [
   "</S>",
   "",
 ].join("\n");
+// Arm B's edit is staged after arm A's product invocations, so it is a ledger
+// record (S-9's before-any-product clause; helpers/staged-mdx.ts) — the same
+// constant (which still spells the expected snapshot bytes in the body).
+const T13_3_2_A_EDITED = stagedMdx(
+  "T13.3-2 source-edit arm: specs/A.mdx revised, with a section carrying a same-file d reference added",
+  T13_3_2_A_V1,
+);
 const T13_3_2_B = ['<S id="beta">', "Beta text.", "</S>", ""].join("\n");
 
 // The record-discipline arm's one source: a d reference makes every
@@ -1283,7 +1291,7 @@ const T13_3_2 = defineProductTest({
         // data is restored, so every command individually faces
         // stale-but-present graph data and must answer from the edited
         // sources.
-        await workspace.file("specs/A.mdx", T13_3_2_A_V1);
+        await workspace.file("specs/A.mdx", T13_3_2_A_EDITED);
         const expectedNonGraph = filteredEntries(
           w0.entries,
           (key) => !isGraphDataKey(key),
@@ -2150,6 +2158,13 @@ const T13_3_3_A = [
 const T13_3_3_B_VALID = ['<S id="beta">', "Beta text.", "</S>", ""].join("\n");
 // A non-root section without `id` — build validation condition 14.1.
 const T13_3_3_B_INVALID = ["<S>", "Beta text.", "</S>", ""].join("\n");
+// The invalidating edit is staged after the body's `build`, so it is a ledger
+// record (S-9's before-any-product clause; helpers/staged-mdx.ts) — the same
+// constant, well-formed MDX (the missing id is validation condition 14.1).
+const T13_3_3_B_ID_LESS = stagedMdx(
+  "T13.3-3 specs/B.mdx with its section's id removed (14.1)",
+  T13_3_3_B_INVALID,
+);
 
 // --- Whole-gate arm fixtures (SPEC 13.3; see the module header) ---
 
@@ -2506,7 +2521,7 @@ const T13_3_3 = defineProductTest({
         // exactly one condition (14.1, missing id). The baseline commit
         // predates it, so baseline resolution succeeds and the refresh
         // failure is the operative error (SPEC 12.0, 6.3).
-        await workspace.file("specs/B.mdx", T13_3_3_B_INVALID);
+        await workspace.file("specs/B.mdx", T13_3_3_B_ID_LESS);
 
         /**
          * Run one probe: exit 1, stdout is the findings report carrying

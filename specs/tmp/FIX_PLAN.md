@@ -124,7 +124,15 @@ first product invocation: ten of Task 8's eleven `section-5.6.ts` sites (every T
 body stages its edits between `gitCommitAll("baseline")` and its first `buildOk`; only
 T5.6-4's arm-2 staging follows arm 1's `build`/`impact`). Judge each listed site against
 the body's first invocation before converting it; such sites stay (S-7's sweep reaches
-them against the stub).
+them against the stub). As Task 9 found: a staging made by a helper counts under
+the body that calls it (T13.5-1's `staleWorkspaceArm`); a constant one module
+exports for another's identically staged arm becomes ONE record, created and
+exported by the defining module and named with both IDs (`section-6.5.ts`'s
+`MOVE_PRECONDITION_BREAK`, `"T6.5-4/T6.6-3 …"`); a body-local alternation over
+a template (T13.5-5's `stateTwo ? … : …`) enumerates to one record per state,
+the body picking by the same condition; restorations of product-written graph
+data and mutations of generated files (`section-13.3.ts`'s `restoreGraphData`,
+`section-13.4.ts`'s rounds) stage no `.mdx` path and stay.
 
 **Appending to product-written bytes (T5.4-1's pattern):** an append is an `edit()`
 extending the file's unique tail (`REINTRO_TAIL`, `f`'s closing run, which the rename
@@ -143,21 +151,6 @@ verdict (`unshare … -- npx vitest run --config test/vitest.config.ts --project
 reached — accepted, Task 18's guard surfaces it when the product gets there).
 
 ## Tasks
-
-### Task 9 — Ledger conversion: §6.3–§6.6, §8, §13, §15
-
-`section-6.3.ts` (886 `F4_BROKEN_FILE, F4_FIXED_SOURCE, { … }` — carry its option into
-the record's declaration; 1394, 1453, 1474, 1526 `r5Source(...)`), `section-6.4.ts`
-(2279 `P6_OTHER_INVALID`), `section-6.5.ts` (3366 — read), `section-6.6.ts` (1042 —
-read), `section-8.ts` (1081 — read), `section-13.3.ts` (368 `key, entry.bytes` table —
-convert the `.mdx` rows if after an invocation; 1286 `T13_3_2_A_V1`; 2509
-`T13_3_3_B_INVALID`; 2720 — read), `section-13.4.ts` (660/669 — session garbage, likely
-not `.mdx`: confirm and leave), `section-13.5.ts` (425 `staged.file("specs/A.mdx",
-A_MDX_EDITED)` over three workspaces — one record; 1432 — read; 1941 `BOM_FILE,
-BOM_MDX, { mdx: "unparseable" }` → a record declared `"unparseable"`),
-`section-15.ts` (302, 458 `specSource(...)`). Certification: T13.5-1/T13.5-4 and other
-CONF-CORE in-scope tests live here — the certification totals must stay 144/33.
-**Checks:** as the preamble's, certification included.
 
 ### Task 10 — Ledger conversion: §9 and §9.3
 

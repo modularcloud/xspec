@@ -83,6 +83,7 @@ import {
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -957,6 +958,14 @@ A node of a group that is neither target nor boundary.
 `,
 };
 
+// The b1 edit is staged after the root-exclusion arm's `build` and queries,
+// so it is a ledger record (S-9's before-any-product clause;
+// helpers/staged-mdx.ts) — the same template call, moved to module level.
+const T8_5_B_EDITED = stagedMdx(
+  "T8-5 specs/B.mdx with b1's text edited",
+  derivedSource("Derived leaf one, edited."),
+);
+
 const T8_5 = defineProductTest({
   id: "T8-5",
   title:
@@ -1078,10 +1087,7 @@ const T8_5 = defineProductTest({
       // containment cannot explain it — and B-root's through containment,
       // hence a1's through the root-targeted pair: A-root and a1 are both
       // upstream-changed (SPEC 5.5, 5.6).
-      await workspace.file(
-        "specs/B.mdx",
-        derivedSource("Derived leaf one, edited."),
-      );
+      await workspace.file("specs/B.mdx", T8_5_B_EDITED);
       await buildOk(
         product,
         workspace,

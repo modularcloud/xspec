@@ -67,6 +67,7 @@ import {
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { assertRequirementCategories, impactAgainst } from "./section-5.6.js";
 import { assertImpactedCode, readSourceText } from "./section-9.js";
@@ -118,6 +119,19 @@ const specSource = (helloText: string): string =>
     "</S>",
     "",
   ].join("\n");
+
+// The edit of print.hello's text and its later restoration are staged after
+// the walkthrough's `build`, so they are ledger records (S-9's
+// before-any-product clause; helpers/staged-mdx.ts) — the same template
+// calls, moved to module level.
+const T15_1_HELLO_EDITED = stagedMdx(
+  "T15-1 specs/SPEC.mdx with print.hello's text edited",
+  specSource("Print hello, edited."),
+);
+const T15_1_HELLO_RESTORED = stagedMdx(
+  "T15-1 specs/SPEC.mdx restored to its original text",
+  specSource("Print hello."),
+);
 
 const DERIVED_SOURCE = [
   'import SPEC from "./SPEC.xspec"',
@@ -299,7 +313,7 @@ const T15_1 = defineProductTest({
       );
 
       // --- Editing print.hello's text: the listed categories (SPEC 15) -----
-      await workspace.file(SPEC_FILE, specSource("Print hello, edited."));
+      await workspace.file(SPEC_FILE, T15_1_HELLO_EDITED);
       await buildOk(
         product,
         workspace,
@@ -455,7 +469,7 @@ const T15_1 = defineProductTest({
       // --- The rename taken instead: journal mapping, no-change impact -----
       // "Instead": the edit is reverted to its exact baseline bytes, so the
       // rename operates on the workspace as committed at `base`.
-      await workspace.file(SPEC_FILE, specSource("Print hello."));
+      await workspace.file(SPEC_FILE, T15_1_HELLO_RESTORED);
       await buildOk(
         product,
         workspace,
