@@ -70,6 +70,15 @@
 //   T10.7-4, T10.7-6): coverage and audit sessions require no git.
 // - Every fixture edit is followed by an explicit `build` before any read,
 //   so no read relies on the 13.3 refresh path (T13.3-*'s business).
+// - Staged-source records (helpers/staged-mdx.ts, S-9: judged before any
+//   product exists): every `.mdx` edit a body stages after its first product
+//   invocation — T10.7-2's B.mdx and extra/N.mdx additions (N.mdx is the
+//   same call in both arms: one record), T10.7-3's par edit, T10.7-4's two
+//   deletions, T10.7-5's w edit, T10.7-6's p.a edit — is the same template
+//   call moved to module level as a record. Every initial `files` entry
+//   stays plain, the later-arm ones (T10.7-1's corrupt-session workspaces,
+//   T10.7-2's audit arm) being the reach observation's; T10.7-1's and
+//   T10.7-5's corrupt-session bytes stage no `.mdx` path.
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -100,6 +109,7 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -916,6 +926,18 @@ export default defineConfig({
 })
 `;
 
+// Both arms' post-create additions follow the arm's first `build`, so they
+// are staged-source records (helpers/staged-mdx.ts, S-9: judged before any
+// product exists); extra/N.mdx is the same call in both arms — one record.
+const T10_7_2_B_LEAF = stagedMdx(
+  "T10.7-2 specs/B.mdx with leaf b (added by the coverage arm's post-create configuration edit)",
+  leafSpec("b", "Bee text."),
+);
+const T10_7_2_N_LEAF = stagedMdx(
+  "T10.7-2 extra/N.mdx with leaf n (added after create in the coverage and audit arms)",
+  leafSpec("n", "Enn text."),
+);
+
 const T10_7_2 = defineProductTest({
   id: "T10.7-2",
   title:
@@ -980,8 +1002,8 @@ const T10_7_2 = defineProductTest({
         // Post-create configuration edit: profile renamed p → q, main's
         // globs edited; B.mdx and extra/N.mdx added.
         await workspace.file("xspec.config.ts", C2_CONFIG_EDITED);
-        await workspace.file(C2_B, leafSpec("b", "Bee text."));
-        await workspace.file(C2_N, leafSpec("n", "Enn text."));
+        await workspace.file(C2_B, T10_7_2_B_LEAF);
+        await workspace.file(C2_N, T10_7_2_N_LEAF);
         await buildOk(
           product,
           workspace,
@@ -1157,7 +1179,7 @@ const T10_7_2 = defineProductTest({
         // parameters (SPEC 10.7), so nothing shields it from the current
         // configuration: its generators run against the current workspace.
         await workspace.file("xspec.config.ts", A2_CONFIG_EDITED);
-        await workspace.file(C2_N, leafSpec("n", "Enn text."));
+        await workspace.file(C2_N, T10_7_2_N_LEAF);
         await buildOk(
           product,
           workspace,
@@ -1230,6 +1252,14 @@ function c3Spec(parText: string): string {
   ].join("\n");
 }
 
+// The healthy session's edit follows the body's first `build`, so it is a
+// staged-source record (helpers/staged-mdx.ts, S-9: judged before any
+// product exists).
+const T10_7_3_C_PAR_EDITED = stagedMdx(
+  "T10.7-3 specs/C.mdx with par's own text at v1 (the healthy session's edit against the real baseline)",
+  c3Spec("Par own text v1."),
+);
+
 /** Remove the workspace's `.git` directory entirely (staging, T10.7-3). */
 async function removeGitDir(
   workspace: TestWorkspace,
@@ -1297,7 +1327,7 @@ const T10_7_3 = defineProductTest({
         // scope root has a child, so `resolve` and `split` would both be
         // legal if the baseline stayed reconstructable: the destroyed
         // baseline is each later command's only failure cause.
-        await workspace.file(C3_FILE, c3Spec("Par own text v1."));
+        await workspace.file(C3_FILE, T10_7_3_C_PAR_EDITED);
         await buildOk(
           product,
           workspace,
@@ -1468,6 +1498,17 @@ function c4KSpec(withU2: boolean, withU1: boolean): string {
   ].join("\n");
 }
 
+// Both deletions follow the body's first `build`, so they are staged-source
+// records (helpers/staged-mdx.ts, S-9: judged before any product exists).
+const T10_7_4_K_WITHOUT_U2 = stagedMdx(
+  "T10.7-4 specs/K.mdx without par.u2's section (par.u1 kept)",
+  c4KSpec(false, true),
+);
+const T10_7_4_K_WITHOUT_U2_U1 = stagedMdx(
+  "T10.7-4 specs/K.mdx without par.u2's and par.u1's sections",
+  c4KSpec(false, false),
+);
+
 const C4_Z_SOURCE = ['<S id="z">', "Zee text.", "</S>", ""].join("\n");
 
 const T10_7_4 = defineProductTest({
@@ -1584,7 +1625,7 @@ const T10_7_4 = defineProductTest({
         // same file's present-scope items — before Z.mdx's item, so it
         // stays within its file group rather than dropping to the end
         // (SPEC 10.5's ordering rule applied to the coverage order, 10.7).
-        await workspace.file(C4_K, c4KSpec(false, true));
+        await workspace.file(C4_K, T10_7_4_K_WITHOUT_U2);
         await buildOk(
           product,
           workspace,
@@ -1642,7 +1683,7 @@ const T10_7_4 = defineProductTest({
         // tiebreak needs two absent items with equal identity strings,
         // which only arise via journaled-rename reintroduction — T10.4-4's
         // staging — so it is not staged here.
-        await workspace.file(C4_K, c4KSpec(false, false));
+        await workspace.file(C4_K, T10_7_4_K_WITHOUT_U2_U1);
         await buildOk(
           product,
           workspace,
@@ -1692,6 +1733,14 @@ function c5Spec(text: string): string {
   return ['<S id="w">', text, "</S>", ""].join("\n");
 }
 
+// The edit of w after a2's resolution follows the body's first `build`, so it
+// is a staged-source record (helpers/staged-mdx.ts, S-9: judged before any
+// product exists); the corrupt session's bytes stage no `.mdx` path.
+const T10_7_5_W_EDITED = stagedMdx(
+  "T10.7-5 specs/W.mdx with w's text at v1 (the edit after a2's resolution)",
+  c5Spec("Dub text v1."),
+);
+
 const T10_7_5 = defineProductTest({
   id: "T10.7-5",
   title:
@@ -1730,7 +1779,7 @@ const T10_7_5 = defineProductTest({
           "no-change",
           `${prefix} \`resolve a2 <w's item> --status no-change\``,
         );
-        await workspace.file(C5_FILE, c5Spec("Dub text v1."));
+        await workspace.file(C5_FILE, T10_7_5_W_EDITED);
         await buildOk(
           product,
           workspace,
@@ -1921,6 +1970,13 @@ function fullRowSequence(report: SessionStatusReport): readonly string[] {
   );
 }
 
+// Stage D's edit follows the body's first `build`, so it is a staged-source
+// record (helpers/staged-mdx.ts, S-9: judged before any product exists).
+const T10_7_6_T_PA_EDITED = stagedMdx(
+  "T10.7-6 specs/T.mdx with p.a's text at v1 (stage D's edit under two resolved scopes)",
+  c6Spec("Paa text v1."),
+);
+
 const T10_7_6 = defineProductTest({
   id: "T10.7-6",
   title:
@@ -2077,7 +2133,7 @@ const T10_7_6 = defineProductTest({
         const paBefore = await queryNode(product, workspace, C6_PA, prefix);
         const pBefore = await queryNode(product, workspace, C6_P, prefix);
         const pbBefore = await queryNode(product, workspace, C6_PB, prefix);
-        await workspace.file(C6_FILE, c6Spec("Paa text v1."));
+        await workspace.file(C6_FILE, T10_7_6_T_PA_EDITED);
         await buildOk(
           product,
           workspace,
