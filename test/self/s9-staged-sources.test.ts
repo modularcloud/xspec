@@ -20,7 +20,7 @@
 // Also verified: the ledger's invariants (sealed once the registry has
 // loaded, so a run-time registration throws; non-empty; uniquely named, each
 // name led by the ID of a registered test, or by E-6 for the §18 exchange
-// fixture's one record — helpers/e6.ts is no registry entry, so this file
+// fixture's four records — helpers/e6.ts is no registry entry, so this file
 // imports it before the manifest seals the ledger; no `unchecked` record —
 // that declaration is P-8's mutations' alone), its registration rules on a fresh
 // unsealed instance, the builder's record overload (a record stages exactly
@@ -51,8 +51,9 @@ import {
 import { TestWorkspace, judgeMdxDeclaration } from "../helpers/workspace.js";
 import type { WorkspaceDecl, WorkspaceMdxDecl } from "../helpers/workspace.js";
 // The E-6 exchange fixture (helpers/e6.ts) is no registry entry, yet stages
-// one `.mdx` source after its first invocations — a record of its own, which
-// this import registers BEFORE the registry manifest below seals the ledger.
+// four `.mdx` sources no sweep reaches — three initial files, and one edit
+// after its first invocations — as records of its own, which this import
+// registers BEFORE the registry manifest below seals the ledger.
 import "../helpers/e6.js";
 import { productTestSuite } from "../suite/registry/index.js";
 
@@ -236,7 +237,7 @@ describe("S-9: the staged-source ledger, once the registry has loaded", () => {
     }
   });
 
-  test("names every record after registered tests: `<TEST-ID>[/<TEST-ID>…] <what it stages>` — or after E-6, the §18 exchange fixture's ID (helpers/e6.ts), for its one record", () => {
+  test("names every record after registered tests: `<TEST-ID>[/<TEST-ID>…] <what it stages>` — or after E-6, the §18 exchange fixture's ID (helpers/e6.ts), for its four records", () => {
     let e6Records = 0;
     for (const record of LEDGER) {
       const [lead, ...rest] = record.name.split(" ");
@@ -252,9 +253,10 @@ describe("S-9: the staged-source ledger, once the registry has loaded", () => {
         ).toBe(true);
       }
     }
-    // The fixture's record is judged here like every other: its module
-    // loaded before the seal (the import order above).
-    expect(e6Records).toBe(1);
+    // The fixture's records — its three initial `.mdx` sources and its leaf
+    // edit — are judged here like every other: its module loaded before the
+    // seal (the import order above).
+    expect(e6Records).toBe(4);
   });
 
   test("holds no `unchecked` record (that declaration is P-8's mutations' alone, S-9)", () => {

@@ -119,6 +119,21 @@ since the sealed registry ledger holds no such record. Known state after Task 1:
 project 22 files, 2332 passed; certification 144/33/0/0; T12.1-3 and T10.1-1 keep
 their verdicts.
 
+**Resolved by Task 2 (the E-6 records).** `test/helpers/e6.ts` registers four records:
+`E-6 specs/Other.mdx version one — the initial source`, ``E-6 specs/Other.mdx version two
+— the leaf edit before `impact` `` (unchanged), `E-6 specs/Core.mdx`, and `E-6
+specs/Refs.mdx`; the three initial ones are passed in the fixture's `files`;
+`E6_CORE_SOURCE` and `E6_REFS_SOURCE` stay string constants beside their records (the
+`at` step derives its byte offset from the former). The self-test's E-6 pin is 4; the
+import order (`../helpers/e6.js` before the manifest) is unchanged. The fixture runs
+under no per-body mark (its suite test calls it directly), so Task 24's extension will
+never reach its initial files — the records are the sole mechanism there. Known state
+after Task 2: the S-9 self-test 195 tests over 170 records (166 `T…` + 4 `E-6`); self
+project 22 files, 2335 passed; certification 144/33/0/0; the exchange test passes
+against the built product with identical writes (6). Task 2's "190 tests over 170
+records" had been counted from the a2fa780 baseline, before Task 1's five self-tests:
+a later task's expected counts add to 195 tests / 170 records.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -283,36 +298,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 2 — E-6: the fixture's three initial sources become ledger records
-
-**Requirement.** Reviewer C gap 2 (S-9 with §18 E-6): `specs/Other.mdx`
-(`otherSource("version one")`), `specs/Core.mdx` (`E6_CORE_SOURCE`), `specs/Refs.mdx`
-(`E6_REFS_SOURCE`) in `runE6RepresentativeFixture` (`test/helpers/e6.ts` ~213–223) are
-judged only when `test/suite/e6-exchange-writer.test.ts` (Linux) or
-`test/windows/e6-byte-identity.test.ts` (Windows) runs against the built product.
-
-**Change** (`test/helpers/e6.ts`, `test/self/s9-staged-sources.test.ts`). Beside
-`E6_OTHER_VERSION_TWO` register `E6_OTHER_VERSION_ONE = stagedMdx("E-6 specs/Other.mdx
-version one", otherSource("version one"))`, `E6_CORE_RECORD = stagedMdx("E-6
-specs/Core.mdx", E6_CORE_SOURCE)`, `E6_REFS_RECORD = stagedMdx("E-6 specs/Refs.mdx",
-E6_REFS_SOURCE)` — the same expressions; keep the string constants where the module
-uses them elsewhere (the exchange comparison, if it does) — and pass the records in
-the fixture's `files`. The self-test's E-6 pin becomes exactly FOUR E-6-led records
-(`expect(e6Records).toBe(4)`; its title's "for its one record" → "for its four
-records"); the import order (`../helpers/e6.js` BEFORE the registry manifest) is
-unchanged and still load-bearing — a record created after the seal throws. `src/app.ts`
-and `xspec.config.ts` are not `.mdx` and stay plain. The Windows leg shares this code
-path: the bytes are identical, so the exchange artifact's byte identity holds and
-`suite-windows` stays green on push (you cannot see CI — no `gh`, no api.github.com;
-the shared code path and the sha256 check below are the proof).
-
-**Checks.** `npx tsc -p test`; `npm run format:check`; the self project (the ledger
-self-test lists four `E-6 …` records: 190 tests over 170 records; certification
-144/33/0/0); `unshare … -- npx vitest run --config test/vitest.config.ts --project suite e6-exchange-writer`
-— the same verdict as before the change (run it before too); AGENTS.md's sha256
-capture over that file before and after: identical writes. AGENTS.md: the E-6 record
-count and the pin.
 
 ### Task 3 — §16: draw-derived initial files declared `perDraw`; constant ones as records
 

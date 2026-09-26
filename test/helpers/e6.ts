@@ -138,14 +138,22 @@ function otherSource(version: string): string {
   );
 }
 
-// The leaf edit the fixture stages between its baseline invocations and
-// `impact`: a staged-source record (helpers/staged-mdx.ts) — the staging
-// follows product invocations, so the builder's undeclared-staging guard
-// requires the S-9 self-test to have judged it before any product exists.
-// This fixture is no registry entry (S-7's sweep never runs it at all), so
-// test/self/s9-staged-sources.test.ts imports this module itself, before
-// the registry manifest seals the ledger; the record's name leads with the
-// fixture's §18 ID rather than a test ID.
+// The fixture's `.mdx` sources are staged-source records
+// (helpers/staged-mdx.ts): its three initial sources and the leaf edit it
+// stages between its baseline invocations and `impact`. S-9's check runs
+// before any product exists for a deterministic fixture's files, yet this
+// fixture is no registry entry — S-7's sweep never runs it, no per-body mark
+// is in effect, and the builder's undeclared-staging guard reaches only the
+// leaf edit (a staging after product invocations in its workspace), never
+// `create()`'s initial files — so nothing but the S-9 self-test judges these
+// sources first: test/self/s9-staged-sources.test.ts imports this module
+// itself, before the registry manifest seals the ledger, and judges every
+// record. The records' names lead with the fixture's §18 ID rather than a
+// test ID.
+const E6_OTHER_VERSION_ONE = stagedMdx(
+  "E-6 specs/Other.mdx version one — the initial source",
+  otherSource("version one"),
+);
 const E6_OTHER_VERSION_TWO = stagedMdx(
   "E-6 specs/Other.mdx version two — the leaf edit before `impact`",
   otherSource("version two"),
@@ -180,6 +188,11 @@ const E6_REFS_SOURCE = [
   "</S>",
   "",
 ].join("\n");
+
+// The two sources above as records; `E6_CORE_SOURCE` stays a string beside
+// its record because the `at` step derives its byte offset from it.
+const E6_CORE_RECORD = stagedMdx("E-6 specs/Core.mdx", E6_CORE_SOURCE);
+const E6_REFS_RECORD = stagedMdx("E-6 specs/Refs.mdx", E6_REFS_SOURCE);
 
 const E6_APP_SOURCE = [
   'import CORE, { text } from "../specs/Core.xspec";',
@@ -216,9 +229,9 @@ export async function runE6RepresentativeFixture(
   const workspace = await TestWorkspace.create({
     files: {
       "xspec.config.ts": E6_CONFIG,
-      [E6_OTHER]: otherSource("version one"),
-      [E6_CORE]: E6_CORE_SOURCE,
-      [E6_REFS]: E6_REFS_SOURCE,
+      [E6_OTHER]: E6_OTHER_VERSION_ONE,
+      [E6_CORE]: E6_CORE_RECORD,
+      [E6_REFS]: E6_REFS_RECORD,
       [E6_APP]: E6_APP_SOURCE,
     },
   });
