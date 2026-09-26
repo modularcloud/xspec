@@ -68,6 +68,17 @@
 // - Workspaces are git-less wherever no baseline is involved; every fixture
 //   edit is followed by an explicit `build` before any read, so no read
 //   relies on the 13.3 refresh path (T13.3-*'s business).
+// - Staged-source records (helpers/staged-mdx.ts, S-9: judged before any
+//   product exists): every `.mdx` edit a body stages after its first product
+//   invocation — T10.7-7's payload-arm edit, T10.7-8's x.k edit, T10.7-9's
+//   g.a.z authoring and both audit-arm authorings, T10.7-10's p.a edit,
+//   T10.7-11's edge swap, T10.7-12's A.mdx v1/v2 and B.mdx v1/v2 edits — is
+//   the same template call moved to module level as a record. T10.7-9's
+//   path-blocks v1 edit precedes the body's first `build` (git staging
+//   invokes no product) and stays plain, as does every initial `files`
+//   entry, the later arms' (T10.7-7's fully-resolved and payload arms,
+//   T10.7-9's audit arm, T10.7-12's provenance and coverage arms) being the
+//   reach observation's; the code sources are `.ts`.
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -93,6 +104,7 @@ import {
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -944,6 +956,14 @@ function n7PbSpec(kidText: string): string {
   ].join("\n");
 }
 
+// The payload arm's reviewed edit follows the body's first `build` (the
+// order arm's), so it is a staged-source record (helpers/staged-mdx.ts, S-9:
+// judged before any product exists); the code source beside it is `.ts`.
+const T10_7_7_A2_KID_V1 = stagedMdx(
+  "T10.7-7 specs/A2.mdx with a.k's text at v1 (the payload arm's reviewed edit)",
+  n7PbSpec("Kid line v1."),
+);
+
 // The payload arm's impacted code location (SPEC 9.2, 10.5): the marker sits
 // inside the function declaration `nextUnit`, so the reference is attributed
 // to the named unit (SPEC 4.6) and the impacted location is
@@ -1165,7 +1185,7 @@ const T10_7_7 = defineProductTest({
         // v1: the reviewed edit, plus the code source whose named unit
         // references a.k — the impacted location (SPEC 9.2) whose
         // code-impact item the walk below reaches.
-        await workspace.file(N7_PB_FILE, n7PbSpec("Kid line v1."));
+        await workspace.file(N7_PB_FILE, T10_7_7_A2_KID_V1);
         await workspace.file(N7_CODE_FILE, N7_CODE_SOURCE);
         await buildOk(product, workspace, `${prefix} \`build\` at v1`);
         const akAtCreate = await queryNode(
@@ -1493,6 +1513,13 @@ function e8Spec(kidText: string): string {
   ].join("\n");
 }
 
+// The x.k edit follows the body's first `build`, so it is a staged-source
+// record (helpers/staged-mdx.ts, S-9: judged before any product exists).
+const T10_7_8_X_KAY_V1 = stagedMdx(
+  "T10.7-8 specs/X.mdx with x.k's text at v1 (the edit invalidating its stored no-change)",
+  e8Spec("Kay line v1."),
+);
+
 const T10_7_8 = defineProductTest({
   id: "T10.7-8",
   title:
@@ -1677,7 +1704,7 @@ const T10_7_8 = defineProductTest({
         // x.k so its stored no-change goes stale — the exported item reads
         // invalidated and re-blocks its dependents, without rewriting the
         // stored status (list-side counting is T10.7-5's business).
-        await workspace.file(E8_FILE, e8Spec("Kay line v1."));
+        await workspace.file(E8_FILE, T10_7_8_X_KAY_V1);
         await buildOk(
           product,
           workspace,
@@ -1766,6 +1793,15 @@ function s9Spec(gaOwn: string, withZ: boolean): string {
   ].join("\n");
 }
 
+// The path-blocks arm's authoring of g.a.z follows the body's first `build`,
+// so it is a staged-source record (helpers/staged-mdx.ts, S-9: judged before
+// any product exists); the arm's v1 edit precedes that `build` and stays
+// plain (S-7's sweep reaches it against the stub).
+const T10_7_9_G_WITH_Z = stagedMdx(
+  "T10.7-9 specs/G.mdx with g.a.z authored (g.a's own text at v1)",
+  s9Spec("Gaa own v1.", true),
+);
+
 // Audit arm: h with child h.a; h.b and h.c are authored later.
 const S9_H_FILE = "specs/H.mdx";
 const S9_H = "specs/H.mdx#h";
@@ -1790,6 +1826,18 @@ function s9HSpec(withB: boolean, withC: boolean): string {
   ].join("\n");
 }
 
+// The audit arm's two authorings follow the body's first `build`, so they
+// are staged-source records (helpers/staged-mdx.ts, S-9: judged before any
+// product exists).
+const T10_7_9_H_WITH_B = stagedMdx(
+  "T10.7-9 specs/H.mdx with h.b authored after create",
+  s9HSpec(true, false),
+);
+const T10_7_9_H_WITH_B_C = stagedMdx(
+  "T10.7-9 specs/H.mdx with h.b and h.c authored",
+  s9HSpec(true, true),
+);
+
 const T10_7_9 = defineProductTest({
   id: "T10.7-9",
   title:
@@ -1804,6 +1852,9 @@ const T10_7_9 = defineProductTest({
         const prefix = "T10.7-9 path-blocks arm";
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
+        // This edit precedes the body's first product invocation (git
+        // staging invokes none), so S-7's sweep reaches it against the
+        // stub: plain contents, no ledger record (helpers/staged-mdx.ts).
         await workspace.file(S9_FILE, s9Spec("Gaa own v1.", false));
         await buildOk(product, workspace, `${prefix} \`build\` after the edit`);
         await createBaseSession(product, workspace, base, "s", prefix);
@@ -1998,7 +2049,7 @@ const T10_7_9 = defineProductTest({
         // `updated` — z's item enters through the decomposition (one item
         // per current child subtree) with a fresh id; no subtree-coherence
         // item for g.a is re-added.
-        await workspace.file(S9_FILE, s9Spec("Gaa own v1.", true));
+        await workspace.file(S9_FILE, T10_7_9_G_WITH_Z);
         await buildOk(
           product,
           workspace,
@@ -2130,7 +2181,7 @@ const T10_7_9 = defineProductTest({
         // it and h's item's blockedBy still names only h.a's item — the
         // discriminating stale blocker set the split's inheritance rule is
         // asserted against.
-        await workspace.file(S9_H_FILE, s9HSpec(true, false));
+        await workspace.file(S9_H_FILE, T10_7_9_H_WITH_B);
         await buildOk(
           product,
           workspace,
@@ -2262,7 +2313,7 @@ const T10_7_9 = defineProductTest({
         // h is never re-added; h.c's item enters with a fresh id; blockedBy
         // is recomputed per the audit rule — h.b's inherited blocker is
         // dropped — with decomposed references replaced by the decomposition.
-        await workspace.file(S9_H_FILE, s9HSpec(true, true));
+        await workspace.file(S9_H_FILE, T10_7_9_H_WITH_B_C);
         await buildOk(
           product,
           workspace,
@@ -2356,6 +2407,13 @@ function r10Spec(paText: string): string {
     "",
   ].join("\n");
 }
+
+// The p.a edit follows the body's first `build`, so it is a staged-source
+// record (helpers/staged-mdx.ts, S-9: judged before any product exists).
+const T10_7_10_R_PA_V1 = stagedMdx(
+  "T10.7-10 specs/R.mdx with p.a's text at v1 (the edit invalidating its resolution)",
+  r10Spec("Paa line v1."),
+);
 
 const R10_NOTE = "reviewed; left as-is pending spec sync";
 
@@ -2523,7 +2581,7 @@ const T10_7_10 = defineProductTest({
         // Invalidate the resolution: edit p.a, with hash premises, then
         // re-resolve the invalidated item — it works like any resolve and
         // records the new current state (v1), clearing the invalidation.
-        await workspace.file(R10_FILE, r10Spec("Paa line v1."));
+        await workspace.file(R10_FILE, T10_7_10_R_PA_V1);
         await buildOk(product, workspace, `${prefix} \`build\` at v1`);
         const v1 = await queryNode(
           product,
@@ -2615,6 +2673,13 @@ function c11DSpec(target: "k1" | "k2"): string {
   ].join("\n");
 }
 
+// The swap follows the body's first `build`, so it is a staged-source record
+// (helpers/staged-mdx.ts, S-9: judged before any product exists).
+const T10_7_11_D_TO_K2 = stagedMdx(
+  "T10.7-11 specs/D.mdx with src's covering d edge moved from k1 to k2",
+  c11DSpec("k2"),
+);
+
 const C11_K_SOURCE = [
   '<S id="k1">',
   "Kay-one line.",
@@ -2681,7 +2746,7 @@ const T10_7_11 = defineProductTest({
         // uncovered, k2 covered. k2's relevant hashes (its own subtree and
         // metadata hashes, SPEC 10.4) are untouched by an incoming-edge
         // change, so its resolution stands.
-        await workspace.file(C11_D, c11DSpec("k2"));
+        await workspace.file(C11_D, T10_7_11_D_TO_K2);
         await buildOk(product, workspace, `${prefix} \`build\` after the swap`);
         const k2Stable = requireRow(
           await sessionStatus(product, workspace, "c", prefix),
@@ -2917,6 +2982,18 @@ const M12_V2: M12SpecState = {
   wt: "Wt own v1 line.",
 };
 
+// The matrix arm's v1 and v2 edits follow the body's first `build`, so they
+// are staged-source records (helpers/staged-mdx.ts, S-9: judged before any
+// product exists); the code sources staged beside v1 are `.ts`.
+const T10_7_12_A_V1 = stagedMdx(
+  "T10.7-12 specs/A.mdx at v1 (the matrix arm's reviewed differences before create)",
+  m12Spec(M12_V1),
+);
+const T10_7_12_A_V2 = stagedMdx(
+  "T10.7-12 specs/A.mdx at v2 (par.n re-edited and gone deleted after create)",
+  m12Spec(M12_V2),
+);
+
 // The present location's source: both markers sit inside the function
 // declaration `refUnit`, so each reference is attributed to the named unit
 // (SPEC 4.6) and the impacted location is `src/ref.ts#refUnit`. The comment
@@ -2979,6 +3056,18 @@ function b12Spec(
   ].join("\n");
 }
 
+// The provenance arm's v1 and v2 edits follow the body's first `build` (the
+// matrix arm's), so they are staged-source records (helpers/staged-mdx.ts,
+// S-9: judged before any product exists).
+const T10_7_12_B_X_T1 = stagedMdx(
+  "T10.7-12 specs/B.mdx with px.x at T1, yq.y and dm's d reference removed",
+  b12Spec("Ex line T1.", false, false),
+);
+const T10_7_12_B_WITHOUT_X = stagedMdx(
+  "T10.7-12 specs/B.mdx without px.x (deleted after create)",
+  b12Spec(null, false, false),
+);
+
 // Sub-fixture C: the uncovered-requirement payload. `targets: "all"` makes
 // the branch node `top` required, so an uncovered scope exists whose subtree
 // text differs from its own text; cov's d edge covers top.in.
@@ -3033,7 +3122,7 @@ const T10_7_12 = defineProductTest({
         const wt0 = await capture(M12_WT, "v0");
 
         // v1 — the reviewed differences; then create.
-        await workspace.file(M12_FILE, m12Spec(M12_V1));
+        await workspace.file(M12_FILE, T10_7_12_A_V1);
         await workspace.file(M12_CODE_FILE, M12_CODE_SOURCE);
         await workspace.file(M12_CODE_DEL, M12_CODE_DEL_SOURCE);
         await buildOk(product, workspace, `${prefix} \`build\` at v1`);
@@ -3053,7 +3142,7 @@ const T10_7_12 = defineProductTest({
         // (its code-impact item's scope becomes a deleted location). No
         // re-derivation runs (the walk resolves `no-change` only), so the
         // item set is fixed at the create-time derivation.
-        await workspace.file(M12_FILE, m12Spec(M12_V2));
+        await workspace.file(M12_FILE, T10_7_12_A_V2);
         await fsp.rm(workspace.path(M12_CODE_DEL));
         await buildOk(product, workspace, `${prefix} \`build\` at v2`);
 
@@ -3611,7 +3700,7 @@ const T10_7_12 = defineProductTest({
 
         // v1: px.x edited (T0→T1); yq.y deleted with dm's d reference to it
         // removed in the same write (so no unresolved reference exists).
-        await workspace.file(B12_FILE, b12Spec("Ex line T1.", false, false));
+        await workspace.file(B12_FILE, T10_7_12_B_X_T1);
         await buildOk(product, workspace, `${prefix} \`build\` at v1`);
         const x1 = await queryNode(
           product,
@@ -3658,7 +3747,7 @@ const T10_7_12 = defineProductTest({
         ).id;
 
         // v2: delete px.x after create.
-        await workspace.file(B12_FILE, b12Spec(null, false, false));
+        await workspace.file(B12_FILE, T10_7_12_B_WITHOUT_X);
         await buildOk(product, workspace, `${prefix} \`build\` at v2`);
 
         const assertProvenance = async (stage: string): Promise<void> => {
