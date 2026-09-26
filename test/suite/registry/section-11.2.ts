@@ -1877,6 +1877,16 @@ const T11_2_3 = defineProductTest({
 //   enumeration is pinned as a complete exact set (a phantom record for the
 //   ambiguous spelling fails the compare — "never a dropped record" rides
 //   the same exactness for the two resolving spellings).
+// - The enclosure arm stages the entry's construct in two spellings, one
+//   workspace each — the entry's own one-line spelling (a paragraph holding
+//   text-position tags under the stock grammar) and the flow-tag spelling
+//   with `<div>` and `</div>` each alone on its line — since 11.2's rule
+//   ("an element by its own tags") is spelling-blind while the two derive
+//   as different MDX node kinds; each pins the 14.16 finding's range
+//   EXACTLY (`<div>`'s first byte through `</div>`'s last byte, the line
+//   terminator after `</div>` excluded — the one range the entry fixes),
+//   the text values as hand-derived literals, and the occurrence's `source`
+//   as the root's identity with its whole-file range (SPEC 1.5, 1.7).
 
 /** A window check for one located finding (SPEC 14 location cardinality). */
 interface LocationWindowExpectation {
@@ -2458,10 +2468,157 @@ const IMP_IMPORTS_AFTER: readonly ViewImportEntry[] = [
   { range: IMP_IMPORT_RANGE, name: "GONE", target: UNAVAILABLE },
 ];
 
+// --- staging 5: enclosure — a stray element enclosing a section and an
+// embedding at the root level ---------------------------------------------------
+//
+// SPEC 11.2 (removal classification by form): a stray element (14.16) is
+// content, preserved by its own tags, and the sections and embeddings it
+// encloses are classified by their own forms — the enclosed section a node
+// of the positional tree parented to the innermost enclosing SECTION
+// construct, the root when none encloses it (SPEC 11.4, T11.4-1), and the
+// enclosed embedding a resolving spelling of the root's own contribution:
+// its occurrence records the root as its source graph node (5.7). The same
+// construct is staged in two spellings, one workspace each — (a) the
+// entry's own one-line spelling `<div><S id="x">t</S>{text("y")}</div>`
+// (under the stock grammar a paragraph holding text-position tags: a flow
+// JSX attempt fails at the `t` after `<S id="x">`), and (b) the flow-tag
+// spelling with `<div>` and `</div>` each alone on its line — both deriving
+// (S-9's default declaration; the builder judges them at staging). `y`
+// precedes the element, so the expansion reads a closed same-file target.
+//
+// Text derivation (SPEC 3, 1.6), shared by both spellings: lines 1 and 3
+// hold nothing but y's removed tags and drop with their terminators; line 2
+// (`Y text.` LF) is kept and is y's whole contribution; `<div>` and `</div>`
+// match no removal rule's form and stay as content; x's tags are removed
+// and its `t` stays in place; `{text("y")}` is replaced by y's subtree text
+// `Y text.` LF — an expansion belonging to the root's own run. The root's
+// subtree text is the whole output; its own text is that output with y's
+// and x's contributions excised.
+
+const ENCL_FILE = "specs/ENCL.mdx";
+const ENCL_Y_TEXT = "Y text.\n";
+const ENCL_X_TEXT = "t";
+const ENCL_Y_CONSTRUCT = '<S id="y">\n' + ENCL_Y_TEXT + "</S>";
+const ENCL_X_CONSTRUCT = '<S id="x">' + ENCL_X_TEXT + "</S>";
+const ENCL_EMBED_TEXT = '{text("y")}';
+
+/** One enclosure spelling: its staged bytes, composed ranges, and pins. */
+interface EnclosureStaging {
+  readonly label: string;
+  readonly source: string;
+  /** `<div>`'s first byte through `</div>`'s last byte (the 14.16 range). */
+  readonly divRange: SourceRange;
+  readonly divText: string;
+  readonly yRange: SourceRange;
+  readonly xRange: SourceRange;
+  readonly embedRange: SourceRange;
+  readonly rootRange: SourceRange;
+  readonly textTree: TextTreeExpectation;
+  readonly occurrences: readonly OccurrenceRecord[];
+}
+
+/**
+ * Compose one spelling: `afterOpen` follows `<div>` and `beforeClose`
+ * precedes `</div>` ("" for the one-line spelling, LF for the flow-tag
+ * spelling). Every range is composed from the same parts that stage the
+ * file; the expected root text values are pinned literals, hand-derived
+ * per spelling (below) — never computed from the staging.
+ */
+function stageEnclosure(
+  label: string,
+  afterOpen: string,
+  beforeClose: string,
+  rootOwn: string,
+  rootSubtree: string,
+): EnclosureStaging {
+  const f = new ByteFixture();
+  const yRange = f.add(ENCL_Y_CONSTRUCT);
+  f.add("\n");
+  const divStart = f.pos;
+  f.add("<div>" + afterOpen);
+  const xRange = f.add(ENCL_X_CONSTRUCT);
+  const embedRange = f.add(ENCL_EMBED_TEXT);
+  f.add(beforeClose + "</div>");
+  const divRange: SourceRange = { start: divStart, end: f.pos };
+  f.add("\n");
+  const rootRange: SourceRange = { start: 0, end: f.pos };
+  return {
+    label,
+    source: f.source,
+    divRange,
+    divText:
+      "<div>" +
+      afterOpen +
+      ENCL_X_CONSTRUCT +
+      ENCL_EMBED_TEXT +
+      beforeClose +
+      "</div>",
+    yRange,
+    xRange,
+    embedRange,
+    rootRange,
+    textTree: {
+      identity: ENCL_FILE,
+      range: rootRange,
+      ownText: rootOwn,
+      subtreeText: rootSubtree,
+      children: [
+        {
+          identity: `${ENCL_FILE}#y`,
+          range: yRange,
+          ownText: ENCL_Y_TEXT,
+          subtreeText: ENCL_Y_TEXT,
+          children: [],
+        },
+        {
+          identity: `${ENCL_FILE}#x`,
+          range: xRange,
+          ownText: ENCL_X_TEXT,
+          subtreeText: ENCL_X_TEXT,
+          children: [],
+        },
+      ],
+    },
+    occurrences: [
+      {
+        file: ENCL_FILE,
+        range: embedRange,
+        kind: "embeds",
+        // The root as the source graph node: its identity the path alone
+        // (SPEC 1.5) together with its own range, the entire file (1.7).
+        source: { identity: ENCL_FILE, range: rootRange },
+        target: `${ENCL_FILE}#y`,
+      },
+    ],
+  };
+}
+
+// (a) the entry's spelling, one line at the root level:
+//   root own      `<div>` `Y text.` LF `</div>` LF
+//   root subtree  `Y text.` LF `<div>t` `Y text.` LF `</div>` LF
+const ENCL_A = stageEnclosure(
+  "the entry's one-line spelling",
+  "",
+  "",
+  "<div>Y text.\n</div>\n",
+  "Y text.\n<div>tY text.\n</div>\n",
+);
+// (b) the flow-tag spelling, `<div>` and `</div>` each alone on its line:
+//   root own      `<div>` LF `Y text.` LF LF `</div>` LF
+//   root subtree  `Y text.` LF `<div>` LF `t` `Y text.` LF LF `</div>` LF
+const ENCL_B = stageEnclosure(
+  "the flow-tag spelling",
+  "\n",
+  "\n",
+  "<div>\nY text.\n\n</div>\n",
+  "Y text.\n<div>\ntY text.\n\n</div>\n",
+);
+const ENCL_STAGINGS: readonly EnclosureStaging[] = [ENCL_A, ENCL_B];
+
 const T11_2_4 = defineProductTest({
   id: "T11.2-4",
   title:
-    "resolution turns on the referenced identity's own definedness: with duplicate spellings of `a` and the unique `a.b` beneath one bearer, the `d` entry naming `a.b` on the other bearer and the `{text(\"a.b\")}` embedding inside an id-less section each resolve and record occurrences whose `source` is exactly the unavailability marker (`file`, `range`, `kind`, `target` present — never a picked bearer, never a dropped record; observed via bare `occurrences` AND `view`), while the `d` reference to `a` records none — ambiguous, every bearer undefined — reported by its 14.5 finding's range, never as a record or an unavailable target, the view still positioning each enclosing construct with identity unavailable, the file's findings (14.1, 14.3, 14.5) accompanying, exit 1; `view --text`: CH-A embeds CH-B embeds CH-C with an unresolved embedding in CH-C (14.6, its finding's range exactly the braced container) → top's and mid's own/subtree text exactly the unavailability marker — one unresolved spelling, or (staged separately) one self-embedding cycle (14.9), poisons the whole value, partial expansion never occurring — while siblings with resolved expansions stay defined and byte-exact and each root's own text stays defined beside its poisoned subtree text; removal classification is by syntactic form: after deleting the imported (unused-binding) GONE.mdx, IMP.mdx's text values are byte-identical to before — the import removed by form, its 14.15 finding notwithstanding, the import entry's `target` flipping to the marker — and the stray `<div>` (14.16) is content, preserved byte-for-byte in the enclosing text and located by its finding (SPEC 11.2, 11.3, 11.4, 5.7, 1.6, 2.1, 3, 12.7, 14; CERTIFICATIONS.md CONF-AVAIL in scope)",
+    "resolution turns on the referenced identity's own definedness: with duplicate spellings of `a` and the unique `a.b` beneath one bearer, the `d` entry naming `a.b` on the other bearer and the `{text(\"a.b\")}` embedding inside an id-less section each resolve and record occurrences whose `source` is exactly the unavailability marker (`file`, `range`, `kind`, `target` present — never a picked bearer, never a dropped record; observed via bare `occurrences` AND `view`), while the `d` reference to `a` records none — ambiguous, every bearer undefined — reported by its 14.5 finding's range, never as a record or an unavailable target, the view still positioning each enclosing construct with identity unavailable, the file's findings (14.1, 14.3, 14.5) accompanying, exit 1; `view --text`: CH-A embeds CH-B embeds CH-C with an unresolved embedding in CH-C (14.6, its finding's range exactly the braced container) → top's and mid's own/subtree text exactly the unavailability marker — one unresolved spelling, or (staged separately) one self-embedding cycle (14.9), poisons the whole value, partial expansion never occurring — while siblings with resolved expansions stay defined and byte-exact and each root's own text stays defined beside its poisoned subtree text; removal classification is by syntactic form: after deleting the imported (unused-binding) GONE.mdx, IMP.mdx's text values are byte-identical to before — the import removed by form, its 14.15 finding notwithstanding, the import entry's `target` flipping to the marker — and the stray `<div>` (14.16) is content, preserved byte-for-byte in the enclosing text and located by its finding; enclosure: `<div><S id=\"x\">t</S>{text(\"y\")}</div>` staged in flow position at the root level (the entry's one-line spelling and the flow-tag spelling, one workspace each), `y` a section of the same file → exactly one 14.16 finding located `<div>` through `</div>`, node `x` in the view's tree a child of the root (never of the element, T11.4-1), the embedding's occurrence recorded with the root as its `source`, and under `view --text` the root's own text carrying `<div>` and `</div>` with `x`'s whole contribution excised and the embedding expanded to `y`'s subtree text, its subtree text carrying `t` in place with `x`'s tags removed — each byte-asserted via bare `view --text` and bare `occurrences` (SPEC 11.2, 11.3, 11.4, 5.7, 1.6, 2.1, 3, 12.7, 14; CERTIFICATIONS.md CONF-AVAIL in scope)",
   run: async (product) => {
     // Fixture self-checks (T5.7-2 discipline): composed ranges sliced back
     // out of the staged bytes before any product invocation.
@@ -2538,6 +2695,39 @@ const T11_2_4 = defineProductTest({
       '<S id="g">\nGone text.\n</S>',
       "GONE's section construct",
     );
+    for (const staging of ENCL_STAGINGS) {
+      const what = `the enclosure staging (${staging.label})`;
+      sliceCheck(
+        staging.source,
+        staging.divRange,
+        staging.divText,
+        `${what}: the stray element, <div> through </div>`,
+      );
+      sliceCheck(
+        staging.source,
+        staging.yRange,
+        ENCL_Y_CONSTRUCT,
+        `${what}: y`,
+      );
+      sliceCheck(
+        staging.source,
+        staging.xRange,
+        ENCL_X_CONSTRUCT,
+        `${what}: x`,
+      );
+      sliceCheck(
+        staging.source,
+        staging.embedRange,
+        ENCL_EMBED_TEXT,
+        `${what}: the enclosed embedding container`,
+      );
+      sliceCheck(
+        staging.source,
+        staging.rootRange,
+        staging.source,
+        `${what}: the root's whole-file range`,
+      );
+    }
 
     // Shared: exactly the R stagings' findings, keyed and located (the
     // identical multiset must accompany both surfaces' answers).
@@ -3006,6 +3196,130 @@ const T11_2_4 = defineProductTest({
           [[], []],
           `${afterContext} — still no occurrences (the binding stays ` +
             `unused) and no comments (SPEC 5.7, 12.7)`,
+        );
+      } finally {
+        await workspace.dispose();
+      }
+    }
+    // --- Staging 5: enclosure — a stray element enclosing a section and an
+    // embedding at the root level, one workspace per spelling (SPEC 11.2:
+    // the element is preserved by its own tags, the section and the
+    // embedding it encloses classified by their own forms).
+    for (const staging of ENCL_STAGINGS) {
+      // Shared: exactly the one staged condition, located by the element's
+      // own tags (the identical finding must accompany both surfaces).
+      const assertEnclosureFindings = (
+        findings: readonly Finding[],
+        context: string,
+      ): void => {
+        assertConditionCounts(
+          findings,
+          { "14.16": 1 },
+          `${context} — the stray element is the workspace's ONLY ` +
+            `condition: exactly one 14.16 and no phantom condition — the ` +
+            `enclosed section and embedding are valid by their own forms ` +
+            `(SPEC 11.2, 2.7, 14)`,
+        );
+        const finding = findingByCondition(findings, "14.16", context);
+        assertLocatedFinding(
+          finding,
+          [{ file: ENCL_FILE, window: staging.divRange }],
+          `${context} — the stray element is located by its finding, one ` +
+            `location (SPEC 11.2, 14)`,
+        );
+        assertSameJson(
+          finding.locations,
+          [{ file: ENCL_FILE, range: staging.divRange }],
+          `${context} — the element is located by its own tags: EXACTLY ` +
+            `<div>'s first byte through </div>'s last byte, the line ` +
+            `terminator after </div> excluded (SPEC 11.2, 14)`,
+        );
+      };
+
+      const workspace = await TestWorkspace.create({
+        files: {
+          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          [ENCL_FILE]: staging.source,
+        },
+      });
+      try {
+        const viewContext = `T11.2-4 bare \`view --text\` (enclosure: ${staging.label})`;
+        const viewResult = await expectExit(
+          product,
+          workspace,
+          ["view", "--text"],
+          1,
+          `${viewContext} — the stray element's 14.16 finding accompanies, ` +
+            `so exit 1 with the full answer emitted (SPEC 11.2)`,
+        );
+        const viewReport = decodeViewReport(
+          parseJsonStdout(
+            viewResult,
+            `${viewContext} — a single JSON document is the only output ` +
+              `form (SPEC 11)`,
+          ),
+          { text: true },
+          viewContext,
+        );
+        assertEnclosureFindings(viewReport.findings, viewContext);
+        assertSameJson(
+          viewReport.views.map((view) => view.file),
+          [ENCL_FILE],
+          `${viewContext} — one per-file view: the enclosure file (SPEC 11.4)`,
+        );
+        const enclView = viewReport.views[0]!;
+        assertSameJson(
+          projectTextNode(enclView.root),
+          staging.textTree,
+          `${viewContext} — the positional tree and the text values: the ` +
+            `root's children in document order y then x — x a child of the ` +
+            `ROOT, the innermost enclosing section construct, never of the ` +
+            `element, which gets no view node (SPEC 11.4, T11.4-1) — each ` +
+            `with its construct range; the root's own text carrying <div> ` +
+            `and </div> as content with x's whole contribution excised and ` +
+            `the embedding expanded to y's subtree text, its subtree text ` +
+            `carrying x's t in place with x's tags removed; y's and x's ` +
+            `values byte-exact (SPEC 11.2, 1.6, 3)`,
+        );
+        assertSameJson(
+          enclView.occurrences,
+          staging.occurrences,
+          `${viewContext} — the enclosed embedding's occurrence: the one ` +
+            `record, brace through brace, kind embeds, its source the ROOT ` +
+            `— identity the path alone with the whole-file range — and ` +
+            `target y (SPEC 5.7, 1.5, 1.7, 11.2)`,
+        );
+        assertSameJson(
+          [enclView.imports, enclView.comments],
+          [[], []],
+          `${viewContext} — no imports or comments staged: empty arrays, ` +
+            `never null (SPEC 12.7)`,
+        );
+
+        const occContext = `T11.2-4 bare \`occurrences\` (enclosure: ${staging.label})`;
+        const occResult = await expectExit(
+          product,
+          workspace,
+          ["occurrences"],
+          1,
+          `${occContext} — the same 14.16 finding accompanies the ` +
+            `enumeration, so exit 1 with the full answer (SPEC 11.2, 11.3)`,
+        );
+        const occReport = decodeOccurrencesReport(
+          parseJsonStdout(
+            occResult,
+            `${occContext} — a single JSON document is the only output ` +
+              `form (SPEC 11)`,
+          ),
+          occContext,
+        );
+        assertEnclosureFindings(occReport.findings, occContext);
+        assertSameJson(
+          occReport.occurrences,
+          staging.occurrences,
+          `${occContext} — the workspace's COMPLETE enumeration: exactly ` +
+            `the enclosed embedding's record with the root as its source ` +
+            `(SPEC 5.7, 11.2, 11.3)`,
         );
       } finally {
         await workspace.dispose();
