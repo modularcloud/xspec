@@ -821,6 +821,61 @@ other 18 under the sections' filter pass. Known state after Task 15: the S-9 sel
 passed, 0 skipped under the namespace (~125 s; 2749 + the 9 record tests); certification
 144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
 
+**Resolved by Task 16 (the §10.4–10.7 modules; e660a9c converts, the closing commit
+records).** Twenty-one new records, one existing record reused. `section-10.4.ts` 12 —
+T10.4-1's five later scenarios' initial files as `T10_4_1_PC_INITIAL`, `_DC_`, `_MC_`,
+`_CI_`, `_UR_` (`"T10.4-1 parent-consistency specs/P.mdx at the baseline (the
+scenario's initial source)"`, …: the same template calls moved to module level beside
+each scenario's state table; the subtree-coherence scenario's S, the body's first
+workspace, plain); T10.4-2's context arm (`T10_4_2_C_INITIAL`) and origin arm
+(`T2O_X_SOURCE` wrapped in place, `T10_4_2_T_INITIAL`, `T10_4_2_O_INITIAL`; the first
+arm's X plain); T10.4-4's move and reintroduction arms (`T4M_B_SOURCE`, `T4M_D_SOURCE`,
+`T4I_SOURCE` wrapped in place; the rename arm's `T4R_SOURCE` plain). `section-10.5.ts`
+3 — `T10_5_1_X1_INITIAL`, `T10_5_1_Y_INITIAL` (T10.5-1's extended and chain fixtures),
+`T10_5_5_V_INITIAL` (T10.5-5's decomposition sub-fixture). `section-10.6.ts` 0 new —
+the split sub-fixture's `F_SOURCE` spelled byte for byte the bytes of the existing
+`T10_6_2_B_WITHOUT_FE` record (`b2Spec(false)`: a > a.b, then s), found by the
+ledger-wide duplicate-bytes probe after a first conversion had registered it as a
+second record; it is that record — aliased (`const F_SOURCE = T10_6_2_B_WITHOUT_FE;`
+after the record), renamed `"T10.6-2 specs/B.mdx with the f and e sections deleted
+(the split sub-fixture's initial specs/F.mdx: the same bytes)"`, the literal spelling
+deleted (the naming rule's "reused, never duplicated", within one test).
+`section-10.7-i.ts` 2 — `W1_SOURCE` wrapped in place, ONE record staged by T10.7-1's
+first workspace and by each corrupt-session state's workspace (`"T10.7-1 specs/W.mdx
+(the flag-exclusivity workspace's initial source and each corrupt-session state's)"`);
+`T10_7_2_A_LEAF`, the `leafSpec("a", "Aye text.")` call T10.7-2's coverage arm (the
+body's first workspace) and audit arm spell identically, hoisted once and staged at
+both (the coverage arm's G plain). `section-10.7-ii.ts` 4 — `T10_7_7_A2_KID_V0`
+(T10.7-7's payload arm; the empty-session arm stages no file), `T10_7_9_H_INITIAL`
+(T10.7-9's audit arm), `T10_7_12_B_T0` and `U12_SOURCE` wrapped in place (T10.7-12's
+provenance and coverage sub-fixtures). The five `withWorkspace` `files` parameters
+widened to `InitialFileContents`; no module declares a workspace `mdx` list. Sub-rule
+applied: a new initial-file record whose bytes and declaration equal an existing
+record's of the SAME module is that record, aliased and renamed for both sites — run
+the duplicate-bytes probe (AGENTS.md) BEFORE a task's closing commit, since a
+same-module duplicate is a conversion mistake the S-9 self-test does not flag (a
+cross-module group stays Task 14's observation). Left plain: every body's first
+workspace (T10.4-1's S, T10.4-2's X, T10.4-3, T10.4-4's R, T10.4-5, T10.5-1's SPEC 15
+files, T10.5-2…T10.5-4, T10.5-5's W, T10.5-6, T10.6-1, T10.6-2's B and a, T10.6-3,
+T10.7-1's first W workspace — the same record —, T10.7-2's G, T10.7-3…T10.7-6,
+T10.7-7's `N7_FILE`, T10.7-8, T10.7-9's G, T10.7-10, T10.7-11, T10.7-12's `M12_FILE`),
+every session, journal, and `.ts` entry. Read-based enumeration: the 14 + 9 + 4 + 8 +
+11 `withWorkspace` sites judged (the task's 15/10/5/9/12 count each module's
+`TestWorkspace.create` helper too; T10.7-1's corrupt-session loop is one site); no
+§10.4–10.7 test fails, so nothing lies behind a diagnosed failure. Checks: the sites
+hook logged the task's 22 (test, path) pairs (25 lines, all `"well-formed"`) before
+and no file after; the sha256 capture over the five suite files (198 writes, compared
+sorted) identical, and `section-10.6.test` re-captured after the F.mdx reuse
+(identical); 26 tests, 26 pass before and after with identical verdict lines (~94 s a
+run); red check: an unclosed tag spliced into the U.mdx initial record and into the
+F.mdx source fails exactly those two as `mdx-derivability` under the ledger
+self-test's `-t 'T10\.[4-7]-'` filter (85 tests). Known state after Task 16: the S-9
+self-test 639 tests over 613 records (606 `T…`, 4 `E-6`, 3 `P-…`); self project 22
+files, 2779 passed, 0 skipped under the namespace (~120 s; 2758 + the 21
+record tests); certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23
+`certification run against` lines; the ledger-wide duplicate-bytes probe 613 records
+in 28 groups, none changed since Task 15.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -987,36 +1042,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 16 — Initial-file conversion: §10.4–§10.7 (`section-10.4.ts`, `section-10.5.ts`, `section-10.6.ts`, `section-10.7-i.ts`, `section-10.7-ii.ts`)
-
-**Workspace creations to judge:** 10.4 (15; 35 records — the `T10_4_1_*_STATES` tuples
-hold the scenarios' EDITS; the scenario workspaces' initial entries are separate),
-10.5 (10; 8 records), 10.6 (5; 3 records), 10.7-i (9; 7 records), 10.7-ii (12; 11
-records).
-**Reachable sites (the instrumented run):**
-- `section-10.4.ts` — T10.4-1 (5): specs/C.mdx specs/D.mdx specs/M.mdx specs/P.mdx specs/U.mdx
-- `section-10.4.ts` — T10.4-2 (4): specs/C.mdx specs/O.mdx specs/T.mdx specs/X.mdx
-- `section-10.4.ts` — T10.4-4 (3): specs/E.mdx specs/b.mdx specs/d.mdx
-- `section-10.5.ts` — T10.5-1 (2): specs/X.mdx specs/Y.mdx
-- `section-10.5.ts` — T10.5-5 (1): specs/V.mdx
-- `section-10.6.ts` — T10.6-2 (1): specs/F.mdx
-- `section-10.7-i.ts` — T10.7-1 (1): specs/W.mdx
-- `section-10.7-i.ts` — T10.7-2 (1): specs/A.mdx
-- `section-10.7-ii.ts` — T10.7-7 (1): specs/A2.mdx
-- `section-10.7-ii.ts` — T10.7-9 (1): specs/H.mdx
-- `section-10.7-ii.ts` — T10.7-12 (2): specs/B.mdx specs/U.mdx
-**Failing here:** none (every §10.4–§10.7 test passes; the site list is complete for
-these modules).
-**Certification scope:** T10.4-5 (CONF-CORE) — run the self project; 144/33/0/0.
-**Notes.** The previous plan's Tasks 12–15 findings name the arms exactly: T10.4-1's
-scenarios 2–6, T10.4-2's and T10.4-4's later arms, T10.5-1's extended and chain
-fixtures, T10.5-5's sub-fixture B, T10.6-2's sub-fixture 2, T10.7-1's per-state
-corrupt-session workspaces, T10.7-2's audit arm, T10.7-7's fully-resolved and payload
-arms, T10.7-9's audit arm, T10.7-12's provenance and coverage arms. The session,
-journal, and `.ts` entries of those workspaces stay plain.
-**Checks.** Recipes 1–5 over `section-10.4.test` (~76 s), `section-10.5.test`,
-`section-10.6.test`, `section-10.7-i.test`, `section-10.7-ii.test`.
 
 ### Task 17 — Initial-file conversion: §11, §11.2, §11.3 (`section-11.ts`, `section-11.2.ts`, `section-11.3.ts`)
 
