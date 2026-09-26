@@ -145,7 +145,19 @@ T10.1-6) becomes ONE record named with every calling test's ID
 scope — `test/self/certification-fixtures.ts`'s `inScope` lists name, among
 §10–§12, only T10.4-5 (Task 12) and T11.2-2, T11.2-4, T11.3-4, T11.4-1, T11.4-3,
 T11.4-4 (Task 16), so every other module's conversion leaves certification
-untouched by construction, the full self run's 144/33 confirming it.
+untouched by construction, the full self run's 144/33 confirming it. As Task 12
+found: a `write()` closure over mutable version variables (`section-10.4.ts`'s
+six T10.4-1 scenarios) enumerates into a module-level `as const` tuple of
+records in staging order — the identical template call with the closure's
+cumulative arguments spelled out, every state carrying the earlier edits
+forward — the arms indexing through it, and a state the closure staged before
+the body's first invocation (the subtree-coherence scenario's pre-`create`
+edit) stays a plain module-level constant beside the table; an append to
+product-written bytes (T10.4-4's reintroduction, the former `Buffer.concat`
+over the rename's output) is T5.4-1's anchored `edit()`; and a conversion's
+byte identity is verifiable end to end by a temporary capture in
+`TestWorkspace.write()` (AGENTS.md's recipe) — the §10.4 file's 70 writes
+hashed identical before and after.
 
 **Appending to product-written bytes (T5.4-1's pattern):** an append is an `edit()`
 extending the file's unique tail (`REINTRO_TAIL`, `f`'s closing run, which the rename
@@ -164,16 +176,6 @@ verdict (`unshare … -- npx vitest run --config test/vitest.config.ts --project
 reached — accepted, Task 18's guard surfaces it when the product gets there).
 
 ## Tasks
-
-### Task 12 — Ledger conversion: §10.4
-
-`section-10.4.ts` (762 `scSpec(...)` through a `write()` closure over mutable version
-variables — enumerate the versions in order into a record table, the preamble's rule; 886
-`pcSpec(...)`; 1023 — read; 1143 `mcSpec`; 1231 `ciSpec`; 1323 `urSpec`; 1591, 1642,
-1657 `t2Spec`; 1706, 1784 `t2cSpec`; 1866 `t2oDSpec`; 1970 `t2oTSpec`, 1971 `t2oDSpec`;
-2095, 2167 `t3Spec`; 2490 `T4R_WITHOUT_CHILD`; 2791 — read; 2997 `t5Spec`). T10.4-5 is
-CONF-CORE in scope (VIOL-CORE-PERSISTREADS certifies it) — totals stay 144/33.
-**Checks:** as the preamble's.
 
 ### Task 13 — Ledger conversion: §10.5 and §10.6
 
