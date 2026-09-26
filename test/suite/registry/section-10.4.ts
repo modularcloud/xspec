@@ -611,6 +611,51 @@ function scSpec(
   ].join("\n");
 }
 
+// The scenario's successive states of specs/S.mdx, in staging order — the
+// former `write()` closure over mutable version variables enumerated, every
+// state carrying the earlier edits forward. The pre-`create` edit (p's own
+// text at v1, staged between `gitCommitAll` and the body's first `build`)
+// precedes every product invocation and stays plain contents; the four arms'
+// states follow it and are staged-source records (helpers/staged-mdx.ts,
+// S-9: judged before any product exists), indexed by arm.
+const T10_4_1_SC_PRE_CREATE = scSpec(
+  "Parent own v1.",
+  "",
+  "Child text v0.",
+  "",
+  "Outside v0.",
+);
+const T10_4_1_SC_STATES = [
+  stagedMdx(
+    "T10.4-1 subtree-coherence specs/S.mdx after arm 1's edit: the child text at v1",
+    scSpec("Parent own v1.", "", "Child text v1.", "", "Outside v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 subtree-coherence specs/S.mdx after arm 2's edit: p tagged pt",
+    scSpec("Parent own v1.", ' tags="pt"', "Child text v1.", "", "Outside v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 subtree-coherence specs/S.mdx after arm 3's edit: p.c tagged ct",
+    scSpec(
+      "Parent own v1.",
+      ' tags="pt"',
+      "Child text v1.",
+      ' tags="ct"',
+      "Outside v0.",
+    ),
+  ),
+  stagedMdx(
+    "T10.4-1 subtree-coherence specs/S.mdx after arm 4's edit: the outside text at v1 (control)",
+    scSpec(
+      "Parent own v1.",
+      ' tags="pt"',
+      "Child text v1.",
+      ' tags="ct"',
+      "Outside v1.",
+    ),
+  ),
+] as const;
+
 // parent-consistency (--base; SPEC 10.4: ownHash and metadataHash of the
 // scope node; subtreeHash of each context node). A deep leaf edit under
 // a > a.k > a.k.d makes a's item's context node a.k, with the changed branch
@@ -646,6 +691,34 @@ function pcSpec(
     "",
   ].join("\n");
 }
+
+// The scenario's successive states of specs/P.mdx, in staging order (the
+// former `write()` closure enumerated, each state carrying the earlier edits
+// forward) — every one, the pre-`create` edit included, follows the body's
+// first `build` (the subtree-coherence scenario's), so all are records:
+// index 0 the pre-`create` edit, then one per arm.
+const T10_4_1_PC_STATES = [
+  stagedMdx(
+    "T10.4-1 parent-consistency specs/P.mdx after the pre-create edit: the deep leaf at v1",
+    pcSpec("Alpha own v0.", "", "Deep leaf v1.", "Other v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 parent-consistency specs/P.mdx after arm 1's edit: the deep leaf at v2",
+    pcSpec("Alpha own v0.", "", "Deep leaf v2.", "Other v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 parent-consistency specs/P.mdx after arm 2's edit: a tagged at",
+    pcSpec("Alpha own v0.", ' tags="at"', "Deep leaf v2.", "Other v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 parent-consistency specs/P.mdx after arm 3's edit: a's own text at v1",
+    pcSpec("Alpha own v1.", ' tags="at"', "Deep leaf v2.", "Other v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 parent-consistency specs/P.mdx after arm 4's edit: the sibling text at v1 (control)",
+    pcSpec("Alpha own v1.", ' tags="at"', "Deep leaf v2.", "Other v1."),
+  ),
+] as const;
 
 // dependency-consistency (--base; SPEC 10.4: ownHash and metadataHash of the
 // scope node; subtreeHash of each upstream target in context). dep depends on
@@ -683,6 +756,63 @@ function dcSpec(
   ].join("\n");
 }
 
+// The scenario's successive states of specs/D.mdx, in staging order (the
+// former `write()` closure enumerated, each state carrying the earlier edits
+// forward), all after the body's first `build`: index 0 the pre-`create`
+// edit, then one per arm.
+const T10_4_1_DC_STATES = [
+  stagedMdx(
+    "T10.4-1 dependency-consistency specs/D.mdx after the pre-create edit: the target's own text at v1",
+    dcSpec(
+      "Dep own v0.",
+      "",
+      "Target own v1.",
+      "Target child v0.",
+      "Unrelated v0.",
+    ),
+  ),
+  stagedMdx(
+    "T10.4-1 dependency-consistency specs/D.mdx after arm 1's edit: dep's own text at v1",
+    dcSpec(
+      "Dep own v1.",
+      "",
+      "Target own v1.",
+      "Target child v0.",
+      "Unrelated v0.",
+    ),
+  ),
+  stagedMdx(
+    "T10.4-1 dependency-consistency specs/D.mdx after arm 2's edit: dep tagged dt",
+    dcSpec(
+      "Dep own v1.",
+      ' tags="dt"',
+      "Target own v1.",
+      "Target child v0.",
+      "Unrelated v0.",
+    ),
+  ),
+  stagedMdx(
+    "T10.4-1 dependency-consistency specs/D.mdx after arm 3's edit: the target's child text at v1",
+    dcSpec(
+      "Dep own v1.",
+      ' tags="dt"',
+      "Target own v1.",
+      "Target child v1.",
+      "Unrelated v0.",
+    ),
+  ),
+  stagedMdx(
+    "T10.4-1 dependency-consistency specs/D.mdx after arm 4's edit: the unrelated text at v1 (control)",
+    dcSpec(
+      "Dep own v1.",
+      ' tags="dt"',
+      "Target own v1.",
+      "Target child v1.",
+      "Unrelated v1.",
+    ),
+  ),
+] as const;
+
 // metadata-consistency (--base; SPEC 10.4: metadataHash of the scope node
 // only). m's staged tag change generates the item; the control is a text
 // edit of m itself — subtreeHash moves, metadataHash does not.
@@ -692,6 +822,24 @@ const MC_M = "specs/M.mdx#m";
 function mcSpec(mTags: string, mText: string): string {
   return [`<S id="m" tags="${mTags}">`, mText, "</S>", ""].join("\n");
 }
+
+// The scenario's successive states of specs/M.mdx, in staging order (the
+// former `write()` closure enumerated), all after the body's first `build`:
+// index 0 the pre-`create` edit, then one per arm.
+const T10_4_1_MC_STATES = [
+  stagedMdx(
+    "T10.4-1 metadata-consistency specs/M.mdx after the pre-create edit: m tagged m1",
+    mcSpec("m1", "Em text v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 metadata-consistency specs/M.mdx after arm 1's edit: m tagged m2",
+    mcSpec("m2", "Em text v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 metadata-consistency specs/M.mdx after arm 2's edit: m's text at v1 (control)",
+    mcSpec("m2", "Em text v1."),
+  ),
+] as const;
 
 // code-impact (--base; SPEC 10.4: subtreeHash and effectiveHash of each node
 // targeted by the scoped location's impact edges). src/ref.ts references t;
@@ -729,6 +877,29 @@ const CI_CODE_SOURCE = [
   "",
 ].join("\n");
 
+// The scenario's successive states of specs/C.mdx, in staging order (the
+// former `write()` closure enumerated, each state carrying the earlier edits
+// forward), all after the body's first `build`: index 0 the pre-`create`
+// edit, then one per arm.
+const T10_4_1_CI_STATES = [
+  stagedMdx(
+    "T10.4-1 code-impact specs/C.mdx after the pre-create edit: the target text at v1",
+    ciSpec("Target v1.", "Upstream v0.", "Watcher v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 code-impact specs/C.mdx after arm 1's edit: the target text at v2",
+    ciSpec("Target v2.", "Upstream v0.", "Watcher v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 code-impact specs/C.mdx after arm 2's edit: the upstream text at v1",
+    ciSpec("Target v2.", "Upstream v1.", "Watcher v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 code-impact specs/C.mdx after arm 3's edit: the watcher text at v1 (control)",
+    ciSpec("Target v2.", "Upstream v1.", "Watcher v1."),
+  ),
+] as const;
+
 // uncovered-requirement (coverage session; SPEC 10.4: subtreeHash and
 // metadataHash of the scope node). Uncovered leaves u (under test) and e
 // (the elsewhere-edit control), both required by the direct profile.
@@ -748,6 +919,25 @@ function urSpec(uAttrs: string, uText: string, eText: string): string {
     "",
   ].join("\n");
 }
+
+// The scenario's successive states of specs/U.mdx, in staging order (the
+// former `write()` closure enumerated, each state carrying the earlier edits
+// forward), all after the body's first `build` — one per arm (a coverage
+// session stages no pre-`create` edit).
+const T10_4_1_UR_STATES = [
+  stagedMdx(
+    "T10.4-1 uncovered-requirement specs/U.mdx after arm 1's edit: u's text at v1",
+    urSpec("", "You leaf v1.", "Elsewhere v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 uncovered-requirement specs/U.mdx after arm 2's edit: u tagged ut",
+    urSpec(' tags="ut"', "You leaf v1.", "Elsewhere v0."),
+  ),
+  stagedMdx(
+    "T10.4-1 uncovered-requirement specs/U.mdx after arm 3's edit: the elsewhere text at v1 (control)",
+    urSpec(' tags="ut"', "You leaf v1.", "Elsewhere v1."),
+  ),
+] as const;
 
 const T10_4_1 = defineProductTest({
   id: "T10.4-1",
@@ -769,22 +959,12 @@ const T10_4_1 = defineProductTest({
       },
       async (workspace) => {
         const prefix = "T10.4-1 subtree-coherence";
-        let pOwn = "Parent own v0.";
-        let pAttrs = "";
-        let cText = "Child text v0.";
-        let cAttrs = "";
-        let oText = "Outside v0.";
-        const write = async (): Promise<void> => {
-          await workspace.file(
-            SC_FILE,
-            scSpec(pOwn, pAttrs, cText, cAttrs, oText),
-          );
-        };
 
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        pOwn = "Parent own v1."; // p `changed` relative to the baseline
-        await write();
+        // p `changed` relative to the baseline — staged before the body's
+        // first product invocation, so plain contents (S-7 reaches it).
+        await workspace.file(SC_FILE, T10_4_1_SC_PRE_CREATE);
         await buildOk(product, workspace, `${prefix} \`build\` after the edit`);
         await expectExit(
           product,
@@ -821,8 +1001,7 @@ const T10_4_1 = defineProductTest({
               label:
                 "text edit inside the scope subtree (a scope node's subtreeHash)",
               apply: async () => {
-                cText = "Child text v1.";
-                await write();
+                await workspace.file(SC_FILE, T10_4_1_SC_STATES[0]);
               },
               invalidates: true,
               changed: [
@@ -837,8 +1016,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "metadata-only edit on the scope root (its metadataHash)",
               apply: async () => {
-                pAttrs = ' tags="pt"';
-                await write();
+                await workspace.file(SC_FILE, T10_4_1_SC_STATES[1]);
               },
               invalidates: true,
               changed: [{ node: SC_P, hash: "metadataHash" }],
@@ -854,8 +1032,7 @@ const T10_4_1 = defineProductTest({
                 "no subtreeHash and MUST still invalidate (the relevant " +
                 "metadataHash is each scope node's)",
               apply: async () => {
-                cAttrs = ' tags="ct"';
-                await write();
+                await workspace.file(SC_FILE, T10_4_1_SC_STATES[2]);
               },
               invalidates: true,
               changed: [{ node: SC_PC, hash: "metadataHash" }],
@@ -868,8 +1045,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "control: an edit outside the scope subtree",
               apply: async () => {
-                oText = "Outside v1.";
-                await write();
+                await workspace.file(SC_FILE, T10_4_1_SC_STATES[3]);
               },
               invalidates: false,
               changed: [{ node: SC_O, hash: "subtreeHash" }],
@@ -894,18 +1070,11 @@ const T10_4_1 = defineProductTest({
       },
       async (workspace) => {
         const prefix = "T10.4-1 parent-consistency";
-        let aOwn = "Alpha own v0.";
-        let aAttrs = "";
-        let dText = "Deep leaf v0.";
-        let oText = "Other v0.";
-        const write = async (): Promise<void> => {
-          await workspace.file(PC_FILE, pcSpec(aOwn, aAttrs, dText, oText));
-        };
 
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        dText = "Deep leaf v1."; // a.k.d `changed`
-        await write();
+        // a.k.d `changed`
+        await workspace.file(PC_FILE, T10_4_1_PC_STATES[0]);
         await buildOk(product, workspace, `${prefix} \`build\` after the edit`);
         await expectExit(
           product,
@@ -956,8 +1125,7 @@ const T10_4_1 = defineProductTest({
               label:
                 "deep text edit under the context child (a context node's subtreeHash)",
               apply: async () => {
-                dText = "Deep leaf v2.";
-                await write();
+                await workspace.file(PC_FILE, T10_4_1_PC_STATES[1]);
               },
               invalidates: true,
               changed: [{ node: PC_AK, hash: "subtreeHash" }],
@@ -973,8 +1141,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "metadata edit of the scope node (its metadataHash)",
               apply: async () => {
-                aAttrs = ' tags="at"';
-                await write();
+                await workspace.file(PC_FILE, T10_4_1_PC_STATES[2]);
               },
               invalidates: true,
               changed: [{ node: PC_A, hash: "metadataHash" }],
@@ -986,8 +1153,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "own-text edit of the scope node (its ownHash)",
               apply: async () => {
-                aOwn = "Alpha own v1.";
-                await write();
+                await workspace.file(PC_FILE, T10_4_1_PC_STATES[3]);
               },
               invalidates: true,
               changed: [{ node: PC_A, hash: "ownHash" }],
@@ -999,8 +1165,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "control: an edit in a sibling subtree of the scope node",
               apply: async () => {
-                oText = "Other v1.";
-                await write();
+                await workspace.file(PC_FILE, T10_4_1_PC_STATES[4]);
               },
               invalidates: false,
               changed: [{ node: PC_O, hash: "subtreeHash" }],
@@ -1030,22 +1195,11 @@ const T10_4_1 = defineProductTest({
       },
       async (workspace) => {
         const prefix = "T10.4-1 dependency-consistency";
-        let depOwn = "Dep own v0.";
-        let depAttrs = "";
-        let tOwn = "Target own v0.";
-        let tcText = "Target child v0.";
-        let uText = "Unrelated v0.";
-        const write = async (): Promise<void> => {
-          await workspace.file(
-            DC_FILE,
-            dcSpec(depOwn, depAttrs, tOwn, tcText, uText),
-          );
-        };
 
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        tOwn = "Target own v1."; // t `changed`: dep's target effectiveHash moves
-        await write();
+        // t `changed`: dep's target effectiveHash moves
+        await workspace.file(DC_FILE, T10_4_1_DC_STATES[0]);
         await buildOk(product, workspace, `${prefix} \`build\` after the edit`);
         await expectExit(
           product,
@@ -1090,8 +1244,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "own-text edit of the scope node (its ownHash)",
               apply: async () => {
-                depOwn = "Dep own v1.";
-                await write();
+                await workspace.file(DC_FILE, T10_4_1_DC_STATES[1]);
               },
               invalidates: true,
               changed: [{ node: DC_DEP, hash: "ownHash" }],
@@ -1103,8 +1256,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "metadata edit of the scope node (its metadataHash)",
               apply: async () => {
-                depAttrs = ' tags="dt"';
-                await write();
+                await workspace.file(DC_FILE, T10_4_1_DC_STATES[2]);
               },
               invalidates: true,
               changed: [{ node: DC_DEP, hash: "metadataHash" }],
@@ -1117,8 +1269,7 @@ const T10_4_1 = defineProductTest({
               label:
                 "text edit under the upstream target in context (target subtreeHash)",
               apply: async () => {
-                tcText = "Target child v1.";
-                await write();
+                await workspace.file(DC_FILE, T10_4_1_DC_STATES[3]);
               },
               invalidates: true,
               changed: [{ node: DC_T, hash: "subtreeHash" }],
@@ -1130,8 +1281,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "control: an edit to an unrelated node",
               apply: async () => {
-                uText = "Unrelated v1.";
-                await write();
+                await workspace.file(DC_FILE, T10_4_1_DC_STATES[4]);
               },
               invalidates: false,
               changed: [{ node: DC_U, hash: "subtreeHash" }],
@@ -1153,16 +1303,11 @@ const T10_4_1 = defineProductTest({
       { [MC_FILE]: mcSpec("m0", "Em text v0.") },
       async (workspace) => {
         const prefix = "T10.4-1 metadata-consistency";
-        let mTags = "m0";
-        let mText = "Em text v0.";
-        const write = async (): Promise<void> => {
-          await workspace.file(MC_FILE, mcSpec(mTags, mText));
-        };
 
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        mTags = "m1"; // m `metadata-changed`
-        await write();
+        // m `metadata-changed`
+        await workspace.file(MC_FILE, T10_4_1_MC_STATES[0]);
         await buildOk(
           product,
           workspace,
@@ -1206,8 +1351,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "metadata edit of the scope node (metadataHash only)",
               apply: async () => {
-                mTags = "m2";
-                await write();
+                await workspace.file(MC_FILE, T10_4_1_MC_STATES[1]);
               },
               invalidates: true,
               changed: [{ node: MC_M, hash: "metadataHash" }],
@@ -1218,8 +1362,7 @@ const T10_4_1 = defineProductTest({
                 "control: a text edit of the scope node does not invalidate " +
                 "(only the metadataHash is relevant to this kind)",
               apply: async () => {
-                mText = "Em text v1.";
-                await write();
+                await workspace.file(MC_FILE, T10_4_1_MC_STATES[2]);
               },
               invalidates: false,
               changed: [{ node: MC_M, hash: "subtreeHash" }],
@@ -1240,17 +1383,11 @@ const T10_4_1 = defineProductTest({
       },
       async (workspace) => {
         const prefix = "T10.4-1 code-impact";
-        let tText = "Target v0.";
-        let upText = "Upstream v0.";
-        let wText = "Watcher v0.";
-        const write = async (): Promise<void> => {
-          await workspace.file(CI_FILE, ciSpec(tText, upText, wText));
-        };
 
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        tText = "Target v1."; // t `changed`: src/ref.ts directly impacted
-        await write();
+        // t `changed`: src/ref.ts directly impacted
+        await workspace.file(CI_FILE, T10_4_1_CI_STATES[0]);
         await buildOk(product, workspace, `${prefix} \`build\` after the edit`);
         await expectExit(
           product,
@@ -1286,8 +1423,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "text edit of an impact-edge target (target subtreeHash)",
               apply: async () => {
-                tText = "Target v2.";
-                await write();
+                await workspace.file(CI_FILE, T10_4_1_CI_STATES[1]);
               },
               invalidates: true,
               changed: [{ node: CI_T, hash: "subtreeHash" }],
@@ -1298,8 +1434,7 @@ const T10_4_1 = defineProductTest({
                 "upstream edit changing only the target's effectiveHash " +
                 "(its subtreeHash stays put)",
               apply: async () => {
-                upText = "Upstream v1.";
-                await write();
+                await workspace.file(CI_FILE, T10_4_1_CI_STATES[2]);
               },
               invalidates: true,
               changed: [{ node: CI_T, hash: "effectiveHash" }],
@@ -1310,8 +1445,7 @@ const T10_4_1 = defineProductTest({
                 "control: an edit to a node that is no impact-edge target " +
                 "and upstream of none",
               apply: async () => {
-                wText = "Watcher v1.";
-                await write();
+                await workspace.file(CI_FILE, T10_4_1_CI_STATES[3]);
               },
               invalidates: false,
               changed: [{ node: CI_W, hash: "subtreeHash" }],
@@ -1332,12 +1466,6 @@ const T10_4_1 = defineProductTest({
       { [UR_FILE]: urSpec("", "You leaf v0.", "Elsewhere v0.") },
       async (workspace) => {
         const prefix = "T10.4-1 uncovered-requirement";
-        let uAttrs = "";
-        let uText = "You leaf v0.";
-        let eText = "Elsewhere v0.";
-        const write = async (): Promise<void> => {
-          await workspace.file(UR_FILE, urSpec(uAttrs, uText, eText));
-        };
 
         await buildOk(product, workspace, `${prefix} \`build\``);
         await expectExit(
@@ -1382,8 +1510,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "text edit in the scope node's subtree (its subtreeHash)",
               apply: async () => {
-                uText = "You leaf v1.";
-                await write();
+                await workspace.file(UR_FILE, T10_4_1_UR_STATES[0]);
               },
               invalidates: true,
               changed: [{ node: UR_U, hash: "subtreeHash" }],
@@ -1392,8 +1519,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "metadata edit of the scope node (its metadataHash)",
               apply: async () => {
-                uAttrs = ' tags="ut"';
-                await write();
+                await workspace.file(UR_FILE, T10_4_1_UR_STATES[1]);
               },
               invalidates: true,
               changed: [{ node: UR_U, hash: "metadataHash" }],
@@ -1402,8 +1528,7 @@ const T10_4_1 = defineProductTest({
             {
               label: "control: an edit elsewhere",
               apply: async () => {
-                eText = "Elsewhere v1.";
-                await write();
+                await workspace.file(UR_FILE, T10_4_1_UR_STATES[2]);
               },
               invalidates: false,
               changed: [{ node: UR_E, hash: "subtreeHash" }],
