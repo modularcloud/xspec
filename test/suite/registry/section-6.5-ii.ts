@@ -88,12 +88,14 @@ import { assertFileBytes, fail } from "../../helpers/assertions.js";
 import { assertExactDeclarationInsertion } from "../../helpers/import-insertion.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   ConsumerProject,
   assertNoCompileErrors,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertEdgeSetEqual,
   assertSameJson,
@@ -126,17 +128,22 @@ const MOVE_ARGV = ["move", `${ORIGIN}#x`, `${TARGET}#y`] as const;
 const MOVE_LABEL = MOVE_ARGV.join(" ");
 
 // The origin holds the moved `x` and, for (c)'s second call, the unmoved
-// `w`; the target holds `z`, (b)'s marker target.
-const ORIGIN_BEFORE = [
-  '<S id="x">',
-  "Moved x text.",
-  "</S>",
-  "",
-  '<S id="w">',
-  "Unmoved w text.",
-  "</S>",
-  "",
-].join("\n");
+// `w`; the target holds `z`, (b)'s marker target. Both are ledger records
+// (S-9's before-any-product clause; helpers/staged-mdx.ts): every arm after
+// the first stages them after the body's first product invocation.
+const ORIGIN_BEFORE = stagedMdx(
+  "T6.5-11 specs/origin.mdx",
+  [
+    '<S id="x">',
+    "Moved x text.",
+    "</S>",
+    "",
+    '<S id="w">',
+    "Unmoved w text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // Composed from SPEC 6.5 and 3: the construct's own characters deleted in
 // place; the merged line that deletion leaves holds only the closing tag's
@@ -147,7 +154,10 @@ const ORIGIN_AFTER = ["", '<S id="w">', "Unmoved w text.", "</S>", ""].join(
   "\n",
 );
 
-const TARGET_BEFORE = ['<S id="z">', "Target z text.", "</S>", ""].join("\n");
+const TARGET_BEFORE = stagedMdx(
+  "T6.5-11 specs/target.mdx",
+  ['<S id="z">', "Target z text.", "</S>", ""].join("\n"),
+);
 
 // Composed from SPEC 6.5: top-level `y`, so the moved text — re-identified
 // by prefix replacement `x` → `y` — is inserted at the end of the file
@@ -374,7 +384,7 @@ function utf8Length(text: string): number {
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -387,7 +397,9 @@ async function withWorkspace<T>(
   }
 }
 
-function armFiles(arm: CallMoveArm): Readonly<Record<string, string>> {
+function armFiles(
+  arm: CallMoveArm,
+): Readonly<Record<string, InitialFileContents>> {
   return { [ORIGIN]: ORIGIN_BEFORE, [TARGET]: TARGET_BEFORE, [CODE]: arm.code };
 }
 

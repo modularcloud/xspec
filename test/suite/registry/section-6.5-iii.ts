@@ -200,6 +200,7 @@ import {
 import { deriveMdx } from "../../helpers/mdx-derivability.js";
 import { HarnessStagingError } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
+import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import {
   ConsumerProject,
@@ -208,6 +209,7 @@ import {
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertEdgeSetEqual,
   assertFindingIdentities,
@@ -256,9 +258,14 @@ export default defineConfig({
 /** The compiler-provided names a spec source's added import may not bind (SPEC 2.1). */
 const MDX_RESERVED_NAMES: readonly string[] = ["S", "Spec", "text"];
 
-/** Stage a fresh workspace (`config` plus `files`), run `body`, dispose (H-1). */
+/**
+ * Stage a fresh workspace (`config` plus `files`), run `body`, dispose (H-1).
+ * Every `.mdx` entry a body stages after its first product invocation is a
+ * ledger record (S-9's before-any-product clause; helpers/staged-mdx.ts),
+ * staged under the record's declaration; the arm tables below carry them.
+ */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
   config: string = CONFIG,
 ): Promise<T> {
@@ -270,6 +277,23 @@ async function withWorkspace<T>(
   } finally {
     await workspace.dispose();
   }
+}
+
+/**
+ * The text of a staged spec source: the string a ledger record was made
+ * from, or the plain string itself — for the S-9 vectors and the tables'
+ * self-checks, which read the staged bytes as text. Every source this
+ * module stages is a string; anything else is a defect of the table.
+ */
+function stagedText(contents: InitialFileContents): string {
+  const text = contents instanceof StagedMdx ? contents.source : contents;
+  if (typeof text !== "string") {
+    throw new Error(
+      "section-6.5-iii: a staged spec source must be a string (the tables " +
+        "compose text, never bytes)",
+    );
+  }
+  return text;
 }
 
 /**
@@ -396,16 +420,19 @@ const R12_IMPORT = 'import A from "./a.xspec"';
 // their lines, so its deletion in place leaves one merged empty line, dropped
 // with its terminator (SPEC 6.5, 3); the blank line before it, blank already,
 // stays — the origin ends with `</S>`, U+000A, U+000A.
-const R12_ORIGIN_BEFORE = [
-  '<S id="w">',
-  "W text.",
-  "</S>",
-  "",
-  '<S id="x">',
-  "X text.",
-  "</S>",
-  "",
-].join("\n");
+const R12_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-12 specs/a.mdx",
+  [
+    '<S id="w">',
+    "W text.",
+    "</S>",
+    "",
+    '<S id="x">',
+    "X text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 const R12_ORIGIN_AFTER = ['<S id="w">', "W text.", "</S>", "", ""].join("\n");
 
 // The target's own section, before and after: `d={A.x}` and `{text(A.x)}`
@@ -447,7 +474,8 @@ const R12_B_TO_Y_EMBEDS: GraphEdge = {
 
 interface R12Arm {
   readonly name: string;
-  readonly targetBefore: string;
+  /** The target as staged: a ledger record (S-9). */
+  readonly targetBefore: StagedMdx;
   /** Composed from SPEC 6.4/6.5 and 3 — never from product output. */
   readonly targetAfter: string;
   readonly importFate: string;
@@ -458,7 +486,10 @@ interface R12Arm {
 const R12_ARMS: readonly R12Arm[] = [
   {
     name: "last uses — import removed",
-    targetBefore: [R12_IMPORT, "", ...R12_OWN_LINES_BEFORE, ""].join("\n"),
+    targetBefore: stagedMdx(
+      "T6.5-12 (last uses — import removed) specs/b.mdx",
+      [R12_IMPORT, "", ...R12_OWN_LINES_BEFORE, ""].join("\n"),
+    ),
     // The two rewritten references were the `A` binding's last uses, so the
     // declaration's own characters are deleted in place and its line, left
     // empty purely by that deletion, is dropped with its terminator — the
@@ -482,14 +513,17 @@ const R12_ARMS: readonly R12Arm[] = [
   },
   {
     name: "a use remains — import kept",
-    targetBefore: [
-      R12_IMPORT,
-      "",
-      ...R12_OWN_LINES_BEFORE,
-      "",
-      ...R12_OTHER_LINES,
-      "",
-    ].join("\n"),
+    targetBefore: stagedMdx(
+      "T6.5-12 (a use remains — import kept) specs/b.mdx",
+      [
+        R12_IMPORT,
+        "",
+        ...R12_OWN_LINES_BEFORE,
+        "",
+        ...R12_OTHER_LINES,
+        "",
+      ].join("\n"),
+    ),
     // `c`'s `d={A.w}` still uses the binding after the rewrite, so the
     // declaration and its line are untouched (SPEC 6.5).
     targetAfter: [
@@ -639,6 +673,11 @@ const F14_MOVE_ARGV = ["move", "specs/a.mdx#m", "specs/new.mdx#m"] as const;
 // `upstream-changed` (5.6).
 const F14_SIBLING_LINES = ['<S id="s">', "Sib text.", "</S>"];
 const F14_THIRD_SOURCE = ['<S id="q">', "Q text.", "</S>", ""].join("\n");
+/** The third module as arm (ii) stages it — a ledger record (S-9); the string stays for the untouched-file compare. */
+const F14_THIRD_STAGED = stagedMdx(
+  "T6.5-14 (two declarations) specs/x.mdx",
+  F14_THIRD_SOURCE,
+);
 
 // Arm (i): no declaration needed — the moved subtree's one reference is
 // local to it (`m.b` depends on `m.a`), and the move keeps the ID, so no
@@ -694,18 +733,21 @@ function f14ImportedMovedLines(
     "</S>",
   ];
 }
-const F14_DECL_ORIGIN_BEFORE = [
-  'import X from "./x.xspec"',
-  "",
-  ...F14_SIBLING_LINES,
-  "",
-  '<S id="m" d={"s"}>',
-  "Moved text.",
-  "",
-  "{text(X.q)}",
-  "</S>",
-  "",
-].join("\n");
+const F14_DECL_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-14 (two declarations) specs/a.mdx",
+  [
+    'import X from "./x.xspec"',
+    "",
+    ...F14_SIBLING_LINES,
+    "",
+    '<S id="m" d={"s"}>',
+    "Moved text.",
+    "",
+    "{text(X.q)}",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 // The origin's `X` binding loses its only use with the moved text, so its
 // declaration is deleted in place and its emptied line dropped with its
 // terminator — the block it alone made up left with no line — while the
@@ -1091,7 +1133,7 @@ async function runF14LocalArm(product: ProductBinding): Promise<void> {
 async function runF14DeclarationsArm(product: ProductBinding): Promise<void> {
   const context = "T6.5-14 (two declarations)";
   await withWorkspace(
-    { [F14_ORIGIN]: F14_DECL_ORIGIN_BEFORE, [F14_THIRD]: F14_THIRD_SOURCE },
+    { [F14_ORIGIN]: F14_DECL_ORIGIN_BEFORE, [F14_THIRD]: F14_THIRD_STAGED },
     async (workspace) => {
       await buildOk(
         product,
@@ -1243,6 +1285,20 @@ const A13_TARGET = "specs/b.mdx";
 const A13_THIRD = "specs/x.mdx";
 const A13_THIRD_MODULE = "specs/x.xspec";
 const A13_THIRD_SOURCE = ['<S id="a">', "A text.", "</S>", ""].join("\n");
+/**
+ * The third module as staged, `a` alone — a ledger record (S-9's
+ * before-any-product clause; helpers/staged-mdx.ts) shared by every site
+ * staging these bytes, identical bytes being one record staged at each:
+ * T6.5-13's cross-file arms and (g), T6.5-19's (a), and T6.6-4's tie-break
+ * restagings at `specs/x.mdx`; T6.5-16's (g) family, T6.5-17's arms, and
+ * their T6.6-3 and T14-7 restagings at `specs/x.mdx` (`R16_G_THIRD_STAGED`,
+ * `M17_X_STAGED` below); T6.5-15's `specs/A.mdx`. The string stays for the
+ * untouched-file compares and the S-9 vectors.
+ */
+const A13_THIRD_STAGED = stagedMdx(
+  "T6.5-13/T6.5-15/T6.5-16/T6.5-17/T6.5-19/T6.6-3/T6.6-4/T14-7 the module holding a alone (specs/x.mdx; T6.5-15's specs/A.mdx)",
+  A13_THIRD_SOURCE,
+);
 /** The canonical specifier the receiving file's added declaration carries (SPEC 6.5, 2.1). */
 const A13_THIRD_SPECIFIER = canonicalSpecifier("specs", A13_THIRD_MODULE);
 /** (g)'s second third module, `specs/y.mdx`, and its canonical specifier. */
@@ -1286,6 +1342,11 @@ const A13_ORIGIN_BEFORE = [
   "",
 ].join("\n");
 const A13_ORIGIN_AFTER = [...A13_ORIGIN_HEAD, ""].join("\n");
+/** The cross-file origin as staged — one record (S-9) for T6.5-13's cross-file arms, T6.5-19's (a), and T6.6-4's tie-break restagings. */
+const A13_ORIGIN_STAGED = stagedMdx(
+  "T6.5-13/T6.5-19/T6.6-4 specs/a.mdx the cross-file origin",
+  A13_ORIGIN_BEFORE,
+);
 
 /** 6.5's exact spelling of the declaration the receiving file needs (the third module's unless `specifier` says otherwise). */
 function a13Declaration(
@@ -1334,7 +1395,7 @@ interface A13Arm {
   /** The placement 6.5 fixes here, for diagnoses. */
   readonly summary: string;
   /** The staging beside the configuration. */
-  readonly files: Readonly<Record<string, string>>;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
   /** The move's argv. */
   readonly argv: readonly string[];
   /** The receiving file: the one whose post-move bytes the arm composes value-blind. */
@@ -1397,7 +1458,8 @@ const A13_BYSTANDER_REASON =
 function a13CrossArm(spec: {
   readonly key: string;
   readonly summary: string;
-  readonly target: string;
+  /** The target as staged: a ledger record (S-9). */
+  readonly target: StagedMdx;
   readonly newId: string;
   readonly compose: (ident: string) => string;
   readonly previewEdits: readonly PreviewEdit[];
@@ -1409,8 +1471,8 @@ function a13CrossArm(spec: {
     key: spec.key,
     summary: spec.summary,
     files: {
-      [A13_ORIGIN]: A13_ORIGIN_BEFORE,
-      [A13_THIRD]: A13_THIRD_SOURCE,
+      [A13_ORIGIN]: A13_ORIGIN_STAGED,
+      [A13_THIRD]: A13_THIRD_STAGED,
       [A13_TARGET]: spec.target,
     },
     argv: ["move", `${A13_ORIGIN}#m`, `${A13_TARGET}#${spec.newId}`],
@@ -1478,6 +1540,38 @@ const A13_C_TARGET = ['<S id="p">', "x", "</S>"].join("\n");
 // (d): a paragraph line alone, unterminated; the target parent of a
 // top-level `new-id` is the root.
 const A13_D_TARGET = "para";
+// The targets as staged — ledger records (S-9); the strings stay for the
+// offsets the preview edits pin. Identical bytes are one record: (a)'s
+// target is T6.5-17's arms' and T6.5-16's (g) control's `specs/b.mdx` too
+// (`M17_TARGET_SOURCE`, `R16_G_CONTROL_TARGET` below; T6.6-3 and T14-7
+// restage T6.5-17's arms), (b)'s is (g)'s, and (d)'s two variants are
+// T6.5-16's top-level (g) twin's (restaged by T6.6-3 and T14-7); (b), (d),
+// and (g) are T6.6-4's tie-break restagings.
+const A13_A_STAGED = stagedMdx(
+  "T6.5-13/T6.5-16/T6.5-17/T6.6-3/T14-7 specs/b.mdx the flow-form parent p holding x",
+  A13_A_TARGET,
+);
+const A13_A_SIBLING_STAGED = stagedMdx(
+  "T6.5-13 arm (a, sibling) specs/b.mdx",
+  A13_A_SIBLING_TARGET,
+);
+const A13_B_STAGED = stagedMdx(
+  "T6.5-13/T6.6-4 arms (b) and (g) specs/b.mdx",
+  A13_B_TARGET,
+);
+const A13_B_TERMINATED_STAGED = stagedMdx(
+  "T6.5-13 arm (b, terminated) specs/b.mdx",
+  `${A13_B_TARGET}\n`,
+);
+const A13_C_STAGED = stagedMdx("T6.5-13 arm (c) specs/b.mdx", A13_C_TARGET);
+const A13_D_STAGED = stagedMdx(
+  "T6.5-13/T6.5-16/T6.6-3/T6.6-4/T14-7 specs/b.mdx the paragraph line para, unterminated",
+  A13_D_TARGET,
+);
+const A13_D_TERMINATED_STAGED = stagedMdx(
+  "T6.5-13/T6.5-16/T6.6-3/T6.6-4/T14-7 specs/b.mdx the paragraph line para, terminated",
+  `${A13_D_TARGET}\n`,
+);
 
 /** (a)/(c)'s composition: the moved text before `</S>`, then the declaration. */
 function a13ComposeIntoP(ident: string, tail: readonly string[]): string {
@@ -1521,6 +1615,7 @@ const A13_E_AFTER = [
   "</S> baz",
   "",
 ].join("\n");
+const A13_E_STAGED = stagedMdx("T6.5-13 arm (e) specs/a.mdx", A13_E_BEFORE);
 // (f): a same-file top-level move of the file's last section, whose
 // unterminated last line the deletion drops.
 const A13_F_MOVED = ['<S id="m">', "y", "</S>"].join("\n");
@@ -1528,12 +1623,18 @@ const A13_F_BEFORE = ['<S id="a">x</S>', A13_F_MOVED].join("\n");
 const A13_F_AFTER = ['<S id="a">x</S>', '<S id="n">', "y", "</S>", ""].join(
   "\n",
 );
+const A13_F_STAGED = stagedMdx("T6.5-13 arm (f) specs/a.mdx", A13_F_BEFORE);
 
 // (g): two declarations added to one spec file — the moved text carries
 // embeddings through two third-module bindings the target lacks, into (b)'s
 // self-closing target; the origin's sibling keeps a use of each, so both
 // declarations stay there (SPEC 6.5).
 const A13_FOURTH_SOURCE = ['<S id="b">', "B text.", "</S>", ""].join("\n");
+/** The fourth module as staged, `b` alone — one record (S-9) for (g) and its T6.6-4 restaging, T6.5-17's (b) and its T6.6-3 and T14-7 restagings (`M17_Y_STAGED` below), and T6.5-15's `specs/B.mdx`. */
+const A13_FOURTH_STAGED = stagedMdx(
+  "T6.5-13/T6.5-15/T6.5-17/T6.6-3/T6.6-4/T14-7 the module holding b alone (specs/y.mdx; T6.5-15's specs/B.mdx)",
+  A13_FOURTH_SOURCE,
+);
 
 /** The moved section of (g): one body line embedding through both third-module bindings. */
 function a13TwiceMovedLines(id: string, x: string, y: string): string[] {
@@ -1553,11 +1654,10 @@ const A13_G_ORIGIN_HEAD: readonly string[] = [
   "</S>",
   "",
 ];
-const A13_G_ORIGIN_BEFORE = [
-  ...A13_G_ORIGIN_HEAD,
-  ...a13TwiceMovedLines("m", "X", "Y"),
-  "",
-].join("\n");
+const A13_G_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-13/T6.6-4 arm (g) specs/a.mdx",
+  [...A13_G_ORIGIN_HEAD, ...a13TwiceMovedLines("m", "X", "Y"), ""].join("\n"),
+);
 const A13_G_ORIGIN_AFTER = [...A13_G_ORIGIN_HEAD, ""].join("\n");
 
 /**
@@ -1596,6 +1696,15 @@ const A13_EXISTING_TARGET = '<S id="k">z</S>\n';
 const A13_I_TARGET_AFTER = `${A13_EXISTING_TARGET}${A13_I_MOVED}\n`;
 const A13_I_LINE_2 = A13_I_ORIGIN_BEFORE.indexOf(A13_I_MOVED);
 const A13_I_REFERENCE = A13_I_ORIGIN_BEFORE.indexOf('"m"');
+const A13_I_ORIGIN_STAGED = stagedMdx(
+  "T6.5-13 arm (i) specs/a.mdx",
+  A13_I_ORIGIN_BEFORE,
+);
+/** The existing target as staged, `k` alone — one record (S-9) for (i), (k), T6.5-19's (b), and T6.5-16's arms staging `R16_K` (below) whole, with their T6.6-3 and T14-7 restagings. */
+const A13_K_STAGED = stagedMdx(
+  "T6.5-13/T6.5-16/T6.5-19/T6.6-3/T14-7 specs/b.mdx holding k alone",
+  A13_EXISTING_TARGET,
+);
 
 /** (i)'s composition: the converted reference, then the target module's declaration at the composed file's end. */
 function a13ComposeOriginDeclaration(
@@ -1638,7 +1747,7 @@ function a13ParagraphHeadedArm(
     ...a13CrossArm({
       key,
       summary,
-      target,
+      target: stagedMdx(`T6.5-13 arm ${key} ${A13_TARGET}`, target),
       newId: "p.n",
       compose: (ident) => [...head, a13ComposeIntoP(ident, [""])].join("\n"),
       previewEdits: [
@@ -1668,6 +1777,10 @@ const A13_DEPENDENT_SOURCE = [
   "</S>",
   "",
 ].join("\n");
+const A13_DEPENDENT_STAGED = stagedMdx(
+  "T6.5-13 arms (h) and (j) specs/dep.mdx",
+  A13_DEPENDENT_SOURCE,
+);
 
 // (h): the mid-line addition off the file's end — the end of the `</S>`
 // line before its terminator is the only admissible offset (offset 0 would
@@ -1675,6 +1788,7 @@ const A13_DEPENDENT_SOURCE = [
 // inside `p`, the start of the `trailing` line would absorb that line, and
 // the file's end follows a paragraph line).
 const A13_H_TARGET = ['<S id="p">', "x", "</S>", "trailing"].join("\n");
+const A13_H_STAGED = stagedMdx("T6.5-13 arm (h) specs/b.mdx", A13_H_TARGET);
 
 // (j): the file's-end addition whose ended line is kept — the closing
 // tag's line a flow line holding a tag and an expression container alone
@@ -1684,6 +1798,7 @@ const A13_H_TARGET = ['<S id="p">', "x", "</S>", "trailing"].join("\n");
 // line with `{text(<X>.a)}` replaced by `a`'s subtree text — then the added
 // terminator after it.
 const A13_J_TARGET = ['<S id="p">', "x", '</S>{text("p")}'].join("\n");
+const A13_J_STAGED = stagedMdx("T6.5-13 arm (j) specs/b.mdx", A13_J_TARGET);
 const A13_A_SUBTREE_TEXT = "A text.\n";
 const A13_J_OWN_BEFORE = "x\n";
 const A13_J_OWN_AFTER = `x\nMoved ${A13_A_SUBTREE_TEXT} text.\n\n`;
@@ -1820,7 +1935,7 @@ function a13DependentArm(
   const arm = a13CrossArm(spec);
   return {
     ...arm,
-    files: { ...arm.files, [A13_DEPENDENT]: A13_DEPENDENT_SOURCE },
+    files: { ...arm.files, [A13_DEPENDENT]: A13_DEPENDENT_STAGED },
     others: [
       ...arm.others,
       {
@@ -1851,7 +1966,10 @@ const A13_K_ORIGIN_HEAD: readonly string[] = [
   "",
 ];
 const A13_K_MOVED = ['<S id="m">', "Moved text.", "</S>"].join("\n");
-const A13_K_ORIGIN_BEFORE = [...A13_K_ORIGIN_HEAD, A13_K_MOVED, ""].join("\n");
+const A13_K_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-13 arm (k) specs/a.mdx",
+  [...A13_K_ORIGIN_HEAD, A13_K_MOVED, ""].join("\n"),
+);
 const A13_K_ORIGIN_AFTER = [...A13_K_ORIGIN_HEAD, ""].join("\n");
 const A13_K_TARGET_AFTER = `${A13_EXISTING_TARGET}${A13_K_MOVED}\n`;
 const A13_K_C_BEFORE = [
@@ -1860,6 +1978,7 @@ const A13_K_C_BEFORE = [
 ].join("\n");
 const A13_K_C_LINE_2 = A13_K_C_BEFORE.indexOf("import A");
 const A13_K_C_REFERENCE = A13_K_C_BEFORE.indexOf("A.m");
+const A13_K_C_STAGED = stagedMdx("T6.5-13 arm (k) specs/c.mdx", A13_K_C_BEFORE);
 
 /** (k)'s composition: the re-rooted reference, then the target module's declaration at the composed file's end. */
 function a13ComposeThirdFileDeclaration(
@@ -1934,7 +2053,7 @@ const A13_ARMS: readonly A13Arm[] = [
       "leave a kept empty line): the moved text and its terminator inserted " +
       "before `</S>`, the declaration plus U+000A appended after the final " +
       "terminator, nothing else",
-    target: A13_A_TARGET,
+    target: A13_A_STAGED,
     newId: "p.n",
     compose: (ident) => a13ComposeIntoP(ident, [""]),
     previewEdits: [
@@ -1953,7 +2072,7 @@ const A13_ARMS: readonly A13Arm[] = [
       "as paragraph text, and the start of the `trailing` line would absorb " +
       "it — so the declaration stands at that empty line's start, the empty " +
       "line kept after it",
-    target: A13_A_SIBLING_TARGET,
+    target: A13_A_SIBLING_STAGED,
     newId: "p.n",
     compose: (ident) => a13ComposeIntoP(ident, ["", "trailing"]),
     previewEdits: [
@@ -1972,7 +2091,7 @@ const A13_ARMS: readonly A13Arm[] = [
       "admissible offset: the parent rewritten to the paired form, the moved " +
       "text between its tags, the declaration after the appended closing " +
       "tag, each preceded by the terminator a tag's `>` requires",
-    target: A13_B_TARGET,
+    target: A13_B_STAGED,
     newId: "p.n",
     compose: a13ComposeSelfClosing,
     previewEdits: [
@@ -1990,7 +2109,7 @@ const A13_ARMS: readonly A13Arm[] = [
       "the self-closing case with a final terminator after the tag — the " +
       "same bytes result, the addition at the file's end, a line start, " +
       "taken over the tag's end",
-    target: `${A13_B_TARGET}\n`,
+    target: A13_B_TERMINATED_STAGED,
     newId: "p.n",
     compose: a13ComposeSelfClosing,
     previewEdits: [
@@ -2010,7 +2129,7 @@ const A13_ARMS: readonly A13Arm[] = [
       "mid-line, is the only admissible offset: the added terminator ends " +
       "the `</S>` line, which drops as it did before, then the declaration " +
       "and its terminator",
-    target: A13_C_TARGET,
+    target: A13_C_STAGED,
     newId: "p.n",
     compose: (ident) => a13ComposeIntoP(ident, [""]),
     previewEdits: [
@@ -2029,7 +2148,7 @@ const A13_ARMS: readonly A13Arm[] = [
       "then the declaration at the same offset, admissible after the flow " +
       "closing tag's line where the reverse order would make it paragraph " +
       "text; no empty line between",
-    target: A13_D_TARGET,
+    target: A13_D_STAGED,
     newId: "n",
     compose: a13ComposeAfterPara,
     previewEdits: [
@@ -2048,7 +2167,7 @@ const A13_ARMS: readonly A13Arm[] = [
       "only line-start admissible offset is the file's end again (offset 0 " +
       "would absorb `para` into the block; the end of the `para` line " +
       "before its terminator would leave the declaration paragraph text)",
-    target: `${A13_D_TARGET}\n`,
+    target: A13_D_TERMINATED_STAGED,
     newId: "n",
     compose: a13ComposeAfterPara,
     previewEdits: [
@@ -2068,7 +2187,7 @@ const A13_ARMS: readonly A13Arm[] = [
       "is added; a product judging the pre-operation text (the point " +
       "preceded by `>`) emits an empty line before the moved text, ending " +
       "the paragraph with `p` unclosed",
-    files: { [A13_ORIGIN]: A13_E_BEFORE },
+    files: { [A13_ORIGIN]: A13_E_STAGED },
     argv: ["move", `${A13_ORIGIN}#p.m`, `${A13_ORIGIN}#p.n`],
     receiving: A13_ORIGIN,
     added: [],
@@ -2095,7 +2214,7 @@ const A13_ARMS: readonly A13Arm[] = [
       "origin deletion drops — what the deletion leaves before the file's " +
       "end is line 1's terminator, so none is added: T6.2-4's " +
       "pure-in-effect final-position move",
-    files: { [A13_ORIGIN]: A13_F_BEFORE },
+    files: { [A13_ORIGIN]: A13_F_STAGED },
     argv: ["move", `${A13_ORIGIN}#m`, `${A13_ORIGIN}#n`],
     receiving: A13_ORIGIN,
     added: [],
@@ -2128,9 +2247,9 @@ const A13_ARMS: readonly A13Arm[] = [
       "`target-insertion` there",
     files: {
       [A13_ORIGIN]: A13_G_ORIGIN_BEFORE,
-      [A13_THIRD]: A13_THIRD_SOURCE,
-      [A13_FOURTH]: A13_FOURTH_SOURCE,
-      [A13_TARGET]: A13_B_TARGET,
+      [A13_THIRD]: A13_THIRD_STAGED,
+      [A13_FOURTH]: A13_FOURTH_STAGED,
+      [A13_TARGET]: A13_B_STAGED,
     },
     argv: ["move", `${A13_ORIGIN}#m`, `${A13_TARGET}#p.n`],
     receiving: A13_TARGET,
@@ -2181,7 +2300,7 @@ const A13_ARMS: readonly A13Arm[] = [
         "which drops as it did before, the declaration's line drops whole, " +
         "and the `</S>` line's original terminator is left an empty line, " +
         "kept",
-      target: A13_H_TARGET,
+      target: A13_H_STAGED,
       newId: "p.n",
       compose: (ident) => a13ComposeIntoP(ident, ["", "trailing"]),
       previewEdits: [
@@ -2205,8 +2324,8 @@ const A13_ARMS: readonly A13Arm[] = [
       "added: an insertion where the origin deletion's range ends reads " +
       "what the deletion leaves",
     files: {
-      [A13_ORIGIN]: A13_I_ORIGIN_BEFORE,
-      [A13_TARGET]: A13_EXISTING_TARGET,
+      [A13_ORIGIN]: A13_I_ORIGIN_STAGED,
+      [A13_TARGET]: A13_K_STAGED,
     },
     argv: ["move", `${A13_ORIGIN}#m`, `${A13_TARGET}#m`],
     receiving: A13_ORIGIN,
@@ -2252,7 +2371,7 @@ const A13_ARMS: readonly A13Arm[] = [
         '`</S>{text("p")}` line, which is kept, its excised embedding ' +
         "counting as remaining line content (1.6) so that the drop rule of " +
         "3 spares it, unlike (c)'s bare `</S>` line",
-      target: A13_J_TARGET,
+      target: A13_J_STAGED,
       newId: "p.n",
       compose: a13ComposeBeforeEmbeddingLine,
       previewEdits: [
@@ -2277,8 +2396,8 @@ const A13_ARMS: readonly A13Arm[] = [
       "removal's range ends reads what the removal leaves",
     files: {
       [A13_ORIGIN]: A13_K_ORIGIN_BEFORE,
-      [A13_TARGET]: A13_EXISTING_TARGET,
-      [A13_SPEC_C]: A13_K_C_BEFORE,
+      [A13_TARGET]: A13_K_STAGED,
+      [A13_SPEC_C]: A13_K_C_STAGED,
     },
     argv: ["move", `${A13_ORIGIN}#m`, `${A13_TARGET}#m`],
     receiving: A13_SPEC_C,
@@ -2376,7 +2495,7 @@ export interface A13Embedding {
 export interface A13TieBreakArm {
   readonly key: string;
   readonly summary: string;
-  readonly files: Readonly<Record<string, string>>;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
   readonly argv: readonly string[];
   readonly receiving: string;
   readonly added: readonly string[];
@@ -2418,7 +2537,10 @@ function a13TieBreakArm(
   const hash = operand.indexOf("#");
   const origin = operand.slice(0, hash);
   const movedConstruct = movedLines.join("\n");
-  if (hash === -1 || !(arm.files[origin] ?? "").includes(movedConstruct)) {
+  if (
+    hash === -1 ||
+    !stagedText(arm.files[origin] ?? "").includes(movedConstruct)
+  ) {
     throw new Error(
       `A13_TIE_BREAK_ARMS ${key}: the origin ${origin} must stage the moved ` +
         `construct ${JSON.stringify(movedConstruct)}`,
@@ -3008,13 +3130,38 @@ const J15_A = j15Declaration("A");
 const J15_B = j15Declaration("B");
 const J15_C = j15Declaration("C");
 
-/** The imported modules: `specs/A.mdx` holds the section `a`, and so on. */
-const J15_MODULES: Readonly<Record<string, string>> = Object.fromEntries(
-  ["A", "B", "C"].map((binding) => [
-    `specs/${binding}.mdx`,
-    `<S id="${binding.toLowerCase()}">\n${binding} text.\n</S>\n`,
-  ]),
-);
+/** The module `binding` names: `specs/A.mdx` holds the section `a`, and so on. */
+function j15Module(binding: string): string {
+  return `<S id="${binding.toLowerCase()}">\n${binding} text.\n</S>\n`;
+}
+
+/**
+ * A module T6.5-13 stages too, byte for byte: its record is reused rather
+ * than registered twice (S-9), the generator held to the record's bytes —
+ * a mismatch is a defect of this table, never a product verdict.
+ */
+function j15SharedModule(binding: string, record: StagedMdx): StagedMdx {
+  if (record.source !== j15Module(binding)) {
+    throw new Error(
+      `T6.5-15 staging: specs/${binding}.mdx must hold the bytes of the ` +
+        `record ${JSON.stringify(record.name)}`,
+    );
+  }
+  return record;
+}
+
+/**
+ * The imported modules as staged — ledger records (S-9): `A` and `B` are
+ * T6.5-13's third and fourth modules, `C` this test's own.
+ */
+const J15_MODULES: Readonly<Record<string, StagedMdx>> = {
+  "specs/A.mdx": j15SharedModule("A", A13_THIRD_STAGED),
+  "specs/B.mdx": j15SharedModule("B", A13_FOURTH_STAGED),
+  "specs/C.mdx": stagedMdx(
+    "T6.5-15 specs/C.mdx the module holding c alone",
+    j15Module("C"),
+  ),
+};
 
 /** Lines each followed by U+000A (SPEC 3). */
 function j15Join(lines: readonly string[]): string {
@@ -3180,6 +3327,24 @@ function j15Compose(arm: J15Arm): J15Staging {
   };
 }
 
+/** An arm with its composition, composed once at load, and its two staged files as ledger records (S-9). */
+interface J15ArmStaging {
+  readonly arm: J15Arm;
+  readonly staging: J15Staging;
+  readonly origin: StagedMdx;
+  readonly target: StagedMdx;
+}
+
+const J15_STAGINGS: readonly J15ArmStaging[] = J15_ARMS.map((arm) => {
+  const staging = j15Compose(arm);
+  return {
+    arm,
+    staging,
+    origin: stagedMdx(`T6.5-15 ${arm.key} ${J15_ORIGIN}`, staging.originBefore),
+    target: stagedMdx(`T6.5-15 ${arm.key} ${J15_TARGET}`, staging.targetBefore),
+  };
+});
+
 /**
  * Every MDX text T6.5-15 stages or asserts as a move's result, for the S-9
  * self-test (test/self/s9-fixture-well-formedness.test.ts): the staged
@@ -3189,15 +3354,12 @@ function j15Compose(arm: J15Arm): J15Staging {
  */
 export const J15_FORM_VECTORS: ReadonlyArray<
   readonly [name: string, source: string]
-> = J15_ARMS.flatMap((arm) => {
-  const staging = j15Compose(arm);
-  return [
-    [`T6.5-15 ${arm.key}: ${J15_ORIGIN} as staged`, staging.originBefore],
-    [`T6.5-15 ${arm.key}: ${J15_ORIGIN} after the move`, staging.originAfter],
-    [`T6.5-15 ${arm.key}: ${J15_TARGET} as staged`, staging.targetBefore],
-    [`T6.5-15 ${arm.key}: ${J15_TARGET} after the move`, staging.targetAfter],
-  ];
-});
+> = J15_STAGINGS.flatMap(({ arm, staging }) => [
+  [`T6.5-15 ${arm.key}: ${J15_ORIGIN} as staged`, staging.originBefore],
+  [`T6.5-15 ${arm.key}: ${J15_ORIGIN} after the move`, staging.originAfter],
+  [`T6.5-15 ${arm.key}: ${J15_TARGET} as staged`, staging.targetBefore],
+  [`T6.5-15 ${arm.key}: ${J15_TARGET} after the move`, staging.targetAfter],
+]);
 
 /** A composed expectation must derive (S-9): a staging defect, never a verdict. */
 function j15AssertPremiseDerives(text: string, rel: string, arm: J15Arm): void {
@@ -3285,16 +3447,19 @@ function j15Deviation(actual: string, arm: J15Arm): string {
   return notes.join("; ");
 }
 
-async function runJ15Arm(product: ProductBinding, arm: J15Arm): Promise<void> {
+async function runJ15Arm(
+  product: ProductBinding,
+  entry: J15ArmStaging,
+): Promise<void> {
+  const { arm, staging } = entry;
   const context = `T6.5-15 ${arm.key}`;
-  const staging = j15Compose(arm);
   j15AssertPremiseDerives(staging.originAfter, J15_ORIGIN, arm);
   j15AssertPremiseDerives(staging.targetAfter, J15_TARGET, arm);
   await withWorkspace(
     {
       "xspec.config.ts": J15_EMIT_CONFIG,
-      [J15_ORIGIN]: staging.originBefore,
-      [J15_TARGET]: staging.targetBefore,
+      [J15_ORIGIN]: entry.origin,
+      [J15_TARGET]: entry.target,
       ...J15_MODULES,
     },
     async (workspace) => {
@@ -3372,8 +3537,8 @@ const T6_5_15 = defineProductTest({
   title:
     "joint import removals over an ESM block: in a spec source the removals in one block are judged together, over the block as all of them would leave it — where they would leave it headed by a JavaScript comment or an indented declaration, the block's first declaration stays byte-for-byte, its binding unused and valid, no removal reported for it, while the others are removed with their lines; a block they would leave with no line at all loses its first declaration with the rest — byte-asserted arms each moving `specs/o.mdx#m`, whose subtree carries every use of the bindings said to lose theirs, into `specs/t.mdx#m`, a target already binding the referenced modules under the origin's identifiers (no import added, nothing rewritten): (a) `import A …`, `// note`, `import B …` on successive lines, both losing their last use — A stays, B is removed with its line, the preview reporting one `import-removal`, B's, none for A; (b) `import A … // note` above `import B …` — the same outcome; (c) `import A …` above the indented `  import B …`, A losing its last use and B keeping one in the kept section — A stays, nothing removed, no removal reported; (d) `import A …`, `import B …` both losing theirs, the removals leaving no line — every declaration removed, both lines dropped, two removals reported; (e) the control `import A …`, `import B …`, `// note`, `import C …`, A keeping its use, B and C losing theirs — B's and C's lines removed, the block left headed by A at its first line's start with `// note` its second line; the origin and the target each asserted byte-equal to expectations composed from 6.5 and 3, `check` and `build` clean after each move, and the origin's compiled Markdown asserted with the comment lines staying as content and the kept declarations removed by their own characters (SPEC 6.5, 3, 2.1, 6.6, 12.7, 14.20)",
   run: async (product) => {
-    for (const arm of J15_ARMS) {
-      await runJ15Arm(product, arm);
+    for (const entry of J15_STAGINGS) {
+      await runJ15Arm(product, entry);
     }
   },
 });
@@ -3427,15 +3592,30 @@ const R16_TARGET = "specs/b.mdx";
  */
 const R16_E_ORIGIN = "specs/o.mdx";
 const R16_E_MODULE_SOURCE = "specs/A.mdx";
-/** A bystander section: the target's existing content and the origin's kept sibling. */
-const R16_K = '<S id="k">z</S>\n';
+/**
+ * A bystander section: the target's existing content and the origin's kept
+ * sibling — T6.5-13's existing target byte for byte, so a target holding it
+ * alone is staged as that one ledger record (S-9), `R16_K_STAGED`.
+ */
+const R16_K = A13_EXISTING_TARGET;
+const R16_K_STAGED = A13_K_STAGED;
 // U+000B and U+000C, built from code points (never escape spellings).
 const R16_VT = String.fromCodePoint(0x000b);
 const R16_FF = String.fromCodePoint(0x000c);
 /** The flow-form section, its tags alone on their lines (arms (f)–(i) and the applicability arms). */
 const R16_FLOW_SECTION = '<S id="m">\nx\n</S>';
+/** The origin holding `k` then the flow-form section — one record (S-9) for (c)'s first shape, the collision arm, and the alone arms, with their T6.6-3 and T14-7 restagings. */
+const R16_FLOW_ORIGIN_STAGED = stagedMdx(
+  "T6.5-16/T6.6-3/T14-7 specs/a.mdx holding k then the flow-form section m",
+  `${R16_K}${R16_FLOW_SECTION}\n`,
+);
 /** The text-position parent of (c)'s first arm, as a whole target file. */
 const R16_TEXT_PARENT = 'foo <S id="p">bar</S> baz\n';
+/** That parent as staged — one record (S-9) for (c)'s first parent, (g) terminated, (i), and the alone arms, with their T6.6-3 and T14-7 restagings. */
+const R16_TEXT_PARENT_STAGED = stagedMdx(
+  "T6.5-16/T6.6-3/T14-7 specs/b.mdx the text-position parent, terminated",
+  R16_TEXT_PARENT,
+);
 
 /** One expected `locations` entry: a file and a 1.7 byte range. */
 export interface R16Location {
@@ -3449,7 +3629,7 @@ export interface R16RefusedArm {
   /** Why the would-be text does not derive, for the diagnoses. */
   readonly summary: string;
   /** The pre-move spec files, each deriving (the builder's S-9 check). */
-  readonly files: Readonly<Record<string, string>>;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
   readonly argv: readonly string[];
   /** The would-be text of each file the refusal concerns: verified underivable (S-9). */
   readonly illFormed: Readonly<Record<string, string>>;
@@ -3507,7 +3687,7 @@ export interface R16NoOffset {
 export interface R16AloneArm {
   readonly key: string;
   readonly summary: string;
-  readonly files: Readonly<Record<string, string>>;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
   readonly argv: readonly string[];
   /** The report's codes, exactly, as a set. */
   readonly codes: readonly string[];
@@ -3517,7 +3697,7 @@ interface R16ControlArm {
   readonly key: string;
   /** What the performed move leaves, for the diagnoses. */
   readonly summary: string;
-  readonly files: Readonly<Record<string, string>>;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
   readonly argv: readonly string[];
   /** Every rewritten file's bytes after the move, composed from 6.5 and 3 with no latitude. */
   readonly expected: Readonly<Record<string, string>>;
@@ -3552,13 +3732,20 @@ function r16Construct(
 // control is T6.2-3(c)'s U+000B/U+000C remainder.
 function r16ArmA(name: string, ws: string): R16RefusedArm {
   const moved = `<S id="m">${ws}\nbody</S>`;
+  const key = `(a) the body</S> variant, ${name} after its opening tag`;
   return {
-    key: `(a) the body</S> variant, ${name} after its opening tag`,
+    key,
     summary:
       `at the target's line start the opening tag \`<S id="m">\`, followed ` +
       `by ${name}, is a flow-position tag, which the text-position closing ` +
       `tag of \`body</S>\` cannot close (SPEC 6.2, 14.20)`,
-    files: { [R16_ORIGIN]: `foo ${moved}\n`, [R16_TARGET]: R16_K },
+    files: {
+      [R16_ORIGIN]: stagedMdx(
+        `T6.5-16/T6.6-3/T14-7 ${key} ${R16_ORIGIN}`,
+        `foo ${moved}\n`,
+      ),
+      [R16_TARGET]: R16_K_STAGED,
+    },
     argv: ["move", "specs/a.mdx#m", "specs/b.mdx#m"],
     illFormed: { [R16_TARGET]: `${R16_K}${moved}\n` },
     wellFormed: { [R16_ORIGIN]: "foo \n" },
@@ -3585,8 +3772,9 @@ function r16ArmB(
     side === "opening"
       ? `<S id="m">${ws}\nbody\n</S>`
       : `<S id="m">\nbody\n${ws}</S>`;
+  const key = `(b) the worked shape with ${name} ${side === "opening" ? "following its opening tag" : "preceding its closing tag"}`;
   return {
-    key: `(b) the worked shape with ${name} ${side === "opening" ? "following its opening tag" : "preceding its closing tag"}`,
+    key,
     summary:
       side === "opening"
         ? `the ${name} following the opening tag keeps it in text position ` +
@@ -3596,7 +3784,13 @@ function r16ArmB(
         : `the opening tag alone on its line at the target is a flow-position ` +
           `tag while the ${name} preceding the closing tag keeps that tag in ` +
           `text position, closing no flow-position tag (SPEC 6.2, 14.20)`,
-    files: { [R16_ORIGIN]: `foo ${moved} bar\n`, [R16_TARGET]: R16_K },
+    files: {
+      [R16_ORIGIN]: stagedMdx(
+        `T6.5-16/T6.6-3/T14-7 ${key} ${R16_ORIGIN}`,
+        `foo ${moved} bar\n`,
+      ),
+      [R16_TARGET]: R16_K_STAGED,
+    },
     argv: ["move", "specs/a.mdx#m", "specs/b.mdx#m"],
     illFormed: { [R16_TARGET]: `${R16_K}${moved}\n` },
     wellFormed: { [R16_ORIGIN]: "foo  bar\n" },
@@ -3620,53 +3814,100 @@ interface R16MovedShape {
   readonly origin: string;
   /** The construct re-identified under `p.n` (prefix replacement). */
   readonly moved: string;
+  /** The origin file as staged, `R16_K` then the construct — a ledger record (S-9), one per shape. */
+  readonly staged: StagedMdx;
+}
+
+/**
+ * A moved shape with its origin file as staged: `ids` the tests staging it
+ * (the refused shapes' T6.6-3 and T14-7 restagings included). The first
+ * shape's origin is the flow-form origin's record, passed in; a passed
+ * record must hold the composition's bytes (a defect of this table
+ * otherwise, never a verdict).
+ */
+function r16MovedShape(
+  ids: string,
+  name: string,
+  origin: string,
+  moved: string,
+  staged?: StagedMdx,
+): R16MovedShape {
+  const source = `${R16_K}${origin}\n`;
+  if (staged !== undefined && staged.source !== source) {
+    throw new Error(
+      `T6.5-16 (c) staging: ${JSON.stringify(staged.name)} does not hold ` +
+        `the origin composed for ${name}`,
+    );
+  }
+  return {
+    name,
+    origin,
+    moved,
+    staged:
+      staged ?? stagedMdx(`${ids} specs/a.mdx holding k then ${name}`, source),
+  };
 }
 
 const R16_C_SHAPES: readonly R16MovedShape[] = [
-  {
-    name: "a flow-position section",
-    origin: '<S id="m">\nx\n</S>',
-    moved: '<S id="p.n">\nx\n</S>',
-  },
-  {
-    name: "a self-closing section",
-    origin: '<S id="m" />',
-    moved: '<S id="p.n" />',
-  },
-  {
-    name: "a single-line section holding nothing outside its tags",
-    origin: '<S id="m"><S id="m.q" /></S>',
-    moved: '<S id="p.n"><S id="p.n.q" /></S>',
-  },
+  r16MovedShape(
+    "T6.5-16/T6.6-3/T14-7",
+    "a flow-position section",
+    R16_FLOW_SECTION,
+    '<S id="p.n">\nx\n</S>',
+    R16_FLOW_ORIGIN_STAGED,
+  ),
+  r16MovedShape(
+    "T6.5-16/T6.6-3/T14-7",
+    "a self-closing section",
+    '<S id="m" />',
+    '<S id="p.n" />',
+  ),
+  r16MovedShape(
+    "T6.5-16/T6.6-3/T14-7",
+    "a single-line section holding nothing outside its tags",
+    '<S id="m"><S id="m.q" /></S>',
+    '<S id="p.n"><S id="p.n.q" /></S>',
+  ),
 ];
 
-const R16_C_CONTROL_SHAPE: R16MovedShape = {
-  name: 'the in-line section `<S id="m">x</S>`',
-  origin: '<S id="m">x</S>',
-  moved: '<S id="p.n">x</S>',
-};
+const R16_C_CONTROL_SHAPE: R16MovedShape = r16MovedShape(
+  "T6.5-16",
+  'the in-line section `<S id="m">x</S>`',
+  '<S id="m">x</S>',
+  '<S id="p.n">x</S>',
+);
 
 interface R16Parent {
   readonly name: string;
   /** The staged target file. */
   readonly source: string;
+  /** That file as staged — a ledger record (S-9), one per parent (the first parent's is `R16_TEXT_PARENT_STAGED`). */
+  readonly staged: StagedMdx;
   /** How 6.5's edits leave the target around the moved text. */
   readonly compose: (moved: string) => string;
 }
+
+const R16_C_LATER_CLOSING_PARENT = 'foo <S id="p">bar\n</S> baz\n';
+const R16_C_SELF_CLOSING_PARENT = 'foo <S id="p" /> baz\n';
 
 const R16_C_PARENTS: readonly R16Parent[] = [
   {
     // The insertion point, before `</S>` after `bar`, is not at a line
     // start: U+000A before the moved text and after it.
     name: 'the text-position parent `foo <S id="p">bar</S> baz`',
-    source: 'foo <S id="p">bar</S> baz\n',
+    source: R16_TEXT_PARENT,
+    staged: R16_TEXT_PARENT_STAGED,
     compose: (moved) => `foo <S id="p">bar\n${moved}\n</S> baz\n`,
   },
   {
     // The closing tag on a later line: the insertion point, at that line's
     // start, takes no terminator before the moved text.
     name: "the text-position parent with its closing tag on a later line",
-    source: 'foo <S id="p">bar\n</S> baz\n',
+    source: R16_C_LATER_CLOSING_PARENT,
+    staged: stagedMdx(
+      "T6.5-16/T6.6-3/T14-7 specs/b.mdx the text-position parent with its closing tag on a later line",
+      R16_C_LATER_CLOSING_PARENT,
+    ),
     compose: (moved) => `foo <S id="p">bar\n${moved}\n</S> baz\n`,
   },
   {
@@ -3674,7 +3915,11 @@ const R16_C_PARENTS: readonly R16Parent[] = [
     // `/` and the whitespace before it deleted, `</S>` appended after `>` —
     // and the insertion before that closing tag is not at a line start.
     name: "the self-closing parent after its paired-form rewrite",
-    source: 'foo <S id="p" /> baz\n',
+    source: R16_C_SELF_CLOSING_PARENT,
+    staged: stagedMdx(
+      "T6.5-16/T6.6-3/T14-7 specs/b.mdx the self-closing parent",
+      R16_C_SELF_CLOSING_PARENT,
+    ),
     compose: (moved) => `foo <S id="p">\n${moved}\n</S> baz\n`,
   },
 ];
@@ -3687,10 +3932,7 @@ function r16ArmC(shape: R16MovedShape, parent: R16Parent): R16RefusedArm {
       `line whose tags are flow-position tags interrupting the paragraph ` +
       `that holds the parent's text-position opening tag, which then closes ` +
       `nothing (SPEC 6.5, 6.2, 14.20; T3-3's constraint)`,
-    files: {
-      [R16_ORIGIN]: `${R16_K}${shape.origin}\n`,
-      [R16_TARGET]: parent.source,
-    },
+    files: { [R16_ORIGIN]: shape.staged, [R16_TARGET]: parent.staged },
     argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
     illFormed: { [R16_TARGET]: parent.compose(shape.moved) },
     wellFormed: { [R16_ORIGIN]: R16_K },
@@ -3708,8 +3950,8 @@ function r16ControlC(parent: R16Parent): R16ControlArm {
       `composed target derives and the move is performed, the origin's ` +
       `emptied line dropped with its terminator (SPEC 6.5, 3, 14.20)`,
     files: {
-      [R16_ORIGIN]: `${R16_K}${R16_C_CONTROL_SHAPE.origin}\n`,
-      [R16_TARGET]: parent.source,
+      [R16_ORIGIN]: R16_C_CONTROL_SHAPE.staged,
+      [R16_TARGET]: parent.staged,
     },
     argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
     expected: {
@@ -3734,6 +3976,24 @@ const R16_D_MOVED = '<S id="p.m">x</S>';
 const R16_D_PREFIX = 'foo <S id="p">bar\n';
 const R16_D_TARGET_AFTER = `${R16_K}<S id="m">x</S>\n`;
 
+/**
+ * (d)'s origin as staged for a `remainder`: the text-position parent holding
+ * `p.m` then the remainder on its line — one ledger record (S-9) per
+ * remainder, the list-marker origin being the missing-parent applicability
+ * arm's too; each is restaged by T6.6-3 and T14-7.
+ */
+const R16_D_ORIGINS = new Map<string, StagedMdx>();
+function r16DOrigin(remainder: string): StagedMdx {
+  const known = R16_D_ORIGINS.get(remainder);
+  if (known !== undefined) return known;
+  const record = stagedMdx(
+    `T6.5-16/T6.6-3/T14-7 specs/a.mdx (d) the parent p holding p.m then ${JSON.stringify(remainder)} on its line`,
+    `${R16_D_PREFIX}${R16_D_MOVED}${remainder}\n</S> baz\n`,
+  );
+  R16_D_ORIGINS.set(remainder, record);
+  return record;
+}
+
 function r16ArmD(name: string, remainder: string): R16RefusedArm {
   return {
     key: `(d) the deletion leaving ${name} at its line's start`,
@@ -3742,10 +4002,7 @@ function r16ArmD(name: string, remainder: string): R16RefusedArm {
       `line's start, ${name} interrupting the paragraph that holds the ` +
       `parent's text-position opening tag, which then closes nothing ` +
       `(SPEC 6.5, 6.2, 14.20)`,
-    files: {
-      [R16_ORIGIN]: `${R16_D_PREFIX}${R16_D_MOVED}${remainder}\n</S> baz\n`,
-      [R16_TARGET]: R16_K,
-    },
+    files: { [R16_ORIGIN]: r16DOrigin(remainder), [R16_TARGET]: R16_K_STAGED },
     argv: ["move", "specs/a.mdx#p.m", "specs/b.mdx#m"],
     illFormed: { [R16_ORIGIN]: `${R16_D_PREFIX}${remainder}\n</S> baz\n` },
     wellFormed: { [R16_TARGET]: R16_D_TARGET_AFTER },
@@ -3761,8 +4018,11 @@ const R16_D_CLOSING_ARM: R16RefusedArm = {
     "flow-position tag closing no text-position tag, the paragraph holding " +
     "the parent's opening tag interrupted (SPEC 6.5, 6.2, 14.20)",
   files: {
-    [R16_ORIGIN]: `${R16_D_PREFIX}${R16_D_MOVED}</S>\n`,
-    [R16_TARGET]: R16_K,
+    [R16_ORIGIN]: stagedMdx(
+      "T6.5-16/T6.6-3/T14-7 specs/a.mdx (d) the parent p holding p.m then its own closing tag",
+      `${R16_D_PREFIX}${R16_D_MOVED}</S>\n`,
+    ),
+    [R16_TARGET]: R16_K_STAGED,
   },
   argv: ["move", "specs/a.mdx#p.m", "specs/b.mdx#m"],
   illFormed: { [R16_ORIGIN]: `${R16_D_PREFIX}</S>\n` },
@@ -3778,8 +4038,11 @@ const R16_D_CONTROL: R16ControlArm = {
     "keeps content, so 3 drops nothing — and the moved section's line is a " +
     "paragraph line at the target's end (SPEC 6.5, 3, 14.20)",
   files: {
-    [R16_ORIGIN]: `${R16_D_PREFIX}${R16_D_MOVED} more\n</S> baz\n`,
-    [R16_TARGET]: R16_K,
+    [R16_ORIGIN]: stagedMdx(
+      "T6.5-16 (d) control: plain prose after the construct specs/a.mdx",
+      `${R16_D_PREFIX}${R16_D_MOVED} more\n</S> baz\n`,
+    ),
+    [R16_TARGET]: R16_K_STAGED,
   },
   argv: ["move", "specs/a.mdx#p.m", "specs/b.mdx#m"],
   expected: {
@@ -3807,8 +4070,14 @@ const R16_D_INSERTION_ARM: R16RefusedArm = {
     "tag and interrupt the paragraph holding `p`'s opening tag (SPEC 6.5, " +
     "6.2, 14.20)",
   files: {
-    [R16_ORIGIN]: `${R16_K}${R16_D_INSERTION_MOVED}\n`,
-    [R16_TARGET]: 'foo <S id="p">\n<S id="p.s"> </S></S> tail\n',
+    [R16_ORIGIN]: stagedMdx(
+      "T6.5-16/T6.6-3/T14-7 (d) the insertion leaving a sibling's tags alone on their line specs/a.mdx",
+      `${R16_K}${R16_D_INSERTION_MOVED}\n`,
+    ),
+    [R16_TARGET]: stagedMdx(
+      "T6.5-16/T6.6-3/T14-7 (d) the insertion leaving a sibling's tags alone on their line specs/b.mdx",
+      'foo <S id="p">\n<S id="p.s"> </S></S> tail\n',
+    ),
   },
   argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
   illFormed: {
@@ -3830,8 +4099,14 @@ const R16_D_INSERTION_ARM: R16RefusedArm = {
 // block — receives the moved text at its end, a line start, none added.
 const R16_E_DECLARATION = 'import A from "./A.xspec"';
 const R16_E_MOVED = '<S id="m">\nx\n</S>';
-const R16_E_ORIGIN_BEFORE = `${R16_K}${R16_E_MOVED}\n`;
-const R16_E_MODULE = '<S id="q">Q text.</S>\n';
+const R16_E_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-16/T6.6-3/T14-7 (e) specs/o.mdx",
+  `${R16_K}${R16_E_MOVED}\n`,
+);
+const R16_E_MODULE = stagedMdx(
+  "T6.5-16/T6.6-3/T14-7 (e) specs/A.mdx holding q",
+  '<S id="q">Q text.</S>\n',
+);
 const R16_E_ARGV = ["move", "specs/o.mdx#m", "specs/b.mdx#m"] as const;
 
 function r16ArmE(name: string, target: string): R16RefusedArm {
@@ -3843,7 +4118,10 @@ function r16ArmE(name: string, target: string): R16RefusedArm {
       `blank line or the file's end (SPEC 6.5, 14.20)`,
     files: {
       [R16_E_ORIGIN]: R16_E_ORIGIN_BEFORE,
-      [R16_TARGET]: target,
+      [R16_TARGET]: stagedMdx(
+        `T6.5-16/T6.6-3/T14-7 (e) the target ${name} ${R16_TARGET}`,
+        target,
+      ),
       [R16_E_MODULE_SOURCE]: R16_E_MODULE,
     },
     argv: [...R16_E_ARGV],
@@ -3863,7 +4141,10 @@ const R16_E_CONTROL: R16ControlArm = {
     "valid (SPEC 6.5, 2.1, 14.20)",
   files: {
     [R16_E_ORIGIN]: R16_E_ORIGIN_BEFORE,
-    [R16_TARGET]: `${R16_E_DECLARATION}\n\n`,
+    [R16_TARGET]: stagedMdx(
+      "T6.5-16 (e) control specs/b.mdx",
+      `${R16_E_DECLARATION}\n\n`,
+    ),
     [R16_E_MODULE_SOURCE]: R16_E_MODULE,
   },
   argv: [...R16_E_ARGV],
@@ -3889,7 +4170,13 @@ const R16_F_ARM: R16RefusedArm = {
     "the moved text carries the `>` prefixes of its interior lines, so at " +
     "the destination its closing tag stands inside a quote its opening tag " +
     "stands outside, closing nothing there (SPEC 6.5, 14.20)",
-  files: { [R16_ORIGIN]: `> ${R16_F_MOVED}\n`, [R16_TARGET]: R16_K },
+  files: {
+    [R16_ORIGIN]: stagedMdx(
+      "T6.5-16/T6.6-3/T14-7 (f) specs/a.mdx",
+      `> ${R16_F_MOVED}\n`,
+    ),
+    [R16_TARGET]: R16_K_STAGED,
+  },
   argv: ["move", "specs/a.mdx#m", "specs/b.mdx#m"],
   illFormed: { [R16_TARGET]: `${R16_K}${R16_F_MOVED}\n` },
   wellFormed: { [R16_ORIGIN]: "> \n" },
@@ -3912,7 +4199,8 @@ const R16_F_ARM: R16RefusedArm = {
 // lacked binding, by its occurrence span (SPEC 5.7, 14) — both in the
 // origin, in start order (12.7).
 const R16_G_THIRD = "specs/x.mdx";
-const R16_G_THIRD_SOURCE = '<S id="a">\nA text.\n</S>\n';
+/** The third module — T6.5-13's byte for byte, staged as that one ledger record (S-9). */
+const R16_G_THIRD_STAGED = A13_THIRD_STAGED;
 const R16_G_SPECIFIER = canonicalSpecifier("specs", "specs/x.xspec");
 /** The origin's declaration of the third module, and the line a receiving file would need. */
 const R16_G_DECLARATION = `import X from "${R16_G_SPECIFIER}"`;
@@ -3920,7 +4208,10 @@ const R16_G_CONTAINER = "{text(X.a)}";
 const R16_G_MOVED = `<S id="m">x ${R16_G_CONTAINER}</S>`;
 /** The origin as the deletion leaves it: the declaration, an empty line, the kept sibling. */
 const R16_G_ORIGIN_KEPT = `${R16_G_DECLARATION}\n\n<S id="k">z ${R16_G_CONTAINER}</S>\n`;
-const R16_G_ORIGIN_BEFORE = `${R16_G_ORIGIN_KEPT}${R16_G_MOVED}\n`;
+const R16_G_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-16/T6.6-3/T14-7 (g) specs/a.mdx the origin holding k and m embedding X.a",
+  `${R16_G_ORIGIN_KEPT}${R16_G_MOVED}\n`,
+);
 const R16_G_LOCATIONS: readonly R16Location[] = [
   r16Construct(R16_ORIGIN, R16_G_ORIGIN_KEPT, R16_G_MOVED),
   r16Construct(R16_ORIGIN, `${R16_G_ORIGIN_KEPT}<S id="m">x `, R16_G_CONTAINER),
@@ -3970,8 +4261,13 @@ function r16ArmG(name: string, terminated: boolean): R16RefusedArm {
       `every other offset splits the paragraph (SPEC 6.5)`,
     files: {
       [R16_ORIGIN]: R16_G_ORIGIN_BEFORE,
-      [R16_TARGET]: terminated ? R16_TEXT_PARENT : R16_TEXT_PARENT.slice(0, -1),
-      [R16_G_THIRD]: R16_G_THIRD_SOURCE,
+      [R16_TARGET]: terminated
+        ? R16_TEXT_PARENT_STAGED
+        : stagedMdx(
+            "T6.5-16/T6.6-3/T14-7 specs/b.mdx the text-position parent, unterminated",
+            R16_TEXT_PARENT.slice(0, -1),
+          ),
+      [R16_G_THIRD]: R16_G_THIRD_STAGED,
     },
     argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
     illFormed: {},
@@ -4014,8 +4310,11 @@ const R16_G_PSEUDO_ARM: R16RefusedArm = {
     "performs the move at offset 0",
   files: {
     [R16_ORIGIN]: R16_G_ORIGIN_BEFORE,
-    [R16_TARGET]: `${R16_G_PSEUDO_HEAD}${R16_TEXT_PARENT}`,
-    [R16_G_THIRD]: R16_G_THIRD_SOURCE,
+    [R16_TARGET]: stagedMdx(
+      "T6.5-16/T6.6-3/T14-7 (g) the pseudo-block twin specs/b.mdx",
+      `${R16_G_PSEUDO_HEAD}${R16_TEXT_PARENT}`,
+    ),
+    [R16_G_THIRD]: R16_G_THIRD_STAGED,
   },
   argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
   illFormed: {},
@@ -4075,7 +4374,7 @@ const R16_G_PSEUDO_ARM: R16RefusedArm = {
 // qualifier decided on its refusing side. The controls are T6.5-13(d) and
 // R16_G_CONTROL below.
 const R16_G_TOP_COMPOSED = `para\n${R16_G_MOVED}\n`;
-function r16ArmGTop(name: string, target: string): R16RefusedArm {
+function r16ArmGTop(name: string, target: StagedMdx): R16RefusedArm {
   return {
     key: `(g) the top-level twin: the paragraph-ended target, ${name}`,
     summary:
@@ -4089,7 +4388,7 @@ function r16ArmGTop(name: string, target: string): R16RefusedArm {
     files: {
       [R16_ORIGIN]: R16_G_ORIGIN_BEFORE,
       [R16_TARGET]: target,
-      [R16_G_THIRD]: R16_G_THIRD_SOURCE,
+      [R16_G_THIRD]: R16_G_THIRD_STAGED,
     },
     argv: ["move", "specs/a.mdx#m", "specs/b.mdx#m"],
     illFormed: {},
@@ -4144,8 +4443,14 @@ const R16_G_SIDE_ARM: R16RefusedArm = {
     "leaves the added line paragraph text, and every other offset splits " +
     "the line (SPEC 6.5)",
   files: {
-    [R16_ORIGIN]: `${R16_G_SIDE_PREFIX}${R16_G_SIDE_MOVED}${R16_G_SIDE_TAIL}`,
-    [R16_TARGET]: '<S id="q">\nz\n</S>\n',
+    [R16_ORIGIN]: stagedMdx(
+      "T6.5-16/T6.6-3/T14-7 (g) the origin-side twin specs/a.mdx",
+      `${R16_G_SIDE_PREFIX}${R16_G_SIDE_MOVED}${R16_G_SIDE_TAIL}`,
+    ),
+    [R16_TARGET]: stagedMdx(
+      "T6.5-16/T6.6-3/T14-7 (g) the origin-side twin specs/b.mdx holding q",
+      '<S id="q">\nz\n</S>\n',
+    ),
   },
   argv: ["move", "specs/a.mdx#p.m", "specs/b.mdx#q.n"],
   illFormed: {},
@@ -4204,9 +4509,12 @@ const R16_I_ARM: R16RefusedArm = {
     "the embedding's braced container, both in the origin, in start order " +
     "(SPEC 6.5, 14, 12.7)",
   files: {
-    [R16_I_ORIGIN]: `${R16_I_PREFIX}${R16_I_MOVED}- item\n</S> baz\n`,
-    [R16_TARGET]: R16_TEXT_PARENT,
-    [R16_G_THIRD]: R16_G_THIRD_SOURCE,
+    [R16_I_ORIGIN]: stagedMdx(
+      "T6.5-16/T6.6-3/T14-7 (i) specs/z.mdx",
+      `${R16_I_PREFIX}${R16_I_MOVED}- item\n</S> baz\n`,
+    ),
+    [R16_TARGET]: R16_TEXT_PARENT_STAGED,
+    [R16_G_THIRD]: R16_G_THIRD_STAGED,
   },
   argv: ["move", "specs/z.mdx#p.m", "specs/b.mdx#p.n"],
   illFormed: { [R16_I_ORIGIN]: '\nfoo <S id="p">bar\n- item\n</S> baz\n' },
@@ -4241,7 +4549,12 @@ const R16_H_ARM: R16RefusedArm = {
     "the insertion puts its flow-position tags inside the text-position " +
     "parent `p`, the one file not well-formed — its path once in " +
     "`identities` (SPEC 6.5, 6.2, 14.20)",
-  files: { [R16_ORIGIN]: `${R16_TEXT_PARENT}${R16_FLOW_SECTION}\n` },
+  files: {
+    [R16_ORIGIN]: stagedMdx(
+      "T6.5-16/T6.6-3/T14-7 (h) the same-file variant specs/a.mdx",
+      `${R16_TEXT_PARENT}${R16_FLOW_SECTION}\n`,
+    ),
+  },
   argv: ["move", "specs/a.mdx#m", "specs/a.mdx#p.n"],
   illFormed: {
     [R16_ORIGIN]: 'foo <S id="p">bar\n<S id="p.n">\nx\n</S>\n</S> baz\n',
@@ -4267,8 +4580,11 @@ const R16_COLLISION_ARM: R16RefusedArm = {
     "the section the target already holds: both reasons reported, each " +
     "once (SPEC 6.5, 14)",
   files: {
-    [R16_ORIGIN]: `${R16_K}${R16_FLOW_SECTION}\n`,
-    [R16_TARGET]: 'foo <S id="p">bar <S id="p.n">n</S></S> baz\n',
+    [R16_ORIGIN]: R16_FLOW_ORIGIN_STAGED,
+    [R16_TARGET]: stagedMdx(
+      "T6.5-16/T6.6-3 (c) beside refused-id-collision specs/b.mdx",
+      'foo <S id="p">bar <S id="p.n">n</S></S> baz\n',
+    ),
   },
   argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.n"],
   illFormed: {
@@ -4292,10 +4608,7 @@ const R16_D_MISSING_PARENT_ARM: R16RefusedArm = {
     "text is not judged, while the origin's deletion, judged always, leaves " +
     "`- item` at its line's start (SPEC 6.5, 14.20): both reasons reported, " +
     "`identities` the origin path alone (SPEC 14)",
-  files: {
-    [R16_ORIGIN]: `${R16_D_PREFIX}${R16_D_MOVED}- item\n</S> baz\n`,
-    [R16_TARGET]: R16_K,
-  },
+  files: { [R16_ORIGIN]: r16DOrigin("- item"), [R16_TARGET]: R16_K_STAGED },
   argv: ["move", "specs/a.mdx#p.m", "specs/b.mdx#q.n"],
   illFormed: { [R16_ORIGIN]: `${R16_D_PREFIX}- item\n</S> baz\n` },
   wellFormed: {},
@@ -4314,6 +4627,11 @@ const R16_D_MISSING_PARENT_ARM: R16RefusedArm = {
 // the valid `specs/new.mdx` alone — exit 1, nothing created (the
 // whole-root compare).
 const R16_CREATED_MOVED = '<S id="m"> \nbody</S>';
+/** The created-target arms' origin — one record (S-9) for both arms and their T6.6-3 and T14-7 restagings. */
+const R16_CREATED_ORIGIN_STAGED = stagedMdx(
+  "T6.5-16/T6.6-3/T14-7 the created-target arms specs/a.mdx",
+  `foo ${R16_CREATED_MOVED}\n`,
+);
 function r16CreatedArm(
   created: string,
   beside: readonly string[],
@@ -4329,7 +4647,7 @@ function r16CreatedArm(
       (alone
         ? `alone, valid, nothing created`
         : `beside its own invalidity, ${beside.join(", ")} with that path`),
-    files: { [R16_ORIGIN]: `foo ${R16_CREATED_MOVED}\n` },
+    files: { [R16_ORIGIN]: R16_CREATED_ORIGIN_STAGED },
     argv: ["move", "specs/a.mdx#m", `${created}#y`],
     illFormed: { [created]: '<S id="y"> \nbody</S>\n' },
     wellFormed: { [R16_ORIGIN]: "foo \n" },
@@ -4357,8 +4675,8 @@ export const R16_ALONE_ARMS: readonly R16AloneArm[] = [
       "`then` is a forbidden segment (SPEC 1.4), so `refused-invalid-id` is " +
       "reported alone, no would-be text judged (SPEC 6.5, 14)",
     files: {
-      [R16_ORIGIN]: `${R16_K}${R16_FLOW_SECTION}\n`,
-      [R16_TARGET]: R16_TEXT_PARENT,
+      [R16_ORIGIN]: R16_FLOW_ORIGIN_STAGED,
+      [R16_TARGET]: R16_TEXT_PARENT_STAGED,
     },
     argv: ["move", "specs/a.mdx#m", "specs/b.mdx#p.then"],
     codes: ["refused-invalid-id"],
@@ -4370,8 +4688,8 @@ export const R16_ALONE_ARMS: readonly R16AloneArm[] = [
       "the target holds no `q`, so no insertion point exists and no target " +
       "text is judged: `refused-missing-target-parent` alone (SPEC 6.5, 14)",
     files: {
-      [R16_ORIGIN]: `${R16_K}${R16_FLOW_SECTION}\n`,
-      [R16_TARGET]: R16_TEXT_PARENT,
+      [R16_ORIGIN]: R16_FLOW_ORIGIN_STAGED,
+      [R16_TARGET]: R16_TEXT_PARENT_STAGED,
     },
     argv: ["move", "specs/a.mdx#m", "specs/b.mdx#q.n"],
     codes: ["refused-missing-target-parent"],
@@ -4400,7 +4718,8 @@ export const R16_ALONE_ARMS: readonly R16AloneArm[] = [
 // after a top-level target insertion as admissible outright, or judging
 // admissibility over the pre-operation text, places the declaration after
 // the moved text.
-const R16_G_CONTROL_TARGET = '<S id="p">\nx\n</S>\n';
+/** The flow-ended target — T6.5-13's (a) target byte for byte, staged as that one ledger record (S-9), `A13_A_STAGED`; the string composes the expectation. */
+const R16_G_CONTROL_TARGET = A13_A_TARGET;
 const R16_G_CONTROL: R16ControlArm = {
   key: "(g) control: the in-line moved text to the top level of a flow-ended target",
   summary:
@@ -4415,8 +4734,8 @@ const R16_G_CONTROL: R16ControlArm = {
     "text (SPEC 6.5, 6.2, 14.20)",
   files: {
     [R16_ORIGIN]: R16_G_ORIGIN_BEFORE,
-    [R16_TARGET]: R16_G_CONTROL_TARGET,
-    [R16_G_THIRD]: R16_G_THIRD_SOURCE,
+    [R16_TARGET]: A13_A_STAGED,
+    [R16_G_THIRD]: R16_G_THIRD_STAGED,
   },
   argv: ["move", "specs/a.mdx#m", "specs/b.mdx#m"],
   expected: { [R16_ORIGIN]: R16_G_ORIGIN_KEPT },
@@ -4486,8 +4805,8 @@ export const R16_REFUSED_ARMS: readonly R16RefusedArm[] = [
   r16ArmG("terminated", true),
   r16ArmG("unterminated", false),
   R16_G_PSEUDO_ARM,
-  r16ArmGTop("terminated", "para\n"),
-  r16ArmGTop("unterminated", "para"),
+  r16ArmGTop("terminated", A13_D_TERMINATED_STAGED),
+  r16ArmGTop("unterminated", A13_D_STAGED),
   R16_G_SIDE_ARM,
   R16_H_ARM,
   R16_I_ARM,
@@ -4516,7 +4835,8 @@ export const R16_FORM_VECTORS: ReadonlyArray<
 > = [
   ...R16_REFUSED_ARMS.flatMap((arm) => [
     ...Object.entries(arm.files).map(
-      ([rel, text]) => [`T6.5-16 ${arm.key}: ${rel} as staged`, text] as const,
+      ([rel, text]) =>
+        [`T6.5-16 ${arm.key}: ${rel} as staged`, stagedText(text)] as const,
     ),
     ...Object.entries(arm.wellFormed).map(
       ([rel, text]) =>
@@ -4545,7 +4865,8 @@ export const R16_FORM_VECTORS: ReadonlyArray<
   ]),
   ...R16_CONTROL_ARMS.flatMap((arm) => [
     ...Object.entries(arm.files).map(
-      ([rel, text]) => [`T6.5-16 ${arm.key}: ${rel} as staged`, text] as const,
+      ([rel, text]) =>
+        [`T6.5-16 ${arm.key}: ${rel} as staged`, stagedText(text)] as const,
     ),
     ...Object.entries(arm.expected).map(
       ([rel, text]) =>
@@ -4562,7 +4883,8 @@ export const R16_FORM_VECTORS: ReadonlyArray<
   ]),
   ...R16_ALONE_ARMS.flatMap((arm) =>
     Object.entries(arm.files).map(
-      ([rel, text]) => [`T6.5-16 ${arm.key}: ${rel} as staged`, text] as const,
+      ([rel, text]) =>
+        [`T6.5-16 ${arm.key}: ${rel} as staged`, stagedText(text)] as const,
     ),
   ),
 ];
@@ -4967,10 +5289,14 @@ const M17_ORIGIN = "specs/a.mdx";
 const M17_TARGET = "specs/b.mdx";
 const M17_X = "specs/x.mdx";
 const M17_Y = "specs/y.mdx";
-const M17_X_SOURCE = '<S id="a">\nA text.\n</S>\n';
-const M17_Y_SOURCE = '<S id="b">\nB text.\n</S>\n';
-/** The target: a flow-form section holding no ESM block, its last line terminated. */
-const M17_TARGET_SOURCE = '<S id="p">\nx\n</S>\n';
+// The third and fourth modules and the target are T6.5-13's third module,
+// fourth module, and (a) target byte for byte — each staged as that one
+// ledger record (S-9), never registered twice.
+const M17_X_STAGED = A13_THIRD_STAGED;
+const M17_Y_STAGED = A13_FOURTH_STAGED;
+/** The target: a flow-form section holding no ESM block, its last line terminated (the string composes the control's expectation). */
+const M17_TARGET_SOURCE = A13_A_TARGET;
+const M17_TARGET_STAGED = A13_A_STAGED;
 const M17_X_SPECIFIER = canonicalSpecifier("specs", "specs/x.xspec");
 const M17_X_DECLARATION = `import X from "${M17_X_SPECIFIER}"`;
 const M17_Y_DECLARATION = `import Y from "${canonicalSpecifier("specs", "specs/y.xspec")}"`;
@@ -5006,7 +5332,7 @@ export interface M17RefusedArm {
   /** Why the moved text is refused, for the diagnoses. */
   readonly summary: string;
   /** The pre-move spec files, each deriving (the builder's S-9 check). */
-  readonly files: Readonly<Record<string, string>>;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
   readonly argv: readonly string[];
   /** The finding's `locations`: each declaration's own characters in the origin, in start order (SPEC 14, 11.4, 12.7). */
   readonly locations: readonly R16Location[];
@@ -5014,10 +5340,13 @@ export interface M17RefusedArm {
   readonly beside?: readonly string[];
 }
 
-const M17_A_FILES: Readonly<Record<string, string>> = {
-  [M17_ORIGIN]: m17Origin([M17_X_DECLARATION], "body {text(X.a)}"),
-  [M17_TARGET]: M17_TARGET_SOURCE,
-  [M17_X]: M17_X_SOURCE,
+const M17_A_FILES: Readonly<Record<string, InitialFileContents>> = {
+  [M17_ORIGIN]: stagedMdx(
+    "T6.5-17/T6.6-3/T14-7 arms (a) and (d) specs/a.mdx",
+    m17Origin([M17_X_DECLARATION], "body {text(X.a)}"),
+  ),
+  [M17_TARGET]: M17_TARGET_STAGED,
+  [M17_X]: M17_X_STAGED,
 };
 
 /** T6.5-17's refused arms, in the entry's order (exported for T6.6-3's preview twins). */
@@ -5039,13 +5368,16 @@ export const M17_REFUSED_ARMS: readonly M17RefusedArm[] = [
       "on successive lines of the one block, each located by its own " +
       "characters in start order (SPEC 6.5, 14, 12.7)",
     files: {
-      [M17_ORIGIN]: m17Origin(
-        [M17_X_DECLARATION, M17_Y_DECLARATION],
-        "body {text(X.a)} {text(Y.b)}",
+      [M17_ORIGIN]: stagedMdx(
+        "T6.5-17/T6.6-3/T14-7 arm (b) specs/a.mdx",
+        m17Origin(
+          [M17_X_DECLARATION, M17_Y_DECLARATION],
+          "body {text(X.a)} {text(Y.b)}",
+        ),
       ),
-      [M17_TARGET]: M17_TARGET_SOURCE,
-      [M17_X]: M17_X_SOURCE,
-      [M17_Y]: M17_Y_SOURCE,
+      [M17_TARGET]: M17_TARGET_STAGED,
+      [M17_X]: M17_X_STAGED,
+      [M17_Y]: M17_Y_STAGED,
     },
     argv: [...M17_ARGV],
     locations: m17Locations([M17_X_DECLARATION, M17_Y_DECLARATION]),
@@ -5058,9 +5390,12 @@ export const M17_REFUSED_ARMS: readonly M17RefusedArm[] = [
       "well-formed — refused all the same, judged over the moved text as " +
       "it stands (SPEC 6.5)",
     files: {
-      [M17_ORIGIN]: m17Origin([M17_X_DECLARATION], "body"),
-      [M17_TARGET]: M17_TARGET_SOURCE,
-      [M17_X]: M17_X_SOURCE,
+      [M17_ORIGIN]: stagedMdx(
+        "T6.5-17/T6.6-3/T14-7 arm (c) specs/a.mdx",
+        m17Origin([M17_X_DECLARATION], "body"),
+      ),
+      [M17_TARGET]: M17_TARGET_STAGED,
+      [M17_X]: M17_X_STAGED,
     },
     argv: [...M17_ARGV],
     locations: m17Locations([M17_X_DECLARATION]),
@@ -5116,9 +5451,12 @@ const M17_CONTROL: R16ControlArm = {
     "declaration on the line after the moved text's closing tag — the one " +
     "line-start admissible offset (SPEC 6.5, 2.1, 3, 14.20)",
   files: {
-    [M17_ORIGIN]: `${M17_CONTROL_ORIGIN_KEPT}${M17_CONTROL_MOVED}\n`,
-    [M17_TARGET]: M17_TARGET_SOURCE,
-    [M17_X]: M17_X_SOURCE,
+    [M17_ORIGIN]: stagedMdx(
+      "T6.5-17 (e) control specs/a.mdx",
+      `${M17_CONTROL_ORIGIN_KEPT}${M17_CONTROL_MOVED}\n`,
+    ),
+    [M17_TARGET]: M17_TARGET_STAGED,
+    [M17_X]: M17_X_STAGED,
   },
   argv: [...M17_ARGV],
   expected: { [M17_ORIGIN]: M17_CONTROL_ORIGIN_KEPT },
@@ -5141,12 +5479,16 @@ export const M17_FORM_VECTORS: ReadonlyArray<
 > = [
   ...M17_REFUSED_ARMS.flatMap((arm) =>
     Object.entries(arm.files).map(
-      ([rel, text]) => [`T6.5-17 ${arm.key}: ${rel} as staged`, text] as const,
+      ([rel, text]) =>
+        [`T6.5-17 ${arm.key}: ${rel} as staged`, stagedText(text)] as const,
     ),
   ),
   ...Object.entries(M17_CONTROL.files).map(
     ([rel, text]) =>
-      [`T6.5-17 ${M17_CONTROL.key}: ${rel} as staged`, text] as const,
+      [
+        `T6.5-17 ${M17_CONTROL.key}: ${rel} as staged`,
+        stagedText(text),
+      ] as const,
   ),
   ...Object.entries(M17_CONTROL.expected).map(
     ([rel, text]) =>
@@ -5771,6 +6113,7 @@ const T6_5_18 = defineProductTest({
 
 /** (a)'s target: an interior empty line inside `p`, the `</S>` line unterminated. */
 const A19_A_TARGET = ['<S id="p">', "", "x", "</S>"].join("\n");
+const A19_A_STAGED = stagedMdx("T6.5-19 arm (a) specs/b.mdx", A19_A_TARGET);
 /** (a)'s target as the target insertion alone leaves it, the declaration absent (6.5's composed text; the identifier `X`). */
 const A19_A_COMPOSED = [
   '<S id="p">',
@@ -5809,7 +6152,7 @@ const A19_A_ARM: A13Arm = a13CrossArm({
     "the `</S>` line; so the file's end, mid-line after `</S>`, is the " +
     "only admissible offset: the added terminator ends the `</S>` line, " +
     "which drops as it did before, then the declaration and its terminator",
-  target: A19_A_TARGET,
+  target: A19_A_STAGED,
   newId: "p.n",
   compose: a19ComposeIntoP,
   previewEdits: [
@@ -5839,6 +6182,10 @@ const A19_B_ORIGIN_BEFORE = [
   "y",
   "</S>",
 ].join("\n");
+const A19_B_ORIGIN_STAGED = stagedMdx(
+  "T6.5-19 arm (b) specs/a.mdx",
+  A19_B_ORIGIN_BEFORE,
+);
 /** The origin deletion's end: the construct's own characters plus line 3's terminator. */
 const A19_B_DELETION_END = A19_B_MOVED.length + 1;
 /** The `d` reference occurrence: that one reference's own expression, `"m"` (SPEC 5.7). */
@@ -5881,8 +6228,8 @@ const A19_B_ARM: A13Arm = {
     "the added terminator ends the `</S>` line, which drops as it did " +
     "before, then the target module's declaration and its terminator",
   files: {
-    [A13_ORIGIN]: A19_B_ORIGIN_BEFORE,
-    [A13_TARGET]: A13_EXISTING_TARGET,
+    [A13_ORIGIN]: A19_B_ORIGIN_STAGED,
+    [A13_TARGET]: A13_K_STAGED,
   },
   argv: ["move", `${A13_ORIGIN}#m`, `${A13_TARGET}#m`],
   receiving: A13_ORIGIN,

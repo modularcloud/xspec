@@ -221,6 +221,7 @@
 
 import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
+import { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type {
   AppliedMappingPair,
@@ -788,7 +789,7 @@ async function expectRefusedPreviewEquivalence(
  */
 async function expectRefusedArmPreviewTwin(
   product: ProductBinding,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   argv: readonly string[],
   codes: readonly string[],
   context: string,
@@ -2560,10 +2561,11 @@ function tieBreakPlan(
   idents: readonly string[],
 ): ExpectedPreviewPlan {
   const where = `e ${arm.key}`;
-  const origin = arm.files[arm.origin];
-  if (origin === undefined) {
+  const staged = arm.files[arm.origin];
+  const origin = staged instanceof StagedMdx ? staged.source : staged;
+  if (typeof origin !== "string") {
     throw new Error(
-      `T6.6-4 staging self-check (${where}): the origin ${arm.origin} is not staged`,
+      `T6.6-4 staging self-check (${where}): the origin ${arm.origin} is not staged as text`,
     );
   }
   if (arm.movedConstruct.indexOf("<S", 1) !== -1) {
