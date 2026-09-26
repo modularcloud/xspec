@@ -265,7 +265,7 @@ function parseDocument(): readonly DocumentConformer[] {
   );
 }
 
-test("CERTIFICATIONS.md defines exactly 5 conformers and 17 violators (C-1 whole-document gate)", () => {
+test("CERTIFICATIONS.md defines exactly 5 conformers and 18 violators (C-1 whole-document gate)", () => {
   const document = parseDocument();
   expect(
     {

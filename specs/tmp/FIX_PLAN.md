@@ -54,20 +54,6 @@ sound (both parser builds agree on every probed verdict).
 
 ## Tasks
 
-### Task 4 — certification self-test wording: eighteen violators, not seventeen
-
-**Requirement.** CERTIFICATIONS.md documents 18 violators, and `EXPECTED_VIOLATORS` /
-the manifest pin 18 (report C). H-8/C-1 self-tests describe what they assert.
-
-**Observed.** `test/self/certification.test.ts`'s header comment says "seventeen
-violators" and the document gate's test title says "17 violators" — stale since the
-eighteenth violator landed.
-
-**Change.** Correct both spellings to eighteen / 18 (and any other stale count in the
-two certification self-test files found by `grep -n -i -E 'seventeen|\b17\b'`). No
-behavioral change; nothing else in the files. **Checks:** `npx tsc -p test`; the
-certification self-tests green (self project in the namespace).
-
 ### Task 5 — S-9: judge every mid-test-staged MDX source before any product exists — the staged-source ledger, its self-test, and the §14 conversion
 
 **Requirement.** TEST-SPEC.md §17 S-9 (line 624): the well-formedness check "runs
