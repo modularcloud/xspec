@@ -157,7 +157,8 @@
 //   arms — is a ledger record, judged by test/self/s9-staged-sources.test.ts
 //   before any product exists. The minimal `mdxSection("a")` and
 //   `mdxSection("b")` sources are staged byte-identically by this module,
-//   section-7-discovery.ts, and section-7.1-7.3.ts, so each is ONE record,
+//   section-7-discovery.ts, section-7.1-7.3.ts, and (the `a`)
+//   section-7.4-7.5.ts, so each is ONE record,
 //   exported from here and named with every staging test in ID order and
 //   every path. T7-1's first workspace (`LOCATION_FILES`) precedes any
 //   invocation and stays plain.
@@ -217,12 +218,13 @@ function mdxSection(id: string): string {
 // The minimal sources the §7 modules stage in workspaces created after a
 // body's first product invocation (module header): byte-identical wherever
 // they are staged — `mdxSection("a")` at `specs/A.mdx` here and in
-// section-7-discovery.ts and section-7.1-7.3.ts; `mdxSection("b")` at
-// `specs/sub/B.mdx` (T7-3, T7-6, T7.3-1) and `specs2/B.mdx` (T7-4) — so each
-// is ONE staged-source record, named with every staging test in ID order and
-// every path; the other two modules import them.
+// section-7-discovery.ts, section-7.1-7.3.ts, and section-7.4-7.5.ts (T7.4-1,
+// T7.5-1; T7.5-5 also at `tgt/a.mdx`); `mdxSection("b")` at `specs/sub/B.mdx`
+// (T7-3, T7-6, T7.3-1) and `specs2/B.mdx` (T7-4) — so each is ONE
+// staged-source record, named with every staging test in ID order and every
+// path; the other modules import them (section-7.4-7.5.ts the `a` alone).
 export const SECTION_A_SOURCE = stagedMdx(
-  "T7-1/T7-2/T7-3/T7-4/T7-6/T7.1-1/T7.3-1 specs/A.mdx (the minimal section a)",
+  "T7-1/T7-2/T7-3/T7-4/T7-6/T7.1-1/T7.3-1/T7.4-1/T7.5-1/T7.5-5 specs/A.mdx (the minimal section a; T7.5-5's tgt/a.mdx)",
   mdxSection("a"),
 );
 export const SECTION_B_SOURCE = stagedMdx(

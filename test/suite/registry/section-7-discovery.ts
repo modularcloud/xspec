@@ -135,11 +135,12 @@ function mdxSection(id: string): string {
 // This module's own staged-source records (module header), beside
 // section-7-basics.ts's shared `a` and `b`: the minimal sources T7-4's later
 // probe workspaces stage — `c`, the control of the casing and inside-root
-// workspaces; `m` and `n`, the inside-root decoys, `n` also T7-6's no-group
-// source at `notes/N.mdx` — one record per byte sequence, named with every
-// staging test and path.
-const SECTION_C_SOURCE = stagedMdx(
-  "T7-4 ctl/C.mdx (the minimal section c, the control source)",
+// workspaces (exported: section-7.4-7.5.ts stages the same bytes at T7.5-4's
+// `specs/C.mdx` and T7.5-5's `tgt/c.mdx`); `m` and `n`, the inside-root
+// decoys, `n` also T7-6's no-group source at `notes/N.mdx` — one record per
+// byte sequence, named with every staging test and path.
+export const SECTION_C_SOURCE = stagedMdx(
+  "T7-4/T7.5-4/T7.5-5 the minimal section c (T7-4's ctl/C.mdx, the control source; T7.5-4's specs/C.mdx; T7.5-5's tgt/c.mdx)",
   mdxSection("c"),
 );
 /** `mdxSection("m")`: the `b/M.mdx` decoy's record is made from it, and
