@@ -337,6 +337,46 @@ self-test 359 tests over 333 records (326 `T…`, 4 `E-6`, 3 `P-…`); self proj
 record tests); certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23
 `certification run against` lines.
 
+**Resolved by Task 7 (the §5 modules; the first commit converts, the second
+records).** Eighteen records: `section-5.1-5.3.ts` 7 — T5.3-1's arm table, the
+`.mdx` entries wrapped in their rows (`"T5.3-1 cross-file depends cycle
+specs/A.mdx"` / `specs/B.mdx`, the mixed, self-depends, self-embeds, and two
+grandparent arms' `specs/A.mdx`; the first arm's converted uniformly),
+`CycleArm.files` and `withWorkspace`'s `files` widened. `section-5.4.ts` 2 —
+`JOURNALED_BASELINE` (T5.4-1's fixture 2) and `MOVE_A_SOURCE` (T5.4-2's move
+fixture) wrapped in place; the anchored `edit()` sites untouched.
+`section-5.5.ts` 1 — `KIND_BASELINE` (T5.5-2's second workspace) wrapped in
+place; T5.5-1's H-6 two-directory protocol creates BOTH workspaces before either
+run (`assertAcrossDirectoriesDeterministic` calls `makeWorkspace` twice, then
+runs), so `RICH_FILES` stays plain. `section-5.6.ts` none (one workspace per
+body, the edits between `gitCommitAll("baseline")` and the first `build`).
+`section-5.7.ts` 8 — `TOKEN_BASE_SOURCE` wrapped in place and the five
+token-bound `specs/MAIN.mdx` sources as the computed table
+`TOKEN_BOUND_STAGINGS` (`{ arm, source, main }`: `tokenBoundSource(arm)` once
+at load, the string kept for the byte-range self-check and the record made
+from it, named `` `T5.7-2 token bounds: ${arm.what} specs/MAIN.mdx` ``;
+`assertTokenBoundArm` takes the pair), `COLLISION_A_SOURCE` /
+`COLLISION_B_SOURCE` (T5.7-4's collision helper) wrapped in place. Sub-rule
+applied: a composed source whose shape the product's grammar widenings might
+accept where the stock parser does not (the five comment/whitespace `d`
+values) is probed with `deriveMdx` BEFORE conversion (a scratch `.mts`,
+AGENTS.md) so the record's declaration is known — all five derive, no
+allowance named. Left plain: every body's first workspace (T5.2-1, T5.3-2,
+T5.4-1's fixture 1, T5.4-2's rename fixture, T5.5-1's two directories, T5.5-2's
+matrix workspace, T5.5-3…T5.5-6, every T5.6-n, T5.7-1, T5.7-2's span
+workspace, T5.7-3, T5.7-4's entry workspace). Checks: the sites hook logged the
+task's 8 (test, path) pairs (20 lines, all `"well-formed"`) before and nothing
+after; the sha256 capture over the five files (154 writes, compared sorted)
+identical; 21 tests, 19 pass and 2 fail — T5.5-5, T5.7-4 — with identical
+diagnoses (T5.5-5's line begins with the adapter's label, not the test ID, so
+the diagnosis extraction uses `HarnessAssertionError: [^`]{0,160}`); red
+check: an unclosed tag spliced into `TOKEN_TAG_POST` fails the five MAIN
+records as `mdx-derivability` while the BASE record passes. Known state after
+Task 7: the S-9 self-test 377 tests over 351 records (344 `T…`, 4 `E-6`,
+3 `P-…`); self project 22 files, 2517 passed, 0 skipped under the
+namespace (~134 s; 2499 + the 18 record tests); certification 144 PASS /
+33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -503,26 +543,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 7 — Initial-file conversion: §5 (`section-5.1-5.3.ts`, `section-5.4.ts`, `section-5.5.ts`, `section-5.6.ts`, `section-5.7.ts`)
-
-**Workspace creations to judge:** 5.1-5.3 (4; `withWorkspace` ~89), 5.4 (5), 5.5 (8;
-`withWorkspace` ~97; 16 records), 5.6 (7; 1 record), 5.7 (6).
-**Reachable sites (the instrumented run):**
-- `section-5.1-5.3.ts` — T5.3-1 (1): specs/A.mdx
-- `section-5.4.ts` — T5.4-1 (1): specs/A.mdx
-- `section-5.4.ts` — T5.4-2 (1): specs/A.mdx
-- `section-5.5.ts` — T5.5-2 (1): specs/A.mdx
-- `section-5.7.ts` — T5.7-2 (2): specs/BASE.mdx specs/MAIN.mdx
-- `section-5.7.ts` — T5.7-4 (2): specs/A.mdx specs/B.mdx
-**Failing here:** T5.5-5, T5.7-4.
-**Certification scope:** none.
-**Notes.** `section-5.4.ts`'s anchored `edit()` sites stay as they are; every T5.6-n
-body stages its edits between `gitCommitAll("baseline")` and its first `buildOk`
-(the previous plan's Task 8 finding) — judge its creations the same way (only
-T5.6-4's arm 2 followed an invocation there).
-**Checks.** Recipes 1–5 over `section-5.1-5.3.test`, `section-5.4.test`,
-`section-5.5.test`, `section-5.6.test`, `section-5.7.test`.
 
 ### Task 8 — Initial-file conversion: §6.1–§6.3 (`section-6.1.ts`, `section-6.2.ts`, `section-6.3.ts`)
 
