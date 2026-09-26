@@ -356,3 +356,52 @@ test("`per-draw` is a `file()` declaration only: the judge treats it as well-for
     stagedMdx("T0-6 per-draw record", WELL_FORMED, "per-draw"),
   ).toThrow(/per-draw/);
 });
+
+test("`copyFrom()` carries another workspace's bytes — the product's output there — past the guard, judged at staging; out of a workspace the product never touched, the guard applies as to plain contents", async () => {
+  const untouched = await stage({ files: { [A]: WELL_FORMED } });
+  await runProductTestBody("T0-7", async () => {
+    const source = await stage({
+      files: { [A]: WELL_FORMED, "xspec.config.ts": "export default {};\n" },
+      mdx: { unchecked: ["specs/fuzz.mdx"] },
+    });
+    await invoke(source.root);
+    const fresh = await stage();
+    await fresh.copyFrom(source, A);
+    await fresh.copyFrom(source, "xspec.config.ts");
+    await fresh.copyFrom(source, A, "specs/Copy.mdx");
+    expect(text(await fresh.readBytes(A))).toBe(WELL_FORMED);
+    expect(text(await fresh.readBytes("specs/Copy.mdx"))).toBe(WELL_FORMED);
+    expect(text(await fresh.readBytes("xspec.config.ts"))).toBe(
+      "export default {};\n",
+    );
+
+    // Judged at staging under the destination's declaration (well-formed).
+    await source.file("specs/fuzz.mdx", ILL_FORMED);
+    let thrown: unknown;
+    try {
+      await fresh.copyFrom(source, "specs/fuzz.mdx");
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(HarnessStagingError);
+    expect((thrown as HarnessStagingError).mode).toBe("mdx-derivability");
+    expect(await fresh.kind("specs/fuzz.mdx")).toBe("absent");
+
+    // Out of a workspace no product touched: the harness's own bytes, a
+    // deterministic fixture — refused here, inside a body that has invoked
+    // the product.
+    await expectRefused(
+      () => fresh.copyFrom(untouched, A, "specs/B.mdx"),
+      "specs/B.mdx",
+      "in the running body of T0-7",
+      "`copyFrom()`",
+    );
+    expect(await fresh.kind("specs/B.mdx")).toBe("absent");
+  });
+
+  // Before any invocation (outside a body, nothing invoked in the
+  // destination) the same copy is a pre-invocation staging S-7 reaches.
+  const fresh = await stage();
+  await fresh.copyFrom(untouched, A);
+  expect(text(await fresh.readBytes(A))).toBe(WELL_FORMED);
+});

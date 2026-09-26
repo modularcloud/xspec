@@ -2412,7 +2412,7 @@ const T6_4_7 = defineProductTest({
                   `6.1, 13.4); found ${kind}`,
               );
             }
-            await fresh.file(rel, await renamed.readBytes(rel));
+            await fresh.copyFrom(renamed, rel);
           }
           await buildOk(
             product,

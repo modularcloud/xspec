@@ -37,7 +37,8 @@
 // or move's rewritten source, which no harness constant equals — which
 // `TestWorkspace.edit()` stages from the workspace's current bytes, judged at
 // staging time (not a deterministic fixture: before any product exists there
-// is nothing to judge). The builder's undeclared-staging guard (helpers/
+// is nothing to judge) — as `TestWorkspace.copyFrom()` carries another
+// workspace's product-written bytes into a fresh one. The builder's undeclared-staging guard (helpers/
 // workspace.ts, helpers/product-invocations.ts) refuses every other plain
 // `.mdx` staging made after a product invocation, so an omission from the
 // ledger is a harness error at the first run that reaches the site.

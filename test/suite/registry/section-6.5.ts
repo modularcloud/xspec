@@ -1652,7 +1652,7 @@ async function runFileMoveArm(
               `13.4); found ${kind}`,
           );
         }
-        await fresh.file(rel, await workspace.readBytes(rel));
+        await fresh.copyFrom(workspace, rel);
       }
       await buildOk(
         product,
@@ -2611,7 +2611,7 @@ const T6_5_3 = defineProductTest({
               `found ${kind}`,
           );
         }
-        await fresh.file(rel, await workspace.readBytes(rel));
+        await fresh.copyFrom(workspace, rel);
       }
       await buildOk(
         product,

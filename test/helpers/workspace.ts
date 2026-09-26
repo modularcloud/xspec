@@ -60,7 +60,12 @@
 //   declaration is `unchecked` (P-8's mutations) or `per-draw` (a property
 //   draw the runner judged before the body saw it, S-9's property clause —
 //   the section-16 modules' alone). `edit()` is a declared staging by
-//   construction. A workspace declaration's initial `files` are outside
+//   construction, and so is `copyFrom()` — another live workspace's current
+//   bytes, the product's output there, carried into a fresh workspace (the
+//   H-6 two-directory seeding of T6.4-7, T6.5-1, T6.5-3) — except out of a
+//   workspace no product has been invoked in, where the bytes are the
+//   harness's own staging and the guard applies as to plain contents. A
+//   workspace declaration's initial `files` are outside
 //   the guard: a body's first workspace's are reached by S-7's sweep, and a
 //   later-arm workspace's stay plain contents by the declaration's shape —
 //   a standing observation, not this guard's.
@@ -388,7 +393,7 @@ export class TestWorkspace {
     throw new HarnessStagingError(
       "undeclared-staging",
       mdxKey(rel),
-      `an MDX source staged with plain contents (declared ${JSON.stringify(declaration)}) after a product invocation ${where} — S-7's sweep against the empty stub never reaches this staging (the body fails at that invocation), so S-9's check would first run at suite time, against a real product, not before any product exists (H-8). Stage it as a staged-source record instead (helpers/staged-mdx.ts: \`stagedMdx("<TEST-ID> <what it stages>", <the same expression, moved, never re-spelled>, <this declaration>)\` at module level, passed to \`file()\`), which test/self/s9-staged-sources.test.ts judges before any product exists; an edit of bytes the product itself wrote goes through \`edit()\`; a P-8 fuzz mutation is declared \`unchecked\`; a property draw the runner already judged is declared \`per-draw\` (section-16 modules only)`,
+      `an MDX source staged with plain contents (declared ${JSON.stringify(declaration)}) after a product invocation ${where} — S-7's sweep against the empty stub never reaches this staging (the body fails at that invocation), so S-9's check would first run at suite time, against a real product, not before any product exists (H-8). Stage it as a staged-source record instead (helpers/staged-mdx.ts: \`stagedMdx("<TEST-ID> <what it stages>", <the same expression, moved, never re-spelled>, <this declaration>)\` at module level, passed to \`file()\`), which test/self/s9-staged-sources.test.ts judges before any product exists; an edit of bytes the product itself wrote goes through \`edit()\`; a P-8 fuzz mutation is declared \`unchecked\`; a property draw the runner already judged is declared \`per-draw\` (section-16 modules only); another workspace's product-written bytes carried into a fresh workspace go through \`copyFrom()\``,
     );
   }
 
@@ -415,6 +420,37 @@ export class TestWorkspace {
     const data = Buffer.from(current.replace(from, to), "utf8");
     this.checkMdx(rel, data, undefined);
     await this.write(rel, data);
+  }
+
+  /**
+   * Stage another live workspace's current bytes of `rel` here, at `destRel`
+   * (default: the same path), under this workspace's S-9 declaration for the
+   * destination, judged at staging time like every `.mdx` write. This
+   * carries the PRODUCT's output — a rename's or move's rewritten sources,
+   * the configuration and journal beside them — into a fresh workspace (the
+   * H-6 two-directory protocol of T6.4-7, T6.5-1, T6.5-3): bytes no harness
+   * constant equals, so not a deterministic fixture, and never a new
+   * harness-spelled source (whatever the product left untouched was staged,
+   * and judged, in `source` already). Out of a workspace no product has
+   * been invoked in, the bytes are the harness's own staging under another
+   * name, so the undeclared-staging guard applies to an `.mdx` destination
+   * exactly as to plain contents (a deterministic fixture belongs in the
+   * ledger).
+   */
+  async copyFrom(
+    source: TestWorkspace,
+    rel: RelPath,
+    destRel: RelPath = rel,
+  ): Promise<void> {
+    const data = await source.readBytes(rel);
+    if (isMdxPath(destRel) && !source.productInvoked) {
+      this.guardUndeclaredStaging(
+        destRel,
+        this.mdxDeclarations.get(mdxKey(destRel)) ?? "well-formed",
+      );
+    }
+    this.checkMdx(destRel, data, undefined);
+    await this.write(destRel, data);
   }
 
   /** The S-9 declaration in effect for a staged path (`.mdx` paths only). */
