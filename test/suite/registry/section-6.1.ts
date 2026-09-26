@@ -42,6 +42,14 @@
 //   precedes it), so a finding pointing at line 1 or at the whole file
 //   without naming the line fails — the discrimination the TEST-SPEC asks
 //   for.
+//
+// Staged-source records (TEST-SPEC S-9's before-any-product clause;
+// helpers/staged-mdx.ts): T6.1-3's directory- and symlink-occupant arms
+// create their workspaces after the garbage-line arm's invocations, so
+// `CORE_FILES`'s two `.mdx` entries are ledger records — judged by
+// test/self/s9-staged-sources.test.ts before any product exists — named
+// with every body that stages the map (T6.1-1's sweep workspace and
+// T6.1-2's two directories precede any invocation and would not need them).
 
 import { Buffer } from "node:buffer";
 import type { Finding } from "../../helpers/adapters/index.js";
@@ -71,8 +79,10 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { buildOk, expectExit } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
@@ -88,19 +98,28 @@ export default defineConfig({
 
 // Importless `.mdx` sources: no imports, embeddings, `d` props, or tags
 // (CONF-CORE scope). A.mdx carries a child so `rename` exercises descendant
-// rewriting; B.mdx is the file-form `move` subject.
-const CORE_FILES: Readonly<Record<string, string>> = {
+// rewriting; B.mdx is the file-form `move` subject. Both are staged-source
+// records (module header): the same expressions, wrapped in place, staged
+// under the records' well-formed declaration by every workspace built from
+// the map.
+const CORE_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPECS_ONLY_CONFIG,
-  "specs/A.mdx": [
-    '<S id="a">',
-    "Alpha text.",
-    '<S id="a.k">',
-    "Kid text.",
-    "</S>",
-    "</S>",
-    "",
-  ].join("\n"),
-  "specs/B.mdx": ['<S id="b">', "Beta text.", "</S>", ""].join("\n"),
+  "specs/A.mdx": stagedMdx(
+    "T6.1-1/T6.1-2/T6.1-3 specs/A.mdx",
+    [
+      '<S id="a">',
+      "Alpha text.",
+      '<S id="a.k">',
+      "Kid text.",
+      "</S>",
+      "</S>",
+      "",
+    ].join("\n"),
+  ),
+  "specs/B.mdx": stagedMdx(
+    "T6.1-1/T6.1-2/T6.1-3 specs/B.mdx",
+    ['<S id="b">', "Beta text.", "</S>", ""].join("\n"),
+  ),
 };
 
 const JOURNAL_PATH = ".xspec/journal";

@@ -78,6 +78,15 @@
 // the entry bytes are; the appended garbage line is structureless bytes no
 // conforming entry format accepts (T6.1-3's sanctioned staging), appended as
 // a whole line under either final-line convention.
+//
+// Staged-source records (TEST-SPEC S-9's before-any-product clause;
+// helpers/staged-mdx.ts): every workspace a body here creates after its
+// first product invocation — T6.3-2's second arm, T6.3-4's four later arms,
+// T6.3-5's arms (b)–(d) — takes its initial `.mdx` sources as ledger
+// records, judged by test/self/s9-staged-sources.test.ts before any product
+// exists; where a body's first workspace stages the same expression, the
+// record stands there too (converted uniformly). T6.3-1's and T6.3-3's one
+// workspace each precede any invocation and stay plain.
 
 import { Buffer } from "node:buffer";
 import { execFile } from "node:child_process";
@@ -104,7 +113,7 @@ import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertSameJson,
   buildFindings,
@@ -134,11 +143,10 @@ const GARBAGE_LINE = "?? harness-injected garbage: not a journal entry ??";
 
 /** Stage a fresh workspace (`files` must include the config), run, dispose. */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
-  mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
-  const workspace = await TestWorkspace.create({ files, mdx });
+  const workspace = await TestWorkspace.create({ files });
   try {
     return await body(workspace);
   } finally {
@@ -521,15 +529,21 @@ const T6_3_1 = defineProductTest({
 // One file with a child (so the rename's prefix replacement gives the replay
 // a descendant mapping too) — the subject of a single journaled rename.
 const J2_FILE = "specs/A.mdx";
-const J2_SOURCE = [
-  '<S id="a">',
-  "Alpha text.",
-  '<S id="a.k">',
-  "Kid text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+// Staged in both arms' workspaces; the second follows the first's
+// invocations, so it is a staged-source record (module header) — the
+// expression wrapped in place.
+const J2_SOURCE = stagedMdx(
+  "T6.3-2 specs/A.mdx",
+  [
+    '<S id="a">',
+    "Alpha text.",
+    '<S id="a.k">',
+    "Kid text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T6_3_2 = defineProductTest({
   id: "T6.3-2",
@@ -694,16 +708,25 @@ const T6_3_3 = defineProductTest({
 
 // A minimal rename subject for the journal-tampering arms.
 const F4_FILE = "specs/A.mdx";
-const F4_SOURCE = ['<S id="a">', "Alpha text.", "</S>", ""].join("\n");
+// Every arm after the first creates its workspace after the earlier arms'
+// invocations, so the initial `.mdx` sources are staged-source records
+// (module header), each expression wrapped in place: the shared A.mdx
+// (staged in the first arm too), the broken source under its `unparseable`
+// declaration — the record carries what the workspace declaration's entry
+// for the path used to — and the precedence arm's invalid, parseable source.
+const F4_SOURCE = stagedMdx(
+  "T6.3-4 specs/A.mdx",
+  ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
+);
 
 // The invalid-baseline-sources arm: committed broken (unparseable — an
 // unclosed section tag, 14.20), then fixed in the working tree.
 const F4_BROKEN_FILE = "specs/Broken.mdx";
-const F4_BROKEN_SOURCE = [
-  '<S id="broken">',
-  "Text that never closes.",
-  "",
-].join("\n");
+const F4_BROKEN_SOURCE = stagedMdx(
+  "T6.3-4 invalid-baseline-sources arm: specs/Broken.mdx committed broken",
+  ['<S id="broken">', "Text that never closes.", ""].join("\n"),
+  "unparseable",
+);
 const F4_FIXED_SOURCE = [
   '<S id="broken">',
   "Text that never closes.",
@@ -713,8 +736,8 @@ const F4_FIXED_SOURCE = [
 // The fix is staged after the body's earlier arms invoked the product, so
 // it is a ledger record (S-9's before-any-product clause;
 // helpers/staged-mdx.ts): the same constant, carrying the call's former
-// `well-formed` option as its declaration — the record's declaration, not
-// the workspace's `unparseable` entry for the path, governs the write.
+// `well-formed` option as its declaration — the record's declaration
+// governs the write, whatever the path's initial record declared.
 const T6_3_4_FIXED = stagedMdx(
   "T6.3-4 invalid-baseline-sources arm: specs/Broken.mdx fixed in the working tree",
   F4_FIXED_SOURCE,
@@ -723,12 +746,15 @@ const T6_3_4_FIXED = stagedMdx(
 
 // The precedence arm's invalid current source: an unresolved local `d`
 // reference (14.5) — a build validation failure.
-const F4_INVALID_SOURCE = [
-  '<S id="a" d={["nope"]}>',
-  "Alpha text depending on nothing that exists.",
-  "</S>",
-  "",
-].join("\n");
+const F4_INVALID_SOURCE = stagedMdx(
+  "T6.3-4 precedence arm specs/A.mdx",
+  [
+    '<S id="a" d={["nope"]}>',
+    "Alpha text depending on nothing that exists.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // A ref that resolves to nothing in any fixture repository, with a spelling
 // unlikely to appear in an error message for any other reason.
@@ -893,8 +919,8 @@ const T6_3_4 = defineProductTest({
           "baseline with an unparseable source",
         );
         // S-9: the fixed source derives — the record's `well-formed`
-        // declaration overrides the workspace's `unparseable` entry for this
-        // write.
+        // declaration governs this write, the initial record's `unparseable`
+        // one the staging above.
         await workspace.file(F4_BROKEN_FILE, T6_3_4_FIXED);
         await buildOk(
           product,
@@ -917,8 +943,6 @@ const T6_3_4 = defineProductTest({
           context,
         );
       },
-      // S-9: the baseline's broken source is the staged parse failure.
-      { unparseable: [F4_BROKEN_FILE] },
     );
 
     // --- Unresolvable ref ---
@@ -1048,14 +1072,24 @@ function r5Source(text: string, withExtra: boolean): string {
   return lines.join("\n") + "\n";
 }
 
-// The nested-repository arms' stagings follow arm (a)'s product invocations,
-// so they are ledger records (S-9's before-any-product clause;
-// helpers/staged-mdx.ts) — the same template calls, moved to module level.
-// Arm (a)'s own edit precedes the body's first invocation and stays a plain
-// staging (S-7's sweep reaches it against the stub).
-const T6_3_5_INNER_V1 = stagedMdx(
-  "T6.3-5 (b) nested-repository arm: the inner workspace's source without the extra section, the inner repository's v1",
+// Every staging after arm (a)'s product invocations is a ledger record
+// (S-9's before-any-product clause; helpers/staged-mdx.ts) — the same
+// template calls, moved to module level. The source without the extra
+// section is ONE record (identical bytes), staged as an initial file at
+// (a)'s and (d)'s `sub/specs/A.mdx` ((a)'s workspace, the body's first,
+// converted uniformly), the submodule arm's `inner/specs/A.mdx`, and (c)'s
+// `specs/A.mdx`, and by `file()` as the nested-repository arm's inner v1;
+// the source with the extra section is that arm's initial
+// `inner/specs/A.mdx`, the outer v1. Arm (a)'s own edit precedes the body's
+// first invocation and stays a plain staging (S-7's sweep reaches it
+// against the stub).
+const T6_3_5_WITHOUT_EXTRA = stagedMdx(
+  "T6.3-5 specs/A.mdx without the extra section: (a) and (d) under sub/, (b) under inner/ (the nested repository's v1, the submodule's initial file), (c) at the root",
   r5Source(R5_TEXT_V0, false),
+);
+const T6_3_5_WITH_EXTRA = stagedMdx(
+  "T6.3-5 (b) nested-repository arm: inner/specs/A.mdx with the extra section, the outer repository's v1",
+  r5Source(R5_TEXT_V0, true),
 );
 const T6_3_5_INNER_EDITED = stagedMdx(
   "T6.3-5 (b): the current edit of the inner workspace's source",
@@ -1407,7 +1441,7 @@ const T6_3_5 = defineProductTest({
     await withWorkspace(
       {
         [R5_SUB_CONFIG]: SPECS_ONLY_CONFIG,
-        [R5_SUB_A]: r5Source(R5_TEXT_V0, false),
+        [R5_SUB_A]: T6_3_5_WITHOUT_EXTRA,
       },
       async (workspace) => {
         const context = "T6.3-5 (a) repository-subdirectory arm";
@@ -1460,7 +1494,7 @@ const T6_3_5 = defineProductTest({
     await withWorkspace(
       {
         [R5_INNER_CONFIG]: SPECS_ONLY_CONFIG,
-        [R5_INNER_A]: r5Source(R5_TEXT_V0, true),
+        [R5_INNER_A]: T6_3_5_WITH_EXTRA,
       },
       async (workspace) => {
         const context = "T6.3-5 (b) nested-repository arm";
@@ -1474,7 +1508,7 @@ const T6_3_5 = defineProductTest({
         await workspace.git(["tag", R5_TAG]);
         // The inner repository's v1: the workspace without the extra
         // section.
-        await workspace.file(R5_INNER_A, T6_3_5_INNER_V1);
+        await workspace.file(R5_INNER_A, T6_3_5_WITHOUT_EXTRA);
         const innerV1 = await initInnerRepositoryAtV1(workspace, R5_INNER);
         assertDistinctTags(outerV1, innerV1, context);
         const outerTree = (
@@ -1510,7 +1544,7 @@ const T6_3_5 = defineProductTest({
     await withWorkspace(
       {
         [R5_INNER_CONFIG]: SPECS_ONLY_CONFIG,
-        [R5_INNER_A]: r5Source(R5_TEXT_V0, false),
+        [R5_INNER_A]: T6_3_5_WITHOUT_EXTRA,
       },
       async (workspace) => {
         const context = "T6.3-5 (b) submodule arm";
@@ -1562,7 +1596,7 @@ const T6_3_5 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [R5_A]: r5Source(R5_TEXT_V0, false),
+        [R5_A]: T6_3_5_WITHOUT_EXTRA,
       },
       async (workspace) => {
         const context = "T6.3-5 (c) no-repository arm";
@@ -1594,7 +1628,7 @@ const T6_3_5 = defineProductTest({
 
     // --- (d) A ref whose tree holds no file at the configuration's path ---
     await withWorkspace(
-      { [R5_SUB_A]: r5Source(R5_TEXT_V0, false) },
+      { [R5_SUB_A]: T6_3_5_WITHOUT_EXTRA },
       async (workspace) => {
         const context = "T6.3-5 (d) configuration-absent-at-ref arm";
         await workspace.gitInit();

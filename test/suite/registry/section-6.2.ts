@@ -64,6 +64,16 @@
 //   TEST-SPEC (SPEC 5.6 bounds it to originating nodes), so it is asserted
 //   as a subset of the fixture's originating-node set, the empty list
 //   accepted — the SUITE-20 convention.
+//
+// Staged-source records (TEST-SPEC S-9's before-any-product clause;
+// helpers/staged-mdx.ts): every workspace a body here creates after its
+// first product invocation — T6.2-3's impure-boundary arm, its impure
+// matrix (a)–(c) and sibling stagings (d)/(e), T6.2-4's pinned shape (2)
+// and `changed` twin — takes its initial `.mdx` sources as ledger records,
+// judged by test/self/s9-staged-sources.test.ts before any product exists
+// (T6.2-4's shape (1), the body's first workspace, converted uniformly with
+// shape (2)); T6.2-1's, T6.2-2's, and T6.2-3's clean-boundary workspace
+// precede any invocation and stay plain.
 
 import type {
   ChangeCategory,
@@ -84,8 +94,11 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertSameJson,
   buildOk,
@@ -122,7 +135,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -977,8 +990,19 @@ export const I3_ROOM_SOURCE = [
   "",
 ].join("\n");
 
-const I3_HALL_SOURCE = ['<S id="tp">', "Hall parent text.", "</S>", ""].join(
-  "\n",
+// The impure-boundary arm's workspace follows the clean-boundary arm's
+// invocations, so its three initial sources are staged-source records
+// (module header): Room.mdx's made from the exported string the S-9
+// fixture self-test imports, Hall.mdx's and Deps.mdx's wrapping their
+// expressions in place.
+const T6_2_3_ROOM = stagedMdx(
+  "T6.2-3 impure-boundary arm specs/Room.mdx",
+  I3_ROOM_SOURCE,
+);
+
+const I3_HALL_SOURCE = stagedMdx(
+  "T6.2-3 impure-boundary arm specs/Hall.mdx",
+  ['<S id="tp">', "Hall parent text.", "</S>", ""].join("\n"),
 );
 
 // The two rewritten files as SPEC 6.5 fixes them — the premise of the hash
@@ -1015,18 +1039,21 @@ export const I3_HALL_MOVED_SOURCE = [
 // identity-mapped through the journal, so its `upstream-changed` — caused by
 // the moved node's own-content change — is attributed exactly to the moved
 // node: the unambiguous "5.6 cascades attributed to it".
-const I3_DEPS_SOURCE = [
-  'import Room from "./Room.xspec"',
-  "",
-  '<S id="watch">',
-  "Dependents holder text.",
-  "",
-  '<S id="watch.onimp" d={Room.op.imp}>',
-  "Depends on the impure moved node.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const I3_DEPS_SOURCE = stagedMdx(
+  "T6.2-3 impure-boundary arm specs/Deps.mdx",
+  [
+    'import Room from "./Room.xspec"',
+    "",
+    '<S id="watch">',
+    "Dependents holder text.",
+    "",
+    '<S id="watch.onimp" d={Room.op.imp}>',
+    "Depends on the impure moved node.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 /** The three hashes T6.2-3 pins for every node of a moved subtree. */
 function assertKeptSectionMoveHashes(
@@ -1164,8 +1191,8 @@ const M3_SHAPES: readonly ImpureShape[] = [
 /** A destination T6.2-3 stages each impure shape into. */
 interface ImpureDestination {
   readonly name: string;
-  /** The staged target file. */
-  readonly source: string;
+  /** The staged target file — a staged-source record (module header). */
+  readonly source: StagedMdx;
   /** The `move` operand's ID part — the new identity by prefix replacement. */
   readonly newId: string;
   readonly parent: string;
@@ -1190,18 +1217,21 @@ const M3_W_ONM = "specs/Deps.mdx#watch.onm";
 // A dependent of the moved node: the sharp "5.6 cascades attributed to it"
 // (as the I3 arm's Deps.mdx). Not byte-pinned after the move — its rewritten
 // `d` reference is rooted at an added import's fresh identifier (SPEC 6.5).
-const M3_DEPS_SOURCE = [
-  'import Ca from "./ca.xspec"',
-  "",
-  '<S id="watch">',
-  "Dependents holder text.",
-  "",
-  '<S id="watch.onm" d={Ca.m}>',
-  "Depends on the impure moved node.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const M3_DEPS_SOURCE = stagedMdx(
+  "T6.2-3 impure stagings (a)–(c) specs/Deps.mdx",
+  [
+    'import Ca from "./ca.xspec"',
+    "",
+    '<S id="watch">',
+    "Dependents holder text.",
+    "",
+    '<S id="watch.onm" d={Ca.m}>',
+    "Depends on the impure moved node.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const M3_DESTINATIONS: readonly ImpureDestination[] = [
   {
@@ -1209,7 +1239,10 @@ const M3_DESTINATIONS: readonly ImpureDestination[] = [
     // insertion point, its end, is a line start (SPEC 6.5); the target root
     // is the parent, `changed` by the gained child reference.
     name: "another file's top level",
-    source: '<S id="k">z</S>\n',
+    source: stagedMdx(
+      "T6.2-3 impure stagings into another file's top level specs/cb.mdx",
+      '<S id="k">z</S>\n',
+    ),
     newId: "m",
     parent: M3_TARGET,
     moved: M3_TOP_POST,
@@ -1241,7 +1274,10 @@ const M3_DESTINATIONS: readonly ImpureDestination[] = [
     // `descendant-changed` through `p` alone (the moved node may join the
     // attribution — the two-sided ambiguity).
     name: "a flow-position parent",
-    source: '<S id="p">\nx\n</S>\n',
+    source: stagedMdx(
+      "T6.2-3 impure stagings into a flow-position parent specs/cb.mdx",
+      '<S id="p">\nx\n</S>\n',
+    ),
     newId: "p.m",
     parent: M3_P,
     moved: M3_FLOW_POST,
@@ -1276,20 +1312,42 @@ const M3_DESTINATIONS: readonly ImpureDestination[] = [
   },
 ];
 
+/** One impure shape with its composed origin file as a record. */
+interface ImpureOriginStaging {
+  readonly shape: ImpureShape;
+  /** `specs/ca.mdx`: the shape's composition, staged at both destinations. */
+  readonly origin: StagedMdx;
+}
+
+// Every impure staging follows the clean-boundary arm's invocations, so its
+// initial sources are staged-source records (module header): the origin
+// composition, once per shape, evaluated at module load in shape order —
+// the same template the matrix cell staged, moved here — and staged at both
+// destinations; each destination's target file and the shared Deps.mdx
+// wrapped in place above.
+const M3_ORIGIN_STAGINGS: readonly ImpureOriginStaging[] = M3_SHAPES.map(
+  (shape) => ({
+    shape,
+    origin: stagedMdx(
+      `T6.2-3 impure staging ${shape.tag}, ${shape.label} specs/ca.mdx`,
+      `foo <S id="m">${shape.body}</S>${shape.afterClose}\n`,
+    ),
+  }),
+);
+
 /** One cell of the matrix: stage, build, move, and assert everything pinned. */
 async function runImpureStaging(
   product: ProductBinding,
-  shape: ImpureShape,
+  { shape, origin }: ImpureOriginStaging,
   destination: ImpureDestination,
 ): Promise<void> {
   const context = `T6.2-3 impure staging ${shape.tag}, ${shape.label}, into ${destination.name}`;
-  const originSource = `foo <S id="m">${shape.body}</S>${shape.afterClose}\n`;
   const movedText = `<S id="${destination.newId}">${shape.body}</S>`;
   const newIdentity = `${M3_TARGET}#${destination.newId}`;
   await withWorkspace(
     SPECS_ONLY_CONFIG,
     {
-      [M3_ORIGIN]: originSource,
+      [M3_ORIGIN]: origin,
       [M3_TARGET]: destination.source,
       [M3_DEPS]: M3_DEPS_SOURCE,
     },
@@ -1439,22 +1497,34 @@ const D3_DEPS = "specs/Deps.mdx";
 const D3_W_TOP = "specs/Deps.mdx#watch";
 const D3_W_ONS = "specs/Deps.mdx#watch.ons";
 
-const D3_A_SOURCE = '<S id="p">\n<S id="p.s"> </S><S id="p.m">text</S>\n</S>\n';
+// The sibling stagings (d) and (e) follow the earlier arms' invocations, so
+// their initial sources are staged-source records (module header), each
+// expression wrapped in place.
+const D3_A_SOURCE = stagedMdx(
+  "T6.2-3 sibling staging (d) specs/a.mdx",
+  '<S id="p">\n<S id="p.s"> </S><S id="p.m">text</S>\n</S>\n',
+);
 const D3_A_MOVED = '<S id="p">\n<S id="p.s"> </S>\n</S>\n';
-const D3_B_SOURCE = '<S id="k">z</S>\n';
+const D3_B_SOURCE = stagedMdx(
+  "T6.2-3 sibling staging (d) specs/b.mdx",
+  '<S id="k">z</S>\n',
+);
 const D3_B_MOVED = '<S id="k">z</S>\n<S id="m">text</S>\n';
-const D3_DEPS_SOURCE = [
-  'import A from "./a.xspec"',
-  "",
-  '<S id="watch">',
-  "Dependents holder text.",
-  "",
-  '<S id="watch.ons" d={A.p.s}>',
-  "Depends on the sibling left alone on its line.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const D3_DEPS_SOURCE = stagedMdx(
+  "T6.2-3 sibling staging (d) specs/Deps.mdx",
+  [
+    'import A from "./a.xspec"',
+    "",
+    '<S id="watch">',
+    "Dependents holder text.",
+    "",
+    '<S id="watch.ons" d={A.p.s}>',
+    "Depends on the sibling left alone on its line.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // (e) at the destination: a text-position target parent `foo <S id="p">`,
 // U+000A, `<S id="p.s">`, U+000C, `</S></S> tail`, U+000A receives
@@ -1476,22 +1546,31 @@ const E3_DEPS = "specs/Deps.mdx";
 const E3_W_TOP = "specs/Deps.mdx#watch";
 const E3_W_ONS = "specs/Deps.mdx#watch.ons";
 
-const E3_A_SOURCE = '<S id="a">x</S>\n<S id="m">text</S>\n';
+const E3_A_SOURCE = stagedMdx(
+  "T6.2-3 sibling staging (e) specs/ea.mdx",
+  '<S id="a">x</S>\n<S id="m">text</S>\n',
+);
 const E3_A_MOVED = '<S id="a">x</S>\n';
-const E3_B_SOURCE = `foo <S id="p">\n<S id="p.s">${FF}</S></S> tail\n`;
+const E3_B_SOURCE = stagedMdx(
+  "T6.2-3 sibling staging (e) specs/eb.mdx",
+  `foo <S id="p">\n<S id="p.s">${FF}</S></S> tail\n`,
+);
 const E3_B_MOVED = `foo <S id="p">\n<S id="p.s">${FF}</S>\n<S id="p.n">text</S>\n</S> tail\n`;
-const E3_DEPS_SOURCE = [
-  'import Eb from "./eb.xspec"',
-  "",
-  '<S id="watch">',
-  "Dependents holder text.",
-  "",
-  '<S id="watch.ons" d={Eb.p.s}>',
-  "Depends on the sibling left alone on its line.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+const E3_DEPS_SOURCE = stagedMdx(
+  "T6.2-3 sibling staging (e) specs/Deps.mdx",
+  [
+    'import Eb from "./eb.xspec"',
+    "",
+    '<S id="watch">',
+    "Dependents holder text.",
+    "",
+    '<S id="watch.ons" d={Eb.p.s}>',
+    "Depends on the sibling left alone on its line.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 /** The sibling's pinned outcome: its one run gone, so its ownHash changes. */
 function assertSiblingRunGone(
@@ -1966,7 +2045,7 @@ const T6_2_3 = defineProductTest({
     await withWorkspace(
       SPECS_ONLY_CONFIG,
       {
-        [I3_ROOM]: I3_ROOM_SOURCE,
+        [I3_ROOM]: T6_2_3_ROOM,
         [I3_HALL]: I3_HALL_SOURCE,
         [I3_DEPS]: I3_DEPS_SOURCE,
       },
@@ -2125,9 +2204,9 @@ const T6_2_3 = defineProductTest({
     );
 
     // --- The three impure stagings (a)–(c), each at both destinations ---
-    for (const shape of M3_SHAPES) {
+    for (const staging of M3_ORIGIN_STAGINGS) {
       for (const destination of M3_DESTINATIONS) {
-        await runImpureStaging(product, shape, destination);
+        await runImpureStaging(product, staging, destination);
       }
     }
 
@@ -2206,24 +2285,41 @@ function p4DepsSource(target: string, role: string): string {
 const F1_P = "specs/a.mdx#p";
 const F1_M_PRE = "specs/a.mdx#p.m";
 const F1_M_POST = "specs/a.mdx#p.n";
-const F1_SOURCE = '<S id="p">\n<S id="p.m">\ny\n</S>\n</S>\n';
+const F1_SOURCE = stagedMdx(
+  "T6.2-4 pinned shape (1), the flow-form last child specs/a.mdx",
+  '<S id="p">\n<S id="p.m">\ny\n</S>\n</S>\n',
+);
 const F1_MOVED = '<S id="p">\n<S id="p.n">\ny\n</S>\n</S>\n';
 
 // Pinned shape (2): T6.5-13(f)'s top-level shape, no final terminator.
 const F2_A = "specs/a.mdx#a";
 const F2_M_PRE = "specs/a.mdx#m";
 const F2_M_POST = "specs/a.mdx#n";
-const F2_SOURCE = '<S id="a">x</S>\n<S id="m">\ny\n</S>';
+const F2_SOURCE = stagedMdx(
+  "T6.2-4 pinned shape (2), T6.5-13(f)'s top-level shape specs/a.mdx",
+  '<S id="a">x</S>\n<S id="m">\ny\n</S>',
+);
 const F2_MOVED = '<S id="a">x</S>\n<S id="n">\ny\n</S>\n';
 
 // The `changed` twin: T6.5-13(e)'s shape, under shape (1)'s command.
-const F3_SOURCE = 'foo <S id="p">\n<S id="p.m">x</S></S> baz\n';
+const F3_SOURCE = stagedMdx(
+  "T6.2-4 `changed` twin, T6.5-13(e)'s shape specs/a.mdx",
+  'foo <S id="p">\n<S id="p.m">x</S></S> baz\n',
+);
+// The twin's dependent: the template call, moved to module level as a
+// record; the runner asserts the file's bytes unchanged after the move
+// against the record's source.
+const T6_2_4_TWIN_DEPS = stagedMdx(
+  "T6.2-4 `changed` twin, T6.5-13(e)'s shape specs/Deps.mdx",
+  p4DepsSource("p", "coincident parent"),
+);
 const F3_MOVED = 'foo <S id="p">\n<S id="p.n">x</S>\n</S> baz\n';
 
 /** One pinned pure shape of T6.2-4 (module header). */
 interface PureFinalPositionStaging {
   readonly label: string;
-  readonly source: string;
+  /** The staged source — a staged-source record (module header). */
+  readonly source: StagedMdx;
   /** The composed file, byte-exact. */
   readonly moved: string;
   /** Why the composition is what it is (the byte assertion's diagnosis). */
@@ -2289,10 +2385,33 @@ const F2_STAGING: PureFinalPositionStaging = {
   preIdentities: [P4_FILE, F2_A, F2_M_PRE, P4_DEPS, P4_W_TOP],
 };
 
+/** One pinned pure shape with its dependent's source as a record. */
+interface PureFinalPositionRun {
+  readonly staging: PureFinalPositionStaging;
+  /** `specs/Deps.mdx`: the template call the runner staged. */
+  readonly deps: StagedMdx;
+}
+
+// T6.2-4's stagings follow one another's invocations, so their initial
+// sources are staged-source records (module header): the pinned shapes'
+// sources wrapped in place, the dependents' template calls evaluated once
+// at module load, in shape order — the same calls the runner made, moved
+// here — and the `changed` twin's above.
+const PURE_FINAL_POSITION_RUNS: readonly PureFinalPositionRun[] = [
+  F1_STAGING,
+  F2_STAGING,
+].map((staging) => ({
+  staging,
+  deps: stagedMdx(
+    `${staging.label} specs/Deps.mdx`,
+    p4DepsSource(staging.idPre, "moved node"),
+  ),
+}));
+
 /** A pinned pure shape: byte-exact composition, full sweep, empty impact. */
 async function runPureFinalPositionStaging(
   product: ProductBinding,
-  staging: PureFinalPositionStaging,
+  { staging, deps }: PureFinalPositionRun,
 ): Promise<void> {
   const context = staging.label;
   const identityMap: Readonly<Record<string, string>> = {
@@ -2305,7 +2424,7 @@ async function runPureFinalPositionStaging(
     SPECS_ONLY_CONFIG,
     {
       [P4_FILE]: staging.source,
-      [P4_DEPS]: p4DepsSource(staging.idPre, "moved node"),
+      [P4_DEPS]: deps,
     },
     async (workspace) => {
       await workspace.gitInit();
@@ -2427,10 +2546,9 @@ async function runPureFinalPositionStaging(
 /** The `changed` twin: the coincident parent alone `changed`. */
 async function runChangedTwinStaging(product: ProductBinding): Promise<void> {
   const context = "T6.2-4 `changed` twin, T6.5-13(e)'s shape";
-  const depsSource = p4DepsSource("p", "coincident parent");
   await withWorkspace(
     SPECS_ONLY_CONFIG,
-    { [P4_FILE]: F3_SOURCE, [P4_DEPS]: depsSource },
+    { [P4_FILE]: F3_SOURCE, [P4_DEPS]: T6_2_4_TWIN_DEPS },
     async (workspace) => {
       await workspace.gitInit();
       const base = await workspace.gitCommitAll("pre-move baseline");
@@ -2474,7 +2592,7 @@ async function runChangedTwinStaging(product: ProductBinding): Promise<void> {
       );
       await assertFileBytes(
         workspace.path(P4_DEPS),
-        depsSource,
+        T6_2_4_TWIN_DEPS.source,
         `${context}: ${P4_DEPS} after the move — its spellings resolve to ` +
           `\`p\`, whose identity the mapping leaves alone: nothing rewritten, ` +
           `no other byte changed (SPEC 6.5)`,
@@ -2609,8 +2727,8 @@ const T6_2_4 = defineProductTest({
   title:
     "same-parent final-position move: moving a parent's last child onto itself (same parent, same final position, new ID) is pure in effect exactly when the re-insertion reproduces the parent's own content sequence — in the two pinned shapes (a flow-form last child whose tags, and its parent's closing tag, stand alone on their lines; T6.5-13(f)'s top-level shape) the composed file is byte-exact, no hash in the workspace changes (full sweep), and `impact --base <pre-move ref>` reports no categories apart from the identity mapping; in the `changed` twin (T6.5-13(e)'s shape) the coincident parent alone is `changed`, its ownHash with it and its metadataHash kept, with the 5.6 cascades attributed to it, the moved node and the root keeping their content (SPEC 6.2, 6.5, 3, 5.4, 5.6)",
   run: async (product) => {
-    await runPureFinalPositionStaging(product, F1_STAGING);
-    await runPureFinalPositionStaging(product, F2_STAGING);
+    for (const run of PURE_FINAL_POSITION_RUNS)
+      await runPureFinalPositionStaging(product, run);
     await runChangedTwinStaging(product);
   },
 });
