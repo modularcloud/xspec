@@ -247,6 +247,7 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type {
   ProductBinding,
   RunOptions,
@@ -282,7 +283,14 @@ export default defineConfig({
 })
 `;
 
-const ANCHOR_SOURCE = '<S id="racine">\nAncrage — contenu stable.\n</S>\n';
+// Staged by T11.6-1's first workspace and by T11.6-4's invalid-configuration
+// workspace — the latter after that body's first product invocation, so
+// S-7's sweep never reaches it against the stub: a staged-source record
+// (helpers/staged-mdx.ts; S-9's before-any-product clause), one for both.
+const ANCHOR_SOURCE = stagedMdx(
+  "T11.6-1/T11.6-4 specs/a.mdx (the anchor source; T11.6-4's invalid-configuration workspace)",
+  '<S id="racine">\nAncrage — contenu stable.\n</S>\n',
+);
 
 const CONFIG_FILE = "xspec.config.ts";
 
@@ -909,6 +917,36 @@ async function expectResolvedInventory(
   return map;
 }
 
+// T11.6-2's emit, outDir, disabled, and sets workspaces are created after
+// the body's first product invocation (the defaults workspace's runs), so
+// S-7's sweep never reaches their initial sources against the stub:
+// staged-source records (helpers/staged-mdx.ts; S-9's before-any-product
+// clause), the same literals moved into them.
+const T11_6_2_EMIT_A = stagedMdx(
+  "T11.6-2 emit workspace specs/a.mdx",
+  '<S id="seule">\nÉmise.\n</S>\n',
+);
+const T11_6_2_OUTDIR_G = stagedMdx(
+  "T11.6-2 outDir workspace specs/g.mdx",
+  '<S id="haut">\nRacine.\n</S>\n',
+);
+const T11_6_2_OUTDIR_H = stagedMdx(
+  "T11.6-2 outDir workspace specs/sub/h.mdx",
+  '<S id="bas">\nNichée.\n</S>\n',
+);
+const T11_6_2_DISABLED_SEUL = stagedMdx(
+  "T11.6-2 disabled workspace specs/seul.mdx",
+  '<S id="seul">\nInerte.\n</S>\n',
+);
+const T11_6_2_SETS_M = stagedMdx(
+  "T11.6-2 sets workspace specs/m.mdx",
+  '<S id="m" tags="a">\nPrincipal.\n</S>\n',
+);
+const T11_6_2_SETS_X = stagedMdx(
+  "T11.6-2 sets workspace aux/x.mdx",
+  '<S id="x">\nAnnexe.\n</S>\n',
+);
+
 const T11_6_2 = defineProductTest({
   id: "T11.6-2",
   title:
@@ -1052,7 +1090,7 @@ const T11_6_2 = defineProductTest({
     const emit = await TestWorkspace.create({
       files: {
         [CONFIG_FILE]: RESOLVED_EMIT_CONFIG,
-        "specs/a.mdx": '<S id="seule">\nÉmise.\n</S>\n',
+        "specs/a.mdx": T11_6_2_EMIT_A,
         // A spec-group file without the `.mdx` extension: discovered (the
         // extension-free glob matches it), invalid (14.19, SPEC 7.1) — a
         // finding of build/check, never of the inventory (11.6).
@@ -1123,8 +1161,8 @@ const T11_6_2 = defineProductTest({
     const outDir = await TestWorkspace.create({
       files: {
         [CONFIG_FILE]: RESOLVED_OUTDIR_CONFIG,
-        "specs/g.mdx": '<S id="haut">\nRacine.\n</S>\n',
-        "specs/sub/h.mdx": '<S id="bas">\nNichée.\n</S>\n',
+        "specs/g.mdx": T11_6_2_OUTDIR_G,
+        "specs/sub/h.mdx": T11_6_2_OUTDIR_H,
       },
     });
     try {
@@ -1180,7 +1218,7 @@ const T11_6_2 = defineProductTest({
     const disabled = await TestWorkspace.create({
       files: {
         [CONFIG_FILE]: RESOLVED_DISABLED_CONFIG,
-        "specs/seul.mdx": '<S id="seul">\nInerte.\n</S>\n',
+        "specs/seul.mdx": T11_6_2_DISABLED_SEUL,
       },
     });
     try {
@@ -1234,8 +1272,8 @@ const T11_6_2 = defineProductTest({
     const sets = await TestWorkspace.create({
       files: {
         [CONFIG_FILE]: RESOLVED_SETS_CONFIG,
-        "specs/m.mdx": '<S id="m" tags="a">\nPrincipal.\n</S>\n',
-        "aux/x.mdx": '<S id="x">\nAnnexe.\n</S>\n',
+        "specs/m.mdx": T11_6_2_SETS_M,
+        "aux/x.mdx": T11_6_2_SETS_X,
       },
     });
     try {
@@ -1559,6 +1597,16 @@ function assertRecordedDerivedPaths(
   }
 }
 
+// T11.6-3's sessions workspace is created after the body's first product
+// invocation (the record workspace's runs), so S-7's sweep never reaches
+// its initial source against the stub: a staged-source record
+// (helpers/staged-mdx.ts; S-9's before-any-product clause), the literal
+// moved into it.
+const T11_6_3_SESSIONS_SEUL = stagedMdx(
+  "T11.6-3 sessions workspace specs/seul.mdx",
+  '<S id="seul">\nSeul.\n</S>\n',
+);
+
 const T11_6_3 = defineProductTest({
   id: "T11.6-3",
   title:
@@ -1823,7 +1871,7 @@ const T11_6_3 = defineProductTest({
     const sessions = await TestWorkspace.create({
       files: {
         [CONFIG_FILE]: SESSIONS_CONFIG,
-        "specs/seul.mdx": '<S id="seul">\nSeul.\n</S>\n',
+        "specs/seul.mdx": T11_6_3_SESSIONS_SEUL,
       },
     });
     try {
@@ -2146,6 +2194,16 @@ function inventoryApartFromRecordSupplied(
   };
 }
 
+// T11.6-4's corrupt-record workspace (arm C) is created after the body's
+// first product invocation (arm A's runs), so S-7's sweep never reaches
+// its initial source against the stub: a staged-source record
+// (helpers/staged-mdx.ts; S-9's before-any-product clause), the literal
+// moved into it; arm B's `specs/a.mdx` is the anchor record above.
+const T11_6_4_RECORD_SEUL = stagedMdx(
+  "T11.6-4 corrupt-record workspace specs/seul.mdx",
+  '<S id="seul">\nContenu stable.\n</S>\n',
+);
+
 const T11_6_4 = defineProductTest({
   id: "T11.6-4",
   title:
@@ -2365,7 +2423,7 @@ const T11_6_4 = defineProductTest({
     const record = await TestWorkspace.create({
       files: {
         [CONFIG_FILE]: RECORD_EMIT_CONFIG,
-        "specs/seul.mdx": '<S id="seul">\nContenu stable.\n</S>\n',
+        "specs/seul.mdx": T11_6_4_RECORD_SEUL,
       },
     });
     try {

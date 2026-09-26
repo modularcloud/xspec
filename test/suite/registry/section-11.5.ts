@@ -84,6 +84,7 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type {
   ArgvValue,
   ProductBinding,
@@ -1269,6 +1270,15 @@ RC.add('<S id="seule">\nTexte positionné aussi.\n</S>');
 const RC_SEC_RANGE: SourceRange = { start: RC_SEC_START, end: RC.pos };
 RC.add("\n");
 const RC_SOURCE = RC.source;
+// T11.5-3's configuration-less twin is created after the body's first
+// product invocation (the operand workspace's runs), so S-7's sweep never
+// reaches its initial file against the stub: a staged-source record
+// (helpers/staged-mdx.ts; S-9's before-any-product clause) made from the
+// string the slice check reads, staged in both workspaces.
+const RC_STAGED = stagedMdx(
+  "T11.5-3 specs/A<U+FFFD>.mdx (the U+FFFD-pathed source; the operand workspace and its configuration-less twin)",
+  RC_SOURCE,
+);
 const RC_ROOT_RANGE: SourceRange = { start: 0, end: RC.pos };
 
 /**
@@ -1454,7 +1464,7 @@ const T11_5_3 = defineProductTest({
         [OC_FILE]: OC_SOURCE,
         [OC_TGT_FILE]: OC_TGT_SOURCE,
         [OC_CASSE_FILE]: OC_CASSE_SOURCE,
-        [RC_PATH]: RC_SOURCE,
+        [RC_PATH]: RC_STAGED,
       },
       // S-9: casse.mdx is the staged parse failure (14.20).
       mdx: { unparseable: [OC_CASSE_FILE] },
@@ -1722,7 +1732,7 @@ const T11_5_3 = defineProductTest({
           // usage error, byte-identically (SPEC 12.0; the T12.0-10
           // discipline, H-4).
           const configless = await TestWorkspace.create({
-            files: { [RC_PATH]: RC_SOURCE },
+            files: { [RC_PATH]: RC_STAGED },
           });
           try {
             const rcAtConfigless = await assertLeavesUnchanged(

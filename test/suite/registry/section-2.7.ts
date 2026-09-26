@@ -1183,6 +1183,12 @@ interface InvalidPropArm {
    * exactly once in `construct`.
    */
   readonly locate?: string;
+  /**
+   * The arm's file as a staged-source record another test stages too,
+   * when one exists — T11.4-3's shared fixture (`VALUELESS_TAGS_STAGED`);
+   * the staging table composes every other arm's record itself.
+   */
+  readonly shared?: StagedMdx;
 }
 
 /** A staged attribute's exact bytes — the `view` entry form of SPEC 11.4. */
@@ -1291,6 +1297,22 @@ function valuelessTagsFixture(): ValuelessTagsFixture {
 export const VALUELESS_TAGS_FIXTURE: ValuelessTagsFixture =
   valuelessTagsFixture();
 
+/** The valueless-`tags` arm's diagnostic name (its row and its record's name). */
+const VALUELESS_TAGS_ARM_NAME =
+  'a valueless `tags` (`<S id="x" tags>`, the file T11.4-3 shares)';
+
+/**
+ * The fixture's file as a staged-source record (helpers/staged-mdx.ts):
+ * T2.7-3's valueless-`tags` arm stages it after the body's first product
+ * invocation, and T11.4-3's shared workspace — its third — stages the same
+ * bytes, so the one record carries both IDs (S-9's before-any-product
+ * clause), made from the exported fixture's `source`.
+ */
+export const VALUELESS_TAGS_STAGED: StagedMdx = stagedMdx(
+  `T2.7-3/T11.4-3 ${VALUELESS_TAGS_ARM_NAME} ${INVALID_PROP_FILE}`,
+  VALUELESS_TAGS_FIXTURE.source,
+);
+
 /**
  * The exported fixture's declared offsets against its own bytes (staging
  * integrity, T11.4-3's slice-check precedent): each attribute's range slices
@@ -1395,9 +1417,10 @@ const INVALID_PROP_ARMS: readonly InvalidPropArm[] = [
     condition: "14.17",
   },
   {
-    name: 'a valueless `tags` (`<S id="x" tags>`, the file T11.4-3 shares)',
+    name: VALUELESS_TAGS_ARM_NAME,
     construct: VALUELESS_TAGS_FIXTURE.construct,
     condition: "14.17",
+    shared: VALUELESS_TAGS_STAGED,
   },
   {
     name: "a quoted `d` value",
@@ -1424,20 +1447,27 @@ const INVALID_PROP_ARMS: readonly InvalidPropArm[] = [
 /** An invalid-prop arm with its one-defect file as a record. */
 interface InvalidPropStaging {
   readonly arm: InvalidPropArm;
-  /** `invalidPropSource(arm.construct)`, staged as `specs/A.mdx`. */
+  /**
+   * `invalidPropSource(arm.construct)` — or the arm's `shared` record, the
+   * same bytes — staged as `specs/A.mdx`.
+   */
   readonly source: StagedMdx;
 }
 
 // The arms' files, composed once at module load: every arm workspace after
 // the body's first is created after its first invocation (S-9's timing
-// clause), and the table converts uniformly.
+// clause), and the table converts uniformly; an arm whose file another
+// test shares takes that one record (`shared`) rather than a second
+// spelling of its bytes.
 const INVALID_PROP_STAGINGS: readonly InvalidPropStaging[] =
   INVALID_PROP_ARMS.map((arm) => ({
     arm,
-    source: stagedMdx(
-      `T2.7-3 ${arm.name} ${INVALID_PROP_FILE}`,
-      invalidPropSource(arm.construct),
-    ),
+    source:
+      arm.shared ??
+      stagedMdx(
+        `T2.7-3 ${arm.name} ${INVALID_PROP_FILE}`,
+        invalidPropSource(arm.construct),
+      ),
   }));
 
 // A repeated unknown prop is simultaneously repeated and unknown — two causes

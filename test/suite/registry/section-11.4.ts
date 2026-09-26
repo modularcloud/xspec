@@ -426,6 +426,7 @@ import { compileMarkdown } from "../../helpers/oracles/markdown.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   expectAvailabilityUsageError,
@@ -435,6 +436,7 @@ import {
 import {
   assertValuelessTagsFixture,
   VALUELESS_TAGS_FIXTURE,
+  VALUELESS_TAGS_STAGED,
 } from "./section-2.7.js";
 import {
   BESIDE_ROOT_FILE_PATTERN_DECOY,
@@ -1692,10 +1694,13 @@ const T11_4_3 = defineProductTest({
     // --- Invocation 3: T2.7-3's shared fixture, viewed bare in its own
     // workspace (module header) — the identity question the matrix file
     // cannot ask: a well-formed, unique `id` beside a valueless `tags`.
+    // Created after this body's first invocation, so its initial file is
+    // the staged-source record T2.7-3's arm stages (the same bytes as
+    // `SHARED.source`; S-9's before-any-product clause).
     const sharedWorkspace = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [SHARED.file]: SHARED.source,
+        [SHARED.file]: VALUELESS_TAGS_STAGED,
       },
     });
     try {
@@ -2551,6 +2556,15 @@ CYE.add("\n</S>");
 const CYE_START_RANGE: SourceRange = { start: CYE_START_START, end: CYE.pos };
 CYE.add("\n");
 const CYE_SOURCE = CYE.source;
+// T11.4-5's cycle, masked, and invalid-path workspaces are created after the
+// body's first product invocation (the chain workspace's runs), so S-7's
+// sweep never reaches their initial files against the stub: staged-source
+// records (helpers/staged-mdx.ts; S-9's before-any-product clause), each
+// made from the string the slice checks read, or wrapped in place.
+const CYE_STAGED = stagedMdx(
+  "T11.4-5 cycle workspace specs/entry.mdx",
+  CYE_SOURCE,
+);
 const CYE_ROOT_RANGE: SourceRange = { start: 0, end: CYE.pos };
 
 const CYL_FILE = "specs/loop.mdx";
@@ -2561,6 +2575,10 @@ const CYL_SELF_TEXT = '{text("l1")}';
 const CYL_SELF_RANGE = CYL.add(CYL_SELF_TEXT);
 CYL.add("\n</S>\n");
 const CYL_SOURCE = CYL.source;
+const CYL_STAGED = stagedMdx(
+  "T11.4-5 cycle workspace specs/loop.mdx",
+  CYL_SOURCE,
+);
 
 // entry's root own text: title + its blank + the dropped import line's blank
 // successor; nothing after the one section (its closing-tag line's drop eats
@@ -2612,11 +2630,21 @@ MKM.add("\n</S>");
 const MKM_M_RANGE: SourceRange = { start: MKM_M_START, end: MKM.pos };
 MKM.add("\n");
 const MKM_SOURCE = MKM.source;
+const MKM_STAGED = stagedMdx(
+  "T11.4-5 masked workspace specs/main.mdx",
+  MKM_SOURCE,
+);
 const MKM_ROOT_RANGE: SourceRange = { start: 0, end: MKM.pos };
 
 const MK_GONE_FILE = "specs/gone.mdx";
 // Unparseable MDX (14.20): an unclosed section tag (the T11.2-1 staging).
-const MK_GONE_SOURCE = '<S id="g">\nNever closed.\n';
+// The requested file is the staged parse failure (14.20): the record
+// carries the `unparseable` declaration the workspace declaration held.
+const MK_GONE_SOURCE = stagedMdx(
+  "T11.4-5 masked workspace specs/gone.mdx",
+  '<S id="g">\nNever closed.\n',
+  "unparseable",
+);
 
 const MKM_ROOT_OWN = "Måne — the masked target's requester.\n\n\n";
 
@@ -2653,6 +2681,10 @@ IPF.add('<S id="h">\nHash line.\n</S>');
 const IP_H_RANGE: SourceRange = { start: IP_H_START, end: IPF.pos };
 IPF.add("\n");
 const IP_SOURCE = IPF.source;
+const IP_STAGED = stagedMdx(
+  "T11.4-5 invalid-path workspace specs/vi#ew.mdx",
+  IP_SOURCE,
+);
 const IP_ROOT_RANGE: SourceRange = { start: 0, end: IPF.pos };
 
 // The file holds no embedding, so every text value is defined and byte-exact
@@ -2974,8 +3006,8 @@ const T11_4_5 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [CYE_FILE]: CYE_SOURCE,
-          [CYL_FILE]: CYL_SOURCE,
+          [CYE_FILE]: CYE_STAGED,
+          [CYL_FILE]: CYL_STAGED,
         },
       });
       try {
@@ -3076,11 +3108,9 @@ const T11_4_5 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [MKM_FILE]: MKM_SOURCE,
+          [MKM_FILE]: MKM_STAGED,
           [MK_GONE_FILE]: MK_GONE_SOURCE,
         },
-        // S-9: the requested file is the staged parse failure (14.20).
-        mdx: { unparseable: [MK_GONE_FILE] },
       });
       try {
         const gateContext =
@@ -3236,7 +3266,7 @@ const T11_4_5 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [IP_FILE]: IP_SOURCE,
+          [IP_FILE]: IP_STAGED,
         },
       });
       try {
@@ -3845,7 +3875,16 @@ const BC_PARTS_OCCURRENCES: readonly OccurrenceRecord[] = [
 
 const BCI_FILE = "specs/imp.mdx";
 const BCT_FILE = "specs/tgt.mdx";
-const BCT_SOURCE = 'Tärget prose.\n\n<S id="t">Tgt line.</S>\n';
+// T11.4-6's imperfect workspace is created after the body's first product
+// invocation (the emission workspace's runs), so S-7's sweep never reaches
+// its initial files against the stub: staged-source records
+// (helpers/staged-mdx.ts; S-9's before-any-product clause) — the target
+// wrapped in place, the importer made from the string the slice checks
+// read.
+const BCT_SOURCE = stagedMdx(
+  "T11.4-6 imperfect workspace specs/tgt.mdx",
+  'Tärget prose.\n\n<S id="t">Tgt line.</S>\n',
+);
 
 const BCI = new ByteFixture();
 BCI.add("Ïmp — imperfect carrier.\n\n");
@@ -3875,6 +3914,10 @@ const BCI_ONE_CLOSE = BCI.add("</S>");
 const BCI_ONE_RANGE: SourceRange = { start: BCI_ONE_START, end: BCI.pos };
 BCI.add("\n");
 const BCI_SOURCE = BCI.source;
+const BCI_STAGED = stagedMdx(
+  "T11.4-6 imperfect workspace specs/imp.mdx",
+  BCI_SOURCE,
+);
 const BCI_ROOT_RANGE: SourceRange = { start: 0, end: BCI.pos };
 
 // The imperfect workspace's COMPLETE findings multiset (the gate's staging
@@ -4196,7 +4239,7 @@ const T11_4_6 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [BCI_FILE]: BCI_SOURCE,
+          [BCI_FILE]: BCI_STAGED,
           [BCT_FILE]: BCT_SOURCE,
         },
       });
