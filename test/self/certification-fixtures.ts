@@ -169,13 +169,16 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       ]),
       // VIOL-CORE-LATELOCK: workspace exclusivity is acquired late — a
       // mutating command acquires it, and creates its hold file, only once
-      // the argument checks of 12.0, baseline resolution (6.3), the gate of
-      // 13.3, and the valid-workspace precondition of rename/move (6.4, 6.5)
-      // have all passed, instead of before them; an invocation one of those
-      // checks refuses exits at once having acquired nothing and created no
-      // hold file, and a mutating command started while another is held on
-      // a workspace failing `build`'s validations exits 1 at the gate or
-      // precondition rather than 2 on exclusion.
+      // the argument checks of 12.0 and baseline resolution (6.3) have
+      // passed, instead of before them — the two checks 12.0 places ahead of
+      // source validation, and the only ones moved: the gate of 13.3, the
+      // valid-workspace precondition of rename/move (6.4, 6.5), and every
+      // modification still follow acquisition and the hold. An invocation
+      // one of the two moved checks refuses exits 2 at once having acquired
+      // nothing and created no hold file — T13.5-8's two seam-ordering arms
+      // (`rename specs/A.mdx nope x`, `review create --base <ref> --name n`
+      // under `--test-hold`) — while its failing-workspace arms, whose
+      // commands pass both checks, hold and are excluded as the conformer's.
       violator("VIOL-CORE-LATELOCK", "conf-core/bin-latelock.mjs", ["T13.5-8"]),
     ],
   ),
