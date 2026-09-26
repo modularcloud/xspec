@@ -137,7 +137,15 @@ body-local alias of an imported template object (T9.1-1's `const wx =
 workedExample`) resolves to the import in the record — the same function,
 identical bytes; and a module's own replace helper over product-rewritten
 bytes (`section-9.3.ts`'s `editSourceExpecting`) keeps its diagnosis and calls
-`edit()` in place of `file()`.
+`edit()` in place of `file()`. As Task 11 found: a constant staged both by a body
+directly and by a shared helper other tests call (`section-10.1.ts`'s
+`A_MDX_EDITED`: T10.1-1's stale arm, and `assertCreateFollowsRefresh` under
+T10.1-6) becomes ONE record named with every calling test's ID
+(`"T10.1-1/T10.1-6 …"`); and the tasks' certification notes overstate §10's
+scope — `test/self/certification-fixtures.ts`'s `inScope` lists name, among
+§10–§12, only T10.4-5 (Task 12) and T11.2-2, T11.2-4, T11.3-4, T11.4-1, T11.4-3,
+T11.4-4 (Task 16), so every other module's conversion leaves certification
+untouched by construction, the full self run's 144/33 confirming it.
 
 **Appending to product-written bytes (T5.4-1's pattern):** an append is an `edit()`
 extending the file's unique tail (`REINTRO_TAIL`, `f`'s closing run, which the rename
@@ -156,16 +164,6 @@ verdict (`unshare … -- npx vitest run --config test/vitest.config.ts --project
 reached — accepted, Task 18's guard surfaces it when the product gets there).
 
 ## Tasks
-
-### Task 11 — Ledger conversion: §10.1–§10.3
-
-`section-10.1.ts` (323 `A_MDX_EDITED`; 1271 `T10_1_5_B_INVALID` — carry its
-declaration; 1813 the shared refusal helper `(product, workspace, name, expected, …)`
-staging `A_MDX_EDITED` before `review create` — one record for every caller; 1117 —
-read; the session-garbage sites are not `.mdx`) and `section-10.2-10.3.ts` (543 — read;
-913, 945, 1034 `t2Spec(...)`; 1107 `t2CovSpec(...)`; 1375, 1395 — read; 1583
-`t4SpecWithoutK(...)`; 1842 `t5Spec(...)`; 1980 `t6Spec(...)`). Certification:
-CONF-CORE in-scope tests among §10 — totals stay 144/33. **Checks:** as the preamble's.
 
 ### Task 12 — Ledger conversion: §10.4
 
