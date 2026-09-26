@@ -550,6 +550,74 @@ file's and the three importers' pass. Known state after Task 10: the S-9 self-te
 certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run
 against` lines.
 
+**Resolved by Task 11 (the §6.5-ii and §6.5-iii modules; the first commit converts,
+the closing commit records).** Eighty-three records: `section-6.5-ii.ts` 2 —
+`ORIGIN_BEFORE` / `TARGET_BEFORE` wrapped in place (`"T6.5-11 specs/origin.mdx"` /
+`"… specs/target.mdx"`; every arm stages them through `armFiles`, the first arm's
+workspace converted uniformly). `section-6.5-iii.ts` 81 — T6.5-12 3 (`R12_ORIGIN_BEFORE`
+wrapped in place, `R12Arm.targetBefore: StagedMdx` wrapped in each row, named by the
+row's `name`); T6.5-14 2 (the declarations arm's `F14_DECL_ORIGIN_BEFORE` wrapped in
+place, `F14_THIRD_STAGED` made from the string the untouched-file compare keeps; the
+local arm's workspace, the body's first, left plain); T6.5-13 22 — `a13CrossArm`'s
+`target` typed `StagedMdx`, its origin and third module the module-level
+`A13_ORIGIN_STAGED` / `A13_THIRD_STAGED`, every per-arm target, origin, and third file
+a `*_STAGED` record made from its string (the strings stay for the offsets the preview
+edits pin) or wrapped in place where nothing else reads it (`A13_G_ORIGIN_BEFORE`,
+`A13_K_ORIGIN_BEFORE`), `a13ParagraphHeadedArm`'s composed target registered inside it
+(`"T6.5-13 arm (l) specs/b.mdx"`, `"… (l, indented) …"`), `A13_DEPENDENT_STAGED` for
+(h) and (j), `A13_ARMS`'s first arm converted uniformly; T6.5-19 2 (`A19_A_STAGED`,
+`A19_B_ORIGIN_STAGED`, the arms sharing T6.5-13's records otherwise); T6.5-15 11 —
+the computed table `J15_STAGINGS` (`{ arm, staging, origin, target }`, `j15Compose`
+once at load, the vectors and the runner reading it, the body iterating it) and the
+modules as the record map `J15_MODULES` (`j15Module(binding)` the kept generator,
+`j15SharedModule` holding `A` and `B` to T6.5-13's third and fourth records at load,
+`"T6.5-15 specs/C.mdx …"` its own); T6.5-16 37 — `R16_FLOW_ORIGIN_STAGED`,
+`R16_TEXT_PARENT_STAGED`, the per-arm origins registered inside `r16ArmA` / `r16ArmB`
+(the arm `key` hoisted and spelled in the name), `R16MovedShape.staged` and
+`R16Parent.staged` computed in place through `r16MovedShape(ids, name, origin, moved,
+staged?)` (a passed record held to the composition's bytes at load) and the hoisted
+parent constants, the (d) family's origins through the memoizing `r16DOrigin(remainder)`
+(named for the remainder, `JSON.stringify`ed; the list-marker origin is the
+missing-parent applicability arm's too), the (e), (f), (g), (h), (i), collision,
+insertion, and created-target sources wrapped in place or registered in their rows,
+`r16ArmGTop`'s `target: StagedMdx`; T6.5-17 4 (the origins of `M17_A_FILES`, (b), (c),
+and the control). Every string-typed `files` map and arm `files` field widened to
+`InitialFileContents` (six interfaces, `withWorkspace`); the S-9 vectors read a record's
+text through the module-local `stagedText()` (`R16_FORM_VECTORS`, `M17_FORM_VECTORS`),
+so `test/self/s9-fixture-well-formedness.test.ts`'s imports are untouched. Sub-rules
+applied: (i) byte-identical sources ACROSS tests and paths are ONE record named with
+every staging test in ID order and every path — `<S id="a">\nA text.\n</S>\n`
+(`A13_THIRD_SOURCE` = the former `R16_G_THIRD_SOURCE` = `M17_X_SOURCE` = T6.5-15's
+`specs/A.mdx`) is `"T6.5-13/T6.5-15/T6.5-16/T6.5-17/T6.5-19/T6.6-3/T6.6-4/T14-7 the
+module holding a alone (specs/x.mdx; T6.5-15's specs/A.mdx)"`, likewise the fourth
+module `b`, the existing target `k` (`A13_EXISTING_TARGET` = `R16_K`), the (a) target
+(`A13_A_TARGET` = `M17_TARGET_SOURCE` = `R16_G_CONTROL_TARGET`), and (d)'s `para` /
+`para\n` (T6.5-16's top-level (g) twin's targets) — the consumer constants aliased
+(`const R16_K = A13_EXISTING_TARGET;`, `M17_X_STAGED = A13_THIRD_STAGED`, …) or
+deleted, never re-spelled; (ii) a record's ID list carries every test that stages it
+anywhere: T6.6-3 restages `R16_REFUSED_ARMS`, `R16_ALONE_ARMS`, and `M17_REFUSED_ARMS`
+after its first workspace, T6.6-4 the four `A13_TIE_BREAK_ARMS` ((b), (d), (d,
+terminated), (g)) in its arm (e), T14-7 every `R16_REFUSED_ARMS` arm but the
+`refused-id-collision` one and every `M17_REFUSED_ARMS` arm — so the collision arm's
+target is `"T6.5-16/T6.6-3 …"` and the controls `"T6.5-16 …"`; (iii) a consumer module
+that reads an exported arm's `files` entry as text takes the record's `.source`: a
+value-level touch of `section-6.6.ts` — `tieBreakPlan` reads the origin through
+`StagedMdx` (one value import) and `expectRefusedArmPreviewTwin`'s `files` widened —
+its own conversion staying Task 12's; `section-14.ts` needs nothing (T14-7 spreads
+`arm.files` into `WorkspaceDecl`). Left plain: T6.5-14's local arm and T6.5-18's
+workspace (each the body's first), every `.ts` and `xspec.config.ts` entry. Read-based
+enumeration: the 3 `withWorkspace` sites of `section-6.5-ii.ts` and the 12 of
+`section-6.5-iii.ts` judged; behind their diagnosed failures at the first arm — T6.5-11,
+T6.5-13, T6.5-15, T6.5-16, T6.5-17, T6.5-19 — every later arm's site is unreached.
+Checks: the sites hook logged the task's 4 (test, path) pairs (4 lines, all
+`"well-formed"`) before and no file after; the sha256 capture over the two suite files
+(40 writes, compared sorted) identical; 9 tests, 2 pass and 7 fail — T6.5-11, T6.5-13,
+T6.5-15, T6.5-16, T6.5-17, T6.5-18, T6.5-19 — with identical diagnoses (~21 s a run).
+Known state after Task 11: the S-9 self-test 558 tests over 532 records
+(525 `T…`, 4 `E-6`, 3 `P-…`); self project 22 files, 2698 passed, 0 skipped
+under the namespace (~141 s; 2615 + the 83 record tests); certification 144 PASS /
+33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -717,22 +785,6 @@ behind a diagnosed failure or in an arm the built product never reaches — reci
 
 ## Tasks
 
-### Task 11 — Initial-file conversion: §6.5-ii and §6.5-iii (`section-6.5-ii.ts`, `section-6.5-iii.ts`)
-
-**Workspace creations to judge:** 6.5-ii (3), 6.5-iii (12 — T6.5-13's arms (b)–(l)
-each `withWorkspace(arm.files, …)` from the `a13…` tables, reviewer A's pointer (c);
-`a13DependentArm`).
-**Reachable sites (the instrumented run):**
-- `section-6.5-iii.ts` — T6.5-12 (2): specs/a.mdx specs/b.mdx
-- `section-6.5-iii.ts` — T6.5-14 (2): specs/a.mdx specs/x.mdx
-**Failing here:** T6.5-11 (ii); T6.5-13, T6.5-15, T6.5-16, T6.5-17, T6.5-18, T6.5-19
-(iii) — most of these modules' sites are behind failures: recipe 5 is the main work.
-**Certification scope:** none.
-**Notes.** Keep the exported string constants the S-9 vector self-test imports
-(T6.5-15…T6.5-19's composed forms) and make records from them; T6.5-13's arm tables
-convert in place (one record per row per `.mdx` entry, named `"T6.5-13 arm (x) <path>"`).
-**Checks.** Recipes 1–5 over `section-6.5-ii.test`, `section-6.5-iii.test`.
-
 ### Task 12 — Initial-file conversion: §6.6 (`section-6.6.ts`)
 
 **Workspace creations to judge:** 25 (`withWorkspace` ~361; imports
@@ -756,6 +808,11 @@ Task 10's — done: Task 10 converted the eight sets this module imports from
 `MOVE_USAGE_ORDERING_FILES`, `MOVE_SOLO_FILES`, `MOVE_IDENTITY_FILES_AFTER` — their
 records named with T6.6-3, so the before-log lacks those entries as well: T6.6-3's
 five listed paths are theirs, and whatever T6.6-3 still logs is the module's own);
+Task 11 converted the sets this module imports from `section-6.5-iii.ts` —
+`R16_REFUSED_ARMS`, `R16_ALONE_ARMS`, `M17_REFUSED_ARMS` (T6.6-3's preview twins) and
+`A13_TIE_BREAK_ARMS` (T6.6-4's arm (e), so its listed `specs/a.mdx`, `specs/b.mdx`,
+`specs/x.mdx` are records already) — and touched this module (`expectRefusedArmPreviewTwin`'s
+`files` widened, `tieBreakPlan` reading the origin through `StagedMdx`);
 the module's own entries convert as planned.
 **Checks.** Recipes 1–5 over `section-6.6.test`.
 
@@ -1010,7 +1067,9 @@ leave `mdx.unparseable`); `specs/a#b.mdx` is an ordinary key; T14-11's arm (v) p
 form (AGENTS.md's arm-filter and stand-in recipes reach it); `RENAME_REFUSAL_FILES`
 (T14-7's first workspace, ~3149) already stages records named with T14-7 (Task 9), as
 do `MOVE_REFUSAL_FILES` and `MOVE_DERIVED_PATH_FILES` (its second and third
-workspaces, ~3178 and ~3213; Task 10).
+workspaces, ~3178 and ~3213; Task 10) and the `R16_REFUSED_ARMS` / `M17_REFUSED_ARMS`
+files its `runT147InvalidRewriteArms` / `runT147MovedImportArms` spread (Task 11:
+records named with T14-7).
 **Checks.** Recipes 1–5 over `section-14.test`, `section-14-ii.test`; after this task
 the whole suite's initial `.mdx` entries after a body's first invocation are records,
 `perDraw`, or `unchecked` — Task 24 verifies it.
