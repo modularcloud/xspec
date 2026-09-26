@@ -132,7 +132,12 @@ exported by the defining module and named with both IDs (`section-6.5.ts`'s
 a template (T13.5-5's `stateTwo ? … : …`) enumerates to one record per state,
 the body picking by the same condition; restorations of product-written graph
 data and mutations of generated files (`section-13.3.ts`'s `restoreGraphData`,
-`section-13.4.ts`'s rounds) stage no `.mdx` path and stay.
+`section-13.4.ts`'s rounds) stage no `.mdx` path and stay. As Task 10 found: a
+body-local alias of an imported template object (T9.1-1's `const wx =
+workedExample`) resolves to the import in the record — the same function,
+identical bytes; and a module's own replace helper over product-rewritten
+bytes (`section-9.3.ts`'s `editSourceExpecting`) keeps its diagnosis and calls
+`edit()` in place of `file()`.
 
 **Appending to product-written bytes (T5.4-1's pattern):** an append is an `edit()`
 extending the file's unique tail (`REINTRO_TAIL`, `f`'s closing run, which the rename
@@ -151,14 +156,6 @@ verdict (`unshare … -- npx vitest run --config test/vitest.config.ts --project
 reached — accepted, Task 18's guard surfaces it when the product gets there).
 
 ## Tasks
-
-### Task 10 — Ledger conversion: §9 and §9.3
-
-`section-9.ts` (252 `p1Source(...)`, 318 `wx.treeSource(...)`, 343 — read, 499, 500,
-503, 608, 673, 767, 768, 885 — read; 502/504 are `.ts` — leave) and `section-9.3.ts`
-(98 — the module's own replace helper: apply the preamble's replace-helper rule to its
-`.mdx` call sites (`edit()` after its assertion); 292, 296, 612, 616 — read; 620, 623, 697; 622/624 are `.ts`).
-**Checks:** as the preamble's.
 
 ### Task 11 — Ledger conversion: §10.1–§10.3
 
