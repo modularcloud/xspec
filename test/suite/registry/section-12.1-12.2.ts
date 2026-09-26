@@ -48,17 +48,26 @@
 //   `rename`/`move` (6.4/6.5) and durable files only by their owning
 //   commands (13.4) leave no path a failed `build` or any `check` may
 //   legitimately change.
-// - T12.2-2 runs one workspace per finding family. Families staged as
-//   invalid sources or corrupted durable state cannot fix whether a product
-//   additionally reports 14.10 staleness: whether prior derived state is
-//   detectably stale when "what the current sources generate" is undefined
-//   (invalid sources, unreplayable journal) is not settled by SPEC 13.3/14 —
-//   a regeneration-comparing product reports nothing (masked, 14), a
-//   hash-comparing product reports staleness. Family assertions therefore
-//   count the non-14.10 findings exactly (the family condition may never be
-//   missing, and no phantom non-staleness condition is accepted) and set
-//   14.10 findings aside. The staleness family itself asserts the reverse:
-//   every finding is 14.10, names its file, and instructs rebuilding.
+// - T12.2-2 runs one workspace per finding family, and every family's
+//   `check` findings are pinned exact — the staged conditions and nothing
+//   beside them, 14.10 included. SPEC 14.10 settles staleness on a failing
+//   workspace: where the workspace fails `build`'s validations (invalid
+//   sources, a journal error — SPEC 13.3) the content the current sources
+//   generate is undefined, so the mismatch forms, per file and graph data,
+//   are undetectable and go unreported, while the unreadable-record form
+//   (14.23) and the recorded-file form (a recorded derived path no longer
+//   generated) are reported whatever the validity. Judged per staging,
+//   neither whatever-validity form is staged: the pre-built families edited
+//   to invalid sources (family 1) or given a garbage journal line (family 7)
+//   leave the record readable and every recorded path still generated (the
+//   same sources and configuration); the never-built families (5, 6) hold
+//   no record at all (a failing `build` writes nothing, 12.1); and the
+//   freshly built passing families (8, 9) have nothing stale. So a product
+//   reporting prior derived state as stale beside the family condition — a
+//   hash-comparing product's unit form, a regeneration-comparing product's
+//   per-file form — fails, as does one omitting the family condition. The
+//   staleness family itself asserts the reverse: every finding is 14.10,
+//   names its file, and instructs rebuilding.
 // - The 14.10 arms pin the exact finding where the fixture has exactly one
 //   stale file (hand-edited module, hand-deleted module, and the
 //   occupant-kind arms — symlink to a byte-identical target, directory:
@@ -217,12 +226,12 @@ async function checkFindings(
 }
 
 /**
- * The T12.2-2 family assertion: `check` exits 1 and the non-14.10 findings
- * are exactly the staged family conditions. 14.10 staleness findings are set
- * aside — whether a product reports prior derived state as stale when the
- * staged corruption makes current generation uncomputable is not settled by
- * SPEC (see the module header) — while the family condition may never be
- * missing and no phantom condition is accepted.
+ * The T12.2-2 family assertion: `check` exits 1 and its findings are exactly
+ * the staged family conditions — 14.10 counted with the rest: on a failing
+ * workspace the mismatch forms go unreported, and no family stages a
+ * whatever-validity form (SPEC 14.10; the module header judges each
+ * staging) — so the family condition may never be missing and no phantom
+ * condition, staleness included, is accepted.
  */
 async function checkFamilyFindings(
   product: ProductBinding,
@@ -231,13 +240,12 @@ async function checkFamilyFindings(
   context: string,
 ): Promise<readonly Finding[]> {
   const findings = await checkFindings(product, workspace, context);
-  const nonStale = findings.filter((finding) => finding.condition !== "14.10");
   assertConditionCounts(
-    nonStale,
+    findings,
     expected,
-    `${context} — the staged family conditions, counted over the non-14.10 ` +
-      `findings (14.10 staleness against the staged corruption is neither ` +
-      `required nor forbidden; see the module header)`,
+    `${context} — exactly the staged family conditions: 14.10's mismatch ` +
+      `forms go unreported on a failing workspace, and no whatever-validity ` +
+      `form is staged (SPEC 14.10; see the module header)`,
   );
   return findings;
 }

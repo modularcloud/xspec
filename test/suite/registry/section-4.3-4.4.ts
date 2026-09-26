@@ -66,10 +66,12 @@
 //   runtime throw, reached "via the emitted JS" (standard tsc emits despite
 //   the asserted type error — the TEST-SPEC alternative to suppressing it;
 //   either way at the consumer's responsibility). On `check`, the condition
-//   is counted exactly over the non-14.10 findings (the T11.2-6 precedent:
-//   whether a never-built workspace's absent derived files are a staleness
-//   finding beside the validation failure is 12.2's, and no other condition
-//   is admitted).
+//   is counted exactly, 14.10 included: the never-built workspace holds no
+//   record (a failing `build` writes nothing, 12.1), so neither
+//   whatever-validity form of 14.10 exists, and on a workspace failing
+//   `build`'s validations the mismatch forms — the absent derived files
+//   and graph data — go unreported (SPEC 14.10, 13.3); no other condition
+//   is admitted.
 // - T4.4-1 "an error whose message contains both modules' source files'
 //   workspace-relative paths": the thrown value's `message` property must be
 //   a string holding `specs/A.mdx` and `specs/B.mdx` as substrings —
@@ -732,24 +734,23 @@ const T4_4_1 = defineProductTest({
           );
 
           // `check` performs all build validations (SPEC 12.2); the
-          // condition is counted exactly over the non-14.10 findings
-          // (module header).
+          // condition is counted exactly, 14.10 included (module header).
           const checkContext = "T4.4-1 `check --json` over the same workspace";
-          const checked = (
-            await runFindingsReport(
-              product,
-              workspace,
-              ["check", "--json"],
-              1,
-              `${checkContext} — \`check\` performs all build validations ` +
-                `and exits 1 on any finding (SPEC 12.2, 14.11)`,
-            )
-          ).filter((finding) => finding.condition !== "14.10");
+          const checked = await runFindingsReport(
+            product,
+            workspace,
+            ["check", "--json"],
+            1,
+            `${checkContext} — \`check\` performs all build validations ` +
+              `and exits 1 on any finding (SPEC 12.2, 14.11)`,
+          );
           assertConditionCounts(
             checked,
             { "14.11": 1 },
-            `${checkContext} — the condition-11 finding, and no condition ` +
-              `beside it save 14.10 (SPEC 12.2, 14.11)`,
+            `${checkContext} — the condition-11 finding and nothing beside ` +
+              `it: the never-built failing workspace holds no record, and ` +
+              `14.10's mismatch forms go unreported there (SPEC 12.2, ` +
+              `14.11, 14.10)`,
           );
           assertCrossModuleFinding(
             checked[0]!,

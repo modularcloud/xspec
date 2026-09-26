@@ -44,12 +44,19 @@
 //   fixes presence, not the point — where a parser gives up inside an
 //   unparseable file is parser-specific — so the arms assert the finding
 //   names the file and carries a location, never a window.
-// - check-side condition counts set 14.10 staleness findings aside (the
-//   T12.2-2/T13.4-6 rationale: whether prior or missing derived state is
-//   detectably stale when the staged defect makes current generation
-//   uncomputable is not settled by SPEC 13.3/14); the staged conditions are
-//   counted exactly over the non-14.10 findings. `build`-side counts are
-//   exact — `build` cannot observe 14.10 (SPEC 14.10, 12.1).
+// - check-side condition counts are exact, 14.10 included, like the
+//   `build`-side counts (`build` cannot observe 14.10, SPEC 14.10, 12.1):
+//   on a workspace failing `build`'s validations `check` reports 14.10 in
+//   its two whatever-validity forms alone — the unreadable-record unit
+//   form (14.23) and the recorded-file form — the mismatch forms, per file
+//   and graph data, being undetectable and unreported there (SPEC 14.10,
+//   13.3). Judged per staging, neither whatever-validity form exists:
+//   T14-1's, T14-3's, and the sweep's never-built workspaces hold no
+//   record (a failing `build` writes nothing, 12.1), and the pre-built
+//   stagings — the sweep's journal entry, T14-4's failing-workspace 14.21
+//   row — leave the record readable with every recorded path still
+//   generated. So a product reporting phantom staleness beside the staged
+//   conditions fails.
 // - T14-4's 14.14 row: the 14.14 entry routes it through every command "as a
 //   usage error (12.0), not a finding", so its both-reporters assertion is
 //   the exit-2 contract (empty stdout under `--json`, stderr naming the
@@ -94,7 +101,7 @@
 //   form-exact 12.7 document decoders (so the full answer member is emitted
 //   beside the findings) at exit 1, its findings counted exactly like the
 //   `build` side (these surfaces never report 14.10, which is `check`'s
-//   alone, so no set-aside applies). 14.13 and 14.22 are instead the
+//   alone). 14.13 and 14.22 are instead the
 //   findings of no domain file: one gated read (`query nodes`) reports
 //   exactly the staged finding at exit 1 (the 13.3 gate; the six-read
 //   breadth and modifies-nothing compares are T13.3-3's), while the three
@@ -429,14 +436,6 @@ async function checkFindings(
 }
 
 /**
- * The check-side tolerance of the module header: 14.10 staleness findings
- * against staged corruption are set aside, everything else is counted.
- */
-function nonStale(findings: readonly Finding[]): readonly Finding[] {
-  return findings.filter((finding) => finding.condition !== "14.10");
-}
-
-/**
  * Run a JSON-only surface (or a `--json` invocation) expecting the exact
  * exit code (H-5) with exactly one JSON document as the entire stdout (SPEC
  * 12.0), returned parsed for the form-exact decoders — the counterpart of
@@ -632,10 +631,10 @@ const T14_1 = defineProductTest({
         buildContext,
       );
       const checkContext =
-        "T14-1 `check --json` over the same workspace (the non-14.10 " +
-        "findings; see the module header)";
+        "T14-1 `check --json` over the same workspace (counted exactly, " +
+        "14.10 included: never built, so no record; see the module header)";
       assertCompleteReport(
-        nonStale(await checkFindings(product, workspace, checkContext)),
+        await checkFindings(product, workspace, checkContext),
         checkContext,
       );
     });
@@ -1081,10 +1080,10 @@ const T14_3 = defineProductTest({
         buildContext,
       );
       const checkContext =
-        "T14-3 `check --json` over the same workspace (the non-14.10 " +
-        "findings; see the module header)";
+        "T14-3 `check --json` over the same workspace (counted exactly, " +
+        "14.10 included: never built, so no record; see the module header)";
       assertMaskingReport(
-        nonStale(await checkFindings(product, workspace, checkContext)),
+        await checkFindings(product, workspace, checkContext),
         checkContext,
       );
     });
@@ -1500,7 +1499,7 @@ function availabilityProbes(file: string): readonly AvailabilityProbe[] {
   ];
 }
 
-/** One command's sweep assertion (build exact; check over non-14.10). */
+/** One command's sweep assertion (`build` and `check` alike exact). */
 function assertSweepFindings(
   findings: readonly Finding[],
   entry: SweepEntry,
@@ -1657,18 +1656,18 @@ const T14_4 = defineProductTest({
           "never its finding (SPEC 14.21, 12.1)",
       );
       assertConditionCounts(
-        nonStale(
-          await checkFindings(
-            product,
-            workspace,
-            "T14-4 (14.21, failing workspace) `check --json`",
-          ),
+        await checkFindings(
+          product,
+          workspace,
+          "T14-4 (14.21, failing workspace) `check --json`",
         ),
         { "14.1": 1, "14.21": 1 },
         "T14-4 (14.21, failing workspace) `check` reports 14.21 beside " +
           "the failing workspace's other findings — the validation error " +
-          "and the corrupt session together, counted exactly over the " +
-          "non-14.10 findings (SPEC 14.21, 12.2; module header)",
+          "and the corrupt session together, counted exactly: 14.10's " +
+          "mismatch forms go unreported on the failing workspace, whose " +
+          "record stays readable with every recorded path still generated " +
+          "(SPEC 14.21, 12.2, 14.10; module header)",
       );
       for (const argv of [
         ["review", "status", "bad", "--json"],
@@ -1851,11 +1850,11 @@ const T14_4 = defineProductTest({
         );
         const checkContext = `T14-4 (${entry.label}) \`check --json\``;
         assertSweepFindings(
-          nonStale(await checkFindings(product, workspace, checkContext)),
+          await checkFindings(product, workspace, checkContext),
           entry,
           `${checkContext} — condition ${entry.condition} is a \`check\` ` +
-            `finding, counted exactly over the non-14.10 findings (see the ` +
-            `module header; SPEC 14, 12.2)`,
+            `finding, counted exactly, 14.10 included (see the module ` +
+            `header; SPEC 14, 12.2, 14.10)`,
         );
 
         if (entry.answers.kind === "no-domain-file") {

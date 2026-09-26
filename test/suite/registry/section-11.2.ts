@@ -3738,12 +3738,19 @@ const T11_2_5 = defineProductTest({
 // it absent; the T12.2-2 family-7 and T14-4 staging). `build --json` and
 // `check --json` each report the journal error — build's multiset exact
 // ({14.13: 1}: build cannot observe staleness, SPEC 12.1), check's exact
-// over the non-14.10 findings (the T12.2-2 set-aside: the journal feeds
-// canonical identities, SPEC 5.4, so whether graph data is verifiable
-// beside an unreadable journal is underdetermined; no phantom
-// non-staleness condition is accepted) — each finding concerning the
-// journal path (SPEC 14: a journal condition carries the file it
-// concerns). Then `view specs/C.mdx`: the finding-free file's complete
+// too ({14.13: 1}: the workspace fails `build`'s validations — journal
+// errors alike, SPEC 13.3 — so 14.10's mismatch forms, per file and graph
+// data, are undetectable and go unreported, SPEC 14.10, while the two
+// forms reported whatever the validity have nothing here: the record the
+// passing build wrote stays readable, no 14.23 state, and every recorded
+// derived path is still generated, no recorded-file form; the exact pin
+// discriminates a product reporting phantom staleness beside the journal
+// error — the unit form of a hash comparison the journal's canonical
+// identities, SPEC 5.4, leave unverifiable, or the generated files as
+// stale against a regeneration the failing sources leave undefined) —
+// each finding concerning the journal path (SPEC 14: a journal condition
+// carries the file it concerns). Then `view specs/C.mdx`: the
+// finding-free file's complete
 // view, findings [], exit 0 — the workspace fails `build`'s validations
 // (journal errors alike, SPEC 13.3), so the surface answers from current
 // sources, consults no journal, and the gate finding never attaches.
@@ -3907,7 +3914,7 @@ async function assertViewFindingFree(
 const T11_2_6 = defineProductTest({
   id: "T11.2-6",
   title:
-    "gate findings never attach: on an otherwise-valid pre-built workspace with a garbage journal line staged (14.13), separately with the `markdown.outDir` directory replaced by a plain file (14.22, the obstructed emit write path's one offending component), and separately, on a never-built workspace, with `markdown.outDir` naming the discovered finding-free spec source `specs/A.mdx` itself (14.22 whose one offending component is a discovered file, every emit destination lying below that plain file), `view` of the finding-free file — in the third fixture `specs/A.mdx` itself, a concerned path naming a domain file's own finding for condition 19 alone (11.2) — answers complete and finding-free at exit 0, writing nothing — the state surfaces through `build` (exactly the gate condition; a failing build modifies nothing) and `check` (the journal error exact over the non-14.10 findings, concerning the journal path; in each obstruction fixture exactly the gate condition — a workspace whose `build` is refused fails `build`'s validations (13.3), so 14.10's mismatch forms, the deleted emission and the never-generated derived files included, go unreported and neither whatever-validity form is staged (14.10) — concerning the offending component, `mdout` and `specs/A.mdx`), and through the gated reads (T13.3-3), never these answers; the passing-workspace refresh participation is T13.3-2's sweep and the failing-side answering discipline T11.2-1's (SPEC 11.2, 13.3, 13.4, 7.3, 12.1, 12.2, 14.13, 14.22, 14.10)",
+    "gate findings never attach: on an otherwise-valid pre-built workspace with a garbage journal line staged (14.13), separately with the `markdown.outDir` directory replaced by a plain file (14.22, the obstructed emit write path's one offending component), and separately, on a never-built workspace, with `markdown.outDir` naming the discovered finding-free spec source `specs/A.mdx` itself (14.22 whose one offending component is a discovered file, every emit destination lying below that plain file), `view` of the finding-free file — in the third fixture `specs/A.mdx` itself, a concerned path naming a domain file's own finding for condition 19 alone (11.2) — answers complete and finding-free at exit 0, writing nothing — the state surfaces through `build` (exactly the gate condition; a failing build modifies nothing) and `check` (in every fixture exactly the gate condition — a workspace failing `build`'s validations, a journal error and a refused write alike (13.3), leaves 14.10's mismatch forms, the deleted emission and the never-generated derived files included, unreported, and neither whatever-validity form is staged: the record, where a build wrote one, stays readable and every recorded derived path still generated (14.10) — concerning the journal path, and the offending component, `mdout` and `specs/A.mdx`), and through the gated reads (T13.3-3), never these answers; the passing-workspace refresh participation is T13.3-2's sweep and the failing-side answering discipline T11.2-1's (SPEC 11.2, 13.3, 13.4, 7.3, 12.1, 12.2, 14.13, 14.22, 14.10)",
   run: async (product) => {
     // --- Fixture 1: garbage journal line (14.13) --------------------------
     {
@@ -3964,11 +3971,15 @@ const T11_2_6 = defineProductTest({
             `journal included (SPEC 12.1, 6.1)`,
         );
 
-        // ...and through `check` (SPEC 12.2, 14.13): the gate condition
-        // counted exactly over the non-14.10 findings (the T12.2-2
-        // set-aside — the journal feeds canonical identities, SPEC 5.4, so
-        // whether graph data is verifiable beside an unreadable journal is
-        // underdetermined; no phantom non-staleness condition is accepted).
+        // ...and through `check` (SPEC 12.2, 14.13): exactly the gate
+        // condition. The workspace fails `build`'s validations (journal
+        // errors alike, SPEC 13.3), so 14.10's mismatch forms — per file
+        // and graph data — are undetectable and go unreported (SPEC 14.10),
+        // and the two forms reported whatever the validity have nothing
+        // here: the record the passing build wrote stays readable (no 14.23
+        // state) and every recorded derived path is still generated (no
+        // recorded-file form). No phantom staleness is accepted beside the
+        // journal error (the module comment).
         const checkContext = `${context} \`check --json\``;
         await assertLeavesUnchanged(
           workspace.root,
@@ -3985,17 +3996,17 @@ const T11_2_6 = defineProductTest({
               parseJsonStdout(result, checkContext),
               checkContext,
             ).findings;
-            const nonStale = findings.filter(
-              (finding) => finding.condition !== "14.10",
-            );
             assertConditionCounts(
-              nonStale,
+              findings,
               { "14.13": 1 },
-              `${checkContext} — the journal error is reported, and no ` +
-                `condition beside it save 14.10 (SPEC 12.2, 14.13)`,
+              `${checkContext} — exactly the journal error: the workspace ` +
+                `fails \`build\`'s validations, so 14.10's mismatch forms ` +
+                `go unreported, and neither whatever-validity form is ` +
+                `staged — the record readable, every recorded path still ` +
+                `generated (SPEC 12.2, 14.13, 13.3, 14.10)`,
             );
             assertFindingConcernsPath(
-              nonStale[0]!,
+              findings[0]!,
               JOURNAL_PATH,
               `${checkContext} — the journal condition's concerned path ` +
                 `(SPEC 14, 12.7)`,
