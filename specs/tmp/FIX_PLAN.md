@@ -176,6 +176,21 @@ plain, as the reach rule reads; every other listed `.mdx` site followed its
 body's first invocation and converted (eleven records); and T10.7-7's
 fully-resolved and payload arms, T10.7-9's audit arm, and T10.7-12's
 provenance and coverage arms join the reach observation above.
+As Task 16 found: a helper's staging is judged under every calling body
+(`section-12.0-ii.ts` 296, `makeStoryWorkspace`'s omega edit — T12.0-7 calls it
+twice and T12.0-9 once, each before its first invocation — stays plain); a
+byte-path staging converts exactly as a string path does when it follows the
+body's first invocation (T12.7-1's `specs/d<0xFF>/In.mdx` and `Tgt.mdx`, a
+record through the same `file()` overload, `isMdxPath` judging the trailing
+bytes) and stays plain when it precedes it (T11.2-3's, T11.5-3's, and
+T12.7-2's byte paths, each before its arm's gate `build`, the body's first);
+a module the site list names with only non-`.mdx` sites (`section-11.6.ts`:
+`.bin`, `.ts`, journal, and session paths) converts nothing; the conversion
+of a CONF-AVAIL-scoped test's site (T11.3-4's holder) left certification at
+144/33 as the rule predicts; and T12.0-8's coverage and impact arms,
+T12.0-9's corrupt, invalid, wrong-kind, and exclusion arms, T12.0-10's
+workspaces after its twin pair, and every §12.7 arm after each body's first
+join the reach observation above.
 
 **Appending to product-written bytes (T5.4-1's pattern):** an append is an `edit()`
 extending the file's unique tail (`REINTRO_TAIL`, `f`'s closing run, which the rename
@@ -194,17 +209,6 @@ verdict (`unshare … -- npx vitest run --config test/vitest.config.ts --project
 reached — accepted, Task 18's guard surfaces it when the product gets there).
 
 ## Tasks
-
-### Task 16 — Ledger conversion: §11, §12.0, §12.7
-
-`section-11.2.ts` (1569 `NU_PATH_BYTES, NU_SOURCE` — a byte path: convert if `.mdx` and
-after an invocation), `section-11.3.ts` (2039 `EMPTY_HOLDER_SOURCE`), `section-11.5.ts`
-(1464 byte path — read), `section-11.6.ts` (1651, 1768 — read; the session sites are
-not `.mdx`), `section-12.0-ii.ts` (296 `storyASource(...)`; 835, 1339
-`corruptWorkspace.file(` — read; 2313 `gitroSource(...)`), `section-12.7.ts` (895, 896,
-1654 byte paths — read; 1319 `UR_SOURCE`; 3053 the inline `'<S id="a">…'` literal).
-T11.2-4/T11.4-* are CONF-AVAIL in scope if any of their sites is touched — totals
-stay 144/33. **Checks:** as the preamble's.
 
 ### Task 17 — Ledger conversion: §12.1–§12.2
 
