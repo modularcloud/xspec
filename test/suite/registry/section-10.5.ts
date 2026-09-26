@@ -47,6 +47,15 @@
 //   so no read relies on the 13.3 refresh path (T13.3-*'s business); hash
 //   premises via `query node` bracket the edits that must isolate a single
 //   sensitivity (SPEC 5.5), as in §10.4.
+// - Staged-source records (helpers/staged-mdx.ts, S-9: judged before any
+//   product exists): every `.mdx` edit a body stages after its first product
+//   invocation — T10.5-1's extended- and chain-fixture edits, T10.5-4's
+//   deletion of v.e and v.f, T10.5-5's p.b edit, r.c revert, and both
+//   decomposition edits, T10.5-6's par.s edit — is the same template call
+//   moved to module level as a record. A staging that precedes a body's
+//   first `build` (each fixture's first edit, between `gitCommitAll` and
+//   that `build`) stays plain, as does every initial `files` entry (S-7's
+//   sweep reaches them against the stub).
 
 import type {
   ExportReport,
@@ -68,6 +77,7 @@ import {
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
@@ -475,6 +485,21 @@ function ySpec(cText: string): string {
   ].join("\n");
 }
 
+// T10.5-1's extended- and chain-fixture edits follow the worked change's
+// `build` (the body's first product invocation), so they are staged-source
+// records (helpers/staged-mdx.ts, S-9: judged before any product exists) —
+// the same template calls moved to module level; the worked change's own
+// edit precedes that `build` and stays plain, and every arm's initial file
+// is a plain `files` entry.
+const T10_5_1_X1_EDITED = stagedMdx(
+  "T10.5-1 specs/X.mdx with p's own text and the three leaves at v1 (extended fixture)",
+  x1Spec("Pee own v1.", "Cee text v1.", "Kay text v1.", "Ess text v1."),
+);
+const T10_5_1_Y_EDITED = stagedMdx(
+  "T10.5-1 specs/Y.mdx with a.b.c at v1 (chain fixture)",
+  ySpec("Cee text v1."),
+);
+
 const T10_5_1 = defineProductTest({
   id: "T10.5-1",
   title:
@@ -632,10 +657,7 @@ const T10_5_1 = defineProductTest({
         const prefix = "T10.5-1 extended fixture";
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        await workspace.file(
-          X1_FILE,
-          x1Spec("Pee own v1.", "Cee text v1.", "Kay text v1.", "Ess text v1."),
-        );
+        await workspace.file(X1_FILE, T10_5_1_X1_EDITED);
         await buildOk(
           product,
           workspace,
@@ -753,7 +775,7 @@ const T10_5_1 = defineProductTest({
         const prefix = "T10.5-1 chain fixture";
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        await workspace.file(Y_FILE, ySpec("Cee text v1."));
+        await workspace.file(Y_FILE, T10_5_1_Y_EDITED);
         await buildOk(product, workspace, `${prefix} \`build\` after the edit`);
         await createBaseSession(product, workspace, base, "s", prefix);
 
@@ -1615,6 +1637,15 @@ const O_DELETED_ORDER: readonly string[] = [
   `code-impact ${O_TWO}`,
 ];
 
+// The deletion of v.e and v.f (a manual edit, SPEC 6.6) follows the body's
+// first `build`, so it is a staged-source record (helpers/staged-mdx.ts,
+// S-9: judged before any product exists); the two pre-`build` edits stay
+// plain.
+const T10_5_4_A_WITHOUT_VEF = stagedMdx(
+  "T10.5-4 specs/A.mdx with the v.e and v.f sections deleted",
+  oASpec(false),
+);
+
 const T10_5_4 = defineProductTest({
   id: "T10.5-4",
   title:
@@ -1666,7 +1697,7 @@ const T10_5_4 = defineProductTest({
         // Delete the v.e and v.f sections (a manual edit, SPEC 6.6) — their
         // items' scope nodes become absent; membership is untouched (no
         // re-derivation happens without an updated resolve).
-        await workspace.file(O_A_FILE, oASpec(false));
+        await workspace.file(O_A_FILE, T10_5_4_A_WITHOUT_VEF);
         await buildOk(
           product,
           workspace,
@@ -1848,6 +1879,29 @@ function vSpec(gaOwn: string, withZ: boolean): string {
   ].join("\n");
 }
 
+// T10.5-5's later edits — sub-fixture A's p.b edit and r.c revert, and both
+// of sub-fixture B's — follow the body's first `build`, so they are
+// staged-source records (helpers/staged-mdx.ts, S-9: judged before any
+// product exists), the same template calls moved to module level;
+// sub-fixture A's first edit precedes that `build` and stays plain, and each
+// sub-fixture's initial file is a plain `files` entry.
+const T10_5_5_W_PB_EDITED = stagedMdx(
+  "T10.5-5 specs/W.mdx with p.b at v1 beside the p.a and r.c edits (re-derivation)",
+  wSpec("Paa text v1.", "Pab text v1.", "Arc text v1."),
+);
+const T10_5_5_W_RC_REVERTED = stagedMdx(
+  "T10.5-5 specs/W.mdx with r.c reverted to its baseline text (re-derivation)",
+  wSpec("Paa text v1.", "Pab text v1.", "Arc text v0."),
+);
+const T10_5_5_V_GA_EDITED = stagedMdx(
+  "T10.5-5 specs/V.mdx with g.a's own text at v1 (decomposition)",
+  vSpec("Gaa own v1.", false),
+);
+const T10_5_5_V_WITH_Z = stagedMdx(
+  "T10.5-5 specs/V.mdx with g.a.z authored after the splits (decomposition)",
+  vSpec("Gaa own v1.", true),
+);
+
 const T10_5_5 = defineProductTest({
   id: "T10.5-5",
   title:
@@ -1918,10 +1972,7 @@ const T10_5_5 = defineProductTest({
           probes,
           `${prefix} pre-edit capture`,
         );
-        await workspace.file(
-          W_FILE,
-          wSpec("Paa text v1.", "Pab text v1.", "Arc text v1."),
-        );
+        await workspace.file(W_FILE, T10_5_5_W_PB_EDITED);
         await buildOk(
           product,
           workspace,
@@ -2112,10 +2163,7 @@ const T10_5_5 = defineProductTest({
         );
 
         // Revert r.c to its baseline text: r's family stops generating.
-        await workspace.file(
-          W_FILE,
-          wSpec("Paa text v1.", "Pab text v1.", "Arc text v0."),
-        );
+        await workspace.file(W_FILE, T10_5_5_W_RC_REVERTED);
         await buildOk(
           product,
           workspace,
@@ -2189,7 +2237,7 @@ const T10_5_5 = defineProductTest({
         const prefix = "T10.5-5 decomposition";
         await workspace.gitInit();
         const base = await workspace.gitCommitAll("baseline");
-        await workspace.file(V_FILE, vSpec("Gaa own v1.", false));
+        await workspace.file(V_FILE, T10_5_5_V_GA_EDITED);
         await buildOk(product, workspace, `${prefix} \`build\` after the edit`);
         await createBaseSession(product, workspace, base, "s", prefix);
 
@@ -2280,7 +2328,7 @@ const T10_5_5 = defineProductTest({
         // edit): it enters only through the decomposition applied at
         // re-derivation — g.a.z itself is a changed node with the changed
         // ancestor g.a, so rule 1 skips it.
-        await workspace.file(V_FILE, vSpec("Gaa own v1.", true));
+        await workspace.file(V_FILE, T10_5_5_V_WITH_Z);
         await buildOk(
           product,
           workspace,
@@ -2404,6 +2452,14 @@ function c6Spec(kText: string, sText: string): string {
   ].join("\n");
 }
 
+// The par.s edit follows the body's first `build`, so it is a staged-source
+// record (helpers/staged-mdx.ts, S-9: judged before any product exists); the
+// par.k edit precedes it and stays plain.
+const T10_5_6_C_PAR_S_EDITED = stagedMdx(
+  "T10.5-6 specs/C.mdx with par.k and par.s both at v1 (the post-decoy edit)",
+  c6Spec("Kay text v1.", "Ess text v1."),
+);
+
 const T10_5_6 = defineProductTest({
   id: "T10.5-6",
   title:
@@ -2470,7 +2526,7 @@ const T10_5_6 = defineProductTest({
         // runs the generators against the recorded commit (c1), under which
         // par.k and par.s are both changed. Against the decoy `mark` or
         // HEAD (both c2), par.k's committed edit is invisible.
-        await workspace.file(C6_FILE, c6Spec("Kay text v1.", "Ess text v1."));
+        await workspace.file(C6_FILE, T10_5_6_C_PAR_S_EDITED);
         await buildOk(
           product,
           workspace,

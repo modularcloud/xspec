@@ -48,6 +48,12 @@
 //   entry-time relevant-hash values (captured through `query node` at the
 //   recorded moment) appearing among the record's string leaves — the same
 //   operationalizations as §10.2/§10.4.
+// - Staged-source records (helpers/staged-mdx.ts, S-9: judged before any
+//   product exists): every `.mdx` edit a body stages after its first product
+//   invocation — T10.6-2's deletion of f and e, T10.6-3's authoring and
+//   editing of p.b — is the same template call moved to module level as a
+//   record; every initial `files` entry stays plain (S-7's sweep reaches a
+//   body's first workspace against the stub).
 
 import type {
   ExportReport,
@@ -67,6 +73,7 @@ import {
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
@@ -723,6 +730,15 @@ const F_SOURCE = [
   "",
 ].join("\n");
 
+// The deletion of f and e (a manual edit, SPEC 6.6) follows the body's first
+// `build`, so it is a staged-source record (helpers/staged-mdx.ts, S-9:
+// judged before any product exists); each sub-fixture's initial files stay
+// plain `files` entries.
+const T10_6_2_B_WITHOUT_FE = stagedMdx(
+  "T10.6-2 specs/B.mdx with the f and e sections deleted",
+  b2Spec(false),
+);
+
 const T10_6_2 = defineProductTest({
   id: "T10.6-2",
   title:
@@ -816,7 +832,7 @@ const T10_6_2 = defineProductTest({
         // Delete the f and e sections (a manual edit, SPEC 6.6): membership
         // and blockedBy are untouched (no re-derivation without an updated
         // resolve), only the order and presence change.
-        await workspace.file(B2_FILE, b2Spec(false));
+        await workspace.file(B2_FILE, T10_6_2_B_WITHOUT_FE);
         await buildOk(
           product,
           workspace,
@@ -1026,6 +1042,19 @@ function rSpec(pbText: string | undefined): string {
   ].join("\n");
 }
 
+// Both p.b stagings — authoring the section, then editing it — follow the
+// body's first `build`, so they are staged-source records
+// (helpers/staged-mdx.ts, S-9: judged before any product exists); the
+// initial file (no p.b) stays a plain `files` entry.
+const T10_6_3_R_PB_V0 = stagedMdx(
+  "T10.6-3 specs/R.mdx with the new section p.b authored at v0",
+  rSpec("Pab text v0."),
+);
+const T10_6_3_R_PB_V1 = stagedMdx(
+  "T10.6-3 specs/R.mdx with p.b edited to v1",
+  rSpec("Pab text v1."),
+);
+
 const T10_6_3 = defineProductTest({
   id: "T10.6-3",
   title:
@@ -1064,7 +1093,7 @@ const T10_6_3 = defineProductTest({
       // records subtreeHash and metadataHash of each scope node; p.b is a
       // leaf, so its own two values are the record) — the graph does not
       // change between this build and the re-derivation below.
-      await workspace.file(R_FILE, rSpec("Pab text v0."));
+      await workspace.file(R_FILE, T10_6_3_R_PB_V0);
       await buildOk(
         product,
         workspace,
@@ -1263,7 +1292,7 @@ const T10_6_3 = defineProductTest({
       // rewritten — still reports the record written at its creation
       // (SPEC 10.2: reads report current as recorded; 10.4: invalidation
       // applies to resolved items alone).
-      await workspace.file(R_FILE, rSpec("Pab text v1."));
+      await workspace.file(R_FILE, T10_6_3_R_PB_V1);
       await buildOk(
         product,
         workspace,
