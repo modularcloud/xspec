@@ -86,6 +86,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -101,7 +102,7 @@ import {
 
 /** Stage a fresh workspace from files, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({ files });
@@ -898,8 +899,10 @@ function assertRootExclusionImpact(
 // vs "all", `coverage="none"` exclusion, and root exclusion. The boundary
 // group has no outgoing dependency edges, so nothing is covered and each
 // profile's uncovered set IS its required set (required = covered ∪
-// uncovered).
-const REQUIRED_SET_FILES: Readonly<Record<string, string>> = {
+// uncovered). It follows arm (a)'s invocations, so its `.mdx` sources are
+// staged-source records (helpers/staged-mdx.ts; S-9's before-any-product
+// clause), wrapped in place.
+const REQUIRED_SET_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -932,7 +935,9 @@ export default defineConfig({
   ]
 })
 `,
-  "tgt/T.mdx": `<S id="t">
+  "tgt/T.mdx": stagedMdx(
+    "T8-5 required-set fixture tgt/T.mdx",
+    `<S id="t">
 Internal parent behavior.
 
 <S id="t.leaf" tags="hot">
@@ -948,14 +953,21 @@ Untagged leaf behavior.
 </S>
 </S>
 `,
-  "bnd/B.mdx": `<S id="b">
+  ),
+  "bnd/B.mdx": stagedMdx(
+    "T8-5 required-set fixture bnd/B.mdx",
+    `<S id="b">
 Boundary node with no outgoing dependency edges.
 </S>
 `,
-  "oth/O.mdx": `<S id="o">
+  ),
+  "oth/O.mdx": stagedMdx(
+    "T8-5 required-set fixture oth/O.mdx",
+    `<S id="o">
 A node of a group that is neither target nor boundary.
 </S>
 `,
+  ),
 };
 
 // The b1 edit is staged after the root-exclusion arm's `build` and queries,
@@ -1312,8 +1324,10 @@ function normalizedReport(report: CoverageReport): unknown {
 }
 
 // The fully covered workspace for `--check`'s "0 otherwise" arm: one
-// profile, one required leaf, covered.
-const CHECK_GREEN_FILES: Readonly<Record<string, string>> = {
+// profile, one required leaf, covered. It follows the report workspace's
+// invocations, so its `.mdx` sources are staged-source records
+// (helpers/staged-mdx.ts; S-9's before-any-product clause), wrapped in place.
+const CHECK_GREEN_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1331,16 +1345,22 @@ export default defineConfig({
   ]
 })
 `,
-  "tgt/T.mdx": `<S id="only">
+  "tgt/T.mdx": stagedMdx(
+    "T8.2-1 covered fixture tgt/T.mdx",
+    `<S id="only">
 The only required leaf.
 </S>
 `,
-  "bnd/B.mdx": `import T from "../tgt/T.xspec"
+  ),
+  "bnd/B.mdx": stagedMdx(
+    "T8.2-1 covered fixture bnd/B.mdx",
+    `import T from "../tgt/T.xspec"
 
 <S id="covers" d={T.only}>
 Covers the only leaf.
 </S>
 `,
+  ),
 };
 
 const T8_2_1 = defineProductTest({

@@ -43,6 +43,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   SPECS_ONLY_CONFIG,
   assertImpactCategories,
@@ -58,7 +59,7 @@ import { assertSameJson, buildOk, expectExit } from "./support.js";
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -793,16 +794,23 @@ const D1_RENAMED_BLOCK = ['<S id="new">', "Doomed node text.", "</S>", ""].join(
 const D2_FILE = "specs/Twice.mdx";
 const D2_DM = "specs/Twice.mdx#dm";
 const D2_KEEP = "specs/Twice.mdx#keep2";
-const D2_BASELINE = [
-  '<S id="d0">',
-  "Doomed original text.",
-  "</S>",
-  "",
-  '<S id="keep2">',
-  "Kept sibling two text.",
-  "</S>",
-  "",
-].join("\n");
+// Arm 2 follows arm 1's invocations, so its baseline is a staged-source
+// record (helpers/staged-mdx.ts; S-9's before-any-product clause) — the
+// same expression, wrapped in place; arm 1's `D1_BASELINE`, the body's
+// first workspace, stays plain.
+const D2_BASELINE = stagedMdx(
+  "T9.3-3 arm 2 specs/Twice.mdx (the baseline)",
+  [
+    '<S id="d0">',
+    "Doomed original text.",
+    "</S>",
+    "",
+    '<S id="keep2">',
+    "Kept sibling two text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 const D2_RENAMED_BLOCK = ['<S id="dm">', "Doomed original text.", "</S>"].join(
   "\n",
 );

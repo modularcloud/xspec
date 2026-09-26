@@ -80,6 +80,7 @@ import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertSameJson,
   buildOk,
@@ -144,7 +145,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -865,8 +866,9 @@ function t2CovSpec(text: string): string {
 // T10.2-2's edits of built workspaces — the `--base` arm's v1 and v2 kid
 // texts, the audit arm's e1, the coverage arm's e1 leaf — are staged-source
 // records (helpers/staged-mdx.ts; S-9's before-any-product clause), the same
-// template calls moved to module level; each arm's initial file stays a
-// plain `files` entry.
+// template calls moved to module level; so are the audit and coverage arms'
+// initial files (e0), staged after the `--base` arm's invocations. The
+// `--base` arm's own v0 entry, the body's first workspace, stays plain.
 const T10_2_2_KID_V1 = stagedMdx(
   "T10.2-2 specs/A.mdx with the kid text at v1 (--base arm)",
   t2Spec("Kid text v1."),
@@ -875,9 +877,17 @@ const T10_2_2_KID_V2 = stagedMdx(
   "T10.2-2 specs/A.mdx with the kid text at v2 (--base arm)",
   t2Spec("Kid text v2."),
 );
+const T10_2_2_KID_E0 = stagedMdx(
+  "T10.2-2 specs/A.mdx with the kid text at e0 (audit arm)",
+  t2Spec("Kid text e0."),
+);
 const T10_2_2_KID_E1 = stagedMdx(
   "T10.2-2 specs/A.mdx with the kid text at e1 (audit arm)",
   t2Spec("Kid text e1."),
+);
+const T10_2_2_UNCOVERED_E0 = stagedMdx(
+  "T10.2-2 specs/U.mdx with the uncovered leaf at e0 (coverage arm)",
+  t2CovSpec("Uncovered leaf e0."),
 );
 const T10_2_2_UNCOVERED_E1 = stagedMdx(
   "T10.2-2 specs/U.mdx with the uncovered leaf at e1 (coverage arm)",
@@ -1031,7 +1041,7 @@ const T10_2_2 = defineProductTest({
     // --- audit arm: values of the current graph at item entry ---
     await withWorkspace(
       SPECS_ONLY_CONFIG,
-      { [T2_SPEC]: t2Spec("Kid text e0.") },
+      { [T2_SPEC]: T10_2_2_KID_E0 },
       async (workspace) => {
         await buildOk(product, workspace, "T10.2-2 audit arm `build` at e0");
         const atEntry = await queryNode(
@@ -1104,7 +1114,7 @@ const T10_2_2 = defineProductTest({
     // --- coverage arm: values of the current graph at item entry ---
     await withWorkspace(
       COVERAGE_CONFIG,
-      { [T2_COV_SPEC]: t2CovSpec("Uncovered leaf e0.") },
+      { [T2_COV_SPEC]: T10_2_2_UNCOVERED_E0 },
       async (workspace) => {
         await buildOk(product, workspace, "T10.2-2 coverage arm `build` at e0");
         const atEntry = await queryNode(

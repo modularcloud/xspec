@@ -131,6 +131,7 @@ import {
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertFindingConcernsPath,
@@ -197,14 +198,25 @@ const A_MDX_EDITED = stagedMdx(
   A_MDX.replace("Kid text.", "Kid text, edited."),
 );
 
-const CORE_FILES: Readonly<Record<string, string>> = {
+// The initial `specs/A.mdx` of every `CORE_FILES` / `COVERAGE_FILES`
+// workspace and of T10.1-5's: one staged-source record made from `A_MDX`
+// (the string stays for the staleness edit above), named with every
+// staging test — T10.1-1's determinism twins, T10.1-4's per-state
+// workspaces, and T10.1-6's occupancy twins follow their bodies' first
+// invocations (helpers/staged-mdx.ts; S-9's before-any-product clause).
+const A_MDX_STAGED = stagedMdx(
+  "T10.1-1/T10.1-2/T10.1-3/T10.1-4/T10.1-5/T10.1-6 specs/A.mdx",
+  A_MDX,
+);
+
+const CORE_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPECS_ONLY_CONFIG,
-  "specs/A.mdx": A_MDX,
+  "specs/A.mdx": A_MDX_STAGED,
 };
 
-const COVERAGE_FILES: Readonly<Record<string, string>> = {
+const COVERAGE_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": COVERAGE_CONFIG,
-  "specs/A.mdx": A_MDX,
+  "specs/A.mdx": A_MDX_STAGED,
 };
 
 const REVIEWS_DIR = ".xspec/reviews";
@@ -216,7 +228,7 @@ function sessionRel(name: string): string {
 
 /** Stage a fresh workspace, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({ files });
@@ -1270,7 +1282,7 @@ const T10_1_5 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        "specs/A.mdx": A_MDX,
+        "specs/A.mdx": A_MDX_STAGED,
         "specs/B.mdx": T10_1_5_B_VALID,
       },
       async (workspace) => {
