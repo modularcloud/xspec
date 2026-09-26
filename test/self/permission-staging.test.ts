@@ -15,11 +15,13 @@
 // fail with that same error by design (H-9: never a pass or a skip); CI runs
 // the self project unprivileged through .github/scripts/run-without-network.sh
 // and a root sandbox runs it under `unshare --map-user`/`--map-group`
-// (AGENTS.md). On any other platform every staging throws at once.
+// (AGENTS.md). On any other platform every staging throws at once: the guard
+// reads `process.platform` when called, so the platform arm below presents it
+// a foreign value — redefined for the arm's duration and restored on finish —
+// and runs on the Linux leg too, never skipped (H-9).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { expect, onTestFinished, test } from "vitest";
 import { HarnessAssertionError } from "../helpers/assertions.js";
@@ -381,19 +383,58 @@ test.runIf(onLinux)(
   },
 );
 
-test.runIf(!onLinux)(
-  "on a non-Linux platform every staging throws HarnessStagingError at once (E-1: the Linux leg)",
-  async () => {
-    const target = path.join(os.tmpdir(), "xspec-harness-nowhere");
-    for (const call of [
-      () => stageWriteRefusal(target),
-      () => stageWriteRefusalUnder(target),
-      () => stageReadRefusalOfFile(target),
-      () => stageReadRefusalOfDirectory(target),
-    ]) {
+// The platform guard (E-1): every staging consults `process.platform` when
+// called and, off the Linux leg, throws before touching the filesystem. The
+// arm presents the guard the Windows and macOS values in turn — the property
+// redefined (it is configurable, not writable) and restored on finish — over a
+// target inside a disposable workspace, the one place a bypassed guard could
+// stage; so it runs on every platform, the Linux leg included, and is never
+// marked skipped (H-9, E-2).
+const FOREIGN_PLATFORMS: readonly NodeJS.Platform[] = ["win32", "darwin"];
+
+/** The own descriptor of `process.platform`, reinstated as it was. */
+function platformDescriptor(): PropertyDescriptor {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+  if (descriptor === undefined) {
+    throw new Error("process.platform is not an own property of process");
+  }
+  return descriptor;
+}
+
+test("the platform guard (E-1): presented a non-Linux platform, every staging throws HarnessStagingError at once and touches nothing — run on every platform, never skipped (H-9)", async () => {
+  const workspace = await TestWorkspace.create();
+  onTestFinished(() => workspace.dispose());
+  const target = workspace.path("nowhere");
+  const holdingMode = await modeOf(workspace.root);
+  const original = platformDescriptor();
+  const restore = (): void => {
+    Object.defineProperty(process, "platform", original);
+  };
+  onTestFinished(restore);
+  const stagings = [
+    ["write-refusal", () => stageWriteRefusal(target)],
+    ["write-refusal-under", () => stageWriteRefusalUnder(target)],
+    ["read-refusal-of-file", () => stageReadRefusalOfFile(target)],
+    ["read-refusal-of-directory", () => stageReadRefusalOfDirectory(target)],
+  ] as const;
+  for (const platform of FOREIGN_PLATFORMS) {
+    Object.defineProperty(process, "platform", {
+      ...original,
+      value: platform,
+    });
+    expect(process.platform).toBe(platform);
+    for (const [mode, call] of stagings) {
       const error = await stagingError(call());
+      expect(error.mode).toBe(mode);
+      expect(error.path).toBe(target);
       expect(error.message).toContain("Linux leg");
-      expect(error.message).toContain(process.platform);
+      expect(error.message).toContain(platform);
     }
-  },
-);
+    restore();
+    expect(process.platform).toBe(original.value);
+  }
+  // At once: the target never came to be and the holding directory keeps
+  // its mode — no staging reached the filesystem.
+  expect(await outcome(fsp.stat(target))).toBe("ENOENT");
+  expect(await modeOf(workspace.root)).toBe(holdingMode);
+});
