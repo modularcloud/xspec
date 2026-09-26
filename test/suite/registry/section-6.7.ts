@@ -42,6 +42,7 @@ import { decodeImpactReport } from "../../helpers/adapters/index.js";
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -317,6 +318,14 @@ const impactArmSource = (midId: string): string =>
     "",
   ].join("\n");
 
+// The manual rename's staging follows the arm's first `build`, so it is a
+// ledger record (S-9's before-any-product clause; helpers/staged-mdx.ts) —
+// the same template call, moved to module level.
+const T6_7_1_RENAMED = stagedMdx(
+  "T6.7-1 impact arm: the direct rename of a.mid to a.neo",
+  impactArmSource("a.neo"),
+);
+
 // The originating nodes of the manual edit (SPEC 5.6: those carrying
 // `changed` — the deleted old node, the added new node, and the parent whose
 // own content lost one child reference and gained another).
@@ -360,6 +369,26 @@ function watchSource(ref: string): {
   return { text, prefix, construct };
 }
 
+// The validation arm's stagings after its first `build` — the manual rename
+// leaving both dependents naming the vacated identity, then both dependents
+// rewritten to the new one — are ledger records wrapping the builders' same
+// `.text` (S-9's before-any-product clause; helpers/staged-mdx.ts). The stale
+// builders' `prefix`/`construct` still pin the 14.5 findings' byte windows.
+const staleOrigin = originSource("b.neo", "b.mid");
+const staleWatch = watchSource("b.mid");
+const T6_7_1_STALE_ORIGIN = stagedMdx(
+  "T6.7-1 validation arm: origin renamed b.mid to b.neo, its same-file dependent still naming b.mid",
+  staleOrigin.text,
+);
+const T6_7_1_REWRITTEN_ORIGIN = stagedMdx(
+  "T6.7-1 validation arm: origin with its same-file dependent rewritten to b.neo",
+  originSource("b.neo", "b.neo").text,
+);
+const T6_7_1_REWRITTEN_WATCH = stagedMdx(
+  "T6.7-1 validation arm: the cross-file dependent rewritten to b.neo",
+  watchSource("b.neo").text,
+);
+
 const T6_7_1 = defineProductTest({
   id: "T6.7-1",
   title:
@@ -381,7 +410,7 @@ const T6_7_1 = defineProductTest({
 
         // The manual rename: only the one `id` attribute changes; the node's
         // text is byte-identical, tempting continuity inference (SPEC 6.7).
-        await workspace.file(I1_FILE, impactArmSource("a.neo"));
+        await workspace.file(I1_FILE, T6_7_1_RENAMED);
 
         await buildOk(
           product,
@@ -443,8 +472,6 @@ const T6_7_1 = defineProductTest({
     );
 
     // --- Validation arm: dependents fail 14.5 until rewritten ---
-    const staleOrigin = originSource("b.neo", "b.mid");
-    const staleWatch = watchSource("b.mid");
     await withWorkspace(
       {
         [V2_ORIGIN]: originSource("b.mid", "b.mid").text,
@@ -460,7 +487,7 @@ const T6_7_1 = defineProductTest({
         );
 
         // The manual rename, leaving both dependents naming the old identity.
-        await workspace.file(V2_ORIGIN, staleOrigin.text);
+        await workspace.file(V2_ORIGIN, T6_7_1_STALE_ORIGIN);
 
         const staleLabel = `${context}: \`build --json\` with the dependents still naming the vacated identity`;
         const findings = await buildFindings(product, workspace, staleLabel);
@@ -499,8 +526,8 @@ const T6_7_1 = defineProductTest({
 
         // "Until rewritten": manually retarget both dependents to the new
         // identity — validation passes again, and still no journal entry.
-        await workspace.file(V2_ORIGIN, originSource("b.neo", "b.neo").text);
-        await workspace.file(V2_WATCH, watchSource("b.neo").text);
+        await workspace.file(V2_ORIGIN, T6_7_1_REWRITTEN_ORIGIN);
+        await workspace.file(V2_WATCH, T6_7_1_REWRITTEN_WATCH);
         await buildOk(
           product,
           workspace,

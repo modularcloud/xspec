@@ -40,6 +40,7 @@ import { decodeImpactReport } from "../../helpers/adapters/index.js";
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, expectExit } from "./support.js";
@@ -929,6 +930,16 @@ const metaSource = (coverage: string, tags: string): string =>
     "",
   ].join("\n");
 
+// Arm 2's staging follows arm 1's `build` and `impact` (the body's first
+// product invocations), so it is a ledger record (S-9's before-any-product
+// clause; helpers/staged-mdx.ts) — the same template call, moved to module
+// level. Arm 1's staging precedes the body's first invocation and stays a
+// plain `file()` (S-7's sweep reaches it against the stub).
+const T5_6_4_TAGS_EDITED = stagedMdx(
+  "T5.6-4 arm 2: tags alpha beta to alpha gamma, coverage none",
+  metaSource("none", "alpha gamma"),
+);
+
 const T5_6_4 = defineProductTest({
   id: "T5.6-4",
   title:
@@ -969,7 +980,7 @@ const T5_6_4 = defineProductTest({
 
         // Arm 2: tags `alpha beta` → `alpha gamma` against the second
         // baseline, so the tags edit is the only difference.
-        await workspace.file(T4_META, metaSource("none", "alpha gamma"));
+        await workspace.file(T4_META, T5_6_4_TAGS_EDITED);
         await buildOk(
           product,
           workspace,
