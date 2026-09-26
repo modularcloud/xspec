@@ -217,6 +217,70 @@ two verbose logs, extracted and `diff`ed). Known state after Task 4: the S-9
 self-test 251 tests over 225 records (218 `T…`, 4 `E-6`, 3 `P-…`); self project
 22 files, 2391 passed, 0 skipped under the namespace (~137 s; 2339 + the 52 record tests); certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
 
+**Resolved by Task 5 (the §2 modules; the first commit converts, the second
+records).** Eighty-eight records: `section-2.1.ts` 28 — `VALID_BASE_FILES`'s
+`specs/BASE.mdx` as ONE record named with both callers
+(`"T2.1-2/T2.1-3 specs/BASE.mdx"`, spread into T2.1-2's first workspace too);
+a runner two tests drive over two arm tables (`runInvalidImportArm` over
+`INVALID_SPECIFIER_ARMS` and `INVALID_BINDING_ARMS`) gets a staging-table
+function taking the test ID — `invalidImportStagings(testId, arms)` pairs each
+row with its `specs/A.mdx` record (`arm.importLine + IMPORTING_FILE_REST`),
+one computed table per test, the runner taking the pair; the two
+`docs/EXTRA.mdx` entries wrapped in the arm rows (the code-group one's
+`export {};` derives — an ESM block, judged well-formed at creation before the
+conversion too); the lexical importers as `LEXICAL_IMPORTER_FILES`
+(`Object.fromEntries` over the table, once at load); the duplicate-binding rows
+composed by `duplicateBindingArm(name, separator)` carrying
+`{ allowances: ["duplicate-import-binding"] }`, so the path left the workspace
+declaration and `withWorkspace`'s `mdx` parameter went with its one caller;
+B1/B2 one record each staged in both arms; T2.1-3's two-names arm and T2.1-5's
+`SELF_IMPORT_SOURCE` wrapped in place. `section-2.2-2.3.ts` 10 — T2.3-3's two
+form tables through `t233ArmStagings(kind, sectionId, forms)`, each row
+carrying the body's former `arm` label verbatim (`` `T2.3-3 ${kind}
+${JSON.stringify(form)} (${label})` `` plus the path; a JSON-stringified form
+spells LF as `\n`, so no raw control characters) so the diagnoses are
+unchanged. `section-2.4.ts` 20 — where one table mixes well-formed and
+deferred-unparseable arms (T2.4-2), the computed table is a discriminated
+union: `DYNAMIC_FORM_STAGINGS`'s well-formed member carries `records: { d,
+text }`, its TypeScript-only member `unparseableAt`, the body branching on
+`entry.records !== undefined` (no non-null assertion, the deferred stagings
+staying plain); a string map an `UnparseableStaging` export spreads
+(`DYNAMIC_ARM_BASE_FILES`, typed `Record<string, string>` until Task 22) keeps
+its string form and the record is made FROM it (`DYNAMIC_ARM_BASE_RECORDS`) —
+the well-formed sibling beside a deferred unparseable staging converts NOW, so
+a task's expected remainders are the unparseable entries alone; T2.4-3's rows
+through `arityArm(name, construct)`; T2.4-4's `SEGMENT_EXACT_BASE`,
+`T2_4_4_TEXT_SOURCE`, `T2_4_4_POSITIVE_SOURCE` wrapped in place
+(`T2_4_4_D_SOURCE`, the first workspace's, plain). `section-2.5-2.6.ts` 6 —
+`INVALID_COVERAGE_STAGINGS` (the five `coverageStaging` calls, once at load)
+and `T2_6_3_SELECT_SOURCE`. `section-2.7.ts` 24 — `FOREIGN_CONSTRUCT_STAGINGS`
+and `INVALID_PROP_STAGINGS` (computed tables over the literal arm tables), the
+three enclosed-construct arms through `enclosedConstructArm(recordName, parts)`
+(`EnclosedConstructArm extends EnclosedConstructArmParts` with
+`source: StagedMdx`; a module-level arm constant that a runner taking the test
+ID stages is named for the test whose body stages it — T2.7-4's expression arm
+`"T2.7-4 …"`), `REPEATED_UNKNOWN_SOURCE`, `T2_7_3_DOUBLE_QUOTED`. The
+valueless-`tags` arm's record holds the same bytes as the exported
+`VALUELESS_TAGS_FIXTURE.source` that T11.4-3 stages (`section-11.4.ts`'s
+`SHARED`): Task 18 reuses and renames it (`"T2.7-3/T11.4-3 …"`) if that
+staging is post-invocation. Left plain: every body's first workspace (first
+rows of converted tables converted uniformly: T2.1-3's first binding arm,
+T2.3-3's first embedding form, T2.4-2's first form in `d`, T2.4-3's zero-argument
+arm, T2.7-1's first foreign construct, T2.7-3's first invalid prop); deferred to
+Task 22, plain and declared `unparseable`: T2.3-3's `{text("a") text("b")}`,
+T2.4-2's two TypeScript-only forms in both positions, T2.7-3's `{...a, b}`,
+T2.7-4's five unparseable comment arms. Checks: the sites hook logged the
+task's 22 (test, path) pairs (107 lines, 25 distinct with the declaration
+column) before and exactly the two reached remainders after (T2.4-2's and
+T2.7-3's `specs/A.mdx` `"unparseable"`; T2.3-3's and T2.7-4's lie behind their
+failures); the sha256 capture over the five files (273 writes, compared
+sorted) identical; 29 tests, 21 pass and 8 fail — T2.1-2, T2.3-3, T2.4-2,
+T2.4-5, T2.5-3, T2.6-1, T2.7-3, T2.7-4 — with identical diagnoses. Known state
+after Task 5: the S-9 self-test 339 tests over 313 records (306 `T…`, 4 `E-6`,
+3 `P-…`); self project 22 files, 2479 passed, 0 skipped under the
+namespace (~137 s; 2391 + the 88 record tests); certification
+144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -383,35 +447,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 5 — Initial-file conversion: §2 (`section-2.1.ts`, `section-2.2-2.3.ts`, `section-2.4.ts`, `section-2.5-2.6.ts`, `section-2.7.ts`)
-
-**Workspace creations to judge:** 2.1 (11), 2.2-2.3 (11), 2.4 (10), 2.5-2.6 (9),
-2.7 (10).
-**Reachable sites (the instrumented run):**
-- `section-2.1.ts` — T2.1-2 (7): docs/EXTRA.mdx specs/A.mdx specs/BASE.mdx specs/P1.mdx specs/P2.mdx specs/P3.mdx specs/P4.mdx
-- `section-2.1.ts` — T2.1-3 (4): specs/A.mdx specs/B1.mdx specs/B2.mdx specs/BASE.mdx
-- `section-2.1.ts` — T2.1-5 (1): specs/SELF.mdx
-- `section-2.2-2.3.ts` — T2.3-3 (1): specs/A.mdx
-- `section-2.4.ts` — T2.4-2 (2): specs/A.mdx specs/BASE.mdx
-- `section-2.4.ts` — T2.4-3 (1): specs/A.mdx
-- `section-2.4.ts` — T2.4-4 (2): specs/A.mdx specs/BASE.mdx
-- `section-2.5-2.6.ts` — T2.5-3 (1): specs/A.mdx
-- `section-2.5-2.6.ts` — T2.6-3 (1): specs/A.mdx
-- `section-2.7.ts` — T2.7-1 (1): specs/A.mdx
-- `section-2.7.ts` — T2.7-3 (1): specs/A.mdx
-**Failing here:** T2.1-2, T2.3-3, T2.4-2, T2.4-5, T2.5-3, T2.6-1, T2.7-3, T2.7-4.
-**Certification scope:** T2.6-1, T2.6-2 (CONF-VALID) — run the self project; 144/33/0/0.
-**Notes.** T2.1-3 names its S-9 allowance (two imports binding one identifier in one
-ESM block): the record carries `{ allowances: [...] }` and the path leaves
-`mdx.allowances`. DEFERRED to Task 22 (leave plain, list as expected remainders of the
-sites check): the four `UnparseableStaging` exports and every entry spread from their
-`.files` — `T2_3_3_UNPARSEABLE_STAGING` (`section-2.2-2.3.ts` ~844; spread at ~1099),
-`T2_4_2_UNPARSEABLE_STAGINGS` (`section-2.4.ts` ~511; ~620), `T2_7_3_SPREAD_UNPARSEABLE_STAGING`
-(`section-2.7.ts` ~1406; ~1503), `T2_7_4_UNPARSEABLE_STAGINGS` (~2039). Every other
-post-invocation entry converts here.
-**Checks.** Recipes 1–5 over `section-2.1.test`, `section-2.2-2.3.test`,
-`section-2.4.test`, `section-2.5-2.6.test`, `section-2.7.test`.
 
 ### Task 6 — Initial-file conversion: §3–§4 (`section-3.ts`, `section-4.ts`, `section-4.1-4.2.ts`, `section-4.3-4.4.ts`, `section-4.5.ts`, `section-4.6.ts`)
 
