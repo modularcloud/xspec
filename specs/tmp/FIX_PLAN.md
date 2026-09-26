@@ -191,6 +191,24 @@ of a CONF-AVAIL-scoped test's site (T11.3-4's holder) left certification at
 T12.0-9's corrupt, invalid, wrong-kind, and exclusion arms, T12.0-10's
 workspaces after its twin pair, and every §12.7 arm after each body's first
 join the reach observation above.
+As Task 17 found: a body reading its own fixture's bytes back from the
+workspace after a `build` to stage them under a new path
+(`section-12.1-12.2.ts` 597, T12.1-3's manual rename of specs/A.mdx to
+specs/C.mdx) hoists to a record over the fixture constant — `build` writes
+derived files and graph data only, never a source (SPEC 12.1), which the
+arm now pins as its staging premise (`assertBytesEqual` of the current
+bytes against the record's `.source`) before staging the record, so a
+product deviation stays a diagnosed failure rather than a silently
+different copy; three of the site list's four `— read` annotations (879,
+1024, 1124) marked inline `.mdx` literals staged after the family
+workspace's `build` and converted, the fourth (1345) the session file; a
+constant staged back by three tests (`FAILED_BUILD_VALID_SOURCE`, restored
+after an edit under T12.1-4, T12.2-2, and T12.2-3) is one record named
+with all three IDs, its `.source` filling eight initial `files` entries,
+`withWorkspace` and the fixture tables widened to `FileContents` for it;
+no §12.1/§12.2 test is in certification scope (144/33 unchanged); and
+T12.2-2's family workspaces after the first (families 2–9) and T12.2-4's
+arms (b)–(d) join the reach observation above.
 
 **Appending to product-written bytes (T5.4-1's pattern):** an append is an `edit()`
 extending the file's unique tail (`REINTRO_TAIL`, `f`'s closing run, which the rename
@@ -209,16 +227,6 @@ verdict (`unshare … -- npx vitest run --config test/vitest.config.ts --project
 reached — accepted, Task 18's guard surfaces it when the product gets there).
 
 ## Tasks
-
-### Task 17 — Ledger conversion: §12.1–§12.2
-
-`section-12.1-12.2.ts` (597 `sourceBytes` — computed in the body: hoist to a record if
-it derives from module constants alone; 688, 706, 878, 1160, 1534 the `FAILED_BUILD_*`
-constants; 879, 1024, 1124, 1345 — read; 1504, 1559 `editedSource` — computed in the
-body: hoist; 1809 `T12_2_4_L_INVALID` (a top-level helper) and 1934 `T12_2_4_L_VALID`;
-the tampered generated-module, link-target, journal, and config sites are not
-`.mdx`). CONF-VALID/CONF-MD in-scope tests may live here — totals stay 144/33.
-**Checks:** as the preamble's.
 
 ### Task 18 — The undeclared-staging guard (last: after every conversion)
 
