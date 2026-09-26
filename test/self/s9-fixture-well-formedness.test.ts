@@ -35,6 +35,7 @@ import {
 import { HarnessStagingError } from "../helpers/permissions.js";
 import { TestWorkspace, type WorkspaceDecl } from "../helpers/workspace.js";
 import { REMOVALS_SOURCE, T3_7_SOURCE } from "../suite/registry/section-3.js";
+import { P1_FORM_VECTORS } from "../suite/registry/section-16-p1.js";
 import { P2_P3_FORM_VECTORS } from "../suite/registry/section-16-p2-p3.js";
 import { P4_FORM_VECTORS } from "../suite/registry/section-16-p4.js";
 import { P5_FORM_VECTORS } from "../suite/registry/section-16-p5-p6.js";
@@ -375,6 +376,25 @@ describe("S-9: every decorated form the P-5 section-move staging composes derive
     );
   });
   test.each(P5_FORM_VECTORS)("%s", (_name, source) => {
+    expectDerives(source);
+  });
+});
+
+// The generators S-9's letter leaves to the per-draw check alone get the
+// same fixed vector set (the §16 preamble: every generated workspace is
+// valid by construction, S-9 verifying before any product exists that every
+// composed form derives): P-1's accepted and rejected draws alike — every
+// alphabet character, the forbidden-name shapes, the `.`-chains, single
+// line terminators inside a value, the 2.6 whitespace runs — as segment
+// draws and as `tags` values in every admissible quote kind.
+describe("S-9: every form the P-1 segment and tags stagings compose derives", () => {
+  test("the vector set is non-empty and uniquely named", () => {
+    expect(P1_FORM_VECTORS.length).toBeGreaterThan(400);
+    expect(new Set(P1_FORM_VECTORS.map(([name]) => name)).size).toBe(
+      P1_FORM_VECTORS.length,
+    );
+  });
+  test.each(P1_FORM_VECTORS)("%s", (_name, source) => {
     expectDerives(source);
   });
 });

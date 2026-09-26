@@ -108,10 +108,26 @@
 //     them one at a time. A prefix of a hazard-free draw is hazard-free (its
 //     terminator pairs are a subset), so the ancestor `id`s a `.`-bearing
 //     draw stages are covered by the repair of the whole draw.
+//
+// S-9 (TEST-SPEC 17; the §16 preamble: each draw is checked before the
+// product is driven on it): accepted and rejected draws alike derive under
+// the stock MDX 3 grammar by construction — every draw sits inside a quoted
+// attribute value of a flow tag, holding no quote of its own kind and no
+// blank line (above) — so each draw's staged source is judged by the
+// harness's derivability check before `build` sees it
+// (helpers/property.ts `mdxSources`, fed from the same pure staging
+// functions the bodies stage from), and the fixed vector set
+// `P1_FORM_VECTORS` below — every alphabet character alone and inside a
+// value, the forbidden-name shapes, the ancestor chains a `.`-bearing draw
+// spells (empty segments included), single line terminators and repaired
+// blank-line hazards inside a value, and the 2.6 whitespace runs — each
+// staged as a segment draw and as a `tags` value in every admissible quote
+// kind, is judged before any product exists
+// (test/self/s9-fixture-well-formedness.test.ts).
 
 import type { Finding } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
-import type { Choices, Gen } from "../../helpers/property.js";
+import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
@@ -529,14 +545,17 @@ const affixedForbiddenName: Gen<string> = (choices) => {
  * rule is an exact-string match, so the flip is valid. `$` has no letter and
  * stays forbidden; the oracle decides either way.
  */
-const caseFlippedForbiddenName: Gen<string> = (choices) => {
-  const name = choices.pick(FORBIDDEN_NAMES);
+const caseFlippedForbiddenName: Gen<string> = (choices) =>
+  upcaseFirstLetter(choices.pick(FORBIDDEN_NAMES));
+
+/** The flip itself: the first a–z letter upcased; a name without one unchanged. */
+function upcaseFirstLetter(name: string): string {
   const index = [...name].findIndex((ch) => ch >= "a" && ch <= "z");
   if (index < 0) return name;
   return (
     name.slice(0, index) + name[index]!.toUpperCase() + name.slice(index + 1)
   );
-};
+}
 
 /**
  * The alphabet's 1.4-valid segment characters at their alphabet weights —
@@ -681,6 +700,28 @@ function segmentSource(segments: readonly string[], quote: string): string {
   return `${opening}Section under test.${LF}${closing}`;
 }
 
+/** The source staging a `tags` value: one section `sec` carrying it. */
+function tagsSource(value: string, quote: string): string {
+  return (
+    `<S id="sec" tags=${quote}${value}${quote}>${LF}` +
+    `Tagged section under test.${LF}</S>${LF}`
+  );
+}
+
+// S-9's per-draw check (helpers/property.ts `mdxSources`): the one source
+// each property stages, composed by the same pure functions the bodies
+// stage from (module header).
+
+function stagedSegmentSources(draw: string): DrawSource[] {
+  return [
+    ["specs/A.mdx", segmentSource(splitSegments(draw), quoteKindFor(draw))],
+  ];
+}
+
+function stagedTagsSources(value: string): DrawSource[] {
+  return [["specs/A.mdx", tagsSource(value, quoteKindFor(value))]];
+}
+
 /** The P-1 segment property body: accepted by `build` iff every segment is 1.4-valid. */
 async function assertSegmentAcceptance(
   product: ProductBinding,
@@ -728,9 +769,7 @@ async function assertTagsAcceptance(
 ): Promise<void> {
   const verdict = tagsVerdict(value);
   const quote = quoteKindFor(value);
-  const source =
-    `<S id="sec" tags=${quote}${value}${quote}>${LF}` +
-    `Tagged section under test.${LF}</S>${LF}`;
+  const source = tagsSource(value, quote);
   await inStagedWorkspace(source, async (workspace) => {
     if (verdict.accepted) {
       await buildOk(
@@ -751,6 +790,121 @@ async function assertTagsAcceptance(
     assertRejectionFindings(findings, ["14.4"], context);
   });
 }
+
+// --- S-9's fixed form-vector set (module header) -------------------------------
+
+/** The line terminators a value may hold singly (the no-blank-line rule). */
+const FORM_TERMINATORS: ReadonlyArray<
+  readonly [name: string, terminator: string]
+> = [
+  ["lone LF", LF],
+  ["lone CR", CR],
+  ["CRLF", CR + LF],
+];
+
+/**
+ * The values the generators' shapes compose, by family: every alphabet
+ * character alone and inside a value, the forbidden-name shapes (exact, at
+ * either level of a chain, case-flipped), `.`-joined chains and the empty
+ * segments a leading, trailing, or doubled dot yields, single line
+ * terminators inside a value with the repaired blank-line hazards, and the
+ * 2.6 whitespace separators, runs, and zero-token values.
+ */
+const P1_FORM_VALUES: ReadonlyArray<readonly [family: string, value: string]> =
+  [
+    ...ALPHABET.flatMap(([, character]): (readonly [string, string])[] => [
+      ["alphabet character alone", character],
+      ["alphabet character inside a value", `a${character}b`],
+    ]),
+    ...FORBIDDEN_NAMES.flatMap((name): (readonly [string, string])[] => [
+      ["forbidden name", name],
+      ["forbidden name at the first level of a chain", `${name}${DOT}a`],
+      ["forbidden name at the last level of a chain", `a${DOT}${name}`],
+      ...(upcaseFirstLetter(name) === name
+        ? []
+        : [["case-flipped forbidden name", upcaseFirstLetter(name)] as const]),
+    ]),
+    ["chain of two valid pieces", `ab${DOT}c1`],
+    ["chain of four valid pieces", `a${DOT}b-${DOT}_9${DOT}zA`],
+    ["leading dot (an empty first segment)", `${DOT}a`],
+    ["trailing dot (an empty last segment)", `a${DOT}`],
+    ["doubled dot (an empty middle segment)", `a${DOT}${DOT}b`],
+    ...FORM_TERMINATORS.flatMap(
+      ([name, terminator]): (readonly [string, string])[] => [
+        [`${name} between characters`, `a${terminator}b`],
+        [`${name} leading`, `${terminator}a`],
+        [`${name} trailing`, `a${terminator}`],
+        [`${name} before an indented continuation`, `a${terminator} ${TAB}b`],
+        [
+          `${name} doubled, repaired`,
+          withoutBlankLineHazards(`a${terminator}${terminator}b`),
+        ],
+        [
+          `${name} around a spaces-only line, repaired`,
+          withoutBlankLineHazards(`a${terminator} ${terminator}b`),
+        ],
+        [
+          `${name} alone, doubled and repaired`,
+          withoutBlankLineHazards(`${terminator}${terminator}`),
+        ],
+      ],
+    ),
+    ["mixed terminators between characters", `a${LF}b${CR}c${CR}${LF}d`],
+    ["lone LF then lone CR, repaired", withoutBlankLineHazards(`a${LF}${CR}b`)],
+    ...WHITESPACE_CHARACTERS.flatMap((ws): (readonly [string, string])[] => {
+      const name = codePointName(ws.codePointAt(0)!);
+      return [
+        [`${name} as a separator`, `a${ws}b`],
+        [`${name} leading and trailing`, `${ws}a${ws}`],
+        [`${name} alone (zero tokens)`, ws],
+      ];
+    }),
+    ["a whitespace run as a separator", `a${SPACE}${TAB}${VT}${FF}b`],
+    ["a whitespace run alone (zero tokens)", `${SPACE}${SPACE}${TAB}`],
+    ["the empty value (zero tokens)", ""],
+  ];
+
+/**
+ * The quote kinds a value admits (module header): the other kind for a
+ * value holding one quote character, either kind for one holding neither —
+ * `quoteKindFor`'s choice first.
+ */
+function admissibleQuoteKinds(value: string): readonly string[] {
+  if (containsBothQuoteKinds(value)) return [];
+  const chosen = quoteKindFor(value);
+  if (value.includes(DOUBLE_QUOTE) || value.includes(SINGLE_QUOTE)) {
+    return [chosen];
+  }
+  return [chosen, chosen === DOUBLE_QUOTE ? SINGLE_QUOTE : DOUBLE_QUOTE];
+}
+
+function quoteKindName(quote: string): string {
+  return quote === DOUBLE_QUOTE ? "double" : "single";
+}
+
+/**
+ * The fixed form-vector set of the P-1 generators (S-9): each value above
+ * staged as a segment draw (its `.`-split spelling the ancestor chain) and
+ * as a `tags` value, in every admissible quote kind — name and source.
+ */
+export const P1_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = P1_FORM_VALUES.flatMap(([family, value]) =>
+  admissibleQuoteKinds(value).flatMap(
+    (quote): (readonly [string, string])[] => [
+      [
+        `segment draw, ${family}: ${renderCodePoints(value)}, ` +
+          `${quoteKindName(quote)} quotes`,
+        segmentSource(splitSegments(value), quote),
+      ],
+      [
+        `tags value, ${family}: ${renderCodePoints(value)}, ` +
+          `${quoteKindName(quote)} quotes`,
+        tagsSource(value, quote),
+      ],
+    ],
+  ),
+);
 
 // --- the registered property test ----------------------------------------------
 
@@ -775,7 +929,7 @@ const P_1 = defineProductTest({
       async (draw) => {
         await assertSegmentAcceptance(product, draw);
       },
-      { render: renderCodePoints },
+      { render: renderCodePoints, mdxSources: stagedSegmentSources },
     );
     await checkProperty(
       "P-1 tag validity",
@@ -783,7 +937,7 @@ const P_1 = defineProductTest({
       async (value) => {
         await assertTagsAcceptance(product, value);
       },
-      { render: renderCodePoints },
+      { render: renderCodePoints, mdxSources: stagedTagsSources },
     );
   },
 });
