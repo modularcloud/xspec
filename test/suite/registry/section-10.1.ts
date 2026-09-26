@@ -85,6 +85,13 @@
 // - The concerned path of the code-less existing-name refusal and of the
 //   condition-21 finding reported in its place is pinned nowhere (SPEC 10.7,
 //   14.21), so only their identity, count, and empty locations are asserted.
+//
+// Sources staged after a body's first product invocation — the stale arm's
+// and stale twins' edited `specs/A.mdx` (T10.1-1, T10.1-6) and T10.1-5's
+// invalidating `specs/B.mdx` — are staged-source records
+// (helpers/staged-mdx.ts, S-9: judged before any product exists); the other
+// stagings here are session files and occupants, which S-9 does not judge,
+// and initial workspace files.
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -121,6 +128,7 @@ import {
   diffSnapshots,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -178,9 +186,16 @@ const A_MDX = [
   "",
 ].join("\n");
 
-// The staleness edit for T10.1-1: same structure, different leaf text — the
-// graph data written by the earlier `build` no longer matches the sources.
-const A_MDX_EDITED = A_MDX.replace("Kid text.", "Kid text, edited.");
+// The staleness edit for T10.1-1's stale arm and T10.1-6's stale twins: same
+// structure, different leaf text — the graph data written by the earlier
+// `build` no longer matches the sources. Every staging of it follows the
+// body's `build`, so it is one staged-source record shared by both tests
+// (helpers/staged-mdx.ts; S-9's before-any-product clause) — the same
+// expression, moved into the record.
+const A_MDX_EDITED = stagedMdx(
+  "T10.1-1/T10.1-6 specs/A.mdx with a.k's text edited (the staleness edit)",
+  A_MDX.replace("Kid text.", "Kid text, edited."),
+);
 
 const CORE_FILES: Readonly<Record<string, string>> = {
   "xspec.config.ts": SPECS_ONLY_CONFIG,
@@ -1224,7 +1239,14 @@ const T10_1_4 = defineProductTest({
 // source — is never touched, so the gate alone flips every subcommand's
 // behavior.
 const T10_1_5_B_VALID = ['<S id="b">', "Beta text.", "</S>", ""].join("\n");
-const T10_1_5_B_INVALID = ["<S>", "Beta text.", "</S>", ""].join("\n");
+// The invalidating edit is staged after the body's `build` and `review
+// create`, so it is a staged-source record (helpers/staged-mdx.ts; S-9's
+// before-any-product clause): well-formed MDX — the file derives; only 14.1
+// fails it.
+const T10_1_5_B_INVALID = stagedMdx(
+  "T10.1-5 specs/B.mdx with the section's id removed (derives; fails 14.1)",
+  ["<S>", "Beta text.", "</S>", ""].join("\n"),
+);
 
 // T10.1-4's shape-independent garbage-bytes corruption: staged directly, no
 // assumed session layout — the bytes parse as no JSON document (SPEC 10.1,

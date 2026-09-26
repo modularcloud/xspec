@@ -48,6 +48,13 @@
 // - Fixture hash captures run right after an explicit `build` at each staged
 //   moment, so no read relies on the 13.3 refresh path except where the
 //   TEST-SPEC text stages it (T10.2-3 reads directly after the deletion).
+//
+// Sources staged after a body's first product invocation — every edit of a
+// built workspace's spec source in T10.2-2, T10.2-4, T10.3-1, and T10.3-2 —
+// are staged-source records (helpers/staged-mdx.ts, S-9: judged before any
+// product exists), the same template calls moved to module level; T10.2-1's
+// edit precedes its first `build` (staged between `gitCommitAll` and the
+// build), so S-7's sweep reaches it against the stub and it stays plain.
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -70,6 +77,7 @@ import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -854,6 +862,28 @@ function t2CovSpec(text: string): string {
   return ['<S id="u">', text, "</S>", ""].join("\n");
 }
 
+// T10.2-2's edits of built workspaces — the `--base` arm's v1 and v2 kid
+// texts, the audit arm's e1, the coverage arm's e1 leaf — are staged-source
+// records (helpers/staged-mdx.ts; S-9's before-any-product clause), the same
+// template calls moved to module level; each arm's initial file stays a
+// plain `files` entry.
+const T10_2_2_KID_V1 = stagedMdx(
+  "T10.2-2 specs/A.mdx with the kid text at v1 (--base arm)",
+  t2Spec("Kid text v1."),
+);
+const T10_2_2_KID_V2 = stagedMdx(
+  "T10.2-2 specs/A.mdx with the kid text at v2 (--base arm)",
+  t2Spec("Kid text v2."),
+);
+const T10_2_2_KID_E1 = stagedMdx(
+  "T10.2-2 specs/A.mdx with the kid text at e1 (audit arm)",
+  t2Spec("Kid text e1."),
+);
+const T10_2_2_UNCOVERED_E1 = stagedMdx(
+  "T10.2-2 specs/U.mdx with the uncovered leaf at e1 (coverage arm)",
+  t2CovSpec("Uncovered leaf e1."),
+);
+
 /**
  * Premises and expectations shared by the three T10.2-2 arms: `entry` is the
  * moment whose values `baseline` must hold; `others` are the later moments
@@ -910,7 +940,7 @@ const T10_2_2 = defineProductTest({
           "T10.2-2 --base arm, baseline moment (v0)",
         );
 
-        await workspace.file(T2_SPEC, t2Spec("Kid text v1."));
+        await workspace.file(T2_SPEC, T10_2_2_KID_V1);
         await buildOk(product, workspace, "T10.2-2 --base arm `build` at v1");
         const atCreate = await queryNode(
           product,
@@ -942,7 +972,7 @@ const T10_2_2 = defineProductTest({
         );
 
         // Further edit after the item entered the session.
-        await workspace.file(T2_SPEC, t2Spec("Kid text v2."));
+        await workspace.file(T2_SPEC, T10_2_2_KID_V2);
         await buildOk(product, workspace, "T10.2-2 --base arm `build` at v2");
         const afterEdit = await queryNode(
           product,
@@ -1031,7 +1061,7 @@ const T10_2_2 = defineProductTest({
           "T10.2-2 audit arm, first read",
         );
 
-        await workspace.file(T2_SPEC, t2Spec("Kid text e1."));
+        await workspace.file(T2_SPEC, T10_2_2_KID_E1);
         await buildOk(product, workspace, "T10.2-2 audit arm `build` at e1");
         const afterEdit = await queryNode(
           product,
@@ -1104,7 +1134,7 @@ const T10_2_2 = defineProductTest({
           "T10.2-2 coverage arm, first read",
         );
 
-        await workspace.file(T2_COV_SPEC, t2CovSpec("Uncovered leaf e1."));
+        await workspace.file(T2_COV_SPEC, T10_2_2_UNCOVERED_E1);
         await buildOk(product, workspace, "T10.2-2 coverage arm `build` at e1");
         const afterEdit = await queryNode(
           product,
@@ -1337,6 +1367,23 @@ function t4SpecWithoutK(controlText: string): string {
   ].join("\n");
 }
 
+// T10.2-4's edits of the built workspace — both leaves at v2, then v3, then
+// the a.k section deleted — are staged-source records
+// (helpers/staged-mdx.ts; S-9's before-any-product clause), the same template
+// calls moved to module level.
+const T10_2_4_V2 = stagedMdx(
+  "T10.2-4 specs/A.mdx with both leaves at v2",
+  t4Spec("Resolved kid v2.", "Control kid v2."),
+);
+const T10_2_4_V3 = stagedMdx(
+  "T10.2-4 specs/A.mdx with both leaves at v3",
+  t4Spec("Resolved kid v3.", "Control kid v3."),
+);
+const T10_2_4_WITHOUT_K_V3 = stagedMdx(
+  "T10.2-4 specs/A.mdx with a.k deleted and the control kid at v3",
+  t4SpecWithoutK("Control kid v3."),
+);
+
 const T10_2_4 = defineProductTest({
   id: "T10.2-4",
   title:
@@ -1372,10 +1419,7 @@ const T10_2_4 = defineProductTest({
         ).id;
 
         // Edit both leaves: live relevant hashes become R2 / Rn2.
-        await workspace.file(
-          T4_SPEC,
-          t4Spec("Resolved kid v2.", "Control kid v2."),
-        );
+        await workspace.file(T4_SPEC, T10_2_4_V2);
         await buildOk(product, workspace, "T10.2-4 `build` at v2");
         const r2 = await queryNode(product, workspace, T4_AK, "T10.2-4 R2");
         const rn2 = await queryNode(product, workspace, T4_AN, "T10.2-4 Rn2");
@@ -1392,10 +1436,7 @@ const T10_2_4 = defineProductTest({
         );
 
         // Further edit: live values become R3 / Rn3.
-        await workspace.file(
-          T4_SPEC,
-          t4Spec("Resolved kid v3.", "Control kid v3."),
-        );
+        await workspace.file(T4_SPEC, T10_2_4_V3);
         await buildOk(product, workspace, "T10.2-4 `build` at v3");
         const r3 = await queryNode(product, workspace, T4_AK, "T10.2-4 R3");
         const rn3 = await queryNode(product, workspace, T4_AN, "T10.2-4 Rn3");
@@ -1580,7 +1621,7 @@ const T10_2_4 = defineProductTest({
         const recordedAtResolve = canonicalJson(resolvedRead.current);
 
         // Delete the scope node (the a.k section construct).
-        await workspace.file(T4_SPEC, t4SpecWithoutK("Control kid v3."));
+        await workspace.file(T4_SPEC, T10_2_4_WITHOUT_K_V3);
         await buildOk(product, workspace, "T10.2-4 `build` after the deletion");
         const afterLoss = await showItem(
           product,
@@ -1648,6 +1689,14 @@ function t5Spec(xText: string): string {
     "",
   ].join("\n");
 }
+
+// T10.3-1's edit of the built workspace (x's text at v2) — a staged-source
+// record (helpers/staged-mdx.ts; S-9's before-any-product clause), the same
+// template call moved to module level.
+const T10_3_1_X_V2 = stagedMdx(
+  "T10.3-1 specs/A.mdx with x's text at v2",
+  t5Spec("Ex text v2."),
+);
 
 const T10_3_1 = defineProductTest({
   id: "T10.3-1",
@@ -1839,7 +1888,7 @@ const T10_3_1 = defineProductTest({
         // Invalidated items need review: edit x — its item (and the root's,
         // whose scope includes x) become invalidated; the root re-blocks
         // (SPEC 10.3), so `next` returns x's item.
-        await workspace.file(T5_SPEC, t5Spec("Ex text v2."));
+        await workspace.file(T5_SPEC, T10_3_1_X_V2);
         await buildOk(product, workspace, "T10.3-1 `build` after the x edit");
         const invalidated = await sessionStatus(
           product,
@@ -1898,6 +1947,14 @@ function t6Spec(kidText: string): string {
     "",
   ].join("\n");
 }
+
+// T10.3-2's edit of the built workspace (the kid text at v2) — a
+// staged-source record (helpers/staged-mdx.ts; S-9's before-any-product
+// clause), the same template call moved to module level.
+const T10_3_2_KID_V2 = stagedMdx(
+  "T10.3-2 specs/A.mdx with the kid text at v2",
+  t6Spec("Kid text v2."),
+);
 
 const T10_3_2 = defineProductTest({
   id: "T10.3-2",
@@ -1977,7 +2034,7 @@ const T10_3_2 = defineProductTest({
         );
 
         // Invalidate the blocker: the dependent's blocked state flips back.
-        await workspace.file(T6_SPEC, t6Spec("Kid text v2."));
+        await workspace.file(T6_SPEC, T10_3_2_KID_V2);
         await buildOk(product, workspace, "T10.3-2 `build` after the kid edit");
         await expectBlockedStates(
           {
