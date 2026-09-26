@@ -538,6 +538,19 @@ export const SPAN_MAIN_SOURCE =
   SPAN_EMB_CONTAINER +
   SPAN_EMB_POST;
 
+// T11.3-1 restages this fixture after its first product invocation, so
+// S-7's sweep never reaches those stagings against the stub: staged-source
+// records (helpers/staged-mdx.ts; S-9's before-any-product clause) made
+// from the strings the expectation tables keep, staged here and there.
+export const SPAN_BASE_STAGED = stagedMdx(
+  "T5.7-2/T11.3-1 specs/BASE.mdx (the spans fixture)",
+  SPAN_BASE_SOURCE,
+);
+export const SPAN_MAIN_STAGED = stagedMdx(
+  "T5.7-2/T11.3-1 specs/MAIN.mdx (the spans fixture)",
+  SPAN_MAIN_SOURCE,
+);
+
 // src/app.ts: the `text` export is aliased ON IMPORT (SPEC 4.4's sanctioned
 // aliasing — TEST-SPEC's aliased callee `t(...)`), and each reference
 // statement wears the trivia its span must exclude — leading indentation, a
@@ -816,7 +829,7 @@ export default defineConfig({
 // (the span workspace's): the base source and each arm's composed source
 // are staged-source records (S-9, test/self/s9-staged-sources.test.ts).
 const TOKEN_BASE_SOURCE = stagedMdx(
-  "T5.7-2 token bounds specs/BASE.mdx",
+  "T5.7-2/T5.7-4/T11.3-1 specs/BASE.mdx (the token-bounds fixture's base; the no-occurrence fixture's specs/BASE.mdx spells the same bytes)",
   '<S id="a">\nA text.\n</S>\n',
 );
 const TOKEN_TAG_PRE = '<S id="s" d={';
@@ -975,8 +988,8 @@ const T5_7_2 = defineProductTest({
     const workspace = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-        "specs/BASE.mdx": SPAN_BASE_SOURCE,
-        "specs/MAIN.mdx": SPAN_MAIN_SOURCE,
+        "specs/BASE.mdx": SPAN_BASE_STAGED,
+        "specs/MAIN.mdx": SPAN_MAIN_STAGED,
         "src/app.ts": SPAN_APP_SOURCE,
       },
     });
@@ -1139,6 +1152,17 @@ const ORD_ALPHA_MID_CONSTRUCT =
   ORD_ALPHA_MID_CLOSE;
 export const ORD_ALPHA_SOURCE =
   ORD_ALPHA_PRELUDE + ORD_ALPHA_TARGETS + ORD_ALPHA_MID_CONSTRUCT + "\n";
+
+// T11.3-1 restages this fixture after its first product invocation (S-9's
+// before-any-product clause): records made from the strings the pins use.
+export const ORD_ZED_STAGED = stagedMdx(
+  "T5.7-3/T11.3-1 specs/Zed.mdx (the order fixture)",
+  ORD_ZED_SOURCE,
+);
+export const ORD_ALPHA_STAGED = stagedMdx(
+  "T5.7-3/T11.3-1 specs/alpha.mdx (the order fixture)",
+  ORD_ALPHA_SOURCE,
+);
 
 // src/app.ts — byte-LAST (`src/` after `specs/`): a top-level marker (no
 // named unit encloses it — the source is the whole-file location, identity
@@ -1437,8 +1461,8 @@ const T5_7_3 = defineProductTest({
     const workspace = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-        [ORD_ZED_FILE]: ORD_ZED_SOURCE,
-        [ORD_ALPHA_FILE]: ORD_ALPHA_SOURCE,
+        [ORD_ZED_FILE]: ORD_ZED_STAGED,
+        [ORD_ALPHA_FILE]: ORD_ALPHA_STAGED,
         [ORD_APP_FILE]: ORD_APP_SOURCE,
       },
     });
@@ -1554,7 +1578,6 @@ const T5_7_3 = defineProductTest({
 // of their own (below the expected table), so the exported table this
 // workspace pins, which T11.3-1 expands by position, is untouched.
 
-export const NO_OCC_BASE_SOURCE = '<S id="a">\nA text.\n</S>\n';
 export const NO_OCC_SPARE_SOURCE = '<S id="sp">\nSpare text.\n</S>\n';
 export const NO_OCC_SPARE_FILE = "specs/SPARE.mdx";
 
@@ -1593,6 +1616,21 @@ export const NO_OCC_MAIN_SOURCE =
   NO_OCC_EMB_PRE +
   NO_OCC_EMB_CONTAINER +
   NO_OCC_EMB_POST;
+
+// T11.3-1 restages this fixture after its first product invocation (S-9's
+// before-any-product clause): records made from the strings the pins use.
+// specs/BASE.mdx spells the token-bounds fixture's base byte for byte, so it
+// is that record (one record per byte sequence, staged at every site; an
+// alias placed after the record, never a second spelling of its bytes).
+export const NO_OCC_BASE_STAGED = TOKEN_BASE_SOURCE;
+export const NO_OCC_SPARE_STAGED = stagedMdx(
+  "T5.7-4/T11.3-1 specs/SPARE.mdx (the no-occurrence fixture)",
+  NO_OCC_SPARE_SOURCE,
+);
+export const NO_OCC_MAIN_STAGED = stagedMdx(
+  "T5.7-4/T11.3-1 specs/MAIN.mdx (the no-occurrence fixture)",
+  NO_OCC_MAIN_SOURCE,
+);
 
 // src/app.ts: the used ordinary import, both T4-4 type-only forms (a `type`
 // modifier on the declaration and on a named binding), a resolving marker in
@@ -2194,9 +2232,9 @@ const T5_7_4 = defineProductTest({
     const workspace = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-        "specs/BASE.mdx": NO_OCC_BASE_SOURCE,
-        "specs/SPARE.mdx": NO_OCC_SPARE_SOURCE,
-        "specs/MAIN.mdx": NO_OCC_MAIN_SOURCE,
+        "specs/BASE.mdx": NO_OCC_BASE_STAGED,
+        "specs/SPARE.mdx": NO_OCC_SPARE_STAGED,
+        "specs/MAIN.mdx": NO_OCC_MAIN_STAGED,
         "src/app.ts": NO_OCC_APP_SOURCE,
       },
     });

@@ -95,6 +95,8 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import type { ArgvValue, ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -266,6 +268,15 @@ C.add(">\nComplete text.\n</S>");
 const C_SECTION_RANGE: SourceRange = { start: C_SECTION_START, end: C.pos };
 C.add("\n");
 const C_SOURCE = C.source;
+// Restaged after a body's first product invocation (T11.2-5's cycle-pair
+// workspace, T11.2-6's later fixtures), so S-7's sweep never reaches those
+// stagings against the stub: a staged-source record (helpers/staged-mdx.ts;
+// S-9's before-any-product clause) made from the string the pins use, and
+// staged at every site the bytes appear (T11.2-1's too).
+const C_STAGED = stagedMdx(
+  "T11.2-1/T11.2-5/T11.2-6 specs/C.mdx (the finding-free file; T11.2-6's outDir fixture stages it at specs/A.mdx too)",
+  C_SOURCE,
+);
 const C_ROOT_RANGE: SourceRange = { start: 0, end: C.pos };
 
 // --- expected values ----------------------------------------------------------
@@ -487,7 +498,7 @@ const T11_2_1 = defineProductTest({
         "xspec.config.ts": SPECS_ONLY_CONFIG,
         [A_FILE]: A_SOURCE,
         [B_FILE]: B_SOURCE,
-        [C_FILE]: C_SOURCE,
+        [C_FILE]: C_STAGED,
       },
       // S-9: B is the staged parse failure (14.20).
       mdx: { unparseable: [B_FILE] },
@@ -1313,6 +1324,12 @@ OK.add(">\nOK text.\n</S>");
 const OK_SEC_RANGE: SourceRange = { start: OK_SEC_START, end: OK.pos };
 OK.add("\n");
 export const OK_SOURCE = OK.source;
+// T11.3-1 restages the file after its first product invocation (S-9's
+// before-any-product clause): a record made from the string the pins use.
+export const OK_STAGED = stagedMdx(
+  "T11.2-3/T11.3-1 specs/OK.mdx (the valid-path contrast)",
+  OK_SOURCE,
+);
 const OK_ROOT_RANGE: SourceRange = { start: 0, end: OK.pos };
 const OK_NODE_ID = `${OK_FILE}#ok`;
 
@@ -1559,7 +1576,7 @@ const T11_2_3 = defineProductTest({
     const workspace = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-        [OK_FILE]: OK_SOURCE,
+        [OK_FILE]: OK_STAGED,
         [HP_FILE]: HP_SOURCE,
         [CS_FILE]: CS_SOURCE,
       },
@@ -2020,6 +2037,12 @@ R.add("\nAmbiguous reference.\n</S>");
 const R_Q_RANGE: SourceRange = { start: R_Q_START, end: R.pos };
 R.add("\n");
 export const R_SOURCE = R.source;
+// T11.3-1 restages the file after its first product invocation (S-9's
+// before-any-product clause): a record made from the string the pins use.
+export const R_STAGED = stagedMdx(
+  "T11.2-4/T11.3-1 specs/R.mdx (the resolution matrix)",
+  R_SOURCE,
+);
 const R_ROOT_RANGE: SourceRange = { start: 0, end: R.pos };
 
 const R_AB_NODE_ID = `${R_FILE}#a.b`;
@@ -2137,6 +2160,12 @@ CHA.add("\n</S>");
 const CHA_SIDE_RANGE: SourceRange = { start: CHA_SIDE_START, end: CHA.pos };
 CHA.add("\n");
 const CH_A_SOURCE = CHA.source;
+// The chain workspace follows the resolution matrix's invocations (S-9's
+// before-any-product clause): records made from the strings the pins use.
+const CH_A_STAGED = stagedMdx(
+  "T11.2-4 specs/CH-A.mdx (the embedding chain)",
+  CH_A_SOURCE,
+);
 const CH_A_ROOT_RANGE: SourceRange = { start: 0, end: CHA.pos };
 
 const CHB = new ByteFixture();
@@ -2155,6 +2184,10 @@ CHB.add('<S id="ok">\nOK line.\n</S>');
 const CHB_OK_RANGE: SourceRange = { start: CHB_OK_START, end: CHB.pos };
 CHB.add("\n");
 const CH_B_SOURCE = CHB.source;
+const CH_B_STAGED = stagedMdx(
+  "T11.2-4 specs/CH-B.mdx (the embedding chain)",
+  CH_B_SOURCE,
+);
 const CH_B_ROOT_RANGE: SourceRange = { start: 0, end: CHB.pos };
 
 const CHC = new ByteFixture();
@@ -2167,6 +2200,10 @@ CHC.add("\n</S>");
 const CHC_DEEP_RANGE: SourceRange = { start: CHC_DEEP_START, end: CHC.pos };
 CHC.add("\n");
 const CH_C_SOURCE = CHC.source;
+const CH_C_STAGED = stagedMdx(
+  "T11.2-4 specs/CH-C.mdx (the embedding chain)",
+  CH_C_SOURCE,
+);
 const CH_C_ROOT_RANGE: SourceRange = { start: 0, end: CHC.pos };
 
 // Expected text values, derived per the rules of 3 (SPEC 3, 1.6). Line
@@ -2339,6 +2376,11 @@ CY.add('<S id="calm">\nCalm line.\n</S>');
 const CY_CALM_RANGE: SourceRange = { start: CY_CALM_START, end: CY.pos };
 CY.add("\n");
 const CY_SOURCE = CY.source;
+// A later workspace of the body (S-9's before-any-product clause).
+const CY_STAGED = stagedMdx(
+  "T11.2-4 specs/CY.mdx (the self-embedding cycle)",
+  CY_SOURCE,
+);
 const CY_ROOT_RANGE: SourceRange = { start: 0, end: CY.pos };
 
 const CY_CALM_TEXT = "Calm line.\n";
@@ -2407,6 +2449,11 @@ IMP.add("\n\nTail line.\n</S>");
 const IMP_KEEP_RANGE: SourceRange = { start: IMP_KEEP_START, end: IMP.pos };
 IMP.add("\n");
 const IMP_SOURCE = IMP.source;
+// A later workspace of the body (S-9's before-any-product clause).
+const IMP_STAGED = stagedMdx(
+  "T11.2-4 specs/IMP.mdx (the importer of GONE.mdx)",
+  IMP_SOURCE,
+);
 const IMP_ROOT_RANGE: SourceRange = { start: 0, end: IMP.pos };
 
 const GONE_FIX = new ByteFixture();
@@ -2416,6 +2463,10 @@ GONE_FIX.add('<S id="g">\nGone text.\n</S>');
 const GONE_G_RANGE: SourceRange = { start: GONE_G_START, end: GONE_FIX.pos };
 GONE_FIX.add("\n");
 const GONE_SOURCE = GONE_FIX.source;
+const GONE_STAGED = stagedMdx(
+  "T11.2-4 specs/GONE.mdx (the imported file, deleted mid-arm)",
+  GONE_SOURCE,
+);
 const GONE_ROOT_RANGE: SourceRange = { start: 0, end: GONE_FIX.pos };
 
 // keep's contribution: body lines with the stray element's own characters
@@ -2509,6 +2560,8 @@ const ENCL_EMBED_TEXT = '{text("y")}';
 interface EnclosureStaging {
   readonly label: string;
   readonly source: string;
+  /** The staged bytes as a ledger record (S-9's before-any-product clause). */
+  readonly staged: StagedMdx;
   /** `<div>`'s first byte through `</div>`'s last byte (the 14.16 range). */
   readonly divRange: SourceRange;
   readonly divText: string;
@@ -2548,6 +2601,7 @@ function stageEnclosure(
   return {
     label,
     source: f.source,
+    staged: stagedMdx(`T11.2-4 specs/ENCL.mdx (${label})`, f.source),
     divRange,
     divText:
       "<div>" +
@@ -2773,7 +2827,7 @@ const T11_2_4 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [R_FILE]: R_SOURCE,
+          [R_FILE]: R_STAGED,
         },
       });
       try {
@@ -2866,9 +2920,9 @@ const T11_2_4 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [CH_A_FILE]: CH_A_SOURCE,
-          [CH_B_FILE]: CH_B_SOURCE,
-          [CH_C_FILE]: CH_C_SOURCE,
+          [CH_A_FILE]: CH_A_STAGED,
+          [CH_B_FILE]: CH_B_STAGED,
+          [CH_C_FILE]: CH_C_STAGED,
         },
       });
       try {
@@ -2973,7 +3027,7 @@ const T11_2_4 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [CY_FILE]: CY_SOURCE,
+          [CY_FILE]: CY_STAGED,
         },
       });
       try {
@@ -3047,8 +3101,8 @@ const T11_2_4 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [IMP_FILE]: IMP_SOURCE,
-          [GONE_FILE]: GONE_SOURCE,
+          [IMP_FILE]: IMP_STAGED,
+          [GONE_FILE]: GONE_STAGED,
         },
       });
       try {
@@ -3242,7 +3296,7 @@ const T11_2_4 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [ENCL_FILE]: staging.source,
+          [ENCL_FILE]: staging.staged,
         },
       });
       try {
@@ -3450,6 +3504,9 @@ D.add("\nParticipant one text.\n</S>");
 const D_X_RANGE: SourceRange = { start: D_X_START, end: D.pos };
 D.add("\n");
 const D_SOURCE = D.source;
+// The cycle-pair workspace follows the body's first invocations (S-9's
+// before-any-product clause): records made from the strings the pins use.
+const D_STAGED = stagedMdx("T11.2-5 specs/D.mdx (the cycle pair)", D_SOURCE);
 const D_ROOT_RANGE: SourceRange = { start: 0, end: D.pos };
 const D_X_D_REF = dLiteralRange(D_X_D);
 
@@ -3469,6 +3526,7 @@ E.add("\nParticipant two text.\n</S>");
 const E_Y_RANGE: SourceRange = { start: E_Y_START, end: E.pos };
 E.add("\n");
 const E_SOURCE = E.source;
+const E_STAGED = stagedMdx("T11.2-5 specs/E.mdx (the cycle pair)", E_SOURCE);
 const E_ROOT_RANGE: SourceRange = { start: 0, end: E.pos };
 const E_Y_D_REF = dLiteralRange(E_Y_D);
 
@@ -3661,7 +3719,7 @@ const T11_2_5 = defineProductTest({
           "xspec.config.ts": SPEC_AND_CODE_CONFIG,
           [A_FILE]: A_SOURCE,
           [B_FILE]: B_SOURCE,
-          [C_FILE]: C_SOURCE,
+          [C_FILE]: C_STAGED,
           [WRONG_KIND_CODE_FILE]: WRONG_KIND_CODE_SOURCE,
         },
         mdx: { unparseable: [B_FILE] },
@@ -3867,9 +3925,9 @@ const T11_2_5 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [C_FILE]: C_SOURCE,
-          [D_FILE]: D_SOURCE,
-          [E_FILE]: E_SOURCE,
+          [C_FILE]: C_STAGED,
+          [D_FILE]: D_STAGED,
+          [E_FILE]: E_STAGED,
         },
       });
       try {
@@ -4238,7 +4296,7 @@ const T11_2_6 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [C_FILE]: C_SOURCE,
+          [C_FILE]: C_STAGED,
         },
       });
       try {
@@ -4350,7 +4408,7 @@ const T11_2_6 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": T11_2_6_OUTDIR_CONFIG,
-          [C_FILE]: C_SOURCE,
+          [C_FILE]: C_STAGED,
         },
       });
       try {
@@ -4496,8 +4554,8 @@ const T11_2_6 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": T11_2_6_SOURCE_OUTDIR_CONFIG,
-          [A_FILE]: C_SOURCE,
-          [C_FILE]: C_SOURCE,
+          [A_FILE]: C_STAGED,
+          [C_FILE]: C_STAGED,
         },
       });
       try {

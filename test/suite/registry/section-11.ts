@@ -97,9 +97,11 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   BESIDE_ROOT_FILE_PATTERN_DECOY,
   INSIDE_NO_MATCH_FILE_PATTERNS,
@@ -163,7 +165,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -665,6 +667,12 @@ const T11_2_A_SOURCE = `${T11_2_A1}\n\n${T11_2_A2}\n\n${T11_2_A3}\n`;
 const T11_2_B1 = '<S id="b1" tags="red" coverage="none">\nB one.\n</S>';
 const T11_2_B2 = '<S id="b2">\nB two.\n</S>';
 const T11_2_B_SOURCE = `${T11_2_B1}\n\n${T11_2_B2}\n`;
+// Staged by T11-2's workspace and by its configuration-state twins — the
+// twins after the body's first invocation, so S-7's sweep never reaches
+// them against the stub: staged-source records (helpers/staged-mdx.ts;
+// S-9's before-any-product clause) made from the strings the ranges use.
+const T11_2_A_STAGED = stagedMdx("T11-2 specs/alpha/A.mdx", T11_2_A_SOURCE);
+const T11_2_B_STAGED = stagedMdx("T11-2 specs/beta/B.mdx", T11_2_B_SOURCE);
 
 // Every requirement node in the workspace with its full row contract —
 // identity, exact source range, tags, coverage attribute (absent for the two
@@ -731,9 +739,9 @@ function expectedRows(
 // T11-2's file set; the configuration stands apart, since the `--tag`
 // sweep's configuration-state twins stage these same files under an invalid
 // and under no configuration.
-const T11_2_FILES: Readonly<Record<string, string>> = {
-  "specs/alpha/A.mdx": T11_2_A_SOURCE,
-  "specs/beta/B.mdx": T11_2_B_SOURCE,
+const T11_2_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "specs/alpha/A.mdx": T11_2_A_STAGED,
+  "specs/beta/B.mdx": T11_2_B_STAGED,
   "src/app.ts": "export {};\n",
 };
 
@@ -1181,7 +1189,14 @@ const T11_3 = defineProductTest({
 
 const T11_4_HUB = '<S id="hub" d={"leaf"}>\nHub: {text("leaf")}\n</S>';
 const T11_4_LEAF = '<S id="leaf">\nLeaf text.\n</S>';
-const T11_4_SOURCE = `${T11_4_HUB}\n\n${T11_4_LEAF}\n`;
+// Staged by T11-4's workspace and by its configuration-state twins — the
+// twins after the body's first invocation, so S-7's sweep never reaches
+// them against the stub: a staged-source record (helpers/staged-mdx.ts;
+// S-9's before-any-product clause), the same expression moved into it.
+const T11_4_SOURCE = stagedMdx(
+  "T11-4 specs/E.mdx",
+  `${T11_4_HUB}\n\n${T11_4_LEAF}\n`,
+);
 const T11_4_APP = [
   'import SPEC, { text } from "../specs/E.xspec";',
   "",
@@ -1201,7 +1216,7 @@ const T11_4_LEAF_ID = "specs/E.mdx#leaf";
 const T11_4_EMBEDDER = "src/app.ts#embedder";
 const T11_4_REFERRER = "src/app.ts#referrer";
 
-const T11_4_FILES: Readonly<Record<string, string>> = {
+const T11_4_FILES: Readonly<Record<string, InitialFileContents>> = {
   "specs/E.mdx": T11_4_SOURCE,
   "src/app.ts": T11_4_APP,
 };

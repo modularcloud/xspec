@@ -132,23 +132,23 @@ import {
   BASE_FILE,
   MAIN_FILE,
   NO_OCC_APP_SOURCE,
-  NO_OCC_BASE_SOURCE,
+  NO_OCC_BASE_STAGED,
   NO_OCC_EXPECTED_CONDITIONS,
-  NO_OCC_MAIN_SOURCE,
+  NO_OCC_MAIN_STAGED,
   NO_OCC_SPARE_FILE,
-  NO_OCC_SPARE_SOURCE,
+  NO_OCC_SPARE_STAGED,
   NO_OCC_UNITS,
   ORD_ALPHA_FILE,
-  ORD_ALPHA_SOURCE,
+  ORD_ALPHA_STAGED,
   ORD_APP_FILE,
   ORD_APP_SOURCE,
   ORD_EXPECTED,
   ORD_ZED_FILE,
-  ORD_ZED_SOURCE,
+  ORD_ZED_STAGED,
   SPAN_ARMS,
   SPAN_APP_SOURCE,
-  SPAN_BASE_SOURCE,
-  SPAN_MAIN_SOURCE,
+  SPAN_BASE_STAGED,
+  SPAN_MAIN_STAGED,
   SPEC_AND_CODE_CONFIG,
   T5_7_1_APP_SOURCE,
   T5_7_1_BASE_SOURCE,
@@ -160,11 +160,12 @@ import {
   CS_FILE,
   CS_SOURCE,
   OK_FILE,
-  OK_SOURCE,
+  OK_STAGED,
   R_CONDITION_COUNTS,
   R_EXPECTED_OCCURRENCES,
   R_FILE,
   R_SOURCE,
+  R_STAGED,
   SPEC_AND_CODE_CONFIG as AVAILABILITY_SPEC_AND_CODE_CONFIG,
   SPECS_ONLY_CONFIG,
 } from "./section-11.2.js";
@@ -432,8 +433,8 @@ const T11_3_1 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-          "specs/BASE.mdx": SPAN_BASE_SOURCE,
-          "specs/MAIN.mdx": SPAN_MAIN_SOURCE,
+          "specs/BASE.mdx": SPAN_BASE_STAGED,
+          "specs/MAIN.mdx": SPAN_MAIN_STAGED,
           "src/app.ts": SPAN_APP_SOURCE,
         },
       });
@@ -500,8 +501,8 @@ const T11_3_1 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-          [ORD_ZED_FILE]: ORD_ZED_SOURCE,
-          [ORD_ALPHA_FILE]: ORD_ALPHA_SOURCE,
+          [ORD_ZED_FILE]: ORD_ZED_STAGED,
+          [ORD_ALPHA_FILE]: ORD_ALPHA_STAGED,
           [ORD_APP_FILE]: ORD_APP_SOURCE,
         },
       });
@@ -570,9 +571,9 @@ const T11_3_1 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-          [BASE_FILE]: NO_OCC_BASE_SOURCE,
-          [NO_OCC_SPARE_FILE]: NO_OCC_SPARE_SOURCE,
-          [MAIN_FILE]: NO_OCC_MAIN_SOURCE,
+          [BASE_FILE]: NO_OCC_BASE_STAGED,
+          [NO_OCC_SPARE_FILE]: NO_OCC_SPARE_STAGED,
+          [MAIN_FILE]: NO_OCC_MAIN_STAGED,
           [APP_FILE]: NO_OCC_APP_SOURCE,
         },
       });
@@ -630,7 +631,7 @@ const T11_3_1 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": AVAILABILITY_SPEC_AND_CODE_CONFIG,
-          [OK_FILE]: OK_SOURCE,
+          [OK_FILE]: OK_STAGED,
           [CS_FILE]: CS_SOURCE,
         },
       });
@@ -700,7 +701,7 @@ const T11_3_1 = defineProductTest({
       const workspace = await TestWorkspace.create({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [R_FILE]: R_SOURCE,
+          [R_FILE]: R_STAGED,
         },
       });
       try {
@@ -880,34 +881,47 @@ const CONJ_Q_FILE = "specs/Q.mdx";
 const CONJ_X_ID = "specs/T.mdx#x";
 const CONJ_Y_ID = "specs/T.mdx#y";
 
-const CONJ_T_SOURCE = [
-  '<S id="x">',
-  "X text.",
-  "</S>",
-  "",
-  '<S id="y">',
-  "Y text.",
-  "</S>",
-  "",
-].join("\n");
+// Workspace 2's initial files, created after the body's first product
+// invocation (workspace 1's runs), so S-7's sweep never reaches them
+// against the stub: staged-source records (helpers/staged-mdx.ts; S-9's
+// before-any-product clause), the same expressions moved into them.
+const CONJ_T_SOURCE = stagedMdx(
+  "T11.3-2 specs/T.mdx (the conjunction workspace)",
+  [
+    '<S id="x">',
+    "X text.",
+    "</S>",
+    "",
+    '<S id="y">',
+    "Y text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
-const CONJ_P_SOURCE = [
-  'import T from "./T.xspec"',
-  "",
-  '<S id="p" d={[T.x, T.y]}>',
-  "P text.",
-  "</S>",
-  "",
-].join("\n");
+const CONJ_P_SOURCE = stagedMdx(
+  "T11.3-2 specs/P.mdx (the conjunction workspace)",
+  [
+    'import T from "./T.xspec"',
+    "",
+    '<S id="p" d={[T.x, T.y]}>',
+    "P text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
-const CONJ_Q_SOURCE = [
-  'import T from "./T.xspec"',
-  "",
-  '<S id="q" d={T.x}>',
-  "Q text.",
-  "</S>",
-  "",
-].join("\n");
+const CONJ_Q_SOURCE = stagedMdx(
+  "T11.3-2 specs/Q.mdx (the conjunction workspace)",
+  [
+    'import T from "./T.xspec"',
+    "",
+    '<S id="q" d={T.x}>',
+    "Q text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const CONJ_P_TO_X: RecordTuple = {
   file: CONJ_P_FILE,
@@ -1521,33 +1535,43 @@ const TO_MALFORMED: ReadonlyArray<readonly [string, string]> = [
 const SEL_BASE_FILE = "specs/BASE.mdx";
 const SEL_USE_FILE = "specs/USE.mdx";
 
-const SEL_BASE_SOURCE = [
-  '<S id="top">',
-  "Top text.",
-  "",
-  '<S id="top.sub">',
-  "Sub text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+// Workspace 2's initial files, created after the body's first product
+// invocation (workspace 1's runs), so S-7's sweep never reaches them
+// against the stub: staged-source records (helpers/staged-mdx.ts; S-9's
+// before-any-product clause), the same expressions moved into them.
+const SEL_BASE_SOURCE = stagedMdx(
+  "T11.3-3 specs/BASE.mdx (the selection workspace)",
+  [
+    '<S id="top">',
+    "Top text.",
+    "",
+    '<S id="top.sub">',
+    "Sub text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
-const SEL_USE_SOURCE = [
-  'import BASE from "./BASE.xspec"',
-  "",
-  '<S id="useTop" d={BASE.top}>',
-  "Top use: {text(BASE.top)}",
-  "</S>",
-  "",
-  '<S id="useSub" d={BASE.top.sub}>',
-  "Sub use.",
-  "</S>",
-  "",
-  '<S id="useRoot" d={BASE}>',
-  "Root use.",
-  "</S>",
-  "",
-].join("\n");
+const SEL_USE_SOURCE = stagedMdx(
+  "T11.3-3 specs/USE.mdx (the selection workspace)",
+  [
+    'import BASE from "./BASE.xspec"',
+    "",
+    '<S id="useTop" d={BASE.top}>',
+    "Top use: {text(BASE.top)}",
+    "</S>",
+    "",
+    '<S id="useSub" d={BASE.top.sub}>',
+    "Sub use.",
+    "</S>",
+    "",
+    '<S id="useRoot" d={BASE}>',
+    "Root use.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const SEL_TOP_D: RecordTuple = {
   file: SEL_USE_FILE,
