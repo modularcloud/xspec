@@ -41,8 +41,10 @@ import {
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. No code
@@ -58,7 +60,7 @@ export default defineConfig({
 
 /** Stage a fresh spec-only workspace, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -250,20 +252,25 @@ const REINTRO_TAIL = " end.\n</S>\n";
 // `w` depends on both bearers.
 const JOURNALED_W = "specs/A.mdx#w";
 
-const JOURNALED_BASELINE = [
-  '<S id="a">',
-  "Alpha behavior.",
-  "</S>",
-  "",
-  '<S id="c">',
-  "Gamma behavior.",
-  "</S>",
-  "",
-  '<S id="w" d={["a", "c"]}>',
-  "Depends on both.",
-  "</S>",
-  "",
-].join("\n");
+// Created after fixture 1's invocations: a staged-source record (S-9,
+// test/self/s9-staged-sources.test.ts).
+const JOURNALED_BASELINE = stagedMdx(
+  "T5.4-1 specs/A.mdx the journaled-variant baseline (fixture 2)",
+  [
+    '<S id="a">',
+    "Alpha behavior.",
+    "</S>",
+    "",
+    '<S id="c">',
+    "Gamma behavior.",
+    "</S>",
+    "",
+    '<S id="w" d={["a", "c"]}>',
+    "Depends on both.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T5_4_1 = defineProductTest({
   id: "T5.4-1",
@@ -609,16 +616,21 @@ const SPELLING_B_SOURCE = ['<S id="b">', "Target behavior.", "</S>", ""].join(
 // the two static quote styles (SPEC 2.4).
 const MOVE_T = "specs/A.mdx#t";
 const MOVE_R = "specs/A.mdx#r";
-const MOVE_A_SOURCE = [
-  '<S id="t">',
-  "Target behavior.",
-  "</S>",
-  "",
-  '<S id="r" d={"t"}>',
-  "Referrer behavior.",
-  "</S>",
-  "",
-].join("\n");
+// The move fixture is created after the rename fixture's invocations: a
+// staged-source record (S-9, test/self/s9-staged-sources.test.ts).
+const MOVE_A_SOURCE = stagedMdx(
+  "T5.4-2 specs/A.mdx the move fixture",
+  [
+    '<S id="t">',
+    "Target behavior.",
+    "</S>",
+    "",
+    '<S id="r" d={"t"}>',
+    "Referrer behavior.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T5_4_2 = defineProductTest({
   id: "T5.4-2",

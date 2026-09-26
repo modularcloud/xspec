@@ -61,6 +61,7 @@ import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertSameJson,
   buildOk,
@@ -95,7 +96,7 @@ interface StagedArm {
 
 /** Stage a fresh spec-only workspace, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -453,16 +454,22 @@ const T5_5_2_TOGGLED = stagedMdx(
 // (the journal walks B.mdx#k back to A.mdx#p.k, SPEC 5.4), differing only in
 // reference kind: child vs embedding (SPEC 1.6, 5.5).
 const KIND_P = "specs/A.mdx#p";
-const KIND_BASELINE = [
-  '<S id="p">',
-  "before",
-  '<S id="p.k">',
-  "Kid text.",
-  "</S>",
-  "after",
-  "</S>",
-  "",
-].join("\n");
+// The kind arm's workspace is created after the matrix workspace's
+// invocations: its baseline is a staged-source record (S-9,
+// test/self/s9-staged-sources.test.ts).
+const KIND_BASELINE = stagedMdx(
+  "T5.5-2 specs/A.mdx with the child construct at its position (the kind arm's baseline)",
+  [
+    '<S id="p">',
+    "before",
+    '<S id="p.k">',
+    "Kid text.",
+    "</S>",
+    "after",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 const KIND_MANUAL = stagedMdx(
   "T5.5-2 specs/A.mdx with the moved child embedded in imported form at its former position (the kind arm)",
   [

@@ -50,6 +50,8 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -810,7 +812,13 @@ export default defineConfig({
 // cites: the first staging's multi-byte head, the tag up to `d={`, the arm's
 // leading characters, the reference, the arm's trailing characters, and the
 // value's closing `}`.
-const TOKEN_BASE_SOURCE = '<S id="a">\nA text.\n</S>\n';
+// Every token-bound workspace is created after the body's first `build`
+// (the span workspace's): the base source and each arm's composed source
+// are staged-source records (S-9, test/self/s9-staged-sources.test.ts).
+const TOKEN_BASE_SOURCE = stagedMdx(
+  "T5.7-2 token bounds specs/BASE.mdx",
+  '<S id="a">\nA text.\n</S>\n',
+);
 const TOKEN_TAG_PRE = '<S id="s" d={';
 const TOKEN_REF = "BASE.a";
 const TOKEN_TAG_POST = "}>\nS text.\n</S>\n";
@@ -832,6 +840,30 @@ function tokenBoundRange(arm: TokenBoundArm): SourceRange {
   return rangeAfter(SPAN_MAIN_HEAD + TOKEN_TAG_PRE + arm.before, TOKEN_REF);
 }
 
+/** One token-bound arm with its composed `specs/MAIN.mdx` bytes and record. */
+interface TokenBoundStaging {
+  readonly arm: TokenBoundArm;
+  /** The composed bytes — the range self-check slices them. */
+  readonly source: string;
+  /** The same bytes as the staged-source record `create()` stages (S-9). */
+  readonly main: StagedMdx;
+}
+
+// The template calls evaluated once at module load, in arm order.
+const TOKEN_BOUND_STAGINGS: readonly TokenBoundStaging[] = TOKEN_BOUND_ARMS.map(
+  (arm) => {
+    const source = tokenBoundSource(arm);
+    return {
+      arm,
+      source,
+      main: stagedMdx(
+        `T5.7-2 token bounds: ${arm.what} specs/MAIN.mdx`,
+        source,
+      ),
+    };
+  },
+);
+
 // The workspace's complete edge set (SPEC 5.2): each file's `contains` edges
 // and the one `depends` edge the occurrence stands behind.
 const TOKEN_EXPECTED_EDGES: readonly GraphEdge[] = [
@@ -843,9 +875,9 @@ const TOKEN_EXPECTED_EDGES: readonly GraphEdge[] = [
 
 async function assertTokenBoundArm(
   product: ProductBinding,
-  arm: TokenBoundArm,
+  staging: TokenBoundStaging,
 ): Promise<void> {
-  const source = tokenBoundSource(arm);
+  const { arm, source, main } = staging;
   const range = tokenBoundRange(arm);
   const label = `T5.7-2 token bounds — ${arm.what}`;
   // Fixture self-check (harness-side, before any product invocation): the
@@ -867,7 +899,7 @@ async function assertTokenBoundArm(
     files: {
       "xspec.config.ts": SPEC_ONLY_CONFIG,
       "specs/BASE.mdx": TOKEN_BASE_SOURCE,
-      "specs/MAIN.mdx": source,
+      "specs/MAIN.mdx": main,
     },
   });
   try {
@@ -1009,7 +1041,8 @@ const T5_7_2 = defineProductTest({
       await workspace.dispose();
     }
 
-    for (const arm of TOKEN_BOUND_ARMS) await assertTokenBoundArm(product, arm);
+    for (const staging of TOKEN_BOUND_STAGINGS)
+      await assertTokenBoundArm(product, staging);
   },
 });
 
@@ -1822,9 +1855,17 @@ function assertNoOccFindings(
 // within its construct's window (the byte-exact spans are T4.5-8's,
 // T4.5-9's, and T4.4-1's own business).
 
-const COLLISION_A_SOURCE =
-  '<S id="a">\nAlpha text.\n</S>\n\n<S id="b">\nBeta text.\n</S>\n';
-const COLLISION_B_SOURCE = '<S id="bb">\nBravo text.\n</S>\n';
+// The collision workspace is created after the entry workspace's
+// invocations: both spec sources are staged-source records (S-9,
+// test/self/s9-staged-sources.test.ts).
+const COLLISION_A_SOURCE = stagedMdx(
+  "T5.7-4 collision workspace specs/A.mdx",
+  '<S id="a">\nAlpha text.\n</S>\n\n<S id="b">\nBeta text.\n</S>\n',
+);
+const COLLISION_B_SOURCE = stagedMdx(
+  "T5.7-4 collision workspace specs/B.mdx",
+  '<S id="bb">\nBravo text.\n</S>\n',
+);
 
 /** The positive control: the import roots both chains (SPEC 2.4, 4.5). */
 const COLLISION_CTRL_SOURCE =

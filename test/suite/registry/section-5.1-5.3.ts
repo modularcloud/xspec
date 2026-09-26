@@ -50,8 +50,10 @@ import {
 import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertEdgeSetEqual,
   buildFindings,
@@ -88,7 +90,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -356,9 +358,13 @@ const T5_2_1 = defineProductTest({
 /** One cycle fixture: its files plus the CycleExpectation it stages. */
 interface CycleArm extends CycleExpectation {
   readonly name: string;
-  readonly files: Readonly<Record<string, string>>;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
 }
 
+// Every arm past the first stages its files after the first arm's `check`:
+// the `.mdx` entries are staged-source records, judged before any product
+// exists (S-9, test/self/s9-staged-sources.test.ts); the first arm's are
+// converted uniformly.
 const T5_3_1_ARMS: readonly CycleArm[] = [
   {
     // Both directions need external references, hence mutual imports — the
@@ -367,22 +373,28 @@ const T5_3_1_ARMS: readonly CycleArm[] = [
       "a `depends` cycle A→B→A across files (with its unavoidable mutual-" +
       "import spec import cycle)",
     files: {
-      "specs/A.mdx": [
-        'import B from "./B.xspec"',
-        "",
-        '<S id="a" d={B.b}>',
-        "A behavior.",
-        "</S>",
-        "",
-      ].join("\n"),
-      "specs/B.mdx": [
-        'import A from "./A.xspec"',
-        "",
-        '<S id="b" d={A.a}>',
-        "B behavior.",
-        "</S>",
-        "",
-      ].join("\n"),
+      "specs/A.mdx": stagedMdx(
+        "T5.3-1 cross-file depends cycle specs/A.mdx",
+        [
+          'import B from "./B.xspec"',
+          "",
+          '<S id="a" d={B.b}>',
+          "A behavior.",
+          "</S>",
+          "",
+        ].join("\n"),
+      ),
+      "specs/B.mdx": stagedMdx(
+        "T5.3-1 cross-file depends cycle specs/B.mdx",
+        [
+          'import A from "./A.xspec"',
+          "",
+          '<S id="b" d={A.a}>',
+          "B behavior.",
+          "</S>",
+          "",
+        ].join("\n"),
+      ),
     },
     cycle: ["specs/A.mdx#a", "specs/B.mdx#b"],
     importCycleFiles: ["specs/A.mdx", "specs/B.mdx"],
@@ -393,44 +405,43 @@ const T5_3_1_ARMS: readonly CycleArm[] = [
     // ancestor shapes are the two arms below).
     name: "a mixed cycle through `contains` + `embeds`",
     files: {
-      "specs/A.mdx": [
-        '<S id="p">',
-        "P behavior.",
-        "",
-        '<S id="p.q">',
-        'Q embeds: {text("x")}',
-        "</S>",
-        "</S>",
-        "",
-        '<S id="x">',
-        'X embeds: {text("p")}',
-        "</S>",
-        "",
-      ].join("\n"),
+      "specs/A.mdx": stagedMdx(
+        "T5.3-1 mixed contains+embeds cycle specs/A.mdx",
+        [
+          '<S id="p">',
+          "P behavior.",
+          "",
+          '<S id="p.q">',
+          'Q embeds: {text("x")}',
+          "</S>",
+          "</S>",
+          "",
+          '<S id="x">',
+          'X embeds: {text("p")}',
+          "</S>",
+          "",
+        ].join("\n"),
+      ),
     },
     cycle: ["specs/A.mdx#p", "specs/A.mdx#p.q", "specs/A.mdx#x"],
   },
   {
     name: "a self-`depends` (a dependency cycle of length one)",
     files: {
-      "specs/A.mdx": [
-        '<S id="s" d={"s"}>',
-        "Depends on itself.",
-        "</S>",
-        "",
-      ].join("\n"),
+      "specs/A.mdx": stagedMdx(
+        "T5.3-1 self-depends specs/A.mdx",
+        ['<S id="s" d={"s"}>', "Depends on itself.", "</S>", ""].join("\n"),
+      ),
     },
     cycle: ["specs/A.mdx#s"],
   },
   {
     name: "a self-`embeds` (a dependency cycle of length one)",
     files: {
-      "specs/A.mdx": [
-        '<S id="s">',
-        'Embeds itself: {text("s")}',
-        "</S>",
-        "",
-      ].join("\n"),
+      "specs/A.mdx": stagedMdx(
+        "T5.3-1 self-embeds specs/A.mdx",
+        ['<S id="s">', 'Embeds itself: {text("s")}', "</S>", ""].join("\n"),
+      ),
     },
     cycle: ["specs/A.mdx#s"],
   },
@@ -439,40 +450,46 @@ const T5_3_1_ARMS: readonly CycleArm[] = [
     // chain runs through: a → a.b → a.b.c → a.
     name: "a section depending on its own ancestor (grandparent)",
     files: {
-      "specs/A.mdx": [
-        '<S id="a">',
-        "Alpha behavior.",
-        "",
-        '<S id="a.b">',
-        "Beta behavior.",
-        "",
-        '<S id="a.b.c" d={"a"}>',
-        "Gamma depends on its grandparent.",
-        "</S>",
-        "</S>",
-        "</S>",
-        "",
-      ].join("\n"),
+      "specs/A.mdx": stagedMdx(
+        "T5.3-1 depends on own grandparent specs/A.mdx",
+        [
+          '<S id="a">',
+          "Alpha behavior.",
+          "",
+          '<S id="a.b">',
+          "Beta behavior.",
+          "",
+          '<S id="a.b.c" d={"a"}>',
+          "Gamma depends on its grandparent.",
+          "</S>",
+          "</S>",
+          "</S>",
+          "",
+        ].join("\n"),
+      ),
     },
     cycle: ["specs/A.mdx#a", "specs/A.mdx#a.b", "specs/A.mdx#a.b.c"],
   },
   {
     name: "a section embedding its own ancestor (grandparent)",
     files: {
-      "specs/A.mdx": [
-        '<S id="a">',
-        "Alpha behavior.",
-        "",
-        '<S id="a.b">',
-        "Beta behavior.",
-        "",
-        '<S id="a.b.c">',
-        'Gamma embeds its grandparent: {text("a")}',
-        "</S>",
-        "</S>",
-        "</S>",
-        "",
-      ].join("\n"),
+      "specs/A.mdx": stagedMdx(
+        "T5.3-1 embeds own grandparent specs/A.mdx",
+        [
+          '<S id="a">',
+          "Alpha behavior.",
+          "",
+          '<S id="a.b">',
+          "Beta behavior.",
+          "",
+          '<S id="a.b.c">',
+          'Gamma embeds its grandparent: {text("a")}',
+          "</S>",
+          "</S>",
+          "</S>",
+          "",
+        ].join("\n"),
+      ),
     },
     cycle: ["specs/A.mdx#a", "specs/A.mdx#a.b", "specs/A.mdx#a.b.c"],
   },
