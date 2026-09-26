@@ -484,10 +484,14 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   // error document carriage) are context with home coverage at
   // T12.7-*/T12.0-*.
   "T14-6": ["14"],
-  // T14-7: 6.4/6.5/5.3 (the staged operations and the cycle rule) and
-  // 12.7/12.0 (report carriage) are context with home coverage at
-  // T6.4-*/T6.5-*/T5.3-1/T12.7-*/T12.0-*; the home passage "14" also
-  // carries the invalid-workspace arm's asserted numbered condition (14.5).
+  // T14-7: 6.4/6.5/5.3 (the staged operations and the cycle rule),
+  // 12.7/12.0 (report carriage; 12.0's unknown-identity usage error on an
+  // invalid-path identity, home T11-6), 1.5 (the identity form 14 restates
+  // over invalid paths), and 5.7/11.4 (the occurrence span and the import
+  // range the located sets are read in) are context with home coverage at
+  // T6.4-*/T6.5-*/T5.3-1/T12.7-*/T12.0-*/T11-6/T1.5-*/T5.7-*/T11.4-*; the
+  // home passage "14" also carries the invalid-workspace arm's asserted
+  // numbered condition (14.5).
   "T14-7": ["14"],
   // T14-8: 5.7/11.4 (the embedding container span and the byte
   // classification it keeps exact) and 12.7 (the finding form's location
