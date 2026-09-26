@@ -486,6 +486,70 @@ state after Task 9: the S-9 self-test 426 tests over 400 records (393 `T…`,
 namespace (~137 s; 2547 + the 19 record tests); certification 144 PASS /
 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
 
+**Resolved by Task 10 (the §6.5 module; 4637836 converts, the closing commit
+records).** Forty-nine records, seven of `section-6.4.ts`'s reused. `section-6.5.ts`:
+T6.5-1 7 — `fileMoveArm` composes each geometry's sources as before and registers
+the `.mdx` ones through the memoizing module-level `t651Record` (a `Map<string,
+StagedMdx>`; the record named for its composition inputs — `"T6.5-1 the moved file
+importing <own imports> and embedding <binding>"`, `"T6.5-1 the spec importer
+importing <specifier>"` — and reused where a later geometry composes the same
+bytes: arms (a) and (c) share the moved file, (a) and (d) the importer, so identical
+bytes are ONE record staged at each site; a same-name/different-bytes composition
+throws at load), `C_SOURCE` wrapped in place, arm (a)'s workspace converted
+uniformly, `rewrites[].source` keeping the strings for the byte contract; T6.5-2
+10 — the shared and in-line origins wrapped in place, the self-closing arm's origin
+and the G, C, D, E, P sources wrapped in their rows, the Beta holder two arms spell
+identically hoisted to `X2_B_HOLDER` (one record), `X2_ZED_STAGED` made from the
+string the bystander compare uses; T6.5-3 6 — `R3_FILES`'s four sources and the two
+third-file sources wrapped in place, `runThirdFileArm`'s `source: StagedMdx` (the
+determinism directories are both created before the first run; the third-file arms
+follow); T6.5-4 5 — `V4_A_STAGED`/`V4_B_STAGED` made from the window strings, Occ,
+Other-valid, and Solo wrapped in place, named `"T6.5-4/T6.6-3/T14-7 …"` (T14-7
+spreads `MOVE_REFUSAL_FILES` and `MOVE_DERIVED_PATH_FILES` after its first
+invocation, T6.6-3 all five sets) and `"T6.5-4/T6.6-3 precondition arm
+specs/Other.mdx as staged (valid)"`; T6.5-5 1 new (`"T6.5-5/T6.6-3 specs/B.mdx"`)
+and 7 reused — the U5 sources mirror T6.4-4's byte for byte, so `section-6.4.ts`
+exports `U4_SOURCE`, `U4_BAD_SOURCE`, `U4_BROKEN_SOURCE`, `U4_STRAY_SOURCE`,
+`U4_DUP_SOURCE`, `U4_ANC_SOURCE`, `U4_SOLO_SOURCE`, renamed with T6.5-5
+(`"T6.4-4/T6.5-5/T6.6-3 specs/A.mdx"`, `"T6.4-4/T6.5-5 masking arm
+specs/Broken.mdx"`, …), and `section-6.5.ts` aliases them (`const U5_A_SOURCE =
+U4_SOURCE;`), the masking arm's `{ unparseable: [U5_BROKEN] }` declaration,
+`withWorkspace`'s `mdx` parameter, and the `WorkspaceMdxDecl` import removed; T6.6-3
+2 — `MOVE_IDENTITY_FILES_AFTER`, T6.5-6's post-move state that T6.6-3 alone stages
+after its first invocation, its entries `"T6.6-3 identity-terms twins specs/A.mdx"`
+/ `"… specs/B.mdx"` made from the strings T6.5-6 asserts, created in the exporting
+module; T6.5-8 6, T6.5-9 4, T6.5-10 8 — behind their diagnosed failures, judged by
+reading; the strings the compares and occurrence spans use kept, records made from
+them; `"T6.5-8/T6.5-9 …"` for the two sources `A9_FILES` shares. Every string-typed
+files map and arm `files` field widened to `InitialFileContents`. Sub-rules
+applied: (i) a helper composing a row's sources from a geometry, where several rows
+compose identical bytes, registers them through a memoizing module-level record
+function named for exactly the composition inputs the bytes are a function of —
+one record per byte sequence, staged at every site, created at load like a
+computed table; (ii) a constant byte-identical to another registry module's record
+is reused by exporting that record, renaming it with the calling ID, and aliasing
+it in the consumer — the consumer's spelling deleted, never re-spelled, the sha256
+capture proving identity; (iii) an exported set only another module stages after
+its first invocation converts in the exporting module, its records named with the
+staging test alone — so Task 12's before-log lacks the eight sets `section-6.6.ts`
+imports from `section-6.5.ts`, and Task 23's T14-7 stages records at its second and
+third workspaces already. Left plain: T6.5-6's and T6.5-7's workspaces (each the
+body's only one), the `copyFrom` seedings of T6.5-1's and T6.5-3's fresh
+directories, every `.ts` and `mdout/new` entry. Read-based enumeration: the 29
+creation sites judged; T6.5-8's MDX arms, T6.5-9's spec-source arm, and T6.5-10's
+arms (b), (c), (c)-sibling the unreached post-invocation sites. Checks: the sites
+hook logged 74 lines (32 distinct (test, path) pairs — the task's list;
+`specs/Broken.mdx` `"unparseable"`, the rest `"well-formed"`) before and no file
+after; the sha256 capture over the suite file (172 writes) identical; 10 tests, 5
+pass and 5 fail — T6.5-6, T6.5-7, T6.5-8, T6.5-9, T6.5-10 — with identical
+diagnoses; red check: an unclosed tag spliced into `movedFileSource`'s `"A holder
+text."` fails the three moved-file records as `mdx-derivability` while the other
+file's and the three importers' pass. Known state after Task 10: the S-9 self-test
+475 tests over 449 records (442 `T…`, 4 `E-6`, 3 `P-…`); self project 22 files,
+2615 passed, 0 skipped under the namespace (~132 s; 2566 + the 49 record tests);
+certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run
+against` lines.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -653,32 +717,6 @@ behind a diagnosed failure or in an arm the built product never reaches — reci
 
 ## Tasks
 
-### Task 10 — Initial-file conversion: §6.5 (`section-6.5.ts`)
-
-**Workspace creations to judge:** 29 (`withWorkspace` ~351; the exported record
-`MOVE_PRECONDITION_BREAK`; T6.5-1's and T6.5-3's `copyFrom` seedings ~1655/~2614 stay;
-a `stageConfigurationStateTwins` caller).
-**Reachable sites (the instrumented run):**
-- `section-6.5.ts` — T6.5-1 (7): specs/A.mdx specs/C.mdx specs/I.mdx specs/sub/A.mdx specs/w/A.mdx specs/w/C.mdx specs/y/I.mdx
-- `section-6.5.ts` — T6.5-2 (8): specs/A.mdx specs/B.mdx specs/C.mdx specs/D.mdx specs/E.mdx specs/G.mdx specs/P.mdx specs/Zed.mdx
-- `section-6.5.ts` — T6.5-3 (5): specs/Keep.mdx specs/Origin.mdx specs/Spare.mdx specs/Target.mdx specs/Third.mdx
-- `section-6.5.ts` — T6.5-4 (4): specs/A.mdx specs/B.mdx specs/Other.mdx specs/Solo.mdx
-- `section-6.5.ts` — T6.5-5 (8): docs/Stray.mdx specs/A.mdx specs/Anc.mdx specs/B.mdx specs/Bad.mdx specs/Broken.mdx specs/Dup.mdx specs/Solo.mdx
-**Failing here:** T6.5-6, T6.5-7, T6.5-8, T6.5-9, T6.5-10.
-**Certification scope:** none.
-**Notes.** Keep the string constants `test/self/s9-fixture-well-formedness.test.ts`
-imports (T6.5-2's composed forms) and create records from them. The module exports
-constants to `section-6.6.ts`: a constant both modules stage post-invocation is one
-record, created here and named with both IDs (the previous plan's Task 9 form).
-Byte identity across modules (found by Task 9): `U5_BAD_SOURCE` (~3412, staged
-~3656) equals `section-6.4.ts`'s `U4_BAD_SOURCE` record `"T6.4-4/T6.6-3
-specs/Bad.mdx"` byte for byte, and neither module imports the other — if T6.5-5's
-site is post-invocation, reuse that record (export it from `section-6.4.ts` and
-rename it with the calling ID) rather than register the bytes twice (the naming
-rule: an existing record whose bytes and declaration equal a new entry's is
-reused, never duplicated).
-**Checks.** Recipes 1–5 over `section-6.5.test` (the file alone runs several minutes).
-
 ### Task 11 — Initial-file conversion: §6.5-ii and §6.5-iii (`section-6.5-ii.ts`, `section-6.5-iii.ts`)
 
 **Workspace creations to judge:** 6.5-ii (3), 6.5-iii (12 — T6.5-13's arms (b)–(l)
@@ -712,8 +750,13 @@ convert in place (one record per row per `.mdx` entry, named `"T6.5-13 arm (x) <
 `RENAME_USAGE_ORDERING_FILES` and `RENAME_SOLO_FILES` (`"T6.4-4/T6.6-3 …"`) — so
 the before-log lacks those entries (T6.6-3's `specs/Solo.mdx` above is the rename
 solo set's if reached through `runSoloUsageArm` ~1169; the move solo set's ~1239 is
-Task 10's); the module's own entries and the sets it imports from `section-6.5.ts`
-convert as planned.
+Task 10's — done: Task 10 converted the eight sets this module imports from
+`section-6.5.ts` — `MOVE_REFUSAL_FILES`, `MOVE_LINK_OUTSIDE_FILES`,
+`MOVE_DERIVED_PATH_FILES`, `MOVE_DERIVED_LINK_FILES`, `MOVE_PRECONDITION_FILES`,
+`MOVE_USAGE_ORDERING_FILES`, `MOVE_SOLO_FILES`, `MOVE_IDENTITY_FILES_AFTER` — their
+records named with T6.6-3, so the before-log lacks those entries as well: T6.6-3's
+five listed paths are theirs, and whatever T6.6-3 still logs is the module's own);
+the module's own entries convert as planned.
 **Checks.** Recipes 1–5 over `section-6.6.test`.
 
 ### Task 13 — Initial-file conversion: §7 basics, discovery, §7.1–§7.3 (`section-7-basics.ts`, `section-7-discovery.ts`, `section-7.1-7.3.ts`)
@@ -965,7 +1008,9 @@ named with every test preparing them, as Task 21's).
 `specs/broken.mdx` and `specs/invalid.mdx` are `unparseable` records (their paths
 leave `mdx.unparseable`); `specs/a#b.mdx` is an ordinary key; T14-11's arm (v) prefix
 form (AGENTS.md's arm-filter and stand-in recipes reach it); `RENAME_REFUSAL_FILES`
-(T14-7's first workspace, ~3149) already stages records named with T14-7 (Task 9).
+(T14-7's first workspace, ~3149) already stages records named with T14-7 (Task 9), as
+do `MOVE_REFUSAL_FILES` and `MOVE_DERIVED_PATH_FILES` (its second and third
+workspaces, ~3178 and ~3213; Task 10).
 **Checks.** Recipes 1–5 over `section-14.test`, `section-14-ii.test`; after this task
 the whole suite's initial `.mdx` entries after a body's first invocation are records,
 `perDraw`, or `unchecked` — Task 24 verifies it.
