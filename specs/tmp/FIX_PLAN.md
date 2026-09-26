@@ -118,6 +118,14 @@ the ledger (`WorkspaceDecl.files` takes plain contents) nor Task 18's guard cove
 an observation for the next determination (a mechanism change beyond the conversion
 tasks), not converted here.
 
+**Site lists (as Task 8 found):** the tasks' site lists were enumerated mechanically —
+every `.mdx` `file()` call in the module — and include sites that precede the body's
+first product invocation: ten of Task 8's eleven `section-5.6.ts` sites (every T5.6-n
+body stages its edits between `gitCommitAll("baseline")` and its first `buildOk`; only
+T5.6-4's arm-2 staging follows arm 1's `build`/`impact`). Judge each listed site against
+the body's first invocation before converting it; such sites stay (S-7's sweep reaches
+them against the stub).
+
 **Appending to product-written bytes (T5.4-1's pattern):** an append is an `edit()`
 extending the file's unique tail (`REINTRO_TAIL`, `f`'s closing run, which the rename
 leaves in place), the anchor's uniqueness and end position diagnosed first (`anchorOnce`
@@ -135,13 +143,6 @@ verdict (`unshare … -- npx vitest run --config test/vitest.config.ts --project
 reached — accepted, Task 18's guard surfaces it when the product gets there).
 
 ## Tasks
-
-### Task 8 — Ledger conversion: §5.6 and §6.7
-
-`section-5.6.ts` (457, 593, 594, 817, 821, 944, 972, 1029, 1030, 1175, 1180) and
-`section-6.7.ts` (384 `impactArmSource("a.neo")`, 463 `staleOrigin.text`, 502/503 the
-`.text` of `originSource`/`watchSource` builders — records wrap the same `.text`).
-**Checks:** as the preamble's.
 
 ### Task 9 — Ledger conversion: §6.3–§6.6, §8, §13, §15
 
