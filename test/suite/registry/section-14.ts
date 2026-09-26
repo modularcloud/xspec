@@ -289,6 +289,7 @@ import {
 } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
@@ -720,6 +721,22 @@ const T14_2_ESCAPED_PREFIX =
   'import BASE from "../specs/base.xspec";\n\nBASE.login;\n';
 const T14_2_ESCAPED_MARKER = `BASE.${T14_2_ESCAPED_LOGIN};`;
 
+// The six unresolved reference forms, staged into specs/ref.mdx after the
+// initial build — a staged-source record: judged before any product exists
+// (S-9, test/self/s9-staged-sources.test.ts).
+const T14_2_REF_BROKEN = stagedMdx(
+  "T14-2 specs/ref.mdx with every unresolved reference form",
+  T14_2_REF_PREFIX +
+    T14_2_REF_D_CONSTRUCT +
+    T14_2_REF_MID +
+    T14_2_REF_TEXT_CONSTRUCT +
+    T14_2_REF_MID +
+    T14_2_REF_LOGIN_CONSTRUCT +
+    T14_2_REF_MID +
+    T14_2_REF_ESCAPED_CONSTRUCT +
+    "\n",
+);
+
 const T14_2 = defineProductTest({
   id: "T14-2",
   title:
@@ -738,18 +755,7 @@ const T14_2 = defineProductTest({
       // Break every reference form: external `d`, local `text(...)`, the
       // escape-spelled local `d`, and the TypeScript forms (marker; `text`
       // call; escape-spelled marker).
-      await workspace.file(
-        "specs/ref.mdx",
-        T14_2_REF_PREFIX +
-          T14_2_REF_D_CONSTRUCT +
-          T14_2_REF_MID +
-          T14_2_REF_TEXT_CONSTRUCT +
-          T14_2_REF_MID +
-          T14_2_REF_LOGIN_CONSTRUCT +
-          T14_2_REF_MID +
-          T14_2_REF_ESCAPED_CONSTRUCT +
-          "\n",
-      );
+      await workspace.file("specs/ref.mdx", T14_2_REF_BROKEN);
       await workspace.file(
         "src/app.ts",
         `${T14_2_APP_PREFIX}${T14_2_APP_MARKER}\n${T14_2_APP_CALL}\n`,
@@ -1394,7 +1400,19 @@ const STALE_DECL: WorkspaceDecl = {
     "specs/a.mdx": '<S id="a1">\nAlpha behavior.\n</S>\n',
   },
 };
-const STALE_EDIT = '<S id="a1">\nAlpha behavior, edited.\n</S>\n';
+// The post-build edits of specs/a.mdx are staged-source records (S-9: judged
+// before any product exists by test/self/s9-staged-sources.test.ts, since
+// S-7's sweep never reaches a staging that follows a product invocation).
+const STALE_EDIT = stagedMdx(
+  "T14-4/T14-6 specs/a.mdx edited after the build (the stale workspace, 14.10)",
+  '<S id="a1">\nAlpha behavior, edited.\n</S>\n',
+);
+// T14-4's failing workspace for the 14.21 arm: specs/a.mdx re-staged
+// without an id (14.1) on the just-rebuilt workspace.
+const T14_4_ID_LESS_EDIT = stagedMdx(
+  "T14-4 specs/a.mdx re-staged without an id (the failing workspace of the 14.21 arm)",
+  "<S>\nNo id.\n</S>\n",
+);
 
 // 14.12 (T7.5-2's fixture): one forbidden rule, one violating dependence.
 const POLICY_DECL: WorkspaceDecl = {
@@ -1643,7 +1661,7 @@ const T14_4 = defineProductTest({
       // finding beside them (SPEC 14.21, 13.3, 10.1; membership only, the
       // module header — the every-subcommand breadth, modifies-nothing
       // compares, and bytes-untouched assertions are T10.1-5's).
-      await workspace.file("specs/a.mdx", "<S>\nNo id.\n</S>\n");
+      await workspace.file("specs/a.mdx", T14_4_ID_LESS_EDIT);
       assertConditionCounts(
         await buildFindings(
           product,
@@ -2662,8 +2680,12 @@ const T14_7_SIB_WINDOW = byteWindow(
 const T14_7_BAD_FILE = "specs/Bad.mdx";
 const T14_7_BAD_VALID =
   '<S id="bad">\nBad-file text, valid for the control arm.\n</S>\n';
-const T14_7_BAD_INVALID =
-  '<S id="bad" d={"nope"}>\nUnresolved dependency target.\n</S>\n';
+// The invalid twin is staged after the control arm's invocations — a
+// staged-source record (S-9, test/self/s9-staged-sources.test.ts).
+const T14_7_BAD_INVALID = stagedMdx(
+  "T14-7 specs/Bad.mdx with an unresolved dependency target (the invalid-workspace arm)",
+  '<S id="bad" d={"nope"}>\nUnresolved dependency target.\n</S>\n',
+);
 
 // The destination-spelling staging (T14-7's own; SPEC 14, 6.5, 12.0):
 // occupancy is judged at a path in discovered-path form alone, so a

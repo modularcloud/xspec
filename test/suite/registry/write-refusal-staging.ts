@@ -1373,27 +1373,6 @@ function isOutsideArea(rel: string): boolean {
   return !isAreaPath(rel);
 }
 
-/**
- * A text-only edit of a built source — the workspace stays valid, its graph
- * data and the source's derived files stale (SPEC 13.3, 13.1, 13.2). The
- * edit rewrites the file's current bytes (the ones the prior rename left),
- * never a recomposed constant.
- */
-async function stalenessEdit(
-  workspace: TestWorkspace,
-  rel: string,
-  from: string,
-  to: string,
-): Promise<void> {
-  const current = Buffer.from(await workspace.readBytes(rel)).toString("utf8");
-  if (!current.includes(from)) {
-    throw new Error(
-      `harness staging: ${rel} does not contain ${JSON.stringify(from)}`,
-    );
-  }
-  await workspace.file(rel, current.replace(from, to));
-}
-
 const SESSION = "s";
 const NEW_SESSION = "n";
 const SESSION_FILE = `${REVIEWS_DIR}/${SESSION}.json`;
@@ -1425,7 +1404,7 @@ export async function reviewMutatorsArm(
   const context =
     "T13.5-7 (e) review mutators with .xspec/reviews and the session file unwritable";
   const editA = (workspace: TestWorkspace): Promise<void> =>
-    stalenessEdit(workspace, RENAME_A_PATH, E_EDIT_FROM, E_EDIT_TO);
+    workspace.edit(RENAME_A_PATH, E_EDIT_FROM, E_EDIT_TO);
   // The build twin: the same fixture and edit, then `build` — the derived
   // state the current sources generate (SPEC 13.3: the refresh writes what
   // `build` would write).
@@ -1641,7 +1620,7 @@ export async function buildArm(product: ProductBinding): Promise<void> {
   const context =
     "T13.5-7 (f) `build --json` with specs/b unwritable on the B-edited workspace";
   const editB = (workspace: TestWorkspace): Promise<void> =>
-    stalenessEdit(workspace, RENAME_B_PATH, F_EDIT_FROM, F_EDIT_TO);
+    workspace.edit(RENAME_B_PATH, F_EDIT_FROM, F_EDIT_TO);
   const buildTwin = await completeOnTwin(
     product,
     RENAME_FIXTURE,
@@ -1754,7 +1733,7 @@ export async function refreshingReadsArm(
   );
   const { workspace } = prepared;
   try {
-    await stalenessEdit(workspace, RENAME_B_PATH, F_EDIT_FROM, F_EDIT_TO);
+    await workspace.edit(RENAME_B_PATH, F_EDIT_FROM, F_EDIT_TO);
     const staged = await snapshotWorkspace(workspace.root);
     const staging = await stageWriteRefusalUnder(
       path.join(workspace.root, GRAPH_DATA_AREA),

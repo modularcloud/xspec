@@ -37,6 +37,17 @@
 //   error, never an assertion failure, never a skip. The parse is in-process
 //   and cheap at every scale the suite stages (the 4096-deep tower in ~0.3 s,
 //   T1.3-7's 4.2 MB document in ~1.4 s), so no staging is exempted for size.
+// - A `.mdx` source a test body stages after invoking the product in its
+//   workspace is passed to `file()` as a staged-source record
+//   (helpers/staged-mdx.ts) carrying the bytes and the S-9 declaration
+//   together: S-7's sweep never reaches such a staging (the body fails at
+//   the invocation against the stub), so the self-test
+//   test/self/s9-staged-sources.test.ts judges every record before any
+//   product exists (S-9's timing clause, H-8) through the judge the builder
+//   itself applies at staging time (`judgeMdxDeclaration` — one code path).
+//   An edit of bytes the product itself wrote goes through `edit()`, judged
+//   at staging time alone: no harness constant equals them, so they are not
+//   a deterministic fixture.
 
 import { Buffer } from "node:buffer";
 import { execFile } from "node:child_process";
@@ -50,6 +61,7 @@ import {
   type MdxAllowance,
 } from "./mdx-derivability.js";
 import { HarnessStagingError } from "./permissions.js";
+import { StagedMdx } from "./staged-mdx.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -233,19 +245,75 @@ export class TestWorkspace {
    * Write a regular file with exactly the declared bytes, creating parents.
    * A `.mdx` path is first judged against its S-9 declaration — the option's,
    * else the workspace declaration's, else well-formed — and a contradiction
-   * throws `HarnessStagingError` before anything is written.
+   * throws `HarnessStagingError` before anything is written. A staged-source
+   * record (helpers/staged-mdx.ts) supplies both the bytes and the
+   * declaration of the write — the form of every `.mdx` staging a body makes
+   * after a product invocation in this workspace, so that the S-9 self-test
+   * judged it before any product existed; an `mdx` option beside a record
+   * contradicts it, and a record at a path S-9 does not judge is a mistake —
+   * both throw.
    */
   async file(
     rel: RelPath,
-    contents: FileContents,
+    contents: FileContents | StagedMdx,
     options: FileOptions = {},
   ): Promise<void> {
-    const data =
-      typeof contents === "string" ? Buffer.from(contents, "utf8") : contents;
-    this.checkMdx(rel, data, options.mdx);
-    const abs = this.resolve(rel);
-    await ensureParent(abs);
-    await fsp.writeFile(abs, data);
+    let data: Uint8Array;
+    let declaration = options.mdx;
+    if (contents instanceof StagedMdx) {
+      const key = mdxKey(rel);
+      if (!isMdxPath(rel)) {
+        throw new HarnessStagingError(
+          "mdx-derivability",
+          key,
+          `the staged-source record ${JSON.stringify(contents.name)} is an ` +
+            "MDX source and the path is not an `.mdx` path — a path S-9 " +
+            "does not judge takes plain contents",
+        );
+      }
+      if (declaration !== undefined) {
+        throw new HarnessStagingError(
+          "mdx-derivability",
+          key,
+          `the staged-source record ${JSON.stringify(contents.name)} ` +
+            `carries its own S-9 declaration ${JSON.stringify(contents.mdx)}; ` +
+            `the \`mdx\` option ${JSON.stringify(declaration)} beside it is ` +
+            "a contradiction — the record's declaration is the one the S-9 " +
+            "self-test verified, so drop the option (or change the record)",
+        );
+      }
+      data = toBytes(contents.source);
+      declaration = contents.mdx;
+    } else {
+      data = toBytes(contents);
+    }
+    this.checkMdx(rel, data, declaration);
+    await this.write(rel, data);
+  }
+
+  /**
+   * Rewrite one spelling in a file's current bytes — `from` replaced by `to`
+   * once, in the UTF-8 decoding of the bytes as they stand — and stage the
+   * result under the path's S-9 declaration (the workspace declaration's,
+   * else well-formed), judged at staging time like every `.mdx` write. This
+   * stages an edit of bytes the PRODUCT wrote — a rename's or move's
+   * rewritten source, which no harness constant equals and which nothing can
+   * judge before the product exists — never of a file whose current bytes
+   * are the harness's own staging: that edit is a deterministic fixture,
+   * computed at module level from the constant as a staged-source record
+   * (helpers/staged-mdx.ts) and staged with `file()`. A `from` the file does
+   * not contain is a harness staging error, never a product verdict.
+   */
+  async edit(rel: string, from: string, to: string): Promise<void> {
+    const current = Buffer.from(await this.readBytes(rel)).toString("utf8");
+    if (!current.includes(from)) {
+      throw new Error(
+        `harness staging: ${rel} does not contain ${JSON.stringify(from)}`,
+      );
+    }
+    const data = Buffer.from(current.replace(from, to), "utf8");
+    this.checkMdx(rel, data, undefined);
+    await this.write(rel, data);
   }
 
   /** The S-9 declaration in effect for a staged path (`.mdx` paths only). */
@@ -261,48 +329,14 @@ export class TestWorkspace {
   ): void {
     if (!isMdxPath(rel)) return;
     const declaration = override ?? this.mdxDeclarationOf(rel);
-    if (declaration === undefined || declaration === "unchecked") return;
-    const key = mdxKey(rel);
-    const allowances =
-      typeof declaration === "object" ? declaration.allowances : undefined;
-    if (allowances !== undefined) assertKnownAllowances(key, allowances);
-    const verdict = deriveMdx(
-      data,
-      allowances === undefined ? undefined : { allowances },
-    );
-    if (declaration === "unparseable") {
-      if (verdict.derives) {
-        throw new HarnessStagingError(
-          "mdx-derivability",
-          key,
-          "declared unparseable (`mdx.unparseable`) but the source derives " +
-            "under the stock MDX 3 parser — SPEC 14.20 admits it; declare " +
-            "it well-formed (the default) or, if it relies on an early " +
-            "error 14.20 admits, name its allowance",
-        );
-      }
-      return;
-    }
-    if (!verdict.derives) {
-      const where =
-        verdict.position === undefined
-          ? ""
-          : ` at line ${verdict.position.line}, column ${verdict.position.column} (offset ${verdict.position.offset})`;
-      const declared =
-        allowances === undefined
-          ? "declared well-formed (S-9's default)"
-          : `declared well-formed under the allowances ${JSON.stringify(allowances)}`;
-      throw new HarnessStagingError(
-        "mdx-derivability",
-        key,
-        `${declared} but the stock MDX 3 parser rejects it${where}: ` +
-          `${verdict.reason} — list the path under \`mdx.unparseable\` if ` +
-          "TEST-SPEC declares the source unparseable (SPEC 14.20), name " +
-          "its allowance if it relies on an early error 14.20 admits, or " +
-          "under `mdx.unchecked` only if the document does not declare " +
-          "its derivability (S-9)",
-      );
-    }
+    if (declaration === undefined) return;
+    judgeMdxDeclaration(mdxKey(rel), data, declaration);
+  }
+
+  private async write(rel: RelPath, data: Uint8Array): Promise<void> {
+    const abs = this.resolve(rel);
+    await ensureParent(abs);
+    await fsp.writeFile(abs, data);
   }
 
   /** Create a directory (and parents). */
@@ -500,6 +534,71 @@ export class TestWorkspace {
       );
     }
   }
+}
+
+/**
+ * S-9's judge — one code path for the builder (every `.mdx` staging, as it
+ * is written) and the self-tests (every staged-source record, before any
+ * product exists): `data`, a source's exact bytes, must match `declaration`
+ * — derive under the stock MDX 3 parser when declared well-formed (under
+ * exactly the named allowances when it names any), not derive when declared
+ * unparseable — or a `HarnessStagingError` of mode `mdx-derivability` names
+ * `key` (the staged path, or a record's name) and the parser's reason. An
+ * `unchecked` declaration judges nothing.
+ */
+export function judgeMdxDeclaration(
+  key: string,
+  data: Uint8Array,
+  declaration: MdxFileDeclaration,
+): void {
+  if (declaration === "unchecked") return;
+  const allowances =
+    typeof declaration === "object" ? declaration.allowances : undefined;
+  if (allowances !== undefined) assertKnownAllowances(key, allowances);
+  const verdict = deriveMdx(
+    data,
+    allowances === undefined ? undefined : { allowances },
+  );
+  if (declaration === "unparseable") {
+    if (verdict.derives) {
+      throw new HarnessStagingError(
+        "mdx-derivability",
+        key,
+        "declared unparseable (`mdx.unparseable`) but the source derives " +
+          "under the stock MDX 3 parser — SPEC 14.20 admits it; declare " +
+          "it well-formed (the default) or, if it relies on an early " +
+          "error 14.20 admits, name its allowance",
+      );
+    }
+    return;
+  }
+  if (!verdict.derives) {
+    const where =
+      verdict.position === undefined
+        ? ""
+        : ` at line ${verdict.position.line}, column ${verdict.position.column} (offset ${verdict.position.offset})`;
+    const declared =
+      allowances === undefined
+        ? "declared well-formed (S-9's default)"
+        : `declared well-formed under the allowances ${JSON.stringify(allowances)}`;
+    throw new HarnessStagingError(
+      "mdx-derivability",
+      key,
+      `${declared} but the stock MDX 3 parser rejects it${where}: ` +
+        `${verdict.reason} — list the path under \`mdx.unparseable\` if ` +
+        "TEST-SPEC declares the source unparseable (SPEC 14.20), name " +
+        "its allowance if it relies on an early error 14.20 admits, or " +
+        "under `mdx.unchecked` only if the document does not declare " +
+        "its derivability (S-9)",
+    );
+  }
+}
+
+/** A declared file's bytes: a string encoded as UTF-8, bytes verbatim. */
+function toBytes(contents: FileContents): Uint8Array {
+  return typeof contents === "string"
+    ? Buffer.from(contents, "utf8")
+    : contents;
 }
 
 const MDX_SUFFIX = Buffer.from(".mdx", "utf8");

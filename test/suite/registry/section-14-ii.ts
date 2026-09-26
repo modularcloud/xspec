@@ -260,25 +260,6 @@ async function assertRecovers(
   );
 }
 
-/**
- * Rewrite one spelling in a source's current bytes (the bytes the fixture's
- * prior rename left), never a recomposed constant — a staging edit.
- */
-async function editSource(
-  workspace: TestWorkspace,
-  rel: string,
-  from: string,
-  to: string,
-): Promise<void> {
-  const current = Buffer.from(await workspace.readBytes(rel)).toString("utf8");
-  if (!current.includes(from)) {
-    throw new Error(
-      `harness staging: ${rel} does not contain ${JSON.stringify(from)}`,
-    );
-  }
-  await workspace.file(rel, current.replace(from, to));
-}
-
 /** The bytes of the snapshot's plain file at `rel`. */
 function fileBytes(
   snapshot: DirectorySnapshot,
@@ -557,7 +538,7 @@ async function sessionFileArm(product: ProductBinding): Promise<void> {
       RESOLVE_SCOPE,
       `${context} staging`,
     );
-    await editSource(workspace, RENAME_A_PATH, A_EDIT_FROM, A_EDIT_TO);
+    await workspace.edit(RENAME_A_PATH, A_EDIT_FROM, A_EDIT_TO);
     const staged = await snapshotWorkspace(workspace.root);
     const result = await runHeldWithStaging(
       product,
@@ -624,7 +605,7 @@ async function derivedPathArm(product: ProductBinding): Promise<void> {
           JSON.stringify([...prepared.before.entries.keys()]),
       );
     }
-    await editSource(workspace, RENAME_B_PATH, B_EDIT_FROM, B_EDIT_TO);
+    await workspace.edit(RENAME_B_PATH, B_EDIT_FROM, B_EDIT_TO);
     const result = await runStaged(
       product,
       workspace,
@@ -738,7 +719,7 @@ async function reportersArm(product: ProductBinding): Promise<void> {
       0,
       `${context} staging \`review create --strategy audit --name s\` (SPEC 10.7)`,
     );
-    await editSource(workspace, RENAME_B_PATH, B_EDIT_FROM, B_EDIT_TO);
+    await workspace.edit(RENAME_B_PATH, B_EDIT_FROM, B_EDIT_TO);
     const staged = await snapshotWorkspace(workspace.root);
     const staging = await refusalUnder(GRAPH_DATA_AREA)(workspace.root);
     try {
@@ -905,8 +886,8 @@ async function failingTwinArm(product: ProductBinding): Promise<void> {
   );
   const { workspace } = prepared;
   try {
-    await editSource(workspace, RENAME_B_PATH, B_EDIT_FROM, B_EDIT_TO);
-    await editSource(workspace, RENAME_A_PATH, A_REFERENCE, A_UNRESOLVED);
+    await workspace.edit(RENAME_B_PATH, B_EDIT_FROM, B_EDIT_TO);
+    await workspace.edit(RENAME_A_PATH, A_REFERENCE, A_UNRESOLVED);
     const staged = await snapshotWorkspace(workspace.root);
     const result = await runStaged(
       product,
@@ -934,7 +915,7 @@ async function failingTwinArm(product: ProductBinding): Promise<void> {
       `${context}: nothing written on the failing workspace (SPEC 13.3)`,
     );
     // Recovery: the harness's own invalidity reverted, then `build`/`check`.
-    await editSource(workspace, RENAME_A_PATH, A_UNRESOLVED, A_REFERENCE);
+    await workspace.edit(RENAME_A_PATH, A_UNRESOLVED, A_REFERENCE);
     await assertRecovers(product, workspace, context);
   } finally {
     await workspace.dispose();
@@ -2361,7 +2342,7 @@ async function discoveryListingArm(product: ProductBinding): Promise<void> {
     // The failing twin on the same workspace: A's reference respelled to
     // resolve nowhere (14.5) — the read failure is still what `build`
     // reports, never the findings.
-    await editSource(workspace, RENAME_A_PATH, A_REFERENCE, A_UNRESOLVED);
+    await workspace.edit(RENAME_A_PATH, A_REFERENCE, A_UNRESOLVED);
     const twinStaging = await stageReadRefusalOfDirectory(
       workspace.path(SUB_DIR),
     );
@@ -2377,7 +2358,7 @@ async function discoveryListingArm(product: ProductBinding): Promise<void> {
     } finally {
       await twinStaging.restore();
     }
-    await editSource(workspace, RENAME_A_PATH, A_UNRESOLVED, A_REFERENCE);
+    await workspace.edit(RENAME_A_PATH, A_UNRESOLVED, A_REFERENCE);
     await assertRecovers(product, workspace, context);
   } finally {
     await workspace.dispose();
