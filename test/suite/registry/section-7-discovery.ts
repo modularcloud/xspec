@@ -68,6 +68,19 @@
 //   is reported as a diagnosed assertion failure: nontermination is exactly
 //   the product defect that arm tests (SPEC 7).
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts).
+// - Staged-source records (TEST-SPEC S-9's before-any-product clause;
+//   helpers/staged-mdx.ts): every `.mdx` file a body stages in a workspace
+//   created after its first product invocation — T7-4's probe workspaces
+//   past the semantics one (`StagedProbe.source`) and its outside-root
+//   arms, T7-6's arms past (a) — is a ledger record, judged by
+//   test/self/s9-staged-sources.test.ts before any product exists: the
+//   minimal `a` and `b` sources are section-7-basics.ts's shared records,
+//   `c`, `m`, and `n` this module's, and T7-6's import arms' sources their
+//   own. Each body's first workspace (T7-4's semantics probes, T7-5's link
+//   workspace, T7-6's exclusion workspace) precedes any invocation and stays
+//   plain; the files T7-4 and T7-5 write beside the root (`stageBesideRoot`,
+//   a raw write outside the builder) stay strings — `x/M.mdx` the one the
+//   `m` record is made from.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -86,9 +99,15 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import type {
+  InitialFileContents,
+  WorkspaceDecl,
+} from "../../helpers/workspace.js";
+import { SECTION_A_SOURCE, SECTION_B_SOURCE } from "./section-7-basics.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -112,6 +131,28 @@ import {
 function mdxSection(id: string): string {
   return `<S id="${id}">\nText for ${id}.\n</S>\n`;
 }
+
+// This module's own staged-source records (module header), beside
+// section-7-basics.ts's shared `a` and `b`: the minimal sources T7-4's later
+// probe workspaces stage — `c`, the control of the casing and inside-root
+// workspaces; `m` and `n`, the inside-root decoys, `n` also T7-6's no-group
+// source at `notes/N.mdx` — one record per byte sequence, named with every
+// staging test and path.
+const SECTION_C_SOURCE = stagedMdx(
+  "T7-4 ctl/C.mdx (the minimal section c, the control source)",
+  mdxSection("c"),
+);
+/** `mdxSection("m")`: the `b/M.mdx` decoy's record is made from it, and
+ * `stageBesideRoot` writes it at `x/M.mdx` beside the root. */
+const M_SOURCE = mdxSection("m");
+const SECTION_M_SOURCE = stagedMdx(
+  "T7-4 b/M.mdx (the minimal section m, the ascent decoy)",
+  M_SOURCE,
+);
+const SECTION_N_SOURCE = stagedMdx(
+  "T7-4/T7-6 the minimal section n (T7-4's a/N.mdx; T7-6's notes/N.mdx)",
+  mdxSection("n"),
+);
 
 /**
  * A declarative configuration (SPEC 7) whose `specs` map holds exactly the
@@ -201,12 +242,26 @@ interface DiscoveryProbe {
   readonly path: string;
   readonly id: string;
   readonly discovered: boolean;
+  /**
+   * The staged-source record holding `mdxSection(id)` — required of every
+   * probe of a workspace created after T7-4's first product invocation
+   * (`StagedProbe`; module header); absent for the semantics probes, the
+   * body's first workspace, staged plain.
+   */
+  readonly source?: StagedMdx;
 }
 
-function probeFiles(probes: readonly DiscoveryProbe[]): Record<string, string> {
-  const files: Record<string, string> = {};
+/** A probe of a later workspace: its source a ledger record. */
+interface StagedProbe extends DiscoveryProbe {
+  readonly source: StagedMdx;
+}
+
+function probeFiles(
+  probes: readonly DiscoveryProbe[],
+): Record<string, InitialFileContents> {
+  const files: Record<string, InitialFileContents> = {};
   for (const probe of probes) {
-    files[probe.path] = mdxSection(probe.id);
+    files[probe.path] = probe.source ?? mdxSection(probe.id);
   }
   return files;
 }
@@ -313,10 +368,15 @@ const CASING_GROUPS: Readonly<Record<string, readonly string[]>> = {
   control: ["ctl/*.mdx"],
 };
 
-const CASING_PROBES: readonly DiscoveryProbe[] = [
-  { path: "specs/A.mdx", id: "a", discovered: false },
-  { path: "specs2/B.mdx", id: "b", discovered: false },
-  { path: "ctl/C.mdx", id: "c", discovered: true },
+const CASING_PROBES: readonly StagedProbe[] = [
+  { path: "specs/A.mdx", id: "a", discovered: false, source: SECTION_A_SOURCE },
+  {
+    path: "specs2/B.mdx",
+    id: "b",
+    discovered: false,
+    source: SECTION_B_SOURCE,
+  },
+  { path: "ctl/C.mdx", id: "c", discovered: true, source: SECTION_C_SOURCE },
 ];
 
 /**
@@ -361,17 +421,46 @@ export async function runT74SingleCasingGlobProbe(
 const BYTE_ONE_GROUPS: Readonly<Record<string, readonly string[]>> = {
   one: ["bytes/?.mdx"],
 };
-const BYTE_ONE_PROBES: readonly DiscoveryProbe[] = [
-  { path: "bytes/é.mdx", id: "etwo", discovered: false },
-  { path: "bytes/x.mdx", id: "xone", discovered: true },
+const BYTE_ONE_PROBES: readonly StagedProbe[] = [
+  {
+    path: "bytes/é.mdx",
+    id: "etwo",
+    discovered: false,
+    source: stagedMdx(
+      "T7-4 byte probes bytes/é.mdx (etwo, under bytes/?.mdx)",
+      mdxSection("etwo"),
+    ),
+  },
+  {
+    path: "bytes/x.mdx",
+    id: "xone",
+    discovered: true,
+    source: stagedMdx(
+      "T7-4 byte probes bytes/x.mdx (xone)",
+      mdxSection("xone"),
+    ),
+  },
 ];
 const BYTE_TWO_GROUPS: Readonly<Record<string, readonly string[]>> = {
   two: ["bytes/??.mdx"],
   anyRun: ["bytes2/*.mdx"],
 };
-const BYTE_TWO_PROBES: readonly DiscoveryProbe[] = [
-  { path: "bytes/é.mdx", id: "e1", discovered: true },
-  { path: "bytes2/é.mdx", id: "e2", discovered: true },
+const BYTE_TWO_PROBES: readonly StagedProbe[] = [
+  {
+    path: "bytes/é.mdx",
+    id: "e1",
+    discovered: true,
+    source: stagedMdx(
+      "T7-4 byte probes bytes/é.mdx (e1, under bytes/??.mdx)",
+      mdxSection("e1"),
+    ),
+  },
+  {
+    path: "bytes2/é.mdx",
+    id: "e2",
+    discovered: true,
+    source: stagedMdx("T7-4 byte probes bytes2/é.mdx (e2)", mdxSection("e2")),
+  },
 ];
 
 // Configuration-directory resolution (T7-4: all paths resolve relative to the
@@ -383,9 +472,25 @@ const BYTE_TWO_PROBES: readonly DiscoveryProbe[] = [
 const CONFIG_DIR_GROUPS: Readonly<Record<string, readonly string[]>> = {
   main: ["specs/*.mdx"],
 };
-const CONFIG_DIR_PROBES: readonly DiscoveryProbe[] = [
-  { path: "specs/A.mdx", id: "roota", discovered: true },
-  { path: "sub/specs/B.mdx", id: "nested", discovered: false },
+const CONFIG_DIR_PROBES: readonly StagedProbe[] = [
+  {
+    path: "specs/A.mdx",
+    id: "roota",
+    discovered: true,
+    source: stagedMdx(
+      "T7-4 configuration-directory probes specs/A.mdx (roota)",
+      mdxSection("roota"),
+    ),
+  },
+  {
+    path: "sub/specs/B.mdx",
+    id: "nested",
+    discovered: false,
+    source: stagedMdx(
+      "T7-4 configuration-directory probes sub/specs/B.mdx (nested)",
+      mdxSection("nested"),
+    ),
+  },
 ];
 
 // Outside-root patterns by spelling alone (SPEC 7, 14.14; module header):
@@ -404,7 +509,7 @@ const OUTSIDE_ROOT_PATTERNS: readonly string[] = [
   "../x/*.mdx", // the plain ascent
 ];
 const BESIDE_ROOT_MATCH: Readonly<Record<string, string>> = {
-  "x/M.mdx": mdxSection("m"),
+  "x/M.mdx": M_SOURCE,
 };
 
 // Inside-root spellings that match nothing (SPEC 7: every glob not outside
@@ -428,11 +533,11 @@ const INSIDE_NO_MATCH_SPELLINGS: readonly string[] = [
 // directory name; other platforms' semantics for `C:` are not staged.
 const DRIVE_QUALIFIED_SPELLING = "C:/specs/*.mdx";
 const CONTROL_GLOB = "ctl/*.mdx";
-const INSIDE_NO_MATCH_PROBES: readonly DiscoveryProbe[] = [
-  { path: "ctl/C.mdx", id: "c", discovered: true },
-  { path: "specs/A.mdx", id: "a", discovered: false },
-  { path: "b/M.mdx", id: "m", discovered: false },
-  { path: "a/N.mdx", id: "n", discovered: false },
+const INSIDE_NO_MATCH_PROBES: readonly StagedProbe[] = [
+  { path: "ctl/C.mdx", id: "c", discovered: true, source: SECTION_C_SOURCE },
+  { path: "specs/A.mdx", id: "a", discovered: false, source: SECTION_A_SOURCE },
+  { path: "b/M.mdx", id: "m", discovered: false, source: SECTION_M_SOURCE },
+  { path: "a/N.mdx", id: "n", discovered: false, source: SECTION_N_SOURCE },
 ];
 
 /**
@@ -603,7 +708,7 @@ const T7_4 = defineProductTest({
               main: ["specs/*.mdx"],
               escape: [pattern],
             }),
-            "specs/A.mdx": mdxSection("a"),
+            "specs/A.mdx": SECTION_A_SOURCE,
           },
         },
         async (workspace) => {
@@ -895,8 +1000,19 @@ const CODE_EXCLUDED: readonly {
 // never add files to the workspace — the designated file must already be a
 // discovered source of a configured spec group, else 14.15).
 const IMPORT_NEG_LINE = 'import U from "../other/unlisted.xspec"';
-const IMPORT_NEG_SOURCE = `${IMPORT_NEG_LINE}\n\n<S id="a">\nAlpha behavior.\n</S>\n`;
-const IMPORT_POS_SOURCE = `import B from "./sub/B.xspec"\n\n<S id="a">\nAlpha behavior.\n</S>\n`;
+const IMPORT_NEG_SOURCE = stagedMdx(
+  "T7-6 specs/A.mdx importing the unmatched other/unlisted.mdx",
+  `${IMPORT_NEG_LINE}\n\n<S id="a">\nAlpha behavior.\n</S>\n`,
+);
+/** The existing but unmatched file the invalid import designates. */
+const UNLISTED_SOURCE = stagedMdx(
+  "T7-6 other/unlisted.mdx (existing, matched by no group)",
+  mdxSection("u"),
+);
+const IMPORT_POS_SOURCE = stagedMdx(
+  "T7-6 specs/A.mdx importing the discovered specs/sub/B.mdx",
+  `import B from "./sub/B.xspec"\n\n<S id="a">\nAlpha behavior.\n</S>\n`,
+);
 
 const T7_6 = defineProductTest({
   id: "T7-6",
@@ -955,7 +1071,7 @@ const T7_6 = defineProductTest({
       {
         files: {
           "xspec.config.ts": CODE_EXCLUSION_CONFIG,
-          "specs/A.mdx": mdxSection("a"),
+          "specs/A.mdx": SECTION_A_SOURCE,
           "specs/A.md": "User-authored file at the emit destination.\n",
           "src/plain.ts": PLAIN_TS,
           ".xspec/staged.ts": STAGED_UNDER_XSPEC_TS,
@@ -1058,7 +1174,7 @@ const T7_6 = defineProductTest({
         files: {
           "xspec.config.ts": specGroupsConfig({ main: ["specs/*.mdx"] }),
           "specs/A.mdx": IMPORT_NEG_SOURCE,
-          "other/unlisted.mdx": mdxSection("u"),
+          "other/unlisted.mdx": UNLISTED_SOURCE,
         },
       },
       async (workspace) => {
@@ -1083,7 +1199,7 @@ const T7_6 = defineProductTest({
         files: {
           "xspec.config.ts": specGroupsConfig({ main: ["specs/**/*.mdx"] }),
           "specs/A.mdx": IMPORT_POS_SOURCE,
-          "specs/sub/B.mdx": mdxSection("b"),
+          "specs/sub/B.mdx": SECTION_B_SOURCE,
         },
       },
       async (workspace) => {
@@ -1115,7 +1231,7 @@ const T7_6 = defineProductTest({
             main: ["specs/*.mdx"],
             vacant: ["vacant/**/*.mdx"],
           }),
-          "specs/A.mdx": mdxSection("a"),
+          "specs/A.mdx": SECTION_A_SOURCE,
         },
       },
       async (workspace) => {
@@ -1147,7 +1263,7 @@ export default defineConfig({
   code: {}
 })
 `,
-          "notes/N.mdx": mdxSection("n"),
+          "notes/N.mdx": SECTION_N_SOURCE,
         },
       },
       async (workspace) => {

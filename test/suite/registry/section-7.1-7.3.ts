@@ -75,6 +75,18 @@
 //   14.15 finding (`emit: true` — the specifier designates a configured
 //   destination) and a clean build (`emit: false` — no path is a
 //   destination, so the ordinary import is outside xspec's validations).
+// - Staged-source records (TEST-SPEC S-9's before-any-product clause;
+//   helpers/staged-mdx.ts): every `.mdx` file a body stages in a workspace
+//   created after its first product invocation — `expectConfigRefused`'s
+//   one staging site, T7.1-1's non-`.mdx`-match workspace, T7.3-1's
+//   `EMISSION_FILES` (its first workspace's too, the map being shared) and
+//   destination workspaces — is a ledger record, judged by
+//   test/self/s9-staged-sources.test.ts before any product exists: the
+//   minimal `a` and `b` sources are section-7-basics.ts's shared records,
+//   staged byte-identically by the three §7 modules. T7.1-1's two-group
+//   workspace and T7.2-1's overlap workspace, each its body's first,
+//   precede any invocation and stay plain; `specs/notes.txt` is no `.mdx`
+//   path and stays a string.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -105,7 +117,11 @@ import {
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import type {
+  InitialFileContents,
+  WorkspaceDecl,
+} from "../../helpers/workspace.js";
+import { SECTION_A_SOURCE, SECTION_B_SOURCE } from "./section-7-basics.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -191,7 +207,7 @@ async function expectConfigRefused(
     {
       files: {
         "xspec.config.ts": config,
-        "specs/A.mdx": mdxSection("a"),
+        "specs/A.mdx": SECTION_A_SOURCE,
       },
     },
     async (workspace) => {
@@ -492,7 +508,7 @@ export default defineConfig({
   }
 })
 `,
-          "specs/A.mdx": mdxSection("a"),
+          "specs/A.mdx": SECTION_A_SOURCE,
           "specs/notes.txt": mdxSection("n"),
         },
       },
@@ -592,9 +608,9 @@ export default defineConfig({
 // outDir path preservation are both observable. Compiled bytes are fixed by
 // SPEC 3 (the tag-only lines drop with their terminators; the content line
 // keeps its own): byte-asserted per H-4; compilation semantics are T3-*'s.
-const EMISSION_FILES: Readonly<Record<string, string>> = {
-  "specs/A.mdx": mdxSection("a"),
-  "specs/sub/B.mdx": mdxSection("b"),
+const EMISSION_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "specs/A.mdx": SECTION_A_SOURCE,
+  "specs/sub/B.mdx": SECTION_B_SOURCE,
 };
 const A_COMPILED = "Text for a.\n";
 const B_COMPILED = "Text for b.\n";
@@ -687,8 +703,10 @@ export default defineConfig({
 `;
 }
 
-const DESTINATION_DISCOVERY_FILES: Readonly<Record<string, string>> = {
-  "specs/A.mdx": mdxSection("a"),
+const DESTINATION_DISCOVERY_FILES: Readonly<
+  Record<string, InitialFileContents>
+> = {
+  "specs/A.mdx": SECTION_A_SOURCE,
   "specs/A.md": DESTINATION_CODE_SOURCE,
 };
 
@@ -723,10 +741,11 @@ export default defineConfig({
 `;
 }
 
-const DESTINATION_IMPORT_FILES: Readonly<Record<string, string>> = {
-  "specs/A.mdx": mdxSection("a"),
-  "src/use.ts": `${DESTINATION_IMPORT_STATEMENT}\n`,
-};
+const DESTINATION_IMPORT_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    "specs/A.mdx": SECTION_A_SOURCE,
+    "src/use.ts": `${DESTINATION_IMPORT_STATEMENT}\n`,
+  };
 
 // Classification-by-configuration-alone arm (SPEC 7.3 "whether or not
 // emission has yet run"): emission enabled, no emission ever run, a
@@ -1063,7 +1082,7 @@ const T7_3_1 = defineProductTest({
       {
         files: {
           "xspec.config.ts": CONFIG_ALONE_CONFIG,
-          "specs/A.mdx": mdxSection("a"),
+          "specs/A.mdx": SECTION_A_SOURCE,
           "specs/A.md": USER_AUTHORED_DESTINATION,
         },
       },

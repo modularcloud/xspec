@@ -149,6 +149,18 @@
 //   point EF BF BD between two letters — a string-literal group key, a
 //   profile name, a rule name — so 14.14's name rule, never the encoding
 //   rule, is at stake; each fixture is otherwise valid.
+// - Staged-source records (TEST-SPEC S-9's before-any-product clause;
+//   helpers/staged-mdx.ts): every `.mdx` file a body stages in a workspace
+//   created after its first product invocation — `expectConfigRefused`'s
+//   one staging site (serving every arm, the first included), T7-1's
+//   no-configuration and occupancy workspaces, T7-2's and T7-3's later
+//   arms — is a ledger record, judged by test/self/s9-staged-sources.test.ts
+//   before any product exists. The minimal `mdxSection("a")` and
+//   `mdxSection("b")` sources are staged byte-identically by this module,
+//   section-7-discovery.ts, and section-7.1-7.3.ts, so each is ONE record,
+//   exported from here and named with every staging test in ID order and
+//   every path. T7-1's first workspace (`LOCATION_FILES`) precedes any
+//   invocation and stays plain.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -172,10 +184,15 @@ import {
   assertSnapshotsEqual,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { FileContents, WorkspaceDecl } from "../../helpers/workspace.js";
+import type {
+  FileContents,
+  InitialFileContents,
+  WorkspaceDecl,
+} from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -196,6 +213,22 @@ import {
 function mdxSection(id: string): string {
   return `<S id="${id}">\nText for ${id}.\n</S>\n`;
 }
+
+// The minimal sources the §7 modules stage in workspaces created after a
+// body's first product invocation (module header): byte-identical wherever
+// they are staged — `mdxSection("a")` at `specs/A.mdx` here and in
+// section-7-discovery.ts and section-7.1-7.3.ts; `mdxSection("b")` at
+// `specs/sub/B.mdx` (T7-3, T7-6, T7.3-1) and `specs2/B.mdx` (T7-4) — so each
+// is ONE staged-source record, named with every staging test in ID order and
+// every path; the other two modules import them.
+export const SECTION_A_SOURCE = stagedMdx(
+  "T7-1/T7-2/T7-3/T7-4/T7-6/T7.1-1/T7.3-1 specs/A.mdx (the minimal section a)",
+  mdxSection("a"),
+);
+export const SECTION_B_SOURCE = stagedMdx(
+  "T7-3/T7-4/T7-6/T7.3-1 the minimal section b (specs/sub/B.mdx; T7-4's specs2/B.mdx)",
+  mdxSection("b"),
+);
 
 // The canonical valid configuration (SPEC 7): exactly one spec group, no
 // optional keys. Every T7-2 violation below is this file with one deviation.
@@ -247,7 +280,7 @@ async function expectConfigRefused(
     {
       files: {
         "xspec.config.ts": config,
-        "specs/A.mdx": mdxSection("a"),
+        "specs/A.mdx": SECTION_A_SOURCE,
       },
     },
     async (workspace) => {
@@ -344,7 +377,7 @@ const OCCUPANCY_LINK_ENTRY = `${OCCUPANCY_LINK_CWD}/${OCCUPANT_NAME}`;
 const OCCUPANCY_WORKSPACE: WorkspaceDecl = {
   files: {
     "xspec.config.ts": SPECS_ONLY_CONFIG,
-    "specs/A.mdx": mdxSection("a"),
+    "specs/A.mdx": SECTION_A_SOURCE,
   },
   dirs: [OCCUPANCY_DIR_ENTRY],
   // The link's target is spelled relative to the link's own directory: the
@@ -715,7 +748,7 @@ const T7_1 = defineProductTest({
     // xspec.config.ts anywhere on the upward path (module header) — a
     // configuration error, not a crash and not an empty success.
     await withWorkspace(
-      { files: { "specs/A.mdx": mdxSection("a") } },
+      { files: { "specs/A.mdx": SECTION_A_SOURCE } },
       async (workspace) => {
         await expectConfigurationError(
           product,
@@ -939,9 +972,11 @@ export default defineConfig({
 // locally on `a` (SPEC 2.2's string form) — and the code group's file holds
 // one top-level marker, so its code location is the file itself (SPEC 4.5,
 // 4.6; the T8-3 shape).
-const QUOTED_KEYS_FILES: Readonly<Record<string, string>> = {
+const QUOTED_KEYS_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": QUOTED_KEYS_CONFIG,
-  "specs/A.mdx": `<S id="a">
+  "specs/A.mdx": stagedMdx(
+    "T7-2 string-literal keys specs/A.mdx",
+    `<S id="a">
 Covered leaf.
 </S>
 
@@ -949,6 +984,7 @@ Covered leaf.
 Dependent leaf.
 </S>
 `,
+  ),
   "src/impl.ts": `import SPEC from "../specs/A.xspec";
 
 SPEC.a;
@@ -1186,7 +1222,7 @@ const T7_2 = defineProductTest({
       {
         files: {
           "xspec.config.ts": ALIASED_CONFIG,
-          "specs/A.mdx": mdxSection("a"),
+          "specs/A.mdx": SECTION_A_SOURCE,
         },
       },
       async (workspace) => {
@@ -1345,7 +1381,7 @@ const T7_2 = defineProductTest({
       {
         files: {
           "xspec.config.ts": VERBATIM_GLOB_CONFIG,
-          "specs/A.mdx": mdxSection("a"),
+          "specs/A.mdx": SECTION_A_SOURCE,
         },
       },
       async (workspace) => {
@@ -1407,7 +1443,7 @@ const T7_2 = defineProductTest({
       {
         files: {
           "xspec.config.ts": verbatimNameConfig(VERBATIM_GROUP_NAME),
-          "specs/A.mdx": mdxSection("a"),
+          "specs/A.mdx": SECTION_A_SOURCE,
         },
       },
       async (workspace) => {
@@ -1491,7 +1527,7 @@ const T7_2 = defineProductTest({
         {
           files: {
             "xspec.config.ts": config,
-            "specs/A.mdx": mdxSection("a"),
+            "specs/A.mdx": SECTION_A_SOURCE,
           },
         },
         async (workspace) => {
@@ -1779,16 +1815,19 @@ export default defineConfig({
 })
 `;
 
-const PRODUCT_MDX = `import O from "../other/O.xspec"
+const PRODUCT_MDX = stagedMdx(
+  "T7-3 specs/product/P.mdx",
+  `import O from "../other/O.xspec"
 
 <S id="p" d={O.o}>
 Product behavior depending on other.
 </S>
-`;
+`,
+);
 
-const OTHER_MDX = mdxSection("o");
+const OTHER_MDX = stagedMdx("T7-3 specs/other/O.mdx", mdxSection("o"));
 
-const VIOLATING_EDGE_FILES: Readonly<Record<string, string>> = {
+const VIOLATING_EDGE_FILES: Readonly<Record<string, InitialFileContents>> = {
   "specs/product/P.mdx": PRODUCT_MDX,
   "specs/other/O.mdx": OTHER_MDX,
 };
@@ -1946,7 +1985,7 @@ const T7_3 = defineProductTest({
       {
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/A.mdx": mdxSection("a"),
+          "specs/A.mdx": SECTION_A_SOURCE,
           "src/impl.ts": MARKER_TS,
         },
       },
@@ -2002,8 +2041,8 @@ const T7_3 = defineProductTest({
       {
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/A.mdx": mdxSection("a"),
-          "specs/sub/B.mdx": mdxSection("b"),
+          "specs/A.mdx": SECTION_A_SOURCE,
+          "specs/sub/B.mdx": SECTION_B_SOURCE,
         },
       },
       async (workspace) => {
@@ -2025,7 +2064,7 @@ const T7_3 = defineProductTest({
       {
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/A.mdx": mdxSection("a"),
+          "specs/A.mdx": SECTION_A_SOURCE,
         },
       },
       async (workspace) => {
