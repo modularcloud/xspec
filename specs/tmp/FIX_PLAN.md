@@ -158,6 +158,10 @@ over the rename's output) is T5.4-1's anchored `edit()`; and a conversion's
 byte identity is verifiable end to end by a temporary capture in
 `TestWorkspace.write()` (AGENTS.md's recipe) — the §10.4 file's 70 writes
 hashed identical before and after.
+As Task 13 found: the site lists' `— read` sites are template calls too (no
+§10.5/§10.6 body reads product-written bytes back, so no `edit()` there), and the
+later-arm initial `files` — T10.5-1's extended and chain fixtures, T10.5-5's
+sub-fixture B, T10.6-2's sub-fixture 2 — join the reach observation above.
 
 **Appending to product-written bytes (T5.4-1's pattern):** an append is an `edit()`
 extending the file's unique tail (`REINTRO_TAIL`, `f`'s closing run, which the rename
@@ -176,13 +180,6 @@ verdict (`unshare … -- npx vitest run --config test/vitest.config.ts --project
 reached — accepted, Task 18's guard surfaces it when the product gets there).
 
 ## Tasks
-
-### Task 13 — Ledger conversion: §10.5 and §10.6
-
-`section-10.5.ts` (496 `s15Spec`; 635 — read; 756 `ySpec`; 938 — read; 1206 `N_CURRENT`
-(1207 `N_CODE` is `.ts`); 1636 `oASpec`, 1637 `oBSpec`, 1669; 1865, 1921, 2115 — read;
-2192, 2283 `vSpec`; 2422, 2473 `c6Spec`) and `section-10.6.ts` (819 `b2Spec`; 1067, 1266
-`rSpec`). **Checks:** as the preamble's.
 
 ### Task 14 — Ledger conversion: §10.7-i
 
