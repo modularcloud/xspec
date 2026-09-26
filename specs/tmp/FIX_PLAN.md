@@ -169,6 +169,13 @@ sites (T10.7-2's `leafSpec("n", "Enn text.")` in both arms) are ONE record stage
 at both, a second registration of the name throwing at load; and T10.7-1's
 per-state corrupt-session workspaces and T10.7-2's audit arm join the reach
 observation above.
+As Task 15 found: a site list can name a git-staged pre-build edit
+(`section-10.7-ii.ts` 1807, T10.7-9's path-blocks v1 edit between
+`gitCommitAll("baseline")` and the body's first `build`) — judged and left
+plain, as the reach rule reads; every other listed `.mdx` site followed its
+body's first invocation and converted (eleven records); and T10.7-7's
+fully-resolved and payload arms, T10.7-9's audit arm, and T10.7-12's
+provenance and coverage arms join the reach observation above.
 
 **Appending to product-written bytes (T5.4-1's pattern):** an append is an `edit()`
 extending the file's unique tail (`REINTRO_TAIL`, `f`'s closing run, which the rename
@@ -187,12 +194,6 @@ verdict (`unshare … -- npx vitest run --config test/vitest.config.ts --project
 reached — accepted, Task 18's guard surfaces it when the product gets there).
 
 ## Tasks
-
-### Task 15 — Ledger conversion: §10.7-ii
-
-`section-10.7-ii.ts` (1168 `n7PbSpec`; 1680 `e8Spec`; 1807, 2001 `s9Spec`; 2133, 2265
-`s9HSpec`; 2526 `r10Spec`; 2684 `c11DSpec`; 3036, 3056 `m12Spec`; 3614, 3661 `b12Spec`;
-1169/3037/3038 are `.ts`). **Checks:** as the preamble's.
 
 ### Task 16 — Ledger conversion: §11, §12.0, §12.7
 
