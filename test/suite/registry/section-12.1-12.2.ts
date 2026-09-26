@@ -157,7 +157,9 @@ import {
   diffSnapshots,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
+import type { FileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { assertGraphDataPresent, deleteGraphData } from "./section-13.3.js";
 import {
@@ -193,7 +195,7 @@ export default defineConfig({
 
 /** Stage a fresh workspace with the given files, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, FileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({ files });
@@ -544,10 +546,20 @@ const T12_1_1 = defineProductTest({
 
 // Two independent spec files (no cross-references), so removal and manual
 // renaming keep the workspace valid (SPEC 6.6: manual restructuring is a
-// deletion plus an addition).
-const REGEN_FILES: Readonly<Record<string, string>> = {
+// deletion plus an addition). Arm 2's manual rename copies A's source to
+// specs/C.mdx after the arm-1 `build` — a staging after a product
+// invocation, so a ledger record (S-9, helpers/staged-mdx.ts) over the
+// fixture's own bytes, which `build` leaves untouched (sources are
+// product-written only by `rename`/`move`, SPEC 12.1, 6.4, 6.5 — pinned as
+// the arm's staging premise); its `.source` is the initial specs/A.mdx.
+const T12_1_3_ALPHA_SOURCE = stagedMdx(
+  "T12.1-3 specs/C.mdx — specs/A.mdx's source copied under its new name (arm 2's manual rename, after the arm-1 build)",
+  ['<S id="a1">', "Alpha behavior.", "</S>", ""].join("\n"),
+);
+
+const REGEN_FILES: Readonly<Record<string, FileContents>> = {
   "xspec.config.ts": markdownConfig(true),
-  "specs/A.mdx": ['<S id="a1">', "Alpha behavior.", "</S>", ""].join("\n"),
+  "specs/A.mdx": T12_1_3_ALPHA_SOURCE.source,
   "specs/B.mdx": ['<S id="b1">', "Beta behavior.", "</S>", ""].join("\n"),
 };
 
@@ -592,9 +604,18 @@ const T12_1_3 = defineProductTest({
       await expectFile(workspace, "specs/A.md", `${arm1} (A survives)`);
 
       // Arm 2 — manually renaming a source (6.6: deletion plus addition):
-      // A's old derived paths disappear, C's appear.
-      const sourceBytes = await workspace.readBytes("specs/A.mdx");
-      await workspace.file("specs/C.mdx", sourceBytes);
+      // A's old derived paths disappear, C's appear. The copy is the
+      // fixture's own bytes (the ledger record), so the staging premise
+      // pins first that `build` left the source untouched.
+      assertBytesEqual(
+        await workspace.readBytes("specs/A.mdx"),
+        T12_1_3_ALPHA_SOURCE.source,
+        "T12.1-3 arm 2 staging premise — `build` writes derived files and " +
+          "graph data only, never a source (SPEC 12.1; sources are " +
+          "product-written only by `rename`/`move`, 6.4, 6.5), so " +
+          "specs/A.mdx still holds the fixture's bytes for the manual rename",
+      );
+      await workspace.file("specs/C.mdx", T12_1_3_ALPHA_SOURCE);
       await fsp.rm(workspace.path("specs/A.mdx"));
       await buildOk(
         product,
@@ -633,25 +654,30 @@ const T12_1_3 = defineProductTest({
 // T12.1-4 — failed build modifies nothing
 // ---------------------------------------------------------------------------
 
-const FAILED_BUILD_VALID_SOURCE = [
-  '<S id="a1">',
-  "Alpha behavior.",
-  "</S>",
-  "",
-].join("\n");
+// The valid source: the initial specs/A.mdx of every T12.1-4, T12.2-2, and
+// T12.2-3 workspace (its `.source`) and, staged back over an edit after the
+// workspace's `build`, a ledger record (S-9, helpers/staged-mdx.ts).
+const FAILED_BUILD_VALID_SOURCE = stagedMdx(
+  "T12.1-4/T12.2-2/T12.2-3 specs/A.mdx restored to the valid source (the fixture's initial bytes, staged back after the build)",
+  ['<S id="a1">', "Alpha behavior.", "</S>", ""].join("\n"),
+);
 
 // The valid source with a nested section lacking `id` — condition 14.1, the
-// staged validation error.
-const FAILED_BUILD_INVALID_SOURCE = [
-  '<S id="a1">',
-  "Alpha behavior.",
-  "",
-  "<S>",
-  "Nested section without an id.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+// staged validation error, staged over the built valid source (a ledger
+// record, S-9).
+const FAILED_BUILD_INVALID_SOURCE = stagedMdx(
+  "T12.1-4/T12.2-2 specs/A.mdx with a nested section lacking id (14.1), staged over the built valid source",
+  [
+    '<S id="a1">',
+    "Alpha behavior.",
+    "",
+    "<S>",
+    "Nested section without an id.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // The valid configuration plus one unknown top-level key — a configuration
 // error (SPEC 7, 14.14).
@@ -674,7 +700,7 @@ const T12_1_4 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
+        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
       },
       async (workspace) => {
         // Prior derived state.
@@ -852,6 +878,27 @@ const GARBAGE_JOURNAL_LINE =
 
 const CORRUPT_SESSION_PATH = ".xspec/reviews/bad.json";
 
+// The family stagings made after each family workspace's `build` — the
+// build-validations family's second edit and the staleness and graph-data
+// families' source edits: ledger records (S-9, helpers/staged-mdx.ts).
+const T12_2_2_B_INVALID_SEGMENT = stagedMdx(
+  "T12.2-2 specs/B.mdx with an invalid ID segment (14.4), staged over the built valid source (build-validations family)",
+  ['<S id="bad name">', "Invalid segment.", "</S>", ""].join("\n"),
+);
+const T12_2_2_A_EDITED = stagedMdx(
+  "T12.2-2 specs/A.mdx with a1's text edited without rebuilding (staleness family, the edited-source arm)",
+  ['<S id="a1">', "Alpha behavior, edited.", "</S>", ""].join("\n"),
+);
+const T12_2_2_A_MISMATCH_EDIT = stagedMdx(
+  "T12.2-2 specs/A.mdx with a1's text edited for the graph-data mismatch arm (refresh-then-revert)",
+  [
+    '<S id="a1">',
+    "Alpha behavior, edited for the mismatch arm.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
 const T12_2_2 = defineProductTest({
   id: "T12.2-2",
   title:
@@ -865,7 +912,7 @@ const T12_2_2 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
+        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
         "specs/B.mdx": ['<S id="b1">', "Beta behavior.", "</S>", ""].join("\n"),
       },
       async (workspace) => {
@@ -876,10 +923,7 @@ const T12_2_2 = defineProductTest({
             "state from a prior valid build persists (SPEC 12.1)",
         );
         await workspace.file("specs/A.mdx", FAILED_BUILD_INVALID_SOURCE);
-        await workspace.file(
-          "specs/B.mdx",
-          ['<S id="bad name">', "Invalid segment.", "</S>", ""].join("\n"),
-        );
+        await workspace.file("specs/B.mdx", T12_2_2_B_INVALID_SEGMENT);
         await checkFamilyFindings(
           product,
           workspace,
@@ -898,7 +942,7 @@ const T12_2_2 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
+        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
       },
       async (workspace) => {
         const moduleRel = "specs/A.xspec.ts";
@@ -1021,10 +1065,7 @@ const T12_2_2 = defineProductTest({
           workspace,
           "T12.2-2 (staleness) rebuild between arms (SPEC 12.1)",
         );
-        await workspace.file(
-          "specs/A.mdx",
-          ['<S id="a1">', "Alpha behavior, edited.", "</S>", ""].join("\n"),
-        );
+        await workspace.file("specs/A.mdx", T12_2_2_A_EDITED);
         const arm3Findings = await checkFindings(
           product,
           workspace,
@@ -1069,7 +1110,7 @@ const T12_2_2 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
+        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
       },
       async (workspace) => {
         await buildOk(
@@ -1121,15 +1162,7 @@ const T12_2_2 = defineProductTest({
             "the rebuild",
         );
         const freshGraph = graphDataStateOf(wholeFresh);
-        await workspace.file(
-          "specs/A.mdx",
-          [
-            '<S id="a1">',
-            "Alpha behavior, edited for the mismatch arm.",
-            "</S>",
-            "",
-          ].join("\n"),
-        );
+        await workspace.file("specs/A.mdx", T12_2_2_A_MISMATCH_EDIT);
         await expectExit(
           product,
           workspace,
@@ -1183,7 +1216,7 @@ const T12_2_2 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
+        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
       },
       async (workspace) => {
         const moduleRel = "specs/A.xspec.ts";
@@ -1290,7 +1323,7 @@ const T12_2_2 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(false),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
+        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
       },
       async (workspace) => {
         await buildOk(
@@ -1334,7 +1367,7 @@ const T12_2_2 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(false),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
+        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
       },
       async (workspace) => {
         await buildOk(
@@ -1405,6 +1438,19 @@ const T12_2_2 = defineProductTest({
 // output forms run inside each compare, so the byte pin covers the human
 // and the `--json` invocation alike.
 
+// The content edit shared by the mismatch staging and the edited-source
+// state: a text-only edit to the one source (still valid, same node set),
+// staged after the state's rebuild — a ledger record (S-9).
+const T12_2_3_A_EDITED = stagedMdx(
+  "T12.2-3 specs/A.mdx with a1's text edited without rebuilding (the mismatch staging and the edited-source state)",
+  [
+    '<S id="a1">',
+    "Alpha behavior, edited without rebuilding.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
 const T12_2_3 = defineProductTest({
   id: "T12.2-3",
   title:
@@ -1413,19 +1459,9 @@ const T12_2_3 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE,
+        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
       },
       async (workspace) => {
-        // The content edit shared by the mismatch staging and the
-        // edited-source state: a text-only edit to the one source (still
-        // valid, same node set).
-        const editedSource = [
-          '<S id="a1">',
-          "Alpha behavior, edited without rebuilding.",
-          "</S>",
-          "",
-        ].join("\n");
-
         // Both `check` output forms on the current stale state: plain
         // `check` exits 1, then `check --json` decodes as the findings
         // report (SPEC 12.2, 12.0; H-3).
@@ -1501,7 +1537,7 @@ const T12_2_3 = defineProductTest({
           "T12.2-3 (mismatch) staging premise after the rebuild",
         );
         const freshGraph = graphDataStateOf(wholeFresh);
-        await workspace.file("specs/A.mdx", editedSource);
+        await workspace.file("specs/A.mdx", T12_2_3_A_EDITED);
         await expectExit(
           product,
           workspace,
@@ -1556,7 +1592,7 @@ const T12_2_3 = defineProductTest({
           workspace,
           "T12.2-3 (edited source) rebuild (SPEC 12.1)",
         );
-        await workspace.file("specs/A.mdx", editedSource);
+        await workspace.file("specs/A.mdx", T12_2_3_A_EDITED);
         await assertLeavesUnchanged(
           workspace.root,
           async () => {
@@ -1593,8 +1629,17 @@ const T12_2_4_L_PATH = "lo/L.mdx";
 const T12_2_4_L_HEAD = '<S id="l1">\nLow one.\n</S>\n\n';
 const T12_2_4_L_BROKEN_TAG = '<S id="l2" d={"nope"}>';
 const T12_2_4_L_TAIL = "\nLow two.\n</S>\n";
-const T12_2_4_L_VALID = `${T12_2_4_L_HEAD}<S id="l2">${T12_2_4_L_TAIL}`;
-const T12_2_4_L_INVALID = `${T12_2_4_L_HEAD}${T12_2_4_L_BROKEN_TAG}${T12_2_4_L_TAIL}`;
+// Both lo/L.mdx states are staged after the arm's `t1224Prepare` build —
+// ledger records (S-9, helpers/staged-mdx.ts); the valid state's `.source`
+// is also the fixture's initial entry.
+const T12_2_4_L_VALID = stagedMdx(
+  "T12.2-4 lo/L.mdx restored to the valid source (arm (d)'s repair; the fixture's initial bytes)",
+  `${T12_2_4_L_HEAD}<S id="l2">${T12_2_4_L_TAIL}`,
+);
+const T12_2_4_L_INVALID = stagedMdx(
+  "T12.2-4 lo/L.mdx with l2's `d` reference unresolved (14.5) — every arm's failing staging",
+  `${T12_2_4_L_HEAD}${T12_2_4_L_BROKEN_TAG}${T12_2_4_L_TAIL}`,
+);
 const T12_2_4_BROKEN_WINDOW = byteWindow(T12_2_4_L_HEAD, T12_2_4_L_BROKEN_TAG);
 
 /** The fixture's configuration with the `extra` group present. */
@@ -1636,7 +1681,7 @@ export default defineConfig({
 })
 `;
 
-const T12_2_4_FILES: Readonly<Record<string, string>> = {
+const T12_2_4_FILES: Readonly<Record<string, FileContents>> = {
   "xspec.config.ts": T12_2_4_CONFIG,
   "hi/H.mdx": [
     'import L from "../lo/L.xspec"',
@@ -1646,7 +1691,7 @@ const T12_2_4_FILES: Readonly<Record<string, string>> = {
     "</S>",
     "",
   ].join("\n"),
-  [T12_2_4_L_PATH]: T12_2_4_L_VALID,
+  [T12_2_4_L_PATH]: T12_2_4_L_VALID.source,
   "extra/E.mdx": ['<S id="e">', "Extra.", "</S>", ""].join("\n"),
 };
 
