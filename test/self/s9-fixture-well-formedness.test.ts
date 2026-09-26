@@ -813,6 +813,11 @@ describe("S-9: encoding rules of 14.20 the parser does not apply", () => {
     ["C0 80 (overlong)", [0xc0, 0x80], 0],
     ["ED A0 80 (surrogate)", [0xed, 0xa0, 0x80], 0],
     ["41 E2 82 at EOF (truncated)", [0x41, 0xe2, 0x82], 1],
+    [
+      "43 61 66 C3 A9 FF (a valid 5-byte prefix then FF)",
+      [0x43, 0x61, 0x66, 0xc3, 0xa9, 0xff],
+      5,
+    ],
     ["F4 90 80 80 (above U+10FFFF)", [0xf4, 0x90, 0x80, 0x80], 0],
     ["a stray continuation byte", [0x41, 0x0a, 0x80], 2],
   ])(

@@ -4377,11 +4377,13 @@ const T14_11_COLLISION_FILES = Object.entries(T4_5_8_FURTHER_LOCATED_FORMS).map(
 // well-formed UTF-8 prefix: the offset of the first byte of the first
 // ill-formed sequence, whether it is malformed or truncated by the file's
 // end, never a later byte at which a decoder notices it, and — like every
-// 14.20 range — zero-length. The four sequences SPEC 14 names, staged as
+// 14.20 range — zero-length. The five sequences SPEC 14 names, staged as
 // exact bytes in a spec source and in a code source alike (SPEC 1.6: a
-// source of either kind that is not valid UTF-8 is unparseable): `41 E2 82
-// 41` — a three-byte sequence cut short, the second `41` where a decoder
-// notices — locates 1; `C0 80` — an overlong encoding of U+0000 — 0;
+// source of either kind that is not valid UTF-8 is unparseable): a valid
+// 5-byte prefix then `FF` — `Café` (`43 61 66 C3 A9`), then a byte no UTF-8
+// sequence holds; arm (m) stages the same form as `specs/enc.mdx` — locates
+// 5; `41 E2 82 41` — a three-byte sequence cut short, the second `41` where
+// a decoder notices — 1; `C0 80` — an overlong encoding of U+0000 — 0;
 // `ED A0 80` — the surrogate code point U+D800 — 0; `41 E2 82` truncated by
 // the end of the file — 1. A decoder accepting overlong or surrogate
 // encodings decodes such a file and reports nothing; one reporting where it
@@ -4397,6 +4399,7 @@ interface EncodingForm {
   readonly offset: number;
 }
 const T14_11_ENCODING_FORMS: readonly EncodingForm[] = [
+  { name: "prefix", bytes: [0x43, 0x61, 0x66, 0xc3, 0xa9, 0xff], offset: 5 },
   { name: "cut", bytes: [0x41, 0xe2, 0x82, 0x41], offset: 1 },
   { name: "overlong", bytes: [0xc0, 0x80], offset: 0 },
   { name: "surrogate", bytes: [0xed, 0xa0, 0x80], offset: 0 },
@@ -4787,7 +4790,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
   },
   {
     arm: "v",
-    rule: "14.20 — an encoding failure's zero-length range at the first byte of the first ill-formed sequence: `41 E2 82 41` → 1, `C0 80` → 0, `ED A0 80` → 0, `41 E2 82` at the file's end → 1, a spec and a code source alike",
+    rule: "14.20 — an encoding failure's zero-length range at the first byte of the first ill-formed sequence: a valid 5-byte prefix then `FF` → 5, `41 E2 82 41` → 1, `C0 80` → 0, `ED A0 80` → 0, `41 E2 82` at the file's end → 1, a spec and a code source alike",
     config: SPEC_AND_CODE_CONFIG,
     // S-9: every spec source here is invalid UTF-8, 14.20's declared form.
     mdx: {
@@ -5018,7 +5021,7 @@ async function runRefusedReadArm(product: ProductBinding): Promise<void> {
 const T14_11 = defineProductTest({
   id: "T14-11",
   title:
-    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), a non-static bare reference exclusive of its `;`, the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms and colliding declarations (the declarator `SPEC = 1`, `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`), 14.16's construct forms (a fragment `<>` through `</>` included), 14.18's chain-extended binding, 14.20's zero-length offsets (a byte-order mark; an encoding failure at the first byte of the first ill-formed sequence — `41 E2 82 41` and `41 E2 82` at the file's end → 1, `C0 80` and `ED A0 80` → 0 — in a spec and a code source alike; syntax — its own two forms and, re-asserted the same way, the offsets T2.3-3, T2.4-2, T2.7-3, T2.7-4, and T14-12 pin; and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.6, 1.7, 2.4, 5.7, 11.2, 11.4, 12.7)",
+    "per-condition ranges: byte-precise fixtures against precomputed offsets, one arm per range rule of SPEC 14 beyond T14-8's — `d` value expressions (an array entry alone, `d={foo}`'s enclosed expression, `(BASE.a)` with its parentheses, a comma sequence whole, `BASE.missing` alone past a block comment and past U+00A0/U+FEFF, a spread entry with its `...`, the elisions of one array literal as one finding at the whole literal — two literals, two findings), `d={}` and `d={ /* c */ }` as 14.20 at the closing brace (never 14.8), a non-static bare reference exclusive of its `;`, the attribute conditions 14.2/14.3/14.4/14.17 at the attribute's own characters (one finding per violating attribute; a repeated prop locating every spelling), 14.1's opening tag, 14.15's declaration forms and colliding declarations (the declarator `SPEC = 1`, `let SPEC;` at `SPEC`, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from `@`, `export class SPEC {}` from `class`), 14.16's construct forms (a fragment `<>` through `</>` included), 14.18's chain-extended binding, 14.20's zero-length offsets (a byte-order mark; an encoding failure at the first byte of the first ill-formed sequence — a valid 5-byte prefix then `FF` → 5, `41 E2 82 41` and `41 E2 82` at the file's end → 1, `C0 80` and `ED A0 80` → 0 — in a spec and a code source alike; syntax — its own two forms and, re-asserted the same way, the offsets T2.3-3, T2.4-2, T2.7-3, T2.7-4, and T14-12 pin; and — Linux leg — a refused read), and a repeated `d`'s per-spelling resolution — every range exact, never a line/column pair (SPEC 14, 1.6, 1.7, 2.4, 5.7, 11.2, 11.4, 12.7)",
   run: async (product) => {
     for (const kase of T14_11_CASES) {
       await runRangeRuleArm(product, kase);
