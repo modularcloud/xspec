@@ -775,6 +775,52 @@ literal-bodied ones pass. Known state after Task 14: the S-9 self-test 609 tests
 under the namespace (~140 s; 2723 + the 26 record tests); certification 144 PASS /
 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
 
+**Resolved by Task 15 (the §8, §9, §9.3, and §10.1–10.3 modules; b1a7666 converts, the
+closing commit records).** Nine records. `section-8.ts` 5 — T8-5's required-set fixture
+(arm (b), after arm (a)'s invocations): `REQUIRED_SET_FILES`' `tgt/T.mdx`, `bnd/B.mdx`,
+`oth/O.mdx` wrapped in place (`"T8-5 required-set fixture tgt/T.mdx"`, …); T8.2-1's
+covered fixture (the "0 otherwise" arm, after the report workspace's invocations):
+`CHECK_GREEN_FILES`' `tgt/T.mdx` and `bnd/B.mdx` wrapped in place (`"T8.2-1 covered
+fixture tgt/T.mdx"`, …). `section-9.ts` 0 — its seven bodies create one workspace each,
+at body start (nothing converts; its `withWorkspace` untouched). `section-9.3.ts` 1 —
+T9.3-3's arm-2 baseline, `D2_BASELINE` wrapped in place (`"T9.3-3 arm 2 specs/Twice.mdx
+(the baseline)"`); `editSourceExpecting` is an `edit()`. `section-10.1.ts` 1 — the
+shared `CORE_FILES` / `COVERAGE_FILES` `specs/A.mdx` as ONE record made FROM `A_MDX`
+(the string stays for the `A_MDX_EDITED` staleness edit), `A_MDX_STAGED`
+`"T10.1-1/T10.1-2/T10.1-3/T10.1-4/T10.1-5/T10.1-6 specs/A.mdx"`: the post-invocation
+sites are T10.1-1's determinism twins (`TestWorkspace.create({ files: CORE_FILES })`),
+T10.1-4's per-state workspaces after the first, and T10.1-6's occupancy twins after the
+first; T10.1-2 and T10.1-3 stage the map in their single workspaces and their exported
+probe runners (the Windows leg's `e6-subset.test.ts`); T10.1-5's inline map takes the
+record at `specs/A.mdx` (the same constant in the body's first workspace — the record
+rather than a plain spelling of its bytes; `T10_1_5_B_VALID` stays plain).
+`section-10.2-10.3.ts` 2 — T10.2-2's audit and coverage arms' initial files as
+`T10_2_2_KID_E0` (`"T10.2-2 specs/A.mdx with the kid text at e0 (audit arm)"`) and
+`T10_2_2_UNCOVERED_E0` (`"T10.2-2 specs/U.mdx with the uncovered leaf at e0 (coverage
+arm)"`), the template calls moved to module level beside the arms' edit records; the
+`--base` arm's v0 entry stays plain. The four converted modules' `withWorkspace` `files`
+parameters and the §8 and §10.1 maps widened to `InitialFileContents`; none declares a
+workspace `mdx` list. Left plain: every body's first workspace (T8-1…T8-4, T8-5's
+root-exclusion, T8.2-1's report, T9-1…T9.2-5, T9.3-1, T9.3-2, T9.3-3's arm 1, T10.2-1,
+T10.2-2's `--base` arm, T10.2-3, T10.2-4, T10.3-1, T10.3-2). Read-based enumeration: the
+9 + 8 + 5 + 23 + 9 creation sites judged; behind T10.1-6's diagnosed failure (its second
+workspace) lie five more `CORE_FILES` twins — records by the same map. Observation for
+the determination, not acted on: the ledger-wide duplicate-bytes probe (AGENTS.md) shows
+the new §10.1 record holds the bytes of `"T6.1-1/T6.1-2/T6.1-3 specs/A.mdx"` and
+`"T6.3-2 specs/A.mdx"` (Task 8's, registered separately) — Task 14's 28 cross-module
+groups are 28 still, that one grown to three members; the record is registered in its
+own module, as this task prescribed and as Task 14 left the groups, and none of the
+other eight new records duplicates any record's bytes. Checks: the sites hook logged the
+task's 11 (test, path) pairs (22 lines, all `"well-formed"`) before and no file after;
+the sha256 capture over the five suite files (179 writes, compared sorted) identical;
+28 tests, 27 pass and 1 fails — T10.1-6 — with an identical diagnosis (~75 s a run);
+red check: an unclosed tag spliced into the required-set `tgt/T.mdx` body and into
+`t2Spec("Kid text e0.")` fails exactly those two records as `mdx-derivability`, the
+other 18 under the sections' filter pass. Known state after Task 15: the S-9 self-test
+618 tests over 592 records (585 `T…`, 4 `E-6`, 3 `P-…`); self project 22 files, 2758
+passed, 0 skipped under the namespace (~125 s; 2749 + the 9 record tests); certification
+144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -941,27 +987,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 15 — Initial-file conversion: §8, §9, §9.3, §10.1–§10.3 (`section-8.ts`, `section-9.ts`, `section-9.3.ts`, `section-10.1.ts`, `section-10.2-10.3.ts`)
-
-**Workspace creations to judge:** 8 (9; 1 record), 9 (8; 2 records), 9.3 (5; 1 record;
-`editSourceExpecting` is an `edit()` — stays), 10.1 (23; 2 records — `A_MDX_EDITED` is
-shared by T10.1-1 and T10.1-6), 10.2-10.3 (9; 9 records).
-**Reachable sites (the instrumented run):**
-- `section-8.ts` — T8-5 (3): bnd/B.mdx oth/O.mdx tgt/T.mdx
-- `section-8.ts` — T8.2-1 (2): bnd/B.mdx tgt/T.mdx
-- `section-9.3.ts` — T9.3-3 (1): specs/Twice.mdx
-- `section-10.1.ts` — T10.1-1 (1): specs/A.mdx
-- `section-10.1.ts` — T10.1-4 (1): specs/A.mdx
-- `section-10.1.ts` — T10.1-6 (1): specs/A.mdx
-- `section-10.2-10.3.ts` — T10.2-2 (2): specs/A.mdx specs/U.mdx
-**Failing here:** T10.1-6.
-**Certification scope:** none.
-**Notes.** Multi-root keys (`bnd/B.mdx`, `tgt/T.mdx`, `oth/O.mdx`) convert like any
-other; the previous plan's Task 10/11 findings name the arms: T9.3-3's arm-2
-workspace, T10.1-6's later twins, T10.2-2's audit and coverage arms.
-**Checks.** Recipes 1–5 over `section-8.test`, `section-9.test`, `section-9.3.test`,
-`section-10.1.test`, `section-10.2-10.3.test`.
 
 ### Task 16 — Initial-file conversion: §10.4–§10.7 (`section-10.4.ts`, `section-10.5.ts`, `section-10.6.ts`, `section-10.7-i.ts`, `section-10.7-ii.ts`)
 
