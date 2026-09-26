@@ -676,6 +676,21 @@ function mdxSection(id: string): string {
   return `<S id="${id}">\nText for ${id}.\n</S>\n`;
 }
 
+/**
+ * The fixed form-vector set of the P-7 stagings (S-9; the §16 preamble):
+ * the one template both arms compose — `mdxSection` — under the discovery
+ * arm's `s<index>` ids (paths capped at 8) and the capture arm's `t<index>`
+ * ids (targets capped at 5), the first and the last admissible index each.
+ */
+export const P7_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [
+  ["discovery arm: mdxSection of the first path (s0)", mdxSection("s0")],
+  ["discovery arm: mdxSection of the last path (s7)", mdxSection("s7")],
+  ["capture arm: mdxSection of the first target (t0)", mdxSection("t0")],
+  ["capture arm: mdxSection of the last target (t4)", mdxSection("t4")],
+];
+
 // S-9's per-draw check (helpers/property.ts `mdxSources`): the spec sources
 // each arm stages — one `mdxSection` per drawn path (the `.mdx` ones are
 // judged; code sources and non-spec paths are not MDX).

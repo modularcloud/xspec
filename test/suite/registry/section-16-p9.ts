@@ -1128,6 +1128,113 @@ async function executeOp(
   }
 }
 
+// ---------------------------------------------------------------------------
+// S-9's fixed form-vector set (TEST-SPEC 17 S-9; the §16 preamble): the
+// generator's forms enumerated over a fixed model — every anchor character
+// and the whole prose interior alphabet, both files, sections nested to the
+// depth cap with the child cap reached, a leaf and a childless top-level
+// section — and, after each edit class in turn (an equal-text prose edit
+// taking the `x` suffix, sections added under a root and under a section,
+// a nested and a top-level section deleted), the re-rendered file, exactly
+// as `stagedP9Sources` derives a draw's sources.
+
+/** A prose line as `proseText` composes it: an anchor, then the interior. */
+function formProse(
+  anchor: (typeof ANCHOR_CHARS)[number],
+  interior: string,
+): string {
+  return anchor + interior;
+}
+
+/** The whole interior alphabet, spelled once each. */
+const P9_INTERIOR_ALPHABET = PROSE_REST.map(([, character]) => character).join(
+  "",
+);
+
+const P9_FORM_MODEL: P9WorkspaceModel = {
+  files: [
+    {
+      prose: formProse("a", P9_INTERIOR_ALPHABET),
+      sections: [
+        {
+          seg: "s0",
+          prose: formProse("b", "aberzK0"),
+          children: [
+            {
+              seg: "s1",
+              prose: formProse("k", "9 .,-:a"),
+              children: [
+                { seg: "s2", prose: formProse("z", ""), children: [] },
+              ],
+            },
+            { seg: "s3", prose: formProse("n", " a"), children: [] },
+          ],
+        },
+        { seg: "s4", prose: formProse("d", "a"), children: [] },
+        { seg: "s5", prose: formProse("p", ".a"), children: [] },
+      ],
+      nextSeg: 6,
+    },
+    {
+      prose: formProse("w", "a-b"),
+      sections: [{ seg: "s0", prose: formProse("0", "a"), children: [] }],
+      nextSeg: 1,
+    },
+  ],
+};
+
+/** Every edit class the generator draws, applied in sequence to the model. */
+const P9_FORM_EDITS: readonly P9Edit[] = [
+  { kind: "editProse", node: "specs/A.mdx", text: formProse("7", "ab") },
+  // The same text as the current prose: the edit takes the `x` suffix.
+  { kind: "editProse", node: "specs/A.mdx#s0.s1.s2", text: formProse("z", "") },
+  {
+    kind: "addSection",
+    parent: "specs/B.mdx",
+    seg: "s1",
+    prose: formProse("a", ":"),
+  },
+  {
+    kind: "addSection",
+    parent: "specs/A.mdx#s4",
+    seg: "s6",
+    prose: formProse("b", ","),
+  },
+  { kind: "deleteSection", node: "specs/A.mdx#s0.s1" },
+  { kind: "deleteSection", node: "specs/A.mdx#s5" },
+];
+
+function p9FormVectors(): ReadonlyArray<
+  readonly [name: string, source: string]
+> {
+  const model = structuredClone(P9_FORM_MODEL);
+  const vectors: (readonly [string, string])[] = Object.entries(
+    renderP9Workspace(model),
+  ).map(([path, source]): readonly [string, string] => [
+    `initial rendering of ${path}`,
+    source,
+  ]);
+  P9_FORM_EDITS.forEach((edit, index) => {
+    applyP9Edit(model, edit);
+    const path = filePath(
+      strictFileIndexOf(
+        model,
+        edit.kind === "addSection" ? edit.parent : edit.node,
+      ),
+    );
+    vectors.push([
+      `after edit ${String(index + 1)} (${describeEdit(edit)}): ${path}`,
+      renderP9Workspace(model)[path]!,
+    ]);
+  });
+  return vectors;
+}
+
+/** The fixed form-vector set of the P-9 rendering (S-9): name and source. */
+export const P9_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = p9FormVectors();
+
 /**
  * S-9's per-draw check (helpers/property.ts `mdxSources`): the initial
  * workspace and, after each edit operation, the re-rendered files — the

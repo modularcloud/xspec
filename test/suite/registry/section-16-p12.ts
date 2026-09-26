@@ -201,6 +201,36 @@ export interface P12Trial {
   readonly unparseable?: string;
 }
 
+// --- the line templates (the generator and the S-9 vector set below) ------
+
+/** The import's ESM block: the declaration, then the mandatory blank line (the ESM block must end, FP-094). */
+const IMPORT_BLOCK_LINES: readonly string[] = [IMPORT_LINE, ""];
+
+/** The constant anchor section `t` opening every file. */
+function anchorSectionLines(prose: string): string[] {
+  return ['<S id="t">', prose, "</S>"];
+}
+
+/** A prose line, optionally carrying an embedding and, after it, a tail. */
+function proseLine(
+  prose: string,
+  embedArgument: string | null,
+  tail: string | null,
+): string {
+  if (embedArgument === null) return prose;
+  return `${prose}{text(${embedArgument})}${tail ?? ""}`;
+}
+
+/** A section's opening tag: the dotted id, then the `d` prop spelling. */
+function openingTag(dotted: string, dProp: string): string {
+  return `<S id="${dotted}"${dProp}>`;
+}
+
+/** An own-line MDX comment. */
+function commentLine(interior: string): string {
+  return `{/* ${interior} */}`;
+}
+
 /**
  * One file's lines (joined by single newlines; module header discipline).
  * The constant anchor section `t` opens every file, so the resolving
@@ -208,13 +238,8 @@ export interface P12Trial {
  */
 function genFileLines(choices: Choices, hasImport: boolean): string[] {
   const lines: string[] = [];
-  if (hasImport) {
-    lines.push(IMPORT_LINE);
-    lines.push(""); // mandatory blank line: the ESM block must end (FP-094)
-  }
-  lines.push('<S id="t">');
-  lines.push(choices.pick(PROSE_POOL));
-  lines.push("</S>");
+  if (hasImport) lines.push(...IMPORT_BLOCK_LINES);
+  lines.push(...anchorSectionLines(choices.pick(PROSE_POOL)));
 
   let seg = 1;
   const nextSeg = (): string => {
@@ -223,19 +248,20 @@ function genFileLines(choices: Choices, hasImport: boolean): string[] {
     return name;
   };
   const emitProse = (): void => {
-    let line: string = choices.pick(PROSE_POOL);
-    if (choices.boolean(0.4)) {
-      line += `{text(${choices.pick(embedArgumentMenu(hasImport))})}`;
-      if (choices.boolean(0.5)) line += choices.pick(TAIL_POOL);
-    }
-    lines.push(line);
+    const prose = choices.pick(PROSE_POOL);
+    const embedArgument = choices.boolean(0.4)
+      ? choices.pick(embedArgumentMenu(hasImport))
+      : null;
+    const tail =
+      embedArgument !== null && choices.boolean(0.5)
+        ? choices.pick(TAIL_POOL)
+        : null;
+    lines.push(proseLine(prose, embedArgument, tail));
   };
   const emitSection = (parentDotted: string, depth: number): void => {
     const segName = nextSeg();
     const dotted = parentDotted === "" ? segName : `${parentDotted}.${segName}`;
-    lines.push(
-      `<S id="${dotted}"${choices.weightedPick(dPropMenu(hasImport))}>`,
-    );
+    lines.push(openingTag(dotted, choices.weightedPick(dPropMenu(hasImport))));
     const innerCount = choices.intInclusive(0, 2);
     for (let k = 0; k < innerCount; k += 1) {
       const menu: (readonly [
@@ -251,7 +277,7 @@ function genFileLines(choices: Choices, hasImport: boolean): string[] {
       if (shape === "prose") emitProse();
       else if (shape === "blank") lines.push("");
       else if (shape === "comment") {
-        lines.push(`{/* ${choices.pick(COMMENT_POOL)} */}`);
+        lines.push(commentLine(choices.pick(COMMENT_POOL)));
       } else emitSection(dotted, depth + 1);
     }
     lines.push("</S>");
@@ -270,7 +296,7 @@ function genFileLines(choices: Choices, hasImport: boolean): string[] {
     if (shape === "prose") emitProse();
     else if (shape === "blank") lines.push("");
     else if (shape === "comment") {
-      lines.push(`{/* ${choices.pick(COMMENT_POOL)} */}`);
+      lines.push(commentLine(choices.pick(COMMENT_POOL)));
     } else emitSection("", 0);
   }
   return lines;
@@ -286,6 +312,140 @@ const DUPLICATE_ID_APPENDIX =
 
 /** The break-parse twist appendix: an unclosed flow tag — 14.20, masked. */
 const BREAK_PARSE_APPENDIX = '<S id="ka">\n';
+
+// --- S-9's fixed form-vector set (TEST-SPEC 17 S-9; the §16 preamble) ------
+
+/** A file's staged text: its lines joined by single newlines, terminated. */
+function p12FileText(lines: readonly string[]): string {
+  return `${lines.join("\n")}\n`;
+}
+
+/**
+ * One file holding every form the generator composes, with or without the
+ * import (the `M0` spellings join the menus with it): the anchor, every
+ * prose line, every embedding argument plain and with every tail, every
+ * comment, a blank line, and one top-level section per `d` prop spelling,
+ * each nested to the depth cap with every inner shape.
+ */
+function p12FormFileLines(hasImport: boolean): string[] {
+  const lines: string[] = hasImport ? [...IMPORT_BLOCK_LINES] : [];
+  lines.push(...anchorSectionLines(PROSE_POOL[0]));
+  for (const prose of PROSE_POOL) lines.push(proseLine(prose, null, null));
+  const embedArguments = embedArgumentMenu(hasImport);
+  for (const argument of embedArguments) {
+    lines.push(proseLine(PROSE_POOL[1], argument, null));
+    for (const tail of TAIL_POOL) {
+      lines.push(proseLine(PROSE_POOL[2], argument, tail));
+    }
+  }
+  for (const interior of COMMENT_POOL) lines.push(commentLine(interior));
+  lines.push("");
+  const dProps = dPropMenu(hasImport).map(([, spelling]) => spelling);
+  let seg = 1;
+  const nextSeg = (): string => {
+    const name = `s${String(seg)}`;
+    seg += 1;
+    return name;
+  };
+  dProps.forEach((dProp, index) => {
+    const top = nextSeg();
+    lines.push(openingTag(top, dProp));
+    lines.push(
+      proseLine(
+        PROSE_POOL[3],
+        embedArguments[index % embedArguments.length]!,
+        TAIL_POOL[index % TAIL_POOL.length]!,
+      ),
+    );
+    lines.push("");
+    lines.push(commentLine(COMMENT_POOL[index % COMMENT_POOL.length]!));
+    const child = `${top}.${nextSeg()}`;
+    lines.push(openingTag(child, dProps[(index + 1) % dProps.length]!));
+    const grandchild = `${child}.${nextSeg()}`;
+    lines.push(openingTag(grandchild, ""));
+    lines.push(proseLine(PROSE_POOL[0], null, null));
+    lines.push("</S>", "</S>", "</S>");
+  });
+  return lines;
+}
+
+/** Each form alone after the anchor — a minimal context — named. */
+function p12MinimalContexts(
+  hasImport: boolean,
+): (readonly [name: string, source: string])[] {
+  const label = hasImport ? "with the import" : "without the import";
+  const context = (
+    name: string,
+    ...lines: string[]
+  ): readonly [string, string] => [
+    `${name}, alone after the anchor ${label}`,
+    p12FileText([
+      ...(hasImport ? IMPORT_BLOCK_LINES : []),
+      ...anchorSectionLines(PROSE_POOL[0]),
+      ...lines,
+    ]),
+  ];
+  return [
+    ...PROSE_POOL.map((prose) =>
+      context(`prose ${JSON.stringify(prose)}`, prose),
+    ),
+    ...embedArgumentMenu(hasImport).flatMap((argument) => [
+      context(
+        `embedding of ${argument}`,
+        proseLine(PROSE_POOL[0], argument, null),
+      ),
+      ...TAIL_POOL.map((tail) =>
+        context(
+          `embedding of ${argument} with the tail ${JSON.stringify(tail)}`,
+          proseLine(PROSE_POOL[0], argument, tail),
+        ),
+      ),
+    ]),
+    ...COMMENT_POOL.map((interior) =>
+      context(`comment ${JSON.stringify(interior)}`, commentLine(interior)),
+    ),
+    ...dPropMenu(hasImport).map(([, dProp]) =>
+      context(
+        dProp === "" ? "a section without a d prop" : `a section with${dProp}`,
+        openingTag("s1", dProp),
+        PROSE_POOL[0],
+        "</S>",
+      ),
+    ),
+    context("a blank line", ""),
+  ];
+}
+
+/**
+ * The fixed form-vector set of the P-12 generator (S-9): every form in one
+ * file and each alone in a minimal context, with and without the import,
+ * and the duplicate-id twist appended to each whole-form file.
+ */
+export const P12_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [false, true].flatMap((hasImport): (readonly [string, string])[] => {
+  const label = hasImport ? "with the import" : "without the import";
+  const every = p12FileText(p12FormFileLines(hasImport));
+  return [
+    [`every form ${label}`, every],
+    [
+      `every form ${label}, the duplicate-id twist appended`,
+      every + DUPLICATE_ID_APPENDIX,
+    ],
+    ...p12MinimalContexts(hasImport),
+  ];
+});
+
+/**
+ * The break-parse twist's composed files — the staging declares them
+ * unparseable (14.20), so S-9 holds that they do not derive.
+ */
+export const P12_UNPARSEABLE_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [false, true].map((hasImport): readonly [string, string] => [
+  `every form ${hasImport ? "with" : "without"} the import, the break-parse twist appended`,
+  p12FileText(p12FormFileLines(hasImport)) + BREAK_PARSE_APPENDIX,
+]);
 
 /** The P-12 trial generator (see the module header). */
 export const genP12Trial: Gen<P12Trial> = (choices) => {

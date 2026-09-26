@@ -847,6 +847,154 @@ function assertProfileMatchesOracle(
   );
 }
 
+// ---------------------------------------------------------------------------
+// S-9's fixed form-vector set (TEST-SPEC 17 S-9; the §16 preamble): the
+// rendering's forms over a fixed trial model — three spec files (one- and
+// two-import ESM blocks), every top-level, child, and grandchild segment,
+// every tag set and coverage spelling, `d` as a single local target, a
+// single external root, and mixed local/external-section/external-root
+// arrays, embeddings of local, external-section, and external-root targets
+// in sections (singly and twice) and at the root, and one code file —
+// judged as `renderP13Files` stages them (its `.mdx` entries; the code and
+// configuration files are not MDX).
+
+function formSection(
+  path: string,
+  id: string,
+  shape: Partial<Omit<P13Section, "identity" | "id">>,
+): P13Section {
+  return {
+    identity: `${path}#${id}`,
+    id,
+    tags: shape.tags ?? [],
+    coverage: shape.coverage ?? null,
+    dRefs: shape.dRefs ?? [],
+    embeds: shape.embeds ?? [],
+    children: shape.children ?? [],
+  };
+}
+
+const [FORM_A, FORM_B, FORM_C] = SPEC_PATHS;
+
+const P13_FORM_TRIAL: P13Trial = {
+  specFiles: [
+    {
+      index: 0,
+      path: FORM_A,
+      rootEmbeds: [`${FORM_A}#k`, `${FORM_A}#t`],
+      sections: [
+        formSection(FORM_A, "k", {
+          dRefs: [`${FORM_A}#k.m`, `${FORM_A}#k.b`],
+          embeds: [`${FORM_A}#k.m`],
+          children: [
+            formSection(FORM_A, "k.m", {
+              tags: TAG_SETS[1]!,
+              coverage: "none",
+              dRefs: [`${FORM_A}#k.m.x`],
+              embeds: [`${FORM_A}#k.m.x`],
+              children: [
+                formSection(FORM_A, "k.m.x", {
+                  tags: TAG_SETS[2]!,
+                  coverage: "required",
+                }),
+              ],
+            }),
+            formSection(FORM_A, "k.b", { tags: TAG_SETS[3]! }),
+          ],
+        }),
+        formSection(FORM_A, "d", {
+          coverage: "none",
+          dRefs: [`${FORM_A}#k`],
+          embeds: [`${FORM_A}#k.b`, `${FORM_A}#k`],
+        }),
+        formSection(FORM_A, "t", {
+          tags: TAG_SETS[1]!,
+          coverage: "required",
+          dRefs: [`${FORM_A}#k`, `${FORM_A}#d`],
+        }),
+      ],
+    },
+    {
+      index: 1,
+      path: FORM_B,
+      rootEmbeds: [FORM_A],
+      sections: [
+        formSection(FORM_B, "k", {
+          tags: TAG_SETS[2]!,
+          dRefs: [FORM_A],
+          embeds: [`${FORM_A}#k.m`],
+          children: [
+            formSection(FORM_B, "k.m", {
+              dRefs: [`${FORM_B}#k.m.x`, `${FORM_A}#t`],
+              children: [formSection(FORM_B, "k.m.x", {})],
+            }),
+          ],
+        }),
+      ],
+    },
+    {
+      index: 2,
+      path: FORM_C,
+      rootEmbeds: [],
+      sections: [
+        formSection(FORM_C, "k", {
+          tags: TAG_SETS[1]!,
+          coverage: "none",
+          dRefs: [`${FORM_B}#k`, FORM_A, FORM_B],
+          embeds: [FORM_B],
+        }),
+        formSection(FORM_C, "d", {
+          dRefs: [`${FORM_C}#k`],
+          embeds: [`${FORM_C}#k`],
+        }),
+      ],
+    },
+  ],
+  codeFiles: [
+    {
+      index: 0,
+      path: CODE_PATHS[0],
+      topLevel: [{ kind: "marker", target: `${FORM_A}#k` }],
+      units: [
+        {
+          name: UNIT_NAMES[0],
+          statements: [{ kind: "text", target: `${FORM_B}#k.m` }],
+        },
+        {
+          name: UNIT_NAMES[1],
+          statements: [{ kind: "marker", target: FORM_A }],
+        },
+      ],
+    },
+  ],
+  specGroups: [
+    [SPEC_GROUP_NAMES[0], [0]],
+    [SPEC_GROUP_NAMES[1], [1, 2]],
+  ],
+  codeGroups: [[CODE_GROUP_NAMES[0], [0]]],
+  profiles: [
+    {
+      name: "p1",
+      target: SPEC_GROUP_NAMES[0],
+      boundary: CODE_GROUP_NAMES[0],
+      mode: "transitive",
+      targets: "all",
+      targetTags: TARGET_TAG_SETS[2]!,
+      edgeKinds: KIND_SETS[6]!,
+    },
+  ],
+};
+
+/** The fixed form-vector set of the P-13 rendering (S-9): name and source. */
+export const P13_FORM_VECTORS: ReadonlyArray<
+  readonly [name: string, source: string]
+> = Object.entries(renderP13Files(P13_FORM_TRIAL))
+  .filter(([path]) => path.endsWith(".mdx"))
+  .map(([path, source]): readonly [string, string] => [
+    `rendering forms of ${path}`,
+    source,
+  ]);
+
 /** S-9's per-draw check (helpers/property.ts `mdxSources`): the staged files. */
 function stagedP13Sources(trial: P13Trial): DrawSource[] {
   return Object.entries(renderP13Files(trial));
