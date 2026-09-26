@@ -54,37 +54,6 @@ sound (both parser builds agree on every probed verdict).
 
 ## Tasks
 
-### Task 1 — T14-11: stage the valid-5-byte-prefix-then-`0xFF` encoding failure in a code source too
-
-**Requirement.** TEST-SPEC.md §14 T14-11 (line 585): the five encoding failures are
-"staged in a spec source and in a code source alike, each `{start: n, end: n}` with
-code `unparseable-source`: a valid 5-byte prefix then `0xFF` → 5; `41 E2 82 41` → 1;
-`C0 80` → 0; `ED A0 80` → 0; `41 E2 82` truncated → 1".
-
-**Observed.** `test/suite/registry/section-14.ts`: arm (m) stages the prefix-then-`0xFF`
-form (`T14_11_ENCODING_MDX` = `Café` + `0xFF` + a section, `T14_11_ENCODING_OFFSET` = 5)
-as `specs/enc.mdx` alone; the (v) family (`T14_11_ENCODING_FORMS`, staged by
-`T14_11_ENCODING_FILES` as `specs/<name>.mdx` and `src/<name>.ts`) holds only the other
-four sequences. The `0xFF` form is never staged in a code source.
-
-**Change.** Add the form to `T14_11_ENCODING_FORMS`, e.g.
-`{ name: "prefix", bytes: [0x43, 0x61, 0x66, 0xc3, 0xa9, 0xff], offset: 5 }` (the bytes of
-`Café` then `0xFF`; build the array from numbers, never from an escape spelling), so the
-(v) family stages it as `specs/prefix.mdx` and `src/prefix.ts` with the pinned
-zero-length range `{start: 5, end: 5}`, code 14.20 (`unparseable-source`), `path` null,
-exactly like the other four. Extend arm (v)'s `rule` string to name the fifth sequence.
-Leave arm (m) as it is (it pins the same offset in the multi-condition workspace). The
-family's `mdx.unparseable` declaration is derived from `T14_11_ENCODING_FILES`, so the
-new spec source is declared unparseable automatically (S-9) — confirm by reading the
-declaration expression, and confirm the code source needs no declaration (`.ts`).
-
-**Checks.** `npx tsc -p test` clean; the self project green in the namespace; T14-11
-alone against the built product (`npm run build` first; `-t 'T14-11 '`) reports the
-same verdict as before plus, if the product fails the new pair, a diagnosed assertion
-naming `src/prefix.ts` or `specs/prefix.mdx` at offset 5. Record in `AGENTS.md` only
-if a new run fact emerges. Not certification-scoped (CERTIFICATIONS.md lists T14-11
-among the form sweeps outside certification).
-
 ### Task 2 — T6.5-13 (h)/(j): require the receiving root's cascades and the dependent root's `upstream-changed`
 
 **Requirement.** TEST-SPEC.md §6.5 T6.5-13 (line 291), arms (h) and (j): `impact --base`
