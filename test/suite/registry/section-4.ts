@@ -65,6 +65,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
@@ -74,6 +75,7 @@ import {
   runConsumer,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -151,7 +153,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -281,14 +283,24 @@ const T4_1 = defineProductTest({
 // `specs/BASE.mdx` (so arms whose specifier names it carry the specifier or
 // binding form as their only defect), any arm-specific extra files, and
 // `src/app.ts` holding exactly the arm's statements — the offending
-// construct(s) start at byte 0, everything pure ASCII.
+// construct(s) start at byte 0, everything pure ASCII. Every arm's workspace
+// past the first is created after a product invocation, so its `.mdx` entries
+// — the shared base and an arm's extras alike — are staged-source records,
+// judged before any product exists (S-9, test/self/s9-staged-sources.test.ts).
 const T4_2_BASE_FILES = {
-  "specs/BASE.mdx": '<S id="core">\nCore behavior.\n</S>\n',
+  "specs/BASE.mdx": stagedMdx(
+    "T4-2 specs/BASE.mdx",
+    '<S id="core">\nCore behavior.\n</S>\n',
+  ),
 } as const;
 
 // The spec source the colocated arms discover beside the code files
-// (COLOCATED_CONFIG): `src/NAME.mdx`, one node `core`.
-const COLOCATED_SPEC_SOURCE = '<S id="core">\nCore behavior.\n</S>\n';
+// (COLOCATED_CONFIG): `src/NAME.mdx`, one node `core` — staged by the
+// escape-spelled arm and the lexical positives.
+const COLOCATED_SPEC_SOURCE = stagedMdx(
+  "T4-2 src/NAME.mdx",
+  '<S id="core">\nCore behavior.\n</S>\n',
+);
 
 // The escape character, built from its code point so that no tool layer
 // decodes the six-character escape spelling staged below on its way into the
@@ -310,7 +322,7 @@ interface InvalidTsImportArm {
   /** Configuration override (defaults to SPEC_AND_CODE_CONFIG). */
   readonly config?: string;
   /** Files staged beside the base files. */
-  readonly extraFiles?: Readonly<Record<string, string>>;
+  readonly extraFiles?: Readonly<Record<string, InitialFileContents>>;
   /**
    * Files staged OUTSIDE the workspace root, at paths relative to the root's
    * parent directory (support.ts stageBesideRoot) — the above-root arm's real
@@ -328,7 +340,10 @@ const XSPEC_RULE_ARMS: readonly InvalidTsImportArm[] = [
     name: "a `.xspec` specifier designating an existing file that is not a discovered spec source",
     statements: ['import MOD from "../docs/EXTRA.xspec";'],
     extraFiles: {
-      "docs/EXTRA.mdx": '<S id="extra">\nOutside every spec group.\n</S>\n',
+      "docs/EXTRA.mdx": stagedMdx(
+        "T4-2 arm undiscovered existing file docs/EXTRA.mdx",
+        '<S id="extra">\nOutside every spec group.\n</S>\n',
+      ),
     },
   },
   {
@@ -491,7 +506,10 @@ const DUPLICATE_BINDING_ARMS: readonly InvalidTsImportArm[] = [
       'import MOD from "../specs/OTHER.xspec";',
     ],
     extraFiles: {
-      "specs/OTHER.mdx": '<S id="other">\nOther behavior.\n</S>\n',
+      "specs/OTHER.mdx": stagedMdx(
+        "T4-2 arm two spec module imports binding one identifier specs/OTHER.mdx",
+        '<S id="other">\nOther behavior.\n</S>\n',
+      ),
     },
     maxFindings: 2,
   },
@@ -1077,11 +1095,17 @@ const T4_4 = defineProductTest({
 // the other pairings import: a discovered code source recording nothing,
 // exporting a value `SPEC` so that each non-spec import designates a real
 // binding (consumer-side resolution is outside xspec's validations either
-// way, SPEC 4.5).
+// way, SPEC 4.5). Every arm's workspace past the first is created after a
+// product invocation: the two spec sources are staged-source records (S-9).
 const T4_5_FILES = {
-  "specs/A.mdx":
+  "specs/A.mdx": stagedMdx(
+    "T4-5 specs/A.mdx",
     '<S id="a">\nAlpha behavior.\n</S>\n\n<S id="b">\nBeta behavior.\n</S>\n',
-  "specs/B.mdx": '<S id="x">\nOther behavior.\n</S>\n',
+  ),
+  "specs/B.mdx": stagedMdx(
+    "T4-5 specs/B.mdx",
+    '<S id="x">\nOther behavior.\n</S>\n',
+  ),
   "src/t.ts": "export const SPEC = 1;\n",
 } as const;
 

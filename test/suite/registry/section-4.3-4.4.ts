@@ -107,6 +107,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
@@ -116,6 +117,7 @@ import {
   runConsumer,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -161,7 +163,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -329,9 +331,13 @@ const T4_3_1 = defineProductTest({
 // One spec source with a nested `a.b`, shared by every arm, so each dynamic
 // chain would resolve if read statically — the form is each arm's sole
 // defect.
+// Staged in every arm's fresh workspace — past the first, after a product
+// invocation: a staged-source record (S-9, test/self/s9-staged-sources.test.ts).
 const T4_3_2_SPEC_FILES = {
-  "specs/A.mdx":
+  "specs/A.mdx": stagedMdx(
+    "T4.3-2 specs/A.mdx",
     '<S id="a">\nAlpha behavior.\n<S id="a.b">\nBeta behavior.\n</S>\n</S>\n',
+  ),
 } as const;
 
 /** One invalid `text` argument arm: a workspace differing only in src/app.ts. */
@@ -494,10 +500,19 @@ const T4_3_2 = defineProductTest({
 // Two spec modules at the paths TEST-SPEC T4.4-1 pins verbatim — the node's
 // module `specs/A.mdx` (node `a`) and the called module `specs/B.mdx` (node
 // `b`) — so the runtime message's substrings, the finding's `identities`,
-// and the occurrence's target are exact literals. Shared with T4.4-2.
+// and the occurrence's target are exact literals. Shared with T4.4-2. T4.4-1's
+// facets past the first create their workspaces after its first invocation —
+// facet 3 staging the `B` source at the invalid path `specs/B#.mdx` — so both
+// sources are staged-source records (S-9, test/self/s9-staged-sources.test.ts).
 const T4_4_SPEC_FILES = {
-  "specs/A.mdx": '<S id="a">\nAlpha module first behavior.\n</S>\n',
-  "specs/B.mdx": '<S id="b">\nBravo module second behavior.\n</S>\n',
+  "specs/A.mdx": stagedMdx(
+    "T4.4-1/T4.4-2 specs/A.mdx",
+    '<S id="a">\nAlpha module first behavior.\n</S>\n',
+  ),
+  "specs/B.mdx": stagedMdx(
+    "T4.4-1/T4.4-2 specs/B.mdx (T4.4-1's facet 3 stages it at specs/B#.mdx)",
+    '<S id="b">\nBravo module second behavior.\n</S>\n',
+  ),
 } as const;
 // Hand-derived subtree texts (SPEC 3/1.6).
 const A_NODE_TEXT = "Alpha module first behavior.\n";

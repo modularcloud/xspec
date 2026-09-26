@@ -121,6 +121,7 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertNoCompileErrors,
@@ -129,7 +130,7 @@ import {
   runConsumer,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceMdxDecl } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { assertRequirementCategories, impactAgainst } from "./section-5.6.js";
 import { assertImpactedCode } from "./section-9.js";
 import {
@@ -176,26 +177,30 @@ const PRINT_SPEC_SOURCE = [
 
 // One spec source with a nested `a.b`, shared by the 14.8/14.18 arms and the
 // edge-kind fixtures, so every staged chain resolves if read statically —
-// the form (or the usage) is each arm's sole defect.
+// the form (or the usage) is each arm's sole defect. Staged in workspaces
+// created after a product invocation (a later arm's, T4.5-4's callee side):
+// one staged-source record, named for every test staging it (S-9,
+// test/self/s9-staged-sources.test.ts).
 const AB_SPEC_FILES = {
-  "specs/A.mdx":
+  "specs/A.mdx": stagedMdx(
+    "T4.5-3/T4.5-4/T4.5-5/T4.5-6/T4.5-7 specs/A.mdx",
     '<S id="a">\nAlpha behavior.\n<S id="a.b">\nBeta behavior.\n</S>\n</S>\n',
+  ),
 } as const;
 
 /**
  * Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1).
- * `mdx` is the staging's S-9 declaration of its `.mdx` sources (helpers/
- * workspace.ts) — omitted, every staged `.mdx` file must derive plainly.
+ * An `.mdx` entry is plain contents, judged well-formed at staging, or a
+ * staged-source record, staged under the record's own declaration (S-9;
+ * helpers/workspace.ts).
  */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
-  mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
-    ...(mdx === undefined ? {} : { mdx }),
   });
   try {
     return await body(workspace);
@@ -516,20 +521,30 @@ const T4_5_2_LOCAL = "specs/MAIN.mdx#local";
 const T4_5_2_OTHER_ROOT = "specs/OTHER.mdx";
 const T4_5_2_UPSTREAM = "specs/OTHER.mdx#upstream";
 
-const T4_5_2_UPSTREAM_MAIN_SOURCE = [
-  'import OTHER from "./OTHER.xspec"',
-  "",
-  "{text(OTHER.upstream)}",
-  "",
-  '<S id="local">',
-  "Local behavior.",
-  "</S>",
-  "",
-].join("\n");
+// The upstream arm's workspace is created after the root-marker arm's
+// invocations, so its two initial sources are staged-source records too
+// (S-9, test/self/s9-staged-sources.test.ts).
+const T4_5_2_UPSTREAM_MAIN_SOURCE = stagedMdx(
+  "T4.5-2 specs/MAIN.mdx of the upstream arm",
+  [
+    'import OTHER from "./OTHER.xspec"',
+    "",
+    "{text(OTHER.upstream)}",
+    "",
+    '<S id="local">',
+    "Local behavior.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 /** The other file: the embedded target's own text is the edited run. */
 const upstreamOtherSource = (text: string): string =>
   ['<S id="upstream">', text, "</S>", ""].join("\n");
+const T4_5_2_UPSTREAM_OTHER_V1 = stagedMdx(
+  "T4.5-2 specs/OTHER.mdx with the embedded target's text at v1 (the upstream arm's initial source)",
+  upstreamOtherSource("Upstream behavior, v1."),
+);
 // The upstream edit, staged after the edge queries — a staged-source record
 // (S-9, test/self/s9-staged-sources.test.ts).
 const T4_5_2_UPSTREAM_OTHER_V2 = stagedMdx(
@@ -686,7 +701,7 @@ const T4_5_2 = defineProductTest({
       SPEC_AND_CODE_CONFIG,
       {
         "specs/MAIN.mdx": T4_5_2_UPSTREAM_MAIN_SOURCE,
-        "specs/OTHER.mdx": upstreamOtherSource("Upstream behavior, v1."),
+        "specs/OTHER.mdx": T4_5_2_UPSTREAM_OTHER_V1,
         "src/app.ts": T4_5_2_APP_SOURCE,
       },
       async (workspace) => {
@@ -1358,9 +1373,16 @@ const T4_5_7 = defineProductTest({
 // resolve if the import roots them, so the same-scope declaration is each
 // arm's sole defect (SPEC 2.4, 4.5) — a product reporting the chains as
 // unresolved for any other reason has nothing else to point at.
+// The one source T4.5-8 stages at two paths — `specs/A.mdx` of the code-side
+// arms and `specs/BASE.mdx` of the spec-source arms — as one staged-source
+// record (S-9, test/self/s9-staged-sources.test.ts): every arm's workspace
+// past the first is created after a product invocation.
+const T4_5_8_AB_SOURCE = stagedMdx(
+  "T4.5-8 specs/A.mdx (also specs/BASE.mdx of the spec-source arms)",
+  '<S id="a">\nAlpha behavior.\n</S>\n\n<S id="b">\nBeta behavior.\n</S>\n',
+);
 const T4_5_8_SPEC_FILES = {
-  "specs/A.mdx":
-    '<S id="a">\nAlpha behavior.\n</S>\n\n<S id="b">\nBeta behavior.\n</S>\n',
+  "specs/A.mdx": T4_5_8_AB_SOURCE,
 } as const;
 
 // The import binds both the default export and `text`, so `text(SPEC.b)` is
@@ -1776,8 +1798,7 @@ async function assertSameScopeControlArm(
 // spellings rooted at `BASE` are unresolved (14.5, 14.6) — no edge, no
 // occurrence — though both targets exist in `specs/BASE.mdx`.
 const T4_5_8_BASE_FILES = {
-  "specs/BASE.mdx":
-    '<S id="a">\nAlpha behavior.\n</S>\n\n<S id="b">\nBeta behavior.\n</S>\n',
+  "specs/BASE.mdx": T4_5_8_AB_SOURCE,
 } as const;
 const T4_5_8_MDX_IMPORT = 'import BASE from "./BASE.xspec"';
 const T4_5_8_MDX_EXPORT = "export const BASE = 1";
@@ -1808,8 +1829,13 @@ const T4_5_8_SPEC_SOURCE_ARMS: readonly SpecSourceCollisionArm[] = [
 
 /** A staged `specs/COL.mdx` of one arm and its constructs' byte positions. */
 interface StagedSpecSourceCollision {
-  /** The whole file: import, export statement, blank, section `c`. */
-  readonly source: string;
+  /**
+   * The whole file — import, export statement, blank, section `c` — as a
+   * staged-source record naming S-9's `duplicate-import-binding` allowance
+   * (registered at module load, so the layouts are staged once, into
+   * `T4_5_8_SPEC_SOURCE_STAGINGS`).
+   */
+  readonly source: StagedMdx;
   /** The import declaration's end-widened byte window (support.ts byteWindow). */
   readonly importWindow: { readonly start: number; readonly end: number };
   /** The declarator `BASE = 1`'s end-widened byte window. */
@@ -1845,7 +1871,12 @@ function stageSpecSourceCollision(
     return { start, end: start + Buffer.byteLength(construct, "utf8") };
   };
   return {
-    source,
+    // S-9: the export declaration binding the import's identifier is an
+    // ECMAScript early error 14.20 admits — the named allowance (its scope
+    // spans both layouts; helpers/mdx-derivability.ts).
+    source: stagedMdx(`T4.5-8 specs/COL.mdx with ${arm.name}`, source, {
+      allowances: ["duplicate-import-binding"],
+    }),
     importWindow: byteWindow("", T4_5_8_MDX_IMPORT),
     declaratorWindow: byteWindow(
       `${exportPrefix}export const `,
@@ -1856,6 +1887,20 @@ function stageSpecSourceCollision(
     embeddingRange: exact(bodyPrefix, T4_5_8_MDX_EMBEDDING),
   };
 }
+
+/** One layout paired with its staging. */
+interface SpecSourceCollisionStaging {
+  readonly arm: SpecSourceCollisionArm;
+  readonly staged: StagedSpecSourceCollision;
+}
+
+// The two layouts staged once, at module load, in table order — a record
+// registers at module level only (S-9), so the body indexes this table.
+const T4_5_8_SPEC_SOURCE_STAGINGS: readonly SpecSourceCollisionStaging[] =
+  T4_5_8_SPEC_SOURCE_ARMS.map((arm) => ({
+    arm,
+    staged: stageSpecSourceCollision(arm),
+  }));
 
 /**
  * The spec-source case's findings in 12.7 order: 14.5 at the `d` value's
@@ -1915,17 +1960,17 @@ function assertSpecSourceCollisionFindings(
  * 1; the gated `query edges --from specs/COL.mdx#c` reports them without
  * answering (SPEC 13.3); and `occurrences --file specs/COL.mdx` carries
  * them and lists no record — no edge and no occurrence for the spellings
- * rooted at the collided identifier (5.7, 11.2). The staging names S-9's
- * `duplicate-import-binding` allowance: the export declaration binding the
- * import's identifier is the early error the stock parser raises for one
+ * rooted at the collided identifier (5.7, 11.2). The staged record names
+ * S-9's `duplicate-import-binding` allowance: the export declaration binding
+ * the import's identifier is the early error the stock parser raises for one
  * module, which every ESM block of a file is to it, so both layouts need
  * it — and 14.20 admits both (a finding in a well-formed file, T14-12).
  */
 async function assertSpecSourceCollision(
   product: ProductBinding,
-  arm: SpecSourceCollisionArm,
+  staging: SpecSourceCollisionStaging,
 ): Promise<void> {
-  const staged = stageSpecSourceCollision(arm);
+  const { arm, staged } = staging;
   await withWorkspace(
     SPEC_AND_CODE_CONFIG,
     { ...T4_5_8_BASE_FILES, "specs/COL.mdx": staged.source },
@@ -2006,10 +2051,6 @@ async function assertSpecSourceCollision(
           `positioned by its finding's range alone (SPEC 2.4, 5.7, 11.2)`,
       );
     },
-    // S-9: the export declaration binding the import's identifier is an
-    // ECMAScript early error 14.20 admits — the named allowance (its scope
-    // spans both layouts; helpers/mdx-derivability.ts).
-    { allowances: { "specs/COL.mdx": ["duplicate-import-binding"] } },
   );
 }
 
@@ -2024,8 +2065,8 @@ const T4_5_8 = defineProductTest({
     for (const arm of T4_5_8_CONTROL_ARMS) {
       await assertSameScopeControlArm(product, arm);
     }
-    for (const arm of T4_5_8_SPEC_SOURCE_ARMS) {
-      await assertSpecSourceCollision(product, arm);
+    for (const staging of T4_5_8_SPEC_SOURCE_STAGINGS) {
+      await assertSpecSourceCollision(product, staging);
     }
   },
 });
@@ -2040,9 +2081,17 @@ const T4_5_8 = defineProductTest({
 // Two spec modules each holding a node `a` (the second for the cross-module
 // argument), and a non-spec module exporting `text` so the `./t` imports
 // name an existing module (a consumer-side matter, SPEC 6.4).
+// Every cell's workspace past the first is created after a product
+// invocation: the two spec sources are staged-source records (S-9).
 const T4_5_9_FILES = {
-  "specs/A.mdx": '<S id="a">\nAlpha behavior.\n</S>\n',
-  "specs/B.mdx": '<S id="a">\nBravo behavior.\n</S>\n',
+  "specs/A.mdx": stagedMdx(
+    "T4.5-9 specs/A.mdx",
+    '<S id="a">\nAlpha behavior.\n</S>\n',
+  ),
+  "specs/B.mdx": stagedMdx(
+    "T4.5-9 specs/B.mdx",
+    '<S id="a">\nBravo behavior.\n</S>\n',
+  ),
   "src/t.ts":
     "export function text(value: unknown): string {\n  return String(value);\n}\n",
 } as const;

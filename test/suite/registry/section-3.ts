@@ -47,6 +47,7 @@ import {
 } from "../../helpers/assertions.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { defineProductTest } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertEdgeSetEqual,
@@ -677,9 +678,18 @@ const T3_5 = defineProductTest({
 // T3-6
 // ---------------------------------------------------------------------------
 
-const SCOPE_A_SOURCE = '<S id="a">\nAlpha.\n</S>\n';
+// T3-6 stages both sources in each variant's fresh workspace, the second
+// and third after the first variant's `build`: staged-source records, judged
+// before any product exists (S-9, test/self/s9-staged-sources.test.ts).
+const SCOPE_A_SOURCE = stagedMdx(
+  "T3-6 specs/A.mdx",
+  '<S id="a">\nAlpha.\n</S>\n',
+);
 const SCOPE_A_COMPILED = "Alpha.\n";
-const SCOPE_B_SOURCE = '<S id="b">\nBeta.\n</S>\n';
+const SCOPE_B_SOURCE = stagedMdx(
+  "T3-6 specs/sub/B.mdx",
+  '<S id="b">\nBeta.\n</S>\n',
+);
 const SCOPE_B_COMPILED = "Beta.\n";
 
 /**

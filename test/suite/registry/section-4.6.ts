@@ -66,8 +66,10 @@ import {
 } from "../../helpers/adapters/index.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { defineProductTest } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertEdgeSetEqual,
   assertSameJson,
@@ -94,7 +96,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -1119,8 +1121,11 @@ const T4_6_3_DECLARATION_FILE_ARMS: readonly DeclarationFileArm[] = [
 /** The declaration-file arm's control: no `.d.` in its last path segment. */
 const T4_6_3_DECLARATION_CONTROL = "src/x.dts.ts";
 
-const T4_6_3_DECLARATION_SPEC_SOURCE = T4_6_3_DECLARATION_FILE_ARMS.flatMap(
-  (arm) => [
+// Staged in T4.6-3's second workspace, created after the first's invocations:
+// a staged-source record (S-9, test/self/s9-staged-sources.test.ts).
+const T4_6_3_DECLARATION_SPEC_SOURCE = stagedMdx(
+  "T4.6-3 specs/D.mdx of the declaration-file arm",
+  T4_6_3_DECLARATION_FILE_ARMS.flatMap((arm) => [
     `<S id="${arm.inner}">`,
     `Target for the marker inside f of ${arm.file}.`,
     "</S>",
@@ -1129,8 +1134,8 @@ const T4_6_3_DECLARATION_SPEC_SOURCE = T4_6_3_DECLARATION_FILE_ARMS.flatMap(
     `Target for the top-level marker of ${arm.file}.`,
     "</S>",
     "",
-  ],
-).join("\n");
+  ]).join("\n"),
+);
 
 /** The one shape every declaration-arm file takes (the control included). */
 function declarationFileSource(arm: DeclarationFileArm): string {
