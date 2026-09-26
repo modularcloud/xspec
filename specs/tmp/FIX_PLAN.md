@@ -618,6 +618,42 @@ Known state after Task 11: the S-9 self-test 558 tests over 532 records
 under the namespace (~141 s; 2615 + the 83 record tests); certification 144 PASS /
 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
 
+**Resolved by Task 12 (the §6.6 module; e921f44 converts, the closing commit
+records).** Eight records, one of `section-6.5.ts`'s reused. `section-6.6.ts`:
+T6.6-2's move arm — `P2_ORIGIN_SOURCE` wrapped in place (`"T6.6-2 move arm
+specs/Origin.mdx"`); its target holds the bytes of T6.5-8/T6.5-9's plain target, so
+`section-6.5.ts`'s `A8_PLAIN_TARGET` is exported, renamed
+`"T6.5-8/T6.5-9/T6.6-2/T6.6-6 specs/Target.mdx (the plain target)"`, and aliased as
+`P2_TARGET_SOURCE` and `R6_TARGET_SOURCE` (T6.6-6's first workspace stages the same
+bytes — aliased rather than left as a second spelling of a record's bytes; Task 10's
+sub-rule (ii), the name carrying T6.6-6 as Task 6's first-workspace-only callers do);
+T6.6-4's arm (b) — `B4_ORIGIN_STAGED`, `B4_TARGET_STAGED`, `B4_THIRD_STAGED`, made
+from the strings `armBPlan` and the real-run byte assertion (`preSource`) keep; arm
+(c), shared with T6.6-5's two file-form arms — `C4_MV_STAGED`, `C4_PAL_STAGED` (the
+expression moved from the deleted `C4_PAL_SOURCE`, nothing else reading it),
+`C4_USER_STAGED`, named `"T6.6-4/T6.6-5 …"`, T6.6-5's first workspace converted
+uniformly; arm (d), shared with T6.6-5's created-target arm — `D4_SOLO_STAGED`. Arm
+(e)'s `A13_TIE_BREAK_ARMS` and every set T6.6-3 stages were records already (Tasks
+9–11), so T6.6-3 logged nothing before. Left plain: T6.6-2's rename arm, T6.6-4's
+arm (a), T6.6-6's origin (each its body's first workspace). Read-based enumeration:
+the 25 creation sites judged; the one unreached post-invocation site is T6.6-3's
+scheduling workspace (`TestWorkspace.create(CORE_DECL)`, behind its diagnosed failure
+at the identity-terms arm), which stages `section-13.5.ts`'s exported `CORE_DECL` —
+its `specs/A.mdx` (`A_MDX`) converts in the exporting module under Task 21, its
+record named with T6.6-3 beside the §13.5 tests (Task 10's sub-rule (iii); Task 21's
+notes updated). Observation, not converted: `section-5.5.ts`'s `RICH_FILES` spells the
+plain target's bytes at `specs/B.mdx` in T5.5-1's two pre-invocation directories
+(Task 7 left them plain). Checks: the sites hook logged the task's 13 (test, path)
+lines (all `"well-formed"`) before and no file after; the sha256 capture over the
+suite file (60 writes) identical; 5 tests, 3 pass and 2 fail — T6.6-3, T6.6-4 — with
+identical diagnoses (~47 s a run); red check: an unclosed `mv` tag fails
+`"T6.6-4/T6.6-5 specs/Mv.mdx"` alone as `mdx-derivability` among the ledger
+self-test's 70 `-t 'T6\.6-'` tests. Known state after Task 12: the S-9 self-test 566
+tests over 540 records (533 `T…`, 4 `E-6`, 3 `P-…`); self project 22 files, 2706
+passed, 0 skipped under the namespace (~137 s; 2698 + the 8 record tests);
+certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run
+against` lines.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -784,37 +820,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 12 — Initial-file conversion: §6.6 (`section-6.6.ts`)
-
-**Workspace creations to judge:** 25 (`withWorkspace` ~361; imports
-`MOVE_PRECONDITION_BREAK` from 6.5).
-**Reachable sites (the instrumented run):**
-- `section-6.6.ts` — T6.6-2 (2): specs/Origin.mdx specs/Target.mdx
-- `section-6.6.ts` — T6.6-3 (5): docs/Occ.mdx specs/A.mdx specs/B.mdx specs/Other.mdx specs/Solo.mdx
-- `section-6.6.ts` — T6.6-4 (10): specs/Mv.mdx specs/Origin.mdx specs/Pal.mdx specs/Solo.mdx specs/Target.mdx specs/Third.mdx specs/User.mdx specs/a.mdx specs/b.mdx specs/x.mdx
-- `section-6.6.ts` — T6.6-5 (4): specs/Mv.mdx specs/Pal.mdx specs/Solo.mdx specs/User.mdx
-**Failing here:** T6.6-3, T6.6-4.
-**Certification scope:** none.
-**Notes.** Task 9 widened this module's `withWorkspace` `files` to
-`InitialFileContents` and converted the three rename sets it imports from
-`section-6.4.ts` — `RENAME_REFUSAL_FILES` (`"T6.4-3/T6.6-3/T14-7 …"`),
-`RENAME_USAGE_ORDERING_FILES` and `RENAME_SOLO_FILES` (`"T6.4-4/T6.6-3 …"`) — so
-the before-log lacks those entries (T6.6-3's `specs/Solo.mdx` above is the rename
-solo set's if reached through `runSoloUsageArm` ~1169; the move solo set's ~1239 is
-Task 10's — done: Task 10 converted the eight sets this module imports from
-`section-6.5.ts` — `MOVE_REFUSAL_FILES`, `MOVE_LINK_OUTSIDE_FILES`,
-`MOVE_DERIVED_PATH_FILES`, `MOVE_DERIVED_LINK_FILES`, `MOVE_PRECONDITION_FILES`,
-`MOVE_USAGE_ORDERING_FILES`, `MOVE_SOLO_FILES`, `MOVE_IDENTITY_FILES_AFTER` — their
-records named with T6.6-3, so the before-log lacks those entries as well: T6.6-3's
-five listed paths are theirs, and whatever T6.6-3 still logs is the module's own);
-Task 11 converted the sets this module imports from `section-6.5-iii.ts` —
-`R16_REFUSED_ARMS`, `R16_ALONE_ARMS`, `M17_REFUSED_ARMS` (T6.6-3's preview twins) and
-`A13_TIE_BREAK_ARMS` (T6.6-4's arm (e), so its listed `specs/a.mdx`, `specs/b.mdx`,
-`specs/x.mdx` are records already) — and touched this module (`expectRefusedArmPreviewTwin`'s
-`files` widened, `tieBreakPlan` reading the origin through `StagedMdx`);
-the module's own entries convert as planned.
-**Checks.** Recipes 1–5 over `section-6.6.test`.
 
 ### Task 13 — Initial-file conversion: §7 basics, discovery, §7.1–§7.3 (`section-7-basics.ts`, `section-7-discovery.ts`, `section-7.1-7.3.ts`)
 
@@ -1001,6 +1006,12 @@ after the original's `build`.
 conformer reaches the sites).
 **Notes.** `section-14-ii.ts`'s `PRECEDENCE_FIXTURE` / `LISTING_FIXTURE` are Task 23's.
 The `RefusalFixture.decl` type is `WorkspaceDecl` — record-accepting since Task 1.
+`CORE_DECL` (`section-13.5.ts`; `specs/A.mdx` from `A_MDX`, which stays a string for
+the `.replace` `A_MDX_EDITED` is made from, the record made from it) is also staged by
+T6.6-3's scheduling workspace (`section-6.6.ts`'s `TestWorkspace.create(CORE_DECL)`,
+after its first invocation and behind its diagnosed failure at the identity-terms arm —
+reached by no run), so its record's name carries T6.6-3 beside the §13.5 tests that
+create it after their first invocation (Task 12's finding; Task 10's sub-rule (iii)).
 **Checks.** Recipes 1–5 over `section-13.1-13.2.test`, `section-13.3.test`,
 `section-13.4.test`, `section-13.5.test`.
 
