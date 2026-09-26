@@ -428,6 +428,64 @@ state after Task 8: the S-9 self-test 407 tests over 381 records (374 `T…`,
 the namespace (~138 s; 2517 + the 30 record tests); certification 144 PASS /
 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
 
+**Resolved by Task 9 (the §6.4 and §6.7 modules; d6d25e6 converts, the closing
+commit records).** Nineteen records: `section-6.4.ts` 17 — T6.4-2's body-local
+staging maps hoisted to module level as `T6_4_2_L_FILES` / `T6_4_2_M_FILES` (the
+`.mdx` entries records named `"T6.4-2 arms 1 and 2 <path>"` / `"T6.4-2 arms 3 and
+4 <path>"` — the same `coreL`/`refsL`/`coreM`/`refsM` calls and
+`OTHER_MDX_L`/`OTHER_MDX_M`, moved — the `.ts` entries plain, arm 1's workspace
+converted uniformly; `runMinimalEditArm`'s `sources` widened, its untouched-file
+compare reading a record's bytes through `.source` so its message selection is
+unchanged); `RENAME_REFUSAL_FILES`'s two entries as records made from `V3_SOURCE`
+and `TWO_BEARER_COLLISION_SOURCE` (both kept as strings for the location windows),
+named `"T6.4-3/T6.6-3/T14-7 specs/A.mdx"` / `"… specs/B.mdx"` (T6.4-3 stages the
+set again for its configuration-state twins after its premise `build` — behind its
+diagnosed failure at the first refusal case, judged by reading; T6.6-3 and T14-7
+stage it in their first workspaces); the seven `U4_*` sources wrapped in place —
+`"T6.4-4/T6.6-3 specs/A.mdx"`, `"… specs/Bad.mdx"`, `"… docs/Stray.mdx"`, `"…
+specs/Solo.mdx"` (the exported `RENAME_USAGE_ORDERING_FILES` / `RENAME_SOLO_FILES`
+sets T6.6-3 stages too, their types widened), `"T6.4-4 masking arm
+specs/Broken.mdx"` carrying `"unparseable"` (the workspace declaration
+`{ unparseable: [U4_BROKEN_FILE] }` removed and, it being the module's only use,
+`withWorkspace`'s `mdx` parameter and the `WorkspaceMdxDecl` import with it —
+Task 8's sub-rule (iii)), `"T6.4-4 duplicate-spellings arm specs/Dup.mdx"`,
+`"T6.4-4 undefined-ancestor arm specs/Anc.mdx"` (the base arm's workspace, the
+body's first, converted uniformly); `T5_CORE_SOURCE` / `T5_TARGET_SOURCE` wrapped
+in place as `"T6.4-5 specs/Core.mdx"` / `"T6.4-5 specs/Target.mdx"` (the move
+arm's twins follow the rename arm; the rename arm's workspace converted
+uniformly). `section-6.7.ts` 2 — the validation arm's initial origin
+(`originSource("b.mid", "b.mid").text`) and stale watcher (`staleWatch.text`; the
+builder's `prefix`/`construct` still pin the byte window) as
+`T6_7_1_INITIAL_ORIGIN` / `T6_7_1_STALE_WATCH`. Sub-rules applied: (i) an
+exported string set that another registry module's string-typed helper consumes
+converts in place, the consumer's parameter widened to `InitialFileContents` —
+a type-only touch of `section-6.6.ts`'s `withWorkspace` (one import, one type;
+its own conversion stays Task 12's), the form Task 10's note prescribes (one
+record, created in the exporting module, named with every staging test's ID); a
+consumer spreading the set into a `WorkspaceDecl` (`section-14.ts`'s T14-7) needs
+nothing; (ii) a body-local staging map a runner both stages and compares against
+(`runMinimalEditArm`'s `touched`) hoists to a module-level record-bearing map,
+the runner reading a record's bytes through `.source` (`StagedMdx` imported as a
+value); (iii) a byte-identical source in a module a later task converts
+(`section-6.5.ts`'s `U5_BAD_SOURCE` equals `U4_BAD_SOURCE`; neither module imports
+the other) is left to that task, which reuses the record by export rather than
+registering the bytes twice (Task 10's note). Left plain: T6.4-1's, T6.4-6's, and
+T6.4-7's workspaces (each the body's first; T6.4-7's fresh twin holds no initial
+files — `copyFrom` seedings of product-written bytes) and T6.7-1's impact arm
+(`gitInit`/`gitCommitAll` invoke no product; its first `build` follows).
+Read-based enumeration: the 17 creation sites of `section-6.4.ts` and the 3 of
+`section-6.7.ts` judged; T6.4-3's twins the one unreached site. Checks: the sites
+hook logged 23 lines (14 distinct (test, path) pairs — the task's list;
+`specs/Broken.mdx` `"unparseable"`, the rest `"well-formed"`) before and no file
+after; the sha256 capture over the two suite files (81 writes, compared sorted)
+identical; 8 tests, 7 pass and 1 fail — T6.4-3 — with an identical diagnosis; red
+check: an unclosed tag spliced into `T5_TARGET_SOURCE` fails `"T6.4-5
+specs/Target.mdx"` as `mdx-derivability` while the Core record passes. Known
+state after Task 9: the S-9 self-test 426 tests over 400 records (393 `T…`,
+4 `E-6`, 3 `P-…`); self project 22 files, 2566 passed, 0 skipped under the
+namespace (~137 s; 2547 + the 19 record tests); certification 144 PASS /
+33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -595,25 +653,6 @@ behind a diagnosed failure or in an arm the built product never reaches — reci
 
 ## Tasks
 
-### Task 9 — Initial-file conversion: §6.4 and §6.7 (`section-6.4.ts`, `section-6.7.ts`)
-
-**Workspace creations to judge:** 6.4 (17; 1 record; a `stageConfigurationStateTwins`
-caller; T6.4-7's H-6 fresh workspace seeded through `copyFrom` ~2415), 6.7 (3; 4
-records).
-**Reachable sites (the instrumented run):**
-- `section-6.4.ts` — T6.4-2 (3): specs/Core.mdx specs/Other.mdx specs/Refs.mdx
-- `section-6.4.ts` — T6.4-4 (7): docs/Stray.mdx specs/A.mdx specs/Anc.mdx specs/Bad.mdx specs/Broken.mdx specs/Dup.mdx specs/Solo.mdx
-- `section-6.4.ts` — T6.4-5 (2): specs/Core.mdx specs/Target.mdx
-- `section-6.7.ts` — T6.7-1 (2): specs/B.mdx specs/Watch.mdx
-**Failing here:** T6.4-3.
-**Certification scope:** none.
-**Notes.** T6.4-7's fresh workspace: its `copyFrom` seedings stay (product-written
-bytes); any `.mdx` entry in its initial `files` is a harness constant and converts;
-its config/journal entries are not `.mdx`. The twins' file set passed to
-`stageConfigurationStateTwins` converts under the calling body (its parameter is
-record-accepting since Task 1).
-**Checks.** Recipes 1–5 over `section-6.4.test`, `section-6.7.test`.
-
 ### Task 10 — Initial-file conversion: §6.5 (`section-6.5.ts`)
 
 **Workspace creations to judge:** 29 (`withWorkspace` ~351; the exported record
@@ -631,6 +670,13 @@ a `stageConfigurationStateTwins` caller).
 imports (T6.5-2's composed forms) and create records from them. The module exports
 constants to `section-6.6.ts`: a constant both modules stage post-invocation is one
 record, created here and named with both IDs (the previous plan's Task 9 form).
+Byte identity across modules (found by Task 9): `U5_BAD_SOURCE` (~3412, staged
+~3656) equals `section-6.4.ts`'s `U4_BAD_SOURCE` record `"T6.4-4/T6.6-3
+specs/Bad.mdx"` byte for byte, and neither module imports the other — if T6.5-5's
+site is post-invocation, reuse that record (export it from `section-6.4.ts` and
+rename it with the calling ID) rather than register the bytes twice (the naming
+rule: an existing record whose bytes and declaration equal a new entry's is
+reused, never duplicated).
 **Checks.** Recipes 1–5 over `section-6.5.test` (the file alone runs several minutes).
 
 ### Task 11 — Initial-file conversion: §6.5-ii and §6.5-iii (`section-6.5-ii.ts`, `section-6.5-iii.ts`)
@@ -660,6 +706,14 @@ convert in place (one record per row per `.mdx` entry, named `"T6.5-13 arm (x) <
 - `section-6.6.ts` — T6.6-5 (4): specs/Mv.mdx specs/Pal.mdx specs/Solo.mdx specs/User.mdx
 **Failing here:** T6.6-3, T6.6-4.
 **Certification scope:** none.
+**Notes.** Task 9 widened this module's `withWorkspace` `files` to
+`InitialFileContents` and converted the three rename sets it imports from
+`section-6.4.ts` — `RENAME_REFUSAL_FILES` (`"T6.4-3/T6.6-3/T14-7 …"`),
+`RENAME_USAGE_ORDERING_FILES` and `RENAME_SOLO_FILES` (`"T6.4-4/T6.6-3 …"`) — so
+the before-log lacks those entries (T6.6-3's `specs/Solo.mdx` above is the rename
+solo set's if reached through `runSoloUsageArm` ~1169; the move solo set's ~1239 is
+Task 10's); the module's own entries and the sets it imports from `section-6.5.ts`
+convert as planned.
 **Checks.** Recipes 1–5 over `section-6.6.test`.
 
 ### Task 13 — Initial-file conversion: §7 basics, discovery, §7.1–§7.3 (`section-7-basics.ts`, `section-7-discovery.ts`, `section-7.1-7.3.ts`)
@@ -910,7 +964,8 @@ named with every test preparing them, as Task 21's).
 **Notes.** T14-4/T14-6 share records already (`"T14-4/T14-6 …"`); T14-3's
 `specs/broken.mdx` and `specs/invalid.mdx` are `unparseable` records (their paths
 leave `mdx.unparseable`); `specs/a#b.mdx` is an ordinary key; T14-11's arm (v) prefix
-form (AGENTS.md's arm-filter and stand-in recipes reach it).
+form (AGENTS.md's arm-filter and stand-in recipes reach it); `RENAME_REFUSAL_FILES`
+(T14-7's first workspace, ~3149) already stages records named with T14-7 (Task 9).
 **Checks.** Recipes 1–5 over `section-14.test`, `section-14-ii.test`; after this task
 the whole suite's initial `.mdx` entries after a body's first invocation are records,
 `perDraw`, or `unchecked` — Task 24 verifies it.
