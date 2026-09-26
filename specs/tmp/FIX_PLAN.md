@@ -162,6 +162,13 @@ As Task 13 found: the site lists' `— read` sites are template calls too (no
 §10.5/§10.6 body reads product-written bytes back, so no `edit()` there), and the
 later-arm initial `files` — T10.5-1's extended and chain fixtures, T10.5-5's
 sub-fixture B, T10.6-2's sub-fixture 2 — join the reach observation above.
+As Task 14 found: a site list's `— read` annotation can mark a non-`.mdx` helper
+site (`section-10.7-i.ts` 638 writes garbage bytes over the session path in
+`CORRUPT_CREATE_ARMS`) — judged and left; identical bytes one test stages at two
+sites (T10.7-2's `leafSpec("n", "Enn text.")` in both arms) are ONE record staged
+at both, a second registration of the name throwing at load; and T10.7-1's
+per-state corrupt-session workspaces and T10.7-2's audit arm join the reach
+observation above.
 
 **Appending to product-written bytes (T5.4-1's pattern):** an append is an `edit()`
 extending the file's unique tail (`REINTRO_TAIL`, `f`'s closing run, which the rename
@@ -180,12 +187,6 @@ verdict (`unshare … -- npx vitest run --config test/vitest.config.ts --project
 reached — accepted, Task 18's guard surfaces it when the product gets there).
 
 ## Tasks
-
-### Task 14 — Ledger conversion: §10.7-i
-
-`section-10.7-i.ts` (638 — read; 983, 984, 1160 `leafSpec(...)`; 1300 `c3Spec`; 1587,
-1645 `c4KSpec`; 1733 `c5Spec`; 2080 `c6Spec`; the config and session sites are not
-`.mdx`). **Checks:** as the preamble's.
 
 ### Task 15 — Ledger conversion: §10.7-ii
 
