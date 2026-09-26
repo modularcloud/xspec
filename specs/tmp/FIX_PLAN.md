@@ -173,6 +173,50 @@ P-6 24, P-7 139, P-9 12, P-12 14, P-13 50), P-11's 36 `"unchecked"`, P-12's 1
 S-9 self-test 199 tests over 173 records (166 `T…`, 4 `E-6`, 3 `P-…`); self project
 22 files, 2339 passed, 0 skipped under the namespace (~141 s; 2335 + the three record tests + the `mdxPathsOf` test); certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
 
+**Resolved by Task 4 (the §1 modules; 7a80081, b9fd0e4, and the task's closing
+commit).** Fifty-two records: `section-1.3.ts` 11 — the structural arm table's
+rows through `structuralArm(recordName, parts)`, which composes
+`prefix + construct + suffix` in place (`StructuralArm extends StructuralArmParts`
+with `source: StagedMdx`; the parts stay for `byteWindow`), T1.3-3's arm hoisted
+from its body to the module-level `SKIPPED_LEVEL_ARM` (a table type whose
+`source` is required cannot be met by a body-local literal — a run-time record
+throws), `TOP_LEVEL_MULTI_SEGMENT` (through the builder) and
+`TOP_LEVEL_ONE_SEGMENT_SOURCE`, `CROSS_FILE_A`/`CROSS_FILE_B`, and the
+invalid-form arms through `invalidIdFormArm()` (the bearer plus the shared
+`FORM_*` parts); `section-1.4.ts` 38 — a template function called over
+module-level constant tables enumerates as a COMPUTED module-level table, the
+same call in the same order evaluated once at load
+(`INVALID_SEGMENT_FIXTURES = INVALID_SEGMENT_ARMS.map((arm) => ({ arm, fixture:
+staged(name, segmentStaging(arm.segment, arm.quote)) }))`, likewise
+`VALID_TAG_FIXTURES` and `INVALID_TAG_FIXTURES`; the body destructures
+`{ arm, fixture }`; `StagedAssembled` pairs an `Assembled` with its record and
+`expectSingle144` stages the record while asserting over `pinned`) — the
+hand-written `as const` tuple remains the form for closures over mutable state
+(the previous plan's Task 12); a record's name carries the arm's own diagnostic
+`name` (`` `T1.4-1 arm ${arm.name} specs/A.mdx` ``: unique per table, no raw
+control characters since the names spell code points as `U+XXXX`);
+`section-1.6-1.7.ts` 3 — `EXTENDED_SOURCE`, T1.6-5's code-arm
+`VALID_SECTION_SOURCE` (unreached behind the spec arm's diagnosed failure,
+judged by reading), `ENDPOINT_SPEC_SOURCE`, each wrapped in place.
+`section-1.5.ts` adds none: T1.5-2's existing byte-path record, renamed
+`T1.5-2 the valid section source at every arm's spec path`, replaces its three
+`.source` fills (a record already serving a later `file()` is reused at the
+initial-file sites and renamed for every site it serves). `section-1.1-1.2.ts`
+needs nothing: every body's creations precede its first invocation (T1.1-2
+creates all three forms before its first `buildOk`) and the later `file()`
+calls are non-`.mdx`. First-workspace rows of converted tables converted
+uniformly (T1.3-3, T1.3-4's multi-segment arm, T1.4-4's first valid tag arm);
+every other first workspace stays plain. Both `findingsOf` helpers take
+`string | StagedMdx`. Checks: the sites hook logged the task's 11 (test, path)
+pairs (39 lines, all `"well-formed"`) before and 0 lines after; the sha256
+capture over the five files run together (173 writes; one log for a
+multi-file run is compared SORTED, since the 4 workers interleave their lines)
+identical; 27 tests, 22 pass and 5 fail — T1.4-1, T1.4-4, T1.5-2, T1.6-5,
+T1.7-2 — with identical diagnoses (the `HarnessAssertionError:` lines of the
+two verbose logs, extracted and `diff`ed). Known state after Task 4: the S-9
+self-test 251 tests over 225 records (218 `T…`, 4 `E-6`, 3 `P-…`); self project
+22 files, 2391 passed, 0 skipped under the namespace (~137 s; 2339 + the 52 record tests); certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -339,34 +383,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 4 — Initial-file conversion: §1 (`section-1.1-1.2.ts`, `section-1.3.ts`, `section-1.4.ts`, `section-1.5.ts`, `section-1.6-1.7.ts`)
-
-**Workspace creations to judge** (`withWorkspace(` / `TestWorkspace.create(` / helper
-calls, per module): 1.1-1.2 (8), 1.3 (5 + `runStructuralArm` → `findingsOf` at ~69/164,
-one workspace per arm row), 1.4 (5), 1.5 (6), 1.6-1.7 (10).
-**Reachable sites (the instrumented run):**
-- `section-1.3.ts` — T1.3-2 (1): specs/A.mdx
-- `section-1.3.ts` — T1.3-4 (1): specs/A.mdx
-- `section-1.3.ts` — T1.3-5 (2): specs/A.mdx specs/B.mdx
-- `section-1.3.ts` — T1.3-6 (1): specs/A.mdx
-- `section-1.4.ts` — T1.4-1 (1): specs/A.mdx
-- `section-1.4.ts` — T1.4-4 (1): specs/A.mdx
-- `section-1.5.ts` — T1.5-2 (2): specs/A�.mdx specs/OK.mdx
-- `section-1.6-1.7.ts` — T1.6-1 (1): specs/A.mdx
-- `section-1.6-1.7.ts` — T1.7-1 (1): specs/E.mdx
-**Failing here (sites past the failure unreached — recipe 5):** T1.4-1, T1.4-4, T1.5-2,
-T1.6-5, T1.7-2.
-**Certification scope:** T1.3-1…T1.3-6, T1.4-1, T1.4-2, T1.4-4 (CONF-VALID) — run the
-self project; 144/33/0/0.
-**Notes.** The structural arm tables of `section-1.3.ts` compose `specs/A.mdx` from
-`prefix + construct + suffix` (the shapes section's second bullet: a `source` record per
-row, the parts kept for `byteWindow`); T1.5-2's Linux-leg byte path is already a
-`file()` record — its `specs/OK.mdx` and the U+FFFD-spelled key are `files` entries of a
-later workspace. Whole-table conversions are fine where a table's first row is the
-body's first workspace.
-**Checks.** Recipes 1–5 over `section-1.1-1.2.test`, `section-1.3.test`,
-`section-1.4.test`, `section-1.5.test`, `section-1.6-1.7.test`.
 
 ### Task 5 — Initial-file conversion: §2 (`section-2.1.ts`, `section-2.2-2.3.ts`, `section-2.4.ts`, `section-2.5-2.6.ts`, `section-2.7.ts`)
 

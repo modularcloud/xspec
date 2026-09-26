@@ -183,16 +183,22 @@ const EMBEDDING_SECTION = [
   "</S>",
 ].join("\n");
 
-const EXTENDED_SOURCE = [
-  "Root prose.",
-  "",
-  INTERLEAVED_BODY,
-  "",
-  EMBEDDING_SECTION,
-  "",
-  "Root outro.",
-  "",
-].join("\n");
+// The extended workspace is created after the base arm's invocations, so
+// its source is a staged-source record, judged by the S-9 self-test before
+// any product exists (S-9's timing clause).
+const EXTENDED_SOURCE = stagedMdx(
+  "T1.6-1 extended specs/A.mdx",
+  [
+    "Root prose.",
+    "",
+    INTERLEAVED_BODY,
+    "",
+    EMBEDDING_SECTION,
+    "",
+    "Root outro.",
+    "",
+  ].join("\n"),
+);
 
 // Expected values, derived by hand from SPEC 3: every tag-only line is
 // emptied purely by removals and dropped with its terminator; all other lines
@@ -997,7 +1003,12 @@ const BOM_OFFSET = 0;
 // workspace builder writes string contents with BOMs kept (S-2).
 const BOM = "\u{FEFF}";
 
-const VALID_SECTION_SOURCE = '<S id="ok">\nValid content.\n</S>\n';
+// The code arm's spec source: that workspace is created after the spec
+// arm's invocation, so a staged-source record (S-9's timing clause).
+const VALID_SECTION_SOURCE = stagedMdx(
+  "T1.6-5 code arm specs/OK.mdx",
+  '<S id="ok">\nValid content.\n</S>\n',
+);
 
 /**
  * Exactly one finding names the file — locating in it, or carrying it as
@@ -1167,16 +1178,21 @@ const ROOT_RANGE = { start: 0, end: utf8Length(RANGE_SOURCE) };
 // --depends--> `omega`, and `src/app.ts#writer` --embeds--> `omega` — so
 // `edges` rows, a `reachable` witness path, and `query node`'s incoming and
 // outgoing edge lists each traverse a code location.
-const ENDPOINT_SPEC_SOURCE = [
-  '<S id="alpha" d={"omega"}>',
-  "Alpha text.",
-  "</S>",
-  "",
-  '<S id="omega">',
-  "Omega text.",
-  "</S>",
-  "",
-].join("\n");
+// The endpoints workspace is created after the range workspace's
+// invocations, so its spec source is a staged-source record (S-9).
+const ENDPOINT_SPEC_SOURCE = stagedMdx(
+  "T1.7-1 endpoints specs/E.mdx",
+  [
+    '<S id="alpha" d={"omega"}>',
+    "Alpha text.",
+    "</S>",
+    "",
+    '<S id="omega">',
+    "Omega text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const ENDPOINT_CODE_SOURCE = [
   'import SPEC, { text } from "../specs/E.xspec";',

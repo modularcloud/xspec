@@ -540,13 +540,15 @@ export default defineConfig({
 
 // Valid content everywhere: the invalid-path condition (14.19) must be the
 // only condition present, so the exact-count assertion has teeth.
-// The valid section source: the `#`-path arms' initial `files` entries
-// (`.source`) and, on the Linux leg, the byte-path staging — a `file()` call
-// the body makes after the spec and code arms' invocations (a byte path
-// cannot key a `files` entry), so a staged-source record, judged before any
-// product exists (S-9, test/self/s9-staged-sources.test.ts).
+// The valid section source, one staged-source record staged at every arm's
+// spec path: the spec arm's `specs/a#b.mdx` (the body's first workspace),
+// the code arm's `specs/OK.mdx` and the U+FFFD arm's `specs/A<U+FFFD>.mdx`
+// (initial files of workspaces created after the spec arm's invocation),
+// and, on the Linux leg, the byte-path `file()` staging (a byte path cannot
+// key a `files` entry) — judged before any product exists (S-9,
+// test/self/s9-staged-sources.test.ts).
 const VALID_SECTION_SOURCE = stagedMdx(
-  "T1.5-2 the valid section source at the non-UTF-8 byte path (Linux leg)",
+  "T1.5-2 the valid section source at every arm's spec path",
   '<S id="ok">\nValid content.\n</S>\n',
 );
 
@@ -616,7 +618,7 @@ const T1_5_2 = defineProductTest({
     const specArm = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        "specs/a#b.mdx": VALID_SECTION_SOURCE.source,
+        "specs/a#b.mdx": VALID_SECTION_SOURCE,
       },
     });
     try {
@@ -635,7 +637,7 @@ const T1_5_2 = defineProductTest({
     const codeArm = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-        "specs/OK.mdx": VALID_SECTION_SOURCE.source,
+        "specs/OK.mdx": VALID_SECTION_SOURCE,
         "src/a#b.ts": "export const ok = 1;\n",
       },
     });
@@ -692,7 +694,7 @@ const T1_5_2 = defineProductTest({
     const replacementArm = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [REPLACEMENT_CHARACTER_SPEC_PATH]: VALID_SECTION_SOURCE.source,
+        [REPLACEMENT_CHARACTER_SPEC_PATH]: VALID_SECTION_SOURCE,
       },
     });
     try {
