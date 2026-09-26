@@ -281,6 +281,62 @@ after Task 5: the S-9 self-test 339 tests over 313 records (306 `T…`, 4 `E-6`,
 namespace (~137 s; 2391 + the 88 record tests); certification
 144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
 
+**Resolved by Task 6 (the §3–§4 modules; the first commit converts, the second
+records).** Twenty records: `section-3.ts` 2 — T3-6's `SCOPE_A_SOURCE` /
+`SCOPE_B_SOURCE` wrapped in place (the variant loop's first workspace converted
+uniformly). `section-4.ts` 6 — `T4_2_BASE_FILES`'s `specs/BASE.mdx` (spread into
+all 35 arm workspaces), `COLOCATED_SPEC_SOURCE` as `"T4-2 src/NAME.mdx"` (the
+escape-spelled arm's `extraFiles` and the lexical positives), the two `extraFiles`
+`.mdx` entries wrapped in their arm rows (`InvalidTsImportArm.extraFiles` widened;
+the FIRST arm's `docs/EXTRA.mdx` — the body's first workspace — converted
+uniformly; the first duplicate-binding arm's `specs/OTHER.mdx` lies behind T4-2's
+failure at the escape-spelled arm, judged by reading), `T4_5_FILES`'s two sources.
+`section-4.3-4.4.ts` 3 — `T4_3_2_SPEC_FILES`'s `specs/A.mdx`; `T4_4_SPEC_FILES`'s
+two sources named `"T4.4-1/T4.4-2 …"` (T4.4-2 stages them in its first workspace
+only; T4.4-1's facet 3 stages the `B` record at the invalid path `specs/B#.mdx` —
+`recordStaging` requires an `.mdx` path, not the path the name states, so a record
+staged at a second path is named for both). `section-4.5.ts` 8 — `AB_SPEC_FILES`'s
+`specs/A.mdx` as ONE record named with all five staging tests
+(`"T4.5-3/T4.5-4/T4.5-5/T4.5-6/T4.5-7 specs/A.mdx"`: a shared map's record carries
+every caller's ID even where a caller stages it in its first workspace only —
+T4.5-6, T4.5-7); T4.5-2's upstream arm — `T4_5_2_UPSTREAM_MAIN_SOURCE` wrapped in
+place, `T4_5_2_UPSTREAM_OTHER_V1` from the template call
+`upstreamOtherSource("Upstream behavior, v1.")` moved to module level beside the
+existing `_V2` edit record; `T4_5_8_AB_SOURCE`, one record for the identical bytes
+T4.5-8 stages at `specs/A.mdx` (`T4_5_8_SPEC_FILES`) and `specs/BASE.mdx`
+(`T4_5_8_BASE_FILES`) — the two former string constants collapsed into it; the two
+`specs/COL.mdx` layouts: a per-arm staging function composing an `.mdx` source
+from module-level parts and an arm row (`stageSpecSourceCollision`) returns
+`source: StagedMdx` — the record named `` `T4.5-8 specs/COL.mdx with ${arm.name}` ``
+carrying `{ allowances: ["duplicate-import-binding"] }` — and is called once at
+load from the computed table `T4_5_8_SPEC_SOURCE_STAGINGS` (`{ arm, staged }`
+pairs), the assertion helper taking the pair and the body iterating the table;
+the allowance left the workspace declaration, so `withWorkspace`'s `mdx`
+parameter and the `WorkspaceMdxDecl` import went with the one caller (as Task 5's
+`section-2.1.ts`); `T4_5_9_FILES`'s two sources. `section-4.6.ts` 1 —
+`T4_6_3_DECLARATION_SPEC_SOURCE` (the `flatMap` over the arm table) wrapped in
+place. `section-4.1-4.2.ts` needs nothing (seven tests, one workspace each, at
+body start). Left plain: every body's first workspace (T3-1…T3-5, T3-7, T4-1,
+T4-3, T4-4, T4.3-1, T4.5-1's and T4.5-2's `PRINT_SPEC_SOURCE`, T4.6-1, T4.6-2,
+T4.6-4). Observation for the next determination, outside the rule's shapes and
+not converted: T4-2's above-root arm stages `outside/NAME.mdx` at the workspace
+root's PARENT through `support.ts`'s `stageBesideRoot` — a raw `fsp.writeFile`,
+neither a `files` entry nor a `file()` staging — so no builder path judges it and
+Task 24's guard will not see it; TEST-SPEC T4-2 names the file ("a real
+`outside/NAME.mdx`") and asserts resolution never reaches it; converting it needs
+`stageBesideRoot` to take a record (a helper change this plan does not schedule).
+Checks: the sites hook logged the task's 10 (test, path) pairs (36 lines, all
+`"well-formed"`) before and nothing after (the hook appends lazily, so an empty
+result is a missing log file); the sha256 capture over the six files (235
+writes, compared sorted) identical; 36 tests, 28 pass and 8 fail — T3-7, T4-2,
+T4-5, T4.4-1, T4.5-8, T4.5-9, T4.6-1, T4.6-3 — with identical diagnoses; red
+check: an unclosed tag spliced into `T4_5_8_MDX_BODY_PREFIX` fails both
+`specs/COL.mdx` records in the S-9 self-test. Known state after Task 6: the S-9
+self-test 359 tests over 333 records (326 `T…`, 4 `E-6`, 3 `P-…`); self project
+22 files, 2499 passed, 0 skipped under the namespace (~136 s; 2479 + the 20
+record tests); certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23
+`certification run against` lines.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -447,26 +503,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 6 — Initial-file conversion: §3–§4 (`section-3.ts`, `section-4.ts`, `section-4.1-4.2.ts`, `section-4.3-4.4.ts`, `section-4.5.ts`, `section-4.6.ts`)
-
-**Workspace creations to judge:** 3 (7), 4 (10), 4.1-4.2 (8), 4.3-4.4 (8; module
-`withWorkspace` ~162), 4.5 (14; 2 records), 4.6 (6).
-**Reachable sites (the instrumented run):**
-- `section-3.ts` — T3-6 (2): specs/A.mdx specs/sub/B.mdx
-- `section-4.ts` — T4-2 (2): specs/BASE.mdx src/NAME.mdx
-- `section-4.3-4.4.ts` — T4.3-2 (1): specs/A.mdx
-- `section-4.5.ts` — T4.5-2 (2): specs/MAIN.mdx specs/OTHER.mdx
-- `section-4.5.ts` — T4.5-3 (1): specs/A.mdx
-- `section-4.5.ts` — T4.5-4 (1): specs/A.mdx
-- `section-4.5.ts` — T4.5-5 (1): specs/A.mdx
-**Failing here:** T3-7, T4-2, T4-5, T4.4-1, T4.5-8, T4.5-9, T4.6-1, T4.6-3.
-**Certification scope:** T3-1…T3-6 (CONF-MD) — run the self project; 144/33/0/0.
-**Notes.** T4-2's `src/NAME.mdx` is an `.mdx` path to the builder wherever it lies —
-a record. T4.5-8 names the two-imports allowance (as T2.1-3): `{ allowances }` on the
-record.
-**Checks.** Recipes 1–5 over `section-3.test`, `section-4.test`, `section-4.1-4.2.test`,
-`section-4.3-4.4.test`, `section-4.5.test`, `section-4.6.test`.
 
 ### Task 7 — Initial-file conversion: §5 (`section-5.1-5.3.ts`, `section-5.4.ts`, `section-5.5.ts`, `section-5.6.ts`, `section-5.7.ts`)
 
