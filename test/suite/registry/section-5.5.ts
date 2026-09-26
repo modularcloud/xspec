@@ -57,6 +57,8 @@ import {
 import { assertAcrossDirectoriesDeterministic } from "../../helpers/determinism.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -77,6 +79,19 @@ export default defineConfig({
   }
 })
 `;
+
+// Every `.mdx` source a body below stages after its base-state `build` — an
+// arm's variant, an edited fixture — is a staged-source record created at
+// module load from the same template call the staging used, so that the S-9
+// self-test (test/self/s9-staged-sources.test.ts) judges it well-formed
+// before any product exists; the initial `files` of each workspace stay
+// plain contents (S-7's sweep reaches them against the stub).
+
+/** An arm's variant as a staged-source record, named with the arm's label. */
+interface StagedArm {
+  readonly label: string;
+  readonly source: StagedMdx;
+}
 
 /** Stage a fresh spec-only workspace, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
@@ -384,48 +399,50 @@ const OWN_P_SUBTREE_TOGGLED =
   "Twin text.\nTwin text.\n" +
   "tail run\n";
 
-const OWNHASH_CHANGED_ARMS: readonly {
-  readonly label: string;
-  readonly source: string;
-}[] = [
-  {
-    label: "an own-text run is edited",
-    source: ownHashSource({ tailRun: "tail run, edited" }),
-  },
-  {
-    label: "a child is added",
-    source: ownHashSource({ withExtraChild: true }),
-  },
-  {
-    label: "a child is removed",
-    source: ownHashSource({ withC1: false }),
-  },
-  {
-    label:
-      "two byte-identical children are reordered (identical text, distinct " +
+// The changed arms, each staged after the base-state build — a staged-source
+// record per row, named with the row's label (S-9).
+const ownHashArm = (label: string, shape: OwnHashShape): StagedArm => ({
+  label,
+  source: stagedMdx(`T5.5-2 ${label}`, ownHashSource(shape)),
+});
+const OWNHASH_CHANGED_ARMS: readonly StagedArm[] = [
+  ownHashArm("an own-text run is edited", { tailRun: "tail run, edited" }),
+  ownHashArm("a child is added", { withExtraChild: true }),
+  ownHashArm("a child is removed", { withC1: false }),
+  ownHashArm(
+    "two byte-identical children are reordered (identical text, distinct " +
       "canonical identities at the excision points)",
-    source: ownHashSource({ twinOrder: ["p.c3", "p.c2"] }),
-  },
-  {
-    label: "an embedded reference is added",
-    source: ownHashSource({ tailRun: 'tail run {text("t2")}' }),
-  },
-  {
-    label: "an embedded reference is removed",
-    source: ownHashSource({ firstRun: "run0  run1" }),
-  },
-  {
-    label: "an embedded reference is retargeted",
-    source: ownHashSource({ firstRun: 'run0 {text("t2")} run1' }),
-  },
-  {
-    label:
-      "an embedded reference is repositioned between runs (the two " +
+    { twinOrder: ["p.c3", "p.c2"] },
+  ),
+  ownHashArm("an embedded reference is added", {
+    tailRun: 'tail run {text("t2")}',
+  }),
+  ownHashArm("an embedded reference is removed", { firstRun: "run0  run1" }),
+  ownHashArm("an embedded reference is retargeted", {
+    firstRun: 'run0 {text("t2")} run1',
+  }),
+  ownHashArm(
+    "an embedded reference is repositioned between runs (the two " +
       "embeddings exchange positions around byte-identical runs — the run " +
       "bytes and the reference multiset are unchanged, only positions differ)",
-    source: ownHashSource({ middleRun: 'L {text("t2")} M {text("t")} R' }),
-  },
+    { middleRun: 'L {text("t2")} M {text("t")} R' },
+  ),
 ];
+
+// The unchanged arms and the line-drop toggle, staged after the changed arms
+// — staged-source records.
+const T5_5_2_CHILD_EDITED = stagedMdx(
+  "T5.5-2 specs/A.mdx with the child p.c1's text edited (the unchanged arm)",
+  ownHashSource({ c1Text: "Child one, edited." }),
+);
+const T5_5_2_TARGET_EDITED = stagedMdx(
+  "T5.5-2 specs/A.mdx with the embedded target t's text edited (the unchanged arm)",
+  ownHashSource({ targetText: "Target one, edited." }),
+);
+const T5_5_2_TOGGLED = stagedMdx(
+  "T5.5-2 specs/A.mdx with the toggle target t3 made non-empty (the line-drop-toggle arm)",
+  ownHashSource({ toggleTargetText: "Now present." }),
+);
 
 // Kind-distinction fixture: at the baseline `p` holds child `p.k` between the
 // runs "before\n" and "after\n". A journaled section move relocates the child
@@ -446,15 +463,18 @@ const KIND_BASELINE = [
   "</S>",
   "",
 ].join("\n");
-const KIND_MANUAL = [
-  'import B from "./B.xspec"',
-  "",
-  '<S id="p">',
-  "before",
-  "{text(B.k)}after",
-  "</S>",
-  "",
-].join("\n");
+const KIND_MANUAL = stagedMdx(
+  "T5.5-2 specs/A.mdx with the moved child embedded in imported form at its former position (the kind arm)",
+  [
+    'import B from "./B.xspec"',
+    "",
+    '<S id="p">',
+    "before",
+    "{text(B.k)}after",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T5_5_2 = defineProductTest({
   id: "T5.5-2",
@@ -524,10 +544,7 @@ const T5_5_2 = defineProductTest({
         // Unchanged: a child's text is edited — only the child's hashes
         // change; the parent's own content holds the child as an identity at
         // an excision point, not its text (SPEC 1.6, 5.5).
-        await workspace.file(
-          "specs/A.mdx",
-          ownHashSource({ c1Text: "Child one, edited." }),
-        );
+        await workspace.file("specs/A.mdx", T5_5_2_CHILD_EDITED);
         const childEditContext = "T5.5-2 unchanged arm (child's text edited)";
         const pAfterChildEdit = await queryHashes(
           product,
@@ -563,10 +580,7 @@ const T5_5_2 = defineProductTest({
         // Unchanged: an embedded target's text is edited (non-empty to
         // non-empty) — the target's text is no part of the embedder's own
         // content (SPEC 1.6).
-        await workspace.file(
-          "specs/A.mdx",
-          ownHashSource({ targetText: "Target one, edited." }),
-        );
+        await workspace.file("specs/A.mdx", T5_5_2_TARGET_EDITED);
         const targetEditAfter = await queryHashes(
           product,
           workspace,
@@ -586,10 +600,7 @@ const T5_5_2 = defineProductTest({
         // ownHash is byte-identical: for own content the excised expression
         // counts as remaining line content and the target's text is no part
         // of it (SPEC 1.6).
-        await workspace.file(
-          "specs/A.mdx",
-          ownHashSource({ toggleTargetText: "Now present." }),
-        );
+        await workspace.file("specs/A.mdx", T5_5_2_TOGGLED);
         const toggleContext = "T5.5-2 line-drop-toggle arm";
         const t3Toggled = await queryNode(
           product,
@@ -760,6 +771,49 @@ const SUB_S1A = "specs/A.mdx#s1.a";
 const SUB_S2 = "specs/A.mdx#s2";
 const SUB_S2T = "specs/A.mdx#s2.t";
 
+// The changed arms — each at depth 2 so `s1`'s own content is untouched: the
+// subtreeHash change travels through the descendant chain alone — staged
+// after the base-state build: a staged-source record per row, named with the
+// row's label (S-9).
+const subtreeArm = (label: string, shape: SubtreeShape): StagedArm => ({
+  label,
+  source: stagedMdx(`T5.5-3 ${label}`, subtreeSource(shape)),
+});
+const SUBTREE_CHANGED_ARMS: readonly StagedArm[] = [
+  subtreeArm("a descendant is added", {
+    grandchildren: [
+      ["g1", "Gamma one."],
+      ["g2", "Gamma two."],
+      ["g3", "Gamma three."],
+    ],
+  }),
+  subtreeArm("a descendant is removed", {
+    grandchildren: [["g2", "Gamma two."]],
+  }),
+  subtreeArm("descendants are reordered", {
+    grandchildren: [
+      ["g2", "Gamma two."],
+      ["g1", "Gamma one."],
+    ],
+  }),
+  subtreeArm("an in-subtree own-content change (a grandchild's run edited)", {
+    grandchildren: [
+      ["g1", "Gamma one, edited."],
+      ["g2", "Gamma two."],
+    ],
+  }),
+];
+
+// The unchanged arms, staged after the changed arms — staged-source records.
+const T5_5_3_SIBLING_EDITED = stagedMdx(
+  "T5.5-3 specs/A.mdx with the sibling subtree s2's intro edited (the unchanged arm)",
+  subtreeSource({ s2Intro: "S2 intro, edited." }),
+);
+const T5_5_3_TARGET_EDITED = stagedMdx(
+  "T5.5-3 specs/A.mdx with the embedded target s2.t's text edited (the unchanged arm)",
+  subtreeSource({ embedTargetText: "Embed target original, edited." }),
+);
+
 const T5_5_3 = defineProductTest({
   id: "T5.5-3",
   title:
@@ -800,46 +854,8 @@ const T5_5_3 = defineProductTest({
 
         // Changed arms — each at depth 2 so `s1`'s own content is untouched:
         // the subtreeHash change travels through the descendant chain alone.
-        const changedArms: readonly {
-          readonly label: string;
-          readonly shape: SubtreeShape;
-        }[] = [
-          {
-            label: "a descendant is added",
-            shape: {
-              grandchildren: [
-                ["g1", "Gamma one."],
-                ["g2", "Gamma two."],
-                ["g3", "Gamma three."],
-              ],
-            },
-          },
-          {
-            label: "a descendant is removed",
-            shape: { grandchildren: [["g2", "Gamma two."]] },
-          },
-          {
-            label: "descendants are reordered",
-            shape: {
-              grandchildren: [
-                ["g2", "Gamma two."],
-                ["g1", "Gamma one."],
-              ],
-            },
-          },
-          {
-            label:
-              "an in-subtree own-content change (a grandchild's run edited)",
-            shape: {
-              grandchildren: [
-                ["g1", "Gamma one, edited."],
-                ["g2", "Gamma two."],
-              ],
-            },
-          },
-        ];
-        for (const arm of changedArms) {
-          await workspace.file("specs/A.mdx", subtreeSource(arm.shape));
+        for (const arm of SUBTREE_CHANGED_ARMS) {
+          await workspace.file("specs/A.mdx", arm.source);
           const after = await queryHashes(
             product,
             workspace,
@@ -863,10 +879,7 @@ const T5_5_3 = defineProductTest({
 
         // Unchanged: a sibling-subtree edit. Control: the sibling's own
         // subtreeHash changed, so the edit demonstrably registered.
-        await workspace.file(
-          "specs/A.mdx",
-          subtreeSource({ s2Intro: "S2 intro, edited." }),
-        );
+        await workspace.file("specs/A.mdx", T5_5_3_SIBLING_EDITED);
         const siblingContext = "T5.5-3 unchanged arm (sibling-subtree edit)";
         const s1AfterSibling = await queryHashes(
           product,
@@ -896,10 +909,7 @@ const T5_5_3 = defineProductTest({
         // Unchanged: an embedded target outside the subtree is edited — the
         // embedder's subtree carries the target as an identity, not its text
         // (SPEC 1.6, 5.5). Control: the target's subtreeHash changed.
-        await workspace.file(
-          "specs/A.mdx",
-          subtreeSource({ embedTargetText: "Embed target original, edited." }),
-        );
+        await workspace.file("specs/A.mdx", T5_5_3_TARGET_EDITED);
         const targetContext =
           "T5.5-3 unchanged arm (embedded target outside the subtree edited)";
         const s1AfterTarget = await queryHashes(
@@ -1010,6 +1020,52 @@ const EFF_DUAL = "specs/A.mdx#dual";
 const EFF_TWIN_A = "specs/A.mdx#twinA";
 const EFF_TWIN_B = "specs/A.mdx#twinB";
 
+// The edge arms — the `d` edit sits on the child `q.inner` — staged after the
+// base-state build: a staged-source record per row, named with the row's
+// label (S-9).
+const effectiveArm = (label: string, shape: EffectiveShape): StagedArm => ({
+  label,
+  source: stagedMdx(`T5.5-4 ${label}`, effectiveSource(shape)),
+});
+const EFFECTIVE_EDGE_ARMS: readonly StagedArm[] = [
+  effectiveArm("a dependency edge is added in the subtree", {
+    innerAttrs: ' d={["t1", "t2"]}',
+  }),
+  effectiveArm("a dependency edge is removed in the subtree", {
+    innerAttrs: "",
+  }),
+  effectiveArm("a dependency edge is retargeted in the subtree", {
+    innerAttrs: ' d={"t2"}',
+  }),
+];
+
+// The remaining arms, staged in this order after the edge arms —
+// staged-source records.
+const T5_5_4_CHAIN_EDITED = stagedMdx(
+  "T5.5-4 specs/A.mdx with the dependency target chain's text edited (the transitive arm)",
+  effectiveSource({ chainText: "Chain tail, edited." }),
+);
+const T5_5_4_TWIN_A = stagedMdx(
+  "T5.5-4 specs/A.mdx with q.inner retargeted to twinA (the twin-retarget arm)",
+  effectiveSource({ innerAttrs: ' d={"twinA"}' }),
+);
+const T5_5_4_TWIN_B = stagedMdx(
+  "T5.5-4 specs/A.mdx with q.inner retargeted to twinB (the twin-retarget arm)",
+  effectiveSource({ innerAttrs: ' d={"twinB"}' }),
+);
+const T5_5_4_UNRELATED_EDITED = stagedMdx(
+  "T5.5-4 specs/A.mdx with the unrelated node's text edited (the unchanged arm)",
+  effectiveSource({ unrelatedText: "Unrelated text, edited." }),
+);
+const T5_5_4_DUAL_MINUS_D = stagedMdx(
+  "T5.5-4 specs/A.mdx with dual's `d` reference removed, the embedding kept (the per-edge-pairs arm)",
+  effectiveSource({ dualAttrs: "" }),
+);
+const T5_5_4_DUAL_MINUS_EMBED = stagedMdx(
+  "T5.5-4 specs/A.mdx with dual's embedding removed, the `d` reference kept (the per-edge-pairs arm)",
+  effectiveSource({ dualLine: "Dual intro.  tail." }),
+);
+
 const T5_5_4 = defineProductTest({
   id: "T5.5-4",
   title:
@@ -1072,28 +1128,8 @@ const T5_5_4 = defineProductTest({
         // edit sits on the child `q.inner`; the ancestor `q` must see its
         // effectiveHash change while its ownHash and subtreeHash stay
         // byte-identical (`d` props are no part of own content, SPEC 1.6, 3).
-        const edgeArms: readonly {
-          readonly label: string;
-          readonly innerAttrs: string;
-        }[] = [
-          {
-            label: "a dependency edge is added in the subtree",
-            innerAttrs: ' d={["t1", "t2"]}',
-          },
-          {
-            label: "a dependency edge is removed in the subtree",
-            innerAttrs: "",
-          },
-          {
-            label: "a dependency edge is retargeted in the subtree",
-            innerAttrs: ' d={"t2"}',
-          },
-        ];
-        for (const arm of edgeArms) {
-          await workspace.file(
-            "specs/A.mdx",
-            effectiveSource({ innerAttrs: arm.innerAttrs }),
-          );
+        for (const arm of EFFECTIVE_EDGE_ARMS) {
+          await workspace.file("specs/A.mdx", arm.source);
           const context = `T5.5-4 edge arm (${arm.label})`;
           const inner = await queryHashes(
             product,
@@ -1139,10 +1175,7 @@ const T5_5_4 = defineProductTest({
         // Transitive: editing `chain`'s text changes chain's effectiveHash,
         // hence t1's (dependency target), hence q.inner's, hence q's — while
         // q's own content and subtree are untouched.
-        await workspace.file(
-          "specs/A.mdx",
-          effectiveSource({ chainText: "Chain tail, edited." }),
-        );
+        await workspace.file("specs/A.mdx", T5_5_4_CHAIN_EDITED);
         const transitiveContext =
           "T5.5-4 transitive arm (a dependency target's dependency edited)";
         const qTransitive = await queryHashes(
@@ -1174,10 +1207,7 @@ const T5_5_4 = defineProductTest({
         // Retarget between the equal-effectiveHash twins: identities enter
         // the target pairs, so the two variants' hashes differ even though
         // the targets' effectiveHashes are equal.
-        await workspace.file(
-          "specs/A.mdx",
-          effectiveSource({ innerAttrs: ' d={"twinA"}' }),
-        );
+        await workspace.file("specs/A.mdx", T5_5_4_TWIN_A);
         const twinContext = "T5.5-4 twin-retarget arm";
         const innerOnA = await queryHashes(
           product,
@@ -1191,10 +1221,7 @@ const T5_5_4 = defineProductTest({
           EFF_Q,
           `${twinContext}, targeting twinA:`,
         );
-        await workspace.file(
-          "specs/A.mdx",
-          effectiveSource({ innerAttrs: ' d={"twinB"}' }),
-        );
+        await workspace.file("specs/A.mdx", T5_5_4_TWIN_B);
         const innerOnB = await queryHashes(
           product,
           workspace,
@@ -1230,10 +1257,7 @@ const T5_5_4 = defineProductTest({
         );
 
         // Unchanged: an unrelated node changes.
-        await workspace.file(
-          "specs/A.mdx",
-          effectiveSource({ unrelatedText: "Unrelated text, edited." }),
-        );
+        await workspace.file("specs/A.mdx", T5_5_4_UNRELATED_EDITED);
         const unrelatedContext = "T5.5-4 unchanged arm (unrelated node edited)";
         assertSameJson(
           await queryHashes(product, workspace, EFF_Q, `${unrelatedContext}:`),
@@ -1247,7 +1271,7 @@ const T5_5_4 = defineProductTest({
         // byte-identical — the discriminating arm: a product deduplicating
         // pairs per distinct target sees {(t1, h)} on both sides and reports
         // no change. Removing the embedding alone changes it too.
-        await workspace.file("specs/A.mdx", effectiveSource({ dualAttrs: "" }));
+        await workspace.file("specs/A.mdx", T5_5_4_DUAL_MINUS_D);
         const minusDContext =
           "T5.5-4 per-edge-pairs arm (the `d` reference removed, the embedding kept)";
         const dualMinusD = await queryHashes(
@@ -1269,10 +1293,7 @@ const T5_5_4 = defineProductTest({
             "per distinct target: two identical (t1, hash) pairs became one",
           minusDContext,
         );
-        await workspace.file(
-          "specs/A.mdx",
-          effectiveSource({ dualLine: "Dual intro.  tail." }),
-        );
+        await workspace.file("specs/A.mdx", T5_5_4_DUAL_MINUS_EMBED);
         const minusEmbedContext =
           "T5.5-4 per-edge-pairs arm (the embedding removed, the `d` reference kept)";
         const dualMinusEmbed = await queryHashes(
@@ -1328,6 +1349,46 @@ const META_OTHER_FILE = ['<S id="other">', "Other file text.", "</S>", ""].join(
   "\n",
 );
 
+// The arms, each staged after the base-state build in the body's order —
+// changed, unchanged, order-insensitivity — a staged-source record per row,
+// named with the row's label (S-9).
+const metadataArm = (label: string, shape: MetadataShape): StagedArm => ({
+  label,
+  source: stagedMdx(`T5.5-5 ${label}`, metadataSource(shape)),
+});
+// Changed arms: `d` target set, coverage attribute, tags.
+const METADATA_CHANGED_ARMS: readonly StagedArm[] = [
+  metadataArm("the `d` target set changes", {
+    mAttrs: ' d={["t1"]} tags="beta alpha"',
+  }),
+  metadataArm("the coverage attribute changes", {
+    mAttrs: ' d={["t1", "t2"]} coverage="none" tags="beta alpha"',
+  }),
+  metadataArm("the tags change", {
+    mAttrs: ' d={["t1", "t2"]} tags="beta gamma"',
+  }),
+];
+// Unchanged arms (the iff's other direction): a text edit, and an added
+// embedded reference — own content (1.6), surfacing through ownHash.
+const METADATA_UNCHANGED_ARMS: readonly StagedArm[] = [
+  metadataArm("the node's text is edited", {
+    mLine: "Meta node text, edited.",
+  }),
+  metadataArm("an embedded text(...) reference is added", {
+    mLine: 'Meta node text. {text("t3")}',
+  }),
+];
+// Order-insensitivity arms: each differs from the committed baseline in
+// exactly the reordering.
+const METADATA_REORDER_ARMS: readonly StagedArm[] = [
+  metadataArm("the references within one multi-element `d` array reordered", {
+    mAttrs: ' d={["t2", "t1"]} tags="beta alpha"',
+  }),
+  metadataArm("a multi-tag `tags` list reordered", {
+    mAttrs: ' d={["t1", "t2"]} tags="alpha beta"',
+  }),
+];
+
 const T5_5_5 = defineProductTest({
   id: "T5.5-5",
   title:
@@ -1378,28 +1439,8 @@ const T5_5_5 = defineProductTest({
         }
 
         // Changed arms: `d` target set, coverage attribute, tags.
-        const changedArms: readonly {
-          readonly label: string;
-          readonly mAttrs: string;
-        }[] = [
-          {
-            label: "the `d` target set changes",
-            mAttrs: ' d={["t1"]} tags="beta alpha"',
-          },
-          {
-            label: "the coverage attribute changes",
-            mAttrs: ' d={["t1", "t2"]} coverage="none" tags="beta alpha"',
-          },
-          {
-            label: "the tags change",
-            mAttrs: ' d={["t1", "t2"]} tags="beta gamma"',
-          },
-        ];
-        for (const arm of changedArms) {
-          await workspace.file(
-            "specs/A.mdx",
-            metadataSource({ mAttrs: arm.mAttrs }),
-          );
+        for (const arm of METADATA_CHANGED_ARMS) {
+          await workspace.file("specs/A.mdx", arm.source);
           const after = await queryHashes(
             product,
             workspace,
@@ -1418,24 +1459,8 @@ const T5_5_5 = defineProductTest({
         // embedded reference, which is own content (1.6) and surfaces through
         // ownHash, never metadataHash. The ownHash change is the control that
         // each edit registered.
-        const unchangedArms: readonly {
-          readonly label: string;
-          readonly mLine: string;
-        }[] = [
-          {
-            label: "the node's text is edited",
-            mLine: "Meta node text, edited.",
-          },
-          {
-            label: "an embedded text(...) reference is added",
-            mLine: 'Meta node text. {text("t3")}',
-          },
-        ];
-        for (const arm of unchangedArms) {
-          await workspace.file(
-            "specs/A.mdx",
-            metadataSource({ mLine: arm.mLine }),
-          );
+        for (const arm of METADATA_UNCHANGED_ARMS) {
+          await workspace.file("specs/A.mdx", arm.source);
           const context = `T5.5-5 unchanged arm (${arm.label})`;
           const after = await queryHashes(
             product,
@@ -1463,25 +1488,8 @@ const T5_5_5 = defineProductTest({
         // over it must report no categories at all (target sets enter sorted
         // by canonical identity, tags sorted, SPEC 5.5) — no requirement
         // entries, per the suite's fixed T1.5-1 interpretation of 9.3.
-        const reorderArms: readonly {
-          readonly label: string;
-          readonly mAttrs: string;
-        }[] = [
-          {
-            label:
-              "the references within one multi-element `d` array reordered",
-            mAttrs: ' d={["t2", "t1"]} tags="beta alpha"',
-          },
-          {
-            label: "a multi-tag `tags` list reordered",
-            mAttrs: ' d={["t1", "t2"]} tags="alpha beta"',
-          },
-        ];
-        for (const arm of reorderArms) {
-          await workspace.file(
-            "specs/A.mdx",
-            metadataSource({ mAttrs: arm.mAttrs }),
-          );
+        for (const arm of METADATA_REORDER_ARMS) {
+          await workspace.file("specs/A.mdx", arm.source);
           const context = `T5.5-5 order-insensitivity arm (${arm.label})`;
           assertSameJson(
             await queryHashes(product, workspace, META_M, `${context}:`),

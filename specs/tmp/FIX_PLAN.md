@@ -15,7 +15,7 @@ assertion failures only — never a harness crash, hang, or false pass, H-8).
 
 **Known state at 8f8245c.** Self project: 20 files, 2126 passed, 0 skipped under
 `unshare --map-user=1000 --map-group=1000 -- npm run test:self` (21 files, 2151 passed
-after Task 5, 2167 after Task 6). Certification pairs:
+after Task 5, 2167 after Task 6, 2201 after Task 7). Certification pairs:
 144 PASS / 33 FAIL, exactly as CERTIFICATIONS.md documents (5 conformers, 18 violators).
 The diagnosed product failures allowed at this phase are recorded in the latest commit
 messages and in `AGENTS.md`'s per-task bullets — they need no plan task. The
@@ -135,15 +135,6 @@ verdict (`unshare … -- npx vitest run --config test/vitest.config.ts --project
 reached — accepted, Task 18's guard surfaces it when the product gets there).
 
 ## Tasks
-
-### Task 7 — Ledger conversion: §5.5
-
-`section-5.5.ts` (18 sites at 8f8245c: 509 `arm.source`, 527, 566, 589, 654
-`KIND_MANUAL`, 842 `subtreeSource(arm.shape)`, 866, 899, 1093, 1142, 1177, 1194, 1233,
-1250 `effectiveSource({ dualAttrs: "" })`, 1272, 1399, 1435, 1481 — the multi-line calls
-need their paths read). Template outputs over module-level arm tables become record
-tables built at load from the same functions and rows. **Checks:** as the preamble's;
-T5.5-* alone against the built product unchanged.
 
 ### Task 8 — Ledger conversion: §5.6 and §6.7
 
