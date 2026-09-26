@@ -377,6 +377,57 @@ Task 7: the S-9 self-test 377 tests over 351 records (344 `T…`, 4 `E-6`,
 namespace (~134 s; 2499 + the 18 record tests); certification 144 PASS /
 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
 
+**Resolved by Task 8 (the §6.1–§6.3 modules; 0a93d2d converts, the closing
+commit records).** Thirty records: `section-6.1.ts` 2 — `CORE_FILES`'s
+`specs/A.mdx` and `specs/B.mdx` wrapped in place, named with every calling
+test (`"T6.1-1/T6.1-2/T6.1-3 …"`; T6.1-3's second and third arms are the
+post-invocation sites, T6.1-1's sweep workspace and T6.1-2's two directories
+— both created before its first `rename` — precede any invocation; the map's
+type widened to `InitialFileContents`). `section-6.2.ts` 23 — T6.2-3's
+impure-boundary arm (`T6_2_3_ROOM` made FROM the exported `I3_ROOM_SOURCE`,
+which `s9-fixture-well-formedness.test.ts` imports as a string;
+`I3_HALL_SOURCE`, `I3_DEPS_SOURCE` wrapped in place), its impure matrix
+(below), its sibling stagings (d)/(e) (the six `D3_*`/`E3_*` sources wrapped
+in place); T6.2-4's `F1_SOURCE`/`F2_SOURCE`/`F3_SOURCE` wrapped in place
+(`PureFinalPositionStaging.source: StagedMdx`; shape (1)'s workspace, the
+body's first, converted uniformly), the dependents through the computed table
+`PURE_FINAL_POSITION_RUNS` (`{ staging, deps }` over `[F1_STAGING,
+F2_STAGING]`, `p4DepsSource(staging.idPre, "moved node")` once at load, the
+runner taking the pair), the twin's `T6_2_4_TWIN_DEPS`. `section-6.3.ts` 5
+new, 1 reused — `J2_SOURCE`, `F4_SOURCE`, `F4_INVALID_SOURCE` wrapped in place
+(T6.3-2's and T6.3-4's first arms converted uniformly), `F4_BROKEN_SOURCE`
+carrying `"unparseable"`, `T6_3_5_WITH_EXTRA`; the existing inner-v1 record
+reused at four initial-file sites as `T6_3_5_WITHOUT_EXTRA`. Sub-rules
+applied: (i) a composition a per-cell helper performs from a module-level row
+(`runImpureStaging`'s `originSource` from `shape`) moves into a computed table
+keyed by the row — `M3_ORIGIN_STAGINGS` (`{ shape, origin }`), ONE record per
+shape staged at both destinations (identical bytes), the helper taking the
+pair and the body iterating the table; a row field staged verbatim
+(`ImpureDestination.source`) is wrapped in place instead; (ii) a body-local
+template call a single-use runner both stages and later compares
+(`runChangedTwinStaging`'s `depsSource`) moves to a module-level record, the
+comparison reading `.source`; (iii) a workspace `mdx.unparseable` entry for an
+initial file becomes the record's declaration and leaves the workspace
+declaration; where that was the module's only use of `withWorkspace`'s `mdx`
+parameter, the parameter and its `WorkspaceMdxDecl` import go (Tasks 5–6's
+precedent); (iv) an existing record whose bytes equal a new initial entry's is
+reused and renamed for every site it serves — its identifier too, when the
+old name misdescribes the wider use. Read-based enumeration: T6.2-1 and
+T6.2-2 (diagnosed failures) each create one workspace at body start and call
+no creating helper — nothing behind their failures. Left plain: T6.2-1's,
+T6.2-2's, T6.2-3's clean-boundary, T6.3-1's, and T6.3-3's workspaces; arm
+(a)'s pre-invocation `file()` edit in T6.3-5. Checks: the sites hook logged the
+task's 19 (test, path) pairs (57 lines: 56 `"well-formed"`, T6.3-4's
+`specs/Broken.mdx` `"unparseable"`) before and nothing after; the sha256
+capture over the three files (133 writes, compared sorted) identical; 12
+tests, 10 pass and 2 fail — T6.2-1, T6.2-2 — with identical diagnoses; red
+check: `<S>` for `</S>` in the origin template fails the five `specs/ca.mdx`
+records as `mdx-derivability`, the three other matrix records pass. Known
+state after Task 8: the S-9 self-test 407 tests over 381 records (374 `T…`,
+4 `E-6`, 3 `P-…`); self project 22 files, 2547 passed, 0 skipped under
+the namespace (~138 s; 2517 + the 30 record tests); certification 144 PASS /
+33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -543,23 +594,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 8 — Initial-file conversion: §6.1–§6.3 (`section-6.1.ts`, `section-6.2.ts`, `section-6.3.ts`)
-
-**Workspace creations to judge:** 6.1 (4), 6.2 (10), 6.3 (15; `withWorkspace` ~136;
-3 records).
-**Reachable sites (the instrumented run):**
-- `section-6.1.ts` — T6.1-3 (2): specs/A.mdx specs/B.mdx
-- `section-6.2.ts` — T6.2-3 (9): specs/Deps.mdx specs/Hall.mdx specs/Room.mdx specs/a.mdx specs/b.mdx specs/ca.mdx specs/cb.mdx specs/ea.mdx specs/eb.mdx
-- `section-6.2.ts` — T6.2-4 (2): specs/Deps.mdx specs/a.mdx
-- `section-6.3.ts` — T6.3-2 (1): specs/A.mdx
-- `section-6.3.ts` — T6.3-4 (2): specs/A.mdx specs/Broken.mdx
-- `section-6.3.ts` — T6.3-5 (3): inner/specs/A.mdx specs/A.mdx sub/specs/A.mdx
-**Failing here:** T6.2-1, T6.2-2.
-**Certification scope:** T6.1-2 (CONF-CORE) — run the self project; 144/33/0/0.
-**Notes.** T6.2-3's nine-file workspace(s); T6.3-5's nested roots (`inner/specs/A.mdx`,
-`sub/specs/A.mdx`) are `.mdx` paths like any other.
-**Checks.** Recipes 1–5 over `section-6.1.test`, `section-6.2.test`, `section-6.3.test`.
 
 ### Task 9 — Initial-file conversion: §6.4 and §6.7 (`section-6.4.ts`, `section-6.7.ts`)
 
