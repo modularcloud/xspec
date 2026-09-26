@@ -19,8 +19,10 @@
 //
 // Also verified: the ledger's invariants (sealed once the registry has
 // loaded, so a run-time registration throws; non-empty; uniquely named, each
-// name led by the ID of a registered test; no `unchecked` record — that
-// declaration is P-8's mutations' alone), its registration rules on a fresh
+// name led by the ID of a registered test, or by E-6 for the §18 exchange
+// fixture's one record — helpers/e6.ts is no registry entry, so this file
+// imports it before the manifest seals the ledger; no `unchecked` record —
+// that declaration is P-8's mutations' alone), its registration rules on a fresh
 // unsealed instance, the builder's record overload (a record stages exactly
 // its bytes under its own declaration, which overrides the workspace's for
 // the path; an `mdx` option beside it, or a non-`.mdx` path, throws with
@@ -42,6 +44,10 @@ import {
 } from "../helpers/staged-mdx.js";
 import { TestWorkspace, judgeMdxDeclaration } from "../helpers/workspace.js";
 import type { WorkspaceDecl } from "../helpers/workspace.js";
+// The E-6 exchange fixture (helpers/e6.ts) is no registry entry, yet stages
+// one `.mdx` source after its first invocations — a record of its own, which
+// this import registers BEFORE the registry manifest below seals the ledger.
+import "../helpers/e6.js";
 import { productTestSuite } from "../suite/registry/index.js";
 
 const LF = String.fromCodePoint(0x000a);
@@ -58,6 +64,9 @@ const text = (data: Uint8Array): string => Buffer.from(data).toString("utf8");
 
 /** The complete ledger: every registry module has loaded through the manifest. */
 const LEDGER = stagedMdxLedger();
+
+/** TEST-SPEC §18 E-6's ID: the exchange fixture (helpers/e6.ts), no registry entry. */
+const E6_FIXTURE_ID = "E-6";
 
 const ILL_FORMED = doc('<S id="x">', "", "never closed");
 const WELL_FORMED = doc('<S id="x">', "", "closed below", "", "</S>");
@@ -160,17 +169,25 @@ describe("S-9: the staged-source ledger, once the registry has loaded", () => {
     }
   });
 
-  test("names every record after registered tests: `<TEST-ID>[/<TEST-ID>…] <what it stages>`", () => {
+  test("names every record after registered tests: `<TEST-ID>[/<TEST-ID>…] <what it stages>` — or after E-6, the §18 exchange fixture's ID (helpers/e6.ts), for its one record", () => {
+    let e6Records = 0;
     for (const record of LEDGER) {
       const [lead, ...rest] = record.name.split(" ");
       expect(rest.join(" ").trim(), record.name).not.toBe("");
       for (const id of (lead ?? "").split("/")) {
+        if (id === E6_FIXTURE_ID) {
+          e6Records += 1;
+          continue;
+        }
         expect(
           productTestSuite.has(id),
-          `${record.name}: ${id} names no registered test`,
+          `${record.name}: ${id} names no registered test (nor ${E6_FIXTURE_ID}, the exchange fixture of helpers/e6.ts)`,
         ).toBe(true);
       }
     }
+    // The fixture's record is judged here like every other: its module
+    // loaded before the seal (the import order above).
+    expect(e6Records).toBe(1);
   });
 
   test("holds no `unchecked` record (that declaration is P-8's mutations' alone, S-9)", () => {

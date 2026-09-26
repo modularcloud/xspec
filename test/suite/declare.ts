@@ -11,6 +11,7 @@
 // outright.
 
 import { test } from "vitest";
+import { runProductTestBody } from "../helpers/product-invocations.js";
 import type { ProductTestEntry } from "../helpers/registry.js";
 import { builtProductBinding } from "../helpers/subprocess.js";
 import { productTestSuite } from "./registry/index.js";
@@ -18,7 +19,10 @@ import { productTestSuite } from "./registry/index.js";
 /**
  * Declare registered product-facing tests as Vitest tests against the built
  * product. The entry's own budget is the Vitest timeout — the same budget the
- * certification runner uses as its hang watchdog.
+ * certification runner uses as its hang watchdog. Each body runs inside its
+ * own invocation context (helpers/product-invocations.ts), as it does under
+ * the certification runner, so the workspace builder's undeclared-staging
+ * guard sees the body's first product invocation wherever it happens.
  */
 export function declareProductTests(
   entries: readonly ProductTestEntry[],
@@ -38,7 +42,9 @@ export function declareProductTests(
       `${entry.id} ${entry.title}`,
       { timeout: entry.timeoutMs },
       async () => {
-        await entry.run(builtProductBinding());
+        await runProductTestBody(entry.id, () =>
+          entry.run(builtProductBinding()),
+        );
       },
     );
   }

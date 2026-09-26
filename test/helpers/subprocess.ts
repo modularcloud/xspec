@@ -36,6 +36,13 @@
 //   merges over the sanitized base, the invocation's env merges last
 //   (`undefined` removes a variable) — tests that vary the environment
 //   deliberately (T12.0-7) set it explicitly.
+// - Undeclared-staging guard (S-9, H-8): right before spawning, every
+//   invocation is noted with its working directory
+//   (helpers/product-invocations.ts), marking the live workspace it runs in
+//   and the registered test body running it — after which the workspace
+//   builder refuses a plain `.mdx` staging that is not a staged-source
+//   record (helpers/workspace.ts). This is the one path every invocation
+//   takes, so the mark cannot be bypassed.
 
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
@@ -45,6 +52,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { noteProductInvocation } from "./product-invocations.js";
 
 /** Hang guard applied to every invocation unless overridden (H-8). */
 export const DEFAULT_TIMEOUT_MS = 30_000;
@@ -215,6 +223,14 @@ export async function startProduct(
   }
 
   const invocation = resolveInvocation(binding.command, fullArgs, commandLine);
+  // The undeclared-staging guard's mark (helpers/product-invocations.ts,
+  // module header): from here on, a plain `.mdx` staging in this workspace
+  // — or anywhere in the registered body running this — is one S-7's sweep
+  // never reaches.
+  noteProductInvocation(
+    options.cwd,
+    await fsp.realpath(options.cwd).catch(() => options.cwd),
+  );
   const child = spawn(invocation.command, invocation.args, {
     cwd: options.cwd,
     env: childEnvironment(binding, options),

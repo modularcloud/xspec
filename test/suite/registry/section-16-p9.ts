@@ -1008,7 +1008,10 @@ async function executeOp(
     case "edit": {
       applyP9Edit(model, op.edit);
       for (const [rel, contents] of Object.entries(renderP9Workspace(model))) {
-        await workspace.file(rel, contents);
+        // S-9: a draw's source, judged per draw by the property runner
+        // (stagedP9Sources) — `per-draw` exempts it from the builder's
+        // undeclared-staging guard.
+        await workspace.file(rel, contents, { mdx: "per-draw" });
       }
       await buildOk(
         product,

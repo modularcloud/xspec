@@ -2236,7 +2236,10 @@ async function runP4Trial(
           );
         }
         for (const path of changedPaths) {
-          await first.file(path, afterFiles[path]);
+          // S-9: a draw's source, judged per draw by the property runner
+          // (stagedP4Sources) — `per-draw` exempts it from the builder's
+          // undeclared-staging guard.
+          await first.file(path, afterFiles[path], { mdx: "per-draw" });
         }
         const context = `P-4 after the single edit — ${description} —`;
         await buildOk(
@@ -2264,7 +2267,7 @@ async function runP4Trial(
         // Restore the pristine workspace: each edit applies independently
         // to the same before-state ("random single edits", not sequences).
         for (const path of changedPaths) {
-          await first.file(path, beforeFiles[path]);
+          await first.file(path, beforeFiles[path], { mdx: "per-draw" });
         }
       }
     } finally {

@@ -60,6 +60,7 @@ import {
 } from "./assertions.js";
 import type { DirectorySnapshot } from "./snapshot.js";
 import { assertSnapshotsEqual, snapshotDirectory } from "./snapshot.js";
+import { stagedMdx } from "./staged-mdx.js";
 import type { ProductBinding, RunResult } from "./subprocess.js";
 import { runProduct } from "./subprocess.js";
 import { TestWorkspace } from "./workspace.js";
@@ -136,6 +137,19 @@ function otherSource(version: string): string {
     "\n",
   );
 }
+
+// The leaf edit the fixture stages between its baseline invocations and
+// `impact`: a staged-source record (helpers/staged-mdx.ts) — the staging
+// follows product invocations, so the builder's undeclared-staging guard
+// requires the S-9 self-test to have judged it before any product exists.
+// This fixture is no registry entry (S-7's sweep never runs it at all), so
+// test/self/s9-staged-sources.test.ts imports this module itself, before
+// the registry manifest seals the ledger; the record's name leads with the
+// fixture's §18 ID rather than a test ID.
+const E6_OTHER_VERSION_TWO = stagedMdx(
+  "E-6 specs/Other.mdx version two — the leaf edit before `impact`",
+  otherSource("version two"),
+);
 
 // The moved file imports another spec file (its own specifier is recomputed
 // across the directory change) and its generated module is imported by a spec
@@ -297,7 +311,7 @@ export async function runE6RepresentativeFixture(
     // One leaf edit between the baseline and `impact`, so the report carries
     // categories; rebuild so derived files match the sources again before the
     // later clean `check` (SPEC 5.6, 14.13).
-    await workspace.file(E6_OTHER, otherSource("version two"));
+    await workspace.file(E6_OTHER, E6_OTHER_VERSION_TWO);
     await step(
       "build-after-edit",
       ["build"],

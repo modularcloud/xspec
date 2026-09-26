@@ -48,6 +48,22 @@
 //   An edit of bytes the product itself wrote goes through `edit()`, judged
 //   at staging time alone: no harness constant equals them, so they are not
 //   a deterministic fixture.
+// - The undeclared-staging guard enforces that form: once a product has been
+//   invoked in a workspace (the subprocess driver marks it, root and
+//   realpath matched) or anywhere in the running registered body (the
+//   async-local context test/suite/declare.ts and the certification runner
+//   establish — S-7's reach is per body: the sweep stops at the body's
+//   first invocation in whatever workspace, so a staging into a fresh
+//   later-arm workspace is unreached too; helpers/product-invocations.ts),
+//   `file()` on an `.mdx` path with plain contents throws
+//   `HarnessStagingError` (mode `undeclared-staging`) unless the effective
+//   declaration is `unchecked` (P-8's mutations) or `per-draw` (a property
+//   draw the runner judged before the body saw it, S-9's property clause —
+//   the section-16 modules' alone). `edit()` is a declared staging by
+//   construction. A workspace declaration's initial `files` are outside
+//   the guard: a body's first workspace's are reached by S-7's sweep, and a
+//   later-arm workspace's stay plain contents by the declaration's shape —
+//   a standing observation, not this guard's.
 
 import { Buffer } from "node:buffer";
 import { execFile } from "node:child_process";
@@ -61,6 +77,12 @@ import {
   type MdxAllowance,
 } from "./mdx-derivability.js";
 import { HarnessStagingError } from "./permissions.js";
+import {
+  type WorkspaceInvocationMark,
+  productInvokedInBody,
+  registerWorkspaceRoot,
+  unregisterWorkspaceRoot,
+} from "./product-invocations.js";
 import { StagedMdx } from "./staged-mdx.js";
 
 const execFileAsync = promisify(execFile);
@@ -111,12 +133,19 @@ export interface WorkspaceMdxDecl {
 
 /**
  * One file's S-9 declaration, for a `file()` call after creation; overrides
- * the workspace declaration for that write alone.
+ * the workspace declaration for that write alone. `per-draw` is a property
+ * draw's source (TEST-SPEC 16; S-9's property clause): well-formed — judged
+ * at staging exactly as `well-formed` is — and already judged per draw by the
+ * property runner before the body saw it (helpers/property.ts `mdxSources`),
+ * so the undeclared-staging guard exempts it. Only the section-16 modules
+ * (section-16-p4.ts, -p5-p6.ts, -p9.ts) pass it; a deterministic test never
+ * does, and a staged-source record never carries it.
  */
 export type MdxFileDeclaration =
   | "well-formed"
   | "unparseable"
   | "unchecked"
+  | "per-draw"
   | { readonly allowances: readonly MdxAllowance[] };
 
 /** Options of a single `file()` staging. */
@@ -182,15 +211,19 @@ export class TestWorkspace {
   private gitScratch: Promise<{ home: string; configFile: string }> | undefined;
   /** The S-9 declaration, resolved per normalized path (see `mdxDeclarationOf`). */
   private readonly mdxDeclarations: ReadonlyMap<string, MdxFileDeclaration>;
+  /** The undeclared-staging guard's mark: has a product been invoked here? */
+  private readonly invocationMark: WorkspaceInvocationMark;
 
   private constructor(
     tempRoot: string,
     root: string,
     mdxDeclarations: ReadonlyMap<string, MdxFileDeclaration>,
+    invocationMark: WorkspaceInvocationMark,
   ) {
     this.tempRoot = tempRoot;
     this.root = root;
     this.mdxDeclarations = mdxDeclarations;
+    this.invocationMark = invocationMark;
   }
 
   /**
@@ -206,13 +239,22 @@ export class TestWorkspace {
     );
     const root = path.join(tempRoot, "work");
     await fsp.mkdir(root);
-    const workspace = new TestWorkspace(tempRoot, root, mdxDeclarations);
+    // Registered under the root and its realpath while the workspace lives
+    // (helpers/product-invocations.ts): an invocation anywhere under either
+    // marks it for the undeclared-staging guard.
+    const realRoot = await fsp.realpath(root);
+    const workspace = new TestWorkspace(
+      tempRoot,
+      root,
+      mdxDeclarations,
+      registerWorkspaceRoot(root, realRoot),
+    );
     try {
       for (const dir of decl.dirs ?? []) {
         await workspace.dir(dir);
       }
       for (const [rel, contents] of Object.entries(decl.files ?? {})) {
-        await workspace.file(rel, contents);
+        await workspace.stageInitial(rel, contents);
       }
       for (const [rel, target] of Object.entries(decl.symlinks ?? {})) {
         await workspace.symlink(rel, target);
@@ -251,7 +293,10 @@ export class TestWorkspace {
    * after a product invocation in this workspace, so that the S-9 self-test
    * judged it before any product existed; an `mdx` option beside a record
    * contradicts it, and a record at a path S-9 does not judge is a mistake —
-   * both throw.
+   * both throw. Plain contents on an `.mdx` path after a product invocation
+   * — in this workspace, or anywhere in the running registered body — throw
+   * too (`undeclared-staging`, see `guardUndeclaredStaging`), unless the
+   * effective declaration is `unchecked` or `per-draw`.
    */
   async file(
     rel: RelPath,
@@ -286,9 +331,65 @@ export class TestWorkspace {
       declaration = contents.mdx;
     } else {
       data = toBytes(contents);
+      if (isMdxPath(rel)) {
+        this.guardUndeclaredStaging(
+          rel,
+          declaration ?? this.mdxDeclarations.get(mdxKey(rel)) ?? "well-formed",
+        );
+      }
     }
     this.checkMdx(rel, data, declaration);
     await this.write(rel, data);
+  }
+
+  /**
+   * Whether a product has been invoked in this workspace since its creation
+   * (the subprocess driver marks it; helpers/product-invocations.ts).
+   */
+  get productInvoked(): boolean {
+    return this.invocationMark.invoked;
+  }
+
+  /**
+   * An initial `files` entry of the workspace declaration: judged like every
+   * `.mdx` staging, outside the undeclared-staging guard (module header — a
+   * body's first workspace's initial files are reached by S-7's sweep; a
+   * later-arm workspace's are the standing observation).
+   */
+  private async stageInitial(
+    rel: string,
+    contents: FileContents,
+  ): Promise<void> {
+    const data = toBytes(contents);
+    this.checkMdx(rel, data, undefined);
+    await this.write(rel, data);
+  }
+
+  /**
+   * The undeclared-staging guard (module header; TEST-SPEC S-9's timing
+   * clause, S-7, H-8): a plain `.mdx` staging — contents that are not a
+   * staged-source record — after a product invocation is first judged at
+   * suite time, against a real product, because S-7's sweep never reaches
+   * it; unless its effective declaration exempts it, it is refused with the
+   * rule to follow. "After a product invocation" is judged both per
+   * workspace (this one's mark) and per body (the running registered body's
+   * context), the latter being S-7's actual reach.
+   */
+  private guardUndeclaredStaging(
+    rel: RelPath,
+    declaration: MdxFileDeclaration,
+  ): void {
+    if (declaration === "unchecked" || declaration === "per-draw") return;
+    const body = productInvokedInBody();
+    if (!this.invocationMark.invoked && body === undefined) return;
+    const where = this.invocationMark.invoked
+      ? "in this workspace"
+      : `in the running body of ${body ?? "?"} (in another workspace: S-7's sweep stops at the body's first invocation wherever it happens)`;
+    throw new HarnessStagingError(
+      "undeclared-staging",
+      mdxKey(rel),
+      `an MDX source staged with plain contents (declared ${JSON.stringify(declaration)}) after a product invocation ${where} — S-7's sweep against the empty stub never reaches this staging (the body fails at that invocation), so S-9's check would first run at suite time, against a real product, not before any product exists (H-8). Stage it as a staged-source record instead (helpers/staged-mdx.ts: \`stagedMdx("<TEST-ID> <what it stages>", <the same expression, moved, never re-spelled>, <this declaration>)\` at module level, passed to \`file()\`), which test/self/s9-staged-sources.test.ts judges before any product exists; an edit of bytes the product itself wrote goes through \`edit()\`; a P-8 fuzz mutation is declared \`unchecked\`; a property draw the runner already judged is declared \`per-draw\` (section-16 modules only)`,
+    );
   }
 
   /**
@@ -450,6 +551,7 @@ export class TestWorkspace {
 
   /** Remove the workspace and all builder scratch. Safe to call twice. */
   async dispose(): Promise<void> {
+    unregisterWorkspaceRoot(this.invocationMark);
     try {
       await fsp.rm(this.tempRoot, {
         recursive: true,
@@ -544,7 +646,9 @@ export class TestWorkspace {
  * exactly the named allowances when it names any), not derive when declared
  * unparseable — or a `HarnessStagingError` of mode `mdx-derivability` names
  * `key` (the staged path, or a record's name) and the parser's reason. An
- * `unchecked` declaration judges nothing.
+ * `unchecked` declaration judges nothing; `per-draw` judges as `well-formed`
+ * (the property runner judged the draw already; the declaration's other
+ * meaning — exempt from the undeclared-staging guard — is `file()`'s).
  */
 export function judgeMdxDeclaration(
   key: string,
@@ -578,9 +682,11 @@ export function judgeMdxDeclaration(
         ? ""
         : ` at line ${verdict.position.line}, column ${verdict.position.column} (offset ${verdict.position.offset})`;
     const declared =
-      allowances === undefined
-        ? "declared well-formed (S-9's default)"
-        : `declared well-formed under the allowances ${JSON.stringify(allowances)}`;
+      declaration === "per-draw"
+        ? "declared well-formed per draw (`per-draw`: a property draw the runner judged)"
+        : allowances === undefined
+          ? "declared well-formed (S-9's default)"
+          : `declared well-formed under the allowances ${JSON.stringify(allowances)}`;
     throw new HarnessStagingError(
       "mdx-derivability",
       key,

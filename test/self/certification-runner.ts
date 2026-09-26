@@ -27,6 +27,7 @@
 // wall-clock data.
 
 import { HarnessAssertionError } from "../helpers/assertions.js";
+import { runProductTestBody } from "../helpers/product-invocations.js";
 import type { ProductTestEntry } from "../helpers/registry.js";
 import type { ProductBinding } from "../helpers/subprocess.js";
 
@@ -169,9 +170,11 @@ async function runOne(
   entry: ProductTestEntry,
   budgetMs: number,
 ): Promise<ProductTestResult> {
-  const body = (async () => {
-    await entry.run(binding);
-  })();
+  // The body runs inside its own invocation context
+  // (helpers/product-invocations.ts): the workspace builder's
+  // undeclared-staging guard sees the body's first product invocation
+  // wherever it happens, exactly as under the suite's Vitest wrapper.
+  const body = runProductTestBody(entry.id, () => entry.run(binding));
   // Keep an abandoned body's eventual rejection observed (hang path): the
   // verdict is already recorded, and an unhandled rejection would crash the
   // whole run (H-8).

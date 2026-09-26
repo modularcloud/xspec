@@ -785,7 +785,10 @@ async function applyEditStep(
 ): Promise<string> {
   const { description, files } = applyEditToState(state, edit);
   for (const [path, bytes] of files) {
-    await workspace.file(path, bytes);
+    // S-9: a draw's source, judged per draw by the property runner
+    // (stagedReplaySources) — `per-draw` exempts it from the builder's
+    // undeclared-staging guard.
+    await workspace.file(path, bytes, { mdx: "per-draw" });
   }
   return description;
 }
