@@ -710,6 +710,71 @@ records (550 `T…`, 4 `E-6`, 3 `P-…`); self project 22 files, 2723 passed, 0 
 under the namespace (~140 s; 2706 + the 17 record tests); certification
 144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
 
+**Resolved by Task 14 (the §7.4–7.5 module; d2e5db5 converts, the closing commit
+records).** Twenty-six records, two of the other §7 modules' reused. Reused:
+`section-7-basics.ts`'s `SECTION_A_SOURCE` (`mdxSection("a")`), imported and renamed
+`"T7-1/T7-2/T7-3/T7-4/T7-6/T7.1-1/T7.3-1/T7.4-1/T7.5-1/T7.5-5 specs/A.mdx (the minimal
+section a; T7.5-5's tgt/a.mdx)"` — `MATRIX_FILES`' and `DUAL_FILES`' `specs/A.mdx`,
+`CAPTURE_STAR_FILES`' `tgt/a.mdx`; `section-7-discovery.ts`'s `SECTION_C_SOURCE`
+(`mdxSection("c")` — the three §7 templates are byte-identical, so Task 13's
+module-local record holds the same bytes), now exported and renamed `"T7-4/T7.5-4/T7.5-5
+the minimal section c (T7-4's ctl/C.mdx, the control source; T7.5-4's specs/C.mdx;
+T7.5-5's tgt/c.mdx)"` — `SELECTOR_FILES_FILES`' `specs/C.mdx`, `CAPTURE_STAR_FILES`'
+`tgt/c.mdx`; the module spells no `mdxSection("b")`, so `SECTION_B_SOURCE` is untouched.
+This module's minimal sections, one record per byte sequence named with every staging
+test in ID order and every path: x (`"T7.4-1/T7.5-1/T7.5-5 the minimal section x
+(aux/X.mdx; T7.5-5's tgt/abc.mdx)"`), d (`"T7.4-1/T7.5-1/T7.5-4 … (dualspec/D.mdx;
+T7.5-4's specs/D.mdx)"`), t (`"T7.5-1/T7.5-4/T7.5-5 tgt/T.mdx (the minimal section t)"`:
+the set-reading rule fixture, the tags selector, T7.5-5's (c), (h), (i)), g and w (the
+mirror fixture), p (`tgt/P.mdx` of (e) and (g), `tgt/t$0.mdx` of (f), `tgt/t$z.mdx` of
+(j)), q (`tgt/tb.mdx`; `tgt/tz.mdx`), r (`tgt/t0.mdx`; `tgt/tQz.mdx`); the eighteen
+literal-bodied sources wrapped in place or hoisted (below), named by fixture or arm
+letter. Sub-rules applied: (i) a fixture-builder function called at module level
+(`setReadingProfileFiles(targetTags, edgeKinds)`, `setReadingRuleFiles(kinds, tags)`)
+whose `.mdx` values are parameter-independent literals — the spelled workspace and its
+collapsed twin stage the same bytes — moves those literals to module-level records
+declared BEFORE the function (the module-level call follows the definition, and a
+`const` record is unusable until initialized), one record each staged in both
+spellings (`"T7.4-1 set reading tgt/T.mdx (the spelled profile and its collapsed
+twin)"`, `"… bnd/B.mdx …"`, `"T7.5-1 set reading pol/P.mdx (the spelled rule and its
+collapsed twin)"`), the builder's return type widened; (ii) a module whose template a
+third module spells byte-identically imports the OTHER modules' records for the ids
+they already hold (A from basics, C from discovery — exported and renamed) and
+registers its own ids once each; (iii) the task's "move arms" were a stale premise —
+`PROFILE_MATRIX` / `RULE_MATRIX` rows hold configuration field lines, not files; the
+`.mdx` entries live in the shared `MATRIX_FILES` / `DUAL_FILES` maps, converted by the
+shared-map rule (the first arm's workspace served by the same map). The four `files`
+parameters and the two builder return types widened to `InitialFileContents`; the
+module declares no workspace `mdx` list. Left plain: each body's first workspace —
+T7.4-2's `SEMANTICS_FILES`, T7.5-2's `FORBIDDEN_FILES`, T7.5-3's `ALLOWED_ONLY_FILES`,
+T7.5-4's `SELECTOR_KIND_FILES`, T7.5-5's `CAPTURE_PAIR_FILES`, T7.5-6's
+`BUILD_VS_CHECK_FILES` (their `mdxSection` calls too, as Task 13 left
+`LOCATION_FILES`') — and T7.5-6's tampered generated module (no `.mdx` path).
+Read-based enumeration: the 11 `withWorkspace` sites (12 creations with the
+`TestWorkspace.create` inside it) judged; T7.4-1 and T7.5-1 fail at their set-reading
+`inventory` assertion in their LAST workspace, so nothing lies behind the diagnosed
+failures. Observation for the next determination, not acted on (outside the task): a
+one-off probe over the sealed ledger (AGENTS.md's recipe) finds 28 groups of
+byte-identical records under different names across modules, registered separately by
+earlier tasks — e.g. `"T1.5-2 the valid section source at every arm's spec path"` =
+`"T1.6-5 code arm specs/OK.mdx"`; `"T2.1-2/T2.1-3 specs/BASE.mdx"` = `"T4-2
+specs/BASE.mdx"` = `"T4-2 src/NAME.mdx"`; `"T4.3-2 specs/A.mdx"` =
+`"T4.5-3/T4.5-4/T4.5-5/T4.5-6/T4.5-7 specs/A.mdx"`; `"T6.1-1/T6.1-2/T6.1-3 specs/A.mdx"`
+= `"T6.3-2 specs/A.mdx"`; `"T10.2-2 specs/A.mdx with the kid text at v2 (--base arm)"` =
+`"T10.3-2 specs/A.mdx with the kid text at v2"` — each judged by the self-test all the
+same (S-9 is satisfied; the naming rule's "reused, never duplicated" was applied within
+a task's modules and where a module knew of another's record); none of this task's 26
+records duplicates another's bytes. Checks: the sites hook logged the task's 38 (test,
+path) pairs (120 lines, all `"well-formed"`) before and no file after; the sha256
+capture over the suite file (255 writes) identical; 8 tests, 6 pass and 2 fail —
+T7.4-1, T7.5-1 — with identical diagnoses (~35 s a run); red check: an unclosed tag
+spliced into this module's `mdxSection` template fails exactly its eight
+template-built records as `mdx-derivability` while the A and C records and the 18
+literal-bodied ones pass. Known state after Task 14: the S-9 self-test 609 tests over
+583 records (576 `T…`, 4 `E-6`, 3 `P-…`); self project 22 files, 2749 passed, 0 skipped
+under the namespace (~140 s; 2723 + the 26 record tests); certification 144 PASS /
+33 FAIL / 0 error / 0 hang over the 23 `certification run against` lines.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -877,24 +942,6 @@ behind a diagnosed failure or in an arm the built product never reaches — reci
 
 ## Tasks
 
-### Task 14 — Initial-file conversion: §7.4–§7.5 (`section-7.4-7.5.ts`)
-
-**Workspace creations to judge:** 12 (T7.5-5's twenty paths come from module-level
-move-arm tables: wrap in place).
-**Reachable sites (the instrumented run):**
-- `section-7.4-7.5.ts` — T7.4-1 (5): aux/X.mdx bnd/B.mdx dualspec/D.mdx specs/A.mdx tgt/T.mdx
-- `section-7.4-7.5.ts` — T7.5-1 (5): aux/X.mdx dualspec/D.mdx pol/P.mdx specs/A.mdx tgt/T.mdx
-- `section-7.4-7.5.ts` — T7.5-2 (2): hi/H.mdx lo/L.mdx
-- `section-7.4-7.5.ts` — T7.5-4 (6): pol/P.mdx specs/B.mdx specs/C.mdx specs/D.mdx specs/inner/A.mdx tgt/T.mdx
-- `section-7.4-7.5.ts` — T7.5-5 (20): grp/abc/F.mdx m/good.mdx m/wrong.mdx pre/S.mdx pre/a$x.mdx pre/aQx.mdx pre/ax.mdx pre/d/ex.mdx pre/x.mdx tgt/P.mdx tgt/T.mdx tgt/a.mdx tgt/abc.mdx tgt/c.mdx tgt/t$0.mdx tgt/t$z.mdx tgt/t0.mdx tgt/tQz.mdx tgt/tb.mdx tg
-**Failing here:** T7.4-1, T7.5-1.
-**Certification scope:** none.
-**Notes.** The module spells the §7 `mdxSection` template: a post-invocation
-`mdxSection("a")` / `mdxSection("b")` entry reuses `section-7-basics.ts`'s exported
-`SECTION_A_SOURCE` / `SECTION_B_SOURCE` by import, the record renamed with the
-staging IDs in ID order (Task 13); every other id is this module's own record.
-**Checks.** Recipes 1–5 over `section-7.4-7.5.test`.
-
 ### Task 15 — Initial-file conversion: §8, §9, §9.3, §10.1–§10.3 (`section-8.ts`, `section-9.ts`, `section-9.3.ts`, `section-10.1.ts`, `section-10.2-10.3.ts`)
 
 **Workspace creations to judge:** 8 (9; 1 record), 9 (8; 2 records), 9.3 (5; 1 record;
@@ -1017,9 +1064,11 @@ records; every §12.7 arm after each body's first — the byte-path `file()` rec
 **Failing here:** T12.2-4, T12.3-1, T12.7-3.
 **Certification scope:** none.
 **Notes.** `section-12.6.ts`'s `VALID_SOURCE` holds the bytes of
-`section-7-basics.ts`'s exported `SECTION_A_SOURCE` (Task 13): T12.6-2's
-post-invocation `specs/A.mdx` reuses that record by import (the constant deleted or
-aliased, never re-spelled), renamed `"…/T12.6-2 …"`.
+`section-7-basics.ts`'s exported `SECTION_A_SOURCE` (Task 13; Task 14 renamed it
+`"T7-1/T7-2/T7-3/T7-4/T7-6/T7.1-1/T7.3-1/T7.4-1/T7.5-1/T7.5-5 specs/A.mdx (the minimal
+section a; T7.5-5's tgt/a.mdx)"`): T12.6-2's post-invocation `specs/A.mdx` reuses that
+record by import (the constant deleted or aliased, never re-spelled), renamed
+`"…/T7.5-5/T12.6-2 …"` (T12.6-2 after T7.5-5 in ID order).
 **Checks.** Recipes 1–5 over `section-12.1-12.2.test`, `section-12.3-12.5.test`,
 `section-12.6.test`, `section-12.7.test`.
 
