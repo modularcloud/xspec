@@ -65,6 +65,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import { SECTION_A_SOURCE } from "./section-7-basics.js";
 import {
   assertSameJson,
   expectConfigurationError,
@@ -105,8 +106,13 @@ export default defineConfig({
 // accept the flag and never consult the file (SPEC 12.6, 12.0).
 const MALFORMED_CONFIG_TARGET = "this is ( not TypeScript {{{\n";
 
-/** A minimal single-section source: one node `a` under the file root. */
-const VALID_SOURCE = '<S id="a">\nText for a.\n</S>\n';
+// A minimal single-section source: one node `a` under the file root. T12.6-2
+// stages it again after its first product invocation (context 3), so S-7's
+// sweep never reaches that workspace against the stub; its bytes are
+// section-7-basics.ts's minimal section a — that staged-source record
+// (helpers/staged-mdx.ts; S-9's before-any-product clause), reused by import
+// rather than spelled again, every site here staging it.
+const VALID_SOURCE = SECTION_A_SOURCE;
 
 /** Stage a fresh workspace, run `body`, dispose (H-1). */
 async function withWorkspace<T>(

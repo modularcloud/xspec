@@ -159,7 +159,7 @@ import {
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import type { FileContents } from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { assertGraphDataPresent, deleteGraphData } from "./section-13.3.js";
 import {
@@ -193,9 +193,25 @@ export default defineConfig({
 `;
 }
 
+// The valid single-section source `a1`, byte-identical wherever it is
+// staged: the initial specs/A.mdx of T12.1-1's and T12.2-1's workspace,
+// T12.1-3's, T12.1-4's, T12.2-3's, and every T12.2-2 family workspace
+// holding a1; T12.1-3's manual-rename copy at specs/C.mdx; and the source
+// T12.1-4, T12.2-2's graph-data mismatch arm, and T12.2-3 stage back over
+// an edit after a build. The later T12.2-2 families' workspaces and the
+// staged-back and copied files follow their body's first product
+// invocation, so S-7's sweep never reaches them against the stub: ONE
+// staged-source record (helpers/staged-mdx.ts; S-9's before-any-product
+// clause) staged at every site — the record rather than a plain spelling
+// of its bytes in the first workspaces too.
+const VALID_A1_SOURCE = stagedMdx(
+  "T12.1-1/T12.1-3/T12.1-4/T12.2-1/T12.2-2/T12.2-3 specs/A.mdx (the valid a1 source: every workspace's initial specs/A.mdx holding a1; T12.1-3's manual-rename copy at specs/C.mdx; staged back after a build by T12.1-4, T12.2-2, and T12.2-3)",
+  ['<S id="a1">', "Alpha behavior.", "</S>", ""].join("\n"),
+);
+
 /** Stage a fresh workspace with the given files, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, FileContents>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({ files });
@@ -435,10 +451,11 @@ async function expectNoModuleOrCompanions(
 // ---------------------------------------------------------------------------
 
 // Two spec files whose validity requires dependency resolution (B imports A
-// and depends on its node), Markdown emission enabled.
-const PRODUCTS_FILES: Readonly<Record<string, string>> = {
+// and depends on its node), Markdown emission enabled; specs/A.mdx is the
+// valid a1 record.
+const PRODUCTS_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": markdownConfig(true),
-  "specs/A.mdx": ['<S id="a1">', "Alpha behavior.", "</S>", ""].join("\n"),
+  "specs/A.mdx": VALID_A1_SOURCE,
   "specs/B.mdx": [
     'import A from "./A.xspec"',
     "",
@@ -548,18 +565,13 @@ const T12_1_1 = defineProductTest({
 // renaming keep the workspace valid (SPEC 6.6: manual restructuring is a
 // deletion plus an addition). Arm 2's manual rename copies A's source to
 // specs/C.mdx after the arm-1 `build` — a staging after a product
-// invocation, so a ledger record (S-9, helpers/staged-mdx.ts) over the
-// fixture's own bytes, which `build` leaves untouched (sources are
-// product-written only by `rename`/`move`, SPEC 12.1, 6.4, 6.5 — pinned as
-// the arm's staging premise); its `.source` is the initial specs/A.mdx.
-const T12_1_3_ALPHA_SOURCE = stagedMdx(
-  "T12.1-3 specs/C.mdx — specs/A.mdx's source copied under its new name (arm 2's manual rename, after the arm-1 build)",
-  ['<S id="a1">', "Alpha behavior.", "</S>", ""].join("\n"),
-);
-
-const REGEN_FILES: Readonly<Record<string, FileContents>> = {
+// invocation, so the ledger record (S-9, helpers/staged-mdx.ts) that is
+// also the initial specs/A.mdx: the fixture's own bytes, which `build`
+// leaves untouched (sources are product-written only by `rename`/`move`,
+// SPEC 12.1, 6.4, 6.5 — pinned as the arm's staging premise).
+const REGEN_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": markdownConfig(true),
-  "specs/A.mdx": T12_1_3_ALPHA_SOURCE.source,
+  "specs/A.mdx": VALID_A1_SOURCE,
   "specs/B.mdx": ['<S id="b1">', "Beta behavior.", "</S>", ""].join("\n"),
 };
 
@@ -609,13 +621,13 @@ const T12_1_3 = defineProductTest({
       // pins first that `build` left the source untouched.
       assertBytesEqual(
         await workspace.readBytes("specs/A.mdx"),
-        T12_1_3_ALPHA_SOURCE.source,
+        VALID_A1_SOURCE.source,
         "T12.1-3 arm 2 staging premise — `build` writes derived files and " +
           "graph data only, never a source (SPEC 12.1; sources are " +
           "product-written only by `rename`/`move`, 6.4, 6.5), so " +
           "specs/A.mdx still holds the fixture's bytes for the manual rename",
       );
-      await workspace.file("specs/C.mdx", T12_1_3_ALPHA_SOURCE);
+      await workspace.file("specs/C.mdx", VALID_A1_SOURCE);
       await fsp.rm(workspace.path("specs/A.mdx"));
       await buildOk(
         product,
@@ -653,14 +665,6 @@ const T12_1_3 = defineProductTest({
 // ---------------------------------------------------------------------------
 // T12.1-4 — failed build modifies nothing
 // ---------------------------------------------------------------------------
-
-// The valid source: the initial specs/A.mdx of every T12.1-4, T12.2-2, and
-// T12.2-3 workspace (its `.source`) and, staged back over an edit after the
-// workspace's `build`, a ledger record (S-9, helpers/staged-mdx.ts).
-const FAILED_BUILD_VALID_SOURCE = stagedMdx(
-  "T12.1-4/T12.2-2/T12.2-3 specs/A.mdx restored to the valid source (the fixture's initial bytes, staged back after the build)",
-  ['<S id="a1">', "Alpha behavior.", "</S>", ""].join("\n"),
-);
 
 // The valid source with a nested section lacking `id` — condition 14.1, the
 // staged validation error, staged over the built valid source (a ledger
@@ -700,7 +704,7 @@ const T12_1_4 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
+        "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
         // Prior derived state.
@@ -729,7 +733,7 @@ const T12_1_4 = defineProductTest({
         // Arm 2 — configuration error: exit 2, nothing modified. The source
         // is restored first so the staged configuration defect is the
         // workspace's only defect.
-        await workspace.file("specs/A.mdx", FAILED_BUILD_VALID_SOURCE);
+        await workspace.file("specs/A.mdx", VALID_A1_SOURCE);
         await workspace.file("xspec.config.ts", FAILED_BUILD_BOGUS_CONFIG);
         await assertLeavesUnchanged(
           workspace.root,
@@ -793,7 +797,7 @@ const T12_2_1 = defineProductTest({
 // non-static `d` value), plus one code file staging 14.7 (an unresolved
 // TypeScript marker). Every reference targets a distinct missing name, so no
 // condition masks another (SPEC 14: each present condition is reported).
-const REFERENCES_FAMILY_FILES: Readonly<Record<string, string>> = {
+const REFERENCES_FAMILY_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -805,22 +809,25 @@ export default defineConfig({
   }
 })
 `,
-  "specs/A.mdx": [
-    '<S id="a1" d={"nope"}>',
-    "Unknown dependency target.",
-    "</S>",
-    "",
-    '<S id="a2">',
-    "Unknown text target below.",
-    "",
-    '{text("nada")}',
-    "</S>",
-    "",
-    '<S id="a3" d={42}>',
-    "Non-static dependency value.",
-    "</S>",
-    "",
-  ].join("\n"),
+  "specs/A.mdx": stagedMdx(
+    "T12.2-2 references family specs/A.mdx (an unknown d target, an unknown text target, and a non-static d value)",
+    [
+      '<S id="a1" d={"nope"}>',
+      "Unknown dependency target.",
+      "</S>",
+      "",
+      '<S id="a2">',
+      "Unknown text target below.",
+      "",
+      '{text("nada")}',
+      "</S>",
+      "",
+      '<S id="a3" d={42}>',
+      "Non-static dependency value.",
+      "</S>",
+      "",
+    ].join("\n"),
+  ),
   "src/app.ts": [
     'import A from "../specs/A.xspec";',
     "",
@@ -834,16 +841,33 @@ export default defineConfig({
 // Family: cycles. A self-`depends` is a dependency cycle of length one
 // (SPEC 5.3) needing no import — so no spec import cycle is co-staged and
 // the exact condition count holds.
-const CYCLE_FAMILY_FILES: Readonly<Record<string, string>> = {
+const CYCLE_FAMILY_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": markdownConfig(false),
-  "specs/A.mdx": ['<S id="s" d={"s"}>', "Depends on itself.", "</S>", ""].join(
-    "\n",
+  "specs/A.mdx": stagedMdx(
+    "T12.2-2 cycles family specs/A.mdx (a self-depends cycle of length one)",
+    ['<S id="s" d={"s"}>', "Depends on itself.", "</S>", ""].join("\n"),
   ),
 };
 
+// The violating dependence h1 -> lo/L.mdx#l1 under the forbidden rule
+// `no-hi-to-lo`, byte-identical in T12.2-2's policy family and every
+// T12.2-4 arm's fixture, both staged after their body's first product
+// invocation (T12.2-4's arms (b)–(d)): ONE staged-source record (S-9).
+const POLICY_HI_SOURCE = stagedMdx(
+  "T12.2-2/T12.2-4 hi/H.mdx (h1 depending on lo/L.mdx#l1 under the no-hi-to-lo rule: T12.2-2's policy family; every T12.2-4 arm)",
+  [
+    'import L from "../lo/L.xspec"',
+    "",
+    '<S id="h1" d={L.l1}>',
+    "Violating dependence.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
 // Family: policy (14.12, check-only). One forbidden rule, one violating
 // edge; build-side silence is T7.5-6's subject (T12.1-2).
-const POLICY_FAMILY_FILES: Readonly<Record<string, string>> = {
+const POLICY_FAMILY_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -861,15 +885,11 @@ export default defineConfig({
   ]
 })
 `,
-  "hi/H.mdx": [
-    'import L from "../lo/L.xspec"',
-    "",
-    '<S id="h1" d={L.l1}>',
-    "Violating dependence.",
-    "</S>",
-    "",
-  ].join("\n"),
-  "lo/L.mdx": ['<S id="l1">', "Low one.", "</S>", ""].join("\n"),
+  "hi/H.mdx": POLICY_HI_SOURCE,
+  "lo/L.mdx": stagedMdx(
+    "T12.2-2 policy family lo/L.mdx (the violated target l1)",
+    ['<S id="l1">', "Low one.", "</S>", ""].join("\n"),
+  ),
 };
 
 // TEST-SPEC-sanctioned malformed journal line (the T6.1-3 shape).
@@ -912,7 +932,7 @@ const T12_2_2 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
+        "specs/A.mdx": VALID_A1_SOURCE,
         "specs/B.mdx": ['<S id="b1">', "Beta behavior.", "</S>", ""].join("\n"),
       },
       async (workspace) => {
@@ -942,7 +962,7 @@ const T12_2_2 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
+        "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
         const moduleRel = "specs/A.xspec.ts";
@@ -1110,7 +1130,7 @@ const T12_2_2 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
+        "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
         await buildOk(
@@ -1190,7 +1210,7 @@ const T12_2_2 = defineProductTest({
               "nothing to stage",
           );
         }
-        await workspace.file("specs/A.mdx", FAILED_BUILD_VALID_SOURCE);
+        await workspace.file("specs/A.mdx", VALID_A1_SOURCE);
         assertSingleUnitFormFinding(
           await checkFindings(
             product,
@@ -1216,7 +1236,7 @@ const T12_2_2 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
+        "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
         const moduleRel = "specs/A.xspec.ts";
@@ -1323,7 +1343,7 @@ const T12_2_2 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(false),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
+        "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
         await buildOk(
@@ -1367,7 +1387,7 @@ const T12_2_2 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(false),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
+        "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
         await buildOk(
@@ -1459,7 +1479,7 @@ const T12_2_3 = defineProductTest({
     await withWorkspace(
       {
         "xspec.config.ts": markdownConfig(true),
-        "specs/A.mdx": FAILED_BUILD_VALID_SOURCE.source,
+        "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
         // Both `check` output forms on the current stale state: plain
@@ -1567,7 +1587,7 @@ const T12_2_3 = defineProductTest({
               "stage",
           );
         }
-        await workspace.file("specs/A.mdx", FAILED_BUILD_VALID_SOURCE);
+        await workspace.file("specs/A.mdx", VALID_A1_SOURCE);
         await assertLeavesUnchanged(
           workspace.root,
           async () => {
@@ -1630,10 +1650,11 @@ const T12_2_4_L_HEAD = '<S id="l1">\nLow one.\n</S>\n\n';
 const T12_2_4_L_BROKEN_TAG = '<S id="l2" d={"nope"}>';
 const T12_2_4_L_TAIL = "\nLow two.\n</S>\n";
 // Both lo/L.mdx states are staged after the arm's `t1224Prepare` build —
-// ledger records (S-9, helpers/staged-mdx.ts); the valid state's `.source`
-// is also the fixture's initial entry.
+// ledger records (S-9, helpers/staged-mdx.ts); the valid state is also the
+// fixture's initial entry (every arm's workspace, arms (b)–(d) after the
+// body's first product invocation).
 const T12_2_4_L_VALID = stagedMdx(
-  "T12.2-4 lo/L.mdx restored to the valid source (arm (d)'s repair; the fixture's initial bytes)",
+  "T12.2-4 lo/L.mdx, the valid source (every arm's initial lo/L.mdx; arm (d)'s repair)",
   `${T12_2_4_L_HEAD}<S id="l2">${T12_2_4_L_TAIL}`,
 );
 const T12_2_4_L_INVALID = stagedMdx(
@@ -1681,18 +1702,14 @@ export default defineConfig({
 })
 `;
 
-const T12_2_4_FILES: Readonly<Record<string, FileContents>> = {
+const T12_2_4_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": T12_2_4_CONFIG,
-  "hi/H.mdx": [
-    'import L from "../lo/L.xspec"',
-    "",
-    '<S id="h1" d={L.l1}>',
-    "Violating dependence.",
-    "</S>",
-    "",
-  ].join("\n"),
-  [T12_2_4_L_PATH]: T12_2_4_L_VALID.source,
-  "extra/E.mdx": ['<S id="e">', "Extra.", "</S>", ""].join("\n"),
+  "hi/H.mdx": POLICY_HI_SOURCE,
+  [T12_2_4_L_PATH]: T12_2_4_L_VALID,
+  "extra/E.mdx": stagedMdx(
+    "T12.2-4 extra/E.mdx (the source arm (b) drops from the groups)",
+    ['<S id="e">', "Extra.", "</S>", ""].join("\n"),
+  ),
 };
 
 /** The violating edge's 14.12 identities, in 14.12's order (SPEC 12.7). */

@@ -581,15 +581,22 @@ export default defineConfig({
 // The one violation: `p` depends locally on `a` (SPEC 2.2 string form);
 // both endpoints are `main` nodes, so the forbidden rule matches exactly
 // this edge and nothing else. `build` never evaluates policy (SPEC 7.5,
-// 12.1) — the finding is `check`'s.
-const POLICY_SOURCE = `<S id="a">
+// 12.1) — the finding is `check`'s. The arm follows T12.7-1's first
+// product invocation (the located-findings arm's `build`), and T12.7-2's
+// identities-ordering arm stages the same bytes after its own first, so
+// S-7's sweep reaches neither against the stub: ONE staged-source record
+// (helpers/staged-mdx.ts; S-9's before-any-product clause) for both.
+const POLICY_SOURCE = stagedMdx(
+  "T12.7-1/T12.7-2 specs/P.mdx (p depending locally on a: T12.7-1's policy-finding arm; T12.7-2's identities-ordering arm)",
+  `<S id="a">
 Target leaf.
 </S>
 
 <S id="p" d={"a"}>
 Dependent leaf.
 </S>
-`;
+`,
+);
 
 async function runPolicyFindingArm(product: ProductBinding): Promise<void> {
   await withWorkspace(
@@ -680,13 +687,26 @@ const CROSS_IMPORT_PREFIX =
   "\n";
 const CROSS_STATEMENT = "textF(HOME.first);";
 
+// The arm follows T12.7-1's first product invocation, so S-7's sweep never
+// reaches its workspace against the stub: its two spec sources are
+// staged-source records (helpers/staged-mdx.ts; S-9's before-any-product
+// clause), the literals moved into them.
+const T12_7_1_HOMEMOD = stagedMdx(
+  "T12.7-1 cross-module arm specs/HOMEMOD.mdx (the calling code's own module)",
+  '<S id="first">\nHome behavior.\n</S>\n',
+);
+const T12_7_1_FOREIGNMOD = stagedMdx(
+  "T12.7-1 cross-module arm specs/FOREIGNMOD.mdx (the foreign module whose text export is called)",
+  '<S id="second">\nForeign behavior.\n</S>\n',
+);
+
 async function runCrossModuleArm(product: ProductBinding): Promise<void> {
   await withWorkspace(
     {
       files: {
         "xspec.config.ts": CROSS_CONFIG,
-        "specs/HOMEMOD.mdx": '<S id="first">\nHome behavior.\n</S>\n',
-        "specs/FOREIGNMOD.mdx": '<S id="second">\nForeign behavior.\n</S>\n',
+        "specs/HOMEMOD.mdx": T12_7_1_HOMEMOD,
+        "specs/FOREIGNMOD.mdx": T12_7_1_FOREIGNMOD,
         "src/app.ts": CROSS_IMPORT_PREFIX + CROSS_STATEMENT + "\n",
       },
     },
@@ -739,12 +759,19 @@ async function runCrossModuleArm(product: ProductBinding): Promise<void> {
 // Arm D — a review-refusal finding carries `code` null
 // ---------------------------------------------------------------------------
 
+// The arm follows T12.7-1's first product invocation: its source is a
+// staged-source record (S-9), the literal moved into it.
+const T12_7_1_REVIEWED = stagedMdx(
+  "T12.7-1 review-refusal arm specs/R.mdx (the one reviewed leaf)",
+  '<S id="r">\nReviewed leaf.\n</S>\n',
+);
+
 async function runReviewRefusalArm(product: ProductBinding): Promise<void> {
   await withWorkspace(
     {
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        "specs/R.mdx": '<S id="r">\nReviewed leaf.\n</S>\n',
+        "specs/R.mdx": T12_7_1_REVIEWED,
       },
     },
     async (workspace) => {
@@ -837,7 +864,14 @@ const IN_MODULE_MARKED = { bytes: IN_MODULE_BYTES.toString("hex") } as const;
 const TGT_MODULE_MARKED = { bytes: TGT_MODULE_BYTES.toString("hex") } as const;
 
 const OK_FILE = "specs/OK.mdx";
-const OK_SOURCE = '<S id="ok">\nOK text.\n</S>\n';
+// The condition-free `ok` source: an initial file of this arm's workspace,
+// created after T12.7-1's first product invocation, and — byte-identical —
+// of T12.7-2's condition-ordering workspace: ONE staged-source record
+// (helpers/staged-mdx.ts; S-9's before-any-product clause).
+const OK_SOURCE = stagedMdx(
+  "T12.7-1/T12.7-2 specs/OK.mdx (the condition-free ok section: T12.7-1's byte-form paths arm; T12.7-2's condition-ordering workspace)",
+  '<S id="ok">\nOK text.\n</S>\n',
+);
 const OK_NODE_ID = `${OK_FILE}#ok`;
 
 const IN = new ByteFixture();
@@ -1166,6 +1200,13 @@ const T12_7_1_UR_EDITED = stagedMdx(
   "T12.7-1 specs/A.mdx with top.leaf's text edited (the unpinned-surface ranges arm's current source over the baseline)",
   UR_SOURCE,
 );
+// The baseline is the arm's initial specs/A.mdx, in a workspace created
+// after T12.7-1's first product invocation: a staged-source record too,
+// made from the string the fixture self-check compares.
+const T12_7_1_UR_BASELINE = stagedMdx(
+  "T12.7-1 specs/A.mdx at the baseline (the unpinned-surface ranges arm's initial source, committed before the leaf edit)",
+  UR_BASELINE_SOURCE,
+);
 
 const UR_CODE_FILE = "src/ref.ts";
 const UR_UNIT_ID = `${UR_CODE_FILE}#unit`;
@@ -1332,7 +1373,7 @@ async function runUnpinnedRangesArm(product: ProductBinding): Promise<void> {
     {
       files: {
         "xspec.config.ts": UR_CONFIG,
-        [UR_FILE]: UR_BASELINE_SOURCE,
+        [UR_FILE]: T12_7_1_UR_BASELINE,
         [UR_CODE_FILE]: UR_CODE_SOURCE,
       },
     },
@@ -1551,7 +1592,9 @@ const ORD_M_FILE = "specs/M.mdx";
 const ORD_M_SOURCE =
   'import { x } from "./OK.xspec"\n\n<S id="m">\nM text.\n</S>\n';
 const ORD_OK_FILE = "specs/OK.mdx";
-const ORD_OK_SOURCE = '<S id="ok">\nOK text.\n</S>\n';
+// The byte-form paths arm's `ok` source (T12.7-1), byte for byte: that one
+// record rather than a second spelling of its bytes.
+const ORD_OK_SOURCE = OK_SOURCE;
 
 const ORD_HASH1_FILE = "specs/ha#1.mdx";
 const ORD_HASH2_FILE = "specs/ha#2.mdx";
@@ -1782,6 +1825,13 @@ const MR_D_TEXT = 'd={"keep"}';
 const MR_D_RANGE = MR.add(MR_D_TEXT);
 MR.add(">\nMoved candidate text.\n</S>\n");
 const MR_SOURCE = MR.source;
+// The arm follows T12.7-2's first product invocation (the
+// condition-ordering arm's `build`): its source is a staged-source record
+// (S-9) made from the string the slice checks read.
+const T12_7_2_MR = stagedMdx(
+  "T12.7-2 refusal-ordering arm specs/MR.mdx (keep holding keep.sub, and mv depending on keep)",
+  MR_SOURCE,
+);
 
 async function runRefusalOrderingArm(product: ProductBinding): Promise<void> {
   sliceCheck(MR_SOURCE, MR_SUB_RANGE, MR_SUB_TEXT, "the remaining bearer");
@@ -1791,7 +1841,7 @@ async function runRefusalOrderingArm(product: ProductBinding): Promise<void> {
     {
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [MR_FILE]: MR_SOURCE,
+        [MR_FILE]: T12_7_2_MR,
       },
     },
     async (workspace) => {
@@ -1891,14 +1941,8 @@ export default defineConfig({
 `;
 
 const IDS_FILE = "specs/P.mdx";
-const IDS_SOURCE = `<S id="a">
-Target leaf.
-</S>
-
-<S id="p" d={"a"}>
-Dependent leaf.
-</S>
-`;
+// T12.7-1's policy-finding source, byte for byte: that one record.
+const IDS_SOURCE = POLICY_SOURCE;
 
 async function runIdentitiesOrderingArm(
   product: ProductBinding,
@@ -2033,7 +2077,17 @@ const DF_LEAF_OPENING: SourceRange = {
   end: DF_LEAF_GT_RANGE.end,
 };
 
-const DF_W_SOURCE = '<S id="w">\nW text.\n</S>\n';
+// The document-forms arm follows T12.7-2's first product invocation: its
+// two spec sources are staged-source records (S-9) — F's made from the
+// string the slice checks read, W's literal wrapped in place.
+const T12_7_2_DF_F = stagedMdx(
+  "T12.7-2 document-forms arm specs/F.mdx (f tagged alpha beta with coverage none, importing W, and f.leaf embedding W.w)",
+  DF_F_SOURCE,
+);
+const DF_W_SOURCE = stagedMdx(
+  "T12.7-2 document-forms arm specs/W.mdx (the embedded w)",
+  '<S id="w">\nW text.\n</S>\n',
+);
 
 // The workspace's one occurrence: f.leaf's embedding of W's `w` (byte-exact
 // container span; the source graph node's own construct range — SPEC 5.7).
@@ -2245,7 +2299,7 @@ async function runDocumentFormsArm(product: ProductBinding): Promise<void> {
     {
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [DF_F_FILE]: DF_F_SOURCE,
+        [DF_F_FILE]: T12_7_2_DF_F,
         [DF_W_FILE]: DF_W_SOURCE,
       },
     },
@@ -2429,8 +2483,17 @@ async function runDocumentFormsArm(product: ProductBinding): Promise<void> {
 // the failed search started from, the invocation working directory,
 // spelled `.`.
 
-/** A minimal valid source, matched by SPECS_ONLY_CONFIG's spec group. */
-const ERR_SOURCE = '<S id="a">\nAlpha.\n</S>\n';
+// A minimal valid source, matched by SPECS_ONLY_CONFIG's spec group: the
+// initial specs/A.mdx of the config-paths, search-failure, single-finding,
+// usage, and environment-refusal arms' workspaces — all but the first
+// created after the body's first product invocation, so S-7's sweep never
+// reaches them against the stub: a staged-source record
+// (helpers/staged-mdx.ts; S-9's before-any-product clause), staged at
+// every site.
+const ERR_SOURCE = stagedMdx(
+  "T12.7-3 specs/A.mdx (the minimal valid source: the config-paths, search-failure, single-finding, usage, and environment-refusal arms' workspaces)",
+  '<S id="a">\nAlpha.\n</S>\n',
+);
 
 // The 14.24 arm's stale edit, staged after T12.7-3's first product invocation
 // (the config-paths arm's), so S-7's sweep never reaches it against the stub:
@@ -3050,8 +3113,13 @@ async function runErrorSymlinkWorkingDirectoryArm(
   );
 }
 
-/** A second valid source, under the directory staged unlistable. */
-const ERR_SUB_SOURCE = '<S id="s">\nSigma.\n</S>\n';
+// A second valid source, under the directory staged unlistable — an
+// initial file of a workspace created after T12.7-3's first product
+// invocation: a staged-source record (S-9).
+const ERR_SUB_SOURCE = stagedMdx(
+  "T12.7-3 specs/sub/S.mdx (the valid source under the directory staged unlistable, 14.25)",
+  '<S id="s">\nSigma.\n</S>\n',
+);
 
 /**
  * Arms (Linux leg): the error documents of the two environment refusals,

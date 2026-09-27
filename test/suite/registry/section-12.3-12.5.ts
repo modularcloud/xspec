@@ -100,7 +100,9 @@ import type { GraphEdge } from "../../helpers/adapters/index.js";
 import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   BESIDE_ROOT_FILE_PATTERN_DECOY,
@@ -148,7 +150,7 @@ export default defineConfig({
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
   config: string,
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
@@ -397,29 +399,35 @@ const T12_3_1_TREE: readonly TreeEntry[] = [
 // Restricted-tree workspace: `grand.par` and `solo` are referenced from code
 // (4.5 markers), so `--unreferenced` lists `grand`, `grand.par.leaf`, and
 // `solo.kid` — a listed node under an unlisted parent with a listed
-// grandparent, and one with no listed ancestor at all.
-const T12_3_1_T = [
-  '<S id="grand">',
-  "Grand line.",
-  "",
-  '<S id="grand.par">',
-  "Par line.",
-  "",
-  '<S id="grand.par.leaf">',
-  "Leaf line.",
-  "</S>",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="solo">',
-  "Solo line.",
-  "",
-  '<S id="solo.kid">',
-  "Kid line.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
+// grandparent, and one with no listed ancestor at all. The workspace
+// follows the ordering workspace's invocations, so S-7's sweep never
+// reaches it against the stub: a staged-source record
+// (helpers/staged-mdx.ts; S-9's before-any-product clause).
+const T12_3_1_T = stagedMdx(
+  "T12.3-1 restricted-tree workspace specs/T.mdx (grand holding grand.par holding grand.par.leaf; solo holding solo.kid)",
+  [
+    '<S id="grand">',
+    "Grand line.",
+    "",
+    '<S id="grand.par">',
+    "Par line.",
+    "",
+    '<S id="grand.par.leaf">',
+    "Leaf line.",
+    "</S>",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="solo">',
+    "Solo line.",
+    "",
+    '<S id="solo.kid">',
+    "Kid line.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T12_3_1_APP = [
   'import SPEC from "../specs/T.xspec";',
