@@ -72,7 +72,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T6.6-3 | section-6.6 | 23, 25, 35 |
 | T6.6-4 | section-6.6 | 29 |
 | T7-1 | section-7-basics | 36 |
-| T7-2 | section-7-basics | 8, 37, 38 |
+| T7-2 | section-7-basics | 8, 37, 38 (since Task 8 its verbatim-literal arms hold — the escape-spelled glob discovers nothing and the escape-spelled group name is named only by its own spelling; it stops first at Task 37's byte-order-mark arm) |
 | T7-3 | section-7-basics | 38 |
 | T7-4 | section-7-discovery | 39, 40 |
 | T7.3-1 | section-7.1-7.3 | 41 |
@@ -112,20 +112,6 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), and Task 53 (a corrupt session in `review list`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
 
 ---
-
-## Task 8 — Configuration literals are read verbatim (SPEC 7, 2.4, 14.14; B2)
-
-**Requirement.** SPEC 2.4's as-spelled rule covers "every configuration literal (7)". SPEC 7: a key is repeated when "an identifier key and a string-literal key [spell] the same name". The comparison is between spelled names.
-
-**Observed.**
-- The glob `"specs/*.mdx"` is read as `specs/*.mdx`: it discovers files, and `inventory` reports the interpreted glob.
-- A group keyed `"product"` becomes `product`, so `target: "product"` resolves.
-
-**Location.** `src/core/config.ts` ~543: `reduceLiteral` returns `{ kind: "string", value: expr.text }`, which is TypeScript's cooked text. Check the object reducer's string-literal keys too.
-
-**Change.** Take each string literal's value, and each string-literal key, from its source characters between the delimiters — `stringLiteralValue` in `src/core/references.ts` (Task 6) does exactly this for a TypeScript `StringLiteral`; reuse it. Whatever rule the verbatim `\` then breaks decides the outcome. For example, `target: "product"` then names no group, which is 14.14.
-
-**Verification.** `section-7-basics.test.ts`: T7-2's literal arms (T7-2 also waits on Tasks 37 and 38). Neighbours: `section-7-discovery.test.ts`, `section-7.1-7.3.test.ts`, `section-7.4-7.5.test.ts`, `section-11.6.test.ts`.
 
 ## Task 9 — A source path containing U+FFFD is invalid (SPEC 14.19, 7, 1.5, 11.2; A3, B14)
 
@@ -766,7 +752,7 @@ Its `identities` are the workspace-relative paths of the files concerned, in byt
 
 **Change.** Before parsing, reject a leading `EF BB BF` with a 14.14 error naming the file (exit 2).
 
-**Verification.** `section-7-basics.test.ts`: T7-2's BOM arm (T7-2 also waits on Tasks 8 and 38).
+**Verification.** `section-7-basics.test.ts`: T7-2's BOM arm, where T7-2 stops first since Task 8 landed (T7-2 also waits on Task 38).
 
 ## Task 38 — Group, profile, and rule names are non-empty and free of U+FFFD (SPEC 7, 14.14; B4, B5)
 

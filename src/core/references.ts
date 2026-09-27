@@ -151,9 +151,10 @@ export function stringLiteralValue(
  * SPEC 2.4: a chain segment's identifier read as spelled — its own
  * characters; one carrying a Unicode escape sequence spells a name
  * containing `\`, which no segment contains (1.4), so the reference names
- * no node (14.5–14.7).
+ * no node (14.5–14.7). The configuration reads its identifier keys the
+ * same way (SPEC 7, ./config.ts): a key is the name its spelling spells.
  */
-function identifierSpelling(
+export function identifierSpelling(
   identifier: tst.Identifier,
   sourceFile: tst.SourceFile,
 ): string {

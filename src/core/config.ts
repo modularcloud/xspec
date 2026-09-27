@@ -7,7 +7,10 @@
 // literals with non-computed identifier or string-literal keys, array
 // literals, static string literals (2.4), and the boolean literals `true`
 // and `false` — no other statement or expression form, no spread, no
-// computed value. IMPLEMENTATION (Key libraries): the file is parsed with
+// computed value. Every string literal it holds, and every key, is read as
+// spelled (SPEC 2.4: "every configuration literal (7)"; SPEC 7: a key is
+// repeated when two keys spell the same name) — no escape sequence is
+// interpreted. IMPLEMENTATION (Key libraries): the file is parsed with
 // the TypeScript compiler API as an AST reduced to data, never executed or
 // imported. A file that is not well-formed TypeScript or does not conform,
 // and every schema violation of SPEC 7.1–7.5, is a configuration error
@@ -25,6 +28,7 @@ import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
 import type { CompiledGlob } from "./glob.js";
 import { compileGlob, unboundToCaptures } from "./glob.js";
+import { identifierSpelling, stringLiteralValue } from "./references.js";
 
 // ---------------------------------------------------------------------------
 // The validated configuration model
@@ -288,9 +292,16 @@ function checkImport(
 ): string | null {
   let ok = true;
   const specifier = decl.moduleSpecifier;
-  if (!ts.isStringLiteral(specifier) || specifier.text !== "xspec") {
+  // SPEC 2.4: the specifier is a configuration literal, its value the
+  // characters between its delimiters as spelled — an escape-spelled
+  // "xspec" is some other specifier.
+  if (
+    !ts.isStringLiteral(specifier) ||
+    stringLiteralValue(specifier, sourceFile) !== "xspec"
+  ) {
     findings.add(
-      `the import must be from the module specifier "xspec" (SPEC 7)`,
+      `the import must be from the module specifier "xspec", read as ` +
+        `spelled with no escape sequence interpreted (SPEC 7, 2.4)`,
       lineOf(specifier, sourceFile),
     );
     ok = false;
@@ -356,7 +367,13 @@ function checkImport(
     );
     ok = false;
   }
-  const importedName = (element.propertyName ?? element.name).text;
+  // SPEC 2.4: a string-literal export name is a configuration literal, read
+  // as spelled; an identifier names the export the language reads it as
+  // (which binding an import makes is the language's question).
+  const exported = element.propertyName ?? element.name;
+  const importedName = ts.isStringLiteral(exported)
+    ? stringLiteralValue(exported, sourceFile)
+    : exported.text;
   if (importedName !== "defineConfig") {
     findings.add(
       `the import must bind defineConfig (found "${importedName}") (SPEC 7)`,
@@ -514,8 +531,15 @@ function reduceLiteral(
       }
       const name = property.name;
       let key: string;
-      if (ts.isIdentifier(name) || ts.isStringLiteral(name)) {
-        key = name.text;
+      // SPEC 7, 2.4: a key is the name it spells — an identifier key's own
+      // characters, a string-literal key's characters between its
+      // delimiters, no escape sequence interpreted — so an identifier key
+      // and a string-literal key spelling the same name repeat one key,
+      // and an escape-spelled key names what it spells.
+      if (ts.isIdentifier(name)) {
+        key = identifierSpelling(name, sourceFile);
+      } else if (ts.isStringLiteral(name)) {
+        key = stringLiteralValue(name, sourceFile);
       } else {
         findings.add(
           `${LITERAL_EXPECTATION}; object keys must be non-computed ` +
@@ -567,8 +591,16 @@ function reduceLiteral(
   }
   if (ts.isStringLiteral(expr)) {
     // SPEC 2.4: a static string literal is a plain single- or double-quoted
-    // string; both parse as StringLiteral. Template literals do not.
-    return { kind: "string", value: expr.text, line };
+    // string; both parse as StringLiteral. Template literals do not. Its
+    // value is the characters between its delimiters exactly as spelled —
+    // a configuration literal (7) like every other — so a glob or name
+    // spelled with an escape sequence carries the escape's characters, and
+    // whatever rule they then break decides the outcome.
+    return {
+      kind: "string",
+      value: stringLiteralValue(expr, sourceFile),
+      line,
+    };
   }
   if (expr.kind === ts.SyntaxKind.TrueKeyword) {
     return { kind: "boolean", value: true, line };
