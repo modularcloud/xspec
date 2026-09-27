@@ -32,23 +32,17 @@
 // left behind — observed in a private temp directory), while a
 // staged-source record entry (the record-accepting `InitialFileContents`,
 // the form such a workspace's initial `.mdx` files take) stages under the
-// record's declaration, `unchecked`, `perDraw`, and `perDrawUnparseable`
-// entries pass (the last two still judged), a non-`.mdx` entry passes, and
-// so does the same creation before the body's first invocation; outside a
-// body context only the per-workspace mark applies, so a creation — which
-// no invocation has touched yet — is never refused; the registry's
-// bookkeeping (`dispose` unregisters); that `per-draw` is a `file()`
-// declaration only (the judge treats it as well-formed, a ledger record
-// refuses it); that the workspace
-// declaration's `perDraw` list is its initial-file form — the listed path's
-// initial contents judged well-formed at creation, a later plain `file()`
-// there exempt from the guard and still judged; and the same of
-// `per-draw-unparseable`, its twin for a draw the document declares
-// unparseable (P-12's break-parse twist) — exempt from the guard by option
-// and through the `perDrawUnparseable` list (in a later-arm workspace of a
-// body that has invoked, too), judged as `unparseable` at creation and at
-// staging, refused on a ledger record. The guard's error is a harness
-// error, never a `HarnessAssertionError`.
+// record's declaration, `unchecked` and `perDraw` entries pass (the latter
+// still judged), a non-`.mdx` entry passes, and so does the same creation
+// before the body's first invocation; outside a body context only the
+// per-workspace mark applies, so a creation — which no invocation has
+// touched yet — is never refused; the registry's bookkeeping (`dispose`
+// unregisters); that `per-draw` is a `file()` declaration only (the judge
+// treats it as well-formed, a ledger record refuses it); and that the
+// workspace declaration's `perDraw` list is its initial-file form — the
+// listed path's initial contents judged well-formed at creation, a later
+// plain `file()` there exempt from the guard and still judged. The guard's
+// error is a harness error, never a `HarnessAssertionError`.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -84,7 +78,6 @@ const text = (data: Uint8Array): string => Buffer.from(data).toString("utf8");
 const WELL_FORMED = doc('<S id="x">', "", "closed below", "", "</S>");
 const EDITED = doc('<S id="x">', "", "edited below", "", "</S>");
 const ILL_FORMED = doc('<S id="x">', "", "never closed");
-const ILL_FORMED_EDITED = doc('<S id="x">', "", "never closed either");
 
 const A = "specs/A.mdx";
 
@@ -370,9 +363,7 @@ test("per-body reach: inside a registered body, an invocation anywhere makes a p
     // A later-arm workspace's initial `.mdx` files as records (the
     // record-accepting `files`): `create()` stages each under the record's
     // declaration, inside the body that has invoked; a `perDraw` entry is
-    // judged well-formed and a `perDrawUnparseable` entry (P-12's
-    // break-parse twist) unparseable, and each path takes plain contents
-    // past the guard.
+    // judged well-formed and its path takes plain contents past the guard.
     const arm = await stage({
       files: {
         "specs/E.mdx": stagedMdx(
@@ -380,24 +371,15 @@ test("per-body reach: inside a registered body, an invocation anywhere makes a p
           WELL_FORMED,
         ),
         "specs/draw.mdx": WELL_FORMED,
-        "specs/twist.mdx": ILL_FORMED,
         "notes.txt": "plain text\n",
       },
-      mdx: {
-        perDraw: ["specs/draw.mdx"],
-        perDrawUnparseable: ["specs/twist.mdx"],
-      },
+      mdx: { perDraw: ["specs/draw.mdx"] },
     });
     expect(arm.productInvoked).toBe(false);
     expect(text(await arm.readBytes("specs/E.mdx"))).toBe(WELL_FORMED);
     expect(text(await arm.readBytes("specs/draw.mdx"))).toBe(WELL_FORMED);
-    expect(text(await arm.readBytes("specs/twist.mdx"))).toBe(ILL_FORMED);
     await arm.file("specs/draw.mdx", EDITED);
     expect(text(await arm.readBytes("specs/draw.mdx"))).toBe(EDITED);
-    await arm.file("specs/twist.mdx", ILL_FORMED_EDITED);
-    expect(text(await arm.readBytes("specs/twist.mdx"))).toBe(
-      ILL_FORMED_EDITED,
-    );
     await expectRefused(
       () => arm.file("specs/E.mdx", EDITED),
       "specs/E.mdx",
@@ -441,7 +423,6 @@ test("initial `files` join the guard: inside a body that has invoked the product
       "Pass a staged-source record as the entry's value",
       "stagedMdx(",
       "`mdx.perDraw`",
-      "`mdx.perDrawUnparseable`",
       "`mdx.unchecked`",
     );
     expect(refused.leftBehind).toEqual([]);
@@ -533,16 +514,6 @@ test("initial `files` join the guard: inside a body that has invoked the product
       "per draw",
     );
     expect(illDraw.leftBehind).toEqual([]);
-
-    // `perDrawUnparseable` (P-12's break-parse twist): past the guard,
-    // judged unparseable at creation.
-    const twist = expectCreated(
-      await createInPrivateTemp({
-        files: { [A]: ILL_FORMED },
-        mdx: { perDrawUnparseable: [A] },
-      }),
-    );
-    expect(text(await twist.readBytes(A))).toBe(ILL_FORMED);
 
     // A path S-9 does not judge always passes.
     const plain = expectCreated(
@@ -671,96 +642,6 @@ test("`per-draw` is a `file()` declaration only: the judge treats it as well-for
   expect(() =>
     stagedMdx("T0-6 per-draw record", WELL_FORMED, "per-draw"),
   ).toThrow(/per-draw/);
-});
-
-test("`per-draw-unparseable` after an invocation — by option, and as the workspace declaration's `perDrawUnparseable` list, whose initial contents are judged unparseable at creation — passes the guard, still judged unparseable at staging", async () => {
-  const twist = "specs/twist.mdx";
-  const workspace = await stage({
-    files: { [A]: WELL_FORMED, [twist]: ILL_FORMED },
-    mdx: { perDrawUnparseable: [twist] },
-  });
-  expect(workspace.mdxDeclarationOf(twist)).toBe("per-draw-unparseable");
-  await invoke(workspace.root);
-
-  // The list: a later plain `file()` of the path passes the guard, judged.
-  await workspace.file(twist, ILL_FORMED_EDITED);
-  expect(text(await workspace.readBytes(twist))).toBe(ILL_FORMED_EDITED);
-  let thrown: unknown;
-  try {
-    await workspace.file(twist, WELL_FORMED);
-  } catch (error) {
-    thrown = error;
-  }
-  expect(thrown).toBeInstanceOf(HarnessStagingError);
-  expect((thrown as HarnessStagingError).mode).toBe("mdx-derivability");
-  expect((thrown as HarnessStagingError).message).toContain(
-    "declared unparseable per draw",
-  );
-  expect(text(await workspace.readBytes(twist))).toBe(ILL_FORMED_EDITED);
-
-  // The option, on an unlisted path the guard otherwise refuses.
-  await workspace.file(A, ILL_FORMED, { mdx: "per-draw-unparseable" });
-  expect(text(await workspace.readBytes(A))).toBe(ILL_FORMED);
-  thrown = undefined;
-  try {
-    await workspace.file(A, EDITED, { mdx: "per-draw-unparseable" });
-  } catch (error) {
-    thrown = error;
-  }
-  expect(thrown).toBeInstanceOf(HarnessStagingError);
-  expect((thrown as HarnessStagingError).mode).toBe("mdx-derivability");
-  expect((thrown as HarnessStagingError).message).toContain(
-    "declared unparseable per draw",
-  );
-  expect(text(await workspace.readBytes(A))).toBe(ILL_FORMED);
-  await expectRefused(
-    () => workspace.file(A, ILL_FORMED, { mdx: "unparseable" }),
-    A,
-    "in this workspace",
-    "`per-draw-unparseable`",
-  );
-
-  // A deriving `perDrawUnparseable` initial entry is refused at creation.
-  thrown = undefined;
-  try {
-    const refused = await TestWorkspace.create({
-      files: { [twist]: WELL_FORMED },
-      mdx: { perDrawUnparseable: [twist] },
-    });
-    onTestFinished(() => refused.dispose());
-  } catch (error) {
-    thrown = error;
-  }
-  expect(thrown).toBeInstanceOf(HarnessStagingError);
-  expect((thrown as HarnessStagingError).mode).toBe("mdx-derivability");
-  expect((thrown as HarnessStagingError).path).toBe(twist);
-  expect((thrown as HarnessStagingError).message).toContain(
-    "declared unparseable per draw",
-  );
-});
-
-test("`per-draw-unparseable` is a `file()` declaration only: the judge treats it as unparseable, and a ledger record refuses it", () => {
-  judgeMdxDeclaration("twist", utf8(ILL_FORMED), "per-draw-unparseable");
-  let thrown: unknown;
-  try {
-    judgeMdxDeclaration("twist", utf8(WELL_FORMED), "per-draw-unparseable");
-  } catch (error) {
-    thrown = error;
-  }
-  expect(thrown).toBeInstanceOf(HarnessStagingError);
-  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
-  expect((thrown as HarnessStagingError).mode).toBe("mdx-derivability");
-  expect((thrown as HarnessStagingError).path).toBe("twist");
-  expect((thrown as HarnessStagingError).message).toContain(
-    "declared unparseable per draw (`per-draw-unparseable`",
-  );
-  expect(() =>
-    stagedMdx(
-      "T0-8 per-draw-unparseable record",
-      ILL_FORMED,
-      "per-draw-unparseable",
-    ),
-  ).toThrow(/`per-draw-unparseable` — that declaration is a property draw's/);
 });
 
 test("`copyFrom()` carries another workspace's bytes — the product's output there — past the guard, judged at staging; out of a workspace the product never touched, the guard applies as to plain contents", async () => {

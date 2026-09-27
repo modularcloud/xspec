@@ -32,14 +32,12 @@
 // a record under the record's declaration; a record at a non-`.mdx` key, or
 // beside a workspace-declaration entry naming its path, throws; the
 // declaration's `perDraw` list judges a draw's initial file as well-formed
-// and declares the path `per-draw`, and its `perDrawUnparseable` list — P-12's
-// break-parse twist — judges one as unparseable and declares the path
-// `per-draw-unparseable`; `mdxPathsOf` lists a rendered map's plain `.mdx`
-// keys for such a list, records left out), the builder's `edit()` (a
-// rewrite of the current bytes, judged under the path's declaration), and
-// the judge's own red checks (an ill-formed source declared well-formed and
-// a deriving source declared unparseable both throw; `unchecked` judges
-// nothing).
+// and declares the path `per-draw`; `mdxPathsOf` lists a rendered map's
+// plain `.mdx` keys for such a list, records left out), the builder's
+// `edit()` (a rewrite of the current bytes, judged under the path's
+// declaration), and the judge's own red checks (an ill-formed source
+// declared well-formed and a deriving source declared unparseable both
+// throw; `unchecked` judges nothing).
 
 import { Buffer } from "node:buffer";
 import { describe, expect, onTestFinished, test, vi } from "vitest";
@@ -514,7 +512,6 @@ describe("S-9: the builder stages an initial `files` record under the record's d
       { unchecked: [P] },
       { allowances: { [P]: ["duplicate-import-binding"] } },
       { perDraw: [P] },
-      { perDrawUnparseable: [P] },
     ];
     for (const mdx of declarations) {
       await createRejected(
@@ -552,58 +549,6 @@ describe("S-9: the builder stages an initial `files` record under the record's d
       "specs/draw.md",
       "not an MDX source",
     );
-  });
-
-  test("`perDrawUnparseable`: a listed path's initial contents are judged unparseable at creation and the path is declared `per-draw-unparseable`; a deriving entry throws; a path in two lists, or not an MDX source, throws", async () => {
-    const draw = "specs/draw.mdx";
-    const workspace = await stage({
-      files: { [draw]: ILL_FORMED },
-      mdx: { perDrawUnparseable: [draw] },
-    });
-    expect(workspace.mdxDeclarationOf(draw)).toBe("per-draw-unparseable");
-    expect(text(await workspace.readBytes(draw))).toBe(ILL_FORMED);
-    await createRejected(
-      { files: { [draw]: WELL_FORMED }, mdx: { perDrawUnparseable: [draw] } },
-      draw,
-      "declared unparseable per draw",
-      "but the source derives under the stock MDX 3 parser",
-      "a generator defect (S-9)",
-    );
-    for (const mdx of [
-      { perDrawUnparseable: [draw], perDraw: [draw] },
-      { perDrawUnparseable: [draw], unparseable: [draw] },
-    ] as const) {
-      await createRejected(
-        { mdx },
-        draw,
-        "more than one of",
-        "`perDrawUnparseable`",
-      );
-    }
-    await createRejected(
-      { mdx: { perDrawUnparseable: ["specs/draw.md"] } },
-      "specs/draw.md",
-      "not an MDX source",
-    );
-    // P-12's shape (section-16-p12.ts `runP12Trial`): the break-parse
-    // twist's path listed `perDrawUnparseable`, the draw's other `.mdx`
-    // paths `perDraw` through `mdxPathsOf`.
-    const twist = "specs/twist.mdx";
-    const files = {
-      "xspec.config.ts": "export default {}",
-      "specs/a.mdx": WELL_FORMED,
-      [twist]: ILL_FORMED,
-    };
-    const trial = await stage({
-      files,
-      mdx: {
-        perDraw: mdxPathsOf(files).filter((path) => path !== twist),
-        perDrawUnparseable: [twist],
-      },
-    });
-    expect(trial.mdxDeclarationOf("specs/a.mdx")).toBe("per-draw");
-    expect(trial.mdxDeclarationOf(twist)).toBe("per-draw-unparseable");
-    expect(text(await trial.readBytes(twist))).toBe(ILL_FORMED);
   });
 
   test("`mdxPathsOf`: the plain `.mdx` keys of an initial `files` map, in map order — a record entry and a non-`.mdx` key left out — so a `perDraw` list derived from a rendered map never names a record's path", async () => {

@@ -44,21 +44,19 @@
 // What is NOT a ledger record: a property draw (judged per draw by the
 // property runner, S-9's property clause, and staged under the `per-draw`
 // declaration — `file()`'s option, or the workspace declaration's `perDraw`
-// list for a draw's initial files — by the section-16 modules alone, or,
-// for a draw the document declares unparseable — P-12's break-parse twist —
-// under `per-draw-unparseable`, the workspace declaration's
-// `perDrawUnparseable` list); a P-8 mutation (`unchecked`); and an edit of
-// bytes the product itself wrote — a rename's or move's rewritten source,
-// which no harness constant equals — which `TestWorkspace.edit()` stages
-// from the workspace's current bytes, judged at staging time (not a
-// deterministic fixture: before any product exists there is nothing to
-// judge) — as `TestWorkspace.copyFrom()` carries another workspace's
-// product-written bytes into a fresh one. The builder's undeclared-staging
-// guard (helpers/workspace.ts, helpers/product-invocations.ts) refuses
-// every other plain `.mdx` staging made after a product invocation — a
-// `file()` write, and an initial `files` entry of a workspace created after
-// the running body's first invocation alike — so an omission from the
-// ledger is a harness error at the first run that reaches the site.
+// list for a draw's initial files — by the section-16 modules alone); a
+// P-8 mutation (`unchecked`); and an edit of bytes the product itself
+// wrote — a rename's or move's rewritten source, which no harness constant
+// equals — which `TestWorkspace.edit()` stages from the workspace's current
+// bytes, judged at staging time (not a deterministic fixture: before any
+// product exists there is nothing to judge) — as `TestWorkspace.copyFrom()`
+// carries another workspace's product-written bytes into a fresh one. The
+// builder's undeclared-staging guard (helpers/workspace.ts,
+// helpers/product-invocations.ts) refuses every other plain `.mdx` staging
+// made after a product invocation — a `file()` write, and an initial
+// `files` entry of a workspace created after the running body's first
+// invocation alike — so an omission from the ledger is a harness error at
+// the first run that reaches the site.
 
 import { MDX_ALLOWANCES } from "./mdx-derivability.js";
 import type { FileContents, MdxFileDeclaration } from "./workspace.js";
@@ -69,12 +67,12 @@ let sealed = false;
 
 /**
  * The declarations a record may carry: never `unchecked` (a record exists
- * to be judged), never `per-draw` or `per-draw-unparseable` (a property
- * draw's alone, judged per draw by the property runner).
+ * to be judged), never `per-draw` (a property draw's alone, judged per draw
+ * by the property runner).
  */
 export type RecordDeclaration = Exclude<
   MdxFileDeclaration,
-  "unchecked" | "per-draw" | "per-draw-unparseable"
+  "unchecked" | "per-draw"
 >;
 
 /**
@@ -173,10 +171,10 @@ function validateDeclaration(
   mdx: MdxFileDeclaration,
 ): RecordDeclaration {
   if (mdx === "well-formed" || mdx === "unparseable") return mdx;
-  if (mdx === "per-draw" || mdx === "per-draw-unparseable") {
+  if (mdx === "per-draw") {
     throw new Error(
       `staged-source ledger: the record ${JSON.stringify(name)} is declared ` +
-        `\`${mdx}\` — that declaration is a property draw's alone (judged ` +
+        "`per-draw` — that declaration is a property draw's alone (judged " +
         "per draw by the property runner, section-16 modules); a record is " +
         "a deterministic fixture, judged by the self-test before any " +
         "product exists (S-9), so declare it well-formed, unparseable, or " +
