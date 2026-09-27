@@ -67,6 +67,7 @@ import {
   displaySnapshotPath,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import {
   assertCompileErrorAt,
   assertNoCompileErrors,
@@ -78,6 +79,7 @@ import type {
   FileOffset,
   SourceDefinitionTarget,
 } from "../../helpers/tooling.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { buildOk } from "./support.js";
 
@@ -95,7 +97,7 @@ export default defineConfig({
 
 /** Stage a fresh workspace with the given files, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({ files });
@@ -541,26 +543,36 @@ export default defineConfig({
 // tag with props (removed), an own-line MDX comment (dropped with its line),
 // a mid-line `text(...)` embedding (replaced with the target's subtree text),
 // author whitespace preserved — plus a subdirectory target source, so the
-// outDir arm observes preserved workspace-relative paths on both files.
-const EMISSION_SOURCES: Readonly<Record<string, string>> = {
-  "specs/A.mdx": [
-    'import LIB from "./sub/LIB.xspec"',
-    "",
-    "# Guide",
-    "",
-    '<S id="alpha" tags="quote">',
-    "Alpha keeps   spacing.",
-    "{/* dropped comment line */}",
-    "Quoting: {text(LIB.util)} inline.",
-    "</S>",
-    "",
-    "Tail prose.",
-    "",
-  ].join("\n"),
+// outDir arm observes preserved workspace-relative paths on both files. The
+// outDir arm's workspace is created after the default arm's invocations, so
+// both `.mdx` entries are staged-source records (S-9's before-any-product
+// clause; helpers/staged-mdx.ts), the default arm's workspace staging them
+// too.
+const EMISSION_SOURCES: Readonly<Record<string, InitialFileContents>> = {
+  "specs/A.mdx": stagedMdx(
+    "T13.2-1 specs/A.mdx (the section-3-representative source, staged by both placement arms)",
+    [
+      'import LIB from "./sub/LIB.xspec"',
+      "",
+      "# Guide",
+      "",
+      '<S id="alpha" tags="quote">',
+      "Alpha keeps   spacing.",
+      "{/* dropped comment line */}",
+      "Quoting: {text(LIB.util)} inline.",
+      "</S>",
+      "",
+      "Tail prose.",
+      "",
+    ].join("\n"),
+  ),
   // A single unterminated line: util's subtree text carries no trailing
   // terminator (SPEC 3: the final line MAY have no terminator), so the
   // mid-line embedding above stays a single line.
-  "specs/sub/LIB.mdx": '<S id="util">Util behavior text.</S>',
+  "specs/sub/LIB.mdx": stagedMdx(
+    "T13.2-1 specs/sub/LIB.mdx (the unterminated embedded target, staged by both placement arms)",
+    '<S id="util">Util behavior text.</S>',
+  ),
 };
 
 // Hand-derived per SPEC 3: the import line and the tag-only, comment-only

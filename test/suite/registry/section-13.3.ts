@@ -180,6 +180,7 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
@@ -216,7 +217,7 @@ export default defineConfig({
 
 /** Stage a fresh workspace with the given files, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  files: Readonly<Record<string, string>>,
+  files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({ files });
@@ -550,16 +551,24 @@ function assertAtAnswer(
 // T13.3-1 — serving reads
 // ---------------------------------------------------------------------------
 
-const T13_3_1_A = [
-  '<S id="alpha" d={["beta"]}>',
-  "Alpha depends on beta.",
-  "</S>",
-  "",
-  '<S id="beta">',
-  "Beta text.",
-  "</S>",
-  "",
-].join("\n");
+// alpha depending on beta, then beta: T13.3-1's source — and byte for byte
+// the source T13.3-2's record-discipline workspace and T13.3-3's whole-gate
+// workspaces stage after their bodies' first invocations, so it is one
+// staged-source record staged at every site (S-9's before-any-product
+// clause; helpers/staged-mdx.ts), aliased below where each arm names it.
+const ALPHA_ON_BETA_SOURCE = stagedMdx(
+  "T13.3-1/T13.3-2/T13.3-3 specs/A.mdx (alpha depending on beta, then beta: T13.3-1's workspace, T13.3-2's record-discipline workspace, T13.3-3's whole-gate workspaces)",
+  [
+    '<S id="alpha" d={["beta"]}>',
+    "Alpha depends on beta.",
+    "</S>",
+    "",
+    '<S id="beta">',
+    "Beta text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T13_3_1 = defineProductTest({
   id: "T13.3-1",
@@ -567,7 +576,7 @@ const T13_3_1 = defineProductTest({
     "after `build`, the read commands (check, ids, show, coverage, impact, review, query, occurrences, view, at) answer without error, and graph data lives under .xspec/ (SPEC 13.3, 12.0)",
   run: async (product) => {
     await withWorkspace(
-      { "xspec.config.ts": GRAPH_CONFIG, "specs/A.mdx": T13_3_1_A },
+      { "xspec.config.ts": GRAPH_CONFIG, "specs/A.mdx": ALPHA_ON_BETA_SOURCE },
       async (workspace) => {
         const A_ROOT = "specs/A.mdx";
         const ALPHA = "specs/A.mdx#alpha";
@@ -885,16 +894,9 @@ const T13_3_2_B = ['<S id="beta">', "Beta text.", "</S>", ""].join("\n");
 // surface's answer contentful (the one occurrence; beta covered through it),
 // and the workspace is otherwise clean — a successful `build` precedes the
 // corruption, so nothing but the corrupt record is wrong (SPEC 13.3, 14.23).
-const T13_3_2_RECORD_A = [
-  '<S id="alpha" d={["beta"]}>',
-  "Alpha depends on beta.",
-  "</S>",
-  "",
-  '<S id="beta">',
-  "Beta text.",
-  "</S>",
-  "",
-].join("\n");
+// Its workspace is created after the source-edit arms' invocations: the
+// staged-source record holding these bytes (T13.3-1's source).
+const T13_3_2_RECORD_A = ALPHA_ON_BETA_SOURCE;
 
 const T13_3_2 = defineProductTest({
   id: "T13.3-2",
@@ -2178,18 +2180,16 @@ const GATE_GARBAGE_LINE = "?? harness-injected garbage: not a journal entry ??";
 // One reference occurrence (alpha's d entry to beta) keeps every never-gated
 // answer contentful; the sources are otherwise finding-free, so the staged
 // journal/write-path state is the workspace's only build-failing condition.
-const T13_3_3_GATE_A = [
-  '<S id="alpha" d={["beta"]}>',
-  "Alpha depends on beta.",
-  "</S>",
-  "",
-  '<S id="beta">',
-  "Beta text.",
-  "</S>",
-  "",
-].join("\n");
+// Both whole-gate workspaces are created after the body's first invocations,
+// so their `.mdx` sources are staged-source records (S-9's before-any-product
+// clause; helpers/staged-mdx.ts): A is the record holding these bytes
+// (T13.3-1's source).
+const T13_3_3_GATE_A = ALPHA_ON_BETA_SOURCE;
 // An unreferenced section for the legitimate journaled rename (line 1).
-const T13_3_3_GATE_T = ['<S id="tmp">', "Tmp text.", "</S>", ""].join("\n");
+const T13_3_3_GATE_T = stagedMdx(
+  "T13.3-3 specs/T.mdx (the garbage-journal workspace's unreferenced tmp section)",
+  ['<S id="tmp">', "Tmp text.", "</S>", ""].join("\n"),
+);
 
 // The obstructed-write-path workspace: emission redirected under
 // `markdown.outDir`, so a plain file at `mdout` obstructs the emit write
@@ -2891,28 +2891,32 @@ const T13_3_3 = defineProductTest({
 // A workspace exercising the enumerated graph-data content (SPEC 13.3):
 // nested sections, a dependency edge, tags, a coverage attribute, a
 // subdirectory source, and a configured coverage profile. No git: graph data
-// derives from sources and configuration alone.
-const T13_3_4_FILES: Readonly<Record<string, string>> = {
+// derives from sources and configuration alone. The two-directory form's
+// workspaces are created after the same-workspace form's invocations, so
+// the `.mdx` entries are staged-source records (S-9's before-any-product
+// clause; helpers/staged-mdx.ts), the first workspace staging them too.
+const T13_3_4_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": GRAPH_CONFIG,
-  "specs/A.mdx": [
-    '<S id="alpha" d={["beta"]} tags="core deep">',
-    "Alpha depends on beta.",
-    '<S id="alpha.one" coverage="none">',
-    "Alpha-one text.",
-    "</S>",
-    "</S>",
-    "",
-    '<S id="beta">',
-    "Beta text.",
-    "</S>",
-    "",
-  ].join("\n"),
-  "specs/sub/C.mdx": [
-    '<S id="gamma" tags="edge">',
-    "Gamma text.",
-    "</S>",
-    "",
-  ].join("\n"),
+  "specs/A.mdx": stagedMdx(
+    "T13.3-4 specs/A.mdx (the determinism workspace: nested sections, a d edge, tags, a coverage attribute)",
+    [
+      '<S id="alpha" d={["beta"]} tags="core deep">',
+      "Alpha depends on beta.",
+      '<S id="alpha.one" coverage="none">',
+      "Alpha-one text.",
+      "</S>",
+      "</S>",
+      "",
+      '<S id="beta">',
+      "Beta text.",
+      "</S>",
+      "",
+    ].join("\n"),
+  ),
+  "specs/sub/C.mdx": stagedMdx(
+    "T13.3-4 specs/sub/C.mdx (the determinism workspace's subdirectory source)",
+    ['<S id="gamma" tags="edge">', "Gamma text.", "</S>", ""].join("\n"),
+  ),
 };
 
 const T13_3_4 = defineProductTest({

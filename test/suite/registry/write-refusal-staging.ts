@@ -72,6 +72,7 @@ import {
   describeEntry,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type {
   ProductBinding,
   RunningProduct,
@@ -150,6 +151,14 @@ export interface RefusalFixture {
 // order by path bytes is A, B, C (SPEC 6.6, 12.7). The sources are staged
 // under `b0`; the prior journaled rename `b0` → `b` leaves them under `b`, so
 // the arms' rename is `b` → `b2`.
+//
+// The H-6 twin is always created after the original's `build`, and every arm
+// after its body's first, so the `.mdx` sources of both fixtures are
+// staged-source records (S-9's before-any-product clause;
+// helpers/staged-mdx.ts) named with every test that prepares the fixture —
+// T13.5-7, and T14-9 and T14-10 (section-14-ii.ts; their
+// `PRECEDENCE_FIXTURE` and `LISTING_FIXTURE` spread the rename fixture's
+// files too).
 const RENAME_CONFIG = `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -159,31 +168,40 @@ export default defineConfig({
   markdown: { emit: true }
 })
 `;
-const RENAME_A = [
-  'import B from "../b/B.xspec"',
-  "",
-  '<S id="a" d={B.b0}>',
-  "Alpha text.",
-  "</S>",
-  "",
-].join("\n");
-const RENAME_B = [
-  '<S id="b0">',
-  "Beta text.",
-  '<S id="b0.k">',
-  "Kid text.",
-  "</S>",
-  "</S>",
-  "",
-].join("\n");
-const RENAME_C = [
-  'import B from "../b/B.xspec"',
-  "",
-  '<S id="c">',
-  "Ceta embeds: {text(B.b0)}",
-  "</S>",
-  "",
-].join("\n");
+const RENAME_A = stagedMdx(
+  "T13.5-7/T14-9/T14-10 the rename fixture specs/a/A.mdx (a d reference to b0)",
+  [
+    'import B from "../b/B.xspec"',
+    "",
+    '<S id="a" d={B.b0}>',
+    "Alpha text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+const RENAME_B = stagedMdx(
+  "T13.5-7/T14-9/T14-10 the rename fixture specs/b/B.mdx (b0 holding b0.k)",
+  [
+    '<S id="b0">',
+    "Beta text.",
+    '<S id="b0.k">',
+    "Kid text.",
+    "</S>",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+const RENAME_C = stagedMdx(
+  "T13.5-7/T14-9/T14-10 the rename fixture specs/c/C.mdx (an embedding of b0)",
+  [
+    'import B from "../b/B.xspec"',
+    "",
+    '<S id="c">',
+    "Ceta embeds: {text(B.b0)}",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 export const RENAME_A_PATH = "specs/a/A.mdx";
 export const RENAME_B_PATH = "specs/b/B.mdx";
@@ -237,15 +255,21 @@ export default defineConfig({
   markdown: { emit: true, outDir: "out" }
 })
 `;
-const MOVE_OTHER = ['<S id="oth0">', "Other text.", "</S>", ""].join("\n");
-const MOVE_A = [
-  'import Other from "../docs/Other.xspec"',
-  "",
-  '<S id="a" d={Other.oth0}>',
-  "Alpha text.",
-  "</S>",
-  "",
-].join("\n");
+const MOVE_OTHER = stagedMdx(
+  "T13.5-7/T14-9 the move fixture docs/Other.mdx (oth0)",
+  ['<S id="oth0">', "Other text.", "</S>", ""].join("\n"),
+);
+const MOVE_A = stagedMdx(
+  "T13.5-7/T14-9 the move fixture specs/A.mdx (importing docs/Other.mdx, a d reference to oth0)",
+  [
+    'import Other from "../docs/Other.xspec"',
+    "",
+    '<S id="a" d={Other.oth0}>',
+    "Alpha text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 const MOVE_APP = ['import A from "../specs/A.xspec";', "", "A.a;", ""].join(
   "\n",
 );

@@ -165,10 +165,16 @@ import {
   assertSnapshotsEqual,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
-import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import type {
+  InitialFileContents,
+  WorkspaceDecl,
+} from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
+import { STREAMS_VALID_SOURCE } from "./section-12.0-i.js";
+import { CORE_A_STAGED } from "./section-13.5.js";
 import {
   assertFindingConcernsPath,
   buildOk,
@@ -204,19 +210,11 @@ export default defineConfig({
 // Importless, tagless `.mdx` sources (the CONF-CORE shape; fine everywhere
 // else too): `a` carries a child so `rename` exercises descendant rewriting;
 // `g` is a second top-level leaf whose audit item is unblocked (SPEC 10.6).
-const A_MDX = [
-  '<S id="a">',
-  "Alpha text.",
-  '<S id="a.k">',
-  "Kid text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="g">',
-  "Gamma text.",
-  "</S>",
-  "",
-].join("\n");
+// Byte for byte section-13.5.ts's CONF-CORE-shaped source, and staged here in
+// workspaces created after a body's first invocation too (T13.4-3's second
+// half, T13.4-6's later arms): that module's staged-source record (S-9's
+// before-any-product clause; helpers/staged-mdx.ts), staged at every site.
+const A_MDX = CORE_A_STAGED;
 
 const A_ROOT = "specs/A.mdx";
 const JOURNAL_REL = ".xspec/journal";
@@ -827,7 +825,9 @@ async function walkOrphanBoundary(
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
         "specs/A.mdx": A_MDX,
-        "specs/B.mdx": ['<S id="b">', "Beta text.", "</S>", ""].join("\n"),
+        // The second half's workspace follows the first half's invocations:
+        // the staged-source record of these bytes (`B_MDX`, below).
+        "specs/B.mdx": B_MDX,
       },
     },
     async (workspace) => {
@@ -1040,7 +1040,7 @@ const TARGET_BYTES =
 // The common staging of the dirty workspace and its pristine reference
 // (module-header rationale: derived output is a function of sources,
 // configuration, and the journal alone, SPEC 13.4).
-const T13_4_4_COMMON: Readonly<Record<string, string>> = {
+const T13_4_4_COMMON: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": MARKDOWN_CONFIG,
   "specs/A.mdx": A_MDX,
   [TARGET_REL]: TARGET_BYTES,
@@ -1407,8 +1407,15 @@ export default defineConfig({
 
 // A second minimal source (the cardinality arms): under OUT_CONFIG it adds
 // the emit write path `out/specs/B.md` — or, staged nested, another emit
-// path under its own `out/…` directory chain (SPEC 7.3, 13.2).
-const B_MDX = ['<S id="b">', "Beta text.", "</S>", ""].join("\n");
+// path under its own `out/…` directory chain (SPEC 7.3, 13.2). Every staging
+// of it — the cardinality arms, T13.4-3's orphan-boundary halves, T13.4-8's
+// emission arm — is in a workspace created after its body's first
+// invocation (T13.4-3's first half aside), so it is one staged-source record
+// (S-9's before-any-product clause; helpers/staged-mdx.ts).
+const B_MDX = stagedMdx(
+  "T13.4-3/T13.4-6/T13.4-8 the minimal section b (specs/B.mdx; T13.4-6's specs/two/B.mdx; T13.4-8's specs/sub/B.mdx)",
+  ['<S id="b">', "Beta text.", "</S>", ""].join("\n"),
+);
 
 // The non-directory occupant staged at write-path components (SPEC 14.22's
 // plain-file kind; content arbitrary — the occupant is never read).
@@ -1963,20 +1970,20 @@ export default defineConfig({
 
 // The relocated file: import- and reference-free, so relocation rewrites
 // nothing and the moved file is byte-identical at its destination (module
-// header; SPEC 6.5).
-const RELOCATED_MDX = ['<S id="a">', "Alpha text.", "</S>", ""].join("\n");
+// header; SPEC 6.5). Byte for byte section-12.0-i.ts's minimal section a,
+// and the emission arm's workspace staging it follows the file-form move's
+// invocations: that staged-source record (S-9's before-any-product clause;
+// helpers/staged-mdx.ts), its bytes compared through `.source`.
+const RELOCATED_MDX = STREAMS_VALID_SOURCE;
 
 // The section-form origin: `mv` is the moved subtree (kept-ID cross-file
-// move, valid per SPEC 6.5), `stay` keeps the origin file non-empty.
+// move, valid per SPEC 6.5), `stay` keeps the origin file non-empty. Its
+// workspace follows the file-form move's invocations: a staged-source record.
 const MOVED_CONSTRUCT = ['<S id="mv">', "Moved text.", "</S>"].join("\n");
-const SECTION_ORIGIN_MDX = [
-  '<S id="stay">',
-  "Stay text.",
-  "</S>",
-  "",
-  MOVED_CONSTRUCT,
-  "",
-].join("\n");
+const SECTION_ORIGIN_MDX = stagedMdx(
+  "T13.4-8 specs/S.mdx (the section-form move's origin: stay, then the moved mv)",
+  ['<S id="stay">', "Stay text.", "</S>", "", MOVED_CONSTRUCT, ""].join("\n"),
+);
 // The created target file's entire initial content (module header; SPEC 6.5).
 const CREATED_TARGET_BYTES = `${MOVED_CONSTRUCT}\n`;
 
@@ -2030,7 +2037,7 @@ const T13_4_8 = defineProductTest({
             "T13.4-8 (file-form move): the moved file under the fresh " +
               "directories (SPEC 13.4, 6.5)",
           ),
-          RELOCATED_MDX,
+          RELOCATED_MDX.source,
           "T13.4-8 (file-form move): the moved file at its destination — " +
             "import- and reference-free, so relocation changes none of its " +
             "bytes (SPEC 6.5; H-4)",

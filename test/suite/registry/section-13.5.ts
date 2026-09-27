@@ -215,6 +215,17 @@ const A_MDX = [
   "</S>",
   "",
 ].join("\n");
+// The source is staged in workspaces created after a body's first product
+// invocation (T13.5-1's stale arm, T13.5-4's storm pair, T13.5-6's serial and
+// concurrent pairs, T13.5-8's valid-workspace arms, T6.6-3's scheduling
+// workspace) and, byte for byte, by section-13.4.ts's tests (its later
+// workspaces included), so it is one staged-source record made from the
+// string (S-9's before-any-product clause; helpers/staged-mdx.ts) — the
+// string stays for the staleness edit below — staged wherever the bytes are.
+export const CORE_A_STAGED = stagedMdx(
+  "T6.6-3/T13.4-1/T13.4-2/T13.4-3/T13.4-4/T13.4-5/T13.4-6/T13.5-1/T13.5-2/T13.5-3/T13.5-4/T13.5-6/T13.5-8 specs/A.mdx (the CONF-CORE-shaped source: a holding a.k, then g; T13.4-6's specs/one/A.mdx too)",
+  A_MDX,
+);
 
 /**
  * The CONF-CORE-shaped staging shared by the 13.5 lock tests — and by
@@ -222,7 +233,7 @@ const A_MDX = [
  * drive-during-hold choreography (T13.5-2's staging).
  */
 export const CORE_DECL: WorkspaceDecl = {
-  files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/A.mdx": A_MDX },
+  files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/A.mdx": CORE_A_STAGED },
 };
 
 const REVIEWS_REL = ".xspec/reviews";
@@ -1366,13 +1377,15 @@ function pollSource(text: string): string {
 // The alternating states are staged after the first `build`, so they are
 // ledger records (S-9's before-any-product clause; helpers/staged-mdx.ts):
 // the loop's two versions, enumerated — state two, then state one — and
-// picked by the same alternation.
+// picked by the same alternation. State one is the workspace's initial
+// source too, which stages the record rather than a second spelling of its
+// bytes.
 const T13_5_5_POLL_STATE_TWO = stagedMdx(
   "T13.5-5 specs/P.mdx in state two",
   pollSource(POLL_TEXT_TWO),
 );
 const T13_5_5_POLL_STATE_ONE = stagedMdx(
-  "T13.5-5 specs/P.mdx in state one",
+  "T13.5-5 specs/P.mdx in state one (the initial source; the alternation's state one)",
   pollSource(POLL_TEXT_ONE),
 );
 
@@ -1385,7 +1398,7 @@ const T13_5_5 = defineProductTest({
       {
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [POLL_FILE]: pollSource(POLL_TEXT_ONE),
+          [POLL_FILE]: T13_5_5_POLL_STATE_ONE,
         },
       },
       async (workspace) => {
@@ -1538,20 +1551,26 @@ const T13_5_5 = defineProductTest({
 // ---------------------------------------------------------------------------
 
 // The second workspace differs from the first in file name, IDs, and texts,
-// so cross-workspace interference cannot cancel out.
-const ISO_TWO_MDX = [
-  '<S id="b">',
-  "Bravo isolated text.",
-  '<S id="b.k">',
-  "Bravo kid text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="h">',
-  "Hotel isolated text.",
-  "</S>",
-  "",
-].join("\n");
+// so cross-workspace interference cannot cancel out. The serial and
+// concurrent pairs are created after the held-overlap probe's invocations,
+// so the source is a staged-source record (S-9's before-any-product clause;
+// helpers/staged-mdx.ts), the probe's workspace 2 staging it too.
+const ISO_TWO_MDX = stagedMdx(
+  "T13.5-6 workspace 2 specs/B.mdx (b holding b.k, then h: the held-overlap probe's, the serial run's, and the concurrent run's)",
+  [
+    '<S id="b">',
+    "Bravo isolated text.",
+    '<S id="b.k">',
+    "Bravo kid text.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="h">',
+    "Hotel isolated text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const ISO_TWO_DECL: WorkspaceDecl = {
   files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/B.mdx": ISO_TWO_MDX },

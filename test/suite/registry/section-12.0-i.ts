@@ -557,13 +557,14 @@ const T12_0_1 = defineProductTest({
 // clause): the findings source of T12.0-2's first workspace, which
 // T12.0-9's findings arm stages after its first invocation (by import),
 // and the minimal valid source the later workspaces of this section's
-// three modules stage — one record each, named with every staging test.
+// three modules stage (and section-13.4.ts's T13.4-8, by import) — one
+// record each, named with every staging test.
 export const STREAMS_INVALID_SOURCE = stagedMdx(
   "T12.0-2/T12.0-9 specs/A.mdx with an unresolved d reference (T12.0-2's findings workspace; T12.0-9's findings arm)",
   ['<S id="a" d={"missing"}>', "Alpha text.", "</S>", ""].join("\n"),
 );
 export const STREAMS_VALID_SOURCE = stagedMdx(
-  "T12.0-2/T12.0-3/T12.0-9/T12.0-10/T12.0-14 specs/A.mdx (the minimal section a: T12.0-2's usage-error and configuration-error arms, T12.0-3's relative-resolution workspace, T12.0-9's corrupt-session and configuration-error arms, T12.0-10's past-the-gate workspace, T12.0-14's grammar workspace)",
+  "T12.0-2/T12.0-3/T12.0-9/T12.0-10/T12.0-14/T13.4-8 specs/A.mdx (the minimal section a: T12.0-2's usage-error and configuration-error arms, T12.0-3's relative-resolution workspace, T12.0-9's corrupt-session and configuration-error arms, T12.0-10's past-the-gate workspace, T12.0-14's grammar workspace; T13.4-8's relocated file, its file-form move and emission arms)",
   ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
 );
 // An unknown top-level key is a configuration error (SPEC 7, 14.14).
