@@ -36,16 +36,16 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T1.5-2 | section-1.5 | 9 |
 | T1.6-5 | section-1.6-1.7 | 14 |
 | T1.7-2 | section-1.6-1.7 | 19, 20 |
-| T2.1-2 | section-2.1 | 6 |
+| T2.1-2 | section-2.1 | 6 (passes since Task 6 landed) |
 | T2.3-3 | section-2.2-2.3 | 7, 14 |
 | T2.4-2 | section-2.4 | 12, 14 |
-| T2.4-5 | section-2.4 | 6 |
+| T2.4-5 | section-2.4 | 6 (passes since Task 6 landed) |
 | T2.5-3 | section-2.5-2.6 | 5 (passes since Task 5 landed) |
 | T2.6-1 | section-2.5-2.6 | 3 (passes since Task 3 landed) |
 | T2.7-3 | section-2.7 | 14 |
 | T2.7-4 | section-2.7 | 13, 14 |
 | T3-7 | section-3 | 10 |
-| T4-2 | section-4 | 6 |
+| T4-2 | section-4 | 6 (passes since Task 6 landed) |
 | T4-5 | section-4 | 16, 17 |
 | T4.4-1 | section-4.3-4.4 | 18 |
 | T4.5-8 | section-4.5 | 16 |
@@ -100,7 +100,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T13.4-6 | section-13.4 | 51 |
 | T13.5-1 | section-13.5 | 43 |
 | T13.5-7 | section-13.5 | 48 |
-| T14-2 | section-14 | 6 |
+| T14-2 | section-14 | 6 (passes since Task 6 landed) |
 | T14-4 | section-14 | 51 |
 | T14-6 | section-14 | 12, 48, 49 |
 | T14-7 | section-14 | 22, 23, 24, 25, 35 |
@@ -113,38 +113,13 @@ Several tasks have no failing test of their own: Task 21 (the undefined refusal 
 
 ---
 
-## Task 6 — String literals, chain segments, and import specifiers are read as spelled (SPEC 2.4, 2.1, 4, 4.5, 14.5–14.7, 14.15; A2, C12)
-
-**Requirement.** SPEC 2.4 (the verbatim rule Task 5 applied to quoted attribute values) covers every static string literal: `d` and `text(...)` string arguments, computed-access indices, and import specifiers in spec and TypeScript sources alike. It also says: "A segment's identifier is likewise read as spelled: one carrying a Unicode escape sequence (`.login`) spells a name containing `\`, which no segment contains (1.4), so the reference names no node and does not resolve (14.5–14.7) — which binding roots a chain is the language's scoping question (2.1, 4.5), not a spelling one." A specifier spelled with an escape designates no source (14.15).
-
-**Observed.** The shared analyzer reads cooked (escape-decoded) values:
-- `d={"login"}`, `{text("login")}`, `BASE["a"]`, `d={BASE.login}`, and the TypeScript marker `BASE.login` all resolve and record edges. T14-2 requires 14.5 and 14.7.
-- `import BASE from "./BASE.xspec"` resolves in spec and TypeScript sources; 14.15 is required.
-
-**Location.**
-- `src/core/spec-references.ts`: acorn's `Literal.value` and `Identifier.name` are cooked; use `raw` or the source slice.
-- `src/core/code-analysis.ts`: TypeScript's `StringLiteral.text` and `Identifier.text`/`escapedText` are cooked; use the node's source characters (`getText()` or positions), minus the delimiters.
-- The import readers on both sides: spec-source ESM imports (`mdx.ts`, `spec-references.ts`) and TypeScript imports (`code-analysis.ts`).
-- The writer side (noted by Task 5, which made `attributeValueText` in `src/core/edits.ts` write an attribute value verbatim): `jsStringLiteral` in the same file still escapes `\` and the quote character, which a verbatim reader no longer reads back as the value. Rename and move write it for rewritten references and import specifiers; valid identities hold neither character (1.4), but a specifier is a path and can hold a quote (`specs/it's.mdx`). Write the value verbatim and pick a quote the value does not hold.
-
-**Change.**
-- Read every string-literal value and every chain segment name from its exact source characters: between the delimiters for literals, the identifier's own span for names.
-- Keep root-binding resolution as the language scopes it: an escaped root identifier still names its binding (2.4, 4.5).
-- Results: an escape-spelled specifier designates no source (14.15). A segment spelled with `\` names no node, so the reference is unresolved: 14.5 in `d`, 14.6 in `text(...)`, 14.7 in TypeScript.
-- Generated modules need no change.
-
-**Verification.**
-- Should turn green: `section-2.4.test.ts` (T2.4-5), `section-2.1.test.ts` (T2.1-2), `section-4.test.ts` (T4-2; T4-5 waits on Tasks 16–17), `section-14.test.ts` (T14-2).
-- `section-1.4.test.ts`: the escape arms of T1.4-1 and T1.4-4 already pass since Task 1 (remark-mdx leaves a backslash in a quoted attribute value undecoded); keep them green.
-- Neighbours: `section-2.2-2.3.test.ts`, `section-4.5.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-16-p1.test.ts`.
-
 ## Task 7 — An embedding's callee is `text` spelled plainly; a parenthesized or escaped callee is an invalid container (SPEC 2.3, 2.4, 14.16; A5)
 
 **Requirement.** SPEC 2.3: "An embedding is an expression container, in flow or text position, whose one expression (14.20) is a call — optional chaining excluded — whose callee is the identifier `text` itself, spelled plainly, neither parenthesized nor escaped (2.4) …; a container holding any other expression is invalid (14.16)."
 
 **Observed.**
 - `{(text)("a")}` is treated as an embedding and reported 14.8; it must be 14.16 at the container.
-- `{text("a")}` is accepted as an embedding; it must be 14.16.
+- `{t\u0065xt("a")}` (the callee spelled with a Unicode escape — this line's escape had been decoded away when the plan was written) is accepted as an embedding; it must be 14.16.
 
 **Location.** `classifyExpression` in `src/core/mdx.ts` (~1494–1546). Its test, `expression.callee.type === "Identifier" && expression.callee.name === "text"`, sees acorn's cooked name, and acorn drops the parentheses.
 
@@ -166,7 +141,7 @@ Also exclude optional calls (`text?.(…)`) if they are not already excluded. Ev
 
 **Location.** `src/core/config.ts` ~543: `reduceLiteral` returns `{ kind: "string", value: expr.text }`, which is TypeScript's cooked text. Check the object reducer's string-literal keys too.
 
-**Change.** Take each string literal's value, and each string-literal key, from its source characters between the delimiters. Whatever rule the verbatim `\` then breaks decides the outcome. For example, `target: "product"` then names no group, which is 14.14.
+**Change.** Take each string literal's value, and each string-literal key, from its source characters between the delimiters — `stringLiteralValue` in `src/core/references.ts` (Task 6) does exactly this for a TypeScript `StringLiteral`; reuse it. Whatever rule the verbatim `\` then breaks decides the outcome. For example, `target: "product"` then names no group, which is 14.14.
 
 **Verification.** `section-7-basics.test.ts`: T7-2's literal arms (T7-2 also waits on Tasks 37 and 38). Neighbours: `section-7-discovery.test.ts`, `section-7.1-7.3.test.ts`, `section-7.4-7.5.test.ts`, `section-11.6.test.ts`.
 

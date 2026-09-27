@@ -44,7 +44,11 @@ import type {
   ClassifiedString,
   TextSpan,
 } from "./references.js";
-import { classifyReference, parseExpressionText } from "./references.js";
+import {
+  classifyReference,
+  parseExpressionText,
+  stringLiteralValue,
+} from "./references.js";
 
 // ---------------------------------------------------------------------------
 // The import model (SPEC 2.1)
@@ -56,7 +60,10 @@ export interface SpecImport {
   readonly statement: SpecImportStatement;
   /** The single default binding, when the form permits one (SPEC 2.1). */
   readonly bindingName: string | null;
-  /** The module specifier's cooked value. */
+  /**
+   * The module specifier's value: the characters between its delimiters
+   * exactly as spelled, no escape sequence interpreted (SPEC 2.4, 2.1).
+   */
   readonly specifier: string;
   /** The quote character of the specifier literal (SPEC 6.5 rewrites). */
   readonly specifierQuote: '"' | "'";
@@ -462,7 +469,11 @@ export function analyzeSpecImports(
           "xspec internal error: import with a non-literal specifier",
         );
       }
-      const specifier = specifierLiteral.text;
+      // SPEC 2.4: the specifier is read as spelled, no escape sequence
+      // interpreted — one spelled with an escape designates the path its
+      // characters spell, the escape's included, never the path the
+      // interpreted value would name.
+      const specifier = stringLiteralValue(specifierLiteral, parsed.sourceFile);
       const relative =
         specifier.startsWith("./") || specifier.startsWith("../");
       if (!relative) {

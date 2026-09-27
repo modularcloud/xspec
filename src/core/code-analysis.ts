@@ -39,7 +39,7 @@ import { derivedFilePathKind } from "./discovery.js";
 import type { Finding } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
 import type { ClassifiedChain } from "./references.js";
-import { classifyReference } from "./references.js";
+import { classifyReference, stringLiteralValue } from "./references.js";
 import { decodeSourceBytes } from "./source-text.js";
 import type { PathText } from "./path-text.js";
 import { pathTextKey, renderPathText } from "./path-text.js";
@@ -112,7 +112,10 @@ export interface CodeImport {
   readonly range: ByteRange;
   /** The declaration's exact text (SPEC 6.5 rewrites). */
   readonly text: string;
-  /** The module specifier's cooked value. */
+  /**
+   * The module specifier's value: the characters between its delimiters
+   * exactly as spelled, no escape sequence interpreted (SPEC 2.4, 4).
+   */
   readonly specifier: string;
   /** The quote character of the specifier literal (SPEC 6.5 rewrites). */
   readonly specifierQuote: '"' | "'";
@@ -480,6 +483,14 @@ class CodeAnalyzer {
     };
   }
 
+  /**
+   * A string literal's value as SPEC 2.4 reads it: the characters between
+   * its delimiters exactly as spelled, no escape sequence interpreted.
+   */
+  private literalValue(literal: tst.StringLiteral): string {
+    return stringLiteralValue(literal, this.sourceFile);
+  }
+
   private addFinding(
     condition: 7 | 8 | 11 | 15 | 18,
     node: tst.Node,
@@ -659,7 +670,10 @@ class CodeAnalyzer {
   ): void {
     const literal = statement.moduleSpecifier;
     if (!ts.isStringLiteral(literal)) return; // grammar guarantees a literal
-    const specifier = literal.text;
+    // SPEC 2.4, 4: the specifier is read as spelled, no escape sequence
+    // interpreted — so whether it ends in `.xspec`, and what it designates,
+    // are judged over its characters as spelled.
+    const specifier = this.literalValue(literal);
     const spec = specifier.endsWith(XSPEC_SUFFIX);
     const clause = statement.importClause;
 
@@ -770,7 +784,12 @@ class CodeAnalyzer {
           );
         } else {
           for (const element of named.elements) {
-            const imported = (element.propertyName ?? element.name).text;
+            // SPEC 2.4: a string-literal export name is read as spelled;
+            // an identifier names the export the language reads it as.
+            const exported = element.propertyName ?? element.name;
+            const imported = ts.isStringLiteral(exported)
+              ? this.literalValue(exported)
+              : exported.text;
             const binding: CodeImportBinding = {
               name: element.name.text,
               typeOnly: clauseTypeOnly || element.isTypeOnly,
@@ -846,7 +865,9 @@ class CodeAnalyzer {
   private scanExportDeclaration(statement: tst.ExportDeclaration): void {
     const literal = statement.moduleSpecifier;
     if (literal === undefined || !ts.isStringLiteral(literal)) return;
-    if (literal.text.endsWith(XSPEC_SUFFIX)) {
+    // SPEC 2.4: the specifier is read as spelled.
+    const specifier = this.literalValue(literal);
+    if (specifier.endsWith(XSPEC_SUFFIX)) {
       this.addFinding(
         15,
         statement,
@@ -857,11 +878,7 @@ class CodeAnalyzer {
       );
       return;
     }
-    this.checkDerivedSpecifier(
-      literal.text,
-      statement,
-      "an export declaration",
-    );
+    this.checkDerivedSpecifier(specifier, statement, "an export declaration");
   }
 
   /**
@@ -878,7 +895,9 @@ class CodeAnalyzer {
     if (!ts.isExternalModuleReference(reference)) return;
     const expression = reference.expression;
     if (expression === undefined || !ts.isStringLiteral(expression)) return;
-    const spec = expression.text.endsWith(XSPEC_SUFFIX);
+    // SPEC 2.4: the specifier is read as spelled.
+    const specifier = this.literalValue(expression);
+    const spec = specifier.endsWith(XSPEC_SUFFIX);
     bound.push({
       name: statement.name.text,
       declaration: statement,
@@ -898,7 +917,7 @@ class CodeAnalyzer {
       return;
     }
     this.checkDerivedSpecifier(
-      expression.text,
+      specifier,
       statement,
       "an import ... = require(...) declaration",
     );
@@ -1124,7 +1143,9 @@ class CodeAnalyzer {
   private visitImportCall(call: tst.CallExpression): void {
     const argument = call.arguments[0];
     if (argument === undefined || !ts.isStringLiteral(argument)) return;
-    if (argument.text.endsWith(XSPEC_SUFFIX)) {
+    // SPEC 2.4: the static specifier is read as spelled.
+    const specifier = this.literalValue(argument);
+    if (specifier.endsWith(XSPEC_SUFFIX)) {
       this.addFinding(
         15,
         call,
@@ -1134,7 +1155,7 @@ class CodeAnalyzer {
       );
       return;
     }
-    this.checkDerivedSpecifier(argument.text, call, "a dynamic import()");
+    this.checkDerivedSpecifier(specifier, call, "a dynamic import()");
   }
 
   /**

@@ -82,20 +82,37 @@ export class EditCollector {
 }
 
 /**
- * A JavaScript string literal holding exactly `value`, written with `quote`
- * (SPEC 6.4: quote style preserved; the fallback form is double-quoted).
- * Only the quote character and the backslash need escaping: the rewritten
- * values — ID segments (SPEC 1.4) and workspace-relative import specifiers
- * (SPEC 2.1) — contain no characters whose escape sequence differs, and the
- * literal re-parses to `value`.
+ * A JavaScript string literal whose value is exactly `value` (SPEC 6.4, 6.5
+ * rewrites and added imports). The value of a static string literal is the
+ * characters between its delimiters exactly as spelled — no escape sequence
+ * is interpreted (SPEC 2.4) — so the value is written verbatim: an escaped
+ * spelling would read back as its escape's characters. `quote` is the style
+ * the edit keeps (SPEC 6.4: quote style preserved; the fallback form and an
+ * added import's specifier are double-quoted, 6.4, 6.5). Rewritten
+ * identities hold no quote character, `\`, or control character (1.4), so
+ * they always take `quote` itself; a rewritten or added import specifier is
+ * a path (2.1), which may hold a quote character. Where the value holds
+ * `quote`, no literal in that style has it as its value, and the other
+ * quote character is taken — SPEC 6.4 and 6.5 prescribe the style for
+ * values it can delimit, and a path holding the prescribed quote has no
+ * spelling in it at all. A value holding both quote characters, or a line
+ * feed or carriage return (which no string literal holds unescaped), has
+ * no verbatim spelling: an internal error, never a malformed rewrite.
  */
 export function jsStringLiteral(value: string, quote: '"' | "'"): string {
-  let escaped = "";
-  for (const character of value) {
-    escaped +=
-      character === "\\" || character === quote ? `\\${character}` : character;
+  const other = quote === '"' ? "'" : '"';
+  const chosen = !value.includes(quote)
+    ? quote
+    : !value.includes(other)
+      ? other
+      : null;
+  if (chosen === null || /[\n\r]/u.test(value)) {
+    throw new Error(
+      `xspec internal error: the string value ${JSON.stringify(value)} has ` +
+        `no verbatim string-literal spelling (SPEC 2.4)`,
+    );
   }
-  return `${quote}${escaped}${quote}`;
+  return `${chosen}${value}${chosen}`;
 }
 
 /**

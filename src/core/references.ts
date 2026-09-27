@@ -37,7 +37,11 @@ export interface TextSpan {
  */
 export interface ClassifiedString {
   readonly kind: "string";
-  /** The literal's cooked value (the named ID path, SPEC 2.2). */
+  /**
+   * The literal's value (the named ID path, SPEC 2.2): the characters
+   * between its delimiters exactly as spelled, no escape sequence
+   * interpreted (SPEC 2.4).
+   */
   readonly value: string;
   /** The quote character the author used (SPEC 6.4: preserved on rewrite). */
   readonly quote: '"' | "'";
@@ -48,7 +52,11 @@ export interface ClassifiedString {
 /** One segment of a static property chain (SPEC 2.4). */
 export interface ClassifiedSegment {
   /**
-   * The segment name. Exactly one chain segment (SPEC 2.4); never split —
+   * The segment name, read as spelled (SPEC 2.4): the identifier's own
+   * characters for dot access, the index literal's characters between its
+   * delimiters for computed access — no escape sequence interpreted, so a
+   * name spelled with one contains `\`, which no ID segment does (1.4),
+   * and names no node. Exactly one chain segment (SPEC 2.4); never split —
    * a name containing `.` can equal no ID segment (SPEC 1.4), so a dotted
    * computed index resolves to nothing (TEST-SPEC T2.4-4).
    */
@@ -81,7 +89,12 @@ export interface ClassifiedSegment {
  */
 export interface ClassifiedChain {
   readonly kind: "chain";
-  /** The root identifier's text (an import binding, when valid). */
+  /**
+   * The name the root identifier binds by the language's reading, escape
+   * sequences interpreted (an import binding, when valid): which binding
+   * roots a chain is the language's scoping question, not a spelling one
+   * (SPEC 2.4, 2.1, 4.5).
+   */
   readonly rootName: string;
   /** The root identifier token. */
   readonly rootSpan: TextSpan;
@@ -111,6 +124,43 @@ export type ClassifiedReference =
 /** The span of a node's own characters (leading trivia excluded). */
 function spanOf(node: tst.Node, sourceFile: tst.SourceFile): TextSpan {
   return { start: node.getStart(sourceFile), end: node.getEnd() };
+}
+
+/**
+ * SPEC 2.4: the value of a static string literal — the characters between
+ * its delimiters exactly as spelled, no escape sequence interpreted — for
+ * every string literal the specification reads: `d` and `text(...)` string
+ * arguments and computed-access indices (here), and import specifiers in
+ * spec and TypeScript sources alike (./spec-references.ts,
+ * ./code-analysis.ts). The parser's own `text` is the interpreted value and
+ * is never read. (An unterminated literal occurs only in a source failing
+ * to parse, 14.20; its value runs to the token's end.)
+ */
+export function stringLiteralValue(
+  literal: tst.StringLiteral,
+  sourceFile: tst.SourceFile,
+): string {
+  const start = literal.getStart(sourceFile);
+  const end = literal.getEnd();
+  const quote = sourceFile.text[start];
+  const terminated = end - start >= 2 && sourceFile.text[end - 1] === quote;
+  return sourceFile.text.slice(start + 1, terminated ? end - 1 : end);
+}
+
+/**
+ * SPEC 2.4: a chain segment's identifier read as spelled — its own
+ * characters; one carrying a Unicode escape sequence spells a name
+ * containing `\`, which no segment contains (1.4), so the reference names
+ * no node (14.5–14.7).
+ */
+function identifierSpelling(
+  identifier: tst.Identifier,
+  sourceFile: tst.SourceFile,
+): string {
+  return sourceFile.text.slice(
+    identifier.getStart(sourceFile),
+    identifier.getEnd(),
+  );
 }
 
 /** The quote character a string literal was written with. */
@@ -146,10 +196,11 @@ export function classifyReference(
   });
 
   if (ts.isStringLiteral(expression)) {
-    // SPEC 2.4: a plain single- or double-quoted string is static.
+    // SPEC 2.4: a plain single- or double-quoted string is static; its
+    // value is its characters as spelled.
     return {
       kind: "string",
-      value: expression.text,
+      value: stringLiteralValue(expression, sourceFile),
       quote: quoteOf(expression, sourceFile),
       span: whole,
     };
@@ -173,6 +224,8 @@ export function classifyReference(
     if (ts.isIdentifier(node)) {
       return {
         kind: "chain",
+        // SPEC 2.4: the root binds by the language's reading (scoping, 2.1,
+        // 4.5), escapes interpreted; only segments are read as spelled.
         rootName: node.text,
         rootSpan: spanOf(node, sourceFile),
         segments: collected.reverse(),
@@ -193,7 +246,8 @@ export function classifyReference(
         );
       }
       collected.push({
-        name: node.name.text,
+        // SPEC 2.4: the segment's identifier is read as spelled.
+        name: identifierSpelling(node.name, sourceFile),
         access: "dot",
         quote: null,
         nameSpan: spanOf(node.name, sourceFile),
@@ -218,7 +272,8 @@ export function classifyReference(
         );
       }
       collected.push({
-        name: index.text,
+        // SPEC 2.4: the index literal's value is its characters as spelled.
+        name: stringLiteralValue(index, sourceFile),
         access: "computed",
         quote: quoteOf(index, sourceFile),
         nameSpan: spanOf(index, sourceFile),
