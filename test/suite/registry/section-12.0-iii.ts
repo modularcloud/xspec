@@ -68,9 +68,14 @@ import {
   diffSnapshots,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import type {
+  InitialFileContents,
+  WorkspaceDecl,
+} from "../../helpers/workspace.js";
+import { STREAMS_VALID_SOURCE } from "./section-12.0-i.js";
 import { SPECS_ONLY_CONFIG } from "./section-5.6.js";
 import {
   buildOk,
@@ -98,21 +103,33 @@ async function withWorkspace<T>(
 // T12.0-14 — invocation grammar
 // ---------------------------------------------------------------------------
 
-/** The grammar fixture's one spec source: a root node holding `a`. */
+/**
+ * The grammar fixture's one spec source: a root node holding `a` — the
+ * minimal section a, the staged-source record section-12.0-i.ts registers
+ * (the same bytes, spelled once; helpers/staged-mdx.ts).
+ */
 const GRAMMAR_SPEC_FILE = "specs/A.mdx";
-const GRAMMAR_SOURCE = '<S id="a">\nAlpha text.\n</S>\n';
-const GRAMMAR_FILES: Readonly<Record<string, string>> = {
+const GRAMMAR_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPECS_ONLY_CONFIG,
-  [GRAMMAR_SPEC_FILE]: GRAMMAR_SOURCE,
+  [GRAMMAR_SPEC_FILE]: STREAMS_VALID_SOURCE,
 };
 /** A `--file` glob inside the root (7) that matches no discovered file. */
 const GRAMMAR_NO_MATCH_GLOB = "no-such-dir/*.mdx";
 /** The `--config` arm's configuration, whose directory is the root (7). */
 const GRAMMAR_CONFIG_DIR = "cfg";
 const GRAMMAR_CONFIG_PATH = `${GRAMMAR_CONFIG_DIR}/xspec.config.ts`;
-const GRAMMAR_CONFIG_FILES: Readonly<Record<string, string>> = {
+/**
+ * The `--config`-first arm's source, staged in T12.0-14's second workspace
+ * (after the grammar workspace's invocations): a staged-source record
+ * (helpers/staged-mdx.ts; S-9's before-any-product clause).
+ */
+const T12_0_14_CFG_B_SOURCE = stagedMdx(
+  "T12.0-14 cfg/specs/B.mdx (the --config-first arm's source)",
+  '<S id="b">\nBeta text.\n</S>\n',
+);
+const GRAMMAR_CONFIG_FILES: Readonly<Record<string, InitialFileContents>> = {
   [GRAMMAR_CONFIG_PATH]: SPECS_ONLY_CONFIG,
-  [`${GRAMMAR_CONFIG_DIR}/specs/B.mdx`]: '<S id="b">\nBeta text.\n</S>\n',
+  [`${GRAMMAR_CONFIG_DIR}/specs/B.mdx`]: T12_0_14_CFG_B_SOURCE,
 };
 /** The session `--name -a` creates and the note `--note -x` stores. */
 const GRAMMAR_SESSION_NAME = "-a";

@@ -106,6 +106,7 @@ import {
   startProduct,
 } from "../../helpers/subprocess.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import {
@@ -552,14 +553,18 @@ const T12_0_1 = defineProductTest({
 
 // One unresolved same-file `d` reference (SPEC 14.5): the finding family is
 // arbitrary — the arms assert streams, not the error catalog.
-const STREAMS_INVALID_SOURCE = [
-  '<S id="a" d={"missing"}>',
-  "Alpha text.",
-  "</S>",
-  "",
-].join("\n");
-const STREAMS_VALID_SOURCE = ['<S id="a">', "Alpha text.", "</S>", ""].join(
-  "\n",
+// Staged-source records (helpers/staged-mdx.ts; S-9's before-any-product
+// clause): the findings source of T12.0-2's first workspace, which
+// T12.0-9's findings arm stages after its first invocation (by import),
+// and the minimal valid source the later workspaces of this section's
+// three modules stage — one record each, named with every staging test.
+export const STREAMS_INVALID_SOURCE = stagedMdx(
+  "T12.0-2/T12.0-9 specs/A.mdx with an unresolved d reference (T12.0-2's findings workspace; T12.0-9's findings arm)",
+  ['<S id="a" d={"missing"}>', "Alpha text.", "</S>", ""].join("\n"),
+);
+export const STREAMS_VALID_SOURCE = stagedMdx(
+  "T12.0-2/T12.0-3/T12.0-9/T12.0-10/T12.0-14 specs/A.mdx (the minimal section a: T12.0-2's usage-error and configuration-error arms, T12.0-3's relative-resolution workspace, T12.0-9's corrupt-session and configuration-error arms, T12.0-10's past-the-gate workspace, T12.0-14's grammar workspace)",
+  ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
 );
 // An unknown top-level key is a configuration error (SPEC 7, 14.14).
 const STREAMS_BAD_CONFIG = `import { defineConfig } from "xspec"
@@ -775,7 +780,12 @@ export default defineConfig({
   }
 })
 `;
-const ALT_SOURCE = ['<S id="b">', "Bee text.", "</S>", ""].join("\n");
+// T12.0-3's relative-resolution workspace follows its sweep story: the
+// alternate root's source is a staged-source record.
+const ALT_SOURCE = stagedMdx(
+  "T12.0-3 alt/aspecs/B.mdx (the alternate root's source)",
+  ['<S id="b">', "Bee text.", "</S>", ""].join("\n"),
+);
 
 const T12_0_3 = defineProductTest({
   id: "T12.0-3",
@@ -1020,20 +1030,25 @@ const T12_0_4 = defineProductTest({
 // T12.0-5 — argument addressing
 // ---------------------------------------------------------------------------
 
-const ADDRESSING_SOURCE = [
-  '<S id="alpha" d={"omega"}>',
-  "Alpha intro.",
-  "",
-  '<S id="alpha.kid">',
-  "Kid text.",
-  "</S>",
-  "</S>",
-  "",
-  '<S id="omega">',
-  "Omega text.",
-  "</S>",
-  "",
-].join("\n");
+// The addressing source: the body's first workspace and, after its
+// invocations, the configuration-state twins — a staged-source record.
+const ADDRESSING_SOURCE = stagedMdx(
+  "T12.0-5 specs/A.mdx (the addressing workspace and its configuration-state twins)",
+  [
+    '<S id="alpha" d={"omega"}>',
+    "Alpha intro.",
+    "",
+    '<S id="alpha.kid">',
+    "Kid text.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="omega">',
+    "Omega text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // "specs/" + 0xFF + "A.mdx": 0xFF never occurs in valid UTF-8, so the
 // argument value is not valid UTF-8 (SPEC 12.0) — stageable on Linux, where
@@ -1373,24 +1388,27 @@ const CASE_FILE = "specs/T.mdx";
 // them. Byte-wise comparison makes them two distinct tags (SPEC 12.0).
 const NFC_TAG = "caf\u00e9";
 const NFD_TAG = "cafe\u0301";
-const CASE_SOURCE = [
-  '<S id="case" tags="foo">',
-  "Lower case node.",
-  "</S>",
-  "",
-  '<S id="Case" tags="Foo">',
-  "Upper case node.",
-  "</S>",
-  "",
-  `<S id="nfc" tags="${NFC_TAG}">`,
-  "NFC-tagged node.",
-  "</S>",
-  "",
-  `<S id="nfd" tags="${NFD_TAG}">`,
-  "NFD-tagged node.",
-  "</S>",
-  "",
-].join("\n");
+const CASE_SOURCE = stagedMdx(
+  "T12.0-6 casing workspace specs/T.mdx",
+  [
+    '<S id="case" tags="foo">',
+    "Lower case node.",
+    "</S>",
+    "",
+    '<S id="Case" tags="Foo">',
+    "Upper case node.",
+    "</S>",
+    "",
+    `<S id="nfc" tags="${NFC_TAG}">`,
+    "NFC-tagged node.",
+    "</S>",
+    "",
+    `<S id="nfd" tags="${NFD_TAG}">`,
+    "NFD-tagged node.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 /**
  * T12.0-6's single-casing path probe as one shared code path: called by the
@@ -1446,6 +1464,18 @@ export async function runT1206SingleCasingPathProbe(
     },
   );
 }
+
+// The two-casing workspace's sources (T12.0-6's third workspace, after the
+// probe's and the casing workspace's invocations): staged-source records,
+// the literals moved to module level.
+const T12_0_6_UPPER_CASING = stagedMdx(
+  "T12.0-6 two-casing workspace specs/A.mdx",
+  ['<S id="upper">', "Upper file text.", "</S>", ""].join("\n"),
+);
+const T12_0_6_LOWER_CASING = stagedMdx(
+  "T12.0-6 two-casing workspace specs/a.mdx",
+  ['<S id="lower">', "Lower file text.", "</S>", ""].join("\n"),
+);
 
 const T12_0_6 = defineProductTest({
   id: "T12.0-6",
@@ -1597,18 +1627,8 @@ const T12_0_6 = defineProductTest({
         {
           files: {
             "xspec.config.ts": SPECS_ONLY_CONFIG,
-            "specs/A.mdx": [
-              '<S id="upper">',
-              "Upper file text.",
-              "</S>",
-              "",
-            ].join("\n"),
-            "specs/a.mdx": [
-              '<S id="lower">',
-              "Lower file text.",
-              "</S>",
-              "",
-            ].join("\n"),
+            "specs/A.mdx": T12_0_6_UPPER_CASING,
+            "specs/a.mdx": T12_0_6_LOWER_CASING,
           },
         },
         async (workspace) => {

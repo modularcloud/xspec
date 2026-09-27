@@ -142,7 +142,14 @@ import {
   startProduct,
 } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import type {
+  InitialFileContents,
+  WorkspaceDecl,
+} from "../../helpers/workspace.js";
+import {
+  STREAMS_INVALID_SOURCE,
+  STREAMS_VALID_SOURCE,
+} from "./section-12.0-i.js";
 import { impactAgainst, SPECS_ONLY_CONFIG } from "./section-5.6.js";
 import { assertImpactedCode, SPEC_AND_CODE_CONFIG } from "./section-9.js";
 import {
@@ -677,28 +684,37 @@ export default defineConfig({
   ]
 })
 `;
-const TIE_BOUNDARY_SOURCE = [
-  'import T from "../tgt/T.xspec"',
-  "",
-  '<S id="b" d={[T.ma, T.mb]}>',
-  "Boundary text.",
-  "</S>",
-  "",
-].join("\n");
-const TIE_TARGET_SOURCE = [
-  '<S id="ma" d={"zz"}>',
-  "Middle a text.",
-  "</S>",
-  "",
-  '<S id="mb" d={"zz"}>',
-  "Middle b text.",
-  "</S>",
-  "",
-  '<S id="zz">',
-  "End target text.",
-  "</S>",
-  "",
-].join("\n");
+// The coverage arm follows the reachable arm's `build`: its two sources are
+// staged-source records (helpers/staged-mdx.ts; S-9's before-any-product
+// clause), wrapped in place.
+const TIE_BOUNDARY_SOURCE = stagedMdx(
+  "T12.0-8 coverage arm specs/bnd/B.mdx",
+  [
+    'import T from "../tgt/T.xspec"',
+    "",
+    '<S id="b" d={[T.ma, T.mb]}>',
+    "Boundary text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+const TIE_TARGET_SOURCE = stagedMdx(
+  "T12.0-8 coverage arm specs/tgt/T.mdx",
+  [
+    '<S id="ma" d={"zz"}>',
+    "Middle a text.",
+    "</S>",
+    "",
+    '<S id="mb" d={"zz"}>',
+    "Middle b text.",
+    "</S>",
+    "",
+    '<S id="zz">',
+    "End target text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 // Impact fixture: `src/app.ts` references `n`; `n` depends on `ca` and `cb`,
 // both edited since the baseline — two equal-length witness paths from `n`.
@@ -718,6 +734,13 @@ const tieImpactSpecSource = (caText: string, cbText: string): string =>
     "</S>",
     "",
   ].join("\n");
+// The impact arm's initial state (both texts at v1), staged after T12.0-8's
+// first product invocation: a staged-source record, the same template call
+// moved to module level.
+const T12_0_8_M_V1 = stagedMdx(
+  "T12.0-8 specs/M.mdx with ca and cb at v1 (the impact arm's initial source)",
+  tieImpactSpecSource("Changed a v1.", "Changed b v1."),
+);
 // The impact arm's doubly-edited state, staged after T12.0-8's first product
 // invocation (the reachable arm's `build`) into a later-arm workspace S-7's
 // sweep never reaches: a staged-source record (helpers/staged-mdx.ts; S-9's
@@ -835,10 +858,7 @@ const T12_0_8 = defineProductTest({
       {
         files: {
           "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-          [TIE_IMPACT_SPEC]: tieImpactSpecSource(
-            "Changed a v1.",
-            "Changed b v1.",
-          ),
+          [TIE_IMPACT_SPEC]: T12_0_8_M_V1,
           [TIE_IMPACT_APP]: TIE_IMPACT_APP_SOURCE,
         },
       },
@@ -927,6 +947,22 @@ async function runPartitionRows(
     }
   }
 }
+
+// Staged-source records for the workspaces T12.0-9 creates after its story
+// workspace's invocations (helpers/staged-mdx.ts; S-9's before-any-product
+// clause): the findings arm's id-less section, and the minimal `alpha`
+// section the wrong-kind and exclusion arms stage — the same bytes
+// T12.0-10's precedence pair and syntax workspace stage, so one record
+// named with both tests; the findings arm's `specs/A.mdx` and the
+// corrupt-session and configuration-error arms' are §12.0-i's records.
+const T12_0_9_U_SOURCE = stagedMdx(
+  "T12.0-9 findings arm specs/U.mdx (a section spelling no identity)",
+  ["<S>", "Section spelling no identity.", "</S>", ""].join("\n"),
+);
+const ALPHA_SECTION_STAGED = stagedMdx(
+  "T12.0-9/T12.0-10 specs/A.mdx (the minimal section alpha: T12.0-9's wrong-kind and exclusion arms; T12.0-10's precedence pair and syntax workspace)",
+  ['<S id="alpha">', "Alpha text.", "</S>", ""].join("\n"),
+);
 
 const T12_0_9 = defineProductTest({
   id: "T12.0-9",
@@ -1319,7 +1355,7 @@ const T12_0_9 = defineProductTest({
       {
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/A.mdx": ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
+          "specs/A.mdx": STREAMS_VALID_SOURCE,
         },
       },
       async (corruptWorkspace) => {
@@ -1374,20 +1410,10 @@ const T12_0_9 = defineProductTest({
       {
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/A.mdx": [
-            '<S id="a" d={"missing"}>',
-            "Alpha text.",
-            "</S>",
-            "",
-          ].join("\n"),
+          "specs/A.mdx": STREAMS_INVALID_SOURCE,
           // A parseable section spelling no identity: its 14.1 finding and
           // its explicitly-unavailable identity ride the answers below.
-          "specs/U.mdx": [
-            "<S>",
-            "Section spelling no identity.",
-            "</S>",
-            "",
-          ].join("\n"),
+          "specs/U.mdx": T12_0_9_U_SOURCE,
         },
       },
       async (invalidWorkspace) => {
@@ -1434,9 +1460,7 @@ const T12_0_9 = defineProductTest({
       {
         files: {
           "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-          "specs/A.mdx": ['<S id="alpha">', "Alpha text.", "</S>", ""].join(
-            "\n",
-          ),
+          "specs/A.mdx": ALPHA_SECTION_STAGED,
           // Valid, reference-free TypeScript: discovered through the code
           // group's glob, bearing no requirement nodes (SPEC 7.2).
           "src/app.ts": "export function noop(): void {}\n",
@@ -1483,7 +1507,7 @@ export default defineConfig({
   bogus: true
 })
 `,
-          "specs/A.mdx": ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
+          "specs/A.mdx": STREAMS_VALID_SOURCE,
         },
       },
       async (configWorkspace) => {
@@ -1504,9 +1528,7 @@ export default defineConfig({
       {
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/A.mdx": ['<S id="alpha">', "Alpha text.", "</S>", ""].join(
-            "\n",
-          ),
+          "specs/A.mdx": ALPHA_SECTION_STAGED,
         },
       },
       async (holdWorkspace) => {
@@ -1597,22 +1619,23 @@ const PREC_SPEC_FILE = "specs/A.mdx";
 const PREC_CODE_FILE = "src/app.ts";
 const PREC_BROKEN_FILE = "specs/Broken.mdx";
 
-const PRECEDENCE_TWIN_FILES: Readonly<Record<string, string>> = {
+const PRECEDENCE_TWIN_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": PRECEDENCE_CONFIG,
-  [PREC_SPEC_FILE]: ['<S id="alpha">', "Alpha text.", "</S>", ""].join("\n"),
+  [PREC_SPEC_FILE]: ALPHA_SECTION_STAGED,
   [PREC_CODE_FILE]: "export function known(): void {}\n",
 };
 
-const PRECEDENCE_FAILING_FILES: Readonly<Record<string, string>> = {
-  ...PRECEDENCE_TWIN_FILES,
-  // An unclosed section tag: unparseable MDX (14.20), the workspace's one
-  // validation finding — staged in a file no gated row names, so every
-  // argument check below is judged from consulted state identical to the
-  // twin's; only the masking arm names this file, deliberately.
-  [PREC_BROKEN_FILE]: ['<S id="broken">', "Text that never closes.", ""].join(
-    "\n",
-  ),
-};
+const PRECEDENCE_FAILING_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    ...PRECEDENCE_TWIN_FILES,
+    // An unclosed section tag: unparseable MDX (14.20), the workspace's one
+    // validation finding — staged in a file no gated row names, so every
+    // argument check below is judged from consulted state identical to the
+    // twin's; only the masking arm names this file, deliberately.
+    [PREC_BROKEN_FILE]: ['<S id="broken">', "Text that never closes.", ""].join(
+      "\n",
+    ),
+  };
 
 /** One gated-read row: a usage-error argument checked before the 13.3 gate. */
 interface GatedUsageRow {
@@ -2027,7 +2050,7 @@ const T12_0_10 = defineProductTest({
       {
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          "specs/A.mdx": ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
+          "specs/A.mdx": STREAMS_VALID_SOURCE,
         },
       },
       async (workspace) => {
@@ -2132,7 +2155,7 @@ export default defineConfig({
           // before the argument count answers the two states differently
           // and fails the byte-identical compare below.
           [SYNTAX_SESSION_REL]: "xspec-harness pre-existing session\n",
-          [SYNTAX_AT_FILE]: '<S id="alpha">\nAlpha text.\n</S>\n',
+          [SYNTAX_AT_FILE]: ALPHA_SECTION_STAGED,
         },
       },
       async (invalidConfig) => {
