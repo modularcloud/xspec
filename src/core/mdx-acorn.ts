@@ -783,3 +783,20 @@ export const mdxAcorn: typeof Parser = Parser.extend(
   acornJsx(),
   excludeEarlyErrors,
 );
+
+/**
+ * SPEC 2.7, 14.20: whether an expression container's content, as MDX 3
+ * derives it, is the empty expression — whitespace and comments alone, so
+ * that it lexes to no token under the grammar (whitespace and line
+ * terminators ECMAScript 2024's: U+00A0, U+FEFF, U+2028, and U+2029
+ * included, U+0085 and U+200B not). Content holding a token, or failing to
+ * lex (an unterminated comment), is no empty expression.
+ */
+export function isEmptyExpression(content: string): boolean {
+  try {
+    const tokenizer = mdxAcorn.tokenizer(content, { ...MDX_ACORN_OPTIONS });
+    return tokenizer.getToken().type === tokTypes.eof;
+  } catch {
+    return false;
+  }
+}

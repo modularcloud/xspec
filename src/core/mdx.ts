@@ -59,7 +59,7 @@ import { sortByBytes, Utf8Offsets } from "./bytes.js";
 import type { ConditionNumber, Finding } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
 import type { PathText } from "./path-text.js";
-import { MDX_ACORN_OPTIONS, mdxAcorn } from "./mdx-acorn.js";
+import { isEmptyExpression, MDX_ACORN_OPTIONS, mdxAcorn } from "./mdx-acorn.js";
 import { decodeSourceBytes } from "./source-text.js";
 import {
   describeSegmentViolation,
@@ -227,7 +227,10 @@ export interface SpecEmbedding {
   readonly expressionRange: ByteRange;
 }
 
-/** One MDX comment — an expression container holding only block comments (SPEC 2.7). */
+/**
+ * One MDX comment — the empty expression: an expression container whose
+ * content is whitespace and comments alone (SPEC 2.7, 14.20).
+ */
 export interface SpecComment {
   /** The innermost section containing the comment (the root included). */
   readonly section: SpecSection;
@@ -1079,20 +1082,22 @@ class DocumentBuilder {
     const range = this.byteRange(span.start, span.end);
     const program = node.data?.estree;
     const body = program?.body ?? [];
-    if (program !== undefined && body.length === 0) {
-      if ((program.comments ?? []).length > 0) {
-        // An MDX comment (`{/* … */}`): a pure annotation (SPEC 2.7).
-        this.comments.push({ section, range });
-        return;
-      }
-      this.addFinding(
-        16,
-        range,
-        `invalid construct: an empty expression container — beyond ` +
-          `Markdown content, only spec-module imports, <S>/<Spec> ` +
-          `sections, {text(...)} embeddings, and MDX comments are ` +
-          `permitted; remove it (SPEC 2.7, 14.16)`,
-      );
+    if (
+      program !== undefined
+        ? body.length === 0
+        : isEmptyExpression(node.value ?? "")
+    ) {
+      // An MDX comment — the empty expression: content of whitespace and
+      // comments alone (SPEC 2.7, 14.20), whitespace and line terminators
+      // ECMAScript's (U+00A0, U+FEFF, U+2028, U+2029 included), so `{}`,
+      // `{ }`, `{/* … */}`, and line comments ended before the closing
+      // brace alike. A pure annotation (SPEC 2.7, 3), never 14.16.
+      // remark-mdx derives such content as a whole Program (the
+      // empty-expression path of micromark-util-events-to-acorn), its body
+      // empty exactly when the content lexes to no token; acorn is
+      // configured, so an estree is always attached — an absent one is
+      // judged from the content itself.
+      this.comments.push({ section, range });
       return;
     }
     const statement = body.length === 1 ? body[0] : undefined;
