@@ -24,12 +24,7 @@
 // exact source offsets, admitting source shapes that are valid xspec sources
 // (SPEC 1–3) but that the stock grammar rejects:
 //   1. Expression grammar (acorn): `xspecAcornExtension` below.
-//   2. ESM block boundary: the stock ESM construct ends only at a blank line
-//      or EOF, so an import directly followed by a non-blank line feeds both
-//      lines to acorn and fails; `widenedEsmConstruct` below ends the block
-//      at the first line boundary where the accumulated text is a complete
-//      valid program.
-//   3. Section-tag pairing: stock MDX pairs JSX tags inside one construct,
+//   2. Section-tag pairing: stock MDX pairs JSX tags inside one construct,
 //      so an opening tag with trailing same-line content whose closing tag
 //      sits on a later line ("Expected a closing tag … before the end of
 //      `paragraph`"), and content directly preceding a closing tag on its
@@ -37,8 +32,18 @@
 //      into a leaf node and the document builder pairs tags itself across
 //      construct boundaries. Genuinely malformed sources — unclosed or
 //      mismatched elements, bad expressions — still fail the parse (14.20).
+//
+// ESM blocks are not widened: remark-mdx's stock `mdxjsEsm` construct bounds
+// them exactly as MDX 3 does (SPEC 14.20; 6.5 "Import edits" spells the
+// bounds out). A block begins with `import` or `export` at a line's start,
+// interrupts no paragraph (the line after a paragraph line is paragraph
+// text), and runs to the next blank line or the file's end — so a line
+// directly following a block's line joins the block — and the whole block
+// must derive as one ECMAScript module holding import and export
+// declarations only, else the file is unparseable (14.20). A block may
+// therefore hold several declarations and JavaScript comments beside them;
+// the comments are the block's, never MDX comments (SPEC 2.7, 3).
 
-import type { Comment, Program } from "acorn";
 import { Parser, tokTypes } from "acorn";
 import acornJsx from "acorn-jsx";
 import remarkMdx from "remark-mdx";
@@ -223,9 +228,14 @@ export interface SpecImportStatement {
 }
 
 /**
- * One top-level ESM block (imports; export statements are invalid and
- * reported, SPEC 2.7 → 14.16). The block's range is what Markdown
- * compilation removes (SPEC 3: imports are removed).
+ * One top-level ESM block as MDX 3 bounds it (SPEC 14.20): from a line
+ * start through the last line before the next blank line or the file's
+ * end, one ECMAScript module holding one or more import and export
+ * declarations and any JavaScript comments beside them. `imports` lists
+ * its import declarations in document order; an export statement is
+ * invalid and reported (SPEC 2.7 → 14.16). Markdown compilation removes
+ * each import declaration's own characters alone — the block's comments
+ * and whitespace stay as content (SPEC 3).
  */
 export interface SpecEsmBlock {
   readonly range: ByteRange;
@@ -441,7 +451,7 @@ function xspecAcornExtension(BaseParser: typeof Parser): typeof Parser {
 const specAcorn = Parser.extend(acornJsx(), xspecAcornExtension);
 
 // ---------------------------------------------------------------------------
-// Grammar widening 2: the ESM block boundary (SPEC 2.1, 3 → 14.20)
+// Parse failures raised by the widened layers (SPEC 14.20)
 // ---------------------------------------------------------------------------
 
 /**
@@ -471,372 +481,8 @@ class MdxGrammarError extends Error {
   }
 }
 
-/**
- * Structural view of micromark's tokenizer surface (not a declared
- * dependency's public API), verified against micromark 4: the code
- * classes, effects, and context members the widened ESM construct uses.
- * Micromark represents line endings as the virtual codes CR −5, LF −4,
- * CRLF −3, a tab as −2 followed by virtual spaces −1, and EOF as null.
- */
-type MicromarkCode = number | null;
-type MicromarkState = (code: MicromarkCode) => MicromarkState | undefined;
-
-interface MicromarkPoint {
-  readonly line: number;
-  readonly column: number;
-  readonly offset: number;
-}
-
-interface MicromarkEffects {
-  enter(type: string): unknown;
-  exit(type: string): object;
-  consume(code: MicromarkCode): void;
-  check(
-    construct: object,
-    ok: MicromarkState,
-    nok: MicromarkState,
-  ): MicromarkState;
-}
-
-interface MicromarkTokenizeContext {
-  readonly interrupt?: boolean;
-  readonly parser: { definedModuleSpecifiers?: string[] };
-  now(): MicromarkPoint;
-  sliceSerialize(
-    range: { start: MicromarkPoint; end: MicromarkPoint },
-    expandTabs?: boolean,
-  ): string;
-}
-
-const isLineEnding = (code: MicromarkCode): boolean =>
-  code !== null && code >= -5 && code <= -3;
-const isAsciiAlpha = (code: MicromarkCode): boolean =>
-  code !== null && ((code >= 65 && code <= 90) || (code >= 97 && code <= 122));
-const isMarkdownSpace = (code: MicromarkCode): boolean =>
-  code === -2 || code === -1 || code === 32;
-
-/**
- * Partial construct mirroring the stock extension's next-line-blank check
- * (micromark-core-commonmark `blankLine` behind one consumed line ending):
- * used only under `effects.check`, so everything it consumes is unwound.
- */
-const blankLineBefore = { tokenize: tokenizeNextBlank, partial: true };
-
-function tokenizeNextBlank(
-  effects: MicromarkEffects,
-  ok: MicromarkState,
-  nok: MicromarkState,
-): MicromarkState {
-  return start;
-
-  function start(code: MicromarkCode): MicromarkState | undefined {
-    effects.enter("lineEndingBlank");
-    effects.consume(code);
-    effects.exit("lineEndingBlank");
-    return inside;
-  }
-  function inside(code: MicromarkCode): MicromarkState | undefined {
-    if (isMarkdownSpace(code)) {
-      effects.enter("linePrefix");
-      effects.consume(code);
-      return prefix;
-    }
-    return after(code);
-  }
-  function prefix(code: MicromarkCode): MicromarkState | undefined {
-    if (isMarkdownSpace(code)) {
-      effects.consume(code);
-      return prefix;
-    }
-    effects.exit("linePrefix");
-    return after(code);
-  }
-  function after(code: MicromarkCode): MicromarkState | undefined {
-    return code === null || isLineEnding(code) ? ok(code) : nok(code);
-  }
-}
-
-/** The acorn options the stock ESM construct uses (micromark-extension-mdxjs). */
-const ESM_ACORN_OPTIONS = {
-  ecmaVersion: 2024,
-  sourceType: "module",
-  locations: true,
-} as const;
-
-/** The statement kinds the stock ESM construct admits in a block. */
-const ALLOWED_ESM_TYPES: ReadonlySet<string> = new Set([
-  "ExportAllDeclaration",
-  "ExportDefaultDeclaration",
-  "ExportNamedDeclaration",
-  "ImportDeclaration",
-]);
-
-/** The structural shape of an acorn parse failure (verified against acorn 8). */
-interface AcornFailureLike {
-  readonly message?: unknown;
-  readonly pos?: unknown;
-  readonly raisedAt?: unknown;
-  readonly loc?: { readonly line?: unknown; readonly column?: unknown };
-}
-
-type EsmParseAttempt =
-  | {
-      readonly ok: true;
-      readonly program: Program;
-      readonly comments: Comment[];
-      readonly prefix: string;
-      readonly source: string;
-    }
-  | {
-      readonly ok: false;
-      readonly failure: AcornFailureLike;
-      readonly swallow: boolean;
-      readonly prefix: string;
-    };
-
-/**
- * Rebase an estree fragment parsed from a document slice onto document
- * positions: every numeric `start`/`end` shifts by `offsetDelta`, every
- * `loc` line by `lineDelta` (the slice is contiguous document text, so a
- * plain shift is exact; the construct starts at column 1, so columns
- * never shift).
- */
-function rebaseEstree(
-  value: unknown,
-  offsetDelta: number,
-  lineDelta: number,
-): void {
-  if (typeof value !== "object" || value === null) {
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      rebaseEstree(item, offsetDelta, lineDelta);
-    }
-    return;
-  }
-  const node = value as Record<string, unknown>;
-  if (typeof node["start"] === "number") {
-    node["start"] = node["start"] + offsetDelta;
-  }
-  if (typeof node["end"] === "number") {
-    node["end"] = node["end"] + offsetDelta;
-  }
-  const loc = node["loc"];
-  if (typeof loc === "object" && loc !== null) {
-    for (const key of ["start", "end"]) {
-      const point = (loc as Record<string, unknown>)[key];
-      if (typeof point === "object" && point !== null) {
-        const record = point as Record<string, unknown>;
-        if (typeof record["line"] === "number") {
-          record["line"] = record["line"] + lineDelta;
-        }
-      }
-    }
-  }
-  for (const [key, child] of Object.entries(node)) {
-    if (key !== "loc") {
-      rebaseEstree(child, offsetDelta, lineDelta);
-    }
-  }
-}
-
-/**
- * Grammar widening 2 (SPEC 14.20; SPEC 2.1/3 fix the accepted shape): a
- * clone of the stock `mdxjsEsm` tokenizer (micromark-extension-mdxjs-esm,
- * verified against its source) whose one behavioral change is in
- * `lineStart` — at each line boundary the accumulated text is tried as a
- * program, and a complete valid one ends the block there, so an import
- * line directly followed by a non-blank line parses. The stock construct
- * ends a block only before a blank line or EOF, feeding the follow-on
- * lines to acorn; every other behavior — swallowing incomplete
- * statements across lines, the blank-line check, the import/export-only
- * rule, `definedModuleSpecifiers`, the `addResult` estree (rebased to
- * document positions) — is mirrored. Registered before the stock
- * construct, which therefore never runs. Adjacent import lines become
- * one block per line rather than one shared block; every consumer of
- * `SpecEsmBlock` is per-statement, so the observable model is unchanged.
- */
-const widenedEsmConstruct = {
-  tokenize: tokenizeWidenedEsm,
-  concrete: true,
-};
-
-function tokenizeWidenedEsm(
-  this: MicromarkTokenizeContext,
-  effects: MicromarkEffects,
-  ok: MicromarkState,
-  nok: MicromarkState,
-): MicromarkState {
-  const self = this;
-  const defined =
-    self.parser.definedModuleSpecifiers ??
-    (self.parser.definedModuleSpecifiers = []);
-  // Re-captured in `start`; initialized here only for definite assignment.
-  let startPoint: MicromarkPoint = self.now();
-  let keyword = "";
-  return self.interrupt === true ? nok : start;
-
-  function start(code: MicromarkCode): MicromarkState | undefined {
-    // Only at the start of a line, not in a container (as stock).
-    if (self.now().column > 1) {
-      return nok(code);
-    }
-    startPoint = self.now();
-    effects.enter("mdxjsEsm");
-    effects.enter("mdxjsEsmData");
-    effects.consume(code);
-    keyword += String.fromCharCode(code as number);
-    return word;
-  }
-
-  function word(code: MicromarkCode): MicromarkState | undefined {
-    if (isAsciiAlpha(code)) {
-      effects.consume(code);
-      keyword += String.fromCharCode(code as number);
-      return word;
-    }
-    if ((keyword === "import" || keyword === "export") && code === 32) {
-      effects.consume(code);
-      return inside;
-    }
-    return nok(code);
-  }
-
-  function inside(code: MicromarkCode): MicromarkState | undefined {
-    if (code === null || isLineEnding(code)) {
-      effects.exit("mdxjsEsmData");
-      return lineStart(code);
-    }
-    effects.consume(code);
-    return inside;
-  }
-
-  function lineStart(code: MicromarkCode): MicromarkState | undefined {
-    if (code === null) {
-      return atEnd(code);
-    }
-    // The widening: a complete valid program ends the block at this line
-    // boundary (before the pending line ending). Otherwise exactly the
-    // stock path: end before a blank line, else continue accumulating.
-    if (parseAccumulated().ok) {
-      return atEnd(code);
-    }
-    return effects.check(blankLineBefore, atEnd, continuationStart)(code);
-  }
-
-  function continuationStart(code: MicromarkCode): MicromarkState | undefined {
-    effects.enter("lineEnding");
-    effects.consume(code);
-    effects.exit("lineEnding");
-    return lineStart;
-  }
-
-  /**
-   * Parse the accumulated block text — the contiguous document slice from
-   * the construct's start to the current point, prefixed (as stock) with
-   * `var` declarations of previously imported bindings so later blocks
-   * referencing them parse. `swallow` mirrors
-   * micromark-util-events-to-acorn: the failure is at the accumulated
-   * text's end, so more content may complete it.
-   */
-  function parseAccumulated(): EsmParseAttempt {
-    const source = self.sliceSerialize(
-      { start: startPoint, end: self.now() },
-      false,
-    );
-    const prefix = defined.length > 0 ? "var " + defined.join(",") + "\n" : "";
-    const comments: Comment[] = [];
-    try {
-      const program = specAcorn.parse(prefix + source, {
-        ...ESM_ACORN_OPTIONS,
-        onComment: comments,
-      });
-      return { ok: true, program, comments, prefix, source };
-    } catch (error) {
-      const failure = (
-        typeof error === "object" && error !== null ? error : {}
-      ) as AcornFailureLike;
-      if (typeof failure.pos !== "number" || failure.loc === undefined) {
-        throw error; // not an acorn parse failure — a genuine crash
-      }
-      const swallow =
-        (typeof failure.raisedAt === "number" &&
-          failure.raisedAt >= prefix.length + source.length) ||
-        (typeof failure.message === "string" &&
-          failure.message.startsWith("Unterminated comment"));
-      return { ok: false, failure, swallow, prefix };
-    }
-  }
-
-  function atEnd(code: MicromarkCode): MicromarkState | undefined {
-    const attempt = parseAccumulated();
-    const prefixLines = attempt.prefix.length > 0 ? 1 : 0;
-    if (!attempt.ok) {
-      if (code !== null && attempt.swallow) {
-        return continuationStart(code);
-      }
-      // Mirror the stock failure message and its document-rebased place.
-      const failure = attempt.failure;
-      const pos = failure.pos as number;
-      const relLine = (failure.loc?.line as number) - prefixLines;
-      const relColumn = failure.loc?.column as number;
-      throw new MdxGrammarError("Could not parse import/exports with acorn", {
-        line: startPoint.line + relLine - 1,
-        column: (relLine === 1 ? startPoint.column - 1 : 0) + relColumn + 1,
-        offset: startPoint.offset + (pos - attempt.prefix.length),
-      });
-    }
-    const program = attempt.program;
-    const delta = startPoint.offset - attempt.prefix.length;
-    const lineDelta = startPoint.line - 1 - prefixLines;
-    rebaseEstree(program, delta, lineDelta);
-    rebaseEstree(attempt.comments, delta, lineDelta);
-    if (attempt.prefix.length > 0) {
-      program.body.shift(); // drop the `var` prefix declaration (as stock)
-    }
-    program.start = startPoint.offset;
-    program.end = startPoint.offset + attempt.source.length;
-    (program as Program & { comments: Comment[] }).comments = attempt.comments;
-    for (const statement of program.body) {
-      if (!ALLOWED_ESM_TYPES.has(statement.type)) {
-        throw new MdxGrammarError(
-          "Unexpected `" +
-            statement.type +
-            "` in code: only import/exports are supported",
-          {
-            start: {
-              line: statement.loc?.start.line,
-              column:
-                statement.loc === undefined || statement.loc === null
-                  ? undefined
-                  : statement.loc.start.column + 1,
-              offset: statement.start,
-            },
-            end: {
-              line: statement.loc?.end.line,
-              column:
-                statement.loc === undefined || statement.loc === null
-                  ? undefined
-                  : statement.loc.end.column + 1,
-              offset: statement.end,
-            },
-          },
-        );
-      }
-      if (statement.type === "ImportDeclaration" && self.interrupt !== true) {
-        for (const specifier of statement.specifiers) {
-          defined.push(specifier.local.name);
-        }
-      }
-    }
-    Object.assign(effects.exit("mdxjsEsm"), { estree: program });
-    return ok(code);
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Grammar widening 3: flat section-tag pairing (SPEC 1.1, 3, 6.5 → 14.20)
+// Grammar widening 2: flat section-tag pairing (SPEC 1.1, 3, 6.5 → 14.20)
 // ---------------------------------------------------------------------------
 
 /**
@@ -867,7 +513,7 @@ interface FromMarkdownContextLike {
  * every tag token becomes one `xspecJsxTag` leaf node carrying the tag's
  * name, kind, and attributes at the token's exact source positions. The
  * document builder pairs the leaves across construct boundaries
- * (SPEC 14.20 widening 3) and reports unclosed or mismatched tags as
+ * (SPEC 14.20 widening 2) and reports unclosed or mismatched tags as
  * parse failures.
  */
 function exitFlatJsxTag(this: FromMarkdownContextLike, token: object): void {
@@ -924,32 +570,22 @@ const flatJsxTagExtension = {
 };
 
 /**
- * Register the grammar widenings. Placed after `remarkMdx` deliberately:
- * micromark's `combineExtensions` splices a later extension's constructs
- * *before* earlier ones at the same character (verified against
- * micromark 4), so `widenedEsmConstruct` is attempted before — and fully
- * shadows — the stock ESM construct at `e`/`i`, and the fromMarkdown
- * merge above replaces the stock tag handlers.
+ * Register the fromMarkdown widening. Placed after `remarkMdx`
+ * deliberately, so the merge above replaces the stock tag handlers. No
+ * micromark construct is added: ESM blocks, among every other construct,
+ * are tokenized by remark-mdx's stock constructs (SPEC 14.20).
  */
 function xspecGrammarWidenings(this: { data(): unknown }): void {
   const data = this.data() as {
-    micromarkExtensions?: unknown[];
     fromMarkdownExtensions?: unknown[];
   };
-  (data.micromarkExtensions ??= []).push({
-    flow: {
-      101: widenedEsmConstruct, // `e`
-      105: widenedEsmConstruct, // `i`
-    },
-  });
   (data.fromMarkdownExtensions ??= []).push(flatJsxTagExtension);
 }
 
 /**
  * The MDX parser (IMPLEMENTATION: remark-mdx defines well-formed MDX,
- * SPEC 14.20 — with the grammar widened per `xspecAcornExtension`,
- * `widenedEsmConstruct`, and `flatJsxTagExtension` above). Frozen once;
- * `parse` is pure.
+ * SPEC 14.20 — with the grammar widened per `xspecAcornExtension` and
+ * `flatJsxTagExtension` above). Frozen once; `parse` is pure.
  */
 const mdxParser = unified()
   .use(remarkParse)
@@ -997,7 +633,7 @@ export function parseSpecSource(
     builder.finishTags();
   } catch (error) {
     if (error instanceof MdxGrammarError) {
-      // A tag-pairing failure (SPEC 14.20 widening 3): unclosed or
+      // A tag-pairing failure (SPEC 14.20 widening 2): unclosed or
       // mismatched tags make the file unparseable, masking its contents.
       return {
         kind: "unparseable",
@@ -1384,7 +1020,7 @@ class DocumentBuilder {
   /**
    * Walk the mdast tree in document order: requirement sections nest by
    * document containment, whatever Markdown structure lies between (SPEC
-   * 1.1–1.3). Under grammar widening 3 every `<S>`/`<Spec>` (and other
+   * 1.1–1.3). Under grammar widening 2 every `<S>`/`<Spec>` (and other
    * JSX) tag arrives as a flat `xspecJsxTag` leaf; this walk pairs them
    * on a stack, so a section opened with trailing same-line content may
    * close on a later line, and content may directly precede a closing
@@ -1442,7 +1078,7 @@ class DocumentBuilder {
   }
 
   /**
-   * One flat tag leaf (SPEC 14.20 widening 3): `<S>`/`<Spec>` tags build
+   * One flat tag leaf (SPEC 14.20 widening 2): `<S>`/`<Spec>` tags build
    * the section tree (SPEC 1.1); any other element is invalid (SPEC 2.7
    * → 14.16) but participates in pairing all the same. An unmatched or
    * mismatched tag is a parse failure, keeping genuinely malformed
@@ -1669,9 +1305,12 @@ class DocumentBuilder {
   }
 
   /**
-   * One top-level ESM block: record import declarations for import
-   * validation and reference analysis (SPEC 2.1); any export statement is
-   * invalid (SPEC 2.7 → 14.16). MDX admits no other statement kind here.
+   * One top-level ESM block: record each of its import declarations for
+   * import validation and reference analysis (SPEC 2.1); any export
+   * statement is invalid (SPEC 2.7 → 14.16). The stock construct admits no
+   * other statement kind (SPEC 14.20), and its estree carries
+   * document-absolute offsets, so each declaration's range is its own
+   * characters — a spelled `;` included, the comments beside it excluded.
    */
   private processEsm(node: MdxTreeNode): void {
     const span = this.spanOf(node);
