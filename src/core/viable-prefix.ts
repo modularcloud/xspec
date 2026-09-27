@@ -45,8 +45,10 @@ const NUMERIC_RUN = /^\.?[0-9][0-9A-Za-z_.]*/;
  * private name's `#` included), an identifier extending it, so that a word
  * the grammar rejects only as a whole (`class` where an identifier may
  * stand) keeps its characters; for a numeric token, each of its own
- * prefixes, the literals it begins; and a whole token of the classes a `.`
- * or `#` alone may begin — a numeric literal (`.0`), a private name (`#x`).
+ * prefixes, the literals it begins; a whole token of the classes a `.` or
+ * `#` alone may begin — a numeric literal (`.0`), a private name (`#x`);
+ * and, where a numeric literal's separator is reported (TypeScript flags a
+ * trailing `_` itself), the separator with the digit it must precede.
  */
 function candidateSpellings(
   text: string,
@@ -70,6 +72,7 @@ function candidateSpellings(
   }
   if (first === ".") spellings.push(".0");
   if (first === "#") spellings.push("#x");
+  if (first === "_") spellings.push("_0");
   return spellings;
 }
 
