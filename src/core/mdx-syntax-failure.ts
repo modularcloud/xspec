@@ -475,7 +475,13 @@ function openContainerOffset(text: string, placed: number | undefined): number {
     return text.length;
   }
   const atEnd = collectedAtEnd(text);
-  if (atEnd !== undefined) return measured(text, atEnd);
+  if (atEnd !== undefined) {
+    return textReadingBound(
+      text,
+      openingOf(text, atEnd),
+      measured(text, atEnd),
+    );
+  }
   if (placed === undefined) return 0;
   const lineEnd = (from: number): number => {
     let at = from;
@@ -535,13 +541,34 @@ function lineLeavingOffset(text: string, placed: number): number {
  * next line's first character — from `from` on, where that lies further —
  * other than those a continuation of the content could still begin with,
  * or, where that line's `}` closes the content, the first character past
- * it the grammar rejects (`pastClosingBrace`).
+ * it the grammar rejects (`pastClosingBrace`) — each bounded where the
+ * content's brace line lies below a paragraph line holding an open text
+ * element (`textReadingBound`).
  */
 function measuredThroughLine(
   text: string,
   end: number,
   collected: Collected,
   from: number,
+): number {
+  const opening = openingOf(text.slice(0, end), collected);
+  return textReadingBound(
+    text,
+    opening,
+    flowMeasuredThroughLine(text, end, collected, from, opening),
+  );
+}
+
+/**
+ * `measuredThroughLine` as a flow construct's content goes on: past blank
+ * lines, and past a closing brace only by what follows it.
+ */
+function flowMeasuredThroughLine(
+  text: string,
+  end: number,
+  collected: Collected,
+  from: number,
+  opening: number | undefined,
 ): number {
   const within = measured(text.slice(0, end), collected);
   if (within < end) return within;
@@ -557,7 +584,6 @@ function measuredThroughLine(
   // indentation, a block quote's marker — character by character until
   // it has become something else (a new list item, a blank line) or its
   // `}` has closed the content.
-  const opening = openingOf(text.slice(0, end), collected);
   let at = Math.max(end + terminator.length, from);
   const bound = Math.min(text.length, at + PROBE_REACH);
   while (at < bound && terminatorAt(text, at) === "") {
@@ -698,6 +724,90 @@ function goesOn(head: string, brace: number): boolean {
   } finally {
     pastBraceDepth -= 1;
   }
+}
+
+// The stock grammar tries a line whose content begins with `{` as a flow
+// expression first, which interrupts the paragraph above it, and gives the
+// line to that paragraph, the brace a text expression's, only where text
+// after the expression's closing brace on its line makes it no flow
+// expression (an attempt meeting the end of the file or a lazy line
+// throws). Below a paragraph line holding an open text element the flow
+// reading never derives: the paragraph it interrupts ends with the element
+// open. The text reading alone is left, and a paragraph holds no line of
+// container syntax and whitespace alone — such a line is blank, or begins
+// a block quote, which interrupts a paragraph — so neither does its text
+// expression, whatever a flow construct's content may span. Where the
+// content is still open at such a line, no completion of a prefix past
+// that line's terminator derives (SPEC 14's location rule for 14.20); a
+// failure the flow reading's measures place before it fails the text
+// reading too, the two collecting the same content there. A code span or a
+// link title opened in the paragraph may close past the brace, hiding it —
+// and the element — in the text reading, so a paragraph holding a backtick
+// or a `]` is left to the flow reading's measures.
+
+/** The stock grammar's report of an element a paragraph's end left open. */
+const PARAGRAPH_LEFT_OPEN = /before the end of `paragraph`$/;
+
+/** The end of the line holding `from` (its terminator's start). */
+function lineEndFrom(text: string, from: number): number {
+  let at = from;
+  while (at < text.length && terminatorAt(text, at) === "") at += 1;
+  return at;
+}
+
+/**
+ * `result`, measured for the container whose content opens at `opening`,
+ * bounded by the text reading (above) where the container's `{` begins its
+ * line past container syntax right below a paragraph line holding an open
+ * text element: at the terminator of the first later line of container
+ * syntax and whitespace alone, where the content is still open at that
+ * line — a `}` ending the line before it falls in the container.
+ */
+function textReadingBound(
+  text: string,
+  opening: number | undefined,
+  result: number,
+): number {
+  if (opening === undefined || text.charAt(opening - 1) !== "{") {
+    return result;
+  }
+  const lineStart = lineStartBefore(text, opening);
+  const terminator = terminatorBefore(text, lineStart);
+  if (
+    terminator === "" ||
+    !LINE_SYNTAX.test(text.slice(lineStart, opening - 1))
+  ) {
+    return result;
+  }
+  let before = lineEndFrom(text, opening);
+  let blankEnd: number | undefined;
+  while (blankEnd === undefined) {
+    const start = before + terminatorAt(text, before).length;
+    const end = lineEndFrom(text, start);
+    if (end >= result || end >= text.length) return result;
+    if (LINE_SYNTAX.test(text.slice(start, end))) blankEnd = end;
+    else before = end;
+  }
+  const paragraphEnd = lineStart - terminator.length;
+  const { failure } = analysisParse(text.slice(0, paragraphEnd));
+  const reason = String(failure?.reason);
+  const paragraphStart = failure === null ? undefined : placeStart(failure);
+  if (
+    failure === null ||
+    failure.source !== "mdast-util-mdx-jsx" ||
+    !EXPECTED_CLOSING_TAG.test(reason) ||
+    !PARAGRAPH_LEFT_OPEN.test(reason) ||
+    placeEnd(failure) !== paragraphEnd ||
+    paragraphStart === undefined ||
+    /[`\]]/.test(text.slice(paragraphStart, paragraphEnd))
+  ) {
+    return result;
+  }
+  const head = text.slice(0, before);
+  const collected = collectedAtEnd(head);
+  return collected !== undefined && openingOf(head, collected) === opening
+    ? blankEnd
+    : result;
 }
 
 /**
