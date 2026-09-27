@@ -1178,6 +1178,82 @@ files, 2867 passed, 0 skipped under the namespace (~90 s; 2852 + the 15 record t
 certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run
 against` lines; the ledger-wide duplicate-bytes probe 701 records in 32 groups.
 
+**Resolved by Task 22 (the T14-11 exchange, `section-14-iii.ts`, `section-15.ts`; 53331cd
+converts, the closing commit records).** Twenty-nine records, one renamed. The four §2
+exports, T14-12's arm stagings, and their consumer changed in one commit: `support.ts`'s
+`UnparseableStaging.files` and `section-14.ts`'s `RangeRuleCase.files` take
+`InitialFileContents`, and `reassertedCase`'s `mdx: { unparseable: [file] }` branch is
+gone outright (every spec-source entry of a re-staged map is a record carrying
+`unparseable`; a `.ts` entry stays plain). `section-2.2-2.3.ts` 1 — the T2.3-3 export's
+`specs/A.mdx` (`"T2.3-3/T14-11 unparseable form … specs/A.mdx"`), the home arm's `mdx`
+dropped. `section-2.4.ts` 4 new, 1 renamed — the string map `DYNAMIC_ARM_BASE_FILES`,
+kept by Task 5 only for the export to spread, folded into `DYNAMIC_ARM_BASE_RECORDS`
+(the literal moved; `"T2.4-2/T14-11 specs/BASE.mdx"`); Task 5's discriminated union
+collapsed into one interface once every entry carries `records` (the TypeScript-only
+forms' declared `unparseable`, `"T2.4-2/T14-11 <form> in <position> specs/A.mdx"`;
+the well-formed names unchanged), the body branching on
+`arm.unparseableAt`; `T2_4_2_UNPARSEABLE_STAGINGS` moved AFTER the computed table and
+derived from it, so the export and the home arm stage one record per bytes — in the
+same order, since T14-11's `w.<n>` numbering follows the exports' order (w.2–w.5);
+`runUnparseableFormArm` takes the record; `withWorkspace`'s orphaned `mdx` parameter
+removed. `section-2.7.ts` 6 — the T2.7-3 spread export's `specs/A.mdx`
+(`"T2.7-3/T14-11 …"`); T2.7-4's `UnparseableCommentArm.source` became the record
+itself (`unparseableCommentArm(name, source, offset, rule)` registers `"T2.7-4/T14-11
+<arm> specs/A.mdx"`, `unparseableInSection` composing through it — the offset computed
+from the string first); both home arms' `mdx` dropped; the orphaned `mdx` parameter
+removed. `section-14-iii.ts` 18 — `BASE_STAGED` (the BASE module beside (b), (g), (t):
+one record), `NOPE_STAGED` ((b), `{ allowances: ["undefined-export"] }`), the nine
+spec-form arms' files, `A_STAGED` (the code arms' spec source, (l)–(q): one record),
+the six negative spec arms' failing files (`unparseable`, created in
+`specUnparseableArm`); `UnparseableArm.files` and both `extraFiles` widened;
+`specFormDecl`, `unparseableDecl`, and `NOPE_DECL` carry no `mdx`; the strings the S-9
+vector self-test imports (`T14_12_FORM_VECTORS`, `T14_12_UNPARSEABLE_VECTORS`) kept.
+Sub-rules: (i) a record staged through a declaration another module's loop sweeps —
+T14-4's and T14-6's `SWEEP_ENTRIES` spread `T14_12_REPORTER_STAGINGS` after their own
+invocations — is named with the sweeping tests too: the task's `"T14-12/T14-11 …"`
+became `"T14-4/T14-6/T14-11/T14-12 (<arm>) …"` (ID order; T14-11 only where it
+re-stages: the negative arms, the BASE and code-arm sources), `"T14-4/T14-6/T14-12 …"`
+for (b) and the swept 14.16 forms, `"T14-12 …"` for (g) and (j); (ii) a module-level
+table of object-literal rows (no sibling property to compute a record from) splits into
+a row table and a computed arm table — `SPEC_FORM_ROWS` and `SPEC_FORM_ARMS =
+SPEC_FORM_ROWS.map((row) => ({ ...row, source: stagedMdx(…) }))`, the declaration from
+the row's allowances — the name's ID list computed by the SAME predicate that selects
+the sweeping consumer (`isSweptSpecForm`, shared with the reporter filter); (iii) the
+red check for an `unparseable` record is to make it derive or flip its declaration
+(an unclosed tag spliced in keeps it unparseable — no red); (iv) the builder self-test
+`someUnparseableRecord()` borrows the ledger's FIRST unparseable record, now T2.3-3's,
+so a red check making that record derive fails that self-test too (expected). Left
+plain: T14-12's (a) workspace (the body's first; its allowance declaration stays), every
+configuration and `.ts` entry; `section-15.ts`'s one creation (T15-1's only workspace,
+created before its first invocation — judged, nothing to convert). Read-based
+enumeration: 9 + 1 (`section-2.2-2.3.ts`), 9, 9, 5, 1 creation sites and
+`section-14.ts`'s `runRangeRuleArm` (the (w) arms) and the two sweeps'
+`withWorkspace(entry.decl, …)`; behind the diagnosed failures — T2.3-3's unparseable
+arm, T2.4-2's three later TypeScript-only stagings, T2.7-4's five, T14-11's
+(w.1)–(w.19), T14-12's (c)–(w), T14-4's and T14-6's T14-12 entries — each stages
+records now; Task 23's notes updated (the sweeps' T14-12 entries and T14-11's (w) arms
+stage records already). Observation for the determination, not acted on (Task 14's class): the
+duplicate-bytes probe finds 730 records in 33 groups — `A_STAGED` forms a new
+cross-module group with `"T4.5-9 specs/A.mdx"` (`section-4.5.ts`); none within this
+task's modules. Checks: the sites hook logged, besides Task 23's `section-14.ts` lines,
+the task's two T14-12 pairs, T14-6's two `NOPE_DECL` pairs, and Task 5's two remainders
+(T2.4-2's and T2.7-3's `specs/A.mdx` `"unparseable"`) before, and none of them after;
+the sha256 capture over `section-2.2-2.3.test`, `section-2.4.test`, `section-2.7.test`,
+`section-14.test`, `section-14-iii.test`, `section-15.test` (335 writes, compared
+sorted) identical; 28 tests, 17 pass and 11 fail — T2.3-3, T2.4-2, T2.4-5, T2.7-3,
+T2.7-4, T14-2, T14-4, T14-6, T14-7, T14-11, T14-12 — with identical verdicts and
+diagnoses (~42 s a run); the per-arm diagnostic variant (AGENTS.md) reaching every
+re-staged site behind a failure gave identical per-arm logs (107 lines, T14-4's and
+T14-6's entries with their `build` findings) and captures (478 writes) before and
+after; red check: 19 records fail as `mdx-derivability` in the S-9 self-test (the
+unparseable ones made deriving or declared well-formed, the two BASE records spliced,
+(b)'s allowance dropped), plus the borrowing builder self-test. Known state after
+Task 22: the S-9 self-test 756 tests over 730 records (723 `T…`, 4 `E-6`, 3 `P-…`);
+self project 22 files, 2896 passed, 0 skipped under the namespace (~90 s; 2867 + the
+29 record tests); certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23
+`certification run against` lines; the ledger-wide duplicate-bytes probe 730 records
+in 33 groups.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -1345,45 +1421,6 @@ behind a diagnosed failure or in an arm the built product never reaches — reci
 
 ## Tasks
 
-### Task 22 — The T14-11 exchange: the §2 `UnparseableStaging` exports, T14-12's arm stagings, their consumer; plus `section-14-iii.ts`'s rest and `section-15.ts`
-
-**Requirement.** T14-11's closing clause re-stages, after its own earlier arms'
-invocations, the unparseable stagings its home tests export (`T14_11_REASSERTED_STAGINGS`,
-`section-14.ts` ~4479: `T2_3_3_UNPARSEABLE_STAGING`, `T2_4_2_UNPARSEABLE_STAGINGS`,
-`T2_7_3_SPREAD_UNPARSEABLE_STAGING`, `T2_7_4_UNPARSEABLE_STAGINGS`, and
-`T14_12_UNPARSEABLE_ARMS` through `t1412Staging` ~4466), building each workspace from
-`staging.files` with `mdx: { unparseable: [file] }` for a spec source (`reassertedCase`
-~4490). Task 5 deferred the home side to here so that the exports and their consumer
-change together.
-
-**Change.** `support.ts`: `UnparseableStaging.files` becomes record-accepting.
-`section-14.ts`: `RangeRuleCase.files` (and whatever `runRangeRuleCase` passes to the
-builder) becomes record-accepting; `reassertedCase` drops the `mdx: { unparseable:
-[file] }` branch for a record entry — after this task every spec-source `file` entry is
-a record, so drop the branch outright; a code-source `.ts` entry stays plain and needs
-no declaration. Home side: each export's `.mdx` entries become records — the failing
-`file` (spec-source) declared `unparseable`, the sources beside it well-formed unless
-the home arm declares otherwise (T14-12's allowance-bearing forms carry
-`{ allowances }`, "under exactly its named allowances") — named with both IDs
-(`"T2.3-3/T14-11 …"`, `"T2.4-2/T14-11 <position> …"`, `"T2.7-3/T14-11 …"`,
-`"T2.7-4/T14-11 <arm> …"`, `"T14-12/T14-11 (<arm>) …"`), the home bodies' own
-stagings of these maps (`section-2.2-2.3.ts` ~1099, `section-2.4.ts` ~620,
-`section-2.7.ts` ~1503, T14-12's arms in `section-14-iii.ts`) taking the records
-through the same maps (remove the paths from those workspaces' `mdx.unparseable`).
-Then `section-14-iii.ts`'s remaining post-invocation entries (T14-12's `specs/A.mdx`,
-`specs/BASE.mdx`) and `section-15.ts` (1 creation — judge).
-**Reachable sites (the instrumented run):**
-- `section-14-iii.ts` — T14-12 (2): specs/A.mdx specs/BASE.mdx
-- the expected remainders Task 5 left: the four exports' spread entries (T2.3-3,
-  T2.4-2, T2.7-3 `specs/A.mdx`, and T2.7-4's — the latter behind its failure).
-**Failing here:** T2.3-3, T2.4-2, T2.7-3, T2.7-4, T14-11 (arm (c); its w.n arms are
-reached only through AGENTS.md's arm-filter recipe — use it to run w.1…w.n against the
-built product before and after: same verdicts), T14-12.
-**Certification scope:** none.
-**Checks.** Recipes 1–5 over `section-2.2-2.3.test`, `section-2.4.test`,
-`section-2.7.test`, `section-14.test`, `section-14-iii.test`, `section-15.test` (the
-sites hook's after-log for the §2 files now empty but for `unchecked` entries).
-
 ### Task 23 — Initial-file conversion: §14 (`section-14.ts`, `section-14-ii.ts`)
 
 **Workspace creations to judge:** 14 (44; 4 records; T14-11's own `RangeRuleCase`
@@ -1398,14 +1435,19 @@ after its earlier arms' invocations, becomes a record named with T14-10).
 - `section-14.ts` — T14-3 (2): specs/broken.mdx specs/invalid.mdx
 - `section-14.ts` — T14-4 (7): hi/H.mdx lo/L.mdx specs/a#b.mdx specs/a.mdx specs/alpha.mdx specs/bravo.mdx specs/s.mdx
 - `section-14.ts` — T14-5 (1): specs/U.mdx
-- `section-14.ts` — T14-6 (7): specs/A.mdx specs/BASE.mdx specs/a#b.mdx specs/a.mdx specs/alpha.mdx specs/bravo.mdx specs/s.mdx
+- `section-14.ts` — T14-6 (7): specs/A.mdx specs/BASE.mdx specs/a#b.mdx specs/a.mdx specs/alpha.mdx specs/bravo.mdx specs/s.mdx (its
+  specs/A.mdx and specs/BASE.mdx are T14-12's (b) `NOPE_DECL`, spread through
+  `T14_12_REPORTER_STAGINGS` — records since Task 22; Task 23's before-log lacks them)
 - `section-14.ts` — T14-8 (9): specs/Col.mdx specs/CycA.mdx specs/CycB.mdx specs/Emb.mdx specs/ImpA.mdx specs/ImpB.mdx specs/One.mdx specs/Pol.mdx specs/Two.mdx
 - `section-14.ts` — T14-11 (3): specs/A.mdx specs/comment-only.mdx specs/empty.mdx
 - `section-14-ii.ts` — T14-10 (3): specs/a/A.mdx specs/b/B.mdx specs/c/C.mdx (the rename
   fixture's, records since Task 21 — Task 23's before-log lacks them)
 **Failing here:** T14-2, T14-4, T14-6, T14-7, T14-11 (14.ts); T14-9, T14-10 (14-ii).
 **Certification scope:** none.
-**Notes.** T14-4/T14-6 share records already (`"T14-4/T14-6 …"`); T14-3's
+**Notes.** Since Task 22 `RangeRuleCase.files` takes records and T14-11's (w) arms
+stage the home modules' records (no `mdx`), and the sweeps' spread of
+`T14_12_REPORTER_STAGINGS` stages `section-14-iii.ts`'s records (named with T14-4 and
+T14-6) — neither needs converting here. T14-4/T14-6 share records already (`"T14-4/T14-6 …"`); T14-3's
 `specs/broken.mdx` and `specs/invalid.mdx` are `unparseable` records (their paths
 leave `mdx.unparseable`); `specs/a#b.mdx` is an ordinary key; T14-11's arm (v) prefix
 form (AGENTS.md's arm-filter and stand-in recipes reach it); `RENAME_REFUSAL_FILES`
