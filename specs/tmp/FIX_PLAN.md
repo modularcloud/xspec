@@ -27,8 +27,8 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | Test | Module | Tasks |
 |---|---|---|
 | P-1 | section-16-p1 | 1 (passes since Task 1 landed) |
-| P-2 | section-16-p2-p3 | 13 (since Task 10 its first falsified trial — seed 271828183, trial 6 — stages a `{}` container in `specs/B.mdx`, reported 14.16) |
-| P-3 | section-16-p2-p3 | 13 (since Task 10 its counterexample, seed 271828183, holds `a{}` in `specs/C.mdx`) |
+| P-2 | section-16-p2-p3 | 13 (passes since Task 13 landed; its first falsified trial had been seed 271828183's trial 6, a `{}` container in `specs/B.mdx` reported 14.16) |
+| P-3 | section-16-p2-p3 | 13 (passes since Task 13 landed; its counterexample, seed 271828183, had held `a{}` in `specs/C.mdx`) |
 | P-4 | section-16-p4 | 3 (passes since Task 3 landed; it runs no `inventory`, so it never waited on Task 4) |
 | P-5 | section-16-p5-p6 | 3 (passes since Task 3 landed; it runs no `inventory`, so it never waited on Task 4) |
 | T1.4-1 | section-1.4 | 1, 5 (passes since Task 5 landed; since Task 1 its one failing arm had been the `&#46;` reference spelling) |
@@ -43,7 +43,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T2.5-3 | section-2.5-2.6 | 5 (passes since Task 5 landed) |
 | T2.6-1 | section-2.5-2.6 | 3 (passes since Task 3 landed) |
 | T2.7-3 | section-2.7 | 14 |
-| T2.7-4 | section-2.7 | 13, 14 |
+| T2.7-4 | section-2.7 | 13, 14 (since Task 13 its ten comment forms and the expression-beside-comment arm hold; it stops first at the U+0085 arm's location, [65,67) where the zero-length 65..65 is required) |
 | T3-7 | section-3 | 10 (passes since Task 10 landed) |
 | T4-2 | section-4 | 6 (passes since Task 6 landed) |
 | T4-5 | section-4 | 16, 17 |
@@ -106,43 +106,16 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T14-7 | section-14 | 22, 23, 24, 25, 35 |
 | T14-9 | section-14-ii | 48 |
 | T14-10 | section-14-ii | 49, 50 |
-| T14-11 | section-14 | 13, 14, 15, 16 (Task 12 landed; it stops first at arm (c), `d={}`'s location, Task 14) |
+| T14-11 | section-14 | 13, 14, 15, 16 (Tasks 12 and 13 landed; it stops first at arm (c), `d={}`'s location, Task 14) |
 | T14-12 | section-14-iii | 14 (since Task 12 its positive arms (a)–(o) hold — the early errors, the expression-grammar forms, and the TypeScript post-parse checks; it stops first at negative arm (p), `010` in a `.ts` file, located [55,58) where the zero-length 56..56 is required; since Task 10 arm (s), the import-then-`const x = 1` block, reports 14.20 over the whole `const` statement where the zero-length range at its start is required) |
 
-Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), and Task 53 (a corrupt session in `review list`); Task 55 (a path beginning with U+FEFF, found while landing Task 9) has landed. Task 29 landed with Task 10: once ESM blocks were bounded as stock MDX 3 bounds them, T6.6-2's move (passing before) added its import at offset 0 of an origin whose first line is `<S id="org">`, the block absorbed that line, and the move's own validation of the rewritten workspace refused it — so additions now go at an admissible offset (`placeSpecImportAdditions` in `src/core/move.ts`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
+Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), Task 53 (a corrupt session in `review list`), and Task 56 (container content the comment deletions empty but that holds a token, found while landing Task 13); Task 55 (a path beginning with U+FEFF, found while landing Task 9) has landed. Task 29 landed with Task 10: once ESM blocks were bounded as stock MDX 3 bounds them, T6.6-2's move (passing before) added its import at offset 0 of an origin whose first line is `<S id="org">`, the block absorbed that line, and the move's own validation of the rewritten workspace refused it — so additions now go at an admissible offset (`placeSpecImportAdditions` in `src/core/move.ts`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
 
 ---
 
-## Task 13 — Empty expression containers are MDX comments (SPEC 2.7, 14.20, 14.16; A4, C16)
-
-**Requirement.**
-- SPEC 2.7 and 14.20 make the empty expression an MDX comment, which 14.16 exempts. The empty expression is whitespace and comments alone between the braces of a container in flow or text position.
-- SPEC 14.20 takes the whitespace for this judgement from ECMAScript 2024's WhiteSpace and LineTerminator: "U+00A0, U+FEFF, U+2028, and U+2029 included, U+0085 and U+200B not".
-- SPEC 14.20 also fixes the comment-deletion procedure: block comments first, then line comments.
-
-**Observed.** These are all reported 14.16:
-- `{}`;
-- containers holding only whitespace, whether ASCII, U+00A0, U+FEFF, U+2028, or U+2029.
-
-`{/* c */}` already works.
-
-**Location.** `classifyExpression` in `src/core/mdx.ts` (~1494–1514): an empty-body program with no comments is reported 14.16.
-
-**Change.**
-- Classify every container whose content is whitespace and comments alone as an MDX comment, like `{/* … */}`. The parser has already derived such a container.
-- Record it in `comments`, so it reaches `view`'s `comments` and Markdown removal (3).
-- Check how remark-mdx represents an empty or whitespace-only container (estree absent, or an empty program) and cover both.
-- The attribute value `d={}` stays 14.20; Task 14 fixes its location.
-
-**Verification.**
-- `section-2.7.test.ts`: T2.7-4's content classes. Its offsets wait on Task 14.
-- `section-16-p2-p3.test.ts`: P-2 and P-3 (Task 10 has landed).
-- `section-14.test.ts`: T14-11's (w) re-assertion of T2.7-4's forms (with Task 14).
-- Neighbours: `section-3.test.ts`, `section-11.4.test.ts`.
-
 ## Task 14 — A 14.20 finding carries one zero-length range at the failure's offset (SPEC 14 location rule, 14.20, 1.6; A9, C15, and B's note on T11.4-4)
 
-After Task 13, which changes where parse failures arise (Tasks 10, 11, and 12 have landed).
+Tasks 10–13, which changed where parse failures arise and which containers derive as comments, have landed.
 
 **Requirement.** SPEC 14: "An unparseable source (14.20) carries one zero-length range at the failure's offset":
 - for a refused read (14.25), 0;
@@ -181,9 +154,31 @@ SPEC 14.20 places `d={}`'s failure at its closing brace, and makes `010` and `09
 
 **Verification.**
 - Should turn green: `section-1.6-1.7.test.ts` (T1.6-5), `section-2.7.test.ts` (T2.7-3), `section-11.4.test.ts` (T11.4-4).
-- `section-2.7.test.ts` (T2.7-4, with Task 13), `section-2.2-2.3.test.ts` (T2.3-3, with Task 7), `section-2.4.test.ts` (T2.4-2: since Task 12 only its offset arms remain).
+- `section-2.7.test.ts` (T2.7-4: since Task 13 only its 14.20 offset arms remain), `section-2.2-2.3.test.ts` (T2.3-3, with Task 7), `section-2.4.test.ts` (T2.4-2: since Task 12 only its offset arms remain).
 - `section-14.test.ts`: T14-11 arm (c) and the (w) family. `section-14-iii.test.ts`: T14-12 (since Task 12 only its negative arms' offsets remain).
 - Neighbours: `section-14-ii.test.ts` (T14-10's refused-read arm stays at 0..0), `section-16-p8.test.ts`.
+
+## Task 56 — Content the comment deletions empty but that holds a token derives one expression or none (SPEC 14.20, 2.7; found while landing Task 13)
+
+After Task 14 (its offsets).
+
+**Requirement.** SPEC 14.20 judges whether a container's content is whitespace and comments alone "by deleting first each block comment — `/*` through the nearest `*/` — then each line comment", and adds: "The content so judged, as spelled before those deletions, must moreover lex to no token under the grammar". Content the deletions empty but that holds a token is therefore no empty expression (2.7): like any other container content, it must derive exactly one ECMAScript 2024 `Expression` beside whitespace and comments alone, or the file is unparseable.
+
+**Observed.** remark-mdx (`micromark-util-events-to-acorn`) takes the deletions' verdict alone: content they empty is parsed as a whole Program (`acorn.parse`), never as one expression. The deletion order lets a `/*` inside a line comment reach a later line's `*/`:
+- `{// /*` LF `x; y /* */` LF `}` and `{// /*` LF `; /* */` LF `}` derive (two statements; an empty statement) and the product reports one 14.16 at the container. SPEC: no expression derives, so 14.20.
+- `{// /*` LF `function(){} /* */` LF `}` fails as a Program (a function declaration needs a name: 14.20 at the `(`). SPEC: `function(){}` is one `Expression` ("no statement's lookahead restriction applying"), so the file is well-formed and the container 14.16.
+
+The stock parser agrees with the product on all three, in flow and text position alike. No test stages the form.
+
+**Location.** `src/core/mdx-acorn.ts` (`mdxAcorn`, the acorn remark-mdx is handed); `classifyExpression` in `src/core/mdx.ts` reads the result.
+
+**Change.**
+- Where `parse` receives content the deletions empty (only the empty-expression path does: an ESM block begins with `import` or `export`, and an attribute value's empty content is refused before parsing) and that content holds a token, derive it as the non-empty path does: one expression (`parseExpressionAt`) followed by whitespace and comments alone, judged by the same deletions.
+- Throw a failure at acorn's position, so the stock swallow rule (a failure at the content's end runs on to a later brace) still applies.
+- Return a derived expression as the stock non-empty path shapes it (a Program holding one ExpressionStatement), so classification sees it: 14.16 or an embedding.
+- Locate failures by Task 14's rule.
+
+**Verification.** No test pins the form. Hand-probe the three shapes above, inline and own-line, through `parseSpecSource` (AGENTS.md, the Task 12 and Task 13 probe bullets), and check with the Task 12 differential recipe that every other stock verdict is unchanged. Neighbours: `section-2.7.test.ts`, `section-16-p2-p3.test.ts`, `section-16-p8.test.ts`.
 
 ## Task 15 — A repeated prop locates every attribute spelling the name (SPEC 14 location cardinality, 14.17, 2.7; C18)
 
@@ -195,7 +190,7 @@ SPEC 14.20 places `d={}`'s failure at its closing brace, and makes `010` and `09
 
 **Change.** Give one 14.17 finding per repeated name, with one location per attribute spelling that name, the first included, in 12.7 location order. Leave the other 14.17 forms unchanged.
 
-**Verification.** `section-14.test.ts`: T14-11 arm (h) (the test also waits on Tasks 12–14 and 16). Neighbours: `section-2.5-2.6.test.ts`, `section-2.7.test.ts`, `section-11.4.test.ts`.
+**Verification.** `section-14.test.ts`: T14-11 arm (h) (the test also waits on Tasks 14 and 16; Tasks 12 and 13 have landed). Neighbours: `section-2.5-2.6.test.ts`, `section-2.7.test.ts`, `section-11.4.test.ts`.
 
 ## Task 16 — A value-level declaration colliding with a spec import binding is 14.15, and chains rooted at it resolve nothing (SPEC 2.4, 2.1, 4.5, 5.7, 14.15, 14.18; A10, C17)
 
