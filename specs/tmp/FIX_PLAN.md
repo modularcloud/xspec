@@ -27,8 +27,8 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | Test | Module | Tasks |
 |---|---|---|
 | P-1 | section-16-p1 | 1 (passes since Task 1 landed) |
-| P-2 | section-16-p2-p3 | 10, 13 |
-| P-3 | section-16-p2-p3 | 10, 13 |
+| P-2 | section-16-p2-p3 | 13 (since Task 10 its first falsified trial — seed 271828183, trial 6 — stages a `{}` container in `specs/B.mdx`, reported 14.16) |
+| P-3 | section-16-p2-p3 | 13 (since Task 10 its counterexample, seed 271828183, holds `a{}` in `specs/C.mdx`) |
 | P-4 | section-16-p4 | 3 (passes since Task 3 landed; it runs no `inventory`, so it never waited on Task 4) |
 | P-5 | section-16-p5-p6 | 3 (passes since Task 3 landed; it runs no `inventory`, so it never waited on Task 4) |
 | T1.4-1 | section-1.4 | 1, 5 (passes since Task 5 landed; since Task 1 its one failing arm had been the `&#46;` reference spelling) |
@@ -44,7 +44,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T2.6-1 | section-2.5-2.6 | 3 (passes since Task 3 landed) |
 | T2.7-3 | section-2.7 | 14 |
 | T2.7-4 | section-2.7 | 13, 14 |
-| T3-7 | section-3 | 10 |
+| T3-7 | section-3 | 10 (passes since Task 10 landed) |
 | T4-2 | section-4 | 6 (passes since Task 6 landed) |
 | T4-5 | section-4 | 16, 17 |
 | T4.4-1 | section-4.3-4.4 | 18 |
@@ -59,18 +59,18 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T6.4-3 | section-6.4 | 22 |
 | T6.5-6 | section-6.5 | 26 |
 | T6.5-7 | section-6.5 | 30 |
-| T6.5-8 | section-6.5 | 28, 29 |
+| T6.5-8 | section-6.5 | 28 (since Task 29 its first failing arm is the TS arm: the added code import carries a `;`) |
 | T6.5-9 | section-6.5 | 32 |
-| T6.5-10 | section-6.5 | 29 |
+| T6.5-10 | section-6.5 | 29 (passes since Task 29 landed, with Task 10) |
 | T6.5-11 | section-6.5-ii | 28, 30, 31 |
-| T6.5-13 | section-6.5-iii | 29 |
-| T6.5-15 | section-6.5-iii | 10, 34 |
-| T6.5-16 | section-6.5-iii | 10, 11, 29, 35 |
+| T6.5-13 | section-6.5-iii | 26 (since Task 29 its arms (a)–(h) hold; it stops first at arm (i)'s preview, an `id-rewrite` reported for the unchanged `id="m"` of a cross-file move keeping its ID) |
+| T6.5-15 | section-6.5-iii | 34 (since Task 10 arm (a)'s three lines derive as one block; it stops first at (a)'s preview, which reports A's declaration removed) |
+| T6.5-16 | section-6.5-iii | 11, 35 (since Tasks 10 and 29 it stops first at arm (a), the `body</S>` variant performed where it must be refused) |
 | T6.5-17 | section-6.5-iii | 25 |
 | T6.5-18 | section-6.5-iii | 33 |
-| T6.5-19 | section-6.5-iii | 29 |
+| T6.5-19 | section-6.5-iii | 26 (since Task 29 arm (a) holds and (b)'s bytes agree; it stops first at (b)'s preview, an `id-rewrite` reported for the unchanged `id="m"`) |
 | T6.6-3 | section-6.6 | 23, 25, 35 |
-| T6.6-4 | section-6.6 | 29 |
+| T6.6-4 | section-6.6 | 29 (passes since Task 29 landed, with Task 10) |
 | T7-1 | section-7-basics | 36 |
 | T7-2 | section-7-basics | 8, 37, 38 (since Task 8 its verbatim-literal arms hold — the escape-spelled glob discovers nothing and the escape-spelled group name is named only by its own spelling; it stops first at Task 37's byte-order-mark arm) |
 | T7-3 | section-7-basics | 38 |
@@ -107,62 +107,35 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T14-9 | section-14-ii | 48 |
 | T14-10 | section-14-ii | 49, 50 |
 | T14-11 | section-14 | 12, 13, 14, 15, 16 |
-| T14-12 | section-14-iii | 10, 11, 12, 14 |
+| T14-12 | section-14-iii | 11, 12, 14 (since Task 10 the import-then-`const x = 1` arm reports 14.20, located over the whole `const` statement where Task 14's zero-length range at its start is required; it stops first at arm (b)'s `export { nope }`, Task 12) |
 
-Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), and Task 53 (a corrupt session in `review list`); Task 55 (a path beginning with U+FEFF, found while landing Task 9) has landed. Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
+Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), and Task 53 (a corrupt session in `review list`); Task 55 (a path beginning with U+FEFF, found while landing Task 9) has landed. Task 29 landed with Task 10: once ESM blocks were bounded as stock MDX 3 bounds them, T6.6-2's move (passing before) added its import at offset 0 of an origin whose first line is `<S id="org">`, the block absorbed that line, and the move's own validation of the rewritten workspace refused it — so additions now go at an admissible offset (`placeSpecImportAdditions` in `src/core/move.ts`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
 
 ---
-
-## Task 10 — ESM blocks are bounded exactly as stock MDX 3 bounds them (SPEC 14.20, 2.1, 2.7, 3, 6.5; A7, C14 first shape)
-
-**Requirement.** SPEC 14.20: well-formed MDX is MDX 3's syntax, decided by derivability alone, and an ESM block is one ECMAScript 2024 module holding import and export declarations only. SPEC 6.5 ("Import edits") spells out the line-sensitive bounds: an ESM block "cannot interrupt a paragraph, so the line after a paragraph line is paragraph text, and it runs to the next blank line or the file's end, so a line followed by a non-blank line absorbs it — one holding no declaration leaving the block underivable". Comments inside a block belong to the block, as in 6.5's example of `import A …`, `// note`, `import B …` on successive lines.
-
-**Observed.** The product's `widenedEsmConstruct` ends a block at the first line boundary where the accumulated text is a complete program. That breaks both ways:
-- Well-formed files are misread. An import after an own-line `// note`, or after a `/* c */ ` prefix, becomes paragraph text: its binding goes missing (14.8) and the import stays in the compiled Markdown. This fails T3-7, T6.5-15(a), and P-2 (seeds 271828183 and 1).
-- Files that are not well-formed are accepted. An import line directly followed by a prose line, `const x = 1`, or `<S …>` builds with no finding, where 14.20 is required at the start of the following line. This fails T14-12's ESM arm.
-
-**Location.** `src/core/mdx.ts`:
-- the header's widening 2 (~27–31);
-- `widenedEsmConstruct` and `tokenizeWidenedEsm` (~630–822);
-- the registration in `xspecGrammarWidenings` (~917–929).
-
-Consumers of `SpecEsmBlock` assume one block per statement today (see the widening's comment). Those consumers are Markdown compilation (3), import validation, `view`'s `imports`, and the move's `SpecImportPlan` in `src/core/move.ts`.
-
-**Change.**
-- Remove widening 2, so the stock `mdxjsEsm` construct (remark-mdx with the product's acorn) bounds blocks. Map its failures to 14.20 through `parseFailureFinding` as today.
-- Re-check every block consumer against multi-statement, comment-bearing blocks. Markdown compilation must remove the whole block, comments included (3). Import validation and `view`'s `imports` stay per declaration.
-- Leave the acorn layer (Task 12) and tag pairing (Task 11) alone here.
-
-**Verification.**
-- Should turn green: `section-3.test.ts` (T3-7).
-- `section-16-p2-p3.test.ts`: P-2 and P-3 on the seeds this fixes; the `{}` seeds wait on Task 13.
-- `section-14-iii.test.ts`: T14-12's ESM-block arm.
-- `section-6.5-iii.test.ts`: T6.5-15 arm (a) (the test waits on Task 34).
-- Neighbours: `section-2.1.test.ts`, `section-4.test.ts`, `section-6.5.test.ts`, `section-6.6.test.ts`, `section-11.4.test.ts`, `section-16-p8.test.ts`.
 
 ## Task 11 — Section tags pair exactly as stock MDX 3 pairs them (SPEC 14.20, 1.1, 3, 6.5; A8 first bullet, C14 second shape)
 
 **Requirement.** SPEC 14.20: well-formedness is derivability under MDX 3 and nothing else. MDX 3 pairs a text-position tag within its paragraph; the stock parser says "Expected a closing tag for `<S>` … before the end of `paragraph`". SPEC 6.5's admissibility rule and `refused-invalid-rewrite` (Tasks 29 and 35) judge would-be files by that same grammar.
 
-**Observed.** `flatJsxTagExtension` (widening 3) makes every tag token a leaf, and the document builder pairs tags across construct boundaries. So shapes that stock MDX 3 rejects are accepted:
+**Observed.** `flatJsxTagExtension` (widening 3 at `3bfedb5`; renumbered widening 2 when Task 10 removed the ESM widening) makes every tag token a leaf, and the document builder pairs tags across construct boundaries. So shapes that stock MDX 3 rejects are accepted:
 - `<S id="x">Text`, a blank line, then `more</S>`;
 - `foo <S id="p">bar</S> baz` receiving a moved flow section.
 
 **Location.** `src/core/mdx.ts`:
-- the header's widening 3 (~32–39);
-- `exitFlatJsxTag`, `ignoreClosingMarker`, and `flatJsxTagExtension` (~825–907);
-- the builder's flat pairing (~1330–1490).
+- the header's widening 2 (formerly 3; ~27–34);
+- `exitFlatJsxTag`, `ignoreClosingMarker`, and `flatJsxTagExtension` (~485–575 since Task 10);
+- the builder's flat pairing (`finishTags` and the tag-leaf handling, ~1000–1180 since Task 10).
 
 **Change.** Decide well-formedness by the stock grammar, in one of two ways:
-- drop widening 3 and build the section tree from stock `mdxJsxFlowElement`/`mdxJsxTextElement` nodes; or
+- drop that widening and build the section tree from stock `mdxJsxFlowElement`/`mdxJsxTextElement` nodes; or
 - keep the flat builder for the model, but first judge the file by the stock pairing (the same pipeline without `flatJsxTagExtension`) and report its failure as 14.20.
 
 Either way:
-- Expose the judgement as a pure core function over a file's text; Tasks 29 and 35 judge would-be files with it.
+- Expose the judgement as a pure core function over a file's text; Task 35 judges would-be files with it. Task 29's placement (`admitsAddedDeclarations` in `src/core/move.ts`, landed) judges each candidate file through `parseSpecSource`, which either route makes report the stock verdict.
 - Mind scale. The suite stages section towers 4096 deep (TEST-SPEC H-11; P-8, P-11), so avoid unbounded recursion (AGENTS.md: a plain recursive function gets about 9.9k frames) and keep parses per file few.
 
 **Verification.**
-- `section-14-iii.test.ts`: T14-12's text-position arm (T14-12 also waits on Tasks 10, 12, 14).
+- `section-14-iii.test.ts`: T14-12's text-position arm (T14-12 also waits on Tasks 12 and 14).
 - Neighbours: `section-1.1-1.2.test.ts`, `section-1.3.test.ts`, `section-1.6-1.7.test.ts`, `section-3.test.ts`, `section-6.5-iii.test.ts`, `section-16-p2-p3.test.ts`, `section-16-p8.test.ts`, `section-16-p11.test.ts`.
 
 ## Task 12 — Brace and ESM content derive exactly as ECMAScript 2024 with JSX derives them: no TypeScript syntax, no early errors (SPEC 14.20, 2.4, 2.7, 14.8, 14.15, 14.16; A6, A8 second bullet, C13, C14 third shape)
@@ -222,13 +195,13 @@ Acorn raises most static-semantic errors through `raiseRecoverable`, and some th
 
 **Verification.**
 - `section-2.7.test.ts`: T2.7-4's content classes. Its offsets wait on Task 14.
-- `section-16-p2-p3.test.ts`: P-3, and P-2 together with Task 10.
+- `section-16-p2-p3.test.ts`: P-2 and P-3 (Task 10 has landed).
 - `section-14.test.ts`: T14-11's (w) re-assertion of T2.7-4's forms (with Task 14).
 - Neighbours: `section-3.test.ts`, `section-11.4.test.ts`.
 
 ## Task 14 — A 14.20 finding carries one zero-length range at the failure's offset (SPEC 14 location rule, 14.20, 1.6; A9, C15, and B's note on T11.4-4)
 
-After Tasks 10–13, which change where parse failures arise.
+After Tasks 11–13, which change where parse failures arise (Task 10 has landed).
 
 **Requirement.** SPEC 14: "An unparseable source (14.20) carries one zero-length range at the failure's offset":
 - for a refused read (14.25), 0;
@@ -264,7 +237,7 @@ SPEC 14.20 places `d={}`'s failure at its closing brace, and makes `010` and `09
 **Verification.**
 - Should turn green: `section-1.6-1.7.test.ts` (T1.6-5), `section-2.7.test.ts` (T2.7-3), `section-11.4.test.ts` (T11.4-4).
 - `section-2.7.test.ts` (T2.7-4, with Task 13), `section-2.2-2.3.test.ts` (T2.3-3, with Task 7), `section-2.4.test.ts` (T2.4-2, with Task 12).
-- `section-14.test.ts`: T14-11 arm (c) and the (w) family. `section-14-iii.test.ts`: T14-12, with Tasks 10–12.
+- `section-14.test.ts`: T14-11 arm (c) and the (w) family. `section-14-iii.test.ts`: T14-12, with Tasks 11 and 12.
 - Neighbours: `section-14-ii.test.ts` (T14-10's refused-read arm stays at 0..0), `section-16-p8.test.ts`.
 
 ## Task 15 — A repeated prop locates every attribute spelling the name (SPEC 14 location cardinality, 14.17, 2.7; C18)
@@ -508,6 +481,7 @@ After Task 21.
 
 **Verification.**
 - Should turn green: `section-6.5.test.ts` (T6.5-6).
+- `section-6.5-iii.test.ts`: T6.5-13 (it stops first at arm (i)'s preview, an `id-rewrite` for the unchanged `id="m"`) and T6.5-19 (arm (b)'s preview, likewise). Task 29's placement already writes the bytes those arms and their successors assert, as far as the run reached; if a later arm fails on another rule, name it and its SPEC rule in a new task.
 - Neighbours: `section-6.5-ii.test.ts`, `section-6.6.test.ts`.
 
 ## Task 27 — A preview succeeds exactly when the real operation would (SPEC 6.6; A22; the `72ad038` plan's Task 3)
@@ -546,36 +520,9 @@ The plan bugs behind those findings are Tasks 30–32. The preview skips the ref
 **Change.** Drop the `;`. The declaration stays on a line of its own, followed by U+000A, per 6.5's insertion rule.
 
 **Verification.**
-- `section-6.5.test.ts`: T6.5-8 (its target arm waits on Task 29).
+- `section-6.5.test.ts`: T6.5-8 (its target arm holds since Task 29).
 - `section-6.5-ii.test.ts`: T6.5-11 (with Tasks 30 and 31).
 - Neighbour: `section-6.6.test.ts`.
-
-## Task 29 — Spec-source import additions go at an admissible offset (SPEC 6.5 "Import edits" and "Composition and admissibility", 6.6, 14.20; A18)
-
-After Tasks 10 and 11.
-
-**Requirement.** SPEC 6.5 (Import edits): an added import is inserted as a line of its own "at an admissible offset". An offset is admissible when the file, as every edit of the rewrite leaves it, is well-formed under its grammar (14.20), with the added line an import declaration. In a spec source, that is:
-- a declaration of an ESM block standing inside no section construct, either one the line begins or one it joins whose other lines were an ESM block's before the edit;
-- the grammar bounds the block line-sensitively (Task 10).
-
-The "Composition and admissibility" paragraph fixes the choice among admissible offsets and the order of insertions that share one; read it whole (T6.6-4(e)'s tie-break arms pin it). SPEC 6.6 reports the `import-addition` at the chosen offset.
-
-**Observed.** In a spec source with no ESM block, the declaration always goes at offset 0, never at the admissible line-start or mid-line offset. That holds even where it then absorbs the next non-blank line, or a paragraph of declarations. The product's own `build` and `check` accept the result because of the widened grammar (Tasks 10–11). As a consequence, the receiving root is never `changed` in T6.5-13 (h) and (j).
-
-**Location.** `src/core/move.ts`: the spec-file import-edit closure (~1455–1500). Its addition offset is placed after the last surviving import, at a removed import's line start, or else at 0.
-
-**Change.**
-- Choose the offset per 6.5:
-  - join an existing top-level ESM block that stands outside every section;
-  - otherwise use a line start, or a mid-line insertion with its preceding U+000A, where the file as all edits leave it stays well-formed with the new line heading an ESM block. That means not directly after a paragraph line, and not directly before a non-blank line the block would absorb.
-- Follow "Composition and admissibility"'s preference and ordering.
-- Judge well-formedness with Task 11's stock-grammar function.
-- Where no offset is admissible, the move is refused (Task 35); leave a clear hook for that.
-
-**Verification.**
-- Should turn green: `section-6.5.test.ts` (T6.5-10), `section-6.5-iii.test.ts` (T6.5-13, T6.5-19), `section-6.6.test.ts` (T6.6-4).
-- `section-6.5.test.ts`: T6.5-8's target arm (with Task 28).
-- Neighbour: `section-6.5-ii.test.ts`.
 
 ## Task 30 — Remove departed spec-module imports from code sources (SPEC 6.5 "Import edits", 6.6; A19, second half; the `72ad038` plan's Task 1)
 
@@ -658,7 +605,7 @@ SPEC 6.6 reports each removal as an `import-removal` spanning every byte it remo
 
 ## Task 34 — Joint import removal keeps a block's first declaration when the block would otherwise be headed by a comment or an indented declaration (SPEC 6.5 "Import edits", 3, 14.20; A23)
 
-After Task 10.
+Task 10, its prerequisite, has landed.
 
 **Requirement.** SPEC 6.5: in a spec source, "the removals in one block are judged together". Where they would leave the block headed by anything but a declaration at the start of its first line — a JavaScript comment or an indented declaration — the remaining declarations would derive as paragraph text (14.20). Then:
 - the block's first declaration stays, "its binding unused (2.1) and no removal reported for it (6.6)";
@@ -672,12 +619,12 @@ After Task 10.
 **Change.** Judge each block's removals jointly, over the block as all of them would leave it. Keep the first declaration, with no `import-removal` reported for it, when the rest would not start with a declaration at the start of the block's first line — unless no line of the block would remain.
 
 **Verification.**
-- `section-6.5-iii.test.ts`: T6.5-15 (arm (a) also needs Task 10).
+- `section-6.5-iii.test.ts`: T6.5-15 (Task 10 has landed).
 - Neighbours: `section-6.5.test.ts`, `section-6.6.test.ts`.
 
 ## Task 35 — Refuse a section move whose rewrite would be invalid: `refused-invalid-rewrite` (SPEC 6.5 "Validation and refusals", 14, 6.6; A24, C19(d))
 
-After Tasks 10, 11, 21, and 29.
+After Tasks 11 and 21 (Tasks 10 and 29 have landed).
 
 **Requirement.** SPEC 14, `refused-invalid-rewrite`: "the section form's exact edits would leave the origin or the target file other than well-formed MDX, or a file the rewrite must add an import to holds no admissible offset for it (6.5)". It is evaluated only over an intrinsically valid new ID, as `refused-structural-parent` is. It is one finding that locates:
 - the moved section's construct in the origin file (1.7);
@@ -689,11 +636,11 @@ Its `identities` are the workspace-relative paths of the files concerned, in byt
 
 **Location.**
 - `src/core/refusal.ts`: the section-form reasons.
-- `src/core/move.ts`: the planned edits, and Task 29's admissibility hook.
+- `src/core/move.ts`: the planned edits, and the `admissible` flag `placeSpecImportAdditions` returns (landed with Task 29; `withImportAdditions` discards it today, the file then taking the first candidate and the rewrite failing the workspace validation).
 
 **Change.**
 - After planning, apply the exact edits in memory to the origin, the target, and any created target file.
-- Judge each file with Task 11's stock-grammar function, and collect the files that lack an admissible offset for an addition they need (Task 29).
+- Judge each file with Task 11's stock-grammar function, and collect the files that lack an admissible offset for an addition they need (`admissible: false`).
 - Report the single finding as specified, beside every other applicable reason.
 - The preview reports the same finding.
 

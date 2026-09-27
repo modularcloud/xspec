@@ -1154,6 +1154,62 @@ function admitsAddedDeclarations(
   return true;
 }
 
+/** Whether the line starting at `position` is blank (spaces and tabs). */
+function isBlankLineAt(bytes: Uint8Array, position: number): boolean {
+  for (let index = position; index < bytes.length; index += 1) {
+    const byte = bytes[index]!;
+    if (isTerminatorByte(byte)) {
+      return true;
+    }
+    if (byte !== 0x20 && byte !== 0x09) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * `composed` with the added declaration lines inserted at a candidate's
+ * composed position — each line followed by U+000A, the first preceded by
+ * one when the position is not at a line start — with the byte ranges of
+ * the declarations' own characters and of the whole insertion.
+ */
+function composeAddition(
+  composed: Uint8Array,
+  candidate: { readonly position: number; readonly atLineStart: boolean },
+  lineBytes: readonly Uint8Array[],
+): {
+  readonly content: Uint8Array;
+  readonly added: readonly ByteRange[];
+  readonly inserted: ByteRange;
+} {
+  let length = candidate.atLineStart ? 0 : 1;
+  for (const line of lineBytes) {
+    length += line.length + 1;
+  }
+  const content = new Uint8Array(composed.length + length);
+  content.set(composed.subarray(0, candidate.position), 0);
+  let cursor = candidate.position;
+  if (!candidate.atLineStart) {
+    content[cursor] = LF;
+    cursor += 1;
+  }
+  const added: ByteRange[] = [];
+  for (const line of lineBytes) {
+    content.set(line, cursor);
+    added.push({ start: cursor, end: cursor + line.length });
+    cursor += line.length;
+    content[cursor] = LF;
+    cursor += 1;
+  }
+  content.set(composed.subarray(candidate.position), cursor);
+  return {
+    content,
+    added,
+    inserted: { start: candidate.position, end: cursor },
+  };
+}
+
 /**
  * Place a spec source's added import declarations (SPEC 6.5 "Import
  * edits" and "Composition and admissibility"): `lines`, contiguous, each
@@ -1181,7 +1237,6 @@ function placeSpecImportAdditions(
   readonly content: Uint8Array;
   readonly admissible: boolean;
 } {
-  const composed = composition.content;
   const lineBytes = lines.map((line) => encoder.encode(line));
   const candidates: {
     offset: number;
@@ -1206,7 +1261,7 @@ function placeSpecImportAdditions(
       return;
     }
     const atLineStart =
-      position === 0 || isTerminatorByte(composed[position - 1]!);
+      position === 0 || isTerminatorByte(composition.content[position - 1]!);
     candidates.push({ offset, position, atLineStart });
   };
   for (const offset of [
@@ -1220,40 +1275,47 @@ function placeSpecImportAdditions(
     ...candidates.filter((candidate) => candidate.atLineStart),
     ...candidates.filter((candidate) => !candidate.atLineStart),
   ];
-  const before = esmBlockRangesOf(document.path, composed);
+  const before = esmBlockRangesOf(document.path, composition.content);
   let fallback: {
     offset: number;
     content: Uint8Array;
     admissible: boolean;
   } | null = null;
   for (const candidate of ordered) {
-    const leading = candidate.atLineStart ? 0 : 1;
-    let length = leading;
-    for (const line of lineBytes) {
-      length += line.length + 1;
-    }
-    const content = new Uint8Array(composed.length + length);
-    content.set(composed.subarray(0, candidate.position), 0);
-    let cursor = candidate.position;
-    if (leading === 1) {
-      content[cursor] = LF;
-      cursor += 1;
-    }
-    const added: ByteRange[] = [];
-    for (const line of lineBytes) {
-      content.set(line, cursor);
-      added.push({ start: cursor, end: cursor + line.length });
-      cursor += line.length;
-      content[cursor] = LF;
-      cursor += 1;
-    }
-    content.set(composed.subarray(candidate.position), cursor);
-    fallback ??= { offset: candidate.offset, content, admissible: false };
-    const inserted = { start: candidate.position, end: cursor };
+    const composed = composeAddition(composition.content, candidate, lineBytes);
+    fallback ??= {
+      offset: candidate.offset,
+      content: composed.content,
+      admissible: false,
+    };
+    // The added lines' block runs on through the line after them: at a
+    // line start whose line is neither blank nor an ESM block's, that line
+    // would join the block — never admissible, so no parse is spent on it.
+    // (A line-end candidate is followed by its line's empty remainder.)
     if (
-      admitsAddedDeclarations(document.path, content, added, inserted, before)
+      candidate.atLineStart &&
+      !isBlankLineAt(composition.content, candidate.position) &&
+      !before.some(
+        (range) =>
+          range.start <= candidate.position && candidate.position < range.end,
+      )
     ) {
-      return { offset: candidate.offset, content, admissible: true };
+      continue;
+    }
+    if (
+      admitsAddedDeclarations(
+        document.path,
+        composed.content,
+        composed.added,
+        composed.inserted,
+        before,
+      )
+    ) {
+      return {
+        offset: candidate.offset,
+        content: composed.content,
+        admissible: true,
+      };
     }
   }
   // SPEC 6.5 refuses a move leaving a file no admissible offset for an
@@ -1266,6 +1328,7 @@ function placeSpecImportAdditions(
   return fallback;
 }
 
+/** Everything a validated section-form move changes in the sources. */
 export interface MoveSectionPlan {
   /** The full identity mapping the operation produces (SPEC 6.5, 6.1). */
   readonly mapping: readonly IdentityMapping[];
