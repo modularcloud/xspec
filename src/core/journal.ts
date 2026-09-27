@@ -44,6 +44,7 @@
 import type { ByteRange } from "./bytes.js";
 import { compareBytes, sortByBytes } from "./bytes.js";
 import { compactJson } from "./canonical-json.js";
+import { containsReplacementCharacter } from "./discovery.js";
 import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
 import { firstInvalidUtf8 } from "./source-text.js";
@@ -497,9 +498,10 @@ function splitIdentity(
 /**
  * Why `path` is not a workspace-relative spec source path, or null when it
  * is. SPEC 1.5: identity paths are workspace-relative and `/`-separated on
- * every platform; SPEC 14.19/7.1: a discovered spec source contains no `#`
- * and carries the `.mdx` extension — journaled operations act on discovered
- * spec sources only (SPEC 6.4, 6.5).
+ * every platform; SPEC 14.19/7.1: a valid discovered spec source's path
+ * contains no `#` and no U+FFFD and carries the `.mdx` extension —
+ * journaled operations act on valid discovered spec sources only (SPEC
+ * 6.4, 6.5).
  */
 function pathProblem(path: string): string | null {
   if (path.length === 0) {
@@ -507,6 +509,11 @@ function pathProblem(path: string): string | null {
   }
   if (path.includes("#")) {
     return `contains "#" (SPEC 14.19)`;
+  }
+  if (containsReplacementCharacter(path)) {
+    // SPEC 7 → 14.19: no valid source path contains U+FFFD, the same rule
+    // discovery applies (core/discovery.ts).
+    return `contains U+FFFD (SPEC 7, 14.19)`;
   }
   if (path.startsWith("/")) {
     return "is not workspace-relative (SPEC 1.5)";

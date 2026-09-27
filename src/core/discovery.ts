@@ -24,6 +24,23 @@ import { pathTextOf } from "./path-text.js";
 
 const SLASH = 0x2f; // "/"
 const HASH = 0x23; // "#" — reserved by node identities (SPEC 1.5)
+/**
+ * SPEC 7 → 14.19: U+FFFD (REPLACEMENT CHARACTER), which no argument value
+ * carries (SPEC 12.0) — so a path containing it could be named by no
+ * command. Built from its code point, never spelled literally.
+ */
+const REPLACEMENT_CHARACTER = String.fromCharCode(0xfffd);
+
+/**
+ * SPEC 7 → 14.19: whether a workspace-relative path, read as decoded
+ * characters, contains U+FFFD — so it is never a valid source path. The
+ * one U+FFFD rule every source-path judgement applies: discovery's
+ * (`classifySources`, over the decoded form of a UTF-8-valid path) and
+ * the journal's recorded paths (core/journal.ts, SPEC 6.1, 14.13).
+ */
+export function containsReplacementCharacter(path: string): boolean {
+  return path.includes(REPLACEMENT_CHARACTER);
+}
 
 const utf8Encoder = new TextEncoder();
 
@@ -46,8 +63,9 @@ const MDX_SUFFIX = utf8Encoder.encode(".mdx");
 export interface InvalidSource {
   /**
    * The real path as data (SPEC 12.0, 12.7): the decoded string where the
-   * path bytes are valid UTF-8 (a `#`-containing or non-`.mdx` spec-group
-   * path), otherwise the exact bytes in the marked form.
+   * path bytes are valid UTF-8 (a `#`- or U+FFFD-containing path, or a
+   * non-`.mdx` spec-group path), otherwise the exact bytes in the marked
+   * form.
    */
   readonly path: PathText;
   /** The path's exact bytes — the resolution and membership space. */
@@ -66,8 +84,8 @@ export interface InvalidSource {
 export interface DiscoveredSource {
   /**
    * Workspace-relative `/`-separated path (SPEC 1.5). Valid discovered
-   * sources always have UTF-8-valid, `#`-free paths (SPEC 7 → 14.19), so
-   * the string form re-encodes to the exact matched bytes.
+   * sources always have UTF-8-valid paths free of `#` and U+FFFD (SPEC 7
+   * → 14.19), so the string form re-encodes to the exact matched bytes.
    */
   readonly path: string;
   /**
@@ -367,9 +385,9 @@ interface MatchedCandidate {
  *    yet run — classification is by configuration alone, SPEC 7.3).
  * 3. Path validation on what remains: matched by both a spec and a code
  *    group → configuration error (SPEC 7.2, 14.14); a path containing `#`
- *    or not valid UTF-8 → 14.19 (SPEC 7); a spec-group match without the
- *    `.mdx` extension → 14.19 (SPEC 7.1). Each condition present is
- *    reported (SPEC 14).
+ *    or U+FFFD, or not valid UTF-8 → 14.19 (SPEC 7); a spec-group match
+ *    without the `.mdx` extension → 14.19 (SPEC 7.1). Each condition
+ *    present is reported (SPEC 14).
  */
 export function classifySources(
   candidates: readonly Uint8Array[],
@@ -450,6 +468,23 @@ export function classifySources(
           `the workspace-relative path contains "#", which node ` +
             `identities reserve (path#id) — rename the file to a "#"-free ` +
             `path (SPEC 7, 1.5, 14.19)`,
+          fileLabel,
+        ),
+      );
+    }
+    if (decoded !== null && containsReplacementCharacter(decoded)) {
+      // SPEC 7 → 14.19: a discovered path containing U+FFFD is invalid —
+      // judged on the decoded characters of a UTF-8-valid path (a path
+      // that is not valid UTF-8 is invalid on that count, below). It keeps
+      // its plain string form (SPEC 12.0, 12.7).
+      valid = false;
+      findings.push(
+        pathFinding(
+          19,
+          `the workspace-relative path contains U+FFFD (REPLACEMENT ` +
+            `CHARACTER), which no argument value carries, so no command ` +
+            `could name the file — rename the file to a path without ` +
+            `U+FFFD (SPEC 7, 12.0, 14.19)`,
           fileLabel,
         ),
       );
