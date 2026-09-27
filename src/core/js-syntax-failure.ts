@@ -88,6 +88,8 @@ interface DiagnosingParser {
   xspecReading?: boolean;
   /** The module's top-level statement in progress (this module's state). */
   xspecTop?: TopStatement;
+  /** The tokenizer's context: a template's or JSX's, or a plain one. */
+  curContext(): { readonly token: string };
   nextToken(): void;
   parse(): { readonly body: readonly { type: string; start: number }[] };
   parseExpression(): unknown;
@@ -165,24 +167,72 @@ const JSX_CLOSING_MISMATCH =
 const JSX_EMPTY_ATTRIBUTE =
   /^JSX attributes must only be assigned a non-empty expression/;
 
+/**
+ * A whole token of the class a token beginning with `first` belongs to — a
+ * string, template, regular expression, number, identifier, or private
+ * name — or undefined for any other character.
+ */
+function classRepresentative(first: string): string | undefined {
+  switch (first) {
+    case '"':
+    case "'":
+    case "`":
+      return first + first;
+    case "/":
+      return "/x/";
+    case ".":
+      return ".0";
+    case "#":
+      return "#x";
+    default:
+      if (/^[0-9]$/.test(first)) return "0";
+      if (/^[\p{ID_Start}$_\\]$/u.test(first)) return "x";
+      return undefined;
+  }
+}
+
 /** Where acorn's failure lies, by the parser state it was raised in. */
 function failureOf(
   parser: DiagnosingParser,
   error: AcornSyntaxError,
   content: string,
   kind: JsContentKind,
+  checkClass: boolean,
 ): JsFailure {
   let failure: JsFailure;
   const mismatch = JSX_CLOSING_MISMATCH.exec(error.message);
   if (parser.xspecReading === true) {
     // The tokenizer stopped at the character its token cannot continue
-    // with; a block comment fails only at the content's end.
-    failure = {
-      point: error.message.startsWith("Unterminated comment")
-        ? content.length
-        : error.raisedAt,
-      atToken: false,
-    };
+    // with — unless no token of its class could stand where it began (a
+    // string after an expression, unterminated or not), which is then the
+    // failure. A block comment, raised while skipping trivia (before the
+    // token start moves), fails only at the content's end.
+    if (error.message.startsWith("Unterminated comment")) {
+      failure = { point: content.length, atToken: false };
+    } else {
+      failure = { point: error.raisedAt, atToken: false };
+      // A template's text and JSX's are read in their construct's own
+      // context, admitted with it.
+      const context = parser.curContext().token;
+      const start = parser.start;
+      const representative = classRepresentative(content.charAt(start));
+      if (
+        checkClass &&
+        context !== "`" &&
+        !context.startsWith("<") &&
+        error.raisedAt > start &&
+        representative !== undefined
+      ) {
+        const probe = jsFailure(
+          content.slice(0, start) + representative,
+          kind,
+          false,
+        );
+        if (probe !== null && probe.point <= start) {
+          failure = { point: start, atToken: true };
+        }
+      }
+    }
   } else if (mismatch !== null) {
     failure = {
       point: closingTagDivergence(content, error.pos, mismatch[1]),
@@ -215,8 +265,15 @@ function failureOf(
   return failure;
 }
 
-/** Where `content` fails to derive as `kind`, or null when it derives. */
-function jsFailure(content: string, kind: JsContentKind): JsFailure | null {
+/**
+ * Where `content` fails to derive as `kind`, or null when it derives;
+ * `checkClass` false for a probe of a token class (no probe within it).
+ */
+function jsFailure(
+  content: string,
+  kind: JsContentKind,
+  checkClass = true,
+): JsFailure | null {
   const parser = new DiagnosingAcorn({ ...MDX_ACORN_OPTIONS }, content);
   try {
     if (kind === "module") {
@@ -238,7 +295,13 @@ function jsFailure(content: string, kind: JsContentKind): JsFailure | null {
     return null;
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
-    return failureOf(parser, error as AcornSyntaxError, content, kind);
+    return failureOf(
+      parser,
+      error as AcornSyntaxError,
+      content,
+      kind,
+      checkClass,
+    );
   }
 }
 

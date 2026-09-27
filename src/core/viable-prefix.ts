@@ -34,7 +34,7 @@ export function commonPrefixLength(
 /** An identifier's first character (ECMAScript and TypeScript alike). */
 const IDENTIFIER_START = /^[\p{ID_Start}$_]/u;
 /** An identifier's characters: the longest run at a position. */
-const IDENTIFIER_RUN = /^[\p{ID_Continue}$‌‍]+/u;
+const IDENTIFIER_RUN = /^[\p{ID_Continue}$\u200C\u200D]+/u;
 /** A numeric literal's characters, generously: digits, letters, `_`, `.`. */
 const NUMERIC_RUN = /^\.?[0-9][0-9A-Za-z_.]*/;
 
@@ -44,8 +44,9 @@ const NUMERIC_RUN = /^\.?[0-9][0-9A-Za-z_.]*/;
  * words — sharing its first character; for an identifier-like token (a
  * private name's `#` included), an identifier extending it, so that a word
  * the grammar rejects only as a whole (`class` where an identifier may
- * stand) keeps its characters; and for a numeric token, each of its own
- * prefixes, the literals it begins.
+ * stand) keeps its characters; for a numeric token, each of its own
+ * prefixes, the literals it begins; and a whole token of the classes a `.`
+ * or `#` alone may begin — a numeric literal (`.0`), a private name (`#x`).
  */
 function candidateSpellings(
   text: string,
@@ -67,6 +68,8 @@ function candidateSpellings(
       spellings.push(numeric[0].slice(0, length));
     }
   }
+  if (first === ".") spellings.push(".0");
+  if (first === "#") spellings.push("#x");
   return spellings;
 }
 

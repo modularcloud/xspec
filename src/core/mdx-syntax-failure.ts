@@ -208,28 +208,127 @@ function contentToFile(
   return mapped >= 0 && mapped <= text.length ? mapped : undefined;
 }
 
-/** Whether `content`'s last line ends the file's last line. */
-function endsText(text: string, content: string): boolean {
-  const contentLines = lineSpans(content);
-  const fileLines = lineSpans(text);
-  const [contentStart, contentEnd] = contentLines[contentLines.length - 1];
-  const [fileStart, fileEnd] = fileLines[fileLines.length - 1];
-  return text
-    .slice(fileStart, fileEnd)
-    .endsWith(content.slice(contentStart, contentEnd));
-}
-
 // ---------------------------------------------------------------------------
 // Per-class offsets
 // ---------------------------------------------------------------------------
 
+/** A container's content as collected, and the grammar it is judged by. */
+interface Collected {
+  readonly content: string;
+  readonly kind: JsContentKind;
+}
+
 /**
- * A container open at the end of `text` (the stock grammar reached the end
- * inside it): its content, from the opening brace on, measured by its own
- * grammar. Appending `}` makes the grammar collect that content and hand
- * it to acorn; a spread attribute's arrives wrapped as `({…})`.
+ * Whether `content`, as the stock grammar collects a container's content,
+ * is the content of a container whose opening brace lies in `head` and
+ * which runs to `head`'s end: its lines, each a suffix of the file line it
+ * corresponds to (the last ending `head`), begin right after a `{`.
  */
-function openContainerOffset(text: string): number {
+function endsAtBrace(head: string, content: string): boolean {
+  const contentLines = lineSpans(content);
+  const fileLines = lineSpans(head);
+  const first = fileLines.length - contentLines.length;
+  if (first < 0) return false;
+  for (let line = 0; line < contentLines.length; line += 1) {
+    const [contentStart, contentEnd] = contentLines[line];
+    const [fileStart, fileEnd] = fileLines[first + line];
+    if (
+      !head
+        .slice(fileStart, fileEnd)
+        .endsWith(content.slice(contentStart, contentEnd))
+    ) {
+      return false;
+    }
+  }
+  const [contentStart, contentEnd] = contentLines[0];
+  const start = fileLines[first][1] - (contentEnd - contentStart);
+  return start > 0 && head.charAt(start - 1) === "{";
+}
+
+/**
+ * The content of the container a `}` appended to `head` falls in — the
+ * stock grammar collects it and hands it to acorn, a spread attribute's
+ * wrapped as `({…})` — or undefined when no container runs to `head`'s
+ * end (its block container, a list item or block quote, ended first). The
+ * grammar tokenizes flow before paragraph text, so a container closing
+ * there may be followed by other calls: the one sought is the call whose
+ * content maps to `head`'s end.
+ */
+function collectedAtEnd(head: string): Collected | undefined {
+  const { calls } = analysisParse(head + "}");
+  for (let index = calls.length - 1; index >= 0; index -= 1) {
+    const value = calls[index].value;
+    if (endsAtBrace(head, value)) return { content: value, kind: "expression" };
+    const inner = value.slice(2, -2);
+    if (
+      value.startsWith("({") &&
+      value.endsWith("})") &&
+      endsAtBrace(head, inner)
+    ) {
+      return { content: inner, kind: "spread" };
+    }
+  }
+  return undefined;
+}
+
+/** Line prefixes a line continuing a container's content may begin with. */
+const LINE_PREFIXES: readonly string[] = ["", "  ", "    ", "> "];
+
+/**
+ * The content of the container `head`'s last line — spelled as it stands,
+ * so a blank line stays blank and a lone tag stays a flow tag — still
+ * belongs to: a `}` on a further line (after a continuation prefix) falls
+ * in it. The content returned ends with that last line, the further line's
+ * terminator and prefix cut off.
+ */
+function collectedPastLine(head: string): Collected | undefined {
+  for (const prefix of LINE_PREFIXES) {
+    const probe = head + "\n" + prefix;
+    const collected = collectedAtEnd(probe);
+    if (collected === undefined) continue;
+    const { content, kind } = collected;
+    const cut = Math.max(content.lastIndexOf("\n"), content.lastIndexOf("\r"));
+    if (cut === -1) continue;
+    const through = content.slice(0, cut).replace(/\r$/, "");
+    return { content: through, kind };
+  }
+  return undefined;
+}
+
+/** The offset (in `head`) where collected content running to its end fails. */
+function measured(head: string, collected: Collected): number {
+  const { content, kind } = collected;
+  const viable = jsViablePrefix(content, kind);
+  if (viable >= content.length) return head.length;
+  return (
+    contentToFile(head, content, content.length, head.length, viable) ??
+    head.length
+  );
+}
+
+/** The line terminator (CR, LF, or CRLF) at `at`, or "" at none. */
+function terminatorAt(text: string, at: number): string {
+  if (text.startsWith("\r\n", at)) return "\r\n";
+  const code = text.charCodeAt(at);
+  return code === 0x0a || code === 0x0d ? text.charAt(at) : "";
+}
+
+/** How many lines past a failure's place a container's content is sought. */
+const CONTAINER_LINES = 256;
+
+/**
+ * A container the stock grammar reached the end of without its content
+ * deriving (an expression container, attribute value expression, or spread
+ * attribute; `placed` the grammar's place for the failure, inside it): its
+ * content, from the opening brace on, measured by its own grammar. When it
+ * runs to the end of `text`, a `}` appended there collects it. When the
+ * block container holding it ended first, the content ends with that block
+ * container's last line — the last line at whose end an appended `}` still
+ * falls in the container — and, the content viable through that line and
+ * its terminator, the failure is the next line's first character other than
+ * the indentation a continuation could still begin with.
+ */
+function openContainerOffset(text: string, placed: number | undefined): number {
   const closed = analysisParse(text + "}");
   if (
     closed.failure !== null &&
@@ -241,25 +340,100 @@ function openContainerOffset(text: string): number {
     const content = text.slice(start);
     return start + jsViablePrefix(content, "expression");
   }
-  const last = closed.calls.at(-1);
-  if (last === undefined) return text.length;
-  let content = last.value;
-  let kind: JsContentKind = "expression";
-  if (
-    !endsText(text, content) &&
-    content.startsWith("({") &&
-    content.endsWith("})") &&
-    endsText(text, content.slice(2, -2))
-  ) {
-    content = content.slice(2, -2);
-    kind = "spread";
+  const atEnd = collectedAtEnd(text);
+  if (atEnd !== undefined) return measured(text, atEnd);
+  if (placed === undefined) return 0;
+  const lineEnd = (from: number): number => {
+    let at = from;
+    while (at < text.length && terminatorAt(text, at) === "") at += 1;
+    return at;
+  };
+  let end = lineEnd(placed);
+  let last: { readonly end: number; readonly collected: Collected } | null =
+    null;
+  for (let line = 0; line < CONTAINER_LINES; line += 1) {
+    const collected = collectedPastLine(text.slice(0, end));
+    if (collected === undefined) {
+      // The line holding the failure's place is the container's, whatever
+      // follows it.
+      if (last === null) {
+        const same = collectedAtEnd(text.slice(0, end));
+        if (same !== undefined) last = { end, collected: same };
+      }
+      break;
+    }
+    last = { end, collected };
+    if (end >= text.length) break;
+    end = lineEnd(end + terminatorAt(text, end).length);
   }
-  const viable = jsViablePrefix(content, kind);
-  if (viable >= content.length) return text.length;
-  return (
-    contentToFile(text, content, content.length, text.length, viable) ??
-    text.length
+  if (last === null) return placed;
+  const within = measured(text.slice(0, last.end), last.collected);
+  if (within < last.end) return within;
+  const terminator = terminatorAt(text, last.end);
+  const { content, kind } = last.collected;
+  if (
+    jsViablePrefix(content + terminator, kind) <
+    content.length + terminator.length
+  ) {
+    return last.end;
+  }
+  // The next line may still continue the content — a lazy line, deeper
+  // indentation, a block quote's marker — character by character until
+  // it has become something else (a new list item, a blank line).
+  const opening = contentToFile(
+    text.slice(0, last.end),
+    content,
+    content.length,
+    last.end,
+    0,
   );
+  let at = last.end + terminator.length;
+  const bound = Math.min(text.length, at + PROBE_REACH);
+  while (
+    at < bound &&
+    terminatorAt(text, at) === "" &&
+    continues(text.slice(0, at + 1), opening, kind)
+  ) {
+    at += 1;
+  }
+  return at;
+}
+
+/** Line continuations a container's content may take (the `x` a probe). */
+const CONTINUATIONS: readonly string[] = [
+  "x",
+  " x",
+  "  x",
+  "   x",
+  "    x",
+  "> x",
+];
+
+/**
+ * Whether `head` — its last line partly spelled — still continues the
+ * content of the container opening at `opening`: some continuation of the
+ * line leaves that content collected, viable up to the probe's `x`.
+ */
+function continues(
+  head: string,
+  opening: number | undefined,
+  kind: JsContentKind,
+): boolean {
+  if (opening === undefined) return false;
+  for (const continuation of CONTINUATIONS) {
+    const probe = head + continuation;
+    const collected = collectedAtEnd(probe);
+    if (collected === undefined || collected.kind !== kind) continue;
+    const { content } = collected;
+    if (
+      contentToFile(probe, content, content.length, probe.length, 0) ===
+        opening &&
+      jsViablePrefix(content, kind) >= content.length - 1
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -432,13 +606,30 @@ function constructEndOffset(
 /**
  * A closing tag met inside a construct opened after its element (an
  * emphasis crossing it): the longest prefix that, as it stands or with one
- * more character, the grammar does not yet reject so.
+ * more character, the grammar does not yet reject so — a prefix ending
+ * inside a tag judged with the tag finished, since the grammar pairs a tag
+ * only once it has read it whole.
  */
-function crossingOffset(text: string, at: number): number {
+function crossingOffset(text: string, at: number, closer: string): number {
   const bound = Math.min(text.length, at + PROBE_REACH);
   for (let end = at + 1; end <= bound; end += 1) {
     const head = text.slice(0, end);
-    if (!completes(head, end) && !completes(head + "x", end)) return end - 1;
+    const { failure } = analysisParse(head);
+    const inTag =
+      failure !== null &&
+      failure.source === "micromark-extension-mdx-jsx" &&
+      placeStart(failure) === head.length;
+    const tail = head.slice(head.lastIndexOf("<"));
+    const completions = inTag
+      ? [
+          ">",
+          "x>",
+          ...(closer.startsWith(tail) ? [closer.slice(tail.length)] : []),
+        ]
+      : ["", "x"];
+    if (!completions.some((completion) => completes(head + completion, end))) {
+      return end - 1;
+    }
   }
   return bound;
 }
@@ -446,6 +637,7 @@ function crossingOffset(text: string, at: number): number {
 /** mdast-util-mdx-jsx's pairing failures, by message. */
 const UNEXPECTED_CLOSING_TAG =
   /^Unexpected closing tag `[^`]*`, expected corresponding closing tag for `<([^`>]*)>`/;
+const CROSSING_CLOSING_TAG = /^Expected the closing tag `<\/([^`>]*)>`/;
 const EXPECTED_CLOSING_TAG =
   /^Expected a closing tag for `<([^`>]*)>` \((\d+):(\d+)-\d+:\d+\)/;
 
@@ -455,7 +647,17 @@ function pairingOffset(text: string, failure: MdxFailure): number {
   if (failure.ruleId !== "end-tag-mismatch") return start ?? 0;
   const unexpected = UNEXPECTED_CLOSING_TAG.exec(reason);
   if (unexpected !== null && start !== undefined) {
-    return closingTagDivergence(text, start, unexpected[1]);
+    // The open element's closing tag, where it could stand, shares the
+    // spelled one's characters up to their names' divergence; where it
+    // could not (the element is outside the construct the tag is in), no
+    // closing tag can, and the `/` fails.
+    const closer = `</${unexpected[1]}>`;
+    if (completes(text.slice(0, start) + closer, start + closer.length)) {
+      return closingTagDivergence(text, start, unexpected[1]);
+    }
+    let slash = start + 1;
+    while (slash < text.length && /\s/u.test(text.charAt(slash))) slash += 1;
+    return slash;
   }
   const expected = EXPECTED_CLOSING_TAG.exec(reason);
   if (expected !== null) {
@@ -469,8 +671,9 @@ function pairingOffset(text: string, failure: MdxFailure): number {
       containerPrefix(text, Number(expected[2]), Number(expected[3])),
     );
   }
-  if (reason.startsWith("Expected the closing tag") && start !== undefined) {
-    return crossingOffset(text, start);
+  const crossing = CROSSING_CLOSING_TAG.exec(reason);
+  if (crossing !== null && start !== undefined) {
+    return crossingOffset(text, start, `</${crossing[1]}>`);
   }
   return start ?? 0;
 }
@@ -487,7 +690,7 @@ function classOffset(
       switch (failure.ruleId) {
         case "acorn":
         case "unexpected-eof":
-          return openContainerOffset(text);
+          return openContainerOffset(text, start);
         case "unexpected-empty-expression":
           return emptyAttributeOffset(text, start ?? 0);
         case "non-spread":
