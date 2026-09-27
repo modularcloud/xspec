@@ -25,10 +25,17 @@
 //     preamble; CERTIFICATIONS.md's P-12 exclusion note: "its comparator is
 //     computed from the product's own `view` answers, anchored by T11.5-1's
 //     precomputed fixture, so there is no independent oracle to mis-trust").
-//     A requested file the view answer carries no entry for (the masked
-//     case, 14.20: an unparseable requested file contributes no view) must
-//     resolve to exactly the unavailability marker at every offset (SPEC
-//     11.5, 11.2, 12.7; T11.5-3's deterministic arm generalized).
+//     Every staged file must carry its entry — asserted before the
+//     occurrence comparison: each is a parseable discovered spec source
+//     (valid by construction, and judged derivable by S-9 before the body
+//     runs), a bare `view` covers every discovered spec source, and the
+//     tree exists for every parseable file (SPEC 11.4, 11.2) — so a missing
+//     entry is a product failure, never a file to skip: a product hiding a
+//     file from `view`, `occurrences`, and `at` alike would otherwise pass
+//     the sweep vacuously over it (H-8). The masked case — an unparseable
+//     requested file contributing no view, every offset's resolution
+//     explicitly unavailable — is T11.5-3's deterministic arm, outside
+//     P-12's valid draws.
 //   * **Occurrence order.** The workspace-wide bare `occurrences`
 //     enumeration equals the view-collected occurrence records — the
 //     concatenation of every per-file view's `occurrences` member — sorted
@@ -143,8 +150,6 @@ import { SPECS_ONLY_CONFIG } from "./section-11.2.js";
 import type { ResolutionData } from "./section-11.5.js";
 import { resolveAtFromView } from "./section-11.5.js";
 import { assertSameJson } from "./support.js";
-
-const UNAVAILABLE = { unavailable: true } as const;
 
 // ---------------------------------------------------------------------------
 // Generation: file pool, content pools, per-file builder.
@@ -658,6 +663,32 @@ async function runP12Trial(
       }
       viewByPath.set(entry.file, entry);
     }
+    // Every staged file carries its view entry, in `trial.files` order: each
+    // is a parseable discovered spec source (valid by construction, judged
+    // derivable by S-9 before this body ran), a bare `view` covers every
+    // discovered spec source, and the tree exists for every parseable file
+    // (SPEC 11.4, 11.2). Required before the occurrence comparison, whose
+    // totality clause would otherwise run over a partial view set, and
+    // before the at sweep, which would otherwise pass vacuously over a file
+    // the product hides from all three surfaces (H-8).
+    const stagedViews = trial.files.map(
+      ([path, content]): readonly [string, string, FileView] => {
+        const entry = viewByPath.get(path);
+        if (entry === undefined) {
+          fail(
+            `${viewContext}: the answer carries no view for ` +
+              `${JSON.stringify(path)} — a staged spec source, parseable ` +
+              `(valid by construction and judged derivable by S-9 before ` +
+              `the product ran) and discovered under the configuration's ` +
+              `\`specs/**/*.mdx\`: a bare \`view\` covers every discovered ` +
+              `spec source, only an unparseable file contributing none, and ` +
+              `the tree exists for every parseable file (SPEC 11.4, 11.2), ` +
+              `so at ≡ view holds for every file (TEST-SPEC §16 P-12)`,
+          );
+        }
+        return [path, content, entry];
+      },
+    );
 
     // --- occurrence order: enumeration ≡ view-collected, sorted (5.7) ------
     const occContext = "P-12 `xspec occurrences`";
@@ -714,13 +745,12 @@ async function runP12Trial(
     );
 
     // --- at ≡ view: every file, every offset 0…byte length -----------------
-    for (const [path, content] of trial.files) {
+    for (const [path, content, entry] of stagedViews) {
       const byteLength = Buffer.byteLength(content, "utf8");
-      const entry = viewByPath.get(path);
-      const data: ResolutionData | null =
-        entry === undefined
-          ? null
-          : { root: entry.root, occurrences: entry.occurrences };
+      const data: ResolutionData = {
+        root: entry.root,
+        occurrences: entry.occurrences,
+      };
       for (let offset = 0; offset <= byteLength; offset += 1) {
         const context = `P-12 \`at ${path} ${String(offset)}\``;
         const report = decodeAtReport(
@@ -735,24 +765,17 @@ async function runP12Trial(
           ),
           context,
         );
-        const expected =
-          data === null ? UNAVAILABLE : resolveAtFromView(data, offset);
         assertSameJson(
           report.resolution,
-          expected,
-          data === null
-            ? `${context}: the requested file contributed no view — the ` +
-                `masked case — so its position data is gone with the rest of ` +
-                `it and every offset's resolution is exactly the ` +
-                `unavailability marker (SPEC 11.2, 11.5, 12.7)`
-            : `${context}: for every offset of the file, \`at\`'s ` +
-                `resolution must equal the resolution computed from the ` +
-                `file's own \`view\` entry alone — the innermost containing ` +
-                `section construct by range containment (the root where ` +
-                `none contains it, the EOF caret included) with its ` +
-                `identity datum verbatim, and the containing occurrence ` +
-                `record (\`null\` where the offset lies in none) — \`at\` ` +
-                `adds convenience, not information (SPEC 11.5, 11.4, 1.7)`,
+          resolveAtFromView(data, offset),
+          `${context}: for every offset of the file, \`at\`'s resolution ` +
+            `must equal the resolution computed from the file's own ` +
+            `\`view\` entry alone — the innermost containing section ` +
+            `construct by range containment (the root where none contains ` +
+            `it, the EOF caret included) with its identity datum verbatim, ` +
+            `and the containing occurrence record (\`null\` where the ` +
+            `offset lies in none) — \`at\` adds convenience, not ` +
+            `information (SPEC 11.5, 11.4, 1.7)`,
         );
       }
     }
@@ -773,8 +796,8 @@ const P_12 = defineProductTest({
     "EVERY offset 0…byte length `at`'s resolution — section " +
     "identity, construct range, containing occurrence — equals the " +
     "resolution computed from that file's entry of one bare `view` answer " +
-    "alone (no entry — the masked file — resolving to exactly the " +
-    "unavailability marker), and the workspace-wide bare `occurrences` " +
+    "alone (every staged file — a parseable discovered spec source — " +
+    "carrying its view entry), and the workspace-wide bare `occurrences` " +
     "enumeration equals the view-collected occurrence records sorted by " +
     "file path bytes, range start, range end — total, duplicate-free " +
     "(identical spans never occur), and byte-identical across repeated " +
