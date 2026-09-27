@@ -1326,6 +1326,49 @@ Known state after Task 23: the S-9 self-test 822 tests over 796 records (789 `T�
 0 hang over the 23 `certification run against` lines; the ledger-wide duplicate-bytes
 probe 796 records in 36 groups.
 
+**Resolved by Task 23b (P-12's break-parse twist; 5a76901 declares, the closing commit
+records).** The minimal shape, as planned: `MdxFileDeclaration` gains
+`"per-draw-unparseable"` (`test/helpers/workspace.ts`), judged by
+`judgeMdxDeclaration` exactly as `unparseable` ("declared unparseable per draw
+(`per-draw-unparseable`: …) but the source derives …"), exempt from
+`guardUndeclaredStaging` beside `unchecked` and `per-draw` (the refusal's remedy text
+names it), accepted as a `file()` option, and resolved from the new
+`WorkspaceMdxDecl.perDrawUnparseable` list (the two-list contradiction names it; a
+record beside it is refused like any list entry); `test/helpers/staged-mdx.ts` exports
+`RecordDeclaration` (excluding `unchecked`, `per-draw`, `per-draw-unparseable`), its
+validator refusing the new member with `per-draw`'s message. The optional runner part
+was taken: `DrawSource` (`test/helpers/property.ts`) gains the optional fourth element
+`"unparseable"`, `checkDrawMdx` judging such a source must-not-derive (the trial and
+shrink phase texts name the mark), and `stagedP12Sources` returns the twist's file so
+marked instead of filtering it out — both lines of S-9's per-draw check now cover the
+twist. `runP12Trial` declares `mdx: { perDraw: <the other .mdx paths>,
+perDrawUnparseable: [trial.unparseable] or [] }`; no staged byte and no draw changes.
+Self-tests: `s9-staged-sources.test.ts` 823 (+1), `s9-undeclared-staging.test.ts` 15
+(+2; the per-body arm gains a `perDrawUnparseable` entry), `property-infrastructure.test.ts`
+16 (+1). Checks: the stash red check fails exactly the six new or extended tests; P-12
+alone against the built product passes (~315 s), the sites hook logging 14
+`"per-draw"` lines and 1 `"per-draw-unparseable"` line, none `"unparseable"` or
+`"well-formed"`; wiring red checks on a scratch copy of the module (every composed file
+marked `"unparseable"` → the runner's harness error at trial 1, seed 271828183, before
+any invocation; every `.mdx` path listed `perDrawUnparseable` → the builder's refusal
+at trial 1); a forward check of Task 24 — its step 1 simulated, uncommitted — P-12
+passes (~305 s), and with the pre-23b `unparseable` declaration restored it fails as
+the `undeclared-staging` harness error at seed 314159265's trial 1 (the premise,
+observed). Task 24 needs no P-12 exception; its self-test list gains the
+`perDrawUnparseable` creation. Observation for the determination, not acted on
+(outside this task's scope): TEST-SPEC §16's preamble names "P-1's invalid draws, P-8,
+P-11" as the properties staging invalid or imperfect input by design and states every
+other property's generated workspaces valid by construction, "so every oracle here is
+evaluated over documents that build"; P-12's text ("For random workspaces") names no
+imperfect input, yet `genP12Trial` appends a duplicate-id or break-parse twist (weights
+4 none, 3 duplicate-id, 2 break-parse — the module header's "valid-leaning but not
+validity-bound" input space, T11.5-3's masked arm generalized). The determinations so
+far judged P-12 compliant; this task declares the twist as it stands. Known state after
+Task 23b: the S-9 self-test 823 tests over 796 records; self project 22 files, 2966
+passed, 0 skipped under the namespace (~91 s); certification 144 PASS / 33 FAIL /
+0 error / 0 hang over the 23 `certification run against` lines; P-12 passes against the
+built product.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -1429,7 +1472,8 @@ names the refused members), `test/helpers/e6.ts`
 `test/suite/registry/support.ts` (Task 1: `stageConfigurationStateTwins`'s parameter
 type; Task 22: `UnparseableStaging.files`), `test/suite/registry/write-refusal-staging.ts`
 (Task 21: the `RENAME_FIXTURE` / `MOVE_FIXTURE` decls), `test/helpers/property.ts`
-(Task 3, only if a `mdxSources` gap is found). A conversion task never edits a helper
+(Task 3, only if a `mdxSources` gap is found — none was; Task 23b: `DrawSource`'s
+`"unparseable"` mark). A conversion task never edits a helper
 except where its text says so; if a module's conversion seems to need a helper change,
 record the need in this preamble and stop at what the task allows.
 
@@ -1493,52 +1537,6 @@ behind a diagnosed failure or in an arm the built product never reaches — reci
 
 ## Tasks
 
-### Task 23b — P-12's break-parse twist: a guard-exempt, builder-judged-unparseable declaration for a draw's initial file (before Task 24)
-
-**Requirement (found by Task 3).** `section-16-p12.ts`'s `runP12Trial` stages the
-trial's composed files as plain initial entries and declares the break-parse twist's
-file (`trial.unparseable`, a drawn path of `FILE_POOL`) `mdx.unparseable`: the builder
-judges it must-not-derive at creation, inside the body, and a failure surfaces as a
-harness error with the seed through the runner's rethrow of `HarnessStagingError` —
-S-9's draw clause holds today. But no declaration Task 3 could give it survives Task 24:
-`perDraw` is judged well-formed at creation (it would refuse the twist), a record can
-never stand for a draw, and the runner's `stagedP12Sources` excludes the file because
-`checkDrawMdx` judges every source as must-derive. Task 24's guard exempts only
-`unchecked` and `per-draw`, so from the second trial on it would refuse the twist entry
-(`undeclared-staging`) — a harness error in P-12 where the plan expects 0 such lines
-and the same 82 failures. Task 3 left the entry declared `unparseable` (the one
-truthful declaration available) and its path out of the `perDraw` list
-(`mdxPathsOf(files).filter((path) => path !== trial.unparseable)`), so the Task 3 sites
-hook logs exactly one `"unparseable"` line per P-12 trial after the first.
-
-**Change** (`test/helpers/workspace.ts`; `test/helpers/staged-mdx.ts` where its
-validator names the refused members; `test/suite/registry/section-16-p12.ts`;
-`test/self/s9-staged-sources.test.ts`; `test/self/s9-undeclared-staging.test.ts`;
-headers; AGENTS.md). Give the workspace declaration a per-draw unparseable form — the
-minimal shape: `WorkspaceMdxDecl.perDrawUnparseable?: readonly string[]` resolving to
-a new `MdxFileDeclaration` member `"per-draw-unparseable"`, which `judgeMdxDeclaration`
-judges exactly as `unparseable` (must not derive; spelled "declared unparseable per
-draw"), `guardUndeclaredStaging` exempts as it exempts `per-draw`, a record refuses as
-it refuses `per-draw` (`StagedMdx.mdx` excludes it), `resolveMdxDeclaration` names in
-the two-list contradiction, and `file()` accepts as an option (section-16 modules
-only). `runP12Trial` then declares `mdx: { perDraw: <the other .mdx paths>,
-perDrawUnparseable: trial.unparseable === undefined ? [] : [trial.unparseable] }`.
-Optional, so the runner's first line covers the twist too: `DrawSource` gains an
-optional fourth element `"unparseable"`, `checkDrawMdx` judging such a source as
-must-not-derive, and `stagedP12Sources` returns the twist file marked so instead of
-filtering it out (then `test/self/property-infrastructure.test.ts` gains the red
-check: a deriving source marked unparseable is a harness error carrying the seed).
-Self-tests follow the `perDraw` tests' pattern for the new list (a listed non-deriving
-entry created; a deriving one refused with the unparseable diagnosis; a path in two
-lists, or not an MDX source, throws), plus the guard exemption after an invocation
-(`s9-undeclared-staging.test.ts`), the record refusal, and the judge.
-
-**Checks.** Recipes 1–2; P-12 alone against the built product (`-t 'P-12 '`, ~6 min,
-PASS unchanged at the fixed seeds) with the Task 3 sites hook (AGENTS.md) showing its
-twist lines declared `"per-draw-unparseable"` and no `"unparseable"` or
-`"well-formed"` line; Task 24's checks are then expected to hold with no P-12
-exception. Record the form in AGENTS.md beside the `perDraw` bullet.
-
 ### Task 24 — The undeclared-staging guard covers initial files (last: after every conversion)
 
 **Requirement.** S-9's timing clause is met only while every post-invocation initial
@@ -1567,12 +1565,13 @@ headers, AGENTS.md):
    throws `undeclared-staging` for `A` and leaves no `xspec-harness-*` directory behind
    (compare `os.tmpdir()` listings, as the existing refusal test does, if it does);
    with a record entry → created; with `mdx: { unchecked: [A] }` → created; with
-   `mdx: { perDraw: [A] }` → created; the same plain creation BEFORE any invocation in
-   the body → created; outside any body context after an invocation elsewhere →
-   created; a non-`.mdx` plain entry always passes. Update the headers (`workspace.ts`
-   module header and `stageInitial`'s comment — "the standing observation" is closed;
-   `product-invocations.ts`'s header where it describes the reach; `staged-mdx.ts`'s
-   header).
+   `mdx: { perDraw: [A] }` → created; with `mdx: { perDrawUnparseable: [A] }` and an
+   unparseable `A` → created (Task 23b's form, P-12's twist); the same plain creation
+   BEFORE any invocation in the body → created; outside any body context after an
+   invocation elsewhere → created; a non-`.mdx` plain entry always passes. Update the
+   headers (`workspace.ts` module header and `stageInitial`'s comment — "the standing
+   observation" is closed; `product-invocations.ts`'s header where it describes the
+   reach; `staged-mdx.ts`'s header).
 4. Any site the full-suite run reveals converts under the rule in this same task —
    expect none.
 
