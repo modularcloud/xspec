@@ -76,8 +76,8 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T7-3 | section-7-basics | 38 |
 | T7-4 | section-7-discovery | 39, 40 |
 | T7.3-1 | section-7.1-7.3 | 41 |
-| T7.4-1 | section-7.4-7.5 | 4 |
-| T7.5-1 | section-7.4-7.5 | 4 |
+| T7.4-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
+| T7.5-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
 | T10.1-6 | section-10.1 | 45, 46 |
 | T11-2 | section-11 | 2, 3, 40, 44 (since Task 2 its malformed-`--tag` sweep holds by hand, twins included; since Task 3 its tag sets hold and it stops first at Task 40's `--file "./specs/alpha/*.mdx"` arm) |
 | T11-6 | section-11 | 19 |
@@ -90,7 +90,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T11.4-4 | section-11.4 | 14 |
 | T11.4-6 | section-11.4 | 3 (passes since Task 3 landed) |
 | T11.5-3 | section-11.5 | 9 |
-| T11.6-2 | section-11.6 | 4 |
+| T11.6-2 | section-11.6 | 4 (passes since Task 4 landed) |
 | T12.0-10 | section-12.0-ii | 44 (its `--tag 'a\b'` row holds since Task 2) |
 | T12.0-14 | section-12.0-iii | 43 |
 | T12.2-4 | section-12.1-12.2 | 52 |
@@ -112,34 +112,6 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), and Task 53 (a corrupt session in `review list`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
 
 ---
-
-## Task 4 — `inventory` reports configured tag and kind lists as sets (SPEC 12.7 `inventory`, 7.4, 7.5, 11.6, 5.2; B9, C4)
-
-**Requirement.** SPEC 12.7, `inventory`:
-- A profile's `targetTags` (`null` where absent) and a `tags` selector's list are tag sets: byte order, duplicates collapsed.
-- A profile's `edgeKinds` and a rule's `kinds`, "configured or defaulted", are kind sets in 5.2's order (`"depends"`, `"embeds"`, `"references"`), duplicates collapsed.
-- SPEC 7.4 and 7.5 read these lists as sets.
-
-**Observed.**
-
-| Configured | Reported | Required |
-|---|---|---|
-| `targetTags: ["z","a","a"]` | as spelled | `["a","z"]` |
-| selector `tags: ["b","a","b"]` | as spelled | `["a","b"]` |
-| `edgeKinds: ["references","depends","depends"]` | `["references","depends"]` | `["depends","references"]` |
-| rule `kinds: ["embeds","depends","embeds"]` | `["embeds","depends"]` | `["depends","embeds"]` |
-
-**Location.**
-- `src/core/config.ts`: `optionalTagList` (~974), `optionalKindList` (~1023), and the selector and rule reducers.
-- `src/cli/commands/inventory.ts` (~138–150).
-- `src/core/config-data.ts` (~79–85, ~191–218): check what records these lists and whether that recorded form must stay stable.
-
-**Change.** Normalize at configuration reduction: tag lists to `compareBytes`-ordered sets, kind lists to 5.2's order without duplicates. Every consumer then sees sets. If some consumer genuinely needs the spelled list, normalize in the inventory rendering instead. Either way, the inventory must show the set forms.
-
-**Verification.**
-- Should turn green: `section-7.4-7.5.test.ts` (T7.4-1, T7.5-1), `section-11.6.test.ts` (T11.6-2).
-- P-4 and P-5, once listed here, pass since Task 3 landed: neither runs `inventory`.
-- Neighbours: `section-10.5.test.ts`, `section-12.7.test.ts`.
 
 ## Task 5 — Quoted attribute values are read verbatim, with no character-reference decoding (SPEC 2.4, 2.7, 2.5, 2.6, 1.4, 14.4, 14.17; A2, first part)
 
