@@ -18,7 +18,9 @@
 //   end of the file, is measured by its own grammar (`jsViablePrefix`) —
 //   `}` appended to the file makes the stock grammar hand that content, as
 //   it collects it, to the acorn recorded here; an attribute value's empty
-//   braces fail at the brace that closes them;
+//   braces fail at the brace that closes them; a lazy line met inside a
+//   flow construct's container ends the content at the line before it,
+//   measured so, the lazy line failing only after content viable there;
 // - an ESM block: the block's text, as recorded, measured as a module of
 //   import and export declarations;
 // - a JSX tag's own syntax: the stock tokenizer's character;
@@ -371,6 +373,13 @@ function terminatorAt(text: string, at: number): string {
   return code === 0x0a || code === 0x0d ? text.charAt(at) : "";
 }
 
+/** The line terminator (CR, LF, or CRLF) ending at `at`, or "" at none. */
+function terminatorBefore(text: string, at: number): string {
+  if (at >= 2 && text.startsWith("\r\n", at - 2)) return "\r\n";
+  const code = text.charCodeAt(at - 1);
+  return code === 0x0a || code === 0x0d ? text.charAt(at - 1) : "";
+}
+
 /** How many lines past a failure's place a container's content is sought. */
 const CONTAINER_LINES = 256;
 
@@ -425,27 +434,43 @@ function openContainerOffset(text: string, placed: number | undefined): number {
     end = lineEnd(end + terminatorAt(text, end).length);
   }
   if (last === null) return placed;
-  const within = measured(text.slice(0, last.end), last.collected);
-  if (within < last.end) return within;
-  const terminator = terminatorAt(text, last.end);
-  const { content, kind } = last.collected;
+  return measuredThroughLine(text, last.end, last.collected, 0);
+}
+
+/**
+ * A container's content collected through the line ending at `end` (at
+ * its terminator), measured by its own grammar: where it fails within, that
+ * offset; where it cannot take the line's terminator, `end`; otherwise the
+ * next line's first character — from `from` on, where that lies further —
+ * other than those a continuation of the content could still begin with.
+ */
+function measuredThroughLine(
+  text: string,
+  end: number,
+  collected: Collected,
+  from: number,
+): number {
+  const within = measured(text.slice(0, end), collected);
+  if (within < end) return within;
+  const terminator = terminatorAt(text, end);
+  const { content, kind } = collected;
   if (
     jsViablePrefix(content + terminator, kind) <
     content.length + terminator.length
   ) {
-    return last.end;
+    return end;
   }
   // The next line may still continue the content — a lazy line, deeper
   // indentation, a block quote's marker — character by character until
   // it has become something else (a new list item, a blank line).
   const opening = contentToFile(
-    text.slice(0, last.end),
+    text.slice(0, end),
     content,
     content.length,
-    last.end,
+    end,
     0,
   );
-  let at = last.end + terminator.length;
+  let at = Math.max(end + terminator.length, from);
   const bound = Math.min(text.length, at + PROBE_REACH);
   while (
     at < bound &&
@@ -455,6 +480,35 @@ function openContainerOffset(text: string, placed: number | undefined): number {
     at += 1;
   }
   return at;
+}
+
+/**
+ * A lazy line met inside a flow-position container's content — a flow
+ * expression, or an attribute value expression or spread attribute of a
+ * flow tag; `placed` the grammar's place for the failure, on the lazy line
+ * past the container prefix it matched there. The grammar throws at the
+ * lazy line without trying a brace beyond it, so the content before it may
+ * already have failed: when the content never derives, the grammar tries
+ * every `}` to the end of the file, and a file ending with a line ending in
+ * a block quote ends with an empty lazy line. The content runs through the
+ * line before the lazy one, collected as an open container's is with a `}`
+ * on a further line (`collectedPastLine`), and is measured as that
+ * container's is (`measuredThroughLine`): the failure is where it fails
+ * within, or its terminator where it cannot take that; only content viable
+ * through its terminator leaves the lazy line the failure — at its first
+ * character, past the prefix the grammar matched, that no continuation of
+ * the content could begin with (SPEC 14's location rule for 14.20).
+ */
+function lazyLineOffset(text: string, placed: number | undefined): number {
+  if (placed === undefined) return 0;
+  const lineStart = lineStartBefore(text, placed + 1);
+  const terminator = terminatorBefore(text, lineStart);
+  if (terminator === "") return placed;
+  const end = lineStart - terminator.length;
+  const head = text.slice(0, end);
+  const collected = collectedPastLine(head) ?? collectedAtEnd(head);
+  if (collected === undefined) return placed;
+  return measuredThroughLine(text, end, collected, placed);
 }
 
 /** Line continuations a container's content may take (the `x` a probe). */
@@ -751,6 +805,8 @@ function classOffset(
           return openContainerOffset(text, start);
         case "unexpected-empty-expression":
           return emptyAttributeOffset(text, start ?? 0);
+        case "unexpected-lazy":
+          return lazyLineOffset(text, start);
         case "non-spread":
         case "spread-extra":
           return spreadOffset(text, failure, calls);
