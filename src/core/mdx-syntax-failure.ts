@@ -20,7 +20,9 @@
 //   it collects it, to the acorn recorded here; an attribute value's empty
 //   braces fail at the brace that closes them; a lazy line met inside a
 //   flow construct's container ends the content at the line before it,
-//   measured so, the lazy line failing only after content viable there;
+//   measured so, the lazy line failing only after content viable there,
+//   and so does a line leaving the block container that holds it, the
+//   grammar placing the end of the file at that line's start;
 // - an ESM block: the block's text, as recorded, measured as a module of
 //   import and export declarations;
 // - a JSX tag's own syntax: the stock tokenizer's character;
@@ -377,7 +379,10 @@ function contentLinePrefix(text: string): string | undefined {
  * in it. The content returned ends with that last line, the further line's
  * terminator and prefix cut off. Whichever prefix the `}` follows, the
  * content through that last line is the same; the prefix the content's own
- * lines give (`contentLinePrefix`) is tried first, then the fixed ones.
+ * lines give (`contentLinePrefix`) is tried first, then the fixed ones. An
+ * attribute's content that is whitespace alone so far is refused before
+ * acorn sees it, so the `}` is also tried after an `x`, a token on the
+ * further line that leaves the content through the last line unchanged.
  */
 function collectedPastLine(head: string): Collected | undefined {
   const own = contentLinePrefix(head);
@@ -387,7 +392,7 @@ function collectedPastLine(head: string): Collected | undefined {
       : [own, ...LINE_PREFIXES.filter((prefix) => prefix !== own)];
   for (const prefix of prefixes) {
     const probe = head + "\n" + prefix;
-    const collected = collectedAtEnd(probe);
+    const collected = collectedAtEnd(probe) ?? collectedAtEnd(probe + "x");
     if (collected === undefined) continue;
     const { content, kind } = collected;
     const cut = Math.max(content.lastIndexOf("\n"), content.lastIndexOf("\r"));
@@ -476,8 +481,32 @@ function openContainerOffset(text: string, placed: number | undefined): number {
     if (end >= text.length) break;
     end = lineEnd(end + terminatorAt(text, end).length);
   }
-  if (last === null) return placed;
+  if (last === null) return lineLeavingOffset(text, placed);
   return measuredThroughLine(text, last.end, last.collected, 0);
+}
+
+/**
+ * A container whose content the grammar ended at the start of the line
+ * holding `placed`, no line from there on its own: a line that leaves the
+ * content's block container — beginning a new list item or block quote, or
+ * a sibling of the list item holding the content — ends the content at the
+ * line before it (micromark's `closeFlow`), the end of the file placed at
+ * this line's start. The content runs through the line before, collected
+ * as an open container's is (`collectedPastLine`), and is measured as that
+ * container's is (`measuredThroughLine`): this line's container syntax may
+ * still continue the content — a lone `>` is a blank line of a list item in
+ * a block quote — so the failure is its first character that no
+ * continuation of the content could begin with (SPEC 14's location rule for
+ * 14.20). `placed` itself where it lies elsewhere or nothing is collected.
+ */
+function lineLeavingOffset(text: string, placed: number): number {
+  const terminator = terminatorBefore(text, placed);
+  if (terminator === "") return placed;
+  const end = placed - terminator.length;
+  const head = text.slice(0, end);
+  const collected = collectedPastLine(head) ?? collectedAtEnd(head);
+  if (collected === undefined) return placed;
+  return measuredThroughLine(text, end, collected, 0);
 }
 
 /**
