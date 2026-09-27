@@ -1055,6 +1055,70 @@ tests); certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23
 `certification run against` lines; the ledger-wide duplicate-bytes probe 670 records
 in 30 groups.
 
+**Resolved by Task 20 (the §12.1–§12.7 modules; b38740e converts, the closing commit
+records).** Sixteen records net (seventeen new, two existing collapsed into one, one of
+another module's reused). `section-12.1-12.2.ts` +4 net — the valid a1 source
+(`<S id="a1">`, `Alpha behavior.`) was spelled three times with identical bytes: as
+T12.1-3's `T12_1_3_ALPHA_SOURCE` record, as `FAILED_BUILD_VALID_SOURCE` (both from the
+previous plan — a same-module group of the duplicate-bytes probe), and inline in
+`PRODUCTS_FILES`; it is now ONE record `VALID_A1_SOURCE` in the shared section
+(`"T12.1-1/T12.1-3/T12.1-4/T12.2-1/T12.2-2/T12.2-3 specs/A.mdx (the valid a1 source: …)"`),
+both old spellings deleted, every `.source` fill of an initial entry (`REGEN_FILES`,
+T12.1-4's workspace, T12.2-2's families 1–4, 7, 9, T12.2-3's workspace) and
+`PRODUCTS_FILES` (T12.1-1's and T12.2-1's one workspace) taking the record; T12.2-2's
+families 5, 6, 8 (after family 1's invocations) — `REFERENCES_FAMILY_FILES`' and
+`CYCLE_FAMILY_FILES`' `specs/A.mdx` and `POLICY_FAMILY_FILES`' `lo/L.mdx` wrapped in
+place, its `hi/H.mdx`, spelled byte-identically by T12.2-4's fixture, hoisted to ONE
+record `POLICY_HI_SOURCE` (`"T12.2-2/T12.2-4 hi/H.mdx (…)"`); T12.2-4's shared fixture
+map (arms (b)–(d) behind its diagnosed failure at arm (a), judged by reading; converted
+uniformly) — `T12_2_4_L_VALID` itself (renamed for its initial and repair sites) and
+`extra/E.mdx` wrapped in place; every map and `withWorkspace`'s `files` widened to
+`InitialFileContents`. `section-12.3-12.5.ts` 1 — T12.3-1's restricted-tree
+`T12_3_1_T` wrapped in place (its second workspace, behind its diagnosed failure in the
+first). `section-12.6.ts` 0 new — `VALID_SOURCE` aliased to `section-7-basics.ts`'s
+`SECTION_A_SOURCE` by import (the spelling deleted), the record renamed
+`"T7-1/T7-2/T7-3/T7-4/T7-6/T7.1-1/T7.3-1/T7.4-1/T7.5-1/T7.5-5/T12.6-1/T12.6-2 specs/A.mdx
+(the minimal section a; T7.5-5's tgt/a.mdx)"` — the task's note named T12.6-2 alone, but
+T12.6-1's (and T12.6-2's first) workspace stages the same aliased constant, so the name
+carries every calling test (Tasks 6 and 12). `section-12.7.ts` 11 — T12.7-1:
+`POLICY_SOURCE` wrapped in place and T12.7-2's byte-identical `IDS_SOURCE` aliased to
+it (`"T12.7-1/T12.7-2 specs/P.mdx (…)"`), the cross-module arm's HOMEMOD/FOREIGNMOD and
+the review-refusal arm's `specs/R.mdx` literals moved to module-level records,
+`T12_7_1_UR_BASELINE` made from `UR_BASELINE_SOURCE` (the self-check's string),
+`OK_SOURCE` wrapped in place and T12.7-2's first-workspace `ORD_OK_SOURCE` aliased to it
+(`"T12.7-1/T12.7-2 specs/OK.mdx (…)"`); T12.7-2: `T12_7_2_MR` and `T12_7_2_DF_F` made
+from the strings the slice checks read, `DF_W_SOURCE` wrapped in place; T12.7-3 (behind
+its diagnosed failure in the config-paths arm, judged by reading): `ERR_SOURCE` (every
+arm's `specs/A.mdx`, the first arm's included) and `ERR_SUB_SOURCE` wrapped in place.
+Sub-rules applied: (i) a pre-existing same-module group of byte-identical RECORDS in a
+module being converted collapses into one record staged at every site (Tasks 16–17's
+alias-and-rename rule applied to two old records; here a new identifier replaces both,
+since each old identifier misdescribed the wider use — Task 8's (iv)); (ii) a record
+name never spells ` > ` (the `vitest list` separator — `grep '> T'` must keep one name
+per line): `"… (grand holding grand.par …)"`, `"… (keep holding keep.sub …)"`. Left
+plain: every body's first workspace otherwise (T12.1-3's and T12.2-2 family 1's and
+`PRODUCTS_FILES`' `specs/B.mdx` — no record holds their bytes —, T12.3-1's ordering
+workspace, T12.3-2, T12.4-1, T12.5-1, T12.7-1's located-findings and T12.7-2's
+condition-ordering workspaces but the aliased `ok`), every configuration and `.ts`
+entry. Read-based enumeration: 19 + 6 + 5 + 18 creation sites judged (each count with
+its module's `withWorkspace` helper). Observation for the determination, not acted on
+(Task 14's class): the duplicate-bytes probe finds 686 records in 31 groups — the
+§12.1-12.2 same-module group gone, two new cross-module groups (the cycles family's
+`specs/A.mdx` = `"T5.3-1 self-depends specs/A.mdx"`; `ERR_SOURCE` = `"T3-6
+specs/A.mdx"`); Task 23's notes updated (`section-14.ts` spells three of this task's
+records' bytes). Checks: the sites hook logged the task's 14 (test, path) pairs (20
+lines, all `"well-formed"`) before and no file after; the sha256 capture over the four
+suite files (120 writes, compared sorted) identical; 16 tests, 13 pass and 3 fail —
+T12.2-4, T12.3-1, T12.7-3 — with identical verdict lines and diagnoses (full blocks,
+temporary paths normalized; ~22 s a run); red check: an unclosed tag spliced into the
+valid-a1, restricted-tree, and `specs/sub/S.mdx` records fails exactly those three as
+`mdx-derivability` under the ledger self-test's `-t 'T12\.[1-7]-'` filter (30 tests).
+Known state after Task 20: the S-9 self-test 712 tests over 686 records (679 `T…`,
+4 `E-6`, 3 `P-…`); self project 22 files, 2852 passed, 0 skipped under the namespace
+(~90 s; 2836 + the 16 record tests); certification 144 PASS / 33 FAIL / 0 error /
+0 hang over the 23 `certification run against` lines; the ledger-wide duplicate-bytes
+probe 686 records in 31 groups.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -1222,30 +1286,6 @@ behind a diagnosed failure or in an arm the built product never reaches — reci
 
 ## Tasks
 
-### Task 20 — Initial-file conversion: §12.1–§12.7 (`section-12.1-12.2.ts`, `section-12.3-12.5.ts`, `section-12.6.ts`, `section-12.7.ts`)
-
-**Workspace creations to judge:** 12.1-12.2 (19; 9 records; its `withWorkspace` and
-fixture tables were widened to `FileContents` by the previous plan's Task 17 — widen
-them to the record-accepting type and replace every `FAILED_BUILD_VALID_SOURCE.source`
-fill with the record; T12.2-2's family workspaces 2–9; T12.2-4's arms (b)–(d)),
-12.3-12.5 (6; `withWorkspace` ~149), 12.6 (5; `withWorkspace` ~112), 12.7 (18; 4
-records; every §12.7 arm after each body's first — the byte-path `file()` records exist).
-**Reachable sites (the instrumented run):**
-- `section-12.1-12.2.ts` — T12.2-2 (3): hi/H.mdx lo/L.mdx specs/A.mdx
-- `section-12.6.ts` — T12.6-2 (1): specs/A.mdx
-- `section-12.7.ts` — T12.7-1 (6): specs/A.mdx specs/FOREIGNMOD.mdx specs/HOMEMOD.mdx specs/OK.mdx specs/P.mdx specs/R.mdx
-- `section-12.7.ts` — T12.7-2 (4): specs/F.mdx specs/MR.mdx specs/P.mdx specs/W.mdx
-**Failing here:** T12.2-4, T12.3-1, T12.7-3.
-**Certification scope:** none.
-**Notes.** `section-12.6.ts`'s `VALID_SOURCE` holds the bytes of
-`section-7-basics.ts`'s exported `SECTION_A_SOURCE` (Task 13; Task 14 renamed it
-`"T7-1/T7-2/T7-3/T7-4/T7-6/T7.1-1/T7.3-1/T7.4-1/T7.5-1/T7.5-5 specs/A.mdx (the minimal
-section a; T7.5-5's tgt/a.mdx)"`): T12.6-2's post-invocation `specs/A.mdx` reuses that
-record by import (the constant deleted or aliased, never re-spelled), renamed
-`"…/T7.5-5/T12.6-2 …"` (T12.6-2 after T7.5-5 in ID order).
-**Checks.** Recipes 1–5 over `section-12.1-12.2.test`, `section-12.3-12.5.test`,
-`section-12.6.test`, `section-12.7.test`.
-
 ### Task 21 — Initial-file conversion: §13 and the H-6 refusal fixtures (`section-13.1-13.2.ts`, `section-13.3.ts`, `section-13.4.ts`, `section-13.5.ts`, `write-refusal-staging.ts`)
 
 **Workspace creations to judge:** 13.1-13.2 (5), 13.3 (9; 2 records; `restoreGraphData`
@@ -1349,7 +1389,16 @@ form (AGENTS.md's arm-filter and stand-in recipes reach it); `RENAME_REFUSAL_FIL
 do `MOVE_REFUSAL_FILES` and `MOVE_DERIVED_PATH_FILES` (its second and third
 workspaces, ~3178 and ~3213; Task 10) and the `R16_REFUSED_ARMS` / `M17_REFUSED_ARMS`
 files its `runT147InvalidRewriteArms` / `runT147MovedImportArms` spread (Task 11:
-records named with T14-7).
+records named with T14-7). Byte-identical spellings (Task 20): `STALE_DECL`'s
+`specs/a.mdx` (`'<S id="a1">\nAlpha behavior.\n</S>\n'`) is `section-12.1-12.2.ts`'s
+`VALID_A1_SOURCE`; `POLICY_DECL`'s `hi/H.mdx` is its `POLICY_HI_SOURCE` and its
+`lo/L.mdx` the record wrapped in place in `POLICY_FAMILY_FILES` (`"T12.2-2 policy
+family lo/L.mdx (…)"` — hoist it to a named export); the 14.9 `specArm`'s
+`'<S id="s" d={"s"}>\nDepends on itself.\n</S>\n'` is `"T5.3-1 self-depends
+specs/A.mdx"` (`section-5.1-5.3.ts`) and `"T12.2-2 cycles family specs/A.mdx (…)"`
+(already a cross-module group). Where such a staging is post-invocation, reuse the
+record by export and import, renamed with the staging IDs in ID order and the path
+(Tasks 13 and 19), never re-spell.
 **Checks.** Recipes 1–5 over `section-14.test`, `section-14-ii.test`; after this task
 the whole suite's initial `.mdx` entries after a body's first invocation are records,
 `perDraw`, or `unchecked` — Task 24 verifies it.
