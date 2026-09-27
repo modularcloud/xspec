@@ -26,6 +26,11 @@
 // TypeScript-only syntax (`BASE.a!`, `BASE.a as X`) is a derivation failure
 // (SPEC 2.4). The static-reference analyzer reads each brace's content as MDX
 // 3 derives it (`derivedContent` below), never the raw document slice.
+// Whitespace and comments alone are judged as SPEC 14.20 judges them: where
+// remark-mdx refuses an attribute's content as empty before calling acorn,
+// though it holds a token the comment deletions hide, the refusal is undone
+// by respelling the content's leading comments (`parseAsJudged`,
+// ./mdx-syntax-failure.ts) and the collected content restored.
 //
 // Section tags are not widened: they pair exactly as stock MDX 3 pairs them
 // (SPEC 14.20; 6.5 "Validation and refusals" spells the consequences out).
@@ -60,7 +65,7 @@ import type { ConditionNumber, Finding } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
 import type { PathText } from "./path-text.js";
 import { isEmptyExpression, MDX_ACORN_OPTIONS, mdxAcorn } from "./mdx-acorn.js";
-import { mdxSyntaxFailureOffset } from "./mdx-syntax-failure.js";
+import { mdxSyntaxFailureOffset, parseAsJudged } from "./mdx-syntax-failure.js";
 import { decodeSourceBytes } from "./source-text.js";
 import {
   describeSegmentViolation,
@@ -509,9 +514,15 @@ function parseMdx(file: PathText, bytes: Uint8Array): MdxParse {
   const text = decoded.text;
   const offsets = new Utf8Offsets(text);
   try {
-    // SPEC 14.20: remark-mdx's grammar defines well-formed MDX.
-    const tree = mdxParser.parse(text) as unknown as MdxTreeNode;
-    return { kind: "tree", text, offsets, tree };
+    // SPEC 14.20: remark-mdx's grammar defines well-formed MDX, its refusal
+    // of an attribute's content as empty undone where that content holds
+    // a token (`parseAsJudged`).
+    const { result, originals } = parseAsJudged(
+      text,
+      (spelled) => mdxParser.parse(spelled) as unknown as MdxTreeNode,
+    );
+    if (originals.size > 0) restoreRespelledContent(result, text, originals);
+    return { kind: "tree", text, offsets, tree: result };
   } catch (error) {
     return {
       kind: "unparseable",
@@ -672,6 +683,72 @@ function sharedEnding(line: string, collected: string): number {
     count += 1;
   }
   return count;
+}
+
+/**
+ * SPEC 14.20: on each attribute a respelling touched (`parseAsJudged`: the
+ * leading comments of an attribute's content, blanked where the stock
+ * grammar refused that content as empty although it holds a token), the
+ * content remark-mdx collected — its `value`, which `derivedContent` reads
+ * — as collected from `text`, the original. The respelled content's estree
+ * (which nothing here reads) keeps the respelled spelling: those comments
+ * are whitespace there.
+ */
+function restoreRespelledContent(
+  node: MdxTreeNode,
+  text: string,
+  originals: ReadonlyMap<number, string>,
+): void {
+  for (const attribute of node.attributes ?? []) {
+    const start = attribute.position?.start.offset;
+    const end = attribute.position?.end.offset;
+    if (typeof start !== "number" || typeof end !== "number") continue;
+    if (![...originals.keys()].some((at) => at >= start && at < end)) {
+      continue;
+    }
+    // The content's last line ends at the closing brace, `end - 1`.
+    const holder = (
+      attribute.type === "mdxJsxExpressionAttribute"
+        ? attribute
+        : attribute.value
+    ) as { value?: unknown } | null | undefined;
+    if (typeof holder === "object" && typeof holder?.value === "string") {
+      holder.value = restoredContent(holder.value, text, end - 1, originals);
+    }
+  }
+  for (const child of node.children ?? []) {
+    restoreRespelledContent(child, text, originals);
+  }
+}
+
+/**
+ * `collected` — content remark-mdx collected from a respelled text, its last
+ * line ending at `end` — with each respelled character restored from
+ * `originals` (micromark reads U+0000 as U+FFFD). Each content line is a
+ * suffix of its file line (the Markdown container prefix and indentation
+ * not collected), so characters correspond from the end, a content line
+ * ending passing the file line's uncollected prefix to its own ending.
+ */
+function restoredContent(
+  collected: string,
+  text: string,
+  end: number,
+  originals: ReadonlyMap<number, string>,
+): string {
+  const units = collected.split("");
+  let at = end;
+  for (let index = units.length - 1; index >= 0; index -= 1) {
+    const code = collected.charCodeAt(index);
+    if (code === 0x0a || code === 0x0d) {
+      while (at > 0 && text.charCodeAt(at - 1) !== code) at -= 1;
+    }
+    at -= 1;
+    const original = originals.get(at);
+    if (original !== undefined) {
+      units[index] = original === "\0" ? "\ufffd" : original;
+    }
+  }
+  return units.join("");
 }
 
 /** An estree node's or comment's document-absolute UTF-16 offsets. */

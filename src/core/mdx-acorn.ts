@@ -796,7 +796,7 @@ function excludeEarlyErrors(BaseParser: typeof Parser): typeof Parser {
 // block's `import` or `export` never does), so their regular expressions —
 // quadratic on a long text holding many an unclosed `/*` or unended `//` —
 // run on such text alone.
-function commentDeletionsEmpty(text: string): boolean {
+export function commentDeletionsEmpty(text: string): boolean {
   if (!/^\s*(?:\/|$)/u.test(text)) return false;
   return /^\s*$/u.test(
     text
@@ -881,8 +881,10 @@ function deriveExpression(
 // between from them (`{// /*` LF `x; y /* */` LF `}`). So `parse`, handed
 // content the deletions empty but that holds a token (only the
 // empty-expression path hands it such content: an ESM block begins with
-// `import` or `export`, and remark-mdx refuses an attribute value's such
-// content before parsing), derives it as any other container content — one
+// `import` or `export`, and remark-mdx refuses an attribute's such content
+// before calling acorn — a refusal undone by respelling,
+// `respellRefusedContent` in ./mdx-syntax-failure.ts), derives it as any
+// other container content — one
 // expression beside whitespace and comments alone, or none (14.20) —
 // shaped as remark-mdx shapes a derived expression: a Program holding one
 // ExpressionStatement. `parseExpressionAt` fails where what follows its

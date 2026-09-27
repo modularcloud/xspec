@@ -32,14 +32,25 @@
 // file, the prefix before a computed offset may itself fail: it is parsed
 // in turn, and the offset moves down until the prefix fails at its own end
 // or not at all.
+//
+// Every text — the file and each probe — is parsed as SPEC 14.20 judges
+// it, as `parseMdx` in mdx.ts parses: the stock grammar refuses an
+// attribute's content its comment deletions empty before calling acorn,
+// though that content may hold a token they hide, and such a refusal is
+// undone by respelling (`parseAsJudged`, the last section below).
 
 import type { Options } from "acorn";
+import { tokTypes } from "acorn";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { jsViablePrefix } from "./js-syntax-failure.js";
 import type { JsContentKind } from "./js-syntax-failure.js";
-import { MDX_ACORN_OPTIONS, mdxAcorn } from "./mdx-acorn.js";
+import {
+  commentDeletionsEmpty,
+  MDX_ACORN_OPTIONS,
+  mdxAcorn,
+} from "./mdx-acorn.js";
 import { closingTagDivergence } from "./viable-prefix.js";
 
 // ---------------------------------------------------------------------------
@@ -94,15 +105,27 @@ interface MdxFailure {
 }
 
 /** One parse: its failure (null when the text is well-formed) and calls. */
-interface AnalysisParse {
+interface RecordedParse {
   readonly failure: MdxFailure | null;
   readonly calls: readonly AcornCall[];
+}
+
+/** One parse as SPEC 14.20 judges its text (`analysisParse`). */
+interface AnalysisParse extends RecordedParse {
+  /**
+   * The text the grammar parsed and the calls were made on: the text
+   * judged, respelled where the stock grammar refused an attribute's
+   * content as empty although it holds a token (`respellRefusedContent`) —
+   * the same length and lines.
+   */
+  readonly parsed: string;
 }
 
 /** An unexpected throw (not the grammar's): the analysis gives up. */
 class AnalysisAbandoned extends Error {}
 
-function analysisParse(text: string): AnalysisParse {
+/** One parse of `text` by the stock grammar, its acorn calls recorded. */
+function recordedParse(text: string): RecordedParse {
   const calls: AcornCall[] = [];
   recording = calls;
   try {
@@ -117,6 +140,24 @@ function analysisParse(text: string): AnalysisParse {
     return { failure, calls };
   } finally {
     recording = null;
+  }
+}
+
+/**
+ * One parse of `text` as SPEC 14.20 judges it — as `parseMdx` in mdx.ts
+ * parses (`parseAsJudged`): the stock grammar's, each refusal of an
+ * attribute's content as empty that holds a token undone by respelling.
+ */
+function analysisParse(text: string): AnalysisParse {
+  let parsed = text;
+  for (let round = 0; ; round += 1) {
+    const { failure, calls } = recordedParse(parsed);
+    const respelled =
+      failure === null || round >= RESPELLINGS
+        ? null
+        : respellRefusedContent(parsed, failure);
+    if (respelled === null) return { failure, calls, parsed };
+    parsed = respelled.text;
   }
 }
 
@@ -219,30 +260,40 @@ interface Collected {
 }
 
 /**
+ * Where `content` begins in `head` when, as the stock grammar collects a
+ * container's content, it runs to `head`'s end — its lines each a suffix of
+ * the file line it corresponds to (the last ending `head`) — or undefined
+ * when it does not.
+ */
+function contentStart(head: string, content: string): number | undefined {
+  const contentLines = lineSpans(content);
+  const fileLines = lineSpans(head);
+  const first = fileLines.length - contentLines.length;
+  if (first < 0) return undefined;
+  for (let line = 0; line < contentLines.length; line += 1) {
+    const [lineStart, lineEnd] = contentLines[line];
+    const [fileStart, fileEnd] = fileLines[first + line];
+    if (
+      !head
+        .slice(fileStart, fileEnd)
+        .endsWith(content.slice(lineStart, lineEnd))
+    ) {
+      return undefined;
+    }
+  }
+  const [start, end] = contentLines[0];
+  return fileLines[first][1] - (end - start);
+}
+
+/**
  * Whether `content`, as the stock grammar collects a container's content,
  * is the content of a container whose opening brace lies in `head` and
  * which runs to `head`'s end: its lines, each a suffix of the file line it
  * corresponds to (the last ending `head`), begin right after a `{`.
  */
 function endsAtBrace(head: string, content: string): boolean {
-  const contentLines = lineSpans(content);
-  const fileLines = lineSpans(head);
-  const first = fileLines.length - contentLines.length;
-  if (first < 0) return false;
-  for (let line = 0; line < contentLines.length; line += 1) {
-    const [contentStart, contentEnd] = contentLines[line];
-    const [fileStart, fileEnd] = fileLines[first + line];
-    if (
-      !head
-        .slice(fileStart, fileEnd)
-        .endsWith(content.slice(contentStart, contentEnd))
-    ) {
-      return false;
-    }
-  }
-  const [contentStart, contentEnd] = contentLines[0];
-  const start = fileLines[first][1] - (contentEnd - contentStart);
-  return start > 0 && head.charAt(start - 1) === "{";
+  const start = contentStart(head, content);
+  return start !== undefined && start > 0 && head.charAt(start - 1) === "{";
 }
 
 /**
@@ -252,18 +303,25 @@ function endsAtBrace(head: string, content: string): boolean {
  * end (its block container, a list item or block quote, ended first). The
  * grammar tokenizes flow before paragraph text, so a container closing
  * there may be followed by other calls: the one sought is the call whose
- * content maps to `head`'s end.
+ * content maps to `head`'s end — in the text the grammar parsed, which a
+ * refusal's respelling may have changed (`analysisParse`), so the content
+ * is as spelled there: only leading comments differ, blanked to whitespace
+ * without a token or line moving, which leaves every measure taken of it
+ * below unchanged.
  */
 function collectedAtEnd(head: string): Collected | undefined {
-  const { calls } = analysisParse(head + "}");
+  const { calls, parsed } = analysisParse(head + "}");
+  const spelled = parsed.slice(0, head.length);
   for (let index = calls.length - 1; index >= 0; index -= 1) {
     const value = calls[index].value;
-    if (endsAtBrace(head, value)) return { content: value, kind: "expression" };
+    if (endsAtBrace(spelled, value)) {
+      return { content: value, kind: "expression" };
+    }
     const inner = value.slice(2, -2);
     if (
       value.startsWith("({") &&
       value.endsWith("})") &&
-      endsAtBrace(head, inner)
+      endsAtBrace(spelled, inner)
     ) {
       return { content: inner, kind: "spread" };
     }
@@ -334,11 +392,11 @@ function openContainerOffset(text: string, placed: number | undefined): number {
     closed.failure !== null &&
     closed.failure.ruleId === "unexpected-empty-expression"
   ) {
-    // An attribute value's content the comment deletions empty: judged
-    // as spelled, from where the grammar places it.
-    const start = placeStart(closed.failure) ?? text.length;
-    const content = text.slice(start);
-    return start + jsViablePrefix(content, "expression");
+    // The attribute open at the end holds whitespace and comments alone —
+    // content that holds a token is respelled, never refused so
+    // (`analysisParse`) — which a token and its closing brace complete:
+    // the whole file is viable.
+    return text.length;
   }
   const atEnd = collectedAtEnd(text);
   if (atEnd !== undefined) return measured(text, atEnd);
@@ -780,5 +838,280 @@ export function mdxSyntaxFailureOffset(text: string, fallback: number): number {
       return fallback;
     }
     throw error;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The grammar's refusal of an attribute's content as empty (SPEC 14.20)
+// ---------------------------------------------------------------------------
+//
+// SPEC 14.20 judges whether brace content is whitespace and comments alone
+// by the comment deletions and, as spelled, by lexing to no token, and the
+// braces of an attribute value or spread attribute admit no empty
+// expression. remark-mdx takes the deletions' verdict alone: it refuses an
+// attribute's content they empty before calling acorn — the
+// `unexpected-empty-expression` of micromark-util-events-to-acorn, thrown
+// through the whole parse — though such content may hold a token they
+// hide: a `/*` inside a line comment reaching a later line's `*/`, a line
+// comment the grammar ends at U+2028 or U+2029 while the deletions run on
+// to the next LF or CR. Such content is no empty expression: it derives
+// one expression beside whitespace and comments alone, or the brace closes
+// no container (SPEC 14.20). The refusal is undone by respelling the text
+// and parsing again: the refused content's leading comments — those among
+// the whitespace before its first token, or before the character at which
+// it fails to lex — are blanked to U+00A0, their line terminators kept.
+// The deletions then leave that token or character in place, so the
+// grammar hands the content to acorn (`mdxAcorn`), which judges it as
+// SPEC 14.20 does; what follows the leading comments — whose comments the
+// deletions judge (what follows the one expression) — stays as spelled.
+// No offset moves and the content lexes to the same tokens (U+00A0 is
+// ECMAScript whitespace), and no Markdown line changes: U+00A0 is neither
+// a line ending nor Markdown's space or tab, so every line keeps its
+// container prefix, its indentation, and its blankness. A brace inside
+// those comments, which the grammar tried to no avail (the refused brace
+// is the first whose content the deletions empty), is no longer tried.
+// Content that is whitespace and comments alone keeps the refusal, located
+// at its brace (`emptyAttributeOffset`).
+
+/** How many refusals one parse may undo — one per attribute at most. */
+const RESPELLINGS = 1024;
+
+/** How many braces past a refused content's start are searched. */
+const REFUSAL_BRACES = 4096;
+
+/** The braces tried one by one before the search halves. */
+const LINEAR_BRACES = 4;
+
+/** The character a respelling writes (SPEC 14.20 whitespace). */
+const RESPELLED = "\u00a0";
+
+/** A text respelled so the stock grammar judges it as SPEC 14.20 does. */
+interface Respelling {
+  /** The respelled text: the same length and line endings. */
+  readonly text: string;
+  /** Each respelled offset (UTF-16), with the character it held. */
+  readonly originals: ReadonlyMap<number, string>;
+}
+
+/**
+ * The content of the attribute whose content begins at `place`, from there
+ * to the brace at `brace`, as the stock grammar collects it when it tries
+ * that brace — undefined when it never does, having refused an earlier
+ * brace's content. An `x` spelled before the brace makes the grammar hand
+ * the content to acorn, which records it: no deletion empties content
+ * ending so.
+ */
+function contentBefore(
+  text: string,
+  place: number,
+  brace: number,
+): string | undefined {
+  const head = text.slice(0, brace) + "x";
+  const { calls } = recordedParse(head + "}");
+  // micromark reads U+0000 as U+FFFD.
+  const spelled = head.replace(/\0/gu, "\ufffd");
+  for (let index = calls.length - 1; index >= 0; index -= 1) {
+    const value = calls[index].value;
+    const contents =
+      value.startsWith("({") && value.endsWith("})")
+        ? [value, value.slice(2, -2)]
+        : [value];
+    for (const content of contents) {
+      if (content.endsWith("x") && contentStart(spelled, content) === place) {
+        return content.slice(0, -1);
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The content the stock grammar refused, placed at `place`: the first brace
+ * past it whose content, as collected, the deletions empty, and that
+ * content. A single-line content is collected as spelled; otherwise the
+ * grammar is asked (`contentBefore`), brace by brace and then by halving —
+ * before the refused brace each content is collected and not emptied, past
+ * it none is collected.
+ */
+function refusedContent(
+  text: string,
+  place: number,
+): { readonly brace: number; readonly content: string } | undefined {
+  const braces: number[] = [];
+  for (
+    let at = text.indexOf("}", place);
+    at !== -1 && braces.length < REFUSAL_BRACES;
+    at = text.indexOf("}", at + 1)
+  ) {
+    braces.push(at);
+  }
+  if (braces.length === 0) return undefined;
+  let low = 0;
+  const line = text.slice(place, braces[0]);
+  if (!/[\n\r]/u.test(line)) {
+    const content = line.replace(/\0/gu, "\ufffd");
+    if (commentDeletionsEmpty(content)) return { brace: braces[0], content };
+    low = 1;
+  }
+  let high = braces.length - 1;
+  while (low <= high) {
+    const middle = low < LINEAR_BRACES ? low : low + ((high - low) >> 1);
+    const content = contentBefore(text, place, braces[middle]);
+    if (content === undefined) {
+      high = middle - 1;
+    } else if (commentDeletionsEmpty(content)) {
+      return { brace: braces[middle], content };
+    } else {
+      low = middle + 1;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The comments among the whitespace `content` begins with, as the grammar
+ * lexes it — each [start, end) — up to its first token or the character at
+ * which it fails to lex; null when it lexes to no token, being whitespace
+ * and comments alone.
+ */
+function leadingComments(content: string): [number, number][] | null {
+  const comments: [number, number][] = [];
+  try {
+    const tokenizer = mdxAcorn.tokenizer(content, {
+      ...MDX_ACORN_OPTIONS,
+      onComment: (
+        _block: boolean,
+        _text: string,
+        start: number,
+        end: number,
+      ): void => {
+        comments.push([start, end]);
+      },
+    });
+    if (tokenizer.getToken().type === tokTypes.eof) return null;
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+  }
+  return comments;
+}
+
+/**
+ * The file offset of each character of `content` — an attribute's content
+ * from `place` to the brace at `brace`, as the grammar collects it — or
+ * null where they disagree. The grammar collects each line after the first
+ * less its Markdown container prefix and indentation, so each content line
+ * is a suffix of its file line, and the lines correspond from the last.
+ */
+function contentPositions(
+  text: string,
+  place: number,
+  brace: number,
+  content: string,
+): number[] | null {
+  const positions = new Array<number>(content.length);
+  let at = brace;
+  for (let index = content.length - 1; index >= 0; index -= 1) {
+    const code = content.charCodeAt(index);
+    if (code === 0x0a || code === 0x0d) {
+      // Past the file line's uncollected prefix, to its own ending.
+      while (at > place && text.charCodeAt(at - 1) !== code) at -= 1;
+    }
+    at -= 1;
+    const spelled = text.charCodeAt(at);
+    if (
+      at < place ||
+      (spelled !== code && !(spelled === 0 && code === 0xfffd))
+    ) {
+      return null;
+    }
+    positions[index] = at;
+  }
+  return content.length === 0 || positions[0] === place ? positions : null;
+}
+
+/** ECMAScript 2024's line terminators: LF, CR, U+2028, U+2029. */
+function isLineTerminator(code: number): boolean {
+  return code === 0x0a || code === 0x0d || code === 0x2028 || code === 0x2029;
+}
+
+/**
+ * SPEC 14.20: `text` respelled where the stock grammar refused an
+ * attribute's content as empty (`failure`, placed at the content's start)
+ * although it holds a token or fails to lex — its leading comments blanked
+ * to U+00A0 — or null where the refusal stands: the content is whitespace
+ * and comments alone, or the failure is another.
+ */
+function respellRefusedContent(
+  text: string,
+  failure: MdxFailure,
+): Respelling | null {
+  if (
+    failure.source !== "micromark-extension-mdx-expression" ||
+    failure.ruleId !== "unexpected-empty-expression"
+  ) {
+    return null;
+  }
+  const place = placeStart(failure);
+  if (place === undefined) return null;
+  try {
+    const refused = refusedContent(text, place);
+    if (refused === undefined) return null;
+    const leading = leadingComments(refused.content);
+    if (leading === null || leading.length === 0) return null;
+    const positions = contentPositions(
+      text,
+      place,
+      refused.brace,
+      refused.content,
+    );
+    if (positions === null) return null;
+    const units = text.split("");
+    const originals = new Map<number, string>();
+    for (const [start, end] of leading) {
+      for (let index = start; index < end; index += 1) {
+        if (isLineTerminator(refused.content.charCodeAt(index))) continue;
+        const at = positions[index];
+        originals.set(at, text.charAt(at));
+        units[at] = RESPELLED;
+      }
+    }
+    return originals.size === 0 ? null : { text: units.join(""), originals };
+  } catch (error) {
+    // Nesting too deep to probe: the refusal stands.
+    if (error instanceof AnalysisAbandoned || error instanceof RangeError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * `parse` — remark-mdx's stock grammar with `mdxAcorn`, as parsed here —
+ * applied to `text` as SPEC 14.20 judges it: each refusal of an
+ * attribute's content as empty that holds a token undone by respelling
+ * (`respellRefusedContent`). The result comes with each respelled offset's
+ * original character (none where the grammar refused no such content);
+ * where the text is not well-formed, the last failure is thrown.
+ */
+export function parseAsJudged<T>(
+  text: string,
+  parse: (text: string) => T,
+): { readonly result: T; readonly originals: ReadonlyMap<number, string> } {
+  let parsed = text;
+  const originals = new Map<number, string>();
+  for (let round = 0; ; round += 1) {
+    try {
+      return { result: parse(parsed), originals };
+    } catch (error) {
+      const respelled =
+        round < RESPELLINGS && typeof error === "object" && error !== null
+          ? respellRefusedContent(parsed, error as MdxFailure)
+          : null;
+      if (respelled === null) throw error;
+      for (const [at, original] of respelled.originals) {
+        if (!originals.has(at)) originals.set(at, original);
+      }
+      parsed = respelled.text;
+    }
   }
 }
