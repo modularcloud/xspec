@@ -1254,6 +1254,78 @@ self project 22 files, 2896 passed, 0 skipped under the namespace (~90 s; 2867 +
 `certification run against` lines; the ledger-wide duplicate-bytes probe 730 records
 in 33 groups.
 
+**Resolved by Task 23 (the §14 modules; c782148 converts, the closing commit
+records).** Sixty-six records, seven existing ones renamed (six of other modules,
+exported there — two hoisted out of a table or map first). `section-14.ts` 65 —
+T14-3's configuration-error arm (`specs/invalid.mdx`; `specs/broken.mdx`
+`unparseable`, the workspace `mdx` dropped); the sweep table `SWEEP_ENTRIES`
+converted uniformly (T14-6's first entry, its body's first workspace, included):
+`specArm` takes a `StagedMdx` (its conditional `mdx.unparseable` for 14.20 gone — the
+14.20 record declares it), the ten literal-bodied entries wrapped in place
+(`"T14-4/T14-6 sweep specs/a.mdx (<condition>, <label>)"`), 14.11's alpha/bravo and
+14.19's `specs/a#b.mdx` wrapped in place, `codeArm`'s spec source one record
+`CODE_ARM_SPEC_SOURCE`; the minimal valid a1 source spelled five times (the 14.13 and
+14.22 entries, `VALID_SPECS_DECL`, `BOGUS_KEY_DECL`, `READ_REFUSAL_DECL`) ONE record
+`VALID_A1_BEHAVIOR` declared before the table, the other spellings deleted; the 14.1
+entry's bytes were `T14_4_ID_LESS_EDIT`'s (a same-module duplicate, Task 20's sub-rule
+(i)): one record `ID_LESS_A_SOURCE`, moved before the table (a `const` used by the
+table must precede it) and renamed for both sites; `READ_REFUSAL_DECL`'s
+`specs/sub/b.mdx`; T14-5's `T14_5_SPEC_SOURCE` wrapped in place (both arms); T14-7's
+multi, import-cycle A, sibling A, and invalid-workspace R records made from the kept
+window strings (`T14_7_*_STAGED`), cycle B, sibling B/C, the invalid-path A, the
+spelling origin `a.mdx`, and the valid Bad twin wrapped in place; T14-8's Col (its
+`duplicate-import-binding` allowance moved from the workspace `mdx` to the record),
+One, Two, CycA/CycB, ImpA/ImpB, Emb, Pol; T14-11's `RangeRuleCase` table converted
+uniformly ((a) included): every `.mdx` entry wrapped in place, `unparseable` for (c),
+(m), (v), the orphaned `RangeRuleCase.mdx` field and `runRangeRuleArm`'s `mdx` removed
+(`WorkspaceMdxDecl` no longer imported), `T14_11_A_MDX` one record named for its
+`specs/A.mdx` and `specs/BASE.mdx` sites, (v)'s computed `T14_11_ENCODING_FILES` rows
+carrying `contents` (a record for each spec source, bytes for each code source), (n)'s
+and (o)'s sources module-level records. `section-14-ii.ts` 1 — arm (g)'s
+`LISTING_FIXTURE` `specs/sub/S.mdx` (`"T14-10 …"`: the prepared workspace and the
+invalid-configuration one). Reused by import and renamed (the note's byte-identical
+spellings): `VALID_A1_SOURCE` and `POLICY_HI_SOURCE` exported from
+`section-12.1-12.2.ts`, the policy family's `lo/L.mdx` hoisted there to
+`POLICY_LO_SOURCE`, and T5.3-1's self-depends record — 14.9's primary test, the note's
+first-named of the two — hoisted in `section-5.1-5.3.ts` to `SELF_DEPENDS_STAGED`,
+each named `"…/T14-4/T14-6 …"` with the `specs/a.mdx` site. Sub-rule applied (found by
+the duplicate-bytes probe before the closing commit): a new entry whose bytes equal a
+record the SAME test already stages elsewhere is that record (the naming rule's "identical
+bytes one test stages at several sites are ONE record"), even across modules — T14-7's
+destination-component `specs/Src.mdx` is `section-6.5.ts`'s `V4_SOLO_SOURCE` (T14-7
+stages it through `MOVE_DERIVED_PATH_FILES`) and its spelling arm's `specs/b.mdx` is
+`section-6.5-iii.ts`'s `A13_FOURTH_STAGED` (through the M17 arms), both exported and
+renamed for the new path; a byte-identical record of ANOTHER test stays Task 14's
+observation. Left plain (each its body's first workspace): T14-1's, T14-2's, T14-3's
+masking workspace (its `mdx.unparseable` stays), T14-8's triple-duplicate workspace,
+T14-10's arm (a) `SOURCE_DECL`; every configuration and code entry. Read-based
+enumeration: the 44 creation sites of `section-14.ts` and `section-14-ii.ts`'s 2
+creations and 18 `prepareRefusalWorkspace` calls; behind the diagnosed failures —
+T14-4's and T14-6's later sweep entries and dedicated arms, T14-7's every arm after the
+first, T14-10's (g), T14-11's (d)–(v), (n), (o) — each stages records now.
+Observation for the determination, not acted on (Task 14's class): the duplicate-bytes
+probe finds 796 records in 36 groups — three new cross-test groups: T14-11 (q)'s
+`specs/A.mdx` = `"T14-12 (g) …"` (`section-14-iii.ts`), T14-7's sibling `specs/B.mdx` =
+`"T6.5-9 spec-source arm specs/text.mdx"`, the sweep's 14.4 source = `"T12.2-2
+specs/B.mdx with an invalid ID segment (14.4) …"`. Checks: the sites hook logged 57
+lines (27 (test, path) pairs, the plan's list) before in the plain run and 114 lines
+(51 pairs) in a per-arm diagnostic variant (`withWorkspace` swallowing its body's
+failure in `section-14.ts`; T14-9's and T14-10's arms wrapped, arm (g)'s first block
+too), and no file after in either; the sha256 capture over `section-14.test`,
+`section-14-ii.test`, `section-5.1-5.3.test`, `section-12.1-12.2.test`,
+`section-6.5.test`, `section-6.5-iii.test`, and `section-6.6.test` (514 writes,
+compared sorted) identical, the variant's (609 writes; 205 per-arm lines) identical;
+44 tests, 23 pass and 21 fail — T12.2-4, T14-2, T14-4, T14-6, T14-7, T14-9, T14-10,
+T14-11, T6.5-6…T6.5-10, T6.5-13, T6.5-15…T6.5-19, T6.6-3, T6.6-4 — with identical
+verdicts and diagnoses; red check: an unclosed tag spliced into four new records
+(`VALID_A1_BEHAVIOR`, sibling C, `T14_11_A_MDX`, the T14-10 listing source) and the
+sweep's 14.20 source made to derive fail exactly those five as `mdx-derivability`.
+Known state after Task 23: the S-9 self-test 822 tests over 796 records (789 `T…`,
+4 `E-6`, 3 `P-…`); self project 22 files, 2962 passed, 0 skipped under the namespace
+(~91 s; 2896 + the 66 record tests); certification 144 PASS / 33 FAIL / 0 error /
+0 hang over the 23 `certification run against` lines; the ledger-wide duplicate-bytes
+probe 796 records in 36 groups.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -1420,54 +1492,6 @@ conversion. Tests the list does not name may still hold post-invocation creation
 behind a diagnosed failure or in an arm the built product never reaches — recipe 5.
 
 ## Tasks
-
-### Task 23 — Initial-file conversion: §14 (`section-14.ts`, `section-14-ii.ts`)
-
-**Workspace creations to judge:** 14 (44; 4 records; T14-11's own `RangeRuleCase`
-tables — arms (a)–(v) and the five encoding forms, `T14_11_ENCODING_FORMS` ~4424,
-whose `Uint8Array` contents are fine as record bytes — wrap in place, one record per
-row per `.mdx` entry, `unparseable` where the row declares it), 14-ii (2; the
-`PRECEDENCE_FIXTURE` ~657 / `LISTING_FIXTURE` ~1135 `RefusalFixture` decls spread
-`RENAME_FIXTURE.decl.files`, records since Task 21 — `PRECEDENCE_FIXTURE` adds no
-`.mdx` entry; `LISTING_FIXTURE`'s own `SUB_PATH` source, prepared by T14-10's arm (g)
-after its earlier arms' invocations, becomes a record named with T14-10).
-**Reachable sites (the instrumented run):**
-- `section-14.ts` — T14-3 (2): specs/broken.mdx specs/invalid.mdx
-- `section-14.ts` — T14-4 (7): hi/H.mdx lo/L.mdx specs/a#b.mdx specs/a.mdx specs/alpha.mdx specs/bravo.mdx specs/s.mdx
-- `section-14.ts` — T14-5 (1): specs/U.mdx
-- `section-14.ts` — T14-6 (7): specs/A.mdx specs/BASE.mdx specs/a#b.mdx specs/a.mdx specs/alpha.mdx specs/bravo.mdx specs/s.mdx (its
-  specs/A.mdx and specs/BASE.mdx are T14-12's (b) `NOPE_DECL`, spread through
-  `T14_12_REPORTER_STAGINGS` — records since Task 22; Task 23's before-log lacks them)
-- `section-14.ts` — T14-8 (9): specs/Col.mdx specs/CycA.mdx specs/CycB.mdx specs/Emb.mdx specs/ImpA.mdx specs/ImpB.mdx specs/One.mdx specs/Pol.mdx specs/Two.mdx
-- `section-14.ts` — T14-11 (3): specs/A.mdx specs/comment-only.mdx specs/empty.mdx
-- `section-14-ii.ts` — T14-10 (3): specs/a/A.mdx specs/b/B.mdx specs/c/C.mdx (the rename
-  fixture's, records since Task 21 — Task 23's before-log lacks them)
-**Failing here:** T14-2, T14-4, T14-6, T14-7, T14-11 (14.ts); T14-9, T14-10 (14-ii).
-**Certification scope:** none.
-**Notes.** Since Task 22 `RangeRuleCase.files` takes records and T14-11's (w) arms
-stage the home modules' records (no `mdx`), and the sweeps' spread of
-`T14_12_REPORTER_STAGINGS` stages `section-14-iii.ts`'s records (named with T14-4 and
-T14-6) — neither needs converting here. T14-4/T14-6 share records already (`"T14-4/T14-6 …"`); T14-3's
-`specs/broken.mdx` and `specs/invalid.mdx` are `unparseable` records (their paths
-leave `mdx.unparseable`); `specs/a#b.mdx` is an ordinary key; T14-11's arm (v) prefix
-form (AGENTS.md's arm-filter and stand-in recipes reach it); `RENAME_REFUSAL_FILES`
-(T14-7's first workspace, ~3149) already stages records named with T14-7 (Task 9), as
-do `MOVE_REFUSAL_FILES` and `MOVE_DERIVED_PATH_FILES` (its second and third
-workspaces, ~3178 and ~3213; Task 10) and the `R16_REFUSED_ARMS` / `M17_REFUSED_ARMS`
-files its `runT147InvalidRewriteArms` / `runT147MovedImportArms` spread (Task 11:
-records named with T14-7). Byte-identical spellings (Task 20): `STALE_DECL`'s
-`specs/a.mdx` (`'<S id="a1">\nAlpha behavior.\n</S>\n'`) is `section-12.1-12.2.ts`'s
-`VALID_A1_SOURCE`; `POLICY_DECL`'s `hi/H.mdx` is its `POLICY_HI_SOURCE` and its
-`lo/L.mdx` the record wrapped in place in `POLICY_FAMILY_FILES` (`"T12.2-2 policy
-family lo/L.mdx (…)"` — hoist it to a named export); the 14.9 `specArm`'s
-`'<S id="s" d={"s"}>\nDepends on itself.\n</S>\n'` is `"T5.3-1 self-depends
-specs/A.mdx"` (`section-5.1-5.3.ts`) and `"T12.2-2 cycles family specs/A.mdx (…)"`
-(already a cross-module group). Where such a staging is post-invocation, reuse the
-record by export and import, renamed with the staging IDs in ID order and the path
-(Tasks 13 and 19), never re-spell.
-**Checks.** Recipes 1–5 over `section-14.test`, `section-14-ii.test`; after this task
-the whole suite's initial `.mdx` entries after a body's first invocation are records,
-`perDraw`, or `unchecked` — Task 24 verifies it.
 
 ### Task 23b — P-12's break-parse twist: a guard-exempt, builder-judged-unparseable declaration for a draw's initial file (before Task 24)
 
