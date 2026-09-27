@@ -34,16 +34,16 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T1.4-1 | section-1.4 | 1, 5 (passes since Task 5 landed; since Task 1 its one failing arm had been the `&#46;` reference spelling) |
 | T1.4-4 | section-1.4 | 1 (passes since Task 1 landed; it stages no character reference) |
 | T1.5-2 | section-1.5 | 9 (passes since Task 9 landed) |
-| T1.6-5 | section-1.6-1.7 | 14 |
+| T1.6-5 | section-1.6-1.7 | 14 (passes since Task 14 landed) |
 | T1.7-2 | section-1.6-1.7 | 19, 20 |
 | T2.1-2 | section-2.1 | 6 (passes since Task 6 landed) |
-| T2.3-3 | section-2.2-2.3 | 7, 14 (since Task 7 its five embedding and five invalid-container arms hold; it stops first at Task 14's offset arm, `{text("a") text("b")}` located 48–49 where the zero-length 49–49 is required) |
-| T2.4-2 | section-2.4 | 14 (since Task 12 its dynamic arms hold and each TypeScript-only form is 14.20 alone; it stops first at `d={BASE.a!}`'s location, [94,95) — the `!` — where the zero-length 95..95 is required) |
+| T2.3-3 | section-2.2-2.3 | 7, 14 (passes since Task 14 landed) |
+| T2.4-2 | section-2.4 | 14 (passes since Task 14 landed) |
 | T2.4-5 | section-2.4 | 6 (passes since Task 6 landed) |
 | T2.5-3 | section-2.5-2.6 | 5 (passes since Task 5 landed) |
 | T2.6-1 | section-2.5-2.6 | 3 (passes since Task 3 landed) |
-| T2.7-3 | section-2.7 | 14 |
-| T2.7-4 | section-2.7 | 13, 14 (since Task 13 its ten comment forms and the expression-beside-comment arm hold; it stops first at the U+0085 arm's location, [65,67) where the zero-length 65..65 is required) |
+| T2.7-3 | section-2.7 | 14 (passes since Task 14 landed) |
+| T2.7-4 | section-2.7 | 13, 14 (passes since Task 14 landed) |
 | T3-7 | section-3 | 10 (passes since Task 10 landed) |
 | T4-2 | section-4 | 6 (passes since Task 6 landed) |
 | T4-5 | section-4 | 16, 17 |
@@ -87,7 +87,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T11.3-3 | section-11.3 | 1, 44 (since Task 1 its first failing arm is configuration-first) |
 | T11.4-2 | section-11.4 | 40 |
 | T11.4-3 | section-11.4 | 3 (passes since Task 3 landed) |
-| T11.4-4 | section-11.4 | 14 |
+| T11.4-4 | section-11.4 | 14 (passes since Task 14 landed) |
 | T11.4-6 | section-11.4 | 3 (passes since Task 3 landed) |
 | T11.5-3 | section-11.5 | 9 (passes since Task 9 landed) |
 | T11.6-2 | section-11.6 | 4 (passes since Task 4 landed) |
@@ -106,61 +106,16 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T14-7 | section-14 | 22, 23, 24, 25, 35 |
 | T14-9 | section-14-ii | 48 |
 | T14-10 | section-14-ii | 49, 50 |
-| T14-11 | section-14 | 13, 14, 15, 16 (Tasks 12 and 13 landed; it stops first at arm (c), `d={}`'s location, Task 14) |
-| T14-12 | section-14-iii | 14 (since Task 12 its positive arms (a)–(o) hold — the early errors, the expression-grammar forms, and the TypeScript post-parse checks; it stops first at negative arm (p), `010` in a `.ts` file, located [55,58) where the zero-length 56..56 is required; since Task 10 arm (s), the import-then-`const x = 1` block, reports 14.20 over the whole `const` statement where the zero-length range at its start is required) |
+| T14-11 | section-14 | 13, 14, 15, 16 (Tasks 12–14 landed: arms (a)–(g) hold and, probed by hand, every 14.20 arm — (c), (m), (v), and the (w) family; it stops first at arm (h), where the repeated prop locates only its second spelling, [45,54) where [36,44) and [45,54) are required — Task 15) |
+| T14-12 | section-14-iii | 14 (passes since Task 14 landed) |
 
 Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), Task 53 (a corrupt session in `review list`), and Task 56 (container content the comment deletions empty but that holds a token, found while landing Task 13); Task 55 (a path beginning with U+FEFF, found while landing Task 9) has landed. Task 29 landed with Task 10: once ESM blocks were bounded as stock MDX 3 bounds them, T6.6-2's move (passing before) added its import at offset 0 of an origin whose first line is `<S id="org">`, the block absorbed that line, and the move's own validation of the rewritten workspace refused it — so additions now go at an admissible offset (`placeSpecImportAdditions` in `src/core/move.ts`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
 
 ---
 
-## Task 14 — A 14.20 finding carries one zero-length range at the failure's offset (SPEC 14 location rule, 14.20, 1.6; A9, C15, and B's note on T11.4-4)
-
-Tasks 10–13, which changed where parse failures arise and which containers derive as comments, have landed.
-
-**Requirement.** SPEC 14: "An unparseable source (14.20) carries one zero-length range at the failure's offset":
-- for a refused read (14.25), 0;
-- for an encoding failure, the byte length of the longest well-formed UTF-8 prefix;
-- for a byte-order mark, 0;
-- for a syntax failure, "the byte length of the longest whole-character prefix of the file with which some well-formed file begins — the file's byte length when the whole file is such a prefix".
-
-SPEC 14.20 places `d={}`'s failure at its closing brace, and makes `010` and `09` 14.20 in a TypeScript source.
-
-**Observed.** Every 14.20 range is non-empty, and syntax offsets are often wrong. Reported pairs (product, then required):
-
-| Case | Product | Required |
-|---|---|---|
-| encoding failure | [21,22) | [21,21) |
-| byte-order mark (also T11.4-4) | [0,3) | [0,0) |
-| `{...a, b}`, A's staging | [17,18) | [15,15) |
-| `{...a, b}`, C's staging (the comma) | 58 | 56 |
-| `d={ /* c */ }` (the closing brace) | 46 | 55 |
-| `d={}` | 13..14 | zero-length, at its closing brace |
-| `010` in a `.ts` file | 10..13 | 11..11 |
-| `09` in a `.ts` file | 10..12 | 11..11 |
-| `d={BASE.a!}` (T2.4-2; 14.20 since Task 12) | the `!` ([94,95) in T2.4-2's staging) | its closing brace (95..95): `!` may begin `!=` |
-| `{text(BASE.a!)}` (T2.4-2) | the `!` | its closing parenthesis |
-| `d={BASE.a as X}` (T2.4-2) | the whitespace before `as` (the attribute's "Unexpected content after expression" at the chain's end) | the offset of `as` |
-| `{text(BASE.a as X)}` (T2.4-2) | `as` itself, one character wide | the offset of `as`, zero-length |
-
-**Location.**
-- `parseFailureFinding` in `src/core/mdx.ts`. Since Task 11 every MDX syntax failure, tag pairing included, is a stock toolchain `VFileMessage` (the product's own `MdxGrammarError` is gone): a construct that ends while an element opened inside it is still open places that construct's whole position (`<S id="x">Text`, a blank line, `more</S>`: the paragraph, 0..14, where the rule's offset is 15, the blank line's start); a closing tag that cannot close the open element places its own tag (`</T>` after `<S id="a">x`; `</S>` inside a paragraph after a flow-position `<S id="a">`), or its `/` alone when no element is open; an element left open at the file's end places nothing (today located 0..0; the rule's offset is the file's byte length).
-- The encoding and BOM path through `decodeSourceBytes` in `src/core/source-text.ts`.
-- The syntax-diagnostic finding in `src/core/code-analysis.ts`.
-
-**Change.**
-- Emit `{start: o, end: o}` for every 14.20.
-- Compute `o` per the rule. For a syntax failure `o` is the longest viable prefix. That is usually the parser's failure position, but not always: a parser may report the offending token's start or a whole diagnostic span. For example, TypeScript flags `010` at its start, while the prefix ending at `0` is viable and the one ending at `01` is not.
-- Implement the rule for the forms the tests pin — T1.6-5 and T14-11's (w) family in the registry — without special-casing test inputs.
-
-**Verification.**
-- Should turn green: `section-1.6-1.7.test.ts` (T1.6-5), `section-2.7.test.ts` (T2.7-3), `section-11.4.test.ts` (T11.4-4).
-- `section-2.7.test.ts` (T2.7-4: since Task 13 only its 14.20 offset arms remain), `section-2.2-2.3.test.ts` (T2.3-3, with Task 7), `section-2.4.test.ts` (T2.4-2: since Task 12 only its offset arms remain).
-- `section-14.test.ts`: T14-11 arm (c) and the (w) family. `section-14-iii.test.ts`: T14-12 (since Task 12 only its negative arms' offsets remain).
-- Neighbours: `section-14-ii.test.ts` (T14-10's refused-read arm stays at 0..0), `section-16-p8.test.ts`.
-
 ## Task 56 — Content the comment deletions empty but that holds a token derives one expression or none (SPEC 14.20, 2.7; found while landing Task 13)
 
-After Task 14 (its offsets).
+Task 14 has landed: every 14.20 is one zero-length range at the longest viable prefix (`src/core/mdx-syntax-failure.ts` over `js-syntax-failure.ts` and `viable-prefix.ts`). That analysis re-parses through `mdxAcorn` and measures container content by the one-expression grammar itself, so a failure this task introduces is located without further work; check the three shapes' offsets by hand.
 
 **Requirement.** SPEC 14.20 judges whether a container's content is whitespace and comments alone "by deleting first each block comment — `/*` through the nearest `*/` — then each line comment", and adds: "The content so judged, as spelled before those deletions, must moreover lex to no token under the grammar". Content the deletions empty but that holds a token is therefore no empty expression (2.7): like any other container content, it must derive exactly one ECMAScript 2024 `Expression` beside whitespace and comments alone, or the file is unparseable.
 
@@ -176,7 +131,7 @@ The stock parser agrees with the product on all three, in flow and text position
 - Where `parse` receives content the deletions empty (only the empty-expression path does: an ESM block begins with `import` or `export`, and an attribute value's empty content is refused before parsing) and that content holds a token, derive it as the non-empty path does: one expression (`parseExpressionAt`) followed by whitespace and comments alone, judged by the same deletions.
 - Throw a failure at acorn's position, so the stock swallow rule (a failure at the content's end runs on to a later brace) still applies.
 - Return a derived expression as the stock non-empty path shapes it (a Program holding one ExpressionStatement), so classification sees it: 14.16 or an embedding.
-- Locate failures by Task 14's rule.
+- Locate failures by Task 14's rule (already in place: `mdxSyntaxFailureOffset`).
 
 **Verification.** No test pins the form. Hand-probe the three shapes above, inline and own-line, through `parseSpecSource` (AGENTS.md, the Task 12 and Task 13 probe bullets), and check with the Task 12 differential recipe that every other stock verdict is unchanged. Neighbours: `section-2.7.test.ts`, `section-16-p2-p3.test.ts`, `section-16-p8.test.ts`.
 

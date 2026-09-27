@@ -40,6 +40,7 @@ import { unified } from "unified";
 import { jsViablePrefix } from "./js-syntax-failure.js";
 import type { JsContentKind } from "./js-syntax-failure.js";
 import { MDX_ACORN_OPTIONS, mdxAcorn } from "./mdx-acorn.js";
+import { closingTagDivergence } from "./viable-prefix.js";
 
 // ---------------------------------------------------------------------------
 // The recording parser
@@ -173,11 +174,13 @@ function lineIndexOf(spans: readonly [number, number][], at: number): number {
 }
 
 /**
- * Map an offset in collected content to the file: the stock grammar
- * collects a container's content line by line, each line's leading
- * container prefix and indentation dropped, so each content line is a
- * suffix of its file line; the lines correspond by their distance from an
- * anchor known in both.
+ * Map an offset in collected content to the file, given an anchor known in
+ * both: on the anchor's own content line, by its distance from the anchor;
+ * on an earlier line, by that line's end — the stock grammar collects a
+ * container's content line by line, each line's leading container prefix
+ * and indentation dropped, so a content line ending at a line terminator
+ * is a suffix of its file line, the lines corresponding by their distance
+ * from the anchor's. A later line's start in the file is not known.
  */
 function contentToFile(
   text: string,
@@ -187,16 +190,21 @@ function contentToFile(
   at: number,
 ): number | undefined {
   const contentLines = lineSpans(content);
-  const fileLines = lineSpans(text);
-  const line =
-    lineIndexOf(fileLines, anchorInFile) -
-    (lineIndexOf(contentLines, anchorInContent) -
-      lineIndexOf(contentLines, at));
-  if (line < 0 || line >= fileLines.length) return undefined;
-  const [contentStart, contentEnd] =
-    contentLines[lineIndexOf(contentLines, at)];
-  const fileEnd = fileLines[line][1];
-  const mapped = fileEnd - (contentEnd - contentStart) + (at - contentStart);
+  const atLine = lineIndexOf(contentLines, at);
+  const anchorLine = lineIndexOf(contentLines, anchorInContent);
+  let mapped: number;
+  if (atLine === anchorLine) {
+    mapped = anchorInFile + (at - anchorInContent);
+  } else if (atLine < anchorLine) {
+    const fileLines = lineSpans(text);
+    const line = lineIndexOf(fileLines, anchorInFile) - (anchorLine - atLine);
+    if (line < 0) return undefined;
+    const [contentStart, contentEnd] = contentLines[atLine];
+    mapped =
+      fileLines[line][1] - (contentEnd - contentStart) + (at - contentStart);
+  } else {
+    return undefined;
+  }
   return mapped >= 0 && mapped <= text.length ? mapped : undefined;
 }
 
@@ -310,8 +318,11 @@ function spreadOffset(
       ? head
       : (properties[1] ?? properties[0]);
   if (placed === undefined) return at;
+  // The grammar places a node before the content (the wrapping `({`) at
+  // the content's start.
+  const anchor = Math.max(0, placed.start - 2);
   const viable = jsViablePrefix(content, "spread");
-  return contentToFile(text, content, placed.start - 2, at, viable) ?? at;
+  return contentToFile(text, content, anchor, at, viable) ?? at;
 }
 
 /** The ESM statement kinds (SPEC 14.20), as the stock grammar allows. */
@@ -354,40 +365,6 @@ function esmOffset(
 }
 
 /**
- * A closing tag that cannot close the open element: the position where
- * its name departs from that element's (a fragment's name is empty).
- */
-function closingTagDivergence(
-  text: string,
-  at: number,
-  expected: string,
-): number {
-  let index = at;
-  const skipSpace = (): void => {
-    while (index < text.length && /\s/u.test(text.charAt(index))) {
-      index += 1;
-    }
-  };
-  if (text.charAt(index) === "<") index += 1;
-  skipSpace();
-  if (text.charAt(index) === "/") index += 1;
-  let matched = 0;
-  for (;;) {
-    skipSpace();
-    if (
-      matched < expected.length &&
-      index < text.length &&
-      text.charAt(index) === expected.charAt(matched)
-    ) {
-      index += 1;
-      matched += 1;
-      continue;
-    }
-    return index;
-  }
-}
-
-/**
  * Whether `probe`, a prefix of the file ending at `at` plus a completion,
  * fails only at or after `at`: its grammar failure, if any, is the
  * completion's or the end's. A pairing failure in the probe counts by the
@@ -411,16 +388,41 @@ function completes(probe: string, at: number): boolean {
 const PROBE_REACH = 256;
 
 /**
- * An element left open when the construct holding it ended (at `end`): the
- * longest prefix the element's closing tag — directly, or after one more
- * character, so a line the construct's end hangs on can go on — still
- * completes.
+ * The continuation a line inside the element's container begins with: the
+ * text before the element on its opening line (`line`, `column` 1-based),
+ * list markers blanked — `> ` stays `> `, `- ` becomes two spaces.
  */
-function constructEndOffset(text: string, end: number, closer: string): number {
+function containerPrefix(text: string, line: number, column: number): string {
+  const spans = lineSpans(text);
+  const span = spans[line - 1];
+  if (span === undefined) return "";
+  const before = text.slice(span[0], Math.min(span[1], span[0] + column - 1));
+  return before.replace(/[-*+]|[0-9]{1,9}[.)]/g, (marker) =>
+    " ".repeat(marker.length),
+  );
+}
+
+/**
+ * An element left open when the construct holding it ended (at `end`): the
+ * longest prefix the element's closing tag still completes — directly, or
+ * after one more character so a line the construct's end hangs on can go
+ * on, and at a line start also after the element's container prefix.
+ */
+function constructEndOffset(
+  text: string,
+  end: number,
+  closer: string,
+  prefix: string,
+): number {
   const bound = Math.min(text.length, end + PROBE_REACH);
   for (let at = end + 1; at <= bound; at += 1) {
     const head = text.slice(0, at);
-    if (!completes(head + closer, at) && !completes(head + "x" + closer, at)) {
+    const lineStart = /[\n\r]$/.test(head);
+    const completions =
+      lineStart && prefix.length > 0
+        ? [closer, "x" + closer, prefix + closer, prefix + "x" + closer]
+        : [closer, "x" + closer];
+    if (!completions.some((completion) => completes(head + completion, at))) {
       return at - 1;
     }
   }
@@ -444,7 +446,8 @@ function crossingOffset(text: string, at: number): number {
 /** mdast-util-mdx-jsx's pairing failures, by message. */
 const UNEXPECTED_CLOSING_TAG =
   /^Unexpected closing tag `[^`]*`, expected corresponding closing tag for `<([^`>]*)>`/;
-const EXPECTED_CLOSING_TAG = /^Expected a closing tag for `<([^`>]*)>`/;
+const EXPECTED_CLOSING_TAG =
+  /^Expected a closing tag for `<([^`>]*)>` \((\d+):(\d+)-\d+:\d+\)/;
 
 function pairingOffset(text: string, failure: MdxFailure): number {
   const reason = String(failure.reason);
@@ -459,7 +462,12 @@ function pairingOffset(text: string, failure: MdxFailure): number {
     const end = placeEnd(failure);
     // Open at the end of the file: the whole file is a viable prefix.
     if (end === undefined) return text.length;
-    return constructEndOffset(text, end, `</${expected[1]}>`);
+    return constructEndOffset(
+      text,
+      end,
+      `</${expected[1]}>`,
+      containerPrefix(text, Number(expected[2]), Number(expected[3])),
+    );
   }
   if (reason.startsWith("Expected the closing tag") && start !== undefined) {
     return crossingOffset(text, start);
@@ -499,8 +507,46 @@ function classOffset(
   }
 }
 
-/** How many times the prefix check below may move the offset down. */
+/** How many times the checks below may move the offset down. */
 const PREFIX_CHECKS = 64;
+/** How many line starts a hidden-failure check backs up through. */
+const LINE_BACKUPS = 64;
+
+/** The start of the line holding the character before `at`. */
+function lineStartBefore(text: string, at: number): number {
+  let index = at - 1;
+  while (index > 0) {
+    const code = text.charCodeAt(index - 1);
+    if (code === 0x0a || code === 0x0d) break;
+    index -= 1;
+  }
+  return Math.max(0, index);
+}
+
+/**
+ * A failure before `offset` that the grammar's order hides: it tokenizes
+ * first and pairs tags only after, so a prefix ending inside an unfinished
+ * construct — a container or tag the offset lies in — reports that
+ * construct's end and nothing before it. The prefix is cut at line starts,
+ * backing up until it no longer ends inside such a construct, and a failure
+ * it reports before the cut is returned; null when there is none.
+ */
+function hiddenFailure(text: string, offset: number): number | null {
+  let cut = offset;
+  for (let backup = 0; backup < LINE_BACKUPS; backup += 1) {
+    const prefix = text.slice(0, cut);
+    const parsed = analysisParse(prefix);
+    if (parsed.failure === null) return null;
+    const at = classOffset(prefix, parsed.failure, parsed.calls);
+    if (at < cut) return at;
+    // Pairing ran, so nothing before the cut failed.
+    if (parsed.failure.source === "mdast-util-mdx-jsx" || cut === 0) {
+      return null;
+    }
+    cut = lineStartBefore(text, cut);
+  }
+  return null;
+}
 
 /**
  * SPEC 14, 14.20: the UTF-16 length of the longest prefix of `text` — a
@@ -512,17 +558,16 @@ export function mdxSyntaxFailureOffset(text: string, fallback: number): number {
   try {
     const whole = analysisParse(text);
     if (whole.failure === null) return fallback;
-    let offset = classOffset(text, whole.failure, whole.calls);
+    let offset = Math.max(
+      0,
+      Math.min(text.length, classOffset(text, whole.failure, whole.calls)),
+    );
     for (let check = 0; check < PREFIX_CHECKS; check += 1) {
-      if (offset >= text.length) return text.length;
-      const prefix = text.slice(0, offset);
-      const parsed = analysisParse(prefix);
-      if (parsed.failure === null) break;
-      const earlier = classOffset(prefix, parsed.failure, parsed.calls);
-      if (earlier >= offset) break;
-      offset = earlier;
+      const earlier = hiddenFailure(text, offset);
+      if (earlier === null || earlier >= offset) break;
+      offset = Math.max(0, earlier);
     }
-    return Math.max(0, Math.min(text.length, offset));
+    return offset;
   } catch (error) {
     if (
       error instanceof AnalysisAbandoned ||

@@ -10,8 +10,9 @@
 // diagnostic away from the character that made the prefix unviable: an
 // unterminated regular expression literal is reported over the literal,
 // the failure being where it stopped (a line terminator); an element
-// without a closing tag is reported at its opening tag, beside the
-// diagnostic where the closing tag was due; and a diagnostic at or past
+// without a closing tag is reported at its opening tag, the failure being
+// where the closing tag that ended it departs from its name; and a
+// diagnostic at or past
 // the end-of-file token is the end's, the whole file a viable prefix. From
 // there the prefix may run on into the offending token (`extendIntoToken`):
 // TypeScript flags `010` at its start, while the prefix `0` begins a
@@ -19,13 +20,12 @@
 
 import ts from "./ts-module.js";
 import type * as tst from "typescript";
-import { extendIntoToken } from "./viable-prefix.js";
+import { closingTagDivergence, extendIntoToken } from "./viable-prefix.js";
 
-/** A text's syntactic diagnostics, and its end-of-file token's full start. */
+/** A text's parse: its syntactic diagnostics, beside its tree. */
 export interface SyntaxDiagnosis {
+  readonly sourceFile: tst.SourceFile;
   readonly diagnostics: readonly tst.Diagnostic[];
-  /** Where trivia before the end of the file begins (UTF-16). */
-  readonly endOfFile: number;
 }
 
 /** TypeScript's token vocabulary: its punctuators and keywords. */
@@ -49,34 +49,64 @@ const ELEMENT_WITHOUT_CLOSING_TAG = 17008;
 /** "Merge conflict marker encountered." — trivia, yet never completed. */
 const CONFLICT_MARKER = 1185;
 
+/**
+ * A JSX element reported without a closing tag at its opening tag's name
+ * (`start`): TypeScript closes it where its children end, at the closing
+ * tag its parent's name took — the failure is where that tag's name
+ * departs from the element's (`<a><b></` is viable, `<a><b></a` is not),
+ * or the end when the file ends first.
+ */
+function unclosedElementPoint(
+  sourceFile: tst.SourceFile,
+  start: number,
+): number {
+  let point = start;
+  const visit = (node: tst.Node): void => {
+    if (
+      ts.isJsxElement(node) &&
+      node.openingElement.tagName.getStart(sourceFile) === start
+    ) {
+      point = closingTagDivergence(
+        sourceFile.text,
+        node.children.end,
+        node.openingElement.tagName.getText(sourceFile),
+      );
+      return;
+    }
+    if (node.pos <= start && start < node.end) ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return point;
+}
+
 /** Where a diagnosed text fails, or null when it is well-formed. */
 function failurePoint(text: string, diagnosis: SyntaxDiagnosis): number | null {
-  const located = diagnosis.diagnostics.filter(
-    (diagnostic) => diagnostic.start !== undefined,
-  );
-  if (located.length === 0) {
-    return diagnosis.diagnostics.length === 0 ? null : 0;
-  }
-  const placed = located.some(
-    (diagnostic) => diagnostic.code !== ELEMENT_WITHOUT_CLOSING_TAG,
-  )
-    ? located.filter(
-        (diagnostic) => diagnostic.code !== ELEMENT_WITHOUT_CLOSING_TAG,
-      )
-    : located;
-  const at = (diagnostic: tst.Diagnostic): number =>
-    diagnostic.code === UNTERMINATED_REGULAR_EXPRESSION
-      ? diagnostic.start! + (diagnostic.length ?? 0)
-      : diagnostic.start!;
+  const { sourceFile, diagnostics } = diagnosis;
+  if (diagnostics.length === 0) return null;
+  const at = (diagnostic: tst.Diagnostic): number => {
+    const start = diagnostic.start ?? 0;
+    switch (diagnostic.code) {
+      case UNTERMINATED_REGULAR_EXPRESSION:
+        return start + (diagnostic.length ?? 0);
+      case ELEMENT_WITHOUT_CLOSING_TAG:
+        return unclosedElementPoint(sourceFile, start);
+      default:
+        return start;
+    }
+  };
   let point = Number.POSITIVE_INFINITY;
-  for (const diagnostic of placed) point = Math.min(point, at(diagnostic));
+  let conflict = false;
+  for (const diagnostic of diagnostics) {
+    const here = at(diagnostic);
+    if (here < point) {
+      point = here;
+      conflict = false;
+    }
+    if (here === point && diagnostic.code === CONFLICT_MARKER) conflict = true;
+  }
   // A failure in the trivia before the end is the end's — unless it is a
   // conflict marker, which no continuation completes.
-  const conflict = placed.some(
-    (diagnostic) =>
-      diagnostic.code === CONFLICT_MARKER && at(diagnostic) === point,
-  );
-  if (point >= diagnosis.endOfFile && !conflict) return text.length;
+  if (point >= sourceFile.endOfFileToken.pos && !conflict) return text.length;
   return Math.min(point, text.length);
 }
 

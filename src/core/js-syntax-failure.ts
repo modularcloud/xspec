@@ -29,7 +29,7 @@
 import type { Options, Parser, TokenType } from "acorn";
 import { tokTypes } from "acorn";
 import { MDX_ACORN_OPTIONS, mdxAcorn } from "./mdx-acorn.js";
-import { extendIntoToken } from "./viable-prefix.js";
+import { closingTagDivergence, extendIntoToken } from "./viable-prefix.js";
 
 /**
  * The grammar content is judged by (SPEC 14.20): one `Expression` (an
@@ -165,41 +165,6 @@ const JSX_CLOSING_MISMATCH =
 const JSX_EMPTY_ATTRIBUTE =
   /^JSX attributes must only be assigned a non-empty expression/;
 
-/**
- * The position in a JSX closing tag `</name>` at which its name departs
- * from `expected` — the last character a viable prefix can hold is the
- * one before it (`<a></` is viable, `<a></b` is not).
- */
-function closingNameDivergence(
-  content: string,
-  at: number,
-  expected: string,
-): number {
-  let index = at;
-  const skipSpace = (): void => {
-    while (index < content.length && /\s/u.test(content.charAt(index))) {
-      index += 1;
-    }
-  };
-  if (content.charAt(index) === "<") index += 1;
-  skipSpace();
-  if (content.charAt(index) === "/") index += 1;
-  let matched = 0;
-  for (;;) {
-    skipSpace();
-    if (
-      matched < expected.length &&
-      index < content.length &&
-      content.charAt(index) === expected.charAt(matched)
-    ) {
-      index += 1;
-      matched += 1;
-      continue;
-    }
-    return index;
-  }
-}
-
 /** Where acorn's failure lies, by the parser state it was raised in. */
 function failureOf(
   parser: DiagnosingParser,
@@ -220,7 +185,7 @@ function failureOf(
     };
   } else if (mismatch !== null) {
     failure = {
-      point: closingNameDivergence(content, error.pos, mismatch[1]),
+      point: closingTagDivergence(content, error.pos, mismatch[1]),
       atToken: false,
     };
   } else if (JSX_EMPTY_ATTRIBUTE.test(error.message)) {

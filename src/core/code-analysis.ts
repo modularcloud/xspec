@@ -366,10 +366,10 @@ function parseFailureFinding(
       tsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
     );
     return {
+      sourceFile: probe,
       diagnostics: createSingleFileProgram(probe, tsx).getSyntacticDiagnostics(
         probe,
       ),
-      endOfFile: probe.endOfFileToken.pos,
     };
   });
   const byte = offsets.byteOffset(at);

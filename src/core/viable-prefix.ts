@@ -90,3 +90,40 @@ export function extendIntoToken(
   }
   return at + best;
 }
+
+/**
+ * A closing tag at `at` (`</name>`, whitespace allowed around its parts)
+ * that cannot close the open element named `expected`: the position where
+ * its name departs from `expected` — the viable prefix runs through the
+ * characters they share (`<a></` is viable, `<a></b` is not). A fragment's
+ * name is empty.
+ */
+export function closingTagDivergence(
+  text: string,
+  at: number,
+  expected: string,
+): number {
+  let index = at;
+  const skipSpace = (): void => {
+    while (index < text.length && /\s/u.test(text.charAt(index))) {
+      index += 1;
+    }
+  };
+  if (text.charAt(index) === "<") index += 1;
+  skipSpace();
+  if (text.charAt(index) === "/") index += 1;
+  let matched = 0;
+  for (;;) {
+    skipSpace();
+    if (
+      matched < expected.length &&
+      index < text.length &&
+      text.charAt(index) === expected.charAt(matched)
+    ) {
+      index += 1;
+      matched += 1;
+      continue;
+    }
+    return index;
+  }
+}
