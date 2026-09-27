@@ -18,12 +18,14 @@
 // conditions inside it go unreported. Within a parsed file, every detectable
 // condition is reported, with 14.2's own masking rule (14.2) applied.
 //
-// Grammar widenings (SPEC 14.20): "well-formed MDX" is remark-mdx's grammar
-// *as extended here* — the toolchain stays remark-mdx (IMPLEMENTATION Key
-// libraries); each widening is a surgical, documented extension preserving
-// exact source offsets, admitting source shapes that are valid xspec sources
-// (SPEC 1–3) but that the stock grammar rejects:
-//   1. Expression grammar (acorn): `xspecAcornExtension` below.
+// Braces and ESM blocks (SPEC 14.20): their content derives by ECMAScript
+// 2024 with JSX alone, "decided by derivability alone" — the acorn remark-mdx
+// is handed (`mdxAcorn`, ./mdx-acorn.ts) excludes every early error, so a
+// file failing only such a rule is well-formed and reaches its ordinary
+// outcome (`export { nope }` 14.16, `{1 = 2}` 14.16, `d={010}` 14.8), while
+// TypeScript-only syntax (`BASE.a!`, `BASE.a as X`) is a derivation failure
+// (SPEC 2.4). The static-reference analyzer reads each brace's content as MDX
+// 3 derives it (`derivedContent` below), never the raw document slice.
 //
 // Section tags are not widened: they pair exactly as stock MDX 3 pairs them
 // (SPEC 14.20; 6.5 "Validation and refusals" spells the consequences out).
@@ -49,8 +51,6 @@
 // therefore hold several declarations and JavaScript comments beside them;
 // the comments are the block's, never MDX comments (SPEC 2.7, 3).
 
-import { Parser, tokTypes } from "acorn";
-import acornJsx from "acorn-jsx";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
@@ -59,6 +59,7 @@ import { sortByBytes, Utf8Offsets } from "./bytes.js";
 import type { ConditionNumber, Finding } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
 import type { PathText } from "./path-text.js";
+import { MDX_ACORN_OPTIONS, mdxAcorn } from "./mdx-acorn.js";
 import { decodeSourceBytes } from "./source-text.js";
 import {
   describeSegmentViolation,
@@ -99,7 +100,12 @@ export interface SpecAttributeValue {
  * spans and TypeScript sources), not here.
  */
 export interface SpecDependencyAttribute {
-  /** Exact source characters between (excluding) the braces. */
+  /**
+   * The content between (excluding) the braces as MDX 3 derives it
+   * (SPEC 14.20): the source characters, each Markdown container line
+   * prefix the expression spans (a block quote's `>`, a list item's
+   * indentation) blanked to spaces, so offsets are the document's own.
+   */
   readonly expressionText: string;
   /** Byte range of `expressionText` within the file. */
   readonly expressionRange: ByteRange;
@@ -210,7 +216,12 @@ export interface SpecEmbedding {
   readonly section: SpecSection;
   /** The whole expression container, braces included. */
   readonly range: ByteRange;
-  /** Exact source characters between (excluding) the braces. */
+  /**
+   * The content between (excluding) the braces as MDX 3 derives it
+   * (SPEC 14.20): the source characters, each Markdown container line
+   * prefix the expression spans (a block quote's `>`, a list item's
+   * indentation) blanked to spaces, so offsets are the document's own.
+   */
   readonly expressionText: string;
   /** Byte range of `expressionText` within the file. */
   readonly expressionRange: ByteRange;
@@ -347,6 +358,12 @@ interface MdxTreeNode {
   readonly type: string;
   readonly position?: MdxPosition;
   readonly children?: readonly MdxTreeNode[];
+  /**
+   * An expression container's content as remark-mdx collected it: the
+   * characters between its braces, less the Markdown container line
+   * prefixes (`derivedContent`).
+   */
+  readonly value?: string;
   /** JSX element name; null for a fragment. */
   readonly name?: string | null;
   readonly attributes?: readonly MdxAttributeNode[];
@@ -380,95 +397,6 @@ interface ParseFailureLike {
   readonly column?: unknown;
   readonly place?: unknown;
 }
-
-/**
- * Structural view of acorn's internal parser surface (not in its public
- * types), verified against acorn 8: the two overridden methods below and
- * the state they touch. `parseSubscript` is acorn's per-access step in a
- * member/call chain; `declareName` records one declared binding and
- * raises on redeclaration after recording it.
- */
-interface AcornInternalParser {
-  /** The current token's type and value. */
-  type: unknown;
-  value: unknown;
-  /** True when a newline precedes the current token. */
-  canInsertSemicolon(): boolean;
-  startNodeAt(pos: number, loc: unknown): { expression?: unknown };
-  finishNode(node: object, type: string): unknown;
-  next(): void;
-  scopeStack: readonly unknown[];
-  parseSubscript(...args: unknown[]): unknown;
-  declareName(name: string, bindingType: unknown, pos: number): void;
-}
-
-/**
- * SPEC 2.1/2.4 require certain files to parse so their defects report as
- * import or reference findings rather than as parse failures: a postfix
- * non-null assertion (`BASE!.auth`) is a *dynamic reference* (SPEC 2.4 →
- * 14.8), and two imports binding one identifier are an *invalid import*
- * (SPEC 2.1 → 14.15) — both conditions of a parsed file. Stock acorn
- * rejects both outright, so the expression grammar is widened by exactly
- * these two rules and nothing else; remark-mdx's grammar, so extended,
- * defines well-formed MDX (IMPLEMENTATION; SPEC 14.20):
- *
- * - a postfix `!` with no preceding newline parses as a
- *   `TSNonNullExpression` chain node (the shared static-reference
- *   analyzer then classifies the reference dynamic, SPEC 2.4);
- * - a module-scope redeclaration — duplicate import bindings — does not
- *   abort the parse (import validation reports 14.15, SPEC 2.1); acorn
- *   records the binding before raising, so swallowing the raise leaves
- *   consistent parser state. Redeclarations in inner scopes still fail.
- */
-function xspecAcornExtension(BaseParser: typeof Parser): typeof Parser {
-  // One more derivation level, so the class handed in stays untouched.
-  const Extended = class extends (BaseParser as unknown as new () => object) {};
-  const prototype = Extended.prototype as AcornInternalParser;
-  const superParseSubscript = prototype.parseSubscript;
-  const superDeclareName = prototype.declareName;
-
-  prototype.parseSubscript = function (
-    this: AcornInternalParser,
-    ...args: unknown[]
-  ): unknown {
-    if (
-      this.type === tokTypes.prefix &&
-      this.value === "!" &&
-      !this.canInsertSemicolon()
-    ) {
-      const node = this.startNodeAt(args[1] as number, args[2]);
-      node.expression = args[0];
-      this.next();
-      return this.finishNode(node, "TSNonNullExpression");
-    }
-    return superParseSubscript.apply(this, args);
-  };
-
-  prototype.declareName = function (
-    this: AcornInternalParser,
-    name: string,
-    bindingType: unknown,
-    pos: number,
-  ): void {
-    try {
-      superDeclareName.call(this, name, bindingType, pos);
-    } catch (error) {
-      if (
-        this.scopeStack.length === 1 &&
-        error instanceof SyntaxError &&
-        error.message.includes("has already been declared")
-      ) {
-        return;
-      }
-      throw error;
-    }
-  };
-
-  return Extended as unknown as typeof Parser;
-}
-
-/** The extended acorn: JSX plus the two SPEC-required widenings above. */
-const specAcorn = Parser.extend(acornJsx(), xspecAcornExtension);
 
 // ---------------------------------------------------------------------------
 // Tag spans beside the stock JSX handlers (SPEC 1.7; no verdict changes)
@@ -540,12 +468,13 @@ function xspecTagSpans(this: { data(): unknown }): void {
 
 /**
  * The MDX parser (IMPLEMENTATION: remark-mdx defines well-formed MDX,
- * SPEC 14.20 — with the expression grammar widened per
- * `xspecAcornExtension` above). Frozen once; `parse` is pure.
+ * SPEC 14.20): MDX 3's grammar, its braces and ESM blocks derived by
+ * ECMAScript 2024 alone, early errors excluded (`mdxAcorn`). Frozen once;
+ * `parse` is pure.
  */
 const mdxParser = unified()
   .use(remarkParse)
-  .use(remarkMdx, { acorn: specAcorn })
+  .use(remarkMdx, { acorn: mdxAcorn, acornOptions: MDX_ACORN_OPTIONS })
   .use(xspecTagSpans)
   .freeze();
 
@@ -682,6 +611,54 @@ function parseFailureFinding(
       `Correct the syntax at the reported location (SPEC 14.20)`,
     [{ file, range }],
   );
+}
+
+/**
+ * SPEC 14.20, 2.3, 2.4: the content between an expression's braces as MDX 3
+ * derives it, at the document's own offsets. `raw` is the document text
+ * between the braces; `collected` the content remark-mdx gathered for the
+ * expression (the node's `value`): the same characters less each
+ * continuation line's Markdown container prefix — a block quote's `>`, a
+ * list item's indentation — which the expression does not hold (a tab the
+ * prefix splits leaves its remaining columns as spaces, and micromark reads
+ * U+0000 as U+FFFD). On each line after the first, what precedes the
+ * longest ending it shares with the collected line is that prefix, and is
+ * blanked to spaces: prefixes are ASCII, so UTF-16 indices and byte offsets
+ * stay put for every span the analyzer reports — `> {text("a")` over `> }`
+ * is the call `text("a")`, never `text("a") >`.
+ */
+function derivedContent(raw: string, collected: unknown): string {
+  if (typeof collected !== "string" || collected === raw) {
+    return raw;
+  }
+  // Markdown line endings (CommonMark): the parts alternate line, ending.
+  const rawParts = raw.split(/(\r\n|\r|\n)/u);
+  const collectedParts = collected.split(/(\r\n|\r|\n)/u);
+  if (rawParts.length !== collectedParts.length) {
+    return raw;
+  }
+  for (let index = 2; index < rawParts.length; index += 2) {
+    const line = rawParts[index];
+    const prefix = line.length - sharedEnding(line, collectedParts[index]);
+    if (prefix > 0 && /^[\t >]+$/u.test(line.slice(0, prefix))) {
+      rawParts[index] = " ".repeat(prefix) + line.slice(prefix);
+    }
+  }
+  return rawParts.join("");
+}
+
+/** The length of the longest ending `line` and `collected` share. */
+function sharedEnding(line: string, collected: string): number {
+  let count = 0;
+  while (count < line.length && count < collected.length) {
+    const spelled = line.charCodeAt(line.length - 1 - count);
+    const read = collected.charCodeAt(collected.length - 1 - count);
+    if (spelled !== read && !(spelled === 0 && read === 0xfffd)) {
+      break;
+    }
+    count += 1;
+  }
+  return count;
 }
 
 /** An estree node's or comment's document-absolute UTF-16 offsets. */
@@ -1134,7 +1111,10 @@ class DocumentBuilder {
       this.embeddings.push({
         section,
         range,
-        expressionText: this.text.slice(span.start + 1, span.end - 1),
+        expressionText: derivedContent(
+          this.text.slice(span.start + 1, span.end - 1),
+          node.value,
+        ),
         expressionRange: this.byteRange(span.start + 1, span.end - 1),
       });
       return;
@@ -1434,7 +1414,10 @@ class DocumentBuilder {
       );
     }
     section.dependency = {
-      expressionText: this.text.slice(open + 1, attrSpan.end - 1),
+      expressionText: derivedContent(
+        this.text.slice(open + 1, attrSpan.end - 1),
+        (value as { readonly value?: unknown }).value,
+      ),
       expressionRange: this.byteRange(open + 1, attrSpan.end - 1),
       attributeRange: attrRange,
     };

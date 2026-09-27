@@ -38,7 +38,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T1.7-2 | section-1.6-1.7 | 19, 20 |
 | T2.1-2 | section-2.1 | 6 (passes since Task 6 landed) |
 | T2.3-3 | section-2.2-2.3 | 7, 14 (since Task 7 its five embedding and five invalid-container arms hold; it stops first at Task 14's offset arm, `{text("a") text("b")}` located 48–49 where the zero-length 49–49 is required) |
-| T2.4-2 | section-2.4 | 12, 14 |
+| T2.4-2 | section-2.4 | 14 (since Task 12 its dynamic arms hold and each TypeScript-only form is 14.20 alone; it stops first at `d={BASE.a!}`'s location, [94,95) — the `!` — where the zero-length 95..95 is required) |
 | T2.4-5 | section-2.4 | 6 (passes since Task 6 landed) |
 | T2.5-3 | section-2.5-2.6 | 5 (passes since Task 5 landed) |
 | T2.6-1 | section-2.5-2.6 | 3 (passes since Task 3 landed) |
@@ -102,50 +102,16 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T13.5-7 | section-13.5 | 48 |
 | T14-2 | section-14 | 6 (passes since Task 6 landed) |
 | T14-4 | section-14 | 51 |
-| T14-6 | section-14 | 12, 48, 49 |
+| T14-6 | section-14 | 48, 49 (since Task 12 its early-error stagings hold; it stops first at the 14.24 arm, Task 48) |
 | T14-7 | section-14 | 22, 23, 24, 25, 35 |
 | T14-9 | section-14-ii | 48 |
 | T14-10 | section-14-ii | 49, 50 |
-| T14-11 | section-14 | 12, 13, 14, 15, 16 |
-| T14-12 | section-14-iii | 11, 12, 14 (Task 11 landed and changed none of its arms, none of which stages a tag-pairing shape; since Task 10 the import-then-`const x = 1` arm reports 14.20, located over the whole `const` statement where Task 14's zero-length range at its start is required; it stops first at arm (b)'s `export { nope }`, Task 12) |
+| T14-11 | section-14 | 13, 14, 15, 16 (Task 12 landed; it stops first at arm (c), `d={}`'s location, Task 14) |
+| T14-12 | section-14-iii | 14 (since Task 12 its positive arms (a)–(o) hold — the early errors, the expression-grammar forms, and the TypeScript post-parse checks; it stops first at negative arm (p), `010` in a `.ts` file, located [55,58) where the zero-length 56..56 is required; since Task 10 arm (s), the import-then-`const x = 1` block, reports 14.20 over the whole `const` statement where the zero-length range at its start is required) |
 
 Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), and Task 53 (a corrupt session in `review list`); Task 55 (a path beginning with U+FEFF, found while landing Task 9) has landed. Task 29 landed with Task 10: once ESM blocks were bounded as stock MDX 3 bounds them, T6.6-2's move (passing before) added its import at offset 0 of an origin whose first line is `<S id="org">`, the block absorbed that line, and the move's own validation of the rewritten workspace refused it — so additions now go at an admissible offset (`placeSpecImportAdditions` in `src/core/move.ts`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
 
 ---
-
-## Task 12 — Brace and ESM content derive exactly as ECMAScript 2024 with JSX derives them: no TypeScript syntax, no early errors (SPEC 14.20, 2.4, 2.7, 14.8, 14.15, 14.16; A6, A8 second bullet, C13, C14 third shape)
-
-**Requirement.**
-- SPEC 14.20: well-formedness "is decided by derivability alone". No rule beyond derivability takes part, and it names what that excludes: "ECMAScript's static-semantic early errors — a duplicate lexically declared name (two imports binding one identifier; an import and an export declaration binding one name), an export naming no declaration, an assignment to a target that is not simple (`1 = 2`), a strict-mode restriction (`let` as an identifier reference, a legacy octal literal)". So a file failing only such rules "is well-formed and proceeds".
-- SPEC 2.4: "a form the grammar does not derive is a parse failure of the file (14.20), never a dynamic reference — so a non-null assertion (`BASE.a!`), a type assertion, or any other TypeScript-only syntax" between a spec source's braces is 14.20.
-
-**Observed.**
-- `xspecAcornExtension` parses a postfix `!` as `TSNonNullExpression`, so `d={BASE.a!}`, `d={BASE!.a}`, and `{text(BASE.a!)}` report 14.8 where 14.20 is required.
-- Conversely, acorn's early errors become 14.20, where each file is well-formed and must reach its ordinary outcome:
-  - `export { nope }` after a valid import: exactly one 14.16 at the whole statement, the import still listed by `view`, the embedding still recorded;
-  - `{1 = 2}`, `{let}`, and `{010}`: 14.16 each;
-  - `d={(1 = 2)}` and `d={010}`: 14.8.
-- Today only duplicate import bindings at module scope are tolerated.
-- (Found while landing Task 7; no test stages it.) Brace content reaches the static-reference analyzer as the raw document slice between the braces — `expressionText`, set in `classifyExpression` for an embedding and in the `d` attribute reader — which `parseExpressionText` (`src/core/references.ts`) re-parses with TypeScript. Inside a Markdown container, an expression spanning lines holds the container's line prefixes in that slice — a block quote's `> ` — though MDX 3 excludes them from the expression (acorn's tree skips them). So `> {text("a")` LF `> }`, an embedding of the local `a`, reports 14.8 at its container, and a block-quoted section's `d={` LF `> "a"}` reports 14.8 at the value, where each must resolve (SPEC 14.20: the content is what MDX 3 derives; 2.3, 2.4).
-
-**Location.** `src/core/mdx.ts`:
-- `xspecAcornExtension` (~361–427) and `specAcorn`, shared by the ESM construct and remark-mdx's expression parsing;
-- `ESM_ACORN_OPTIONS`.
-
-Acorn raises most static-semantic errors through `raiseRecoverable`, and some through `raise`: for example "Assigning to rvalue", legacy octal and `let` under strict mode, and the undefined-export check at the end of `parseTopLevel`. Verify each against acorn 8's source in `node_modules/acorn`.
-
-**Change.**
-- Remove the non-null-assertion rule.
-- Suppress all of ECMAScript's early errors (the SPEC's list is illustrative) while keeping every genuine syntax failure.
-- The newly accepted constructs then reach their ordinary outcomes: an export statement is 14.16 (the whole statement), a non-embedding container is 14.16, a non-static `d` or `text` argument is 14.8, and duplicate bindings are 14.15.
-- The static-reference analyzer must tolerate the trees acorn now returns.
-- Analyze each brace's content as MDX 3 derives it — acorn's own tree, or the slice with every container line prefix blanked to spaces (the same widths, so offsets stay put) — never the raw document slice.
-
-**Verification.**
-- `section-2.4.test.ts`: T2.4-2 (its 14.20-offset arms wait on Task 14).
-- `section-14-iii.test.ts`: T14-12's positive arms.
-- `section-14.test.ts`: T14-6's early-error stagings, and T14-11's (w) re-assertion of T2.4-2's forms (with Task 14).
-- Neighbours: `section-2.1.test.ts`, `section-2.7.test.ts`, `section-4.test.ts`, `section-11.4.test.ts`, `section-16-p2-p3.test.ts`, `section-16-p8.test.ts`.
 
 ## Task 13 — Empty expression containers are MDX comments (SPEC 2.7, 14.20, 14.16; A4, C16)
 
@@ -176,7 +142,7 @@ Acorn raises most static-semantic errors through `raiseRecoverable`, and some th
 
 ## Task 14 — A 14.20 finding carries one zero-length range at the failure's offset (SPEC 14 location rule, 14.20, 1.6; A9, C15, and B's note on T11.4-4)
 
-After Tasks 12 and 13, which change where parse failures arise (Tasks 10 and 11 have landed).
+After Task 13, which changes where parse failures arise (Tasks 10, 11, and 12 have landed).
 
 **Requirement.** SPEC 14: "An unparseable source (14.20) carries one zero-length range at the failure's offset":
 - for a refused read (14.25), 0;
@@ -198,6 +164,10 @@ SPEC 14.20 places `d={}`'s failure at its closing brace, and makes `010` and `09
 | `d={}` | 13..14 | zero-length, at its closing brace |
 | `010` in a `.ts` file | 10..13 | 11..11 |
 | `09` in a `.ts` file | 10..12 | 11..11 |
+| `d={BASE.a!}` (T2.4-2; 14.20 since Task 12) | the `!` ([94,95) in T2.4-2's staging) | its closing brace (95..95): `!` may begin `!=` |
+| `{text(BASE.a!)}` (T2.4-2) | the `!` | its closing parenthesis |
+| `d={BASE.a as X}` (T2.4-2) | the whitespace before `as` (the attribute's "Unexpected content after expression" at the chain's end) | the offset of `as` |
+| `{text(BASE.a as X)}` (T2.4-2) | `as` itself, one character wide | the offset of `as`, zero-length |
 
 **Location.**
 - `parseFailureFinding` in `src/core/mdx.ts`. Since Task 11 every MDX syntax failure, tag pairing included, is a stock toolchain `VFileMessage` (the product's own `MdxGrammarError` is gone): a construct that ends while an element opened inside it is still open places that construct's whole position (`<S id="x">Text`, a blank line, `more</S>`: the paragraph, 0..14, where the rule's offset is 15, the blank line's start); a closing tag that cannot close the open element places its own tag (`</T>` after `<S id="a">x`; `</S>` inside a paragraph after a flow-position `<S id="a">`), or its `/` alone when no element is open; an element left open at the file's end places nothing (today located 0..0; the rule's offset is the file's byte length).
@@ -211,8 +181,8 @@ SPEC 14.20 places `d={}`'s failure at its closing brace, and makes `010` and `09
 
 **Verification.**
 - Should turn green: `section-1.6-1.7.test.ts` (T1.6-5), `section-2.7.test.ts` (T2.7-3), `section-11.4.test.ts` (T11.4-4).
-- `section-2.7.test.ts` (T2.7-4, with Task 13), `section-2.2-2.3.test.ts` (T2.3-3, with Task 7), `section-2.4.test.ts` (T2.4-2, with Task 12).
-- `section-14.test.ts`: T14-11 arm (c) and the (w) family. `section-14-iii.test.ts`: T14-12, with Task 12.
+- `section-2.7.test.ts` (T2.7-4, with Task 13), `section-2.2-2.3.test.ts` (T2.3-3, with Task 7), `section-2.4.test.ts` (T2.4-2: since Task 12 only its offset arms remain).
+- `section-14.test.ts`: T14-11 arm (c) and the (w) family. `section-14-iii.test.ts`: T14-12 (since Task 12 only its negative arms' offsets remain).
 - Neighbours: `section-14-ii.test.ts` (T14-10's refused-read arm stays at 0..0), `section-16-p8.test.ts`.
 
 ## Task 15 — A repeated prop locates every attribute spelling the name (SPEC 14 location cardinality, 14.17, 2.7; C18)
