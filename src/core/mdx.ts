@@ -51,10 +51,10 @@ import { compareFindings, locatedFinding } from "./findings.js";
 import type { PathText } from "./path-text.js";
 import { decodeSourceBytes } from "./source-text.js";
 import {
-  containsControl,
-  containsWhitespace,
-  FORBIDDEN_SEGMENT_NAMES,
+  describeSegmentViolation,
+  idSegmentViolations,
   isWhitespaceCodePoint,
+  segmentViolation,
 } from "./text.js";
 
 // ---------------------------------------------------------------------------
@@ -1097,30 +1097,42 @@ function pointRange(
 // ---------------------------------------------------------------------------
 
 /**
- * Why `value` violates SPEC 1.4 as an ID segment or a tag (`"."` allowed in
- * tags only), or null when valid. Segments arrive from splitting an ID on
- * `"."`, so the segment path never sees a `"."`.
+ * The SPEC 1.4 problems of one `id` or `tags` value, as phrases for its
+ * attribute's one 14.4 finding (SPEC 14.4: one finding per `id` or `tags`
+ * attribute whose value violates 1.4, however many of its segments or tags
+ * do), judged by the shared validator (text.ts). `values` are the value's
+ * segments (split on `"."`, SPEC 1.3) or tags (split per 2.6) as MDX
+ * decodes them, `rawValue` the characters between the quotes as authored.
+ * MDX decodes U+0000 to U+FFFD while parsing: where the raw characters hold
+ * U+0000 but no U+FFFD, every decoded U+FFFD is an authored U+0000 and is
+ * restored before judging, so the finding names the control character
+ * actually spelled; where they hold both, U+0000 is named on its own and
+ * the decoded values are judged as they are (U+FFFD breaks 1.4 as well).
  */
-function valueViolation(value: string, kind: "segment" | "tag"): string | null {
-  if (value.length === 0) {
-    return "it is empty (SPEC 1.4: segments are non-empty)";
+function attributeProblems(
+  kind: "segment" | "tag",
+  rawValue: string,
+  values: readonly string[],
+): string[] {
+  const nul = String.fromCharCode(0x0000);
+  const replacement = String.fromCharCode(0xfffd);
+  const rawHasNul = rawValue.includes(nul);
+  const restore = rawHasNul && !rawValue.includes(replacement);
+  const problems: string[] = [];
+  if (rawHasNul && !restore) {
+    problems.push("the value contains the control character U+0000");
   }
-  if (FORBIDDEN_SEGMENT_NAMES.has(value)) {
-    return `${JSON.stringify(value)} is a forbidden name (SPEC 1.4)`;
+  for (const decoded of values) {
+    const value = restore ? decoded.split(replacement).join(nul) : decoded;
+    const violation = segmentViolation(value, kind);
+    if (violation !== null) {
+      problems.push(
+        `the ${kind} ${JSON.stringify(value)} ` +
+          describeSegmentViolation(violation),
+      );
+    }
   }
-  if (kind === "segment" && value.includes(".")) {
-    return 'it contains "." (SPEC 1.4)';
-  }
-  if (value.includes("#")) {
-    return 'it contains "#" (SPEC 1.4)';
-  }
-  if (containsWhitespace(value)) {
-    return "it contains whitespace (SPEC 1.4)";
-  }
-  if (containsControl(value)) {
-    return "it contains a control character (SPEC 1.4)";
-  }
-  return null;
+  return problems;
 }
 
 /**
@@ -1159,9 +1171,7 @@ export function definedIdentitySections(
   // against the parent's spelled identity — a top-level section against the
   // empty prefix (exactly one segment).
   const wellFormed = (id: string): boolean =>
-    id
-      .split(".")
-      .every((segment) => valueViolation(segment, "segment") === null);
+    idSegmentViolations(id).length === 0;
   const chain = new Map<SpecSection, boolean>();
   const chainOk = (section: SpecSection): boolean => {
     if (section.parent === null) return true; // the root spells no identity
@@ -1802,10 +1812,9 @@ class DocumentBuilder {
       );
     }
     // The raw characters between the quotes. MDX replaces U+0000 with
-    // U+FFFD while decoding, so the control-character rule of SPEC 1.4 is
-    // checked against the raw characters as authored.
+    // U+FFFD while decoding, so the SPEC 1.4 judgement of `id` and `tags`
+    // consults the raw characters as authored (`attributeProblems`).
     const rawValue = this.text.slice(open + 1, attrSpan.end - 1);
-    const rawHasNul = rawValue.includes("\u0000");
 
     if (name === "coverage") {
       // SPEC 2.5/2.7 → 14.17: the only defined values are "required"
@@ -1829,34 +1838,21 @@ class DocumentBuilder {
       // yielding no tags is equivalent to omitting the prop.
       const tags = splitTags(value);
       section.tags = tags;
-      let tagsValid = true;
-      if (rawHasNul) {
-        // SPEC 1.4 → 14.4: U+0000 is a control character.
-        tagsValid = false;
-        this.addFinding(
-          4,
-          attrRange,
-          `invalid tag: the tags value contains the control character ` +
-            `U+0000 — tags contain no control characters; remove it ` +
-            `(SPEC 1.4, 2.6, 14.4)`,
-        );
+      const problems = attributeProblems("tag", rawValue, tags);
+      if (problems.length === 0) {
+        return true;
       }
-      for (const tag of tags) {
-        const violation = valueViolation(tag, "tag");
-        if (violation !== null) {
-          // SPEC 11.2: an invalid-valued prop leaves the interpreted
-          // value undefined.
-          tagsValid = false;
-          this.addFinding(
-            4,
-            attrRange,
-            `invalid tag ${JSON.stringify(tag)}: ${violation} — tags ` +
-              `follow the ID-segment rules with "." allowed; correct or ` +
-              `remove the tag (SPEC 1.4, 2.6, 14.4)`,
-          );
-        }
-      }
-      return tagsValid;
+      // SPEC 14.4: one finding per `tags` attribute whose value violates
+      // 1.4; SPEC 11.2: an invalid-valued prop leaves the interpreted value
+      // undefined.
+      this.addFinding(
+        4,
+        attrRange,
+        `invalid tag: ${problems.join("; ")} — tags follow the ID-segment ` +
+          `rules with "." allowed; correct or remove the tag ` +
+          `(SPEC 1.4, 2.6, 14.4)`,
+      );
+      return false;
     }
 
     // name === "id" (SPEC 1.3): record the declared ID and validate its
@@ -1869,27 +1865,15 @@ class DocumentBuilder {
       quote: quoteCharacter,
       attributeRange: attrRange,
     };
-    if (rawHasNul) {
-      // SPEC 1.4 → 14.4: U+0000 is a control character.
+    const problems = attributeProblems("segment", rawValue, value.split("."));
+    if (problems.length > 0) {
+      // SPEC 14.4: one finding per `id` attribute whose value violates 1.4.
       this.addFinding(
         4,
         attrRange,
-        `invalid segment: the id value contains the control character ` +
-          `U+0000 — segments contain no control characters; remove it ` +
-          `(SPEC 1.4, 14.4)`,
+        `invalid segment in id: ${problems.join("; ")} — correct the ` +
+          `segment (SPEC 1.4, 14.4)`,
       );
-    }
-    for (const segment of value.split(".")) {
-      const violation = valueViolation(segment, "segment");
-      if (violation !== null) {
-        this.addFinding(
-          4,
-          attrRange,
-          `invalid segment ${JSON.stringify(segment)} in id ` +
-            `${JSON.stringify(value)}: ${violation} — correct the segment ` +
-            `(SPEC 1.4, 14.4)`,
-        );
-      }
     }
     // The spelled identity stays spelled whatever its segments (SPEC 11.2);
     // its definedness is judged by `definedIdentitySections`.

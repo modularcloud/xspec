@@ -43,42 +43,27 @@ import type { SpecFileAnalysis, WorkspaceGraph } from "./graph.js";
 import type { SpecSection } from "./mdx.js";
 import type { PathText } from "./path-text.js";
 import { replaceIdPrefix } from "./rename.js";
-import {
-  containsControl,
-  containsWhitespace,
-  FORBIDDEN_SEGMENT_NAMES,
-} from "./text.js";
+import { describeSegmentViolation, idSegmentViolations } from "./text.js";
 
 /**
  * Why `id` is not in intrinsic ID form (SPEC 14: one or more segments
- * joined by `.`, each satisfying 1.4), or null when it is. Splitting on
- * `.` makes the no-`.` rule structural; each segment must be non-empty,
- * free of `#`, whitespace, and control characters, and none of the
- * forbidden names. Shared by the refusal evaluation here and the CLI's
- * argument diagnostics (SPEC 6.4, 6.5).
+ * joined by `.`, each satisfying 1.4), or null when it is — judged by the
+ * shared SPEC 1.4 validator (text.ts), splitting on `.` making the no-`.`
+ * rule structural. Used by the `refused-invalid-id` evaluation (SPEC 6.4,
+ * 6.5).
  */
 export function intrinsicIdProblem(id: string): string | null {
-  for (const segment of id.split(".")) {
-    if (segment.length === 0) {
-      return "it has an empty segment";
-    }
-    if (FORBIDDEN_SEGMENT_NAMES.has(segment)) {
-      return (
-        `its segment ${JSON.stringify(segment)} is one of the forbidden ` +
-        `names ("$", "__proto__", "prototype", "constructor", "then")`
-      );
-    }
-    if (segment.includes("#")) {
-      return `its segment ${JSON.stringify(segment)} contains "#"`;
-    }
-    if (containsWhitespace(segment)) {
-      return `its segment ${JSON.stringify(segment)} contains whitespace`;
-    }
-    if (containsControl(segment)) {
-      return `its segment ${JSON.stringify(segment)} contains a control character`;
-    }
+  const first = idSegmentViolations(id)[0];
+  if (first === undefined) {
+    return null;
   }
-  return null;
+  if (first.violation.rule === "empty") {
+    return "it has an empty segment";
+  }
+  return (
+    `its segment ${JSON.stringify(first.segment)} ` +
+    describeSegmentViolation(first.violation)
+  );
 }
 
 /** One refusal-reason finding (SPEC 14): stable code, concerned data. */

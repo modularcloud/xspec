@@ -47,11 +47,7 @@ import { compactJson } from "./canonical-json.js";
 import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
 import { firstInvalidUtf8 } from "./source-text.js";
-import {
-  containsControl,
-  containsWhitespace,
-  FORBIDDEN_SEGMENT_NAMES,
-} from "./text.js";
+import { describeSegmentViolation, idSegmentViolations } from "./text.js";
 
 /** SPEC 6.1: the journal's workspace-relative path. */
 export const JOURNAL_PATH = ".xspec/journal";
@@ -532,29 +528,22 @@ function pathProblem(path: string): string | null {
   return null;
 }
 
-/** Why `id` is not a valid requirement ID (SPEC 1.3, 1.4), or null. */
+/**
+ * Why `id` is not a valid requirement ID (SPEC 1.3, 1.4), or null — judged
+ * by the shared SPEC 1.4 validator (text.ts), segment by segment.
+ */
 function idProblem(id: string): string | null {
-  for (const segment of id.split(".")) {
-    if (segment.length === 0) {
-      return "has an ID with an empty segment (SPEC 1.4)";
-    }
-    if (FORBIDDEN_SEGMENT_NAMES.has(segment)) {
-      return (
-        `has an ID with the forbidden segment ${JSON.stringify(segment)} ` +
-        `(SPEC 1.4)`
-      );
-    }
-    if (segment.includes("#")) {
-      return `has an ID segment containing "#" (SPEC 1.4)`;
-    }
-    if (containsWhitespace(segment)) {
-      return "has an ID segment containing whitespace (SPEC 1.4)";
-    }
-    if (containsControl(segment)) {
-      return "has an ID segment containing a control character (SPEC 1.4)";
-    }
+  const first = idSegmentViolations(id)[0];
+  if (first === undefined) {
+    return null;
   }
-  return null;
+  if (first.violation.rule === "empty") {
+    return "has an ID with an empty segment (SPEC 1.4)";
+  }
+  return (
+    `has an ID whose segment ${JSON.stringify(first.segment)} ` +
+    `${describeSegmentViolation(first.violation)} (SPEC 1.4)`
+  );
 }
 
 // ---------------------------------------------------------------------------

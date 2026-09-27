@@ -40,37 +40,148 @@ export function isWhitespaceOnly(text: string): boolean {
   return true;
 }
 
-/** True when `text` contains at least one SPEC 1.4 whitespace character. */
-export function containsWhitespace(text: string): boolean {
-  for (let index = 0; index < text.length; index += 1) {
-    if (isWhitespaceCodePoint(text.charCodeAt(index))) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/** True when `text` contains at least one SPEC 1.4 control character. */
-export function containsControl(text: string): boolean {
-  for (let index = 0; index < text.length; index += 1) {
-    if (isControlCodePoint(text.charCodeAt(index))) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /**
- * SPEC 1.4: the five forbidden segment (and tag) names. Shared by MDX prop
- * validation (mdx.ts) and journal-entry validation (journal.ts).
+ * SPEC 1.4: the five forbidden segment (and tag) names, judged by
+ * `segmentViolation` below.
  */
-export const FORBIDDEN_SEGMENT_NAMES: ReadonlySet<string> = new Set([
+const FORBIDDEN_SEGMENT_NAMES: ReadonlySet<string> = new Set([
   "$",
   "__proto__",
   "prototype",
   "constructor",
   "then",
 ]);
+
+/**
+ * SPEC 1.4: the quote, escape, and character-reference characters — `"`,
+ * `'`, `\`, and `&` — which no segment or tag contains, so that every
+ * segment is spelled verbatim in every form (2.4, 2.7, 6.4). Keyed by code
+ * unit; each value names the character for diagnostics.
+ */
+const VERBATIM_BREAKING_CHARACTERS: ReadonlyMap<number, string> = new Map([
+  [0x22, 'a double quote (")'],
+  [0x27, "a single quote (')"],
+  [0x5c, "a backslash (\\)"],
+  [0x26, "an ampersand (&)"],
+]);
+
+/** SPEC 1.4: U+FFFD (REPLACEMENT CHARACTER), which no argument value carries (12.0). */
+const REPLACEMENT_CHARACTER = 0xfffd;
+
+/**
+ * Which rule of SPEC 1.4 a value breaks as an ID segment or a tag — one
+ * variant per rule of 1.4's list — as data, so each validating site keeps
+ * its own message frame around `describeSegmentViolation`'s wording.
+ */
+export type SegmentViolation =
+  | { readonly rule: "empty" }
+  | { readonly rule: "dot" }
+  | { readonly rule: "hash" }
+  | { readonly rule: "whitespace" }
+  | { readonly rule: "control" }
+  | { readonly rule: "verbatim"; readonly character: string }
+  | { readonly rule: "replacement" }
+  | { readonly rule: "forbidden-name" };
+
+/**
+ * The one SPEC 1.4 validator: the first rule `value` breaks as an ID
+ * segment (`kind` `"segment"`) or a tag (`"tag"`, which MAY contain `"."`,
+ * 1.4's last paragraph), or null when it satisfies every rule. A segment:
+ * is non-empty; contains no `"."`, no `"#"`, no whitespace or control
+ * character (this module's exact classes), none of `"`, `'`, `\`, `&`, and
+ * no U+FFFD; and is none of the forbidden names. Every site that judges a
+ * segment or a tag goes through here — MDX `id`/`tags` props (14.4),
+ * rename and move's `<new-id>` (`refused-invalid-id`, 14), `occurrences
+ * --to` spellings (11.3), and journal entries (14.13).
+ */
+export function segmentViolation(
+  value: string,
+  kind: "segment" | "tag",
+): SegmentViolation | null {
+  if (value.length === 0) {
+    return { rule: "empty" };
+  }
+  // A single code-unit scan is exact: every character the rules name is
+  // one UTF-16 code unit, and no surrogate half is any of them.
+  let violation: SegmentViolation | null = null;
+  for (let index = 0; index < value.length && violation === null; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code === 0x2e) {
+      if (kind === "segment") violation = { rule: "dot" };
+    } else if (code === 0x23) {
+      violation = { rule: "hash" };
+    } else if (isWhitespaceCodePoint(code)) {
+      violation = { rule: "whitespace" };
+    } else if (isControlCodePoint(code)) {
+      violation = { rule: "control" };
+    } else if (code === REPLACEMENT_CHARACTER) {
+      violation = { rule: "replacement" };
+    } else {
+      const character = VERBATIM_BREAKING_CHARACTERS.get(code);
+      if (character !== undefined) {
+        violation = { rule: "verbatim", character };
+      }
+    }
+  }
+  if (violation !== null) {
+    return violation;
+  }
+  return FORBIDDEN_SEGMENT_NAMES.has(value) ? { rule: "forbidden-name" } : null;
+}
+
+/**
+ * Every segment of the dotted ID `id` (SPEC 1.3: segments joined by `"."`)
+ * that breaks SPEC 1.4, in order, with the first rule each breaks; empty
+ * exactly when `id` is well-formed. The split makes 1.4's no-`"."` rule
+ * structural: a doubled, leading, or trailing `"."` yields an empty
+ * segment.
+ */
+export function idSegmentViolations(
+  id: string,
+): { readonly segment: string; readonly violation: SegmentViolation }[] {
+  const violations: {
+    readonly segment: string;
+    readonly violation: SegmentViolation;
+  }[] = [];
+  for (const segment of id.split(".")) {
+    const violation = segmentViolation(segment, "segment");
+    if (violation !== null) {
+      violations.push({ segment, violation });
+    }
+  }
+  return violations;
+}
+
+/**
+ * The shared wording of a SPEC 1.4 violation: a predicate completing "the
+ * segment …" or "the tag …" (e.g. `contains "#"`).
+ */
+export function describeSegmentViolation(violation: SegmentViolation): string {
+  switch (violation.rule) {
+    case "empty":
+      return "is empty";
+    case "dot":
+      return 'contains "."';
+    case "hash":
+      return 'contains "#"';
+    case "whitespace":
+      return "contains whitespace";
+    case "control":
+      return "contains a control character";
+    case "verbatim":
+      return (
+        `contains ${violation.character}, one of the quote, escape, and ` +
+        `character-reference characters`
+      );
+    case "replacement":
+      return "contains U+FFFD (REPLACEMENT CHARACTER)";
+    case "forbidden-name":
+      return (
+        'is one of the forbidden names ("$", "__proto__", "prototype", ' +
+        '"constructor", "then")'
+      );
+  }
+}
 
 /** A SPEC 3 line terminator: CRLF (one terminator), lone LF, or lone CR. */
 export type LineTerminator = "\r\n" | "\n" | "\r";

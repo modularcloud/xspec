@@ -27,11 +27,7 @@ import type { DependencyEdgeKind, WorkspaceGraph } from "./graph.js";
 import type { SpecDocument, SpecSection } from "./mdx.js";
 import type { PathText } from "./path-text.js";
 import { pathTextKey } from "./path-text.js";
-import {
-  containsControl,
-  containsWhitespace,
-  FORBIDDEN_SEGMENT_NAMES,
-} from "./text.js";
+import { describeSegmentViolation, idSegmentViolations } from "./text.js";
 
 /**
  * The consulted domain of one availability answer (SPEC 11.2): a set of
@@ -136,29 +132,23 @@ export function nodeSpellingProblem(spelling: string): string | null {
     return null;
   }
   const idPart = spelling.slice(firstHash + 1);
-  for (const segment of idPart.split(".")) {
-    if (segment.length === 0) {
-      return idPart.length === 0
-        ? 'its id part after "#" is empty (one or more segments required)'
-        : "its id part has an empty segment";
-    }
-    if (FORBIDDEN_SEGMENT_NAMES.has(segment)) {
-      return (
-        `its id segment ${JSON.stringify(segment)} is one of the forbidden ` +
-        `names ("$", "__proto__", "prototype", "constructor", "then") ` +
-        `(SPEC 1.4)`
-      );
-    }
-    if (containsWhitespace(segment)) {
-      return `its id segment ${JSON.stringify(segment)} contains whitespace (SPEC 1.4)`;
-    }
-    if (containsControl(segment)) {
-      return `its id segment ${JSON.stringify(segment)} contains a control character (SPEC 1.4)`;
-    }
-    // SPEC 1.4's no-"." rule is structural under the split; a "#" inside a
-    // segment is impossible under the at-most-one-"#" rule above.
+  if (idPart.length === 0) {
+    return 'its id part after "#" is empty (one or more segments required)';
   }
-  return null;
+  // The shared SPEC 1.4 validator (text.ts); the no-"." rule is structural
+  // under the split, and a "#" inside a segment is impossible under the
+  // at-most-one-"#" rule above.
+  const first = idSegmentViolations(idPart)[0];
+  if (first === undefined) {
+    return null;
+  }
+  if (first.violation.rule === "empty") {
+    return "its id part has an empty segment";
+  }
+  return (
+    `its id segment ${JSON.stringify(first.segment)} ` +
+    `${describeSegmentViolation(first.violation)} (SPEC 1.4)`
+  );
 }
 
 /**

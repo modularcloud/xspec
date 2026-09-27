@@ -26,13 +26,13 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 
 | Test | Module | Tasks |
 |---|---|---|
-| P-1 | section-16-p1 | 1 |
+| P-1 | section-16-p1 | 1 (passes since Task 1 landed) |
 | P-2 | section-16-p2-p3 | 10, 13 |
 | P-3 | section-16-p2-p3 | 10, 13 |
 | P-4 | section-16-p4 | 3, 4 |
 | P-5 | section-16-p5-p6 | 3, 4 |
-| T1.4-1 | section-1.4 | 1, 5, 6 |
-| T1.4-4 | section-1.4 | 1, 5, 6 |
+| T1.4-1 | section-1.4 | 1, 5 (since Task 1 only its last arm fails: the `&#46;` reference spelling) |
+| T1.4-4 | section-1.4 | 1 (passes since Task 1 landed; it stages no character reference) |
 | T1.5-2 | section-1.5 | 9 |
 | T1.6-5 | section-1.6-1.7 | 14 |
 | T1.7-2 | section-1.6-1.7 | 19, 20 |
@@ -84,7 +84,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T11-7 | section-11 | 3 |
 | T11.2-6 | section-11.2 | 51 |
 | T11.3-2 | section-11.3 | 40 |
-| T11.3-3 | section-11.3 | 1, 44 |
+| T11.3-3 | section-11.3 | 1, 44 (since Task 1 its first failing arm is configuration-first) |
 | T11.4-2 | section-11.4 | 40 |
 | T11.4-3 | section-11.4 | 3 |
 | T11.4-4 | section-11.4 | 14 |
@@ -113,31 +113,6 @@ Several tasks have no failing test of their own: Task 21 (the undefined refusal 
 
 ---
 
-## Task 1 — One shared SPEC 1.4 validator carrying every segment and tag rule (SPEC 1.4, 14.4, 14 `refused-invalid-id`, 11.3, 12.0, 14.13; A1, B12)
-
-**Requirement.** SPEC 1.4: each ID segment is non-empty and contains no `.`, no `#`, no control character or whitespace (1.4's exact classes), none of `"`, `'`, `\`, `&` ("so that every segment is spelled verbatim in every form"), and no U+FFFD, and is not `$`, `__proto__`, `prototype`, `constructor`, or `then`. A tag follows the same rules but may contain `.`. A violating declared `id` or `tags` value is 14.4, one finding per violating attribute. A rename or section-move `<new-id>` violating them is `refused-invalid-id` (SPEC 14's refusal list; 6.4, 6.5). An `occurrences --to` spelling whose id part violates them is a malformed value, a usage error (11.3, 12.0). A journal line naming such an ID is malformed (14.13).
-
-**Observed.**
-- A1: `build` accepts `"`, `'`, `\`, `&`, and U+FFFD in `id` segments and tags, with no 14.4.
-- A1: `rename specs/A.mdx a 'x"y'` is performed, writing `id="x&quot;y"` and `d={"x\"y"}`, where `refused-invalid-id` is required; `move` behaves alike.
-- B12: `occurrences --to 'a.mdx#x&y'` (likewise `x\y`, `x'y`, `x"y`) answers an empty selection with exit 0; it must exit 2.
-
-**Location.** There are four hand-copied validators, none with the new rules:
-- `valueViolation` in `src/core/mdx.ts` (~1104), also behind `definedIdentitySections` (~1164);
-- the intrinsic-ID-form check at the top of `src/core/refusal.ts` (~53–80);
-- `nodeSpellingProblem` in `src/core/availability.ts` (~126), called from `src/cli/commands/occurrences.ts` (~78);
-- `idProblem` in `src/core/journal.ts` (~536).
-
-The shared pieces are in `src/core/text.ts`: `FORBIDDEN_SEGMENT_NAMES`, `containsWhitespace`, `containsControl`.
-
-**Change.** Add one validator to `src/core/text.ts` implementing every 1.4 rule, with a `segment` or `tag` kind. Route all four sites through it, keeping each site's own message wording and finding shape. Change only the rule set, not which constructs are validated. Today the product decodes escape and character-reference spellings before validating, so T1.4-1/T1.4-4's arms for those need Tasks 5 and 6.
-
-**Verification.**
-- Should turn green: `section-16-p1.test.ts` (P-1).
-- Partially: `section-1.4.test.ts` (the character arms of T1.4-1 and T1.4-4) and `section-11.3.test.ts` (T11.3-3's `"`/`'`/`\`/`&` arms; its configuration-first arms wait on Task 44).
-- Neighbours, no regressions: `section-1.3.test.ts`, `section-6.1.test.ts`, `section-6.4.test.ts`, `section-6.5.test.ts`.
-- By hand: `rename specs/A.mdx a 'x"y'` gives exit 1 with exactly one `refused-invalid-id`; `occurrences --to 'a.mdx#x&y'` gives exit 2.
-
 ## Task 2 — `query nodes --tag` rejects a spelling no tag can have (SPEC 11.1, 1.4, 12.0; B11)
 
 **Requirement.** SPEC 11.1 and 12.0: a `--tag` spelling malformed as a tag under 1.4's rules is a malformed value. That is a usage error (exit 2) of the syntax class: "a `--to` or `--tag` spelling malformed as an identity or tag".
@@ -148,7 +123,7 @@ The shared pieces are in `src/core/text.ts`: `FORBIDDEN_SEGMENT_NAMES`, `contain
 - `src/cli/args.ts`: the `--tag` flag spec (~260) validates nothing.
 - `src/cli/commands/query-core.ts` (~283) reads the value raw.
 
-**Change.** After Task 1: validate the value with Task 1's tag rule at parse level, in `args.ts`, where the multi-`#` identity check already runs without loading configuration. Report the plain usage error (`code` and `path` `null` in the 12.7 error document).
+**Change.** After Task 1: validate the value with Task 1's tag rule (`segmentViolation(value, "tag")` in `src/core/text.ts`, worded by `describeSegmentViolation`) at parse level, in `args.ts`, where the multi-`#` identity check already runs without loading configuration. Report the plain usage error (`code` and `path` `null` in the 12.7 error document).
 
 **Verification.**
 - `section-11.test.ts`: T11-2's malformed-`--tag` arms (T11-2 also waits on Tasks 3, 40, and 44).
@@ -223,10 +198,11 @@ The shared pieces are in `src/core/text.ts`: `FORBIDDEN_SEGMENT_NAMES`, `contain
 - Update the doc comment.
 - Confirm rename and move's in-place ID rewrite (6.4) stays byte-exact.
 - With Task 1 in place, a verbatim `&` then fails 1.4.
+- `attributeProblems` in `src/core/mdx.ts` (Task 1) judges `id`/`tags` with one 14.4 finding per attribute and restores a U+0000 that remark-mdx decoded to U+FFFD; once values are the raw characters that restoration is a no-op, and the helper can judge the raw values alone.
 
 **Verification.**
 - Should turn green: `section-2.5-2.6.test.ts` (T2.5-3).
-- With Tasks 1 and 6: `section-1.4.test.ts` (T1.4-1 and T1.4-4, their character-reference arms).
+- `section-1.4.test.ts`: T1.4-1, whose one failing arm since Task 1 is the `&#46;` reference spelling (T1.4-4 already passes).
 - Neighbours: `section-1.1-1.2.test.ts`, `section-1.3.test.ts`, `section-2.7.test.ts`, `section-6.4.test.ts`.
 
 ## Task 6 — String literals, chain segments, and import specifiers are read as spelled (SPEC 2.4, 2.1, 4, 4.5, 14.5–14.7, 14.15; A2, C12)
@@ -250,7 +226,7 @@ The shared pieces are in `src/core/text.ts`: `FORBIDDEN_SEGMENT_NAMES`, `contain
 
 **Verification.**
 - Should turn green: `section-2.4.test.ts` (T2.4-5), `section-2.1.test.ts` (T2.1-2), `section-4.test.ts` (T4-2; T4-5 waits on Tasks 16–17), `section-14.test.ts` (T14-2).
-- With Tasks 1 and 5: `section-1.4.test.ts` (the escape arms of T1.4-1 and T1.4-4).
+- `section-1.4.test.ts`: the escape arms of T1.4-1 and T1.4-4 already pass since Task 1 (remark-mdx leaves a backslash in a quoted attribute value undecoded); keep them green.
 - Neighbours: `section-2.2-2.3.test.ts`, `section-4.5.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-16-p1.test.ts`.
 
 ## Task 7 — An embedding's callee is `text` spelled plainly; a parenthesized or escaped callee is an invalid container (SPEC 2.3, 2.4, 14.16; A5)
