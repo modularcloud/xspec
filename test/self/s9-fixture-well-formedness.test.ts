@@ -41,10 +41,7 @@ import { P4_FORM_VECTORS } from "../suite/registry/section-16-p4.js";
 import { P5_FORM_VECTORS } from "../suite/registry/section-16-p5-p6.js";
 import { P7_FORM_VECTORS } from "../suite/registry/section-16-p7.js";
 import { P9_FORM_VECTORS } from "../suite/registry/section-16-p9.js";
-import {
-  P12_FORM_VECTORS,
-  P12_UNPARSEABLE_VECTORS,
-} from "../suite/registry/section-16-p12.js";
+import { P12_FORM_VECTORS } from "../suite/registry/section-16-p12.js";
 import { P13_FORM_VECTORS } from "../suite/registry/section-16-p13.js";
 import {
   I3_HALL_MOVED_SOURCE,
@@ -430,33 +427,19 @@ describe("S-9: every form the P-9 rendering composes, initially and after each e
   });
 });
 
-// P-12's twists: the duplicate-id appendix composes a well-formed file
-// (11.2's duplicate is a validity finding, not a parse failure), while the
-// break-parse appendix — an unclosed flow tag — is what the staging
-// declares unparseable (14.20), so the composed file must not derive.
-describe("S-9: every form the P-12 generator composes, twists included, derives", () => {
+// P-12's workspaces are valid by construction (TEST-SPEC §16 preamble): no
+// draw is declared unparseable, so every vector — the every-form file and
+// each form's minimal context, with and without the import, each placed
+// where the generator may compose it — must derive.
+describe("S-9: every form the P-12 generator composes derives", () => {
   test("the vector set is non-empty and uniquely named", () => {
-    expect(P12_FORM_VECTORS.length).toBeGreaterThan(40);
+    expect(P12_FORM_VECTORS.length).toBe(44);
     expect(new Set(P12_FORM_VECTORS.map(([name]) => name)).size).toBe(
       P12_FORM_VECTORS.length,
     );
   });
   test.each(P12_FORM_VECTORS)("%s", (_name, source) => {
     expectDerives(source);
-  });
-});
-
-describe("S-9: the P-12 break-parse twist's composed files do not derive", () => {
-  test("the vector set is non-empty and uniquely named", () => {
-    expect(P12_UNPARSEABLE_VECTORS.length).toBe(2);
-    expect(new Set(P12_UNPARSEABLE_VECTORS.map(([name]) => name)).size).toBe(
-      P12_UNPARSEABLE_VECTORS.length,
-    );
-  });
-  test.each(P12_UNPARSEABLE_VECTORS)("%s", (_name, source) => {
-    expectRejects(source);
-    // No allowance makes an MDX-syntax rejection pass.
-    expectRejects(source, MDX_ALLOWANCES);
   });
 });
 

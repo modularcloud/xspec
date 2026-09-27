@@ -2,12 +2,12 @@
 //
 // One registered product-facing property test (C-2 "one code path"): a
 // seeded, reproducible generator (helpers/property.ts, H-10; fixed seed set
-// in CI, E-5) produces small random spec-only workspaces — 1–3 `.mdx` spec
-// sources with nested sections, prose (multi-byte spellings included, so
-// byte offsets diverge from code-point and UTF-16 counts, SPEC 1.7), MDX
-// comments, blank lines, an optional import of the first file, `d`
-// references, and `{text(...)}` embeddings, in resolving, maybe-resolving,
-// and never-resolving spellings — and asserts, per trial, exactly the two
+// in CI, E-5) produces small random spec-only workspaces, valid by
+// construction — 1–3 `.mdx` spec sources with nested sections, prose
+// (multi-byte spellings included, so byte offsets diverge from code-point
+// and UTF-16 counts, SPEC 1.7), MDX comments, blank lines, an optional
+// import of the first file, and resolving `d` references and
+// `{text(...)}` embeddings — and asserts, per trial, exactly the two
 // equivalences P-12 states:
 //
 //   * **at ≡ view.** For EVERY file and EVERY offset 0…byte length, `at`'s
@@ -49,41 +49,48 @@
 // deterministic §11 tests pin pointwise correctness; P-12 searches the
 // input space for inconsistency between the three surfaces.
 //
-// Input space. Workspaces are valid-leaning but not validity-bound: the
-// configuration is constant and valid by construction (a configuration
-// error is a 14.14 exit-2 outcome preceding every answer, outside P-12's
-// subject), file paths are fixed valid spellings, and every staged argument
-// is well-formed with offsets in 0…byte length — so no invocation stages a
-// usage error and every answer exits 0 or 1 (SPEC 11.2: these surfaces
-// answer per file whatever findings the workspace carries; argument checks
-// alone exit 2). Reference spellings may resolve (`"t"` — every file's
-// constant anchor section; `M0.t` through the drawn import), maybe-resolve
-// (`"s1"`), or never resolve (`"zz"`), so answers are exercised on both
-// exit sides with and without findings. One optional per-trial twist
-// appends imperfection to one file:
+// Input space: valid by construction (TEST-SPEC §16 preamble — P-12 is not
+// among the properties staging invalid or imperfect input by design, P-1's
+// invalid draws, P-8, and P-11, so its oracles are evaluated over documents
+// that build and a generator artifact never surfaces as a product failure).
+// The configuration is constant and valid (a configuration error is a
+// 14.14 exit-2 outcome preceding every answer, outside P-12's subject),
+// file paths are fixed valid spellings, and every staged argument is
+// well-formed with offsets in 0…byte length — so no invocation stages a
+// usage error and every answer exits 0 or 1 (SPEC 11.2: argument checks
+// alone exit 2; P-12's entry pins no exit beyond that). References follow
+// P-4's discipline (section-16-p4.ts): each targets the file's constant
+// anchor `t` — its first top-level section, holding prose alone — or,
+// through the drawn import `M0` of the first file (files after the first
+// only; the first draws none, so no import cycle arises, SPEC 2.1), that
+// file's anchor `M0.t`, or `s1` — the first section a file emits, always
+// top-level — at sites after `s1`'s closing tag alone (the root's later
+// content or a later top-level subtree). So every reference resolves
+// (SPEC 2.2–2.4); none names the site's own section or an ancestor (SPEC
+// 5.3: "a section MUST NOT depend on or embed its own ancestor"); every
+// depends/embeds edge points into a subtree whose own references reach
+// only the anchors, which reference nothing, so the combined
+// contains/depends/embeds graph is acyclic (5.3); and section IDs come
+// from a fresh per-file counter beside `t` (`s1`, `s1.s2`, …: unique and
+// structurally valid, 1.3, 1.4). Imperfect input is anchored elsewhere: an
+// unparseable requested file's explicitly unavailable resolution by
+// T11.5-3, explicitly unavailable identity data by T11.2-*, and the
+// imperfect-input classes by P-11.
 //
-//   * `duplicate-id` — two appended sections both spelling `dd`, the first
-//     carrying `d={"t"}`: both bearers' identities are undefined (11.2,
-//     uniqueness), so the view reports their `identity` as the
-//     unavailability marker and `at` must agree at every offset inside
-//     them; the `d` reference still resolves and records an occurrence
-//     whose source datum is explicitly unavailable as one datum (5.7,
-//     11.2) — carried identically by the view, the enumeration, and the
-//     containing-occurrence side of `at`.
-//   * `break-parse` — an appended unclosed section tag: the file is
-//     unparseable (14.20), contributes no view entry, and `at` must report
-//     the unavailability marker at every offset (11.2, 11.5).
-//
-// Rendering discipline (parseable by construction outside `break-parse`):
-// section tags, comments, and prose are own-line constructs joined by
-// single newlines (the T11.5-1/P-4 style — MDX flow JSX interrupts a
-// paragraph, so glued tags stay flow constructs), while the import is
-// followed by a mandatory blank line (an MDX ESM block extends to the next
-// blank line and cannot interrupt a paragraph — the FP-094 hazard);
-// embeddings are glued mid-line behind non-empty prose; prose draws from a
-// fixed MDX-safe pool (alphanumeric line starts; no `<`, `>`, `{`, `}`,
-// backtick, `~`, `&`, `\`), with multi-byte entries (é, à, —) shifting
-// every later offset (SPEC 1.7).
+// Rendering discipline (every composed file derives, S-9): section tags,
+// comments, and prose are own-line constructs joined by single newlines
+// (the T11.5-1/P-4 style — MDX flow JSX interrupts a paragraph, so glued
+// tags stay flow constructs), while the import is followed by a mandatory
+// blank line (an MDX ESM block extends to the next blank line and cannot
+// interrupt a paragraph — the FP-094 hazard); embeddings are glued mid-line
+// behind non-empty prose; prose draws from a fixed MDX-safe pool
+// (alphanumeric line starts; no `<`, `>`, `{`, `}`, backtick, `~`, `&`,
+// `\`), with multi-byte entries (é, à, —) shifting every later offset
+// (SPEC 1.7). `P12_FORM_VECTORS` below spells every composed form, each
+// where the generator may compose it, for the S-9 self-test
+// (test/self/s9-fixture-well-formedness.test.ts), and every draw's sources
+// are judged before the product sees them (`mdxSources`,
+// helpers/property.ts).
 //
 // Cost shape: the at ≡ view clause is exhaustive per trial (sum of file
 // byte lengths + one EOF caret per file `at` invocations — "reachability is
@@ -91,15 +98,22 @@
 // small and the trial count low (`runs: 3` × the 3 default seeds = 9
 // CI-pinned trials), with the shrink budget sized against whole-trial
 // re-execution cost. An implementation-time dry-run over the committed
-// default seeds at these 9 trials verified: every twist kind occurs (none
-// ×4, duplicate-id ×3, break-parse ×2), multi-file workspaces, imports,
-// embeddings, `d` props, external references, and multi-byte prose all
-// occur, ~1470 `at` invocations total across the set, and every staged
-// source parses under remark-mdx exactly except the break-parse files,
-// which fail to parse (E-5: the fixed seeds exercise the full surface
-// deterministically). The `view` invocation runs first, so a product
-// without the §11 surfaces (the stub, S-7) fails immediately and cheaply,
-// and shrinking stays fast in the red phase (H-8).
+// default seeds at these 9 trials measured: 20 files (1-file workspaces ×2,
+// 2-file ×3, 3-file ×4), 8 drawn imports and one `M0.t` reference (a
+// `d={M0.t}`), 4 embeddings (`'t'` ×3, `"t"` ×1, each with a tail) and 6
+// single `d` props (`d={"t"}` ×5, `d={M0.t}` ×1) — 10 occurrences, spread
+// over two files in three trials and two to a file in two files — one
+// depth-2 section, multi-byte prose in 14 of the 20 files, and 1339 `at`
+// invocations in all. No `"s1"` reference and no `d` array occur there,
+// nor in the first 25 trials per seed: both arise only at a site after
+// `s1` closes (about 2% of files over a 1000-trial sample on other seeds),
+// and the S-9 vectors spell both. Every file of both seed sets derives,
+// and every trial of both — as every one of the sample's 38 trials
+// spelling `"s1"`, and each form vector — builds under the built product
+// with exit 0 and no finding (an implementation-time cross-check, never a
+// committed check against the product). The `view` invocation runs first,
+// so a product without the §11 surfaces (the stub, S-7) fails immediately
+// and cheaply, and shrinking stays fast in the red phase (H-8).
 //
 // P-12 is expressly outside every CERTIFICATIONS.md fixture scope (its
 // Exclusions name P-12 directly), so this body binds only to the real
@@ -133,7 +147,7 @@ import { assertSameJson } from "./support.js";
 const UNAVAILABLE = { unavailable: true } as const;
 
 // ---------------------------------------------------------------------------
-// Generation: file pool, content pools, per-file builder, twists.
+// Generation: file pool, content pools, per-file builder.
 
 /** Fixed valid paths in byte order (the 5.7 file-order sort is exercised). */
 const FILE_POOL = ["specs/A.mdx", "specs/B.mdx", "specs/C.mdx"] as const;
@@ -161,44 +175,47 @@ const TAIL_POOL = [" fin.", " — suite."] as const;
 const COMMENT_POOL = ["note", "à voir"] as const;
 
 /**
- * Embedding argument spellings (SPEC 2.3, 2.4 static forms). `"t"` always
- * resolves (the constant anchor section below); `'t'` is a spelling variant
- * of the same target; `"s1"` resolves exactly when the file drew a
- * top-level extra section (maybe); `"zz"` never resolves — an unresolved
- * spelling records no occurrence and reports its own finding (5.7, 11.2).
- * `M0.t` (external, resolving) joins the menu where the import was drawn.
+ * Embedding argument spellings (SPEC 2.3, 2.4 static forms), every one
+ * resolving (module header, "Input space"): `"t"` — the file's constant
+ * anchor section below — and `'t'`, a spelling variant of the same target;
+ * `"s1"` once the file's `s1` has closed (`s1` is the first section a file
+ * emits, always top-level, so at every later site it exists and is neither
+ * the site's own section nor an ancestor, SPEC 5.3); `M0.t` (external) where
+ * the import was drawn. Simplest first (pick shrinks toward the first
+ * entry).
  */
-function embedArgumentMenu(hasImport: boolean): readonly string[] {
-  const local = ['"t"', "'t'", '"s1"', '"zz"'] as const;
-  return hasImport ? [...local, "M0.t"] : local;
+function embedArgumentMenu(
+  hasImport: boolean,
+  s1Closed: boolean,
+): readonly string[] {
+  const menu = ['"t"', "'t'"];
+  if (s1Closed) menu.push('"s1"');
+  if (hasImport) menu.push("M0.t");
+  return menu;
 }
 
 /**
- * Opening-tag `d` prop spellings (SPEC 2.2), `""` = prop omitted. Entries
- * of a `d` array record occurrences separately (5.7); the mixed arrays
- * exercise resolving and non-resolving entries side by side.
+ * Opening-tag `d` prop spellings (SPEC 2.2), `""` = prop omitted, under the
+ * embedding menu's targets and conditions: every entry resolves, and the
+ * array's entries record occurrences separately (5.7).
  */
 function dPropMenu(
   hasImport: boolean,
+  s1Closed: boolean,
 ): ReadonlyArray<readonly [number, string]> {
   const entries: (readonly [number, string])[] = [
     [5, ""],
     [2, ' d={"t"}'],
-    [1, ' d={["t", "s1"]}'],
-    [1, ' d={["t", "zz"]}'],
   ];
+  if (s1Closed) entries.push([1, ' d={["t", "s1"]}']);
   if (hasImport) entries.push([1, " d={M0.t}"]);
   return entries;
 }
 
-/** One generated workspace and the twist applied to it. */
+/** One generated workspace (module header). */
 export interface P12Trial {
   /** Staged content per workspace-relative path, in FILE_POOL order. */
   readonly files: ReadonlyArray<readonly [string, string]>;
-  /** Human-readable twist description (`"none"` when none applied). */
-  readonly twist: string;
-  /** The file the break-parse twist left unparseable (14.20), if any. */
-  readonly unparseable?: string;
 }
 
 // --- the line templates (the generator and the S-9 vector set below) ------
@@ -233,8 +250,11 @@ function commentLine(interior: string): string {
 
 /**
  * One file's lines (joined by single newlines; module header discipline).
- * The constant anchor section `t` opens every file, so the resolving
- * reference spellings above always have a target, in-file and cross-file.
+ * The constant anchor section `t` opens every file, so the reference
+ * spellings above always have a target, in-file and cross-file; `s1Closed`
+ * turns true right after the closing tag of `s1` — the first section
+ * `emitSection` names, always top-level — so neither `s1`'s opening tag nor
+ * anything inside it spells `"s1"` (module header, "Input space").
  */
 function genFileLines(choices: Choices, hasImport: boolean): string[] {
   const lines: string[] = [];
@@ -242,6 +262,7 @@ function genFileLines(choices: Choices, hasImport: boolean): string[] {
   lines.push(...anchorSectionLines(choices.pick(PROSE_POOL)));
 
   let seg = 1;
+  let s1Closed = false;
   const nextSeg = (): string => {
     const name = `s${String(seg)}`;
     seg += 1;
@@ -250,7 +271,7 @@ function genFileLines(choices: Choices, hasImport: boolean): string[] {
   const emitProse = (): void => {
     const prose = choices.pick(PROSE_POOL);
     const embedArgument = choices.boolean(0.4)
-      ? choices.pick(embedArgumentMenu(hasImport))
+      ? choices.pick(embedArgumentMenu(hasImport, s1Closed))
       : null;
     const tail =
       embedArgument !== null && choices.boolean(0.5)
@@ -261,7 +282,9 @@ function genFileLines(choices: Choices, hasImport: boolean): string[] {
   const emitSection = (parentDotted: string, depth: number): void => {
     const segName = nextSeg();
     const dotted = parentDotted === "" ? segName : `${parentDotted}.${segName}`;
-    lines.push(openingTag(dotted, choices.weightedPick(dPropMenu(hasImport))));
+    lines.push(
+      openingTag(dotted, choices.weightedPick(dPropMenu(hasImport, s1Closed))),
+    );
     const innerCount = choices.intInclusive(0, 2);
     for (let k = 0; k < innerCount; k += 1) {
       const menu: (readonly [
@@ -281,6 +304,7 @@ function genFileLines(choices: Choices, hasImport: boolean): string[] {
       } else emitSection(dotted, depth + 1);
     }
     lines.push("</S>");
+    if (dotted === "s1") s1Closed = true;
   };
 
   const extraCount = choices.intInclusive(0, 2);
@@ -302,17 +326,6 @@ function genFileLines(choices: Choices, hasImport: boolean): string[] {
   return lines;
 }
 
-/**
- * The duplicate-id twist appendix (module header): both bearers of `dd`
- * undefined (11.2), the first's resolving `d={"t"}` reference recording an
- * occurrence whose source datum is explicitly unavailable (5.7).
- */
-const DUPLICATE_ID_APPENDIX =
-  '<S id="dd" d={"t"}>\nd un.\n</S>\n<S id="dd">\nd deux.\n</S>\n';
-
-/** The break-parse twist appendix: an unclosed flow tag — 14.20, masked. */
-const BREAK_PARSE_APPENDIX = '<S id="ka">\n';
-
 // --- S-9's fixed form-vector set (TEST-SPEC 17 S-9; the §16 preamble) ------
 
 /** A file's staged text: its lines joined by single newlines, terminated. */
@@ -322,32 +335,46 @@ function p12FileText(lines: readonly string[]): string {
 
 /**
  * One file holding every form the generator composes, with or without the
- * import (the `M0` spellings join the menus with it): the anchor, every
- * prose line, every embedding argument plain and with every tail, every
- * comment, a blank line, and one top-level section per `d` prop spelling,
- * each nested to the depth cap with every inner shape.
+ * import (the `M0` spellings join the menus with it), each where the
+ * generator may compose it — so the file is valid as the generator would
+ * compose it (module header, "Input space"): the anchor, every prose line,
+ * every embedding argument of the opening menu plain and with every tail,
+ * every comment, a blank line, and one top-level section per `d` prop
+ * spelling, each nested to the depth cap with every inner shape. The first
+ * of them is `s1`, spelling the omitted prop (every menu's first entry) and
+ * drawing its subtree's spellings from the opening menus alone (`s1` is not
+ * yet closed there); the embedding arguments the menus add once `s1` has
+ * closed follow its closing tag, plain and with every tail, and the later
+ * sections draw from the full menus.
  */
 function p12FormFileLines(hasImport: boolean): string[] {
   const lines: string[] = hasImport ? [...IMPORT_BLOCK_LINES] : [];
   lines.push(...anchorSectionLines(PROSE_POOL[0]));
   for (const prose of PROSE_POOL) lines.push(proseLine(prose, null, null));
-  const embedArguments = embedArgumentMenu(hasImport);
-  for (const argument of embedArguments) {
-    lines.push(proseLine(PROSE_POOL[1], argument, null));
-    for (const tail of TAIL_POOL) {
-      lines.push(proseLine(PROSE_POOL[2], argument, tail));
+  const pushEmbeddings = (embedArguments: readonly string[]): void => {
+    for (const argument of embedArguments) {
+      lines.push(proseLine(PROSE_POOL[1], argument, null));
+      for (const tail of TAIL_POOL) {
+        lines.push(proseLine(PROSE_POOL[2], argument, tail));
+      }
     }
-  }
+  };
+  const openingArguments = embedArgumentMenu(hasImport, false);
+  pushEmbeddings(openingArguments);
   for (const interior of COMMENT_POOL) lines.push(commentLine(interior));
   lines.push("");
-  const dProps = dPropMenu(hasImport).map(([, spelling]) => spelling);
+  const dPropSpellings = (s1Closed: boolean): string[] =>
+    dPropMenu(hasImport, s1Closed).map(([, spelling]) => spelling);
   let seg = 1;
+  let s1Closed = false;
   const nextSeg = (): string => {
     const name = `s${String(seg)}`;
     seg += 1;
     return name;
   };
-  dProps.forEach((dProp, index) => {
+  dPropSpellings(true).forEach((dProp, index) => {
+    const embedArguments = embedArgumentMenu(hasImport, s1Closed);
+    const dProps = dPropSpellings(s1Closed);
     const top = nextSeg();
     lines.push(openingTag(top, dProp));
     lines.push(
@@ -365,87 +392,102 @@ function p12FormFileLines(hasImport: boolean): string[] {
     lines.push(openingTag(grandchild, ""));
     lines.push(proseLine(PROSE_POOL[0], null, null));
     lines.push("</S>", "</S>", "</S>");
+    if (top === "s1") {
+      s1Closed = true;
+      pushEmbeddings(
+        embedArgumentMenu(hasImport, true).filter(
+          (argument) => !openingArguments.includes(argument),
+        ),
+      );
+    }
   });
   return lines;
 }
 
-/** Each form alone after the anchor — a minimal context — named. */
+/**
+ * Each form alone after the anchor — a minimal context — named. A form the
+ * menus offer only once `s1` has closed (a spelling of `s1`) follows a
+ * closed top-level `s1`, as the generator composes it: the embedding on the
+ * root's next line, the `d` prop on the next top-level section, `s2`.
+ */
 function p12MinimalContexts(
   hasImport: boolean,
 ): (readonly [name: string, source: string])[] {
   const label = hasImport ? "with the import" : "without the import";
   const context = (
     name: string,
+    afterS1: boolean,
     ...lines: string[]
   ): readonly [string, string] => [
-    `${name}, alone after the anchor ${label}`,
+    `${name}, alone after the anchor${afterS1 ? " and a closed s1" : ""} ${label}`,
     p12FileText([
       ...(hasImport ? IMPORT_BLOCK_LINES : []),
       ...anchorSectionLines(PROSE_POOL[0]),
+      ...(afterS1 ? [openingTag("s1", ""), PROSE_POOL[0], "</S>"] : []),
       ...lines,
     ]),
   ];
+  const openingArguments = embedArgumentMenu(hasImport, false);
+  const openingDProps = dPropMenu(hasImport, false).map(
+    ([, spelling]) => spelling,
+  );
   return [
     ...PROSE_POOL.map((prose) =>
-      context(`prose ${JSON.stringify(prose)}`, prose),
+      context(`prose ${JSON.stringify(prose)}`, false, prose),
     ),
-    ...embedArgumentMenu(hasImport).flatMap((argument) => [
-      context(
-        `embedding of ${argument}`,
-        proseLine(PROSE_POOL[0], argument, null),
-      ),
-      ...TAIL_POOL.map((tail) =>
+    ...embedArgumentMenu(hasImport, true).flatMap((argument) => {
+      const afterS1 = !openingArguments.includes(argument);
+      return [
         context(
-          `embedding of ${argument} with the tail ${JSON.stringify(tail)}`,
-          proseLine(PROSE_POOL[0], argument, tail),
+          `embedding of ${argument}`,
+          afterS1,
+          proseLine(PROSE_POOL[0], argument, null),
         ),
-      ),
-    ]),
+        ...TAIL_POOL.map((tail) =>
+          context(
+            `embedding of ${argument} with the tail ${JSON.stringify(tail)}`,
+            afterS1,
+            proseLine(PROSE_POOL[0], argument, tail),
+          ),
+        ),
+      ];
+    }),
     ...COMMENT_POOL.map((interior) =>
-      context(`comment ${JSON.stringify(interior)}`, commentLine(interior)),
-    ),
-    ...dPropMenu(hasImport).map(([, dProp]) =>
       context(
+        `comment ${JSON.stringify(interior)}`,
+        false,
+        commentLine(interior),
+      ),
+    ),
+    ...dPropMenu(hasImport, true).map(([, dProp]) => {
+      const afterS1 = !openingDProps.includes(dProp);
+      return context(
         dProp === "" ? "a section without a d prop" : `a section with${dProp}`,
-        openingTag("s1", dProp),
+        afterS1,
+        openingTag(afterS1 ? "s2" : "s1", dProp),
         PROSE_POOL[0],
         "</S>",
-      ),
-    ),
-    context("a blank line", ""),
+      );
+    }),
+    context("a blank line", false, ""),
   ];
 }
 
 /**
  * The fixed form-vector set of the P-12 generator (S-9): every form in one
- * file and each alone in a minimal context, with and without the import,
- * and the duplicate-id twist appended to each whole-form file.
+ * file and each alone in a minimal context, with and without the import —
+ * each vector file valid as the generator would compose it (every reference
+ * it spells resolves, none to its own section or an ancestor; IDs unique).
  */
 export const P12_FORM_VECTORS: ReadonlyArray<
   readonly [name: string, source: string]
 > = [false, true].flatMap((hasImport): (readonly [string, string])[] => {
   const label = hasImport ? "with the import" : "without the import";
-  const every = p12FileText(p12FormFileLines(hasImport));
   return [
-    [`every form ${label}`, every],
-    [
-      `every form ${label}, the duplicate-id twist appended`,
-      every + DUPLICATE_ID_APPENDIX,
-    ],
+    [`every form ${label}`, p12FileText(p12FormFileLines(hasImport))],
     ...p12MinimalContexts(hasImport),
   ];
 });
-
-/**
- * The break-parse twist's composed files — the staging declares them
- * unparseable (14.20), so S-9 holds that they do not derive.
- */
-export const P12_UNPARSEABLE_VECTORS: ReadonlyArray<
-  readonly [name: string, source: string]
-> = [false, true].map((hasImport): readonly [string, string] => [
-  `every form ${hasImport ? "with" : "without"} the import, the break-parse twist appended`,
-  p12FileText(p12FormFileLines(hasImport)) + BREAK_PARSE_APPENDIX,
-]);
 
 /** The P-12 trial generator (see the module header). */
 export const genP12Trial: Gen<P12Trial> = (choices) => {
@@ -462,32 +504,12 @@ export const genP12Trial: Gen<P12Trial> = (choices) => {
       `${genFileLines(choices, hasImport).join("\n")}\n`,
     ]);
   }
-  const twistKind = choices.weightedPick<
-    "none" | "duplicate-id" | "break-parse"
-  >([
-    [4, "none"],
-    [3, "duplicate-id"],
-    [2, "break-parse"],
-  ]);
-  if (twistKind === "none") return { files, twist: "none" };
-  const target = choices.intInclusive(0, fileCount - 1);
-  const [path, content] = files[target];
-  const appendix =
-    twistKind === "duplicate-id" ? DUPLICATE_ID_APPENDIX : BREAK_PARSE_APPENDIX;
-  files[target] = [path, content + appendix];
-  return {
-    files,
-    ...(twistKind === "break-parse" ? { unparseable: path } : {}),
-    twist: `${twistKind} on ${path}`,
-  };
+  return { files };
 };
 
-/** Counterexample rendering: the twist and the staged sources, in full. */
+/** Counterexample rendering: the staged sources, in full. */
 export function renderP12Trial(trial: P12Trial): string {
-  return JSON.stringify({
-    twist: trial.twist,
-    files: Object.fromEntries(trial.files),
-  });
+  return JSON.stringify({ files: Object.fromEntries(trial.files) });
 }
 
 // ---------------------------------------------------------------------------
@@ -580,16 +602,11 @@ async function runAnswer(
 
 /**
  * S-9's per-draw check (helpers/property.ts `mdxSources`): every composed
- * file, the break-parse twist's marked `"unparseable"` — the one source a
- * trial declares unparseable (14.20), which must not derive; every other
- * must derive.
+ * file, each of which must derive — the workspaces are valid by
+ * construction (module header, "Input space"; TEST-SPEC §16 preamble).
  */
 function stagedP12Sources(trial: P12Trial): DrawSource[] {
-  return trial.files.map(([path, contents]): DrawSource =>
-    path === trial.unparseable
-      ? [path, contents, undefined, "unparseable"]
-      : [path, contents],
-  );
+  return trial.files.map(([path, contents]): DrawSource => [path, contents]);
 }
 
 /** The P-12 property body for one generated trial (module header). */
@@ -604,21 +621,15 @@ async function runP12Trial(
   const workspace = await TestWorkspace.create({
     files,
     // S-9: every composed file is the draw's, judged by the property runner
-    // before the body saw it (`stagedP12Sources` above) and declared per
-    // draw, as every initial `.mdx` file a trial stages after the body's
-    // first product invocation must be (helpers/workspace.ts): the
-    // break-parse twist's file — the one unparseable source a trial
-    // declares — `perDrawUnparseable` (judged so again at creation: it must
-    // not derive), every other one `perDraw` (it must derive).
-    mdx: {
-      perDraw: mdxPathsOf(files).filter((path) => path !== trial.unparseable),
-      perDrawUnparseable:
-        trial.unparseable === undefined ? [] : [trial.unparseable],
-    },
+    // before the body saw it (`stagedP12Sources` above) and declared
+    // `perDraw`, as every initial `.mdx` file a trial stages after the
+    // body's first product invocation must be (helpers/workspace.ts) —
+    // judged again at creation: it must derive.
+    mdx: { perDraw: mdxPathsOf(files) },
   });
   try {
     // --- the derivability ground: one bare `view` over the whole domain ----
-    const viewContext = `P-12 \`xspec view\` (twist: ${trial.twist})`;
+    const viewContext = "P-12 `xspec view`";
     const viewReport = decodeViewReport(
       parseJsonStdout(
         await runAnswer(product, workspace, ["view"], viewContext),
@@ -649,7 +660,7 @@ async function runP12Trial(
     }
 
     // --- occurrence order: enumeration ≡ view-collected, sorted (5.7) ------
-    const occContext = `P-12 \`xspec occurrences\` (twist: ${trial.twist})`;
+    const occContext = "P-12 `xspec occurrences`";
     const first = await runAnswer(
       product,
       workspace,
@@ -711,7 +722,7 @@ async function runP12Trial(
           ? null
           : { root: entry.root, occurrences: entry.occurrences };
       for (let offset = 0; offset <= byteLength; offset += 1) {
-        const context = `P-12 \`at ${path} ${String(offset)}\` (twist: ${trial.twist})`;
+        const context = `P-12 \`at ${path} ${String(offset)}\``;
         const report = decodeAtReport(
           parseJsonStdout(
             await runAnswer(
@@ -756,10 +767,10 @@ async function runP12Trial(
 const P_12 = defineProductTest({
   id: "P-12",
   title:
-    "property: on random spec-only workspaces (nested sections, imports, " +
-    "comments, d references and {text(...)} embeddings behind multi-byte " +
-    "prose; optionally one duplicate-id file or one unparseable file), for " +
-    "EVERY file and EVERY offset 0…byte length `at`'s resolution — section " +
+    "property: on random spec-only workspaces, valid by construction " +
+    "(nested sections, imports, comments, resolving d references and " +
+    "{text(...)} embeddings behind multi-byte prose), for EVERY file and " +
+    "EVERY offset 0…byte length `at`'s resolution — section " +
     "identity, construct range, containing occurrence — equals the " +
     "resolution computed from that file's entry of one bare `view` answer " +
     "alone (no entry — the masked file — resolving to exactly the " +
