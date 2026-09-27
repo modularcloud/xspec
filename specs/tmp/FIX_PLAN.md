@@ -31,7 +31,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | P-3 | section-16-p2-p3 | 10, 13 |
 | P-4 | section-16-p4 | 3 (passes since Task 3 landed; it runs no `inventory`, so it never waited on Task 4) |
 | P-5 | section-16-p5-p6 | 3 (passes since Task 3 landed; it runs no `inventory`, so it never waited on Task 4) |
-| T1.4-1 | section-1.4 | 1, 5 (since Task 1 only its last arm fails: the `&#46;` reference spelling) |
+| T1.4-1 | section-1.4 | 1, 5 (passes since Task 5 landed; since Task 1 its one failing arm had been the `&#46;` reference spelling) |
 | T1.4-4 | section-1.4 | 1 (passes since Task 1 landed; it stages no character reference) |
 | T1.5-2 | section-1.5 | 9 |
 | T1.6-5 | section-1.6-1.7 | 14 |
@@ -40,7 +40,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T2.3-3 | section-2.2-2.3 | 7, 14 |
 | T2.4-2 | section-2.4 | 12, 14 |
 | T2.4-5 | section-2.4 | 6 |
-| T2.5-3 | section-2.5-2.6 | 5 |
+| T2.5-3 | section-2.5-2.6 | 5 (passes since Task 5 landed) |
 | T2.6-1 | section-2.5-2.6 | 3 (passes since Task 3 landed) |
 | T2.7-3 | section-2.7 | 14 |
 | T2.7-4 | section-2.7 | 13, 14 |
@@ -113,34 +113,9 @@ Several tasks have no failing test of their own: Task 21 (the undefined refusal 
 
 ---
 
-## Task 5 — Quoted attribute values are read verbatim, with no character-reference decoding (SPEC 2.4, 2.7, 2.5, 2.6, 1.4, 14.4, 14.17; A2, first part)
-
-**Requirement.** SPEC 2.4: "The value of such a literal, and of a quoted attribute value (2.7), is the characters between its delimiters exactly as spelled — no escape sequence or character reference is interpreted — … so a spelling containing `\` or `&` names no valid identity or tag (1.4), and a `coverage` value spelled with an escape or character reference is neither `required` nor `none` (14.17)."
-
-**Observed.** remark-mdx decodes character references in quoted attribute values, and the product validates the decoded text. Each of these is accepted:
-- `coverage="&#110;one"` reads as `none` (14.17 required);
-- `id="a&#46;b"` reads as `a.b` (14.4 required);
-- `tags="x&#121;"` reads as `xy` (14.4 required).
-
-**Location.** `src/core/mdx.ts`:
-- `SpecAttributeValue.value`, documented as "the decoded characters of the quoted form" (~69–75);
-- the section builder's prop validation (~1780–1895), which takes `id`, `coverage`, and `tags` from the mdast attribute's decoded value.
-
-**Change.**
-- Take every quoted attribute value from the source characters between its quotes (its `valueRange`), never from the parser's decoded value. This covers `id`, `coverage`, `tags`, and any other string prop that is read.
-- Update the doc comment.
-- Confirm rename and move's in-place ID rewrite (6.4) stays byte-exact.
-- With Task 1 in place, a verbatim `&` then fails 1.4.
-- `attributeProblems` in `src/core/mdx.ts` (Task 1) judges `id`/`tags` with one 14.4 finding per attribute and restores a U+0000 that remark-mdx decoded to U+FFFD; once values are the raw characters that restoration is a no-op, and the helper can judge the raw values alone.
-
-**Verification.**
-- Should turn green: `section-2.5-2.6.test.ts` (T2.5-3).
-- `section-1.4.test.ts`: T1.4-1, whose one failing arm since Task 1 is the `&#46;` reference spelling (T1.4-4 already passes).
-- Neighbours: `section-1.1-1.2.test.ts`, `section-1.3.test.ts`, `section-2.7.test.ts`, `section-6.4.test.ts`.
-
 ## Task 6 — String literals, chain segments, and import specifiers are read as spelled (SPEC 2.4, 2.1, 4, 4.5, 14.5–14.7, 14.15; A2, C12)
 
-**Requirement.** SPEC 2.4 (Task 5's rule) covers every static string literal: `d` and `text(...)` string arguments, computed-access indices, and import specifiers in spec and TypeScript sources alike. It also says: "A segment's identifier is likewise read as spelled: one carrying a Unicode escape sequence (`.login`) spells a name containing `\`, which no segment contains (1.4), so the reference names no node and does not resolve (14.5–14.7) — which binding roots a chain is the language's scoping question (2.1, 4.5), not a spelling one." A specifier spelled with an escape designates no source (14.15).
+**Requirement.** SPEC 2.4 (the verbatim rule Task 5 applied to quoted attribute values) covers every static string literal: `d` and `text(...)` string arguments, computed-access indices, and import specifiers in spec and TypeScript sources alike. It also says: "A segment's identifier is likewise read as spelled: one carrying a Unicode escape sequence (`.login`) spells a name containing `\`, which no segment contains (1.4), so the reference names no node and does not resolve (14.5–14.7) — which binding roots a chain is the language's scoping question (2.1, 4.5), not a spelling one." A specifier spelled with an escape designates no source (14.15).
 
 **Observed.** The shared analyzer reads cooked (escape-decoded) values:
 - `d={"login"}`, `{text("login")}`, `BASE["a"]`, `d={BASE.login}`, and the TypeScript marker `BASE.login` all resolve and record edges. T14-2 requires 14.5 and 14.7.
@@ -150,6 +125,7 @@ Several tasks have no failing test of their own: Task 21 (the undefined refusal 
 - `src/core/spec-references.ts`: acorn's `Literal.value` and `Identifier.name` are cooked; use `raw` or the source slice.
 - `src/core/code-analysis.ts`: TypeScript's `StringLiteral.text` and `Identifier.text`/`escapedText` are cooked; use the node's source characters (`getText()` or positions), minus the delimiters.
 - The import readers on both sides: spec-source ESM imports (`mdx.ts`, `spec-references.ts`) and TypeScript imports (`code-analysis.ts`).
+- The writer side (noted by Task 5, which made `attributeValueText` in `src/core/edits.ts` write an attribute value verbatim): `jsStringLiteral` in the same file still escapes `\` and the quote character, which a verbatim reader no longer reads back as the value. Rename and move write it for rewritten references and import specifiers; valid identities hold neither character (1.4), but a specifier is a path and can hold a quote (`specs/it's.mdx`). Write the value verbatim and pick a quote the value does not hold.
 
 **Change.**
 - Read every string-literal value and every chain segment name from its exact source characters: between the delimiters for literals, the identifier's own span for names.

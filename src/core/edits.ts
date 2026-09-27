@@ -101,21 +101,19 @@ export function jsStringLiteral(value: string, quote: '"' | "'"): string {
 /**
  * The characters of a quoted MDX attribute value holding exactly `value`
  * under `quote` (SPEC 2.7: quoted attribute form; SPEC 6.4: the quote style
- * is preserved). MDX decodes character references in attribute values, so
- * `&` and the quote character are written as character references — every
- * other character is written verbatim — and the attribute re-parses to
- * exactly `value`.
+ * is preserved). A quoted attribute value is the characters between its
+ * quotes exactly as spelled — no character reference is interpreted
+ * (SPEC 2.4) — so the value is written verbatim and reads back as itself.
+ * The rewritten values are identities, whose segments hold no quote
+ * character (SPEC 1.4); a value holding `quote` has no spelling in that
+ * form at all.
  */
 export function attributeValueText(value: string, quote: '"' | "'"): string {
-  let encoded = "";
-  for (const character of value) {
-    if (character === "&") {
-      encoded += "&amp;";
-    } else if (character === quote) {
-      encoded += quote === '"' ? "&quot;" : "&#x27;";
-    } else {
-      encoded += character;
-    }
+  if (value.includes(quote)) {
+    throw new Error(
+      `xspec internal error: the attribute value ${JSON.stringify(value)} ` +
+        `holds its own quote character ${quote} and has no quoted spelling`,
+    );
   }
-  return encoded;
+  return value;
 }

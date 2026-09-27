@@ -68,9 +68,10 @@ import {
  */
 export interface SpecAttributeValue {
   /**
-   * The attribute's value — the decoded characters of the quoted form
-   * (MDX decodes character references in attribute values; the declared ID
-   * and tag values are these decoded characters).
+   * The attribute's value: the characters between its quotes exactly as
+   * spelled in the source (SPEC 2.4) — no character reference or escape
+   * sequence is interpreted, so `id="a&#46;b"` declares the segment
+   * `a&#46;b`, never `a.b`. The parser's decoded value is never read.
    */
   readonly value: string;
   /** Byte range of the value's characters, between (excluding) the quotes. */
@@ -119,10 +120,11 @@ export interface SpecRawAttribute {
  */
 export interface SpecSection {
   /**
-   * The declared ID (SPEC 1.3), decoded — or null for the implicit root and
-   * for a section whose ID is unusable: missing (14.1) or declared in an
-   * invalid form (14.17, repeated or not a quoted string). A null ID on a
-   * non-root section always has a finding accounting for it.
+   * The declared ID (SPEC 1.3), as spelled between the `id` attribute's
+   * quotes (SPEC 2.4: no character reference interpreted) — or null for the
+   * implicit root and for a section whose ID is unusable: missing (14.1) or
+   * declared in an invalid form (14.17, repeated or not a quoted string). A
+   * null ID on a non-root section always has a finding accounting for it.
    */
   readonly id: string | null;
   /**
@@ -891,7 +893,10 @@ function ignoreClosingMarker(): void {
  * extension, so these handlers replace the stock ones per token type
  * (mdast-util-from-markdown merges `enter`/`exit` maps by assignment,
  * later extensions winning) while every other stock handler — tag names,
- * attributes and their decoded values, expression attributes — stays.
+ * attributes and their values, expression attributes — stays. (The stock
+ * handler decodes character references in a quoted value; the builder
+ * reads only whether a value is quoted, braced, or absent, and takes a
+ * quoted value's characters from the source as spelled — SPEC 2.4.)
  * Handlers that reject genuinely malformed tags (attributes or a
  * self-closing slash in a closing tag) also stay, so those remain parse
  * failures (SPEC 14.20).
@@ -1102,29 +1107,17 @@ function pointRange(
  * attribute's one 14.4 finding (SPEC 14.4: one finding per `id` or `tags`
  * attribute whose value violates 1.4, however many of its segments or tags
  * do), judged by the shared validator (text.ts). `values` are the value's
- * segments (split on `"."`, SPEC 1.3) or tags (split per 2.6) as MDX
- * decodes them, `rawValue` the characters between the quotes as authored.
- * MDX decodes U+0000 to U+FFFD while parsing: where the raw characters hold
- * U+0000 but no U+FFFD, every decoded U+FFFD is an authored U+0000 and is
- * restored before judging, so the finding names the control character
- * actually spelled; where they hold both, U+0000 is named on its own and
- * the decoded values are judged as they are (U+FFFD breaks 1.4 as well).
+ * segments (split on `"."`, SPEC 1.3) or tags (split per 2.6), taken from
+ * the characters between the attribute's quotes exactly as spelled
+ * (SPEC 2.4) — so an authored U+0000 is judged as the control character it
+ * is, and a character reference as the `&` it contains.
  */
 function attributeProblems(
   kind: "segment" | "tag",
-  rawValue: string,
   values: readonly string[],
 ): string[] {
-  const nul = String.fromCharCode(0x0000);
-  const replacement = String.fromCharCode(0xfffd);
-  const rawHasNul = rawValue.includes(nul);
-  const restore = rawHasNul && !rawValue.includes(replacement);
   const problems: string[] = [];
-  if (rawHasNul && !restore) {
-    problems.push("the value contains the control character U+0000");
-  }
-  for (const decoded of values) {
-    const value = restore ? decoded.split(replacement).join(nul) : decoded;
+  for (const value of values) {
     const violation = segmentViolation(value, kind);
     if (violation !== null) {
       problems.push(
@@ -1785,8 +1778,12 @@ class DocumentBuilder {
     if (name === "id") {
       section.idPresent = true;
     }
-    const value = attribute.value ?? null;
-    if (typeof value !== "string") {
+    // The parser's value says only which form the attribute takes: a string
+    // for the quoted form, an object for a braced one, null when valueless.
+    // Its characters are never read — they are character-reference decoded,
+    // and SPEC 2.4 reads a quoted value exactly as spelled (below).
+    const form = attribute.value ?? null;
+    if (typeof form !== "string") {
       // SPEC 2.7 → 14.17: braced (e.g. id={"login"}) and valueless forms
       // are invalid for id, coverage, and tags.
       this.addFinding(
@@ -1795,7 +1792,7 @@ class DocumentBuilder {
         `invalid prop: the ${name} value must be a static string literal ` +
           `in quoted attribute form, single- or double-quoted — e.g. ` +
           `${name}="…" — not ` +
-          `${value === null ? "a valueless prop" : "a braced expression"} ` +
+          `${form === null ? "a valueless prop" : "a braced expression"} ` +
           `(SPEC 2.7, 14.17)`,
       );
       if (name === "id") {
@@ -1814,10 +1811,15 @@ class DocumentBuilder {
         "xspec internal error: quoted attribute value without quotes",
       );
     }
-    // The raw characters between the quotes. MDX replaces U+0000 with
-    // U+FFFD while decoding, so the SPEC 1.4 judgement of `id` and `tags`
-    // consults the raw characters as authored (`attributeProblems`).
-    const rawValue = this.text.slice(open + 1, attrSpan.end - 1);
+    // SPEC 2.4: the value of a quoted attribute is the characters between
+    // its delimiters exactly as spelled — no character reference (nor any
+    // escape sequence) is interpreted — for `id`, `coverage`, and `tags`
+    // alike. So `coverage="&#110;one"` is neither "required" nor "none"
+    // (14.17), and `id="a&#46;b"` or `tags="x&#121;"` spells a segment or
+    // tag containing `&`, which SPEC 1.4 forbids (14.4).
+    const valueStart = open + 1;
+    const valueEnd = attrSpan.end - 1;
+    const value = this.text.slice(valueStart, valueEnd);
 
     if (name === "coverage") {
       // SPEC 2.5/2.7 → 14.17: the only defined values are "required"
@@ -1843,7 +1845,7 @@ class DocumentBuilder {
       // formed here, so every surface and the graph data carry the set.
       const tags = splitTags(value);
       section.tags = sortByBytes(tags, (tag) => tag);
-      const problems = attributeProblems("tag", rawValue, tags);
+      const problems = attributeProblems("tag", tags);
       if (problems.length === 0) {
         return true;
       }
@@ -1866,11 +1868,11 @@ class DocumentBuilder {
     section.id = value;
     section.idAttribute = {
       value,
-      valueRange: this.byteRange(open + 1, attrSpan.end - 1),
+      valueRange: this.byteRange(valueStart, valueEnd),
       quote: quoteCharacter,
       attributeRange: attrRange,
     };
-    const problems = attributeProblems("segment", rawValue, value.split("."));
+    const problems = attributeProblems("segment", value.split("."));
     if (problems.length > 0) {
       // SPEC 14.4: one finding per `id` attribute whose value violates 1.4.
       this.addFinding(
