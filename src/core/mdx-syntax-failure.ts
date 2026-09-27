@@ -564,12 +564,33 @@ const CONTINUATIONS: readonly string[] = [
 ];
 
 /**
+ * What may follow a line spelled so far as `spelled` to continue the
+ * containers a continuation prefix (`prefix`) continues: the prefix's rest
+ * past what the line spells of it, then each of its suffixes, the whole
+ * first, since the line may have spelled any leading part of it, and
+ * spelled it otherwise (`> ` where the prefix spells `>>`). A suffix
+ * beginning inside a run of spaces and tabs is left out: the one beginning
+ * at the run's start continues wherever it does, since more indentation
+ * keeps a line in its containers (indented code is disabled).
+ */
+function prefixRests(prefix: string, spelled: string): string[] {
+  const rests = prefix.startsWith(spelled)
+    ? [prefix.slice(spelled.length)]
+    : [];
+  for (let from = 0; from < prefix.length; from += 1) {
+    if (from > 0 && /[ \t]{2}/.test(prefix.slice(from - 1, from + 1))) {
+      continue;
+    }
+    rests.push(prefix.slice(from));
+  }
+  return rests;
+}
+
+/**
  * The continuations of `head`'s last line, partly spelled, to probe: the
- * prefix the content's lines before it give (`contentLinePrefix`) — its
- * rest past what the line spells of it, then each of its suffixes, the
- * whole first, since the line may have spelled any leading part of it, and
- * spelled it otherwise (`> ` where the content spells `>>`) — then the
- * fixed ones, each followed by the probe's `x`.
+ * rests (`prefixRests`) of the prefix the content's lines before it give
+ * (`contentLinePrefix`), then the fixed ones, each followed by the probe's
+ * `x`.
  */
 function continuationsOf(head: string): readonly string[] {
   const lineStart = lineStartBefore(head, head.length);
@@ -580,13 +601,9 @@ function continuationsOf(head: string): readonly string[] {
   );
   const own = contentLinePrefix(before);
   if (own === undefined) return CONTINUATIONS;
-  const spelled = head.slice(lineStart);
-  const derived = own.startsWith(spelled)
-    ? [own.slice(spelled.length) + "x"]
-    : [];
-  for (let from = 0; from < own.length; from += 1) {
-    derived.push(own.slice(from) + "x");
-  }
+  const derived = prefixRests(own, head.slice(lineStart)).map(
+    (rest) => rest + "x",
+  );
   return [...new Set([...derived, ...CONTINUATIONS])];
 }
 
@@ -720,23 +737,38 @@ function esmOffset(
 }
 
 /**
+ * How `probe`, a prefix of the file ending at `at` plus a completion,
+ * completes: `"whole"` where it derives, `"paired"` where tag pairing fails
+ * only at or after `at`, `"class"` where a construct fails only there by
+ * its class (`classOffset`), null where it fails before `at`. A pairing
+ * failure in the probe counts by the construct it concerns (no probing
+ * within a probe). A class failure stops the grammar before it pairs tags,
+ * so a `"class"` completion leaves unjudged the pairing before `at`.
+ */
+function completion(
+  probe: string,
+  at: number,
+): "whole" | "paired" | "class" | null {
+  const { failure, calls } = analysisParse(probe);
+  if (failure === null) return "whole";
+  if (failure.source === "mdast-util-mdx-jsx") {
+    const place = String(failure.reason).startsWith(
+      "Expected a closing tag for",
+    )
+      ? placeEnd(failure)
+      : placeStart(failure);
+    return place === undefined || place >= at ? "paired" : null;
+  }
+  return classOffset(probe, failure, calls) >= at ? "class" : null;
+}
+
+/**
  * Whether `probe`, a prefix of the file ending at `at` plus a completion,
  * fails only at or after `at`: its grammar failure, if any, is the
- * completion's or the end's. A pairing failure in the probe counts by the
- * construct it concerns (no probing within a probe).
+ * completion's or the end's (`completion`).
  */
 function completes(probe: string, at: number): boolean {
-  const { failure, calls } = analysisParse(probe);
-  if (failure === null) return true;
-  if (failure.source === "mdast-util-mdx-jsx") {
-    if (String(failure.reason).startsWith("Expected a closing tag for")) {
-      const end = placeEnd(failure);
-      return end === undefined || end >= at;
-    }
-    const start = placeStart(failure);
-    return start === undefined || start >= at;
-  }
-  return classOffset(probe, failure, calls) >= at;
+  return completion(probe, at) !== null;
 }
 
 /** How far past a construct's end the probes below look. */
@@ -759,7 +791,19 @@ function containerPrefix(text: string, line: number, column: number): string {
  * An element left open when the construct holding it ended (at `end`): the
  * longest prefix the element's closing tag still completes — directly, or
  * after one more character so a line the construct's end hangs on can go
- * on, and at a line start also after the element's container prefix.
+ * on, and on a line that so far spells container syntax alone (a line
+ * start, a lone `>`, indentation short of a list item's) also after the
+ * rests of the element's container prefix (`prefixRests`): its rest past
+ * what the line spells, then each of its suffixes (SPEC 14's location rule
+ * for 14.20). The grammar judges every probe, so a wrong candidate only
+ * fails to complete. Past the container syntax of a line after the
+ * construct's end, a probe failing by a construct's class (a tag or
+ * expression the line leaves open, which the closer cannot finish) leaves
+ * the pairing unjudged, so it counts only where the line's content begins
+ * inside the element's container — where the closer, a paragraph's `x` and
+ * the closer, or such a line and the closer on the next line (after the
+ * container prefix) completes; content beginning outside it has ended the
+ * container with the element open.
  */
 function constructEndOffset(
   text: string,
@@ -768,14 +812,56 @@ function constructEndOffset(
   prefix: string,
 ): number {
   const bound = Math.min(text.length, end + PROBE_REACH);
+  let judged = -1;
+  let inside = false;
+  const contentInside = (content: number): boolean => {
+    if (judged !== content) {
+      const before = text.slice(0, content);
+      judged = content;
+      inside = [closer, "x" + closer, "x\n" + prefix + closer].some((tail) =>
+        completes(before + tail, content),
+      );
+    }
+    return inside;
+  };
   for (let at = end + 1; at <= bound; at += 1) {
     const head = text.slice(0, at);
-    const lineStart = /[\n\r]$/.test(head);
-    const completions =
-      lineStart && prefix.length > 0
-        ? [closer, "x" + closer, prefix + closer, prefix + "x" + closer]
-        : [closer, "x" + closer];
-    if (!completions.some((completion) => completes(head + completion, at))) {
+    const lineStart =
+      Math.max(head.lastIndexOf("\n"), head.lastIndexOf("\r")) + 1;
+    const spelled = head.slice(lineStart);
+    const run = CONTAINER_RUN.exec(spelled)?.[0] ?? "";
+    let viable: boolean;
+    if (run.length === spelled.length) {
+      const bare = completion(head + closer, at);
+      if (bare === "whole") {
+        // The closer closes the element here, and after more spaces and
+        // tabs too where the line ends so far with none of a list marker's
+        // characters: more indentation keeps a line in its containers.
+        if (/(?:^|[ \t>])$/.test(spelled)) {
+          while (at < bound && /[ \t]/.test(text.charAt(at))) at += 1;
+        }
+        continue;
+      }
+      if (bare !== null) continue;
+      const completions = new Set(["x" + closer]);
+      for (const rest of prefixRests(prefix, spelled)) {
+        completions.add(rest + closer);
+        completions.add(rest + "x" + closer);
+      }
+      completions.delete(closer);
+      viable = [...completions].some((tail) => completes(head + tail, at));
+    } else {
+      viable = [closer, "x" + closer].some((tail) => {
+        const how = completion(head + tail, at);
+        return (
+          how === "whole" ||
+          how === "paired" ||
+          (how === "class" &&
+            (lineStart <= end || contentInside(lineStart + run.length)))
+        );
+      });
+    }
+    if (!viable) {
       return at - 1;
     }
   }
@@ -820,6 +906,34 @@ const CROSSING_CLOSING_TAG = /^Expected the closing tag `<\/([^`>]*)>`/;
 const EXPECTED_CLOSING_TAG =
   /^Expected a closing tag for `<([^`>]*)>` \((\d+):(\d+)-\d+:\d+\)/;
 
+/** An element left open when the construct holding it ended. */
+interface LeftOpen {
+  /** Where the construct ended. */
+  readonly end: number;
+  /** The element's closing tag. */
+  readonly closer: string;
+  /** The element's container prefix (`containerPrefix`). */
+  readonly prefix: string;
+}
+
+/**
+ * The element a pairing failure of `text` reports left open when the
+ * construct holding it ended — the stock "Expected a closing tag for" with
+ * an end; null for any other pairing failure, and for an element open at
+ * the end of `text`.
+ */
+function leftOpen(text: string, failure: MdxFailure): LeftOpen | null {
+  if (failure.ruleId !== "end-tag-mismatch") return null;
+  const expected = EXPECTED_CLOSING_TAG.exec(String(failure.reason));
+  const end = placeEnd(failure);
+  if (expected === null || end === undefined) return null;
+  return {
+    end,
+    closer: `</${expected[1]}>`,
+    prefix: containerPrefix(text, Number(expected[2]), Number(expected[3])),
+  };
+}
+
 function pairingOffset(text: string, failure: MdxFailure): number {
   const reason = String(failure.reason);
   const start = placeStart(failure);
@@ -838,17 +952,11 @@ function pairingOffset(text: string, failure: MdxFailure): number {
     while (slash < text.length && /\s/u.test(text.charAt(slash))) slash += 1;
     return slash;
   }
-  const expected = EXPECTED_CLOSING_TAG.exec(reason);
-  if (expected !== null) {
-    const end = placeEnd(failure);
+  if (EXPECTED_CLOSING_TAG.test(reason)) {
+    const open = leftOpen(text, failure);
     // Open at the end of the file: the whole file is a viable prefix.
-    if (end === undefined) return text.length;
-    return constructEndOffset(
-      text,
-      end,
-      `</${expected[1]}>`,
-      containerPrefix(text, Number(expected[2]), Number(expected[3])),
-    );
+    if (open === null) return text.length;
+    return constructEndOffset(text, open.end, open.closer, open.prefix);
   }
   const crossing = CROSSING_CLOSING_TAG.exec(reason);
   if (crossing !== null && start !== undefined) {
@@ -913,7 +1021,9 @@ function lineStartBefore(text: string, at: number): number {
  * construct — a container or tag the offset lies in — reports that
  * construct's end and nothing before it. The prefix is cut at line starts,
  * backing up until it no longer ends inside such a construct, and a failure
- * it reports before the cut is returned; null when there is none.
+ * it reports before the cut is returned — a tag-pairing failure located by
+ * the file's own characters, returned where it lies before `offset`; null
+ * when there is none.
  */
 function hiddenFailure(text: string, offset: number): number | null {
   let cut = offset;
@@ -921,12 +1031,24 @@ function hiddenFailure(text: string, offset: number): number | null {
     const prefix = text.slice(0, cut);
     const parsed = analysisParse(prefix);
     if (parsed.failure === null) return null;
+    if (parsed.failure.source === "mdast-util-mdx-jsx") {
+      // Pairing ran, so nothing before the cut failed to tokenize. An
+      // element the prefix leaves open when the construct holding it ends
+      // is located by the file's own characters, past the cut too: the
+      // line the cut begins may already have ended that construct (SPEC
+      // 14's location rule for 14.20). An element open at the prefix's end
+      // tells nothing of the file past the cut.
+      const open = leftOpen(prefix, parsed.failure);
+      if (open === null) {
+        const at = pairingOffset(prefix, parsed.failure);
+        return at < cut ? at : null;
+      }
+      const at = constructEndOffset(text, open.end, open.closer, open.prefix);
+      return at < offset ? at : null;
+    }
     const at = classOffset(prefix, parsed.failure, parsed.calls);
     if (at < cut) return at;
-    // Pairing ran, so nothing before the cut failed.
-    if (parsed.failure.source === "mdast-util-mdx-jsx" || cut === 0) {
-      return null;
-    }
+    if (cut === 0) return null;
     cut = lineStartBefore(text, cut);
   }
   return null;
