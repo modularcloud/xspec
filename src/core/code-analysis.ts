@@ -41,6 +41,7 @@ import { compareFindings, locatedFinding } from "./findings.js";
 import type { ClassifiedChain } from "./references.js";
 import { classifyReference, stringLiteralValue } from "./references.js";
 import { decodeSourceBytes } from "./source-text.js";
+import { tsSyntaxFailureOffset } from "./ts-syntax-failure.js";
 import type { PathText } from "./path-text.js";
 import { pathTextKey, renderPathText } from "./path-text.js";
 import type { DesignateSpecifier } from "./spec-references.js";
@@ -263,6 +264,7 @@ export function analyzeCodeSource(
         kind: "unparseable",
         finding: parseFailureFinding(
           file,
+          path,
           sourceFile,
           offsets,
           tsx,
@@ -344,34 +346,39 @@ function createSingleFileProgram(
 /** The 14.20 finding for a parse failure, locating it (SPEC 14.20). */
 function parseFailureFinding(
   file: PathText,
+  path: string,
   sourceFile: tst.SourceFile,
   offsets: Utf8Offsets,
   tsx: boolean,
-  diagnostic: tst.DiagnosticWithLocation,
+  diagnostic: tst.Diagnostic,
 ): Finding {
   const reason = ts.flattenDiagnosticMessageText(diagnostic.messageText, " ");
   const grammar = tsx ? "TSX" : "plain TypeScript";
-  const start = Math.min(diagnostic.start, sourceFile.text.length);
-  const end = Math.min(
-    start + Math.max(diagnostic.length, 0),
-    sourceFile.text.length,
-  );
-  // SPEC 14/1.7: the reported location is the failure's byte range (the
-  // compiler exposes UTF-16 offsets; converted here).
+  // SPEC 14: one zero-length range at the failure's offset — the byte
+  // length of the longest prefix with which some well-formed file begins
+  // (ts-syntax-failure.ts), each probe judged by the same grammar.
+  const at = tsSyntaxFailureOffset(sourceFile.text, (text) => {
+    const probe = ts.createSourceFile(
+      path,
+      text,
+      ts.ScriptTarget.Latest,
+      /* setParentNodes */ false,
+      tsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    return {
+      diagnostics: createSingleFileProgram(probe, tsx).getSyntacticDiagnostics(
+        probe,
+      ),
+      endOfFile: probe.endOfFileToken.pos,
+    };
+  });
+  const byte = offsets.byteOffset(at);
   return locatedFinding(
     20,
     `unparseable source: not well-formed TypeScript under the ` +
       `${grammar} grammar the file name selects — ${reason}. Correct the ` +
       `syntax at the reported location (SPEC 14.20)`,
-    [
-      {
-        file,
-        range: {
-          start: offsets.byteOffset(start),
-          end: offsets.byteOffset(end),
-        },
-      },
-    ],
+    [{ file, range: { start: byte, end: byte } }],
   );
 }
 

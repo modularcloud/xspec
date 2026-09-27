@@ -60,6 +60,7 @@ import type { ConditionNumber, Finding } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
 import type { PathText } from "./path-text.js";
 import { isEmptyExpression, MDX_ACORN_OPTIONS, mdxAcorn } from "./mdx-acorn.js";
+import { mdxSyntaxFailureOffset } from "./mdx-syntax-failure.js";
 import { decodeSourceBytes } from "./source-text.js";
 import {
   describeSegmentViolation,
@@ -394,10 +395,10 @@ interface TagSpans {
 
 /** The thrown parse failure's observed shape (a unified VFileMessage). */
 interface ParseFailureLike {
+  /** The grammar component that raised it (absent on any other throw). */
+  readonly source?: unknown;
   readonly reason?: unknown;
   readonly message?: unknown;
-  readonly line?: unknown;
-  readonly column?: unknown;
   readonly place?: unknown;
 }
 
@@ -573,47 +574,56 @@ function parseFailureFinding(
         ? failure.message
         : String(error);
 
-  // A VFileMessage's `place` is a point ({line, column, offset}) or a
-  // position ({start, end}); either way the offsets are UTF-16 indices.
-  // SPEC 14/1.7: the reported location is a byte range; a failure exposing
-  // no offset locates at the file start (range [0, 0)). Line/column, when
-  // the failure carries them, enter the message text only.
-  let range: ByteRange = { start: 0, end: 0 };
-  let line: number | undefined;
-  let column: number | undefined;
-  const place = failure.place as
-    (MdxPoint & Partial<MdxPosition>) | null | undefined;
-  const startPoint: MdxPoint | undefined =
-    place == null ? undefined : (place.start ?? place);
-  const endPoint: MdxPoint | undefined =
-    place == null ? undefined : (place.end ?? place);
-  if (startPoint !== undefined && typeof startPoint.offset === "number") {
-    range = pointRange(startPoint.offset, endPoint?.offset, text, offsets);
+  // SPEC 14: one zero-length range at the failure's offset — the byte
+  // length of the longest prefix with which some well-formed file begins
+  // (mdx-syntax-failure.ts). A throw that is not the grammar's own failure
+  // (a VFileMessage, carrying its source) — nesting too deep to parse —
+  // locates at the file start.
+  let at = 0;
+  if (typeof failure.source === "string") {
+    const place = failure.place as
+      (MdxPoint & Partial<MdxPosition>) | null | undefined;
+    const placed = place == null ? undefined : (place.start ?? place).offset;
+    const fallback =
+      typeof placed === "number"
+        ? Math.max(0, Math.min(text.length, placed))
+        : 0;
+    at = mdxSyntaxFailureOffset(text, fallback);
   }
-  if (typeof failure.line === "number") {
-    line = failure.line;
-  } else if (startPoint !== undefined && typeof startPoint.line === "number") {
-    line = startPoint.line;
-  }
-  if (typeof failure.column === "number") {
-    column = failure.column;
-  } else if (
-    startPoint !== undefined &&
-    typeof startPoint.column === "number"
-  ) {
-    column = startPoint.column;
-  }
-
-  const where =
-    line !== undefined
-      ? ` at line ${String(line)}${column !== undefined ? `, column ${String(column)}` : ""}`
-      : "";
+  const byte = offsets.byteOffset(at);
+  const { line, column } = lineAndColumn(text, at);
   return locatedFinding(
     20,
-    `unparseable source: not well-formed MDX${where} — ${reason}. ` +
-      `Correct the syntax at the reported location (SPEC 14.20)`,
-    [{ file, range }],
+    `unparseable source: not well-formed MDX at line ${String(line)}, ` +
+      `column ${String(column)} — ${reason}. Correct the syntax at the ` +
+      `reported location (SPEC 14.20)`,
+    [{ file, range: { start: byte, end: byte } }],
   );
+}
+
+/**
+ * The 1-based line and column (in code points) of a UTF-16 index, lines
+ * ended by CR, LF, or CRLF — for a finding's message text.
+ */
+function lineAndColumn(
+  text: string,
+  index: number,
+): { readonly line: number; readonly column: number } {
+  let line = 1;
+  let lineStart = 0;
+  for (let at = 0; at < index; at += 1) {
+    const code = text.charCodeAt(at);
+    if (code === 0x0a || (code === 0x0d && text.charCodeAt(at + 1) !== 0x0a)) {
+      line += 1;
+      lineStart = at + 1;
+    }
+  }
+  let column = 1;
+  for (let at = lineStart; at < index; at += 1) {
+    const code = text.charCodeAt(at);
+    if (code < 0xdc00 || code > 0xdfff) column += 1;
+  }
+  return { line, column };
 }
 
 /**
@@ -695,28 +705,6 @@ function callsCookedText(expression: EstreeNode): boolean {
     call.callee.type === "Identifier" &&
     call.callee.name === "text"
   );
-}
-
-/** A byte range from a parse failure's UTF-16 point (and optional end). */
-function pointRange(
-  startIndex: number,
-  endIndex: number | undefined,
-  text: string,
-  offsets: Utf8Offsets,
-): ByteRange {
-  const clamp = (index: number): number =>
-    Math.max(0, Math.min(text.length, index));
-  const start = clamp(startIndex);
-  let end: number;
-  if (endIndex !== undefined && clamp(endIndex) > start) {
-    end = clamp(endIndex);
-  } else if (start < text.length) {
-    const codePoint = text.codePointAt(start)!;
-    end = start + (codePoint > 0xffff ? 2 : 1);
-  } else {
-    end = start;
-  }
-  return { start: offsets.byteOffset(start), end: offsets.byteOffset(end) };
 }
 
 // ---------------------------------------------------------------------------

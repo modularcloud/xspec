@@ -101,7 +101,9 @@ export function decodeSourceBytes(
         "unparseable source: the file begins with a UTF-8 byte-order " +
           "mark (bytes 0-3) — source files are BOM-free UTF-8; remove the " +
           "byte-order mark (SPEC 1.6, 14.20)",
-        [{ file: path, range: { start: 0, end: 3 } }],
+        // SPEC 14: one zero-length range at the failure's offset, 0 for a
+        // byte-order mark.
+        [{ file: path, range: { start: 0, end: 0 } }],
       ),
     };
   }
@@ -114,7 +116,10 @@ export function decodeSourceBytes(
         `unparseable source: the file is not valid UTF-8 (first invalid ` +
           `byte at offset ${String(invalidAt)}) — re-encode the file as ` +
           `UTF-8 (SPEC 1.6, 14.20)`,
-        [{ file: path, range: { start: invalidAt, end: invalidAt + 1 } }],
+        // SPEC 14: one zero-length range at the byte length of the longest
+        // well-formed UTF-8 prefix — the first byte of the first ill-formed
+        // sequence, malformed or truncated by the file's end.
+        [{ file: path, range: { start: invalidAt, end: invalidAt } }],
       ),
     };
   }
