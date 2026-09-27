@@ -335,14 +335,56 @@ function collectedAtEnd(head: string): Collected | undefined {
 const LINE_PREFIXES: readonly string[] = ["", "  ", "    ", "> "];
 
 /**
+ * A line's leading block quote markers, list markers (each followed by a
+ * space, a tab, or the line's end), and indentation.
+ */
+const CONTAINER_RUN = /^(?:[ \t>]|(?:[-*+]|[0-9]{1,9}[.)])(?=[ \t]|$))*/;
+
+/** `spelled` with each list marker blanked: `- ` becomes two spaces. */
+function blankedListMarkers(spelled: string): string {
+  return spelled.replace(/[-*+]|[0-9]{1,9}[.)]/g, (marker) =>
+    " ".repeat(marker.length),
+  );
+}
+
+/**
+ * The continuation prefix a container's content lines give: the leading
+ * block quote markers, list markers, and indentation of the last line of
+ * `text` holding more than those, list markers blanked as `containerPrefix`
+ * blanks them — `> - ` gives `>   `, `- > ` gives `  > `; undefined when
+ * no line holds more. Inside nested containers (a list item in a block
+ * quote, a block quote in a list item) a line continues them all only so,
+ * which no fixed prefix spells (SPEC 14's location rule for 14.20). The
+ * grammar judges every probe, so a wrong candidate (content spelled like a
+ * marker) only fails to collect.
+ */
+function contentLinePrefix(text: string): string | undefined {
+  const spans = lineSpans(text);
+  const first = Math.max(0, spans.length - CONTAINER_LINES);
+  for (let line = spans.length - 1; line >= first; line -= 1) {
+    const spelled = text.slice(spans[line][0], spans[line][1]);
+    const run = CONTAINER_RUN.exec(spelled)?.[0] ?? "";
+    if (run.length < spelled.length) return blankedListMarkers(run);
+  }
+  return undefined;
+}
+
+/**
  * The content of the container `head`'s last line — spelled as it stands,
  * so a blank line stays blank and a lone tag stays a flow tag — still
  * belongs to: a `}` on a further line (after a continuation prefix) falls
  * in it. The content returned ends with that last line, the further line's
- * terminator and prefix cut off.
+ * terminator and prefix cut off. Whichever prefix the `}` follows, the
+ * content through that last line is the same; the prefix the content's own
+ * lines give (`contentLinePrefix`) is tried first, then the fixed ones.
  */
 function collectedPastLine(head: string): Collected | undefined {
-  for (const prefix of LINE_PREFIXES) {
+  const own = contentLinePrefix(head);
+  const prefixes =
+    own === undefined
+      ? LINE_PREFIXES
+      : [own, ...LINE_PREFIXES.filter((prefix) => prefix !== own)];
+  for (const prefix of prefixes) {
     const probe = head + "\n" + prefix;
     const collected = collectedAtEnd(probe);
     if (collected === undefined) continue;
@@ -522,6 +564,33 @@ const CONTINUATIONS: readonly string[] = [
 ];
 
 /**
+ * The continuations of `head`'s last line, partly spelled, to probe: the
+ * prefix the content's lines before it give (`contentLinePrefix`) — its
+ * rest past what the line spells of it, then each of its suffixes, the
+ * whole first, since the line may have spelled any leading part of it, and
+ * spelled it otherwise (`> ` where the content spells `>>`) — then the
+ * fixed ones, each followed by the probe's `x`.
+ */
+function continuationsOf(head: string): readonly string[] {
+  const lineStart = lineStartBefore(head, head.length);
+  if (lineStart === 0) return CONTINUATIONS;
+  const before = head.slice(
+    0,
+    lineStart - terminatorBefore(head, lineStart).length,
+  );
+  const own = contentLinePrefix(before);
+  if (own === undefined) return CONTINUATIONS;
+  const spelled = head.slice(lineStart);
+  const derived = own.startsWith(spelled)
+    ? [own.slice(spelled.length) + "x"]
+    : [];
+  for (let from = 0; from < own.length; from += 1) {
+    derived.push(own.slice(from) + "x");
+  }
+  return [...new Set([...derived, ...CONTINUATIONS])];
+}
+
+/**
  * Whether `head` — its last line partly spelled — still continues the
  * content of the container opening at `opening`: some continuation of the
  * line leaves that content collected, viable up to the probe's `x`.
@@ -532,7 +601,7 @@ function continues(
   kind: JsContentKind,
 ): boolean {
   if (opening === undefined) return false;
-  for (const continuation of CONTINUATIONS) {
+  for (const continuation of continuationsOf(head)) {
     const probe = head + continuation;
     const collected = collectedAtEnd(probe);
     if (collected === undefined || collected.kind !== kind) continue;
@@ -683,9 +752,7 @@ function containerPrefix(text: string, line: number, column: number): string {
   const span = spans[line - 1];
   if (span === undefined) return "";
   const before = text.slice(span[0], Math.min(span[1], span[0] + column - 1));
-  return before.replace(/[-*+]|[0-9]{1,9}[.)]/g, (marker) =>
-    " ".repeat(marker.length),
-  );
+  return blankedListMarkers(before);
 }
 
 /**
