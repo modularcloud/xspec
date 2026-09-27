@@ -22,7 +22,11 @@
 //   flow construct's container ends the content at the line before it,
 //   measured so, the lazy line failing only after content viable there,
 //   and so does a line leaving the block container that holds it, the
-//   grammar placing the end of the file at that line's start;
+//   grammar placing the end of the file at that line's start; content a
+//   `}` closes on a line that then fails — a flow expression's brace
+//   followed by text, its content spanning a blank line no paragraph
+//   holds — fails at the first character past the brace that the grammar
+//   rejects;
 // - an ESM block: the block's text, as recorded, measured as a module of
 //   import and export declarations;
 // - a JSX tag's own syntax: the stock tokenizer's character;
@@ -258,6 +262,12 @@ function contentToFile(
 // Per-class offsets
 // ---------------------------------------------------------------------------
 
+/**
+ * What the stock grammar drops before a container's content line: block
+ * quote markers and indentation (a list item's continuation is spaces).
+ */
+const LINE_SYNTAX = /^[ \t>]*$/;
+
 /** A container's content as collected, and the grammar it is judged by. */
 interface Collected {
   readonly content: string;
@@ -267,8 +277,13 @@ interface Collected {
 /**
  * Where `content` begins in `head` when, as the stock grammar collects a
  * container's content, it runs to `head`'s end — its lines each a suffix of
- * the file line it corresponds to (the last ending `head`) — or undefined
- * when it does not.
+ * the file line it corresponds to (the last ending `head`), each line after
+ * the first past what the grammar drops before a content line: container
+ * syntax and indentation (`LINE_SYNTAX`) — or undefined when it does not.
+ * Content ending with a line terminator was closed by a `}` that begins a
+ * line past its container syntax, so it runs to the end of no `head` whose
+ * last line holds more: an empty last content line is a suffix of every
+ * line.
  */
 function contentStart(head: string, content: string): number | undefined {
   const contentLines = lineSpans(content);
@@ -278,10 +293,14 @@ function contentStart(head: string, content: string): number | undefined {
   for (let line = 0; line < contentLines.length; line += 1) {
     const [lineStart, lineEnd] = contentLines[line];
     const [fileStart, fileEnd] = fileLines[first + line];
+    const fileLine = head.slice(fileStart, fileEnd);
+    const contentLine = content.slice(lineStart, lineEnd);
     if (
-      !head
-        .slice(fileStart, fileEnd)
-        .endsWith(content.slice(lineStart, lineEnd))
+      !fileLine.endsWith(contentLine) ||
+      (line > 0 &&
+        !LINE_SYNTAX.test(
+          fileLine.slice(0, fileLine.length - contentLine.length),
+        ))
     ) {
       return undefined;
     }
@@ -514,7 +533,9 @@ function lineLeavingOffset(text: string, placed: number): number {
  * its terminator), measured by its own grammar: where it fails within, that
  * offset; where it cannot take the line's terminator, `end`; otherwise the
  * next line's first character — from `from` on, where that lies further —
- * other than those a continuation of the content could still begin with.
+ * other than those a continuation of the content could still begin with,
+ * or, where that line's `}` closes the content, the first character past
+ * it the grammar rejects (`pastClosingBrace`).
  */
 function measuredThroughLine(
   text: string,
@@ -534,24 +555,149 @@ function measuredThroughLine(
   }
   // The next line may still continue the content — a lazy line, deeper
   // indentation, a block quote's marker — character by character until
-  // it has become something else (a new list item, a blank line).
-  const opening = contentToFile(
-    text.slice(0, end),
-    content,
-    content.length,
-    end,
-    0,
-  );
+  // it has become something else (a new list item, a blank line) or its
+  // `}` has closed the content.
+  const opening = openingOf(text.slice(0, end), collected);
   let at = Math.max(end + terminator.length, from);
   const bound = Math.min(text.length, at + PROBE_REACH);
-  while (
-    at < bound &&
-    terminatorAt(text, at) === "" &&
-    continues(text.slice(0, at + 1), opening, kind)
-  ) {
+  while (at < bound && terminatorAt(text, at) === "") {
+    if (continues(text.slice(0, at + 1), opening, kind)) {
+      at += 1;
+    } else if (
+      text.charAt(at) === "}" &&
+      opening !== undefined &&
+      closesAt(text, at, opening, kind)
+    ) {
+      return pastClosingBrace(text, at);
+    } else {
+      break;
+    }
+  }
+  return at;
+}
+
+/**
+ * Where collected content running to `head`'s end opens in `head` (right
+ * after its opening brace), or undefined where that is not known.
+ */
+function openingOf(head: string, collected: Collected): number | undefined {
+  const { content } = collected;
+  return contentToFile(head, content, content.length, head.length, 0);
+}
+
+/**
+ * Whether the `}` at `brace` closes the container whose content, of
+ * `kind`, opens at `opening`: the grammar tries every `}` and closes the
+ * container at the first whose content derives, so the content before this
+ * one is collected at it (a `}` appended there falls in the container) and
+ * none runs past it (a `}` appended past it falls in no content opening
+ * there).
+ */
+function closesAt(
+  text: string,
+  brace: number,
+  opening: number,
+  kind: JsContentKind,
+): boolean {
+  const collectedTo = (end: number): boolean => {
+    const head = text.slice(0, end);
+    const collected = collectedAtEnd(head);
+    return (
+      collected !== undefined &&
+      collected.kind === kind &&
+      openingOf(head, collected) === opening
+    );
+  };
+  return collectedTo(brace) && !collectedTo(brace + 1);
+}
+
+/** How deeply scans past closing braces may nest (through `goesOn`). */
+const PAST_BRACE_DEPTH = 4;
+
+/** The scans past closing braces in progress (`goesOn`). */
+let pastBraceDepth = 0;
+
+/**
+ * A container's content closed by the `}` at `brace`, the line it closes
+ * on having gone on so far only as its content: the prefix through the
+ * brace is viable (a line ending, or `>` after a tag's attribute, may
+ * follow), and the failure is the first character past it that the
+ * grammar, reading the prefix through that character, rejects (`goesOn`) —
+ * past a flow expression's closing brace, a flow construct goes on only
+ * with whitespace, tags, and expressions after tags before its line ends,
+ * and the paragraph the grammar reads its line as otherwise cannot hold
+ * content spanning a blank line (SPEC 14's location rule for 14.20). A tag
+ * or expression past the brace may go on to further lines, whose container
+ * syntax the prefix may end inside (`goesOnPrefixed`).
+ */
+function pastClosingBrace(text: string, brace: number): number {
+  const prefix = contentLinePrefix(text.slice(0, brace + 1));
+  const bound = Math.min(text.length, brace + 1 + PROBE_REACH);
+  let at = brace + 1;
+  while (at < bound) {
+    const head = text.slice(0, at + 1);
+    if (!goesOn(head, brace) && !goesOnPrefixed(head, brace, prefix)) break;
     at += 1;
   }
   return at;
+}
+
+/**
+ * Whether `head`, whose last line — past the one holding the `}` at
+ * `brace` — spells container syntax alone so far, goes on (`goesOn`) once
+ * that line spells the rest of the container prefix the brace's line gives
+ * (`prefix`; `prefixRests`), then `x` or nothing: the grammar places the
+ * end of a file ending so at that line's start, where no construct's
+ * content has begun (a lone space of a list item's two, a block quote's
+ * `>` short of its list item's indentation).
+ */
+function goesOnPrefixed(
+  head: string,
+  brace: number,
+  prefix: string | undefined,
+): boolean {
+  if (prefix === undefined) return false;
+  const lineStart =
+    Math.max(head.lastIndexOf("\n"), head.lastIndexOf("\r")) + 1;
+  const spelled = head.slice(lineStart);
+  if (
+    lineStart <= brace ||
+    (CONTAINER_RUN.exec(spelled)?.[0] ?? "").length < spelled.length
+  ) {
+    return false;
+  }
+  return prefixRests(prefix, spelled).some(
+    (rest) =>
+      (rest !== "" && goesOn(head + rest, brace)) ||
+      goesOn(head + rest + "x", brace),
+  );
+}
+
+/**
+ * Whether `head`, a prefix of the file ending past a `}` at `brace` that
+ * closed a container, goes on as far as the grammar's reading tells: it
+ * derives, fails only by tag pairing (located by the checks of prefixes,
+ * `hiddenFailure`), or fails by a construct's class only at or after its
+ * end (`classOffset`). A failure placed at or before the brace belongs to
+ * a reading that gave way: the construct holding the brace failed on what
+ * follows it — a flow expression on text after it — and the paragraph the
+ * grammar reads instead failed before it, content spanning a blank line
+ * being no text expression's. Nested scans (a probe's own failure past a
+ * later closing brace) are bounded by `PAST_BRACE_DEPTH`, beyond which a
+ * failure counts by its place alone.
+ */
+function goesOn(head: string, brace: number): boolean {
+  const { failure, calls } = analysisParse(head);
+  if (failure === null || failure.source === "mdast-util-mdx-jsx") return true;
+  const start = placeStart(failure);
+  if (start === undefined || start <= brace) return false;
+  if (pastBraceDepth >= PAST_BRACE_DEPTH) return start >= head.length;
+  pastBraceDepth += 1;
+  try {
+    return classOffset(head, failure, calls) >= head.length;
+  } finally {
+    pastBraceDepth -= 1;
+  }
 }
 
 /**
@@ -654,8 +800,7 @@ function continues(
     if (collected === undefined || collected.kind !== kind) continue;
     const { content } = collected;
     if (
-      contentToFile(probe, content, content.length, probe.length, 0) ===
-        opening &&
+      openingOf(probe, collected) === opening &&
       jsViablePrefix(content, kind) >= content.length - 1
     ) {
       return true;
