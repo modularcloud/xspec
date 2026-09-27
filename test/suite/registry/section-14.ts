@@ -297,7 +297,7 @@ import {
   ConsumerProject,
 } from "../../helpers/tooling.js";
 import type {
-  FileContents,
+  InitialFileContents,
   WorkspaceDecl,
   WorkspaceMdxDecl,
 } from "../../helpers/workspace.js";
@@ -4062,7 +4062,12 @@ interface RangeRuleCase {
   /** The SPEC 14 range rule under test (diagnostics). */
   readonly rule: string;
   readonly config: string;
-  readonly files: Readonly<Record<string, FileContents>>;
+  /**
+   * The sources beside the configuration: plain contents, or a staged-source
+   * record at an `.mdx` path carrying its own S-9 declaration (the (w) arms'
+   * sources, registered by their home modules).
+   */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
   /** S-9: the staged MDX sources the document declares unparseable, if any. */
   readonly mdx?: WorkspaceMdxDecl;
   /** Every staged finding, with its complete location list. */
@@ -4458,9 +4463,12 @@ const T14_11_ENCODING_FILES = T14_11_ENCODING_FORMS.flatMap((form) =>
 // spread's comma, an ESM block's statement at the `const` line's start,
 // import attributes at `with`, `d={]}` at the `]`, `{text(}` at its `}`,
 // and an unbalanced `{text("a")` at the file's byte length. Every spec
-// source is declared unparseable (S-9) as in its home test; a code source is
-// the product's alone to judge; the configuration is this module's for the
-// staging's kind (the home modules stage the same text).
+// source is the staged-source record its home module registers — the
+// failing one declared unparseable (S-9) — staged here under that very
+// declaration, as in its home arm (the (w) workspaces follow this body's
+// earlier invocations); a code source is the product's alone to judge; the
+// configuration is this module's for the staging's kind (the home modules
+// stage the same text).
 
 /** T14-12's arm as an `UnparseableStaging`: its sources beside the configuration. */
 function t1412Staging(arm: UnparseableArm): UnparseableStaging {
@@ -4494,7 +4502,6 @@ function reassertedCase(
     arm: `w.${String(index)}`,
     rule: `14.20 — a syntax-failure offset another test pins, re-asserted: ${staging.name}`,
     config: kind === "code-source" ? SPEC_AND_CODE_CONFIG : SPECS_ONLY_CONFIG,
-    ...(kind === "spec-source" ? { mdx: { unparseable: [file] } } : {}),
     files,
     expected: [
       {

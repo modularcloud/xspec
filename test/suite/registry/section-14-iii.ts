@@ -108,12 +108,21 @@
 //   allowances for the S-9 self-test, which judges every staging without
 //   the product — the S-7 sweep reaches only a body's first staging — and
 //   the negative arms' spec sources as `T14_12_UNPARSEABLE_VECTORS`, each
-//   declared `mdx.unparseable` at staging and judged non-deriving by the
+//   staged as a record declared unparseable and judged non-deriving by the
 //   same self-test, which also confirms the pinned offset against the stock
 //   parser's rejection position wherever the two coincide (every arm but
 //   the spread's: the stock parser reports a spread's extra content at the
 //   content, past the comma the rule of 14 fixes — the rule, not the tool,
 //   fixes the offset).
+// - Every workspace after the body's first — (b)'s onward — stages its
+//   `.mdx` sources as staged-source records (helpers/staged-mdx.ts; S-9's
+//   timing clause), registered at load and judged by the ledger self-test
+//   before any product exists, each carrying its arm's declaration: an
+//   early-error form its allowance, a negative arm's failing file
+//   `unparseable`. T14-4 and T14-6 sweep the 14.16 and 14.20 arms'
+//   workspaces (`T14_12_REPORTER_STAGINGS`) and T14-11 re-stages the
+//   negative arms' sources, each after its own first invocation, so a
+//   record's name carries every test that stages it.
 // - Every negative spec-source staging opens with a would-be invalid segment
 //   (`id="bad name"`, 14.4) before its failing construct — for the ESM-block
 //   arms after the block, (s) also spelling an import designating no
@@ -145,8 +154,13 @@ import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import type { MdxAllowance } from "../../helpers/mdx-derivability.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import type { WorkspaceDecl } from "../../helpers/workspace.js";
+import type {
+  InitialFileContents,
+  WorkspaceDecl,
+} from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
@@ -349,22 +363,43 @@ const BASE_FILE = "specs/BASE.mdx";
 const BASE_MDX = '<S id="a">\nA.\n</S>\n\n<S id="b">\nB.\n</S>\n';
 const BASE_IMPORT = 'import BASE from "./BASE.xspec"';
 
+/**
+ * The `BASE` module as a staged-source record (S-9), staged beside (b)'s,
+ * (g)'s, and (t)'s files: each of those workspaces follows the body's first
+ * product invocation, and T14-4's and T14-6's sweeps (over (b) and (t)) and
+ * T14-11's re-staging (of (t)) stage it after their own.
+ */
+const BASE_STAGED = stagedMdx(
+  "T14-4/T14-6/T14-11/T14-12 the BASE module (the (b), (g), and (t) arms) specs/BASE.mdx",
+  BASE_MDX,
+);
+
 /** The file every spec-source arm stages its form in. */
 const ARM_FILE = "specs/A.mdx";
 
-/** One positive spec-source arm: a form, its allowance, its pinned findings. */
-interface SpecFormArm {
+/** One positive spec-source arm's row: a form, its allowance, its pinned findings. */
+interface SpecFormRow {
   /** The arm's letter (diagnostics). */
   readonly arm: string;
   /** The form under test and the rule it relies on (diagnostics). */
   readonly name: string;
   readonly fixture: AssembledFixture;
-  /** Further staged sources (the `BASE` module), beside the arm's file. */
-  readonly extraFiles?: Readonly<Record<string, string>>;
+  /** Further staged sources (the `BASE` module's record), beside the arm's file. */
+  readonly extraFiles?: Readonly<Record<string, InitialFileContents>>;
   /** S-9: the early error the form relies on; absent, it derives plainly. */
   readonly allowances?: readonly MdxAllowance[];
   /** The condition each pinned part reports, in pin order. */
   readonly conditions: readonly string[];
+}
+
+/**
+ * One positive spec-source arm: its row, and its file as a staged-source
+ * record under the row's allowances (S-9) — every arm's workspace follows
+ * the body's first product invocation.
+ */
+interface SpecFormArm extends SpecFormRow {
+  /** `fixture.text` as its record. */
+  readonly source: StagedMdx;
 }
 
 /** A flow-position container at the top level, after the valid section. */
@@ -373,7 +408,7 @@ function containerArm(
   name: string,
   container: string,
   allowances?: readonly MdxAllowance[],
-): SpecFormArm {
+): SpecFormRow {
   return {
     arm,
     name,
@@ -383,7 +418,7 @@ function containerArm(
   };
 }
 
-const SPEC_FORM_ARMS: readonly SpecFormArm[] = [
+const SPEC_FORM_ROWS: readonly SpecFormRow[] = [
   containerArm(
     "c",
     "`{1 = 2}` — an assignment to a target that is not simple, an early error (14.16, never 14.20)",
@@ -418,7 +453,7 @@ const SPEC_FORM_ARMS: readonly SpecFormArm[] = [
       pin("BASE.a, BASE.b"),
       "}>\nA comma sequence.\n</S>\n",
     ]),
-    extraFiles: { [BASE_FILE]: BASE_MDX },
+    extraFiles: { [BASE_FILE]: BASE_STAGED },
     conditions: ["14.8"],
   },
   containerArm(
@@ -450,17 +485,40 @@ const SPEC_FORM_ARMS: readonly SpecFormArm[] = [
   },
 ];
 
-/** The workspace one spec-form arm stages (its allowance declared, S-9). */
+/**
+ * Whether T14-4's reporter matrix sweeps the arm — a 14.16 construct alone
+ * (TEST-SPEC T14-4: "the 14.16 and 14.20 arms of … T14-12"; T14-6's
+ * stable-code sweep with it, `T14_12_REPORTER_STAGINGS`).
+ */
+function isSweptSpecForm(arm: SpecFormRow): boolean {
+  return arm.conditions.length === 1 && arm.conditions[0] === "14.16";
+}
+
+/**
+ * The arms with their records, computed once at module load, each named
+ * with every test staging it: T14-12, and T14-4 and T14-6 for a swept arm.
+ */
+const SPEC_FORM_ARMS: readonly SpecFormArm[] = SPEC_FORM_ROWS.map(
+  (row): SpecFormArm => ({
+    ...row,
+    source: stagedMdx(
+      `${isSweptSpecForm(row) ? "T14-4/T14-6/T14-12" : "T14-12"} (${row.arm}) ${row.name} ${ARM_FILE}`,
+      row.fixture.text,
+      row.allowances === undefined
+        ? "well-formed"
+        : { allowances: row.allowances },
+    ),
+  }),
+);
+
+/** The workspace one spec-form arm stages: its record carries its allowance (S-9). */
 function specFormDecl(arm: SpecFormArm): WorkspaceDecl {
   return {
     files: {
       "xspec.config.ts": SPECS_ONLY_CONFIG,
       ...(arm.extraFiles ?? {}),
-      [ARM_FILE]: arm.fixture.text,
+      [ARM_FILE]: arm.source,
     },
-    ...(arm.allowances === undefined
-      ? {}
-      : { mdx: { allowances: { [ARM_FILE]: arm.allowances } } }),
   };
 }
 
@@ -612,14 +670,24 @@ const NOPE_SECTION_RANGE: ByteRange = (() => {
   };
 })();
 
-/** The (b) workspace: the `BASE` module beside the arm's file, its allowance declared (S-9). */
+/**
+ * (b)'s file as a staged-source record under its allowance (S-9): the
+ * workspace follows (a)'s invocations, and T14-4's and T14-6's sweeps stage
+ * it after theirs.
+ */
+const NOPE_STAGED = stagedMdx(
+  "T14-4/T14-6/T14-12 (b) `export { nope }` after a valid, used import specs/A.mdx",
+  NOPE_FIXTURE.text,
+  { allowances: ["undefined-export"] },
+);
+
+/** The (b) workspace: the `BASE` module beside the arm's file, both records (S-9). */
 const NOPE_DECL: WorkspaceDecl = {
   files: {
     "xspec.config.ts": SPECS_ONLY_CONFIG,
-    [BASE_FILE]: BASE_MDX,
-    [ARM_FILE]: NOPE_FIXTURE.text,
+    [BASE_FILE]: BASE_STAGED,
+    [ARM_FILE]: NOPE_STAGED,
   },
-  mdx: { allowances: { [ARM_FILE]: ["undefined-export"] } },
 };
 
 /** The one finding: 14.16 at the export statement whole (SPEC 14). */
@@ -820,6 +888,18 @@ async function runExportNopeArm(product: ProductBinding): Promise<void> {
 
 /** The spec source the code arms import: `a` resolves. */
 const A_MDX = '<S id="a">\nAlpha behavior.\n</S>\n';
+
+/**
+ * `A_MDX` as a staged-source record (S-9): every code arm's workspace —
+ * (l)–(o)'s and the negative (p)'s and (q)'s — follows the body's first
+ * product invocation, and T14-4's and T14-6's sweeps and T14-11's
+ * re-staging stage (p)'s and (q)'s after theirs.
+ */
+const A_STAGED = stagedMdx(
+  "T14-4/T14-6/T14-11/T14-12 the code arms' spec source specs/A.mdx",
+  A_MDX,
+);
+
 const CODE_IMPORT = 'import A from "../specs/A.xspec"';
 const CODE_FILE = "src/app.ts";
 
@@ -906,7 +986,7 @@ async function runCodeFormArm(
     {
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-        "specs/A.mdx": A_MDX,
+        "specs/A.mdx": A_STAGED,
         [CODE_FILE]: source,
       },
     },
@@ -982,8 +1062,14 @@ export interface UnparseableArm {
   readonly kind: "spec-source" | "code-source";
   /** The unparseable file's workspace-relative path. */
   readonly file: string;
-  /** Every staged file, the configuration included. */
-  readonly files: Readonly<Record<string, string>>;
+  /**
+   * Every staged file, the configuration included: each `.mdx` source a
+   * staged-source record — a spec-source arm's failing file declared
+   * unparseable (S-9) — registered at load, since every negative arm's
+   * workspace follows the body's first product invocation and T14-4, T14-6,
+   * and T14-11 stage the same records after theirs.
+   */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
   /** The staged unparseable text (the S-9 vectors; Task 46's reuse). */
   readonly source: string;
   /** The failure's byte offset: SPEC 14's zero-length range `{offset, offset}`. */
@@ -1008,7 +1094,7 @@ function specUnparseableArm(
   parts: readonly (string | PinnedPart)[],
   rule: string,
   options: {
-    readonly extraFiles?: Readonly<Record<string, string>>;
+    readonly extraFiles?: Readonly<Record<string, InitialFileContents>>;
     readonly masked?: string;
     readonly parserAgrees?: boolean;
   } = {},
@@ -1022,7 +1108,11 @@ function specUnparseableArm(
     files: {
       "xspec.config.ts": SPECS_ONLY_CONFIG,
       ...(options.extraFiles ?? {}),
-      [ARM_FILE]: fixture.text,
+      [ARM_FILE]: stagedMdx(
+        `T14-4/T14-6/T14-11/T14-12 (${arm}) ${name} ${ARM_FILE}`,
+        fixture.text,
+        "unparseable",
+      ),
     },
     source: fixture.text,
     offset: pinned(fixture, 0).start,
@@ -1047,7 +1137,7 @@ function codeUnparseableArm(
     file: CODE_FILE,
     files: {
       "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-      "specs/A.mdx": A_MDX,
+      "specs/A.mdx": A_STAGED,
       [CODE_FILE]: fixture.text,
     },
     source: fixture.text,
@@ -1142,7 +1232,7 @@ export const T14_12_UNPARSEABLE_ARMS: readonly UnparseableArm[] = [
       "are syntax the edition lacks (ECMAScript 2024) and, no line " +
       "terminator preceding, nothing else may follow the declaration on " +
       "its line (SPEC 14.20)",
-    { extraFiles: { [BASE_FILE]: BASE_MDX } },
+    { extraFiles: { [BASE_FILE]: BASE_STAGED } },
   ),
   specUnparseableArm(
     "u",
@@ -1174,12 +1264,12 @@ export const T14_12_UNPARSEABLE_ARMS: readonly UnparseableArm[] = [
   ),
 ];
 
-/** The workspace one negative arm stages (spec sources declared unparseable, S-9). */
+/**
+ * The workspace one negative arm stages: its `.mdx` sources records, a
+ * spec-source arm's failing file declared unparseable (S-9).
+ */
 function unparseableDecl(arm: UnparseableArm): WorkspaceDecl {
-  return {
-    files: arm.files,
-    ...(arm.kind === "spec-source" ? { mdx: { unparseable: [arm.file] } } : {}),
-  };
+  return { files: arm.files };
 }
 
 /**
@@ -1364,9 +1454,7 @@ export const T14_12_REPORTER_STAGINGS: readonly ReporterStaging[] = [
     decl: NOPE_DECL,
     answers: { kind: "spec-source", file: ARM_FILE },
   },
-  ...SPEC_FORM_ARMS.filter(
-    (arm) => arm.conditions.length === 1 && arm.conditions[0] === "14.16",
-  ).map((arm): ReporterStaging => ({
+  ...SPEC_FORM_ARMS.filter(isSweptSpecForm).map((arm): ReporterStaging => ({
     condition: "14.16",
     label: `T14-12 (${arm.arm}) ${arm.name}`,
     decl: specFormDecl(arm),

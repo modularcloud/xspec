@@ -50,10 +50,7 @@ import {
   ConsumerProject,
 } from "../../helpers/tooling.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type {
-  InitialFileContents,
-  WorkspaceMdxDecl,
-} from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import type { OccurrenceUnit } from "./section-5.7.js";
 import { expectedUnitMultiset, renderOccurrenceUnit } from "./section-5.7.js";
 import type { UnparseableStaging } from "./support.js";
@@ -100,11 +97,9 @@ async function withWorkspace<T>(
   config: string,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
-  mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
-    mdx,
   });
   try {
     return await body(workspace);
@@ -408,18 +403,14 @@ const DYNAMIC_FORM_ARMS: readonly DynamicFormArm[] = [
 const DYNAMIC_ARM_PREAMBLE =
   'import BASE from "./BASE.xspec"\n\n<S id="alpha">\nAlpha behavior.\n</S>\n\n';
 
-const DYNAMIC_ARM_BASE_FILES = {
-  "specs/BASE.mdx": '<S id="auth">\nAuth behavior.\n</S>\n',
-} as const;
-
-// The same module as a staged-source record for the arms' workspaces —
-// every one after the body's first is created after its first invocation
-// (S-9's timing clause); the string map above stays the exported
-// stagings' form.
+// The module every arm stages beside `specs/A.mdx`, as a staged-source
+// record: every arm workspace after the body's first is created after its
+// first invocation, and T14-11 re-stages the TypeScript-only forms'
+// workspaces after its own (S-9's timing clause).
 const DYNAMIC_ARM_BASE_RECORDS = {
   "specs/BASE.mdx": stagedMdx(
-    "T2.4-2 specs/BASE.mdx",
-    DYNAMIC_ARM_BASE_FILES["specs/BASE.mdx"],
+    "T2.4-2/T14-11 specs/BASE.mdx",
+    '<S id="auth">\nAuth behavior.\n</S>\n',
   ),
 } as const;
 
@@ -517,77 +508,69 @@ function syntaxFailureOffset(
 }
 
 /**
- * The TypeScript-only forms' stagings — the very bytes the arms below drive,
- * `specs/A.mdx` beside `specs/BASE.mdx`, in `d` and in `text(...)` — each
- * with its syntax failure's offset, exported for T14-11's re-assertion of
- * the offsets the same way (TEST-SPEC T14-11's closing clause); `specs/A.mdx`
- * is declared unparseable under S-9 wherever it is staged.
+ * One arm's two stagings (`stageDynamicForm`) with their staged-source
+ * records, evaluated once at module load: every arm workspace after the
+ * body's first is created after its first product invocation (S-9's timing
+ * clause), and the table converts uniformly. A TypeScript-only form's two
+ * records are declared unparseable (14.20) — the very records the exported
+ * `T2_4_2_UNPARSEABLE_STAGINGS` carries, which T14-11 re-stages after its own
+ * invocations.
  */
-export const T2_4_2_UNPARSEABLE_STAGINGS: readonly UnparseableStaging[] =
-  DYNAMIC_FORM_ARMS.flatMap((arm) => {
-    const { unparseableAt } = arm;
-    if (unparseableAt === undefined) {
-      return [];
-    }
-    const { d, text } = stageDynamicForm(arm);
-    return (
-      [
-        ["`d`", d],
-        ["`text(...)`", text],
-      ] as const
-    ).map(([position, staging]): UnparseableStaging => ({
-      name: `${arm.name} in ${position}: \`${arm.expression}\` (T2.4-2)`,
-      kind: "spec-source",
-      file: "specs/A.mdx",
-      files: { ...DYNAMIC_ARM_BASE_FILES, "specs/A.mdx": staging.source },
-      offset: syntaxFailureOffset(staging, unparseableAt),
-    }));
-  });
-
-/**
- * One arm's two stagings (`stageDynamicForm`), evaluated once at module
- * load. A form 14.20 admits carries its two staged-source records: every
- * arm workspace after the body's first is created after its first product
- * invocation (S-9's timing clause), and the table converts uniformly. A
- * TypeScript-only form's stagings stay plain, declared unparseable where
- * staged — the exported `T2_4_2_UNPARSEABLE_STAGINGS`, the same
- * construction.
- */
-type DynamicFormStagings =
-  | {
-      readonly arm: DynamicFormArm;
-      readonly d: RejectedFormStaging;
-      readonly text: RejectedFormStaging;
-      /** The records of a form 14.20 admits: `d.source`, `text.source`. */
-      readonly records: { readonly d: StagedMdx; readonly text: StagedMdx };
-    }
-  | {
-      readonly arm: DynamicFormArm;
-      readonly d: RejectedFormStaging;
-      readonly text: RejectedFormStaging;
-      readonly records?: undefined;
-      /** A TypeScript-only form: `arm.unparseableAt`. */
-      readonly unparseableAt: number;
-    };
+interface DynamicFormStagings {
+  readonly arm: DynamicFormArm;
+  readonly d: RejectedFormStaging;
+  readonly text: RejectedFormStaging;
+  /** `d.source` and `text.source` as staged-source records. */
+  readonly records: { readonly d: StagedMdx; readonly text: StagedMdx };
+}
 
 const DYNAMIC_FORM_STAGINGS: readonly DynamicFormStagings[] =
   DYNAMIC_FORM_ARMS.map((arm): DynamicFormStagings => {
     const { d, text } = stageDynamicForm(arm);
-    if (arm.unparseableAt !== undefined) {
-      return { arm, d, text, unparseableAt: arm.unparseableAt };
-    }
+    const [ids, mdx] =
+      arm.unparseableAt === undefined
+        ? (["T2.4-2", "well-formed"] as const)
+        : (["T2.4-2/T14-11", "unparseable"] as const);
     return {
       arm,
       d,
       text,
       records: {
-        d: stagedMdx(`T2.4-2 ${arm.name} in \`d\` specs/A.mdx`, d.source),
+        d: stagedMdx(`${ids} ${arm.name} in \`d\` specs/A.mdx`, d.source, mdx),
         text: stagedMdx(
-          `T2.4-2 ${arm.name} in \`text(...)\` specs/A.mdx`,
+          `${ids} ${arm.name} in \`text(...)\` specs/A.mdx`,
           text.source,
+          mdx,
         ),
       },
     };
+  });
+
+/**
+ * The TypeScript-only forms' stagings — the very records the arms below
+ * drive, `specs/A.mdx` beside `specs/BASE.mdx`, in `d` and in `text(...)` —
+ * each with its syntax failure's offset, exported for T14-11's re-assertion
+ * of the offsets the same way (TEST-SPEC T14-11's closing clause); each
+ * `specs/A.mdx` record is declared unparseable (S-9).
+ */
+export const T2_4_2_UNPARSEABLE_STAGINGS: readonly UnparseableStaging[] =
+  DYNAMIC_FORM_STAGINGS.flatMap(({ arm, d, text, records }) => {
+    const { unparseableAt } = arm;
+    if (unparseableAt === undefined) {
+      return [];
+    }
+    return (
+      [
+        ["`d`", d, records.d],
+        ["`text(...)`", text, records.text],
+      ] as const
+    ).map(([position, staging, record]): UnparseableStaging => ({
+      name: `${arm.name} in ${position}: \`${arm.expression}\` (T2.4-2)`,
+      kind: "spec-source",
+      file: "specs/A.mdx",
+      files: { ...DYNAMIC_ARM_BASE_RECORDS, "specs/A.mdx": record },
+      offset: syntaxFailureOffset(staging, unparseableAt),
+    }));
   });
 
 /**
@@ -639,11 +622,11 @@ async function runDynamicFormArm(
  * 14.20), so `build --json` exits 1 with exactly one finding, 14.20 — the
  * masked file reports nothing else, never 14.8 — carrying the one
  * zero-length range at `offset`, the syntax failure's offset under SPEC 14's
- * rule. S-9: the staging is declared unparseable.
+ * rule. S-9: `source` is the staging's record, declared unparseable.
  */
 async function runUnparseableFormArm(
   product: ProductBinding,
-  source: string,
+  source: StagedMdx,
   offset: number,
   context: string,
 ): Promise<void> {
@@ -668,7 +651,6 @@ async function runUnparseableFormArm(
           `(SPEC 14; T14-11)`,
       );
     },
-    { unparseable: ["specs/A.mdx"] },
   );
 }
 
@@ -678,44 +660,45 @@ const T2_4_2 = defineProductTest({
     'each dynamic form — template literal argument; identifier or call as index; optional chaining; parenthesized chain; conditional expression; the "another meaning" case `BASE.a<X>y`, two comparisons, its `d` finding at the whole expression — fails with 14.8, in `d` and in `text(...)`, in MDX, while TypeScript-only syntax — a non-null assertion, a type assertion — is 14.20 alone at the offset SPEC 14\'s syntax-failure rule fixes (SPEC 2.4, 14.8, 14.20)',
   run: async (product) => {
     for (const entry of DYNAMIC_FORM_STAGINGS) {
-      // The form in `d` and in `text(...)` (`stageDynamicForm`): the
-      // TypeScript-only forms' stagings are the exported
-      // `T2_4_2_UNPARSEABLE_STAGINGS`, driven here by the same construction.
-      const { arm, d: dStaging, text: textStaging } = entry;
+      // The form in `d` and in `text(...)` (`stageDynamicForm`), each staged
+      // as its record: the TypeScript-only forms' records are the ones the
+      // exported `T2_4_2_UNPARSEABLE_STAGINGS` carries.
+      const { arm, d: dStaging, text: textStaging, records } = entry;
+      const { unparseableAt } = arm;
       const dContext = `T2.4-2 \`build --json\` with ${arm.name} in \`d\``;
-      if (entry.records !== undefined) {
+      if (unparseableAt === undefined) {
         await runDynamicFormArm(
           product,
           dStaging,
-          entry.records.d,
+          records.d,
           arm.exactExpressionRange === true ? dStaging.expression : undefined,
           dContext,
         );
       } else {
         await runUnparseableFormArm(
           product,
-          dStaging.source,
-          syntaxFailureOffset(dStaging, entry.unparseableAt),
+          records.d,
+          syntaxFailureOffset(dStaging, unparseableAt),
           dContext,
         );
       }
 
       const textContext = `T2.4-2 \`build --json\` with ${arm.name} in \`text(...)\``;
-      if (entry.records !== undefined) {
+      if (unparseableAt === undefined) {
         // An embedding's 14.8 is located by its full braced container (SPEC
         // 14), asserted within the construct's window as the sibling arms are.
         await runDynamicFormArm(
           product,
           textStaging,
-          entry.records.text,
+          records.text,
           undefined,
           textContext,
         );
       } else {
         await runUnparseableFormArm(
           product,
-          textStaging.source,
-          syntaxFailureOffset(textStaging, entry.unparseableAt),
+          records.text,
+          syntaxFailureOffset(textStaging, unparseableAt),
           textContext,
         );
       }

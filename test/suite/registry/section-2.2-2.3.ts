@@ -885,8 +885,9 @@ const T2_3_3_UNPARSEABLE_FORM = `${T2_3_3_UNPARSEABLE_PREFIX}text("b")}`;
  * below drives, staged alone in section `u`, the offset the container's
  * start plus the byte length of the prefix through the space after the
  * first call — exported for T14-11's re-assertion of the offset the same
- * way (TEST-SPEC T14-11's closing clause; the S-9 `unparseable` declaration
- * accompanies it wherever it is staged).
+ * way (TEST-SPEC T14-11's closing clause). `specs/A.mdx` is a staged-source
+ * record declared unparseable (S-9), registered at load: the arm below and
+ * T14-11 each stage it after their bodies' first product invocations.
  */
 export const T2_3_3_UNPARSEABLE_STAGING: UnparseableStaging = (() => {
   const staging = stageT233("u", T2_3_3_UNPARSEABLE_FORM);
@@ -896,7 +897,13 @@ export const T2_3_3_UNPARSEABLE_STAGING: UnparseableStaging = (() => {
       "the zero-length range at the offset of the second `text` (T2.3-3)",
     kind: "spec-source",
     file: T2_3_3_FILE,
-    files: { [T2_3_3_FILE]: staging.source },
+    files: {
+      [T2_3_3_FILE]: stagedMdx(
+        `T2.3-3/T14-11 unparseable form ${JSON.stringify(T2_3_3_UNPARSEABLE_FORM)} (no expression the grammar derives) ${T2_3_3_FILE}`,
+        staging.source,
+        "unparseable",
+      ),
+    },
     offset:
       staging.container.start +
       Buffer.byteLength(T2_3_3_UNPARSEABLE_PREFIX, "utf8"),
@@ -1139,10 +1146,10 @@ const T2_3_3 = defineProductTest({
     const workspace = await TestWorkspace.create({
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
+        // S-9: the export's record, declared unparseable — the one form
+        // TEST-SPEC declares so (14.20).
         ...T2_3_3_UNPARSEABLE_STAGING.files,
       },
-      // S-9: the one form TEST-SPEC declares unparseable (14.20).
-      mdx: { unparseable: [T2_3_3_FILE] },
     });
     try {
       const context = `T2.3-3 \`build --json\` over ${JSON.stringify(T2_3_3_UNPARSEABLE_FORM)}`;

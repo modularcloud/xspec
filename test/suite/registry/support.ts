@@ -386,9 +386,14 @@ export function byteWindow(
  * configuration excluded (the consumer supplies one discovering them);
  * `offset` is the byte length of the longest whole-character prefix with
  * which some well-formed file begins (SPEC 14, 1.7), the one zero-length
- * range `{offset, offset}` of the file's sole 14.20 finding. A spec source is
- * declared unparseable under S-9 wherever it is staged; a code source is the
- * product's alone to judge.
+ * range `{offset, offset}` of the file's sole 14.20 finding. Every spec
+ * source is a staged-source record (helpers/staged-mdx.ts) the home module
+ * registers at load — the unparseable `file` declared unparseable, a source
+ * beside it under its home declaration — and stages through this very map,
+ * so the S-9 self-test judges each before any product exists and both
+ * stagings, the home arm's and T14-11's (each after its body's first
+ * product invocation), carry that one declaration; a code source is the
+ * product's alone to judge, staged as plain contents.
  */
 export interface UnparseableStaging {
   /** The form under test (diagnostics). */
@@ -397,8 +402,11 @@ export interface UnparseableStaging {
   readonly kind: "spec-source" | "code-source";
   /** The unparseable file's workspace-relative path. */
   readonly file: string;
-  /** Every staged source, the configuration excluded. */
-  readonly files: Readonly<Record<string, string>>;
+  /**
+   * Every staged source, the configuration excluded: each `.mdx` source a
+   * staged-source record carrying its S-9 declaration.
+   */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
   /** The failure's byte offset: SPEC 14's zero-length range `{offset, offset}`. */
   readonly offset: number;
 }

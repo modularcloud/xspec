@@ -91,10 +91,7 @@ import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type {
-  InitialFileContents,
-  WorkspaceMdxDecl,
-} from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import type {
   FindingSourceExpectation,
   UnparseableStaging,
@@ -152,19 +149,16 @@ function invalidPropSource(construct: string): string {
 }
 
 /**
- * Stage a fresh workspace (config plus `files`, under the S-9 declaration
- * `mdx` where a staging declares an unparseable source), run `body`,
- * dispose (H-1).
+ * Stage a fresh workspace (config plus `files` — an unparseable staging's
+ * source a record carrying its S-9 declaration), run `body`, dispose (H-1).
  */
 async function withWorkspace<T>(
   config: string,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
-  mdx?: WorkspaceMdxDecl,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
-    mdx,
   });
   try {
     return await body(workspace);
@@ -1501,7 +1495,9 @@ const T2_7_3_SPREAD_COMMA_OFFSET = utf8Bytes(`${SIBLING}<S id="x" {...a`);
  * The failing half's staging — the very bytes the arm below drives, the
  * one-defect file `invalidPropSource` composes — with the comma's offset,
  * exported for T14-11's re-assertion of the offset the same way (TEST-SPEC
- * T14-11's closing clause); declared unparseable under S-9 wherever staged.
+ * T14-11's closing clause). `specs/A.mdx` is a staged-source record declared
+ * unparseable (S-9): the arm below and T14-11 each stage it after their
+ * bodies' first product invocations.
  */
 export const T2_7_3_SPREAD_UNPARSEABLE_STAGING: UnparseableStaging = {
   name:
@@ -1510,7 +1506,11 @@ export const T2_7_3_SPREAD_UNPARSEABLE_STAGING: UnparseableStaging = {
   kind: "spec-source",
   file: INVALID_PROP_FILE,
   files: {
-    [INVALID_PROP_FILE]: invalidPropSource(T2_7_3_SPREAD_UNPARSEABLE_CONSTRUCT),
+    [INVALID_PROP_FILE]: stagedMdx(
+      `T2.7-3/T14-11 a spread attribute \`{...a, b}\` (the spread grammar pair's ill-formed half) ${INVALID_PROP_FILE}`,
+      invalidPropSource(T2_7_3_SPREAD_UNPARSEABLE_CONSTRUCT),
+      "unparseable",
+    ),
   },
   offset: T2_7_3_SPREAD_COMMA_OFFSET,
 };
@@ -1642,7 +1642,6 @@ const T2_7_3 = defineProductTest({
             "(SPEC 14, 14.20; T14-11, T14-12)",
         );
       },
-      { unparseable: [INVALID_PROP_FILE] },
     );
 
     // Repeated unknown prop: every finding is 14.17, at the construct.
@@ -2049,16 +2048,21 @@ const T2_7_4_EXPRESSION_ARM = enclosedConstructArm(
 );
 
 /**
- * A form 2.7 makes unparseable (14.20), staged alone under S-9's
- * `unparseable` declaration: the one zero-length range at the offset SPEC 14
- * fixes — the byte length of the longest whole-character prefix with which
- * some well-formed file begins — precomputed from the staged bytes.
+ * A form 2.7 makes unparseable (14.20), staged alone as a staged-source
+ * record declared `unparseable` (S-9): the one zero-length range at the
+ * offset SPEC 14 fixes — the byte length of the longest whole-character
+ * prefix with which some well-formed file begins — precomputed from the
+ * staged bytes.
  */
 interface UnparseableCommentArm {
   /** The arm's name in contexts. */
   readonly name: string;
-  /** The file's exact bytes. */
-  readonly source: string;
+  /**
+   * The file's exact bytes, as its record: every arm's workspace follows
+   * the body's first product invocation, and T14-11 re-stages it after its
+   * own (`T2_7_4_UNPARSEABLE_STAGINGS`).
+   */
+  readonly source: StagedMdx;
   /** The pinned offset (SPEC 1.7 bytes). */
   readonly offset: number;
   /** Why SPEC 14 fixes that offset. */
@@ -2069,6 +2073,25 @@ const T2_7_4_UNPARSEABLE_FILE = "specs/A.mdx";
 const T2_7_4_UNPARSEABLE_PREFIX = `${SIBLING}<S id="bad">\nAlpha.\n\n`;
 const T2_7_4_UNPARSEABLE_SUFFIX = "\n\nOmega.\n</S>\n";
 
+/** An arm staging `source` alone, registered as its record at load (S-9). */
+function unparseableCommentArm(
+  name: string,
+  source: string,
+  offset: number,
+  rule: string,
+): UnparseableCommentArm {
+  return {
+    name,
+    source: stagedMdx(
+      `T2.7-4/T14-11 ${name} ${T2_7_4_UNPARSEABLE_FILE}`,
+      source,
+      "unparseable",
+    ),
+    offset,
+    rule,
+  };
+}
+
 /** A construct on a line of its own inside the section after the sibling. */
 function unparseableInSection(
   construct: string,
@@ -2076,12 +2099,12 @@ function unparseableInSection(
   name: string,
   rule: string,
 ): UnparseableCommentArm {
-  return {
+  return unparseableCommentArm(
     name,
-    source: T2_7_4_UNPARSEABLE_PREFIX + construct + T2_7_4_UNPARSEABLE_SUFFIX,
-    offset: utf8Bytes(T2_7_4_UNPARSEABLE_PREFIX) + within,
+    T2_7_4_UNPARSEABLE_PREFIX + construct + T2_7_4_UNPARSEABLE_SUFFIX,
+    utf8Bytes(T2_7_4_UNPARSEABLE_PREFIX) + within,
     rule,
-  };
+  );
 }
 
 const T2_7_4_CODE_POINT_RULE =
@@ -2125,23 +2148,21 @@ const T2_7_4_UNPARSEABLE_ARMS: readonly UnparseableCommentArm[] = [
     "`{// c` U+2029 `}` U+000A `}`",
     T2_7_4_FIRST_BRACE_RULE,
   ),
-  {
-    name: "`{// c}` as the file's last construct, no later `}` in the file",
-    source: T2_7_4_RUN_ON_SOURCE,
-    offset: utf8Bytes(T2_7_4_RUN_ON_SOURCE),
-    rule:
-      "the zero-length range at the file's byte length — the first `}` " +
+  unparseableCommentArm(
+    "`{// c}` as the file's last construct, no later `}` in the file",
+    T2_7_4_RUN_ON_SOURCE,
+    utf8Bytes(T2_7_4_RUN_ON_SOURCE),
+    "the zero-length range at the file's byte length — the first `}` " +
       "lies on the commented-out line and closes nothing, and the whole " +
       "file is a prefix of a well-formed one, a later `}` closing the " +
       "container (SPEC 14, 14.20, 2.7; T14-12)",
-  },
+  ),
 ];
 
 /**
  * The five stagings as T14-11 re-asserts them (TEST-SPEC T14-11's closing
- * clause): each arm's bytes as `specs/A.mdx` with its offset — the same
- * staging `runUnparseableCommentArm` drives; declared unparseable under S-9
- * wherever staged.
+ * clause): each arm's record as `specs/A.mdx` with its offset — the same
+ * staging `runUnparseableCommentArm` drives, declared unparseable (S-9).
  */
 export const T2_7_4_UNPARSEABLE_STAGINGS: readonly UnparseableStaging[] =
   T2_7_4_UNPARSEABLE_ARMS.map((arm): UnparseableStaging => ({
@@ -2213,7 +2234,6 @@ async function runUnparseableCommentArm(
           "(SPEC 11.4), and it is the only discovered spec source",
       );
     },
-    { unparseable: [T2_7_4_UNPARSEABLE_FILE] },
   );
 }
 
