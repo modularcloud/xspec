@@ -162,7 +162,10 @@ export interface StoredRequirementNode {
   readonly range: ByteRange;
   /** SPEC 2.5: the effective coverage attribute — null for a root. */
   readonly coverage: "required" | "none" | null;
-  /** SPEC 2.6: the node's tags, in first-occurrence order. */
+  /**
+   * SPEC 2.6, 12.7: the node's tags — a tag set, in byte order (SPEC 12.0),
+   * duplicates collapsed; `[]` for a section carrying none and for a root.
+   */
   readonly tags: readonly string[];
   /** SPEC 5.5: the node's four hashes. */
   readonly hashes: NodeHashes;
@@ -460,7 +463,12 @@ function requirementToJson(node: StoredRequirementNode): JsonValue {
     id: node.id,
     range: { start: node.range.start, end: node.range.end },
     coverage: node.coverage,
-    tags: [...node.tags],
+    // SPEC 12.7: a tag set — byte order (SPEC 12.0), duplicates collapsed.
+    // The snapshot already carries it (core/mdx.ts forms the set);
+    // serializing the normal form also makes a store that records tags in
+    // any other order non-canonical, so the store-backed fast path
+    // (workspace/fast-read.ts, step 1) falls back instead of serving it.
+    tags: [...new Set(node.tags)].sort(compareBytes),
     hashes: {
       ownHash: node.hashes.ownHash,
       subtreeHash: node.hashes.subtreeHash,

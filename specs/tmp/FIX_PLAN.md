@@ -29,8 +29,8 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | P-1 | section-16-p1 | 1 (passes since Task 1 landed) |
 | P-2 | section-16-p2-p3 | 10, 13 |
 | P-3 | section-16-p2-p3 | 10, 13 |
-| P-4 | section-16-p4 | 3, 4 |
-| P-5 | section-16-p5-p6 | 3, 4 |
+| P-4 | section-16-p4 | 3 (passes since Task 3 landed; it runs no `inventory`, so it never waited on Task 4) |
+| P-5 | section-16-p5-p6 | 3 (passes since Task 3 landed; it runs no `inventory`, so it never waited on Task 4) |
 | T1.4-1 | section-1.4 | 1, 5 (since Task 1 only its last arm fails: the `&#46;` reference spelling) |
 | T1.4-4 | section-1.4 | 1 (passes since Task 1 landed; it stages no character reference) |
 | T1.5-2 | section-1.5 | 9 |
@@ -41,7 +41,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T2.4-2 | section-2.4 | 12, 14 |
 | T2.4-5 | section-2.4 | 6 |
 | T2.5-3 | section-2.5-2.6 | 5 |
-| T2.6-1 | section-2.5-2.6 | 3 |
+| T2.6-1 | section-2.5-2.6 | 3 (passes since Task 3 landed) |
 | T2.7-3 | section-2.7 | 14 |
 | T2.7-4 | section-2.7 | 13, 14 |
 | T3-7 | section-3 | 10 |
@@ -52,10 +52,10 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T4.5-9 | section-4.5 | 16, 17 |
 | T4.6-1 | section-4.6 | 19 |
 | T4.6-3 | section-4.6 | 20 |
-| T5.5-5 | section-5.5 | 3 |
+| T5.5-5 | section-5.5 | 3 (passes since Task 3 landed) |
 | T5.7-4 | section-5.7 | 16, 17, 18 |
-| T6.2-1 | section-6.2 | 3 |
-| T6.2-2 | section-6.2 | 3 |
+| T6.2-1 | section-6.2 | 3 (passes since Task 3 landed) |
+| T6.2-2 | section-6.2 | 3 (passes since Task 3 landed) |
 | T6.4-3 | section-6.4 | 22 |
 | T6.5-6 | section-6.5 | 26 |
 | T6.5-7 | section-6.5 | 30 |
@@ -79,16 +79,16 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T7.4-1 | section-7.4-7.5 | 4 |
 | T7.5-1 | section-7.4-7.5 | 4 |
 | T10.1-6 | section-10.1 | 45, 46 |
-| T11-2 | section-11 | 2, 3, 40, 44 (since Task 2 its malformed-`--tag` sweep holds by hand, twins included; the test still stops first at Task 3's tag-set arm) |
+| T11-2 | section-11 | 2, 3, 40, 44 (since Task 2 its malformed-`--tag` sweep holds by hand, twins included; since Task 3 its tag sets hold and it stops first at Task 40's `--file "./specs/alpha/*.mdx"` arm) |
 | T11-6 | section-11 | 19 |
-| T11-7 | section-11 | 3 |
+| T11-7 | section-11 | 3 (passes since Task 3 landed) |
 | T11.2-6 | section-11.2 | 51 |
 | T11.3-2 | section-11.3 | 40 |
 | T11.3-3 | section-11.3 | 1, 44 (since Task 1 its first failing arm is configuration-first) |
 | T11.4-2 | section-11.4 | 40 |
-| T11.4-3 | section-11.4 | 3 |
+| T11.4-3 | section-11.4 | 3 (passes since Task 3 landed) |
 | T11.4-4 | section-11.4 | 14 |
-| T11.4-6 | section-11.4 | 3 |
+| T11.4-6 | section-11.4 | 3 (passes since Task 3 landed) |
 | T11.5-3 | section-11.5 | 9 |
 | T11.6-2 | section-11.6 | 4 |
 | T12.0-10 | section-12.0-ii | 44 (its `--tag 'a\b'` row holds since Task 2) |
@@ -112,29 +112,6 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), and Task 53 (a corrupt session in `review list`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
 
 ---
-
-## Task 3 — Node tags are byte-ordered sets on every surface (SPEC 12.7, 2.6, 11.1, 11.4, 12.0; A14, B10, C4)
-
-**Requirement.** SPEC 12.7: "A tag set — a node's interpreted tags (2.6, 11.2) … — is an array of tag strings in byte order (12.0), duplicates collapsed; a section carrying no tags (2.6) has `[]`." Byte order means UTF-8 byte order (12.0), not UTF-16 code-unit order.
-
-**Observed.** `tags="b a a z"` is emitted in first-occurrence order, `["b","a","z"]`, by `query node`, `query nodes`, `query subtree`, `view`, and `show --json`. The SPEC form is `["a","b","z"]`.
-
-**Location.**
-- `splitTags` in `src/core/mdx.ts` (~1207) keeps first-occurrence order.
-- `SpecSection.tags` then flows unchanged into graph data (`src/core/graph-data.ts` ~165, ~276, ~463; its doc comment says "first-occurrence order") and on to `src/cli/commands/query-fast.ts` (~31, reading the recorded tags), `query-core.ts`, `view.ts`, `analysis-view.ts`, and `show.ts`.
-- `src/core/hashes.ts` (~309) and `src/core/path-blocks.ts` (~588) already sort with `compareBytes` (`src/core/bytes.ts` ~28) for their own use.
-
-**Change.**
-- Make the interpreted tags a byte-ordered set where they are formed: `splitTags` (or the builder at ~1830) sorts with `compareBytes` and collapses duplicates. Every surface and the graph data then carry the set form.
-- Update the graph-data doc comment.
-- Keep each 14.4 finding per violating attribute unchanged.
-- Hashes must not change, since they already sort.
-- Check every other consumer of `section.tags` still reads it as a set: coverage `targetTags` filtering, policy tag selectors, and review reason text.
-
-**Verification.**
-- Should turn green: `section-2.5-2.6.test.ts` (T2.6-1), `section-5.5.test.ts` (T5.5-5), `section-6.2.test.ts` (T6.2-1, T6.2-2), `section-11.test.ts` (T11-7; T11-2 waits on Tasks 40, 44), `section-11.4.test.ts` (T11.4-3, T11.4-6).
-- With Task 4: `section-16-p4.test.ts` (P-4) and `section-16-p5-p6.test.ts` (P-5).
-- Neighbours: `section-7.4-7.5.test.ts`, `section-10.5.test.ts`, `section-13.3.test.ts`.
 
 ## Task 4 — `inventory` reports configured tag and kind lists as sets (SPEC 12.7 `inventory`, 7.4, 7.5, 11.6, 5.2; B9, C4)
 
@@ -161,7 +138,7 @@ Several tasks have no failing test of their own: Task 21 (the undefined refusal 
 
 **Verification.**
 - Should turn green: `section-7.4-7.5.test.ts` (T7.4-1, T7.5-1), `section-11.6.test.ts` (T11.6-2).
-- With Task 3: `section-16-p4.test.ts` (P-4) and `section-16-p5-p6.test.ts` (P-5).
+- P-4 and P-5, once listed here, pass since Task 3 landed: neither runs `inventory`.
 - Neighbours: `section-10.5.test.ts`, `section-12.7.test.ts`.
 
 ## Task 5 — Quoted attribute values are read verbatim, with no character-reference decoding (SPEC 2.4, 2.7, 2.5, 2.6, 1.4, 14.4, 14.17; A2, first part)
@@ -938,7 +915,7 @@ Its `identities` are the workspace-relative paths of the files concerned, in byt
 **Verification.**
 - Should turn green: `section-11.3.test.ts` (T11.3-2), `section-11.4.test.ts` (T11.4-2), `section-12.3-12.5.test.ts` (T12.3-1).
 - With Task 39: `section-7-discovery.test.ts` (T7-4).
-- `section-11.test.ts`: T11-2's `--file` arms (T11-2 also waits on Tasks 3 and 44).
+- `section-11.test.ts`: T11-2's `--file` arms (T11-2 also waits on Task 44).
 - Neighbours: `section-7-basics.test.ts`, `section-7.4-7.5.test.ts`.
 
 ## Task 41 — `markdown.outDir` spelling is enforced (SPEC 7.3, 14.14; B8)
@@ -1039,7 +1016,7 @@ With a missing configuration, all of the above fail the same way, and so does `a
 Leave the non-syntax usage errors (unknown node, offset beyond the file's length, unknown session) after configuration, in 12.0's order.
 
 **Verification.**
-- Should turn green: `section-12.0-ii.test.ts` (T12.0-10), `section-11.3.test.ts` (T11.3-3, with Task 1), `section-11.test.ts` (T11-2, with Tasks 3 and 40).
+- Should turn green: `section-12.0-ii.test.ts` (T12.0-10), `section-11.3.test.ts` (T11.3-3, with Task 1), `section-11.test.ts` (T11-2, with Task 40).
 - Neighbours: `section-10.7-i.test.ts`, `section-11.5.test.ts`, `section-12.0-i.test.ts`, `section-12.0-iii.test.ts`.
 
 ## Task 45 — A symlinked session directory holds no sessions for every `review` subcommand (SPEC 13.4, 10.1, 10.7, 12.0; B15, C9)

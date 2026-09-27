@@ -45,7 +45,7 @@ import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import type { ByteRange } from "./bytes.js";
-import { Utf8Offsets } from "./bytes.js";
+import { sortByBytes, Utf8Offsets } from "./bytes.js";
 import type { ConditionNumber, Finding } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
 import type { PathText } from "./path-text.js";
@@ -158,8 +158,9 @@ export interface SpecSection {
   readonly coverage: "required" | "none" | null;
   /**
    * The node's tags (SPEC 2.6): the whitespace-split tokens of the `tags`
-   * value with duplicates collapsed, in first-occurrence order; empty when
-   * the prop is absent or yields no tags.
+   * value as a tag set (SPEC 12.7) — byte order (SPEC 12.0), duplicates
+   * collapsed — on every surface that reports them and in graph data;
+   * empty when the prop is absent or yields no tags.
    */
   readonly tags: readonly string[];
   /** The `id` attribute's recorded value/spans, when usably declared. */
@@ -1211,8 +1212,10 @@ export function definedIdentitySections(
 /**
  * SPEC 2.6: split a `tags` value on runs of SPEC 1.4 whitespace, ignoring
  * leading and trailing whitespace, and collapse duplicates keeping
- * first-occurrence order. A value yielding no tags is equivalent to an
- * omitted prop.
+ * first-occurrence order — the order the value spells them, which the
+ * 14.4 finding's problem list follows; the interpreted tags recorded on
+ * the section are these tokens as a byte-ordered set (SPEC 12.7). A value
+ * yielding no tags is equivalent to an omitted prop.
  */
 export function splitTags(value: string): string[] {
   const tokens: string[] = [];
@@ -1835,9 +1838,11 @@ class DocumentBuilder {
 
     if (name === "tags") {
       // SPEC 2.6: whitespace splitting, duplicate collapse; a value
-      // yielding no tags is equivalent to omitting the prop.
+      // yielding no tags is equivalent to omitting the prop. SPEC 12.7:
+      // the interpreted tags are a tag set, in byte order (SPEC 12.0) —
+      // formed here, so every surface and the graph data carry the set.
       const tags = splitTags(value);
-      section.tags = tags;
+      section.tags = sortByBytes(tags, (tag) => tag);
       const problems = attributeProblems("tag", rawValue, tags);
       if (problems.length === 0) {
         return true;
