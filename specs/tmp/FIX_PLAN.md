@@ -109,25 +109,9 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T14-11 | section-14 | 12, 13, 14, 15, 16 |
 | T14-12 | section-14-iii | 10, 11, 12, 14 |
 
-Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), Task 53 (a corrupt session in `review list`), and Task 55 (a path beginning with U+FEFF, found while landing Task 9). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
+Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), and Task 53 (a corrupt session in `review list`); Task 55 (a path beginning with U+FEFF, found while landing Task 9) has landed. Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
 
 ---
-
-## Task 55 — A discovered path beginning with U+FEFF keeps that character (SPEC 1.5, 7, 12.0, 12.7; found while landing Task 9)
-
-Land before Task 54; it depends on no other task.
-
-**Requirement.** SPEC 7: a discovered file's workspace-relative path is the directory-entry names descending from the workspace root, joined with `/` (1.5), matched and compared as its UTF-8 bytes (12.0); SPEC 12.7: a path whose bytes are valid UTF-8 is presented as that string. A name beginning with U+FEFF (bytes `EF BB BF`) is valid UTF-8 and holds no `#` or U+FFFD, so a root-level spec source so named is valid and its path string begins with U+FEFF.
-
-**Observed** (at Task 9's commit). With `specs: { main: ["*.mdx"] }` and a valid section source at the root-level name `EF BB BF` + `a.mdx`, `build --json` exits 1 with a 14.20 "the discovered file could not be read" located in `a.mdx`, and `inventory --json` lists the source as `a.mdx`. `pathTextOf` (`src/core/path-text.ts`) decodes with `new TextDecoder("utf-8", { fatal: true })`, whose default BOM handling drops a leading U+FEFF, so the string form no longer re-encodes to the path's bytes and the file is read at the wrong path. (`Buffer.toString("utf8")` keeps U+FEFF; only `TextDecoder` drops it.)
-
-**Location.** `src/core/path-text.ts` `strictUtf8Decoder` (behind `pathTextOf`, hence discovery's `fileLabel`/`decoded` in `src/core/discovery.ts` `classifySources`); `src/workspace/pipeline.ts` `lossyDecoder` (the identity-space stand-in of an invalid-path source) has the same default.
-
-**Change.**
-- Decode path bytes with `ignoreBOM: true` (the decoder then keeps a leading U+FEFF as a character), so a valid path's string form always re-encodes to its exact bytes; give the stand-in decoder the same option so distinct paths keep distinct stand-ins.
-- Leave content decoders alone: a source or configuration file whose bytes begin with a byte-order mark falls under its own rules (1.6, 14.20; 7, 14.14 — Task 37).
-
-**Verification.** No suite test stages such a name. Hand-verify on a scratch workspace (name via `printf '\357\273\277a.mdx'`): `build --json` finding-free at exit 0 with the generated module written beside the source, and `inventory --json` listing the path whose first character is U+FEFF. Neighbours: `section-1.5.test.ts`, `section-7-discovery.test.ts`, `section-11.5.test.ts`, `section-11.6.test.ts`.
 
 ## Task 10 — ESM blocks are bounded exactly as stock MDX 3 bounds them (SPEC 14.20, 2.1, 2.7, 3, 6.5; A7, C14 first shape)
 

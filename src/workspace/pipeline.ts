@@ -447,9 +447,11 @@ export function workspaceInputsOf(
  * Deterministic lossy decoding for the identity-space stand-in path of an
  * invalid-path source (SPEC 14.19): invalid sequences become U+FFFD per
  * the Unicode maximal-subpart rule — never rendered, only a per-analysis
- * map key.
+ * map key. A leading U+FEFF is kept as a character of the path (SPEC 7,
+ * 1.5: a path is its names' exact bytes), as `pathTextOf` keeps it, so a
+ * path beginning with it and its twin without it keep distinct stand-ins.
  */
-const lossyDecoder = new TextDecoder("utf-8");
+const lossyDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
 
 /**
  * Read one discovered source's exact bytes from the filesystem, null when

@@ -20,7 +20,16 @@
 import { compareBytes } from "./bytes.js";
 import type { JsonValue } from "./canonical-json.js";
 
-const strictUtf8Decoder = new TextDecoder("utf-8", { fatal: true });
+// SPEC 7, 1.5: a path is the directory-entry names joined with `/`, matched
+// and compared as its exact UTF-8 bytes (12.0), and a valid-UTF-8 path is
+// presented as that string (12.7). A leading U+FEFF (`EF BB BF`) is an
+// ordinary character of such a path, never a byte-order mark to discard:
+// `ignoreBOM` keeps it, so a path's string form always re-encodes to the
+// path's exact bytes (the decoder's default would silently drop it).
+const strictUtf8Decoder = new TextDecoder("utf-8", {
+  fatal: true,
+  ignoreBOM: true,
+});
 const utf8Encoder = new TextEncoder();
 
 /**
