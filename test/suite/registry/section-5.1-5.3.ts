@@ -361,6 +361,14 @@ interface CycleArm extends CycleExpectation {
   readonly files: Readonly<Record<string, InitialFileContents>>;
 }
 
+// The self-`depends` arm's source, exported: T14-4's and T14-6's sweeps
+// (section-14.ts) stage the same bytes as their 14.9 entry's specs/a.mdx
+// (T5.3-1 is 14.9's primary test) — ONE staged-source record (S-9).
+export const SELF_DEPENDS_STAGED = stagedMdx(
+  "T5.3-1/T14-4/T14-6 self-depends specs/A.mdx (T14-4's and T14-6's sweep specs/a.mdx, the 14.9 dependency-cycle entry)",
+  ['<S id="s" d={"s"}>', "Depends on itself.", "</S>", ""].join("\n"),
+);
+
 // Every arm past the first stages its files after the first arm's `check`:
 // the `.mdx` entries are staged-source records, judged before any product
 // exists (S-9, test/self/s9-staged-sources.test.ts); the first arm's are
@@ -428,10 +436,7 @@ const T5_3_1_ARMS: readonly CycleArm[] = [
   {
     name: "a self-`depends` (a dependency cycle of length one)",
     files: {
-      "specs/A.mdx": stagedMdx(
-        "T5.3-1 self-depends specs/A.mdx",
-        ['<S id="s" d={"s"}>', "Depends on itself.", "</S>", ""].join("\n"),
-      ),
+      "specs/A.mdx": SELF_DEPENDS_STAGED,
     },
     cycle: ["specs/A.mdx#s"],
   },

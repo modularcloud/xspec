@@ -1630,9 +1630,9 @@ const A13_F_STAGED = stagedMdx("T6.5-13 arm (f) specs/a.mdx", A13_F_BEFORE);
 // self-closing target; the origin's sibling keeps a use of each, so both
 // declarations stay there (SPEC 6.5).
 const A13_FOURTH_SOURCE = ['<S id="b">', "B text.", "</S>", ""].join("\n");
-/** The fourth module as staged, `b` alone — one record (S-9) for (g) and its T6.6-4 restaging, T6.5-17's (b) and its T6.6-3 and T14-7 restagings (`M17_Y_STAGED` below), and T6.5-15's `specs/B.mdx`. */
-const A13_FOURTH_STAGED = stagedMdx(
-  "T6.5-13/T6.5-15/T6.5-17/T6.6-3/T6.6-4/T14-7 the module holding b alone (specs/y.mdx; T6.5-15's specs/B.mdx)",
+/** The fourth module as staged, `b` alone — one record (S-9) for (g) and its T6.6-4 restaging, T6.5-17's (b) and its T6.6-3 and T14-7 restagings (`M17_Y_STAGED` below), T6.5-15's `specs/B.mdx`, and T14-7's destination-spelling arm's `specs/b.mdx` (section-14.ts, by import). */
+export const A13_FOURTH_STAGED = stagedMdx(
+  "T6.5-13/T6.5-15/T6.5-17/T6.6-3/T6.6-4/T14-7 the module holding b alone (specs/y.mdx; T6.5-15's specs/B.mdx; T14-7's destination-spelling arm specs/b.mdx)",
   A13_FOURTH_SOURCE,
 );
 

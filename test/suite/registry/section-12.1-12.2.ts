@@ -203,9 +203,11 @@ export default defineConfig({
 // invocation, so S-7's sweep never reaches them against the stub: ONE
 // staged-source record (helpers/staged-mdx.ts; S-9's before-any-product
 // clause) staged at every site — the record rather than a plain spelling
-// of its bytes in the first workspaces too.
-const VALID_A1_SOURCE = stagedMdx(
-  "T12.1-1/T12.1-3/T12.1-4/T12.2-1/T12.2-2/T12.2-3 specs/A.mdx (the valid a1 source: every workspace's initial specs/A.mdx holding a1; T12.1-3's manual-rename copy at specs/C.mdx; staged back after a build by T12.1-4, T12.2-2, and T12.2-3)",
+// of its bytes in the first workspaces too. Exported: T14-4's and T14-6's
+// stale workspace (section-14.ts's STALE_DECL) stages the same bytes as
+// specs/a.mdx.
+export const VALID_A1_SOURCE = stagedMdx(
+  "T12.1-1/T12.1-3/T12.1-4/T12.2-1/T12.2-2/T12.2-3/T14-4/T14-6 specs/A.mdx (the valid a1 source: every workspace's initial specs/A.mdx holding a1; T12.1-3's manual-rename copy at specs/C.mdx; staged back after a build by T12.1-4, T12.2-2, and T12.2-3; T14-4's and T14-6's stale workspace specs/a.mdx)",
   ['<S id="a1">', "Alpha behavior.", "</S>", ""].join("\n"),
 );
 
@@ -850,11 +852,12 @@ const CYCLE_FAMILY_FILES: Readonly<Record<string, InitialFileContents>> = {
 };
 
 // The violating dependence h1 -> lo/L.mdx#l1 under the forbidden rule
-// `no-hi-to-lo`, byte-identical in T12.2-2's policy family and every
-// T12.2-4 arm's fixture, both staged after their body's first product
-// invocation (T12.2-4's arms (b)–(d)): ONE staged-source record (S-9).
-const POLICY_HI_SOURCE = stagedMdx(
-  "T12.2-2/T12.2-4 hi/H.mdx (h1 depending on lo/L.mdx#l1 under the no-hi-to-lo rule: T12.2-2's policy family; every T12.2-4 arm)",
+// `no-hi-to-lo`, byte-identical in T12.2-2's policy family, every T12.2-4
+// arm's fixture, and T14-4's and T14-6's policy workspace (section-14.ts,
+// by import), all staged after their body's first product invocation
+// (T12.2-4's arms (b)–(d)): ONE staged-source record (S-9).
+export const POLICY_HI_SOURCE = stagedMdx(
+  "T12.2-2/T12.2-4/T14-4/T14-6 hi/H.mdx (h1 depending on lo/L.mdx#l1 under the no-hi-to-lo rule: T12.2-2's policy family; every T12.2-4 arm; T14-4's and T14-6's policy workspace)",
   [
     'import L from "../lo/L.xspec"',
     "",
@@ -863,6 +866,14 @@ const POLICY_HI_SOURCE = stagedMdx(
     "</S>",
     "",
   ].join("\n"),
+);
+
+// The violated target l1, byte-identical in T12.2-2's policy family and
+// T14-4's and T14-6's policy workspace (section-14.ts, by import): ONE
+// staged-source record (S-9).
+export const POLICY_LO_SOURCE = stagedMdx(
+  "T12.2-2/T14-4/T14-6 lo/L.mdx (the violated target l1: T12.2-2's policy family; T14-4's and T14-6's policy workspace)",
+  ['<S id="l1">', "Low one.", "</S>", ""].join("\n"),
 );
 
 // Family: policy (14.12, check-only). One forbidden rule, one violating
@@ -886,10 +897,7 @@ export default defineConfig({
 })
 `,
   "hi/H.mdx": POLICY_HI_SOURCE,
-  "lo/L.mdx": stagedMdx(
-    "T12.2-2 policy family lo/L.mdx (the violated target l1)",
-    ['<S id="l1">', "Low one.", "</S>", ""].join("\n"),
-  ),
+  "lo/L.mdx": POLICY_LO_SOURCE,
 };
 
 // TEST-SPEC-sanctioned malformed journal line (the T6.1-3 shape).

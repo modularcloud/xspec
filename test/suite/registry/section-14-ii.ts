@@ -123,6 +123,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { DirectorySnapshot } from "../../helpers/snapshot.js";
 import { assertSnapshotsEqual } from "../../helpers/snapshot.js";
+import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { pathExists } from "../../helpers/subprocess.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
@@ -1130,13 +1131,19 @@ const SOURCE_DECL: WorkspaceDecl = {
 
 // Arm (g)'s fixture: the rename fixture plus a source under `specs/sub`, a
 // directory the discovery of SPEC 7 lists under the glob `specs/**/*.mdx`.
+// Arm (g) follows T14-10's earlier arms' invocations, so the source is a
+// staged-source record (S-9, test/self/s9-staged-sources.test.ts), staged
+// by the prepared workspace and the invalid-configuration one alike.
 const SUB_DIR = "specs/sub";
 const SUB_PATH = `${SUB_DIR}/S.mdx`;
 const LISTING_FIXTURE: RefusalFixture = {
   decl: {
     files: {
       ...RENAME_FIXTURE.decl.files,
-      [SUB_PATH]: ['<S id="s">', "Sub text.", "</S>", ""].join("\n"),
+      [SUB_PATH]: stagedMdx(
+        "T14-10 specs/sub/S.mdx (arm (g)'s listing fixture: the source under the unlistable directory)",
+        ['<S id="s">', "Sub text.", "</S>", ""].join("\n"),
+      ),
     },
   },
   priorRename: RENAME_FIXTURE.priorRename,

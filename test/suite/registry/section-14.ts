@@ -110,7 +110,7 @@
 // - T14-4 also sweeps T14-12's 14.16 and 14.20 stagings (section-14-iii.ts's
 //   exported `T14_12_REPORTER_STAGINGS`: `export { nope }` and the
 //   early-error containers under their S-9 allowances, the six unparseable
-//   spec sources declared `mdx.unparseable`, the two unparseable `.ts`
+//   spec sources' records declared unparseable, the two unparseable `.ts`
 //   sources) as further sweep entries — reporter membership by exact
 //   counts, the pinned offsets being T14-12's own subject; the `.ts`
 //   entries are code-source rows (`occurrences` alone).
@@ -290,6 +290,7 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
@@ -299,7 +300,6 @@ import {
 import type {
   InitialFileContents,
   WorkspaceDecl,
-  WorkspaceMdxDecl,
 } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -322,6 +322,7 @@ import {
 } from "./section-14-iii.js";
 import type { R16Location, R16RefusedArm } from "./section-6.5-iii.js";
 import {
+  A13_FOURTH_STAGED,
   M17_REFUSED_ARMS,
   R16_CONFIG,
   R16_REFUSED_ARMS,
@@ -335,7 +336,14 @@ import {
   MOVE_REFUSAL_CONFIG,
   MOVE_REFUSAL_FILES,
   stageMoveRefusalOccupants,
+  V4_SOLO_SOURCE,
 } from "./section-6.5.js";
+import {
+  POLICY_HI_SOURCE,
+  POLICY_LO_SOURCE,
+  VALID_A1_SOURCE,
+} from "./section-12.1-12.2.js";
+import { SELF_DEPENDS_STAGED } from "./section-5.1-5.3.js";
 import type {
   BearerLocationExpectation,
   UnparseableStaging,
@@ -1056,8 +1064,11 @@ function assertMaskingReport(
 }
 
 // The configuration-error arm: an unknown top-level key (SPEC 7, 14.14)
-// beside sources that are themselves invalid.
-const T14_3_CONFIG_ARM_FILES: Readonly<Record<string, string>> = {
+// beside sources that are themselves invalid. The arm's workspace follows
+// the body's first invocations, so its sources are staged-source records
+// (S-9, test/self/s9-staged-sources.test.ts), the malformed one declared
+// unparseable.
+const T14_3_CONFIG_ARM_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1067,8 +1078,15 @@ export default defineConfig({
   bogus: true
 })
 `,
-  "specs/invalid.mdx": "<S>\nMissing id (14.1), never analyzed.\n</S>\n",
-  "specs/broken.mdx": '<S id="x">\nUnclosed element (14.20), never analyzed.\n',
+  "specs/invalid.mdx": stagedMdx(
+    "T14-3 configuration-error arm specs/invalid.mdx (a missing id, never analyzed)",
+    "<S>\nMissing id (14.1), never analyzed.\n</S>\n",
+  ),
+  "specs/broken.mdx": stagedMdx(
+    "T14-3 configuration-error arm specs/broken.mdx (an unclosed element, never analyzed)",
+    '<S id="x">\nUnclosed element (14.20), never analyzed.\n',
+    "unparseable",
+  ),
 };
 
 const T14_3 = defineProductTest({
@@ -1099,10 +1117,7 @@ const T14_3 = defineProductTest({
     // the configuration — for `build` and `check` alike, with invalid
     // sources present.
     await withWorkspace(
-      {
-        files: T14_3_CONFIG_ARM_FILES,
-        mdx: { unparseable: ["specs/broken.mdx"] },
-      },
+      { files: T14_3_CONFIG_ARM_FILES },
       async (workspace) => {
         await expectConfigurationError(
           product,
@@ -1161,22 +1176,32 @@ interface SweepEntry {
     | { readonly kind: "no-domain-file"; readonly file: string };
 }
 
-/** Shorthand: a specs-only workspace whose one source stages the condition. */
-function specArm(condition: string, label: string, source: string): SweepEntry {
+/**
+ * Shorthand: a specs-only workspace whose one source stages the condition —
+ * a staged-source record carrying its own S-9 declaration (every sweep
+ * workspace but T14-6's first follows its body's first invocation; the
+ * table is converted uniformly).
+ */
+function specArm(
+  condition: string,
+  label: string,
+  source: StagedMdx,
+): SweepEntry {
   return {
     condition,
     label,
     decl: {
       files: { "xspec.config.ts": SPECS_ONLY_CONFIG, "specs/a.mdx": source },
-      // S-9: the 14.20 entry's source is the one the document declares
-      // unparseable; every other entry's source must derive.
-      ...(condition === "14.20"
-        ? { mdx: { unparseable: ["specs/a.mdx"] } }
-        : {}),
     },
     answers: { kind: "spec-source", file: "specs/a.mdx" },
   };
 }
+
+// The code arms' valid spec source (a staged-source record, S-9).
+const CODE_ARM_SPEC_SOURCE = stagedMdx(
+  "T14-4/T14-6 specs/s.mdx (the code arms' valid spec source n1: the sweep's 14.7 and 14.18 entries)",
+  '<S id="n1">\nCode-referenced behavior.\n</S>\n',
+);
 
 /** Shorthand: a valid spec plus one code file staging the condition. */
 function codeArm(condition: string, label: string, source: string): SweepEntry {
@@ -1186,7 +1211,7 @@ function codeArm(condition: string, label: string, source: string): SweepEntry {
     decl: {
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-        "specs/s.mdx": '<S id="n1">\nCode-referenced behavior.\n</S>\n',
+        "specs/s.mdx": CODE_ARM_SPEC_SOURCE,
         "src/app.ts": source,
       },
     },
@@ -1194,56 +1219,86 @@ function codeArm(condition: string, label: string, source: string): SweepEntry {
   };
 }
 
+// The sources the sweep shares with the dedicated arms below, staged-source
+// records (S-9): the minimal valid source a1 — the journal-error and
+// symbolic-link entries' spec source and the ground of VALID_SPECS_DECL,
+// BOGUS_KEY_DECL, and READ_REFUSAL_DECL — and specs/a.mdx without an id,
+// the missing-ID entry's source, which T14-4's 14.21 arm also re-stages
+// on its just-rebuilt workspace (the failing side).
+const VALID_A1_BEHAVIOR = stagedMdx(
+  "T14-4/T14-6 specs/a.mdx (the minimal valid source a1: the sweep's journal-error and symbolic-link entries; the 14.21, 14.23, and 14.14 arms' workspaces; T14-6's 14.25 and code-null arms)",
+  '<S id="a1">\nValid behavior.\n</S>\n',
+);
+const ID_LESS_A_SOURCE = stagedMdx(
+  "T14-4/T14-6 specs/a.mdx without an id (the sweep's missing-ID entry, 14.1; re-staged after the build by T14-4's 14.21 arm, its failing workspace)",
+  "<S>\nNo id.\n</S>\n",
+);
+
 const GARBAGE_JOURNAL_LINE =
   "?? harness-injected garbage: not a journal entry ??\n";
 
 const SWEEP_ENTRIES: readonly SweepEntry[] = [
-  specArm("14.1", "missing ID", "<S>\nNo id.\n</S>\n"),
+  specArm("14.1", "missing ID", ID_LESS_A_SOURCE),
   specArm(
     "14.2",
     "invalid structural ID",
-    [
-      '<S id="p">',
-      "Parent.",
-      "",
-      '<S id="q.r">',
-      "A child whose ID does not extend the parent's.",
-      "</S>",
-      "</S>",
-      "",
-    ].join("\n"),
+    stagedMdx(
+      "T14-4/T14-6 sweep specs/a.mdx (14.2, invalid structural ID)",
+      [
+        '<S id="p">',
+        "Parent.",
+        "",
+        '<S id="q.r">',
+        "A child whose ID does not extend the parent's.",
+        "</S>",
+        "</S>",
+        "",
+      ].join("\n"),
+    ),
   ),
   {
     ...specArm(
       "14.3",
       "duplicate ID within a file",
-      [
-        '<S id="dup">',
-        "First occurrence.",
-        "</S>",
-        "",
-        '<S id="dup">',
-        "Second occurrence.",
-        "</S>",
-        "",
-      ].join("\n"),
+      stagedMdx(
+        "T14-4/T14-6 sweep specs/a.mdx (14.3, duplicate ID within a file)",
+        [
+          '<S id="dup">',
+          "First occurrence.",
+          "</S>",
+          "",
+          '<S id="dup">',
+          "Second occurrence.",
+          "</S>",
+          "",
+        ].join("\n"),
+      ),
     ),
     perOccurrenceTolerated: true,
   },
   specArm(
     "14.4",
     "invalid segment",
-    '<S id="bad name">\nInvalid segment.\n</S>\n',
+    stagedMdx(
+      "T14-4/T14-6 sweep specs/a.mdx (14.4, invalid segment)",
+      '<S id="bad name">\nInvalid segment.\n</S>\n',
+    ),
   ),
   specArm(
     "14.5",
     "unknown dependency",
-    '<S id="a" d={"nope"}>\nUnknown dependency target.\n</S>\n',
+    stagedMdx(
+      "T14-4/T14-6 sweep specs/a.mdx (14.5, unknown dependency)",
+      '<S id="a" d={"nope"}>\nUnknown dependency target.\n</S>\n',
+    ),
   ),
   specArm(
     "14.6",
     "unknown text target",
-    '<S id="a">\nBody:\n\n{text("nada")}\n</S>\n',
+    stagedMdx(
+      "T14-4/T14-6 sweep specs/a.mdx (14.6, unknown text target)",
+      '<S id="a">\nBody:\n\n{text("nada")}\n</S>\n',
+    ),
   ),
   codeArm(
     "14.7",
@@ -1255,21 +1310,26 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
   specArm(
     "14.8",
     "invalid argument",
-    '<S id="a" d={42}>\nNon-static dependency value.\n</S>\n',
+    stagedMdx(
+      "T14-4/T14-6 sweep specs/a.mdx (14.8, invalid argument)",
+      '<S id="a" d={42}>\nNon-static dependency value.\n</S>\n',
+    ),
   ),
-  specArm(
-    "14.9",
-    "dependency cycle",
-    '<S id="s" d={"s"}>\nDepends on itself.\n</S>\n',
-  ),
+  specArm("14.9", "dependency cycle", SELF_DEPENDS_STAGED),
   {
     condition: "14.11",
     label: "cross-module text call",
     decl: {
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
-        "specs/alpha.mdx": '<S id="first">\nAlpha behavior.\n</S>\n',
-        "specs/bravo.mdx": '<S id="second">\nBravo behavior.\n</S>\n',
+        "specs/alpha.mdx": stagedMdx(
+          "T14-4/T14-6 sweep specs/alpha.mdx (14.11, cross-module text call)",
+          '<S id="first">\nAlpha behavior.\n</S>\n',
+        ),
+        "specs/bravo.mdx": stagedMdx(
+          "T14-4/T14-6 sweep specs/bravo.mdx (14.11, cross-module text call)",
+          '<S id="second">\nBravo behavior.\n</S>\n',
+        ),
         "src/app.ts": [
           'import ALPHA from "../specs/alpha.xspec";',
           'import { text as textB } from "../specs/bravo.xspec";',
@@ -1287,7 +1347,7 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
     decl: {
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        "specs/a.mdx": '<S id="a1">\nValid behavior.\n</S>\n',
+        "specs/a.mdx": VALID_A1_BEHAVIOR,
       },
     },
     prepare: async (product, workspace) => {
@@ -1304,24 +1364,33 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
   specArm(
     "14.15",
     "invalid import",
-    [
-      'import X from "./missing.xspec"',
-      "",
-      '<S id="a">',
-      "The import designates no discovered spec source.",
-      "</S>",
-      "",
-    ].join("\n"),
+    stagedMdx(
+      "T14-4/T14-6 sweep specs/a.mdx (14.15, invalid import)",
+      [
+        'import X from "./missing.xspec"',
+        "",
+        '<S id="a">',
+        "The import designates no discovered spec source.",
+        "</S>",
+        "",
+      ].join("\n"),
+    ),
   ),
   specArm(
     "14.16",
     "invalid construct",
-    '<S id="a">\nBody.\n</S>\n\n<div>Not a section.</div>\n',
+    stagedMdx(
+      "T14-4/T14-6 sweep specs/a.mdx (14.16, invalid construct)",
+      '<S id="a">\nBody.\n</S>\n\n<div>Not a section.</div>\n',
+    ),
   ),
   specArm(
     "14.17",
     "invalid prop",
-    '<S id="a" bogus="1">\nUnknown prop.\n</S>\n',
+    stagedMdx(
+      "T14-4/T14-6 sweep specs/a.mdx (14.17, invalid prop)",
+      '<S id="a" bogus="1">\nUnknown prop.\n</S>\n',
+    ),
   ),
   codeArm(
     "14.18",
@@ -1339,7 +1408,10 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
     decl: {
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        "specs/a#b.mdx": '<S id="a">\nValid content, invalid path.\n</S>\n',
+        "specs/a#b.mdx": stagedMdx(
+          "T14-4/T14-6 sweep specs/a#b.mdx (14.19, invalid source path)",
+          '<S id="a">\nValid content, invalid path.\n</S>\n',
+        ),
       },
     },
     // The `#`-containing path is valid UTF-8, so the file is nameable by an
@@ -1348,7 +1420,16 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
     // answer whose consulted domain includes it (SPEC 11.2, 11.4, 11.5).
     answers: { kind: "spec-source", file: "specs/a#b.mdx" },
   },
-  specArm("14.20", "unparseable source", '<S id="x">\nUnclosed element.\n'),
+  // S-9: the one entry source the document declares unparseable.
+  specArm(
+    "14.20",
+    "unparseable source",
+    stagedMdx(
+      "T14-4/T14-6 sweep specs/a.mdx (14.20, unparseable source)",
+      '<S id="x">\nUnclosed element.\n',
+      "unparseable",
+    ),
+  ),
   {
     condition: "14.22",
     label: "symbolic link in a write path",
@@ -1363,7 +1444,7 @@ export default defineConfig({
   markdown: { emit: true, outDir: "out" }
 })
 `,
-        "specs/a.mdx": '<S id="a1">\nValid behavior.\n</S>\n',
+        "specs/a.mdx": VALID_A1_BEHAVIOR,
       },
       dirs: ["real-out"],
       symlinks: { out: "real-out" },
@@ -1393,28 +1474,27 @@ export default defineConfig({
 
 // 14.10 (T12.2-2's fixture): build, then edit the source — Markdown emission
 // on, so the emitted file's bytes are the compiled source and the staged
-// staleness is certainly detectable.
+// staleness is certainly detectable. Every workspace of the decls below
+// but T14-4's first follows its body's first invocation, so each `.mdx`
+// entry is a staged-source record (S-9) — here T12.2-2's own valid a1
+// source, byte-identical, by import.
 const STALE_DECL: WorkspaceDecl = {
   files: {
     "xspec.config.ts": markdownConfig(true),
-    "specs/a.mdx": '<S id="a1">\nAlpha behavior.\n</S>\n',
+    "specs/a.mdx": VALID_A1_SOURCE,
   },
 };
-// The post-build edits of specs/a.mdx are staged-source records (S-9: judged
+// The post-build edit of specs/a.mdx is a staged-source record (S-9: judged
 // before any product exists by test/self/s9-staged-sources.test.ts, since
 // S-7's sweep never reaches a staging that follows a product invocation).
 const STALE_EDIT = stagedMdx(
   "T14-4/T14-6 specs/a.mdx edited after the build (the stale workspace, 14.10)",
   '<S id="a1">\nAlpha behavior, edited.\n</S>\n',
 );
-// T14-4's failing workspace for the 14.21 arm: specs/a.mdx re-staged
-// without an id (14.1) on the just-rebuilt workspace.
-const T14_4_ID_LESS_EDIT = stagedMdx(
-  "T14-4 specs/a.mdx re-staged without an id (the failing workspace of the 14.21 arm)",
-  "<S>\nNo id.\n</S>\n",
-);
 
-// 14.12 (T7.5-2's fixture): one forbidden rule, one violating dependence.
+// 14.12 (T7.5-2's fixture): one forbidden rule, one violating dependence —
+// its two sources T12.2-2's policy family's records, byte-identical, by
+// import.
 const POLICY_DECL: WorkspaceDecl = {
   files: {
     "xspec.config.ts": `import { defineConfig } from "xspec"
@@ -1434,15 +1514,8 @@ export default defineConfig({
   ]
 })
 `,
-    "hi/H.mdx": [
-      'import L from "../lo/L.xspec"',
-      "",
-      '<S id="h1" d={L.l1}>',
-      "Violating dependence.",
-      "</S>",
-      "",
-    ].join("\n"),
-    "lo/L.mdx": ['<S id="l1">', "Low one.", "</S>", ""].join("\n"),
+    "hi/H.mdx": POLICY_HI_SOURCE,
+    "lo/L.mdx": POLICY_LO_SOURCE,
   },
 };
 
@@ -1451,7 +1524,7 @@ export default defineConfig({
 const VALID_SPECS_DECL: WorkspaceDecl = {
   files: {
     "xspec.config.ts": SPECS_ONLY_CONFIG,
-    "specs/a.mdx": '<S id="a1">\nValid behavior.\n</S>\n',
+    "specs/a.mdx": VALID_A1_BEHAVIOR,
   },
 };
 
@@ -1473,7 +1546,7 @@ export default defineConfig({
   bogus: true
 })
 `,
-    "specs/a.mdx": '<S id="a1">\nValid behavior.\n</S>\n',
+    "specs/a.mdx": VALID_A1_BEHAVIOR,
   },
 };
 
@@ -1661,7 +1734,7 @@ const T14_4 = defineProductTest({
       // finding beside them (SPEC 14.21, 13.3, 10.1; membership only, the
       // module header — the every-subcommand breadth, modifies-nothing
       // compares, and bytes-untouched assertions are T10.1-5's).
-      await workspace.file("specs/a.mdx", T14_4_ID_LESS_EDIT);
+      await workspace.file("specs/a.mdx", ID_LESS_A_SOURCE);
       assertConditionCounts(
         await buildFindings(
           product,
@@ -1983,16 +2056,21 @@ const T14_5_UNIT_SOURCE = [
   "",
 ].join("\n");
 
-const T14_5_SPEC_SOURCE = [
-  '<S id="t1">',
-  "Marker target.",
-  "</S>",
-  "",
-  '<S id="t2">',
-  "Embedded target.",
-  "</S>",
-  "",
-].join("\n");
+// Both arms' spec source: the `.mts` arm follows the `.tsx` arm's
+// invocations, so it is a staged-source record (S-9), staged by both.
+const T14_5_SPEC_SOURCE = stagedMdx(
+  "T14-5 specs/U.mdx (the .tsx and .mts arms' spec source: the marker target t1 and the embedded target t2)",
+  [
+    '<S id="t1">',
+    "Marker target.",
+    "</S>",
+    "",
+    '<S id="t2">',
+    "Embedded target.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 function codeGroupConfig(glob: string): string {
   return `import { defineConfig } from "xspec"
@@ -2201,8 +2279,11 @@ const UNLISTABLE_DIR = "specs/sub";
 const READ_REFUSAL_DECL: WorkspaceDecl = {
   files: {
     "xspec.config.ts": SPECS_ONLY_CONFIG,
-    "specs/a.mdx": '<S id="a1">\nValid behavior.\n</S>\n',
-    [`${UNLISTABLE_DIR}/b.mdx`]: '<S id="b1">\nValid behavior.\n</S>\n',
+    "specs/a.mdx": VALID_A1_BEHAVIOR,
+    [`${UNLISTABLE_DIR}/b.mdx`]: stagedMdx(
+      "T14-6 specs/sub/b.mdx (the 14.25 arm's valid source under the unlistable directory)",
+      '<S id="b1">\nValid behavior.\n</S>\n',
+    ),
   },
 };
 
@@ -2596,9 +2677,9 @@ async function assertRefusalReport(
 // directories, 13.4) — component occupancy is the arm's sole defect.
 const T14_7_COMPONENT_OCCUPANT = "specs/blocked";
 const T14_7_COMPONENT_DEST = "specs/blocked/Out.mdx";
-const T14_7_COMPONENT_FILES: Readonly<Record<string, string>> = {
+const T14_7_COMPONENT_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPECS_ONLY_CONFIG,
-  "specs/Src.mdx": '<S id="solo">\nSolo text.\n</S>\n',
+  "specs/Src.mdx": V4_SOLO_SOURCE,
   [T14_7_COMPONENT_OCCUPANT]: "not a directory\n",
 };
 
@@ -2625,6 +2706,14 @@ const T14_7_MULTI_SOURCE = [
   "</S>",
   "",
 ].join("\n");
+
+// The staged source (S-9: every T14-7 workspace after the first follows the
+// body's first invocations — a staged-source record, made from the string
+// the windows below are computed from).
+const T14_7_MULTI_STAGED = stagedMdx(
+  "T14-7 every-applicable-reason arm specs/M.mdx (keep holding the occupant keep.mv; mv depending on keep)",
+  T14_7_MULTI_SOURCE,
+);
 
 // The remaining colliding bearer's whole construct — the collision's
 // complete bearer set (SPEC 14: every colliding bearer; the occupant is the
@@ -2677,11 +2766,19 @@ const T14_7_SIB_WINDOW = byteWindow(
   ),
   T14_7_SIB_CONSTRUCT,
 );
+const T14_7_RENAME_STAGED = stagedMdx(
+  "T14-7 invalid-workspace arm specs/R.mdx (a holding a.mid and a.sib)",
+  T14_7_RENAME_SOURCE,
+);
 const T14_7_BAD_FILE = "specs/Bad.mdx";
-const T14_7_BAD_VALID =
-  '<S id="bad">\nBad-file text, valid for the control arm.\n</S>\n';
+const T14_7_BAD_VALID = stagedMdx(
+  "T14-7 invalid-workspace arm specs/Bad.mdx (the valid twin: bad, before its unresolved dependency target is staged)",
+  '<S id="bad">\nBad-file text, valid for the control arm.\n</S>\n',
+);
 // The invalid twin is staged after the control arm's invocations — a
-// staged-source record (S-9, test/self/s9-staged-sources.test.ts).
+// staged-source record (S-9, test/self/s9-staged-sources.test.ts), as are
+// the arm's initial sources (the workspace follows the body's first
+// invocations).
 const T14_7_BAD_INVALID = stagedMdx(
   "T14-7 specs/Bad.mdx with an unresolved dependency target (the invalid-workspace arm)",
   '<S id="bad" d={"nope"}>\nUnresolved dependency target.\n</S>\n',
@@ -2708,10 +2805,13 @@ export default defineConfig({
 })
 `;
 const T14_7_SPELLING_ORIGIN = "a.mdx";
-const T14_7_SPELLING_FILES: Readonly<Record<string, string>> = {
+const T14_7_SPELLING_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": T14_7_SPELLING_CONFIG,
-  [T14_7_SPELLING_ORIGIN]: '<S id="x">\nX text.\n</S>\n',
-  "specs/b.mdx": '<S id="b">\nB text.\n</S>\n',
+  [T14_7_SPELLING_ORIGIN]: stagedMdx(
+    "T14-7 destination-spelling arm a.mdx (the root-level origin x)",
+    '<S id="x">\nX text.\n</S>\n',
+  ),
+  "specs/b.mdx": A13_FOURTH_STAGED,
 };
 const T14_7_SPELLED_DESTINATIONS: readonly string[] = [
   "./a.mdx",
@@ -2750,14 +2850,21 @@ const T14_7_CYCLE_A_SOURCE = [
   "",
 ].join("\n");
 const T14_7_IMPORT_DECLARATION = 'import A from "./A.xspec"';
-const T14_7_CYCLE_B_SOURCE = [
-  T14_7_IMPORT_DECLARATION,
-  "",
-  '<S id="b" d={A.keep}>',
-  "B text.",
-  "</S>",
-  "",
-].join("\n");
+const T14_7_CYCLE_B_SOURCE = stagedMdx(
+  "T14-7 import-cycle arm specs/B.mdx (b importing A for keep)",
+  [
+    T14_7_IMPORT_DECLARATION,
+    "",
+    '<S id="b" d={A.keep}>',
+    "B text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+const T14_7_CYCLE_A_STAGED = stagedMdx(
+  "T14-7 import-cycle arm specs/A.mdx (keep, x, and user referencing x in local form)",
+  T14_7_CYCLE_A_SOURCE,
+);
 const T14_7_LOCAL_REFERENCE = 'd={"x"}';
 const T14_7_LOCAL_REFERENCE_WINDOW = byteWindow(
   T14_7_CYCLE_A_SOURCE.slice(
@@ -2941,11 +3048,14 @@ async function runT147MovedImportArms(product: ProductBinding): Promise<void> {
 // — so each report is exactly its two findings.
 const T14_7_INVALID_PATH_ORIGIN = "specs/A.mdx";
 const T14_7_INVALID_PATH = "specs/new.txt";
-const T14_7_INVALID_PATH_FILES: Readonly<Record<string, string>> = {
-  "xspec.config.ts": SPECS_ONLY_CONFIG,
-  [T14_7_INVALID_PATH_ORIGIN]:
-    '<S id="keep">\nKeep text.\n</S>\n\n<S id="x">\nX text.\n</S>\n',
-};
+const T14_7_INVALID_PATH_FILES: Readonly<Record<string, InitialFileContents>> =
+  {
+    "xspec.config.ts": SPECS_ONLY_CONFIG,
+    [T14_7_INVALID_PATH_ORIGIN]: stagedMdx(
+      "T14-7 invalid-path arm specs/A.mdx (keep and x)",
+      '<S id="keep">\nKeep text.\n</S>\n\n<S id="x">\nX text.\n</S>\n',
+    ),
+  };
 
 /** One identity over the invalid path: the `<new-id>` moved to, the reason concerning the identity, and the identity itself. */
 interface InvalidPathArm {
@@ -3062,18 +3172,26 @@ const T14_7_SIBLING_A_SOURCE = [
   "</S>",
   "",
 ].join("\n");
-const T14_7_SIBLING_B_SOURCE = ['<S id="bar">', "Bar text.", "</S>", ""].join(
-  "\n",
+const T14_7_SIBLING_B_SOURCE = stagedMdx(
+  "T14-7 sibling import-cycle arm specs/B.mdx (bar)",
+  ['<S id="bar">', "Bar text.", "</S>", ""].join("\n"),
 );
 const T14_7_SIBLING_C_IMPORT = 'import B from "./B.xspec"';
-const T14_7_SIBLING_C_SOURCE = [
-  T14_7_SIBLING_C_IMPORT,
-  "",
-  '<S id="foo" d={B.bar}>',
-  "Foo text.",
-  "</S>",
-  "",
-].join("\n");
+const T14_7_SIBLING_C_SOURCE = stagedMdx(
+  "T14-7 sibling import-cycle arm specs/C.mdx (foo importing B for bar)",
+  [
+    T14_7_SIBLING_C_IMPORT,
+    "",
+    '<S id="foo" d={B.bar}>',
+    "Foo text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+const T14_7_SIBLING_A_STAGED = stagedMdx(
+  "T14-7 sibling import-cycle arm specs/A.mdx (x carrying d={C.foo} beside keep)",
+  T14_7_SIBLING_A_SOURCE,
+);
 const T14_7_SIBLING_CHAIN_WINDOW = byteWindow(
   T14_7_SIBLING_A_SOURCE.slice(
     0,
@@ -3089,7 +3207,7 @@ async function runT147SiblingCycleArm(product: ProductBinding): Promise<void> {
     {
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [T14_7_SIBLING_A]: T14_7_SIBLING_A_SOURCE,
+        [T14_7_SIBLING_A]: T14_7_SIBLING_A_STAGED,
         [T14_7_SIBLING_B]: T14_7_SIBLING_B_SOURCE,
         [T14_7_SIBLING_C]: T14_7_SIBLING_C_SOURCE,
       },
@@ -3271,7 +3389,7 @@ const T14_7 = defineProductTest({
       {
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [T14_7_MULTI_FILE]: T14_7_MULTI_SOURCE,
+          [T14_7_MULTI_FILE]: T14_7_MULTI_STAGED,
         },
       },
       async (workspace) => {
@@ -3361,7 +3479,7 @@ const T14_7 = defineProductTest({
       {
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [T14_7_CYCLE_A]: T14_7_CYCLE_A_SOURCE,
+          [T14_7_CYCLE_A]: T14_7_CYCLE_A_STAGED,
           [T14_7_CYCLE_B]: T14_7_CYCLE_B_SOURCE,
         },
       },
@@ -3427,7 +3545,7 @@ const T14_7 = defineProductTest({
       {
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
-          [T14_7_RENAME_FILE]: T14_7_RENAME_SOURCE,
+          [T14_7_RENAME_FILE]: T14_7_RENAME_STAGED,
           [T14_7_BAD_FILE]: T14_7_BAD_VALID,
         },
       },
@@ -3631,14 +3749,29 @@ const T14_8_COL_IMPORTS: readonly string[] = [
   'import A from "./One.xspec"',
   'import A from "./Two.xspec"',
 ];
-const T14_8_COL_SOURCE = [
-  ...T14_8_COL_IMPORTS,
-  "",
-  '<S id="col">',
-  "Collision-file body text.",
-  "</S>",
-  "",
-].join("\n");
+// S-9: two imports binding one identifier — an early error 14.20 admits,
+// the named allowance; the workspace follows the body's first invocation,
+// so its sources are staged-source records.
+const T14_8_COL_SOURCE = stagedMdx(
+  "T14-8 import-binding collision arm specs/Col.mdx (two imports binding A)",
+  [
+    ...T14_8_COL_IMPORTS,
+    "",
+    '<S id="col">',
+    "Collision-file body text.",
+    "</S>",
+    "",
+  ].join("\n"),
+  { allowances: ["duplicate-import-binding"] },
+);
+const T14_8_ONE_SOURCE = stagedMdx(
+  "T14-8 import-binding collision arm specs/One.mdx (the first import's target)",
+  '<S id="one">\nTarget one text.\n</S>\n',
+);
+const T14_8_TWO_SOURCE = stagedMdx(
+  "T14-8 import-binding collision arm specs/Two.mdx (the second import's target)",
+  '<S id="two">\nTarget two text.\n</S>\n',
+);
 const T14_8_COL_PARTICIPANTS: readonly ParticipantExpectation[] =
   T14_8_COL_IMPORTS.map((declaration, index) => ({
     file: T14_8_COL_FILE,
@@ -3662,10 +3795,16 @@ const T14_8_CYC_A_IMPORT = 'import B from "./CycB.xspec"';
 const T14_8_CYC_A_ELEMENT = '<S id="a" d={B.b}>\nCycle A behavior text.\n</S>';
 const T14_8_CYC_B_IMPORT = 'import A from "./CycA.xspec"';
 const T14_8_CYC_B_ELEMENT = '<S id="b" d={A.a}>\nCycle B behavior text.\n</S>';
-const T14_8_CYC_FILES: Readonly<Record<string, string>> = {
+const T14_8_CYC_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPECS_ONLY_CONFIG,
-  [T14_8_CYC_A_FILE]: `${T14_8_CYC_A_IMPORT}\n\n${T14_8_CYC_A_ELEMENT}\n`,
-  [T14_8_CYC_B_FILE]: `${T14_8_CYC_B_IMPORT}\n\n${T14_8_CYC_B_ELEMENT}\n`,
+  [T14_8_CYC_A_FILE]: stagedMdx(
+    "T14-8 cross-file dependency cycle arm specs/CycA.mdx (a depending on B.b)",
+    `${T14_8_CYC_A_IMPORT}\n\n${T14_8_CYC_A_ELEMENT}\n`,
+  ),
+  [T14_8_CYC_B_FILE]: stagedMdx(
+    "T14-8 cross-file dependency cycle arm specs/CycB.mdx (b depending on A.a)",
+    `${T14_8_CYC_B_IMPORT}\n\n${T14_8_CYC_B_ELEMENT}\n`,
+  ),
 };
 const T14_8_CYC_SPELLING_PARTICIPANTS: readonly ParticipantExpectation[] = [
   {
@@ -3691,10 +3830,16 @@ const T14_8_IMP_A_FILE = "specs/ImpA.mdx";
 const T14_8_IMP_B_FILE = "specs/ImpB.mdx";
 const T14_8_IMP_A_IMPORT = 'import B from "./ImpB.xspec"';
 const T14_8_IMP_B_IMPORT = 'import A from "./ImpA.xspec"';
-const T14_8_IMP_FILES: Readonly<Record<string, string>> = {
+const T14_8_IMP_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPECS_ONLY_CONFIG,
-  [T14_8_IMP_A_FILE]: `${T14_8_IMP_A_IMPORT}\n\n<S id="ia">\nImport-cycle A text, binding unused.\n</S>\n`,
-  [T14_8_IMP_B_FILE]: `${T14_8_IMP_B_IMPORT}\n\n<S id="ib">\nImport-cycle B text, binding unused.\n</S>\n`,
+  [T14_8_IMP_A_FILE]: stagedMdx(
+    "T14-8 pure import cycle arm specs/ImpA.mdx (importing ImpB, the binding unused)",
+    `${T14_8_IMP_A_IMPORT}\n\n<S id="ia">\nImport-cycle A text, binding unused.\n</S>\n`,
+  ),
+  [T14_8_IMP_B_FILE]: stagedMdx(
+    "T14-8 pure import cycle arm specs/ImpB.mdx (importing ImpA, the binding unused)",
+    `${T14_8_IMP_B_IMPORT}\n\n<S id="ib">\nImport-cycle B text, binding unused.\n</S>\n`,
+  ),
 };
 const T14_8_IMP_PARTICIPANTS: readonly ParticipantExpectation[] = [
   { file: T14_8_IMP_A_FILE, window: byteWindow("", T14_8_IMP_A_IMPORT) },
@@ -3710,7 +3855,10 @@ const T14_8_IMP_PARTICIPANTS: readonly ParticipantExpectation[] = [
 const T14_8_EMB_FILE = "specs/Emb.mdx";
 const T14_8_EMB_PREFIX = '<S id="emb">\nProse before the embedding.\n\n';
 const T14_8_EMB_CONTAINER = '{text("emb.nope")}';
-const T14_8_EMB_SOURCE = `${T14_8_EMB_PREFIX}${T14_8_EMB_CONTAINER}\n\nProse after keeps the container off the file end.\n</S>\n`;
+const T14_8_EMB_SOURCE = stagedMdx(
+  "T14-8 no-occurrence embedding arm specs/Emb.mdx (an unresolved local text(...) between prose)",
+  `${T14_8_EMB_PREFIX}${T14_8_EMB_CONTAINER}\n\nProse after keeps the container off the file end.\n</S>\n`,
+);
 const T14_8_EMB_RANGE = {
   start: Buffer.byteLength(T14_8_EMB_PREFIX, "utf8"),
   end:
@@ -3740,16 +3888,19 @@ export default defineConfig({
 })
 `;
 const T14_8_POL_FILE = "specs/Pol.mdx";
-const T14_8_POL_SOURCE = [
-  '<S id="a">',
-  "Policy target text.",
-  "</S>",
-  "",
-  '<S id="p" d={"a"}>',
-  "Policy source text.",
-  "</S>",
-  "",
-].join("\n");
+const T14_8_POL_SOURCE = stagedMdx(
+  "T14-8 policy arm specs/Pol.mdx (p depending on a under the no-spec-deps rule)",
+  [
+    '<S id="a">',
+    "Policy target text.",
+    "</S>",
+    "",
+    '<S id="p" d={"a"}>',
+    "Policy source text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
 
 const T14_8 = defineProductTest({
   id: "T14-8",
@@ -3790,12 +3941,9 @@ const T14_8 = defineProductTest({
         files: {
           "xspec.config.ts": SPECS_ONLY_CONFIG,
           [T14_8_COL_FILE]: T14_8_COL_SOURCE,
-          "specs/One.mdx": '<S id="one">\nTarget one text.\n</S>\n',
-          "specs/Two.mdx": '<S id="two">\nTarget two text.\n</S>\n',
+          "specs/One.mdx": T14_8_ONE_SOURCE,
+          "specs/Two.mdx": T14_8_TWO_SOURCE,
         },
-        // S-9: two imports binding one identifier — an early error 14.20
-        // admits, the named allowance.
-        mdx: { allowances: { [T14_8_COL_FILE]: ["duplicate-import-binding"] } },
       },
       async (workspace) => {
         const context = "T14-8 `build --json` over an import-binding collision";
@@ -4063,13 +4211,13 @@ interface RangeRuleCase {
   readonly rule: string;
   readonly config: string;
   /**
-   * The sources beside the configuration: plain contents, or a staged-source
-   * record at an `.mdx` path carrying its own S-9 declaration (the (w) arms'
-   * sources, registered by their home modules).
+   * The sources beside the configuration: every `.mdx` entry a staged-source
+   * record carrying its own S-9 declaration — every arm's workspace but
+   * (a)'s follows the body's first invocation, (a)'s converted uniformly,
+   * the (w) arms' records registered by their home modules — and every
+   * code source plain contents.
    */
   readonly files: Readonly<Record<string, InitialFileContents>>;
-  /** S-9: the staged MDX sources the document declares unparseable, if any. */
-  readonly mdx?: WorkspaceMdxDecl;
   /** Every staged finding, with its complete location list. */
   readonly expected: readonly ExactFindingExpectation[];
 }
@@ -4077,9 +4225,15 @@ interface RangeRuleCase {
 /** A valid section every MDX fixture opens with — `ok` is a resolvable target. */
 const T14_11_PREAMBLE = '<S id="ok">\nTarget: café.\n</S>\n\n';
 
-/** The spec source the code-file arms import: `a`, `a.b`, and `b` resolve. */
-const T14_11_A_MDX =
-  '<S id="a">\nA.\n<S id="a.b">\nA.b.\n</S>\n</S>\n\n<S id="b">\nB.\n</S>\n';
+/**
+ * The spec source the code-file arms import: `a`, `a.b`, and `b` resolve —
+ * a staged-source record (S-9), also the refined `d`-value arms' imported
+ * `specs/BASE.mdx` and arm (o)'s readable source.
+ */
+const T14_11_A_MDX = stagedMdx(
+  "T14-11 specs/A.mdx (the imported module: a, a.b, and b; arms (d), (j), (l), (u), and (o), and arms (p)-(t)'s specs/BASE.mdx)",
+  '<S id="a">\nA.\n<S id="a.b">\nA.b.\n</S>\n</S>\n\n<S id="b">\nB.\n</S>\n',
+);
 
 // (a) 14.5 — an unresolved entry of a `d` array literal: the entry's own
 // expression, its quotes included, no bracket, comma, or whitespace.
@@ -4433,11 +4587,21 @@ const T14_11_ENCODING_FORMS: readonly EncodingForm[] = [
   { name: "eof", bytes: [0x41, 0xe2, 0x82], offset: 1 },
 ];
 
-/** Each encoding form as a spec source and as a code source, its pin located. */
+/**
+ * Each encoding form as a spec source and as a code source, its pin located:
+ * the spec source a staged-source record declared unparseable (S-9; arm (v)
+ * follows the body's first invocation), the code source plain bytes.
+ */
 const T14_11_ENCODING_FILES = T14_11_ENCODING_FORMS.flatMap((form) =>
   [`specs/${form.name}.mdx`, `src/${form.name}.ts`].map((file) => ({
     file,
-    bytes: Uint8Array.from(form.bytes),
+    contents: file.endsWith(".mdx")
+      ? stagedMdx(
+          `T14-11 (v) ${file} (the ${form.name} encoding form)`,
+          Uint8Array.from(form.bytes),
+          "unparseable",
+        )
+      : Uint8Array.from(form.bytes),
     location: { file, range: { start: form.offset, end: form.offset } },
   })),
 );
@@ -4525,7 +4689,12 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "a",
     rule: "14.5 — an unresolved `d` array entry: the entry's own expression alone",
     config: SPECS_ONLY_CONFIG,
-    files: { [T14_11_SPEC]: T14_11_D_ENTRY.text },
+    files: {
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (a) specs/A.mdx (an unresolved d array entry)",
+        T14_11_D_ENTRY.text,
+      ),
+    },
     expected: [
       { condition: "14.5", locations: located(T14_11_SPEC, T14_11_D_ENTRY, 0) },
     ],
@@ -4534,7 +4703,12 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "b",
     rule: "14.8 — `d={foo}`: the expression the braces enclose, braces excluded",
     config: SPECS_ONLY_CONFIG,
-    files: { [T14_11_SPEC]: T14_11_D_IDENT.text },
+    files: {
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (b) specs/A.mdx (d={foo})",
+        T14_11_D_IDENT.text,
+      ),
+    },
     expected: [
       { condition: "14.8", locations: located(T14_11_SPEC, T14_11_D_IDENT, 0) },
     ],
@@ -4543,13 +4717,21 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "c",
     rule: "14.20 — `d={}` and `d={ /* c */ }`: not well-formed MDX, the zero-length range at the closing brace, never 14.8",
     config: SPECS_ONLY_CONFIG,
-    files: {
-      "specs/empty.mdx": T14_11_D_EMPTY.text,
-      "specs/comment-only.mdx": T14_11_D_COMMENT_ONLY.text,
-    },
     // S-9: an attribute value admits no empty expression (SPEC 2.7, 14.20);
-    // the stock grammar rejects both (`unexpected-empty-expression`).
-    mdx: { unparseable: ["specs/empty.mdx", "specs/comment-only.mdx"] },
+    // the stock grammar rejects both (`unexpected-empty-expression`) — the
+    // records are declared unparseable.
+    files: {
+      "specs/empty.mdx": stagedMdx(
+        "T14-11 (c) specs/empty.mdx (d={})",
+        T14_11_D_EMPTY.text,
+        "unparseable",
+      ),
+      "specs/comment-only.mdx": stagedMdx(
+        "T14-11 (c) specs/comment-only.mdx (d={ /* c */ })",
+        T14_11_D_COMMENT_ONLY.text,
+        "unparseable",
+      ),
+    },
     expected: [
       {
         condition: "14.20",
@@ -4580,7 +4762,12 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "e",
     rule: "14.2 — each bearer's `id` attribute, one finding per bearer",
     config: SPECS_ONLY_CONFIG,
-    files: { [T14_11_SPEC]: T14_11_STRUCTURAL.text },
+    files: {
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (e) specs/A.mdx (a two-segment top-level ID and a level-skipping child)",
+        T14_11_STRUCTURAL.text,
+      ),
+    },
     expected: [
       {
         condition: "14.2",
@@ -4596,7 +4783,12 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "f",
     rule: "14.3 — one finding locating each bearer's `id` attribute",
     config: SPECS_ONLY_CONFIG,
-    files: { [T14_11_SPEC]: T14_11_DUPLICATE.text },
+    files: {
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (f) specs/A.mdx (two bearers of dup)",
+        T14_11_DUPLICATE.text,
+      ),
+    },
     expected: [
       {
         condition: "14.3",
@@ -4608,7 +4800,12 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "g",
     rule: "14.4 — one finding per violating `id` or `tags` attribute, at the attribute",
     config: SPECS_ONLY_CONFIG,
-    files: { [T14_11_SPEC]: T14_11_SEGMENT_TAG.text },
+    files: {
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (g) specs/A.mdx (malformed id segments and a malformed tag)",
+        T14_11_SEGMENT_TAG.text,
+      ),
+    },
     expected: [0, 1, 2].map((index) => ({
       condition: "14.4",
       locations: located(T14_11_SPEC, T14_11_SEGMENT_TAG, index),
@@ -4618,7 +4815,12 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "h",
     rule: "14.17 per form — a repeated prop at every attribute spelling the name; an unknown prop, a spread attribute, and an invalid `coverage` value at the attribute",
     config: SPECS_ONLY_CONFIG,
-    files: { [T14_11_SPEC]: T14_11_INVALID_PROP.text },
+    files: {
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (h) specs/A.mdx (a repeated, an unknown, a spread, and an invalid coverage prop)",
+        T14_11_INVALID_PROP.text,
+      ),
+    },
     expected: [
       {
         condition: "14.17",
@@ -4634,7 +4836,12 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "i",
     rule: "14.1 — the section's opening tag",
     config: SPECS_ONLY_CONFIG,
-    files: { [T14_11_SPEC]: T14_11_MISSING_ID.text },
+    files: {
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (i) specs/A.mdx (a section without an id)",
+        T14_11_MISSING_ID.text,
+      ),
+    },
     expected: [
       {
         condition: "14.1",
@@ -4648,7 +4855,10 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     config: SPEC_AND_CODE_CONFIG,
     files: {
       [T14_11_SPEC]: T14_11_A_MDX,
-      "specs/B.mdx": T14_11_IMPORT_MDX.text,
+      "specs/B.mdx": stagedMdx(
+        "T14-11 (j) specs/B.mdx (an import of a missing module beside A's)",
+        T14_11_IMPORT_MDX.text,
+      ),
       "src/exp.ts": T14_11_EXPORT_TS.text,
       "src/req.ts": T14_11_REQUIRE_TS.text,
       "src/dyn.ts": T14_11_DYNAMIC_TS.text,
@@ -4689,7 +4899,12 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "k",
     rule: "14.16 per form — an element through its closing tag, a self-closing tag, a fragment `<>` through `</>`, an expression container brace through brace, an export statement whole",
     config: SPECS_ONLY_CONFIG,
-    files: { [T14_11_SPEC]: T14_11_CONSTRUCTS.text },
+    files: {
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (k) specs/A.mdx (the five invalid construct forms)",
+        T14_11_CONSTRUCTS.text,
+      ),
+    },
     expected: [0, 1, 2, 3, 4].map((index) => ({
       condition: "14.16",
       locations: located(T14_11_SPEC, T14_11_CONSTRUCTS, index),
@@ -4709,13 +4924,25 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "m",
     rule: "14.20 — one zero-length range at the failure's offset: a byte-order mark, an encoding failure, an MDX and a TypeScript syntax failure",
     config: SPEC_AND_CODE_CONFIG,
-    // S-9: the three MDX sources are 14.20's declared-unparseable forms (the
-    // TypeScript one is the product's alone to judge).
-    mdx: { unparseable: ["specs/bom.mdx", "specs/enc.mdx", "specs/open.mdx"] },
+    // S-9: the three MDX sources are 14.20's declared-unparseable forms, their
+    // records declared so (the TypeScript one is the product's alone to
+    // judge).
     files: {
-      "specs/bom.mdx": T14_11_BOM_MDX.text,
-      "specs/enc.mdx": T14_11_ENCODING_MDX,
-      "specs/open.mdx": T14_11_UNCLOSED_MDX.text,
+      "specs/bom.mdx": stagedMdx(
+        "T14-11 (m) specs/bom.mdx (a byte-order mark)",
+        T14_11_BOM_MDX.text,
+        "unparseable",
+      ),
+      "specs/enc.mdx": stagedMdx(
+        "T14-11 (m) specs/enc.mdx (an invalid byte after a valid 5-byte prefix)",
+        T14_11_ENCODING_MDX,
+        "unparseable",
+      ),
+      "specs/open.mdx": stagedMdx(
+        "T14-11 (m) specs/open.mdx (ends inside an unclosed section)",
+        T14_11_UNCLOSED_MDX.text,
+        "unparseable",
+      ),
       "src/bad.ts": T14_11_SYNTAX_TS.text,
     },
     expected: [
@@ -4749,7 +4976,13 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "p",
     rule: "14.8 — `d={(BASE.a)}`: the enclosed expression first token through last, its parentheses included",
     config: SPECS_ONLY_CONFIG,
-    files: { [T14_11_BASE]: T14_11_A_MDX, [T14_11_SPEC]: T14_11_D_PAREN.text },
+    files: {
+      [T14_11_BASE]: T14_11_A_MDX,
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (p) specs/A.mdx (d={(BASE.a)})",
+        T14_11_D_PAREN.text,
+      ),
+    },
     expected: [
       { condition: "14.8", locations: located(T14_11_SPEC, T14_11_D_PAREN, 0) },
     ],
@@ -4758,7 +4991,13 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "q",
     rule: "14.8 — `d={BASE.a, BASE.b}`: the whole comma sequence, one expression",
     config: SPECS_ONLY_CONFIG,
-    files: { [T14_11_BASE]: T14_11_A_MDX, [T14_11_SPEC]: T14_11_D_COMMA.text },
+    files: {
+      [T14_11_BASE]: T14_11_A_MDX,
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (q) specs/A.mdx (d={BASE.a, BASE.b})",
+        T14_11_D_COMMA.text,
+      ),
+    },
     expected: [
       { condition: "14.8", locations: located(T14_11_SPEC, T14_11_D_COMMA, 0) },
     ],
@@ -4767,7 +5006,13 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "r",
     rule: "14.5 — `BASE.missing` alone: the braces and the whitespace and comment between them and the expression excluded, U+00A0 and U+FEFF spelled there likewise",
     config: SPECS_ONLY_CONFIG,
-    files: { [T14_11_BASE]: T14_11_A_MDX, [T14_11_SPEC]: T14_11_D_TRIVIA.text },
+    files: {
+      [T14_11_BASE]: T14_11_A_MDX,
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (r) specs/A.mdx (BASE.missing past a block comment, U+00A0, and U+FEFF)",
+        T14_11_D_TRIVIA.text,
+      ),
+    },
     expected: [0, 1, 2].map((index) => ({
       condition: "14.5",
       locations: located(T14_11_SPEC, T14_11_D_TRIVIA, index),
@@ -4777,7 +5022,13 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "s",
     rule: "14.8 — a spread entry `d={[...BASE.a]}`: `...BASE.a`, the `...` included",
     config: SPECS_ONLY_CONFIG,
-    files: { [T14_11_BASE]: T14_11_A_MDX, [T14_11_SPEC]: T14_11_D_SPREAD.text },
+    files: {
+      [T14_11_BASE]: T14_11_A_MDX,
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (s) specs/A.mdx (d={[...BASE.a]})",
+        T14_11_D_SPREAD.text,
+      ),
+    },
     expected: [
       {
         condition: "14.8",
@@ -4791,7 +5042,10 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     config: SPECS_ONLY_CONFIG,
     files: {
       [T14_11_BASE]: T14_11_A_MDX,
-      [T14_11_SPEC]: T14_11_D_ELISIONS.text,
+      [T14_11_SPEC]: stagedMdx(
+        "T14-11 (t) specs/A.mdx (two array literals with elisions)",
+        T14_11_D_ELISIONS.text,
+      ),
     },
     expected: [0, 1].map((index) => ({
       condition: "14.8",
@@ -4821,14 +5075,10 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "v",
     rule: "14.20 — an encoding failure's zero-length range at the first byte of the first ill-formed sequence: a valid 5-byte prefix then `FF` → 5, `41 E2 82 41` → 1, `C0 80` → 0, `ED A0 80` → 0, `41 E2 82` at the file's end → 1, a spec and a code source alike",
     config: SPEC_AND_CODE_CONFIG,
-    // S-9: every spec source here is invalid UTF-8, 14.20's declared form.
-    mdx: {
-      unparseable: T14_11_ENCODING_FILES.map((entry) => entry.file).filter(
-        (file) => file.endsWith(".mdx"),
-      ),
-    },
+    // S-9: every spec source here is invalid UTF-8, 14.20's declared form —
+    // its record declared unparseable (T14_11_ENCODING_FILES).
     files: Object.fromEntries(
-      T14_11_ENCODING_FILES.map((entry) => [entry.file, entry.bytes]),
+      T14_11_ENCODING_FILES.map((entry) => [entry.file, entry.contents]),
     ),
     expected: T14_11_ENCODING_FILES.map((entry) => ({
       condition: "14.20",
@@ -4911,7 +5161,7 @@ async function runRangeRuleArm(
 ): Promise<void> {
   const context = `T14-11 (${kase.arm}) ${kase.rule}`;
   await withWorkspace(
-    { files: { "xspec.config.ts": kase.config, ...kase.files }, mdx: kase.mdx },
+    { files: { "xspec.config.ts": kase.config, ...kase.files } },
     async (workspace) => {
       const findings = await buildFindings(
         product,
@@ -4948,6 +5198,13 @@ function enclosedExpression(attribute: {
   return { start: attribute.start + 3, end: attribute.end - 1 };
 }
 
+// Arm (n)'s source, staged after the table's arms' invocations (a
+// staged-source record, S-9).
+const T14_11_REPEATED_D_STAGED = stagedMdx(
+  "T14-11 (n) specs/A.mdx (a repeated d, one entry resolving)",
+  T14_11_REPEATED_D.text,
+);
+
 async function runRepeatedDependencyArm(
   product: ProductBinding,
 ): Promise<void> {
@@ -4965,7 +5222,7 @@ async function runRepeatedDependencyArm(
     {
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
-        [file]: T14_11_REPEATED_D.text,
+        [file]: T14_11_REPEATED_D_STAGED,
       },
     },
     async (workspace) => {
@@ -5009,6 +5266,13 @@ async function runRepeatedDependencyArm(
 // NU3_STAGED pattern of section-11.5.ts; the runner must be unprivileged).
 const T14_11_REFUSAL_STAGED = process.platform === "linux";
 
+// Arm (o)'s refused file (a staged-source record, S-9: the arm follows the
+// body's earlier invocations).
+const T14_11_REFUSED_SOURCE = stagedMdx(
+  "T14-11 (o) specs/R.mdx (the source staged unreadable)",
+  '<S id="r">\nRefused content.\n</S>\n',
+);
+
 async function runRefusedReadArm(product: ProductBinding): Promise<void> {
   const context =
     "T14-11 (o) 14.20 for a refused read: the zero-length range at offset 0 " +
@@ -5019,7 +5283,7 @@ async function runRefusedReadArm(product: ProductBinding): Promise<void> {
       files: {
         "xspec.config.ts": SPECS_ONLY_CONFIG,
         [T14_11_SPEC]: T14_11_A_MDX,
-        [file]: '<S id="r">\nRefused content.\n</S>\n',
+        [file]: T14_11_REFUSED_SOURCE,
       },
     },
     async (workspace) => {

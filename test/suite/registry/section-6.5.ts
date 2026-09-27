@@ -2908,8 +2908,11 @@ export default defineConfig({
 })
 `;
 const V4_SOLO = "specs/Solo.mdx";
-const V4_SOLO_SOURCE = stagedMdx(
-  "T6.5-4/T6.6-3/T14-7 derived-path arms specs/Solo.mdx",
+// Exported: T14-7's destination-component arm (section-14.ts) stages the
+// same bytes as its moved file specs/Src.mdx — one staged-source record
+// (S-9) for every site.
+export const V4_SOLO_SOURCE = stagedMdx(
+  "T6.5-4/T6.6-3/T14-7 the moved file solo (the derived-path arms' specs/Solo.mdx; T14-7's destination-component arm specs/Src.mdx)",
   ['<S id="solo">', "Solo text.", "</S>", ""].join("\n"),
 );
 const V4_MDOUT_OCCUPANT = "mdout/new";
