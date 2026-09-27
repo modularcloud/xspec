@@ -792,7 +792,12 @@ function excludeEarlyErrors(BaseParser: typeof Parser): typeof Parser {
 // exactly ECMAScript 2024's WhiteSpace and LineTerminator). These are
 // remark-mdx's own deletions (micromark-util-events-to-acorn), which decide
 // the brace closing a container: one on a commented-out line closes none.
+// Text they empty begins, past whitespace, with a comment's `/` (an ESM
+// block's `import` or `export` never does), so their regular expressions —
+// quadratic on a long text holding many an unclosed `/*` or unended `//` —
+// run on such text alone.
 function commentDeletionsEmpty(text: string): boolean {
+  if (!/^\s*(?:\/|$)/u.test(text)) return false;
   return /^\s*$/u.test(
     text
       .replace(/\/\*[\s\S]*?\*\//gu, "")
