@@ -27,7 +27,8 @@
 // - tag pairing: a closing tag where its name departs from the open
 //   element's; a construct ending, or an emphasis closing, with an element
 //   still open inside it — the longest prefix a closing tag (or one more
-//   character) can still complete, found by probing the grammar;
+//   character) can still complete, found by probing the grammar, a prefix
+//   ending inside a tag probed with the tag finished;
 // - an element left open at the end of the file: the file's length.
 //
 // Since the grammar reports tag pairing only after tokenizing the whole
@@ -788,6 +789,173 @@ function containerPrefix(text: string, line: number, column: number): string {
 }
 
 /**
+ * The stock tokenizer's failure at the end of `head` where `head` ends
+ * inside a JSX tag (its reason); null where it does not. The grammar pairs
+ * a tag only once it has read it whole.
+ */
+function tagEndingAt(head: string): string | null {
+  const { failure } = analysisParse(head);
+  return failure !== null &&
+    failure.source === "micromark-extension-mdx-jsx" &&
+    placeStart(failure) === head.length
+    ? String(failure.reason)
+    : null;
+}
+
+/** A quoted attribute value a tag is left inside: its quote. */
+const IN_QUOTED_VALUE =
+  / in attribute value, expected a corresponding closing quote `(.)`/u;
+/** A tag left inside its name, or before it, where a closer may go on. */
+const IN_TAG_NAME = / (?:before|in) (?:member |local )?name,/u;
+/** A closing tag a prefix ends inside, its name so far (the tag's own). */
+const CLOSING_SO_FAR = /<\/[ \t]*([^\s<>/{}"'=]*)$/u;
+/** mdast-util-mdx-jsx's failures of a tag's own syntax, not its pairing. */
+const TAG_SYNTAX: ReadonlySet<string> = new Set([
+  "unexpected-attribute",
+  "unexpected-self-closing-slash",
+]);
+
+/**
+ * The ways to finish the JSX tag a prefix ends inside, by where the stock
+ * tokenizer leaves it (`reason`): a quoted attribute value closed by its
+ * quote, a missing value given as `""`, and a name begun after `.` or `:`
+ * given a character, before the tag ends as a self-closing and an opening
+ * tag; a tag left after its self-closing slash ended; any other ended by
+ * `>`, `/>`, and `x>`.
+ */
+function tagFinishes(reason: string): string[] {
+  const quote = IN_QUOTED_VALUE.exec(reason)?.[1];
+  if (quote !== undefined) return [quote + "/>", quote + ">"];
+  if (reason.includes(" before attribute value,")) return ['""/>', '"">'];
+  if (reason.includes(" after self-closing slash,")) return [">"];
+  if (/ before (?:member |local |local attribute )name,/u.test(reason)) {
+    return ["x/>", "x>"];
+  }
+  return [">", "/>", "x>"];
+}
+
+/**
+ * The rest of the closing tag of the element named `name` past what the
+ * end of `head` — inside a tag's name or before it — spells of it: past
+ * `<`, or past `</` and part of the name; null where `head` spells no part
+ * of it.
+ */
+function closerRest(head: string, name: string): string | null {
+  if (head.endsWith("<")) return "/" + name + ">";
+  const spelled = CLOSING_SO_FAR.exec(head)?.[1];
+  return spelled !== undefined && name.startsWith(spelled)
+    ? name.slice(spelled.length) + ">"
+    : null;
+}
+
+/** How many lines back an earlier construct taking a tag in is sought. */
+const ABSORBER_LINES = 64;
+/** How many backtick run lengths close such a code span, at most. */
+const ABSORBER_RUNS = 4;
+
+/**
+ * Finishes that take the JSX tag a prefix (`head`) ends inside into an
+ * earlier construct the rest of the file may still close, which makes its
+ * `<` no tag: a code span opened by a backtick run (closed by a run as
+ * long), a link resource past `](` (its pointy or raw destination, or its
+ * title, closed with the resource), and a definition past `]:` (its pointy
+ * destination closed, or its raw one ended) — sought in the lines since the
+ * last blank one, where such a construct would begin.
+ */
+function absorberFinishes(head: string): string[] {
+  const lines = head.split(/\r\n|\r|\n/u);
+  let first = lines.length - 1;
+  while (
+    first > 0 &&
+    lines.length - first < ABSORBER_LINES &&
+    !/^[ \t>]*$/u.test(lines[first - 1] ?? "")
+  ) {
+    first -= 1;
+  }
+  const block = lines.slice(first).join("\n");
+  const runs = new Set<number>();
+  for (const [run] of block.matchAll(/`+/gu)) runs.add(run.length);
+  const finishes = [...runs]
+    .slice(0, ABSORBER_RUNS)
+    .map((length) => "`".repeat(length));
+  if (block.includes("](")) finishes.push(">)", ")", '")', "')", "))");
+  if (block.includes("]:")) finishes.push(">", "");
+  return finishes;
+}
+
+/**
+ * Whether `head`, a prefix of the file ending at `at` inside a JSX tag
+ * (`reason`, the stock tokenizer's failure there; `tagEndingAt`), goes on
+ * to close the element whose closing tag is `closer` (its container prefix
+ * `prefix`): the tag finished (`tagFinishes` — and, where the prefix ends
+ * inside a tag's name or before it, the rest of `closer`, or of the closing
+ * tag of the element the grammar pairs a finished closing tag with), then
+ * `closer`, directly or after a paragraph's `x`; or the tag taken into an
+ * earlier construct (`absorberFinishes`), then `closer` so or on the next
+ * line — derives or fails only by tag pairing at or after `at` (SPEC 14's
+ * location rule for 14.20). A failure of the finished tag's own syntax (a
+ * closing tag given an attribute or a self-closing slash) or of a
+ * construct's class judges nothing: the grammar has not paired the tag.
+ */
+function finishedTagCompletes(
+  head: string,
+  at: number,
+  reason: string,
+  closer: string,
+  prefix: string,
+): boolean {
+  const tagStart = CLOSING_SO_FAR.exec(head)?.index;
+  const nameFinishes = IN_TAG_NAME.test(reason);
+  const finishes: string[] = [];
+  const add = (finish: string | null): void => {
+    if (finish !== null && !finishes.includes(finish)) finishes.push(finish);
+  };
+  const addCloserRest = (name: string): void => {
+    if (nameFinishes) add(closerRest(head, name));
+  };
+  const judged = (probe: string): boolean => {
+    const { failure } = analysisParse(probe);
+    if (failure === null) return true;
+    if (
+      failure.source !== "mdast-util-mdx-jsx" ||
+      TAG_SYNTAX.has(String(failure.ruleId))
+    ) {
+      return false;
+    }
+    const failed = String(failure.reason);
+    const place = failed.startsWith("Expected a closing tag for")
+      ? placeEnd(failure)
+      : placeStart(failure);
+    if (place === undefined || place >= at) return true;
+    // The finished closing tag's name departs from the open element's:
+    // that element's name may still finish it.
+    const expected = UNEXPECTED_CLOSING_TAG.exec(failed);
+    if (expected !== null && place === tagStart) {
+      addCloserRest(expected[1] ?? "");
+    }
+    return false;
+  };
+  // A closing tag is most likely finished by its element's name; an
+  // opening tag by ending it.
+  if (tagStart !== undefined) addCloserRest(closer.slice(2, -1));
+  for (const finish of tagFinishes(reason)) add(finish);
+  addCloserRest(closer.slice(2, -1));
+  for (let index = 0; index < finishes.length; index += 1) {
+    const finish = finishes[index] ?? "";
+    if (
+      judged(head + finish + "x" + closer) ||
+      judged(head + finish + closer)
+    ) {
+      return true;
+    }
+  }
+  const tails = ["x" + closer, closer, "\n" + prefix + closer];
+  return absorberFinishes(head).some((finish) =>
+    tails.some((tail) => judged(head + finish + tail)),
+  );
+}
+
+/**
  * An element left open when the construct holding it ended (at `end`): the
  * longest prefix the element's closing tag still completes — directly, or
  * after one more character so a line the construct's end hangs on can go
@@ -796,14 +964,20 @@ function containerPrefix(text: string, line: number, column: number): string {
  * rests of the element's container prefix (`prefixRests`): its rest past
  * what the line spells, then each of its suffixes (SPEC 14's location rule
  * for 14.20). The grammar judges every probe, so a wrong candidate only
- * fails to complete. Past the container syntax of a line after the
- * construct's end, a probe failing by a construct's class (a tag or
- * expression the line leaves open, which the closer cannot finish) leaves
- * the pairing unjudged, so it counts only where the line's content begins
- * inside the element's container — where the closer, a paragraph's `x` and
- * the closer, or such a line and the closer on the next line (after the
- * container prefix) completes; content beginning outside it has ended the
- * container with the element open.
+ * fails to complete. Past a line's container syntax, a prefix ending inside
+ * a JSX tag is judged with the tag finished (`finishedTagCompletes`), since
+ * the grammar pairs a tag only once it has read it whole: a closing tag
+ * that cannot pair — typed in a paragraph, where it closes no flow
+ * element, or naming no open element — fails there, unless a code span,
+ * link, or definition begun before it may still take it in. Past the
+ * container syntax of a line after the construct's end, a probe failing by
+ * any other construct's class (an expression, an attribute value's braces
+ * among them, that the line leaves open and the closer cannot finish)
+ * leaves the pairing unjudged, so it counts only where the line's content
+ * begins inside the element's container — where the closer, a paragraph's
+ * `x` and the closer, or such a line and the closer on the next line
+ * (after the container prefix) completes; content beginning outside it has
+ * ended the container with the element open.
  */
 function constructEndOffset(
   text: string,
@@ -851,15 +1025,19 @@ function constructEndOffset(
       completions.delete(closer);
       viable = [...completions].some((tail) => completes(head + tail, at));
     } else {
-      viable = [closer, "x" + closer].some((tail) => {
-        const how = completion(head + tail, at);
-        return (
-          how === "whole" ||
-          how === "paired" ||
-          (how === "class" &&
-            (lineStart <= end || contentInside(lineStart + run.length)))
-        );
-      });
+      const counts = (how: ReturnType<typeof completion>): boolean =>
+        how === "whole" ||
+        how === "paired" ||
+        (how === "class" &&
+          (lineStart <= end || contentInside(lineStart + run.length)));
+      // A prefix ending inside a tag, which the closer meets as the tag's
+      // class, is judged with the tag finished (`finishedTagCompletes`).
+      const bare = completion(head + closer, at);
+      const reason = bare === "class" ? tagEndingAt(head) : null;
+      viable =
+        reason !== null
+          ? finishedTagCompletes(head, at, reason, closer, prefix)
+          : counts(bare) || counts(completion(head + "x" + closer, at));
     }
     if (!viable) {
       return at - 1;
@@ -879,11 +1057,7 @@ function crossingOffset(text: string, at: number, closer: string): number {
   const bound = Math.min(text.length, at + PROBE_REACH);
   for (let end = at + 1; end <= bound; end += 1) {
     const head = text.slice(0, end);
-    const { failure } = analysisParse(head);
-    const inTag =
-      failure !== null &&
-      failure.source === "micromark-extension-mdx-jsx" &&
-      placeStart(failure) === head.length;
+    const inTag = tagEndingAt(head) !== null;
     const tail = head.slice(head.lastIndexOf("<"));
     const completions = inTag
       ? [
