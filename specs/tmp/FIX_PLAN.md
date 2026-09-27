@@ -79,7 +79,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T7.4-1 | section-7.4-7.5 | 4 |
 | T7.5-1 | section-7.4-7.5 | 4 |
 | T10.1-6 | section-10.1 | 45, 46 |
-| T11-2 | section-11 | 2, 3, 40, 44 |
+| T11-2 | section-11 | 2, 3, 40, 44 (since Task 2 its malformed-`--tag` sweep holds by hand, twins included; the test still stops first at Task 3's tag-set arm) |
 | T11-6 | section-11 | 19 |
 | T11-7 | section-11 | 3 |
 | T11.2-6 | section-11.2 | 51 |
@@ -91,7 +91,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T11.4-6 | section-11.4 | 3 |
 | T11.5-3 | section-11.5 | 9 |
 | T11.6-2 | section-11.6 | 4 |
-| T12.0-10 | section-12.0-ii | 44 |
+| T12.0-10 | section-12.0-ii | 44 (its `--tag 'a\b'` row holds since Task 2) |
 | T12.0-14 | section-12.0-iii | 43 |
 | T12.2-4 | section-12.1-12.2 | 52 |
 | T12.3-1 | section-12.3-12.5 | 40 |
@@ -113,22 +113,6 @@ Several tasks have no failing test of their own: Task 21 (the undefined refusal 
 
 ---
 
-## Task 2 — `query nodes --tag` rejects a spelling no tag can have (SPEC 11.1, 1.4, 12.0; B11)
-
-**Requirement.** SPEC 11.1 and 12.0: a `--tag` spelling malformed as a tag under 1.4's rules is a malformed value. That is a usage error (exit 2) of the syntax class: "a `--to` or `--tag` spelling malformed as an identity or tag".
-
-**Observed.** `query nodes --tag` with any of these spellings returns no rows with exit 0: `''`, `'a b'`, `#`, `then`, `constructor`, `$`, a control character, `"`, `'`, `\`, or an `&`-bearing spelling. Each must exit 2.
-
-**Location.**
-- `src/cli/args.ts`: the `--tag` flag spec (~260) validates nothing.
-- `src/cli/commands/query-core.ts` (~283) reads the value raw.
-
-**Change.** After Task 1: validate the value with Task 1's tag rule (`segmentViolation(value, "tag")` in `src/core/text.ts`, worded by `describeSegmentViolation`) at parse level, in `args.ts`, where the multi-`#` identity check already runs without loading configuration. Report the plain usage error (`code` and `path` `null` in the 12.7 error document).
-
-**Verification.**
-- `section-11.test.ts`: T11-2's malformed-`--tag` arms (T11-2 also waits on Tasks 3, 40, and 44).
-- By hand, each spelling above exits 2 with and without `--json`, including against an invalid configuration (a parse-level check already meets Task 44's ordering).
-
 ## Task 3 — Node tags are byte-ordered sets on every surface (SPEC 12.7, 2.6, 11.1, 11.4, 12.0; A14, B10, C4)
 
 **Requirement.** SPEC 12.7: "A tag set — a node's interpreted tags (2.6, 11.2) … — is an array of tag strings in byte order (12.0), duplicates collapsed; a section carrying no tags (2.6) has `[]`." Byte order means UTF-8 byte order (12.0), not UTF-16 code-unit order.
@@ -148,7 +132,7 @@ Several tasks have no failing test of their own: Task 21 (the undefined refusal 
 - Check every other consumer of `section.tags` still reads it as a set: coverage `targetTags` filtering, policy tag selectors, and review reason text.
 
 **Verification.**
-- Should turn green: `section-2.5-2.6.test.ts` (T2.6-1), `section-5.5.test.ts` (T5.5-5), `section-6.2.test.ts` (T6.2-1, T6.2-2), `section-11.test.ts` (T11-7; T11-2 waits on Tasks 2, 40, 44), `section-11.4.test.ts` (T11.4-3, T11.4-6).
+- Should turn green: `section-2.5-2.6.test.ts` (T2.6-1), `section-5.5.test.ts` (T5.5-5), `section-6.2.test.ts` (T6.2-1, T6.2-2), `section-11.test.ts` (T11-7; T11-2 waits on Tasks 40, 44), `section-11.4.test.ts` (T11.4-3, T11.4-6).
 - With Task 4: `section-16-p4.test.ts` (P-4) and `section-16-p5-p6.test.ts` (P-5).
 - Neighbours: `section-7.4-7.5.test.ts`, `section-10.5.test.ts`, `section-13.3.test.ts`.
 
@@ -954,7 +938,7 @@ Its `identities` are the workspace-relative paths of the files concerned, in byt
 **Verification.**
 - Should turn green: `section-11.3.test.ts` (T11.3-2), `section-11.4.test.ts` (T11.4-2), `section-12.3-12.5.test.ts` (T12.3-1).
 - With Task 39: `section-7-discovery.test.ts` (T7-4).
-- `section-11.test.ts`: T11-2's `--file` arms (T11-2 also waits on Tasks 2, 3, and 44).
+- `section-11.test.ts`: T11-2's `--file` arms (T11-2 also waits on Tasks 3 and 44).
 - Neighbours: `section-7-basics.test.ts`, `section-7.4-7.5.test.ts`.
 
 ## Task 41 — `markdown.outDir` spelling is enforced (SPEC 7.3, 14.14; B8)
@@ -1032,7 +1016,7 @@ The error document then carries `code` and `path` as `null`.
 - `--test-hold` with `--preview`, on `rename` and on `move`;
 - `review status .x`, and `review create … --name .x`;
 - `occurrences --to a#b#c`, `--to 'specs/OK.mdx#ok#use'`, and `--to a.mdx#then`;
-- `query nodes --tag then` and `--tag 'a\b'`;
+- (`query nodes --tag then` and `--tag 'a\b'` — resolved by Task 2, whose tag rule runs at parse level in `src/cli/args.ts`, the `tagValue` flag field: every malformed `--tag` now exits 2 with the plain usage error, byte-identically under an invalid or missing configuration);
 - `--file ../x` and `--file a/../../x`, on `ids`, `query nodes`, `occurrences`, and `view`.
 
 With a missing configuration, all of the above fail the same way, and so does `at <file> +7`.
@@ -1046,7 +1030,7 @@ With a missing configuration, all of the above fail the same way, and so does `a
 
 **Change.** Move every syntax-class check into the parse stage, before the configuration is located, as one table of per-command spelling checks:
 - Task 1's identity rules for `--to`;
-- Task 2's tag rule for `--tag`;
+- Task 2's tag rule for `--tag` (already parse-level: `tagValue` in `src/cli/args.ts`; fold it into the table);
 - Task 39's depth rule for `--file`;
 - 10.1's session-name form;
 - the offset's digits-only spelling;
@@ -1055,7 +1039,7 @@ With a missing configuration, all of the above fail the same way, and so does `a
 Leave the non-syntax usage errors (unknown node, offset beyond the file's length, unknown session) after configuration, in 12.0's order.
 
 **Verification.**
-- Should turn green: `section-12.0-ii.test.ts` (T12.0-10), `section-11.3.test.ts` (T11.3-3, with Task 1), `section-11.test.ts` (T11-2, with Tasks 2, 3, and 40).
+- Should turn green: `section-12.0-ii.test.ts` (T12.0-10), `section-11.3.test.ts` (T11.3-3, with Task 1), `section-11.test.ts` (T11-2, with Tasks 3 and 40).
 - Neighbours: `section-10.7-i.test.ts`, `section-11.5.test.ts`, `section-12.0-i.test.ts`, `section-12.0-iii.test.ts`.
 
 ## Task 45 — A symlinked session directory holds no sessions for every `review` subcommand (SPEC 13.4, 10.1, 10.7, 12.0; B15, C9)

@@ -25,6 +25,10 @@
 //   usage error (12.0: "missing required flags or arguments").
 // - Argument values are interpreted as UTF-8; a value that is not valid
 //   UTF-8 is a usage error (12.0).
+// - Value checks decided by spelling alone run here, without loading
+//   configuration (12.0's syntax class): enumerated and list values, the
+//   at-most-one-`#` identity rule, and a `--tag` spelling no tag can have
+//   (11.1, 1.4).
 //
 // Every parse failure is a usage error: exit 2 with the diagnostic on
 // stderr. Standard output is empty unless JSON output is in effect —
@@ -35,6 +39,8 @@
 // argv tokens and static text, never resolved filesystem paths, keeping all
 // output byte-deterministic for identical input (12.0: no absolute paths,
 // no environment-dependent content).
+
+import { describeSegmentViolation, segmentViolation } from "../core/text.js";
 
 /** One flag a command accepts, and how its value (if any) is validated. */
 interface FlagSpec {
@@ -61,6 +67,15 @@ interface FlagSpec {
    * loading configuration.
    */
   readonly identityValue?: boolean;
+  /**
+   * SPEC 11.1: the flag's value is a tag (`query nodes --tag`), accepted
+   * syntactically — any well-formed tag (1.4), whatever the workspace
+   * contains. A spelling no tag can have under 1.4's rules is a malformed
+   * value, a usage error of the syntax class (12.0: "a `--to` or `--tag`
+   * spelling malformed as an identity or tag"): parse-level, reported
+   * without loading configuration.
+   */
+  readonly tagValue?: boolean;
 }
 
 /** One command (or `review`/`query` subcommand) of the SPEC 12.5 table. */
@@ -257,7 +272,9 @@ const COMMANDS: readonly CommandSpec[] = [
     flags: [
       { name: "--group", takesValue: true, valueName: "<g>" },
       { name: "--file", takesValue: true, valueName: "<glob>" },
-      { name: "--tag", takesValue: true, valueName: "<t>" },
+      // SPEC 11.1: `--tag` accepts any well-formed tag (1.4) — syntactic
+      // acceptance, as on `occurrences --to` (11.3).
+      { name: "--tag", takesValue: true, valueName: "<t>", tagValue: true },
       // SPEC 11: `--coverage required|none`.
       {
         name: "--coverage",
@@ -758,6 +775,22 @@ export function parseArgv(argv: readonly string[]): ParseResult {
       const problem = identityValueProblem(value, `${spec.path}: '${token}'`);
       if (problem !== null) {
         return usageError(problem, inEffect());
+      }
+    }
+    if (flag.tagValue === true) {
+      // SPEC 11.1, 1.4, 12.0: a spelling no tag can have is a malformed
+      // value — decided by its spelling alone, so parse-level. Judged by
+      // the one shared 1.4 validator; the spelling is quoted as JSON so an
+      // invisible or line-breaking character shows in the one-line message.
+      const violation = segmentViolation(value, "tag");
+      if (violation !== null) {
+        return usageError(
+          `${spec.path}: invalid value for '${token}' — the tag ` +
+            `${JSON.stringify(value)} ${describeSegmentViolation(violation)}` +
+            `, so no tag has this spelling: a malformed value ` +
+            `(SPEC 11.1, 1.4, 12.0)`,
+          inEffect(),
+        );
       }
     }
     if (token === "--config") config = value;

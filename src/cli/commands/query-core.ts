@@ -280,6 +280,8 @@ function resolveNodesFilters(
     filters: {
       groupGlobs,
       fileGlob,
+      // SPEC 11.1: already judged well-formed (1.4) at parse level
+      // (cli/args.ts); a well-formed tag no node carries matches nothing.
       tag: flagValue(invocation, "--tag"),
       coverage: flagValue(invocation, "--coverage"),
     },

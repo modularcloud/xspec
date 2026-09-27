@@ -92,7 +92,8 @@ export type SegmentViolation =
  * no U+FFFD; and is none of the forbidden names. Every site that judges a
  * segment or a tag goes through here — MDX `id`/`tags` props (14.4),
  * rename and move's `<new-id>` (`refused-invalid-id`, 14), `occurrences
- * --to` spellings (11.3), and journal entries (14.13).
+ * --to` spellings (11.3), `query nodes --tag` spellings (11.1), and journal
+ * entries (14.13).
  */
 export function segmentViolation(
   value: string,
