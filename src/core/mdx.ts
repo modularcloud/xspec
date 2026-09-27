@@ -24,14 +24,19 @@
 // exact source offsets, admitting source shapes that are valid xspec sources
 // (SPEC 1–3) but that the stock grammar rejects:
 //   1. Expression grammar (acorn): `xspecAcornExtension` below.
-//   2. Section-tag pairing: stock MDX pairs JSX tags inside one construct,
-//      so an opening tag with trailing same-line content whose closing tag
-//      sits on a later line ("Expected a closing tag … before the end of
-//      `paragraph`"), and content directly preceding a closing tag on its
-//      line, are rejected; `flatJsxTagExtension` below turns each tag token
-//      into a leaf node and the document builder pairs tags itself across
-//      construct boundaries. Genuinely malformed sources — unclosed or
-//      mismatched elements, bad expressions — still fail the parse (14.20).
+//
+// Section tags are not widened: they pair exactly as stock MDX 3 pairs them
+// (SPEC 14.20; 6.5 "Validation and refusals" spells the consequences out).
+// remark-mdx's stock handlers build `mdxJsxFlowElement` and
+// `mdxJsxTextElement` nodes, and an element opened inside a construct must
+// close inside that same construct: a text-position tag closes within its
+// paragraph ("Expected a closing tag for `<S>` … before the end of
+// `paragraph`"), and a flow-position opening tag closes at a flow-position
+// closing tag beside it, never inside a paragraph line or any other
+// construct opened after it — otherwise the file is unparseable (14.20). The one addition beside those
+// handlers records each tag token's exact span (`tagSpanExtension` below),
+// which the stock nodes do not carry (SPEC 1.7: a section's opening and
+// closing tags are its own characters); it changes no verdict.
 //
 // ESM blocks are not widened: remark-mdx's stock `mdxjsEsm` construct bounds
 // them exactly as MDX 3 does (SPEC 14.20; 6.5 "Import edits" spells the
@@ -345,11 +350,26 @@ interface MdxTreeNode {
   /** JSX element name; null for a fragment. */
   readonly name?: string | null;
   readonly attributes?: readonly MdxAttributeNode[];
-  readonly data?: { readonly estree?: EstreeProgram };
-  /** `xspecJsxTag` only: this leaf is a closing tag (`</…>`). */
-  readonly close?: boolean;
-  /** `xspecJsxTag` only: this leaf is a self-closing tag (`<…/>`). */
-  readonly selfClosing?: boolean;
+  readonly data?: {
+    readonly estree?: EstreeProgram;
+    /** The root only: every JSX tag token's span (`tagSpanExtension`). */
+    readonly xspecTagSpans?: TagSpans;
+  };
+}
+
+/**
+ * The exact span of every JSX tag token in one parsed file — `<` through
+ * `>`, in UTF-16 indices — recorded by `tagSpanExtension` below. Tag
+ * tokens never overlap, so a tag is identified by its start as by its end.
+ * An element node spans its opening tag's start through its closing tag's
+ * end (a self-closing element: its one tag), so these maps give each
+ * element's tags (SPEC 1.7).
+ */
+interface TagSpans {
+  /** A tag's end, by its start. */
+  readonly endByStart: Map<number, number>;
+  /** A tag's start, by its end. */
+  readonly startByEnd: Map<number, number>;
 }
 
 /** The thrown parse failure's observed shape (a unified VFileMessage). */
@@ -451,151 +471,121 @@ function xspecAcornExtension(BaseParser: typeof Parser): typeof Parser {
 const specAcorn = Parser.extend(acornJsx(), xspecAcornExtension);
 
 // ---------------------------------------------------------------------------
-// Parse failures raised by the widened layers (SPEC 14.20)
-// ---------------------------------------------------------------------------
-
-/**
- * A parse failure raised by the widened grammar layers below, shaped like
- * the unified `VFileMessage`s the stock toolchain throws so
- * `parseFailureFinding` locates it the same way: `reason` plus a `place`
- * that is either a point (`{line, column, offset}`) or a position
- * (`{start, end}`), offsets in UTF-16 indices.
- */
-class MdxGrammarError extends Error {
-  readonly reason: string;
-  readonly place: object;
-  readonly line?: number;
-  readonly column?: number;
-
-  constructor(
-    reason: string,
-    place: { line: number; column: number; offset: number } | MdxPosition,
-  ) {
-    super(reason);
-    this.reason = reason;
-    this.place = place;
-    if ("line" in place) {
-      this.line = place.line;
-      this.column = place.column;
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Grammar widening 2: flat section-tag pairing (SPEC 1.1, 3, 6.5 → 14.20)
+// Tag spans beside the stock JSX handlers (SPEC 1.7; no verdict changes)
 // ---------------------------------------------------------------------------
 
 /**
  * Structural view of mdast-util-from-markdown's compile context (verified
- * against mdast-util-from-markdown 2): the members the flat-tag handlers
- * use. `data.mdxJsxTag` is the tag snapshot the stock mdast-util-mdx-jsx
- * handlers (which stay registered) accumulate per tag token.
+ * against mdast-util-from-markdown 2): the members the tag-span handler
+ * uses. `data.mdxJsxTag` is the tag state the stock mdast-util-mdx-jsx
+ * handlers keep while a tag token is open — its `start` and `end` are the
+ * whole tag token's points — and `stack[0]` is the tree's root.
  */
 interface FromMarkdownContextLike {
   readonly data: {
     mdxJsxTag?: {
-      readonly name?: string | null;
-      readonly close?: boolean;
-      readonly selfClosing?: boolean;
-      readonly attributes?: readonly MdxAttributeNode[];
+      readonly start?: MdxPoint;
+      readonly end?: MdxPoint;
     };
   };
-  resume(): unknown;
-  enter(node: object, token: object): unknown;
-  exit(token: object): unknown;
+  readonly stack: readonly { data?: { xspecTagSpans?: TagSpans } }[];
 }
 
 /**
- * Replacement for the stock `exitMdxJsxTag`: instead of pairing tags into
- * `mdxJsxFlowElement`/`mdxJsxTextElement` nodes within one construct —
- * which rejects a section opened with trailing same-line content and
- * closed on a later line, and content directly preceding a closing tag —
- * every tag token becomes one `xspecJsxTag` leaf node carrying the tag's
- * name, kind, and attributes at the token's exact source positions. The
- * document builder pairs the leaves across construct boundaries
- * (SPEC 14.20 widening 2) and reports unclosed or mismatched tags as
- * parse failures.
+ * Record the current tag token's span on the root (`TagSpans`). Registered
+ * for the tag's `<` and `>` marker tokens, which no stock handler reads, so
+ * every stock handler — tag names, attributes, and the element pairing
+ * that decides well-formedness (SPEC 14.20) — stays in place; the second
+ * call per tag records the same span again.
  */
-function exitFlatJsxTag(this: FromMarkdownContextLike, token: object): void {
-  const tag = this.data.mdxJsxTag;
-  if (tag === undefined) {
-    throw new Error("xspec internal error: JSX tag exit without tag state");
+function recordTagSpan(this: FromMarkdownContextLike): void {
+  const start = this.data.mdxJsxTag?.start?.offset;
+  const end = this.data.mdxJsxTag?.end?.offset;
+  const root = this.stack[0];
+  if (typeof start !== "number" || typeof end !== "number" || !root) {
+    throw new Error("xspec internal error: JSX tag marker without tag state");
   }
-  this.resume(); // drop the tag's text buffer, as the stock handler does
-  this.enter(
-    {
-      type: "xspecJsxTag",
-      name: tag.name ?? null,
-      close: tag.close === true,
-      selfClosing: tag.selfClosing === true,
-      attributes: tag.attributes ?? [],
-      children: [],
-    },
-    token,
-  );
-  this.exit(token);
+  const data = (root.data ??= {});
+  const spans = (data.xspecTagSpans ??= {
+    endByStart: new Map<number, number>(),
+    startByEnd: new Map<number, number>(),
+  });
+  spans.endByStart.set(start, end);
+  spans.startByEnd.set(end, start);
 }
 
 /**
- * Replacement for the stock `enterMdxJsxTagClosingMarker`, which throws on
- * a closing tag with no same-construct open element; pairing (and the
- * corresponding failure) is the document builder's.
+ * The fromMarkdown addition: handlers for token types the stock
+ * extensions leave unhandled (mdast-util-from-markdown merges handler
+ * maps by assignment per token type, so no stock handler is replaced).
  */
-function ignoreClosingMarker(): void {
-  // Intentionally empty.
-}
-
-/**
- * The fromMarkdown override. Registered after mdast-util-mdx-jsx's
- * extension, so these handlers replace the stock ones per token type
- * (mdast-util-from-markdown merges `enter`/`exit` maps by assignment,
- * later extensions winning) while every other stock handler — tag names,
- * attributes and their values, expression attributes — stays. (The stock
- * handler decodes character references in a quoted value; the builder
- * reads only whether a value is quoted, braced, or absent, and takes a
- * quoted value's characters from the source as spelled — SPEC 2.4.)
- * Handlers that reject genuinely malformed tags (attributes or a
- * self-closing slash in a closing tag) also stay, so those remain parse
- * failures (SPEC 14.20).
- */
-const flatJsxTagExtension = {
-  enter: {
-    mdxJsxFlowTagClosingMarker: ignoreClosingMarker,
-    mdxJsxTextTagClosingMarker: ignoreClosingMarker,
-  },
+const tagSpanExtension = {
   exit: {
-    mdxJsxFlowTag: exitFlatJsxTag,
-    mdxJsxTextTag: exitFlatJsxTag,
+    mdxJsxFlowTagMarker: recordTagSpan,
+    mdxJsxTextTagMarker: recordTagSpan,
   },
 };
 
 /**
- * Register the fromMarkdown widening. Placed after `remarkMdx`
- * deliberately, so the merge above replaces the stock tag handlers. No
- * micromark construct is added: ESM blocks, among every other construct,
- * are tokenized by remark-mdx's stock constructs (SPEC 14.20).
+ * Register the tag-span recorder. No micromark construct is added and no
+ * stock handler replaced: every construct is tokenized, and every JSX
+ * element paired, by remark-mdx's stock grammar (SPEC 14.20).
  */
-function xspecGrammarWidenings(this: { data(): unknown }): void {
+function xspecTagSpans(this: { data(): unknown }): void {
   const data = this.data() as {
     fromMarkdownExtensions?: unknown[];
   };
-  (data.fromMarkdownExtensions ??= []).push(flatJsxTagExtension);
+  (data.fromMarkdownExtensions ??= []).push(tagSpanExtension);
 }
 
 /**
  * The MDX parser (IMPLEMENTATION: remark-mdx defines well-formed MDX,
- * SPEC 14.20 — with the grammar widened per `xspecAcornExtension` and
- * `flatJsxTagExtension` above). Frozen once; `parse` is pure.
+ * SPEC 14.20 — with the expression grammar widened per
+ * `xspecAcornExtension` above). Frozen once; `parse` is pure.
  */
 const mdxParser = unified()
   .use(remarkParse)
   .use(remarkMdx, { acorn: specAcorn })
-  .use(xspecGrammarWidenings)
+  .use(xspecTagSpans)
   .freeze();
 
 // ---------------------------------------------------------------------------
 // Parsing
 // ---------------------------------------------------------------------------
+
+/** A spec source's parse: its decoded text and MDX tree, or its 14.20. */
+type MdxParse =
+  | {
+      readonly kind: "tree";
+      readonly text: string;
+      readonly offsets: Utf8Offsets;
+      readonly tree: MdxTreeNode;
+    }
+  | { readonly kind: "unparseable"; readonly finding: Finding };
+
+/**
+ * Decode and parse one spec source (SPEC 1.6, 14.20): valid UTF-8 with no
+ * byte-order mark, then MDX 3's grammar — the whole verdict on
+ * well-formedness, which the document builder never revises.
+ */
+function parseMdx(file: PathText, bytes: Uint8Array): MdxParse {
+  const decoded = decodeSourceBytes(file, bytes);
+  if (!decoded.ok) {
+    return { kind: "unparseable", finding: decoded.finding };
+  }
+  const text = decoded.text;
+  const offsets = new Utf8Offsets(text);
+  try {
+    // SPEC 14.20: remark-mdx's grammar defines well-formed MDX.
+    const tree = mdxParser.parse(text) as unknown as MdxTreeNode;
+    return { kind: "tree", text, offsets, tree };
+  } catch (error) {
+    return {
+      kind: "unparseable",
+      finding: parseFailureFinding(file, error, text, offsets),
+    };
+  }
+}
 
 /**
  * Parse one discovered spec source into its document model (SPEC 1, 2).
@@ -609,58 +599,29 @@ export function parseSpecSource(
   bytes: Uint8Array,
   file: PathText = path,
 ): SpecSourceResult {
-  const decoded = decodeSourceBytes(file, bytes);
-  if (!decoded.ok) {
-    return { kind: "unparseable", finding: decoded.finding };
+  const parsed = parseMdx(file, bytes);
+  if (parsed.kind === "unparseable") {
+    return parsed;
   }
-  const text = decoded.text;
-  const offsets = new Utf8Offsets(text);
-
-  let tree: MdxTreeNode;
-  try {
-    // SPEC 14.20: remark-mdx's grammar defines well-formed MDX.
-    tree = mdxParser.parse(text) as unknown as MdxTreeNode;
-  } catch (error) {
-    return {
-      kind: "unparseable",
-      finding: parseFailureFinding(file, error, text, offsets),
-    };
-  }
-
-  const builder = new DocumentBuilder(path, file, text, offsets);
-  try {
-    builder.walk(tree);
-    builder.finishTags();
-  } catch (error) {
-    if (error instanceof MdxGrammarError) {
-      // A tag-pairing failure (SPEC 14.20 widening 2): unclosed or
-      // mismatched tags make the file unparseable, masking its contents.
-      return {
-        kind: "unparseable",
-        finding: parseFailureFinding(file, error, text, offsets),
-      };
-    }
-    if (error instanceof RangeError) {
-      // SPEC 14.20: nesting beyond what the recursive walk can process (a
-      // call-stack overflow surfaces as a RangeError) makes the file
-      // unparseable — a finding, never a crash (SPEC 12.0: exit codes
-      // partition all outcomes). `mdxParser.parse` above is guarded the
-      // same way by its own catch-all.
-      return {
-        kind: "unparseable",
-        finding: locatedFinding(
-          20,
-          `unparseable source: not well-formed MDX — the file's nesting ` +
-            `exceeds what the parser can process, so no location inside ` +
-            `it can be analyzed; simplify or split the file (SPEC 14.20)`,
-          [{ file, range: { start: 0, end: 0 } }],
-        ),
-      };
-    }
-    throw error;
-  }
+  const builder = new DocumentBuilder(path, file, parsed.text, parsed.offsets);
+  builder.walk(parsed.tree);
   builder.validateStructure();
   return { kind: "document", document: builder.finish() };
+}
+
+/**
+ * SPEC 14.20: the 14.20 finding a spec source's bytes carry — null exactly
+ * when the file is well-formed. The verdict is `parseSpecSource`'s, reached
+ * without building the document model: a pure judgement over a file's
+ * bytes, for texts no discovered file holds yet — a move's would-be files
+ * (SPEC 6.5 "Validation and refusals", `refused-invalid-rewrite`).
+ */
+export function specSourceParseFailure(
+  file: PathText,
+  bytes: Uint8Array,
+): Finding | null {
+  const parsed = parseMdx(file, bytes);
+  return parsed.kind === "unparseable" ? parsed.finding : null;
 }
 
 /** The 14.20 finding for a thrown MDX parse failure, with its location. */
@@ -937,17 +898,15 @@ interface MutableSection {
   idPresent: boolean;
 }
 
-/** One open tag awaiting its closing tag during the walk. */
-interface OpenTagFrame {
-  /** The tag's name — null for a fragment. */
-  readonly name: string | null;
-  /** UTF-16 span of the opening tag. */
-  readonly span: { readonly start: number; readonly end: number };
-  /** The opening tag's position (failure reporting). */
-  readonly position: MdxPosition;
-  /** The section the tag opened, or null for a non-section element. */
+/** One element whose children the walk is visiting. */
+interface OpenElementFrame {
+  /** The section the element is, or null for a non-section element. */
   readonly section: MutableSection | null;
 }
+
+/** The walk's pending work: a node to visit, or an element to leave. */
+type WalkItem =
+  { readonly visit: MdxTreeNode } | { readonly leave: OpenElementFrame };
 
 class DocumentBuilder {
   readonly root: MutableSection;
@@ -956,7 +915,10 @@ class DocumentBuilder {
   private readonly embeddings: SpecEmbedding[] = [];
   private readonly comments: SpecComment[] = [];
   private readonly findings: Finding[] = [];
-  private readonly tagStack: OpenTagFrame[] = [];
+  /** The elements enclosing the node being visited, outermost first. */
+  private readonly elementStack: OpenElementFrame[] = [];
+  /** The file's tag spans; set by `walk` from the tree's root. */
+  private tagSpans: TagSpans | undefined;
 
   constructor(
     private readonly path: string,
@@ -1020,47 +982,57 @@ class DocumentBuilder {
   /**
    * Walk the mdast tree in document order: requirement sections nest by
    * document containment, whatever Markdown structure lies between (SPEC
-   * 1.1–1.3). Under grammar widening 2 every `<S>`/`<Spec>` (and other
-   * JSX) tag arrives as a flat `xspecJsxTag` leaf; this walk pairs them
-   * on a stack, so a section opened with trailing same-line content may
-   * close on a later line, and content may directly precede a closing
-   * tag on its line (SPEC 14.20).
+   * 1.1–1.3). Every JSX element arrives as the stock grammar paired it
+   * (SPEC 14.20) — an `mdxJsxFlowElement` or `mdxJsxTextElement` spanning
+   * its opening tag through its closing tag, its content as its children —
+   * so the section tree follows the element tree. The walk keeps its own
+   * stack of pending work instead of recursing: sections nest as deep as a
+   * file stacks them (the suite stages towers 4096 deep), and each level
+   * must cost heap, never call stack.
    */
-  walk(node: MdxTreeNode): void {
-    switch (node.type) {
-      case "xspecJsxTag": {
-        this.handleTag(node);
-        return;
-      }
-      case "mdxJsxFlowElement":
-      case "mdxJsxTextElement": {
-        // flatJsxTagExtension replaces element construction wholesale.
-        throw new Error(
-          "xspec internal error: unflattened JSX element in the MDX tree",
-        );
-      }
-      case "mdxFlowExpression":
-      case "mdxTextExpression": {
-        this.classifyExpression(node, this.currentSection());
-        return;
-      }
-      case "mdxjsEsm": {
-        this.processEsm(node);
-        return;
-      }
-      default: {
-        for (const child of node.children ?? []) {
-          this.walk(child);
+  walk(tree: MdxTreeNode): void {
+    this.tagSpans = tree.data?.xspecTagSpans;
+    const pending: WalkItem[] = [{ visit: tree }];
+    for (let item = pending.pop(); item !== undefined; item = pending.pop()) {
+      if ("leave" in item) {
+        if (this.elementStack.pop() !== item.leave) {
+          throw new Error("xspec internal error: unbalanced element walk");
         }
-        return;
+        continue;
+      }
+      const node = item.visit;
+      switch (node.type) {
+        case "mdxJsxFlowElement":
+        case "mdxJsxTextElement": {
+          const frame = this.enterElement(node);
+          this.elementStack.push(frame);
+          pending.push({ leave: frame });
+          break;
+        }
+        case "mdxFlowExpression":
+        case "mdxTextExpression": {
+          this.classifyExpression(node, this.currentSection());
+          continue;
+        }
+        case "mdxjsEsm": {
+          this.processEsm(node);
+          continue;
+        }
+        default: {
+          break;
+        }
+      }
+      const children = node.children ?? [];
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        pending.push({ visit: children[index] });
       }
     }
   }
 
-  /** The innermost section whose opening tag is still open (SPEC 1.1). */
+  /** The innermost section whose element encloses the walk (SPEC 1.1). */
   private currentSection(): MutableSection {
-    for (let index = this.tagStack.length - 1; index >= 0; index -= 1) {
-      const section = this.tagStack[index].section;
+    for (let index = this.elementStack.length - 1; index >= 0; index -= 1) {
+      const section = this.elementStack[index].section;
       if (section !== null) {
         return section;
       }
@@ -1068,77 +1040,40 @@ class DocumentBuilder {
     return this.root;
   }
 
-  /** The node's position; every parsed mdast node carries one. */
-  private positionOf(node: MdxTreeNode): MdxPosition {
-    const position = node.position;
-    if (position === undefined) {
-      throw new Error("xspec internal error: MDX node without a position");
-    }
-    return position;
-  }
-
   /**
-   * One flat tag leaf (SPEC 14.20 widening 2): `<S>`/`<Spec>` tags build
-   * the section tree (SPEC 1.1); any other element is invalid (SPEC 2.7
-   * → 14.16) but participates in pairing all the same. An unmatched or
-   * mismatched tag is a parse failure, keeping genuinely malformed
-   * sources 14.20-unparseable exactly as under the stock grammar.
+   * One JSX element as the stock grammar paired it (SPEC 14.20):
+   * `<S>`/`<Spec>` builds a section (SPEC 1.1); any other element is
+   * invalid (SPEC 2.7 → 14.16), reported once over its whole construct,
+   * while the sections inside it nest by containment all the same. The
+   * element's tags are the recorded tag tokens at its two ends (SPEC 1.7):
+   * a self-closing element is its one tag.
    */
-  private handleTag(node: MdxTreeNode): void {
+  private enterElement(node: MdxTreeNode): OpenElementFrame {
     const span = this.spanOf(node);
-    const name = node.name ?? null;
-    if (node.close === true) {
-      const frame = this.tagStack.pop();
-      if (frame === undefined) {
-        throw new MdxGrammarError(
-          `Unexpected closing tag \`</${name ?? ""}>\`, expected an open ` +
-            `tag first`,
-          this.positionOf(node),
-        );
-      }
-      if (frame.name !== name) {
-        throw new MdxGrammarError(
-          `Unexpected closing tag \`</${name ?? ""}>\`, expected ` +
-            `corresponding closing tag for \`<${frame.name ?? ""}>\``,
-          this.positionOf(node),
-        );
-      }
-      if (frame.section !== null) {
-        // SPEC 1.7: the construct's own characters end with the last
-        // character of its closing tag.
-        frame.section.closingTagRange = this.byteRange(span.start, span.end);
-        frame.section.range = this.byteRange(frame.span.start, span.end);
-      } else {
-        this.reportForeignElement(frame.name, frame.span.start, span.end);
-      }
-      return;
+    const openingEnd = this.tagSpans?.endByStart.get(span.start);
+    const selfClosing = openingEnd === span.end;
+    const closingStart = selfClosing
+      ? span.start
+      : this.tagSpans?.startByEnd.get(span.end);
+    if (openingEnd === undefined || closingStart === undefined) {
+      throw new Error("xspec internal error: JSX element without tag spans");
     }
+    const name = node.name ?? null;
     if (name === "S" || name === "Spec") {
       // SPEC 1.1: `<S>` and `<Spec>` are equivalent requirement sections
       // (compared byte-wise, SPEC 12.0 — no other casing).
-      const section = this.buildSection(node, span);
-      if (node.selfClosing !== true) {
-        this.tagStack.push({
-          name,
-          span,
-          position: this.positionOf(node),
-          section,
-        });
-      }
-      return;
+      return {
+        section: this.buildSection(node, {
+          start: span.start,
+          openingEnd,
+          closingStart,
+          end: span.end,
+          selfClosing,
+        }),
+      };
     }
-    // SPEC 2.7 → 14.16: any other JSX element is invalid — reported once
-    // per element when it pairs (or immediately when self-closing).
-    if (node.selfClosing === true) {
-      this.reportForeignElement(name, span.start, span.end);
-      return;
-    }
-    this.tagStack.push({
-      name,
-      span,
-      position: this.positionOf(node),
-      section: null,
-    });
+    this.reportForeignElement(name, span.start, span.end);
+    return { section: null };
   }
 
   /** SPEC 2.7 → 14.16: a JSX element other than `<S>`/`<Spec>`. */
@@ -1156,21 +1091,6 @@ class DocumentBuilder {
         `embeddings, and MDX comments are permitted; remove it ` +
         `(SPEC 2.7, 14.16)`,
     );
-  }
-
-  /**
-   * After the walk: every opened tag must have closed — an unclosed
-   * element is a parse failure (SPEC 14.20), as under the stock grammar.
-   */
-  finishTags(): void {
-    const frame = this.tagStack[this.tagStack.length - 1];
-    if (frame !== undefined) {
-      throw new MdxGrammarError(
-        `Expected a closing tag for \`<${frame.name ?? ""}>\` before the ` +
-          `end of the file`,
-        frame.position,
-      );
-    }
   }
 
   /**
@@ -1348,27 +1268,33 @@ class DocumentBuilder {
   // -------------------------------------------------------------------------
 
   /**
-   * Build one `<S>`/`<Spec>` section from its opening (or self-closing)
-   * tag leaf, with validated props (SPEC 1.1, 2.5–2.7). The tag token
-   * covers the tag's exact characters, so the opening-tag range is the
-   * leaf's span; for a paired section, the closing-tag range and the
-   * construct range (SPEC 1.7) are completed when its closing tag pairs.
+   * Build one `<S>`/`<Spec>` section from its element, with validated props
+   * (SPEC 1.1, 2.5–2.7). `tags` gives the element's UTF-16 bounds: its
+   * start and end, its opening tag's end, and its closing tag's start — for
+   * a self-closing element, whose one tag is the whole construct, the
+   * element's start (SPEC 1.7).
    */
   private buildSection(
     node: MdxTreeNode,
-    span: { start: number; end: number },
+    tags: {
+      readonly start: number;
+      readonly openingEnd: number;
+      readonly closingStart: number;
+      readonly end: number;
+      readonly selfClosing: boolean;
+    },
   ): MutableSection {
     // SPEC 1.1: a self-closing section element is an empty leaf; its tag
     // is the whole construct (SPEC 1.7).
-    const selfClosing = node.selfClosing === true;
+    const selfClosing = tags.selfClosing;
     const parent = this.currentSection();
     const section: MutableSection = {
       id: null,
       // SPEC 1.7: opening tag through closing tag, or the self-closing
-      // tag's own characters (paired sections are completed above).
-      range: this.byteRange(span.start, span.end),
-      openingTagRange: this.byteRange(span.start, span.end),
-      closingTagRange: this.byteRange(span.start, span.end),
+      // tag's own characters.
+      range: this.byteRange(tags.start, tags.end),
+      openingTagRange: this.byteRange(tags.start, tags.openingEnd),
+      closingTagRange: this.byteRange(tags.closingStart, tags.end),
       selfClosing,
       parent,
       children: [],

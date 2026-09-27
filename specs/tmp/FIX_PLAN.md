@@ -65,7 +65,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T6.5-11 | section-6.5-ii | 28, 30, 31 |
 | T6.5-13 | section-6.5-iii | 26 (since Task 29 its arms (a)–(h) hold; it stops first at arm (i)'s preview, an `id-rewrite` reported for the unchanged `id="m"` of a cross-file move keeping its ID) |
 | T6.5-15 | section-6.5-iii | 34 (since Task 10 arm (a)'s three lines derive as one block; it stops first at (a)'s preview, which reports A's declaration removed) |
-| T6.5-16 | section-6.5-iii | 11, 35 (since Tasks 10 and 29 it stops first at arm (a), the `body</S>` variant performed where it must be refused) |
+| T6.5-16 | section-6.5-iii | 11, 35 (since Task 11 the stock pairing rejects arm (a)'s would-be target, so the move is no longer performed: it stops at its own re-validation of the rewritten workspace, exit 1 with the would-be file's 14.20 — `got ["14.20"]` — where the single `refused-invalid-rewrite` is required) |
 | T6.5-17 | section-6.5-iii | 25 |
 | T6.5-18 | section-6.5-iii | 33 |
 | T6.5-19 | section-6.5-iii | 26 (since Task 29 arm (a) holds and (b)'s bytes agree; it stops first at (b)'s preview, an `id-rewrite` reported for the unchanged `id="m"`) |
@@ -107,36 +107,11 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T14-9 | section-14-ii | 48 |
 | T14-10 | section-14-ii | 49, 50 |
 | T14-11 | section-14 | 12, 13, 14, 15, 16 |
-| T14-12 | section-14-iii | 11, 12, 14 (since Task 10 the import-then-`const x = 1` arm reports 14.20, located over the whole `const` statement where Task 14's zero-length range at its start is required; it stops first at arm (b)'s `export { nope }`, Task 12) |
+| T14-12 | section-14-iii | 11, 12, 14 (Task 11 landed and changed none of its arms, none of which stages a tag-pairing shape; since Task 10 the import-then-`const x = 1` arm reports 14.20, located over the whole `const` statement where Task 14's zero-length range at its start is required; it stops first at arm (b)'s `export { nope }`, Task 12) |
 
 Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), and Task 53 (a corrupt session in `review list`); Task 55 (a path beginning with U+FEFF, found while landing Task 9) has landed. Task 29 landed with Task 10: once ESM blocks were bounded as stock MDX 3 bounds them, T6.6-2's move (passing before) added its import at offset 0 of an origin whose first line is `<S id="org">`, the block absorbed that line, and the move's own validation of the rewritten workspace refused it — so additions now go at an admissible offset (`placeSpecImportAdditions` in `src/core/move.ts`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
 
 ---
-
-## Task 11 — Section tags pair exactly as stock MDX 3 pairs them (SPEC 14.20, 1.1, 3, 6.5; A8 first bullet, C14 second shape)
-
-**Requirement.** SPEC 14.20: well-formedness is derivability under MDX 3 and nothing else. MDX 3 pairs a text-position tag within its paragraph; the stock parser says "Expected a closing tag for `<S>` … before the end of `paragraph`". SPEC 6.5's admissibility rule and `refused-invalid-rewrite` (Tasks 29 and 35) judge would-be files by that same grammar.
-
-**Observed.** `flatJsxTagExtension` (widening 3 at `3bfedb5`; renumbered widening 2 when Task 10 removed the ESM widening) makes every tag token a leaf, and the document builder pairs tags across construct boundaries. So shapes that stock MDX 3 rejects are accepted:
-- `<S id="x">Text`, a blank line, then `more</S>`;
-- `foo <S id="p">bar</S> baz` receiving a moved flow section.
-
-**Location.** `src/core/mdx.ts`:
-- the header's widening 2 (formerly 3; ~27–34);
-- `exitFlatJsxTag`, `ignoreClosingMarker`, and `flatJsxTagExtension` (~485–575 since Task 10);
-- the builder's flat pairing (`finishTags` and the tag-leaf handling, ~1000–1180 since Task 10).
-
-**Change.** Decide well-formedness by the stock grammar, in one of two ways:
-- drop that widening and build the section tree from stock `mdxJsxFlowElement`/`mdxJsxTextElement` nodes; or
-- keep the flat builder for the model, but first judge the file by the stock pairing (the same pipeline without `flatJsxTagExtension`) and report its failure as 14.20.
-
-Either way:
-- Expose the judgement as a pure core function over a file's text; Task 35 judges would-be files with it. Task 29's placement (`admitsAddedDeclarations` in `src/core/move.ts`, landed) judges each candidate file through `parseSpecSource`, which either route makes report the stock verdict.
-- Mind scale. The suite stages section towers 4096 deep (TEST-SPEC H-11; P-8, P-11), so avoid unbounded recursion (AGENTS.md: a plain recursive function gets about 9.9k frames) and keep parses per file few.
-
-**Verification.**
-- `section-14-iii.test.ts`: T14-12's text-position arm (T14-12 also waits on Tasks 12 and 14).
-- Neighbours: `section-1.1-1.2.test.ts`, `section-1.3.test.ts`, `section-1.6-1.7.test.ts`, `section-3.test.ts`, `section-6.5-iii.test.ts`, `section-16-p2-p3.test.ts`, `section-16-p8.test.ts`, `section-16-p11.test.ts`.
 
 ## Task 12 — Brace and ESM content derive exactly as ECMAScript 2024 with JSX derives them: no TypeScript syntax, no early errors (SPEC 14.20, 2.4, 2.7, 14.8, 14.15, 14.16; A6, A8 second bullet, C13, C14 third shape)
 
@@ -201,7 +176,7 @@ Acorn raises most static-semantic errors through `raiseRecoverable`, and some th
 
 ## Task 14 — A 14.20 finding carries one zero-length range at the failure's offset (SPEC 14 location rule, 14.20, 1.6; A9, C15, and B's note on T11.4-4)
 
-After Tasks 11–13, which change where parse failures arise (Task 10 has landed).
+After Tasks 12 and 13, which change where parse failures arise (Tasks 10 and 11 have landed).
 
 **Requirement.** SPEC 14: "An unparseable source (14.20) carries one zero-length range at the failure's offset":
 - for a refused read (14.25), 0;
@@ -225,7 +200,7 @@ SPEC 14.20 places `d={}`'s failure at its closing brace, and makes `010` and `09
 | `09` in a `.ts` file | 10..12 | 11..11 |
 
 **Location.**
-- `parseFailureFinding` and the `MdxGrammarError` sites in `src/core/mdx.ts`.
+- `parseFailureFinding` in `src/core/mdx.ts`. Since Task 11 every MDX syntax failure, tag pairing included, is a stock toolchain `VFileMessage` (the product's own `MdxGrammarError` is gone): a construct that ends while an element opened inside it is still open places that construct's whole position (`<S id="x">Text`, a blank line, `more</S>`: the paragraph, 0..14, where the rule's offset is 15, the blank line's start); a closing tag that cannot close the open element places its own tag (`</T>` after `<S id="a">x`; `</S>` inside a paragraph after a flow-position `<S id="a">`), or its `/` alone when no element is open; an element left open at the file's end places nothing (today located 0..0; the rule's offset is the file's byte length).
 - The encoding and BOM path through `decodeSourceBytes` in `src/core/source-text.ts`.
 - The syntax-diagnostic finding in `src/core/code-analysis.ts`.
 
@@ -237,7 +212,7 @@ SPEC 14.20 places `d={}`'s failure at its closing brace, and makes `010` and `09
 **Verification.**
 - Should turn green: `section-1.6-1.7.test.ts` (T1.6-5), `section-2.7.test.ts` (T2.7-3), `section-11.4.test.ts` (T11.4-4).
 - `section-2.7.test.ts` (T2.7-4, with Task 13), `section-2.2-2.3.test.ts` (T2.3-3, with Task 7), `section-2.4.test.ts` (T2.4-2, with Task 12).
-- `section-14.test.ts`: T14-11 arm (c) and the (w) family. `section-14-iii.test.ts`: T14-12, with Tasks 11 and 12.
+- `section-14.test.ts`: T14-11 arm (c) and the (w) family. `section-14-iii.test.ts`: T14-12, with Task 12.
 - Neighbours: `section-14-ii.test.ts` (T14-10's refused-read arm stays at 0..0), `section-16-p8.test.ts`.
 
 ## Task 15 — A repeated prop locates every attribute spelling the name (SPEC 14 location cardinality, 14.17, 2.7; C18)
@@ -624,7 +599,7 @@ Task 10, its prerequisite, has landed.
 
 ## Task 35 — Refuse a section move whose rewrite would be invalid: `refused-invalid-rewrite` (SPEC 6.5 "Validation and refusals", 14, 6.6; A24, C19(d))
 
-After Tasks 11 and 21 (Tasks 10 and 29 have landed).
+After Task 21 (Tasks 10, 11, and 29 have landed).
 
 **Requirement.** SPEC 14, `refused-invalid-rewrite`: "the section form's exact edits would leave the origin or the target file other than well-formed MDX, or a file the rewrite must add an import to holds no admissible offset for it (6.5)". It is evaluated only over an intrinsically valid new ID, as `refused-structural-parent` is. It is one finding that locates:
 - the moved section's construct in the origin file (1.7);
@@ -632,7 +607,7 @@ After Tasks 11 and 21 (Tasks 10 and 29 have landed).
 
 Its `identities` are the workspace-relative paths of the files concerned, in byte order: each file whose would-be text is not well-formed MDX (a target file to be created included), and each file holding no admissible offset for an addition it needs. SPEC 6.5 ("Moved text and insertion", "Validation and refusals") defines the edits being judged. A preview reports exactly the same (6.6).
 
-**Observed.** Not implemented: every shape that should be refused is performed with exit 0. For example, a flow section moved into a text-position parent (`foo <S id="p">bar</S> baz`) leaves a target file the stock parser rejects. This covers T6.5-16's 24 refused arms and its five performed controls, T6.6-3's preview twins, and T14-7's arm. AGENTS.md's T6.5-16 bullets describe the arms.
+**Observed.** Not implemented. Before Task 11 every shape that should be refused was performed with exit 0. Since Task 11 a shape whose would-be file the stock grammar rejects is no longer performed: the move's in-memory re-validation of the rewritten workspace (step 6 in `src/cli/commands/move.ts`) exits 1 reporting that file's 14.20 and writes nothing — hand-verified for a flow section moved into a text-position parent (`foo <S id="p">bar</S> baz`: the would-be `specs/t.mdx` reported `unparseable-source`), and T6.5-16 arm (a) fails with `got ["14.20"]` — where the single `refused-invalid-rewrite` finding is required; shapes the stock grammar accepts but 6.5 still refuses (no admissible offset for an addition) are not re-observed. This covers T6.5-16's 24 refused arms and its five performed controls, T6.6-3's preview twins, and T14-7's arm. AGENTS.md's T6.5-16 bullets describe the arms.
 
 **Location.**
 - `src/core/refusal.ts`: the section-form reasons.
@@ -640,7 +615,7 @@ Its `identities` are the workspace-relative paths of the files concerned, in byt
 
 **Change.**
 - After planning, apply the exact edits in memory to the origin, the target, and any created target file.
-- Judge each file with Task 11's stock-grammar function, and collect the files that lack an admissible offset for an addition they need (`admissible: false`).
+- Judge each file with `specSourceParseFailure(file, bytes)` (`src/core/mdx.ts`, landed with Task 11: null exactly when the bytes are well-formed — the stock MDX 3 verdict `parseSpecSource` reaches, without building the model), and collect the files that lack an admissible offset for an addition they need (`admissible: false`).
 - Report the single finding as specified, beside every other applicable reason.
 - The preview reports the same finding.
 
