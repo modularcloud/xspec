@@ -37,7 +37,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T1.6-5 | section-1.6-1.7 | 14 |
 | T1.7-2 | section-1.6-1.7 | 19, 20 |
 | T2.1-2 | section-2.1 | 6 (passes since Task 6 landed) |
-| T2.3-3 | section-2.2-2.3 | 7, 14 |
+| T2.3-3 | section-2.2-2.3 | 7, 14 (since Task 7 its five embedding and five invalid-container arms hold; it stops first at Task 14's offset arm, `{text("a") text("b")}` located 48–49 where the zero-length 49–49 is required) |
 | T2.4-2 | section-2.4 | 12, 14 |
 | T2.4-5 | section-2.4 | 6 (passes since Task 6 landed) |
 | T2.5-3 | section-2.5-2.6 | 5 (passes since Task 5 landed) |
@@ -112,24 +112,6 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), and Task 53 (a corrupt session in `review list`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
 
 ---
-
-## Task 7 — An embedding's callee is `text` spelled plainly; a parenthesized or escaped callee is an invalid container (SPEC 2.3, 2.4, 14.16; A5)
-
-**Requirement.** SPEC 2.3: "An embedding is an expression container, in flow or text position, whose one expression (14.20) is a call — optional chaining excluded — whose callee is the identifier `text` itself, spelled plainly, neither parenthesized nor escaped (2.4) …; a container holding any other expression is invalid (14.16)."
-
-**Observed.**
-- `{(text)("a")}` is treated as an embedding and reported 14.8; it must be 14.16 at the container.
-- `{t\u0065xt("a")}` (the callee spelled with a Unicode escape — this line's escape had been decoded away when the plan was written) is accepted as an embedding; it must be 14.16.
-
-**Location.** `classifyExpression` in `src/core/mdx.ts` (~1494–1546). Its test, `expression.callee.type === "Identifier" && expression.callee.name === "text"`, sees acorn's cooked name, and acorn drops the parentheses.
-
-**Change.** Accept an embedding only when both hold:
-- the callee's own source characters are exactly `text`;
-- the call expression begins at the callee, so no parenthesis precedes it (for example, `expression.start === callee.start`).
-
-Also exclude optional calls (`text?.(…)`) if they are not already excluded. Everything else is 14.16 at the whole container.
-
-**Verification.** `section-2.2-2.3.test.ts`: T2.3-3's classification arms; its later 14.20-offset arms wait on Task 14. Neighbours: `section-2.7.test.ts`, `section-3.test.ts`, `section-5.7.test.ts`.
 
 ## Task 8 — Configuration literals are read verbatim (SPEC 7, 2.4, 14.14; B2)
 
@@ -224,6 +206,7 @@ Either way:
   - `{1 = 2}`, `{let}`, and `{010}`: 14.16 each;
   - `d={(1 = 2)}` and `d={010}`: 14.8.
 - Today only duplicate import bindings at module scope are tolerated.
+- (Found while landing Task 7; no test stages it.) Brace content reaches the static-reference analyzer as the raw document slice between the braces — `expressionText`, set in `classifyExpression` for an embedding and in the `d` attribute reader — which `parseExpressionText` (`src/core/references.ts`) re-parses with TypeScript. Inside a Markdown container, an expression spanning lines holds the container's line prefixes in that slice — a block quote's `> ` — though MDX 3 excludes them from the expression (acorn's tree skips them). So `> {text("a")` LF `> }`, an embedding of the local `a`, reports 14.8 at its container, and a block-quoted section's `d={` LF `> "a"}` reports 14.8 at the value, where each must resolve (SPEC 14.20: the content is what MDX 3 derives; 2.3, 2.4).
 
 **Location.** `src/core/mdx.ts`:
 - `xspecAcornExtension` (~361–427) and `specAcorn`, shared by the ESM construct and remark-mdx's expression parsing;
@@ -236,6 +219,7 @@ Acorn raises most static-semantic errors through `raiseRecoverable`, and some th
 - Suppress all of ECMAScript's early errors (the SPEC's list is illustrative) while keeping every genuine syntax failure.
 - The newly accepted constructs then reach their ordinary outcomes: an export statement is 14.16 (the whole statement), a non-embedding container is 14.16, a non-static `d` or `text` argument is 14.8, and duplicate bindings are 14.15.
 - The static-reference analyzer must tolerate the trees acorn now returns.
+- Analyze each brace's content as MDX 3 derives it — acorn's own tree, or the slice with every container line prefix blanked to spaces (the same widths, so offsets stay put) — never the raw document slice.
 
 **Verification.**
 - `section-2.4.test.ts`: T2.4-2 (its 14.20-offset arms wait on Task 14).

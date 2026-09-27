@@ -301,11 +301,22 @@ interface EstreeNode {
   readonly expression?: EstreeNode;
   readonly callee?: EstreeNode;
   readonly name?: string;
+  /** A `CallExpression`'s optional-call flag (`text?.(…)`). */
+  readonly optional?: boolean;
+}
+
+/** A JavaScript comment acorn records beside an expression's nodes. */
+interface EstreeComment {
+  /** "Block" or "Line". */
+  readonly type: string;
+  /** Document-absolute UTF-16 offsets, as for `EstreeNode`. */
+  readonly start?: number;
+  readonly end?: number;
 }
 
 interface EstreeProgram {
   readonly body?: readonly EstreeNode[];
-  readonly comments?: readonly unknown[];
+  readonly comments?: readonly EstreeComment[];
 }
 
 interface MdxAttributeNode {
@@ -1076,6 +1087,39 @@ function parseFailureFinding(
   );
 }
 
+/** An estree node's or comment's document-absolute UTF-16 offsets. */
+function positionsOf(node: {
+  readonly start?: number;
+  readonly end?: number;
+}): {
+  readonly start: number;
+  readonly end: number;
+} {
+  const { start, end } = node;
+  if (typeof start !== "number" || typeof end !== "number") {
+    throw new Error("xspec internal error: estree node without a position");
+  }
+  return { start, end };
+}
+
+/**
+ * Whether an expression is a call — optional or not — whose callee acorn
+ * reads as the identifier `text`, parenthesized or escape-spelled alike:
+ * the near misses of an embedding (SPEC 2.3), whose 14.16 finding names
+ * the plain spelling.
+ */
+function callsCookedText(expression: EstreeNode): boolean {
+  const call =
+    expression.type === "ChainExpression" ? expression.expression : expression;
+  return (
+    call !== undefined &&
+    call.type === "CallExpression" &&
+    call.callee !== undefined &&
+    call.callee.type === "Identifier" &&
+    call.callee.name === "text"
+  );
+}
+
 /** A byte range from a parse failure's UTF-16 point (and optional end). */
 function pointRange(
   startIndex: number,
@@ -1525,10 +1569,7 @@ class DocumentBuilder {
         : undefined;
     if (
       expression !== undefined &&
-      expression.type === "CallExpression" &&
-      expression.callee !== undefined &&
-      expression.callee.type === "Identifier" &&
-      expression.callee.name === "text"
+      this.isEmbeddingCall(expression, span, program?.comments ?? [])
     ) {
       // A `{text(...)}` embedding (SPEC 2.3). Its argument is analyzed by
       // the static-reference analyzer (SPEC 2.4 → 14.8), not here; `text`
@@ -1545,10 +1586,86 @@ class DocumentBuilder {
     this.addFinding(
       16,
       range,
-      `invalid construct: an expression container that is neither a ` +
-        `{text(...)} embedding nor an MDX comment — remove it or replace ` +
-        `it with a permitted construct (SPEC 2.7, 14.16)`,
+      expression !== undefined && callsCookedText(expression)
+        ? `invalid construct: an expression container calling text that ` +
+            `is no {text(...)} embedding — an embedding's one expression ` +
+            `is a call of text spelled plainly, beside nothing but ` +
+            `whitespace and comments: its callee neither parenthesized nor ` +
+            `escaped, the call neither optional nor parenthesized; spell ` +
+            `it {text(<reference>)} (SPEC 2.3, 2.4, 14.16)`
+        : `invalid construct: an expression container that is neither a ` +
+            `{text(...)} embedding nor an MDX comment — remove it or ` +
+            `replace it with a permitted construct (SPEC 2.7, 14.16)`,
     );
+  }
+
+  /**
+   * SPEC 2.3: whether a container's one expression is an embedding's call —
+   * a call, optional chaining excluded, whose callee is the identifier
+   * `text` itself, spelled plainly, neither parenthesized nor escaped
+   * (2.4), whatever whitespace and comments stand beside the call. The
+   * estree alone cannot tell: acorn cooks an escape-spelled name to `text`,
+   * and micromark's events-to-acorn removes every `ParenthesizedExpression`
+   * node, leaving the inner node at its inner offsets. So the callee's own
+   * characters must be exactly `text` (2.4: read as spelled), the call must
+   * begin at its callee (`(text)("a")` begins at its `(`), and no
+   * parenthesis may stand beside the call outside a comment (`(text("a"))`)
+   * — the grammar lets nothing else stand there but whitespace, comments,
+   * and a Markdown container's line prefixes (`>`), which the expression
+   * does not hold.
+   */
+  private isEmbeddingCall(
+    expression: EstreeNode,
+    span: { readonly start: number; readonly end: number },
+    comments: readonly EstreeComment[],
+  ): boolean {
+    const callee = expression.callee;
+    if (
+      expression.type !== "CallExpression" ||
+      expression.optional === true ||
+      callee === undefined ||
+      callee.type !== "Identifier"
+    ) {
+      return false;
+    }
+    const call = positionsOf(expression);
+    const name = positionsOf(callee);
+    return (
+      this.text.slice(name.start, name.end) === "text" &&
+      call.start === name.start &&
+      !this.parenthesisBeside(span.start + 1, call.start, comments) &&
+      !this.parenthesisBeside(call.end, span.end - 1, comments)
+    );
+  }
+
+  /**
+   * Whether a parenthesis stands in the document text [from, to) outside
+   * every comment of `comments` (a comment may itself spell one).
+   */
+  private parenthesisBeside(
+    from: number,
+    to: number,
+    comments: readonly EstreeComment[],
+  ): boolean {
+    const spanned = comments
+      .map((comment) => positionsOf(comment))
+      .sort((left, right) => left.start - right.start);
+    let index = from;
+    for (const comment of spanned) {
+      if (comment.start >= to) {
+        break;
+      }
+      if (comment.end <= index) {
+        continue;
+      }
+      if (
+        /[()]/u.test(this.text.slice(index, Math.max(index, comment.start)))
+      ) {
+        return true;
+      }
+      index = Math.max(index, comment.end);
+    }
+    return index < to && /[()]/u.test(this.text.slice(index, to));
   }
 
   /**
