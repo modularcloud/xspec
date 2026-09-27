@@ -66,7 +66,8 @@ import {
 import type { SpecFileAnalysis } from "./graph.js";
 import type { IdentityMapping, JournalEntry } from "./journal.js";
 import { createJournalEntry } from "./journal.js";
-import type { SpecSection } from "./mdx.js";
+import type { SpecDocument, SpecSection } from "./mdx.js";
+import { parseSpecSource } from "./mdx.js";
 import type { PreviewFileEdits } from "./preview.js";
 import { PreviewCollector } from "./preview.js";
 import {
@@ -971,7 +972,300 @@ function assembleWithInsertion(
   return out;
 }
 
-/** Everything a validated section-form move changes in the sources. */
+/**
+ * A file's content as every edit of a section move but its added import
+ * declarations leaves it, and where declarations added at a
+ * pre-operation offset stand in that content (SPEC 6.5 "Composition and
+ * admissibility": composition in pre-operation coordinates).
+ */
+interface FileComposition {
+  readonly content: Uint8Array;
+  /**
+   * The composed position of declarations added at pre-operation
+   * `offset`: after every edit whose range ends there, before every edit
+   * whose range begins there, and after the target insertion — with the
+   * appended closing tag, where one applies — when the insertion shares
+   * the offset; null where `offset` lies strictly inside an edit's range,
+   * where no addition may stand (SPEC 6.5).
+   */
+  positionOf(offset: number): number | null;
+}
+
+/** Map an original-byte offset through edits; null inside one's range. */
+function composedPosition(
+  offset: number,
+  edits: readonly SourceEdit[],
+): number | null {
+  let delta = 0;
+  for (const edit of edits) {
+    if (edit.range.end <= offset) {
+      delta +=
+        encoder.encode(edit.replacement).length -
+        (edit.range.end - edit.range.start);
+    } else if (edit.range.start < offset) {
+      return null;
+    }
+  }
+  return offset + delta;
+}
+
+/** The composition of a file receiving no moved text. */
+function editsComposition(
+  bytes: Uint8Array,
+  edits: readonly SourceEdit[],
+): FileComposition {
+  return {
+    content: applyEdits(bytes, edits),
+    positionOf: (offset) => composedPosition(offset, edits),
+  };
+}
+
+/**
+ * The composition of the existing target file: its edits applied and the
+ * moved text inserted (SPEC 6.5), declarations added at the insertion's
+ * own offset standing after it and after the appended closing tag.
+ */
+function insertionComposition(
+  bytes: Uint8Array,
+  edits: readonly SourceEdit[],
+  insertion: SectionInsertion,
+): FileComposition {
+  const content = assembleWithInsertion(bytes, edits, insertion);
+  const inserted = content.length - applyEdits(bytes, edits).length;
+  return {
+    content,
+    positionOf: (offset) => {
+      const position = composedPosition(offset, edits);
+      if (position === null) {
+        return null;
+      }
+      return offset >= insertion.pos ? position + inserted : position;
+    },
+  };
+}
+
+/** The start of the line after the one holding `position` (SPEC 3). */
+function nextLineStart(bytes: Uint8Array, position: number): number {
+  return terminatorEndAt(bytes, lineContentEndAfter(bytes, position));
+}
+
+/**
+ * Every line start of a file in document order (SPEC 3: U+000D U+000A is
+ * one terminator), the file's end after a final terminator included.
+ */
+function lineStartsOf(bytes: Uint8Array): number[] {
+  const starts = [0];
+  for (let start = 0; start < bytes.length;) {
+    const next = nextLineStart(bytes, start);
+    if (next === start || next > bytes.length) {
+      break;
+    }
+    if (isTerminatorByte(bytes[next - 1]!)) {
+      starts.push(next);
+    }
+    start = next;
+  }
+  return starts;
+}
+
+/**
+ * Every line's end in document order — the offset of its terminator, or
+ * the file's end for a final line without one.
+ */
+function lineEndsOf(bytes: Uint8Array): number[] {
+  const ends: number[] = [];
+  for (const start of lineStartsOf(bytes)) {
+    const end = lineContentEndAfter(bytes, start);
+    if (end < bytes.length || end > start) {
+      ends.push(end);
+    }
+  }
+  return ends;
+}
+
+/** The ESM block ranges of a spec source's content; none if unparseable. */
+function esmBlockRangesOf(path: string, content: Uint8Array): ByteRange[] {
+  const parsed = parseSpecSource(path, content);
+  return parsed.kind === "document"
+    ? parsed.document.esmBlocks.map((block) => block.range)
+    : [];
+}
+
+/**
+ * SPEC 6.5 "Import edits": whether `content` — a spec source as every edit
+ * of the rewrite leaves it, the added declarations' own characters at
+ * `added` and the whole addition, a U+000A before it included, at
+ * `inserted` — admits the addition: the file is well-formed (14.20); the
+ * added lines are import declarations of one ESM block standing inside no
+ * section construct of the file so left; and every other line of that
+ * block was a line of an ESM block before the addition (`before`: the
+ * block ranges of the content without it), so the addition turns no
+ * paragraph line, or any other content, into the block's.
+ */
+function admitsAddedDeclarations(
+  path: string,
+  content: Uint8Array,
+  added: readonly ByteRange[],
+  inserted: ByteRange,
+  before: readonly ByteRange[],
+): boolean {
+  const parsed = parseSpecSource(path, content);
+  if (parsed.kind !== "document") {
+    return false;
+  }
+  const document = parsed.document;
+  const block = document.esmBlocks.find((candidate) =>
+    added.every((range) =>
+      candidate.imports.some(
+        (statement) =>
+          statement.range.start === range.start &&
+          statement.range.end === range.end,
+      ),
+    ),
+  );
+  if (block === undefined) {
+    return false;
+  }
+  if (
+    document.sections.some(
+      (section) =>
+        section.range.start <= block.range.start &&
+        block.range.end <= section.range.end,
+    )
+  ) {
+    return false;
+  }
+  const shift = inserted.end - inserted.start;
+  for (
+    let line = block.range.start;
+    line < block.range.end;
+    line = nextLineStart(content, line)
+  ) {
+    if (line >= inserted.start && line < inserted.end) {
+      continue; // an added line
+    }
+    const original = line < inserted.start ? line : line - shift;
+    if (
+      !before.some((range) => range.start <= original && original < range.end)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Place a spec source's added import declarations (SPEC 6.5 "Import
+ * edits" and "Composition and admissibility"): `lines`, contiguous, each
+ * followed by U+000A and the first preceded by one when its insertion
+ * point — judged over the composed text — is not at the start of a line,
+ * inserted at an admissible offset, one at a line start taken over any
+ * other. Candidates are tried in a fixed order — `preferred`, then every
+ * line start of the pre-operation file, then every line's end — the first
+ * admissible one taken (the choice among admissible offsets is
+ * implementation latitude, exercised deterministically). An offset
+ * strictly inside a section construct of the pre-operation file stays
+ * inside that construct as every edit leaves the file, so it is never
+ * admissible and is not tried. Returns the chosen pre-operation offset,
+ * the file's composed content, and whether the offset is admissible —
+ * false only where the file holds no admissible offset at all.
+ */
+function placeSpecImportAdditions(
+  document: SpecDocument,
+  bytes: Uint8Array,
+  composition: FileComposition,
+  lines: readonly string[],
+  preferred: readonly number[],
+): {
+  readonly offset: number;
+  readonly content: Uint8Array;
+  readonly admissible: boolean;
+} {
+  const composed = composition.content;
+  const lineBytes = lines.map((line) => encoder.encode(line));
+  const candidates: {
+    offset: number;
+    position: number;
+    atLineStart: boolean;
+  }[] = [];
+  const seen = new Set<number>();
+  const consider = (offset: number): void => {
+    if (seen.has(offset)) {
+      return;
+    }
+    seen.add(offset);
+    if (
+      document.sections.some(
+        (section) => section.range.start < offset && offset < section.range.end,
+      )
+    ) {
+      return;
+    }
+    const position = composition.positionOf(offset);
+    if (position === null) {
+      return;
+    }
+    const atLineStart =
+      position === 0 || isTerminatorByte(composed[position - 1]!);
+    candidates.push({ offset, position, atLineStart });
+  };
+  for (const offset of [
+    ...preferred,
+    ...lineStartsOf(bytes),
+    ...lineEndsOf(bytes),
+  ]) {
+    consider(offset);
+  }
+  const ordered = [
+    ...candidates.filter((candidate) => candidate.atLineStart),
+    ...candidates.filter((candidate) => !candidate.atLineStart),
+  ];
+  const before = esmBlockRangesOf(document.path, composed);
+  let fallback: {
+    offset: number;
+    content: Uint8Array;
+    admissible: boolean;
+  } | null = null;
+  for (const candidate of ordered) {
+    const leading = candidate.atLineStart ? 0 : 1;
+    let length = leading;
+    for (const line of lineBytes) {
+      length += line.length + 1;
+    }
+    const content = new Uint8Array(composed.length + length);
+    content.set(composed.subarray(0, candidate.position), 0);
+    let cursor = candidate.position;
+    if (leading === 1) {
+      content[cursor] = LF;
+      cursor += 1;
+    }
+    const added: ByteRange[] = [];
+    for (const line of lineBytes) {
+      content.set(line, cursor);
+      added.push({ start: cursor, end: cursor + line.length });
+      cursor += line.length;
+      content[cursor] = LF;
+      cursor += 1;
+    }
+    content.set(composed.subarray(candidate.position), cursor);
+    fallback ??= { offset: candidate.offset, content, admissible: false };
+    const inserted = { start: candidate.position, end: cursor };
+    if (
+      admitsAddedDeclarations(document.path, content, added, inserted, before)
+    ) {
+      return { offset: candidate.offset, content, admissible: true };
+    }
+  }
+  // SPEC 6.5 refuses a move leaving a file no admissible offset for an
+  // addition it needs (`refused-invalid-rewrite`); the caller does not yet
+  // decide that refusal from `admissible`. The declarations stand at the
+  // first candidate, and validating the rewritten workspace fails the move.
+  if (fallback === null) {
+    throw new Error("xspec internal error: no offset for an import addition");
+  }
+  return fallback;
+}
+
 export interface MoveSectionPlan {
   /** The full identity mapping the operation produces (SPEC 6.5, 6.1). */
   readonly mapping: readonly IdentityMapping[];
@@ -1439,61 +1733,81 @@ export function planMoveSection(
     })),
   );
 
-  // Per-file import add/remove edits (cross-file only): removals are
-  // line-dropped like every 6.5 deletion; additions anchor after the last
-  // surviving import's line, at the removed block's line start when none
-  // survives, or at the start of the file when the file had no imports —
-  // one deterministic offset (SPEC 6.5), shared with the preview
-  // (SPEC 6.6: in a pre-existing file the real insertion offset is exactly
-  // the previewed one).
-  interface ImportEditSet {
-    readonly deletionRanges: ByteRange[];
-    readonly additionEdit: SourceEdit | null;
-  }
-  const importEditsFor = (
+  // Per-file import edits (cross-file only). Removals are line-dropped like
+  // every 6.5 deletion, each reported with every byte it removes (SPEC 6.6:
+  // an import removal's range spans the declaration plus the leftover
+  // whitespace and terminator of each line its drop empties, judged per
+  // declaration).
+  const importRemovalsFor = (
     spec: SpecFileAnalysis,
     plan: SpecImportPlan,
     bytes: Uint8Array,
-  ): ImportEditSet => {
-    const path = spec.document.path;
+  ): ByteRange[] => {
     const removed = plan.removedImports();
-    const added = plan.addedImports();
-    const removedSet = new Set(removed);
-    const deletionRanges = removed.map((imported) => imported.statement.range);
-    // SPEC 6.6: an import removal's range spans the declaration plus the
-    // leftover whitespace and terminator of each line its drop empties —
-    // every byte the edit removes, judged per declaration.
     for (const imported of removed) {
       preview.add(
-        path,
+        spec.document.path,
         "import-removal",
         removalSpan(bytes, imported.statement.range),
       );
     }
+    return removed.map((imported) => imported.statement.range);
+  };
+
+  // Additions (SPEC 6.5 "Import edits"): the added declarations stand at
+  // an admissible offset of the file as every other edit leaves it — first
+  // tried after the last surviving import's line, then at the first
+  // removed import's line start, then at the start of the file — one
+  // deterministic offset, shared with the preview (SPEC 6.6: in a
+  // pre-existing file the real insertion offset is exactly the previewed
+  // one). Returns the file's final content, or null when it adds nothing.
+  const withImportAdditions = (
+    spec: SpecFileAnalysis,
+    plan: SpecImportPlan,
+    bytes: Uint8Array,
+    composition: FileComposition,
+  ): Uint8Array | null => {
+    const path = spec.document.path;
+    const added = plan.addedImports();
     if (added.length === 0) {
-      return { deletionRanges, additionEdit: null };
+      return null;
     }
     const lines = added.map((addition) =>
       specImportLine(path, addition.modulePath, addition.name),
     );
+    const removed = plan.removedImports();
+    const removedSet = new Set(removed);
     const survivors = spec.imports.imports.filter(
       (imported) => !removedSet.has(imported),
     );
     const lastSurvivor = survivors[survivors.length - 1];
     const firstRemoved = removed[0];
-    const offset =
-      lastSurvivor !== undefined
-        ? offsetAfterLine(bytes, lastSurvivor.statement.range.end)
-        : firstRemoved !== undefined
-          ? lineStartBefore(bytes, firstRemoved.statement.range.start)
-          : 0;
-    // SPEC 6.6: an import addition is a zero-length insertion point at the
-    // exact offset the real operation then inserts at (SPEC 6.5).
-    preview.add(path, "import-addition", { start: offset, end: offset });
-    return {
-      deletionRanges,
-      additionEdit: importAdditionEdit(bytes, offset, lines),
-    };
+    const preferred = [
+      ...(lastSurvivor === undefined
+        ? []
+        : [offsetAfterLine(bytes, lastSurvivor.statement.range.end)]),
+      ...(firstRemoved === undefined
+        ? []
+        : [lineStartBefore(bytes, firstRemoved.statement.range.start)]),
+      0,
+    ];
+    const placed = placeSpecImportAdditions(
+      spec.document,
+      bytes,
+      composition,
+      lines,
+      preferred,
+    );
+    // SPEC 6.6: each added declaration is one import addition, reported as
+    // a zero-length insertion point at the exact offset the real operation
+    // then inserts at (SPEC 6.5).
+    for (let index = 0; index < lines.length; index += 1) {
+      preview.add(path, "import-addition", {
+        start: placed.offset,
+        end: placed.offset,
+      });
+    }
+    return placed.content;
   };
 
   // Assemble every rewritten file.
@@ -1606,24 +1920,24 @@ export function planMoveSection(
   } else {
     // The origin file: construct deletion, remaining-reference rewrites,
     // import removals and additions (SPEC 6.5).
-    const originImports = importEditsFor(
-      origin,
-      planFor(origin, originPath),
-      originBytes,
-    );
+    const originPlan = planFor(origin, originPath);
     const originEdits: SourceEdit[] = [
       ...deletionEditsWithLineDrops(originBytes, [
         movedRange,
-        ...originImports.deletionRanges,
+        ...importRemovalsFor(origin, originPlan, originBytes),
       ]),
       ...(outerEdits.editsFor(originPath) ?? []),
-      ...(originImports.additionEdit === null
-        ? []
-        : [originImports.additionEdit]),
     ];
+    const originComposition = editsComposition(originBytes, originEdits);
     rewrites.push({
       path: originPath,
-      content: applyEdits(originBytes, originEdits),
+      content:
+        withImportAdditions(
+          origin,
+          originPlan,
+          originBytes,
+          originComposition,
+        ) ?? originComposition.content,
     });
 
     // The target file: created empty before insertion (SPEC 6.5), or the
@@ -1651,25 +1965,29 @@ export function planMoveSection(
       content.set(tail, head.length + movedBody.length);
       rewrites.push({ path: targetPath, content });
     } else {
-      const targetImports = importEditsFor(
-        target,
-        planFor(target, targetPath),
-        targetBytes,
-      );
+      const targetPlan = planFor(target, targetPath);
       const targetEdits: SourceEdit[] = [
         ...deletionEditsWithLineDrops(
           targetBytes,
-          targetImports.deletionRanges,
+          importRemovalsFor(target, targetPlan, targetBytes),
         ),
         ...(outerEdits.editsFor(targetPath) ?? []),
-        ...(targetImports.additionEdit === null
-          ? []
-          : [targetImports.additionEdit]),
         ...(pairedFormEdit === null ? [] : [pairedFormEdit]),
       ];
+      const targetComposition = insertionComposition(
+        targetBytes,
+        targetEdits,
+        insertion,
+      );
       rewrites.push({
         path: targetPath,
-        content: assembleWithInsertion(targetBytes, targetEdits, insertion),
+        content:
+          withImportAdditions(
+            target,
+            targetPlan,
+            targetBytes,
+            targetComposition,
+          ) ?? targetComposition.content,
       });
     }
 
@@ -1683,15 +2001,18 @@ export function planMoveSection(
       const fileEdits: SourceEdit[] = [...(outerEdits.editsFor(path) ?? [])];
       if (plan !== undefined) {
         const bytes = encoder.encode(spec.document.text);
-        const imports = importEditsFor(spec, plan, bytes);
         fileEdits.push(
-          ...deletionEditsWithLineDrops(bytes, imports.deletionRanges),
+          ...deletionEditsWithLineDrops(
+            bytes,
+            importRemovalsFor(spec, plan, bytes),
+          ),
         );
-        if (imports.additionEdit !== null) {
-          fileEdits.push(imports.additionEdit);
-        }
-        if (fileEdits.length > 0) {
-          rewrites.push({ path, content: applyEdits(bytes, fileEdits) });
+        const composition = editsComposition(bytes, fileEdits);
+        const content = withImportAdditions(spec, plan, bytes, composition);
+        if (content !== null) {
+          rewrites.push({ path, content });
+        } else if (fileEdits.length > 0) {
+          rewrites.push({ path, content: composition.content });
         }
         continue;
       }
