@@ -38,7 +38,8 @@
 // `files` (the record-accepting `InitialFileContents`) and staged by
 // `TestWorkspace.create()` under the record's declaration, exactly as
 // `file()` stages one (the workspace declaration naming the record's path
-// is a contradiction and throws).
+// is a contradiction and throws); a plain `.mdx` entry there is refused at
+// creation, as a plain `file()` staging after an invocation is.
 //
 // What is NOT a ledger record: a property draw (judged per draw by the
 // property runner, S-9's property clause, and staged under the `per-draw`
@@ -54,9 +55,10 @@
 // judge) — as `TestWorkspace.copyFrom()` carries another workspace's
 // product-written bytes into a fresh one. The builder's undeclared-staging
 // guard (helpers/workspace.ts, helpers/product-invocations.ts) refuses
-// every other plain `.mdx` staging made after a product invocation, so an
-// omission from the ledger is a harness error at the first run that reaches
-// the site.
+// every other plain `.mdx` staging made after a product invocation — a
+// `file()` write, and an initial `files` entry of a workspace created after
+// the running body's first invocation alike — so an omission from the
+// ledger is a harness error at the first run that reaches the site.
 
 import { MDX_ALLOWANCES } from "./mdx-derivability.js";
 import type { FileContents, MdxFileDeclaration } from "./workspace.js";

@@ -76,16 +76,22 @@
 //   non-`.mdx` key, or beside a workspace-declaration entry for its path,
 //   throws as a record beside an `mdx` option does); a body's first
 //   workspace's initial files may stay plain contents, reached by the
-//   sweep. The guard does not cover `create()`'s initial entries: a plain
-//   `.mdx` entry of a later-arm workspace is a convention the S-9 self-test
-//   cannot see, not a refusal. The declaration's `perDraw` list is the
-//   initial-file form of `per-draw`: a section-16 module's draw-derived
-//   initial files, judged by the property runner before the body saw them
-//   (`mdxPathsOf` lists a rendered map's plain `.mdx` keys for it); its
-//   `perDrawUnparseable` list is the initial-file form of
-//   `per-draw-unparseable` (P-12's break-parse twist, which the runner
-//   judges must not derive — the `"unparseable"` mark of helpers/property.ts
-//   `DrawSource`).
+//   sweep. The guard covers `create()`'s initial entries too, one code
+//   path with `file()`'s: a plain `.mdx` entry of a workspace created after
+//   the running body's first product invocation is refused at creation
+//   (the diagnosis names it an initial `files` entry, with its remedies),
+//   unless the declaration lists it `unchecked`, `perDraw`, or
+//   `perDrawUnparseable`, and the half-built workspace is disposed. At
+//   creation only the per-body mark can be set — the root was registered
+//   an instant before and nothing has run in it — so outside a body
+//   context (a self-test, the E-6 fixture) creation never refuses. The
+//   declaration's `perDraw` list is the initial-file form of `per-draw`: a
+//   section-16 module's draw-derived initial files, judged by the property
+//   runner before the body saw them (`mdxPathsOf` lists a rendered map's
+//   plain `.mdx` keys for it); its `perDrawUnparseable` list is the
+//   initial-file form of `per-draw-unparseable` (P-12's break-parse twist,
+//   which the runner judges must not derive — the `"unparseable"` mark of
+//   helpers/property.ts `DrawSource`).
 
 import { Buffer } from "node:buffer";
 import { execFile } from "node:child_process";
@@ -135,7 +141,10 @@ export type FileContents = string | Uint8Array;
  * that the S-9 self-test judged it before any product existed (module
  * header). A record belongs at an `.mdx` key the workspace's `mdx`
  * declaration does not name; a body's first workspace's initial files may
- * stay plain contents.
+ * stay plain contents, and a plain `.mdx` entry of a workspace created after
+ * the running body's first product invocation is refused at creation (the
+ * undeclared-staging guard) unless its path is listed `unchecked`,
+ * `perDraw`, or `perDrawUnparseable`.
  */
 export type InitialFileContents = FileContents | StagedMdx;
 
@@ -406,8 +415,14 @@ export class TestWorkspace {
    * staged-source record, staged under the record's own declaration (module
    * header — the form of a later-arm workspace's initial `.mdx` files, which
    * S-7's sweep never reaches; a body's first workspace's may stay plain).
-   * Outside the undeclared-staging guard: a plain entry is not refused after
-   * an invocation.
+   * Inside the undeclared-staging guard, as `file()` is: a plain `.mdx`
+   * entry of a workspace created after the running body's first product
+   * invocation is refused before anything of it is written, unless the
+   * workspace declaration lists it `unchecked`, `perDraw`, or
+   * `perDrawUnparseable` (`guardUndeclaredStaging`; at creation only the
+   * per-body mark can be set, so outside a body context — a self-test, the
+   * E-6 fixture — creation never refuses); `create()` then disposes the
+   * half-built workspace.
    */
   private async stageInitial(
     rel: string,
@@ -425,6 +440,13 @@ export class TestWorkspace {
     } else {
       data = toBytes(contents);
       declaration = undefined;
+      if (isMdxPath(rel)) {
+        this.guardUndeclaredStaging(
+          rel,
+          this.mdxDeclarations.get(mdxKey(rel)) ?? "well-formed",
+          "initial entry",
+        );
+      }
     }
     this.checkMdx(rel, data, declaration);
     await this.write(rel, data);
@@ -480,11 +502,17 @@ export class TestWorkspace {
    * it; unless its effective declaration exempts it, it is refused with the
    * rule to follow. "After a product invocation" is judged both per
    * workspace (this one's mark) and per body (the running registered body's
-   * context), the latter being S-7's actual reach.
+   * context), the latter being S-7's actual reach. `site` is the staging's
+   * kind, named in the diagnosis with its remedies: a write after creation
+   * (`file()`, `copyFrom()`), or an initial `files` entry `create()` stages —
+   * where only the per-body mark can refuse, since the workspace's own mark
+   * cannot be set yet (its root was registered an instant before, and
+   * nothing has run in it).
    */
   private guardUndeclaredStaging(
     rel: RelPath,
     declaration: MdxFileDeclaration,
+    site: "write" | "initial entry" = "write",
   ): void {
     if (
       declaration === "unchecked" ||
@@ -498,11 +526,11 @@ export class TestWorkspace {
     const where = this.invocationMark.invoked
       ? "in this workspace"
       : `in the running body of ${body ?? "?"} (in another workspace: S-7's sweep stops at the body's first invocation wherever it happens)`;
-    throw new HarnessStagingError(
-      "undeclared-staging",
-      mdxKey(rel),
-      `an MDX source staged with plain contents (declared ${JSON.stringify(declaration)}) after a product invocation ${where} — S-7's sweep against the empty stub never reaches this staging (the body fails at that invocation), so S-9's check would first run at suite time, against a real product, not before any product exists (H-8). Stage it as a staged-source record instead (helpers/staged-mdx.ts: \`stagedMdx("<TEST-ID> <what it stages>", <the same expression, moved, never re-spelled>, <this declaration>)\` at module level, passed to \`file()\`), which test/self/s9-staged-sources.test.ts judges before any product exists; an edit of bytes the product itself wrote goes through \`edit()\`; a P-8 fuzz mutation is declared \`unchecked\`; a property draw the runner already judged is declared \`per-draw\` (\`per-draw-unparseable\` for a draw the document declares unparseable; section-16 modules only); another workspace's product-written bytes carried into a fresh workspace go through \`copyFrom()\``,
-    );
+    const detail =
+      site === "initial entry"
+        ? `an initial \`files\` entry of a workspace created after a product invocation ${where}, staged with plain contents (declared ${JSON.stringify(declaration)}) — S-7's sweep against the empty stub never reaches this creation (the body fails at that invocation), so S-9's check would first run at suite time, against a real product, not before any product exists (H-8). Pass a staged-source record as the entry's value instead (helpers/staged-mdx.ts: \`stagedMdx("<TEST-ID> <workspace or arm> <path>", <the same expression, moved, never re-spelled>, <this declaration>)\` at module level, and the path dropped from the workspace's \`mdx\` declaration — the record carries it), which test/self/s9-staged-sources.test.ts judges before any product exists; a property draw's initial file the runner already judged is listed in \`mdx.perDraw\` (\`mdx.perDrawUnparseable\` for a draw the document declares unparseable; section-16 modules only); a P-8 fuzz mutation or a noise file no discovery reaches is listed in \`mdx.unchecked\``
+        : `an MDX source staged with plain contents (declared ${JSON.stringify(declaration)}) after a product invocation ${where} — S-7's sweep against the empty stub never reaches this staging (the body fails at that invocation), so S-9's check would first run at suite time, against a real product, not before any product exists (H-8). Stage it as a staged-source record instead (helpers/staged-mdx.ts: \`stagedMdx("<TEST-ID> <what it stages>", <the same expression, moved, never re-spelled>, <this declaration>)\` at module level, passed to \`file()\`), which test/self/s9-staged-sources.test.ts judges before any product exists; an edit of bytes the product itself wrote goes through \`edit()\`; a P-8 fuzz mutation is declared \`unchecked\`; a property draw the runner already judged is declared \`per-draw\` (\`per-draw-unparseable\` for a draw the document declares unparseable; section-16 modules only); another workspace's product-written bytes carried into a fresh workspace go through \`copyFrom()\``;
+    throw new HarnessStagingError("undeclared-staging", mdxKey(rel), detail);
   }
 
   /**
