@@ -628,9 +628,13 @@ export function buildWorkspaceGraph(
             reference.range,
             `unknown TypeScript reference: the ${construct} referencing ` +
               `${describeExternal(reference.modulePath, reference.segments)} ` +
-              `does not resolve — ${resolved.reason}; this is also a type ` +
-              `error against the generated module; correct or remove the ` +
-              `reference (SPEC 4.5, 14.7)`,
+              `does not resolve — ${resolved.reason}` +
+              // SPEC 14.7: the type-error clause holds only for a spelling
+              // free of escape sequences (2.4).
+              (reference.escapeFree
+                ? `; this is also a type error against the generated module`
+                : "") +
+              `; correct or remove the reference (SPEC 4.5, 14.7)`,
           ),
         );
         continue;
@@ -857,6 +861,21 @@ function describeExternal(
   return JSON.stringify(`${modulePath}#${segments.join(".")}`);
 }
 
+/**
+ * SPEC 2.4, 1.4: a reference is read as spelled — a string literal's value
+ * and a chain segment's name are their characters, no escape sequence or
+ * character reference interpreted — so a spelling holding `\` or `&`
+ * names no valid identity. The note that makes such an unresolved
+ * reference actionable (SPEC 14); empty for any other spelling.
+ */
+function verbatimSpellingNote(spelled: string): string {
+  return spelled.includes("\\") || spelled.includes("&")
+    ? ` — the reference is read as spelled, no escape sequence or ` +
+        `character reference interpreted, and no ID segment contains "\\" ` +
+        `or "&"; spell the ID's characters plainly (SPEC 2.4, 1.4)`
+    : "";
+}
+
 /** Reference resolution against the parsed documents (SPEC 2.2, 2.3, 4.5). */
 class Resolver {
   constructor(
@@ -878,7 +897,8 @@ class Resolver {
           ok: false,
           reason:
             `no section with ID ${JSON.stringify(target.idPath)} exists ` +
-            `in ${JSON.stringify(document.path)}`,
+            `in ${JSON.stringify(document.path)}` +
+            verbatimSpellingNote(target.idPath),
         };
       }
       return { ok: true, node };
@@ -932,7 +952,8 @@ class Resolver {
         ok: false,
         reason:
           `no section with ID ${JSON.stringify(id)} exists in ` +
-          JSON.stringify(modulePath),
+          JSON.stringify(modulePath) +
+          verbatimSpellingNote(id),
       };
     }
     return { ok: true, node };

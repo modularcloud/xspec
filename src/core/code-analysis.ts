@@ -173,6 +173,14 @@ export interface CodeReference {
    * through closing parenthesis, argument included.
    */
   readonly occurrenceRange: ByteRange;
+  /**
+   * Whether the reference is spelled free of escape sequences (SPEC 2.4):
+   * no `\` among the characters of its chain's root identifier and
+   * segment names, or of a `text` call's callee. Only such a spelling that
+   * does not resolve is also a type error against the generated module
+   * (SPEC 14.7) — TypeScript reads an escape interpreted, xspec as spelled.
+   */
+  readonly escapeFree: boolean;
 }
 
 /** The analysis of one parseable code source. */
@@ -550,7 +558,8 @@ class CodeAnalyzer {
    * Build one recorded reference from a classified static chain.
    * `occurrenceRange` is the SPEC 5.7 occurrence span — for a marker the
    * chain itself (omit it), for a `text(...)` call the entire call
-   * expression, callee through closing parenthesis.
+   * expression, callee through closing parenthesis. `callee` is a `text`
+   * call's callee, part of the spelling judged for escapes (SPEC 14.7).
    */
   private chainReference(
     kind: "references" | "embeds",
@@ -558,6 +567,7 @@ class CodeAnalyzer {
     modulePath: string,
     location: string,
     occurrenceRange?: ByteRange,
+    callee?: tst.Node,
   ): CodeReference {
     const spanRange = (span: {
       readonly start: number;
@@ -567,6 +577,19 @@ class CodeAnalyzer {
       end: this.offsets.byteOffset(span.end),
     });
     const range = spanRange(classified.span);
+    // SPEC 2.4, 14.7: a spelling free of escape sequences — no `\` in
+    // the root identifier, a segment's name token, or the callee.
+    const tokens = [
+      classified.rootSpan,
+      ...classified.segments.map((segment) => segment.nameSpan),
+      ...(callee === undefined
+        ? []
+        : [{ start: callee.getStart(this.sourceFile), end: callee.getEnd() }]),
+    ];
+    const escapeFree = tokens.every(
+      (token) =>
+        !this.sourceFile.text.slice(token.start, token.end).includes("\\"),
+    );
     return {
       kind,
       location,
@@ -586,6 +609,7 @@ class CodeAnalyzer {
       },
       range,
       occurrenceRange: occurrenceRange ?? range,
+      escapeFree,
     };
   }
 
@@ -1521,6 +1545,7 @@ class CodeAnalyzer {
         rootBinding.target.path,
         this.attributionOf(call),
         this.rangeOf(call),
+        call.expression,
       ),
     );
   }
