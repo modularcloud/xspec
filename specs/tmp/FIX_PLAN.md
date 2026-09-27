@@ -997,6 +997,64 @@ the 17 record tests); certification 144 PASS / 33 FAIL / 0 error / 0 hang over t
 23 `certification run against` lines; the ledger-wide duplicate-bytes probe 657
 records in the same 29 groups.
 
+**Resolved by Task 19 (the §12.0 modules; 8a4583f converts, the closing commit
+records).** Thirteen records. `section-12.0-i.ts` 7 — `STREAMS_VALID_SOURCE` (the
+minimal section a: `<S id="a">`, `Alpha text.`) wrapped in place and EXPORTED as ONE
+record for every §12.0 site spelling its bytes (`"T12.0-2/T12.0-3/T12.0-9/T12.0-10/T12.0-14
+specs/A.mdx (the minimal section a: …)"`: T12.0-2's usage- and configuration-error
+arms, T12.0-3's relative-resolution workspace, T12.0-9's corrupt-session and
+configuration-error arms, T12.0-10's past-the-gate workspace, T12.0-14's grammar
+workspace — the `section-12.0-ii.ts` and `section-12.0-iii.ts` spellings deleted,
+`GRAMMAR_SOURCE` with them); `STREAMS_INVALID_SOURCE` likewise (`"T12.0-2/T12.0-9 …"`:
+T12.0-2's first workspace, T12.0-9's findings arm by import); `ALT_SOURCE` (T12.0-3's
+`alt/aspecs/B.mdx`), `ADDRESSING_SOURCE` (T12.0-5's first workspace and its
+configuration-state twins, one record), `CASE_SOURCE` (T12.0-6's casing workspace; the
+NFC/NFD tag constants untouched), and the two-casing workspace's literals moved to
+module level (`T12_0_6_UPPER_CASING` / `T12_0_6_LOWER_CASING`). `section-12.0-ii.ts`
+5 — T12.0-8's coverage arm (`TIE_BOUNDARY_SOURCE`, `TIE_TARGET_SOURCE` wrapped in
+place) and impact arm (`T12_0_8_M_V1`, the template call moved beside the existing v2
+edit record); T12.0-9's findings-arm `specs/U.mdx` (`T12_0_9_U_SOURCE`); the minimal
+section alpha that T12.0-9's wrong-kind and exclusion arms and T12.0-10's precedence
+pair and syntax workspace spell identically — ONE record `ALPHA_SECTION_STAGED`
+(`"T12.0-9/T12.0-10 …"`), `PRECEDENCE_TWIN_FILES` / `PRECEDENCE_FAILING_FILES` widened
+(the precedence pair precedes T12.0-10's first `build`; its `specs/Broken.mdx` stays
+plain under the workspace `unparseable` declaration). `section-12.0-iii.ts` 1 —
+T12.0-14's `--config`-first workspace's `cfg/specs/B.mdx` (`T12_0_14_CFG_B_SOURCE`, the
+literal moved; behind the diagnosed failure at `--json ids`, judged by reading). No new
+sub-rule: a byte sequence several modules of one task spell is ONE record created and
+exported by the first module in registry order and imported by the others (Task 13's
+form), named with every staging test, first-workspace callers included (T12.0-14's
+grammar workspace; Task 12's "aliased rather than left as a second spelling"). Left
+plain: T12.0-1's, T12.0-3's, and T12.0-4's sweep workspaces (`createSweepWorkspace`,
+each its body's first), T12.0-6's single-casing probe (its first; the Windows leg
+reruns it), T12.0-7's two story workspaces (both before its first invocation),
+T12.0-9's story workspace and its omega edit, T12.0-8's reachable arm, T12.0-11's,
+T12.0-12's, and T12.0-13's single workspaces, T12.0-10's `specs/Broken.mdx` and its
+file-less missing-configuration twin, every session, `.ts`, and configuration entry.
+Read-based enumeration: 12 + 19 + 2 creation call sites judged; T12.0-10 fails at its
+syntax rows in its last workspace pair (both later sites reached), T12.0-14 at
+`--json ids` in its first workspace (its second workspace the one unreached site, a
+record). Recovery: the conversion was drafted by an iteration that died before
+committing; this one re-verified it — the before side re-run from HEAD's copies of the
+three modules, the after side from the working tree it committed. Observation for the
+determination, not acted on (Task 14's class): the duplicate-bytes probe finds 670
+records in 30 groups — `STREAMS_VALID_SOURCE` joins the §6.3 `specs/A.mdx` group,
+`T12_0_14_CFG_B_SOURCE` the §6.1/§6.5 `specs/B.mdx` group, and `ALT_SOURCE` forms a
+30th with `"T10.7-2 specs/B.mdx with leaf b (…)"`; none within the §12.0 modules (Task
+21's notes updated: `section-13.4.ts`'s `RELOCATED_MDX` spells `STREAMS_VALID_SOURCE`'s
+bytes). Checks: the sites hook logged the task's 13 (test, path) pairs (20 lines, all
+`"well-formed"`) before and no file after; the sha256 capture over the three suite
+files (85 writes, compared sorted) identical; 14 tests, 12 pass and 2 fail — T12.0-10,
+T12.0-14 — with identical verdict lines and diagnoses (~62 s a run); red check: an
+unclosed tag spliced into the addressing record and the coverage arm's
+`specs/tgt/T.mdx` record fails exactly those two as `mdx-derivability` under the
+ledger self-test's `-t 'T12\.0-'` filter (14 tests). Known state after Task 19: the
+S-9 self-test 696 tests over 670 records (663 `T…`, 4 `E-6`, 3 `P-…`); self project
+22 files, 2836 passed, 0 skipped under the namespace (~88 s; 2823 + the 13 record
+tests); certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23
+`certification run against` lines; the ledger-wide duplicate-bytes probe 670 records
+in 30 groups.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -1164,28 +1222,6 @@ behind a diagnosed failure or in an arm the built product never reaches — reci
 
 ## Tasks
 
-### Task 19 — Initial-file conversion: §12.0 (`section-12.0-i.ts`, `section-12.0-ii.ts`, `section-12.0-iii.ts`)
-
-**Workspace creations to judge:** 12.0-i (11; `withWorkspace` ~138; a
-`stageConfigurationStateTwins` caller), 12.0-ii (18; 1 record; `makeStoryWorkspace`'s
-omega edit precedes each caller's first invocation and stays), 12.0-iii (3).
-**Reachable sites (the instrumented run):**
-- `section-12.0-i.ts` — T12.0-2 (1): specs/A.mdx
-- `section-12.0-i.ts` — T12.0-3 (2): alt/aspecs/B.mdx specs/A.mdx
-- `section-12.0-i.ts` — T12.0-5 (1): specs/A.mdx
-- `section-12.0-i.ts` — T12.0-6 (3): specs/A.mdx specs/T.mdx specs/a.mdx
-- `section-12.0-ii.ts` — T12.0-8 (3): specs/M.mdx specs/bnd/B.mdx specs/tgt/T.mdx
-- `section-12.0-ii.ts` — T12.0-9 (2): specs/A.mdx specs/U.mdx
-- `section-12.0-ii.ts` — T12.0-10 (1): specs/A.mdx
-**Failing here:** T12.0-10, T12.0-14.
-**Certification scope:** none.
-**Notes.** The previous plan's Task 16 findings name the arms: T12.0-8's coverage and
-impact arms, T12.0-9's corrupt, invalid, wrong-kind, and exclusion arms, T12.0-10's
-workspaces after its twin pair; T12.0-3's `alt/aspecs/B.mdx` is an alternate root's
-source.
-**Checks.** Recipes 1–5 over `section-12.0-i.test`, `section-12.0-ii.test`,
-`section-12.0-iii.test`.
-
 ### Task 20 — Initial-file conversion: §12.1–§12.7 (`section-12.1-12.2.ts`, `section-12.3-12.5.ts`, `section-12.6.ts`, `section-12.7.ts`)
 
 **Workspace creations to judge:** 12.1-12.2 (19; 9 records; its `withWorkspace` and
@@ -1241,6 +1277,10 @@ T6.6-3's scheduling workspace (`section-6.6.ts`'s `TestWorkspace.create(CORE_DEC
 after its first invocation and behind its diagnosed failure at the identity-terms arm —
 reached by no run), so its record's name carries T6.6-3 beside the §13.5 tests that
 create it after their first invocation (Task 12's finding; Task 10's sub-rule (iii)).
+`RELOCATED_MDX` (`section-13.4.ts` ~1967) spells the bytes of `section-12.0-i.ts`'s
+exported `STREAMS_VALID_SOURCE` (Task 19): where its staging is post-invocation, reuse
+that record by import and rename it with the staging IDs in ID order (the compare
+~2033 reading `.source` or a kept string), never re-spell.
 **Checks.** Recipes 1–5 over `section-13.1-13.2.test`, `section-13.3.test`,
 `section-13.4.test`, `section-13.5.test`.
 
