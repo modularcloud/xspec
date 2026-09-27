@@ -1119,6 +1119,65 @@ Known state after Task 20: the S-9 self-test 712 tests over 686 records (679 `T�
 0 hang over the 23 `certification run against` lines; the ledger-wide duplicate-bytes
 probe 686 records in 31 groups.
 
+**Resolved by Task 21 (the §13 modules and the H-6 refusal fixtures; 31d884c converts,
+the closing commit records).** Fifteen records, one of another module's reused.
+`section-13.1-13.2.ts` 2 — T13.2-1's `EMISSION_SOURCES` entries wrapped in place (the
+outDir arm follows the default arm's invocations; the default arm's workspace
+converted uniformly). `section-13.3.ts` 4 — the alpha-on-beta source, spelled three
+times with identical bytes (T13.3-1's only workspace, T13.3-2's record-discipline
+workspace, T13.3-3's two whole-gate workspaces), is ONE record `ALPHA_ON_BETA_SOURCE`
+(`"T13.3-1/T13.3-2/T13.3-3 specs/A.mdx (…)"`), `T13_3_2_RECORD_A` / `T13_3_3_GATE_A`
+aliased after it, the literals deleted (Task 20's sub-rule (i) applied to three
+strings); `T13_3_3_GATE_T` and `T13_3_4_FILES`' two sources wrapped in place.
+`section-13.5.ts` 2 — `CORE_A_STAGED`, made from the kept `A_MDX` string (the
+`.replace` source of `A_MDX_EDITED`), EXPORTED and staged by `CORE_DECL`, named with
+every staging test, first-workspace callers included (`"T6.6-3/T13.4-1/…/T13.4-6/
+T13.5-1/T13.5-2/T13.5-3/T13.5-4/T13.5-6/T13.5-8 specs/A.mdx (the CONF-CORE-shaped
+source …)"`): `section-13.4.ts`'s `A_MDX` spelled the same bytes, so its literal is
+deleted and it aliases the import (`const A_MDX = CORE_A_STAGED;`). Sub-rule applied:
+where one task's modules spell a byte sequence and one of them needs the STRING (here
+§13.5's `.replace`), the record lives in that module, made from the kept string, and
+the others import the record — rather than Task 19's "first module in registry order",
+which would leave the string-needing module a second spelling or a narrowing read;
+§13.5 is also the module the plan's note named and T6.6-3 already imports from.
+`ISO_TWO_MDX` wrapped in place; T13.5-5's first-workspace `pollSource(POLL_TEXT_ONE)`
+takes the existing state-one record (renamed `"… in state one (the initial source;
+the alternation's state one)"`). `section-13.4.ts` 2 — `B_MDX` wrapped in place, T13.4-3's
+inline spelling of its bytes (`walkOrphanBoundary`'s `specs/B.mdx`) replaced by it
+(`"T13.4-3/T13.4-6/T13.4-8 the minimal section b (…)"`); `SECTION_ORIGIN_MDX` wrapped in
+place; `RELOCATED_MDX` aliased to `section-12.0-i.ts`'s `STREAMS_VALID_SOURCE` (renamed
+`"T12.0-2/T12.0-3/T12.0-9/T12.0-10/T12.0-14/T13.4-8 …"`), the file-form move's compare
+reading `.source`. `write-refusal-staging.ts` 5 — `RENAME_A`/`RENAME_B`/`RENAME_C`
+(`"T13.5-7/T14-9/T14-10 the rename fixture …"`) and `MOVE_OTHER`/`MOVE_A` (`"T13.5-7/T14-9
+the move fixture …"`) wrapped in place: T14-9's and T14-10's arms (`section-14-ii.ts`)
+prepare them too, and its `PRECEDENCE_FIXTURE`/`LISTING_FIXTURE` spread the rename
+fixture's files (T14-10 never prepares the move fixture). Left plain: T13.1-1's and
+T13.1-2's workspaces, T13.3-2's and T13.3-3's first workspaces (no record holds their
+bytes), `MOVE_APP`, every configuration entry. Read-based enumeration: 5 + 9 + 18 + 15
+creation sites and `prepareRefusalWorkspace`'s one judged; behind the diagnosed
+failures — T13.3-2's record-discipline workspace (after its deletion arm), T13.4-6's
+seven later workspaces (after its first arm), T13.5-1's stale arm (after its `build
+--test-hold --json` arm), T13.5-7's later arms (after (a)), T14-9's twins and later
+arms (after (a)), T6.6-3's scheduling workspace — each stages records now.
+Observation for the determination, not acted on (Task 14's class): the duplicate-bytes
+probe finds 701 records in 32 groups — `B_MDX` joins the §6.1/§6.5/§12.0-iii
+`<S id="b">` group (four members now) and `CORE_A_STAGED` forms a 32nd with `"P-10
+specs/A.mdx"` (`section-16-p10.ts`); none within this task's modules. Checks: the sites
+hook logged 27 lines before — the task's 18 (test, path) pairs plus T14-10's three
+rename-fixture pairs (Task 23's list), all `"well-formed"` — and no file after; the
+sha256 capture over the four §13 suite files, `section-14-ii.test`, and
+`section-6.6.test` (207 writes, compared sorted) identical; 29 tests, 21 pass and 8
+fail — T13.3-2, T13.4-6, T13.5-1, T13.5-7, T14-9, T14-10, T6.6-3, T6.6-4 — with identical
+verdict lines and diagnoses (full blocks, temporary paths normalized and the product's
+temporary-file names `.xspec.tmp-<pid>-<n>` too, which T13.5-7's and T14-9's exit-70
+diagnoses quote; ~43 s a run); red check: an unclosed tag spliced into the T13.2-1 A,
+T13.3-4 C, T13.4-8 S, T13.5-6 B, and move-fixture Other records fails exactly those
+five as `mdx-derivability` in the S-9 self-test. Known state after Task 21: the S-9
+self-test 727 tests over 701 records (694 `T…`, 4 `E-6`, 3 `P-…`); self project 22
+files, 2867 passed, 0 skipped under the namespace (~90 s; 2852 + the 15 record tests);
+certification 144 PASS / 33 FAIL / 0 error / 0 hang over the 23 `certification run
+against` lines; the ledger-wide duplicate-bytes probe 701 records in 32 groups.
+
 ## The conversion rule, extended to initial files (governs Tasks 3–23)
 
 **Carried over, in force** (the previous plan's preamble, `git show
@@ -1286,44 +1345,6 @@ behind a diagnosed failure or in an arm the built product never reaches — reci
 
 ## Tasks
 
-### Task 21 — Initial-file conversion: §13 and the H-6 refusal fixtures (`section-13.1-13.2.ts`, `section-13.3.ts`, `section-13.4.ts`, `section-13.5.ts`, `write-refusal-staging.ts`)
-
-**Workspace creations to judge:** 13.1-13.2 (5), 13.3 (9; 2 records; `restoreGraphData`
-stages no `.mdx`), 13.4 (18; `withWorkspace` ~231), 13.5 (15; 4 records;
-`staleWorkspaceArm`), and `write-refusal-staging.ts`'s `RENAME_FIXTURE` (~203) and
-`MOVE_FIXTURE` (~272): their `decl.files` `.mdx` entries become records named with
-every test that prepares the fixture (`prepareRefusalWorkspace` / `completeOnTwin`
-callers — T13.5-7's arms; grep the callers), because the H-6 twin is always created
-after the original's `build`.
-**Reachable sites (the instrumented run):**
-- `section-13.1-13.2.ts` — T13.2-1 (2): specs/A.mdx specs/sub/LIB.mdx
-- `section-13.3.ts` — T13.3-3 (2): specs/A.mdx specs/T.mdx
-- `section-13.3.ts` — T13.3-4 (2): specs/A.mdx specs/sub/C.mdx
-- `section-13.4.ts` — T13.4-3 (2): specs/A.mdx specs/B.mdx
-- `section-13.4.ts` — T13.4-8 (3): specs/A.mdx specs/S.mdx specs/sub/B.mdx
-- `section-13.5.ts` — T13.5-4 (1): specs/A.mdx
-- `section-13.5.ts` — T13.5-6 (2): specs/A.mdx specs/B.mdx
-- `section-13.5.ts` — T13.5-7 (3): specs/a/A.mdx specs/b/B.mdx specs/c/C.mdx
-- `section-13.5.ts` — T13.5-8 (1): specs/A.mdx
-**Failing here:** T13.3-2, T13.4-6, T13.5-1, T13.5-7.
-**Certification scope:** T13.4-5, T13.5-1, T13.5-2, T13.5-3, T13.5-4, T13.5-5, T13.5-8
-(CONF-CORE) — run the self project; 144/33/0/0 (T13.5-4 and T13.5-8 are flagged: their
-conformer reaches the sites).
-**Notes.** `section-14-ii.ts`'s `PRECEDENCE_FIXTURE` / `LISTING_FIXTURE` are Task 23's.
-The `RefusalFixture.decl` type is `WorkspaceDecl` — record-accepting since Task 1.
-`CORE_DECL` (`section-13.5.ts`; `specs/A.mdx` from `A_MDX`, which stays a string for
-the `.replace` `A_MDX_EDITED` is made from, the record made from it) is also staged by
-T6.6-3's scheduling workspace (`section-6.6.ts`'s `TestWorkspace.create(CORE_DECL)`,
-after its first invocation and behind its diagnosed failure at the identity-terms arm —
-reached by no run), so its record's name carries T6.6-3 beside the §13.5 tests that
-create it after their first invocation (Task 12's finding; Task 10's sub-rule (iii)).
-`RELOCATED_MDX` (`section-13.4.ts` ~1967) spells the bytes of `section-12.0-i.ts`'s
-exported `STREAMS_VALID_SOURCE` (Task 19): where its staging is post-invocation, reuse
-that record by import and rename it with the staging IDs in ID order (the compare
-~2033 reading `.source` or a kept string), never re-spell.
-**Checks.** Recipes 1–5 over `section-13.1-13.2.test`, `section-13.3.test`,
-`section-13.4.test`, `section-13.5.test`.
-
 ### Task 22 — The T14-11 exchange: the §2 `UnparseableStaging` exports, T14-12's arm stagings, their consumer; plus `section-14-iii.ts`'s rest and `section-15.ts`
 
 **Requirement.** T14-11's closing clause re-stages, after its own earlier arms'
@@ -1369,8 +1390,10 @@ sites hook's after-log for the §2 files now empty but for `unchecked` entries).
 tables — arms (a)–(v) and the five encoding forms, `T14_11_ENCODING_FORMS` ~4424,
 whose `Uint8Array` contents are fine as record bytes — wrap in place, one record per
 row per `.mdx` entry, `unparseable` where the row declares it), 14-ii (2; the
-`PRECEDENCE_FIXTURE` ~657 / `LISTING_FIXTURE` ~1135 `RefusalFixture` decls: records
-named with every test preparing them, as Task 21's).
+`PRECEDENCE_FIXTURE` ~657 / `LISTING_FIXTURE` ~1135 `RefusalFixture` decls spread
+`RENAME_FIXTURE.decl.files`, records since Task 21 — `PRECEDENCE_FIXTURE` adds no
+`.mdx` entry; `LISTING_FIXTURE`'s own `SUB_PATH` source, prepared by T14-10's arm (g)
+after its earlier arms' invocations, becomes a record named with T14-10).
 **Reachable sites (the instrumented run):**
 - `section-14.ts` — T14-3 (2): specs/broken.mdx specs/invalid.mdx
 - `section-14.ts` — T14-4 (7): hi/H.mdx lo/L.mdx specs/a#b.mdx specs/a.mdx specs/alpha.mdx specs/bravo.mdx specs/s.mdx
@@ -1378,7 +1401,8 @@ named with every test preparing them, as Task 21's).
 - `section-14.ts` — T14-6 (7): specs/A.mdx specs/BASE.mdx specs/a#b.mdx specs/a.mdx specs/alpha.mdx specs/bravo.mdx specs/s.mdx
 - `section-14.ts` — T14-8 (9): specs/Col.mdx specs/CycA.mdx specs/CycB.mdx specs/Emb.mdx specs/ImpA.mdx specs/ImpB.mdx specs/One.mdx specs/Pol.mdx specs/Two.mdx
 - `section-14.ts` — T14-11 (3): specs/A.mdx specs/comment-only.mdx specs/empty.mdx
-- `section-14-ii.ts` — T14-10 (3): specs/a/A.mdx specs/b/B.mdx specs/c/C.mdx
+- `section-14-ii.ts` — T14-10 (3): specs/a/A.mdx specs/b/B.mdx specs/c/C.mdx (the rename
+  fixture's, records since Task 21 — Task 23's before-log lacks them)
 **Failing here:** T14-2, T14-4, T14-6, T14-7, T14-11 (14.ts); T14-9, T14-10 (14-ii).
 **Certification scope:** none.
 **Notes.** T14-4/T14-6 share records already (`"T14-4/T14-6 …"`); T14-3's
