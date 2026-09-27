@@ -20,6 +20,7 @@
 
 import ts from "./ts-module.js";
 import type * as tst from "typescript";
+import { byteOrderedSet } from "./bytes.js";
 import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
 import type { CompiledGlob } from "./glob.js";
@@ -38,6 +39,17 @@ export const DEPENDENCY_EDGE_KINDS: readonly DependencyEdgeKind[] = [
   "embeds",
   "references",
 ];
+
+/**
+ * The set form of a dependency-kind list (SPEC 12.7's kind-set value form):
+ * each distinct kind once, in the order SPEC 5.2 lists them — `"depends"`,
+ * `"embeds"`, `"references"` — however the list was spelled.
+ */
+export function dependencyKindSet(
+  kinds: readonly DependencyEdgeKind[],
+): DependencyEdgeKind[] {
+  return DEPENDENCY_EDGE_KINDS.filter((kind) => kinds.includes(kind));
+}
 
 /** One configured spec or code group (SPEC 7.1, 7.2): a named glob list. */
 export interface ConfiguredGroup {
@@ -63,7 +75,11 @@ export interface CoverageProfile {
   readonly name: string;
   /** Spec group whose requirements must be covered (SPEC 7.4). */
   readonly target: string;
-  /** When present, restricts the target set by tags (SPEC 7.4); never empty. */
+  /**
+   * When present, restricts the target set by tags (SPEC 7.4); never empty.
+   * Read as a set (SPEC 7.4): held in its 12.7 tag-set form — byte order,
+   * duplicates collapsed.
+   */
   readonly targetTags?: readonly string[];
   /** SPEC 7.4: default `"leaves"`. */
   readonly targets: "leaves" | "all";
@@ -71,7 +87,11 @@ export interface CoverageProfile {
   /** Resolved kind: inferred when unambiguous, else as given (SPEC 7.4). */
   readonly boundaryKind: "spec" | "code";
   readonly mode: "direct" | "transitive";
-  /** SPEC 7.4: defaults to all three dependency edge kinds; never empty. */
+  /**
+   * SPEC 7.4: defaults to all three dependency edge kinds; never empty.
+   * Read as a set (SPEC 7.4): held in its 12.7 kind-set form — 5.2's order,
+   * duplicates collapsed.
+   */
   readonly edgeKinds: readonly DependencyEdgeKind[];
 }
 
@@ -95,7 +115,11 @@ export type PolicySelector =
     }
   | {
       readonly selector: "tags";
-      /** Matching means carrying at least one listed tag (SPEC 7.5); never empty. */
+      /**
+       * Matching means carrying at least one listed tag (SPEC 7.5); never
+       * empty. Read as a set (SPEC 7.4, 7.5): held in its 12.7 tag-set
+       * form — byte order, duplicates collapsed.
+       */
       readonly tags: readonly string[];
     };
 
@@ -105,7 +129,11 @@ export interface PolicyRule {
   readonly type: "forbidden" | "allowedOnly";
   readonly from: PolicySelector;
   readonly to: PolicySelector;
-  /** SPEC 7.5: defaults to all three dependency edge kinds; never empty. */
+  /**
+   * SPEC 7.5: defaults to all three dependency edge kinds; never empty.
+   * Read as a set (SPEC 7.4): held in its 12.7 kind-set form — 5.2's order,
+   * duplicates collapsed.
+   */
   readonly kinds: readonly DependencyEdgeKind[];
 }
 
@@ -623,7 +651,10 @@ function optionalEnum<T extends string>(
 
 /**
  * Optional tag-list field (SPEC 7.4 `targetTags`, 7.5 selector `tags`): a
- * list of strings; an empty list is a configuration error (14.14).
+ * list of strings; an empty list is a configuration error (14.14). The list
+ * is read as a set (SPEC 7.4, 7.5) — a repeated element collapses, as on a
+ * list-valued flag (11.1) — and returned in its 12.7 tag-set form, byte
+ * order (SPEC 12.0), so every consumer and every output sees the set.
  */
 function optionalTagList(
   object: ObjectNode,
@@ -654,14 +685,16 @@ function optionalTagList(
     }
     tags.push(element.value);
   }
-  return tags;
+  return byteOrderedSet(tags);
 }
 
 /**
  * Optional dependency-edge-kind list (SPEC 7.4 `edgeKinds`, 7.5 rule
  * `kinds`): a subset of depends/embeds/references; empty is a configuration
  * error (14.14). Returns undefined when absent (caller applies the
- * all-three default) or invalid.
+ * all-three default) or invalid. The list is read as a set (SPEC 7.4) and
+ * returned in its 12.7 kind-set form: 5.2's order, duplicates collapsed,
+ * however it was spelled.
  */
 function optionalKindList(
   object: ObjectNode,
@@ -697,9 +730,9 @@ function optionalKindList(
       );
       continue;
     }
-    if (!kinds.includes(element.value)) kinds.push(element.value);
+    kinds.push(element.value);
   }
-  return kinds;
+  return dependencyKindSet(kinds);
 }
 
 /**

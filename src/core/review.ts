@@ -64,7 +64,7 @@
 // values. File I/O — reading `.xspec/reviews/`, classifying occupants,
 // writing session files — lives in src/workspace/reviews.ts.
 
-import { compareBytes } from "./bytes.js";
+import { byteOrderedSet, compareBytes } from "./bytes.js";
 import { canonicalJson } from "./canonical-json.js";
 import type { JsonObject, JsonValue } from "./canonical-json.js";
 import { parseCanonicalIdentity } from "./journal.js";
@@ -74,7 +74,7 @@ import type {
   CoverageProfile,
   DependencyEdgeKind,
 } from "./config.js";
-import { DEPENDENCY_EDGE_KINDS } from "./config.js";
+import { DEPENDENCY_EDGE_KINDS, dependencyKindSet } from "./config.js";
 import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
 
@@ -1155,14 +1155,19 @@ function parseRecordedProfile(
   if (!complete || problems.list.length > before) {
     return null;
   }
+  // SPEC 7.4: `targetTags` and `edgeKinds` are read as sets — a recorded
+  // list in any order, a repeated element included, means its set, held in
+  // the 12.7 value forms (tag sets in byte order, kind sets in 5.2's order)
+  // like the configured lists a `create` records (core/config.ts).
   return {
     name: name as string,
     target: target as RecordedGroup,
-    targetTags,
+    targetTags:
+      targetTags === undefined ? undefined : byteOrderedSet(targetTags),
     targets: targets as "leaves" | "all",
     boundary: boundary as RecordedGroup,
     mode: mode as "direct" | "transitive",
-    edgeKinds,
+    edgeKinds: dependencyKindSet(edgeKinds),
   };
 }
 

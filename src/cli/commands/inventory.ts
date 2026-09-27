@@ -103,7 +103,9 @@ function groupDefJson(group: {
 
 /**
  * A resolved policy selector (SPEC 7.5, 12.7): `{"group", "kind"}` with the
- * kind explicit though inferred, `{"files"}`, or `{"tags"}`.
+ * kind explicit though inferred, `{"files"}`, or `{"tags"}` — the list a
+ * tag set, as the configuration holds it (core/config.ts reads it as a set,
+ * SPEC 7.5, 12.7: byte order, duplicates collapsed).
  */
 function policySelectorJson(selector: PolicySelector): JsonObject {
   switch (selector.selector) {
@@ -122,7 +124,11 @@ function policySelectorJson(selector: PolicySelector): JsonObject {
  * `{"emit": false, "outDir": null}` (7.3), `targetTags` null where absent —
  * groups, profiles, and rules in configuration order, each carried with its
  * complete definition; group references stay the configured group names,
- * resolving against the group lists this same view reports.
+ * resolving against the group lists this same view reports. `targetTags`,
+ * `edgeKinds`, and a rule's `kinds`, configured or defaulted, are in their
+ * 12.7 set forms (tag sets in byte order, kind sets in 5.2's order,
+ * duplicates collapsed) because the configuration holds them so
+ * (core/config.ts reads them as sets, SPEC 7.4, 7.5).
  */
 function configurationViewJson(configuration: Configuration): JsonObject {
   return {

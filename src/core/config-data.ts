@@ -13,7 +13,12 @@
 // policy `files` selector in capture-from mode for `from`, capture-to for
 // `to` — core/config.ts). Anything structurally off — or any pattern that
 // no longer compiles — yields null, and the caller falls back to the full
-// parse; the fast path treats null as "no recorded parse".
+// parse; the fast path treats null as "no recorded parse". A recorded tag
+// or kind list must also be in the set form the parser now produces
+// (SPEC 7.4, 7.5, 12.7: tag sets in byte order, kind sets in 5.2's order,
+// duplicates collapsed): a record written in any other form is not what
+// parsing these bytes yields, so it too falls back, and the full path's
+// compare-and-refresh replaces it (SPEC 13.3).
 //
 // Pure core (IMPLEMENTATION Architecture): data in, data out, no I/O — and
 // deliberately free of core/config.ts value imports, so loading this module
@@ -29,6 +34,7 @@ import type {
   PolicyRule,
   PolicySelector,
 } from "./config.js";
+import { isByteOrderedSet } from "./bytes.js";
 import type { GlobMode } from "./glob.js";
 import { compileGlob } from "./glob.js";
 
@@ -112,19 +118,37 @@ function parseStringArray(value: unknown): string[] | null {
   return out;
 }
 
-const EDGE_KIND_VALUES: ReadonlySet<string> = new Set([
-  "depends",
-  "embeds",
-  "references",
-]);
+/** SPEC 5.2: the dependency edge kinds, in the order 5.2 lists them. */
+const EDGE_KIND_ORDER: readonly string[] = ["depends", "embeds", "references"];
 
+/**
+ * A recorded kind list (SPEC 7.4 `edgeKinds`, 7.5 rule `kinds`): non-empty
+ * and in its 12.7 kind-set form — dependency kinds only, strictly in 5.2's
+ * order, so none repeats.
+ */
 function parseEdgeKinds(value: unknown): DependencyEdgeKind[] | null {
   const items = parseStringArray(value);
   if (items === null || items.length === 0) return null;
+  let previous = -1;
   for (const item of items) {
-    if (!EDGE_KIND_VALUES.has(item)) return null;
+    const position = EDGE_KIND_ORDER.indexOf(item);
+    if (position <= previous) return null;
+    previous = position;
   }
   return items as DependencyEdgeKind[];
+}
+
+/**
+ * A recorded tag list (SPEC 7.4 `targetTags`, 7.5 selector `tags`):
+ * non-empty and in its 12.7 tag-set form — strictly ascending byte order,
+ * so none repeats.
+ */
+function parseTagSet(value: unknown): string[] | null {
+  const items = parseStringArray(value);
+  if (items === null || items.length === 0 || !isByteOrderedSet(items)) {
+    return null;
+  }
+  return items;
 }
 
 function parseStoredGroup(value: unknown): StoredGroup | null {
@@ -171,8 +195,8 @@ function selectorFromStored(
       return { selector: "files", pattern, glob: compiled.glob };
     }
     case "tags": {
-      const tags = parseStringArray(value["tags"]);
-      if (tags === null || tags.length === 0) return null;
+      const tags = parseTagSet(value["tags"]);
+      if (tags === null) return null;
       return { selector: "tags", tags };
     }
     default:
@@ -203,8 +227,8 @@ function coverageFromStored(value: unknown): CoverageProfile | null {
   }
   let targetTags: readonly string[] | undefined;
   if (targetTagsRaw !== null) {
-    const parsed = parseStringArray(targetTagsRaw);
-    if (parsed === null || parsed.length === 0) return null;
+    const parsed = parseTagSet(targetTagsRaw);
+    if (parsed === null) return null;
     targetTags = parsed;
   }
   return {
