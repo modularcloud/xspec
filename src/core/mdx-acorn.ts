@@ -35,8 +35,13 @@
 // generator, as an AwaitExpression or YieldExpression before it can see a
 // following `=>`, so `await => 1` and a generator's `yield => 1` — arrows
 // whose one parameter derives, an early error — stay unparseable.
+//
+// `mdxAcorn` also judges "whitespace and comments alone" — a container's
+// empty expression, and what may follow a container's one expression — as
+// SPEC 14.20 does: by the comment deletions remark-mdx applies and, as
+// spelled, by lexing to no token (`judgeCommentsAsSpelled`, below).
 
-import type { TokenType } from "acorn";
+import type { Expression, Options, Program, TokenType } from "acorn";
 import { Parser, tokTypes } from "acorn";
 import acornJsx from "acorn-jsx";
 
@@ -775,28 +780,182 @@ function excludeEarlyErrors(BaseParser: typeof Parser): typeof Parser {
   return Extended as unknown as typeof Parser;
 }
 
-/**
- * The parser remark-mdx is handed (SPEC 14.20): acorn with JSX, deriving the
- * ECMAScript 2024 grammar alone — early errors excluded.
- */
-export const mdxAcorn: typeof Parser = Parser.extend(
-  acornJsx(),
-  excludeEarlyErrors,
-);
+// ---------------------------------------------------------------------------
+// Whitespace and comments alone (SPEC 14.20)
+// ---------------------------------------------------------------------------
+
+// SPEC 14.20: whether `text` is whitespace and comments alone by the
+// comment deletions — each block comment, `/*` through the nearest `*/`,
+// deleted first, then each line comment, `//` through the first U+000A or
+// U+000D (U+2028 and U+2029 notwithstanding; one not so ended stays put) —
+// nothing but whitespace and line terminators remaining (JavaScript's `\s`,
+// exactly ECMAScript 2024's WhiteSpace and LineTerminator). These are
+// remark-mdx's own deletions (micromark-util-events-to-acorn), which decide
+// the brace closing a container: one on a commented-out line closes none.
+function commentDeletionsEmpty(text: string): boolean {
+  return /^\s*$/u.test(
+    text
+      .replace(/\/\*[\s\S]*?\*\//gu, "")
+      .replace(/\/\/[^\n\r]*(?:\r\n|\n|\r)/gu, ""),
+  );
+}
 
 /**
- * SPEC 2.7, 14.20: whether an expression container's content, as MDX 3
- * derives it, is the empty expression — whitespace and comments alone, so
- * that it lexes to no token under the grammar (whitespace and line
- * terminators ECMAScript 2024's: U+00A0, U+FEFF, U+2028, and U+2029
- * included, U+0085 and U+200B not). Content holding a token, or failing to
- * lex (an unterminated comment), is no empty expression.
+ * SPEC 14.20: whether `text`, as spelled, lexes to no token under the
+ * grammar — comments ended where ECMAScript 2024 ends them (a line comment
+ * at U+2028 and U+2029 as well), whitespace and line terminators the
+ * edition's (U+00A0, U+FEFF, U+2028, and U+2029 included, U+0085 and
+ * U+200B not). Text failing to lex (an unterminated comment) does not.
  */
-export function isEmptyExpression(content: string): boolean {
+function lexesToNoToken(text: string): boolean {
   try {
-    const tokenizer = mdxAcorn.tokenizer(content, { ...MDX_ACORN_OPTIONS });
+    const tokenizer = mdxAcorn.tokenizer(text, { ...MDX_ACORN_OPTIONS });
     return tokenizer.getToken().type === tokTypes.eof;
   } catch {
     return false;
   }
+}
+
+/** acorn's parser as `deriveExpression` drives it (acorn 8.17). */
+interface ExpressionParser {
+  /** The current token: after an expression, the one following it. */
+  readonly type: TokenType;
+  readonly start: number;
+  nextToken(): void;
+  parseExpression(): Expression;
+}
+
+/**
+ * acorn's own `raise`, which always throws: a failure raised through it
+ * is a derivation failure, never an early error to suppress.
+ */
+const raiseDerivationFailure = (
+  Parser.prototype as unknown as {
+    raise(this: ExpressionParser, pos: number, message: string): never;
+  }
+).raise;
+
+/**
+ * SPEC 14.20: the one expression `input` derives from `pos` (acorn's
+ * `parseExpressionAt`), beside nothing that lexes to a token: where what
+ * follows it holds a token that the comment deletions hide — so remark-mdx
+ * would take what follows for whitespace and comments alone — the
+ * derivation fails at that token. What follows, the deletions not emptying
+ * it, is remark-mdx's own failure ("Unexpected content after expression").
+ */
+function deriveExpression(
+  ParserClass: typeof Parser,
+  input: string,
+  pos: number,
+  options: Options,
+): { readonly parser: ExpressionParser; readonly expression: Expression } {
+  const parser = new (
+    ParserClass as unknown as new (
+      options: Options,
+      input: string,
+      startPos: number,
+    ) => ExpressionParser
+  )(options, input, pos);
+  parser.nextToken();
+  const expression = parser.parseExpression();
+  if (
+    parser.type !== tokTypes.eof &&
+    commentDeletionsEmpty(input.slice(expression.end))
+  ) {
+    raiseDerivationFailure.call(parser, parser.start, "Unexpected token");
+  }
+  return { parser, expression };
+}
+
+// The acorn plugin judging whitespace and comments alone as SPEC 14.20
+// does: by the comment deletions and, as spelled, by lexing to no token.
+// remark-mdx takes the deletions' verdict alone — content they empty is
+// parsed as a whole Program (`parse`, its empty-expression path), and what
+// follows a container's one expression passes when they empty it — while a
+// `/*` inside a line comment reaches a later line's `*/`, hiding the tokens
+// between from them (`{// /*` LF `x; y /* */` LF `}`). So `parse`, handed
+// content the deletions empty but that holds a token (only the
+// empty-expression path hands it such content: an ESM block begins with
+// `import` or `export`, and remark-mdx refuses an attribute value's such
+// content before parsing), derives it as any other container content — one
+// expression beside whitespace and comments alone, or none (14.20) —
+// shaped as remark-mdx shapes a derived expression: a Program holding one
+// ExpressionStatement. `parseExpressionAt` fails where what follows its
+// expression holds a token (`{x // /*` LF `y /* */` LF `}`).
+function judgeCommentsAsSpelled(BaseParser: typeof Parser): typeof Parser {
+  // One more derivation level, so the class handed in stays untouched.
+  const Extended = class extends (BaseParser as unknown as new (
+    ...args: never[]
+  ) => object) {} as unknown as typeof Parser;
+
+  Extended.parseExpressionAt = function (
+    this: typeof Parser,
+    input: string,
+    pos: number,
+    options: Options,
+  ): Expression {
+    return deriveExpression(this, input, pos, options).expression;
+  };
+
+  Extended.parse = function (
+    this: typeof Parser,
+    input: string,
+    options: Options,
+  ): Program {
+    if (!commentDeletionsEmpty(input) || lexesToNoToken(input)) {
+      return BaseParser.parse.call(this, input, options);
+    }
+    const { parser, expression } = deriveExpression(this, input, 0, options);
+    if (!commentDeletionsEmpty(input.slice(expression.end))) {
+      // What follows the expression, judged as remark-mdx judges it after
+      // `parseExpressionAt`.
+      raiseDerivationFailure.call(
+        parser,
+        expression.end,
+        "Unexpected content after expression",
+      );
+    }
+    return {
+      type: "Program",
+      start: 0,
+      end: input.length,
+      body: [
+        {
+          type: "ExpressionStatement",
+          expression,
+          start: 0,
+          end: input.length,
+        },
+      ],
+      sourceType: "module",
+      comments: [],
+    } as unknown as Program;
+  };
+
+  return Extended;
+}
+
+/**
+ * The parser remark-mdx is handed (SPEC 14.20): acorn with JSX, deriving the
+ * ECMAScript 2024 grammar alone — early errors excluded — and judging
+ * whitespace and comments alone by the comment deletions and, as spelled,
+ * by lexing to no token.
+ */
+export const mdxAcorn: typeof Parser = Parser.extend(
+  acornJsx(),
+  excludeEarlyErrors,
+  judgeCommentsAsSpelled,
+);
+
+/**
+ * SPEC 2.7, 14.20: whether an expression container's content is the empty
+ * expression — whitespace and comments alone, judged by the comment
+ * deletions and, as spelled, by lexing to no token under the grammar
+ * (whitespace and line terminators ECMAScript 2024's: U+00A0, U+FEFF,
+ * U+2028, and U+2029 included, U+0085 and U+200B not). Content holding a
+ * token, or failing to lex (an unterminated comment), is no empty
+ * expression.
+ */
+export function isEmptyExpression(content: string): boolean {
+  return commentDeletionsEmpty(content) && lexesToNoToken(content);
 }
