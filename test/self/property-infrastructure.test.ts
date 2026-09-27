@@ -21,7 +21,9 @@
 //   * S-9 per-draw check (TEST-SPEC 16 preamble) — a draw whose staged MDX
 //     does not derive is a harness error carrying the seed, raised before
 //     the body sees the draw (the initial trial and shrunk candidates
-//     alike), never a diagnosed failure and never a skipped draw; a
+//     alike), never a diagnosed failure and never a skipped draw; a source
+//     the draw marks `unparseable` (P-12's break-parse twist) is judged
+//     the other way round, a deriving one being the harness error; a
 //     workspace-builder refusal thrown inside the body is attributed the
 //     same way, naming the refused staging.
 //
@@ -449,6 +451,69 @@ test("S-9 per-draw check: a generator whose every draw derives runs unhindered, 
     },
   );
   expect(ran).toBe(5);
+});
+
+test("S-9 per-draw check: a source the draw marks `unparseable` (P-12's break-parse twist) must not derive — a non-deriving one runs unhindered, a deriving one is a harness error carrying the seed, raised before the body runs on it", async () => {
+  let ran = 0;
+  await checkProperty(
+    "unparseable-marked draws",
+    (choices) => choices.intInclusive(0, 3),
+    () => {
+      ran += 1;
+    },
+    {
+      runs: 4,
+      seeds: [7],
+      env: {},
+      mdxSources: () => [
+        ["specs/A.mdx", WELL_FORMED_MDX],
+        ["specs/B.mdx", UNCLOSED_MDX, undefined, "unparseable"],
+        ["notes.txt", WELL_FORMED_MDX, undefined, "unparseable"],
+      ],
+    },
+  );
+  expect(ran).toBe(4);
+
+  // The same draws as the ill-formed-draw test above (generator and seed
+  // alike): value 2 marks a deriving source unparseable.
+  const seen: number[] = [];
+  const thrown = await captureRejection(
+    checkProperty(
+      "deriving draw marked unparseable",
+      (choices) => choices.intInclusive(0, 3),
+      (value) => {
+        seen.push(value);
+      },
+      {
+        runs: 8,
+        seeds: [7],
+        env: {},
+        mdxSources: (value) => [
+          ["specs/A.mdx", WELL_FORMED_MDX],
+          [
+            "specs/B.mdx",
+            value === 2 ? WELL_FORMED_MDX : UNCLOSED_MDX,
+            `draw ${String(value)}`,
+            "unparseable",
+          ],
+        ],
+      },
+    ),
+  );
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error;
+  expect(error.message).toContain("harness error while checking trial");
+  expect(error.message).toContain("S-9");
+  expect(error.message).toContain("seed 7");
+  expect(error.message).toContain(`${PROPERTY_SEED_ENV}=7`);
+  expect(error.message).toContain("specs/B.mdx (draw 2)");
+  expect(error.message).toContain("composed by the generator as unparseable");
+  expect(error.cause).toBeInstanceOf(HarnessStagingError);
+  expect((error.cause as HarnessStagingError).mode).toBe("mdx-derivability");
+  // The body never ran on the contradicting draw: the check precedes it.
+  expect(seen).not.toContain(2);
+  expect(seen.length).toBeGreaterThan(0);
 });
 
 test("S-9 per-draw check: a shrunk candidate is checked before the body runs on it — a non-deriving one is a harness error, never a rejected candidate", async () => {

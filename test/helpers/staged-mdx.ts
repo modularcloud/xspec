@@ -40,20 +40,23 @@
 // `file()` stages one (the workspace declaration naming the record's path
 // is a contradiction and throws).
 //
-// What is NOT a ledger record: a property draw (judged per
-// draw by the property runner, S-9's property clause, and staged under the
-// `per-draw` declaration — `file()`'s option, or the workspace
-// declaration's `perDraw` list for a draw's initial files — by the
-// section-16 modules alone); a P-8 mutation
-// (`unchecked`); and an edit of bytes the product itself wrote — a rename's
-// or move's rewritten source, which no harness constant equals — which
-// `TestWorkspace.edit()` stages from the workspace's current bytes, judged at
-// staging time (not a deterministic fixture: before any product exists there
-// is nothing to judge) — as `TestWorkspace.copyFrom()` carries another
-// workspace's product-written bytes into a fresh one. The builder's undeclared-staging guard (helpers/
-// workspace.ts, helpers/product-invocations.ts) refuses every other plain
-// `.mdx` staging made after a product invocation, so an omission from the
-// ledger is a harness error at the first run that reaches the site.
+// What is NOT a ledger record: a property draw (judged per draw by the
+// property runner, S-9's property clause, and staged under the `per-draw`
+// declaration — `file()`'s option, or the workspace declaration's `perDraw`
+// list for a draw's initial files — by the section-16 modules alone, or,
+// for a draw the document declares unparseable — P-12's break-parse twist —
+// under `per-draw-unparseable`, the workspace declaration's
+// `perDrawUnparseable` list); a P-8 mutation (`unchecked`); and an edit of
+// bytes the product itself wrote — a rename's or move's rewritten source,
+// which no harness constant equals — which `TestWorkspace.edit()` stages
+// from the workspace's current bytes, judged at staging time (not a
+// deterministic fixture: before any product exists there is nothing to
+// judge) — as `TestWorkspace.copyFrom()` carries another workspace's
+// product-written bytes into a fresh one. The builder's undeclared-staging
+// guard (helpers/workspace.ts, helpers/product-invocations.ts) refuses
+// every other plain `.mdx` staging made after a product invocation, so an
+// omission from the ledger is a harness error at the first run that reaches
+// the site.
 
 import { MDX_ALLOWANCES } from "./mdx-derivability.js";
 import type { FileContents, MdxFileDeclaration } from "./workspace.js";
@@ -61,6 +64,16 @@ import type { FileContents, MdxFileDeclaration } from "./workspace.js";
 const ledger: StagedMdx[] = [];
 const names = new Set<string>();
 let sealed = false;
+
+/**
+ * The declarations a record may carry: never `unchecked` (a record exists
+ * to be judged), never `per-draw` or `per-draw-unparseable` (a property
+ * draw's alone, judged per draw by the property runner).
+ */
+export type RecordDeclaration = Exclude<
+  MdxFileDeclaration,
+  "unchecked" | "per-draw" | "per-draw-unparseable"
+>;
 
 /**
  * A staged MDX source with its S-9 declaration: the exact bytes a test body
@@ -75,7 +88,7 @@ export class StagedMdx {
   /** The staged bytes, exactly as `TestWorkspace.file()` writes them. */
   readonly source: FileContents;
   /** The S-9 declaration in effect for the staging. */
-  readonly mdx: Exclude<MdxFileDeclaration, "unchecked" | "per-draw">;
+  readonly mdx: RecordDeclaration;
 
   constructor(
     name: string,
@@ -156,12 +169,12 @@ export function isStagedMdxLedgerSealed(): boolean {
 function validateDeclaration(
   name: string,
   mdx: MdxFileDeclaration,
-): Exclude<MdxFileDeclaration, "unchecked" | "per-draw"> {
+): RecordDeclaration {
   if (mdx === "well-formed" || mdx === "unparseable") return mdx;
-  if (mdx === "per-draw") {
+  if (mdx === "per-draw" || mdx === "per-draw-unparseable") {
     throw new Error(
       `staged-source ledger: the record ${JSON.stringify(name)} is declared ` +
-        "`per-draw` — that declaration is a property draw's alone (judged " +
+        `\`${mdx}\` — that declaration is a property draw's alone (judged ` +
         "per draw by the property runner, section-16 modules); a record is " +
         "a deterministic fixture, judged by the self-test before any " +
         "product exists (S-9), so declare it well-formed, unparseable, or " +

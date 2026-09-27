@@ -65,9 +65,13 @@
 // vectors and the workspace builder use), and a source that does not derive
 // is a harness error carrying the seed (H-10): never a diagnosed failure,
 // never a draw to skip — a generator composing an ill-formed form is a
-// harness defect. The workspace builder's own staging-time check is the
-// second line: a `HarnessStagingError` it throws while the body runs is
-// rethrown as a harness error naming the seed and the refused staging.
+// harness defect. A source the draw marks `"unparseable"` (`DrawSource`'s
+// fourth element: one the document declares unparseable, SPEC 14.20 —
+// P-12's break-parse twist) is judged the other way round: one that
+// derives is the harness error. The workspace builder's own staging-time
+// check is the second line: a `HarnessStagingError` it throws while the
+// body runs is rethrown as a harness error naming the seed and the refused
+// staging.
 
 import { HarnessAssertionError } from "./assertions.js";
 import { deriveMdx } from "./mdx-derivability.js";
@@ -234,20 +238,29 @@ export interface PropertyOptions<T> {
    * its whole staged file map. A non-deriving source is a harness error
    * naming the path, the parser's reason, and the seed (H-10) — never a
    * diagnosed failure, never a skipped draw. Generated MDX carries no S-9
-   * allowance: the generators compose valid MDX by construction (16).
+   * allowance: the generators compose valid MDX by construction (16). The
+   * one exception is a source the entry marks `"unparseable"` (its fourth
+   * element) — a draw the document declares unparseable (14.20; P-12's
+   * break-parse twist) — which must NOT derive: a deriving one is the
+   * harness error, carrying the seed alike.
    */
   readonly mdxSources?: (value: T) => Iterable<DrawSource>;
 }
 
 /**
  * One file a draw stages, for {@link PropertyOptions.mdxSources}: its
- * workspace-relative path, its bytes, and an optional label distinguishing
- * several stagings of one path within a trial.
+ * workspace-relative path, its bytes, an optional label distinguishing
+ * several stagings of one path within a trial, and an optional declaration
+ * mark — `"unparseable"` for a source the document declares unparseable
+ * (SPEC 14.20: it must not derive; the staging declares it
+ * `per-draw-unparseable`, helpers/workspace.ts), absent for the default,
+ * a source that must derive.
  */
 export type DrawSource = readonly [
   path: string,
   contents: string | Uint8Array,
   label?: string,
+  declared?: "unparseable",
 ];
 
 /** How the effective seed set was chosen; see the module header. */
@@ -449,7 +462,7 @@ export async function checkProperty<T>(
         throw harnessError({
           name,
           seed,
-          phase: `checking trial ${String(trial)} of ${String(runs)} (S-9: every MDX source a draw stages derives)`,
+          phase: `checking trial ${String(trial)} of ${String(runs)} (S-9: every MDX source a draw stages derives — or, marked unparseable, does not)`,
           cause: error,
           renderedInput: renderValue(generated.value, options.render),
         });
@@ -807,9 +820,9 @@ async function shrinkFalsification<T>(
     if (replayed === null) return false;
     if (!shortlexLess(replayed.tape, current.trial.tape)) return false;
     // A shrunk candidate is a draw like any other: its staged MDX is checked
-    // before the body sees it (S-9), and a non-deriving one is a harness
-    // defect — never "candidate rejected" (a generator composing it on any
-    // tape is the defect).
+    // before the body sees it (S-9), and a non-deriving one — a deriving
+    // one, marked unparseable — is a harness defect, never "candidate
+    // rejected" (a generator composing it on any tape is the defect).
     try {
       checkDrawMdx(replayed.value, context.mdxSources);
     } catch (error) {
@@ -817,7 +830,8 @@ async function shrinkFalsification<T>(
         name: context.name,
         seed: context.seed,
         phase:
-          "shrinking (S-9: an MDX source a shrunk input stages does not derive)",
+          "shrinking (S-9: an MDX source a shrunk input stages does not " +
+          "derive, or derives though marked unparseable)",
         cause: error,
         renderedInput: renderValue(replayed.value, context.render),
       });
@@ -964,8 +978,9 @@ function harnessError(details: {
 
 /**
  * S-9's per-draw check (module header): judge every `.mdx` source the draw
- * stages; the first that does not derive throws a `HarnessStagingError` of
- * mode `mdx-derivability`, spelled as the workspace builder spells its own
+ * stages; the first that does not derive — or, marked `"unparseable"`, the
+ * first that does — throws a `HarnessStagingError` of mode
+ * `mdx-derivability`, spelled as the workspace builder spells its own
  * refusal, so both lines of the check report alike.
  */
 function checkDrawMdx<T>(
@@ -973,9 +988,20 @@ function checkDrawMdx<T>(
   mdxSources: ((value: T) => Iterable<DrawSource>) | undefined,
 ): void {
   if (mdxSources === undefined) return;
-  for (const [path, contents, label] of mdxSources(value)) {
+  for (const [path, contents, label, declared] of mdxSources(value)) {
     if (!path.endsWith(".mdx")) continue;
     const verdict = deriveMdx(contents);
+    if (declared === "unparseable") {
+      if (!verdict.derives) continue;
+      throw new HarnessStagingError(
+        "mdx-derivability",
+        label === undefined ? path : `${path} (${label})`,
+        "composed by the generator as unparseable (the document declares " +
+          "the draw unparseable, SPEC 14.20) but the source derives under " +
+          "the stock MDX 3 parser — a generator defect (S-9), not a " +
+          "product failure",
+      );
+    }
     if (verdict.derives) continue;
     const where =
       verdict.position === undefined

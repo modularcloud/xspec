@@ -580,11 +580,16 @@ async function runAnswer(
 
 /**
  * S-9's per-draw check (helpers/property.ts `mdxSources`): every composed
- * file but the break-parse twist's, which the staging declares unparseable
- * (the builder judges that declaration at staging time).
+ * file, the break-parse twist's marked `"unparseable"` — the one source a
+ * trial declares unparseable (14.20), which must not derive; every other
+ * must derive.
  */
 function stagedP12Sources(trial: P12Trial): DrawSource[] {
-  return trial.files.filter(([path]) => path !== trial.unparseable);
+  return trial.files.map(([path, contents]): DrawSource =>
+    path === trial.unparseable
+      ? [path, contents, undefined, "unparseable"]
+      : [path, contents],
+  );
 }
 
 /** The P-12 property body for one generated trial (module header). */
@@ -598,15 +603,17 @@ async function runP12Trial(
   };
   const workspace = await TestWorkspace.create({
     files,
-    // S-9: the break-parse twist's file is the one unparseable source the
-    // document declares — judged so at creation (it must not derive); every
-    // other composed file is the draw's, judged by the property runner
-    // before the body saw it (`stagedP12Sources` above) — declared per
+    // S-9: every composed file is the draw's, judged by the property runner
+    // before the body saw it (`stagedP12Sources` above) and declared per
     // draw, as every initial `.mdx` file a trial stages after the body's
-    // first product invocation must be (helpers/workspace.ts).
+    // first product invocation must be (helpers/workspace.ts): the
+    // break-parse twist's file — the one unparseable source a trial
+    // declares — `perDrawUnparseable` (judged so again at creation: it must
+    // not derive), every other one `perDraw` (it must derive).
     mdx: {
-      unparseable: trial.unparseable === undefined ? [] : [trial.unparseable],
       perDraw: mdxPathsOf(files).filter((path) => path !== trial.unparseable),
+      perDrawUnparseable:
+        trial.unparseable === undefined ? [] : [trial.unparseable],
     },
   });
   try {
