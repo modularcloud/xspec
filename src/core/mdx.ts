@@ -1365,7 +1365,13 @@ class DocumentBuilder {
 
   /** Validate and record one section element's props (SPEC 2.5–2.7). */
   private processAttributes(node: MdxTreeNode, section: MutableSection): void {
-    const seen = new Set<string>();
+    /**
+     * Each prop name the tag spells → the attribute range of every
+     * spelling of it, in tag order, the first included (SPEC 14 location
+     * cardinality: a repeated prop locates every attribute spelling the
+     * name).
+     */
+    const spellings = new Map<string, ByteRange[]>();
     let idUnusable = false;
     for (const attribute of node.attributes ?? []) {
       const attrSpan = this.spanOf(attribute);
@@ -1393,16 +1399,12 @@ class DocumentBuilder {
         continue;
       }
       const name = attribute.name ?? "";
-      if (seen.has(name)) {
+      const earlier = spellings.get(name);
+      if (earlier !== undefined) {
         // SPEC 2.7 → 14.17: no prop name may occur more than once on one
-        // element — defined or unknown.
-        this.addFinding(
-          17,
-          attrRange,
-          `invalid prop: the prop ${JSON.stringify(name)} is repeated on ` +
-            `one element — no prop name may occur more than once; remove ` +
-            `the repetition (SPEC 2.7, 14.17)`,
-        );
+        // element — defined or unknown. Reported once per name, locating
+        // every spelling, after the loop.
+        earlier.push(attrRange);
         if (name === "id") {
           idUnusable = true; // ambiguous declaration — no usable ID
         }
@@ -1416,7 +1418,7 @@ class DocumentBuilder {
         }
         continue;
       }
-      seen.add(name);
+      spellings.set(name, [attrRange]);
       if (name === "d") {
         this.processDependencyProp(attribute, attrSpan, section);
       } else if (name === "id" || name === "coverage" || name === "tags") {
@@ -1449,6 +1451,26 @@ class DocumentBuilder {
             `tags; remove it (SPEC 2.7, 14.17)`,
         );
       }
+    }
+    for (const [name, ranges] of spellings) {
+      if (ranges.length < 2) {
+        continue;
+      }
+      // SPEC 2.7 → 14.17: a repeated prop, defined or unknown, is invalid.
+      // SPEC 14 location cardinality: the spellings jointly violate it, so
+      // it is ONE finding per repeated name carrying a location for every
+      // attribute spelling the name, the first included — no
+      // representative is chosen (12.7 orders the locations).
+      this.findings.push(
+        locatedFinding(
+          17,
+          `invalid prop: the prop ${JSON.stringify(name)} is spelled ` +
+            `${String(ranges.length)} times on one element — no prop name ` +
+            `may occur more than once; keep one spelling and remove the ` +
+            `others (SPEC 2.7, 14.17)`,
+          ranges.map((range) => ({ file: this.file, range })),
+        ),
+      );
     }
     if (idUnusable) {
       section.id = null;
