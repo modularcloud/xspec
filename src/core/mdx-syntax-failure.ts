@@ -539,8 +539,9 @@ function openContainerOffset(text: string, placed: number | undefined): number {
     // The attribute open at the end holds whitespace and comments alone —
     // content that holds a token is respelled, never refused so
     // (`analysisParse`) — which a token and its closing brace complete:
-    // the whole file is viable.
-    return text.length;
+    // the whole file is viable, but for the text reading's bound (the
+    // refusal is placed where the content opens).
+    return textReadingBound(text, placeStart(closed.failure), text.length);
   }
   const atEnd = collectedAtEnd(text);
   if (atEnd !== undefined) {
@@ -983,13 +984,15 @@ function walkToOpenParagraph(
  * `result`, measured for the container whose content opens at `opening`,
  * bounded by the text reading (above) where the construct holding the
  * container's `{` begins right below a paragraph line holding an open text
- * element or text-level expression (`openParagraphAbove`): at the
- * terminator of the first line past the brace's of container syntax and
- * whitespace alone, where the content is still open at that line — below
- * an open element, a `}` ending the line before it falls in the container
+ * element or text-level expression (`openParagraphAbove`): below an open
+ * element, at the terminator of the first line past the brace's of
+ * container syntax and whitespace alone, where the content is still open
+ * at that line — a `}` ending the line before it falls in the container
  * (the two readings collect the same content); below an open expression,
- * whose content the text reading goes on with instead, as that reading
- * collects it (`textExpressionBound`).
+ * whose content the text reading goes on with instead, where that content,
+ * as that reading collects it through the lines past the brace's before
+ * such a line and `result`, fails, or at that line's terminator
+ * (`textExpressionBound`).
  */
 function textReadingBound(
   text: string,
@@ -1001,12 +1004,21 @@ function textReadingBound(
   }
   let before = lineEndFrom(text, opening);
   let blankEnd: number | undefined;
-  while (blankEnd === undefined) {
-    const start = before + terminatorAt(text, before).length;
+  // The lines past the brace's up to `result`: `before` the end of the
+  // last one before the first of container syntax and whitespace alone
+  // (ending at `blankEnd`), the file's unterminated last line counting as
+  // neither where it is empty.
+  for (;;) {
+    const terminator = terminatorAt(text, before);
+    if (terminator === "") break;
+    const start = before + terminator.length;
     const end = lineEndFrom(text, start);
-    if (end >= result || end >= text.length) return result;
-    if (LINE_SYNTAX.test(text.slice(start, end))) blankEnd = end;
-    else before = end;
+    if (end > result || start === text.length) break;
+    if (end < text.length && LINE_SYNTAX.test(text.slice(start, end))) {
+      blankEnd = end;
+      break;
+    }
+    before = end;
   }
   // An attribute's content that is whitespace alone so far is refused
   // before acorn sees it, so the `}` is also tried after an `x`: no text
@@ -1021,7 +1033,7 @@ function textReadingBound(
   for (const { end, open } of paragraphs) {
     if (open === "expression") {
       bound = Math.min(bound, textExpressionBound(text, end, before, blankEnd));
-    } else if (openAt(head) || openAt(head + "x")) {
+    } else if (blankEnd !== undefined && (openAt(head) || openAt(head + "x"))) {
       bound = Math.min(bound, blankEnd);
     }
   }
@@ -1030,30 +1042,31 @@ function textReadingBound(
 
 /**
  * The bound the text reading sets where a paragraph line ending at
- * `paragraphEnd` holds a text-level expression open, the construct holding
- * a brace beginning on the line right below it, and the first line past
- * that construct's of container syntax and whitespace alone ending at
- * `blankEnd`, the line before it at `before`. The flow reading of the line
- * below — a flow expression or tag interrupting the paragraph — leaves the
- * expression open at the paragraph's end, so it never derives; in the text
- * reading that line and the ones after it are the paragraph's, their
- * characters the expression's content, which cannot span the blank line
- * (SPEC 14's location rule for 14.20). That reading is probed with the
- * line below respelled past its container syntax with U+00A0 — no flow
- * construct begins with it, and to acorn it is whitespace, or a character
- * of the string, comment, or template it falls in — and the expression's
- * content collected at a `}` appended to the line before the blank one:
- * where it fails within, that offset; where it cannot take that line's
- * terminator, the terminator; otherwise `blankEnd`. `Infinity` where the
- * probe collects no content of that expression: it closed before, or a
- * code span, link, or definition begun before its brace and ending there
- * hides it.
+ * `paragraphEnd` holds a text-level expression open and the construct
+ * holding a brace begins on the line right below it: `before` the end of
+ * the last line to measure through, and `blankEnd` the end of the first
+ * line past the brace's of container syntax and whitespace alone, where
+ * there is one right after it. The flow reading of the line below — a flow
+ * expression or tag interrupting the paragraph — leaves the expression
+ * open at the paragraph's end, so it never derives, and so does a flow
+ * expression whose content never closes; in the text reading that line and
+ * the ones after it are the paragraph's, their characters the expression's
+ * content, which cannot span the blank line (SPEC 14's location rule for
+ * 14.20). That reading is probed with the line below respelled past its
+ * container syntax with U+00A0 — no flow construct begins with it, and to
+ * acorn it is whitespace, or a character of the string, comment, template,
+ * or JSX text it falls in — and the expression's content collected at a
+ * `}` appended at `before`: where it fails within, that offset; where it
+ * cannot take the line ending there, `before`; otherwise `blankEnd`, if
+ * any. `Infinity` where the probe collects no content of that expression:
+ * it closed before, or a code span, link, or definition begun before its
+ * brace and ending there hides it, or a line interrupts the paragraph.
  */
 function textExpressionBound(
   text: string,
   paragraphEnd: number,
   before: number,
-  blankEnd: number,
+  blankEnd: number | undefined,
 ): number {
   const below = paragraphEnd + terminatorAt(text, paragraphEnd).length;
   const spelled = text.slice(below, lineEndFrom(text, below));
@@ -1068,10 +1081,13 @@ function textExpressionBound(
   if (within < head.length) return within > at ? within - 1 : within;
   const terminator = terminatorAt(text, before);
   const { content, kind } = collected;
-  return jsViablePrefix(content + terminator, kind) <
+  if (
+    jsViablePrefix(content + terminator, kind) <
     content.length + terminator.length
-    ? before
-    : blankEnd;
+  ) {
+    return before;
+  }
+  return blankEnd ?? Infinity;
 }
 
 /**
