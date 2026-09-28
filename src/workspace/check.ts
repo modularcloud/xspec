@@ -13,11 +13,14 @@
 // alone, so the retained derived-file record — lagging, or absent where a
 // refresh wrote graph data beside no record — never reads as staleness.
 //
-// The comparison is against the pure build derivation (core/build.ts): the
-// caller computes the current `BuildOutputs` over a workspace that passed
-// build validation — with invalid sources "what the current sources and
-// configuration generate" is undefined, and the validation findings mask
-// staleness (SPEC 14).
+// The comparison is against the pure build derivation (core/build.ts). The
+// mismatch forms — per file and graph data — are consulted on a workspace
+// passing `build`'s validations alone: with source validation errors,
+// journal errors, or refused writes (14.22) alike, "what the current
+// sources and configuration generate" is undefined, and those forms go
+// unreported (SPEC 14.10, 13.3, 14). The two forms consulting no generated
+// content — the unreadable-record unit form and the recorded-file form —
+// are reported whatever the sources' validity (SPEC 14.10).
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
@@ -128,30 +131,33 @@ function unreadableRecordStaleFinding(): Finding {
 }
 
 /**
- * The SPEC 14.10 findings of `check` (SPEC 12.2), reading and comparing
- * only — nothing is written:
+ * SPEC 14.10's mismatch forms — per file and graph data — the findings of
+ * `check` (SPEC 12.2) that compare against the content the current sources
+ * and configuration generate, reading and comparing only (nothing is
+ * written):
  *
  * - each derived file the current sources and configuration generate whose
  *   path holds different bytes, no plain file, or nothing at all;
- * - the graph data, as one unit in two exclusive forms (SPEC 14.10), each
- *   one finding whose concerned path is the graph-data area itself, no
- *   path inside it named: recorded state that exists but cannot be read as
- *   a record (SPEC 14.23) under the unreadable-record form; otherwise the
- *   missing-or-mismatch form by the shared compare-with-current predicate
- *   over the snapshot file (SPEC 13.3 — the record, stored apart, is never
- *   staleness: lagging, or absent beside graph data a refresh wrote);
- * - each recorded derived file remaining (anything occupying its path) at
- *   a path the current build no longer generates (`outputs.orphans`) —
- *   undetectable, and so unreported, while the unreadable-record state
- *   holds (no readable record is consulted).
+ * - the graph data's missing-or-mismatch unit form, one finding whose
+ *   concerned path is the graph-data area itself, no path inside it named,
+ *   by the shared compare-with-current predicate over the snapshot file
+ *   (SPEC 13.3 — the record, stored apart, is never staleness: lagging, or
+ *   absent beside graph data a refresh wrote). The unit forms are
+ *   exclusive (SPEC 14.10): while the record cannot be read as a record
+ *   (SPEC 14.23) the unreadable-record form alone reports
+ *   (`recordStalenessFindings`), never this one beside it.
  *
- * `outputs` is the pure build derivation over the current, validated
- * workspace, its orphans derived against `record`'s recorded paths;
- * `stored` the loaded graph data and `record` the loaded derived-file
- * record. Deterministic order: generated files in the build's output
- * order, then the graph data, then the orphans (byte order, SPEC 12.0).
+ * Detectable only on a workspace passing `build`'s validations (SPEC
+ * 14.10, 13.3): with source validation errors, journal errors, or refused
+ * writes (14.22) alike, "what the current sources and configuration
+ * generate" is undefined, and these forms go unreported (SPEC 14) — the
+ * caller consults them on a passing workspace alone. `outputs` is the pure
+ * build derivation over the current workspace, `stored` the loaded graph
+ * data, and `record` the loaded derived-file record. Deterministic order:
+ * generated files in the build's output order, then the graph data (SPEC
+ * 12.0).
  */
-export async function stalenessFindings(
+export async function mismatchStalenessFindings(
   root: string,
   outputs: BuildOutputs,
   stored: LoadedGraphData,
@@ -202,31 +208,55 @@ export async function stalenessFindings(
     }
   }
 
-  // SPEC 14.10's unit forms, exclusive — one finding either way, never
-  // both. Recorded state that exists but cannot be read as a record
-  // (SPEC 14.23) reports under the unreadable-record form alone; otherwise
-  // `check` reports the graph data stale exactly when the refreshing reads
-  // would refresh it — the shared predicate (SPEC 13.3).
-  if (record.state === "unreadable") {
-    findings.push(unreadableRecordStaleFinding());
-  } else if (!graphDataMatchesCurrent(stored.bytes, outputs.graphData)) {
+  // SPEC 14.10's mismatch unit form: `check` reports the graph data stale
+  // exactly when the refreshing reads would refresh it — the shared
+  // predicate (SPEC 13.3) — unless the record is unreadable, whose own
+  // form reports alone (the unit forms are exclusive).
+  if (
+    record.state !== "unreadable" &&
+    !graphDataMatchesCurrent(stored.bytes, outputs.graphData)
+  ) {
     findings.push(mismatchedGraphDataStaleFinding());
   }
 
-  // SPEC 14.10's recorded-orphan arm: `outputs.orphans` holds the recorded
-  // derived files the current build no longer generates (byte order,
-  // core/build.ts); one whose path is vacant remains nowhere — no finding.
-  // While the unreadable-record state holds this form is undetectable
-  // (SPEC 14.10): it consults no readable record, and an unreadable record
-  // records nothing (`outputs.orphans` is empty by construction,
-  // `recordedPathsOf`).
-  // A remaining path whose kind the environment refuses to read is stale
-  // all the same (SPEC 14.25 → 14.10, `comparedOccupant`).
-  for (const rel of outputs.orphans) {
+  return findings;
+}
+
+/**
+ * SPEC 14.10's two forms consulting no generated content, reported by
+ * `check` (SPEC 12.2) whatever the sources' validity — reading only,
+ * nothing written:
+ *
+ * - the unreadable-record unit form: recorded generation state that exists
+ *   but cannot be read as a record (SPEC 14.23), one finding whose
+ *   concerned path is the graph-data area itself (exclusive with the
+ *   mismatch unit form of `mismatchStalenessFindings`);
+ * - the recorded-file form: each recorded derived file remaining (anything
+ *   occupying its path) at a path the current sources and configuration no
+ *   longer generate — `orphans`, the record's paths outside the set of
+ *   generated paths, in byte order (core/build.ts); one whose path is
+ *   vacant remains nowhere, no finding. While the unreadable-record state
+ *   holds this form is undetectable (SPEC 14.10): it consults no readable
+ *   record, and an unreadable record records nothing (`orphans` is empty
+ *   by construction, `recordedPathsOf`). A remaining path whose kind the
+ *   environment refuses to read is stale all the same (SPEC 14.25 → 14.10,
+ *   `comparedOccupant`).
+ *
+ * Deterministic order: the graph data, then the orphans (SPEC 12.0).
+ */
+export async function recordStalenessFindings(
+  root: string,
+  record: DerivedFileRecord,
+  orphans: readonly string[],
+): Promise<Finding[]> {
+  const findings: Finding[] = [];
+  if (record.state === "unreadable") {
+    findings.push(unreadableRecordStaleFinding());
+  }
+  for (const rel of orphans) {
     if ((await comparedOccupant(absoluteOf(root, rel))) !== "absent") {
       findings.push(orphanFinding(rel));
     }
   }
-
   return findings;
 }

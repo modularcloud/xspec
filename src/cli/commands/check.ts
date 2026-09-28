@@ -29,7 +29,10 @@ import type { BuildOutputs } from "../../core/build.js";
 import { computeBuildOutputs } from "../../core/build.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import { evaluatePolicy } from "../../core/policy.js";
-import { stalenessFindings } from "../../workspace/check.js";
+import {
+  mismatchStalenessFindings,
+  recordStalenessFindings,
+} from "../../workspace/check.js";
 import {
   loadGraphData,
   readDerivedFileRecord,
@@ -70,11 +73,11 @@ export async function checkCommand(
 
   const findings: Finding[] = [...analysis.findings];
 
-  // SPEC 14.10/14.22 — judged against the pure build derivation, which is
-  // defined only for a workspace that passes build validation: with
-  // findings present, "what the current sources and configuration
-  // generate" is undefined and the validation errors mask staleness
-  // (SPEC 14); the write set is equally undefined for 14.22.
+  // SPEC 14.10/14.22 — judged against the pure build derivation
+  // (core/build.ts), computed here only over a workspace whose sources and
+  // journal pass build validation: with such findings present, "what the
+  // current sources and configuration generate" is undefined and 14.10's
+  // mismatch forms are undetectable (SPEC 14).
   if (analysis.findings.length === 0) {
     const stored = await loadGraphData(workspace.root);
     const record = await readDerivedFileRecord(workspace.root);
@@ -87,15 +90,36 @@ export async function checkCommand(
       recordedPathsOf(record),
       workspaceInputsOf(workspace, analysis),
     );
-    findings.push(
-      ...(await stalenessFindings(workspace.root, outputs, stored, record)),
-    );
     // SPEC 14.22: `check` reports the obstructed write-path components
     // without writing — the same findings a `build` would refuse on.
+    const obstructions = await obstructedWritePathFindings(
+      workspace.root,
+      outputs.writePaths,
+    );
+    findings.push(...obstructions);
+    // SPEC 14.10, 13.3: a refused write (14.22) fails `build`'s validations
+    // like a source validation error or a journal error — the content the
+    // current sources and configuration generate is undefined there, so
+    // the mismatch forms, per file and graph data, go unreported (SPEC
+    // 14).
+    if (obstructions.length === 0) {
+      findings.push(
+        ...(await mismatchStalenessFindings(
+          workspace.root,
+          outputs,
+          stored,
+          record,
+        )),
+      );
+    }
+    // SPEC 14.10: the forms consulting no generated content — the
+    // unreadable-record unit form and the recorded-file form — are
+    // reported whatever the sources' validity, a refused write included.
     findings.push(
-      ...(await obstructedWritePathFindings(
+      ...(await recordStalenessFindings(
         workspace.root,
-        outputs.writePaths,
+        record,
+        outputs.orphans,
       )),
     );
   }
