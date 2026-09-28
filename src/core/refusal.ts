@@ -839,8 +839,14 @@ export function evaluateMoveFileRefusals(
   }
 
   // SPEC 14 `refused-destination-exists`: the file form's destination path
-  // is already occupied, whatever kind of filesystem object occupies it.
-  if (probe.occupant !== "absent") {
+  // is already occupied, whatever kind of filesystem object occupies it —
+  // unless it is the origin path itself, compared byte-wise (SPEC 12.0):
+  // the exact self-move, its only occupant the origin the relocation
+  // would remove, is `refused-identity-unchanged`'s alone (SPEC 6.5, 14).
+  // A spelling such as `./a.mdx` for the origin `a.mdx` is not in
+  // discovered-path form, so it is never probed as occupied here (SPEC 7,
+  // 14): `refused-invalid-destination` reports it.
+  if (probe.occupant !== "absent" && destination !== originPath) {
     findings.push(
       refusalFinding(
         "refused-destination-exists",
