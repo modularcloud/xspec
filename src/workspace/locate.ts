@@ -14,11 +14,13 @@
 //
 // SPEC 14: a configuration error's concerned path is reported in the
 // anchoring form of 11.6, identified relative to the invocation working
-// directory — the configuration file the upward search found or `--config`
-// named, or `.` for a failed upward search with no `--config`. This module
-// computes that spelling once (./anchor.ts) and hands it to every consumer:
-// the located workspace carries it for later parse and discovery errors,
-// and a locate failure's findings carry it directly.
+// directory — the configuration path the upward search found or `--config`
+// named, whatever occupies it, or `.` for a failed upward search with no
+// `--config` — except that a `--config` path nothing occupies is reported
+// as the argument value exactly as given (12.0). This module computes that
+// spelling once (./anchor.ts) and hands it to every consumer: the located
+// workspace carries it for later parse and discovery errors, and a locate
+// failure's findings carry it directly.
 //
 // The store-backed read fast path (./fast-read.ts) starts from this
 // module's result: with the configuration file's exact bytes in hand, a
@@ -61,20 +63,26 @@ export type WorkspaceLocateResult =
       readonly ok: false;
       readonly findings: readonly Finding[];
       /**
-       * SPEC 14: the concerned path of the failure in the 11.6 anchoring
-       * form — the found or named configuration path, whatever occupies it
-       * (7), or `.` for a failed upward search with no `--config`.
+       * SPEC 14: the concerned path of the failure — the found or named
+       * configuration path in the 11.6 anchoring form, whatever occupies it
+       * (7); `.` for a failed upward search with no `--config`; and a
+       * `--config` path nothing occupies as the argument value exactly as
+       * given (12.0).
        */
-      readonly configAnchor: string;
+      readonly concernedPath: string;
     };
 
-function failure(message: string, configAnchor: string): WorkspaceLocateResult {
+function failure(
+  message: string,
+  concernedPath: string,
+): WorkspaceLocateResult {
   // SPEC 14: configuration errors carry the file or path they concern —
-  // the anchored configuration path (or `.`) — with no in-source location.
+  // the anchored configuration path, `.`, or an unoccupied `--config`
+  // value as given — with no in-source location.
   return {
     ok: false,
-    findings: [pathFinding(14, message, configAnchor)],
-    configAnchor,
+    findings: [pathFinding(14, message, concernedPath)],
+    concernedPath,
   };
 }
 
@@ -168,11 +176,18 @@ export async function locateWorkspace(
     occupant = await occupantOf(configPath);
     if (occupant.kind === "absent") {
       // SPEC 14: missing configuration WITH `--config` given concerns the
-      // named file (never `.` — that is the failed upward search's case).
+      // named path (never `.` — that is the failed upward search's case).
+      // A path nothing occupies is the one concerned path no physical
+      // resolution (11.6) can spell, so it is reported as the argument
+      // value exactly as given (12.0) — never canonicalized, and an
+      // absolute value stays absolute: `./../cfg//xspec.config.ts` is
+      // reported byte-for-byte, never `../cfg/xspec.config.ts`. Once the
+      // path is occupied, whatever occupies it, the anchoring form below
+      // applies: existence, not spelling, decides the form.
       return failure(
         `--config ${configFlag}: no configuration file exists at this ` +
           `path, resolved against the working directory (SPEC 7, 12.0)`,
-        anchoredPathSpelling(cwd, configPath),
+        configFlag,
       );
     }
   } else {

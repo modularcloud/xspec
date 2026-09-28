@@ -263,7 +263,7 @@ export async function main(
     emitConfigurationErrors(
       { stdout, stderr },
       jsonOutputInEffect(result.invocation),
-      location.configAnchor,
+      location.concernedPath,
       location.findings,
     );
     return 2;

@@ -314,14 +314,16 @@ export function emitErrorDocument(stdout: CliWriter, finding: Finding): void {
  * The one condition-14 finding of an exit-2 configuration error (SPEC 12.7:
  * "One invocation reports one error" — a configuration file with several
  * distinct defects is a single finding, its message deterministic but
- * otherwise unpinned). The concerned path is the configuration file in the
- * anchoring form of 11.6, relative to the invocation working directory, or
- * `.` for a failed upward search with no `--config` (SPEC 14); locations
- * stay empty — a configuration error is an unlocated condition (SPEC 14).
+ * otherwise unpinned). The concerned path is the found or named
+ * configuration path in the anchoring form of 11.6, relative to the
+ * invocation working directory, whatever occupies it; `.` for a failed
+ * upward search with no `--config`; or a `--config` path nothing occupies
+ * as the argument value exactly as given (SPEC 14, 12.0). Locations stay
+ * empty — a configuration error is an unlocated condition (SPEC 14).
  */
 export function configurationErrorFinding(
   findings: readonly Finding[],
-  configAnchor: string,
+  concernedPath: string,
 ): Finding {
   // The per-defect messages joined in the pinned findings order (SPEC 12.7)
   // keep the merged message deterministic (SPEC 12.0).
@@ -332,7 +334,7 @@ export function configurationErrorFinding(
     code: "configuration-error",
     message,
     locations: [],
-    path: configAnchor,
+    path: concernedPath,
     identities: [],
   };
 }
@@ -353,13 +355,14 @@ export function renderConfigurationError(finding: Finding): string {
  * defect as a standard-error diagnostic line and, when JSON output is in
  * effect, the exit-2 error document of 12.0/12.7 as the entire standard
  * output — one finding however many defects, its concerned path the
- * anchored configuration path (SPEC 14). The caller exits 2; stderr
- * diagnostics are identical whatever the output form (SPEC 12.0).
+ * anchored configuration path, `.`, or an unoccupied `--config` value as
+ * given (SPEC 14). The caller exits 2; stderr diagnostics are identical
+ * whatever the output form (SPEC 12.0).
  */
 export function emitConfigurationErrors(
   io: CommandIo,
   jsonInEffect: boolean,
-  configAnchor: string,
+  concernedPath: string,
   findings: readonly Finding[],
 ): void {
   for (const finding of findings) {
@@ -368,7 +371,7 @@ export function emitConfigurationErrors(
   if (jsonInEffect) {
     emitErrorDocument(
       io.stdout,
-      configurationErrorFinding(findings, configAnchor),
+      configurationErrorFinding(findings, concernedPath),
     );
   }
 }

@@ -95,7 +95,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T12.0-14 | section-12.0-iii | 43 |
 | T12.2-4 | section-12.1-12.2 | 52 |
 | T12.3-1 | section-12.3-12.5 | 40 (passes since Task 40 landed) |
-| T12.7-3 | section-12.7 | 42 |
+| T12.7-3 | section-12.7 | 42, 48, 49 (since Task 42 landed every configuration arm holds — an unoccupied `--config` path, `./../cfg//xspec.config.ts` and an absolute one, reported byte-for-byte as given, the same spellings reporting `../cfg/xspec.config.ts` once the malformed file exists — and so do the search-failure, single-finding, usage, and linked-working-directory arms; it stops first at the Linux-leg 14.24 arm, Task 48: `build --json` on a stale workspace with `.xspec` unwritable exits 70, `internal error: EACCES`, where it must exit 2 with `{"code": "write-failure", "path": ".xspec"}`; the 14.25 arm after it, `build --json` with `specs/sub` unlistable, expecting `{"code": "read-failure", "path": "specs/sub"}`, waits on Task 49) |
 | T13.3-2 | section-13.3 | 47 |
 | T13.4-6 | section-13.4 | 51 |
 | T13.5-1 | section-13.5 | 43 |
@@ -166,20 +166,6 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 42 — An unoccupied `--config` path is echoed exactly as given (SPEC 14 concerned path, 12.0, 12.7; C5)
-
-**Requirement.** SPEC 14: a configuration error's concerned path is the found or named configuration path, in the anchoring form of 11.6. The exception: "a `--config` path nothing occupies — the one concerned path no physical resolution (11.6) can spell — is reported as the argument value exactly as given (12.0)".
-
-**Observed.**
-- `--config ./../cfg//xspec.config.ts`, naming nothing, is reported as `../cfg/xspec.config.ts`.
-- An unoccupied absolute `--config` path is reported as a relative path.
-
-**Location.** `src/workspace/locate.ts`: `failure(message, configAnchor)` (~67), the `--config` branch (~117), and the anchoring helper they use.
-
-**Change.** When nothing occupies the named path, carry the argument value verbatim as the concerned path. Keep physical anchoring for occupied paths.
-
-**Verification.** `section-12.7.test.ts` (T12.7-3). Neighbours: `section-7-basics.test.ts`, `section-11.6.test.ts`.
 
 ## Task 43 — Parse arguments by SPEC 12.0's invocation grammar (SPEC 12.0; C1)
 
@@ -363,6 +349,7 @@ The write order itself matched 13.5 in every staging.
 
 **Verification.**
 - `section-13.5.test.ts` (T13.5-7), `section-14-ii.test.ts` (T14-9), and `section-14.test.ts` (T14-6's condition-24 arm).
+- `section-12.7.test.ts` (T12.7-3's Linux-leg 14.24 arm: `build --json` on a stale workspace with `.xspec` unwritable reports `{"code": "write-failure", "path": ".xspec"}`, exit 2; its 14.25 arm after it waits on Task 49).
 - These tests need the unprivileged namespace; AGENTS.md explains why.
 - Neighbours: `section-6.4.test.ts`, `section-10.7-ii.test.ts`, `section-12.1-12.2.test.ts`, `section-13.3.test.ts`.
 
@@ -393,6 +380,7 @@ The command stops at the read and exits 2. The error document carries the code `
 **Verification.**
 - `section-14-ii.test.ts`: T14-10's directory arms (T14-10 also waits on Task 50).
 - `section-14.test.ts`: T14-6's condition-25 arm.
+- `section-12.7.test.ts`: T12.7-3's Linux-leg 14.25 arm, `build --json` with `specs/sub` unlistable reporting `{"code": "read-failure", "path": "specs/sub"}`, exit 2 — its last arm.
 - Neighbours: `section-7-discovery.test.ts`, `section-10.1.test.ts`, `section-11.6.test.ts`.
 
 ## Task 50 — Refused reads of journal and graph-data content take those objects' own conditions (SPEC 14.25, 14.13, 14.23, 11.6, 6.6, 13.3; C7(a), C7(d))
@@ -625,7 +613,7 @@ No test stages a parenthesized default export.
 
 ## Task 77 — A `--config` path through a symbolic link anchors on the physical root (SPEC 11.6, 14, 7; found while landing Task 36)
 
-**Requirement.** SPEC 11.6: "The working directory and the workspace root enter this spelling as physical directory paths, every symbolic link among their components resolved, and the configuration file as its own name under the root so spelled: a link between the working directory and the root spells the physical relation; a link above both changes nothing." SPEC 14: a configuration error's concerned path is the found or named configuration path in that anchoring form, whatever occupies it (7) — the one exception, a `--config` path nothing occupies, echoed as given, is Task 42's.
+**Requirement.** SPEC 11.6: "The working directory and the workspace root enter this spelling as physical directory paths, every symbolic link among their components resolved, and the configuration file as its own name under the root so spelled: a link between the working directory and the root spells the physical relation; a link above both changes nothing." SPEC 14: a configuration error's concerned path is the found or named configuration path in that anchoring form, whatever occupies it (7) — the one exception, a `--config` path nothing occupies, echoed as given, landed with Task 42: `locateWorkspace`'s absent branch reports `configFlag` itself as the failure's `concernedPath`.
 
 **Observed.**
 - From a root holding a valid `a/b/xspec.config.ts` and the link `L` → `a/b`, `inventory --json --config L/xspec.config.ts` reports `config` `L/xspec.config.ts` (and `root` `L`): the link's lexical relation. SPEC 11.6's physical spelling is `a/b/xspec.config.ts` (and `a/b`).
@@ -634,7 +622,7 @@ No test stages a parenthesized default export.
 
 **Location.** `src/workspace/locate.ts`: `locateWorkspace`'s `--config` branch, which anchors `path.resolve(cwd, configFlag)` lexically; `anchoredPathSpelling` in `src/workspace/anchor.ts`; the inventory's `root`/`config` anchoring, which reads the located workspace's anchor.
 
-**Change.** For an occupied `--config` path, resolve the entry's parent directory physically (`fsp.realpath`) and anchor the entry as its own name under that directory — for the inventory's `root` as for every concerned path. Never resolve the entry itself: a symbolic-link occupant is reported as the entry (7). A refused read during the resolution is condition 25 (Task 49's rendering); an unoccupied path stays echoed as given (Task 42).
+**Change.** For an occupied `--config` path, resolve the entry's parent directory physically (`fsp.realpath`) and anchor the entry as its own name under that directory — for the inventory's `root` as for every concerned path. Never resolve the entry itself: a symbolic-link occupant is reported as the entry (7). A refused read during the resolution is condition 25 (Task 49's rendering); an unoccupied path stays echoed as given (Task 42, landed) — judge occupancy before any resolution that could fail on it.
 
 **Verification.** No suite test stages a link among a `--config` path's directory components (T11.6-1's physical arms reach the root by the upward search or by an absolute `--config` over the realpath'd root; T12.7-3's resolves `./../xspec.config.ts` against a linked working directory); hand-probe the staging above. Neighbours: `section-11.6.test.ts`, `section-12.7.test.ts`, `section-7-basics.test.ts`, `section-12.0-i.test.ts`.
 
