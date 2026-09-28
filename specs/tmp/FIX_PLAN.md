@@ -56,7 +56,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T5.7-4 | section-5.7 | 16, 17, 18 (passes since Task 18 landed: `textB(A.missing)` in `src/cross.ts` is 14.7 alone, and the resolving `textB(A.a)` records its occurrence beside its 14.11) |
 | T6.2-1 | section-6.2 | 3 (passes since Task 3 landed) |
 | T6.2-2 | section-6.2 | 3 (passes since Task 3 landed) |
-| T6.4-3 | section-6.4 | 22 |
+| T6.4-3 | section-6.4 | 22 (passes since Task 22 landed) |
 | T6.5-6 | section-6.5 | 26 |
 | T6.5-7 | section-6.5 | 30 |
 | T6.5-8 | section-6.5 | 28 (since Task 29 its first failing arm is the TS arm: the added code import carries a `;`) |
@@ -69,7 +69,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T6.5-17 | section-6.5-iii | 25 |
 | T6.5-18 | section-6.5-iii | 33 |
 | T6.5-19 | section-6.5-iii | 26 (since Task 29 arm (a) holds and (b)'s bytes agree; it stops first at (b)'s preview, an `id-rewrite` reported for the unchanged `id="m"`) |
-| T6.6-3 | section-6.6 | 23, 25, 35 |
+| T6.6-3 | section-6.6 | 23, 25, 35 (since Task 22 its `--preview` replays of T6.4-3's refusals hold, the invalid-ID arms included; it stops first at the file-form exact self-move arm, Task 23: `refused-destination-exists` reported beside `refused-identity-unchanged`) |
 | T6.6-4 | section-6.6 | 29 (passes since Task 29 landed, with Task 10) |
 | T7-1 | section-7-basics | 36 |
 | T7-2 | section-7-basics | 8, 37, 38 (since Task 8 its verbatim-literal arms hold — the escape-spelled glob discovers nothing and the escape-spelled group name is named only by its own spelling; it stops first at Task 37's byte-order-mark arm) |
@@ -103,7 +103,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T14-2 | section-14 | 6 (passes since Task 6 landed) |
 | T14-4 | section-14 | 51 |
 | T14-6 | section-14 | 48, 49 (since Task 12 its early-error stagings hold; it stops first at the 14.24 arm, Task 48) |
-| T14-7 | section-14 | 22, 23, 24, 25, 35 |
+| T14-7 | section-14 | 22, 23, 24, 25, 35 (since Task 22 its rename arms hold; it stops first at the move cases' spec-import-cycle arm, Task 24: the finding locates B's existing import alone, `[specs/B.mdx 0,25]`, lacking the local reference's spelling) |
 | T14-9 | section-14-ii | 48 |
 | T14-10 | section-14-ii | 49, 50 |
 | T14-11 | section-14 | 13, 14, 15, 16, 68 (Tasks 12–16 landed: every table arm holds — (a)–(m) and (p)–(w), (h)'s repeated `id` locating both spellings, [36,44) and [45,54), since Task 15, and (j)'s and (u)'s colliding declarations beside their imports since Task 16; it stops first at arm (n), run after the table's arms, which waits on Task 68: probed by hand, its 14.17 locates both `d` attributes since Task 15, while the second spelling's unresolved `"absent"` reports no 14.5) |
@@ -166,21 +166,6 @@ Several tasks have no failing test of their own: Task 27 (preview/real agreement
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 22 — `refused-invalid-id` concerns the new identity alone (SPEC 14 refusal list, 6.4; A15, C19(a))
-
-**Requirement.** SPEC 14, `refused-invalid-id`: "concerning the new identity alone: an ID the prefix replacement produces is in intrinsic form exactly when the new ID is … so no produced identity reports separately".
-
-**Observed.** `rename specs/A.mdx a a.then` reports the identities `["specs/A.mdx#a.then","specs/A.mdx#a.then.c"]`; T6.4-3's staging adds `a.then.kid` the same way. The first identity alone is required.
-
-**Location.** `src/core/refusal.ts` ~399: the invalid-ID finding's identities.
-
-**Change.** Carry exactly one identity over the destination file, spelled verbatim: `<file>#<new-id>` for a rename, `<target-file>#<new-id>` for a section move.
-
-**Verification.**
-- Should turn green: `section-6.4.test.ts` (T6.4-3).
-- `section-14.test.ts`: T14-7's invalid-ID arm.
-- Neighbour: `section-6.6.test.ts`.
 
 ## Task 23 — The exact file self-move reports `refused-identity-unchanged` alone (SPEC 14, 6.5; A16, C19(b))
 
@@ -416,7 +401,7 @@ Its `identities` are the workspace-relative paths of the files concerned, in byt
 **Verification.**
 - Should turn green: `section-6.5-iii.test.ts` (T6.5-16).
 - `section-6.6.test.ts`: T6.6-3 (with Tasks 23 and 25).
-- `section-14.test.ts`: T14-7 (with Tasks 22–25).
+- `section-14.test.ts`: T14-7 (with Tasks 23–25).
 - Neighbours: `section-6.5.test.ts`, `section-6.5-ii.test.ts`.
 
 ## Task 36 — The configuration path is judged by what occupies it (SPEC 7, 14.14; B1)

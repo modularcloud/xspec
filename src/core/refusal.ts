@@ -367,33 +367,25 @@ function identityFilePart(identity: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * `refused-invalid-id` (SPEC 14): the new ID, or an ID the prefix
- * replacement produces, is not in intrinsic ID form — one finding
- * concerning those identities (`file#id` per SPEC 1.5), or null. The
- * produced IDs are `newId` plus each moved descendant's prefix-replaced ID
- * (SPEC 6.4, 6.5).
+ * `refused-invalid-id` (SPEC 14): the new ID is not in intrinsic ID form
+ * (one or more segments joined by `.`, each satisfying SPEC 1.4) — one
+ * finding concerning the new identity alone, or null. Its `identities`
+ * hold exactly `<file>#<new-id>` over the operation's destination file
+ * (SPEC 1.5, 14: the file for a rename, the target file for a section
+ * move), the ID spelled verbatim. An ID the prefix replacement produces
+ * (SPEC 6.4, 6.5) is in intrinsic form exactly when the new ID is — the
+ * suffix it appends is valid on a workspace passing `build`'s
+ * validations — so no produced identity reports separately (SPEC 14).
  */
-function invalidIdFinding(
-  targetFile: string,
-  producedIds: readonly string[],
-): Finding | null {
-  const invalid: string[] = [];
-  const problems: string[] = [];
-  for (const id of producedIds) {
-    const problem = intrinsicIdProblem(id);
-    if (problem !== null) {
-      invalid.push(id);
-      problems.push(`${JSON.stringify(id)}: ${problem}`);
-    }
-  }
-  if (invalid.length === 0) return null;
+function invalidIdFinding(targetFile: string, newId: string): Finding | null {
+  const problem = intrinsicIdProblem(newId);
+  if (problem === null) return null;
   return refusalFinding(
     "refused-invalid-id",
-    `invalid new ID: the operation would produce identities that are not ` +
-      `in intrinsic ID form (one or more segments joined by ".", each ` +
-      `satisfying SPEC 1.4) — ${problems.join("; ")}; choose a valid new ` +
-      `ID (SPEC 1.4, 14)`,
-    { identities: invalid.map((id) => `${targetFile}#${id}`) },
+    `invalid new ID: ${JSON.stringify(newId)} is not in intrinsic ID form ` +
+      `(one or more segments joined by ".", each satisfying SPEC 1.4) — ` +
+      `${problem}; choose a valid new ID (SPEC 1.4, 14)`,
+    { identities: [`${targetFile}#${newId}`] },
   );
 }
 
@@ -708,8 +700,9 @@ export function evaluateRenameRefusals(inputs: RenameRefusalInputs): Finding[] {
     }
   }
 
-  // SPEC 14 `refused-invalid-id`: intrinsic form only.
-  const invalidId = invalidIdFinding(file, producedIds);
+  // SPEC 14 `refused-invalid-id`: intrinsic form only, concerning the new
+  // identity alone — every produced ID shares the new ID's form.
+  const invalidId = invalidIdFinding(file, newId);
   if (invalidId !== null) findings.push(invalidId);
 
   // SPEC 14 `refused-id-collision`: against the IDs remaining once the
@@ -962,8 +955,10 @@ export function evaluateMoveSectionRefusals(
     if (mapped !== null) producedIds.push(mapped);
   }
 
-  // SPEC 14 `refused-invalid-id`: intrinsic form only.
-  const invalidId = invalidIdFinding(targetPath, producedIds);
+  // SPEC 14 `refused-invalid-id`: intrinsic form only, concerning the new
+  // identity alone over the target file — every produced ID shares the new
+  // ID's form.
+  const invalidId = invalidIdFinding(targetPath, newId);
   if (invalidId !== null) findings.push(invalidId);
 
   // SPEC 14 `refused-id-collision`: against the IDs remaining in the
