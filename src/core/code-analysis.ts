@@ -267,6 +267,20 @@ export interface CodeAnalysis {
   /** Every extracted reference, in document order (SPEC 4.3, 4.5). */
   readonly references: readonly CodeReference[];
   /**
+   * Every identifier the file spells, each as the language reads it
+   * (escapes interpreted): every name a declaration of any scope binds,
+   * value- or type-level — variables and their destructuring patterns,
+   * parameters, functions, classes, enums, interfaces, type aliases, type
+   * parameters, namespaces, `declare` forms, and every binding of every
+   * import — and every name the file reads, property names included.
+   * SPEC 6.5 "Import edits": an added import binds fresh identifiers
+   * colliding with no binding already in the file (2.1, 4); an identifier
+   * outside this set collides with no module-scope binding, is shadowed by
+   * no inner declaration wherever it roots a spelling (4.5), and captures
+   * no use the file spells of a name bound outside it.
+   */
+  readonly spelledNames: ReadonlySet<string>;
+  /**
    * The per-file 14.7/14.8/14.15/14.18 findings, ordered by location — a
    * cross-module call's 14.11 is reported at resolution (graph.ts), since
    * the condition needs an argument that resolves (SPEC 14.11).
@@ -604,6 +618,7 @@ class CodeAnalyzer {
       references: [...this.references].sort(
         (a, b) => a.range.start - b.range.start || a.range.end - b.range.end,
       ),
+      spelledNames: spelledIdentifierNames(this.sourceFile),
       findings: sortFindings(this.findings),
     };
   }
@@ -2055,6 +2070,31 @@ function bindingNames(
     if (ts.isOmittedExpression(element)) continue;
     bindingNames(element.name, element, into);
   }
+}
+
+/**
+ * Every identifier the file spells, as the language reads it (SPEC 6.5
+ * "Import edits": the names an added import's fresh identifiers avoid —
+ * `CodeAnalysis.spelledNames`). Every binding name is an identifier the
+ * tree holds, whatever its scope or declaration kind, so collecting every
+ * identifier node covers them all. The traversal keeps its own stack: a
+ * nesting the parser builds iteratively (a long chain of array-type
+ * suffixes or binary operators) must not exhaust the call stack here.
+ */
+function spelledIdentifierNames(sourceFile: tst.SourceFile): Set<string> {
+  const names = new Set<string>();
+  const pending: tst.Node[] = [sourceFile];
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    if (ts.isIdentifier(node)) {
+      names.add(node.text);
+      continue;
+    }
+    // The callback returns nothing: a truthy result would end the visit.
+    ts.forEachChild(node, (child) => {
+      pending.push(child);
+    });
+  }
+  return names;
 }
 
 /** Each judged namespace's verdict; null while it is under judgement. */

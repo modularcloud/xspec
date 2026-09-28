@@ -60,7 +60,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T6.5-6 | section-6.5 | 26 (passes since Task 26 landed: the kept-ID move's preview reports the origin's `origin-deletion` and the target's `target-insertion` alone, no `id-rewrite` or `reference-rewrite` for the unchanged `id='x.c'`, `id="x"`, `id="x.u"`, and `d={"x.c"}`) |
 | T6.5-7 | section-6.5 | 30 (passes since Task 30 landed: the own-line and shared-line code variants' origin-module imports are removed with 6.5's exact extent) |
 | T6.5-8 | section-6.5 | 28 (passes since Task 28 landed; since Task 29 its one failing arm had been the TS arm, the added code import carrying a `;`) |
-| T6.5-9 | section-6.5 | 32 |
+| T6.5-9 | section-6.5 | 32 (passes since Task 32 landed: an added declaration's fresh identifiers avoid every identifier the receiving code file spells — `CodeAnalysis.spelledNames`, every scope's bindings, value- and type-level, imports included — so the TS arm binds `Target2`, passing over the pre-empted `const`, `function`, `class`, `type` alias, and non-spec import bindings) |
 | T6.5-10 | section-6.5 | 29 (passes since Task 29 landed, with Task 10) |
 | T6.5-11 | section-6.5-ii | 28, 30, 31 (passes since Task 31 landed: each arm's call is rewritten whole, `t(O.x)` becoming `targetText(target.y)` — `targetText(T.y)` in (b), through its existing `T` — the added declaration binding exactly the lacked bindings, and the origin import removed with its line in (a), (b), and (d)) |
 | T6.5-13 | section-6.5-iii | 26 (passes since Task 26 landed; since Task 29 its arms (a)–(h) had held and it had stopped first at arm (i)'s preview, an `id-rewrite` reported for the unchanged `id="m"` of a cross-file move keeping its ID) |
@@ -167,25 +167,6 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 
 ---
 
-## Task 32 — Fresh identifiers in code files collide with no module-scope binding (SPEC 6.5 "Import edits", 2.1, 4; A21, first bullet; the `72ad038` plan's Task 2)
-
-**Requirement.** SPEC 6.5: "An added import binds fresh identifiers — colliding with no binding already in the file (2.1, 4), distinct from the others added there".
-
-**Observed.** Fresh identifiers are checked only against import bindings, so they can collide with module-scope `const`, `function`, `class`, or `type` names. T6.5-9 pre-empts `Target`, `target`, `TARGET`, `TargetSpec`, `TargetSPEC`, `ORG1`, `ORG2`, and `ORG_`.
-
-**Location.**
-- `src/core/move.ts`: the code-file `taken` set, seeded lazily from import bindings in the `addition` closure of the code-file reference loop, and `freshBindingName` (~641). Since Task 31 that set serves both fresh identifiers an added declaration can bind — the default binding (stem base, `target`) and the `text` binding (stem base plus `TEXT_BINDING_SUFFIX`, `targetText`) — so seeding it covers both.
-- `src/core/code-analysis.ts`: `CodeAnalysis` (~176) exposes no module-scope names.
-
-**Change.**
-- Extend the analysis with every identifier bound at the file's module scope, value- and type-level: variables (destructuring included), functions, classes, enums, interfaces, type aliases, namespaces, `declare` forms, and every binding of every import. Task 16 may already collect the value-level part.
-- Seed `taken` from it.
-- Keep the candidate derivation deterministic.
-
-**Verification.**
-- Should turn green: `section-6.5.test.ts` (T6.5-9).
-- Neighbours: `section-6.5-ii.test.ts`, `section-6.6.test.ts`.
-
 ## Task 33 — A re-rooted code reference uses a binding that no local declaration shadows at the occurrence (SPEC 6.5 "Reference spellings", 4.5; A21, second bullet)
 
 **Requirement.** SPEC 6.5: each chosen binding "is one the file already holds that no local declaration shadows at the occurrence (4.5)". Where the file holds none, it is the binding of the declaration the operation adds.
@@ -196,8 +177,8 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 
 **Change.**
 - For each occurrence, choose an existing binding of the target module that is not shadowed in that occurrence's scope — the default binding for its chain and, for a `text(...)` call, the `text` binding for its callee (`CodeReference.callee`, recorded since Task 31, gives the callee's range).
-- If none qualifies, add an import whose fresh identifiers are also unshadowed at every occurrence they root.
-- To support this, the analysis must expose the names declared in each occurrence's enclosing inner scopes.
+- If none qualifies, add an import whose fresh identifiers are also unshadowed at every occurrence they root. Since Task 32 this half holds: the fresh identifiers avoid every identifier the file spells (`CodeAnalysis.spelledNames`, seeding `taken` in the `addition` closure), so no declaration of any scope binds them — hand-verified: `const Target = 1` inside `f` beside the moved marker, the marker becomes `Target2.mv` under an added `import Target2 …`, its edge from `src/app.ts#f` kept.
+- To support this, the analysis must expose, for an existing binding, whether a local declaration shadows it at each occurrence (the names declared in the occurrence's enclosing inner scopes, or the checker's resolution of the name there).
 
 **Verification.**
 - Should turn green: `section-6.5-iii.test.ts` (T6.5-18).
@@ -791,7 +772,7 @@ No test stages a parenthesized default export.
 **Change.**
 - Take the first admissible offset of a deterministic candidate order over line starts (e.g. the current anchor, then the file's start, then the other line starts in byte order). A candidate is admissible when the file, every edit of the rewrite applied (the addition included), parses with no syntax diagnostic (TSX for `.tsx`, 14.20) and its top-level `statements` hold an import declaration spanning exactly each added declaration's characters.
 - Report the chosen offset in the preview, as now. A file holding no admissible offset is Task 35's refusal.
-- Do this after Tasks 32–33, which rework the reference loop before it (freshness, shadowing); Tasks 30 (removals) and 31 (`text` bindings: an added declaration may bind `{ text as Y }`, rendered by `importDeclarationLine`) landed.
+- Do this after Task 33, which reworks the reference loop before it (shadowing); Tasks 30 (removals), 31 (`text` bindings: an added declaration may bind `{ text as Y }`, rendered by `importDeclarationLine`), and 32 (freshness: `taken` seeded from `CodeAnalysis.spelledNames`) landed.
 
 **Verification.** No suite test pins it. Hand-probe both Observed stagings: each move adds the declaration at a top-level line start, the moved marker keeps its `references` edge under the new identity, `check` is clean, and the preview's `import-addition` offset equals the real insertion's. Run `section-6.5.test.ts` (T6.5-8's TS arm, T6.5-9), `section-6.5-ii.test.ts`, `section-6.5-iii.test.ts` (T6.5-18), and `section-6.6.test.ts`.
 
@@ -803,13 +784,13 @@ No test stages a parenthesized default export.
 
 **Location.**
 - `src/core/code-analysis.ts`, the spec-module import scan: an `{ default as X }` element (`imported === "default"`) registers its role but enters neither `CodeImport.defaultBinding` nor `textBindings`.
-- `src/core/move.ts`, the code-file reference loop: the `existingDefault` search reads `defaultBinding` alone. The fresh-name `taken` seed reads `defaultBinding` and `textBindings` alone, so it misses `X` too; Task 32 reseeds it from every module-scope name.
+- `src/core/move.ts`, the code-file reference loop: the `existingDefault` search reads `defaultBinding` alone. The fresh-name `taken` seed no longer misses `X`: since Task 32 it is every identifier the file spells (`CodeAnalysis.spelledNames`).
 
 **Change.**
 - Expose every default-export binding of a spec module import, the named `{ default as X }` form included (for example, a `nodeBindings` list beside `textBindings`, each with its `typeOnly`).
 - Choose the existing target-module binding from that list, value-level and, once Task 33 lands, unshadowed at the occurrence.
 - Keep the choice deterministic, e.g. the first such binding in document order.
-- Do this with or after Tasks 32–33, which rework the same binding choice (Task 31 landed: `existingText` chooses a moved call's callee binding the same way).
+- Do this with or after Task 33, which reworks the same binding choice (Tasks 31 and 32 landed: `existingText` chooses a moved call's callee binding the same way, and fresh identifiers avoid every identifier the file spells).
 
 **Verification.** No suite test pins it. Hand-probe the Observed staging: after the move `src/app.ts` reads `import { default as TGT } from "../specs/Target.xspec";`, `TGT.tgt;`, `TGT.mv;`, with no addition and the ORG line dropped. `query edges` lists the marker's `references` edge to `specs/Target.mdx#mv`, and `check` is clean. Run `section-6.5.test.ts`, `section-6.5-ii.test.ts`, `section-6.5-iii.test.ts`, and `section-6.6.test.ts`.
 

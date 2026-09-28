@@ -548,9 +548,11 @@ function offsetAfterLine(bytes: Uint8Array, position: number): number {
 
 /**
  * ECMAScript reserved words, which an import binding can never use — the
- * fresh-identifier chooser (SPEC 6.5) skips them.
+ * fresh-identifier chooser (SPEC 6.5) skips them — and `arguments` and
+ * `eval`, which no binding of module (strict) code may bind.
  */
 const RESERVED_BINDING_NAMES: ReadonlySet<string> = new Set([
+  "arguments",
   "await",
   "break",
   "case",
@@ -564,6 +566,7 @@ const RESERVED_BINDING_NAMES: ReadonlySet<string> = new Set([
   "do",
   "else",
   "enum",
+  "eval",
   "export",
   "extends",
   "false",
@@ -1803,21 +1806,17 @@ export function planMoveSection(
         holdsTarget(imported) &&
         imported.textBindings.some((binding) => !binding.typeOnly),
     );
-    // The declaration the rewrite adds, and the names already bound.
+    // The declaration the rewrite adds, and the names its fresh identifiers
+    // avoid (SPEC 6.5 "Import edits": colliding with no binding already in
+    // the file, 2.1, 4): every identifier the file spells — each binding of
+    // every scope, value- or type-level, imports included, and each name
+    // the file reads — so an added binding collides with no module-scope
+    // declaration, no inner declaration shadows it at an occurrence it
+    // roots (4.5), and it captures no use of an outer name.
     let added: AddedBindings | null = null;
     let taken: Set<string> | null = null;
     const addition = (): { added: AddedBindings; taken: Set<string> } => {
-      if (taken === null) {
-        taken = new Set();
-        for (const imported of analysis.imports) {
-          if (imported.defaultBinding !== null) {
-            taken.add(imported.defaultBinding.name);
-          }
-          for (const binding of imported.textBindings) {
-            taken.add(binding.name);
-          }
-        }
-      }
+      taken ??= new Set(analysis.spelledNames);
       if (added === null) {
         added = { defaultName: null, textName: null };
         let additions = codeAdditions.get(analysis.path);
