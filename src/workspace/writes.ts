@@ -32,6 +32,10 @@
 // before touching the workspace, and the write primitives re-check as a
 // terminal defense. Path components above the workspace root are
 // unrestricted (SPEC 13.4).
+//
+// SPEC 13.4's read side shares the occupant classification: reads traverse
+// no non-directory component either, and `readableDirectory` is the one
+// judge of whether a read may list a workspace directory at all.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -186,6 +190,31 @@ export async function obstructedComponentOf(
     if (occupant !== "directory") return { component, occupant };
   }
   return null;
+}
+
+/**
+ * SPEC 13.4, the read side ("Reads traverse none either"): whether reads
+ * may list the directory at the workspace-relative path `rel` — true
+ * exactly when `rel` itself and every workspace-relative directory
+ * component above it are occupied by directories, each judged by `lstat`
+ * shallowest first, so a symbolic link is judged itself and never
+ * traversed, whatever it targets. Absent, occupied by anything other than
+ * a directory — a plain file, a symbolic link, any other non-directory
+ * occupant — or lying below such an occupant, the directory holds nothing
+ * (14.25's absence, never its refusal): no read lists through it, and the
+ * caller reads nothing there. For `.xspec/reviews`, that is the session
+ * directory holding no sessions (SPEC 10.1). Components above the
+ * workspace root are unrestricted (SPEC 13.4) and never examined.
+ */
+export async function readableDirectory(
+  root: string,
+  rel: string,
+): Promise<boolean> {
+  for (const component of [...directoryComponents(rel), rel]) {
+    const occupant = await classifyOccupant(absoluteOf(root, component));
+    if (occupant !== "directory") return false;
+  }
+  return true;
 }
 
 /** The SPEC 14.22 finding for one obstructed directory component. */

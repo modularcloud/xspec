@@ -469,9 +469,11 @@ export function unknownSessionError(
   return usageError(
     invocation,
     context,
-    `unknown session '${name}' — no session file ` +
-      `.xspec/reviews/${name}.json exists; session names compare byte-wise ` +
-      `and case-sensitively (SPEC 10.1, 10.7, 12.0)`,
+    `unknown session '${name}' — the session directory .xspec/reviews/ ` +
+      `holds no session file ${name}.json (it holds sessions only while ` +
+      `directories occupy its path and .xspec, never through a symbolic ` +
+      `link or other non-directory occupant, SPEC 10.1, 13.4); session ` +
+      `names compare byte-wise and case-sensitively (SPEC 10.1, 10.7, 12.0)`,
   );
 }
 

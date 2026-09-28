@@ -78,7 +78,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T7.3-1 | section-7.1-7.3 | 41 (passes since Task 41 landed: `outDirSpellingProblem` in `src/core/discovery.ts` judges `markdown.outDir`'s verbatim literal by spelling alone, so `""`, `/out`, `./out`, `out/../x`, `out//x`, `out/`, `../out`, and `docs/../../out` are each 14.14, exit 2 naming `xspec.config.ts`, nothing written; `out/sub` redirects the emission) |
 | T7.4-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
 | T7.5-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
-| T10.1-6 | section-10.1 | 45, 46 |
+| T10.1-6 | section-10.1 | 45, 46 (since Task 45 landed its session-directory arms hold — `.xspec/reviews` a plain file, and a symbolic link to a directory holding a valid `s.json`: `review list` answers no sessions, `review status s` is the unknown-session usage error, `check` is clean, `inventory` lists no session, `ids` answers, `create` reports the one 14.22 concerning `.xspec/reviews` — and so do its three stale twins; it stops first at the area arm `.xspec` a plain file, Task 46: `inventory --json` exits 0 where it must exit 1 with `recorded` unavailable and the one condition-23 finding concerning `.xspec`) |
 | T11-2 | section-11 | 2, 3, 40 (passes since Task 40 landed: its inside `--file` spellings, `./specs/alpha/*.mdx` and its twins, answer no rows, exit 0; it never waited on Task 44 — its outside-root `--file` arms run on a valid workspace, and its twin sweep under an invalid and a missing configuration covers only the malformed `--tag` values Task 2 judges at parse level; since Task 3 its tag sets had held) |
 | T11-6 | section-11 | 19 (passes since Task 19 landed) |
 | T11-7 | section-11 | 3 (passes since Task 3 landed) |
@@ -167,34 +167,12 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 
 ---
 
-## Task 45 — A symlinked session directory holds no sessions for every `review` subcommand (SPEC 13.4, 10.1, 10.7, 12.0; B15, C9)
-
-**Requirement.**
-- SPEC 13.4: "Reads traverse none either: below a workspace-relative directory component occupied by anything other than a directory — a symbolic link included, whatever it targets — nothing is read … the session directory so placed holds no sessions (10.1)".
-- An unknown session name is a usage error (10.7, 12.0).
-
-**Observed.** Staging: `.xspec/reviews` is a symlink to a directory holding a valid `s.json`.
-- `review status s`, `next s`, `show s item-1`, and `export s` answer from the linked session, exit 0.
-- `resolve s item-1` gives a "blocked" refusal, and `split s item-1` gives a 14.22 finding, both exit 1.
-- All six must exit 2 with an unknown-session usage error.
-- Already correct: `list`, `create`, `check`, `ids`, `inventory`, and a plain-file occupant.
-
-**Location.** `src/workspace/reviews.ts`:
-- `loadSession` (~178–230) and `loadAllSessions` read through `readdir` and `readFile` without classifying the directory.
-- `listSessionNames` (~93) and `sessionOccupied` (~156) — follow whatever `list` already does.
-
-**Change.** Before any session read, classify `.xspec` and `.xspec/reviews` with `lstat`, in one helper shared by all six subcommands and by `list`. A non-directory occupant at either path means no sessions, so every session name is unknown (exit 2).
-
-**Verification.**
-- `section-10.1.test.ts`: T10.1-6's reviews arms (its area arms need Task 46).
-- Neighbours: `section-10.7-i.test.ts`, `section-10.7-ii.test.ts`, `section-13.4.test.ts`.
-
 ## Task 46 — A non-directory `.xspec` holds no journal and no sessions, and its record is unreadable (SPEC 13.4, 11.6, 14.23, 14.10, 10.1; B16)
 
-After Task 45.
+Task 45 has landed the shared helpers and the sessions part: `readableDirectory(root, rel)` in `src/workspace/writes.ts` (true exactly when `rel` and every workspace-relative directory component above it hold directories, judged by `lstat` shallowest first) and, over it, `sessionDirectoryHoldsSessions(root)` in `src/workspace/reviews.ts`, which every session read consults (`listSessionNames`, `listSessionFilePaths`, `sessionOccupied`, `loadSession`, so `loadAllSessions` too). Hand-verified at Task 45: with `.xspec` a symbolic link to a directory holding `reviews/s.json`, `inventory` lists no session and the six name-taking `review` subcommands exit 2, unknown session. What remains is the journal and the record: `readableDirectory(root, GRAPH_DATA_AREA)` is the area judge to reuse.
 
 **Requirement.**
-- SPEC 13.4, continuing Task 45's rule: "the journal so placed is empty (6.1) and unoccupied to the inventory (11.6), and the session directory so placed holds no sessions (10.1)".
+- SPEC 13.4, continuing the rule Task 45 applied to sessions: "the journal so placed is empty (6.1) and unoccupied to the inventory (11.6), and the session directory so placed holds no sessions (10.1)".
 - The same passage continues: "the record alone, whose container the graph-data area is, reads instead as unreadable under such an occupant of the area's own path (14.23)".
 - Consequences:
   - `inventory` reports that state as 14.23 (11.6);
@@ -202,7 +180,7 @@ After Task 45.
 
 **Observed.**
 - `.xspec` as a plain file: `inventory` reports `recorded` as `[]`, no finding, exit 0.
-- `.xspec` as a symlink to a directory: `inventory` reports `journal.occupied` `true`, lists `.xspec/reviews/s.json` under `sessions`, and reads `recorded` through the link, all with no finding and exit 0.
+- `.xspec` as a symlink to a directory: `inventory` reports `journal.occupied` `true` and reads `recorded` through the link, with no finding and exit 0 (its `sessions` has been `[]` since Task 45).
 - Required in both cases:
   - `occupied` is `false` and `sessions` is `[]`;
   - `recorded` is `{"unavailable": true}`;
@@ -213,9 +191,9 @@ After Task 45.
 - `src/cli/commands/inventory.ts`.
 - `src/workspace/graph-data.ts` (the record read), `src/workspace/journal.ts`, `src/workspace/reviews.ts`, `src/workspace/check.ts`.
 
-**Change.** Classify the area path with `lstat` once per command, sharing Task 45's helper, and derive every consequence from it:
+**Change.** Classify the area path with `lstat` once per command, sharing Task 45's helper (`readableDirectory`), and derive every consequence from it:
 - journal: unoccupied and empty;
-- sessions: none;
+- sessions: none (done at Task 45);
 - record: unreadable (condition 23), wherever the record is consulted:
   - on `inventory`, the finding plus the unavailable datum;
   - on previews (6.6);
