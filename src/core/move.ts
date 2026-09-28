@@ -1355,8 +1355,14 @@ export interface MoveSectionPlan {
   readonly previewFiles: readonly PreviewFileEdits[];
 }
 
-/** An import declaration line for a spec file (SPEC 2.1, 6.5 additions). */
-function specImportLine(
+/**
+ * An added default import declaration, spelled exactly as SPEC 6.5 gives it
+ * in a spec source and a TypeScript source alike: `import X from "…"`,
+ * single spaces, no statement terminator, the specifier double-quoted in the
+ * canonical relative spelling from the importing file's directory (SPEC 2.1,
+ * 6.5 "Import edits"). `importAdditionEdit` puts it on a line of its own.
+ */
+function defaultImportLine(
   filePath: string,
   modulePath: string,
   name: string,
@@ -1854,7 +1860,7 @@ export function planMoveSection(
       return null;
     }
     const lines = added.map((addition) =>
-      specImportLine(path, addition.modulePath, addition.name),
+      defaultImportLine(path, addition.modulePath, addition.name),
     );
     const removed = plan.removedImports();
     const removedSet = new Set(removed);
@@ -2032,7 +2038,11 @@ export function planMoveSection(
           ? ""
           : `${added
               .map((addition) =>
-                specImportLine(targetPath, addition.modulePath, addition.name),
+                defaultImportLine(
+                  targetPath,
+                  addition.modulePath,
+                  addition.name,
+                ),
               )
               .map((line) => `${line}\n`)
               .join("")}\n`;
@@ -2142,17 +2152,12 @@ export function planMoveSection(
             `moved subtree but has no spec module import`,
         );
       }
+      // SPEC 6.5: each added declaration is spelled `import X from "…"`,
+      // no statement terminator, on a line of its own.
       const lines = [...additions.entries()]
         .sort((a, b) => compareBytes(a[0], b[0]))
-        .map(
-          ([modulePath, name]) =>
-            `import ${name} from ${jsStringLiteral(
-              relativeModuleSpecifier(
-                analysis.path,
-                moduleSpecifierTargetOf(modulePath),
-              ),
-              '"',
-            )};`,
+        .map(([modulePath, name]) =>
+          defaultImportLine(analysis.path, modulePath, name),
         );
       const offset = offsetAfterLine(bytes, anchor.range.end);
       // SPEC 6.6: the import addition's zero-length insertion point, at
