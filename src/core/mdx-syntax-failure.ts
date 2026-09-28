@@ -26,10 +26,12 @@
 //   `}` closes on a line that then fails — a flow expression's brace
 //   followed by text, its content spanning a blank line no paragraph
 //   holds — fails at the first character past the brace that the grammar
-//   rejects; and content a brace line opens right below a paragraph line
-//   holding an open text element — the flow reading doomed, the text
-//   reading the paragraph's — fails at the latest at the terminator of
-//   its first line of container syntax and whitespace alone;
+//   rejects; and content opened by a construct begun right below a
+//   paragraph line holding an open text element — a brace line, a tag
+//   holding the brace, a brace after a tag or text on that line, a brace
+//   inside a tag or expression running on from it; the flow reading
+//   doomed, the text reading the paragraph's — fails at the latest at the
+//   terminator of its first line of container syntax and whitespace alone;
 // - an ESM block: the block's text, as recorded, measured as a module of
 //   import and export declarations;
 // - a JSX tag's own syntax: the stock tokenizer's character;
@@ -595,8 +597,8 @@ function lineLeavingOffset(text: string, placed: number): number {
  * other than those a continuation of the content could still begin with,
  * or, where that line's `}` closes the content, the first character past
  * it the grammar rejects (`pastClosingBrace`) — each bounded where the
- * content's brace line lies below a paragraph line holding an open text
- * element (`textReadingBound`).
+ * construct holding the content's brace begins right below a paragraph
+ * line holding an open text element (`textReadingBound`).
  */
 function measuredThroughLine(
   text: string,
@@ -779,26 +781,34 @@ function goesOn(head: string, brace: number): boolean {
   }
 }
 
-// The stock grammar tries a line whose content begins with `{` as a flow
-// expression first, which interrupts the paragraph above it, and gives the
-// line to that paragraph, the brace a text expression's, only where text
-// after the expression's closing brace on its line makes it no flow
-// expression (an attempt meeting the end of the file or a lazy line
-// throws). Below a paragraph line holding an open text element the flow
-// reading never derives: the paragraph it interrupts ends with the element
-// open. The text reading alone is left, and a paragraph holds no line of
-// container syntax and whitespace alone — such a line is blank, or begins
-// a block quote, which interrupts a paragraph — so neither does its text
-// expression, whatever a flow construct's content may span. Where the
-// content is still open at such a line, no completion of a prefix past
-// that line's terminator derives (SPEC 14's location rule for 14.20); a
-// failure the flow reading's measures place before it fails the text
-// reading too, the two collecting the same content there. A code span, a
-// link title, or a definition's label or title opened in the paragraph may
-// close past the brace, hiding it — and the element — in the text reading
-// (`[a <S id="s">` LF `` {` `` LF `]: u` LF LF `` `} b `` derives, a
-// definition), so a paragraph holding a backtick or a bracket is left to
-// the flow reading's measures.
+// The stock grammar tries a line whose content begins with `{` or `<` as a
+// flow construct first — a flow expression, a flow tag — which interrupts
+// the paragraph above it, and gives the line to that paragraph, the brace
+// a text expression's or a text tag's, only where text after the
+// construct on its line makes it no flow construct (an attempt meeting the
+// end of the file or a lazy line throws, and a tag, once past `<` and a
+// character other than a space or a line ending, is read as a tag in
+// either reading). Below a paragraph line holding an open text element the
+// flow reading never derives: the paragraph it interrupts ends with the
+// element open. The text reading alone is left, and a paragraph holds no
+// line of container syntax and whitespace alone — such a line is blank, or
+// begins a block quote, which interrupts a paragraph — so neither does its
+// text expression or text tag, whatever a flow construct's content may
+// span. The same holds for a brace further along the line below the
+// paragraph line, after a tag or text, and for a brace on a later line
+// inside a tag or expression begun on that line: the paragraph, once past
+// its line, cannot end inside a construct unfinished there, so it holds
+// the brace. Where the content is still open at such a line, no completion
+// of a prefix past that line's terminator derives (SPEC 14's location rule
+// for 14.20); a failure the flow reading's measures place before it fails
+// the text reading too, the two collecting the same content there. A code
+// span, a link title, or a definition's label or title opened in the
+// paragraph may close past the brace, hiding it — and the element — in the
+// text reading (`[a <S id="s">` LF `` {` `` LF `]: u` LF LF `` `} b ``
+// derives, a definition), so a paragraph holding a backtick or a bracket
+// is left to the flow reading's measures; one opened past the paragraph
+// line, before the brace, is the grammar's own reading there, a line that
+// does not begin with `{` or `<` being text alone.
 
 /** The stock grammar's report of an element a paragraph's end left open. */
 const PARAGRAPH_LEFT_OPEN = /before the end of `paragraph`$/;
@@ -810,13 +820,85 @@ function lineEndFrom(text: string, from: number): number {
   return at;
 }
 
+/** The start of the line whose end (its terminator's start) is `end`. */
+function lineStartAt(text: string, end: number): number {
+  let at = end;
+  while (at > 0 && terminatorBefore(text, at) === "") at -= 1;
+  return at;
+}
+
+/**
+ * Whether `failure`, the grammar's for a prefix ending at `end`, is the
+ * end of the file met inside a JSX tag or an expression — a construct the
+ * prefix leaves unfinished at its end.
+ */
+function endsInsideConstruct(failure: MdxFailure, end: number): boolean {
+  return (
+    (failure.source === "micromark-extension-mdx-jsx" ||
+      failure.source === "micromark-extension-mdx-expression") &&
+    failure.ruleId === "unexpected-eof" &&
+    placeStart(failure) === end
+  );
+}
+
+/**
+ * Whether `failure`, the grammar's for a prefix ending at `end`, is a
+ * paragraph ending there with a text element open — the paragraph holding
+ * no backtick or bracket (above).
+ */
+function leavesParagraphOpen(
+  text: string,
+  failure: MdxFailure,
+  end: number,
+): boolean {
+  const reason = String(failure.reason);
+  const paragraphStart = placeStart(failure);
+  return (
+    failure.source === "mdast-util-mdx-jsx" &&
+    EXPECTED_CLOSING_TAG.test(reason) &&
+    PARAGRAPH_LEFT_OPEN.test(reason) &&
+    placeEnd(failure) === end &&
+    paragraphStart !== undefined &&
+    !/[`[\]]/.test(text.slice(paragraphStart, end))
+  );
+}
+
+/**
+ * The paragraph line holding an open text element (its end) right above
+ * the line where the construct holding a brace begins — the brace's line
+ * starting at `lineStart`, or, where the prefix through the line above
+ * ends inside a JSX tag or an expression, the first of the lines such
+ * constructs run over, walking back line by line (above) — or undefined
+ * where no such paragraph line is found: a line above that is blank, the
+ * file's first line, or a prefix the grammar reads otherwise.
+ */
+function openParagraphAbove(
+  text: string,
+  lineStart: number,
+): number | undefined {
+  let start = lineStart;
+  for (;;) {
+    const terminator = terminatorBefore(text, start);
+    if (terminator === "") return undefined;
+    const end = start - terminator.length;
+    start = lineStartAt(text, end);
+    if (LINE_SYNTAX.test(text.slice(start, end))) return undefined;
+    const { failure } = analysisParse(text.slice(0, end));
+    if (failure === null) return undefined;
+    if (!endsInsideConstruct(failure, end)) {
+      return leavesParagraphOpen(text, failure, end) ? end : undefined;
+    }
+  }
+}
+
 /**
  * `result`, measured for the container whose content opens at `opening`,
- * bounded by the text reading (above) where the container's `{` begins its
- * line past container syntax right below a paragraph line holding an open
- * text element: at the terminator of the first later line of container
- * syntax and whitespace alone, where the content is still open at that
- * line — a `}` ending the line before it falls in the container.
+ * bounded by the text reading (above) where the construct holding the
+ * container's `{` begins right below a paragraph line holding an open text
+ * element (`openParagraphAbove`): at the terminator of the first line past
+ * the brace's of container syntax and whitespace alone, where the content
+ * is still open at that line — a `}` ending the line before it falls in
+ * the container.
  */
 function textReadingBound(
   text: string,
@@ -824,14 +906,6 @@ function textReadingBound(
   result: number,
 ): number {
   if (opening === undefined || text.charAt(opening - 1) !== "{") {
-    return result;
-  }
-  const lineStart = lineStartBefore(text, opening);
-  const terminator = terminatorBefore(text, lineStart);
-  if (
-    terminator === "" ||
-    !LINE_SYNTAX.test(text.slice(lineStart, opening - 1))
-  ) {
     return result;
   }
   let before = lineEndFrom(text, opening);
@@ -843,26 +917,18 @@ function textReadingBound(
     if (LINE_SYNTAX.test(text.slice(start, end))) blankEnd = end;
     else before = end;
   }
-  const paragraphEnd = lineStart - terminator.length;
-  const { failure } = analysisParse(text.slice(0, paragraphEnd));
-  const reason = String(failure?.reason);
-  const paragraphStart = failure === null ? undefined : placeStart(failure);
-  if (
-    failure === null ||
-    failure.source !== "mdast-util-mdx-jsx" ||
-    !EXPECTED_CLOSING_TAG.test(reason) ||
-    !PARAGRAPH_LEFT_OPEN.test(reason) ||
-    placeEnd(failure) !== paragraphEnd ||
-    paragraphStart === undefined ||
-    /[`[\]]/.test(text.slice(paragraphStart, paragraphEnd))
-  ) {
+  if (openParagraphAbove(text, lineStartBefore(text, opening)) === undefined) {
     return result;
   }
+  // An attribute's content that is whitespace alone so far is refused
+  // before acorn sees it, so the `}` is also tried after an `x`: no text
+  // past the line reopens a container a `}` on it closed.
+  const openAt = (head: string): boolean => {
+    const collected = collectedAtEnd(head);
+    return collected !== undefined && openingOf(head, collected) === opening;
+  };
   const head = text.slice(0, before);
-  const collected = collectedAtEnd(head);
-  return collected !== undefined && openingOf(head, collected) === opening
-    ? blankEnd
-    : result;
+  return openAt(head) || openAt(head + "x") ? blankEnd : result;
 }
 
 /**
