@@ -93,7 +93,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T11.6-2 | section-11.6 | 4 (passes since Task 4 landed) |
 | T12.0-10 | section-12.0-ii | 44 (passes since Task 44 landed: `parseArgv` in `src/cli/args.ts` judges the whole syntax class before `main` locates the configuration — each flag's `spelling` and each command's `operandSpellings` name a `SpellingRule`, and `PREVIEW_FLAG.excludes` refuses `--test-hold` beside `--preview` — so the `--test-hold`, `.x` session-name, `+7` offset, malformed `--to`, and outside-root `--file` rows report the plain usage error under an invalid and a missing configuration alike, no hold file created; its `--tag 'a\b'` row had held since Task 2) |
 | T12.0-14 | section-12.0-iii | 43 (passes since Task 43 landed: `parseArgv` in `src/cli/args.ts` reads the tokens in stages — `walkTokens` strips flags anywhere, each flag's arity fixed by its name across commands (`FLAG_ARITY`, a name of no command taking no value), and honours `--`; JSON output is in effect exactly for a `--json` the walk reads as a flag, or a JSON-only surface; then `matchCommand` matches the remaining words to the synopsis and each walked flag is checked against the command's accepted set — so `--json ids`, `--config cfg/xspec.config.ts build`, and `ids --` run, while `ids -- --json`, `build --file --json`, and `ids --file --json extra` exit 2 with stdout empty) |
-| T12.2-4 | section-12.1-12.2 | 52 |
+| T12.2-4 | section-12.1-12.2 | 52 (passes since Task 52 landed: `checkCommand` in `src/cli/commands/check.ts` reads the record and computes its orphans on every workspace — `orphanedRecordedPaths` over `discoveredGeneratedPaths` in `src/core/build.ts`, the generated-path set of every discovered spec source by the `NAME.mdx` name shape, 14.19-rejected ones with a string form included — and runs `recordStalenessFindings` whatever the findings, so arm (b) reports the dropped `extra/E.mdx`'s module and three companions beside the 14.5 and arm (c) the unreadable-record unit form; `evaluatePolicy` runs only on a workspace with no analysis finding and no 14.22, so arms (a) and (d) report the 14.5 alone) |
 | T12.3-1 | section-12.3-12.5 | 40 (passes since Task 40 landed) |
 | T12.7-3 | section-12.7 | 42, 48, 49 (passes since Task 49 landed: its last arm, the Linux-leg 14.25 one — `build --json` with `specs/sub` unlistable — exits 2 with `{"code": "read-failure", "path": "specs/sub"}`, the discovery walk's refused listing raised through `performRead` in `src/workspace/environment-refusal.ts` (`walk` in `src/workspace/discovery.ts`); since Task 42 every configuration arm had held — an unoccupied `--config` path, `./../cfg//xspec.config.ts` and an absolute one, reported byte-for-byte as given, the same spellings reporting `../cfg/xspec.config.ts` once the malformed file exists — with the search-failure, single-finding, usage, and linked-working-directory arms, and since Task 48 its 14.24 arm, `{"code": "write-failure", "path": ".xspec"}`) |
 | T13.3-2 | section-13.3 | 47 (passes since Task 47 landed: the graph-data area holds the snapshot with its derivation inputs at `.xspec/graph.json` and the recorded derived-file paths apart at `.xspec/record.json` — `GRAPH_DATA_PATH` and `DERIVED_FILE_RECORD_PATH` in `src/core/graph-data.ts`, both read through `readStoredFile` in `src/workspace/graph-data.ts` — and a refreshing read writes the snapshot file alone (`assessWorkspaceRead` in `src/workspace/refresh.ts`, `finishAvailabilityRefresh` in `src/workspace/availability.ts`), so after the deletion arm's refresh `inventory` reports `recorded` `[]` and `check` is clean, a readable record stays byte-for-byte, and an unreadable one stays untouched while the refresh rewrites the snapshot beside it) |
@@ -166,29 +166,6 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 52 — On a workspace failing validation, `check` reports no 14.12 and still reports 14.10's validity-independent forms (SPEC 14.10, 14.12, 7.5; C11)
-
-**Requirement.**
-- SPEC 14.10: the recorded-file form and the unreadable-record unit form are "reported whatever the sources' validity".
-- SPEC 14.12 and 7.5: no policy violation is detectable on a workspace failing validation.
-
-**Observed.** Staging: one unresolved `d` reference.
-- A policy-violating edge is still reported as 14.12.
-- A recorded orphan (a derived path whose source has left the configuration) gets no 14.10.
-- A corrupt record gets no 14.10 unit form.
-- The valid controls report both 14.10 forms.
-
-**Location.** `checkCommand` in `src/cli/commands/check.ts`, and `src/workspace/check.ts`. Since Task 51 the staleness forms are split: `mismatchStalenessFindings` (per file and the graph-data mismatch unit form), consulted only on a workspace with no analysis finding and no 14.22, and `recordStalenessFindings` (the unreadable-record unit form and the recorded-file form over an `orphans` list), which already reports beside a 14.22. Both still run only inside `checkCommand`'s `analysis.findings.length === 0` branch, because `orphans` comes from `computeBuildOutputs`.
-
-**Change.** On a failing workspace — any source validation finding, journal error (14.13), or 14.22 (SPEC 13.3, 14.12: "a workspace passing `build`'s validations") —
-- skip policy evaluation (today `evaluatePolicy` runs whatever the findings, a 14.22 workspace included);
-- still compare the record against the generated-path set (the recorded-file form), that set derived from discovery and configuration alone (13.1, 7.3, 11.6) where `computeBuildOutputs` cannot run, and pass the resulting orphans to `recordStalenessFindings`;
-- still report an unreadable record's unit form (`recordStalenessFindings`).
-
-**Verification.**
-- `section-12.1-12.2.test.ts` (T12.2-4).
-- Neighbours: `section-7.4-7.5.test.ts`, `section-14.test.ts`.
 
 ## Task 53 — `review list` reports a corrupt session as a 14.21 finding (SPEC 14, 14.21, 12.7; C20)
 
@@ -421,7 +398,7 @@ No test stages a parenthesized default export.
 **Change.**
 - On a workspace with source or journal findings, judge the write-path set that discovery and configuration define: modules and companions per 13.1, Markdown per 7.3, and graph data's own paths.
 - Report its 14.22 findings beside the validation findings. A failing `build` still modifies nothing.
-- Task 52 needs the same generated-path set for the recorded-file form; share it.
+- Share the generated-path set Task 52 built for the recorded-file form: `discoveredGeneratedPaths` in `src/core/build.ts` — every discovered spec source's module, companions, and Markdown destination by the `NAME.mdx` name shape alone, 14.19-rejected sources with a string form included, in byte order. The write-path set is it plus `GRAPH_DATA_OWN_PATHS`, as `src/workspace/fast-read.ts` composes it over valid sources. It omits the derived paths of a source whose path is not valid UTF-8 (no string form). Decide whether a 14.22 judgment needs those: the module and companions lie in the source's own directory, but a Markdown destination under `outDir` crosses components no string names. In `checkCommand`, `passesBuildValidations` already gates `evaluatePolicy` on analysis findings and on a 14.22.
 - Judge `rename`/`move`'s invalid-workspace refusal (6.4, 6.5; T14-7: "the workspace's numbered findings alone") by the same reading.
 - First confirm that no suite test pins the validation findings alone on such a staging; if one does, record the contradiction per the rules above.
 
