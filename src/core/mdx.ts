@@ -189,8 +189,15 @@ export interface SpecSection {
   readonly tags: readonly string[];
   /** The `id` attribute's recorded value/spans, when usably declared. */
   readonly idAttribute: SpecAttributeValue | null;
-  /** The `d` attribute's recorded expression span, when validly braced. */
-  readonly dependency: SpecDependencyAttribute | null;
+  /**
+   * Every validly braced `d` attribute's recorded expression span, in tag
+   * order — empty where the tag spells none. SPEC 11.2 "Resolution":
+   * resolution is per spelling, whatever the validity of the attribute
+   * holding it, so each entry of every `d` attribute of a section that
+   * repeats the prop (14.17) resolves or not on its own, exactly as the
+   * entries of a single `d` do; a quoted or valueless `d` holds no entries.
+   */
+  readonly dependencies: readonly SpecDependencyAttribute[];
   /**
    * The raw attribute spellings as parsed, one entry per attribute the tag
    * spells, in tag order (SPEC 11.4). Empty for the root, which has no tag.
@@ -1052,7 +1059,7 @@ interface MutableSection {
   coverage: "required" | "none" | null;
   tags: readonly string[];
   idAttribute: SpecAttributeValue | null;
-  dependency: SpecDependencyAttribute | null;
+  dependencies: SpecDependencyAttribute[];
   attributes: SpecRawAttribute[];
   tagsDefined: boolean;
   coverageDefined: boolean;
@@ -1102,7 +1109,7 @@ class DocumentBuilder {
       coverage: null,
       tags: [],
       idAttribute: null,
-      dependency: null,
+      dependencies: [],
       attributes: [],
       tagsDefined: true,
       coverageDefined: true,
@@ -1478,7 +1485,7 @@ class DocumentBuilder {
       coverage: "required", // SPEC 2.5: the default
       tags: [],
       idAttribute: null,
-      dependency: null,
+      dependencies: [],
       attributes: [],
       tagsDefined: true,
       coverageDefined: true,
@@ -1534,6 +1541,19 @@ class DocumentBuilder {
         earlier.push(attrRange);
         if (name === "id") {
           idUnusable = true; // ambiguous declaration — no usable ID
+        }
+        if (name === "d") {
+          // SPEC 11.2 "Resolution": resolution is per spelling, whatever
+          // the validity of the attribute holding it — each entry of every
+          // `d` attribute of a section repeating the prop resolves or not
+          // on its own, beside the repetition's one 14.17 (below), exactly
+          // as the entries of a single `d` do. A braced later spelling is
+          // recorded as the first is; a quoted or valueless one holds no
+          // entries.
+          const dependency = this.dependencyAttribute(attribute, attrSpan);
+          if (dependency !== null) {
+            section.dependencies.push(dependency);
+          }
         }
         // SPEC 11.2: a repeated `tags`/`coverage` prop leaves the
         // interpreted value undefined — no occurrence is picked.
@@ -1611,20 +1631,38 @@ class DocumentBuilder {
     attrSpan: { start: number; end: number },
     section: MutableSection,
   ): void {
-    const attrRange = this.byteRange(attrSpan.start, attrSpan.end);
-    const value = attribute.value ?? null;
-    if (value === null || typeof value === "string") {
+    const dependency = this.dependencyAttribute(attribute, attrSpan);
+    if (dependency === null) {
       // SPEC 2.7 → 14.17: a quoted or valueless `d` is invalid.
+      const form =
+        (attribute.value ?? null) === null
+          ? "a valueless prop"
+          : "a quoted string";
       this.addFinding(
         17,
-        attrRange,
+        this.byteRange(attrSpan.start, attrSpan.end),
         `invalid prop: the d prop must be a braced expression holding a ` +
           `static reference or an array literal of static references — ` +
-          `e.g. d={BASE.auth.login} or d={["local.id"]} — not ` +
-          `${value === null ? "a valueless prop" : "a quoted string"} ` +
+          `e.g. d={BASE.auth.login} or d={["local.id"]} — not ${form} ` +
           `(SPEC 2.7, 2.2, 14.17)`,
       );
       return;
+    }
+    section.dependencies.push(dependency);
+  }
+
+  /**
+   * The spans of one `d` attribute in the braced-expression form of SPEC
+   * 2.7, for the analyzer of 2.2/2.4 — null for a quoted or valueless `d`,
+   * which holds no entries (its 14.17 is the caller's to report).
+   */
+  private dependencyAttribute(
+    attribute: MdxAttributeNode,
+    attrSpan: { start: number; end: number },
+  ): SpecDependencyAttribute | null {
+    const value = attribute.value ?? null;
+    if (value === null || typeof value === "string") {
+      return null;
     }
     const open = this.valueOpenIndex(attribute, attrSpan);
     if (open === null || this.text[open] !== "{") {
@@ -1632,13 +1670,13 @@ class DocumentBuilder {
         "xspec internal error: braced d value without a brace in source",
       );
     }
-    section.dependency = {
+    return {
       expressionText: derivedContent(
         this.text.slice(open + 1, attrSpan.end - 1),
         (value as { readonly value?: unknown }).value,
       ),
       expressionRange: this.byteRange(open + 1, attrSpan.end - 1),
-      attributeRange: attrRange,
+      attributeRange: this.byteRange(attrSpan.start, attrSpan.end),
     };
   }
 

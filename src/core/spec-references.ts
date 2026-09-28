@@ -882,12 +882,16 @@ export function analyzeSpecReferences(
   const analyzer = new ReferenceAnalyzer(document, importModel.bindings);
   const dependencies: DependencyReference[] = [];
   for (const section of document.sections) {
-    const dependency = section.dependency;
-    if (dependency === null) {
-      continue;
-    }
-    for (const reference of analyzer.analyzeDependencyValue(dependency)) {
-      dependencies.push({ section, reference });
+    // SPEC 11.2 "Resolution": every braced `d` spelling of the section, in
+    // tag order — each spelling of a repeated prop included (14.17) — is
+    // analyzed exactly as a single `d` is, so each of its entries records
+    // an occurrence, reports 14.5 through the graph, or reports 14.8 on its
+    // own; the graph's duplicate-target collapse (SPEC 2.2, 5.2) applies
+    // across spellings as within one array literal.
+    for (const dependency of section.dependencies) {
+      for (const reference of analyzer.analyzeDependencyValue(dependency)) {
+        dependencies.push({ section, reference });
+      }
     }
   }
   const embeddings: EmbeddingReference[] = [];
