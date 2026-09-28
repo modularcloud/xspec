@@ -16,7 +16,8 @@
 // - `<offset>` must be one or more ASCII decimal digits, read in decimal —
 //   leading zeros permitted; a sign, whitespace, or any other character is
 //   not a non-negative integer's spelling (SPEC 11.5). A purely syntactic
-//   check, judged before any configuration or source is consulted.
+//   check — 12.0's syntax class — so the parser judges it (cli/args.ts),
+//   before any configuration or source is consulted.
 // - `<file>` asserts domain membership exactly as a `view` operand does
 //   (SPEC 11.4): a file outside the discovered set is unknown and a
 //   discovered code source is a wrong-kind operand; a `#`-containing
@@ -65,9 +66,7 @@ import {
   unavailableJson,
 } from "../report.js";
 import {
-  invalidOffsetMessage,
   offsetOutOfRangeMessage,
-  offsetSpellingOk,
   unknownFileMessage,
   wrongKindFileMessage,
 } from "./at-common.js";
@@ -81,15 +80,9 @@ export async function atCommand(
   const file = invocation.positionals[0]!;
   const offsetSpelling = invocation.positionals[1]!;
 
-  // --- the syntactic offset check (SPEC 11.5, 12.0: a malformed value,
-  // judged from the invocation alone, before anything is consulted) -------
-  if (!offsetSpellingOk(offsetSpelling)) {
-    return usageError(
-      invocation,
-      context,
-      invalidOffsetMessage(offsetSpelling),
-    );
-  }
+  // SPEC 11.5, 12.0: the offset's spelling — one or more ASCII decimal
+  // digits — was judged by the parser (cli/args.ts), a syntax-class usage
+  // error reported before the configuration is loaded.
   const offset = Number.parseInt(offsetSpelling, 10);
 
   // --- the analysis half of the SPEC 11.2 pre-answer step (a pure read) ---

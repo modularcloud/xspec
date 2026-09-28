@@ -17,7 +17,6 @@
 import type { ByteRange } from "../../core/bytes.js";
 import type { JsonObject } from "../../core/canonical-json.js";
 import type { CompiledGlob } from "../../core/glob.js";
-import { compileGlob } from "../../core/glob.js";
 import type { GraphEdge, GraphEdgeKind } from "../../core/graph.js";
 import { DEPENDENCY_EDGE_KINDS } from "../../core/graph.js";
 import type { NodeHashes } from "../../core/hashes.js";
@@ -26,7 +25,12 @@ import { shortestWitnessPath } from "../../core/paths.js";
 import type { Invocation } from "../args.js";
 import { flagList, flagValue } from "../args.js";
 import type { CliWriter, CommandIo } from "../io.js";
-import { emitDocument, rangeJson, usageError } from "./common.js";
+import {
+  compileFileFlag,
+  emitDocument,
+  rangeJson,
+  usageError,
+} from "./common.js";
 
 /** One requirement node as the query subcommands consume it (SPEC 11). */
 export interface QueryRow {
@@ -232,10 +236,12 @@ type NodesFiltersResult =
  * Validate the configuration-level flag values of `query nodes` (SPEC 11):
  * `--group` accepts only a configured spec group's name — a code group's
  * name is an invalid flag value, the wrong-kind group reference of 14.14,
- * and an unknown name is a usage error (12.0) — and `--file` compiles under
- * the glob rules of 7, where a pattern resolving outside the workspace root
- * is an invalid flag value, exit 2 like its configuration-time counterpart
- * (14.14). Like those counterparts, these checks precede source analysis.
+ * and an unknown name is a usage error (12.0), a check preceding source
+ * analysis like its 14.14 counterparts — and `--file` compiles under the
+ * glob rules of 7. A `--file` pattern outside the workspace root is an
+ * invalid flag value decided by its spelling alone, which the parser has
+ * already refused (12.0's syntax class, before the configuration is
+ * loaded), so it never reaches this check.
  */
 function resolveNodesFilters(
   invocation: Invocation,
@@ -260,21 +266,7 @@ function resolveNodesFilters(
     }
     groupGlobs = specGroup.globs;
   }
-  let fileGlob: CompiledGlob | undefined;
-  const filePattern = flagValue(invocation, "--file");
-  if (filePattern !== undefined) {
-    const compiled = compileGlob(filePattern, "plain");
-    if (!compiled.ok) {
-      // Plain mode has one compile error: outside-root (SPEC 7).
-      return {
-        ok: false,
-        message:
-          `invalid value '${filePattern}' for '--file' — the pattern ` +
-          `resolves outside the workspace root (SPEC 11, 7, 12.0)`,
-      };
-    }
-    fileGlob = compiled.glob;
-  }
+  const fileGlob = compileFileFlag(invocation);
   return {
     ok: true,
     filters: {

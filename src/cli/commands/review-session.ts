@@ -7,8 +7,10 @@
 // baseline.ts, refresh.ts). This module composes them into the one flow
 // every session-naming subcommand shares:
 //
-// 1. Session-name validity (SPEC 10.1 → 12.0: any other name is a usage
-//    error, exit 2).
+// 1. Session-name validity is the parser's (cli/args.ts): a name outside
+//    the form of 10.1 is a usage error of 12.0's syntax class, exit 2,
+//    reported before the configuration is loaded — so every name reaching
+//    this flow is well-formed.
 // 2. Analyze the workspace (a pure read): configuration errors keep their
 //    exit-2 precedence over every later check (SPEC 14.14, 12.0).
 // 3. Session existence, judged against the session directory alone — no
@@ -65,7 +67,6 @@ import type {
 import {
   isItemBlocked,
   recordedStateToJson,
-  sessionNameProblem,
   sessionStrategy,
 } from "../../core/review.js";
 import type {
@@ -368,11 +369,9 @@ export async function loadSessionForCommand(
 ): Promise<
   LoadedSessionForCommand | { readonly ok: false; readonly exit: ExitCode }
 > {
-  // Step 1 — SPEC 10.1 → 12.0: an invalid session name is a usage error.
-  const nameCheck = requireValidSessionName(name, invocation, context);
-  if (nameCheck !== null) {
-    return { ok: false, exit: nameCheck };
-  }
+  // Step 1 — the name's form (SPEC 10.1) was judged by the parser
+  // (cli/args.ts) before the configuration was loaded: a name outside it
+  // is a syntax-class usage error (SPEC 12.0).
 
   // Step 2 — SPEC 14.14/12.0: analyze the current workspace — a pure read;
   // configuration errors precede every argument check that consults the
@@ -459,19 +458,6 @@ export async function loadSessionForCommand(
     analysis: analyzed.analysis,
     baseline,
   };
-}
-
-/** SPEC 10.1 → 12.0: report an invalid session name, or pass (null). */
-export function requireValidSessionName(
-  name: string,
-  invocation: Invocation,
-  context: CommandContext,
-): ExitCode | null {
-  const problem = sessionNameProblem(name);
-  if (problem === null) {
-    return null;
-  }
-  return usageError(invocation, context, problem);
 }
 
 /** SPEC 10.7 → 12.0: an unknown session named in arguments. */

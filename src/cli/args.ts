@@ -35,13 +35,23 @@
 //    — its own flags plus the global `--json` and `--config <path>` — so
 //    `--name=value`, or a flag of another command, is an unknown flag; a
 //    flag may be given at most once (identical values included); list-valued
-//    flags (`--kinds`) take one comma-separated value (11).
+//    flags (`--kinds`) take one comma-separated value (11); and each value
+//    is judged against its fixed vocabulary or spelling rule.
+// 5. The command-level checks: required flags, the co-occurrence rules, the
+//    operand count, and each operand's spelling rule.
 // - Argument values are interpreted as UTF-8; a malformed value is a usage
 //   error judged before every per-flag and per-operand check (12.0).
-// - Value checks decided by spelling alone run here, without loading
-//   configuration (12.0's syntax class): enumerated and list values, the
-//   at-most-one-`#` identity rule, and a `--tag` spelling no tag can have
-//   (11.1, 1.4).
+// - Stages 3–5 are SPEC 12.0's syntax class, every error the invocation's
+//   arguments alone determine, so all of it is judged here, before `main`
+//   locates the configuration: an unknown command, subcommand, or flag, a
+//   repeated flag, a missing required flag or argument, a surplus operand,
+//   a malformed value, and every invalid flag value or operand spelling that
+//   a fixed vocabulary (`allowed`, `list`), a spelling rule (`SpellingRule`)
+//   or a co-occurrence rule (`exactlyOneOf`, `excludes`,
+//   `positionalConflicts`, `move`'s operand forms) decides. Every other
+//   usage error consults configuration, discovery, or the workspace — an
+//   unknown or wrong-kind name, an `<offset>` beyond the file's length — and
+//   is the command handler's, after the configuration error of 14.14.
 //
 // Every parse failure is a usage error: exit 2 with the diagnostic on
 // stderr. Standard output is empty unless JSON output is in effect (stage 2,
@@ -52,7 +62,38 @@
 // filesystem paths, keeping all output byte-deterministic for identical
 // input (12.0: no absolute paths, no environment-dependent content).
 
+import { nodeSpellingProblem } from "../core/availability.js";
+import { globLiesOutsideRoot } from "../core/glob.js";
+import { sessionNameProblem } from "../core/session-name.js";
 import { describeSegmentViolation, segmentViolation } from "../core/text.js";
+
+/**
+ * SPEC 12.0's syntax class, its spelling rules: "every invalid flag value
+ * or operand spelling that ... a spelling rule ... decides" is an error the
+ * invocation's arguments alone determine, reported without loading
+ * configuration. Each rule judges one value by its spelling alone
+ * (`spellingProblem`):
+ *
+ * - `identity` — a `<node>` or `<graph-node>` value: at most one `#` is
+ *   well-formed (12.0, 1.5); whether it names a node is judged later,
+ *   parse-local against the named file (12.0, 11.1);
+ * - `requirement-node` — `occurrences --to`, whose acceptance is syntactic
+ *   (11.3): a well-formed requirement-node identity (1.4, 1.5);
+ * - `tag` — `query nodes --tag`, likewise syntactic (11.1): a spelling
+ *   some tag can have (1.4);
+ * - `inside-root` — a `--file` glob: inside the workspace root, "decided by
+ *   its spelling alone" (12.0, 7, 11.1, 12.3);
+ * - `session-name` — the form of 10.1;
+ * - `offset` — `at`'s `<offset>`: one or more ASCII decimal digits (11.5);
+ *   whether it lies within the file's length is judged later.
+ */
+type SpellingRule =
+  | "identity"
+  | "requirement-node"
+  | "tag"
+  | "inside-root"
+  | "session-name"
+  | "offset";
 
 /** One flag a command accepts, and how its value (if any) is validated. */
 interface FlagSpec {
@@ -72,22 +113,17 @@ interface FlagSpec {
    */
   readonly list?: readonly string[];
   /**
-   * SPEC 12.0: the flag's value is a `<node>`/`<graph-node>` identity —
-   * `#` splits path from id or unit, at most one is well-formed, and a
-   * spelling containing more than one is a malformed value, an error the
-   * invocation's syntax alone determines: parse-level, reported without
+   * The spelling rule the flag's value must satisfy (SPEC 12.0's syntax
+   * class): a value it refuses is a usage error judged here, without
    * loading configuration.
    */
-  readonly identityValue?: boolean;
+  readonly spelling?: SpellingRule;
   /**
-   * SPEC 11.1: the flag's value is a tag (`query nodes --tag`), accepted
-   * syntactically — any well-formed tag (1.4), whatever the workspace
-   * contains. A spelling no tag can have under 1.4's rules is a malformed
-   * value, a usage error of the syntax class (12.0: "a `--to` or `--tag`
-   * spelling malformed as an identity or tag"): parse-level, reported
-   * without loading configuration.
+   * A flag this one excludes, and why — SPEC 12.0's co-occurrence rules:
+   * given together, the two are a usage error of the syntax class, judged
+   * here without loading configuration.
    */
-  readonly tagValue?: boolean;
+  readonly excludes?: { readonly flag: string; readonly why: string };
 }
 
 /** One command (or `review`/`query` subcommand) of the SPEC 12.5 table. */
@@ -110,13 +146,14 @@ interface CommandSpec {
    */
   readonly positionalConflicts?: readonly string[];
   /**
-   * SPEC 12.0: the command's positional operands are `<node>`/`<graph-node>`
-   * identities (the `identityValue` rule, positional side) — a multi-`#`
-   * spelling is a malformed value, parse-level. Never set for `<file>`
-   * operands: a bare `<file>` is a whole path in which `#` has no delimiter
-   * role (`view`, `at`, `rename`'s origin).
+   * The spelling rule of each operand, by position (parallel to
+   * `positionals`; a null entry, or none, has no rule) — SPEC 12.0's syntax
+   * class, judged here without loading configuration. A `<node>` operand
+   * takes the `identity` rule (a multi-`#` spelling is a malformed value);
+   * a bare `<file>` never does — it is a whole path in which `#` has no
+   * delimiter role (`view`, `at`, `rename`'s origin).
    */
-  readonly identityPositionals?: boolean;
+  readonly operandSpellings?: readonly (SpellingRule | null)[];
   /** Command-specific flags; the SPEC 12.0 globals are added for every command. */
   readonly flags: readonly FlagSpec[];
   /**
@@ -169,9 +206,20 @@ const TEST_HOLD_FLAG: FlagSpec = {
  * SPEC 6.6: `rename` and `move` accept `--preview` — full validation and
  * planning, performed on nothing. Combining it with `--test-hold` is a
  * usage error (a preview acquires no exclusivity and does not take the
- * acquisition-tied seam), checked by the command handlers.
+ * acquisition-tied seam) — SPEC 12.0 lists "`--test-hold` beside
+ * `--preview`" in the syntax class, so it is judged here, before the
+ * configuration is loaded and before any hold file could be created.
  */
-const PREVIEW_FLAG: FlagSpec = { name: "--preview", takesValue: false };
+const PREVIEW_FLAG: FlagSpec = {
+  name: "--preview",
+  takesValue: false,
+  excludes: {
+    flag: "--test-hold",
+    why:
+      "a preview acquires no workspace exclusivity and does not take the " +
+      "acquisition-tied test seam (SPEC 6.6, 13.5, 12.0)",
+  },
+};
 
 /**
  * The known command table (SPEC 12.5), in specification order. Argument
@@ -190,7 +238,12 @@ const COMMANDS: readonly CommandSpec[] = [
     positionals: [],
     flags: [
       { name: "--tree", takesValue: false },
-      { name: "--file", takesValue: true, valueName: "<glob>" },
+      {
+        name: "--file",
+        takesValue: true,
+        valueName: "<glob>",
+        spelling: "inside-root",
+      },
       { name: "--unreferenced", takesValue: false },
     ],
   },
@@ -198,7 +251,7 @@ const COMMANDS: readonly CommandSpec[] = [
   {
     path: "show",
     positionals: ["<node>"],
-    identityPositionals: true,
+    operandSpellings: ["identity"],
     flags: [],
   },
   // SPEC 8.2: `coverage` runs all profiles, `coverage <name>` one; `--check`.
@@ -235,23 +288,46 @@ const COMMANDS: readonly CommandSpec[] = [
         allowed: ["audit"],
       },
       { name: "--coverage", takesValue: true, valueName: "<profile>" },
-      { name: "--name", takesValue: true, valueName: "<name>", required: true },
+      {
+        name: "--name",
+        takesValue: true,
+        valueName: "<name>",
+        required: true,
+        spelling: "session-name",
+      },
       TEST_HOLD_FLAG,
     ],
     exactlyOneOf: [["--base", "--strategy", "--coverage"]],
   },
   { path: "review list", positionals: [], flags: [] },
-  { path: "review status", positionals: ["<name>"], flags: [] },
-  { path: "review next", positionals: ["<name>"], flags: [] },
-  { path: "review show", positionals: ["<name>", "<item-id>"], flags: [] },
+  {
+    path: "review status",
+    positionals: ["<name>"],
+    operandSpellings: ["session-name"],
+    flags: [],
+  },
+  {
+    path: "review next",
+    positionals: ["<name>"],
+    operandSpellings: ["session-name"],
+    flags: [],
+  },
+  {
+    path: "review show",
+    positionals: ["<name>", "<item-id>"],
+    operandSpellings: ["session-name", null],
+    flags: [],
+  },
   {
     path: "review split",
     positionals: ["<name>", "<item-id>"],
+    operandSpellings: ["session-name", null],
     flags: [TEST_HOLD_FLAG],
   },
   {
     path: "review resolve",
     positionals: ["<name>", "<item-id>"],
+    operandSpellings: ["session-name", null],
     flags: [
       // SPEC 10.7: `--status` accepts `updated`, `no-change`, and `skipped`;
       // any other value is a usage error.
@@ -268,12 +344,18 @@ const COMMANDS: readonly CommandSpec[] = [
   },
   // SPEC 10.7: `export` is JSON-only — the entire session as a single JSON
   // document, its only output form with or without `--json` (12.0).
-  { path: "review export", positionals: ["<name>"], flags: [], jsonOnly: true },
+  {
+    path: "review export",
+    positionals: ["<name>"],
+    operandSpellings: ["session-name"],
+    flags: [],
+    jsonOnly: true,
+  },
   // SPEC 11: the six query subcommands — JSON-only surfaces (12.0).
   {
     path: "query node",
     positionals: ["<node>"],
-    identityPositionals: true,
+    operandSpellings: ["identity"],
     flags: [],
     jsonOnly: true,
   },
@@ -283,10 +365,15 @@ const COMMANDS: readonly CommandSpec[] = [
     jsonOnly: true,
     flags: [
       { name: "--group", takesValue: true, valueName: "<g>" },
-      { name: "--file", takesValue: true, valueName: "<glob>" },
+      {
+        name: "--file",
+        takesValue: true,
+        valueName: "<glob>",
+        spelling: "inside-root",
+      },
       // SPEC 11.1: `--tag` accepts any well-formed tag (1.4) — syntactic
       // acceptance, as on `occurrences --to` (11.3).
-      { name: "--tag", takesValue: true, valueName: "<t>", tagValue: true },
+      { name: "--tag", takesValue: true, valueName: "<t>", spelling: "tag" },
       // SPEC 11: `--coverage required|none`.
       {
         name: "--coverage",
@@ -305,13 +392,13 @@ const COMMANDS: readonly CommandSpec[] = [
         name: "--from",
         takesValue: true,
         valueName: "<graph-node>",
-        identityValue: true,
+        spelling: "identity",
       },
       {
         name: "--to",
         takesValue: true,
         valueName: "<graph-node>",
-        identityValue: true,
+        spelling: "identity",
       },
       // SPEC 11: `edges --kinds` filters over all four kinds.
       {
@@ -325,14 +412,14 @@ const COMMANDS: readonly CommandSpec[] = [
   {
     path: "query subtree",
     positionals: ["<node>"],
-    identityPositionals: true,
+    operandSpellings: ["identity"],
     flags: [],
     jsonOnly: true,
   },
   {
     path: "query ancestors",
     positionals: ["<node>"],
-    identityPositionals: true,
+    operandSpellings: ["identity"],
     flags: [],
     jsonOnly: true,
   },
@@ -346,14 +433,14 @@ const COMMANDS: readonly CommandSpec[] = [
         takesValue: true,
         valueName: "<graph-node>",
         required: true,
-        identityValue: true,
+        spelling: "identity",
       },
       {
         name: "--to",
         takesValue: true,
         valueName: "<graph-node>",
         required: true,
-        identityValue: true,
+        spelling: "identity",
       },
       {
         name: "--kinds",
@@ -371,8 +458,20 @@ const COMMANDS: readonly CommandSpec[] = [
     positionals: [],
     jsonOnly: true,
     flags: [
-      { name: "--file", takesValue: true, valueName: "<glob>" },
-      { name: "--to", takesValue: true, valueName: "<node>" },
+      {
+        name: "--file",
+        takesValue: true,
+        valueName: "<glob>",
+        spelling: "inside-root",
+      },
+      // SPEC 11.3: acceptance is syntactic — only a spelling malformed as
+      // a requirement-node identity is a usage error (12.0's syntax class).
+      {
+        name: "--to",
+        takesValue: true,
+        valueName: "<node>",
+        spelling: "requirement-node",
+      },
     ],
   },
   // SPEC 11.4: `view [<file> …] [--file <glob>] [--text]` — JSON-only
@@ -386,18 +485,25 @@ const COMMANDS: readonly CommandSpec[] = [
     positionalConflicts: ["--file"],
     jsonOnly: true,
     flags: [
-      { name: "--file", takesValue: true, valueName: "<glob>" },
+      {
+        name: "--file",
+        takesValue: true,
+        valueName: "<glob>",
+        spelling: "inside-root",
+      },
       { name: "--text", takesValue: false },
     ],
   },
-  // SPEC 11.5: `at <file> <offset>` — JSON-only (SPEC 11). `<file>` asserts
-  // domain membership exactly as a `view` operand does and `<offset>` must
-  // be one or more ASCII decimal digits within the file's byte length —
+  // SPEC 11.5: `at <file> <offset>` — JSON-only (SPEC 11). `<offset>` must
+  // be one or more ASCII decimal digits, a spelling rule judged here (12.0's
+  // syntax class); `<file>` asserts domain membership exactly as a `view`
+  // operand does and the offset must lie within the file's byte length —
   // checks the handler runs against discovery and the file's bytes, before
   // answering (SPEC 11.2, 12.0).
   {
     path: "at",
     positionals: ["<file>", "<offset>"],
+    operandSpellings: [null, "offset"],
     flags: [],
     jsonOnly: true,
   },
@@ -551,24 +657,82 @@ function moveOperandsProblem(positionals: readonly string[]): string | null {
   return null;
 }
 
+/** SPEC 11.5: an `<offset>` is one or more ASCII decimal digits — nothing else. */
+const OFFSET_SPELLING = /^[0-9]+$/;
+
 /**
- * SPEC 12.0: at most one `#` is well-formed in a `<node>`/`<graph-node>`
- * value — its `#` splits path from id or unit, and no identity contains one
- * in path, id segment, or unit name (1.4, 1.5, 4.6) — so a spelling
- * containing more than one is a malformed value, a usage error the
- * invocation's syntax alone determines: parse-level, reported without
- * loading configuration. Returns the diagnostic, or null.
+ * Judge one flag value or operand by its spelling rule (`SpellingRule`) —
+ * an error of SPEC 12.0's syntax class: the value alone decides it, so it
+ * is reported here, without loading configuration. `subject` names the
+ * flag (`'--to'`) or operand (`<node>`) for the diagnostic. Returns the
+ * diagnostic, or null for a well-formed spelling.
  */
-function identityValueProblem(value: string, what: string): string | null {
-  const first = value.indexOf("#");
-  if (first !== -1 && value.includes("#", first + 1)) {
-    return (
-      `${what} value '${value}' contains more than one '#' — at most one ` +
-      `is well-formed: '#' splits path from id or unit, and no identity ` +
-      `contains one (SPEC 12.0, 1.5)`
-    );
+function spellingProblem(
+  rule: SpellingRule,
+  value: string,
+  subject: string,
+): string | null {
+  switch (rule) {
+    case "identity": {
+      // SPEC 12.0: at most one `#` is well-formed in a `<node>` or
+      // `<graph-node>` value — its `#` splits path from id or unit, and no
+      // identity contains one in path, id segment, or unit name (1.4, 1.5,
+      // 4.6) — so a spelling containing more than one is a malformed value.
+      const first = value.indexOf("#");
+      if (first === -1 || !value.includes("#", first + 1)) return null;
+      return (
+        `${subject} value '${value}' contains more than one '#' — at most ` +
+        `one is well-formed: '#' splits path from id or unit, and no ` +
+        `identity contains one (SPEC 12.0, 1.5)`
+      );
+    }
+    case "requirement-node": {
+      // SPEC 11.3: `--to` acceptance is syntactic — only a spelling
+      // malformed as a requirement-node identity is a usage error, while
+      // an unknown or unresolving identity selects nothing.
+      const problem = nodeSpellingProblem(value);
+      if (problem === null) return null;
+      return (
+        `invalid value '${value}' for ${subject} — not a well-formed ` +
+        `requirement-node identity: ${problem} (SPEC 11.3, 1.4, 1.5, 12.0)`
+      );
+    }
+    case "tag": {
+      // SPEC 11.1, 1.4: a spelling no tag can have, judged by the one
+      // shared 1.4 validator; the spelling is quoted as JSON so an
+      // invisible or line-breaking character shows in the one-line message.
+      const violation = segmentViolation(value, "tag");
+      if (violation === null) return null;
+      return (
+        `invalid value for ${subject} — the tag ${JSON.stringify(value)} ` +
+        `${describeSegmentViolation(violation)}, so no tag has this ` +
+        `spelling: a malformed value (SPEC 11.1, 1.4, 12.0)`
+      );
+    }
+    case "inside-root":
+      // SPEC 7, 11.1, 12.3: a `--file` pattern outside the workspace root
+      // is an invalid flag value, "decided by its spelling alone" (12.0) —
+      // the pure depth count 7 applies to a configured glob.
+      if (!globLiesOutsideRoot(value)) return null;
+      return (
+        `invalid value '${value}' for ${subject} — the pattern lies ` +
+        `outside the workspace root, decided by its spelling alone ` +
+        `(SPEC 7, 11.1, 12.3, 12.0)`
+      );
+    case "session-name":
+      // SPEC 10.1: any name outside the form is a usage error (12.0).
+      return sessionNameProblem(value);
+    case "offset":
+      // SPEC 11.5: a sign, whitespace, or any other character is not a
+      // non-negative integer's spelling.
+      if (OFFSET_SPELLING.test(value)) return null;
+      return (
+        `invalid ${subject} value '${value}' — one or more ASCII decimal ` +
+        `digits required (leading zeros permitted; a sign, whitespace, or ` +
+        `any other character is not a non-negative integer's spelling) ` +
+        `(SPEC 11.5, 12.0)`
+      );
   }
-  return null;
 }
 
 /** `"build, check, ids, …"` for diagnostics, in specification order. */
@@ -868,27 +1032,14 @@ export function parseArgv(argv: readonly string[]): ParseResult {
           `one of: ${flag.allowed.join(", ")})`,
       );
     }
-    if (flag.identityValue === true) {
-      // SPEC 12.0: a `<graph-node>` flag value with more than one `#` is a
-      // malformed value — syntax-determined, so parse-level.
-      const problem = identityValueProblem(value, `${spec.path}: '${token}'`);
+    if (flag.spelling !== undefined) {
+      // SPEC 12.0's syntax class: a value its spelling rule refuses — a
+      // multi-`#` identity, a `--to` or `--tag` malformed as an identity
+      // or tag, a `--file` glob outside the workspace root, a session name
+      // outside 10.1's form — is decided by the value alone.
+      const problem = spellingProblem(flag.spelling, value, `'${token}'`);
       if (problem !== null) {
-        return refuse(problem);
-      }
-    }
-    if (flag.tagValue === true) {
-      // SPEC 11.1, 1.4, 12.0: a spelling no tag can have is a malformed
-      // value — decided by its spelling alone, so parse-level. Judged by
-      // the one shared 1.4 validator; the spelling is quoted as JSON so an
-      // invisible or line-breaking character shows in the one-line message.
-      const violation = segmentViolation(value, "tag");
-      if (violation !== null) {
-        return refuse(
-          `${spec.path}: invalid value for '${token}' — the tag ` +
-            `${JSON.stringify(value)} ${describeSegmentViolation(violation)}` +
-            `, so no tag has this spelling: a malformed value ` +
-            `(SPEC 11.1, 1.4, 12.0)`,
-        );
+        return refuse(`${spec.path}: ${problem}`);
       }
     }
     if (token === "--config") config = value;
@@ -911,6 +1062,22 @@ export function parseArgv(argv: readonly string[]): ParseResult {
       return refuse(
         `${spec.path}: exactly one of ${group.join(", ")} is required` +
           (given.length === 0 ? "" : ` (got ${given.join(" and ")})`),
+      );
+    }
+  }
+  // SPEC 12.0's co-occurrence rules (via `excludes`): `--test-hold` beside
+  // `--preview` (6.6) — reported before the configuration is loaded, so no
+  // hold file is ever created for it.
+  for (const flag of spec.flags) {
+    const excluded = flag.excludes;
+    if (
+      excluded !== undefined &&
+      seen.has(flag.name) &&
+      seen.has(excluded.flag)
+    ) {
+      return refuse(
+        `${spec.path}: ${excluded.flag} cannot be combined with ` +
+          `${flag.name}: ${excluded.why}`,
       );
     }
   }
@@ -945,18 +1112,21 @@ export function parseArgv(argv: readonly string[]): ParseResult {
       );
     }
   }
-  // SPEC 12.0: a `<node>` positional with more than one `#` is a malformed
-  // value — syntax-determined, so parse-level (`show`, `query node`,
-  // `query subtree`, `query ancestors`).
-  if (spec.identityPositionals === true) {
-    for (const positional of positionals) {
-      const problem = identityValueProblem(
-        positional,
-        `${spec.path}: ${spec.positionals[0] ?? "<node>"}`,
-      );
-      if (problem !== null) {
-        return refuse(problem);
-      }
+  // SPEC 12.0's syntax class, operand side (via `operandSpellings`): a
+  // multi-`#` `<node>` (`show`, `query node`, `query subtree`, `query
+  // ancestors`), a session name outside 10.1's form (`review`), an
+  // `<offset>` spelled other than in decimal digits (`at`, 11.5).
+  const operandRules = spec.operandSpellings ?? [];
+  for (let index = 0; index < positionals.length; index += 1) {
+    const rule = operandRules[index] ?? null;
+    if (rule === null) continue;
+    const problem = spellingProblem(
+      rule,
+      positionals[index]!,
+      spec.positionals[index]!,
+    );
+    if (problem !== null) {
+      return refuse(`${spec.path}: ${problem}`);
     }
   }
   // SPEC 6.5/12.0: `move` operand classification is by spelling alone — a

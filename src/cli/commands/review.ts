@@ -4,25 +4,26 @@
 //
 // Outcome precedence, per subcommand:
 //
-// `create` (mutating, SPEC 13.5) — under workspace exclusivity with the
-// `--test-hold` seam:
-//   1. session-name validity (SPEC 10.1 → 12.0, exit 2);
-//   2. `--coverage`: the named profile must be configured (SPEC 10.7 →
+// `create` (mutating, SPEC 13.5) — its session name's form (SPEC 10.1),
+// its exactly-one-of rule (SPEC 10.7), and its `--strategy` vocabulary are
+// the parser's, judged before the configuration is loaded (12.0's syntax
+// class); then, under workspace exclusivity with the `--test-hold` seam:
+//   1. `--coverage`: the named profile must be configured (SPEC 10.7 →
 //      12.0 "unknown profiles named in arguments", exit 2) — a
 //      configuration-level check preceding source analysis;
-//   3. `--base`: read the baseline — ref resolution and the journal
+//   2. `--base`: read the baseline — ref resolution and the journal
 //      prefix/replay (SPEC 6.3 → 12.0, exit 2) — preceding source
 //      validation;
-//   4. the SPEC 13.3 gate: invalid sources report the validation errors,
+//   3. the SPEC 13.3 gate: invalid sources report the validation errors,
 //      exit 1, nothing created;
-//   5. `--base`: validate the baseline content as a workspace (SPEC 6.3 →
+//   4. `--base`: validate the baseline content as a workspace (SPEC 6.3 →
 //      12.0, exit 2) — past the gate, so a baseline sharing the current
 //      workspace's findings is the gate's exit-1 report — then commit the
 //      refresh write (a no-op when the store already matches);
-//   6. an existing session name — matched ignoring ASCII case (SPEC 10.1)
+//   5. an existing session name — matched ignoring ASCII case (SPEC 10.1)
 //      — is refused, exit 1, nothing created (SPEC 10.7); an exact-name
 //      corrupt occupant reports the corruption instead (SPEC 10.1, 14.21);
-//   7. derive the items (SPEC 10.5–10.7), validate the write path
+//   6. derive the items (SPEC 10.5–10.7), validate the write path
 //      (SPEC 14.22), and write the session file (SPEC 10.1, 13.4).
 //
 // `list` (read) — refresh-on-read, then every session in byte order of
@@ -31,8 +32,8 @@
 // in place of those fields; exit 1 iff any is corrupt.
 //
 // `status`, `next`, `show`, `export` (reads) — the shared open flow of
-// review-session.ts (name validity, load, recorded-baseline resolution,
-// refresh), then the read-time view (SPEC 10.4: invalidation applied,
+// review-session.ts (session existence, load, recorded-baseline
+// resolution, refresh — the name's form being the parser's), then the read-time view (SPEC 10.4: invalidation applied,
 // never persisted). `next` returns the first item in item order that needs
 // review and is unblocked, or reports the session fully resolved (exit 0,
 // the JSON payload with no item). `export` emits the entire session as a
@@ -48,7 +49,6 @@ import {
   parametersToJson,
   recordCoverageProfile,
   sessionFilePath,
-  sessionNameProblem,
   sessionStrategy,
   statusNeedsReview,
 } from "../../core/review.js";
@@ -103,11 +103,9 @@ async function runCreate(
 ): Promise<ExitCode> {
   const { workspace, stdout, stderr } = context;
 
-  // SPEC 10.1 → 12.0: an invalid session name is a usage error.
-  const nameProblem = sessionNameProblem(name);
-  if (nameProblem !== null) {
-    return usageError(invocation, context, nameProblem);
-  }
+  // The name's form (SPEC 10.1) was judged by the parser (cli/args.ts), a
+  // syntax-class usage error reported before the configuration is loaded
+  // and exclusivity acquired (SPEC 12.0, 13.5).
 
   // SPEC 10.7: exactly one of `--base`, `--strategy audit`, `--coverage`
   // was given (the parser enforces the exclusivity); resolve the creation

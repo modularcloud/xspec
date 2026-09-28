@@ -84,14 +84,14 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T11-7 | section-11 | 3 (passes since Task 3 landed) |
 | T11.2-6 | section-11.2 | 51 |
 | T11.3-2 | section-11.3 | 40 (passes since Task 40 landed: `./specs/*.mdx` and `specs//*.mdx` admit the empty set, an empty, finding-free answer, exit 0) |
-| T11.3-3 | section-11.3 | 1, 44 (since Task 1 its first failing arm is configuration-first) |
+| T11.3-3 | section-11.3 | 1, 44 (passes since Task 44 landed: every malformed `--to` spelling — the `requirement-node` spelling rule `spellingProblem` in `src/cli/args.ts` applies, `nodeSpellingProblem` beneath it — is the plain usage error, byte-identical with the configuration invalid or missing; since Task 1 its first failing arm had been configuration-first) |
 | T11.4-2 | section-11.4 | 40 (passes since Task 40 landed) |
 | T11.4-3 | section-11.4 | 3 (passes since Task 3 landed) |
 | T11.4-4 | section-11.4 | 14 (passes since Task 14 landed) |
 | T11.4-6 | section-11.4 | 3 (passes since Task 3 landed) |
 | T11.5-3 | section-11.5 | 9 (passes since Task 9 landed) |
 | T11.6-2 | section-11.6 | 4 (passes since Task 4 landed) |
-| T12.0-10 | section-12.0-ii | 44 (its `--tag 'a\b'` row holds since Task 2) |
+| T12.0-10 | section-12.0-ii | 44 (passes since Task 44 landed: `parseArgv` in `src/cli/args.ts` judges the whole syntax class before `main` locates the configuration — each flag's `spelling` and each command's `operandSpellings` name a `SpellingRule`, and `PREVIEW_FLAG.excludes` refuses `--test-hold` beside `--preview` — so the `--test-hold`, `.x` session-name, `+7` offset, malformed `--to`, and outside-root `--file` rows report the plain usage error under an invalid and a missing configuration alike, no hold file created; its `--tag 'a\b'` row had held since Task 2) |
 | T12.0-14 | section-12.0-iii | 43 (passes since Task 43 landed: `parseArgv` in `src/cli/args.ts` reads the tokens in stages — `walkTokens` strips flags anywhere, each flag's arity fixed by its name across commands (`FLAG_ARITY`, a name of no command taking no value), and honours `--`; JSON output is in effect exactly for a `--json` the walk reads as a flag, or a JSON-only surface; then `matchCommand` matches the remaining words to the synopsis and each walked flag is checked against the command's accepted set — so `--json ids`, `--config cfg/xspec.config.ts build`, and `ids --` run, while `ids -- --json`, `build --file --json`, and `ids --file --json extra` exit 2 with stdout empty) |
 | T12.2-4 | section-12.1-12.2 | 52 |
 | T12.3-1 | section-12.3-12.5 | 40 (passes since Task 40 landed) |
@@ -166,50 +166,6 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 44 — Report syntax-class usage errors without loading configuration (SPEC 12.0; B13, C2)
-
-After Tasks 1, 2, 39, and 43.
-
-**Requirement.** SPEC 12.0: "an error the invocation's arguments alone determine — the syntax class — is reported without loading configuration". The class includes:
-- `--test-hold` beside `--preview` (6.6);
-- `<file>` operands beside `--file` (11.4);
-- "a session name outside the form of 10.1";
-- "an `<offset>` spelled as anything but decimal digits (11.5)";
-- "a `--to` or `--tag` spelling malformed as an identity or tag (11.3, 11.1)";
-- "a `--file` pattern outside the workspace root (11.1) — decided by its spelling alone (7)".
-
-The error document then carries `code` and `path` as `null`.
-
-**Observed.** With an invalid configuration, each of these reports `configuration-error` instead:
-- `--test-hold` with `--preview`, on `rename` and on `move`;
-- `review status .x`, and `review create … --name .x`;
-- `occurrences --to a#b#c`, `--to 'specs/OK.mdx#ok#use'`, and `--to a.mdx#then`;
-- (`query nodes --tag then` and `--tag 'a\b'` — resolved by Task 2, whose tag rule runs at parse level in `src/cli/args.ts`, the `tagValue` flag field: every malformed `--tag` now exits 2 with the plain usage error, byte-identically under an invalid or missing configuration);
-- `--file ../x` and `--file a/../../x`, on `ids`, `query nodes`, `occurrences`, and `view`.
-
-With a missing configuration, all of the above fail the same way, and so does `at <file> +7`.
-
-**Location.**
-- `src/cli/args.ts`: the parse-level checks. Since Task 43, `parseArgv` runs in stages: `walkTokens` (flags anywhere, arity by name, `--`), JSON-in-effect from the walk, the whole-argv UTF-8 check, `matchCommand`, the per-flag checks against the command's accepted set (unknown, repeated, missing value, list/allowed/identity/tag values), then the required-flag, exactly-one-of, operand-count, operand-conflict, identity-operand, and `move` operand checks; the syntax-class spelling checks belong after those, every one before `main` locates the configuration.
-- `src/cli/main.ts`: the dispatch order.
-- `src/cli/commands/gated-args.ts`.
-- `src/cli/commands/occurrences.ts` ~78, where `nodeSpellingProblem` runs after loading.
-- The review session-name check, and `at`'s offset check.
-
-**Change.** Move every syntax-class check into the parse stage, before the configuration is located, as one table of per-command spelling checks:
-- Task 1's identity rules for `--to`;
-- Task 2's tag rule for `--tag` (already parse-level: `tagValue` in `src/cli/args.ts`; fold it into the table);
-- Task 39's depth rule for `--file` (`globLiesOutsideRoot` in `src/core/glob.ts`, pure; today each `--file` surface meets it through `compileGlob` after configuration loads);
-- 10.1's session-name form;
-- the offset's digits-only spelling;
-- the co-occurrence rules.
-
-Leave the non-syntax usage errors (unknown node, offset beyond the file's length, unknown session) after configuration, in 12.0's order.
-
-**Verification.**
-- Should turn green: `section-12.0-ii.test.ts` (T12.0-10), `section-11.3.test.ts` (T11.3-3, with Task 1). (`section-11.test.ts`'s T11-2 passes since Task 40 landed: its twin sweep covers only `--tag`, parse-level since Task 2.)
-- Neighbours: `section-10.7-i.test.ts`, `section-11.5.test.ts`, `section-12.0-i.test.ts`, `section-12.0-iii.test.ts`.
 
 ## Task 45 — A symlinked session directory holds no sessions for every `review` subcommand (SPEC 13.4, 10.1, 10.7, 12.0; B15, C9)
 

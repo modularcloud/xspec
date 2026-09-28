@@ -45,8 +45,6 @@ import { canonicalJson } from "../../core/canonical-json.js";
 import type { JsonObject, JsonValue } from "../../core/canonical-json.js";
 import type { ExitCode } from "../../core/findings.js";
 import { orderFindings } from "../../core/findings.js";
-import type { CompiledGlob } from "../../core/glob.js";
-import { compileGlob } from "../../core/glob.js";
 import type { SpecFileAnalysis, WorkspaceGraph } from "../../core/graph.js";
 import type { SpecDocument, SpecSection } from "../../core/mdx.js";
 import { definedIdentitySections } from "../../core/mdx.js";
@@ -59,7 +57,7 @@ import {
 import type { WorkspaceTextModel } from "../../core/text-model.js";
 import { finishAvailabilityRefresh } from "../../workspace/availability.js";
 import type { Invocation } from "../args.js";
-import { flagPresent, flagValue } from "../args.js";
+import { flagPresent } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { analyzeAnalysisForAvailability } from "../prepare.js";
 import {
@@ -67,7 +65,7 @@ import {
   occurrenceRecordJson,
   unavailableJson,
 } from "../report.js";
-import { rangeJson, usageError } from "./common.js";
+import { compileFileFlag, rangeJson, usageError } from "./common.js";
 
 /** One requested file's parsed analysis and its path validity (SPEC 14.19). */
 interface RequestedSpec {
@@ -85,24 +83,12 @@ export async function viewCommand(
   invocation: Invocation,
   context: CommandContext,
 ): Promise<ExitCode> {
-  // --- syntactic argument checks (SPEC 11.2: they precede answering) ------
+  // --- the arguments (SPEC 11.2: their checks precede answering) ---------
+  // A `--file` pattern outside the workspace root, and `<file>` operands
+  // beside `--file`, are the parser's: syntax-class usage errors reported
+  // before the configuration is loaded (SPEC 11.4, 11.1, 7, 12.0).
   const withText = flagPresent(invocation, "--text");
-  let fileGlob: CompiledGlob | undefined;
-  const filePattern = flagValue(invocation, "--file");
-  if (filePattern !== undefined) {
-    const compiled = compileGlob(filePattern, "plain");
-    if (!compiled.ok) {
-      // Plain mode has one compile error: a pattern resolving outside the
-      // workspace root — an invalid flag value, as in SPEC 11.1 (SPEC 7).
-      return usageError(
-        invocation,
-        context,
-        `invalid value '${filePattern}' for '--file' — the pattern ` +
-          `resolves outside the workspace root (SPEC 11.4, 11.1, 7, 12.0)`,
-      );
-    }
-    fileGlob = compiled.glob;
-  }
+  const fileGlob = compileFileFlag(invocation);
 
   // --- the analysis half of the SPEC 11.2 pre-answer step (a pure read) ---
   const prepared = await analyzeAnalysisForAvailability(invocation, context);

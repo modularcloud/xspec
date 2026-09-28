@@ -25,13 +25,13 @@ import type { ReviewSession } from "../core/review.js";
 import {
   corruptSessionFinding,
   corruptSessionOccupantFinding,
-  isValidSessionName,
   parseSessionBytes,
   REVIEWS_DIRECTORY,
   serializeSession,
   sessionFilePath,
   sortSessionNames,
 } from "../core/review.js";
+import { isValidSessionName } from "../core/session-name.js";
 import {
   classifyOccupant,
   describeOccupant,

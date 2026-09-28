@@ -20,13 +20,14 @@
 //
 // The argument checks keep their SPEC 11.2/12.0 semantics and their exact
 // diagnostics (./at-common.ts — SPEC 12.0: byte-identical output whichever
-// path answers): the syntactic offset check precedes everything; membership
-// is judged against the verified snapshot — on a verified store the
-// discovered set equals the recorded set with no invalid paths
-// (workspace/fast-read.ts), every discovered spec source has its root node
-// and every discovered code source its whole-file location (core/graph.ts),
-// so the operand's classification is the stored identities' — and the
-// offset bound against the root's whole-file range (SPEC 1.7).
+// path answers): the syntactic offset check, the parser's (cli/args.ts),
+// precedes everything; membership is judged against the verified snapshot
+// — on a verified store the discovered set equals the recorded set with no
+// invalid paths (workspace/fast-read.ts), every discovered spec source has
+// its root node and every discovered code source its whole-file location
+// (core/graph.ts), so the operand's classification is the stored
+// identities' — and the offset bound against the root's whole-file range
+// (SPEC 1.7).
 
 import { canonicalJson } from "../../core/canonical-json.js";
 import type { JsonValue } from "../../core/canonical-json.js";
@@ -41,9 +42,7 @@ import type { Invocation } from "../args.js";
 import type { CliWriter } from "../io.js";
 import { occurrenceRecordJson } from "../report.js";
 import {
-  invalidOffsetMessage,
   offsetOutOfRangeMessage,
-  offsetSpellingOk,
   unknownFileMessage,
   wrongKindFileMessage,
 } from "./at-common.js";
@@ -79,11 +78,8 @@ export async function tryFastAt(
   const file = invocation.positionals[0]!;
   const offsetSpelling = invocation.positionals[1]!;
 
-  // SPEC 11.5/12.0: a malformed <offset> is judged from the invocation
-  // alone — before any store, configuration, or workspace consult.
-  if (!offsetSpellingOk(offsetSpelling)) {
-    return usageError(invocation, io, invalidOffsetMessage(offsetSpelling));
-  }
+  // SPEC 11.5/12.0: the <offset> is decimal digits — the parser judged its
+  // spelling (cli/args.ts) before the configuration was located.
   const offset = Number.parseInt(offsetSpelling, 10);
 
   const verified = await verifyStoreForRead(located);

@@ -90,34 +90,9 @@ export function sessionFilePath(name: string): string {
 // Session names (SPEC 10.1)
 // ---------------------------------------------------------------------------
 
-/**
- * SPEC 10.1: a session name consists of one or more characters from `A–Z`,
- * `a–z`, `0–9`, `.`, `_`, and `-`, and does not begin with `.`.
- */
-export function isValidSessionName(name: string): boolean {
-  return /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(name);
-}
-
-/**
- * The usage-error diagnostic for an invalid session name, or null for a
- * valid one (SPEC 10.1 → 12.0: any other name is a usage error).
- */
-export function sessionNameProblem(name: string): string | null {
-  if (isValidSessionName(name)) {
-    return null;
-  }
-  const reason =
-    name.length === 0
-      ? "it is empty"
-      : name.startsWith(".")
-        ? "it begins with `.`"
-        : "it contains a character outside `A-Z a-z 0-9 . _ -`";
-  return (
-    `invalid session name ${JSON.stringify(name)}: ${reason} — a session ` +
-    `name must consist of one or more characters from A-Z, a-z, 0-9, ` +
-    `\`.\`, \`_\`, and \`-\`, and must not begin with \`.\` (SPEC 10.1)`
-  );
-}
+// The session-name form itself (`isValidSessionName`, `sessionNameProblem`)
+// lives in ./session-name.ts, import-free, so the argument parser judges it
+// without loading this module (SPEC 12.0 syntax class).
 
 /** ASCII case folding (A–Z → a–z); no other character is touched. */
 export function asciiCaseFold(text: string): string {

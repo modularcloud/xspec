@@ -24,14 +24,12 @@
 
 import type { JsonObject } from "../../core/canonical-json.js";
 import type { ExitCode } from "../../core/findings.js";
-import type { CompiledGlob } from "../../core/glob.js";
-import { compileGlob } from "../../core/glob.js";
 import type { RequirementNode, WorkspaceGraph } from "../../core/graph.js";
 import type { Invocation } from "../args.js";
-import { flagPresent, flagValue } from "../args.js";
+import { flagPresent } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { prepareGraphForRead } from "../prepare.js";
-import { emitDocument, usageError } from "./common.js";
+import { compileFileFlag, emitDocument } from "./common.js";
 
 /** The requirement ID of a listed node — never a root (see the filter). */
 function requirementIdOf(node: RequirementNode): string {
@@ -168,25 +166,10 @@ export async function idsCommand(
 ): Promise<ExitCode> {
   const { stdout, stderr } = context;
 
-  // SPEC 12.3/11: `--file` compiles under the glob rules of 7, where a
-  // pattern resolving outside the workspace root is an invalid flag value,
-  // exit 2 like its configuration-time counterpart (14.14). Like those
-  // counterparts, this check precedes source analysis.
-  let fileGlob: CompiledGlob | undefined;
-  const filePattern = flagValue(invocation, "--file");
-  if (filePattern !== undefined) {
-    const compiled = compileGlob(filePattern, "plain");
-    if (!compiled.ok) {
-      // Plain mode has one compile error: outside-root (SPEC 7).
-      return usageError(
-        invocation,
-        context,
-        `invalid value '${filePattern}' for '--file' — the pattern ` +
-          `resolves outside the workspace root (SPEC 12.3, 7, 12.0)`,
-      );
-    }
-    fileGlob = compiled.glob;
-  }
+  // SPEC 12.3/11: `--file` compiles under the glob rules of 7; a pattern
+  // outside the workspace root is an invalid flag value, which the parser
+  // has already refused by its spelling alone (12.0's syntax class).
+  const fileGlob = compileFileFlag(invocation);
 
   // SPEC 13.3: refresh-on-read, then answer.
   const prepared = await prepareGraphForRead(invocation, context);

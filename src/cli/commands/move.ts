@@ -121,7 +121,6 @@ import {
 import type { Invocation } from "../args.js";
 import {
   flagPresent,
-  flagValue,
   isValidUtf8ArgumentValue,
   jsonOutputInEffect,
 } from "../args.js";
@@ -721,18 +720,11 @@ export async function moveCommand(
   }
   // SPEC 6.6/13.5: a preview invocation is a non-mutating command — it
   // acquires no workspace exclusivity and does not take the
-  // acquisition-tied test seam, so `--test-hold` together with `--preview`
-  // is a usage error (exit 2), no hold file created, nothing modified.
+  // acquisition-tied test seam. `--test-hold` together with `--preview`
+  // never reaches here: the parser refuses the pair (cli/args.ts), a
+  // syntax-class usage error reported before the configuration is loaded,
+  // no hold file created, nothing modified (SPEC 12.0).
   if (flagPresent(invocation, "--preview")) {
-    if (flagValue(invocation, "--test-hold") !== undefined) {
-      return usageError(
-        invocation,
-        context,
-        `--test-hold cannot be combined with --preview: a preview acquires ` +
-          `no workspace exclusivity and does not take the acquisition-tied ` +
-          `test seam (SPEC 6.6, 13.5, 12.0)`,
-      );
-    }
     return runMove(invocation, context, originArg, destinationArg, true);
   }
   // SPEC 13.5: workspace exclusivity around the whole operation, with the

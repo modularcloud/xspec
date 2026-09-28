@@ -4,13 +4,14 @@
 // seam, exactly like `create`, `rename`, and `move`.
 //
 // Outcome precedence, per subcommand (shared steps through
-// review-session.ts's `loadSessionForCommand` — name validity, load with
+// review-session.ts's `loadSessionForCommand` — session existence, load with
 // the corrupt check, recorded-baseline resolution, refresh-on-read):
 //
 // `split <name> <item-id>`:
-//   1. session name validity (SPEC 10.1 → 12.0, exit 2), unknown session or
-//      corrupt session (SPEC 10.7 → 12.0 exit 2; 14.21 exit 1), baseline
-//      resolution (SPEC 6.3 → 12.0), refresh (SPEC 13.3);
+//   1. unknown session or corrupt session (SPEC 10.7 → 12.0 exit 2; 14.21
+//      exit 1), baseline resolution (SPEC 6.3 → 12.0), refresh (SPEC 13.3)
+//      — the session name's form being the parser's, a syntax-class usage
+//      error reported before the configuration is loaded (SPEC 10.1, 12.0);
 //   2. an unknown item id is a usage error (SPEC 10.7 → 12.0, exit 2);
 //   3. `split` on an item of any other kind than `subtree-coherence`, or on
 //      one whose scope root has no children, is refused — exit 1, nothing
