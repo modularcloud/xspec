@@ -74,7 +74,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T7-1 | section-7-basics | 36 (passes since Task 36 landed: `occupantOf` in `src/workspace/locate.ts` classifies the found or named configuration path by `lstat`, so the upward search stops at the nearest entry named `xspec.config.ts` whatever occupies it, and a directory or symbolic-link occupant, found or named, is 14.14 concerning that entry in the anchoring form, never read through) |
 | T7-2 | section-7-basics | 8, 37, 38 (passes since Task 38 landed: `checkConfiguredName` in `src/core/config.ts` refuses an empty or U+FFFD-bearing group name — a `specs` or `code` key — and profile or rule `name`, each one 14.14 giving the key and its line, so the empty-name arms, a spec group `""` and a profile and a rule named `""`, exit 2 naming the file; since Task 8 its verbatim-literal arms had held, and since Task 37 its encoding and repeated-key arms) |
 | T7-3 | section-7-basics | 38 (passes since Task 38 landed: its U+FFFD-name arms — a spec group key, a profile name, and a rule name, each the encoded code point `EF BF BD` between two letters — are each 14.14, exit 2 naming the file) |
-| T7-4 | section-7-discovery | 39, 40 |
+| T7-4 | section-7-discovery | 39, 40 (since Task 39 its outside-root arms hold — `**/../x/*.mdx`, `a/../../x/*.mdx`, `/specs/*.mdx`, and `../x/*.mdx` each 14.14, exit 2 — the depth count `globLiesOutsideRoot` in `src/core/glob.ts` deciding by spelling alone; it stops first at Task 40's inside-root arm `a/../b/*.mdx`) |
 | T7.3-1 | section-7.1-7.3 | 41 |
 | T7.4-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
 | T7.5-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
@@ -167,28 +167,6 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 
 ---
 
-## Task 39 — A `**` segment leaves the outside-root depth unchanged (SPEC 7, 11.1, 11.3, 11.4, 12.0, 12.3, 14.14; B6)
-
-**Requirement.** SPEC 7 decides whether a glob lies outside the root by its spelling alone. Read the `/`-separated segments from a depth of zero:
-- a `..` segment lowers the depth by one;
-- "a `.` segment, an empty segment …, and a `**` segment, which may match no segment at all, leave it unchanged";
-- every other segment raises the depth by one.
-
-"A glob beginning with `/`, or whose depth ever falls below zero, is outside the root". For configured globs and policy `files` selectors that is 14.14. For a `--file` pattern it is a usage error of the syntax class, exit 2 (11.1, 11.3, 11.4, 12.0).
-
-**Observed.**
-- Configured globs `**/../x/*.mdx` and `specs/**/../../x.mdx` load (exit 0).
-- A policy selector `files: "**/../x"` loads.
-- `--file '**/../x'` answers with exit 0 on `query nodes`, `occurrences`, and `view`.
-
-**Location.** `src/core/glob.ts`: `resolveSegments` (~138–167) resolves `..` lexically against the preceding segments, `**` included.
-
-**Change.** Implement the outside-root decision as the SPEC's pure depth count, separate from matching. Use it for configuration globs, policy selectors, and every `--file`, `ids --file` included.
-
-**Verification.**
-- `section-7-discovery.test.ts`: T7-4's outside-root arms (its inside-root arms need Task 40).
-- Neighbours: `section-7.4-7.5.test.ts`, `section-11.test.ts`, `section-11.3.test.ts`, `section-11.4.test.ts`, `section-12.3-12.5.test.ts`.
-
 ## Task 40 — Inside-root `.`, `..`, and empty glob segments match nothing (SPEC 7, 12.0, 12.3, 11.1, 11.3, 11.4, 7.5; B7, C3)
 
 **Requirement.**
@@ -200,13 +178,13 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 - as policy `files` selectors, which then produce violations;
 - as `--file` on `ids`, `query nodes`, `occurrences`, and `view`. These must return an empty, finding-free answer with exit 0.
 
-**Location.** `src/core/glob.ts`: `resolveSegments` drops `.` and empty segments and pops on `..`; its output feeds the matcher.
+**Location.** `src/core/glob.ts`: `resolveSegments` drops `.` and empty segments and pops on `..`; its output feeds the matcher. Since Task 39 it decides nothing about the root: `CompiledGlob.compileInternal` first refuses an outside-root spelling through `globLiesOutsideRoot`, the SPEC 7 depth count, and only then calls it.
 
-**Change.** Stop normalizing and match segments as spelled. A `.`, `..`, or empty pattern segment matches no path segment, since discovered paths never contain one. Keep Task 39's outside-root decision separate.
+**Change.** Stop normalizing and match segments as spelled. A `.`, `..`, or empty pattern segment matches no path segment, since discovered paths never contain one. Keep Task 39's outside-root decision (`globLiesOutsideRoot`, landed) separate and unchanged.
 
 **Verification.**
 - Should turn green: `section-11.3.test.ts` (T11.3-2), `section-11.4.test.ts` (T11.4-2), `section-12.3-12.5.test.ts` (T12.3-1).
-- With Task 39: `section-7-discovery.test.ts` (T7-4).
+- `section-7-discovery.test.ts` (T7-4): its outside-root arms hold since Task 39; it stops first at the inside-root arm `a/../b/*.mdx`.
 - `section-11.test.ts`: T11-2's `--file` arms (T11-2 also waits on Task 44).
 - Neighbours: `section-7-basics.test.ts`, `section-7.4-7.5.test.ts`.
 
@@ -300,7 +278,7 @@ With a missing configuration, all of the above fail the same way, and so does `a
 **Change.** Move every syntax-class check into the parse stage, before the configuration is located, as one table of per-command spelling checks:
 - Task 1's identity rules for `--to`;
 - Task 2's tag rule for `--tag` (already parse-level: `tagValue` in `src/cli/args.ts`; fold it into the table);
-- Task 39's depth rule for `--file`;
+- Task 39's depth rule for `--file` (`globLiesOutsideRoot` in `src/core/glob.ts`, pure; today each `--file` surface meets it through `compileGlob` after configuration loads);
 - 10.1's session-name form;
 - the offset's digits-only spelling;
 - the co-occurrence rules.
