@@ -75,7 +75,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T7-2 | section-7-basics | 8, 37, 38 (passes since Task 38 landed: `checkConfiguredName` in `src/core/config.ts` refuses an empty or U+FFFD-bearing group name — a `specs` or `code` key — and profile or rule `name`, each one 14.14 giving the key and its line, so the empty-name arms, a spec group `""` and a profile and a rule named `""`, exit 2 naming the file; since Task 8 its verbatim-literal arms had held, and since Task 37 its encoding and repeated-key arms) |
 | T7-3 | section-7-basics | 38 (passes since Task 38 landed: its U+FFFD-name arms — a spec group key, a profile name, and a rule name, each the encoded code point `EF BF BD` between two letters — are each 14.14, exit 2 naming the file) |
 | T7-4 | section-7-discovery | 39, 40 (passes since Task 40 landed: an inside glob is matched as spelled, each `.`, `..`, or empty segment the `never` pattern segment of `parseSegment` in `src/core/glob.ts`, matching no path segment, so the inside-root arms `a/../b/*.mdx`, `./specs/*.mdx`, `specs//*.mdx`, and `specs/*.mdx/` each discover nothing beside the control; since Task 39 its outside-root arms had held — `**/../x/*.mdx`, `a/../../x/*.mdx`, `/specs/*.mdx`, and `../x/*.mdx` each 14.14, exit 2, the depth count `globLiesOutsideRoot` deciding by spelling alone) |
-| T7.3-1 | section-7.1-7.3 | 41 |
+| T7.3-1 | section-7.1-7.3 | 41 (passes since Task 41 landed: `outDirSpellingProblem` in `src/core/discovery.ts` judges `markdown.outDir`'s verbatim literal by spelling alone, so `""`, `/out`, `./out`, `out/../x`, `out//x`, `out/`, `../out`, and `docs/../../out` are each 14.14, exit 2 naming `xspec.config.ts`, nothing written; `out/sub` redirects the emission) |
 | T7.4-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
 | T7.5-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
 | T10.1-6 | section-10.1 | 45, 46 |
@@ -166,18 +166,6 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 41 — `markdown.outDir` spelling is enforced (SPEC 7.3, 14.14; B8)
-
-**Requirement.** SPEC 7.3: `outDir` is "spelled as one or more non-empty `/`-separated segments", none of them `.` or `..`. An empty value, a leading `/`, or a `.`, `..`, or empty segment is a configuration error (14.14).
-
-**Observed.** These are accepted: `""`, `"./out"`, `"out/../x"`, `"out//x"`, `"out/"`, and `"out/."`. Only a leading `/` or an escaping `..` is refused.
-
-**Location.** `src/core/config.ts` ~852–870, which checks `resolvesInsideRoot(outDirNode.value)`.
-
-**Change.** Replace that check with the segment rule, applied to the verbatim literal (Task 8).
-
-**Verification.** `section-7.1-7.3.test.ts` (T7.3-1). Neighbours: `section-11.6.test.ts`, `section-13.4.test.ts`.
 
 ## Task 42 — An unoccupied `--config` path is echoed exactly as given (SPEC 14 concerned path, 12.0, 12.7; C5)
 

@@ -24,6 +24,7 @@
 import ts from "./ts-module.js";
 import type * as tst from "typescript";
 import { byteOrderedSet } from "./bytes.js";
+import { outDirSpellingProblem } from "./discovery.js";
 import type { Finding } from "./findings.js";
 import { pathFinding } from "./findings.js";
 import type { CompiledGlob } from "./glob.js";
@@ -918,8 +919,9 @@ function validateGroups(
 
 /**
  * SPEC 7.3: `markdown.emit` is a required boolean; `markdown.outDir` is an
- * optional path resolving relative to the workspace root that MUST resolve
- * within it; unknown keys are configuration errors (14.14).
+ * optional directory path relative to the workspace root, spelled in plain
+ * workspace-relative form; any other spelling and unknown keys are
+ * configuration errors (14.14).
  */
 function validateMarkdown(
   node: ConfigNode,
@@ -966,38 +968,26 @@ function validateMarkdown(
         `"markdown.outDir" must be a path string (SPEC 7.3)`,
         outDirNode.line,
       );
-    } else if (!resolvesInsideRoot(outDirNode.value)) {
-      findings.add(
-        `"markdown.outDir" ("${outDirNode.value}") resolves outside the ` +
-          `workspace root — it must resolve within it (SPEC 7.3, 14.14)`,
-        outDirNode.line,
-      );
     } else {
-      outDir = outDirNode.value;
+      // SPEC 7.3, 14.14: the verbatim literal (2.4) must spell a plain
+      // workspace-relative directory path; nothing is resolved, collapsed,
+      // or dropped, so `./out`, `out/.`, `out//x`, and `out/` are refused
+      // like `/out` and `../out`.
+      const problem = outDirSpellingProblem(outDirNode.value);
+      if (problem !== null) {
+        findings.add(
+          `"markdown.outDir" ("${outDirNode.value}") ${problem} — spell it ` +
+            `as a directory path relative to the workspace root: one or ` +
+            `more non-empty "/"-separated segments, none "." or ".." ` +
+            `(SPEC 7.3, 14.14)`,
+          outDirNode.line,
+        );
+      } else {
+        outDir = outDirNode.value;
+      }
     }
   }
   return { emit, outDir };
-}
-
-/**
- * SPEC 7.3 (and SPEC 7 for globs): lexical containment in the workspace
- * root — an absolute path, or a `..` stepping above the root, resolves
- * outside it.
- */
-function resolvesInsideRoot(relativePath: string): boolean {
-  const segments = relativePath.split("/");
-  if (segments.length > 1 && segments[0] === "") return false; // absolute
-  let depth = 0;
-  for (const segment of segments) {
-    if (segment === "" || segment === ".") continue;
-    if (segment === "..") {
-      if (depth === 0) return false;
-      depth -= 1;
-      continue;
-    }
-    depth += 1;
-  }
-  return true;
 }
 
 const PROFILE_KEYS: readonly string[] = [

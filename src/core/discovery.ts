@@ -204,26 +204,40 @@ function matchingGroupNames(
 }
 
 /**
- * SPEC 7.3: the validated `markdown.outDir` (resolves within the workspace
- * root) reduced to its canonical workspace-relative prefix, trailing `/`
- * included — or null when absent or naming the root itself (default
- * placement next to each source).
+ * SPEC 7.3: why a `markdown.outDir` spelling is not a directory path
+ * relative to the workspace root — "one or more non-empty `/`-separated
+ * segments, none `.` or `..` — the form of every workspace-relative path
+ * (1.5, 7)" — or null when it is. Decided by the verbatim spelling alone
+ * (2.4): "any other spelling — empty, beginning with `/`, or carrying a
+ * `.`, `..`, or empty segment — is a configuration error (14.14)", whether
+ * or not it would resolve inside the root.
+ */
+export function outDirSpellingProblem(outDir: string): string | null {
+  if (outDir.length === 0) return "is empty";
+  if (outDir.startsWith("/")) return `begins with "/"`;
+  for (const segment of outDir.split("/")) {
+    if (segment === "") {
+      return `carries an empty segment (a doubled or trailing "/")`;
+    }
+    if (segment === "." || segment === "..") {
+      return `carries a "${segment}" segment`;
+    }
+  }
+  return null;
+}
+
+/**
+ * SPEC 7.3: the prefix every emit destination carries — the validated
+ * `markdown.outDir`, already a plain workspace-relative path
+ * ({@link outDirSpellingProblem}), with the joining `/` appended, since each
+ * destination is "`outDir` joined by `/` to the emitted file's default
+ * workspace-relative path (13.2)" — or null when absent (default placement
+ * next to each source).
  */
 export function canonicalOutDirPrefix(
   outDir: string | undefined,
 ): string | null {
-  if (outDir === undefined) return null;
-  const kept: string[] = [];
-  for (const segment of outDir.split("/")) {
-    if (segment === "" || segment === ".") continue;
-    if (segment === "..") {
-      kept.pop(); // validated to resolve within the root (SPEC 7.3, 14.14)
-      continue;
-    }
-    kept.push(segment);
-  }
-  if (kept.length === 0) return null;
-  return kept.join("/") + "/";
+  return outDir === undefined ? null : `${outDir}/`;
 }
 
 /** The byte encoding of `canonicalOutDirPrefix` for the byte-wise matcher. */

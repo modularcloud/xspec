@@ -35,6 +35,7 @@ import type {
   PolicySelector,
 } from "./config.js";
 import { isByteOrderedSet } from "./bytes.js";
+import { outDirSpellingProblem } from "./discovery.js";
 import type { GlobMode } from "./glob.js";
 import { compileGlob } from "./glob.js";
 
@@ -302,6 +303,11 @@ export function configurationFromStored(value: unknown): Configuration | null {
     const outDir = markdownRaw["outDir"];
     if (typeof emit !== "boolean") return null;
     if (outDir !== null && typeof outDir !== "string") return null;
+    // SPEC 7.3, 14.14: a recorded `outDir` the parser refuses is not what
+    // parsing these bytes yields — fall back, so the full parse reports it.
+    if (outDir !== null && outDirSpellingProblem(outDir) !== null) {
+      return null;
+    }
     markdown = { emit, ...(outDir === null ? {} : { outDir }) };
   }
 
