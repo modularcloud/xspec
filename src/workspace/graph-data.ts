@@ -22,9 +22,12 @@
 // first, into one of three states (SPEC 13.3, 14.23): absent — nothing
 // occupies the path, the area absent included; readable — a plain file
 // holding the stored shape; or unreadable — a non-plain occupant, bytes
-// that are not valid UTF-8 or not the stored shape, or the area's own path
+// that are not valid UTF-8 or not the stored shape, the area's own path
 // `.xspec` occupied by a non-directory, below which nothing is read
-// (SPEC 13.4). For the record, absent is the empty record (SPEC 11.6,
+// (SPEC 13.4), or a read the environment refuses — the area's own
+// occupant's kind, the file's kind, or its content (SPEC 14.25: the state
+// of condition 23, never the read failure and never absence). For the
+// record, absent is the empty record (SPEC 11.6,
 // 14.23: never a condition, whatever else the area holds — graph data a
 // refresh wrote included) and unreadable is recorded state that exists but
 // cannot be read as a record (14.23 — never an empty record): the
@@ -48,7 +51,16 @@ import {
   serializeDerivedFileRecord,
   serializeGraphData,
 } from "../core/graph-data.js";
-import { classifyOccupant, writeDerivedFile } from "./writes.js";
+import {
+  isAbsenceFailure,
+  isFilesystemFailure,
+} from "./environment-refusal.js";
+import type { PathOccupant } from "./writes.js";
+import {
+  classifyOccupant,
+  graphDataAreaOccupant,
+  writeDerivedFile,
+} from "./writes.js";
 
 const strictUtf8Decoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -84,12 +96,19 @@ type StoredFileRead =
  * - under a directory, the file's own path: nothing there is absent; only
  *   a plain file is read, anything else there existing but unreadable; and
  *   bytes that are not valid UTF-8 are unreadable.
+ *
+ * SPEC 14.25: a read the environment refuses here — the area's own
+ * occupant's kind (`graphDataAreaOccupant`), the file's kind, or its
+ * content — is one more way the stored file cannot be read: unreadable,
+ * the state of condition 23 (the record's 14.23, the snapshot's graph
+ * data that does not match), never the read failure of condition 25 and
+ * never absence. Only nonexistence is absence.
  */
 async function readStoredFile(
   root: string,
   rel: string,
 ): Promise<StoredFileRead> {
-  const area = await classifyOccupant(absoluteOf(root, GRAPH_DATA_AREA));
+  const area = await graphDataAreaOccupant(root);
   if (area === "absent") {
     return { state: "absent" };
   }
@@ -97,7 +116,13 @@ async function readStoredFile(
     return { state: "unreadable", bytes: null };
   }
   const absolute = absoluteOf(root, rel);
-  const occupant = await classifyOccupant(absolute);
+  let occupant: PathOccupant;
+  try {
+    occupant = await classifyOccupant(absolute);
+  } catch (error) {
+    if (isFilesystemFailure(error)) return { state: "unreadable", bytes: null };
+    throw error;
+  }
   if (occupant === "absent") {
     return { state: "absent" };
   }
@@ -107,10 +132,14 @@ async function readStoredFile(
   let bytes: Uint8Array;
   try {
     bytes = await fsp.readFile(absolute);
-  } catch {
+  } catch (error) {
     // Vanished between classification and read (SPEC 13.5: concurrent
-    // commands, last-write-wins): nothing exists to read.
-    return { state: "absent" };
+    // commands, last-write-wins): nothing exists to read. Any other
+    // failure the filesystem reports is a refused content read (SPEC
+    // 14.25): the file exists and cannot be read.
+    if (isAbsenceFailure(error)) return { state: "absent" };
+    if (isFilesystemFailure(error)) return { state: "unreadable", bytes: null };
+    throw error;
   }
   try {
     return { state: "text", bytes, text: strictUtf8Decoder.decode(bytes) };
@@ -134,8 +163,9 @@ export interface LoadedGraphData {
    * data missing); "readable" — a plain file parsing as the stored shape
    * (`data` non-null); "unreadable" — something that cannot be read as
    * graph data: a non-plain occupant, bytes that are not valid UTF-8, not
-   * JSON, or not the stored shape, or the area's own path occupied by a
-   * non-directory (graph data that does not match). The refreshing reads
+   * JSON, or not the stored shape, the area's own path occupied by a
+   * non-directory, or a read the environment refuses (SPEC 14.25) — graph
+   * data that does not match. The refreshing reads
    * rewrite the file in both non-readable states (SPEC 13.3) and `check`
    * reports them as the graph data's staleness (SPEC 14.10).
    */
@@ -197,8 +227,9 @@ export type DerivedFileRecord =
       /**
        * SPEC 14.23: recorded state that exists but cannot be read as a
        * record — a non-plain-file occupant, bytes that are not the stored
-       * shape (corrupt, merge-conflicted or otherwise), or the area's own
-       * path occupied by a non-directory (SPEC 13.4). The
+       * shape (corrupt, merge-conflicted or otherwise), the area's own
+       * path occupied by a non-directory (SPEC 13.4), or graph data the
+       * environment refuses to read (SPEC 14.25). The
        * consulting surface reports its record-supplied datum explicitly
        * unavailable beside one condition-23 finding whose concerned path is
        * the graph-data area, and exits 1 with everything else in full.

@@ -63,7 +63,7 @@ import {
 } from "./environment-refusal.js";
 import type { LoadedGraphData } from "./graph-data.js";
 import { loadGraphData } from "./graph-data.js";
-import { readJournalBytes } from "./journal.js";
+import { readJournalContent } from "./journal.js";
 import type { LocatedWorkspace } from "./locate.js";
 import { obstructedWritePathFindings } from "./writes.js";
 
@@ -135,9 +135,16 @@ async function verifyStore(
     return null;
   }
 
-  // 3. Journal: recorded content hash (null = absent, SPEC 6.1).
-  const journalBytes = await readJournalBytes(located.root);
-  const journalHash = journalBytes === null ? null : sha256Hex(journalBytes);
+  // 3. Journal: recorded content hash (null = absent, SPEC 6.1). A journal
+  // the full path would report — a non-plain occupant, or content the
+  // environment refuses to read (SPEC 13.4, 14.25 → 14.13) — falls back,
+  // whatever the store recorded, so the full path's gate meets it.
+  const journal = await readJournalContent(located.root);
+  if (journal.state === "occupied" || journal.state === "refused") {
+    return null;
+  }
+  const journalHash =
+    journal.state === "read" ? sha256Hex(journal.bytes) : null;
   if (journalHash !== data.inputs.journalHash) {
     return null;
   }

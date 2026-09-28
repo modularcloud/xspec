@@ -48,8 +48,6 @@
 // the baseline analysis and the current analysis can never drift apart.
 
 import { Buffer } from "node:buffer";
-import * as fsp from "node:fs/promises";
-import * as path from "node:path";
 import { classifySources } from "../core/discovery.js";
 import type { Finding } from "../core/findings.js";
 import type { Journal } from "../core/journal.js";
@@ -61,8 +59,8 @@ import { runGit } from "./git.js";
 import type { LoadedJournal } from "./journal.js";
 import {
   journalFromBytes,
-  journalOccupant as currentJournalOccupant,
   occupiedJournal,
+  readJournalContent as readCurrentJournalContent,
 } from "./journal.js";
 import type { WorkspaceAnalysis } from "./pipeline.js";
 import { analyzeWorkspaceContent } from "./pipeline.js";
@@ -437,22 +435,30 @@ export async function readBaseline(
       : journalFromBytes(baselineJournalBytes);
 
   // --- replay: current journal entries absent at the ref (SPEC 6.3) -----
-  const currentJournalAbsolute = path.join(root, ".xspec", "journal");
-  const occupant = await currentJournalOccupant(root);
+  const current = await readCurrentJournalContent(root);
   let currentJournalBytes: Uint8Array;
-  if (occupant === "absent") {
+  if (current.state === "absent") {
     // SPEC 6.3: a journal file absent in the current workspace is read as
     // an empty journal — and so is one below an area path holding no
     // directory, where nothing is read (SPEC 13.4).
     currentJournalBytes = new Uint8Array(0);
-  } else if (occupant === "file") {
-    currentJournalBytes = await fsp.readFile(currentJournalAbsolute);
-  } else {
+  } else if (current.state === "read") {
+    currentJournalBytes = current.bytes;
+  } else if (current.state === "occupied") {
     return failure(
       `the current journal ${JOURNAL_PATH} is occupied by ` +
-        `${describeOccupant(occupant)}, not a plain file — the journal ` +
-        `entries appended since baseline ref '${ref}' cannot be read for ` +
-        `replay (SPEC 6.1, 6.3, 13.4)`,
+        `${describeOccupant(current.occupant)}, not a plain file — the ` +
+        `journal entries appended since baseline ref '${ref}' cannot be ` +
+        `read for replay (SPEC 6.1, 6.3, 13.4)`,
+    );
+  } else {
+    // SPEC 14.25: the refusal is one more way the journal cannot be read
+    // (14.13) — replay fails exactly as for an occupied journal path.
+    return failure(
+      `the environment refused to read the current journal ` +
+        `${JOURNAL_PATH} (${current.cause.code ?? "an unknown error"}) — ` +
+        `the journal entries appended since baseline ref '${ref}' cannot ` +
+        `be read for replay (SPEC 6.1, 6.3, 14.25)`,
     );
   }
   const replay = computeJournalReplay(

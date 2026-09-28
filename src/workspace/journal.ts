@@ -7,10 +7,13 @@
 // modified or deleted by other commands. An absent file is an empty journal
 // (SPEC 6.1). A journal path occupied by anything other than a plain file —
 // a symbolic link included — is never read, appended to, or replaced: it is
-// a journal error (SPEC 13.4 → 14.13). Below an area path `.xspec` holding
-// no directory — a plain file, or a symbolic link whatever it targets —
-// nothing is read: the journal so placed is empty (SPEC 6.1) and
-// unoccupied to the inventory (SPEC 11.6), never a journal error (13.4).
+// a journal error (SPEC 13.4 → 14.13), and so is a journal whose content
+// the environment refuses to read (SPEC 14.25 → 14.13), while a refused
+// read of the journal path's kind is the read failure of condition 25
+// (SPEC 14.25). Below an area path `.xspec` holding no directory — a plain
+// file, or a symbolic link whatever it targets — nothing is read: the
+// journal so placed is empty (SPEC 6.1) and unoccupied to the inventory
+// (SPEC 11.6), never a journal error (13.4).
 //
 // Parsing, validation, and the canonical-identity walk are the pure core's
 // (src/core/journal.ts); this module classifies the occupant and reads
@@ -28,6 +31,10 @@ import {
   parseJournal,
   serializeJournalEntry,
 } from "../core/journal.js";
+import {
+  isAbsenceFailure,
+  isFilesystemFailure,
+} from "./environment-refusal.js";
 import type { PathOccupant } from "./writes.js";
 import {
   appendDurableFile,
@@ -35,8 +42,12 @@ import {
   readableOccupant,
 } from "./writes.js";
 
-/** What occupies the journal's path (SPEC 6.1, 13.4). */
-export type JournalFileState = "absent" | "plain" | "occupied";
+/**
+ * What occupies the journal's path (SPEC 6.1, 13.4), and whether its
+ * content could be read: "refused" is a plain file whose content the
+ * environment refuses to read (SPEC 14.25 → 14.13).
+ */
+export type JournalFileState = "absent" | "plain" | "occupied" | "refused";
 
 /** The loaded journal: parse results plus the file-state classification. */
 export interface LoadedJournal {
@@ -48,12 +59,16 @@ export interface LoadedJournal {
    */
   readonly journal: Journal;
   readonly entries: readonly PositionedJournalEntry[];
-  /** The journal's 14.13 findings: bad lines, or a non-plain-file occupant. */
+  /**
+   * The journal's 14.13 findings: bad lines, a non-plain-file occupant, or
+   * content the environment refuses to read (SPEC 14.25).
+   */
   readonly findings: readonly Finding[];
   /**
    * The exact bytes the journal was loaded from — null for an absent file
-   * (an empty journal, SPEC 6.1) and for a non-plain occupant (never read,
-   * SPEC 13.4). The journal is a derivation input (SPEC 5.4), so its
+   * (an empty journal, SPEC 6.1), for a non-plain occupant (never read,
+   * SPEC 13.4), and for refused content (SPEC 14.25). The journal is a
+   * derivation input (SPEC 5.4), so its
    * content fingerprint enters the graph data's recorded inputs
    * (SPEC 13.3; core/graph-data.ts).
    */
@@ -146,46 +161,94 @@ export function occupiedJournal(occupant: PathOccupant): LoadedJournal {
 }
 
 /**
- * Load the workspace's journal (SPEC 6.1): an absent file is an empty
- * journal; a plain file is parsed and validated (core); anything else at the
- * path — symbolic link, directory, or other non-plain occupant — is never
- * read and reports a journal error (SPEC 13.4 → 14.13). Classification uses
- * lstat (writes.ts), so a symbolic link is judged itself, never through its
- * target; below an area path holding no directory the journal is absent,
- * so empty (SPEC 13.4, `journalOccupant`).
+ * The journal whose content the environment refuses to read — permission
+ * denied, an I/O error, any other failure the filesystem reports for the
+ * read (SPEC 14.25 → 14.13: "a journal the environment refuses to read"):
+ * one 14.13 finding concerning the journal, no entries, exactly as a
+ * journal that cannot be read for any other reason fails the workspace's
+ * validation (SPEC 14.13, 13.3). The message carries the filesystem's
+ * error code, never its own text, which names absolute paths (SPEC 12.0).
  */
-export async function loadJournal(root: string): Promise<LoadedJournal> {
-  const absolute = journalAbsolutePath(root);
-  const occupant = await journalOccupant(root);
-  if (occupant === "absent") {
-    return journalFromBytes(null);
-  }
-  if (occupant !== "file") {
-    return occupiedJournal(occupant);
-  }
-  return journalFromBytes(await fsp.readFile(absolute));
+export function refusedJournal(cause: NodeJS.ErrnoException): LoadedJournal {
+  const code = cause.code ?? "an unknown error";
+  const finding: Finding = pathFinding(
+    13,
+    `journal error: the environment refused to read the journal ` +
+      `${JOURNAL_PATH} (${code}) — its entries cannot be read, so no ` +
+      `identity it maps can be resolved (SPEC 6.1, 14.25); make the ` +
+      `journal readable, then rerun the command (SPEC 14.13)`,
+    JOURNAL_PATH,
+  );
+  return {
+    fileState: "refused",
+    journal: new Journal([]),
+    entries: [],
+    findings: [finding],
+    rawBytes: null,
+  };
 }
 
 /**
- * The journal file's raw bytes — null when the path holds no plain file (an
- * absent journal is empty, SPEC 6.1, and so is one below an area path
- * holding no directory, SPEC 13.4; a non-plain occupant is never read,
- * SPEC 13.4, and the caller's validation has already reported it, 14.13).
- * `rename` and `move` read these to model the journal as it will stand
- * after their append (SPEC 6.4, 6.5: the post-operation analysis hashes
- * with the journal including the new entry, SPEC 5.4).
+ * The current journal's content as one read finds it (SPEC 6.1, 13.4,
+ * 14.25) — the one content read every current-journal reader shares:
+ * `absent` where nothing occupies the path as reads see it
+ * (`journalOccupant`: below an area path holding no directory included),
+ * or where the file vanished between classification and read (SPEC 13.5);
+ * `occupied` where anything but a plain file occupies it, never read
+ * (SPEC 13.4 → 14.13); `refused` where the environment refuses the content
+ * read (SPEC 14.25 → 14.13); and `read`, the file's exact bytes. A refused
+ * kind read is the read failure of condition 25 (`journalOccupant`), thrown.
  */
-export async function readJournalBytes(
+export type JournalContent =
+  | { readonly state: "absent" }
+  | { readonly state: "occupied"; readonly occupant: PathOccupant }
+  | { readonly state: "refused"; readonly cause: NodeJS.ErrnoException }
+  | { readonly state: "read"; readonly bytes: Uint8Array };
+
+/** Read the current journal's content (`JournalContent`). */
+export async function readJournalContent(
   root: string,
-): Promise<Uint8Array | null> {
-  const absolute = journalAbsolutePath(root);
-  if ((await journalOccupant(root)) !== "file") {
-    return null;
+): Promise<JournalContent> {
+  const occupant = await journalOccupant(root);
+  if (occupant === "absent") {
+    return { state: "absent" };
+  }
+  if (occupant !== "file") {
+    return { state: "occupied", occupant };
   }
   try {
-    return await fsp.readFile(absolute);
-  } catch {
-    return null;
+    return {
+      state: "read",
+      bytes: await fsp.readFile(journalAbsolutePath(root)),
+    };
+  } catch (error) {
+    if (isAbsenceFailure(error)) return { state: "absent" };
+    if (isFilesystemFailure(error)) return { state: "refused", cause: error };
+    throw error;
+  }
+}
+
+/**
+ * Load the workspace's journal (SPEC 6.1): an absent file is an empty
+ * journal; a plain file is parsed and validated (core); anything else at the
+ * path — symbolic link, directory, or other non-plain occupant — is never
+ * read and reports a journal error (SPEC 13.4 → 14.13), as does content the
+ * environment refuses to read (SPEC 14.25 → 14.13, `refusedJournal`).
+ * Classification uses lstat (writes.ts), so a symbolic link is judged
+ * itself, never through its target; below an area path holding no
+ * directory the journal is absent, so empty (SPEC 13.4, `journalOccupant`).
+ */
+export async function loadJournal(root: string): Promise<LoadedJournal> {
+  const content = await readJournalContent(root);
+  switch (content.state) {
+    case "absent":
+      return journalFromBytes(null);
+    case "occupied":
+      return occupiedJournal(content.occupant);
+    case "refused":
+      return refusedJournal(content.cause);
+    case "read":
+      return journalFromBytes(content.bytes);
   }
 }
 

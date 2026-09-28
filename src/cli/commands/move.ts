@@ -105,7 +105,6 @@ import type { LoadedWorkspace } from "../../workspace/config.js";
 import {
   appendJournalEntry,
   journalFromBytes,
-  readJournalBytes,
 } from "../../workspace/journal.js";
 import { withMutationExclusivity } from "../../workspace/lock.js";
 import type { WorkspaceAnalysis } from "../../workspace/pipeline.js";
@@ -500,7 +499,11 @@ async function reanalyzeMoved(
     invalidSources: analysis.classification.invalidSources,
     findings: [],
   };
-  const currentJournal = await readJournalBytes(workspace.root);
+  // SPEC 6.4, 5.4: the journal as validated — the bytes this analysis
+  // loaded (null for an absent journal, SPEC 6.1) — plus the new entry.
+  // Validation passed, so it bore no 14.13 finding: an unreadable journal,
+  // its content refused (SPEC 14.25) included, never reaches this point.
+  const currentJournal = analysis.journal.rawBytes;
   const entryLine = encoder.encode(serializeJournalEntry(plan.entry) + "\n");
   const journalBytes = concatBytes(
     currentJournal === null ? [entryLine] : [currentJournal, entryLine],
@@ -698,7 +701,11 @@ async function reanalyzeSectionMoved(
       findings: analysis.classification.findings,
     };
   }
-  const currentJournal = await readJournalBytes(workspace.root);
+  // SPEC 6.4, 5.4: the journal as validated — the bytes this analysis
+  // loaded (null for an absent journal, SPEC 6.1) — plus the new entry.
+  // Validation passed, so it bore no 14.13 finding: an unreadable journal,
+  // its content refused (SPEC 14.25) included, never reaches this point.
+  const currentJournal = analysis.journal.rawBytes;
   const entryLine = encoder.encode(serializeJournalEntry(plan.entry) + "\n");
   const journalBytes = concatBytes(
     currentJournal === null ? [entryLine] : [currentJournal, entryLine],

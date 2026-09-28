@@ -46,7 +46,11 @@
 // typed read failure (./environment-refusal.ts) concerning the object's
 // workspace-relative path, thrown so the command stops at that read (exit
 // 2, SPEC 12.0). `classifyOccupant` stays the raw judgement beneath them,
-// for the readers whose refused read is a condition of their own.
+// for the readers whose refused read is a condition of their own — among
+// them the graph-data area's own path, whose refused kind read is the
+// state of condition 23 (`graphDataAreaOccupant`): the record unreadable,
+// nothing read below the area, no obstruction established there; only a
+// write under the area, examining it first, stops at that read.
 //
 // SPEC 14.24: a write the environment refuses — a file's creation,
 // replacement, append, relocation, or removal — stops the command making
@@ -66,6 +70,7 @@ import { compareBytes } from "../core/bytes.js";
 import type { SourceWrite } from "../core/edits.js";
 import type { Finding } from "../core/findings.js";
 import { pathFinding } from "../core/findings.js";
+import { GRAPH_DATA_AREA } from "../core/graph-data.js";
 import type { RefusedWrite } from "./environment-refusal.js";
 import {
   isFilesystemFailure,
@@ -132,6 +137,48 @@ export async function probeOccupant(
     if (isFilesystemFailure(error)) throw readFailure(rel, "kind", error);
     throw error;
   }
+}
+
+/**
+ * What occupies the graph-data area's own path `.xspec` (SPEC 11.6, 13.3)
+ * as a read judges it: its occupant by `lstat` (`classifyOccupant`), or
+ * "refused" where the environment refuses the kind read. SPEC 14.25: a
+ * refused read of the area's own occupant is the state of condition 23,
+ * never the read failure of condition 25 — no record can be read under it
+ * (14.23; `readStoredFile`, graph-data.ts), and, as below an area path
+ * holding no directory, nothing below it is read (13.4): the journal is
+ * empty and unoccupied to the inventory, the session directory holds no
+ * sessions (`readableDirectory`; SPEC 11.6: "a refused read of the area's
+ * own occupant is condition 23"), and no obstruction is established there
+ * (`obstructedComponentOf`). A write under the area still examines it
+ * first and stops at the refused read (`assertUnobstructedParent`: a write
+ * never passes through a component it cannot judge, SPEC 13.4).
+ */
+export async function graphDataAreaOccupant(
+  root: string,
+): Promise<PathOccupant | "refused"> {
+  try {
+    return await classifyOccupant(absoluteOf(root, GRAPH_DATA_AREA));
+  } catch (error) {
+    if (isFilesystemFailure(error)) return "refused";
+    throw error;
+  }
+}
+
+/**
+ * The occupant of a workspace-relative directory component as a read, or
+ * the 14.22 examination of a write path, judges it: the graph-data area's
+ * own path by `graphDataAreaOccupant`, its refused kind read "refused"
+ * (the state of condition 23, SPEC 14.25); every other component by
+ * `probeOccupant`, a refused kind read there the read failure (SPEC 14.25).
+ */
+async function componentOccupant(
+  root: string,
+  component: string,
+): Promise<PathOccupant | "refused"> {
+  return component === GRAPH_DATA_AREA
+    ? graphDataAreaOccupant(root)
+    : probeOccupant(root, component);
 }
 
 /**
@@ -220,15 +267,21 @@ export interface ObstructedComponent {
  * itself traverse it), and below a missing component nothing exists —
  * writes create those as directories, so a nonexistent component is never
  * this condition (SPEC 13.4). Components above the workspace root are
- * unrestricted (SPEC 13.4) and never examined.
+ * unrestricted (SPEC 13.4) and never examined. A kind read the environment
+ * refuses is the read failure concerning the component (SPEC 14.25) —
+ * except the graph-data area's own path, whose refused kind read is the
+ * state of condition 23 (SPEC 14.25; `graphDataAreaOccupant`), which
+ * establishes no obstruction: examination stops there, and a write under
+ * the area meets the refusal at its own examination
+ * (`assertUnobstructedParent`).
  */
 export async function obstructedComponentOf(
   root: string,
   rel: string,
 ): Promise<ObstructedComponent | null> {
   for (const component of directoryComponents(rel)) {
-    const occupant = await probeOccupant(root, component);
-    if (occupant === "absent") return null;
+    const occupant = await componentOccupant(root, component);
+    if (occupant === "absent" || occupant === "refused") return null;
     if (occupant !== "directory") return { component, occupant };
   }
   return null;
@@ -248,14 +301,17 @@ export async function obstructedComponentOf(
  * directory holding no sessions (SPEC 10.1). Components above the
  * workspace root are unrestricted (SPEC 13.4) and never examined. A kind
  * read the environment refuses is the read failure concerning the
- * component read (SPEC 14.25, `probeOccupant`).
+ * component read (SPEC 14.25, `probeOccupant`) — except the graph-data
+ * area's own path, whose refused kind read is the state of condition 23
+ * (SPEC 14.25, `graphDataAreaOccupant`): nothing below it is read, as
+ * below an area path holding no directory (SPEC 13.4).
  */
 export async function readableDirectory(
   root: string,
   rel: string,
 ): Promise<boolean> {
   for (const component of [...directoryComponents(rel), rel]) {
-    const occupant = await probeOccupant(root, component);
+    const occupant = await componentOccupant(root, component);
     if (occupant !== "directory") return false;
   }
   return true;
@@ -273,7 +329,9 @@ export async function readableDirectory(
  * below an area path holding no directory: empty (SPEC 6.1) and unoccupied
  * to the inventory (SPEC 11.6). A kind read the environment refuses — the
  * path's own or a component's — is the read failure concerning the path
- * read (SPEC 14.25: the journal's and a session file's kind included).
+ * read (SPEC 14.25: the journal's and a session file's kind included),
+ * the graph-data area's own path excepted (`readableDirectory`: the state
+ * of condition 23, nothing below it read).
  */
 export async function readableOccupant(
   root: string,
@@ -360,7 +418,10 @@ export async function obstructedWritePathFindings(
  * Throws on a symlinked component and on a component occupied by a
  * non-directory, which no directory creation can cure; the missing
  * components below the last existing one are the write's own to create
- * (`createParentDirectories`).
+ * (`createParentDirectories`). Every component is judged by `probeOccupant`
+ * — the graph-data area's own path included: a write never passes through
+ * a component it cannot judge (SPEC 13.4), so a refused kind read here is
+ * the read failure, the command stopping at it (SPEC 14.25).
  */
 async function assertUnobstructedParent(
   root: string,
