@@ -10,16 +10,16 @@
 // (SPEC 13.5) and replaces whatever occupies its path (SPEC 13.4).
 
 import type { BuildOutputs } from "../core/build.js";
-import { writeGraphData } from "./graph-data.js";
+import { writeDerivedFileRecord, writeGraphData } from "./graph-data.js";
 import { removeDerivedFile, writeDerivedFile } from "./writes.js";
 
 /**
  * Execute one validated build (SPEC 12.1): regenerate every derived file,
  * remove the recorded derived files no longer generated (via recorded paths
- * only, SPEC 13.3, 13.4), and store the graph data last — the record that
- * names the generated set updates only once the set exists, so an
- * interrupted build leaves at worst a stale store, which `check` reports
- * (14.10) and rebuilding resolves (SPEC 13.4).
+ * only, SPEC 13.3, 13.4), and store the graph data last, the record after
+ * the snapshot — the record that names the generated set updates only once
+ * the set exists, so an interrupted build leaves at worst a stale store,
+ * which `check` reports (14.10) and rebuilding resolves (SPEC 13.4).
  */
 export async function executeBuildOutputs(
   root: string,
@@ -35,4 +35,5 @@ export async function executeBuildOutputs(
     await removeDerivedFile(root, orphan);
   }
   await writeGraphData(root, outputs.graphData);
+  await writeDerivedFileRecord(root, outputs.record);
 }

@@ -48,7 +48,10 @@ import { generatedDerivedPaths } from "../core/build.js";
 import { configurationFromStored } from "../core/config-data.js";
 import type { Configuration } from "../core/config.js";
 import type { GraphData, StoredRequirementNode } from "../core/graph-data.js";
-import { GRAPH_DATA_PATH, serializeGraphData } from "../core/graph-data.js";
+import {
+  GRAPH_DATA_OWN_PATHS,
+  serializeGraphData,
+} from "../core/graph-data.js";
 import { sha256Hex } from "../core/hash.js";
 import { discoverSources } from "./discovery.js";
 import type { LoadedGraphData } from "./graph-data.js";
@@ -76,10 +79,12 @@ function absoluteOf(root: string, rel: string): string {
 export async function verifyStoreForRead(
   located: LocatedWorkspace,
 ): Promise<VerifiedStore | null> {
-  // 1. Store bytes: present, parseable, canonical — read by the one record
-  // read every surface shares (./graph-data.ts), so the store is read only
-  // as a plain file under an area path holding a directory, never through
-  // a symbolic link or a non-directory occupant (SPEC 13.4, 14.23). A read
+  // 1. Store bytes: present, parseable, canonical — the snapshot file,
+  // read by the one graph-data read every surface shares (./graph-data.ts),
+  // so the store is read only as a plain file under an area path holding a
+  // directory, never through a symbolic link or a non-directory occupant
+  // (SPEC 13.4, 14.23); the record, which no read answer needs, is left
+  // unconsulted as by the full path's refresh (SPEC 13.3). A read
   // that throws falls back like every other failure here: the full path
   // meets it, and answers or reports, as it would without this path.
   let stored: LoadedGraphData;
@@ -154,7 +159,7 @@ export async function verifyStoreForRead(
       configuration,
       classification.specSources.map((source) => source.path),
     ),
-    GRAPH_DATA_PATH,
+    ...GRAPH_DATA_OWN_PATHS,
   ];
   if (
     (await obstructedWritePathFindings(located.root, writePaths)).length > 0

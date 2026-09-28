@@ -21,7 +21,10 @@ import type { BuildOutputs } from "../../core/build.js";
 import { computeBuildOutputs } from "../../core/build.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import { JOURNAL_PATH } from "../../core/journal.js";
-import { loadGraphData } from "../../workspace/graph-data.js";
+import {
+  readDerivedFileRecord,
+  recordedPathsOf,
+} from "../../workspace/graph-data.js";
 import type { WorkspaceAnalysis } from "../../workspace/pipeline.js";
 import { workspaceInputsOf } from "../../workspace/pipeline.js";
 import { obstructedWritePathFindings } from "../../workspace/writes.js";
@@ -119,14 +122,16 @@ export async function validateRewrittenWorkspace(
   // A preview consults the record for its delta only, past this validation
   // (SPEC 6.6: a refused preview consults no record), so it derives the
   // outputs over none.
-  const stored = preview ? null : (await loadGraphData(workspace.root)).data;
+  const recorded = preview
+    ? []
+    : recordedPathsOf(await readDerivedFileRecord(workspace.root));
   const outputs = computeBuildOutputs(
     workspace.configuration,
     rewritten.specs,
     rewritten.graph,
     rewritten.textModel,
     rewritten.hashes,
-    stored,
+    recorded,
     workspaceInputsOf(workspace, rewritten),
   );
 

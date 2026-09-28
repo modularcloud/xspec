@@ -78,7 +78,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T7.3-1 | section-7.1-7.3 | 41 (passes since Task 41 landed: `outDirSpellingProblem` in `src/core/discovery.ts` judges `markdown.outDir`'s verbatim literal by spelling alone, so `""`, `/out`, `./out`, `out/../x`, `out//x`, `out/`, `../out`, and `docs/../../out` are each 14.14, exit 2 naming `xspec.config.ts`, nothing written; `out/sub` redirects the emission) |
 | T7.4-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
 | T7.5-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
-| T10.1-6 | section-10.1 | 45, 46 (passes since Task 46 landed: below the graph-data area's own path `.xspec` holding a plain file, or a symbolic link to a directory holding a journal, graph data, and a valid session, nothing is read — `readableOccupant` in `src/workspace/writes.ts` classifies the journal's path absent there (`journalOccupant` in `src/workspace/journal.ts`, which every current-journal read consults, baseline replay's and the fast path's included), and `loadGraphData` in `src/workspace/graph-data.ts` classifies the area first, a non-directory occupant making the record unreadable — so `inventory --json` reports `recorded` unavailable, `journal.occupied` false, and `sessions` `[]` beside the one condition-23 finding concerning `.xspec`, exit 1, and `check` the unreadable-record unit form beside the one 14.22; since Task 45 its session-directory arms and three stale twins had held) |
+| T10.1-6 | section-10.1 | 45, 46 (passes since Task 46 landed: below the graph-data area's own path `.xspec` holding a plain file, or a symbolic link to a directory holding a journal, graph data, and a valid session, nothing is read — `readableOccupant` in `src/workspace/writes.ts` classifies the journal's path absent there (`journalOccupant` in `src/workspace/journal.ts`, which every current-journal read consults, baseline replay's and the fast path's included), and `loadGraphData` in `src/workspace/graph-data.ts` classifies the area first, a non-directory occupant making the record unreadable (since Task 47 through `readStoredFile`, which `readDerivedFileRecord` shares for the record's own file) — so `inventory --json` reports `recorded` unavailable, `journal.occupied` false, and `sessions` `[]` beside the one condition-23 finding concerning `.xspec`, exit 1, and `check` the unreadable-record unit form beside the one 14.22; since Task 45 its session-directory arms and three stale twins had held) |
 | T11-2 | section-11 | 2, 3, 40 (passes since Task 40 landed: its inside `--file` spellings, `./specs/alpha/*.mdx` and its twins, answer no rows, exit 0; it never waited on Task 44 — its outside-root `--file` arms run on a valid workspace, and its twin sweep under an invalid and a missing configuration covers only the malformed `--tag` values Task 2 judges at parse level; since Task 3 its tag sets had held) |
 | T11-6 | section-11 | 19 (passes since Task 19 landed) |
 | T11-7 | section-11 | 3 (passes since Task 3 landed) |
@@ -96,7 +96,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T12.2-4 | section-12.1-12.2 | 52 |
 | T12.3-1 | section-12.3-12.5 | 40 (passes since Task 40 landed) |
 | T12.7-3 | section-12.7 | 42, 48, 49 (since Task 42 landed every configuration arm holds — an unoccupied `--config` path, `./../cfg//xspec.config.ts` and an absolute one, reported byte-for-byte as given, the same spellings reporting `../cfg/xspec.config.ts` once the malformed file exists — and so do the search-failure, single-finding, usage, and linked-working-directory arms; it stops first at the Linux-leg 14.24 arm, Task 48: `build --json` on a stale workspace with `.xspec` unwritable exits 70, `internal error: EACCES`, where it must exit 2 with `{"code": "write-failure", "path": ".xspec"}`; the 14.25 arm after it, `build --json` with `specs/sub` unlistable, expecting `{"code": "read-failure", "path": "specs/sub"}`, waits on Task 49) |
-| T13.3-2 | section-13.3 | 47 |
+| T13.3-2 | section-13.3 | 47 (passes since Task 47 landed: the graph-data area holds the snapshot with its derivation inputs at `.xspec/graph.json` and the recorded derived-file paths apart at `.xspec/record.json` — `GRAPH_DATA_PATH` and `DERIVED_FILE_RECORD_PATH` in `src/core/graph-data.ts`, both read through `readStoredFile` in `src/workspace/graph-data.ts` — and a refreshing read writes the snapshot file alone (`assessWorkspaceRead` in `src/workspace/refresh.ts`, `finishAvailabilityRefresh` in `src/workspace/availability.ts`), so after the deletion arm's refresh `inventory` reports `recorded` `[]` and `check` is clean, a readable record stays byte-for-byte, and an unreadable one stays untouched while the refresh rewrites the snapshot beside it) |
 | T13.4-6 | section-13.4 | 51 |
 | T13.5-1 | section-13.5 | 43 (passes since Task 43 landed: `build --test-hold --json` consumes `--json` as the hold path, `--test-hold` being value-taking by name, and exits 2 as an unknown flag to `build`, stdout empty, no hold file) |
 | T13.5-7 | section-13.5 | 48 |
@@ -166,23 +166,6 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 47 — A refreshing read leaves an absent record absent (SPEC 13.3; C8)
-
-**Requirement.** SPEC 13.3: "The record is left unchanged in every state — an absent record stays absent, the empty record (11.6), whatever graph data the refresh writes beside it".
-
-**Observed.** After the graph data is deleted, running `ids --json` and then `inventory` shows `recorded` as the eight generated paths. It must be `[]`.
-
-**Location.** `src/workspace/refresh.ts` (the refresh writes graph data, record included) and `src/core/graph-data.ts` (record serialization).
-
-**Change.** Refresh must carry the record over exactly as it found it:
-- absent stays absent, in whatever graph-data layout keeps `inventory`'s `recorded` at `[]` and keeps `check`'s recorded-file comparisons correct;
-- present stays unchanged;
-- unreadable stays untouched, as it already does.
-
-**Verification.**
-- `section-13.3.test.ts`: T13.3-2.
-- Neighbours: `section-11.6.test.ts`, `section-12.1-12.2.test.ts`, `section-13.4.test.ts`.
 
 ## Task 48 — A write the environment refuses is condition 24: exit 2 with the `write-failure` error document (SPEC 14.24, 13.5, 13.3, 12.0, 12.7; C6)
 
@@ -261,15 +244,15 @@ The command stops at the read and exits 2. The error document carries the code `
 
 **Observed.**
 - Journal content refused (mode `0o200`): `build`, `check`, `ids`, and `rename` exit 70. Required: a condition-13 finding concerning `.xspec/journal`, exit 1, with `ids` answering nothing.
-- Graph data unreadable (`.xspec/graph.json`, mode `-w-`): it is read as the empty record.
+- Graph data unreadable (every graph-data file mode `-w-` — since Task 47 `.xspec/graph.json`, the snapshot, and `.xspec/record.json`, the record): it is read as the empty record.
   - `inventory` reports `recorded` as `[]`, with no finding and exit 0.
   - `move --preview` computes its `delta` against an empty record, exit 0.
   - Required: `{"unavailable": true}`, the `unreadable-record` finding concerning `.xspec`, and exit 1.
 
 **Location.**
 - `src/workspace/journal.ts` (the journal read) and `src/workspace/graph-data.ts` (the record read).
-  - Since Task 46, every current-journal read — `loadJournal`, `journalOccupied`, `readJournalBytes`, and baseline replay's in `src/workspace/baseline.ts` — classifies through `journalOccupant` (`readableOccupant` in `src/workspace/writes.ts`), and `loadGraphData` classifies the area's own path `.xspec` before the record's; the store-backed fast path (`verifyStoreForRead` in `src/workspace/fast-read.ts`) reads the store through `loadGraphData` too.
-  - A refused `lstat` in any of these throws from `classifyOccupant` (only `ENOENT`, `ENOTDIR`, and `ELOOP` are absence), and `loadGraphData`'s `readFile` catch reads any refusal as absence. The area's refused `lstat` must become the unreadable state (14.25: "a refused read of the graph-data area's own occupant").
+  - Since Task 46, every current-journal read — `loadJournal`, `journalOccupied`, `readJournalBytes`, and baseline replay's in `src/workspace/baseline.ts` — classifies through `journalOccupant` (`readableOccupant` in `src/workspace/writes.ts`). Since Task 47 both graph-data files are read through one classification, `readStoredFile` in `src/workspace/graph-data.ts` — the area's own path `.xspec` first, then the file's — by `loadGraphData` (the snapshot, `.xspec/graph.json`; also the store-backed fast path's read, `verifyStoreForRead` in `src/workspace/fast-read.ts`) and `readDerivedFileRecord` (the record, `.xspec/record.json`, which `inventory`, the previews, `check`, `build`, and the finishing regeneration consult).
+  - A refused `lstat` there throws from `classifyOccupant` (only `ENOENT`, `ENOTDIR`, and `ELOOP` are absence), and `readStoredFile`'s `readFile` catch reads any refusal as absence. A refused read of the area's own occupant or of a stored file must become `readStoredFile`'s unreadable state (14.25: "a refused read of the graph-data area's own occupant, or of anything under the area other than those durable paths and the session directory"): for the record, 14.23's unreadable state; for the snapshot, graph data that does not match.
 - `src/cli/commands/inventory.ts`.
 - The previews' delta computation (`src/cli/commands/preview.ts`, `move.ts`, `rename.ts`).
 - `src/workspace/refresh.ts` and `src/workspace/check.ts`.
@@ -277,7 +260,7 @@ The command stops at the read and exits 2. The error document carries the code `
 **Change.**
 - Report a refused journal content read as 14.13, as the gate reports a malformed journal.
 - Route a refused record read through the unreadable-record state wherever the record is consulted, reusing the path a corrupt record already takes.
-- A refreshing read regenerates the graph data, as it does on a mismatch (13.3).
+- A refreshing read regenerates the graph data, as it does on a mismatch (13.3): since Task 47 the refreshing reads rewrite `.xspec/graph.json` whenever it is absent or unreadable and never write the record, so a refused snapshot read classified either way is already regenerated, the record left as it is.
 
 **Verification.**
 - `section-14-ii.test.ts`: T14-10, together with Task 49.

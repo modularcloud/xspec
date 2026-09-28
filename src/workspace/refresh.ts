@@ -7,12 +7,15 @@
 // commands refresh it — writing exactly what `xspec build` would write,
 // except that no TypeScript or Markdown is generated or removed and the
 // recorded derived-file paths are left unchanged — before answering. The
-// record is left unchanged in every state: recorded state that exists but
-// cannot be read as a record (SPEC 14.23) is neither read, repaired, nor
-// replaced — the read answers from the current analysis, reports no
-// finding for it, and leaves the store byte-for-byte, the state persisting
-// until a successful `build` or a finishing `rename`/`move` regeneration
-// replaces the record (`check` reports it as staleness, SPEC 14.10). When
+// record is left unchanged in every state — an absent record stays absent,
+// the empty record (11.6), whatever graph data the refresh writes beside
+// it — and recorded state that exists but cannot be read as a record
+// (SPEC 14.23) is neither read, repaired, nor replaced: the refresh writes
+// the snapshot file alone and never the record's (./graph-data.ts), never
+// consults the record, and reports no finding for it, the unreadable state
+// persisting until a successful `build` or a finishing `rename`/`move`
+// regeneration replaces the record (`check` reports it as staleness,
+// SPEC 14.10). When
 // the current workspace fails the validations of `xspec build` — source
 // validation errors, journal errors (14.13), and refused writes over
 // build's complete write set (14.22) alike: the findings a `build` would
@@ -37,10 +40,7 @@
 import { computeBuildOutputs } from "../core/build.js";
 import type { Finding } from "../core/findings.js";
 import type { GraphData } from "../core/graph-data.js";
-import {
-  graphDataMatchesCurrent,
-  refreshedGraphData,
-} from "../core/graph-data.js";
+import { graphDataMatchesCurrent } from "../core/graph-data.js";
 import type { LoadedWorkspace } from "./config.js";
 import { loadGraphData, writeGraphData } from "./graph-data.js";
 import type { WorkspaceAnalysis } from "./pipeline.js";
@@ -53,15 +53,14 @@ export type WorkspacePreparation =
       /**
        * The workspace is valid and the stored graph data now matches the
        * current sources and configuration — refreshed if it did not
-       * (SPEC 13.3) — or exists but cannot be read as a record and was
-       * left untouched (SPEC 13.3, 14.23). Answer from `analysis`.
+       * (SPEC 13.3); the record, whatever its state, left unchanged
+       * (SPEC 13.3, 14.23). Answer from `analysis`.
        */
       readonly kind: "ready";
       readonly analysis: WorkspaceAnalysis;
       /**
-       * The current snapshot with the retained record — or, over an
-       * unreadable record, build's data, never written (the answer's
-       * source is `analysis` either way).
+       * The stored graph data — the current snapshot with its derivation
+       * inputs (the answer's source is `analysis`).
        */
       readonly graphData: GraphData;
     }
@@ -118,10 +117,10 @@ export async function analyzeWorkspaceForRead(
  * or refused writes over build's complete write set (SPEC 14.22): the
  * findings a `build` would now report — with nothing modified;
  * `ready` carries the graph data the read answers beside and a `commit`
- * that performs the one refresh write (a no-op when the store already
- * matches — and always over recorded state that exists but cannot be read
- * as a record, which no refresh reads, repairs, or replaces, SPEC 13.3,
- * 14.23). The caller commits only once every remaining argument check
+ * that performs the one refresh write, the snapshot file's (a no-op when
+ * the stored graph data already matches; the record, which no refresh
+ * reads, repairs, or replaces, is never written, SPEC 13.3, 14.23). The
+ * caller commits only once every remaining argument check
  * has passed, so a usage-error invocation writes nothing — and the
  * decision itself never writes, so a report that must precede other
  * evaluation (the corrupt-session report of 10.1 behind this gate) can be
@@ -149,17 +148,18 @@ export async function assessWorkspaceRead(
   // configuration (SPEC 13.3): the same pure derivation `build` runs
   // (SPEC 12.1), so the refreshed bytes match a real build's byte for byte
   // (SPEC 12.0 determinism). Its graph data and write set are independent
-  // of the stored record (`stored` feeds orphan removal alone, which no
-  // refresh performs), so the store stays unconsulted until the workspace
-  // has passed the complete gate below. The refresh generates and removes
-  // no TypeScript or Markdown — only the graph data is ever written.
+  // of the stored record (the record feeds orphan removal alone, which no
+  // refresh performs), so the record is never consulted and the store stays
+  // unread until the workspace has passed the complete gate below. The
+  // refresh generates and removes no TypeScript or Markdown — only the
+  // snapshot file is ever written.
   const build = computeBuildOutputs(
     workspace.configuration,
     analysis.specs,
     analysis.graph,
     analysis.textModel,
     analysis.hashes,
-    null,
+    [],
     workspaceInputsOf(workspace, analysis),
   );
 
@@ -176,27 +176,23 @@ export async function assessWorkspaceRead(
     return { kind: "findings", findings: writeFindings };
   }
 
+  // SPEC 13.3: graph data missing or not matching the current sources and
+  // configuration — nothing stored, a stale snapshot, or something stored
+  // that cannot be read as graph data — is rewritten as `build` would
+  // write it; matching data is served as is, nothing to commit. The record
+  // is left unchanged in every state (SPEC 13.3, 14.23): the refresh
+  // writes the snapshot file alone, so an absent record stays absent (the
+  // empty record, 11.6), a readable one stays byte-for-byte, and recorded
+  // state that cannot be read as a record is neither read, repaired, nor
+  // replaced, no finding reported for it — met by the record-consulting
+  // surfaces (SPEC 11.6, 6.6 → 14.23) and reported as staleness by `check`
+  // (SPEC 14.10) until a successful `build` or a finishing `rename`/`move`
+  // regeneration replaces it.
   const stored = await loadGraphData(workspace.root);
-  if (stored.state === "unreadable") {
-    // SPEC 13.3: recorded state that exists but cannot be read as a record
-    // is neither read, repaired, nor replaced by a refresh, and no finding
-    // is reported for it — the read answers from the current analysis and
-    // the store stays byte-for-byte. The state persists — met by the
-    // record-consulting surfaces (SPEC 11.6, 6.6 → 14.23) and reported as
-    // staleness by `check` (SPEC 14.10) — until a successful `build` or a
-    // finishing `rename`/`move` regeneration replaces the record.
-    return {
-      kind: "ready",
-      graphData: build.graphData,
-      commit: async () => {},
-    };
-  }
-  const graphData = refreshedGraphData(stored.data, build.graphData);
-  if (graphDataMatchesCurrent(stored.bytes, stored.data, build.graphData)) {
-    // Matching data is served as is — no write, nothing to commit.
+  const graphData = build.graphData;
+  if (graphDataMatchesCurrent(stored.bytes, graphData)) {
     return { kind: "ready", graphData, commit: async () => {} };
   }
-
   return {
     kind: "ready",
     graphData,

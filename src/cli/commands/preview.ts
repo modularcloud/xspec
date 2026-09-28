@@ -24,7 +24,7 @@
 import { generatedDerivedPaths } from "../../core/build.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import {
-  GRAPH_DATA_PATH,
+  GRAPH_DATA_OWN_PATHS,
   unreadableRecordFinding,
 } from "../../core/graph-data.js";
 import type { IdentityMapping } from "../../core/journal.js";
@@ -78,12 +78,12 @@ export async function emitSuccessfulPreview(
     return 1;
   }
   // SPEC 6.6: an absent record records nothing — the empty-record success
-  // path, never condition 23. The graph-data path is never recorded
-  // (SPEC 13.3); a record naming it anyway is dropped defensively, as the
+  // path, never condition 23. Graph data's own paths are never recorded
+  // (SPEC 13.3); a record naming one anyway is dropped defensively, as the
   // build's orphan domain drops it.
   const recorded =
     record.state === "readable"
-      ? record.paths.filter((path) => path !== GRAPH_DATA_PATH)
+      ? record.paths.filter((path) => !GRAPH_DATA_OWN_PATHS.includes(path))
       : [];
   emitPreviewReport(json, stdout, [], {
     mapping,

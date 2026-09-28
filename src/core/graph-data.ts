@@ -10,39 +10,45 @@
 // This module defines that content:
 //
 // - the stored model — a plain-data snapshot of the assembled workspace
-//   graph (./graph.ts) plus the recorded derived-file paths;
+//   graph (./graph.ts) with its derivation inputs, and, apart from it, the
+//   recorded derived-file paths;
 // - `buildGraphSnapshot` — the pure derivation of the snapshot from the
 //   graph and its computed hashes (./hashes.ts);
-// - `serializeGraphData`/`parseGraphData` — the byte encoding through the
-//   one canonical serializer (./canonical-json.ts; IMPLEMENTATION: stored
-//   JSON goes through one canonical serializer — sorted keys, stable
-//   ordering, trailing newline), byte-deterministic for a given workspace
-//   (SPEC 12.0: no wall-clock values, no randomness, no absolute paths —
-//   every stored path is workspace-relative, SPEC 1.5);
+// - `serializeGraphData`/`parseGraphData` and
+//   `serializeDerivedFileRecord`/`parseDerivedFileRecord` — the byte
+//   encodings of the two parts through the one canonical serializer
+//   (./canonical-json.ts; IMPLEMENTATION: stored JSON goes through one
+//   canonical serializer — sorted keys, stable ordering, trailing newline),
+//   byte-deterministic for a given workspace (SPEC 12.0: no wall-clock
+//   values, no randomness, no absolute paths — every stored path is
+//   workspace-relative, SPEC 1.5);
 // - the compare-with-current predicate `graphDataMatchesCurrent` — shared
 //   by refresh-on-read (SPEC 13.3) and `check`'s staleness finding
 //   (SPEC 14.10), so both judge the store by one rule.
 //
-// The two parts age differently (SPEC 13.3): the snapshot is a pure
-// function of the current sources, configuration, and journal, and
-// "graph data does not match the current sources and configuration"
-// exactly when the stored bytes differ from a re-serialization holding the
-// current snapshot; the recorded derived-file paths are updated only by
-// generation (`xspec build`, and the commands that regenerate as `build`
-// does) — a refresh leaves them unchanged, and the record legitimately
-// outlives the generation set (that is what makes orphan removal and
-// 14.10's recorded-orphan arm possible, SPEC 13.3, 13.4, 12.1). A refresh
-// writes exactly what `xspec build` would write except for that record
-// clause (SPEC 13.3): with a readable record, build's data with the stored
-// record preserved; with an absent store there are no recorded paths to
-// preserve, and the written data is exactly build's, would-be record
-// included. Recorded state that exists but cannot be read as a record —
-// malformed bytes, a non-plain occupant (workspace/graph-data.ts's
-// "unreadable" state) — is neither read, repaired, nor replaced by any
-// refresh (SPEC 13.3, 14.23): only `build` and the finishing
-// `rename`/`move` regeneration replace it, and `check` reports it as
-// staleness (SPEC 14.10). The predicate compares against the same
-// refreshed form, so refresh and `check` judge the store by one rule.
+// The two parts age differently (SPEC 13.3), so each has its own file in
+// the graph-data area (the layout is the product's own, deliberately
+// unenumerated to consumers, SPEC 13.3, 11.6): the snapshot with its
+// inputs (`GRAPH_DATA_PATH`) is a pure function of the current sources,
+// configuration, and journal, and "graph data does not match the current
+// sources and configuration" exactly when its stored bytes differ from the
+// serialization of the current snapshot — the comparison of 13.3, from
+// which the recorded derived-file paths are excluded by construction. The
+// record (`DERIVED_FILE_RECORD_PATH`) is written only by generation
+// (`xspec build`, and the commands that regenerate as `build` does) and
+// legitimately outlives the generation set (that is what makes orphan
+// removal and 14.10's recorded-orphan arm possible, SPEC 13.3, 13.4, 12.1).
+// A refresh writes exactly what `xspec build` would write except that the
+// record is left unchanged (SPEC 13.3): it writes the snapshot file alone
+// and never the record's, so the record keeps whatever state it has — an
+// absent record stays absent, the empty record (11.6), whatever graph data
+// the refresh writes beside it; a readable one stays byte-for-byte; and
+// recorded state that exists but cannot be read as a record — malformed
+// bytes, a non-plain occupant (workspace/graph-data.ts's "unreadable"
+// state) — is neither read, repaired, nor replaced by any refresh
+// (SPEC 13.3, 14.23): only `build` and the finishing `rename`/`move`
+// regeneration replace it, and `check` reports it as staleness
+// (SPEC 14.10).
 //
 // The content is otherwise opaque (SPEC 13.3): its observable contract is
 // its location under `.xspec/`, its classification as a derived file
@@ -74,8 +80,32 @@ import type { WorkspaceTextModel } from "./text-model.js";
  */
 export const GRAPH_DATA_AREA = ".xspec";
 
-/** SPEC 13.3/13.4: the graph-data file's workspace-relative path. */
+/**
+ * SPEC 13.3/13.4: the workspace-relative path of the graph data proper —
+ * the snapshot with its derivation inputs, the part a refresh writes.
+ */
 export const GRAPH_DATA_PATH = ".xspec/graph.json";
+
+/**
+ * SPEC 13.3/13.4: the workspace-relative path of the recorded derived-file
+ * paths — the record, written by generation alone and never by a refresh,
+ * so the record is left unchanged in every state (SPEC 13.3). Nothing
+ * occupying it — the area absent, or a directory without it, whatever else
+ * the area holds, graph data a refresh wrote included — is the empty
+ * record (SPEC 11.6, 14.23).
+ */
+export const DERIVED_FILE_RECORD_PATH = ".xspec/record.json";
+
+/**
+ * The graph data's own paths, both derived files (SPEC 13.4) that `build`
+ * writes (its write set, SPEC 12.1, 14.22). Graph data records no paths of
+ * its own (SPEC 13.3): neither is ever a recorded derived-file path, so
+ * neither is ever an orphan.
+ */
+export const GRAPH_DATA_OWN_PATHS: readonly string[] = [
+  GRAPH_DATA_PATH,
+  DERIVED_FILE_RECORD_PATH,
+];
 
 /**
  * The one condition-23 finding (SPEC 14.23): recorded generation state that
@@ -99,15 +129,24 @@ export function unreadableRecordFinding(): Finding {
 }
 
 /**
- * The stored format version: a parsed file of any other version is
- * malformed (parse yields null) — recorded state that exists but cannot be
- * read as a record (SPEC 14.23): the refreshing reads leave it untouched
- * and answer from the current analysis, `check` reports it as staleness,
- * and a `build` (or finishing regeneration) replaces it (SPEC 13.3,
- * 14.10). Version 3 added the reference occurrences (SPEC 5.7, 13.3);
- * version 4 added the code-location source ranges (SPEC 1.7).
+ * The stored graph-data format version: a parsed file of any other version
+ * is malformed (parse yields null) — graph data that does not match the
+ * current sources and configuration: the refreshing reads rewrite it,
+ * `check` reports it as staleness, and a `build` (or finishing
+ * regeneration) replaces it (SPEC 13.3, 14.10). Version 3 added the
+ * reference occurrences (SPEC 5.7, 13.3); version 4 added the
+ * code-location source ranges (SPEC 1.7); version 5 moved the recorded
+ * derived-file paths to their own file (`DERIVED_FILE_RECORD_PATH`), which
+ * no refresh writes (SPEC 13.3).
  */
-const GRAPH_DATA_VERSION = 4;
+const GRAPH_DATA_VERSION = 5;
+
+/**
+ * The derived-file record's format version: a record file of any other
+ * version is malformed (parse yields null) — recorded state that exists but
+ * cannot be read as a record (SPEC 14.23).
+ */
+const DERIVED_FILE_RECORD_VERSION = 1;
 
 /** One recorded derivation input: a discovered source and its fingerprint. */
 export interface StoredSourceInput {
@@ -230,19 +269,18 @@ export interface GraphSnapshot {
   readonly occurrences: readonly StoredOccurrence[];
 }
 
-/** The complete stored graph data (SPEC 13.3). */
+/**
+ * The stored graph data proper (SPEC 13.3), the part a refresh writes: the
+ * snapshot with its derivation inputs. The recorded derived-file paths —
+ * the paths of the derived files most recently generated (SPEC 13.3,
+ * 13.4), on which orphan removal (12.1) and 14.10's recorded-orphan form
+ * rely — are stored apart (`serializeDerivedFileRecord`), written by
+ * generation alone.
+ */
 export interface GraphData {
   readonly snapshot: GraphSnapshot;
   /** The recorded derivation inputs of the snapshot (see `StoredInputs`). */
   readonly inputs: StoredInputs;
-  /**
-   * SPEC 13.3/13.4: the workspace-relative paths of the derived files most
-   * recently generated — generated TypeScript modules and companions
-   * (13.1) and emitted Markdown (13.2). Updated only by generation;
-   * refresh preserves it. Orphan removal (12.1) and 14.10's
-   * recorded-orphan finding rely on exactly this record.
-   */
-  readonly derivedFiles: readonly string[];
 }
 
 /**
@@ -315,78 +353,30 @@ export function buildGraphSnapshot(
 }
 
 /**
- * The graph data a refresh writes (SPEC 13.3): exactly what `xspec build`
- * would write, except the recorded derived-file paths are left unchanged.
- * `build` is what the build would write for the current sources and
- * configuration — snapshot plus the would-be generated set as its record
- * (core/build.ts, `BuildOutputs.graphData`). With a readable record the
- * refresh preserves it (the record is updated only by generation, and it
- * legitimately outlives the generation set — SPEC 13.3, 13.4); with an
- * absent store (`stored` null) there are no recorded paths to leave
- * unchanged, and the refresh writes build's data as is. An unreadable
- * record never reaches a refresh write at all: the refreshing reads leave
- * that state untouched (SPEC 13.3, 14.23; workspace/refresh.ts,
- * workspace/availability.ts). Files orphaned while the record was missing
- * stay outside xspec's knowledge either way (SPEC 13.4): the would-be
- * record names only currently generated paths, never such orphans.
- * `build` itself does not use this — it records the paths it just
- * generated.
- */
-export function refreshedGraphData(
-  stored: GraphData | null,
-  build: GraphData,
-): GraphData {
-  return stored === null
-    ? build
-    : {
-        snapshot: build.snapshot,
-        inputs: build.inputs,
-        derivedFiles: stored.derivedFiles,
-      };
-}
-
-/**
- * The recorded derived-file paths of a loaded store (SPEC 13.3), for
- * orphan removal (SPEC 12.1, 13.4) and 14.10's recorded-orphan arm. A
- * missing or malformed store records nothing: such orphans are outside
- * xspec's knowledge and are never removed (SPEC 13.4).
- */
-export function recordedDerivedFiles(
-  data: GraphData | null,
-): readonly string[] {
-  return data === null ? [] : data.derivedFiles;
-}
-
-/**
  * The compare-with-current predicate (SPEC 13.3, 14.10): whether the
  * stored graph data matches the current sources and configuration —
- * operationally, whether the stored bytes are exactly what a refresh
- * would write (`refreshedGraphData` over `build`, what `xspec build`
- * would write for the current sources and configuration). False when the
- * store is missing (`storedBytes` null). The unreadable-record state is
- * judged before this predicate is ever consulted (SPEC 13.3, 14.23:
- * workspace/graph-data.ts's three-way load state): the refreshing reads
- * skip both the predicate and the write there, and `check` reports that
- * state under 14.10's unreadable-record unit form instead — so the inputs
- * here are an absent or readable store. The refreshing reads refresh
- * exactly when this is false (SPEC 13.3); `check`, which never refreshes,
- * reports the graph data mismatched exactly when this is false
- * (SPEC 14.10) — by the same rule, so the retained derived-file record
- * never reads as staleness (SPEC 13.3: the record is mandated to be left
- * unchanged).
+ * operationally, whether the stored bytes are exactly the serialization of
+ * `build`, the graph data `xspec build` would write for the current
+ * sources and configuration (core/build.ts, `BuildOutputs.graphData`),
+ * which is exactly what a refresh writes: the recorded derived-file paths
+ * are stored apart (`DERIVED_FILE_RECORD_PATH`), so the comparison
+ * excludes them by construction and a lagging record alone is never
+ * staleness (SPEC 13.3, 14.10). False when no plain file's bytes were read
+ * (`storedBytes` null — missing, or occupied by anything else). The
+ * refreshing reads refresh exactly when this is false (SPEC 13.3);
+ * `check`, which never refreshes, reports the graph data mismatched
+ * exactly when this is false and the record is readable or absent
+ * (SPEC 14.10: an unreadable record reports under its own unit form
+ * alone) — the same rule for both.
  */
 export function graphDataMatchesCurrent(
   storedBytes: Uint8Array | null,
-  storedData: GraphData | null,
   build: GraphData,
 ): boolean {
   if (storedBytes === null) {
     return false;
   }
-  const expected = utf8Encoder.encode(
-    serializeGraphData(refreshedGraphData(storedData, build)),
-  );
-  return bytesEqual(storedBytes, expected);
+  return bytesEqual(storedBytes, utf8Encoder.encode(serializeGraphData(build)));
 }
 
 // ---------------------------------------------------------------------------
@@ -413,8 +403,8 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
  * the versioned shape (IMPLEMENTATION: one canonical serializer — sorted
  * keys, stable ordering, trailing newline). Byte-deterministic for a given
  * workspace (SPEC 13.3, 12.0): the snapshot enters in the graph's fixed
- * order and the recorded derived-file paths enter deduplicated in byte
- * order.
+ * order. The recorded derived-file paths are no part of it (they are
+ * stored apart, `serializeDerivedFileRecord`).
  */
 export function serializeGraphData(data: GraphData): string {
   const value: JsonValue = {
@@ -433,7 +423,6 @@ export function serializeGraphData(data: GraphData): string {
           hash: source.hash,
         })),
     },
-    derivedFiles: [...new Set(data.derivedFiles)].sort(compareBytes),
     requirements: data.snapshot.requirements.map(requirementToJson),
     codeLocations: data.snapshot.codeLocations.map((location): JsonValue => ({
       identity: location.identity,
@@ -495,15 +484,13 @@ const EDGE_KINDS: ReadonlySet<string> = new Set([
 /**
  * Parse stored graph-data text. Returns null — malformed — for anything
  * that is not the versioned shape `serializeGraphData` writes: not JSON,
- * a different version, or structurally invalid fields. A malformed store
- * is recorded state that exists but cannot be read as a record
- * (SPEC 14.23): the refreshing reads leave it untouched and answer from
- * the current analysis (SPEC 13.3), `check` reports it as staleness under
- * the unreadable-record unit form (SPEC 14.10), the record-consulting
- * surfaces report their record-supplied datum explicitly unavailable
- * beside the condition-23 finding, and a successful `build` or finishing
- * regeneration replaces it; its derived-file record is unrecoverable,
- * leaving any orphans outside xspec's knowledge (SPEC 13.4).
+ * a different version, or structurally invalid fields. Malformed graph
+ * data is graph data that does not match the current sources and
+ * configuration (SPEC 13.3): the refreshing reads rewrite it, `check`
+ * reports it as staleness (SPEC 14.10) — under the unreadable-record unit
+ * form alone where the record cannot be read either — and a successful
+ * `build` or finishing regeneration replaces it. The record it sits beside
+ * is judged on its own (`parseDerivedFileRecord`).
  */
 export function parseGraphData(text: string): GraphData | null {
   let raw: unknown;
@@ -516,14 +503,12 @@ export function parseGraphData(text: string): GraphData | null {
     return null;
   }
   const inputs = parseInputs(raw["inputs"]);
-  const derivedFiles = parseStringArray(raw["derivedFiles"]);
   const requirements = parseArray(raw["requirements"], parseRequirement);
   const codeLocations = parseArray(raw["codeLocations"], parseCodeLocation);
   const edges = parseArray(raw["edges"], parseEdge);
   const occurrences = parseArray(raw["occurrences"], parseOccurrence);
   if (
     inputs === null ||
-    derivedFiles === null ||
     requirements === null ||
     codeLocations === null ||
     edges === null ||
@@ -534,8 +519,48 @@ export function parseGraphData(text: string): GraphData | null {
   return {
     snapshot: { requirements, codeLocations, edges, occurrences },
     inputs,
-    derivedFiles,
   };
+}
+
+/**
+ * Serialize the recorded derived-file paths (SPEC 13.3, 13.4) — the paths
+ * of the derived files most recently generated: generated TypeScript
+ * modules and companions (13.1) and emitted Markdown (13.2) — to the
+ * record's stored text through the one canonical serializer, the paths
+ * deduplicated in byte order (SPEC 12.0). Written by generation alone
+ * (`xspec build` and the finishing regeneration of `rename`/`move`), never
+ * by a refresh (SPEC 13.3).
+ */
+export function serializeDerivedFileRecord(paths: readonly string[]): string {
+  return canonicalJson({
+    version: DERIVED_FILE_RECORD_VERSION,
+    derivedFiles: [...new Set(paths)].sort(compareBytes),
+  });
+}
+
+/**
+ * Parse the record's stored text: the recorded derived-file paths, or null
+ * — malformed — for anything that is not the versioned shape
+ * `serializeDerivedFileRecord` writes. A malformed record is recorded state
+ * that exists but cannot be read as a record (SPEC 14.23): the
+ * record-consulting surfaces report their record-supplied datum explicitly
+ * unavailable beside the condition-23 finding (SPEC 11.6, 6.6), `check`
+ * reports it under 14.10's unreadable-record unit form, the refreshing
+ * reads neither read, repair, nor replace it (SPEC 13.3), and a successful
+ * `build` or finishing regeneration replaces it; the paths it held are
+ * unrecoverable, leaving any orphans outside xspec's knowledge (SPEC 13.4).
+ */
+export function parseDerivedFileRecord(text: string): readonly string[] | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!isRecord(raw) || raw["version"] !== DERIVED_FILE_RECORD_VERSION) {
+    return null;
+  }
+  return parseStringArray(raw["derivedFiles"]);
 }
 
 function parseSourceInput(value: unknown): StoredSourceInput | null {

@@ -17,7 +17,10 @@ import type { BuildOutputs } from "../../core/build.js";
 import { computeBuildOutputs } from "../../core/build.js";
 import type { ExitCode } from "../../core/findings.js";
 import { executeBuildOutputs } from "../../workspace/build.js";
-import { loadGraphData } from "../../workspace/graph-data.js";
+import {
+  readDerivedFileRecord,
+  recordedPathsOf,
+} from "../../workspace/graph-data.js";
 import {
   analyzeWorkspace,
   workspaceInputsOf,
@@ -60,14 +63,16 @@ export async function buildCommand(
     // occupied by anything other than a directory refuses the write,
     // reported before anything is modified — one finding per distinct
     // offending component).
-    const stored = await loadGraphData(workspace.root);
+    // SPEC 12.1/13.4: the stored record's paths are the orphan-removal
+    // domain — none where the record is absent or unreadable.
+    const record = await readDerivedFileRecord(workspace.root);
     outputs = computeBuildOutputs(
       workspace.configuration,
       analysis.specs,
       analysis.graph,
       analysis.textModel,
       analysis.hashes,
-      stored.data,
+      recordedPathsOf(record),
       workspaceInputsOf(workspace, analysis),
     );
     findings.push(

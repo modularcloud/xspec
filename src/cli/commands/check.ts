@@ -30,7 +30,11 @@ import { computeBuildOutputs } from "../../core/build.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import { evaluatePolicy } from "../../core/policy.js";
 import { stalenessFindings } from "../../workspace/check.js";
-import { loadGraphData } from "../../workspace/graph-data.js";
+import {
+  loadGraphData,
+  readDerivedFileRecord,
+  recordedPathsOf,
+} from "../../workspace/graph-data.js";
 import {
   analyzeWorkspace,
   workspaceInputsOf,
@@ -73,17 +77,18 @@ export async function checkCommand(
   // (SPEC 14); the write set is equally undefined for 14.22.
   if (analysis.findings.length === 0) {
     const stored = await loadGraphData(workspace.root);
+    const record = await readDerivedFileRecord(workspace.root);
     const outputs: BuildOutputs = computeBuildOutputs(
       workspace.configuration,
       analysis.specs,
       analysis.graph,
       analysis.textModel,
       analysis.hashes,
-      stored.data,
+      recordedPathsOf(record),
       workspaceInputsOf(workspace, analysis),
     );
     findings.push(
-      ...(await stalenessFindings(workspace.root, outputs, stored)),
+      ...(await stalenessFindings(workspace.root, outputs, stored, record)),
     );
     // SPEC 14.22: `check` reports the obstructed write-path components
     // without writing — the same findings a `build` would refuse on.

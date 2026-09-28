@@ -9,8 +9,9 @@
 // rebuilding. SPEC 13.3: `check` never refreshes — this module only reads
 // and compares, writing nothing; the graph data itself is judged by the
 // same compare-with-current predicate the refreshing reads use
-// (core/graph-data.ts, `graphDataMatchesCurrent`), so the retained
-// derived-file record never reads as staleness.
+// (core/graph-data.ts, `graphDataMatchesCurrent`), over the snapshot file
+// alone, so the retained derived-file record — lagging, or absent where a
+// refresh wrote graph data beside no record — never reads as staleness.
 //
 // The comparison is against the pure build derivation (core/build.ts): the
 // caller computes the current `BuildOutputs` over a workspace that passed
@@ -27,7 +28,7 @@ import {
   GRAPH_DATA_AREA,
   graphDataMatchesCurrent,
 } from "../core/graph-data.js";
-import type { LoadedGraphData } from "./graph-data.js";
+import type { DerivedFileRecord, LoadedGraphData } from "./graph-data.js";
 import { classifyOccupant, describeOccupant } from "./writes.js";
 
 const utf8Encoder = new TextEncoder();
@@ -117,21 +118,24 @@ function unreadableRecordStaleFinding(): Finding {
  *   path inside it named: recorded state that exists but cannot be read as
  *   a record (SPEC 14.23) under the unreadable-record form; otherwise the
  *   missing-or-mismatch form by the shared compare-with-current predicate
- *   (SPEC 13.3 — the retained derived-file record is never staleness);
+ *   over the snapshot file (SPEC 13.3 — the record, stored apart, is never
+ *   staleness: lagging, or absent beside graph data a refresh wrote);
  * - each recorded derived file remaining (anything occupying its path) at
  *   a path the current build no longer generates (`outputs.orphans`) —
  *   undetectable, and so unreported, while the unreadable-record state
  *   holds (no readable record is consulted).
  *
  * `outputs` is the pure build derivation over the current, validated
- * workspace; `stored` the loaded graph data it was derived against.
- * Deterministic order: generated files in the build's output order, then
- * the graph data, then the orphans (byte order, SPEC 12.0).
+ * workspace, its orphans derived against `record`'s recorded paths;
+ * `stored` the loaded graph data and `record` the loaded derived-file
+ * record. Deterministic order: generated files in the build's output
+ * order, then the graph data, then the orphans (byte order, SPEC 12.0).
  */
 export async function stalenessFindings(
   root: string,
   outputs: BuildOutputs,
   stored: LoadedGraphData,
+  record: DerivedFileRecord,
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
 
@@ -175,11 +179,9 @@ export async function stalenessFindings(
   // (SPEC 14.23) reports under the unreadable-record form alone; otherwise
   // `check` reports the graph data stale exactly when the refreshing reads
   // would refresh it — the shared predicate (SPEC 13.3).
-  if (stored.state === "unreadable") {
+  if (record.state === "unreadable") {
     findings.push(unreadableRecordStaleFinding());
-  } else if (
-    !graphDataMatchesCurrent(stored.bytes, stored.data, outputs.graphData)
-  ) {
+  } else if (!graphDataMatchesCurrent(stored.bytes, outputs.graphData)) {
     findings.push(mismatchedGraphDataStaleFinding());
   }
 
@@ -187,8 +189,9 @@ export async function stalenessFindings(
   // derived files the current build no longer generates (byte order,
   // core/build.ts); one whose path is vacant remains nowhere — no finding.
   // While the unreadable-record state holds this form is undetectable
-  // (SPEC 14.10): it consults no readable record, and an unreadable store
-  // records nothing (`outputs.orphans` is empty by construction).
+  // (SPEC 14.10): it consults no readable record, and an unreadable record
+  // records nothing (`outputs.orphans` is empty by construction,
+  // `recordedPathsOf`).
   for (const rel of outputs.orphans) {
     if ((await classifyOccupant(absoluteOf(root, rel))) !== "absent") {
       findings.push(orphanFinding(rel));

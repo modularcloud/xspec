@@ -33,10 +33,7 @@ import * as path from "node:path";
 
 import { computeBuildOutputs } from "../core/build.js";
 import type { Finding } from "../core/findings.js";
-import {
-  graphDataMatchesCurrent,
-  refreshedGraphData,
-} from "../core/graph-data.js";
+import { graphDataMatchesCurrent } from "../core/graph-data.js";
 import type { LoadedWorkspace } from "./config.js";
 import { loadGraphData, writeGraphData } from "./graph-data.js";
 import type { WorkspaceAnalysis } from "./pipeline.js";
@@ -107,16 +104,16 @@ export async function finishAvailabilityRefresh(
   // What `xspec build` would write for the current sources and
   // configuration (SPEC 13.3): the same pure derivation `build` runs
   // (SPEC 12.1). Its graph data and write set are independent of the
-  // stored record (`stored` feeds orphan removal alone, which no refresh
-  // performs), so the store stays unconsulted until the workspace has
-  // passed the complete gate below.
+  // stored record (the record feeds orphan removal alone, which no refresh
+  // performs), so the record is never consulted and the store stays unread
+  // until the workspace has passed the complete gate below.
   const build = computeBuildOutputs(
     workspace.configuration,
     analysis.specs,
     analysis.graph,
     analysis.textModel,
     analysis.hashes,
-    null,
+    [],
     workspaceInputsOf(workspace, analysis),
   );
 
@@ -134,22 +131,17 @@ export async function finishAvailabilityRefresh(
   }
 
   // Passing workspace: read-time refresh participation (SPEC 13.3), as in
-  // ./refresh.ts — matching data is served as is; mismatched or missing
-  // data is rewritten as `build` would write it, the recorded derived-file
-  // paths left unchanged. Recorded state that exists but cannot be read as
-  // a record is neither read, repaired, nor replaced, and no finding is
-  // reported for it (SPEC 13.3, 14.23): the store stays byte-for-byte
+  // ./refresh.ts — matching data is served as is; missing, mismatched, or
+  // unreadable graph data is rewritten as `build` would write it, the
+  // snapshot file alone. The record is left unchanged in every state
+  // (SPEC 13.3, 14.23): absent stays absent, readable stays byte-for-byte,
+  // and recorded state that exists but cannot be read as a record is
+  // neither read, repaired, nor replaced, no finding reported for it,
   // until a successful `build` or a finishing `rename`/`move` regeneration
   // replaces the record.
   const stored = await loadGraphData(workspace.root);
-  if (stored.state === "unreadable") {
-    return;
-  }
-  if (!graphDataMatchesCurrent(stored.bytes, stored.data, build.graphData)) {
-    await writeGraphData(
-      workspace.root,
-      refreshedGraphData(stored.data, build.graphData),
-    );
+  if (!graphDataMatchesCurrent(stored.bytes, build.graphData)) {
+    await writeGraphData(workspace.root, build.graphData);
   }
 }
 
