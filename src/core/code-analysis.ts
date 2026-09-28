@@ -182,6 +182,17 @@ export interface CodeReference {
    * that binding too (SPEC 6.5 "Import edits", 4.5); null for a marker.
    */
   readonly calleeImport: number | null;
+  /**
+   * For a `text(...)` call, its callee identifier: the name the language
+   * reads (escapes interpreted, as for a chain's root, SPEC 2.4) and the
+   * identifier's own characters, which a section move re-rooting the call
+   * at another module's `text` binding rewrites in place (SPEC 6.5
+   * "Reference spellings", 6.4); null for a marker.
+   */
+  readonly callee: {
+    readonly name: string;
+    readonly range: ByteRange;
+  } | null;
   /** The reference expression's bytes (finding locations, SPEC 14.7). */
   readonly range: ByteRange;
   /**
@@ -687,8 +698,9 @@ class CodeAnalyzer {
    * `occurrenceRange` is the SPEC 5.7 occurrence span — for a marker the
    * chain itself (omit it), for a `text(...)` call the entire call
    * expression, callee through closing parenthesis. `callee` is a `text`
-   * call's callee, part of the spelling judged for escapes (SPEC 14.7),
-   * and `calledModule` a cross-module call's called module (SPEC 14.11).
+   * call's callee identifier, part of the spelling judged for escapes
+   * (SPEC 14.7) and recorded for a move's re-rooting (SPEC 6.5), and
+   * `calledModule` a cross-module call's called module (SPEC 14.11).
    * `rootImport` and `calleeImport` index the import declarations whose
    * bindings the root and the callee are (SPEC 6.5 "Import edits").
    */
@@ -699,7 +711,7 @@ class CodeAnalyzer {
     rootImport: number,
     location: string,
     occurrenceRange?: ByteRange,
-    callee?: tst.Node,
+    callee?: tst.Identifier,
     calledModule: CalledModule | null = null,
     calleeImport: number | null = null,
   ): CodeReference {
@@ -711,14 +723,16 @@ class CodeAnalyzer {
       end: this.offsets.byteOffset(span.end),
     });
     const range = spanRange(classified.span);
+    const calleeSpan =
+      callee === undefined
+        ? null
+        : { start: callee.getStart(this.sourceFile), end: callee.getEnd() };
     // SPEC 2.4, 14.7: a spelling free of escape sequences — no `\` in
     // the root identifier, a segment's name token, or the callee.
     const tokens = [
       classified.rootSpan,
       ...classified.segments.map((segment) => segment.nameSpan),
-      ...(callee === undefined
-        ? []
-        : [{ start: callee.getStart(this.sourceFile), end: callee.getEnd() }]),
+      ...(calleeSpan === null ? [] : [calleeSpan]),
     ];
     const escapeFree = tokens.every(
       (token) =>
@@ -743,6 +757,10 @@ class CodeAnalyzer {
       },
       rootImport,
       calleeImport,
+      callee:
+        callee === undefined || calleeSpan === null
+          ? null
+          : { name: callee.text, range: spanRange(calleeSpan) },
       range,
       occurrenceRange: occurrenceRange ?? range,
       escapeFree,
@@ -1695,7 +1713,7 @@ class CodeAnalyzer {
   ): void {
     const parent = identifier.parent;
     if (ts.isCallExpression(parent) && parent.expression === identifier) {
-      if (binding !== null) this.analyzeTextCall(parent, binding);
+      if (binding !== null) this.analyzeTextCall(parent, identifier, binding);
       return;
     }
     this.addFinding(
@@ -1712,9 +1730,14 @@ class CodeAnalyzer {
    * property chain rooted at a spec module import binding; the string
    * form is MDX-only (4.3 → 14.8); a cross-module node is recorded with
    * its called module, resolution reporting 14.11 (4.4, graph.ts).
-   * `callee` is the `text` binding the callee resolves to.
+   * `calleeIdentifier` is the call's callee and `callee` the `text`
+   * binding it resolves to.
    */
-  private analyzeTextCall(call: tst.CallExpression, callee: TextBinding): void {
+  private analyzeTextCall(
+    call: tst.CallExpression,
+    calleeIdentifier: tst.Identifier,
+    callee: TextBinding,
+  ): void {
     const calleeTarget = callee.target;
     if (call.questionDotToken !== undefined) {
       this.addFinding(
@@ -1886,7 +1909,7 @@ class CodeAnalyzer {
         rootBinding.importIndex,
         this.attributionOf(call),
         this.rangeOf(call),
-        call.expression,
+        calleeIdentifier,
         calledModule,
         callee.importIndex,
       ),

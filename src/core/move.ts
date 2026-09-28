@@ -628,16 +628,24 @@ function stemIdentifierBase(modulePath: string): string {
 }
 
 /**
+ * The suffix a fresh `text` binding's identifier adds to the module's stem
+ * base (SPEC 6.5: identifier choice is deterministic), so the binding is
+ * aliased as 4.4 advises where a file consumes several spec modules.
+ */
+const TEXT_BINDING_SUFFIX = "Text";
+
+/**
  * A fresh import binding name for `modulePath` colliding with no name in
  * `taken` (SPEC 6.5, 2.1: fresh, non-colliding, deterministic): the stem
- * base, then base2, base3, … — skipping reserved words and the
- * compiler-provided names.
+ * base followed by `suffix`, then that with 2, 3, … appended — skipping
+ * reserved words and the compiler-provided names.
  */
 function freshBindingName(
   modulePath: string,
   taken: ReadonlySet<string>,
+  suffix = "",
 ): string {
-  const base = stemIdentifierBase(modulePath);
+  const base = `${stemIdentifierBase(modulePath)}${suffix}`;
   const usable = (name: string): boolean =>
     !taken.has(name) &&
     !RESERVED_BINDING_NAMES.has(name) &&
@@ -1338,22 +1346,63 @@ export interface MoveSectionPlan {
 }
 
 /**
- * An added default import declaration, spelled exactly as SPEC 6.5 gives it
- * in a spec source and a TypeScript source alike: `import X from "…"`,
- * single spaces, no statement terminator, the specifier double-quoted in the
- * canonical relative spelling from the importing file's directory (SPEC 2.1,
- * 6.5 "Import edits"). `composeAddition` puts it on a line of its own.
+ * The bindings one declaration added to a file gives it of one module
+ * (SPEC 6.5 "Import edits"): exactly the lacked ones — the default binding
+ * a chain is rooted at, and, in a TypeScript source, the `text` binding a
+ * call's callee is (2.1, 4); null where the file holds the binding.
  */
-function defaultImportLine(
+interface AddedBindings {
+  defaultName: string | null;
+  textName: string | null;
+}
+
+/**
+ * An added import declaration, spelled exactly as SPEC 6.5 gives it:
+ * `import X from "…"` in a spec source; in a TypeScript source
+ * `import X from "…"`, `import { text as Y } from "…"`, or
+ * `import X, { text as Y } from "…"`, as the lacked bindings require, the
+ * named binding `{ text }` where its identifier is `text` itself — single
+ * spaces, no statement terminator, the specifier double-quoted in the
+ * canonical relative spelling from the importing file's directory
+ * (SPEC 2.1, 6.5 "Import edits"). `composeAddition` puts it on a line of
+ * its own.
+ */
+function importDeclarationLine(
   filePath: string,
   modulePath: string,
-  name: string,
+  bindings: Readonly<AddedBindings>,
 ): string {
   const specifier = relativeModuleSpecifier(
     filePath,
     moduleSpecifierTargetOf(modulePath),
   );
-  return `import ${name} from ${jsStringLiteral(specifier, '"')}`;
+  const clauses: string[] = [];
+  if (bindings.defaultName !== null) {
+    clauses.push(bindings.defaultName);
+  }
+  if (bindings.textName !== null) {
+    clauses.push(
+      bindings.textName === "text"
+        ? "{ text }"
+        : `{ text as ${bindings.textName} }`,
+    );
+  }
+  if (clauses.length === 0) {
+    throw new Error("xspec internal error: an added import binding nothing");
+  }
+  return `import ${clauses.join(", ")} from ${jsStringLiteral(specifier, '"')}`;
+}
+
+/** An added default import declaration, `import X from "…"` (SPEC 6.5). */
+function defaultImportLine(
+  filePath: string,
+  modulePath: string,
+  name: string,
+): string {
+  return importDeclarationLine(filePath, modulePath, {
+    defaultName: name,
+    textName: null,
+  });
 }
 
 /**
@@ -1710,10 +1759,17 @@ export function planMoveSection(
   }
 
   // SPEC 6.5: TypeScript markers and `text(...)` calls into the moved
-  // subtree, re-rooted at a binding of the target module (an existing
-  // spec-module import's default binding, or a fresh added import) with the
-  // segment prefix re-identified. Type-level references record no edges
-  // (SPEC 4.5) and are absent from the analyzed references.
+  // subtree. Under a cross-file move each is rooted at bindings of the
+  // target module — a chain (a marker, a call's argument) at its default
+  // binding, a call's callee at its `text` binding (4.3, 4.4) — each one
+  // the file already holds (the first such declaration in document order,
+  // deterministic) or else one the declaration added to the file gives:
+  // one per module, binding exactly the lacked ones. A call is so
+  // rewritten whole, over its occurrence's span (5.7), and is never the
+  // cross-module call of 14.11. Under a same-file move the module is kept,
+  // so only a chain's segment prefix is re-identified and no callee is
+  // touched. Type-level references record no edges (SPEC 4.5) and are
+  // absent from the analyzed references.
   //
   // SPEC 6.5 "Import edits": an occurrence uses a binding when its chain is
   // rooted at it or, for a `text(...)` call, its callee is it (4.5); a spec
@@ -1722,10 +1778,9 @@ export function planMoveSection(
   // import whose bindings were already unused stays (2.1). Uses are counted
   // per import declaration, the one the analysis resolved each root and
   // callee to, before the rewrite and as the re-rooting leaves them.
-  const codeAdditions = new Map<string, Map<string, string>>();
+  const codeAdditions = new Map<string, Map<string, AddedBindings>>();
   const codeRemovals = new Map<string, readonly CodeImport[]>();
   for (const analysis of code) {
-    let taken: Set<string> | null = null;
     const usesBefore = analysis.imports.map(() => 0);
     for (const reference of analysis.references) {
       usesBefore[reference.rootImport]! += 1;
@@ -1734,6 +1789,46 @@ export function planMoveSection(
       }
     }
     const usesAfter = [...usesBefore];
+    // The target module's value-level bindings the file already holds.
+    const holdsTarget = (imported: CodeImport): boolean =>
+      imported.valid && imported.targetPath === targetPath;
+    const existingDefault = analysis.imports.findIndex(
+      (imported) =>
+        holdsTarget(imported) &&
+        imported.defaultBinding !== null &&
+        !imported.defaultBinding.typeOnly,
+    );
+    const existingText = analysis.imports.findIndex(
+      (imported) =>
+        holdsTarget(imported) &&
+        imported.textBindings.some((binding) => !binding.typeOnly),
+    );
+    // The declaration the rewrite adds, and the names already bound.
+    let added: AddedBindings | null = null;
+    let taken: Set<string> | null = null;
+    const addition = (): { added: AddedBindings; taken: Set<string> } => {
+      if (taken === null) {
+        taken = new Set();
+        for (const imported of analysis.imports) {
+          if (imported.defaultBinding !== null) {
+            taken.add(imported.defaultBinding.name);
+          }
+          for (const binding of imported.textBindings) {
+            taken.add(binding.name);
+          }
+        }
+      }
+      if (added === null) {
+        added = { defaultName: null, textName: null };
+        let additions = codeAdditions.get(analysis.path);
+        if (additions === undefined) {
+          additions = new Map();
+          codeAdditions.set(analysis.path, additions);
+        }
+        additions.set(targetPath, added);
+      }
+      return { added, taken };
+    };
     for (const reference of analysis.references) {
       if (
         reference.modulePath !== originPath ||
@@ -1747,59 +1842,70 @@ export function planMoveSection(
         );
       }
       let rootName: string | null = null;
+      let calleeName: string | null = null;
       if (!sameFile) {
         // The chain leaves its origin-module root for a binding of the
         // target module — another module, so another import.
         usesAfter[reference.rootImport]! -= 1;
-        const existing = analysis.imports.findIndex(
-          (imported) =>
-            imported.valid &&
-            imported.targetPath === targetPath &&
-            imported.defaultBinding !== null &&
-            !imported.defaultBinding.typeOnly,
-        );
-        if (existing !== -1) {
-          rootName = analysis.imports[existing]!.defaultBinding!.name;
-          usesAfter[existing]! += 1;
+        if (existingDefault !== -1) {
+          rootName = analysis.imports[existingDefault]!.defaultBinding!.name;
+          usesAfter[existingDefault]! += 1;
         } else {
-          let additions = codeAdditions.get(analysis.path);
-          if (additions === undefined) {
-            additions = new Map();
-            codeAdditions.set(analysis.path, additions);
+          const fresh = addition();
+          fresh.added.defaultName ??= freshBindingName(targetPath, fresh.taken);
+          fresh.taken.add(fresh.added.defaultName);
+          rootName = fresh.added.defaultName;
+        }
+        if (reference.callee !== null) {
+          // SPEC 6.5, 4.4: the callee leaves the origin module's `text`
+          // for the target module's — the call is rewritten whole.
+          if (reference.calleeImport === null) {
+            throw new Error(
+              "xspec internal error: a text(...) call without its callee's " +
+                "import",
+            );
           }
-          const added = additions.get(targetPath);
-          if (added !== undefined) {
-            rootName = added;
+          usesAfter[reference.calleeImport]! -= 1;
+          if (existingText !== -1) {
+            calleeName = analysis.imports[existingText]!.textBindings.find(
+              (binding) => !binding.typeOnly,
+            )!.name;
+            usesAfter[existingText]! += 1;
           } else {
-            if (taken === null) {
-              taken = new Set();
-              for (const imported of analysis.imports) {
-                if (imported.defaultBinding !== null) {
-                  taken.add(imported.defaultBinding.name);
-                }
-                for (const binding of imported.textBindings) {
-                  taken.add(binding.name);
-                }
-              }
-            }
-            rootName = freshBindingName(targetPath, taken);
-            taken.add(rootName);
-            additions.set(targetPath, rootName);
+            const fresh = addition();
+            fresh.added.textName ??= freshBindingName(
+              targetPath,
+              fresh.taken,
+              TEXT_BINDING_SUFFIX,
+            );
+            fresh.taken.add(fresh.added.textName);
+            calleeName = fresh.added.textName;
           }
         }
       }
-      const prefixEdits = chainPrefixEdits(
+      const referenceEdits = chainPrefixEdits(
         reference.spelling,
         oldSegments,
         newSegments,
         rootName,
       );
-      for (const edit of prefixEdits) {
+      if (
+        reference.callee !== null &&
+        calleeName !== null &&
+        calleeName !== reference.callee.name
+      ) {
+        referenceEdits.push({
+          range: reference.callee.range,
+          replacement: calleeName,
+        });
+      }
+      for (const edit of referenceEdits) {
         outerEdits.add(analysis.path, edit);
       }
-      if (prefixEdits.length > 0) {
+      if (referenceEdits.length > 0) {
         // SPEC 6.6/5.7: a marker occurrence spans the bare chain, a TS
-        // `text(...)` occurrence the whole call expression.
+        // `text(...)` occurrence the whole call expression — one rewrite
+        // however many of its parts change.
         preview.add(
           analysis.path,
           "reference-rewrite",
@@ -2142,8 +2248,8 @@ export function planMoveSection(
     }
   }
 
-  // Code files: chain retargets, import removals, and added imports
-  // (SPEC 6.5, 4). A removal is line-dropped like every 6.5 deletion and
+  // Code files: chain and callee retargets, import removals, and added
+  // imports (SPEC 6.5, 4). A removal is line-dropped like every 6.5 deletion and
   // reported with every byte it removes (SPEC 6.6, judged per
   // declaration). An addition is anchored after the line of the file's
   // last spec-module import — a code file referencing the moved subtree
@@ -2185,12 +2291,14 @@ export function planMoveSection(
             `moved subtree but has no spec module import`,
         );
       }
-      // SPEC 6.5: each added declaration is spelled `import X from "…"`,
-      // no statement terminator, on a line of its own.
+      // SPEC 6.5: each added declaration binds exactly the lacked
+      // bindings, spelled `import X from "…"`, `import { text as Y } from
+      // "…"`, or `import X, { text as Y } from "…"`, no statement
+      // terminator, on a line of its own.
       const lines = additions
         .sort((a, b) => compareBytes(a[0], b[0]))
-        .map(([modulePath, name]) =>
-          defaultImportLine(analysis.path, modulePath, name),
+        .map(([modulePath, bindings]) =>
+          importDeclarationLine(analysis.path, modulePath, bindings),
         );
       const firstRemoved = removed[0];
       let placed: { offset: number; position: number } | null = null;
