@@ -351,6 +351,37 @@ export function renderConfigurationError(finding: Finding): string {
 }
 
 /**
+ * SPEC 14.24/12.0: render the environment's refusal of a write as a
+ * diagnostic line — a usage error, standard-error content — naming the
+ * concerned path, as a configuration error's line does.
+ */
+export function renderEnvironmentRefusal(finding: Finding): string {
+  const label = finding.code === "read-failure" ? "read" : "write";
+  const location =
+    finding.path === null ? "" : `${renderPathText(finding.path)}: `;
+  return `xspec: ${label} failure: ${location}${finding.message}\n`;
+}
+
+/**
+ * Report a write the environment refused (SPEC 14.24) the way every command
+ * must: a usage error (12.0), not a finding — the diagnostic on standard
+ * error and, when JSON output is in effect, the exit-2 error document of
+ * 12.0/12.7 as the entire standard output, its one finding carrying the
+ * condition's stable code and concerned path; without JSON output standard
+ * output stays empty. The caller exits 2.
+ */
+export function emitEnvironmentRefusal(
+  io: CommandIo,
+  jsonInEffect: boolean,
+  finding: Finding,
+): void {
+  io.stderr.write(renderEnvironmentRefusal(finding));
+  if (jsonInEffect) {
+    emitErrorDocument(io.stdout, finding);
+  }
+}
+
+/**
  * Report configuration errors (SPEC 14.14) the way every command must: each
  * defect as a standard-error diagnostic line and, when JSON output is in
  * effect, the exit-2 error document of 12.0/12.7 as the entire standard

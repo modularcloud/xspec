@@ -84,6 +84,7 @@ import type {
   DiscoveredSource,
   SourceClassification,
 } from "../../core/discovery.js";
+import { orderSourceWrites } from "../../core/edits.js";
 import type { ExitCode } from "../../core/findings.js";
 import type { SpecFileAnalysis } from "../../core/graph.js";
 import { serializeJournalEntry } from "../../core/journal.js";
@@ -114,9 +115,8 @@ import {
 } from "../../workspace/pipeline.js";
 import {
   nonDirectoryComponents,
+  performSourceWrites,
   probeOccupant,
-  removeSourceFile,
-  writeSourceFile,
 } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
 import {
@@ -433,14 +433,16 @@ async function runMoveFile(
   }
 
   // All validation passed — modify: write the rewritten sources (atomic per
-  // file, SPEC 13.5; the moved content lands at the destination), remove
-  // the origin (SPEC 6.5: the file is relocated), append the mapping to the
-  // journal (SPEC 6.1, 6.5), and regenerate derived files exactly as
-  // `xspec build` does (SPEC 6.5, 6.4).
-  for (const rewrite of plan.rewrites) {
-    await writeSourceFile(workspace.root, rewrite.path, rewrite.content);
-  }
-  await removeSourceFile(workspace.root, originPath);
+  // file, SPEC 13.5), in the preview's `files` order — the relocation,
+  // under the origin's path, producing the destination and then removing
+  // the origin (SPEC 6.5: the file is relocated; 13.5) — append the mapping
+  // to the journal (SPEC 6.1, 6.5), and regenerate derived files exactly as
+  // `xspec build` does (SPEC 6.5, 6.4). A write the environment refuses
+  // stops the operation there (SPEC 14.24, 13.5).
+  await performSourceWrites(
+    workspace.root,
+    orderSourceWrites(plan.rewrites, { origin: originPath, destination }),
+  );
   await appendJournalEntry(workspace.root, plan.entry);
   await executeBuildOutputs(workspace.root, verdict.outputs);
 
@@ -630,12 +632,15 @@ async function runMoveSection(
   }
 
   // All validation passed — modify: write the rewritten sources (atomic per
-  // file, SPEC 13.5; the origin keeps its path, the target gains the moved
-  // text), append the mapping to the journal (SPEC 6.1, 6.5), and
-  // regenerate derived files exactly as `xspec build` does (SPEC 6.5, 6.4).
-  for (const rewrite of plan.rewrites) {
-    await writeSourceFile(workspace.root, rewrite.path, rewrite.content);
-  }
+  // file, in the preview's `files` order, SPEC 13.5; the origin keeps its
+  // path, the target gains the moved text), append the mapping to the
+  // journal (SPEC 6.1, 6.5), and regenerate derived files exactly as
+  // `xspec build` does (SPEC 6.5, 6.4). A write the environment refuses
+  // stops the operation there (SPEC 14.24, 13.5).
+  await performSourceWrites(
+    workspace.root,
+    orderSourceWrites(plan.rewrites, null),
+  );
   await appendJournalEntry(workspace.root, plan.entry);
   await executeBuildOutputs(workspace.root, verdict.outputs);
 

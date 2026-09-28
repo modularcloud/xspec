@@ -49,6 +49,7 @@
 // `mapping` (SPEC 6.4, 6.6) — with `--json`, the single JSON document
 // (SPEC 12.0).
 
+import { orderSourceWrites } from "../../core/edits.js";
 import type { ExitCode } from "../../core/findings.js";
 import { serializeJournalEntry } from "../../core/journal.js";
 import { evaluateRenameRefusals } from "../../core/refusal.js";
@@ -67,7 +68,7 @@ import {
   analyzeWorkspace,
   analyzeWorkspaceContent,
 } from "../../workspace/pipeline.js";
-import { writeSourceFile } from "../../workspace/writes.js";
+import { performSourceWrites } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
 import { flagPresent, jsonOutputInEffect } from "../args.js";
 import type { CommandContext } from "../io.js";
@@ -230,11 +231,14 @@ async function runRename(
   }
 
   // All validation passed — modify: rewrite the sources (atomic per file,
-  // SPEC 13.5), append the mapping to the journal (SPEC 6.1, 6.4), and
-  // regenerate derived files exactly as `xspec build` does (SPEC 6.4).
-  for (const rewrite of plan.rewrites) {
-    await writeSourceFile(workspace.root, rewrite.path, rewrite.content);
-  }
+  // in the preview's `files` order, SPEC 13.5), append the mapping to the
+  // journal (SPEC 6.1, 6.4), and regenerate derived files exactly as
+  // `xspec build` does (SPEC 6.4). A write the environment refuses stops
+  // the operation there (SPEC 14.24, 13.5).
+  await performSourceWrites(
+    workspace.root,
+    orderSourceWrites(plan.rewrites, null),
+  );
   await appendJournalEntry(workspace.root, plan.entry);
   await executeBuildOutputs(workspace.root, verdict.outputs);
 

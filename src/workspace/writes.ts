@@ -37,14 +37,27 @@
 // no non-directory component either, and `readableDirectory` is the one
 // judge of whether a read may list a workspace directory at all —
 // `readableOccupant`, over it, of what a read finds at a file's path.
+//
+// SPEC 14.24: a write the environment refuses — a file's creation,
+// replacement, append, relocation, or removal — stops the command making
+// it. Every write primitive here runs its filesystem mutations through
+// `performWrite`, which turns any failure the filesystem reports into the
+// typed write failure (./environment-refusal.ts) concerning the file the
+// write would have produced or removed, or the graph-data area for graph
+// data; thrown at the write, it leaves every earlier write complete and
+// attempts no later one (SPEC 13.5), and the CLI reports it as the exit-2
+// usage error (SPEC 12.0, 12.7).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import * as process from "node:process";
 import { compareBytes } from "../core/bytes.js";
+import type { SourceWrite } from "../core/edits.js";
 import type { Finding } from "../core/findings.js";
 import { pathFinding } from "../core/findings.js";
+import type { RefusedWrite } from "./environment-refusal.js";
+import { isFilesystemFailure, writeFailure } from "./environment-refusal.js";
 
 /**
  * What occupies a filesystem path, judged by `lstat` — a symbolic link is
@@ -291,12 +304,16 @@ export async function obstructedWritePathFindings(
 /**
  * Terminal defense shared by the write primitives: verify no
  * workspace-relative directory component of `rel` is a symbolic link
- * (callers report SPEC 14.22 gracefully before ever calling a write), then
- * create the missing parent directories. Throws on a symlinked component
- * and on a component occupied by a non-directory, which no directory
- * creation can cure.
+ * (callers report SPEC 14.22 gracefully before ever calling a write).
+ * Throws on a symlinked component and on a component occupied by a
+ * non-directory, which no directory creation can cure; the missing
+ * components below the last existing one are the write's own to create
+ * (`createParentDirectories`).
  */
-async function ensureWritableParent(root: string, rel: string): Promise<void> {
+async function assertUnobstructedParent(
+  root: string,
+  rel: string,
+): Promise<void> {
   for (const component of directoryComponents(rel)) {
     const occupant = await classifyOccupant(absoluteOf(root, component));
     if (occupant === "absent") break; // mkdir supplies the rest
@@ -314,7 +331,41 @@ async function ensureWritableParent(root: string, rel: string): Promise<void> {
       );
     }
   }
-  await fsp.mkdir(path.dirname(absoluteOf(root, rel)), { recursive: true });
+}
+
+/**
+ * Bring the nonexistent directory components of a write path into
+ * existence as directories (SPEC 13.4: a missing intermediate directory
+ * never refuses or fails a write) — part of the write itself, so a refused
+ * creation is the write's own failure (SPEC 14.24).
+ */
+async function createParentDirectories(absolute: string): Promise<void> {
+  await fsp.mkdir(path.dirname(absolute), { recursive: true });
+}
+
+/**
+ * SPEC 14.24: perform one write's filesystem mutations, turning any failure
+ * the filesystem reports for them — permission denied, a read-only
+ * filesystem, exhausted storage, any other — into the write failure
+ * concerning `concerned`, thrown so the command stops at this write: no
+ * later write is attempted, and every earlier one stays complete (SPEC
+ * 13.5). The occupant classifications around a write are reads, never run
+ * through here. Anything else — a defect of the product's own — propagates
+ * unchanged.
+ */
+async function performWrite<T>(
+  concerned: string,
+  write: RefusedWrite,
+  mutation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await mutation();
+  } catch (error) {
+    if (isFilesystemFailure(error)) {
+      throw writeFailure(concerned, write, error);
+    }
+    throw error;
+  }
 }
 
 let temporaryCounter = 0;
@@ -345,28 +396,42 @@ function contentBytes(content: Uint8Array | string): Uint8Array {
  * replaced as itself — rename never follows the destination — and nothing
  * is ever written through it (SPEC 13.4). A directory occupant, which
  * rename cannot replace, is removed and the rename retried: derived-file
- * paths belong to xspec, whatever exists at them (SPEC 13.4).
+ * paths belong to xspec, whatever exists at them (SPEC 13.4). On any
+ * failure — the temp file's own write included, which exhausted storage
+ * can cut short — the temp file is removed, best effort, and the failure
+ * rethrown: the target keeps its prior state (SPEC 13.5), and the failure
+ * is the write's to report (SPEC 14.24).
  */
 async function replaceWithFile(
   absolute: string,
   content: Uint8Array | string,
 ): Promise<void> {
   const temporary = temporaryPathBeside(absolute);
-  await fsp.writeFile(temporary, contentBytes(content));
+  try {
+    await fsp.writeFile(temporary, contentBytes(content));
+    await renameOnto(temporary, absolute);
+  } catch (error) {
+    // Never leave the temp behind; where even its removal is refused, the
+    // write's own failure is still the one reported.
+    await fsp.rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * Rename the complete temp file onto its target (SPEC 13.5), replacing a
+ * directory occupant — which rename cannot replace — by removing it and
+ * retrying. Where the target's occupant cannot even be classified, the
+ * rename's own failure stands.
+ */
+async function renameOnto(temporary: string, absolute: string): Promise<void> {
   try {
     await fsp.rename(temporary, absolute);
   } catch (renameError) {
-    try {
-      if ((await classifyOccupant(absolute)) === "directory") {
-        await fsp.rm(absolute, { recursive: true, force: true });
-        await fsp.rename(temporary, absolute);
-        return;
-      }
-      throw renameError;
-    } catch (error) {
-      await fsp.rm(temporary, { force: true }); // never leave the temp behind
-      throw error;
-    }
+    const occupant = await classifyOccupant(absolute).catch(() => null);
+    if (occupant !== "directory") throw renameError;
+    await fsp.rm(absolute, { recursive: true, force: true });
+    await fsp.rename(temporary, absolute);
   }
 }
 
@@ -377,15 +442,27 @@ async function replaceWithFile(
  * link included, never writing through it (SPEC 13.4). Missing parent
  * directories are created. Callers have already validated the write path
  * (SPEC 14.22, `obstructedWritePathFindings`); an obstructed component here
- * is a terminal defense and throws.
+ * is a terminal defense and throws. A write the environment refuses is the
+ * write failure concerning `rel` — or, for a graph-data file, the
+ * graph-data area `area` it lies in, no path inside the area named (SPEC
+ * 14.24, 11.6).
  */
 export async function writeDerivedFile(
   root: string,
   rel: string,
   content: Uint8Array | string,
+  area?: string,
 ): Promise<void> {
-  await ensureWritableParent(root, rel);
-  await replaceWithFile(absoluteOf(root, rel), content);
+  await assertUnobstructedParent(root, rel);
+  const absolute = absoluteOf(root, rel);
+  await performWrite(
+    area ?? rel,
+    area === undefined ? "write" : "graph-data",
+    async () => {
+      await createParentDirectories(absolute);
+      await replaceWithFile(absolute, content);
+    },
+  );
 }
 
 /**
@@ -394,15 +471,20 @@ export async function writeDerivedFile(
  * its observable effect (SPEC 13.5), like every product write. The path
  * holds a discovered source — a plain file — and its rewritten content
  * replaces it; callers have validated the write path (SPEC 14.22) and run
- * under workspace exclusivity (SPEC 13.5).
+ * under workspace exclusivity (SPEC 13.5). A refused write is the write
+ * failure concerning `rel` (SPEC 14.24).
  */
 export async function writeSourceFile(
   root: string,
   rel: string,
   content: Uint8Array | string,
 ): Promise<void> {
-  await ensureWritableParent(root, rel);
-  await replaceWithFile(absoluteOf(root, rel), content);
+  await assertUnobstructedParent(root, rel);
+  const absolute = absoluteOf(root, rel);
+  await performWrite(rel, "write", async () => {
+    await createParentDirectories(absolute);
+    await replaceWithFile(absolute, content);
+  });
 }
 
 /**
@@ -414,14 +496,36 @@ export async function writeSourceFile(
  * whose directory component became a symbolic link — or any other
  * non-directory, below which the source cannot exist — is skipped
  * untouched, as in orphan removal. An absent occupant is a completed
- * removal.
+ * removal. A refused removal is the write failure concerning `rel` — a
+ * relocation's second write, concerning the origin (SPEC 14.24, 13.5).
  */
 export async function removeSourceFile(
   root: string,
   rel: string,
 ): Promise<void> {
   if ((await obstructedComponentOf(root, rel)) !== null) return;
-  await fsp.rm(absoluteOf(root, rel), { force: true });
+  const absolute = absoluteOf(root, rel);
+  await performWrite(rel, "remove", () => fsp.rm(absolute, { force: true }));
+}
+
+/**
+ * Perform a rewriting operation's source writes (SPEC 6.4, 6.5) in the
+ * order SPEC 13.5 pins (core/edits.ts `orderSourceWrites`), each atomic in
+ * its observable effect (SPEC 13.5); a write the environment refuses stops
+ * the operation there, the writes before it complete and none after it
+ * attempted (SPEC 14.24).
+ */
+export async function performSourceWrites(
+  root: string,
+  writes: readonly SourceWrite[],
+): Promise<void> {
+  for (const write of writes) {
+    if (write.kind === "write") {
+      await writeSourceFile(root, write.path, write.content);
+    } else {
+      await removeSourceFile(root, write.path);
+    }
+  }
 }
 
 /**
@@ -435,7 +539,8 @@ export async function removeSourceFile(
  * 13.4), so the path no longer denotes a location xspec may touch — like an
  * orphan whose record is missing, it is outside xspec's knowledge; below
  * any other non-directory component the recorded path cannot exist, so the
- * removal is equally complete without touching anything.
+ * removal is equally complete without touching anything. A refused removal
+ * is the write failure concerning `rel` (SPEC 14.24).
  */
 export async function removeDerivedFile(
   root: string,
@@ -445,10 +550,12 @@ export async function removeDerivedFile(
   const absolute = absoluteOf(root, rel);
   const occupant = await classifyOccupant(absolute);
   if (occupant === "absent") return;
-  await fsp.rm(absolute, {
-    recursive: occupant === "directory",
-    force: true,
-  });
+  await performWrite(rel, "remove", () =>
+    fsp.rm(absolute, {
+      recursive: occupant === "directory",
+      force: true,
+    }),
+  );
 }
 
 /**
@@ -477,17 +584,19 @@ async function requireDurableWritable(
  * Write a durable file (SPEC 13.4: the journal, review sessions) atomically
  * (SPEC 13.5), by its owning command only. The path must hold a plain file
  * or nothing: any other occupant refuses the write (SPEC 13.4; terminal
- * defense — the read side reports it as 14.13/14.21 first).
+ * defense — the read side reports it as 14.13/14.21 first). A write the
+ * environment refuses is the write failure concerning `rel` (SPEC 14.24).
  */
 export async function writeDurableFile(
   root: string,
   rel: string,
   content: Uint8Array | string,
 ): Promise<void> {
-  await ensureWritableParent(root, rel);
+  await assertUnobstructedParent(root, rel);
   const absolute = absoluteOf(root, rel);
+  await performWrite(rel, "write", () => createParentDirectories(absolute));
   await requireDurableWritable(absolute, rel);
-  await replaceWithFile(absolute, content);
+  await performWrite(rel, "write", () => replaceWithFile(absolute, content));
 }
 
 /**
@@ -502,29 +611,33 @@ export async function writeDurableFile(
  * workspace exclusivity (SPEC 13.5), so no concurrent appender races the
  * absence classification. Later appends are one O_APPEND write of the
  * complete bytes. The same non-plain-occupant refusal applies as for
- * `writeDurableFile`.
+ * `writeDurableFile`, and an append the environment refuses is the write
+ * failure concerning `rel` (SPEC 14.24).
  */
 export async function appendDurableFile(
   root: string,
   rel: string,
   content: Uint8Array | string,
 ): Promise<void> {
-  await ensureWritableParent(root, rel);
+  await assertUnobstructedParent(root, rel);
   const absolute = absoluteOf(root, rel);
+  await performWrite(rel, "append", () => createParentDirectories(absolute));
   await requireDurableWritable(absolute, rel);
   const bytes = Buffer.from(contentBytes(content));
   if ((await classifyOccupant(absolute)) === "absent") {
-    await replaceWithFile(absolute, bytes);
+    await performWrite(rel, "append", () => replaceWithFile(absolute, bytes));
     return;
   }
-  const handle = await fsp.open(absolute, "a");
-  try {
-    let written = 0;
-    while (written < bytes.length) {
-      const result = await handle.write(bytes, written);
-      written += result.bytesWritten;
+  await performWrite(rel, "append", async () => {
+    const handle = await fsp.open(absolute, "a");
+    try {
+      let written = 0;
+      while (written < bytes.length) {
+        const result = await handle.write(bytes, written);
+        written += result.bytesWritten;
+      }
+    } finally {
+      await handle.close();
     }
-  } finally {
-    await handle.close();
-  }
+  });
 }

@@ -258,13 +258,19 @@ export function recordedPathsOf(record: DerivedFileRecord): readonly string[] {
  * Callers validate the write path first (SPEC 14.22,
  * `obstructedWritePathFindings`) and write only for workspaces that pass
  * build validation — a failed build or refresh writes nothing (SPEC 12.1,
- * 13.3).
+ * 13.3). A write the environment refuses concerns the graph-data area, no
+ * path inside it named (SPEC 14.24, 11.6).
  */
 export async function writeGraphData(
   root: string,
   data: GraphData,
 ): Promise<void> {
-  await writeDerivedFile(root, GRAPH_DATA_PATH, serializeGraphData(data));
+  await writeDerivedFile(
+    root,
+    GRAPH_DATA_PATH,
+    serializeGraphData(data),
+    GRAPH_DATA_AREA,
+  );
 }
 
 /**
@@ -273,7 +279,8 @@ export async function writeGraphData(
  * never a refresh's — as the canonical serialization (core) at
  * `.xspec/record.json`, through the derived-file write primitive like the
  * graph data, replacing whatever occupies the path, an unreadable record
- * included (SPEC 14.23).
+ * included (SPEC 14.23). The record is graph data (SPEC 13.3), so a refused
+ * write of it concerns the graph-data area (SPEC 14.24).
  */
 export async function writeDerivedFileRecord(
   root: string,
@@ -283,5 +290,6 @@ export async function writeDerivedFileRecord(
     root,
     DERIVED_FILE_RECORD_PATH,
     serializeDerivedFileRecord(paths),
+    GRAPH_DATA_AREA,
   );
 }

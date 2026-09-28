@@ -95,16 +95,16 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T12.0-14 | section-12.0-iii | 43 (passes since Task 43 landed: `parseArgv` in `src/cli/args.ts` reads the tokens in stages — `walkTokens` strips flags anywhere, each flag's arity fixed by its name across commands (`FLAG_ARITY`, a name of no command taking no value), and honours `--`; JSON output is in effect exactly for a `--json` the walk reads as a flag, or a JSON-only surface; then `matchCommand` matches the remaining words to the synopsis and each walked flag is checked against the command's accepted set — so `--json ids`, `--config cfg/xspec.config.ts build`, and `ids --` run, while `ids -- --json`, `build --file --json`, and `ids --file --json extra` exit 2 with stdout empty) |
 | T12.2-4 | section-12.1-12.2 | 52 |
 | T12.3-1 | section-12.3-12.5 | 40 (passes since Task 40 landed) |
-| T12.7-3 | section-12.7 | 42, 48, 49 (since Task 42 landed every configuration arm holds — an unoccupied `--config` path, `./../cfg//xspec.config.ts` and an absolute one, reported byte-for-byte as given, the same spellings reporting `../cfg/xspec.config.ts` once the malformed file exists — and so do the search-failure, single-finding, usage, and linked-working-directory arms; it stops first at the Linux-leg 14.24 arm, Task 48: `build --json` on a stale workspace with `.xspec` unwritable exits 70, `internal error: EACCES`, where it must exit 2 with `{"code": "write-failure", "path": ".xspec"}`; the 14.25 arm after it, `build --json` with `specs/sub` unlistable, expecting `{"code": "read-failure", "path": "specs/sub"}`, waits on Task 49) |
+| T12.7-3 | section-12.7 | 42, 48, 49 (since Task 42 landed every configuration arm holds — an unoccupied `--config` path, `./../cfg//xspec.config.ts` and an absolute one, reported byte-for-byte as given, the same spellings reporting `../cfg/xspec.config.ts` once the malformed file exists — and so do the search-failure, single-finding, usage, and linked-working-directory arms; since Task 48 its Linux-leg 14.24 arm holds too — `build --json` on a stale workspace with `.xspec` unwritable exits 2 with `{"code": "write-failure", "path": ".xspec"}` — and it stops at its last arm, the 14.25 one, Task 49: `build --json` with `specs/sub` unlistable exits 70, `internal error: EACCES … scandir`, where it must exit 2 with `{"code": "read-failure", "path": "specs/sub"}`) |
 | T13.3-2 | section-13.3 | 47 (passes since Task 47 landed: the graph-data area holds the snapshot with its derivation inputs at `.xspec/graph.json` and the recorded derived-file paths apart at `.xspec/record.json` — `GRAPH_DATA_PATH` and `DERIVED_FILE_RECORD_PATH` in `src/core/graph-data.ts`, both read through `readStoredFile` in `src/workspace/graph-data.ts` — and a refreshing read writes the snapshot file alone (`assessWorkspaceRead` in `src/workspace/refresh.ts`, `finishAvailabilityRefresh` in `src/workspace/availability.ts`), so after the deletion arm's refresh `inventory` reports `recorded` `[]` and `check` is clean, a readable record stays byte-for-byte, and an unreadable one stays untouched while the refresh rewrites the snapshot beside it) |
 | T13.4-6 | section-13.4 | 51 |
 | T13.5-1 | section-13.5 | 43 (passes since Task 43 landed: `build --test-hold --json` consumes `--json` as the hold path, `--test-hold` being value-taking by name, and exits 2 as an unknown flag to `build`, stdout empty, no hold file) |
-| T13.5-7 | section-13.5 | 48 |
+| T13.5-7 | section-13.5 | 48 (passes since Task 48 landed: every write primitive of `src/workspace/writes.ts` runs its filesystem mutations through `performWrite`, which turns a failure the filesystem reports into the typed `EnvironmentRefusal` of `src/workspace/environment-refusal.ts` — its 12.7 finding `write-failure`, concerning the file the write would have produced or removed, or `.xspec` for graph data — thrown at the write and rendered by `main`'s catch (`src/cli/main.ts`, `emitEnvironmentRefusal` in `src/cli/report.ts`) as exit 2 with the error document; and `rename` and `move` make their source writes in the preview's `files` order, a relocation producing the destination and then removing the origin (`orderSourceWrites` in `src/core/edits.ts`, `performSourceWrites` in `src/workspace/writes.ts`), so arm (d)'s refused origin removal leaves `src/app.ts` unrewritten — the file-form move had removed the origin only after every rewrite) |
 | T14-2 | section-14 | 6 (passes since Task 6 landed) |
 | T14-4 | section-14 | 51 |
-| T14-6 | section-14 | 48, 49 (since Task 12 its early-error stagings hold; it stops first at the 14.24 arm, Task 48) |
+| T14-6 | section-14 | 48, 49 (since Task 12 its early-error stagings hold, and since Task 48 its 14.24 arm — `build --json` on the stale workspace with `.xspec` unwritable exits 2 with the `write-failure` document; it stops at the 14.25 arm, Task 49: `build --json` with `specs/sub` unlistable exits 70, `internal error: EACCES … scandir`) |
 | T14-7 | section-14 | 22, 23, 24, 25, 35 (passes since Task 35 landed: its invalid-rewrite arms, T6.5-16's refused arms minus the collision arm, report the one `refused-invalid-rewrite`; its moved-import, invalid-path, and exact self-move arms, run after them, hold — the self-moves' would-be texts, judged, are well-formed, so `refused-identity-unchanged` stays alone) |
-| T14-9 | section-14-ii | 48 |
+| T14-9 | section-14-ii | 48 (passes since Task 48 landed: each arm's refused write exits 2 with the `write-failure` document and a stderr diagnostic, the concerned path the refused file's — `specs/b/B.mdx`, `.xspec/journal`, a Markdown file under `out/specs`, `specs/A.mdx` for the origin removal, `specs/sub/B.mdx` for the destination's production, `.xspec/reviews/s.json`, a derived path under `specs/b/` — and every refreshing read and `review create` on the stale workspace with `.xspec` unwritable reports `.xspec`, while `check`, `inventory`, `version`, and the previews write nothing) |
 | T14-10 | section-14-ii | 49, 50 |
 | T14-11 | section-14 | 13, 14, 15, 16, 68 (Tasks 12–16 landed: every table arm holds — (a)–(m) and (p)–(w), (h)'s repeated `id` locating both spellings, [36,44) and [45,54), since Task 15, and (j)'s and (u)'s colliding declarations beside their imports since Task 16; it stops first at arm (n), run after the table's arms, which waits on Task 68: probed by hand, its 14.17 locates both `d` attributes since Task 15, while the second spelling's unresolved `"absent"` reports no 14.5) |
 | T14-12 | section-14-iii | 14 (passes since Task 14 landed) |
@@ -167,45 +167,9 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 
 ---
 
-## Task 48 — A write the environment refuses is condition 24: exit 2 with the `write-failure` error document (SPEC 14.24, 13.5, 13.3, 12.0, 12.7; C6)
-
-**Requirement.** SPEC 14.24 covers every write xspec makes that the environment refuses: a file's creation, replacement, append, relocation, or removal. It is reported "by the command making the write — `build` (12.1), `rename` and `move` (6.4, 6.5), the refreshing reads of 13.3, and the mutating `review` subcommands (10.7, 13.5) — as a usage error (12.0), not a finding".
-- The command stops at the refused write: it attempts no later write, leaves every earlier write complete (13.5), and exits 2.
-- The concerned path is the file the write would have produced or removed. A relocation is two writes, each with its own path. A graph-data write concerns the graph-data area, `.xspec`.
-- The stable code is `write-failure`.
-- `check`, and every other command that writes nothing, never reports it.
-
-**Observed.** `CONDITION_CODES` (`src/core/findings.ts` ~57–81) stops at 23. Every refused write ends in exit 70 ("internal error: EACCES") with no error document:
-- `build`, with a derived directory unwritable;
-- the refreshing reads `ids`, `query nodes`, and `view`, with `.xspec` unwritable;
-- `rename`, with the source directory unwritable, and again with the journal unwritable after the source edits;
-- a file-form `move` failing at the origin's removal;
-- `review resolve` and `review create`, with the session directory unwritable.
-
-The write order itself matched 13.5 in every staging.
-
-**Location.**
-- `src/core/findings.ts`: the code table and the `ConditionNumber` type.
-- `src/workspace/writes.ts`: every write helper — `writeDerivedFile`, `writeSourceFile`, `removeSourceFile`, `removeDerivedFile`, `writeDurableFile`, `appendDurableFile`, and the temp-file-plus-rename path.
-- The graph-data and session writers.
-- `src/cli/main.ts`: the exit-70 catch.
-- `src/cli/report.ts`: the error document.
-
-**Change.**
-- Add conditions 24 (`write-failure`) and 25 (`read-failure`) to the code table. Task 49 also uses 25.
-- Turn any errno a write raises into a typed write-failure error carrying the workspace-relative concerned path (`.xspec` for graph data). Propagate it to the CLI and render the 12.7 error document: exit 2, and stdout empty without `--json`.
-- Keep earlier writes and attempt no later ones.
-- A hold file that cannot be created stays 13.5's usage error, not this condition.
-
-**Verification.**
-- `section-13.5.test.ts` (T13.5-7), `section-14-ii.test.ts` (T14-9), and `section-14.test.ts` (T14-6's condition-24 arm).
-- `section-12.7.test.ts` (T12.7-3's Linux-leg 14.24 arm: `build --json` on a stale workspace with `.xspec` unwritable reports `{"code": "write-failure", "path": ".xspec"}`, exit 2; its 14.25 arm after it waits on Task 49).
-- These tests need the unprivileged namespace; AGENTS.md explains why.
-- Neighbours: `section-6.4.test.ts`, `section-10.7-ii.test.ts`, `section-12.1-12.2.test.ts`, `section-13.3.test.ts`.
-
 ## Task 49 — A refused read of a directory listing or occupant kind is condition 25: exit 2 with `read-failure` (SPEC 14.25, 12.0, 7, 10.1, 11.6; C7(b), C7(c))
 
-After Task 48.
+Task 48 has landed, and its machinery is this task's to reuse: `EnvironmentRefusal` in `src/workspace/environment-refusal.ts` is the typed error carrying the refusal's 12.7 finding (`pathFinding(24, …)` built by `writeFailure`; conditions 24 and 25 are both in `CONDITION_CODES`, and `codeExitClass` gives both exit class 2), `isFilesystemFailure` tells a failure the filesystem reports (an errno `code` beside a `syscall`) from a product defect, and `src/cli/main.ts` catches the error around `dispatchInWorkspace` — the configuration location (`locateWorkspace`), both store-backed fast paths, the configuration parse, and every handler — rendering it through `emitEnvironmentRefusal` in `src/cli/report.ts`, whose stderr line already reads `read failure` for a `read-failure` finding. A `readFailure` factory beside `writeFailure` (`pathFinding(25, …)`) thrown at each refused read is all the rendering needs. The write layer's occupant classifications (`classifyOccupant`'s `lstat` in `assertUnobstructedParent`, `obstructedComponentOf`, `requireDurableWritable`, and a removal's occupant check) are reads, deliberately kept outside `performWrite`, so a refused one still exits 70 until this task: SPEC 14.25 makes a path occupant's kind refused wherever xspec examines one this condition.
 
 **Requirement.** SPEC 14.25 treats these refused reads as condition 25, a usage error, "like a write failure":
 - "a directory discovery lists (7)";
@@ -225,7 +189,7 @@ The command stops at the read and exits 2. The error document carries the code `
 - `src/workspace/locate.ts`: the upward search and the named path's kind read. Since Task 36, `occupantOf` classifies both by `lstat`, treats only `ENOENT` and `ENOTDIR` as absence, and rethrows every other errno, which reaches `src/cli/main.ts`'s exit-70 catch (hand-probed: a working directory under an ancestor staged `chmod 0` inside one `unshare` invocation exits 70 with `EACCES ... lstat`, where it had loaded the configuration above).
 - The anchoring helpers.
 
-**Change.** At these reads, treat only `ENOENT` and `ENOTDIR` as absence. Every other errno raises a typed read-failure error carrying the concerned path, rendered with Task 48's machinery.
+**Change.** At these reads, treat only `ENOENT` and `ENOTDIR` as absence. Every other errno raises the typed refusal (`EnvironmentRefusal`) carrying the `read-failure` finding and the concerned path, rendered by Task 48's catch in `main`.
 
 **Verification.**
 - `section-14-ii.test.ts`: T14-10's directory arms (T14-10 also waits on Task 50).

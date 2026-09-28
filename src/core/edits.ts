@@ -8,6 +8,7 @@
 // that produce them live in ./rename.ts and ./move.ts.
 
 import type { ByteRange } from "./bytes.js";
+import { compareBytes } from "./bytes.js";
 
 /** One in-place edit: replace the bytes of `range` with `replacement`. */
 export interface SourceEdit {
@@ -21,6 +22,67 @@ export interface SourceRewrite {
   readonly path: string;
   /** The file's complete rewritten bytes (SPEC 6.4/6.5: edits applied). */
   readonly content: Uint8Array;
+}
+
+/**
+ * One source write of a rewriting operation (SPEC 6.4, 6.5, 13.5): a file's
+ * complete new bytes at its path, or the removal of a relocation's origin.
+ */
+export type SourceWrite =
+  | {
+      readonly kind: "write";
+      readonly path: string;
+      readonly content: Uint8Array;
+    }
+  | { readonly kind: "remove"; readonly path: string };
+
+/**
+ * A file-form move's relocation (SPEC 6.5): the moved file produced at the
+ * destination, then the origin removed.
+ */
+export interface Relocation {
+  readonly origin: string;
+  readonly destination: string;
+}
+
+/**
+ * SPEC 13.5: the order of a rewriting operation's source writes — one write
+ * per file the operation rewrites, relocates, or creates, in the order the
+ * preview's `files` lists them (6.6, 12.7: by the file's current,
+ * pre-operation path bytes — a relocated file's entry under its origin
+ * path, a created file's under the path its creation occupies), a
+ * relocation producing the destination and then removing the origin. A
+ * command stopped by a refused write (14.24) therefore leaves exactly the
+ * writes before it in this order, each complete.
+ */
+export function orderSourceWrites(
+  rewrites: readonly SourceRewrite[],
+  relocation: Relocation | null,
+): SourceWrite[] {
+  if (
+    relocation !== null &&
+    !rewrites.some((rewrite) => rewrite.path === relocation.destination)
+  ) {
+    // Unreachable: a file-form move always produces its destination (SPEC
+    // 6.5). Guarded so the origin's removal can never go unordered.
+    throw new Error(
+      "xspec internal error: a relocation without the destination's write",
+    );
+  }
+  const entries = rewrites.map((rewrite) => {
+    const write: SourceWrite = {
+      kind: "write",
+      path: rewrite.path,
+      content: rewrite.content,
+    };
+    if (relocation !== null && rewrite.path === relocation.destination) {
+      const removal: SourceWrite = { kind: "remove", path: relocation.origin };
+      return { key: relocation.origin, writes: [write, removal] };
+    }
+    return { key: rewrite.path, writes: [write] };
+  });
+  entries.sort((a, b) => compareBytes(a.key, b.key));
+  return entries.flatMap((entry) => entry.writes);
 }
 
 const encoder = new TextEncoder();

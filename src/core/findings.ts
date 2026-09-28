@@ -22,7 +22,7 @@ import { comparePathTexts } from "./path-text.js";
  */
 export type ExitCode = 0 | 1 | 2;
 
-/** SPEC 14: the defined error conditions, numbered 1–23. */
+/** SPEC 14: the defined error conditions, numbered 1–25. */
 export type ConditionNumber =
   | 1
   | 2
@@ -46,7 +46,9 @@ export type ConditionNumber =
   | 20
   | 21
   | 22
-  | 23;
+  | 23
+  | 24
+  | 25;
 
 /**
  * SPEC 14: the numbered conditions' stable code tokens, listed in condition
@@ -78,6 +80,8 @@ export const CONDITION_CODES = [
   "corrupt-session", // 14.21
   "obstructed-write-path", // 14.22
   "unreadable-record", // 14.23
+  "write-failure", // 14.24 — a usage error (exit 2), never a finding
+  "read-failure", // 14.25 — a usage error (exit 2), never a finding
 ] as const;
 export type ConditionCode = (typeof CONDITION_CODES)[number];
 
@@ -210,11 +214,16 @@ export function codeOrdinal(code: FindingCode | null): number {
 /**
  * The exit class of a command reporting a finding with this code (SPEC
  * 12.0): 2 for condition 14, a usage error preceding all source analysis
- * (SPEC 14.14); 1 for every other finding, refusals and code-less findings
- * included.
+ * (SPEC 14.14), and for conditions 24 and 25, the environment's refusal of
+ * a write or a read — usage errors, never findings (SPEC 14.24, 14.25); 1
+ * for every other finding, refusals and code-less findings included.
  */
 export function codeExitClass(code: FindingCode | null): 1 | 2 {
-  return code === "configuration-error" ? 2 : 1;
+  return code === "configuration-error" ||
+    code === "write-failure" ||
+    code === "read-failure"
+    ? 2
+    : 1;
 }
 
 /**

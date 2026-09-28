@@ -19,6 +19,7 @@
 // then dispatch, exactly as before.
 
 import type { ExitCode } from "../core/findings.js";
+import { EnvironmentRefusal } from "../workspace/environment-refusal.js";
 import { locateWorkspace } from "../workspace/locate.js";
 import type { Invocation } from "./args.js";
 import { COMMAND_PATHS, jsonOutputInEffect, parseArgv } from "./args.js";
@@ -27,6 +28,7 @@ import { tryFastQuery } from "./commands/query-fast.js";
 import type { CliWriter, CommandContext } from "./io.js";
 import {
   emitConfigurationErrors,
+  emitEnvironmentRefusal,
   emitErrorDocument,
   usageErrorFinding,
 } from "./report.js";
@@ -257,17 +259,58 @@ export async function main(
       `no handler registered for command '${result.invocation.command}'`,
     );
   }
+  try {
+    return await dispatchInWorkspace(
+      result.invocation,
+      loadHandler,
+      cwd,
+      stdout,
+      stderr,
+    );
+  } catch (error) {
+    // SPEC 14.24/12.0: a write the environment refuses stops the command at
+    // that write — thrown there by the workspace write layer, so no later
+    // write was attempted and every earlier one stands complete (13.5) —
+    // and is a usage error, not a finding: exit 2, the diagnostic on
+    // standard error and, with JSON output in effect, the 12.7 error
+    // document carrying `write-failure` and the concerned path as the
+    // entire standard output. Every writing command answers only after its
+    // writes, so nothing of an answer precedes the document.
+    if (error instanceof EnvironmentRefusal) {
+      emitEnvironmentRefusal(
+        { stdout, stderr },
+        jsonOutputInEffect(result.invocation),
+        error.finding,
+      );
+      return 2;
+    }
+    throw error;
+  }
+}
+
+/**
+ * The workspace-bound part of an invocation: locate and load the
+ * configuration, then answer from a verified store or dispatch to the
+ * command's handler.
+ */
+async function dispatchInWorkspace(
+  invocation: Invocation,
+  loadHandler: () => Promise<CommandHandler>,
+  cwd: string,
+  stdout: CliWriter,
+  stderr: CliWriter,
+): Promise<ExitCode> {
   // SPEC 7/14.14: every command locates and loads the configuration —
   // upward search from the working directory, or the `--config <path>`
   // value resolved against it (12.0). A missing or invalid configuration
   // is a configuration error, reported as a usage error (exit 2) preceding
   // all source analysis — with JSON output in effect, the 12.7 error
   // document as the entire standard output (12.0).
-  const location = await locateWorkspace(cwd, result.invocation.config);
+  const location = await locateWorkspace(cwd, invocation.config);
   if (!location.ok) {
     emitConfigurationErrors(
       { stdout, stderr },
-      jsonOutputInEffect(result.invocation),
+      jsonOutputInEffect(invocation),
       location.concernedPath,
       location.findings,
     );
@@ -278,9 +321,9 @@ export async function main(
   // current workspace bytes (module header) — the recorded configuration
   // parse stands in for re-parsing, so a fast answer never needs the
   // parser. Anything unverified falls through to the full path below.
-  if (isQueryCommand(result.invocation.command)) {
+  if (isQueryCommand(invocation.command)) {
     const fast = await tryFastQuery(
-      result.invocation,
+      invocation,
       location.located,
       stdout,
       stderr,
@@ -295,13 +338,8 @@ export async function main(
   // refresh participation would write nothing and the answer equals the
   // full path's byte for byte (SPEC 12.0). Anything unverified falls
   // through to the full path below.
-  if (result.invocation.command === "at") {
-    const fast = await tryFastAt(
-      result.invocation,
-      location.located,
-      stdout,
-      stderr,
-    );
+  if (invocation.command === "at") {
+    const fast = await tryFastAt(invocation, location.located, stdout, stderr);
     if (fast !== null) {
       return fast;
     }
@@ -314,14 +352,14 @@ export async function main(
   if (!loaded.ok) {
     emitConfigurationErrors(
       { stdout, stderr },
-      jsonOutputInEffect(result.invocation),
+      jsonOutputInEffect(invocation),
       location.located.configAnchor,
       loaded.findings,
     );
     return 2;
   }
   const handler = await loadHandler();
-  return handler(result.invocation, {
+  return handler(invocation, {
     cwd,
     workspace: loaded.workspace,
     stdout,
