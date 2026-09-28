@@ -84,18 +84,22 @@ export type ConditionCode = (typeof CONDITION_CODES)[number];
 /**
  * SPEC 14: the refusal reasons of `rename`/`move` (6.4, 6.5), stable codes
  * in the order 14 lists them — the findings order after the numbered
- * conditions (12.7).
+ * conditions (12.7). Stable codes cover exactly the numbered conditions and
+ * these ten reasons, and no more (SPEC 14): every rewritten reference
+ * resolves by construction, so no reason exists for an unresolvable one
+ * (SPEC 6.4, 6.5).
  */
 export const REFUSAL_CODES = [
   "refused-invalid-id",
   "refused-identity-unchanged",
   "refused-id-collision",
   "refused-structural-parent",
-  "refused-unresolvable-reference",
   "refused-cycle",
   "refused-destination-exists",
   "refused-missing-target-parent",
   "refused-invalid-destination",
+  "refused-invalid-rewrite",
+  "refused-moved-import",
 ] as const;
 export type RefusalCode = (typeof REFUSAL_CODES)[number];
 

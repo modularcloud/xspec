@@ -22,15 +22,22 @@
 // inputs, probed by the workspace layer (workspace/writes.ts) over exactly
 // the paths `assessDestinationPath` names.
 //
-// The would-be reasons — `refused-cycle` and
-// `refused-unresolvable-reference` — are evaluated over the post-operation
-// workspace modeled in identity space (the current graph's nodes, edges,
-// and occurrences with the operation's identity mapping applied, the
-// section form's re-parenting included), never by reanalyzing rewritten
-// text: the findings locate the participating reference spellings and
-// import declarations at their CURRENT, pre-operation coordinates (SPEC
-// 14: a refusal renders as precisely as a finding; 6.6: previews report in
-// current, pre-operation coordinates).
+// The would-be reason `refused-cycle` is evaluated over the
+// post-operation workspace modeled in identity space (the current graph's
+// nodes, edges, and occurrences with the operation's identity mapping
+// applied, the section form's re-parenting included), never by
+// reanalyzing rewritten text: the findings locate the participating
+// reference spellings and import declarations at their CURRENT,
+// pre-operation coordinates (SPEC 14: a refusal renders as precisely as a
+// finding; 6.6: previews report in current, pre-operation coordinates).
+//
+// SPEC 14's ten reasons are the whole refusal vocabulary: every rewritten
+// reference resolves by construction, so no reason exists for one that
+// would not (SPEC 6.4, 6.5). A moved reference to the target file's own
+// root — which neither form could spell there: the local form names IDs
+// of its own file (2.2), the imported form would be a self-import (2.1) —
+// makes the moved node depend on its own ancestor, so the move is refused
+// as that would-be dependency cycle (SPEC 5.3), `refused-cycle`.
 
 import type { ByteRange } from "./bytes.js";
 import { sortByBytes } from "./bytes.js";
@@ -909,11 +916,10 @@ export interface MoveSectionRefusalInputs {
  * (SPEC 6.5, 14) over a workspace passing `build`'s validations: the
  * mirrored identity checks (intrinsic form, identity change, collisions
  * after the removal), the target parent, the destination occupancy and
- * validity, the would-be cycles (dependency and spec-import), and the
- * rewritten references that could not resolve (a moved reference
- * targeting the target file's root node — the local form names IDs of its
- * own file, never the file's root, SPEC 2.2, and the imported form would
- * be a self-import cycle, SPEC 2.1).
+ * validity, and the would-be cycles (dependency and spec-import). No
+ * reason exists for an unresolvable rewritten reference (SPEC 6.4, 14):
+ * a moved reference targeting the target file's root node is refused as
+ * the dependency cycle it closes (the module header).
  */
 export function evaluateMoveSectionRefusals(
   inputs: MoveSectionRefusalInputs,
@@ -1050,38 +1056,6 @@ export function evaluateMoveSectionRefusals(
   const withinMovedRange = (range: ByteRange): boolean =>
     range.start >= movedSection.range.start &&
     range.end <= movedSection.range.end;
-
-  // SPEC 14 `refused-unresolvable-reference`: a rewritten reference would
-  // not resolve — a reference within the moved subtree targeting the
-  // target file's root node: at the target, the local form names IDs of
-  // its own file, never the file's root (SPEC 2.2), and the imported form
-  // would be a self-import (SPEC 2.1) — locating each such reference
-  // spelling.
-  const unresolvable: FindingLocation[] = [];
-  for (const occurrence of graph.occurrences) {
-    if (occurrence.source === null) continue;
-    if (graph.requirementNode(occurrence.source) === undefined) continue;
-    if (occurrence.file !== originPath) continue;
-    if (!withinMovedRange(occurrence.range)) continue;
-    if (map(occurrence.target) === targetPath) {
-      unresolvable.push({ file: occurrence.file, range: occurrence.range });
-    }
-  }
-  if (unresolvable.length > 0) {
-    findings.push(
-      refusalFinding(
-        "refused-unresolvable-reference",
-        `unresolvable rewritten reference: the located reference ` +
-          `spellings within the moved subtree target the target file's ` +
-          `root node — after the move no rewrite of them could resolve: ` +
-          `the local form names IDs of its own file, never the file's ` +
-          `root (SPEC 2.2), and the imported form would be a self-import ` +
-          `(SPEC 2.1) — retarget those references or choose another ` +
-          `target file (SPEC 6.5, 14)`,
-        { locations: unresolvable },
-      ),
-    );
-  }
 
   // SPEC 14 `refused-cycle`: the would-be dependency graph — the moved
   // root re-parented from its current parent to the target parent (the

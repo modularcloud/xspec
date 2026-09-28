@@ -599,8 +599,9 @@ async function runMoveSection(
 
   // SPEC 6.5/14: evaluate every applicable refusal reason together over
   // the valid workspace — the mirrored identity checks, the target
-  // parent, destination occupancy and validity, would-be cycles, and
-  // unresolvable rewritten references, one finding per reason — and
+  // parent, destination occupancy and validity, and would-be cycles, one
+  // finding per reason (no reason exists for an unresolvable rewritten
+  // reference: each resolves by construction, SPEC 6.4) — and
   // refuse (exit 1) with the 12.7 findings report, nothing modified. The
   // destination probes run only where no discovered spec source occupies
   // the target path (a discovered target raises no occupancy or validity
@@ -685,10 +686,11 @@ async function runMoveSection(
   }
   if (rewritten.findings.length > 0) {
     // Unreachable: the refusal evaluation above (core/refusal.ts) realizes
-    // every reason a move can be refused for — would-be cycles and
-    // unresolvable rewritten references included — so a validated plan
-    // leaves a valid workspace. Guarded so a regression refuses (exit 1,
-    // nothing modified) rather than corrupts.
+    // every reason a move can be refused for — would-be cycles included,
+    // a moved reference to the target file's own root among them — and
+    // every rewritten reference resolves by construction (SPEC 6.4, 6.5),
+    // so a validated plan leaves a valid workspace. Guarded so a
+    // regression refuses (exit 1, nothing modified) rather than corrupts.
     return emitFindingsRefusal(
       false,
       invocation.json,
