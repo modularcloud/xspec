@@ -57,18 +57,18 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T6.2-1 | section-6.2 | 3 (passes since Task 3 landed) |
 | T6.2-2 | section-6.2 | 3 (passes since Task 3 landed) |
 | T6.4-3 | section-6.4 | 22 (passes since Task 22 landed) |
-| T6.5-6 | section-6.5 | 26 |
+| T6.5-6 | section-6.5 | 26 (passes since Task 26 landed: the kept-ID move's preview reports the origin's `origin-deletion` and the target's `target-insertion` alone, no `id-rewrite` or `reference-rewrite` for the unchanged `id='x.c'`, `id="x"`, `id="x.u"`, and `d={"x.c"}`) |
 | T6.5-7 | section-6.5 | 30 |
 | T6.5-8 | section-6.5 | 28 (since Task 29 its first failing arm is the TS arm: the added code import carries a `;`) |
 | T6.5-9 | section-6.5 | 32 |
 | T6.5-10 | section-6.5 | 29 (passes since Task 29 landed, with Task 10) |
 | T6.5-11 | section-6.5-ii | 28, 30, 31 |
-| T6.5-13 | section-6.5-iii | 26 (since Task 29 its arms (a)–(h) hold; it stops first at arm (i)'s preview, an `id-rewrite` reported for the unchanged `id="m"` of a cross-file move keeping its ID) |
+| T6.5-13 | section-6.5-iii | 26 (passes since Task 26 landed; since Task 29 its arms (a)–(h) had held and it had stopped first at arm (i)'s preview, an `id-rewrite` reported for the unchanged `id="m"` of a cross-file move keeping its ID) |
 | T6.5-15 | section-6.5-iii | 34 (since Task 10 arm (a)'s three lines derive as one block; it stops first at (a)'s preview, which reports A's declaration removed) |
 | T6.5-16 | section-6.5-iii | 11, 35 (since Task 11 the stock pairing rejects arm (a)'s would-be target, so the move is no longer performed: it stops at its own re-validation of the rewritten workspace, exit 1 with the would-be file's 14.20 — `got ["14.20"]` — where the single `refused-invalid-rewrite` is required) |
 | T6.5-17 | section-6.5-iii | 25 (passes since Task 25 landed: each refused arm reports the single `refused-moved-import` locating each declaration's own characters, `refused-invalid-id` beside it in (d), previewed alike; the control (e) is performed as composed) |
 | T6.5-18 | section-6.5-iii | 33 |
-| T6.5-19 | section-6.5-iii | 26 (since Task 29 arm (a) holds and (b)'s bytes agree; it stops first at (b)'s preview, an `id-rewrite` reported for the unchanged `id="m"`) |
+| T6.5-19 | section-6.5-iii | 26 (passes since Task 26 landed; since Task 29 it had stopped first at arm (b)'s preview, an `id-rewrite` reported for the unchanged `id="m"`) |
 | T6.6-3 | section-6.6 | 23, 25, 35 (since Task 22 its `--preview` replays of T6.4-3's refusals hold, the invalid-ID arms included, and since Task 23 the file-form exact self-move arm, `refused-identity-unchanged` alone; it stops first at the replay of T6.5-16 arm (a)'s `body</S>` variant (a space after its opening tag), Task 35: the product reports `["14.20 x1"]` where the single `refused-invalid-rewrite` is required; the replays of T6.5-17's four refused arms, run after T6.5-16's, hold since Task 25 — hand-verified by driving the module's `expectRefusedArmPreviewTwin` over `M17_REFUSED_ARMS`, AGENTS.md's refusal-probing bullet) |
 | T6.6-4 | section-6.6 | 29 (passes since Task 29 landed, with Task 10) |
 | T7-1 | section-7-basics | 36 |
@@ -166,23 +166,6 @@ Several tasks have no failing test of their own: Task 27 (preview/real agreement
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 26 — A move rewrites and previews only spellings whose characters change (SPEC 6.5 "Reference spellings", 6.6; A17)
-
-**Requirement.** SPEC 6.5: "A rewrite is made, and reported (6.6), exactly when it changes the construct's characters". In particular, "a cross-file section move keeping its ID rewrites no `id` attribute and no local-form reference inside the moved text to a node of the moved subtree".
-
-**Observed.** A cross-file section move that keeps its ID reports `id-rewrite` and `reference-rewrite` edits for spellings it does not change. The bytes the real move writes are correct.
-
-**Location.**
-- `src/core/move.ts`: the section-form edit assembly and its `preview.add(…)` calls.
-- `src/core/preview.ts`.
-
-**Change.** Emit an edit and its preview entry only where the replacement differs from the current characters.
-
-**Verification.**
-- Should turn green: `section-6.5.test.ts` (T6.5-6).
-- `section-6.5-iii.test.ts`: T6.5-13 (it stops first at arm (i)'s preview, an `id-rewrite` for the unchanged `id="m"`) and T6.5-19 (arm (b)'s preview, likewise). Task 29's placement already writes the bytes those arms and their successors assert, as far as the run reached; if a later arm fails on another rule, name it and its SPEC rule in a new task.
-- Neighbours: `section-6.5-ii.test.ts`, `section-6.6.test.ts`.
 
 ## Task 27 — A preview succeeds exactly when the real operation would (SPEC 6.6; A22; the `72ad038` plan's Task 3)
 

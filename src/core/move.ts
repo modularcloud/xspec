@@ -1502,6 +1502,13 @@ export function planMoveSection(
     if (mapped === null) {
       continue;
     }
+    if (mapped === section.id) {
+      // SPEC 6.5: a rewrite is made, and reported (6.6), exactly when it
+      // changes the construct's characters — an `id` attribute already
+      // spelling its node's new ID (a cross-file section move keeping its
+      // ID) is neither rewritten nor reported.
+      continue;
+    }
     const attribute = section.idAttribute;
     if (attribute === null) {
       throw new Error(
@@ -1551,14 +1558,21 @@ export function planMoveSection(
           if (mappedLocal !== null) {
             // Within the moved subtree: stays local, re-identified by
             // prefix replacement, quote style preserved (SPEC 6.5, 6.4).
-            addInner({
-              range: reference.spelling.range,
-              replacement: jsStringLiteral(
-                mappedLocal,
-                reference.spelling.quote,
-              ),
-            });
-            preview.add(originPath, "reference-rewrite", occurrence);
+            // A rewrite is made, and reported (6.6), exactly when it
+            // changes the construct's characters (SPEC 6.5): a local-form
+            // spelling already naming its target's new ID — a cross-file
+            // move keeping its ID, read in the target file (2.2) — already
+            // resolves to the new identity: neither rewritten nor reported.
+            if (mappedLocal !== reference.target.idPath) {
+              addInner({
+                range: reference.spelling.range,
+                replacement: jsStringLiteral(
+                  mappedLocal,
+                  reference.spelling.quote,
+                ),
+              });
+              preview.add(originPath, "reference-rewrite", occurrence);
+            }
           } else if (!sameFile) {
             // A moved reference to a node staying behind: local → imported,
             // rooted at the target file's binding of the origin module
