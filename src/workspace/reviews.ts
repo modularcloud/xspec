@@ -33,23 +33,30 @@ import {
 } from "../core/review.js";
 import { isValidSessionName } from "../core/session-name.js";
 import {
-  classifyOccupant,
   describeOccupant,
+  probeOccupant,
   readableDirectory,
+  readableDirectoryEntries,
   writeDurableFile,
 } from "./writes.js";
 
 /** The extension a session file bears, byte-exact (SPEC 10.1, 12.0). */
 const SESSION_EXTENSION = ".json";
 
-/** The reviews directory's absolute path under the workspace root. */
-function reviewsAbsolutePath(root: string): string {
-  return path.join(root, ...REVIEWS_DIRECTORY.split("/"));
-}
-
 /** A session file's absolute path under the workspace root. */
 function sessionAbsolutePath(root: string, name: string): string {
-  return path.join(reviewsAbsolutePath(root), `${name}${SESSION_EXTENSION}`);
+  return path.join(root, ...sessionFilePath(name).split("/"));
+}
+
+/**
+ * The session directory's entry names (SPEC 10.1), once
+ * `sessionDirectoryHoldsSessions` has judged it listable. SPEC 14.25: a
+ * listing the environment refuses is the read failure concerning
+ * `.xspec/reviews` — the command making it stops there, exit 2 — never a
+ * directory holding no sessions; a directory gone since lists nothing.
+ */
+async function sessionDirectoryEntries(root: string): Promise<string[]> {
+  return readableDirectoryEntries(root, REVIEWS_DIRECTORY);
 }
 
 /**
@@ -63,7 +70,9 @@ function sessionAbsolutePath(root: string, name: string): string {
  * there (SPEC 10.7, 12.0) and nothing below it is read. The one judge
  * shared by every session read — `list`, the name-taking subcommands
  * (`status`, `next`, `show`, `export`, `resolve`, `split`), `create`'s
- * existing-name checks, `check`'s 14.21 sweep, and `inventory`.
+ * existing-name checks, `check`'s 14.21 sweep, and `inventory`. SPEC
+ * 14.25: a kind read the environment refuses here is the read failure
+ * concerning the path read (`readableDirectory`), never absence.
  */
 export async function sessionDirectoryHoldsSessions(
   root: string,
@@ -115,13 +124,7 @@ export async function listSessionNames(root: string): Promise<string[]> {
   if (!(await sessionDirectoryHoldsSessions(root))) {
     return [];
   }
-  const directory = reviewsAbsolutePath(root);
-  let entries: string[];
-  try {
-    entries = await fsp.readdir(directory);
-  } catch {
-    return [];
-  }
+  const entries = await sessionDirectoryEntries(root);
   const names: string[] = [];
   for (const entry of entries) {
     if (!entry.endsWith(SESSION_EXTENSION)) continue;
@@ -150,13 +153,7 @@ export async function listSessionFilePaths(root: string): Promise<string[]> {
   if (!(await sessionDirectoryHoldsSessions(root))) {
     return [];
   }
-  const directory = reviewsAbsolutePath(root);
-  let entries: string[];
-  try {
-    entries = await fsp.readdir(directory);
-  } catch {
-    return [];
-  }
+  const entries = await sessionDirectoryEntries(root);
   const fileNames = entries.filter((entry) => {
     if (!entry.endsWith(SESSION_EXTENSION)) return false;
     return isValidSessionName(entry.slice(0, -SESSION_EXTENSION.length));
@@ -184,12 +181,7 @@ export async function sessionOccupied(
   if (!(await sessionDirectoryHoldsSessions(root))) {
     return false;
   }
-  let entries: string[];
-  try {
-    entries = await fsp.readdir(reviewsAbsolutePath(root));
-  } catch {
-    return false;
-  }
+  const entries = await sessionDirectoryEntries(root);
   return entries.includes(`${name}${SESSION_EXTENSION}`);
 }
 
@@ -220,17 +212,15 @@ export async function loadSession(
   if (!(await sessionDirectoryHoldsSessions(root))) {
     return { state: "absent", name };
   }
-  let entries: string[];
-  try {
-    entries = await fsp.readdir(reviewsAbsolutePath(root));
-  } catch {
-    return { state: "absent", name };
-  }
+  const entries = await sessionDirectoryEntries(root);
   if (!entries.includes(entryName)) {
     return { state: "absent", name };
   }
   const absolute = sessionAbsolutePath(root, name);
-  const occupant = await classifyOccupant(absolute);
+  // SPEC 14.25: a session file's kind read the environment refuses is the
+  // read failure concerning the session file's path (`probeOccupant`) —
+  // where its refused content read, below, is condition 21.
+  const occupant = await probeOccupant(root, sessionFilePath(name));
   if (occupant === "absent") {
     return { state: "absent", name };
   }
@@ -245,11 +235,15 @@ export async function loadSession(
   try {
     bytes = await fsp.readFile(absolute);
   } catch (error) {
+    // SPEC 14.25 → 14.21: a session file the environment refuses to read
+    // is corrupt. The message names the filesystem's error code alone —
+    // never its own message, which carries the absolute path (SPEC 12.0).
+    const code = (error as NodeJS.ErrnoException).code ?? "an unknown error";
     return {
       state: "corrupt",
       name,
       finding: corruptSessionFinding(name, [
-        `the session file cannot be read: ${(error as Error).message}`,
+        `the session file cannot be read (${code}; SPEC 14.25)`,
       ]),
     };
   }

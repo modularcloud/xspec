@@ -52,6 +52,12 @@ export interface LoadedWorkspace {
    */
   readonly configAnchor: string;
   /**
+   * The workspace root in the anchoring form of 11.6, relative to the
+   * invocation working directory — the inventory's `root` (SPEC 11.6) and
+   * the concerned path of a refused read of the root directory (SPEC 14.25).
+   */
+  readonly rootAnchor: string;
+  /**
    * SHA-256 (hex) of the configuration file's exact bytes — the graph
    * data's recorded-parse key (SPEC 13.3; ./fast-read.ts).
    */
@@ -87,6 +93,7 @@ export function parseLocatedWorkspace(
       root: located.root,
       configFileName: located.configFileName,
       configAnchor: located.configAnchor,
+      rootAnchor: located.rootAnchor,
       configHash: sha256Hex(located.configBytes),
       configuration: parsed.configuration,
     },

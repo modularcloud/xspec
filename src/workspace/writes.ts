@@ -36,7 +36,17 @@
 // SPEC 13.4's read side shares the occupant classification: reads traverse
 // no non-directory component either, and `readableDirectory` is the one
 // judge of whether a read may list a workspace directory at all —
-// `readableOccupant`, over it, of what a read finds at a file's path.
+// `readableOccupant`, over it, of what a read finds at a file's path, and
+// `readableDirectoryEntries` the listing itself.
+//
+// SPEC 14.25: every one of those reads — a path occupant's kind wherever
+// xspec examines one (6.5, 7, 11.6, 13.4), a directory's entries — is made
+// through `probeOccupant` or `readableDirectoryEntries`, which read absence
+// as absence and turn any other failure the filesystem reports into the
+// typed read failure (./environment-refusal.ts) concerning the object's
+// workspace-relative path, thrown so the command stops at that read (exit
+// 2, SPEC 12.0). `classifyOccupant` stays the raw judgement beneath them,
+// for the readers whose refused read is a condition of their own.
 //
 // SPEC 14.24: a write the environment refuses — a file's creation,
 // replacement, append, relocation, or removal — stops the command making
@@ -57,7 +67,12 @@ import type { SourceWrite } from "../core/edits.js";
 import type { Finding } from "../core/findings.js";
 import { pathFinding } from "../core/findings.js";
 import type { RefusedWrite } from "./environment-refusal.js";
-import { isFilesystemFailure, writeFailure } from "./environment-refusal.js";
+import {
+  isFilesystemFailure,
+  performRead,
+  readFailure,
+  writeFailure,
+} from "./environment-refusal.js";
 
 /**
  * What occupies a filesystem path, judged by `lstat` — a symbolic link is
@@ -71,7 +86,12 @@ export type PathOccupant =
  * through a non-directory or looping component classifies as "absent" —
  * nothing occupies the path itself; the offending component is judged and
  * reported separately (SPEC 14.22, `obstructedWritePathFindings`; SPEC 6.5,
- * `nonDirectoryComponents`) — never a crash on the classifying read.
+ * `nonDirectoryComponents`) — never a crash on the classifying read. Any
+ * other failure is thrown as the filesystem reported it: the raw judgement,
+ * for the readers whose refused kind read is a condition of their own
+ * (SPEC 14.25: a derived file's kind that `check` compares, 14.10; the
+ * graph-data area's, 14.23); every other kind read goes through
+ * `probeOccupant`, which makes the refusal condition 25.
  */
 export async function classifyOccupant(
   absolute: string,
@@ -93,17 +113,25 @@ export async function classifyOccupant(
 }
 
 /**
- * Classify the occupant of a workspace-relative path — the `rename`/`move`
- * destination probes' entry (SPEC 6.5, core/refusal.ts). A path unreachable
- * through a non-directory or looping component classifies as "absent" like
- * every classification; the offending component reports separately through
- * `nonDirectoryComponents` (SPEC 6.5: `refused-invalid-destination`).
+ * Classify the occupant of a workspace-relative path (SPEC 13.4) — every
+ * kind read xspec makes of a path in the workspace, the `rename`/`move`
+ * destination probes' included (SPEC 6.5, core/refusal.ts). A path
+ * unreachable through a non-directory or looping component classifies as
+ * "absent" like every classification; the offending component reports
+ * separately (SPEC 6.5 `nonDirectoryComponents`, 14.22). SPEC 14.25: a kind
+ * read the environment refuses — permission denied, an I/O error — is the
+ * read failure concerning `rel`, thrown so the command stops at the read.
  */
 export async function probeOccupant(
   root: string,
   rel: string,
 ): Promise<PathOccupant> {
-  return classifyOccupant(absoluteOf(root, rel));
+  try {
+    return await classifyOccupant(absoluteOf(root, rel));
+  } catch (error) {
+    if (isFilesystemFailure(error)) throw readFailure(rel, "kind", error);
+    throw error;
+  }
 }
 
 /**
@@ -199,7 +227,7 @@ export async function obstructedComponentOf(
   rel: string,
 ): Promise<ObstructedComponent | null> {
   for (const component of directoryComponents(rel)) {
-    const occupant = await classifyOccupant(absoluteOf(root, component));
+    const occupant = await probeOccupant(root, component);
     if (occupant === "absent") return null;
     if (occupant !== "directory") return { component, occupant };
   }
@@ -218,14 +246,16 @@ export async function obstructedComponentOf(
  * (14.25's absence, never its refusal): no read lists through it, and the
  * caller reads nothing there. For `.xspec/reviews`, that is the session
  * directory holding no sessions (SPEC 10.1). Components above the
- * workspace root are unrestricted (SPEC 13.4) and never examined.
+ * workspace root are unrestricted (SPEC 13.4) and never examined. A kind
+ * read the environment refuses is the read failure concerning the
+ * component read (SPEC 14.25, `probeOccupant`).
  */
 export async function readableDirectory(
   root: string,
   rel: string,
 ): Promise<boolean> {
   for (const component of [...directoryComponents(rel), rel]) {
-    const occupant = await classifyOccupant(absoluteOf(root, component));
+    const occupant = await probeOccupant(root, component);
     if (occupant !== "directory") return false;
   }
   return true;
@@ -239,9 +269,11 @@ export async function readableDirectory(
  * occupant — nothing is read and the path holds nothing (14.25's absence,
  * never its refusal), so it classifies "absent" without being probed
  * through the component; otherwise the path's own occupant, judged by
- * `lstat` (`classifyOccupant`). For `.xspec/journal`, that is the journal
+ * `lstat` (`probeOccupant`). For `.xspec/journal`, that is the journal
  * below an area path holding no directory: empty (SPEC 6.1) and unoccupied
- * to the inventory (SPEC 11.6).
+ * to the inventory (SPEC 11.6). A kind read the environment refuses — the
+ * path's own or a component's — is the read failure concerning the path
+ * read (SPEC 14.25: the journal's and a session file's kind included).
  */
 export async function readableOccupant(
   root: string,
@@ -252,7 +284,27 @@ export async function readableOccupant(
   if (parent !== undefined && !(await readableDirectory(root, parent))) {
     return "absent";
   }
-  return classifyOccupant(absoluteOf(root, rel));
+  return probeOccupant(root, rel);
+}
+
+/**
+ * SPEC 13.4, 14.25: the entry names of the workspace directory at `rel`,
+ * as a read lists them — the caller has judged the directory listable
+ * (`readableDirectory`). A directory gone since lists nothing: its
+ * nonexistence is absence, never a refusal. A listing the environment
+ * refuses — permission denied, an I/O error — is the read failure
+ * concerning `rel`, thrown so the command stops at the read.
+ */
+export async function readableDirectoryEntries(
+  root: string,
+  rel: string,
+): Promise<string[]> {
+  return performRead(
+    rel,
+    "listing",
+    () => fsp.readdir(absoluteOf(root, rel)),
+    () => [],
+  );
 }
 
 /** The SPEC 14.22 finding for one obstructed directory component. */
@@ -315,7 +367,7 @@ async function assertUnobstructedParent(
   rel: string,
 ): Promise<void> {
   for (const component of directoryComponents(rel)) {
-    const occupant = await classifyOccupant(absoluteOf(root, component));
+    const occupant = await probeOccupant(root, component);
     if (occupant === "absent") break; // mkdir supplies the rest
     if (occupant === "symlink") {
       throw new Error(
@@ -548,7 +600,7 @@ export async function removeDerivedFile(
 ): Promise<void> {
   if ((await obstructedComponentOf(root, rel)) !== null) return;
   const absolute = absoluteOf(root, rel);
-  const occupant = await classifyOccupant(absolute);
+  const occupant = await probeOccupant(root, rel);
   if (occupant === "absent") return;
   await performWrite(rel, "remove", () =>
     fsp.rm(absolute, {
@@ -566,10 +618,10 @@ export async function removeDerivedFile(
  * is the terminal defense.
  */
 async function requireDurableWritable(
-  absolute: string,
+  root: string,
   rel: string,
 ): Promise<void> {
-  const occupant = await classifyOccupant(absolute);
+  const occupant = await probeOccupant(root, rel);
   if (occupant !== "absent" && occupant !== "file") {
     throw new Error(
       `cannot write the durable file ${rel}: its path is occupied by ` +
@@ -595,7 +647,7 @@ export async function writeDurableFile(
   await assertUnobstructedParent(root, rel);
   const absolute = absoluteOf(root, rel);
   await performWrite(rel, "write", () => createParentDirectories(absolute));
-  await requireDurableWritable(absolute, rel);
+  await requireDurableWritable(root, rel);
   await performWrite(rel, "write", () => replaceWithFile(absolute, content));
 }
 
@@ -622,9 +674,9 @@ export async function appendDurableFile(
   await assertUnobstructedParent(root, rel);
   const absolute = absoluteOf(root, rel);
   await performWrite(rel, "append", () => createParentDirectories(absolute));
-  await requireDurableWritable(absolute, rel);
+  await requireDurableWritable(root, rel);
   const bytes = Buffer.from(contentBytes(content));
-  if ((await classifyOccupant(absolute)) === "absent") {
+  if ((await probeOccupant(root, rel)) === "absent") {
     await performWrite(rel, "append", () => replaceWithFile(absolute, bytes));
     return;
   }

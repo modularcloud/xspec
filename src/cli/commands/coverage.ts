@@ -24,7 +24,7 @@ import type { ExitCode } from "../../core/findings.js";
 import type { Invocation } from "../args.js";
 import { flagPresent } from "../args.js";
 import type { CommandContext } from "../io.js";
-import { prepareGraphForRead } from "../prepare.js";
+import { analyzeGraphForRead, finishGraphForRead } from "../prepare.js";
 import { emitDocument, usageError } from "./common.js";
 
 /** One profile's report as JSON data (SPEC 8.2: the same information). */
@@ -90,9 +90,19 @@ export async function coverageCommand(
   const { stdout, stderr } = context;
   const { configuration } = context.workspace;
 
+  // SPEC 12.0: the configuration search and the discovery of 7 precede
+  // every error consulting them — a configuration error, a discovery-level
+  // one included (14.14), and a discovery read the environment refuses
+  // (14.25, thrown from the walk) are each met before the profile name is
+  // judged against the configuration.
+  const analyzed = await analyzeGraphForRead(invocation, context);
+  if (!analyzed.ok) {
+    return analyzed.exit;
+  }
+
   // SPEC 8.2/12.0: `coverage <name>` runs one profile; an unknown profile
-  // name is a usage error. A configuration-level check, preceding source
-  // analysis like its 14.14 counterparts.
+  // name is a usage error — an argument check, judged against the
+  // configuration, so it precedes the invalid-workspace report of 13.3.
   let profiles: readonly CoverageProfile[] = configuration.coverage;
   if (invocation.positionals.length > 0) {
     const name = invocation.positionals[0];
@@ -110,8 +120,12 @@ export async function coverageCommand(
     profiles = [named];
   }
 
-  // SPEC 13.3: refresh-on-read, then answer.
-  const prepared = await prepareGraphForRead(invocation, context);
+  // SPEC 13.3: the gate and refresh-on-read, then answer.
+  const prepared = await finishGraphForRead(
+    invocation,
+    context,
+    analyzed.analysis,
+  );
   if (!prepared.ok) {
     return prepared.exit;
   }

@@ -34,7 +34,6 @@ import {
 import { JOURNAL_PATH } from "../../core/journal.js";
 import type { PathText } from "../../core/path-text.js";
 import { comparePathTexts, pathTextJson } from "../../core/path-text.js";
-import { anchoredPathSpelling } from "../../workspace/anchor.js";
 import { discoverSources } from "../../workspace/discovery.js";
 import { readDerivedFileRecord } from "../../workspace/graph-data.js";
 import { journalOccupied } from "../../workspace/journal.js";
@@ -168,7 +167,11 @@ export async function inventoryCommand(
   const { configuration } = workspace;
 
   // SPEC 11.6: discovery — the walk and glob classification, no parsing.
-  const classification = await discoverSources(workspace.root, configuration);
+  const classification = await discoverSources(
+    workspace.root,
+    configuration,
+    workspace.rootAnchor,
+  );
 
   // SPEC 14.14: configuration errors keep their precedence — a
   // discovery-level configuration error (a file matched by both a spec and
@@ -227,10 +230,11 @@ export async function inventoryCommand(
   // SPEC 12.7: the ten-member inventory document form. The anchoring is
   // pure invocation input (SPEC 11.6, 12.0): the workspace root and the
   // configuration file relative to the invocation working directory in the
-  // canonical spelling (workspace/anchor.ts).
+  // canonical spelling (workspace/anchor.ts), each spelled once when the
+  // configuration was located (workspace/locate.ts).
   const document: JsonValue = {
     findings: findings.map(findingToJson),
-    root: anchoredPathSpelling(context.cwd, workspace.root),
+    root: workspace.rootAnchor,
     config: workspace.configAnchor,
     configuration: configurationViewJson(configuration),
     sources: sources.map((source): JsonObject => ({

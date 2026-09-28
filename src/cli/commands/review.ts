@@ -8,9 +8,14 @@
 // its exactly-one-of rule (SPEC 10.7), and its `--strategy` vocabulary are
 // the parser's, judged before the configuration is loaded (12.0's syntax
 // class); then, under workspace exclusivity with the `--test-hold` seam:
+//   0. the analysis of the current workspace — the configuration search
+//      and the discovery of 7 precede every error consulting them (SPEC
+//      12.0): a configuration error, a discovery-level one included, exits
+//      2 (14.14), and a discovery read the environment refuses stops the
+//      command (14.25, exit 2);
 //   1. `--coverage`: the named profile must be configured (SPEC 10.7 →
-//      12.0 "unknown profiles named in arguments", exit 2) — a
-//      configuration-level check preceding source analysis;
+//      12.0 "unknown profiles named in arguments", exit 2) — an argument
+//      check judged against the configuration, preceding the gate;
 //   2. `--base`: read the baseline — ref resolution and the journal
 //      prefix/replay (SPEC 6.3 → 12.0, exit 2) — preceding source
 //      validation;
@@ -107,6 +112,17 @@ async function runCreate(
   // syntax-class usage error reported before the configuration is loaded
   // and exclusivity acquired (SPEC 12.0, 13.5).
 
+  // SPEC 12.0, 14.14, 14.25: analyze the current workspace first — the
+  // configuration search and the discovery of 7 precede every error
+  // consulting them, so a configuration error (a discovery-level one
+  // included; exit 2) and a discovery read the environment refuses (exit
+  // 2, thrown from the walk) are met before the creation parameters are
+  // judged. Nothing is reported past this until the gate below.
+  const analyzed = await analyzeGraphForRead(invocation, context);
+  if (!analyzed.ok) {
+    return analyzed.exit;
+  }
+
   // SPEC 10.7: exactly one of `--base`, `--strategy audit`, `--coverage`
   // was given (the parser enforces the exclusivity); resolve the creation
   // parameters, fully (SPEC 10.7: the resolved commit identity; the
@@ -118,8 +134,8 @@ async function runCreate(
   let baselineRead: BaselineRead | undefined;
   if (profileName !== undefined) {
     // SPEC 10.7 → 12.0: an unknown profile named in arguments is a usage
-    // error — a configuration-level check preceding source analysis, as
-    // for `coverage <name>` (SPEC 8.2, 14.14).
+    // error — an argument check judged against the configuration, as for
+    // `coverage <name>` (SPEC 8.2), preceding the gate of 13.3.
     const profile = workspace.configuration.coverage.find(
       (candidate) => candidate.name === profileName,
     );
@@ -156,14 +172,9 @@ async function runCreate(
     parameters = { strategy: "audit" };
   }
 
-  // SPEC 13.3/14.14: analyze the current workspace (configuration errors
-  // exit 2), then the gate — with invalid sources, report the validation
+  // SPEC 13.3: the gate — with invalid sources, report the validation
   // errors, exit 1, nothing created (a `review` subcommand like any other);
   // the baseline content is not validated past it (module header).
-  const analyzed = await analyzeGraphForRead(invocation, context);
-  if (!analyzed.ok) {
-    return analyzed.exit;
-  }
   const { analysis } = analyzed;
   const assessed = await assessWorkspaceRead(workspace, analysis);
   if (assessed.kind === "findings") {

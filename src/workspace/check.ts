@@ -28,7 +28,9 @@ import {
   GRAPH_DATA_AREA,
   graphDataMatchesCurrent,
 } from "../core/graph-data.js";
+import { isFilesystemFailure } from "./environment-refusal.js";
 import type { DerivedFileRecord, LoadedGraphData } from "./graph-data.js";
+import type { PathOccupant } from "./writes.js";
 import { classifyOccupant, describeOccupant } from "./writes.js";
 
 const utf8Encoder = new TextEncoder();
@@ -45,6 +47,24 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
     if (a[index] !== b[index]) return false;
   }
   return true;
+}
+
+/**
+ * What occupies a derived-file path `check` compares (SPEC 14.10), judged
+ * by `lstat` (`classifyOccupant`), or "refused" where the environment
+ * refuses the kind read: SPEC 14.25 makes a derived file's content or kind
+ * that `check` compares condition 10, the path stale — never the read
+ * failure of condition 25, and never an internal error.
+ */
+async function comparedOccupant(
+  absolute: string,
+): Promise<PathOccupant | "refused"> {
+  try {
+    return await classifyOccupant(absolute);
+  } catch (error) {
+    if (isFilesystemFailure(error)) return "refused";
+    throw error;
+  }
 }
 
 /** SPEC 14.10: a stale generated file — names the file, instructs rebuild. */
@@ -141,7 +161,14 @@ export async function stalenessFindings(
 
   for (const file of outputs.files) {
     const absolute = absoluteOf(root, file.path);
-    const occupant = await classifyOccupant(absolute);
+    const occupant = await comparedOccupant(absolute);
+    if (occupant === "refused") {
+      // SPEC 14.25 → 14.10: a refused kind read leaves the path stale.
+      findings.push(
+        staleFinding(file.path, "cannot be examined — it does not match"),
+      );
+      continue;
+    }
     if (occupant === "absent") {
       findings.push(staleFinding(file.path, "is missing — it does not match"));
       continue;
@@ -162,8 +189,9 @@ export async function stalenessFindings(
     try {
       bytes = await fsp.readFile(absolute);
     } catch {
-      // Vanished between classification and read (SPEC 13.5 concurrency):
-      // it no longer matches.
+      // SPEC 14.25 → 14.10: content the environment refuses to read leaves
+      // the path stale — as does a file gone between classification and
+      // read (SPEC 13.5 concurrency): it no longer matches.
       findings.push(
         staleFinding(file.path, "cannot be read — it does not match"),
       );
@@ -192,8 +220,10 @@ export async function stalenessFindings(
   // (SPEC 14.10): it consults no readable record, and an unreadable record
   // records nothing (`outputs.orphans` is empty by construction,
   // `recordedPathsOf`).
+  // A remaining path whose kind the environment refuses to read is stale
+  // all the same (SPEC 14.25 → 14.10, `comparedOccupant`).
   for (const rel of outputs.orphans) {
-    if ((await classifyOccupant(absoluteOf(root, rel))) !== "absent") {
+    if ((await comparedOccupant(absoluteOf(root, rel))) !== "absent") {
       findings.push(orphanFinding(rel));
     }
   }

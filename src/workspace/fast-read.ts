@@ -40,7 +40,10 @@
 //
 // The fast path never writes (a verified store needs no refresh; SPEC
 // 13.3's refreshing reads write only when the store does not match), and
-// reads never modify anything (SPEC 13.4).
+// reads never modify anything (SPEC 13.4). A read the environment refuses
+// during verification (SPEC 14.25) falls back too: the full path makes its
+// reads in its own order and meets the refusal there, so the command's
+// outcome never depends on which path met it first.
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
@@ -54,6 +57,10 @@ import {
 } from "../core/graph-data.js";
 import { sha256Hex } from "../core/hash.js";
 import { discoverSources } from "./discovery.js";
+import {
+  EnvironmentRefusal,
+  isFilesystemFailure,
+} from "./environment-refusal.js";
 import type { LoadedGraphData } from "./graph-data.js";
 import { loadGraphData } from "./graph-data.js";
 import { readJournalBytes } from "./journal.js";
@@ -74,9 +81,24 @@ function absoluteOf(root: string, rel: string): string {
 /**
  * Load and verify the stored graph data against the current workspace
  * bytes (module header). Null — fall back to the full path — whenever
- * anything at all fails to verify.
+ * anything at all fails to verify, a read the environment refuses (SPEC
+ * 14.25) included.
  */
 export async function verifyStoreForRead(
+  located: LocatedWorkspace,
+): Promise<VerifiedStore | null> {
+  try {
+    return await verifyStore(located);
+  } catch (error) {
+    if (error instanceof EnvironmentRefusal || isFilesystemFailure(error)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** The verification of `verifyStoreForRead`, in the module header's order. */
+async function verifyStore(
   located: LocatedWorkspace,
 ): Promise<VerifiedStore | null> {
   // 1. Store bytes: present, parseable, canonical — the snapshot file,
@@ -121,7 +143,11 @@ export async function verifyStoreForRead(
   }
 
   // 4. Discovery: the same walk the pipeline runs, then byte fingerprints.
-  const classification = await discoverSources(located.root, configuration);
+  const classification = await discoverSources(
+    located.root,
+    configuration,
+    located.rootAnchor,
+  );
   if (classification.findings.length > 0) {
     return null;
   }

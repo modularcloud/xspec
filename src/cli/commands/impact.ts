@@ -3,6 +3,11 @@
 //
 // Flow (SPEC 9, 6.3, 12.0, 13.3):
 //
+// 0. Analyze the current workspace (cli/prepare.ts `analyzeGraphForRead`):
+//    the configuration search and the discovery of 7 precede every error
+//    consulting them (SPEC 12.0) — a configuration error, a discovery-level
+//    one included, exits 2 before the baseline is read (14.14), and a
+//    discovery read the environment refuses stops the command (14.25).
 // 1. Read the baseline — resolve the ref, list the tree at it, and compute
 //    the journal prefix/replay (workspace/baseline.ts `readBaseline`). An
 //    unresolvable ref or a prefix/replay failure is a usage error, exit 2,
@@ -140,6 +145,17 @@ export async function impactCommand(
     throw new Error("xspec internal error: impact without --base");
   }
 
+  // SPEC 12.0, 14.14, 14.25: analyze the current workspace first — the
+  // configuration search and the discovery of 7 precede every error
+  // consulting them, and a configuration error (a discovery-level one
+  // included) precedes every other error of exit class 2, a baseline's
+  // included: a configuration error exits 2, and a discovery read the
+  // environment refuses stops the command at that read (exit 2).
+  const analyzed = await analyzeGraphForRead(invocation, context);
+  if (!analyzed.ok) {
+    return analyzed.exit;
+  }
+
   // SPEC 6.3/12.0: reading the baseline — ref resolution and the journal
   // prefix/replay — precedes source validation: an unresolvable ref or a
   // replay failure is a usage error (exit 2, stderr) even when the current
@@ -149,14 +165,9 @@ export async function impactCommand(
     return usageError(invocation, context, readResolution.message);
   }
 
-  // SPEC 13.3/14.14: analyze the current workspace (configuration errors
-  // exit 2), then the gate — on a workspace failing `build`'s validations,
+  // SPEC 13.3: the gate — on a workspace failing `build`'s validations,
   // the findings report alone, exit 1, nothing modified; the baseline
   // content is not validated past it (module header).
-  const analyzed = await analyzeGraphForRead(invocation, context);
-  if (!analyzed.ok) {
-    return analyzed.exit;
-  }
   const { analysis } = analyzed;
   const assessed = await assessWorkspaceRead(context.workspace, analysis);
   if (assessed.kind === "findings") {

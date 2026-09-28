@@ -167,7 +167,11 @@ export async function analyzeWorkspace(
   workspace: LoadedWorkspace,
 ): Promise<WorkspaceAnalysis> {
   const { root, configuration } = workspace;
-  const classification = await discoverSources(root, configuration);
+  const classification = await discoverSources(
+    root,
+    configuration,
+    workspace.rootAnchor,
+  );
   return analyzeWorkspaceContent(configuration, {
     classification,
     readSource: (rel) => readSourceBytes(root, rel),
