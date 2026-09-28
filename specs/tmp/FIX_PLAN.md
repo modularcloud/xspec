@@ -46,14 +46,14 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T2.7-4 | section-2.7 | 13, 14 (passes since Task 14 landed) |
 | T3-7 | section-3 | 10 (passes since Task 10 landed) |
 | T4-2 | section-4 | 6 (passes since Task 6 landed) |
-| T4-5 | section-4 | 16, 17 |
+| T4-5 | section-4 | 16, 17 (since Task 16 it waits on Task 17 alone: it stops first at its first arm, the type-only import collision — `actual ["14.15"]` where `["14.7","14.7","14.15"]` is expected) |
 | T4.4-1 | section-4.3-4.4 | 18 |
-| T4.5-8 | section-4.5 | 16 |
-| T4.5-9 | section-4.5 | 16, 17 |
+| T4.5-8 | section-4.5 | 16 (passes since Task 16 landed) |
+| T4.5-9 | section-4.5 | 16, 17 (since Task 16 its `function text` and `const text` cells and the type-alias control pass, visited by a per-cell diagnostic variant; it stops first at the first import-import arm's `SPEC.a` cell — Task 17: the three import-import arms' `SPEC.a` and `B.a` cells report no 14.18, their `"x"` cells pass) |
 | T4.6-1 | section-4.6 | 19 |
 | T4.6-3 | section-4.6 | 20 |
 | T5.5-5 | section-5.5 | 3 (passes since Task 3 landed) |
-| T5.7-4 | section-5.7 | 16, 17, 18 |
+| T5.7-4 | section-5.7 | 16, 17, 18 (since Task 16 `src/collide.ts`'s two 14.7s and `src/calltext.ts`'s 14.18 are reported; its collision premise still reports `14.7 x2` and `14.11 x2` where `14.7 x5` and `14.11 x1` are expected — `src/typed.ts`'s two chains, Task 17, and `textB(A.missing)` reported 14.11 for 14.7, Task 18) |
 | T6.2-1 | section-6.2 | 3 (passes since Task 3 landed) |
 | T6.2-2 | section-6.2 | 3 (passes since Task 3 landed) |
 | T6.4-3 | section-6.4 | 22 |
@@ -106,10 +106,10 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T14-7 | section-14 | 22, 23, 24, 25, 35 |
 | T14-9 | section-14-ii | 48 |
 | T14-10 | section-14-ii | 49, 50 |
-| T14-11 | section-14 | 13, 14, 15, 16, 68 (Tasks 12–15 landed: arms (a)–(i) hold — (h)'s repeated `id` locating both spellings, [36,44) and [45,54), since Task 15 — and, probed by hand, every 14.20 arm — (c), (m), (v), and the (w) family; it stops first at arm (j), the colliding declarator beside its import — Task 16; arm (n), run after the table's arms, waits on Task 68: probed by hand, its 14.17 locates both `d` attributes since Task 15, while the second spelling's unresolved `"absent"` reports no 14.5) |
+| T14-11 | section-14 | 13, 14, 15, 16, 68 (Tasks 12–16 landed: every table arm holds — (a)–(m) and (p)–(w), (h)'s repeated `id` locating both spellings, [36,44) and [45,54), since Task 15, and (j)'s and (u)'s colliding declarations beside their imports since Task 16; it stops first at arm (n), run after the table's arms, which waits on Task 68: probed by hand, its 14.17 locates both `d` attributes since Task 15, while the second spelling's unresolved `"absent"` reports no 14.5) |
 | T14-12 | section-14-iii | 14 (passes since Task 14 landed) |
 
-Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), Task 53 (a corrupt session in `review list`), Task 65 (a 14.20 offset inside a container's content more than 256 lines past the grammar's place, found while landing Task 63), Task 66 (a 14.20 offset past the blank line inside a flow tag's attribute expression on the line below a paragraph holding an open text element, found while landing Task 64), Task 67 (a 14.20 offset past the blank line after a brace line below a paragraph line holding an open text expression, found while landing Task 64), and Task 69 (a repeated prop's later spellings judged on their own — 14.4 per `id` or `tags` attribute and each spelling's own 14.17 — found while landing Task 15); Task 55 (a path beginning with U+FEFF, found while landing Task 9), Task 56 (container content the comment deletions empty but that holds a token, found while landing Task 13), Task 57 (the same for an attribute's content, which remark-mdx refused before calling acorn, found while landing Task 56), Task 58 (a 14.20 the grammar reports at a lazy line inside a flow construct's container, located since by the content before it, found while landing Task 57), and Task 59 (a 14.20 inside nested containers, whose content the fixed continuation prefixes could not collect, collected since with the prefix the content's own lines give, found while landing Task 58), Task 60 (a 14.20 tag-pairing offset after a line spelling part of the element's container prefix, probed since with that prefix's rests, and a hidden pairing failure located past a prefix's cut, found while landing Task 59), Task 61 (a 14.20 tag-pairing offset past a closing tag, typed on a line inside the element's container, that cannot pair — a prefix ending inside a tag judged since with the tag finished, found while landing Task 60), and Task 62 (a 14.20 offset at the start of a line that leaves a flow-position container's block container, where the grammar places the end of the file — located since past the container syntax that line still spells, a lone `>` a blank line of a list item in a block quote, found while landing Task 60), and Task 63 (a 14.20 offset past a brace that closes a flow expression whose content spans a blank line, text following the brace on its line — located since at the first character past the brace that the grammar rejects, found while landing Task 60), and Task 64 (a 14.20 offset past the blank line that follows a brace line below a paragraph holding an open text element — located since at that line's terminator, the bound the paragraph's text reading sets, the grammar's flow reading of the brace line never deriving, found while landing Task 62) have landed. Task 29 landed with Task 10: once ESM blocks were bounded as stock MDX 3 bounds them, T6.6-2's move (passing before) added its import at offset 0 of an origin whose first line is `<S id="org">`, the block absorbed that line, and the move's own validation of the rewritten workspace refused it — so additions now go at an admissible offset (`placeSpecImportAdditions` in `src/core/move.ts`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
+Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), Task 53 (a corrupt session in `review list`), Task 65 (a 14.20 offset inside a container's content more than 256 lines past the grammar's place, found while landing Task 63), Task 66 (a 14.20 offset past the blank line inside a flow tag's attribute expression on the line below a paragraph holding an open text element, found while landing Task 64), Task 67 (a 14.20 offset past the blank line after a brace line below a paragraph line holding an open text expression, found while landing Task 64), Task 69 (a repeated prop's later spellings judged on their own — 14.4 per `id` or `tags` attribute and each spelling's own 14.17 — found while landing Task 15), and Task 70 (a TypeScript `text(...)` call's unresolved or non-static argument located at the argument instead of the call, found while landing Task 16); Task 55 (a path beginning with U+FEFF, found while landing Task 9), Task 56 (container content the comment deletions empty but that holds a token, found while landing Task 13), Task 57 (the same for an attribute's content, which remark-mdx refused before calling acorn, found while landing Task 56), Task 58 (a 14.20 the grammar reports at a lazy line inside a flow construct's container, located since by the content before it, found while landing Task 57), and Task 59 (a 14.20 inside nested containers, whose content the fixed continuation prefixes could not collect, collected since with the prefix the content's own lines give, found while landing Task 58), Task 60 (a 14.20 tag-pairing offset after a line spelling part of the element's container prefix, probed since with that prefix's rests, and a hidden pairing failure located past a prefix's cut, found while landing Task 59), Task 61 (a 14.20 tag-pairing offset past a closing tag, typed on a line inside the element's container, that cannot pair — a prefix ending inside a tag judged since with the tag finished, found while landing Task 60), and Task 62 (a 14.20 offset at the start of a line that leaves a flow-position container's block container, where the grammar places the end of the file — located since past the container syntax that line still spells, a lone `>` a blank line of a list item in a block quote, found while landing Task 60), and Task 63 (a 14.20 offset past a brace that closes a flow expression whose content spans a blank line, text following the brace on its line — located since at the first character past the brace that the grammar rejects, found while landing Task 60), and Task 64 (a 14.20 offset past the blank line that follows a brace line below a paragraph holding an open text element — located since at that line's terminator, the bound the paragraph's text reading sets, the grammar's flow reading of the brace line never deriving, found while landing Task 62) have landed. Task 29 landed with Task 10: once ESM blocks were bounded as stock MDX 3 bounds them, T6.6-2's move (passing before) added its import at offset 0 of an origin whose first line is `<S id="org">`, the block absorbed that line, and the move's own validation of the rewritten workspace refused it — so additions now go at an admissible offset (`placeSpecImportAdditions` in `src/core/move.ts`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
 
 ---
 
@@ -167,37 +167,6 @@ Several tasks have no failing test of their own: Task 21 (the undefined refusal 
 
 ---
 
-## Task 16 — A value-level declaration colliding with a spec import binding is 14.15, and chains rooted at it resolve nothing (SPEC 2.4, 2.1, 4.5, 5.7, 14.15, 14.18; A10, C17)
-
-**Requirement.**
-- SPEC 2.4: an identifier bound by a spec module import and, in the same scope, by another binding roots no resolving chain. That other binding is "a non-import declaration binding it at value level: a variable, function, class, or enum declaration, or a namespace declaration binding a value; in a spec source, a declaration an export statement holds". Such a chain yields "no edge, no occurrence (5.7)", and its spelling reports as unresolved (14.5–14.7) beside the collision finding (14.15).
-- Type-level declarations (an interface, a type alias, a namespace binding no value) collide with nothing, and an inner-scope declaration shadows instead (4.5).
-- SPEC 14's location list for 14.15 locates each colliding non-import declaration by the construct binding the name. A variable declarator is located by its own characters, from its name or binding pattern through its initializer.
-- A call through a colliding `text` is no `text` call (4.5; 14.11's note): it records no `embeds` edge or occurrence, and a node passed to it is unsupported usage (14.18).
-
-**Observed.**
-- In a `.ts` file, beside `import BASE from "../specs/B.xspec"`, a colliding `const BASE = 1`, `let`, `function BASE() {}`, `class`, `enum`, or value namespace gives no finding, and `BASE.a` still resolves.
-- In a spec source, `export const BASE = 1` beside the import gives only 14.16, and `d={BASE.a}` still resolves.
-- `function text() {}` or `const text = …` beside a `text` import still records `embeds` edges and occurrences.
-
-**Location.**
-- `src/core/code-analysis.ts`: the import-binding table and the module-scope walker (~1022–1090, ~1575–1660).
-- `src/core/spec-references.ts`: spec-source bindings (~584–592).
-- `processEsm` in `src/core/mdx.ts`, which records an export statement only as 14.16.
-
-**Change.**
-- Collect the module scope's value-level declarations: every name a declarator's binding pattern binds, plus functions, classes, enums, and value namespaces; in a spec source, also every name an export statement declares.
-- Where one binds a spec import's identifier, report one 14.15 per collided identifier. It locates every colliding declaration: imports by their import ranges, other declarations per 14's rule.
-- Treat that binding as colliding:
-  - chains rooted at it are unresolved — 14.5 or 14.6 in spec sources, 14.7 in TypeScript — with no edge and no occurrence;
-  - calls through a colliding `text` are plain calls: no `embeds`, and 14.18 at a node argument.
-
-**Verification.**
-- Should turn green: `section-4.5.test.ts` (T4.5-8).
-- With Task 17: `section-4.5.test.ts` (T4.5-9), `section-4.test.ts` (T4-5). With Tasks 17 and 18: `section-5.7.test.ts` (T5.7-4).
-- `section-14.test.ts`: T14-11 arms (j) and (u).
-- Neighbours: `section-2.1.test.ts`, `section-4.6.test.ts`, `section-6.5.test.ts`.
-
 ## Task 17 — Import-import collisions leave chains unresolved and `text` calls unsupported, never silently dropped (SPEC 4.5, 2.4, 14.7, 14.18, 14.15, 14.11; A11)
 
 **Requirement.**
@@ -210,8 +179,8 @@ Several tasks have no failing test of their own: Task 21 (the undefined refusal 
 - `text(SPEC.a)` and `text(B.a)` through a colliding `text` omit the 14.18 at the node argument.
 
 **Location.**
-- `src/core/code-analysis.ts`: the `"poisoned"` binding kind and its masking checks. The `72ad038` plan located these at ~28, ~225, ~422–424, ~610, ~643, ~814, ~896–897, ~1157, ~1188, ~1205–1207, and "a poisoned callee masks its arguments" at ~1313–1315; the product is unchanged since.
-- `src/core/spec-references.ts`: the poisoned binding (~584–592) and `EmbeddingReference.reference === null` (~716–726).
+- `src/core/code-analysis.ts`: the `"poisoned"` binding kind and its masking checks — `scanModuleLinks`, which marks colliding imports `poisoned`, `visitIdentifier`, `isTextCallArgument` ("a poisoned callee masks its arguments"), `analyzeTextCall`, `visitExportSpecifiers`, and `visitImportEqualsUse`. Since Task 16 the file has a `"colliding"` binding kind carrying the import's `role`, which gives a value-level collision exactly this task's semantics (a chain in a marker or a `text` argument 14.7 at its would-be occurrence span, a call through a colliding `text` a plain call whose node argument the walk reports 14.18); `scanModuleLinks` builds one 14.15 per identifier covering both collision kinds, so marking an import-import collision `colliding` there (the role of its value-level spec binding, `"node"` where none has one) may suffice.
+- `src/core/spec-references.ts`: `analyzeSpecImports`, which marks an import-import collision `poisoned` and, since Task 16, an import/export collision `colliding`; `resolveClassified` reports a `colliding` root through its `unresolved` outcome (14.5 at a `d` reference's own expression, 14.6 at an embedding's braced container).
 
 **Change.**
 - Replace masking with unresolved reporting. A marker or chain rooted at a colliding identifier reports 14.7 in TypeScript, 14.5 in a `d` value, or 14.6 in a `text(...)` argument, at the spelling's own range, with no edge and no occurrence.
@@ -219,7 +188,7 @@ Several tasks have no failing test of their own: Task 21 (the undefined refusal 
 - Apply the same rule on the spec-source side, per 2.4; T14-12 stages two imports binding one identifier.
 - Keep the 14.15 findings as they are.
 
-**Verification.** With Task 16:
+**Verification.** Task 16 has landed, so these should turn green:
 - `section-4.test.ts` (T4-5);
 - `section-4.5.test.ts` (T4.5-9);
 - `section-5.7.test.ts` (T5.7-4, with Task 18 as well).
@@ -1012,6 +981,20 @@ The command stops at the read and exits 2. The error document carries the code `
 **Change.** Judge every spelling as if it stood alone: the value-form and invalid-value 14.17s, the unknown-prop 14.17, and 14.4 for an `id` or `tags` value violating 1.4. Record no interpreted value from a repeated name: the section spells no identity (11.2), its tags or coverage stay undefined, and its `d` spellings are Task 68's. Separate validation from recording in `processStringProp` (and `processDependencyProp`), so a later spelling reports without setting `section.id`, `idAttribute`, `tags`, or `coverage`. No test pins these counts: T2.7-3 asserts only the condition and window of a repeated unknown prop's findings, and every other staged repetition (T1.3-6, T6.4-4's `specs/Solo.mdx`, T11.2-2, T11.4-3, T14-11 (h) and (n)) spells valid values, so their counts hold.
 
 **Verification.** Hand-probe the Observed cases in both spelling orders: each spelling's own finding beside the one repetition finding. Run `section-1.3.test.ts`, `section-2.7.test.ts`, `section-6.4.test.ts`, `section-11.2.test.ts`, `section-11.4.test.ts`, and `section-14.test.ts`.
+
+## Task 70 — A TypeScript `text(...)` call's unresolved or non-static argument is located at the call, callee through closing parenthesis (SPEC 14, 5.7; found while landing Task 16)
+
+**Requirement.** SPEC 14: "A reference spelling — unresolved (14.5–14.7), non-static or of wrong arity (14.8), or cross-module (14.11) — is located by the span its occurrence occupies or would occupy, per kind (5.7): … a TypeScript `text(...)` call, callee through closing parenthesis". SPEC 5.7: "a TypeScript `text(...)` occurrence spans the entire call expression, callee through closing parenthesis, argument included".
+
+**Observed.** Probed at 2e7a9aa in a scratch workspace: `src/app.ts` holds `import SPEC, { text } from "../specs/A.xspec";`, a blank line, then `text(SPEC.missing);`, `text("x");`, and `` text(`x`); `` on their own lines; `specs/A.mdx` holds sections `a` and `b`. `build --json` reports the 14.7 at [53,65), the argument chain `SPEC.missing`, where the call spans [48,66); and each 14.8 at its literal alone, [73,76) and [84,87), where the calls span [68,77) and [79,88). Already located at the call: an optional call, type arguments, a wrong arity, a cross-module 14.11, and, since Task 16, a chain rooted at a colliding identifier.
+
+**Location.**
+- `src/core/graph.ts`: the two loops over `analysis.references` that report an unresolved reference's 14.7 at `reference.range`, for valid-path and for 14.19 code files. For an `embeds` reference, `reference.occurrenceRange` is the call; a marker's two ranges coincide.
+- `src/core/code-analysis.ts`, `analyzeTextCall`: the 14.8 findings located at `argument` (a spread element, a string literal, a template literal, a non-chain argument) and the undefined-member 14.7 located at `argument`.
+
+**Change.** Locate each of these findings at the call expression: `rangeOf(call)` in `analyzeTextCall`, and `occurrenceRange` for an `embeds` reference in the graph. Leave markers unchanged.
+
+**Verification.** No suite test pins these ranges: T4.3-2, T4.4-1's second facet, and T5.7-4's `src/cross.ts` findings assert windows that hold both the argument and the call. Hand-probe the Observed staging (each finding at its call) and an undefined-member call (an import of a spec source whose own path is invalid, 14.19). Run `section-4.3-4.4.test.ts`, `section-5.7.test.ts`, `section-14.test.ts`, `section-2.4.test.ts`, `section-11.3.test.ts`, and `section-12.1-12.2.test.ts`.
 
 ## Task 54 — Confirm the full suite and CI are green, record the state, and delete this file
 
