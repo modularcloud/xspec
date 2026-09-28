@@ -28,7 +28,11 @@
 // colliding imports, is masked by that import's 14.15. A chain rooted at
 // a shadowing local declaration or a type-only binding records no edge
 // and falls under no condition (SPEC 4.5); its value-level misuse is the
-// consumer's TypeScript error, outside xspec's validations.
+// consumer's TypeScript error, outside xspec's validations. An identifier
+// a spec module import binds at value level that a value-level
+// declaration of the module scope also binds roots no resolving chain
+// (SPEC 2.4, 4.5): beside the collision's 14.15, its chains report as
+// unresolved (14.7) and a call through it as `text` is a plain call.
 
 import ts from "./ts-module.js";
 import type * as tst from "typescript";
@@ -440,16 +444,59 @@ type TrackedBinding =
        * here are masked (SPEC 14).
        */
       readonly kind: "poisoned";
+    }
+  | {
+      /**
+       * SPEC 2.4, 4.5: an identifier a spec module import binds at value
+       * level — in `role` — that a value-level declaration of the module
+       * scope also binds. The language names no single binding, so a
+       * chain rooted here names no target: in a marker or a `text` call's
+       * argument it is unresolved (14.7), recording no edge and no
+       * occurrence (5.7), and a call through it as `text` is no `text`
+       * call (4.5). Its other uses are those of the role's binding.
+       */
+      readonly kind: "colliding";
+      readonly role: "node" | "text";
     };
 
-/** One import-bound identifier, for the collision rule (SPEC 4, 2.1). */
+/** One import-bound identifier, for the collision rules (SPEC 4, 2.1, 2.4). */
 interface BoundName {
   readonly name: string;
   /** The binding's declaration node (the checker resolves uses to it). */
   readonly declaration: tst.Node;
   /** Whether the binding's import is a spec module import. */
   readonly spec: boolean;
+  /**
+   * Whether this is a spec module import declaration's value-level
+   * binding — none introduced type-only (SPEC 4) — the binding a
+   * value-level declaration of the same scope collides with (SPEC 2.4).
+   */
+  readonly valueLevelSpec: boolean;
+  /**
+   * The binding's role where its form is a permitted one (SPEC 4): the
+   * default export ("node") or the `text` export ("text"); null for any
+   * other binding.
+   */
+  readonly role: "node" | "text" | null;
   readonly statement: tst.Statement;
+}
+
+/**
+ * One module-scope non-import declaration binding a name at value level
+ * (SPEC 2.4): a variable, function, class, or enum declaration, or a
+ * namespace declaration binding a value.
+ */
+interface ValueDeclaration {
+  readonly name: string;
+  /** The declaration node TypeScript binds the name to (use resolution). */
+  readonly declaration: tst.Node;
+  /** The construct binding the name, as a 14.15 locates it (SPEC 14, 1.7). */
+  readonly construct:
+    | tst.VariableDeclaration
+    | tst.FunctionDeclaration
+    | tst.ClassDeclaration
+    | tst.EnumDeclaration
+    | tst.ModuleDeclaration;
 }
 
 class CodeAnalyzer {
@@ -504,6 +551,18 @@ class CodeAnalyzer {
    */
   private literalValue(literal: tst.StringLiteral): string {
     return stringLiteralValue(literal, this.sourceFile);
+  }
+
+  /**
+   * The export a named import binding names — SPEC 2.4: a string-literal
+   * export name is read as spelled; an identifier names the export the
+   * language reads it as.
+   */
+  private importedName(element: tst.ImportSpecifier): string {
+    const exported = element.propertyName ?? element.name;
+    return ts.isStringLiteral(exported)
+      ? this.literalValue(exported)
+      : exported.text;
   }
 
   private addFinding(
@@ -644,17 +703,26 @@ class CodeAnalyzer {
         this.scanImportEquals(statement, bound);
       }
     }
-    // SPEC 4/2.1 → 14.15: no import may bind an identifier already bound
-    // by ANOTHER import, when either import is a spec module import — one
+    // SPEC 4/2.1/2.4 → 14.15: no import may bind an identifier already
+    // bound by ANOTHER import, when either import is a spec module import,
+    // and no spec module import's value-level binding may share its
+    // identifier with a value-level declaration of the module scope — one
     // condition the declarations jointly violate: ONE finding per collided
     // identifier, locating every colliding declaration (SPEC 14 location
-    // cardinality; no representative chosen), every colliding binding
-    // masked.
+    // cardinality; no representative chosen). Colliding imports alone are
+    // masked; an identifier a value-level declaration collides with roots
+    // no resolving chain (SPEC 2.4, 4.5).
     const byName = new Map<string, BoundName[]>();
     for (const entry of bound) {
       const entries = byName.get(entry.name);
       if (entries === undefined) byName.set(entry.name, [entry]);
       else entries.push(entry);
+    }
+    const declaredByName = new Map<string, ValueDeclaration[]>();
+    for (const declared of moduleValueDeclarations(this.sourceFile)) {
+      const entries = declaredByName.get(declared.name);
+      if (entries === undefined) declaredByName.set(declared.name, [declared]);
+      else entries.push(declared);
     }
     for (const [name, entries] of byName) {
       const statements: tst.Statement[] = [];
@@ -663,28 +731,105 @@ class CodeAnalyzer {
           statements.push(entry.statement);
         }
       }
-      // The collision is between imports (SPEC 4: "already bound by
-      // another import"): it needs two distinct declarations.
-      if (statements.length < 2 || !entries.some((entry) => entry.spec)) {
-        continue;
+      // The collision between imports (SPEC 4: "already bound by another
+      // import") needs two distinct declarations.
+      const importCollision =
+        statements.length >= 2 && entries.some((entry) => entry.spec);
+      // SPEC 2.4: the import's binding being value-level (4), a
+      // non-import declaration binding the identifier at value level in
+      // the same scope collides with it.
+      const declared = entries.some((entry) => entry.valueLevelSpec)
+        ? (declaredByName.get(name) ?? [])
+        : [];
+      const constructs: ValueDeclaration["construct"][] = [];
+      for (const entry of declared) {
+        if (!constructs.includes(entry.construct)) {
+          constructs.push(entry.construct);
+        }
       }
+      if (!importCollision && constructs.length === 0) continue;
+      const message =
+        constructs.length === 0
+          ? `invalid import: the identifier ${JSON.stringify(name)} is ` +
+            `bound by ${String(statements.length)} imports in this file — ` +
+            `no two imports may bind the same identifier when either is a ` +
+            `spec module import; rename all but one binding (SPEC 4, 2.1, ` +
+            `14.15)`
+          : `invalid import: the identifier ${JSON.stringify(name)} is ` +
+            `bound by ` +
+            (importCollision
+              ? `${String(statements.length)} imports`
+              : `a spec module import`) +
+            ` and by ` +
+            (constructs.length === 1
+              ? `a value-level declaration`
+              : `${String(constructs.length)} value-level declarations`) +
+            ` of the same module scope — the language names no single ` +
+            `binding, so no chain rooted at it resolves; rename the import ` +
+            `binding or the declaration (SPEC 2.4, 4.5, 14.15)`;
       this.findings.push(
-        locatedFinding(
-          15,
-          `invalid import: the identifier ${JSON.stringify(name)} is bound ` +
-            `by ${String(statements.length)} imports in this file — no two ` +
-            `imports may bind the same identifier when either is a spec ` +
-            `module import; rename all but one binding (SPEC 4, 2.1, 14.15)`,
-          statements.map((declaration) => ({
+        locatedFinding(15, message, [
+          ...statements.map((declaration) => ({
             file: this.file,
             range: this.rangeOf(declaration),
           })),
-        ),
+          ...constructs.map((construct) => ({
+            file: this.file,
+            range: this.collidingConstructRange(construct),
+          })),
+        ]),
       );
+      const role =
+        entries.find((entry) => entry.valueLevelSpec && entry.role !== null)
+          ?.role ?? null;
+      const binding: TrackedBinding =
+        constructs.length > 0 && role !== null
+          ? { kind: "colliding", role }
+          : { kind: "poisoned" };
       for (const entry of entries) {
-        this.declarations.set(entry.declaration, { kind: "poisoned" });
+        this.declarations.set(entry.declaration, binding);
+      }
+      if (binding.kind === "colliding") {
+        // Whichever symbol TypeScript resolves a use to — the import's
+        // merged with the declaration's, or the declaration's own export
+        // symbol — names the colliding identifier.
+        for (const entry of declared) {
+          this.declarations.set(entry.declaration, binding);
+        }
       }
     }
+  }
+
+  /**
+   * SPEC 14, 1.7: the construct binding a colliding declaration's name —
+   * a variable declarator by its own characters, its name or binding
+   * pattern through its initializer, the enclosing statement excluded; a
+   * function, class, enum, or namespace declaration by its own
+   * characters, a decorator list included and a leading `export` or
+   * `export default`, with whatever separates it from the construct's
+   * first token, excluded — only what leads, so `@dec export class C {}`
+   * spans whole from its `@`.
+   */
+  private collidingConstructRange(
+    construct: ValueDeclaration["construct"],
+  ): ByteRange {
+    if (ts.isVariableDeclaration(construct)) return this.rangeOf(construct);
+    const modifiers = construct.modifiers ?? [];
+    const first = modifiers.at(0);
+    if (first === undefined || first.kind !== ts.SyntaxKind.ExportKeyword) {
+      return this.rangeOf(construct);
+    }
+    const second = modifiers.at(1);
+    const cut =
+      second !== undefined && second.kind === ts.SyntaxKind.DefaultKeyword
+        ? second
+        : first;
+    return {
+      start: this.offsets.byteOffset(
+        firstTokenStartAfter(construct, cut.end, this.sourceFile),
+      ),
+      end: this.offsets.byteOffset(construct.getEnd()),
+    };
   }
 
   /**
@@ -708,33 +853,44 @@ class CodeAnalyzer {
     const spec = specifier.endsWith(XSPEC_SUFFIX);
     const clause = statement.importClause;
 
-    // Track every bound identifier for the collision rule (SPEC 4, 2.1).
+    // Track every bound identifier for the collision rules (SPEC 4, 2.1,
+    // 2.4): a binding introduced type-only is a type-level name (SPEC 4).
+    const track = (
+      name: string,
+      declaration: tst.Node,
+      typeOnly: boolean,
+      role: "node" | "text" | null,
+    ): void => {
+      bound.push({
+        name,
+        declaration,
+        spec,
+        valueLevelSpec: spec && !typeOnly,
+        role: spec ? role : null,
+        statement,
+      });
+    };
     if (clause !== undefined) {
       if (clause.name !== undefined) {
-        bound.push({
-          name: clause.name.text,
-          declaration: clause,
-          spec,
-          statement,
-        });
+        track(clause.name.text, clause, clause.isTypeOnly, "node");
       }
       const named = clause.namedBindings;
       if (named !== undefined) {
         if (ts.isNamespaceImport(named)) {
-          bound.push({
-            name: named.name.text,
-            declaration: named,
-            spec,
-            statement,
-          });
+          track(named.name.text, named, clause.isTypeOnly, null);
         } else {
           for (const element of named.elements) {
-            bound.push({
-              name: element.name.text,
-              declaration: element,
-              spec,
-              statement,
-            });
+            const imported = this.importedName(element);
+            track(
+              element.name.text,
+              element,
+              clause.isTypeOnly || element.isTypeOnly,
+              imported === "text"
+                ? "text"
+                : imported === "default"
+                  ? "node"
+                  : null,
+            );
           }
         }
       }
@@ -815,12 +971,7 @@ class CodeAnalyzer {
           );
         } else {
           for (const element of named.elements) {
-            // SPEC 2.4: a string-literal export name is read as spelled;
-            // an identifier names the export the language reads it as.
-            const exported = element.propertyName ?? element.name;
-            const imported = ts.isStringLiteral(exported)
-              ? this.literalValue(exported)
-              : exported.text;
+            const imported = this.importedName(element);
             const binding: CodeImportBinding = {
               name: element.name.text,
               typeOnly: clauseTypeOnly || element.isTypeOnly,
@@ -929,10 +1080,14 @@ class CodeAnalyzer {
     // SPEC 2.4: the specifier is read as spelled.
     const specifier = this.literalValue(expression);
     const spec = specifier.endsWith(XSPEC_SUFFIX);
+    // Not a spec module import (SPEC 4: only an import declaration is
+    // one), so no binding here is one a declaration collides with (2.4).
     bound.push({
       name: statement.name.text,
       declaration: statement,
       spec,
+      valueLevelSpec: false,
+      role: null,
       statement,
     });
     if (spec) {
@@ -1259,11 +1414,17 @@ class CodeAnalyzer {
       // and is no condition; a poisoned root is masked by its 14.15.
       return;
     }
-    if (binding.kind === "text") {
-      this.visitTextBindingUse(identifier, binding);
+    if (binding.kind === "colliding") {
+      // SPEC 2.4, 4.5: the uses of the role's binding, naming no target.
+      if (binding.role === "text") this.visitTextBindingUse(identifier, null);
+      else this.visitNodeBindingUse(identifier, null);
       return;
     }
-    this.visitNodeBindingUse(identifier, binding);
+    if (binding.kind === "text") {
+      this.visitTextBindingUse(identifier, binding.target);
+      return;
+    }
+    this.visitNodeBindingUse(identifier, binding.target);
   }
 
   /**
@@ -1271,11 +1432,12 @@ class CodeAnalyzer {
    * static chain in expression-statement position — or as the sole
    * argument of a call whose callee is a spec module's `text` export.
    * Everything else is 14.18 (or 14.8 for a non-static chain in marker
-   * position).
+   * position). A null `target` is a colliding identifier's (SPEC 2.4,
+   * 4.5): its static chain in marker position names no target (14.7).
    */
   private visitNodeBindingUse(
     identifier: tst.Identifier,
-    binding: { readonly kind: "node"; readonly target: SpecModuleTarget },
+    target: SpecModuleTarget | null,
   ): void {
     const use = climbUseExpression(identifier);
     const parent = use.parent;
@@ -1285,12 +1447,27 @@ class CodeAnalyzer {
       // is a dependency marker recording a `references` edge.
       const classified = classifyReference(use, this.sourceFile);
       if (classified.kind === "chain") {
-        if (binding.target.defined) {
+        if (target === null) {
+          // SPEC 2.4, 4.5 → 14.7: rooted at an identifier the language
+          // binds twice, the chain names no target — no edge, no
+          // occurrence (5.7) — located as its occurrence would be, the
+          // bare chain exclusive of the terminator (SPEC 14).
+          this.addFinding(
+            7,
+            use,
+            `unknown TypeScript reference: the marker's chain is rooted ` +
+              `at ${JSON.stringify(identifier.text)}, which a spec module ` +
+              `import and a value-level declaration of the same module ` +
+              `scope both bind — the language names no single binding, so ` +
+              `the chain names no target; resolve the collision (SPEC 2.4, ` +
+              `4.5, 14.7)`,
+          );
+        } else if (target.defined) {
           this.references.push(
             this.chainReference(
               "references",
               classified,
-              binding.target.path,
+              target.path,
               this.attributionOf(use),
             ),
           );
@@ -1303,7 +1480,7 @@ class CodeAnalyzer {
             use,
             `unknown TypeScript reference: the marker referencing ` +
               `${describeTargetChain(
-                binding.target,
+                target,
                 classified.segments.map((segment) => segment.name),
               )} ` +
               `does not resolve — ${UNDEFINED_TARGET_REASON} ` +
@@ -1363,22 +1540,28 @@ class CodeAnalyzer {
       this.checker.getSymbolAtLocation(callee),
     );
     // A poisoned callee masks its arguments too: the import's 14.15
-    // already accounts for the whole call (SPEC 14).
+    // already accounts for the whole call (SPEC 14). A colliding callee's
+    // call is no `text` call (SPEC 4.5): its arguments are ordinary uses.
     return binding?.kind === "text" || binding?.kind === "poisoned";
   }
 
   /**
    * SPEC 4.5: a `text` binding appears only as the callee of a call;
    * that call is an ordinary expression, valid in expression-statement
-   * position too, recording its `embeds` edge (4.3) — never a marker.
+   * position too, recording its `embeds` edge (4.3) — never a marker. A
+   * null `target` is a colliding identifier's (SPEC 2.4, 4.5): a call
+   * through it is no spec module's `text` call — no edge, no occurrence
+   * (5.7), no condition of a `text` call (7, 8, 11) — and the walk visits
+   * its arguments as those of any other call, where a spec module binding
+   * or node is used outside the sanctioned uses (14.18).
    */
   private visitTextBindingUse(
     identifier: tst.Identifier,
-    binding: { readonly kind: "text"; readonly target: SpecModuleTarget },
+    target: SpecModuleTarget | null,
   ): void {
     const parent = identifier.parent;
     if (ts.isCallExpression(parent) && parent.expression === identifier) {
-      this.analyzeTextCall(parent, binding);
+      if (target !== null) this.analyzeTextCall(parent, target);
       return;
     }
     this.addFinding(
@@ -1397,7 +1580,7 @@ class CodeAnalyzer {
    */
   private analyzeTextCall(
     call: tst.CallExpression,
-    calleeBinding: { readonly kind: "text"; readonly target: SpecModuleTarget },
+    calleeTarget: SpecModuleTarget,
   ): void {
     if (call.questionDotToken !== undefined) {
       this.addFinding(
@@ -1479,7 +1662,10 @@ class CodeAnalyzer {
       // TypeScript error against the branded signature (SPEC 4.4).
       return;
     }
-    if (rootBinding.kind === "text") {
+    if (
+      rootBinding.kind === "text" ||
+      (rootBinding.kind === "colliding" && rootBinding.role === "text")
+    ) {
       this.addFinding(
         18,
         argument,
@@ -1504,10 +1690,24 @@ class CodeAnalyzer {
       );
       return;
     }
-    if (
-      moduleTargetKey(rootBinding.target) !==
-      moduleTargetKey(calleeBinding.target)
-    ) {
+    if (rootBinding.kind === "colliding") {
+      // SPEC 2.4, 4.5 → 14.7: a chain rooted at an identifier the
+      // language binds twice names no target — no edge, no occurrence
+      // (5.7) — so the call is located as its occurrence would be, callee
+      // through closing parenthesis (SPEC 14); needing a resolving
+      // argument, it is never 14.11 (SPEC 14.11).
+      this.addFinding(
+        7,
+        call,
+        `unknown TypeScript reference: the text(...) argument is rooted ` +
+          `at ${JSON.stringify(classified.rootName)}, which a spec module ` +
+          `import and a value-level declaration of the same module scope ` +
+          `both bind — the language names no single binding, so the chain ` +
+          `names no target; resolve the collision (SPEC 2.4, 4.5, 14.7)`,
+      );
+      return;
+    }
+    if (moduleTargetKey(rootBinding.target) !== moduleTargetKey(calleeTarget)) {
       // SPEC 4.4 → 14.11: a node passed to another module's text export
       // — modules compared as their files, byte-exact (SPEC 12.0). The
       // foreign (called) module is identity data on the finding, not a
@@ -1518,10 +1718,10 @@ class CodeAnalyzer {
         `cross-module text call: the argument is a node of module ` +
           `${JSON.stringify(moduleTargetDisplay(rootBinding.target))} but ` +
           `the "text" export called belongs to module ` +
-          `${JSON.stringify(moduleTargetDisplay(calleeBinding.target))} — ` +
+          `${JSON.stringify(moduleTargetDisplay(calleeTarget))} — ` +
           `pass a node only to its own module's "text" export ` +
           `(SPEC 4.4, 14.11)`,
-        [moduleTargetDisplay(calleeBinding.target)],
+        [moduleTargetDisplay(calleeTarget)],
       );
       return;
     }
@@ -1567,6 +1767,262 @@ function hasModifier(node: tst.Node, kind: tst.SyntaxKind): boolean {
   return (
     ts.canHaveModifiers(node) &&
     (ts.getModifiers(node) ?? []).some((modifier) => modifier.kind === kind)
+  );
+}
+
+/**
+ * SPEC 2.4: every non-import declaration binding a name at value level in
+ * the module scope, in document order — each name a variable declarator's
+ * name or binding pattern binds, a named function, class, or enum
+ * declaration, and a namespace declaration binding a value. A `var` in a
+ * nested statement binds in the module scope too (JavaScript's hoisting);
+ * a block-scoped declaration there binds in an inner scope, which shadows
+ * instead (4.5), as does anything inside a function, class, or namespace.
+ * Type-level declarations (interfaces, type aliases, namespaces binding no
+ * value) bind nothing here.
+ */
+function moduleValueDeclarations(
+  sourceFile: tst.SourceFile,
+): ValueDeclaration[] {
+  const found: ValueDeclaration[] = [];
+  const declarators = (list: tst.VariableDeclarationList): void => {
+    for (const declarator of list.declarations) {
+      const names: [string, tst.Node][] = [];
+      bindingNames(declarator.name, declarator, names);
+      for (const [name, declaration] of names) {
+        found.push({ name, declaration, construct: declarator });
+      }
+    }
+  };
+  const isVar = (list: tst.VariableDeclarationList): boolean =>
+    (list.flags & ts.NodeFlags.BlockScoped) === 0;
+  const hoisted = (statement: tst.Statement | undefined): void => {
+    if (statement === undefined) return;
+    if (ts.isVariableStatement(statement)) {
+      if (isVar(statement.declarationList)) {
+        declarators(statement.declarationList);
+      }
+    } else if (ts.isBlock(statement)) {
+      for (const inner of statement.statements) hoisted(inner);
+    } else if (ts.isIfStatement(statement)) {
+      hoisted(statement.thenStatement);
+      hoisted(statement.elseStatement);
+    } else if (
+      ts.isForStatement(statement) ||
+      ts.isForInStatement(statement) ||
+      ts.isForOfStatement(statement)
+    ) {
+      const initializer = statement.initializer;
+      if (
+        initializer !== undefined &&
+        ts.isVariableDeclarationList(initializer) &&
+        isVar(initializer)
+      ) {
+        declarators(initializer);
+      }
+      hoisted(statement.statement);
+    } else if (
+      ts.isWhileStatement(statement) ||
+      ts.isDoStatement(statement) ||
+      ts.isLabeledStatement(statement) ||
+      ts.isWithStatement(statement)
+    ) {
+      hoisted(statement.statement);
+    } else if (ts.isTryStatement(statement)) {
+      hoisted(statement.tryBlock);
+      hoisted(statement.catchClause?.block);
+      hoisted(statement.finallyBlock);
+    } else if (ts.isSwitchStatement(statement)) {
+      for (const clause of statement.caseBlock.clauses) {
+        for (const inner of clause.statements) hoisted(inner);
+      }
+    }
+  };
+  for (const statement of sourceFile.statements) {
+    if (ts.isVariableStatement(statement)) {
+      declarators(statement.declarationList);
+    } else if (
+      (ts.isFunctionDeclaration(statement) ||
+        ts.isClassDeclaration(statement)) &&
+      statement.name !== undefined
+    ) {
+      found.push({
+        name: statement.name.text,
+        declaration: statement,
+        construct: statement,
+      });
+    } else if (ts.isEnumDeclaration(statement)) {
+      found.push({
+        name: statement.name.text,
+        declaration: statement,
+        construct: statement,
+      });
+    } else if (ts.isModuleDeclaration(statement)) {
+      // `declare module "m"` names a module, and `declare global` binds
+      // in the global scope — neither binds a module-scope name.
+      if (
+        ts.isIdentifier(statement.name) &&
+        (statement.flags & ts.NodeFlags.GlobalAugmentation) === 0 &&
+        namespaceBindsValue(statement, new Map())
+      ) {
+        found.push({
+          name: statement.name.text,
+          declaration: statement,
+          construct: statement,
+        });
+      }
+    } else {
+      hoisted(statement);
+    }
+  }
+  return found;
+}
+
+/**
+ * Every identifier a binding name binds, with the declaration node
+ * TypeScript binds it to: the declarator for a plain name, the binding
+ * element for a name inside a binding pattern.
+ */
+function bindingNames(
+  name: tst.BindingName,
+  declaration: tst.Node,
+  into: [string, tst.Node][],
+): void {
+  if (ts.isIdentifier(name)) {
+    into.push([name.text, declaration]);
+    return;
+  }
+  for (const element of name.elements) {
+    if (ts.isOmittedExpression(element)) continue;
+    bindingNames(element.name, element, into);
+  }
+}
+
+/** Each judged namespace's verdict; null while it is under judgement. */
+type NamespaceJudgements = Map<tst.Node, boolean | null>;
+
+/**
+ * SPEC 2.4: whether a namespace declaration binds a value — TypeScript's
+ * own instantiation rule: a namespace binds none when its body holds only
+ * type-level members — interfaces, type aliases, import aliases not
+ * exported, namespaces binding none, and export lists naming only such
+ * members — and binds one otherwise, a const enum included, as TypeScript
+ * binds it. `judged` memoizes each namespace's verdict and breaks a cycle
+ * through export lists: a namespace under judgement (null) counts as
+ * binding none, as TypeScript counts it.
+ */
+function namespaceBindsValue(
+  declaration: tst.ModuleDeclaration,
+  judged: NamespaceJudgements,
+): boolean {
+  const known = judged.get(declaration);
+  if (known !== undefined) return known ?? false;
+  judged.set(declaration, null);
+  const body = declaration.body;
+  const binds =
+    body === undefined
+      ? true
+      : ts.isModuleDeclaration(body)
+        ? namespaceBindsValue(body, judged)
+        : ts.isModuleBlock(body)
+          ? body.statements.some((statement) =>
+              statementBindsValue(statement, judged),
+            )
+          : true;
+  judged.set(declaration, binds);
+  return binds;
+}
+
+/** One namespace member under TypeScript's instantiation rule (above). */
+function statementBindsValue(
+  statement: tst.Statement,
+  judged: NamespaceJudgements,
+): boolean {
+  if (
+    ts.isInterfaceDeclaration(statement) ||
+    ts.isTypeAliasDeclaration(statement)
+  ) {
+    return false;
+  }
+  if (
+    (ts.isImportDeclaration(statement) ||
+      ts.isImportEqualsDeclaration(statement)) &&
+    !hasModifier(statement, ts.SyntaxKind.ExportKeyword)
+  ) {
+    return false;
+  }
+  if (ts.isModuleDeclaration(statement)) {
+    return namespaceBindsValue(statement, judged);
+  }
+  if (
+    ts.isExportDeclaration(statement) &&
+    statement.moduleSpecifier === undefined &&
+    statement.exportClause !== undefined &&
+    ts.isNamedExports(statement.exportClause)
+  ) {
+    return statement.exportClause.elements.some((specifier) =>
+      exportedMemberBindsValue(specifier, judged),
+    );
+  }
+  return true;
+}
+
+/**
+ * Whether the local an export list names binds a value: the innermost
+ * enclosing statement list declaring the name decides — an import alias
+ * counting as a value, as TypeScript counts it — and a name no enclosing
+ * list declares may be a value.
+ */
+function exportedMemberBindsValue(
+  specifier: tst.ExportSpecifier,
+  judged: NamespaceJudgements,
+): boolean {
+  const name = specifier.propertyName ?? specifier.name;
+  if (!ts.isIdentifier(name)) return true;
+  for (
+    let scope: tst.Node | undefined = specifier.parent;
+    scope !== undefined;
+    scope = scope.parent
+  ) {
+    if (
+      !ts.isBlock(scope) &&
+      !ts.isModuleBlock(scope) &&
+      !ts.isSourceFile(scope)
+    ) {
+      continue;
+    }
+    let declared = false;
+    for (const statement of scope.statements) {
+      if (!statementDeclaresName(statement, name.text)) continue;
+      if (
+        ts.isImportEqualsDeclaration(statement) ||
+        statementBindsValue(statement, judged)
+      ) {
+        return true;
+      }
+      declared = true;
+    }
+    if (declared) return false;
+  }
+  return true;
+}
+
+/** Whether a statement is a declaration naming `name` (TypeScript's test). */
+function statementDeclaresName(
+  statement: tst.Statement,
+  name: string,
+): boolean {
+  if (ts.isVariableStatement(statement)) {
+    return statement.declarationList.declarations.some(
+      (declarator) =>
+        ts.isIdentifier(declarator.name) && declarator.name.text === name,
+    );
+  }
+  const declared = (statement as { readonly name?: tst.Node }).name;
+  return (
+    declared !== undefined &&
+    ts.isIdentifier(declared) &&
+    declared.text === name
   );
 }
 
