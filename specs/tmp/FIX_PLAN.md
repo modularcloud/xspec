@@ -72,8 +72,8 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T6.6-3 | section-6.6 | 23, 25, 35 (passes since Task 35 landed: its `--preview` replays of T6.5-16's refused and alone arms report the real operation's findings, and the replays of T6.5-17's arms, run after them, hold since Task 25 — `refused-moved-import` alone, the would-be text judged well-formed with its additions admitted) |
 | T6.6-4 | section-6.6 | 29 (passes since Task 29 landed, with Task 10) |
 | T7-1 | section-7-basics | 36 (passes since Task 36 landed: `occupantOf` in `src/workspace/locate.ts` classifies the found or named configuration path by `lstat`, so the upward search stops at the nearest entry named `xspec.config.ts` whatever occupies it, and a directory or symbolic-link occupant, found or named, is 14.14 concerning that entry in the anchoring form, never read through) |
-| T7-2 | section-7-basics | 8, 37, 38 (since Task 8 its verbatim-literal arms hold — the escape-spelled glob discovers nothing and the escape-spelled group name is named only by its own spelling; since Task 37 its encoding arms hold — `parseConfigurationBytes` in `src/workspace/config.ts` judges the bytes before decoding, a leading `EF BB BF` (`beginsWithByteOrderMark`, shared with `decodeSourceBytes`) and then invalid UTF-8 each one 14.14 naming the file, exit 2 — as do its repeated-key arms; it stops first at Task 38's empty-name arm, a spec group named `""`) |
-| T7-3 | section-7-basics | 38 |
+| T7-2 | section-7-basics | 8, 37, 38 (passes since Task 38 landed: `checkConfiguredName` in `src/core/config.ts` refuses an empty or U+FFFD-bearing group name — a `specs` or `code` key — and profile or rule `name`, each one 14.14 giving the key and its line, so the empty-name arms, a spec group `""` and a profile and a rule named `""`, exit 2 naming the file; since Task 8 its verbatim-literal arms had held, and since Task 37 its encoding and repeated-key arms) |
+| T7-3 | section-7-basics | 38 (passes since Task 38 landed: its U+FFFD-name arms — a spec group key, a profile name, and a rule name, each the encoded code point `EF BF BD` between two letters — are each 14.14, exit 2 naming the file) |
 | T7-4 | section-7-discovery | 39, 40 |
 | T7.3-1 | section-7.1-7.3 | 41 |
 | T7.4-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
@@ -166,20 +166,6 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 38 — Group, profile, and rule names are non-empty and free of U+FFFD (SPEC 7, 14.14; B4, B5)
-
-**Requirement.** SPEC 7: "an empty group, profile, or rule name (`""`)" is a configuration error, and "A group, profile, or rule name containing U+FFFD is a configuration error (14.14)".
-
-**Observed.** Each of these loads with exit 0 instead of failing:
-- a spec group named `""`, a profile with `name: ""`, and a rule with `name: ""`;
-- the same three names containing U+FFFD.
-
-**Location.** `src/core/config.ts`: the group reducers for `specs` and `code`, the coverage-profile reducer (~974–1034), and the policy-rule reducer.
-
-**Change.** Add both checks to every name reader. Report each failure as 14.14 with an actionable message giving the key and line; all errors go into the one error document.
-
-**Verification.** `section-7-basics.test.ts`: T7-2's empty-name arms and T7-3. Neighbours: `section-7.1-7.3.test.ts`, `section-7.4-7.5.test.ts`.
 
 ## Task 39 — A `**` segment leaves the outside-root depth unchanged (SPEC 7, 11.1, 11.3, 11.4, 12.0, 12.3, 14.14; B6)
 

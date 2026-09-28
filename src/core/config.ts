@@ -655,6 +655,40 @@ function requireString(
   return { value: node.value, line: node.line };
 }
 
+/** U+FFFD (REPLACEMENT CHARACTER), which no argument value carries (12.0). */
+const REPLACEMENT_CHARACTER = String.fromCodePoint(0xfffd);
+
+/**
+ * SPEC 7, 14.14: a group, profile, or rule name is non-empty — `""` is a
+ * configuration error — and contains no U+FFFD, since no argument value
+ * carries the character (12.0) and configured names are named in
+ * arguments. `name` is the name as spelled (a key's or a string literal's
+ * characters, no escape interpreted, 2.4), so only the encoded character
+ * counts. Reports the violation, if any, at `line`.
+ */
+function checkConfiguredName(
+  name: string,
+  what: "group" | "profile" | "rule",
+  where: string,
+  line: number | undefined,
+  findings: ConfigFindings,
+): void {
+  if (name.length === 0) {
+    findings.add(
+      `${where}: the ${what} name is empty ("") — group, profile, and ` +
+        `rule names are non-empty (SPEC 7, 14.14)`,
+      line,
+    );
+  } else if (name.includes(REPLACEMENT_CHARACTER)) {
+    findings.add(
+      `${where}: the ${what} name "${name}" contains U+FFFD (REPLACEMENT ` +
+        `CHARACTER) — no argument value carries the character, and ` +
+        `configured names are named in arguments (SPEC 7, 12.0, 14.14)`,
+      line,
+    );
+  }
+}
+
 /**
  * Optional enumerated string field; reports invalid values. Returns
  * undefined when absent or invalid.
@@ -835,6 +869,16 @@ function validateGroups(
   }
   const groups: ConfiguredGroup[] = [];
   for (const [name, value] of node.entries) {
+    // SPEC 7, 14.14: the group's key is its name — non-empty, free of
+    // U+FFFD. The group stays configured either way, so references to it
+    // resolve and the name is its one reported defect.
+    checkConfiguredName(
+      name,
+      "group",
+      label,
+      node.keyLines.get(name),
+      findings,
+    );
     const patterns: string[] = [];
     const globs: CompiledGlob[] = [];
     if (value.kind !== "array") {
@@ -1008,6 +1052,13 @@ function validateCoverage(
       findings,
     );
     if (name !== undefined) {
+      checkConfiguredName(
+        name.value,
+        "profile",
+        `${where}.name`,
+        name.line,
+        findings,
+      );
       if (names.has(name.value)) {
         findings.add(
           `${where}: duplicate profile name "${name.value}" — profile ` +
@@ -1267,6 +1318,13 @@ function validatePolicy(
       findings,
     );
     if (name !== undefined) {
+      checkConfiguredName(
+        name.value,
+        "rule",
+        `${where}.name`,
+        name.line,
+        findings,
+      );
       if (names.has(name.value)) {
         findings.add(
           `${where}: duplicate rule name "${name.value}" — rule names are ` +
