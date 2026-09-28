@@ -34,8 +34,9 @@
 // form; the subtree is re-identified by prefix replacement; references
 // convert between local and imported forms as the rewrite requires, spec
 // module imports are added (binding fresh, non-colliding, deterministic
-// identifiers) and removed exactly when a binding had references and the
-// rewrite leaves it with none (SPEC 6.5, 2.1); the full mapping is the
+// identifiers) and removed — in spec and code sources alike — exactly when
+// an occurrence used a binding of the import before the rewrite and none
+// uses any binding of it after (SPEC 6.5, 2.1); the full mapping is the
 // journal entry.
 //
 // Rewrites are minimal in-place edits (SPEC 6.4, 6.5), preserving quote
@@ -55,7 +56,7 @@
 
 import type { ByteRange } from "./bytes.js";
 import { compareBytes } from "./bytes.js";
-import type { CodeAnalysis } from "./code-analysis.js";
+import type { CodeAnalysis, CodeImport } from "./code-analysis.js";
 import type { SourceEdit, SourceRewrite } from "./edits.js";
 import {
   applyEdits,
@@ -543,25 +544,6 @@ function removalSpan(bytes: Uint8Array, range: ByteRange): ByteRange {
  */
 function offsetAfterLine(bytes: Uint8Array, position: number): number {
   return terminatorEndAt(bytes, lineContentEndAfter(bytes, position));
-}
-
-/**
- * SPEC 6.5: the import-addition edit at `offset` in the file's original
- * bytes — each declaration inserted as a line of its own, its characters
- * followed by a U+000A line terminator, the block preceded by one exactly
- * when the insertion point is not at the start of a line. Shared by the
- * real rewrite and the preview (SPEC 6.6: the real insertion offset equals
- * the previewed one).
- */
-function importAdditionEdit(
-  bytes: Uint8Array,
-  offset: number,
-  lines: readonly string[],
-): SourceEdit {
-  const atLineStart = offset === 0 || isTerminatorByte(bytes[offset - 1]!);
-  const text =
-    (atLineStart ? "" : "\n") + lines.map((line) => `${line}\n`).join("");
-  return { range: { start: offset, end: offset }, replacement: text };
 }
 
 /**
@@ -1360,7 +1342,7 @@ export interface MoveSectionPlan {
  * in a spec source and a TypeScript source alike: `import X from "…"`,
  * single spaces, no statement terminator, the specifier double-quoted in the
  * canonical relative spelling from the importing file's directory (SPEC 2.1,
- * 6.5 "Import edits"). `importAdditionEdit` puts it on a line of its own.
+ * 6.5 "Import edits"). `composeAddition` puts it on a line of its own.
  */
 function defaultImportLine(
   filePath: string,
@@ -1732,9 +1714,26 @@ export function planMoveSection(
   // spec-module import's default binding, or a fresh added import) with the
   // segment prefix re-identified. Type-level references record no edges
   // (SPEC 4.5) and are absent from the analyzed references.
+  //
+  // SPEC 6.5 "Import edits": an occurrence uses a binding when its chain is
+  // rooted at it or, for a `text(...)` call, its callee is it (4.5); a spec
+  // module import is removed exactly when an occurrence used a binding of
+  // its before the rewrite and none uses any binding of its after it — an
+  // import whose bindings were already unused stays (2.1). Uses are counted
+  // per import declaration, the one the analysis resolved each root and
+  // callee to, before the rewrite and as the re-rooting leaves them.
   const codeAdditions = new Map<string, Map<string, string>>();
+  const codeRemovals = new Map<string, readonly CodeImport[]>();
   for (const analysis of code) {
     let taken: Set<string> | null = null;
+    const usesBefore = analysis.imports.map(() => 0);
+    for (const reference of analysis.references) {
+      usesBefore[reference.rootImport]! += 1;
+      if (reference.calleeImport !== null) {
+        usesBefore[reference.calleeImport]! += 1;
+      }
+    }
+    const usesAfter = [...usesBefore];
     for (const reference of analysis.references) {
       if (
         reference.modulePath !== originPath ||
@@ -1749,15 +1748,19 @@ export function planMoveSection(
       }
       let rootName: string | null = null;
       if (!sameFile) {
-        const existing = analysis.imports.find(
+        // The chain leaves its origin-module root for a binding of the
+        // target module — another module, so another import.
+        usesAfter[reference.rootImport]! -= 1;
+        const existing = analysis.imports.findIndex(
           (imported) =>
             imported.valid &&
             imported.targetPath === targetPath &&
             imported.defaultBinding !== null &&
             !imported.defaultBinding.typeOnly,
         );
-        if (existing !== undefined) {
-          rootName = existing.defaultBinding!.name;
+        if (existing !== -1) {
+          rootName = analysis.imports[existing]!.defaultBinding!.name;
+          usesAfter[existing]! += 1;
         } else {
           let additions = codeAdditions.get(analysis.path);
           if (additions === undefined) {
@@ -1803,6 +1806,12 @@ export function planMoveSection(
           reference.occurrenceRange,
         );
       }
+    }
+    const removed = analysis.imports.filter(
+      (_, index) => usesBefore[index]! > 0 && usesAfter[index] === 0,
+    );
+    if (removed.length > 0) {
+      codeRemovals.set(analysis.path, removed);
     }
   }
 
@@ -2133,18 +2142,42 @@ export function planMoveSection(
     }
   }
 
-  // Code files: chain retargets plus added imports (SPEC 6.5, 4). Anchored
-  // after the line of the file's last spec-module import — a code file
-  // referencing the moved subtree always has one (its chains root at
-  // import bindings) — at the one deterministic offset the preview reports
-  // (SPEC 6.5, 6.6).
+  // Code files: chain retargets, import removals, and added imports
+  // (SPEC 6.5, 4). A removal is line-dropped like every 6.5 deletion and
+  // reported with every byte it removes (SPEC 6.6, judged per
+  // declaration). An addition is anchored after the line of the file's
+  // last spec-module import — a code file referencing the moved subtree
+  // always has one (its chains root at import bindings) — or, where that
+  // offset lies strictly inside another edit's range, at the first removed
+  // import's line start, else at the file's start: the one deterministic
+  // offset the preview reports (SPEC 6.5, 6.6), whether it is at the start
+  // of a line judged over the composed text, an addition at the end of a
+  // removal's range reading what that removal leaves (SPEC 6.5
+  // "Composition and admissibility").
   for (const analysis of code) {
+    const bytes = encoder.encode(analysis.text);
+    const removed = codeRemovals.get(analysis.path) ?? [];
+    for (const imported of removed) {
+      preview.add(
+        analysis.path,
+        "import-removal",
+        removalSpan(bytes, imported.range),
+      );
+    }
     const fileEdits: SourceEdit[] = [
       ...(outerEdits.editsFor(analysis.path) ?? []),
+      ...deletionEditsWithLineDrops(
+        bytes,
+        removed.map((imported) => imported.range),
+      ),
     ];
-    const bytes = encoder.encode(analysis.text);
-    const additions = codeAdditions.get(analysis.path);
-    if (additions !== undefined && additions.size > 0) {
+    const additions = [...(codeAdditions.get(analysis.path) ?? new Map())];
+    if (fileEdits.length === 0 && additions.length === 0) {
+      continue;
+    }
+    const composition = editsComposition(bytes, fileEdits);
+    let content = composition.content;
+    if (additions.length > 0) {
       const anchor = analysis.imports[analysis.imports.length - 1];
       if (anchor === undefined) {
         throw new Error(
@@ -2154,26 +2187,52 @@ export function planMoveSection(
       }
       // SPEC 6.5: each added declaration is spelled `import X from "…"`,
       // no statement terminator, on a line of its own.
-      const lines = [...additions.entries()]
+      const lines = additions
         .sort((a, b) => compareBytes(a[0], b[0]))
         .map(([modulePath, name]) =>
           defaultImportLine(analysis.path, modulePath, name),
         );
-      const offset = offsetAfterLine(bytes, anchor.range.end);
-      // SPEC 6.6: the import addition's zero-length insertion point, at
-      // the exact offset the real operation then inserts at (SPEC 6.5).
-      preview.add(analysis.path, "import-addition", {
-        start: offset,
-        end: offset,
-      });
-      fileEdits.push(importAdditionEdit(bytes, offset, lines));
+      const firstRemoved = removed[0];
+      let placed: { offset: number; position: number } | null = null;
+      for (const offset of [
+        offsetAfterLine(bytes, anchor.range.end),
+        ...(firstRemoved === undefined
+          ? []
+          : [lineStartBefore(bytes, firstRemoved.range.start)]),
+        0,
+      ]) {
+        const position = composition.positionOf(offset);
+        if (position !== null) {
+          placed = { offset, position };
+          break;
+        }
+      }
+      if (placed === null) {
+        throw new Error(
+          "xspec internal error: no offset for an import addition",
+        );
+      }
+      content = composeAddition(
+        composition.content,
+        {
+          position: placed.position,
+          atLineStart:
+            placed.position === 0 ||
+            isTerminatorByte(composition.content[placed.position - 1]!),
+        },
+        lines.map((line) => encoder.encode(line)),
+      ).content;
+      // SPEC 6.6: each added declaration is one import addition, its
+      // zero-length insertion point at the exact offset the real operation
+      // then inserts at (SPEC 6.5).
+      for (let index = 0; index < lines.length; index += 1) {
+        preview.add(analysis.path, "import-addition", {
+          start: placed.offset,
+          end: placed.offset,
+        });
+      }
     }
-    if (fileEdits.length > 0) {
-      rewrites.push({
-        path: analysis.path,
-        content: applyEdits(bytes, fileEdits),
-      });
-    }
+    rewrites.push({ path: analysis.path, content });
   }
 
   return {

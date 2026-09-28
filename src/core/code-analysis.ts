@@ -169,6 +169,19 @@ export interface CodeReference {
   readonly segments: readonly string[];
   /** The chain's exact spelling, for in-place rewrites (SPEC 6.4). */
   readonly spelling: ReferenceSpelling;
+  /**
+   * The index, in the file's `imports`, of the spec module import
+   * declaration whose binding the chain is rooted at — as the language
+   * resolves the root identifier (SPEC 4.5): the occurrence uses that
+   * binding (SPEC 6.5 "Import edits").
+   */
+  readonly rootImport: number;
+  /**
+   * For a `text(...)` call, the index, in the file's `imports`, of the
+   * declaration whose `text` binding the callee is — the occurrence uses
+   * that binding too (SPEC 6.5 "Import edits", 4.5); null for a marker.
+   */
+  readonly calleeImport: number | null;
   /** The reference expression's bytes (finding locations, SPEC 14.7). */
   readonly range: ByteRange;
   /**
@@ -458,8 +471,18 @@ const UNDEFINED_TARGET_REASON =
 
 /** What one import-bound identifier means as a reference root (SPEC 4.5). */
 type TrackedBinding =
-  | { readonly kind: "node"; readonly target: SpecModuleTarget }
-  | { readonly kind: "text"; readonly target: SpecModuleTarget }
+  | {
+      readonly kind: "node";
+      readonly target: SpecModuleTarget;
+      /** The index, in `imports`, of the declaration giving the binding. */
+      readonly importIndex: number;
+    }
+  | {
+      readonly kind: "text";
+      readonly target: SpecModuleTarget;
+      /** The index, in `imports`, of the declaration giving the binding. */
+      readonly importIndex: number;
+    }
   | {
       /** SPEC 4: a binding introduced type-only is a type-level name. */
       readonly kind: "type-level";
@@ -472,6 +495,9 @@ type TrackedBinding =
       readonly kind: "poisoned";
     }
   | CollidingBinding;
+
+/** A `text` binding of a valid spec module import (SPEC 4, 4.5). */
+type TextBinding = Extract<TrackedBinding, { readonly kind: "text" }>;
 
 /**
  * SPEC 2.4, 4.5: an identifier a spec module import binds that another
@@ -663,15 +689,19 @@ class CodeAnalyzer {
    * expression, callee through closing parenthesis. `callee` is a `text`
    * call's callee, part of the spelling judged for escapes (SPEC 14.7),
    * and `calledModule` a cross-module call's called module (SPEC 14.11).
+   * `rootImport` and `calleeImport` index the import declarations whose
+   * bindings the root and the callee are (SPEC 6.5 "Import edits").
    */
   private chainReference(
     kind: "references" | "embeds",
     classified: ClassifiedChain,
     modulePath: string,
+    rootImport: number,
     location: string,
     occurrenceRange?: ByteRange,
     callee?: tst.Node,
     calledModule: CalledModule | null = null,
+    calleeImport: number | null = null,
   ): CodeReference {
     const spanRange = (span: {
       readonly start: number;
@@ -711,6 +741,8 @@ class CodeAnalyzer {
           accessRange: spanRange(segment.accessSpan),
         })),
       },
+      rootImport,
+      calleeImport,
       range,
       occurrenceRange: occurrenceRange ?? range,
       escapeFree,
@@ -1067,6 +1099,9 @@ class CodeAnalyzer {
           `"./NAME.xspec" (SPEC 4, 2.1, 14.15)`,
       );
     }
+    // The declaration's index in `imports`, pushed below: the import whose
+    // binding a recorded occurrence uses (SPEC 6.5 "Import edits").
+    const importIndex = this.imports.length;
     for (const { declaration, binding, role } of roles) {
       this.declarations.set(
         declaration,
@@ -1074,7 +1109,7 @@ class CodeAnalyzer {
           ? { kind: "poisoned" }
           : binding.typeOnly
             ? { kind: "type-level" }
-            : { kind: role, target },
+            : { kind: role, target, importIndex },
       );
     }
 
@@ -1519,7 +1554,7 @@ class CodeAnalyzer {
       return;
     }
     if (binding.kind === "text") {
-      this.visitTextBindingUse(identifier, binding.target);
+      this.visitTextBindingUse(identifier, binding);
       return;
     }
     this.visitNodeBindingUse(identifier, binding);
@@ -1565,6 +1600,7 @@ class CodeAnalyzer {
               "references",
               classified,
               binding.target.path,
+              binding.importIndex,
               this.attributionOf(use),
             ),
           );
@@ -1647,7 +1683,7 @@ class CodeAnalyzer {
    * SPEC 4.5: a `text` binding appears only as the callee of a call;
    * that call is an ordinary expression, valid in expression-statement
    * position too, recording its `embeds` edge (4.3) — never a marker. A
-   * null `target` is a colliding identifier's (SPEC 2.4, 4.5): a call
+   * null `binding` is a colliding identifier's (SPEC 2.4, 4.5): a call
    * through it is no spec module's `text` call — no edge, no occurrence
    * (5.7), no condition of a `text` call (7, 8, 11) — and the walk visits
    * its arguments as those of any other call, where a spec module binding
@@ -1655,11 +1691,11 @@ class CodeAnalyzer {
    */
   private visitTextBindingUse(
     identifier: tst.Identifier,
-    target: SpecModuleTarget | null,
+    binding: TextBinding | null,
   ): void {
     const parent = identifier.parent;
     if (ts.isCallExpression(parent) && parent.expression === identifier) {
-      if (target !== null) this.analyzeTextCall(parent, target);
+      if (binding !== null) this.analyzeTextCall(parent, binding);
       return;
     }
     this.addFinding(
@@ -1676,11 +1712,10 @@ class CodeAnalyzer {
    * property chain rooted at a spec module import binding; the string
    * form is MDX-only (4.3 → 14.8); a cross-module node is recorded with
    * its called module, resolution reporting 14.11 (4.4, graph.ts).
+   * `callee` is the `text` binding the callee resolves to.
    */
-  private analyzeTextCall(
-    call: tst.CallExpression,
-    calleeTarget: SpecModuleTarget,
-  ): void {
+  private analyzeTextCall(call: tst.CallExpression, callee: TextBinding): void {
+    const calleeTarget = callee.target;
     if (call.questionDotToken !== undefined) {
       this.addFinding(
         8,
@@ -1848,10 +1883,12 @@ class CodeAnalyzer {
         "embeds",
         classified,
         rootBinding.target.path,
+        rootBinding.importIndex,
         this.attributionOf(call),
         this.rangeOf(call),
         call.expression,
         calledModule,
+        callee.importIndex,
       ),
     );
   }
