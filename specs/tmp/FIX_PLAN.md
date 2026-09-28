@@ -74,18 +74,18 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T7-1 | section-7-basics | 36 (passes since Task 36 landed: `occupantOf` in `src/workspace/locate.ts` classifies the found or named configuration path by `lstat`, so the upward search stops at the nearest entry named `xspec.config.ts` whatever occupies it, and a directory or symbolic-link occupant, found or named, is 14.14 concerning that entry in the anchoring form, never read through) |
 | T7-2 | section-7-basics | 8, 37, 38 (passes since Task 38 landed: `checkConfiguredName` in `src/core/config.ts` refuses an empty or U+FFFD-bearing group name — a `specs` or `code` key — and profile or rule `name`, each one 14.14 giving the key and its line, so the empty-name arms, a spec group `""` and a profile and a rule named `""`, exit 2 naming the file; since Task 8 its verbatim-literal arms had held, and since Task 37 its encoding and repeated-key arms) |
 | T7-3 | section-7-basics | 38 (passes since Task 38 landed: its U+FFFD-name arms — a spec group key, a profile name, and a rule name, each the encoded code point `EF BF BD` between two letters — are each 14.14, exit 2 naming the file) |
-| T7-4 | section-7-discovery | 39, 40 (since Task 39 its outside-root arms hold — `**/../x/*.mdx`, `a/../../x/*.mdx`, `/specs/*.mdx`, and `../x/*.mdx` each 14.14, exit 2 — the depth count `globLiesOutsideRoot` in `src/core/glob.ts` deciding by spelling alone; it stops first at Task 40's inside-root arm `a/../b/*.mdx`) |
+| T7-4 | section-7-discovery | 39, 40 (passes since Task 40 landed: an inside glob is matched as spelled, each `.`, `..`, or empty segment the `never` pattern segment of `parseSegment` in `src/core/glob.ts`, matching no path segment, so the inside-root arms `a/../b/*.mdx`, `./specs/*.mdx`, `specs//*.mdx`, and `specs/*.mdx/` each discover nothing beside the control; since Task 39 its outside-root arms had held — `**/../x/*.mdx`, `a/../../x/*.mdx`, `/specs/*.mdx`, and `../x/*.mdx` each 14.14, exit 2, the depth count `globLiesOutsideRoot` deciding by spelling alone) |
 | T7.3-1 | section-7.1-7.3 | 41 |
 | T7.4-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
 | T7.5-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
 | T10.1-6 | section-10.1 | 45, 46 |
-| T11-2 | section-11 | 2, 3, 40, 44 (since Task 2 its malformed-`--tag` sweep holds by hand, twins included; since Task 3 its tag sets hold and it stops first at Task 40's `--file "./specs/alpha/*.mdx"` arm) |
+| T11-2 | section-11 | 2, 3, 40 (passes since Task 40 landed: its inside `--file` spellings, `./specs/alpha/*.mdx` and its twins, answer no rows, exit 0; it never waited on Task 44 — its outside-root `--file` arms run on a valid workspace, and its twin sweep under an invalid and a missing configuration covers only the malformed `--tag` values Task 2 judges at parse level; since Task 3 its tag sets had held) |
 | T11-6 | section-11 | 19 (passes since Task 19 landed) |
 | T11-7 | section-11 | 3 (passes since Task 3 landed) |
 | T11.2-6 | section-11.2 | 51 |
-| T11.3-2 | section-11.3 | 40 |
+| T11.3-2 | section-11.3 | 40 (passes since Task 40 landed: `./specs/*.mdx` and `specs//*.mdx` admit the empty set, an empty, finding-free answer, exit 0) |
 | T11.3-3 | section-11.3 | 1, 44 (since Task 1 its first failing arm is configuration-first) |
-| T11.4-2 | section-11.4 | 40 |
+| T11.4-2 | section-11.4 | 40 (passes since Task 40 landed) |
 | T11.4-3 | section-11.4 | 3 (passes since Task 3 landed) |
 | T11.4-4 | section-11.4 | 14 (passes since Task 14 landed) |
 | T11.4-6 | section-11.4 | 3 (passes since Task 3 landed) |
@@ -94,7 +94,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T12.0-10 | section-12.0-ii | 44 (its `--tag 'a\b'` row holds since Task 2) |
 | T12.0-14 | section-12.0-iii | 43 |
 | T12.2-4 | section-12.1-12.2 | 52 |
-| T12.3-1 | section-12.3-12.5 | 40 |
+| T12.3-1 | section-12.3-12.5 | 40 (passes since Task 40 landed) |
 | T12.7-3 | section-12.7 | 42 |
 | T13.3-2 | section-13.3 | 47 |
 | T13.4-6 | section-13.4 | 51 |
@@ -166,27 +166,6 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 40 — Inside-root `.`, `..`, and empty glob segments match nothing (SPEC 7, 12.0, 12.3, 11.1, 11.3, 11.4, 7.5; B7, C3)
-
-**Requirement.**
-- SPEC 7: "every other glob is inside, its `.`, `..`, and empty segments matching nothing".
-- SPEC 12.0: arguments that name files or globs "are read as spelled and compared byte-wise against workspace-relative paths (below; 7), which no normalization touches: `./specs/A.mdx`, `specs//A.mdx`, and `specs\A.mdx` name or match no discovered file".
-
-**Observed.** These spellings match what their normalized forms match: `./specs/*.mdx`, `specs//*.mdx`, `specs/./*.mdx`, `specs/../specs/*.mdx`, and `specs/**/../*.mdx`. So do `./apecs/*.mdx`-style spellings. This happens:
-- as configured globs, which then discover sources;
-- as policy `files` selectors, which then produce violations;
-- as `--file` on `ids`, `query nodes`, `occurrences`, and `view`. These must return an empty, finding-free answer with exit 0.
-
-**Location.** `src/core/glob.ts`: `resolveSegments` drops `.` and empty segments and pops on `..`; its output feeds the matcher. Since Task 39 it decides nothing about the root: `CompiledGlob.compileInternal` first refuses an outside-root spelling through `globLiesOutsideRoot`, the SPEC 7 depth count, and only then calls it.
-
-**Change.** Stop normalizing and match segments as spelled. A `.`, `..`, or empty pattern segment matches no path segment, since discovered paths never contain one. Keep Task 39's outside-root decision (`globLiesOutsideRoot`, landed) separate and unchanged.
-
-**Verification.**
-- Should turn green: `section-11.3.test.ts` (T11.3-2), `section-11.4.test.ts` (T11.4-2), `section-12.3-12.5.test.ts` (T12.3-1).
-- `section-7-discovery.test.ts` (T7-4): its outside-root arms hold since Task 39; it stops first at the inside-root arm `a/../b/*.mdx`.
-- `section-11.test.ts`: T11-2's `--file` arms (T11-2 also waits on Task 44).
-- Neighbours: `section-7-basics.test.ts`, `section-7.4-7.5.test.ts`.
 
 ## Task 41 — `markdown.outDir` spelling is enforced (SPEC 7.3, 14.14; B8)
 
@@ -286,7 +265,7 @@ With a missing configuration, all of the above fail the same way, and so does `a
 Leave the non-syntax usage errors (unknown node, offset beyond the file's length, unknown session) after configuration, in 12.0's order.
 
 **Verification.**
-- Should turn green: `section-12.0-ii.test.ts` (T12.0-10), `section-11.3.test.ts` (T11.3-3, with Task 1), `section-11.test.ts` (T11-2, with Task 40).
+- Should turn green: `section-12.0-ii.test.ts` (T12.0-10), `section-11.3.test.ts` (T11.3-3, with Task 1). (`section-11.test.ts`'s T11-2 passes since Task 40 landed: its twin sweep covers only `--tag`, parse-level since Task 2.)
 - Neighbours: `section-10.7-i.test.ts`, `section-11.5.test.ts`, `section-12.0-i.test.ts`, `section-12.0-iii.test.ts`.
 
 ## Task 45 — A symlinked session directory holds no sessions for every `review` subcommand (SPEC 13.4, 10.1, 10.7, 12.0; B15, C9)
