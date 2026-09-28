@@ -27,6 +27,10 @@ import { parseConfiguration } from "../core/config.js";
 import type { Finding } from "../core/findings.js";
 import { pathFinding } from "../core/findings.js";
 import { sha256Hex } from "../core/hash.js";
+import {
+  beginsWithByteOrderMark,
+  firstInvalidUtf8,
+} from "../core/source-text.js";
 import type { LocatedWorkspace } from "./locate.js";
 import { locateWorkspace } from "./locate.js";
 
@@ -117,26 +121,41 @@ export function parseConfigurationBytes(
   bytes: Uint8Array,
   configFileName: string,
 ): ConfigurationResult {
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return {
-      ok: false,
-      findings: [
-        pathFinding(
-          14,
-          `not valid UTF-8 — the configuration must be well-formed ` +
-            `TypeScript (SPEC 7, 14.14)`,
-          configFileName,
-        ),
-      ],
-    };
+  // SPEC 7: the file's bytes MUST be valid UTF-8 and MUST NOT begin with a
+  // byte-order mark, as a source file's must (1.6); a file violating this
+  // encoding rule is a configuration error (14.14) — whatever TypeScript,
+  // which skips a leading mark, would make of the text. The mark is judged
+  // first, on the bytes: it is the file's first byte.
+  if (beginsWithByteOrderMark(bytes)) {
+    return encodingFailure(
+      `the configuration file begins with a UTF-8 byte-order mark (bytes ` +
+        `EF BB BF) — its bytes must be UTF-8 without a byte-order mark; ` +
+        `remove the mark (SPEC 7, 14.14)`,
+      configFileName,
+    );
   }
-  // A leading byte-order mark is valid in a TypeScript file; strip it so
-  // the parser sees the module text. (The SPEC 14.20 BOM rule constrains
-  // discovered sources, not the configuration.)
-  if (text.startsWith("\uFEFF")) text = text.slice(1);
-
+  const invalidAt = firstInvalidUtf8(bytes);
+  if (invalidAt !== -1) {
+    return encodingFailure(
+      `the configuration file is not valid UTF-8 (first invalid byte at ` +
+        `offset ${String(invalidAt)}) — its bytes must be valid UTF-8; ` +
+        `re-encode the file as UTF-8 (SPEC 7, 14.14)`,
+      configFileName,
+    );
+  }
+  // Validated above: decoding strips nothing and replaces nothing, so the
+  // text is exactly the file's characters.
+  const text = new TextDecoder("utf-8", {
+    fatal: true,
+    ignoreBOM: true,
+  }).decode(bytes);
   return parseConfiguration(text, configFileName);
+}
+
+/** A configuration file's one encoding-rule finding (SPEC 7, 14.14). */
+function encodingFailure(
+  message: string,
+  configFileName: string,
+): ConfigurationResult {
+  return { ok: false, findings: [pathFinding(14, message, configFileName)] };
 }

@@ -72,7 +72,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T6.6-3 | section-6.6 | 23, 25, 35 (passes since Task 35 landed: its `--preview` replays of T6.5-16's refused and alone arms report the real operation's findings, and the replays of T6.5-17's arms, run after them, hold since Task 25 — `refused-moved-import` alone, the would-be text judged well-formed with its additions admitted) |
 | T6.6-4 | section-6.6 | 29 (passes since Task 29 landed, with Task 10) |
 | T7-1 | section-7-basics | 36 (passes since Task 36 landed: `occupantOf` in `src/workspace/locate.ts` classifies the found or named configuration path by `lstat`, so the upward search stops at the nearest entry named `xspec.config.ts` whatever occupies it, and a directory or symbolic-link occupant, found or named, is 14.14 concerning that entry in the anchoring form, never read through) |
-| T7-2 | section-7-basics | 8, 37, 38 (since Task 8 its verbatim-literal arms hold — the escape-spelled glob discovers nothing and the escape-spelled group name is named only by its own spelling; it stops first at Task 37's byte-order-mark arm) |
+| T7-2 | section-7-basics | 8, 37, 38 (since Task 8 its verbatim-literal arms hold — the escape-spelled glob discovers nothing and the escape-spelled group name is named only by its own spelling; since Task 37 its encoding arms hold — `parseConfigurationBytes` in `src/workspace/config.ts` judges the bytes before decoding, a leading `EF BB BF` (`beginsWithByteOrderMark`, shared with `decodeSourceBytes`) and then invalid UTF-8 each one 14.14 naming the file, exit 2 — as do its repeated-key arms; it stops first at Task 38's empty-name arm, a spec group named `""`) |
 | T7-3 | section-7-basics | 38 |
 | T7-4 | section-7-discovery | 39, 40 |
 | T7.3-1 | section-7.1-7.3 | 41 |
@@ -166,18 +166,6 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 37 — A configuration file beginning with a byte-order mark is invalid (SPEC 7, 14.14; B3)
-
-**Requirement.** SPEC 7: the configuration file's bytes "MUST be valid UTF-8 and MUST NOT begin with a byte-order mark". A file that violates this encoding rule is a configuration error (14.14).
-
-**Observed.** A configuration file beginning with a BOM loads (exit 0).
-
-**Location.** The configuration read in `src/workspace/config.ts`, or the parse entry in `src/core/config.ts`.
-
-**Change.** Before parsing, reject a leading `EF BB BF` with a 14.14 error naming the file (exit 2).
-
-**Verification.** `section-7-basics.test.ts`: T7-2's BOM arm, where T7-2 stops first since Task 8 landed (T7-2 also waits on Task 38).
 
 ## Task 38 — Group, profile, and rule names are non-empty and free of U+FFFD (SPEC 7, 14.14; B4, B5)
 

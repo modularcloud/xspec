@@ -72,6 +72,21 @@ export function firstInvalidUtf8(bytes: Uint8Array): number {
   return -1;
 }
 
+/**
+ * Whether `bytes` begin with the UTF-8 byte-order mark, `EF BB BF` — the
+ * leading bytes a source file (SPEC 1.6, 14.20) and the configuration file
+ * (SPEC 7, 14.14) must not begin with. Judged on the bytes, never on
+ * decoded text: a decoder may strip the mark silently.
+ */
+export function beginsWithByteOrderMark(bytes: Uint8Array): boolean {
+  return (
+    bytes.length >= 3 &&
+    bytes[0] === 0xef &&
+    bytes[1] === 0xbb &&
+    bytes[2] === 0xbf
+  );
+}
+
 /** The decoded text, or the file's 14.20 finding (SPEC 1.6). */
 export type DecodedSource =
   | { readonly ok: true; readonly text: string }
@@ -88,12 +103,7 @@ export function decodeSourceBytes(
   bytes: Uint8Array,
 ): DecodedSource {
   // SPEC 1.6: a source beginning with a byte-order mark is unparseable.
-  if (
-    bytes.length >= 3 &&
-    bytes[0] === 0xef &&
-    bytes[1] === 0xbb &&
-    bytes[2] === 0xbf
-  ) {
+  if (beginsWithByteOrderMark(bytes)) {
     return {
       ok: false,
       finding: locatedFinding(
