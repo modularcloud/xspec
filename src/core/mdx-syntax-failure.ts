@@ -26,7 +26,10 @@
 //   `}` closes on a line that then fails — a flow expression's brace
 //   followed by text, its content spanning a blank line no paragraph
 //   holds — fails at the first character past the brace that the grammar
-//   rejects;
+//   rejects; and content a brace line opens right below a paragraph line
+//   holding an open text element — the flow reading doomed, the text
+//   reading the paragraph's — fails at the latest at the terminator of
+//   its first line of container syntax and whitespace alone;
 // - an ESM block: the block's text, as recorded, measured as a module of
 //   import and export declarations;
 // - a JSX tag's own syntax: the stock tokenizer's character;
@@ -740,10 +743,12 @@ function goesOn(head: string, brace: number): boolean {
 // content is still open at such a line, no completion of a prefix past
 // that line's terminator derives (SPEC 14's location rule for 14.20); a
 // failure the flow reading's measures place before it fails the text
-// reading too, the two collecting the same content there. A code span or a
-// link title opened in the paragraph may close past the brace, hiding it —
-// and the element — in the text reading, so a paragraph holding a backtick
-// or a `]` is left to the flow reading's measures.
+// reading too, the two collecting the same content there. A code span, a
+// link title, or a definition's label or title opened in the paragraph may
+// close past the brace, hiding it — and the element — in the text reading
+// (`[a <S id="s">` LF `` {` `` LF `]: u` LF LF `` `} b `` derives, a
+// definition), so a paragraph holding a backtick or a bracket is left to
+// the flow reading's measures.
 
 /** The stock grammar's report of an element a paragraph's end left open. */
 const PARAGRAPH_LEFT_OPEN = /before the end of `paragraph`$/;
@@ -799,7 +804,7 @@ function textReadingBound(
     !PARAGRAPH_LEFT_OPEN.test(reason) ||
     placeEnd(failure) !== paragraphEnd ||
     paragraphStart === undefined ||
-    /[`\]]/.test(text.slice(paragraphStart, paragraphEnd))
+    /[`[\]]/.test(text.slice(paragraphStart, paragraphEnd))
   ) {
     return result;
   }
