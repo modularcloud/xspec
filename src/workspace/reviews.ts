@@ -93,7 +93,8 @@ export type LoadedSession =
        * parsed, or violates a session invariant. Every `review` subcommand
        * naming the session reports `finding` and exits 1, modifying
        * nothing; `list` reports the session corrupt in place of its fields
-       * (SPEC 10.7); `check` reports it as condition 21.
+       * (SPEC 10.7), with `finding` beside the listing (SPEC 14.21, 12.7);
+       * `check` reports it as condition 21.
        */
       readonly state: "corrupt";
       readonly name: string;

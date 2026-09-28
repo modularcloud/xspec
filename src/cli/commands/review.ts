@@ -34,7 +34,8 @@
 // `list` (read) — refresh-on-read, then every session in byte order of
 // name with its name, strategy, and item counts by stored status (no
 // read-time invalidation, SPEC 10.7); corrupt sessions by name as corrupt
-// in place of those fields; exit 1 iff any is corrupt.
+// in place of those fields, each also reported as its 14.21 finding under
+// `findings` (SPEC 14, 12.7); exit 1 iff any is corrupt.
 //
 // `status`, `next`, `show`, `export` (reads) — the shared open flow of
 // review-session.ts (session existence, load, recorded-baseline
@@ -46,7 +47,8 @@
 // (SPEC 10.7).
 
 import type { JsonObject } from "../../core/canonical-json.js";
-import type { ExitCode } from "../../core/findings.js";
+import type { ExitCode, Finding } from "../../core/findings.js";
+import { orderFindings } from "../../core/findings.js";
 import type { ReviewSession, SessionParameters } from "../../core/review.js";
 import {
   countsByStoredStatus,
@@ -83,7 +85,11 @@ import type { Invocation } from "../args.js";
 import { flagValue } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { analyzeGraphForRead, prepareGraphForRead } from "../prepare.js";
-import { emitFindingsReport } from "../report.js";
+import {
+  emitFindingsReport,
+  findingToJson,
+  renderFindingsHuman,
+} from "../report.js";
 import { emitDocument, testHoldSpecOf, usageError } from "./common.js";
 import {
   countsJson,
@@ -344,14 +350,18 @@ export async function reviewListCommand(
 
   // SPEC 10.7: every session in byte order of session name; item counts by
   // stored status — no read-time invalidation — and each corrupt session
-  // (14.21) by name as corrupt in place of those fields.
+  // (14.21) by name as corrupt in place of those fields. SPEC 14.21, 14,
+  // 12.7: `list` reports each corrupt session as its condition-21 finding
+  // too — the stable code, the session file as the concerned path — in the
+  // document's `findings` member (`[]` when none is corrupt), and the
+  // human form names the code, presenting the same information (12.0).
   const loaded = await loadAllSessions(context.workspace.root);
-  let anyCorrupt = false;
+  const corruptions: Finding[] = [];
   const entries: JsonObject[] = [];
   let human = "";
   for (const entry of loaded) {
     if (entry.state === "corrupt") {
-      anyCorrupt = true;
+      corruptions.push(entry.finding);
       entries.push({ corrupt: true, name: entry.name });
       human += `${entry.name} corrupt\n`;
       continue;
@@ -367,13 +377,22 @@ export async function reviewListCommand(
       `${entry.name} ${sessionStrategy(entry.session)} ` +
       `${renderCountsHuman(counts)}\n`;
   }
+  // SPEC 12.7: findings in the pinned order, identical findings collapsed —
+  // each corrupt session's finding concerns its own session file, so none
+  // collapses.
+  const findings = orderFindings(corruptions);
   if (invocation.json) {
-    emitDocument(context.stdout, { sessions: entries });
+    emitDocument(context.stdout, {
+      findings: findings.map(findingToJson),
+      sessions: entries,
+    });
   } else {
-    context.stdout.write(human);
+    context.stdout.write(
+      findings.length > 0 ? human + renderFindingsHuman(findings) : human,
+    );
   }
-  // SPEC 10.7: `list` exits 1 when any session is corrupt, else 0.
-  return anyCorrupt ? 1 : 0;
+  // SPEC 10.7, 14.21: `list` exits 1 when any session is corrupt, else 0.
+  return findings.length > 0 ? 1 : 0;
 }
 
 // ---------------------------------------------------------------------------
