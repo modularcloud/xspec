@@ -35,7 +35,8 @@
 //
 // SPEC 13.4's read side shares the occupant classification: reads traverse
 // no non-directory component either, and `readableDirectory` is the one
-// judge of whether a read may list a workspace directory at all.
+// judge of whether a read may list a workspace directory at all —
+// `readableOccupant`, over it, of what a read finds at a file's path.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -215,6 +216,30 @@ export async function readableDirectory(
     if (occupant !== "directory") return false;
   }
   return true;
+}
+
+/**
+ * SPEC 13.4, the read side, for one file: what occupies the
+ * workspace-relative path `rel` as reads see it. Below a workspace-relative
+ * directory component occupied by anything other than a directory — a
+ * plain file, a symbolic link whatever it targets, any other non-directory
+ * occupant — nothing is read and the path holds nothing (14.25's absence,
+ * never its refusal), so it classifies "absent" without being probed
+ * through the component; otherwise the path's own occupant, judged by
+ * `lstat` (`classifyOccupant`). For `.xspec/journal`, that is the journal
+ * below an area path holding no directory: empty (SPEC 6.1) and unoccupied
+ * to the inventory (SPEC 11.6).
+ */
+export async function readableOccupant(
+  root: string,
+  rel: string,
+): Promise<PathOccupant> {
+  const components = directoryComponents(rel);
+  const parent = components[components.length - 1];
+  if (parent !== undefined && !(await readableDirectory(root, parent))) {
+    return "absent";
+  }
+  return classifyOccupant(absoluteOf(root, rel));
 }
 
 /** The SPEC 14.22 finding for one obstructed directory component. */

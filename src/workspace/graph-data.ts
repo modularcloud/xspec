@@ -17,8 +17,10 @@
 // (nothing recorded — the refreshing reads write build's data whole),
 // readable (the parsed model — compared, and refreshed on mismatch with
 // the record preserved), or unreadable — recorded state that exists but
-// cannot be read as a record: a non-plain occupant, or bytes that are not
-// valid UTF-8 or not the stored shape. The unreadable state is neither
+// cannot be read as a record: a non-plain occupant, bytes that are not
+// valid UTF-8 or not the stored shape, or the area's own path `.xspec`
+// occupied by a non-directory, below which nothing is read (SPEC 13.4,
+// 14.23 — never an empty record). The unreadable state is neither
 // read, repaired, nor replaced by any refreshing read and no finding is
 // reported for it (SPEC 13.3); it persists — met by the record-consulting
 // surfaces (SPEC 11.6, 6.6 → 14.23) and reported as staleness by `check`
@@ -30,6 +32,7 @@ import * as path from "node:path";
 import { compareBytes } from "../core/bytes.js";
 import type { GraphData } from "../core/graph-data.js";
 import {
+  GRAPH_DATA_AREA,
   GRAPH_DATA_PATH,
   parseGraphData,
   serializeGraphData,
@@ -81,16 +84,36 @@ function graphDataAbsolutePath(root: string): string {
   return path.join(root, ...GRAPH_DATA_PATH.split("/"));
 }
 
+/** The graph-data area's absolute path under the workspace root. */
+function graphDataAreaAbsolutePath(root: string): string {
+  return path.join(root, ...GRAPH_DATA_AREA.split("/"));
+}
+
 /**
  * Load the workspace's graph data (SPEC 13.3). Never throws on the
  * expected states — each loads as its `GraphDataState`, and the refresh,
  * failure, and staleness behaviors are the callers' (SPEC 13.3, 14.10,
- * 14.23). The occupant classification mirrors `readDerivedFileRecord`:
- * only a plain file is read; anything else at the record's path exists but
- * is no readable record, while a path below a non-directory classifies
- * absent (writes.ts — nothing occupies it).
+ * 14.23). The occupant classification is the record's container first,
+ * then the record's own path, each by lstat:
+ *
+ * - the graph-data area's own path `.xspec` — absent, nothing is recorded
+ *   (the empty record, SPEC 14.23: "the area absent"); occupied by
+ *   anything other than a directory — a plain file, a symbolic link
+ *   whatever it targets, any other non-directory occupant — the record,
+ *   whose container the area is, reads as unreadable (SPEC 13.4, 14.23):
+ *   nothing is read below the occupant, and it is never read as an empty
+ *   record;
+ * - under a directory, the record's path: only a plain file is read;
+ *   anything else there exists but is no readable record.
  */
 export async function loadGraphData(root: string): Promise<LoadedGraphData> {
+  const area = await classifyOccupant(graphDataAreaAbsolutePath(root));
+  if (area === "absent") {
+    return { state: "absent", bytes: null, data: null };
+  }
+  if (area !== "directory") {
+    return { state: "unreadable", bytes: null, data: null };
+  }
   const absolute = graphDataAbsolutePath(root);
   const occupant = await classifyOccupant(absolute);
   if (occupant === "absent") {
@@ -140,8 +163,9 @@ export type DerivedFileRecord =
   | {
       /**
        * SPEC 14.23: recorded state that exists but cannot be read as a
-       * record — a non-plain-file occupant, or bytes that are not the
-       * stored shape (corrupt, merge-conflicted or otherwise). The
+       * record — a non-plain-file occupant, bytes that are not the stored
+       * shape (corrupt, merge-conflicted or otherwise), or the area's own
+       * path occupied by a non-directory (SPEC 13.4). The
        * consulting surface reports its record-supplied datum explicitly
        * unavailable beside one condition-23 finding whose concerned path is
        * the graph-data area, and exits 1 with everything else in full.

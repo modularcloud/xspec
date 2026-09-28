@@ -59,11 +59,15 @@ import type { LoadedWorkspace } from "./config.js";
 import { parseConfigurationBytes } from "./config.js";
 import { runGit } from "./git.js";
 import type { LoadedJournal } from "./journal.js";
-import { journalFromBytes, occupiedJournal } from "./journal.js";
+import {
+  journalFromBytes,
+  journalOccupant as currentJournalOccupant,
+  occupiedJournal,
+} from "./journal.js";
 import type { WorkspaceAnalysis } from "./pipeline.js";
 import { analyzeWorkspaceContent } from "./pipeline.js";
 import type { PathOccupant } from "./writes.js";
-import { classifyOccupant, describeOccupant } from "./writes.js";
+import { describeOccupant } from "./writes.js";
 
 /** A successfully reconstructed baseline (SPEC 6.3). */
 export interface ResolvedBaseline {
@@ -434,11 +438,12 @@ export async function readBaseline(
 
   // --- replay: current journal entries absent at the ref (SPEC 6.3) -----
   const currentJournalAbsolute = path.join(root, ".xspec", "journal");
-  const occupant = await classifyOccupant(currentJournalAbsolute);
+  const occupant = await currentJournalOccupant(root);
   let currentJournalBytes: Uint8Array;
   if (occupant === "absent") {
     // SPEC 6.3: a journal file absent in the current workspace is read as
-    // an empty journal.
+    // an empty journal — and so is one below an area path holding no
+    // directory, where nothing is read (SPEC 13.4).
     currentJournalBytes = new Uint8Array(0);
   } else if (occupant === "file") {
     currentJournalBytes = await fsp.readFile(currentJournalAbsolute);

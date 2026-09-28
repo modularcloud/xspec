@@ -48,13 +48,11 @@ import { generatedDerivedPaths } from "../core/build.js";
 import { configurationFromStored } from "../core/config-data.js";
 import type { Configuration } from "../core/config.js";
 import type { GraphData, StoredRequirementNode } from "../core/graph-data.js";
-import {
-  GRAPH_DATA_PATH,
-  parseGraphData,
-  serializeGraphData,
-} from "../core/graph-data.js";
+import { GRAPH_DATA_PATH, serializeGraphData } from "../core/graph-data.js";
 import { sha256Hex } from "../core/hash.js";
 import { discoverSources } from "./discovery.js";
+import type { LoadedGraphData } from "./graph-data.js";
+import { loadGraphData } from "./graph-data.js";
 import { readJournalBytes } from "./journal.js";
 import type { LocatedWorkspace } from "./locate.js";
 import { obstructedWritePathFindings } from "./writes.js";
@@ -78,21 +76,26 @@ function absoluteOf(root: string, rel: string): string {
 export async function verifyStoreForRead(
   located: LocatedWorkspace,
 ): Promise<VerifiedStore | null> {
-  // 1. Store bytes: present, parseable, canonical.
-  let storedBytes: Buffer;
+  // 1. Store bytes: present, parseable, canonical — read by the one record
+  // read every surface shares (./graph-data.ts), so the store is read only
+  // as a plain file under an area path holding a directory, never through
+  // a symbolic link or a non-directory occupant (SPEC 13.4, 14.23). A read
+  // that throws falls back like every other failure here: the full path
+  // meets it, and answers or reports, as it would without this path.
+  let stored: LoadedGraphData;
   try {
-    storedBytes = await fsp.readFile(absoluteOf(located.root, GRAPH_DATA_PATH));
+    stored = await loadGraphData(located.root);
   } catch {
     return null;
   }
-  let storedText: string;
-  try {
-    storedText = new TextDecoder("utf-8", { fatal: true }).decode(storedBytes);
-  } catch {
+  if (stored.state !== "readable" || stored.bytes === null) {
     return null;
   }
-  const data = parseGraphData(storedText);
-  if (data === null || serializeGraphData(data) !== storedText) {
+  const data = stored.data;
+  if (
+    data === null ||
+    !Buffer.from(serializeGraphData(data), "utf8").equals(stored.bytes)
+  ) {
     return null;
   }
 

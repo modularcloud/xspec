@@ -7,7 +7,10 @@
 // modified or deleted by other commands. An absent file is an empty journal
 // (SPEC 6.1). A journal path occupied by anything other than a plain file —
 // a symbolic link included — is never read, appended to, or replaced: it is
-// a journal error (SPEC 13.4 → 14.13).
+// a journal error (SPEC 13.4 → 14.13). Below an area path `.xspec` holding
+// no directory — a plain file, or a symbolic link whatever it targets —
+// nothing is read: the journal so placed is empty (SPEC 6.1) and
+// unoccupied to the inventory (SPEC 11.6), never a journal error (13.4).
 //
 // Parsing, validation, and the canonical-identity walk are the pure core's
 // (src/core/journal.ts); this module classifies the occupant and reads
@@ -28,8 +31,8 @@ import {
 import type { PathOccupant } from "./writes.js";
 import {
   appendDurableFile,
-  classifyOccupant,
   describeOccupant,
+  readableOccupant,
 } from "./writes.js";
 
 /** What occupies the journal's path (SPEC 6.1, 13.4). */
@@ -63,15 +66,30 @@ function journalAbsolutePath(root: string): string {
 }
 
 /**
+ * What occupies the journal's path as reads see it (SPEC 6.1, 13.4) — the
+ * one classification every current-journal read derives from: the path's
+ * own occupant, judged by lstat so a link there is judged itself, never
+ * probed through; and "absent" below an area path holding no directory —
+ * `.xspec` a plain file, a symbolic link whatever it targets, or any other
+ * non-directory occupant — where nothing is read, so the journal so placed
+ * is empty (SPEC 6.1) and unoccupied to the inventory (SPEC 11.6), never a
+ * journal error (`readableOccupant`, writes.ts).
+ */
+export async function journalOccupant(root: string): Promise<PathOccupant> {
+  return readableOccupant(root, JOURNAL_PATH);
+}
+
+/**
  * SPEC 11.6: whether anything presently occupies the journal's path —
  * occupancy is presence alone, whatever kind of filesystem object occupies
  * it (a plain file, a directory, a symbolic link broken or not), judged by
- * lstat so a link is never probed through (SPEC 13.4). No content is read:
- * an absent journal is an empty journal (SPEC 6.1), and the inventory
- * reports no 14.13 for whatever the occupant holds.
+ * lstat so a link is never probed through (SPEC 13.4) — none below an area
+ * path holding no directory (`journalOccupant`). No content is read: an
+ * absent journal is an empty journal (SPEC 6.1), and the inventory reports
+ * no 14.13 for whatever the occupant holds.
  */
 export async function journalOccupied(root: string): Promise<boolean> {
-  return (await classifyOccupant(journalAbsolutePath(root))) !== "absent";
+  return (await journalOccupant(root)) !== "absent";
 }
 
 /**
@@ -133,11 +151,12 @@ export function occupiedJournal(occupant: PathOccupant): LoadedJournal {
  * path — symbolic link, directory, or other non-plain occupant — is never
  * read and reports a journal error (SPEC 13.4 → 14.13). Classification uses
  * lstat (writes.ts), so a symbolic link is judged itself, never through its
- * target.
+ * target; below an area path holding no directory the journal is absent,
+ * so empty (SPEC 13.4, `journalOccupant`).
  */
 export async function loadJournal(root: string): Promise<LoadedJournal> {
   const absolute = journalAbsolutePath(root);
-  const occupant = await classifyOccupant(absolute);
+  const occupant = await journalOccupant(root);
   if (occupant === "absent") {
     return journalFromBytes(null);
   }
@@ -149,7 +168,8 @@ export async function loadJournal(root: string): Promise<LoadedJournal> {
 
 /**
  * The journal file's raw bytes — null when the path holds no plain file (an
- * absent journal is empty, SPEC 6.1; a non-plain occupant is never read,
+ * absent journal is empty, SPEC 6.1, and so is one below an area path
+ * holding no directory, SPEC 13.4; a non-plain occupant is never read,
  * SPEC 13.4, and the caller's validation has already reported it, 14.13).
  * `rename` and `move` read these to model the journal as it will stand
  * after their append (SPEC 6.4, 6.5: the post-operation analysis hashes
@@ -159,7 +179,7 @@ export async function readJournalBytes(
   root: string,
 ): Promise<Uint8Array | null> {
   const absolute = journalAbsolutePath(root);
-  if ((await classifyOccupant(absolute)) !== "file") {
+  if ((await journalOccupant(root)) !== "file") {
     return null;
   }
   try {
