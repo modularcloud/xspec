@@ -66,10 +66,10 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T6.5-13 | section-6.5-iii | 26 (since Task 29 its arms (a)–(h) hold; it stops first at arm (i)'s preview, an `id-rewrite` reported for the unchanged `id="m"` of a cross-file move keeping its ID) |
 | T6.5-15 | section-6.5-iii | 34 (since Task 10 arm (a)'s three lines derive as one block; it stops first at (a)'s preview, which reports A's declaration removed) |
 | T6.5-16 | section-6.5-iii | 11, 35 (since Task 11 the stock pairing rejects arm (a)'s would-be target, so the move is no longer performed: it stops at its own re-validation of the rewritten workspace, exit 1 with the would-be file's 14.20 — `got ["14.20"]` — where the single `refused-invalid-rewrite` is required) |
-| T6.5-17 | section-6.5-iii | 25 |
+| T6.5-17 | section-6.5-iii | 25 (passes since Task 25 landed: each refused arm reports the single `refused-moved-import` locating each declaration's own characters, `refused-invalid-id` beside it in (d), previewed alike; the control (e) is performed as composed) |
 | T6.5-18 | section-6.5-iii | 33 |
 | T6.5-19 | section-6.5-iii | 26 (since Task 29 arm (a) holds and (b)'s bytes agree; it stops first at (b)'s preview, an `id-rewrite` reported for the unchanged `id="m"`) |
-| T6.6-3 | section-6.6 | 23, 25, 35 (since Task 22 its `--preview` replays of T6.4-3's refusals hold, the invalid-ID arms included, and since Task 23 the file-form exact self-move arm, `refused-identity-unchanged` alone; it stops first at the replay of T6.5-16 arm (a)'s `body</S>` variant (a space after its opening tag), Task 35: the product reports `["14.20 x1"]` where the single `refused-invalid-rewrite` is required) |
+| T6.6-3 | section-6.6 | 23, 25, 35 (since Task 22 its `--preview` replays of T6.4-3's refusals hold, the invalid-ID arms included, and since Task 23 the file-form exact self-move arm, `refused-identity-unchanged` alone; it stops first at the replay of T6.5-16 arm (a)'s `body</S>` variant (a space after its opening tag), Task 35: the product reports `["14.20 x1"]` where the single `refused-invalid-rewrite` is required; the replays of T6.5-17's four refused arms, run after T6.5-16's, hold since Task 25 — hand-verified by driving the module's `expectRefusedArmPreviewTwin` over `M17_REFUSED_ARMS`, AGENTS.md's refusal-probing bullet) |
 | T6.6-4 | section-6.6 | 29 (passes since Task 29 landed, with Task 10) |
 | T7-1 | section-7-basics | 36 |
 | T7-2 | section-7-basics | 8, 37, 38 (since Task 8 its verbatim-literal arms hold — the escape-spelled glob discovers nothing and the escape-spelled group name is named only by its own spelling; it stops first at Task 37's byte-order-mark arm) |
@@ -103,7 +103,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T14-2 | section-14 | 6 (passes since Task 6 landed) |
 | T14-4 | section-14 | 51 |
 | T14-6 | section-14 | 48, 49 (since Task 12 its early-error stagings hold; it stops first at the 14.24 arm, Task 48) |
-| T14-7 | section-14 | 22, 23, 24, 25, 35 (since Task 22 its rename arms hold; its exact self-move arms, run late in the body (after the cycle, invalid-rewrite, moved-import, and invalid-path arms), hold since Task 23 — hand-verified on their staging: `move specs/R.mdx specs/R.mdx` exits 1 with `refused-identity-unchanged` alone, `identities` `["specs/R.mdx"]`, `--preview` likewise; since Task 24 both spec-import-cycle arms hold — the finding locates `user`'s `"x"`, `[specs/A.mdx 72,75]`, beside B's import `[specs/B.mdx 0,25]`, and in the sibling arm the chain `C.foo`, `[specs/A.mdx 71,76]`, beside C's import; it stops first at the invalid-rewrite arm's `body</S>` variant (a space after its opening tag), Task 35: the product reports `["14.20 x1"]` where the single `refused-invalid-rewrite` is required) |
+| T14-7 | section-14 | 22, 23, 24, 25, 35 (since Task 22 its rename arms hold; its exact self-move arms, run late in the body (after the cycle, invalid-rewrite, moved-import, and invalid-path arms), hold since Task 23 — hand-verified on their staging: `move specs/R.mdx specs/R.mdx` exits 1 with `refused-identity-unchanged` alone, `identities` `["specs/R.mdx"]`, `--preview` likewise; since Task 24 both spec-import-cycle arms hold — the finding locates `user`'s `"x"`, `[specs/A.mdx 72,75]`, beside B's import `[specs/B.mdx 0,25]`, and in the sibling arm the chain `C.foo`, `[specs/A.mdx 71,76]`, beside C's import; it stops first at the invalid-rewrite arm's `body</S>` variant (a space after its opening tag), Task 35: the product reports `["14.20 x1"]` where the single `refused-invalid-rewrite` is required; its moved-import arms, run after the invalid-rewrite arms, hold since Task 25 — hand-verified by driving the module's `runT147MovedImportArms`, AGENTS.md's refusal-probing bullet) |
 | T14-9 | section-14-ii | 48 |
 | T14-10 | section-14-ii | 49, 50 |
 | T14-11 | section-14 | 13, 14, 15, 16, 68 (Tasks 12–16 landed: every table arm holds — (a)–(m) and (p)–(w), (h)'s repeated `id` locating both spellings, [36,44) and [45,54), since Task 15, and (j)'s and (u)'s colliding declarations beside their imports since Task 16; it stops first at arm (n), run after the table's arms, which waits on Task 68: probed by hand, its 14.17 locates both `d` attributes since Task 15, while the second spelling's unresolved `"absent"` reports no 14.5) |
@@ -166,31 +166,6 @@ Several tasks have no failing test of their own: Task 27 (preview/real agreement
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 25 — Moving a section that holds an import declaration is refused as `refused-moved-import` (SPEC 6.5 "Validation and refusals", 14, 6.6; A25, C19(e))
-
-After Task 21 (landed: `REFUSAL_CODES` lists `refused-moved-import`).
-
-**Requirement.**
-- SPEC 6.5 refuses a section move whose moved text holds an import declaration; "such a section is movable once the declaration stands outside it".
-- SPEC 14, `refused-moved-import`: "one finding locating each such declaration in the origin file by its own characters, the import range of 11.4, its `identities` empty".
-- A preview reports exactly the same (6.6).
-
-**Observed.** `move` and `move --preview` of such a section crash with exit 70: "xspec internal error: overlapping move deletions".
-
-**Location.**
-- `src/core/refusal.ts`: the section-form reasons.
-- `src/core/move.ts` ~449: the throw.
-
-**Change.**
-- Add the reason, evaluated over the pre-operation origin. Locate every import declaration inside the moved section's construct, one location each.
-- Report it together with every other applicable reason (14).
-- Keep the internal-error throw only as an unreachable guard.
-
-**Verification.**
-- Should turn green: `section-6.5-iii.test.ts` (T6.5-17).
-- `section-6.6.test.ts`: T6.6-3, with Task 35.
-- `section-14.test.ts`: T14-7's moved-import arm.
 
 ## Task 26 — A move rewrites and previews only spellings whose characters change (SPEC 6.5 "Reference spellings", 6.6; A17)
 
@@ -368,11 +343,12 @@ Its `identities` are the workspace-relative paths of the files concerned, in byt
 - Judge each file with `specSourceParseFailure(file, bytes)` (`src/core/mdx.ts`, landed with Task 11: null exactly when the bytes are well-formed — the stock MDX 3 verdict `parseSpecSource` reaches, without building the model), and collect the files that lack an admissible offset for an addition they need (`admissible: false`).
 - Report the single finding as specified, beside every other applicable reason.
 - The preview reports the same finding.
+- Planning a move whose moved text holds an import declaration throws `xspec internal error: overlapping move deletions` (`deletionEditsWithLineDrops` in `src/core/move.ts`: the declaration's import removal lies inside the origin deletion). Since Task 25 such a move is refused as `refused-moved-import` before any planning, the throw an unreachable guard; if this task plans inside the refusal evaluation, it must not reach that throw — e.g. compose the would-be origin with the import removals lying inside the moved construct left out, the origin deletion subsuming them. T6.5-17's refused arms (a)–(c) pin `refused-moved-import` alone — no `refused-invalid-rewrite` beside it ((c)'s summary in `section-6.5-iii.ts`: "the composition would otherwise be well-formed") — and (d) `refused-invalid-id` beside it (no `refused-invalid-rewrite` under an invalid new ID); T6.6-3 and T14-7 replay those arms, so they must stay green.
 
 **Verification.**
 - Should turn green: `section-6.5-iii.test.ts` (T6.5-16).
-- `section-6.6.test.ts`: T6.6-3 (with Task 25).
-- `section-14.test.ts`: T14-7 (with Task 25; Task 24 landed, and T14-7 now stops first at this task's arm).
+- `section-6.6.test.ts`: T6.6-3 (Task 25 landed: its replays of T6.5-17's arms, run after T6.5-16's, hold).
+- `section-14.test.ts`: T14-7 (Tasks 24 and 25 landed: T14-7 now stops first at this task's arm, and its moved-import arms, run after it, hold).
 - Neighbours: `section-6.5.test.ts`, `section-6.5-ii.test.ts`.
 
 ## Task 36 — The configuration path is judged by what occupies it (SPEC 7, 14.14; B1)

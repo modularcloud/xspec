@@ -922,6 +922,32 @@ export function evaluateMoveFileRefusals(
   return findings;
 }
 
+/**
+ * SPEC 6.5, 14 `refused-moved-import`: the import declarations the moved
+ * text holds — the moved text being the section construct's own
+ * characters, from the first character of its opening tag through the
+ * last character of its closing tag (SPEC 6.5, 1.7). An ESM block derives
+ * inside a section element too (SPEC 14.20), a descendant's inside every
+ * enclosing construct, and a block lies wholly inside or wholly outside an
+ * element, so a declaration is held exactly when its own characters lie
+ * inside the construct's range. Each is located in the origin file by its
+ * own characters — the import range of 11.4, a spelled `;` included, its
+ * line terminator excluded — in start order (SPEC 14, 12.7).
+ */
+function movedImportLocations(
+  origin: SpecFileAnalysis,
+  construct: ByteRange,
+): FindingLocation[] {
+  const locations: FindingLocation[] = [];
+  for (const declared of origin.imports.imports) {
+    const range = declared.statement.range;
+    if (range.start >= construct.start && range.end <= construct.end) {
+      locations.push({ file: origin.document.file, range });
+    }
+  }
+  return locations;
+}
+
 /** The inputs of a section-form move's refusal evaluation (SPEC 6.5, 14). */
 export interface MoveSectionRefusalInputs {
   readonly specs: readonly SpecFileAnalysis[];
@@ -953,10 +979,11 @@ export interface MoveSectionRefusalInputs {
  * (SPEC 6.5, 14) over a workspace passing `build`'s validations: the
  * mirrored identity checks (intrinsic form, identity change, collisions
  * after the removal), the target parent, the destination occupancy and
- * validity, and the would-be cycles (dependency and spec-import). No
- * reason exists for an unresolvable rewritten reference (SPEC 6.4, 14):
- * a moved reference targeting the target file's root node is refused as
- * the dependency cycle it closes (the module header).
+ * validity, an import declaration the moved text holds, and the would-be
+ * cycles (dependency and spec-import). No reason exists for an
+ * unresolvable rewritten reference (SPEC 6.4, 14): a moved reference
+ * targeting the target file's root node is refused as the dependency
+ * cycle it closes (the module header).
  */
 export function evaluateMoveSectionRefusals(
   inputs: MoveSectionRefusalInputs,
@@ -1089,6 +1116,39 @@ export function evaluateMoveSectionRefusals(
         ),
       );
     }
+  }
+
+  // SPEC 14 `refused-moved-import`: the moved text holds an import
+  // declaration — judged over the moved text as it stands, whatever the
+  // edits would leave (SPEC 6.5): the exact edits would carry the
+  // declaration into the target file, where its specifier resolves from
+  // that file's directory (2.1) and its binding may collide with one the
+  // file holds (14.15), while every origin-kept reference rooted at its
+  // binding would lose it (2.4). Its terms read nothing of the new ID, the
+  // target path, or the insertion point, so it applies beside every other
+  // reason, under no intrinsic-validity qualifier: one finding locating
+  // each such declaration in the origin file by its own characters (the
+  // import range of 11.4), its `identities` empty (SPEC 14).
+  const movedImports = movedImportLocations(origin, movedSection.range);
+  if (movedImports.length > 0) {
+    const held =
+      movedImports.length === 1
+        ? "an import declaration"
+        : `${String(movedImports.length)} import declarations`;
+    findings.push(
+      refusalFinding(
+        "refused-moved-import",
+        `moved import: the moved section ` +
+          `${JSON.stringify(`${originPath}#${oldId}`)} holds ${held} — a ` +
+          `move carrying an import declaration into the target file is ` +
+          `refused: its specifier would resolve from that file's ` +
+          `directory, its binding could collide with one the file holds, ` +
+          `and every reference the origin keeps rooted at its binding ` +
+          `would lose it; move each declaration into an ESM block outside ` +
+          `the section, then move the section (SPEC 6.5, 2.1, 14)`,
+        { locations: movedImports },
+      ),
+    );
   }
 
   const map = moveSectionIdentityMap(originPath, oldId, targetPath, newId);

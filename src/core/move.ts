@@ -447,6 +447,10 @@ function deletionEditsWithLineDrops(
   const sorted = [...ranges].sort((a, b) => a.start - b.start);
   for (let index = 1; index < sorted.length; index += 1) {
     if (sorted[index]!.start < sorted[index - 1]!.end) {
+      // Unreachable guard: the one overlap a plan could hold — an import
+      // removal inside the origin deletion's construct — is a moved text
+      // holding an import declaration, refused before any planning
+      // (`refused-moved-import`, SPEC 6.5, 14; core/refusal.ts).
       throw new Error("xspec internal error: overlapping move deletions");
     }
   }
