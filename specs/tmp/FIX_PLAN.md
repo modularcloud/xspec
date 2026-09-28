@@ -92,13 +92,13 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T11.5-3 | section-11.5 | 9 (passes since Task 9 landed) |
 | T11.6-2 | section-11.6 | 4 (passes since Task 4 landed) |
 | T12.0-10 | section-12.0-ii | 44 (its `--tag 'a\b'` row holds since Task 2) |
-| T12.0-14 | section-12.0-iii | 43 |
+| T12.0-14 | section-12.0-iii | 43 (passes since Task 43 landed: `parseArgv` in `src/cli/args.ts` reads the tokens in stages — `walkTokens` strips flags anywhere, each flag's arity fixed by its name across commands (`FLAG_ARITY`, a name of no command taking no value), and honours `--`; JSON output is in effect exactly for a `--json` the walk reads as a flag, or a JSON-only surface; then `matchCommand` matches the remaining words to the synopsis and each walked flag is checked against the command's accepted set — so `--json ids`, `--config cfg/xspec.config.ts build`, and `ids --` run, while `ids -- --json`, `build --file --json`, and `ids --file --json extra` exit 2 with stdout empty) |
 | T12.2-4 | section-12.1-12.2 | 52 |
 | T12.3-1 | section-12.3-12.5 | 40 (passes since Task 40 landed) |
 | T12.7-3 | section-12.7 | 42, 48, 49 (since Task 42 landed every configuration arm holds — an unoccupied `--config` path, `./../cfg//xspec.config.ts` and an absolute one, reported byte-for-byte as given, the same spellings reporting `../cfg/xspec.config.ts` once the malformed file exists — and so do the search-failure, single-finding, usage, and linked-working-directory arms; it stops first at the Linux-leg 14.24 arm, Task 48: `build --json` on a stale workspace with `.xspec` unwritable exits 70, `internal error: EACCES`, where it must exit 2 with `{"code": "write-failure", "path": ".xspec"}`; the 14.25 arm after it, `build --json` with `specs/sub` unlistable, expecting `{"code": "read-failure", "path": "specs/sub"}`, waits on Task 49) |
 | T13.3-2 | section-13.3 | 47 |
 | T13.4-6 | section-13.4 | 51 |
-| T13.5-1 | section-13.5 | 43 |
+| T13.5-1 | section-13.5 | 43 (passes since Task 43 landed: `build --test-hold --json` consumes `--json` as the hold path, `--test-hold` being value-taking by name, and exits 2 as an unknown flag to `build`, stdout empty, no hold file) |
 | T13.5-7 | section-13.5 | 48 |
 | T14-2 | section-14 | 6 (passes since Task 6 landed) |
 | T14-4 | section-14 | 51 |
@@ -167,37 +167,6 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 
 ---
 
-## Task 43 — Parse arguments by SPEC 12.0's invocation grammar (SPEC 12.0; C1)
-
-**Requirement.** SPEC 12.0, "Invocation grammar":
-- Flag tokens "may stand anywhere among the arguments — before the command word, between it and its operands, or after them".
-- "The token `--` ends flag reading: it is dropped, and every later token is a non-flag token".
-- "A flag's arity is fixed by its name, the same for every command — known before the command word is identified … and a `--` token naming no flag of any command takes no value".
-- Once flags, their values, and any `--` are removed, the remaining tokens must match the synopsis exactly. A surplus token is a usage error of the syntax class.
-
-The JSON bullet adds: JSON output is in effect exactly when "a `--json` token read as a flag, not as another flag's value" is given (or the surface is JSON-only).
-
-**Observed.**
-- (a) Flags before the command word or the subcommand are refused, exit 2:
-  - `xspec --json ids` and `xspec --config cfg/xspec.config.ts build` fail with "expected a command before any flags";
-  - `xspec query --json nodes` fails with "missing subcommand".
-- (b) `--` is not treated as the end of flags:
-  - `ids --` fails with "unknown flag '--'"; it must behave as `ids`;
-  - `ids -- --json` puts the error document on stdout; it must be a surplus-operand error, with JSON not in effect and stdout empty.
-- (c) `build --file --json`, `build --test-hold --json`, and `ids --file --json extra` put the error document on stdout, although `--json` is a flag's value in each. The cause is a literal `argv.includes("--json")` scan.
-
-**Location.** `src/cli/args.ts`: `parseArgv` (header ~1–40, per-command flag tables ~250–330, checks ~755–830), and wherever JSON-in-effect is decided (`src/cli/main.ts`).
-
-**Change.** Parse in stages:
-1. Walk all tokens using one global arity table: every flag of every command, each value-taking or not. Strip flags with their values, and honour `--`.
-2. Decide JSON-in-effect from that walk: a `--json` read as a flag, including a repeated one.
-3. Match the remaining tokens to the command, subcommand, and operands.
-4. Check each flag against the command's accepted set.
-
-Keep usage-error precedence and messages deterministic.
-
-**Verification.** `section-12.0-iii.test.ts` (T12.0-14), `section-13.5.test.ts` (T13.5-1). Neighbours: `section-12.0-i.test.ts`, `section-12.0-ii.test.ts`, `section-12.6.test.ts`, `section-12.7.test.ts`.
-
 ## Task 44 — Report syntax-class usage errors without loading configuration (SPEC 12.0; B13, C2)
 
 After Tasks 1, 2, 39, and 43.
@@ -222,7 +191,7 @@ The error document then carries `code` and `path` as `null`.
 With a missing configuration, all of the above fail the same way, and so does `at <file> +7`.
 
 **Location.**
-- `src/cli/args.ts`: the parse-level checks.
+- `src/cli/args.ts`: the parse-level checks. Since Task 43, `parseArgv` runs in stages: `walkTokens` (flags anywhere, arity by name, `--`), JSON-in-effect from the walk, the whole-argv UTF-8 check, `matchCommand`, the per-flag checks against the command's accepted set (unknown, repeated, missing value, list/allowed/identity/tag values), then the required-flag, exactly-one-of, operand-count, operand-conflict, identity-operand, and `move` operand checks; the syntax-class spelling checks belong after those, every one before `main` locates the configuration.
 - `src/cli/main.ts`: the dispatch order.
 - `src/cli/commands/gated-args.ts`.
 - `src/cli/commands/occurrences.ts` ~78, where `nodeSpellingProblem` runs after loading.

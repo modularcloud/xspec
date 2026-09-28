@@ -301,7 +301,7 @@ export function usageErrorFinding(message: string): Finding {
 /**
  * The exit-2 error document of SPEC 12.0/12.7 — `{"error": …}` holding one
  * finding form — as the entire standard output. Emitted exactly when JSON
- * output is in effect (`--json` among the arguments, or a JSON-only
+ * output is in effect (a `--json` token read as a flag, or a JSON-only
  * surface); the caller writes the stderr diagnostics and exits 2 either
  * way.
  */

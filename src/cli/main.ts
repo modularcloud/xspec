@@ -222,8 +222,8 @@ export async function main(
     // SPEC 12.0: usage errors — unknown commands or flags, missing required
     // flags or arguments, invalid flag values, repeated flags, non-UTF-8
     // argument values — exit 2 with the diagnostic on standard error. With
-    // JSON output in effect (`--json` among the arguments even when the
-    // arguments are themselves the error, or a JSON-only surface), the
+    // JSON output in effect (a `--json` token read as a flag, even when
+    // the arguments are themselves the error, or a JSON-only surface), the
     // 12.7 error document — one code-less, path-less finding — is the
     // entire standard output; otherwise standard output stays empty.
     stderr.write(`xspec: ${result.message}\n`);

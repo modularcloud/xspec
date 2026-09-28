@@ -19,7 +19,7 @@ import { emitErrorDocument, usageErrorFinding } from "../report.js";
 /**
  * SPEC 12.0: usage errors — unknown identities, unknown groups, invalid
  * flag values — exit 2 with the diagnostic on standard error. With JSON
- * output in effect (`--json` among the arguments, or a JSON-only surface),
+ * output in effect (a `--json` read as a flag, or a JSON-only surface),
  * the 12.7 error document — `{"error": …}` holding one code-less,
  * path-less finding form — is the entire standard output; without it,
  * standard output stays empty. Diagnostics echo argv tokens and static
