@@ -416,7 +416,7 @@ No test stages a parenthesized default export.
 - Adding `specs/B.mdx` with an unresolved `d={missing}`: `build`, `check`, and `ids` report the 14.8 alone.
 - With a garbage `.xspec/journal` instead: they report the 14.13 alone.
 
-**Location.** `buildCommand` in `src/cli/commands/build.ts`, `checkCommand` in `src/cli/commands/check.ts`, and `analyzeWorkspaceForRead` in `src/workspace/refresh.ts`. Each runs `obstructedWritePathFindings` over `computeBuildOutputs(...).writePaths` inside a no-analysis-findings branch.
+**Location.** `buildCommand` in `src/cli/commands/build.ts`, `checkCommand` in `src/cli/commands/check.ts`, and the gate's `assessWorkspaceRead` in `src/workspace/refresh.ts`. Each runs `obstructedWritePathFindings` over `computeBuildOutputs(...).writePaths` inside a no-analysis-findings branch.
 
 **Change.**
 - On a workspace with source or journal findings, judge the write-path set that discovery and configuration define: modules and companions per 13.1, Markdown per 7.3, and graph data's own paths.
