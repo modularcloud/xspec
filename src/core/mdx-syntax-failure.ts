@@ -27,11 +27,13 @@
 //   followed by text, its content spanning a blank line no paragraph
 //   holds — fails at the first character past the brace that the grammar
 //   rejects; and content opened by a construct begun right below a
-//   paragraph line holding an open text element — a brace line, a tag
-//   holding the brace, a brace after a tag or text on that line, a brace
-//   inside a tag or expression running on from it; the flow reading
-//   doomed, the text reading the paragraph's — fails at the latest at the
-//   terminator of its first line of container syntax and whitespace alone;
+//   paragraph line holding an open text element or text-level expression —
+//   a brace line, a tag holding the brace, a brace after a tag or text on
+//   that line, a brace inside a tag or expression running on from it; the
+//   flow reading doomed, the text reading the paragraph's — fails at the
+//   latest at the terminator of its first line of container syntax and
+//   whitespace alone, and below an open expression, whose content that
+//   reading goes on with, where that content fails;
 // - an ESM block: the block's text, as recorded, measured as a module of
 //   import and export declarations;
 // - a JSX tag's own syntax: the stock tokenizer's character;
@@ -809,6 +811,16 @@ function goesOn(head: string, brace: number): boolean {
 // is left to the flow reading's measures; one opened past the paragraph
 // line, before the brace, is the grammar's own reading there, a line that
 // does not begin with `{` or `<` being text alone.
+//
+// Below a paragraph line holding an open text-level expression — a text
+// expression, or an attribute value expression or spread attribute of a
+// text tag — the flow reading is doomed alike, and in the text reading the
+// line below is the expression's content, the brace no container's: the
+// two readings collect different content, so the text reading's is
+// collected as that reading has it, the line below respelled so that no
+// flow construct begins it (`textExpressionBound`). A code span, link, or
+// definition hiding the expression ends by the paragraph's end, so that
+// probe sees it.
 
 /** The stock grammar's report of an element a paragraph's end left open. */
 const PARAGRAPH_LEFT_OPEN = /before the end of `paragraph`$/;
@@ -863,8 +875,44 @@ function leavesParagraphOpen(
   );
 }
 
+/**
+ * Whether `failure`, the grammar's for a prefix ending at `end` inside an
+ * expression (`endsInsideConstruct`), is a text-level one's — a text
+ * expression, or an attribute value expression or spread attribute of a
+ * text tag — held open by a paragraph (or heading) line ending at `end`,
+ * `terminator` the line's: the prefix through the terminator fails there
+ * too, the paragraph ending at the line, where a flow construct's content
+ * would run on past it (the end of the file placed past the terminator, or
+ * the empty line past it lazy).
+ */
+function holdsOpenTextExpression(
+  text: string,
+  failure: MdxFailure,
+  end: number,
+  terminator: string,
+): boolean {
+  if (failure.source !== "micromark-extension-mdx-expression") return false;
+  const through = analysisParse(text.slice(0, end + terminator.length));
+  return (
+    through.failure !== null &&
+    through.failure.source === "micromark-extension-mdx-expression" &&
+    through.failure.ruleId === "unexpected-eof" &&
+    placeStart(through.failure) === end
+  );
+}
+
 /** How many lines of a construct `openParagraphAbove` walks back over. */
 const CONSTRUCT_LINES = 64;
+
+/**
+ * A paragraph line above the construct holding a brace (its end), and what
+ * it holds open at its end: a text element, or a text-level expression
+ * whose content the lines below go on with in the text reading.
+ */
+interface ParagraphLine {
+  readonly end: number;
+  readonly open: "element" | "expression";
+}
 
 /**
  * `openParagraphAbove`'s findings in the analysis in progress, by the text
@@ -872,24 +920,29 @@ const CONSTRUCT_LINES = 64;
  * ask of the same lines again and again, and each step of the walk parses
  * a prefix.
  */
-let paragraphsAbove: Map<string, number | undefined> | null = null;
+let paragraphsAbove: Map<string, readonly ParagraphLine[]> | null = null;
 
 /**
- * The paragraph line holding an open text element (its end) right above
- * the line where the construct holding a brace begins — the brace's line
- * starting at `lineStart`, or, where the prefix through the line above
- * ends inside a JSX tag or an expression, the first of the lines such
- * constructs run over, walking back line by line (above), at most
- * `CONSTRUCT_LINES` of them — or undefined where no such paragraph line is
- * found: a line above that is blank, the file's first line, a prefix the
- * grammar reads otherwise, or a construct running over more lines.
+ * The paragraph lines holding an open text element or text-level
+ * expression right above the line where the construct holding a brace
+ * begins — the brace's line starting at `lineStart`, or, where the prefix
+ * through the line above ends inside a JSX tag or an expression, the first
+ * of the lines such constructs run over, walking back line by line
+ * (above), at most `CONSTRUCT_LINES` of them: the first line found whose
+ * prefix ends inside a text-level expression a paragraph holds
+ * (`holdsOpenTextExpression`), walked over all the same, and the line where
+ * the walk ends if the grammar reads a paragraph ending there with a text
+ * element open (`leavesParagraphOpen`) — none where the walk meets a blank
+ * line, the file's first line, or a prefix the grammar reads otherwise
+ * first, or runs over more lines.
  */
 function openParagraphAbove(
   text: string,
   lineStart: number,
-): number | undefined {
+): readonly ParagraphLine[] {
   const key = text.slice(0, lineStart);
-  if (paragraphsAbove?.has(key) === true) return paragraphsAbove.get(key);
+  const known = paragraphsAbove?.get(key);
+  if (known !== undefined) return known;
   const found = walkToOpenParagraph(text, lineStart);
   paragraphsAbove?.set(key, found);
   return found;
@@ -899,31 +952,44 @@ function openParagraphAbove(
 function walkToOpenParagraph(
   text: string,
   lineStart: number,
-): number | undefined {
+): readonly ParagraphLine[] {
+  const found: ParagraphLine[] = [];
   let start = lineStart;
   for (let line = 0; line <= CONSTRUCT_LINES; line += 1) {
     const terminator = terminatorBefore(text, start);
-    if (terminator === "") return undefined;
+    if (terminator === "") return found;
     const end = start - terminator.length;
     start = lineStartAt(text, end);
-    if (LINE_SYNTAX.test(text.slice(start, end))) return undefined;
+    if (LINE_SYNTAX.test(text.slice(start, end))) return found;
     const { failure } = analysisParse(text.slice(0, end));
-    if (failure === null) return undefined;
+    if (failure === null) return found;
     if (!endsInsideConstruct(failure, end)) {
-      return leavesParagraphOpen(text, failure, end) ? end : undefined;
+      if (leavesParagraphOpen(text, failure, end)) {
+        found.push({ end, open: "element" });
+      }
+      return found;
+    }
+    if (
+      found.length === 0 &&
+      holdsOpenTextExpression(text, failure, end, terminator)
+    ) {
+      found.push({ end, open: "expression" });
     }
   }
-  return undefined;
+  return found;
 }
 
 /**
  * `result`, measured for the container whose content opens at `opening`,
  * bounded by the text reading (above) where the construct holding the
  * container's `{` begins right below a paragraph line holding an open text
- * element (`openParagraphAbove`): at the terminator of the first line past
- * the brace's of container syntax and whitespace alone, where the content
- * is still open at that line — a `}` ending the line before it falls in
- * the container.
+ * element or text-level expression (`openParagraphAbove`): at the
+ * terminator of the first line past the brace's of container syntax and
+ * whitespace alone, where the content is still open at that line — below
+ * an open element, a `}` ending the line before it falls in the container
+ * (the two readings collect the same content); below an open expression,
+ * whose content the text reading goes on with instead, as that reading
+ * collects it (`textExpressionBound`).
  */
 function textReadingBound(
   text: string,
@@ -942,9 +1008,6 @@ function textReadingBound(
     if (LINE_SYNTAX.test(text.slice(start, end))) blankEnd = end;
     else before = end;
   }
-  if (openParagraphAbove(text, lineStartBefore(text, opening)) === undefined) {
-    return result;
-  }
   // An attribute's content that is whitespace alone so far is refused
   // before acorn sees it, so the `}` is also tried after an `x`: no text
   // past the line reopens a container a `}` on it closed.
@@ -953,7 +1016,62 @@ function textReadingBound(
     return collected !== undefined && openingOf(head, collected) === opening;
   };
   const head = text.slice(0, before);
-  return openAt(head) || openAt(head + "x") ? blankEnd : result;
+  let bound = result;
+  const paragraphs = openParagraphAbove(text, lineStartBefore(text, opening));
+  for (const { end, open } of paragraphs) {
+    if (open === "expression") {
+      bound = Math.min(bound, textExpressionBound(text, end, before, blankEnd));
+    } else if (openAt(head) || openAt(head + "x")) {
+      bound = Math.min(bound, blankEnd);
+    }
+  }
+  return bound;
+}
+
+/**
+ * The bound the text reading sets where a paragraph line ending at
+ * `paragraphEnd` holds a text-level expression open, the construct holding
+ * a brace beginning on the line right below it, and the first line past
+ * that construct's of container syntax and whitespace alone ending at
+ * `blankEnd`, the line before it at `before`. The flow reading of the line
+ * below — a flow expression or tag interrupting the paragraph — leaves the
+ * expression open at the paragraph's end, so it never derives; in the text
+ * reading that line and the ones after it are the paragraph's, their
+ * characters the expression's content, which cannot span the blank line
+ * (SPEC 14's location rule for 14.20). That reading is probed with the
+ * line below respelled past its container syntax with U+00A0 — no flow
+ * construct begins with it, and to acorn it is whitespace, or a character
+ * of the string, comment, or template it falls in — and the expression's
+ * content collected at a `}` appended to the line before the blank one:
+ * where it fails within, that offset; where it cannot take that line's
+ * terminator, the terminator; otherwise `blankEnd`. `Infinity` where the
+ * probe collects no content of that expression: it closed before, or a
+ * code span, link, or definition begun before its brace and ending there
+ * hides it.
+ */
+function textExpressionBound(
+  text: string,
+  paragraphEnd: number,
+  before: number,
+  blankEnd: number,
+): number {
+  const below = paragraphEnd + terminatorAt(text, paragraphEnd).length;
+  const spelled = text.slice(below, lineEndFrom(text, below));
+  const at = below + (CONTAINER_RUN.exec(spelled)?.[0] ?? "").length;
+  if (at > before) return Infinity;
+  const head = text.slice(0, at) + RESPELLED + text.slice(at, before);
+  const collected = collectedAtEnd(head);
+  if (collected === undefined) return Infinity;
+  const opening = openingOf(head, collected);
+  if (opening === undefined || opening > paragraphEnd) return Infinity;
+  const within = measured(head, collected);
+  if (within < head.length) return within > at ? within - 1 : within;
+  const terminator = terminatorAt(text, before);
+  const { content, kind } = collected;
+  return jsViablePrefix(content + terminator, kind) <
+    content.length + terminator.length
+    ? before
+    : blankEnd;
 }
 
 /**
