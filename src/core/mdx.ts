@@ -591,18 +591,26 @@ export function parseSpecSource(
 }
 
 /**
- * SPEC 14.20: the 14.20 finding a spec source's bytes carry — null exactly
- * when the file is well-formed. The verdict is `parseSpecSource`'s, reached
- * without building the document model: a pure judgement over a file's
- * bytes, for texts no discovered file holds yet — a move's would-be files
- * (SPEC 6.5 "Validation and refusals", `refused-invalid-rewrite`).
+ * SPEC 14.20: whether a spec source's bytes are well-formed — exactly when
+ * `parseSpecSource` reaches a document rather than the 14.20 finding. The
+ * verdict is reached without locating a failure or building the document
+ * model: a pure judgement over a file's bytes, for texts no discovered file
+ * holds yet — a move's would-be files (SPEC 6.5 "Validation and refusals",
+ * `refused-invalid-rewrite`), whose refusal locates the moved construct
+ * rather than the failure.
  */
-export function specSourceParseFailure(
-  file: PathText,
-  bytes: Uint8Array,
-): Finding | null {
-  const parsed = parseMdx(file, bytes);
-  return parsed.kind === "unparseable" ? parsed.finding : null;
+export function isWellFormedSpecSource(bytes: Uint8Array): boolean {
+  // The path only labels a finding this verdict never reports.
+  const decoded = decodeSourceBytes("", bytes);
+  if (!decoded.ok) {
+    return false;
+  }
+  try {
+    parseAsJudged(decoded.text, (spelled) => mdxParser.parse(spelled));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** The 14.20 finding for a thrown MDX parse failure, with its location. */

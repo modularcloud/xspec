@@ -52,8 +52,10 @@
 //    the mirrored identity checks (intrinsic form, identity change,
 //    collisions after the removal), the target parent, destination
 //    occupancy and validity (obstructed destination-side directory
-//    components included), would-be dependency and spec-import cycles, and
-//    moved text holding an import declaration (no reason exists for a
+//    components included), would-be dependency and spec-import cycles,
+//    the section form's would-be text — each judged file well-formed, each
+//    added import at an admissible offset (`refused-invalid-rewrite`) —
+//    and moved text holding an import declaration (no reason exists for a
 //    rewritten reference: each resolves by construction, SPEC 6.4, 6.5) —
 //    and a refused move reports one finding per reason, each with its
 //    stable code and concerned identity, path, or located participants (at
@@ -537,7 +539,8 @@ async function runMoveSection(
 
   // SPEC 6.5/14: evaluate every applicable refusal reason together over
   // the valid workspace — the mirrored identity checks, the target
-  // parent, destination occupancy and validity, and would-be cycles, one
+  // parent, destination occupancy and validity, the would-be text's
+  // well-formedness and import additions, and would-be cycles, one
   // finding per reason (no reason exists for an unresolvable rewritten
   // reference: each resolves by construction, SPEC 6.4) — and
   // refuse (exit 1) with the 12.7 findings report, nothing modified. The

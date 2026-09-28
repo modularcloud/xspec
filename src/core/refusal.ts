@@ -31,6 +31,14 @@
 // pre-operation coordinates (SPEC 14: a refusal renders as precisely as a
 // finding; 6.6: previews report in current, pre-operation coordinates).
 //
+// `refused-invalid-rewrite` alone reads would-be text: the section form's
+// exact edits composed exactly as the move plan composes them
+// (core/move.ts `judgeMoveSectionRewrite`), the origin's and the target's
+// would-be texts judged well-formed or not (SPEC 14.20) and every spec
+// source's added declarations judged for an admissible offset (SPEC 6.5),
+// the finding locating the moved construct and the spellings rooted at an
+// addition no offset admits at their current, pre-operation coordinates.
+//
 // SPEC 14's ten reasons are the whole refusal vocabulary: every rewritten
 // reference resolves by construction, so no reason exists for one that
 // would not (SPEC 6.4, 6.5). A moved reference to the target file's own
@@ -44,10 +52,12 @@ import { sortByBytes } from "./bytes.js";
 import type { Configuration, ConfiguredGroup } from "./config.js";
 import { specSourceDerivedPaths } from "./discovery.js";
 import type { Finding, FindingLocation, RefusalCode } from "./findings.js";
-import { sortLocations } from "./findings.js";
+import { compareLocations, sortLocations } from "./findings.js";
 import { findCycles } from "./graph.js";
 import type { SpecFileAnalysis, WorkspaceGraph } from "./graph.js";
 import type { SpecSection } from "./mdx.js";
+import type { MoveSectionRewriteVerdict } from "./move.js";
+import { judgeMoveSectionRewrite } from "./move.js";
 import type { PathText } from "./path-text.js";
 import { replaceIdPrefix } from "./rename.js";
 import { describeSegmentViolation, idSegmentViolations } from "./text.js";
@@ -948,6 +958,80 @@ function movedImportLocations(
   return locations;
 }
 
+/**
+ * SPEC 14 `refused-invalid-rewrite` from the would-be files' verdict
+ * (core/move.ts), or null when every judged file is well-formed and every
+ * addition admitted: one finding, locating the moved section's construct
+ * in the origin file (1.7) and, for each addition no offset admits, every
+ * reference spelling the operation roots at its binding, whether or not
+ * its characters change — as `refused-cycle` locates an import the
+ * operation would add — its `identities` the workspace-relative paths of
+ * the files concerned — each whose would-be text is not well-formed MDX, a
+ * target file to be created included, spelled whatever its path's
+ * validity, and each holding no admissible offset for an addition it
+ * needs — in byte order, its `path` null.
+ */
+function invalidRewriteFinding(
+  verdict: MoveSectionRewriteVerdict,
+  origin: SpecFileAnalysis,
+  construct: ByteRange,
+  from: string,
+  to: string,
+): Finding | null {
+  if (verdict.illFormed.length === 0 && verdict.inadmissible.length === 0) {
+    return null;
+  }
+  const concerned = sortByBytes(
+    [
+      ...new Set([
+        ...verdict.illFormed,
+        ...verdict.inadmissible.map((entry) => entry.path),
+      ]),
+    ],
+    (path) => path,
+  );
+  const locations: FindingLocation[] = [
+    { file: origin.document.file, range: construct },
+  ];
+  for (const entry of verdict.inadmissible) {
+    for (const spelling of entry.spellings) {
+      if (!locations.some((known) => compareLocations(known, spelling) === 0)) {
+        locations.push(spelling);
+      }
+    }
+  }
+  const causes: string[] = [];
+  if (verdict.illFormed.length > 0) {
+    causes.push(
+      `leave ${sortByBytes([...verdict.illFormed], (path) => path)
+        .map((path) => JSON.stringify(path))
+        .join(" and ")} not well-formed MDX (SPEC 14.20)`,
+    );
+  }
+  if (verdict.inadmissible.length > 0) {
+    causes.push(
+      `add an import to ${sortByBytes(
+        verdict.inadmissible.map((entry) => entry.path),
+        (path) => path,
+      )
+        .map((path) => JSON.stringify(path))
+        .join(" and ")}, ` +
+        `${verdict.inadmissible.length === 1 ? "which holds" : "each holding"} ` +
+        `no admissible offset for it — located by the reference spellings ` +
+        `rooted at its binding`,
+    );
+  }
+  return refusalFinding(
+    "refused-invalid-rewrite",
+    `invalid rewrite: moving ${JSON.stringify(from)} to ` +
+      `${JSON.stringify(to)} would ${causes.join(", and would ")} — the ` +
+      `exact edits read line-sensitively, so the moved section's shape ` +
+      `must derive where it would stand; reshape the section or choose ` +
+      `another target (SPEC 6.5, 14)`,
+    { locations, identities: concerned },
+  );
+}
+
 /** The inputs of a section-form move's refusal evaluation (SPEC 6.5, 14). */
 export interface MoveSectionRefusalInputs {
   readonly specs: readonly SpecFileAnalysis[];
@@ -979,7 +1063,8 @@ export interface MoveSectionRefusalInputs {
  * (SPEC 6.5, 14) over a workspace passing `build`'s validations: the
  * mirrored identity checks (intrinsic form, identity change, collisions
  * after the removal), the target parent, the destination occupancy and
- * validity, an import declaration the moved text holds, and the would-be
+ * validity, an import declaration the moved text holds, the would-be
+ * text (well-formed files, admissible import additions), and the would-be
  * cycles (dependency and spec-import). No reason exists for an
  * unresolvable rewritten reference (SPEC 6.4, 14): a moved reference
  * targeting the target file's root node is refused as the dependency
@@ -1149,6 +1234,39 @@ export function evaluateMoveSectionRefusals(
         { locations: movedImports },
       ),
     );
+  }
+
+  // SPEC 14 `refused-invalid-rewrite`: the section form's exact edits would
+  // leave the origin or the target file other than well-formed MDX
+  // (14.20), or a file the rewrite must add an import to holds no
+  // admissible offset for it (SPEC 6.5). Like `refused-structural-parent`,
+  // it is evaluated only over an intrinsically valid new ID — an invalid
+  // one, spelled verbatim, leaves the would-be text undefined — and beside
+  // every other applicable reason, judged over the would-be text: the
+  // origin's, and the additions every other file needs, always; the
+  // target's — its well-formedness and its additions alike — exactly when
+  // an insertion point exists: the target path a discovered spec source or
+  // an absent path (`refused-destination-exists` otherwise), and the target
+  // parent present outside the moved subtree
+  // (`refused-missing-target-parent` otherwise).
+  if (invalidId === null) {
+    const insertionPoint =
+      parentUsable && (target !== null || probe.occupant === "absent");
+    const invalidRewrite = invalidRewriteFinding(
+      judgeMoveSectionRewrite(
+        specs,
+        originPath,
+        oldId,
+        targetPath,
+        newId,
+        insertionPoint,
+      ),
+      origin,
+      movedSection.range,
+      `${originPath}#${oldId}`,
+      `${targetPath}#${newId}`,
+    );
+    if (invalidRewrite !== null) findings.push(invalidRewrite);
   }
 
   const map = moveSectionIdentityMap(originPath, oldId, targetPath, newId);

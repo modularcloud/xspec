@@ -69,6 +69,7 @@ import {
   EditCollector,
   jsStringLiteral,
 } from "./edits.js";
+import type { FindingLocation } from "./findings.js";
 import type { SpecFileAnalysis } from "./graph.js";
 import type { IdentityMapping, JournalEntry } from "./journal.js";
 import { createJournalEntry } from "./journal.js";
@@ -78,7 +79,7 @@ import type {
   SpecImportStatement,
   SpecSection,
 } from "./mdx.js";
-import { parseSpecSource } from "./mdx.js";
+import { isWellFormedSpecSource, parseSpecSource } from "./mdx.js";
 import type { PreviewFileEdits } from "./preview.js";
 import { PreviewCollector } from "./preview.js";
 import {
@@ -461,7 +462,9 @@ function deletionEditsWithLineDrops(
       // Unreachable guard: the one overlap a plan could hold — an import
       // removal inside the origin deletion's construct — is a moved text
       // holding an import declaration, refused before any planning
-      // (`refused-moved-import`, SPEC 6.5, 14; core/refusal.ts).
+      // (`refused-moved-import`, SPEC 6.5, 14; core/refusal.ts) and
+      // judged with those removals left to the origin deletion
+      // (`judgeMoveSectionRewrite`).
       throw new Error("xspec internal error: overlapping move deletions");
     }
   }
@@ -780,6 +783,7 @@ class SpecImportPlan {
   private readonly arrivals = new Map<string, number>();
   private readonly taken = new Set<string>();
   private readonly additions = new Map<string, string>();
+  private readonly addedSpellings: FindingLocation[] = [];
 
   /** `spec` is null for a target file the move creates (SPEC 6.5). */
   constructor(private readonly spec: SpecFileAnalysis | null) {
@@ -801,8 +805,12 @@ class SpecImportPlan {
    * The binding name a rewritten reference to `modulePath` roots at in this
    * file (SPEC 6.5: an import is added when a rewritten reference needs a
    * module binding its file lacks). Counts one arrival per call.
+   * `spelling` is the reference's occurrence in pre-operation coordinates
+   * (5.7), recorded where the binding is an added one: the spellings a
+   * `refused-invalid-rewrite` locates when no offset admits the addition
+   * (SPEC 14), whether or not their characters change.
    */
-  bindingFor(modulePath: string): string {
+  bindingFor(modulePath: string, spelling: FindingLocation): string {
     if (this.spec !== null) {
       for (const imported of this.spec.imports.imports) {
         if (
@@ -814,6 +822,7 @@ class SpecImportPlan {
         }
       }
     }
+    this.addedSpellings.push(spelling);
     const added = this.additions.get(modulePath);
     if (added !== undefined) {
       return added;
@@ -881,6 +890,15 @@ class SpecImportPlan {
     return [...this.additions.entries()]
       .map(([modulePath, name]) => ({ modulePath, name }))
       .sort((a, b) => compareBytes(a.modulePath, b.modulePath));
+  }
+
+  /**
+   * Every reference spelling the operation roots at a binding this file's
+   * added declarations give it, at its pre-operation occurrence (SPEC 6.5,
+   * 14, 5.7).
+   */
+  addedBindingSpellings(): readonly FindingLocation[] {
+    return this.addedSpellings;
   }
 }
 
@@ -1393,9 +1411,10 @@ function placeSpecImportAdditions(
     }
   }
   // SPEC 6.5 refuses a move leaving a file no admissible offset for an
-  // addition it needs (`refused-invalid-rewrite`); the caller does not yet
-  // decide that refusal from `admissible`. The declarations stand at the
-  // first candidate, and validating the rewritten workspace fails the move.
+  // addition it needs (`refused-invalid-rewrite`), decided from
+  // `admissible` by the refusal evaluation (`judgeMoveSectionRewrite`):
+  // the declarations stand at the first candidate, a text the refused move
+  // only judges and never writes.
   if (fallback === null) {
     throw new Error("xspec internal error: no offset for an import addition");
   }
@@ -1486,6 +1505,49 @@ function defaultImportLine(
 }
 
 /**
+ * What a section-form move's exact edits leave invalid (SPEC 6.5
+ * "Validation and refusals", 14 `refused-invalid-rewrite`), over the files
+ * the refusal judges: the origin always, the target only where an
+ * insertion point exists, and every other spec source for the additions it
+ * needs.
+ */
+export interface MoveSectionRewriteVerdict {
+  /**
+   * The judged files whose would-be text — as every edit but the added
+   * declarations leaves it, a created target as its creation composes it —
+   * is not well-formed MDX (14.20), in the order judged.
+   */
+  readonly illFormed: readonly string[];
+  /**
+   * Each spec source holding no admissible offset for the declarations it
+   * needs added, with every reference spelling the operation roots at
+   * their bindings, at its pre-operation occurrence (5.7), whether or not
+   * its characters change.
+   */
+  readonly inadmissible: readonly {
+    readonly path: string;
+    readonly spellings: readonly FindingLocation[];
+  }[];
+}
+
+/**
+ * How the refusal evaluation composes a section move's would-be files
+ * (SPEC 6.5 "Validation and refusals"): beside every other applicable
+ * reason — the exact self-move, a moved text holding an import
+ * declaration, a moved reference to the target file's own root (refused
+ * as the dependency cycle it closes) — so none of those preconditions is
+ * asserted; and the target composed only where an insertion point exists.
+ */
+interface MoveSectionJudging {
+  /**
+   * Whether the target insertion point exists: the target path a
+   * discovered spec source or an absent path, and the target parent, where
+   * `<new-id>` needs one, present outside the moved subtree (SPEC 6.5).
+   */
+  readonly insertionPoint: boolean;
+}
+
+/**
  * Derive the SPEC 6.5 section-form move plan over a validated workspace's
  * analyses. See the module header for the exact text rules and the
  * preconditions the caller has established.
@@ -1498,6 +1560,62 @@ export function planMoveSection(
   targetPath: string,
   newId: string,
 ): MoveSectionPlan {
+  const { plan } = composeMoveSection(
+    specs,
+    code,
+    originPath,
+    oldId,
+    targetPath,
+    newId,
+    null,
+  );
+  if (plan === null) {
+    throw new Error("xspec internal error: a section move composed no plan");
+  }
+  return plan;
+}
+
+/**
+ * SPEC 6.5 "Validation and refusals", 14 `refused-invalid-rewrite`: judge
+ * a section-form move's exact edits over a workspace passing `build`'s
+ * validations, under an intrinsically valid `<new-id>` — the would-be text
+ * of the origin, and of the target where `insertionPoint` holds, judged
+ * well-formed or not (14.20), and every spec source judged for an
+ * admissible offset for the additions it needs — composed exactly as the
+ * plan composes them. Code sources are not judged: a TypeScript source's
+ * end admits a top-level declaration.
+ */
+export function judgeMoveSectionRewrite(
+  specs: readonly SpecFileAnalysis[],
+  originPath: string,
+  oldId: string,
+  targetPath: string,
+  newId: string,
+  insertionPoint: boolean,
+): MoveSectionRewriteVerdict {
+  return composeMoveSection(specs, [], originPath, oldId, targetPath, newId, {
+    insertionPoint,
+  }).verdict;
+}
+
+/**
+ * The section-form composition behind `planMoveSection` (`judging` null:
+ * the preconditions asserted, every file composed, the plan returned) and
+ * `judgeMoveSectionRewrite` (the preconditions another refusal reason
+ * reports tolerated, the verdict judged, and no plan).
+ */
+function composeMoveSection(
+  specs: readonly SpecFileAnalysis[],
+  code: readonly CodeAnalysis[],
+  originPath: string,
+  oldId: string,
+  targetPath: string,
+  newId: string,
+  judging: MoveSectionJudging | null,
+): {
+  readonly plan: MoveSectionPlan | null;
+  readonly verdict: MoveSectionRewriteVerdict;
+} {
   const origin = specs.find((spec) => spec.document.path === originPath);
   if (origin === undefined) {
     throw new Error(
@@ -1514,12 +1632,27 @@ export function planMoveSection(
         `${originPath} — the caller validated its existence`,
     );
   }
-  if (originPath === targetPath && oldId === newId) {
+  if (judging === null && originPath === targetPath && oldId === newId) {
     throw new Error(
       "xspec internal error: the exact self-move — the caller refused it " +
         "(SPEC 6.5)",
     );
   }
+  // The would-be target is composed where an insertion point exists —
+  // always for a plan, whose caller refused every move lacking one.
+  const composesTarget = judging === null || judging.insertionPoint;
+  const illFormed: string[] = [];
+  const inadmissible: {
+    readonly path: string;
+    readonly spellings: readonly FindingLocation[];
+  }[] = [];
+  // SPEC 6.5/14.20: the judged would-be texts, as every edit but the added
+  // declarations leaves them.
+  const judgeWellFormed = (path: string, content: Uint8Array): void => {
+    if (judging !== null && !isWellFormedSpecSource(content)) {
+      illFormed.push(path);
+    }
+  };
   const sameFile = originPath === targetPath;
   const target = sameFile
     ? origin
@@ -1552,9 +1685,10 @@ export function planMoveSection(
   // The target parent: the target file's section bearing `<new-id>` minus
   // its final segment — the file's root (insertion at end of file) for a
   // top-level `new-id` (SPEC 6.5). The caller validated its existence and
-  // that it lies outside the moved subtree.
+  // that it lies outside the moved subtree — or, judging, reports that no
+  // insertion point exists, and no target is composed.
   let parentSection: SpecSection | null = null;
-  if (newSegments.length > 1) {
+  if (composesTarget && newSegments.length > 1) {
     const parentId = newSegments.slice(0, -1).join(".");
     const found = target?.document.sections.find(
       (section) => section.id === parentId,
@@ -1651,6 +1785,13 @@ export function planMoveSection(
     const path = spec.document.path;
     for (const located of locatedReferencesOf(spec)) {
       const { section, reference, occurrence } = located;
+      // The spelling at its pre-operation occurrence (5.7) — a moved
+      // text's inside the origin's construct — whatever file it will
+      // stand in (SPEC 14 `refused-invalid-rewrite`).
+      const spelling: FindingLocation = {
+        file: spec.document.file,
+        range: occurrence,
+      };
       const declaredInMoved =
         spec === origin &&
         section.id !== null &&
@@ -1697,7 +1838,7 @@ export function planMoveSection(
             const name = planFor(
               createsTargetFile ? null : (target ?? null),
               targetPath,
-            ).bindingFor(originPath);
+            ).bindingFor(originPath, spelling);
             addInner({
               range: reference.spelling.range,
               replacement: renderChain(
@@ -1722,7 +1863,10 @@ export function planMoveSection(
           // A remaining reference to the moved subtree: local → imported,
           // rooted at the origin file's binding of the target module
           // (SPEC 6.5).
-          const name = planFor(origin, originPath).bindingFor(targetPath);
+          const name = planFor(origin, originPath).bindingFor(
+            targetPath,
+            spelling,
+          );
           outerEdits.add(path, {
             range: reference.spelling.range,
             replacement: renderChain(name, mappedLocal.split(".")),
@@ -1750,6 +1894,13 @@ export function planMoveSection(
           // The moved text references the file it moves into: imported →
           // local (SPEC 6.5); a file never imports itself (SPEC 2.1).
           if (segments.length === 0) {
+            if (judging !== null) {
+              // Refused as the dependency cycle it closes (`refused-cycle`,
+              // core/refusal.ts): no form spells it in the target file, so
+              // the would-be text keeps the expression as spelled — any
+              // expression judges alike (SPEC 6.5, 14.20).
+              continue;
+            }
             throw new Error(
               "xspec internal error: a moved reference targets the target " +
                 "file's root node — the caller refused this move (SPEC 6.5)",
@@ -1767,7 +1918,7 @@ export function planMoveSection(
           const name = planFor(
             createsTargetFile ? null : (target ?? null),
             targetPath,
-          ).bindingFor(modulePath);
+          ).bindingFor(modulePath, spelling);
           if (name !== reference.spelling.rootName) {
             addInner({
               range: reference.spelling.rootRange,
@@ -1822,7 +1973,7 @@ export function planMoveSection(
       // (SPEC 6.5).
       const filePlan = planFor(spec, path);
       filePlan.depart(reference.spelling.rootName);
-      const rootName = filePlan.bindingFor(targetPath);
+      const rootName = filePlan.bindingFor(targetPath, spelling);
       const prefixEdits = chainPrefixEdits(
         reference.spelling,
         oldSegments,
@@ -2035,12 +2186,33 @@ export function planMoveSection(
   // reported with every byte it removes (SPEC 6.6: an import removal's
   // range spans the declaration plus the leftover whitespace and terminator
   // of each line its drop empties, judged per declaration).
+  //
+  // Judging a moved text that holds an import declaration — refused as
+  // `refused-moved-import` (SPEC 6.5, 14), never planned — the origin
+  // deletion removes each declaration inside the construct with the moved
+  // text: no removal of its own, and no survivor.
+  const deletedWithMoved = (
+    spec: SpecFileAnalysis,
+    imported: SpecImport,
+  ): boolean =>
+    judging !== null &&
+    spec === origin &&
+    imported.statement.range.start >= movedRange.start &&
+    imported.statement.range.end <= movedRange.end;
+  const removedImportsOf = (
+    spec: SpecFileAnalysis,
+    plan: SpecImportPlan,
+    bytes: Uint8Array,
+  ): SpecImport[] =>
+    plan
+      .removedImports(bytes)
+      .filter((imported) => !deletedWithMoved(spec, imported));
   const importRemovalsFor = (
     spec: SpecFileAnalysis,
     plan: SpecImportPlan,
     bytes: Uint8Array,
   ): ByteRange[] => {
-    const removed = plan.removedImports(bytes);
+    const removed = removedImportsOf(spec, plan, bytes);
     for (const imported of removed) {
       preview.add(
         spec.document.path,
@@ -2070,12 +2242,22 @@ export function planMoveSection(
       return null;
     }
     const lines = added.map((addition) =>
-      defaultImportLine(path, addition.modulePath, addition.name),
+      judging !== null && !addition.modulePath.endsWith(MDX_SUFFIX)
+        ? // Judging a target path that is no spec source path (refused
+          // as `refused-invalid-destination` beside, SPEC 6.5, 14): its
+          // module has no `.xspec` spelling, and any specifier judges the
+          // added line alike.
+          `import ${addition.name} from ${jsStringLiteral(
+            relativeModuleSpecifier(path, addition.modulePath),
+            '"',
+          )}`
+        : defaultImportLine(path, addition.modulePath, addition.name),
     );
-    const removed = plan.removedImports(bytes);
+    const removed = removedImportsOf(spec, plan, bytes);
     const removedSet = new Set(removed);
     const survivors = spec.imports.imports.filter(
-      (imported) => !removedSet.has(imported),
+      (imported) =>
+        !removedSet.has(imported) && !deletedWithMoved(spec, imported),
     );
     const lastSurvivor = survivors[survivors.length - 1];
     const firstRemoved = removed[0];
@@ -2095,6 +2277,19 @@ export function planMoveSection(
       lines,
       preferred,
     );
+    if (!placed.admissible) {
+      // SPEC 6.5/14 `refused-invalid-rewrite`: the file holds no
+      // admissible offset for the declarations it needs, located by every
+      // spelling rooted at their bindings — a refusal the plan's caller
+      // has already reported, judging the same composition.
+      if (judging === null) {
+        throw new Error(
+          `xspec internal error: ${path} holds no admissible offset for an ` +
+            `import addition — the caller refused this move (SPEC 6.5)`,
+        );
+      }
+      inadmissible.push({ path, spellings: plan.addedBindingSpellings() });
+    }
     // SPEC 6.6: each added declaration is one import addition, reported as
     // a zero-length insertion point at the exact offset the real operation
     // then inserts at (SPEC 6.5).
@@ -2204,16 +2399,19 @@ export function planMoveSection(
 
   if (sameFile) {
     // One file carries the deletion, the outer rewrites, the paired-form
-    // rewrite of a self-closing target parent, and the insertion.
+    // rewrite of a self-closing target parent, and the insertion — judged
+    // with no insertion point, the deletion and the rewrites alone (SPEC
+    // 6.5: the origin as its deletion leaves it).
     const edits: SourceEdit[] = [
       ...deletionEditsWithLineDrops(originBytes, [movedRange]),
       ...(outerEdits.editsFor(originPath) ?? []),
       ...(pairedFormEdit === null ? [] : [pairedFormEdit]),
     ];
-    rewrites.push({
-      path: originPath,
-      content: assembleWithInsertion(originBytes, edits, insertion),
-    });
+    const content = composesTarget
+      ? assembleWithInsertion(originBytes, edits, insertion)
+      : applyEdits(originBytes, edits);
+    judgeWellFormed(originPath, content);
+    rewrites.push({ path: originPath, content });
   } else {
     // The origin file: construct deletion, remaining-reference rewrites,
     // import removals and additions (SPEC 6.5).
@@ -2226,6 +2424,7 @@ export function planMoveSection(
       ...(outerEdits.editsFor(originPath) ?? []),
     ];
     const originComposition = editsComposition(originBytes, originEdits);
+    judgeWellFormed(originPath, originComposition.content);
     rewrites.push({
       path: originPath,
       content:
@@ -2239,8 +2438,9 @@ export function planMoveSection(
 
     // The target file: created empty before insertion (SPEC 6.5), or the
     // existing file with its conversions, import edits, the paired-form
-    // rewrite, and the insertion.
-    if (target === undefined) {
+    // rewrite, and the insertion — composed only where an insertion point
+    // exists (judging: SPEC 6.5 judges the target's text exactly then).
+    if (composesTarget && target === undefined) {
       const plan = planFor(null, targetPath);
       const added = plan.addedImports();
       const importBlock =
@@ -2264,8 +2464,9 @@ export function planMoveSection(
       content.set(head, 0);
       content.set(movedBody, head.length);
       content.set(tail, head.length + movedBody.length);
+      judgeWellFormed(targetPath, content);
       rewrites.push({ path: targetPath, content });
-    } else {
+    } else if (composesTarget && target !== undefined) {
       const targetPlan = planFor(target, targetPath);
       const targetEdits: SourceEdit[] = [
         ...deletionEditsWithLineDrops(
@@ -2280,6 +2481,7 @@ export function planMoveSection(
         targetEdits,
         insertion,
       );
+      judgeWellFormed(targetPath, targetComposition.content);
       rewrites.push({
         path: targetPath,
         content:
@@ -2439,17 +2641,26 @@ export function planMoveSection(
   }
 
   return {
-    mapping,
-    // SPEC 6.1/6.5: the appended entry records the operation and the full
-    // mapping it produced.
-    entry: createJournalEntry(
-      "move-section",
-      `${originPath}#${oldId}`,
-      `${targetPath}#${newId}`,
-      mapping,
-    ),
-    rewrites,
-    createsTargetFile,
-    previewFiles: preview.files(),
+    // Judging, no plan exists: the operation is refused wherever the
+    // verdict, or any other reason, finds cause — its target path perhaps
+    // no spec source path, which no journal entry records (SPEC 6.1, 7.1).
+    plan:
+      judging !== null
+        ? null
+        : {
+            mapping,
+            // SPEC 6.1/6.5: the appended entry records the operation and
+            // the full mapping it produced.
+            entry: createJournalEntry(
+              "move-section",
+              `${originPath}#${oldId}`,
+              `${targetPath}#${newId}`,
+              mapping,
+            ),
+            rewrites,
+            createsTargetFile,
+            previewFiles: preview.files(),
+          },
+    verdict: { illFormed, inadmissible },
   };
 }
