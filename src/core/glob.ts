@@ -16,10 +16,13 @@
 // adjacent `*` runs. A path segment beginning with `.` is matched only by a
 // pattern segment written with a leading `.` — read from the pattern as
 // written, so `*`, `?`, `**`, captures, and capture references never match
-// a dot-initial segment, and `**` never consumes one. A pattern that
-// resolves outside the workspace root is a configuration error (14.14); an
-// outside-root `--file` value is the flag-level counterpart, a usage error
-// (SPEC 11, 12.0) — this module only reports the condition as data.
+// a dot-initial segment, and `**` never consumes one. Whether a pattern
+// lies outside the workspace root is decided by its spelling alone, a pure
+// depth count over its segments ({@link globLiesOutsideRoot}), separate from
+// matching. An outside-root configured glob or policy selector is a
+// configuration error (14.14); an outside-root `--file` value is the
+// flag-level counterpart, a usage error (SPEC 11, 12.0, 12.3) — this module
+// only reports the condition as data.
 //
 // SPEC 7.5: a `from` pattern MAY contain capture wildcards `$1`…`$9`, each
 // appearing at most once; a capture matches one or more bytes within a
@@ -62,11 +65,12 @@ export type CaptureValues = ReadonlyMap<number, Uint8Array>;
 
 /**
  * Why a pattern does not compile, as data (IMPLEMENTATION cross-cutting
- * rules): "outside-root" — the pattern resolves outside the workspace root
- * (SPEC 7); "duplicate-capture" — a `from` pattern uses a capture wildcard
- * more than once (SPEC 7.5). Both are configuration errors (14.14) when the
- * pattern comes from configuration; an outside-root `--file` value is a
- * usage error (SPEC 11, 12.0). The caller assigns the exit class.
+ * rules): "outside-root" — the pattern lies outside the workspace root by
+ * its spelling alone (SPEC 7, {@link globLiesOutsideRoot});
+ * "duplicate-capture" — a `from` pattern uses a capture wildcard more than
+ * once (SPEC 7.5). Both are configuration errors (14.14) when the pattern
+ * comes from configuration; an outside-root `--file` value is a usage error
+ * (SPEC 11, 12.0). The caller assigns the exit class.
  */
 export type GlobCompileError =
   | { readonly kind: "outside-root" }
@@ -123,25 +127,53 @@ function isDotDotSegment(segment: Uint8Array): boolean {
   return segment.length === 2 && segment[0] === DOT && segment[1] === DOT;
 }
 
+function isGlobstarSegment(segment: Uint8Array): boolean {
+  return segment.length === 2 && segment[0] === STAR && segment[1] === STAR;
+}
+
 /**
- * Resolve a pattern's `.` and `..` segments lexically against the
- * workspace root (SPEC 7: configured paths and globs resolve relative to
- * the configuration file's directory, which is the workspace root).
- * Wildcard segments count as ordinary names to resolution; matched paths
- * are canonical workspace-relative paths and never contain dot segments,
- * so matching uses the resolved form. Returns null when the pattern
- * resolves outside the workspace root (SPEC 7 → 14.14): an absolute
- * pattern, or a `..` with no preceding segment left to cancel. Interior
- * empty segments (`//` runs) collapse; a trailing slash keeps one final
- * empty segment — no real path has one, so such a pattern matches nothing.
+ * SPEC 7: whether a glob lies outside the workspace root is decided by its
+ * spelling alone — for configured group globs and policy `files` selectors
+ * (14.14) and for the `--file` patterns of 11 and 12.3 (a usage error,
+ * 12.0) alike. Reading its `/`-separated segments in order from a depth of
+ * zero, a `..` segment lowers the depth by one; a `.` segment, an empty
+ * segment (a doubled or trailing `/`), and a `**` segment, which may match
+ * no segment at all, leave it unchanged; and every other segment raises it
+ * by one (a drive-qualified spelling is ordinary segments). A glob
+ * beginning with `/`, or whose depth ever falls below zero, is outside the
+ * root; every other glob is inside. Pure: no filesystem, no matching.
  */
-function resolveSegments(
-  raw: readonly Uint8Array[],
-): readonly Uint8Array[] | null {
-  const first = raw[0];
-  if (raw.length > 1 && first.length === 0) {
-    return null; // absolute: not workspace-root-relative
+export function globLiesOutsideRoot(pattern: PathInput): boolean {
+  const bytes = toBytes(pattern);
+  if (bytes.length > 0 && bytes[0] === SLASH) return true;
+  let depth = 0;
+  for (const segment of splitOnSlash(bytes)) {
+    if (isDotDotSegment(segment)) {
+      depth -= 1;
+      if (depth < 0) return true;
+    } else if (
+      segment.length > 0 &&
+      !isDotSegment(segment) &&
+      !isGlobstarSegment(segment)
+    ) {
+      depth += 1;
+    }
   }
+  return false;
+}
+
+/**
+ * The segments matching reads, for a pattern {@link globLiesOutsideRoot}
+ * has already judged inside the workspace root — the outside-root decision
+ * is made there, by spelling alone, never here. Resolves the pattern's `.`
+ * and `..` segments lexically: wildcard segments count as ordinary names to
+ * resolution. Interior empty segments (`//` runs) collapse; a trailing
+ * slash keeps one final empty segment — no real path has one, so such a
+ * pattern matches nothing. An inside pattern's depth never exceeds the
+ * length resolved so far (a `**` raises the length but not the depth), so
+ * every `..` here finds a segment left to cancel.
+ */
+function resolveSegments(raw: readonly Uint8Array[]): readonly Uint8Array[] {
   const resolved: Uint8Array[] = [];
   for (let index = 0; index < raw.length; index += 1) {
     const segment = raw[index];
@@ -155,10 +187,7 @@ function resolveSegments(
       continue;
     }
     if (isDotDotSegment(segment)) {
-      if (resolved.length === 0) {
-        return null; // steps above the workspace root
-      }
-      resolved.pop();
+      resolved.pop(); // never empty for an inside pattern (above)
       continue;
     }
     resolved.push(segment);
@@ -177,7 +206,7 @@ function parseSegment(
   segment: Uint8Array,
   capturesEnabled: boolean,
 ): PatternSegment {
-  if (segment.length === 2 && segment[0] === STAR && segment[1] === STAR) {
+  if (isGlobstarSegment(segment)) {
     return { kind: "globstar" };
   }
   const tokens: SegmentToken[] = [];
@@ -445,10 +474,13 @@ export class CompiledGlob {
 
   /** @internal Use {@link compileGlob}. */
   static compileInternal(pattern: string, mode: GlobMode): GlobCompileResult {
-    const resolved = resolveSegments(splitOnSlash(utf8Encoder.encode(pattern)));
-    if (resolved === null) {
+    const bytes = utf8Encoder.encode(pattern);
+    // SPEC 7: the outside-root decision is the spelling's depth count alone,
+    // made before and apart from matching.
+    if (globLiesOutsideRoot(bytes)) {
       return { ok: false, error: { kind: "outside-root" } };
     }
+    const resolved = resolveSegments(splitOnSlash(bytes));
     const capturesEnabled = mode !== "plain";
     const segments = resolved.map((segment) =>
       parseSegment(segment, capturesEnabled),
