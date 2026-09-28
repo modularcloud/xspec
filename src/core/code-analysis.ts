@@ -24,14 +24,14 @@
 //
 // Masking (SPEC 14): an unparseable file (14.20) masks the conditions
 // inside itself — decode or parse failure yields only the 14.20. A chain
-// rooted at a binding of an invalid import, or at an identifier bound by
-// colliding imports, is masked by that import's 14.15. A chain rooted at
-// a shadowing local declaration or a type-only binding records no edge
-// and falls under no condition (SPEC 4.5); its value-level misuse is the
-// consumer's TypeScript error, outside xspec's validations. An identifier
-// a spec module import binds at value level that a value-level
-// declaration of the module scope also binds roots no resolving chain
-// (SPEC 2.4, 4.5): beside the collision's 14.15, its chains report as
+// rooted at a binding of an invalid import is masked by that import's
+// 14.15. A chain rooted at a shadowing local declaration or a type-only
+// binding records no edge and falls under no condition (SPEC 4.5); its
+// value-level misuse is the consumer's TypeScript error, outside xspec's
+// validations. An identifier a spec module import binds that another
+// import, or a value-level declaration of the module scope, also binds
+// roots no resolving chain (SPEC 2.4, 4.5), whether or not either import
+// is type-only: beside the collision's 14.15, its chains report as
 // unresolved (14.7) and a call through it as `text` is a plain call.
 
 import ts from "./ts-module.js";
@@ -439,25 +439,34 @@ type TrackedBinding =
     }
   | {
       /**
-       * A binding of an invalid import, or an identifier bound by more
-       * than one import: the 14.15 accounts for it, and references rooted
-       * here are masked (SPEC 14).
+       * A binding of an invalid import (one not colliding): the 14.15
+       * accounts for it, and references rooted here are masked (SPEC 14).
        */
       readonly kind: "poisoned";
     }
-  | {
-      /**
-       * SPEC 2.4, 4.5: an identifier a spec module import binds at value
-       * level — in `role` — that a value-level declaration of the module
-       * scope also binds. The language names no single binding, so a
-       * chain rooted here names no target: in a marker or a `text` call's
-       * argument it is unresolved (14.7), recording no edge and no
-       * occurrence (5.7), and a call through it as `text` is no `text`
-       * call (4.5). Its other uses are those of the role's binding.
-       */
-      readonly kind: "colliding";
-      readonly role: "node" | "text";
-    };
+  | CollidingBinding;
+
+/**
+ * SPEC 2.4, 4.5: an identifier a spec module import binds that another
+ * import, or a value-level declaration of the module scope, also binds —
+ * whether or not either import is type-only (4.5: the type-only exemption
+ * reaches a chain the language roots at one binding, and a colliding
+ * identifier roots it at none). The language names no single binding, so
+ * a chain rooted here names no target: in a marker or a `text` call's
+ * argument it is unresolved (14.7), recording no edge and no occurrence
+ * (5.7), and a call through it as a `text` binding is no `text` call
+ * (4.5). Its other uses are those of the bindings its spec module imports
+ * give it — `node` where one binds the default export, `text` where one
+ * binds the `text` export, at least one of the two: a binding of no
+ * permitted form (14.15) roots chains as a default binding would.
+ */
+interface CollidingBinding {
+  readonly kind: "colliding";
+  readonly node: boolean;
+  readonly text: boolean;
+  /** The colliding binders, as messages name them ("2 imports", …). */
+  readonly binders: string;
+}
 
 /** One import-bound identifier, for the collision rules (SPEC 4, 2.1, 2.4). */
 interface BoundName {
@@ -709,9 +718,9 @@ class CodeAnalyzer {
     // identifier with a value-level declaration of the module scope — one
     // condition the declarations jointly violate: ONE finding per collided
     // identifier, locating every colliding declaration (SPEC 14 location
-    // cardinality; no representative chosen). Colliding imports alone are
-    // masked; an identifier a value-level declaration collides with roots
-    // no resolving chain (SPEC 2.4, 4.5).
+    // cardinality; no representative chosen). A collided identifier, with
+    // another import or with a value-level declaration alike, roots no
+    // resolving chain (SPEC 2.4, 4.5).
     const byName = new Map<string, BoundName[]>();
     for (const entry of bound) {
       const entries = byName.get(entry.name);
@@ -753,8 +762,9 @@ class CodeAnalyzer {
           ? `invalid import: the identifier ${JSON.stringify(name)} is ` +
             `bound by ${String(statements.length)} imports in this file — ` +
             `no two imports may bind the same identifier when either is a ` +
-            `spec module import; rename all but one binding (SPEC 4, 2.1, ` +
-            `14.15)`
+            `spec module import, and the language names no single binding, ` +
+            `so no chain rooted at it resolves; rename all but one binding ` +
+            `(SPEC 4, 2.1, 2.4, 4.5, 14.15)`
           : `invalid import: the identifier ${JSON.stringify(name)} is ` +
             `bound by ` +
             (importCollision
@@ -779,29 +789,42 @@ class CodeAnalyzer {
           })),
         ]),
       );
-      // SPEC 2.4 roots no chain at a colliding identifier whatever the
-      // import's own validity; a binding of no permitted form (14.15)
-      // roots chains as a default binding would.
-      const binding: TrackedBinding =
-        constructs.length > 0
-          ? {
-              kind: "colliding",
-              role:
-                entries.find(
-                  (entry) => entry.valueLevelSpec && entry.role !== null,
-                )?.role ?? "node",
-            }
-          : { kind: "poisoned" };
+      // SPEC 2.4, 4.5 root no chain at a colliding identifier — whether
+      // the collision is with another import or with a value-level
+      // declaration, whether or not either import is type-only, and
+      // whatever the imports' own validity: its chains report as
+      // unresolved (14.7) beside this 14.15, never masked by it. Its other
+      // uses are those of the bindings its spec module imports give it; a
+      // binding of no permitted form (14.15) roots chains as a default
+      // binding would.
+      const roles = entries.flatMap((entry) =>
+        entry.spec && entry.role !== null ? [entry.role] : [],
+      );
+      const text = roles.includes("text");
+      const binding: CollidingBinding = {
+        kind: "colliding",
+        node: roles.includes("node") || !text,
+        text,
+        binders:
+          (importCollision
+            ? `${String(statements.length)} imports`
+            : `a spec module import`) +
+          (constructs.length === 0
+            ? ``
+            : constructs.length === 1
+              ? ` and a value-level declaration of the same module scope`
+              : ` and ${String(constructs.length)} value-level ` +
+                `declarations of the same module scope`),
+      };
+      // Whichever symbol TypeScript resolves a use to — the first import's,
+      // a later colliding import's own, the import's merged with a
+      // declaration's, or the declaration's own export symbol — names the
+      // colliding identifier.
       for (const entry of entries) {
         this.declarations.set(entry.declaration, binding);
       }
-      if (binding.kind === "colliding") {
-        // Whichever symbol TypeScript resolves a use to — the import's
-        // merged with the declaration's, or the declaration's own export
-        // symbol — names the colliding identifier.
-        for (const entry of declared) {
-          this.declarations.set(entry.declaration, binding);
-        }
+      for (const entry of declared) {
+        this.declarations.set(entry.declaration, binding);
       }
     }
   }
@@ -1421,16 +1444,26 @@ class CodeAnalyzer {
       return;
     }
     if (binding.kind === "colliding") {
-      // SPEC 2.4, 4.5: the uses of the role's binding, naming no target.
-      if (binding.role === "text") this.visitTextBindingUse(identifier, null);
-      else this.visitNodeBindingUse(identifier, null);
+      // SPEC 2.4, 4.5: the uses of the bindings its spec module imports
+      // give it, naming no target — as a callee a `text` binding's where
+      // one binds the `text` export (a plain call, no `text` call);
+      // elsewhere a node binding's where one binds the default export (a
+      // marker's chain unresolved, 14.7).
+      const parent = identifier.parent;
+      const callee =
+        ts.isCallExpression(parent) && parent.expression === identifier;
+      if (binding.text && (callee || !binding.node)) {
+        this.visitTextBindingUse(identifier, null);
+      } else {
+        this.visitNodeBindingUse(identifier, binding);
+      }
       return;
     }
     if (binding.kind === "text") {
       this.visitTextBindingUse(identifier, binding.target);
       return;
     }
-    this.visitNodeBindingUse(identifier, binding.target);
+    this.visitNodeBindingUse(identifier, binding);
   }
 
   /**
@@ -1438,12 +1471,12 @@ class CodeAnalyzer {
    * static chain in expression-statement position — or as the sole
    * argument of a call whose callee is a spec module's `text` export.
    * Everything else is 14.18 (or 14.8 for a non-static chain in marker
-   * position). A null `target` is a colliding identifier's (SPEC 2.4,
-   * 4.5): its static chain in marker position names no target (14.7).
+   * position). A colliding identifier (SPEC 2.4, 4.5) names no target:
+   * its static chain in marker position is unresolved (14.7).
    */
   private visitNodeBindingUse(
     identifier: tst.Identifier,
-    target: SpecModuleTarget | null,
+    binding: Extract<TrackedBinding, { readonly kind: "node" | "colliding" }>,
   ): void {
     const use = climbUseExpression(identifier);
     const parent = use.parent;
@@ -1453,27 +1486,26 @@ class CodeAnalyzer {
       // is a dependency marker recording a `references` edge.
       const classified = classifyReference(use, this.sourceFile);
       if (classified.kind === "chain") {
-        if (target === null) {
+        if (binding.kind === "colliding") {
           // SPEC 2.4, 4.5 → 14.7: rooted at an identifier the language
-          // binds twice, the chain names no target — no edge, no
+          // binds more than once, the chain names no target — no edge, no
           // occurrence (5.7) — located as its occurrence would be, the
           // bare chain exclusive of the terminator (SPEC 14).
           this.addFinding(
             7,
             use,
             `unknown TypeScript reference: the marker's chain is rooted ` +
-              `at ${JSON.stringify(identifier.text)}, which a spec module ` +
-              `import and a value-level declaration of the same module ` +
-              `scope both bind — the language names no single binding, so ` +
-              `the chain names no target; resolve the collision (SPEC 2.4, ` +
-              `4.5, 14.7)`,
+              `at ${JSON.stringify(identifier.text)}, which ` +
+              `${binding.binders} each bind — the language names no ` +
+              `single binding, so the chain names no target; resolve the ` +
+              `collision (SPEC 2.4, 4.5, 14.7)`,
           );
-        } else if (target.defined) {
+        } else if (binding.target.defined) {
           this.references.push(
             this.chainReference(
               "references",
               classified,
-              target.path,
+              binding.target.path,
               this.attributionOf(use),
             ),
           );
@@ -1486,7 +1518,7 @@ class CodeAnalyzer {
             use,
             `unknown TypeScript reference: the marker referencing ` +
               `${describeTargetChain(
-                target,
+                binding.target,
                 classified.segments.map((segment) => segment.name),
               )} ` +
               `does not resolve — ${UNDEFINED_TARGET_REASON} ` +
@@ -1545,9 +1577,10 @@ class CodeAnalyzer {
     const binding = this.bindingOfSymbol(
       this.checker.getSymbolAtLocation(callee),
     );
-    // A poisoned callee masks its arguments too: the import's 14.15
-    // already accounts for the whole call (SPEC 14). A colliding callee's
-    // call is no `text` call (SPEC 4.5): its arguments are ordinary uses.
+    // A poisoned callee — an invalid import's binding — masks its
+    // arguments too: the import's 14.15 already accounts for the whole
+    // call (SPEC 14). A colliding callee's call is no `text` call (SPEC
+    // 4.5): its arguments are ordinary uses.
     return binding?.kind === "text" || binding?.kind === "poisoned";
   }
 
@@ -1670,7 +1703,7 @@ class CodeAnalyzer {
     }
     if (
       rootBinding.kind === "text" ||
-      (rootBinding.kind === "colliding" && rootBinding.role === "text")
+      (rootBinding.kind === "colliding" && !rootBinding.node)
     ) {
       this.addFinding(
         18,
@@ -1698,18 +1731,18 @@ class CodeAnalyzer {
     }
     if (rootBinding.kind === "colliding") {
       // SPEC 2.4, 4.5 → 14.7: a chain rooted at an identifier the
-      // language binds twice names no target — no edge, no occurrence
-      // (5.7) — so the call is located as its occurrence would be, callee
-      // through closing parenthesis (SPEC 14); needing a resolving
-      // argument, it is never 14.11 (SPEC 14.11).
+      // language binds more than once names no target — no edge, no
+      // occurrence (5.7) — so the call is located as its occurrence would
+      // be, callee through closing parenthesis (SPEC 14); needing a
+      // resolving argument, it is never 14.11 (SPEC 14.11).
       this.addFinding(
         7,
         call,
         `unknown TypeScript reference: the text(...) argument is rooted ` +
-          `at ${JSON.stringify(classified.rootName)}, which a spec module ` +
-          `import and a value-level declaration of the same module scope ` +
-          `both bind — the language names no single binding, so the chain ` +
-          `names no target; resolve the collision (SPEC 2.4, 4.5, 14.7)`,
+          `at ${JSON.stringify(classified.rootName)}, which ` +
+          `${rootBinding.binders} each bind — the language names no ` +
+          `single binding, so the chain names no target; resolve the ` +
+          `collision (SPEC 2.4, 4.5, 14.7)`,
       );
       return;
     }

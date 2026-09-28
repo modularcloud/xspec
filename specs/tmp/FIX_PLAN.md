@@ -46,14 +46,14 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T2.7-4 | section-2.7 | 13, 14 (passes since Task 14 landed) |
 | T3-7 | section-3 | 10 (passes since Task 10 landed) |
 | T4-2 | section-4 | 6 (passes since Task 6 landed) |
-| T4-5 | section-4 | 16, 17 (since Task 16 it waits on Task 17 alone: it stops first at its first arm, the type-only import collision — `actual ["14.15"]` where `["14.7","14.7","14.15"]` is expected) |
+| T4-5 | section-4 | 16, 17 (passes since Task 17 landed) |
 | T4.4-1 | section-4.3-4.4 | 18 |
 | T4.5-8 | section-4.5 | 16 (passes since Task 16 landed) |
-| T4.5-9 | section-4.5 | 16, 17 (since Task 16 its `function text` and `const text` cells and the type-alias control pass, visited by a per-cell diagnostic variant; it stops first at the first import-import arm's `SPEC.a` cell — Task 17: the three import-import arms' `SPEC.a` and `B.a` cells report no 14.18, their `"x"` cells pass) |
+| T4.5-9 | section-4.5 | 16, 17 (passes since Task 17 landed) |
 | T4.6-1 | section-4.6 | 19 |
 | T4.6-3 | section-4.6 | 20 |
 | T5.5-5 | section-5.5 | 3 (passes since Task 3 landed) |
-| T5.7-4 | section-5.7 | 16, 17, 18 (since Task 16 `src/collide.ts`'s two 14.7s and `src/calltext.ts`'s 14.18 are reported; its collision premise still reports `14.7 x2` and `14.11 x2` where `14.7 x5` and `14.11 x1` are expected — `src/typed.ts`'s two chains, Task 17, and `textB(A.missing)` reported 14.11 for 14.7, Task 18) |
+| T5.7-4 | section-5.7 | 16, 17, 18 (since Task 17 it waits on Task 18 alone: `src/collide.ts`'s and `src/typed.ts`'s four 14.7s and `src/calltext.ts`'s 14.18 are reported; its collision premise still reports `14.7 x4` and `14.11 x2` where `14.7 x5` and `14.11 x1` are expected — `textB(A.missing)` in `src/cross.ts` reported 14.11 for 14.7, Task 18) |
 | T6.2-1 | section-6.2 | 3 (passes since Task 3 landed) |
 | T6.2-2 | section-6.2 | 3 (passes since Task 3 landed) |
 | T6.4-3 | section-6.4 | 22 |
@@ -166,34 +166,6 @@ Several tasks have no failing test of their own: Task 21 (the undefined refusal 
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 17 — Import-import collisions leave chains unresolved and `text` calls unsupported, never silently dropped (SPEC 4.5, 2.4, 14.7, 14.18, 14.15, 14.11; A11)
-
-**Requirement.**
-- SPEC 4.5: an identifier bound by two imports roots its chains at no binding, "its chains unresolved (14.7) beside the collision (14.15), whether or not either import is type-only (4): the type-only exemption reaches a chain the language roots at one binding, and a colliding identifier roots it at none".
-- SPEC 14.11: "a call through a colliding `text` identifier (4.5), no `text` call, is never this condition". Its node argument is therefore 14.18.
-- SPEC 2.4 states the same for spec sources: chains rooted at a colliding identifier are unresolved, 14.5 in a `d` value and 14.6 in a `text(...)` argument.
-
-**Observed.** 14.15 is reported, but:
-- chains through a value import that collides with a type-only import are silently dropped, with no 14.7;
-- `text(SPEC.a)` and `text(B.a)` through a colliding `text` omit the 14.18 at the node argument.
-
-**Location.**
-- `src/core/code-analysis.ts`: the `"poisoned"` binding kind and its masking checks — `scanModuleLinks`, which marks colliding imports `poisoned`, `visitIdentifier`, `isTextCallArgument` ("a poisoned callee masks its arguments"), `analyzeTextCall`, `visitExportSpecifiers`, and `visitImportEqualsUse`. Since Task 16 the file has a `"colliding"` binding kind carrying the import's `role`, which gives a value-level collision exactly this task's semantics (a chain in a marker or a `text` argument 14.7 at its would-be occurrence span, a call through a colliding `text` a plain call whose node argument the walk reports 14.18); `scanModuleLinks` builds one 14.15 per identifier covering both collision kinds, so marking an import-import collision `colliding` there (the role of its value-level spec binding, `"node"` where none has one) may suffice.
-- `src/core/spec-references.ts`: `analyzeSpecImports`, which marks an import-import collision `poisoned` and, since Task 16, an import/export collision `colliding`; `resolveClassified` reports a `colliding` root through its `unresolved` outcome (14.5 at a `d` reference's own expression, 14.6 at an embedding's braced container).
-
-**Change.**
-- Replace masking with unresolved reporting. A marker or chain rooted at a colliding identifier reports 14.7 in TypeScript, 14.5 in a `d` value, or 14.6 in a `text(...)` argument, at the spelling's own range, with no edge and no occurrence.
-- Treat a call through a colliding `text` as a plain call, with 14.18 at a node argument.
-- Apply the same rule on the spec-source side, per 2.4; T14-12 stages two imports binding one identifier.
-- Keep the 14.15 findings as they are.
-
-**Verification.** Task 16 has landed, so these should turn green:
-- `section-4.test.ts` (T4-5);
-- `section-4.5.test.ts` (T4.5-9);
-- `section-5.7.test.ts` (T5.7-4, with Task 18 as well).
-
-Neighbours: `section-2.1.test.ts`, `section-11.3.test.ts`, `section-14-iii.test.ts`.
 
 ## Task 18 — A cross-module `text` call keeps its `embeds` edge and occurrence; an unresolved argument is 14.7 alone (SPEC 14.11, 5.7, 4.4; A12)
 

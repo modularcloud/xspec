@@ -13,18 +13,19 @@
 // recorded import targets is the graph's (SPEC 2.1, 5.3 → 14.9).
 //
 // Masking (SPEC 14): a reference whose chain is rooted at a binding
-// introduced by an *invalid* import (or by colliding imports) is masked —
-// the import's own 14.15 already accounts for it, and its target is
-// undetectable — while a chain rooted at an identifier no import binds is
-// a dynamic reference (14.8): it is not "rooted at an imported spec
-// module" (SPEC 2.4). References through a valid import of an
-// unparseable file are recorded normally and report as unresolved during
-// resolution (SPEC 14.20, 14.5–14.7); references through a valid import
-// of a member whose own path is invalid (SPEC 14.19) never resolve —
-// every identity of such a file is undefined (SPEC 11.2) — a condition
-// decidable per file, so their 14.5/14.6 is reported here directly. So is
-// that of a chain rooted at an identifier an import and a declaration an
-// export statement holds both bind (SPEC 2.4): it names no target.
+// introduced by an *invalid* import is masked — the import's own 14.15
+// already accounts for it, and its target is undetectable — while a chain
+// rooted at an identifier no import binds is a dynamic reference (14.8):
+// it is not "rooted at an imported spec module" (SPEC 2.4). References
+// through a valid import of an unparseable file are recorded normally and
+// report as unresolved during resolution (SPEC 14.20, 14.5–14.7);
+// references through a valid import of a member whose own path is invalid
+// (SPEC 14.19) never resolve — every identity of such a file is undefined
+// (SPEC 11.2) — a condition decidable per file, so their 14.5/14.6 is
+// reported here directly. So is that of a chain rooted at an identifier
+// an import binds that another import, or a declaration an export
+// statement holds, also binds (SPEC 2.4): it names no target, beside the
+// collision's 14.15.
 
 import ts from "./ts-module.js";
 import type * as tst from "typescript";
@@ -123,21 +124,23 @@ export type SpecImportBinding =
     }
   | {
       /**
-       * A binding of an invalid import, or an identifier bound by more
-       * than one import: the 14.15 accounts for it, and references rooted
-       * here are masked (SPEC 14).
+       * A binding of an invalid import (one not colliding): the 14.15
+       * accounts for it, and references rooted here are masked (SPEC 14).
        */
       readonly kind: "poisoned";
     }
   | {
       /**
-       * SPEC 2.1, 2.4: an identifier an import binds that a declaration
-       * an export statement holds also binds — the language names no
-       * single binding, so a chain rooted here names no target: it
-       * reports as unresolved (14.5/14.6) beside the collision's 14.15,
-       * recording no edge and no occurrence (5.7).
+       * SPEC 2.1, 2.4: an identifier an import binds that another import,
+       * or a declaration an export statement holds, also binds — the
+       * language names no single binding, so a chain rooted here names no
+       * target: it reports as unresolved (14.5/14.6) beside the
+       * collision's 14.15, whatever the imports' own validity, recording
+       * no edge and no occurrence (5.7).
        */
       readonly kind: "colliding";
+      /** The colliding binders, as messages name them ("2 imports", …). */
+      readonly binders: string;
     };
 
 /** The analyzed imports of one xspec source file (SPEC 2.1). */
@@ -611,10 +614,10 @@ export function analyzeSpecImports(
   // condition the declarations jointly violate — ONE finding per collided
   // identifier, locating every colliding declaration (SPEC 14: no
   // representative is chosen), each export statement's by the construct
-  // binding the name. Colliding imports alone poison the binding, so
-  // references rooted at it are masked (SPEC 14); an identifier an export
-  // statement's declaration also binds roots no resolving chain (SPEC
-  // 2.4): its chains report as unresolved (14.5, 14.6).
+  // binding the name. A collided identifier — bound by another import or
+  // by an export statement's declaration alike — roots no resolving chain
+  // (SPEC 2.4): its chains report as unresolved (14.5, 14.6) beside the
+  // collision, never masked by it.
   const exportedByName = new Map<string, SpecExportedBinding[]>();
   for (const block of document.esmBlocks) {
     for (const held of block.exportedBindings) {
@@ -642,7 +645,9 @@ export function analyzeSpecImports(
           ? `invalid import: the identifier ${JSON.stringify(name)} is ` +
               `bound by ${String(declared.length)} imports in this file — ` +
               `no two imports in an xspec source file may bind the same ` +
-              `identifier; rename all but one binding (SPEC 2.1, 14.15)`
+              `identifier, and the language names no single binding, so no ` +
+              `chain rooted at it resolves; rename all but one binding ` +
+              `(SPEC 2.1, 2.4, 14.15)`
           : `invalid import: the identifier ${JSON.stringify(name)} is ` +
               `bound by ` +
               (declared.length === 1
@@ -668,10 +673,21 @@ export function analyzeSpecImports(
         ],
       ),
     );
-    bindings.set(
-      name,
-      exported.length > 0 ? { kind: "colliding" } : { kind: "poisoned" },
-    );
+    // SPEC 2.4: whatever the imports' own validity, the identifier roots
+    // no chain at any binding.
+    bindings.set(name, {
+      kind: "colliding",
+      binders:
+        (declared.length === 1
+          ? `an import`
+          : `${String(declared.length)} imports`) +
+        (exported.length === 0
+          ? ``
+          : exported.length === 1
+            ? ` and a declaration an export statement holds`
+            : ` and ${String(exported.length)} declarations export ` +
+              `statements hold`),
+    });
   }
 
   return {
@@ -790,9 +806,9 @@ export interface DependencyReference {
 /**
  * One `{text(...)}` embedding's analysis (SPEC 2.3). `reference` is null
  * when the embedding yields none: a 14.8 finding accounts for it, its
- * chain root is a poisoned import binding (masked, SPEC 14), or its chain
- * names no target decidably per file, a 14.6 reported here (SPEC 14.19,
- * 11.2, 2.4).
+ * chain root is an invalid import's poisoned binding (masked, SPEC 14),
+ * or its chain names no target decidably per file, a 14.6 reported here
+ * (SPEC 14.19, 11.2, 2.4).
  */
 export interface EmbeddingReference {
   readonly embedding: SpecEmbedding;
@@ -1157,10 +1173,9 @@ class ReferenceAnalyzer {
         outcome: "unresolved",
         subject: `rooted at ${root}`,
         reason:
-          `${root} is bound both by an import and by a declaration an ` +
-          `export statement holds — the language names no single binding, ` +
-          `so the chain names no target (SPEC 2.4, 2.1); resolve the ` +
-          `collision`,
+          `${root} is bound by ${binding.binders} — the language names no ` +
+          `single binding, so the chain names no target (SPEC 2.4, 2.1); ` +
+          `resolve the collision`,
         span: classified.span,
       };
     }
