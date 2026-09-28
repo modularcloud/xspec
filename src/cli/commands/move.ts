@@ -53,20 +53,23 @@
 //    collisions after the removal), the target parent, destination
 //    occupancy and validity (obstructed destination-side directory
 //    components included), would-be dependency and spec-import cycles, and
-//    rewritten references that could not resolve — and a refused move
-//    reports one finding per reason, each with its stable code and
-//    concerned identity, path, or located participants (at current,
-//    pre-operation coordinates), as the 12.7 findings report (exit 1),
-//    modifying nothing. `--preview` (SPEC 6.6) shares exactly this
-//    evaluation. The destination-side filesystem facts are probed by the
-//    workspace layer (workspace/writes.ts) over exactly the paths the
+//    moved text holding an import declaration (no reason exists for a
+//    rewritten reference: each resolves by construction, SPEC 6.4, 6.5) —
+//    and a refused move reports one finding per reason, each with its
+//    stable code and concerned identity, path, or located participants (at
+//    current, pre-operation coordinates), as the 12.7 findings report
+//    (exit 1), modifying nothing. `--preview` (SPEC 6.6) shares exactly
+//    this evaluation. The destination-side filesystem facts are probed by
+//    the workspace layer (workspace/writes.ts) over exactly the paths the
 //    core assessment names.
 // 6. The rewritten workspace is re-validated in memory and the complete
 //    write set passes the SPEC 14.22 symlink check — internal-consistency
 //    guards on the would-succeed path (the refusal evaluation above
-//    realizes "all rewritten references resolve" and the no-new-cycles
-//    rule for the user-facing contract); any finding refuses (exit 1)
-//    before modifying anything.
+//    realizes the no-new-cycles rule for the user-facing contract, and
+//    every rewritten reference resolves by construction); any finding
+//    refuses (exit 1) before modifying anything. `--preview` runs these
+//    guards too and reports its plan only past them, refused exactly when
+//    the real operation would be (SPEC 6.6; ./rewrite-validation.ts).
 //
 // Success writes the rewritten sources, removes the origin (file form),
 // appends the journal entry, and regenerates; the report is the applied
@@ -74,15 +77,14 @@
 // information of the preview's `mapping` (SPEC 6.5, 6.4, 6.6) — with
 // `--json`, the single JSON document (SPEC 12.0).
 
-import { computeBuildOutputs } from "../../core/build.js";
 import { compareBytes } from "../../core/bytes.js";
 import type {
   DiscoveredSource,
   SourceClassification,
 } from "../../core/discovery.js";
-import type { ExitCode, Finding } from "../../core/findings.js";
+import type { ExitCode } from "../../core/findings.js";
 import type { SpecFileAnalysis } from "../../core/graph.js";
-import { JOURNAL_PATH, serializeJournalEntry } from "../../core/journal.js";
+import { serializeJournalEntry } from "../../core/journal.js";
 import type { MoveFilePlan, MoveSectionPlan } from "../../core/move.js";
 import { planMoveFile, planMoveSection } from "../../core/move.js";
 import type {
@@ -97,7 +99,6 @@ import {
 } from "../../core/refusal.js";
 import { executeBuildOutputs } from "../../workspace/build.js";
 import type { LoadedWorkspace } from "../../workspace/config.js";
-import { loadGraphData } from "../../workspace/graph-data.js";
 import {
   appendJournalEntry,
   journalFromBytes,
@@ -108,13 +109,11 @@ import type { WorkspaceAnalysis } from "../../workspace/pipeline.js";
 import {
   analyzeWorkspace,
   analyzeWorkspaceContent,
-  workspaceInputsOf,
 } from "../../workspace/pipeline.js";
 import {
   nonDirectoryComponents,
   probeOccupant,
   removeSourceFile,
-  obstructedWritePathFindings,
   writeSourceFile,
 } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
@@ -124,37 +123,17 @@ import {
   isValidUtf8ArgumentValue,
   jsonOutputInEffect,
 } from "../args.js";
-import type { CliWriter, CommandContext } from "../io.js";
+import type { CommandContext } from "../io.js";
 import {
   emitAppliedMappingReport,
   emitConfigurationErrors,
-  emitFindingsReport,
 } from "../report.js";
 import { testHoldSpecOf, usageError } from "./common.js";
-import { emitRefusedPreview, emitSuccessfulPreview } from "./preview.js";
-
-/**
- * SPEC 6.5/12.0/12.7: a refused move is a validation failure — exit 1, the
- * findings report `{"findings": […]}` on standard output (SPEC 12.0:
- * reports are standard-output content; with `--json`, one JSON document as
- * the entire standard output). Workspace-precondition findings and
- * refusal-reason findings alike go through here — never mixed in one
- * report (SPEC 14). A refused `--preview` reports exactly the same
- * findings and exit, in the preview document form with `mapping`, `files`,
- * and `delta` null (SPEC 6.6, 12.7).
- */
-function emitFindingsRefusal(
-  preview: boolean,
-  json: boolean,
-  stdout: CliWriter,
-  findings: readonly Finding[],
-): ExitCode {
-  if (preview) {
-    return emitRefusedPreview(json, stdout, findings);
-  }
-  emitFindingsReport(json, stdout, findings);
-  return 1;
-}
+import { emitSuccessfulPreview } from "./preview.js";
+import {
+  emitFindingsRefusal,
+  validateRewrittenWorkspace,
+} from "./rewrite-validation.js";
 
 /**
  * Assess a move destination and probe its filesystem facts (SPEC 6.5):
@@ -403,6 +382,37 @@ async function runMoveFile(
     destination,
   );
 
+  // Re-validate the rewritten workspace in memory and vet the complete
+  // write set — the rewritten sources, the destination included — before
+  // touching anything (SPEC 6.5: all rewritten references resolve, no
+  // import or dependency cycle arises, and the finishing regeneration
+  // cannot fail). The journal is modeled as it will stand after the append
+  // — hashes take the journal as an input (SPEC 5.4), and the file form is
+  // pure (SPEC 6.2), so the regenerated graph data matches a fresh build of
+  // the moved workspace byte for byte (SPEC 6.5, 12.0); the stored record's
+  // paths for the origin's generated files are no longer generated and
+  // become orphans, so no stale output (14.10) remains. The preview runs
+  // the same validation, refused exactly when the real operation would be
+  // (SPEC 6.6; ./rewrite-validation.ts).
+  const rewritten = await reanalyzeMoved(
+    workspace,
+    analysis,
+    plan,
+    originPath,
+    destination,
+    assessment.specGroups,
+  );
+  const verdict = await validateRewrittenWorkspace(
+    invocation,
+    context,
+    rewritten,
+    plan.rewrites.map((rewrite) => rewrite.path),
+    preview,
+  );
+  if (!verdict.proceeds) {
+    return verdict.exit;
+  }
+
   // SPEC 6.6: a preview reports the plan and performs it on nothing. The
   // post-operation generation set follows the post-move source set — the
   // origin's entry replaced by the destination — so the delta carries the
@@ -421,78 +431,6 @@ async function runMoveFile(
     );
   }
 
-  // Re-validate the rewritten workspace in memory before touching anything
-  // (SPEC 6.5: all rewritten references resolve, no import or dependency
-  // cycle arises, and the finishing regeneration cannot fail). The journal
-  // is modeled as it will stand after the append — hashes take the journal
-  // as an input (SPEC 5.4), and the file form is pure (SPEC 6.2), so the
-  // regenerated graph data matches a fresh build of the moved workspace
-  // byte for byte (SPEC 6.5, 12.0).
-  const rewritten = await reanalyzeMoved(
-    workspace,
-    analysis,
-    plan,
-    originPath,
-    destination,
-    assessment.specGroups,
-  );
-  if (rewritten.configurationErrors.length > 0) {
-    // Unreachable: the destination was validated against the same group
-    // rules discovery applies. Guarded so a regression reports rather than
-    // corrupts.
-    emitConfigurationErrors(
-      context,
-      jsonOutputInEffect(invocation),
-      workspace.configAnchor,
-      rewritten.configurationErrors,
-    );
-    return 2;
-  }
-  if (rewritten.findings.length > 0) {
-    // Unreachable: the refusal evaluation above (core/refusal.ts) realizes
-    // every reason a move can be refused for, so a validated plan leaves a
-    // valid workspace. Guarded so a regression refuses (exit 1, nothing
-    // modified) rather than corrupts.
-    return emitFindingsRefusal(
-      false,
-      invocation.json,
-      stdout,
-      rewritten.findings,
-    );
-  }
-
-  // SPEC 6.5/6.4/12.1: the finishing regeneration's outputs, derived
-  // exactly as `xspec build` derives them — over the rewritten analyses.
-  // The stored record's paths for the origin's generated files are no
-  // longer generated and become orphans, so no stale output (14.10)
-  // remains.
-  const stored = await loadGraphData(workspace.root);
-  const outputs = computeBuildOutputs(
-    workspace.configuration,
-    rewritten.specs,
-    rewritten.graph,
-    rewritten.textModel,
-    rewritten.hashes,
-    stored.data,
-    // SPEC 13.3/6.5: the regenerated store records the rewritten workspace's
-    // inputs — the post-move source set and bytes, and the journal as it
-    // will stand after the append (the rewritten analysis models exactly
-    // those bytes).
-    workspaceInputsOf(workspace, rewritten),
-  );
-
-  // SPEC 14.22: validate the complete write set — rewritten sources (the
-  // destination included), the journal, and every regenerated file — before
-  // modifying anything.
-  const writeFindings = await obstructedWritePathFindings(workspace.root, [
-    ...plan.rewrites.map((rewrite) => rewrite.path),
-    JOURNAL_PATH,
-    ...outputs.writePaths,
-  ]);
-  if (writeFindings.length > 0) {
-    return emitFindingsRefusal(false, invocation.json, stdout, writeFindings);
-  }
-
   // All validation passed — modify: write the rewritten sources (atomic per
   // file, SPEC 13.5; the moved content lands at the destination), remove
   // the origin (SPEC 6.5: the file is relocated), append the mapping to the
@@ -503,7 +441,7 @@ async function runMoveFile(
   }
   await removeSourceFile(workspace.root, originPath);
   await appendJournalEntry(workspace.root, plan.entry);
-  await executeBuildOutputs(workspace.root, outputs);
+  await executeBuildOutputs(workspace.root, verdict.outputs);
 
   // SPEC 6.5/6.4/12.0: a successful move reports its applied mapping, as
   // rename does — the complete identity mapping the operation journaled, in
@@ -642,6 +580,35 @@ async function runMoveSection(
     newId,
   );
 
+  // Re-validate the rewritten workspace in memory and vet the complete
+  // write set — the rewritten sources, a created target included — before
+  // touching anything (SPEC 6.5: all rewritten references resolve,
+  // structural rules hold, and no import or dependency cycle arises — 2.1,
+  // 5.3 — so the finishing regeneration cannot fail). The journal is
+  // modeled as it will stand after the append (SPEC 5.4). The refusal
+  // evaluation above realizes every reason a move can be refused for —
+  // would-be cycles included, a moved reference to the target file's own
+  // root among them — so these guards refuse only a regression. The
+  // preview runs the same validation, refused exactly when the real
+  // operation would be (SPEC 6.6; ./rewrite-validation.ts).
+  const rewritten = await reanalyzeSectionMoved(
+    workspace,
+    analysis,
+    plan,
+    targetPath,
+    createGroups,
+  );
+  const verdict = await validateRewrittenWorkspace(
+    invocation,
+    context,
+    rewritten,
+    plan.rewrites.map((rewrite) => rewrite.path),
+    preview,
+  );
+  if (!verdict.proceeds) {
+    return verdict.exit;
+  }
+
   // SPEC 6.6: a preview reports the plan and performs it on nothing. The
   // post-operation generation set follows the post-move source set — a
   // created target file joins it — so the delta carries the created file's
@@ -660,74 +627,6 @@ async function runMoveSection(
     );
   }
 
-  // Re-validate the rewritten workspace in memory before touching anything
-  // (SPEC 6.5: all rewritten references resolve, structural rules hold, and
-  // no import or dependency cycle arises — 2.1, 5.3 — so the finishing
-  // regeneration cannot fail). The journal is modeled as it will stand
-  // after the append (SPEC 5.4).
-  const rewritten = await reanalyzeSectionMoved(
-    workspace,
-    analysis,
-    plan,
-    targetPath,
-    createGroups,
-  );
-  if (rewritten.configurationErrors.length > 0) {
-    // Unreachable: the configuration is untouched and a created target was
-    // validated against the same group rules discovery applies. Guarded so
-    // a regression reports rather than corrupts.
-    emitConfigurationErrors(
-      context,
-      jsonOutputInEffect(invocation),
-      workspace.configAnchor,
-      rewritten.configurationErrors,
-    );
-    return 2;
-  }
-  if (rewritten.findings.length > 0) {
-    // Unreachable: the refusal evaluation above (core/refusal.ts) realizes
-    // every reason a move can be refused for — would-be cycles included,
-    // a moved reference to the target file's own root among them — and
-    // every rewritten reference resolves by construction (SPEC 6.4, 6.5),
-    // so a validated plan leaves a valid workspace. Guarded so a
-    // regression refuses (exit 1, nothing modified) rather than corrupts.
-    return emitFindingsRefusal(
-      false,
-      invocation.json,
-      stdout,
-      rewritten.findings,
-    );
-  }
-
-  // SPEC 6.5/6.4/12.1: the finishing regeneration's outputs, derived
-  // exactly as `xspec build` derives them — over the rewritten analyses.
-  const stored = await loadGraphData(workspace.root);
-  const outputs = computeBuildOutputs(
-    workspace.configuration,
-    rewritten.specs,
-    rewritten.graph,
-    rewritten.textModel,
-    rewritten.hashes,
-    stored.data,
-    // SPEC 13.3/6.5: the regenerated store records the rewritten workspace's
-    // inputs — the post-move source set and bytes, and the journal as it
-    // will stand after the append (the rewritten analysis models exactly
-    // those bytes).
-    workspaceInputsOf(workspace, rewritten),
-  );
-
-  // SPEC 14.22: validate the complete write set — rewritten sources (a
-  // created target included), the journal, and every regenerated file —
-  // before modifying anything.
-  const writeFindings = await obstructedWritePathFindings(workspace.root, [
-    ...plan.rewrites.map((rewrite) => rewrite.path),
-    JOURNAL_PATH,
-    ...outputs.writePaths,
-  ]);
-  if (writeFindings.length > 0) {
-    return emitFindingsRefusal(false, invocation.json, stdout, writeFindings);
-  }
-
   // All validation passed — modify: write the rewritten sources (atomic per
   // file, SPEC 13.5; the origin keeps its path, the target gains the moved
   // text), append the mapping to the journal (SPEC 6.1, 6.5), and
@@ -736,7 +635,7 @@ async function runMoveSection(
     await writeSourceFile(workspace.root, rewrite.path, rewrite.content);
   }
   await appendJournalEntry(workspace.root, plan.entry);
-  await executeBuildOutputs(workspace.root, outputs);
+  await executeBuildOutputs(workspace.root, verdict.outputs);
 
   // SPEC 6.5/6.4/12.0: a successful move reports its applied mapping, as
   // rename does — the complete identity mapping the operation journaled, in

@@ -36,9 +36,12 @@
 //    nothing. `--preview` (SPEC 6.6) shares exactly this evaluation.
 // 6. The rewritten workspace is re-validated in memory and the complete
 //    write set passes the SPEC 14.22 symlink check — internal-consistency
-//    guards on the would-succeed path (the refusal evaluation above
-//    realizes "all rewritten references resolve" for the user-facing
-//    contract); any finding refuses (exit 1) before modifying anything.
+//    guards on the would-succeed path (every rewritten reference resolves
+//    by construction, SPEC 6.4, and the refusal evaluation above realizes
+//    the user-facing contract); any finding refuses (exit 1) before
+//    modifying anything. `--preview` runs these guards too and reports its
+//    plan only past them, refused exactly when the real operation would be
+//    (SPEC 6.6; ./rewrite-validation.ts).
 //
 // Success writes the rewritten sources, appends the journal entry, and
 // regenerates; the report is the applied mapping — the complete identity
@@ -46,15 +49,13 @@
 // `mapping` (SPEC 6.4, 6.6) — with `--json`, the single JSON document
 // (SPEC 12.0).
 
-import { computeBuildOutputs } from "../../core/build.js";
-import type { ExitCode, Finding } from "../../core/findings.js";
-import { JOURNAL_PATH, serializeJournalEntry } from "../../core/journal.js";
+import type { ExitCode } from "../../core/findings.js";
+import { serializeJournalEntry } from "../../core/journal.js";
 import { evaluateRenameRefusals } from "../../core/refusal.js";
 import type { RenamePlan } from "../../core/rename.js";
 import { planRename } from "../../core/rename.js";
 import { executeBuildOutputs } from "../../workspace/build.js";
 import type { LoadedWorkspace } from "../../workspace/config.js";
-import { loadGraphData } from "../../workspace/graph-data.js";
 import {
   appendJournalEntry,
   journalFromBytes,
@@ -65,45 +66,21 @@ import type { WorkspaceAnalysis } from "../../workspace/pipeline.js";
 import {
   analyzeWorkspace,
   analyzeWorkspaceContent,
-  workspaceInputsOf,
 } from "../../workspace/pipeline.js";
-import {
-  obstructedWritePathFindings,
-  writeSourceFile,
-} from "../../workspace/writes.js";
+import { writeSourceFile } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
 import { flagPresent, flagValue, jsonOutputInEffect } from "../args.js";
-import type { CliWriter, CommandContext } from "../io.js";
+import type { CommandContext } from "../io.js";
 import {
   emitAppliedMappingReport,
   emitConfigurationErrors,
-  emitFindingsReport,
 } from "../report.js";
 import { testHoldSpecOf, usageError } from "./common.js";
-import { emitRefusedPreview, emitSuccessfulPreview } from "./preview.js";
-
-/**
- * SPEC 6.4/12.0/12.7: a refused rename is a validation failure — exit 1,
- * the findings report `{"findings": […]}` on standard output (SPEC 12.0:
- * reports are standard-output content; with `--json`, one JSON document as
- * the entire standard output). Workspace-precondition findings and
- * refusal-reason findings alike go through here — never mixed in one
- * report (SPEC 14). A refused `--preview` reports exactly the same
- * findings and exit, in the preview document form with `mapping`, `files`,
- * and `delta` null (SPEC 6.6, 12.7).
- */
-function emitFindingsRefusal(
-  preview: boolean,
-  json: boolean,
-  stdout: CliWriter,
-  findings: readonly Finding[],
-): ExitCode {
-  if (preview) {
-    return emitRefusedPreview(json, stdout, findings);
-  }
-  emitFindingsReport(json, stdout, findings);
-  return 1;
-}
+import { emitSuccessfulPreview } from "./preview.js";
+import {
+  emitFindingsRefusal,
+  validateRewrittenWorkspace,
+} from "./rewrite-validation.js";
 
 /** Concatenate byte arrays (the hypothetical post-append journal bytes). */
 function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
@@ -214,6 +191,27 @@ async function runRename(
   // 6.1, 6.6).
   const plan = planRename(analysis.specs, analysis.code, file, oldId, newId);
 
+  // Re-validate the rewritten workspace in memory and vet the complete
+  // write set before touching anything (SPEC 6.4: structural rules remain
+  // satisfied and all rewritten references resolve; the finishing
+  // regeneration cannot fail). The journal is modeled as it will stand
+  // after the append — hashes take the journal as an input (SPEC 5.4), so
+  // the regenerated graph data matches a fresh build of the rewritten
+  // workspace byte for byte (SPEC 6.4, 12.0). The preview runs the same
+  // validation, refused exactly when the real operation would be (SPEC
+  // 6.6; ./rewrite-validation.ts).
+  const rewritten = await reanalyzeRewritten(workspace, analysis, plan);
+  const verdict = await validateRewrittenWorkspace(
+    invocation,
+    context,
+    rewritten,
+    plan.rewrites.map((rewrite) => rewrite.path),
+    preview,
+  );
+  if (!verdict.proceeds) {
+    return verdict.exit;
+  }
+
   // SPEC 6.6: a preview reports the plan and performs it on nothing — the
   // complete identity mapping the operation would journal (the journal
   // entry's canonical `from`-byte order), the per-file edits, and the
@@ -231,64 +229,6 @@ async function runRename(
     );
   }
 
-  // Re-validate the rewritten workspace in memory before touching anything
-  // (SPEC 6.4: structural rules remain satisfied and all rewritten
-  // references resolve; the finishing regeneration cannot fail). The
-  // journal is modeled as it will stand after the append — hashes take the
-  // journal as an input (SPEC 5.4), so the regenerated graph data matches a
-  // fresh build of the rewritten workspace byte for byte (SPEC 6.4, 12.0).
-  const rewritten = await reanalyzeRewritten(workspace, analysis, plan);
-  if (rewritten.configurationErrors.length > 0) {
-    // Unreachable: the configuration and file set are unchanged. Guarded so
-    // a regression reports rather than corrupts.
-    emitConfigurationErrors(
-      context,
-      jsonOutputInEffect(invocation),
-      workspace.configAnchor,
-      rewritten.configurationErrors,
-    );
-    return 2;
-  }
-  if (rewritten.findings.length > 0) {
-    // Unreachable: the refusal evaluation above (core/refusal.ts) realizes
-    // every reason a rename can be refused for, so a validated plan leaves
-    // a valid workspace. Guarded so a regression refuses (exit 1, nothing
-    // modified) rather than corrupts.
-    return emitFindingsRefusal(
-      false,
-      invocation.json,
-      stdout,
-      rewritten.findings,
-    );
-  }
-
-  // SPEC 6.4/12.1: the finishing regeneration's outputs, derived exactly as
-  // `xspec build` derives them — over the rewritten analyses.
-  const stored = await loadGraphData(workspace.root);
-  const outputs = computeBuildOutputs(
-    workspace.configuration,
-    rewritten.specs,
-    rewritten.graph,
-    rewritten.textModel,
-    rewritten.hashes,
-    stored.data,
-    // SPEC 13.3/6.4: the regenerated store records the rewritten workspace's
-    // inputs — the rewritten source bytes and the journal as it will stand
-    // after the append (reanalyzeRewritten models exactly those bytes).
-    workspaceInputsOf(workspace, rewritten),
-  );
-
-  // SPEC 14.22: validate the complete write set — rewritten sources, the
-  // journal, and every regenerated file — before modifying anything.
-  const writeFindings = await obstructedWritePathFindings(workspace.root, [
-    ...plan.rewrites.map((rewrite) => rewrite.path),
-    JOURNAL_PATH,
-    ...outputs.writePaths,
-  ]);
-  if (writeFindings.length > 0) {
-    return emitFindingsRefusal(false, invocation.json, stdout, writeFindings);
-  }
-
   // All validation passed — modify: rewrite the sources (atomic per file,
   // SPEC 13.5), append the mapping to the journal (SPEC 6.1, 6.4), and
   // regenerate derived files exactly as `xspec build` does (SPEC 6.4).
@@ -296,7 +236,7 @@ async function runRename(
     await writeSourceFile(workspace.root, rewrite.path, rewrite.content);
   }
   await appendJournalEntry(workspace.root, plan.entry);
-  await executeBuildOutputs(workspace.root, outputs);
+  await executeBuildOutputs(workspace.root, verdict.outputs);
 
   // SPEC 6.4/12.0: a successful rename's report is the applied mapping —
   // the complete identity mapping the operation journaled, the information
