@@ -1225,8 +1225,10 @@ class CodeAnalyzer {
       enclosing: readonly string[],
       ambient: boolean,
     ): void => {
-      // SPEC 4.6: a named unit binds a name to *executable code*; ambient
-      // (`declare`) declarations bind none and enclose no statements.
+      // SPEC 4.6: a named unit binds a name to *executable code*; a
+      // declaration in an ambient context binds none and encloses no
+      // statements — whether a `declare` modifier introduces it or its file
+      // is a declaration file (below).
       const nowAmbient =
         ambient || hasModifier(node, ts.SyntaxKind.DeclareKeyword);
       let chain = enclosing;
@@ -1245,8 +1247,12 @@ class CodeAnalyzer {
         visit(child, chain, nowAmbient);
       });
     };
+    // SPEC 4.6: a declaration file is ambient by kind — every declaration
+    // in it is in an ambient context, so the file binds no unit and
+    // occupies no document-order slot; its markers attribute to the file.
+    const ambientFile = isDeclarationFileName(this.path);
     ts.forEachChild(this.sourceFile, (child) => {
-      visit(child, [], false);
+      visit(child, [], ambientFile);
     });
     records.sort((a, b) => a.start - b.start);
     const occurrences = new Map<string, number>();
@@ -1269,18 +1275,21 @@ class CodeAnalyzer {
    * SPEC 1.7: the byte range of the construct binding a unit's name. The
    * construct is the recorded declaration node itself — a variable
    * declaration node already spans its own name through its initializer,
-   * never the enclosing multi-declaration statement — with three
-   * carve-outs: the nested declarations a dotted namespace name nests in
-   * the AST all take the outermost declaration of the dotted chain (the
-   * one construct binding them all); a default export whose exported
-   * construct is named takes that construct's own range — for the merged
-   * declaration form (`export default function f() {}`) the declaration
-   * with its `export default ` modifier prefix excluded, for the
-   * `export default <expression>` form the named function or class
-   * expression's own span — while the `default` unit an anonymous
-   * exported construct derives takes the whole export declaration; and a
-   * `path#unit@N` simply carries its own occurrence's construct, which is
-   * the node recorded for it.
+   * never the enclosing multi-declaration statement — by its own
+   * characters: a decorator list is part of the declaration it decorates,
+   * and a LEADING `export` or `export default`, with whatever separates it
+   * from the construct's first token, is excluded (`declarationRange`).
+   * The nested declarations a dotted namespace name nests in the AST all
+   * take the outermost declaration of the dotted chain (the one construct
+   * binding them all); a default export whose exported construct is named
+   * takes that construct's own range — for the merged declaration form
+   * (`export default function f() {}`) the declaration with its leading
+   * `export default ` excluded, for the `export default <expression>`
+   * form the named function or class expression's own span — while the
+   * `default` unit an anonymous exported construct derives takes the whole
+   * export declaration, a decorator list preceding its `export` included;
+   * and a `path#unit@N` simply carries its own occurrence's construct,
+   * which is the node recorded for it.
    */
   private unitRange(node: tst.Node): ByteRange {
     if (ts.isModuleDeclaration(node)) {
@@ -1294,7 +1303,7 @@ class CodeAnalyzer {
       ) {
         outer = outer.parent;
       }
-      return this.rangeOf(outer);
+      return this.declarationRange(outer);
     }
     if (ts.isExportAssignment(node)) {
       const expression = stripParentheses(node.expression);
@@ -1313,23 +1322,43 @@ class CodeAnalyzer {
       (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
       node.name !== undefined
     ) {
-      const defaultModifier = (ts.getModifiers(node) ?? []).find(
-        (modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword,
-      );
-      if (defaultModifier !== undefined) {
-        // The merged named-default-export form: the construct's own range
-        // excludes the `export default ` prefix, beginning at the first
-        // construct token after the `default` modifier (SPEC 1.7) — any
-        // further modifier (`async`, `abstract`) is the construct's own.
-        return {
-          start: this.offsets.byteOffset(
-            firstTokenStartAfter(node, defaultModifier.end, this.sourceFile),
-          ),
-          end: this.offsets.byteOffset(node.getEnd()),
-        };
+      return this.declarationRange(node);
+    }
+    // The anonymous merged default export (`export default function () {}`,
+    // `@dec export default class {}`) is itself the construct deriving the
+    // `default` unit: the whole export declaration (SPEC 1.7).
+    return this.rangeOf(node);
+  }
+
+  /**
+   * SPEC 1.7: a named declaration's own characters, a leading `export` or
+   * `export default` — and whatever separates it from the construct's
+   * first token — excluded. Only what LEADS is excluded: the modifier list
+   * (decorators included) comes in source order, so `export @dec class C
+   * {}` spans `@dec class C {}`, while `@dec export class C {}` and `@dec
+   * export default class C {}` span whole from their `@`, the `export`
+   * inside; a further modifier (`async`, `abstract`) is the construct's own.
+   */
+  private declarationRange(
+    node:
+      tst.FunctionDeclaration | tst.ClassDeclaration | tst.ModuleDeclaration,
+  ): ByteRange {
+    const modifiers = node.modifiers ?? [];
+    let leading: tst.Node | undefined;
+    if (modifiers[0]?.kind === ts.SyntaxKind.ExportKeyword) {
+      leading = modifiers[0];
+      if (modifiers[1]?.kind === ts.SyntaxKind.DefaultKeyword) {
+        leading = modifiers[1];
       }
     }
-    return this.rangeOf(node);
+    const start =
+      leading === undefined
+        ? node.getStart(this.sourceFile)
+        : firstTokenStartAfter(node, leading.end, this.sourceFile);
+    return {
+      start: this.offsets.byteOffset(start),
+      end: this.offsets.byteOffset(node.getEnd()),
+    };
   }
 
   // -- value-level use analysis (SPEC 4.3, 4.5 → 14.7, 14.8, 14.18) ---------
@@ -2113,11 +2142,11 @@ function stripParentheses(expression: tst.Expression): tst.Expression {
 
 /**
  * The UTF-16 start of `node`'s first token lying entirely after
- * `boundary` — used to exclude a leading `export default ` modifier
- * prefix from a named construct's own range (SPEC 1.7). Children come in
- * source order; a syntax list (the modifier list) is searched within, so
- * a modifier following `default` (e.g. `async`) is found where the next
- * sibling token would overshoot it.
+ * `boundary` — used to exclude a leading `export` or `export default`
+ * modifier prefix from a named construct's own range (SPEC 1.7). Children
+ * come in source order; a syntax list (the modifier list) is searched
+ * within, so a decorator or modifier following the prefix (`@dec`,
+ * `async`) is found where the next sibling token would overshoot it.
  */
 function firstTokenStartAfter(
   node: tst.Node,
@@ -2164,6 +2193,38 @@ function constructorNameIsPlain(
 }
 
 /**
+ * SPEC 4.6, 2.4: a unit's name is a plain identifier — spelled without
+ * escape sequences, read as spelled. TypeScript's `Identifier.text` is
+ * cooked (`f\u006Fo` reads `foo`), so the name is plain exactly when its
+ * source characters equal that text; an escape-spelled name binds no unit
+ * (null), never the unit its interpreted name would spell.
+ */
+function plainName(
+  name: tst.Identifier,
+  sourceFile: tst.SourceFile,
+): string | null {
+  const spelled = sourceFile.text.slice(name.getStart(sourceFile), name.end);
+  return spelled === name.text ? spelled : null;
+}
+
+/**
+ * SPEC 4.6: whether a code source is a declaration file, ambient by kind —
+ * by TypeScript's file-name rule, a name ending in `.d.mts` or `.d.cts`,
+ * or ending in `.ts` with `.d.` earlier in its last path segment (`.d.ts`,
+ * `.d.css.ts`; never `x.dts.ts`). A path's segments are its `/`-joined
+ * directory-entry names (SPEC 7), so the rule reads the last one; the
+ * comparisons are case-sensitive, as TypeScript's are.
+ */
+function isDeclarationFileName(path: string): boolean {
+  const segment = path.slice(path.lastIndexOf("/") + 1);
+  return (
+    segment.endsWith(".d.mts") ||
+    segment.endsWith(".d.cts") ||
+    (segment.endsWith(".ts") && segment.includes(".d."))
+  );
+}
+
+/**
  * SPEC 4.6: the name a construct statically binds to executable code, or
  * null when the construct is not a named code unit. The construct list is
  * exact: a function declaration; a class declaration; a class member with
@@ -2173,8 +2234,11 @@ function constructorNameIsPlain(
  * declaration with a plain identifier name and such an initializer; a
  * namespace declaration (`namespace A.B` nests one declaration per name in
  * the AST already); or a default export, named `default` when the exported
- * construct is anonymous. Signature-only declarations (overloads, abstract
- * members) bind no executable code.
+ * construct is anonymous. Every name is plain, spelled without escape
+ * sequences (`plainName`): an escape-spelled one binds no unit.
+ * Signature-only declarations (overloads, abstract members) bind no
+ * executable code, and neither does an ambient declaration, which the
+ * caller never asks about (`collectUnits`).
  */
 function unitName(node: tst.Node, sourceFile: tst.SourceFile): string | null {
   if (ts.isConstructorDeclaration(node)) {
@@ -2186,11 +2250,11 @@ function unitName(node: tst.Node, sourceFile: tst.SourceFile): string | null {
   }
   if (ts.isFunctionDeclaration(node)) {
     if (node.body === undefined) return null;
-    if (node.name !== undefined) return node.name.text;
+    if (node.name !== undefined) return plainName(node.name, sourceFile);
     return hasModifier(node, ts.SyntaxKind.DefaultKeyword) ? "default" : null;
   }
   if (ts.isClassDeclaration(node)) {
-    if (node.name !== undefined) return node.name.text;
+    if (node.name !== undefined) return plainName(node.name, sourceFile);
     return hasModifier(node, ts.SyntaxKind.DefaultKeyword) ? "default" : null;
   }
   if (
@@ -2200,24 +2264,24 @@ function unitName(node: tst.Node, sourceFile: tst.SourceFile): string | null {
   ) {
     if (!ts.isClassLike(node.parent)) return null; // class members only
     if (node.body === undefined) return null;
-    return ts.isIdentifier(node.name) ? node.name.text : null;
+    return ts.isIdentifier(node.name) ? plainName(node.name, sourceFile) : null;
   }
   if (ts.isPropertyDeclaration(node)) {
     if (!ts.isIdentifier(node.name)) return null;
     const initializer = node.initializer;
     return initializer !== undefined && isFunctionOrClassExpression(initializer)
-      ? node.name.text
+      ? plainName(node.name, sourceFile)
       : null;
   }
   if (ts.isVariableDeclaration(node)) {
     if (!ts.isIdentifier(node.name)) return null;
     const initializer = node.initializer;
     return initializer !== undefined && isFunctionOrClassExpression(initializer)
-      ? node.name.text
+      ? plainName(node.name, sourceFile)
       : null;
   }
   if (ts.isModuleDeclaration(node)) {
-    return ts.isIdentifier(node.name) ? node.name.text : null;
+    return ts.isIdentifier(node.name) ? plainName(node.name, sourceFile) : null;
   }
   if (ts.isExportAssignment(node) && node.isExportEquals !== true) {
     const expression = stripParentheses(node.expression);
@@ -2225,7 +2289,9 @@ function unitName(node: tst.Node, sourceFile: tst.SourceFile): string | null {
       ts.isFunctionExpression(expression) ||
       ts.isClassExpression(expression)
     ) {
-      return expression.name !== undefined ? expression.name.text : "default";
+      return expression.name !== undefined
+        ? plainName(expression.name, sourceFile)
+        : "default";
     }
     return ts.isArrowFunction(expression) ? "default" : null;
   }
