@@ -1067,6 +1067,21 @@ interface MutableSection {
   idPresent: boolean;
 }
 
+/**
+ * One quoted `id`, `coverage`, or `tags` spelling judged on its own
+ * (SPEC 2.7): its value exactly as spelled (SPEC 2.4) and whether that value
+ * satisfies the prop's value rule — SPEC 1.4 for `id` and `tags` (else
+ * 14.4), 2.5 for `coverage` (else 14.17).
+ */
+interface JudgedStringProp extends SpecAttributeValue {
+  readonly valid: boolean;
+}
+
+/** The props whose value is a quoted static string literal (SPEC 2.7). */
+function isStringPropName(name: string): name is "id" | "coverage" | "tags" {
+  return name === "id" || name === "coverage" || name === "tags";
+}
+
 /** One element whose children the walk is visiting. */
 interface OpenElementFrame {
   /** The section the element is, or null for a non-section element. */
@@ -1537,38 +1552,38 @@ class DocumentBuilder {
       if (earlier !== undefined) {
         // SPEC 2.7 → 14.17: no prop name may occur more than once on one
         // element — defined or unknown. Reported once per name, locating
-        // every spelling, after the loop.
+        // every spelling, after the loop. The repetition exempts no
+        // spelling from the per-attribute rules (SPEC 2.7, 14.4, 14.17):
+        // each is judged below as if it stood alone.
         earlier.push(attrRange);
+      } else {
+        spellings.set(name, [attrRange]);
+      }
+      if (name === "d") {
+        // SPEC 2.7 → 14.17: a quoted or valueless `d` is invalid, every
+        // spelling judged on its own. SPEC 11.2 "Resolution": resolution
+        // is per spelling, whatever the validity of the attribute holding
+        // it — each entry of every `d` attribute of a section repeating
+        // the prop resolves or not on its own, beside the repetition's one
+        // 14.17 (below), exactly as the entries of a single `d` do — so
+        // every braced spelling is recorded, in tag order.
+        this.processDependencyProp(attribute, attrSpan, section);
+      } else if (earlier !== undefined && isStringPropName(name)) {
+        // SPEC 2.7, 14.4, 14.17: a later spelling of `id`, `coverage`, or
+        // `tags` reports its own value-form, invalid-value, and 1.4
+        // findings, but records nothing (SPEC 11.2): a repeated `id`
+        // spells no identity — the ambiguous declaration leaves no usable
+        // ID — and a repeated `tags`/`coverage` prop leaves the
+        // interpreted value undefined, no spelling picked.
+        this.judgeStringProp(name, attribute, attrSpan);
         if (name === "id") {
-          idUnusable = true; // ambiguous declaration — no usable ID
-        }
-        if (name === "d") {
-          // SPEC 11.2 "Resolution": resolution is per spelling, whatever
-          // the validity of the attribute holding it — each entry of every
-          // `d` attribute of a section repeating the prop resolves or not
-          // on its own, beside the repetition's one 14.17 (below), exactly
-          // as the entries of a single `d` do. A braced later spelling is
-          // recorded as the first is; a quoted or valueless one holds no
-          // entries.
-          const dependency = this.dependencyAttribute(attribute, attrSpan);
-          if (dependency !== null) {
-            section.dependencies.push(dependency);
-          }
-        }
-        // SPEC 11.2: a repeated `tags`/`coverage` prop leaves the
-        // interpreted value undefined — no occurrence is picked.
-        if (name === "tags") {
+          idUnusable = true;
+        } else if (name === "tags") {
           section.tagsDefined = false;
-        }
-        if (name === "coverage") {
+        } else {
           section.coverageDefined = false;
         }
-        continue;
-      }
-      spellings.set(name, [attrRange]);
-      if (name === "d") {
-        this.processDependencyProp(attribute, attrSpan, section);
-      } else if (name === "id" || name === "coverage" || name === "tags") {
+      } else if (isStringPropName(name)) {
         const interpreted = this.processStringProp(
           name,
           attribute,
@@ -1589,7 +1604,8 @@ class DocumentBuilder {
         }
       } else {
         // SPEC 2.7 → 14.17: the props defined on <S>/<Spec> are id, d,
-        // coverage, and tags.
+        // coverage, and tags — every spelling of an unknown prop is one,
+        // a repeated one beside the repetition's finding.
         this.addFinding(
           17,
           attrRange,
@@ -1625,7 +1641,11 @@ class DocumentBuilder {
     }
   }
 
-  /** SPEC 2.7: `d` MUST be a braced expression; record its span for 2.2/2.4. */
+  /**
+   * SPEC 2.7: `d` MUST be a braced expression — every spelling judged on
+   * its own (14.17) — and each braced spelling's span is recorded for
+   * 2.2/2.4 (SPEC 11.2 "Resolution").
+   */
   private processDependencyProp(
     attribute: MdxAttributeNode,
     attrSpan: { start: number; end: number },
@@ -1682,11 +1702,12 @@ class DocumentBuilder {
 
   /**
    * SPEC 2.7: the value of `id`, `coverage`, and `tags` MUST be a static
-   * string literal in quoted attribute form. Validates the value and
-   * records it on the section (SPEC 1.3, 2.5, 2.6 → 14.4, 14.17). Returns
-   * whether the prop's interpreted value is defined (SPEC 11.2): false for
-   * a malformed (braced/valueless) or invalid-valued `tags`/`coverage`
-   * occurrence — a spelled `id`'s definedness is the identity machinery's
+   * string literal in quoted attribute form. Judges the prop's first
+   * spelling (`judgeStringProp`, SPEC 14.4, 14.17) and records its value on
+   * the section (SPEC 1.3, 2.5, 2.6). Returns whether the prop's
+   * interpreted value is defined (SPEC 11.2): false for a malformed
+   * (braced/valueless) or invalid-valued `tags`/`coverage` occurrence — a
+   * spelled `id`'s definedness is the identity machinery's
    * (`definedIdentitySections`), not this predicate's.
    */
   private processStringProp(
@@ -1696,10 +1717,63 @@ class DocumentBuilder {
     section: MutableSection,
     onIdUnusable: () => void,
   ): boolean {
-    const attrRange = this.byteRange(attrSpan.start, attrSpan.end);
     if (name === "id") {
       section.idPresent = true;
     }
+    const judged = this.judgeStringProp(name, attribute, attrSpan);
+    if (judged === null) {
+      if (name === "id") {
+        onIdUnusable();
+      }
+      return false;
+    }
+    if (name === "coverage") {
+      if (!judged.valid) {
+        return false;
+      }
+      section.coverage = judged.value === "none" ? "none" : "required";
+      return true;
+    }
+    if (name === "tags") {
+      // SPEC 2.6: whitespace splitting, duplicate collapse; a value
+      // yielding no tags is equivalent to omitting the prop. SPEC 12.7:
+      // the interpreted tags are a tag set, in byte order (SPEC 12.0) —
+      // formed here, so every surface and the graph data carry the set.
+      // SPEC 11.2: an invalid-valued prop (14.4) leaves the interpreted
+      // value undefined.
+      section.tags = sortByBytes(splitTags(judged.value), (tag) => tag);
+      return judged.valid;
+    }
+    // name === "id" (SPEC 1.3): record the declared ID; the structural
+    // checks (14.1–14.3) run in validateStructure once the tree is complete.
+    // The spelled identity stays spelled whatever its segments (SPEC 11.2);
+    // its definedness is judged by `definedIdentitySections`.
+    section.id = judged.value;
+    section.idAttribute = {
+      value: judged.value,
+      valueRange: judged.valueRange,
+      quote: judged.quote,
+      attributeRange: judged.attributeRange,
+    };
+    return true;
+  }
+
+  /**
+   * Judge one `id`, `coverage`, or `tags` spelling as if it stood alone
+   * (SPEC 2.7), reporting its own findings and recording nothing: a braced
+   * or valueless value form is 14.17; a `coverage` value other than
+   * "required" or "none" is 14.17 (SPEC 2.5); an `id` or `tags` value
+   * violating 1.4 is 14.4 — one finding per `id` or `tags` attribute whose
+   * value violates it. Every spelling of a repeated prop is judged so,
+   * beside the repetition's one 14.17 (SPEC 14.17). Returns the quoted
+   * value as spelled, or null for a braced or valueless form.
+   */
+  private judgeStringProp(
+    name: "id" | "coverage" | "tags",
+    attribute: MdxAttributeNode,
+    attrSpan: { start: number; end: number },
+  ): JudgedStringProp | null {
+    const attrRange = this.byteRange(attrSpan.start, attrSpan.end);
     // The parser's value says only which form the attribute takes: a string
     // for the quoted form, an object for a braced one, null when valueless.
     // Its characters are never read — they are character-reference decoded,
@@ -1717,10 +1791,7 @@ class DocumentBuilder {
           `${form === null ? "a valueless prop" : "a braced expression"} ` +
           `(SPEC 2.7, 14.17)`,
       );
-      if (name === "id") {
-        onIdUnusable();
-      }
-      return false;
+      return null;
     }
     const open = this.valueOpenIndex(attribute, attrSpan);
     const quoteCharacter = open === null ? null : this.text[open];
@@ -1742,7 +1813,7 @@ class DocumentBuilder {
     const valueStart = open + 1;
     const valueEnd = attrSpan.end - 1;
     const value = this.text.slice(valueStart, valueEnd);
-
+    let valid = true;
     if (name === "coverage") {
       // SPEC 2.5/2.7 → 14.17: the only defined values are "required"
       // (the default) and "none".
@@ -1754,59 +1825,43 @@ class DocumentBuilder {
             `only defined values are "required" (the default) and "none" ` +
             `(SPEC 2.5, 2.7, 14.17)`,
         );
-        return false;
+        valid = false;
       }
-      section.coverage = value;
-      return true;
-    }
-
-    if (name === "tags") {
-      // SPEC 2.6: whitespace splitting, duplicate collapse; a value
-      // yielding no tags is equivalent to omitting the prop. SPEC 12.7:
-      // the interpreted tags are a tag set, in byte order (SPEC 12.0) —
-      // formed here, so every surface and the graph data carry the set.
-      const tags = splitTags(value);
-      section.tags = sortByBytes(tags, (tag) => tag);
-      const problems = attributeProblems("tag", tags);
-      if (problems.length === 0) {
-        return true;
+    } else if (name === "tags") {
+      // SPEC 2.6: tags split on runs of whitespace (1.4); SPEC 14.4: one
+      // finding per `tags` attribute whose value violates 1.4.
+      const problems = attributeProblems("tag", splitTags(value));
+      if (problems.length > 0) {
+        this.addFinding(
+          4,
+          attrRange,
+          `invalid tag: ${problems.join("; ")} — tags follow the ` +
+            `ID-segment rules with "." allowed; correct or remove the tag ` +
+            `(SPEC 1.4, 2.6, 14.4)`,
+        );
+        valid = false;
       }
-      // SPEC 14.4: one finding per `tags` attribute whose value violates
-      // 1.4; SPEC 11.2: an invalid-valued prop leaves the interpreted value
-      // undefined.
-      this.addFinding(
-        4,
-        attrRange,
-        `invalid tag: ${problems.join("; ")} — tags follow the ID-segment ` +
-          `rules with "." allowed; correct or remove the tag ` +
-          `(SPEC 1.4, 2.6, 14.4)`,
-      );
-      return false;
+    } else {
+      // SPEC 1.3: the segments are the value's "."-separated parts; SPEC
+      // 14.4: one finding per `id` attribute whose value violates 1.4.
+      const problems = attributeProblems("segment", value.split("."));
+      if (problems.length > 0) {
+        this.addFinding(
+          4,
+          attrRange,
+          `invalid segment in id: ${problems.join("; ")} — correct the ` +
+            `segment (SPEC 1.4, 14.4)`,
+        );
+        valid = false;
+      }
     }
-
-    // name === "id" (SPEC 1.3): record the declared ID and validate its
-    // segments (SPEC 1.4 → 14.4); the structural checks (14.1–14.3) run in
-    // validateStructure once the tree is complete.
-    section.id = value;
-    section.idAttribute = {
+    return {
       value,
       valueRange: this.byteRange(valueStart, valueEnd),
       quote: quoteCharacter,
       attributeRange: attrRange,
+      valid,
     };
-    const problems = attributeProblems("segment", value.split("."));
-    if (problems.length > 0) {
-      // SPEC 14.4: one finding per `id` attribute whose value violates 1.4.
-      this.addFinding(
-        4,
-        attrRange,
-        `invalid segment in id: ${problems.join("; ")} — correct the ` +
-          `segment (SPEC 1.4, 14.4)`,
-      );
-    }
-    // The spelled identity stays spelled whatever its segments (SPEC 11.2);
-    // its definedness is judged by `definedIdentitySections`.
-    return true;
   }
 
   /**
