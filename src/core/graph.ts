@@ -13,9 +13,11 @@
 //   kind a set: duplicate declarations collapse to a single edge;
 // - reference resolution — every `d` reference, `{text(...)}` target, and
 //   TypeScript reference is resolved; unknown targets report 14.5, 14.6,
-//   and 14.7. Masking (SPEC 14): a reference into an unparseable file
-//   reports as unresolved here while the file's internal conditions stay
-//   masked behind its own 14.20;
+//   and 14.7, and a resolving cross-module `text(...)` call reports 14.11
+//   beside its standing edge and occurrence (SPEC 14.11, 5.7) — an
+//   unresolved one is 14.7 alone. Masking (SPEC 14): a reference into an
+//   unparseable file reports as unresolved here while the file's internal
+//   conditions stay masked behind its own 14.20;
 // - reference occurrences (SPEC 5.7) — one record per textual spelling of
 //   a dependency-kind reference whose target resolves, in occurrence
 //   order: the positions behind the collapsed edge set;
@@ -36,7 +38,11 @@
 
 import { compareBytes, sortByBytes, utf8Length } from "./bytes.js";
 import type { ByteRange } from "./bytes.js";
-import type { CodeAnalysis } from "./code-analysis.js";
+import type {
+  CalledModule,
+  CodeAnalysis,
+  CodeReference,
+} from "./code-analysis.js";
 import type { Finding, FindingLocation } from "./findings.js";
 import { compareFindings, locatedFinding } from "./findings.js";
 import type { SpecDocument, SpecEmbedding, SpecSection } from "./mdx.js";
@@ -639,6 +645,18 @@ export function buildWorkspaceGraph(
         );
         continue;
       }
+      if (reference.calledModule !== null) {
+        // SPEC 14.11: the argument resolves, so the call passes a node to
+        // another module's `text` export — its edge and occurrence stand
+        // beside the finding (5.7).
+        findings.push(
+          crossModuleTextFinding(
+            analysis.file,
+            reference,
+            reference.calledModule,
+          ),
+        );
+      }
       addEdge(reference.kind, reference.location, resolved.node.identity);
       // SPEC 5.7: a TS `text(...)` occurrence spans the entire call
       // expression, callee through closing parenthesis; a marker occurrence
@@ -768,6 +786,17 @@ export function buildWorkspaceGraph(
         reference.segments,
       );
       if (resolved.ok) {
+        if (reference.calledModule !== null) {
+          // SPEC 14.11: a resolving cross-module call, judged on its own
+          // terms in a file whose own path is invalid (SPEC 11.2).
+          findings.push(
+            crossModuleTextFinding(
+              analysis.file,
+              reference,
+              reference.calledModule,
+            ),
+          );
+        }
         addOccurrence(
           analysis.file,
           reference.occurrenceRange,
@@ -847,6 +876,29 @@ function unresolvedFinding(
   message: string,
 ): Finding {
   return locatedFinding(condition, message, [{ file, range }]);
+}
+
+/**
+ * The 14.11 finding of a resolving cross-module `text(...)` call (SPEC
+ * 4.4, 14.11): located at the call, callee through closing parenthesis —
+ * the span its standing occurrence occupies (SPEC 14, 5.7) — its
+ * `identities` exactly the called module's root identity, or none where
+ * that module's path is invalid (SPEC 14.11, 12.7).
+ */
+function crossModuleTextFinding(
+  file: PathText,
+  reference: CodeReference,
+  called: CalledModule,
+): Finding {
+  return locatedFinding(
+    11,
+    `cross-module text call: the argument is a node of module ` +
+      `${JSON.stringify(reference.modulePath)} but the "text" export ` +
+      `called belongs to module ${JSON.stringify(called.display)} — pass ` +
+      `a node only to its own module's "text" export (SPEC 4.4, 14.11)`,
+    [{ file, range: reference.occurrenceRange }],
+    called.identity === null ? [] : [called.identity],
+  );
 }
 
 /** A human description of an external reference's target (messages only). */

@@ -186,6 +186,29 @@ export interface CodeReference {
    * (SPEC 14.7) — TypeScript reads an escape interpreted, xspec as spelled.
    */
   readonly escapeFree: boolean;
+  /**
+   * The called module of a cross-module `text(...)` call (SPEC 4.4,
+   * 14.11): the spec module whose `text` export the callee binds, when it
+   * is not the argument's own module; null for a marker and for a call
+   * into the argument's own module. The condition needs an argument that
+   * resolves, which only resolution decides: a resolving call records its
+   * edge and occurrence and reports 14.11 beside them (SPEC 5.7), an
+   * unresolved one is 14.7 alone (SPEC 14.11).
+   */
+  readonly calledModule: CalledModule | null;
+}
+
+/** The foreign module of a cross-module `text(...)` call (SPEC 14.11). */
+export interface CalledModule {
+  /**
+   * The called module's root identity (SPEC 1.5), its workspace-relative
+   * path, or null where that path is invalid (SPEC 14.19): its root
+   * identity is then undefined, and no identity over an invalid path is
+   * ever emitted (SPEC 14.11, 11.2), so the finding carries none.
+   */
+  readonly identity: string | null;
+  /** The module's deterministic display spelling (messages only). */
+  readonly display: string;
 }
 
 /** The analysis of one parseable code source. */
@@ -219,7 +242,11 @@ export interface CodeAnalysis {
   readonly imports: readonly CodeImport[];
   /** Every extracted reference, in document order (SPEC 4.3, 4.5). */
   readonly references: readonly CodeReference[];
-  /** The 14.8/14.11/14.15/14.18 findings, ordered by location. */
+  /**
+   * The per-file 14.7/14.8/14.15/14.18 findings, ordered by location — a
+   * cross-module call's 14.11 is reported at resolution (graph.ts), since
+   * the condition needs an argument that resolves (SPEC 14.11).
+   */
   readonly findings: readonly Finding[];
 }
 
@@ -634,7 +661,8 @@ class CodeAnalyzer {
    * `occurrenceRange` is the SPEC 5.7 occurrence span — for a marker the
    * chain itself (omit it), for a `text(...)` call the entire call
    * expression, callee through closing parenthesis. `callee` is a `text`
-   * call's callee, part of the spelling judged for escapes (SPEC 14.7).
+   * call's callee, part of the spelling judged for escapes (SPEC 14.7),
+   * and `calledModule` a cross-module call's called module (SPEC 14.11).
    */
   private chainReference(
     kind: "references" | "embeds",
@@ -643,6 +671,7 @@ class CodeAnalyzer {
     location: string,
     occurrenceRange?: ByteRange,
     callee?: tst.Node,
+    calledModule: CalledModule | null = null,
   ): CodeReference {
     const spanRange = (span: {
       readonly start: number;
@@ -685,6 +714,7 @@ class CodeAnalyzer {
       range,
       occurrenceRange: occurrenceRange ?? range,
       escapeFree,
+      calledModule,
     };
   }
 
@@ -1302,7 +1332,7 @@ class CodeAnalyzer {
     return this.rangeOf(node);
   }
 
-  // -- value-level use analysis (SPEC 4.3, 4.5 → 14.8, 14.11, 14.18) --------
+  // -- value-level use analysis (SPEC 4.3, 4.5 → 14.7, 14.8, 14.18) ---------
 
   private walk(node: tst.Node): void {
     // Module-linking constructs were validated in scanModuleLinks; their
@@ -1615,7 +1645,8 @@ class CodeAnalyzer {
   /**
    * One `text(...)` call (SPEC 4.3, 4.5): exactly one argument, a static
    * property chain rooted at a spec module import binding; the string
-   * form is MDX-only (4.3 → 14.8); a cross-module node is 14.11 (4.4).
+   * form is MDX-only (4.3 → 14.8); a cross-module node is recorded with
+   * its called module, resolution reporting 14.11 (4.4, graph.ts).
    */
   private analyzeTextCall(
     call: tst.CallExpression,
@@ -1746,29 +1777,13 @@ class CodeAnalyzer {
       );
       return;
     }
-    if (moduleTargetKey(rootBinding.target) !== moduleTargetKey(calleeTarget)) {
-      // SPEC 4.4 → 14.11: a node passed to another module's text export
-      // — modules compared as their files, byte-exact (SPEC 12.0). The
-      // foreign (called) module is identity data on the finding, not a
-      // further location (SPEC 14, 12.7).
-      this.addFinding(
-        11,
-        call,
-        `cross-module text call: the argument is a node of module ` +
-          `${JSON.stringify(moduleTargetDisplay(rootBinding.target))} but ` +
-          `the "text" export called belongs to module ` +
-          `${JSON.stringify(moduleTargetDisplay(calleeTarget))} — ` +
-          `pass a node only to its own module's "text" export ` +
-          `(SPEC 4.4, 14.11)`,
-        [moduleTargetDisplay(calleeTarget)],
-      );
-      return;
-    }
     if (!rootBinding.target.defined) {
       // SPEC 14.7: a text(...) call that does not resolve — into a member
       // whose identities are all undefined (SPEC 14.19, 11.2), a
       // condition decidable per file. The finding spans the argument
       // chain, as an unresolved defined-member argument's would (SPEC 14).
+      // It is condition 7 alone whatever module the callee's `text`
+      // export belongs to: 14.11 needs an argument that resolves.
       this.addFinding(
         7,
         argument,
@@ -1781,6 +1796,21 @@ class CodeAnalyzer {
       );
       return;
     }
+    // SPEC 4.4 → 14.11: a node passed to another module's `text` export
+    // — modules compared as their files, byte-exact (SPEC 12.0). The
+    // condition needs a node, an argument that resolves (11.2), which
+    // resolution alone decides (graph.ts): the call is recorded like any
+    // other, its called module beside it — the foreign module, identity
+    // data on the finding rather than a further location (SPEC 14,
+    // 12.7) — so its edge and occurrence stand beside its 14.11 (5.7),
+    // while an argument that does not resolve is 14.7 alone (14.11).
+    const calledModule: CalledModule | null =
+      moduleTargetKey(rootBinding.target) === moduleTargetKey(calleeTarget)
+        ? null
+        : {
+            identity: calleeTarget.defined ? calleeTarget.path : null,
+            display: moduleTargetDisplay(calleeTarget),
+          };
     // SPEC 4.3: text(node) records an `embeds` edge from the calling
     // code location. Its occurrence spans the entire call expression,
     // callee through closing parenthesis (SPEC 5.7).
@@ -1792,6 +1822,7 @@ class CodeAnalyzer {
         this.attributionOf(call),
         this.rangeOf(call),
         call.expression,
+        calledModule,
       ),
     );
   }

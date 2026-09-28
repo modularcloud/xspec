@@ -47,13 +47,13 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T3-7 | section-3 | 10 (passes since Task 10 landed) |
 | T4-2 | section-4 | 6 (passes since Task 6 landed) |
 | T4-5 | section-4 | 16, 17 (passes since Task 17 landed) |
-| T4.4-1 | section-4.3-4.4 | 18 |
+| T4.4-1 | section-4.3-4.4 | 18 (passes since Task 18 landed) |
 | T4.5-8 | section-4.5 | 16 (passes since Task 16 landed) |
 | T4.5-9 | section-4.5 | 16, 17 (passes since Task 17 landed) |
 | T4.6-1 | section-4.6 | 19 |
 | T4.6-3 | section-4.6 | 20 |
 | T5.5-5 | section-5.5 | 3 (passes since Task 3 landed) |
-| T5.7-4 | section-5.7 | 16, 17, 18 (since Task 17 it waits on Task 18 alone: `src/collide.ts`'s and `src/typed.ts`'s four 14.7s and `src/calltext.ts`'s 14.18 are reported; its collision premise still reports `14.7 x4` and `14.11 x2` where `14.7 x5` and `14.11 x1` are expected — `textB(A.missing)` in `src/cross.ts` reported 14.11 for 14.7, Task 18) |
+| T5.7-4 | section-5.7 | 16, 17, 18 (passes since Task 18 landed: `textB(A.missing)` in `src/cross.ts` is 14.7 alone, and the resolving `textB(A.a)` records its occurrence beside its 14.11) |
 | T6.2-1 | section-6.2 | 3 (passes since Task 3 landed) |
 | T6.2-2 | section-6.2 | 3 (passes since Task 3 landed) |
 | T6.4-3 | section-6.4 | 22 |
@@ -166,27 +166,6 @@ Several tasks have no failing test of their own: Task 21 (the undefined refusal 
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 18 — A cross-module `text` call keeps its `embeds` edge and occurrence; an unresolved argument is 14.7 alone (SPEC 14.11, 5.7, 4.4; A12)
-
-**Requirement.** SPEC 14.11:
-- A node passed to the `text` export of another spec module: "its edge and occurrence stand (5.7)".
-- A call whose argument is not exactly one resolving static node reference "is that condition alone, whatever spec module the chain's root binding designates, so `textB(A.missing)` is condition 7 only and `textB(A.a!)` condition 8 only".
-
-**Observed.**
-- A resolving cross-module call records no `embeds` occurrence beside its 14.11.
-- `textB(A.missing)` gets 14.11 instead of 14.7 alone.
-
-**Location.** `src/core/code-analysis.ts`: the handling of TypeScript `text(...)` calls, covering the cross-module check and occurrence recording.
-
-**Change.**
-- Whenever the argument resolves, record the call's `embeds` edge and occurrence, sourced at its unit (4.6) and targeting the argument's node. Add 14.11 beside it when the modules differ.
-- When the argument is unresolved (14.7) or not static (14.8), report that condition alone.
-
-**Verification.**
-- Should turn green: `section-4.3-4.4.test.ts` (T4.4-1).
-- With Tasks 16 and 17: `section-5.7.test.ts` (T5.7-4).
-- Neighbours: `section-9.test.ts`, `section-11.3.test.ts`, `section-12.3-12.5.test.ts`.
 
 ## Task 19 — A class constructor is a named code unit `C.constructor` (SPEC 4.6, 1.7; A13(a), and B's note on T11-6)
 
@@ -958,7 +937,7 @@ The command stops at the read and exits 2. The error document carries the code `
 
 **Requirement.** SPEC 14: "A reference spelling — unresolved (14.5–14.7), non-static or of wrong arity (14.8), or cross-module (14.11) — is located by the span its occurrence occupies or would occupy, per kind (5.7): … a TypeScript `text(...)` call, callee through closing parenthesis". SPEC 5.7: "a TypeScript `text(...)` occurrence spans the entire call expression, callee through closing parenthesis, argument included".
 
-**Observed.** Probed at 2e7a9aa in a scratch workspace: `src/app.ts` holds `import SPEC, { text } from "../specs/A.xspec";`, a blank line, then `text(SPEC.missing);`, `text("x");`, and `` text(`x`); `` on their own lines; `specs/A.mdx` holds sections `a` and `b`. `build --json` reports the 14.7 at [53,65), the argument chain `SPEC.missing`, where the call spans [48,66); and each 14.8 at its literal alone, [73,76) and [84,87), where the calls span [68,77) and [79,88). Already located at the call: an optional call, type arguments, a wrong arity, a cross-module 14.11, and, since Task 16, a chain rooted at a colliding identifier.
+**Observed.** Probed at 2e7a9aa in a scratch workspace: `src/app.ts` holds `import SPEC, { text } from "../specs/A.xspec";`, a blank line, then `text(SPEC.missing);`, `text("x");`, and `` text(`x`); `` on their own lines; `specs/A.mdx` holds sections `a` and `b`. `build --json` reports the 14.7 at [53,65), the argument chain `SPEC.missing`, where the call spans [48,66); and each 14.8 at its literal alone, [73,76) and [84,87), where the calls span [68,77) and [79,88). Already located at the call: an optional call, type arguments, a wrong arity, a cross-module 14.11, and, since Task 16, a chain rooted at a colliding identifier. Since Task 18 a cross-module call whose argument does not resolve is 14.7 alone, reported through the same graph loops and so located at the argument too: T4.4-1's `textB(A.missing)` below its 85-byte import prefix reports [91,100), where the call spans [85,101); the resolving call's 14.11 is located at `occurrenceRange`, the call (`crossModuleTextFinding` in `src/core/graph.ts`).
 
 **Location.**
 - `src/core/graph.ts`: the two loops over `analysis.references` that report an unresolved reference's 14.7 at `reference.range`, for valid-path and for 14.19 code files. For an `embeds` reference, `reference.occurrenceRange` is the call; a marker's two ranges coincide.
