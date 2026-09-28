@@ -35,7 +35,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T1.4-4 | section-1.4 | 1 (passes since Task 1 landed; it stages no character reference) |
 | T1.5-2 | section-1.5 | 9 (passes since Task 9 landed) |
 | T1.6-5 | section-1.6-1.7 | 14 (passes since Task 14 landed) |
-| T1.7-2 | section-1.6-1.7 | 19, 20 |
+| T1.7-2 | section-1.6-1.7 | 19, 20 (since Task 19 its constructor record holds; `occurrences` differs in 3 of 19 records, all Task 20's: `export @dec class`'s unit range, `export   function`'s, and `types.d.ts`'s whole-file attribution) |
 | T2.1-2 | section-2.1 | 6 (passes since Task 6 landed) |
 | T2.3-3 | section-2.2-2.3 | 7, 14 (passes since Task 14 landed) |
 | T2.4-2 | section-2.4 | 14 (passes since Task 14 landed) |
@@ -50,7 +50,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T4.4-1 | section-4.3-4.4 | 18 (passes since Task 18 landed) |
 | T4.5-8 | section-4.5 | 16 (passes since Task 16 landed) |
 | T4.5-9 | section-4.5 | 16, 17 (passes since Task 17 landed) |
-| T4.6-1 | section-4.6 | 19 |
+| T4.6-1 | section-4.6 | 19 (passes since Task 19 landed) |
 | T4.6-3 | section-4.6 | 20 |
 | T5.5-5 | section-5.5 | 3 (passes since Task 3 landed) |
 | T5.7-4 | section-5.7 | 16, 17, 18 (passes since Task 18 landed: `textB(A.missing)` in `src/cross.ts` is 14.7 alone, and the resolving `textB(A.a)` records its occurrence beside its 14.11) |
@@ -80,7 +80,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T7.5-1 | section-7.4-7.5 | 4 (passes since Task 4 landed) |
 | T10.1-6 | section-10.1 | 45, 46 |
 | T11-2 | section-11 | 2, 3, 40, 44 (since Task 2 its malformed-`--tag` sweep holds by hand, twins included; since Task 3 its tag sets hold and it stops first at Task 40's `--file "./specs/alpha/*.mdx"` arm) |
-| T11-6 | section-11 | 19 |
+| T11-6 | section-11 | 19 (passes since Task 19 landed) |
 | T11-7 | section-11 | 3 (passes since Task 3 landed) |
 | T11.2-6 | section-11.2 | 51 |
 | T11.3-2 | section-11.3 | 40 |
@@ -109,7 +109,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T14-11 | section-14 | 13, 14, 15, 16, 68 (Tasks 12–16 landed: every table arm holds — (a)–(m) and (p)–(w), (h)'s repeated `id` locating both spellings, [36,44) and [45,54), since Task 15, and (j)'s and (u)'s colliding declarations beside their imports since Task 16; it stops first at arm (n), run after the table's arms, which waits on Task 68: probed by hand, its 14.17 locates both `d` attributes since Task 15, while the second spelling's unresolved `"absent"` reports no 14.5) |
 | T14-12 | section-14-iii | 14 (passes since Task 14 landed) |
 
-Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), Task 53 (a corrupt session in `review list`), Task 65 (a 14.20 offset inside a container's content more than 256 lines past the grammar's place, found while landing Task 63), Task 66 (a 14.20 offset past the blank line inside a flow tag's attribute expression on the line below a paragraph holding an open text element, found while landing Task 64), Task 67 (a 14.20 offset past the blank line after a brace line below a paragraph line holding an open text expression, found while landing Task 64), Task 69 (a repeated prop's later spellings judged on their own — 14.4 per `id` or `tags` attribute and each spelling's own 14.17 — found while landing Task 15), and Task 70 (a TypeScript `text(...)` call's unresolved or non-static argument located at the argument instead of the call, found while landing Task 16); Task 55 (a path beginning with U+FEFF, found while landing Task 9), Task 56 (container content the comment deletions empty but that holds a token, found while landing Task 13), Task 57 (the same for an attribute's content, which remark-mdx refused before calling acorn, found while landing Task 56), Task 58 (a 14.20 the grammar reports at a lazy line inside a flow construct's container, located since by the content before it, found while landing Task 57), and Task 59 (a 14.20 inside nested containers, whose content the fixed continuation prefixes could not collect, collected since with the prefix the content's own lines give, found while landing Task 58), Task 60 (a 14.20 tag-pairing offset after a line spelling part of the element's container prefix, probed since with that prefix's rests, and a hidden pairing failure located past a prefix's cut, found while landing Task 59), Task 61 (a 14.20 tag-pairing offset past a closing tag, typed on a line inside the element's container, that cannot pair — a prefix ending inside a tag judged since with the tag finished, found while landing Task 60), and Task 62 (a 14.20 offset at the start of a line that leaves a flow-position container's block container, where the grammar places the end of the file — located since past the container syntax that line still spells, a lone `>` a blank line of a list item in a block quote, found while landing Task 60), and Task 63 (a 14.20 offset past a brace that closes a flow expression whose content spans a blank line, text following the brace on its line — located since at the first character past the brace that the grammar rejects, found while landing Task 60), and Task 64 (a 14.20 offset past the blank line that follows a brace line below a paragraph holding an open text element — located since at that line's terminator, the bound the paragraph's text reading sets, the grammar's flow reading of the brace line never deriving, found while landing Task 62) have landed. Task 29 landed with Task 10: once ESM blocks were bounded as stock MDX 3 bounds them, T6.6-2's move (passing before) added its import at offset 0 of an origin whose first line is `<S id="org">`, the block absorbed that line, and the move's own validation of the rewritten workspace refused it — so additions now go at an admissible offset (`placeSpecImportAdditions` in `src/core/move.ts`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
+Several tasks have no failing test of their own: Task 21 (the undefined refusal code), Task 27 (preview/real agreement, which Tasks 30–32 make unobservable on today's stagings), Task 53 (a corrupt session in `review list`), Task 65 (a 14.20 offset inside a container's content more than 256 lines past the grammar's place, found while landing Task 63), Task 66 (a 14.20 offset past the blank line inside a flow tag's attribute expression on the line below a paragraph holding an open text element, found while landing Task 64), Task 67 (a 14.20 offset past the blank line after a brace line below a paragraph line holding an open text expression, found while landing Task 64), Task 69 (a repeated prop's later spellings judged on their own — 14.4 per `id` or `tags` attribute and each spelling's own 14.17 — found while landing Task 15), Task 70 (a TypeScript `text(...)` call's unresolved or non-static argument located at the argument instead of the call, found while landing Task 16), and Task 71 (an abstract class member spelling a body or a function-valued initializer bound as a unit, found while landing Task 19); Task 55 (a path beginning with U+FEFF, found while landing Task 9), Task 56 (container content the comment deletions empty but that holds a token, found while landing Task 13), Task 57 (the same for an attribute's content, which remark-mdx refused before calling acorn, found while landing Task 56), Task 58 (a 14.20 the grammar reports at a lazy line inside a flow construct's container, located since by the content before it, found while landing Task 57), and Task 59 (a 14.20 inside nested containers, whose content the fixed continuation prefixes could not collect, collected since with the prefix the content's own lines give, found while landing Task 58), Task 60 (a 14.20 tag-pairing offset after a line spelling part of the element's container prefix, probed since with that prefix's rests, and a hidden pairing failure located past a prefix's cut, found while landing Task 59), Task 61 (a 14.20 tag-pairing offset past a closing tag, typed on a line inside the element's container, that cannot pair — a prefix ending inside a tag judged since with the tag finished, found while landing Task 60), and Task 62 (a 14.20 offset at the start of a line that leaves a flow-position container's block container, where the grammar places the end of the file — located since past the container syntax that line still spells, a lone `>` a blank line of a list item in a block quote, found while landing Task 60), and Task 63 (a 14.20 offset past a brace that closes a flow expression whose content spans a blank line, text following the brace on its line — located since at the first character past the brace that the grammar rejects, found while landing Task 60), and Task 64 (a 14.20 offset past the blank line that follows a brace line below a paragraph holding an open text element — located since at that line's terminator, the bound the paragraph's text reading sets, the grammar's flow reading of the brace line never deriving, found while landing Task 62) have landed. Task 29 landed with Task 10: once ESM blocks were bounded as stock MDX 3 bounds them, T6.6-2's move (passing before) added its import at offset 0 of an origin whose first line is `<S id="org">`, the block absorbed that line, and the move's own validation of the rewritten workspace refused it — so additions now go at an admissible offset (`placeSpecImportAdditions` in `src/core/move.ts`). Composite tests (T14-4, T14-6, T14-11, T14-12) restage fixtures from other sections, so the task that lands last may reveal a further arm; if it does, name the arm and its SPEC rule in a new task.
 
 ---
 
@@ -167,21 +167,6 @@ Several tasks have no failing test of their own: Task 21 (the undefined refusal 
 
 ---
 
-## Task 19 — A class constructor is a named code unit `C.constructor` (SPEC 4.6, 1.7; A13(a), and B's note on T11-6)
-
-**Requirement.** SPEC 4.6 counts "a constructor — a unit named `constructor`, `path#C.constructor` in a class `C`" among the named code units. Its range is the constructor member's own characters (1.7). T1.7-2's constructor arm pins that range.
-
-**Observed.** Markers inside a constructor attribute to `src/code.ts#C`, and `query edges --from src/code.ts#C.constructor` exits 2 as an unknown node.
-
-**Location.** `src/core/code-analysis.ts`: the unit walker, including named-unit collection (~997), `unitRange` (~1021), and class-member handling.
-
-**Change.** Bind a unit named `constructor` for each constructor implementation, nested in its class's chain. Skip overload signatures and ambient contexts. Give it a document-order slot like other members, so the `@N` suffixes of 4.6 apply.
-
-**Verification.**
-- Should turn green: `section-4.6.test.ts` (T4.6-1), `section-11.test.ts` (T11-6).
-- With Task 20: `section-1.6-1.7.test.ts` (T1.7-2's constructor arm).
-- Neighbours: `section-4.5.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`.
-
 ## Task 20 — Code-unit binding and ranges: leading `export` excluded; escape-spelled names and declaration files bind nothing (SPEC 4.6, 1.7, 2.4; A13(b)–(d))
 
 **Requirement.** SPEC 4.6:
@@ -207,7 +192,7 @@ SPEC 1.7 and 14 define a function or class unit's range as the construct binding
 
 **Verification.**
 - Should turn green: `section-4.6.test.ts` (T4.6-3).
-- With Task 19: `section-1.6-1.7.test.ts` (T1.7-2).
+- `section-1.6-1.7.test.ts` (T1.7-2: Task 19 landed, and its `occurrences` now differs only in this task's three records — `export @dec class`, `export   function`, and `types.d.ts`).
 - Neighbours: `section-4.5.test.ts`, `section-5.7.test.ts`, `section-11.test.ts`.
 
 ## Task 21 — The refusal-code table is exactly SPEC 14's ten reasons; `refused-unresolvable-reference` goes (SPEC 14, 6.4, 12.7; A27)
@@ -946,6 +931,18 @@ The command stops at the read and exits 2. The error document carries the code `
 **Change.** Locate each of these findings at the call expression: `rangeOf(call)` in `analyzeTextCall`, and `occurrenceRange` for an `embeds` reference in the graph. Leave markers unchanged.
 
 **Verification.** No suite test pins these ranges: T4.3-2, T4.4-1's second facet, and T5.7-4's `src/cross.ts` findings assert windows that hold both the argument and the call. Hand-probe the Observed staging (each finding at its call) and an undefined-member call (an import of a spec source whose own path is invalid, 14.19). Run `section-4.3-4.4.test.ts`, `section-5.7.test.ts`, `section-14.test.ts`, `section-2.4.test.ts`, `section-11.3.test.ts`, and `section-12.1-12.2.test.ts`.
+
+## Task 71 — An abstract class member binds no unit, whatever body or initializer it spells (SPEC 4.6, 14.20; found while landing Task 19)
+
+**Requirement.** SPEC 4.6: "Neither is a declaration that binds no executable code — an overload signature, a body-less method signature, an abstract member, or a declaration in an ambient context, …: none is a unit or occupies a document-order slot (below)". Units are read by the construct's own form, and SPEC 14.20 leaves TypeScript's post-parse grammar checks out of well-formedness. So a class member carrying the `abstract` modifier is well-formed, and binds no unit, even where it spells a body (`abstract m(): void {}`, TS1245 only after parsing), a function-valued initializer (`abstract p = () => {}`, TS1267), or is a constructor (`abstract constructor() {}`, TS1242). A class declaration's own `abstract` (`abstract class A`) is no abstract member: the class is a unit.
+
+**Observed.** Probed with Task 19 landed, in a scratch workspace. `src/c.ts` holds `abstract class A {` with, in order, `abstract m(): void { SPEC.a; }`, `abstract p = () => { SPEC.b; };`, `abstract get g(): number { SPEC.a; return 1; }`, `abstract constructor() { SPEC.b; }`, and a concrete `m(): void { SPEC.b; }`. `build` exits 0. `occurrences` attributes the four abstract members' markers to `A.m`, `A.p`, `A.g`, and `A.constructor`, and the concrete method's to `A.m@2`. SPEC fixes the bare class `A` for the first four and `A.m` for the last. `unitName` rejects a method, accessor, or constructor only when it has no body, and a property only when its initializer is not a function, arrow, or class expression; it never consults the `abstract` modifier. TypeScript's emit keeps the spelled bodies and drops the property, so "binds no executable code" is read from the member's form, not from what is emitted. No test stages the form: T4.6-3's abstract getter and T14-12 arm (m)'s misplaced `abstract m(): void` are both body-less.
+
+**Location.** `unitName` in `src/core/code-analysis.ts`: the constructor branch (Task 19), the method and accessor branch, and the property branch.
+
+**Change.** Before the per-kind branches, return null for a class member (a node whose parent is class-like) that carries the `abstract` modifier (`hasModifier(node, ts.SyntaxKind.AbstractKeyword)`). The member then occupies no document-order slot, and markers inside it attribute to the enclosing unit.
+
+**Verification.** Hand-probe the Observed staging. The four abstract members' markers must attribute to `A` and the concrete method's to `A.m`. `query edges --from src/c.ts#A.m@2` must exit 2 as an unknown node, and `abstract class A` must stay a unit. Run `section-4.6.test.ts`, `section-1.6-1.7.test.ts`, `section-11.test.ts`, and `section-14-iii.test.ts`.
 
 ## Task 54 — Confirm the full suite and CI are green, record the state, and delete this file
 

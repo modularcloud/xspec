@@ -1231,7 +1231,7 @@ class CodeAnalyzer {
         ambient || hasModifier(node, ts.SyntaxKind.DeclareKeyword);
       let chain = enclosing;
       if (!nowAmbient) {
-        const name = unitName(node);
+        const name = unitName(node, this.sourceFile);
         if (name !== null) {
           chain = [...enclosing, name];
           records.push({
@@ -2139,18 +2139,51 @@ function firstTokenStartAfter(
 }
 
 /**
+ * SPEC 4.6: whether a constructor declaration's name is the plain
+ * identifier `constructor` — the keyword token spelled exactly so. The
+ * declaration carries no name node, so its token is found among its
+ * children, past any JSDoc and the modifier list. TypeScript also reads a
+ * string-literal `"constructor"` member as the constructor: a
+ * string-literal member name, which binds no unit. A name spelled with an
+ * escape sequence would bind none either (2.4), but TypeScript's parser
+ * rejects that spelling of the keyword, so its file is unparseable (14.20)
+ * and the spelling comparison is only defensive.
+ */
+function constructorNameIsPlain(
+  node: tst.ConstructorDeclaration,
+  sourceFile: tst.SourceFile,
+): boolean {
+  for (const child of node.getChildren(sourceFile)) {
+    if (child.kind === ts.SyntaxKind.StringLiteral) return false;
+    if (child.kind === ts.SyntaxKind.ConstructorKeyword) {
+      const start = child.getStart(sourceFile);
+      return sourceFile.text.slice(start, child.getEnd()) === "constructor";
+    }
+  }
+  return false; // defensive: every constructor spells its name token
+}
+
+/**
  * SPEC 4.6: the name a construct statically binds to executable code, or
  * null when the construct is not a named code unit. The construct list is
  * exact: a function declaration; a class declaration; a class member with
- * a non-computed identifier name (a method, getter, setter, or a property
- * whose initializer is a function, arrow, or class expression); a
- * variable declaration with a plain identifier name and such an
- * initializer; a namespace declaration (`namespace A.B` nests one
- * declaration per name in the AST already); or a default export, named
- * `default` when the exported construct is anonymous. Signature-only
- * declarations (overloads, abstract members) bind no executable code.
+ * a non-computed identifier name (a constructor — a unit named
+ * `constructor` — a method, getter, setter, or a property whose
+ * initializer is a function, arrow, or class expression); a variable
+ * declaration with a plain identifier name and such an initializer; a
+ * namespace declaration (`namespace A.B` nests one declaration per name in
+ * the AST already); or a default export, named `default` when the exported
+ * construct is anonymous. Signature-only declarations (overloads, abstract
+ * members) bind no executable code.
  */
-function unitName(node: tst.Node): string | null {
+function unitName(node: tst.Node, sourceFile: tst.SourceFile): string | null {
+  if (ts.isConstructorDeclaration(node)) {
+    // SPEC 4.6: a constructor is a class member unit named `constructor`
+    // (`path#C.constructor`) — its implementation alone, an overload
+    // signature binding no executable code.
+    if (!ts.isClassLike(node.parent) || node.body === undefined) return null;
+    return constructorNameIsPlain(node, sourceFile) ? "constructor" : null;
+  }
   if (ts.isFunctionDeclaration(node)) {
     if (node.body === undefined) return null;
     if (node.name !== undefined) return node.name.text;
