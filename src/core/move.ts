@@ -56,7 +56,12 @@
 
 import type { ByteRange } from "./bytes.js";
 import { compareBytes } from "./bytes.js";
-import type { CodeAnalysis, CodeImport } from "./code-analysis.js";
+import type {
+  CodeAnalysis,
+  CodeImport,
+  CodeImportBinding,
+  CodeReference,
+} from "./code-analysis.js";
 import type { SourceEdit, SourceRewrite } from "./edits.js";
 import {
   applyEdits,
@@ -1765,9 +1770,11 @@ export function planMoveSection(
   // subtree. Under a cross-file move each is rooted at bindings of the
   // target module — a chain (a marker, a call's argument) at its default
   // binding, a call's callee at its `text` binding (4.3, 4.4) — each one
-  // the file already holds (the first such declaration in document order,
-  // deterministic) or else one the declaration added to the file gives:
-  // one per module, binding exactly the lacked ones. A call is so
+  // the file already holds that no local declaration shadows at the
+  // occurrence (4.5; the first such in document order, deterministic) or
+  // else one the declaration added to the file gives: one per module,
+  // binding exactly the lacked ones, its fresh identifiers shadowed
+  // nowhere (they avoid every identifier the file spells). A call is so
   // rewritten whole, over its occurrence's span (5.7), and is never the
   // cross-module call of 14.11. Under a same-file move the module is kept,
   // so only a chain's segment prefix is re-identified and no callee is
@@ -1792,20 +1799,36 @@ export function planMoveSection(
       }
     }
     const usesAfter = [...usesBefore];
-    // The target module's value-level bindings the file already holds.
+    // The target module's value-level bindings the file already holds that
+    // no local declaration shadows at the occurrence (SPEC 6.5 "Reference
+    // spellings", 4.5): the first such in document order — declarations,
+    // then a declaration's bindings — deterministic; null where the file
+    // holds none there, and the added declaration's binding roots the
+    // spelling instead.
     const holdsTarget = (imported: CodeImport): boolean =>
       imported.valid && imported.targetPath === targetPath;
-    const existingDefault = analysis.imports.findIndex(
-      (imported) =>
-        holdsTarget(imported) &&
-        imported.defaultBinding !== null &&
-        !imported.defaultBinding.typeOnly,
-    );
-    const existingText = analysis.imports.findIndex(
-      (imported) =>
-        holdsTarget(imported) &&
-        imported.textBindings.some((binding) => !binding.typeOnly),
-    );
+    const existingBinding = (
+      reference: CodeReference,
+      bindingsOf: (imported: CodeImport) => readonly CodeImportBinding[],
+    ): { readonly importIndex: number; readonly name: string } | null => {
+      for (const [importIndex, imported] of analysis.imports.entries()) {
+        if (!holdsTarget(imported)) continue;
+        const binding = bindingsOf(imported).find(
+          (candidate) =>
+            !candidate.typeOnly &&
+            !reference.shadowedImportNames.has(candidate.name),
+        );
+        if (binding !== undefined) return { importIndex, name: binding.name };
+      }
+      return null;
+    };
+    const defaultBindingsOf = (
+      imported: CodeImport,
+    ): readonly CodeImportBinding[] =>
+      imported.defaultBinding === null ? [] : [imported.defaultBinding];
+    const textBindingsOf = (
+      imported: CodeImport,
+    ): readonly CodeImportBinding[] => imported.textBindings;
     // The declaration the rewrite adds, and the names its fresh identifiers
     // avoid (SPEC 6.5 "Import edits": colliding with no binding already in
     // the file, 2.1, 4): every identifier the file spells — each binding of
@@ -1846,9 +1869,10 @@ export function planMoveSection(
         // The chain leaves its origin-module root for a binding of the
         // target module — another module, so another import.
         usesAfter[reference.rootImport]! -= 1;
-        if (existingDefault !== -1) {
-          rootName = analysis.imports[existingDefault]!.defaultBinding!.name;
-          usesAfter[existingDefault]! += 1;
+        const existingDefault = existingBinding(reference, defaultBindingsOf);
+        if (existingDefault !== null) {
+          rootName = existingDefault.name;
+          usesAfter[existingDefault.importIndex]! += 1;
         } else {
           const fresh = addition();
           fresh.added.defaultName ??= freshBindingName(targetPath, fresh.taken);
@@ -1865,11 +1889,10 @@ export function planMoveSection(
             );
           }
           usesAfter[reference.calleeImport]! -= 1;
-          if (existingText !== -1) {
-            calleeName = analysis.imports[existingText]!.textBindings.find(
-              (binding) => !binding.typeOnly,
-            )!.name;
-            usesAfter[existingText]! += 1;
+          const existingText = existingBinding(reference, textBindingsOf);
+          if (existingText !== null) {
+            calleeName = existingText.name;
+            usesAfter[existingText.importIndex]! += 1;
           } else {
             const fresh = addition();
             fresh.added.textName ??= freshBindingName(

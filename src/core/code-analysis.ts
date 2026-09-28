@@ -220,6 +220,19 @@ export interface CodeReference {
    * unresolved one is 14.7 alone (SPEC 14.11).
    */
   readonly calledModule: CalledModule | null;
+  /**
+   * The identifiers the file's spec module imports bind (SPEC 4: default,
+   * `text`, and `{ default as X }` bindings alike, as the language reads
+   * them) that a local declaration shadows at the occurrence (SPEC 4.5):
+   * each one TypeScript scoping, resolving it at value level at the
+   * chain's root, resolves to something other than that import binding.
+   * A `text(...)` call's callee stands in the root's scope — no scope
+   * lies between a call's callee and its argument — so the set holds for
+   * both. SPEC 6.5 "Reference spellings": a re-rooted spelling uses a
+   * binding the file already holds only where no local declaration
+   * shadows it at the occurrence.
+   */
+  readonly shadowedImportNames: ReadonlySet<string>;
 }
 
 /** The foreign module of a cross-module `text(...)` call (SPEC 14.11). */
@@ -595,6 +608,15 @@ class CodeAnalyzer {
   private readonly declarations = new Map<tst.Node, TrackedBinding>();
   /** Named-unit construct → its unit (attribution, SPEC 4.6). */
   private readonly unitByNode = new Map<tst.Node, CodeUnit>();
+  /**
+   * Every binding of every spec module import, in document order: the
+   * bound identifier and the declaration node the checker resolves its
+   * uses to (the shadowing judgement, SPEC 4.5, 6.5).
+   */
+  private readonly importBindings: {
+    readonly name: string;
+    readonly declaration: tst.Node;
+  }[] = [];
 
   constructor(
     private readonly path: string,
@@ -693,6 +715,28 @@ class CodeAnalyzer {
   }
 
   /**
+   * SPEC 4.5, 6.5 "Reference spellings": the identifiers the file's spec
+   * module imports bind that a local declaration shadows at `location` —
+   * each one TypeScript scoping, resolving it there at value level,
+   * resolves to something other than that import binding's declaration.
+   */
+  private shadowedImportNamesAt(location: tst.Node): ReadonlySet<string> {
+    const shadowed = new Set<string>();
+    for (const { name, declaration } of this.importBindings) {
+      const symbol = this.checker.resolveName(
+        name,
+        location,
+        ts.SymbolFlags.Value,
+        false,
+      );
+      if (!(symbol?.declarations ?? []).some((node) => node === declaration)) {
+        shadowed.add(name);
+      }
+    }
+    return shadowed;
+  }
+
+  /**
    * SPEC 4.6: the innermost enclosing named code unit's identity, or the
    * file when none encloses the node.
    */
@@ -717,11 +761,14 @@ class CodeAnalyzer {
    * (SPEC 14.7) and recorded for a move's re-rooting (SPEC 6.5), and
    * `calledModule` a cross-module call's called module (SPEC 14.11).
    * `rootImport` and `calleeImport` index the import declarations whose
-   * bindings the root and the callee are (SPEC 6.5 "Import edits").
+   * bindings the root and the callee are (SPEC 6.5 "Import edits"), and
+   * `root` is the chain's root identifier, where the import bindings a
+   * local declaration shadows are judged (SPEC 4.5, 6.5).
    */
   private chainReference(
     kind: "references" | "embeds",
     classified: ClassifiedChain,
+    root: tst.Identifier,
     modulePath: string,
     rootImport: number,
     location: string,
@@ -780,6 +827,7 @@ class CodeAnalyzer {
       occurrenceRange: occurrenceRange ?? range,
       escapeFree,
       calledModule,
+      shadowedImportNames: this.shadowedImportNamesAt(root),
     };
   }
 
@@ -1136,6 +1184,7 @@ class CodeAnalyzer {
     // binding a recorded occurrence uses (SPEC 6.5 "Import edits").
     const importIndex = this.imports.length;
     for (const { declaration, binding, role } of roles) {
+      this.importBindings.push({ name: binding.name, declaration });
       this.declarations.set(
         declaration,
         !valid || target === null
@@ -1632,6 +1681,7 @@ class CodeAnalyzer {
             this.chainReference(
               "references",
               classified,
+              identifier,
               binding.target.path,
               binding.importIndex,
               this.attributionOf(use),
@@ -1823,6 +1873,7 @@ class CodeAnalyzer {
         ? undefined
         : this.bindingOfSymbol(this.checker.getSymbolAtLocation(root));
     if (
+      root === null ||
       rootBinding === undefined ||
       rootBinding.kind === "type-level" ||
       rootBinding.kind === "poisoned"
@@ -1920,6 +1971,7 @@ class CodeAnalyzer {
       this.chainReference(
         "embeds",
         classified,
+        root,
         rootBinding.target.path,
         rootBinding.importIndex,
         this.attributionOf(call),
