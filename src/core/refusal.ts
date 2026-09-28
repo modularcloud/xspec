@@ -538,9 +538,19 @@ interface RelocationModel {
  * spelling homed in H post-operation resolves to a node of T ≠ H — the
  * rewrite adds an import when a rewritten reference needs a module
  * binding its file lacks and removes one whose binding is left without
- * references (SPEC 6.5). Each cycle is one finding locating the CURRENT
- * import declarations participating in it (a would-be import the rewrite
- * would add exists in no current source and contributes no location).
+ * references (SPEC 6.5). Each cycle is one finding locating its full path
+ * in pre-operation coordinates (SPEC 14 location cardinality), step by
+ * step: for a step H → T, the import declarations of H designating T
+ * that exist before the operation, each by its own characters — H then
+ * holds a binding of T, which every spelling the operation roots in H at
+ * T's module uses (SPEC 6.5: an existing binding is chosen over an
+ * addition), so no import of T is added to H — or, where H holds none,
+ * the import the operation would add, which exists in no pre-operation
+ * coordinates: every reference spelling the operation roots at its
+ * binding, whether or not the spelling's characters change (SPEC 14,
+ * 6.5) — each spelling homed in H post-operation whose target then lies
+ * in T, at its current location (a moved-text spelling inside the
+ * origin's moved construct).
  */
 function wouldBeImportCycleFindings(
   specs: readonly SpecFileAnalysis[],
@@ -589,51 +599,79 @@ function wouldBeImportCycleFindings(
   }
 
   // Every requirement-side reference spelling, homed and retargeted: the
-  // spec-file import relation the rewrite leaves behind (SPEC 6.5). Code
-  // files do not participate in SPEC import cycles (2.1: among spec
-  // source files).
+  // spec-file import relation the rewrite leaves behind (SPEC 6.5), each
+  // spelling kept at its CURRENT location under its would-be step (home
+  // file → target's file): where the home holds no binding of the
+  // target's module, those spellings locate the import the step adds
+  // (SPEC 14). Code files do not participate in SPEC import cycles (2.1:
+  // among spec source files).
+  const homedSpellings = new Map<string, Map<string, FindingLocation[]>>();
   for (const occurrence of graph.occurrences) {
     if (occurrence.source === null) continue;
     if (graph.requirementNode(occurrence.source) === undefined) continue;
     if (typeof occurrence.file !== "string") continue; // valid workspaces only
     const home = relocation.postHomeOf(occurrence.file, occurrence.range);
     const targetFile = identityFilePart(map(occurrence.target));
+    // SPEC 2.2/6.5: a spelling whose target lies in its own file is in
+    // local form there, rooted at no binding.
+    if (home === targetFile) continue;
     addEdge(home, targetFile);
+    let byTarget = homedSpellings.get(home);
+    if (byTarget === undefined) {
+      homedSpellings.set(home, (byTarget = new Map()));
+    }
+    let spellings = byTarget.get(targetFile);
+    if (spellings === undefined) byTarget.set(targetFile, (spellings = []));
+    spellings.push({ file: occurrence.file, range: occurrence.range });
   }
+
+  // The import declarations of `home` designating `target` that exist
+  // before the operation, both read at their current paths (a created
+  // file holds none and is designated by none).
+  const existingImports = (home: string, target: string): FindingLocation[] => {
+    const sourcePath = relocation.prePathOf(home);
+    const targetPath = relocation.prePathOf(target);
+    if (sourcePath === null || targetPath === null) return [];
+    const spec = specByPath.get(sourcePath);
+    if (spec === undefined) return [];
+    return spec.imports.imports
+      .filter((declared) => declared.targetPath === targetPath)
+      .map((declared) => ({
+        file: spec.document.file,
+        range: declared.statement.range,
+      }));
+  };
 
   const nodes = [
     ...specs.map((spec) => relocation.postPathOf(spec.document.path)),
     ...relocation.createdFiles,
   ];
   return findCycles(nodes, adjacency).map((cycle) => {
-    // Locate the CURRENT import declarations participating in the
-    // would-be cycle (SPEC 14 location cardinality): for each step, every
-    // import of the step's source file (at its current path) designating
-    // the step's target (at its current path). Imports the rewrite would
-    // add exist in no current source and contribute no location.
+    // Locate the would-be cycle's full path in pre-operation coordinates
+    // (SPEC 14 location cardinality, the function comment): for each step,
+    // the home's existing imports of the target by their own characters —
+    // or, where it holds none, the import the operation would add, by
+    // every reference spelling the operation roots at its binding.
     const locations: FindingLocation[] = [];
     for (let step = 0; step + 1 < cycle.length; step += 1) {
-      const sourcePath = relocation.prePathOf(cycle[step]!);
-      const targetPath = relocation.prePathOf(cycle[step + 1]!);
-      if (sourcePath === null || targetPath === null) continue;
-      const spec = specByPath.get(sourcePath);
-      if (spec === undefined) continue;
-      for (const declared of spec.imports.imports) {
-        if (declared.targetPath === targetPath) {
-          locations.push({
-            file: spec.document.file,
-            range: declared.statement.range,
-          });
-        }
-      }
+      const home = cycle[step]!;
+      const target = cycle[step + 1]!;
+      const existing = existingImports(home, target);
+      locations.push(
+        ...(existing.length > 0
+          ? existing
+          : (homedSpellings.get(home)?.get(target) ?? [])),
+      );
     }
     return refusalFinding(
       "refused-cycle",
       `the move would create a spec import cycle: ${cycle.join(" → ")} — ` +
         `import cycles among spec source files are invalid (SPEC 2.1); ` +
-        `the rewrite would add the imports closing this cycle, so the ` +
-        `move is refused; choose a target that does not make the origin ` +
-        `and target files import each other (SPEC 6.5, 14)`,
+        `the rewrite would add the imports closing this cycle — each ` +
+        `located by the reference spellings the move roots at its ` +
+        `binding, beside the participating existing import declarations ` +
+        `— so the move is refused; choose a target that does not make ` +
+        `the origin and target files import each other (SPEC 6.5, 14)`,
       { locations },
     );
   });
