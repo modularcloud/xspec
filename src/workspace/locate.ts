@@ -5,9 +5,12 @@
 // search for `xspec.config.ts` from the working directory, or uses the
 // path given by the global `--config <path>` option — a filesystem path
 // resolved against the working directory (SPEC 12.0). The configuration
-// file's directory is the workspace root. A missing configuration is a
-// configuration error (14.14), reported by every command as a usage error
-// (exit 2, 12.0) preceding all source analysis.
+// file's directory is the workspace root. The configuration file is the
+// occupant of the path so found or named, read only when it is a plain
+// file: a missing configuration, or any other occupant — a directory, a
+// symbolic link whatever it targets — is a configuration error (14.14),
+// reported by every command as a usage error (exit 2, 12.0) preceding all
+// source analysis.
 //
 // SPEC 14: a configuration error's concerned path is reported in the
 // anchoring form of 11.6, identified relative to the invocation working
@@ -23,6 +26,7 @@
 // re-parsing (SPEC 12.0 determinism — identical bytes parse identically),
 // which is what lets a fresh-store read skip the parser module entirely.
 
+import type { Stats } from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import type { Finding } from "../core/findings.js";
@@ -58,8 +62,8 @@ export type WorkspaceLocateResult =
       readonly findings: readonly Finding[];
       /**
        * SPEC 14: the concerned path of the failure in the 11.6 anchoring
-       * form — the `--config`-named file, the found-but-unreadable file, or
-       * `.` for a failed upward search with no `--config`.
+       * form — the found or named configuration path, whatever occupies it
+       * (7), or `.` for a failed upward search with no `--config`.
        */
       readonly configAnchor: string;
     };
@@ -74,25 +78,71 @@ function failure(message: string, configAnchor: string): WorkspaceLocateResult {
   };
 }
 
-/** Whether a plain-stat of the path reaches a regular file. */
-async function isFile(candidate: string): Promise<boolean> {
-  try {
-    return (await fsp.stat(candidate)).isFile();
-  } catch {
-    return false;
-  }
+/**
+ * What occupies a configuration path (SPEC 7): nothing, a plain file — the
+ * one occupant ever read — or any other filesystem object, described for
+ * the diagnostic.
+ */
+type ConfigOccupant =
+  | { readonly kind: "absent" }
+  | { readonly kind: "file" }
+  | { readonly kind: "other"; readonly description: string };
+
+/**
+ * Whether a failed kind read found nothing at the path: no entry of that
+ * name, or a path component that is not a directory. SPEC 14.25: an
+ * object's nonexistence is never a read failure — an absent configuration
+ * path is missing configuration (14.14).
+ */
+function isAbsence(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
 }
 
 /**
- * SPEC 7: upward search for `xspec.config.ts` from the working directory.
- * Returns the found file's absolute path, or undefined when the search
- * exhausts at the filesystem root.
+ * SPEC 7: classify the occupant of a configuration path by the entry
+ * itself, never by what a symbolic link at that path targets — `lstat`
+ * follows no link in the final component. Any other refused read — of the
+ * occupant's kind, or of a directory holding it that the upward search
+ * examines (permission denied, an I/O error) — propagates: it is condition
+ * 25 (SPEC 14.25), never absence, so the search never continues past it.
  */
-async function searchUpward(startDir: string): Promise<string | undefined> {
+async function occupantOf(candidate: string): Promise<ConfigOccupant> {
+  let stats: Stats;
+  try {
+    stats = await fsp.lstat(candidate);
+  } catch (error) {
+    if (isAbsence(error)) return { kind: "absent" };
+    throw error;
+  }
+  if (stats.isFile()) return { kind: "file" };
+  const description = stats.isSymbolicLink()
+    ? "a symbolic link"
+    : stats.isDirectory()
+      ? "a directory"
+      : "a filesystem object other than a plain file";
+  return { kind: "other", description };
+}
+
+/**
+ * SPEC 7: upward search for `xspec.config.ts` from the working directory —
+ * the working directory itself first. The search stops at the nearest
+ * directory holding an entry of that name, whatever occupies it, so a
+ * directory or a symbolic link of that name ends the search as surely as a
+ * plain file does (the caller reads only a plain file). Returns the entry's
+ * absolute path and occupant, or undefined when the search exhausts at the
+ * filesystem root.
+ */
+async function searchUpward(
+  startDir: string,
+): Promise<
+  { readonly configPath: string; readonly occupant: ConfigOccupant } | undefined
+> {
   let dir = startDir;
   for (;;) {
-    const candidate = path.join(dir, CONFIG_FILE_NAME);
-    if (await isFile(candidate)) return candidate;
+    const configPath = path.join(dir, CONFIG_FILE_NAME);
+    const occupant = await occupantOf(configPath);
+    if (occupant.kind !== "absent") return { configPath, occupant };
     const parent = path.dirname(dir);
     if (parent === dir) return undefined;
     dir = parent;
@@ -111,10 +161,12 @@ export async function locateWorkspace(
 ): Promise<WorkspaceLocateResult> {
   let configPath: string;
   let configFileName: string;
+  let occupant: ConfigOccupant;
   if (configFlag !== undefined) {
     configPath = path.resolve(cwd, configFlag);
     configFileName = path.basename(configPath);
-    if (!(await isFile(configPath))) {
+    occupant = await occupantOf(configPath);
+    if (occupant.kind === "absent") {
       // SPEC 14: missing configuration WITH `--config` given concerns the
       // named file (never `.` — that is the failed upward search's case).
       return failure(
@@ -136,17 +188,40 @@ export async function locateWorkspace(
         ".",
       );
     }
-    configPath = found;
+    configPath = found.configPath;
     configFileName = CONFIG_FILE_NAME;
+    occupant = found.occupant;
   }
 
+  // SPEC 14: the concerned path of every configuration error from here on
+  // is the found or named configuration path itself, whatever occupies it
+  // (7) — the entry, never what a symbolic link there targets.
   const configAnchor = anchoredPathSpelling(cwd, configPath);
+  if (occupant.kind === "other") {
+    // SPEC 7, 14.14: the configuration file is read only when it is a plain
+    // file; any other occupant — a directory, a symbolic link whatever it
+    // targets, or anything else — is missing or invalid configuration,
+    // never read through, and the upward search never continues past it.
+    return failure(
+      (configFlag === undefined
+        ? `the upward search from the working directory stops at the ` +
+          `nearest entry named ${CONFIG_FILE_NAME}, and this one is `
+        : `--config ${configFlag}: this path holds `) +
+        `${occupant.description}, not a plain file — the configuration ` +
+        `file is read only as a plain file, never through a directory or ` +
+        `a symbolic link; put the configuration file itself at this path ` +
+        `(SPEC 7)`,
+      configAnchor,
+    );
+  }
   let bytes: Uint8Array;
   try {
     bytes = await fsp.readFile(configPath);
   } catch {
+    // SPEC 7, 14.25: a plain configuration file the environment refuses to
+    // read is invalid configuration (14.14).
     return failure(
-      `the configuration file cannot be read (SPEC 7)`,
+      `the configuration file cannot be read (SPEC 7, 14.25)`,
       configAnchor,
     );
   }
