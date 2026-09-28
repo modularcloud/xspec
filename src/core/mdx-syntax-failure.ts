@@ -863,21 +863,45 @@ function leavesParagraphOpen(
   );
 }
 
+/** How many lines of a construct `openParagraphAbove` walks back over. */
+const CONSTRUCT_LINES = 64;
+
+/**
+ * `openParagraphAbove`'s findings in the analysis in progress, by the text
+ * before the brace's line — all they depend on: the probes of one analysis
+ * ask of the same lines again and again, and each step of the walk parses
+ * a prefix.
+ */
+let paragraphsAbove: Map<string, number | undefined> | null = null;
+
 /**
  * The paragraph line holding an open text element (its end) right above
  * the line where the construct holding a brace begins — the brace's line
  * starting at `lineStart`, or, where the prefix through the line above
  * ends inside a JSX tag or an expression, the first of the lines such
- * constructs run over, walking back line by line (above) — or undefined
- * where no such paragraph line is found: a line above that is blank, the
- * file's first line, or a prefix the grammar reads otherwise.
+ * constructs run over, walking back line by line (above), at most
+ * `CONSTRUCT_LINES` of them — or undefined where no such paragraph line is
+ * found: a line above that is blank, the file's first line, a prefix the
+ * grammar reads otherwise, or a construct running over more lines.
  */
 function openParagraphAbove(
   text: string,
   lineStart: number,
 ): number | undefined {
+  const key = text.slice(0, lineStart);
+  if (paragraphsAbove?.has(key) === true) return paragraphsAbove.get(key);
+  const found = walkToOpenParagraph(text, lineStart);
+  paragraphsAbove?.set(key, found);
+  return found;
+}
+
+/** `openParagraphAbove`'s walk. */
+function walkToOpenParagraph(
+  text: string,
+  lineStart: number,
+): number | undefined {
   let start = lineStart;
-  for (;;) {
+  for (let line = 0; line <= CONSTRUCT_LINES; line += 1) {
     const terminator = terminatorBefore(text, start);
     if (terminator === "") return undefined;
     const end = start - terminator.length;
@@ -889,6 +913,7 @@ function openParagraphAbove(
       return leavesParagraphOpen(text, failure, end) ? end : undefined;
     }
   }
+  return undefined;
 }
 
 /**
@@ -1640,6 +1665,7 @@ function hiddenFailure(text: string, offset: number): number | null {
  * is not the grammar's own failure, or nesting too deep to re-parse).
  */
 export function mdxSyntaxFailureOffset(text: string, fallback: number): number {
+  paragraphsAbove = new Map();
   try {
     const whole = analysisParse(text);
     if (whole.failure === null) return fallback;
@@ -1662,6 +1688,8 @@ export function mdxSyntaxFailureOffset(text: string, fallback: number): number {
       return fallback;
     }
     throw error;
+  } finally {
+    paragraphsAbove = null;
   }
 }
 
