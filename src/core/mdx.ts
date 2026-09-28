@@ -260,11 +260,27 @@ export interface SpecImportStatement {
  * its import declarations in document order; an export statement is
  * invalid and reported (SPEC 2.7 → 14.16). Markdown compilation removes
  * each import declaration's own characters alone — the block's comments
- * and whitespace stay as content (SPEC 3).
+ * and whitespace stay as content (SPEC 3). `exportedBindings` lists, in
+ * document order, the identifiers the block's export statements declare —
+ * an import sharing one collides with it (SPEC 2.1, 2.4 → 14.15).
  */
 export interface SpecEsmBlock {
   readonly range: ByteRange;
   readonly imports: readonly SpecImportStatement[];
+  readonly exportedBindings: readonly SpecExportedBinding[];
+}
+
+/**
+ * One identifier a declaration held by an export statement binds (SPEC
+ * 2.1, 2.4, 2.7), with the construct binding it, as SPEC 14 locates a
+ * colliding declaration (1.7): a variable declarator by its own
+ * characters, its name or binding pattern through its initializer; a
+ * function or class declaration by its own characters, the leading
+ * `export` or `export default` excluded.
+ */
+export interface SpecExportedBinding {
+  readonly name: string;
+  readonly range: ByteRange;
 }
 
 /** The parsed per-file document model. */
@@ -352,6 +368,27 @@ interface EstreeComment {
 interface EstreeProgram {
   readonly body?: readonly EstreeNode[];
   readonly comments?: readonly EstreeComment[];
+}
+
+/**
+ * The estree shape of an ESM statement's declarations and binding
+ * patterns, as acorn builds them (SPEC 2.1, 2.4): identifiers carry the
+ * name the language reads.
+ */
+interface EstreeDeclarationNode {
+  readonly type: string;
+  readonly start?: number;
+  readonly end?: number;
+  readonly name?: string;
+  readonly id?: EstreeDeclarationNode | null;
+  readonly declaration?: EstreeDeclarationNode | null;
+  readonly declarations?: readonly EstreeDeclarationNode[];
+  readonly properties?: readonly EstreeDeclarationNode[];
+  readonly elements?: readonly (EstreeDeclarationNode | null)[];
+  readonly left?: EstreeDeclarationNode;
+  readonly argument?: EstreeDeclarationNode;
+  /** A pattern property's value (a pattern node). */
+  readonly value?: unknown;
 }
 
 interface MdxAttributeNode {
@@ -764,6 +801,78 @@ function positionsOf(node: {
     throw new Error("xspec internal error: estree node without a position");
   }
   return { start, end };
+}
+
+/**
+ * SPEC 2.1, 2.4: each identifier a declaration held by an export
+ * statement binds, with the UTF-16 span of the construct binding it — a
+ * variable declarator, or the function or class declaration itself, whose
+ * own characters exclude the leading `export` or `export default` (SPEC
+ * 14, 1.7). A statement holding no declaration — an export list, a
+ * re-export, a default-exported expression or anonymous construct — binds
+ * nothing.
+ */
+function exportedDeclarationBindings(
+  statement: EstreeDeclarationNode,
+): { readonly name: string; readonly start: number; readonly end: number }[] {
+  const declaration =
+    statement.type === "ExportNamedDeclaration" ||
+    statement.type === "ExportDefaultDeclaration"
+      ? statement.declaration
+      : null;
+  if (declaration === null || declaration === undefined) return [];
+  if (declaration.type === "VariableDeclaration") {
+    const held: { name: string; start: number; end: number }[] = [];
+    for (const declarator of declaration.declarations ?? []) {
+      const { start, end } = positionsOf(declarator);
+      const names: string[] = [];
+      patternNames(declarator.id, names);
+      for (const name of names) held.push({ name, start, end });
+    }
+    return held;
+  }
+  const name = declaration.id?.name;
+  if (
+    (declaration.type === "FunctionDeclaration" ||
+      declaration.type === "ClassDeclaration") &&
+    name !== undefined
+  ) {
+    return [{ name, ...positionsOf(declaration) }];
+  }
+  return [];
+}
+
+/** Every identifier an ECMAScript binding pattern binds, in source order. */
+function patternNames(
+  pattern: EstreeDeclarationNode | null | undefined,
+  into: string[],
+): void {
+  if (pattern === null || pattern === undefined) return;
+  switch (pattern.type) {
+    case "Identifier":
+      if (pattern.name !== undefined) into.push(pattern.name);
+      return;
+    case "ObjectPattern":
+      for (const property of pattern.properties ?? []) {
+        if (property.type === "RestElement") {
+          patternNames(property.argument, into);
+        } else if (typeof property.value === "object") {
+          patternNames(property.value as EstreeDeclarationNode | null, into);
+        }
+      }
+      return;
+    case "ArrayPattern":
+      for (const element of pattern.elements ?? []) {
+        patternNames(element, into);
+      }
+      return;
+    case "AssignmentPattern":
+      patternNames(pattern.left, into);
+      return;
+    case "RestElement":
+      patternNames(pattern.argument, into);
+      return;
+  }
 }
 
 /**
@@ -1285,6 +1394,7 @@ class DocumentBuilder {
   private processEsm(node: MdxTreeNode): void {
     const span = this.spanOf(node);
     const imports: SpecImportStatement[] = [];
+    const exportedBindings: SpecExportedBinding[] = [];
     for (const statement of node.data?.estree?.body ?? []) {
       const start = statement.start;
       const end = statement.end;
@@ -1305,11 +1415,20 @@ class DocumentBuilder {
           `invalid construct: an export statement — xspec source files ` +
             `export nothing; remove it (SPEC 2.7, 14.16)`,
         );
+        // SPEC 2.1, 2.4: what the statement's declaration binds, which an
+        // import sharing the identifier collides with (14.15).
+        for (const held of exportedDeclarationBindings(statement)) {
+          exportedBindings.push({
+            name: held.name,
+            range: this.byteRange(held.start, held.end),
+          });
+        }
       }
     }
     this.esmBlocks.push({
       range: this.byteRange(span.start, span.end),
       imports,
+      exportedBindings,
     });
   }
 

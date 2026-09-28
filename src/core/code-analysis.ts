@@ -779,12 +779,18 @@ class CodeAnalyzer {
           })),
         ]),
       );
-      const role =
-        entries.find((entry) => entry.valueLevelSpec && entry.role !== null)
-          ?.role ?? null;
+      // SPEC 2.4 roots no chain at a colliding identifier whatever the
+      // import's own validity; a binding of no permitted form (14.15)
+      // roots chains as a default binding would.
       const binding: TrackedBinding =
-        constructs.length > 0 && role !== null
-          ? { kind: "colliding", role }
+        constructs.length > 0
+          ? {
+              kind: "colliding",
+              role:
+                entries.find(
+                  (entry) => entry.valueLevelSpec && entry.role !== null,
+                )?.role ?? "node",
+            }
           : { kind: "poisoned" };
       for (const entry of entries) {
         this.declarations.set(entry.declaration, binding);

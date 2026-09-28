@@ -22,7 +22,9 @@
 // resolution (SPEC 14.20, 14.5–14.7); references through a valid import
 // of a member whose own path is invalid (SPEC 14.19) never resolve —
 // every identity of such a file is undefined (SPEC 11.2) — a condition
-// decidable per file, so their 14.5/14.6 is reported here directly.
+// decidable per file, so their 14.5/14.6 is reported here directly. So is
+// that of a chain rooted at an identifier an import and a declaration an
+// export statement holds both bind (SPEC 2.4): it names no target.
 
 import ts from "./ts-module.js";
 import type * as tst from "typescript";
@@ -35,6 +37,7 @@ import { pathTextKey, pathTextOf, renderPathText } from "./path-text.js";
 import type {
   SpecDocument,
   SpecEmbedding,
+  SpecExportedBinding,
   SpecImportStatement,
   SpecSection,
 } from "./mdx.js";
@@ -125,6 +128,16 @@ export type SpecImportBinding =
        * here are masked (SPEC 14).
        */
       readonly kind: "poisoned";
+    }
+  | {
+      /**
+       * SPEC 2.1, 2.4: an identifier an import binds that a declaration
+       * an export statement holds also binds — the language names no
+       * single binding, so a chain rooted here names no target: it
+       * reports as unresolved (14.5/14.6) beside the collision's 14.15,
+       * recording no edge and no occurrence (5.7).
+       */
+      readonly kind: "colliding";
     };
 
 /** The analyzed imports of one xspec source file (SPEC 2.1). */
@@ -593,24 +606,72 @@ export function analyzeSpecImports(
     }
   }
 
-  // SPEC 2.1 → 14.15: an identifier bound by more than one import is one
+  // SPEC 2.1, 2.4 → 14.15: an identifier bound by more than one import,
+  // or by an import and a declaration an export statement holds, is one
   // condition the declarations jointly violate — ONE finding per collided
   // identifier, locating every colliding declaration (SPEC 14: no
-  // representative is chosen); the identifier's binding is poisoned, so
-  // references rooted at it are masked (SPEC 14).
+  // representative is chosen), each export statement's by the construct
+  // binding the name. Colliding imports alone poison the binding, so
+  // references rooted at it are masked (SPEC 14); an identifier an export
+  // statement's declaration also binds roots no resolving chain (SPEC
+  // 2.4): its chains report as unresolved (14.5, 14.6).
+  const exportedByName = new Map<string, SpecExportedBinding[]>();
+  for (const block of document.esmBlocks) {
+    for (const held of block.exportedBindings) {
+      const entries = exportedByName.get(held.name);
+      if (entries === undefined) {
+        exportedByName.set(held.name, [held]);
+      } else if (
+        !entries.some(
+          (entry) =>
+            entry.range.start === held.range.start &&
+            entry.range.end === held.range.end,
+        )
+      ) {
+        entries.push(held);
+      }
+    }
+  }
   for (const [name, declared] of declarationsByName) {
-    if (declared.length < 2) continue;
+    const exported = exportedByName.get(name) ?? [];
+    if (declared.length < 2 && exported.length === 0) continue;
     findings.push(
       locatedFinding(
         15,
-        `invalid import: the identifier ${JSON.stringify(name)} is bound ` +
-          `by ${String(declared.length)} imports in this file — no two ` +
-          `imports in an xspec source file may bind the same identifier; ` +
-          `rename all but one binding (SPEC 2.1, 14.15)`,
-        declared.map((decl) => ({ file: document.file, range: decl.range })),
+        exported.length === 0
+          ? `invalid import: the identifier ${JSON.stringify(name)} is ` +
+              `bound by ${String(declared.length)} imports in this file — ` +
+              `no two imports in an xspec source file may bind the same ` +
+              `identifier; rename all but one binding (SPEC 2.1, 14.15)`
+          : `invalid import: the identifier ${JSON.stringify(name)} is ` +
+              `bound by ` +
+              (declared.length === 1
+                ? `an import`
+                : `${String(declared.length)} imports`) +
+              ` and by ` +
+              (exported.length === 1
+                ? `a declaration an export statement holds`
+                : `${String(exported.length)} declarations export ` +
+                  `statements hold`) +
+              ` — the language names no single binding, so no chain rooted ` +
+              `at it resolves; remove the export statement or rename the ` +
+              `import binding (SPEC 2.1, 2.4, 14.15)`,
+        [
+          ...declared.map((decl) => ({
+            file: document.file,
+            range: decl.range,
+          })),
+          ...exported.map((held) => ({
+            file: document.file,
+            range: held.range,
+          })),
+        ],
       ),
     );
-    bindings.set(name, { kind: "poisoned" });
+    bindings.set(
+      name,
+      exported.length > 0 ? { kind: "colliding" } : { kind: "poisoned" },
+    );
   }
 
   return {
@@ -728,8 +789,10 @@ export interface DependencyReference {
 
 /**
  * One `{text(...)}` embedding's analysis (SPEC 2.3). `reference` is null
- * when the embedding yields none: a 14.8 finding accounts for it, or its
- * chain root is a poisoned import binding (masked, SPEC 14).
+ * when the embedding yields none: a 14.8 finding accounts for it, its
+ * chain root is a poisoned import binding (masked, SPEC 14), or its chain
+ * names no target decidably per file, a 14.6 reported here (SPEC 14.19,
+ * 11.2, 2.4).
  */
 export interface EmbeddingReference {
   readonly embedding: SpecEmbedding;
@@ -752,14 +815,18 @@ type ResolvedReference =
   | { readonly outcome: "finding"; readonly finding: Finding }
   | {
       /**
-       * A chain rooted at a valid import of a member whose path is
-       * invalid (SPEC 14.19): every identity of that file is undefined
-       * (SPEC 11.2), so the reference never resolves — the caller reports
-       * its 14.5/14.6 with the span rules of its construct kind.
+       * A static chain that never resolves, decidably per file — rooted
+       * at a valid import of a member whose path is invalid (SPEC 14.19:
+       * every identity of that file is undefined, 11.2), or at an
+       * identifier a declaration an export statement holds also binds
+       * (SPEC 2.4: the language names no single binding). The caller
+       * reports its 14.5/14.6 with the span rules of its construct kind.
        */
-      readonly outcome: "undefined-target";
-      readonly modulePath: PathText;
-      readonly segments: readonly string[];
+      readonly outcome: "unresolved";
+      /** What the reference names, for messages ("to …", "rooted at …"). */
+      readonly subject: string;
+      /** Why it names no node, for messages. */
+      readonly reason: string;
       readonly span: TextSpan;
     }
   | { readonly outcome: "masked" };
@@ -904,16 +971,15 @@ class ReferenceAnalyzer {
         references.push(resolved.reference);
       } else if (resolved.outcome === "finding") {
         this.findings.push(resolved.finding);
-      } else if (resolved.outcome === "undefined-target") {
-        // SPEC 14.5: a d reference that does not resolve — here into a
-        // member whose identities are all undefined (SPEC 14.19, 11.2).
-        // The finding spans the reference's own expression (SPEC 14).
+      } else if (resolved.outcome === "unresolved") {
+        // SPEC 14.5: a d reference that does not resolve, decidably per
+        // file (SPEC 14.19, 11.2, 2.4). The finding spans the reference's
+        // own expression (SPEC 14).
         this.findings.push(
           locatedFinding(
             5,
-            `unknown dependency: the d reference to ` +
-              `${describeUndefinedTarget(resolved.modulePath, resolved.segments)} ` +
-              `does not resolve — ${UNDEFINED_TARGET_REASON} (SPEC 2.2, 14.5)`,
+            `unknown dependency: the d reference ${resolved.subject} ` +
+              `does not resolve — ${resolved.reason} (SPEC 2.2, 14.5)`,
             [
               {
                 file: this.document.file,
@@ -996,17 +1062,16 @@ class ReferenceAnalyzer {
     }
     if (resolved.outcome === "finding") {
       this.findings.push(resolved.finding);
-    } else if (resolved.outcome === "undefined-target") {
-      // SPEC 14.6: a text(...) reference that does not resolve — here
-      // into a member whose identities are all undefined (SPEC 14.19,
-      // 11.2). An embedding-form finding's range is the full braced
-      // container — the span its occurrence would occupy (SPEC 14, 5.7).
+    } else if (resolved.outcome === "unresolved") {
+      // SPEC 14.6: a text(...) reference that does not resolve, decidably
+      // per file (SPEC 14.19, 11.2, 2.4). An embedding-form finding's
+      // range is the full braced container — the span its occurrence
+      // would occupy (SPEC 14, 5.7).
       this.findings.push(
         locatedFinding(
           6,
-          `unknown text target: the text(...) reference to ` +
-            `${describeUndefinedTarget(resolved.modulePath, resolved.segments)} ` +
-            `does not resolve — ${UNDEFINED_TARGET_REASON} (SPEC 2.3, 14.6)`,
+          `unknown text target: the text(...) reference ${resolved.subject} ` +
+            `does not resolve — ${resolved.reason} (SPEC 2.3, 14.6)`,
           [{ file: this.document.file, range: embedding.range }],
         ),
       );
@@ -1074,9 +1139,28 @@ class ReferenceAnalyzer {
       // condition (14.5/14.6) is decidable per file; the caller reports it
       // with its construct kind's span rules (SPEC 14, 5.7).
       return {
-        outcome: "undefined-target",
-        modulePath: binding.modulePath,
-        segments: classified.segments.map((segment) => segment.name),
+        outcome: "unresolved",
+        subject: `to ${describeUndefinedTarget(
+          binding.modulePath,
+          classified.segments.map((segment) => segment.name),
+        )}`,
+        reason: UNDEFINED_TARGET_REASON,
+        span: classified.span,
+      };
+    }
+    if (binding.kind === "colliding") {
+      // SPEC 2.4: the language names no single binding, so the chain
+      // names no target — no edge, no occurrence (5.7) — and reports as
+      // unresolved beside the collision's 14.15, decidably per file.
+      const root = JSON.stringify(classified.rootName);
+      return {
+        outcome: "unresolved",
+        subject: `rooted at ${root}`,
+        reason:
+          `${root} is bound both by an import and by a declaration an ` +
+          `export statement holds — the language names no single binding, ` +
+          `so the chain names no target (SPEC 2.4, 2.1); resolve the ` +
+          `collision`,
         span: classified.span,
       };
     }
