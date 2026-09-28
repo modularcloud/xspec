@@ -72,7 +72,12 @@ import {
 import type { SpecFileAnalysis } from "./graph.js";
 import type { IdentityMapping, JournalEntry } from "./journal.js";
 import { createJournalEntry } from "./journal.js";
-import type { SpecDocument, SpecSection } from "./mdx.js";
+import type {
+  SpecDocument,
+  SpecEsmBlock,
+  SpecImportStatement,
+  SpecSection,
+} from "./mdx.js";
 import { parseSpecSource } from "./mdx.js";
 import type { PreviewFileEdits } from "./preview.js";
 import { PreviewCollector } from "./preview.js";
@@ -551,6 +556,56 @@ function offsetAfterLine(bytes: Uint8Array, position: number): number {
   return terminatorEndAt(bytes, lineContentEndAfter(bytes, position));
 }
 
+/** The keyword every import declaration's own characters begin with. */
+const IMPORT_KEYWORD_LENGTH = "import".length;
+const SPACE = 0x20;
+
+/**
+ * SPEC 6.5 "Import edits": whether the import removals `removed` leave the
+ * spec source's ESM block `block` still deriving as one — judged together,
+ * over the block as all of them would leave it: each removed declaration's
+ * own characters deleted, the lines that leaves empty or whitespace-only
+ * dropped with their terminators (3). The grammar bounds the block
+ * line-sensitively (14.20): its construct opens only at a line's start
+ * spelling `import` then U+0020, so the first line left must start with a
+ * kept declaration spelled so. Anything else heading it — a JavaScript
+ * comment (`// note` below a removed first line, or trailing it on that
+ * line), an indented declaration — leaves the remaining lines deriving as
+ * paragraph text, and the block's first declaration must stay. A block
+ * left with no line at all, every line dropped, is headed by nothing: its
+ * removals stand, the first declaration's included.
+ */
+function removalsLeaveBlockHeaded(
+  bytes: Uint8Array,
+  block: SpecEsmBlock,
+  removed: ReadonlySet<SpecImportStatement>,
+): boolean {
+  const edits = deletionEditsWithLineDrops(
+    bytes,
+    block.imports
+      .filter((statement) => removed.has(statement))
+      .map((statement) => statement.range),
+  );
+  // The block's first byte no edit deletes: the start of the first line
+  // the removals leave (the edits come in document order, a dropped line
+  // spanning its terminator, so each line the block keeps starts a line).
+  let head = block.range.start;
+  for (const edit of edits) {
+    if (edit.range.start > head) {
+      break;
+    }
+    head = Math.max(head, edit.range.end);
+  }
+  if (head >= block.range.end) {
+    return true;
+  }
+  return (
+    block.imports.some(
+      (statement) => !removed.has(statement) && statement.range.start === head,
+    ) && bytes[head + IMPORT_KEYWORD_LENGTH] === SPACE
+  );
+}
+
 /**
  * ECMAScript reserved words, which an import binding can never use — the
  * fresh-identifier chooser (SPEC 6.5) skips them — and `arguments` and
@@ -775,15 +830,20 @@ class SpecImportPlan {
   }
 
   /**
-   * SPEC 6.5/2.1: the imports removed — exactly those whose binding had
-   * references and the rewrite leaves with none; a binding that was already
-   * unreferenced stays.
+   * SPEC 6.5/2.1: the imports removed — those whose binding had references
+   * and the rewrite leaves with none (a binding that was already
+   * unreferenced stays), the removals in one ESM block judged together
+   * (`removalsLeaveBlockHeaded`, over the file's `bytes`): where they would
+   * leave the block headed by anything but a declaration at the start of
+   * its first line, the block's first declaration stays — its binding
+   * unused (2.1), no removal reported for it (6.6) — and the others are
+   * removed, the block it still heads deriving as before.
    */
-  removedImports(): SpecImport[] {
+  removedImports(bytes: Uint8Array): SpecImport[] {
     if (this.spec === null) {
       return [];
     }
-    const removed: SpecImport[] = [];
+    const removed = new Set<SpecImportStatement>();
     for (const imported of this.spec.imports.imports) {
       const name = imported.bindingName;
       if (name === null) {
@@ -798,10 +858,22 @@ class SpecImportPlan {
         (this.departures.get(name) ?? 0) +
         (this.arrivals.get(name) ?? 0);
       if (before > 0 && after === 0) {
-        removed.push(imported);
+        removed.add(imported.statement);
       }
     }
-    return removed;
+    for (const block of this.spec.document.esmBlocks) {
+      const first = block.imports[0];
+      if (
+        first !== undefined &&
+        removed.has(first) &&
+        !removalsLeaveBlockHeaded(bytes, block, removed)
+      ) {
+        removed.delete(first);
+      }
+    }
+    return this.spec.imports.imports.filter((imported) =>
+      removed.has(imported.statement),
+    );
   }
 
   /** The added imports, ordered by module path bytes (deterministic). */
@@ -1957,17 +2029,18 @@ export function planMoveSection(
     })),
   );
 
-  // Per-file import edits (cross-file only). Removals are line-dropped like
-  // every 6.5 deletion, each reported with every byte it removes (SPEC 6.6:
-  // an import removal's range spans the declaration plus the leftover
-  // whitespace and terminator of each line its drop empties, judged per
-  // declaration).
+  // Per-file import edits (cross-file only). Which declarations a spec
+  // source loses is judged per ESM block (`SpecImportPlan.removedImports`,
+  // SPEC 6.5); removals are line-dropped like every 6.5 deletion, each
+  // reported with every byte it removes (SPEC 6.6: an import removal's
+  // range spans the declaration plus the leftover whitespace and terminator
+  // of each line its drop empties, judged per declaration).
   const importRemovalsFor = (
     spec: SpecFileAnalysis,
     plan: SpecImportPlan,
     bytes: Uint8Array,
   ): ByteRange[] => {
-    const removed = plan.removedImports();
+    const removed = plan.removedImports(bytes);
     for (const imported of removed) {
       preview.add(
         spec.document.path,
@@ -1999,7 +2072,7 @@ export function planMoveSection(
     const lines = added.map((addition) =>
       defaultImportLine(path, addition.modulePath, addition.name),
     );
-    const removed = plan.removedImports();
+    const removed = plan.removedImports(bytes);
     const removedSet = new Set(removed);
     const survivors = spec.imports.imports.filter(
       (imported) => !removedSet.has(imported),

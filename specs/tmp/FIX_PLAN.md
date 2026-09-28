@@ -64,7 +64,7 @@ These are VERIFY's 82 failures at `3bfedb5`. Each registry module is `test/suite
 | T6.5-10 | section-6.5 | 29 (passes since Task 29 landed, with Task 10) |
 | T6.5-11 | section-6.5-ii | 28, 30, 31 (passes since Task 31 landed: each arm's call is rewritten whole, `t(O.x)` becoming `targetText(target.y)` — `targetText(T.y)` in (b), through its existing `T` — the added declaration binding exactly the lacked bindings, and the origin import removed with its line in (a), (b), and (d)) |
 | T6.5-13 | section-6.5-iii | 26 (passes since Task 26 landed; since Task 29 its arms (a)–(h) had held and it had stopped first at arm (i)'s preview, an `id-rewrite` reported for the unchanged `id="m"` of a cross-file move keeping its ID) |
-| T6.5-15 | section-6.5-iii | 34 (since Task 10 arm (a)'s three lines derive as one block; it stops first at (a)'s preview, which reports A's declaration removed) |
+| T6.5-15 | section-6.5-iii | 34 (passes since Task 34 landed: a spec source's removals are judged per ESM block — `SpecImportPlan.removedImports(bytes)` and `removalsLeaveBlockHeaded` in `src/core/move.ts` — so where they would leave the block headed by anything but a kept declaration opening its first line, the block's first declaration stays, unreported, in arms (a), (b), and (c)) |
 | T6.5-16 | section-6.5-iii | 11, 35 (since Task 11 the stock pairing rejects arm (a)'s would-be target, so the move is no longer performed: it stops at its own re-validation of the rewritten workspace, exit 1 with the would-be file's 14.20 — `got ["14.20"]` — where the single `refused-invalid-rewrite` is required) |
 | T6.5-17 | section-6.5-iii | 25 (passes since Task 25 landed: each refused arm reports the single `refused-moved-import` locating each declaration's own characters, `refused-invalid-id` beside it in (d), previewed alike; the control (e) is performed as composed) |
 | T6.5-18 | section-6.5-iii | 33 (passes since Task 33 landed: a re-rooted chain root or `text` callee takes the first existing target-module binding that no local declaration shadows at the occurrence — `CodeReference.shadowedImportNames`, the checker's value-level resolution of each import-bound identifier at the chain's root — so the marker in `f`, where `const T = 1` shadows the import, becomes `target.y` under an added `import target from "../specs/target.xspec"`) |
@@ -166,25 +166,6 @@ Several tasks have no failing test of their own: Task 53 (a corrupt session in `
 **Verification.** `section-14.test.ts`: T14-11 arm (n) (the test also waits on Task 16, whose arm (j) it reaches first). Meanwhile hand-probe arm (n)'s bytes: `build --json` and `occurrences` must each carry the 14.17 at [43,51) and [52,64) and the 14.5 at [55,63), exit 1, and `occurrences` exactly the one occurrence above. Neighbours: `section-2.2-2.3.test.ts`, `section-5.7.test.ts`, `section-11.3.test.ts`, `section-11.5.test.ts`.
 
 ---
-
-## Task 34 — Joint import removal keeps a block's first declaration when the block would otherwise be headed by a comment or an indented declaration (SPEC 6.5 "Import edits", 3, 14.20; A23)
-
-Task 10, its prerequisite, has landed.
-
-**Requirement.** SPEC 6.5: in a spec source, "the removals in one block are judged together". Where they would leave the block headed by anything but a declaration at the start of its first line — a JavaScript comment or an indented declaration — the remaining declarations would derive as paragraph text (14.20). Then:
-- the block's first declaration stays, "its binding unused (2.1) and no removal reported for it (6.6)";
-- the other declarations are removed;
-- "a block they would leave with no line at all … [has] its first declaration removed with the rest".
-
-**Observed.** When removals would leave a block headed by a comment or an indented declaration, the first declaration is removed too. For example, `import A … // note` above `import B …` loses both lines.
-
-**Location.** `src/core/move.ts`: `SpecImportPlan.removedImports()` (~719–812) and the removal closure (~1455–1500).
-
-**Change.** Judge each block's removals jointly, over the block as all of them would leave it. Keep the first declaration, with no `import-removal` reported for it, when the rest would not start with a declaration at the start of the block's first line — unless no line of the block would remain.
-
-**Verification.**
-- `section-6.5-iii.test.ts`: T6.5-15 (Task 10 has landed).
-- Neighbours: `section-6.5.test.ts`, `section-6.6.test.ts`.
 
 ## Task 35 — Refuse a section move whose rewrite would be invalid: `refused-invalid-rewrite` (SPEC 6.5 "Validation and refusals", 14, 6.6; A24, C19(d))
 
@@ -724,22 +705,22 @@ No test stages a parenthesized default export.
 
 ## Task 74 — A refused move's spec import cycle locates only the existing import declarations the rewrite keeps (SPEC 14 refusal list, 6.5 "Import edits"; found while landing Task 24)
 
-**Requirement.** SPEC 14, `refused-cycle`, for a spec import cycle: "each participating import declaration existing before the operation by its own characters". The would-be cycle runs through the post-operation import relation. SPEC 6.5 ("Import edits") removes an existing spec module import "exactly when an occurrence used a binding of its before the rewrite and none uses any binding of its after it". A declaration the rewrite removes stands in no post-operation file: it does not participate and is not located. A declaration the rewrite keeps participates even when its binding is left unused — an import already unused before the operation (2.1), and, once Task 34 lands, a block's first declaration the joint-removal rule keeps.
+**Requirement.** SPEC 14, `refused-cycle`, for a spec import cycle: "each participating import declaration existing before the operation by its own characters". The would-be cycle runs through the post-operation import relation. SPEC 6.5 ("Import edits") removes an existing spec module import "exactly when an occurrence used a binding of its before the rewrite and none uses any binding of its after it". A declaration the rewrite removes stands in no post-operation file: it does not participate and is not located. A declaration the rewrite keeps participates even when its binding is left unused — an import already unused before the operation (2.1), and, since Task 34 landed, a block's first declaration the joint-removal rule keeps.
 
 **Observed.** Probed with Task 24 landed, in a scratch workspace with a specs-only configuration; `build` exits 0.
 - `specs/A.mdx`: `import X from "./B.xspec"`, `import Y from "./B.xspec"`, a blank line, then `<S id="keep">` and `<S id="m" d={[X.b, "keep"]}>`, each holding one line of text. `specs/B.mdx`: `import C from "./C.xspec"`, a blank line, then `<S id="b" d={C.c}>`. `specs/C.mdx`: `<S id="c">`.
 - `move specs/A.mdx#m specs/C.mdx#m --preview --json` exits 1 with one `refused-cycle` for `specs/A.mdx → specs/B.mdx → specs/C.mdx → specs/A.mdx`. It locates `[specs/A.mdx 0,25]` (X), `[26,51]` (Y), `[103,109]` (`"keep"`, rooted at C's added import of A), and `[specs/B.mdx 0,25]`. X's only use departs with `m`, so the rewrite removes X, and the finding should not locate it.
-- The model keeps an existing import's edge only when its binding was already unused, or when a spelling homed in its file still targets its module. After Task 34, a kept first declaration whose binding the rewrite leaves unused would contribute no edge. A cycle it closed would escape the refusal and meet the post-move re-validation guard in `src/cli/commands/move.ts` (a 14.9 finding) instead.
+- The model keeps an existing import's edge only when its binding was already unused, or when a spelling homed in its file still targets its module. So a first declaration the joint-removal rule keeps (Task 34, landed), its binding left unused, contributes no edge, and a cycle it closes escapes the refusal and meets the post-move re-validation guard in `src/cli/commands/move.ts` instead. Probed with Task 34 landed: `specs/A.mdx` holding `import X from "./B.xspec"`, `// note`, a blank line, then `<S id="keep">` and `<S id="m" d={[X.b, "keep"]}>`, each holding one line of text, and `specs/B.mdx` holding `<S id="b">`; `build` exits 0. `move specs/A.mdx#m specs/B.mdx#m`, with or without `--preview`, exits 1 with one 14.9 `cycle` (`specs/A.mdx → specs/B.mdx → specs/A.mdx`, locating `[specs/A.mdx 0,25]` and the would-be added import `[specs/B.mdx 56,81]`), nothing modified. SPEC 14 requires one `refused-cycle` locating X's declaration `[specs/A.mdx 0,25]` — X stays, as removing it would leave `// note` heading the block — and the moved `"keep"` `[specs/A.mdx 76,82]`, rooted at B's added import of A.
 
 **Location.**
 - `src/core/refusal.ts`: `wouldBeImportCycleFindings` — its `existingImports` helper, and the loop keeping already-unreferenced imports.
-- `src/core/move.ts`: `SpecImportPlan` — `bindingFor` roots every arrival at the first import designating the module; `removedImports` decides the removals.
+- `src/core/move.ts`: `SpecImportPlan` — `bindingFor` roots every arrival at the first import designating the module; `removedImports(bytes)` decides the removals, each ESM block's judged together by `removalsLeaveBlockHeaded`.
 
 **Change.**
 - Make the would-be relation's existing declarations exactly those the rewrite keeps, and locate only those.
-- Prefer deriving them from the plan's own import bookkeeping (`SpecImportPlan`'s removals and, after Task 34, its joint-removal rule) over a second model, so the refusal and the rewrite cannot disagree.
+- Prefer deriving them from the plan's own import bookkeeping (`SpecImportPlan`'s removals, its joint-removal rule included) over a second model, so the refusal and the rewrite cannot disagree.
 
-**Verification.** No suite test pins it. Hand-probe the Observed staging: X absent; Y, `"keep"`, and B's import located. Run `section-14.test.ts` (T14-7's cycle arms), `section-6.5.test.ts`, and `section-6.6.test.ts`.
+**Verification.** No suite test pins it. Hand-probe both Observed stagings: in the first, X absent and Y, `"keep"`, and B's import located; in the second, one `refused-cycle` in place of the 14.9. Run `section-14.test.ts` (T14-7's cycle arms), `section-6.5.test.ts`, and `section-6.6.test.ts`.
 
 ## Task 75 — An import added to a code file stands at an admissible offset, a top-level declaration of the file as the rewrite leaves it (SPEC 6.5 "Import edits"; found while landing Task 28)
 
