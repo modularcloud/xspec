@@ -221,7 +221,7 @@ export async function inventoryCommand(
     record.state === "readable"
       ? [...record.paths]
       : record.state === "absent"
-        ? [] // SPEC 11.6: a missing store is an empty record.
+        ? [] // SPEC 11.6: a missing record is an empty record.
         : unavailableJson();
 
   // SPEC 12.7: the ten-member inventory document form. The anchoring is

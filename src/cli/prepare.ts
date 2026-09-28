@@ -37,7 +37,7 @@ export type ReadPreparation =
       readonly ok: true;
       /** The analyzed current workspace (graph, text model, hashes, journal). */
       readonly analysis: WorkspaceAnalysis;
-      /** The stored graph data — current snapshot, retained record. */
+      /** The stored graph data — the current snapshot with its inputs. */
       readonly graphData: GraphData;
     }
   | {
