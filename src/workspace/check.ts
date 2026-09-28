@@ -234,8 +234,10 @@ export async function mismatchStalenessFindings(
  * - the recorded-file form: each recorded derived file remaining (anything
  *   occupying its path) at a path the current sources and configuration no
  *   longer generate — `orphans`, the record's paths outside the set of
- *   generated paths, in byte order (core/build.ts); one whose path is
- *   vacant remains nowhere, no finding. While the unreadable-record state
+ *   generated paths that discovery and configuration define on any
+ *   workspace, in byte order (core/build.ts: `orphanedRecordedPaths` over
+ *   `discoveredGeneratedPaths`); one whose path is vacant remains nowhere,
+ *   no finding. While the unreadable-record state
  *   holds this form is undetectable (SPEC 14.10): it consults no readable
  *   record, and an unreadable record records nothing (`orphans` is empty
  *   by construction, `recordedPathsOf`). A remaining path whose kind the

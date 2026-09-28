@@ -26,6 +26,7 @@
 
 import { compareBytes, sortByBytes } from "./bytes.js";
 import type { Configuration } from "./config.js";
+import type { SourceClassification } from "./discovery.js";
 import { canonicalOutDirPrefix } from "./discovery.js";
 import type { GeneratedFile } from "./emission.js";
 import { generateSpecModule, specModulePaths } from "./emission.js";
@@ -116,15 +117,8 @@ export function computeBuildOutputs(
   }
 
   const generated = new Set(files.map((file) => file.path));
-  // SPEC 12.1/13.3/13.4: orphan removal via recorded paths only. Graph
-  // data's own paths are never recorded (13.3: graph data records no paths
-  // of its own); a record naming one anyway is dropped defensively — the
-  // store is rewritten, never removed, by a build.
-  const orphans = [...new Set(recorded)]
-    .filter(
-      (path) => !generated.has(path) && !GRAPH_DATA_OWN_PATHS.includes(path),
-    )
-    .sort(compareBytes);
+  // SPEC 12.1/13.3/13.4: orphan removal via recorded paths only.
+  const orphans = orphanedRecordedPaths(recorded, generated);
 
   return {
     files,
@@ -150,8 +144,10 @@ export function computeBuildOutputs(
  * byte order, graph data excluded (SPEC 13.3: the record holds the
  * generated derived files; graph data records no path of its own). The
  * path-only companion of `computeBuildOutputs`' enumeration, serving the
- * preview delta's post-operation generation set (SPEC 6.6): the paths are a
- * function of the source names and the configuration alone.
+ * preview delta's post-operation generation set (SPEC 6.6) and the set of
+ * generated paths on any workspace (`discoveredGeneratedPaths`, SPEC
+ * 14.10): the paths are a function of the source names and the
+ * configuration alone.
  */
 export function generatedDerivedPaths(
   configuration: Configuration,
@@ -166,8 +162,9 @@ export function generatedDerivedPaths(
   for (const specPath of specPaths) {
     if (!specPath.endsWith(".mdx")) {
       // SPEC 13.1: per-source derived paths are defined by the `NAME.mdx`
-      // name shape alone; a valid workspace discovers no other spec-source
-      // names (SPEC 14.19), so this arm is defensive.
+      // name shape alone — a spec-group file without the extension (14.19,
+      // reaching here only through `discoveredGeneratedPaths`) generates no
+      // module and emits no Markdown.
       continue;
     }
     const modulePaths = specModulePaths(specPath);
@@ -183,4 +180,59 @@ export function generatedDerivedPaths(
     }
   }
   return [...new Set(paths)].sort(compareBytes);
+}
+
+/**
+ * SPEC 14.10's "set of generated paths alone, a set discovery and
+ * configuration define on any workspace (13.1, 7.3, 11.6)": the derived
+ * paths every discovered spec source generates by its `NAME.mdx` name shape
+ * alone — its module and companions (13.1) and, while emission is enabled,
+ * its Markdown emit destination (7.3) — through `generatedDerivedPaths`, in
+ * byte order, graph data excluded. It parses no source, so it is defined on
+ * a workspace failing `build`'s validations as on a passing one, where it
+ * is exactly the paths `computeBuildOutputs` generates (every discovered
+ * spec source then valid and parsed). A spec-group file whose own path
+ * 14.19 rejects is a discovered spec source all the same — the inventory's
+ * derived-file map gives it a module path and an emit destination (11.6),
+ * and the configured emit destinations count it (7.3) — so it contributes
+ * its derived paths, a non-`.mdx` one none (13.1). A rejected path with no
+ * plain string form (not valid UTF-8, SPEC 12.0) contributes nothing here:
+ * its derived paths keep its stem, an ASCII suffix following it, so they
+ * are no more valid UTF-8 than it is, and no recorded path — a string, the
+ * record written by a successful build over valid sources (13.3) — can
+ * equal one.
+ */
+export function discoveredGeneratedPaths(
+  configuration: Configuration,
+  classification: SourceClassification,
+): readonly string[] {
+  const specPaths = classification.specSources.map((source) => source.path);
+  for (const source of classification.invalidSources) {
+    if (source.kind === "spec" && typeof source.path === "string") {
+      specPaths.push(source.path);
+    }
+  }
+  return generatedDerivedPaths(configuration, specPaths);
+}
+
+/**
+ * SPEC 12.1, 13.3, 13.4, 14.10: the recorded derived-file paths the current
+ * sources and configuration no longer generate — `recorded` (a readable
+ * record's paths; none where the record is absent or cannot be read as a
+ * record, files orphaned then being outside xspec's knowledge, 13.4)
+ * outside `generated`, duplicate-free, in byte order. Graph data's own
+ * paths are never recorded (13.3: graph data records no paths of its own);
+ * a record naming one anyway is dropped defensively — the store is
+ * rewritten, never removed, by a build. The one rule behind generation's
+ * orphan removal and `check`'s recorded-file form.
+ */
+export function orphanedRecordedPaths(
+  recorded: readonly string[],
+  generated: ReadonlySet<string>,
+): readonly string[] {
+  return [...new Set(recorded)]
+    .filter(
+      (path) => !generated.has(path) && !GRAPH_DATA_OWN_PATHS.includes(path),
+    )
+    .sort(compareBytes);
 }
