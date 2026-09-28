@@ -379,14 +379,14 @@ function blankedListMarkers(spelled: string): string {
  * blanks them — `> - ` gives `>   `, `- > ` gives `  > `; undefined when
  * no line holds more. Inside nested containers (a list item in a block
  * quote, a block quote in a list item) a line continues them all only so,
- * which no fixed prefix spells (SPEC 14's location rule for 14.20). The
- * grammar judges every probe, so a wrong candidate (content spelled like a
- * marker) only fails to collect.
+ * which no fixed prefix spells (SPEC 14's location rule for 14.20) — however
+ * many lines of that syntax alone (the content's blank lines) follow it.
+ * The grammar judges every probe, so a wrong candidate (content spelled
+ * like a marker) only fails to collect.
  */
 function contentLinePrefix(text: string): string | undefined {
   const spans = lineSpans(text);
-  const first = Math.max(0, spans.length - CONTAINER_LINES);
-  for (let line = spans.length - 1; line >= first; line -= 1) {
+  for (let line = spans.length - 1; line >= 0; line -= 1) {
     const spelled = text.slice(spans[line][0], spans[line][1]);
     const run = CONTAINER_RUN.exec(spelled)?.[0] ?? "";
     if (run.length < spelled.length) return blankedListMarkers(run);
@@ -450,8 +450,66 @@ function terminatorBefore(text: string, at: number): string {
   return code === 0x0a || code === 0x0d ? text.charAt(at - 1) : "";
 }
 
-/** How many lines past a failure's place a container's content is sought. */
-const CONTAINER_LINES = 256;
+/** The ends (at their terminators) of `text`'s lines from `from`'s on. */
+function lineEndsFrom(text: string, from: number): number[] {
+  let end = lineEndFrom(text, from);
+  const ends = [end];
+  while (end < text.length) {
+    end = lineEndFrom(text, end + terminatorAt(text, end).length);
+    ends.push(end);
+  }
+  return ends;
+}
+
+/** The lines past a failure's place probed one by one before galloping. */
+const LINEAR_LINES = 8;
+
+/**
+ * The last of `count` lines, numbered from 0, past which `collect` still
+ * collects a container's content (`collectedPastLine`), with that content —
+ * line 0 known to collect `first`. Collection is monotone: a container
+ * still open past a line is open past every line before it. So the lines
+ * are searched, not walked: one by one through the first `LINEAR_LINES`
+ * (content mostly ends within a few lines of the place, and a probe past
+ * its end, trying every prefix, costs several probes within it), then
+ * galloping by doubling steps to the first line that collects nothing, and
+ * bisecting between it and the last line that collects — O(log count)
+ * probes, each a few parses of the prefix, where a walk costs a probe per
+ * line of content and a bounded walk ends early inside longer content
+ * (SPEC 14's location rule for 14.20).
+ */
+function lastCollectedLine(
+  count: number,
+  collect: (line: number) => Collected | undefined,
+  first: Collected,
+): { readonly line: number; readonly collected: Collected } {
+  let low = 0;
+  let collected = first;
+  let high = count;
+  let step = 1;
+  while (low + 1 < high) {
+    const line = Math.min(low + step, high - 1);
+    const probed = collect(line);
+    if (probed === undefined) {
+      high = line;
+      break;
+    }
+    low = line;
+    collected = probed;
+    if (low >= LINEAR_LINES) step *= 2;
+  }
+  while (low + 1 < high) {
+    const line = low + Math.floor((high - low) / 2);
+    const probed = collect(line);
+    if (probed === undefined) {
+      high = line;
+    } else {
+      low = line;
+      collected = probed;
+    }
+  }
+  return { line: low, collected };
+}
 
 /**
  * A container the stock grammar reached the end of without its content
@@ -459,11 +517,14 @@ const CONTAINER_LINES = 256;
  * attribute; `placed` the grammar's place for the failure, inside it): its
  * content, from the opening brace on, measured by its own grammar. When it
  * runs to the end of `text`, a `}` appended there collects it. When the
- * block container holding it ended first, the content ends with that block
- * container's last line — the last line at whose end an appended `}` still
- * falls in the container — and, the content viable through that line and
- * its terminator, the failure is the next line's first character other than
- * the indentation a continuation could still begin with.
+ * block container holding it ended first, or a line past the place ends the
+ * content otherwise (a brace closing it that text follows), the content
+ * ends with the last line past which a `}` on a further line still falls
+ * in the container, however far past the place (`lastCollectedLine`) —
+ * and, the content viable through that line and its terminator, the failure
+ * is the next line's first character that no continuation of the content
+ * could begin with, or past the brace closing it there
+ * (`measuredThroughLine`).
  */
 function openContainerOffset(text: string, placed: number | undefined): number {
   const closed = analysisParse(text + "}");
@@ -486,31 +547,20 @@ function openContainerOffset(text: string, placed: number | undefined): number {
     );
   }
   if (placed === undefined) return 0;
-  const lineEnd = (from: number): number => {
-    let at = from;
-    while (at < text.length && terminatorAt(text, at) === "") at += 1;
-    return at;
-  };
-  let end = lineEnd(placed);
-  let last: { readonly end: number; readonly collected: Collected } | null =
-    null;
-  for (let line = 0; line < CONTAINER_LINES; line += 1) {
-    const collected = collectedPastLine(text.slice(0, end));
-    if (collected === undefined) {
-      // The line holding the failure's place is the container's, whatever
-      // follows it.
-      if (last === null) {
-        const same = collectedAtEnd(text.slice(0, end));
-        if (same !== undefined) last = { end, collected: same };
-      }
-      break;
-    }
-    last = { end, collected };
-    if (end >= text.length) break;
-    end = lineEnd(end + terminatorAt(text, end).length);
+  const ends = lineEndsFrom(text, placed);
+  const collect = (line: number): Collected | undefined =>
+    collectedPastLine(text.slice(0, ends[line]));
+  const first = collect(0);
+  if (first === undefined) {
+    // The line holding the failure's place is the container's, whatever
+    // follows it.
+    const same = collectedAtEnd(text.slice(0, ends[0]));
+    return same === undefined
+      ? lineLeavingOffset(text, placed)
+      : measuredThroughLine(text, ends[0], same, 0);
   }
-  if (last === null) return lineLeavingOffset(text, placed);
-  return measuredThroughLine(text, last.end, last.collected, 0);
+  const last = lastCollectedLine(ends.length, collect, first);
+  return measuredThroughLine(text, ends[last.line], last.collected, 0);
 }
 
 /**
