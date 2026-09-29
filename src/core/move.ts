@@ -2239,10 +2239,11 @@ function composeMoveSection(
       }
       return null;
     };
+    // A chain's root: any binding of the module's default export — the
+    // default clause's or a named `{ default as X }` element's (SPEC 4).
     const defaultBindingsOf = (
       imported: CodeImport,
-    ): readonly CodeImportBinding[] =>
-      imported.defaultBinding === null ? [] : [imported.defaultBinding];
+    ): readonly CodeImportBinding[] => imported.defaultBindings;
     const textBindingsOf = (
       imported: CodeImport,
     ): readonly CodeImportBinding[] => imported.textBindings;

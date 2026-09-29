@@ -142,8 +142,14 @@ export interface CodeImport {
    * import.
    */
   readonly targetFile: PathText | null;
-  /** The default-export binding, when present (SPEC 4). */
-  readonly defaultBinding: CodeImportBinding | null;
+  /**
+   * Every binding of the module's default export, in written order
+   * (SPEC 4: the default export, optionally aliased): the default
+   * clause's (`import X from`), then each named `{ default as X }`
+   * element's — both bind the default export, so either roots a chain
+   * (6.5 "Reference spellings").
+   */
+  readonly defaultBindings: readonly CodeImportBinding[];
   /** The named `text` bindings, in written order (SPEC 4). */
   readonly textBindings: readonly CodeImportBinding[];
   /** Whether the import is valid (collisions are reported pairwise). */
@@ -1167,7 +1173,7 @@ class CodeAnalyzer {
     // each optionally aliased, optionally type-only. A side-effect-only
     // import binds nothing — no forbidden binding — and records nothing.
     const clauseTypeOnly = clause?.isTypeOnly === true;
-    let defaultBinding: CodeImportBinding | null = null;
+    const defaultBindings: CodeImportBinding[] = [];
     const textBindings: CodeImportBinding[] = [];
     /** Registered once validity is known: declaration → role. */
     const roles: {
@@ -1177,12 +1183,12 @@ class CodeAnalyzer {
     }[] = [];
     if (clause !== undefined) {
       if (clause.name !== undefined) {
-        defaultBinding = { name: clause.name.text, typeOnly: clauseTypeOnly };
-        roles.push({
-          declaration: clause,
-          binding: defaultBinding,
-          role: "node",
-        });
+        const binding: CodeImportBinding = {
+          name: clause.name.text,
+          typeOnly: clauseTypeOnly,
+        };
+        defaultBindings.push(binding);
+        roles.push({ declaration: clause, binding, role: "node" });
       }
       const named = clause.namedBindings;
       if (named !== undefined) {
@@ -1203,6 +1209,7 @@ class CodeAnalyzer {
               roles.push({ declaration: element, binding, role: "text" });
             } else if (imported === "default") {
               // SPEC 4: the default export, aliased through the named form.
+              defaultBindings.push(binding);
               roles.push({ declaration: element, binding, role: "node" });
             } else {
               defects.push(
@@ -1257,7 +1264,7 @@ class CodeAnalyzer {
       specifierRange: this.rangeOf(literal),
       targetPath: valid ? targetPath : null,
       targetFile: valid ? targetFile : null,
-      defaultBinding,
+      defaultBindings,
       textBindings,
       valid,
     });
