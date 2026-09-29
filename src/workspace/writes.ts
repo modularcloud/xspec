@@ -713,44 +713,40 @@ export async function writeDurableFile(
 }
 
 /**
- * Append to a line-oriented durable file (SPEC 6.1: the journal is
- * append-only and comes into existence with the first append; SPEC 13.4:
- * line-oriented so concurrent additions merge textually). Atomic in its
- * observable effect (SPEC 13.5): the first append — the file absent —
- * creates it as a complete file (temp beside the target, one rename), so a
- * concurrent reader only ever observes absence or the complete first entry,
- * never an empty or partial file (opening with O_CREAT and then writing
- * would expose an empty file between the two). Appending callers run under
- * workspace exclusivity (SPEC 13.5), so no concurrent appender races the
- * absence classification. Later appends are one O_APPEND write of the
- * complete bytes. The same non-plain-occupant refusal applies as for
- * `writeDurableFile`, and an append the environment refuses is the write
- * failure concerning `rel` (SPEC 14.24).
+ * Append `addition` to a line-oriented durable file (SPEC 6.1: the journal
+ * is append-only and comes into existence with the first append; SPEC 13.4:
+ * line-oriented so concurrent additions merge textually), atomic in its
+ * observable effect (SPEC 13.5): the file's content after the append —
+ * `prior`, the content the caller validated (null: the file absent), then
+ * `addition` — replaces the file as one complete file, the temp file beside
+ * it and then one rename (`replaceWithFile`), the first append's creation
+ * and every later append alike. So at every moment a concurrent reader
+ * observes the prior state or the complete new content, and an append the
+ * environment refuses — exhausted storage cutting the temp file's write
+ * short included — or an interrupted command leaves the file byte-for-byte
+ * as it was, never a partial line (SPEC 13.5, 14.24, 6.1: stopped at its
+ * commit point, the operation leaves no entry). Writing the addition in
+ * place would not be: an O_APPEND write that exhausted storage cuts short
+ * leaves part of the line, and a reader can observe it partly written.
+ * The content is composed from `prior`, not read again: appending callers
+ * run under workspace exclusivity (SPEC 13.5), so no rival appender changes
+ * what they validated — "the workspace it validates is the one it
+ * rewrites" — and the append makes no read the environment could refuse
+ * past the operation's earlier writes. The same non-plain-occupant refusal
+ * applies as for `writeDurableFile`, and an append the environment refuses
+ * is the write failure concerning `rel` (SPEC 14.24).
  */
 export async function appendDurableFile(
   root: string,
   rel: string,
-  content: Uint8Array | string,
+  prior: Uint8Array | null,
+  addition: Uint8Array | string,
 ): Promise<void> {
   await assertUnobstructedParent(root, rel);
   const absolute = absoluteOf(root, rel);
   await performWrite(rel, "append", () => createParentDirectories(absolute));
   await requireDurableWritable(root, rel);
-  const bytes = Buffer.from(contentBytes(content));
-  if ((await probeOccupant(root, rel)) === "absent") {
-    await performWrite(rel, "append", () => replaceWithFile(absolute, bytes));
-    return;
-  }
-  await performWrite(rel, "append", async () => {
-    const handle = await fsp.open(absolute, "a");
-    try {
-      let written = 0;
-      while (written < bytes.length) {
-        const result = await handle.write(bytes, written);
-        written += result.bytesWritten;
-      }
-    } finally {
-      await handle.close();
-    }
-  });
+  const added = contentBytes(addition);
+  const bytes = prior === null ? added : Buffer.concat([prior, added]);
+  await performWrite(rel, "append", () => replaceWithFile(absolute, bytes));
 }

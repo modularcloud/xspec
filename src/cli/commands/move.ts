@@ -442,7 +442,11 @@ async function runMoveFile(
     workspace.root,
     orderSourceWrites(plan.rewrites, { origin: originPath, destination }),
   );
-  await appendJournalEntry(workspace.root, plan.entry);
+  await appendJournalEntry(
+    workspace.root,
+    analysis.journal.rawBytes,
+    plan.entry,
+  );
   await executeBuildOutputs(workspace.root, verdict.outputs);
 
   // SPEC 6.5/6.4/12.0: a successful move reports its applied mapping, as
@@ -645,7 +649,11 @@ async function runMoveSection(
     workspace.root,
     orderSourceWrites(plan.rewrites, null),
   );
-  await appendJournalEntry(workspace.root, plan.entry);
+  await appendJournalEntry(
+    workspace.root,
+    analysis.journal.rawBytes,
+    plan.entry,
+  );
   await executeBuildOutputs(workspace.root, verdict.outputs);
 
   // SPEC 6.5/6.4/12.0: a successful move reports its applied mapping, as

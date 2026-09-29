@@ -255,23 +255,34 @@ export async function loadJournal(root: string): Promise<LoadedJournal> {
 /**
  * Append one entry to the journal as its canonical line (SPEC 6.1:
  * append-only, one entry per line, byte-deterministic; the file comes into
- * existence with the first journaled operation). The write goes through the
- * workspace write layer (writes.ts): one O_APPEND write of the whole line,
- * atomic in its observable effect (SPEC 13.5) and merging textually with
- * concurrent additions (SPEC 13.4). Callers are `rename` and `move` only,
- * running under workspace exclusivity (SPEC 13.5) and after full workspace
- * validation (SPEC 6.4) — an occupied journal path or an obstructed
- * `.xspec` component has already refused the operation as a finding (14.13,
- * 14.22), and the layer's own guards are the terminal defense, thrown as
- * errors.
+ * existence with the first journaled operation). `prior` is the journal as
+ * the caller loaded and validated it (`LoadedJournal.rawBytes`: null for
+ * an absent journal, SPEC 6.1), and the journal becomes `prior` followed by
+ * the entry's line — the very bytes of the post-append journal the caller
+ * validated the rewritten workspace against and derived its outputs from
+ * (SPEC 6.4, 5.4, 13.3). The write goes through the workspace write
+ * layer's atomic append (writes.ts `appendDurableFile`): the complete new
+ * journal replaces the file by one rename, so a concurrent reader observes
+ * the prior journal or the complete new one, and an append refused or
+ * interrupted — exhausted storage part-way through the line included —
+ * leaves the journal byte-for-byte as it was, no entry (SPEC 13.5, 14.24);
+ * the content stays line-oriented, merging textually with concurrent
+ * additions (SPEC 13.4). Callers are `rename` and `move` only, running
+ * under workspace exclusivity (SPEC 13.5) and after full workspace
+ * validation (SPEC 6.4) — an occupied journal path, a journal whose content
+ * the environment refused to read, or an obstructed `.xspec` component has
+ * already refused the operation as a finding (14.13, 14.22), and the
+ * layer's own guards are the terminal defense, thrown as errors.
  */
 export async function appendJournalEntry(
   root: string,
+  prior: Uint8Array | null,
   entry: JournalEntry,
 ): Promise<void> {
   await appendDurableFile(
     root,
     JOURNAL_PATH,
+    prior,
     serializeJournalEntry(entry) + "\n",
   );
 }
