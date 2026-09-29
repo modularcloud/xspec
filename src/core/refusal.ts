@@ -26,10 +26,11 @@
 // post-operation workspace modeled in identity space (the current graph's
 // nodes, edges, and occurrences with the operation's identity mapping
 // applied, the section form's re-parenting included), never by
-// reanalyzing rewritten text: the findings locate the participating
-// reference spellings and import declarations at their CURRENT,
-// pre-operation coordinates (SPEC 14: a refusal renders as precisely as a
-// finding; 6.6: previews report in current, pre-operation coordinates).
+// reanalyzing rewritten text: its one finding, however many cycles the
+// move would close, locates the participating reference spellings and
+// import declarations at their CURRENT, pre-operation coordinates (SPEC
+// 14: a refusal renders as precisely as a finding; 6.6: previews report
+// in current, pre-operation coordinates).
 //
 // `refused-invalid-rewrite` alone reads would-be text: the section form's
 // exact edits composed exactly as the move plan composes them
@@ -453,21 +454,94 @@ interface Reparent {
 }
 
 /**
- * `refused-cycle`, dependency half (SPEC 14, 5.3): cycles in the would-be
- * combined graph of `contains`, `depends`, and `embeds` edges over
- * requirement nodes — the current graph's edges with the identity mapping
- * applied and, for the section form, the moved root re-parented. Each
- * cycle is one finding locating its full in-source path: every CURRENT
- * reference spelling recording a participating dependency edge (SPEC 14
- * location cardinality; `contains` steps, the would-be insertion
- * included, spell nothing).
+ * One cycle a move would create (SPEC 6.5): which relation it closes, its
+ * full path as a closed walk, and the constructs locating that path in
+ * pre-operation coordinates (SPEC 14 location cardinality).
  */
-function wouldBeDependencyCycleFindings(
+interface WouldBeCycle {
+  readonly kind: "dependency" | "import";
+  readonly path: readonly string[];
+  readonly locations: readonly FindingLocation[];
+}
+
+/**
+ * `refused-cycle` (SPEC 14): one reason, so one finding however many
+ * cycles the move would create — a dependency cycle beside a spec import
+ * cycle, or cycles in distinct strongly connected components — "one
+ * finding per reason, never only the first found". It locates every
+ * cycle's full path: the union of each cycle's located constructs, each
+ * construct once (one spelling can record a dependency edge of one cycle
+ * and root a would-be import closing another; SPEC 12.7: one location per
+ * offending construct), in 12.7's within-finding order; its message names
+ * each cycle's path. Null when the move closes no cycle. Build's condition
+ * 14.9 is not this rule: there each cycle stays its own finding
+ * (core/graph.ts).
+ */
+function refusedCycleFinding(cycles: readonly WouldBeCycle[]): Finding | null {
+  if (cycles.length === 0) return null;
+  const dependency = cycles.filter((cycle) => cycle.kind === "dependency");
+  const imports = cycles.filter((cycle) => cycle.kind === "import");
+  const named = [
+    ...dependency.map(
+      (cycle) => `a dependency cycle (${cycle.path.join(" → ")})`,
+    ),
+    ...imports.map(
+      (cycle) => `a spec import cycle (${cycle.path.join(" → ")})`,
+    ),
+  ];
+  const explanations: string[] = [];
+  if (dependency.length > 0) {
+    explanations.push(
+      `the combined contains/depends/embeds graph over requirement ` +
+        `nodes must be acyclic (SPEC 5.3), the located reference ` +
+        `spellings recording the participating dependency edges`,
+    );
+  }
+  if (imports.length > 0) {
+    explanations.push(
+      `import cycles among spec source files are invalid (SPEC 2.1), the ` +
+        `rewrite adding the imports that close ` +
+        `${imports.length === 1 ? "it" : "them"} — each located by the ` +
+        `reference spellings the move roots at its binding, beside the ` +
+        `participating existing import declarations`,
+    );
+  }
+  const sorted = sortLocations(cycles.flatMap((cycle) => cycle.locations));
+  const locations = sorted.filter(
+    (location, index) =>
+      index === 0 || compareLocations(sorted[index - 1]!, location) !== 0,
+  );
+  return refusalFinding(
+    "refused-cycle",
+    `the move would create ${englishList(named)} — ` +
+      `${explanations.join("; ")} — so the move is refused; choose a ` +
+      `target that closes no cycle (SPEC 6.5, 14)`,
+    { locations },
+  );
+}
+
+/** `a`, `a and b`, `a, b, and c`: a message's list of named items. */
+function englishList(items: readonly string[]): string {
+  if (items.length <= 2) return items.join(" and ");
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]!}`;
+}
+
+/**
+ * The dependency half of `refused-cycle` (SPEC 14, 5.3): cycles in the
+ * would-be combined graph of `contains`, `depends`, and `embeds` edges
+ * over requirement nodes — the current graph's edges with the identity
+ * mapping applied and, for the section form, the moved root re-parented.
+ * Each cycle carries its full in-source path: every CURRENT reference
+ * spelling recording a participating dependency edge (SPEC 14 location
+ * cardinality; `contains` steps, the would-be insertion included, spell
+ * nothing).
+ */
+function wouldBeDependencyCycles(
   graph: WorkspaceGraph,
   map: IdentityMap,
   reparent: Reparent | null,
   extraNodes: readonly string[],
-): Finding[] {
+): WouldBeCycle[] {
   const adjacency = new Map<string, Set<string>>();
   const addEdge = (source: string, target: string): void => {
     let targets = adjacency.get(source);
@@ -515,15 +589,7 @@ function wouldBeDependencyCycleFindings(
       const list = spellings.get(`${cycle[step]!} ${cycle[step + 1]!}`);
       if (list !== undefined) locations.push(...list);
     }
-    return refusalFinding(
-      "refused-cycle",
-      `the move would create a dependency cycle: ${cycle.join(" → ")} — ` +
-        `the combined contains/depends/embeds graph over requirement ` +
-        `nodes must be acyclic (SPEC 5.3); the located reference ` +
-        `spellings record its participating dependency edges; choose a ` +
-        `target outside the moved node's dependents (SPEC 6.5, 14)`,
-      { locations },
-    );
+    return { kind: "dependency", path: cycle, locations };
   });
 }
 
@@ -540,7 +606,7 @@ interface RelocationModel {
 }
 
 /**
- * `refused-cycle`, spec-import half (SPEC 14, 2.1): cycles in the
+ * The spec-import half of `refused-cycle` (SPEC 14, 2.1): cycles in the
  * would-be file-level import relation among spec source files. The
  * relation is modeled in identity space: an import whose binding was
  * already unreferenced stays (SPEC 6.5), and beyond those, a
@@ -548,7 +614,7 @@ interface RelocationModel {
  * spelling homed in H post-operation resolves to a node of T ≠ H — the
  * rewrite adds an import when a rewritten reference needs a module
  * binding its file lacks and removes one whose binding is left without
- * references (SPEC 6.5). Each cycle is one finding locating its full path
+ * references (SPEC 6.5). Each cycle carries its full path located
  * in pre-operation coordinates (SPEC 14 location cardinality), step by
  * step: for a step H → T, the import declarations of H designating T
  * that exist before the operation, each by its own characters — H then
@@ -562,12 +628,12 @@ interface RelocationModel {
  * in T, at its current location (a moved-text spelling inside the
  * origin's moved construct).
  */
-function wouldBeImportCycleFindings(
+function wouldBeImportCycles(
   specs: readonly SpecFileAnalysis[],
   graph: WorkspaceGraph,
   map: IdentityMap,
   relocation: RelocationModel,
-): Finding[] {
+): WouldBeCycle[] {
   const specByPath = new Map<string, SpecFileAnalysis>();
   for (const spec of specs) {
     specByPath.set(spec.document.path, spec);
@@ -673,17 +739,7 @@ function wouldBeImportCycleFindings(
           : (homedSpellings.get(home)?.get(target) ?? [])),
       );
     }
-    return refusalFinding(
-      "refused-cycle",
-      `the move would create a spec import cycle: ${cycle.join(" → ")} — ` +
-        `import cycles among spec source files are invalid (SPEC 2.1); ` +
-        `the rewrite would add the imports closing this cycle — each ` +
-        `located by the reference spellings the move roots at its ` +
-        `binding, beside the participating existing import declarations ` +
-        `— so the move is refused; choose a target that does not make ` +
-        `the origin and target files import each other (SPEC 6.5, 14)`,
-      { locations },
-    );
+    return { kind: "import", path: cycle, locations };
   });
 }
 
@@ -918,16 +974,20 @@ export function evaluateMoveFileRefusals(
 
   // SPEC 14 `refused-cycle`: evaluated on its own terms over the would-be
   // workspace (no new cycle can arise from a pure file rename of the
-  // graph, but the reason is read on its own terms, SPEC 14).
+  // graph, but the reason is read on its own terms, SPEC 14) — one
+  // finding for every cycle, dependency and spec import alike.
   const map = moveFileIdentityMap(originPath, destination);
-  findings.push(...wouldBeDependencyCycleFindings(graph, map, null, []));
   const relocation: RelocationModel = {
     postPathOf: (path) => (path === originPath ? destination : path),
     prePathOf: (path) => (path === destination ? originPath : path),
     postHomeOf: (path) => (path === originPath ? destination : path),
     createdFiles: [],
   };
-  findings.push(...wouldBeImportCycleFindings(specs, graph, map, relocation));
+  const cycle = refusedCycleFinding([
+    ...wouldBeDependencyCycles(graph, map, null, []),
+    ...wouldBeImportCycles(specs, graph, map, relocation),
+  ]);
+  if (cycle !== null) findings.push(cycle);
 
   return findings;
 }
@@ -1277,7 +1337,8 @@ export function evaluateMoveSectionRefusals(
   // SPEC 14 `refused-cycle`: the would-be dependency graph — the moved
   // root re-parented from its current parent to the target parent (the
   // target file's root for a single-segment `<new-id>`, SPEC 6.5) — and
-  // the would-be spec import relation. These reasons need a definable
+  // the would-be spec import relation, every cycle of either reported
+  // together as the one finding of this one reason. It needs a definable
   // post-operation shape: with the insertion point missing (above) there
   // is no would-be graph to judge.
   if (!parentUsable) return findings;
@@ -1298,15 +1359,6 @@ export function evaluateMoveSectionRefusals(
     added: { parent: newParentIdentity, child: map(movedIdentity) },
   };
   const createdTarget = target === null;
-  findings.push(
-    ...wouldBeDependencyCycleFindings(
-      graph,
-      map,
-      reparent,
-      // A created target file's root node exists in no current graph.
-      createdTarget ? [targetPath] : [],
-    ),
-  );
   const relocation: RelocationModel = {
     postPathOf: (path) => path,
     prePathOf: (path) => (createdTarget && path === targetPath ? null : path),
@@ -1314,7 +1366,17 @@ export function evaluateMoveSectionRefusals(
       path === originPath && withinMovedRange(range) ? targetPath : path,
     createdFiles: createdTarget ? [targetPath] : [],
   };
-  findings.push(...wouldBeImportCycleFindings(specs, graph, map, relocation));
+  const cycle = refusedCycleFinding([
+    ...wouldBeDependencyCycles(
+      graph,
+      map,
+      reparent,
+      // A created target file's root node exists in no current graph.
+      createdTarget ? [targetPath] : [],
+    ),
+    ...wouldBeImportCycles(specs, graph, map, relocation),
+  ]);
+  if (cycle !== null) findings.push(cycle);
 
   return findings;
 }
