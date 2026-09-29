@@ -1944,13 +1944,14 @@ class CodeAnalyzer {
       rootBinding.kind === "text" ||
       (rootBinding.kind === "colliding" && !rootBinding.node)
     ) {
-      this.addFinding(
-        18,
-        argument,
-        `unsupported node usage: a spec module "text" binding is passed ` +
-          `as a value — it appears only as the callee of a text(...) call ` +
-          `(SPEC 4.5, 14.18)`,
-      );
+      // SPEC 4.5: a `text` binding appears only as a `text` call's callee,
+      // so an argument rooted at one — directly, or through the accesses
+      // and wrappers `leftmostIdentifier` climbs — names no node and the
+      // call records nothing. Its use is 14.18, reported once, by the walk
+      // (visitIdentifier → visitTextBindingUse), which reaches every such
+      // root: SPEC 14 locates it at the binding's identifier alone — no
+      // property chain extends a `text` binding's spelling — never at the
+      // whole argument, and never twice.
       return;
     }
     const classified = classifyReference(argument, this.sourceFile);
