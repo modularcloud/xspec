@@ -62,6 +62,7 @@ import type {
   CodeImportBinding,
   CodeReference,
 } from "./code-analysis.js";
+import { topLevelImportRanges } from "./code-analysis.js";
 import type { SourceEdit, SourceRewrite } from "./edits.js";
 import {
   applyEdits,
@@ -1280,6 +1281,17 @@ function isBlankLineAt(bytes: Uint8Array, position: number): boolean {
 }
 
 /**
+ * A file's content with added declarations inserted (`composeAddition`):
+ * the byte ranges of the declarations' own characters and of the whole
+ * insertion, a U+000A before it included.
+ */
+interface ComposedAddition {
+  readonly content: Uint8Array;
+  readonly added: readonly ByteRange[];
+  readonly inserted: ByteRange;
+}
+
+/**
  * `composed` with the added declaration lines inserted at a candidate's
  * composed position — each line followed by U+000A, the first preceded by
  * one when the position is not at a line start — with the byte ranges of
@@ -1289,11 +1301,7 @@ function composeAddition(
   composed: Uint8Array,
   candidate: { readonly position: number; readonly atLineStart: boolean },
   lineBytes: readonly Uint8Array[],
-): {
-  readonly content: Uint8Array;
-  readonly added: readonly ByteRange[];
-  readonly inserted: ByteRange;
-} {
+): ComposedAddition {
   let length = candidate.atLineStart ? 0 : 1;
   for (const line of lineBytes) {
     length += line.length + 1;
@@ -1322,106 +1330,99 @@ function composeAddition(
 }
 
 /**
- * Place a spec source's added import declarations (SPEC 6.5 "Import
- * edits" and "Composition and admissibility"): `lines`, contiguous, each
- * followed by U+000A and the first preceded by one when its insertion
- * point — judged over the composed text — is not at the start of a line,
- * inserted at an admissible offset, one at a line start taken over any
- * other. Candidates are tried in a fixed order — `preferred`, then every
- * line start of the pre-operation file, then every line's end — the first
- * admissible one taken (the choice among admissible offsets is
- * implementation latitude, exercised deterministically). An offset
- * strictly inside a section construct of the pre-operation file stays
- * inside that construct as every edit leaves the file, so it is never
- * admissible and is not tried. Returns the chosen pre-operation offset,
- * the file's composed content, and whether the offset is admissible —
- * false only where the file holds no admissible offset at all.
+ * A candidate offset for a file's added import declarations (SPEC 6.5):
+ * the pre-operation `offset`, the `position` at which declarations added
+ * there stand in the composed text, and whether that position is at the
+ * start of a line — judged over the composed text with the addition
+ * absent (SPEC 6.5 "Composition and admissibility").
  */
-function placeSpecImportAdditions(
-  document: SpecDocument,
+interface AdditionCandidate {
+  readonly offset: number;
+  readonly position: number;
+  readonly atLineStart: boolean;
+}
+
+/**
+ * The candidate offsets for a file's added import declarations, in the
+ * fixed order they are tried (SPEC 6.5: the choice among admissible
+ * offsets is implementation latitude, exercised deterministically):
+ * `preferred`, then every line start of the pre-operation file, then every
+ * line's end, each once — those at the start of a line before every
+ * other, an admissible offset at a line start being taken over any other.
+ * An offset strictly inside another edit's range, where no addition may
+ * stand, or one `excluded` names, is no candidate.
+ */
+function additionCandidates(
   bytes: Uint8Array,
   composition: FileComposition,
-  lines: readonly string[],
   preferred: readonly number[],
-): {
-  readonly offset: number;
-  readonly content: Uint8Array;
-  readonly admissible: boolean;
-} {
-  const lineBytes = lines.map((line) => encoder.encode(line));
-  const candidates: {
-    offset: number;
-    position: number;
-    atLineStart: boolean;
-  }[] = [];
+  excluded: (offset: number) => boolean,
+): AdditionCandidate[] {
+  const candidates: AdditionCandidate[] = [];
   const seen = new Set<number>();
-  const consider = (offset: number): void => {
-    if (seen.has(offset)) {
-      return;
-    }
-    seen.add(offset);
-    if (
-      document.sections.some(
-        (section) => section.range.start < offset && offset < section.range.end,
-      )
-    ) {
-      return;
-    }
-    const position = composition.positionOf(offset);
-    if (position === null) {
-      return;
-    }
-    const atLineStart =
-      position === 0 || isTerminatorByte(composition.content[position - 1]!);
-    candidates.push({ offset, position, atLineStart });
-  };
   for (const offset of [
     ...preferred,
     ...lineStartsOf(bytes),
     ...lineEndsOf(bytes),
   ]) {
-    consider(offset);
+    if (seen.has(offset)) {
+      continue;
+    }
+    seen.add(offset);
+    if (excluded(offset)) {
+      continue;
+    }
+    const position = composition.positionOf(offset);
+    if (position === null) {
+      continue;
+    }
+    const atLineStart =
+      position === 0 || isTerminatorByte(composition.content[position - 1]!);
+    candidates.push({ offset, position, atLineStart });
   }
-  const ordered = [
+  return [
     ...candidates.filter((candidate) => candidate.atLineStart),
     ...candidates.filter((candidate) => !candidate.atLineStart),
   ];
-  const before = esmBlockRangesOf(document.path, composition.content);
-  let fallback: {
-    offset: number;
-    content: Uint8Array;
-    admissible: boolean;
-  } | null = null;
-  for (const candidate of ordered) {
+}
+
+/** Where a file's added declarations stand (SPEC 6.5, 6.6). */
+interface PlacedAdditions {
+  /** The pre-operation offset, exactly the one the preview reports. */
+  readonly offset: number;
+  /** The file's content, every edit and the addition applied. */
+  readonly content: Uint8Array;
+  /**
+   * Whether the offset is admissible — false only where the file holds
+   * no admissible offset at all, the declarations then standing at the
+   * first candidate: a text the refused move only judges, never writes.
+   */
+  readonly admissible: boolean;
+}
+
+/**
+ * Place a file's added import declarations (SPEC 6.5 "Import edits" and
+ * "Composition and admissibility"): `lines`, contiguous, each followed by
+ * U+000A and the first preceded by one when its insertion point — judged
+ * over the composed text — is not at the start of a line, inserted at the
+ * first of `candidates` whose composition `admits`.
+ */
+function placeImportAdditions(
+  composition: FileComposition,
+  lines: readonly string[],
+  candidates: readonly AdditionCandidate[],
+  admits: (candidate: AdditionCandidate, composed: ComposedAddition) => boolean,
+): PlacedAdditions {
+  const lineBytes = lines.map((line) => encoder.encode(line));
+  let fallback: PlacedAdditions | null = null;
+  for (const candidate of candidates) {
     const composed = composeAddition(composition.content, candidate, lineBytes);
     fallback ??= {
       offset: candidate.offset,
       content: composed.content,
       admissible: false,
     };
-    // The added lines' block runs on through the line after them: at a
-    // line start whose line is neither blank nor an ESM block's, that line
-    // would join the block — never admissible, so no parse is spent on it.
-    // (A line-end candidate is followed by its line's empty remainder.)
-    if (
-      candidate.atLineStart &&
-      !isBlankLineAt(composition.content, candidate.position) &&
-      !before.some(
-        (range) =>
-          range.start <= candidate.position && candidate.position < range.end,
-      )
-    ) {
-      continue;
-    }
-    if (
-      admitsAddedDeclarations(
-        document.path,
-        composed.content,
-        composed.added,
-        composed.inserted,
-        before,
-      )
-    ) {
+    if (admits(candidate, composed)) {
       return {
         offset: candidate.offset,
         content: composed.content,
@@ -1431,13 +1432,115 @@ function placeSpecImportAdditions(
   }
   // SPEC 6.5 refuses a move leaving a file no admissible offset for an
   // addition it needs (`refused-invalid-rewrite`), decided from
-  // `admissible` by the refusal evaluation (`judgeMoveSectionRewrite`):
-  // the declarations stand at the first candidate, a text the refused move
-  // only judges and never writes.
+  // `admissible` by the refusal evaluation (`judgeMoveSectionRewrite`).
+  // The file's start is always a candidate, so the fallback exists.
   if (fallback === null) {
     throw new Error("xspec internal error: no offset for an import addition");
   }
   return fallback;
+}
+
+/**
+ * Place a spec source's added import declarations (SPEC 6.5 "Import
+ * edits"): at the first candidate (`additionCandidates`) that admits them
+ * (`admitsAddedDeclarations`). An offset strictly inside a section
+ * construct of the pre-operation file stays inside that construct as every
+ * edit leaves the file, so it is never admissible and is not tried.
+ */
+function placeSpecImportAdditions(
+  document: SpecDocument,
+  bytes: Uint8Array,
+  composition: FileComposition,
+  lines: readonly string[],
+  preferred: readonly number[],
+): PlacedAdditions {
+  const candidates = additionCandidates(
+    bytes,
+    composition,
+    preferred,
+    (offset) =>
+      document.sections.some(
+        (section) => section.range.start < offset && offset < section.range.end,
+      ),
+  );
+  const before = esmBlockRangesOf(document.path, composition.content);
+  return placeImportAdditions(
+    composition,
+    lines,
+    candidates,
+    (candidate, composed) => {
+      // The added lines' block runs on through the line after them: at a
+      // line start whose line is neither blank nor an ESM block's, that
+      // line would join the block — never admissible, so no parse is spent
+      // on it. (A line-end candidate is followed by its line's empty
+      // remainder.)
+      if (
+        candidate.atLineStart &&
+        !isBlankLineAt(composition.content, candidate.position) &&
+        !before.some(
+          (range) =>
+            range.start <= candidate.position && candidate.position < range.end,
+        )
+      ) {
+        return false;
+      }
+      return admitsAddedDeclarations(
+        document.path,
+        composed.content,
+        composed.added,
+        composed.inserted,
+        before,
+      );
+    },
+  );
+}
+
+/**
+ * SPEC 6.5 "Import edits": whether `composed` — a code source as every
+ * edit of the rewrite leaves it, the added declarations' own characters at
+ * `composed.added` — admits the addition: the file is well-formed under
+ * the grammar its name selects (14.20), and each added line is a
+ * top-level declaration of it, an import declaration spanning exactly the
+ * added characters. So no construct absorbs a declaration — a comment, a
+ * template literal, JSX text, or a block (TypeScript's parser derives an
+ * import declaration inside a function body, the top-level rule being a
+ * post-parse check) — and it absorbs nothing (a `;` heading the line after
+ * it, which the grammar reads as its terminator).
+ */
+function admitsAddedCodeDeclarations(
+  path: string,
+  composed: ComposedAddition,
+): boolean {
+  const declarations = topLevelImportRanges(path, composed.content);
+  return (
+    declarations !== null &&
+    composed.added.every((range) =>
+      declarations.some(
+        (declaration) =>
+          declaration.start === range.start && declaration.end === range.end,
+      ),
+    )
+  );
+}
+
+/**
+ * Place a code source's added import declarations (SPEC 6.5 "Import
+ * edits"): at the first candidate (`additionCandidates`) that admits them
+ * (`admitsAddedCodeDeclarations`).
+ */
+function placeCodeImportAdditions(
+  path: string,
+  bytes: Uint8Array,
+  composition: FileComposition,
+  lines: readonly string[],
+  preferred: readonly number[],
+): PlacedAdditions {
+  return placeImportAdditions(
+    composition,
+    lines,
+    additionCandidates(bytes, composition, preferred, () => false),
+    (_, composed) => admitsAddedCodeDeclarations(path, composed),
+  );
 }
 
 /** Everything a validated section-form move changes in the sources. */
@@ -1489,10 +1592,17 @@ function importDeclarationLine(
   filePath: string,
   modulePath: string,
   bindings: Readonly<AddedBindings>,
+  judging = false,
 ): string {
   const specifier = relativeModuleSpecifier(
     filePath,
-    moduleSpecifierTargetOf(modulePath),
+    judging && !modulePath.endsWith(MDX_SUFFIX)
+      ? // Judging a target path that is no spec source path (refused as
+        // `refused-invalid-destination` beside, SPEC 6.5, 14): its module
+        // has no `.xspec` spelling, and any specifier judges the added
+        // line alike.
+        modulePath
+      : moduleSpecifierTargetOf(modulePath),
   );
   const clauses: string[] = [];
   if (bindings.defaultName !== null) {
@@ -1516,19 +1626,22 @@ function defaultImportLine(
   filePath: string,
   modulePath: string,
   name: string,
+  judging = false,
 ): string {
-  return importDeclarationLine(filePath, modulePath, {
-    defaultName: name,
-    textName: null,
-  });
+  return importDeclarationLine(
+    filePath,
+    modulePath,
+    { defaultName: name, textName: null },
+    judging,
+  );
 }
 
 /**
  * What a section-form move's exact edits leave invalid (SPEC 6.5
  * "Validation and refusals", 14 `refused-invalid-rewrite`), over the files
  * the refusal judges: the origin always, the target only where an
- * insertion point exists, and every other spec source for the additions it
- * needs.
+ * insertion point exists, and every other spec source and every code
+ * source for the additions it needs.
  */
 export interface MoveSectionRewriteVerdict {
   /**
@@ -1538,10 +1651,11 @@ export interface MoveSectionRewriteVerdict {
    */
   readonly illFormed: readonly string[];
   /**
-   * Each spec source holding no admissible offset for the declarations it
-   * needs added, with every reference spelling the operation roots at
-   * their bindings, at its pre-operation occurrence (5.7), whether or not
-   * its characters change.
+   * Each spec or code source holding no admissible offset for the
+   * declarations it needs added, with every reference spelling the
+   * operation roots at their bindings, at its pre-operation occurrence
+   * (5.7), whether or not its characters change — a `text(...)` call in a
+   * code source by the whole call.
    */
   readonly inadmissible: readonly {
     readonly path: string;
@@ -1638,19 +1752,19 @@ export function planMoveSection(
  * `refused-cycle`: judge a section-form move's exact edits over a
  * workspace passing `build`'s validations — the would-be text of the
  * origin, and of the target where `insertionPoint` holds, judged
- * well-formed or not (14.20), and every spec source judged for an
- * admissible offset for the additions it needs — composed exactly as the
- * plan composes them, beside the spec import relation the rewrite leaves.
- * The verdict means something under an intrinsically valid `<new-id>`
- * alone; the relation reads nothing of `<new-id>`: which references the
- * move re-roots, at which bindings, and which declarations it adds and
- * removes are fixed by the moved subtree, the origin, and the target file
- * (SPEC 6.5 "Import edits"). Code sources are not judged: a TypeScript
- * source's end admits a top-level declaration, and no code source takes
- * part in a spec import cycle (2.1).
+ * well-formed or not (14.20), and every spec and code source judged for
+ * an admissible offset for the additions it needs — composed exactly as
+ * the plan composes them, beside the spec import relation the rewrite
+ * leaves. The verdict means something under an intrinsically valid
+ * `<new-id>` alone; the relation reads nothing of `<new-id>`: which
+ * references the move re-roots, at which bindings, and which declarations
+ * it adds and removes are fixed by the moved subtree, the origin, and the
+ * target file (SPEC 6.5 "Import edits"). No code source takes part in a
+ * spec import cycle (2.1).
  */
 export function judgeMoveSectionRewrite(
   specs: readonly SpecFileAnalysis[],
+  code: readonly CodeAnalysis[],
   originPath: string,
   oldId: string,
   targetPath: string,
@@ -1659,7 +1773,7 @@ export function judgeMoveSectionRewrite(
 ): MoveSectionJudgement {
   const { verdict, imports } = composeMoveSection(
     specs,
-    [],
+    code,
     originPath,
     oldId,
     targetPath,
@@ -2087,6 +2201,12 @@ function composeMoveSection(
   // callee to, before the rewrite and as the re-rooting leaves them.
   const codeAdditions = new Map<string, Map<string, AddedBindings>>();
   const codeRemovals = new Map<string, readonly CodeImport[]>();
+  // Per code file: every occurrence (5.7) the operation roots at a binding
+  // its added declaration gives it, in pre-operation coordinates — the
+  // spellings a `refused-invalid-rewrite` locates when no offset admits
+  // the addition (SPEC 14), a `text(...)` call's by the whole call, whether
+  // its argument's root, its callee, or both take an added binding.
+  const codeAddedSpellings = new Map<string, FindingLocation[]>();
   for (const analysis of code) {
     const usesBefore = analysis.imports.map(() => 0);
     for (const reference of analysis.references) {
@@ -2162,6 +2282,7 @@ function composeMoveSection(
       }
       let rootName: string | null = null;
       let calleeName: string | null = null;
+      let rootedAtAddition = false;
       if (!sameFile) {
         // The chain leaves its origin-module root for a binding of the
         // target module — another module, so another import.
@@ -2175,6 +2296,7 @@ function composeMoveSection(
           fresh.added.defaultName ??= freshBindingName(targetPath, fresh.taken);
           fresh.taken.add(fresh.added.defaultName);
           rootName = fresh.added.defaultName;
+          rootedAtAddition = true;
         }
         if (reference.callee !== null) {
           // SPEC 6.5, 4.4: the callee leaves the origin module's `text`
@@ -2199,8 +2321,20 @@ function composeMoveSection(
             );
             fresh.taken.add(fresh.added.textName);
             calleeName = fresh.added.textName;
+            rootedAtAddition = true;
           }
         }
+      }
+      if (rootedAtAddition) {
+        let spellings = codeAddedSpellings.get(analysis.path);
+        if (spellings === undefined) {
+          spellings = [];
+          codeAddedSpellings.set(analysis.path, spellings);
+        }
+        spellings.push({
+          file: analysis.file,
+          range: reference.occurrenceRange,
+        });
       }
       const referenceEdits = chainPrefixEdits(
         reference.spelling,
@@ -2316,16 +2450,12 @@ function composeMoveSection(
       return null;
     }
     const lines = added.map((addition) =>
-      judging !== null && !addition.modulePath.endsWith(MDX_SUFFIX)
-        ? // Judging a target path that is no spec source path (refused
-          // as `refused-invalid-destination` beside, SPEC 6.5, 14): its
-          // module has no `.xspec` spelling, and any specifier judges the
-          // added line alike.
-          `import ${addition.name} from ${jsStringLiteral(
-            relativeModuleSpecifier(path, addition.modulePath),
-            '"',
-          )}`
-        : defaultImportLine(path, addition.modulePath, addition.name),
+      defaultImportLine(
+        path,
+        addition.modulePath,
+        addition.name,
+        judging !== null,
+      ),
     );
     const removed = removedImportsOf(spec, plan, bytes);
     const removedSet = new Set(removed);
@@ -2622,15 +2752,18 @@ function composeMoveSection(
   // Code files: chain and callee retargets, import removals, and added
   // imports (SPEC 6.5, 4). A removal is line-dropped like every 6.5 deletion and
   // reported with every byte it removes (SPEC 6.6, judged per
-  // declaration). An addition is anchored after the line of the file's
-  // last spec-module import — a code file referencing the moved subtree
-  // always has one (its chains root at import bindings) — or, where that
-  // offset lies strictly inside another edit's range, at the first removed
-  // import's line start, else at the file's start: the one deterministic
-  // offset the preview reports (SPEC 6.5, 6.6), whether it is at the start
-  // of a line judged over the composed text, an addition at the end of a
-  // removal's range reading what that removal leaves (SPEC 6.5
-  // "Composition and admissibility").
+  // declaration). An addition stands at an admissible offset: one at which
+  // the file, as every edit of the rewrite leaves it, is well-formed under
+  // the grammar its name selects (14.20) with each added line a top-level
+  // import declaration (`admitsAddedCodeDeclarations`). Candidates are
+  // tried in a fixed order — after the line of the file's last spec-module
+  // import (a code file referencing the moved subtree always has one: its
+  // chains root at import bindings), the first removed import's line
+  // start, the file's start, then every other line start and every line's
+  // end — an offset at the start of a line, judged over the composed text,
+  // taken over any other: the one deterministic offset the preview reports
+  // (SPEC 6.5, 6.6), an addition at the end of a removal's range reading
+  // what that removal leaves (SPEC 6.5 "Composition and admissibility").
   for (const analysis of code) {
     const bytes = encoder.encode(analysis.text);
     const removed = codeRemovals.get(analysis.path) ?? [];
@@ -2669,38 +2802,45 @@ function composeMoveSection(
       const lines = additions
         .sort((a, b) => compareBytes(a[0], b[0]))
         .map(([modulePath, bindings]) =>
-          importDeclarationLine(analysis.path, modulePath, bindings),
+          importDeclarationLine(
+            analysis.path,
+            modulePath,
+            bindings,
+            judging !== null,
+          ),
         );
       const firstRemoved = removed[0];
-      let placed: { offset: number; position: number } | null = null;
-      for (const offset of [
-        offsetAfterLine(bytes, anchor.range.end),
-        ...(firstRemoved === undefined
-          ? []
-          : [lineStartBefore(bytes, firstRemoved.range.start)]),
-        0,
-      ]) {
-        const position = composition.positionOf(offset);
-        if (position !== null) {
-          placed = { offset, position };
-          break;
+      const placed = placeCodeImportAdditions(
+        analysis.path,
+        bytes,
+        composition,
+        lines,
+        [
+          offsetAfterLine(bytes, anchor.range.end),
+          ...(firstRemoved === undefined
+            ? []
+            : [lineStartBefore(bytes, firstRemoved.range.start)]),
+          0,
+        ],
+      );
+      if (!placed.admissible) {
+        // SPEC 6.5/14 `refused-invalid-rewrite`: the file holds no
+        // admissible offset for the declaration it needs, located by every
+        // occurrence rooted at its bindings — a refusal the plan's caller
+        // has already reported, judging the same composition.
+        if (judging === null) {
+          throw new Error(
+            `xspec internal error: ${analysis.path} holds no admissible ` +
+              `offset for an import addition — the caller refused this ` +
+              `move (SPEC 6.5)`,
+          );
         }
+        inadmissible.push({
+          path: analysis.path,
+          spellings: codeAddedSpellings.get(analysis.path) ?? [],
+        });
       }
-      if (placed === null) {
-        throw new Error(
-          "xspec internal error: no offset for an import addition",
-        );
-      }
-      content = composeAddition(
-        composition.content,
-        {
-          position: placed.position,
-          atLineStart:
-            placed.position === 0 ||
-            isTerminatorByte(composition.content[placed.position - 1]!),
-        },
-        lines.map((line) => encoder.encode(line)),
-      ).content;
+      content = placed.content;
       // SPEC 6.6: each added declaration is one import addition, its
       // zero-length insertion point at the exact offset the real operation
       // then inserts at (SPEC 6.5).

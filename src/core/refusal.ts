@@ -54,6 +54,7 @@
 
 import type { ByteRange } from "./bytes.js";
 import { sortByBytes } from "./bytes.js";
+import type { CodeAnalysis } from "./code-analysis.js";
 import type { Configuration, ConfiguredGroup } from "./config.js";
 import { specSourceDerivedPaths } from "./discovery.js";
 import type { Finding, FindingLocation, RefusalCode } from "./findings.js";
@@ -1020,6 +1021,11 @@ function invalidRewriteFinding(
 /** The inputs of a section-form move's refusal evaluation (SPEC 6.5, 14). */
 export interface MoveSectionRefusalInputs {
   readonly specs: readonly SpecFileAnalysis[];
+  /**
+   * The code sources, judged for an admissible offset for the import
+   * additions each needs (SPEC 6.5, 14 `refused-invalid-rewrite`).
+   */
+  readonly code: readonly CodeAnalysis[];
   readonly graph: WorkspaceGraph;
   /** The origin file's analysis (a discovered, parsed spec source). */
   readonly origin: SpecFileAnalysis;
@@ -1058,8 +1064,17 @@ export interface MoveSectionRefusalInputs {
 export function evaluateMoveSectionRefusals(
   inputs: MoveSectionRefusalInputs,
 ): Finding[] {
-  const { specs, graph, origin, oldId, targetPath, newId, target, probe } =
-    inputs;
+  const {
+    specs,
+    code,
+    graph,
+    origin,
+    oldId,
+    targetPath,
+    newId,
+    target,
+    probe,
+  } = inputs;
   const originPath = origin.document.path;
   const sameFile = targetPath === originPath;
   const movedSection = origin.document.sections.find((s) => s.id === oldId);
@@ -1248,6 +1263,7 @@ export function evaluateMoveSectionRefusals(
     invalidId === null || parentUsable
       ? judgeMoveSectionRewrite(
           specs,
+          code,
           originPath,
           oldId,
           targetPath,

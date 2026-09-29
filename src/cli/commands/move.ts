@@ -559,6 +559,7 @@ async function runMoveSection(
   );
   const refusals = evaluateMoveSectionRefusals({
     specs: analysis.specs,
+    code: analysis.code,
     graph: analysis.graph,
     origin: originSpec,
     oldId,

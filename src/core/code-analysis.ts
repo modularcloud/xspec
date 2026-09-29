@@ -380,6 +380,54 @@ export function analyzeCodeSource(
   }
 }
 
+/**
+ * SPEC 6.5 "Import edits", 14.20: a would-be code source — a discovered
+ * code source as a move's edits leave it — judged exactly as
+ * `analyzeCodeSource` judges a discovered one: decoded (1.6) and parsed
+ * under the grammar its file name selects, well-formed exactly when
+ * scanning and parsing report no syntax error. For a well-formed text, the
+ * byte range of each top-level import declaration, in document order —
+ * the `import` keyword through its last token, a statement terminator the
+ * grammar reads into it included; null for a text that is not well-formed
+ * or that the parser cannot process.
+ */
+export function topLevelImportRanges(
+  path: string,
+  bytes: Uint8Array,
+): ByteRange[] | null {
+  const decoded = decodeSourceBytes(path, bytes);
+  if (!decoded.ok) {
+    return null;
+  }
+  // SPEC 14.20: `.tsx` parses as TSX, any other name as plain TypeScript.
+  const tsx = path.endsWith(".tsx");
+  try {
+    const sourceFile = ts.createSourceFile(
+      path,
+      decoded.text,
+      ts.ScriptTarget.Latest,
+      /* setParentNodes */ false,
+      tsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    const program = createSingleFileProgram(sourceFile, tsx);
+    if (program.getSyntacticDiagnostics(sourceFile).length > 0) {
+      return null;
+    }
+    const offsets = new Utf8Offsets(decoded.text);
+    return sourceFile.statements
+      .filter((statement) => ts.isImportDeclaration(statement))
+      .map((statement) => ({
+        start: offsets.byteOffset(statement.getStart(sourceFile)),
+        end: offsets.byteOffset(statement.end),
+      }));
+  } catch (error) {
+    // As in `analyzeCodeSource`: a call-stack overflow is a text the
+    // parser cannot process, never a crash.
+    if (!(error instanceof RangeError)) throw error;
+    return null;
+  }
+}
+
 /** The 14.20 finding for a source the parser cannot process (overflow). */
 function stackOverflowFinding(file: PathText, grammar: string): Finding {
   return locatedFinding(
