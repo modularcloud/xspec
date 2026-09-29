@@ -724,10 +724,11 @@ export async function writeDurableFile(
  * observes the prior state or the complete new content, and an append the
  * environment refuses — exhausted storage cutting the temp file's write
  * short included — or an interrupted command leaves the file byte-for-byte
- * as it was, never a partial line (SPEC 13.5, 14.24, 6.1: stopped at its
- * commit point, the operation leaves no entry). Writing the addition in
- * place would not be: an O_APPEND write that exhausted storage cuts short
- * leaves part of the line, and a reader can observe it partly written.
+ * as it was, never a partial line (SPEC 13.5, 14.24; the journal append
+ * is the operation's commit point, so an operation stopped there leaves
+ * no entry, 13.5). Writing the addition in place would not be: an
+ * O_APPEND write that exhausted storage cuts short leaves part of the
+ * line, and a reader can observe it partly written.
  * The content is composed from `prior`, not read again: appending callers
  * run under workspace exclusivity (SPEC 13.5), so no rival appender changes
  * what they validated — "the workspace it validates is the one it
