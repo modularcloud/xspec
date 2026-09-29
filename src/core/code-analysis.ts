@@ -2399,11 +2399,25 @@ function isDeclarationFileName(path: string): boolean {
  * the AST already); or a default export, named `default` when the exported
  * construct is anonymous. Every name is plain, spelled without escape
  * sequences (`plainName`): an escape-spelled one binds no unit.
- * Signature-only declarations (overloads, abstract members) bind no
- * executable code, and neither does an ambient declaration, which the
- * caller never asks about (`collectUnits`).
+ * Signature-only declarations (overloads, body-less methods) and abstract
+ * members, whatever they spell, bind no executable code, and neither does
+ * an ambient declaration, which the caller never asks about
+ * (`collectUnits`).
  */
 function unitName(node: tst.Node, sourceFile: tst.SourceFile): string | null {
+  // SPEC 4.6: an abstract member binds no executable code and is no unit,
+  // occupying no document-order slot, read by its own form — even where it
+  // spells a body (`abstract m(): void {}`), a function-valued initializer
+  // (`abstract p = () => {}`), or is a constructor (`abstract
+  // constructor() {}`): TypeScript rejects each only in its post-parse
+  // grammar checks, which leave the file well-formed (14.20). A class's own
+  // `abstract` (`abstract class A`) marks no member: the class is a unit.
+  if (
+    ts.isClassLike(node.parent) &&
+    hasModifier(node, ts.SyntaxKind.AbstractKeyword)
+  ) {
+    return null;
+  }
   if (ts.isConstructorDeclaration(node)) {
     // SPEC 4.6: a constructor is a class member unit named `constructor`
     // (`path#C.constructor`) — its implementation alone, an overload
