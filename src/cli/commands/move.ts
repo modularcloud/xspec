@@ -105,6 +105,7 @@ import {
   UNPROBED_DESTINATION,
 } from "../../core/refusal.js";
 import { executeBuildOutputs } from "../../workspace/build.js";
+import { buildValidationFindings } from "../../workspace/build-validation.js";
 import type { LoadedWorkspace } from "../../workspace/config.js";
 import {
   appendJournalEntry,
@@ -251,8 +252,10 @@ async function runMove(
 
   // SPEC 12.0/14: an origin ID inside an unparseable origin file (14.20) is
   // masked — the origin was discovered but yielded no document, so the
-  // validation findings are reported and the command exits 1. The file form
-  // takes the same path: an unparseable origin fails build validation.
+  // workspace fails `build`'s validations and the invalid-workspace
+  // refusal below is the report: the workspace's findings, exit 1. The
+  // file form takes the same path: an unparseable origin fails build
+  // validation.
   const originSpec = analysis.specs.find(
     (s) => s.document.path === origin.file,
   );
@@ -261,7 +264,7 @@ async function runMove(
       preview,
       invocation.json,
       stdout,
-      analysis.findings,
+      await buildValidationFindings(workspace, analysis),
     );
   }
 
@@ -282,14 +285,21 @@ async function runMove(
   }
 
   // SPEC 6.5 → 6.4: refuse, before modifying anything, when the current
-  // workspace fails the validations of `xspec build` — move only ever
-  // rewrites a valid workspace. The findings are the report (SPEC 12.0).
-  if (analysis.findings.length > 0) {
+  // workspace fails the validations of `xspec build` — source validation
+  // errors, journal errors (14.13), and refused writes (14.22) alike, the
+  // findings a `build` would now report (SPEC 13.3;
+  // workspace/build-validation.ts) — move only ever rewrites a valid
+  // workspace. The findings are the report (SPEC 12.0), alone: no refusal
+  // reason is evaluated or reported beside them (SPEC 14) — a destination
+  // under a component that already obstructs the current workspace's
+  // write paths is this refusal, never `refused-invalid-destination`.
+  const workspaceFindings = await buildValidationFindings(workspace, analysis);
+  if (workspaceFindings.length > 0) {
     return emitFindingsRefusal(
       preview,
       invocation.json,
       stdout,
-      analysis.findings,
+      workspaceFindings,
     );
   }
 

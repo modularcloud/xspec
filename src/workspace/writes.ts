@@ -71,6 +71,13 @@ import type { SourceWrite } from "../core/edits.js";
 import type { Finding } from "../core/findings.js";
 import { pathFinding } from "../core/findings.js";
 import { GRAPH_DATA_AREA } from "../core/graph-data.js";
+import type { PathBytes, PathText } from "../core/path-text.js";
+import {
+  comparePathTexts,
+  pathTextKey,
+  pathTextOf,
+  renderPathText,
+} from "../core/path-text.js";
 import type { RefusedWrite } from "./environment-refusal.js";
 import {
   isFilesystemFailure,
@@ -99,7 +106,7 @@ export type PathOccupant =
  * `probeOccupant`, which makes the refusal condition 25.
  */
 export async function classifyOccupant(
-  absolute: string,
+  absolute: string | Buffer,
 ): Promise<PathOccupant> {
   let stats;
   try {
@@ -249,8 +256,11 @@ function directoryComponents(rel: string): string[] {
 
 /** An offending directory component and what occupies it (SPEC 14.22). */
 export interface ObstructedComponent {
-  /** The component's workspace-relative path — the concerned path. */
-  readonly component: string;
+  /**
+   * The component's workspace-relative path — the concerned path; in the
+   * byte form where it has no plain string form (SPEC 12.0, 12.7).
+   */
+  readonly component: PathText;
   /** Its non-directory occupant, judged by `lstat` (SPEC 13.4). */
   readonly occupant: PathOccupant;
 }
@@ -285,6 +295,64 @@ export async function obstructedComponentOf(
     if (occupant !== "directory") return { component, occupant };
   }
   return null;
+}
+
+/** The `/` separating workspace-relative path segments, as a byte. */
+const SLASH_BYTE = 0x2f;
+
+/**
+ * `obstructedComponentOf` over a write path with no plain string form
+ * (SPEC 12.0) — a derived path of a discovered spec source whose own path
+ * is not valid UTF-8 (14.19; `discoveredWritePaths`, core/build.ts): its
+ * workspace-relative directory components, the byte prefixes ending before
+ * each `/`, examined alike, shallowest first, stopping at the first
+ * non-directory or missing one. A component with a string form is judged
+ * exactly as `obstructedComponentOf` judges it; one without is addressed
+ * by its exact bytes (`/`-separated, as discovery's walk addresses such a
+ * path) and, obstructed, concerned in the byte form (SPEC 12.7), its
+ * refused kind read the read failure concerning it (SPEC 14.25).
+ */
+async function obstructedByteComponentOf(
+  root: string,
+  bytes: Uint8Array,
+): Promise<ObstructedComponent | null> {
+  for (
+    let end = bytes.indexOf(SLASH_BYTE);
+    end !== -1;
+    end = bytes.indexOf(SLASH_BYTE, end + 1)
+  ) {
+    const component = pathTextOf(bytes.subarray(0, end));
+    const occupant =
+      typeof component === "string"
+        ? await componentOccupant(root, component)
+        : await probeByteOccupant(root, component);
+    if (occupant === "absent" || occupant === "refused") return null;
+    if (occupant !== "directory") return { component, occupant };
+  }
+  return null;
+}
+
+/**
+ * `probeOccupant` for a workspace-relative path with no plain string form,
+ * addressed by its exact bytes: a kind read the environment refuses is the
+ * read failure concerning the path in the byte form (SPEC 14.25, 12.7).
+ */
+async function probeByteOccupant(
+  root: string,
+  rel: PathBytes,
+): Promise<PathOccupant> {
+  try {
+    return await classifyOccupant(
+      Buffer.concat([
+        Buffer.from(root),
+        Buffer.from("/"),
+        Buffer.from(rel.bytes),
+      ]),
+    );
+  } catch (error) {
+    if (isFilesystemFailure(error)) throw readFailure(rel, "kind", error);
+    throw error;
+  }
 }
 
 /**
@@ -391,11 +459,12 @@ function obstructionFinding(obstructed: ObstructedComponent): Finding {
         `the link targets (SPEC 13.4)`
       : `${describeOccupant(obstructed.occupant)}, not a directory ` +
         `(SPEC 13.4)`;
+  const component = renderPathText(obstructed.component);
   return pathFinding(
     22,
     `obstructed write path: the workspace-relative directory component ` +
-      `${obstructed.component} of a path xspec writes is occupied by ` +
-      `${occupant}; replace ${obstructed.component} with a real directory, ` +
+      `${component} of a path xspec writes is occupied by ` +
+      `${occupant}; replace ${component} with a real directory, ` +
       `or redirect the writes so no path xspec writes passes through it ` +
       `(SPEC 14.22)`,
     obstructed.component,
@@ -407,25 +476,32 @@ function obstructionFinding(obstructed: ObstructedComponent): Finding {
  * finding per distinct offending component, whatever write paths it
  * refuses, each finding's concerned path the component's workspace-relative
  * path. Deterministic — paths are deduplicated and examined in byte order,
- * findings in byte order of component (SPEC 12.0). Callers run this over
- * their complete write set before modifying anything ("a command refuses
- * the write and reports it before modifying anything"); `check` reports the
- * same findings without writing (SPEC 14.22).
+ * findings in byte order of component (SPEC 12.0), a path with no plain
+ * string form (a derived path of a source whose path is not valid UTF-8,
+ * 14.19) examined by its exact bytes in the same order
+ * (`obstructedByteComponentOf`). Callers run this over their complete
+ * write set before modifying anything ("a command refuses the write and
+ * reports it before modifying anything"); `check` reports the same
+ * findings without writing (SPEC 14.22).
  */
 export async function obstructedWritePathFindings(
   root: string,
-  rels: Iterable<string>,
+  rels: Iterable<PathText>,
 ): Promise<Finding[]> {
-  const unique = [...new Set(rels)].sort(compareBytes);
+  const unique = new Map<string, PathText>();
+  for (const rel of rels) unique.set(pathTextKey(rel), rel);
   const obstructions = new Map<string, ObstructedComponent>();
-  for (const rel of unique) {
-    const obstructed = await obstructedComponentOf(root, rel);
-    if (obstructed !== null && !obstructions.has(obstructed.component)) {
-      obstructions.set(obstructed.component, obstructed);
-    }
+  for (const rel of [...unique.values()].sort(comparePathTexts)) {
+    const obstructed =
+      typeof rel === "string"
+        ? await obstructedComponentOf(root, rel)
+        : await obstructedByteComponentOf(root, rel.bytes);
+    if (obstructed === null) continue;
+    const key = pathTextKey(obstructed.component);
+    if (!obstructions.has(key)) obstructions.set(key, obstructed);
   }
   return [...obstructions.values()]
-    .sort((a, b) => compareBytes(a.component, b.component))
+    .sort((a, b) => comparePathTexts(a.component, b.component))
     .map(obstructionFinding);
 }
 

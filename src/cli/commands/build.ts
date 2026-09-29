@@ -11,12 +11,14 @@
 // that fails — validation errors (exit 1, findings on standard output) or a
 // configuration error (exit 2, diagnostics on standard error) — modifies
 // nothing: every write happens strictly after all validation, including the
-// SPEC 14.22 pre-write check over the complete write set.
+// SPEC 14.22 pre-write check over the complete write set, judged beside the
+// source and journal findings (workspace/build-validation.ts).
 
 import type { BuildOutputs } from "../../core/build.js";
 import { computeBuildOutputs } from "../../core/build.js";
 import type { ExitCode } from "../../core/findings.js";
 import { executeBuildOutputs } from "../../workspace/build.js";
+import { buildValidationFindings } from "../../workspace/build-validation.js";
 import {
   readDerivedFileRecord,
   recordedPathsOf,
@@ -25,7 +27,6 @@ import {
   analyzeWorkspace,
   workspaceInputsOf,
 } from "../../workspace/pipeline.js";
-import { obstructedWritePathFindings } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
 import { jsonOutputInEffect } from "../args.js";
 import type { CommandContext } from "../io.js";
@@ -54,35 +55,16 @@ export async function buildCommand(
     return 2;
   }
 
-  const findings = [...analysis.findings];
-  let outputs: BuildOutputs | null = null;
-  if (findings.length === 0) {
-    // Valid workspace: derive the complete output set (core), then validate
-    // every write path before touching anything (SPEC 14.22: a
-    // workspace-relative directory component of a path xspec writes
-    // occupied by anything other than a directory refuses the write,
-    // reported before anything is modified — one finding per distinct
-    // offending component).
-    // SPEC 12.1/13.4: the stored record's paths are the orphan-removal
-    // domain — none where the record is absent or unreadable.
-    const record = await readDerivedFileRecord(workspace.root);
-    outputs = computeBuildOutputs(
-      workspace.configuration,
-      analysis.specs,
-      analysis.graph,
-      analysis.textModel,
-      analysis.hashes,
-      recordedPathsOf(record),
-      workspaceInputsOf(workspace, analysis),
-    );
-    findings.push(
-      ...(await obstructedWritePathFindings(
-        workspace.root,
-        outputs.writePaths,
-      )),
-    );
-  }
-
+  // SPEC 12.1, 13.3, 14: the validations of `build` — source validation
+  // errors, journal errors (14.13), and refused writes (14.22) alike, each
+  // condition reported beside the others. The 14.22 examination runs over
+  // the write paths discovery and configuration define (13.1, 7.3, 13.3),
+  // so a refused write reports beside the source and journal findings,
+  // not only on an otherwise valid workspace: a workspace-relative
+  // directory component of a path xspec writes occupied by anything other
+  // than a directory refuses the write, reported before anything is
+  // modified — one finding per distinct offending component.
+  const findings = await buildValidationFindings(workspace, analysis);
   if (findings.length > 0) {
     // SPEC 12.1/12.0: a failing build's validation errors are the report —
     // standard-output content, exit 1 — and the build modifies nothing.
@@ -90,11 +72,20 @@ export async function buildCommand(
     return 1;
   }
 
-  // outputs is non-null here: it is computed exactly when the analysis had
-  // no findings, and the 14.22 check added none.
-  if (outputs === null) {
-    throw new Error("xspec internal error: build outputs missing");
-  }
+  // Valid workspace: derive the complete output set (core) — its write
+  // paths exactly the set just examined (core/build.ts).
+  // SPEC 12.1/13.4: the stored record's paths are the orphan-removal
+  // domain — none where the record is absent or unreadable.
+  const record = await readDerivedFileRecord(workspace.root);
+  const outputs: BuildOutputs = computeBuildOutputs(
+    workspace.configuration,
+    analysis.specs,
+    analysis.graph,
+    analysis.textModel,
+    analysis.hashes,
+    recordedPathsOf(record),
+    workspaceInputsOf(workspace, analysis),
+  );
   await executeBuildOutputs(workspace.root, outputs);
   if (invocation.json) {
     // SPEC 12.0: every command supports `--json`, emitting a single JSON

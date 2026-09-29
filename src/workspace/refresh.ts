@@ -18,8 +18,9 @@
 // SPEC 14.10). When
 // the current workspace fails the validations of `xspec build` — source
 // validation errors, journal errors (14.13), and refused writes over
-// build's complete write set (14.22) alike: the findings a `build` would
-// now report — they report exactly those findings and exit 1 without
+// build's complete write set (14.22) alike, reported together (SPEC 14):
+// the findings a `build` would now report (./build-validation.ts) — they
+// report exactly those findings and exit 1 without
 // answering and without modifying anything: a failed refresh, like a failed
 // build (SPEC 12.1), leaves every derived file and all graph data
 // unmodified.
@@ -42,11 +43,11 @@ import type { SourceClassification } from "../core/discovery.js";
 import type { Finding } from "../core/findings.js";
 import type { GraphData } from "../core/graph-data.js";
 import { graphDataMatchesCurrent } from "../core/graph-data.js";
+import { buildValidationFindings } from "./build-validation.js";
 import type { LoadedWorkspace } from "./config.js";
 import { loadGraphData, writeGraphData } from "./graph-data.js";
 import type { WorkspaceAnalysis } from "./pipeline.js";
 import { analyzeWorkspace, workspaceInputsOf } from "./pipeline.js";
-import { obstructedWritePathFindings } from "./writes.js";
 
 /** The outcome of the SPEC 13.3 pre-answer step. */
 export type WorkspacePreparation =
@@ -69,7 +70,8 @@ export type WorkspacePreparation =
       /**
        * SPEC 13.3: the current workspace fails `build`'s validations —
        * source validation errors, journal errors, and refused writes over
-       * build's complete write set alike (SPEC 14.22) — the command reports
+       * build's complete write set alike (SPEC 14.22), reported together
+       * (SPEC 14) — the command reports
        * these findings as its report (standard output, SPEC 12.0) and
        * exits 1 without answering; nothing was modified.
        */
@@ -118,9 +120,10 @@ export async function analyzeWorkspaceForRead(
 
 /**
  * The gate-and-refresh assessment (SPEC 13.3), decision separated from
- * write: `findings` is the invalid-workspace report — validation findings,
- * or refused writes over build's complete write set (SPEC 14.22): the
- * findings a `build` would now report — with nothing modified;
+ * write: `findings` is the invalid-workspace report — validation findings
+ * and refused writes over build's complete write set (SPEC 14.22)
+ * together: the findings a `build` would now report — with nothing
+ * modified;
  * `ready` carries the graph data the read answers beside and a `commit`
  * that performs the one refresh write, the snapshot file's (a no-op when
  * the stored graph data already matches; the record, which no refresh
@@ -143,21 +146,27 @@ export async function assessWorkspaceRead(
   workspace: LoadedWorkspace,
   analysis: WorkspaceAnalysis,
 ): Promise<ReadRefreshAssessment> {
-  if (analysis.findings.length > 0) {
-    // SPEC 13.3: current sources fail build validation — report, exit 1,
-    // answer nothing, modify nothing (the store has not even been read).
-    return { kind: "findings", findings: analysis.findings };
+  // SPEC 13.3: the current workspace fails `build`'s validations — source
+  // validation errors, journal errors (14.13), and refused writes (14.22)
+  // alike: the findings a `build` would now report, each condition beside
+  // the others (SPEC 14), refused writes judged over the write paths
+  // discovery and configuration define whatever the sources' validity
+  // (./build-validation.ts). The gated read reports them and exits 1
+  // without answering; evaluation only — nothing is modified and the store
+  // stays unread on this failing side.
+  const findings = await buildValidationFindings(workspace, analysis);
+  if (findings.length > 0) {
+    return { kind: "findings", findings };
   }
 
   // What `xspec build` would write for the current sources and
   // configuration (SPEC 13.3): the same pure derivation `build` runs
   // (SPEC 12.1), so the refreshed bytes match a real build's byte for byte
-  // (SPEC 12.0 determinism). Its graph data and write set are independent
-  // of the stored record (the record feeds orphan removal alone, which no
-  // refresh performs), so the record is never consulted and the store stays
-  // unread until the workspace has passed the complete gate below. The
-  // refresh generates and removes no TypeScript or Markdown — only the
-  // snapshot file is ever written.
+  // (SPEC 12.0 determinism). Its graph data is independent of the stored
+  // record (the record feeds orphan removal alone, which no refresh
+  // performs), so the record is never consulted. The refresh generates and
+  // removes no TypeScript or Markdown — only the snapshot file is ever
+  // written.
   const build = computeBuildOutputs(
     workspace.configuration,
     analysis.specs,
@@ -167,19 +176,6 @@ export async function assessWorkspaceRead(
     [],
     workspaceInputsOf(workspace, analysis),
   );
-
-  // SPEC 13.3: refused writes (14.22) fail `build`'s validations alike —
-  // judged over build's complete write set, exactly the findings a `build`
-  // would now report. The gated read reports them and exits 1 without
-  // answering; evaluation only — nothing is modified and the store stays
-  // unread on this failing side.
-  const writeFindings = await obstructedWritePathFindings(
-    workspace.root,
-    build.writePaths,
-  );
-  if (writeFindings.length > 0) {
-    return { kind: "findings", findings: writeFindings };
-  }
 
   // SPEC 13.3: graph data missing or not matching the current sources and
   // configuration — nothing stored, a stale snapshot, or something stored

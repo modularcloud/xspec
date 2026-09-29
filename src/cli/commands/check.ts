@@ -19,7 +19,9 @@
 //   modifying anything; workspace/reviews.ts);
 // - no write path a build would use has a workspace-relative directory
 //   component occupied by anything other than a directory — reported
-//   without writing (SPEC 14.22).
+//   without writing (SPEC 14.22), judged over the paths discovery and
+//   configuration define whatever the sources' validity, beside the
+//   source and journal findings (workspace/build-validation.ts).
 //
 // `check` never refreshes (SPEC 13.3): it reports staleness instead of
 // rewriting graph data, and it writes nothing whatsoever — every probe here
@@ -34,6 +36,7 @@ import {
 } from "../../core/build.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import { evaluatePolicy } from "../../core/policy.js";
+import { buildValidationFindings } from "../../workspace/build-validation.js";
 import {
   mismatchStalenessFindings,
   recordStalenessFindings,
@@ -48,7 +51,6 @@ import {
   workspaceInputsOf,
 } from "../../workspace/pipeline.js";
 import { loadAllSessions } from "../../workspace/reviews.js";
-import { obstructedWritePathFindings } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
 import { jsonOutputInEffect } from "../args.js";
 import type { CommandContext } from "../io.js";
@@ -76,8 +78,6 @@ export async function checkCommand(
     return 2;
   }
 
-  const findings: Finding[] = [...analysis.findings];
-
   // SPEC 14.10: the recorded-file form compares the record against the set
   // of generated paths alone — a set discovery and configuration define on
   // any workspace (13.1, 7.3, 11.6; core/build.ts) — so, like the
@@ -95,17 +95,24 @@ export async function checkCommand(
     ),
   );
 
-  // SPEC 13.3, 12.1: whether the workspace passes `build`'s validations —
-  // no source validation finding, no journal error (both in
-  // `analysis.findings`), and no refused write (14.22, judged below) — the
-  // one state in which the content the current sources and configuration
+  // SPEC 12.2 → 12.1, 13.3: all build validations — source validation
+  // findings and journal errors (the analysis) and the refused writes of
+  // 14.22, which `check` reports without writing, judging exactly
+  // `build`'s write paths: the set discovery and configuration define on
+  // any workspace (13.1, 7.3, 13.3; workspace/build-validation.ts), so a
+  // refused write reports beside the source and journal findings (SPEC
+  // 14). Whether the workspace passes them — none present — is the one
+  // state in which the content the current sources and configuration
   // generate (14.10) and the graph policy constrains (14.12) are defined.
-  let passesBuildValidations = analysis.findings.length === 0;
+  const buildFindings = await buildValidationFindings(workspace, analysis);
+  const findings: Finding[] = [...buildFindings];
+  const passesBuildValidations = buildFindings.length === 0;
 
-  // SPEC 14.10/14.22 — judged against the pure build derivation
-  // (core/build.ts), computed here only over a workspace whose sources and
-  // journal pass build validation: with such findings present, "what the
-  // current sources and configuration generate" is undefined and 14.10's
+  // SPEC 14.10 — the mismatch forms, per file and graph data, judged
+  // against the pure build derivation (core/build.ts), computed only over
+  // a workspace passing `build`'s validations: with a source validation
+  // finding, a journal error, or a refused write (14.22) present, "what
+  // the current sources and configuration generate" is undefined and the
   // mismatch forms are undetectable (SPEC 14).
   if (passesBuildValidations) {
     const stored = await loadGraphData(workspace.root);
@@ -118,30 +125,14 @@ export async function checkCommand(
       recordedPathsOf(record),
       workspaceInputsOf(workspace, analysis),
     );
-    // SPEC 14.22: `check` reports the obstructed write-path components
-    // without writing — the same findings a `build` would refuse on.
-    const obstructions = await obstructedWritePathFindings(
-      workspace.root,
-      outputs.writePaths,
+    findings.push(
+      ...(await mismatchStalenessFindings(
+        workspace.root,
+        outputs,
+        stored,
+        record,
+      )),
     );
-    findings.push(...obstructions);
-    // SPEC 14.10, 13.3: a refused write (14.22) fails `build`'s validations
-    // like a source validation error or a journal error — the content the
-    // current sources and configuration generate is undefined there, so
-    // the mismatch forms, per file and graph data, go unreported (SPEC
-    // 14).
-    if (obstructions.length > 0) {
-      passesBuildValidations = false;
-    } else {
-      findings.push(
-        ...(await mismatchStalenessFindings(
-          workspace.root,
-          outputs,
-          stored,
-          record,
-        )),
-      );
-    }
   }
 
   // SPEC 14.10: the forms consulting no generated content — the

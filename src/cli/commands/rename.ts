@@ -61,6 +61,7 @@ import { evaluateRenameRefusals } from "../../core/refusal.js";
 import type { RenamePlan } from "../../core/rename.js";
 import { planRename } from "../../core/rename.js";
 import { executeBuildOutputs } from "../../workspace/build.js";
+import { buildValidationFindings } from "../../workspace/build-validation.js";
 import type { LoadedWorkspace } from "../../workspace/config.js";
 import {
   appendJournalEntry,
@@ -133,14 +134,15 @@ async function runRename(
 
   // SPEC 12.0/14: an old ID inside an unparseable origin file (14.20) is
   // masked — the origin was discovered but yielded no document, so the
-  // validation findings are reported and the command exits 1.
+  // workspace fails `build`'s validations and the invalid-workspace
+  // refusal below is the report: the workspace's findings, exit 1.
   const origin = analysis.specs.find((s) => s.document.path === file);
   if (origin === undefined) {
     return emitFindingsRefusal(
       preview,
       invocation.json,
       stdout,
-      analysis.findings,
+      await buildValidationFindings(workspace, analysis),
     );
   }
 
@@ -157,15 +159,20 @@ async function runRename(
 
   // SPEC 6.4: refuse, before modifying anything, when the current workspace
   // fails the validations of `xspec build` — rename only ever rewrites a
-  // valid workspace. The invalid-workspace refusal reports the workspace's
-  // numbered findings alone: no refusal reason is evaluated or reported
-  // beside them (SPEC 14).
-  if (analysis.findings.length > 0) {
+  // valid workspace. Those validations are source validation errors,
+  // journal errors (14.13), and refused writes (14.22) alike — the
+  // findings a `build` would now report (SPEC 13.3; refused writes judged
+  // over `build`'s write paths as discovery and configuration define them,
+  // workspace/build-validation.ts). The invalid-workspace refusal reports
+  // the workspace's numbered findings alone: no refusal reason is
+  // evaluated or reported beside them (SPEC 14).
+  const workspaceFindings = await buildValidationFindings(workspace, analysis);
+  if (workspaceFindings.length > 0) {
     return emitFindingsRefusal(
       preview,
       invocation.json,
       stdout,
-      analysis.findings,
+      workspaceFindings,
     );
   }
 

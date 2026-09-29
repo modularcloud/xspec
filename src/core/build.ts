@@ -27,13 +27,14 @@
 import { compareBytes, sortByBytes } from "./bytes.js";
 import type { Configuration } from "./config.js";
 import type { SourceClassification } from "./discovery.js";
-import { canonicalOutDirPrefix } from "./discovery.js";
+import { canonicalOutDirPrefix, specSourceDerivedPaths } from "./discovery.js";
 import type { GeneratedFile } from "./emission.js";
 import { generateSpecModule, specModulePaths } from "./emission.js";
 import type { GraphData, StoredInputs } from "./graph-data.js";
 import { buildGraphSnapshot, GRAPH_DATA_OWN_PATHS } from "./graph-data.js";
 import type { SpecFileAnalysis, WorkspaceGraph } from "./graph.js";
 import type { NodeHashes } from "./hashes.js";
+import type { PathText } from "./path-text.js";
 import type { WorkspaceTextModel } from "./text-model.js";
 
 /** Everything one `xspec build` writes and removes (SPEC 12.1). */
@@ -213,6 +214,43 @@ export function discoveredGeneratedPaths(
     }
   }
   return generatedDerivedPaths(configuration, specPaths);
+}
+
+/**
+ * SPEC 14.22's write paths of `build` on any workspace: "the derived files
+ * the current sources and configuration generate (13.1, 13.2) and graph
+ * data (13.3)" — per-source derived paths defined by the `NAME.mdx` name
+ * shape alone (13.1), so the set, like 14.10's set of generated paths, is
+ * one discovery and configuration define on a workspace failing `build`'s
+ * validations as on a passing one, needing no source to parse. The paths
+ * are `discoveredGeneratedPaths`; then, for each discovered spec source
+ * whose path has no plain string form (not valid UTF-8, 14.19), which that
+ * set omits, its module path and Markdown emit destination in the byte
+ * form (`specSourceDerivedPaths`, the inventory's derived-file map, 11.6):
+ * the destination under `markdown.outDir` crosses directory components no
+ * other write path need cross, some of them without a string form (7.3),
+ * while the companions lie beside the module (13.1), crossing no further
+ * component; then graph data's own paths. On a passing workspace — every
+ * discovered spec source valid and parsed — this is exactly the set of
+ * `computeBuildOutputs`' `writePaths`. Unordered: the 14.22 examination
+ * (`obstructedWritePathFindings`) deduplicates and orders the paths itself.
+ */
+export function discoveredWritePaths(
+  configuration: Configuration,
+  classification: SourceClassification,
+): readonly PathText[] {
+  const paths: PathText[] = [
+    ...discoveredGeneratedPaths(configuration, classification),
+  ];
+  for (const source of classification.invalidSources) {
+    if (source.kind === "spec" && typeof source.path !== "string") {
+      const derived = specSourceDerivedPaths(source.bytes, configuration);
+      if (derived.module !== null) paths.push(derived.module);
+      if (derived.markdown !== null) paths.push(derived.markdown);
+    }
+  }
+  paths.push(...GRAPH_DATA_OWN_PATHS);
+  return paths;
 }
 
 /**
