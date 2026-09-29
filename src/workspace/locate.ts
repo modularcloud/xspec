@@ -22,13 +22,28 @@
 // workspace carries it for later parse and discovery errors, and a locate
 // failure's findings carry it directly.
 //
+// SPEC 11.6: the working directory and the workspace root enter that
+// spelling as physical directory paths, every symbolic link among their
+// components resolved, and the configuration file as its own name under
+// the root so spelled. The working directory is resolved first
+// (`physicalWorkingDirectory`); the upward search ascends from it, so every
+// directory it examines is physical, and a `--config` value is resolved
+// against it component by component as the filesystem resolves a path
+// (`namedConfigurationEntry`): through a link at a directory component the
+// entry is the one the filesystem finds, spelled by the physical relation
+// (`L/xspec.config.ts`, `L` a link to `a/b`, is `a/b/xspec.config.ts`, the
+// root `a/b`), while the entry itself is never resolved (7: whatever
+// occupies it). Every location read below goes through the physical path,
+// so the file read is the file anchored.
+//
 // SPEC 14.25: a read the environment refuses here — a directory the upward
-// search examines, or the named configuration path's kind — is condition
-// 25, thrown as the typed read failure (./environment-refusal.ts) that the
-// CLI reports as exit 2, its concerned path in the anchoring form (the
-// root is not yet known); the configuration file's refused content read
-// is invalid configuration instead (14.14). Nonexistence is never a
-// refusal: it is the missing configuration of 14.14.
+// search or the anchoring resolution examines, or the named configuration
+// path's kind — is condition 25, thrown as the typed read failure
+// (./environment-refusal.ts) that the CLI reports as exit 2, its concerned
+// path in the anchoring form (the root is not yet known); the configuration
+// file's refused content read is invalid configuration instead (14.14).
+// Nonexistence is never a refusal: it is the missing configuration of
+// 14.14.
 //
 // The store-backed read fast path (./fast-read.ts) starts from this
 // module's result: with the configuration file's exact bytes in hand, a
@@ -41,7 +56,11 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import type { Finding } from "../core/findings.js";
 import { pathFinding } from "../core/findings.js";
-import { anchoredPathSpelling } from "./anchor.js";
+import {
+  anchoredPathSpelling,
+  pathSegments,
+  physicalDirectory,
+} from "./anchor.js";
 import type { EnvironmentRefusal } from "./environment-refusal.js";
 import {
   isAbsenceFailure,
@@ -151,6 +170,78 @@ async function occupantOf(
 }
 
 /**
+ * SPEC 11.6: the invocation working directory as a physical directory
+ * path, every symbolic link among its components resolved — the directory
+ * every anchoring spelling ascends from, the upward search starts at (7),
+ * and a `--config` value resolves against (12.0). SPEC 14.25: a lookup the
+ * environment refuses among its components is a directory the anchoring
+ * resolution examines — the read failure concerning that directory,
+ * spelled against the working directory as given, since the resolution
+ * that would spell it physically is the one refused.
+ */
+async function physicalWorkingDirectory(cwd: string): Promise<string> {
+  const given = path.resolve(cwd);
+  const { root } = path.parse(given);
+  const resolved = await physicalDirectory(
+    root,
+    pathSegments(given.slice(root.length)),
+    (examined, cause) =>
+      readFailure(anchoredPathSpelling(given, examined), "listing", cause),
+  );
+  // A working directory removed since the command started leaves nothing
+  // to resolve: its own spelling stands, and every read below it reads the
+  // absence (SPEC 14.25: nonexistence is never a refused read).
+  return resolved.found ? resolved.path : given;
+}
+
+/**
+ * SPEC 12.0, 11.6: the configuration entry a `--config` value names — a
+ * filesystem path resolved against the physical working directory as the
+ * filesystem resolves one: each `.` the directory itself, each `..` the
+ * physical parent of the directory reached so far, and every symbolic link
+ * among the directory components followed where it stands, so the entry
+ * is spelled by the physical relation (`L/xspec.config.ts` through a link
+ * `L` to `a/b` names `a/b/xspec.config.ts`). The entry itself — the last
+ * segment — is never resolved: whatever occupies it is the configuration
+ * path's occupant (7), a symbolic link included. A value ending in `.` or
+ * `..` names the directory it reaches, never a link. Undefined when
+ * nothing can occupy the path — a directory component missing, not a
+ * directory, or a link whose target is either — the unoccupied path
+ * echoed as given (SPEC 14). SPEC 14.25: a refused lookup in a directory
+ * the resolution examines is the read failure concerning that directory in
+ * its anchoring form.
+ */
+async function namedConfigurationEntry(
+  workingDirectory: string,
+  configFlag: string,
+): Promise<string | undefined> {
+  let start = workingDirectory;
+  let rest = configFlag;
+  if (path.isAbsolute(configFlag)) {
+    start = path.parse(configFlag).root;
+    rest = configFlag.slice(start.length);
+  }
+  const segments = pathSegments(rest);
+  const last = segments[segments.length - 1];
+  const entryName =
+    last === undefined || last === "." || last === ".." ? undefined : last;
+  const directory = await physicalDirectory(
+    start,
+    entryName === undefined ? segments : segments.slice(0, -1),
+    (examined, cause) =>
+      readFailure(
+        anchoredPathSpelling(workingDirectory, examined),
+        "listing",
+        cause,
+      ),
+  );
+  if (!directory.found) return undefined;
+  return entryName === undefined
+    ? directory.path
+    : path.join(directory.path, entryName);
+}
+
+/**
  * SPEC 7: upward search for `xspec.config.ts` from the working directory —
  * the working directory itself first. The search stops at the nearest
  * directory holding an entry of that name, whatever occupies it, so a
@@ -163,17 +254,22 @@ async function occupantOf(
  * before the root is known.
  */
 async function searchUpward(
-  cwd: string,
-  startDir: string,
+  workingDirectory: string,
 ): Promise<
   { readonly configPath: string; readonly occupant: ConfigOccupant } | undefined
 > {
-  let dir = startDir;
+  // Ascending from the physical working directory, each directory is its
+  // physical parent's child: the search examines physical paths alone.
+  let dir = workingDirectory;
   for (;;) {
     const configPath = path.join(dir, CONFIG_FILE_NAME);
     const examined = dir;
     const occupant = await occupantOf(configPath, (cause) =>
-      readFailure(anchoredPathSpelling(cwd, examined), "listing", cause),
+      readFailure(
+        anchoredPathSpelling(workingDirectory, examined),
+        "listing",
+        cause,
+      ),
     );
     if (occupant.kind !== "absent") return { configPath, occupant };
     const parent = path.dirname(dir);
@@ -184,29 +280,39 @@ async function searchUpward(
 
 /**
  * Locate and read the project configuration file (SPEC 7, 14.14) without
- * parsing it. `configFlag` is the `--config <path>` value when given,
- * resolved against `cwd` (SPEC 12.0); otherwise the upward search from
- * `cwd` applies.
+ * parsing it. `cwd` is the invocation working directory, resolved
+ * physically first (SPEC 11.6). `configFlag` is the `--config <path>`
+ * value when given, resolved against it (SPEC 12.0); otherwise the upward
+ * search from it applies.
  */
 export async function locateWorkspace(
   cwd: string,
   configFlag: string | undefined,
 ): Promise<WorkspaceLocateResult> {
+  // SPEC 11.6: every spelling below is anchored on the physical working
+  // directory, and every configuration path is found from it.
+  const workingDirectory = await physicalWorkingDirectory(cwd);
   let configPath: string;
   let configFileName: string;
   let occupant: ConfigOccupant;
   if (configFlag !== undefined) {
-    configPath = path.resolve(cwd, configFlag);
-    configFileName = path.basename(configPath);
+    const named = await namedConfigurationEntry(workingDirectory, configFlag);
     // SPEC 14.25: the named path's refused kind read is condition 25,
     // concerning the path in its anchoring form (11.6) — examined before
     // the root is known; only nonexistence is the missing configuration
-    // below.
-    const named = configPath;
-    occupant = await occupantOf(configPath, (cause) =>
-      readFailure(anchoredPathSpelling(cwd, named), "kind", cause),
-    );
-    if (occupant.kind === "absent") {
+    // below. Occupancy is judged before anything is spelled: a path
+    // nothing occupies has no physical spelling (SPEC 14).
+    const namedOccupant: ConfigOccupant =
+      named === undefined
+        ? { kind: "absent" }
+        : await occupantOf(named, (cause) =>
+            readFailure(
+              anchoredPathSpelling(workingDirectory, named),
+              "kind",
+              cause,
+            ),
+          );
+    if (named === undefined || namedOccupant.kind === "absent") {
       // SPEC 14: missing configuration WITH `--config` given concerns the
       // named path (never `.` — that is the failed upward search's case).
       // A path nothing occupies is the one concerned path no physical
@@ -222,8 +328,11 @@ export async function locateWorkspace(
         configFlag,
       );
     }
+    configPath = named;
+    configFileName = path.basename(named);
+    occupant = namedOccupant;
   } else {
-    const found = await searchUpward(cwd, path.resolve(cwd));
+    const found = await searchUpward(workingDirectory);
     if (found === undefined) {
       // SPEC 14: a failed upward search with no `--config` concerns the
       // directory it started from — the invocation working directory,
@@ -243,7 +352,7 @@ export async function locateWorkspace(
   // SPEC 14: the concerned path of every configuration error from here on
   // is the found or named configuration path itself, whatever occupies it
   // (7) — the entry, never what a symbolic link there targets.
-  const configAnchor = anchoredPathSpelling(cwd, configPath);
+  const configAnchor = anchoredPathSpelling(workingDirectory, configPath);
   if (occupant.kind === "other") {
     // SPEC 7, 14.14: the configuration file is read only when it is a plain
     // file; any other occupant — a directory, a symbolic link whatever it
@@ -279,7 +388,7 @@ export async function locateWorkspace(
       root,
       configFileName,
       configAnchor,
-      rootAnchor: anchoredPathSpelling(cwd, root),
+      rootAnchor: anchoredPathSpelling(workingDirectory, root),
       configBytes: bytes,
     },
   };
