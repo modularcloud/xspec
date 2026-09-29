@@ -1401,12 +1401,14 @@ class CodeAnalyzer {
    * The nested declarations a dotted namespace name nests in the AST all
    * take the outermost declaration of the dotted chain (the one construct
    * binding them all); a default export whose exported construct is named
-   * takes that construct's own range — for the merged declaration form
-   * (`export default function f() {}`) the declaration with its leading
-   * `export default ` excluded, for the `export default <expression>`
-   * form the named function or class expression's own span — while the
-   * `default` unit an anonymous exported construct derives takes the whole
-   * export declaration, a decorator list preceding its `export` included;
+   * takes that construct's own range — only ever the merged declaration
+   * form (`export default function f() {}`), the declaration with its
+   * leading `export default ` excluded, since a function or class
+   * expression is exported only wrapped and so binds no unit (SPEC 4.6,
+   * `unitName`) — while the `default` unit an anonymous exported construct
+   * derives takes the whole export declaration, a decorator list preceding
+   * its `export` included, and for an exported arrow function (`export
+   * default () => {};`, the export assignment itself) its terminator too;
    * and a `path#unit@N` simply carries its own occurrence's construct,
    * which is the node recorded for it.
    */
@@ -1424,19 +1426,6 @@ class CodeAnalyzer {
       }
       return this.declarationRange(outer);
     }
-    if (ts.isExportAssignment(node)) {
-      const expression = stripParentheses(node.expression);
-      if (
-        (ts.isFunctionExpression(expression) ||
-          ts.isClassExpression(expression)) &&
-        expression.name !== undefined
-      ) {
-        // A named exported construct: its own range (SPEC 1.7).
-        return this.rangeOf(expression);
-      }
-      // Anonymous: the whole export declaration, terminator included.
-      return this.rangeOf(node);
-    }
     if (
       (ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) &&
       node.name !== undefined
@@ -1444,8 +1433,10 @@ class CodeAnalyzer {
       return this.declarationRange(node);
     }
     // The anonymous merged default export (`export default function () {}`,
-    // `@dec export default class {}`) is itself the construct deriving the
-    // `default` unit: the whole export declaration (SPEC 1.7).
+    // `@dec export default class {}`) and an exported arrow function's
+    // export assignment (`export default () => {};`) are each the construct
+    // deriving the `default` unit: the whole export declaration, a spelled
+    // terminator included (SPEC 1.7).
     return this.rangeOf(node);
   }
 
@@ -2297,12 +2288,6 @@ function isFunctionOrClassExpression(expression: tst.Expression): boolean {
   );
 }
 
-function stripParentheses(expression: tst.Expression): tst.Expression {
-  let current = expression;
-  while (ts.isParenthesizedExpression(current)) current = current.expression;
-  return current;
-}
-
 /**
  * The UTF-16 start of `node`'s first token lying entirely after
  * `boundary` — used to exclude a leading `export` or `export default`
@@ -2397,8 +2382,11 @@ function isDeclarationFileName(path: string): boolean {
  * declaration with a plain identifier name and such an initializer; a
  * namespace declaration (`namespace A.B` nests one declaration per name in
  * the AST already); or a default export, named `default` when the exported
- * construct is anonymous. Every name is plain, spelled without escape
- * sequences (`plainName`): an escape-spelled one binds no unit.
+ * construct is anonymous. Each construct is read by its own form: an
+ * initializer or exported expression that merely wraps one of these forms
+ * (parenthesized, cast, `satisfies`-qualified, non-null-asserted) binds no
+ * unit. Every name is plain, spelled without escape sequences
+ * (`plainName`): an escape-spelled one binds no unit.
  * Signature-only declarations (overloads, body-less methods) and abstract
  * members, whatever they spell, bind no executable code, and neither does
  * an ambient declaration, which the caller never asks about
@@ -2461,16 +2449,16 @@ function unitName(node: tst.Node, sourceFile: tst.SourceFile): string | null {
     return ts.isIdentifier(node.name) ? plainName(node.name, sourceFile) : null;
   }
   if (ts.isExportAssignment(node) && node.isExportEquals !== true) {
-    const expression = stripParentheses(node.expression);
-    if (
-      ts.isFunctionExpression(expression) ||
-      ts.isClassExpression(expression)
-    ) {
-      return expression.name !== undefined
-        ? plainName(expression.name, sourceFile)
-        : "default";
-    }
-    return ts.isArrowFunction(expression) ? "default" : null;
+    // SPEC 4.6: the exported expression is read by its own form, as
+    // spelled — one that merely wraps a function, arrow, or class
+    // (parenthesized, `as`-cast, `satisfies`-qualified, non-null-asserted)
+    // is another expression and binds no unit. TypeScript parses an
+    // unwrapped `export default function …` or `export default class …` as
+    // a declaration (the branches above), so a function or class
+    // expression reaches an export assignment only wrapped: the one
+    // construct left binding a unit here is an unwrapped arrow function,
+    // always anonymous and so named `default`.
+    return ts.isArrowFunction(node.expression) ? "default" : null;
   }
   return null;
 }
