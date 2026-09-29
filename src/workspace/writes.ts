@@ -337,12 +337,30 @@ export async function readableOccupant(
   root: string,
   rel: string,
 ): Promise<PathOccupant> {
+  if (!(await readsReach(root, rel))) return "absent";
+  return probeOccupant(root, rel);
+}
+
+/**
+ * SPEC 13.4, the read side, for one path: whether reads reach the
+ * workspace-relative path `rel` — true exactly when every
+ * workspace-relative directory component of `rel` is occupied by a
+ * directory, each judged by `lstat` shallowest first (`readableDirectory`
+ * over its parent), so a symbolic link is judged itself and never
+ * traversed, whatever it targets. False below a component that is absent
+ * or occupied by anything other than a directory — a plain file, a
+ * symbolic link, any other non-directory occupant: nothing is read there,
+ * and the path holds nothing (14.25's absence, never its refusal). The
+ * path's own occupant is not examined; a top-level path has no directory
+ * component and is always reached. A kind read the environment refuses
+ * is `readableDirectory`'s: the read failure concerning the component
+ * (SPEC 14.25) — the graph-data area's own path excepted (the state of
+ * condition 23, nothing below it read).
+ */
+export async function readsReach(root: string, rel: string): Promise<boolean> {
   const components = directoryComponents(rel);
   const parent = components[components.length - 1];
-  if (parent !== undefined && !(await readableDirectory(root, parent))) {
-    return "absent";
-  }
-  return probeOccupant(root, rel);
+  return parent === undefined || (await readableDirectory(root, parent));
 }
 
 /**

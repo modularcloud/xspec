@@ -34,7 +34,7 @@ import {
 import { isFilesystemFailure } from "./environment-refusal.js";
 import type { DerivedFileRecord, LoadedGraphData } from "./graph-data.js";
 import type { PathOccupant } from "./writes.js";
-import { classifyOccupant, describeOccupant } from "./writes.js";
+import { classifyOccupant, describeOccupant, readsReach } from "./writes.js";
 
 const utf8Encoder = new TextEncoder();
 
@@ -237,12 +237,23 @@ export async function mismatchStalenessFindings(
  *   generated paths that discovery and configuration define on any
  *   workspace, in byte order (core/build.ts: `orphanedRecordedPaths` over
  *   `discoveredGeneratedPaths`); one whose path is vacant remains nowhere,
- *   no finding. While the unreadable-record state
- *   holds this form is undetectable (SPEC 14.10): it consults no readable
- *   record, and an unreadable record records nothing (`orphans` is empty
- *   by construction, `recordedPathsOf`). A remaining path whose kind the
- *   environment refuses to read is stale all the same (SPEC 14.25 → 14.10,
- *   `comparedOccupant`).
+ *   no finding. Each path is judged by the read side of SPEC 13.4
+ *   (`readsReach`): its workspace-relative directory components shallowest
+ *   first, so below a component that is absent or occupied by anything
+ *   other than a directory — a plain file, or a symbolic link whatever it
+ *   targets, never read through — the path holds nothing and remains
+ *   nowhere (14.25's absence, never its refusal), as `build`'s removal
+ *   leaves such a path untouched (`removeDerivedFile`). A component's kind
+ *   read the environment refuses is the read failure concerning that
+ *   component (SPEC 14.25: a path occupant's kind examined under 13.4, no
+ *   derived file's), thrown so `check` stops at it, exit 2 — as the same
+ *   refusal among a generated path's components stops it at the 14.22
+ *   examination. While the unreadable-record state holds this form is
+ *   undetectable (SPEC 14.10): it consults no readable record, and an
+ *   unreadable record records nothing (`orphans` is empty by
+ *   construction, `recordedPathsOf`). A path reached whose own kind the
+ *   environment refuses to read is stale all the same (SPEC 14.25 → 14.10:
+ *   a derived file's kind that `check` compares, `comparedOccupant`).
  *
  * Deterministic order: the graph data, then the orphans (SPEC 12.0).
  */
@@ -256,6 +267,9 @@ export async function recordStalenessFindings(
     findings.push(unreadableRecordStaleFinding());
   }
   for (const rel of orphans) {
+    // SPEC 13.4: reads traverse no non-directory component — below one the
+    // recorded path holds nothing, and no derived file remains there.
+    if (!(await readsReach(root, rel))) continue;
     if ((await comparedOccupant(absoluteOf(root, rel))) !== "absent") {
       findings.push(orphanFinding(rel));
     }
