@@ -334,10 +334,10 @@ const EXPRESSION_CLOSER = "\n)";
 /**
  * Parse one expression's exact source text — a spec source's reference as
  * MDX 3 derives it (SPEC 14.20: a `d` value, an entry of its array literal,
- * or a `text(...)` argument, ./spec-references.ts), or a probe's spelling
- * (./rename.ts) — into a standalone AST for the analyzer, in expression
- * position: the text is parenthesized, so no statement's lookahead
- * restriction applies (`{a: 1}`, `function(){}`, `class {}`, and
+ * or a `text(...)` argument), or a probe's spelling, through
+ * `classifyReferenceText` — into a standalone AST for the analyzer, in
+ * expression position: the text is parenthesized, so no statement's
+ * lookahead restriction applies (`{a: 1}`, `function(){}`, `class {}`, and
  * `async function(){}` are expressions, never a block or declarations).
  * The grammar is TypeScript's JavaScript-with-JSX reading, ECMAScript's
  * with JSX (SPEC 14.20, 2.7): JSX is read as JSX, and no type assertion or
@@ -386,12 +386,13 @@ export interface ClassifiedReferenceText {
  * Classify one reference's own characters (SPEC 2.4) — first token through
  * last, as the reference-spelling locations of SPEC 14 take them: a spec
  * source's `d` value or entry, or `text(...)` argument, as MDX 3 derives it
- * (SPEC 14.20). Where this grammar's reading of the text is not one
- * expression spanning exactly those characters — a construct the grammar
- * derives that TypeScript's reading does not (a JSX element as the object of
- * a member access, call, or `new`, such as `<b/>.x`) — the text is no static
- * string literal or property chain, which the reading always derives, so
- * the reference is dynamic, spanning the whole text.
+ * (SPEC 14.20), or a probe's spelling (./rename.ts). Where the reading of
+ * `parseExpressionText` is not one expression spanning exactly those
+ * characters — a construct ECMAScript with JSX derives that the reading
+ * does not: a JSX element as the object of a member access, a call, a
+ * tagged template, `new`, or a postfix update (`<b/>.x`) — the text is no
+ * static string literal or property chain, both of which the reading
+ * always derives, so the reference is dynamic, spanning the whole text.
  */
 export function classifyReferenceText(text: string): ClassifiedReferenceText {
   const { sourceFile, expression, textStart } = parseExpressionText(text);
