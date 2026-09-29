@@ -42,17 +42,14 @@ import type {
   SpecImportStatement,
   SpecSection,
 } from "./mdx.js";
+import { deriveContentExpression } from "./mdx-acorn.js";
 import type {
   ClassifiedChain,
   ClassifiedReference,
   ClassifiedString,
   TextSpan,
 } from "./references.js";
-import {
-  classifyReference,
-  parseExpressionText,
-  stringLiteralValue,
-} from "./references.js";
+import { classifyReferenceText, stringLiteralValue } from "./references.js";
 
 // ---------------------------------------------------------------------------
 // The import model (SPEC 2.1)
@@ -374,15 +371,21 @@ const COMPILER_PROVIDED_NAMES: ReadonlySet<string> = new Set([
 
 const XSPEC_SUFFIX = ".xspec";
 
-/** Translates analyzer spans of one re-parsed slice into byte ranges. */
+/**
+ * Translates analyzer spans of one re-parsed slice into byte ranges: the
+ * slice begins at `sliceStartByte` in the document and at `parsedStart` in
+ * the text its spans index (0 for the slice itself; a text parsed by
+ * `classifyReferenceText` begins at its `textStart`).
+ */
 class SpanTranslator {
   private readonly baseIndex: number;
 
   constructor(
     private readonly offsets: Utf8Offsets,
     sliceStartByte: number,
+    parsedStart = 0,
   ) {
-    this.baseIndex = offsets.indexOfByteOffset(sliceStartByte);
+    this.baseIndex = offsets.indexOfByteOffset(sliceStartByte) - parsedStart;
   }
 
   range(span: TextSpan): ByteRange {
@@ -390,6 +393,18 @@ class SpanTranslator {
       start: this.offsets.byteOffset(this.baseIndex + span.start),
       end: this.offsets.byteOffset(this.baseIndex + span.end),
     };
+  }
+
+  /**
+   * The translator of the part of this slice beginning at its offset
+   * `start`, re-parsed in a text where it begins at `parsedStart`.
+   */
+  part(start: number, parsedStart: number): SpanTranslator {
+    return new SpanTranslator(
+      this.offsets,
+      this.offsets.byteOffset(this.baseIndex + start),
+      parsedStart,
+    );
   }
 }
 
@@ -927,19 +942,24 @@ class ReferenceAnalyzer {
    * SPEC 2.2: a `d` value is a single reference or an array literal of
    * references, external and local forms mixed freely; `d={[]}` declares
    * no dependencies. Any other value is a dynamic argument (SPEC 2.7 →
-   * 14.8), as is any dynamic element (SPEC 2.4).
+   * 14.8), as is any dynamic entry (SPEC 2.4). The value is the expression
+   * MDX 3 derives from the braces' content (SPEC 14.20) — an array literal
+   * exactly where that expression is one, unparenthesized — and each
+   * reference, the whole value or one entry, is classified by its own
+   * characters, first token through last, which its occurrence or finding
+   * spans (SPEC 14, 5.7).
    */
   analyzeDependencyValue(dependency: {
     readonly expressionText: string;
     readonly expressionRange: ByteRange;
     readonly attributeRange: ByteRange;
   }): SpecReference[] {
-    const { sourceFile, expression } = parseExpressionText(
-      dependency.expressionText,
-    );
-    if (expression === null) {
-      // Not a single expression at all (an object literal parses as a
-      // block, for instance): a dynamic argument (SPEC 2.7 → 14.8).
+    const text = dependency.expressionText;
+    const value = deriveContentExpression(text);
+    if (value === null) {
+      // A parsed document's braced `d` always derives one expression
+      // (SPEC 14.20); were it not to, the value would be no static
+      // reference: a dynamic argument (SPEC 2.7 → 14.8).
       this.addFinding(
         dependency.attributeRange,
         `invalid argument: the d value is not a static reference or an ` +
@@ -948,40 +968,42 @@ class ReferenceAnalyzer {
       );
       return [];
     }
-    const translate = new SpanTranslator(
+    const valueTranslate = new SpanTranslator(
       this.document.offsets,
       dependency.expressionRange.start,
     );
+    const entries = value.type === "ArrayExpression" ? value.elements : [value];
+    if (entries.includes(null)) {
+      // SPEC 14: the elisions of one array literal — holes among its
+      // entries, spelling no expression — are one finding, however many,
+      // located by the whole array literal, brackets included (SPEC 2.2 →
+      // 14.8: a hole is no reference).
+      this.addFinding(
+        valueTranslate.range(value),
+        `invalid argument: the d array contains an elided element — ` +
+          `each element must be a static reference (SPEC 2.2, 2.4, 14.8)`,
+      );
+    }
     const references: SpecReference[] = [];
-    const elements = ts.isArrayLiteralExpression(expression)
-      ? expression.elements
-      : [expression];
-    for (const element of elements) {
-      if (ts.isOmittedExpression(element)) {
-        // An array hole is no reference (SPEC 2.2 → 14.8).
-        this.addFinding(
-          translate.range({
-            start: expression.getStart(sourceFile),
-            end: expression.getEnd(),
-          }),
-          `invalid argument: the d array contains an elided element — ` +
-            `each element must be a static reference (SPEC 2.2, 2.4, 14.8)`,
-        );
+    for (const entry of entries) {
+      if (entry === null) {
         continue;
       }
-      if (ts.isSpreadElement(element)) {
+      if (entry.type === "SpreadElement") {
+        // SPEC 14: a spread entry by its own characters, `...` included.
         this.addFinding(
-          translate.range({
-            start: element.getStart(sourceFile),
-            end: element.getEnd(),
-          }),
+          valueTranslate.range(entry),
           `invalid argument: a spread element is not a static reference ` +
             `(SPEC 2.2, 2.4, 14.8)`,
         );
         continue;
       }
+      const { classified, textStart } = classifyReferenceText(
+        text.slice(entry.start, entry.end),
+      );
+      const translate = valueTranslate.part(entry.start, textStart);
       const resolved = this.resolveClassified(
-        classifyReference(element, sourceFile),
+        classified,
         translate,
         `each d reference must be a static string literal naming a ` +
           `same-file ID or a static property chain rooted at an imported ` +
@@ -1015,19 +1037,21 @@ class ReferenceAnalyzer {
 
   /**
    * SPEC 2.3, 2.4: an embedding is a `text(...)` call with exactly one
-   * argument, following the same external/local duality as `d`.
+   * argument, following the same external/local duality as `d`. The call
+   * is the expression MDX 3 derives from the container's content (SPEC
+   * 14.20), so its arguments are the ones ECMAScript reads (`text(<b/>,
+   * "a")` has two), and the one argument is classified by its own
+   * characters.
    */
   analyzeEmbedding(embedding: SpecEmbedding): SpecReference | null {
-    const { sourceFile, expression } = parseExpressionText(
-      embedding.expressionText,
-    );
+    const text = embedding.expressionText;
+    const expression = deriveContentExpression(text);
     const call =
       expression !== null &&
-      ts.isCallExpression(expression) &&
-      expression.questionDotToken === undefined &&
-      expression.typeArguments === undefined &&
-      ts.isIdentifier(expression.expression) &&
-      expression.expression.text === "text"
+      expression.type === "CallExpression" &&
+      !expression.optional &&
+      expression.callee.type === "Identifier" &&
+      expression.callee.name === "text"
         ? expression
         : null;
     if (call === null) {
@@ -1052,11 +1076,7 @@ class ReferenceAnalyzer {
       return null;
     }
     const argument = call.arguments[0];
-    const translate = new SpanTranslator(
-      this.document.offsets,
-      embedding.expressionRange.start,
-    );
-    if (ts.isSpreadElement(argument)) {
+    if (argument.type === "SpreadElement") {
       // SPEC 14: a no-occurrence spelling of the MDX embedding form is
       // located by the full braced container (the span its occurrence
       // would occupy, 5.7).
@@ -1067,8 +1087,15 @@ class ReferenceAnalyzer {
       );
       return null;
     }
+    const { classified, textStart } = classifyReferenceText(
+      text.slice(argument.start, argument.end),
+    );
+    const translate = new SpanTranslator(
+      this.document.offsets,
+      embedding.expressionRange.start,
+    ).part(argument.start, textStart);
     const resolved = this.resolveClassified(
-      classifyReference(argument, sourceFile),
+      classified,
       translate,
       `the text(...) argument must be a static string literal naming a ` +
         `same-file ID or a static property chain rooted at an imported ` +

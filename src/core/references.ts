@@ -176,6 +176,11 @@ function quoteOf(
   return quote;
 }
 
+/** SPEC 2.4: why an expression of any other form is dynamic. */
+const OTHER_FORM_REASON =
+  "it is neither a static string literal nor a static property chain " +
+  "rooted at an import binding";
+
 /**
  * Classify one expression per the static argument rule (SPEC 2.4): a
  * static string literal (plain single- or double-quoted; template
@@ -295,38 +300,111 @@ export function classifyReference(
         "parentheses do not participate in a static property chain",
       );
     }
-    return dynamic(
-      "it is neither a static string literal nor a static property chain " +
-        "rooted at an import binding",
-    );
+    return dynamic(OTHER_FORM_REASON);
   }
 }
 
-/**
- * Parse one expression span's exact source text (an MDX `d` value or
- * `{...}` container content, SPEC 2.2, 2.3) into a standalone AST for the
- * analyzer. `expression` is null when the text is not a single expression
- * statement — an object literal (parsed as a block), several statements,
- * or nothing — every such value is dynamic for the caller's purposes
- * (SPEC 2.7 → 14.8). Positions in the returned AST are UTF-16 offsets
- * into `text`.
- */
-export function parseExpressionText(text: string): {
+/** One expression's text parsed by `parseExpressionText`. */
+export interface ParsedExpression {
+  /** The standalone source the text was parsed in. */
   readonly sourceFile: tst.SourceFile;
+  /**
+   * The one expression the text holds — its own characters first token
+   * through last, parentheses the text spells around it included, the
+   * whitespace and comments beside it excluded — or null where the reading
+   * yields none closed by the enclosing parenthesis.
+   */
   readonly expression: tst.Expression | null;
-} {
+  /**
+   * The UTF-16 offset in `sourceFile.text` at which the text begins: every
+   * position in the AST is that offset plus the text's own.
+   */
+  readonly textStart: number;
+}
+
+/** What `parseExpressionText` sets before the text: expression position. */
+const EXPRESSION_OPENER = "(";
+
+/**
+ * What follows the text: a line terminator, so that a line comment ending
+ * the text cannot swallow the closing parenthesis, then that parenthesis.
+ */
+const EXPRESSION_CLOSER = "\n)";
+
+/**
+ * Parse one expression's exact source text — a spec source's reference as
+ * MDX 3 derives it (SPEC 14.20: a `d` value, an entry of its array literal,
+ * or a `text(...)` argument, ./spec-references.ts), or a probe's spelling
+ * (./rename.ts) — into a standalone AST for the analyzer, in expression
+ * position: the text is parenthesized, so no statement's lookahead
+ * restriction applies (`{a: 1}`, `function(){}`, `class {}`, and
+ * `async function(){}` are expressions, never a block or declarations).
+ * The grammar is TypeScript's JavaScript-with-JSX reading, ECMAScript's
+ * with JSX (SPEC 14.20, 2.7): JSX is read as JSX, and no type assertion or
+ * type argument list is read (`a<b, c>(d)` is two comparisons joined by a
+ * comma, as ECMAScript derives it). `expression` is the parenthesized
+ * operand — null where the reading yields no operand closed by the
+ * enclosing parenthesis, the text not being one expression as this
+ * grammar reads it. Positions are offsets into `sourceFile.text`, the text
+ * beginning at `textStart`.
+ */
+export function parseExpressionText(text: string): ParsedExpression {
   const sourceFile = ts.createSourceFile(
-    "xspec-expression.ts",
-    text,
+    "xspec-expression.jsx",
+    EXPRESSION_OPENER + text + EXPRESSION_CLOSER,
     ts.ScriptTarget.Latest,
     /* setParentNodes */ true,
-    ts.ScriptKind.TS,
+    ts.ScriptKind.JSX,
   );
+  const textStart = EXPRESSION_OPENER.length;
   const statement =
     sourceFile.statements.length === 1 ? sourceFile.statements[0] : undefined;
-  const expression =
-    statement !== undefined && ts.isExpressionStatement(statement)
-      ? statement.expression
+  const parenthesized =
+    statement !== undefined &&
+    ts.isExpressionStatement(statement) &&
+    ts.isParenthesizedExpression(statement.expression) &&
+    statement.expression.getStart(sourceFile) === 0 &&
+    statement.expression.getEnd() === sourceFile.text.length
+      ? statement.expression.expression
       : null;
-  return { sourceFile, expression };
+  const expression =
+    parenthesized !== null &&
+    parenthesized.getStart(sourceFile) < parenthesized.getEnd()
+      ? parenthesized
+      : null;
+  return { sourceFile, expression, textStart };
+}
+
+/** A reference's classification, spans offset by the parsed text's start. */
+export interface ClassifiedReferenceText {
+  readonly classified: ClassifiedReference;
+  /** Where the classified text begins in the text it was parsed in. */
+  readonly textStart: number;
+}
+
+/**
+ * Classify one reference's own characters (SPEC 2.4) — first token through
+ * last, as the reference-spelling locations of SPEC 14 take them: a spec
+ * source's `d` value or entry, or `text(...)` argument, as MDX 3 derives it
+ * (SPEC 14.20). Where this grammar's reading of the text is not one
+ * expression spanning exactly those characters — a construct the grammar
+ * derives that TypeScript's reading does not (a JSX element as the object of
+ * a member access, call, or `new`, such as `<b/>.x`) — the text is no static
+ * string literal or property chain, which the reading always derives, so
+ * the reference is dynamic, spanning the whole text.
+ */
+export function classifyReferenceText(text: string): ClassifiedReferenceText {
+  const { sourceFile, expression, textStart } = parseExpressionText(text);
+  const whole = { start: textStart, end: textStart + text.length };
+  if (
+    expression === null ||
+    expression.getStart(sourceFile) !== whole.start ||
+    expression.getEnd() !== whole.end
+  ) {
+    return {
+      classified: { kind: "dynamic", reason: OTHER_FORM_REASON, span: whole },
+      textStart,
+    };
+  }
+  return { classified: classifyReference(expression, sourceFile), textStart };
 }

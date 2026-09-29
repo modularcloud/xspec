@@ -48,7 +48,7 @@ import { createJournalEntry } from "./journal.js";
 import type { SpecAttributeValue, SpecDocument } from "./mdx.js";
 import type { PreviewFileEdits } from "./preview.js";
 import { PreviewCollector } from "./preview.js";
-import { classifyReference, parseExpressionText } from "./references.js";
+import { classifyReferenceText } from "./references.js";
 import type {
   ReferenceSpelling,
   SegmentSpelling,
@@ -81,28 +81,23 @@ export interface RenamePlan {
 /**
  * Whether `name` can be written as a dot-access segment (`.name`) that the
  * static-reference grammar (SPEC 2.4) reads back as exactly this segment.
- * Decided by the analyzer itself — parse `a.<name>` and require a one-
- * segment dot chain naming `name` — so a kept dot form always round-trips:
+ * Decided by the analyzer itself — classify `a.<name>` and require a one-
+ * segment dot chain naming `name`, which `classifyReferenceText` gives only
+ * where the chain spans the whole spelling — so a kept dot form always
+ * round-trips:
  * keywords are valid property names (TypeScript's IdentifierName), while
  * any name needing quoting fails and falls back to computed access
  * (SPEC 6.4: dot access for segments that are valid TypeScript
  * identifiers, double-quoted computed access otherwise).
  */
 export function isDotAccessSegmentName(name: string): boolean {
-  const text = `a.${name}`;
-  const { sourceFile, expression } = parseExpressionText(text);
-  if (expression === null) {
-    return false;
-  }
-  const classified = classifyReference(expression, sourceFile);
+  const { classified } = classifyReferenceText(`a.${name}`);
   return (
     classified.kind === "chain" &&
     classified.rootName === "a" &&
     classified.segments.length === 1 &&
     classified.segments[0].access === "dot" &&
-    classified.segments[0].name === name &&
-    classified.span.start === 0 &&
-    classified.span.end === text.length
+    classified.segments[0].name === name
   );
 }
 

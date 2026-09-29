@@ -966,3 +966,27 @@ export const mdxAcorn: typeof Parser = Parser.extend(
 export function isEmptyExpression(content: string): boolean {
   return commentDeletionsEmpty(content) && lexesToNoToken(content);
 }
+
+/**
+ * SPEC 14.20: the one expression MDX 3 derives from an expression
+ * container's or attribute value expression's content, as remark-mdx
+ * derives it — `parseExpressionAt` from the content's start, parentheses
+ * preserved (micromark's events-to-acorn) — so each node spans its own
+ * characters, first token through last, a parenthesized expression its
+ * parentheses included (SPEC 14's reference-spelling locations). Positions
+ * are UTF-16 offsets into `content`. Null where the content derives no
+ * expression, which a parsed document's container never holds.
+ */
+export function deriveContentExpression(content: string): Expression | null {
+  try {
+    return mdxAcorn.parseExpressionAt(content, 0, {
+      ...MDX_ACORN_OPTIONS,
+      preserveParens: true,
+    });
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      return null;
+    }
+    throw error;
+  }
+}
