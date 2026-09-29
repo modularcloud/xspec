@@ -193,13 +193,15 @@ export interface CodeReference {
     readonly name: string;
     readonly range: ByteRange;
   } | null;
-  /** The reference expression's bytes (finding locations, SPEC 14.7). */
+  /** The reference chain's own bytes, the argument of a `text(...)` call. */
   readonly range: ByteRange;
   /**
    * The occurrence span (SPEC 5.7), exact per kind: for a marker the bare
    * reference chain alone, exclusive of any statement terminator (equal to
    * `range`); for a `text(...)` call the entire call expression, callee
-   * through closing parenthesis, argument included.
+   * through closing parenthesis, argument included. A reference that
+   * does not resolve records no occurrence, and its finding (SPEC 14.7)
+   * is located here, the span the occurrence would occupy (SPEC 14).
    */
   readonly occurrenceRange: ByteRange;
   /**
@@ -1796,7 +1798,11 @@ class CodeAnalyzer {
    * form is MDX-only (4.3 → 14.8); a cross-module node is recorded with
    * its called module, resolution reporting 14.11 (4.4, graph.ts).
    * `calleeIdentifier` is the call's callee and `callee` the `text`
-   * binding it resolves to.
+   * binding it resolves to. SPEC 14: every condition of the call as a
+   * reference spelling — unresolved (14.7), non-static or of wrong arity
+   * (14.8), cross-module (14.11) — is located by the span its occurrence
+   * occupies or would occupy (5.7), the entire call expression, callee
+   * through closing parenthesis, whichever part of it offends.
    */
   private analyzeTextCall(
     call: tst.CallExpression,
@@ -1834,10 +1840,13 @@ class CodeAnalyzer {
       return;
     }
     const argument = call.arguments[0];
+    // SPEC 14, 5.7: the 14.8 findings below, and the undefined-member 14.7
+    // past them, locate the call — callee through closing parenthesis —
+    // never the argument alone.
     if (ts.isSpreadElement(argument)) {
       this.addFinding(
         8,
-        argument,
+        call,
         `invalid argument: a spread element is not a static reference ` +
           `(SPEC 2.4, 14.8)`,
       );
@@ -1847,7 +1856,7 @@ class CodeAnalyzer {
       // SPEC 4.3: the string form of text(...) is MDX-only.
       this.addFinding(
         8,
-        argument,
+        call,
         `invalid argument: a string argument to text(...) in a TypeScript ` +
           `file — the string form is MDX-only; pass the node itself ` +
           `(SPEC 4.3, 14.8)`,
@@ -1860,7 +1869,7 @@ class CodeAnalyzer {
     ) {
       this.addFinding(
         8,
-        argument,
+        call,
         `invalid argument: a template literal is not a static string ` +
           `literal, and the string form of text(...) is MDX-only anyway ` +
           `(SPEC 2.4, 4.3, 14.8)`,
@@ -1906,7 +1915,7 @@ class CodeAnalyzer {
           : "it is not a bare property chain";
       this.addFinding(
         8,
-        argument,
+        call,
         `invalid argument: ${reason} — the text(...) argument must be a ` +
           `static property chain rooted at a spec module import binding ` +
           `(SPEC 4.5, 2.4, 14.8)`,
@@ -1933,13 +1942,15 @@ class CodeAnalyzer {
     if (!rootBinding.target.defined) {
       // SPEC 14.7: a text(...) call that does not resolve — into a member
       // whose identities are all undefined (SPEC 14.19, 11.2), a
-      // condition decidable per file. The finding spans the argument
-      // chain, as an unresolved defined-member argument's would (SPEC 14).
-      // It is condition 7 alone whatever module the callee's `text`
-      // export belongs to: 14.11 needs an argument that resolves.
+      // condition decidable per file. The finding spans the call, callee
+      // through closing parenthesis, as the call's would-be occurrence
+      // does and an unresolved defined-member argument's finding does
+      // (SPEC 14, 5.7). It is condition 7 alone whatever module the
+      // callee's `text` export belongs to: 14.11 needs an argument that
+      // resolves.
       this.addFinding(
         7,
-        argument,
+        call,
         `unknown TypeScript reference: the text(...) argument referencing ` +
           `${describeTargetChain(
             rootBinding.target,

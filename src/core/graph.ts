@@ -617,7 +617,9 @@ export function buildWorkspaceGraph(
   }
 
   // SPEC 5.2/4.3/4.5: `references` from TypeScript markers and `embeds`
-  // from TypeScript `text(...)` calls; unknown targets are 14.7.
+  // from TypeScript `text(...)` calls; unknown targets are 14.7, located
+  // by the span the occurrence would occupy (SPEC 14, 5.7): a marker's
+  // bare chain, a `text(...)` call's entire call expression.
   for (const analysis of code) {
     for (const reference of analysis.references) {
       const resolved = resolution.resolveExternal(
@@ -631,7 +633,7 @@ export function buildWorkspaceGraph(
           unresolvedFinding(
             7,
             analysis.path,
-            reference.range,
+            reference.occurrenceRange,
             `unknown TypeScript reference: the ${construct} referencing ` +
               `${describeExternal(reference.modulePath, reference.segments)} ` +
               `does not resolve — ${resolved.reason}` +
@@ -815,7 +817,9 @@ export function buildWorkspaceGraph(
             `${describeExternal(reference.modulePath, reference.segments)} ` +
             `does not resolve — ${resolved.reason}; correct or remove the ` +
             `reference (SPEC 4.5, 14.7)`,
-          [{ file: analysis.file, range: reference.range }],
+          // SPEC 14, 5.7: located as the occurrence would be — a
+          // `text(...)` call callee through closing parenthesis.
+          [{ file: analysis.file, range: reference.occurrenceRange }],
         ),
       );
     }
