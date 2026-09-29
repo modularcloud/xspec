@@ -23,14 +23,18 @@
 // the paths `assessDestinationPath` names.
 //
 // The would-be reason `refused-cycle` is evaluated over the
-// post-operation workspace modeled in identity space (the current graph's
-// nodes, edges, and occurrences with the operation's identity mapping
-// applied, the section form's re-parenting included), never by
-// reanalyzing rewritten text: its one finding, however many cycles the
-// move would close, locates the participating reference spellings and
-// import declarations at their CURRENT, pre-operation coordinates (SPEC
-// 14: a refusal renders as precisely as a finding; 6.6: previews report
-// in current, pre-operation coordinates).
+// post-operation workspace, never by reanalyzing rewritten text: the
+// dependency half in identity space (the current graph's nodes, edges,
+// and occurrences with the operation's identity mapping applied, the
+// section form's re-parenting included), the spec-import half over the
+// import relation the operation leaves — a file move's declarations, the
+// paths mapped; a section move's as its composition's own import
+// bookkeeping keeps and adds them (core/move.ts `judgeMoveSectionRewrite`),
+// so the refusal and the rewrite cannot disagree. Its one finding, however
+// many cycles the move would close, locates the participating reference
+// spellings and import declarations at their CURRENT, pre-operation
+// coordinates (SPEC 14: a refusal renders as precisely as a finding; 6.6:
+// previews report in current, pre-operation coordinates).
 //
 // `refused-invalid-rewrite` alone reads would-be text: the section form's
 // exact edits composed exactly as the move plan composes them
@@ -57,7 +61,7 @@ import { compareLocations, sortLocations } from "./findings.js";
 import { findCycles } from "./graph.js";
 import type { SpecFileAnalysis, WorkspaceGraph } from "./graph.js";
 import type { SpecSection } from "./mdx.js";
-import type { MoveSectionRewriteVerdict } from "./move.js";
+import type { MoveSectionRewriteVerdict, WouldBeSpecImport } from "./move.js";
 import { judgeMoveSectionRewrite } from "./move.js";
 import type { PathText } from "./path-text.js";
 import { replaceIdPrefix } from "./rename.js";
@@ -367,12 +371,6 @@ function moveSectionIdentityMap(
   };
 }
 
-/** The file part of a node identity (SPEC 1.5: `path#id`, or the path). */
-function identityFilePart(identity: string): string {
-  const hash = identity.indexOf("#");
-  return hash === -1 ? identity : identity.slice(0, hash);
-}
-
 // ---------------------------------------------------------------------------
 // Shared reason evaluations
 // ---------------------------------------------------------------------------
@@ -593,150 +591,83 @@ function wouldBeDependencyCycles(
   });
 }
 
-/** How a would-be operation relocates files and spellings (SPEC 6.5). */
-interface RelocationModel {
-  /** A file's post-operation path (the file form's rename; else identity). */
-  readonly postPathOf: (path: string) => string;
-  /** A post-operation path's current file, or null for a created one. */
-  readonly prePathOf: (path: string) => string | null;
-  /** The post-operation home of one reference spelling (SPEC 6.5). */
-  readonly postHomeOf: (path: string, range: ByteRange) => string;
-  /** Post-operation spec files that exist in no current analysis. */
-  readonly createdFiles: readonly string[];
+/**
+ * The spec import relation a file-form move leaves (SPEC 6.5 "Import
+ * edits", 2.1): every declaration, none removed and none added — each
+ * specifier designating the moved file, and each of the moved file's own,
+ * rewritten exactly where it would no longer designate its source, so
+ * every declaration keeps designating what it designated — the paths
+ * mapped, each declaration located by its own characters.
+ */
+function fileMoveSpecImports(
+  specs: readonly SpecFileAnalysis[],
+  originPath: string,
+  destination: string,
+): WouldBeSpecImport[] {
+  const postPathOf = (path: string): string =>
+    path === originPath ? destination : path;
+  const imports: WouldBeSpecImport[] = [];
+  for (const spec of specs) {
+    for (const declared of spec.imports.imports) {
+      if (declared.targetPath === null) continue; // valid workspaces only
+      imports.push({
+        importer: postPathOf(spec.document.path),
+        imported: postPathOf(declared.targetPath),
+        locations: [
+          { file: spec.document.file, range: declared.statement.range },
+        ],
+      });
+    }
+  }
+  return imports;
 }
 
 /**
  * The spec-import half of `refused-cycle` (SPEC 14, 2.1): cycles in the
- * would-be file-level import relation among spec source files. The
- * relation is modeled in identity space: an import whose binding was
- * already unreferenced stays (SPEC 6.5), and beyond those, a
- * post-operation import edge H → T exists exactly when a reference
- * spelling homed in H post-operation resolves to a node of T ≠ H — the
- * rewrite adds an import when a rewritten reference needs a module
- * binding its file lacks and removes one whose binding is left without
- * references (SPEC 6.5). Each cycle carries its full path located
- * in pre-operation coordinates (SPEC 14 location cardinality), step by
- * step: for a step H → T, the import declarations of H designating T
- * that exist before the operation, each by its own characters — H then
- * holds a binding of T, which every spelling the operation roots in H at
- * T's module uses (SPEC 6.5: an existing binding is chosen over an
- * addition), so no import of T is added to H — or, where H holds none,
- * the import the operation would add, which exists in no pre-operation
- * coordinates: every reference spelling the operation roots at its
- * binding, whether or not the spelling's characters change (SPEC 14,
- * 6.5) — each spelling homed in H post-operation whose target then lies
- * in T, at its current location (a moved-text spelling inside the
+ * would-be file-level import relation among spec source files, `imports`
+ * — the relation the operation leaves: every declaration its rewrite
+ * keeps and every one it adds (SPEC 6.5 "Import edits"), a declaration it
+ * removes standing in no post-operation file, so taking part in no cycle
+ * and located by none. Each cycle carries its full path located in
+ * pre-operation coordinates (SPEC 14 location cardinality), step by step:
+ * for a step H → T, each participating declaration of H designating T —
+ * one existing before the operation by its own characters, one the
+ * operation would add, which exists in no pre-operation coordinates, by
+ * every reference spelling the operation roots at its binding, whether or
+ * not the spelling's characters change (a moved-text spelling inside the
  * origin's moved construct).
  */
 function wouldBeImportCycles(
-  specs: readonly SpecFileAnalysis[],
-  graph: WorkspaceGraph,
-  map: IdentityMap,
-  relocation: RelocationModel,
+  imports: readonly WouldBeSpecImport[],
 ): WouldBeCycle[] {
-  const specByPath = new Map<string, SpecFileAnalysis>();
-  for (const spec of specs) {
-    specByPath.set(spec.document.path, spec);
-  }
   const adjacency = new Map<string, Set<string>>();
-  const addEdge = (source: string, target: string): void => {
-    if (source === target) return;
-    let targets = adjacency.get(source);
-    if (targets === undefined) adjacency.set(source, (targets = new Set()));
-    targets.add(target);
-  };
-
-  // SPEC 6.5/2.1: an import whose binding was already unreferenced stays —
-  // its file-level relation survives the operation unchanged (paths
-  // mapped).
-  for (const spec of specs) {
-    const referencedRoots = new Set<string>();
-    for (const dependency of spec.references.dependencies) {
-      const spelling = dependency.reference.spelling;
-      if (spelling.form === "chain") referencedRoots.add(spelling.rootName);
+  const located = new Map<string, Map<string, FindingLocation[]>>();
+  const nodes: string[] = [];
+  for (const declared of imports) {
+    const { importer, imported } = declared;
+    // No valid workspace holds a self-import (SPEC 2.1), and no rewrite
+    // adds one: a moved spelling targeting its new file turns local
+    // (6.5). One arises only where a file move's destination is another
+    // spec source's path, refused as occupied, the two files' paths
+    // merged — no would-be workspace holds both files there.
+    if (importer === imported) continue;
+    nodes.push(importer, imported);
+    let targets = adjacency.get(importer);
+    if (targets === undefined) adjacency.set(importer, (targets = new Set()));
+    targets.add(imported);
+    let byImported = located.get(importer);
+    if (byImported === undefined) {
+      located.set(importer, (byImported = new Map()));
     }
-    for (const embedded of spec.references.embeddings) {
-      const spelling = embedded.reference?.spelling;
-      if (spelling !== undefined && spelling.form === "chain") {
-        referencedRoots.add(spelling.rootName);
-      }
-    }
-    for (const declared of spec.imports.imports) {
-      if (declared.targetPath === null || declared.bindingName === null) {
-        continue;
-      }
-      if (!referencedRoots.has(declared.bindingName)) {
-        addEdge(
-          relocation.postPathOf(spec.document.path),
-          relocation.postPathOf(declared.targetPath),
-        );
-      }
-    }
+    let locations = byImported.get(imported);
+    if (locations === undefined) byImported.set(imported, (locations = []));
+    locations.push(...declared.locations);
   }
-
-  // Every requirement-side reference spelling, homed and retargeted: the
-  // spec-file import relation the rewrite leaves behind (SPEC 6.5), each
-  // spelling kept at its CURRENT location under its would-be step (home
-  // file → target's file): where the home holds no binding of the
-  // target's module, those spellings locate the import the step adds
-  // (SPEC 14). Code files do not participate in SPEC import cycles (2.1:
-  // among spec source files).
-  const homedSpellings = new Map<string, Map<string, FindingLocation[]>>();
-  for (const occurrence of graph.occurrences) {
-    if (occurrence.source === null) continue;
-    if (graph.requirementNode(occurrence.source) === undefined) continue;
-    if (typeof occurrence.file !== "string") continue; // valid workspaces only
-    const home = relocation.postHomeOf(occurrence.file, occurrence.range);
-    const targetFile = identityFilePart(map(occurrence.target));
-    // SPEC 2.2/6.5: a spelling whose target lies in its own file is in
-    // local form there, rooted at no binding.
-    if (home === targetFile) continue;
-    addEdge(home, targetFile);
-    let byTarget = homedSpellings.get(home);
-    if (byTarget === undefined) {
-      homedSpellings.set(home, (byTarget = new Map()));
-    }
-    let spellings = byTarget.get(targetFile);
-    if (spellings === undefined) byTarget.set(targetFile, (spellings = []));
-    spellings.push({ file: occurrence.file, range: occurrence.range });
-  }
-
-  // The import declarations of `home` designating `target` that exist
-  // before the operation, both read at their current paths (a created
-  // file holds none and is designated by none).
-  const existingImports = (home: string, target: string): FindingLocation[] => {
-    const sourcePath = relocation.prePathOf(home);
-    const targetPath = relocation.prePathOf(target);
-    if (sourcePath === null || targetPath === null) return [];
-    const spec = specByPath.get(sourcePath);
-    if (spec === undefined) return [];
-    return spec.imports.imports
-      .filter((declared) => declared.targetPath === targetPath)
-      .map((declared) => ({
-        file: spec.document.file,
-        range: declared.statement.range,
-      }));
-  };
-
-  const nodes = [
-    ...specs.map((spec) => relocation.postPathOf(spec.document.path)),
-    ...relocation.createdFiles,
-  ];
   return findCycles(nodes, adjacency).map((cycle) => {
-    // Locate the would-be cycle's full path in pre-operation coordinates
-    // (SPEC 14 location cardinality, the function comment): for each step,
-    // the home's existing imports of the target by their own characters —
-    // or, where it holds none, the import the operation would add, by
-    // every reference spelling the operation roots at its binding.
     const locations: FindingLocation[] = [];
     for (let step = 0; step + 1 < cycle.length; step += 1) {
-      const home = cycle[step]!;
-      const target = cycle[step + 1]!;
-      const existing = existingImports(home, target);
       locations.push(
-        ...(existing.length > 0
-          ? existing
-          : (homedSpellings.get(home)?.get(target) ?? [])),
+        ...(located.get(cycle[step]!)?.get(cycle[step + 1]!) ?? []),
       );
     }
     return { kind: "import", path: cycle, locations };
@@ -977,15 +908,9 @@ export function evaluateMoveFileRefusals(
   // graph, but the reason is read on its own terms, SPEC 14) — one
   // finding for every cycle, dependency and spec import alike.
   const map = moveFileIdentityMap(originPath, destination);
-  const relocation: RelocationModel = {
-    postPathOf: (path) => (path === originPath ? destination : path),
-    prePathOf: (path) => (path === destination ? originPath : path),
-    postHomeOf: (path) => (path === originPath ? destination : path),
-    createdFiles: [],
-  };
   const cycle = refusedCycleFinding([
     ...wouldBeDependencyCycles(graph, map, null, []),
-    ...wouldBeImportCycles(specs, graph, map, relocation),
+    ...wouldBeImportCycles(fileMoveSpecImports(specs, originPath, destination)),
   ]);
   if (cycle !== null) findings.push(cycle);
 
@@ -1309,18 +1234,32 @@ export function evaluateMoveSectionRefusals(
   // an absent path (`refused-destination-exists` otherwise), and the target
   // parent present outside the moved subtree
   // (`refused-missing-target-parent` otherwise).
-  if (invalidId === null) {
-    const insertionPoint =
-      parentUsable && (target !== null || probe.occupant === "absent");
+  //
+  // One composition (core/move.ts `judgeMoveSectionRewrite`) serves this
+  // verdict and `refused-cycle`'s would-be spec import relation (below),
+  // which reads nothing of the new ID — which references the move
+  // re-roots, at which bindings, and which declarations it adds and
+  // removes are fixed by the moved subtree, the origin, and the target
+  // file (SPEC 6.5 "Import edits") — so where the new ID is invalid, the
+  // relation alone read, the old ID stands in for it, composing no target:
+  // spelled verbatim, an invalid ID leaves the would-be text undefined
+  // (6.5), perhaps without any spelling at all.
+  const judgement =
+    invalidId === null || parentUsable
+      ? judgeMoveSectionRewrite(
+          specs,
+          originPath,
+          oldId,
+          targetPath,
+          invalidId === null ? newId : oldId,
+          invalidId === null &&
+            parentUsable &&
+            (target !== null || probe.occupant === "absent"),
+        )
+      : null;
+  if (invalidId === null && judgement !== null) {
     const invalidRewrite = invalidRewriteFinding(
-      judgeMoveSectionRewrite(
-        specs,
-        originPath,
-        oldId,
-        targetPath,
-        newId,
-        insertionPoint,
-      ),
+      judgement.verdict,
       origin,
       movedSection.range,
       `${originPath}#${oldId}`,
@@ -1330,18 +1269,17 @@ export function evaluateMoveSectionRefusals(
   }
 
   const map = moveSectionIdentityMap(originPath, oldId, targetPath, newId);
-  const withinMovedRange = (range: ByteRange): boolean =>
-    range.start >= movedSection.range.start &&
-    range.end <= movedSection.range.end;
 
   // SPEC 14 `refused-cycle`: the would-be dependency graph — the moved
   // root re-parented from its current parent to the target parent (the
   // target file's root for a single-segment `<new-id>`, SPEC 6.5) — and
-  // the would-be spec import relation, every cycle of either reported
+  // the would-be spec import relation, the composition's (above): every
+  // declaration the rewrite keeps and every one it adds, each located as
+  // SPEC 14 locates a participant — every cycle of either reported
   // together as the one finding of this one reason. It needs a definable
   // post-operation shape: with the insertion point missing (above) there
   // is no would-be graph to judge.
-  if (!parentUsable) return findings;
+  if (!parentUsable || judgement === null) return findings;
   const movedIdentity = `${originPath}#${oldId}`;
   const currentParent = movedSection.parent;
   const currentParentIdentity =
@@ -1359,13 +1297,6 @@ export function evaluateMoveSectionRefusals(
     added: { parent: newParentIdentity, child: map(movedIdentity) },
   };
   const createdTarget = target === null;
-  const relocation: RelocationModel = {
-    postPathOf: (path) => path,
-    prePathOf: (path) => (createdTarget && path === targetPath ? null : path),
-    postHomeOf: (path, range) =>
-      path === originPath && withinMovedRange(range) ? targetPath : path,
-    createdFiles: createdTarget ? [targetPath] : [],
-  };
   const cycle = refusedCycleFinding([
     ...wouldBeDependencyCycles(
       graph,
@@ -1374,7 +1305,7 @@ export function evaluateMoveSectionRefusals(
       // A created target file's root node exists in no current graph.
       createdTarget ? [targetPath] : [],
     ),
-    ...wouldBeImportCycles(specs, graph, map, relocation),
+    ...wouldBeImportCycles(judgement.imports),
   ]);
   if (cycle !== null) findings.push(cycle);
 

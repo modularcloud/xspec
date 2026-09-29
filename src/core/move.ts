@@ -783,7 +783,8 @@ class SpecImportPlan {
   private readonly arrivals = new Map<string, number>();
   private readonly taken = new Set<string>();
   private readonly additions = new Map<string, string>();
-  private readonly addedSpellings: FindingLocation[] = [];
+  /** Per added module: the spellings rooted at its added binding. */
+  private readonly addedSpellings = new Map<string, FindingLocation[]>();
 
   /** `spec` is null for a target file the move creates (SPEC 6.5). */
   constructor(private readonly spec: SpecFileAnalysis | null) {
@@ -806,9 +807,10 @@ class SpecImportPlan {
    * file (SPEC 6.5: an import is added when a rewritten reference needs a
    * module binding its file lacks). Counts one arrival per call.
    * `spelling` is the reference's occurrence in pre-operation coordinates
-   * (5.7), recorded where the binding is an added one: the spellings a
-   * `refused-invalid-rewrite` locates when no offset admits the addition
-   * (SPEC 14), whether or not their characters change.
+   * (5.7), recorded, per module, where the binding is an added one: the
+   * spellings a `refused-invalid-rewrite` locates when no offset admits the
+   * addition, and a `refused-cycle` when the addition closes a would-be
+   * spec import cycle (SPEC 14), whether or not their characters change.
    */
   bindingFor(modulePath: string, spelling: FindingLocation): string {
     if (this.spec !== null) {
@@ -822,7 +824,12 @@ class SpecImportPlan {
         }
       }
     }
-    this.addedSpellings.push(spelling);
+    let spellings = this.addedSpellings.get(modulePath);
+    if (spellings === undefined) {
+      spellings = [];
+      this.addedSpellings.set(modulePath, spellings);
+    }
+    spellings.push(spelling);
     const added = this.additions.get(modulePath);
     if (added !== undefined) {
       return added;
@@ -885,10 +892,22 @@ class SpecImportPlan {
     );
   }
 
-  /** The added imports, ordered by module path bytes (deterministic). */
-  addedImports(): { readonly modulePath: string; readonly name: string }[] {
+  /**
+   * The added imports, ordered by module path bytes (deterministic), each
+   * with every reference spelling the operation roots at its binding, at
+   * its pre-operation occurrence (SPEC 6.5, 14, 5.7).
+   */
+  addedImports(): {
+    readonly modulePath: string;
+    readonly name: string;
+    readonly spellings: readonly FindingLocation[];
+  }[] {
     return [...this.additions.entries()]
-      .map(([modulePath, name]) => ({ modulePath, name }))
+      .map(([modulePath, name]) => ({
+        modulePath,
+        name,
+        spellings: this.addedSpellings.get(modulePath) ?? [],
+      }))
       .sort((a, b) => compareBytes(a.modulePath, b.modulePath));
   }
 
@@ -898,7 +917,7 @@ class SpecImportPlan {
    * 14, 5.7).
    */
   addedBindingSpellings(): readonly FindingLocation[] {
-    return this.addedSpellings;
+    return this.addedImports().flatMap((addition) => addition.spellings);
   }
 }
 
@@ -1531,6 +1550,45 @@ export interface MoveSectionRewriteVerdict {
 }
 
 /**
+ * One declaration of the spec import relation a section move's rewrite
+ * leaves (SPEC 6.5 "Import edits", 2.1; 14 `refused-cycle`): the importing
+ * spec source and the one it designates, by path — a section move
+ * relocates no file, and the target file is a created one where the move
+ * creates it — located in pre-operation coordinates: a declaration
+ * existing before the operation that the rewrite keeps, by its own
+ * characters; one the rewrite adds, which exists in no pre-operation
+ * coordinates, by every reference spelling the operation roots at its
+ * binding, whether or not the spelling's characters change (SPEC 14).
+ */
+export interface WouldBeSpecImport {
+  readonly importer: string;
+  readonly imported: string;
+  readonly locations: readonly FindingLocation[];
+}
+
+/**
+ * What the refusal evaluation reads of a section move's composition
+ * (SPEC 6.5, 14): the would-be text's verdict (`refused-invalid-rewrite`)
+ * and the spec import relation the rewrite leaves (`refused-cycle`).
+ */
+export interface MoveSectionJudgement {
+  readonly verdict: MoveSectionRewriteVerdict;
+  /**
+   * The spec import relation the rewrite leaves, read from the
+   * composition's own import bookkeeping, so the refusal and the rewrite
+   * cannot disagree: every declaration it keeps — an import whose
+   * bindings were already unused, and a block's first declaration the
+   * joint-removal rule keeps, its binding left unused, included — and
+   * every one it adds, a declaration it removes standing in no
+   * post-operation file (SPEC 6.5 "Import edits"). Spec sources in the
+   * analyses' order, each file's kept declarations in source order, then
+   * its additions in module-path byte order; a created target file's
+   * additions last.
+   */
+  readonly imports: readonly WouldBeSpecImport[];
+}
+
+/**
  * How the refusal evaluation composes a section move's would-be files
  * (SPEC 6.5 "Validation and refusals"): beside every other applicable
  * reason — the exact self-move, a moved text holding an import
@@ -1576,14 +1634,20 @@ export function planMoveSection(
 }
 
 /**
- * SPEC 6.5 "Validation and refusals", 14 `refused-invalid-rewrite`: judge
- * a section-form move's exact edits over a workspace passing `build`'s
- * validations, under an intrinsically valid `<new-id>` — the would-be text
- * of the origin, and of the target where `insertionPoint` holds, judged
+ * SPEC 6.5 "Validation and refusals", 14 `refused-invalid-rewrite` and
+ * `refused-cycle`: judge a section-form move's exact edits over a
+ * workspace passing `build`'s validations — the would-be text of the
+ * origin, and of the target where `insertionPoint` holds, judged
  * well-formed or not (14.20), and every spec source judged for an
  * admissible offset for the additions it needs — composed exactly as the
- * plan composes them. Code sources are not judged: a TypeScript source's
- * end admits a top-level declaration.
+ * plan composes them, beside the spec import relation the rewrite leaves.
+ * The verdict means something under an intrinsically valid `<new-id>`
+ * alone; the relation reads nothing of `<new-id>`: which references the
+ * move re-roots, at which bindings, and which declarations it adds and
+ * removes are fixed by the moved subtree, the origin, and the target file
+ * (SPEC 6.5 "Import edits"). Code sources are not judged: a TypeScript
+ * source's end admits a top-level declaration, and no code source takes
+ * part in a spec import cycle (2.1).
  */
 export function judgeMoveSectionRewrite(
   specs: readonly SpecFileAnalysis[],
@@ -1592,17 +1656,25 @@ export function judgeMoveSectionRewrite(
   targetPath: string,
   newId: string,
   insertionPoint: boolean,
-): MoveSectionRewriteVerdict {
-  return composeMoveSection(specs, [], originPath, oldId, targetPath, newId, {
-    insertionPoint,
-  }).verdict;
+): MoveSectionJudgement {
+  const { verdict, imports } = composeMoveSection(
+    specs,
+    [],
+    originPath,
+    oldId,
+    targetPath,
+    newId,
+    { insertionPoint },
+  );
+  return { verdict, imports };
 }
 
 /**
  * The section-form composition behind `planMoveSection` (`judging` null:
  * the preconditions asserted, every file composed, the plan returned) and
  * `judgeMoveSectionRewrite` (the preconditions another refusal reason
- * reports tolerated, the verdict judged, and no plan).
+ * reports tolerated, the verdict judged and the would-be spec import
+ * relation read, and no plan).
  */
 function composeMoveSection(
   specs: readonly SpecFileAnalysis[],
@@ -1615,6 +1687,8 @@ function composeMoveSection(
 ): {
   readonly plan: MoveSectionPlan | null;
   readonly verdict: MoveSectionRewriteVerdict;
+  /** Judging, the would-be spec import relation; empty for a plan. */
+  readonly imports: readonly WouldBeSpecImport[];
 } {
   const origin = specs.find((spec) => spec.document.path === originPath);
   if (origin === undefined) {
@@ -2640,6 +2714,60 @@ function composeMoveSection(
     rewrites.push({ path: analysis.path, content });
   }
 
+  // SPEC 6.5 "Import edits", 14 `refused-cycle`: judging, the spec import
+  // relation the rewrite leaves, read from this composition's own import
+  // bookkeeping, so the refusal and the rewrite cannot disagree — each
+  // spec source's declarations but those its removals take (the
+  // joint-removal rule of `removedImports` included: a block's first
+  // declaration stays, its binding unused, where the others' removal would
+  // leave the block headed by anything else) and those the origin deletion
+  // takes with a moved text holding them (`refused-moved-import`), each by
+  // its own characters; then the declarations the rewrite adds to it, each
+  // by the spellings rooted at its binding; a created target file's
+  // additions last. A same-file move plans no import edit, every
+  // declaration staying.
+  const imports: WouldBeSpecImport[] = [];
+  const pushAdditions = (path: string): void => {
+    for (const addition of importPlans.get(path)?.addedImports() ?? []) {
+      imports.push({
+        importer: path,
+        imported: addition.modulePath,
+        locations: addition.spellings,
+      });
+    }
+  };
+  if (judging !== null) {
+    for (const spec of specs) {
+      const path = spec.document.path;
+      const plan = importPlans.get(path);
+      const removed = new Set(
+        plan === undefined
+          ? []
+          : removedImportsOf(spec, plan, encoder.encode(spec.document.text)),
+      );
+      for (const declared of spec.imports.imports) {
+        if (
+          declared.targetPath === null ||
+          removed.has(declared) ||
+          deletedWithMoved(spec, declared)
+        ) {
+          continue;
+        }
+        imports.push({
+          importer: path,
+          imported: declared.targetPath,
+          locations: [
+            { file: spec.document.file, range: declared.statement.range },
+          ],
+        });
+      }
+      pushAdditions(path);
+    }
+    if (createsTargetFile) {
+      pushAdditions(targetPath);
+    }
+  }
+
   return {
     // Judging, no plan exists: the operation is refused wherever the
     // verdict, or any other reason, finds cause — its target path perhaps
@@ -2662,5 +2790,6 @@ function composeMoveSection(
             previewFiles: preview.files(),
           },
     verdict: { illFormed, inadmissible },
+    imports,
   };
 }
