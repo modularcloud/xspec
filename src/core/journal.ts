@@ -183,10 +183,13 @@ export function serializeJournalEntry(entry: JournalEntry): string {
 
 const LF = 0x0a;
 const decoder = new TextDecoder();
+const encoder = new TextEncoder();
 
 /**
  * Parse a journal file's bytes (SPEC 6.1): one entry per line, the final
- * line's terminator optional (the product always writes it). Every line that
+ * line's terminator optional (the product always writes it, and an append
+ * terminates an unterminated last line first, `appendedJournalBytes`,
+ * so the new entry never joins it). Every line that
  * is not the canonical byte form of a valid entry yields one condition-13
  * finding naming the line (SPEC 14.13); the remaining lines' entries are
  * still returned, in file order, so diagnostics can describe the rest of the
@@ -212,6 +215,43 @@ export function parseJournal(bytes: Uint8Array): ParsedJournal {
     offset = end + 1;
   }
   return { entries, findings };
+}
+
+/**
+ * The journal as it stands once `entry` is appended to `prior` (SPEC 6.1:
+ * append-only, one entry per line; 13.4: line-oriented, so concurrent
+ * additions merge textually), on the line model `parseJournal` reads.
+ * `prior` is the journal as loaded and validated — null for an absent
+ * journal (SPEC 6.1). The result is `prior`'s bytes unchanged, then a line
+ * feed where they are nonempty and do not end with one — a last line left
+ * unterminated by hand or by a merge tool, which `parseJournal` reads as
+ * an entry, so a valid journal — then the entry's canonical line and its
+ * terminator: the new entry always stands on a line of its own, never
+ * joined to the prior last line, and the prior bytes stay a byte prefix.
+ * An absent or empty journal, and one ending in its terminator, gain the
+ * entry's line alone.
+ *
+ * This is the one composition of the post-append journal: the rewritten-
+ * workspace analyses of `rename` and `move` validate against it and derive
+ * the graph data's recorded inputs from it (SPEC 6.4, 6.5, 5.4, 13.3), and
+ * the append writes it (workspace/journal.ts `appendJournalEntry`), so the
+ * file written is byte-identical with the journal so validated.
+ */
+export function appendedJournalBytes(
+  prior: Uint8Array | null,
+  entry: JournalEntry,
+): Uint8Array {
+  const line = encoder.encode(serializeJournalEntry(entry) + "\n");
+  const before = prior ?? new Uint8Array(0);
+  const separator =
+    before.length > 0 && before[before.length - 1] !== LF ? 1 : 0;
+  const out = new Uint8Array(before.length + separator + line.length);
+  out.set(before, 0);
+  if (separator === 1) {
+    out[before.length] = LF;
+  }
+  out.set(line, before.length + separator);
+  return out;
 }
 
 /** One 14.13 finding for a bad journal line, naming the line (SPEC 14.13). */

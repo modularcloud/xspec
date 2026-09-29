@@ -26,10 +26,10 @@ import type { Finding } from "../core/findings.js";
 import { pathFinding } from "../core/findings.js";
 import type { JournalEntry, PositionedJournalEntry } from "../core/journal.js";
 import {
+  appendedJournalBytes,
   Journal,
   JOURNAL_PATH,
   parseJournal,
-  serializeJournalEntry,
 } from "../core/journal.js";
 import {
   isAbsenceFailure,
@@ -257,10 +257,13 @@ export async function loadJournal(root: string): Promise<LoadedJournal> {
  * append-only, one entry per line, byte-deterministic; the file comes into
  * existence with the first journaled operation). `prior` is the journal as
  * the caller loaded and validated it (`LoadedJournal.rawBytes`: null for
- * an absent journal, SPEC 6.1), and the journal becomes `prior` followed by
- * the entry's line — the very bytes of the post-append journal the caller
- * validated the rewritten workspace against and derived its outputs from
- * (SPEC 6.4, 5.4, 13.3). The write goes through the workspace write
+ * an absent journal, SPEC 6.1), and the journal becomes the post-append
+ * journal core composes from it (`appendedJournalBytes`): `prior`, a line
+ * feed terminating its last line where that line lacks one, then the
+ * entry's line — the very bytes the caller validated the rewritten
+ * workspace against and derived its outputs from (SPEC 6.4, 6.5, 5.4,
+ * 13.3), since it composes them with the same function over the same
+ * inputs. The write goes through the workspace write
  * layer's atomic append (writes.ts `appendDurableFile`): the complete new
  * journal replaces the file by one rename, so a concurrent reader observes
  * the prior journal or the complete new one, and an append refused or
@@ -279,10 +282,12 @@ export async function appendJournalEntry(
   prior: Uint8Array | null,
   entry: JournalEntry,
 ): Promise<void> {
+  const next = appendedJournalBytes(prior, entry);
+  // `prior` is a byte prefix of `next`, so the addition is `next` past it.
   await appendDurableFile(
     root,
     JOURNAL_PATH,
     prior,
-    serializeJournalEntry(entry) + "\n",
+    next.subarray(prior === null ? 0 : prior.length),
   );
 }

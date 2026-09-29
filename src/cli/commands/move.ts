@@ -91,7 +91,7 @@ import type {
 import { orderSourceWrites } from "../../core/edits.js";
 import type { ExitCode } from "../../core/findings.js";
 import type { SpecFileAnalysis } from "../../core/graph.js";
-import { serializeJournalEntry } from "../../core/journal.js";
+import { appendedJournalBytes } from "../../core/journal.js";
 import type { MoveFilePlan, MoveSectionPlan } from "../../core/move.js";
 import { planMoveFile, planMoveSection } from "../../core/move.js";
 import type {
@@ -191,21 +191,6 @@ function parseMoveArgument(raw: string): MoveArgument {
     return { file: raw, id: null };
   }
   return { file: raw.slice(0, hash), id: raw.slice(hash + 1) };
-}
-
-/** Concatenate byte arrays (the hypothetical post-append journal bytes). */
-function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
-  let total = 0;
-  for (const part of parts) {
-    total += part.length;
-  }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const part of parts) {
-    out.set(part, offset);
-    offset += part.length;
-  }
-  return out;
 }
 
 /**
@@ -503,13 +488,14 @@ async function reanalyzeMoved(
     findings: [],
   };
   // SPEC 6.4, 5.4: the journal as validated — the bytes this analysis
-  // loaded (null for an absent journal, SPEC 6.1) — plus the new entry.
-  // Validation passed, so it bore no 14.13 finding: an unreadable journal,
-  // its content refused (SPEC 14.25) included, never reaches this point.
-  const currentJournal = analysis.journal.rawBytes;
-  const entryLine = encoder.encode(serializeJournalEntry(plan.entry) + "\n");
-  const journalBytes = concatBytes(
-    currentJournal === null ? [entryLine] : [currentJournal, entryLine],
+  // loaded (null for an absent journal, SPEC 6.1) — plus the new entry on
+  // a line of its own, composed exactly as the append will write it
+  // (`appendedJournalBytes`, SPEC 6.1, 13.3). Validation passed, so it bore
+  // no 14.13 finding: an unreadable journal, its content refused
+  // (SPEC 14.25) included, never reaches this point.
+  const journalBytes = appendedJournalBytes(
+    analysis.journal.rawBytes,
+    plan.entry,
   );
   return analyzeWorkspaceContent(workspace.configuration, {
     classification,
@@ -710,13 +696,14 @@ async function reanalyzeSectionMoved(
     };
   }
   // SPEC 6.4, 5.4: the journal as validated — the bytes this analysis
-  // loaded (null for an absent journal, SPEC 6.1) — plus the new entry.
-  // Validation passed, so it bore no 14.13 finding: an unreadable journal,
-  // its content refused (SPEC 14.25) included, never reaches this point.
-  const currentJournal = analysis.journal.rawBytes;
-  const entryLine = encoder.encode(serializeJournalEntry(plan.entry) + "\n");
-  const journalBytes = concatBytes(
-    currentJournal === null ? [entryLine] : [currentJournal, entryLine],
+  // loaded (null for an absent journal, SPEC 6.1) — plus the new entry on
+  // a line of its own, composed exactly as the append will write it
+  // (`appendedJournalBytes`, SPEC 6.1, 13.3). Validation passed, so it bore
+  // no 14.13 finding: an unreadable journal, its content refused
+  // (SPEC 14.25) included, never reaches this point.
+  const journalBytes = appendedJournalBytes(
+    analysis.journal.rawBytes,
+    plan.entry,
   );
   return analyzeWorkspaceContent(workspace.configuration, {
     classification,

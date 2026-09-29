@@ -56,7 +56,7 @@
 import type { SourceClassification } from "../../core/discovery.js";
 import { orderSourceWrites } from "../../core/edits.js";
 import type { ExitCode } from "../../core/findings.js";
-import { serializeJournalEntry } from "../../core/journal.js";
+import { appendedJournalBytes } from "../../core/journal.js";
 import { evaluateRenameRefusals } from "../../core/refusal.js";
 import type { RenamePlan } from "../../core/rename.js";
 import { planRename } from "../../core/rename.js";
@@ -84,21 +84,6 @@ import {
   emitFindingsRefusal,
   validateRewrittenWorkspace,
 } from "./rewrite-validation.js";
-
-/** Concatenate byte arrays (the hypothetical post-append journal bytes). */
-function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
-  let total = 0;
-  for (const part of parts) {
-    total += part.length;
-  }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const part of parts) {
-    out.set(part, offset);
-    offset += part.length;
-  }
-  return out;
-}
 
 /**
  * The rename operation — run under workspace exclusivity (SPEC 13.5), or
@@ -277,13 +262,14 @@ async function reanalyzeRewritten(
     byPath.set(rewrite.path, rewrite.content);
   }
   // SPEC 6.4, 5.4: the journal as validated — the bytes this analysis
-  // loaded (null for an absent journal, SPEC 6.1) — plus the new entry.
-  // Validation passed, so it bore no 14.13 finding: an unreadable journal,
-  // its content refused (SPEC 14.25) included, never reaches this point.
-  const currentJournal = analysis.journal.rawBytes;
-  const entryLine = encoder.encode(serializeJournalEntry(plan.entry) + "\n");
-  const journalBytes = concatBytes(
-    currentJournal === null ? [entryLine] : [currentJournal, entryLine],
+  // loaded (null for an absent journal, SPEC 6.1) — plus the new entry on
+  // a line of its own, composed exactly as the append will write it
+  // (`appendedJournalBytes`, SPEC 6.1, 13.3). Validation passed, so it bore
+  // no 14.13 finding: an unreadable journal, its content refused
+  // (SPEC 14.25) included, never reaches this point.
+  const journalBytes = appendedJournalBytes(
+    analysis.journal.rawBytes,
+    plan.entry,
   );
   return analyzeWorkspaceContent(workspace.configuration, {
     classification: analysis.classification,
