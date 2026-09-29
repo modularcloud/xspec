@@ -54,6 +54,7 @@
 import { generateAuditItems } from "../../core/audit.js";
 import type { JsonObject } from "../../core/canonical-json.js";
 import { generateCoverageSessionItems } from "../../core/coverage-session.js";
+import type { SourceClassification } from "../../core/discovery.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import { generatePathBlocksItems } from "../../core/path-blocks.js";
 import type {
@@ -366,6 +367,7 @@ export async function loadSessionForCommand(
   name: string,
   invocation: Invocation,
   context: CommandContext,
+  discovered?: SourceClassification,
 ): Promise<
   LoadedSessionForCommand | { readonly ok: false; readonly exit: ExitCode }
 > {
@@ -375,8 +377,11 @@ export async function loadSessionForCommand(
 
   // Step 2 — SPEC 14.14/12.0: analyze the current workspace — a pure read;
   // configuration errors precede every argument check that consults the
-  // workspace, the unknown-session check below included.
-  const analyzed = await analyzeGraphForRead(invocation, context);
+  // workspace, the unknown-session check below included. A mutating
+  // subcommand hands in the classification it made before acquiring
+  // exclusivity, its configuration errors already reported there
+  // (SPEC 13.5; ./mutation.ts).
+  const analyzed = await analyzeGraphForRead(invocation, context, discovered);
   if (!analyzed.ok) {
     return { ok: false, exit: analyzed.exit };
   }

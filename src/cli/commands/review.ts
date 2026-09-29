@@ -7,12 +7,14 @@
 // `create` (mutating, SPEC 13.5) — its session name's form (SPEC 10.1),
 // its exactly-one-of rule (SPEC 10.7), and its `--strategy` vocabulary are
 // the parser's, judged before the configuration is loaded (12.0's syntax
-// class); then, under workspace exclusivity with the `--test-hold` seam:
-//   0. the analysis of the current workspace — the configuration search
-//      and the discovery of 7 precede every error consulting them (SPEC
-//      12.0): a configuration error, a discovery-level one included, exits
-//      2 (14.14), and a discovery read the environment refuses stops the
-//      command (14.25, exit 2);
+// class); then the configuration search and the discovery of 7, which
+// precede every error consulting them (SPEC 12.0) and exclusivity's
+// acquisition (SPEC 13.5; ./mutation.ts): a configuration error, a
+// discovery-level one included, exits 2 (14.14), and a discovery read the
+// environment refuses stops the command (14.25, exit 2); then, under
+// workspace exclusivity with the `--test-hold` seam:
+//   0. the analysis of the current workspace over that discovery — the
+//      sources' content and the journal read;
 //   1. `--coverage`: the named profile must be configured (SPEC 10.7 →
 //      12.0 "unknown profiles named in arguments", exit 2) — an argument
 //      check judged against the configuration, preceding the gate;
@@ -47,6 +49,7 @@
 // (SPEC 10.7).
 
 import type { JsonObject } from "../../core/canonical-json.js";
+import type { SourceClassification } from "../../core/discovery.js";
 import type { ExitCode, Finding } from "../../core/findings.js";
 import { orderFindings } from "../../core/findings.js";
 import type { ReviewSession, SessionParameters } from "../../core/review.js";
@@ -72,7 +75,6 @@ import {
   readBaseline,
   validateBaselineContent,
 } from "../../workspace/baseline.js";
-import { withMutationExclusivity } from "../../workspace/lock.js";
 import { assessWorkspaceRead } from "../../workspace/refresh.js";
 import {
   listSessionNames,
@@ -90,7 +92,8 @@ import {
   findingToJson,
   renderFindingsHuman,
 } from "../report.js";
-import { emitDocument, testHoldSpecOf, usageError } from "./common.js";
+import { emitDocument, usageError } from "./common.js";
+import { runMutatingCommand } from "./mutation.js";
 import {
   countsJson,
   effectiveTotals,
@@ -106,11 +109,15 @@ import {
 // `review create` (SPEC 10.7)
 // ---------------------------------------------------------------------------
 
-/** The `create` operation, run under workspace exclusivity (SPEC 13.5). */
+/**
+ * The `create` operation, run under workspace exclusivity (SPEC 13.5) over
+ * the classification made before acquisition (./mutation.ts).
+ */
 async function runCreate(
   invocation: Invocation,
   context: CommandContext,
   name: string,
+  discovered: SourceClassification,
 ): Promise<ExitCode> {
   const { workspace, stdout, stderr } = context;
 
@@ -118,13 +125,15 @@ async function runCreate(
   // syntax-class usage error reported before the configuration is loaded
   // and exclusivity acquired (SPEC 12.0, 13.5).
 
-  // SPEC 12.0, 14.14, 14.25: analyze the current workspace first — the
-  // configuration search and the discovery of 7 precede every error
-  // consulting them, so a configuration error (a discovery-level one
-  // included; exit 2) and a discovery read the environment refuses (exit
-  // 2, thrown from the walk) are met before the creation parameters are
-  // judged. Nothing is reported past this until the gate below.
-  const analyzed = await analyzeGraphForRead(invocation, context);
+  // SPEC 12.0, 14.14, 14.25, 13.5: the configuration search and the
+  // discovery of 7 precede every error consulting them and exclusivity's
+  // acquisition, so a configuration error (a discovery-level one included;
+  // exit 2) and a discovery read the environment refuses (exit 2, thrown
+  // from the walk) were met before acquisition (./mutation.ts). Analyze
+  // the current workspace over that discovery first — the creation
+  // parameters are judged past it. Nothing is reported past this until
+  // the gate below.
+  const analyzed = await analyzeGraphForRead(invocation, context, discovered);
   if (!analyzed.ok) {
     return analyzed.exit;
   }
@@ -318,19 +327,13 @@ export async function reviewCreateCommand(
     // Unreachable: the parser enforces the required flag (SPEC 10.7, 12.0).
     throw new Error("xspec internal error: review create without --name");
   }
-  // SPEC 13.5: `create` is a mutating subcommand — workspace exclusivity
-  // around the whole operation, with the `--test-hold` seam immediately
-  // after acquisition; a held workspace fails promptly as a usage error,
-  // modifying nothing.
-  const outcome = await withMutationExclusivity(
-    context.workspace.root,
-    testHoldSpecOf(invocation, context.cwd),
-    () => runCreate(invocation, context, name),
+  // SPEC 13.5: `create` is a mutating subcommand — discovery, then
+  // workspace exclusivity around every later check and read, with the
+  // `--test-hold` seam immediately after acquisition; a held workspace
+  // fails promptly as a usage error, modifying nothing (./mutation.ts).
+  return runMutatingCommand(invocation, context, true, (discovered) =>
+    runCreate(invocation, context, name, discovered),
   );
-  if (!outcome.ok) {
-    return usageError(invocation, context, outcome.usageMessage);
-  }
-  return outcome.value;
 }
 
 // ---------------------------------------------------------------------------

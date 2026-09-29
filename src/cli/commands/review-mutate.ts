@@ -1,7 +1,10 @@
 // The mutating `xspec review` subcommands beyond `create`: `split` and
 // `resolve` (SPEC 10.7). Both modify the session's durable file (SPEC 13.4,
 // 13.5), so both run under workspace mutual exclusion with the `--test-hold`
-// seam, exactly like `create`, `rename`, and `move`.
+// seam, exactly like `create`, `rename`, and `move`: acquired once the
+// sources are discovered — a discovery-level configuration error or refused
+// read reported first, exit 2 — and before every later check and read
+// (SPEC 13.5, 12.0; ./mutation.ts).
 //
 // Outcome precedence, per subcommand (shared steps through
 // review-session.ts's `loadSessionForCommand` — session existence, load with
@@ -33,6 +36,7 @@
 //      (SPEC 10.5, every strategy), the write path is validated
 //      (SPEC 14.22), and the session file is rewritten.
 
+import type { SourceClassification } from "../../core/discovery.js";
 import type { ExitCode } from "../../core/findings.js";
 import type { ResolveStatus } from "../../core/review.js";
 import { sessionFilePath } from "../../core/review.js";
@@ -41,7 +45,6 @@ import {
   resolveSessionItem,
   splitItemDecomposition,
 } from "../../core/review-derive.js";
-import { withMutationExclusivity } from "../../workspace/lock.js";
 import type { WorkspaceAnalysis } from "../../workspace/pipeline.js";
 import { writeSession } from "../../workspace/reviews.js";
 import { obstructedWritePathFindings } from "../../workspace/writes.js";
@@ -49,7 +52,8 @@ import type { Invocation } from "../args.js";
 import { flagValue } from "../args.js";
 import type { CommandContext } from "../io.js";
 import { emitFindingsReport } from "../report.js";
-import { emitDocument, testHoldSpecOf, usageError } from "./common.js";
+import { emitDocument, usageError } from "./common.js";
+import { runMutatingCommand } from "./mutation.js";
 import type { SessionGenerationRun } from "./review-session.js";
 import {
   buildSessionReadView,
@@ -120,14 +124,23 @@ async function writeSessionChecked(
 // `review split` (SPEC 10.7)
 // ---------------------------------------------------------------------------
 
-/** The `split` operation, run under workspace exclusivity (SPEC 13.5). */
+/**
+ * The `split` operation, run under workspace exclusivity (SPEC 13.5) over
+ * the classification made before acquisition (./mutation.ts).
+ */
 async function runSplit(
   invocation: Invocation,
   context: CommandContext,
   name: string,
   itemId: string,
+  discovered: SourceClassification,
 ): Promise<ExitCode> {
-  const loaded = await loadSessionForCommand(name, invocation, context);
+  const loaded = await loadSessionForCommand(
+    name,
+    invocation,
+    context,
+    discovered,
+  );
   if (!loaded.ok) {
     return loaded.exit;
   }
@@ -196,25 +209,23 @@ export async function reviewSplitCommand(
     // Unreachable: the parser enforces the positionals (SPEC 10.7).
     throw new Error("xspec internal error: review split without its arguments");
   }
-  // SPEC 13.5: workspace exclusivity around the whole operation, with the
-  // `--test-hold` seam immediately after acquisition; a held workspace
-  // fails promptly as a usage error, modifying nothing.
-  const outcome = await withMutationExclusivity(
-    context.workspace.root,
-    testHoldSpecOf(invocation, context.cwd),
-    () => runSplit(invocation, context, name, itemId),
+  // SPEC 13.5: discovery, then workspace exclusivity around every later
+  // check and read, with the `--test-hold` seam immediately after
+  // acquisition; a held workspace fails promptly as a usage error,
+  // modifying nothing (./mutation.ts).
+  return runMutatingCommand(invocation, context, true, (discovered) =>
+    runSplit(invocation, context, name, itemId, discovered),
   );
-  if (!outcome.ok) {
-    return usageError(invocation, context, outcome.usageMessage);
-  }
-  return outcome.value;
 }
 
 // ---------------------------------------------------------------------------
 // `review resolve` (SPEC 10.7)
 // ---------------------------------------------------------------------------
 
-/** The `resolve` operation, run under workspace exclusivity (SPEC 13.5). */
+/**
+ * The `resolve` operation, run under workspace exclusivity (SPEC 13.5)
+ * over the classification made before acquisition (./mutation.ts).
+ */
 async function runResolve(
   invocation: Invocation,
   context: CommandContext,
@@ -222,8 +233,14 @@ async function runResolve(
   itemId: string,
   status: ResolveStatus,
   note: string | undefined,
+  discovered: SourceClassification,
 ): Promise<ExitCode> {
-  const loaded = await loadSessionForCommand(name, invocation, context);
+  const loaded = await loadSessionForCommand(
+    name,
+    invocation,
+    context,
+    discovered,
+  );
   if (!loaded.ok) {
     return loaded.exit;
   }
@@ -314,23 +331,18 @@ export async function reviewResolveCommand(
     throw new Error("xspec internal error: review resolve without --status");
   }
   const note = flagValue(invocation, "--note");
-  // SPEC 13.5: workspace exclusivity around the whole operation, with the
-  // `--test-hold` seam immediately after acquisition.
-  const outcome = await withMutationExclusivity(
-    context.workspace.root,
-    testHoldSpecOf(invocation, context.cwd),
-    () =>
-      runResolve(
-        invocation,
-        context,
-        name,
-        itemId,
-        status as ResolveStatus,
-        note,
-      ),
+  // SPEC 13.5: discovery, then workspace exclusivity around every later
+  // check and read, with the `--test-hold` seam immediately after
+  // acquisition (./mutation.ts).
+  return runMutatingCommand(invocation, context, true, (discovered) =>
+    runResolve(
+      invocation,
+      context,
+      name,
+      itemId,
+      status as ResolveStatus,
+      note,
+      discovered,
+    ),
   );
-  if (!outcome.ok) {
-    return usageError(invocation, context, outcome.usageMessage);
-  }
-  return outcome.value;
 }

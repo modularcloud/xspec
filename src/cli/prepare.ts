@@ -15,6 +15,7 @@
 //
 // `check` must not use this: it never refreshes (SPEC 13.3, 14.10).
 
+import type { SourceClassification } from "../core/discovery.js";
 import type { ExitCode } from "../core/findings.js";
 import type { GraphData } from "../core/graph-data.js";
 import {
@@ -60,13 +61,17 @@ export type ReadAnalysisPreparation =
  * (`show`'s and `query`'s identity operands, SPEC 12.0) run those checks
  * against the returned analysis, then — the invocation valid — call
  * `finishGraphForRead`: the checks precede the invalid-workspace report of
- * 13.3, and a failing invocation writes nothing.
+ * 13.3, and a failing invocation writes nothing. `discovered` is the
+ * classification a mutating `review` subcommand made before acquiring
+ * exclusivity (SPEC 13.5; commands/mutation.ts), its configuration errors
+ * already reported there.
  */
 export async function analyzeGraphForRead(
   invocation: Invocation,
   context: CommandContext,
+  discovered?: SourceClassification,
 ): Promise<ReadAnalysisPreparation> {
-  const analyzed = await analyzeWorkspaceForRead(context.workspace);
+  const analyzed = await analyzeWorkspaceForRead(context.workspace, discovered);
   if (analyzed.kind === "configuration") {
     emitConfigurationErrors(
       context,

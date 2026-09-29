@@ -157,21 +157,54 @@ export interface WorkspaceContent {
 }
 
 /**
+ * Discover the workspace's sources (SPEC 7): the classification every
+ * analysis of the filesystem workspace starts from. A listing or kind read
+ * the environment refuses stops the command here, thrown from the walk as
+ * its read failure (SPEC 14.25); a discovery-level configuration error is
+ * carried as data (`discoveryConfigurationErrors`). A mutating command
+ * discovers before acquiring exclusivity and hands the classification to
+ * `analyzeWorkspace` (SPEC 13.5; cli/commands/mutation.ts).
+ */
+export function discoverWorkspace(
+  workspace: LoadedWorkspace,
+): Promise<SourceClassification> {
+  return discoverSources(
+    workspace.root,
+    workspace.configuration,
+    workspace.rootAnchor,
+  );
+}
+
+/**
+ * A classification's discovery-level configuration errors (SPEC 7.2 →
+ * 14.14: a file matched by both a spec and a code group) — usage class
+ * (exit 2, SPEC 12.0), preceding all source analysis (SPEC 14).
+ */
+export function discoveryConfigurationErrors(
+  classification: SourceClassification,
+): readonly Finding[] {
+  return classification.findings.filter(
+    (finding) => codeExitClass(finding.code) === 2,
+  );
+}
+
+/**
  * Analyze the workspace (see the module header): discover, parse, and
  * validate every configured source, load the journal, assemble the graph,
  * and compute the text model and hashes. Total over invalid workspaces —
  * every condition arrives as data in `findings`/`configurationErrors`, and
- * only I/O failures throw.
+ * only I/O failures throw. `discovered`, when given, is this workspace's
+ * classification from `discoverWorkspace`, made earlier by the caller: the
+ * analysis then reads only the discovered sources' content and the journal
+ * (SPEC 13.5: a mutating command's reads after discovery follow its
+ * acquisition of exclusivity).
  */
 export async function analyzeWorkspace(
   workspace: LoadedWorkspace,
+  discovered?: SourceClassification,
 ): Promise<WorkspaceAnalysis> {
   const { root, configuration } = workspace;
-  const classification = await discoverSources(
-    root,
-    configuration,
-    workspace.rootAnchor,
-  );
+  const classification = discovered ?? (await discoverWorkspace(workspace));
   return analyzeWorkspaceContent(configuration, {
     classification,
     readSource: (rel) => readSourceBytes(root, rel),
@@ -196,9 +229,7 @@ export async function analyzeWorkspaceContent(
   // SPEC 14/14.14: discovery-level configuration errors are usage-class and
   // precede all source analysis — with one present, no source is parsed and
   // no finding-class condition is reported.
-  const configurationErrors = classification.findings.filter(
-    (finding) => codeExitClass(finding.code) === 2,
-  );
+  const configurationErrors = discoveryConfigurationErrors(classification);
   if (configurationErrors.length > 0) {
     const graph = buildWorkspaceGraph({ specs: [], code: [] });
     const textModel = new WorkspaceTextModel(graph.embeddingResolver());

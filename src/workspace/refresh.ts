@@ -38,6 +38,7 @@
 // so refresh and build agree by construction, byte for byte — SPEC 12.0).
 
 import { computeBuildOutputs } from "../core/build.js";
+import type { SourceClassification } from "../core/discovery.js";
 import type { Finding } from "../core/findings.js";
 import type { GraphData } from "../core/graph-data.js";
 import { graphDataMatchesCurrent } from "../core/graph-data.js";
@@ -99,12 +100,16 @@ export type ReadAnalysis =
  * parse-local; a session name against the session directory) run between
  * this and `assessWorkspaceRead`: configuration errors precede those
  * checks, the checks precede the invalid-workspace report (SPEC 12.0),
- * and a failing invocation modifies nothing.
+ * and a failing invocation modifies nothing. `discovered` is the
+ * classification a mutating `review` subcommand made before acquiring
+ * exclusivity (SPEC 13.5; `analyzeWorkspace`), its configuration errors
+ * already reported.
  */
 export async function analyzeWorkspaceForRead(
   workspace: LoadedWorkspace,
+  discovered?: SourceClassification,
 ): Promise<ReadAnalysis> {
-  const analysis = await analyzeWorkspace(workspace);
+  const analysis = await analyzeWorkspace(workspace, discovered);
   if (analysis.configurationErrors.length > 0) {
     return { kind: "configuration", errors: analysis.configurationErrors };
   }

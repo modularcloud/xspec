@@ -9,13 +9,17 @@
 //
 // Outcome precedence (SPEC 6.4, 12.0, 13.5, 14):
 //
-// 1. Workspace exclusivity (SPEC 13.5): `rename` is a mutating command —
+// 1. Configuration errors (SPEC 14.14): usage class, exit 2, preceding all
+//    source analysis — the configuration file's (cli/main.ts) and then
+//    discovery's (a file matched by both a spec and a code group), met
+//    with discovery's refused reads (14.25) before exclusivity is acquired
+//    (SPEC 13.5, 12.0; ./mutation.ts).
+// 2. Workspace exclusivity (SPEC 13.5): `rename` is a mutating command —
 //    while another one runs, it fails promptly with a usage error (exit 2)
 //    modifying nothing; with `--test-hold <path>`, the hold file is created
 //    immediately after acquiring exclusivity and before modifying anything,
-//    and the command proceeds only once it has been deleted.
-// 2. Configuration errors (SPEC 14.14): usage class, exit 2, preceding all
-//    source analysis.
+//    and the command proceeds only once it has been deleted. A preview
+//    acquires nothing (SPEC 6.6).
 // 3. Argument existence (SPEC 6.4 → 12.0): a `<file>` that is not a
 //    discovered spec source, or an old ID absent from the origin file, is a
 //    usage error (exit 2) — checked before source validation, so it is
@@ -49,6 +53,7 @@
 // `mapping` (SPEC 6.4, 6.6) — with `--json`, the single JSON document
 // (SPEC 12.0).
 
+import type { SourceClassification } from "../../core/discovery.js";
 import { orderSourceWrites } from "../../core/edits.js";
 import type { ExitCode } from "../../core/findings.js";
 import { serializeJournalEntry } from "../../core/journal.js";
@@ -61,7 +66,6 @@ import {
   appendJournalEntry,
   journalFromBytes,
 } from "../../workspace/journal.js";
-import { withMutationExclusivity } from "../../workspace/lock.js";
 import type { WorkspaceAnalysis } from "../../workspace/pipeline.js";
 import {
   analyzeWorkspace,
@@ -69,13 +73,11 @@ import {
 } from "../../workspace/pipeline.js";
 import { performSourceWrites } from "../../workspace/writes.js";
 import type { Invocation } from "../args.js";
-import { flagPresent, jsonOutputInEffect } from "../args.js";
+import { flagPresent } from "../args.js";
 import type { CommandContext } from "../io.js";
-import {
-  emitAppliedMappingReport,
-  emitConfigurationErrors,
-} from "../report.js";
-import { testHoldSpecOf, usageError } from "./common.js";
+import { emitAppliedMappingReport } from "../report.js";
+import { usageError } from "./common.js";
+import { runMutatingCommand } from "./mutation.js";
 import { emitSuccessfulPreview } from "./preview.js";
 import {
   emitFindingsRefusal,
@@ -100,7 +102,10 @@ function concatBytes(parts: readonly Uint8Array[]): Uint8Array {
 /**
  * The rename operation — run under workspace exclusivity (SPEC 13.5), or
  * as its `--preview` (SPEC 6.6), which shares every validation and the
- * plan, takes no exclusivity, and modifies nothing.
+ * plan, takes no exclusivity, and modifies nothing. `discovered` is the
+ * workspace's classification, made before acquisition, its configuration
+ * errors already reported (SPEC 13.5, 14.14; ./mutation.ts): the analysis
+ * here reads the sources' content and the journal.
  */
 async function runRename(
   invocation: Invocation,
@@ -109,21 +114,10 @@ async function runRename(
   oldId: string,
   newId: string,
   preview: boolean,
+  discovered: SourceClassification,
 ): Promise<ExitCode> {
-  const { workspace, stdout, stderr } = context;
-  const analysis = await analyzeWorkspace(workspace);
-
-  // SPEC 14.14/12.0: configuration errors precede all source analysis —
-  // usage class, exit 2, diagnostics on standard error, nothing modified.
-  if (analysis.configurationErrors.length > 0) {
-    emitConfigurationErrors(
-      context,
-      jsonOutputInEffect(invocation),
-      workspace.configAnchor,
-      analysis.configurationErrors,
-    );
-    return 2;
-  }
+  const { workspace, stdout } = context;
+  const analysis = await analyzeWorkspace(workspace, discovered);
 
   // SPEC 6.4 → 12.0: the argument existence checks precede source
   // validation. `<file>` must name a discovered spec source
@@ -310,20 +304,12 @@ export async function renameCommand(
   // never reaches here: the parser refuses the pair (cli/args.ts), a
   // syntax-class usage error reported before the configuration is loaded,
   // no hold file created, nothing modified (SPEC 12.0).
-  if (flagPresent(invocation, "--preview")) {
-    return runRename(invocation, context, file, oldId, newId, true);
-  }
-  // SPEC 13.5: workspace exclusivity around the whole operation, with the
-  // `--test-hold` seam immediately after acquisition; a workspace held by
-  // another mutating command fails promptly as a usage error (12.0),
-  // modifying nothing.
-  const outcome = await withMutationExclusivity(
-    context.workspace.root,
-    testHoldSpecOf(invocation, context.cwd),
-    () => runRename(invocation, context, file, oldId, newId, false),
+  const preview = flagPresent(invocation, "--preview");
+  // SPEC 13.5: discovery, then workspace exclusivity around every later
+  // check and read, with the `--test-hold` seam immediately after
+  // acquisition; a workspace held by another mutating command fails
+  // promptly as a usage error (12.0), modifying nothing (./mutation.ts).
+  return runMutatingCommand(invocation, context, !preview, (discovered) =>
+    runRename(invocation, context, file, oldId, newId, preview, discovered),
   );
-  if (!outcome.ok) {
-    return usageError(invocation, context, outcome.usageMessage);
-  }
-  return outcome.value;
 }
