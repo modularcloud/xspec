@@ -38,6 +38,24 @@
 // declaration), and the judge's own red checks (an ill-formed source
 // declared well-formed and a deriving source declared unparseable both
 // throw; `unchecked` judges nothing).
+//
+// The ledger's TypeScript records (helpers/staged-ts.ts; S-9's TypeScript
+// clause) are verified the same way: every code source and configuration
+// file a body stages after its first product invocation is a `StagedTs`
+// record created at module load — its bytes, its declaration (well-formed
+// or unparseable, never `unchecked`), and the grammar it is judged under
+// (`ts`, or `tsx` for a `.tsx` path; SPEC 14.20) — and this file judges
+// every one with the builder's own TypeScript judge (`judgeTsDeclaration`,
+// handed a neutral file name of the record's grammar) before any product
+// exists. Also verified: the records' invariants once the registry has
+// loaded (sealed, non-empty, uniquely named after registered tests or E-6),
+// their registration rules on a fresh instance, and the builder's record
+// overload — `file()` and `create()`'s initial `files` stage a record's
+// bytes under the record's declaration, whatever the path's name or
+// workspace declaration (a `ts` option beside it, a workspace `ts` entry
+// beside an initial record, a path selecting the other grammar, and an
+// `.mdx` path all throw, nothing written); a contradicting record throws
+// at staging exactly as here.
 
 import { Buffer } from "node:buffer";
 import { describe, expect, onTestFinished, test, vi } from "vitest";
@@ -51,8 +69,16 @@ import {
   stagedMdxLedger,
 } from "../helpers/staged-mdx.js";
 import {
+  StagedTs,
+  isStagedTsLedgerSealed,
+  stagedTs,
+  stagedTsLedger,
+  tsGrammarFileName,
+} from "../helpers/staged-ts.js";
+import {
   TestWorkspace,
   judgeMdxDeclaration,
+  judgeTsDeclaration,
   mdxPathsOf,
 } from "../helpers/workspace.js";
 import type { WorkspaceDecl, WorkspaceMdxDecl } from "../helpers/workspace.js";
@@ -689,5 +715,598 @@ describe("S-9: the judge — an ill-formed source declared well-formed and a der
     judgeMdxDeclaration("well-formed", utf8(WELL_FORMED), "well-formed");
     judgeMdxDeclaration("unparseable", utf8(ILL_FORMED), "unparseable");
     judgeMdxDeclaration("unchecked", utf8(ILL_FORMED), "unchecked");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The staged-source ledger's TypeScript records (helpers/staged-ts.ts): every
+// code source and configuration file a registered body stages after its
+// first product invocation — a reconfiguration after a `build`, an arm's
+// variant code source, the configuration of a workspace the body creates
+// after that invocation — is a record created at module load, judged here
+// with the builder's own TypeScript judge (`judgeTsDeclaration`, the one
+// code path `checkTs` applies at staging time) under the grammar the record
+// names, before any product exists (S-9's TypeScript clause and its timing
+// clause, H-8).
+
+/** The complete TypeScript records: every registry module has loaded. */
+const TS_LEDGER = stagedTsLedger();
+
+const TS_WELL_FORMED = "export const a = 1;" + LF;
+const TS_ILL_FORMED = "export const = 1;" + LF;
+/** TSX-only: a JSX element is a syntax error in plain TypeScript. */
+const TSX_ONLY = "export const e = <a />;" + LF;
+/** Accepted read as module code only (a top-level `await` form, S-9). */
+const TS_ONE_WAY = "await /re/;" + LF;
+
+function expectTsStagingError(
+  thrown: unknown,
+  key: string,
+  ...fragments: readonly string[]
+): void {
+  expect(thrown).toBeInstanceOf(Error);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as Error & { mode?: unknown; path?: unknown };
+  expect(error.name).toBe("HarnessStagingError");
+  expect(error.mode).toBe("ts-derivability");
+  expect(error.path).toBe(key);
+  expect(error.message).toContain(`ts-derivability staging of ${key}: `);
+  for (const fragment of fragments) {
+    expect(error.message).toContain(fragment);
+  }
+}
+
+async function expectTsRejected(
+  action: () => Promise<unknown>,
+  key: string,
+  ...fragments: readonly string[]
+): Promise<void> {
+  let thrown: unknown;
+  try {
+    await action();
+  } catch (error) {
+    thrown = error;
+  }
+  expectTsStagingError(thrown, key, ...fragments);
+}
+
+/** A well-formed plain-TypeScript record of the registry's own. */
+function someWellFormedTsRecord(): StagedTs {
+  const record = TS_LEDGER.find(
+    (entry) => entry.ts === "well-formed" && entry.grammar === "ts",
+  );
+  if (record === undefined) {
+    throw new Error("the ledger holds no well-formed TypeScript record");
+  }
+  return record;
+}
+
+/**
+ * A fresh, unsealed TypeScript ledger and the builder bound to it (both
+ * re-evaluated after `vi.resetModules()`, so the fresh builder's `StagedTs`
+ * is the fresh ledger's class): for the records the sealed registry ledger
+ * cannot hold — contradicting ones, TSX ones. Errors are the fresh modules'
+ * own, matched by name and mode.
+ */
+async function freshTsBuilder(): Promise<{
+  readonly ledger: typeof import("../helpers/staged-ts.js");
+  readonly builder: typeof import("../helpers/workspace.js");
+}> {
+  vi.resetModules();
+  const ledger = await import("../helpers/staged-ts.js");
+  const builder = await import("../helpers/workspace.js");
+  return { ledger, builder };
+}
+
+describe("S-9: the staged TypeScript records, once the registry has loaded", () => {
+  test("are sealed, so a record created at run time throws instead of escaping this self-test", () => {
+    expect(isStagedTsLedgerSealed()).toBe(true);
+    expect(() => stagedTs("T0-0 late record", TS_WELL_FORMED)).toThrow(
+      /sealed/,
+    );
+    expect(() => new StagedTs("T0-0 late record", TS_WELL_FORMED)).toThrow(
+      /sealed/,
+    );
+    expect(TS_LEDGER.some((record) => record.name === "T0-0 late record")).toBe(
+      false,
+    );
+  });
+
+  test("are non-empty, and every record is an immutable, uniquely named `StagedTs` declared well-formed or unparseable under a named grammar", () => {
+    expect(TS_LEDGER.length).toBeGreaterThan(0);
+    const names = TS_LEDGER.map((record) => record.name);
+    expect(new Set(names).size).toBe(names.length);
+    for (const record of TS_LEDGER) {
+      expect(record).toBeInstanceOf(StagedTs);
+      expect(Object.isFrozen(record)).toBe(true);
+      expect(record.name.trim().length).toBeGreaterThan(0);
+      expect(
+        typeof record.source === "string" ||
+          record.source instanceof Uint8Array,
+      ).toBe(true);
+      expect(["well-formed", "unparseable"], record.name).toContain(record.ts);
+      expect(["ts", "tsx"], record.name).toContain(record.grammar);
+    }
+  });
+
+  test("names every record after registered tests: `<TEST-ID>[/<TEST-ID>…] <what it stages>` — or after E-6, the §18 exchange fixture's ID (helpers/e6.ts), for its two records", () => {
+    let e6Records = 0;
+    for (const record of TS_LEDGER) {
+      const [lead, ...rest] = record.name.split(" ");
+      expect(rest.join(" ").trim(), record.name).not.toBe("");
+      for (const id of (lead ?? "").split("/")) {
+        if (id === E6_FIXTURE_ID) {
+          e6Records += 1;
+          continue;
+        }
+        expect(
+          productTestSuite.has(id),
+          `${record.name}: ${id} names no registered test (nor ${E6_FIXTURE_ID}, the exchange fixture of helpers/e6.ts)`,
+        ).toBe(true);
+      }
+    }
+    // The fixture's configuration and code source, staged at its creation
+    // outside every registered body and S-7's sweep, are judged here alone.
+    expect(e6Records).toBe(2);
+  });
+});
+
+/**
+ * Every TypeScript judgement the ledger declares: each TypeScript record
+ * under its grammar, and each MDX record of a code-group `.mdx` path (one
+ * carrying `ts`) as plain TypeScript — an `.mdx` name selects it (14.20).
+ */
+const TS_JUDGEMENTS: readonly (readonly [
+  string,
+  Uint8Array,
+  "well-formed" | "unparseable",
+  string,
+])[] = [
+  ...TS_LEDGER.map(
+    (record) =>
+      [
+        record.name,
+        bytesOf(record.source),
+        record.ts,
+        tsGrammarFileName(record.grammar),
+      ] as const,
+  ),
+  ...LEDGER.flatMap((record) =>
+    record.ts === undefined
+      ? []
+      : [
+          [
+            `${record.name} (as TypeScript)`,
+            bytesOf(record.source),
+            record.ts,
+            tsGrammarFileName("ts"),
+          ] as const,
+        ],
+  ),
+];
+
+describe("S-9: every staged TypeScript source in the ledger matches its declaration before any product exists", () => {
+  test.each(TS_JUDGEMENTS)("%s", (name, data, declaration, fileName) => {
+    judgeTsDeclaration(name, data, declaration, fileName);
+  });
+});
+
+describe("S-9: the TypeScript records' registration rules", () => {
+  async function freshTsLedger(): Promise<
+    typeof import("../helpers/staged-ts.js")
+  > {
+    vi.resetModules();
+    return await import("../helpers/staged-ts.js");
+  }
+
+  test("a record registers in order with its declaration and grammar, well-formed plain TypeScript by default; a duplicate name throws", async () => {
+    const ledger = await freshTsLedger();
+    expect(ledger.isStagedTsLedgerSealed()).toBe(false);
+    expect(ledger.stagedTsLedger()).toEqual([]);
+    const a = ledger.stagedTs("T0-1 a", TS_WELL_FORMED);
+    const b = ledger.stagedTs("T0-1 b", utf8(TS_ILL_FORMED), "unparseable");
+    const c = ledger.stagedTs("T0-1 c", TSX_ONLY, "well-formed", "tsx");
+    expect([a.ts, a.grammar]).toEqual(["well-formed", "ts"]);
+    expect(a.source).toBe(TS_WELL_FORMED);
+    expect([b.ts, b.grammar]).toEqual(["unparseable", "ts"]);
+    expect([c.ts, c.grammar]).toEqual(["well-formed", "tsx"]);
+    expect(ledger.stagedTsLedger()).toEqual([a, b, c]);
+    expect(() => ledger.stagedTs("T0-1 a", TS_WELL_FORMED)).toThrow(
+      /duplicate/,
+    );
+    expect(ledger.stagedTsLedger()).toHaveLength(3);
+  });
+
+  test("an `unchecked` declaration, an unknown grammar, an empty name, and non-file contents are refused", async () => {
+    const ledger = await freshTsLedger();
+    expect(() =>
+      ledger.stagedTs(
+        "T0-2 u",
+        TS_WELL_FORMED,
+        "unchecked" as unknown as "well-formed",
+      ),
+    ).toThrow(/unchecked/);
+    expect(() =>
+      ledger.stagedTs(
+        "T0-2 g",
+        TS_WELL_FORMED,
+        "well-formed",
+        "jsx" as unknown as "ts",
+      ),
+    ).toThrow(/grammar/);
+    expect(() => ledger.stagedTs("  ", TS_WELL_FORMED)).toThrow(
+      /non-empty name/,
+    );
+    expect(() =>
+      ledger.stagedTs("T0-2 c", { text: TS_WELL_FORMED } as unknown as string),
+    ).toThrow(/string or byte contents/);
+    expect(ledger.stagedTsLedger()).toEqual([]);
+  });
+
+  test("sealing freezes the records: a later registration throws, and sealing twice throws", async () => {
+    const ledger = await freshTsLedger();
+    const a = ledger.stagedTs("T0-3 a", TS_WELL_FORMED);
+    ledger.sealStagedTsLedger();
+    expect(ledger.isStagedTsLedgerSealed()).toBe(true);
+    expect(() => ledger.stagedTs("T0-3 b", TS_WELL_FORMED)).toThrow(/sealed/);
+    expect(() => ledger.sealStagedTsLedger()).toThrow(/sealed twice/);
+    expect(ledger.stagedTsLedger()).toEqual([a]);
+    expect(Object.isFrozen(ledger.stagedTsLedger())).toBe(true);
+  });
+
+  test("the grammar a name selects: `.tsx` alone selects TSX (SPEC 14.20)", async () => {
+    const ledger = await freshTsLedger();
+    expect(ledger.tsGrammarOf("src/a.tsx")).toBe("tsx");
+    for (const name of [
+      "src/a.ts",
+      "xspec.config.ts",
+      "a.d.ts",
+      "a.jsx",
+      "specs/a.md",
+      "a.TSX",
+    ]) {
+      expect(ledger.tsGrammarOf(name), name).toBe("ts");
+    }
+    expect(ledger.tsGrammarOf(ledger.tsGrammarFileName("tsx"))).toBe("tsx");
+    expect(ledger.tsGrammarOf(ledger.tsGrammarFileName("ts"))).toBe("ts");
+  });
+});
+
+describe("S-9: the builder stages a TypeScript record's bytes under the record's declaration", () => {
+  test("a record stages exactly its bytes, at a configuration path and at a code-source path", async () => {
+    const record = someWellFormedTsRecord();
+    const workspace = await stage();
+    for (const rel of ["xspec.config.ts", "src/record.ts"]) {
+      await workspace.file(rel, record);
+      expect(
+        Buffer.compare(
+          Buffer.from(await workspace.readBytes(rel)),
+          Buffer.from(bytesOf(record.source)),
+        ),
+        rel,
+      ).toBe(0);
+    }
+  });
+
+  test("a record's declaration governs its write, overriding the workspace declaration and the name's default, as the `ts` option does — a code source whose name the default does not reach included", async () => {
+    const { ledger, builder } = await freshTsBuilder();
+    const unparseable = ledger.stagedTs(
+      "T0-4 ill-formed",
+      TS_ILL_FORMED,
+      "unparseable",
+    );
+    const wellFormed = ledger.stagedTs("T0-4 well-formed", TS_WELL_FORMED);
+    const workspace = await builder.TestWorkspace.create({
+      ts: { unchecked: ["src/u.ts"], unparseable: ["src/w.ts"] },
+    });
+    onTestFinished(() => workspace.dispose());
+    await workspace.file("src/a.ts", unparseable);
+    await workspace.file("src/u.ts", unparseable);
+    await workspace.file("src/w.ts", wellFormed);
+    await workspace.file("specs/code.md", wellFormed);
+    expect(text(await workspace.readBytes("src/a.ts"))).toBe(TS_ILL_FORMED);
+    expect(text(await workspace.readBytes("specs/code.md"))).toBe(
+      TS_WELL_FORMED,
+    );
+    // Plain contents there are judged under the path's declaration still.
+    await expectTsRejected(
+      () => workspace.file("src/a.ts", TS_ILL_FORMED),
+      "src/a.ts",
+      "declared well-formed",
+    );
+    await expectTsRejected(
+      () => workspace.file("src/w.ts", TS_WELL_FORMED),
+      "src/w.ts",
+      "declared unparseable",
+    );
+  });
+
+  test("a `ts` option beside a record is a contradiction: nothing is written", async () => {
+    const record = someWellFormedTsRecord();
+    const workspace = await stage();
+    await expectTsRejected(
+      () => workspace.file("src/record.ts", record, { ts: "well-formed" }),
+      "src/record.ts",
+      "contradiction",
+      JSON.stringify(record.name),
+    );
+    expect(await workspace.kind("src/record.ts")).toBe("absent");
+  });
+
+  test("a record staged at a path selecting the other grammar is a mistake, either way round: nothing is written", async () => {
+    const record = someWellFormedTsRecord();
+    const workspace = await stage();
+    await expectTsRejected(
+      () => workspace.file("src/record.tsx", record),
+      "src/record.tsx",
+      JSON.stringify(record.name),
+      "grammar",
+    );
+    expect(await workspace.kind("src/record.tsx")).toBe("absent");
+    const { ledger, builder } = await freshTsBuilder();
+    const tsx = ledger.stagedTs("T0-5 tsx", TSX_ONLY, "well-formed", "tsx");
+    const fresh = await builder.TestWorkspace.create();
+    onTestFinished(() => fresh.dispose());
+    await fresh.file("src/view.tsx", tsx);
+    expect(text(await fresh.readBytes("src/view.tsx"))).toBe(TSX_ONLY);
+    await expectTsRejected(
+      () => fresh.file("src/view.ts", tsx),
+      "src/view.ts",
+      '"T0-5 tsx"',
+      "grammar",
+    );
+    expect(await fresh.kind("src/view.ts")).toBe("absent");
+  });
+
+  test("a TypeScript record at an `.mdx` path is a mistake: nothing is written", async () => {
+    const record = someWellFormedTsRecord();
+    const workspace = await stage();
+    await expectTsRejected(
+      () => workspace.file("docs/code.mdx", record),
+      "docs/code.mdx",
+      JSON.stringify(record.name),
+      "`.mdx` path",
+    );
+    expect(await workspace.kind("docs/code.mdx")).toBe("absent");
+  });
+
+  test("a record is judged at staging time too (the same judge): a fresh ledger's contradicting records throw, one-way text under either declaration included", async () => {
+    const { ledger, builder } = await freshTsBuilder();
+    const workspace = await builder.TestWorkspace.create();
+    onTestFinished(() => workspace.dispose());
+    for (const [record, fragment] of [
+      [
+        ledger.stagedTs("T0-6 ill-formed", TS_ILL_FORMED),
+        "declared well-formed",
+      ],
+      [
+        ledger.stagedTs("T0-6 deriving", TS_WELL_FORMED, "unparseable"),
+        "declared unparseable",
+      ],
+      [
+        ledger.stagedTs("T0-6 one-way", TS_ONE_WAY),
+        "accepted read as module code only",
+      ],
+      [
+        ledger.stagedTs("T0-6 one-way, unparseable", TS_ONE_WAY, "unparseable"),
+        "accepted read as module code only",
+      ],
+      [
+        ledger.stagedTs("T0-6 TSX-only as plain", TSX_ONLY),
+        "declared well-formed",
+      ],
+    ] as const) {
+      await expectTsRejected(
+        () => workspace.file("src/record.ts", record),
+        "src/record.ts",
+        fragment,
+      );
+      expect(await workspace.kind("src/record.ts"), record.name).toBe("absent");
+      // The self-test's own judgement of the record: the same verdict.
+      let thrown: unknown;
+      try {
+        builder.judgeTsDeclaration(
+          record.name,
+          bytesOf(record.source),
+          record.ts,
+          ledger.tsGrammarFileName(record.grammar),
+        );
+      } catch (error) {
+        thrown = error;
+      }
+      expectTsStagingError(thrown, record.name, fragment);
+    }
+  });
+});
+
+describe("S-9: the builder stages an initial `files` TypeScript record under the record's declaration", () => {
+  test("a record in `files` stages exactly its bytes under its own declaration, whatever the name's default", async () => {
+    const { ledger, builder } = await freshTsBuilder();
+    const config = ledger.stagedTs("T0-7 configuration", TS_WELL_FORMED);
+    const unparseable = ledger.stagedTs(
+      "T0-7 ill-formed",
+      TS_ILL_FORMED,
+      "unparseable",
+    );
+    const view = ledger.stagedTs("T0-7 view", TSX_ONLY, "well-formed", "tsx");
+    const workspace = await builder.TestWorkspace.create({
+      files: {
+        "xspec.config.ts": config,
+        "src/bad.ts": unparseable,
+        "src/view.tsx": view,
+        "specs/code.md": config,
+        "notes.txt": "plain text\n",
+      },
+    });
+    onTestFinished(() => workspace.dispose());
+    expect(text(await workspace.readBytes("xspec.config.ts"))).toBe(
+      TS_WELL_FORMED,
+    );
+    expect(text(await workspace.readBytes("src/bad.ts"))).toBe(TS_ILL_FORMED);
+    expect(text(await workspace.readBytes("src/view.tsx"))).toBe(TSX_ONLY);
+    expect(text(await workspace.readBytes("specs/code.md"))).toBe(
+      TS_WELL_FORMED,
+    );
+    // The path's own declaration stayed the name's default.
+    expect(workspace.tsDeclarationOf("src/bad.ts")).toBe("well-formed");
+    expect(workspace.tsDeclarationOf("specs/code.md")).toBeUndefined();
+  });
+
+  test("a record contradicting its declaration, at a path of the other grammar, at an `.mdx` key, or beside a workspace `ts` entry naming its path, makes `create()` throw", async () => {
+    const { ledger, builder } = await freshTsBuilder();
+    const wellFormed = ledger.stagedTs("T0-8 well-formed", TS_WELL_FORMED);
+    const illFormed = ledger.stagedTs("T0-8 ill-formed", TS_ILL_FORMED);
+    const cases: readonly (readonly [
+      WorkspaceDecl,
+      string,
+      readonly string[],
+    ])[] = [
+      [
+        { files: { "src/a.ts": illFormed } },
+        "src/a.ts",
+        ["declared well-formed"],
+      ],
+      [{ files: { "src/a.tsx": wellFormed } }, "src/a.tsx", ["grammar"]],
+      [{ files: { "docs/a.mdx": wellFormed } }, "docs/a.mdx", ["`.mdx` path"]],
+      [
+        {
+          files: { "src/a.ts": wellFormed },
+          ts: { unparseable: ["src/a.ts"] },
+        },
+        "src/a.ts",
+        ["contradiction", "drop the declaration entry"],
+      ],
+      [
+        { files: { "src/a.ts": wellFormed }, ts: { unchecked: ["src/a.ts"] } },
+        "src/a.ts",
+        ["contradiction"],
+      ],
+      [
+        {
+          files: { "specs/a.md": wellFormed },
+          ts: { wellFormed: ["specs/a.md"] },
+        },
+        "specs/a.md",
+        ["contradiction"],
+      ],
+    ];
+    for (const [decl, key, fragments] of cases) {
+      let thrown: unknown;
+      try {
+        const workspace = await builder.TestWorkspace.create(
+          decl as Parameters<typeof builder.TestWorkspace.create>[0],
+        );
+        onTestFinished(() => workspace.dispose());
+      } catch (error) {
+        thrown = error;
+      }
+      expectTsStagingError(thrown, key, ...fragments);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// An `.mdx` path a code group discovers is an MDX source and a code source
+// at once (SPEC 7.2; T2.1-2's `docs/EXTRA.mdx`): its MDX record carries the
+// path's TypeScript declaration too (`ts`), judged above as plain
+// TypeScript, and the builder stages the record under both declarations.
+
+describe("S-9: an MDX record of a code-group `.mdx` path carries its TypeScript declaration too", () => {
+  /** Well-formed MDX (an ESM block) and well-formed TypeScript alike. */
+  const BOTH = "export {};" + LF;
+  /** Well-formed MDX, ill-formed TypeScript. */
+  const MDX_ONLY = doc('<S id="x">', "", "closed below", "", "</S>");
+
+  test("registers well-formed or unparseable, or none; any other TypeScript declaration is refused", async () => {
+    vi.resetModules();
+    const ledger = await import("../helpers/staged-mdx.js");
+    const a = ledger.stagedMdx("T0-9 a", BOTH, "well-formed", "well-formed");
+    const b = ledger.stagedMdx(
+      "T0-9 b",
+      MDX_ONLY,
+      "well-formed",
+      "unparseable",
+    );
+    const c = ledger.stagedMdx("T0-9 c", BOTH);
+    expect([a.ts, b.ts, c.ts]).toEqual([
+      "well-formed",
+      "unparseable",
+      undefined,
+    ]);
+    expect(() =>
+      ledger.stagedMdx(
+        "T0-9 u",
+        BOTH,
+        "well-formed",
+        "unchecked" as unknown as "well-formed",
+      ),
+    ).toThrow(/TypeScript declaration/);
+    expect(ledger.stagedMdxLedger()).toEqual([a, b, c]);
+  });
+
+  test("the builder stages it under both declarations, at creation and by `file()`; a contradicting TypeScript declaration throws, nothing written", async () => {
+    const { ledger, builder } = await freshBuilder();
+    const code = ledger.stagedMdx(
+      "T0-10 code",
+      BOTH,
+      "well-formed",
+      "well-formed",
+    );
+    const wrong = ledger.stagedMdx(
+      "T0-10 wrong",
+      MDX_ONLY,
+      "well-formed",
+      "well-formed",
+    );
+    const unparseable = ledger.stagedMdx(
+      "T0-10 unparseable",
+      MDX_ONLY,
+      "well-formed",
+      "unparseable",
+    );
+    const workspace = await builder.TestWorkspace.create({
+      files: { "docs/code.mdx": code, "docs/prose.mdx": unparseable },
+    });
+    onTestFinished(() => workspace.dispose());
+    expect(text(await workspace.readBytes("docs/code.mdx"))).toBe(BOTH);
+    expect(text(await workspace.readBytes("docs/prose.mdx"))).toBe(MDX_ONLY);
+    await workspace.file("docs/later.mdx", code);
+    expect(text(await workspace.readBytes("docs/later.mdx"))).toBe(BOTH);
+    let thrown: unknown;
+    try {
+      await workspace.file("docs/wrong.mdx", wrong);
+    } catch (error) {
+      thrown = error;
+    }
+    expectTsStagingError(thrown, "docs/wrong.mdx", "declared well-formed");
+    expect(await workspace.kind("docs/wrong.mdx")).toBe("absent");
+    thrown = undefined;
+    try {
+      await workspace.file("docs/later.mdx", code, { ts: "well-formed" });
+    } catch (error) {
+      thrown = error;
+    }
+    expectTsStagingError(
+      thrown,
+      "docs/later.mdx",
+      "contradiction",
+      '"T0-10 code"',
+    );
+    thrown = undefined;
+    try {
+      const beside = await builder.TestWorkspace.create({
+        files: { "docs/code.mdx": code },
+        ts: { wellFormed: ["docs/code.mdx"] },
+      });
+      onTestFinished(() => beside.dispose());
+    } catch (error) {
+      thrown = error;
+    }
+    expectTsStagingError(
+      thrown,
+      "docs/code.mdx",
+      "contradiction",
+      "drop the declaration entry",
+    );
   });
 });

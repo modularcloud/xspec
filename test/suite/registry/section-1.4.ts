@@ -61,6 +61,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
@@ -77,15 +78,19 @@ import {
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group — the
-// CONF-VALID scope.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// CONF-VALID scope. A staged-source record (S-9's timing clause): the later
+// arms' workspaces stage it after their body's first invocation.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T1.4-1/T1.4-4 xspec.config.ts — the specs-only configuration of every arm workspace",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // --- character classes under test (SPEC 1.4, exact) -------------------------
 
@@ -558,19 +563,17 @@ const T1_4_2 = defineProductTest({
 // would compile, but the dot consumer would carry no error at `login`).
 const DASH_SEGMENT_SOURCE = '<S id="login-v2">\nDashed segment.\n</S>\n';
 
-const BRACKET_CONSUMER = [
-  'import SPEC from "./specs/A.xspec";',
-  "",
-  'SPEC["login-v2"];',
-  "",
-].join("\n");
+const BRACKET_CONSUMER = stagedTs(
+  "T1.4-3 consumer.ts — bracket access to `login-v2`, staged after `build`",
+  ['import SPEC from "./specs/A.xspec";', "", 'SPEC["login-v2"];', ""].join(
+    "\n",
+  ),
+);
 
-const DOT_CONSUMER = [
-  'import SPEC from "./specs/A.xspec";',
-  "",
-  "SPEC.login-v2;",
-  "",
-].join("\n");
+const DOT_CONSUMER = stagedTs(
+  "T1.4-3 dot-consumer.ts — dot access to `login-v2`, staged after `build`",
+  ['import SPEC from "./specs/A.xspec";', "", "SPEC.login-v2;", ""].join("\n"),
+);
 
 const T1_4_3 = defineProductTest({
   id: "T1.4-3",

@@ -51,6 +51,7 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -66,15 +67,20 @@ import {
   sortedIdentities,
 } from "./support.js";
 
-// Minimal declarative configuration (SPEC 7): one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// Minimal declarative configuration (SPEC 7): one spec group. A
+// staged-source record (S-9's timing clause): T1.5-2's non-UTF-8 and U+FFFD
+// arms stage it after the body's first invocation.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T1.5-2 xspec.config.ts — the specs-only configuration of the non-UTF-8 and U+FFFD arms",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // ---------------------------------------------------------------------------
 // T1.5-1
@@ -525,8 +531,18 @@ const T1_5_1 = defineProductTest({
 // T1.5-2
 // ---------------------------------------------------------------------------
 
-// One spec group plus one code group, for the code-group arm (SPEC 7.2).
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// The code arm's code source at `src/a#b.ts`, staged after the spec arm's
+// invocation: a staged-source record (S-9's timing clause).
+const CODE_ARM_SOURCE = stagedTs(
+  "T1.5-2 code arm src/a#b.ts",
+  "export const ok = 1;\n",
+);
+
+// One spec group plus one code group, for the code-group arm (SPEC 7.2),
+// staged after the spec arm's invocation: a staged-source record (S-9).
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T1.5-2 code arm xspec.config.ts",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -536,7 +552,8 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 // Valid content everywhere: the invalid-path condition (14.19) must be the
 // only condition present, so the exact-count assertion has teeth.
@@ -638,7 +655,7 @@ const T1_5_2 = defineProductTest({
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
         "specs/OK.mdx": VALID_SECTION_SOURCE,
-        "src/a#b.ts": "export const ok = 1;\n",
+        "src/a#b.ts": CODE_ARM_SOURCE,
       },
     });
     try {

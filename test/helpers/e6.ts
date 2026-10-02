@@ -61,6 +61,7 @@ import {
 import type { DirectorySnapshot } from "./snapshot.js";
 import { assertSnapshotsEqual, snapshotDirectory } from "./snapshot.js";
 import { stagedMdx } from "./staged-mdx.js";
+import { stagedTs } from "./staged-ts.js";
 import type { ProductBinding, RunResult } from "./subprocess.js";
 import { runProduct } from "./subprocess.js";
 import { TestWorkspace } from "./workspace.js";
@@ -104,7 +105,9 @@ export interface E6FixtureRun {
 // run produces every E-6 output kind: generated modules, emitted Markdown,
 // graph data, journal, session file, and coverage/impact reports (SPEC 7,
 // 7.3, 7.4).
-const E6_CONFIG = `import { defineConfig } from "xspec"
+const E6_CONFIG = stagedTs(
+  "E-6 xspec.config.ts",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -124,7 +127,8 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 const E6_OTHER = "specs/Other.mdx";
 const E6_CORE = "specs/Core.mdx";
@@ -149,7 +153,9 @@ function otherSource(version: string): string {
 // sources first: test/self/s9-staged-sources.test.ts imports this module
 // itself, before the registry manifest seals the ledger, and judges every
 // record. The records' names lead with the fixture's §18 ID rather than a
-// test ID.
+// test ID. Its configuration and code source are TypeScript records
+// (helpers/staged-ts.ts) for the same reason, judged by the same self-test
+// with S-9's TypeScript check.
 const E6_OTHER_VERSION_ONE = stagedMdx(
   "E-6 specs/Other.mdx version one — the initial source",
   otherSource("version one"),
@@ -194,13 +200,16 @@ const E6_REFS_SOURCE = [
 const E6_CORE_RECORD = stagedMdx("E-6 specs/Core.mdx", E6_CORE_SOURCE);
 const E6_REFS_RECORD = stagedMdx("E-6 specs/Refs.mdx", E6_REFS_SOURCE);
 
-const E6_APP_SOURCE = [
-  'import CORE, { text } from "../specs/Core.xspec";',
-  "",
-  "CORE.core.mid.leaf;",
-  "text(CORE.core.mid);",
-  "",
-].join("\n");
+const E6_APP_SOURCE = stagedTs(
+  "E-6 src/app.ts",
+  [
+    'import CORE, { text } from "../specs/Core.xspec";',
+    "",
+    "CORE.core.mid.leaf;",
+    "text(CORE.core.mid);",
+    "",
+  ].join("\n"),
+);
 
 // `at` probe: the fixture points `at` at the byte offset of `Other.oth`
 // inside core.mid.leaf's `{text(Other.oth)}` embedding — within the

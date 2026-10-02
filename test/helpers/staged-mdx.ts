@@ -57,8 +57,17 @@
 // `files` entry of a workspace created after the running body's first
 // invocation alike — so an omission from the ledger is a harness error at
 // the first run that reaches the site.
+//
+// Code sources and configuration files have sibling records of their own
+// (helpers/staged-ts.ts), sealed by the manifest beside this ledger and
+// judged by the same self-test with S-9's TypeScript check. An `.mdx` path a
+// code group discovers is an MDX source and a code source at once, so its
+// record here carries its TypeScript declaration too (`ts`): the self-test
+// judges those bytes as plain TypeScript as well, and the builder stages
+// them under both declarations.
 
 import { MDX_ALLOWANCES } from "./mdx-derivability.js";
+import type { TsDeclaration } from "./ts-derivability.js";
 import type { FileContents, MdxFileDeclaration } from "./workspace.js";
 
 const ledger: StagedMdx[] = [];
@@ -89,11 +98,23 @@ export class StagedMdx {
   readonly source: FileContents;
   /** The S-9 declaration in effect for the staging. */
   readonly mdx: RecordDeclaration;
+  /**
+   * The S-9 TypeScript declaration of the same bytes, when the staged
+   * `.mdx` path is also a code source — a code group globbing `.mdx` names
+   * discovers it (SPEC 7.2; T2.1-2's `docs/EXTRA.mdx`) — judged as plain
+   * TypeScript too (an `.mdx` name selects plain TypeScript, 14.20); the
+   * record then carries the path's TypeScript declaration as well, in place
+   * of the workspace declaration's `ts` entry. Undefined for every other
+   * record: the path is no code source, and S-9's TypeScript check does not
+   * judge it.
+   */
+  readonly ts: TsDeclaration | undefined;
 
   constructor(
     name: string,
     source: FileContents,
     mdx: MdxFileDeclaration = "well-formed",
+    ts?: TsDeclaration,
   ) {
     if (sealed) {
       throw new Error(
@@ -121,9 +142,19 @@ export class StagedMdx {
           "string or byte contents",
       );
     }
+    if (ts !== undefined && ts !== "well-formed" && ts !== "unparseable") {
+      throw new Error(
+        `staged-source ledger: the record ${JSON.stringify(name)} carries ` +
+          `the TypeScript declaration ${JSON.stringify(ts)} — a record's ` +
+          'TypeScript declaration is "well-formed" or "unparseable" (14.20), ' +
+          "or absent for a path no code group discovers; a record exists to " +
+          "be judged (S-9)",
+      );
+    }
     this.name = name;
     this.source = source;
     this.mdx = validateDeclaration(name, mdx);
+    this.ts = ts;
     Object.freeze(this);
     names.add(name);
     ledger.push(this);
@@ -134,14 +165,18 @@ export class StagedMdx {
  * Register a staged MDX source in the ledger at module load: `source` is the
  * very expression the staging used (moved, never re-spelled), `mdx` the
  * declaration in effect for that staging — the former `mdx` option, else the
- * workspace declaration's entry for the path, else well-formed.
+ * workspace declaration's entry for the path, else well-formed — and `ts`,
+ * for a path a code group also discovers as a code source, the TypeScript
+ * declaration in effect for it (the former `ts` option, else the workspace
+ * declaration's `ts` entry).
  */
 export function stagedMdx(
   name: string,
   source: FileContents,
   mdx: MdxFileDeclaration = "well-formed",
+  ts?: TsDeclaration,
 ): StagedMdx {
-  return new StagedMdx(name, source, mdx);
+  return new StagedMdx(name, source, mdx, ts);
 }
 
 /** Every record registered so far, in registration order. */

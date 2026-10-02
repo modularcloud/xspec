@@ -44,6 +44,7 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertNoCompileErrors,
@@ -65,18 +66,26 @@ import {
 // Minimal declarative configuration (SPEC 7): one spec group. The spec-group
 // globs match only `.mdx` files, so no glob matches a Markdown emit
 // destination (`specs/*.md`, SPEC 7.3) — the discovered set is identical
-// under every `markdown` variant, as T1.6-1's parity arm requires.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// under every `markdown` variant, as T1.6-1's parity arm requires. This
+// configuration and the two `markdown` variants below are staged-source
+// records (S-9's timing clause): the parity arm stages each into its second
+// workspace after the body's first invocation.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T1.6-1 xspec.config.ts — `markdown` absent (the parity arm's first variant)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // As above with `markdown: { emit: false }` (SPEC 7.3).
-const EMIT_FALSE_CONFIG = `import { defineConfig } from "xspec"
+const EMIT_FALSE_CONFIG = stagedTs(
+  "T1.6-1 xspec.config.ts — `markdown: { emit: false }`",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -84,11 +93,14 @@ export default defineConfig({
   },
   markdown: { emit: false }
 })
-`;
+`,
+);
 
 // As above with emission enabled (default destination: next to each source
 // file, `specs/A.mdx` → `specs/A.md`; SPEC 7.3, 13.2).
-const EMIT_TRUE_CONFIG = `import { defineConfig } from "xspec"
+const EMIT_TRUE_CONFIG = stagedTs(
+  "T1.6-1 xspec.config.ts — `markdown: { emit: true }`",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -96,7 +108,8 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 /**
  * `query node <identity>` decoded through the H-3 adapter, with the resolved
@@ -508,12 +521,15 @@ const REVIEW_SESSION = "expansion";
 
 // `text(node)` at runtime (SPEC 4.3): the compiled consumer prints the
 // expanded subtree text — requirement text reaches it only through `text`.
-const EXPANSION_CONSUMER = [
-  'import SPEC, { text } from "./specs/A.xspec";',
-  "",
-  "process.stdout.write(text(SPEC.summary));",
-  "",
-].join("\n");
+const EXPANSION_CONSUMER = stagedTs(
+  "T1.6-3 main.ts — `text` of the expanded summary, staged after `build`",
+  [
+    'import SPEC, { text } from "./specs/A.xspec";',
+    "",
+    "process.stdout.write(text(SPEC.summary));",
+    "",
+  ].join("\n"),
+);
 
 const T1_6_3 = defineProductTest({
   id: "T1.6-3",
@@ -950,8 +966,12 @@ const T1_6_4 = defineProductTest({
 // T1.6-5
 // ---------------------------------------------------------------------------
 
-// One spec group plus one code group, for the code-source arms (SPEC 7.2).
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// One spec group plus one code group, for the code-source arms (SPEC 7.2) —
+// T1.6-5's code arm and T1.7-1's endpoints workspace, each created after
+// its body's first invocation: a staged-source record (S-9's timing clause).
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T1.6-5/T1.7-1 xspec.config.ts — one spec group and one code group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -961,7 +981,8 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 // 0xFF can occur in no valid UTF-8 sequence; everything else in the file is
 // valid, so 14.20 is the file's only condition. The prefix is the file's
@@ -1002,6 +1023,20 @@ const BOM_OFFSET = 0;
 // begins with a BOM is unparseable, 14.20). U+FEFF encodes to EF BB BF; the
 // workspace builder writes string contents with BOMs kept (S-2).
 const BOM = "\u{FEFF}";
+
+// The code arm's two code sources, 14.20's declared-unparseable encodings:
+// that workspace is created after the spec arm's invocation, so each is a
+// staged-source record carrying its declaration (S-9's timing clause).
+const BAD_UTF8_CODE_RECORD = stagedTs(
+  "T1.6-5 code arm src/bad-utf8.ts",
+  BAD_UTF8_CODE_SOURCE,
+  "unparseable",
+);
+const BOM_CODE_RECORD = stagedTs(
+  "T1.6-5 code arm src/bom.ts",
+  BOM + "export const b = 2;\n",
+  "unparseable",
+);
 
 // The code arm's spec source: that workspace is created after the spec
 // arm's invocation, so a staged-source record (S-9's timing clause).
@@ -1106,11 +1141,9 @@ const T1_6_5 = defineProductTest({
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
         "specs/OK.mdx": VALID_SECTION_SOURCE,
-        "src/bad-utf8.ts": BAD_UTF8_CODE_SOURCE,
-        "src/bom.ts": BOM + "export const b = 2;\n",
+        "src/bad-utf8.ts": BAD_UTF8_CODE_RECORD,
+        "src/bom.ts": BOM_CODE_RECORD,
       },
-      // S-9: both code sources are 14.20's declared-unparseable encodings.
-      ts: { unparseable: ["src/bad-utf8.ts", "src/bom.ts"] },
     });
     try {
       const context =
@@ -1196,18 +1229,21 @@ const ENDPOINT_SPEC_SOURCE = stagedMdx(
   ].join("\n"),
 );
 
-const ENDPOINT_CODE_SOURCE = [
-  'import SPEC, { text } from "../specs/E.xspec";',
-  "",
-  "export function entry(): void {",
-  "  SPEC.alpha;",
-  "}",
-  "",
-  "export function writer(): string {",
-  "  return text(SPEC.omega);",
-  "}",
-  "",
-].join("\n");
+const ENDPOINT_CODE_SOURCE = stagedTs(
+  "T1.7-1 endpoints src/app.ts",
+  [
+    'import SPEC, { text } from "../specs/E.xspec";',
+    "",
+    "export function entry(): void {",
+    "  SPEC.alpha;",
+    "}",
+    "",
+    "export function writer(): string {",
+    "  return text(SPEC.omega);",
+    "}",
+    "",
+  ].join("\n"),
+);
 
 const ENDPOINT_FILE = "specs/E.mdx";
 const ALPHA_ID = "specs/E.mdx#alpha";

@@ -28,6 +28,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import {
   assertCompileErrorAt,
   assertNoCompileErrors,
@@ -164,14 +165,17 @@ const MIXED_TAGS_SOURCE = [
 // The identical consumer compiles against both workspaces' generated modules:
 // bare references are dependency markers (SPEC 4.5), so a clean compile of
 // the full chain set demonstrates both modules expose the same skeleton.
-const SKELETON_CONSUMER = [
-  'import SPEC from "./specs/A.xspec";',
-  "",
-  "SPEC.login;",
-  "SPEC.login.validCredentials;",
-  "SPEC.meta;",
-  "",
-].join("\n");
+const SKELETON_CONSUMER = stagedTs(
+  "T1.1-2 consumer.ts — the skeleton consumer both tag forms compile against, staged after `build`",
+  [
+    'import SPEC from "./specs/A.xspec";',
+    "",
+    "SPEC.login;",
+    "SPEC.login.validCredentials;",
+    "SPEC.meta;",
+    "",
+  ].join("\n"),
+);
 
 const T1_1_2 = defineProductTest({
   id: "T1.1-2",
@@ -340,21 +344,24 @@ export default defineConfig({
 })
 `;
 
-const VALID_LEAF_CONSUMER = [
-  'import SPEC from "./specs/A.xspec";',
-  "",
-  "SPEC.main;",
-  "SPEC.todo;",
-  "SPEC.empty;",
-  "",
-].join("\n");
+const VALID_LEAF_CONSUMER = stagedTs(
+  "T1.1-3 consumer.ts — the leaf-chain consumer, staged after `build`",
+  [
+    'import SPEC from "./specs/A.xspec";',
+    "",
+    "SPEC.main;",
+    "SPEC.todo;",
+    "SPEC.empty;",
+    "",
+  ].join("\n"),
+);
 
-const CHILD_CHAIN_CONSUMER = [
-  'import SPEC from "./specs/A.xspec";',
-  "",
-  "SPEC.todo.child;",
-  "",
-].join("\n");
+const CHILD_CHAIN_CONSUMER = stagedTs(
+  "T1.1-3 bad-consumer.ts — the child-of-a-leaf chain, staged after `build`",
+  ['import SPEC from "./specs/A.xspec";', "", "SPEC.todo.child;", ""].join(
+    "\n",
+  ),
+);
 
 const T1_1_3 = defineProductTest({
   id: "T1.1-3",
@@ -577,12 +584,15 @@ const ROOT_TEXT_SOURCE = [
 const ROOT_TEXT_COMPILED =
   "# Title\n\nIntro prose.\n\nAlpha requirement.\n\nAlpha one.\n\n";
 
-const ROOT_TEXT_CONSUMER = [
-  'import SPEC, { text } from "./specs/A.xspec";',
-  "",
-  "process.stdout.write(text(SPEC));",
-  "",
-].join("\n");
+const ROOT_TEXT_CONSUMER = stagedTs(
+  "T1.2-2 main.ts — `text` of the root node, staged after `build`",
+  [
+    'import SPEC, { text } from "./specs/A.xspec";',
+    "",
+    "process.stdout.write(text(SPEC));",
+    "",
+  ].join("\n"),
+);
 
 const T1_2_2 = defineProductTest({
   id: "T1.2-2",

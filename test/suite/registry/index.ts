@@ -14,6 +14,7 @@
 
 import { ProductTestSuite } from "../../helpers/registry.js";
 import { sealStagedMdxLedger } from "../../helpers/staged-mdx.js";
+import { sealStagedTsLedger } from "../../helpers/staged-ts.js";
 import { section11to12Tests } from "./section-1.1-1.2.js";
 import { section13Tests } from "./section-1.3.js";
 import { section14Tests } from "./section-1.4.js";
@@ -171,9 +172,11 @@ export const productTestSuite = new ProductTestSuite([
   ...section16P13Tests,
 ]);
 
-// The staged-source ledger (helpers/staged-mdx.ts) is complete once every
-// registration module above has loaded: seal it, so that a record created
-// later — at run time, from a test body — throws instead of escaping the S-9
-// self-test (test/self/s9-staged-sources.test.ts judges every record before
-// any product exists, H-8).
+// The staged-source ledger (helpers/staged-mdx.ts, and its TypeScript
+// records, helpers/staged-ts.ts) is complete once every registration module
+// above has loaded: seal both, so that a record created later — at run time,
+// from a test body — throws instead of escaping the S-9 self-test
+// (test/self/s9-staged-sources.test.ts judges every record before any
+// product exists, H-8).
 sealStagedMdxLedger();
+sealStagedTsLedger();

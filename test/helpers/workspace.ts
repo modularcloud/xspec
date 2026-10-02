@@ -73,6 +73,19 @@
 //   An edit of bytes the product itself wrote goes through `edit()`, judged
 //   at staging time alone: no harness constant equals them, so they are not
 //   a deterministic fixture.
+// - A code source or configuration file a test body stages after its first
+//   product invocation — a `file()` write, or an initial `files` entry of a
+//   workspace created after that invocation — is passed as the ledger's
+//   TypeScript record (helpers/staged-ts.ts) carrying the bytes, the S-9
+//   declaration, and the grammar the record is judged under, staged under
+//   the record's declaration (a `ts` option beside it, a workspace `ts`
+//   entry beside an initial record, an `.mdx` path, and a path selecting
+//   the other grammar all throw); the same self-test judges every such
+//   record with `judgeTsDeclaration` before any product exists. A record
+//   makes its path judged whatever the name, as `ts.wellFormed` does. The
+//   undeclared-staging guard below covers `.mdx` stagings only so far: its
+//   TypeScript arm comes once every registry module stages its
+//   post-invocation code sources and configurations as records.
 // - The undeclared-staging guard enforces that form: once a product has been
 //   invoked in a workspace (the subprocess driver marks it, root and
 //   realpath matched) or anywhere in the running registered body (the
@@ -133,6 +146,7 @@ import {
   unregisterWorkspaceRoot,
 } from "./product-invocations.js";
 import { StagedMdx } from "./staged-mdx.js";
+import { StagedTs, tsGrammarOf } from "./staged-ts.js";
 import {
   type TsDeclaration,
   judgeTypeScript,
@@ -161,18 +175,20 @@ export type FileContents = string | Uint8Array;
 
 /**
  * An initial `files` entry of a workspace declaration: plain contents, or a
- * staged-source record (helpers/staged-mdx.ts) whose bytes `create()` stages
- * under the record's own S-9 declaration — the form of every `.mdx` initial
- * file of a workspace a body creates after its first product invocation, so
- * that the S-9 self-test judged it before any product existed (module
- * header). A record belongs at an `.mdx` key the workspace's `mdx`
- * declaration does not name; a body's first workspace's initial files may
- * stay plain contents, and a plain `.mdx` entry of a workspace created after
- * the running body's first product invocation is refused at creation (the
+ * staged-source record whose bytes `create()` stages under the record's own
+ * S-9 declaration — an MDX record (helpers/staged-mdx.ts) at an `.mdx` key,
+ * a TypeScript record (helpers/staged-ts.ts) at a code source's or
+ * configuration file's key — the form of every such initial file of a
+ * workspace a body creates after its first product invocation, so that the
+ * S-9 self-test judged it before any product existed (module header). A
+ * record belongs at a key the workspace's `mdx` (or `ts`) declaration does
+ * not name; a body's first workspace's initial files may stay plain
+ * contents, and a plain `.mdx` entry of a workspace created after the
+ * running body's first product invocation is refused at creation (the
  * undeclared-staging guard) unless its path is listed `unchecked` or
  * `perDraw`.
  */
-export type InitialFileContents = FileContents | StagedMdx;
+export type InitialFileContents = FileContents | StagedMdx | StagedTs;
 
 /**
  * A staging's S-9 declaration of its MDX sources' well-formedness, by
@@ -440,20 +456,37 @@ export class TestWorkspace {
    * effective declaration is `unchecked` or `per-draw`. A code source or
    * configuration file is judged against its S-9 TypeScript declaration —
    * the `ts` option's, else the workspace declaration's, else well-formed
-   * for a name `TS_DEFAULT_SUFFIXES` reaches — before anything is written.
+   * for a name `TS_DEFAULT_SUFFIXES` reaches — before anything is written;
+   * a TypeScript staged-source record (helpers/staged-ts.ts) supplies both
+   * the bytes and that declaration — the form of every code source and
+   * configuration file a body stages after a product invocation — and a
+   * `ts` option beside it, an `.mdx` path, or a path selecting the other
+   * grammar throws.
    */
   async file(
     rel: RelPath,
-    contents: FileContents | StagedMdx,
+    contents: FileContents | StagedMdx | StagedTs,
     options: FileOptions = {},
   ): Promise<void> {
     let data: Uint8Array;
     let declaration = options.mdx;
+    let tsDeclaration = options.ts;
     if (contents instanceof StagedMdx) {
-      ({ data, declaration } = this.recordStaging(
+      const staged = this.recordStaging(
         rel,
         contents,
         declaration,
+        tsDeclaration,
+        "option",
+      );
+      data = staged.data;
+      declaration = staged.declaration;
+      tsDeclaration = staged.tsDeclaration ?? tsDeclaration;
+    } else if (contents instanceof StagedTs) {
+      ({ data, tsDeclaration } = this.tsRecordStaging(
+        rel,
+        contents,
+        tsDeclaration,
         "option",
       ));
     } else {
@@ -466,7 +499,7 @@ export class TestWorkspace {
       }
     }
     this.checkMdx(rel, data, declaration);
-    this.checkTs(rel, data, options.ts);
+    this.checkTs(rel, data, tsDeclaration);
     await this.write(rel, data);
   }
 
@@ -481,9 +514,11 @@ export class TestWorkspace {
   /**
    * An initial `files` entry of the workspace declaration: plain contents,
    * judged under the workspace declaration like every `.mdx` staging, or a
-   * staged-source record, staged under the record's own declaration (module
-   * header — the form of a later-arm workspace's initial `.mdx` files, which
-   * S-7's sweep never reaches; a body's first workspace's may stay plain).
+   * staged-source record — an MDX record or a TypeScript one — staged under
+   * the record's own declaration (module header — the form of a later-arm
+   * workspace's initial `.mdx` files, code sources, and configuration,
+   * which S-7's sweep never reaches; a body's first workspace's may stay
+   * plain).
    * Inside the undeclared-staging guard, as `file()` is: a plain `.mdx`
    * entry of a workspace created after the running body's first product
    * invocation is refused before anything of it is written, unless the
@@ -499,11 +534,20 @@ export class TestWorkspace {
   ): Promise<void> {
     let data: Uint8Array;
     let declaration: MdxFileDeclaration | undefined;
+    let tsDeclaration: TsFileDeclaration | undefined;
     if (contents instanceof StagedMdx) {
-      ({ data, declaration } = this.recordStaging(
+      ({ data, declaration, tsDeclaration } = this.recordStaging(
         rel,
         contents,
         this.mdxDeclarations.get(mdxKey(rel)),
+        this.tsDeclarations.get(mdxKey(rel)),
+        "declaration entry",
+      ));
+    } else if (contents instanceof StagedTs) {
+      ({ data, tsDeclaration } = this.tsRecordStaging(
+        rel,
+        contents,
+        this.tsDeclarations.get(mdxKey(rel)),
         "declaration entry",
       ));
     } else {
@@ -518,7 +562,7 @@ export class TestWorkspace {
       }
     }
     this.checkMdx(rel, data, declaration);
-    this.checkTs(rel, data, undefined);
+    this.checkTs(rel, data, tsDeclaration);
     await this.write(rel, data);
   }
 
@@ -528,14 +572,23 @@ export class TestWorkspace {
    * one the S-9 self-test verified. A record at a path S-9 does not judge
    * is a mistake, and a second declaration for the path beside the record
    * (`file()`'s `mdx` option, the workspace declaration's entry) is a
-   * contradiction; both throw before anything is written.
+   * contradiction; both throw before anything is written. A record carrying
+   * a TypeScript declaration too (the path is a code source a code group
+   * discovers; helpers/staged-mdx.ts) returns it for the TypeScript check,
+   * and a `ts` option or workspace `ts` entry beside it is a contradiction
+   * likewise.
    */
   private recordStaging(
     rel: RelPath,
     record: StagedMdx,
     beside: MdxFileDeclaration | undefined,
+    tsBeside: TsFileDeclaration | undefined,
     besideForm: "option" | "declaration entry",
-  ): { readonly data: Uint8Array; readonly declaration: MdxFileDeclaration } {
+  ): {
+    readonly data: Uint8Array;
+    readonly declaration: MdxFileDeclaration;
+    readonly tsDeclaration: TsFileDeclaration | undefined;
+  } {
     const key = mdxKey(rel);
     if (!isMdxPath(rel)) {
       throw new HarnessStagingError(
@@ -561,7 +614,94 @@ export class TestWorkspace {
           "change the record)",
       );
     }
-    return { data: toBytes(record.source), declaration: record.mdx };
+    if (record.ts !== undefined && tsBeside !== undefined) {
+      const what =
+        besideForm === "option"
+          ? `the \`ts\` option ${JSON.stringify(tsBeside)} beside it`
+          : `the workspace declaration's \`ts\` entry ${JSON.stringify(tsBeside)} for the path beside it`;
+      throw new HarnessStagingError(
+        "ts-derivability",
+        key,
+        `the staged-source record ${JSON.stringify(record.name)} ` +
+          "carries its own S-9 TypeScript declaration " +
+          `${JSON.stringify(record.ts)} (the path is a code source too); ` +
+          `${what} is a contradiction — the record's declaration is the ` +
+          `one the S-9 self-test verified, so drop the ${besideForm} (or ` +
+          "change the record)",
+      );
+    }
+    return {
+      data: toBytes(record.source),
+      declaration: record.mdx,
+      tsDeclaration: record.ts,
+    };
+  }
+
+  /**
+   * A TypeScript staged-source record's staging (helpers/staged-ts.ts) —
+   * `file()`'s and an initial `files` entry's alike: the record's bytes
+   * under the record's declaration, the one the S-9 self-test verified under
+   * the grammar the record names. An `.mdx` path is an MDX source first (an
+   * MDX record's), and a path selecting the other grammar (SPEC 14.20: a
+   * name ending `.tsx` selects TSX, any other plain TypeScript) would judge
+   * the bytes otherwise than the self-test did — both are mistakes; a
+   * second declaration for the path beside the record (`file()`'s `ts`
+   * option, the workspace declaration's `ts` entry) is a contradiction. All
+   * throw before anything is written. A record makes its path judged
+   * whatever its name: it is the per-write form of `ts.wellFormed` (or
+   * `ts.unparseable`).
+   */
+  private tsRecordStaging(
+    rel: RelPath,
+    record: StagedTs,
+    beside: TsFileDeclaration | undefined,
+    besideForm: "option" | "declaration entry",
+  ): {
+    readonly data: Uint8Array;
+    readonly tsDeclaration: TsFileDeclaration;
+  } {
+    const key = mdxKey(rel);
+    if (isMdxPath(rel)) {
+      throw new HarnessStagingError(
+        "ts-derivability",
+        key,
+        `the staged-source record ${JSON.stringify(record.name)} is a ` +
+          "TypeScript record and the path is an `.mdx` path — an MDX " +
+          "source is staged as an MDX record (helpers/staged-mdx.ts)",
+      );
+    }
+    const selected = tsGrammarOf(key);
+    if (selected !== record.grammar) {
+      const named = (grammar: string): string =>
+        grammar === "tsx" ? "TSX" : "plain TypeScript";
+      throw new HarnessStagingError(
+        "ts-derivability",
+        key,
+        `the staged-source record ${JSON.stringify(record.name)} is judged ` +
+          `under the grammar ${JSON.stringify(record.grammar)} ` +
+          `(${named(record.grammar)}) and the path selects ` +
+          `${JSON.stringify(selected)} (${named(selected)}; SPEC 14.20: a ` +
+          "name ending `.tsx` selects TSX, any other plain TypeScript) — " +
+          "stage the record at a path of its grammar, or register one " +
+          "naming the path's",
+      );
+    }
+    if (beside !== undefined) {
+      const what =
+        besideForm === "option"
+          ? `the \`ts\` option ${JSON.stringify(beside)} beside it`
+          : `the workspace declaration's \`ts\` entry ${JSON.stringify(beside)} for the path beside it`;
+      throw new HarnessStagingError(
+        "ts-derivability",
+        key,
+        `the staged-source record ${JSON.stringify(record.name)} ` +
+          `carries its own S-9 declaration ${JSON.stringify(record.ts)}; ` +
+          `${what} is a contradiction — the record's declaration is the ` +
+          `one the S-9 self-test verified, so drop the ${besideForm} (or ` +
+          "change the record)",
+      );
+    }
+    return { data: toBytes(record.source), tsDeclaration: record.ts };
   }
 
   /**
@@ -985,11 +1125,14 @@ export const TS_DEFAULT_SUFFIXES = [
 
 /**
  * S-9's TypeScript judge for a staging — one code path for the builder
- * (every code source and configuration file, as it is written) and any
- * self-test judging a staging before any product exists: `data`, the file's
- * exact bytes, must match `declaration` under `judgeTypeScript` (the grammar
- * `key`'s name selects), or a `HarnessStagingError` of mode
- * `ts-derivability` names `key` and the parser's first error. A text the
+ * (every code source and configuration file, as it is written) and the
+ * self-tests judging a staging before any product exists (every TypeScript
+ * staged-source record): `data`, the file's exact bytes, must match
+ * `declaration` under `judgeTypeScript` (the grammar `fileName` selects —
+ * the staged path, `key`, by default; a record, judged before it has a
+ * path, is handed a neutral name of its grammar, `tsGrammarFileName`), or a
+ * `HarnessStagingError` of mode `ts-derivability` names `key` (the staged
+ * path, or a record's name) and the parser's first error. A text the
  * release accepts read one way only is refused under either declaration
  * (S-9: no fixture is such text). An `unchecked` declaration judges nothing.
  */
@@ -997,9 +1140,10 @@ export function judgeTsDeclaration(
   key: string,
   data: Uint8Array,
   declaration: TsFileDeclaration,
+  fileName: string = key,
 ): void {
   if (declaration === "unchecked") return;
-  const verdict = judgeTypeScript(data, key);
+  const verdict = judgeTypeScript(data, fileName);
   const problem = tsDeclarationProblem(verdict, declaration);
   if (problem === undefined) return;
   const remedy =

@@ -38,6 +38,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -51,15 +52,19 @@ import {
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, nothing
-// else — the CONF-VALID scope.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// else — the CONF-VALID scope. A staged-source record (S-9's timing clause):
+// the later arms' workspaces stage it after their body's first invocation.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T1.3-2/T1.3-4/T1.3-5/T1.3-6 xspec.config.ts — the specs-only configuration of every arm workspace",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 /**
  * Stage one single-file workspace and collect its `build --json` findings.
