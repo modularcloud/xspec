@@ -38,16 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 26 — T4.3-2 and T4.5-3: the template-literal arms (TEST-SPEC L172, L183; A10, A11)
-
-**Where.** `test/suite/registry/section-4.3-4.4.ts` (T4.3-2) and `section-4.5.ts` (T4.5-3).
-
-**Change.**
-- *T4.3-2.* Add the arm `` text(SPEC[`a`]) ``, the module holding `a`: 14.8.
-- *T4.5-3.* Restage its template-literal arm as L183 pins it, `` SPEC[`login-v2`]; `` with the module holding `login-v2`; today it stages `` SPEC[`a`]; ``.
-
-**Checks.** S-9 and S-7 pass. Both tests against the built product.
-
 ### Task 27 — T4.5-4 and T4.5-8: `using` and `await using` shadowing and module-scope collision arms (TEST-SPEC L184, L188; SPEC 4.5, 2.4, 14.15, 14.7; A12, A13)
 
 **Where.** `test/suite/registry/section-4.5.ts`.

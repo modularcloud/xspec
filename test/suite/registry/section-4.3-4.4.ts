@@ -22,11 +22,12 @@
 //   (SPEC 4.6), asserted as the file's complete outgoing edge set.
 // - T4.3-2 arms stage exactly one defect each — the string/dynamic/arity
 //   form. The dynamic arms' chains would resolve to existing nodes if read
-//   statically (`SPEC[key]` with key = "a"; `SPEC.a?.b` with `a.b` staged),
-//   so a product cannot legitimately reclassify them as unresolved
-//   references (14.7): the sole present condition is 14.8 (SPEC 2.4, 4.3,
-//   4.5). The arity arms mirror T2.4-3's MDX staging in this language's
-//   valid argument form: the two-argument call passes two static, resolvable
+//   statically (`SPEC[key]` with key = "a"; `` SPEC[`a`] `` read as
+//   `SPEC["a"]`; `SPEC.a?.b` with `a.b` staged), so a product cannot
+//   legitimately reclassify them as unresolved references (14.7): the sole
+//   present condition is 14.8 (SPEC 2.4, 4.3, 4.5). The arity arms mirror
+//   T2.4-3's MDX staging in this language's valid argument form: the
+//   two-argument call passes two static, resolvable
 //   node chains (`SPEC.a`, `SPEC.a.b` — never strings, each themselves 14.8
 //   in TypeScript, which would stage further defects), and the zero-argument
 //   call has nothing to resolve, so in each the arity is the sole defect —
@@ -382,6 +383,22 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
     ],
     offending: "text(SPEC[key]);",
   },
+  // TEST-SPEC's `` text(SPEC[`a`]) ``, `SPEC`'s module holding `a`: template
+  // literals are not static (SPEC 2.4), so a product reading the
+  // no-substitution template literal as the static string literal `"a"`
+  // resolves the chain, records the edge, and reports nothing — failing the
+  // exit-1 and exact {"14.8": 1} expectations.
+  {
+    name:
+      "a computed index by template literal as the `text` argument " +
+      "(template literals are not static, SPEC 2.4)",
+    lines: [
+      'import SPEC, { text } from "../specs/A.xspec";',
+      "",
+      "text(SPEC[`a`]);",
+    ],
+    offending: "text(SPEC[`a`]);",
+  },
   {
     name:
       "an optional-chaining chain as the `text` argument (dynamic node " +
@@ -492,7 +509,7 @@ const T4_3_2_LAID_OUT_ARMS: readonly LaidOutTextArgumentArm[] = T4_3_2_ARMS.map(
 const T4_3_2 = defineProductTest({
   id: "T4.3-2",
   title:
-    "a string argument to `text` in a TypeScript file fails with 14.8; so does a dynamic node-form argument there — a computed index by variable, an optional-chaining chain, and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`text(SPEC.a!)`, `text(SPEC.a as X)`, `text(<X>SPEC.a)` in a `.ts` file, `text(SPEC.a satisfies X)`), each as the `text` argument, the file well-formed — and so do a zero-argument and a two-argument `text(...)` call: 14.8's arity clause holds in either language, the MDX arms being T2.4-3 (SPEC 4.3, 2.4, 4.5)",
+    "a string argument to `text` in a TypeScript file fails with 14.8; so does a dynamic node-form argument there — a computed index by variable, a computed index by template literal (`` text(SPEC[`a`]) ``, the module holding `a`: template literals are not static), an optional-chaining chain, and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`text(SPEC.a!)`, `text(SPEC.a as X)`, `text(<X>SPEC.a)` in a `.ts` file, `text(SPEC.a satisfies X)`), each as the `text` argument, the file well-formed — and so do a zero-argument and a two-argument `text(...)` call: 14.8's arity clause holds in either language, the MDX arms being T2.4-3 (SPEC 4.3, 2.4, 4.5)",
   run: async (product) => {
     for (const { arm, app } of T4_3_2_LAID_OUT_ARMS) {
       const at = arm.lines.indexOf(arm.offending);

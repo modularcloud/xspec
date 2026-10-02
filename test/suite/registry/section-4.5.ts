@@ -35,10 +35,12 @@
 //   asserts (SPEC 5.5, 9.2, 9.3).
 // - T4.5-3 arms stage exactly one defect each — the non-static form. Every
 //   arm's chain would resolve to an existing node if read statically
-//   (`SPEC[key]` with key = "a"; the `a.b` chains with `a.b` staged), so a
-//   product cannot legitimately reclassify the finding as an unresolved
-//   reference (14.7): the sole present condition is 14.8, and the exact
-//   condition-count assertion simultaneously pins "not 14.18" (SPEC 4.5).
+//   (`SPEC[key]` with key = "a"; the `a.b` chains with `a.b` staged;
+//   `` SPEC[`login-v2`] `` read as `SPEC["login-v2"]`, over its own module
+//   holding `login-v2`, as TEST-SPEC pins it), so a product cannot
+//   legitimately reclassify the finding as an unresolved reference (14.7):
+//   the sole present condition is 14.8, and the exact condition-count
+//   assertion simultaneously pins "not 14.18" (SPEC 4.5).
 // - T4.5-3's TypeScript-only arms (`SPEC.a!;`, `SPEC.a as X;`, `<X>SPEC.a;`,
 //   `SPEC.a satisfies X;`) are dynamic references in a TypeScript source —
 //   14.8 at the statement's expression, the file well-formed — never a parse
@@ -278,6 +280,12 @@ interface OffendingStatementArm {
   readonly lines: readonly string[];
   /** The offending statement — exactly one of the lines. */
   readonly offending: string;
+  /**
+   * The arm's spec sources, when not the shared `a`/`a.b` source
+   * (`AB_SPEC_FILES`) — staged-source records, as every arm's workspace
+   * past a body's first is created after a product invocation (S-9).
+   */
+  readonly specFiles?: Readonly<Record<string, StagedMdx>>;
 }
 
 /** An arm's staged `src/app.ts` and its offending statement's window. */
@@ -343,10 +351,11 @@ function stageOffendingStatements(
 }
 
 /**
- * Stage one arm over the shared `a`/`a.b` spec source and assert `build
- * --json` reports exactly one finding of `condition`, located within the
- * offending statement's byte window. The exact condition-count assertion is
- * simultaneously the classification assertion (14.8 vs 14.18, SPEC 4.5).
+ * Stage one arm over its spec sources — the shared `a`/`a.b` source unless
+ * the arm names its own — and assert `build --json` reports exactly one
+ * finding of `condition`, located within the offending statement's byte
+ * window. The exact condition-count assertion is simultaneously the
+ * classification assertion (14.8 vs 14.18, SPEC 4.5).
  */
 async function assertArmFailsWith(
   product: ProductBinding,
@@ -358,7 +367,7 @@ async function assertArmFailsWith(
   const context = `${testId} \`build --json\` over ${arm.name}`;
   await withWorkspace(
     SPEC_AND_CODE_CONFIG,
-    { ...AB_SPEC_FILES, "src/app.ts": source },
+    { ...(arm.specFiles ?? AB_SPEC_FILES), "src/app.ts": source },
     async (workspace) => {
       const findings = await buildFindings(product, workspace, context);
       assertConditionCounts(findings, { [condition]: 1 }, context);
@@ -864,6 +873,19 @@ const T4_5_2 = defineProductTest({
 
 const T4_5_3_IMPORT = 'import SPEC from "../specs/A.xspec";';
 
+// The template-literal arm's spec source: `SPEC`'s module holding
+// `login-v2`, as TEST-SPEC T4.5-3 pins it — a segment no dot access reaches
+// (T1.4-3), so `SPEC["login-v2"]` would resolve if read statically and the
+// template literal is the arm's sole defect. The arm is not the body's
+// first, so its workspace is created after a product invocation: a
+// staged-source record (S-9, test/self/s9-staged-sources.test.ts).
+const T4_5_3_LOGIN_SPEC_FILES = {
+  "specs/A.mdx": stagedMdx(
+    "T4.5-3 template-literal arm specs/A.mdx — the module holding login-v2",
+    '<S id="login-v2">\nLogin behavior.\n</S>\n',
+  ),
+} as const;
+
 const T4_5_3_ARMS: readonly OffendingStatementArm[] = [
   {
     name:
@@ -929,12 +951,18 @@ const T4_5_3_ARMS: readonly OffendingStatementArm[] = [
     lines: [T4_5_3_IMPORT, "", "(SPEC.a).b;"],
     offending: "(SPEC.a).b;",
   },
+  // TEST-SPEC's `` SPEC[`login-v2`]; ``: a product reading the
+  // no-substitution template literal as the static string literal
+  // `"login-v2"` resolves the chain, records the edge, and reports nothing
+  // — failing the exit-1 and exact {"14.8": 1} expectations.
   {
     name:
-      "a template-literal computed index as a bare expression statement " +
-      "(template literals are not static, SPEC 2.4, 4.5)",
-    lines: [T4_5_3_IMPORT, "", "SPEC[`a`];"],
-    offending: "SPEC[`a`];",
+      "a template-literal computed index as a bare expression statement, " +
+      "`SPEC`'s module holding `login-v2` (template literals are not " +
+      "static, SPEC 2.4, 4.5)",
+    lines: [T4_5_3_IMPORT, "", "SPEC[`login-v2`];"],
+    offending: "SPEC[`login-v2`];",
+    specFiles: T4_5_3_LOGIN_SPEC_FILES,
   },
 ];
 
@@ -944,7 +972,7 @@ const T4_5_3_STAGINGS = stageOffendingStatements("T4.5-3", T4_5_3_ARMS);
 const T4_5_3 = defineProductTest({
   id: "T4.5-3",
   title:
-    "a non-static bare reference in expression-statement position — computed index by variable, optional chaining, non-null assertion, parentheses, template-literal index, and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`SPEC.a as X;`, `<X>SPEC.a;` in a `.ts` file, `SPEC.a satisfies X;`) — fails with exactly one located 14.8 finding (invalid argument, not 14.18), the file well-formed (SPEC 4.5, 2.4, 14.8)",
+    "a non-static bare reference in expression-statement position — computed index by variable, optional chaining, non-null assertion, parentheses, template-literal index (`` SPEC[`login-v2`]; ``, the module holding `login-v2`: template literals are not static), and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`SPEC.a as X;`, `<X>SPEC.a;` in a `.ts` file, `SPEC.a satisfies X;`) — fails with exactly one located 14.8 finding (invalid argument, not 14.18), the file well-formed (SPEC 4.5, 2.4, 14.8)",
   run: async (product) => {
     for (const staging of T4_5_3_STAGINGS) {
       await assertArmFailsWith(product, "T4.5-3", staging, "14.8");
