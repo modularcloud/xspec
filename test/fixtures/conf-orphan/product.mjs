@@ -89,6 +89,12 @@
 //   through that link, so the removal and 14.10's recorded-file form — both
 //   consulting it, and nothing else — judge, report, and remove the entry the
 //   link's target holds under the path's remaining components.
+// - `removeLinkTarget` (VIOL-ORPHAN-LINKTARGET, bin-linktarget.mjs):
+//   `removeRecorded`, given a removable occupant that is a symbolic link,
+//   deletes the plain file the link resolves to (nothing where it resolves
+//   to no plain file) and leaves the link standing; `recordedOccupant`, and
+//   so 14.10's recorded-file form, is untouched, the link still judged as
+//   itself, and `writeDerived` still replaces a link as the occupant.
 
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
@@ -1315,7 +1321,35 @@ function isRemovable(occupant, rel, ws) {
 async function removeRecorded(config, rel, ws) {
   const occupant = await recordedOccupant(config, rel);
   if (!isRemovable(occupant, rel, ws)) return;
+  if (deviations.removeLinkTarget && occupant.kind === "symlink") {
+    await removeLinkedPlainFile(occupant.abs);
+    return;
+  }
   await fsp.unlink(occupant.abs);
+}
+
+/**
+ * VIOL-ORPHAN-LINKTARGET's deviation (CERTIFICATIONS.md
+ * §VIOL-ORPHAN-LINKTARGET) — `removeRecorded` with one clause of 13.4's
+ * removal rule inverted: where the recorded path's occupant is a symbolic
+ * link, the removal deletes in place of the link the plain file the link
+ * resolves to — nothing where it resolves to no plain file (dangling,
+ * looping, or reaching a directory or another kind) — and leaves the link
+ * standing. The occupant is still judged as itself by `recordedOccupant`,
+ * so 14.10's recorded-file form is unchanged; nothing is read below a
+ * non-directory component; derived-file writes (`writeDerived`) still
+ * replace a link as the occupant.
+ */
+async function removeLinkedPlainFile(linkAbs) {
+  let resolved;
+  try {
+    resolved = await fsp.realpath(linkAbs);
+  } catch (error) {
+    if (["ENOENT", "ENOTDIR", "ELOOP"].includes(error.code)) return;
+    throw error;
+  }
+  if ((await lstatKind(resolved)) !== "file") return;
+  await fsp.unlink(resolved);
 }
 
 /**

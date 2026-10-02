@@ -373,6 +373,16 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       violator("VIOL-ORPHAN-THROUGHLINK", "conf-orphan/bin-throughlink.mjs", [
         "T13.4-11",
       ]),
+      // VIOL-ORPHAN-LINKTARGET: the removal of a recorded path no longer
+      // generated, where the path's occupant is a symbolic link, deletes the
+      // plain file the link resolves to (nothing where it resolves to no
+      // plain file) in place of the link, and leaves the link standing. The
+      // occupant is still judged as itself, so 14.10's recorded-file form is
+      // unchanged; nothing is read below a non-directory component;
+      // derived-file writes still replace a link as the occupant.
+      violator("VIOL-ORPHAN-LINKTARGET", "conf-orphan/bin-linktarget.mjs", [
+        "T13.4-11",
+      ]),
     ],
   ),
 ];
