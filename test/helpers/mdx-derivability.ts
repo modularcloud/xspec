@@ -151,6 +151,45 @@ const ALLOWANCE_RULES: Readonly<Record<MdxAllowance, AllowanceRule>> = {
   },
 };
 
+/**
+ * The early errors `readMdxTree` admits beyond S-9's named allowances, for a
+ * file no fixture declares — one a product wrote, whose added imports
+ * T6.5-22(a) reads (helpers/added-import-identifiers.ts) through S-6's name
+ * analysis: ECMAScript 2024's static-semantic errors on an identifier its
+ * grammar derives as a binding or a reference, each naming a word SPEC 6.5
+ * bars as an added import's identifier — those strict mode code admits as no
+ * binding (`let`, `static`, `implements`, `interface`, `package`, `private`,
+ * `protected`, `public`, `yield`, `eval`, `arguments`) and `await` in module
+ * code, where `BindingIdentifier : await` derives with its early error — so
+ * that `import let from "./let.xspec"`, which 14.20 makes well-formed
+ * (T6.5-22), reads. Never `enum` or another reserved word, which no binding
+ * derives: acorn reports those under the same messages, so each pattern
+ * names its words, and an `await` the grammar cannot take as an identifier
+ * (inside an async function, or an operand-less `await` expression) meets
+ * other messages. They are no S-9 allowance: S-9's list is exactly its five,
+ * and `deriveMdx`, judging the fixtures S-9 judges, never admits these.
+ */
+const READING_RULES: readonly AllowanceRule[] = [
+  {
+    programOnly: false,
+    message:
+      /^The keyword '(?:implements|interface|let|package|private|protected|public|static|yield|await)' is reserved$/,
+  },
+  {
+    programOnly: false,
+    message:
+      /^Binding (?:implements|interface|let|package|private|protected|public|static|yield|await|eval|arguments) in strict mode$/,
+  },
+  {
+    programOnly: false,
+    message: /^Cannot use keyword 'await' outside an async function$/,
+  },
+  {
+    programOnly: false,
+    message: /^let is disallowed as a lexically bound name$/,
+  },
+];
+
 // ---------------------------------------------------------------------------
 // Unicode 15.1's identifier characters and whitespace (SPEC 14.20, S-9).
 
@@ -373,8 +412,14 @@ function eatHeldTo151(
 
 /** The stock parser, its identifiers 15.1's, tolerating exactly the named
  * early errors. */
-function lenientParser(allowances: readonly MdxAllowance[]): typeof Parser {
-  const rules = allowances.map((name) => ALLOWANCE_RULES[name]);
+function lenientParser(
+  allowances: readonly MdxAllowance[],
+  reading: boolean,
+): typeof Parser {
+  const rules = [
+    ...allowances.map((name) => ALLOWANCE_RULES[name]),
+    ...(reading ? READING_RULES : []),
+  ];
   return class LenientParser extends Unicode151Parser {
     // Set by the program parse an ESM block gets; an expression parse
     // (`parseExpressionAt`) never calls `parse()`.
@@ -604,12 +649,17 @@ function restoreCharacter(error: unknown, shown: number, actual: number): void {
 const EXTENSIONS = new Map<string, MdxExtension>();
 const MDAST_EXTENSIONS = [mdxFromMarkdown()];
 
-function extensionsFor(allowances: readonly MdxAllowance[]): MdxExtension {
+function extensionsFor(
+  allowances: readonly MdxAllowance[],
+  reading = false,
+): MdxExtension {
   const named = [...new Set(allowances)].sort();
-  const key = named.join(",");
+  const key = `${named.join(",")}${reading ? "+reading" : ""}`;
   let extension = EXTENSIONS.get(key);
   if (extension === undefined) {
-    extension = withUnicode151Jsx(mdxjs({ acorn: lenientParser(named) }));
+    extension = withUnicode151Jsx(
+      mdxjs({ acorn: lenientParser(named, reading) }),
+    );
     EXTENSIONS.set(key, extension);
   }
   return extension;
@@ -682,6 +732,15 @@ export function deriveMdx(
   source: Uint8Array | string,
   options?: DeriveMdxOptions,
 ): MdxVerdict {
+  return deriveMdxWith(source, options?.allowances ?? [], false);
+}
+
+/** `deriveMdx`, `READING_RULES` admitted besides when `reading`. */
+function deriveMdxWith(
+  source: Uint8Array | string,
+  allowances: readonly MdxAllowance[],
+  reading: boolean,
+): MdxVerdict {
   let text: string;
   if (typeof source === "string") {
     const lone = firstLoneSurrogate(source);
@@ -721,7 +780,7 @@ export function deriveMdx(
   parsedText = text;
   try {
     fromMarkdown(text, {
-      extensions: [extensionsFor(options?.allowances ?? [])],
+      extensions: [extensionsFor(allowances, reading)],
       mdastExtensions: MDAST_EXTENSIONS,
     });
     return { derives: true };
@@ -760,12 +819,16 @@ export type MdxTree = ReturnType<typeof fromMarkdown>;
 /**
  * The tree of a source that derives under 14.20, read by the parse
  * `deriveMdx` judges with — every S-9 allowance admitted, since a well-formed
- * file may carry any of those early errors. TEST-SPEC S-6's name analysis
- * (helpers/oracles/name-analysis.ts) reads a spec source's names from it. A
- * source that does not derive so has no tree to read: a harness error.
+ * file may carry any of those early errors, and the early errors of
+ * `READING_RULES` besides, which a product-written file may carry (an added
+ * `import let from "./let.xspec"`, T6.5-22). TEST-SPEC S-6's name analysis
+ * (helpers/oracles/name-analysis.ts) reads a spec source's names from it, and
+ * T6.5-22(a)'s check (helpers/added-import-identifiers.ts) a rewritten
+ * source's import declarations. A source that does not derive so has no tree
+ * to read: a harness error, its reason the parse's.
  */
 export function readMdxTree(text: string): MdxTree {
-  const verdict = deriveMdx(text, { allowances: MDX_ALLOWANCES });
+  const verdict = deriveMdxWith(text, MDX_ALLOWANCES, true);
   if (!verdict.derives) {
     throw new Error(
       `S-9's MDX parse: no tree is read from a source that does not derive under SPEC 14.20 (${verdict.reason})`,
@@ -775,7 +838,7 @@ export function readMdxTree(text: string): MdxTree {
   parsedText = text;
   try {
     return fromMarkdown(text, {
-      extensions: [extensionsFor(MDX_ALLOWANCES)],
+      extensions: [extensionsFor(MDX_ALLOWANCES, true)],
       mdastExtensions: MDAST_EXTENSIONS,
     });
   } finally {

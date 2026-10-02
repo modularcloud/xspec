@@ -43,6 +43,14 @@
 //   builder refuses a plain `.mdx` staging that is not a staged-source
 //   record (helpers/workspace.ts). This is the one path every invocation
 //   takes, so the mark cannot be bypassed.
+// - T6.5-22(a)'s universal assertion (helpers/added-import-identifiers.ts):
+//   an invocation whose argv reads as a performed `move` has its
+//   pre-operation sources read before it spawns, and once it exits 0 the
+//   identifiers of every import declaration it added are judged before
+//   `waitForExit` resolves — a breach rejects it with a diagnosed failure
+//   (`HarnessAssertionError`) — so the assertion holds whichever test
+//   performs the operation. The module loads only for an argv holding the
+//   token `move`.
 
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
@@ -52,6 +60,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import type { AddedImportCheck } from "./added-import-identifiers.js";
 import { noteProductInvocation } from "./product-invocations.js";
 
 /** Hang guard applied to every invocation unless overridden (H-8). */
@@ -223,6 +232,13 @@ export async function startProduct(
   }
 
   const invocation = resolveInvocation(binding.command, fullArgs, commandLine);
+  // T6.5-22(a) (module header): a performed move's pre-operation sources,
+  // read before anything is spawned.
+  const addedImportCheck = await prepareAddedImportCheck(
+    options.cwd,
+    options.argv ?? [],
+    commandLine,
+  );
   // The undeclared-staging guard's mark (helpers/product-invocations.ts,
   // module header): from here on, a plain `.mdx` staging in this workspace
   // — or anywhere in the registered body running this — is one S-7's sweep
@@ -242,7 +258,25 @@ export async function startProduct(
     commandLine,
     options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
+    addedImportCheck,
   );
+}
+
+/**
+ * T6.5-22(a)'s check for an invocation (helpers/added-import-identifiers.ts),
+ * or undefined when its argv cannot read as a performed move — the module,
+ * which loads the harness's TypeScript and MDX parsers, is loaded only for
+ * an argv holding the token `move`.
+ */
+async function prepareAddedImportCheck(
+  cwd: string,
+  argv: readonly ArgvValue[],
+  commandLine: string,
+): Promise<AddedImportCheck | undefined> {
+  if (!argv.includes("move")) return undefined;
+  const { prepareAddedImportCheck: prepare } =
+    await import("./added-import-identifiers.js");
+  return await prepare(cwd, argv, commandLine);
 }
 
 /** Run an invocation to completion — the common foreground path. */
@@ -257,7 +291,7 @@ export async function runProduct(
 /**
  * A started invocation. `waitForExit` resolves with the run result (normal
  * exits and requested kills alike) and rejects, diagnosed, on timeout, output
- * overflow, or spawn failure.
+ * overflow, spawn failure, or a performed move's breach of T6.5-22(a).
  */
 export class RunningProduct {
   readonly commandLine: string;
@@ -272,6 +306,7 @@ export class RunningProduct {
     commandLine: string,
     timeoutMs: number,
     maxOutputBytes: number,
+    addedImportCheck?: AddedImportCheck,
   ) {
     this.#child = child;
     this.commandLine = commandLine;
@@ -298,7 +333,7 @@ export class RunningProduct {
       child.kill("SIGKILL");
     }, timeoutMs);
 
-    this.#exit = new Promise<RunResult>((resolve, reject) => {
+    const exit = new Promise<RunResult>((resolve, reject) => {
       let done = false;
       const settle = (complete: () => void): void => {
         if (done) return;
@@ -348,6 +383,15 @@ export class RunningProduct {
         });
       });
     });
+    // T6.5-22(a): a performed move's added imports, judged once it exits 0
+    // and before any awaiter sees the result (helpers/subprocess.ts header).
+    this.#exit =
+      addedImportCheck === undefined
+        ? exit
+        : exit.then(async (result) => {
+            await addedImportCheck.verify(result);
+            return result;
+          });
     // Mark rejections as observed even when a test aborts before awaiting;
     // awaiters of waitForExit() still receive the original rejection.
     this.#exit.catch(() => {});
@@ -369,8 +413,9 @@ export class RunningProduct {
 
   /**
    * The run's outcome. Resolves for normal exits and requested kills; rejects
-   * with a diagnosed error on timeout, output overflow, or spawn failure.
-   * Callable any number of times.
+   * with a diagnosed error on timeout, output overflow, or spawn failure, and
+   * with a diagnosed assertion failure when a performed move exiting 0 added
+   * an import T6.5-22(a) rejects. Callable any number of times.
    */
   async waitForExit(): Promise<RunResult> {
     return await this.#exit;

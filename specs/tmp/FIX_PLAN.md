@@ -38,26 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part B — Shared machinery
 
-### Task 19 — T6.5-22(a): every operation the suite performs that adds an import is held to the added-identifier assertion (TEST-SPEC T6.5-22(a), L301; A28; C4(a) rides on it)
-
-**Depends on.** Task 18, done: `analyzeNames` and `addedIdentifierBreaches` in `test/helpers/oracles/name-analysis.ts`, which throw on a file that is not well-formed under its grammar (AGENTS.md's S-6 name-analysis bullet).
-
-**Where.** Wherever the suite performs import-adding operations. Prefer one central hook that every section-form `move` exiting 0 passes through — the subprocess driver path that the registered bodies and the property runner share (`test/helpers/subprocess.ts`), or a wrapper every such move uses. The assertion then holds "whichever test performs it".
-
-**Change.** For each file the operation changed, read every added import declaration from the post-operation bytes; the identifiers' values are otherwise unpinned. Assert, with Task 18's analysis over the pre-operation file:
-- no added identifier is barred there;
-- none is bound by a declaration of the pre-operation file, or referenced in it;
-- the added identifiers are distinct;
-- in a spec source, none is `S`, `Spec`, or `text`.
-
-A breach is a diagnosed product failure naming the file, the identifier, and the clause.
-- *Coverage today:* T6.5-3's third-file arm, T6.5-8 through T6.5-15, T6.5-16's performed controls, T6.5-17 through T6.5-19, the real runs T6.6-4(b) makes on a copy, and P-5's drawn moves.
-- *Later tests* that add imports (T1.4-5(b) and (c), T6.5-22(b), T6.5-23) must get it without further wiring.
-
-**Checks.**
-- A self-test vector or a temporary stand-in shows the hook fires: a stand-in product adding `import let from …` is failed.
-- The T6.5, T6.6, and P-5 suite files against the built product: verdicts unchanged, unless the product breaches a clause. Diagnose every new failure by hand.
-
 ### Task 20 — H-7: T11.2-4 maps to `"14"` (TEST-SPEC §14's per-condition index lists T11.2-4 under 14.16; H-7; C9)
 
 **Where.** `test/suite/registry/traceability.ts`, which today reads `"T11.2-4": ["11.2"]`.
