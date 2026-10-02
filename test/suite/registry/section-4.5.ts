@@ -66,8 +66,12 @@
 //   member beside it) together with `occurrences --file`, which answers on
 //   the failing workspace (11.2) and lists no record for the spellings (5.7).
 //   Reference-spelling findings (14.5–14.7) are asserted byte-exact at the
-//   span 14 fixes — terminators and delimiters excluded — while the
-//   declarations a 14.15 or 14.16 locates use the end-widened window below.
+//   span 14 fixes — terminators and delimiters excluded — and so is a code
+//   arm's colliding non-import construct (a declarator, or a declaration
+//   ending in its closing brace: no terminator makes its span ambiguous),
+//   while the import declaration a 14.15 locates, its own characters
+//   spelling a `;`, and the spec-source arms' declarations use the
+//   end-widened window below.
 // - T4.5-8's further located forms stage the supporting declaration the
 //   spelled construct needs on the line before it — an ambient
 //   `declare const o: Record<string, number>;` for the binding pattern
@@ -984,11 +988,41 @@ const T4_5_3 = defineProductTest({
 // T4.5-4 — shadowing: chains rooted at a local are not spec references
 // ---------------------------------------------------------------------------
 
-// The identical statement text `SPEC.a.b;` appears twice: once at top level
-// rooted at the import binding (a marker, the control), once inside a
-// function whose local `const SPEC` shadows the import — TypeScript scoping
-// resolves that chain to the local, so it is not a spec reference (SPEC 4.5:
-// rooting is scope-aware and value-level).
+// The identical statement text `SPEC.a.b;` appears at top level rooted at the
+// import binding (a marker, the control) and inside the scope of each
+// shadowing local — TypeScript scoping resolves those chains to the local, so
+// they are not spec references (SPEC 4.5: rooting is scope-aware and
+// value-level). The locals: a `const SPEC` in `localScope`; a `using SPEC =
+// f()` in a block of `usingBlockScope`; and an `await using SPEC = f()` in
+// the async function `awaitUsingScope` (SPEC 2.4, 4.5: variable
+// declarations, `using` and `await using` included). Each shadowed chain
+// lies in a named code unit (4.6), so a product ignoring the scoping would
+// record an edge from that unit — distinguishable from the file-level
+// control's. The same chain outside the `using` block — still inside
+// `usingBlockScope`, past the block's closing brace — is rooted at the
+// import again and records its edge from `src/app.ts#usingBlockScope`: the
+// block, not the function, bounds the `using` local's scope. The block's
+// shadowed chain and that edge share a source unit and a target, so the
+// edge set alone cannot tell them apart; the occurrence records (5.7) can —
+// each spelling rooted at the import records exactly one, at its own range,
+// and a shadowed chain none. The ambient `declare function f` binds no
+// `SPEC` and is no named unit (4.6); TypeScript 5.9.3 accepts the file both
+// as module code and as script code (14.20).
+const T4_5_4_USING_BLOCK_UNIT = [
+  "function usingBlockScope(): void {",
+  "  {",
+  "    using SPEC = f();",
+  "    SPEC.a.b;",
+  "  }",
+  "  SPEC.a.b;",
+  "}",
+].join("\n");
+const T4_5_4_AWAIT_USING_UNIT = [
+  "async function awaitUsingScope(): Promise<void> {",
+  "  await using SPEC = f();",
+  "  SPEC.a.b;",
+  "}",
+].join("\n");
 const T4_5_4_APP_SOURCE = [
   'import SPEC from "../specs/A.xspec";',
   "",
@@ -1002,7 +1036,86 @@ const T4_5_4_APP_SOURCE = [
   "",
   "localScope();",
   "",
+  "declare function f(): Disposable & { a: { b: string } };",
+  "",
+  T4_5_4_USING_BLOCK_UNIT,
+  "",
+  T4_5_4_AWAIT_USING_UNIT,
+  "",
+  "usingBlockScope();",
+  "void awaitUsingScope();",
+  "",
 ].join("\n");
+
+/**
+ * The byte position of `needle` within `haystack` (pure ASCII, so string
+ * indices are byte offsets), required to occur exactly once — a missing or
+ * repeated anchor is a harness defect, never a product failure.
+ */
+function t454UniqueAt(haystack: string, needle: string, what: string): number {
+  const at = haystack.indexOf(needle);
+  if (
+    at === -1 ||
+    haystack.indexOf(needle, at + 1) !== -1 ||
+    !/^[\x20-\x7e\n]*$/.test(haystack)
+  ) {
+    throw new Error(
+      `T4.5-4 fixture broke: ${what} must occur exactly once in a pure-ASCII ` +
+        `src/app.ts — fix the staged source in section-4.5.ts (harness bug)`,
+    );
+  }
+  return at;
+}
+
+// The occurrence records `occurrences --file src/app.ts` must list over the
+// main workspace, in occurrence order (SPEC 5.7: file, then range start,
+// then range end): the top-level control marker, whose source is the
+// whole-file location (identity the path alone, range the entire file), and
+// the chain past the `using` block, whose source is the enclosing function
+// declaration — `function` through its closing brace (1.7, 4.6). Each own
+// range is the bare chain, the `;` excluded (5.7, 14). No record for a chain
+// a local roots: the `const`, `using`, and `await using` scopes' chains.
+const T4_5_4_EXPECTED_RECORDS: readonly (readonly unknown[])[] = (() => {
+  const source = T4_5_4_APP_SOURCE;
+  const chain = "SPEC.a.b";
+  const controlStart =
+    t454UniqueAt(source, "\n\nSPEC.a.b;\n", "the top-level control marker") + 2;
+  const unitStart = t454UniqueAt(
+    source,
+    T4_5_4_USING_BLOCK_UNIT,
+    "the `usingBlockScope` declaration",
+  );
+  const pastBlockStart =
+    unitStart +
+    t454UniqueAt(
+      T4_5_4_USING_BLOCK_UNIT,
+      "  }\n  SPEC.a.b;\n",
+      "the chain past the `using` block",
+    ) +
+    6;
+  return [
+    [
+      "src/app.ts",
+      controlStart,
+      controlStart + chain.length,
+      "references",
+      ["src/app.ts", 0, source.length],
+      "specs/A.mdx#a.b",
+    ],
+    [
+      "src/app.ts",
+      pastBlockStart,
+      pastBlockStart + chain.length,
+      "references",
+      [
+        "src/app.ts#usingBlockScope",
+        unitStart,
+        unitStart + T4_5_4_USING_BLOCK_UNIT.length,
+      ],
+      "specs/A.mdx#a.b",
+    ],
+  ];
+})();
 
 // Callee side (SPEC 4.5: rooting is scope-aware and value-level for the
 // `text` binding as for the node chain). Inside `shadowScope`, a local
@@ -1187,7 +1300,7 @@ async function assertT454CalleeSide(product: ProductBinding): Promise<void> {
 const T4_5_4 = defineProductTest({
   id: "T4.5-4",
   title:
-    "a local declaration shadowing the import binding: chains rooted at the local are not spec references — no edge, no error, the program builds — while the identical statement rooted at the import records its marker edge; callee side: an inner-scope `function text` shadowing the imported `text` makes `text(SPEC.a)` in that scope a call to another function — `build` and `check` report exactly one condition-18 finding located at that use, exit 1, and `occurrences --file` over the code file, answering on the failing workspace, carries the finding and lists no record for it while the identical call outside the scope lists its `embeds` occurrence (SPEC 4.5, 5.7, 11.2, 11.3, 14.18)",
+    "a local declaration shadowing the import binding — a `const`, a `using SPEC = f()` in a block, and an `await using SPEC = f()` in an async function among the locals: chains rooted at the local are not spec references — no edge, no occurrence, no error, the program builds — while the identical statement rooted at the import, outside each local's scope, records its edge; callee side: an inner-scope `function text` shadowing the imported `text` makes `text(SPEC.a)` in that scope a call to another function — `build` and `check` report exactly one condition-18 finding located at that use, exit 1, and `occurrences --file` over the code file, answering on the failing workspace, carries the finding and lists no record for it while the identical call outside the scope lists its `embeds` occurrence (SPEC 4.5, 2.4, 5.7, 11.2, 11.3, 14.18)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -1211,23 +1324,75 @@ const T4_5_4 = defineProductTest({
         );
 
         // No edge: the workspace's complete `references` edge set is the
-        // top-level control marker's file-attributed edge — a product that
-        // ignored scoping would record a second edge from the function unit.
-        const expected: readonly GraphEdge[] = [
-          { from: "src/app.ts", to: "specs/A.mdx#a.b", kind: "references" },
-        ];
+        // top-level control marker's file-attributed edge plus the edge of
+        // the chain past the `using` block, attributed to its enclosing
+        // function — a product that ignored the `const` or `await using`
+        // scoping would record a further edge from `localScope` or
+        // `awaitUsingScope`, and one scoping a block's `using` local to the
+        // whole function would drop the `usingBlockScope` edge.
+        const controlEdge: GraphEdge = {
+          from: "src/app.ts",
+          to: "specs/A.mdx#a.b",
+          kind: "references",
+        };
         assertEdgeSetEqual(
           await queryEdgesOfKind(product, workspace, "references", "T4.5-4"),
-          expected,
-          "T4.5-4 chains rooted at the shadowing local record no edge; the " +
-            "identical top-level statement rooted at the import records " +
-            "exactly its marker edge (SPEC 4.5, 4.6)",
+          [
+            controlEdge,
+            {
+              from: "src/app.ts#usingBlockScope",
+              to: "specs/A.mdx#a.b",
+              kind: "references",
+            },
+          ],
+          "T4.5-4 chains rooted at a shadowing local — `const`, `using` in " +
+            "a block, `await using` in an async function — record no edge; " +
+            "the identical top-level statement rooted at the import records " +
+            "exactly its marker edge, and the same chain outside the `using` " +
+            "block's scope records its edge from the enclosing function " +
+            "(SPEC 4.5, 2.4, 4.6)",
         );
         assertEdgeSetEqual(
           await queryEdgesFrom(product, workspace, "src/app.ts", "T4.5-4"),
-          expected,
-          "T4.5-4 the file's complete outgoing edge set is the control " +
-            "marker's edge (SPEC 4.5, 4.6)",
+          [controlEdge],
+          "T4.5-4 the whole-file location's complete outgoing edge set is " +
+            "the control marker's edge (SPEC 4.5, 4.6)",
+        );
+
+        // No edge, per spelling: `occurrences --file src/app.ts` lists
+        // exactly the records of the two chains the import roots — the
+        // control and the chain past the `using` block — and none for a
+        // chain a local roots (SPEC 5.7, 11.3): a product ignoring the
+        // block's `using` local would list a third record at that chain's
+        // own range, an edge the edge set cannot distinguish (same source
+        // unit, same target). The workspace is valid, so the answer is
+        // finding-free, exit 0 (11.2).
+        const occContext =
+          "T4.5-4 `occurrences --file src/app.ts` over the shadowing locals";
+        const report = decodeOccurrencesReport(
+          await runJson(
+            product,
+            workspace,
+            ["occurrences", "--file", "src/app.ts"],
+            occContext,
+          ),
+          occContext,
+        );
+        assertSameJson(
+          report.findings.map((finding) => finding.condition),
+          [],
+          `${occContext}: no finding accompanies the answer — the shadowed ` +
+            `chains fall under no condition (SPEC 4.5, 11.2)`,
+        );
+        assertSameJson(
+          report.occurrences.map(occurrenceTuple),
+          T4_5_4_EXPECTED_RECORDS,
+          `${occContext}: exactly the records of the chains the import ` +
+            `roots — the top-level control (whole-file source) and the ` +
+            `chain past the \`using\` block (source \`usingBlockScope\`) — ` +
+            `each at its bare chain, and none for a chain the \`const\`, ` +
+            `\`using\`, or \`await using\` local roots (SPEC 4.5, 2.4, 5.7, ` +
+            `4.6, 1.7, 11.3)`,
         );
       },
     );
@@ -1539,6 +1704,22 @@ const T4_5_8_COLLIDING_ARMS: readonly SameScopeDeclarationArm[] = [
     line: "const SPEC = 1;",
     construct: "SPEC = 1",
   },
+  // The `using` and `await using` forms (SPEC 2.4: variable declarations,
+  // `using` and `await using` included), each at the module's top level —
+  // TypeScript 5.9.3 accepts both as module code and as script code
+  // (14.20). The located construct is the declarator `SPEC = f()`, the
+  // `using` or `await using` excluded (14, 1.7); the ambient `declare
+  // function f` on the line before binds no `SPEC`.
+  {
+    name: "a `using` declaration `using SPEC = f()` at module scope (SPEC 2.4)",
+    line: "declare function f(): Disposable;\nusing SPEC = f();",
+    construct: "SPEC = f()",
+  },
+  {
+    name: "an `await using` declaration `await using SPEC = f()` at module scope (SPEC 2.4)",
+    line: "declare function f(): AsyncDisposable;\nawait using SPEC = f();",
+    construct: "SPEC = f()",
+  },
   {
     name: "a function declaration `function SPEC() {}` (SPEC 2.4)",
     line: "function SPEC() {}",
@@ -1603,6 +1784,12 @@ interface StagedSameScopeArm {
   readonly importWindow: { readonly start: number; readonly end: number };
   /** The colliding construct's end-widened byte window (`""` construct: unused). */
   readonly constructWindow: { readonly start: number; readonly end: number };
+  /**
+   * The colliding construct's own characters, exactly (SPEC 14, 1.7): a
+   * declarator or a declaration that ends in no statement terminator, so
+   * its precomputed offsets are unambiguous (`""` construct: unused).
+   */
+  readonly constructRange: { readonly start: number; readonly end: number };
   /** The marker's bare chain, exactly (SPEC 14: terminator excluded). */
   readonly markerRange: { readonly start: number; readonly end: number };
   /** The `text(...)` call, callee through closing parenthesis, exactly (14). */
@@ -1640,6 +1827,10 @@ function stageSameScopeArm(arm: SameScopeDeclarationArm): StagedSameScopeArm {
     source: stagedTs(`T4.5-8 src/app.ts beside ${arm.name}`, source),
     importWindow: byteWindow("", T4_5_8_IMPORT),
     constructWindow: byteWindow(
+      declarationPrefix + arm.line.slice(0, constructAt),
+      arm.construct,
+    ),
+    constructRange: exact(
       declarationPrefix + arm.line.slice(0, constructAt),
       arm.construct,
     ),
@@ -1735,6 +1926,20 @@ function assertSameScopeCollisionFindings(
       `by its own characters and the non-import by the construct binding ` +
       `the name, a declarator by its own characters with the \`const\` ` +
       `statement excluded (SPEC 14, 1.7, 2.4)`,
+  );
+  // The non-import's location byte-asserted against its precomputed offsets
+  // (TEST-SPEC T4.5-8): the declarator's own characters — name or binding
+  // pattern through initializer, the `const`, `let`, `using`, or `await
+  // using` statement excluded — or the declaration's own characters, a
+  // decorator list included and a leading `export` excluded (SPEC 14, 1.7).
+  // None ends in a statement terminator, so its exact span is unambiguous;
+  // the import's own characters keep the end-widened window above.
+  assertSameJson(
+    locationTuples(findings[2]!)[1],
+    ["src/app.ts", staged.constructRange.start, staged.constructRange.end],
+    `${context}: the 14.15's second location is byte-exact — the colliding ` +
+      `construct's own characters, nothing before or after them (SPEC 14, ` +
+      `1.7, 2.4)`,
   );
 }
 
@@ -2156,7 +2361,7 @@ async function assertSpecSourceCollision(
 const T4_5_8 = defineProductTest({
   id: "T4.5-8",
   title:
-    "same-scope collisions: an identifier the spec module import binds that a module-scope `const`, `function`, `class`, `enum`, or value-binding `namespace` declaration also binds at value level roots no resolving chain — `build` and `check` report the condition-15 collision, locating the import by its own characters and the non-import by the construct binding the name (the declarator `SPEC = 1`, the `const` statement excluded; the further forms `let SPEC;` at `SPEC` alone, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from its `@`, and `export class SPEC {}` / `export function SPEC() {}` from `class` / `function`, the `export` excluded), beside condition 7 for the marker `SPEC.a` and the call `text(SPEC.b)`, each at the span its occurrence would occupy, exit 1; the gated `query edges` reports no edge from the file and `occurrences` no record for the spellings; type-level `interface`, `type`, and value-free `namespace` declarations collide with nothing — edges recorded, no finding, exit 0; and a spec source holding `export const BASE = 1` beside `import BASE` reports 14.16 for the export statement, 14.15 locating the import and the declarator, and 14.5/14.6 for the `d` and `text(...)` spellings rooted at `BASE`, no edge and no occurrence recorded for them — the two declarations in one ESM block and, a second arm, across two blocks, each a finding in a well-formed file, never 14.20 (SPEC 2.4, 4.5, 2.1, 2.7, 5.7, 11.2, 12.7, 13.3, 14, 14.15, 14.20)",
+    "same-scope collisions: an identifier the spec module import binds that a module-scope `const`, `using`, `await using`, `function`, `class`, `enum`, or value-binding `namespace` declaration also binds at value level roots no resolving chain — `build` and `check` report the condition-15 collision, locating the import by its own characters and the non-import by the construct binding the name, byte-exact (the declarator `SPEC = 1`, the `const` statement excluded; `SPEC = f()` for `using SPEC = f()` and `await using SPEC = f()`, the `using` or `await using` excluded; the further forms `let SPEC;` at `SPEC` alone, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from its `@`, and `export class SPEC {}` / `export function SPEC() {}` from `class` / `function`, the `export` excluded), beside condition 7 for the marker `SPEC.a` and the call `text(SPEC.b)`, each at the span its occurrence would occupy, exit 1; the gated `query edges` reports no edge from the file and `occurrences` no record for the spellings; type-level `interface`, `type`, and value-free `namespace` declarations collide with nothing — edges recorded, no finding, exit 0; and a spec source holding `export const BASE = 1` beside `import BASE` reports 14.16 for the export statement, 14.15 locating the import and the declarator, and 14.5/14.6 for the `d` and `text(...)` spellings rooted at `BASE`, no edge and no occurrence recorded for them — the two declarations in one ESM block and, a second arm, across two blocks, each a finding in a well-formed file, never 14.20 (SPEC 2.4, 4.5, 2.1, 2.7, 5.7, 11.2, 12.7, 13.3, 14, 14.15, 14.20)",
   run: async (product) => {
     for (const staging of T4_5_8_COLLIDING_STAGINGS) {
       await assertSameScopeCollisionArm(product, staging);
