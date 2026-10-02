@@ -66,6 +66,8 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
@@ -103,8 +105,12 @@ export default defineConfig({
 
 // One spec group plus one code group (SPEC 7.2): TypeScript files under
 // `src/` are discovered code sources, so `build` analyzes their imports and
-// spec-module usage (4, 4.5).
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// spec-module usage (4, 4.5). A staged-source record (S-9's timing clause):
+// every arm workspace of T4-2 and T4-5 past each body's first is created
+// after a product invocation; T4-3 and T4-4 stage it before theirs.
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T4-2/T4-5 xspec.config.ts — one spec group and one code group, the arm workspaces' default",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -114,12 +120,17 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 // The same plus enabled Markdown emission, for the T4-2 arms whose derived
 // path is a configured Markdown emit destination — those exist exactly while
 // emission is enabled (SPEC 7.3), with the default next-to-source placement.
-const MARKDOWN_EMIT_CONFIG = `import { defineConfig } from "xspec"
+// A staged-source record: those arms' workspaces are created after T4-2's
+// first invocation.
+const MARKDOWN_EMIT_CONFIG = stagedTs(
+  "T4-2 xspec.config.ts — the code-group configuration with Markdown emission enabled, the emit-destination arms",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -130,15 +141,19 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 // A spec group reaching `.mdx` files under `src/`, beside the code group's
 // `.ts` files (SPEC 7.1, 7.2: the two globs match disjoint sets; the
 // generated `src/NAME.xspec.ts` is a derived file, excluded from every group,
 // 13.4), for the T4-2 arms whose specifier TEST-SPEC pins relative to the
 // spec source's own directory — the lexical positives and the escape-spelled
-// name segment.
-const COLOCATED_CONFIG = `import { defineConfig } from "xspec"
+// name segment. A staged-source record: those arms' workspaces are created
+// after T4-2's first invocation.
+const COLOCATED_CONFIG = stagedTs(
+  "T4-2 xspec.config.ts — a spec group reaching `src/**/*.mdx` beside the code group, the colocated arms",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -148,11 +163,12 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
+  config: string | StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
@@ -286,7 +302,10 @@ const T4_1 = defineProductTest({
 // construct(s) start at byte 0, everything pure ASCII. Every arm's workspace
 // past the first is created after a product invocation, so its `.mdx` entries
 // — the shared base and an arm's extras alike — are staged-source records,
-// judged before any product exists (S-9, test/self/s9-staged-sources.test.ts).
+// judged before any product exists (S-9, test/self/s9-staged-sources.test.ts),
+// and so are its configuration and its code sources: each arm's `src/app.ts`
+// is laid out into a record at module load (`layOutInvalidTsImportArm`), one
+// per row.
 const T4_2_BASE_FILES = {
   "specs/BASE.mdx": stagedMdx(
     "T4-2 specs/BASE.mdx",
@@ -320,7 +339,7 @@ interface InvalidTsImportArm {
    */
   readonly maxFindings?: number;
   /** Configuration override (defaults to SPEC_AND_CODE_CONFIG). */
-  readonly config?: string;
+  readonly config?: StagedTs;
   /** Files staged beside the base files. */
   readonly extraFiles?: Readonly<Record<string, InitialFileContents>>;
   /**
@@ -469,7 +488,7 @@ const MODULE_LINKING_FORMS: readonly {
 const DERIVED_PATH_KINDS: readonly {
   readonly kind: string;
   readonly specifier: string;
-  readonly config?: string;
+  readonly config?: StagedTs;
 }[] = [
   {
     kind: "a file name containing `.xspec.` (`../specs/BASE.xspec.ts` directly)",
@@ -532,6 +551,50 @@ const DUPLICATE_BINDING_ARMS: readonly InvalidTsImportArm[] = [
 ];
 
 /**
+ * An invalid-import arm laid out at module load: its `src/app.ts` — the
+ * statements, one per line from byte 0 — as a staged-source record (S-9's
+ * timing clause: every arm's workspace past the first is created after a
+ * product invocation), and each statement's end-widened byte window
+ * (support.ts byteWindow), fixed from the same bytes.
+ */
+interface LaidOutInvalidTsImportArm {
+  readonly arm: InvalidTsImportArm;
+  readonly app: StagedTs;
+  readonly windows: readonly {
+    readonly start: number;
+    readonly end: number;
+  }[];
+}
+
+/**
+ * Lay out one arm's `src/app.ts` and its statements' byte windows. It
+ * registers a record, so it runs at module load only (`T4_2_INVALID_ARMS`).
+ */
+function layOutInvalidTsImportArm(
+  arm: InvalidTsImportArm,
+): LaidOutInvalidTsImportArm {
+  const windows: { start: number; end: number }[] = [];
+  let prefix = "";
+  for (const statement of arm.statements) {
+    windows.push(byteWindow(prefix, statement));
+    prefix += statement + "\n";
+  }
+  return {
+    arm,
+    app: stagedTs(`T4-2 arm ${arm.name} src/app.ts`, prefix),
+    windows,
+  };
+}
+
+// T4-2's invalid-import arms in run order, one record per row.
+const T4_2_INVALID_ARMS: readonly LaidOutInvalidTsImportArm[] = [
+  ...XSPEC_RULE_ARMS,
+  ...SIDE_EFFECT_IMPORT_ARMS,
+  ...DERIVED_PATH_ARMS,
+  ...DUPLICATE_BINDING_ARMS,
+].map(layOutInvalidTsImportArm);
+
+/**
  * Run one invalid-import arm: `build --json` exits 1 with only 14.15
  * findings — exactly one for a single-statement arm, one or two for a
  * colliding pair — each locating the importing code file and falling within
@@ -540,22 +603,16 @@ const DUPLICATE_BINDING_ARMS: readonly InvalidTsImportArm[] = [
  */
 async function runInvalidTsImportArm(
   product: ProductBinding,
-  arm: InvalidTsImportArm,
+  { arm, app, windows }: LaidOutInvalidTsImportArm,
   testId: string,
 ): Promise<void> {
   const context = `${testId} \`build --json\` over ${arm.name}`;
-  const windows: { start: number; end: number }[] = [];
-  let prefix = "";
-  for (const statement of arm.statements) {
-    windows.push(byteWindow(prefix, statement));
-    prefix += statement + "\n";
-  }
   await withWorkspace(
     arm.config ?? SPEC_AND_CODE_CONFIG,
     {
       ...T4_2_BASE_FILES,
       ...arm.extraFiles,
-      "src/app.ts": prefix,
+      "src/app.ts": app,
     },
     async (workspace) => {
       await stageBesideRoot(workspace, arm.outsideFiles ?? {});
@@ -607,22 +664,26 @@ async function runInvalidTsImportArm(
 // discovered spec source — a product that analyzed the call (e.g. by constant
 // propagation) would have to report the always-invalid static-specifier
 // dynamic import (14.15) and fail the exit-0 expectation; a conforming
-// product records nothing from the file.
-const NON_STATIC_DYNAMIC_SOURCE = [
-  'const target = "../specs/BASE.xspec";',
-  "void import(target);",
-  "",
-].join("\n");
+// product records nothing from the file. Every positive arm's workspace is
+// created after T4-2's first invocation, so its code sources are
+// staged-source records (S-9's timing clause), as are those below.
+const NON_STATIC_DYNAMIC_SOURCE = stagedTs(
+  "T4-2 src/app.ts — the dynamic `import()` with a non-static specifier",
+  ['const target = "../specs/BASE.xspec";', "void import(target);", ""].join(
+    "\n",
+  ),
+);
 
 // Positive arm: two colliding non-spec imports — neither is a spec module
 // import, so the collision is no xspec finding, and the unused colliding
 // bindings trigger no xspec error (TypeScript's own complaint is outside
 // xspec's validations).
-const NON_SPEC_COLLISION_SOURCE = [
-  'import MOD from "node:path";',
-  'import MOD from "node:url";',
-  "",
-].join("\n");
+const NON_SPEC_COLLISION_SOURCE = stagedTs(
+  "T4-2 src/app.ts — two colliding non-spec imports",
+  ['import MOD from "node:path";', 'import MOD from "node:url";', ""].join(
+    "\n",
+  ),
+);
 
 // Positive arms: lexical resolution in TS (SPEC 4: the resolution of 2.1).
 // The spec source `src/NAME.mdx` sits beside its consumers under
@@ -631,18 +692,26 @@ const NON_SPEC_COLLISION_SOURCE = [
 // same directory through an empty segment. Each consumer's bare marker
 // records a `references` edge to the resolved node (4.5): a product failing
 // to resolve either spelling reports 14.15 and fails the build, and one
-// resolving it elsewhere records the wrong edge target.
-const LEXICAL_TS_CONSUMERS: readonly {
-  readonly file: string;
-  readonly specifier: string;
-}[] = [
-  { file: "src/one.ts", specifier: "./sub/../NAME.xspec" },
-  { file: "src/two.ts", specifier: ".//NAME.xspec" },
-];
-
+// resolving it elsewhere records the wrong edge target. Each consumer is a
+// staged-source record, one per row.
 function lexicalTsConsumerSource(specifier: string): string {
   return [`import NAME from "${specifier}";`, "", "NAME.core;", ""].join("\n");
 }
+
+const LEXICAL_TS_CONSUMERS: readonly {
+  readonly file: string;
+  readonly specifier: string;
+  readonly source: StagedTs;
+}[] = [
+  { file: "src/one.ts", specifier: "./sub/../NAME.xspec" },
+  { file: "src/two.ts", specifier: ".//NAME.xspec" },
+].map((consumer) => ({
+  ...consumer,
+  source: stagedTs(
+    `T4-2 lexical positive ${consumer.file} — the marker through \`${consumer.specifier}\``,
+    lexicalTsConsumerSource(consumer.specifier),
+  ),
+}));
 
 // Positive arm: a side-effect-only import in a code-group file (SPEC 4: it
 // binds nothing, records nothing, and is valid). It is staged alone in
@@ -653,23 +722,30 @@ function lexicalTsConsumerSource(specifier: string): string {
 // (14.15 at `build` or `check`) or records anything from it is caught — an
 // edge by `query edges --from src/side.ts`, a phantom occurrence as an extra
 // tuple in the exact (file, kind, target) multiset (SPEC 5.7: an import
-// declaration, its binding used or not, records no occurrence).
+// declaration, its binding used or not, records no occurrence). The three
+// code sources are staged-source records.
 const SIDE_EFFECT_IMPORT_FILE = "src/side.ts";
-const SIDE_EFFECT_IMPORT_SOURCE = 'import "../specs/BASE.xspec";\n';
+const SIDE_EFFECT_IMPORT_SOURCE = stagedTs(
+  "T4-2 side-effect arm src/side.ts — the side-effect-only import, alone",
+  'import "../specs/BASE.xspec";\n',
+);
 
-const SIDE_EFFECT_ORDINARY_CONSUMERS: Readonly<Record<string, string>> = {
-  "src/one.ts": [
-    'import BASE from "../specs/BASE.xspec";',
-    "",
-    "BASE.core;",
-    "",
-  ].join("\n"),
-  "src/two.ts": [
-    'import BASE, { text } from "../specs/BASE.xspec";',
-    "",
-    "process.stdout.write(text(BASE.core));",
-    "",
-  ].join("\n"),
+const SIDE_EFFECT_ORDINARY_CONSUMERS: Readonly<Record<string, StagedTs>> = {
+  "src/one.ts": stagedTs(
+    "T4-2 side-effect arm src/one.ts — the ordinary marker consumer",
+    ['import BASE from "../specs/BASE.xspec";', "", "BASE.core;", ""].join(
+      "\n",
+    ),
+  ),
+  "src/two.ts": stagedTs(
+    "T4-2 side-effect arm src/two.ts — the ordinary `text(...)` consumer",
+    [
+      'import BASE, { text } from "../specs/BASE.xspec";',
+      "",
+      "process.stdout.write(text(BASE.core));",
+      "",
+    ].join("\n"),
+  ),
 };
 
 // The consumers' edges (SPEC 4.3, 4.5; top-level statements, so each source
@@ -700,12 +776,7 @@ const T4_2 = defineProductTest({
   // (H-8 hang guard only, never an assertion — H-10).
   timeoutMs: 240_000,
   run: async (product) => {
-    for (const arm of [
-      ...XSPEC_RULE_ARMS,
-      ...SIDE_EFFECT_IMPORT_ARMS,
-      ...DERIVED_PATH_ARMS,
-      ...DUPLICATE_BINDING_ARMS,
-    ]) {
+    for (const arm of T4_2_INVALID_ARMS) {
       await runInvalidTsImportArm(product, arm, "T4-2");
     }
 
@@ -719,7 +790,7 @@ const T4_2 = defineProductTest({
         ...Object.fromEntries(
           LEXICAL_TS_CONSUMERS.map((consumer) => [
             consumer.file,
-            lexicalTsConsumerSource(consumer.specifier),
+            consumer.source,
           ]),
         ),
       },
@@ -1096,7 +1167,9 @@ const T4_4 = defineProductTest({
 // exporting a value `SPEC` so that each non-spec import designates a real
 // binding (consumer-side resolution is outside xspec's validations either
 // way, SPEC 4.5). Every arm's workspace past the first is created after a
-// product invocation: the two spec sources are staged-source records (S-9).
+// product invocation: the two spec sources, the configuration, and both code
+// sources — `src/t.ts` here, each arm's `src/app.ts` in `T4_5_ARMS` — are
+// staged-source records (S-9).
 const T4_5_FILES = {
   "specs/A.mdx": stagedMdx(
     "T4-5 specs/A.mdx",
@@ -1106,7 +1179,10 @@ const T4_5_FILES = {
     "T4-5 specs/B.mdx",
     '<S id="x">\nOther behavior.\n</S>\n',
   ),
-  "src/t.ts": "export const SPEC = 1;\n",
+  "src/t.ts": stagedTs(
+    "T4-5 src/t.ts — the non-spec module `./t` exporting `SPEC`",
+    "export const SPEC = 1;\n",
+  ),
 } as const;
 
 // `text` bound by its own declaration — two declarations of one module
@@ -1157,8 +1233,11 @@ const T4_5_PAIRINGS: readonly TypeOnlyCollisionPairing[] = [
 interface StagedTypeOnlyCollisionArm {
   /** The pairing and its declaration order (failure diagnostics). */
   readonly name: string;
-  /** The whole file: `text` import, the pair, blank, marker, `text` call. */
-  readonly source: string;
+  /**
+   * The whole file: `text` import, the pair, blank, marker, `text` call — a
+   * staged-source record (S-9's timing clause).
+   */
+  readonly source: StagedTs;
   /**
    * The two colliding import declarations' end-widened byte windows
    * (support.ts byteWindow), in file order — the `text` import is no
@@ -1179,7 +1258,8 @@ interface StagedTypeOnlyCollisionArm {
  * declarations in the given order, one per line, then the marker statement
  * and the `text(...)` call statement after a blank line — and fix every
  * construct's byte position from the exact bytes. The file is pure ASCII,
- * so string indices are byte offsets.
+ * so string indices are byte offsets. It registers the file as a record, so
+ * it runs at module load only (`T4_5_ARMS`).
  */
 function stageTypeOnlyCollisionArm(
   pairing: TypeOnlyCollisionPairing,
@@ -1205,14 +1285,24 @@ function stageTypeOnlyCollisionArm(
     const start = Buffer.byteLength(before, "utf8");
     return { start, end: start + Buffer.byteLength(construct, "utf8") };
   };
+  const name = `${pairing.name} (${order === "spec-first" ? "the spec import declared first" : "the other import declared first"})`;
   return {
-    name: `${pairing.name} (${order === "spec-first" ? "the spec import declared first" : "the other import declared first"})`,
-    source,
+    name,
+    source: stagedTs(`T4-5 arm ${name} src/app.ts`, source),
     collidingWindows,
     markerRange: exact(markerPrefix, T4_5_MARKER_CHAIN),
     textCallRange: exact(textCallPrefix, T4_5_TEXT_CALL),
   };
 }
+
+// T4-5's eight arms in run order — each pairing in both declaration orders —
+// one record per row.
+const T4_5_ARMS: readonly StagedTypeOnlyCollisionArm[] = T4_5_PAIRINGS.flatMap(
+  (pairing) =>
+    (["spec-first", "other-first"] as const).map((order) =>
+      stageTypeOnlyCollisionArm(pairing, order),
+    ),
+);
 
 /** A finding's locations as JSON-safe `[file, start, end]` tuples (12.7 order). */
 function t45LocationTuples(finding: Finding): readonly (readonly unknown[])[] {
@@ -1407,13 +1497,8 @@ const T4_5 = defineProductTest({
   title:
     "type-only import collisions — an identifier a spec module import binds that another import also binds, either or both type-only (a second spec module's type-only default, a type-only non-spec binding, a value-level non-spec binding beside a type-only spec import, both type-only), staged in both declaration orders, roots no chain: `build` and `check` report 14.15 locating both declarations and 14.7 for the marker and the `text` call (exit 1), and `occurrences --file` on the failing workspace lists no record for them beside the findings — never the type-only exemption's silence (SPEC 2.4, 4, 4.5, 5.7, 11.2, 14.7, 14.15)",
   run: async (product) => {
-    for (const pairing of T4_5_PAIRINGS) {
-      for (const order of ["spec-first", "other-first"] as const) {
-        await assertTypeOnlyCollisionArm(
-          product,
-          stageTypeOnlyCollisionArm(pairing, order),
-        );
-      }
+    for (const staged of T4_5_ARMS) {
+      await assertTypeOnlyCollisionArm(product, staged);
     }
   },
 });
