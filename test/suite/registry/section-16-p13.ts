@@ -111,7 +111,11 @@ import { checkProperty } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
+import {
+  TestWorkspace,
+  mdxPathsOf,
+  tsPathsOf,
+} from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, runJson } from "./support.js";
 
 // ---------------------------------------------------------------------------
@@ -1009,10 +1013,14 @@ async function runP13Trial(
   // S-9: the draw's sources, judged by the property runner before the body
   // saw them (`stagedP13Sources` above) — declared per draw, as every
   // initial `.mdx` file a trial stages after the body's first product
-  // invocation must be (helpers/workspace.ts).
+  // invocation must be (helpers/workspace.ts); the configuration and the
+  // code sources (`c0/U.ts`, `c1/V.ts`) the draw composed are declared per
+  // draw too (`ts.perDraw`: judged well-formed at staging, past the
+  // undeclared-staging guard's TypeScript arm).
   const workspace = await TestWorkspace.create({
     files,
     mdx: { perDraw: mdxPathsOf(files) },
+    ts: { perDraw: tsPathsOf(files) },
   });
   try {
     await buildOk(

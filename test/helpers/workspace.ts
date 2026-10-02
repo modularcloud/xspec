@@ -82,10 +82,11 @@
 //   entry beside an initial record, an `.mdx` path, and a path selecting
 //   the other grammar all throw); the same self-test judges every such
 //   record with `judgeTsDeclaration` before any product exists. A record
-//   makes its path judged whatever the name, as `ts.wellFormed` does. The
-//   undeclared-staging guard below covers `.mdx` stagings only so far: its
-//   TypeScript arm comes once every registry module stages its
-//   post-invocation code sources and configurations as records.
+//   makes its path judged whatever the name, as `ts.wellFormed` does. An
+//   `.mdx` path a code group discovers is a code source too: its MDX record
+//   carries the TypeScript declaration (`ts`), and the same self-test
+//   judges it as TypeScript as well. The undeclared-staging guard below
+//   holds every such staging to that form, as it holds the `.mdx` ones.
 // - The undeclared-staging guard enforces that form: once a product has been
 //   invoked in a workspace (the subprocess driver marks it, root and
 //   realpath matched) or anywhere in the running registered body (the
@@ -93,39 +94,52 @@
 //   establish — S-7's reach is per body: the sweep stops at the body's
 //   first invocation in whatever workspace, so a staging into a fresh
 //   later-arm workspace is unreached too; helpers/product-invocations.ts),
-//   `file()` on an `.mdx` path with plain contents throws
-//   `HarnessStagingError` (mode `undeclared-staging`) unless the effective
+//   `file()` with plain contents throws `HarnessStagingError` (mode
+//   `undeclared-staging`) on an `.mdx` path unless the effective
 //   declaration is `unchecked` (P-8's mutations) or `per-draw` (a property
 //   draw the runner judged before the body saw it, S-9's property clause —
-//   the section-16 modules' alone). `edit()` is a declared staging by
-//   construction, and so is `copyFrom()` — another live workspace's current
-//   bytes, the product's output there, carried into a fresh workspace (the
-//   H-6 two-directory seeding of T6.4-7, T6.5-1, T6.5-3) — except out of a
-//   workspace no product has been invoked in, where the bytes are the
-//   harness's own staging and the guard applies as to plain contents. A
+//   the section-16 modules' alone), and — the guard's TypeScript arm — on
+//   a path S-9's TypeScript check judges (a `TS_DEFAULT_SUFFIXES` name, or
+//   one a `ts` option or the workspace's `ts` declaration names) unless the
+//   effective TypeScript declaration is `unchecked` (P-8's and P-11's
+//   mutations, a noise file, a tampered product-written module) or
+//   `per-draw` (a property draw's composed configuration or code source,
+//   judged well-formed at staging — the section-16 modules' alone). An MDX
+//   record carrying no `ts` at a path the TypeScript check judges (a
+//   code-group `.mdx` path) is refused likewise: the self-test judged it as
+//   MDX alone. `edit()` is a declared staging by construction, and so is
+//   `copyFrom()` — another live workspace's current bytes, the product's
+//   output there, carried into a fresh workspace (the H-6 two-directory
+//   seeding of T6.4-7, T6.5-1, T6.5-3) — except out of a workspace no
+//   product has been invoked in, where the bytes are the harness's own
+//   staging and both arms of the guard apply as to plain contents. A
 //   workspace declaration's initial `files` take a record too
-//   (`InitialFileContents`): the initial `.mdx` files of a workspace a body
-//   creates AFTER its first product invocation — a later arm's, a helper's
-//   twin — are deterministic fixtures S-7's sweep never reaches (the body
-//   fails at that invocation), so each is a record `create()` stages under
-//   the record's declaration (a record at a non-`.mdx` key, or beside a
-//   workspace-declaration entry for its path, throws as a record beside an
-//   `mdx` option does); a body's first workspace's initial files may stay
-//   plain contents, reached by the sweep. The guard covers `create()`'s
-//   initial entries too, one code path with `file()`'s: a plain `.mdx`
-//   entry of a workspace created after the running body's first product
-//   invocation is refused at creation (the diagnosis names it an initial
-//   `files` entry, with its remedies), unless the declaration lists it
-//   `unchecked` or `perDraw`, and the half-built workspace is disposed. At
-//   creation only the per-body mark can be set — the root was registered
-//   an instant before and nothing has run in it — so outside a body
-//   context (a self-test, the E-6 fixture) creation never refuses. The
-//   declaration's `perDraw` list is the initial-file form of `per-draw`: a
-//   section-16 module's draw-derived initial files, judged by the property
-//   runner before the body saw them (`mdxPathsOf` lists a rendered map's
-//   plain `.mdx` keys for it). Every generated draw must derive (TEST-SPEC
-//   16, S-9): the document declares no draw unparseable, so no per-draw
-//   declaration exempts a draw from deriving.
+//   (`InitialFileContents`): the initial `.mdx` files, code sources, and
+//   configuration of a workspace a body creates AFTER its first product
+//   invocation — a later arm's, a helper's twin — are deterministic
+//   fixtures S-7's sweep never reaches (the body fails at that
+//   invocation), so each is a record `create()` stages under the record's
+//   declaration (a record at a key of the other kind, or beside a
+//   workspace-declaration entry for its path, throws as a record beside a
+//   `file()` option does); a body's first workspace's initial files may
+//   stay plain contents, reached by the sweep. The guard covers
+//   `create()`'s initial entries too, one code path with `file()`'s: a
+//   plain entry of a workspace created after the running body's first
+//   product invocation is refused at creation (the diagnosis names it an
+//   initial `files` entry, with its remedies) unless its declaration
+//   exempts it — `mdx.unchecked` or `mdx.perDraw` for an `.mdx` path,
+//   `ts.unchecked` or `ts.perDraw` for a path the TypeScript check judges
+//   — and the half-built workspace is disposed. At creation only the
+//   per-body mark can be set — the root was registered an instant before
+//   and nothing has run in it — so outside a body context (a self-test,
+//   the E-6 fixture, the Windows leg's drive-mismatch arm) creation never
+//   refuses. The declaration's `perDraw` lists are the initial-file forms
+//   of `per-draw`: a section-16 module's draw-derived initial files
+//   (`mdxPathsOf` and `tsPathsOf` list a rendered map's plain `.mdx` keys
+//   and plain TypeScript-default keys for them). Every generated draw must
+//   derive (TEST-SPEC 16, S-9): the document declares no draw unparseable,
+//   so no per-draw declaration exempts a draw from deriving, nor a
+//   per-draw configuration or code source from being well-formed.
 
 import { Buffer } from "node:buffer";
 import { execFile } from "node:child_process";
@@ -183,10 +197,11 @@ export type FileContents = string | Uint8Array;
  * S-9 self-test judged it before any product existed (module header). A
  * record belongs at a key the workspace's `mdx` (or `ts`) declaration does
  * not name; a body's first workspace's initial files may stay plain
- * contents, and a plain `.mdx` entry of a workspace created after the
- * running body's first product invocation is refused at creation (the
- * undeclared-staging guard) unless its path is listed `unchecked` or
- * `perDraw`.
+ * contents, and a plain `.mdx` entry, code source, or configuration file of
+ * a workspace created after the running body's first product invocation is
+ * refused at creation (the undeclared-staging guard) unless its path is
+ * listed `unchecked` or `perDraw` (in `mdx`, or in `ts` for a path the
+ * TypeScript check judges).
  */
 export type InitialFileContents = FileContents | StagedMdx | StagedTs;
 
@@ -271,14 +286,33 @@ export interface WorkspaceTsDecl {
    * names under `docs/`): each must be well-formed, as a default path is.
    */
   readonly wellFormed?: readonly string[];
+  /**
+   * Configuration files and code sources whose initial contents a property
+   * draw composed (TEST-SPEC 16, S-9's property clause — P-7's
+   * configurations, P-13's configuration and code sources): each is judged
+   * well-formed at creation exactly as the default is, and the
+   * undeclared-staging guard exempts the path, at creation and for a later
+   * plain `file()` staging — the initial-file form of `per-draw`. Only the
+   * section-16 modules list a path here (`tsPathsOf` over a rendered map);
+   * a deterministic test never does (a later-arm workspace's initial code
+   * sources and configuration are records).
+   */
+  readonly perDraw?: readonly string[];
 }
 
 /**
  * One file's S-9 TypeScript declaration, for a `file()` call after creation;
  * overrides the workspace declaration (and the name's default) for that
- * write alone.
+ * write alone. `per-draw` is a property draw's composed configuration or
+ * code source (TEST-SPEC 16; S-9's property clause): well-formed — judged at
+ * staging exactly as `well-formed` is — and generated per trial, so no
+ * module-level record can hold it and the undeclared-staging guard exempts
+ * it. Only the section-16 modules pass it — to `file()`, or as the
+ * workspace declaration's `ts.perDraw` list for a draw's initial files; a
+ * deterministic test never does, and a staged-source record never carries
+ * it.
  */
-export type TsFileDeclaration = TsDeclaration | "unchecked";
+export type TsFileDeclaration = TsDeclaration | "unchecked" | "per-draw";
 
 /** Options of a single `file()` staging. */
 export interface FileOptions {
@@ -461,7 +495,11 @@ export class TestWorkspace {
    * the bytes and that declaration — the form of every code source and
    * configuration file a body stages after a product invocation — and a
    * `ts` option beside it, an `.mdx` path, or a path selecting the other
-   * grammar throws.
+   * grammar throws. Plain contents at a path the TypeScript check judges
+   * after a product invocation throw `undeclared-staging` too (the guard's
+   * TypeScript arm, `guardUndeclaredTsStaging`), unless the effective
+   * TypeScript declaration is `unchecked` or `per-draw`; so does an MDX
+   * record carrying no `ts` at such a path (a code-group `.mdx` path).
    */
   async file(
     rel: RelPath,
@@ -479,6 +517,14 @@ export class TestWorkspace {
         tsDeclaration,
         "option",
       );
+      if (staged.tsDeclaration === undefined) {
+        this.guardUndeclaredTsStaging(
+          rel,
+          tsDeclaration ?? this.tsDeclarationOf(rel),
+          "write",
+          contents,
+        );
+      }
       data = staged.data;
       declaration = staged.declaration;
       tsDeclaration = staged.tsDeclaration ?? tsDeclaration;
@@ -497,6 +543,10 @@ export class TestWorkspace {
           declaration ?? this.mdxDeclarations.get(mdxKey(rel)) ?? "well-formed",
         );
       }
+      this.guardUndeclaredTsStaging(
+        rel,
+        tsDeclaration ?? this.tsDeclarationOf(rel),
+      );
     }
     this.checkMdx(rel, data, declaration);
     this.checkTs(rel, data, tsDeclaration);
@@ -523,10 +573,13 @@ export class TestWorkspace {
    * entry of a workspace created after the running body's first product
    * invocation is refused before anything of it is written, unless the
    * workspace declaration lists it `unchecked` or `perDraw`
-   * (`guardUndeclaredStaging`; at creation only the per-body mark can be
-   * set, so outside a body context — a self-test, the E-6 fixture —
-   * creation never refuses); `create()` then disposes the half-built
-   * workspace.
+   * (`guardUndeclaredStaging`), and so is a plain entry at a path the
+   * TypeScript check judges, unless the declaration lists it
+   * `ts.unchecked` or `ts.perDraw`, and an MDX record carrying no `ts` at
+   * such a path (`guardUndeclaredTsStaging`); `create()` then disposes the
+   * half-built workspace. At creation only the per-body mark can be set,
+   * so outside a body context (a self-test, the E-6 fixture, the Windows
+   * leg's drive-mismatch arm) creation never refuses.
    */
   private async stageInitial(
     rel: string,
@@ -543,6 +596,14 @@ export class TestWorkspace {
         this.tsDeclarations.get(mdxKey(rel)),
         "declaration entry",
       ));
+      if (tsDeclaration === undefined) {
+        this.guardUndeclaredTsStaging(
+          rel,
+          this.tsDeclarationOf(rel),
+          "initial entry",
+          contents,
+        );
+      }
     } else if (contents instanceof StagedTs) {
       ({ data, tsDeclaration } = this.tsRecordStaging(
         rel,
@@ -560,6 +621,11 @@ export class TestWorkspace {
           "initial entry",
         );
       }
+      this.guardUndeclaredTsStaging(
+        rel,
+        this.tsDeclarationOf(rel),
+        "initial entry",
+      );
     }
     this.checkMdx(rel, data, declaration);
     this.checkTs(rel, data, tsDeclaration);
@@ -725,16 +791,77 @@ export class TestWorkspace {
     site: "write" | "initial entry" = "write",
   ): void {
     if (declaration === "unchecked" || declaration === "per-draw") return;
-    const body = productInvokedInBody();
-    if (!this.invocationMark.invoked && body === undefined) return;
-    const where = this.invocationMark.invoked
-      ? "in this workspace"
-      : `in the running body of ${body ?? "?"} (in another workspace: S-7's sweep stops at the body's first invocation wherever it happens)`;
+    const where = this.invocationBefore();
+    if (where === undefined) return;
     const detail =
       site === "initial entry"
         ? `an initial \`files\` entry of a workspace created after a product invocation ${where}, staged with plain contents (declared ${JSON.stringify(declaration)}) — S-7's sweep against the empty stub never reaches this creation (the body fails at that invocation), so S-9's check would first run at suite time, against a real product, not before any product exists (H-8). Pass a staged-source record as the entry's value instead (helpers/staged-mdx.ts: \`stagedMdx("<TEST-ID> <workspace or arm> <path>", <the same expression, moved, never re-spelled>, <this declaration>)\` at module level, and the path dropped from the workspace's \`mdx\` declaration — the record carries it), which test/self/s9-staged-sources.test.ts judges before any product exists; a property draw's initial file the runner already judged is listed in \`mdx.perDraw\` (section-16 modules only); a P-8 fuzz mutation or a noise file no discovery reaches is listed in \`mdx.unchecked\``
         : `an MDX source staged with plain contents (declared ${JSON.stringify(declaration)}) after a product invocation ${where} — S-7's sweep against the empty stub never reaches this staging (the body fails at that invocation), so S-9's check would first run at suite time, against a real product, not before any product exists (H-8). Stage it as a staged-source record instead (helpers/staged-mdx.ts: \`stagedMdx("<TEST-ID> <what it stages>", <the same expression, moved, never re-spelled>, <this declaration>)\` at module level, passed to \`file()\`), which test/self/s9-staged-sources.test.ts judges before any product exists; an edit of bytes the product itself wrote goes through \`edit()\`; a P-8 fuzz mutation is declared \`unchecked\`; a property draw the runner already judged is declared \`per-draw\` (section-16 modules only); another workspace's product-written bytes carried into a fresh workspace go through \`copyFrom()\``;
     throw new HarnessStagingError("undeclared-staging", mdxKey(rel), detail);
+  }
+
+  /**
+   * The undeclared-staging guard's TypeScript arm (module header; TEST-SPEC
+   * S-9's TypeScript and timing clauses, S-7, H-8): a staging at a path
+   * S-9's TypeScript check judges — `declaration`, the write's effective
+   * TypeScript declaration, is defined — after a product invocation is
+   * first judged at suite time, against a real product, unless its bytes
+   * are a TypeScript staged-source record (or an MDX record carrying its
+   * TypeScript declaration) the S-9 self-test judged before any product
+   * existed. Refused, with the rule to follow: plain contents (`mdxRecord`
+   * undefined), and an MDX record carrying no `ts` (`mdxRecord` — the
+   * self-test judged it as MDX alone), unless the effective declaration is
+   * `unchecked` (a mutation, a noise file, a tampered product-written
+   * module: nothing to judge) or `per-draw` (a property draw's composed
+   * configuration or code source, generated per trial). The marks and
+   * `site` are `guardUndeclaredStaging`'s.
+   */
+  private guardUndeclaredTsStaging(
+    rel: RelPath,
+    declaration: TsFileDeclaration | undefined,
+    site: "write" | "initial entry" = "write",
+    mdxRecord?: StagedMdx,
+  ): void {
+    if (
+      declaration === undefined ||
+      declaration === "unchecked" ||
+      declaration === "per-draw"
+    ) {
+      return;
+    }
+    const where = this.invocationBefore();
+    if (where === undefined) return;
+    const declared = `declared ${JSON.stringify(declaration)}`;
+    const unreached = `S-7's sweep against the empty stub never reaches this ${site === "initial entry" ? "creation" : "staging"} (the body fails at that invocation), so S-9's TypeScript check would first run at suite time, against a real product, not before any product exists (H-8)`;
+    const mdxForm =
+      "a code-group `.mdx` path takes an MDX staged-source record carrying " +
+      "its TypeScript declaration (`stagedMdx(name, source, mdx, ts)`)";
+    let detail: string;
+    if (mdxRecord !== undefined) {
+      const staging =
+        site === "initial entry"
+          ? `an initial \`files\` entry of a workspace created after a product invocation ${where}`
+          : `a staging after a product invocation ${where}`;
+      detail = `${staging}: the MDX staged-source record ${JSON.stringify(mdxRecord.name)} carries no TypeScript declaration, yet S-9's TypeScript check judges the path (${declared}: a code source a code group discovers), so the record's TypeScript reading was never judged before any product existed — ${unreached}. Give the record its TypeScript declaration instead (\`stagedMdx(name, source, mdx, ts)\`, which test/self/s9-staged-sources.test.ts judges as TypeScript too), dropping the path from the workspace's \`ts\` declaration and any \`ts\` option — the record carries it; a file whose well-formedness the document does not declare is declared \`unchecked\` (\`ts.unchecked\`); a property draw's composed file is declared per draw (\`ts.perDraw\`, \`{ ts: "per-draw" }\`; section-16 modules only)`;
+    } else if (site === "initial entry") {
+      detail = `an initial \`files\` entry of a workspace created after a product invocation ${where}, a code source or configuration file staged with plain contents (${declared}) — ${unreached}. Pass a TypeScript staged-source record as the entry's value instead (helpers/staged-ts.ts: \`stagedTs("<TEST-ID> <workspace or arm> <path>", <the same expression, moved, never re-spelled>, <this declaration>)\` at module level, and the path dropped from the workspace's \`ts\` declaration — the record carries it), which test/self/s9-staged-sources.test.ts judges before any product exists; ${mdxForm}; a property draw's composed file is listed in \`ts.perDraw\` (section-16 modules only); a mutation or a noise file no discovery reaches is listed in \`ts.unchecked\``;
+    } else {
+      detail = `a code source or configuration file staged with plain contents (${declared}) after a product invocation ${where} — ${unreached}. Stage it as a TypeScript staged-source record instead (helpers/staged-ts.ts: \`stagedTs("<TEST-ID> <what it stages>", <the same expression, moved, never re-spelled>, <this declaration>)\` at module level, passed to \`file()\`), which test/self/s9-staged-sources.test.ts judges before any product exists; ${mdxForm}; an edit of bytes the product itself wrote goes through \`edit()\`; a mutation, a noise file, or a tampered product-written module is declared \`unchecked\` (\`{ ts: "unchecked" }\`); a property draw's composed file is declared \`per-draw\` (\`{ ts: "per-draw" }\`, section-16 modules only); another workspace's product-written bytes carried into a fresh workspace go through \`copyFrom()\``;
+    }
+    throw new HarnessStagingError("undeclared-staging", mdxKey(rel), detail);
+  }
+
+  /**
+   * Where the undeclared-staging guard finds a product invocation before
+   * a staging: in this workspace (its mark), else in the running registered
+   * body (its context — S-7's actual reach); undefined when neither mark is
+   * set, the staging being one S-7's sweep reaches.
+   */
+  private invocationBefore(): string | undefined {
+    if (this.invocationMark.invoked) return "in this workspace";
+    const body = productInvokedInBody();
+    if (body === undefined) return undefined;
+    return `in the running body of ${body} (in another workspace: S-7's sweep stops at the body's first invocation wherever it happens)`;
   }
 
   /**
@@ -776,9 +903,9 @@ export class TestWorkspace {
    * harness-spelled source (whatever the product left untouched was staged,
    * and judged, in `source` already). Out of a workspace no product has
    * been invoked in, the bytes are the harness's own staging under another
-   * name, so the undeclared-staging guard applies to an `.mdx` destination
-   * exactly as to plain contents (a deterministic fixture belongs in the
-   * ledger).
+   * name, so the undeclared-staging guard applies to an `.mdx` destination,
+   * and to a destination the TypeScript check judges, exactly as to plain
+   * contents (a deterministic fixture belongs in the ledger).
    */
   async copyFrom(
     source: TestWorkspace,
@@ -786,11 +913,14 @@ export class TestWorkspace {
     destRel: RelPath = rel,
   ): Promise<void> {
     const data = await source.readBytes(rel);
-    if (isMdxPath(destRel) && !source.productInvoked) {
-      this.guardUndeclaredStaging(
-        destRel,
-        this.mdxDeclarations.get(mdxKey(destRel)) ?? "well-formed",
-      );
+    if (!source.productInvoked) {
+      if (isMdxPath(destRel)) {
+        this.guardUndeclaredStaging(
+          destRel,
+          this.mdxDeclarations.get(mdxKey(destRel)) ?? "well-formed",
+        );
+      }
+      this.guardUndeclaredTsStaging(destRel, this.tsDeclarationOf(destRel));
     }
     this.checkMdx(destRel, data, undefined);
     this.checkTs(destRel, data, undefined);
@@ -1134,7 +1264,10 @@ export const TS_DEFAULT_SUFFIXES = [
  * `HarnessStagingError` of mode `ts-derivability` names `key` (the staged
  * path, or a record's name) and the parser's first error. A text the
  * release accepts read one way only is refused under either declaration
- * (S-9: no fixture is such text). An `unchecked` declaration judges nothing.
+ * (S-9: no fixture is such text). An `unchecked` declaration judges nothing;
+ * `per-draw` judges as `well-formed` (a property draw's composed file; the
+ * declaration's other meaning — exempt from the undeclared-staging guard —
+ * is the builder's), its refusal naming the generator.
  */
 export function judgeTsDeclaration(
   key: string,
@@ -1144,8 +1277,25 @@ export function judgeTsDeclaration(
 ): void {
   if (declaration === "unchecked") return;
   const verdict = judgeTypeScript(data, fileName);
-  const problem = tsDeclarationProblem(verdict, declaration);
+  const perDraw = declaration === "per-draw";
+  const problem = tsDeclarationProblem(
+    verdict,
+    perDraw ? "well-formed" : declaration,
+  );
   if (problem === undefined) return;
+  if (perDraw) {
+    throw new HarnessStagingError(
+      "ts-derivability",
+      key,
+      `${problem.replace(
+        /^declared well-formed/,
+        "declared well-formed per draw (`per-draw`: a property draw's " +
+          "composed file)",
+      )} — the generator composed a configuration or code source that is ` +
+        "not well-formed TypeScript, which no draw may be (TEST-SPEC 16, " +
+        "S-9): fix the generator",
+    );
+  }
   const remedy =
     verdict.verdict === "one-way"
       ? "restage the fixture as text both readings agree on, or list the " +
@@ -1211,6 +1361,28 @@ export function mdxPathsOf(
   return Object.entries(files)
     .filter(
       ([rel, contents]) => isMdxPath(rel) && !(contents instanceof StagedMdx),
+    )
+    .map(([rel]) => rel);
+}
+
+/**
+ * The keys of an initial `files` map that stage plain contents at a path
+ * S-9's TypeScript default reaches (a `TS_DEFAULT_SUFFIXES` name), in the
+ * map's order — the paths a section-16 module's `ts.perDraw` list names
+ * over a map its generator rendered (P-7's configurations, P-13's
+ * configuration and code sources). A record entry is left out: it carries
+ * its own declaration, and a list naming its path is the contradiction
+ * `create()` refuses.
+ */
+export function tsPathsOf(
+  files: Readonly<Record<string, InitialFileContents>>,
+): string[] {
+  return Object.entries(files)
+    .filter(
+      ([rel, contents]) =>
+        isTsDefaultPath(rel) &&
+        !(contents instanceof StagedTs) &&
+        !(contents instanceof StagedMdx),
     )
     .map(([rel]) => rel);
 }
@@ -1303,7 +1475,7 @@ function resolveTsDeclaration(
         "ts-derivability",
         key,
         "the S-9 TypeScript declaration names the path in more than one " +
-          "of `unparseable`, `unchecked`, and `wellFormed`",
+          "of `unparseable`, `unchecked`, `wellFormed`, and `perDraw`",
       );
     }
     resolved.set(key, declaration);
@@ -1311,6 +1483,7 @@ function resolveTsDeclaration(
   for (const rel of decl.unparseable ?? []) declare(rel, "unparseable");
   for (const rel of decl.unchecked ?? []) declare(rel, "unchecked");
   for (const rel of decl.wellFormed ?? []) declare(rel, "well-formed");
+  for (const rel of decl.perDraw ?? []) declare(rel, "per-draw");
   return resolved;
 }
 

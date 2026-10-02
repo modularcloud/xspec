@@ -59,9 +59,15 @@ import {
   unregisterWorkspaceRoot,
 } from "../helpers/product-invocations.js";
 import { stagedMdx } from "../helpers/staged-mdx.js";
+import { stagedTs } from "../helpers/staged-ts.js";
 import { runProduct, startProduct } from "../helpers/subprocess.js";
 import type { ProductBinding } from "../helpers/subprocess.js";
-import { TestWorkspace, judgeMdxDeclaration } from "../helpers/workspace.js";
+import {
+  TestWorkspace,
+  judgeMdxDeclaration,
+  judgeTsDeclaration,
+  tsPathsOf,
+} from "../helpers/workspace.js";
 import type { WorkspaceDecl } from "../helpers/workspace.js";
 
 const onPosix = process.platform !== "win32";
@@ -296,10 +302,12 @@ test("the exemptions after an invocation: a staged-source record, `edit()`, `unc
   expect((thrown as HarnessStagingError).message).toContain("per draw");
   expect(text(await workspace.readBytes(A))).toBe(WELL_FORMED);
 
-  // A path S-9 does not judge.
+  // A path S-9 judges neither way (a code source at such a name is judged
+  // only when declared — `ts.wellFormed` — and then guarded; below).
   await workspace.file("notes.txt", "plain text\n");
-  await workspace.file("src/app.ts", "export {};\n");
+  await workspace.file("specs/code.md", "export {};\n");
   expect(text(await workspace.readBytes("notes.txt"))).toBe("plain text\n");
+  expect(text(await workspace.readBytes("specs/code.md"))).toBe("export {};\n");
 });
 
 test("an invocation inside the root marks the workspace; a background start marks it before the child runs; a sibling workspace stays unmarked", async () => {
@@ -515,17 +523,17 @@ test("initial `files` join the guard: inside a body that has invoked the product
     );
     expect(illDraw.leftBehind).toEqual([]);
 
-    // A path S-9 does not judge always passes.
+    // A path S-9 judges neither way always passes (a code source or
+    // configuration file is guarded too — the TypeScript arm's tests below).
     const plain = expectCreated(
       await createInPrivateTemp({
         files: {
           "notes.txt": "plain text\n",
-          "src/app.ts": "export {};\n",
-          "xspec.config.ts": "export default {};\n",
+          "specs/code.md": "export {};\n",
         },
       }),
     );
-    expect(text(await plain.readBytes("src/app.ts"))).toBe("export {};\n");
+    expect(text(await plain.readBytes("specs/code.md"))).toBe("export {};\n");
   });
 
   // Outside any body context, after an invocation elsewhere: only the
@@ -691,4 +699,503 @@ test("`copyFrom()` carries another workspace's bytes — the product's output th
   const fresh = await stage();
   await fresh.copyFrom(untouched, A);
   expect(text(await fresh.readBytes(A))).toBe(WELL_FORMED);
+});
+
+// ---------------------------------------------------------------------------
+// The guard's TypeScript arm (S-9's TypeScript and timing clauses): a code
+// source or configuration file — any path S-9's TypeScript check judges —
+// staged after a product invocation is held to the TypeScript record form
+// exactly as an `.mdx` source is held to the MDX one.
+
+const TS_SOURCE = "export const a = 1;" + LF;
+const TS_EDITED = "export const a = 2;" + LF;
+const TS_ILL_FORMED = "export const = 1;" + LF;
+const CONFIG_SOURCE = doc(
+  'import { defineConfig } from "xspec"',
+  "",
+  "export default defineConfig({",
+  '  specs: { main: ["specs/**/*.mdx"] }',
+  "})",
+);
+const CONFIG_EDITED = doc(
+  'import { defineConfig } from "xspec"',
+  "",
+  "export default defineConfig({",
+  '  specs: { main: ["docs/**/*.mdx"] }',
+  "})",
+);
+/** Well-formed MDX (an ESM block) and well-formed TypeScript alike. */
+const MDX_AND_TS = "export {};" + LF;
+
+/** One kind of TypeScript staging the arm covers. */
+interface TsStaging {
+  readonly rel: string;
+  readonly what: string;
+  readonly source: string;
+  readonly edited: string;
+  /** An `edit()` of `edited`: the spelling replaced, and its replacement. */
+  readonly edit: readonly [from: string, to: string];
+}
+
+/** A code source and the configuration file. */
+const TS_STAGINGS: readonly TsStaging[] = [
+  {
+    rel: "src/app.ts",
+    what: "code source",
+    source: TS_SOURCE,
+    edited: TS_EDITED,
+    edit: ["a = 2", "a = 3"],
+  },
+  {
+    rel: "xspec.config.ts",
+    what: "configuration",
+    source: CONFIG_SOURCE,
+    edited: CONFIG_EDITED,
+    edit: ["docs/", "lib/"],
+  },
+];
+
+/** The TypeScript arm's plain-write diagnosis, with its remedies. */
+const TS_WRITE_REMEDIES = [
+  "a code source or configuration file staged with plain contents",
+  "S-9's TypeScript check",
+  "Stage it as a TypeScript staged-source record",
+  "stagedTs(",
+  "stagedMdx(name, source, mdx, ts)",
+  "`edit()`",
+  '`{ ts: "unchecked" }`',
+  '`{ ts: "per-draw" }`',
+  "`copyFrom()`",
+] as const;
+
+/** The TypeScript arm's initial-entry diagnosis, with its remedies. */
+const TS_INITIAL_REMEDIES = [
+  "a code source or configuration file staged with plain contents",
+  "S-9's TypeScript check",
+  "Pass a TypeScript staged-source record as the entry's value",
+  "stagedTs(",
+  "stagedMdx(name, source, mdx, ts)",
+  "`ts.perDraw`",
+  "`ts.unchecked`",
+] as const;
+
+/** A thrown `HarnessStagingError` of mode `ts-derivability` (the S-9 judge). */
+function expectTsJudged(
+  thrown: unknown,
+  key: string,
+  ...fragments: readonly string[]
+): void {
+  expect(thrown).toBeInstanceOf(HarnessStagingError);
+  const error = thrown as HarnessStagingError;
+  expect(error.mode).toBe("ts-derivability");
+  expect(error.path).toBe(key);
+  for (const fragment of fragments) {
+    expect(error.message).toContain(fragment);
+  }
+}
+
+async function caught(action: () => Promise<unknown>): Promise<unknown> {
+  try {
+    await action();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
+test("the TypeScript arm: after an invocation in the workspace, a plain code source or configuration file staged by `file()` is refused with the TypeScript rule, whatever its declaration, and nothing is written", async () => {
+  for (const { rel, source, edited } of TS_STAGINGS) {
+    const workspace = await stage({
+      files: { [rel]: source },
+      ts: { unparseable: ["src/bad.ts"], wellFormed: ["specs/code.md"] },
+    });
+    // Before any invocation S-7's sweep reaches the staging: accepted.
+    await workspace.file(rel, edited);
+    await workspace.file(rel, source);
+    await invoke(workspace.root);
+    await expectRefused(
+      () => workspace.file(rel, edited),
+      rel,
+      "in this workspace",
+      'declared "well-formed"',
+      ...TS_WRITE_REMEDIES,
+    );
+    expect(text(await workspace.readBytes(rel))).toBe(source);
+    // As bytes, and under its normalized key.
+    await expectRefused(
+      () => workspace.file(`deep/../${rel}`, utf8(edited)),
+      rel,
+      "S-9's TypeScript check",
+    );
+    expect(text(await workspace.readBytes(rel))).toBe(source);
+    // Whatever the declaration: the option's, the workspace's `unparseable`
+    // entry, a `wellFormed` code source whose name the default misses.
+    await expectRefused(
+      () => workspace.file(rel, TS_ILL_FORMED, { ts: "unparseable" }),
+      rel,
+      'declared "unparseable"',
+    );
+    await expectRefused(
+      () => workspace.file("src/bad.ts", TS_ILL_FORMED),
+      "src/bad.ts",
+      'declared "unparseable"',
+    );
+    await expectRefused(
+      () => workspace.file("specs/code.md", TS_SOURCE),
+      "specs/code.md",
+      'declared "well-formed"',
+    );
+    expect(text(await workspace.readBytes(rel))).toBe(source);
+    expect(await workspace.kind("src/bad.ts")).toBe("absent");
+    expect(await workspace.kind("specs/code.md")).toBe("absent");
+  }
+});
+
+test("the TypeScript arm's exemptions after an invocation: a TypeScript record, `edit()`, `unchecked`, `per-draw` (still judged well-formed), `copyFrom()` out of an invoked workspace, and a name nothing judges", async () => {
+  for (const { rel, what, source, edited, edit } of TS_STAGINGS) {
+    const workspace = await stage({
+      files: { [rel]: source },
+      ts: { unchecked: ["src/fuzz.ts"] },
+    });
+    await invoke(workspace.root);
+
+    // A record: the S-9 self-test's business, staged under its declaration.
+    await workspace.file(
+      rel,
+      stagedTs(`T0-12 guard: the edited ${what}`, edited),
+    );
+    expect(text(await workspace.readBytes(rel))).toBe(edited);
+
+    // `edit()`: bytes the product wrote, in a real body — judged at
+    // staging, never guarded.
+    const [from, to] = edit;
+    await workspace.edit(rel, from, to);
+    expect(text(await workspace.readBytes(rel))).toBe(edited.replace(from, to));
+
+    // `unchecked`, by option and by workspace declaration (P-8's and P-11's
+    // mutations, a tampered product-written module): never judged.
+    await workspace.file(rel, TS_ILL_FORMED, { ts: "unchecked" });
+    expect(text(await workspace.readBytes(rel))).toBe(TS_ILL_FORMED);
+    await workspace.file("src/fuzz.ts", TS_ILL_FORMED);
+    expect(text(await workspace.readBytes("src/fuzz.ts"))).toBe(TS_ILL_FORMED);
+
+    // `per-draw` (a property draw's composed file): exempt from the guard,
+    // still judged well-formed at staging.
+    await workspace.file(rel, source, { ts: "per-draw" });
+    expect(text(await workspace.readBytes(rel))).toBe(source);
+    expectTsJudged(
+      await caught(() =>
+        workspace.file(rel, TS_ILL_FORMED, { ts: "per-draw" }),
+      ),
+      rel,
+      "declared well-formed per draw",
+      "fix the generator",
+    );
+    expect(text(await workspace.readBytes(rel))).toBe(source);
+
+    // `copyFrom()` out of a workspace the product was invoked in carries
+    // the product's output there — judged, never guarded; out of one it
+    // never touched, the bytes are the harness's own: refused.
+    const invoked = await stage({ files: { [rel]: edited } });
+    await invoke(invoked.root);
+    await workspace.copyFrom(invoked, rel);
+    expect(text(await workspace.readBytes(rel))).toBe(edited);
+    const untouched = await stage({ files: { [rel]: source } });
+    await expectRefused(
+      () => workspace.copyFrom(untouched, rel),
+      rel,
+      "in this workspace",
+      "S-9's TypeScript check",
+      "`copyFrom()`",
+    );
+    expect(text(await workspace.readBytes(rel))).toBe(edited);
+
+    // Names S-9 judges neither way.
+    await workspace.file("notes.txt", "plain text" + LF);
+    await workspace.file("specs/code.md", TS_ILL_FORMED);
+    expect(text(await workspace.readBytes("specs/code.md"))).toBe(
+      TS_ILL_FORMED,
+    );
+  }
+});
+
+test("the TypeScript arm's per-body reach: inside a body that has invoked the product, a fresh workspace's plain code source or configuration is refused — by `file()`, and as an initial `files` entry at creation, nothing left behind — while records, `unchecked`, and per-draw stagings pass, the last still judged", async () => {
+  const INITIAL =
+    "an initial `files` entry of a workspace created after a product invocation in the running body of T0-13";
+  const plainFiles = Object.fromEntries(
+    TS_STAGINGS.map(({ rel, source }) => [rel, source]),
+  );
+  await runProductTestBody("T0-13", async () => {
+    // Before the body's first invocation: S-7's sweep reaches a plain
+    // creation and a plain `file()` (a first workspace may stay plain).
+    const first = expectCreated(
+      await createInPrivateTemp({ files: plainFiles }),
+    );
+    for (const { rel, edited } of TS_STAGINGS) await first.file(rel, edited);
+    await invoke(first.root);
+    expect(productInvokedInBody()).toBe("T0-13");
+
+    for (const { rel, what, source, edited } of TS_STAGINGS) {
+      // `file()` into a fresh later-arm workspace the product never touched.
+      const later = await stage();
+      expect(later.productInvoked).toBe(false);
+      await expectRefused(
+        () => later.file(rel, source),
+        rel,
+        "in the running body of T0-13",
+        "in another workspace",
+        ...TS_WRITE_REMEDIES,
+      );
+      expect(await later.kind(rel)).toBe("absent");
+      await later.file(
+        rel,
+        stagedTs(`T0-13 guard: the later-arm ${what}`, source),
+      );
+      expect(text(await later.readBytes(rel))).toBe(source);
+      await later.file(rel, TS_ILL_FORMED, { ts: "unchecked" });
+      await later.file(rel, edited, { ts: "per-draw" });
+      expect(text(await later.readBytes(rel))).toBe(edited);
+
+      // An initial entry: refused at creation, whatever its declaration,
+      // the half-built workspace disposed with what it staged before.
+      const refused = await createInPrivateTemp({ files: { [rel]: source } });
+      expect(refused.created).toBeUndefined();
+      expectUndeclared(
+        refused.thrown,
+        rel,
+        INITIAL,
+        "in another workspace",
+        '(declared "well-formed")',
+        ...TS_INITIAL_REMEDIES,
+      );
+      expect(refused.leftBehind).toEqual([]);
+      const unparseable = await createInPrivateTemp({
+        files: { [rel]: TS_ILL_FORMED },
+        ts: { unparseable: [rel] },
+      });
+      expectUndeclared(
+        unparseable.thrown,
+        rel,
+        INITIAL,
+        'declared "unparseable"',
+      );
+      expect(unparseable.leftBehind).toEqual([]);
+      const mixed = await createInPrivateTemp({
+        files: {
+          "specs/Z.mdx": stagedMdx(
+            `T0-13 guard: an initial record staged before the refused ${what}`,
+            WELL_FORMED,
+          ),
+          "notes.txt": "plain text" + LF,
+          [rel]: source,
+        },
+      });
+      expectUndeclared(mixed.thrown, rel, INITIAL);
+      expect(mixed.leftBehind).toEqual([]);
+
+      // The exemptions at creation: a record entry, `ts.unchecked`, and
+      // `ts.perDraw` — judged well-formed at creation, its path then taking
+      // a plain `file()` past the guard, still judged.
+      const record = expectCreated(
+        await createInPrivateTemp({
+          files: {
+            [rel]: stagedTs(
+              `T0-13 guard: a later workspace's initial ${what}`,
+              source,
+            ),
+          },
+        }),
+      );
+      expect(text(await record.readBytes(rel))).toBe(source);
+      const unchecked = expectCreated(
+        await createInPrivateTemp({
+          files: { [rel]: TS_ILL_FORMED },
+          ts: { unchecked: [rel] },
+        }),
+      );
+      expect(text(await unchecked.readBytes(rel))).toBe(TS_ILL_FORMED);
+      const draw = expectCreated(
+        await createInPrivateTemp({
+          files: { [rel]: source },
+          ts: { perDraw: [rel] },
+        }),
+      );
+      expect(draw.tsDeclarationOf(rel)).toBe("per-draw");
+      await draw.file(rel, edited);
+      expect(text(await draw.readBytes(rel))).toBe(edited);
+      expectTsJudged(
+        await caught(() => draw.file(rel, TS_ILL_FORMED)),
+        rel,
+        "declared well-formed per draw",
+      );
+      expect(text(await draw.readBytes(rel))).toBe(edited);
+      const illDraw = await createInPrivateTemp({
+        files: { [rel]: TS_ILL_FORMED },
+        ts: { perDraw: [rel] },
+      });
+      expectTsJudged(illDraw.thrown, rel, "declared well-formed per draw");
+      expect(illDraw.leftBehind).toEqual([]);
+    }
+
+    // A code source whose name the default misses, declared `wellFormed`,
+    // is guarded at creation too.
+    const declared = await createInPrivateTemp({
+      files: { "specs/code.md": TS_SOURCE },
+      ts: { wellFormed: ["specs/code.md"] },
+    });
+    expectUndeclared(declared.thrown, "specs/code.md", INITIAL);
+    expect(declared.leftBehind).toEqual([]);
+  });
+
+  // Outside any body context, after an invocation elsewhere: only the
+  // per-workspace mark applies, and a workspace being created has none (the
+  // E-6 fixture's creation, the Windows leg's drive-mismatch arm's).
+  const elsewhere = await stage();
+  await invoke(elsewhere.root);
+  expect(productInvokedInBody()).toBeUndefined();
+  const outside = expectCreated(
+    await createInPrivateTemp({ files: plainFiles }),
+  );
+  for (const { rel, source } of TS_STAGINGS) {
+    expect(text(await outside.readBytes(rel))).toBe(source);
+  }
+});
+
+test("the TypeScript arm at a code-group `.mdx` path: after an invocation, an MDX record carrying no `ts` where the TypeScript check judges the path is refused — by `file()` and at creation — while one carrying its `ts` passes", async () => {
+  const CODE_MDX = "docs/impl.mdx";
+  const bare = stagedMdx(
+    "T0-14 guard: a code-group source without its TypeScript declaration",
+    MDX_AND_TS,
+  );
+  const carrying = stagedMdx(
+    "T0-14 guard: a code-group source with its TypeScript declaration",
+    MDX_AND_TS,
+    "well-formed",
+    "well-formed",
+  );
+  const RECORD_REMEDIES = [
+    "the MDX staged-source record",
+    "carries no TypeScript declaration",
+    "S-9's TypeScript check",
+    "stagedMdx(name, source, mdx, ts)",
+    "`ts.unchecked`",
+    "`ts.perDraw`",
+  ] as const;
+
+  // The workspace's `ts` declaration makes the path judged as TypeScript.
+  const declared = await stage({ ts: { wellFormed: [CODE_MDX] } });
+  await declared.file(CODE_MDX, bare); // before any invocation: reached
+  await invoke(declared.root);
+  await expectRefused(
+    () => declared.file(CODE_MDX, bare),
+    CODE_MDX,
+    "in this workspace",
+    'declared "well-formed"',
+    ...RECORD_REMEDIES,
+  );
+  // So does a `ts` option.
+  const optioned = await stage();
+  await invoke(optioned.root);
+  await expectRefused(
+    () => optioned.file(CODE_MDX, bare, { ts: "well-formed" }),
+    CODE_MDX,
+    "in this workspace",
+    ...RECORD_REMEDIES,
+  );
+  expect(await optioned.kind(CODE_MDX)).toBe("absent");
+  // Exempt: the record carrying its `ts`; an `unchecked` TypeScript
+  // declaration; a path no code group discovers (MDX alone).
+  await optioned.file(CODE_MDX, carrying);
+  expect(text(await optioned.readBytes(CODE_MDX))).toBe(MDX_AND_TS);
+  await optioned.file(CODE_MDX, bare, { ts: "unchecked" });
+  await optioned.file("docs/prose.mdx", bare);
+  expect(text(await optioned.readBytes("docs/prose.mdx"))).toBe(MDX_AND_TS);
+
+  // As an initial entry of a workspace created after the body's first
+  // invocation.
+  await runProductTestBody("T0-14", async () => {
+    const first = await stage();
+    await invoke(first.root);
+    const refused = await createInPrivateTemp({
+      files: { [CODE_MDX]: bare },
+      ts: { wellFormed: [CODE_MDX] },
+    });
+    expectUndeclared(
+      refused.thrown,
+      CODE_MDX,
+      "an initial `files` entry of a workspace created after a product invocation in the running body of T0-14",
+      ...RECORD_REMEDIES,
+    );
+    expect(refused.leftBehind).toEqual([]);
+    const passed = expectCreated(
+      await createInPrivateTemp({ files: { [CODE_MDX]: carrying } }),
+    );
+    expect(text(await passed.readBytes(CODE_MDX))).toBe(MDX_AND_TS);
+    expectCreated(
+      await createInPrivateTemp({
+        files: { [CODE_MDX]: bare },
+        ts: { unchecked: [CODE_MDX] },
+      }),
+    );
+  });
+});
+
+test("the TypeScript `per-draw` declaration is the builder's alone: the judge treats it as well-formed, a record refuses it, a path takes one TypeScript list, a record beside it contradicts it, and `tsPathsOf` lists a rendered map's plain TypeScript-default keys", async () => {
+  judgeTsDeclaration("draw", utf8(TS_SOURCE), "per-draw");
+  expectTsJudged(
+    await caught(async () => {
+      judgeTsDeclaration("draw", utf8(TS_ILL_FORMED), "per-draw");
+    }),
+    "draw",
+    "declared well-formed per draw",
+    "fix the generator",
+  );
+  expect(() =>
+    stagedTs(
+      "T0-15 per-draw record",
+      TS_SOURCE,
+      "per-draw" as unknown as "well-formed",
+    ),
+  ).toThrow(/per-draw/);
+  expect(() =>
+    stagedMdx(
+      "T0-15 per-draw TypeScript declaration",
+      MDX_AND_TS,
+      "well-formed",
+      "per-draw" as unknown as "well-formed",
+    ),
+  ).toThrow(/per-draw/);
+  expectTsJudged(
+    await caught(() =>
+      TestWorkspace.create({
+        ts: { perDraw: ["src/app.ts"], unchecked: ["src/app.ts"] },
+      }),
+    ),
+    "src/app.ts",
+    "more than one of",
+    "`perDraw`",
+  );
+  expectTsJudged(
+    await caught(() =>
+      TestWorkspace.create({
+        files: {
+          "src/app.ts": stagedTs("T0-15 a record beside a draw", TS_SOURCE),
+        },
+        ts: { perDraw: ["src/app.ts"] },
+      }),
+    ),
+    "src/app.ts",
+    "contradiction",
+  );
+  expect(
+    tsPathsOf({
+      "xspec.config.ts": CONFIG_SOURCE,
+      "specs/a.mdx": WELL_FORMED,
+      "c0/U.ts": TS_SOURCE,
+      "src/rec.ts": stagedTs("T0-15 a rendered map's record", TS_SOURCE),
+      "notes.txt": "plain text" + LF,
+      "lib/m.mjs": TS_SOURCE,
+      "specs/code.md": TS_SOURCE,
+    }),
+  ).toEqual(["xspec.config.ts", "c0/U.ts", "lib/m.mjs"]);
 });

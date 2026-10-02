@@ -64,7 +64,10 @@
 // code group discovers is an MDX source and a code source at once, so its
 // record here carries its TypeScript declaration too (`ts`): the self-test
 // judges those bytes as plain TypeScript as well, and the builder stages
-// them under both declarations.
+// them under both declarations. After a product invocation, a record
+// carrying no `ts` at a path the TypeScript check judges is refused by the
+// undeclared-staging guard's TypeScript arm: its TypeScript reading was
+// never judged before any product existed.
 
 import { MDX_ALLOWANCES } from "./mdx-derivability.js";
 import type { TsDeclaration } from "./ts-derivability.js";

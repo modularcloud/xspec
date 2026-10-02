@@ -70,6 +70,7 @@ import {
   fail,
   parseJsonStdout,
 } from "../helpers/assertions.js";
+import { ANCHOR_CONFIG, ANCHOR_SOURCE } from "../helpers/e6-drive-mismatch.js";
 import { DEFAULT_PRODUCT_TEST_TIMEOUT_MS } from "../helpers/registry.js";
 import { builtProductBinding, runProduct } from "../helpers/subprocess.js";
 import type { ProductBinding, RunResult } from "../helpers/subprocess.js";
@@ -99,18 +100,11 @@ function realpathNative(p: string): Promise<string> {
 // A minimal valid workspace (the registered T11.6-1 body's staging): the
 // inventory parses no sources (SPEC 11.6), so the anchoring depends on none
 // of this — the staging keeps the workspace valid so every answer is the
-// complete, finding-free, exit-0 case.
-
-const ANCHOR_CONFIG = `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/**/*.mdx"]
-  }
-})
-`;
-
-const ANCHOR_SOURCE = '<S id="racine">\nAncrage — contenu stable.\n</S>\n';
+// complete, finding-free, exit-0 case. Its configuration and spec source
+// (`ANCHOR_CONFIG`, `ANCHOR_SOURCE`) are staged-source records of
+// helpers/e6-drive-mismatch.ts, which the S-9 self-test judges before any
+// product exists: this arm stages them at creation, outside every
+// registered body and S-7's sweep (TEST-SPEC S-9's timing clause, H-8).
 
 const CONFIG_FILE = "xspec.config.ts";
 

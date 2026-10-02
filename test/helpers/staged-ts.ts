@@ -42,12 +42,25 @@
 // not declare — P-8's and P-11's mutations, noise files — staged as plain
 // contents; a record exists to be judged).
 //
-// What is NOT a record: a property draw's generated code source or
-// configuration (judged per draw by the property runner — S-9's property
-// clause); an `unchecked` mutation or noise file; and an edit of bytes the
-// product itself wrote (a rename's or move's rewritten code source, which
-// no harness constant equals), staged by `TestWorkspace.edit()` or carried
-// into a fresh workspace by `TestWorkspace.copyFrom()`.
+// What is NOT a record: a property draw's composed code source or
+// configuration (P-7's configurations, P-13's configuration and code
+// sources — generated per trial, so no module-level record can hold them;
+// staged under the `per-draw` TypeScript declaration, `ts.perDraw` at
+// creation or `{ ts: "per-draw" }` per `file()` call, judged well-formed at
+// staging, by the section-16 modules alone — S-9's property clause); an
+// `unchecked` mutation, noise file, or tampered product-written module; and
+// an edit of bytes the product itself wrote (a rename's or move's rewritten
+// code source, which no harness constant equals), staged by
+// `TestWorkspace.edit()` or carried into a fresh workspace by
+// `TestWorkspace.copyFrom()`. The builder's undeclared-staging guard
+// (helpers/workspace.ts, its TypeScript arm; helpers/product-invocations.ts)
+// refuses every other plain staging of a code source or configuration file
+// made after a product invocation — a `file()` write, an initial `files`
+// entry of a workspace created after the running body's first invocation,
+// a `copyFrom()` out of a workspace no product touched — and an MDX record
+// carrying no TypeScript declaration at a path the TypeScript check judges,
+// so an omission from the ledger is a harness error at the first run that
+// reaches the site.
 
 import type { TsDeclaration } from "./ts-derivability.js";
 import type { FileContents } from "./workspace.js";

@@ -1,21 +1,28 @@
 // Product-invocation tracking for the workspace builder's undeclared-staging
-// guard (TEST-SPEC 17 S-9's timing clause, S-7, §0 H-8; helpers/workspace.ts
-// `TestWorkspace.file()` and `TestWorkspace.create()`'s initial `files`).
-// Harness machinery only: this module never touches product code, and
-// nothing here is an assertion about a product.
+// guard (TEST-SPEC 17 S-9's timing and TypeScript clauses, S-7, §0 H-8;
+// helpers/workspace.ts `TestWorkspace.file()`, `copyFrom()`, and
+// `TestWorkspace.create()`'s initial `files`). Harness machinery only: this
+// module never touches product code, and nothing here is an assertion about
+// a product.
 //
 // S-7's sweep against the empty stub reaches a registered body's stagings
 // only up to the body's FIRST product invocation — the body fails there — so
-// an `.mdx` source a body stages after that invocation is judged first at
-// suite time, against a real product, unless it is a staged-source record
-// (helpers/staged-mdx.ts) the S-9 self-test judged before any product
-// existed. The builder enforces that form: a plain `.mdx` staging after an
-// invocation — a `file()` write, or an initial `files` entry of a workspace
-// created after it — throws `HarnessStagingError` of mode
-// `undeclared-staging` unless its declaration exempts it. This module tells
-// the builder when an invocation has happened, two ways, both marked by
-// `startProduct` (helpers/subprocess.ts — the one subprocess path every
-// invocation takes, so the mark cannot be bypassed):
+// an `.mdx` source, code source, or configuration file a body stages after
+// that invocation is judged first at suite time, against a real product,
+// unless it is a staged-source record (helpers/staged-mdx.ts for an MDX
+// source — carrying its TypeScript declaration too at a code-group `.mdx`
+// path — helpers/staged-ts.ts for a code source or configuration file) the
+// S-9 self-test judged before any product existed. The builder enforces
+// that form: a plain staging after an invocation at a path S-9 judges — an
+// `.mdx` path, or one the TypeScript check judges — a `file()` write, or an
+// initial `files` entry of a workspace created after it, throws
+// `HarnessStagingError` of mode `undeclared-staging` unless its declaration
+// exempts it (`unchecked`, or `per-draw` for a property draw), and so does
+// an MDX record carrying no TypeScript declaration at a path the TypeScript
+// check judges. This module tells the builder when an invocation has
+// happened, two ways, both marked by `startProduct` (helpers/subprocess.ts —
+// the one subprocess path every invocation takes, so the mark cannot be
+// bypassed):
 //
 // - Per workspace: `TestWorkspace.create` registers the workspace root, and
 //   its realpath, while the workspace lives (`dispose` unregisters). An
@@ -34,8 +41,10 @@
 //   workspace's initial `files` above all, which only this mark can refuse
 //   (at creation the workspace's own mark cannot be set yet: its root was
 //   registered an instant before, and nothing has run in it). Outside such
-//   a context — a self-test, the E-6 fixture of helpers/e6.ts — the
-//   per-workspace mark stands alone, and a creation is never refused.
+//   a context — a self-test, the E-6 fixture of helpers/e6.ts, the Windows
+//   leg's drive-mismatch arm (whose initial files are records of
+//   helpers/e6-drive-mismatch.ts for that reason) — the per-workspace mark
+//   stands alone, and a creation is never refused.
 //
 // Every subprocess the driver starts counts, whatever its binding: a
 // certification fixture, the empty stub, or a compiled consumer program

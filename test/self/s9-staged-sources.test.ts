@@ -48,7 +48,10 @@
 // every one with the builder's own TypeScript judge (`judgeTsDeclaration`,
 // handed a neutral file name of the record's grammar) before any product
 // exists. Also verified: the records' invariants once the registry has
-// loaded (sealed, non-empty, uniquely named after registered tests or E-6),
+// loaded (sealed, non-empty, uniquely named after registered tests or E-6;
+// the Windows leg's drive-mismatch arm's configuration and spec source,
+// helpers/e6-drive-mismatch.ts — staged at creation outside every
+// registered body and S-7's sweep — imported before the seal like E-6's),
 // their registration rules on a fresh instance, and the builder's record
 // overload — `file()` and `create()`'s initial `files` stage a record's
 // bytes under the record's declaration, whatever the path's name or
@@ -87,6 +90,15 @@ import type { WorkspaceDecl, WorkspaceMdxDecl } from "../helpers/workspace.js";
 // after its first invocations — as records of its own, which this import
 // registers BEFORE the registry manifest below seals the ledger.
 import "../helpers/e6.js";
+// Likewise the Windows leg's drive-mismatch arm of T11.6-1
+// (test/windows/e6-drive-mismatch.test.ts): it stages its configuration and
+// spec source at creation, outside every registered body and S-7's sweep,
+// as records of helpers/e6-drive-mismatch.ts, registered here before the
+// seal and judged below.
+import {
+  ANCHOR_CONFIG as DRIVE_MISMATCH_CONFIG,
+  ANCHOR_SOURCE as DRIVE_MISMATCH_SOURCE,
+} from "../helpers/e6-drive-mismatch.js";
 import { productTestSuite } from "../suite/registry/index.js";
 
 const LF = String.fromCodePoint(0x000a);
@@ -848,6 +860,26 @@ describe("S-9: the staged TypeScript records, once the registry has loaded", () 
     // The fixture's configuration and code source, staged at its creation
     // outside every registered body and S-7's sweep, are judged here alone.
     expect(e6Records).toBe(2);
+  });
+
+  test("hold the Windows leg's drive-mismatch configuration, and the MDX ledger its spec source (test/windows/e6-drive-mismatch.test.ts stages both at creation, outside every registered body and S-7's sweep): judged here, before any product exists", () => {
+    expect(TS_LEDGER).toContain(DRIVE_MISMATCH_CONFIG);
+    expect(LEDGER).toContain(DRIVE_MISMATCH_SOURCE);
+    expect(DRIVE_MISMATCH_CONFIG.ts).toBe("well-formed");
+    expect(DRIVE_MISMATCH_CONFIG.grammar).toBe("ts");
+    expect(DRIVE_MISMATCH_SOURCE.mdx).toBe("well-formed");
+    expect(DRIVE_MISMATCH_SOURCE.ts).toBeUndefined();
+    judgeTsDeclaration(
+      DRIVE_MISMATCH_CONFIG.name,
+      bytesOf(DRIVE_MISMATCH_CONFIG.source),
+      DRIVE_MISMATCH_CONFIG.ts,
+      tsGrammarFileName(DRIVE_MISMATCH_CONFIG.grammar),
+    );
+    judgeMdxDeclaration(
+      DRIVE_MISMATCH_SOURCE.name,
+      bytesOf(DRIVE_MISMATCH_SOURCE.source),
+      DRIVE_MISMATCH_SOURCE.mdx,
+    );
   });
 });
 
