@@ -33,7 +33,13 @@
 // locations, see support.ts byteWindow); every other staged construct lies
 // outside the widened window.
 
-import type { Finding, GraphEdge } from "../../helpers/adapters/index.js";
+import type {
+  DependencyEdgeKind,
+  Finding,
+  GraphEdge,
+  OccurrenceRecord,
+  SourceRange,
+} from "../../helpers/adapters/index.js";
 import {
   decodeEdgesReport,
   decodeOccurrencesReport,
@@ -130,7 +136,7 @@ async function withWorkspace<T>(
 async function queryEdgesOfKind(
   product: ProductBinding,
   workspace: TestWorkspace,
-  kind: "depends" | "embeds",
+  kind: DependencyEdgeKind,
   context: string,
 ): Promise<readonly GraphEdge[]> {
   const label = `${context} \`query edges --kinds ${kind}\``;
@@ -153,12 +159,20 @@ async function queryEdgesOfKind(
 // `d` and in `text(...)`: double- and single-quoted string literals, a
 // dot-access chain, computed access via a static string literal (double- and
 // single-quoted index alike — "a plain single- or double-quoted string"), and
-// mixed chains (dot-then-computed and computed-then-dot). The imported module
-// carries non-identifier segments (`login-v2`, `pin-2`, `auth.sub-x`) so the
-// computed arms use the form 2.4 defines them for (1.4).
+// mixed chains (dot-then-computed and computed-then-dot), and dot access
+// naming a reserved word (`BASE.delete`: a non-computed access's name is any
+// identifier name the file's grammar admits there, a reserved word included,
+// SPEC 2.4 — ECMAScript 2024 admits `delete` after `.`, and `delete` is a
+// valid ID segment, 1.4). The imported module carries non-identifier
+// segments (`login-v2`, `pin-2`, `auth.sub-x`) so the computed arms use the
+// form 2.4 defines them for (1.4), and the reserved-word segment `delete`.
 const T2_4_1_BASE = [
   '<S id="login-v2">',
   "Dashed target.",
+  "</S>",
+  "",
+  '<S id="delete">',
+  "Reserved-word target.",
   "</S>",
   "",
   '<S id="pin-2">',
@@ -214,12 +228,17 @@ const T2_4_1_SOURCE = [
   "Mixed dot and computed chains.",
   "</S>",
   "",
+  '<S id="reserved" d={BASE.delete}>',
+  "Dot access naming a reserved word.",
+  "</S>",
+  "",
   '<S id="embed">',
   'Double: {text("alpha")}',
   "Single: {text('beta')}",
   "Dot: {text(BASE.auth.login)}",
   'Computed: {text(BASE["login-v2"])}',
   'Mixed: {text(BASE.auth["sub-x"])}',
+  "Reserved: {text(BASE.delete)}",
   "</S>",
   "",
 ].join("\n");
@@ -227,7 +246,7 @@ const T2_4_1_SOURCE = [
 const T2_4_1 = defineProductTest({
   id: "T2.4-1",
   title:
-    "double- and single-quoted string literals and property chains with dot access, computed access via static string literal, and mixed chains are all accepted in `d` and `text(...)` — the workspace builds and each form records its edge to the right target (SPEC 2.4, 2.2, 2.3)",
+    "double- and single-quoted string literals and property chains with dot access, computed access via static string literal, mixed chains, and dot access naming a reserved word (`BASE.delete`) are all accepted in `d` and `text(...)` — the workspace builds and each form records its edge to the right target (SPEC 2.4, 2.2, 2.3)",
   run: async (product) => {
     await withWorkspace(
       SPECS_ONLY_CONFIG,
@@ -282,6 +301,11 @@ const T2_4_1 = defineProductTest({
               to: "specs/BASE.mdx#auth.login",
               kind: "depends",
             },
+            {
+              from: "specs/A.mdx#reserved",
+              to: "specs/BASE.mdx#delete",
+              kind: "depends",
+            },
           ],
           "T2.4-1 the complete `depends` edge set — one edge per accepted `d` form, " +
             "each resolved to the node its spelling names (SPEC 2.4, 2.2)",
@@ -312,6 +336,11 @@ const T2_4_1 = defineProductTest({
             {
               from: "specs/A.mdx#embed",
               to: "specs/BASE.mdx#auth.sub-x",
+              kind: "embeds",
+            },
+            {
+              from: "specs/A.mdx#embed",
+              to: "specs/BASE.mdx#delete",
               kind: "embeds",
             },
           ],
@@ -1058,6 +1087,32 @@ const T2_4_4 = defineProductTest({
 // 14.7's type-error clause is not what makes the finding (SPEC 14.7: it
 // holds only for a spelling free of escape sequences).
 //
+// The MDX half of the segment rule, in the same failing workspace: the
+// same segment escape in a spec source — `d={BASE.lo\u0067in}` and
+// `{text(BASE.lo\u0067in)}`, BASE's module holding `login` — is 14.5 and
+// 14.6 respectively and records no edge and no occurrence, though ECMAScript
+// decodes the escape to `login`: a spec source reaches its expressions
+// through ECMAScript 2024's grammar (14.20), never TypeScript's, so the
+// code-source arm cannot stand in for it, and a product resolving through
+// the decoded name records both edges (and their occurrences) and drops
+// both findings. The escape-free control `d={BASE.login}` beside them
+// records its edge, witnessed by its occurrence record, as the code-source
+// control's is.
+//
+// The escaped root, in a second workspace that is valid: which binding roots
+// a chain is the language's scoping question, never a spelling one (2.4,
+// 2.1, 4.5). `d={B\u0041SE.login}` and `{text(B\u0041SE.login)}` in MDX
+// and the marker `B\u0041SE.login` in a code source, each segment
+// escape-free, are rooted at the `BASE` import binding (ECMAScript and
+// TypeScript alike read the escaped identifier reference as `BASE`), so the
+// workspace builds with no finding and each spelling records its edge
+// (`query edges` answers there) and its occurrence — failing a product that
+// reads the root as spelled too, finds no binding named `B\u0041SE`, and
+// reports the reference (14.5, 14.6) or passes the marker over. Each staged
+// MDX file derives (S-9), and each code file is text TypeScript 5.9.3
+// accepts both as module code and as script code (14.20) — the builder's
+// staging-time judges hold every one of them to that.
+//
 // The escape spellings are composed from the backslash's code point (the
 // Task 18 pattern) so they stand in the staged files as their six-character
 // sequences, never decoded on the way in; the character reference `&#46;` is
@@ -1069,6 +1124,11 @@ const ESCAPED_LOGIN = `lo${BACKSLASH}u0067in`;
 const ESCAPED_DOTTED_KEY = `a${BACKSLASH}u002Eb`;
 /** The six characters `\u0061` as spelled; interpreted they read `a`. */
 const ESCAPED_A_KEY = `${BACKSLASH}u0061`;
+/**
+ * The nine characters `B\u0041SE` as spelled: an escaped identifier
+ * reference, which ECMAScript and TypeScript alike read as `BASE`.
+ */
+const ESCAPED_ROOT = `B${BACKSLASH}u0041SE`;
 /** The character-reference spelling whose interpreted value reads `a.b`. */
 const REFERENCE_DOTTED_PATH = "a&#46;b";
 
@@ -1120,10 +1180,18 @@ interface VerbatimArm {
   readonly construct: string;
 }
 
+// The escape-free control `d={BASE.login}` beside the MDX segment-escape
+// arms: its tag's head and its one reference — the span its occurrence
+// record covers (SPEC 5.7: a `d` reference occurrence spans that one
+// reference's own expression).
+const T2_4_5_MDX_CONTROL_HEAD = '<S id="ctl" d={';
+const T2_4_5_MDX_CONTROL_CHAIN = "BASE.login";
+
 // specs/A.mdx after the edit, as an exact sequence of parts: the head, then
 // each arm's construct with its surrounding text, so every construct's byte
 // window follows from the parts before it. Arm order within a condition is
-// source order — the order `findingsInSourceOrder` selects.
+// source order — the order `findingsInSourceOrder` selects. The last two
+// arms are the MDX segment escapes, the escape-free control after them.
 const T2_4_5_MDX_PARTS: readonly (string | VerbatimArm)[] = [
   T2_4_5_HEAD,
   {
@@ -1157,17 +1225,36 @@ const T2_4_5_MDX_PARTS: readonly (string | VerbatimArm)[] = [
     condition: "14.6",
     construct: `{text(BASE["${ESCAPED_A_KEY}"]["b"])}`,
   },
-  "\n</S>\n",
+  "\n</S>\n\n",
+  {
+    name: `d={BASE.${ESCAPED_LOGIN}}`,
+    condition: "14.5",
+    construct: `<S id="e6" d={BASE.${ESCAPED_LOGIN}}>`,
+  },
+  "\nEscape-spelled chain segment.\n</S>\n\n",
+  '<S id="e7">\n',
+  {
+    name: `{text(BASE.${ESCAPED_LOGIN})}`,
+    condition: "14.6",
+    construct: `{text(BASE.${ESCAPED_LOGIN})}`,
+  },
+  "\n</S>\n\n",
+  T2_4_5_MDX_CONTROL_HEAD,
+  T2_4_5_MDX_CONTROL_CHAIN,
+  "}>\nThe escape-free control beside the escape-spelled segments.\n</S>\n",
 ];
+
+/** The edited specs/A.mdx: the parts in order. */
+const T2_4_5_MDX_TEXT = T2_4_5_MDX_PARTS.map((part) =>
+  typeof part === "string" ? part : part.construct,
+).join("");
 
 // Staged into specs/A.mdx after the valid initial build — a staged-source
 // record, judged before any product exists (S-9,
 // test/self/s9-staged-sources.test.ts).
 const T2_4_5_MDX_SOURCE = stagedMdx(
-  "T2.4-5 specs/A.mdx with the six verbatim spellings",
-  T2_4_5_MDX_PARTS.map((part) =>
-    typeof part === "string" ? part : part.construct,
-  ).join(""),
+  "T2.4-5 specs/A.mdx with the eight verbatim spellings and the escape-free control",
+  T2_4_5_MDX_TEXT,
 );
 
 /** The staged arms of one condition in source order, each with its byte window. */
@@ -1214,18 +1301,162 @@ const T2_4_5_CONTROL_UNIT: OccurrenceUnit = {
   target: "specs/BASE.mdx#login",
   count: 1,
 };
-const T2_4_5_CONTROL_RANGE = {
-  start: Buffer.byteLength(T2_4_5_APP_PREFIX, "utf8"),
-  end:
-    Buffer.byteLength(T2_4_5_APP_PREFIX, "utf8") +
-    Buffer.byteLength(T2_4_5_APP_CONTROL_CHAIN, "utf8"),
+/** The exact byte range (SPEC 1.7) of `spelling` staged right after `prefix`. */
+function rangeAfter(prefix: string, spelling: string): SourceRange {
+  const start = Buffer.byteLength(prefix, "utf8");
+  return { start, end: start + Buffer.byteLength(spelling, "utf8") };
+}
+const T2_4_5_CONTROL_RANGE = rangeAfter(
+  T2_4_5_APP_PREFIX,
+  T2_4_5_APP_CONTROL_CHAIN,
+);
+
+// The MDX control's occurrence: from its section `ctl` to BASE's `login`,
+// spanning the one reference's own expression `BASE.login`, the braces
+// excluded (SPEC 5.7).
+const T2_4_5_MDX_CONTROL_UNIT: OccurrenceUnit = {
+  what: "the escape-free control `d={BASE.login}` in specs/A.mdx",
+  file: "specs/A.mdx",
+  kind: "depends",
+  source: "specs/A.mdx#ctl",
+  target: "specs/BASE.mdx#login",
+  count: 1,
 };
+const T2_4_5_MDX_CONTROL_RANGE = rangeAfter(
+  T2_4_5_MDX_TEXT.slice(
+    0,
+    T2_4_5_MDX_TEXT.indexOf(T2_4_5_MDX_CONTROL_HEAD) +
+      T2_4_5_MDX_CONTROL_HEAD.length,
+  ),
+  T2_4_5_MDX_CONTROL_CHAIN,
+);
+
+/** One expected occurrence record: its unit, and the span its spelling occupies. */
+interface ExpectedOccurrence {
+  readonly unit: OccurrenceUnit;
+  readonly spelling: string;
+  readonly range: SourceRange;
+}
+
+/** The failing workspace's two records: both escape-free controls. */
+const T2_4_5_CONTROL_OCCURRENCES: readonly ExpectedOccurrence[] = [
+  {
+    unit: T2_4_5_MDX_CONTROL_UNIT,
+    spelling: T2_4_5_MDX_CONTROL_CHAIN,
+    range: T2_4_5_MDX_CONTROL_RANGE,
+  },
+  {
+    unit: T2_4_5_CONTROL_UNIT,
+    spelling: T2_4_5_APP_CONTROL_CHAIN,
+    range: T2_4_5_CONTROL_RANGE,
+  },
+];
+
+// The escaped-root workspace (valid): specs/A.mdx holds
+// `d={B\u0041SE.login}` in section `r1` and `{text(B\u0041SE.login)}` in
+// section `r2`, src/app.ts the marker `B\u0041SE.login` at its top level,
+// and BASE's module holds `login`. The workspace is created after the body's
+// first product invocation, so each staged source is a record (S-9's timing
+// clause), the configuration included (SPEC_AND_CODE_CONFIG).
+const T2_4_5_ROOT_CHAIN = `${ESCAPED_ROOT}.login`;
+const T2_4_5_ROOT_D_PREFIX =
+  'import BASE from "./BASE.xspec"\n\n<S id="r1" d={';
+const T2_4_5_ROOT_EMBED = `{text(${T2_4_5_ROOT_CHAIN})}`;
+const T2_4_5_ROOT_EMBED_PREFIX =
+  `${T2_4_5_ROOT_D_PREFIX}${T2_4_5_ROOT_CHAIN}}>\n` +
+  "Escaped-root dependency.\n</S>\n\n" +
+  '<S id="r2">\n';
+const T2_4_5_ROOT_BASE = stagedMdx(
+  "T2.4-5 specs/BASE.mdx — the escaped-root workspace's imported module",
+  T2_4_5_BASE,
+);
+const T2_4_5_ROOT_MDX = stagedMdx(
+  "T2.4-5 specs/A.mdx — the escaped-root `d` and `text(...)` arms",
+  `${T2_4_5_ROOT_EMBED_PREFIX}${T2_4_5_ROOT_EMBED}\n</S>\n`,
+);
+const T2_4_5_ROOT_APP = stagedTs(
+  "T2.4-5 src/app.ts — the escaped-root marker at the top level",
+  `${T2_4_5_APP_PREFIX}${T2_4_5_ROOT_CHAIN};\n`,
+);
+
+// Each escaped-root spelling's record, from the node that holds it to BASE's
+// `login` (SPEC 5.7): the `d` reference spans its own expression, the
+// embedding its whole `{text(...)}` container, and the marker its bare chain
+// (no named unit encloses it, so its source is the whole file, 4.6).
+const T2_4_5_ROOT_OCCURRENCES: readonly ExpectedOccurrence[] = [
+  {
+    unit: {
+      what: "the escaped-root `d` reference in section `r1` of specs/A.mdx",
+      file: "specs/A.mdx",
+      kind: "depends",
+      source: "specs/A.mdx#r1",
+      target: "specs/BASE.mdx#login",
+      count: 1,
+    },
+    spelling: T2_4_5_ROOT_CHAIN,
+    range: rangeAfter(T2_4_5_ROOT_D_PREFIX, T2_4_5_ROOT_CHAIN),
+  },
+  {
+    unit: {
+      what: "the escaped-root embedding in section `r2` of specs/A.mdx",
+      file: "specs/A.mdx",
+      kind: "embeds",
+      source: "specs/A.mdx#r2",
+      target: "specs/BASE.mdx#login",
+      count: 1,
+    },
+    spelling: T2_4_5_ROOT_EMBED,
+    range: rangeAfter(T2_4_5_ROOT_EMBED_PREFIX, T2_4_5_ROOT_EMBED),
+  },
+  {
+    unit: {
+      what: "the escaped-root marker at the top level of src/app.ts",
+      file: "src/app.ts",
+      kind: "references",
+      source: "src/app.ts",
+      target: "specs/BASE.mdx#login",
+      count: 1,
+    },
+    spelling: T2_4_5_ROOT_CHAIN,
+    range: rangeAfter(T2_4_5_APP_PREFIX, T2_4_5_ROOT_CHAIN),
+  },
+];
 
 /**
- * The six staged spellings and nothing else: exactly three 14.5, two 14.6,
- * one 14.7 (SPEC 14: every condition reported, and nothing for the control
- * marker or the nodes beside the arms), each located within its own
- * construct's byte window.
+ * The complete occurrence answer is exactly the expected records: the
+ * (file, kind, source, target) multiset first, then each record's exact span
+ * (SPEC 5.7), found by its tuple — which the multiset has pinned to occur
+ * exactly once — so a record at another spelling's span fails by name.
+ */
+function assertOccurrencesExactly(
+  records: readonly OccurrenceRecord[],
+  expected: readonly ExpectedOccurrence[],
+  context: string,
+): void {
+  assertSameJson(
+    records.map(renderOccurrenceUnit).sort(),
+    expectedUnitMultiset(expected.map(({ unit }) => unit)),
+    `${context}: the complete (file, [kind], source -> target) record ` +
+      `multiset is exactly ${expected.map(({ unit }) => unit.what).join("; ")}`,
+  );
+  for (const { unit, spelling, range } of expected) {
+    const [tuple] = expectedUnitMultiset([{ ...unit, count: 1 }]);
+    assertSameJson(
+      records
+        .filter((record) => renderOccurrenceUnit(record) === tuple)
+        .map((record) => record.range),
+      [range],
+      `${context}: the record for ${unit.what} spans \`${spelling}\` ` +
+        `exactly (SPEC 5.7)`,
+    );
+  }
+}
+
+/**
+ * The eight staged spellings and nothing else: exactly four 14.5, three
+ * 14.6, one 14.7 (SPEC 14: every condition reported, and nothing for the two
+ * escape-free controls or the nodes beside the arms), each located within
+ * its own construct's byte window.
  */
 function assertVerbatimFindings(
   findings: readonly Finding[],
@@ -1233,15 +1464,17 @@ function assertVerbatimFindings(
 ): void {
   assertConditionCounts(
     findings,
-    { "14.5": 3, "14.6": 2, "14.7": 1 },
-    `${context}: exactly the six verbatim spellings are reported — the ` +
+    { "14.5": 4, "14.6": 3, "14.7": 1 },
+    `${context}: exactly the eight verbatim spellings are reported — the ` +
       `escape-spelled local \`d\` literal, the reference-spelled local \`d\` ` +
-      `literal, and the escape-spelled computed key are 14.5; the ` +
-      `escape-spelled local \`text\` literal and the escape-spelled computed ` +
-      `keys in \`text\` are 14.6; the escape-spelled marker is 14.7 — and ` +
-      `nothing for the escape-free control \`BASE.login\` (SPEC 2.4, 1.4, ` +
-      `14.5–14.7): a product interpreting a spelling resolves it to the node ` +
-      `staged beside it and drops its finding`,
+      `literal, the escape-spelled computed key, and the escape-spelled ` +
+      `chain segment in \`d\` are 14.5; the escape-spelled local \`text\` ` +
+      `literal, the escape-spelled computed keys in \`text\`, and the ` +
+      `escape-spelled chain segment in \`text\` are 14.6; the escape-spelled ` +
+      `marker is 14.7 — and nothing for the escape-free controls ` +
+      `\`d={BASE.login}\` and \`BASE.login\` (SPEC 2.4, 1.4, 14.5–14.7): a ` +
+      `product interpreting a spelling resolves it to the node staged beside ` +
+      `it and drops its finding`,
   );
   for (const condition of ["14.5", "14.6"] as const) {
     const reported = findingsInSourceOrder(findings, condition);
@@ -1271,7 +1504,7 @@ function assertVerbatimFindings(
 
 const T2_4_5 = defineProductTest({
   id: "T2.4-5",
-  title: `verbatim literals: every static string literal is read exactly as spelled, no escape sequence or character reference interpreted, so a spelling whose interpreted value would name a node names nothing — beside the local \`login\` and \`a.b\` and BASE's \`a.b\` and \`login\`, \`d={"${ESCAPED_LOGIN}"}\` and \`{text("${ESCAPED_LOGIN}")}\` are 14.5 and 14.6, \`d={"${REFERENCE_DOTTED_PATH}"}\` 14.5, \`d={BASE["${ESCAPED_DOTTED_KEY}"]}\` and \`{text(BASE["${ESCAPED_A_KEY}"]["b"])}\` 14.5 and 14.6, each at its own construct; the TypeScript marker \`BASE.${ESCAPED_LOGIN}\` is 14.7 and records no edge and no occurrence — \`occurrences\` lists exactly the escape-free control \`BASE.login\`'s record beside it, spanning the bare chain — while the consumer file type-checks clean against the prior valid generation (TypeScript reads the escaped identifier as \`login\`, which exists), so a product resolving the interpreted name fails (SPEC 2.4, 1.4, 4.5, 5.7, 11.3, 14.5–14.7)`,
+  title: `verbatim literals: every static string literal is read exactly as spelled, no escape sequence or character reference interpreted, so a spelling whose interpreted value would name a node names nothing — beside the local \`login\` and \`a.b\` and BASE's \`a.b\` and \`login\`, \`d={"${ESCAPED_LOGIN}"}\` and \`{text("${ESCAPED_LOGIN}")}\` are 14.5 and 14.6, \`d={"${REFERENCE_DOTTED_PATH}"}\` 14.5, \`d={BASE["${ESCAPED_DOTTED_KEY}"]}\` and \`{text(BASE["${ESCAPED_A_KEY}"]["b"])}\` 14.5 and 14.6, and the MDX segment escapes \`d={BASE.${ESCAPED_LOGIN}}\` and \`{text(BASE.${ESCAPED_LOGIN})}\` 14.5 and 14.6 though ECMAScript decodes the escape to \`login\`, each at its own construct; the TypeScript marker \`BASE.${ESCAPED_LOGIN}\` is 14.7 — the escaped spellings record no edge and no occurrence, \`occurrences\` listing exactly the escape-free controls \`d={BASE.login}\` and \`BASE.login\` beside them, each at its exact span — while the consumer file type-checks clean against the prior valid generation (TypeScript reads the escaped identifier as \`login\`, which exists), so a product resolving the interpreted name fails; the root is a scoping question, never a spelling one — \`d={${ESCAPED_ROOT}.login}\`, \`{text(${ESCAPED_ROOT}.login)}\`, and the marker \`${ESCAPED_ROOT}.login\` are rooted at the \`BASE\` binding, the workspace builds with no finding, and each records its edge and its occurrence (SPEC 2.4, 1.4, 2.1, 4.5, 5.7, 11.3, 14.5–14.7)`,
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
@@ -1299,7 +1532,7 @@ const T2_4_5 = defineProductTest({
         await workspace.file("src/app.ts", T2_4_5_APP_EDITED);
 
         const buildContext =
-          "T2.4-5 `build --json` over the six verbatim spellings";
+          "T2.4-5 `build --json` over the eight verbatim spellings and the two escape-free controls";
         assertVerbatimFindings(
           await buildFindings(product, workspace, buildContext),
           buildContext,
@@ -1326,14 +1559,15 @@ const T2_4_5 = defineProductTest({
             `generated module exports (SPEC 14.7, 2.4, 4.1)`,
         );
 
-        // No edge, no occurrence for the escaped marker; the control records
-        // its edge. `occurrences` answers on the failing workspace, the
-        // domain's findings accompanying (SPEC 11.2, 11.3; exit 1), and the
-        // complete record multiset is exactly the control's one record —
-        // its (file, kind, source, target) tuple and its exact span — so a
-        // record for the escaped spelling (a tuple identical to the
-        // control's, at another span) is caught by count, and a record at
-        // the escaped span in place of the control's by the span.
+        // No edge, no occurrence for the escaped marker or the two MDX
+        // segment escapes; each control records its edge. `occurrences`
+        // answers on the failing workspace, the domain's findings
+        // accompanying (SPEC 11.2, 11.3; exit 1), and the complete record
+        // multiset is exactly the two controls' records — each one's (file,
+        // kind, source, target) tuple and its exact span — so a record for
+        // an escaped spelling (a tuple identical to its control's, at
+        // another span) is caught by count, and a record at the escaped span
+        // in place of the control's by the span.
         const occContext = "T2.4-5 `occurrences` over the failing workspace";
         const result = await expectExit(
           product,
@@ -1348,22 +1582,80 @@ const T2_4_5 = defineProductTest({
           occContext,
         );
         assertVerbatimFindings(report.findings, occContext);
-        assertSameJson(
-          report.occurrences.map(renderOccurrenceUnit).sort(),
-          expectedUnitMultiset([T2_4_5_CONTROL_UNIT]),
-          `${occContext}: the complete (file, [kind], source -> target) ` +
-            `record multiset is exactly the escape-free control's one record ` +
-            `— \`BASE.login\` from the whole file to \`specs/BASE.mdx#login\` ` +
-            `— and no record for the escape-spelled marker, which resolves ` +
-            `nowhere and so records no edge and no occurrence (SPEC 2.4, 5.7, ` +
-            `4.5, 11.3)`,
+        assertOccurrencesExactly(
+          report.occurrences,
+          T2_4_5_CONTROL_OCCURRENCES,
+          `${occContext} — the escape-spelled marker and the two escape-` +
+            `spelled MDX segments resolve nowhere, so they record no edge and ` +
+            `no occurrence, while each escape-free control records its own ` +
+            `(SPEC 2.4, 5.7, 4.5, 11.3)`,
         );
-        assertSameJson(
-          report.occurrences[0]!.range,
-          T2_4_5_CONTROL_RANGE,
-          `${occContext}: the one record spans the control's bare chain ` +
-            `\`${T2_4_5_APP_CONTROL_CHAIN}\` alone, exclusive of the ` +
-            `terminator (SPEC 5.7) — never the escape-spelled marker's span`,
+      },
+    );
+
+    // The escaped root, in a second workspace that is valid: the root is
+    // the language's scoping question, never a spelling one (SPEC 2.4,
+    // 2.1, 4.5), so `B\u0041SE` roots each chain at the `BASE` import
+    // binding. The build exits 0 — no finding anywhere — and the exact edge
+    // sets of each kind and the exact occurrence answer pin every escaped-
+    // root spelling to its own edge and record: a product reading the root
+    // as spelled reports the MDX references unresolved (14.5, 14.6), failing
+    // the build, and passes the marker over, failing its edge and record.
+    await withWorkspace(
+      SPEC_AND_CODE_CONFIG,
+      {
+        "specs/BASE.mdx": T2_4_5_ROOT_BASE,
+        "specs/A.mdx": T2_4_5_ROOT_MDX,
+        "src/app.ts": T2_4_5_ROOT_APP,
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          `T2.4-5 \`build\` over the escaped-root arms \`d={${T2_4_5_ROOT_CHAIN}}\`, ` +
+            `\`${T2_4_5_ROOT_EMBED}\`, and the marker \`${T2_4_5_ROOT_CHAIN}\` — ` +
+            `each rooted at the \`BASE\` import binding, so the workspace is ` +
+            `valid and reports no finding (SPEC 2.4, 2.1, 4.5)`,
+        );
+        for (const kind of ["depends", "embeds", "references"] as const) {
+          assertEdgeSetEqual(
+            await queryEdgesOfKind(
+              product,
+              workspace,
+              kind,
+              "T2.4-5 escaped root",
+            ),
+            T2_4_5_ROOT_OCCURRENCES.filter(
+              ({ unit }) => unit.kind === kind,
+            ).map(({ unit }) => ({ from: unit.source, to: unit.target, kind })),
+            `T2.4-5 the escaped-root workspace's complete \`${kind}\` edge ` +
+              `set — the escaped-root spelling of that kind records its edge ` +
+              `to \`specs/BASE.mdx#login\`, rooted at the \`BASE\` import ` +
+              `binding (SPEC 2.4, 2.1, 4.5, 5.2)`,
+          );
+        }
+        const occContext =
+          "T2.4-5 `occurrences` over the escaped-root workspace";
+        const report = decodeOccurrencesReport(
+          await runJson(
+            product,
+            workspace,
+            ["occurrences"],
+            `${occContext} — a finding-free answer exits 0 (SPEC 11.3)`,
+          ),
+          occContext,
+        );
+        assertConditionCounts(
+          report.findings,
+          {},
+          `${occContext}: no finding accompanies the answer — each ` +
+            `escaped-root spelling resolves (SPEC 2.4, 11.2)`,
+        );
+        assertOccurrencesExactly(
+          report.occurrences,
+          T2_4_5_ROOT_OCCURRENCES,
+          `${occContext} — each escaped-root spelling records its occurrence ` +
+            `(SPEC 2.4, 5.7, 11.3)`,
         );
       },
     );
