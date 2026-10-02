@@ -38,21 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part B — Shared machinery
 
-### Task 13 — The refusal vocabulary gains `refused-exposed-derived-file` (SPEC 14's listed order, SPEC.md L819; TEST-SPEC H-3, S-5; prerequisite of A27, B10, B15)
-
-**Where.**
-- `test/helpers/adapters/model.ts`: `REFUSAL_CODE_TOKENS`;
-- `test/helpers/adapters/forms.ts`: the finding decoder, which rejects unknown codes, and the 12.7 order comparator;
-- `test/self/s5-output-adapters.test.ts`.
-
-**Change.** Add `refused-exposed-derived-file` between `refused-invalid-destination` and `refused-invalid-rewrite`, in SPEC 14's listed order. New S-5 vectors:
-- the decoder accepts a finding carrying the code;
-- the order comparator ranks it after `refused-invalid-destination` and before `refused-invalid-rewrite`, and rejects the reversed pair.
-
-**Checks.**
-- Red-check the new vectors by stashing the helper change (AGENTS.md's self-test red-check recipe).
-- The S-5 file passes, and so does the full self project.
-
 ### Task 14 — S-9's TypeScript judge and its fixed vectors (TEST-SPEC §17 S-9's TypeScript clause, L632; SPEC 14.20, 1.6; C1, part 1)
 
 **Where.** A new harness helper (for example `test/helpers/ts-derivability.ts`) importing `typescript-5.9.3` and nothing of the product. A new self-test (for example `test/self/s9-typescript-well-formedness.test.ts`).
@@ -515,6 +500,8 @@ If T6.5-9 or T6.5-11 import this arm's exported staging, keep them building; Tas
   - (d) A symbolic link to a file outside the workspace is the occupant, with (a)'s glob present: the move succeeds, the regeneration removes the link as the link, and the target stays byte-identical. Reuse the shared link staging `stageLinkToOutsideFile` and `assertOutsideLinkTargetUnchanged` (`section-13.4.ts`; export them, or move them to `support.ts`).
   - (e) The section form in (a)'s staging: exit 0, the preview succeeding alike, with the effects L300 states and `check` clean.
 - *Multi-reason order.* `move specs/A.mdx "specs/a'b.mdx"` in (a)'s staging reports `refused-invalid-destination`, then `refused-exposed-derived-file`. Export the staging: T12.7-2 asserts the same order (Task 55).
+
+**Note (from Task 13).** The vocabulary, decoder, and comparator know the code; `IDENTITY_PINNED_REFUSAL_CODES` (`test/suite/registry/support.ts`) does not list it, so `assertRefusalIdentities` throws a harness defect on a case stating its `identities`. Asserting L300's `identities` `[]` through that path needs the code classified there, with its doc comment, or a direct assertion.
 
 **Checks.** S-7 passes. T6.5-21 and T6.6-3 against the built product.
 

@@ -161,9 +161,11 @@
 //   characters and that local reference's spelling (5.7), never a range
 //   for the import that does not yet exist. The remaining
 //   every-participant cardinality contract is T14-8's subject.
-//   SPEC 14 lists exactly ten refusal reasons — the two it lists last,
-//   refused-invalid-rewrite and refused-moved-import, are T6.5-16's and
-//   T6.5-17's subjects — and no unresolvable-reference reason exists
+//   SPEC 14 lists exactly eleven refusal reasons — the two it lists
+//   last, refused-invalid-rewrite and refused-moved-import, are
+//   T6.5-16's and T6.5-17's subjects, and refused-exposed-derived-file,
+//   listed just before them, is T6.5-21's — and no
+//   unresolvable-reference reason exists
 //   (its retired code is unknown to the form-exact decode, S-5), so no
 //   arm stages one. The
 //   exact self-move's modifies-nothing and journal discipline are staged
@@ -2581,7 +2583,7 @@ const T14_6 = defineProductTest({
  * refusal report never carries two findings of one reason (SPEC 14: one
  * finding per reason). No report carries a code outside 14's list: the
  * form-exact decode admits only 14's codes (forms.ts KNOWN_CODE_TOKENS —
- * the 25 condition tokens and the ten refusal reasons), so an unlisted
+ * the 25 condition tokens and the eleven refusal reasons), so an unlisted
  * code, the retired `refused-unresolvable-reference` included, fails as an
  * H-3 form failure before any count, and the exact multiset excludes every
  * listed code beside the expected ones.

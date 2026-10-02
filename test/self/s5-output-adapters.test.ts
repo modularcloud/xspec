@@ -296,6 +296,28 @@ const GOOD_FINDINGS = {
   ],
 };
 
+// The two findings T6.5-21's multi-reason arm reports, in SPEC 14's listed
+// order (12.7, T12.7-2): `move specs/A.mdx "specs/a'b.mdx"` refused
+// `refused-invalid-destination` (T6.5-4's barred character) then
+// `refused-exposed-derived-file` (the origin's emit destination `specs/A.md`
+// exposed to a `specs/*.md` glob) — each a reason concerning a path, carried
+// as the finding's `path` with `locations` [] (SPEC 14), `identities` []
+// as T6.5-21 states it.
+const INVALID_DESTINATION_FINDING = {
+  code: "refused-invalid-destination",
+  message: "the destination path would not be a valid discovered spec source",
+  locations: [],
+  path: "specs/a'b.mdx",
+  identities: [],
+};
+const EXPOSED_DERIVED_FILE_FINDING = {
+  code: "refused-exposed-derived-file",
+  message: "the origin's emit destination holds a file discovery would yield",
+  locations: [],
+  path: "specs/A.md",
+  identities: [],
+};
+
 // An `occurrences` document in the literal SPEC 12.7 form (a form-exact
 // surface, H-3): `{"findings", "occurrences"}`, each record
 // `{"file", "range", "kind", "source", "target"}` in occurrence order (5.7 —
@@ -1439,6 +1461,35 @@ const DECODERS: readonly DecoderSpec[] = [
           expect(decoded.findings[1]!.identities).toEqual([]);
         },
       },
+      {
+        label:
+          "refused-exposed-derived-file after refused-invalid-destination, " +
+          "each concerning its path with locations [] (T6.5-21's " +
+          "multi-reason arm; SPEC 14's listed order, T12.7-2)",
+        doc: {
+          findings: [
+            structuredClone(INVALID_DESTINATION_FINDING),
+            structuredClone(EXPOSED_DERIVED_FILE_FINDING),
+          ],
+        },
+        verify: (decoded: ReturnType<typeof decodeFindingsReport>): void => {
+          expect(decoded.findings.map((finding) => finding.code)).toEqual([
+            "refused-invalid-destination",
+            "refused-exposed-derived-file",
+          ]);
+          // Refusal reasons derive no 14.N condition identity.
+          expect(decoded.findings.map((finding) => finding.condition)).toEqual([
+            null,
+            null,
+          ]);
+          expect(decoded.findings.map((finding) => finding.path)).toEqual([
+            "specs/a'b.mdx",
+            "specs/A.md",
+          ]);
+          expect(decoded.findings[1]!.locations).toEqual([]);
+          expect(decoded.findings[1]!.identities).toEqual([]);
+        },
+      },
     ],
     bad: [
       { label: "missing findings list", doc: {} },
@@ -1677,6 +1728,36 @@ const DECODERS: readonly DecoderSpec[] = [
           findings: [
             structuredClone(GOOD_FINDINGS.findings[5]),
             structuredClone(GOOD_FINDINGS.findings[0]),
+          ],
+        },
+      },
+      {
+        label:
+          "refused-exposed-derived-file before refused-invalid-destination " +
+          "(14 lists it after: T6.5-21's multi-reason pair reversed)",
+        doc: {
+          findings: [
+            structuredClone(EXPOSED_DERIVED_FILE_FINDING),
+            structuredClone(INVALID_DESTINATION_FINDING),
+          ],
+        },
+      },
+      {
+        label:
+          "refused-invalid-rewrite before refused-exposed-derived-file " +
+          "(14 lists refused-exposed-derived-file before it)",
+        doc: {
+          findings: [
+            {
+              code: "refused-invalid-rewrite",
+              message: "the exact edits would leave specs/B.mdx unparseable",
+              locations: [
+                { file: "specs/A.mdx", range: { start: 12, end: 60 } },
+              ],
+              path: null,
+              identities: ["specs/B.mdx"],
+            },
+            structuredClone(EXPOSED_DERIVED_FILE_FINDING),
           ],
         },
       },
@@ -4413,25 +4494,87 @@ test("S-5: the findings comparator orders codes numerically, refusals in 14's or
   expect(compareFindings(refusalFirst, refusalLater)).toBeLessThan(0);
   // 14's listed order, not lexicographic: refused-missing-target-parent
   // (7th listed) precedes refused-invalid-destination (8th) although "m"
-  // sorts after "i"; the two codes 14 lists last follow in its order,
-  // refused-invalid-rewrite (9th) then refused-moved-import (10th).
+  // sorts after "i"; refused-exposed-derived-file (9th) follows
+  // refused-invalid-destination and precedes refused-invalid-rewrite (10th)
+  // although "e" sorts before "i" (T6.5-21's multi-reason order, T12.7-2);
+  // the two codes 14 lists last follow in its order, refused-invalid-rewrite
+  // (10th) then refused-moved-import (11th).
   const refusalSeventh = findingWith({
     code: "refused-missing-target-parent",
   });
   const refusalEighth = findingWith({ code: "refused-invalid-destination" });
-  const refusalNinth = findingWith({ code: "refused-invalid-rewrite" });
-  const refusalTenth = findingWith({ code: "refused-moved-import" });
+  const refusalNinth = findingWith({ code: "refused-exposed-derived-file" });
+  const refusalTenth = findingWith({ code: "refused-invalid-rewrite" });
+  const refusalEleventh = findingWith({ code: "refused-moved-import" });
   expect(compareFindings(refusalLater, refusalSeventh)).toBeLessThan(0);
   expect(compareFindings(refusalSeventh, refusalEighth)).toBeLessThan(0);
   expect(compareFindings(refusalEighth, refusalNinth)).toBeLessThan(0);
   expect(compareFindings(refusalNinth, refusalTenth)).toBeLessThan(0);
+  expect(compareFindings(refusalTenth, refusalEleventh)).toBeLessThan(0);
+  // The reversed pairs around refused-exposed-derived-file rank the other
+  // way, and it ranks after the last numbered condition (14.25's token —
+  // never in a findings array, but the comparator's rank is total).
+  expect(compareFindings(refusalNinth, refusalEighth)).toBeGreaterThan(0);
+  expect(compareFindings(refusalTenth, refusalNinth)).toBeGreaterThan(0);
+  expect(
+    compareFindings(findingWith({ code: "read-failure" }), refusalNinth),
+  ).toBeLessThan(0);
   // Code-less findings sort last, after the last listed refusal reason.
   expect(
     compareFindings(refusalLater, findingWith({ code: null })),
   ).toBeLessThan(0);
   expect(
-    compareFindings(refusalTenth, findingWith({ code: null })),
+    compareFindings(refusalNinth, findingWith({ code: null })),
   ).toBeLessThan(0);
+  expect(
+    compareFindings(refusalEleventh, findingWith({ code: null })),
+  ).toBeLessThan(0);
+  // A code 14 does not list takes no rank: handed to the comparator outside
+  // decode (which admits only 14's codes), the retired
+  // refused-unresolvable-reference is a harness defect, thrown — never
+  // ranked beside a listed code.
+  expect(() =>
+    compareFindings(
+      findingWith({ code: "refused-unresolvable-reference" }),
+      refusalEighth,
+    ),
+  ).toThrow(/harness defect/);
+});
+
+test("S-5: the findings decode admits refused-exposed-derived-file and rejects it out of 14's listed order by the order rule", () => {
+  // One of 14's codes: admitted alone, a refusal reason deriving no 14.N.
+  const alone = decodeFindingsReport({
+    findings: [structuredClone(EXPOSED_DERIVED_FILE_FINDING)],
+  });
+  expect(alone.findings[0]!.code).toBe("refused-exposed-derived-file");
+  expect(alone.findings[0]!.condition).toBeNull();
+  expect(alone.findings[0]!.path).toBe("specs/A.md");
+  // Each reversed pair around it is rejected by the pinned 12.7 order —
+  // never as an unknown code, so the rejection is the order's own.
+  const invalidRewrite = {
+    code: "refused-invalid-rewrite",
+    message: "the exact edits would leave specs/B.mdx unparseable",
+    locations: [{ file: "specs/A.mdx", range: { start: 12, end: 60 } }],
+    path: null,
+    identities: ["specs/B.mdx"],
+  };
+  const reversed = [
+    {
+      label: "refused-exposed-derived-file before refused-invalid-destination",
+      findings: [EXPOSED_DERIVED_FILE_FINDING, INVALID_DESTINATION_FINDING],
+    },
+    {
+      label: "refused-invalid-rewrite before refused-exposed-derived-file",
+      findings: [invalidRewrite, EXPOSED_DERIVED_FILE_FINDING],
+    },
+  ];
+  for (const { label, findings } of reversed) {
+    const failure = expectDiagnosed(label, () =>
+      decodeFindingsReport({ findings: structuredClone(findings) }),
+    );
+    expect(failure.message).toContain("findings in the pinned 12.7 order");
+    expect(failure.message).not.toContain("a stable code");
+  }
 });
 
 test("S-5: the findings comparator compares locations, paths, and identities byte-wise with the prefix rule", () => {

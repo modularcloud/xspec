@@ -225,7 +225,10 @@ export const USAGE_ERROR_CONDITION_CODE_TOKENS = [
 
 /**
  * SPEC.md 14's refusal-reason stable codes, in the order 14 lists them —
- * the findings order after the numbered conditions (SPEC 12.7, T14-7).
+ * the findings order after the numbered conditions (SPEC 12.7, T14-7):
+ * eleven reasons, `refused-exposed-derived-file` (a file move's exposed
+ * emit destination, 6.5; T6.5-21) listed after `refused-invalid-destination`
+ * and before `refused-invalid-rewrite` (T12.7-2).
  */
 export const REFUSAL_CODE_TOKENS = [
   "refused-invalid-id",
@@ -236,6 +239,7 @@ export const REFUSAL_CODE_TOKENS = [
   "refused-destination-exists",
   "refused-missing-target-parent",
   "refused-invalid-destination",
+  "refused-exposed-derived-file",
   "refused-invalid-rewrite",
   "refused-moved-import",
 ] as const;

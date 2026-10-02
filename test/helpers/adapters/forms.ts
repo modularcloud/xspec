@@ -347,7 +347,8 @@ export function decodeFindingForm(value: unknown, site: DecodeSite): Finding {
  * A code's rank in the findings order: the numbered conditions in numeric
  * order, then the refusal reasons in the order 14 lists them, then code-less
  * findings (SPEC 12.7). Total over decoded findings — decode admits only the
- * known tokens.
+ * known tokens; a code outside 14's list reaching the comparator any other
+ * way is a harness defect, thrown rather than ranked beside a listed code.
  */
 function codeRank(code: string | null): number {
   if (code === null) {
@@ -355,10 +356,16 @@ function codeRank(code: string | null): number {
   }
   const condition = (CONDITION_CODE_TOKENS as readonly string[]).indexOf(code);
   if (condition !== -1) return condition;
-  return (
-    CONDITION_CODE_TOKENS.length +
-    (REFUSAL_CODE_TOKENS as readonly string[]).indexOf(code)
-  );
+  const refusal = (REFUSAL_CODE_TOKENS as readonly string[]).indexOf(code);
+  if (refusal === -1) {
+    throw new Error(
+      `harness defect: the 12.7 findings comparator was handed the code ` +
+        `${JSON.stringify(code)}, which SPEC 14 does not list (model.ts ` +
+        `CONDITION_CODE_TOKENS, REFUSAL_CODE_TOKENS) — decode admits only ` +
+        `14's codes, so no listed rank applies`,
+    );
+  }
+  return CONDITION_CODE_TOKENS.length + refusal;
 }
 
 function compareSequences<T>(
