@@ -343,4 +343,17 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
       violator("VIOL-AVAIL-NOFILE", "conf-avail/bin-nofile.mjs", ["T11.3-4"]),
     ],
   ),
+  // CONF-ORPHAN (§CONF-ORPHAN): removal of recorded derived paths — `build`
+  // and `check` over one spec group of trivial single-section `.mdx`
+  // sources, `markdown` emitting next to sources or under an `outDir` and
+  // then reconfigured (`outDir` changed, or emission disabled by `markdown`
+  // absent or `emit: false`), a code group globbing `specs/*.md` of
+  // `export const n = 1`; graph data recording the derived paths generated
+  // (13.3); 13.4's removal of each recorded path no longer generated — its
+  // occupant judged at the path itself, a directory or a discovered source
+  // left in place, anything else removed (a symbolic link as the link),
+  // nothing read below a non-directory component — and 14.10's per-file,
+  // graph-data, and recorded-file forms, the last reporting exactly what
+  // that removal would remove.
+  conformer("CONF-ORPHAN", "conf-orphan/bin.mjs", ["T13.4-11"], []),
 ];

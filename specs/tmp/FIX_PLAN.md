@@ -38,36 +38,9 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part A — Certification
 
-### Task 7 — The CONF-ORPHAN conformer (CERTIFICATIONS.md §CONF-ORPHAN; TEST-SPEC C-1, C-2; D3)
-
-**Depends on.** T13.4-11, registered (`test/suite/registry/section-13.4.ts`). Its body drives `build` and `check --json` alone. Emission is disabled by `markdown` absent in arms (a) and (c), and by `markdown: { emit: false }` in (b) and (f). (b)'s code group is `code: { app: ["specs/*.md"] }`. (e)'s link target directory is `foreign/` at the workspace root (inside staging), or `foreign/` beside the root in the workspace's temporary directory (outside staging). Both links store relative targets. The body stops at its first failing arm, in the order (a), (b), (c), (d), (e) inside, (e) outside, (f), then order independence. Against the built product it fails at (a), and at (b) once (a) passes. A hand-staged probe confirms both: the product reports and deletes a directory, and a discovered source, at a recorded path.
-
-**Where.**
-- `test/fixtures/conf-orphan/product.mjs` and `bin.mjs` (new);
-- `test/self/certification-fixtures.ts`: CONF-ORPHAN after CONF-AVAIL, in-scope `["T13.4-11"]`; Tasks 8 and 9 add its violators.
-
-**Change.** The simplest product that conforms within §CONF-ORPHAN's scope and command surface. It follows the fixture conventions in AGENTS.md: plain Node ESM with no build step, run as `node test/fixtures/conf-orphan/bin.mjs <command> …` inside the workspace, exiting 70 for a fixture-internal crash or an invocation outside the scope.
-- *Configuration*, as T13.4-11 stages it: one spec group; `markdown` emitting next to sources or under `outDir`, then reconfigured (`outDir` changed, or emission disabled by `markdown` absent or `emit: false`); and (b)'s code group `specs/*.md`. The scope's one code source is well-formed and no other condition arises, so the conformer needs no TypeScript parse.
-- *`build` (12.1)*, over trivial single-section sources:
-  - it writes each module (content beyond the path is out of scope; no companions);
-  - while emission is enabled, it writes the Markdown of 3;
-  - it writes graph data whose record lists the derived paths generated (13.3);
-  - each write replaces its path's occupant, a directory holding files included, and traverses no symbolic link.
-- *Removal of each recorded path no longer generated*, per 13.4:
-  - the occupant is judged at the path itself;
-  - a directory or a discovered source is left in place, and anything else is removed — a symbolic link as the link itself;
-  - nothing is read below a directory component occupied by anything other than a directory (a link included); the path then holds nothing, and its removal makes no write.
-- *`check` (12.2)* with 14.10's per-file, graph-data, and recorded-file forms. The recorded-file form reports exactly what that removal would remove. Reports follow 14's and 12.7's forms, and exit codes follow 12.0.
-- *Borrowing.* Fixtures share no modules today, so copy what helps into this fixture: CONF-CORE's `check`, CONF-MD's Markdown, CONF-DISC's configuration and discovery.
-
-**Checks.**
-- `-t ORPHAN`: the conformer passes T13.4-11 — every arm, both (e) stagings, and the order-independence arm.
-- Hand-probe (a), (c), and (e) in scratch workspaces.
-- The manifest-equality gate test now lacks only the two violators.
-
 ### Task 8 — VIOL-ORPHAN-THROUGHLINK (CERTIFICATIONS.md §VIOL-ORPHAN-THROUGHLINK, as narrowed at e77332e; D3)
 
-**Depends on.** Task 7.
+**Depends on.** Task 7, done: the CONF-ORPHAN conformer (`test/fixtures/conf-orphan/product.mjs`, `bin.mjs`) passes T13.4-11, and its manifest entry lists no violators yet. Both violators deviate where its header's deviation seam says: `recordedOccupant` (the occupant 13.4's removal and 14.10's recorded-file form judge) and `removeRecorded`.
 
 **Where.** `test/fixtures/conf-orphan/bin-throughlink.mjs` (new), a deviation switch in `product.mjs`, and the manifest entry certifying `["T13.4-11"]`.
 
