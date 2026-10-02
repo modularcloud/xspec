@@ -124,7 +124,12 @@
 //   destination clauses "containing `#`" and "not valid UTF-8" admit no
 //   refusal staging (T6.5-4's dead-letter note): every operand spelling that
 //   would present either is an exit-2 usage error before any refusal is
-//   evaluated — those stagings are T6.5-5's.
+//   evaluated — those stagings are T6.5-5's. The barred-character arms
+//   are refusals instead: a `<new-id>` carrying a character 1.4's
+//   quote-and-escape bullet bars (refused-invalid-id) and a destination
+//   path carrying one 7.1 bars (refused-invalid-destination) are each a
+//   well-formed argument value that no spelling rule decides (12.0), so
+//   exit 1, never exit 2.
 // - T6.5-5 exit-2 arms run with `--json`: stdout exactly one 12.7 error
 //   document (12.0: with JSON output in effect, an exit-2 invocation emits
 //   the error document as its entire stdout — no report, no validation
@@ -256,6 +261,7 @@ import {
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
+  BARRED_NEW_ID_CHARACTERS,
   U4_ANC_SOURCE,
   U4_BAD_SOURCE,
   U4_BROKEN_SOURCE,
@@ -3407,6 +3413,132 @@ export async function stageMoveRefusalOccupants(
   await workspace.symlink(V4_LINK_COMPONENT, V4_LINKED_TARGET, "dir");
 }
 
+/** `U+XXXX`, naming a barred character in a case's diagnosis text. */
+function codePointName(codePoint: number): string {
+  return `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+// T6.5-4's barred-character `<new-id>` arms (TEST-SPEC T6.5-4; SPEC 1.4's
+// quote-and-escape bullet — T6.4-3's discriminator, met in the section
+// form): one per character the bullet bars (section-6.4.ts's
+// BARRED_NEW_ID_CHARACTERS: the double quote, the single quote, the escape
+// character, `&`, U+2028, and U+2029), each spelled between two letters in
+// a one-segment `<new-id>` (as T1.4-1 spells them: the literal, validly
+// encoded character) moving A.mdx's `keep` into B.mdx, as the other
+// invalid-id arms do. Each destination operand `specs/B.mdx#a<c>b` is a
+// well-formed argument value (12.0: valid UTF-8, no U+FFFD, one `#`) that
+// no spelling rule decides, so each arm exits 1 with `refused-invalid-id`
+// alone, never exit 2, its `identities` exactly `["specs/B.mdx#a<c>b"]`
+// with the character verbatim (SPEC 14: refused-structural-parent and
+// refused-invalid-rewrite are evaluated only over an intrinsically valid
+// new ID, and no other reason applies to the staging). A product
+// whose new-ID check omits a character its source validation bars (T1.4-1)
+// performs the move — writing the character into an `id` attribute, a
+// workspace failing validation behind a reported success — and fails the
+// exit, the finding, and the modifies-nothing compare (workspace and
+// journal alike). Each character is built from its code point, so no tool
+// layer can normalize the spelling away.
+const BARRED_CHARACTER_NEW_ID_CASES: readonly MoveRefusalCase[] =
+  BARRED_NEW_ID_CHARACTERS.map(([codePoint, name]): MoveRefusalCase => {
+    const newId = `a${String.fromCodePoint(codePoint)}b`;
+    return {
+      argv: ["move", "specs/A.mdx#keep", `${V4_B}#${newId}`],
+      expected: {
+        finding: "refused-invalid-id",
+        identities: [`${V4_B}#${newId}`],
+      },
+      reason:
+        `section form whose one-segment <new-id> carries ${name} ` +
+        `(${codePointName(codePoint)}) between two letters, which 1.4's ` +
+        `quote-and-escape bullet bars — a well-formed argument value no ` +
+        `spelling rule decides, so exit 1, never exit 2, the character ` +
+        `verbatim in identities (SPEC 6.5, 1.4, 12.0, 14)`,
+    };
+  });
+
+// T6.5-4's barred destination-path arms (TEST-SPEC T6.5-4; SPEC 7.1, 6.5,
+// 14.19): one file-form arm and one section-form arm creating the target
+// per character 7.1 bars from spec-source paths — the double quote, the
+// single quote, the backslash, U+000A, U+000D, U+2028, and U+2029 — each
+// spelled between two letters in the destination's file name
+// (`specs/a<c>b.mdx`; the section form's `specs/a<c>b.mdx#x`, nothing at
+// that path), plus, for the single quote, one arm of each form placing it
+// in a directory component instead (`specs/it's/b.mdx`, `specs/it's`
+// absent): 7.1 bars the character anywhere in the path, so a validator
+// checking the file name alone fails there. REFUSAL_CONFIG's spec glob
+// `specs/**/*.mdx` reaches every destination these arms spell — under a
+// glob reaching the top level alone `specs/it's/b.mdx` would belong to no
+// spec group, refused under the same code concerning the same path, and
+// that validator would pass. Each destination is a well-formed argument
+// value (12.0: valid UTF-8, no U+FFFD, no `#` in its path part), so each
+// arm is refused `refused-invalid-destination` concerning the destination
+// path as spelled, the character verbatim (SPEC 6.5, 14.19, 14) — never a
+// usage error — and modifies nothing; no other reason applies (A.mdx is
+// referenced from no other file, and `x` moves under its own valid ID with
+// nothing referencing it). The destinations are operands, never staged
+// file names, so no arm needs Linux-leg gating. Each character is built
+// from its code point.
+const BARRED_PATH_CHARACTERS: readonly (readonly [number, string])[] = [
+  [0x22, "the double quote"],
+  [0x27, "the single quote"],
+  [0x5c, "the backslash"],
+  [0x0a, "LINE FEED"],
+  [0x0d, "CARRIAGE RETURN"],
+  [0x2028, "LINE SEPARATOR"],
+  [0x2029, "PARAGRAPH SEPARATOR"],
+];
+
+/**
+ * The two arms of one barred destination path: the file form moving A.mdx
+ * to `path`, and the section form moving A.mdx's `x` to `path#x`, creating
+ * the target file — each refused `refused-invalid-destination` concerning
+ * `path` exactly as spelled. `shown` renders the path for diagnosis with
+ * the barred character named by its code point.
+ */
+function barredPathCases(
+  path: string,
+  shown: string,
+  name: string,
+): readonly MoveRefusalCase[] {
+  return [
+    {
+      argv: ["move", V4_A, path],
+      expected: { finding: "refused-invalid-destination", path },
+      reason:
+        `file form whose destination path ${shown} contains ${name} — a ` +
+        `character 7.1 bars from spec-source paths; a well-formed argument ` +
+        `value, so refused concerning the path as spelled, never a usage ` +
+        `error (SPEC 6.5, 7.1, 14.19, 12.0)`,
+    },
+    {
+      argv: ["move", `${V4_A}#x`, `${path}#x`],
+      expected: { finding: "refused-invalid-destination", path },
+      reason:
+        `section form creating the target file ${shown}, whose path ` +
+        `contains ${name} — a character 7.1 bars from spec-source paths; ` +
+        `the created target file's path is vetted like the file form's ` +
+        `destination, refused concerning it as spelled, never a usage ` +
+        `error (SPEC 6.5, 7.1, 14.19, 12.0)`,
+    },
+  ];
+}
+
+const BARRED_DESTINATION_PATH_CASES: readonly MoveRefusalCase[] = [
+  ...BARRED_PATH_CHARACTERS.flatMap(([codePoint, name]) =>
+    barredPathCases(
+      `specs/a${String.fromCodePoint(codePoint)}b.mdx`,
+      `specs/a<${codePointName(codePoint)}>b.mdx`,
+      `${name} (${codePointName(codePoint)}) in its file name`,
+    ),
+  ),
+  ...barredPathCases(
+    `specs/it${String.fromCodePoint(0x27)}s/b.mdx`,
+    `specs/it<U+0027>s/b.mdx (specs/it<U+0027>s absent)`,
+    "the single quote (U+0027) in a directory component, where a " +
+      "validator checking the file name alone sees none",
+  ),
+];
+
 // Each case's expected refusal finding (SPEC 14): the exact stable code with
 // the concern §14 assigns the reason — identity, path, or located
 // participant (the module header's T6.5-4 note walks the per-reason
@@ -3530,6 +3662,7 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
       "treatment a product gets by generalizing 11.3's `--to` spelling " +
       "rule to move operands (SPEC 6.5, 12.0)",
   },
+  ...BARRED_CHARACTER_NEW_ID_CASES,
   {
     argv: ["move", "specs/A.mdx#x", "specs/B.mdx#y"],
     expected: {
@@ -3588,6 +3721,7 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
       "`specs/plain/**` spec glob, isolating 14.19's extension rule " +
       "(SPEC 6.5, 7.1, 14.19)",
   },
+  ...BARRED_DESTINATION_PATH_CASES,
   // The inside-root staging of the link-component arms (V4_LINK_COMPONENT's
   // note): `specs/sub` → `linked/`, staged by stageMoveRefusalOccupants; the
   // whole-root compare sees any write landing through the link.
@@ -3723,7 +3857,7 @@ export const MOVE_PRECONDITION_CASE: MoveRefusalCase = {
 const T6_5_4 = defineProductTest({
   id: "T6.5-4",
   title:
-    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle (refused-cycle, the dependency arm locating the participating `d` spelling); file form whose destination exists — occupied by a plain file, by a directory, by a symbolic link, and by a broken symbolic link with its target absent, one arm each, the directory arm discriminating a product probing for a file alone and the broken-link arm discriminating a product probing existence through link-following stat (refused-destination-exists, concerning that path); section form whose target path is occupied by anything other than a discovered spec source — a directory; a symbolic link resolving to a discovered spec source (discovery never yields a symlink); and an existing `.mdx` file outside every configured spec group, the latter refusing under refused-destination-exists and refused-invalid-destination together, one finding per applicable reason; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment; the empty `<new-id>` of destination operand `specs/B.mdx#`, a well-formed 12.0 split with zero id segments, never the exit-2 generalization of 11.3's `--to` spelling rule — refused-invalid-id, concerning that identity); the ordinary cross-file `<new-id>` collision (refused-id-collision, locating the remaining bearer); a missing target parent and a target parent within the moved subtree (refused-missing-target-parent, concerning the target-parent identity); destination paths in no configured spec group, in a code group as well, or lacking `.mdx`, and the derived-path arm — emission enabled under `markdown.outDir`, the otherwise-valid destination's emit-destination directory component `mdout/new` occupied by a plain file lying under no current source's write path, refused never 14.22 (refused-invalid-destination, concerning the destination path); the symbolic-link arms of the same clause — a file-form move to `specs/sub/b.mdx` and a section-form move creating the target file `specs/sub/new.mdx`, `specs/sub` a symbolic link to a real, empty directory, staged with the link targeting a directory inside the workspace root and, on its own workspace, one outside it — each refused-invalid-destination concerning the destination path, never 14.22, nothing written through the link inside or outside the workspace (the link and its target directory byte-identical afterward), and the derived-path arm's sibling staging `mdout/new` as such a link instead of a plain file, refused identically — each refusal the form-exact 12.7 findings-only report holding exactly one finding per applicable reason with its exact stable code; the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6, reporting the workspace's numbered findings alone (SPEC 6.5, 7, 7.3, 5.3, 2.1, 1.4, 1.3, 13.1, 13.2, 13.4, 14.14, 14.19, 14.22, 12.0, 12.7, 14)",
+    "refusals (exit 1, nothing modified): a move creating a spec import cycle or a dependency cycle (refused-cycle, the dependency arm locating the participating `d` spelling); file form whose destination exists — occupied by a plain file, by a directory, by a symbolic link, and by a broken symbolic link with its target absent, one arm each, the directory arm discriminating a product probing for a file alone and the broken-link arm discriminating a product probing existence through link-following stat (refused-destination-exists, concerning that path); section form whose target path is occupied by anything other than a discovered spec source — a directory; a symbolic link resolving to a discovered spec source (discovery never yields a symlink); and an existing `.mdx` file outside every configured spec group, the latter refusing under refused-destination-exists and refused-invalid-destination together, one finding per applicable reason; section form with a 1.4-invalid `<new-id>` (forbidden name `then`; whitespace-bearing segment; the empty `<new-id>` of destination operand `specs/B.mdx#`, a well-formed 12.0 split with zero id segments, never the exit-2 generalization of 11.3's `--to` spelling rule; one arm per character 1.4's quote-and-escape bullet bars — the double quote, the single quote, the escape character, `&`, U+2028, and U+2029 — each between two letters in a one-segment `<new-id>` (destination operand `specs/B.mdx#a<c>b`), a well-formed argument value no spelling rule decides, so exit 1, never exit 2, the character verbatim in identities — refused-invalid-id, concerning that identity); the ordinary cross-file `<new-id>` collision (refused-id-collision, locating the remaining bearer); a missing target parent and a target parent within the moved subtree (refused-missing-target-parent, concerning the target-parent identity); destination paths in no configured spec group, in a code group as well, lacking `.mdx`, or containing a character 7.1 bars from spec-source paths — the double quote, the single quote, the backslash, U+000A, U+000D, U+2028, or U+2029 — one file-form arm and one section-form arm creating the target per character (`specs/a<c>b.mdx`, nothing at that path), and for the single quote one arm of each form placing it in a directory component instead (`specs/it's/b.mdx`, `specs/it's` absent: a validator checking the file name alone passes it), under the spec glob `specs/**/*.mdx`, which reaches every such destination, each refused concerning the destination path as spelled, never a usage error — every such spelling is a well-formed argument value (12.0) — and the derived-path arm — emission enabled under `markdown.outDir`, the otherwise-valid destination's emit-destination directory component `mdout/new` occupied by a plain file lying under no current source's write path, refused never 14.22 (refused-invalid-destination, concerning the destination path); the symbolic-link arms of the same clause — a file-form move to `specs/sub/b.mdx` and a section-form move creating the target file `specs/sub/new.mdx`, `specs/sub` a symbolic link to a real, empty directory, staged with the link targeting a directory inside the workspace root and, on its own workspace, one outside it — each refused-invalid-destination concerning the destination path, never 14.22, nothing written through the link inside or outside the workspace (the link and its target directory byte-identical afterward), and the derived-path arm's sibling staging `mdout/new` as such a link instead of a plain file, refused identically — each refusal the form-exact 12.7 findings-only report holding exactly one finding per applicable reason with its exact stable code; the `#`-containing and non-UTF-8 destination clauses admit no refusal staging (the dead-letter note): every such operand spelling is an exit-2 usage error first, staged in T6.5-5; plus the valid-workspace precondition as T6.4-6, reporting the workspace's numbered findings alone (SPEC 6.5, 7, 7.1, 7.3, 5.3, 2.1, 1.4, 1.3, 13.1, 13.2, 13.4, 14.14, 14.19, 14.22, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       MOVE_REFUSAL_CONFIG,

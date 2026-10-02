@@ -38,23 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 33 — T6.5-4: barred `<new-id>` characters and barred destination-path characters (TEST-SPEC L281; SPEC 6.5, 7.1, 1.4, 14.19; A20; they flow into T6.6-3 and T14-7)
-
-**Where.** `test/suite/registry/section-6.5.ts`: `MOVE_REFUSAL_CASES`, which T6.6-3 and T14-7 iterate.
-
-**Change.** Spellings from L281.
-- *(i) Barred `<new-id>` characters, section form.* One arm per character 1.4's quote-and-escape bullet bars: `"`, `'`, the backslash, `&`, U+2028, and U+2029. Each `<new-id>` is one segment carrying the character between two letters. Each arm:
-  - exits 1 with `refused-invalid-id`, never exit 2;
-  - reports `identities` `["<target>#<new-id>"]`.
-- *(ii) Barred destination-path characters (7.1).* For each of `"`, `'`, the backslash, U+000A, U+000D, U+2028, and U+2029, one file-form arm and one section-form arm creating the target. For `'`, also one arm of each form placing it in a directory component: `specs/it's/b.mdx`, with `specs/it's` absent. Each arm:
-  - is refused `refused-invalid-destination`, concerning the destination as spelled — never a usage error;
-  - modifies nothing (compare-around machinery);
-  - runs under the spec glob `specs/**/*.mdx`.
-
-These destinations are operands, never staged file names, so no arm needs Linux-leg gating.
-
-**Checks.** S-7 passes. T6.5-4, T6.6-3, and T14-7 against the built product.
-
 ### Task 34 — T6.5-7: the CRLF and lone-CR re-runs (TEST-SPEC L285; A21)
 
 **Where.** `test/suite/registry/section-6.5.ts`: T6.5-7.
@@ -412,7 +395,7 @@ In each staging:
 **Change.**
 - Add a `refused-exposed-derived-file` arm over T6.5-21's staging: `path` the origin's emit destination, `locations` `[]`, `identities` `[]`.
 - Assert `refused-invalid-destination`, never 14.22, for:
-  - T6.5-4's barred path characters: Task 33's cases, if not already reached through `MOVE_REFUSAL_CASES`;
+  - T6.5-4's barred path characters: Task 33's cases, if not already reached through `MOVE_REFUSAL_CASES` (done at Task 33: they sit in `MOVE_REFUSAL_CASES`, which T14-7 iterates through `assertRefusalReport`, each asserting `refused-invalid-destination` alone with its `path`);
   - T6.5-20's derived-path relations and module-linking designation, through its exported stagings.
 
 **Checks.** S-7 passes. T14-7 against the built product.

@@ -1524,15 +1524,17 @@ export const RENAME_REFUSAL_FILES: Readonly<
 // — and fails the exit, the finding, and the modifies-nothing compare
 // (workspace and journal alike: the compare spans the whole root). Each
 // character is built from its code point, so no tool layer can normalize
-// the spelling away.
-const BARRED_NEW_ID_CHARACTERS: readonly (readonly [number, string])[] = [
-  [0x22, "the double quote"],
-  [0x27, "the single quote"],
-  [0x5c, "the escape character (backslash)"],
-  [0x26, "the character-reference character `&`"],
-  [0x2028, "LINE SEPARATOR"],
-  [0x2029, "PARAGRAPH SEPARATOR"],
-];
+// the spelling away. Exported for T6.5-4's section-form twins
+// (section-6.5.ts): one list of the characters the bullet bars.
+export const BARRED_NEW_ID_CHARACTERS: readonly (readonly [number, string])[] =
+  [
+    [0x22, "the double quote"],
+    [0x27, "the single quote"],
+    [0x5c, "the escape character (backslash)"],
+    [0x26, "the character-reference character `&`"],
+    [0x2028, "LINE SEPARATOR"],
+    [0x2029, "PARAGRAPH SEPARATOR"],
+  ];
 const BARRED_CHARACTER_RENAME_CASES: readonly RenameRefusalCase[] =
   BARRED_NEW_ID_CHARACTERS.map(([codePoint, name]): RenameRefusalCase => {
     const newId = `a${String.fromCodePoint(codePoint)}b`;
