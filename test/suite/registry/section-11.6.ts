@@ -248,6 +248,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type {
   ProductBinding,
   RunOptions,
@@ -732,13 +733,20 @@ export default defineConfig({
 })
 `;
 
+// T11.6-2's later workspaces (every one but `defaults`) are created after
+// its first invocations, so their configurations below are TypeScript
+// staged-source records (helpers/staged-ts.ts; S-9's TypeScript and timing
+// clauses), all well-formed.
+
 /**
  * Emission enabled with the default next-to-source destinations (SPEC 7.3),
  * and the glob `specs/*` written extension-free so `specs/note.txt` is a
  * discovered spec-group file without the `.mdx` extension — the 14.19
  * staging beside the valid source (SPEC 7.1).
  */
-const RESOLVED_EMIT_CONFIG = `import { defineConfig } from "xspec"
+const RESOLVED_EMIT_CONFIG = stagedTs(
+  "T11.6-2 emit workspace xspec.config.ts — emission next to source, the extension-free glob specs/*",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -746,10 +754,13 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 /** Emission redirected under `markdown.outDir` (SPEC 7.3). */
-const RESOLVED_OUTDIR_CONFIG = `import { defineConfig } from "xspec"
+const RESOLVED_OUTDIR_CONFIG = stagedTs(
+  "T11.6-2 outDir workspace xspec.config.ts — emission under mdout",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -757,14 +768,17 @@ export default defineConfig({
   },
   markdown: { emit: true, outDir: "mdout" }
 })
-`;
+`,
+);
 
 /**
  * Emission disabled explicitly — `emit` false with `outDir` configured: the
  * view reports the complete definition while no path is a Markdown emit
  * destination (SPEC 7.3).
  */
-const RESOLVED_DISABLED_CONFIG = `import { defineConfig } from "xspec"
+const RESOLVED_DISABLED_CONFIG = stagedTs(
+  "T11.6-2 disabled workspace xspec.config.ts — emit false with outDir docsout",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -772,7 +786,8 @@ export default defineConfig({
   },
   markdown: { emit: false, outDir: "docsout" }
 })
-`;
+`,
+);
 
 /**
  * Configured sets (SPEC 7.4, 7.5, 12.7; the inventory arms of T7.4-1 and
@@ -782,7 +797,9 @@ export default defineConfig({
  * the spellings: tag sets in byte order with duplicates collapsed, kind sets
  * in 5.2's order.
  */
-const RESOLVED_SETS_CONFIG = `import { defineConfig } from "xspec"
+const RESOLVED_SETS_CONFIG = stagedTs(
+  "T11.6-2 sets workspace xspec.config.ts — configured sets spelled with repeats and out of order",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -809,7 +826,8 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 /**
  * The three dependency edge kinds in the order 5.2 lists them — the 12.7
@@ -1371,7 +1389,12 @@ export default defineConfig({
 })
 `;
 
-const DURABLES_NOEMIT_CONFIG = `import { defineConfig } from "xspec"
+// The lag arm's rewrite, staged by `file()` after the build: a TypeScript
+// staged-source record (helpers/staged-ts.ts; S-9's TypeScript and timing
+// clauses), well-formed.
+const DURABLES_NOEMIT_CONFIG = stagedTs(
+  "T11.6-3 xspec.config.ts — the emission-off twin (the lag arm's rewrite)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1380,7 +1403,8 @@ export default defineConfig({
   },
   markdown: { emit: false }
 })
-`;
+`,
+);
 
 /**
  * The foreign occupant's distinctive name component: chosen to appear in no
@@ -1390,14 +1414,20 @@ export default defineConfig({
  */
 const FOREIGN_TOKEN = "zzz-artefact-etranger";
 
-const SESSIONS_CONFIG = `import { defineConfig } from "xspec"
+// The sessions workspace is created after the record workspace's
+// invocations: its configuration is a TypeScript staged-source record
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), well-formed.
+const SESSIONS_CONFIG = stagedTs(
+  "T11.6-3 sessions workspace xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 /** The journal's workspace-relative path (SPEC 6.1). */
 const JOURNAL_PATH = `${GRAPH_DATA_AREA_PATH}/journal`;
@@ -2106,12 +2136,24 @@ const IMPERFECT_PREMISE_CONDITIONS: Readonly<Record<string, number>> = {
   "14.20": 1,
 };
 
-/** Not well-formed TypeScript: the invalid-configuration staging (14.14). */
-const IMPERFECT_BROKEN_CONFIG =
-  "ceci n'est pas du TypeScript ((( donc pas une configuration\n";
+// Arms B and C stage their workspaces after arm A's invocations, so both
+// configurations are TypeScript staged-source records (helpers/staged-ts.ts;
+// S-9's TypeScript and timing clauses).
+
+/**
+ * Not well-formed TypeScript: the invalid-configuration staging (14.14) —
+ * an `unparseable` record (14.20), which carries the declaration.
+ */
+const IMPERFECT_BROKEN_CONFIG = stagedTs(
+  "T11.6-4 arm B xspec.config.ts — not well-formed TypeScript (the invalid configuration)",
+  "ceci n'est pas du TypeScript ((( donc pas une configuration\n",
+  "unparseable",
+);
 
 /** Arm C's valid workspace: one source, emission on (a rich record). */
-const RECORD_EMIT_CONFIG = `import { defineConfig } from "xspec"
+const RECORD_EMIT_CONFIG = stagedTs(
+  "T11.6-4 arm C xspec.config.ts — one source, emission on (the corrupt-record workspace)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2119,7 +2161,8 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 /**
  * Run flag-less `inventory` from `cwd` and assert the 14.14 precedence
@@ -2399,8 +2442,8 @@ const T11_6_4 = defineProductTest({
         // content an answer would have carried.
         "specs/a.mdx": ANCHOR_SOURCE,
       },
-      // S-9: the broken configuration is not well-formed TypeScript (14.20).
-      ts: { unparseable: [CONFIG_FILE] },
+      // S-9: the broken configuration is not well-formed TypeScript (14.20);
+      // its record carries the `unparseable` declaration.
     });
     try {
       await expectFlaglessInventoryConfigurationError(

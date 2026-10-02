@@ -134,6 +134,7 @@ import {
 } from "../../helpers/snapshot.js";
 import type { SnapshotChange } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import {
   pathExists,
@@ -667,7 +668,13 @@ const TIE_REACHABLE_SOURCE = [
 
 // Coverage fixture: boundary group `bnd` (only `b`), target group `tgt`;
 // transitive mode; two equal-length covering paths to `zz` via `ma`/`mb`.
-const TIE_COVERAGE_CONFIG = `import { defineConfig } from "xspec"
+// T12.0-8's coverage and impact arms follow its reachable arm's
+// invocations, so their configurations and code source are TypeScript
+// staged-source records (helpers/staged-ts.ts; S-9's TypeScript and timing
+// clauses), all well-formed.
+const TIE_COVERAGE_CONFIG = stagedTs(
+  "T12.0-8 coverage arm xspec.config.ts — the spec groups bnd and tgt and the transitive profile prof",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -683,7 +690,8 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 // The coverage arm follows the reachable arm's `build`: its two sources are
 // staged-source records (helpers/staged-mdx.ts; S-9's before-any-product
 // clause), wrapped in place.
@@ -750,12 +758,21 @@ const T12_0_8_M_V2 = stagedMdx(
   tieImpactSpecSource("Changed a v2.", "Changed b v2."),
 );
 const TIE_IMPACT_APP = "src/app.ts";
-const TIE_IMPACT_APP_SOURCE = [
-  'import M from "../specs/M.xspec";',
-  "",
-  "M.n;",
-  "",
-].join("\n");
+const TIE_IMPACT_APP_SOURCE = stagedTs(
+  "T12.0-8 impact arm src/app.ts — the reference M.n",
+  ['import M from "../specs/M.xspec";', "", "M.n;", ""].join("\n"),
+);
+// The imported configurations stay plain for their owners' bodies and for
+// this module's first workspaces; the later workspaces stage records of this
+// module's own wrapping them, the same expressions moved here.
+const T12_0_8_9_SPEC_AND_CODE_CONFIG = stagedTs(
+  "T12.0-8/T12.0-9 xspec.config.ts — one spec group and one code group (section-9.ts's SPEC_AND_CODE_CONFIG)",
+  SPEC_AND_CODE_CONFIG,
+);
+const T12_0_9_10_SPECS_ONLY_CONFIG = stagedTs(
+  "T12.0-9/T12.0-10 xspec.config.ts — one spec group (section-5.6.ts's SPECS_ONLY_CONFIG)",
+  SPECS_ONLY_CONFIG,
+);
 
 const T12_0_8 = defineProductTest({
   id: "T12.0-8",
@@ -857,7 +874,7 @@ const T12_0_8 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+          "xspec.config.ts": T12_0_8_9_SPEC_AND_CODE_CONFIG,
           [TIE_IMPACT_SPEC]: T12_0_8_M_V1,
           [TIE_IMPACT_APP]: TIE_IMPACT_APP_SOURCE,
         },
@@ -962,6 +979,28 @@ const T12_0_9_U_SOURCE = stagedMdx(
 const ALPHA_SECTION_STAGED = stagedMdx(
   "T12.0-9/T12.0-10 specs/A.mdx (the minimal section alpha: T12.0-9's wrong-kind and exclusion arms; T12.0-10's precedence pair and syntax workspace)",
   ['<S id="alpha">', "Alpha text.", "</S>", ""].join("\n"),
+);
+
+// T12.0-9's later arms (and T12.0-10's invalid-configuration workspace)
+// stage these after a product invocation: TypeScript staged-source records
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), the inline
+// literals moved here. The unknown-key configuration is well-formed
+// TypeScript (14.20), an invalid configuration (SPEC 7, 14.14).
+const T12_0_9_KIND_APP_SOURCE = stagedTs(
+  "T12.0-9 wrong-kind arm src/app.ts — valid, reference-free TypeScript",
+  "export function noop(): void {}\n",
+);
+const T12_0_9_10_UNKNOWN_KEY_CONFIG = stagedTs(
+  "T12.0-9/T12.0-10 xspec.config.ts — an unknown top-level key (T12.0-9's configuration-error arm, T12.0-10's invalid-configuration workspace)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  bogus: true
+})
+`,
 );
 
 const T12_0_9 = defineProductTest({
@@ -1354,7 +1393,7 @@ const T12_0_9 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          "xspec.config.ts": T12_0_9_10_SPECS_ONLY_CONFIG,
           "specs/A.mdx": STREAMS_VALID_SOURCE,
         },
       },
@@ -1409,7 +1448,7 @@ const T12_0_9 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          "xspec.config.ts": T12_0_9_10_SPECS_ONLY_CONFIG,
           "specs/A.mdx": STREAMS_INVALID_SOURCE,
           // A parseable section spelling no identity: its 14.1 finding and
           // its explicitly-unavailable identity ride the answers below.
@@ -1459,11 +1498,11 @@ const T12_0_9 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": SPEC_AND_CODE_CONFIG,
+          "xspec.config.ts": T12_0_8_9_SPEC_AND_CODE_CONFIG,
           "specs/A.mdx": ALPHA_SECTION_STAGED,
           // Valid, reference-free TypeScript: discovered through the code
           // group's glob, bearing no requirement nodes (SPEC 7.2).
-          "src/app.ts": "export function noop(): void {}\n",
+          "src/app.ts": T12_0_9_KIND_APP_SOURCE,
         },
       },
       async (kindWorkspace) => {
@@ -1498,15 +1537,7 @@ const T12_0_9 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/**/*.mdx"]
-  },
-  bogus: true
-})
-`,
+          "xspec.config.ts": T12_0_9_10_UNKNOWN_KEY_CONFIG,
           "specs/A.mdx": STREAMS_VALID_SOURCE,
         },
       },
@@ -1527,7 +1558,7 @@ export default defineConfig({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          "xspec.config.ts": T12_0_9_10_SPECS_ONLY_CONFIG,
           "specs/A.mdx": ALPHA_SECTION_STAGED,
         },
       },
@@ -2049,7 +2080,7 @@ const T12_0_10 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": SPECS_ONLY_CONFIG,
+          "xspec.config.ts": T12_0_9_10_SPECS_ONLY_CONFIG,
           "specs/A.mdx": STREAMS_VALID_SOURCE,
         },
       },
@@ -2136,15 +2167,7 @@ const T12_0_10 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/**/*.mdx"]
-  },
-  bogus: true
-})
-`,
+          "xspec.config.ts": T12_0_9_10_UNKNOWN_KEY_CONFIG,
           // What the missing-flag and missing-argument rows would consult
           // next, staged so a product judging it before the syntax check is
           // observed: a session already named `n` — SPEC 10.7 refuses

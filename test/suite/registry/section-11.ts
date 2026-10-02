@@ -98,6 +98,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -738,11 +739,17 @@ function expectedRows(
 
 // T11-2's file set; the configuration stands apart, since the `--tag`
 // sweep's configuration-state twins stage these same files under an invalid
-// and under no configuration.
+// and under no configuration. The twins are created after the `build`, so
+// every file of the set is a staged-source record: the `.mdx` sources MDX
+// records, `src/app.ts` a TypeScript record (helpers/staged-ts.ts; S-9's
+// TypeScript and timing clauses).
 const T11_2_FILES: Readonly<Record<string, InitialFileContents>> = {
   "specs/alpha/A.mdx": T11_2_A_STAGED,
   "specs/beta/B.mdx": T11_2_B_STAGED,
-  "src/app.ts": "export {};\n",
+  "src/app.ts": stagedTs(
+    "T11-2 src/app.ts — an empty module (the workspace's and its configuration-state twins')",
+    "export {};\n",
+  ),
 };
 
 // `--tag` acceptance is syntactic (SPEC 11.1, 1.4, 12.0): the spellings no
@@ -1197,18 +1204,24 @@ const T11_4_SOURCE = stagedMdx(
   "T11-4 specs/E.mdx",
   `${T11_4_HUB}\n\n${T11_4_LEAF}\n`,
 );
-const T11_4_APP = [
-  'import SPEC, { text } from "../specs/E.xspec";',
-  "",
-  "export function embedder(): string {",
-  "  return text(SPEC.leaf);",
-  "}",
-  "",
-  "export function referrer(): void {",
-  "  SPEC.hub;",
-  "}",
-  "",
-].join("\n");
+// T11-4's code source: its configuration-state twins stage it after the
+// `build`, so it is a TypeScript staged-source record (helpers/staged-ts.ts;
+// S-9's TypeScript and timing clauses), staged in all three workspaces.
+const T11_4_APP = stagedTs(
+  "T11-4 src/app.ts — the embedder and referrer units (the workspace's and its configuration-state twins')",
+  [
+    'import SPEC, { text } from "../specs/E.xspec";',
+    "",
+    "export function embedder(): string {",
+    "  return text(SPEC.leaf);",
+    "}",
+    "",
+    "export function referrer(): void {",
+    "  SPEC.hub;",
+    "}",
+    "",
+  ].join("\n"),
+);
 
 const T11_4_FILE = "specs/E.mdx";
 const T11_4_HUB_ID = "specs/E.mdx#hub";

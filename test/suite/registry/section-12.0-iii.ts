@@ -69,6 +69,7 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type {
@@ -127,8 +128,19 @@ const T12_0_14_CFG_B_SOURCE = stagedMdx(
   "T12.0-14 cfg/specs/B.mdx (the --config-first arm's source)",
   '<S id="b">\nBeta text.\n</S>\n',
 );
+/**
+ * The `--config`-first arm's configuration, staged in the same second
+ * workspace: a TypeScript staged-source record (helpers/staged-ts.ts; S-9's
+ * TypeScript and timing clauses) wrapping section-5.6.ts's SPECS_ONLY_CONFIG,
+ * the same expression moved here (the grammar workspace, the body's first,
+ * stages the constant plain).
+ */
+const T12_0_14_CFG_CONFIG = stagedTs(
+  "T12.0-14 cfg/xspec.config.ts — one spec group, the --config-first arm's configuration (section-5.6.ts's SPECS_ONLY_CONFIG)",
+  SPECS_ONLY_CONFIG,
+);
 const GRAMMAR_CONFIG_FILES: Readonly<Record<string, InitialFileContents>> = {
-  [GRAMMAR_CONFIG_PATH]: SPECS_ONLY_CONFIG,
+  [GRAMMAR_CONFIG_PATH]: T12_0_14_CFG_CONFIG,
   [`${GRAMMAR_CONFIG_DIR}/specs/B.mdx`]: T12_0_14_CFG_B_SOURCE,
 };
 /** The session `--name -a` creates and the note `--note -x` stores. */

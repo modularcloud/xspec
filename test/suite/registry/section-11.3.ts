@@ -125,6 +125,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { OccurrenceUnit } from "./section-5.7.js";
 import {
@@ -308,6 +309,38 @@ function assertClaimedOrder(
   }
 }
 
+// T11.3-1's later workspaces — every one but the first is created after the
+// body's first product invocation — stage their code sources and
+// configurations as TypeScript staged-source records (helpers/staged-ts.ts;
+// S-9's TypeScript and timing clauses), all well-formed. The constants the
+// owning modules export stay plain there (their own bodies stage them
+// before any invocation), so each is wrapped here, the same expression
+// moved: section-5.7.ts's three fixtures' `src/app.ts`, and section-11.2.ts's
+// code-group configuration and invalid-path code source. section-5.7.ts's
+// SPEC_AND_CODE_CONFIG and section-11.2.ts's SPECS_ONLY_CONFIG are records
+// themselves, staged as imported (T11.3-2's and T11.3-3's later workspaces
+// stage the latter too).
+const T11_3_1_SPAN_APP_SOURCE = stagedTs(
+  "T11.3-1 T5.7-2 fixture src/app.ts (section-5.7.ts's SPAN_APP_SOURCE)",
+  SPAN_APP_SOURCE,
+);
+const T11_3_1_ORD_APP_SOURCE = stagedTs(
+  "T11.3-1 T5.7-3 fixture src/app.ts (section-5.7.ts's ORD_APP_SOURCE)",
+  ORD_APP_SOURCE,
+);
+const T11_3_1_NO_OCC_APP_SOURCE = stagedTs(
+  "T11.3-1 T5.7-4 fixture src/app.ts (section-5.7.ts's NO_OCC_APP_SOURCE)",
+  NO_OCC_APP_SOURCE,
+);
+const T11_3_1_CS_CONFIG = stagedTs(
+  "T11.3-1 invalid-path code-source workspace xspec.config.ts — one spec group and one code group (section-11.2.ts's SPEC_AND_CODE_CONFIG)",
+  AVAILABILITY_SPEC_AND_CODE_CONFIG,
+);
+const T11_3_1_CS_SOURCE = stagedTs(
+  "T11.3-1 invalid-path code-source workspace src/co#de.ts (section-11.2.ts's CS_SOURCE)",
+  CS_SOURCE,
+);
+
 const T11_3_1 = defineProductTest({
   id: "T11.3-1",
   title:
@@ -435,7 +468,7 @@ const T11_3_1 = defineProductTest({
           "xspec.config.ts": SPEC_AND_CODE_CONFIG,
           "specs/BASE.mdx": SPAN_BASE_STAGED,
           "specs/MAIN.mdx": SPAN_MAIN_STAGED,
-          "src/app.ts": SPAN_APP_SOURCE,
+          "src/app.ts": T11_3_1_SPAN_APP_SOURCE,
         },
       });
       try {
@@ -503,7 +536,7 @@ const T11_3_1 = defineProductTest({
           "xspec.config.ts": SPEC_AND_CODE_CONFIG,
           [ORD_ZED_FILE]: ORD_ZED_STAGED,
           [ORD_ALPHA_FILE]: ORD_ALPHA_STAGED,
-          [ORD_APP_FILE]: ORD_APP_SOURCE,
+          [ORD_APP_FILE]: T11_3_1_ORD_APP_SOURCE,
         },
       });
       try {
@@ -574,7 +607,7 @@ const T11_3_1 = defineProductTest({
           [BASE_FILE]: NO_OCC_BASE_STAGED,
           [NO_OCC_SPARE_FILE]: NO_OCC_SPARE_STAGED,
           [MAIN_FILE]: NO_OCC_MAIN_STAGED,
-          [APP_FILE]: NO_OCC_APP_SOURCE,
+          [APP_FILE]: T11_3_1_NO_OCC_APP_SOURCE,
         },
       });
       try {
@@ -630,9 +663,9 @@ const T11_3_1 = defineProductTest({
       const context = "T11.3-1 over T11.2-3's invalid-path code source";
       const workspace = await TestWorkspace.create({
         files: {
-          "xspec.config.ts": AVAILABILITY_SPEC_AND_CODE_CONFIG,
+          "xspec.config.ts": T11_3_1_CS_CONFIG,
           [OK_FILE]: OK_STAGED,
-          [CS_FILE]: CS_SOURCE,
+          [CS_FILE]: T11_3_1_CS_SOURCE,
         },
       });
       try {

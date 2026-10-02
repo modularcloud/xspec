@@ -97,6 +97,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import type { ArgvValue, ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -116,14 +117,23 @@ import {
 // Exported (with the T11.2-3 code-source and T11.2-4 resolution-matrix
 // staging constants below): T11.3-1 asserts the same stagings' enumerations
 // through `occurrences` (registry/section-11.3.ts imports, never copies).
-export const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// A TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses), staged wherever it is used and named for every body
+// staging it after a product invocation: T11.2-4's later stagings and
+// T11.2-5's second workspace here, T11.3-1's, T11.3-2's, and T11.3-3's later
+// workspaces, T11.4-3's shared workspace and T11.4-5's and T11.4-6's later
+// ones, and P-12's later trials (registry/section-16-p12.ts).
+export const SPECS_ONLY_CONFIG = stagedTs(
+  "T11.2-4/T11.2-5/T11.3-1/T11.3-2/T11.3-3/T11.4-3/T11.4-5/T11.4-6/P-12 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 const A_FILE = "specs/A.mdx";
 const B_FILE = "specs/B.mdx";
@@ -4193,12 +4203,19 @@ const T11_2_5 = defineProductTest({
 // view answers write nothing — the garbage journal not repaired or
 // deleted, no graph data or derived files touched — and the failing
 // build/check modify nothing (SPEC 12.1, 12.2, 14.22).
+//
+// Fixtures 2 and 3 are created after fixture 1's invocations, so their
+// configurations are TypeScript staged-source records (helpers/staged-ts.ts;
+// S-9's TypeScript and timing clauses), both well-formed; fixture 1's is
+// SPECS_ONLY_CONFIG, a record itself.
 
 const JOURNAL_PATH = ".xspec/journal";
 const T11_2_6_GARBAGE_LINE =
   "?? harness-injected garbage: not a journal entry ??\n";
 
-const T11_2_6_OUTDIR_CONFIG = `import { defineConfig } from "xspec"
+const T11_2_6_OUTDIR_CONFIG = stagedTs(
+  "T11.2-6 obstructed-write-path fixture xspec.config.ts — Markdown emission under mdout",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -4206,14 +4223,17 @@ export default defineConfig({
   },
   markdown: { emit: true, outDir: "mdout" }
 })
-`;
+`,
+);
 const T11_2_6_OUTDIR = "mdout";
 const T11_2_6_EMITTED = "mdout/specs/C.md";
 
 // Fixture 3: the emit directory is the discovered spec source itself — a
 // well-formed outDir spelling (SPEC 7.3: non-empty segments, none `.` or
 // `..`), its occupant judged only where the write is made (13.4, 14.22).
-const T11_2_6_SOURCE_OUTDIR_CONFIG = `import { defineConfig } from "xspec"
+const T11_2_6_SOURCE_OUTDIR_CONFIG = stagedTs(
+  "T11.2-6 discovered-component fixture xspec.config.ts — markdown.outDir naming the discovered spec source",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -4221,7 +4241,8 @@ export default defineConfig({
   },
   markdown: { emit: true, outDir: "${A_FILE}" }
 })
-`;
+`,
+);
 
 /**
  * The T11.2-6 never-attach arm: `view` naming the finding-free file

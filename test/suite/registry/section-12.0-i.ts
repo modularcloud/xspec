@@ -107,6 +107,7 @@ import {
 } from "../../helpers/subprocess.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import {
@@ -125,15 +126,21 @@ import {
   stageConfigurationStateTwins,
 } from "./support.js";
 
-// Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// Minimal declarative configuration (SPEC 7): exactly one spec group. A
+// TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses), staged wherever it is used: T12.0-2's, T12.0-3's,
+// and T12.0-6's later workspaces stage it after a product invocation.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T12.0-2/T12.0-3/T12.0-6 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
@@ -567,8 +574,13 @@ export const STREAMS_VALID_SOURCE = stagedMdx(
   "T12.0-2/T12.0-3/T12.0-9/T12.0-10/T12.0-14/T13.4-8 specs/A.mdx (the minimal section a: T12.0-2's usage-error and configuration-error arms, T12.0-3's relative-resolution workspace, T12.0-9's corrupt-session and configuration-error arms, T12.0-10's past-the-gate workspace, T12.0-14's grammar workspace; T13.4-8's relocated file, its file-form move and emission arms)",
   ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
 );
-// An unknown top-level key is a configuration error (SPEC 7, 14.14).
-const STREAMS_BAD_CONFIG = `import { defineConfig } from "xspec"
+// An unknown top-level key is a configuration error (SPEC 7, 14.14). T12.0-2
+// stages it after its first workspace's invocations: a TypeScript
+// staged-source record, well-formed TypeScript (14.20) though an invalid
+// configuration.
+const STREAMS_BAD_CONFIG = stagedTs(
+  "T12.0-2 configuration-error workspace xspec.config.ts — an unknown top-level key",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -576,7 +588,8 @@ export default defineConfig({
   },
   bogus: true
 })
-`;
+`,
+);
 
 const T12_0_2 = defineProductTest({
   id: "T12.0-2",
@@ -772,15 +785,20 @@ const T12_0_2 = defineProductTest({
 
 // A second, self-contained configuration whose directory (alt/) is its own
 // workspace root (SPEC 7: configured globs resolve relative to the
-// configuration file's directory).
-const ALT_CONFIG = `import { defineConfig } from "xspec"
+// configuration file's directory). T12.0-3's relative-resolution workspace
+// follows its sweep story, so this is a TypeScript staged-source record, as
+// SPECS_ONLY_CONFIG beside it is.
+const ALT_CONFIG = stagedTs(
+  "T12.0-3 alt/xspec.config.ts — the alternate root's configuration (the spec group alt)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     alt: ["aspecs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 // T12.0-3's relative-resolution workspace follows its sweep story: the
 // alternate root's source is a staged-source record.
 const ALT_SOURCE = stagedMdx(
