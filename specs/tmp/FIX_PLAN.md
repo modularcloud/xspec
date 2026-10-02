@@ -38,26 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part A — Certification
 
-### Task 10 — CONF-DISC conformer: `check`, 7.1's path-character bar, code-source well-formedness, verbatim configuration literals (CERTIFICATIONS.md §CONF-DISC, §VIOL-DISC-DERIVED; D2)
-
-**Where.** `test/fixtures/conf-disc/product.mjs` and the header of `bin-derived.mjs`; AGENTS.md's fixture bullet if the fixture gains a dependency.
-
-**Change.** Bring the conformer to §CONF-DISC's current scope and command surface.
-- *`check` (12.2).* Run `build`'s validations and write nothing; exit 1 with exactly those findings in 14's and 12.7's form, or exit 0 when clean. Today `check --json` exits 2 ("unknown command check").
-- *7.1's path-character bar (14.19), for spec-group matches.* The bar applies to a workspace-relative path holding `"`, `'`, the backslash, U+000A, U+000D, U+2028, or U+2029 anywhere, directory components included. Today only `#` and a missing `.mdx` are reported, and `specs/a'b.mdx` builds with exit 0. The invalid source's emit destination stays classified derived and excluded: derived paths follow the `NAME.mdx` name shape alone (13.4, 13.1, 7.3); the fixture's `provisional` set already does this.
-- *Code-source well-formedness (14.20).* Parse every discovered code source as TypeScript: release 5.9.3 at ESNext, TSX or plain as the file name selects, well-formed only when accepted both as module code and as script code. An ill-formed source gets a 14.20 finding, and the gate of 13.3 then turns `query edges` back with exit 1. Today code sources are never read.
-  - Conservative choice: load the harness's own `typescript-5.9.3` lazily, only when a code source is discovered, to keep certification fast. Never load `typescript`. If the fixture takes the dependency, amend AGENTS.md's bullet saying fixtures have no dependencies.
-  - The fixture stays plain ESM. Task 14's judge, if it already exists, shows the reading-forcing approach.
-- *Configuration literals read verbatim (2.4).* `parseString` interprets backslash escapes today. A glob spelled `src/a`, backslash, `*.ts` must reach the matcher with its backslash, and `inventory` must report it as spelled.
-- *`bin-derived.mjs`'s header.* Restate the current deviation: code-side derived matches are parsed as plain TypeScript, with a 14.20 finding where they don't parse. DERIVED inherits everything else.
-
-**Checks.**
-- `-t DISC`: the conformer passes T7-4, T7-5, and T7-6. DIALECT fails exactly T7-4, on its `[1]` and `{a,c}` arms. SYMLINK fails exactly T7-5. DERIVED fails exactly T7-6, on its exclusion arms.
-- Hand probes in scratch workspaces:
-  - T7-6's invalid-source staging (TEST-SPEC L325, Task 12): `check --json` exits 1 with the one 14.19 finding for `specs/a'b.mdx`;
-  - its emission-disabled control: 14.19 plus 14.20 for `specs/a'b.md`;
-  - the literal-backslash glob of Task 11: `inventory` reports it verbatim and discovers the backslash-named file alone.
-
 ### Task 11 — T7-4: the literal-backslash arm (TEST-SPEC L323; SPEC 7, 2.4; CERTIFICATIONS.md §CONF-DISC, §VIOL-DISC-DIALECT; B2; D2)
 
 **Depends on.** Task 10.

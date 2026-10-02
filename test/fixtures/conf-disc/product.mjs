@@ -12,13 +12,16 @@
 //   the empty `specs` and `code` maps, are valid with zero sources); imports
 //   of 2.1's single-default-binding form, resolving against the importing
 //   file's directory to a discovered source, an undiscovered target failing
-//   with 14.15; `markdown` with `emit: true` and default destinations,
+//   with 14.15; `markdown` with `emit: true` and default destinations, and
+//   emission disabled (`markdown` absent or `emit: false`), destinations
 //   classified by configuration alone (7.3); symbolic links present in the
 //   tree; code groups (7.2) of well-formed `.ts` sources spelling no marker,
 //   spec-module import, or `text` call — each discovered code source an
 //   edgeless whole-file code location (4.6), nothing in scope giving a code
-//   file an edge — under the same glob grammar; no `coverage`, `policy`, or
-//   git; content of derived and emitted files beyond path is out of scope.
+//   file an edge — under the same glob grammar; as T7-6's invalid-source arm
+//   stages them, a spec source at a path 7.1 bars and a code-group file that
+//   is no well-formed TypeScript; no `coverage`, `policy`, or git; content of
+//   derived and emitted files beyond path is out of scope.
 // - Command surface: `build` and `ids` (12.3) as the observation of the
 //   discovered spec set, and `inventory` (11.6) in its full 12.7 document
 //   form — T7-4's observation that a glob matching nothing is configured as
@@ -26,20 +29,27 @@
 //   observation of the discovered code set — a discovered code source's
 //   whole-file location answers exit 0 with its empty edge enumeration, and
 //   a path in no configured group (an excluded derived path included) is the
-//   usage error of 12.0, a check preceding the gate of 13.3; the
+//   usage error of 12.0, a check preceding the gate of 13.3; `check` (12.2)
+//   over T7-6's validation-failing invalid-source workspaces alone; the
 //   configuration-error behavior of 14.14/12.0 for patterns resolving
-//   outside the workspace root, and the source-error reporting of 14.15 and
-//   14.19.
+//   outside the workspace root, and the source-error reporting of 14.15,
+//   14.19 (`#` and U+FFFD on either side; 7.1's path-character bar and a
+//   missing `.mdx` on the spec side), and 14.20 (spec sources by the MDX-lite
+//   lexer below, code sources by TypeScript 5.9.3, encoding on both sides).
 // - Contracts under certification: glob semantics of 7 — `*`, `?`, `**`
 //   (any segments only as a whole pattern segment; each `*` of an in-segment
 //   `**` the single-segment wildcard), byte-wise case-sensitive matching,
-//   the dot-segment rule, every other character a literal, and the
+//   the dot-segment rule, every other character a literal (the backslash
+//   included, the configuration literal read verbatim, 2.4), and the
 //   outside-root decision by spelling alone (a leading `/` or a depth
 //   falling below zero a configuration error, 14.14; a `.`, `..`, or empty
 //   segment inside the root matching nothing; a drive-qualified spelling
 //   ordinary segments) — discovery's refusal to follow symbolic links, and
 //   the source exclusion of 13.4 (`.xspec.` names, `.xspec/` paths, and
-//   enabled Markdown emit destinations in no spec or code group).
+//   enabled Markdown emit destinations in no spec or code group — an
+//   invalid source's destination included, derived paths following the
+//   `NAME.mdx` name shape alone, 13.1, 7.3), with 7.1's path-character bar
+//   (14.19) as T7-6's invalid-source arm stages it.
 //
 // Key mechanisms:
 // - The glob matcher is a port of the harness oracle's discovery half
@@ -78,15 +88,38 @@
 //   destinations (`X.md` beside each discovered `X.mdx` spec source;
 //   destinations exist by configuration alone, whether or not emission has
 //   run, 7.3) — so the module `build` generates beside a source is excluded
-//   from a code glob exactly as from a spec glob. A surviving spec match
-//   without the `.mdx` extension, or a surviving match of either kind whose
-//   path contains `#`, is a 14.19 finding; exclusion precedes that check, so
-//   an excluded occupant of an emit destination is silently no source. A
-//   surviving code match is a discovered code source as it stands: nothing
-//   in scope gives a code file an edge, so it is never read — its whole-file
-//   location is the only graph node it contributes (4.6). The both-groups
+//   from a code glob exactly as from a spec glob. Derived paths follow the
+//   `NAME.mdx` name shape alone (13.1, 7.3), so a spec match 14.19 reports
+//   — `specs/a'b.mdx` above all — still has its emit destination, which
+//   stays excluded. A surviving match of either kind whose path contains
+//   `#` or U+FFFD (an ill-formed UTF-8 name reads as U+FFFD), and a
+//   surviving spec match without the `.mdx` extension or holding a
+//   character 7.1 bars anywhere in its path (the quotes, the backslash,
+//   U+000A, U+000D, U+2028, U+2029), is one 14.19 finding and no source to
+//   parse; exclusion precedes that check, so an excluded occupant of an emit
+//   destination is silently no source. A surviving code match is a
+//   discovered code source: nothing in scope gives a code file an edge, so
+//   its whole-file location is the only graph node it contributes (4.6), and
+//   it is read only to judge its well-formedness (below). The both-groups
 //   rule of 14.14 stays dormant (the staged code globs match no spec-group
 //   file); no check for it is implemented here.
+// - Code sources are judged by the harness's own TypeScript 5.9.3
+//   (`typescript-5.9.3`, never the product's `typescript`), loaded lazily
+//   through `createRequire` by the first invocation that discovers a code
+//   source: valid UTF-8 with no byte-order mark (1.6), then parsed at ESNext,
+//   TSX for a `.tsx` name and plain TypeScript for any other, read both as a
+//   module's code and as a script's (the reading forced through
+//   `setExternalModuleIndicator`); well-formed only when neither reading
+//   reports a syntax error — the release's scanning and parsing alone
+//   (14.20). An ill-formed one is a 14.20 finding: one zero-length range at
+//   the earliest syntax diagnostic's byte offset, or, for an encoding
+//   failure, at the first ill-formed byte (0 for a byte-order mark). It
+//   fails `build`'s validations, so `check` reports it and the gate of 13.3
+//   turns `ids` and `query edges` back with it (exit 1).
+// - Configuration literals are read verbatim (2.4, 7): a string literal's
+//   value is the characters between its quotes exactly as spelled, no
+//   escape sequence interpreted, so a glob spelled with a backslash reaches
+//   the matcher with it and `inventory` reports it as spelled.
 // - Sources are scanned by a hand-rolled MDX-lite lexer for exactly the
 //   scope's constructs: spec module imports at line start (2.1) and
 //   `<S>`/`<Spec>` opening/self-closing/closing tags with quoted or braced
@@ -107,6 +140,12 @@
 //   `ids` recomputes from sources on every run (13.3's refresh, minus the
 //   unobservable-in-scope stored form), reporting validation findings with
 //   exit 1 without writing anything when the sources are invalid.
+// - `check` (12.2, scoped): `build`'s validations, writing nothing — over
+//   T7-6's invalid-source workspaces, staged from scratch with no `build`
+//   succeeding, so no record exists (13.3) and the findings are exactly
+//   `build`'s, exit 1. A workspace passing the validations would need
+//   14.10's derived-file and graph-data verification, which this conformer
+//   does not keep: refused loudly (exit 70), never a false clean answer.
 // - `ids` (12.3): requirement IDs grouped by file — files in byte order of
 //   workspace-relative path (UTF-8 byte comparison, not code-unit order), IDs
 //   within a file in document order; `--json` emits the single JSON document
@@ -160,11 +199,18 @@
 //     `.xspec/` (where a pattern spells the dot segment), and occupants of
 //     enabled emit destinations are treated as ordinary matches — on the
 //     spec side a non-`.mdx` occupant then surfaces as 14.19; on the code
-//     side each such path enters the discovered code set as an edgeless
-//     whole-file location, so `query edges --from` answers it exit 0.
+//     side each such path enters the discovered code set and is parsed as
+//     every discovered code source is (plain TypeScript for every non-`.tsx`
+//     name, a 14.20 finding where it does not parse), so `query edges
+//     --from` answers it exit 0 where every discovered file parses and exit
+//     1 at the gate of 13.3 where one does not or a spec-side 14.19 shares
+//     the workspace — never the conformer's exit 2; and in T7-6's
+//     invalid-source arm the emit destination `specs/a'b.md` enters the code
+//     set, `check` reporting its 14.20 beside the 14.19.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
+import { createRequire } from "node:module";
 import * as path from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -460,29 +506,36 @@ class LiteralParser {
     }
   }
 
+  /**
+   * A static string literal (SPEC 2.4, 7): its value is the characters
+   * between its delimiters exactly as spelled — no escape sequence is
+   * interpreted, so a glob spelled `src/a`, backslash, `*.ts` reaches the
+   * matcher with its backslash, and a key so spelled names a group whose
+   * spelling holds one. The lexical extent is TypeScript's: a backslash
+   * still keeps the character after it (a quote or a line terminator, the
+   * CR LF pair as one) from ending the literal, both kept in the value as
+   * spelled, and an unescaped line feed or carriage return before the
+   * closing quote leaves the literal unterminated — not well-formed
+   * TypeScript, so a configuration error (14.20, 14.14).
+   */
   parseString() {
     const quote = this.text[this.pos];
-    this.pos += 1;
-    let out = "";
-    while (this.pos < this.text.length) {
-      const c = this.text[this.pos];
+    const start = this.pos + 1;
+    let i = start;
+    while (i < this.text.length) {
+      const c = this.text[i];
       if (c === quote) {
-        this.pos += 1;
-        return out;
+        this.pos = i + 1;
+        return this.text.slice(start, i);
       }
+      if (c === "\n" || c === "\r") break;
       if (c === "\\") {
-        const next = this.text[this.pos + 1];
-        if (next === undefined) break;
-        if (next === "n") out += "\n";
-        else if (next === "t") out += "\t";
-        else if (next === "r") out += "\r";
-        else out += next;
-        this.pos += 2;
+        i += this.text.startsWith("\r\n", i + 1) ? 3 : 2;
         continue;
       }
-      out += c;
-      this.pos += 1;
+      i += 1;
     }
+    this.pos = i;
     return this.fail("unterminated string literal");
   }
 }
@@ -1098,6 +1151,37 @@ function compareUtf8(a, b) {
   return Buffer.compare(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 }
 
+/**
+ * The characters 7.1 bars from a spec-group file's workspace-relative path,
+ * anywhere in it, directory components included (14.19): the double and
+ * single quote, the backslash, line feed, carriage return, and the line and
+ * paragraph separators — built from code points, never escape-spelled.
+ */
+const SPEC_PATH_BARRED = new Set(
+  [0x22, 0x27, 0x5c, 0x0a, 0x0d, 0x2028, 0x2029].map((cp) =>
+    String.fromCodePoint(cp),
+  ),
+);
+
+/** U+FFFD, built from its code point (SPEC 7, 14.19). */
+const REPLACEMENT_CHARACTER = String.fromCodePoint(0xfffd);
+
+/**
+ * The 14.19 reasons binding a discovered source of either kind (SPEC 7): a
+ * `#` or U+FFFD in its workspace-relative path, or a path that is not valid
+ * UTF-8 — the walk reads entry names as strings, so an ill-formed byte
+ * sequence surfaces as U+FFFD and the one check covers both.
+ * @param {string} rel @returns {string[]}
+ */
+function pathReasons(rel) {
+  const reasons = [];
+  if (rel.includes("#")) reasons.push('contains "#"');
+  if (rel.includes(REPLACEMENT_CHARACTER)) {
+    reasons.push("contains U+FFFD or is not valid UTF-8");
+  }
+  return reasons;
+}
+
 /** SPEC 13.4: `.xspec.`-bearing file names and files under `.xspec/`. */
 function isXspecClassified(rel) {
   const base = rel.split("/").at(-1) ?? rel;
@@ -1110,20 +1194,24 @@ function isXspecClassified(rel) {
  * Discover the workspace's sources (SPEC 7, 13.4): walk plain files, match
  * the spec groups' globs and the code groups' globs, apply the 13.4 source
  * exclusion to the matches of either kind, and validate surviving matches'
- * paths (14.19). Returns the byte-ordered spec sources and code sources plus
- * any 14.19 findings. A code source is discovered by path alone: nothing in
- * scope gives a code file an edge, so it is never read — its whole-file
- * location is its only graph node (4.6).
+ * paths (14.19: `#` and U+FFFD on either side; on the spec side also the
+ * characters 7.1 bars, anywhere in the path, and a missing `.mdx`). Returns
+ * the byte-ordered spec sources and code sources plus any 14.19 findings; an
+ * invalid path is no source to parse. Nothing in scope gives a code file an
+ * edge, so a code source's whole-file location is its only graph node (4.6);
+ * {@link loadWorkspace} still parses it (14.20).
  *
  * §VIOL-DISC-DERIVED hook (CERT-17, bin-derived.mjs): the exclusion filter
  * below — the one filter both group kinds pass through — is the deviation's
  * single consumption point: under `noDerivedExclusion` the 13.4 exclusion is
  * skipped and every glob match of either kind is an ordinary match, so an
  * excluded-under-the-conformer path enters the discovered spec set (or,
- * lacking `.mdx`, surfaces as 14.19) or the discovered code set (an edgeless
- * whole-file location, answered by `query edges --from`); glob semantics,
- * the dot-segment rule, link behavior, and the import and empty-map rules
- * are unchanged.
+ * lacking `.mdx`, surfaces as 14.19) or the discovered code set (parsed as
+ * every code source is — 14.20 where it does not parse — and otherwise an
+ * edgeless whole-file location answered by `query edges --from`); glob
+ * semantics, the dot-segment rule, link behavior, 14.19 for non-`.mdx`
+ * matches, the parse of a discovered source, and the import and empty-map
+ * rules are unchanged.
  */
 async function discoverSources(config) {
   const walked = await walkPlainFiles(config.root);
@@ -1159,9 +1247,11 @@ async function discoverSources(config) {
       : matched.filter((rel) => !excluded(rel));
   /** @type {Finding[]} */
   const findings = [];
-  const hashFinding = (rel) => ({
+  // One 14.19 finding per invalid discovered path, naming every reason it
+  // carries; an invalid path is no source to parse.
+  const invalidPath = (rel, reasons) => ({
     condition: "14.19",
-    message: `invalid source path: the discovered path ${JSON.stringify(rel)} contains "#" (SPEC 7, 1.5, 14.19)`,
+    message: `invalid source path: the discovered path ${JSON.stringify(rel)} ${reasons.join("; ")} (SPEC 7, 7.1, 14.19)`,
     file: rel,
   });
   const keptSpec = kept(specMatched);
@@ -1169,16 +1259,22 @@ async function discoverSources(config) {
   /** @type {string[]} */
   const sources = [];
   for (const rel of keptSpec) {
-    if (rel.includes("#")) {
-      findings.push(hashFinding(rel));
-      continue;
+    const reasons = pathReasons(rel);
+    const barred = [...rel].filter((c) => SPEC_PATH_BARRED.has(c));
+    if (barred.length > 0) {
+      const named = [...new Set(barred)].map(
+        (c) =>
+          `U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")}`,
+      );
+      reasons.push(
+        `holds ${named.join(", ")}, which 7.1 bars from a spec-group path`,
+      );
     }
     if (!rel.endsWith(".mdx")) {
-      findings.push({
-        condition: "14.19",
-        message: `invalid source path: the spec-group match ${JSON.stringify(rel)} does not have the .mdx extension (SPEC 7.1, 14.19)`,
-        file: rel,
-      });
+      reasons.push("is a spec-group match without the .mdx extension");
+    }
+    if (reasons.length > 0) {
+      findings.push(invalidPath(rel, reasons));
       continue;
     }
     sources.push(rel);
@@ -1186,8 +1282,9 @@ async function discoverSources(config) {
   /** @type {string[]} */
   const codeSources = [];
   for (const rel of keptCode) {
-    if (rel.includes("#")) {
-      findings.push(hashFinding(rel));
+    const reasons = pathReasons(rel);
+    if (reasons.length > 0) {
+      findings.push(invalidPath(rel, reasons));
       continue;
     }
     codeSources.push(rel);
@@ -1384,6 +1481,72 @@ function parseMdx(text) {
   return result();
 }
 
+/**
+ * The byte length of the longest prefix of `bytes` that is well-formed
+ * UTF-8 (Unicode's table of well-formed byte sequences: no overlong form, no
+ * surrogate, nothing above U+10FFFF) — the offset of the first byte of the
+ * first ill-formed sequence, malformed or truncated by the end, or the
+ * whole length when every sequence is well-formed (SPEC 14.20's offset for
+ * an encoding failure: `41 E2 82 41` locates 1, `C0 80` and `ED A0 80` 0).
+ * @param {Uint8Array} bytes @returns {number}
+ */
+function wellFormedUtf8PrefixLength(bytes) {
+  let i = 0;
+  while (i < bytes.length) {
+    const lead = bytes[i];
+    if (lead < 0x80) {
+      i += 1;
+      continue;
+    }
+    let length;
+    let low = 0x80;
+    let high = 0xbf;
+    if (lead >= 0xc2 && lead <= 0xdf) length = 2;
+    else if (lead === 0xe0) [length, low] = [3, 0xa0];
+    else if (lead === 0xed) [length, high] = [3, 0x9f];
+    else if (lead >= 0xe1 && lead <= 0xef) length = 3;
+    else if (lead === 0xf0) [length, low] = [4, 0x90];
+    else if (lead === 0xf4) [length, high] = [4, 0x8f];
+    else if (lead >= 0xf1 && lead <= 0xf3) length = 4;
+    else return i;
+    if (i + length > bytes.length) return i;
+    if (bytes[i + 1] < low || bytes[i + 1] > high) return i;
+    for (let k = 2; k < length; k += 1) {
+      if (bytes[i + k] < 0x80 || bytes[i + k] > 0xbf) return i;
+    }
+    i += length;
+  }
+  return bytes.length;
+}
+
+/**
+ * A discovered source's encoding failure (SPEC 1.6, 14.20), or null: a
+ * leading byte-order mark — judged on the raw bytes, since a UTF-8
+ * TextDecoder strips one — at offset 0, else the first ill-formed UTF-8
+ * sequence at its byte offset. `byteAt` is the failure's byte offset.
+ * @param {string} rel @param {Uint8Array} bytes
+ * @returns {{ byteAt: number, message: string } | null}
+ */
+function encodingFailure(rel, bytes) {
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    return {
+      byteAt: 0,
+      message: `${rel} begins with a byte-order mark (SPEC 1.6)`,
+    };
+  }
+  const valid = wellFormedUtf8PrefixLength(bytes);
+  if (valid < bytes.length) {
+    return {
+      byteAt: valid,
+      message: `${rel} is not valid UTF-8 from byte ${String(valid)} (SPEC 1.6)`,
+    };
+  }
+  return null;
+}
+
+/** The decoder for content {@link encodingFailure} has passed. */
+const UTF8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+
 /** Analyze one source file's bytes into a file record. */
 function analyzeFile(rel, bytes) {
   const base = {
@@ -1394,25 +1557,9 @@ function analyzeFile(rel, bytes) {
     imports: [],
     failure: null,
   };
-  let text;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    return {
-      ...base,
-      failure: { at: 0, message: `${rel} is not valid UTF-8 (SPEC 1.6)` },
-    };
-  }
-  if (text.charCodeAt(0) === 0xfeff) {
-    return {
-      ...base,
-      text,
-      failure: {
-        at: 0,
-        message: `${rel} begins with a byte-order mark (SPEC 1.6)`,
-      },
-    };
-  }
+  const encoding = encodingFailure(rel, bytes);
+  if (encoding !== null) return { ...base, failure: encoding };
+  const text = UTF8.decode(bytes);
   const byteOf = byteOffsetMapper(text, bytes.length);
   const parsed = parseMdx(text);
   return {
@@ -1431,6 +1578,96 @@ function byteRange(record, startIndex, endIndex) {
   return {
     start: record.byteOf(clamp(startIndex)),
     end: record.byteOf(clamp(endIndex)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Code-source well-formedness (SPEC 14.20): TypeScript at release 5.9.3
+// ---------------------------------------------------------------------------
+
+/** The harness's own TypeScript 5.9.3, loaded on first use. */
+let typeScript = null;
+
+/**
+ * Load the harness's `typescript-5.9.3` (an npm alias of
+ * `typescript@5.9.3`, the release SPEC 14.20 fixes; never the product's
+ * `typescript`) through `createRequire` — a plain CommonJS load, cheaper
+ * than the ESM loader's — lazily, so only an invocation that discovers a
+ * code source pays for it.
+ */
+function loadTypeScript() {
+  typeScript ??= createRequire(import.meta.url)("typescript-5.9.3");
+  return typeScript;
+}
+
+/**
+ * Judge `text` under TypeScript 5.9.3's scanning and parsing at ESNext, TSX
+ * or plain as `tsx` selects, read both as a module's code and as a script's
+ * — the reading forced through `setExternalModuleIndicator`, which decides
+ * whether the parser takes top-level `await` as an operator (a module) or
+ * an identifier (a script). A text is well-formed only when both readings
+ * report no syntax error (`parseDiagnostics`, the scanner's and parser's
+ * own — never the post-parse grammar checks, binding, or type checking);
+ * one 14.20 leaves open counts as ill-formed here, the conservative side.
+ * Returns null when well-formed, else the earliest diagnostic's string
+ * index — the fixture's approximation of 14.20's offset rule. The neutral
+ * file name keeps a `.d.ts`-like name from switching the parser into a
+ * declaration file's ambient context.
+ * @param {string} text @param {boolean} tsx @returns {number | null}
+ */
+function typeScriptFailureIndex(text, tsx) {
+  const ts = loadTypeScript();
+  let earliest = null;
+  for (const asModule of [true, false]) {
+    const file = ts.createSourceFile(
+      tsx ? "source.tsx" : "source.ts",
+      text,
+      {
+        languageVersion: ts.ScriptTarget.ESNext,
+        setExternalModuleIndicator: (sourceFile) => {
+          sourceFile.externalModuleIndicator = asModule ? true : undefined;
+        },
+      },
+      false,
+      tsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    const diagnostics = file.parseDiagnostics;
+    if (!Array.isArray(diagnostics)) {
+      throw new Error(
+        "typescript-5.9.3 exposed no parseDiagnostics on a parsed source file",
+      );
+    }
+    for (const diagnostic of diagnostics) {
+      if (earliest === null || diagnostic.start < earliest) {
+        earliest = diagnostic.start;
+      }
+    }
+  }
+  return earliest;
+}
+
+/**
+ * Analyze one discovered code source (SPEC 7.2, 14.20): valid UTF-8 with no
+ * byte-order mark (1.6), then well-formed TypeScript under the grammar its
+ * name selects — `.tsx` as TSX, any other name as plain TypeScript. Returns
+ * `{ rel, failure }`, `failure` null or `{ byteAt, message }` with the
+ * failure's byte offset. A well-formed source is used no further: nothing in
+ * scope gives a code file an edge (4.6).
+ * @param {string} rel @param {Uint8Array} bytes
+ */
+function analyzeCodeFile(rel, bytes) {
+  const encoding = encodingFailure(rel, bytes);
+  if (encoding !== null) return { rel, failure: encoding };
+  const text = UTF8.decode(bytes);
+  const index = typeScriptFailureIndex(text, rel.endsWith(".tsx"));
+  if (index === null) return { rel, failure: null };
+  const byteOf = byteOffsetMapper(text, bytes.length);
+  return {
+    rel,
+    failure: {
+      byteAt: byteOf(Math.max(0, Math.min(index, text.length))),
+      message: `${rel} is not well-formed TypeScript (release 5.9.3, ${rel.endsWith(".tsx") ? "TSX" : "plain TypeScript"}, read both as a module and as a script) — correct the syntax at the located offset`,
+    },
   };
 }
 
@@ -1454,11 +1691,12 @@ const RESERVED_BINDINGS = new Set(["S", "Spec", "text"]);
 
 /**
  * Load the workspace: configuration, discovery, every discovered spec
- * source's analysis, and import resolution; the discovered code sources are
- * carried by path alone (never read — edgeless whole-file locations, 4.6).
- * Files in byte order of workspace-relative path — deterministic (SPEC
- * 12.0). An unparseable file (14.20) masks the conditions inside itself
- * (SPEC 14).
+ * source's analysis, and import resolution; every discovered code source is
+ * parsed for its well-formedness alone (14.20) — otherwise each is an
+ * edgeless whole-file location (4.6). Files in byte order of
+ * workspace-relative path — deterministic (SPEC 12.0). An unparseable file
+ * (14.20) masks the conditions inside itself (SPEC 14). The findings are
+ * exactly `build`'s validations over the scope (12.1, 12.2).
  */
 async function loadWorkspace(cwd, configFlag) {
   const config = await loadConfig(cwd, configFlag);
@@ -1470,14 +1708,23 @@ async function loadWorkspace(cwd, configFlag) {
     const bytes = await fsp.readFile(path.join(config.root, ...rel.split("/")));
     files.set(rel, analyzeFile(rel, bytes));
   }
+  // An unparseable source (14.20) carries one zero-length range at the
+  // failure's byte offset: an encoding failure's `byteAt`, or a parse
+  // failure's string index mapped to bytes.
+  const unparseable = (record) => {
+    const at =
+      record.failure.byteAt ??
+      byteRange(record, record.failure.at, record.failure.at).start;
+    return {
+      condition: "14.20",
+      message: `unparseable source: ${record.failure.message} (SPEC 14.20)`,
+      file: record.rel,
+      location: { start: at, end: at },
+    };
+  };
   for (const record of files.values()) {
     if (record.failure !== null) {
-      findings.push({
-        condition: "14.20",
-        message: `unparseable source: ${record.failure.message} (SPEC 14.20)`,
-        file: record.rel,
-        location: byteRange(record, record.failure.at, record.failure.at + 1),
-      });
+      findings.push(unparseable(record));
       continue;
     }
     for (const section of record.sections) {
@@ -1514,6 +1761,14 @@ async function loadWorkspace(cwd, configFlag) {
         });
       }
     }
+  }
+  // Every discovered code source is parsed (SPEC 7.2, 14.20): an ill-formed
+  // one is a build validation failure, so `build` and `check` report it and
+  // the gate of 13.3 turns `ids` and `query` back with it.
+  for (const rel of discovery.codeSources) {
+    const bytes = await fsp.readFile(path.join(config.root, ...rel.split("/")));
+    const record = analyzeCodeFile(rel, bytes);
+    if (record.failure !== null) findings.push(unparseable(record));
   }
   return { config, files, codeSources: discovery.codeSources, findings };
 }
@@ -1722,6 +1977,29 @@ async function commandBuild(io, cwd, argv) {
     io.stdout(canonicalJson(findingsDoc([])) + "\n");
   }
   return 0;
+}
+
+/**
+ * `xspec check` (SPEC 12.2, scoped): `build`'s validations, writing nothing.
+ * §CONF-DISC serves `check` over validation-failing workspaces alone — T7-6's
+ * invalid-source arm and its control, each staged from scratch with no
+ * `build` succeeding on it, so no record exists (13.3) and `check` reports
+ * exactly `build`'s findings (12.2): 14.10's mismatch forms are undetectable
+ * on a failing workspace and its recorded-file form meets no record. So the
+ * findings report, exit 1. A workspace passing the validations would need
+ * 14.10's verification of derived files and graph data, which this
+ * conformer keeps none of: outside the scope, refused loudly (exit 70) —
+ * never a false clean answer.
+ */
+async function commandCheck(io, cwd, argv) {
+  const { flags } = parseArgs(argv, READ_FLAGS, [0, 0]);
+  const ws = await loadWorkspace(cwd, flags["--config"]);
+  if (ws.findings.length > 0) {
+    throw new FindingsError(ws.findings);
+  }
+  throw new ScopeError(
+    "check on a workspace passing build's validations is outside this fixture's scope (CERTIFICATIONS.md §CONF-DISC: check over T7-6's validation-failing workspaces alone; 14.10's derived-file and graph-data verification is not implemented)",
+  );
 }
 
 /**
@@ -2052,6 +2330,8 @@ async function dispatchCommand(io, cwd, argv) {
     switch (command) {
       case "build":
         return await commandBuild(io, cwd, rest);
+      case "check":
+        return await commandCheck(io, cwd, rest);
       case "ids":
         return await commandIds(io, cwd, rest);
       case "inventory":
@@ -2060,7 +2340,7 @@ async function dispatchCommand(io, cwd, argv) {
         return await commandQuery(io, cwd, rest);
       default:
         throw new UsageError(
-          `unknown command ${String(command)} (SPEC 12.0; this fixture's surface is build, ids, inventory, and query edges, CERTIFICATIONS.md §CONF-DISC)`,
+          `unknown command ${String(command)} (SPEC 12.0; this fixture's surface is build, check, ids, inventory, and query edges, CERTIFICATIONS.md §CONF-DISC)`,
         );
     }
   } catch (error) {
