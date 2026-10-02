@@ -97,6 +97,21 @@
 //   workspace) precedes any invocation and stays plain; the files T7-4 and
 //   T7-5 write beside the root (`stageBesideRoot`, a raw write outside the
 //   builder) stay strings — `x/M.mdx` the one the `m` record is made from.
+// - TypeScript staged-source records (TEST-SPEC S-9's TypeScript and
+//   timing clauses; helpers/staged-ts.ts): every configuration file and
+//   code source a body stages in a workspace created after its first
+//   product invocation — T7-4's probe, outside-root, inside-root, and
+//   literal-backslash workspaces (the single-casing probe's too, a code
+//   path the Windows leg reruns, E-6), T7-6's arms past (a) — is a ledger
+//   record carrying its S-9 declaration, judged by
+//   test/self/s9-staged-sources.test.ts before any product exists: T7-6's
+//   `specs/a'b.md` holding `)` unparseable (14.20 — the record makes the
+//   path judged, a name the default does not reach), every other
+//   well-formed. Arms staged from a module-level spelling table (T7-4's
+//   outside-root patterns and inside-root spellings) carry one record per
+//   row, made at module load. The same first workspaces stay plain, and
+//   so does `x/M.mdx`'s raw write; the literal-backslash records' bytes
+//   and paths are built from the code point as before.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -117,12 +132,12 @@ import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type {
   InitialFileContents,
   WorkspaceDecl,
-  WorkspaceTsDecl,
 } from "../../helpers/workspace.js";
 import { SECTION_A_SOURCE, SECTION_B_SOURCE } from "./section-7-basics.js";
 import {
@@ -399,6 +414,14 @@ const CASING_PROBES: readonly StagedProbe[] = [
   { path: "ctl/C.mdx", id: "c", discovered: true, source: SECTION_C_SOURCE },
 ];
 
+// The probe workspace's configuration, a staged-source record (module
+// header): T7-4 stages it after its first product invocation, and the
+// Windows leg's rerun (E-6) stages the same record.
+const CASING_CONFIG = stagedTs(
+  "T7-4 xspec.config.ts (the single-casing case-sensitivity probes)",
+  specGroupsConfig(CASING_GROUPS),
+);
+
 /**
  * T7-4's single-casing glob probe as one shared code path: called by the
  * registered T7-4 body on the suite leg and rerun verbatim by the Windows leg
@@ -415,7 +438,7 @@ export async function runT74SingleCasingGlobProbe(
   await withWorkspace(
     {
       files: {
-        "xspec.config.ts": specGroupsConfig(CASING_GROUPS),
+        "xspec.config.ts": CASING_CONFIG,
         ...probeFiles(CASING_PROBES),
       },
     },
@@ -482,6 +505,16 @@ const BYTE_TWO_PROBES: readonly StagedProbe[] = [
     source: stagedMdx("T7-4 byte probes bytes2/é.mdx (e2)", mdxSection("e2")),
   },
 ];
+// The two byte-probe workspaces' configurations, staged-source records
+// (module header).
+const BYTE_ONE_CONFIG = stagedTs(
+  "T7-4 xspec.config.ts (byte probes: bytes/?.mdx)",
+  specGroupsConfig(BYTE_ONE_GROUPS),
+);
+const BYTE_TWO_CONFIG = stagedTs(
+  "T7-4 xspec.config.ts (byte probes: bytes/??.mdx and bytes2/*.mdx)",
+  specGroupsConfig(BYTE_TWO_GROUPS),
+);
 
 // Configuration-directory resolution (T7-4: all paths resolve relative to the
 // configuration file's directory): run from `sub/`, whose own `sub/specs/`
@@ -512,6 +545,11 @@ const CONFIG_DIR_PROBES: readonly StagedProbe[] = [
     ),
   },
 ];
+// The workspace's configuration, a staged-source record (module header).
+const CONFIG_DIR_CONFIG = stagedTs(
+  "T7-4 xspec.config.ts (configuration-directory probes: specs/*.mdx)",
+  specGroupsConfig(CONFIG_DIR_GROUPS),
+);
 
 // Outside-root patterns by spelling alone (SPEC 7, 14.14; module header):
 // the three spellings T7-4 pins plus the plain ascent. Each fixture also
@@ -531,6 +569,22 @@ const OUTSIDE_ROOT_PATTERNS: readonly string[] = [
 const BESIDE_ROOT_MATCH: Readonly<Record<string, string>> = {
   "x/M.mdx": M_SOURCE,
 };
+// The outside-root arms, one staged-source record per pattern made at
+// module load (module header): each arm's configuration — the valid group
+// beside the escaping one — staged after T7-4's first product invocation.
+const OUTSIDE_ROOT_ARMS: readonly {
+  readonly pattern: string;
+  readonly config: StagedTs;
+}[] = OUTSIDE_ROOT_PATTERNS.map((pattern) => ({
+  pattern,
+  config: stagedTs(
+    `T7-4 xspec.config.ts (the outside-root pattern ${pattern})`,
+    specGroupsConfig({
+      main: ["specs/*.mdx"],
+      escape: [pattern],
+    }),
+  ),
+}));
 
 // Inside-root spellings that match nothing (SPEC 7: every glob not outside
 // the root is inside, its `.`, `..`, and empty segments matching nothing,
@@ -560,6 +614,35 @@ const INSIDE_NO_MATCH_PROBES: readonly StagedProbe[] = [
   { path: "a/N.mdx", id: "n", discovered: false, source: SECTION_N_SOURCE },
 ];
 
+/** An inside-root arm: the spelling and its workspace's configuration. */
+interface InsideNoMatchArm {
+  readonly spelling: string;
+  readonly config: StagedTs;
+}
+
+/**
+ * An inside-root spelling's arm, its configuration — the group holding only
+ * the spelling beside the control group — a staged-source record made at
+ * module load (module header): T7-4 stages every arm after its first
+ * product invocation.
+ */
+function insideNoMatchArm(spelling: string): InsideNoMatchArm {
+  return {
+    spelling,
+    config: stagedTs(
+      `T7-4 xspec.config.ts (the inside-root spelling ${spelling} beside ` +
+        "the control group)",
+      specGroupsConfig({
+        probe: [spelling],
+        control: [CONTROL_GLOB],
+      }),
+    ),
+  };
+}
+const INSIDE_NO_MATCH_ARMS: readonly InsideNoMatchArm[] =
+  INSIDE_NO_MATCH_SPELLINGS.map(insideNoMatchArm);
+const DRIVE_QUALIFIED_ARM = insideNoMatchArm(DRIVE_QUALIFIED_SPELLING);
+
 /**
  * One inside-root spelling that matches nothing (SPEC 7): a group holding
  * only the spelling discovers zero sources beside the control group —
@@ -570,16 +653,14 @@ const INSIDE_NO_MATCH_PROBES: readonly StagedProbe[] = [
  */
 async function expectInsideMatchingNothing(
   product: ProductBinding,
-  spelling: string,
+  arm: InsideNoMatchArm,
 ): Promise<void> {
+  const { spelling } = arm;
   const shown = JSON.stringify(spelling);
   await withWorkspace(
     {
       files: {
-        "xspec.config.ts": specGroupsConfig({
-          probe: [spelling],
-          control: [CONTROL_GLOB],
-        }),
+        "xspec.config.ts": arm.config,
         ...probeFiles(INSIDE_NO_MATCH_PROBES),
       },
     },
@@ -647,7 +728,13 @@ const LITERAL_BACKSLASH_GROUP = "lit";
 const LITERAL_BACKSLASH_GLOB = `src/a${BACKSLASH}*.ts`;
 const LITERAL_BACKSLASH_MATCH = `src/a${BACKSLASH}b.ts`;
 const LITERAL_BACKSLASH_SIBLING = "src/ab.ts";
-const LITERAL_BACKSLASH_CONFIG = `import { defineConfig } from "xspec"
+// The arm's three files are staged-source records (module header), staged
+// after T7-4's first product invocation; their names spell the backslash in
+// words.
+const LITERAL_BACKSLASH_CONFIG = stagedTs(
+  "T7-4 xspec.config.ts (the literal-backslash arm: the code group globbing " +
+    "src/a, a backslash, *.ts)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {},
@@ -655,10 +742,18 @@ export default defineConfig({
     ${LITERAL_BACKSLASH_GROUP}: ["${LITERAL_BACKSLASH_GLOB}"]
   }
 })
-`;
-const LITERAL_BACKSLASH_FILES: Readonly<Record<string, string>> = {
-  [LITERAL_BACKSLASH_MATCH]: "export const backslashed = 1;\n",
-  [LITERAL_BACKSLASH_SIBLING]: "export const sibling = 2;\n",
+`,
+);
+const LITERAL_BACKSLASH_FILES: Readonly<Record<string, StagedTs>> = {
+  [LITERAL_BACKSLASH_MATCH]: stagedTs(
+    "T7-4 the literal-backslash arm's matched code source (src/a, a " +
+      "backslash, b.ts)",
+    "export const backslashed = 1;\n",
+  ),
+  [LITERAL_BACKSLASH_SIBLING]: stagedTs(
+    "T7-4 src/ab.ts (the literal-backslash arm's sibling)",
+    "export const sibling = 2;\n",
+  ),
 };
 
 /**
@@ -772,7 +867,7 @@ const T7_4 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": specGroupsConfig(CONFIG_DIR_GROUPS),
+          "xspec.config.ts": CONFIG_DIR_CONFIG,
           ...probeFiles(CONFIG_DIR_PROBES),
         },
       },
@@ -793,7 +888,7 @@ const T7_4 = defineProductTest({
       await withWorkspace(
         {
           files: {
-            "xspec.config.ts": specGroupsConfig(BYTE_ONE_GROUPS),
+            "xspec.config.ts": BYTE_ONE_CONFIG,
             ...probeFiles(BYTE_ONE_PROBES),
           },
         },
@@ -810,7 +905,7 @@ const T7_4 = defineProductTest({
       await withWorkspace(
         {
           files: {
-            "xspec.config.ts": specGroupsConfig(BYTE_TWO_GROUPS),
+            "xspec.config.ts": BYTE_TWO_CONFIG,
             ...probeFiles(BYTE_TWO_PROBES),
           },
         },
@@ -831,14 +926,11 @@ const T7_4 = defineProductTest({
     // when resolved; the error document's finding carries the stable code
     // and the configuration file as its concerned path (SPEC 14, 12.7), and
     // a build failing at configuration load writes nothing (12.1).
-    for (const pattern of OUTSIDE_ROOT_PATTERNS) {
+    for (const { pattern, config } of OUTSIDE_ROOT_ARMS) {
       await withWorkspace(
         {
           files: {
-            "xspec.config.ts": specGroupsConfig({
-              main: ["specs/*.mdx"],
-              escape: [pattern],
-            }),
+            "xspec.config.ts": config,
             "specs/A.mdx": SECTION_A_SOURCE,
           },
         },
@@ -879,11 +971,11 @@ const T7_4 = defineProductTest({
     // discovers zero sources (exit 0), the inventory reporting the glob as
     // configured (SPEC 7, 11.6); the drive-qualified spelling is ordinary
     // segments on the Linux leg.
-    for (const spelling of INSIDE_NO_MATCH_SPELLINGS) {
-      await expectInsideMatchingNothing(product, spelling);
+    for (const arm of INSIDE_NO_MATCH_ARMS) {
+      await expectInsideMatchingNothing(product, arm);
     }
     if (process.platform === "linux") {
-      await expectInsideMatchingNothing(product, DRIVE_QUALIFIED_SPELLING);
+      await expectInsideMatchingNothing(product, DRIVE_QUALIFIED_ARM);
     }
 
     // The literal backslash: a code group globbing `src/a`, a backslash,
@@ -1081,8 +1173,12 @@ const EXCLUSION_EXPECTED: readonly ListingEntry[] = [
 // `--from` — the usage error of 12.0, judged after configuration loading
 // and before the 13.3 gate: exit 2 with the 12.7 error document, never a
 // finding, nothing modified — beside the discovered source's exit-0 control
-// showing the group live.
-const CODE_EXCLUSION_CONFIG = `import { defineConfig } from "xspec"
+// showing the group live. The arm's configuration and its two staged `.ts`
+// files are staged-source records (module header): T7-6 stages them after
+// its first product invocation.
+const CODE_EXCLUSION_CONFIG = stagedTs(
+  "T7-6 xspec.config.ts (code-group exclusion)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1093,13 +1189,20 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 /** The staged code source: well-formed, no marker, spec import, or text call. */
-const PLAIN_TS = "export const plain = 1;\n";
+const PLAIN_TS = stagedTs(
+  "T7-6 src/plain.ts (code-group exclusion: the discovered code source)",
+  "export const plain = 1;\n",
+);
 
 /** A well-formed `.ts` file staged under `.xspec/` — derived by path alone. */
-const STAGED_UNDER_XSPEC_TS = "export const staged = 2;\n";
+const STAGED_UNDER_XSPEC_TS = stagedTs(
+  "T7-6 .xspec/staged.ts (code-group exclusion: a staged file under .xspec/)",
+  "export const staged = 2;\n",
+);
 
 /** The excluded paths the code globs match: each arm's premise and rule. */
 const CODE_EXCLUDED: readonly {
@@ -1188,6 +1291,17 @@ export default defineConfig({
 `;
 }
 
+// The arm's and the control's configurations, staged-source records
+// (module header): T7-6 stages both after its first product invocation.
+const INVALID_SOURCE_EMIT_CONFIG = stagedTs(
+  "T7-6 xspec.config.ts (the invalid-source arm: emission enabled)",
+  invalidSourceConfig(true),
+);
+const INVALID_SOURCE_NO_EMIT_CONFIG = stagedTs(
+  "T7-6 xspec.config.ts (the invalid-source control: emission disabled)",
+  invalidSourceConfig(false),
+);
+
 /** specs/a'b.mdx's content, exactly as T7-6 spells it. */
 const INVALID_SOURCE = stagedMdx(
   "T7-6 specs/a'b.mdx (the invalid-source arm and its control: `'` in a " +
@@ -1196,14 +1310,20 @@ const INVALID_SOURCE = stagedMdx(
 );
 
 /** specs/a'b.md's content, exactly as T7-6 spells it: no well-formed
- * TypeScript (14.20). */
+ * TypeScript (14.20). The control's condition-20 window is spelled from it,
+ * and its staged-source record below is made from it. */
 const UNPARSEABLE_DESTINATION = ")";
 
 /** S-9: specs/a'b.md, a name the default does not reach, is declared
- * unparseable TypeScript (14.20) — T7-6's own words. */
-const UNPARSEABLE_DESTINATION_TS: WorkspaceTsDecl = {
-  unparseable: [INVALID_SOURCE_DESTINATION],
-};
+ * unparseable TypeScript (14.20) — T7-6's own words — by its staged-source
+ * record (module header; the record makes the path judged): the arm and its
+ * control stage it, both after T7-6's first product invocation. */
+const UNPARSEABLE_DESTINATION_SOURCE = stagedTs(
+  "T7-6 specs/a'b.md (the invalid-source arm and its control: `)`, no " +
+    "well-formed TypeScript, 14.20)",
+  UNPARSEABLE_DESTINATION,
+  "unparseable",
+);
 
 // Import arms (SPEC 2.1/7: imports resolve references between files but
 // never add files to the workspace — the designated file must already be a
@@ -1221,6 +1341,37 @@ const UNLISTED_SOURCE = stagedMdx(
 const IMPORT_POS_SOURCE = stagedMdx(
   "T7-6 specs/A.mdx importing the discovered specs/sub/B.mdx",
   `import B from "./sub/B.xspec"\n\n<S id="a">\nAlpha behavior.\n</S>\n`,
+);
+
+// The configurations of the import arms, the no-match group, and the empty
+// maps, staged-source records (module header): T7-6 stages each after its
+// first product invocation.
+const IMPORT_NEG_CONFIG = stagedTs(
+  "T7-6 xspec.config.ts (import of an existing but unmatched file: the " +
+    "one group main, specs/*.mdx)",
+  specGroupsConfig({ main: ["specs/*.mdx"] }),
+);
+const IMPORT_POS_CONFIG = stagedTs(
+  "T7-6 xspec.config.ts (import of a discovered source: the one group " +
+    "main, specs/**/*.mdx)",
+  specGroupsConfig({ main: ["specs/**/*.mdx"] }),
+);
+const NO_MATCH_GROUP_CONFIG = stagedTs(
+  "T7-6 xspec.config.ts (the no-match group vacant beside main)",
+  specGroupsConfig({
+    main: ["specs/*.mdx"],
+    vacant: ["vacant/**/*.mdx"],
+  }),
+);
+const EMPTY_MAPS_CONFIG = stagedTs(
+  "T7-6 xspec.config.ts (empty specs and code maps)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {},
+  code: {}
+})
+`,
 );
 
 const T7_6 = defineProductTest({
@@ -1382,11 +1533,10 @@ const T7_6 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": invalidSourceConfig(true),
+          "xspec.config.ts": INVALID_SOURCE_EMIT_CONFIG,
           [INVALID_SOURCE_PATH]: INVALID_SOURCE,
-          [INVALID_SOURCE_DESTINATION]: UNPARSEABLE_DESTINATION,
+          [INVALID_SOURCE_DESTINATION]: UNPARSEABLE_DESTINATION_SOURCE,
         },
-        ts: UNPARSEABLE_DESTINATION_TS,
       },
       async (workspace) => {
         const context =
@@ -1441,11 +1591,10 @@ const T7_6 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": invalidSourceConfig(false),
+          "xspec.config.ts": INVALID_SOURCE_NO_EMIT_CONFIG,
           [INVALID_SOURCE_PATH]: INVALID_SOURCE,
-          [INVALID_SOURCE_DESTINATION]: UNPARSEABLE_DESTINATION,
+          [INVALID_SOURCE_DESTINATION]: UNPARSEABLE_DESTINATION_SOURCE,
         },
-        ts: UNPARSEABLE_DESTINATION_TS,
       },
       async (workspace) => {
         const context =
@@ -1495,7 +1644,7 @@ const T7_6 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": specGroupsConfig({ main: ["specs/*.mdx"] }),
+          "xspec.config.ts": IMPORT_NEG_CONFIG,
           "specs/A.mdx": IMPORT_NEG_SOURCE,
           "other/unlisted.mdx": UNLISTED_SOURCE,
         },
@@ -1520,7 +1669,7 @@ const T7_6 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": specGroupsConfig({ main: ["specs/**/*.mdx"] }),
+          "xspec.config.ts": IMPORT_POS_CONFIG,
           "specs/A.mdx": IMPORT_POS_SOURCE,
           "specs/sub/B.mdx": SECTION_B_SOURCE,
         },
@@ -1550,10 +1699,7 @@ const T7_6 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": specGroupsConfig({
-            main: ["specs/*.mdx"],
-            vacant: ["vacant/**/*.mdx"],
-          }),
+          "xspec.config.ts": NO_MATCH_GROUP_CONFIG,
           "specs/A.mdx": SECTION_A_SOURCE,
         },
       },
@@ -1579,13 +1725,7 @@ const T7_6 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {},
-  code: {}
-})
-`,
+          "xspec.config.ts": EMPTY_MAPS_CONFIG,
           "notes/N.mdx": SECTION_N_SOURCE,
         },
       },

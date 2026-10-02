@@ -87,6 +87,21 @@
 //   workspace and T7.2-1's overlap workspace, each its body's first,
 //   precede any invocation and stay plain; `specs/notes.txt` is no `.mdx`
 //   path and stays a string.
+// - TypeScript staged-source records (TEST-SPEC S-9's TypeScript and
+//   timing clauses; helpers/staged-ts.ts): every configuration file and
+//   code source a body stages in a workspace created after its first
+//   product invocation — `expectConfigRefused`'s one staging site (its
+//   arm tables' rows each a record made at module load), T7.1-1's
+//   non-`.mdx`-match configuration, T7.3-1's emission-matrix variants
+//   (the first's too, the table being one), outDir, destination, and
+//   configuration-alone workspaces — is a ledger record carrying its S-9
+//   declaration, judged by test/self/s9-staged-sources.test.ts before any
+//   product exists: every one well-formed, T7.3-1's destination code
+//   source at `specs/A.md` included (its record makes the path judged, a
+//   name the default does not reach). The same two first workspaces stay
+//   plain; `specs/A.md`'s user-authored text in T7.3-1's
+//   configuration-alone arm lies in a spec group, no code source, and
+//   stays a string.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -114,13 +129,13 @@ import {
   assertSnapshotsEqual,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type {
   InitialFileContents,
   WorkspaceDecl,
-  WorkspaceTsDecl,
 } from "../../helpers/workspace.js";
 import { SECTION_A_SOURCE, SECTION_B_SOURCE } from "./section-7-basics.js";
 import {
@@ -193,7 +208,9 @@ async function expectIdsListing(
 }
 
 /**
- * Stage a workspace whose only defect is the given configuration text and
+ * Stage a workspace whose only defect is the given configuration — a
+ * staged-source record, well-formed (module header), since T7.3-1 stages
+ * every arm after its first product invocation (S-9's timing clause) — and
  * assert `build --json` refuses it per 14.14. The staged source is valid and
  * matched by every fixture configuration's spec glob, so a product that
  * wrongly accepts the configuration proceeds to a successful build (exit 0)
@@ -201,7 +218,7 @@ async function expectIdsListing(
  */
 async function expectConfigRefused(
   product: ProductBinding,
-  config: string,
+  config: StagedTs,
   context: string,
 ): Promise<void> {
   await withWorkspace(
@@ -413,6 +430,22 @@ function renderPolicyFindings(findings: readonly Finding[]): string[] {
   return findings.map(renderPolicyIdentities).sort();
 }
 
+// The non-`.mdx`-match workspace's configuration: the one spec group's glob
+// `specs/*` matches `specs/notes.txt`. A staged-source record (module
+// header): T7.1-1 stages it after its first product invocation.
+const NON_MDX_MATCH_CONFIG = stagedTs(
+  "T7.1-1 xspec.config.ts (the spec-group glob specs/* matching " +
+    "specs/notes.txt)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*"]
+  }
+})
+`,
+);
+
 const T7_1_1 = defineProductTest({
   id: "T7.1-1",
   title:
@@ -501,14 +534,7 @@ const T7_1_1 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/*"]
-  }
-})
-`,
+          "xspec.config.ts": NON_MDX_MATCH_CONFIG,
           "specs/A.mdx": SECTION_A_SOURCE,
           "specs/notes.txt": mdxSection("n"),
         },
@@ -617,36 +643,67 @@ const A_COMPILED = "Text for a.\n";
 const B_COMPILED = "Text for b.\n";
 
 // The emission-scope matrix (SPEC 7.3): absent and `emit: false` mean no
-// emission; `emit: true` emits next to each source.
+// emission; `emit: true` emits next to each source. Each variant's
+// configuration is a staged-source record (module header): T7.3-1 stages
+// every variant past the first after its first product invocation.
 const EMISSION_VARIANTS = [
-  { key: "`markdown` absent", config: specsMainConfig(""), emits: false },
+  {
+    key: "`markdown` absent",
+    config: stagedTs(
+      "T7.3-1 xspec.config.ts (emission matrix: `markdown` absent)",
+      specsMainConfig(""),
+    ),
+    emits: false,
+  },
   {
     key: "`markdown: { emit: false }`",
-    config: specsMainConfig(",\n  markdown: { emit: false }"),
+    config: stagedTs(
+      "T7.3-1 xspec.config.ts (emission matrix: `markdown: { emit: false }`)",
+      specsMainConfig(",\n  markdown: { emit: false }"),
+    ),
     emits: false,
   },
   {
     key: "`markdown: { emit: true }`",
-    config: specsMainConfig(",\n  markdown: { emit: true }"),
+    config: stagedTs(
+      "T7.3-1 xspec.config.ts (emission matrix: `markdown: { emit: true }`)",
+      specsMainConfig(",\n  markdown: { emit: true }"),
+    ),
     emits: true,
   },
 ] as const;
 
+/** A refused-configuration arm (T7.3-1): its label and its record. */
+interface RefusedConfigArm {
+  readonly label: string;
+  readonly config: StagedTs;
+}
+
 // `markdown` present without `emit` → 14.14 (SPEC 7.3: `emit` is required
 // when `markdown` is present). The outDir-bearing arm discriminates a
-// product that infers emission from any other markdown key.
-const EMIT_REQUIRED_VIOLATIONS: readonly { label: string; extra: string }[] = [
+// product that infers emission from any other markdown key. Each arm's
+// configuration is a staged-source record made at module load from its row
+// (module header).
+const EMIT_REQUIRED_VIOLATIONS: readonly RefusedConfigArm[] = [
   { label: "markdown: {}", extra: ",\n  markdown: {}" },
   {
     label: 'markdown: { outDir: "docs" } (outDir given, emit still missing)',
     extra: ',\n  markdown: { outDir: "docs" }',
   },
-];
+].map((row) => ({
+  label: row.label,
+  config: stagedTs(
+    `T7.3-1 xspec.config.ts (${row.label})`,
+    specsMainConfig(row.extra),
+  ),
+}));
 
 // `outDir` redirect (SPEC 7.3: emitted files land under outDir, preserving
 // workspace-relative paths; outDir resolves against the workspace root).
-const OUTDIR_CONFIG = specsMainConfig(
-  ',\n  markdown: { emit: true, outDir: "docs" }',
+// A staged-source record (module header).
+const OUTDIR_CONFIG = stagedTs(
+  'T7.3-1 xspec.config.ts (outDir "docs")',
+  specsMainConfig(',\n  markdown: { emit: true, outDir: "docs" }'),
 );
 
 // `outDir` not in plain workspace-relative form → 14.14 (SPEC 7.3: one or
@@ -656,8 +713,13 @@ const OUTDIR_CONFIG = specsMainConfig(
 // pinned spelling (TEST-SPEC T7.3-1), then the two `..`-bearing spellings
 // the arm always drove. Each is serialized into the configuration through
 // `JSON.stringify`, so the literal the product reads is exactly the
-// spelling listed.
-const INVALID_OUTDIRS: readonly { outDir: string; why: string }[] = [
+// spelling listed; each arm's configuration is a staged-source record made
+// at module load from its row (module header).
+const INVALID_OUTDIRS: readonly {
+  readonly outDir: string;
+  readonly why: string;
+  readonly config: StagedTs;
+}[] = [
   { outDir: "", why: "empty" },
   { outDir: "/out", why: "begins with `/`" },
   { outDir: "./out", why: "carries a `.` segment" },
@@ -669,13 +731,24 @@ const INVALID_OUTDIRS: readonly { outDir: string; why: string }[] = [
     outDir: "docs/../../out",
     why: "carries `..` segments (resolving outside the root besides)",
   },
-];
+].map((row) => ({
+  outDir: row.outDir,
+  why: row.why,
+  config: stagedTs(
+    `T7.3-1 xspec.config.ts (outDir ${JSON.stringify(row.outDir)} ${row.why})`,
+    specsMainConfig(
+      `,\n  markdown: { emit: true, outDir: ${JSON.stringify(row.outDir)} }`,
+    ),
+  ),
+}));
 
 // The pinned valid multi-segment spelling (SPEC 7.3, TEST-SPEC T7.3-1):
 // `out/sub` redirects the emission under `out/sub/`, preserving each
-// source's workspace-relative path beneath it.
-const OUTDIR_SUB_CONFIG = specsMainConfig(
-  ',\n  markdown: { emit: true, outDir: "out/sub" }',
+// source's workspace-relative path beneath it. A staged-source record
+// (module header).
+const OUTDIR_SUB_CONFIG = stagedTs(
+  'T7.3-1 xspec.config.ts (outDir "out/sub")',
+  specsMainConfig(',\n  markdown: { emit: true, outDir: "out/sub" }'),
 );
 
 // Classification-follows-emit, discovery channel (module header): the
@@ -683,11 +756,17 @@ const OUTDIR_SUB_CONFIG = specsMainConfig(
 // content whose top-level marker records a `references` edge attributed to
 // the file (SPEC 4.5, 4.6, 14.20) — in a code group whose glob matches only
 // it. The spec and code globs are disjoint (`*.mdx` vs `*.md` suffixes), so
-// no 14.14 overlap arises.
-const DESTINATION_CODE_SOURCE = `import BASE from "./A.xspec"
+// no 14.14 overlap arises. S-9: the destination path's code source, a name
+// the default does not reach, is declared well-formed (a valid code source,
+// 14.20) by its staged-source record (module header; the record makes the
+// path judged), staged in both workspaces of the arm.
+const DESTINATION_CODE_SOURCE = stagedTs(
+  "T7.3-1 specs/A.md (the destination path staged as a valid code source)",
+  `import BASE from "./A.xspec"
 
 BASE.a
-`;
+`,
+);
 
 function destinationDiscoveryConfig(emit: boolean): string {
   return `import { defineConfig } from "xspec"
@@ -704,17 +783,21 @@ export default defineConfig({
 `;
 }
 
+// The arm's two configurations, staged-source records (module header).
+const DESTINATION_DISCOVERY_NO_EMIT_CONFIG = stagedTs(
+  "T7.3-1 xspec.config.ts (destination discovery: emission disabled)",
+  destinationDiscoveryConfig(false),
+);
+const DESTINATION_DISCOVERY_EMIT_CONFIG = stagedTs(
+  "T7.3-1 xspec.config.ts (destination discovery: emission enabled)",
+  destinationDiscoveryConfig(true),
+);
+
 const DESTINATION_DISCOVERY_FILES: Readonly<
   Record<string, InitialFileContents>
 > = {
   "specs/A.mdx": SECTION_A_SOURCE,
   "specs/A.md": DESTINATION_CODE_SOURCE,
-};
-
-/** S-9: the destination path's code source, a name the default does not
- * reach, is declared well-formed (a valid code source, 14.20). */
-const DESTINATION_DISCOVERY_TS: WorkspaceTsDecl = {
-  wellFormed: ["specs/A.md"],
 };
 
 const CONTAINS_EDGE: GraphEdge = {
@@ -748,17 +831,33 @@ export default defineConfig({
 `;
 }
 
+// The arm's two configurations and the importing code source, staged-source
+// records (module header).
+const DESTINATION_IMPORT_EMIT_CONFIG = stagedTs(
+  "T7.3-1 xspec.config.ts (destination import: emission enabled)",
+  destinationImportConfig(true),
+);
+const DESTINATION_IMPORT_NO_EMIT_CONFIG = stagedTs(
+  "T7.3-1 xspec.config.ts (destination import: emission disabled)",
+  destinationImportConfig(false),
+);
+
 const DESTINATION_IMPORT_FILES: Readonly<Record<string, InitialFileContents>> =
   {
     "specs/A.mdx": SECTION_A_SOURCE,
-    "src/use.ts": `${DESTINATION_IMPORT_STATEMENT}\n`,
+    "src/use.ts": stagedTs(
+      "T7.3-1 src/use.ts (importing the destination path ../specs/A.md)",
+      `${DESTINATION_IMPORT_STATEMENT}\n`,
+    ),
   };
 
 // Classification-by-configuration-alone arm (SPEC 7.3 "whether or not
 // emission has yet run"): emission enabled, no emission ever run, a
 // user-authored file at the destination, one spec-group glob matching both
-// the source and the destination.
-const CONFIG_ALONE_CONFIG = `import { defineConfig } from "xspec"
+// the source and the destination. A staged-source record (module header).
+const CONFIG_ALONE_CONFIG = stagedTs(
+  "T7.3-1 xspec.config.ts (classification by configuration alone)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -766,7 +865,8 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 const USER_AUTHORED_DESTINATION =
   "User-authored notes at the emit destination.\n";
@@ -847,7 +947,7 @@ const T7_3_1 = defineProductTest({
     for (const arm of EMIT_REQUIRED_VIOLATIONS) {
       await expectConfigRefused(
         product,
-        specsMainConfig(arm.extra),
+        arm.config,
         `T7.3-1 (${arm.label}) \`build --json\` — \`emit\` is required when ` +
           `\`markdown\` is present (SPEC 7.3, 14.14)`,
       );
@@ -891,9 +991,7 @@ const T7_3_1 = defineProductTest({
     for (const arm of INVALID_OUTDIRS) {
       await expectConfigRefused(
         product,
-        specsMainConfig(
-          `,\n  markdown: { emit: true, outDir: ${JSON.stringify(arm.outDir)} }`,
-        ),
+        arm.config,
         `T7.3-1 (outDir ${JSON.stringify(arm.outDir)} ${arm.why}: not in ` +
           `plain workspace-relative form — one or more non-empty ` +
           `\`/\`-separated segments, none \`.\` or \`..\`, decided by ` +
@@ -949,10 +1047,9 @@ const T7_3_1 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": destinationDiscoveryConfig(false),
+          "xspec.config.ts": DESTINATION_DISCOVERY_NO_EMIT_CONFIG,
           ...DESTINATION_DISCOVERY_FILES,
         },
-        ts: DESTINATION_DISCOVERY_TS,
       },
       async (workspace) => {
         const allLabel =
@@ -990,10 +1087,9 @@ const T7_3_1 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": destinationDiscoveryConfig(true),
+          "xspec.config.ts": DESTINATION_DISCOVERY_EMIT_CONFIG,
           ...DESTINATION_DISCOVERY_FILES,
         },
-        ts: DESTINATION_DISCOVERY_TS,
       },
       async (workspace) => {
         const allLabel =
@@ -1044,7 +1140,7 @@ const T7_3_1 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": destinationImportConfig(true),
+          "xspec.config.ts": DESTINATION_IMPORT_EMIT_CONFIG,
           ...DESTINATION_IMPORT_FILES,
         },
       },
@@ -1067,7 +1163,7 @@ const T7_3_1 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": destinationImportConfig(false),
+          "xspec.config.ts": DESTINATION_IMPORT_NO_EMIT_CONFIG,
           ...DESTINATION_IMPORT_FILES,
         },
       },
