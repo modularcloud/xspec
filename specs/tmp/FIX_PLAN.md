@@ -36,16 +36,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ## Tasks
 
-### Part B — Shared machinery
-
-### Task 20 — H-7: T11.2-4 maps to `"14"` (TEST-SPEC §14's per-condition index lists T11.2-4 under 14.16; H-7; C9)
-
-**Where.** `test/suite/registry/traceability.ts`, which today reads `"T11.2-4": ["11.2"]`.
-
-**Change.** Add `"14"`. T6.5-20, T6.5-21, T13.4-9, T13.4-10, and T13.4-11 carry `"14"` from their own tasks.
-
-**Checks.** S-1 passes.
-
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
 ### Task 21 — Register T1.4-5: identifier by characters (TEST-SPEC L61; SPEC 1.4, 2.4, 4.1, 6.4, 6.5, 14.20; A4)
