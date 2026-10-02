@@ -42,7 +42,7 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 Task 16 was split as its text allowed. Done at dc97774: the mechanism — `StagedTs` records (`test/helpers/staged-ts.ts`), sealed beside the MDX ledger and judged by `test/self/s9-staged-sources.test.ts`; the builder's record overloads; MDX records carrying `ts` for a code-group `.mdx` path — and the first module group (§1's five modules) plus the E-6 fixture's configuration and code source. AGENTS.md's "staged-source ledger's TypeScript records" bullet holds the conversion rule, the detector recipe that finds a module's remaining plain post-invocation TypeScript stagings, and the survey's totals.
 
-Done since: Task 16b (§2 and §3), Task 16c (`section-4.ts`; `section-4.1-4.2.ts` has no runtime site), Task 16d (`section-4.3-4.4.ts`, `section-4.5.ts`, `section-4.6.ts`), Task 16e (§5 and §6.1–§6.4; `section-5.6.ts` has no runtime site), Task 16f (§6.5–§6.7), and Task 16g (`section-7-basics.ts`); `git log --grep 'Task 16[b-g]'`. Their counts are in that AGENTS.md bullet.
+Done since: Task 16b (§2 and §3), Task 16c (`section-4.ts`; `section-4.1-4.2.ts` has no runtime site), Task 16d (`section-4.3-4.4.ts`, `section-4.5.ts`, `section-4.6.ts`), Task 16e (§5 and §6.1–§6.4; `section-5.6.ts` has no runtime site), Task 16f (§6.5–§6.7), Task 16g (`section-7-basics.ts`), and Task 16h (`section-7-discovery.ts` and `section-7.1-7.3.ts`); `git log --grep 'Task 16[b-h]'`. Their counts are in that AGENTS.md bullet.
 
 Task 16e also made records of shared constants that later tasks' bodies stage after an invocation, so the detector no longer logs those sites: `support.ts`'s `UNKNOWN_KEY_CONFIG` (the configuration-state twins' invalid configuration, which T6.5-5, T11-2, T11-4, and T12.0-5 stage after an invocation, as T6.4-3 does), `section-5.7.ts`'s exported `SPEC_AND_CODE_CONFIG` (T11.3-1's later workspaces), and `section-6.4.ts`'s exported `RENAME_REFUSAL_CONFIG`, `RENAME_USAGE_CONFIG`, and the `src/app.ts` of `RENAME_USAGE_ORDERING_FILES` (T6.6-3). Task 16f did likewise: `section-6.5.ts`'s exported `MOVE_REFUSAL_CONFIG` and `MOVE_DERIVED_PATH_CONFIG` and `section-6.5-iii.ts`'s exported `R16_CONFIG` (T14-7's later workspaces stage them), and `section-13.5.ts`'s one configuration, `SPECS_ONLY_CONFIG` (`CORE_DECL`'s and `ISO_TWO_DECL`'s), which T6.6-3's runs-while-held arm stages after an invocation, named for T6.6-3 and the 13.5 bodies the detector saw staging it after one. A task that finds a further body staging one of them after an invocation adds that test's ID to the record's name.
 
@@ -53,13 +53,6 @@ Every split task below converts its modules by that rule, then checks:
 - `npm run typecheck`, `npm run format:check`, and the full self project under the namespace pass.
 
 The survey at 3f43daa (suite plus certification) names each module's runtime sites below: tests, staged paths, and distinct byte-strings. It is a floor, not the list.
-
-### Task 16h — TypeScript records: `section-7-discovery.ts` and `section-7.1-7.3.ts`
-
-- `section-7-discovery.ts`: T7-4 and T7-6. Configurations, `src/a<backslash>b.ts`, `src/ab.ts`, `src/plain.ts`, `.xspec/staged.ts`, and `specs/a'b.md` (T7-6's `unparseable` code source): 25 byte-strings.
-  - T7-6 fails diagnosed against the built product, so certification reached five of its configurations the suite did not.
-  - T7-4's Linux-leg literal-backslash arm stays gated inside the body; its record's bytes and path are built from code points as now.
-- `section-7.1-7.3.ts`: T7.1-1 and T7.3-1. Configurations, `specs/A.md` (a code source, `wellFormed` today), and `src/use.ts`: 22 byte-strings.
 
 ### Task 16i — TypeScript records: `section-7.4-7.5.ts`
 
