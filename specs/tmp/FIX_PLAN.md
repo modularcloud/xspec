@@ -38,20 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 37 — T6.5-11: arms (a) and (b) restaged; new arms (e) and (f) (TEST-SPEC L290; A24)
-
-**Where.** `test/suite/registry/section-6.5-ii.ts`. Today the origin import stands first (in (b), before `T`), and any line start is accepted.
-
-**Change.** Exact bytes at L290.
-- *Restage (a):* `import K from "../specs/k.xspec"`, then `import O, { text as t } …`, then `f` holding `K.a` and `t(O.x)`.
-- *Restage (b):* `import T …` first, then `import O, { text as t } …`.
-- *Placement in (a) and (b):* assert the added run exactly where the origin declaration's line stood.
-- *New (e):* the file holds `import { text as tt }` and lacks the default. The call becomes `tt(<X>.y)`, and the run adds only `import <X> from …`.
-- *New (f):* `tt` is appended after `f`, so it is untimely. One declaration binds both, and `<Y>` is never `tt`.
-- *In (e) and (f):* `build` and `check` clean, a clean compile, one `embeds` edge from `src/c.ts#f`, and preview parity.
-
-**Checks.** S-9 and S-7 pass. T6.5-11 against the built product.
-
 ### Task 38 — T6.5-18: fixture order and placement; the type-only and callee-shadow arms (TEST-SPEC L297; A25)
 
 **Where.** `test/suite/registry/section-6.5-iii.ts`: `a18App` and the `A18_*` section, which stage O first today.

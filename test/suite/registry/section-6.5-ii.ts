@@ -35,38 +35,52 @@
 //
 // Conservative operationalizations (noted per H-4):
 // - The fresh identifiers are the only unpinned runs (TEST-SPEC T6.5-11).
-//   Both are read off the rewritten call — the one place 6.4/6.5's pinned
+//   They are read off the rewritten call — the one place 6.4/6.5's pinned
 //   spelling makes them observable: exactly one `<callee>(<root>.y)` in the
-//   file, `<callee>` the added `text` binding (or `text`) and `<root>` the
-//   target module's default binding — the added declaration is then
-//   composed byte-exactly with those identifiers substituted, the file's
-//   post-move bytes WITHOUT it composed from the rules of 6.5 and 3 (the
-//   origin declaration's line removed where both its bindings lose their
-//   last use, the call's occurrence span replaced by the rewritten call —
-//   "the call's span as a second isolated run"), and the single inserted
-//   run isolated by diff (`assertExactDeclarationInsertion`) must read, at
-//   some admissible offset lying at the start of a line, as exactly that
-//   declaration followed by U+000A. Where the file keeps a binding (the
-//   retained origin import of (c), the existing `T` of (b)) the fresh
-//   identifiers may not be it — asserted directly (a collision is also
-//   TS2300 under the compile), never narrowing 6.5's latitude.
+//   file, `<callee>` the added `text` binding (or `text`), or (e)'s held
+//   `tt`, and `<root>` the target module's default binding, added or (b)'s
+//   held `T` — the added declaration is then composed byte-exactly with
+//   those identifiers substituted, the file's post-move bytes WITHOUT it
+//   composed from the rules of 6.5 and 3 (the origin declaration's line
+//   removed where both its bindings lose their last use, the call's
+//   occurrence span replaced by the rewritten call — "the call's span as a
+//   second isolated run"), and the single inserted run isolated by diff
+//   (`assertExactDeclarationInsertion`) must read as exactly that
+//   declaration followed by U+000A: in (a), (b), (e), and (f) at the one
+//   composed position where the origin declaration's line stood, directly
+//   after the heading import's line — the file's one line-start admissible
+//   offset (the removal's start and end, each following a statement's end
+//   and timely, compose to it; every later line start lies inside `f` or is
+//   untimely, a statement standing between it and `O`'s declaration) — and
+//   in (c) and (d), which TEST-SPEC places nowhere, at some offset lying at
+//   the start of a line. Where the file keeps a binding (the retained
+//   origin import of (c), `K` of (a) and (f), the existing `T` of (b), `tt`
+//   of (e) and (f)) the fresh identifiers may not be it — asserted directly
+//   (a collision is also TS2300 under the compile), never narrowing 6.5's
+//   latitude — and a held binding roots the call exactly where 6.5 roots it
+//   there: `T` the argument in (b), timely, its declaration preceding
+//   `O`'s; `tt` the callee in (e), timely, its declaration preceding `t`'s;
+//   `tt` never the callee in (f), untimely, `f` standing between `t`'s
+//   declaration and its own (T6.5-23(k)'s mirror).
 // - "`build` and `check` are clean (no 14.11, no 14.7)" is each command's
 //   `--json` report decoded as exactly `{"findings": []}` at exit 0.
-// - (a)'s preview parity runs on a second, identically staged workspace
-//   after the real move — the real move first, so the headline observation
-//   (the move succeeding, the call never becoming the cross-module call of
-//   14.11) is the first diagnosis. Byte determinism (6.1, 6.5) makes the two
-//   workspaces comparable: the `import-addition`'s pre-operation offset is
-//   mapped to composed coordinates (6.5's composition — an offset strictly
-//   inside the removal's or the rewrite's range is diagnosed; the removal's
-//   start and end compose to one position, the assertion admitting either,
-//   T6.6-4 (b)) and must be one of the offsets at which the real move's
-//   inserted run reads as the disciplined declaration.
-// - (b), (c), and (d) pin no preview (TEST-SPEC pins (a)'s), and no arm
-//   pins the origin's and target's plan entries (T6.6-4's business); the
-//   origin and target files' post-move bytes are asserted whole as
-//   soundness guards, composed from 6.5 and 3 with no latitude, as
-//   T6.5-8's arms compose them.
+// - (a)'s, (e)'s, and (f)'s preview parity runs on a second, identically
+//   staged workspace after the arm's real move — the real move first, so
+//   the headline observation (the move succeeding, the call never becoming
+//   the cross-module call of 14.11) is the first diagnosis. Byte
+//   determinism (6.1, 6.5) makes the two workspaces comparable: the
+//   `import-addition`'s pre-operation offset must be the origin
+//   declaration's removal's start or its end (TEST-SPEC T6.5-11: one
+//   composed position, the choice 6.5's latitude, T6.6-4 (b)), and, mapped
+//   to composed coordinates (6.5's composition — an offset strictly inside
+//   the removal's or the rewrite's range is diagnosed; the removal's start
+//   and end compose to one position), must be one of the offsets at which
+//   the real move's inserted run reads as the disciplined declaration.
+// - (b), (c), and (d) pin no preview (TEST-SPEC pins (a)'s, (e)'s, and
+//   (f)'s), and no arm pins the origin's and target's plan entries
+//   (T6.6-4's business); the origin, target, and third-module files'
+//   post-move bytes are asserted whole as soundness guards, composed from
+//   6.5 and 3 with no latitude, as T6.5-8's arms compose them.
 // - (d)'s discriminating expectation — the standard-tooling compile fails
 //   after the move — is asserted through H-2's tooling channel as at least
 //   one error diagnostic located within the type alias statement's
@@ -109,8 +123,8 @@ import {
 // One spec group plus one code group (SPEC 7.2): the code file is a
 // discovered code source, so its call records an occurrence and its edge. A
 // staged-source record: T6.5-11 stages it in workspaces created after a
-// product invocation — (a)'s preview-parity twin and arms (b)–(d) (S-9's
-// timing clause; test/self/s9-staged-sources.test.ts).
+// product invocation — the preview-parity twins of (a), (e), and (f), and
+// arms (b)–(f) (S-9's timing clause; test/self/s9-staged-sources.test.ts).
 const CONFIG = stagedTs(
   "T6.5-11 xspec.config.ts — one spec group and one code group",
   `import { defineConfig } from "xspec"
@@ -128,6 +142,8 @@ export default defineConfig({
 
 const ORIGIN = "specs/origin.mdx";
 const TARGET = "specs/target.mdx";
+/** (a)'s and (f)'s retained third module, whose node `a` `f`'s marker names. */
+const THIRD = "specs/k.mdx";
 const CODE = "src/c.ts";
 /** The canonical relative spelling of the target module from `src/`. */
 const TARGET_SPECIFIER = "../specs/target.xspec";
@@ -180,18 +196,43 @@ const TARGET_AFTER = [
   "",
 ].join("\n");
 
-/** The origin import every arm's code file opens with, `;`-terminated. */
-const ORIGIN_IMPORT = 'import O, { text as t } from "../specs/origin.xspec";';
-/** (b)'s existing default binding of the target module. */
-const TARGET_DEFAULT_IMPORT = 'import T from "../specs/target.xspec";';
+// The retained third module of (a) and (f): `K`'s import heads their code
+// file so that the origin declaration's removal starts after a statement's
+// end (TEST-SPEC T6.5-11), and `f`'s marker `K.a` keeps it. The move never
+// touches it. A ledger record, as the origin and target are.
+const THIRD_TEXT = ['<S id="a">', "Third-module a text.", "</S>", ""].join(
+  "\n",
+);
+const THIRD_BEFORE = stagedMdx("T6.5-11 specs/k.mdx", THIRD_TEXT);
+
+// The import declarations the arms' code files hold, spelled as TEST-SPEC
+// T6.5-11 gives them: single spaces, no statement terminator.
+/** The origin import every arm's code file holds. */
+const ORIGIN_IMPORT = 'import O, { text as t } from "../specs/origin.xspec"';
+/** (a)'s and (f)'s third-module import, heading the file. */
+const THIRD_IMPORT = 'import K from "../specs/k.xspec"';
+/** (b)'s existing default binding of the target module, heading the file. */
+const TARGET_DEFAULT_IMPORT = 'import T from "../specs/target.xspec"';
+/** (e)'s and (f)'s existing `text` binding of the target module. */
+const TARGET_TEXT_IMPORT = 'import { text as tt } from "../specs/target.xspec"';
 /** The call under test, inside the function `f`. */
 const CALL_BEFORE = "t(O.x)";
+/** (a)'s and (f)'s marker inside `f`, on the third module's node `a`. */
+const THIRD_MARKER = "K.a";
 /** (d)'s type-level spelling of the origin binding (SPEC 4.5). */
 const TYPE_ALIAS = "export type N = typeof O.x;";
 
-/** The function `f` holding one `text(...)` call as its return value. */
-function functionF(call: string): readonly string[] {
-  return ["export function f(): string {", `  return ${call};`, "}"];
+/**
+ * The function `f` holding one `text(...)` call as its return value, after
+ * an optional marker statement ((a)'s and (f)'s `K.a`).
+ */
+function functionF(call: string, marker?: string): readonly string[] {
+  return [
+    "export function f(): string {",
+    ...(marker === undefined ? [] : [`  ${marker};`]),
+    `  return ${call};`,
+    "}",
+  ];
 }
 
 /** (c)'s second function, calling on the unmoved node `w`. */
@@ -199,9 +240,15 @@ const FUNCTION_G = ["export function g(): string {", "  return t(O.w);", "}"];
 
 /** The bindings a rewritten call is rooted at, read off the call. */
 interface CallBindings {
-  /** The callee — the added `text` binding, or `text` itself. */
+  /**
+   * The callee — the target module's `text` binding: the added one (or
+   * `text` itself), or (e)'s held `tt`.
+   */
   readonly callee: string;
-  /** The argument's root — the target module's default binding. */
+  /**
+   * The argument's root — the target module's default binding: the added
+   * one, or (b)'s held `T`.
+   */
   readonly root: string;
 }
 
@@ -228,10 +275,31 @@ function textOnlyDeclaration(bindings: CallBindings): string {
   return `import ${namedTextBinding(bindings.callee)} from "${TARGET_SPECIFIER}"`;
 }
 
+/** `import X from "../specs/target.xspec"` (SPEC 6.5; (e)). */
+function defaultOnlyDeclaration(bindings: CallBindings): string {
+  return `import ${bindings.root} from "${TARGET_SPECIFIER}"`;
+}
+
+/**
+ * The offset of the start of line 2 of a file whose line 1 is `firstLine`
+ * terminated by U+000A — in the composed text of (a), (b), (e), and (f),
+ * where the origin declaration's line stood.
+ */
+function lineTwoOffset(firstLine: string): number {
+  return utf8Length(firstLine) + 1;
+}
+
 const EMBEDS_F_TO_Y: GraphEdge = {
   from: `${CODE}#f`,
   to: `${TARGET}#y`,
   kind: "embeds",
+};
+
+/** (a)'s and (f)'s marker edge: `K.a` inside `f`, untouched by the move. */
+const REFERENCES_F_TO_A: GraphEdge = {
+  from: `${CODE}#f`,
+  to: `${THIRD}#a`,
+  kind: "references",
 };
 
 /** One T6.5-11 arm: `src/c.ts` before the move and its pinned outcome. */
@@ -251,15 +319,39 @@ interface CallMoveArm {
   readonly declaration: (bindings: CallBindings) => string;
   /** The bindings the file lacks, for diagnoses. */
   readonly lacked: string;
-  /** The target module's default binding the file already holds (b). */
+  /**
+   * The target module's default binding the file already holds, which
+   * roots the argument (b).
+   */
   readonly existingRoot?: string;
+  /**
+   * The target module's `text` binding the file already holds, value-level,
+   * unshadowed, and timely, which roots the callee (e).
+   */
+  readonly existingCallee?: string;
+  /**
+   * A target-module `text` binding the file holds that is untimely for the
+   * callee, which therefore never roots it (f), with why.
+   */
+  readonly untimelyCallee?: { readonly name: string; readonly why: string };
   /** Identifiers the fresh bindings may not be: bindings the file keeps. */
   readonly forbidden: readonly {
     readonly name: string;
     readonly why: string;
   }[];
+  /**
+   * The insertion offset into `base` TEST-SPEC pins — where the origin
+   * declaration's line stood, the file's one line-start admissible offset —
+   * with how the diagnosis names it; absent, any offset lying at the start
+   * of a line is accepted ((c), (d)).
+   */
+  readonly placement?: { readonly offset: number; readonly where: string };
   /** Whether the origin declaration is removed with its line, or kept. */
   readonly originImport: "removed" | "kept";
+  /** Whether the third module `specs/k.mdx` is staged ((a), (f)). */
+  readonly third: boolean;
+  /** Whether TEST-SPEC pins the arm's preview parity ((a), (e), (f)). */
+  readonly preview: boolean;
   /** The workspace's complete `embeds` edge set after the move. */
   readonly embeds: readonly GraphEdge[];
   /** The workspace's complete `references` edge set after the move. */
@@ -267,39 +359,68 @@ interface CallMoveArm {
   readonly compile: "clean" | "fails-at-type-alias";
 }
 
+/** (a)'s and (f)'s pinned placement, directly after `K`'s line. */
+const AFTER_THIRD_IMPORT = {
+  offset: lineTwoOffset(THIRD_IMPORT),
+  where:
+    "the start of line 2 of the composed text, where the origin " +
+    "declaration's line stood, directly after `K`'s line — the one " +
+    "composed position the removal's start and end make, each following " +
+    "a statement's end and timely; every later line start lies inside " +
+    "the statement `f` (no top-level position) or past it, untimely, `f` " +
+    "standing between it and `O`'s declaration (SPEC 6.5; T6.5-23(n))",
+} as const;
+
 const CALL_MOVE_ARMS: readonly CallMoveArm[] = [
   {
     label: "(a)",
     summary:
-      "the file imports `O, { text as t }` from the origin module and calls " +
-      "`t(O.x)` inside `f`, both bindings losing their last use",
+      "`K`'s import heads the file, then `import O, { text as t }` from the " +
+      "origin module; `f` holds the marker `K.a` and calls `t(O.x)`, both " +
+      "origin bindings losing their last use",
     code: stagedTs(
       "T6.5-11 (a) src/c.ts",
-      [ORIGIN_IMPORT, "", ...functionF(CALL_BEFORE), ""].join("\n"),
+      [
+        THIRD_IMPORT,
+        ORIGIN_IMPORT,
+        ...functionF(CALL_BEFORE, THIRD_MARKER),
+        "",
+      ].join("\n"),
     ),
     base: (bindings) =>
-      ["", ...functionF(rewrittenCall(bindings)), ""].join("\n"),
+      [
+        THIRD_IMPORT,
+        ...functionF(rewrittenCall(bindings), THIRD_MARKER),
+        "",
+      ].join("\n"),
     declaration: fullDeclaration,
     lacked: "the target module's default and `text` bindings",
-    forbidden: [],
+    forbidden: [
+      {
+        name: "K",
+        why: "the default binding of the retained third-module import",
+      },
+    ],
+    placement: AFTER_THIRD_IMPORT,
     originImport: "removed",
+    third: true,
+    preview: true,
     embeds: [EMBEDS_F_TO_Y],
-    references: [],
+    references: [REFERENCES_F_TO_A],
     compile: "clean",
   },
   {
     label: "(b)",
     summary:
       'the file already holds `import T from "../specs/target.xspec"` — ' +
-      "its default binding used by the marker `T.z` — and lacks its `text`",
+      "heading it, before the origin import, its default binding used by " +
+      "the marker `T.z` — and lacks its `text`",
     code: stagedTs(
       "T6.5-11 (b) src/c.ts",
       [
-        ORIGIN_IMPORT,
         TARGET_DEFAULT_IMPORT,
-        "",
+        ORIGIN_IMPORT,
         "T.z;",
-        "",
         ...functionF(CALL_BEFORE),
         "",
       ].join("\n"),
@@ -307,9 +428,7 @@ const CALL_MOVE_ARMS: readonly CallMoveArm[] = [
     base: (bindings) =>
       [
         TARGET_DEFAULT_IMPORT,
-        "",
         "T.z;",
-        "",
         ...functionF(rewrittenCall(bindings)),
         "",
       ].join("\n"),
@@ -322,7 +441,19 @@ const CALL_MOVE_ARMS: readonly CallMoveArm[] = [
         why: "the identifier the file's existing target-module import binds",
       },
     ],
+    placement: {
+      offset: lineTwoOffset(TARGET_DEFAULT_IMPORT),
+      where:
+        "the start of line 2 of the composed text, where the origin " +
+        "declaration's line stood, directly after `T`'s line, as in (a) — " +
+        "the one composed position the removal's start and end make, each " +
+        "following a statement's end and timely; every later line start is " +
+        "untimely, the marker statement `T.z;` standing between it and " +
+        "`O`'s declaration (SPEC 6.5)",
+    },
     originImport: "removed",
+    third: false,
+    preview: false,
     embeds: [EMBEDS_F_TO_Y],
     references: [{ from: CODE, to: `${TARGET}#z`, kind: "references" }],
     compile: "clean",
@@ -365,6 +496,8 @@ const CALL_MOVE_ARMS: readonly CallMoveArm[] = [
       },
     ],
     originImport: "kept",
+    third: false,
+    preview: false,
     embeds: [
       EMBEDS_F_TO_Y,
       { from: `${CODE}#g`, to: `${ORIGIN}#w`, kind: "embeds" },
@@ -391,9 +524,106 @@ const CALL_MOVE_ARMS: readonly CallMoveArm[] = [
     lacked: "the target module's default and `text` bindings",
     forbidden: [],
     originImport: "removed",
+    third: false,
+    preview: false,
     embeds: [EMBEDS_F_TO_Y],
     references: [],
     compile: "fails-at-type-alias",
+  },
+  {
+    label: "(e)",
+    summary:
+      "the file holds the target module's `text` binding — `import { text " +
+      "as tt }` heading it, unused before the move — and lacks its default; " +
+      "`f` calls `t(O.x)`, the only use of `O` and of `t`",
+    code: stagedTs(
+      "T6.5-11 (e) src/c.ts",
+      [TARGET_TEXT_IMPORT, ORIGIN_IMPORT, ...functionF(CALL_BEFORE), ""].join(
+        "\n",
+      ),
+    ),
+    base: (bindings) =>
+      [TARGET_TEXT_IMPORT, ...functionF(rewrittenCall(bindings)), ""].join(
+        "\n",
+      ),
+    declaration: defaultOnlyDeclaration,
+    lacked: "the target module's default binding alone",
+    existingCallee: "tt",
+    forbidden: [
+      {
+        name: "tt",
+        why: "the `text` binding the file's existing target-module import binds",
+      },
+    ],
+    placement: {
+      offset: lineTwoOffset(TARGET_TEXT_IMPORT),
+      where:
+        "the start of line 2 of the composed text, where the origin " +
+        "declaration's line stood, directly after `tt`'s line, as in (a) — " +
+        "the one composed position the removal's start and end make, each " +
+        "following a statement's end and timely; every later line start " +
+        "lies inside the statement `f` or past it, untimely (SPEC 6.5)",
+    },
+    originImport: "removed",
+    third: false,
+    preview: true,
+    embeds: [EMBEDS_F_TO_Y],
+    references: [],
+    compile: "clean",
+  },
+  {
+    label: "(f)",
+    summary:
+      "(a)'s file with `import { text as tt }` from the target module " +
+      "appended after `f` — `tt` untimely for the callee, `f` standing " +
+      "between `t`'s declaration and its own",
+    code: stagedTs(
+      "T6.5-11 (f) src/c.ts",
+      [
+        THIRD_IMPORT,
+        ORIGIN_IMPORT,
+        ...functionF(CALL_BEFORE, THIRD_MARKER),
+        TARGET_TEXT_IMPORT,
+        "",
+      ].join("\n"),
+    ),
+    base: (bindings) =>
+      [
+        THIRD_IMPORT,
+        ...functionF(rewrittenCall(bindings), THIRD_MARKER),
+        TARGET_TEXT_IMPORT,
+        "",
+      ].join("\n"),
+    declaration: fullDeclaration,
+    lacked:
+      "the target module's default and `text` bindings — its held `tt` " +
+      "untimely for the callee",
+    untimelyCallee: {
+      name: "tt",
+      why:
+        "the target module's `text` binding the file holds, untimely for " +
+        "the callee: its declaration follows `t`'s with the statement `f` " +
+        "between them, and a binding declared after the replaced one is " +
+        "timely only with no top-level statement but import declarations " +
+        "between the two",
+    },
+    forbidden: [
+      {
+        name: "K",
+        why: "the default binding of the retained third-module import",
+      },
+      {
+        name: "tt",
+        why: "the `text` binding the file's existing target-module import binds",
+      },
+    ],
+    placement: AFTER_THIRD_IMPORT,
+    originImport: "removed",
+    third: true,
+    preview: true,
+    embeds: [EMBEDS_F_TO_Y],
+    references: [REFERENCES_F_TO_A],
+    compile: "clean",
   },
 ];
 
@@ -435,7 +665,12 @@ async function withWorkspace<T>(
 function armFiles(
   arm: CallMoveArm,
 ): Readonly<Record<string, InitialFileContents>> {
-  return { [ORIGIN]: ORIGIN_BEFORE, [TARGET]: TARGET_BEFORE, [CODE]: arm.code };
+  return {
+    [ORIGIN]: ORIGIN_BEFORE,
+    [TARGET]: TARGET_BEFORE,
+    ...(arm.third ? { [THIRD]: THIRD_BEFORE } : {}),
+    [CODE]: arm.code,
+  };
 }
 
 /**
@@ -465,8 +700,9 @@ const REWRITTEN_CALL =
  * The bindings the rewritten call is rooted at — the value-unpinned fresh
  * identifiers (SPEC 6.5), read off the one place the pinned spelling makes
  * them observable; diagnosed when the call is not rewritten as pinned, is
- * rooted at anything but the existing default binding where the file holds
- * one, or binds an identifier the file keeps.
+ * rooted at anything but the existing default or `text` binding where the
+ * file holds a timely one, has its callee rooted at a held `text` binding
+ * untimely for it, or binds an identifier the file keeps.
  */
 function readRewrittenCall(
   text: string,
@@ -497,12 +733,37 @@ function readRewrittenCall(
         `${JSON.stringify(rewrittenCall({ callee, root }))}`,
     );
   }
+  if (arm.existingCallee !== undefined && callee !== arm.existingCallee) {
+    fail(
+      `${context}: the rewritten call's callee must be re-rooted at the ` +
+        `existing \`text\` binding \`${arm.existingCallee}\` the file ` +
+        `already holds of the target module — value-level, unshadowed at ` +
+        `the call, and timely for the callee, its declaration preceding ` +
+        `\`t\`'s — so the addition binds the lacked default binding alone ` +
+        `and the call becomes exactly ` +
+        `\`${arm.existingCallee}(<X>.y)\` (SPEC 6.5); the call reads ` +
+        `${JSON.stringify(rewrittenCall({ callee, root }))} — a product ` +
+        `judging the \`text\` binding lacked whenever the default is`,
+    );
+  }
+  if (arm.untimelyCallee !== undefined && callee === arm.untimelyCallee.name) {
+    fail(
+      `${context}: the rewritten call's callee is \`${callee}\`, ` +
+        `${arm.untimelyCallee.why} — a held binding roots a spelling only ` +
+        `where it is timely for it, so one added declaration binds both ` +
+        `the default and \`text\` and the callee is its \`text\` binding ` +
+        `(SPEC 6.5; T6.5-23(k)); the call reads ` +
+        `${JSON.stringify(rewrittenCall({ callee, root }))} — a product ` +
+        `checking a held \`text\` binding's timeliness only when it would ` +
+        `otherwise add nothing`,
+    );
+  }
   for (const kept of arm.forbidden) {
-    for (const [role, name] of [
-      ["callee", callee],
-      ["argument root", root],
+    for (const [role, name, held] of [
+      ["callee", callee, arm.existingCallee],
+      ["argument root", root, arm.existingRoot],
     ] as const) {
-      if (name === kept.name && name !== arm.existingRoot) {
+      if (name === kept.name && name !== held) {
         fail(
           `${context}: the rewritten call's ${role} is \`${name}\`, ` +
             `${kept.why} — an added import binds fresh identifiers ` +
@@ -515,7 +776,7 @@ function readRewrittenCall(
   return { callee, root };
 }
 
-/** The real move's observations (a)'s preview parity needs. */
+/** The real move's observations an arm's preview parity needs. */
 interface RealMoveOutcome {
   readonly bindings: CallBindings;
   /** Every composed-coordinates offset at which the added run reads. */
@@ -525,9 +786,11 @@ interface RealMoveOutcome {
 /**
  * Stage one arm, run the section-form move, and assert the code file is its
  * composed post-move bytes with exactly the declaration the lacked bindings
- * require added under 6.5's line discipline at a line-start offset, the
- * origin and target files as composed, `check` and `build` clean, the edge
- * sets exact, and the standard-tooling compile as pinned.
+ * require added under 6.5's line discipline — at the arm's pinned offset,
+ * where the origin declaration's line stood, or, unpinned, at a line-start
+ * offset — the origin, target, and third-module files as composed, `check`
+ * and `build` clean, the edge sets exact, and the standard-tooling compile
+ * as pinned.
  */
 async function runCallMoveArm(
   product: ProductBinding,
@@ -586,7 +849,22 @@ async function runCallMoveArm(
         `binding ${arm.lacked}: ${JSON.stringify(declaration)} followed by ` +
         `U+000A (SPEC 6.5, 2.1, 5.7, 3)`,
     );
-    if (!readings.some((reading) => reading.atLineStart)) {
+    const pinned = arm.placement;
+    if (pinned !== undefined) {
+      // Bytes are the only observable: the pin holds exactly when the run
+      // reads as the disciplined declaration at the pinned offset.
+      if (!readings.some((reading) => reading.offset === pinned.offset)) {
+        fail(
+          `${context}: ${CODE} — the added declaration ` +
+            `${JSON.stringify(declaration)} followed by U+000A must stand at ` +
+            `${pinned.where} (offset ${String(pinned.offset)} of the ` +
+            `composed text), the file's one line-start admissible offset; ` +
+            `the inserted run reads instead at composed offset(s) ` +
+            `${readings.map((reading) => String(reading.offset)).join(", ")} ` +
+            `(SPEC 6.5, 3; T6.5-8's discipline)`,
+        );
+      }
+    } else if (!readings.some((reading) => reading.atLineStart)) {
       fail(
         `${context}: ${CODE} — the added declaration was inserted at a ` +
           `mid-line offset (U+000A, the declaration, U+000A; read at ` +
@@ -612,6 +890,15 @@ async function runCallMoveArm(
         `appended at the end of the file plus U+000A, otherwise ` +
         `byte-identical (SPEC 6.5, 3; H-4, normalizing nothing)`,
     );
+    if (arm.third) {
+      await assertFileBytes(
+        workspace.path(THIRD),
+        THIRD_TEXT,
+        `${context}: ${THIRD} after the move — the retained third module, ` +
+          `whose node \`K.a\` names is neither moved nor referenced by the ` +
+          `moved text, untouched (SPEC 6.5; H-4, normalizing nothing)`,
+      );
+    }
 
     await expectFindingFreeReport(
       product,
@@ -764,12 +1051,44 @@ function composedOffset(
 }
 
 /**
- * (a)'s preview parity (SPEC 6.6, 12.7): on a second, identically staged
- * workspace, the preview's entry for the code file holds exactly the
- * `import-removal` spanning the origin declaration with its adjunct drop,
- * the `reference-rewrite` spanning the call's occurrence, and one
- * zero-length `import-addition` whose offset, composed, is where the real
- * move inserted the declaration.
+ * The byte range of `needle`'s one occurrence in `text`, `needle` standing
+ * at a line start and followed by U+000A — `withTerminator` widens the range
+ * over that terminator. Throws (a harness defect) when the arm table stages
+ * no such occurrence or several.
+ */
+function stagedLineRange(
+  text: string,
+  needle: string,
+  withTerminator: boolean,
+  label: string,
+): ByteRange {
+  const at = text.indexOf(needle);
+  if (
+    at < 0 ||
+    text.indexOf(needle, at + 1) >= 0 ||
+    (at > 0 && text[at - 1] !== "\n") ||
+    text[at + needle.length] !== "\n"
+  ) {
+    throw new Error(
+      `${label}: the staged ${CODE} must hold ${JSON.stringify(needle)} ` +
+        "exactly once, as a line of its own (a harness defect)",
+    );
+  }
+  const start = utf8Length(text.slice(0, at));
+  return {
+    start,
+    end: start + utf8Length(needle) + (withTerminator ? 1 : 0),
+  };
+}
+
+/**
+ * An arm's preview parity (SPEC 6.6, 12.7) — (a)'s, (e)'s, and (f)'s: on a
+ * second, identically staged workspace, the preview's entry for the code
+ * file holds exactly the `import-removal` spanning the origin declaration
+ * with its adjunct drop, the `reference-rewrite` spanning the call's
+ * occurrence, and one zero-length `import-addition` at the removal's start
+ * or at its end, whose offset, composed, is where the real move inserted
+ * the declaration.
  */
 async function runPreviewParityArm(
   product: ProductBinding,
@@ -811,8 +1130,16 @@ async function runPreviewParityArm(
           `[${preview.files.map((file) => renderPathValue(file.file)).join(", ")}]`,
       );
     }
-    const removal: ByteRange = { start: 0, end: utf8Length(ORIGIN_IMPORT) + 1 };
     const code = codeText(arm);
+    if (arm.originImport !== "removed") {
+      throw new Error(
+        `${context}: preview parity is pinned for arms whose origin ` +
+          "declaration is removed (a harness defect)",
+      );
+    }
+    // The origin declaration's own characters plus the terminator of the
+    // line its deletion leaves empty (SPEC 6.5, 3).
+    const removal = stagedLineRange(code, ORIGIN_IMPORT, true, context);
     const callStart = utf8Length(code.slice(0, code.indexOf(CALL_BEFORE)));
     const rewrite: ByteRange = {
       start: callStart,
@@ -849,13 +1176,26 @@ async function runPreviewParityArm(
       `${label}: ${CODE} — exactly the three edits the move makes there, ` +
         `class-plus-range in the 12.7 order: the \`import-removal\` ` +
         `spanning the origin declaration with its adjunct drop ` +
-        `[0, ${String(removal.end)}) — its own characters and the ` +
-        `terminator of the line its deletion leaves empty — the ` +
-        `\`reference-rewrite\` spanning the call's occurrence, callee ` +
-        `through closing parenthesis [${String(rewrite.start)}, ` +
+        `[${String(removal.start)}, ${String(removal.end)}) — its own ` +
+        `characters and the terminator of the line its deletion leaves ` +
+        `empty — the \`reference-rewrite\` spanning the call's occurrence, ` +
+        `callee through closing parenthesis [${String(rewrite.start)}, ` +
         `${String(rewrite.end)}), and the zero-length \`import-addition\` ` +
         `at the insertion offset (SPEC 6.6, 6.5, 5.7, 3, 12.7)`,
     );
+    if (offset !== removal.start && offset !== removal.end) {
+      fail(
+        `${label}: ${CODE} — the \`import-addition\` stands at offset ` +
+          `${String(offset)}, neither the origin declaration's removal's ` +
+          `start (${String(removal.start)}) nor its end ` +
+          `(${String(removal.end)}): the one composed position those two ` +
+          `make, where the origin declaration's line stood, is the file's ` +
+          `one line-start admissible offset — every later line start lies ` +
+          `inside a statement or is untimely — the choice between them 6.5's ` +
+          `latitude, the real operation's bytes the same either way ` +
+          `(SPEC 6.5, 6.6; T6.6-4 (b))`,
+      );
+    }
     const composed = composedOffset(
       offset,
       removal,
@@ -866,7 +1206,7 @@ async function runPreviewParityArm(
       fail(
         `${label}: the \`import-addition\` offset ${String(offset)} lies ` +
           `strictly inside another edit's range — the removal ` +
-          `[0, ${String(removal.end)}) or the rewrite ` +
+          `[${String(removal.start)}, ${String(removal.end)}) or the rewrite ` +
           `[${String(rewrite.start)}, ${String(rewrite.end)}) — where an ` +
           `addition's offset never lies (SPEC 6.5, 6.6)`,
       );
@@ -887,13 +1227,11 @@ async function runPreviewParityArm(
 const T6_5_11 = defineProductTest({
   id: "T6.5-11",
   title:
-    "TypeScript `text(...)` calls across the move: a call whose target the section form carries into another file is rewritten whole — callee through the target module's `text` binding, argument through its default binding — over its occurrence's span, never becoming the cross-module call of 14.11, and imports are added binding exactly the lacked bindings and removed exactly when an occurrence used a binding of theirs before and none after; over `specs/origin.mdx#x` → `specs/target.mdx#y` and `src/c.ts`: (a) `import O, { text as t }` with `t(O.x)` inside `f` — after the move the file compiles clean under standard tooling, `build` and `check` are clean, `query edges` reports the one `embeds` edge from `src/c.ts#f` to `specs/target.mdx#y`, and the bytes are the composed post-move file with the single added run exactly `import <X>, { text as <Y> } from \"../specs/target.xspec\"` (or `{ text }` where the fresh identifier is `text` itself) followed by U+000A at a line-start offset, the call's span replaced by `<Y>(<X>.y)`, the origin declaration removed with its line, no other byte changed; (b) the file already holding `import T from \"../specs/target.xspec\"` (used by the marker `T.z`) gains exactly `import { text as <Y> } from …` (or `{ text }`), the argument rewritten through the existing `T`, the origin import removed; (c) a second call `t(O.w)` on an unmoved node keeps the origin declaration byte-for-byte, the moved call alone rewritten; (d) `type N = typeof O.x` keeps no import — the origin import is removed, `build` and `check` are clean, and the standard-tooling compile fails at the alias; and (a)'s `--preview` reports for `src/c.ts` one `reference-rewrite` over the call's span, one `import-addition` at the offset the real operation then uses, and one `import-removal` spanning the origin declaration with its adjunct drop (SPEC 6.5, 4.3, 4.5, 4.6, 5.7, 6.6, 12.7)",
+    "TypeScript `text(...)` calls across the move: a call whose target the section form carries into another file is rewritten whole — callee through the target module's `text` binding, argument through its default binding — over its occurrence's span, never becoming the cross-module call of 14.11, and imports are added binding exactly the lacked bindings and removed exactly when an occurrence used a binding of theirs before and none after; over `specs/origin.mdx#x` → `specs/target.mdx#y` and `src/c.ts`: (a) `import K from \"../specs/k.xspec\"` heading `import O, { text as t }`, then `f` holding the marker `K.a` and `t(O.x)` — after the move the file compiles clean under standard tooling, `build` and `check` are clean, `query edges` reports the one `embeds` edge from `src/c.ts#f` to `specs/target.mdx#y`, and the bytes are the composed post-move file with the single added run exactly `import <X>, { text as <Y> } from \"../specs/target.xspec\"` (or `{ text }` where the fresh identifier is `text` itself) followed by U+000A where the origin declaration's line stood, directly after `K`'s line, the call's span replaced by `<Y>(<X>.y)`, the origin declaration removed with its line, no other byte changed; (b) the file headed by `import T from \"../specs/target.xspec\"` (used by the marker `T.z`), then the origin import, gains exactly `import { text as <Y> } from …` (or `{ text }`) where the origin declaration's line stood, the argument rewritten through the existing `T`, the origin import removed; (c) a second call `t(O.w)` on an unmoved node keeps the origin declaration byte-for-byte, the moved call alone rewritten; (d) `type N = typeof O.x` keeps no import — the origin import is removed, `build` and `check` are clean, and the standard-tooling compile fails at the alias; (e) the file headed by `import { text as tt } from \"../specs/target.xspec\"`, lacking the default, gains exactly `import <X> from …` where the origin declaration's line stood, the call becoming `tt(<X>.y)`; (f) (a)'s file with `import { text as tt }` appended after `f`, untimely for the callee, gains one declaration binding both, as in (a), the call becoming `<Y>(<X>.y)`, `<Y>` never `tt` — (e) and (f) each clean under `build`, `check`, and the compile, with the one `embeds` edge; and the `--preview` of (a), (e), and (f) reports for `src/c.ts` one `reference-rewrite` over the call's span, one `import-addition` at the origin declaration's removal's start or end, where the real operation then inserts, and one `import-removal` spanning the origin declaration with its adjunct drop (SPEC 6.5, 4.3, 4.5, 4.6, 5.7, 6.6, 12.7)",
   run: async (product) => {
-    const armA = CALL_MOVE_ARMS[0]!;
-    const real = await runCallMoveArm(product, armA);
-    await runPreviewParityArm(product, armA, real);
-    for (const arm of CALL_MOVE_ARMS.slice(1)) {
-      await runCallMoveArm(product, arm);
+    for (const arm of CALL_MOVE_ARMS) {
+      const real = await runCallMoveArm(product, arm);
+      if (arm.preview) await runPreviewParityArm(product, arm, real);
     }
   },
 });
