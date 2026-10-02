@@ -36,14 +36,16 @@
 // the whole braced construct — while `{...a, b}` is not, 14.20 at the
 // offset of its comma (T2.7-3's pair, staged under S-9's `unparseable`
 // declaration). The comment forms of 2.7 beyond the usual `{/* … */}` —
-// `{}`, ECMAScript-only and ASCII whitespace between braces, a block-comment
-// sequence, line-comment containers ended by U+000A or U+000D, and the
-// run-on `{// c}` U+000A `}` — each behave as T2.7-2's comment (removed
-// from Markdown output, absent from own text, no finding, listed under
-// `view`'s `comments` brace through brace); an expression beside a comment
-// is 14.16; U+0085 or U+200B between braces, `{// c` U+2028/U+2029 `}`
-// U+000A `}`, and `{// c}` with no later `}` are 14.20 at the offsets SPEC
-// 14 fixes (T2.7-4, each 14.20 staging declared `unparseable`).
+// `{}`, ECMAScript-only and ASCII whitespace between braces (each space
+// separator Unicode 15.1 places outside Latin-1 among them, one arm per code
+// point), a block-comment sequence, line-comment containers ended by U+000A
+// or U+000D, and the run-on `{// c}` U+000A `}` — each behave as T2.7-2's
+// comment (removed from Markdown output, absent from own text, no finding,
+// listed under `view`'s `comments` brace through brace); an expression
+// beside a comment is 14.16; U+0085, U+200B, or U+180E between braces,
+// `{// c` U+2028/U+2029 `}` U+000A `}`, and `{// c}` with no later `}` are
+// 14.20 at the offsets SPEC 14 fixes (T2.7-4, each 14.20 staging declared
+// `unparseable`).
 //
 // Location assertions follow the SUITE-08 discipline: negative fixtures are
 // pure ASCII, composed as `prefix + construct + suffix` with exactly known
@@ -1769,9 +1771,14 @@ const T2_7_3 = defineProductTest({
 // container range, opening brace through closing brace (11.4). A container
 // holding anything else is no comment: an invalid expression container
 // (14.16) where the grammar derives its content, an unparseable file (14.20)
-// where it does not — U+0085 and U+200B being neither ECMAScript whitespace
-// nor line terminators, and the comment grammar's own failures (T14-12). The
-// code points are spelled from their values, never as escape literals.
+// where it does not — U+0085, U+200B, and U+180E being neither ECMAScript
+// whitespace nor line terminators, and the comment grammar's own failures
+// (T14-12). ECMAScript's space separators are the latest Unicode version's
+// — Unicode 15.1's (14.20) — so every Zs code point outside Latin-1 between
+// braces is a comment too, one arm each, while U+180E, a space separator up
+// to Unicode 6.2 and a format character under 15.1, is neither whitespace
+// nor an identifier character: 14.20 at its offset. The code points are
+// spelled from their values, never as escape literals.
 const CARRIAGE_RETURN = String.fromCodePoint(0x0d);
 const NO_BREAK_SPACE = String.fromCodePoint(0xa0);
 const ZERO_WIDTH_NO_BREAK_SPACE = String.fromCodePoint(0xfeff);
@@ -1779,6 +1786,22 @@ const LINE_SEPARATOR = String.fromCodePoint(0x2028);
 const PARAGRAPH_SEPARATOR = String.fromCodePoint(0x2029);
 const NEXT_LINE = String.fromCodePoint(0x85);
 const ZERO_WIDTH_SPACE = String.fromCodePoint(0x200b);
+const MONGOLIAN_VOWEL_SEPARATOR = String.fromCodePoint(0x180e);
+
+/**
+ * The space separators (general category Zs) that Unicode 15.1 places
+ * outside Latin-1 — U+1680, U+2000 through U+200A, U+202F, U+205F, and
+ * U+3000 — one comment arm each (T2.7-4).
+ */
+const SPACE_SEPARATORS_PAST_LATIN_1: readonly number[] = [
+  0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007,
+  0x2008, 0x2009, 0x200a, 0x202f, 0x205f, 0x3000,
+];
+
+/** A code point's conventional name, `U+` and at least four hex digits. */
+function codePointName(code: number): string {
+  return `U+${code.toString(16).toUpperCase().padStart(4, "0")}`;
+}
 
 /** One comment form of 2.7: its container's exact characters and staging. */
 interface CommentForm {
@@ -1864,6 +1887,16 @@ const T2_7_4_COMMENT_FORMS: readonly CommentForm[] = [
     construct: `{${PARAGRAPH_SEPARATOR}}`,
     layout: "twin",
   },
+  // One arm per space separator outside Latin-1, each in its own file: a
+  // product whose brace-side whitespace is ASCII's plus the four code points
+  // 14.20 names takes `{` U+3000 `}` (the ideographic space CJK input methods
+  // produce) for no empty expression and masks that file.
+  ...SPACE_SEPARATORS_PAST_LATIN_1.map((code): CommentForm => ({
+    file: `specs/zs-${code.toString(16)}.mdx`,
+    name: `${codePointName(code)} between braces, a space separator of Unicode 15.1`,
+    construct: `{${String.fromCodePoint(code)}}`,
+    layout: "twin",
+  })),
 ];
 
 // Each form's file: one section holding the form inline — `Alpha ` before
@@ -2124,6 +2157,14 @@ const T2_7_4_CODE_POINT_RULE =
   "both by name), so the content is no empty expression, and neither begins " +
   "any token of the grammar, so it derives no expression either; the prefix " +
   "through `{` begins a well-formed file (SPEC 14, 14.20, 1.4; T14-11)";
+const T2_7_4_FORMAT_CHARACTER_RULE =
+  "the zero-length range at the offset of the code point — U+180E, a space " +
+  "separator up to Unicode 6.2, is a format character under Unicode 15.1, " +
+  "whose space separators ECMAScript's are (14.20): neither whitespace, a " +
+  "line terminator, nor an identifier character, so the content is no empty " +
+  "expression, and it begins no token of the grammar, so it derives no " +
+  "expression either; the prefix through `{` begins a well-formed file " +
+  "(SPEC 14, 14.20, 1.4; T14-11)";
 const T2_7_4_FIRST_BRACE_RULE =
   "the zero-length range at the offset of the first `}` — the deletion " +
   "judgement runs the line comment through U+000A, so the first brace " +
@@ -2146,6 +2187,12 @@ const T2_7_4_UNPARSEABLE_ARMS: readonly UnparseableCommentArm[] = [
     utf8Bytes("{"),
     "U+200B between braces",
     T2_7_4_CODE_POINT_RULE,
+  ),
+  unparseableInSection(
+    `{${MONGOLIAN_VOWEL_SEPARATOR}}`,
+    utf8Bytes("{"),
+    "U+180E between braces",
+    T2_7_4_FORMAT_CHARACTER_RULE,
   ),
   unparseableInSection(
     `{// c${LINE_SEPARATOR}}\n}`,
@@ -2171,7 +2218,7 @@ const T2_7_4_UNPARSEABLE_ARMS: readonly UnparseableCommentArm[] = [
 ];
 
 /**
- * The five stagings as T14-11 re-asserts them (TEST-SPEC T14-11's closing
+ * The six stagings as T14-11 re-asserts them (TEST-SPEC T14-11's closing
  * clause): each arm's record as `specs/A.mdx` with its offset — the same
  * staging `runUnparseableCommentArm` drives, declared unparseable (S-9).
  */
@@ -2251,7 +2298,7 @@ async function runUnparseableCommentArm(
 const T2_7_4 = defineProductTest({
   id: "T2.7-4",
   title:
-    "every comment form of 2.7 — `{}`, ASCII and ECMAScript-only whitespace between braces (U+00A0, U+FEFF, U+2028, U+2029), a block-comment sequence, line-comment containers ended by U+000A or U+000D before their closing brace, and the run-on `{// c}` U+000A `}` — is removed from Markdown output byte-exactly, absent from own text, finding-free with `build` exit 0, and listed in `view`'s `comments` brace through brace; an expression beside a comment is one 14.16 brace through brace with no `comments` entry; U+0085 or U+200B between braces, `{// c` U+2028/U+2029 `}` U+000A `}`, and `{// c}` with no later `}` are 14.20 at the offsets SPEC 14 fixes (SPEC 2.7, 14.16, 14.20, 1.4, 3, 11.2, 11.4)",
+    "every comment form of 2.7 — `{}`, ASCII and ECMAScript-only whitespace between braces (U+00A0, U+FEFF, U+2028, U+2029, and each space separator Unicode 15.1 places outside Latin-1 — U+1680, U+2000 through U+200A, U+202F, U+205F, U+3000 — one arm per code point), a block-comment sequence, line-comment containers ended by U+000A or U+000D before their closing brace, and the run-on `{// c}` U+000A `}` — is removed from Markdown output byte-exactly, absent from own text, finding-free with `build` exit 0, and listed in `view`'s `comments` brace through brace; an expression beside a comment is one 14.16 brace through brace with no `comments` entry; U+0085, U+200B, or U+180E (a format character under Unicode 15.1) between braces, `{// c` U+2028/U+2029 `}` U+000A `}`, and `{// c}` with no later `}` are 14.20 at the offsets SPEC 14 fixes (SPEC 2.7, 14.16, 14.20, 1.4, 3, 11.2, 11.4)",
   run: async (product) => {
     await runCommentForms(product);
     await runEnclosedConstructArm(product, "T2.7-4", T2_7_4_EXPRESSION_ARM);
