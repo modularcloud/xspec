@@ -38,22 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 31 — T6.5-1: the five-declaration specifier arm (TEST-SPEC L278; SPEC 6.5; A18)
-
-**Where.** `test/suite/registry/section-6.5.ts`.
-
-**Change.** Run `move specs/A.mdx specs/sub/A.mdx` under the glob `specs/**/*.mdx`, with `specs/C.mdx` discovered. The arm has five import declarations whose specifiers the move rewrites, though none records an edge (exact bytes at L278):
-- the moved file's own unused `import C from "./C.xspec"` in `A.mdx`;
-- the unused `import A from "./A.xspec"` in `B.mdx`;
-- in `src/c.ts`: `import type T`, `import { type text as t }`, and `import "../specs/A.xspec"`.
-
-Expected:
-- each specifier is rewritten byte-exactly, keeping its quote style;
-- the preview's `files` holds the relocation entry and exactly five `import-specifier-rewrite` entries;
-- `build` and `check` exit 0 afterward.
-
-**Checks.** S-9 and S-7 pass. T6.5-1 against the built product.
-
 ### Task 32 — T6.5-2: the CRLF and lone-CR terminator-kind arms (TEST-SPEC L279; SPEC 6.5, 3; A19)
 
 **Where.** `test/suite/registry/section-6.5.ts`: `X2_ARMS`. No T6.5 module stages CR or CRLF today.
