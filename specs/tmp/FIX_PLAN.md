@@ -38,14 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 28 — T5.7-2: the U+3000 / U+202F token-bound arm (TEST-SPEC L239; SPEC 5.7, 1.4; A15)
-
-**Where.** `test/suite/registry/section-5.7.ts`: `TOKEN_BOUND_ARMS` holds only the U+00A0 and U+FEFF arms today.
-
-**Change.** Add `d={` U+3000 `BASE.a` U+202F `}`: its occurrence spans `BASE.a` alone.
-
-**Checks.** S-9 and S-7 pass. T5.7-2 against the built product.
-
 ### Task 29 — T6.4-2: five keepable-form rename arms (TEST-SPEC L269; SPEC 6.4, 1.4; A16)
 
 **Where.** `test/suite/registry/section-6.4.ts`.

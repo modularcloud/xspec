@@ -754,7 +754,11 @@ function assertStagedSpan(arm: SpanArm): void {
 // occurrence's bounds are ECMAScript tokens' (SPEC 1.4, 14): the span is the
 // reference's own expression, whatever whitespace and comments its braces
 // hold beside it — a product excluding ASCII whitespace alone spans into a
-// U+00A0 or U+FEFF neighbor and fails the first two arms. Line comments inside
+// U+00A0, U+FEFF, or U+3000 neighbor and fails the first three arms, and one
+// whose class is ASCII's plus the code points SPEC 14.20 names (U+00A0,
+// U+FEFF, U+2028, U+2029) spans into the third arm's U+3000 and U+202F —
+// Unicode 15.1 space separators ECMAScript's whitespace takes (SPEC 14.20)
+// that 14.20 does not name — and fails it (T2.7-4). Line comments inside
 // the value take 14.20's deletion judgement and run-on rule as a container's
 // (2.7, T2.7-4): `d={// c` U+000A `BASE.a}` ends its comment at the
 // terminator, and in the run-on twin `d={// c}` U+000A `BASE.a}` the first
@@ -765,12 +769,14 @@ function assertStagedSpan(arm: SpanArm): void {
 // staged in a workspace of its own, so a form the product mishandles is
 // diagnosed by name without masking the others. The first staging's
 // multi-byte `pre` section precedes the value, so byte offsets diverge from
-// code-point and UTF-16 counting for every form, and the U+00A0 (2 bytes) and
-// U+FEFF (3 bytes) spellings shift the span's own start as well. The two code
-// points are composed from their values, never spelled as escapes, so the
-// staged bytes are exactly those the entry names.
+// code-point and UTF-16 counting for every form, and the U+00A0 (2 bytes),
+// U+FEFF (3 bytes), and U+3000 (3 bytes) spellings shift the span's own start
+// as well. The four code points are composed from their values, never spelled
+// as escapes, so the staged bytes are exactly those the entry names.
 const NBSP = String.fromCodePoint(0xa0); // U+00A0 — no-break space
 const ZWNBSP = String.fromCodePoint(0xfeff); // U+FEFF — inside the file, so no byte-order mark
+const IDEOGRAPHIC_SPACE = String.fromCodePoint(0x3000); // U+3000 — a Unicode 15.1 space separator (Zs)
+const NARROW_NBSP = String.fromCodePoint(0x202f); // U+202F — narrow no-break space, a Unicode 15.1 space separator (Zs)
 const LF = "\n"; // U+000A — the line terminator that ends a line comment
 
 interface TokenBoundArm {
@@ -795,6 +801,14 @@ const TOKEN_BOUND_ARMS: readonly TokenBoundArm[] = [
       "whitespace inside the file, no byte-order mark; SPEC 1.4)",
     before: ZWNBSP,
     after: "",
+  },
+  {
+    what:
+      "U+3000 before and U+202F after the reference — `d={` U+3000 " +
+      "`BASE.a` U+202F `}` (Unicode 15.1 space separators ECMAScript's " +
+      "whitespace takes and SPEC 14.20 does not name; SPEC 1.4, 14.20)",
+    before: IDEOGRAPHIC_SPACE,
+    after: NARROW_NBSP,
   },
   {
     what: "a block comment before the reference — `d={ /* c */ BASE.a }`",
@@ -993,7 +1007,7 @@ async function assertTokenBoundArm(
 const T5_7_2 = defineProductTest({
   id: "T5.7-2",
   title:
-    "byte-precise occurrence spans per kind against precomputed offsets: a `d` occurrence spans exactly that one reference's own expression — an array's middle entry alone, no brackets, commas, or surrounding whitespace; an MDX embedding occurrence spans the entire braced container `{text(...)}`, opening brace through closing brace — the whole construct compilation replaces; a TS call occurrence spans callee through closing parenthesis, argument included — an aliased callee `t(SPEC.x)` from its `t`; a marker occurrence spans the bare reference chain alone, exclusive of the statement's terminating `;` and surrounding trivia; token bounds inside a `d` value take ECMAScript's whitespace and comments — `d={` U+00A0 `BASE.a` U+00A0 `}`, `d={` U+FEFF `BASE.a` `}`, `d={ /* c */ BASE.a }`, and the line-comment forms `d={// c` U+000A `BASE.a}` and its run-on twin `d={// c}` U+000A `BASE.a}` (14.20's deletion judgement and run-on rule) are each a well-formed `d` recording one occurrence spanning `BASE.a` alone (SPEC 5.7, 1.4, 1.7, 2.7, 3, 4.4, 11.3, 14)",
+    "byte-precise occurrence spans per kind against precomputed offsets: a `d` occurrence spans exactly that one reference's own expression — an array's middle entry alone, no brackets, commas, or surrounding whitespace; an MDX embedding occurrence spans the entire braced container `{text(...)}`, opening brace through closing brace — the whole construct compilation replaces; a TS call occurrence spans callee through closing parenthesis, argument included — an aliased callee `t(SPEC.x)` from its `t`; a marker occurrence spans the bare reference chain alone, exclusive of the statement's terminating `;` and surrounding trivia; token bounds inside a `d` value take ECMAScript's whitespace — its space separators Unicode 15.1's — and comments — `d={` U+00A0 `BASE.a` U+00A0 `}`, `d={` U+FEFF `BASE.a` `}`, `d={` U+3000 `BASE.a` U+202F `}`, `d={ /* c */ BASE.a }`, and the line-comment forms `d={// c` U+000A `BASE.a}` and its run-on twin `d={// c}` U+000A `BASE.a}` (14.20's deletion judgement and run-on rule) are each a well-formed `d` recording one occurrence spanning `BASE.a` alone (SPEC 5.7, 1.4, 1.7, 2.7, 3, 4.4, 11.3, 14)",
   run: async (product) => {
     for (const arm of SPAN_ARMS) assertStagedSpan(arm);
 
