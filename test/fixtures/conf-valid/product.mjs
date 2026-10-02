@@ -87,7 +87,9 @@
 // `valueViolation`'s control branch; `widenValidityWhitespace`
 // (§VIOL-VALID-WIDE, bin-wide.mjs, CERT-10) in `valueViolation`'s whitespace
 // branch — U+00A0 and U+0085, exactly, treated as whitespace for 1.4
-// validity only.
+// validity only; `acceptLineSeparators` (§VIOL-VALID-SEP, bin-sep.mjs) in
+// `valueViolation`'s U+2028/U+2029 branch — 1.4's bar on the two code points
+// not enforced, every other clause of the quote-and-escape bullet kept.
 
 import { createHash } from "node:crypto";
 import * as fsp from "node:fs/promises";
@@ -527,7 +529,7 @@ function isValidityWhitespace(codePoint) {
  * (§VIOL-VALID-WIDE, bin-wide.mjs) they are treated as whitespace for 1.4
  * validity, so segments and tags containing them are rejected with 14.4.
  * U+2028 and U+2029 belong to neither class either, but 1.4's
- * quote-and-escape bullet bars them in every fixture
+ * quote-and-escape bullet bars them in every fixture but §VIOL-VALID-SEP's
  * (`LINE_SEPARATOR_CODE_POINTS` below), so neither is a boundary here.
  */
 const WIDE_BOUNDARY_CODE_POINTS = new Set([0x00a0, 0x0085]);
@@ -562,7 +564,8 @@ const QUOTE_ESCAPE_REFERENCE_CHARACTERS = new Set(['"', "'", "\\", "&"]);
  * bullet of SPEC 1.4 bars from segments and tags. Neither belongs to the
  * whitespace or the control class (SPEC 1.4), so neither splits a tag
  * (`splitTags` below): a tag containing either is kept whole, then rejected
- * in `valueViolation`.
+ * in `valueViolation` — accepted there under `acceptLineSeparators`
+ * (§VIOL-VALID-SEP, bin-sep.mjs), still kept whole.
  */
 const LINE_SEPARATOR_CODE_POINTS = new Map([
   [0x2028, "LINE SEPARATOR"],
@@ -630,7 +633,16 @@ function valueViolation(value, role) {
     // U+2028 and U+2029, barred by the same bullet of SPEC 1.4 though in
     // neither the whitespace nor the control class: condition 4, one finding
     // per offending attribute, exactly as for the characters above.
-    if (LINE_SEPARATOR_CODE_POINTS.has(codePoint)) {
+    // §VIOL-VALID-SEP (bin-sep.mjs): under `acceptLineSeparators` this one
+    // clause of the bullet is not enforced, so a segment or tag containing
+    // either code point is accepted. The quote, escape, and
+    // character-reference characters stay barred by the branch above, and
+    // neither code point joins the whitespace class: `splitTags` below still
+    // keeps a tag containing either whole.
+    if (
+      LINE_SEPARATOR_CODE_POINTS.has(codePoint) &&
+      !deviations.acceptLineSeparators
+    ) {
       return `the ${role} contains ${codePointName(codePoint)} (${LINE_SEPARATOR_CODE_POINTS.get(codePoint)}), barred by the quote-and-escape bullet (SPEC 1.4)`;
     }
     // U+FFFD (REPLACEMENT CHARACTER), which no argument value carries (SPEC
@@ -1456,6 +1468,10 @@ async function commandQuery(io, cwd, argv) {
  *     in `valueViolation` — U+00A0 and U+0085, exactly, are treated as
  *     whitespace for 1.4 validity, so segments and tags containing them are
  *     rejected with 14.4; tag splitting is unchanged.
+ *   - `acceptLineSeparators` (§VIOL-VALID-SEP, bin-sep.mjs): consumed in
+ *     `valueViolation` — 1.4's bar on U+2028 and U+2029 is not enforced, so
+ *     segments and tags containing either are accepted; `"`, `'`, `\`, and
+ *     `&` stay barred, and tag splitting is unchanged.
  */
 let deviations = {};
 

@@ -21,12 +21,12 @@ Why the harness must change: the documents moved after the harness was last gree
 - *Free text.* Corrections and other free-text checks use H-3's robust matching.
 - *Linux-leg arms* (staged file names holding a backslash, U+000A, U+000D, or non-UTF-8 bytes) gate themselves inside the shared body, as T12.0-5's non-UTF-8 arm does, so the Windows subset (`test/windows/e6-subset.test.ts`) skips no arm.
 - *Product verdicts.* The built product (Phase 10's, at c62f451) predates these SPEC changes. A new or strengthened arm that fails against it is recorded as a diagnosed product failure only once a hand-staged probe shows the product's answer contradicts the asserted SPEC behavior. A harness error, crash, or hang is a harness defect to fix in the task. An arm that passes against the product proves nothing about its liveness: red-check it (through a violator, a stand-in wrapper, or a mutation) where the task says so.
-- *Every task ends with:* `npm run typecheck`; `npm run format:check`; the touched suite files against the built product; the full self project under the namespace, with no failure from the task's own changes (until Task 9 lands, the gate tests still fail on whatever Tasks 5–9 have not yet wired); and a commit message stating the honest results. `AGENTS.md` gets only build/run knowledge a later spawn needs (a recipe, a count or timing a later check relies on), never a task narrative.
+- *Every task ends with:* `npm run typecheck`; `npm run format:check`; the touched suite files against the built product; the full self project under the namespace, with no failure from the task's own changes (until Task 9 lands, the gate tests still fail on whatever Tasks 6–9 have not yet wired); and a commit message stating the honest results. `AGENTS.md` gets only build/run knowledge a later spawn needs (a recipe, a count or timing a later check relies on), never a task narrative.
 
 **Standing rulings.** Two rulings stand for this run: AGENTS.md's "Known residual 14.20 location gaps" and "Known SPEC 6.5 gap, deferred to a future SPEC revision" bullets. No task here addresses them, and none may be added for them.
 
 **Order.** Tasks are in dependency order, and each names what it depends on:
-- Part A (Tasks 5–12) clears the red certification gate and brings the certification families to the current CERTIFICATIONS.md.
+- Part A (Tasks 6–12) clears the red certification gate and brings the certification families to the current CERTIFICATIONS.md.
 - Part B (Tasks 13–20) builds the machinery later tasks rely on.
 - Part C (Tasks 21–61) brings the T-numbered tests to the current text, in TEST-SPEC order.
 - Part D (Tasks 62–65) covers the properties, the Windows leg, and S-9's generated TypeScript forms.
@@ -37,23 +37,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 ## Tasks
 
 ### Part A — Certification
-
-### Task 5 — VIOL-VALID-SEP (CERTIFICATIONS.md §VIOL-VALID-SEP; TEST-SPEC C-1; V failure 2; D1(c))
-
-**Depends on.** Tasks 3 and 4 (done at the commits that removed them from this plan): the conformer bars both code points, and T1.4-1 and T1.4-4 each carry one U+2028 arm and one U+2029 arm, the literal characters between two letters.
-
-**Where.**
-- `test/fixtures/conf-valid/bin-sep.mjs` (new, on the sibling `bin-<deviation>.mjs` pattern);
-- a deviation switch in `test/fixtures/conf-valid/product.mjs`, skipping the `LINE_SEPARATOR_CODE_POINTS` branch of `valueViolation` (where Task 3 put the bar);
-- `test/self/certification-fixtures.ts`: an entry after VIOL-VALID-WIDE certifying `T1.4-1`, `T1.4-4`, and `P-1`.
-
-**Change.** The conformer with one deviation: 1.4's bar on U+2028 and U+2029 is not enforced, so a segment or tag containing either is accepted. Everything else is unchanged:
-- the quote, escape, and character-reference characters stay barred;
-- neither code point joins the whitespace class, so a tag containing either is kept whole.
-
-**Checks.**
-- `-t VALID`: SEP fails exactly T1.4-1 and T1.4-4, on their U+2028 and U+2029 arms alone (read the diagnoses), and P-1, its diagnosis a draw holding U+2028 or U+2029. Every other in-scope test passes against it. The conformer, CTRL, and WIDE are unchanged.
-- The manifest-equality gate test now lacks only the CONF-ORPHAN family.
 
 ### Task 6 — Register T13.4-11: removing recorded paths no longer generated (TEST-SPEC L564; SPEC 13.4, 14.10; CERTIFICATIONS.md §CONF-ORPHAN's staging constraints and the Exclusions entry "T13.4-4's link arm"; V failure 3; B14; D3)
 

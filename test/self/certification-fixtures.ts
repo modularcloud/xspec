@@ -223,6 +223,16 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
         "T1.4-4",
         "P-1",
       ]),
+      // VIOL-VALID-SEP: SPEC 1.4's bar on U+2028 and U+2029 is not
+      // enforced — a segment or tag containing either is accepted as valid.
+      // One clause of 1.4's quote-and-escape bullet dropped: the quote,
+      // escape, and character-reference characters stay barred, and neither
+      // code point joins the whitespace class, so tag splitting is unchanged.
+      violator("VIOL-VALID-SEP", "conf-valid/bin-sep.mjs", [
+        "T1.4-1",
+        "T1.4-4",
+        "P-1",
+      ]),
     ],
   ),
   // CONF-MD (§CONF-MD): Markdown compilation — `build` with byte-exact
