@@ -89,6 +89,7 @@ import { assertExactDeclarationInsertion } from "../../helpers/import-insertion.
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   ConsumerProject,
@@ -106,8 +107,13 @@ import {
 } from "./support.js";
 
 // One spec group plus one code group (SPEC 7.2): the code file is a
-// discovered code source, so its call records an occurrence and its edge.
-const CONFIG = `import { defineConfig } from "xspec"
+// discovered code source, so its call records an occurrence and its edge. A
+// staged-source record: T6.5-11 stages it in workspaces created after a
+// product invocation — (a)'s preview-parity twin and arms (b)–(d) (S-9's
+// timing clause; test/self/s9-staged-sources.test.ts).
+const CONFIG = stagedTs(
+  "T6.5-11 xspec.config.ts — one spec group and one code group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -117,7 +123,8 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 const ORIGIN = "specs/origin.mdx";
 const TARGET = "specs/target.mdx";
@@ -231,8 +238,13 @@ const EMBEDS_F_TO_Y: GraphEdge = {
 interface CallMoveArm {
   readonly label: string;
   readonly summary: string;
-  /** `src/c.ts` before the move. */
-  readonly code: string;
+  /**
+   * `src/c.ts` before the move — a staged-source record
+   * (helpers/staged-ts.ts): every workspace but (a)'s first is created after
+   * a product invocation (S-9's timing clause), and the table is converted
+   * uniformly. `codeText` reads it back as text.
+   */
+  readonly code: StagedTs;
   /** Its composed post-move bytes WITHOUT the added import (SPEC 6.5, 3). */
   readonly base: (bindings: CallBindings) => string;
   /** The added declaration's exact characters (SPEC 6.5). */
@@ -261,7 +273,10 @@ const CALL_MOVE_ARMS: readonly CallMoveArm[] = [
     summary:
       "the file imports `O, { text as t }` from the origin module and calls " +
       "`t(O.x)` inside `f`, both bindings losing their last use",
-    code: [ORIGIN_IMPORT, "", ...functionF(CALL_BEFORE), ""].join("\n"),
+    code: stagedTs(
+      "T6.5-11 (a) src/c.ts",
+      [ORIGIN_IMPORT, "", ...functionF(CALL_BEFORE), ""].join("\n"),
+    ),
     base: (bindings) =>
       ["", ...functionF(rewrittenCall(bindings)), ""].join("\n"),
     declaration: fullDeclaration,
@@ -277,15 +292,18 @@ const CALL_MOVE_ARMS: readonly CallMoveArm[] = [
     summary:
       'the file already holds `import T from "../specs/target.xspec"` — ' +
       "its default binding used by the marker `T.z` — and lacks its `text`",
-    code: [
-      ORIGIN_IMPORT,
-      TARGET_DEFAULT_IMPORT,
-      "",
-      "T.z;",
-      "",
-      ...functionF(CALL_BEFORE),
-      "",
-    ].join("\n"),
+    code: stagedTs(
+      "T6.5-11 (b) src/c.ts",
+      [
+        ORIGIN_IMPORT,
+        TARGET_DEFAULT_IMPORT,
+        "",
+        "T.z;",
+        "",
+        ...functionF(CALL_BEFORE),
+        "",
+      ].join("\n"),
+    ),
     base: (bindings) =>
       [
         TARGET_DEFAULT_IMPORT,
@@ -314,14 +332,17 @@ const CALL_MOVE_ARMS: readonly CallMoveArm[] = [
     summary:
       "a second call `t(O.w)` in `g` on the unmoved node keeps both origin " +
       "bindings in use, so the origin declaration stays",
-    code: [
-      ORIGIN_IMPORT,
-      "",
-      ...functionF(CALL_BEFORE),
-      "",
-      ...FUNCTION_G,
-      "",
-    ].join("\n"),
+    code: stagedTs(
+      "T6.5-11 (c) src/c.ts",
+      [
+        ORIGIN_IMPORT,
+        "",
+        ...functionF(CALL_BEFORE),
+        "",
+        ...FUNCTION_G,
+        "",
+      ].join("\n"),
+    ),
     base: (bindings) =>
       [
         ORIGIN_IMPORT,
@@ -356,14 +377,12 @@ const CALL_MOVE_ARMS: readonly CallMoveArm[] = [
     summary:
       "the file's only value-level use of `O` is the moved call while " +
       "`type N = typeof O.x` remains — a type-level spelling keeps no import",
-    code: [
-      ORIGIN_IMPORT,
-      "",
-      TYPE_ALIAS,
-      "",
-      ...functionF(CALL_BEFORE),
-      "",
-    ].join("\n"),
+    code: stagedTs(
+      "T6.5-11 (d) src/c.ts",
+      [ORIGIN_IMPORT, "", TYPE_ALIAS, "", ...functionF(CALL_BEFORE), ""].join(
+        "\n",
+      ),
+    ),
     base: (bindings) =>
       ["", TYPE_ALIAS, "", ...functionF(rewrittenCall(bindings)), ""].join(
         "\n",
@@ -380,6 +399,22 @@ const CALL_MOVE_ARMS: readonly CallMoveArm[] = [
 
 function utf8Length(text: string): number {
   return Buffer.byteLength(text, "utf8");
+}
+
+/**
+ * An arm's staged `src/c.ts` as text: the string its record was made from.
+ * Every code file this module stages is a string; anything else is a defect
+ * of the arm table.
+ */
+function codeText(arm: CallMoveArm): string {
+  const text = arm.code.source;
+  if (typeof text !== "string") {
+    throw new Error(
+      `T6.5-11 ${arm.label}: the staged ${CODE} must be a string (the arm ` +
+        "table composes text, never bytes)",
+    );
+  }
+  return text;
 }
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
@@ -777,9 +812,8 @@ async function runPreviewParityArm(
       );
     }
     const removal: ByteRange = { start: 0, end: utf8Length(ORIGIN_IMPORT) + 1 };
-    const callStart = utf8Length(
-      arm.code.slice(0, arm.code.indexOf(CALL_BEFORE)),
-    );
+    const code = codeText(arm);
+    const callStart = utf8Length(code.slice(0, code.indexOf(CALL_BEFORE)));
     const rewrite: ByteRange = {
       start: callStart,
       end: callStart + utf8Length(CALL_BEFORE),

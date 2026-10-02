@@ -43,6 +43,7 @@ import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -57,15 +58,20 @@ import {
 } from "./support.js";
 
 // Exactly one spec group (SPEC 7). No code groups exist in these fixtures, so
-// no code location can be impacted.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// no code location can be impacted. A staged-source record: T6.7-1 stages it
+// in a workspace created after a product invocation (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T6.7-1 xspec.config.ts — exactly one spec group, no code group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 const JOURNAL_PATH = ".xspec/journal";
 

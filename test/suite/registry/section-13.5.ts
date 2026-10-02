@@ -147,6 +147,7 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
@@ -188,15 +189,22 @@ import {
 } from "./write-refusal-staging.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
-// other keys — the CONF-CORE workspace shape (CERTIFICATIONS.md).
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// other keys — the CONF-CORE workspace shape (CERTIFICATIONS.md). A
+// staged-source record: T13.5-1, T13.5-4, T13.5-6, and T13.5-8 stage it in
+// workspaces created after a product invocation (CORE_DECL, ISO_TWO_DECL),
+// as T6.6-3's runs-while-held arm does (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T6.6-3/T13.5-1/T13.5-4/T13.5-6/T13.5-8 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape (CORE_DECL's and ISO_TWO_DECL's)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // Importless, tagless `.mdx` source (the CONF-CORE shape): `a` carries a
 // child so `rename` rewrites a descendant and `review split` has a child

@@ -201,6 +201,7 @@ import { deriveMdx } from "../../helpers/mdx-derivability.js";
 import { HarnessStagingError } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import {
   ConsumerProject,
@@ -222,15 +223,22 @@ import {
 } from "./support.js";
 
 // One spec group (SPEC 7.1), no code group: every staged `.mdx` under
-// `specs/` is a discovered spec source.
-const CONFIG = `import { defineConfig } from "xspec"
+// `specs/` is a discovered spec source. A staged-source record: T6.5-12
+// through T6.5-14, T6.5-16, T6.5-17, and T6.5-19 stage it in workspaces
+// created after a product invocation, as T6.6-3, T6.6-4, and T14-7 do
+// through R16_CONFIG (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const CONFIG = stagedTs(
+  "T6.5-12/T6.5-13/T6.5-14/T6.5-16/T6.5-17/T6.5-19/T6.6-3/T6.6-4/T14-7 xspec.config.ts — one spec group, no code group, the module's configuration (R16_CONFIG)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 /**
  * The configuration every arm of this module is staged under
@@ -267,7 +275,7 @@ const MDX_RESERVED_NAMES: readonly string[] = ["S", "Spec", "text"];
 async function withWorkspace<T>(
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
-  config: string = CONFIG,
+  config: string | StagedTs = CONFIG,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
@@ -3110,8 +3118,14 @@ const J15_ORIGIN_MARKDOWN = "specs/o.md";
 const J15_TARGET = "specs/t.mdx";
 const J15_MOVE_ARGV = ["move", "specs/o.mdx#m", "specs/t.mdx#m"] as const;
 
-/** The module's configuration with Markdown emission on (SPEC 7.3, 13.2). */
-const J15_EMIT_CONFIG = `import { defineConfig } from "xspec"
+/**
+ * The module's configuration with Markdown emission on (SPEC 7.3, 13.2). A
+ * staged-source record: every arm after the first stages it in a workspace
+ * created after a product invocation (S-9's timing clause).
+ */
+const J15_EMIT_CONFIG = stagedTs(
+  "T6.5-15 xspec.config.ts — one spec group with Markdown emission",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -3119,7 +3133,8 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 /** `import <B> from "./<B>.xspec"` — 2.1's one permitted form. */
 function j15Declaration(binding: string): string {

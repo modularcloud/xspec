@@ -42,9 +42,9 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 Task 16 was split as its text allowed. Done at dc97774: the mechanism — `StagedTs` records (`test/helpers/staged-ts.ts`), sealed beside the MDX ledger and judged by `test/self/s9-staged-sources.test.ts`; the builder's record overloads; MDX records carrying `ts` for a code-group `.mdx` path — and the first module group (§1's five modules) plus the E-6 fixture's configuration and code source. AGENTS.md's "staged-source ledger's TypeScript records" bullet holds the conversion rule, the detector recipe that finds a module's remaining plain post-invocation TypeScript stagings, and the survey's totals.
 
-Done since: Task 16b (§2 and §3), Task 16c (`section-4.ts`; `section-4.1-4.2.ts` has no runtime site), Task 16d (`section-4.3-4.4.ts`, `section-4.5.ts`, `section-4.6.ts`), and Task 16e (§5 and §6.1–§6.4; `section-5.6.ts` has no runtime site); `git log --grep 'Task 16[b-e]'`. Their counts are in that AGENTS.md bullet.
+Done since: Task 16b (§2 and §3), Task 16c (`section-4.ts`; `section-4.1-4.2.ts` has no runtime site), Task 16d (`section-4.3-4.4.ts`, `section-4.5.ts`, `section-4.6.ts`), Task 16e (§5 and §6.1–§6.4; `section-5.6.ts` has no runtime site), and Task 16f (§6.5–§6.7); `git log --grep 'Task 16[b-f]'`. Their counts are in that AGENTS.md bullet.
 
-Task 16e also made records of shared constants that later tasks' bodies stage after an invocation, so the detector no longer logs those sites: `support.ts`'s `UNKNOWN_KEY_CONFIG` (the configuration-state twins' invalid configuration, which T6.5-5, T11-2, T11-4, and T12.0-5 stage after an invocation, as T6.4-3 does), `section-5.7.ts`'s exported `SPEC_AND_CODE_CONFIG` (T11.3-1's later workspaces), and `section-6.4.ts`'s exported `RENAME_REFUSAL_CONFIG`, `RENAME_USAGE_CONFIG`, and the `src/app.ts` of `RENAME_USAGE_ORDERING_FILES` (T6.6-3). A task that finds a further body staging one of them after an invocation adds that test's ID to the record's name.
+Task 16e also made records of shared constants that later tasks' bodies stage after an invocation, so the detector no longer logs those sites: `support.ts`'s `UNKNOWN_KEY_CONFIG` (the configuration-state twins' invalid configuration, which T6.5-5, T11-2, T11-4, and T12.0-5 stage after an invocation, as T6.4-3 does), `section-5.7.ts`'s exported `SPEC_AND_CODE_CONFIG` (T11.3-1's later workspaces), and `section-6.4.ts`'s exported `RENAME_REFUSAL_CONFIG`, `RENAME_USAGE_CONFIG`, and the `src/app.ts` of `RENAME_USAGE_ORDERING_FILES` (T6.6-3). Task 16f did likewise: `section-6.5.ts`'s exported `MOVE_REFUSAL_CONFIG` and `MOVE_DERIVED_PATH_CONFIG` and `section-6.5-iii.ts`'s exported `R16_CONFIG` (T14-7's later workspaces stage them), and `section-13.5.ts`'s one configuration, `SPECS_ONLY_CONFIG` (`CORE_DECL`'s and `ISO_TWO_DECL`'s), which T6.6-3's runs-while-held arm stages after an invocation, named for T6.6-3 and the 13.5 bodies the detector saw staging it after one. A task that finds a further body staging one of them after an invocation adds that test's ID to the record's name.
 
 Every split task below converts its modules by that rule, then checks:
 - `test/self/s9-staged-sources.test.ts` passes; AGENTS.md records its TypeScript-judgement count and the self project's test count.
@@ -53,14 +53,6 @@ Every split task below converts its modules by that rule, then checks:
 - `npm run typecheck`, `npm run format:check`, and the full self project under the namespace pass.
 
 The survey at 3f43daa (suite plus certification) names each module's runtime sites below: tests, staged paths, and distinct byte-strings. It is a floor, not the list.
-
-### Task 16f — TypeScript records: §6.5–§6.7
-
-- `section-6.5.ts`: T6.5-1 through T6.5-5 and T6.5-8 through T6.5-10. Configurations and `src/app.ts`: 11 byte-strings. Its `stageConfigurationStateTwins` calls (`support.ts`) pass records in the files map they hand over.
-- `section-6.5-ii.ts`: T6.5-11, configurations and `src/c.ts`, 5 byte-strings.
-- `section-6.5-iii.ts`: T6.5-12 through T6.5-17 and T6.5-19, 2 configurations.
-- `section-6.6.ts`: T6.6-2 through T6.6-5. Configurations and `src/app.ts`: 6 byte-strings, including T6.6-5's `file()` of `xspec.config.ts`.
-- `section-6.7.ts`: T6.7-1, one configuration.
 
 ### Task 16g — TypeScript records: `section-7-basics.ts`
 
@@ -107,7 +99,7 @@ The survey at 3f43daa (suite plus certification) names each module's runtime sit
   - T13.4-11 fails diagnosed against the built product, so certification reached six of its stagings the suite did not.
   - T13.4-11(b)'s `specs/A.md` code source is `wellFormed` today.
   - T13.4-2's damaged derived files and T13.4-4's noise stay `unchecked` and plain.
-- `section-13.5.ts`: T13.5-1, T13.5-4, T13.5-6, and T13.5-8, one configuration.
+- `section-13.5.ts`: done in Task 16f — its one configuration (`CORE_DECL`'s and `ISO_TWO_DECL`'s) is a record named for T6.6-3, T13.5-1, T13.5-4, T13.5-6, and T13.5-8, and the detector finds no plain post-invocation staging of the module's own (T13.5-7's sites are `write-refusal-staging.ts`'s, below).
 - `write-refusal-staging.ts`: T13.5-7, T14-9, and T14-10, configurations and `src/app.ts`, 5 byte-strings.
 - About 44 byte-strings in all.
 

@@ -222,7 +222,7 @@
 import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
 import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
-import type { StagedTs } from "../../helpers/staged-ts.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type {
   AppliedMappingPair,
@@ -349,7 +349,12 @@ import {
 // One spec group with Markdown emission (SPEC 7, 7.3), so the premise
 // `build` materializes every derived-file kind — generated modules, Markdown
 // output, and graph data — and the modifies-nothing compare covers them all.
-const SPECS_MD_CONFIG = `import { defineConfig } from "xspec"
+// A staged-source record: T6.6-2 stages it in a workspace created after a
+// product invocation, and T6.6-5 by `file()` after one (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const SPECS_MD_CONFIG = stagedTs(
+  "T6.6-2/T6.6-5 xspec.config.ts — one spec group with Markdown emission",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -357,7 +362,8 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 const JOURNAL_PATH = ".xspec/journal";
 
@@ -1911,15 +1917,20 @@ async function assertRealRunInsertsImportAtPreviewedOffset(
 }
 
 // One spec group, no Markdown emission, no code group — arms (b)–(e) rewrite
-// MDX alone, and the derived-file delta's content is T6.6-5's business.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// MDX alone, and the derived-file delta's content is T6.6-5's business. A
+// staged-source record: T6.6-4's arms (b)–(d) and T6.6-5's later workspaces
+// stage it after a product invocation (S-9's timing clause).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T6.6-4/T6.6-5 xspec.config.ts — exactly one spec group, no code group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // Arm (a) adds a code group: the rename's reference rewrites span MDX and TS
 // (TEST-SPEC T6.6-4(a)).

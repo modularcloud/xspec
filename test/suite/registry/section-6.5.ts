@@ -232,6 +232,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import {
   assertDirectoriesEqual,
   assertLeavesUnchanged,
@@ -284,20 +285,31 @@ import {
 } from "./support.js";
 
 // Exactly one spec group (SPEC 7), for the byte-exact edit and identity-terms
-// fixtures.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// fixtures. A staged-source record: T6.5-2, T6.5-5, and T6.5-8 stage it in
+// workspaces created after a product invocation, as T6.6-3 does through
+// MOVE_SOLO_CONFIG and MOVE_IDENTITY_CONFIG (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T6.5-2/T6.5-5/T6.5-8/T6.6-3 xspec.config.ts — exactly one spec group, the byte-exact, usage-error, and identity-terms fixtures'",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // One spec group plus one code group (SPEC 7.2), for T6.5-5's wrong-kind
 // origin arms: the staged code source is discovered, so a code-source origin
 // operand is a wrong-kind usage error in either form (SPEC 6.5, 6.4, 12.0).
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// A staged-source record: T6.5-5's ordering arm stages it in a workspace
+// created after a product invocation, as T6.6-3 does through
+// MOVE_USAGE_CONFIG (S-9's timing clause).
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T6.5-5/T6.6-3 xspec.config.ts — one spec group and one code group, the usage-error fixtures'",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -307,11 +319,16 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 // One spec group plus Markdown emission (SPEC 7.3), so T6.5-3's fresh-build
 // compare covers generated modules, Markdown output, and graph data alike.
-const SPECS_MD_CONFIG = `import { defineConfig } from "xspec"
+// A staged-source record: T6.5-2, T6.5-3, T6.5-9, and T6.5-10 stage it in
+// workspaces created after a product invocation (S-9's timing clause).
+const SPECS_MD_CONFIG = stagedTs(
+  "T6.5-2/T6.5-3/T6.5-9/T6.5-10 xspec.config.ts — one spec group with Markdown emission",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -319,12 +336,17 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 // Specs, code, and Markdown emission, for the T6.5-1 file-form fixture whose
 // rewrites span MDX and TypeScript sources and whose fresh-build compare
-// covers every derived-file kind (the T6.4-7 configuration).
-const FULL_CONFIG = `import { defineConfig } from "xspec"
+// covers every derived-file kind (the T6.4-7 configuration). A staged-source
+// record: T6.5-1 stages it after a product invocation — every arm's preview
+// copy, and arms (b)–(d) (S-9's timing clause).
+const FULL_CONFIG = stagedTs(
+  "T6.5-1 xspec.config.ts — specs, code, and Markdown emission",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -335,14 +357,20 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 // The T6.5-4 refusal configuration: the second spec glob admits `.mdx`-less
 // destinations under `specs/plain/` (isolating the lacking-`.mdx` refusal
 // from the no-spec-group one), and the code group overlaps the spec globs at
 // `specs/dual/` (the belonging-to-a-code-group-as-well refusal, 14.14). Both
-// extra globs match no staged file, so the workspace itself stays valid.
-const REFUSAL_CONFIG = `import { defineConfig } from "xspec"
+// extra globs match no staged file, so the workspace itself stays valid. A
+// staged-source record: T6.5-4's later workspaces stage it after a product
+// invocation, as T6.6-3 and T14-7 do through MOVE_REFUSAL_CONFIG (S-9's
+// timing clause).
+const REFUSAL_CONFIG = stagedTs(
+  "T6.5-4/T6.6-3/T14-7 xspec.config.ts — the refusal configuration: a second spec glob under specs/plain/, a code group over specs/dual/",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -352,7 +380,8 @@ export default defineConfig({
     dual: ["specs/dual/**"]
   }
 })
-`;
+`,
+);
 
 const JOURNAL_PATH = ".xspec/journal";
 const LF = 0x0a;
@@ -364,7 +393,7 @@ const LF = 0x0a;
  * `files`; helpers/staged-mdx.ts), staged under the record's declaration.
  */
 async function withWorkspace<T>(
-  config: string,
+  config: string | StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
@@ -1189,7 +1218,10 @@ function fileMoveArm(geometry: FileMoveGeometry): FileMoveArm {
   const consumerStaged = geometry.consumerRewrite !== null;
   if (geometry.consumerRewrite !== null) {
     const consumerText = consumerSource(geometry.consumerRewrite.before);
-    files[CONSUMER] = consumerText;
+    files[CONSUMER] = stagedTs(
+      `T6.5-1 src/app.ts the .ts importer importing ${geometry.consumerRewrite.before}`,
+      consumerText,
+    );
     rewrites.push({
       pre: CONSUMER,
       post: CONSUMER,
@@ -1800,7 +1832,7 @@ const X2_B_HOLDER = stagedMdx(
 interface ByteExactArm {
   readonly name: string;
   /** The staged configuration; `SPECS_ONLY_CONFIG` unless the arm reads compiled Markdown. */
-  readonly config?: string;
+  readonly config?: StagedTs;
   readonly files: Readonly<Record<string, InitialFileContents>>;
   readonly argv: readonly string[];
   readonly expected: Readonly<Record<string, string>>;
@@ -2898,7 +2930,12 @@ const V4_OTHER_INVALID = [
 // refused-invalid-destination concerning the destination path, never 14.22
 // (SPEC 14, T14-7) — discriminating a product that vets only the
 // destination path's own components (it sees `new/` absent and proceeds).
-const V4_OUTDIR_CONFIG = `import { defineConfig } from "xspec"
+// A staged-source record: T6.5-4's derived-path workspaces are created
+// after a product invocation, as T6.6-3's and T14-7's are through
+// MOVE_DERIVED_PATH_CONFIG (S-9's timing clause).
+const V4_OUTDIR_CONFIG = stagedTs(
+  "T6.5-4/T6.6-3/T14-7 xspec.config.ts — the derived-path configuration: a second spec glob under new/, Markdown emitted under mdout/",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2906,7 +2943,8 @@ export default defineConfig({
   },
   markdown: { emit: true, outDir: "mdout" }
 })
-`;
+`,
+);
 const V4_SOLO = "specs/Solo.mdx";
 // Exported: T14-7's destination-component arm (section-14.ts) stages the
 // same bytes as its moved file specs/Src.mdx — one staged-source record
@@ -3555,9 +3593,14 @@ const U5_BROKEN_SOURCE = U4_BROKEN_SOURCE;
 // a code source bears no requirement IDs, and both forms' origin operands
 // name discovered spec sources (SPEC 6.5), making a code-source origin a
 // wrong-kind operand in either form, judged like existence before any
-// content question (SPEC 6.4, 12.0).
+// content question (SPEC 6.4, 12.0). A staged-source record: T6.5-5's twins
+// and ordering arm stage it after a product invocation, as T6.6-3 does
+// through MOVE_USAGE_ORDERING_FILES (S-9's timing clause).
 const U5_CODE = "src/app.ts";
-const U5_CODE_SOURCE = "export function noop(): void {}\n";
+const U5_CODE_SOURCE = stagedTs(
+  "T6.5-5/T6.6-3 src/app.ts — a discovered code source bearing no requirement IDs, the wrong-kind origin operand",
+  "export function noop(): void {}\n",
+);
 
 // The second nonexistent-`<file>` spelling (TEST-SPEC T6.5-5: "both of
 // T6.4-4's spellings"): a valid `.mdx` present on disk, holding a section
@@ -5217,7 +5260,7 @@ const A8_MDX_RESERVED = ["S", "Spec", "text"].map((name) => ({
 /** One T6.5-8 arm: a receiving file gaining exactly one import. */
 interface AddedImportArm {
   readonly label: string;
-  readonly config: string;
+  readonly config: StagedTs;
   readonly files: Readonly<Record<string, InitialFileContents>>;
   /** Workspace-relative path of the file gaining the import. */
   readonly receiving: string;
