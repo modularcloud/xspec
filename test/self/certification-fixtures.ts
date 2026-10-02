@@ -214,9 +214,9 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
         "T1.4-4",
         "P-1",
       ]),
-      // VIOL-VALID-WIDE: U+00A0, U+0085, and U+2028 are treated as
-      // whitespace for SPEC 1.4 validity — a segment or tag containing any
-      // of them is rejected with 14.4. Tag splitting and all other
+      // VIOL-VALID-WIDE: U+00A0 and U+0085, exactly, are treated as
+      // whitespace for SPEC 1.4 validity — a segment or tag containing
+      // either is rejected with 14.4. Tag splitting and all other
       // classifications are unchanged.
       violator("VIOL-VALID-WIDE", "conf-valid/bin-wide.mjs", [
         "T1.4-2",

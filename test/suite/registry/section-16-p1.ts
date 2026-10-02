@@ -4,8 +4,9 @@
 // reproducible generators (helpers/property.ts, H-10; fixed seed set in CI,
 // E-5) produce segment draws and `tags`-prop values over a code-point
 // alphabet weighted toward the SPEC 1.4 boundary classes P-1 names — the
-// whitespace and control classes of 1.4, the excluded boundary code points
-// U+00A0/U+0085/U+2028, `.` and `#`, the quote, escape, and
+// whitespace and control classes of 1.4, U+00A0/U+0085 (valid, in neither
+// class), U+2028/U+2029 (in neither class, yet invalid under 1.4's
+// quote-and-escape bullet), `.` and `#`, the quote, escape, and
 // character-reference characters `"` `'` `\` `&` and U+FFFD (each invalid,
 // 1.4), the forbidden names, and the glob metacharacters of common dialects
 // (`[` `]` `{` `}` `!` `+` `(` `)`), which are ordinary valid segment
@@ -38,22 +39,25 @@
 //     whitespace never reaches tag validation, and zero tokens are accepted
 //     as an omitted prop (T2.6-2). Rejections report 14.4 only.
 //
-// CONF-VALID in-scope; certified by §VIOL-VALID-CTRL and §VIOL-VALID-WIDE
-// (CERTIFICATIONS.md). Fixtures stay within the CONF-VALID scope: one
-// configured spec group of `.mdx` sources whose sections carry `id`/`tags`
-// props only — values in either quote kind, bearers nested as deeply as the
-// `.`-bearing draws stage them — and the command surface is `build` with
-// 14.1–14.4 reporting. The generator's reachability of the certifying
-// classes is deterministic under the fixed seed set (E-5): the committed
-// seeds stage, many times over, (a) draws whose only 1.4 violation is a
-// non-whitespace control character — accepted by VIOL-VALID-CTRL where 1.4
-// rejects them — and (b) 1.4-valid draws containing U+00A0/U+0085/U+2028 —
-// rejected by VIOL-VALID-WIDE where 1.4 accepts them. CERT-09/CERT-10
-// verify both against the real fixtures. The same seeds stage the shapes
-// the staging discipline below introduces — `.`-bearing draws accepted
-// nested and rejected at an ancestor or at the bearer, single-quoted
-// spellings — through the `dottedChain` shape and the quote characters'
-// alphabet weights.
+// CONF-VALID in-scope; certified by §VIOL-VALID-CTRL, §VIOL-VALID-WIDE, and
+// §VIOL-VALID-SEP (CERTIFICATIONS.md). Fixtures stay within the CONF-VALID
+// scope: one configured spec group of `.mdx` sources whose sections carry
+// `id`/`tags` props only — values in either quote kind, bearers nested as
+// deeply as the `.`-bearing draws stage them — and the command surface is
+// `build` with 14.1–14.4 reporting. The generator's reachability of the
+// certifying classes is deterministic under the fixed seed set (E-5): the
+// committed seeds stage, many times over, (a) draws whose only 1.4 violation is
+// a non-whitespace control character — accepted by VIOL-VALID-CTRL where 1.4
+// rejects them — (b) 1.4-valid draws containing U+00A0 or U+0085 —
+// VIOL-VALID-WIDE's valid boundaries, U+00A0 and U+0085 alone, rejected by it
+// where 1.4 accepts them — and (c) draws whose only 1.4 violation is U+2028 or
+// U+2029 — accepted by VIOL-VALID-SEP where 1.4 rejects them — each of the two
+// code points in segment draws and in tag draws alike (AGENTS.md records the
+// counts). The certification runner verifies each against the real fixtures.
+// The same seeds stage the shapes the staging discipline below introduces —
+// `.`-bearing draws accepted nested and rejected at an ancestor or at the
+// bearer, single-quoted spellings — through the `dottedChain` shape and the
+// quote characters' alphabet weights.
 //
 // Byte-exact staging per the SUITE-03 discipline (HARNESS-01): every
 // character under test — raw control bytes included — is written into the
@@ -170,7 +174,10 @@ const REPLACEMENT_CHARACTER = cp(0xfffd);
 // trial stages. SPEC 1.4: whitespace means exactly U+0009 U+000A U+000B
 // U+000C U+000D U+0020, control characters means exactly U+0000–U+001F and
 // U+007F, and no other code point (U+00A0, U+0085, U+2028 included) belongs
-// to either class. SPEC 1.3: `.` separates an ID's segments.
+// to either class. U+2028 and U+2029, in neither class, are barred by 1.4's
+// quote-and-escape bullet beside `"` `'` `\` `&`, and split no tag (2.6
+// splits on the whitespace class alone). SPEC 1.3: `.` separates an ID's
+// segments.
 
 const FORBIDDEN_NAMES: readonly string[] = [
   "$",
@@ -195,6 +202,17 @@ function isSpecControl(codePoint: number): boolean {
  */
 const QUOTE_ESCAPE_REFERENCE_CODE_POINTS: ReadonlySet<number> = new Set([
   0x0022, 0x0027, 0x005c, 0x0026,
+]);
+
+/**
+ * U+2028 (LINE SEPARATOR) and U+2029 (PARAGRAPH SEPARATOR), which the same
+ * bullet of SPEC 1.4 bars from segments and tags. Neither belongs to the
+ * whitespace or the control class, so neither splits a tag (`splitTags`
+ * below): a tag holding one is one token, predicted rejected (14.4).
+ */
+const LINE_SEPARATOR_NAMES: ReadonlyMap<number, string> = new Map([
+  [0x2028, "LINE SEPARATOR"],
+  [0x2029, "PARAGRAPH SEPARATOR"],
 ]);
 
 type Verdict =
@@ -239,6 +257,13 @@ function valueVerdict(value: string, role: "segment" | "tag"): Verdict {
       return {
         valid: false,
         reason: `the ${role} contains the quote, escape, or character-reference character ${codePointName(codePoint)} (1.4)`,
+      };
+    }
+    const separatorName = LINE_SEPARATOR_NAMES.get(codePoint);
+    if (separatorName !== undefined) {
+      return {
+        valid: false,
+        reason: `the ${role} contains ${codePointName(codePoint)} (${separatorName}), barred by the quote-and-escape bullet (1.4)`,
       };
     }
     if (codePoint === 0xfffd) {
@@ -349,7 +374,8 @@ function codePointName(codePoint: number): string {
 /**
  * Counterexample/context rendering: the JSON escape plus the exact code
  * points, so control and boundary characters are unambiguous in failure
- * messages (JSON.stringify escapes controls but not U+00A0/U+0085/U+2028).
+ * messages (JSON.stringify escapes controls but not U+00A0, U+0085, U+2028,
+ * or U+2029).
  */
 function renderCodePoints(value: string): string {
   const points = [...value]
@@ -433,32 +459,41 @@ const ALPHABET: ReadonlyArray<readonly [number, string]> = [
   [2, "+"],
   [2, "("],
   [2, ")"],
-  // The quote, escape, and character-reference characters and U+FFFD —
+  // 1.4's quote-and-escape bullet — the quote, escape, and
+  // character-reference characters, U+2028, and U+2029 — and U+FFFD:
   // invalid boundary classes (SPEC 1.4). Each quote character is spellable
   // only inside the other quote kind (SPEC 2.7; the staging discipline in
   // the module header chooses the kind per draw, predicts rejection, and
   // never stages a draw holding both). `\` and `&` are staged raw inside
   // the quoted value, which SPEC 2.4 reads verbatim (no escape sequence or
   // character reference interpreted), so a draw holding one is predicted
-  // rejected on the character itself. U+FFFD is staged as the literal,
-  // validly encoded code point, so 14.4 — never 14.20 — is at stake.
+  // rejected on the character itself. U+2028 (line separator) and U+2029
+  // (paragraph separator) are in neither the whitespace nor the control
+  // class, so neither splits a tag (2.6): a draw holding one is predicted
+  // rejected on the code point itself. Each is weighted above its group so
+  // that the fixed seeds reach it, in segment draws and in tag draws alike,
+  // in draws holding no other violation — §VIOL-VALID-SEP's flip class,
+  // which a draw must otherwise dodge every invalid class to enter
+  // (AGENTS.md records the counts). They and U+FFFD are staged as the
+  // literal, validly encoded code points, so 14.4 — never 14.20 — is at
+  // stake.
   [3, DOUBLE_QUOTE],
   [3, SINGLE_QUOTE],
   [3, BACKSLASH],
   [3, AMPERSAND],
+  [10, cp(0x2028)],
+  [10, cp(0x2029)],
   [3, REPLACEMENT_CHARACTER],
-  // The boundary code points SPEC 1.4 excludes from both classes — valid
-  // (T1.4-2 anchors; §VIOL-VALID-WIDE's flip class): no-break space, next
-  // line, line separator.
+  // The valid boundary code points SPEC 1.4 excludes from both classes and
+  // bars by no rule, U+00A0 and U+0085 alone (T1.4-2 anchors;
+  // §VIOL-VALID-WIDE's flip class): no-break space, next line.
   [5, cp(0x00a0)],
   [5, cp(0x0085)],
-  [5, cp(0x2028)],
-  // Breadth beyond the named set: further code points a Unicode-whitespace
-  // (JS regex `\s`-style) classifier would misclassify (en quad, paragraph
-  // separator), plus non-ASCII and non-BMP valid characters. All valid per
-  // 1.4 ("no other code point belongs to either class").
+  // Breadth beyond the named set: a further code point a Unicode-whitespace
+  // (JS regex `\s`-style) classifier would misclassify (en quad), plus
+  // non-ASCII and non-BMP valid characters. All valid per 1.4 ("no other
+  // code point belongs to either class", and no rule bars them).
   [1, cp(0x2000)],
-  [1, cp(0x2029)],
   [1, cp(0x00e9)],
   [1, cp(0x4e2d)],
   [1, cp(0x1f600)],

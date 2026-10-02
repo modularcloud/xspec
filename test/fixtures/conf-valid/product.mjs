@@ -48,7 +48,9 @@
 //   exactly one segment per level (T1.4-1's staging).
 // - SPEC 1.4's alphabet, exactly: beyond `.`, `#`, the whitespace and
 //   control classes, and the forbidden names, a segment or tag containing
-//   `"`, `'`, `\`, `&`, or U+FFFD is invalid (14.4). Attribute values are
+//   `"`, `'`, `\`, or `&`, or U+2028 or U+2029 (1.4's quote-and-escape
+//   bullet; neither code point is whitespace or a control character, so
+//   neither splits a tag), or U+FFFD is invalid (14.4). Attribute values are
 //   read verbatim (SPEC 2.4): no escape sequence or character reference is
 //   interpreted, so `id="a\u002Eb"` is a one-segment ID containing `\`
 //   and `id="a&#46;b"` one containing `&` — condition 4, never the
@@ -84,7 +86,8 @@
 // `acceptNonWhitespaceControls` (§VIOL-VALID-CTRL, bin-ctrl.mjs, CERT-09) in
 // `valueViolation`'s control branch; `widenValidityWhitespace`
 // (§VIOL-VALID-WIDE, bin-wide.mjs, CERT-10) in `valueViolation`'s whitespace
-// branch — U+00A0/U+0085/U+2028 treated as whitespace for 1.4 validity only.
+// branch — U+00A0 and U+0085, exactly, treated as whitespace for 1.4
+// validity only.
 
 import { createHash } from "node:crypto";
 import * as fsp from "node:fs/promises";
@@ -507,23 +510,27 @@ async function discoverSources(root, groups) {
 
 /**
  * SPEC 1.4's whitespace class for *validity*, exactly: U+0009–U+000D and
- * U+0020; no other code point (U+00A0, U+0085, U+2028 included) belongs to
- * it. The VIOL-VALID-WIDE deviation switch (`widenValidityWhitespace`,
- * CERT-10) hooks into this class's *enforcement* in `valueViolation` —
- * validity classification only, never `splitTags` below.
+ * U+0020; no other code point (U+00A0, U+0085, U+2028, and U+2029 included)
+ * belongs to it. The VIOL-VALID-WIDE deviation switch
+ * (`widenValidityWhitespace`, CERT-10) hooks into this class's *enforcement*
+ * in `valueViolation` — validity classification only, never `splitTags`
+ * below.
  */
 function isValidityWhitespace(codePoint) {
   return (codePoint >= 0x0009 && codePoint <= 0x000d) || codePoint === 0x0020;
 }
 
 /**
- * The boundary code points SPEC 1.4 excludes from both character classes:
- * U+00A0 (no-break space), U+0085 (next line), U+2028 (line separator).
- * Under `widenValidityWhitespace` (§VIOL-VALID-WIDE, bin-wide.mjs) they are
- * treated as whitespace for 1.4 validity, so segments and tags containing
- * them are rejected with 14.4.
+ * The valid boundary code points SPEC 1.4 excludes from both character
+ * classes and bars by no rule, exactly: U+00A0 (no-break space) and U+0085
+ * (next line) — TEST-SPEC T1.4-2's. Under `widenValidityWhitespace`
+ * (§VIOL-VALID-WIDE, bin-wide.mjs) they are treated as whitespace for 1.4
+ * validity, so segments and tags containing them are rejected with 14.4.
+ * U+2028 and U+2029 belong to neither class either, but 1.4's
+ * quote-and-escape bullet bars them in every fixture
+ * (`LINE_SEPARATOR_CODE_POINTS` below), so neither is a boundary here.
  */
-const WIDE_BOUNDARY_CODE_POINTS = new Set([0x00a0, 0x0085, 0x2028]);
+const WIDE_BOUNDARY_CODE_POINTS = new Set([0x00a0, 0x0085]);
 
 /**
  * SPEC 1.4's control-character class, exactly: U+0000–U+001F and U+007F. The
@@ -549,6 +556,18 @@ const FORBIDDEN_NAMES = new Set([
  * tag is spelled verbatim in every form (SPEC 2.4, 2.7, 6.4).
  */
 const QUOTE_ESCAPE_REFERENCE_CHARACTERS = new Set(['"', "'", "\\", "&"]);
+
+/**
+ * U+2028 (LINE SEPARATOR) and U+2029 (PARAGRAPH SEPARATOR), which the same
+ * bullet of SPEC 1.4 bars from segments and tags. Neither belongs to the
+ * whitespace or the control class (SPEC 1.4), so neither splits a tag
+ * (`splitTags` below): a tag containing either is kept whole, then rejected
+ * in `valueViolation`.
+ */
+const LINE_SEPARATOR_CODE_POINTS = new Map([
+  [0x2028, "LINE SEPARATOR"],
+  [0x2029, "PARAGRAPH SEPARATOR"],
+]);
 
 function codePointName(codePoint) {
   return `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
@@ -579,7 +598,7 @@ function valueViolation(value, role) {
       return `the ${role} contains "#" (SPEC 1.4)`;
     }
     // §VIOL-VALID-WIDE (bin-wide.mjs): under `widenValidityWhitespace` the
-    // boundary code points U+00A0/U+0085/U+2028 are treated as whitespace for
+    // boundary code points U+00A0 and U+0085 are treated as whitespace for
     // 1.4 validity — segments and tags containing them are rejected with 14.4.
     // Validity classification only: `splitTags` below stays on the literal
     // 1.4 whitespace class, and every other classification is unchanged.
@@ -607,6 +626,12 @@ function valueViolation(value, role) {
     // 4, never its interpreted spelling.
     if (QUOTE_ESCAPE_REFERENCE_CHARACTERS.has(character)) {
       return `the ${role} contains the quote, escape, or character-reference character ${JSON.stringify(character)} (SPEC 1.4)`;
+    }
+    // U+2028 and U+2029, barred by the same bullet of SPEC 1.4 though in
+    // neither the whitespace nor the control class: condition 4, one finding
+    // per offending attribute, exactly as for the characters above.
+    if (LINE_SEPARATOR_CODE_POINTS.has(codePoint)) {
+      return `the ${role} contains ${codePointName(codePoint)} (${LINE_SEPARATOR_CODE_POINTS.get(codePoint)}), barred by the quote-and-escape bullet (SPEC 1.4)`;
     }
     // U+FFFD (REPLACEMENT CHARACTER), which no argument value carries (SPEC
     // 1.4, 12.0): only a literal U+FFFD in the source bytes reaches here —
@@ -1428,7 +1453,7 @@ async function commandQuery(io, cwd, argv) {
  *     consumed in `valueViolation` — non-whitespace control characters are
  *     accepted in segments and tags.
  *   - `widenValidityWhitespace` (§VIOL-VALID-WIDE, bin-wide.mjs): consumed
- *     in `valueViolation` — U+00A0, U+0085, and U+2028 are treated as
+ *     in `valueViolation` — U+00A0 and U+0085, exactly, are treated as
  *     whitespace for 1.4 validity, so segments and tags containing them are
  *     rejected with 14.4; tag splitting is unchanged.
  */

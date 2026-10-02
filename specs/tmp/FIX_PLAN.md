@@ -26,7 +26,7 @@ Why the harness must change: the documents moved after the harness was last gree
 **Standing rulings.** Two rulings stand for this run: AGENTS.md's "Known residual 14.20 location gaps" and "Known SPEC 6.5 gap, deferred to a future SPEC revision" bullets. No task here addresses them, and none may be added for them.
 
 **Order.** Tasks are in dependency order, and each names what it depends on:
-- Part A (Tasks 3–12) clears the red certification gate and brings the certification families to the current CERTIFICATIONS.md.
+- Part A (Tasks 4–12) clears the red certification gate and brings the certification families to the current CERTIFICATIONS.md.
 - Part B (Tasks 13–20) builds the machinery later tasks rely on.
 - Part C (Tasks 21–61) brings the T-numbered tests to the current text, in TEST-SPEC order.
 - Part D (Tasks 62–65) covers the properties, the Windows leg, and S-9's generated TypeScript forms.
@@ -38,33 +38,9 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part A — Certification
 
-### Task 3 — CONF-VALID bars U+2028 and U+2029; VIOL-VALID-WIDE is exactly U+00A0 and U+0085; P-1 predicts both rejected (CERTIFICATIONS.md §CONF-VALID, §VIOL-VALID-WIDE; TEST-SPEC §16 P-1, L604; SPEC 1.4's quote-and-escape bullet; D1(a), D1(b); C5; A's P-1 note)
-
-**Where.**
-- `test/fixtures/conf-valid/product.mjs`: `valueViolation`, `WIDE_BOUNDARY_CODE_POINTS` (today U+00A0, U+0085, and U+2028), and the header and switch comments.
-- `test/fixtures/conf-valid/bin-wide.mjs`: its header still names three code points.
-- `test/self/certification-fixtures.ts`: the comment above the VIOL-VALID-WIDE entry still names U+2028 among the code points treated as whitespace.
-- `test/suite/registry/section-16-p1.ts`:
-  - `QUOTE_ESCAPE_REFERENCE_CODE_POINTS`;
-  - the alphabet, where U+2028 sits in the valid boundary group at weight 5 and U+2029 in the valid "breadth" group at weight 1;
-  - the header's class and reachability notes, and the other comments calling U+2028 valid.
-
-**Change.** Land these three changes in one commit: the conformer's bar alone fails P-1 against the conformer, and the oracle's change alone fails it the other way.
-- *Conformer.* A segment or tag containing U+2028 or U+2029 fails 14.4: one finding per offending `id` or `tags` attribute, located at the attribute, exactly as for the quote, escape, and character-reference characters. Neither code point joins the whitespace or control class, so tag splitting (2.6) is unchanged.
-- *VIOL-VALID-WIDE.* Its whitespace-for-validity set is exactly U+00A0 and U+0085, and the comments in both files say so.
-- *P-1.*
-  - The oracle predicts 14.4 for every segment and tag containing U+2028 or U+2029; neither splits a tag.
-  - The generator moves both into the invalid quote-and-escape boundary group, each weighted so that the fixed CI seeds reach each of them in segment draws and in tag draws. VIOL-VALID-SEP (Task 5) needs that reach.
-  - The header notes that VIOL-VALID-WIDE's valid boundaries are U+00A0 and U+0085 alone.
-
-**Checks.**
-- `-t VALID`: the conformer passes 12 of 12. CTRL fails exactly T1.4-1, T1.4-4, and P-1. WIDE fails exactly T1.4-2, T1.4-4, and P-1, its P-1 diagnosis a draw holding U+00A0 or U+0085.
-- Measure what the fixed seeds stage, with AGENTS.md's P-1 measuring recipe: the number of segment draws and tag draws holding U+2028, and holding U+2029. Record the numbers in AGENTS.md's P-1 bullet.
-- P-1 against the built product. Diagnose any failure: the product predates the bar.
-
 ### Task 4 — T1.4-1 and T1.4-4: one invalid arm each for U+2028 and U+2029 (TEST-SPEC L57, L60; A1, A3)
 
-**Depends on.** Task 3: the conformer must bar both code points first.
+**Depends on.** Task 3 (done at the commit that removed it from this plan): the conformer bars both code points.
 
 **Where.** `test/suite/registry/section-1.4.ts`: T1.4-1's matrix arms and T1.4-4's invalid tag arms, plus staged-source records wherever a body stages after its first invocation.
 
@@ -79,11 +55,11 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Task 5 — VIOL-VALID-SEP (CERTIFICATIONS.md §VIOL-VALID-SEP; TEST-SPEC C-1; V failure 2; D1(c))
 
-**Depends on.** Tasks 3 and 4.
+**Depends on.** Task 4 (and Task 3, done).
 
 **Where.**
 - `test/fixtures/conf-valid/bin-sep.mjs` (new, on the sibling `bin-<deviation>.mjs` pattern);
-- a deviation switch in `test/fixtures/conf-valid/product.mjs`;
+- a deviation switch in `test/fixtures/conf-valid/product.mjs`, skipping the `LINE_SEPARATOR_CODE_POINTS` branch of `valueViolation` (where Task 3 put the bar);
 - `test/self/certification-fixtures.ts`: an entry after VIOL-VALID-WIDE certifying `T1.4-1`, `T1.4-4`, and `P-1`.
 
 **Change.** The conformer with one deviation: 1.4's bar on U+2028 and U+2029 is not enforced, so a segment or tag containing either is accepted. Everything else is unchanged:
