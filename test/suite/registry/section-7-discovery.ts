@@ -57,7 +57,12 @@
 // while a path in no configured group, an excluded derived path above all,
 // is unknown to `--from`: the usage error of 12.0, judged after
 // configuration loading and before the 13.3 gate, exit 2 with the 12.7
-// error document (the CONF-DISC staging constraint for that arm).
+// error document (the CONF-DISC staging constraint for that arm). Its
+// invalid-source arm and that arm's control observe through `check --json`
+// (12.2) alone, each over a workspace staged from scratch that fails
+// `build`'s validations and on which no `build` runs — so no record exists
+// (13.3) and `check` reports exactly the validation findings (CONF-DISC's
+// constraint for those two).
 //
 // Conservative operationalizations (H-3/H-4):
 // - Listing comparisons sort both sides bytewise by file path: these tests
@@ -86,12 +91,12 @@
 //   arms, T7-6's arms past (a) — is a ledger record, judged by
 //   test/self/s9-staged-sources.test.ts before any product exists: the
 //   minimal `a` and `b` sources are section-7-basics.ts's shared records,
-//   `c`, `m`, and `n` this module's, and T7-6's import arms' sources their
-//   own. Each body's first workspace (T7-4's semantics probes, T7-5's link
-//   workspace, T7-6's exclusion workspace) precedes any invocation and stays
-//   plain; the files T7-4 and T7-5 write beside the root (`stageBesideRoot`,
-//   a raw write outside the builder) stay strings — `x/M.mdx` the one the
-//   `m` record is made from.
+//   `c`, `m`, and `n` this module's, and the sources of T7-6's
+//   invalid-source and import arms their own. Each body's first workspace
+//   (T7-4's semantics probes, T7-5's link workspace, T7-6's exclusion
+//   workspace) precedes any invocation and stays plain; the files T7-4 and
+//   T7-5 write beside the root (`stageBesideRoot`, a raw write outside the
+//   builder) stay strings — `x/M.mdx` the one the `m` record is made from.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -122,6 +127,7 @@ import { SECTION_A_SOURCE, SECTION_B_SOURCE } from "./section-7-basics.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
+  assertFindingConcernsPath,
   assertFindingLocated,
   assertSameJson,
   buildFindings,
@@ -130,6 +136,7 @@ import {
   expectConfigurationError,
   expectErrorDocument,
   expectExit,
+  runFindingsReport,
   runJson,
   stageBesideRoot,
 } from "./support.js";
@@ -1127,6 +1134,70 @@ const CODE_EXCLUDED: readonly {
   },
 ];
 
+// The invalid-source arm and its control (SPEC 13.4, 13.1, 7.3, 7.1, 14.19,
+// 14.20, 12.2): an invalid source's emit destination is derived too —
+// per-source derived paths follow the `NAME.mdx` name shape alone (13.1,
+// 7.3), whatever the source's validity. Staged as T7-6 pins it: emission
+// next to sources, the spec glob `specs/*.mdx`, a code group globbing
+// `specs/*.md`, and
+//
+//   specs/a'b.mdx   holding `<S id="a">A</S>` — a spec-group file whose
+//                   path holds `'`, which 7.1 bars (14.19; T7.1-1)
+//   specs/a'b.md    a plain file holding `)`, no well-formed TypeScript
+//                   (14.20) — specs/a'b.mdx's configured emit destination
+//                   while emission is enabled
+//
+// `specs/*.md` does not match specs/a'b.mdx, so no file lies in both kinds
+// of group (7.2's 14.14 stays dormant). With emission enabled the
+// destination is a derived file (13.4), so the code group discovers nothing
+// and `check` reports the condition-19 finding alone — a product deriving
+// emit destinations for valid sources alone discovers specs/a'b.md as a
+// code source and reports its condition 20. The control flips `emit` to
+// `false`, the one bit (either spelling of disabled emission 7.3 admits
+// would do; `emit: false` also catches a product classifying by the mere
+// presence of `markdown`): the path is then no emit destination, the code
+// group discovers it, and `check` reports its condition-20 finding beside
+// the condition-19 one — showing the code glob reaches the path, so the
+// arm's non-discovery is no never-matched pass.
+//
+// Each workspace is staged from scratch and observed by `check` alone: it
+// fails `build`'s validations and no `build` runs on it, so no record exists
+// (13.3) and `check` reports exactly `build`'s validation findings (12.2) —
+// 14.10's mismatch forms are undetectable on a failing workspace and its
+// recorded-file form meets no record (the CERTIFICATIONS.md CONF-DISC
+// staging constraint for this arm). Nothing is a symbolic link and no glob
+// carries a bracket or brace (the VIOL-DISC-SYMLINK and VIOL-DISC-DIALECT
+// staging constraints).
+const INVALID_SOURCE_PATH = "specs/a'b.mdx";
+const INVALID_SOURCE_DESTINATION = "specs/a'b.md";
+
+/** T7-6's invalid-source configuration, emission enabled or disabled. */
+function invalidSourceConfig(emit: boolean): string {
+  return `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  code: {
+    impl: ["specs/*.md"]
+  },
+  markdown: { emit: ${String(emit)} }
+})
+`;
+}
+
+/** specs/a'b.mdx's content, exactly as T7-6 spells it. */
+const INVALID_SOURCE = stagedMdx(
+  "T7-6 specs/a'b.mdx (the invalid-source arm and its control: `'` in a " +
+    "spec-group path, 7.1)",
+  '<S id="a">A</S>',
+);
+
+/** specs/a'b.md's content, exactly as T7-6 spells it: no well-formed
+ * TypeScript (14.20). */
+const UNPARSEABLE_DESTINATION = ")";
+
 // Import arms (SPEC 2.1/7: imports resolve references between files but
 // never add files to the workspace — the designated file must already be a
 // discovered source of a configured spec group, else 14.15).
@@ -1149,11 +1220,14 @@ const T7_6 = defineProductTest({
   id: "T7-6",
   title:
     "discovery boundaries: derived files (`.xspec.` names, `.xspec/` " +
-    "paths, enabled Markdown emit destinations) are never discovered as " +
-    "sources of a spec or a code group even when globs match them — the " +
-    "code side observed through `query edges --from`; an import never " +
-    "adds an unmatched file (14.15); a no-match group and empty " +
-    "specs/code maps are valid with zero sources (SPEC 7, 13.4, 2.1, 11.1)",
+    "paths, enabled Markdown emit destinations — an invalid source's " +
+    "included, derived paths following the NAME.mdx name shape alone) " +
+    "are never discovered as sources of a spec or a code group even when " +
+    "globs match them — the code side observed through `query edges " +
+    "--from`, the invalid source's destination through `check` beside " +
+    "its emission-disabled control; an import never adds an unmatched " +
+    "file (14.15); a no-match group and empty specs/code maps are valid " +
+    "with zero sources (SPEC 7, 13.4, 13.1, 7.3, 2.1, 11.1, 12.2)",
   run: async (product) => {
     // (a) Derived-file exclusion, before and after a `build`.
     await withWorkspace(
@@ -1291,6 +1365,115 @@ const T7_6 = defineProductTest({
             );
           }
         }
+      },
+    );
+
+    // (a'') The invalid-source arm (fixture comment above): emission
+    // enabled, so specs/a'b.md is the invalid specs/a'b.mdx's emit
+    // destination — derived, in no group though the code glob matches it —
+    // and `check` reports exactly one finding, specs/a'b.mdx's condition 19.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": invalidSourceConfig(true),
+          [INVALID_SOURCE_PATH]: INVALID_SOURCE,
+          [INVALID_SOURCE_DESTINATION]: UNPARSEABLE_DESTINATION,
+        },
+      },
+      async (workspace) => {
+        const context =
+          "T7-6 (invalid-source arm: emission enabled, specs/a'b.md the " +
+          "invalid specs/a'b.mdx's emit destination) `check --json`";
+        const findings = await runFindingsReport(
+          product,
+          workspace,
+          ["check", "--json"],
+          1,
+          `${context} — the workspace fails build's validations (14.19), ` +
+            `so check exits 1 with its findings report (SPEC 12.2, 12.0)`,
+        );
+        const destinationParsed = findings.some(
+          (finding) =>
+            finding.condition === "14.20" &&
+            finding.locations.some(
+              (location) => location.file === INVALID_SOURCE_DESTINATION,
+            ),
+        );
+        if (destinationParsed) {
+          fail(
+            `${context}: reported a condition-20 finding for ` +
+              `${INVALID_SOURCE_DESTINATION} — with emission enabled it is ` +
+              `the emit destination of ${INVALID_SOURCE_PATH} whatever that ` +
+              `source's validity (per-source derived paths follow the ` +
+              `NAME.mdx name shape alone, SPEC 13.1, 7.3), so 13.4 excludes ` +
+              `it from the code group and its \`)\` is never parsed; a ` +
+              `product deriving emit destinations for valid sources alone ` +
+              `discovers it as a code source`,
+          );
+        }
+        assertConditionCounts(
+          findings,
+          { "14.19": 1 },
+          `${context}: exactly one finding, ${INVALID_SOURCE_PATH}'s ` +
+            `condition 19 — \`'\` in a spec-group path (SPEC 7.1, 13.4, ` +
+            `14.19)`,
+        );
+        assertFindingConcernsPath(
+          findings[0]!,
+          INVALID_SOURCE_PATH,
+          `${context}: the condition-19 finding`,
+        );
+      },
+    );
+
+    // (a''') Its control: emission disabled (`emit: false`), so specs/a'b.md
+    // is no emit destination (7.3) — the code group discovers it, and
+    // `check` reports its condition-20 finding beside specs/a'b.mdx's
+    // condition 19.
+    await withWorkspace(
+      {
+        files: {
+          "xspec.config.ts": invalidSourceConfig(false),
+          [INVALID_SOURCE_PATH]: INVALID_SOURCE,
+          [INVALID_SOURCE_DESTINATION]: UNPARSEABLE_DESTINATION,
+        },
+      },
+      async (workspace) => {
+        const context =
+          "T7-6 (invalid-source control: emission disabled, specs/a'b.md " +
+          "no emit destination) `check --json`";
+        const findings = await runFindingsReport(
+          product,
+          workspace,
+          ["check", "--json"],
+          1,
+          `${context} — the workspace fails build's validations (14.19, ` +
+            `14.20), so check exits 1 with its findings report (SPEC 12.2, ` +
+            `12.0)`,
+        );
+        assertConditionCounts(
+          findings,
+          { "14.19": 1, "14.20": 1 },
+          `${context}: ${INVALID_SOURCE_PATH}'s condition 19 and, beside ` +
+            `it, ${INVALID_SOURCE_DESTINATION}'s condition 20 — with ` +
+            `emission disabled the path is no emit destination (7.3), so ` +
+            `the code glob discovers it as a code source whose \`)\` is no ` +
+            `well-formed TypeScript (SPEC 7.2, 14.19, 14.20)`,
+        );
+        assertFindingConcernsPath(
+          findings.find((finding) => finding.condition === "14.19")!,
+          INVALID_SOURCE_PATH,
+          `${context}: the condition-19 finding`,
+        );
+        assertFindingLocated(
+          findings.find((finding) => finding.condition === "14.20")!,
+          {
+            file: INVALID_SOURCE_DESTINATION,
+            window: byteWindow("", UNPARSEABLE_DESTINATION),
+          },
+          `${context}: the condition-20 finding locates the parse failure ` +
+            `in ${INVALID_SOURCE_DESTINATION} (SPEC 14, 14.20)`,
+        );
       },
     );
 

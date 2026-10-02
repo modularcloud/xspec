@@ -36,23 +36,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ## Tasks
 
-### Part A — Certification
-
-### Task 12 — T7-6: the invalid-source arm and its control (TEST-SPEC L325; SPEC 7.1, 13.4, 14.19, 14.20, 12.2; CERTIFICATIONS.md §CONF-DISC, §VIOL-DISC-DERIVED; B3; D2)
-
-**Depends on.** Task 10.
-
-**Where.** `test/suite/registry/section-7-discovery.ts`: T7-6's body.
-
-**Change.** Stage as L325 does: emission next to sources, a spec glob `specs/*.mdx`, a code group globbing `specs/*.md`, and `specs/a'b.mdx` holding `<S id="a">A</S>` beside a plain file `specs/a'b.md` holding `)`.
-- *Arm.* `check` exits 1 with exactly one finding: condition 19 for `specs/a'b.mdx`, never condition 20 for `specs/a'b.md`.
-- *Control.* With emission disabled (either spelling 7.3 admits), `check` reports `specs/a'b.md`'s condition-20 finding beside the condition-19 one.
-- *CONF-DISC's constraints.* Stage each workspace from scratch and observe it by `check` alone; no `build` may succeed on it.
-
-**Checks.**
-- `-t DISC`: the conformer passes T7-6. DERIVED fails T7-6, on its exclusion arms and on the invalid-source arm's extra condition-20 finding; the control is unmoved. DIALECT and SYMLINK pass T7-6.
-- T7-6 against the built product (diagnose).
-
 ### Part B — Shared machinery
 
 ### Task 13 — The refusal vocabulary gains `refused-exposed-derived-file` (SPEC 14's listed order, SPEC.md L819; TEST-SPEC H-3, S-5; prerequisite of A27, B10, B15)
