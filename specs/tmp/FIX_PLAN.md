@@ -38,16 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 32 — T6.5-2: the CRLF and lone-CR terminator-kind arms (TEST-SPEC L279; SPEC 6.5, 3; A19)
-
-**Where.** `test/suite/registry/section-6.5.ts`: `X2_ARMS`. No T6.5 module stages CR or CRLF today.
-
-**Change.** For each terminator kind (CRLF, lone CR), add both geometries L279 names: into parent `p`, and at the end of the file at `n`. Use the exact bytes L279 gives.
-
-**Checks.**
-- Byte-verify the staged terminators.
-- S-9 and S-7 pass. T6.5-2 against the built product.
-
 ### Task 33 — T6.5-4: barred `<new-id>` characters and barred destination-path characters (TEST-SPEC L281; SPEC 6.5, 7.1, 1.4, 14.19; A20; they flow into T6.6-3 and T14-7)
 
 **Where.** `test/suite/registry/section-6.5.ts`: `MOVE_REFUSAL_CASES`, which T6.6-3 and T14-7 iterate.

@@ -2096,6 +2096,77 @@ interface ByteExactArm {
   readonly markdown?: Readonly<Record<string, string>>;
 }
 
+// The terminator-kind arms' characters (SPEC 3), spelled from code points
+// (tool-safe): a CRLF pair is one terminator, a lone CR one too, and U+000A
+// is the terminator every move inserts, whatever terminators the file holds.
+const X2_CR = String.fromCodePoint(0x000d);
+const X2_LF = String.fromCodePoint(0x000a);
+const X2_CRLF = X2_CR + X2_LF;
+
+/**
+ * T6.5-2's terminator-kind arms for one kind T (SPEC 3, 6.5), origin and
+ * target sharing it: the origin `specs/o.mdx` = `<S id="a">x</S>`, T,
+ * `<S id="m">`, T, `y`, T, `</S>`, T, moved into parent `p` of
+ * `specs/t.mdx` = `<S id="p">`, T, `x`, T, `</S>`, T, and to top-level `n`
+ * at the end of `specs/u.mdx` = `<S id="p">x</S>`, T. The deletion empties
+ * the moved construct's joined line, dropped with its whole terminator; the
+ * moved text carries its own terminators and is followed by one U+000A; the
+ * insertion point, following a T, is a line start (none added before it);
+ * every terminator the edits leave in place is kept byte-for-byte. A product
+ * matching the file's terminator style (T after the moved text) fails, and
+ * one splitting lines on U+000A alone, which in the lone-CR arms keeps the
+ * emptied origin line and adds a U+000A before the moved text. Called at
+ * module load: the records are the ledger's (S-9; later arms of the body).
+ */
+function x2TerminatorKindArms(
+  kind: string,
+  terminator: string,
+): readonly ByteExactArm[] {
+  const t = terminator;
+  const origin = stagedMdx(
+    `T6.5-2 ${kind} terminator-kind arms specs/o.mdx (the shared origin)`,
+    ['<S id="a">x</S>', '<S id="m">', "y", "</S>", ""].join(t),
+  );
+  const originAfter = '<S id="a">x</S>' + t;
+  return [
+    {
+      name: `${kind} terminators, into parent p: the emptied origin line dropped with its terminator, U+000A after the moved text, none before it`,
+      files: {
+        "specs/o.mdx": origin,
+        "specs/t.mdx": stagedMdx(
+          `T6.5-2 ${kind} terminator-kind arm specs/t.mdx (into parent p)`,
+          ['<S id="p">', "x", "</S>", ""].join(t),
+        ),
+      },
+      argv: ["move", "specs/o.mdx#m", "specs/t.mdx#p.m"],
+      expected: {
+        "specs/o.mdx": originAfter,
+        "specs/t.mdx":
+          ['<S id="p">', "x", '<S id="p.m">', "y", "</S>"].join(t) +
+          X2_LF +
+          "</S>" +
+          t,
+      },
+    },
+    {
+      name: `${kind} terminators, end of file at top-level n: U+000A after the moved text, none before it`,
+      files: {
+        "specs/o.mdx": origin,
+        "specs/u.mdx": stagedMdx(
+          `T6.5-2 ${kind} terminator-kind arm specs/u.mdx (end of file)`,
+          '<S id="p">x</S>' + t,
+        ),
+      },
+      argv: ["move", "specs/o.mdx#m", "specs/u.mdx#n"],
+      expected: {
+        "specs/o.mdx": originAfter,
+        "specs/u.mdx":
+          ['<S id="p">x</S>', '<S id="n">', "y", "</S>"].join(t) + X2_LF,
+      },
+    },
+  ];
+}
+
 const X2_ARMS: readonly ByteExactArm[] = [
   {
     // Deletion drops the merged construct line (rule of 3), keeps the
@@ -2316,6 +2387,10 @@ const X2_ARMS: readonly ByteExactArm[] = [
       ].join("\n"),
     },
   },
+  // Terminator-kind arms (SPEC 3, 6.5): one per kind, CRLF and lone CR, in
+  // both geometries — into parent `p` and at the end of the file at `n`.
+  ...x2TerminatorKindArms("CRLF", X2_CRLF),
+  ...x2TerminatorKindArms("lone CR", X2_CR),
 ];
 
 /**
@@ -2340,7 +2415,7 @@ export const X2_COMPOSED_FORMS: ReadonlyArray<
 const T6_5_2 = defineProductTest({
   id: "T6.5-2",
   title:
-    "section form text edits, byte-exact: moved text spans the opening tag's first character through the closing tag's last; origin deletion drops lines left empty/whitespace-only (rule of 3); insertion immediately before the target parent's closing tag (or end of file for top-level `new-id`), followed by U+000A and preceded by one when the insertion point is not at the start of a line, judged over the composed text — staged over four geometries: a closing tag alone on its line (no terminator added), with its sibling indented on its line, `  </S>` (one added, the two spaces left a line of their own, kept in the compiled Markdown); the end of a file with a final terminator (none added) and without one (one added); and a closing tag sharing its line with preceding content, a text-position parent receiving a single-line in-line section whose line is a paragraph continuation there (one added); target file created when absent; self-closing sections move as exactly their tag's characters and a self-closing target parent is first rewritten to paired form; no other byte changes (SPEC 6.5, 3, 1.1, 14.20)",
+    "section form text edits, byte-exact: moved text spans the opening tag's first character through the closing tag's last; origin deletion drops lines left empty/whitespace-only (rule of 3); insertion immediately before the target parent's closing tag (or end of file for top-level `new-id`), followed by U+000A and preceded by one when the insertion point is not at the start of a line, judged over the composed text — staged over four geometries: a closing tag alone on its line (no terminator added), with its sibling indented on its line, `  </S>` (one added, the two spaces left a line of their own, kept in the compiled Markdown); the end of a file with a final terminator (none added) and without one (one added); and a closing tag sharing its line with preceding content, a text-position parent receiving a single-line in-line section whose line is a paragraph continuation there (one added); target file created when absent; self-closing sections move as exactly their tag's characters and a self-closing target parent is first rewritten to paired form; terminator-kind arms, CRLF and lone CR, origin and target sharing the kind, into a parent and at the end of a file: every terminator the move inserts is U+000A, a line start and the drop rule are judged by 3's terminators (the emptied origin line dropped with its whole terminator, none added before the moved text), and every kept terminator stays byte-for-byte; no other byte changes (SPEC 6.5, 3, 1.1, 14.20)",
   run: async (product) => {
     for (const arm of X2_ARMS) {
       await withWorkspace(
