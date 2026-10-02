@@ -67,6 +67,8 @@ import {
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -95,7 +97,7 @@ export default defineConfig({
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
+  config: string | StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
@@ -1061,8 +1063,13 @@ function namesForbiddenUnit(identity: string): boolean {
 // never to `path#f` — while the control `x.dts.ts` (no `.d.` in its last
 // segment) keeps `path#f`. Each marker targets its own section, so the
 // complete `references` set pins every attribution. The occurrence's
-// whole-file `source` range is T1.7-2's assertion.
-const T4_6_3_DECLARATION_FILE_CONFIG = `import { defineConfig } from "xspec"
+// whole-file `source` range is T1.7-2's assertion. The arm's workspace is
+// created after the body's first invocation, so its configuration and its
+// five code files are staged-source records (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const T4_6_3_DECLARATION_FILE_CONFIG = stagedTs(
+  "T4.6-3 xspec.config.ts — a code group spanning `.ts`, `.mts`, and `.cts`, the declaration-file arm's",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1072,7 +1079,8 @@ export default defineConfig({
     app: ["src/**/*.ts", "src/**/*.mts", "src/**/*.cts"]
   }
 })
-`;
+`,
+);
 
 /** One code file of the declaration-file arm. */
 interface DeclarationFileArm {
@@ -1151,11 +1159,15 @@ function declarationFileSource(arm: DeclarationFileArm): string {
   ].join("\n");
 }
 
-const T4_6_3_DECLARATION_FILES: Readonly<Record<string, string>> =
+// One record per declaration-arm file, laid out at module load (S-9).
+const T4_6_3_DECLARATION_FILES: Readonly<Record<string, StagedTs>> =
   Object.fromEntries(
     T4_6_3_DECLARATION_FILE_ARMS.map((arm) => [
       arm.file,
-      declarationFileSource(arm),
+      stagedTs(
+        `T4.6-3 ${arm.file} of the declaration-file arm`,
+        declarationFileSource(arm),
+      ),
     ]),
   );
 

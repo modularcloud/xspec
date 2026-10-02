@@ -108,6 +108,8 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
@@ -136,19 +138,30 @@ import {
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. The
 // consumer files under `consumer/` are outside every group by construction.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// A staged-source record, judged before any product exists (S-9's timing
+// clause; test/self/s9-staged-sources.test.ts): T4.4-1's consumer facet
+// creates its workspace after the body's first invocation; T4.4-2 stages it
+// before its own.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T4.4-1 xspec.config.ts — one spec group only, the consumer facet's",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // One spec group plus one code group (SPEC 7.2): TypeScript files under
 // `src/` are discovered code sources, so `build` analyzes their imports and
-// spec-module usage (4, 4.5).
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// spec-module usage (4, 4.5). A staged-source record: every arm workspace
+// of T4.3-2 past the first, and T4.4-1's after its first facet, is created
+// after a product invocation; T4.3-1 stages it before its own.
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T4.3-2/T4.4-1 xspec.config.ts — one spec group and one code group, the arm workspaces' default",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -158,11 +171,12 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
+  config: StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
@@ -453,12 +467,34 @@ const T4_3_2_ARMS: readonly InvalidTextArgumentArm[] = [
   },
 ];
 
+/**
+ * An invalid `text` argument arm laid out at module load: its `src/app.ts`
+ * — the arm's lines, each one terminated — as a staged-source record (S-9's
+ * timing clause: every arm's workspace past the first is created after a
+ * product invocation, so S-7's sweep never reaches it), one per row.
+ */
+interface LaidOutTextArgumentArm {
+  readonly arm: InvalidTextArgumentArm;
+  readonly app: StagedTs;
+}
+
+// T4.3-2's arms in run order, one record per row.
+const T4_3_2_LAID_OUT_ARMS: readonly LaidOutTextArgumentArm[] = T4_3_2_ARMS.map(
+  (arm) => ({
+    arm,
+    app: stagedTs(
+      `T4.3-2 arm ${arm.name} src/app.ts`,
+      arm.lines.map((line) => line + "\n").join(""),
+    ),
+  }),
+);
+
 const T4_3_2 = defineProductTest({
   id: "T4.3-2",
   title:
     "a string argument to `text` in a TypeScript file fails with 14.8; so does a dynamic node-form argument there — a computed index by variable, an optional-chaining chain, and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`text(SPEC.a!)`, `text(SPEC.a as X)`, `text(<X>SPEC.a)` in a `.ts` file, `text(SPEC.a satisfies X)`), each as the `text` argument, the file well-formed — and so do a zero-argument and a two-argument `text(...)` call: 14.8's arity clause holds in either language, the MDX arms being T2.4-3 (SPEC 4.3, 2.4, 4.5)",
   run: async (product) => {
-    for (const arm of T4_3_2_ARMS) {
+    for (const { arm, app } of T4_3_2_LAID_OUT_ARMS) {
       const at = arm.lines.indexOf(arm.offending);
       if (at === -1 || arm.lines.lastIndexOf(arm.offending) !== at) {
         // A harness defect (never a product failure): the offending
@@ -469,7 +505,6 @@ const T4_3_2 = defineProductTest({
             `section-4.3-4.4.ts`,
         );
       }
-      const source = arm.lines.map((line) => line + "\n").join("");
       const prefix = arm.lines
         .slice(0, at)
         .map((line) => line + "\n")
@@ -478,7 +513,7 @@ const T4_3_2 = defineProductTest({
       const context = `T4.3-2 \`build --json\` over ${arm.name}`;
       await withWorkspace(
         SPEC_AND_CODE_CONFIG,
-        { ...T4_3_2_SPEC_FILES, "src/app.ts": source },
+        { ...T4_3_2_SPEC_FILES, "src/app.ts": app },
         async (workspace) => {
           const findings = await buildFindings(product, workspace, context);
           assertConditionCounts(findings, { "14.8": 1 }, context);
@@ -557,6 +592,38 @@ function callRange(prefix: string, call: string): SourceRange {
   const start = Buffer.byteLength(prefix, "utf8");
   return { start, end: start + Buffer.byteLength(call, "utf8") };
 }
+
+// The resolving-argument arms (facet 2) and the invalid-called-path facet
+// (facet 3) create their workspaces after the body's first invocation, so
+// their `src/app.ts` sources are staged-source records laid out at module
+// load (S-9's timing clause; test/self/s9-staged-sources.test.ts), one per
+// arm; facet 1's source, staged before that invocation, stays plain.
+const T4_4_1_RESOLVING_ARMS = [
+  {
+    call: T4_4_1_UNRESOLVED_CALL,
+    condition: "14.7",
+    what: "an unresolved argument",
+  },
+  {
+    call: T4_4_1_DYNAMIC_CALL,
+    condition: "14.8",
+    what: "a non-static argument",
+  },
+].map((arm) => ({
+  ...arm,
+  app: stagedTs(
+    `T4.4-1 src/app.ts with ${arm.what}, \`${arm.call}\``,
+    appSource(T4_4_1_APP_PREFIX, arm.call),
+  ),
+}));
+const T4_4_1_INVALID_APP_SOURCE = appSource(
+  T4_4_1_INVALID_APP_PREFIX,
+  T4_4_1_CROSS_CALL,
+);
+const T4_4_1_INVALID_APP = stagedTs(
+  `T4.4-1 src/app.ts importing the called module from the invalid path ${T4_4_1_INVALID_CALLED_PATH}`,
+  T4_4_1_INVALID_APP_SOURCE,
+);
 
 /**
  * The cross-module call's one occurrence record, projected (SPEC 5.7, 12.7):
@@ -659,30 +726,35 @@ async function occurrencesOnFailingWorkspace(
 // the call carries the expected (asserted) type error, tsc emits regardless,
 // and the emitted JS reports whether the call threw, the thrown value's
 // `message` property when it is a string (the datum SPEC 4.4 binds; null
-// otherwise), and `String(error)` for the diagnosis alone.
-const T4_4_1_CONSUMER_SOURCE = [
-  'import A from "../specs/A.xspec";',
-  'import { text as textB } from "../specs/B.xspec";',
-  "",
-  "let threw = false;",
-  "let message: string | null = null;",
-  'let rendering = "";',
-  "try {",
-  "  const returned: unknown = textB(A.a);",
-  "  rendering = String(returned);",
-  "} catch (error) {",
-  "  threw = true;",
-  "  rendering = String(error);",
-  '  if (error !== null && typeof error === "object") {',
-  "    const candidate = (error as { message?: unknown }).message;",
-  '    if (typeof candidate === "string") {',
-  "      message = candidate;",
-  "    }",
-  "  }",
-  "}",
-  "process.stdout.write(JSON.stringify({ threw, message, rendering }));",
-  "",
-].join("\n");
+// otherwise), and `String(error)` for the diagnosis alone. A staged-source
+// record (S-9's timing clause): the consumer facet's workspace is created
+// after the body's first invocation.
+const T4_4_1_CONSUMER_SOURCE = stagedTs(
+  "T4.4-1 consumer/cross.ts — the cross-module consumer, outside every group",
+  [
+    'import A from "../specs/A.xspec";',
+    'import { text as textB } from "../specs/B.xspec";',
+    "",
+    "let threw = false;",
+    "let message: string | null = null;",
+    'let rendering = "";',
+    "try {",
+    "  const returned: unknown = textB(A.a);",
+    "  rendering = String(returned);",
+    "} catch (error) {",
+    "  threw = true;",
+    "  rendering = String(error);",
+    '  if (error !== null && typeof error === "object") {',
+    "    const candidate = (error as { message?: unknown }).message;",
+    '    if (typeof candidate === "string") {',
+    "      message = candidate;",
+    "    }",
+    "  }",
+    "}",
+    "process.stdout.write(JSON.stringify({ threw, message, rendering }));",
+    "",
+  ].join("\n"),
+);
 
 /** Decode the cross-module consumer's report (harness-authored contract). */
 function decodeCrossOutcome(payload: unknown): {
@@ -810,23 +882,11 @@ const T4_4_1 = defineProductTest({
 
     // Facet 2 — a resolving argument is required: condition 7 or 8 alone,
     // no condition 11 beside it, and no occurrence (SPEC 14.11, 5.7).
-    for (const arm of [
-      {
-        call: T4_4_1_UNRESOLVED_CALL,
-        condition: "14.7",
-        what: "an unresolved argument",
-      },
-      {
-        call: T4_4_1_DYNAMIC_CALL,
-        condition: "14.8",
-        what: "a non-static argument",
-      },
-    ]) {
-      const source = appSource(T4_4_1_APP_PREFIX, arm.call);
+    for (const arm of T4_4_1_RESOLVING_ARMS) {
       const window = byteWindow(T4_4_1_APP_PREFIX, arm.call);
       await withWorkspace(
         SPEC_AND_CODE_CONFIG,
-        { ...T4_4_SPEC_FILES, [T4_4_1_APP_FILE]: source },
+        { ...T4_4_SPEC_FILES, [T4_4_1_APP_FILE]: arm.app },
         async (workspace) => {
           const context = `T4.4-1 \`build --json\` with ${arm.what}, \`${arm.call}\``;
           const findings = await buildFindings(product, workspace, context);
@@ -867,14 +927,14 @@ const T4_4_1 = defineProductTest({
     // Facet 3 — invalid called path: the finding still reported, its
     // `identities` exactly `[]`, the occurrence still recorded.
     {
-      const source = appSource(T4_4_1_INVALID_APP_PREFIX, T4_4_1_CROSS_CALL);
+      const source = T4_4_1_INVALID_APP_SOURCE;
       const range = callRange(T4_4_1_INVALID_APP_PREFIX, T4_4_1_CROSS_CALL);
       await withWorkspace(
         SPEC_AND_CODE_CONFIG,
         {
           "specs/A.mdx": T4_4_SPEC_FILES["specs/A.mdx"],
           [T4_4_1_INVALID_CALLED_PATH]: T4_4_SPEC_FILES["specs/B.mdx"],
-          [T4_4_1_APP_FILE]: source,
+          [T4_4_1_APP_FILE]: T4_4_1_INVALID_APP,
         },
         async (workspace) => {
           const context =

@@ -122,6 +122,8 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertNoCompileErrors,
@@ -149,8 +151,14 @@ import {
 
 // One spec group plus one code group (SPEC 7.2): TypeScript files under
 // `src/` are discovered code sources, so `build` analyzes their spec-module
-// usage (4, 4.5).
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// usage (4, 4.5). A staged-source record, judged before any product exists
+// (S-9's timing clause; test/self/s9-staged-sources.test.ts): T4.5-2's
+// upstream arm, T4.5-4's callee side, and every arm workspace of T4.5-3,
+// T4.5-5, T4.5-8, and T4.5-9 past the body's first are created after a
+// product invocation; T4.5-1, T4.5-6, and T4.5-7 stage it before theirs.
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T4.5-2/T4.5-3/T4.5-4/T4.5-5/T4.5-8/T4.5-9 xspec.config.ts — one spec group and one code group, the arm workspaces' default",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -160,7 +168,8 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 // A two-level document (root → print → print.hello), so a leaf edit changes
 // the root's subtreeHash through a two-step contains chain (SPEC 5.5).
@@ -190,12 +199,13 @@ const AB_SPEC_FILES = {
 
 /**
  * Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1).
- * An `.mdx` entry is plain contents, judged well-formed at staging, or a
- * staged-source record, staged under the record's own declaration (S-9;
+ * An `.mdx` entry, a code source, or the configuration is plain contents,
+ * judged well-formed at staging, or a staged-source record — MDX or
+ * TypeScript — staged under the record's own declaration (S-9;
  * helpers/workspace.ts).
  */
 async function withWorkspace<T>(
-  config: string,
+  config: StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
@@ -270,18 +280,31 @@ interface OffendingStatementArm {
   readonly offending: string;
 }
 
-/** An arm's staged `src/app.ts` text and its offending statement's window. */
+/** An arm's staged `src/app.ts` and its offending statement's window. */
 interface StagedOffendingStatement {
-  /** The whole file: every line LF-terminated. */
-  readonly source: string;
+  /**
+   * The whole file — every line LF-terminated — as a staged-source record
+   * (S-9's timing clause: every arm's workspace past a body's first is
+   * created after a product invocation, so S-7's sweep never reaches it),
+   * registered at module load.
+   */
+  readonly source: StagedTs;
   /** The offending statement's byte window (support.ts byteWindow). */
   readonly window: { readonly start: number; readonly end: number };
+}
+
+/** One offending-statement arm paired with its staging. */
+interface OffendingStatementStaging {
+  readonly arm: OffendingStatementArm;
+  readonly staged: StagedOffendingStatement;
 }
 
 /**
  * Lay out an arm's `src/app.ts` and locate its offending statement's byte
  * window. The statement must appear exactly once among the staged lines —
- * otherwise a harness defect (never a product failure).
+ * otherwise a harness defect (never a product failure). It registers a
+ * record, so it runs at module load only (`stageOffendingStatements`,
+ * `T4_5_4_CALLEE_STAGED`).
  */
 function stageOffendingStatement(
   testId: string,
@@ -299,7 +322,24 @@ function stageOffendingStatement(
     .slice(0, at)
     .map((line) => line + "\n")
     .join("");
-  return { source, window: byteWindow(prefix, arm.offending) };
+  return {
+    source: stagedTs(`${testId} arm ${arm.name} src/app.ts`, source),
+    window: byteWindow(prefix, arm.offending),
+  };
+}
+
+/**
+ * Stage an arm table once, at module load, in table order — a record
+ * registers at module level only (S-9), so the body iterates the result.
+ */
+function stageOffendingStatements(
+  testId: string,
+  arms: readonly OffendingStatementArm[],
+): readonly OffendingStatementStaging[] {
+  return arms.map((arm) => ({
+    arm,
+    staged: stageOffendingStatement(testId, arm),
+  }));
 }
 
 /**
@@ -311,10 +351,10 @@ function stageOffendingStatement(
 async function assertArmFailsWith(
   product: ProductBinding,
   testId: string,
-  arm: OffendingStatementArm,
+  { arm, staged }: OffendingStatementStaging,
   condition: string,
 ): Promise<void> {
-  const { source, window } = stageOffendingStatement(testId, arm);
+  const { source, window } = staged;
   const context = `${testId} \`build --json\` over ${arm.name}`;
   await withWorkspace(
     SPEC_AND_CODE_CONFIG,
@@ -489,13 +529,13 @@ export default defineConfig({
 `;
 
 // The bare reference to the default export, at file top level — the root
-// marker, and the workspace's only dependency edge.
-const T4_5_2_APP_SOURCE = [
-  'import SPEC from "../specs/MAIN.xspec";',
-  "",
-  "SPEC;",
-  "",
-].join("\n");
+// marker, and the workspace's only dependency edge. A staged-source record
+// (S-9's timing clause): the upstream arm's workspace is created after the
+// root-marker arm's invocations; the root-marker arm stages it before them.
+const T4_5_2_APP_SOURCE = stagedTs(
+  "T4.5-2 src/app.ts — the root marker, the upstream arm's (also the root-marker arm's)",
+  ['import SPEC from "../specs/MAIN.xspec";', "", "SPEC;", ""].join("\n"),
+);
 
 // The leaf edit: one own-content run of print.hello changes, so the root's
 // subtreeHash (and effectiveHash) change through the contains chain
@@ -898,13 +938,16 @@ const T4_5_3_ARMS: readonly OffendingStatementArm[] = [
   },
 ];
 
+// T4.5-3's arms staged at module load, one record per row (S-9).
+const T4_5_3_STAGINGS = stageOffendingStatements("T4.5-3", T4_5_3_ARMS);
+
 const T4_5_3 = defineProductTest({
   id: "T4.5-3",
   title:
     "a non-static bare reference in expression-statement position — computed index by variable, optional chaining, non-null assertion, parentheses, template-literal index, and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`SPEC.a as X;`, `<X>SPEC.a;` in a `.ts` file, `SPEC.a satisfies X;`) — fails with exactly one located 14.8 finding (invalid argument, not 14.18), the file well-formed (SPEC 4.5, 2.4, 14.8)",
   run: async (product) => {
-    for (const arm of T4_5_3_ARMS) {
-      await assertArmFailsWith(product, "T4.5-3", arm, "14.8");
+    for (const staging of T4_5_3_STAGINGS) {
+      await assertArmFailsWith(product, "T4.5-3", staging, "14.8");
     }
   },
 });
@@ -962,6 +1005,12 @@ const T4_5_4_CALLEE_ARM: OffendingStatementArm = {
   ],
   offending: T4_5_4_CALLEE_SHADOWED_LINE,
 };
+// The callee side creates its workspace after the body's first invocation:
+// its `src/app.ts` is staged at module load, a staged-source record (S-9).
+const T4_5_4_CALLEE_STAGED = stageOffendingStatement(
+  "T4.5-4",
+  T4_5_4_CALLEE_ARM,
+);
 
 /**
  * An occurrence record's every datum (SPEC 5.7) as one JSON-safe tuple —
@@ -995,10 +1044,7 @@ function occurrenceTuple(record: OccurrenceRecord): readonly unknown[] {
  * call's `embeds` record, none for the shadowed call (5.7, 11.3).
  */
 async function assertT454CalleeSide(product: ProductBinding): Promise<void> {
-  const { source, window } = stageOffendingStatement(
-    "T4.5-4",
-    T4_5_4_CALLEE_ARM,
-  );
+  const { source, window } = T4_5_4_CALLEE_STAGED;
   const shadowedUse = { file: "src/app.ts", window } as const;
   // The control record: its own range spans the call expression, callee
   // through closing parenthesis, the statement terminator excluded; its
@@ -1013,7 +1059,7 @@ async function assertT454CalleeSide(product: ProductBinding): Promise<void> {
       controlStart,
       controlEnd,
       "embeds",
-      ["src/app.ts", 0, Buffer.byteLength(source, "utf8")],
+      ["src/app.ts", 0, Buffer.byteLength(source.source, "utf8")],
       "specs/A.mdx#a.b",
     ],
   ];
@@ -1218,13 +1264,16 @@ const T4_5_5_ARMS: readonly OffendingStatementArm[] = [
   },
 ];
 
+// T4.5-5's arms staged at module load, one record per row (S-9).
+const T4_5_5_STAGINGS = stageOffendingStatements("T4.5-5", T4_5_5_ARMS);
+
 const T4_5_5 = defineProductTest({
   id: "T4.5-5",
   title:
     "the sanctioned value-level uses are exact — aliasing a node to a variable, destructuring the module, re-exporting the binding, storing a node in an array or object, passing a node to a function other than a spec module's `text` export, and passing or storing `text` other than as a callee each fail with exactly one located 14.18 finding (SPEC 4.5, 14.18)",
   run: async (product) => {
-    for (const arm of T4_5_5_ARMS) {
-      await assertArmFailsWith(product, "T4.5-5", arm, "14.18");
+    for (const staging of T4_5_5_STAGINGS) {
+      await assertArmFailsWith(product, "T4.5-5", staging, "14.18");
     }
   },
 });
@@ -1510,8 +1559,14 @@ const T4_5_8_CONTROL_ARMS: readonly SameScopeDeclarationArm[] = [
 
 /** A staged `src/app.ts` for one arm and its constructs' byte positions. */
 interface StagedSameScopeArm {
-  /** The whole file: import, blank, declaration, blank, marker, `text` call. */
-  readonly source: string;
+  /**
+   * The whole file — import, blank, declaration, blank, marker, `text`
+   * call — as a staged-source record (registered at module load, so the
+   * arms are staged once, into `T4_5_8_COLLIDING_STAGINGS` and
+   * `T4_5_8_CONTROL_STAGINGS`: every arm's workspace past the body's first
+   * is created after a product invocation, S-9's timing clause).
+   */
+  readonly source: StagedTs;
   /** The import declaration's end-widened byte window (support.ts byteWindow). */
   readonly importWindow: { readonly start: number; readonly end: number };
   /** The colliding construct's end-widened byte window (`""` construct: unused). */
@@ -1527,7 +1582,8 @@ interface StagedSameScopeArm {
  * marker statement and the `text(...)` call statement, each on its own line
  * — and fix every construct's byte position from the exact bytes. The file
  * is pure ASCII, so string indices are byte offsets. A construct missing
- * from its line is a harness defect, never a product failure.
+ * from its line is a harness defect, never a product failure. It registers
+ * a record, so it runs at module load only.
  */
 function stageSameScopeArm(arm: SameScopeDeclarationArm): StagedSameScopeArm {
   const constructAt = arm.line.indexOf(arm.construct);
@@ -1549,7 +1605,7 @@ function stageSameScopeArm(arm: SameScopeDeclarationArm): StagedSameScopeArm {
     return { start, end: start + Buffer.byteLength(construct, "utf8") };
   };
   return {
-    source,
+    source: stagedTs(`T4.5-8 src/app.ts beside ${arm.name}`, source),
     importWindow: byteWindow("", T4_5_8_IMPORT),
     constructWindow: byteWindow(
       declarationPrefix + arm.line.slice(0, constructAt),
@@ -1559,6 +1615,19 @@ function stageSameScopeArm(arm: SameScopeDeclarationArm): StagedSameScopeArm {
     textCallRange: exact(textCallPrefix, T4_5_8_TEXT_CALL),
   };
 }
+
+/** One module-scope declaration arm paired with its staging. */
+interface SameScopeArmStaging {
+  readonly arm: SameScopeDeclarationArm;
+  readonly staged: StagedSameScopeArm;
+}
+
+// The arms staged once, at module load, in table order — a record registers
+// at module level only (S-9), so the body iterates these tables.
+const T4_5_8_COLLIDING_STAGINGS: readonly SameScopeArmStaging[] =
+  T4_5_8_COLLIDING_ARMS.map((arm) => ({ arm, staged: stageSameScopeArm(arm) }));
+const T4_5_8_CONTROL_STAGINGS: readonly SameScopeArmStaging[] =
+  T4_5_8_CONTROL_ARMS.map((arm) => ({ arm, staged: stageSameScopeArm(arm) }));
 
 /** A finding's locations as JSON-safe `[file, start, end]` tuples (12.7 order). */
 function locationTuples(finding: Finding): readonly (readonly unknown[])[] {
@@ -1648,9 +1717,8 @@ function assertSameScopeCollisionFindings(
  */
 async function assertSameScopeCollisionArm(
   product: ProductBinding,
-  arm: SameScopeDeclarationArm,
+  { arm, staged }: SameScopeArmStaging,
 ): Promise<void> {
-  const staged = stageSameScopeArm(arm);
   await withWorkspace(
     SPEC_AND_CODE_CONFIG,
     { ...T4_5_8_SPEC_FILES, "src/app.ts": staged.source },
@@ -1757,9 +1825,8 @@ async function assertSameScopeCollisionArm(
  */
 async function assertSameScopeControlArm(
   product: ProductBinding,
-  arm: SameScopeDeclarationArm,
+  { arm, staged }: SameScopeArmStaging,
 ): Promise<void> {
-  const staged = stageSameScopeArm(arm);
   await withWorkspace(
     SPEC_AND_CODE_CONFIG,
     { ...T4_5_8_SPEC_FILES, "src/app.ts": staged.source },
@@ -2059,11 +2126,11 @@ const T4_5_8 = defineProductTest({
   title:
     "same-scope collisions: an identifier the spec module import binds that a module-scope `const`, `function`, `class`, `enum`, or value-binding `namespace` declaration also binds at value level roots no resolving chain — `build` and `check` report the condition-15 collision, locating the import by its own characters and the non-import by the construct binding the name (the declarator `SPEC = 1`, the `const` statement excluded; the further forms `let SPEC;` at `SPEC` alone, `const { SPEC } = o` at `{ SPEC } = o`, `@dec class SPEC {}` from its `@`, and `export class SPEC {}` / `export function SPEC() {}` from `class` / `function`, the `export` excluded), beside condition 7 for the marker `SPEC.a` and the call `text(SPEC.b)`, each at the span its occurrence would occupy, exit 1; the gated `query edges` reports no edge from the file and `occurrences` no record for the spellings; type-level `interface`, `type`, and value-free `namespace` declarations collide with nothing — edges recorded, no finding, exit 0; and a spec source holding `export const BASE = 1` beside `import BASE` reports 14.16 for the export statement, 14.15 locating the import and the declarator, and 14.5/14.6 for the `d` and `text(...)` spellings rooted at `BASE`, no edge and no occurrence recorded for them — the two declarations in one ESM block and, a second arm, across two blocks, each a finding in a well-formed file, never 14.20 (SPEC 2.4, 4.5, 2.1, 2.7, 5.7, 11.2, 12.7, 13.3, 14, 14.15, 14.20)",
   run: async (product) => {
-    for (const arm of T4_5_8_COLLIDING_ARMS) {
-      await assertSameScopeCollisionArm(product, arm);
+    for (const staging of T4_5_8_COLLIDING_STAGINGS) {
+      await assertSameScopeCollisionArm(product, staging);
     }
-    for (const arm of T4_5_8_CONTROL_ARMS) {
-      await assertSameScopeControlArm(product, arm);
+    for (const staging of T4_5_8_CONTROL_STAGINGS) {
+      await assertSameScopeControlArm(product, staging);
     }
     for (const staging of T4_5_8_SPEC_SOURCE_STAGINGS) {
       await assertSpecSourceCollision(product, staging);
@@ -2082,7 +2149,8 @@ const T4_5_8 = defineProductTest({
 // argument), and a non-spec module exporting `text` so the `./t` imports
 // name an existing module (a consumer-side matter, SPEC 6.4).
 // Every cell's workspace past the first is created after a product
-// invocation: the two spec sources are staged-source records (S-9).
+// invocation: the two spec sources and the non-spec module are
+// staged-source records (S-9).
 const T4_5_9_FILES = {
   "specs/A.mdx": stagedMdx(
     "T4.5-9 specs/A.mdx",
@@ -2092,8 +2160,10 @@ const T4_5_9_FILES = {
     "T4.5-9 specs/B.mdx",
     '<S id="a">\nBravo behavior.\n</S>\n',
   ),
-  "src/t.ts":
+  "src/t.ts": stagedTs(
+    "T4.5-9 src/t.ts — the non-spec module exporting `text`",
     "export function text(value: unknown): string {\n  return String(value);\n}\n",
+  ),
 } as const;
 
 // The spec import binding `SPEC` and `text` — the `text` every arm's
@@ -2191,8 +2261,14 @@ const T4_5_9_ARGUMENTS: readonly CollidingCallArgument[] = [
 
 /** A staged `src/app.ts` for one cell and its constructs' byte positions. */
 interface StagedCollidingTextCall {
-  /** The whole file: the imports and the declaration, a blank line, the call. */
-  readonly source: string;
+  /**
+   * The whole file — the imports and the declaration, a blank line, the
+   * call — as a staged-source record (registered at module load, so the
+   * cells are staged once, into `T4_5_9_CELLS`: every cell's workspace past
+   * the body's first is created after a product invocation, S-9's timing
+   * clause).
+   */
+  readonly source: StagedTs;
   /** The spec import's end-widened byte window (support.ts byteWindow). */
   readonly importWindow: { readonly start: number; readonly end: number };
   /** The colliding construct's end-widened byte window. */
@@ -2208,7 +2284,8 @@ interface StagedCollidingTextCall {
  * then the colliding declaration, a blank line, and the call statement —
  * and fix every construct's byte position from the exact bytes (pure
  * ASCII, so string indices are byte offsets). A construct missing from its
- * line is a harness defect, never a product failure.
+ * line is a harness defect, never a product failure. It registers a
+ * record, so it runs at module load only.
  */
 function stageCollidingTextCall(
   arm: CollidingTextArm,
@@ -2227,7 +2304,10 @@ function stageCollidingTextCall(
   const source = `${argumentPrefix}${argument.spelling});\n`;
   const argumentStart = Buffer.byteLength(argumentPrefix, "utf8");
   return {
-    source,
+    source: stagedTs(
+      `T4.5-9 src/app.ts beside ${arm.name}, the argument ${argument.name}`,
+      source,
+    ),
     importWindow: byteWindow("", T4_5_9_IMPORT),
     constructWindow: byteWindow(
       declarationPrefix + arm.line.slice(0, constructAt),
@@ -2241,6 +2321,25 @@ function stageCollidingTextCall(
       : undefined,
   };
 }
+
+/** One cell — a colliding declaration and a call argument — and its staging. */
+interface CollidingTextCallCell {
+  readonly arm: CollidingTextArm;
+  readonly argument: CollidingCallArgument;
+  readonly staged: StagedCollidingTextCall;
+}
+
+// The cells staged once, at module load, in run order (each colliding
+// declaration with each argument) — a record registers at module level only
+// (S-9), so the body iterates this table.
+const T4_5_9_CELLS: readonly CollidingTextCallCell[] =
+  T4_5_9_COLLIDING_ARMS.flatMap((arm) =>
+    T4_5_9_ARGUMENTS.map((argument) => ({
+      arm,
+      argument,
+      staged: stageCollidingTextCall(arm, argument),
+    })),
+  );
 
 /**
  * Assert the findings a cell's workspace reports, in 12.7 order: the one
@@ -2298,10 +2397,8 @@ function assertCollidingTextCallFindings(
  */
 async function assertCollidingTextCallCell(
   product: ProductBinding,
-  arm: CollidingTextArm,
-  argument: CollidingCallArgument,
+  { arm, argument, staged }: CollidingTextCallCell,
 ): Promise<void> {
-  const staged = stageCollidingTextCall(arm, argument);
   const cell = `${arm.name}, the argument ${argument.name}`;
   await withWorkspace(
     SPEC_AND_CODE_CONFIG,
@@ -2381,12 +2478,19 @@ async function assertCollidingTextCallCell(
 // call — its `embeds` edge and occurrence recorded, no finding (4.3, 5.7).
 const T4_5_9_CONTROL_LINE = "type text = number;";
 const T4_5_9_CONTROL_CALL = "text(SPEC.a)";
+// The control's workspace is created after the body's invocations: its
+// `src/app.ts` is a staged-source record (S-9).
+const T4_5_9_CONTROL_CALL_PREFIX = `${T4_5_9_IMPORT}\n${T4_5_9_CONTROL_LINE}\n\n`;
+const T4_5_9_CONTROL_SOURCE = stagedTs(
+  "T4.5-9 src/app.ts beside the type alias `type text = number` (the control)",
+  `${T4_5_9_CONTROL_CALL_PREFIX}${T4_5_9_CONTROL_CALL};\n`,
+);
 
 async function assertCollidingTextControl(
   product: ProductBinding,
 ): Promise<void> {
-  const callPrefix = `${T4_5_9_IMPORT}\n${T4_5_9_CONTROL_LINE}\n\n`;
-  const source = `${callPrefix}${T4_5_9_CONTROL_CALL};\n`;
+  const callPrefix = T4_5_9_CONTROL_CALL_PREFIX;
+  const source = T4_5_9_CONTROL_SOURCE;
   const callStart = Buffer.byteLength(callPrefix, "utf8");
   const callEnd = callStart + Buffer.byteLength(T4_5_9_CONTROL_CALL, "utf8");
   // The record's own range spans the call, callee through closing
@@ -2398,7 +2502,7 @@ async function assertCollidingTextControl(
       callStart,
       callEnd,
       "embeds",
-      ["src/app.ts", 0, Buffer.byteLength(source, "utf8")],
+      ["src/app.ts", 0, Buffer.byteLength(source.source, "utf8")],
       "specs/A.mdx#a",
     ],
   ];
@@ -2461,10 +2565,8 @@ const T4_5_9 = defineProductTest({
   title:
     'call through a colliding `text` identifier: a call whose callee `text` the spec import and a second non-spec import, a second spec module\'s `text` import, a type-only import, a `function text(x: unknown) {}`, or a `const text = (x: unknown) => ""` of the same module scope also bind is no spec module\'s `text` call — `build` and `check` report 14.15 locating both declarations and, for `text(SPEC.a)`, 14.18 at `SPEC.a` (the identifier extended by its longest static chain), exit 1, no 14.6, 14.7, 14.8, or 14.11; `text("x")` beside the same collision reports no 14.8 and no 14.18; `text(B.a)`, `B` a valid second module\'s default binding, reports 14.18 at `B.a`, never 14.11; no edge and no occurrence — `occurrences --file` on the failing workspace lists none beside the findings; and the type alias `type text = number` beside the import collides with nothing, the call recording its `embeds` edge and occurrence, no finding (SPEC 4.5, 2.4, 5.7, 11.2, 14, 14.15, 14.18)',
   run: async (product) => {
-    for (const arm of T4_5_9_COLLIDING_ARMS) {
-      for (const argument of T4_5_9_ARGUMENTS) {
-        await assertCollidingTextCallCell(product, arm, argument);
-      }
+    for (const cell of T4_5_9_CELLS) {
+      await assertCollidingTextCallCell(product, cell);
     }
     await assertCollidingTextControl(product);
   },

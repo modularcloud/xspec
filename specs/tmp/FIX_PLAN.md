@@ -42,7 +42,7 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 Task 16 was split as its text allowed. Done at dc97774: the mechanism — `StagedTs` records (`test/helpers/staged-ts.ts`), sealed beside the MDX ledger and judged by `test/self/s9-staged-sources.test.ts`; the builder's record overloads; MDX records carrying `ts` for a code-group `.mdx` path — and the first module group (§1's five modules) plus the E-6 fixture's configuration and code source. AGENTS.md's "staged-source ledger's TypeScript records" bullet holds the conversion rule, the detector recipe that finds a module's remaining plain post-invocation TypeScript stagings, and the survey's totals.
 
-Done since: Task 16b (§2 and §3) and Task 16c (`section-4.ts`; `section-4.1-4.2.ts` has no runtime site); `git log --grep 'Task 16[bc]'`. Their counts are in that AGENTS.md bullet.
+Done since: Task 16b (§2 and §3), Task 16c (`section-4.ts`; `section-4.1-4.2.ts` has no runtime site), and Task 16d (`section-4.3-4.4.ts`, `section-4.5.ts`, `section-4.6.ts`); `git log --grep 'Task 16[b-d]'`. Their counts are in that AGENTS.md bullet.
 
 Every split task below converts its modules by that rule, then checks:
 - `test/self/s9-staged-sources.test.ts` passes; AGENTS.md records its TypeScript-judgement count and the self project's test count.
@@ -51,12 +51,6 @@ Every split task below converts its modules by that rule, then checks:
 - `npm run typecheck`, `npm run format:check`, and the full self project under the namespace pass.
 
 The survey at 3f43daa (suite plus certification) names each module's runtime sites below: tests, staged paths, and distinct byte-strings. It is a floor, not the list.
-
-### Task 16d — TypeScript records: `section-4.3-4.4.ts`, `section-4.5.ts`, `section-4.6.ts`
-
-- `section-4.3-4.4.ts`: T4.3-2 and T4.4-1. Configurations, `src/app.ts`, and `consumer/cross.ts`: 14 byte-strings.
-- `section-4.5.ts`: T4.5-2 through T4.5-5, T4.5-8, and T4.5-9. Configurations, `src/app.ts`, and `src/t.ts`: 46 byte-strings.
-- `section-4.6.ts`: T4.6-3. The configuration and the five declaration-file names (`src/x.d.ts`, `.d.mts`, `.d.cts`, `.d.css.ts`, `src/x.dts.ts`): 6 byte-strings.
 
 ### Task 16e — TypeScript records: §5 and §6.1–§6.4
 
