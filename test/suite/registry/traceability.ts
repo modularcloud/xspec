@@ -103,6 +103,12 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T1.4-2": ["1.4"],
   "T1.4-3": ["1.4"],
   "T1.4-4": ["1.4", "14"],
+  // T1.4-5: 1.4's identifier test by characters at the release and language
+  // level 14.20 fixes (the "14" key), through dot access in both kinds of
+  // source (2.4), the generated module's dot-accessible and quoted
+  // properties (4.1), and a section move's conversion to imported form in
+  // 6.4's fallback spellings (6.4, 6.5).
+  "T1.4-5": ["1.4", "2.4", "4.1", "6.4", "6.5", "14"],
   "T1.5-1": ["1.5"],
   "T1.5-2": ["1.5", "12.0", "12.7", "14"],
   "T1.5-3": ["1.5"],
