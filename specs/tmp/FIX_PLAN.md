@@ -38,19 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 36 — T6.5-9: placement, and the type-alias name left to T6.5-22(a) (TEST-SPEC L288; A23)
-
-**Depends on.** Tasks 19 and 35.
-
-**Where.** `test/suite/registry/section-6.5.ts`: T6.5-9's code arm. Since Task 35 (2026-10-02) T6.5-8's restaged TS arm is `A8_TS_ORIGIN_LINES`, `A8_PLAIN_TARGET_LINES`, `a8Code`, `A8_TS_ARGV`, and `A8_CODE_REWRITTEN` there, while T6.5-9 still stages its former copy under `A9_*` (`specs/Origin.mdx`, `specs/Target.mdx`, `src/app.ts`). `assertAddedImportInsertion` (`test/helpers/import-insertion.ts`) judges line starts by SPEC 3's terminators and takes one `pinnedOffset`.
-
-**Change.**
-- *Restage.* The code arm becomes T6.5-8's restaged TS arm plus the lures. The import declarations (the origin's and the non-spec lures') head the file, with no blank line after them.
-- *Placement.* Assert the diff-isolated added run as T6.5-8 asserts it: at the start of the line directly after one of the imports. Today no placement is asserted, and the blank line after the imports lets a conforming product insert at a line start that is not directly after an import.
-- *Type alias.* Drop T6.5-9's own assertion that the fresh identifier is not the `type` alias's name (`TargetSPEC`). L288 leaves the alias to T6.5-22(a), which Task 19 asserts universally. T6.5-9 keeps the value-level lures and the compile-cleanliness assertion.
-
-**Checks.** S-9 and S-7 pass. T6.5-9 against the built product.
-
 ### Task 37 — T6.5-11: arms (a) and (b) restaged; new arms (e) and (f) (TEST-SPEC L290; A24)
 
 **Where.** `test/suite/registry/section-6.5-ii.ts`. Today the origin import stands first (in (b), before `T`), and any line start is accepted.

@@ -117,6 +117,20 @@ export interface AddedImportOptions {
    * line-start readings is the product's (6.5's latitude).
    */
   readonly pinnedOffset?: { readonly offset: number; readonly where: string };
+  /**
+   * The insertion offsets into `base` the test confines the run to, with
+   * how the diagnosis names them — set where the receiving file's
+   * line-start admissible offsets are several and all known (T6.5-9's code
+   * arm: the start of the line directly after each import declaration
+   * heading the file), the choice among them the product's (6.5's
+   * latitude). The run must read as the disciplined insertion at one of
+   * them. `pinnedOffset` is the one-offset case; a caller sets at most one
+   * of the two.
+   */
+  readonly pinnedOffsets?: {
+    readonly offsets: readonly number[];
+    readonly where: string;
+  };
 }
 
 function firstDifference(a: Uint8Array, b: Uint8Array): number {
@@ -400,13 +414,17 @@ function readInsertion(
  * readings (line starts judged by 3's terminators, `atLineStart`), unless
  * the caller pins it (`pinnedOffset`: the receiving file's one line-start
  * admissible offset), when the run must read as the disciplined insertion
- * at exactly that offset. The accepted reading is returned.
+ * at exactly that offset, or confines it (`pinnedOffsets`: the receiving
+ * file's several line-start admissible offsets), when the run must read as
+ * the disciplined insertion at one of them. The accepted reading is
+ * returned.
  */
 export function assertAddedImportInsertion(
   options: AddedImportOptions,
   context: string,
 ): AddedImportReading {
   const label = `${context}: ${options.rel}`;
+  const pins = pinnedSet(options, label);
   const insertion = isolateSingleInsertion(options.base, options.actual, label);
   const specifier = canonicalSpecifier(
     options.importerDir,
@@ -435,12 +453,15 @@ export function assertAddedImportInsertion(
     if (last !== undefined && last.reason === read.reason) last.to = offset;
     else reasons.push({ from: offset, to: offset, reason: read.reason });
   }
-  const pinned = options.pinnedOffset;
   const pinnedNote =
-    pinned === undefined
+    pins === undefined
       ? ""
-      : ` (the test pins the insertion at ${pinned.where}, offset ` +
-        `${String(pinned.offset)} of the composed text)`;
+      : pins.one
+        ? ` (the test pins the insertion at ${pins.where}, offset ` +
+          `${String(pins.offsets[0])} of the composed text)`
+        : ` (the test confines the insertion to ${pins.where}: ` +
+          `${describeOffsets(options.base, pins.offsets)} of the composed ` +
+          `text)`;
   if (accepted === undefined) {
     const shown = options.actual.subarray(
       insertion.highestOffset,
@@ -467,29 +488,84 @@ export function assertAddedImportInsertion(
           .join("; "),
     );
   }
-  if (pinned === undefined) return accepted;
-  // Bytes are the only observable: the pinned offset holds exactly when
-  // the run read there is the disciplined insertion.
-  if (
-    pinned.offset >= insertion.lowestOffset &&
-    pinned.offset <= insertion.highestOffset
-  ) {
-    const read = readInsertion(
-      options,
-      pinned.offset,
-      insertion.length,
-      expected,
-    );
+  if (pins === undefined) return accepted;
+  // Bytes are the only observable: a pin holds exactly when the run read at
+  // one of its offsets is the disciplined insertion.
+  for (const offset of pins.offsets) {
+    if (offset < insertion.lowestOffset || offset > insertion.highestOffset) {
+      continue;
+    }
+    const read = readInsertion(options, offset, insertion.length, expected);
     if ("reading" in read) return read.reading;
   }
   fail(
     `${label} — the added import ${JSON.stringify(text)} followed by ` +
       `U+000A stands at offset ${String(accepted.offset)}, the start of ` +
       `line ${String(lineAt(options.base, accepted.offset))} of the composed ` +
-      `text, not at ${pinned.where} (offset ${String(pinned.offset)}), the ` +
-      `one line-start admissible offset the receiving file holds — 6.5 ` +
-      `takes a line-start admissible offset over any other, and an offset ` +
-      `elsewhere is not admissible there (SPEC 6.5, 3)`,
+      `text, not at ${pins.where} ` +
+      (pins.one
+        ? `(offset ${String(pins.offsets[0])}), the one line-start ` +
+          `admissible offset the receiving file holds`
+        : `(${describeOffsets(options.base, pins.offsets)}), the line-start ` +
+          `admissible offsets the receiving file holds`) +
+      ` — 6.5 takes a line-start admissible offset over any other, and an ` +
+      `offset elsewhere is not admissible there (SPEC 6.5, 3)`,
+  );
+}
+
+/** A caller's pin as one set of offsets (`one`: the `pinnedOffset` form). */
+interface PinnedSet {
+  readonly offsets: readonly number[];
+  readonly where: string;
+  readonly one: boolean;
+}
+
+/**
+ * The caller's pin, `pinnedOffset` or `pinnedOffsets`, as one set; throws
+ * (a harness defect, never a product verdict) when both are set or the set
+ * is empty.
+ */
+function pinnedSet(
+  options: AddedImportOptions,
+  label: string,
+): PinnedSet | undefined {
+  const { pinnedOffset, pinnedOffsets } = options;
+  if (pinnedOffset !== undefined && pinnedOffsets !== undefined) {
+    throw new Error(
+      `${label}: a caller of assertAddedImportInsertion sets pinnedOffset ` +
+        "or pinnedOffsets, never both (a harness defect)",
+    );
+  }
+  if (pinnedOffset !== undefined) {
+    return {
+      offsets: [pinnedOffset.offset],
+      where: pinnedOffset.where,
+      one: true,
+    };
+  }
+  if (pinnedOffsets === undefined) return undefined;
+  if (pinnedOffsets.offsets.length === 0) {
+    throw new Error(
+      `${label}: pinnedOffsets names no offset — a confining set holds at ` +
+        "least one (a harness defect)",
+    );
+  }
+  return {
+    offsets: [...pinnedOffsets.offsets],
+    where: pinnedOffsets.where,
+    one: false,
+  };
+}
+
+/** Offsets of `text` named with their 1-based lines, for diagnoses. */
+function describeOffsets(text: Uint8Array, offsets: readonly number[]): string {
+  return (
+    "offsets " +
+    offsets
+      .map(
+        (offset) => `${String(offset)} (line ${String(lineAt(text, offset))})`,
+      )
+      .join(", ")
   );
 }
 

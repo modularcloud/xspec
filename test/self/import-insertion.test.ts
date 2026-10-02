@@ -418,6 +418,109 @@ test("a pinned offset admits that offset alone", () => {
   );
 });
 
+// T6.5-9's code arm: the import declarations head the file, so the start of
+// the line directly after each one is a line-start admissible offset, and
+// the test confines the run to those (`pinnedOffsets`).
+const H_LINE_2 = 'import Target, { O2 } from "./util.js"';
+const H_BASE = [
+  C_LINE_1,
+  H_LINE_2,
+  "const target = Target + O2;",
+  "function f() {",
+  "  T.y;",
+  "  O.w;",
+  "}",
+  "",
+].join("\n");
+const H_AFTER_IMPORTS = [
+  C_LINE_1.length + 1,
+  C_LINE_1.length + 1 + H_LINE_2.length + 1,
+];
+
+function checkHeaded(actual: string, confined = true) {
+  return assertAddedImportInsertion(
+    {
+      rel: "src/c.ts",
+      base: bytes(H_BASE),
+      actual: bytes(actual),
+      importerDir: "src",
+      expectedModule: "specs/target.xspec",
+      identifier: "T",
+      ...(confined
+        ? {
+            pinnedOffsets: {
+              offsets: H_AFTER_IMPORTS,
+              where: "the start of the line directly after an import",
+            },
+          }
+        : {}),
+    },
+    "self",
+  );
+}
+
+const insertAt = (base: string, at: number, run: string): string =>
+  base.slice(0, at) + run + base.slice(at);
+
+test("a confining offset set admits each of its offsets and those alone", () => {
+  // Directly after either import: accepted, at that offset.
+  for (const at of H_AFTER_IMPORTS) {
+    expect(checkHeaded(insertAt(H_BASE, at, C_DECL + "\n")).offset).toBe(at);
+  }
+  // Offset 0, the start of the line after the `const`, and the file's end:
+  // line starts all, so the unconfined reader accepts them — the set does
+  // not, and names its offsets with their lines.
+  const afterConst = H_BASE.indexOf("function f");
+  for (const at of [0, afterConst, H_BASE.length]) {
+    const actual = insertAt(H_BASE, at, C_DECL + "\n");
+    expect(checkHeaded(actual, false).offset).toBe(at);
+    expectDiagnosed(
+      () => checkHeaded(actual),
+      "not at the start of the line directly after an import",
+      `offsets ${String(H_AFTER_IMPORTS[0])} (line 2), ` +
+        `${String(H_AFTER_IMPORTS[1])} (line 3)`,
+      "the line-start admissible offsets the receiving file holds",
+    );
+  }
+  // A misspelled declaration at a confined offset is diagnosed as one, the
+  // set named.
+  expectDiagnosed(
+    () =>
+      checkHeaded(insertAt(H_BASE, H_AFTER_IMPORTS[1] ?? 0, C_DECL + ";\n")),
+    "is not the added import",
+    "statement terminator",
+    "confines the insertion to the start of the line directly after an import",
+  );
+});
+
+test("pinnedOffset and pinnedOffsets together, or an empty set, are harness defects", () => {
+  const actual = insertAt(H_BASE, H_AFTER_IMPORTS[0] ?? 0, C_DECL + "\n");
+  const common = {
+    rel: "src/c.ts",
+    base: bytes(H_BASE),
+    actual: bytes(actual),
+    importerDir: "src",
+    expectedModule: "specs/target.xspec",
+    identifier: "T",
+  };
+  expect(() =>
+    assertAddedImportInsertion(
+      {
+        ...common,
+        pinnedOffset: { offset: H_AFTER_IMPORTS[0] ?? 0, where: "line 2" },
+        pinnedOffsets: { offsets: H_AFTER_IMPORTS, where: "after an import" },
+      },
+      "self",
+    ),
+  ).toThrow(/never both/);
+  expect(() =>
+    assertAddedImportInsertion(
+      { ...common, pinnedOffsets: { offsets: [], where: "nowhere" } },
+      "self",
+    ),
+  ).toThrow(/names no offset/);
+});
+
 // The exact-declaration reader (T6.5-11): the added declaration's characters
 // are pinned byte-exactly by the caller — 6.5's TypeScript spellings with the
 // fresh identifiers substituted — and the line discipline is read as the

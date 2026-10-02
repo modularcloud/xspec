@@ -600,8 +600,9 @@ const P2_ORIGIN_SOURCE = stagedMdx(
     "",
   ].join("\n"),
 );
-// The plain target — the bytes T6.5-8/T6.5-9 stage at the same path, so
-// section-6.5.ts's record (one record for identical bytes across tests).
+// The plain target — the bytes T6.5-8 and T6.5-9 stage at
+// `specs/target.mdx`, so section-6.5.ts's record (one record for identical
+// bytes across tests).
 const P2_TARGET_SOURCE = A8_PLAIN_TARGET;
 const P2_MOVE_ARGV = [
   "move",
