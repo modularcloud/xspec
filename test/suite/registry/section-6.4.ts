@@ -1506,6 +1506,50 @@ export const RENAME_REFUSAL_FILES: Readonly<
   ),
 };
 
+// T6.4-3's barred-character arms (TEST-SPEC T6.4-3; SPEC 1.4's
+// quote-and-escape bullet): one per character the bullet bars — the double
+// quote, the single quote, the escape character (backslash), the
+// character-reference character `&`, U+2028, and U+2029 — each spelled
+// between two letters in a one-segment `<new-id>` renaming V3_SOURCE's
+// top-level `a` (as T1.4-1 spells them: the literal, validly encoded
+// character). Each `<new-id>` is a well-formed argument value (12.0: valid
+// UTF-8, no U+FFFD) that no spelling rule decides — unlike T12.0-10's
+// `--to` and `--tag` arms — so each arm exits 1 with `refused-invalid-id`
+// alone, never exit 2, its `identities` exactly the new identity with the
+// character verbatim: SPEC 14 reports no prefix-produced identity beside
+// it, and `refused-structural-parent` is evaluated only over intrinsically
+// valid IDs. A product whose new-ID check omits a character its source
+// validation bars (T1.4-1) performs the rename — writing the character into
+// `id` attributes, a workspace failing validation behind a reported success
+// — and fails the exit, the finding, and the modifies-nothing compare
+// (workspace and journal alike: the compare spans the whole root). Each
+// character is built from its code point, so no tool layer can normalize
+// the spelling away.
+const BARRED_NEW_ID_CHARACTERS: readonly (readonly [number, string])[] = [
+  [0x22, "the double quote"],
+  [0x27, "the single quote"],
+  [0x5c, "the escape character (backslash)"],
+  [0x26, "the character-reference character `&`"],
+  [0x2028, "LINE SEPARATOR"],
+  [0x2029, "PARAGRAPH SEPARATOR"],
+];
+const BARRED_CHARACTER_RENAME_CASES: readonly RenameRefusalCase[] =
+  BARRED_NEW_ID_CHARACTERS.map(([codePoint, name]): RenameRefusalCase => {
+    const newId = `a${String.fromCodePoint(codePoint)}b`;
+    return {
+      argv: ["rename", V3_FILE, "a", newId],
+      expected: {
+        finding: "refused-invalid-id",
+        identities: [`${V3_FILE}#${newId}`],
+      },
+      reason:
+        `new ID invalid per 1.4 — its one segment carries ${name} ` +
+        `(U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}), ` +
+        `which 1.4's quote-and-escape bullet bars; a well-formed argument ` +
+        `value, so exit 1, never exit 2`,
+    };
+  });
+
 // Each arm's expected refusal finding (SPEC 14): the exact stable code, with
 // its exact `identities` — the concerned identity as the sole element, in
 // 1.5's form over the file (`refused-invalid-id` and
@@ -1533,6 +1577,7 @@ export const RENAME_REFUSAL_CASES: readonly RenameRefusalCase[] = [
     },
     reason: "new ID invalid per 1.4 — its segment contains whitespace",
   },
+  ...BARRED_CHARACTER_RENAME_CASES,
   {
     argv: ["rename", V3_FILE, "a.mid", "a.mid"],
     expected: {
@@ -1604,7 +1649,7 @@ const V3_MALFORMED_NEW_ID_ARGVS: readonly (readonly [
 const T6_4_3 = defineProductTest({
   id: "T6.4-3",
   title:
-    "validation refusals (exit 1): a new ID that is invalid (1.4), equal to the old ID, colliding with an existing ID, or violating structural parent rules each refuses the rename and modifies nothing (workspace byte-compare) — each refusal reported as the form-exact 12.7 findings-only report holding exactly one finding with its exact stable refusal code (refused-invalid-id, refused-identity-unchanged, refused-id-collision, refused-structural-parent) and the concerned identity or located colliding bearer — the collision staged with one bearer and with two (`rename a b` where `a.c` sits beside `b` and `b.c`: the new ID and the prefix-replaced `b.c` each collide, one refused-id-collision finding locating exactly both bearers `b` and `b.c`, a product locating the first alone failing); a `<new-id>` containing U+FFFD, or not valid UTF-8 (raw argv bytes, Linux leg), never reaches the 1.4 check — a malformed argument value, a syntax-class usage error: exit 2 with the plain usage error's document (`code` null), byte-identical with the configuration file invalid or missing, modifying nothing — never `refused-invalid-id` (SPEC 6.4, 1.4, 1.3, 12.0, 12.7, 14)",
+    "validation refusals (exit 1): a new ID that is invalid (1.4: among its arms one per character 1.4's quote-and-escape bullet bars (the double quote, the single quote, the escape character, `&`, U+2028, and U+2029), each spelled between two letters in a one-segment `<new-id>` renaming the top-level `a`: a well-formed argument value that no spelling rule decides, so refused-invalid-id alone with the character verbatim in its identities, exit 1, never exit 2, workspace and journal byte-unchanged), equal to the old ID, colliding with an existing ID, or violating structural parent rules each refuses the rename and modifies nothing (workspace byte-compare) — each refusal reported as the form-exact 12.7 findings-only report holding exactly one finding with its exact stable refusal code (refused-invalid-id, refused-identity-unchanged, refused-id-collision, refused-structural-parent) and the concerned identity or located colliding bearer — the collision staged with one bearer and with two (`rename a b` where `a.c` sits beside `b` and `b.c`: the new ID and the prefix-replaced `b.c` each collide, one refused-id-collision finding locating exactly both bearers `b` and `b.c`, a product locating the first alone failing); a `<new-id>` containing U+FFFD, or not valid UTF-8 (raw argv bytes, Linux leg), never reaches the 1.4 check — a malformed argument value, a syntax-class usage error: exit 2 with the plain usage error's document (`code` null), byte-identical with the configuration file invalid or missing, modifying nothing — never `refused-invalid-id` (SPEC 6.4, 1.4, 1.3, 12.0, 12.7, 14)",
   run: async (product) => {
     await withWorkspace(
       RENAME_REFUSAL_CONFIG,

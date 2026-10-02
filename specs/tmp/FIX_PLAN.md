@@ -38,19 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 30 — T6.4-3: six barred-character `<new-id>` arms (TEST-SPEC L270; SPEC 6.4, 1.4; A17; they flow into T6.6-3 and T14-7)
-
-**Where.** `test/suite/registry/section-6.4.ts`: `RENAME_REFUSAL_CASES` holds only the `then` and whitespace arms today. T6.6-3 (`section-6.6.ts`) and T14-7 (`section-14.ts`) iterate it.
-
-**Change.** Run `rename specs/A.mdx a '<new-id>'` with each `<new-id>` (exact at L270): `a"b`; `a'b`; `a`, backslash, `b`; `a&b`; `a`, U+2028, `b`; and `a`, U+2029, `b`.
-- Each exits 1 with `refused-invalid-id` alone, never exit 2.
-- `identities` is exactly `["specs/A.mdx#<new-id>"]`, the character verbatim.
-- The workspace and the journal stay byte-unchanged, checked with the compare-around machinery.
-
-Add the arms to `RENAME_REFUSAL_CASES`, so that T6.6-3's preview twins and T14-7's code assertions cover them.
-
-**Checks.** S-7 passes. T6.4-3, T6.6-3, and T14-7 against the built product.
-
 ### Task 31 — T6.5-1: the five-declaration specifier arm (TEST-SPEC L278; SPEC 6.5; A18)
 
 **Where.** `test/suite/registry/section-6.5.ts`.
