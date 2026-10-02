@@ -38,23 +38,11 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 35 — T6.5-8: the TS arm restaged, and the terminator re-runs (TEST-SPEC L287; SPEC 6.5; A22)
-
-**Where.** `test/suite/registry/section-6.5.ts`. T6.5-8's TS arm stages `import ORG …;`, a blank line, then top-level markers, and accepts any line start. That admits placements 6.5 now forbids as untimely, such as after `ORG.org.mv;`.
-
-**Change.**
-- *Restage* as L287 pins it: `src/c.ts` = `import O from "../specs/origin.xspec"`, U+000A, then a function `f` holding `O.x` (moved) and `O.w`. Assert the added run exactly at the start of line 2.
-- *Add the CRLF and lone-CR re-runs* of all three arms, exact bytes per L287.
-
-If T6.5-9 or T6.5-11 import this arm's exported staging, keep them building; Tasks 36 and 37 restage them.
-
-**Checks.** S-9 and S-7 pass. T6.5-8 against the built product.
-
 ### Task 36 — T6.5-9: placement, and the type-alias name left to T6.5-22(a) (TEST-SPEC L288; A23)
 
 **Depends on.** Tasks 19 and 35.
 
-**Where.** `test/suite/registry/section-6.5.ts`: T6.5-9's code arm.
+**Where.** `test/suite/registry/section-6.5.ts`: T6.5-9's code arm. Since Task 35 (2026-10-02) T6.5-8's restaged TS arm is `A8_TS_ORIGIN_LINES`, `A8_PLAIN_TARGET_LINES`, `a8Code`, `A8_TS_ARGV`, and `A8_CODE_REWRITTEN` there, while T6.5-9 still stages its former copy under `A9_*` (`specs/Origin.mdx`, `specs/Target.mdx`, `src/app.ts`). `assertAddedImportInsertion` (`test/helpers/import-insertion.ts`) judges line starts by SPEC 3's terminators and takes one `pinnedOffset`.
 
 **Change.**
 - *Restage.* The code arm becomes T6.5-8's restaged TS arm plus the lures. The import declarations (the origin's and the non-spec lures') head the file, with no blank line after them.
