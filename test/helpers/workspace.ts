@@ -330,7 +330,9 @@ export interface FileOptions {
 export interface WorkspaceDecl {
   /**
    * Regular files: workspace-relative path → exact contents, or a
-   * staged-source record at an `.mdx` path (`InitialFileContents`).
+   * staged-source record — an MDX record at an `.mdx` path, a TypeScript
+   * record at a code source's or configuration file's path
+   * (`InitialFileContents`).
    */
   readonly files?: Readonly<Record<string, InitialFileContents>>;
   /** Symbolic links: workspace-relative link path → verbatim target. */

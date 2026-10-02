@@ -43,6 +43,22 @@
 // listed path's initial contents judged well-formed at creation, a later
 // plain `file()` there exempt from the guard and still judged. The guard's
 // error is a harness error, never a `HarnessAssertionError`.
+//
+// The guard's TypeScript arm (S-9's TypeScript clause), verified for a code
+// source (`src/app.ts`) and a configuration file (`xspec.config.ts`) alike:
+// plain contents at a path the TypeScript check judges are refused after a
+// workspace invocation and after a body invocation — by `file()`, and as
+// an initial `files` entry at creation (per-body mark only, nothing left
+// behind) — whatever their declaration (the default, `unparseable`, a
+// `wellFormed` name the default misses), with the TypeScript remedies in
+// the diagnosis; exempt are a TypeScript record, `edit()`, `unchecked`, the
+// TypeScript `per-draw` declaration (by option, and as `ts.perDraw` at
+// creation — still judged well-formed), `copyFrom()` out of an invoked
+// workspace, and a name nothing judges; an MDX record carrying no `ts` at a
+// code-group `.mdx` path is refused, one carrying its `ts` passes; and the
+// TypeScript `per-draw` declaration is the builder's alone (the judge
+// treats it as well-formed, a record refuses it, `tsPathsOf` lists a
+// rendered map's plain TypeScript-default keys for `ts.perDraw`).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
