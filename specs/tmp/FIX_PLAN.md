@@ -38,18 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 22 — T1.7-2 and T4.6-1: the `using` and `await using` unit arms (TEST-SPEC L80, L193; SPEC 1.7, 4.6; A5, A14)
-
-**Where.** `test/suite/registry/section-1.6-1.7.ts` (T1.7-2; no `using` appears anywhere in the harness today) and `section-4.6.ts` (T4.6-1).
-
-**Change.** Exact shapes are at L80 and L193.
-- *T1.7-2.* `using f = () => { SPEC.a }` spans `f = () => { SPEC.a }`, and `await using h = () => { SPEC.b }` spans `h = () => { SPEC.b }`. Neither span starts at `using` or `await`.
-- *T4.6-1.* `using f = () => { SPEC.a }` at top level gives the unit `path#f`; `await using h = () => { SPEC.b }` inside an async `g` gives `path#g.h`.
-
-Every code file must be accepted by 5.9.3 both ways.
-
-**Checks.** S-9 and S-7 pass. Both tests against the built product (diagnose).
-
 ### Task 23 — T2.4-1 and T2.4-5: reserved-word dot access; escaped-segment and escaped-root arms (TEST-SPEC L109, L113; SPEC 2.4; A6, A7)
 
 **Where.** `test/suite/registry/section-2.4.ts`.

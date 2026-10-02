@@ -30,6 +30,15 @@
 //   plain function declared in the file (itself a unit, `path#dec`,
 //   recording no edge). Only attribution is observed here — the decorated
 //   declarations' ranges are T1.7-2's.
+// - T4.6-1 `using` and `await using` arms: staged under the names TEST-SPEC
+//   spells (`using f` at top level, `await using h` inside an async function
+//   `g`), each initialized with an arrow function holding the placement's
+//   marker and `text(...)` call; the module-scope `f` and the
+//   namespace-scoped `A.B.f` are distinct chains, so neither takes an `@N`
+//   suffix. The file
+//   stays accepted by TypeScript 5.9.3 both as module code and as script
+//   code (14.20), which the workspace builder's staging-time judge confirms
+//   (S-9). Their ranges are T1.7-2's.
 // - T4.6-3 "value-side boundary … never to a unit named `s` (asserted via
 //   `query edges`)": the two value-side `text(...)` calls target dedicated
 //   sections, so the workspace's complete `embeds` edge set (`--kinds
@@ -277,6 +286,24 @@ const T4_6_1_PLACEMENTS: readonly AttributionPlacement[] = [
     forms: "both",
   },
   {
+    name:
+      "a `using` declaration initialized with an arrow function, at top " +
+      "level (`using f = () => { ... }` — SPEC 4.6 counts it as a variable " +
+      "declaration)",
+    unit: "src/app.ts#f",
+    target: "usingdecl",
+    forms: "both",
+  },
+  {
+    name:
+      "an `await using` declaration initialized with an arrow function " +
+      "inside an async function `g` (`await using h = () => { ... }` — a " +
+      "variable declaration too; nested chain g.h)",
+    unit: "src/app.ts#g.h",
+    target: "awaitusing",
+    forms: "both",
+  },
+  {
     name: "directly inside a namespace",
     unit: "src/app.ts#ns",
     target: "ns",
@@ -432,6 +459,18 @@ const T4_6_1_APP_SOURCE = [
   "  }",
   "};",
   "",
+  "using f = () => {",
+  "  SPEC.usingdecl;",
+  "  text(SPEC.usingdecl);",
+  "};",
+  "",
+  "async function g(): Promise<void> {",
+  "  await using h = () => {",
+  "    SPEC.awaitusing;",
+  "    text(SPEC.awaitusing);",
+  "  };",
+  "}",
+  "",
   "namespace ns {",
   "  SPEC.ns;",
   "  text(SPEC.ns);",
@@ -550,7 +589,7 @@ const T4_6_1_EXPECTED_EMBEDS: readonly GraphEdge[] = T4_6_1_PLACEMENTS.filter(
 const T4_6_1 = defineProductTest({
   id: "T4.6-1",
   title:
-    "markers and `text(...)` calls attribute to the innermost enclosing named unit — file top level to the file; function declarations, class methods, a constructor (`Service.constructor`, a unit named `constructor`), getters, setters, function-, arrow-, and class-valued class properties and variables, namespaces — `namespace X` and the legacy `module X`, the same declaration — and a named default export to `path#unit` with the dot-joined chain outermost first (`Service.method`, `ns.fn`); a class static block and a plain non-function property initializer to the bare class unit; `namespace A.B` and the legacy `module P.Q` each declare one unit per dot-separated name; decorated declarations are units like undecorated ones (`dec` declared in the file: `@dec class Deco { @dec m() { ... } }` to `Deco.m`, its static block to the bare `Deco`, `export @dec class DecoExport { m() { ... } }` to `DecoExport.m`) — with each placement's `references` and `embeds` edges sourced at the same unit (SPEC 4.6, 4.5, 4.3)",
+    "markers and `text(...)` calls attribute to the innermost enclosing named unit — file top level to the file; function declarations, class methods, a constructor (`Service.constructor`, a unit named `constructor`), getters, setters, function-, arrow-, and class-valued class properties and variables, `using` and `await using` declarations initialized with an arrow function (variable declarations: `using f` at top level to `f`, `await using h` in an async function `g` to `g.h`), namespaces — `namespace X` and the legacy `module X`, the same declaration — and a named default export to `path#unit` with the dot-joined chain outermost first (`Service.method`, `ns.fn`); a class static block and a plain non-function property initializer to the bare class unit; `namespace A.B` and the legacy `module P.Q` each declare one unit per dot-separated name; decorated declarations are units like undecorated ones (`dec` declared in the file: `@dec class Deco { @dec m() { ... } }` to `Deco.m`, its static block to the bare `Deco`, `export @dec class DecoExport { m() { ... } }` to `DecoExport.m`) — with each placement's `references` and `embeds` edges sourced at the same unit (SPEC 4.6, 4.5, 4.3)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,

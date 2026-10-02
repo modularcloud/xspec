@@ -1473,8 +1473,9 @@ const T1_7_1 = defineProductTest({
 
 // Occurrence records (SPEC 5.7, 11.3) are the surface making every code
 // unit's range reachable (SPEC 1.7): each fixture file below stages one
-// sanctioned TypeScript reference (`deco.ts` two, one per decorated unit) —
-// a dependency marker (4.5) or a `text(...)` call (4.3) — inside one
+// sanctioned TypeScript reference (`deco.ts` two, one per decorated unit;
+// `using.ts` two, one per `using` and `await using` unit of T4.6-1) — a
+// dependency marker (4.5) or a `text(...)` call (4.3) — inside one
 // named-code-unit shape of SPEC 4.6 (TEST-SPEC T1.7-2's further forms
 // included: the constructor, a decorated class and member, the export
 // exclusion, the `default` unit's spellings, a legacy `module`, and a
@@ -1494,9 +1495,13 @@ const T1_7_1 = defineProductTest({
 const OCC_MARKER = "SPEC.req";
 const OCC_REQ_ID = "specs/R.mdx#req";
 const OCC_ALT_ID = "specs/R.mdx#alt";
+const OCC_A_ID = "specs/R.mdx#a";
+const OCC_B_ID = "specs/R.mdx#b";
 
-// The referenced spec source: two sections, so the marker target and the
-// `text(...)` target are distinct nodes.
+// The referenced spec source: `req` and `alt`, so the marker target and the
+// `text(...)` target are distinct nodes, plus `a` and `b`, the targets the
+// `using` and `await using` arms spell exactly as TEST-SPEC T1.7-2 does
+// (`SPEC.a`, `SPEC.b`).
 const OCC_TARGET_SOURCE = [
   '<S id="req">',
   "Req text.",
@@ -1504,6 +1509,14 @@ const OCC_TARGET_SOURCE = [
   "",
   '<S id="alt">',
   "Alt text.",
+  "</S>",
+  "",
+  '<S id="a">',
+  "A text.",
+  "</S>",
+  "",
+  '<S id="b">',
+  "B text.",
   "</S>",
   "",
 ].join("\n");
@@ -1727,6 +1740,32 @@ const OCC_DTS_HEAD =
 const OCC_DTS_FN_PRE = "function f(): void {\n  ";
 const OCC_DTS_SOURCE = OCC_DTS_HEAD + OCC_DTS_FN_PRE + OCC_MARKER + ";\n}\n";
 
+// src/using.ts — the `using` and `await using` units of T4.6-1, spelled as
+// TEST-SPEC T1.7-2 spells them: SPEC 4.6 counts both as variable
+// declarations, so `using f = () => { SPEC.a }` at top level derives unit
+// `f`, and `await using h = () => { SPEC.b }` inside the async function `g`
+// derives `g.h`. Each unit spans its own name through its initializer —
+// `f = () => { SPEC.a }` and `h = () => { SPEC.b }` — neither from `using`
+// nor from `await` (SPEC 1.7), and no terminator is spelled, so each range
+// ends at the arrow body's closing brace. The file is accepted by TypeScript
+// 5.9.3 both as module code and as script code (14.20), as the workspace
+// builder's staging-time judge confirms (S-9).
+const OCC_USING_HEAD =
+  '// prélude 🦄 using\nimport SPEC from "../specs/R.xspec";\n\n';
+const OCC_USING_KEYWORD = "using ";
+const OCC_USING_UNIT_PRE = "f = () => { ";
+const OCC_USING_MARKER = "SPEC.a";
+const OCC_USING_UNIT = OCC_USING_UNIT_PRE + OCC_USING_MARKER + " }";
+const OCC_AWAIT_USING_PRE = "\n\nasync function g() {\n  await using ";
+const OCC_AWAIT_USING_UNIT_PRE = "h = () => { ";
+const OCC_AWAIT_USING_MARKER = "SPEC.b";
+const OCC_AWAIT_USING_UNIT =
+  OCC_AWAIT_USING_UNIT_PRE + OCC_AWAIT_USING_MARKER + " }";
+const OCC_USING_BEFORE_AWAIT =
+  OCC_USING_HEAD + OCC_USING_KEYWORD + OCC_USING_UNIT + OCC_AWAIT_USING_PRE;
+const OCC_USING_SOURCE =
+  OCC_USING_BEFORE_AWAIT + OCC_AWAIT_USING_UNIT + "\n}\n";
+
 /** One staged occurrence: its expected record plus fixture-self-check data. */
 interface OccurrenceArm {
   readonly what: string;
@@ -1744,11 +1783,11 @@ interface OccurrenceArm {
 // The complete expected enumeration, in occurrence order (SPEC 5.7: by
 // referencing file path bytes — anon < arrow < cls < ctor < decdef < decexp
 // < deco < expdec < fn < mod < multi < named < ns < pair < spaced < top <
-// types.d.ts — then by range start, which places `deco.ts`'s property embed
-// before the marker in its decorated member): the spec source stages no `d`
-// prop, no MDX embedding, and no import, and import declarations record no
-// occurrence (5.7), so the nineteen staged references are the workspace's
-// only occurrences.
+// types.d.ts < using — then by range start, which places `deco.ts`'s
+// property embed before the marker in its decorated member, and `using.ts`'s
+// `f` before `g.h`): the spec source stages no `d` prop, no MDX embedding,
+// and no import, and import declarations record no occurrence (5.7), so the
+// twenty-one staged references are the workspace's only occurrences.
 const OCC_EXPECTED: readonly OccurrenceArm[] = [
   {
     what:
@@ -2156,6 +2195,51 @@ const OCC_EXPECTED: readonly OccurrenceArm[] = [
       target: OCC_REQ_ID,
     },
   },
+  {
+    what:
+      "`using f = () => { SPEC.a }` at top level — a variable declaration " +
+      "(SPEC 4.6), so unit `f` spans its own name through its initializer, " +
+      "`f = () => { SPEC.a }`, never from `using` (SPEC 1.7)",
+    fileSource: OCC_USING_SOURCE,
+    occurrenceSpan: OCC_USING_MARKER,
+    unitSpan: OCC_USING_UNIT,
+    record: {
+      file: "src/using.ts",
+      range: rangeAfter(
+        OCC_USING_HEAD + OCC_USING_KEYWORD + OCC_USING_UNIT_PRE,
+        OCC_USING_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/using.ts#f",
+        range: rangeAfter(OCC_USING_HEAD + OCC_USING_KEYWORD, OCC_USING_UNIT),
+      },
+      target: OCC_A_ID,
+    },
+  },
+  {
+    what:
+      "`await using h = () => { SPEC.b }` inside the async function `g` — a " +
+      "variable declaration (SPEC 4.6), so unit `g.h` spans its own name " +
+      "through its initializer, `h = () => { SPEC.b }`, neither from " +
+      "`await` nor from `using` (SPEC 1.7)",
+    fileSource: OCC_USING_SOURCE,
+    occurrenceSpan: OCC_AWAIT_USING_MARKER,
+    unitSpan: OCC_AWAIT_USING_UNIT,
+    record: {
+      file: "src/using.ts",
+      range: rangeAfter(
+        OCC_USING_BEFORE_AWAIT + OCC_AWAIT_USING_UNIT_PRE,
+        OCC_AWAIT_USING_MARKER,
+      ),
+      kind: "references",
+      source: {
+        identity: "src/using.ts#g.h",
+        range: rangeAfter(OCC_USING_BEFORE_AWAIT, OCC_AWAIT_USING_UNIT),
+      },
+      target: OCC_B_ID,
+    },
+  },
 ];
 
 /**
@@ -2186,7 +2270,7 @@ function assertStagedSpan(
 const T1_7_2 = defineProductTest({
   id: "T1.7-2",
   title:
-    "code-location ranges via occurrence records: against precomputed byte offsets, the `source` node of a marker or TS `text(...)` occurrence carries the entire file for a whole-file location; the construct binding the name for a function and a class declaration; the unit's own name through its initializer — not the enclosing multi-declaration statement; the single dotted-namespace declaration's shared range; the named construct's own range vs the whole export declaration under unit `default` for default exports; the second occurrence's construct for `path#unit@2`; and the further forms — the constructor member, a decorated class and member from their first `@`, the export exclusion (`export @dec class`, `@dec export class`, `export   function`), the `default` unit through a spelled `;` or from a leading `@`, a legacy `module A.B`, and a declaration file's whole-file range (SPEC 1.7, 4.6, 5.7, 11.3, 12.7)",
+    "code-location ranges via occurrence records: against precomputed byte offsets, the `source` node of a marker or TS `text(...)` occurrence carries the entire file for a whole-file location; the construct binding the name for a function and a class declaration; the unit's own name through its initializer — not the enclosing multi-declaration statement, and for the `using` and `await using` units (`using f = () => { SPEC.a }` spans `f = () => { SPEC.a }`, `await using h = () => { SPEC.b }` in an async `g` spans `h = () => { SPEC.b }`, neither from `using` nor from `await`); the single dotted-namespace declaration's shared range; the named construct's own range vs the whole export declaration under unit `default` for default exports; the second occurrence's construct for `path#unit@2`; and the further forms — the constructor member, a decorated class and member from their first `@`, the export exclusion (`export @dec class`, `@dec export class`, `export   function`), the `default` unit through a spelled `;` or from a leading `@`, a legacy `module A.B`, and a declaration file's whole-file range (SPEC 1.7, 4.6, 5.7, 11.3, 12.7)",
   run: async (product) => {
     for (const arm of OCC_EXPECTED) {
       assertStagedSpan(
@@ -2224,6 +2308,7 @@ const T1_7_2 = defineProductTest({
         "src/spaced.ts": OCC_SPACED_SOURCE,
         "src/top.ts": OCC_TOP_SOURCE,
         "src/types.d.ts": OCC_DTS_SOURCE,
+        "src/using.ts": OCC_USING_SOURCE,
       },
     });
     try {
