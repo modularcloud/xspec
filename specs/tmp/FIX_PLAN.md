@@ -42,7 +42,9 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 Task 16 was split as its text allowed. Done at dc97774: the mechanism — `StagedTs` records (`test/helpers/staged-ts.ts`), sealed beside the MDX ledger and judged by `test/self/s9-staged-sources.test.ts`; the builder's record overloads; MDX records carrying `ts` for a code-group `.mdx` path — and the first module group (§1's five modules) plus the E-6 fixture's configuration and code source. AGENTS.md's "staged-source ledger's TypeScript records" bullet holds the conversion rule, the detector recipe that finds a module's remaining plain post-invocation TypeScript stagings, and the survey's totals.
 
-Done since: Task 16b (§2 and §3), Task 16c (`section-4.ts`; `section-4.1-4.2.ts` has no runtime site), and Task 16d (`section-4.3-4.4.ts`, `section-4.5.ts`, `section-4.6.ts`); `git log --grep 'Task 16[b-d]'`. Their counts are in that AGENTS.md bullet.
+Done since: Task 16b (§2 and §3), Task 16c (`section-4.ts`; `section-4.1-4.2.ts` has no runtime site), Task 16d (`section-4.3-4.4.ts`, `section-4.5.ts`, `section-4.6.ts`), and Task 16e (§5 and §6.1–§6.4; `section-5.6.ts` has no runtime site); `git log --grep 'Task 16[b-e]'`. Their counts are in that AGENTS.md bullet.
+
+Task 16e also made records of shared constants that later tasks' bodies stage after an invocation, so the detector no longer logs those sites: `support.ts`'s `UNKNOWN_KEY_CONFIG` (the configuration-state twins' invalid configuration, which T6.5-5, T11-2, T11-4, and T12.0-5 stage after an invocation, as T6.4-3 does), `section-5.7.ts`'s exported `SPEC_AND_CODE_CONFIG` (T11.3-1's later workspaces), and `section-6.4.ts`'s exported `RENAME_REFUSAL_CONFIG`, `RENAME_USAGE_CONFIG`, and the `src/app.ts` of `RENAME_USAGE_ORDERING_FILES` (T6.6-3). A task that finds a further body staging one of them after an invocation adds that test's ID to the record's name.
 
 Every split task below converts its modules by that rule, then checks:
 - `test/self/s9-staged-sources.test.ts` passes; AGENTS.md records its TypeScript-judgement count and the self project's test count.
@@ -51,15 +53,6 @@ Every split task below converts its modules by that rule, then checks:
 - `npm run typecheck`, `npm run format:check`, and the full self project under the namespace pass.
 
 The survey at 3f43daa (suite plus certification) names each module's runtime sites below: tests, staged paths, and distinct byte-strings. It is a floor, not the list.
-
-### Task 16e — TypeScript records: §5 and §6.1–§6.4
-
-- `section-5.1-5.3.ts`: T5.3-1. `section-5.4.ts`: T5.4-1 and T5.4-2. `section-5.5.ts`: T5.5-2. One configuration each.
-- `section-5.6.ts`: no runtime site; confirm by reading.
-- `section-5.7.ts`: T5.7-2 and T5.7-4. Configurations and `src/calltext.ts`, `src/collide.ts`, `src/cross.ts`, `src/ctrl.ts`, `src/typed.ts`: 7 byte-strings.
-- `section-6.1.ts`: T6.1-3. `section-6.2.ts`: T6.2-3 and T6.2-4. One configuration each.
-- `section-6.3.ts`: T6.3-2, T6.3-4, and T6.3-5. `xspec.config.ts`, `inner/xspec.config.ts`, `sub/xspec.config.ts`, and `sub/xspec.previous.config.ts`: 4 byte-strings.
-- `section-6.4.ts`: T6.4-2 through T6.4-5 and T6.4-7. Configurations, `src/app.ts`, and `src/other.ts`: 11 byte-strings. T6.4-7's `copyFrom` seeding stays as it is.
 
 ### Task 16f — TypeScript records: §6.5–§6.7
 

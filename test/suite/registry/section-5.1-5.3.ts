@@ -51,6 +51,8 @@ import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -62,15 +64,21 @@ import {
   runJson,
 } from "./support.js";
 
-// Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// Minimal declarative configuration (SPEC 7): exactly one spec group. Every
+// T5.3-1 cycle arm past the first stages it in a workspace created after the
+// body's first invocation, so it is a staged-source record (S-9's timing
+// clause; test/self/s9-staged-sources.test.ts).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T5.3-1 xspec.config.ts — exactly one spec group, every cycle arm's workspace",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // One spec group plus one code group (SPEC 7.2): TypeScript files under
 // `src/` are discovered code sources, so `build` analyzes their spec-module
@@ -89,7 +97,7 @@ export default defineConfig({
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
+  config: string | StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {

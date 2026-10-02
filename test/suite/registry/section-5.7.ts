@@ -52,6 +52,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -71,8 +72,13 @@ import {
 
 // One spec group plus one code group (SPEC 7.2): TypeScript files under
 // `src/` are discovered code sources, so `build` analyzes their spec-module
-// usage (4.3, 4.5) — the TS half of the occurrence kinds.
-export const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// usage (4.3, 4.5) — the TS half of the occurrence kinds. T5.7-4's collision
+// workspace and T11.3-1's later fixture workspaces (section-11.3.ts) stage it
+// after a product invocation, so it is a staged-source record (S-9's timing
+// clause; test/self/s9-staged-sources.test.ts).
+export const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T5.7-4/T11.3-1 xspec.config.ts — one spec group and one code group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -82,7 +88,8 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 // ---------------------------------------------------------------------------
 // T5.7-1 — units and duplicates
@@ -811,15 +818,20 @@ const TOKEN_BOUND_ARMS: readonly TokenBoundArm[] = [
   },
 ];
 
-// One spec group and no code group: the stagings hold no TypeScript file.
-const SPEC_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// One spec group and no code group: the stagings hold no code source. Every
+// token-bound workspace is created after the body's first `build`, so the
+// configuration is a staged-source record too (S-9's timing clause).
+const SPEC_ONLY_CONFIG = stagedTs(
+  "T5.7-2 xspec.config.ts — one spec group and no code group, the token-bound arms'",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // The referencing source is composed from the exact parts the expected range
 // cites: the first staging's multi-byte head, the tag up to `d={`, the arm's
@@ -1964,12 +1976,30 @@ const CROSS_PARTS: readonly string[] = [
   ";\n",
 ];
 
+// The five code files are staged in the collision workspace too, after the
+// entry workspace's invocations: staged-source records, the same
+// expressions wrapped in place (S-9's timing clause).
 const COLLISION_CODE_FILES = {
-  "src/calltext.ts": CALLTEXT_PARTS.join(""),
-  "src/collide.ts": COLLIDE_PARTS.join(""),
-  "src/cross.ts": CROSS_PARTS.join(""),
-  "src/ctrl.ts": COLLISION_CTRL_SOURCE,
-  "src/typed.ts": TYPED_PARTS.join(""),
+  "src/calltext.ts": stagedTs(
+    "T5.7-4 collision workspace src/calltext.ts",
+    CALLTEXT_PARTS.join(""),
+  ),
+  "src/collide.ts": stagedTs(
+    "T5.7-4 collision workspace src/collide.ts",
+    COLLIDE_PARTS.join(""),
+  ),
+  "src/cross.ts": stagedTs(
+    "T5.7-4 collision workspace src/cross.ts",
+    CROSS_PARTS.join(""),
+  ),
+  "src/ctrl.ts": stagedTs(
+    "T5.7-4 collision workspace src/ctrl.ts",
+    COLLISION_CTRL_SOURCE,
+  ),
+  "src/typed.ts": stagedTs(
+    "T5.7-4 collision workspace src/typed.ts",
+    TYPED_PARTS.join(""),
+  ),
 } as const;
 
 /** A part's end-widened byte window from the exact parts before it. */

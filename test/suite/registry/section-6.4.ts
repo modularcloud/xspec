@@ -128,6 +128,7 @@ import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
+import { StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type {
   AppliedMappingPair,
   GraphEdge,
@@ -186,8 +187,13 @@ import {
 } from "./support.js";
 
 // One spec group plus one code group (SPEC 7.2), for fixtures whose rewrites
-// span MDX and TypeScript sources.
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// span MDX and TypeScript sources. A staged-source record: T6.4-2, T6.4-4,
+// T6.4-5, and T6.6-3 (as RENAME_USAGE_CONFIG) stage it in workspaces
+// created after a product invocation (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T6.4-2/T6.4-4/T6.4-5/T6.6-3 xspec.config.ts — one spec group and one code group, the rewrite and usage-error fixtures'",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -197,17 +203,23 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 // Exactly one spec group (SPEC 7), for the refusal and usage-error fixtures.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// A staged-source record: T6.4-4 and T6.6-3 (as RENAME_REFUSAL_CONFIG) stage
+// it in workspaces created after a product invocation (S-9's timing clause).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T6.4-4/T6.6-3 xspec.config.ts — exactly one spec group, the refusal and usage-error fixtures'",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // Specs, code, and Markdown emission (SPEC 7.3), so T6.4-7's compare covers
 // generated modules, Markdown output, and graph data alike.
@@ -234,7 +246,7 @@ const LF = 0x0a;
  * `files`; helpers/staged-mdx.ts), staged under the record's declaration.
  */
 async function withWorkspace<T>(
-  config: string,
+  config: string | StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
@@ -1080,9 +1092,9 @@ const OTHER_TS_M = [
  * 4 follow arm 1's invocations, so every `.mdx` entry is a ledger record
  * (S-9's before-any-product clause; helpers/staged-mdx.ts) — the same
  * expression the body composed, moved to module level, arm 1's entries
- * converted uniformly — and the `.ts` entries stay plain. `runMinimalEditArm`
- * stages a map as it is and reads a record's bytes back for the
- * untouched-file compare.
+ * converted uniformly — and every `.ts` entry is a TypeScript record
+ * likewise (helpers/staged-ts.ts). `runMinimalEditArm` stages a map as it
+ * is and reads a record's bytes back for the untouched-file compare.
  */
 const T6_4_2_L_FILES: Readonly<Record<string, InitialFileContents>> = {
   "specs/Core.mdx": stagedMdx(
@@ -1097,8 +1109,8 @@ const T6_4_2_L_FILES: Readonly<Record<string, InitialFileContents>> = {
     "T6.4-2 arms 1 and 2 specs/Other.mdx",
     OTHER_MDX_L,
   ),
-  "src/app.ts": appL("login-v2"),
-  "src/other.ts": OTHER_TS_L,
+  "src/app.ts": stagedTs("T6.4-2 arms 1 and 2 src/app.ts", appL("login-v2")),
+  "src/other.ts": stagedTs("T6.4-2 arms 1 and 2 src/other.ts", OTHER_TS_L),
 };
 const T6_4_2_M_FILES: Readonly<Record<string, InitialFileContents>> = {
   "specs/Core.mdx": stagedMdx(
@@ -1113,8 +1125,8 @@ const T6_4_2_M_FILES: Readonly<Record<string, InitialFileContents>> = {
     "T6.4-2 arms 3 and 4 specs/Other.mdx",
     OTHER_MDX_M,
   ),
-  "src/app.ts": appM(".mid", "mid"),
-  "src/other.ts": OTHER_TS_M,
+  "src/app.ts": stagedTs("T6.4-2 arms 3 and 4 src/app.ts", appM(".mid", "mid")),
+  "src/other.ts": stagedTs("T6.4-2 arms 3 and 4 src/other.ts", OTHER_TS_M),
 };
 
 /**
@@ -1142,7 +1154,10 @@ async function runMinimalEditArm(
     for (const [rel, bytes] of Object.entries(expected)) {
       const staged = sources[rel];
       const touched =
-        bytes !== (staged instanceof StagedMdx ? staged.source : staged);
+        bytes !==
+        (staged instanceof StagedMdx || staged instanceof StagedTs
+          ? staged.source
+          : staged);
       await assertFileBytes(
         workspace.path(rel),
         bytes,
@@ -1615,9 +1630,14 @@ export const U4_BROKEN_SOURCE = stagedMdx(
 // The wrong-kind arm's discovered code source (SPEC 7.2): valid TypeScript
 // with no spec references, so the base arm's workspace still builds clean —
 // a code source bears no requirement IDs, making it a wrong-kind `<file>`
-// operand (SPEC 6.4).
+// operand (SPEC 6.4). A staged-source record: T6.4-4's ordering arm and
+// T6.6-3 stage it in workspaces created after a product invocation (S-9's
+// timing clause).
 const U4_CODE_FILE = "src/app.ts";
-const U4_CODE_SOURCE = "export function noop(): void {}\n";
+const U4_CODE_SOURCE = stagedTs(
+  "T6.4-4/T6.6-3 src/app.ts — a discovered code source bearing no requirement IDs, the wrong-kind `<file>` operand",
+  "export function noop(): void {}\n",
+);
 
 // The second nonexistent-`<file>` spelling (TEST-SPEC T6.4-4): a valid `.mdx`
 // present on disk, holding a section spelling the old ID, but outside every
@@ -2032,12 +2052,17 @@ const T5_TARGET_SOURCE = stagedMdx(
   "T6.4-5 specs/Target.mdx",
   ['<S id="hub">', "Hub text.", "</S>", ""].join("\n"),
 );
-const T5_MOVE_APP_SOURCE = [
-  'import CORE from "../specs/Core.xspec";',
-  "",
-  "type MidNode = typeof CORE.core.mid;",
-  "",
-].join("\n");
+// The move arm's workspaces are created after the rename arm's invocations,
+// so its code file is a staged-source record (S-9's timing clause).
+const T5_MOVE_APP_SOURCE = stagedTs(
+  "T6.4-5 src/app.ts — the move arm's code file, its `typeof`-level reference alone",
+  [
+    'import CORE from "../specs/Core.xspec";',
+    "",
+    "type MidNode = typeof CORE.core.mid;",
+    "",
+  ].join("\n"),
+);
 const T5_MOVE_ARGV: readonly string[] = [
   "move",
   `${T5_CORE}#core.mid`,
@@ -2249,7 +2274,7 @@ const T6_4_5 = defineProductTest({
         );
         await assertFileBytes(
           workspace.path(T5_APP),
-          T5_MOVE_APP_SOURCE,
+          T5_MOVE_APP_SOURCE.source,
           "T6.4-5 move arm: the code file after the section move — its " +
             "`typeof`-level reference keeps naming the vacated identity " +
             "byte-for-byte, and its import stays (its binding had no " +

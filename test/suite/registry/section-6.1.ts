@@ -80,21 +80,28 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import { buildOk, expectExit } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
-// other keys — the CONF-CORE workspace shape.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// other keys — the CONF-CORE workspace shape. T6.1-3's later arms stage it in
+// workspaces created after the body's first invocation, so it is a
+// staged-source record (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T6.1-3 xspec.config.ts — exactly one spec group, the CONF-CORE workspace shape",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // Importless `.mdx` sources: no imports, embeddings, `d` props, or tags
 // (CONF-CORE scope). A.mdx carries a child so `rename` exercises descendant

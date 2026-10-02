@@ -28,6 +28,7 @@ import {
   parseJsonStdout,
 } from "../../helpers/assertions.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type {
   ArgvValue,
   ProductBinding,
@@ -937,8 +938,13 @@ export async function expectPlainUsageError(
  * command but `version` that loads it reports 14.14 (`configuration-error`,
  * SPEC 7, 14.14), so an invocation answering the plain usage error on a
  * workspace holding it demonstrably never loaded the configuration (12.0).
+ * A staged-source record: T6.4-3, T6.5-5, T11-2, T11-4, and T12.0-5 stage
+ * the twins after a product invocation (S-9's timing clause;
+ * test/self/s9-staged-sources.test.ts).
  */
-export const UNKNOWN_KEY_CONFIG = `import { defineConfig } from "xspec"
+export const UNKNOWN_KEY_CONFIG = stagedTs(
+  "T6.4-3/T6.5-5/T11-2/T11-4/T12.0-5 xspec.config.ts — an unknown top-level key, the invalid configuration-state twin's",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -946,7 +952,8 @@ export default defineConfig({
   },
   bogus: true
 })
-`;
+`,
+);
 
 /**
  * The two configuration states under which a syntax-class usage error must

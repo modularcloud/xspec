@@ -222,6 +222,7 @@
 import { Buffer } from "node:buffer";
 import { defineProductTest } from "../../helpers/registry.js";
 import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type {
   AppliedMappingPair,
@@ -369,7 +370,7 @@ const JOURNAL_PATH = ".xspec/journal";
  * (helpers/staged-mdx.ts; S-9's before-any-product clause).
  */
 async function withWorkspace<T>(
-  config: string,
+  config: string | StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {

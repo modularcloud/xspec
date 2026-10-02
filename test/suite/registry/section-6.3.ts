@@ -109,6 +109,7 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
@@ -123,15 +124,23 @@ import {
 } from "./support.js";
 
 // Exactly one spec group over specs/ (SPEC 7) — every fixture here except
-// T6.3-1's, whose group membership is the moving part.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// T6.3-1's, whose group membership is the moving part. T6.3-2, T6.3-4, and
+// T6.3-5 stage it after a product invocation — in a later workspace, at
+// `xspec.config.ts` or `inner/xspec.config.ts`, and by `file()` at
+// `sub/xspec.previous.config.ts` and `sub/xspec.config.ts` — so it is a
+// staged-source record (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T6.3-2/T6.3-4/T6.3-5 xspec.config.ts — exactly one spec group over specs/, staged at every configuration path",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 const JOURNAL_PATH = ".xspec/journal";
 const LF = 0x0a;

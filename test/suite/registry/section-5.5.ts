@@ -59,6 +59,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -72,14 +73,20 @@ import {
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. No code
 // groups exist in any fixture here, so impacted code never enters play.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// T5.5-2 stages it again in its kind-distinction workspace, created after
+// its first invocations, so it is a staged-source record (S-9's timing
+// clause; test/self/s9-staged-sources.test.ts).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T5.5-2 xspec.config.ts — exactly one spec group, every workspace's",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // Every `.mdx` source a body below stages after its base-state `build` — an
 // arm's variant, an edited fixture — is a staged-source record created at

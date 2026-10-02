@@ -42,6 +42,7 @@ import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -49,14 +50,20 @@ import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. No code
 // groups exist in any fixture here, so impacted code never enters play.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// T5.4-1 and T5.4-2 each stage it again in a workspace created after their
+// first invocations, so it is a staged-source record (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T5.4-1/T5.4-2 xspec.config.ts — exactly one spec group, every workspace's",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 /** Stage a fresh spec-only workspace, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
