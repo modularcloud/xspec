@@ -612,14 +612,21 @@ async function runAvailabilityArm(
 /** The P-11 property body for one trial (see the module header). */
 /** The `.mdx` paths whose staged bytes differ from the base file's. */
 function mutatedMdxPaths(trial: AvailabilityTrial): string[] {
+  return mutatedPaths(trial).filter((path) => path.endsWith(".mdx"));
+}
+
+/** The code-source paths whose staged bytes differ from the base file's. */
+function mutatedCodePaths(trial: AvailabilityTrial): string[] {
+  return mutatedPaths(trial).filter((path) => !path.endsWith(".mdx"));
+}
+
+/** Every path whose staged bytes differ from the base file's. */
+function mutatedPaths(trial: AvailabilityTrial): string[] {
   const base = new Map(
     FUZZ_BASE_FILES.map(([path, text]) => [path, Buffer.from(text, "utf8")]),
   );
   return trial.files
-    .filter(
-      ([path, bytes]) =>
-        path.endsWith(".mdx") && !(base.get(path)?.equals(bytes) ?? false),
-    )
+    .filter(([path, bytes]) => !(base.get(path)?.equals(bytes) ?? false))
     .map(([path]) => path);
 }
 
@@ -641,6 +648,9 @@ async function runAvailabilityTrial(
       ]),
     ),
     mdx: { unchecked: mutated },
+    // S-9: a mutated code source's TypeScript well-formedness is undeclared
+    // too (fuzz); an unmutated one is the base constant, well-formed.
+    ts: { unchecked: mutatedCodePaths(trial) },
   });
   try {
     for (const arm of trial.arms) {

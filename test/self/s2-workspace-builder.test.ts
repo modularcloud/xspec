@@ -11,7 +11,12 @@
 // deterministic fixture stages (T1.3-7's 2048-deep chained-id tower — the
 // largest document the suite stages), each read back byte-complete, so a
 // truncating writer or recursion-limited serializer cannot silently stage
-// shallower or smaller inputs than declared (H-11's input side).
+// shallower or smaller inputs than declared (H-11's input side). The
+// builder's S-9 TypeScript check at staging time has its vectors here too
+// (TEST-SPEC S-9's TypeScript clause): a declared-well-formed ill-formed
+// `.ts` file, a declared-unparseable well-formed one, and a text TypeScript
+// 5.9.3 accepts read one way only each throw `HarnessStagingError` (mode
+// `ts-derivability`) before anything is written.
 // Certification cannot exercise builder bugs that make fixtures diverge from
 // their declarations, so this self-test must pass before any fixture is
 // trusted.
@@ -28,9 +33,12 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { expect, onTestFinished, test } from "vitest";
+import { HarnessAssertionError } from "../helpers/assertions.js";
+import { HarnessStagingError } from "../helpers/permissions.js";
 import {
   GIT_FIXTURE_EPOCH_SECONDS,
   GIT_FIXTURE_PERSON,
+  TS_DEFAULT_SUFFIXES,
   TestWorkspace,
 } from "../helpers/workspace.js";
 import type { WorkspaceDecl } from "../helpers/workspace.js";
@@ -584,4 +592,368 @@ test("scale vector: the largest document the suite stages — T1.3-7's 2048-deep
   expect(innermost).toHaveLength(4_095);
   expect(countOccurrences(actual, `<S id="${outermost}">\n`)).toBe(1);
   expect(countOccurrences(actual, `<S id="${innermost}">\n`)).toBe(1);
+});
+
+// ---------------------------------------------------------------------------
+// S-9's TypeScript check at staging time (TEST-SPEC S-9's TypeScript clause,
+// H-8; helpers/workspace.ts): the builder judges every staged code source and
+// configuration file with `judgeTypeScript` (helpers/ts-derivability.ts — the
+// harness's own TypeScript 5.9.3 parser, both readings) as it judges `.mdx`
+// sources. A name `TS_DEFAULT_SUFFIXES` reaches is declared well-formed by
+// default; a staging declares the exceptions per path (`ts: { unparseable,
+// unchecked, wellFormed }`, or per `file()` call). A contradiction, and a
+// text accepted read one way only, throw `HarnessStagingError` (mode
+// `ts-derivability`) before anything is written — a harness error, never an
+// assertion failure and never a skip.
+
+const TS_WELL_FORMED = "export const n = 1;\n";
+/** Rejected both ways: TS1134 at the `=` (byte offset 13). */
+const TS_ILL_FORMED = "export const = 1;\n";
+/** SPEC 14.20's one-way texts: module code only, and script code only. */
+const TS_MODULE_ONLY = "await /re/;\n";
+const TS_SCRIPT_ONLY = "let a = await / 2 / 1;\n";
+/** A TSX-only construct: well-formed in a `.tsx` file, nowhere else. */
+const TSX_ONLY = "export const v = <b>x</b>;\n";
+const TS_BOM_BYTES = concatBytes(bytes(0xef, 0xbb, 0xbf), utf8(TS_WELL_FORMED));
+const TS_INVALID_UTF8_BYTES = concatBytes(
+  utf8("export const n = 1; // "),
+  bytes(0xff, 0x0a),
+);
+/** T7-2's syntax-error configuration: its braces never close. */
+const UNCLOSED_CONFIG =
+  'import { defineConfig } from "xspec"\n\nexport default defineConfig({\n' +
+  '  specs: {\n    main: ["specs/**/*.mdx"]\n';
+
+async function expectTsStagingError(
+  action: () => Promise<unknown>,
+  stagedPath: string,
+  ...fragments: readonly string[]
+): Promise<HarnessStagingError> {
+  let thrown: unknown;
+  try {
+    await action();
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(HarnessStagingError);
+  expect(thrown).not.toBeInstanceOf(HarnessAssertionError);
+  const error = thrown as HarnessStagingError;
+  expect(error.mode).toBe("ts-derivability");
+  expect(error.path).toBe(stagedPath);
+  expect(error.message).toContain(`ts-derivability staging of ${stagedPath}: `);
+  for (const fragment of fragments) {
+    expect(error.message).toContain(fragment);
+  }
+  return error;
+}
+
+test("S-9 TypeScript vector: a declared-well-formed ill-formed `.ts` throws at staging, naming the path and the parser's first error", async () => {
+  await expectTsStagingError(
+    () => TestWorkspace.create({ files: { "src/a.ts": TS_ILL_FORMED } }),
+    "src/a.ts",
+    "declared well-formed, but it is not well-formed TypeScript (5.9.3",
+    'TS1134 "Variable declaration expected." at line 1, column 14 (byte offset 13)',
+    "`ts.unparseable`",
+  );
+  // Declared well-formed explicitly — the same verdict.
+  await expectTsStagingError(
+    () =>
+      TestWorkspace.create({
+        files: { "src/a.ts": TS_ILL_FORMED },
+        ts: { wellFormed: ["src/a.ts"] },
+      }),
+    "src/a.ts",
+    "declared well-formed",
+  );
+  // The configuration file is judged by the same grammar (SPEC 7, 14.20).
+  await expectTsStagingError(
+    () =>
+      TestWorkspace.create({ files: { "xspec.config.ts": UNCLOSED_CONFIG } }),
+    "xspec.config.ts",
+    "declared well-formed",
+    "TS1005",
+  );
+  // 14.20's encoding rules: a byte-order mark and invalid UTF-8.
+  await expectTsStagingError(
+    () => TestWorkspace.create({ files: { "src/a.ts": TS_BOM_BYTES } }),
+    "src/a.ts",
+    "byte-order mark",
+  );
+  await expectTsStagingError(
+    () =>
+      TestWorkspace.create({ files: { "src/a.ts": TS_INVALID_UTF8_BYTES } }),
+    "src/a.ts",
+    "not valid UTF-8: an invalid sequence at byte offset 23",
+  );
+  // The name selects the grammar: a TSX-only construct in a `.ts` file.
+  await expectTsStagingError(
+    () => TestWorkspace.create({ files: { "src/v.ts": TSX_ONLY } }),
+    "src/v.ts",
+    "declared well-formed",
+  );
+  const workspace = await makeWorkspace({
+    files: { "src/v.tsx": TSX_ONLY, "src/a.ts": TS_WELL_FORMED },
+  });
+  expect(Buffer.from(await workspace.readBytes("src/v.tsx")).toString()).toBe(
+    TSX_ONLY,
+  );
+  expect(workspace.tsDeclarationOf("src/v.tsx")).toBe("well-formed");
+});
+
+test("S-9 TypeScript vector: a declared-unparseable well-formed `.ts` throws at staging; an ill-formed one stages", async () => {
+  await expectTsStagingError(
+    () =>
+      TestWorkspace.create({
+        files: { "src/a.ts": TS_WELL_FORMED },
+        ts: { unparseable: ["src/a.ts"] },
+      }),
+    "src/a.ts",
+    "declared unparseable, but TypeScript 5.9.3 accepts it both as module code and as script code",
+  );
+  await expectTsStagingError(
+    () =>
+      TestWorkspace.create({
+        files: { "src/v.tsx": TSX_ONLY },
+        ts: { unparseable: ["src/v.tsx"] },
+      }),
+    "src/v.tsx",
+    "declared unparseable",
+  );
+  const workspace = await makeWorkspace({
+    files: {
+      "src/a.ts": TS_ILL_FORMED,
+      "src/v.ts": TSX_ONLY,
+      "src/bom.ts": TS_BOM_BYTES,
+      "src/bad.ts": TS_INVALID_UTF8_BYTES,
+      "xspec.config.ts": UNCLOSED_CONFIG,
+    },
+    ts: {
+      unparseable: [
+        "src/a.ts",
+        "src/v.ts",
+        "src/bom.ts",
+        "src/bad.ts",
+        "xspec.config.ts",
+      ],
+    },
+  });
+  expect(workspace.tsDeclarationOf("src/a.ts")).toBe("unparseable");
+  expectSameBytes(await workspace.readBytes("src/bom.ts"), TS_BOM_BYTES);
+  expectSameBytes(
+    await workspace.readBytes("src/bad.ts"),
+    TS_INVALID_UTF8_BYTES,
+  );
+  expectSameBytes(
+    await workspace.readBytes("xspec.config.ts"),
+    utf8(UNCLOSED_CONFIG),
+  );
+});
+
+test("S-9 TypeScript vector: a text accepted read one way only throws under either declaration — module code only and script code only", async () => {
+  for (const [text, fragment] of [
+    [
+      TS_MODULE_ONLY,
+      "accepted read as module code only, rejected read as script code",
+    ],
+    [
+      TS_SCRIPT_ONLY,
+      "accepted read as script code only, rejected read as module code",
+    ],
+  ] as const) {
+    await expectTsStagingError(
+      () => TestWorkspace.create({ files: { "src/a.ts": text } }),
+      "src/a.ts",
+      "declared well-formed",
+      fragment,
+      "whatever its declaration (S-9)",
+      "restage the fixture",
+    );
+    await expectTsStagingError(
+      () =>
+        TestWorkspace.create({
+          files: { "src/a.ts": text },
+          ts: { unparseable: ["src/a.ts"] },
+        }),
+      "src/a.ts",
+      "declared unparseable",
+      fragment,
+    );
+    // A file whose well-formedness the document does not declare is never
+    // judged, a one-way text included.
+    const workspace = await makeWorkspace({
+      files: { "src/a.ts": text },
+      ts: { unchecked: ["src/a.ts"] },
+    });
+    expect(Buffer.from(await workspace.readBytes("src/a.ts")).toString()).toBe(
+      text,
+    );
+  }
+});
+
+test("S-9 TypeScript default: the names `TS_DEFAULT_SUFFIXES` reaches are judged; any other name only when declared", async () => {
+  expect([...TS_DEFAULT_SUFFIXES]).toEqual([
+    ".ts",
+    ".tsx",
+    ".mts",
+    ".cts",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+  ]);
+  const workspace = await makeWorkspace({
+    files: {
+      // Not judged by default: a code group may glob these names, so a code
+      // source among them declares itself.
+      "specs/A.md": TS_ILL_FORMED,
+      "notes.txt": TS_ILL_FORMED,
+      "src/a.TS": TS_ILL_FORMED,
+      "data.json": TS_ILL_FORMED,
+    },
+  });
+  for (const rel of [
+    "src/a.ts",
+    "src/a.tsx",
+    "src/a.mts",
+    "src/a.cts",
+    "src/a.d.ts",
+    "src/a.d.mts",
+    "src/a.js",
+    "src/a.jsx",
+    "src/a.mjs",
+    "src/a.cjs",
+    "xspec.config.ts",
+    "cfg/broken.config.ts",
+  ]) {
+    expect(workspace.tsDeclarationOf(rel)).toBe("well-formed");
+    await expectTsStagingError(
+      () => workspace.file(rel, TS_ILL_FORMED),
+      rel,
+      "declared well-formed",
+    );
+  }
+  for (const rel of [
+    "specs/A.md",
+    "notes.txt",
+    "src/a.TS",
+    "data.json",
+    "specs/A.mdx",
+  ]) {
+    expect(workspace.tsDeclarationOf(rel)).toBeUndefined();
+  }
+  // A code source whose name the default does not reach is declared: T7-6's
+  // `specs/a'b.md` holding `)` unparseable, T13.4-11(b)'s `specs/A.md`
+  // holding `export const n = 1` well-formed.
+  const declared = await makeWorkspace({
+    files: { "specs/a'b.md": ")", "specs/A.md": "export const n = 1\n" },
+    ts: { unparseable: ["specs/a'b.md"], wellFormed: ["specs/A.md"] },
+  });
+  expect(declared.tsDeclarationOf("specs/a'b.md")).toBe("unparseable");
+  expect(declared.tsDeclarationOf("specs/A.md")).toBe("well-formed");
+  await expectTsStagingError(
+    () =>
+      TestWorkspace.create({
+        files: { "specs/A.md": ")" },
+        ts: { wellFormed: ["specs/A.md"] },
+      }),
+    "specs/A.md",
+    "declared well-formed",
+    'TS1128 "Declaration or statement expected."',
+  );
+  await expectTsStagingError(
+    () =>
+      TestWorkspace.create({
+        files: { "specs/a'b.md": "export const n = 1\n" },
+        ts: { unparseable: ["specs/a'b.md"] },
+      }),
+    "specs/a'b.md",
+    "declared unparseable",
+  );
+});
+
+test("S-9 TypeScript declarations: the workspace declaration governs later stagings — `file()`, `edit()`, `copyFrom()` — and a `ts` option overrides it for one write", async () => {
+  const workspace = await makeWorkspace({
+    files: { "src/a.ts": TS_WELL_FORMED },
+    ts: { unparseable: ["src/u.ts"], unchecked: ["src/n.ts"] },
+  });
+  await workspace.file("src/u.ts", TS_ILL_FORMED);
+  await expectTsStagingError(
+    () => workspace.file("src/u.ts", TS_WELL_FORMED),
+    "src/u.ts",
+    "declared unparseable",
+  );
+  await workspace.file("src/u.ts", TS_WELL_FORMED, { ts: "well-formed" });
+  await workspace.file("src/n.ts", TS_ILL_FORMED);
+  await workspace.file("src/n.ts", TS_MODULE_ONLY);
+  await workspace.file("src/b.ts", TS_ILL_FORMED, { ts: "unparseable" });
+  await workspace.file("src/c.ts", TS_SCRIPT_ONLY, { ts: "unchecked" });
+  await workspace.file("specs/A.md", ")", { ts: "unparseable" });
+  await expectTsStagingError(
+    () => workspace.file("specs/B.md", ")", { ts: "well-formed" }),
+    "specs/B.md",
+    "declared well-formed",
+  );
+  // A byte path is keyed by its decoding.
+  await expectTsStagingError(
+    () => workspace.file(utf8("src/d.ts"), TS_ILL_FORMED),
+    "src/d.ts",
+    "declared well-formed",
+  );
+  // `edit()` and `copyFrom()` stage under the destination's declaration.
+  await expectTsStagingError(
+    () => workspace.edit("src/a.ts", "n = 1", "= 1"),
+    "src/a.ts",
+    "declared well-formed",
+  );
+  expect(Buffer.from(await workspace.readBytes("src/a.ts")).toString()).toBe(
+    TS_WELL_FORMED,
+  );
+  await workspace.edit("src/n.ts", "await", "await await");
+  const source = await makeWorkspace({
+    files: { "src/x.ts": TS_ILL_FORMED },
+    ts: { unchecked: ["src/x.ts"] },
+  });
+  await expectTsStagingError(
+    () => workspace.copyFrom(source, "src/x.ts", "src/y.ts"),
+    "src/y.ts",
+    "declared well-formed",
+  );
+  await workspace.copyFrom(source, "src/x.ts", "src/u.ts");
+  expect(Buffer.from(await workspace.readBytes("src/u.ts")).toString()).toBe(
+    TS_ILL_FORMED,
+  );
+});
+
+test("S-9 TypeScript declarations: a refused staging writes nothing; a path in two lists is refused at creation", async () => {
+  const workspace = await makeWorkspace({
+    files: { "src/a.ts": TS_WELL_FORMED },
+  });
+  await expectTsStagingError(
+    () => workspace.file("src/a.ts", TS_ILL_FORMED),
+    "src/a.ts",
+  );
+  expect(Buffer.from(await workspace.readBytes("src/a.ts")).toString()).toBe(
+    TS_WELL_FORMED,
+  );
+  await expectTsStagingError(
+    () => workspace.file("src/deep/b.ts", TS_ILL_FORMED),
+    "src/deep/b.ts",
+  );
+  expect(await workspace.kind("src/deep")).toBe("absent");
+  await expectTsStagingError(
+    () =>
+      TestWorkspace.create({
+        ts: { unparseable: ["src/a.ts"], unchecked: ["./src/a.ts"] },
+      }),
+    "src/a.ts",
+    "more than one",
+  );
+  await expectTsStagingError(
+    () =>
+      TestWorkspace.create({
+        ts: { wellFormed: ["specs/A.md"], unparseable: ["specs//A.md"] },
+      }),
+    "specs/A.md",
+    "more than one",
+  );
 });

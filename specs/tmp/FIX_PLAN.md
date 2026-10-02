@@ -16,7 +16,7 @@ Why the harness must change: the documents moved after the harness was last gree
 
 **Conventions for new and changed tests.**
 - *Registration.* A new registered test goes into its registry module's exported list. A new module also needs an import in `test/suite/registry/index.ts` and a thin wrapper `test/suite/<module>.test.ts` calling `declareProductTests`. Every new test needs its H-7 entry in `test/suite/registry/traceability.ts`, carrying `"14"` whenever it asserts a numbered condition or a stable refusal code (TEST-SPEC §14's per-condition index: "the H-7 map is the complete record"). S-1 checks the map, and S-7's sweep runs every registered body against the empty stub; both run in the self project.
-- *S-9 timing.* A `.mdx` source that a body stages after its first product invocation, or in a workspace it creates after it, is a staged-source record (`test/helpers/staged-mdx.ts`, judged by `test/self/s9-staged-sources.test.ts`); the undeclared-staging guard refuses plain contents there. Once Tasks 15 and 16 land, the same holds for TypeScript code sources and configuration files.
+- *S-9 timing.* A `.mdx` source that a body stages after its first product invocation, or in a workspace it creates after it, is a staged-source record (`test/helpers/staged-mdx.ts`, judged by `test/self/s9-staged-sources.test.ts`); the undeclared-staging guard refuses plain contents there. Once Task 16 lands, the same holds for TypeScript code sources and configuration files. Since Task 15 the builder judges every staged code source and configuration file at staging time (AGENTS.md's S-9 TypeScript bullet): a new staging of one TEST-SPEC declares unparseable lists it under `ts.unparseable`, a code source whose name `TS_DEFAULT_SUFFIXES` does not reach lists it under `ts.wellFormed` (or `ts.unparseable`), and a file whose well-formedness the document does not declare under `ts.unchecked`.
 - *Never-modifies compares* use the compare-around machinery (`assertLeavesUnchanged` and `snapshotDirectory` in `test/helpers/snapshot.ts`, as T13.4-5 uses them). CERTIFICATIONS.md's VIOL-CORE-CHATTYREADS note makes the certification of T6.4-3, T6.5-4, T6.5-20, T6.5-21, T13.4-9, and T13.4-10 representative only insofar as they share it.
 - *Free text.* Corrections and other free-text checks use H-3's robust matching.
 - *Linux-leg arms* (staged file names holding a backslash, U+000A, U+000D, or non-UTF-8 bytes) gate themselves inside the shared body, as T12.0-5's non-UTF-8 arm does, so the Windows subset (`test/windows/e6-subset.test.ts`) skips no arm.
@@ -38,33 +38,9 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part B — Shared machinery
 
-### Task 15 — S-9's TypeScript check at staging time (TEST-SPEC S-9, L632; H-8; C1, part 2)
-
-**Depends on.** Task 14 (done: the judge is `judgeTypeScript` in `test/helpers/ts-derivability.ts`, and `tsDeclarationProblem` gives the harness error's text for a declaration, a one-way text failing every declaration; AGENTS.md's S-9 TypeScript bullet).
-
-**Where.**
-- `test/helpers/workspace.ts`: the builder's initial files and `file()`, and its declaration types (beside `WorkspaceMdxDecl`);
-- `test/self/s2-workspace-builder.test.ts`;
-- every registry module staging a code source or configuration file whose well-formedness must be declared otherwise.
-
-**Change.** The builder judges every staged code source and configuration file at staging time with Task 14's judge, as it judges `.mdx` files with `deriveMdx`.
-- *Default.* A file is declared well-formed by default. Choose and document which paths the default covers: at least `.ts`, `.tsx`, and every configuration file.
-- *Per-path declarations for the exceptions:*
-  - sources TEST-SPEC declares unparseable (14.20);
-  - files whose well-formedness the document does not declare: P-8 and P-11 fuzz mutations, noise files no discovery reaches, and edits of product-written bytes;
-  - code sources whose names the default does not reach. A code group can glob any name: T7-6's `specs/a'b.md` holding `)`, and T13.4-11(b)'s `specs/A.md` holding `export const n = 1`.
-- *Failures.* A contradiction throws `HarnessStagingError` — a harness error, never an assertion failure or a skip — and so does every one-way text.
-- *Finding the exceptions.* Run the self project (S-7's sweep stages every body's pre-invocation files) and the suite. Declare each exception they surface; never weaken the judge.
-
-**Checks.**
-- S-2 gains vectors, each throwing: a declared-well-formed ill-formed `.ts`; a declared-unparseable well-formed one; a one-way text.
-- The self project is green.
-- The full suite against the built product shows no harness error, with the product verdicts unchanged.
-- Record the declaration's shape in AGENTS.md's S-9 bullet.
-
 ### Task 16 — S-9's TypeScript check for post-invocation stagings: records, ledger, guard (TEST-SPEC S-9's timing clause, L632; H-8; S-7; C1, part 3)
 
-**Depends on.** Task 15.
+**Depends on.** Task 15 (done: the builder judges every code source and configuration file at staging time through `judgeTsDeclaration`; the declaration is `ts: { unparseable, unchecked, wellFormed }` on `create`, or `{ ts: ... }` per `file()` call; AGENTS.md's S-9 TypeScript bullet lists the declared stagings and a one-pass survey recipe for finding every staging the check judges, with each one's body and invocation state). Several of Task 15's declarations sit on stagings after a product invocation — T7-2's later arms, T14-11's arms, T12.7-3's sibling `file()`, T13.4-11(b)'s `file()`, and every later-arm workspace whose code sources or configuration the default judges — so converting such a staging to a record moves its declaration into the record.
 
 **Where.**
 - `test/helpers/staged-mdx.ts`, or a sibling generalizing it;

@@ -2794,7 +2794,10 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
           "non-canonically and absolutely: a build failing at " +
           "configuration load modifies nothing (SPEC 12.1)",
       );
-      await workspace.file(ERR_SIBLING_CONFIG_FILE, ERR_MALFORMED_CONFIG);
+      // S-9: the malformed configuration is not well-formed TypeScript (14.20).
+      await workspace.file(ERR_SIBLING_CONFIG_FILE, ERR_MALFORMED_CONFIG, {
+        ts: "unparseable",
+      });
       await assertLeavesUnchanged(
         workspace.root,
         () =>
@@ -3097,6 +3100,8 @@ async function runErrorSymlinkWorkingDirectoryArm(
       files: { "a/xspec.config.ts": ERR_MALFORMED_CONFIG },
       dirs: ["a/b"],
       symlinks: { L: "a/b" },
+      // S-9: the malformed configuration is not well-formed TypeScript (14.20).
+      ts: { unparseable: ["a/xspec.config.ts"] },
     },
     async (workspace) => {
       await expectAnchoredConfigurationError(

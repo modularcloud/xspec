@@ -5,7 +5,9 @@
 // release's acceptance. Harness machinery only: no product imports, no I/O,
 // no test-framework dependence. Its self-test is
 // test/self/s9-typescript-well-formedness.test.ts; the MDX side of S-9 is
-// helpers/mdx-derivability.ts.
+// helpers/mdx-derivability.ts. The workspace builder (helpers/workspace.ts,
+// `judgeTsDeclaration`) applies it to every staged code source and
+// configuration file at staging time.
 //
 // The check is made by a means independent of the product (S-9): the
 // harness's own TypeScript, `typescript-5.9.3` (an npm alias of

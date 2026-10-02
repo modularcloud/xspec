@@ -1144,8 +1144,9 @@ function codeUnparseableArm(
     offset: pinned(fixture, 0).start,
     masked: `the unresolved marker \`${MASKED_MARKER}\` (14.7)`,
     rule,
-    // The harness has no TypeScript oracle: the product alone judges a
-    // code source (S-9 covers MDX), so nothing here to agree with.
+    // `parserAgrees` confirms the stock MDX parser's position, which a code
+    // source never meets; S-9's TypeScript check judges the file unparseable
+    // at staging (`unparseableDecl`).
     parserAgrees: false,
   };
 }
@@ -1266,10 +1267,14 @@ export const T14_12_UNPARSEABLE_ARMS: readonly UnparseableArm[] = [
 
 /**
  * The workspace one negative arm stages: its `.mdx` sources records, a
- * spec-source arm's failing file declared unparseable (S-9).
+ * spec-source arm's failing file declared unparseable (S-9), and a
+ * code-source arm's failing file declared unparseable by its S-9
+ * TypeScript declaration.
  */
 function unparseableDecl(arm: UnparseableArm): WorkspaceDecl {
-  return { files: arm.files };
+  return arm.kind === "code-source"
+    ? { files: arm.files, ts: { unparseable: [arm.file] } }
+    : { files: arm.files };
 }
 
 /**

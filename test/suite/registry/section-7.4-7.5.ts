@@ -161,6 +161,7 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import type {
   InitialFileContents,
   WorkspaceDecl,
+  WorkspaceTsDecl,
 } from "../../helpers/workspace.js";
 import { SECTION_A_SOURCE } from "./section-7-basics.js";
 import { SECTION_C_SOURCE } from "./section-7-discovery.js";
@@ -461,22 +462,26 @@ async function expectPolicyFindings(
   files: Readonly<Record<string, InitialFileContents>>,
   expected: readonly PolicyExpectation[],
   contextBase: string,
+  ts?: WorkspaceTsDecl,
 ): Promise<void> {
-  await withWorkspace({ files }, async (workspace) => {
-    await buildOk(
-      product,
-      workspace,
-      `${contextBase} \`build\` — sources are valid and build does not ` +
-        `evaluate policy (SPEC 12.1, 7.5), so the check below observes ` +
-        `fresh output and only policy findings`,
-    );
-    const label = `${contextBase} \`check --json\``;
-    assertPolicyFindings(
-      await checkFindings(product, workspace, label),
-      expected,
-      label,
-    );
-  });
+  await withWorkspace(
+    { files, ...(ts === undefined ? {} : { ts }) },
+    async (workspace) => {
+      await buildOk(
+        product,
+        workspace,
+        `${contextBase} \`build\` — sources are valid and build does not ` +
+          `evaluate policy (SPEC 12.1, 7.5), so the check below observes ` +
+          `fresh output and only policy findings`,
+      );
+      const label = `${contextBase} \`check --json\``;
+      assertPolicyFindings(
+        await checkFindings(product, workspace, label),
+        expected,
+        label,
+      );
+    },
+  );
 }
 
 /** Resolve one profile of a coverage report by name, diagnosed (H-8). */
@@ -2745,6 +2750,9 @@ const T7_5_5 = defineProductTest({
       "T7.5-5 (trailing $ in from — src/end$ matches only the $-suffixed " +
         "name src/end$, never src/end, which a regex-anchor reading would " +
         "match instead; SPEC 7.5, 14.14)",
+      // S-9: both code sources are discovered by the extension-free glob
+      // `src/*`, names the default does not reach — declared well-formed.
+      { wellFormed: ["src/end$", "src/end"] },
     );
 
     // (h) Trailing `$` in `to`: loads — ends in `$`, references no absent

@@ -279,6 +279,7 @@ async function expectConfigRefused(
   product: ProductBinding,
   config: FileContents,
   context: string,
+  configDeclared: "well-formed" | "unparseable" = "well-formed",
 ): Promise<void> {
   await withWorkspace(
     {
@@ -286,6 +287,11 @@ async function expectConfigRefused(
         "xspec.config.ts": config,
         "specs/A.mdx": SECTION_A_SOURCE,
       },
+      // S-9: a configuration file is judged by 14.20's TypeScript grammar
+      // (SPEC 7); the syntax-error and encoding arms are declared unparseable.
+      ...(configDeclared === "unparseable"
+        ? { ts: { unparseable: ["xspec.config.ts"] } }
+        : {}),
     },
     async (workspace) => {
       const before = await snapshotDirectory(workspace.root);
@@ -781,9 +787,15 @@ const T7_1 = defineProductTest({
 // object literals with non-computed identifier or string-literal keys, array
 // literals, static string literals, and the boolean literals; no other
 // statement or expression form, no spread, no computed value.
-const FORM_VIOLATIONS: readonly { label: string; config: string }[] = [
+const FORM_VIOLATIONS: readonly {
+  label: string;
+  config: string;
+  /** S-9: TEST-SPEC T7-2 declares this configuration unparseable (14.20). */
+  unparseable?: true;
+}[] = [
   {
     label: "not well-formed TypeScript — a syntax error (unclosed braces)",
+    unparseable: true,
     config: `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -1219,7 +1231,12 @@ const T7_2 = defineProductTest({
   timeoutMs: 240_000,
   run: async (product) => {
     for (const arm of FORM_VIOLATIONS) {
-      await expectConfigRefused(product, arm.config, `T7-2 (${arm.label})`);
+      await expectConfigRefused(
+        product,
+        arm.config,
+        `T7-2 (${arm.label})`,
+        arm.unparseable === true ? "unparseable" : "well-formed",
+      );
     }
 
     await withWorkspace(
@@ -1506,11 +1523,13 @@ const T7_2 = defineProductTest({
       NON_UTF8_CONFIG,
       "T7-2 (encoding: the byte 0xFF inside a trailing line comment — the " +
         "file's bytes are not valid UTF-8)",
+      "unparseable",
     );
     await expectConfigRefused(
       product,
       BOM_CONFIG,
       "T7-2 (encoding: the file begins with a byte-order mark)",
+      "unparseable",
     );
 
     // Object-literal keys and names (SPEC 7, 14.14): repeated keys, empty

@@ -302,6 +302,7 @@ import {
 import type {
   InitialFileContents,
   WorkspaceDecl,
+  WorkspaceTsDecl,
 } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -940,11 +941,12 @@ const T14_3_BROKEN_TS = [
 ].join("\n");
 
 const T14_3_FILES: WorkspaceDecl = {
-  // S-9: the MDX sources 14.20 declares unparseable (the TypeScript one is
-  // the product's alone to judge).
+  // S-9: the sources 14.20 declares unparseable — the three MDX sources, and
+  // the TypeScript one (a TSX-only construct in a `.ts` file).
   mdx: {
     unparseable: ["specs/brokenmdx.mdx", "specs/badutf8.mdx", "specs/bom.mdx"],
   },
+  ts: { unparseable: ["src/brokents.ts"] },
   files: {
     "xspec.config.ts": SPEC_AND_CODE_CONFIG,
     "specs/brokenmdx.mdx": T14_3_BROKEN_MDX,
@@ -2167,6 +2169,9 @@ const T14_5 = defineProductTest({
           "specs/U.mdx": T14_5_SPEC_SOURCE,
           "src/view.mts": T14_5_UNIT_SOURCE,
         },
+        // S-9: any name but `.tsx` selects plain TypeScript, so the TSX-only
+        // construct is unparseable here (14.20).
+        ts: { unparseable: ["src/view.mts"] },
       },
       async (workspace) => {
         const context = "T14-5 `build --json` over the `.mts` code file";
@@ -4220,6 +4225,12 @@ interface RangeRuleCase {
    * code source plain contents.
    */
   readonly files: Readonly<Record<string, InitialFileContents>>;
+  /**
+   * The S-9 TypeScript declaration of the staged code sources (default:
+   * every one well-formed) — an arm whose code source 14.20 declares
+   * unparseable lists it.
+   */
+  readonly ts?: WorkspaceTsDecl;
   /** Every staged finding, with its complete location list. */
   readonly expected: readonly ExactFindingExpectation[];
 }
@@ -4632,7 +4643,8 @@ const T14_11_ENCODING_FILES = T14_11_ENCODING_FORMS.flatMap((form) =>
 // source is the staged-source record its home module registers — the
 // failing one declared unparseable (S-9) — staged here under that very
 // declaration, as in its home arm (the (w) workspaces follow this body's
-// earlier invocations); a code source is the product's alone to judge; the
+// earlier invocations); a code-source staging's failing file is declared
+// unparseable by its S-9 TypeScript declaration (`reassertedCase`); the
 // configuration is this module's for the staging's kind (the home modules
 // stage the same text).
 
@@ -4669,6 +4681,8 @@ function reassertedCase(
     rule: `14.20 — a syntax-failure offset another test pins, re-asserted: ${staging.name}`,
     config: kind === "code-source" ? SPEC_AND_CODE_CONFIG : SPECS_ONLY_CONFIG,
     files,
+    // S-9: a code-source staging's failing file is declared unparseable.
+    ...(kind === "code-source" ? { ts: { unparseable: [file] } } : {}),
     expected: [
       {
         condition: "14.20",
@@ -4926,9 +4940,10 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "m",
     rule: "14.20 — one zero-length range at the failure's offset: a byte-order mark, an encoding failure, an MDX and a TypeScript syntax failure",
     config: SPEC_AND_CODE_CONFIG,
-    // S-9: the three MDX sources are 14.20's declared-unparseable forms, their
-    // records declared so (the TypeScript one is the product's alone to
-    // judge).
+    // S-9: the four sources are 14.20's declared-unparseable forms — the
+    // three MDX sources' records declared so, and the TypeScript one listed
+    // in `ts`.
+    ts: { unparseable: ["src/bad.ts"] },
     files: {
       "specs/bom.mdx": stagedMdx(
         "T14-11 (m) specs/bom.mdx (a byte-order mark)",
@@ -5077,8 +5092,12 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "v",
     rule: "14.20 — an encoding failure's zero-length range at the first byte of the first ill-formed sequence: a valid 5-byte prefix then `FF` → 5, `41 E2 82 41` → 1, `C0 80` → 0, `ED A0 80` → 0, `41 E2 82` at the file's end → 1, a spec and a code source alike",
     config: SPEC_AND_CODE_CONFIG,
-    // S-9: every spec source here is invalid UTF-8, 14.20's declared form —
-    // its record declared unparseable (T14_11_ENCODING_FILES).
+    // S-9: every source here is invalid UTF-8, 14.20's declared form — each
+    // spec source's record declared unparseable (T14_11_ENCODING_FILES), each
+    // code source listed in `ts`.
+    ts: {
+      unparseable: T14_11_ENCODING_FORMS.map((form) => `src/${form.name}.ts`),
+    },
     files: Object.fromEntries(
       T14_11_ENCODING_FILES.map((entry) => [entry.file, entry.contents]),
     ),
@@ -5163,7 +5182,10 @@ async function runRangeRuleArm(
 ): Promise<void> {
   const context = `T14-11 (${kase.arm}) ${kase.rule}`;
   await withWorkspace(
-    { files: { "xspec.config.ts": kase.config, ...kase.files } },
+    {
+      files: { "xspec.config.ts": kase.config, ...kase.files },
+      ...(kase.ts === undefined ? {} : { ts: kase.ts }),
+    },
     async (workspace) => {
       const findings = await buildFindings(
         product,

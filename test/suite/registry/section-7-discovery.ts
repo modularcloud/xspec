@@ -122,6 +122,7 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import type {
   InitialFileContents,
   WorkspaceDecl,
+  WorkspaceTsDecl,
 } from "../../helpers/workspace.js";
 import { SECTION_A_SOURCE, SECTION_B_SOURCE } from "./section-7-basics.js";
 import {
@@ -1198,6 +1199,12 @@ const INVALID_SOURCE = stagedMdx(
  * TypeScript (14.20). */
 const UNPARSEABLE_DESTINATION = ")";
 
+/** S-9: specs/a'b.md, a name the default does not reach, is declared
+ * unparseable TypeScript (14.20) — T7-6's own words. */
+const UNPARSEABLE_DESTINATION_TS: WorkspaceTsDecl = {
+  unparseable: [INVALID_SOURCE_DESTINATION],
+};
+
 // Import arms (SPEC 2.1/7: imports resolve references between files but
 // never add files to the workspace — the designated file must already be a
 // discovered source of a configured spec group, else 14.15).
@@ -1379,6 +1386,7 @@ const T7_6 = defineProductTest({
           [INVALID_SOURCE_PATH]: INVALID_SOURCE,
           [INVALID_SOURCE_DESTINATION]: UNPARSEABLE_DESTINATION,
         },
+        ts: UNPARSEABLE_DESTINATION_TS,
       },
       async (workspace) => {
         const context =
@@ -1437,6 +1445,7 @@ const T7_6 = defineProductTest({
           [INVALID_SOURCE_PATH]: INVALID_SOURCE,
           [INVALID_SOURCE_DESTINATION]: UNPARSEABLE_DESTINATION,
         },
+        ts: UNPARSEABLE_DESTINATION_TS,
       },
       async (workspace) => {
         const context =

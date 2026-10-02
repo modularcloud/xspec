@@ -38,7 +38,10 @@ import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { InitialFileContents } from "../../helpers/workspace.js";
+import type {
+  InitialFileContents,
+  WorkspaceTsDecl,
+} from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -89,9 +92,11 @@ async function withWorkspace<T>(
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
   config: string = SPECS_ONLY_CONFIG,
+  ts?: WorkspaceTsDecl,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
+    ...(ts === undefined ? {} : { ts }),
   });
   try {
     return await body(workspace);
@@ -130,6 +135,11 @@ interface InvalidImportArm {
   readonly extraFiles: Readonly<Record<string, InitialFileContents>>;
   /** Configuration override (defaults to SPECS_ONLY_CONFIG). */
   readonly config?: string;
+  /**
+   * The S-9 TypeScript declaration of a code source whose name the default
+   * does not reach (a code group globbing `docs/` `.mdx` names).
+   */
+  readonly ts?: WorkspaceTsDecl;
   /**
    * Files staged OUTSIDE the workspace root, at paths relative to the root's
    * parent directory (support.ts stageBesideRoot) — the above-root arm's real
@@ -192,6 +202,7 @@ async function runInvalidImportArm(
       );
     },
     arm.config,
+    arm.ts,
   );
 }
 
@@ -318,6 +329,7 @@ const INVALID_SPECIFIER_ARMS: readonly InvalidImportArm[] = [
       ),
     },
     config: SPECS_AND_DOCS_CODE_CONFIG,
+    ts: { wellFormed: ["docs/EXTRA.mdx"] },
   },
   {
     // From `specs/` (depth 1) the two `..` segments reach depth -1: the

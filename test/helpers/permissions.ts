@@ -51,8 +51,10 @@ import * as path from "node:path";
 /**
  * The staging modes, named in every `HarnessStagingError`: the permission
  * stagings of this module, the workspace builder's S-9 derivability check
- * of a staged MDX source (`mdx-derivability`, helpers/workspace.ts), and the
- * builder's undeclared-staging guard (`undeclared-staging`: a plain `.mdx`
+ * of a staged MDX source (`mdx-derivability`, helpers/workspace.ts), its
+ * TypeScript check of a staged code source or configuration file
+ * (`ts-derivability`, helpers/workspace.ts and helpers/ts-derivability.ts),
+ * and the builder's undeclared-staging guard (`undeclared-staging`: a plain `.mdx`
  * staging after a product invocation, which S-7's sweep never reaches and
  * so must be a staged-source record; helpers/workspace.ts,
  * helpers/product-invocations.ts).
@@ -63,6 +65,7 @@ export type StagingMode =
   | "read-refusal-of-file"
   | "read-refusal-of-directory"
   | "mdx-derivability"
+  | "ts-derivability"
   | "undeclared-staging";
 
 /**
@@ -72,12 +75,14 @@ export type StagingMode =
  * (absent, symlinked, wrong kind), a platform that is not the Linux leg's —
  * or a staged MDX source contradicting its S-9 declaration (declared
  * well-formed yet rejected by the stock parser, or declared unparseable yet
- * deriving; helpers/workspace.ts), or an MDX source staged with plain
- * contents after a product invocation, outside the staged-source ledger
- * the S-9 self-test judges before any product exists (`undeclared-staging`,
- * helpers/workspace.ts). Never a `HarnessAssertionError`: nothing
- * here is a product verdict — it is a harness error, never a diagnosed
- * product failure and never a skip.
+ * deriving; helpers/workspace.ts), a staged code source or configuration
+ * file contradicting its S-9 TypeScript declaration or accepted read one way
+ * only (`ts-derivability`, helpers/workspace.ts), or an MDX source staged
+ * with plain contents after a product invocation, outside the staged-source
+ * ledger the S-9 self-test judges before any product exists
+ * (`undeclared-staging`, helpers/workspace.ts). Never a
+ * `HarnessAssertionError`: nothing here is a product verdict — it is a
+ * harness error, never a diagnosed product failure and never a skip.
  */
 export class HarnessStagingError extends Error {
   readonly mode: StagingMode;

@@ -37,6 +37,31 @@
 //   error, never an assertion failure, never a skip. The parse is in-process
 //   and cheap at every scale the suite stages (the 4096-deep tower in ~0.3 s,
 //   T1.3-7's 4.2 MB document in ~1.4 s), so no staging is exempted for size.
+// - Every staged code source and configuration file is judged the same way
+//   by S-9's TypeScript check (`judgeTypeScript`, helpers/ts-derivability.ts
+//   — the harness's own `typescript-5.9.3` parser at ESNext, read as module
+//   code and as script code; SPEC 14.20), at staging time, through the same
+//   four stagings (`create()`'s initial files, `file()`, `edit()`,
+//   `copyFrom()`). The default reaches a path by its name alone: every file
+//   whose name ends in a TypeScript or JavaScript source suffix
+//   (`TS_DEFAULT_SUFFIXES`: `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`,
+//   `.mjs`, `.cjs` — so `.d.ts` names and every configuration file the suite
+//   stages, `xspec.config.ts` and each `--config` target, all named `.ts`)
+//   is declared well-formed and must be accepted both ways. A staging
+//   declares the exceptions per path in `ts: { unparseable, unchecked,
+//   wellFormed }` (or per `file()` call, `{ ts: ... }`): `unparseable` for a
+//   file TEST-SPEC declares unparseable (14.20: a TypeScript syntax error,
+//   invalid UTF-8, a byte-order mark — rejected both ways), `unchecked` for
+//   a file whose well-formedness the document does not declare (a fuzz
+//   mutation, a noise file no discovery reaches, an edit of product-written
+//   bytes), and `wellFormed` for a code source whose name the default does
+//   not reach (a code group globs any name: T7-6's `specs/a'b.md` is
+//   declared `unparseable`, T13.4-11(b)'s `specs/A.md` `wellFormed`). A
+//   contradiction throws `HarnessStagingError` (mode `ts-derivability`,
+//   naming the path and the parser's first error), and so does every text
+//   the release accepts read one way only, whatever its declaration but
+//   `unchecked` (no fixture is such text, S-9) — a harness error, never an
+//   assertion failure, never a skip.
 // - A `.mdx` source a test body stages after invoking the product in its
 //   workspace is passed to `file()` as a staged-source record
 //   (helpers/staged-mdx.ts) carrying the bytes and the S-9 declaration
@@ -108,6 +133,11 @@ import {
   unregisterWorkspaceRoot,
 } from "./product-invocations.js";
 import { StagedMdx } from "./staged-mdx.js";
+import {
+  type TsDeclaration,
+  judgeTypeScript,
+  tsDeclarationProblem,
+} from "./ts-derivability.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -198,10 +228,52 @@ export type MdxFileDeclaration =
   | "per-draw"
   | { readonly allowances: readonly MdxAllowance[] };
 
+/**
+ * A staging's S-9 declaration of its TypeScript files' well-formedness —
+ * code sources and configuration files (SPEC 14.20's TypeScript grammar) —
+ * by workspace-relative path, keyed as `WorkspaceMdxDecl` keys are. Every
+ * staged file whose name ends in one of `TS_DEFAULT_SUFFIXES` and is not
+ * named here is declared well-formed: accepted by TypeScript 5.9.3 both as
+ * module code and as script code. A path belongs to at most one list.
+ */
+export interface WorkspaceTsDecl {
+  /**
+   * Files TEST-SPEC declares unparseable (14.20): each must be rejected
+   * both ways — a TypeScript syntax error, invalid UTF-8, a leading
+   * byte-order mark — whatever its name.
+   */
+  readonly unparseable?: readonly string[];
+  /**
+   * Files whose well-formedness the document does not declare — fuzz
+   * mutations (P-8, P-11), noise files no discovery reaches, edits of
+   * product-written bytes. Never a way to hide an ill-formed fixture.
+   */
+  readonly unchecked?: readonly string[];
+  /**
+   * Code sources (or a configuration file) whose names the default does not
+   * reach — a code group globs any name (`specs/*.md`, `src/*`, `.mdx`
+   * names under `docs/`): each must be well-formed, as a default path is.
+   */
+  readonly wellFormed?: readonly string[];
+}
+
+/**
+ * One file's S-9 TypeScript declaration, for a `file()` call after creation;
+ * overrides the workspace declaration (and the name's default) for that
+ * write alone.
+ */
+export type TsFileDeclaration = TsDeclaration | "unchecked";
+
 /** Options of a single `file()` staging. */
 export interface FileOptions {
   /** The file's S-9 declaration; defaults to the workspace declaration's. */
   readonly mdx?: MdxFileDeclaration;
+  /**
+   * The file's S-9 TypeScript declaration; defaults to the workspace
+   * declaration's, else to well-formed for a name `TS_DEFAULT_SUFFIXES`
+   * reaches (any other name is not judged).
+   */
+  readonly ts?: TsFileDeclaration;
 }
 
 /** Declarative form of a workspace's initial content. */
@@ -223,6 +295,13 @@ export interface WorkspaceDecl {
    * header).
    */
   readonly mdx?: WorkspaceMdxDecl;
+  /**
+   * S-9 declaration of the staged TypeScript files — code sources and
+   * configuration files, those in `files` and those later stagings write;
+   * every path `TS_DEFAULT_SUFFIXES` reaches and absent from it is declared
+   * well-formed (see the module header).
+   */
+  readonly ts?: WorkspaceTsDecl;
 }
 
 export interface GitPerson {
@@ -266,6 +345,8 @@ export class TestWorkspace {
   private gitScratch: Promise<{ home: string; configFile: string }> | undefined;
   /** The S-9 declaration, resolved per normalized path (see `mdxDeclarationOf`). */
   private readonly mdxDeclarations: ReadonlyMap<string, MdxFileDeclaration>;
+  /** The S-9 TypeScript declaration, resolved per normalized path. */
+  private readonly tsDeclarations: ReadonlyMap<string, TsFileDeclaration>;
   /** The undeclared-staging guard's mark: has a product been invoked here? */
   private readonly invocationMark: WorkspaceInvocationMark;
 
@@ -273,22 +354,26 @@ export class TestWorkspace {
     tempRoot: string,
     root: string,
     mdxDeclarations: ReadonlyMap<string, MdxFileDeclaration>,
+    tsDeclarations: ReadonlyMap<string, TsFileDeclaration>,
     invocationMark: WorkspaceInvocationMark,
   ) {
     this.tempRoot = tempRoot;
     this.root = root;
     this.mdxDeclarations = mdxDeclarations;
+    this.tsDeclarations = tsDeclarations;
     this.invocationMark = invocationMark;
   }
 
   /**
    * Create a fresh workspace in a unique temporary directory and populate it
    * with the declared entries (directories, then files, then symlinks); each
-   * `.mdx` file is judged against the staging's S-9 declaration as it is
-   * written (a contradiction throws `HarnessStagingError`).
+   * `.mdx` file, code source, and configuration file is judged against the
+   * staging's S-9 declarations as it is written (a contradiction throws
+   * `HarnessStagingError`).
    */
   static async create(decl: WorkspaceDecl = {}): Promise<TestWorkspace> {
     const mdxDeclarations = resolveMdxDeclaration(decl.mdx ?? {});
+    const tsDeclarations = resolveTsDeclaration(decl.ts ?? {});
     const tempRoot = await fsp.mkdtemp(
       path.join(os.tmpdir(), "xspec-harness-"),
     );
@@ -302,6 +387,7 @@ export class TestWorkspace {
       tempRoot,
       root,
       mdxDeclarations,
+      tsDeclarations,
       registerWorkspaceRoot(root, realRoot),
     );
     try {
@@ -351,7 +437,10 @@ export class TestWorkspace {
    * both throw. Plain contents on an `.mdx` path after a product invocation
    * — in this workspace, or anywhere in the running registered body — throw
    * too (`undeclared-staging`, see `guardUndeclaredStaging`), unless the
-   * effective declaration is `unchecked` or `per-draw`.
+   * effective declaration is `unchecked` or `per-draw`. A code source or
+   * configuration file is judged against its S-9 TypeScript declaration —
+   * the `ts` option's, else the workspace declaration's, else well-formed
+   * for a name `TS_DEFAULT_SUFFIXES` reaches — before anything is written.
    */
   async file(
     rel: RelPath,
@@ -377,6 +466,7 @@ export class TestWorkspace {
       }
     }
     this.checkMdx(rel, data, declaration);
+    this.checkTs(rel, data, options.ts);
     await this.write(rel, data);
   }
 
@@ -428,6 +518,7 @@ export class TestWorkspace {
       }
     }
     this.checkMdx(rel, data, declaration);
+    this.checkTs(rel, data, undefined);
     await this.write(rel, data);
   }
 
@@ -509,8 +600,9 @@ export class TestWorkspace {
   /**
    * Rewrite one spelling in a file's current bytes — `from` replaced by `to`
    * once, in the UTF-8 decoding of the bytes as they stand — and stage the
-   * result under the path's S-9 declaration (the workspace declaration's,
-   * else well-formed), judged at staging time like every `.mdx` write. This
+   * result under the path's S-9 declarations (the workspace declaration's,
+   * else well-formed), judged at staging time like every `.mdx` write and
+   * every code source's or configuration file's (`tsDeclarationOf`). This
    * stages an edit of bytes the PRODUCT wrote — a rename's or move's
    * rewritten source, which no harness constant equals and which nothing can
    * judge before the product exists — never of a file whose current bytes
@@ -528,13 +620,15 @@ export class TestWorkspace {
     }
     const data = Buffer.from(current.replace(from, to), "utf8");
     this.checkMdx(rel, data, undefined);
+    this.checkTs(rel, data, undefined);
     await this.write(rel, data);
   }
 
   /**
    * Stage another live workspace's current bytes of `rel` here, at `destRel`
-   * (default: the same path), under this workspace's S-9 declaration for the
-   * destination, judged at staging time like every `.mdx` write. This
+   * (default: the same path), under this workspace's S-9 declarations for
+   * the destination, judged at staging time like every `.mdx` write and
+   * every code source's or configuration file's. This
    * carries the PRODUCT's output — a rename's or move's rewritten sources,
    * the configuration and journal beside them — into a fresh workspace (the
    * H-6 two-directory protocol of T6.4-7, T6.5-1, T6.5-3): bytes no harness
@@ -559,6 +653,7 @@ export class TestWorkspace {
       );
     }
     this.checkMdx(destRel, data, undefined);
+    this.checkTs(destRel, data, undefined);
     await this.write(destRel, data);
   }
 
@@ -566,6 +661,28 @@ export class TestWorkspace {
   mdxDeclarationOf(rel: RelPath): MdxFileDeclaration | undefined {
     if (!isMdxPath(rel)) return undefined;
     return this.mdxDeclarations.get(mdxKey(rel)) ?? "well-formed";
+  }
+
+  /**
+   * The S-9 TypeScript declaration in effect for a staged path: the
+   * workspace declaration's entry, else well-formed for a name
+   * `TS_DEFAULT_SUFFIXES` reaches; undefined for a path nothing judges.
+   */
+  tsDeclarationOf(rel: RelPath): TsFileDeclaration | undefined {
+    return (
+      this.tsDeclarations.get(mdxKey(rel)) ??
+      (isTsDefaultPath(rel) ? "well-formed" : undefined)
+    );
+  }
+
+  private checkTs(
+    rel: RelPath,
+    data: Uint8Array,
+    override: TsFileDeclaration | undefined,
+  ): void {
+    const declaration = override ?? this.tsDeclarationOf(rel);
+    if (declaration === undefined) return;
+    judgeTsDeclaration(mdxKey(rel), data, declaration);
   }
 
   private checkMdx(
@@ -845,6 +962,67 @@ export function judgeMdxDeclaration(
   }
 }
 
+/**
+ * The name suffixes S-9's TypeScript default reaches: a staged file whose
+ * name ends in one of them is declared well-formed unless its staging
+ * declares otherwise — TypeScript's own source names (`.d.ts` and its kin
+ * included) and JavaScript's, which a code group globbing them discovers as
+ * code sources parsed as plain TypeScript (SPEC 14.20: any name but `.tsx`
+ * selects plain TypeScript). Every configuration file the suite stages is
+ * named `.ts` (`xspec.config.ts`, each `--config` target). Matched
+ * case-sensitively, as SPEC spells the `.tsx` suffix.
+ */
+export const TS_DEFAULT_SUFFIXES = [
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+] as const;
+
+/**
+ * S-9's TypeScript judge for a staging — one code path for the builder
+ * (every code source and configuration file, as it is written) and any
+ * self-test judging a staging before any product exists: `data`, the file's
+ * exact bytes, must match `declaration` under `judgeTypeScript` (the grammar
+ * `key`'s name selects), or a `HarnessStagingError` of mode
+ * `ts-derivability` names `key` and the parser's first error. A text the
+ * release accepts read one way only is refused under either declaration
+ * (S-9: no fixture is such text). An `unchecked` declaration judges nothing.
+ */
+export function judgeTsDeclaration(
+  key: string,
+  data: Uint8Array,
+  declaration: TsFileDeclaration,
+): void {
+  if (declaration === "unchecked") return;
+  const verdict = judgeTypeScript(data, key);
+  const problem = tsDeclarationProblem(verdict, declaration);
+  if (problem === undefined) return;
+  const remedy =
+    verdict.verdict === "one-way"
+      ? "restage the fixture as text both readings agree on, or list the " +
+        "path under `ts.unchecked` only if the document does not declare " +
+        "its well-formedness (S-9)"
+      : declaration === "well-formed"
+        ? "list the path under `ts.unparseable` if TEST-SPEC declares the " +
+          "file unparseable (SPEC 14.20), or under `ts.unchecked` only if " +
+          "the document does not declare its well-formedness (a fuzz " +
+          "mutation, a noise file no discovery reaches, an edit of " +
+          "product-written bytes; S-9)"
+        : "drop the path from `ts.unparseable` (well-formed is the default " +
+          "for a name the default reaches; `ts.wellFormed` declares any " +
+          "other code source)";
+  throw new HarnessStagingError(
+    "ts-derivability",
+    key,
+    `${problem} — ${remedy}`,
+  );
+}
+
 /** A declared file's bytes: a string encoded as UTF-8, bytes verbatim. */
 function toBytes(contents: FileContents): Uint8Array {
   return typeof contents === "string"
@@ -861,6 +1039,18 @@ function isMdxPath(rel: RelPath): boolean {
     rel.length >= MDX_SUFFIX.length &&
     Buffer.from(rel.subarray(rel.length - MDX_SUFFIX.length)).equals(MDX_SUFFIX)
   );
+}
+
+/** Whether S-9's TypeScript default reaches a staged path by its name. */
+function isTsDefaultPath(rel: RelPath): boolean {
+  const bytes = typeof rel === "string" ? Buffer.from(rel, "utf8") : rel;
+  return TS_DEFAULT_SUFFIXES.some((suffix) => {
+    const tail = Buffer.from(suffix, "utf8");
+    return (
+      bytes.length >= tail.length &&
+      Buffer.from(bytes.subarray(bytes.length - tail.length)).equals(tail)
+    );
+  });
 }
 
 /**
@@ -951,6 +1141,32 @@ function resolveMdxDeclaration(
     assertKnownAllowances(rel, allowances);
     declare(rel, { allowances });
   }
+  return resolved;
+}
+
+/**
+ * Resolve a workspace's S-9 TypeScript declaration to one entry per path,
+ * refusing a declaration defect: a path in two lists.
+ */
+function resolveTsDeclaration(
+  decl: WorkspaceTsDecl,
+): ReadonlyMap<string, TsFileDeclaration> {
+  const resolved = new Map<string, TsFileDeclaration>();
+  const declare = (rel: string, declaration: TsFileDeclaration): void => {
+    const key = mdxKey(rel);
+    if (resolved.has(key)) {
+      throw new HarnessStagingError(
+        "ts-derivability",
+        key,
+        "the S-9 TypeScript declaration names the path in more than one " +
+          "of `unparseable`, `unchecked`, and `wellFormed`",
+      );
+    }
+    resolved.set(key, declaration);
+  };
+  for (const rel of decl.unparseable ?? []) declare(rel, "unparseable");
+  for (const rel of decl.unchecked ?? []) declare(rel, "unchecked");
+  for (const rel of decl.wellFormed ?? []) declare(rel, "well-formed");
   return resolved;
 }
 

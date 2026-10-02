@@ -2048,8 +2048,11 @@ const T11_4_4 = defineProductTest({
         [CODE_TARGET_FILE]: CODE_TARGET_SOURCE,
         [IMPORTS_FILE]: IMPORTS_SOURCE,
       },
-      // S-9: the masked target begins with a byte-order mark (14.20).
+      // S-9: the masked target begins with a byte-order mark (14.20); the
+      // code-source target, a name the default does not reach, is
+      // well-formed TypeScript.
       mdx: { unparseable: [MASKED_TARGET_FILE] },
+      ts: { wellFormed: [CODE_TARGET_FILE] },
     });
     try {
       // Invocation 1 (CONF-AVAIL's enumerated surface: no gate-reference

@@ -1109,6 +1109,8 @@ const T1_6_5 = defineProductTest({
         "src/bad-utf8.ts": BAD_UTF8_CODE_SOURCE,
         "src/bom.ts": BOM + "export const b = 2;\n",
       },
+      // S-9: both code sources are 14.20's declared-unparseable encodings.
+      ts: { unparseable: ["src/bad-utf8.ts", "src/bom.ts"] },
     });
     try {
       const context =

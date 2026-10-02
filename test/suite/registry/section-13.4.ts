@@ -690,16 +690,21 @@ const T13_4_2 = defineProductTest({
             "truncate",
             async (key) => {
               const bytes = bytesOf(key);
+              // S-9: a derived file is no source — no discovery reaches it
+              // (13.4) — and these are edits of product-written bytes, so
+              // the TypeScript well-formedness of a truncated module or
+              // companion is undeclared.
               await workspace.file(
                 key,
                 bytes.subarray(0, Math.floor(bytes.length / 2)),
+                { ts: "unchecked" },
               );
             },
           ],
           [
             "garbage-overwrite",
             async (key) => {
-              await workspace.file(key, GARBAGE_BYTES);
+              await workspace.file(key, GARBAGE_BYTES, { ts: "unchecked" });
             },
           ],
         ];
@@ -1211,6 +1216,10 @@ const T13_4_4 = defineProductTest({
         "specs/A.xspec.ts": "user content at the generated module's path\n",
         "specs/A.md": "user content at the emitted Markdown's path\n",
       },
+      // S-9: the noise at the generated module's path is no code source —
+      // a derived path no discovery reaches (13.4), its well-formedness
+      // undeclared.
+      ts: { unchecked: ["specs/A.xspec.ts"] },
     });
     try {
       // The pristine reference build fixes the expected byte tree.
@@ -2700,7 +2709,11 @@ const ORPHAN_ARM_SOURCE: OrphanArm = {
   recordedRel: "specs/A.md",
   changedConfig: ORPHAN_CODE_GROUP_CONFIG,
   stage: async (workspace) => {
-    await workspace.file("specs/A.md", ORPHAN_CODE_SOURCE);
+    // S-9: a discovered code source whose name the default does not reach
+    // (the code group globs `specs/*.md`), declared well-formed.
+    await workspace.file("specs/A.md", ORPHAN_CODE_SOURCE, {
+      ts: "well-formed",
+    });
     return async (context) => {
       assertBytesEqual(
         await readFileDiagnosed(

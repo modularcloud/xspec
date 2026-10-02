@@ -392,8 +392,9 @@ export function byteWindow(
  * beside it under its home declaration — and stages through this very map,
  * so the S-9 self-test judges each before any product exists and both
  * stagings, the home arm's and T14-11's (each after its body's first
- * product invocation), carry that one declaration; a code source is the
- * product's alone to judge, staged as plain contents.
+ * product invocation), carry that one declaration; a code source is staged
+ * as plain contents, a `code-source` staging's failing `file` declared
+ * unparseable by its S-9 TypeScript declaration at each staging site.
  */
 export interface UnparseableStaging {
   /** The form under test (diagnostics). */

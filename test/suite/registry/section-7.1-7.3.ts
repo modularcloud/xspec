@@ -120,6 +120,7 @@ import { TestWorkspace } from "../../helpers/workspace.js";
 import type {
   InitialFileContents,
   WorkspaceDecl,
+  WorkspaceTsDecl,
 } from "../../helpers/workspace.js";
 import { SECTION_A_SOURCE, SECTION_B_SOURCE } from "./section-7-basics.js";
 import {
@@ -710,6 +711,12 @@ const DESTINATION_DISCOVERY_FILES: Readonly<
   "specs/A.md": DESTINATION_CODE_SOURCE,
 };
 
+/** S-9: the destination path's code source, a name the default does not
+ * reach, is declared well-formed (a valid code source, 14.20). */
+const DESTINATION_DISCOVERY_TS: WorkspaceTsDecl = {
+  wellFormed: ["specs/A.md"],
+};
+
 const CONTAINS_EDGE: GraphEdge = {
   from: "specs/A.mdx",
   to: "specs/A.mdx#a",
@@ -945,6 +952,7 @@ const T7_3_1 = defineProductTest({
           "xspec.config.ts": destinationDiscoveryConfig(false),
           ...DESTINATION_DISCOVERY_FILES,
         },
+        ts: DESTINATION_DISCOVERY_TS,
       },
       async (workspace) => {
         const allLabel =
@@ -985,6 +993,7 @@ const T7_3_1 = defineProductTest({
           "xspec.config.ts": destinationDiscoveryConfig(true),
           ...DESTINATION_DISCOVERY_FILES,
         },
+        ts: DESTINATION_DISCOVERY_TS,
       },
       async (workspace) => {
         const allLabel =

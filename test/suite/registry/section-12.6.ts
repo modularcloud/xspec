@@ -349,7 +349,12 @@ const T12_6_2 = defineProductTest({
     // also hosting the two `--config` targets: a nonexistent path and a
     // malformed file, each accepted and never consulted (SPEC 12.6, 12.0).
     await withWorkspace(
-      { files: { "malformed-config.ts": MALFORMED_CONFIG_TARGET } },
+      {
+        files: { "malformed-config.ts": MALFORMED_CONFIG_TARGET },
+        // S-9: the malformed configuration is not well-formed TypeScript
+        // (14.20) — declared unparseable.
+        ts: { unparseable: ["malformed-config.ts"] },
+      },
       async (workspace) => {
         // Staging premise, pinned in-test: no configuration is reachable
         // here — the other commands exit 2 as a 14.14 configuration error

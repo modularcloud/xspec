@@ -2399,6 +2399,8 @@ const T11_6_4 = defineProductTest({
         // content an answer would have carried.
         "specs/a.mdx": ANCHOR_SOURCE,
       },
+      // S-9: the broken configuration is not well-formed TypeScript (14.20).
+      ts: { unparseable: [CONFIG_FILE] },
     });
     try {
       await expectFlaglessInventoryConfigurationError(
