@@ -128,6 +128,26 @@
 //   T7.5-4's, and T7.5-5's first arm) precedes any invocation — S-7's sweep
 //   reaches it — and stays plain, as does T7.5-6's tampered generated
 //   module (no `.mdx` path).
+// - TypeScript staged-source records (TEST-SPEC S-9's TypeScript and
+//   timing clauses; helpers/staged-ts.ts): every configuration file and
+//   code source a body stages in a workspace created after its first
+//   product invocation — `expectConfigRefused`'s one staging site (T7.4-1's
+//   and T7.5-1's matrix tables, every row a record made at module load, the
+//   first's too, the table being one), T7.4-1's ambiguous-name, inferred-
+//   kind, and unknown-profile-name configurations, both bodies' set-reading
+//   configurations, T7.5-2's kinds-restriction, T7.5-4's files- and
+//   tags-selector, and T7.5-5's arms (b)–(j) configurations, and the code
+//   sources of MATRIX_FILES, DUAL_FILES, and T7.5-5's arms (d), (e), and (g)
+//   — is a ledger record carrying its S-9 declaration, every one
+//   well-formed, judged by test/self/s9-staged-sources.test.ts before any
+//   product exists. Byte-identical code sources are ONE record, named with
+//   every path: `src/impl.ts` and `dualcode/d.ts` (OK_CODE_SOURCE), and
+//   CODE_MARKER_TO_P at T7.5-5's five paths, `src/end$` and `src/end`
+//   among them (code sources the default does not reach, judged because
+//   the record makes the path judged). The same first workspaces stay
+//   plain; T7.5-6's tampered generated module, an edit of product-written
+//   bytes, is staged `unchecked` (the document declares nothing of its
+//   well-formedness, and no harness constant equals its bytes).
 
 import type {
   CoverageProfileReport,
@@ -155,13 +175,13 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type {
   InitialFileContents,
   WorkspaceDecl,
-  WorkspaceTsDecl,
 } from "../../helpers/workspace.js";
 import { SECTION_A_SOURCE } from "./section-7-basics.js";
 import { SECTION_C_SOURCE } from "./section-7-discovery.js";
@@ -242,9 +262,12 @@ async function withWorkspace<T>(
 }
 
 /**
- * Stage a workspace with the given configuration and source files and assert
- * `build --json` refuses it per 14.14 (module header: the deviation is the
- * only defect, so wrong acceptance surfaces as a failed exit-code assertion).
+ * Stage a workspace with the given configuration — a staged-source record,
+ * well-formed (module header), since T7.4-1 and T7.5-1 stage every arm past
+ * their first after the body's first product invocation (S-9's timing
+ * clause) — and source files, and assert `build --json` refuses it per
+ * 14.14 (module header: the deviation is the only defect, so wrong
+ * acceptance surfaces as a failed exit-code assertion).
  * Beyond the shared 14.14 contract (`expectConfigurationError`), the finding
  * is pinned to the configuration file: its concerned path is exactly
  * `xspec.config.ts` — the file the upward search found, in the anchoring
@@ -256,7 +279,7 @@ async function withWorkspace<T>(
  */
 async function expectConfigRefused(
   product: ProductBinding,
-  config: string,
+  config: StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   context: string,
 ): Promise<void> {
@@ -319,11 +342,21 @@ function entriesBlock(
   return `  ${key}: [\n${rendered}\n  ]`;
 }
 
+// The one code source the validation-matrix and ambiguous-name layouts
+// stage — `src/impl.ts` of MATRIX_FILES, `dualcode/d.ts` of DUAL_FILES, the
+// same bytes — is one TypeScript staged-source record (module header): T7.4-1
+// and T7.5-1 stage both maps in workspaces created after their first product
+// invocation.
+const OK_CODE_SOURCE = stagedTs(
+  "T7.4-1/T7.5-1 the code source exporting ok (src/impl.ts; dualcode/d.ts)",
+  "export const ok = 1;\n",
+);
+
 // The validation-matrix group layout (T7.4-1, T7.5-1): two spec groups (so
 // group-typed references have a valid unambiguous referent and a second
 // distinct group), one code group (for the wrong-kind arms). Every group
-// holds one valid staged source (MATRIX_FILES; the `.mdx` ones records, the
-// map serving every arm after a body's first — module header).
+// holds one valid staged source (MATRIX_FILES; every one a record, the map
+// serving every arm after a body's first — module header).
 const MATRIX_GROUPS = `  specs: {
     main: ["specs/**/*.mdx"],
     aux: ["aux/**/*.mdx"]
@@ -345,7 +378,7 @@ ${block}
 const MATRIX_FILES: Readonly<Record<string, InitialFileContents>> = {
   "specs/A.mdx": SECTION_A_SOURCE,
   "aux/X.mdx": SECTION_X_SOURCE,
-  "src/impl.ts": "export const ok = 1;\n",
+  "src/impl.ts": OK_CODE_SOURCE,
 };
 
 // The ambiguous-name layout: `dual` exists as both a spec group and a code
@@ -372,7 +405,7 @@ ${block}
 const DUAL_FILES: Readonly<Record<string, InitialFileContents>> = {
   "specs/A.mdx": SECTION_A_SOURCE,
   "dualspec/D.mdx": SECTION_D_SOURCE,
-  "dualcode/d.ts": "export const ok = 1;\n",
+  "dualcode/d.ts": OK_CODE_SOURCE,
 };
 
 /**
@@ -462,26 +495,22 @@ async function expectPolicyFindings(
   files: Readonly<Record<string, InitialFileContents>>,
   expected: readonly PolicyExpectation[],
   contextBase: string,
-  ts?: WorkspaceTsDecl,
 ): Promise<void> {
-  await withWorkspace(
-    { files, ...(ts === undefined ? {} : { ts }) },
-    async (workspace) => {
-      await buildOk(
-        product,
-        workspace,
-        `${contextBase} \`build\` — sources are valid and build does not ` +
-          `evaluate policy (SPEC 12.1, 7.5), so the check below observes ` +
-          `fresh output and only policy findings`,
-      );
-      const label = `${contextBase} \`check --json\``;
-      assertPolicyFindings(
-        await checkFindings(product, workspace, label),
-        expected,
-        label,
-      );
-    },
-  );
+  await withWorkspace({ files }, async (workspace) => {
+    await buildOk(
+      product,
+      workspace,
+      `${contextBase} \`build\` — sources are valid and build does not ` +
+        `evaluate policy (SPEC 12.1, 7.5), so the check below observes ` +
+        `fresh output and only policy findings`,
+    );
+    const label = `${contextBase} \`check --json\``;
+    assertPolicyFindings(
+      await checkFindings(product, workspace, label),
+      expected,
+      label,
+    );
+  });
 }
 
 /** Resolve one profile of a coverage report by name, diagnosed (H-8). */
@@ -546,13 +575,19 @@ Embeds z:
  * reachable over an embeds edge alone — a kind outside the configured
  * edgeKinds — and the untagged `n`, lacking every targetTags tag (8.1/8.2),
  * so both configured sets shape the report the twins must agree on.
+ * Called at module load only: each workspace's configuration is a
+ * TypeScript staged-source record named for its `spelling` (module header —
+ * T7.4-1 stages both workspaces after its first product invocation).
  */
 function setReadingProfileFiles(
+  spelling: string,
   targetTags: string,
   edgeKinds: string,
 ): Readonly<Record<string, InitialFileContents>> {
   return {
-    "xspec.config.ts": `import { defineConfig } from "xspec"
+    "xspec.config.ts": stagedTs(
+      `T7.4-1 set reading xspec.config.ts (${spelling})`,
+      `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -571,16 +606,19 @@ export default defineConfig({
   ]
 })
 `,
+    ),
     "tgt/T.mdx": SET_READING_PROFILE_TARGET,
     "bnd/B.mdx": SET_READING_PROFILE_BOUNDARY,
   };
 }
 
 const SET_READING_PROFILE_FILES = setReadingProfileFiles(
+  "the spelled profile",
   '["z", "a", "a"]',
   '["references", "depends", "depends"]',
 );
 const SET_READING_PROFILE_TWIN_FILES = setReadingProfileFiles(
+  "the profile's collapsed twin",
   '["a", "z"]',
   '["depends", "references"]',
 );
@@ -693,14 +731,20 @@ Tagged c.
  * edge per (tag, kind) pair the sets admit — `pa` (tagged a) depends on `t`,
  * `pb` (tagged b) embeds it — beside the two the rule must leave unflagged:
  * the untagged `pu` and `pc`, tagged c (matching means carrying at least
- * one listed tag, SPEC 7.5).
+ * one listed tag, SPEC 7.5). Called at module load only: each workspace's
+ * configuration is a TypeScript staged-source record named for its
+ * `spelling` (module header — T7.5-1 stages both workspaces after its first
+ * product invocation).
  */
 function setReadingRuleFiles(
+  spelling: string,
   kinds: string,
   tags: string,
 ): Readonly<Record<string, InitialFileContents>> {
   return {
-    "xspec.config.ts": `import { defineConfig } from "xspec"
+    "xspec.config.ts": stagedTs(
+      `T7.5-1 set reading xspec.config.ts (${spelling})`,
+      `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -718,16 +762,19 @@ export default defineConfig({
   ]
 })
 `,
+    ),
     "pol/P.mdx": SET_READING_RULE_POLICY,
     "tgt/T.mdx": SECTION_T_SOURCE,
   };
 }
 
 const SET_READING_RULE_FILES = setReadingRuleFiles(
+  "the spelled rule",
   '["embeds", "depends", "embeds"]',
   '["b", "a", "b"]',
 );
 const SET_READING_RULE_TWIN_FILES = setReadingRuleFiles(
+  "the rule's collapsed twin",
   '["depends", "embeds"]',
   '["a", "b"]',
 );
@@ -1018,48 +1065,87 @@ const PROFILE_MATRIX: readonly {
   },
 ];
 
+/** A refused-configuration arm (T7.4-1, T7.5-1): its label and its record. */
+interface RefusedConfigArm {
+  readonly label: string;
+  readonly config: StagedTs;
+}
+
+// The matrix's rows as refused-configuration arms, each configuration a
+// TypeScript staged-source record made at module load from its row — the
+// expression moved, never re-spelled — named `T7.4-1 xspec.config.ts
+// (<label>)`: T7.4-1 stages every arm past the first after its first product
+// invocation, and the table is one (module header).
+const PROFILE_MATRIX_ARMS: readonly RefusedConfigArm[] = PROFILE_MATRIX.map(
+  (arm) => ({
+    label: arm.label,
+    config: stagedTs(
+      `T7.4-1 xspec.config.ts (${arm.label})`,
+      matrixConfig(entriesBlock("coverage", arm.profiles)),
+    ),
+  }),
+);
+
 // `boundary: "dual"` where dual is both a spec and a code group, boundaryKind
-// absent → 14.14 (7.4: boundaryKind MUST be required when ambiguous).
-const AMBIGUOUS_BOUNDARY_ABSENT_CONFIG = dualConfig(
-  entriesBlock("coverage", [
-    ['name: "p"', 'target: "main"', 'boundary: "dual"', 'mode: "direct"'],
-  ]),
+// absent → 14.14 (7.4: boundaryKind MUST be required when ambiguous). This
+// configuration and the three below are TypeScript staged-source records
+// (module header): T7.4-1 stages each after its first product invocation.
+const AMBIGUOUS_BOUNDARY_ABSENT_CONFIG = stagedTs(
+  "T7.4-1 xspec.config.ts (the ambiguous boundary name dual, boundaryKind " +
+    "absent)",
+  dualConfig(
+    entriesBlock("coverage", [
+      ['name: "p"', 'target: "main"', 'boundary: "dual"', 'mode: "direct"'],
+    ]),
+  ),
 );
 
 // The same ambiguous name with boundaryKind given, both directions → valid.
-const AMBIGUOUS_BOUNDARY_GIVEN_CONFIG = dualConfig(
-  entriesBlock("coverage", [
-    [
-      'name: "p-spec"',
-      'target: "main"',
-      'boundary: "dual"',
-      'boundaryKind: "spec"',
-      'mode: "direct"',
-    ],
-    [
-      'name: "p-code"',
-      'target: "main"',
-      'boundary: "dual"',
-      'boundaryKind: "code"',
-      'mode: "direct"',
-    ],
-  ]),
+const AMBIGUOUS_BOUNDARY_GIVEN_CONFIG = stagedTs(
+  "T7.4-1 xspec.config.ts (the ambiguous boundary name dual, boundaryKind " +
+    "given in both directions)",
+  dualConfig(
+    entriesBlock("coverage", [
+      [
+        'name: "p-spec"',
+        'target: "main"',
+        'boundary: "dual"',
+        'boundaryKind: "spec"',
+        'mode: "direct"',
+      ],
+      [
+        'name: "p-code"',
+        'target: "main"',
+        'boundary: "dual"',
+        'boundaryKind: "code"',
+        'mode: "direct"',
+      ],
+    ]),
+  ),
 );
 
 // Unambiguous boundary names without boundaryKind — one spec-only (aux), one
 // code-only (app) → valid: the kind MUST be inferred (7.4).
-const INFERRED_KIND_CONFIG = matrixConfig(
-  entriesBlock("coverage", [
-    ['name: "p-spec"', 'target: "main"', 'boundary: "aux"', 'mode: "direct"'],
-    ['name: "p-code"', 'target: "main"', 'boundary: "app"', 'mode: "direct"'],
-  ]),
+const INFERRED_KIND_CONFIG = stagedTs(
+  "T7.4-1 xspec.config.ts (unambiguous spec-only and code-only boundary " +
+    "names, boundaryKind inferred)",
+  matrixConfig(
+    entriesBlock("coverage", [
+      ['name: "p-spec"', 'target: "main"', 'boundary: "aux"', 'mode: "direct"'],
+      ['name: "p-code"', 'target: "main"', 'boundary: "app"', 'mode: "direct"'],
+    ]),
+  ),
 );
 
 // One valid profile, for the unknown-profile-name usage-error arm.
-const VALID_COVERAGE_CONFIG = matrixConfig(
-  entriesBlock("coverage", [
-    ['name: "p"', 'target: "main"', 'boundary: "aux"', 'mode: "direct"'],
-  ]),
+const VALID_COVERAGE_CONFIG = stagedTs(
+  "T7.4-1 xspec.config.ts (one valid profile, the unknown-profile-name " +
+    "usage-error arm)",
+  matrixConfig(
+    entriesBlock("coverage", [
+      ['name: "p"', 'target: "main"', 'boundary: "aux"', 'mode: "direct"'],
+    ]),
+  ),
 );
 
 const T7_4_1 = defineProductTest({
@@ -1082,10 +1168,10 @@ const T7_4_1 = defineProductTest({
     "14.14, 12.0, 12.7, 11.6)",
   run: async (product) => {
     // (a) The 14.14 matrix over the standard group layout.
-    for (const arm of PROFILE_MATRIX) {
+    for (const arm of PROFILE_MATRIX_ARMS) {
       await expectConfigRefused(
         product,
-        matrixConfig(entriesBlock("coverage", arm.profiles)),
+        arm.config,
         MATRIX_FILES,
         `T7.4-1 (${arm.label})`,
       );
@@ -1674,17 +1760,38 @@ const RULE_MATRIX: readonly {
   },
 ];
 
+// The matrix's rows as refused-configuration arms, each configuration a
+// TypeScript staged-source record made at module load from its row — the
+// expression moved, never re-spelled — named `T7.5-1 xspec.config.ts
+// (<label>)`: T7.5-1 stages every arm past the first after its first product
+// invocation, and the table is one (module header).
+const RULE_MATRIX_ARMS: readonly RefusedConfigArm[] = RULE_MATRIX.map(
+  (arm) => ({
+    label: arm.label,
+    config: stagedTs(
+      `T7.5-1 xspec.config.ts (${arm.label})`,
+      matrixConfig(entriesBlock("policy", arm.rules)),
+    ),
+  }),
+);
+
 // An ambiguous group name in a selector without `kind` → 14.14 (7.5: the
 // kind MUST be given when the name exists as both a spec and a code group).
-const AMBIGUOUS_SELECTOR_CONFIG = dualConfig(
-  entriesBlock("policy", [
-    [
-      'name: "r"',
-      'type: "forbidden"',
-      'from: { group: "dual" }',
-      'to: { group: "main" }',
-    ],
-  ]),
+// A TypeScript staged-source record (module header): T7.5-1 stages it after
+// its first product invocation.
+const AMBIGUOUS_SELECTOR_CONFIG = stagedTs(
+  "T7.5-1 xspec.config.ts (a selector naming the ambiguous group dual " +
+    "without kind)",
+  dualConfig(
+    entriesBlock("policy", [
+      [
+        'name: "r"',
+        'type: "forbidden"',
+        'from: { group: "dual" }',
+        'to: { group: "main" }',
+      ],
+    ]),
+  ),
 );
 
 const T7_5_1 = defineProductTest({
@@ -1704,10 +1811,10 @@ const T7_5_1 = defineProductTest({
     '["a", "b"] (byte order, collapsed), and the rule\'s `check` findings ' +
     "equal to its collapsed twin's (SPEC 7.5, 12.7, 11.6)",
   run: async (product) => {
-    for (const arm of RULE_MATRIX) {
+    for (const arm of RULE_MATRIX_ARMS) {
       await expectConfigRefused(
         product,
-        matrixConfig(entriesBlock("policy", arm.rules)),
+        arm.config,
         MATRIX_FILES,
         `T7.5-1 (${arm.label})`,
       );
@@ -1808,8 +1915,11 @@ Mid uses the low group.
 
 // `kinds` restriction: one source node with a depends edge AND an embeds edge
 // into the forbidden group; kinds ["embeds"] evaluates only the embeds edge.
+// The configuration is a TypeScript staged-source record (module header).
 const FORBIDDEN_KINDS_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+  "xspec.config.ts": stagedTs(
+    "T7.5-2 kinds restriction xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1827,6 +1937,7 @@ export default defineConfig({
   ]
 })
 `,
+  ),
   "hi/H.mdx": stagedMdx(
     "T7.5-2 kinds restriction hi/H.mdx",
     `import L from "../lo/L.xspec"
@@ -2028,9 +2139,12 @@ T.t
 
 // (b) `files` selectors match by glob, on both sides: only the edge whose
 // source file matches `from`'s glob AND whose target file matches `to`'s
-// glob is flagged.
+// glob is flagged. The configuration is a TypeScript staged-source record
+// (module header), as is (c)'s.
 const SELECTOR_FILES_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+  "xspec.config.ts": stagedTs(
+    "T7.5-4 files selectors xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2046,6 +2160,7 @@ export default defineConfig({
   ]
 })
 `,
+  ),
   "specs/inner/A.mdx": stagedMdx(
     "T7.5-4 files selectors specs/inner/A.mdx",
     `import C from "../C.xspec"
@@ -2078,7 +2193,9 @@ Outer depends on C — the from glob does not match this source.
 // ["red", "blue"] (an all-tags product matches neither); untagged `u` does
 // not.
 const SELECTOR_TAGS_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+  "xspec.config.ts": stagedTs(
+    "T7.5-4 tags selector xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2095,6 +2212,7 @@ export default defineConfig({
   ]
 })
 `,
+  ),
   "pol/P.mdx": stagedMdx(
     "T7.5-4 tags selector pol/P.mdx",
     `import T from "../tgt/T.xspec"
@@ -2219,9 +2337,12 @@ ALT.n
 // string, the capture takes its one-byte minimum). Targets exist for the
 // correct expansion (tgt/a.mdx), the greedy-capture expansion (tgt/abc.mdx),
 // and the greedy-leading-`*` expansion (tgt/c.mdx); exactly the first is
-// flagged.
+// flagged. The configuration is a TypeScript staged-source record (module
+// header), as is every configuration and code source of arms (c)-(j).
 const CAPTURE_STAR_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+  "xspec.config.ts": stagedTs(
+    "T7.5-5 (b) *$1* against abc xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2238,6 +2359,7 @@ export default defineConfig({
   ]
 })
 `,
+  ),
   "grp/abc/F.mdx": stagedMdx(
     "T7.5-5 (b) *$1* against abc grp/abc/F.mdx",
     `import A from "../../tgt/a.xspec"
@@ -2258,7 +2380,9 @@ Depends on every candidate expansion's node.
 // pre/ax.mdx ($1 = a) but neither pre/x.mdx ($1 would be empty) nor
 // pre/d/ex.mdx ($1 would be d/e — a whole-path-regex product matches it).
 const CAPTURE_LIMITS_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+  "xspec.config.ts": stagedTs(
+    "T7.5-5 (c) capture limits xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2275,6 +2399,7 @@ export default defineConfig({
   ]
 })
 `,
+  ),
   "pre/ax.mdx": stagedMdx(
     "T7.5-5 (c) capture limits pre/ax.mdx",
     `import T from "../tgt/T.xspec"
@@ -2309,7 +2434,9 @@ Source whose file would need a capture spanning a slash.
 // must target a node of m/$1.mdx — src/good.ts → m/good.mdx#g agrees (no
 // finding), src/evil.ts → m/wrong.mdx#w disagrees (a finding).
 const CAPTURE_MIRROR_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+  "xspec.config.ts": stagedTs(
+    "T7.5-5 (d) mirror-structure allowedOnly xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2328,14 +2455,21 @@ export default defineConfig({
   ]
 })
 `,
-  "src/good.ts": `import G from "../m/good.xspec"
+  ),
+  "src/good.ts": stagedTs(
+    "T7.5-5 (d) mirror-structure allowedOnly src/good.ts",
+    `import G from "../m/good.xspec"
 
 G.g
 `,
-  "src/evil.ts": `import W from "../m/wrong.xspec"
+  ),
+  "src/evil.ts": stagedTs(
+    "T7.5-5 (d) mirror-structure allowedOnly src/evil.ts",
+    `import W from "../m/wrong.xspec"
 
 W.w
 `,
+  ),
   "m/good.mdx": SECTION_G_SOURCE,
   "m/wrong.mdx": SECTION_W_SOURCE,
 };
@@ -2348,8 +2482,17 @@ W.w
 // is the load assertion; exact finding sets over bait paths are the match
 // assertion).
 
-/** A code file bearing one top-level marker into `tgt/P.mdx#p`. */
-const CODE_MARKER_TO_P = 'import P from "../tgt/P.xspec"\n\nP.p\n';
+/**
+ * A code file bearing one top-level marker into `tgt/P.mdx#p`: one
+ * TypeScript staged-source record for every path (e)'s and (g)'s workspaces
+ * stage it at (module header), well-formed — at `src/end$` and `src/end`,
+ * names the default does not reach, too (the record makes the path judged).
+ */
+const CODE_MARKER_TO_P = stagedTs(
+  "T7.5-5 the code source bearing one marker into tgt/P.mdx#p (src/a$0.ts; " +
+    "src/ab.ts; src/a0.ts; src/end$; src/end)",
+  'import P from "../tgt/P.xspec"\n\nP.p\n',
+);
 
 // (e) `$0` in `from` — the spec's own example: `a$0.ts` matches the file
 // `a$0.ts` and never `ab.ts` (a capture reading matches `ab.ts` with $0 = b —
@@ -2359,7 +2502,9 @@ const CODE_MARKER_TO_P = 'import P from "../tgt/P.xspec"\n\nP.p\n';
 const LITERAL_DOLLAR0_FROM_FILES: Readonly<
   Record<string, InitialFileContents>
 > = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+  "xspec.config.ts": stagedTs(
+    "T7.5-5 (e) $0 in from xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2378,6 +2523,7 @@ export default defineConfig({
   ]
 })
 `,
+  ),
   "src/a$0.ts": CODE_MARKER_TO_P,
   "src/ab.ts": CODE_MARKER_TO_P,
   "src/a0.ts": CODE_MARKER_TO_P,
@@ -2390,7 +2536,9 @@ export default defineConfig({
 // depends on every candidate expansion's node.
 const LITERAL_DOLLAR0_TO_FILES: Readonly<Record<string, InitialFileContents>> =
   {
-    "xspec.config.ts": `import { defineConfig } from "xspec"
+    "xspec.config.ts": stagedTs(
+      "T7.5-5 (f) $0 in to xspec.config.ts",
+      `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2407,6 +2555,7 @@ export default defineConfig({
   ]
 })
 `,
+    ),
     "pre/S.mdx": stagedMdx(
       "T7.5-5 (f) $0 in to pre/S.mdx",
       `import P from "../tgt/t$0.xspec"
@@ -2431,7 +2580,9 @@ Depends on every candidate expansion's node.
 const LITERAL_TRAILING_FROM_FILES: Readonly<
   Record<string, InitialFileContents>
 > = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+  "xspec.config.ts": stagedTs(
+    "T7.5-5 (g) trailing $ in from xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2450,6 +2601,7 @@ export default defineConfig({
   ]
 })
 `,
+  ),
   "src/end$": CODE_MARKER_TO_P,
   "src/end": CODE_MARKER_TO_P,
   "tgt/P.mdx": SECTION_P_SOURCE,
@@ -2463,7 +2615,9 @@ export default defineConfig({
 // it; the literal reading yields zero findings, `check` exit 0.
 const LITERAL_TRAILING_TO_FILES: Readonly<Record<string, InitialFileContents>> =
   {
-    "xspec.config.ts": `import { defineConfig } from "xspec"
+    "xspec.config.ts": stagedTs(
+      "T7.5-5 (h) trailing $ in to xspec.config.ts",
+      `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2480,6 +2634,7 @@ export default defineConfig({
   ]
 })
 `,
+    ),
     "pre/S.mdx": stagedMdx(
       "T7.5-5 (h) trailing $ in to pre/S.mdx",
       `import T from "../tgt/T.xspec"
@@ -2505,7 +2660,9 @@ const LITERAL_TRAILING_TO_BAIT_EDGE: readonly GraphEdge[] = [
 const LITERAL_NONDIGIT_FROM_FILES: Readonly<
   Record<string, InitialFileContents>
 > = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+  "xspec.config.ts": stagedTs(
+    "T7.5-5 (i) $ before a non-digit in from xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2522,6 +2679,7 @@ export default defineConfig({
   ]
 })
 `,
+  ),
   "pre/a$x.mdx": stagedMdx(
     "T7.5-5 (i) $ before a non-digit in from pre/a$x.mdx",
     `import T from "../tgt/T.xspec"
@@ -2556,7 +2714,9 @@ One-byte-wildcard bait.
 // capture violation) and matches only the literal target; baits as in (i).
 const LITERAL_NONDIGIT_TO_FILES: Readonly<Record<string, InitialFileContents>> =
   {
-    "xspec.config.ts": `import { defineConfig } from "xspec"
+    "xspec.config.ts": stagedTs(
+      "T7.5-5 (j) $ before a non-digit in to xspec.config.ts",
+      `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2573,6 +2733,7 @@ export default defineConfig({
   ]
 })
 `,
+    ),
     "pre/S.mdx": stagedMdx(
       "T7.5-5 (j) $ before a non-digit in to pre/S.mdx",
       `import P from "../tgt/t$z.xspec"
@@ -2737,7 +2898,9 @@ const T7_5_5 = defineProductTest({
     );
 
     // (g) Trailing `$` in `from`: the pattern matches only the `$`-suffixed
-    // name.
+    // name. S-9: both code sources are discovered by the extension-free glob
+    // `src/*`, names the default does not reach — declared well-formed by
+    // their record, CODE_MARKER_TO_P, which makes each path judged.
     await expectPolicyFindings(
       product,
       LITERAL_TRAILING_FROM_FILES,
@@ -2750,9 +2913,6 @@ const T7_5_5 = defineProductTest({
       "T7.5-5 (trailing $ in from — src/end$ matches only the $-suffixed " +
         "name src/end$, never src/end, which a regex-anchor reading would " +
         "match instead; SPEC 7.5, 14.14)",
-      // S-9: both code sources are discovered by the extension-free glob
-      // `src/*`, names the default does not reach — declared well-formed.
-      { wellFormed: ["src/end$", "src/end"] },
     );
 
     // (h) Trailing `$` in `to`: loads — ends in `$`, references no absent
@@ -2911,7 +3071,13 @@ const T7_5_6 = defineProductTest({
       // …and regenerates output: tamper with a generated module, rebuild,
       // and the module is byte-restored (12.1 regenerates every derived
       // file; 12.0 makes the regenerated bytes deterministic, so the
-      // product-to-itself byte comparison is exact — H-4).
+      // product-to-itself byte comparison is exact — H-4). The tampered
+      // module is an edit of product-written bytes — a derived file, no
+      // code source (no code group globs it), whose well-formedness the
+      // document does not declare — so it is staged `unchecked` (S-9):
+      // never a staged-source record (no harness constant equals those
+      // bytes), and never judged, which would turn a product's malformed
+      // module into a harness error (H-8).
       const moduleRel = "hi/H.xspec.ts";
       const original = await readGeneratedModule(
         workspace,
@@ -2919,7 +3085,9 @@ const T7_5_6 = defineProductTest({
         "T7.5-6 after the first build (SPEC 13.1: hi/H.mdx generates " +
           "hi/H.xspec.ts in the source file's directory)",
       );
-      await workspace.file(moduleRel, `${original}// tampered\n`);
+      await workspace.file(moduleRel, `${original}// tampered\n`, {
+        ts: "unchecked",
+      });
       await buildOk(
         product,
         workspace,
