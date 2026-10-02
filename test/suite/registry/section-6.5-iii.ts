@@ -151,18 +151,20 @@
 //   those it names by ID (T6.2-3(a), (b), (c), (e)) being that test's
 //   stagings. Arms (f)–(i), the applicability arms, and the created-target
 //   arm are still to be registered; the preview twins are T6.6-3's.
-// - T6.5-18 stages the origin with a kept sibling `w` after the moved `x`
-//   (the entry leaves the rest of the file open), so the origin stays a
-//   non-empty file and its post-move bytes are composed whole from 6.5 and
-//   3; `src/c.ts` is composed value-blind in the fresh identifier alone,
-//   read off the rewritten marker, and the added declaration isolated by
-//   diff (T6.5-8's discipline, `assertAddedImportInsertion`); the preview
-//   is taken before the real move and its `src/c.ts` edits asserted once
-//   the real addition's offset is known, mapped back to pre-operation
-//   coordinates — the removal's start and its end both admitted where the
-//   addition composes to the file's start (T6.6-4(b)'s latitude); the
-//   compile-clean premise and observation ride the TypeScript tooling
-//   driver (H-2) as T6.5-9's do.
+// - T6.5-18 runs four arms (`A18_ARMS`: the shadowed default, the
+//   type-only default (a), the type-only `text` (b), and the shadowed
+//   callee), each its own workspace of ledger records, the origin staged
+//   with a kept sibling `w` after the moved `x` (the entry leaves the rest
+//   of the file open), so the origin stays a non-empty file and its
+//   post-move bytes are composed whole from 6.5 and 3; `src/c.ts` is
+//   composed value-blind in the fresh identifier alone, read off the
+//   rewritten marker or call, and the added declaration isolated by diff
+//   and pinned where the origin declaration's line stood (T6.5-8's
+//   discipline, `assertExactDeclarationInsertion`); the preview is taken
+//   before the real move, its `import-addition` admitted at the origin
+//   declaration's removal's start or its end, one composed position
+//   (T6.6-4(b)'s latitude); the compile-clean premise and observation ride
+//   the TypeScript tooling driver (H-2) as T6.5-9's do.
 // - T6.5-19 rides T6.5-13's arm runner (`runA13Arm`, its diagnoses under
 //   the caller's test ID): (a) is a cross-file arm over T6.5-13's shared
 //   origin and third module (the origin keeps a second use of `X`, so
@@ -194,7 +196,7 @@ import {
 } from "../../helpers/adapters/index.js";
 import { assertFileBytes, fail } from "../../helpers/assertions.js";
 import {
-  assertAddedImportInsertion,
+  assertExactDeclarationInsertion,
   canonicalSpecifier,
 } from "../../helpers/import-insertion.js";
 import { deriveMdx } from "../../helpers/mdx-derivability.js";
@@ -250,8 +252,13 @@ export default defineConfig({
  */
 export const R16_CONFIG = CONFIG;
 
-// One spec group plus one code group (SPEC 7.1), for T6.5-18's code file.
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// One spec group plus one code group (SPEC 7.1), for T6.5-18's code file. A
+// staged-source record: T6.5-18 stages it in workspaces created after a
+// product invocation — every arm after the first (S-9's timing clause;
+// test/self/s9-staged-sources.test.ts).
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T6.5-18 xspec.config.ts — one spec group and one code group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -261,7 +268,8 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 /** The compiler-provided names a spec source's added import may not bind (SPEC 2.1). */
 const MDX_RESERVED_NAMES: readonly string[] = ["S", "Spec", "text"];
@@ -5638,44 +5646,67 @@ const T6_5_17 = defineProductTest({
 });
 
 // ---------------------------------------------------------------------------
-// T6.5-18: shadow-aware binding choice. SPEC 6.5 roots a rewritten spelling
-// at a binding the file already holds only where no local declaration
-// shadows it at the occurrence (4.5) — "one the file already holds that no
-// local declaration shadows at the occurrence" — and otherwise, the file
-// holding none, at the binding of the declaration the operation adds, an
-// import being added exactly where the file lacks a binding the spelling is
-// rooted at. T6.5-7's TS arm exercises the unshadowed choice (the existing
-// target binding used, no import added); this test the shadowed one, whose
-// wrong outcome is silent to the product alone: a product rooting by name at
-// the shadowed `T` rewrites the marker to `T.y`, adds no import, and records
-// no edge from `f` — a chain rooted at a local declaration is no spec
-// reference (4.5): no finding, no staleness, a dropped edge behind a
-// reported success — its `T.y` a consumer type error besides.
+// T6.5-18: shadow-aware, value-level binding choice. SPEC 6.5 roots a
+// rewritten spelling at a binding the file already holds only where no
+// local declaration shadows it at the occurrence (4.5) — "one the file
+// already holds that no local declaration shadows at the occurrence" — and
+// otherwise, the file holding none, at the binding of the declaration the
+// operation adds, an import being added exactly where the file lacks a
+// binding the spelling is rooted at. T6.5-7's TS arm exercises the
+// unshadowed choice (the existing target binding used, no import added);
+// this test the shadowed one, whose wrong outcome is silent to the product
+// alone, and the value-level one: a spelling in external form is rooted at
+// a value-level binding of its target's module (4.5), a binding introduced
+// type-only being a type-level name (4), a chain rooted at which records no
+// edge and raises no finding (T4-4).
 //
-// Fixture: `specs/origin.mdx` holding `x` (beside a kept sibling `w`, so the
-// origin stays a non-empty file after the deletion — a staging choice the
-// entry leaves open), `specs/target.mdx` holding `z`, and `src/c.ts`
-// importing both modules, holding a module-scope marker `T.z` and a function
-// `f` holding `const T = 1` beside the marker `O.x`: the inner-scope `T`
-// shadows the import within `f` (T4.5-4) and is no same-scope collision of
-// 14.15 (T4.5-8); `O.x` resolves through the unshadowed `O`. Everything
-// staged is ASCII, so string lengths are byte counts (1.7). After
-// `move specs/origin.mdx#x specs/target.mdx#y` the marker, standing in `f`,
-// is rooted at no binding of the target module the file holds unshadowed
-// there — `T` is shadowed — so a declaration binding a fresh `<F>` is added
-// (its value unpinned, 6.5's latitude; equal to `T` under no reading, the
-// module-scope import and the local of `f` both binding it — 6.5's
-// freshness spanning the local, T6.5-9), the marker's occurrence span (5.7:
-// the bare chain, exclusive of the `;`) is replaced by `<F>.y`, and the
-// origin declaration, its only use gone, is removed with its line (3).
+// Four arms, each its own workspace over `specs/origin.mdx` holding `x`
+// (beside a kept sibling `w`, so the origin stays a non-empty file after
+// the deletion — a staging choice the entry leaves open), `specs/target.mdx`
+// holding `z`, and `src/c.ts`, each under
+// `move specs/origin.mdx#x specs/target.mdx#y`:
+// - base: `import T`, then `import O`, the module-scope marker `T.z`, and a
+//   function `f` holding `const T = 1` beside the marker `O.x` — the
+//   inner-scope `T` shadows the import within `f` (T4.5-4) and is no
+//   same-scope collision of 14.15 (T4.5-8), `O.x` resolving through the
+//   unshadowed `O`. The marker is rooted at a fresh `<F>` an added
+//   `import <F>` binds — equal to `T` under no reading, the module-scope
+//   import and the local of `f` both binding it (6.5's freshness spanning
+//   the local, T6.5-9). A product rooting by name at the shadowed `T`
+//   writes `T.y`, adds no import, and records no edge from `f`: a chain
+//   rooted at a local is no spec reference (4.5).
+// - (a): the target module's default bound type-only (`import type T`), `T`
+//   spelled at type level alone (`let v: typeof T.z`): the marker `O.x` is
+//   rooted at an added `import <F>`, never at `T`.
+// - (b): the target module's `text` bound type-only (`{ type text as tt }`
+//   beside the value-level default `T`): the call `textO(O.x)`, its target
+//   carried into the target module, is rewritten whole to `<Y>(T.y)` through
+//   an added `import { text as <Y> }` (or `{ text }`), never `tt(T.y)`.
+// - callee: the callee side of the shadow rule — `import T, { text as tt }`
+//   and `f` holding `const tt = 1` beside the call `t(O.x)`: the call
+//   becomes `<Y>(T.y)` through the same added declaration, never
+//   `tt(T.y)`, which calls the local.
+// In each the origin declaration — line 2, directly after the target
+// module's declaration heading the file — loses its last use and is
+// removed with its line (3), and the added line stands where that line
+// stood: the removal's start and its end compose to one position, each
+// following a statement's end and timely (6.5), while every later line
+// start is untimely, a statement other than an import declaration (`T.z`,
+// `let v: …`) standing between it and the origin declaration — the file's
+// one line-start admissible offset, pinned under T6.5-8's diff-isolated
+// discipline (`assertExactDeclarationInsertion`, the fresh identifier read
+// off the rewritten occurrence). Everything staged is ASCII, so string
+// lengths are byte counts (1.7).
 
 const A18_ORIGIN = "specs/origin.mdx";
 const A18_TARGET = "specs/target.mdx";
 const A18_APP = "src/c.ts";
-const A18_TARGET_MODULE = "specs/target.xspec";
 const A18_ARGV = ["move", "specs/origin.mdx#x", "specs/target.mdx#y"] as const;
+const A18_MOVE_LABEL = A18_ARGV.join(" ");
+/** The target module's canonical relative specifier from `src/` (SPEC 6.5). */
+const A18_TARGET_SPECIFIER = "../specs/target.xspec";
 
-const A18_ORIGIN_BEFORE = [
+const A18_ORIGIN_TEXT = [
   '<S id="x">',
   "Origin x text.",
   "</S>",
@@ -5686,6 +5717,14 @@ const A18_ORIGIN_BEFORE = [
   "",
 ].join("\n");
 
+// The origin and target are ledger records (S-9's before-any-product
+// clause; helpers/staged-mdx.ts): every arm after the first stages them
+// after the body's first product invocation.
+const A18_ORIGIN_BEFORE = stagedMdx(
+  "T6.5-18 specs/origin.mdx",
+  A18_ORIGIN_TEXT,
+);
+
 // Composed from SPEC 6.5 and 3: the moved construct's own characters are
 // deleted in place; the line that deletion leaves empty is dropped with its
 // terminator; the blank line after it was blank before the deletion and
@@ -5694,8 +5733,11 @@ const A18_ORIGIN_AFTER = ["", '<S id="w">', "Kept w text.", "</S>", ""].join(
   "\n",
 );
 
-const A18_TARGET_BEFORE = ['<S id="z">', "Target z text.", "</S>", ""].join(
-  "\n",
+const A18_TARGET_TEXT = ['<S id="z">', "Target z text.", "</S>", ""].join("\n");
+
+const A18_TARGET_BEFORE = stagedMdx(
+  "T6.5-18 specs/target.mdx",
+  A18_TARGET_TEXT,
 );
 
 // Composed from SPEC 6.5: a top-level `y`, so the moved text — re-identified
@@ -5712,141 +5754,443 @@ const A18_TARGET_AFTER = [
   "",
 ].join("\n");
 
-const A18_ORIGIN_DECLARATION = 'import O from "../specs/origin.xspec";';
-const A18_TARGET_DECLARATION = 'import T from "../specs/target.xspec";';
-/** The marker in `f`: the bare chain, its occurrence span (SPEC 5.7). */
-const A18_MARKER = "O.x";
-
-/**
- * `src/c.ts` around its two variable parts: the origin declaration on its
- * own first line (present before the move, removed by it) and the marker in
- * `f` (`O.x` before, `<F>.y` after). Everything else stands byte-for-byte:
- * the `T` import, the module-scope marker `T.z`, the local `const T = 1`.
- */
-function a18App(originImport: boolean, marker: string): string {
-  return [
-    ...(originImport ? [A18_ORIGIN_DECLARATION] : []),
-    A18_TARGET_DECLARATION,
-    "",
-    "T.z;",
-    "",
-    "function f() {",
-    "  const T = 1;",
-    `  ${marker};`,
-    "}",
-    "",
-  ].join("\n");
-}
-
-const A18_APP_BEFORE = a18App(true, A18_MARKER);
-
-/**
- * `src/c.ts`'s expected post-move bytes WITHOUT the added import (SPEC
- * 6.4/6.5, 3): the origin declaration removed with its line — its own
- * characters deleted in place leave the line empty, so it is dropped with
- * its terminator — the marker re-rooted at the fresh binding with dot access
- * (`y` is identifier-valid), its `;` outside the span kept, the `T`
- * declaration and `T.z` byte-for-byte.
- */
-const a18AppBase = (root: string): string => a18App(false, `${root}.y`);
-
-/** The origin declaration's removal range: its characters and the line's terminator (SPEC 6.5, 3; 6.6). */
-const A18_REMOVAL_END = A18_ORIGIN_DECLARATION.length + 1;
-/** The marker's occurrence span in pre-operation coordinates (SPEC 5.7; `O.x` occurs once). */
-const A18_MARKER_START = A18_APP_BEFORE.indexOf(A18_MARKER);
-const A18_MARKER_END = A18_MARKER_START + A18_MARKER.length;
-
-// The rewritten marker: a root not preceded by an identifier character or a
-// `.`, then `.y;` (`T.z;` and the declarations never match).
-const A18_APP_REWRITTEN = /(?<![A-Za-z0-9_$.])([A-Za-z_$][A-Za-z0-9_$]*)\.y;/g;
-
-/** Before the move: `O.x` through the unshadowed `O`, attributed to `f` (4.6); `T.z` to the file. */
-const A18_EDGES_BEFORE: readonly GraphEdge[] = [
-  { from: `${A18_APP}#f`, to: `${A18_ORIGIN}#x`, kind: "references" },
-  { from: A18_APP, to: `${A18_TARGET}#z`, kind: "references" },
-];
-
-/** After the move: the marker through the fresh binding, under the moved node's new identity. */
-const A18_EDGES_AFTER: readonly GraphEdge[] = [
-  { from: `${A18_APP}#f`, to: `${A18_TARGET}#y`, kind: "references" },
-  { from: A18_APP, to: `${A18_TARGET}#z`, kind: "references" },
-];
-
 /** Every MDX form T6.5-18 stages or asserts as the move's result (S-9). */
 export const A18_FORM_VECTORS: ReadonlyArray<
   readonly [name: string, source: string]
 > = [
-  [`T6.5-18: ${A18_ORIGIN} as staged`, A18_ORIGIN_BEFORE],
-  [`T6.5-18: ${A18_TARGET} as staged`, A18_TARGET_BEFORE],
+  [`T6.5-18: ${A18_ORIGIN} as staged`, A18_ORIGIN_TEXT],
+  [`T6.5-18: ${A18_TARGET} as staged`, A18_TARGET_TEXT],
   [`T6.5-18: ${A18_ORIGIN} after the move`, A18_ORIGIN_AFTER],
   [`T6.5-18: ${A18_TARGET} after the move`, A18_TARGET_AFTER],
 ];
 
+// The declarations the arms' `src/c.ts` hold, spelled as TEST-SPEC T6.5-18
+// gives them: single spaces, no statement terminator.
+const A18_T_DEFAULT = 'import T from "../specs/target.xspec"';
+const A18_O_DEFAULT = 'import O from "../specs/origin.xspec"';
+const A18_T_TYPE_ONLY = 'import type T from "../specs/target.xspec"';
+const A18_T_TYPE_TEXT =
+  'import T, { type text as tt } from "../specs/target.xspec"';
+const A18_O_TEXT_O = 'import O, { text as textO } from "../specs/origin.xspec"';
+const A18_T_TEXT = 'import T, { text as tt } from "../specs/target.xspec"';
+const A18_O_TEXT_T = 'import O, { text as t } from "../specs/origin.xspec"';
+
+/** A complete edge set of one kind, with why it is the expected one. */
+interface A18EdgeSet {
+  readonly kind: "references" | "embeds";
+  readonly edges: readonly GraphEdge[];
+  readonly why: string;
+}
+
+/** One arm's staging and expectations, as the table spells them. */
+interface A18ArmSpec {
+  /** The arm's label in diagnoses: `base`, `(a)`, `(b)`, or `callee`. */
+  readonly label: string;
+  /** The staging in words, for the premise diagnoses. */
+  readonly summary: string;
+  /** Line 1: the target module's declaration, kept byte-for-byte. */
+  readonly targetDeclaration: string;
+  /** Line 2: the origin declaration, its last use gone after the move. */
+  readonly originDeclaration: string;
+  /** The lines after the two declarations, each terminated by U+000A. */
+  readonly rest: readonly string[];
+  /** The occurrence the move rewrites, as staged (occurring once). */
+  readonly occurrence: string;
+  /**
+   * A marker chain, rewritten to `<F>.y` through an added default binding,
+   * or a whole `text(...)` call, rewritten to `<Y>(T.y)` through an added
+   * `text` binding and the held `T` (SPEC 6.5, 4.3, 5.7).
+   */
+  readonly shape: "marker" | "call";
+  /**
+   * The held binding the wrong outcome roots at (`T` for a marker, `tt`
+   * for a callee), with why 6.5 bars it there.
+   */
+  readonly barred: { readonly name: string; readonly why: string };
+  /** The base arm's premise: the complete `references` set before the move. */
+  readonly before?: A18EdgeSet;
+  /** The complete edge set of one kind after the move. */
+  readonly after: A18EdgeSet;
+  /** Why the workspace is clean after the move, for the `check` diagnosis. */
+  readonly clean: string;
+  /** Why the file compiles clean after the move, for the H-2 diagnosis. */
+  readonly compiles: string;
+}
+
+/** An arm with its staged `src/c.ts` and the byte ranges its edits span. */
+interface A18Arm extends A18ArmSpec {
+  /** `src/c.ts` as staged: a ledger record (S-9's timing clause). */
+  readonly code: StagedTs;
+  /** The staged text of `src/c.ts`. */
+  readonly staged: string;
+  /** The origin declaration with its line's terminator (SPEC 6.5, 3; 6.6). */
+  readonly removal: { readonly start: number; readonly end: number };
+  /** The occurrence's span (SPEC 5.7), in pre-operation coordinates. */
+  readonly rewrite: { readonly start: number; readonly end: number };
+}
+
 /**
- * The identifier the rewritten marker is rooted at — the value-unpinned
- * fresh binding (SPEC 6.5), read off the one place 6.4's pinned spelling
- * makes it observable; diagnosed when the marker is not spelled as 6.4 pins
- * it or is rewritten more or less than once.
+ * Build an arm at module load: its `src/c.ts` record (every arm after the
+ * first stages it after the body's first product invocation, S-9) and its
+ * edits' pre-operation ranges; throws — a harness defect — unless the
+ * staging is ASCII (string lengths then byte counts) and holds the
+ * occurrence exactly once, after the origin declaration's line.
  */
-function a18RewrittenMarkerRoot(text: string, context: string): string {
-  const matches = [...text.matchAll(A18_APP_REWRITTEN)];
-  const root = matches.length === 1 ? matches[0]?.[1] : undefined;
-  if (root === undefined) {
+function a18Arm(spec: A18ArmSpec): A18Arm {
+  const staged = [
+    spec.targetDeclaration,
+    spec.originDeclaration,
+    ...spec.rest,
+    "",
+  ].join("\n");
+  for (let i = 0; i < staged.length; i += 1) {
+    if (staged.charCodeAt(i) > 0x7f) {
+      throw new Error(
+        `T6.5-18 ${spec.label}: the staged ${A18_APP} must be ASCII, so ` +
+          "that string lengths are byte counts (a harness defect)",
+      );
+    }
+  }
+  const removalStart = spec.targetDeclaration.length + 1;
+  const removalEnd = removalStart + spec.originDeclaration.length + 1;
+  const at = staged.indexOf(spec.occurrence);
+  if (at < removalEnd || staged.indexOf(spec.occurrence, at + 1) >= 0) {
+    throw new Error(
+      `T6.5-18 ${spec.label}: the staged ${A18_APP} must hold the ` +
+        `occurrence ${JSON.stringify(spec.occurrence)} exactly once, after ` +
+        "the origin declaration's line (a harness defect)",
+    );
+  }
+  return {
+    ...spec,
+    code: stagedTs(`T6.5-18 ${spec.label} ${A18_APP}`, staged),
+    staged,
+    removal: { start: removalStart, end: removalEnd },
+    rewrite: { start: at, end: at + spec.occurrence.length },
+  };
+}
+
+const A18_ARMS: readonly A18Arm[] = [
+  a18Arm({
+    label: "base",
+    summary:
+      "`import T`, then `import O`, the module-scope marker `T.z`, and `f` " +
+      "holding `const T = 1` beside the marker `O.x` — the local `T` " +
+      "shadows the import within `f` (SPEC 4.5; T4.5-4) and is no " +
+      "same-scope collision of 14.15 (T4.5-8), `O.x` resolving through the " +
+      "unshadowed `O`",
+    targetDeclaration: A18_T_DEFAULT,
+    originDeclaration: A18_O_DEFAULT,
+    rest: ["T.z", "function f() {", "  const T = 1", "  O.x", "}"],
+    occurrence: "O.x",
+    shape: "marker",
+    barred: {
+      name: "T",
+      why:
+        "rooted by name at `T`, which the local `const T = 1` shadows at " +
+        "the occurrence, so the chain is no spec reference (SPEC 4.5): 6.5 " +
+        "roots a rewritten spelling at a binding the file already holds " +
+        "only where no local declaration shadows it at the occurrence, and " +
+        "otherwise at the binding of the declaration it adds — a fresh " +
+        "identifier equal to `T` under no reading, the module-scope import " +
+        "and the local of `f` both binding it (SPEC 6.5, 2.1; T6.5-9)",
+    },
+    before: {
+      kind: "references",
+      edges: [
+        { from: `${A18_APP}#f`, to: `${A18_ORIGIN}#x`, kind: "references" },
+        { from: A18_APP, to: `${A18_TARGET}#z`, kind: "references" },
+      ],
+      why:
+        "`O.x` through the unshadowed `O`, attributed to `f`, and `T.z` " +
+        "attributed to the file (SPEC 4.5, 4.6, 5.2)",
+    },
+    after: {
+      kind: "references",
+      edges: [
+        { from: `${A18_APP}#f`, to: `${A18_TARGET}#y`, kind: "references" },
+        { from: A18_APP, to: `${A18_TARGET}#z`, kind: "references" },
+      ],
+      why:
+        "the rewritten marker reported from `src/c.ts#f` under the moved " +
+        "node's new identity through the fresh binding, beside `T.z`'s " +
+        "edge as before the move; a chain rooted by name at the shadowed " +
+        "`T` records no edge (SPEC 6.5, 4.5, 4.6, 5.2)",
+    },
+    clean:
+      "the added import and the rewritten marker resolve (no 14.7), and " +
+      "two imports binding one module under distinct identifiers collide " +
+      "with nothing (2.1, 14.15)",
+    compiles:
+      "the added import binds an identifier colliding with no binding of " +
+      "the file (TS2440, TS2300), and the rewritten marker resolves " +
+      "against the regenerated modules through it, never through the " +
+      "local `const T = 1` (SPEC 6.5, 4.5; H-2)",
+  }),
+  a18Arm({
+    label: "(a)",
+    summary:
+      "`import type T`, then `import O`, `let v: typeof T.z`, and the " +
+      "marker `O.x` — the target module's default bound type-only, `T` " +
+      "spelled at type level alone",
+    targetDeclaration: A18_T_TYPE_ONLY,
+    originDeclaration: A18_O_DEFAULT,
+    rest: ["let v: typeof T.z", "O.x"],
+    occurrence: "O.x",
+    shape: "marker",
+    barred: {
+      name: "T",
+      why:
+        "rooted at `T`, which `import type T` binds type-only — a " +
+        "type-level name (SPEC 4), a chain rooted at it recording no edge " +
+        "and raising no finding (4.5; T4-4) — while 6.5 roots a spelling in " +
+        "external form at a value-level binding of its target's module, " +
+        "and, the file holding none, at the binding of the declaration it " +
+        "adds: a fresh identifier equal to `T` under no reading, a " +
+        "declaration of the file binding it (SPEC 6.5, 2.1; T6.5-9)",
+    },
+    after: {
+      kind: "references",
+      edges: [{ from: A18_APP, to: `${A18_TARGET}#y`, kind: "references" }],
+      why:
+        "the rewritten marker, at module scope, reported from `src/c.ts` " +
+        "under the moved node's new identity through the added value-level " +
+        "binding; `typeof T.z`, rooted at the type-only `T`, a type-level " +
+        "name, records none, nor would a marker rooted there (SPEC 6.5, 4, " +
+        "4.5, 4.6; T4-4)",
+    },
+    clean:
+      "the added import and the rewritten marker resolve (no 14.7), and the " +
+      "type-only import and the added one of the same module collide with " +
+      "nothing (2.1, 14.15)",
+    compiles:
+      "the added import binds a fresh value-level identifier through which " +
+      "the rewritten marker resolves against the regenerated modules — " +
+      "`T`, bound type-only, cannot be used as a value (TS1361) (SPEC 6.5, " +
+      "4, 4.5; H-2)",
+  }),
+  a18Arm({
+    label: "(b)",
+    summary:
+      "`import T, { type text as tt }`, then `import O, { text as textO }`, " +
+      "`T.z`, and the call `textO(O.x)` — the target module's `text` bound " +
+      "type-only beside its value-level default `T`",
+    targetDeclaration: A18_T_TYPE_TEXT,
+    originDeclaration: A18_O_TEXT_O,
+    rest: ["T.z", "textO(O.x)"],
+    occurrence: "textO(O.x)",
+    shape: "call",
+    barred: {
+      name: "tt",
+      why:
+        "`{ type text as tt }` binds the target module's `text` type-only, " +
+        "a type-level name (SPEC 4) no value-level call can use — a " +
+        "consumer type error — while 6.5 roots a call's callee at a " +
+        "value-level `text` binding of its module, and, the file holding " +
+        "none, at the binding of a declaration it adds binding that " +
+        "module's `text` alone (SPEC 6.5, 4.3, 4.5)",
+    },
+    after: {
+      kind: "embeds",
+      edges: [{ from: A18_APP, to: `${A18_TARGET}#y`, kind: "embeds" }],
+      why:
+        "the rewritten call, at module scope, reported from `src/c.ts` " +
+        "under the moved node's new identity (SPEC 6.5, 4.3, 4.6, 5.2)",
+    },
+    clean:
+      "the rewritten call passes a node of the target module to that " +
+      "module's `text` (no 14.11, no 14.18), and the added import collides " +
+      "with nothing (2.1, 14.15)",
+    compiles:
+      "the added `text` binding is value-level and fresh, and the rewritten " +
+      "call resolves through it — `tt`, bound type-only, cannot be called " +
+      "as a value (TS1361) (SPEC 6.5, 4, 4.3; H-2)",
+  }),
+  a18Arm({
+    label: "callee",
+    summary:
+      "`import T, { text as tt }`, then `import O, { text as t }`, `T.z`, " +
+      "and `f` holding `const tt = 1` beside the call `t(O.x)` — the local " +
+      "`tt` shadows the import within `f` as the base arm's `T` does",
+    targetDeclaration: A18_T_TEXT,
+    originDeclaration: A18_O_TEXT_T,
+    rest: ["T.z", "function f() {", "  const tt = 1", "  t(O.x)", "}"],
+    occurrence: "t(O.x)",
+    shape: "call",
+    barred: {
+      name: "tt",
+      why:
+        "rooted by name at the import's `tt`, which the local `const tt = " +
+        "1` shadows at the call — a node passed to a function other than " +
+        "`text`, which `check` reports (14.18), and a consumer type error " +
+        "besides: 6.5 roots a call's callee at its module's `text` binding, " +
+        "a held one only where no local declaration shadows it at the " +
+        "occurrence, and otherwise at the binding of a declaration it adds " +
+        "binding that module's `text` alone (SPEC 6.5, 4.3, 4.5)",
+    },
+    after: {
+      kind: "embeds",
+      edges: [{ from: `${A18_APP}#f`, to: `${A18_TARGET}#y`, kind: "embeds" }],
+      why:
+        "the rewritten call reported from `src/c.ts#f` under the moved " +
+        "node's new identity (SPEC 6.5, 4.3, 4.6, 5.2)",
+    },
+    clean:
+      "the rewritten call passes its node to the target module's `text`, " +
+      "not to the local `tt` (no 14.18), and the added import collides " +
+      "with nothing (2.1, 14.15)",
+    compiles:
+      "the added `text` binding is fresh and unshadowed at the call, and " +
+      "the rewritten call resolves through it — the local `tt`, a number, " +
+      "is not callable (TS2349) (SPEC 6.5, 4.3, 4.5; H-2)",
+  }),
+];
+
+// The rewritten marker: a root not preceded by an identifier character or a
+// `.`, then `.y` not followed by one (`T.z`, `typeof T.z`, and the
+// declarations never match).
+const A18_MARKER_REWRITTEN =
+  /(?<![A-Za-z0-9_$.])([A-Za-z_$][A-Za-z0-9_$]*)\.y(?![A-Za-z0-9_$])/g;
+
+// The rewritten call: a callee not preceded by an identifier character or a
+// `.`, then `(`, the argument's root, `.y`, and `)`.
+const A18_CALL_REWRITTEN =
+  /(?<![A-Za-z0-9_$.])([A-Za-z_$][A-Za-z0-9_$]*)\(([A-Za-z_$][A-Za-z0-9_$]*)\.y\)/g;
+
+/** A rewritten occurrence and the declaration its fresh binding needs. */
+interface A18Rewrite {
+  /** The rewritten occurrence's characters, in 6.4's pinned spelling. */
+  readonly occurrence: string;
+  /** The added declaration's exact characters (SPEC 6.5's spelling). */
+  readonly declaration: string;
+}
+
+/**
+ * Read the rewritten occurrence off `src/c.ts` after the move — the fresh
+ * binding value-unpinned (SPEC 6.5), read off the one place 6.4's pinned
+ * spelling makes it observable (dot access, `y` being identifier-valid) —
+ * and diagnose the wrong outcomes: an occurrence not spelled as 6.4 pins
+ * it or rewritten more or less than once, one rooted at the arm's barred
+ * held binding, and a call whose argument is not re-rooted at the held `T`
+ * or whose callee is `T`.
+ */
+function a18ReadRewrite(
+  arm: A18Arm,
+  text: string,
+  context: string,
+): A18Rewrite {
+  if (arm.shape === "marker") {
+    const matches = [...text.matchAll(A18_MARKER_REWRITTEN)];
+    const root = matches.length === 1 ? matches[0]?.[1] : undefined;
+    if (root === undefined) {
+      fail(
+        `${context}: ${A18_APP} after the move must hold exactly one ` +
+          `marker \`<binding>.y\` — the marker on the moved node rewritten, ` +
+          `over its occurrence span (5.7), to the moved node's new identity ` +
+          `through a value-level binding of the target module in 6.4's ` +
+          `pinned spelling (dot access, \`y\` being identifier-valid; SPEC ` +
+          `6.5, 6.4); found ${String(matches.length)} in ` +
+          `${JSON.stringify(text)}`,
+      );
+    }
+    if (root === arm.barred.name) {
+      fail(
+        `${context}: the marker is rewritten to \`${root}.y\` — ` +
+          `${arm.barred.why}; the file reads ${JSON.stringify(text)}`,
+      );
+    }
+    return {
+      occurrence: `${root}.y`,
+      declaration: `import ${root} from "${A18_TARGET_SPECIFIER}"`,
+    };
+  }
+  const matches = [...text.matchAll(A18_CALL_REWRITTEN)];
+  const match = matches.length === 1 ? matches[0] : undefined;
+  const callee = match?.[1];
+  const root = match?.[2];
+  if (callee === undefined || root === undefined) {
     fail(
-      `${context}: ${A18_APP} after the move must hold exactly one marker ` +
-        `\`<binding>.y;\` — the marker on the moved node rewritten, over ` +
-        `its occurrence span (5.7), to the moved node's new identity through ` +
-        `a binding of the target module in 6.4's pinned spelling (dot ` +
-        `access, \`y\` being identifier-valid; SPEC 6.5, 6.4); found ` +
+      `${context}: ${A18_APP} after the move must hold exactly one call ` +
+        `\`<callee>(<binding>.y)\` — the call whose target the move carries ` +
+        `into the target module rewritten whole, over its occurrence's span ` +
+        `(5.7), callee and argument rooted at bindings of that module, the ` +
+        `argument in 6.4's pinned spelling (SPEC 6.5, 6.4, 4.3); found ` +
         `${String(matches.length)} in ${JSON.stringify(text)}`,
     );
   }
-  return root;
-}
-
-/**
- * The pre-operation offsets at which an import addition composes to
- * `composedOffset` in the rewritten file (SPEC 6.5, 6.6): each edited range
- * is replaced whole, an addition's offset lies strictly inside none, and an
- * insertion at an offset where an edit's range ends stands after that
- * edit's result, where one begins, before it — so the removal's start and
- * its end are two pre-operation offsets for one composed position
- * (T6.6-4(b)'s latitude, T6.5-13(i)/(k)), while past the marker's rewrite
- * the composed text differs by the spelling's length difference.
- */
-function a18PreOperationOffsets(
-  composedOffset: number,
-  rewritten: string,
-): readonly number[] {
-  const delta = rewritten.length - A18_MARKER.length;
-  const offsets: number[] = [];
-  for (let p = 0; p <= A18_APP_BEFORE.length; p += 1) {
-    const insideRemoval = p > 0 && p < A18_REMOVAL_END;
-    const insideRewrite = p > A18_MARKER_START && p < A18_MARKER_END;
-    if (insideRemoval || insideRewrite) continue;
-    let composed: number;
-    if (p <= A18_REMOVAL_END) composed = 0;
-    else if (p <= A18_MARKER_START) composed = p - A18_REMOVAL_END;
-    else composed = p - A18_REMOVAL_END + delta;
-    if (composed === composedOffset) offsets.push(p);
+  const shown = `\`${callee}(${root}.y)\``;
+  if (callee === arm.barred.name) {
+    fail(
+      `${context}: the call is rewritten to ${shown}, its callee ` +
+        `\`${callee}\` — ${arm.barred.why}; the file reads ` +
+        `${JSON.stringify(text)}`,
+    );
   }
-  return offsets;
+  if (root !== "T") {
+    fail(
+      `${context}: the call is rewritten to ${shown} — its argument must ` +
+        `be re-rooted at the held \`T\`, the target module's default ` +
+        `binding: value-level, unshadowed at the occurrence, and timely, ` +
+        `its declaration preceding the origin declaration's — so the ` +
+        `declaration added binds that module's \`text\` alone, with no ` +
+        `default binding (SPEC 6.5, 4.5); the file reads ` +
+        `${JSON.stringify(text)}`,
+    );
+  }
+  if (callee === "T") {
+    fail(
+      `${context}: the call is rewritten to ${shown} — its callee is the ` +
+        `held default binding \`T\`, not the target module's \`text\`: the ` +
+        `added declaration binds that module's \`text\` to a fresh ` +
+        `identifier, equal to neither \`T\` nor \`tt\`, which declarations ` +
+        `of the file already bind (SPEC 6.5, 2.1, 4.3); the file reads ` +
+        `${JSON.stringify(text)}`,
+    );
+  }
+  const named = callee === "text" ? "{ text }" : `{ text as ${callee} }`;
+  return {
+    occurrence: `${callee}(T.y)`,
+    declaration: `import ${named} from "${A18_TARGET_SPECIFIER}"`,
+  };
 }
 
 /**
- * `src/c.ts`'s preview edits given the addition's pre-operation offset:
- * the `import-removal` spanning the origin declaration with its adjunct
- * drop, the `import-addition` zero-length at that offset, and the
- * `reference-rewrite` spanning the marker — in 12.7's order: range start,
- * then range end, then class-name bytes (SPEC 6.6, 12.7; T6.6-4).
+ * `src/c.ts`'s expected post-move bytes WITHOUT the added declaration (SPEC
+ * 6.4/6.5, 3): the origin declaration removed with its line — its own
+ * characters deleted in place leave the line empty, so it is dropped with
+ * its terminator — the occurrence's span (5.7) replaced by its rewritten
+ * spelling, every other byte as staged.
  */
-function a18PreviewEdits(addition: number): readonly PreviewEdit[] {
+function a18Compose(arm: A18Arm, rewritten: string): string {
+  const staged = arm.staged;
+  return (
+    staged.slice(0, arm.removal.start) +
+    staged.slice(arm.removal.end, arm.rewrite.start) +
+    rewritten +
+    staged.slice(arm.rewrite.end)
+  );
+}
+
+/**
+ * `src/c.ts`'s preview edits with the addition at the pre-operation offset
+ * `addition`: the `import-removal` spanning the origin declaration with its
+ * adjunct drop, the zero-length `import-addition`, and the
+ * `reference-rewrite` spanning the occurrence — in 12.7's order: range
+ * start, then range end, then class-name bytes (SPEC 6.6, 12.7; T6.6-4).
+ */
+function a18PreviewEdits(
+  arm: A18Arm,
+  addition: number,
+): readonly PreviewEdit[] {
   const edits: PreviewEdit[] = [
-    { class: "import-removal", range: { start: 0, end: A18_REMOVAL_END } },
+    {
+      class: "import-removal",
+      range: { start: arm.removal.start, end: arm.removal.end },
+    },
     { class: "import-addition", range: { start: addition, end: addition } },
     {
       class: "reference-rewrite",
-      range: { start: A18_MARKER_START, end: A18_MARKER_END },
+      range: { start: arm.rewrite.start, end: arm.rewrite.end },
     },
   ];
   return edits.sort(
@@ -5866,7 +6210,7 @@ async function a18PreviewEntry(
   workspace: TestWorkspace,
   context: string,
 ): Promise<PreviewFileEntry> {
-  const label = `${context} \`${A18_ARGV.join(" ")} --preview --json\` before the real move`;
+  const label = `${context} \`${A18_MOVE_LABEL} --preview --json\` before the real move`;
   const report = decodePreviewReport(
     await runJson(
       product,
@@ -5883,12 +6227,15 @@ async function a18PreviewEntry(
         `(SPEC 6.6, 12.7); findings: ${JSON.stringify(report.findings)}`,
     );
   }
-  const entry = report.files.find((candidate) => candidate.file === A18_APP);
+  const entries = report.files.filter(
+    (candidate) => candidate.file === A18_APP,
+  );
+  const entry = entries.length === 1 ? entries[0] : undefined;
   if (entry === undefined) {
     fail(
-      `${label}: \`files\` holds an entry for ${A18_APP}, a file the ` +
-        `operation rewrites — its marker rewrite, import addition, and ` +
-        `import removal (SPEC 6.6, 12.7); got ` +
+      `${label}: \`files\` holds exactly one entry for ${A18_APP}, a file ` +
+        `the operation rewrites — its occurrence rewrite, import addition, ` +
+        `and import removal (SPEC 6.6, 12.7); got ` +
         `[${report.files.map((candidate) => JSON.stringify(candidate.file)).join(", ")}]`,
     );
   }
@@ -5897,16 +6244,21 @@ async function a18PreviewEntry(
 
 /**
  * Preview parity (SPEC 6.6, 12.7): `src/c.ts`'s edits are exactly one
- * `reference-rewrite` spanning the marker, one `import-addition` at the
- * offset the real operation then used — either pre-operation offset where
- * the composed position admits two — and one `import-removal` spanning the
+ * `reference-rewrite` spanning the occurrence, one zero-length
+ * `import-addition` at the origin declaration's removal's start or at its
+ * end — the one composed position those two make, where the real operation
+ * inserts the declaration (the bytes pinned there), the choice between
+ * them 6.5's latitude (T6.6-4(b)) — and one `import-removal` spanning the
  * origin declaration with its adjunct drop, in 12.7's order.
  */
 function a18AssertPreviewEdits(
   entry: PreviewFileEntry,
-  candidates: readonly (readonly PreviewEdit[])[],
+  arm: A18Arm,
   context: string,
 ): void {
+  const candidates = [arm.removal.start, arm.removal.end].map((offset) =>
+    a18PreviewEdits(arm, offset),
+  );
   const actual = entry.edits.map((edit) => ({
     class: edit.class,
     range: { start: edit.range.start, end: edit.range.end },
@@ -5918,177 +6270,179 @@ function a18AssertPreviewEdits(
   fail(
     `${context} preview: ${A18_APP}'s edits are exactly ` +
       candidates.map((candidate) => JSON.stringify(candidate)).join(" or ") +
-      ` — one \`reference-rewrite\` spanning the marker's occurrence (5.7), ` +
-      `one \`import-addition\` zero-length at the pre-operation offset the ` +
-      `real operation then used (the removal's start and its end composing ` +
-      `to one position, T6.6-4(b)), one \`import-removal\` spanning the ` +
-      `origin declaration with its adjunct drop, ordered by range start, ` +
-      `then range end, then class-name bytes (SPEC 6.6, 12.7; T6.6-4); ` +
-      `got ${shown}`,
+      ` — one \`reference-rewrite\` spanning the ` +
+      `${arm.shape === "marker" ? "marker" : "call"}'s occurrence (5.7), ` +
+      `one zero-length \`import-addition\` at the origin declaration's ` +
+      `removal's start or at its end (the one composed position those two ` +
+      `make, where the real operation inserts the declaration; T6.6-4(b)), ` +
+      `and one \`import-removal\` spanning the origin declaration with its ` +
+      `adjunct drop, ordered by range start, then range end, then ` +
+      `class-name bytes (SPEC 6.6, 12.7; T6.6-4); got ${shown}`,
+  );
+}
+
+/**
+ * Stage one arm, take the preview, run the move, and assert its outcome:
+ * `src/c.ts` is its composed post-move bytes with exactly the declaration
+ * the lacked binding requires added where the origin declaration's line
+ * stood, the origin and target files are as composed, the preview's edits
+ * for `src/c.ts` are the move's, the arm's edge set is exact, `check` and
+ * `build` are clean, and the file compiles clean (H-2).
+ */
+async function runA18Arm(product: ProductBinding, arm: A18Arm): Promise<void> {
+  const context = `T6.5-18 ${arm.label}`;
+  await withWorkspace(
+    {
+      [A18_ORIGIN]: A18_ORIGIN_BEFORE,
+      [A18_TARGET]: A18_TARGET_BEFORE,
+      [A18_APP]: arm.code,
+    },
+    async (workspace) => {
+      // Premise: a valid workspace — so a later failure is the move's, not
+      // the staging's.
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["build", "--json"],
+        `${context} premise \`build --json\` over the staging — clean: ` +
+          arm.summary,
+      );
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        `${context} premise \`check --json\` after that build — clean: the ` +
+          `staging is valid and nothing is stale (SPEC 12.2, 14.10)`,
+      );
+      // Fixture self-check through H-2's standard-tooling channel: the
+      // staging compiles clean, so a later diagnostic is the move's.
+      assertNoCompileErrors(
+        await ConsumerProject.load({
+          rootDir: workspace.root,
+          rootFiles: [A18_APP],
+        }),
+        `${context} premise: ${A18_APP} compiles clean before the move ` +
+          `under standard tooling — ${arm.summary}; the generated modules ` +
+          `resolve (SPEC 4, 13.1; a fixture self-check)`,
+      );
+      if (arm.before !== undefined) {
+        assertEdgeSetEqual(
+          await queryEdgesOfKind(product, workspace, arm.before.kind, context),
+          arm.before.edges,
+          `${context} premise: the complete \`${arm.before.kind}\` edge set ` +
+            `before the move — ${arm.before.why}`,
+        );
+      }
+
+      // The preview first: it modifies nothing (6.6), and its edits for
+      // `src/c.ts` are asserted once the real operation's bytes are.
+      const previewEntry = await a18PreviewEntry(product, workspace, context);
+
+      await expectExit(
+        product,
+        workspace,
+        [...A18_ARGV],
+        0,
+        `${context} \`${A18_MOVE_LABEL}\` — a valid move over the workspace ` +
+          `the premise \`build\` accepted succeeds (SPEC 6.5)`,
+      );
+
+      const actual = await workspace.readBytes(A18_APP);
+      const rewrite = a18ReadRewrite(
+        arm,
+        Buffer.from(actual).toString("utf8"),
+        context,
+      );
+      // T6.5-8's diff-isolated discipline: the file composed without the
+      // added declaration, the single added run isolated by diff and read
+      // as the exact declaration under 6.5's line discipline.
+      const readings = assertExactDeclarationInsertion(
+        {
+          rel: A18_APP,
+          base: Buffer.from(a18Compose(arm, rewrite.occurrence), "utf8"),
+          actual,
+          declaration: rewrite.declaration,
+        },
+        `${context}: ${A18_APP} after the move is its composed post-move ` +
+          `bytes — the origin declaration removed with its line (its last ` +
+          `use gone; SPEC 6.5, 3), the occurrence's span replaced by ` +
+          `${JSON.stringify(rewrite.occurrence)} (5.7), every other byte ` +
+          `as staged — with exactly one declaration added, binding the ` +
+          `lacked binding: ${JSON.stringify(rewrite.declaration)} followed ` +
+          `by U+000A (single spaces, no statement terminator, the specifier ` +
+          `double-quoted in its canonical relative spelling from src/; SPEC ` +
+          `6.5, 2.1, 6.4, 3; T6.5-8)`,
+      );
+      // Bytes are the only observable: the pin holds exactly when the run
+      // reads as the disciplined declaration where the origin
+      // declaration's line stood — the start of line 2 of the composed
+      // text, directly after the target module's declaration.
+      const pinned = arm.removal.start;
+      if (!readings.some((reading) => reading.offset === pinned)) {
+        fail(
+          `${context}: ${A18_APP} — the added declaration ` +
+            `${JSON.stringify(rewrite.declaration)} followed by U+000A must ` +
+            `stand where the origin declaration's line stood, directly after ` +
+            `the target module's declaration (offset ${String(pinned)} of the ` +
+            `composed text, the start of its line 2): the removal's start ` +
+            `and its end make that one composed position, each following a ` +
+            `statement's end and timely, while every later line start is ` +
+            `untimely, a statement other than an import declaration standing ` +
+            `between it and the origin declaration — the file's one ` +
+            `line-start admissible offset, taken over any other (SPEC 6.5, 3; ` +
+            `T6.5-8's discipline); the inserted run reads instead at ` +
+            `composed offset(s) ` +
+            `${readings.map((reading) => String(reading.offset)).join(", ")}`,
+        );
+      }
+      await assertFileBytes(
+        workspace.path(A18_ORIGIN),
+        A18_ORIGIN_AFTER,
+        `${context}: ${A18_ORIGIN} after the move — the moved construct ` +
+          `deleted in place, the line its deletion empties dropped with its ` +
+          `terminator, the blank line that was blank before kept, the ` +
+          `sibling untouched (SPEC 6.5, 3; H-4, normalizing nothing)`,
+      );
+      await assertFileBytes(
+        workspace.path(A18_TARGET),
+        A18_TARGET_AFTER,
+        `${context}: ${A18_TARGET} after the move — the re-identified moved ` +
+          `text appended after the final terminator plus U+000A, otherwise ` +
+          `byte-identical (SPEC 6.5; H-4, normalizing nothing)`,
+      );
+
+      a18AssertPreviewEdits(previewEntry, arm, context);
+
+      assertEdgeSetEqual(
+        await queryEdgesOfKind(product, workspace, arm.after.kind, context),
+        arm.after.edges,
+        `${context}: the complete \`${arm.after.kind}\` edge set after the ` +
+          `move — ${arm.after.why}`,
+      );
+      await assertCleanAfterMove(product, workspace, arm.clean, context);
+      // A fresh project: the language service snapshots files on first
+      // access, and the move rewrote them.
+      assertNoCompileErrors(
+        await ConsumerProject.load({
+          rootDir: workspace.root,
+          rootFiles: [A18_APP],
+        }),
+        `${context}: ${A18_APP} after the move compiles with no ` +
+          `diagnostics under standard tooling — ${arm.compiles}`,
+      );
+    },
+    SPEC_AND_CODE_CONFIG,
   );
 }
 
 const T6_5_18 = defineProductTest({
   id: "T6.5-18",
   title:
-    "shadow-aware binding choice: over `specs/origin.mdx` holding `x`, `specs/target.mdx` holding `z`, and `src/c.ts` importing both modules (`O`, `T`) with a module-scope marker `T.z` and a function `f` holding `const T = 1` beside the marker `O.x` — a valid workspace (`build --json` clean, the file compiling clean under standard tooling, the `references` edges `src/c.ts#f` → `specs/origin.mdx#x` and `src/c.ts` → `specs/target.mdx#z`) — `move specs/origin.mdx#x specs/target.mdx#y` roots the rewritten marker at no binding of the target module the file holds unshadowed at the occurrence (`T` is shadowed in `f`, SPEC 4.5) and so adds a declaration binding a fresh `<F>` (value unpinned, never `T`): asserted under T6.5-8's diff-isolated discipline against the file composed without the added import — the single added byte run exactly `import <F> from \"../specs/target.xspec\"` followed by U+000A at a line-start offset, `<F>` read off the rewritten marker, the marker's occurrence span (5.7) replaced by `<F>.y`, the origin declaration removed with its line (3), the `T` declaration and `T.z` byte-for-byte, no other byte changed — the origin and target files byte-equal to their compositions; the `--preview` taken before the move reporting for `src/c.ts` exactly one `reference-rewrite` spanning the marker, one `import-addition` at the offset the real operation then used, and one `import-removal` spanning the origin declaration with its adjunct drop (6.6, 12.7; T6.6-4); then `query edges` reporting `src/c.ts#f` → `specs/target.mdx#y` beside `T.z`'s edge as before, `check --json` and `build --json` clean (no 14.7, no 14.15: two imports of one module under distinct identifiers collide with nothing), and the file compiling clean (H-2) — a product rooting by name at the shadowed `T` rewrites the marker to `T.y`, adds no import, and records no edge from `f`, silent to itself (SPEC 6.5, 4.5, 2.1, 3, 5.7, 6.6, 12.7)",
+    "shadow-aware, value-level binding choice: over `specs/origin.mdx` holding `x` and `specs/target.mdx` holding `z`, `move specs/origin.mdx#x specs/target.mdx#y` roots each rewritten spelling in `src/c.ts` at a value-level binding of the target module that no local declaration shadows at the occurrence, and otherwise at the binding of a declaration it adds — four arms, each a valid workspace before the move (`build` and `check` clean, the file compiling clean under standard tooling): the base arm (`import T`, then `import O`, the module-scope marker `T.z`, and `f` holding `const T = 1` beside the marker `O.x`) gains `import <F> from \"../specs/target.xspec\"`, `<F>` never `T`, the marker becoming `<F>.y`, `query edges` reporting `src/c.ts#f` → `specs/target.mdx#y` beside `T.z`'s edge as before; (a) the target's default bound type-only (`import type T`, then `import O`, `let v: typeof T.z`, `O.x`) becomes exactly `import type T`, `import <F>`, `let v: typeof T.z`, `<F>.y`, with the marker's `references` edge from `src/c.ts`; (b) the target's `text` bound type-only (`import T, { type text as tt }`, then `import O, { text as textO }`, `T.z`, `textO(O.x)`) gains exactly `import { text as <Y> } from \"../specs/target.xspec\"` (or `{ text }`), the call becoming `<Y>(T.y)`, with its `embeds` edge from `src/c.ts`; and the callee shadow (`import T, { text as tt }`, then `import O, { text as t }`, `T.z`, and `f` holding `const tt = 1` beside `t(O.x)`) gains the same declaration, the call becoming `<Y>(T.y)`, with its `embeds` edge from `src/c.ts#f` — `<Y>` never `T` or `tt`; in each the origin declaration removed with its line and the single added run exactly the declaration followed by U+000A where that line stood, directly after the target module's declaration — the file's one line-start admissible offset — no other byte changed (T6.5-8's diff-isolated discipline), the origin and target files byte-equal to their compositions, `check` and `build` clean afterward, the file compiling clean (H-2), and the `--preview` taken before the move reporting for `src/c.ts` exactly one `reference-rewrite` spanning the marker or the call, one `import-addition` at the origin declaration's removal's start or end, and one `import-removal` spanning it with its adjunct drop (6.6, 12.7; T6.6-4) — a product rooting at the shadowed or type-only binding writes `T.y` or `tt(T.y)`, adds no import, and fails the byte contract (SPEC 6.5, 4, 4.3, 4.5, 4.6, 2.1, 3, 5.7, 6.6, 12.7)",
   run: async (product) => {
-    const context = "T6.5-18";
-    await withWorkspace(
-      {
-        [A18_ORIGIN]: A18_ORIGIN_BEFORE,
-        [A18_TARGET]: A18_TARGET_BEFORE,
-        [A18_APP]: A18_APP_BEFORE,
-      },
-      async (workspace) => {
-        // Premise: a valid workspace — the inner-scope `T` shadows the
-        // import within `f` and is no same-scope collision (14.15), `O.x`
-        // resolves through the unshadowed `O` — so a later failure is the
-        // move's, not the staging's.
-        await expectFindingFreeReport(
-          product,
-          workspace,
-          ["build", "--json"],
-          `${context} premise \`build --json\` over the staging — clean: ` +
-            `the local \`const T = 1\` in \`f\` shadows the import there ` +
-            `(SPEC 4.5; T4.5-4) and is no same-scope collision of 14.15 ` +
-            `(T4.5-8), and \`O.x\` resolves through the unshadowed \`O\``,
-        );
-        // Fixture self-check through H-2's standard-tooling channel: the
-        // staging compiles clean, so a later diagnostic is the move's.
-        assertNoCompileErrors(
-          await ConsumerProject.load({
-            rootDir: workspace.root,
-            rootFiles: [A18_APP],
-          }),
-          `${context} premise: ${A18_APP} compiles clean before the move ` +
-            `under standard tooling — the shadowing local is valid ` +
-            `TypeScript and the generated modules resolve (SPEC 4, 13.1; a ` +
-            `fixture self-check)`,
-        );
-        assertEdgeSetEqual(
-          await queryEdgesOfKind(product, workspace, "references", context),
-          A18_EDGES_BEFORE,
-          `${context} premise: the complete \`references\` edge set before ` +
-            `the move — \`O.x\` through the unshadowed \`O\`, attributed ` +
-            `to \`f\`, and \`T.z\` attributed to the file (SPEC 4.5, 4.6, ` +
-            `5.2)`,
-        );
-
-        // The preview first: it modifies nothing (6.6), and its edits for
-        // `src/c.ts` are asserted once the real operation's offset is known.
-        const previewEntry = await a18PreviewEntry(product, workspace, context);
-
-        await expectExit(
-          product,
-          workspace,
-          [...A18_ARGV],
-          0,
-          `${context} \`${A18_ARGV.join(" ")}\` — a valid move over the ` +
-            `workspace the premise \`build\` accepted succeeds (SPEC 6.5)`,
-        );
-
-        const actual = await workspace.readBytes(A18_APP);
-        const text = Buffer.from(actual).toString("utf8");
-        const root = a18RewrittenMarkerRoot(text, context);
-        if (root === "T") {
-          fail(
-            `${context}: the marker in \`f\` is rewritten to \`T.y\` — ` +
-              `rooted by name at \`T\`, which the local \`const T = 1\` ` +
-              `shadows at the occurrence, so the chain is no spec reference ` +
-              `(SPEC 4.5): 6.5 roots a rewritten spelling at a binding the ` +
-              `file already holds only where no local declaration shadows ` +
-              `it at the occurrence, and otherwise at the binding of the ` +
-              `declaration it adds — a fresh identifier equal to \`T\` ` +
-              `under no reading, the module-scope import and the local of ` +
-              `\`f\` both binding it (SPEC 6.5, 2.1; T6.5-9); the file reads ` +
-              `${JSON.stringify(text)}`,
-          );
-        }
-        // T6.5-8's diff-isolated discipline: the file composed without the
-        // added import, the single added run isolated by diff and read at
-        // every admissible offset, a line-start one alone accepted.
-        const reading = assertAddedImportInsertion(
-          {
-            rel: A18_APP,
-            base: Buffer.from(a18AppBase(root), "utf8"),
-            actual,
-            importerDir: "src",
-            expectedModule: A18_TARGET_MODULE,
-            identifier: root,
-          },
-          `${context}: ${A18_APP} after the move is its composed post-move ` +
-            `bytes — the origin declaration removed with its line (its only ` +
-            `use gone; SPEC 6.5, 3), the marker's occurrence span replaced ` +
-            `by \`${root}.y\` (5.7), the \`T\` declaration and \`T.z\` ` +
-            `byte-for-byte — with exactly one import of the target module ` +
-            `added as a line of its own: byte-exactly 6.5's spelling ` +
-            `(single spaces, no statement terminator, the specifier ` +
-            `double-quoted in its canonical relative spelling from src/) ` +
-            `followed by U+000A at a line-start offset, binding the fresh ` +
-            `identifier the rewritten marker is rooted at, no other byte ` +
-            `changed (SPEC 6.5, 2.1, 6.4, 3; T6.5-8)`,
-        );
-        await assertFileBytes(
-          workspace.path(A18_ORIGIN),
-          A18_ORIGIN_AFTER,
-          `${context}: ${A18_ORIGIN} after the move — the moved construct ` +
-            `deleted in place, the line its deletion empties dropped with ` +
-            `its terminator, the blank line that was blank before kept, the ` +
-            `sibling untouched (SPEC 6.5, 3; H-4, normalizing nothing)`,
-        );
-        await assertFileBytes(
-          workspace.path(A18_TARGET),
-          A18_TARGET_AFTER,
-          `${context}: ${A18_TARGET} after the move — the re-identified ` +
-            `moved text appended after the final terminator plus U+000A, ` +
-            `otherwise byte-identical (SPEC 6.5; H-4, normalizing nothing)`,
-        );
-
-        // Preview parity: the addition's offset is the one the real
-        // operation used, mapped back to pre-operation coordinates.
-        a18AssertPreviewEdits(
-          previewEntry,
-          a18PreOperationOffsets(reading.offset, `${root}.y`).map(
-            a18PreviewEdits,
-          ),
-          context,
-        );
-
-        assertEdgeSetEqual(
-          await queryEdgesOfKind(product, workspace, "references", context),
-          A18_EDGES_AFTER,
-          `${context}: the complete \`references\` edge set after the move ` +
-            `— the rewritten marker reported from \`src/c.ts#f\` under the ` +
-            `moved node's new identity through the fresh binding, beside ` +
-            `\`T.z\`'s edge as before the move; a chain rooted by name at ` +
-            `the shadowed \`T\` records no edge (SPEC 6.5, 4.5, 4.6, 5.2)`,
-        );
-        await assertCleanAfterMove(
-          product,
-          workspace,
-          "the added import and the rewritten marker resolve (no 14.7), " +
-            "and two imports binding one module under distinct identifiers " +
-            "collide with nothing (2.1, 14.15)",
-          context,
-        );
-        // A fresh project: the language service snapshots files on first
-        // access, and the move rewrote them.
-        assertNoCompileErrors(
-          await ConsumerProject.load({
-            rootDir: workspace.root,
-            rootFiles: [A18_APP],
-          }),
-          `${context}: ${A18_APP} after the move compiles with no ` +
-            `diagnostics under standard tooling — the added import binds an ` +
-            `identifier colliding with no binding of the file (TS2440, ` +
-            `TS2300), and the rewritten marker resolves against the ` +
-            `regenerated modules through it, never through the local ` +
-            `\`const T = 1\` (SPEC 6.5, 4.5; H-2)`,
-        );
-      },
-      SPEC_AND_CODE_CONFIG,
-    );
+    for (const arm of A18_ARMS) {
+      await runA18Arm(product, arm);
+    }
   },
 });
 

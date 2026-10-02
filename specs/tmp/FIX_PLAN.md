@@ -38,19 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 38 — T6.5-18: fixture order and placement; the type-only and callee-shadow arms (TEST-SPEC L297; A25)
-
-**Where.** `test/suite/registry/section-6.5-iii.ts`: `a18App` and the `A18_*` section, which stage O first today.
-
-**Change.** Exact bytes at L297.
-- *Order.* `import T`, then `import O`. The added run stands exactly where O's line stood, directly after T's line.
-- *Type-only (a).* `import type T`, `import O`, `let v: typeof T.z`, and `O.x` give the exact file with `import <F>` added and `<F>.y`.
-- *Type-only (b).* `import T, { type text as tt }` with `textO(O.x)` gives an added `import { text as <Y> }` and the call `<Y>(T.y)`.
-- *Callee shadow.* `const tt = 1` in `f` gives an added `import { text as <Y> }` and the call `<Y>(T.y)`.
-- *Each arm:* clean `build` and `check`, a clean compile, the edges, and preview parity.
-
-**Checks.** S-9 and S-7 pass. T6.5-18 against the built product.
-
 ### Task 39 — Register T6.5-20, arms (a) and (b): destination refusals over derived paths (TEST-SPEC L299; SPEC 6.5, 13.4, 14; A26, A30)
 
 **Depends on.** None. Tasks 40 and 41 add arms (c) through (e).
