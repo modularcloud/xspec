@@ -268,6 +268,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { runProduct } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -421,15 +422,25 @@ async function withWorkspace<T>(
   }
 }
 
-// The canonical valid configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// The canonical valid configuration (SPEC 7): exactly one spec group. The
+// arms after each body's first stage it in workspaces created after that
+// body's first product invocation — T12.7-1's review-refusal and byte-form
+// paths arms, T12.7-2's refusal-ordering and document-forms arms, T12.7-3's
+// usage-error and environment-refusal arms — so S-7's sweep never reaches
+// those stagings against the stub: a TypeScript staged-source record
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), staged at
+// every site, the first arms' too.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T12.7-1/T12.7-2/T12.7-3 xspec.config.ts — one spec group (every arm staging it after its body's first invocation)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // ---------------------------------------------------------------------------
 // Arm A — located findings: path null, location order (file bytes; start)
@@ -561,7 +572,12 @@ async function runLocatedFindingsArm(product: ProductBinding): Promise<void> {
 // Arm B — the policy finding's contractual identities (14.12)
 // ---------------------------------------------------------------------------
 
-const POLICY_CONFIG = `import { defineConfig } from "xspec"
+// The arm follows T12.7-1's first product invocation, so its configuration
+// is a TypeScript staged-source record (helpers/staged-ts.ts; S-9's
+// TypeScript and timing clauses).
+const POLICY_CONFIG = stagedTs(
+  "T12.7-1 policy-finding arm xspec.config.ts — one spec group under the forbidden rule no-self-deps",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -576,7 +592,8 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 // The one violation: `p` depends locally on `a` (SPEC 2.2 string form);
 // both endpoints are `main` nodes, so the forbidden rule matches exactly
@@ -669,7 +686,13 @@ async function runPolicyFindingArm(product: ProductBinding): Promise<void> {
 
 const FOREIGN_STEM = "FOREIGNMOD";
 
-const CROSS_CONFIG = `import { defineConfig } from "xspec"
+// The arm follows T12.7-1's first product invocation, so its configuration
+// and code source are TypeScript staged-source records
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), the code
+// source's inline expression hoisted into a module-level record below.
+const CROSS_CONFIG = stagedTs(
+  "T12.7-1 cross-module arm xspec.config.ts — one spec group and one code group (src/**/*.ts)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -679,13 +702,18 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 const CROSS_IMPORT_PREFIX =
   'import HOME from "../specs/HOMEMOD.xspec";\n' +
   'import { text as textF } from "../specs/FOREIGNMOD.xspec";\n' +
   "\n";
 const CROSS_STATEMENT = "textF(HOME.first);";
+const T12_7_1_CROSS_APP = stagedTs(
+  "T12.7-1 cross-module arm src/app.ts (HOMEMOD's node passed to FOREIGNMOD's text export)",
+  CROSS_IMPORT_PREFIX + CROSS_STATEMENT + "\n",
+);
 
 // The arm follows T12.7-1's first product invocation, so S-7's sweep never
 // reaches its workspace against the stub: its two spec sources are
@@ -707,7 +735,7 @@ async function runCrossModuleArm(product: ProductBinding): Promise<void> {
         "xspec.config.ts": CROSS_CONFIG,
         "specs/HOMEMOD.mdx": T12_7_1_HOMEMOD,
         "specs/FOREIGNMOD.mdx": T12_7_1_FOREIGNMOD,
-        "src/app.ts": CROSS_IMPORT_PREFIX + CROSS_STATEMENT + "\n",
+        "src/app.ts": T12_7_1_CROSS_APP,
       },
     },
     async (workspace) => {
@@ -1146,8 +1174,14 @@ async function runBytePathsArm(product: ProductBinding): Promise<void> {
 // with its source range (SPEC 10.7, 1.7). Every range the payload carries is
 // asserted: a present payload node without a range, or with a range other
 // than its construct's, fails.
+//
+// The arm follows T12.7-1's first product invocation, so its configuration
+// and code source are TypeScript staged-source records
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses).
 
-const UR_CONFIG = `import { defineConfig } from "xspec"
+const UR_CONFIG = stagedTs(
+  "T12.7-1 unpinned-surface ranges arm xspec.config.ts — one spec group and one code group (src/**/*.ts)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1157,7 +1191,8 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 const UR_FILE = "specs/A.mdx";
 const UR_ROOT_ID = UR_FILE;
@@ -1220,6 +1255,12 @@ const UR_UNIT_TEXT = "function unit() {\n  A.top.leaf;\n}";
 const UR_UNIT_RANGE = UR_CODE.add(UR_UNIT_TEXT);
 UR_CODE.add("\n");
 const UR_CODE_SOURCE = UR_CODE.source;
+// The code source staged as the arm's initial src/ref.ts: a TypeScript
+// staged-source record made from the string the fixture self-check slices.
+const T12_7_1_UR_CODE = stagedTs(
+  "T12.7-1 unpinned-surface ranges arm src/ref.ts (the named unit referencing top.leaf)",
+  UR_CODE_SOURCE,
+);
 
 /** Every node this fixture stages, with its construct's byte range. */
 const UR_RANGES: ReadonlyMap<string, SourceRange> = new Map([
@@ -1374,7 +1415,7 @@ async function runUnpinnedRangesArm(product: ProductBinding): Promise<void> {
       files: {
         "xspec.config.ts": UR_CONFIG,
         [UR_FILE]: T12_7_1_UR_BASELINE,
-        [UR_CODE_FILE]: UR_CODE_SOURCE,
+        [UR_CODE_FILE]: T12_7_1_UR_CODE,
       },
     },
     async (workspace) => {
@@ -1915,9 +1956,14 @@ async function runRefusalOrderingArm(product: ProductBinding): Promise<void> {
 // `check` reports two findings identical in code (policy-violation),
 // locations ([]), and path (null), ordered by identities element-wise — the
 // rule name, their first element. The rules are declared in the OPPOSITE
-// order ("rb" first), so a configuration-order emission fails.
+// order ("rb" first), so a configuration-order emission fails. The arm
+// follows T12.7-2's first product invocation, so its configuration is a
+// TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses).
 
-const IDS_CONFIG = `import { defineConfig } from "xspec"
+const IDS_CONFIG = stagedTs(
+  "T12.7-2 identities-ordering arm xspec.config.ts — two forbidden rules rb and ra with identical selectors",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1938,7 +1984,8 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 const IDS_FILE = "specs/P.mdx";
 // T12.7-1's policy-finding source, byte for byte: that one record.
@@ -2526,9 +2573,13 @@ export default defineConfig({
  * (SPEC 7): an unknown top-level key, a glob resolving outside the
  * workspace root, and an unknown `markdown` field — "a configuration file
  * with several distinct defects" (T12.7-3), each a configuration error on
- * its own.
+ * its own. Staged by the single-finding arm, after T12.7-3's first product
+ * invocation: a TypeScript staged-source record (helpers/staged-ts.ts; S-9's
+ * TypeScript and timing clauses), well-formed.
  */
-const ERR_MULTI_DEFECT_CONFIG = `import { defineConfig } from "xspec"
+const ERR_MULTI_DEFECT_CONFIG = stagedTs(
+  "T12.7-3 xspec.config.ts — three independent 14.14 defects in one well-formed file (the single-finding arm)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   definitelyUnknownKey: true,
@@ -2538,17 +2589,27 @@ export default defineConfig({
   },
   markdown: { emit: true, definitelyUnknownField: false }
 })
-`;
+`,
+);
 
 /**
  * Not well-formed TypeScript — the "malformed" `--config` target of
  * T12.7-3's sibling-directory staging (SPEC 14 condition 14: "a
  * configuration file that is not well-formed TypeScript"), one defect by
  * the T7-2 attribution discipline: the file is not a program at all, so
- * the refusal is attributable to nothing but its form.
+ * the refusal is attributable to nothing but its form. Staged after T12.7-3's
+ * first product invocation — by the sibling-directory arm's `file()` at
+ * `cfg/xspec.config.ts` and as the symlink-working-directory arm's
+ * `a/xspec.config.ts` — so S-7's sweep never reaches it against the stub: a
+ * TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+ * and timing clauses), declared unparseable (14.20); the record carries the
+ * declaration at both sites.
  */
-const ERR_MALFORMED_CONFIG =
-  "this is not TypeScript ((( and so not a configuration\n";
+const ERR_MALFORMED_CONFIG = stagedTs(
+  "T12.7-3 cfg/xspec.config.ts and a/xspec.config.ts — not well-formed TypeScript (the malformed configuration)",
+  "this is not TypeScript ((( and so not a configuration\n",
+  "unparseable",
+);
 
 /**
  * T12.7-3's sibling-directory staging (T11.6-1's form): the invocation
@@ -2794,10 +2855,9 @@ async function runErrorConfigPathsArm(product: ProductBinding): Promise<void> {
           "non-canonically and absolutely: a build failing at " +
           "configuration load modifies nothing (SPEC 12.1)",
       );
-      // S-9: the malformed configuration is not well-formed TypeScript (14.20).
-      await workspace.file(ERR_SIBLING_CONFIG_FILE, ERR_MALFORMED_CONFIG, {
-        ts: "unparseable",
-      });
+      // S-9: the malformed configuration is not well-formed TypeScript
+      // (14.20); its record carries the `unparseable` declaration.
+      await workspace.file(ERR_SIBLING_CONFIG_FILE, ERR_MALFORMED_CONFIG);
       await assertLeavesUnchanged(
         workspace.root,
         () =>
@@ -3097,11 +3157,11 @@ async function runErrorSymlinkWorkingDirectoryArm(
 ): Promise<void> {
   await withWorkspace(
     {
+      // S-9: the malformed configuration is not well-formed TypeScript
+      // (14.20); its record carries the `unparseable` declaration.
       files: { "a/xspec.config.ts": ERR_MALFORMED_CONFIG },
       dirs: ["a/b"],
       symlinks: { L: "a/b" },
-      // S-9: the malformed configuration is not well-formed TypeScript (14.20).
-      ts: { unparseable: ["a/xspec.config.ts"] },
     },
     async (workspace) => {
       await expectAnchoredConfigurationError(

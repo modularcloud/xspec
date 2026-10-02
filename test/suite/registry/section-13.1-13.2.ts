@@ -68,6 +68,7 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import {
   assertCompileErrorAt,
   assertNoCompileErrors,
@@ -539,6 +540,14 @@ export default defineConfig({
 `;
 }
 
+// Arm (b)'s configuration: its workspace follows arm (a)'s invocation, so
+// S-7's sweep never reaches it against the stub — a TypeScript staged-source
+// record (helpers/staged-ts.ts; S-9's TypeScript and timing clauses).
+const T13_2_1_OUTDIR_CONFIG = stagedTs(
+  "T13.2-1 (b) xspec.config.ts — Markdown emission under outDir docs",
+  emissionConfig('{ emit: true, outDir: "docs" }'),
+);
+
 // A section-3-representative source — an import (removed, line dropped), a
 // tag with props (removed), an own-line MDX comment (dropped with its line),
 // a mid-line `text(...)` embedding (replaced with the target's subtree text),
@@ -632,7 +641,7 @@ const T13_2_1 = defineProductTest({
     // markdown.outDir — redirected, not duplicated).
     await withWorkspace(
       {
-        "xspec.config.ts": emissionConfig('{ emit: true, outDir: "docs" }'),
+        "xspec.config.ts": T13_2_1_OUTDIR_CONFIG,
         ...EMISSION_SOURCES,
       },
       async (workspace) => {

@@ -170,6 +170,7 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type {
   DirectorySnapshot,
   SnapshotEntry,
@@ -196,8 +197,15 @@ import {
 
 // One spec group plus one coverage profile (SPEC 7, 7.4): `coverage` and
 // `review create --coverage` need a configured profile, and `targets: "all"`
-// keeps the required set at every non-root node (SPEC 8.1).
-const GRAPH_CONFIG = `import { defineConfig } from "xspec"
+// keeps the required set at every non-root node (SPEC 8.1). T13.3-2's
+// record-discipline workspace, T13.3-3's garbage-journal workspace, and
+// T13.3-4's two-directory workspaces stage it after their body's first
+// product invocation, so S-7's sweep never reaches those stagings against
+// the stub: a TypeScript staged-source record (helpers/staged-ts.ts; S-9's
+// TypeScript and timing clauses), staged at every site.
+const GRAPH_CONFIG = stagedTs(
+  "T13.3-2/T13.3-3/T13.3-4 xspec.config.ts — one spec group and the coverage profile p (targets all)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -213,7 +221,8 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace with the given files, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
@@ -2194,7 +2203,11 @@ const T13_3_3_GATE_T = stagedMdx(
 // The obstructed-write-path workspace: emission redirected under
 // `markdown.outDir`, so a plain file at `mdout` obstructs the emit write
 // path `mdout/specs/A.md` at its first component (SPEC 7.3, 13.2, 13.4).
-const T13_3_3_OUTDIR_CONFIG = `import { defineConfig } from "xspec"
+// The workspace follows the body's first product invocation: a TypeScript
+// staged-source record (S-9).
+const T13_3_3_OUTDIR_CONFIG = stagedTs(
+  "T13.3-3 obstructed-write-path workspace xspec.config.ts — emission under outDir mdout, the coverage profile p",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2211,7 +2224,8 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 /** Lines in a line-oriented file, either final-line convention (T6.1-3). */
 function journalLineCount(bytes: Uint8Array): number {

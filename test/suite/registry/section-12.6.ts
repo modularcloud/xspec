@@ -62,6 +62,7 @@ import {
 } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
@@ -90,8 +91,13 @@ export default defineConfig({
 // The invalid configuration: SPECS_ONLY_CONFIG with exactly one deviation —
 // an unknown top-level key (14.14; the T7-2 single-deviation discipline), so
 // `build`'s refusal is attributable to the configuration alone while the
-// staged source stays valid.
-const INVALID_CONFIG = `import { defineConfig } from "xspec"
+// staged source stays valid. T12.6-2 stages it in a workspace created after
+// its first product invocation (context 3), so S-7's sweep never reaches it
+// against the stub: a TypeScript staged-source record (helpers/staged-ts.ts;
+// S-9's TypeScript and timing clauses), well-formed.
+const INVALID_CONFIG = stagedTs(
+  "T12.6-2 xspec.config.ts — an unknown top-level key (the invalid configuration, context 3)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -99,12 +105,21 @@ export default defineConfig({
   },
   bogus: true
 })
-`;
+`,
+);
 
 // A malformed `--config` target: not well-formed TypeScript, so any product
 // that consults the named file at all fails on it (14.14) — `version` must
-// accept the flag and never consult the file (SPEC 12.6, 12.0).
-const MALFORMED_CONFIG_TARGET = "this is ( not TypeScript {{{\n";
+// accept the flag and never consult the file (SPEC 12.6, 12.0). T12.6-2
+// stages it in a workspace created after its first product invocation: a
+// TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses), declared unparseable (14.20) — the record carries the
+// declaration.
+const MALFORMED_CONFIG_TARGET = stagedTs(
+  "T12.6-2 malformed-config.ts — not well-formed TypeScript (the malformed --config target)",
+  "this is ( not TypeScript {{{\n",
+  "unparseable",
+);
 
 // A minimal single-section source: one node `a` under the file root. T12.6-2
 // stages it again after its first product invocation (context 3), so S-7's
@@ -350,10 +365,9 @@ const T12_6_2 = defineProductTest({
     // malformed file, each accepted and never consulted (SPEC 12.6, 12.0).
     await withWorkspace(
       {
-        files: { "malformed-config.ts": MALFORMED_CONFIG_TARGET },
         // S-9: the malformed configuration is not well-formed TypeScript
-        // (14.20) — declared unparseable.
-        ts: { unparseable: ["malformed-config.ts"] },
+        // (14.20); its record carries the `unparseable` declaration.
+        files: { "malformed-config.ts": MALFORMED_CONFIG_TARGET },
       },
       async (workspace) => {
         // Staging premise, pinned in-test: no configuration is reachable

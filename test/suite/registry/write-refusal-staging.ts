@@ -73,6 +73,7 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type {
   ProductBinding,
   RunningProduct,
@@ -158,8 +159,12 @@ export interface RefusalFixture {
 // helpers/staged-mdx.ts) named with every test that prepares the fixture —
 // T13.5-7, and T14-9 and T14-10 (section-14-ii.ts; their
 // `PRECEDENCE_FIXTURE` and `LISTING_FIXTURE` spread the rename fixture's
-// files too).
-const RENAME_CONFIG = `import { defineConfig } from "xspec"
+// files too) — and their configurations and code source are TypeScript
+// staged-source records (helpers/staged-ts.ts; S-9's TypeScript and timing
+// clauses), named likewise.
+const RENAME_CONFIG = stagedTs(
+  "T13.5-7/T14-9/T14-10 the rename fixture xspec.config.ts (one spec group, Markdown emission next to sources)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -167,7 +172,8 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 const RENAME_A = stagedMdx(
   "T13.5-7/T14-9/T14-10 the rename fixture specs/a/A.mdx (a d reference to b0)",
   [
@@ -243,7 +249,9 @@ export const RENAME_FIXTURE: RefusalFixture = {
 // (arm (c) stages `out/specs` unwritable and admits exactly those two
 // writes). The prior journaled rename `oth0` → `oth` in `docs/Other.mdx`
 // makes the workspace journal-bearing.
-const MOVE_CONFIG = `import { defineConfig } from "xspec"
+const MOVE_CONFIG = stagedTs(
+  "T13.5-7/T14-9 the move fixture xspec.config.ts (spec groups specs/** and docs/**, code group src/**/*.ts, Markdown emission under outDir out)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -254,7 +262,8 @@ export default defineConfig({
   },
   markdown: { emit: true, outDir: "out" }
 })
-`;
+`,
+);
 const MOVE_OTHER = stagedMdx(
   "T13.5-7/T14-9 the move fixture docs/Other.mdx (oth0)",
   ['<S id="oth0">', "Other text.", "</S>", ""].join("\n"),
@@ -270,8 +279,9 @@ const MOVE_A = stagedMdx(
     "",
   ].join("\n"),
 );
-const MOVE_APP = ['import A from "../specs/A.xspec";', "", "A.a;", ""].join(
-  "\n",
+const MOVE_APP = stagedTs(
+  "T13.5-7/T14-9 the move fixture src/app.ts (the importer of specs/A.mdx's module whose specifier the move rewrites)",
+  ['import A from "../specs/A.xspec";', "", "A.a;", ""].join("\n"),
 );
 
 export const MOVE_ORIGIN = "specs/A.mdx";

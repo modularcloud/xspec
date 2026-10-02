@@ -199,6 +199,8 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import type {
@@ -219,15 +221,24 @@ import {
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group, no
-// other keys — the CONF-CORE workspace shape (CERTIFICATIONS.md).
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// other keys — the CONF-CORE workspace shape (CERTIFICATIONS.md). T13.4-3's
+// second half and T13.4-6's journal-occupant, session-occupant, and
+// linked-working-directory arms stage it in workspaces created after their
+// body's first product invocation, so S-7's sweep never reaches those
+// stagings against the stub: a TypeScript staged-source record
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), staged at
+// every site.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T13.4-3/T13.4-6 xspec.config.ts — one spec group (T13.4-3's second half; T13.4-6's journal-occupant, session-occupant, and linked-working-directory arms)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // One spec group plus Markdown emission next to each source (SPEC 7.3), so
 // all four derived-file classes exist: module, companions, emitted Markdown,
@@ -740,15 +751,20 @@ const T13_4_2 = defineProductTest({
 
 // The narrowed configuration: B.mdx no longer belongs to any group, so B's
 // derived files are no longer generated (a literal path is a valid glob,
-// SPEC 7).
-const A_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// SPEC 7). Staged by `file()` after each half's initial build: a TypeScript
+// staged-source record (helpers/staged-ts.ts; S-9's TypeScript and timing
+// clauses).
+const A_ONLY_CONFIG = stagedTs(
+  "T13.4-3 xspec.config.ts — narrowed to specs/A.mdx (each half's configuration change after its build)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/A.mdx"]
   }
 })
-`;
+`,
+);
 
 const A_MODULE_REL = "specs/A.xspec.ts";
 const B_DERIVED_PREFIX = "specs/B.xspec.";
@@ -1554,7 +1570,13 @@ const T13_4_5 = defineProductTest({
 
 // Markdown redirected into `out`, which the fixture stages as a symbolic
 // link to a real directory inside the workspace (SPEC 7.3; module header).
-const OUT_CONFIG = `import { defineConfig } from "xspec"
+// The arms after the first stage it in workspaces created after the body's
+// first product invocation: a TypeScript staged-source record
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), staged at
+// every site.
+const OUT_CONFIG = stagedTs(
+  "T13.4-6 xspec.config.ts — Markdown emission under outDir out (the occupant and cardinality arms)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1562,7 +1584,8 @@ export default defineConfig({
   },
   markdown: { emit: true, outDir: "out" }
 })
-`;
+`,
+);
 
 // A second minimal source (the cardinality arms): under OUT_CONFIG it adds
 // the emit write path `out/specs/B.md` — or, staged nested, another emit
@@ -2105,8 +2128,12 @@ export default defineConfig({
 `;
 
 // Section-form move arm: the created target path `fresh/sub/T.mdx` lies in a
-// configured spec group, `fresh/` absent (as above).
-const FRESH_GROUP_CONFIG = `import { defineConfig } from "xspec"
+// configured spec group, `fresh/` absent (as above). The arm's workspace
+// follows the body's first product invocation: a TypeScript staged-source
+// record (helpers/staged-ts.ts; S-9's TypeScript and timing clauses).
+const FRESH_GROUP_CONFIG = stagedTs(
+  "T13.4-8 section-form move arm xspec.config.ts — spec groups specs/** and fresh/**, Markdown emission on",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2114,12 +2141,16 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 // Emission arm: a nested `markdown.outDir` whose whole chain is nonexistent
 // (`out/` absent; SPEC 7.3 — resolves within the root, workspace-relative
-// paths preserved beneath it).
-const NESTED_OUT_CONFIG = `import { defineConfig } from "xspec"
+// paths preserved beneath it). The arm's workspace follows the body's first
+// product invocation: a TypeScript staged-source record (S-9).
+const NESTED_OUT_CONFIG = stagedTs(
+  "T13.4-8 emission arm xspec.config.ts — Markdown emission under the nonexistent nested outDir out/md",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2127,7 +2158,8 @@ export default defineConfig({
   },
   markdown: { emit: true, outDir: "out/md" }
 })
-`;
+`,
+);
 
 // The relocated file: import- and reference-free, so relocation rewrites
 // nothing and the moved file is byte-identical at its destination (module
@@ -2372,7 +2404,19 @@ const T13_4_8 = defineProductTest({
 // next to sources (under `outDir: "out"` in (d) and (e)), then reconfigured
 // — emission disabled under either spelling 7.3 admits, or `outDir`
 // changed; the code group arriving only in (b), as emission is disabled.
-const ORPHAN_EMIT_CONFIG = `import { defineConfig } from "xspec"
+//
+// Every configuration below is staged after the body's first product
+// invocation — the later arms' initial ones in workspaces created after it,
+// each arm's changed one by `file()` after its build, the
+// order-independence arm's in both its workspaces — so S-7's sweep never
+// reaches those stagings against the stub (T13.4-11 failing diagnosed
+// against a product, its later arms are first reached in certification):
+// TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses), staged at every site, `OrphanArm` typing its
+// configuration fields `StagedTs`.
+const ORPHAN_EMIT_CONFIG = stagedTs(
+  "T13.4-11 xspec.config.ts — specs/*.mdx, Markdown emission next to sources (arms (a), (b), (c), and (f) build under it)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2380,20 +2424,26 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 // Emission disabled by `markdown` absent (SPEC 7.3): arms (a) and (c).
-const ORPHAN_NO_MARKDOWN_CONFIG = `import { defineConfig } from "xspec"
+const ORPHAN_NO_MARKDOWN_CONFIG = stagedTs(
+  "T13.4-11 (a)/(c) xspec.config.ts — emission disabled by markdown absent",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // Emission disabled by `emit: false` (SPEC 7.3): arm (f).
-const ORPHAN_EMIT_FALSE_CONFIG = `import { defineConfig } from "xspec"
+const ORPHAN_EMIT_FALSE_CONFIG = stagedTs(
+  "T13.4-11 (f) xspec.config.ts — emission disabled by emit false",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2401,12 +2451,15 @@ export default defineConfig({
   },
   markdown: { emit: false }
 })
-`;
+`,
+);
 
 // Arm (b): emission disabled as a code group globbing `specs/*.md` is added
 // (SPEC 7.2), so the recorded `specs/A.md` is a discovered code source once
 // it is no emit destination (7.3, 13.4).
-const ORPHAN_CODE_GROUP_CONFIG = `import { defineConfig } from "xspec"
+const ORPHAN_CODE_GROUP_CONFIG = stagedTs(
+  "T13.4-11 (b) xspec.config.ts — emission disabled as a code group globbing specs/*.md is added",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2417,11 +2470,14 @@ export default defineConfig({
   },
   markdown: { emit: false }
 })
-`;
+`,
+);
 
 // Arms (d) and (e): built under `outDir: "out"`, recording `out/specs/A.md`,
 // then `outDir` changed to `"md"`.
-const ORPHAN_OUT_CONFIG = `import { defineConfig } from "xspec"
+const ORPHAN_OUT_CONFIG = stagedTs(
+  "T13.4-11 (d)/(e) xspec.config.ts — Markdown emission under outDir out (the initial build)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2429,8 +2485,11 @@ export default defineConfig({
   },
   markdown: { emit: true, outDir: "out" }
 })
-`;
-const ORPHAN_MD_CONFIG = `import { defineConfig } from "xspec"
+`,
+);
+const ORPHAN_MD_CONFIG = stagedTs(
+  "T13.4-11 (d)/(e) xspec.config.ts — outDir changed to md",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2438,11 +2497,14 @@ export default defineConfig({
   },
   markdown: { emit: true, outDir: "md" }
 })
-`;
+`,
+);
 
 // The order-independence arm: `specs/**/*.mdx` reaches the nested source
 // `specs/B.md/C.mdx` — still `.mdx` names alone.
-const ORPHAN_NESTED_CONFIG = `import { defineConfig } from "xspec"
+const ORPHAN_NESTED_CONFIG = stagedTs(
+  "T13.4-11 order-independence arm xspec.config.ts — specs/**/*.mdx, Markdown emission next to sources (the arm's workspace and its twin)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -2450,7 +2512,8 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 // Trivial single-section sources (CERTIFICATIONS.md §CONF-ORPHAN: no
 // imports, embeddings, comments, or props beyond `id`). Every arm after the
@@ -2467,8 +2530,15 @@ const ORPHAN_C_MDX = stagedMdx(
   ['<S id="c">', "Gamma text.", "</S>", ""].join("\n"),
 );
 
-// Arm (b)'s well-formed TypeScript, overwriting the emitted `specs/A.md`.
-const ORPHAN_CODE_SOURCE = "export const n = 1\n";
+// Arm (b)'s well-formed TypeScript, overwriting the emitted `specs/A.md` after
+// the body's first product invocation: a TypeScript staged-source record
+// (S-9) — a discovered code source whose name the default does not reach
+// (the code group globs `specs/*.md`), declared well-formed by the record,
+// which makes the path judged.
+const ORPHAN_CODE_SOURCE = stagedTs(
+  "T13.4-11 (b) specs/A.md — a discovered code source (export const n = 1) over the emitted Markdown",
+  "export const n = 1\n",
+);
 // Arm (a)'s file inside the directory replacing `specs/A.md` — no glob
 // matches it.
 const ORPHAN_DIR_FILE_REL = "specs/A.md/kept.txt";
@@ -2533,12 +2603,12 @@ function staleFindingsConcerning(
 interface OrphanArm {
   /** Diagnostic tag, e.g. "T13.4-11 (a) a directory". */
   readonly tag: string;
-  /** The configuration of the initial build. */
-  readonly builtConfig: string;
+  /** The configuration of the initial build (a staged-source record). */
+  readonly builtConfig: StagedTs;
   /** The recorded derived path the change leaves no longer generated. */
   readonly recordedRel: string;
-  /** The configuration the change installs. */
-  readonly changedConfig: string;
+  /** The configuration the change installs (a staged-source record). */
+  readonly changedConfig: StagedTs;
   /**
    * Stage the change's occupant — before the configuration change is
    * written, before the first `check` — capturing what the arm compares,
@@ -2710,10 +2780,9 @@ const ORPHAN_ARM_SOURCE: OrphanArm = {
   changedConfig: ORPHAN_CODE_GROUP_CONFIG,
   stage: async (workspace) => {
     // S-9: a discovered code source whose name the default does not reach
-    // (the code group globs `specs/*.md`), declared well-formed.
-    await workspace.file("specs/A.md", ORPHAN_CODE_SOURCE, {
-      ts: "well-formed",
-    });
+    // (the code group globs `specs/*.md`), declared well-formed by its
+    // record.
+    await workspace.file("specs/A.md", ORPHAN_CODE_SOURCE);
     return async (context) => {
       assertBytesEqual(
         await readFileDiagnosed(
@@ -2722,7 +2791,7 @@ const ORPHAN_ARM_SOURCE: OrphanArm = {
           `${context}: the discovered code source at the recorded ` +
             `specs/A.md is left in place — a source is never derived`,
         ),
-        ORPHAN_CODE_SOURCE,
+        ORPHAN_CODE_SOURCE.source,
         `${context}: the discovered code source at the recorded specs/A.md ` +
           `byte-identical — a source is never derived (SPEC 13.4)`,
       );

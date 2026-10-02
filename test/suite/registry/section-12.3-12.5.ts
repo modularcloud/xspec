@@ -101,6 +101,7 @@ import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -134,8 +135,14 @@ export default defineConfig({
 `;
 
 // One spec group plus one code group (SPEC 7.2), so code-side `references`
-// edges (4.5) enter the graph.
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// edges (4.5) enter the graph. T12.3-1's restricted-tree workspace follows
+// the ordering workspace's invocations, so S-7's sweep never reaches it
+// against the stub: a TypeScript staged-source record (helpers/staged-ts.ts;
+// S-9's TypeScript and timing clauses), staged at every site — T12.4-1's
+// first workspace too.
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T12.3-1 xspec.config.ts — one spec group and one code group (the restricted-tree workspace; T12.4-1's workspace too)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -145,11 +152,12 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
+  config: InitialFileContents,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
@@ -429,18 +437,23 @@ const T12_3_1_T = stagedMdx(
   ].join("\n"),
 );
 
-const T12_3_1_APP = [
-  'import SPEC from "../specs/T.xspec";',
-  "",
-  "export function touchPar(): void {",
-  "  SPEC.grand.par;",
-  "}",
-  "",
-  "export function touchSolo(): void {",
-  "  SPEC.solo;",
-  "}",
-  "",
-].join("\n");
+// The restricted-tree workspace's code markers, staged after the ordering
+// workspace's invocations: a TypeScript staged-source record (S-9).
+const T12_3_1_APP = stagedTs(
+  "T12.3-1 restricted-tree workspace src/app.ts (code markers referencing grand.par and solo)",
+  [
+    'import SPEC from "../specs/T.xspec";',
+    "",
+    "export function touchPar(): void {",
+    "  SPEC.grand.par;",
+    "}",
+    "",
+    "export function touchSolo(): void {",
+    "  SPEC.solo;",
+    "}",
+    "",
+  ].join("\n"),
+);
 
 const T12_3_1 = defineProductTest({
   id: "T12.3-1",

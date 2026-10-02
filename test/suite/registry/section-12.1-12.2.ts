@@ -158,6 +158,7 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
@@ -192,6 +193,23 @@ export default defineConfig({
 })
 `;
 }
+
+// `markdownConfig`'s two configurations, each staged after a body's first
+// product invocation — emission on by T12.2-2's staleness, graph-data
+// unit-form, and unreadable-record families' workspaces; emission off by
+// T12.1-3's arm-3 rewrite and T12.2-2's staleness arm-4 rewrite and its
+// cycles, journal, and sessions families' workspaces — so S-7's sweep never
+// reaches those stagings against the stub: TypeScript staged-source records
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), staged at
+// every site, the first workspaces' too.
+const MARKDOWN_EMIT_CONFIG = stagedTs(
+  "T12.2-2 xspec.config.ts — one spec group, Markdown emission on (markdownConfig(true): the staleness, graph-data unit-form, and unreadable-record families' workspaces)",
+  markdownConfig(true),
+);
+const MARKDOWN_NO_EMIT_CONFIG = stagedTs(
+  "T12.1-3/T12.2-2 xspec.config.ts — one spec group, Markdown emission off (markdownConfig(false): T12.1-3's arm-3 rewrite; T12.2-2's staleness arm-4 rewrite and its cycles, journal, and sessions families' workspaces)",
+  markdownConfig(false),
+);
 
 // The valid single-section source `a1`, byte-identical wherever it is
 // staged: the initial specs/A.mdx of T12.1-1's and T12.2-1's workspace,
@@ -456,7 +474,7 @@ async function expectNoModuleOrCompanions(
 // and depends on its node), Markdown emission enabled; specs/A.mdx is the
 // valid a1 record.
 const PRODUCTS_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": markdownConfig(true),
+  "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
   "specs/A.mdx": VALID_A1_SOURCE,
   "specs/B.mdx": [
     'import A from "./A.xspec"',
@@ -572,7 +590,7 @@ const T12_1_1 = defineProductTest({
 // leaves untouched (sources are product-written only by `rename`/`move`,
 // SPEC 12.1, 6.4, 6.5 — pinned as the arm's staging premise).
 const REGEN_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": markdownConfig(true),
+  "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
   "specs/A.mdx": VALID_A1_SOURCE,
   "specs/B.mdx": ['<S id="b1">', "Beta behavior.", "</S>", ""].join("\n"),
 };
@@ -648,7 +666,7 @@ const T12_1_3 = defineProductTest({
       // Arm 3 — disabling emission: the emitted Markdown disappears, the
       // module stays (SPEC 7.3: with emit false, no path is a Markdown emit
       // destination).
-      await workspace.file("xspec.config.ts", markdownConfig(false));
+      await workspace.file("xspec.config.ts", MARKDOWN_NO_EMIT_CONFIG);
       await buildOk(
         product,
         workspace,
@@ -686,8 +704,12 @@ const FAILED_BUILD_INVALID_SOURCE = stagedMdx(
 );
 
 // The valid configuration plus one unknown top-level key — a configuration
-// error (SPEC 7, 14.14).
-const FAILED_BUILD_BOGUS_CONFIG = `import { defineConfig } from "xspec"
+// error (SPEC 7, 14.14), staged over the built workspace: a TypeScript
+// staged-source record (helpers/staged-ts.ts; S-9's TypeScript and timing
+// clauses), well-formed.
+const FAILED_BUILD_BOGUS_CONFIG = stagedTs(
+  "T12.1-4 xspec.config.ts — an unknown top-level key bogus (arm 2's configuration error, staged over the built workspace)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -696,7 +718,8 @@ export default defineConfig({
   markdown: { emit: true },
   bogus: true
 })
-`;
+`,
+);
 
 const T12_1_4 = defineProductTest({
   id: "T12.1-4",
@@ -705,7 +728,7 @@ const T12_1_4 = defineProductTest({
   run: async (product) => {
     await withWorkspace(
       {
-        "xspec.config.ts": markdownConfig(true),
+        "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
         "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
@@ -799,8 +822,14 @@ const T12_2_1 = defineProductTest({
 // non-static `d` value), plus one code file staging 14.7 (an unresolved
 // TypeScript marker). Every reference targets a distinct missing name, so no
 // condition masks another (SPEC 14: each present condition is reported).
+// The family's workspace follows family 1's invocations, so its
+// configuration and code source are TypeScript staged-source records
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), wrapped in
+// place.
 const REFERENCES_FAMILY_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+  "xspec.config.ts": stagedTs(
+    "T12.2-2 references family xspec.config.ts — one spec group and one code group (src/**/*.ts)",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -811,6 +840,7 @@ export default defineConfig({
   }
 })
 `,
+  ),
   "specs/A.mdx": stagedMdx(
     "T12.2-2 references family specs/A.mdx (an unknown d target, an unknown text target, and a non-static d value)",
     [
@@ -830,21 +860,24 @@ export default defineConfig({
       "",
     ].join("\n"),
   ),
-  "src/app.ts": [
-    'import A from "../specs/A.xspec";',
-    "",
-    "function marker(): void {",
-    "  A.missing;",
-    "}",
-    "",
-  ].join("\n"),
+  "src/app.ts": stagedTs(
+    "T12.2-2 references family src/app.ts (an unresolved TypeScript marker, A.missing)",
+    [
+      'import A from "../specs/A.xspec";',
+      "",
+      "function marker(): void {",
+      "  A.missing;",
+      "}",
+      "",
+    ].join("\n"),
+  ),
 };
 
 // Family: cycles. A self-`depends` is a dependency cycle of length one
 // (SPEC 5.3) needing no import — so no spec import cycle is co-staged and
 // the exact condition count holds.
 const CYCLE_FAMILY_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": markdownConfig(false),
+  "xspec.config.ts": MARKDOWN_NO_EMIT_CONFIG,
   "specs/A.mdx": stagedMdx(
     "T12.2-2 cycles family specs/A.mdx (a self-depends cycle of length one)",
     ['<S id="s" d={"s"}>', "Depends on itself.", "</S>", ""].join("\n"),
@@ -877,9 +910,14 @@ export const POLICY_LO_SOURCE = stagedMdx(
 );
 
 // Family: policy (14.12, check-only). One forbidden rule, one violating
-// edge; build-side silence is T7.5-6's subject (T12.1-2).
+// edge; build-side silence is T7.5-6's subject (T12.1-2). The family's
+// workspace follows family 1's invocations, so its configuration is a
+// TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses), wrapped in place.
 const POLICY_FAMILY_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+  "xspec.config.ts": stagedTs(
+    "T12.2-2 policy family xspec.config.ts — hi and lo groups under the forbidden rule no-hi-to-lo",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -896,6 +934,7 @@ export default defineConfig({
   ]
 })
 `,
+  ),
   "hi/H.mdx": POLICY_HI_SOURCE,
   "lo/L.mdx": POLICY_LO_SOURCE,
 };
@@ -939,7 +978,7 @@ const T12_2_2 = defineProductTest({
     // or graph data would find nothing and exit 0.
     await withWorkspace(
       {
-        "xspec.config.ts": markdownConfig(true),
+        "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
         "specs/A.mdx": VALID_A1_SOURCE,
         "specs/B.mdx": ['<S id="b1">', "Beta behavior.", "</S>", ""].join("\n"),
       },
@@ -969,7 +1008,7 @@ const T12_2_2 = defineProductTest({
     // occupant-kind arms.
     await withWorkspace(
       {
-        "xspec.config.ts": markdownConfig(true),
+        "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
         "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
@@ -987,7 +1026,15 @@ const T12_2_2 = defineProductTest({
           moduleRel,
           "T12.2-2 (staleness) after the initial build (SPEC 13.1)",
         );
-        await workspace.file(moduleRel, `${original}// tampered\n`);
+        // The tampered module is an edit of product-written bytes — a
+        // derived file, no code source, whose well-formedness the document
+        // does not declare — so it is staged `unchecked` (S-9): never a
+        // staged-source record (no harness constant equals those bytes), and
+        // never judged, which would turn a product's malformed module into a
+        // harness error (H-8).
+        await workspace.file(moduleRel, `${original}// tampered\n`, {
+          ts: "unchecked",
+        });
         assertSingleStaleFile(
           await checkFindings(
             product,
@@ -1115,7 +1162,7 @@ const T12_2_2 = defineProductTest({
           "T12.2-2 (staleness) rebuild between arms — regenerates from the " +
             "edited, still-valid source (SPEC 12.1)",
         );
-        await workspace.file("xspec.config.ts", markdownConfig(false));
+        await workspace.file("xspec.config.ts", MARKDOWN_NO_EMIT_CONFIG);
         const arm4Findings = await checkFindings(
           product,
           workspace,
@@ -1137,7 +1184,7 @@ const T12_2_2 = defineProductTest({
     // is a phantom.
     await withWorkspace(
       {
-        "xspec.config.ts": markdownConfig(true),
+        "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
         "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
@@ -1243,7 +1290,7 @@ const T12_2_2 = defineProductTest({
     // only), then replaced by a successful `build`.
     await withWorkspace(
       {
-        "xspec.config.ts": markdownConfig(true),
+        "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
         "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
@@ -1350,7 +1397,7 @@ const T12_2_2 = defineProductTest({
     // Family 7 — journal integrity (14.13): a malformed journal line.
     await withWorkspace(
       {
-        "xspec.config.ts": markdownConfig(false),
+        "xspec.config.ts": MARKDOWN_NO_EMIT_CONFIG,
         "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
@@ -1394,7 +1441,7 @@ const T12_2_2 = defineProductTest({
     // parsed is corrupt categorically (SPEC 10.1).
     await withWorkspace(
       {
-        "xspec.config.ts": markdownConfig(false),
+        "xspec.config.ts": MARKDOWN_NO_EMIT_CONFIG,
         "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
@@ -1486,7 +1533,7 @@ const T12_2_3 = defineProductTest({
   run: async (product) => {
     await withWorkspace(
       {
-        "xspec.config.ts": markdownConfig(true),
+        "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
         "specs/A.mdx": VALID_A1_SOURCE,
       },
       async (workspace) => {
@@ -1671,8 +1718,15 @@ const T12_2_4_L_INVALID = stagedMdx(
 );
 const T12_2_4_BROKEN_WINDOW = byteWindow(T12_2_4_L_HEAD, T12_2_4_L_BROKEN_TAG);
 
-/** The fixture's configuration with the `extra` group present. */
-const T12_2_4_CONFIG = `import { defineConfig } from "xspec"
+/**
+ * The fixture's configuration with the `extra` group present — staged by
+ * arms (b)–(d)'s workspaces after the body's first product invocation: a
+ * TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+ * and timing clauses), staged at every site.
+ */
+const T12_2_4_CONFIG = stagedTs(
+  "T12.2-4 xspec.config.ts — hi, lo, and extra groups under the forbidden rule no-hi-to-lo (every arm's workspace)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1689,10 +1743,16 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
-/** The same configuration with the `extra` group dropped (arm (b)). */
-const T12_2_4_CONFIG_WITHOUT_EXTRA = `import { defineConfig } from "xspec"
+/**
+ * The same configuration with the `extra` group dropped (arm (b)), staged
+ * over the built workspace: a TypeScript staged-source record (S-9).
+ */
+const T12_2_4_CONFIG_WITHOUT_EXTRA = stagedTs(
+  "T12.2-4 (b) xspec.config.ts — the extra group dropped without a rebuild (the orphaning rewrite)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1708,7 +1768,8 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 const T12_2_4_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": T12_2_4_CONFIG,
@@ -1960,7 +2021,11 @@ const T12_2_4 = defineProductTest({
         moduleRel,
         `${context} after the initial build (SPEC 13.1)`,
       );
-      await workspace.file(moduleRel, `${original}// tampered\n`);
+      // An edit of product-written bytes, staged `unchecked` (S-9; as
+      // T12.2-2's staleness arm 1 stages its tampered module).
+      await workspace.file(moduleRel, `${original}// tampered\n`, {
+        ts: "unchecked",
+      });
       await t1224FailingStaging(product, workspace, { form: "none" }, context);
     });
 

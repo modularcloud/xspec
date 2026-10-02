@@ -124,6 +124,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { DirectorySnapshot } from "../../helpers/snapshot.js";
 import { assertSnapshotsEqual } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import { pathExists } from "../../helpers/subprocess.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
@@ -636,8 +637,13 @@ async function derivedPathArm(product: ProductBinding): Promise<void> {
 // app` names a code group, an invalid flag value (SPEC 11.1: `--group`
 // accepts only a configured spec group's name). The prior journaled rename
 // is the rename fixture's; the code source references nothing it rewrites.
+// T14-9 prepares it after its first product invocation, so its
+// configuration and code source are TypeScript staged-source records
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses).
 const CODE_GROUP = "app";
-const PRECEDENCE_CONFIG = `import { defineConfig } from "xspec"
+const PRECEDENCE_CONFIG = stagedTs(
+  "T14-9 the precedence fixture xspec.config.ts (one spec group, the code group app, Markdown emission next to sources)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -648,13 +654,12 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
-const PRECEDENCE_APP = [
-  'import A from "../specs/a/A.xspec";',
-  "",
-  "A.a;",
-  "",
-].join("\n");
+`,
+);
+const PRECEDENCE_APP = stagedTs(
+  "T14-9 the precedence fixture src/app.ts (importing specs/a/A.mdx's module)",
+  ['import A from "../specs/a/A.xspec";', "", "A.a;", ""].join("\n"),
+);
 const PRECEDENCE_FIXTURE: RefusalFixture = {
   decl: {
     files: {
