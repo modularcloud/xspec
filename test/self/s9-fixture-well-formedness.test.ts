@@ -25,6 +25,8 @@
 // its code point.
 
 import { Buffer } from "node:buffer";
+import * as acorn from "acorn";
+import ts from "typescript-5.9.3";
 import { describe, expect, onTestFinished, test } from "vitest";
 import { HarnessAssertionError } from "../helpers/assertions.js";
 import {
@@ -70,6 +72,14 @@ const FF = String.fromCodePoint(0x000c);
 const LS = String.fromCodePoint(0x2028);
 const BOM = String.fromCodePoint(0xfeff);
 const ASTRAL = String.fromCodePoint(0x1f600);
+
+/** acorn's identifier tables and whitespace list: runtime exports its
+ * declarations leave out. */
+const ACORN = acorn as unknown as {
+  readonly isIdentifierStart: (code: number, astral?: boolean) => boolean;
+  readonly isIdentifierChar: (code: number, astral?: boolean) => boolean;
+  readonly nonASCIIwhitespace: RegExp;
+};
 
 /** Lines joined by U+000A, the last one terminated. */
 const doc = (...lines: readonly string[]): string => lines.join(LF) + LF;
@@ -833,6 +843,357 @@ describe("S-9: encoding rules of 14.20 the parser does not apply", () => {
     const verdict = expectRejects(`# ${String.fromCharCode(0xd83d)} x${LF}`);
     expect(verdict.reason).toContain("surrogate");
     expect(verdict.position?.offset).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unicode 15.1 (S-9; SPEC 14.20): the identifier characters — an
+// expression's and a JSX name's alike — and the space separators are Unicode
+// 15.1's, judged code point by code point, whatever the checking tool's
+// tables say. The stock tools judge otherwise: acorn 8.17's identifier tables
+// are Unicode 17's, and the MDX tokenizer reads a JSX name one UTF-16 code
+// unit at a time by the runtime's tables (acorn-jsx, a JSX name inside an
+// expression, one code unit at a time too) — so every vector naming U+1C89
+// or U+2EBF0 in an identifier or a name below fails under the stock
+// judgement. Every non-ASCII character is built from its code point.
+
+const cp = (code: number): string => String.fromCodePoint(code);
+/** U+1C89, a Unicode 16 letter: no identifier character under 15.1. */
+const U16_LETTER = cp(0x1c89);
+/** U+2EBF0, the first character of CJK Unified Ideographs Extension I,
+ * which Unicode 15.1 added (T14-12's Unicode pin). */
+const EXT_I = cp(0x2ebf0);
+/** U+2EBF1, its neighbour. */
+const EXT_I_NEXT = cp(0x2ebf1);
+/** U+1D7CE MATHEMATICAL BOLD DIGIT ZERO (Nd): an astral identifier part
+ * that begins no identifier. */
+const BOLD_ZERO = cp(0x1d7ce);
+/** U+180E, a space separator up to Unicode 6.2, a format character under
+ * 15.1: neither whitespace nor an identifier character (T2.7-4). */
+const U180E = cp(0x180e);
+const BACKSLASH = cp(0x5c);
+const NAME = (code: number): string =>
+  `U+${code.toString(16).toUpperCase().padStart(4, "0")}`;
+
+/** The space separators (general category Zs) Unicode 15.1 places outside
+ * Latin-1, one T2.7-4 arm each (TEST-SPEC T2.7-4). */
+const SPACE_SEPARATORS_PAST_LATIN_1: readonly number[] = [
+  0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007,
+  0x2008, 0x2009, 0x200a, 0x202f, 0x205f, 0x3000,
+];
+
+/** ECMAScript 2024's WhiteSpace and LineTerminator under Unicode 15.1: TAB,
+ * VT, FF, ZWNBSP, the space separators (U+0020, U+00A0, and those above), LF,
+ * CR, LS, PS. */
+const WHITESPACE_151: ReadonlySet<number> = new Set([
+  0x09,
+  0x0a,
+  0x0b,
+  0x0c,
+  0x0d,
+  0x20,
+  0xa0,
+  0xfeff,
+  0x2028,
+  0x2029,
+  ...SPACE_SEPARATORS_PAST_LATIN_1,
+]);
+
+const UNICODE_151_DERIVES: ReadonlyArray<
+  readonly [name: string, source: string]
+> = [
+  [
+    "`<a` U+2EBF0 `>x</a` U+2EBF0 `>`: an element name U+2EBF0 continues, both tags",
+    doc(`<a${EXT_I}>x</a${EXT_I}>`),
+  ],
+  [
+    '`<a b` U+2EBF0 `="1" />`: an attribute name U+2EBF0 continues',
+    doc(`<a b${EXT_I}="1" />`),
+  ],
+  [
+    "T14-12: the container `{` U+2EBF0 `}` alone on its line",
+    doc(`{${EXT_I}}`),
+  ],
+  [
+    "T14-12: the element `<a` U+2EBF0 ` />` alone on its line",
+    doc(`<a${EXT_I} />`),
+  ],
+  [
+    'T14-12: the section `<S id="x" a` U+2EBF0 `="v" />` alone on its line',
+    doc(`<S id="x" a${EXT_I}="v" />`),
+  ],
+  ["`<` U+2EBF0 ` />`: U+2EBF0 begins a JSX name", doc(`<${EXT_I} />`)],
+  [
+    "`<a.` U+2EBF0 ` />` and `<a:` U+2EBF0 ` />`: member and local names",
+    doc(`<a.${EXT_I} />`, "", `<a:${EXT_I} />`),
+  ],
+  [
+    '`<a ` U+2EBF0 `:b="1" />`: an attribute name\'s prefix',
+    doc(`<a ${EXT_I}:b="1" />`),
+  ],
+  [
+    "a text-position element, its attribute name holding U+2EBF0, mid-paragraph",
+    doc(`x <a b${EXT_I}="1">y</a> z`),
+  ],
+  [
+    "an element in a block quote, after an astral character on an earlier line",
+    doc(`> ${EXT_I} quoted`, `> <a${EXT_I} />`),
+  ],
+  [
+    "an element after an astral character and a CR LF line ending",
+    `x${EXT_I}${CR}${LF}${CR}${LF}<a${EXT_I} />${CR}${LF}`,
+  ],
+  [
+    "astral characters inside a tag's attribute values, quoted and braced",
+    doc(`<a b="${EXT_I}" c={"${EXT_I}"} d={${EXT_I}} {...${EXT_I}} />`),
+  ],
+  [
+    "a flow element followed on its line by a container holding U+2EBF0",
+    doc(`<a${EXT_I} />{${EXT_I}}`),
+  ],
+  [
+    "`{<a` U+2EBF0 ` />}`: a JSX name inside a container (acorn-jsx)",
+    doc(`{<a${EXT_I} />}`),
+  ],
+  [
+    "a JSX name holding U+2EBF0 inside an attribute expression (acorn-jsx)",
+    doc(`<a b={<c${EXT_I} />} />`),
+  ],
+  [
+    "an ESM import binding U+2EBF0",
+    doc(`import ${EXT_I} from "./A.xspec"`, "", "Text."),
+  ],
+  ["a private name holding U+2EBF0", doc(`{class { #${EXT_I} = 1 }}`)],
+  ["a regular expression's group name U+2EBF0", doc(`{/(?<${EXT_I}>a)/}`)],
+  [
+    "`<a` U+30FB ` />`: KATAKANA MIDDLE DOT continues a name under 15.1",
+    doc(`<a${cp(0x30fb)} />`),
+  ],
+  [
+    "`<a` U+1D7CE ` />`: an astral identifier part continues a name",
+    doc(`<a${BOLD_ZERO} />`),
+  ],
+  [
+    "U+1C89 outside every identifier: a string, attribute values, a comment, text",
+    doc(
+      `{"${U16_LETTER}"}`,
+      "",
+      `<a b="${U16_LETTER}" c={"${U16_LETTER}"} />`,
+      "",
+      `{/* ${U16_LETTER} */}`,
+      "",
+      `Text ${U16_LETTER} here.`,
+    ),
+  ],
+  ...SPACE_SEPARATORS_PAST_LATIN_1.map((code): readonly [string, string] => [
+    `T2.7-4: \`{\` ${NAME(code)} \`}\`, a space separator, is an MDX comment`,
+    doc(`{${cp(code)}}`),
+  ]),
+  ...[0xa0, 0xfeff, 0x2028, 0x2029].map((code): readonly [string, string] => [
+    `T2.7-4: \`{\` ${NAME(code)} \`}\` is an MDX comment`,
+    doc(`{${cp(code)}}`),
+  ]),
+  ...[0x1680, 0x3000, 0xfeff].map((code): readonly [string, string] => [
+    `\`{1\` ${NAME(code)} \`+ 2}\`: whitespace between an expression's tokens`,
+    doc(`{1${cp(code)}+ 2}`),
+  ]),
+  ...[0x1680, 0x3000, 0xfeff, 0x2028].map((code): readonly [string, string] => [
+    `\`<a\` ${NAME(code)} \`b="1" />\`: whitespace inside a tag`,
+    doc(`<a${cp(code)}b="1" />`),
+  ]),
+];
+
+const UNICODE_151_REJECTS: ReadonlyArray<
+  readonly [name: string, source: string, offset: number]
+> = [
+  [
+    "`{` U+1C89 `}`: a Unicode 16 letter begins no identifier",
+    doc(`{${U16_LETTER}}`),
+    1,
+  ],
+  ["`<a` U+1C89 ` />`: nor continues a JSX name", doc(`<a${U16_LETTER} />`), 2],
+  [
+    "T2.7-4: `{` U+180E `}`, a format character under 15.1",
+    doc(`{${U180E}}`),
+    1,
+  ],
+  ["T2.7-4: `{` U+0085 `}`", doc(`{${cp(0x85)}}`), 1],
+  ["T2.7-4: `{` U+200B `}`", doc(`{${cp(0x200b)}}`), 1],
+  ["`{a` U+1C89 `}`: nor continues an identifier", doc(`{a${U16_LETTER}}`), 2],
+  [
+    "`{a` backslash `u{1C89}}`: nor through an escape sequence",
+    doc(`{a${BACKSLASH}u{1C89}}`),
+    1,
+  ],
+  ["`<` U+1C89 ` />`: nor begins a JSX name", doc(`<${U16_LETTER} />`), 1],
+  [
+    '`<a b` U+1C89 `="1" />`: nor continues an attribute name',
+    doc(`<a b${U16_LETTER}="1" />`),
+    4,
+  ],
+  [
+    "`<a.` U+1C89 ` />`: nor begins a member name",
+    doc(`<a.${U16_LETTER} />`),
+    3,
+  ],
+  [
+    "`{<a` U+1C89 ` />}`: nor continues a JSX name inside a container",
+    doc(`{<a${U16_LETTER} />}`),
+    3,
+  ],
+  [
+    "a JSX name holding U+1C89 inside an attribute expression",
+    doc(`<a b={<c${U16_LETTER} />} />`),
+    8,
+  ],
+  [
+    "an ESM import binding holding U+1C89",
+    doc(`import a${U16_LETTER} from "./A.xspec"`, "", "Text."),
+    8,
+  ],
+  ["a private name holding U+1C89", doc(`{class { #a${U16_LETTER} = 1 }}`), 11],
+  [
+    "a regular expression's group name U+1C89",
+    doc(`{/(?<${U16_LETTER}>a)/}`),
+    -1,
+  ],
+  [
+    "`<` U+1D7CE ` />`: an astral identifier part begins no JSX name",
+    doc(`<${BOLD_ZERO} />`),
+    1,
+  ],
+  [
+    "`<a` U+2EBF0 `>x</a` U+2EBF1 `>`: names compared whole, code point by code point",
+    doc(`<a${EXT_I}>x</a${EXT_I_NEXT}>`),
+    -1,
+  ],
+  [
+    '`<a` U+180E `b="1" />`: U+180E is no whitespace inside a tag',
+    doc(`<a${U180E}b="1" />`),
+    2,
+  ],
+  [
+    "`{1` U+180E `+ 2}`: nor between an expression's tokens",
+    doc(`{1${U180E}+ 2}`),
+    2,
+  ],
+];
+
+describe("S-9: identifier characters and space separators are Unicode 15.1's, code point by code point", () => {
+  test.each(UNICODE_151_DERIVES)("%s derives", (_name, source) => {
+    expectDerives(source);
+    expectDerives(Buffer.from(source, "utf8"));
+  });
+
+  test.each(UNICODE_151_REJECTS)(
+    "%s does not derive",
+    (_name, source, offset) => {
+      const verdict = expectRejects(source);
+      // The offending code point, where the vector pins it (the stock
+      // parser's position, a UTF-16 index; -1 where the rejection lies
+      // elsewhere — a pattern's, or a closing tag's).
+      if (offset >= 0) expect(verdict.position?.offset).toBe(offset);
+      expectRejects(Buffer.from(source, "utf8"));
+      // No allowance admits a character 15.1 does not.
+      expectRejects(source, MDX_ALLOWANCES);
+    },
+  );
+
+  test("TypeScript 5.9.3's ESNext tables are Unicode 15.1's at the version boundaries", () => {
+    const ESNEXT = ts.ScriptTarget.ESNext;
+    // [code point, begins an identifier, continues one]
+    const boundaries: ReadonlyArray<readonly [number, boolean, boolean]> = [
+      [0x2ebf0, true, true], // added in 15.1 (CJK Extension I)
+      [0x31350, true, true], // added in 15.0 (CJK Extension H)
+      [0x1c89, false, false], // added in 16.0
+      [0x323b0, false, false], // added in 17.0 (CJK Extension J)
+      [0x30fb, false, true], // joined ID_Continue in 15.1
+      [0xff65, false, true], // joined ID_Continue in 15.1
+      [0x200c, false, true], // ZWNJ: ID_Continue since 15.1, ES's anyway
+      [0x200d, false, true], // ZWJ
+      [0x00b7, false, true], // Other_ID_Continue
+      [0x2e2f, false, false], // Lm, but Pattern_Syntax
+      [0x180e, false, false], // Cf
+      [0x24, true, true], // `$`
+      [0x5f, true, true], // `_`
+      [0x30, false, true], // `0`
+      [0x2d, false, false], // `-` (a JSX name's own addition)
+    ];
+    for (const [code, start, part] of boundaries) {
+      expect([NAME(code), ts.isIdentifierStart(code, ESNEXT)]).toEqual([
+        NAME(code),
+        start,
+      ]);
+      expect([NAME(code), ts.isIdentifierPart(code, ESNEXT)]).toEqual([
+        NAME(code),
+        part,
+      ]);
+    }
+  });
+
+  test("acorn admits every identifier character Unicode 15.1 admits, where 15.1 admits it", () => {
+    // The premise of holding acorn's identifier tokens to 15.1 as they
+    // finish: tables that admit more than 15.1's (Unicode 17's) tokenize
+    // every text 15.1 admits as 15.1's would.
+    const ESNEXT = ts.ScriptTarget.ESNext;
+    const missing: string[] = [];
+    for (let code = 0; code <= 0x10ffff; code++) {
+      if (code >= 0xd800 && code <= 0xdfff) continue;
+      if (
+        ts.isIdentifierStart(code, ESNEXT) &&
+        !ACORN.isIdentifierStart(code, true)
+      ) {
+        missing.push(`${NAME(code)} (start)`);
+      }
+      if (
+        ts.isIdentifierPart(code, ESNEXT) &&
+        !ACORN.isIdentifierChar(code, true)
+      ) {
+        missing.push(`${NAME(code)} (part)`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  test("acorn's whitespace is Unicode 15.1's: its fixed non-ASCII list", () => {
+    // acorn skips U+00A0 and the line separators by name, and any other
+    // code point from U+1680 up that its `nonASCIIwhitespace` matches.
+    const differing: string[] = [];
+    for (let code = 0x80; code <= 0xffff; code++) {
+      const acornSkips =
+        code === 0xa0 ||
+        code === 0x2028 ||
+        code === 0x2029 ||
+        (code >= 0x1680 &&
+          ACORN.nonASCIIwhitespace.test(String.fromCharCode(code)));
+      if (acornSkips !== WHITESPACE_151.has(code)) differing.push(NAME(code));
+    }
+    expect(differing).toEqual([]);
+  });
+
+  test("this runtime's `\\s` is Unicode 15.1's (the empty-expression judgement reads it)", () => {
+    const whitespace = /\s/;
+    const differing: string[] = [];
+    for (let code = 0; code <= 0xffff; code++) {
+      if (
+        whitespace.test(String.fromCharCode(code)) !== WHITESPACE_151.has(code)
+      ) {
+        differing.push(NAME(code));
+      }
+    }
+    expect(differing).toEqual([]);
+  });
+
+  test("a rejection names the character as 15.1 judges it", () => {
+    expect(expectRejects(doc(`{${U16_LETTER}}`)).reason).toContain(
+      "Unicode 15.1",
+    );
+    expect(expectRejects(doc(`<a${U16_LETTER} />`)).reason).toContain(
+      `(U+1C89, judged by Unicode 15.1)`,
+    );
+    expect(expectRejects(doc(`<a${U180E}b="1" />`)).reason).toContain(
+      `(U+180E, judged by Unicode 15.1)`,
+    );
   });
 });
 
