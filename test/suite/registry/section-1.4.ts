@@ -28,7 +28,9 @@
 //     neither U+2028 nor U+2029, which 1.4's quote-and-escape bullet bars
 //     (§VIOL-VALID-SEP expects T1.4-2 to keep passing under that violator);
 //   - non-whitespace control characters appear only in T1.4-1's control arms
-//     and T1.4-4's control tag arms (§VIOL-VALID-CTRL).
+//     and T1.4-4's control tag arms (§VIOL-VALID-CTRL);
+//   - U+2028 and U+2029 appear only in T1.4-1's and T1.4-4's one arm each
+//     (§VIOL-VALID-SEP: each certified test fails on those arms alone).
 // T1.4-3 is in no certification entry's scope: it exercises the generated
 // module under standard TypeScript tooling (HARNESS-05, SPEC 13.1).
 //
@@ -162,6 +164,18 @@ const QUOTE_ESCAPE_REFERENCE_CHARACTERS: readonly ForbiddenCharacterClass[] = [
     quote: '"',
   },
   { name: "the character-reference character `&`", character: "&", quote: '"' },
+];
+
+/**
+ * U+2028 (LINE SEPARATOR) and U+2029 (PARAGRAPH SEPARATOR): in neither 1.4
+ * class (T1.4-2), yet barred from every segment and tag by 1.4's
+ * quote-and-escape bullet — one invalid arm each in T1.4-1 and in T1.4-4,
+ * each staged as the literal, validly encoded character (never an escape
+ * spelling, which 2.4 reads verbatim as a value containing `\`).
+ */
+const LINE_SEPARATOR_CHARACTERS: readonly (readonly [number, string])[] = [
+  [0x2028, "line separator"],
+  [0x2029, "paragraph separator"],
 ];
 
 /** U+FFFD (REPLACEMENT CHARACTER), which no argument value carries (SPEC 1.4, 12.0). */
@@ -332,7 +346,9 @@ async function expectSingle144(
 
 // The segment-validity matrix. Every representative is staged as its raw
 // character between two ordinary letters (or as the whole segment, for the
-// forbidden names) — the quote, escape, and character-reference characters
+// forbidden names) — the quote, escape, and character-reference characters,
+// U+2028 and U+2029 (one arm each: 1.4's quote-and-escape bullet bars both,
+// though neither is whitespace or a control character under 1.4, T1.4-2),
 // and U+FFFD included (SPEC 1.4) — plus the two verbatim spellings of SPEC
 // 2.4 (module header). U+00A0 and U+0085 belong to neither 1.4 class and no
 // rule of 1.4 bars them: they are deliberately absent from this test — they
@@ -363,6 +379,10 @@ const INVALID_SEGMENT_ARMS: readonly SegmentArm[] = [
     name: `${name} in a segment`,
     segment: `a${character}b`,
     quote,
+  })),
+  ...LINE_SEPARATOR_CHARACTERS.map(([codePoint, label]) => ({
+    name: `${codePointName(codePoint)} (${label}) in a segment`,
+    segment: between(codePoint),
   })),
   {
     name: "U+FFFD (REPLACEMENT CHARACTER) in a segment",
@@ -422,7 +442,7 @@ const LONE_EMPTY_SEGMENT = staged(
 const T1_4_1 = defineProductTest({
   id: "T1.4-1",
   title:
-    'segment validity matrix: empty segments (`a..b` via nesting and a lone `id=""`), `#`, each whitespace character, each control-class representative, each forbidden name, the quote, escape, and character-reference characters (`"` single-quoted, `\'`, backslash, `&`), and U+FFFD fail with 14.4, one finding per offending `id` attribute located exactly at it; the verbatim escape and character-reference spellings of `.` are segments containing the backslash and `&` — condition 4, never the two-segment ID `a.b` (SPEC 1.4, 2.4, 14, 14.4)',
+    'segment validity matrix: empty segments (`a..b` via nesting and a lone `id=""`), `#`, each whitespace character, each control-class representative, each forbidden name, the quote, escape, and character-reference characters (`"` single-quoted, `\'`, backslash, `&`), U+2028 and U+2029 (one arm each, between two letters), and U+FFFD fail with 14.4, one finding per offending `id` attribute located exactly at it; the verbatim escape and character-reference spellings of `.` are segments containing the backslash and `&` — condition 4, never the two-segment ID `a.b` (SPEC 1.4, 2.4, 14, 14.4)',
   run: async (product) => {
     // Template control: the base workspace differs from every negative arm
     // only in the one segment, so each arm's 14.4 is attributable to the
@@ -611,8 +631,11 @@ const T1_4_3 = defineProductTest({
 // (2.6), so no tag token can be empty or contain whitespace — whitespace-only
 // values behave as omitted (T2.6-2), and the whitespace control characters
 // U+0009–U+000D are split away as separators. The quote, escape, and
-// character-reference characters and U+FFFD are invalid in a tag as in a
-// segment, and the escape spelling of `y` is read verbatim (module header).
+// character-reference characters, U+2028 and U+2029 (one arm each, 1.4's
+// quote-and-escape bullet; neither is 1.4 whitespace, so 2.6 splitting keeps
+// the staged value one tag and 14.4 alone rejects it), and U+FFFD are
+// invalid in a tag as in a segment, and the escape spelling of `y` is read
+// verbatim (module header).
 interface TagArm {
   readonly name: string;
   readonly tag: string;
@@ -639,6 +662,10 @@ const INVALID_TAG_ARMS: readonly TagArm[] = [
     name: `a tag containing ${name}`,
     tag: `x${character}y`,
     quote,
+  })),
+  ...LINE_SEPARATOR_CHARACTERS.map(([codePoint, label]) => ({
+    name: `a tag containing ${codePointName(codePoint)} (${label})`,
+    tag: `x${String.fromCodePoint(codePoint)}y`,
   })),
   {
     name: "a tag containing U+FFFD (REPLACEMENT CHARACTER)",
@@ -672,7 +699,7 @@ const INVALID_TAG_FIXTURES = INVALID_TAG_ARMS.map((arm) => ({
 const T1_4_4 = defineProductTest({
   id: "T1.4-4",
   title:
-    "tags: `.` is valid; `#`, a forbidden name, non-whitespace control characters, the quote, escape, and character-reference characters (`\"` single-quoted, `'`, backslash, `&`), and U+FFFD fail with 14.4, one finding per offending `tags` attribute located exactly at it; the verbatim escape spelling of `y` is a tag containing the backslash — condition 4, never the tag `xy`; the T1.4-2 boundary code points U+00A0 and U+0085 are valid in tags and never split (SPEC 1.4, 2.4, 2.6, 14, 14.4)",
+    "tags: `.` is valid; `#`, a forbidden name, non-whitespace control characters, the quote, escape, and character-reference characters (`\"` single-quoted, `'`, backslash, `&`), U+2028 and U+2029 (one arm each), and U+FFFD fail with 14.4, one finding per offending `tags` attribute located exactly at it; the verbatim escape spelling of `y` is a tag containing the backslash — condition 4, never the tag `xy`; the T1.4-2 boundary code points U+00A0 and U+0085 are valid in tags and never split (SPEC 1.4, 2.4, 2.6, 14, 14.4)",
   run: async (product) => {
     for (const { arm, fixture } of VALID_TAG_FIXTURES) {
       const workspace = await TestWorkspace.create({

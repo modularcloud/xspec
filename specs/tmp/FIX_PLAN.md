@@ -26,7 +26,7 @@ Why the harness must change: the documents moved after the harness was last gree
 **Standing rulings.** Two rulings stand for this run: AGENTS.md's "Known residual 14.20 location gaps" and "Known SPEC 6.5 gap, deferred to a future SPEC revision" bullets. No task here addresses them, and none may be added for them.
 
 **Order.** Tasks are in dependency order, and each names what it depends on:
-- Part A (Tasks 4–12) clears the red certification gate and brings the certification families to the current CERTIFICATIONS.md.
+- Part A (Tasks 5–12) clears the red certification gate and brings the certification families to the current CERTIFICATIONS.md.
 - Part B (Tasks 13–20) builds the machinery later tasks rely on.
 - Part C (Tasks 21–61) brings the T-numbered tests to the current text, in TEST-SPEC order.
 - Part D (Tasks 62–65) covers the properties, the Windows leg, and S-9's generated TypeScript forms.
@@ -38,24 +38,9 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part A — Certification
 
-### Task 4 — T1.4-1 and T1.4-4: one invalid arm each for U+2028 and U+2029 (TEST-SPEC L57, L60; A1, A3)
-
-**Depends on.** Task 3 (done at the commit that removed it from this plan): the conformer bars both code points.
-
-**Where.** `test/suite/registry/section-1.4.ts`: T1.4-1's matrix arms and T1.4-4's invalid tag arms, plus staged-source records wherever a body stages after its first invocation.
-
-**Change.** Stage each code point as the literal, validly encoded character.
-- *T1.4-1.* One arm per code point, spelled between two letters in an `id`: 14.4, one finding per offending `id` attribute, located at the attribute (T14-11).
-- *T1.4-4.* One arm per code point, a tag containing it: 14.4, one finding per offending `tags` attribute, located at it.
-
-**Checks.**
-- `-t VALID`: the conformer passes. CTRL and WIDE still fail exactly their tests: the new arms pass against both, since both bar the two code points.
-- The S-9 ledger self-test passes.
-- T1.4-1 and T1.4-4 against the built product (diagnose).
-
 ### Task 5 — VIOL-VALID-SEP (CERTIFICATIONS.md §VIOL-VALID-SEP; TEST-SPEC C-1; V failure 2; D1(c))
 
-**Depends on.** Task 4 (and Task 3, done).
+**Depends on.** Tasks 3 and 4 (done at the commits that removed them from this plan): the conformer bars both code points, and T1.4-1 and T1.4-4 each carry one U+2028 arm and one U+2029 arm, the literal characters between two letters.
 
 **Where.**
 - `test/fixtures/conf-valid/bin-sep.mjs` (new, on the sibling `bin-<deviation>.mjs` pattern);
