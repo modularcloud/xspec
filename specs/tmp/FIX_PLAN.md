@@ -16,7 +16,7 @@ Why the harness must change: the documents moved after the harness was last gree
 
 **Conventions for new and changed tests.**
 - *Registration.* A new registered test goes into its registry module's exported list. A new module also needs an import in `test/suite/registry/index.ts` and a thin wrapper `test/suite/<module>.test.ts` calling `declareProductTests`. Every new test needs its H-7 entry in `test/suite/registry/traceability.ts`, carrying `"14"` whenever it asserts a numbered condition or a stable refusal code (TEST-SPEC §14's per-condition index: "the H-7 map is the complete record"). S-1 checks the map, and S-7's sweep runs every registered body against the empty stub; both run in the self project.
-- *S-9 timing.* A `.mdx` source that a body stages after its first product invocation, or in a workspace it creates after it, is a staged-source record (`test/helpers/staged-mdx.ts`, judged by `test/self/s9-staged-sources.test.ts`); the undeclared-staging guard refuses plain contents there. Once Task 16 lands, the same holds for TypeScript code sources and configuration files. Since Task 15 the builder judges every staged code source and configuration file at staging time (AGENTS.md's S-9 TypeScript bullet): a new staging of one TEST-SPEC declares unparseable lists it under `ts.unparseable`, a code source whose name `TS_DEFAULT_SUFFIXES` does not reach lists it under `ts.wellFormed` (or `ts.unparseable`), and a file whose well-formedness the document does not declare under `ts.unchecked`.
+- *S-9 timing.* A `.mdx` source that a body stages after its first product invocation, or in a workspace it creates after it, is a staged-source record (`test/helpers/staged-mdx.ts`, judged by `test/self/s9-staged-sources.test.ts`); the undeclared-staging guard refuses plain contents there. Since Task 16 (dc97774) a TypeScript code source or configuration file staged there is a `StagedTs` record too (AGENTS.md's TypeScript-records bullet), and once Task 16o lands the guard refuses plain contents there as well. Since Task 15 the builder judges every staged code source and configuration file at staging time (AGENTS.md's S-9 TypeScript bullet): a new staging of one TEST-SPEC declares unparseable lists it under `ts.unparseable`, a code source whose name `TS_DEFAULT_SUFFIXES` does not reach lists it under `ts.wellFormed` (or `ts.unparseable`), and a file whose well-formedness the document does not declare under `ts.unchecked`.
 - *Never-modifies compares* use the compare-around machinery (`assertLeavesUnchanged` and `snapshotDirectory` in `test/helpers/snapshot.ts`, as T13.4-5 uses them). CERTIFICATIONS.md's VIOL-CORE-CHATTYREADS note makes the certification of T6.4-3, T6.5-4, T6.5-20, T6.5-21, T13.4-9, and T13.4-10 representative only insofar as they share it.
 - *Free text.* Corrections and other free-text checks use H-3's robust matching.
 - *Linux-leg arms* (staged file names holding a backslash, U+000A, U+000D, or non-UTF-8 bytes) gate themselves inside the shared body, as T12.0-5's non-UTF-8 arm does, so the Windows subset (`test/windows/e6-subset.test.ts`) skips no arm.
@@ -38,24 +38,147 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part B — Shared machinery
 
-### Task 16 — S-9's TypeScript check for post-invocation stagings: records, ledger, guard (TEST-SPEC S-9's timing clause, L632; H-8; S-7; C1, part 3)
+### Notes for Tasks 16b–16o, Task 16's split (not a task; Task 16o deletes them) — S-9's TypeScript check for post-invocation stagings (TEST-SPEC S-9's timing clause, L632; H-8; S-7; C1, part 3)
 
-**Depends on.** Task 15 (done: the builder judges every code source and configuration file at staging time through `judgeTsDeclaration`; the declaration is `ts: { unparseable, unchecked, wellFormed }` on `create`, or `{ ts: ... }` per `file()` call; AGENTS.md's S-9 TypeScript bullet lists the declared stagings and a one-pass survey recipe for finding every staging the check judges, with each one's body and invocation state). Several of Task 15's declarations sit on stagings after a product invocation — T7-2's later arms, T14-11's arms, T12.7-3's sibling `file()`, T13.4-11(b)'s `file()`, and every later-arm workspace whose code sources or configuration the default judges — so converting such a staging to a record moves its declaration into the record.
+Task 16 was split as its text allowed. Done at dc97774: the mechanism — `StagedTs` records (`test/helpers/staged-ts.ts`), sealed beside the MDX ledger and judged by `test/self/s9-staged-sources.test.ts`; the builder's record overloads; MDX records carrying `ts` for a code-group `.mdx` path — and the first module group (§1's five modules) plus the E-6 fixture's configuration and code source. AGENTS.md's "staged-source ledger's TypeScript records" bullet holds the conversion rule, the detector recipe that finds a module's remaining plain post-invocation TypeScript stagings, and the survey's totals.
 
-**Where.**
-- `test/helpers/staged-mdx.ts`, or a sibling generalizing it;
-- `test/self/s9-staged-sources.test.ts`;
-- the undeclared-staging guard (`test/helpers/product-invocations.ts`, `test/helpers/workspace.ts`) and its self-test `test/self/s9-undeclared-staging.test.ts`;
-- every registry module staging a code source or configuration file after a product invocation. Reconfiguration after a `build` is the common case: `outDir` changed, emission disabled, a code group added.
+Every split task below converts its modules by that rule, then checks:
+- `test/self/s9-staged-sources.test.ts` passes; AGENTS.md records its TypeScript-judgement count and the self project's test count.
+- Each converted module's suite files under the namespace against the built product keep their verdicts (diagnosed failures at the same arms), with no harness error.
+- The detector, run over those suite files and `test/self/certification.test.ts`, logs no plain post-invocation staging from the task's modules. A site behind a diagnosed product failure that no conformer reaches is found by reading the module, and converted all the same.
+- `npm run typecheck`, `npm run format:check`, and the full self project under the namespace pass.
 
-**Change.** S-9 checks each deterministic TypeScript fixture before any product exists. As for `.mdx` (AGENTS.md's ledger bullets), a code source or configuration file staged after the body's first product invocation, or in a workspace created after it, becomes a module-level staged-source record judged by the ledger self-test. The undeclared-staging guard then refuses plain contents there.
-- *Sequence.* Land the mechanism (records and ledger) first, then the conversions, then the guard. The guard enables only once no suite staging would trip it, so the suite never shows a harness error.
-- *Splitting.* If the conversions exceed one spawn, land the mechanism with the first module group. Insert follow-up tasks directly after this one, one per module group with the guard in the last, as the fifth-determination plan split its `.mdx` ledger conversion.
+The survey at 3f43daa (suite plus certification) names each module's runtime sites below: tests, staged paths, and distinct byte-strings. It is a floor, not the list.
+
+### Task 16b — TypeScript records: §2 and §3
+
+- `section-2.1.ts`: T2.1-2, T2.1-3, T2.1-5. `withWorkspace`'s configurations: 2 byte-strings. T2.1-2's code-group arm `docs/EXTRA.mdx` is an MDX record staged after an invocation: give it `ts: "well-formed"` (`stagedMdx`'s fourth argument), and drop the arm's `ts: { wellFormed: [...] }`.
+- `section-2.2-2.3.ts`: T2.3-3, configurations, 2 byte-strings.
+- `section-2.4.ts`: T2.4-2 through T2.4-5, configurations and `src/app.ts`, 5 byte-strings.
+- `section-2.5-2.6.ts`: T2.5-3 and T2.6-3, 2 byte-strings.
+- `section-2.7.ts`: T2.7-1, T2.7-3, and T2.7-4, 2 byte-strings.
+- `section-3.ts`: T3-6, 2 byte-strings.
+
+### Task 16c — TypeScript records: `section-4.ts` and `section-4.1-4.2.ts`
+
+- `section-4.ts`: T4-2 and T4-5. Configurations, `src/app.ts`, `src/one.ts`, `src/two.ts`, `src/side.ts`, and `src/t.ts` across the arm workspaces: 48 byte-strings. Arm tables take one record per row.
+- `section-4.1-4.2.ts`: no runtime site; confirm by reading.
+
+### Task 16d — TypeScript records: `section-4.3-4.4.ts`, `section-4.5.ts`, `section-4.6.ts`
+
+- `section-4.3-4.4.ts`: T4.3-2 and T4.4-1. Configurations, `src/app.ts`, and `consumer/cross.ts`: 14 byte-strings.
+- `section-4.5.ts`: T4.5-2 through T4.5-5, T4.5-8, and T4.5-9. Configurations, `src/app.ts`, and `src/t.ts`: 46 byte-strings.
+- `section-4.6.ts`: T4.6-3. The configuration and the five declaration-file names (`src/x.d.ts`, `.d.mts`, `.d.cts`, `.d.css.ts`, `src/x.dts.ts`): 6 byte-strings.
+
+### Task 16e — TypeScript records: §5 and §6.1–§6.4
+
+- `section-5.1-5.3.ts`: T5.3-1. `section-5.4.ts`: T5.4-1 and T5.4-2. `section-5.5.ts`: T5.5-2. One configuration each.
+- `section-5.6.ts`: no runtime site; confirm by reading.
+- `section-5.7.ts`: T5.7-2 and T5.7-4. Configurations and `src/calltext.ts`, `src/collide.ts`, `src/cross.ts`, `src/ctrl.ts`, `src/typed.ts`: 7 byte-strings.
+- `section-6.1.ts`: T6.1-3. `section-6.2.ts`: T6.2-3 and T6.2-4. One configuration each.
+- `section-6.3.ts`: T6.3-2, T6.3-4, and T6.3-5. `xspec.config.ts`, `inner/xspec.config.ts`, `sub/xspec.config.ts`, and `sub/xspec.previous.config.ts`: 4 byte-strings.
+- `section-6.4.ts`: T6.4-2 through T6.4-5 and T6.4-7. Configurations, `src/app.ts`, and `src/other.ts`: 11 byte-strings. T6.4-7's `copyFrom` seeding stays as it is.
+
+### Task 16f — TypeScript records: §6.5–§6.7
+
+- `section-6.5.ts`: T6.5-1 through T6.5-5 and T6.5-8 through T6.5-10. Configurations and `src/app.ts`: 11 byte-strings. Its `stageConfigurationStateTwins` calls (`support.ts`) pass records in the files map they hand over.
+- `section-6.5-ii.ts`: T6.5-11, configurations and `src/c.ts`, 5 byte-strings.
+- `section-6.5-iii.ts`: T6.5-12 through T6.5-17 and T6.5-19, 2 configurations.
+- `section-6.6.ts`: T6.6-2 through T6.6-5. Configurations and `src/app.ts`: 6 byte-strings, including T6.6-5's `file()` of `xspec.config.ts`.
+- `section-6.7.ts`: T6.7-1, one configuration.
+
+### Task 16g — TypeScript records: `section-7-basics.ts`
+
+- T7-1, T7-2, and T7-3. Configuration arms and `src/impl.ts`: 45 byte-strings.
+- T7-2's declared-unparseable configurations become `unparseable` records, their workspace `ts.unparseable` entries dropped.
+- Also convert the arms past the built product's diagnosed failures that the survey could not reach.
+
+### Task 16h — TypeScript records: `section-7-discovery.ts` and `section-7.1-7.3.ts`
+
+- `section-7-discovery.ts`: T7-4 and T7-6. Configurations, `src/a<backslash>b.ts`, `src/ab.ts`, `src/plain.ts`, `.xspec/staged.ts`, and `specs/a'b.md` (T7-6's `unparseable` code source): 25 byte-strings.
+  - T7-6 fails diagnosed against the built product, so certification reached five of its configurations the suite did not.
+  - T7-4's Linux-leg literal-backslash arm stays gated inside the body; its record's bytes and path are built from code points as now.
+- `section-7.1-7.3.ts`: T7.1-1 and T7.3-1. Configurations, `specs/A.md` (a code source, `wellFormed` today), and `src/use.ts`: 22 byte-strings.
+
+### Task 16i — TypeScript records: `section-7.4-7.5.ts`
+
+- T7.4-1, T7.5-1, T7.5-2, and T7.5-4 through T7.5-6: 67 byte-strings.
+- Paths: configurations, `src/impl.ts`, `dualcode/d.ts`, `src/good.ts`, `src/evil.ts`, `src/a$0.ts`, `src/ab.ts`, `src/a0.ts`, `hi/H.xspec.ts`, and T7.5-5's `src/end$` and `src/end` (code sources the default does not reach, `wellFormed` today).
+
+### Task 16j — TypeScript records: §8–§10
+
+- `section-8.ts`: T8-5 and T8.2-1. `section-9.3.ts`: T9.3-3. `section-9.ts`: no runtime site; confirm by reading.
+- `section-10.1.ts`: T10.1-1, T10.1-4, and T10.1-6. `section-10.2-10.3.ts`: T10.2-2.
+- `section-10.4.ts`: T10.4-1, T10.4-2, and T10.4-4, with `src/ref.ts`. `section-10.5.ts`: T10.5-1 and T10.5-5. `section-10.6.ts`: T10.6-2.
+- `section-10.7-i.ts`: T10.7-1 and T10.7-2. `section-10.7-ii.ts`: T10.7-7, T10.7-9, and T10.7-12, with `src/next.ts`, `src/ref.ts`, and `src/del.ts`.
+- About 23 byte-strings in all.
+
+### Task 16k — TypeScript records: §11 and §12.0
+
+- `section-11.ts`: T11-2 and T11-4, with `src/app.ts`. Its `stageConfigurationStateTwins` calls pass records.
+- `section-11.2.ts`: T11.2-4 through T11.2-6. `section-11.3.ts`: T11.3-1 through T11.3-3, with `src/app.ts` and `src/co#de.ts`. `section-11.4.ts`: T11.4-3, T11.4-5, and T11.4-6. `section-11.5.ts`: no runtime site; confirm by reading.
+- `section-11.6.ts`: T11.6-2 through T11.6-4, 8 configurations. T11.6-4's malformed configurations are `unparseable` records.
+- `section-12.0-i.ts`: T12.0-2, T12.0-3, T12.0-5, and T12.0-6, with `alt/xspec.config.ts`. Its `stageConfigurationStateTwins` call passes records.
+- `section-12.0-ii.ts`: T12.0-8 through T12.0-10, with `src/app.ts`. `section-12.0-iii.ts`: T12.0-14's `cfg/xspec.config.ts`.
+- About 31 byte-strings in all.
+
+### Task 16l — TypeScript records: §12.1–§13
+
+- `section-12.1-12.2.ts`: T12.1-3, T12.1-4, T12.2-2, and T12.2-4, with `specs/A.xspec.ts`, `src/app.ts`, and `hi/H.xspec.ts`. `section-12.3-12.5.ts`: T12.3-1.
+- `section-12.6.ts`: T12.6-2. Its `malformed-config.ts` is an `unparseable` record.
+- `section-12.7.ts`: T12.7-1 through T12.7-3, with `src/app.ts`, `src/ref.ts`, `cfg/xspec.config.ts`, and `a/xspec.config.ts`. T12.7-3's malformed configuration and its sibling `file()` are `unparseable` records.
+- `section-13.1-13.2.ts`: T13.2-1. `section-13.3.ts`: T13.3-2 through T13.3-4.
+- `section-13.4.ts`: T13.4-3, T13.4-6, T13.4-8, and T13.4-11.
+  - T13.4-11 fails diagnosed against the built product, so certification reached six of its stagings the suite did not.
+  - T13.4-11(b)'s `specs/A.md` code source is `wellFormed` today.
+  - T13.4-2's damaged derived files and T13.4-4's noise stay `unchecked` and plain.
+- `section-13.5.ts`: T13.5-1, T13.5-4, T13.5-6, and T13.5-8, one configuration.
+- `write-refusal-staging.ts`: T13.5-7, T14-9, and T14-10, configurations and `src/app.ts`, 5 byte-strings.
+- About 44 byte-strings in all.
+
+### Task 16m — TypeScript records: §14
+
+- `section-14.ts`: T14-2 through T14-8 and T14-11. Configurations; T14-2's `src/app.ts` and `src/escaped.ts` `file()` stagings; and T14-11's arm code sources (`src/app.ts`, `src/view.mts`, `src/exp.ts`, `src/req.ts`, `src/dyn.ts`, `src/collide*.ts`, `src/bad.ts`, …): 35 byte-strings.
+  - Keep the declared-unparseable kinds as `unparseable` records. These are T14-5's TSX-only `src/view.mts`; T14-11's (m) and (v) code sources (the survey saw `src/app.ts`, `src/bad.ts`, `src/cut.ts`, `src/eof.ts`, `src/overlong.ts`, `src/prefix.ts`, and `src/surrogate.ts` declared unparseable); and T14-12's code-source arms wherever T14-4, T14-6, and T14-11's (w) restage them. `unparseableDecl` and `reassertedCase` derive the declaration from the arm's `kind`, so the records must too. T14-3's `src/brokents.ts` is staged before any invocation and stays plain.
+  - A `.tsx` path's record names grammar `"tsx"`.
+- `section-14-ii.ts`: T14-10, one configuration.
+- `section-14-iii.ts`: T14-12, configurations and `src/app.ts`, 8 byte-strings.
+
+### Task 16n — TypeScript records: the §16 properties' fixed files
+
+- A property's fixed configuration or base code source, staged in every trial's workspace, is a deterministic fixture. Each later trial stages it after the body's first invocation, so it becomes a record.
+- One configuration each: P-1, P-2/P-3, P-4, P-5/P-6, P-9, P-10, and P-12.
+- P-8 and P-11 each have a configuration and a base `src/app.ts` as records. Their mutated files stay `unchecked` and plain.
+- Not records: P-7's configurations (38 byte-strings over the fixed seeds) and P-13's configuration, `c0/U.ts`, and `c1/V.ts` (49) are composed per draw. Task 16o declares them per draw, and Task 64 judges them.
+- Checks: each property against the built product at the fixed seeds keeps its verdict, P-1 failing diagnosed as now. Record a timing in AGENTS.md if one moved.
+
+### Task 16o — The undeclared-staging guard covers code sources and configurations (Task 16's last)
+
+**Depends on.** Tasks 16b–16n: the guard enables only once no suite staging would trip it.
+
+**Change.**
+- *The TypeScript arm.* The guard (`test/helpers/workspace.ts`, `test/helpers/product-invocations.ts`) covers the TypeScript check as it covers `.mdx`. After either mark — the workspace's or the running body's — it refuses with `HarnessStagingError` mode `undeclared-staging`:
+  - plain contents at a path the TypeScript check judges, whose effective declaration is neither `unchecked` nor per-draw, staged by `file()`, as an initial `files` entry at creation (per-body mark only, as for `.mdx`), or by `copyFrom()` out of a workspace with no invocation;
+  - an MDX record with no `ts` at such a path.
+  
+  The diagnosis names the TypeScript remedies: a `StagedTs` record, an MDX record's `ts`, `ts.unchecked`, or the per-draw declaration.
+- *Draws.* Add a TypeScript per-draw declaration (`{ ts: "per-draw" }` per `file()` call, `ts.perDraw` on `create`): judged well-formed at staging, exempt from the guard, section-16 modules only. Declare P-7's and P-13's draw-composed files with it. Task 64 adds the runner's per-draw check before the product is driven.
+- *Headers.* Update the module headers (`workspace.ts`, `product-invocations.ts`, `staged-ts.ts`) and AGENTS.md's guard and TypeScript-records bullets. Delete the notes block above Task 16b with this task.
+- *The Windows leg.* `test/windows/e6-drive-mismatch.test.ts` stages `xspec.config.ts` and `specs/a.mdx` at creation, outside every registered body and S-7's sweep, as E-6's fixture does. The guard cannot refuse that staging, yet S-9 wants both files judged before any product exists. Make them records the S-9 self-test judges, as it judges E-6's: for example, move the two constants into a helper module that the Windows test imports and that the self-test imports before the manifest seals the ledger.
 
 **Checks.**
-- The ledger self-test passes; record its count in AGENTS.md.
-- The guard's self-test covers a `.ts` staging and a configuration staging.
-- The full suite against the built product shows no `undeclared-staging` or other harness error.
+- `test/self/s9-undeclared-staging.test.ts` covers a `.ts` code-source staging and an `xspec.config.ts` configuration staging. For each:
+  - refused after a workspace invocation and after a body invocation, as `file()` and as an initial entry;
+  - exempt as a record, `unchecked`, per-draw, `edit()`, and `copyFrom()` out of an invoked workspace;
+  - the MDX record without `ts` at a code-group `.mdx` path refused.
+  
+  Its existing exemption line staging `src/app.ts` after an invocation must change: that path is judged now.
+- Red check: on a scratch-backed copy of a converted module, make one record's staging plain (`.source`). The run reports `undeclared-staging`. Restore with `cp` and verify with `cmp`.
+- The decisive check, never beside the self project: the full suite under the namespace, `--reporter=verbose` to a log.
+  - `grep -c 'undeclared-staging'` gives 0;
+  - the failed-ID set equals the known one (P-1, T1.4-1, T1.4-4, T7-6, T13.4-11 at dc97774, unless a task since changed it);
+  - every error is a `HarnessAssertionError`.
+- The full self project under the namespace passes, with certification totals unchanged.
 
 ### Task 17 — S-9's MDX check judges identifier characters and space separators by Unicode 15.1, code point by code point (TEST-SPEC S-9, L632; SPEC 14.20; C2)
 
@@ -749,7 +872,7 @@ In each staging:
 
 ### Task 64 — S-9's TypeScript check for generated forms: the fixed vector set and the per-draw check (TEST-SPEC S-9, L632; §16; C1, part 4)
 
-**Depends on.** Tasks 14–16, 62, and 63.
+**Depends on.** Tasks 14, 15, 16b–16o (Task 16o declares the draw-composed files per draw), 62, and 63.
 
 **Where.**
 - `test/helpers/property.ts`: `checkProperty`'s per-draw S-9 option (today `mdxSources`);
