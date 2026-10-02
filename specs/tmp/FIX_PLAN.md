@@ -38,23 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 25 — T4-2: import types, string-named module declarations, their derived-path designations, and "no other construct names a module" (TEST-SPEC L151, and T4.5-7 at L187, which defers to T4-2; SPEC 4, 4.5, 14.15; A9)
-
-**Where.** `test/suite/registry/section-4.ts`, where `MODULE_LINKING_FORMS` lists four forms today.
-
-**Change.** Spellings from L151; every file must be accepted by 5.9.3 both ways.
-- *(i) Import types.* `type T = import("./NAME.xspec").default` and `let v: typeof import("./NAME.xspec")` each give 14.15.
-- *(ii) String-named module declarations.* Each gives 14.15:
-  - `declare module "./NAME.xspec" { }`, in a file holding `export {}`;
-  - `module "./NAME.xspec" { }`;
-  - `declare module "*.xspec" { }`.
-- *(iii) Derived-path designation.* Cover every module-linking form 4 names (six) by adding the import type and the string-named module declaration to `MODULE_LINKING_FORMS`. Each form designates `./NAME.xspec.ts`, a path under `.xspec/`, and a configured Markdown emit destination while emission is enabled.
-- *(iv) "No other construct names a module."*
-  - *Staging.* `src/c.ts` imports `NAME.mdx`'s module and marks a node. It also holds `require("../specs/NAME.xspec")`, `require("./missing.xspec")`, the triple-slash reference, the `const p` string, and the three template-literal `import()` calls (exact list at L151).
-  - *Expected.* `build` and `check` exit 0, and `query edges` lists only the marker's edge. Under a file move of `NAME.mdx`, only the import declaration's specifier is rewritten; the other seven spellings stay byte-unchanged. The preview reports exactly one `import-specifier-rewrite` for the file.
-
-**Checks.** S-9 and S-7 pass. T4-2 and T4.5-7 against the built product.
-
 ### Task 26 — T4.3-2 and T4.5-3: the template-literal arms (TEST-SPEC L172, L183; A10, A11)
 
 **Where.** `test/suite/registry/section-4.3-4.4.ts` (T4.3-2) and `section-4.5.ts` (T4.5-3).

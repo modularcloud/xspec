@@ -20,12 +20,17 @@
 // (14.15); the permitted bindings are the default and `text` exports, each
 // optionally aliased, possibly type-only; every other module-linking form
 // whose specifier ends in `.xspec` — a dynamic `import()` with a static
-// specifier, export declarations in all forms, `import X = require(…)` — is
-// invalid (14.15), as is any of the four module-linking forms whose relative
-// specifier designates a derived-file path (13.4) other than through
-// `.xspec`; a dynamic `import()` with a non-static specifier is not analyzed
-// and records nothing; imports colliding on a binding identifier are 14.15
-// when either import is a spec module import.
+// specifier, export declarations in all forms, `import X = require(…)`, an
+// import type, a string-named module declaration (its name the specifier) —
+// is invalid (14.15), as is any of the six module-linking forms whose
+// relative specifier designates a derived-file path (13.4) other than
+// through `.xspec`; no other construct names a module — a dynamic
+// `import()` whose specifier is not a static string literal (an
+// identifier, a template literal) is not analyzed and records nothing, and a
+// `require(…)` call's argument, a triple-slash directive, or a string
+// literal elsewhere is never read, validated, or rewritten (6.5) as a
+// specifier; imports colliding on a binding identifier are 14.15 when either
+// import is a spec module import.
 //
 // Conservative operationalizations (noted per H-4 — wording is free, so only
 // the stated observables are asserted):
@@ -44,7 +49,12 @@
 //   the `occurrences` document's complete (file, kind, target) multiset with
 //   the two ordinary consumers' records — a phantom record is an extra tuple
 //   — leaving each record's source datum and exact span to T5.7-2/T5.7-3.
+// - T4-2 "`query edges` listing the marker's edge alone" (the
+//   no-other-construct arm): the whole workspace's dependency edges are
+//   compared with the marker's one edge; the spec source's structural
+//   `contains` edge (SPEC 5.2) is not the arm's subject and is set aside.
 
+import { Buffer } from "node:buffer";
 import type {
   DependencyEdgeKind,
   Finding,
@@ -55,11 +65,13 @@ import {
   decodeEdgesReport,
   decodeFindingsReport,
   decodeOccurrencesReport,
+  decodePreviewReport,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
   assertExitCode,
+  assertFileBytes,
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
@@ -434,6 +446,50 @@ const XSPEC_RULE_ARMS: readonly InvalidTsImportArm[] = [
     name: "an `import X = require(…)` declaration with a `.xspec` specifier",
     statements: ['import MOD = require("../specs/BASE.xspec");'],
   },
+  // An import type is a module-linking form, never a free type-level
+  // reference (SPEC 4, 4.5; T4.5-7 defers here). Its `./NAME.xspec`
+  // specifier designates a discovered spec source — `src/NAME.mdx` beside
+  // the code file (COLOCATED_CONFIG) — so the form alone is the defect: a
+  // product validating the target alone, or reading the import type as a
+  // type-level reference, builds clean and fails the arm.
+  {
+    name: 'an import type naming a `.xspec` module (`type T = import("./NAME.xspec").default`)',
+    statements: ['type T = import("./NAME.xspec").default;'],
+    config: COLOCATED_CONFIG,
+    extraFiles: { "src/NAME.mdx": COLOCATED_SPEC_SOURCE },
+  },
+  {
+    name: 'an import type in a `typeof` query naming a `.xspec` module (`let v: typeof import("./NAME.xspec")`)',
+    statements: ['let v: typeof import("./NAME.xspec");'],
+    config: COLOCATED_CONFIG,
+    extraFiles: { "src/NAME.mdx": COLOCATED_SPEC_SOURCE },
+  },
+  // A string-named module declaration, its name the specifier (SPEC 4),
+  // `declare` or not, a module augmentation included. TypeScript's own
+  // complaints here — a relative ambient module name, a quoted name outside
+  // an ambient context — are post-parse checks, so each file is well-formed
+  // (14.20) and its finding 14.15's. The augmentation's file holds
+  // `export {}` (a module, so the declaration augments the discovered spec
+  // source's module), staged after the declaration so the declaration is the
+  // statement the finding locates.
+  {
+    name: 'a module augmentation `declare module "./NAME.xspec" { }`, its file holding `export {}`',
+    statements: ['declare module "./NAME.xspec" { }', "export {};"],
+    config: COLOCATED_CONFIG,
+    extraFiles: { "src/NAME.mdx": COLOCATED_SPEC_SOURCE },
+  },
+  {
+    name: 'the undeclared string-named module declaration `module "./NAME.xspec" { }`',
+    statements: ['module "./NAME.xspec" { }'],
+    config: COLOCATED_CONFIG,
+    extraFiles: { "src/NAME.mdx": COLOCATED_SPEC_SOURCE },
+  },
+  {
+    // Non-relative and designating nothing, its name still ends in `.xspec`:
+    // a product checking relative specifiers alone builds clean and fails.
+    name: 'the non-relative ambient wildcard `declare module "*.xspec" { }`',
+    statements: ['declare module "*.xspec" { }'],
+  },
 ];
 
 // The side-effect-only form (SPEC 4): `import "./NAME.xspec"` binds nothing,
@@ -455,7 +511,7 @@ const SIDE_EFFECT_IMPORT_ARMS: readonly InvalidTsImportArm[] = [
   },
 ];
 
-// Derived-path arms (SPEC 4, 13.4): the full cross product of the four
+// Derived-path arms (SPEC 4, 13.4): the full cross product of the six
 // module-linking forms SPEC 4 names and the three derived-file path kinds of
 // 13.4 — a file name containing `.xspec.` (the generated module's own path,
 // consumed only through its `.xspec` specifier), a path under `.xspec/`, and
@@ -482,6 +538,16 @@ const MODULE_LINKING_FORMS: readonly {
   {
     form: "a static-specifier dynamic `import()`",
     statement: (specifier) => `void import("${specifier}");`,
+  },
+  {
+    form: "an import type",
+    statement: (specifier) => `type T = import("${specifier}").default;`,
+  },
+  {
+    // Alone in its file (a script), so an ambient module declaration whose
+    // relative name TypeScript rejects only post-parse (14.20).
+    form: "a string-named module declaration",
+    statement: (specifier) => `declare module "${specifier}" { }`,
   },
 ];
 
@@ -768,10 +834,88 @@ function renderOccurrenceTriple(
   return `${file} [${kind}] -> ${target}`;
 }
 
+// Positive arm: no other construct names a module (SPEC 4). `src/c.ts`
+// imports `specs/NAME.mdx`'s module through an import declaration and marks
+// its node `core` (a `references` edge, 4.5), and beside them holds seven
+// spellings that name no module: a triple-slash reference directive to the
+// generated module's path (a comment to the grammar, 14.20 — staged first,
+// where TypeScript reads directives), two `require(…)` calls (a string
+// literal in an argument position), a string literal bound by a `const`, and
+// three dynamic `import()` calls whose specifier is a template literal (not
+// static, 2.4, so not analyzed) — the same three spellings that would each
+// be 14.15 as a module-linking form's specifier (a `.xspec` specifier
+// outside an import declaration, a missing source, a derived-file path).
+// None raises a finding or records an edge, and a file move of NAME.mdx into
+// another directory rewrites the import declaration's specifier alone (6.5),
+// its preview reporting for the file exactly that one
+// `import-specifier-rewrite` (6.6, 12.7): a product validating or rewriting
+// the other spellings, or reading a no-substitution template literal as a
+// static string literal, fails. Its workspace is created after T4-2's first
+// invocation, so both sources are staged-source records (S-9).
+const NO_OTHER_CONSTRUCT_FILE = "src/c.ts";
+const NO_OTHER_CONSTRUCT_DIRECTIVE =
+  '/// <reference path="../specs/NAME.xspec.ts" />';
+const NO_OTHER_CONSTRUCT_IMPORT_PREFIX = "import NAME from ";
+
+/** `src/c.ts` with its import declaration's specifier literal `specifier`. */
+function noOtherConstructSource(specifier: string): string {
+  return [
+    NO_OTHER_CONSTRUCT_DIRECTIVE,
+    `${NO_OTHER_CONSTRUCT_IMPORT_PREFIX}${specifier};`,
+    "",
+    "NAME.core;",
+    'require("../specs/NAME.xspec");',
+    'require("./missing.xspec");',
+    'const p = "../specs/NAME.xspec";',
+    "void import(`../specs/NAME.xspec`);",
+    "void import(`./missing.xspec`);",
+    "void import(`../specs/NAME.xspec.ts`);",
+    "",
+  ].join("\n");
+}
+
+const NO_OTHER_CONSTRUCT_SPECIFIER = '"../specs/NAME.xspec"';
+const NO_OTHER_CONSTRUCT_SOURCE = stagedTs(
+  "T4-2 no-other-construct arm src/c.ts — a marked import beside two `require(…)` calls, a triple-slash reference, a string literal, and three template-literal `import()` calls",
+  noOtherConstructSource(NO_OTHER_CONSTRUCT_SPECIFIER),
+);
+const NO_OTHER_CONSTRUCT_SPEC_SOURCE = stagedMdx(
+  "T4-2 no-other-construct arm specs/NAME.mdx",
+  '<S id="core">\nCore behavior.\n</S>\n',
+);
+
+// The file move, into a directory `specs/sub/` that does not yet exist.
+const NO_OTHER_CONSTRUCT_MOVE_ARGV = [
+  "move",
+  "specs/NAME.mdx",
+  "specs/sub/NAME.mdx",
+] as const;
+
+// The import declaration's specifier literal, its delimiters included (SPEC
+// 6.6), in pre-move byte coordinates: the preview's one edit for the file.
+const NO_OTHER_CONSTRUCT_SPECIFIER_RANGE = (() => {
+  const start = Buffer.byteLength(
+    `${NO_OTHER_CONSTRUCT_DIRECTIVE}\n${NO_OTHER_CONSTRUCT_IMPORT_PREFIX}`,
+    "utf8",
+  );
+  return {
+    start,
+    end: start + Buffer.byteLength(NO_OTHER_CONSTRUCT_SPECIFIER, "utf8"),
+  };
+})();
+
+// `src/c.ts` after the move: that literal alone replaced by the canonical
+// relative spelling of the moved source's module from `src/` (SPEC 6.5,
+// 2.1), its double quotes kept (6.4); every other byte — the seven
+// spellings' included — unchanged.
+const NO_OTHER_CONSTRUCT_MOVED_SOURCE = noOtherConstructSource(
+  '"../specs/sub/NAME.xspec"',
+);
+
 const T4_2 = defineProductTest({
   id: "T4-2",
-  title: `TS import rules: undiscovered/nonexistent/bare/absolute \`.xspec\` specifiers, one whose ascent passes above the root (a real \`outside/NAME.mdx\` at the root's parent), one escape-spelled in a name segment ("./N${BACKSLASH}u0041ME.xspec", read verbatim), bindings other than the default and \`text\`, static-specifier dynamic \`import()\`, every export-declaration form, \`import X = require(…)\`, and derived-path specifiers through each module-linking form all fail with 14.15; \`./sub/../NAME.xspec\` (no \`sub/\` on disk) and \`.//NAME.xspec\` resolve lexically to NAME.mdx and markers through them record edges; a non-static dynamic \`import()\` is not analyzed; binding collisions are 14.15 when either import is a spec module import, and no finding otherwise; a side-effect-only \`import "./NAME.xspec"\` binds nothing and is valid in a code-group file — \`build\` and \`check\` exit 0, no edge, no occurrence — while \`import "./missing.xspec"\` and \`import "../specs/NAME.xspec.ts"\` fail with 14.15 (SPEC 4, 2.1, 2.4, 5.7, 13.4, 14.15)`,
-  // Many small workspaces (31 negative arms plus four positive ones), each
+  title: `TS import rules: undiscovered/nonexistent/bare/absolute \`.xspec\` specifiers, one whose ascent passes above the root (a real \`outside/NAME.mdx\` at the root's parent), one escape-spelled in a name segment ("./N${BACKSLASH}u0041ME.xspec", read verbatim), bindings other than the default and \`text\`, static-specifier dynamic \`import()\`, every export-declaration form, \`import X = require(…)\`, import types (\`type T = import("./NAME.xspec").default\`, \`let v: typeof import("./NAME.xspec")\`), string-named module declarations (\`declare module "./NAME.xspec" { }\` as an augmentation, its file holding \`export {}\`, the undeclared \`module "./NAME.xspec" { }\`, and the non-relative wildcard \`declare module "*.xspec" { }\`), and derived-path specifiers through each of the six module-linking forms all fail with 14.15; \`./sub/../NAME.xspec\` (no \`sub/\` on disk) and \`.//NAME.xspec\` resolve lexically to NAME.mdx and markers through them record edges; a non-static dynamic \`import()\` is not analyzed; no other construct names a module — in \`src/c.ts\` beside a marked import, two \`require(…)\` calls, a triple-slash reference, a string literal, and three template-literal \`import()\` calls raise no finding and record no edge (\`build\` and \`check\` exit 0, \`query edges\` the marker's edge alone), and a file move of NAME.mdx rewrites the import declaration's specifier alone, those seven spellings byte-unchanged, its preview reporting for the file one \`import-specifier-rewrite\` spanning that specifier and no other edit; binding collisions are 14.15 when either import is a spec module import, and no finding otherwise; a side-effect-only \`import "./NAME.xspec"\` binds nothing and is valid in a code-group file — \`build\` and \`check\` exit 0, no edge, no occurrence — while \`import "./missing.xspec"\` and \`import "../specs/NAME.xspec.ts"\` fail with 14.15 (SPEC 4, 2.1, 2.4, 4.5, 5.7, 6.5, 6.6, 13.4, 14.15)`,
+  // Many small workspaces (42 negative arms plus five positive ones), each
   // one product invocation or a few: a wider hang budget than the default
   // (H-8 hang guard only, never an assertion — H-10).
   timeoutMs: 240_000,
@@ -896,6 +1040,123 @@ const T4_2 = defineProductTest({
               JSON.stringify(actual),
           );
         }
+      },
+    );
+
+    // No other construct names a module: beside a marked import, seven
+    // spellings raise nothing and record nothing, and a file move rewrites
+    // the import declaration's specifier alone.
+    await withWorkspace(
+      SPEC_AND_CODE_CONFIG,
+      {
+        "specs/NAME.mdx": NO_OTHER_CONSTRUCT_SPEC_SOURCE,
+        [NO_OTHER_CONSTRUCT_FILE]: NO_OTHER_CONSTRUCT_SOURCE,
+      },
+      async (workspace) => {
+        await buildOk(
+          product,
+          workspace,
+          "T4-2 `build` with src/c.ts holding, beside a marked import, two " +
+            "`require(…)` calls, a triple-slash reference, a string literal, " +
+            "and three template-literal `import()` calls (SPEC 4: no other " +
+            "construct names a module, so none is validated)",
+        );
+        await expectExit(
+          product,
+          workspace,
+          ["check"],
+          0,
+          "T4-2 `check` over the same workspace (SPEC 4: no other construct " +
+            "names a module)",
+        );
+        // The dependency edges (SPEC 5.2: `contains` is structural, the spec
+        // source's own) across the whole workspace: the marker's alone.
+        const edgesLabel = "T4-2 `query edges` over src/c.ts's workspace";
+        const edges = decodeEdgesReport(
+          await runJson(product, workspace, ["query", "edges"], edgesLabel),
+          edgesLabel,
+        );
+        assertEdgeSetEqual(
+          edges.filter((edge) => edge.kind !== "contains"),
+          [
+            {
+              from: NO_OTHER_CONSTRUCT_FILE,
+              to: "specs/NAME.mdx#core",
+              kind: "references",
+            },
+          ],
+          `${edgesLabel}: the marker's \`references\` edge is the only ` +
+            "dependency edge — the seven other spellings name no module and " +
+            "record no edge (SPEC 4, 4.5)",
+        );
+
+        // The move's preview: for src/c.ts, one `import-specifier-rewrite`
+        // spanning the import declaration's specifier literal, and no other
+        // edit (SPEC 6.6, 12.7).
+        const previewLabel = `T4-2 \`${NO_OTHER_CONSTRUCT_MOVE_ARGV.join(" ")} --preview --json\``;
+        const preview = decodePreviewReport(
+          await runJson(
+            product,
+            workspace,
+            [...NO_OTHER_CONSTRUCT_MOVE_ARGV, "--preview", "--json"],
+            previewLabel,
+          ),
+          previewLabel,
+        );
+        assertSameJson(
+          preview.findings,
+          [],
+          `${previewLabel}: the preview of the valid file-form move ` +
+            "completes with findings [] (SPEC 6.6)",
+        );
+        if (preview.files === null) {
+          fail(
+            `${previewLabel}: the completed preview reports its plan — ` +
+              "`files` non-null (SPEC 6.6, 12.7)",
+          );
+        }
+        assertSameJson(
+          preview.files
+            .filter(
+              (entry) =>
+                renderPathValue(entry.file) === NO_OTHER_CONSTRUCT_FILE,
+            )
+            .map((entry) => entry.edits),
+          [
+            [
+              {
+                class: "import-specifier-rewrite",
+                range: NO_OTHER_CONSTRUCT_SPECIFIER_RANGE,
+              },
+            ],
+          ],
+          `${previewLabel}: the preview lists ${NO_OTHER_CONSTRUCT_FILE} ` +
+            "once, its edits exactly one `import-specifier-rewrite` spanning " +
+            "the import declaration's specifier literal, delimiters " +
+            "included — no edit to the seven other spellings (SPEC 4, 6.5, " +
+            "6.6, 12.7)",
+        );
+
+        // The move itself: the import declaration's specifier rewritten,
+        // every other byte of src/c.ts unchanged.
+        await expectExit(
+          product,
+          workspace,
+          NO_OTHER_CONSTRUCT_MOVE_ARGV,
+          0,
+          `T4-2 \`${NO_OTHER_CONSTRUCT_MOVE_ARGV.join(" ")}\` — a valid ` +
+            "file-form move into another directory (SPEC 6.5)",
+        );
+        await assertFileBytes(
+          workspace.path(NO_OTHER_CONSTRUCT_FILE),
+          NO_OTHER_CONSTRUCT_MOVED_SOURCE,
+          `T4-2 ${NO_OTHER_CONSTRUCT_FILE} after the move: the import ` +
+            "declaration's specifier alone rewritten to " +
+            '"../specs/sub/NAME.xspec", the two `require(…)` arguments, the ' +
+            "triple-slash reference, the string literal, and the three " +
+            "template-literal `import()` specifiers byte-unchanged (SPEC 4, " +
+            "6.5)",
+        );
       },
     );
 

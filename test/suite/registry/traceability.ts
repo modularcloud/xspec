@@ -156,7 +156,11 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T3-6": ["3"],
   "T3-7": ["3", "2.1", "2.7", "1.6", "11.4"],
   "T4-1": ["4"],
-  "T4-2": ["4", "2.1", "2.4", "5.7", "14"],
+  // T4-2: 4's import rules and module-linking forms, its import-type arms
+  // carrying 4.5's "an import type is no type-level reference" (T4.5-7
+  // defers here), and its no-other-construct arm a file move's rewrite
+  // (6.5) and preview edits (6.6) over the constructs naming no module.
+  "T4-2": ["4", "2.1", "2.4", "4.5", "5.7", "6.5", "6.6", "13.4", "14"],
   "T4-3": ["4"],
   "T4-4": ["4"],
   "T4-5": ["4", "2.1", "2.4", "4.5", "5.7", "11.2", "14"],

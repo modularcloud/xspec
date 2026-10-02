@@ -1328,7 +1328,11 @@ const T4_5_6 = defineProductTest({
 // Type-level references in several positions: a type-alias `typeof` query on
 // the root and on a chain, a type-level indexed access, an interface property
 // annotation, and a parameter annotation. No value-level use of the binding
-// exists anywhere in the file.
+// exists anywhere in the file. TEST-SPEC's closing clause — an import type
+// naming a `.xspec` module is no such reference but a module-linking form,
+// 14.15 — defers to T4-2, whose import-type arms
+// (`type T = import("./NAME.xspec").default`,
+// `let v: typeof import("./NAME.xspec")`) assert it (section-4.ts).
 const T4_5_7_APP_SOURCE = [
   'import SPEC from "../specs/A.xspec";',
   "",
@@ -1350,7 +1354,7 @@ const T4_5_7_APP_SOURCE = [
 const T4_5_7 = defineProductTest({
   id: "T4.5-7",
   title:
-    "`typeof SPEC.a.b` and other type-level references are unrestricted: the workspace builds with no edges recorded, and rename rewrites nothing in the file — type-level references may be left naming vacated identities while the workspace stays valid (SPEC 4.5, 6.4)",
+    "`typeof SPEC.a.b` and other type-level references are unrestricted: the workspace builds with no edges recorded, and rename rewrites nothing in the file — type-level references may be left naming vacated identities while the workspace stays valid; an import type naming a `.xspec` module is no such reference but a module-linking form, 14.15, asserted by T4-2's import-type arms (SPEC 4.5, 6.4)",
   run: async (product) => {
     await withWorkspace(
       SPEC_AND_CODE_CONFIG,
