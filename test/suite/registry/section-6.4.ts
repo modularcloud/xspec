@@ -61,7 +61,11 @@
 //   post-rename file from SPEC 6.4's rules: only the renamed segment's
 //   characters change, quote kind and access form are kept, and the
 //   double-quoted computed fallback applies to a dot segment whose new name
-//   is not a TS identifier alone. Whole files are compared byte-exactly,
+//   is not a TS identifier alone — that identifier test being 1.4's test of
+//   characters alone at TypeScript 5.9.3's ESNext level (14.20): arms 5 to 9
+//   rename a dot-access `login` to `delete`, U+00E9, and U+2EBF0 (dot
+//   kept) and to `2fa` and U+1C89 then `x` (the fallback, whatever the
+//   runtime's Unicode tables admit). Whole files are compared byte-exactly,
 //   `.mdx` and `.ts` alike (markers and `text(...)` calls included), and
 //   two files holding only unaffected references must come through
 //   byte-identical ("only the affected parts change" pins all other
@@ -1087,9 +1091,27 @@ const OTHER_TS_M = [
   "",
 ].join("\n");
 
+// Fixture M over `login` (arms 5 to 9): fixture M's templates with the
+// renamed segment staged as `login` — TEST-SPEC T6.4-2's `BASE.login`, the
+// `BASE` here being `Core.top` in MDX and `CORE.top` in TS — renamed to
+// names whose dot form 1.4's test of characters alone decides, at the
+// TypeScript release and language level 14.20 fixes (5.9.3, ESNext). The
+// reserved word `delete` (property access admits any identifier name, 2.4),
+// U+00E9 (a non-ASCII letter), and U+2EBF0 (a Unicode 15.1 ideograph that
+// 5.9.3 admits at ESNext but not at ES5) stay dot access. `2fa` (its first
+// character can only continue an identifier) and U+1C89 followed by `x` (a
+// Unicode 16 letter 5.9.3 admits nowhere in an identifier, though a runtime
+// whose tables postdate 15.1 admits it) take the double-quoted computed
+// fallback. Every computed segment keeps its quote kind and every local
+// string its quotes, as in arms 3 and 4. The characters are built from
+// their code points, never spelled as escapes.
+const E_ACUTE = String.fromCodePoint(0x00e9);
+const IDEOGRAPH = String.fromCodePoint(0x2ebf0);
+const TJE_X = `${String.fromCodePoint(0x1c89)}x`;
+
 /**
- * The arms' stagings. Arm 1's workspace is the body's first; arms 2, 3, and
- * 4 follow arm 1's invocations, so every `.mdx` entry is a ledger record
+ * The arms' stagings. Arm 1's workspace is the body's first; arms 2 to 9
+ * follow arm 1's invocations, so every `.mdx` entry is a ledger record
  * (S-9's before-any-product clause; helpers/staged-mdx.ts) — the same
  * expression the body composed, moved to module level, arm 1's entries
  * converted uniformly — and every `.ts` entry is a TypeScript record
@@ -1127,6 +1149,25 @@ const T6_4_2_M_FILES: Readonly<Record<string, InitialFileContents>> = {
   ),
   "src/app.ts": stagedTs("T6.4-2 arms 3 and 4 src/app.ts", appM(".mid", "mid")),
   "src/other.ts": stagedTs("T6.4-2 arms 3 and 4 src/other.ts", OTHER_TS_M),
+};
+const T6_4_2_M_LOGIN_FILES: Readonly<Record<string, InitialFileContents>> = {
+  "specs/Core.mdx": stagedMdx(
+    "T6.4-2 arms 5 to 9 specs/Core.mdx",
+    coreM("login"),
+  ),
+  "specs/Refs.mdx": stagedMdx(
+    "T6.4-2 arms 5 to 9 specs/Refs.mdx",
+    refsM(".login", "login"),
+  ),
+  "specs/Other.mdx": stagedMdx(
+    "T6.4-2 arms 5 to 9 specs/Other.mdx",
+    OTHER_MDX_M,
+  ),
+  "src/app.ts": stagedTs(
+    "T6.4-2 arms 5 to 9 src/app.ts",
+    appM(".login", "login"),
+  ),
+  "src/other.ts": stagedTs("T6.4-2 arms 5 to 9 src/other.ts", OTHER_TS_M),
 };
 
 /**
@@ -1182,7 +1223,7 @@ async function runMinimalEditArm(
 const T6_4_2 = defineProductTest({
   id: "T6.4-2",
   title:
-    "minimal edits: quote style (single vs double) and access form (dot vs computed) of untouched reference parts are preserved byte-wise and only the affected parts change; the rewritten segment keeps every keepable form — a computed segment stays computed in its own quote kind whether or not the new name is a TS identifier, dot stays dot for an identifier-valid name, single-quoted local strings and single-quoted `id` attributes keep their quotes — and only a dot segment whose new name is not a TS identifier becomes double-quoted computed access; every rewritten `.mdx` and `.ts` file is byte-equal to its composed expectation and untouched files stay byte-identical (SPEC 6.4, 2.4, 2.7)",
+    "minimal edits: quote style (single vs double) and access form (dot vs computed) of untouched reference parts are preserved byte-wise and only the affected parts change; the rewritten segment keeps every keepable form — a computed segment stays computed in its own quote kind whether or not the new name is a TS identifier, dot stays dot for an identifier-valid name (a reserved word, `delete`, a non-ASCII letter, U+00E9, and U+2EBF0 included — 1.4 judging characters alone at TypeScript 5.9.3's ESNext level), single-quoted local strings and single-quoted `id` attributes keep their quotes — and only a dot segment whose new name is not a TS identifier becomes double-quoted computed access (`2fa`, and U+1C89 then `x`, which 5.9.3 admits nowhere in an identifier whatever a runtime's Unicode tables say); every rewritten `.mdx` and `.ts` file is byte-equal to its composed expectation and untouched files stay byte-identical (SPEC 6.4, 1.4, 2.4, 2.7)",
   run: async (product) => {
     const expectedL = (seg: string) => ({
       "specs/Core.mdx": coreL(seg),
@@ -1240,6 +1281,57 @@ const T6_4_2 = defineProductTest({
       expectedM('["neo-2"]', "neo-2"),
       "T6.4-2 arm 4 (top.mid → top.neo-2: dot falls back to double-quoted computed access, computed keeps quotes)",
     );
+
+    // Arms 5 to 9: fixture M over `login`, each new name's dot form decided
+    // by 1.4's test of characters alone at TypeScript 5.9.3's ESNext level
+    // (14.20) — never by a runtime's Unicode tables, nor at ES5.
+    const loginArms: readonly {
+      readonly seg: string;
+      readonly label: string;
+      readonly dot: string;
+      readonly why: string;
+    }[] = [
+      {
+        seg: "delete",
+        label: "delete",
+        dot: ".delete",
+        why: "a reserved word is an identifier name property access admits, so dot stays dot",
+      },
+      {
+        seg: E_ACUTE,
+        label: "U+00E9",
+        dot: `.${E_ACUTE}`,
+        why: "a non-ASCII letter begins an identifier, so dot stays dot",
+      },
+      {
+        seg: IDEOGRAPH,
+        label: "U+2EBF0",
+        dot: `.${IDEOGRAPH}`,
+        why: "TypeScript 5.9.3 admits U+2EBF0 at ESNext (not at ES5), so dot stays dot",
+      },
+      {
+        seg: "2fa",
+        label: "2fa",
+        dot: '["2fa"]',
+        why: "a digit can only continue an identifier, so dot falls back to double-quoted computed access",
+      },
+      {
+        seg: TJE_X,
+        label: "U+1C89 then x",
+        dot: `["${TJE_X}"]`,
+        why: "TypeScript 5.9.3 admits U+1C89 nowhere in an identifier, whatever the runtime's Unicode tables, so dot falls back to double-quoted computed access",
+      },
+    ];
+    for (const [index, arm] of loginArms.entries()) {
+      await runMinimalEditArm(
+        product,
+        "top.login",
+        `top.${arm.seg}`,
+        T6_4_2_M_LOGIN_FILES,
+        expectedM(arm.dot, arm.seg),
+        `T6.4-2 arm ${index + 5} (top.login → top.${arm.label}: ${arm.why}; computed keeps quotes)`,
+      );
+    }
   },
 });
 // ---------------------------------------------------------------------------

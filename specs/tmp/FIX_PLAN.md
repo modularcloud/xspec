@@ -38,21 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 29 — T6.4-2: five keepable-form rename arms (TEST-SPEC L269; SPEC 6.4, 1.4; A16)
-
-**Where.** `test/suite/registry/section-6.4.ts`.
-
-**Change.** Five rename arms under the whole-file byte contract; staging and expected bytes at L269.
-- Dot access kept:
-  - `BASE.login` renamed to `delete` gives `BASE.delete`;
-  - renamed to U+00E9 gives `BASE.`U+00E9;
-  - renamed to U+2EBF0 gives `BASE.`U+2EBF0.
-- Double-quoted computed access:
-  - `2fa` gives `BASE["2fa"]`;
-  - U+1C89 followed by `x` gives `BASE["`U+1C89`x"]`.
-
-**Checks.** S-9 and S-7 pass. T6.4-2 against the built product.
-
 ### Task 30 — T6.4-3: six barred-character `<new-id>` arms (TEST-SPEC L270; SPEC 6.4, 1.4; A17; they flow into T6.6-3 and T14-7)
 
 **Where.** `test/suite/registry/section-6.4.ts`: `RENAME_REFUSAL_CASES` holds only the `then` and whitespace arms today. T6.6-3 (`section-6.6.ts`) and T14-7 (`section-14.ts`) iterate it.
