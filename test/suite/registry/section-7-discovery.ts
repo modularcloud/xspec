@@ -43,7 +43,12 @@
 // under `.xspec/` (13.3), which no fixture pattern can reach: none names
 // `.xspec/`, no staged name carries `.xspec.`, `markdown` is absent, and
 // wildcards never match the dot segment — the CERTIFICATIONS.md CONF-DISC
-// staging constraints for these two tests.
+// staging constraints for these two tests. T7-4's literal-backslash arm
+// (Linux leg) declares the one code group these two tests stage, and
+// observes its discovered set through `inventory --json` alone — it parses
+// no source and writes nothing — with no `build` preceding it and no spec
+// group declared, so `sources` is exactly the code set; its glob reaches no
+// derived-classified path (CONF-DISC's constraint for that arm).
 //
 // T7-6's code-group exclusion arm observes the code side through `query
 // edges --from <path>` (11.1), T7-3's idiom for code discovery: a discovered
@@ -62,6 +67,12 @@
 //   text: Linux file names are byte strings, so the staged two-byte code
 //   point reaches the matcher verbatim; other platforms' filesystems
 //   normalize or re-case names, so the staged bytes are not portable.
+// - The literal-backslash arm is gated to the Linux leg by T7-4's own text,
+//   where a file name can hold the byte; the gate sits inside the body (the
+//   Windows leg reruns only the single-casing probe, E-6). Its glob is
+//   written between the configuration literal's quotes with its single
+//   backslash, built from the code point: the literal is read verbatim
+//   (SPEC 2.4), so a doubled backslash would spell a different glob.
 // - T7-5 runs `ids` once over one workspace holding every link arm; the
 //   invocation is wrapped so a failure to complete — a discovery hang on the
 //   staged symlink cycle, killed by the subprocess driver's timeout (H-8) —
@@ -598,6 +609,113 @@ async function expectInsideMatchingNothing(
   );
 }
 
+// The literal backslash (T7-4; Linux leg, where a file name can hold it):
+// the backslash is a literal byte of a glob, never an escape (SPEC 7: every
+// character outside `*`, `?`, and `**` is a literal), and the configuration
+// literal spelling the glob is read verbatim (2.4: no escape sequence of any
+// configuration literal is interpreted). The one code group globs `src/a`,
+// a backslash, `*.ts`, spelled with that single backslash between the
+// literal's quotes, so it discovers `src/a`, a backslash, `b.ts` and not the
+// sibling `src/ab.ts`: a product reading the backslash as a glob escape (a
+// literal `*`) discovers neither, and one interpreting the literal's escape
+// (TypeScript's own reading of a backslash before `*`, which drops the
+// backslash) discovers both and reports the glob without its backslash.
+// The backslash is built from its code point (U+005C), never spelled as an
+// escape in this source, and the glob is rendered between the quotes as is,
+// never through `JSON.stringify` (which would double the backslash).
+// Observed through `inventory --json` (11.6), which parses no source and
+// writes nothing, with no `build` preceding it, over a configuration
+// declaring no spec group (`specs: {}`, valid with zero sources, SPEC 7), so
+// the code group's discovered set is the whole `sources` listing — the
+// CERTIFICATIONS.md CONF-DISC staging constraint for this arm: its code set
+// observed through `inventory` before any `build`, its glob reaching no
+// derived-classified path, `markdown` absent. The configuration file and
+// both code files are well-formed TypeScript, accepted by release 5.9.3 read
+// as module code and as script code (14.20; TypeScript accepts a backslash
+// before `*` in a string literal as an escape), and the code files spell no
+// marker, `text` call, or module-linking form (CONF-DISC's scope).
+const BACKSLASH = String.fromCharCode(0x5c);
+const LITERAL_BACKSLASH_GROUP = "lit";
+const LITERAL_BACKSLASH_GLOB = `src/a${BACKSLASH}*.ts`;
+const LITERAL_BACKSLASH_MATCH = `src/a${BACKSLASH}b.ts`;
+const LITERAL_BACKSLASH_SIBLING = "src/ab.ts";
+const LITERAL_BACKSLASH_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {},
+  code: {
+    ${LITERAL_BACKSLASH_GROUP}: ["${LITERAL_BACKSLASH_GLOB}"]
+  }
+})
+`;
+const LITERAL_BACKSLASH_FILES: Readonly<Record<string, string>> = {
+  [LITERAL_BACKSLASH_MATCH]: "export const backslashed = 1;\n",
+  [LITERAL_BACKSLASH_SIBLING]: "export const sibling = 2;\n",
+};
+
+/**
+ * T7-4's literal-backslash arm (Linux leg; the constants above): the code
+ * group globbing `src/a`, a backslash, `*.ts` is reported exactly as
+ * configured — the configuration literal read verbatim (SPEC 2.4) — and
+ * discovers the backslash-named file alone, never its sibling `src/ab.ts`
+ * (SPEC 7), as `inventory --json` lists them (11.6).
+ */
+async function expectLiteralBackslashGlob(
+  product: ProductBinding,
+): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": LITERAL_BACKSLASH_CONFIG,
+        ...LITERAL_BACKSLASH_FILES,
+      },
+    },
+    async (workspace) => {
+      const glob = JSON.stringify(LITERAL_BACKSLASH_GLOB);
+      const match = JSON.stringify(LITERAL_BACKSLASH_MATCH);
+      const sibling = JSON.stringify(LITERAL_BACKSLASH_SIBLING);
+      const label =
+        "T7-4 (the literal backslash, Linux leg: the code group globbing " +
+        `${glob}, JSON-spelled) \`inventory --json\``;
+      const inventory = decodeInventoryDocument(
+        await runJson(product, workspace, ["inventory", "--json"], label),
+        label,
+      );
+      assertSameJson(
+        {
+          specs: inventory.configuration.specs,
+          code: inventory.configuration.code,
+        },
+        {
+          specs: [],
+          code: [
+            { name: LITERAL_BACKSLASH_GROUP, globs: [LITERAL_BACKSLASH_GLOB] },
+          ],
+        },
+        `${label}: the glob is reported exactly as configured — the ` +
+          `configuration literal read verbatim, its backslash kept (SPEC ` +
+          `2.4, 7, 11.6); a product interpreting the literal's escape ` +
+          `reports ${JSON.stringify("src/a*.ts")} instead`,
+      );
+      assertSameJson(
+        inventory.sources,
+        [
+          {
+            path: LITERAL_BACKSLASH_MATCH,
+            groups: [{ name: LITERAL_BACKSLASH_GROUP, kind: "code" }],
+          },
+        ],
+        `${label}: the backslash is a literal byte, never an escape — the ` +
+          `group discovers ${match} alone, never the sibling ${sibling}, ` +
+          `and the configuration declares no other group (SPEC 7, 2.4, ` +
+          `11.6); a product reading the backslash as a glob escape ` +
+          `discovers neither file, and one interpreting the literal's ` +
+          `escape discovers both`,
+      );
+    },
+  );
+}
+
 const T7_4 = defineProductTest({
   id: "T7-4",
   title:
@@ -605,7 +723,11 @@ const T7_4 = defineProductTest({
     "`*` the single-segment wildcard), byte-wise case-sensitive matching " +
     "incl. the single-casing SPECS/specs probe and the Linux-leg é.mdx " +
     "byte probes, the dot-segment rule, literal metacharacters ([1], " +
-    "{a,c}, !, +(x)), configuration-directory-relative resolution, " +
+    "{a,c}, !, +(x), and the Linux-leg backslash: a code group globbing " +
+    "src/a, a backslash, *.ts — the configuration literal read verbatim, " +
+    "SPEC 2.4 — discovers the backslash-named file alone, never " +
+    "src/ab.ts, per `inventory`), configuration-directory-relative " +
+    "resolution, " +
     "outside-root patterns by spelling alone (`a/../../x`, `**/../x`, a " +
     "leading `/`) as configuration errors even with a matching file " +
     "beside the root (SPEC 7, 14.14), and inside-root spellings " +
@@ -754,6 +876,14 @@ const T7_4 = defineProductTest({
     }
     if (process.platform === "linux") {
       await expectInsideMatchingNothing(product, DRIVE_QUALIFIED_SPELLING);
+    }
+
+    // The literal backslash: a code group globbing `src/a`, a backslash,
+    // `*.ts` — the configuration literal read verbatim (SPEC 2.4) —
+    // discovers the backslash-named file alone (SPEC 7), on the Linux leg,
+    // where a file name can hold the byte (T7-4's own text).
+    if (process.platform === "linux") {
+      await expectLiteralBackslashGlob(product);
     }
   },
 });

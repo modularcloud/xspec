@@ -38,22 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part A — Certification
 
-### Task 11 — T7-4: the literal-backslash arm (TEST-SPEC L323; SPEC 7, 2.4; CERTIFICATIONS.md §CONF-DISC, §VIOL-DISC-DIALECT; B2; D2)
-
-**Depends on.** Task 10.
-
-**Where.** `test/suite/registry/section-7-discovery.ts`: T7-4's body.
-
-**Change.** A Linux-leg arm, gated inside the body (its file name holds a backslash).
-- *Staging.* A code group globbing `src/a`, backslash, `*.ts`, with the configuration literal read verbatim. It must discover `src/a`, backslash, `b.ts` and not a sibling `src/ab.ts`. Both files are well-formed `.ts` sources spelling no marker, `text` call, or module-linking form.
-- *Configuration.* The configuration file must be TypeScript that 5.9.3 accepts both ways. A backslash before `*` inside a string literal is an escape TypeScript reads, while xspec reads the literal verbatim (2.4).
-- *CONF-DISC's staging constraints.* Observe the code set through `inventory`, before any `build` or on a first `build` (VIOL-DISC-DERIVED's constraint), with the glob reported as spelled.
-
-**Checks.**
-- `-t DISC`: the conformer passes T7-4. DIALECT still fails only on `[1]` and `{a,c}`; the new arm passes against it. DERIVED passes T7-4.
-- T7-4 against the built product (diagnose).
-- `test/windows/e6-subset.test.ts` runs T7-4's single-casing probe, not its entry; confirm that by reading the file.
-
 ### Task 12 — T7-6: the invalid-source arm and its control (TEST-SPEC L325; SPEC 7.1, 13.4, 14.19, 14.20, 12.2; CERTIFICATIONS.md §CONF-DISC, §VIOL-DISC-DERIVED; B3; D2)
 
 **Depends on.** Task 10.
