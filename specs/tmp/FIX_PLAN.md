@@ -38,19 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 23 — T2.4-1 and T2.4-5: reserved-word dot access; escaped-segment and escaped-root arms (TEST-SPEC L109, L113; SPEC 2.4; A6, A7)
-
-**Where.** `test/suite/registry/section-2.4.ts`.
-
-**Change.** Take every spelling from L113, building the escapes from code points.
-- *T2.4-1.* The reserved-word arm `BASE.delete` builds and records its edge.
-- *T2.4-5(i), the MDX segment escape.* `BASE`'s module holds `login`. The `login` segment, spelled in dot access with its `g` as a backslash-u escape of U+0067, gives 14.5 in `d={…}` and 14.6 in `{text(…)}`; each records no edge and no occurrence. Beside them, the escape-free control `d={BASE.login}` records its edge.
-- *T2.4-5(ii), the escaped root.* `BASE` is spelled with its `A` as a backslash-u escape of U+0041, its segments escape-free: in MDX in `d={…login}` and `{text(…login)}`, and as a marker in a code source. Each records its edge and occurrence with no finding.
-
-**Checks.**
-- S-9: the MDX derives, and the code files are accepted both ways. S-7 passes.
-- T2.4-1 and T2.4-5 against the built product.
-
 ### Task 24 — T2.7-4: the Unicode 15.1 space-separator comment arms and the U+180E parse failure (TEST-SPEC L132; SPEC 2.7, 14.20; A8)
 
 **Depends on.** Task 17 is natural to land first. It keeps `{` U+180E `}` unparseable, as the check already judges it.
