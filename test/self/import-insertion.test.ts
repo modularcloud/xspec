@@ -16,7 +16,12 @@
 // importer's own directory, no `./` prefix, a `.mdx` extension), a
 // declaration binding an identifier the rewritten references are not
 // rooted at, a specifier designating the wrong module, nothing inserted,
-// and edits beyond one inserted run.
+// and edits beyond one inserted run. Line starts are judged by SPEC 3's
+// terminators (T6.5-8's terminator re-runs): the disciplined insertion after
+// a CRLF or a lone CR is accepted, one between a CRLF's two characters is
+// no line start, and the mid-line form a reader judging line starts by
+// U+000A alone writes after a lone CR fails diagnosed; a pinned offset (the
+// TS arm's start of line 2) admits that offset alone.
 
 import { Buffer } from "node:buffer";
 import { expect, test } from "vitest";
@@ -24,6 +29,7 @@ import { HarnessAssertionError } from "../helpers/assertions.js";
 import {
   assertAddedImportInsertion,
   assertExactDeclarationInsertion,
+  atLineStart,
   canonicalSpecifier,
   isolateSingleInsertion,
 } from "../helpers/import-insertion.js";
@@ -269,6 +275,149 @@ test("every failure spelling T6.5-8 names fails diagnosed", () => {
   expectDiagnosed(() => check(BASE), "no bytes were inserted");
 });
 
+test("line starts are judged by SPEC 3's terminators", () => {
+  // After a U+000A, a CRLF, or a lone CR — the file's end after a final
+  // terminator of any kind included — and at offset 0.
+  expect(atLineStart(bytes("ab"), 0)).toBe(true);
+  expect(atLineStart(bytes("a\nb"), 2)).toBe(true);
+  expect(atLineStart(bytes("a\r\nb"), 3)).toBe(true);
+  expect(atLineStart(bytes("a\rb"), 2)).toBe(true);
+  expect(atLineStart(bytes("a\r"), 2)).toBe(true);
+  expect(atLineStart(bytes("a\r\n"), 3)).toBe(true);
+  // Mid-line, and between a CRLF's two characters (half of one terminator).
+  expect(atLineStart(bytes("ab"), 1)).toBe(false);
+  expect(atLineStart(bytes("a\r\nb"), 2)).toBe(false);
+});
+
+// T6.5-8's TS arm: `src/c.ts` is the origin import, a terminator, then a
+// function `f` holding the rewritten marker and the unmoved one; the start
+// of line 2 is its one line-start admissible offset, pinned.
+const C_LINE_1 = 'import O from "../specs/origin.xspec"';
+const C_DECL = 'import T from "../specs/target.xspec"';
+const cBase = (t: string): string =>
+  [C_LINE_1, "function f() {", "  T.y;", "  O.w;", "}", ""].join(t);
+
+function checkCode(actual: string, t: string, pinned = true) {
+  return assertAddedImportInsertion(
+    {
+      rel: "src/c.ts",
+      base: bytes(cBase(t)),
+      actual: bytes(actual),
+      importerDir: "src",
+      expectedModule: "specs/target.xspec",
+      identifier: "T",
+      ...(pinned
+        ? {
+            pinnedOffset: {
+              offset: C_LINE_1.length + t.length,
+              where: "the start of line 2",
+            },
+          }
+        : {}),
+    },
+    "self",
+  );
+}
+
+test("the disciplined insertion after a CRLF or a lone CR is at a line start", () => {
+  for (const t of ["\n", "\r\n", "\r"]) {
+    const base = cBase(t);
+    const at = C_LINE_1.length + t.length;
+    const actual = base.slice(0, at) + C_DECL + "\n" + base.slice(at);
+    // Pinned and unpinned alike: the run is the declaration followed by
+    // U+000A (never the file's own terminator style) at line 2's start.
+    expect(checkCode(actual, t).offset).toBe(at);
+    expect(checkCode(actual, t, false).offset).toBe(at);
+  }
+});
+
+test("a lone-CR or CRLF file's insertion off 3's line starts fails diagnosed", () => {
+  const notImport = "is not the added import";
+  // After a lone CR, the mid-line form (U+000A, the declaration, U+000A) —
+  // what a product judging line starts by U+000A alone writes there; that
+  // U+000A joins the lone CR into one CRLF.
+  {
+    const base = cBase("\r");
+    const at = C_LINE_1.length + 1;
+    expectDiagnosed(
+      () =>
+        checkCode(
+          base.slice(0, at) + "\n" + C_DECL + "\n" + base.slice(at),
+          "\r",
+        ),
+      notImport,
+      "follows a lone U+000D",
+      "by U+000A alone",
+    );
+    // The same product's mid-line form before the lone CR, at the
+    // statement's end: a line-start offset exists, so it is not conforming.
+    const end = C_LINE_1.length;
+    expectDiagnosed(
+      () =>
+        checkCode(
+          base.slice(0, end) + "\n" + C_DECL + "\n" + base.slice(end),
+          "\r",
+        ),
+      notImport,
+      "mid-line form",
+    );
+    // A terminator in the file's style after the declaration.
+    expectDiagnosed(
+      () => checkCode(base.slice(0, at) + C_DECL + "\r" + base.slice(at), "\r"),
+      notImport,
+    );
+  }
+  // Between a CRLF's two characters: no line start, so the declaration
+  // joins line 1.
+  {
+    const base = cBase("\r\n");
+    const at = C_LINE_1.length + 1;
+    expectDiagnosed(
+      () =>
+        checkCode(base.slice(0, at) + C_DECL + "\n" + base.slice(at), "\r\n"),
+      notImport,
+      "join the preceding line",
+    );
+    // The file's own CRLF after the declaration.
+    const start = C_LINE_1.length + 2;
+    expectDiagnosed(
+      () =>
+        checkCode(
+          base.slice(0, start) + C_DECL + "\r\n" + base.slice(start),
+          "\r\n",
+        ),
+      notImport,
+      "ends in U+000D",
+    );
+  }
+});
+
+test("a pinned offset admits that offset alone", () => {
+  for (const t of ["\n", "\r\n", "\r"]) {
+    const base = cBase(t);
+    // At the file's end after the final terminator, and at offset 0: line
+    // starts both, so the unpinned reader accepts them — the pin does not.
+    for (const actual of [base + C_DECL + "\n", C_DECL + "\n" + base]) {
+      expect(checkCode(actual, t, false).declaration).toBe(C_DECL);
+      expectDiagnosed(
+        () => checkCode(actual, t),
+        "not at the start of line 2",
+        "the one line-start admissible offset",
+      );
+    }
+  }
+  // A misspelled declaration at the pinned offset is diagnosed as one,
+  // the pin named.
+  const base = cBase("\n");
+  const at = C_LINE_1.length + 1;
+  expectDiagnosed(
+    () => checkCode(base.slice(0, at) + C_DECL + ";\n" + base.slice(at), "\n"),
+    "is not the added import",
+    "statement terminator",
+    "pins the insertion at the start of line 2",
+  );
+});
+
 // The exact-declaration reader (T6.5-11): the added declaration's characters
 // are pinned byte-exactly by the caller — 6.5's TypeScript spellings with the
 // fresh identifiers substituted — and the line discipline is read as the
@@ -317,6 +466,24 @@ test("the mid-line form is read with its preceding terminator", () => {
   expect(
     checkExact(head + "\n" + TS_DECL + "\n" + TS_BASE.slice(head.length)),
   ).toEqual([{ offset: head.length, atLineStart: false }]);
+});
+
+test("the exact reader judges line starts by 3's terminators", () => {
+  // The same file with every terminator a lone CR: the offset after the
+  // leading lone CR is a line start, so the run is the declaration followed
+  // by U+000A alone.
+  const base = TS_BASE.split("\n").join("\r");
+  expect(
+    assertExactDeclarationInsertion(
+      {
+        rel: "src/c.ts",
+        base: bytes(base),
+        actual: bytes("\r" + TS_DECL + "\n" + base.slice(1)),
+        declaration: TS_DECL,
+      },
+      "self",
+    ),
+  ).toEqual([{ offset: 1, atLineStart: true }]);
 });
 
 test("every deviation from the exact declaration fails diagnosed", () => {

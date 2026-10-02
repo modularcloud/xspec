@@ -20,6 +20,13 @@
 // `actual`, then asserts that run is exactly the declaration — `import `,
 // the identifier, ` from "`, the canonical specifier, `"` — followed by
 // U+000A, at an offset lying at the start of a line of the composed text.
+// Line starts are judged by SPEC 3's terminators — U+000D U+000A as one,
+// a U+000A not preceded by U+000D, a U+000D not followed by U+000A — so an
+// offset is at the start of a line exactly when nothing precedes it or such
+// a terminator immediately precedes it (6.5): the offset after a lone CR is
+// one, the offset between a CRLF's two characters is not, and a reader
+// judging line starts by U+000A alone would fail a conforming insertion
+// into a lone-CR file (T6.5-8's terminator re-runs; `atLineStart`).
 //
 // Offsets are a range, not a point: a run whose end bytes repeat the bytes
 // beside it admits several insertion offsets describing the same bytes
@@ -43,6 +50,23 @@ import { posix as posixPath } from "node:path";
 import { fail } from "./assertions.js";
 
 const LF = 0x0a;
+const CR = 0x0d;
+
+/**
+ * Whether `offset` lies at the start of a line of `text` (SPEC 6.5: exactly
+ * when nothing precedes it or a line terminator of 3 immediately precedes
+ * it — U+000D U+000A as one terminator, a U+000A not preceded by U+000D, a
+ * U+000D not followed by U+000A). The offset after a lone CR, the file's
+ * end after a final terminator of any kind included, is a line start; the
+ * offset between a CRLF's two characters is not, the CR there being half
+ * of one terminator.
+ */
+export function atLineStart(text: Uint8Array, offset: number): boolean {
+  if (offset === 0) return true;
+  const before = text[offset - 1];
+  if (before === LF) return true;
+  return before === CR && text[offset] !== LF;
+}
 
 /** The single run whose insertion into `base` yields `actual`. */
 export interface SingleInsertion {
@@ -85,6 +109,14 @@ export interface AddedImportOptions {
   readonly expectedModule: string;
   /** The identifier the rewritten references are rooted at. */
   readonly identifier: string;
+  /**
+   * The insertion offset into `base` the test pins, with how the diagnosis
+   * names it — set where the receiving file holds exactly one line-start
+   * admissible offset (T6.5-8's TS arm: the start of line 2, after the
+   * terminator ending the origin import's line). Omitted, the choice among
+   * line-start readings is the product's (6.5's latitude).
+   */
+  readonly pinnedOffset?: { readonly offset: number; readonly where: string };
 }
 
 function firstDifference(a: Uint8Array, b: Uint8Array): number {
@@ -305,7 +337,7 @@ function readInsertion(
   expected: ExpectedDeclaration,
 ): { reading: AddedImportReading } | { reason: string } {
   const { base, actual, identifier } = options;
-  if (offset !== 0 && base[offset - 1] !== LF) {
+  if (!atLineStart(base, offset)) {
     return {
       reason:
         actual[offset] === LF
@@ -323,6 +355,16 @@ function readInsertion(
   const run = actual.subarray(offset, offset + length);
   if (run.length === 0 || run[run.length - 1] !== LF) {
     return { reason: "the run must end with a U+000A line terminator" };
+  }
+  if (offset > 0 && base[offset - 1] === CR && run[0] === LF) {
+    return {
+      reason:
+        "the offset follows a lone U+000D, which ends a line (SPEC 3), so " +
+        "it is at the start of a line, yet the run begins with U+000A — " +
+        "the mid-line form a product judging line starts by U+000A alone " +
+        "writes, that U+000A joining the lone U+000D into one CRLF " +
+        "terminator (T6.5-8)",
+    };
   }
   const held = run.subarray(0, run.length - 1);
   if (Buffer.compare(held, expected.bytes) !== 0) {
@@ -355,7 +397,10 @@ function readInsertion(
  * other), no other byte inserted. The identifier is the one the caller
  * read off the rewritten references, so its value stays the product's
  * (6.5's latitude); the offset is the product's among the line-start
- * readings. The accepted reading is returned.
+ * readings (line starts judged by 3's terminators, `atLineStart`), unless
+ * the caller pins it (`pinnedOffset`: the receiving file's one line-start
+ * admissible offset), when the run must read as the disciplined insertion
+ * at exactly that offset. The accepted reading is returned.
  */
 export function assertAddedImportInsertion(
   options: AddedImportOptions,
@@ -375,39 +420,89 @@ export function assertAddedImportInsertion(
   };
   // Consecutive offsets sharing one reason are reported as a range.
   const reasons: { from: number; to: number; reason: string }[] = [];
+  let accepted: AddedImportReading | undefined;
   for (
     let offset = insertion.highestOffset;
     offset >= insertion.lowestOffset;
     offset -= 1
   ) {
     const read = readInsertion(options, offset, insertion.length, expected);
-    if ("reading" in read) return read.reading;
+    if ("reading" in read) {
+      accepted = read.reading;
+      break;
+    }
     const last = reasons[reasons.length - 1];
     if (last !== undefined && last.reason === read.reason) last.to = offset;
     else reasons.push({ from: offset, to: offset, reason: read.reason });
   }
-  const shown = options.actual.subarray(
-    insertion.highestOffset,
-    insertion.highestOffset + insertion.length,
-  );
+  const pinned = options.pinnedOffset;
+  const pinnedNote =
+    pinned === undefined
+      ? ""
+      : ` (the test pins the insertion at ${pinned.where}, offset ` +
+        `${String(pinned.offset)} of the composed text)`;
+  if (accepted === undefined) {
+    const shown = options.actual.subarray(
+      insertion.highestOffset,
+      insertion.highestOffset + insertion.length,
+    );
+    fail(
+      `${label} — the single inserted run ` +
+        `${JSON.stringify(Buffer.from(shown).toString("utf8"))} is not the ` +
+        `added import ${JSON.stringify(text)} followed by U+000A at a ` +
+        `line-start offset (6.5's spelling and line discipline, T6.5-8: ` +
+        `single spaces, no statement terminator, the specifier ` +
+        `double-quoted in its canonical relative spelling from ` +
+        `${options.importerDir || "."}/, the declaration's characters then ` +
+        `U+000A at a line-start admissible offset, which the receiving file ` +
+        `holds and 6.5 takes over any other, line starts judged by 3's ` +
+        `terminators; no other byte inserted — SPEC 6.5, 2.1)${pinnedNote} ` +
+        `under any admissible reading: ` +
+        reasons
+          .map(({ from, to, reason }) =>
+            from === to
+              ? `at offset ${String(from)}: ${reason}`
+              : `at offsets ${String(to)}–${String(from)}: ${reason}`,
+          )
+          .join("; "),
+    );
+  }
+  if (pinned === undefined) return accepted;
+  // Bytes are the only observable: the pinned offset holds exactly when
+  // the run read there is the disciplined insertion.
+  if (
+    pinned.offset >= insertion.lowestOffset &&
+    pinned.offset <= insertion.highestOffset
+  ) {
+    const read = readInsertion(
+      options,
+      pinned.offset,
+      insertion.length,
+      expected,
+    );
+    if ("reading" in read) return read.reading;
+  }
   fail(
-    `${label} — the single inserted run ` +
-      `${JSON.stringify(Buffer.from(shown).toString("utf8"))} is not the ` +
-      `added import ${JSON.stringify(text)} followed by U+000A at a ` +
-      `line-start offset (6.5's spelling and line discipline, T6.5-8: single ` +
-      `spaces, no statement terminator, the specifier double-quoted in its ` +
-      `canonical relative spelling from ${options.importerDir || "."}/, the ` +
-      `declaration's characters then U+000A at a line-start admissible ` +
-      `offset, which the receiving file holds and 6.5 takes over any other; ` +
-      `no other byte inserted — SPEC 6.5, 2.1) under any admissible reading: ` +
-      reasons
-        .map(({ from, to, reason }) =>
-          from === to
-            ? `at offset ${String(from)}: ${reason}`
-            : `at offsets ${String(to)}–${String(from)}: ${reason}`,
-        )
-        .join("; "),
+    `${label} — the added import ${JSON.stringify(text)} followed by ` +
+      `U+000A stands at offset ${String(accepted.offset)}, the start of ` +
+      `line ${String(lineAt(options.base, accepted.offset))} of the composed ` +
+      `text, not at ${pinned.where} (offset ${String(pinned.offset)}), the ` +
+      `one line-start admissible offset the receiving file holds — 6.5 ` +
+      `takes a line-start admissible offset over any other, and an offset ` +
+      `elsewhere is not admissible there (SPEC 6.5, 3)`,
   );
+}
+
+/**
+ * The 1-based line of `text` that `offset` lies on, lines counted by SPEC
+ * 3's terminators (as `atLineStart` judges them), for diagnoses.
+ */
+function lineAt(text: Uint8Array, offset: number): number {
+  let line = 1;
+  for (let i = 0; i < offset; i += 1) {
+    if (text[i] === LF || (text[i] === CR && text[i + 1] !== LF)) line += 1;
+  }
+  return line;
 }
 
 /** Options for {@link assertExactDeclarationInsertion}. */
@@ -426,7 +521,7 @@ export interface ExactInsertionOptions {
 export interface ExactInsertionReading {
   /** Insertion offset into `base` (pre-insertion coordinates). */
   readonly offset: number;
-  /** Whether that offset lies at the start of a line of `base`. */
+  /** Whether that offset lies at the start of a line of `base` (`atLineStart`). */
   readonly atLineStart: boolean;
 }
 
@@ -441,9 +536,9 @@ function readExactInsertion(
 ): { reading: ExactInsertionReading } | { reason: string } {
   const { base, actual, declaration } = options;
   const run = actual.subarray(offset, offset + length);
-  const atLineStart = offset === 0 || base[offset - 1] === LF;
+  const lineStart = atLineStart(base, offset);
   let body = run;
-  if (!atLineStart) {
+  if (!lineStart) {
     if (run[0] !== LF) {
       return {
         reason:
@@ -465,7 +560,7 @@ function readExactInsertion(
         `${JSON.stringify(Buffer.from(held).toString("utf8"))}`,
     };
   }
-  return { reading: { offset, atLineStart } };
+  return { reading: { offset, atLineStart: lineStart } };
 }
 
 /**
