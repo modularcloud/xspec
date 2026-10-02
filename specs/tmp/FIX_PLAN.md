@@ -38,24 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part B — Shared machinery
 
-### Task 17 — S-9's MDX check judges identifier characters and space separators by Unicode 15.1, code point by code point (TEST-SPEC S-9, L632; SPEC 14.20; C2)
-
-**Where.** `test/helpers/mdx-derivability.ts` and `test/self/s9-fixture-well-formedness.test.ts`.
-
-**Change.** Today the stock tables decide:
-- acorn 8.17's tables, newer than 15.1, judge expressions and ESM blocks;
-- micromark-extension-mdx-jsx judges JSX names one UTF-16 code unit at a time.
-
-Judge identifier characters in expressions, ESM blocks, and JSX element and attribute names by Unicode 15.1, one code point at a time, and space separators by 15.1 too. Reviewer C's hint: TypeScript 5.9.3's `isIdentifierStart` and `isIdentifierPart` at ESNext give 15.1's verdicts (U+1C89 false, U+2EBF0 true); Node 22's own regex tables are Unicode 17. Keep S-9's named allowances and the rest of the judge unchanged.
-
-**Checks.**
-- New self-test vectors:
-  - must not derive: `{` U+1C89 `}`; `<a` U+1C89 ` />`; `{` U+180E `}` (already the case today; keep it as a vector);
-  - must derive: `<a` U+2EBF0 `>x</a` U+2EBF0 `>`; `<a b` U+2EBF0 `="1" />`; T14-12's MDX element and attribute names holding U+2EBF0 (L594).
-- Red-check by reverting the helper.
-- The self project is green: every existing vector and staged record is judged as before.
-- The suite against the built product shows no new `mdx-derivability` harness error.
-
 ### Task 18 — S-6: the name analysis behind T6.5-22(a), and its fixed vector suite (TEST-SPEC §17 S-6, L629; T6.5-22, L301; C3)
 
 **Where.** A new harness helper (for example `test/helpers/name-analysis.ts`), and a new self-test (for example `test/self/s6-name-analysis.test.ts`). The self-test must run in the self project, before any import-adding test or P-5 relies on the analysis.

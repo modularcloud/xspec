@@ -59,14 +59,14 @@
 // when this check was written, against both properties derived from Unicode
 // 15.1's character database: its general categories, Other_ID_Start,
 // Other_ID_Continue, Pattern_Syntax, and Pattern_White_Space; the self-test
-// pins the version-boundary code points). acorn's identifiers
-// are held to them as tokens finish (`Unicode151Parser`), the MDX
-// tokenizer's JSX names by an adapter presenting each code point to it as
-// 15.1 classes it (`withUnicode151Jsx`). Space separators: acorn's are a
-// fixed list, 15.1's (the self-test checks it); the JSX adapter presents
-// in-tag whitespace by 15.1; and the empty-expression judgement of
-// micromark-util-events-to-acorn reads the runtime's `\s`, so the runtime's
-// class is checked to be 15.1's before any judgement (`checkRuntimeWhitespace`).
+// pins the version-boundary code points). acorn's identifiers are held to
+// them as tokens finish (`Unicode151Parser`), the MDX tokenizer's JSX names
+// by an adapter presenting each code point to it as 15.1 classes it
+// (`withUnicode151Jsx`). Space separators: acorn's are a fixed list, 15.1's
+// (the self-test checks it); the JSX adapter presents in-tag whitespace by
+// 15.1; and the empty-expression judgement of micromark-util-events-to-acorn
+// reads the runtime's `\s`, so the runtime's class is checked to be 15.1's
+// before any judgement (`checkRuntimeWhitespace`).
 
 import { Parser, tokTypes } from "acorn";
 import type { Program } from "acorn";
