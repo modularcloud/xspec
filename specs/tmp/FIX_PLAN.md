@@ -38,20 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 24 — T2.7-4: the Unicode 15.1 space-separator comment arms and the U+180E parse failure (TEST-SPEC L132; SPEC 2.7, 14.20; A8)
-
-**Depends on.** Task 17 is natural to land first. It keeps `{` U+180E `}` unparseable, as the check already judges it.
-
-**Where.** `test/suite/registry/section-2.7.ts`.
-
-**Change.**
-- *15 comment arms.* One arm per Zs space separator outside Latin-1 under Unicode 15.1: U+1680, U+2000 through U+200A, U+202F, U+205F, and U+3000. Each is `{` plus the code point plus `}`, and must behave as T2.7-2's comment does (exact expectation at L132).
-- *Parse-failure arm.* `{` U+180E `}` reports 14.20 at the zero-length range at the code point's offset, declared unparseable for S-9.
-
-**Checks.**
-- S-9 judges the 15 arms derivable and the U+180E staging unparseable. S-7 passes.
-- T2.7-4 against the built product.
-
 ### Task 25 — T4-2: import types, string-named module declarations, their derived-path designations, and "no other construct names a module" (TEST-SPEC L151, and T4.5-7 at L187, which defers to T4-2; SPEC 4, 4.5, 14.15; A9)
 
 **Where.** `test/suite/registry/section-4.ts`, where `MODULE_LINKING_FORMS` lists four forms today.
