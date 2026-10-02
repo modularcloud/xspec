@@ -232,6 +232,7 @@ import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import type { FileContents, WorkspaceDecl } from "../../helpers/workspace.js";
 import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
@@ -890,17 +891,31 @@ const genPurityTrial: Gen<PurityTrial> = (choices) => {
   return { model, ops };
 };
 
+// The configuration every trial's workspace stages beside the rendered
+// sources: section-5.6.ts's SPECS_ONLY_CONFIG, the same expression moved
+// into a TypeScript staged-source record of this module's own
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), well-formed:
+// every trial after a body's first stages it after that body's first product
+// invocation — an initial file S-7's sweep never reaches — so the ledger
+// self-test judges it before any product exists. It stays plain in its
+// owner, whose bodies stage it before any invocation only.
+const P5_P6_SPECS_ONLY_CONFIG = stagedTs(
+  "P-5/P-6 xspec.config.ts — one spec group (section-5.6.ts's SPECS_ONLY_CONFIG)",
+  SPECS_ONLY_CONFIG,
+);
+
 /**
- * A trial's workspace declaration: the configuration beside the rendered
- * sources, every `.mdx` one declared per draw — judged by the property
- * runner before the body saw the draw (`mdxSources` on the registrations
- * below; S-9), as every initial `.mdx` file a trial stages after the body's
- * first product invocation must be (helpers/workspace.ts).
+ * A trial's workspace declaration: the configuration (a staged-source
+ * record) beside the rendered sources, every `.mdx` one declared per draw —
+ * judged by the property runner before the body saw the draw (`mdxSources`
+ * on the registrations below; S-9), as every initial `.mdx` file a trial
+ * stages after the body's first product invocation must be
+ * (helpers/workspace.ts).
  */
 function drawWorkspace(
   rendered: Readonly<Record<string, FileContents>>,
 ): WorkspaceDecl {
-  const files = { "xspec.config.ts": SPECS_ONLY_CONFIG, ...rendered };
+  const files = { "xspec.config.ts": P5_P6_SPECS_ONLY_CONFIG, ...rendered };
   return { files, mdx: { perDraw: mdxPathsOf(files) } };
 }
 

@@ -113,6 +113,7 @@ import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
 import {
@@ -124,14 +125,22 @@ import {
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. No
 // code groups and no Markdown emission — hashes are the subject.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// A TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses), well-formed: every trial stages it afresh, from the
+// second trial on after the body's first product invocation — an initial
+// file S-7's sweep never reaches, so the ledger self-test judges it before
+// any product exists.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "P-4 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // ---------------------------------------------------------------------------
 // Workspace model

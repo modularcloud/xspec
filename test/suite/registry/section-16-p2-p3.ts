@@ -141,7 +141,9 @@ import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import { TestWorkspace, mdxPathsOf } from "../../helpers/workspace.js";
 import { buildOk, runJson } from "./support.js";
 
@@ -149,7 +151,14 @@ import { buildOk, runJson } from "./support.js";
 // enabled with the default destination next to each source (SPEC 7.3, 13.2).
 // The spec-group glob matches only `.mdx` files, so no glob matches a
 // Markdown emit destination.
-const EMIT_TRUE_CONFIG = `import { defineConfig } from "xspec"
+// A TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses), well-formed: every trial stages it afresh, from the
+// second trial on after the body's first product invocation — an initial
+// file S-7's sweep never reaches, so the ledger self-test judges it before
+// any product exists.
+const EMIT_TRUE_CONFIG = stagedTs(
+  "P-2/P-3 xspec.config.ts — one spec group, Markdown emission enabled",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -157,7 +166,8 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 /** The character with the given code point (hex-spelled, tool-safe). */
 function cp(codePoint: number): string {
@@ -1860,18 +1870,24 @@ function mdPathOf(sourcePath: string): string {
   return `${sourcePath.slice(0, -".mdx".length)}.md`;
 }
 
-function workspaceFiles(doc: GeneratedDoc): Record<string, string> {
-  const files: Record<string, string> = { "xspec.config.ts": EMIT_TRUE_CONFIG };
+function workspaceFiles(
+  doc: GeneratedDoc,
+): Record<string, InitialFileContents> {
+  const files: Record<string, InitialFileContents> = {
+    "xspec.config.ts": EMIT_TRUE_CONFIG,
+  };
   for (const file of doc.files) files[file.path] = sourceOf(file);
   return files;
 }
 
 /**
  * S-9's per-draw check (helpers/property.ts `mdxSources`): every file a
- * draw stages — the `.mdx` sources are judged before the product sees them.
+ * draw composes — the `.mdx` sources are judged before the product sees
+ * them. The configuration staged beside them is no draw's: a staged-source
+ * record, judged by the ledger self-test before any product exists.
  */
 function stagedSources(doc: GeneratedDoc): DrawSource[] {
-  return Object.entries(workspaceFiles(doc));
+  return doc.files.map((file): DrawSource => [file.path, sourceOf(file)]);
 }
 
 /**

@@ -609,7 +609,6 @@ async function runAvailabilityArm(
   }
 }
 
-/** The P-11 property body for one trial (see the module header). */
 /** The `.mdx` paths whose staged bytes differ from the base file's. */
 function mutatedMdxPaths(trial: AvailabilityTrial): string[] {
   return mutatedPaths(trial).filter((path) => path.endsWith(".mdx"));
@@ -630,26 +629,28 @@ function mutatedPaths(trial: AvailabilityTrial): string[] {
     .map(([path]) => path);
 }
 
+/** The P-11 property body for one trial (see the module header). */
 async function runAvailabilityTrial(
   product: ProductBinding,
   trial: AvailabilityTrial,
 ): Promise<void> {
-  const mutated = mutatedMdxPaths(trial);
+  const mutated = mutatedPaths(trial);
   const workspace = await TestWorkspace.create({
-    // S-9: a mutated document is a fuzz staging whose derivability the
-    // document does not declare; an unmutated base source is the harness's
-    // constant, staged as P-8's record (`FUZZ_BASE_RECORDS`) — judged before
-    // any product exists — since every trial after the first stages it
-    // after the body's first product invocation.
+    // S-9: a mutated file is a fuzz staging whose well-formedness the
+    // document does not declare — a document's derivability and a code
+    // source's TypeScript well-formedness alike — staged plain and declared
+    // `unchecked`; an unmutated base file (the configuration always among
+    // them) is the harness's constant, staged as P-8's record
+    // (`FUZZ_BASE_RECORDS`) — judged before any product exists — since every
+    // trial after the first stages it after the body's first product
+    // invocation.
     files: Object.fromEntries(
       trial.files.map(([path, bytes]) => [
         path,
         mutated.includes(path) ? bytes : (FUZZ_BASE_RECORDS.get(path) ?? bytes),
       ]),
     ),
-    mdx: { unchecked: mutated },
-    // S-9: a mutated code source's TypeScript well-formedness is undeclared
-    // too (fuzz); an unmutated one is the base constant, well-formed.
+    mdx: { unchecked: mutatedMdxPaths(trial) },
     ts: { unchecked: mutatedCodePaths(trial) },
   });
   try {

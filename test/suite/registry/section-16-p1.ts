@@ -135,20 +135,29 @@ import type { Choices, DrawSource, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import { buildFindings, buildOk } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group — the
-// CONF-VALID scope, byte-identical to SUITE-03's staging.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// CONF-VALID scope, byte-identical to SUITE-03's staging. A TypeScript
+// staged-source record (helpers/staged-ts.ts; S-9's TypeScript and timing
+// clauses), well-formed: every trial stages it afresh, from the second trial
+// on after the body's first product invocation — an initial file S-7's
+// sweep never reaches, so the ledger self-test judges it before any product
+// exists.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "P-1 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 /** The character with the given code point (hex-spelled, tool-safe). */
 function cp(codePoint: number): string {
