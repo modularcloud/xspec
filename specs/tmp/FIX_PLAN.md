@@ -21,12 +21,12 @@ Why the harness must change: the documents moved after the harness was last gree
 - *Free text.* Corrections and other free-text checks use H-3's robust matching.
 - *Linux-leg arms* (staged file names holding a backslash, U+000A, U+000D, or non-UTF-8 bytes) gate themselves inside the shared body, as T12.0-5's non-UTF-8 arm does, so the Windows subset (`test/windows/e6-subset.test.ts`) skips no arm.
 - *Product verdicts.* The built product (Phase 10's, at c62f451) predates these SPEC changes. A new or strengthened arm that fails against it is recorded as a diagnosed product failure only once a hand-staged probe shows the product's answer contradicts the asserted SPEC behavior. A harness error, crash, or hang is a harness defect to fix in the task. An arm that passes against the product proves nothing about its liveness: red-check it (through a violator, a stand-in wrapper, or a mutation) where the task says so.
-- *Every task ends with:* `npm run typecheck`; `npm run format:check`; the touched suite files against the built product; the full self project under the namespace, with no failure from the task's own changes (until Task 9 lands, the gate tests still fail on whatever Tasks 6–9 have not yet wired); and a commit message stating the honest results. `AGENTS.md` gets only build/run knowledge a later spawn needs (a recipe, a count or timing a later check relies on), never a task narrative.
+- *Every task ends with:* `npm run typecheck`; `npm run format:check`; the touched suite files against the built product; the full self project under the namespace, with no failure from the task's own changes (until Task 9 lands, the gate tests still fail on whatever Tasks 7–9 have not yet wired); and a commit message stating the honest results. `AGENTS.md` gets only build/run knowledge a later spawn needs (a recipe, a count or timing a later check relies on), never a task narrative.
 
 **Standing rulings.** Two rulings stand for this run: AGENTS.md's "Known residual 14.20 location gaps" and "Known SPEC 6.5 gap, deferred to a future SPEC revision" bullets. No task here addresses them, and none may be added for them.
 
 **Order.** Tasks are in dependency order, and each names what it depends on:
-- Part A (Tasks 6–12) clears the red certification gate and brings the certification families to the current CERTIFICATIONS.md.
+- Part A (Tasks 7–12) clears the red certification gate and brings the certification families to the current CERTIFICATIONS.md.
 - Part B (Tasks 13–20) builds the machinery later tasks rely on.
 - Part C (Tasks 21–61) brings the T-numbered tests to the current text, in TEST-SPEC order.
 - Part D (Tasks 62–65) covers the properties, the Windows leg, and S-9's generated TypeScript forms.
@@ -38,33 +38,9 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part A — Certification
 
-### Task 6 — Register T13.4-11: removing recorded paths no longer generated (TEST-SPEC L564; SPEC 13.4, 14.10; CERTIFICATIONS.md §CONF-ORPHAN's staging constraints and the Exclusions entry "T13.4-4's link arm"; V failure 3; B14; D3)
-
-**Where.** `test/suite/registry/section-13.4.ts` (T13.4-4's link arm included) and `test/suite/registry/traceability.ts`.
-
-**Change.**
-- *Arms.* Arms (a)–(f) and the order-independence arm, exactly as L564 states them. Each of (a)–(f) builds with emission next to sources ((d) and (e) build under `outDir: "out"`), stages the change, then runs `check`, `build`, and `check`. Every last `check` is clean.
-  - (a) `specs/A.md` replaced by a directory holding a file, then emission disabled: no condition-10 finding concerning `specs/A.md` (the graph-data unit form left unasserted); the directory and its content byte-identical after `build`.
-  - (b) `specs/A.md` overwritten with `export const n = 1` as emission is disabled and a code group globbing `specs/*.md` is added: no condition-10 finding; the file byte-identical.
-  - (c) `specs/A.md` replaced by a symbolic link to a file outside the workspace: the first `check` reports the condition-10 recorded-file finding concerning `specs/A.md`; `build` removes the link itself, and its target stays byte-identical.
-  - (d) `out/specs` replaced by a plain file and `outDir` changed to `"md"`: no finding, no 14.22, no 14.24; `out/specs` byte-identical.
-  - (e) (d)'s staging with `out/specs` replaced instead by a symbolic link to a real directory holding a foreign plain file `A.md`, staged twice: once with that directory inside the workspace under no group's globs, once outside the workspace root. No finding; the link, the target directory, and its `A.md` byte-identical.
-  - (f) `specs/A.md` deleted: no finding (the graph-data unit form left unasserted, as in (a)), no 14.24.
-  - Order independence: build with `specs/B.md/C.mdx`, then delete it and add `specs/B.mdx`: `build` exits 0 and the workspace is exactly the regenerated one, with `check` clean.
-- *CONF-ORPHAN's staging constraints* (CERTIFICATIONS.md §CONF-ORPHAN):
-  - spec globs match `.mdx` names alone (`specs/*.mdx`, or `specs/**/*.mdx` for the order-independence arm);
-  - the code group arrives only in (b);
-  - the order-independence arm's "exactly the regenerated one" compares the workspace's files with those of a twin holding the same sources and configuration, freshly built by `build` (H-6's two-directory protocol), never with `inventory`.
-- *One shared link staging.* One helper stages a symbolic link to a file outside the workspace at a derived file's path, snapshots the target before, and compares it after. Arm (c) uses it, and so does T13.4-4's existing link arm, which moves onto it. CERTIFICATIONS.md's Exclusions let T13.4-4's link arm ride VIOL-ORPHAN-LINKTARGET's certification only insofar as it shares that staging.
-- *H-7.* `"13.4"` and `"14"`, plus each other passage the arms assert, as neighbouring entries do.
-
-**Checks.**
-- The registry gate test ("every CERTIFICATIONS.md in-scope test is implemented…") passes. S-7 passes.
-- T13.4-11 and T13.4-4 against the built product. Establish each arm's verdict: the product predates 13.4's current removal rule, so record an arm as a product failure only after a hand-staged probe confirms the product's answer.
-
 ### Task 7 — The CONF-ORPHAN conformer (CERTIFICATIONS.md §CONF-ORPHAN; TEST-SPEC C-1, C-2; D3)
 
-**Depends on.** Task 6.
+**Depends on.** T13.4-11, registered (`test/suite/registry/section-13.4.ts`). Its body drives `build` and `check --json` alone. Emission is disabled by `markdown` absent in arms (a) and (c), and by `markdown: { emit: false }` in (b) and (f). (b)'s code group is `code: { app: ["specs/*.md"] }`. (e)'s link target directory is `foreign/` at the workspace root (inside staging), or `foreign/` beside the root in the workspace's temporary directory (outside staging). Both links store relative targets. The body stops at its first failing arm, in the order (a), (b), (c), (d), (e) inside, (e) outside, (f), then order independence. Against the built product it fails at (a), and at (b) once (a) passes. A hand-staged probe confirms both: the product reports and deletes a directory, and a discovered source, at a recorded path.
 
 **Where.**
 - `test/fixtures/conf-orphan/product.mjs` and `bin.mjs` (new);
@@ -654,7 +630,7 @@ If T6.5-9 or T6.5-11 import this arm's exported staging, keep them building; Tas
   - (b) With no build ever run: `specs/A.md` is the user's plain file, under a code group `specs/*.md`.
 - *Performed controls.*
   - (c) No glob reaches `specs/A.md`.
-  - (d) A symbolic link to a file outside the workspace is the occupant, with (a)'s glob present: the move succeeds, the regeneration removes the link as the link, and the target stays byte-identical. Reuse Task 6's link-staging helper.
+  - (d) A symbolic link to a file outside the workspace is the occupant, with (a)'s glob present: the move succeeds, the regeneration removes the link as the link, and the target stays byte-identical. Reuse the shared link staging `stageLinkToOutsideFile` and `assertOutsideLinkTargetUnchanged` (`section-13.4.ts`; export them, or move them to `support.ts`).
   - (e) The section form in (a)'s staging: exit 0, the preview succeeding alike, with the effects L300 states and `check` clean.
 - *Multi-reason order.* `move specs/A.mdx "specs/a'b.mdx"` in (a)'s staging reports `refused-invalid-destination`, then `refused-exposed-derived-file`. Export the staging: T12.7-2 asserts the same order (Task 55).
 
@@ -828,7 +804,7 @@ S-9 names every one of these configurations well-formed: 5.9.3 accepts each both
 
 ### Task 56 — T13.4-4: the directory-occupant arms (TEST-SPEC L557; SPEC 13.4; B11)
 
-**Depends on.** Task 6, which moved T13.4-4's link arm onto the shared helper.
+**Depends on.** Nothing open. T13.4-4's link arm already stages through the shared helper `stageLinkToOutsideFile`; keep it there.
 
 **Where.** `test/suite/registry/section-13.4.ts`.
 

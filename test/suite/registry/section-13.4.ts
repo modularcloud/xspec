@@ -2,7 +2,8 @@
 // committable files + sorted keys), T13.4-2 (derived reproducibility),
 // T13.4-3 (orphan knowledge boundary), T13.4-4 (derived paths belong to
 // xspec), T13.4-5 (durable protection), T13.4-6 (symlink write rules),
-// T13.4-8 (writes create missing directories).
+// T13.4-8 (writes create missing directories), T13.4-11 (removing recorded
+// paths no longer generated).
 // T13.4-7 registers no test body: its TEST-SPEC entry is a cross-reference —
 // T7-6 (section-7-discovery.ts) carries the `.xspec.` / `.xspec/` /
 // emit-destination source exclusion. (A registered no-op body would pass
@@ -33,6 +34,15 @@
 //   output is a function of sources, configuration, and the journal alone
 //   (13.4), so conforming builds of both workspaces yield byte-identical
 //   trees.
+// - T13.4-4's link arm and T13.4-11(c) stage their links through one
+//   function, `stageLinkToOutsideFile`: a symbolic link at a derived file's
+//   own path resolving to a plain file outside the workspace root (in the
+//   workspace's temporary directory, beside the root), the target's bytes
+//   captured before the product runs and compared after. CERTIFICATIONS.md
+//   certifies that staging through T13.4-11(c) (VIOL-ORPHAN-LINKTARGET), and
+//   T13.4-4's link arm rides the certification insofar as it shares the
+//   staging (its Exclusions entry "T13.4-4's link arm"). Outside the root,
+//   the targets take no part in T13.4-4's whole-workspace compare.
 // - T13.4-3's two halves — the record missing (deleted per T13.3-2's
 //   operational definition) and unreadable (corrupted shape-blind through
 //   the H-3 record-staging adapter, T6.6-6's staging, before the
@@ -131,6 +141,28 @@
 //   under `outDir` in the emission arm) — companion sets being
 //   implementation latitude (13.1) and content another test's subject
 //   (T13.1-*, T13.2-1, T3-*).
+// - T13.4-11 stays inside CERTIFICATIONS.md §CONF-ORPHAN's scope (the test
+//   is in-scope there): one spec group of trivial single-section `.mdx`
+//   sources whose glob matches `.mdx` names alone; `markdown` emitting next
+//   to sources (under `outDir: "out"` in (d) and (e)), then reconfigured —
+//   emission disabled by `markdown` absent in (a) and (c) and by
+//   `emit: false` in (b) and (f), both spellings 7.3 admits, or `outDir`
+//   changed to `"md"`; (b)'s code group `specs/*.md` alone; commands
+//   `build` and `check --json` alone. "No condition-10 finding concerning
+//   P" is asserted over the 12.7 `path` member of the `stale-output`
+//   findings, the first `check`'s other findings left unasserted — the
+//   graph-data unit form unpinned (13.3, 14.10), and in (d) and (e) the
+//   per-file form of the fresh emit destination `md/specs/A.md` — so that
+//   `check` may exit 0 or 1, consistently with its findings (12.0). Every
+//   "byte-identical" compares against a capture taken once the staging is
+//   complete, before the first `check`. (e)'s inside staging puts the
+//   link's target directory at `foreign/` in the root, under no group's
+//   globs; its outside staging, beside the root in the workspace's
+//   temporary directory; both links store a relative target. The
+//   order-independence arm's "exactly the regenerated one" is H-6's
+//   two-directory compare of the whole workspace against a twin holding
+//   the same sources and configuration, freshly built — never `inventory`
+//   (§CONF-ORPHAN's staging constraint).
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -161,13 +193,14 @@ import type {
   SnapshotEntry,
 } from "../../helpers/snapshot.js";
 import {
+  assertDirectoriesEqual,
   assertLeavesUnchanged,
   assertSnapshotsEqual,
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
-import { runProduct } from "../../helpers/subprocess.js";
+import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import type {
   InitialFileContents,
   WorkspaceDecl,
@@ -179,7 +212,9 @@ import {
   assertFindingConcernsPath,
   buildOk,
   expectExit,
+  expectFindingFreeReport,
   runCli,
+  runFindingsReport,
   runJson,
 } from "./support.js";
 
@@ -1033,23 +1068,134 @@ const T13_4_3 = defineProductTest({
 // T13.4-4 — derived paths belong to xspec
 // ---------------------------------------------------------------------------
 
-const TARGET_REL = "target.txt";
-const TARGET_BYTES =
-  "harness-owned link target: nothing may ever be written through the link\n";
-
 // The common staging of the dirty workspace and its pristine reference
 // (module-header rationale: derived output is a function of sources,
-// configuration, and the journal alone, SPEC 13.4).
+// configuration, and the journal alone, SPEC 13.4). The link arm's targets
+// lie outside the workspace root (`stageLinkToOutsideFile`, below), so they
+// take no part in the whole-workspace compare.
 const T13_4_4_COMMON: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": MARKDOWN_CONFIG,
   "specs/A.mdx": A_MDX,
-  [TARGET_REL]: TARGET_BYTES,
 };
 
-/** `"../" × depth` up from a `/`-separated key's directory to the root. */
-function relativeTargetFrom(key: string, targetName: string): string {
-  const depth = key.split("/").length - 1;
-  return "../".repeat(depth) + targetName;
+// Where the shared link staging puts its targets: a directory beside the
+// workspace root, in the workspace's own temporary directory (`tempRoot`,
+// whose `work/` is the root), disposed with it.
+const OUTSIDE_LINK_TARGETS_DIR = "outside-link-targets";
+
+/**
+ * A symbolic link the harness staged at a derived file's own path, resolving
+ * to a plain file outside the workspace root, with the target's bytes as
+ * captured before any product invocation over the staging.
+ */
+interface OutsideFileLink {
+  /** The link's workspace-relative path: a derived file's own path. */
+  readonly linkRel: string;
+  /** The target's absolute path, beside the workspace root. */
+  readonly targetAbs: string;
+  /** The target's bytes, captured once the staging was complete. */
+  readonly targetBefore: Uint8Array;
+}
+
+/**
+ * The one link staging T13.4-4's link arm and T13.4-11(c) share: the
+ * occupant at a derived file's own path (the file a build put there) is
+ * replaced by a symbolic link resolving to a fresh plain file outside the
+ * workspace root, and the target's bytes are captured before the product
+ * runs over the staging; `assertOutsideLinkTargetUnchanged` compares them
+ * afterward. CERTIFICATIONS.md certifies this staging through T13.4-11(c)
+ * (VIOL-ORPHAN-LINKTARGET), and T13.4-4's link arm rides that certification
+ * insofar as it shares this staging (the Exclusions entry "T13.4-4's link
+ * arm" and the violator's note) — so both stage through this one function.
+ * The staging verifies itself — the path holds a symbolic link resolving to
+ * the target — and a staging that misses is an internal harness error,
+ * never a product verdict. The link stores a relative target; `targetName`
+ * names the target file, unique within the workspace.
+ */
+async function stageLinkToOutsideFile(
+  workspace: TestWorkspace,
+  linkRel: string,
+  targetName: string,
+): Promise<OutsideFileLink> {
+  const targetAbs = path.join(
+    workspace.tempRoot,
+    OUTSIDE_LINK_TARGETS_DIR,
+    targetName,
+  );
+  await fsp.mkdir(path.dirname(targetAbs), { recursive: true });
+  await fsp.writeFile(
+    targetAbs,
+    `harness-owned link target outside the workspace root, linked from ` +
+      `${linkRel}: never written through, never removed\n`,
+    { flag: "wx" },
+  );
+  const linkAbs = workspace.path(linkRel);
+  await fsp.rm(linkAbs, { force: true });
+  await workspace.symlink(
+    linkRel,
+    path.relative(path.dirname(linkAbs), targetAbs),
+    "file",
+  );
+  if ((await workspace.kind(linkRel)) !== "symlink") {
+    throw new Error(
+      `internal error: failed to stage a symbolic link at ${linkRel}`,
+    );
+  }
+  const [resolved, expected] = await Promise.all([
+    fsp.realpath(linkAbs),
+    fsp.realpath(targetAbs),
+  ]);
+  if (resolved !== expected) {
+    throw new Error(
+      `internal error: the symbolic link staged at ${linkRel} resolves to ` +
+        `${resolved}, not to its target ${expected}`,
+    );
+  }
+  return { linkRel, targetAbs, targetBefore: await fsp.readFile(targetAbs) };
+}
+
+/**
+ * The shared link staging's after-compare: the target outside the workspace
+ * root is still a plain file holding exactly the bytes captured before the
+ * product ran — nothing written through the link, and the target never
+ * removed in the link's place (SPEC 13.4: writes never traverse symbolic
+ * links; a removal removes a symbolic link itself, never its target).
+ */
+async function assertOutsideLinkTargetUnchanged(
+  link: OutsideFileLink,
+  context: string,
+): Promise<void> {
+  let kind: "file" | "dir" | "symlink" | "other" | "absent";
+  try {
+    const stats = await fsp.lstat(link.targetAbs);
+    kind = stats.isSymbolicLink()
+      ? "symlink"
+      : stats.isFile()
+        ? "file"
+        : stats.isDirectory()
+          ? "dir"
+          : "other";
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    kind = "absent";
+  }
+  if (kind !== "file") {
+    fail(
+      `${context}: the target of the symbolic link staged at ` +
+        `${link.linkRel} — a plain file outside the workspace root, at ` +
+        `${link.targetAbs} — must still be that plain file, byte-identical ` +
+        `(SPEC 13.4: a symbolic link itself, never its target; nothing is ` +
+        `ever written through a link); found ${kind}`,
+    );
+  }
+  assertBytesEqual(
+    await fsp.readFile(link.targetAbs),
+    link.targetBefore,
+    `${context}: the target of the symbolic link staged at ` +
+      `${link.linkRel}, outside the workspace root, byte-identical (SPEC ` +
+      `13.4: nothing is ever written through a link, and a removal removes ` +
+      `the link itself, never its target)`,
+  );
 }
 
 const T13_4_4 = defineProductTest({
@@ -1130,18 +1276,21 @@ const T13_4_4 = defineProductTest({
       );
 
       // Arm 2 — symbolic links at derived files' own paths: one per derived
-      // class. Each link resolves to the harness's target file; a product
-      // writing through a link modifies the target, a product refusing
-      // errors out, and a conforming product replaces the link itself.
+      // class, each through the shared link staging (T13.4-11(c)'s), so
+      // each resolves to its own plain file outside the workspace root; a
+      // product writing through a link modifies its target, a product
+      // refusing errors out, and a conforming product replaces the link
+      // itself.
       const linkKeys = ["specs/A.xspec.ts", "specs/A.md", graphKey] as const;
-      for (const key of linkKeys) {
-        await fsp.rm(dirty.path(key), { force: true });
-        await dirty.symlink(key, relativeTargetFrom(key, TARGET_REL));
-        if ((await dirty.kind(key)) !== "symlink") {
-          throw new Error(
-            `T13.4-4 internal error: failed to stage a symlink at ${key}`,
-          );
-        }
+      const links: OutsideFileLink[] = [];
+      for (const [index, key] of linkKeys.entries()) {
+        links.push(
+          await stageLinkToOutsideFile(
+            dirty,
+            key,
+            `T13.4-4-target-${String(index)}.txt`,
+          ),
+        );
       }
       await buildOk(
         product,
@@ -1159,19 +1308,20 @@ const T13_4_4 = defineProductTest({
           );
         }
       }
-      assertBytesEqual(
-        await dirty.readBytes(TARGET_REL),
-        TARGET_BYTES,
-        "T13.4-4 (symlink occupants): the link target after `build` — " +
-          "nothing is ever written through the link (SPEC 13.4)",
-      );
+      for (const link of links) {
+        await assertOutsideLinkTargetUnchanged(
+          link,
+          "T13.4-4 (symlink occupants): the link target after `build` — " +
+            "nothing is ever written through the link (SPEC 13.4)",
+        );
+      }
       const sw2 = await snapshotDirectory(dirty.root);
       assertSnapshotsEqual(
         sr,
         sw2,
         "T13.4-4 (symlink occupants): the workspace after `build` vs the " +
           "pristine reference — every derived path holds its generated " +
-          "plain file and the target is untouched (SPEC 13.4, 12.0)",
+          "plain file (SPEC 13.4, 12.0)",
       );
     } finally {
       await reference.dispose();
@@ -1409,11 +1559,13 @@ export default defineConfig({
 // the emit write path `out/specs/B.md` — or, staged nested, another emit
 // path under its own `out/…` directory chain (SPEC 7.3, 13.2). Every staging
 // of it — the cardinality arms, T13.4-3's orphan-boundary halves, T13.4-8's
-// emission arm — is in a workspace created after its body's first
-// invocation (T13.4-3's first half aside), so it is one staged-source record
-// (S-9's before-any-product clause; helpers/staged-mdx.ts).
+// emission arm, T13.4-11's order-independence arm and its twin — is in a
+// workspace created after its body's first invocation (T13.4-3's first half
+// aside), or added after an invocation in its own, so it is one
+// staged-source record (S-9's before-any-product clause;
+// helpers/staged-mdx.ts).
 const B_MDX = stagedMdx(
-  "T13.4-3/T13.4-6/T13.4-8 the minimal section b (specs/B.mdx; T13.4-6's specs/two/B.mdx; T13.4-8's specs/sub/B.mdx)",
+  "T13.4-3/T13.4-6/T13.4-8/T13.4-11 the minimal section b (specs/B.mdx, T13.4-11's order-independence arm and its twin included; T13.4-6's specs/two/B.mdx; T13.4-8's specs/sub/B.mdx)",
   ['<S id="b">', "Beta text.", "</S>", ""].join("\n"),
 );
 
@@ -2201,6 +2353,623 @@ const T13_4_8 = defineProductTest({
   },
 });
 
+// ---------------------------------------------------------------------------
+// T13.4-11 — removing recorded paths no longer generated
+// ---------------------------------------------------------------------------
+
+// CERTIFICATIONS.md §CONF-ORPHAN's staging constraints: one spec group whose
+// glob matches `.mdx` names alone, so no glob reaches a derived path while
+// it is one and 13.4's source exclusion stays dormant; `markdown` emitting
+// next to sources (under `outDir: "out"` in (d) and (e)), then reconfigured
+// — emission disabled under either spelling 7.3 admits, or `outDir`
+// changed; the code group arriving only in (b), as emission is disabled.
+const ORPHAN_EMIT_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  markdown: { emit: true }
+})
+`;
+
+// Emission disabled by `markdown` absent (SPEC 7.3): arms (a) and (c).
+const ORPHAN_NO_MARKDOWN_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  }
+})
+`;
+
+// Emission disabled by `emit: false` (SPEC 7.3): arm (f).
+const ORPHAN_EMIT_FALSE_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  markdown: { emit: false }
+})
+`;
+
+// Arm (b): emission disabled as a code group globbing `specs/*.md` is added
+// (SPEC 7.2), so the recorded `specs/A.md` is a discovered code source once
+// it is no emit destination (7.3, 13.4).
+const ORPHAN_CODE_GROUP_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  code: {
+    app: ["specs/*.md"]
+  },
+  markdown: { emit: false }
+})
+`;
+
+// Arms (d) and (e): built under `outDir: "out"`, recording `out/specs/A.md`,
+// then `outDir` changed to `"md"`.
+const ORPHAN_OUT_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "out" }
+})
+`;
+const ORPHAN_MD_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/*.mdx"]
+  },
+  markdown: { emit: true, outDir: "md" }
+})
+`;
+
+// The order-independence arm: `specs/**/*.mdx` reaches the nested source
+// `specs/B.md/C.mdx` — still `.mdx` names alone.
+const ORPHAN_NESTED_CONFIG = `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  markdown: { emit: true }
+})
+`;
+
+// Trivial single-section sources (CERTIFICATIONS.md §CONF-ORPHAN: no
+// imports, embeddings, comments, or props beyond `id`). Every arm after the
+// first stages them in a workspace created after the body's first product
+// invocation: staged-source records (S-9's before-any-product clause;
+// helpers/staged-mdx.ts). The order-independence arm's `specs/B.mdx` is
+// B_MDX, above.
+const ORPHAN_A_MDX = stagedMdx(
+  "T13.4-11 specs/A.mdx (the trivial single-section a: arms (a) to (f))",
+  ['<S id="a">', "Alpha text.", "</S>", ""].join("\n"),
+);
+const ORPHAN_C_MDX = stagedMdx(
+  "T13.4-11 specs/B.md/C.mdx (the trivial single-section c: the order-independence arm's first build)",
+  ['<S id="c">', "Gamma text.", "</S>", ""].join("\n"),
+);
+
+// Arm (b)'s well-formed TypeScript, overwriting the emitted `specs/A.md`.
+const ORPHAN_CODE_SOURCE = "export const n = 1\n";
+// Arm (a)'s file inside the directory replacing `specs/A.md` — no glob
+// matches it.
+const ORPHAN_DIR_FILE_REL = "specs/A.md/kept.txt";
+const ORPHAN_DIR_FILE_BYTES = "a file inside a directory at a recorded path\n";
+// Arm (e)'s foreign plain file `A.md` in the directory the link targets.
+const ORPHAN_FOREIGN_BYTES =
+  "a foreign plain file no build wrote: nothing reads or removes it\n";
+
+/**
+ * `check --json` where T13.4-11 leaves the accompanying findings unasserted
+ * — the graph-data unit form, unpinned (13.3, 14.10), and in (d) and (e)
+ * the per-file form of the fresh emit destination `md/specs/A.md`: exit 0
+ * with the finding-free report or exit 1 with at least one finding (SPEC
+ * 12.2, 12.0: `check` exits 1 on any finding), the report decoded
+ * form-exact either way (H-3). Returns the findings.
+ */
+async function orphanCheckFindings(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<readonly Finding[]> {
+  const result = await runCli(product, workspace, ["check", "--json"]);
+  if (
+    result.signal !== null ||
+    (result.exitCode !== 0 && result.exitCode !== 1)
+  ) {
+    fail(
+      `${context}: \`check\` on a workspace passing \`build\`'s validations ` +
+        `exits 0 when clean and 1 on any finding — never another code ` +
+        `(SPEC 12.2, 12.0); got ${summarizeResult(result)}`,
+    );
+  }
+  const findings = decodeFindingsReport(
+    parseJsonStdout(result, context),
+    context,
+  ).findings;
+  if ((result.exitCode === 0) !== (findings.length === 0)) {
+    fail(
+      `${context}: \`check\` exits 1 exactly when it reports a finding ` +
+        `(SPEC 12.2, 12.0); got exit ${String(result.exitCode)} with ` +
+        `${String(findings.length)} finding(s)`,
+    );
+  }
+  return findings;
+}
+
+/** The condition-10 findings concerning one workspace-relative path. */
+function staleFindingsConcerning(
+  findings: readonly Finding[],
+  rel: string,
+): Finding[] {
+  return findings.filter((finding) => {
+    return finding.condition === "14.10" && finding.path === rel;
+  });
+}
+
+/**
+ * One of T13.4-11's arms (a)–(f): the build it starts from, the recorded
+ * path its change leaves no longer generated, the change itself, and what
+ * the first `check` reports concerning that path.
+ */
+interface OrphanArm {
+  /** Diagnostic tag, e.g. "T13.4-11 (a) a directory". */
+  readonly tag: string;
+  /** The configuration of the initial build. */
+  readonly builtConfig: string;
+  /** The recorded derived path the change leaves no longer generated. */
+  readonly recordedRel: string;
+  /** The configuration the change installs. */
+  readonly changedConfig: string;
+  /**
+   * Stage the change's occupant — before the configuration change is
+   * written, before the first `check` — capturing what the arm compares,
+   * and return the judgment of the occupant after `build`.
+   */
+  readonly stage: (
+    workspace: TestWorkspace,
+  ) => Promise<(context: string) => Promise<void>>;
+  /** The first `check`: the recorded-file finding (c), or no finding. */
+  readonly firstCheck: "recorded-file-finding" | "no-finding";
+  /** What the first `check`'s expectation rests on (diagnostics). */
+  readonly why: string;
+}
+
+/**
+ * Walk one arm: build (the recorded path premised a plain file — emitted
+ * Markdown, SPEC 13.2, 7.3), stage the change, then `check`, `build`, and
+ * `check` again — the first `check` judged concerning the recorded path,
+ * `build` exiting 0 (so no 14.22, exit 1, and no 14.24, exit 2: SPEC 12.0),
+ * the occupant judged after it, and the last `check` clean.
+ */
+async function walkOrphanArm(
+  product: ProductBinding,
+  arm: OrphanArm,
+): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": arm.builtConfig,
+        "specs/A.mdx": ORPHAN_A_MDX,
+      },
+    },
+    async (workspace) => {
+      await buildOk(product, workspace, `${arm.tag} initial \`build\``);
+      await assertKindIs(
+        workspace,
+        arm.recordedRel,
+        "file",
+        `${arm.tag}: staging premise — the initial build emits specs/A.mdx's ` +
+          `Markdown at ${arm.recordedRel} as a plain file, recording it ` +
+          `(SPEC 13.2, 7.3, 13.3)`,
+      );
+      const judgeAfterBuild = await arm.stage(workspace);
+      await workspace.file("xspec.config.ts", arm.changedConfig);
+
+      const firstContext = `${arm.tag} first \`check --json\``;
+      if (arm.firstCheck === "recorded-file-finding") {
+        const findings = await runFindingsReport(
+          product,
+          workspace,
+          ["check", "--json"],
+          1,
+          `${firstContext} — ${arm.why}`,
+        );
+        const concerning = staleFindingsConcerning(findings, arm.recordedRel);
+        if (concerning.length !== 1) {
+          fail(
+            `${firstContext}: exactly one condition-10 finding in the ` +
+              `recorded-file form concerning ${arm.recordedRel} — ${arm.why} ` +
+              `(SPEC 14.10: one finding per such path, its derived path the ` +
+              `finding's path, 12.7); got ${String(concerning.length)} among ` +
+              JSON.stringify(
+                findings.map((finding) => ({
+                  code: finding.code,
+                  path: finding.path,
+                })),
+              ),
+          );
+        }
+      } else {
+        const findings = await orphanCheckFindings(
+          product,
+          workspace,
+          firstContext,
+        );
+        const concerning = staleFindingsConcerning(findings, arm.recordedRel);
+        if (concerning.length > 0) {
+          fail(
+            `${firstContext}: no condition-10 finding concerns ` +
+              `${arm.recordedRel} — ${arm.why} (SPEC 13.4, 14.10: the ` +
+              `recorded-file form reports exactly the occupants the removal ` +
+              `would remove); got ` +
+              JSON.stringify(concerning.map((finding) => finding.message)),
+          );
+        }
+      }
+
+      await buildOk(
+        product,
+        workspace,
+        `${arm.tag} \`build\` — the removal of the recorded path no longer ` +
+          `generated succeeds, no 14.22 (exit 1) and no 14.24 (exit 2) ` +
+          `(SPEC 13.4, 12.1, 12.0)`,
+      );
+      await judgeAfterBuild(`${arm.tag} after \`build\``);
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        `${arm.tag} last \`check --json\` — clean: the rebuilt record no ` +
+          `longer lists the path (SPEC 13.3, 13.4, 14.10)`,
+      );
+    },
+  );
+}
+
+/**
+ * A directory's byte state after the product ran: still a real directory,
+ * entry for entry byte-identical to the snapshot taken once the staging was
+ * complete (H-4) — checked as a directory first, so a removed or replaced
+ * directory is a diagnosed failure rather than a snapshot error.
+ */
+async function assertDirectoryUnchanged(
+  before: DirectorySnapshot,
+  what: string,
+  context: string,
+): Promise<void> {
+  let kind: "dir" | "absent" | "other";
+  try {
+    const stats = await fsp.lstat(before.root);
+    kind = stats.isDirectory() ? "dir" : "other";
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    kind = "absent";
+  }
+  if (kind !== "dir") {
+    fail(
+      `${context}: ${what} must still be a directory, byte-identical with ` +
+        `its content (SPEC 13.4); found ${kind === "other" ? "a non-directory" : "nothing"} at ${before.root}`,
+    );
+  }
+  assertSnapshotsEqual(
+    before,
+    await snapshotDirectory(before.root),
+    `${context}: ${what} and its content byte-identical (SPEC 13.4)`,
+  );
+}
+
+/** Arm (a): a directory holding a file at the recorded path. */
+const ORPHAN_ARM_DIRECTORY: OrphanArm = {
+  tag: "T13.4-11 (a) a directory",
+  builtConfig: ORPHAN_EMIT_CONFIG,
+  recordedRel: "specs/A.md",
+  changedConfig: ORPHAN_NO_MARKDOWN_CONFIG,
+  stage: async (workspace) => {
+    await fsp.rm(workspace.path("specs/A.md"));
+    await workspace.file(ORPHAN_DIR_FILE_REL, ORPHAN_DIR_FILE_BYTES);
+    const before = await snapshotDirectory(workspace.path("specs/A.md"));
+    return async (context) => {
+      await assertDirectoryUnchanged(
+        before,
+        "the directory at the recorded specs/A.md — a path holding a " +
+          "directory is left as it is, the removal making no write",
+        context,
+      );
+    };
+  },
+  firstCheck: "no-finding",
+  why:
+    "the recorded path holds a directory, which the removal leaves as it " +
+    "is (whether the graph-data unit form accompanies it is unasserted)",
+};
+
+/** Arm (b): a discovered code source at the recorded path. */
+const ORPHAN_ARM_SOURCE: OrphanArm = {
+  tag: "T13.4-11 (b) a discovered source",
+  builtConfig: ORPHAN_EMIT_CONFIG,
+  recordedRel: "specs/A.md",
+  changedConfig: ORPHAN_CODE_GROUP_CONFIG,
+  stage: async (workspace) => {
+    await workspace.file("specs/A.md", ORPHAN_CODE_SOURCE);
+    return async (context) => {
+      assertBytesEqual(
+        await readFileDiagnosed(
+          workspace,
+          "specs/A.md",
+          `${context}: the discovered code source at the recorded ` +
+            `specs/A.md is left in place — a source is never derived`,
+        ),
+        ORPHAN_CODE_SOURCE,
+        `${context}: the discovered code source at the recorded specs/A.md ` +
+          `byte-identical — a source is never derived (SPEC 13.4)`,
+      );
+    };
+  },
+  firstCheck: "no-finding",
+  why:
+    "once no emit destination, the recorded path is a discovered code " +
+    "source, which the removal leaves in place (SPEC 7.2, 7.3)",
+};
+
+/** Arm (c): a symbolic link to a file outside the workspace. */
+const ORPHAN_ARM_LINK: OrphanArm = {
+  tag: "T13.4-11 (c) a symbolic link",
+  builtConfig: ORPHAN_EMIT_CONFIG,
+  recordedRel: "specs/A.md",
+  changedConfig: ORPHAN_NO_MARKDOWN_CONFIG,
+  stage: async (workspace) => {
+    const link = await stageLinkToOutsideFile(
+      workspace,
+      "specs/A.md",
+      "T13.4-11-c-target.md",
+    );
+    return async (context) => {
+      await assertKindIs(
+        workspace,
+        "specs/A.md",
+        "absent",
+        `${context}: the recorded specs/A.md held a symbolic link, which ` +
+          `the removal removes as the link itself, never its target, and ` +
+          `with emission disabled nothing is written there (SPEC 13.4, 7.3)`,
+      );
+      await assertOutsideLinkTargetUnchanged(link, context);
+    };
+  },
+  firstCheck: "recorded-file-finding",
+  why:
+    "a symbolic link at the recorded path is an occupant the removal " +
+    "removes, judged as itself",
+};
+
+/** Arm (d): the recorded path below a plain-file component. */
+const ORPHAN_ARM_PLAIN_COMPONENT: OrphanArm = {
+  tag: "T13.4-11 (d) nothing to remove",
+  builtConfig: ORPHAN_OUT_CONFIG,
+  recordedRel: "out/specs/A.md",
+  changedConfig: ORPHAN_MD_CONFIG,
+  stage: async (workspace) => {
+    await fsp.rm(workspace.path("out/specs"), { recursive: true });
+    await workspace.file("out/specs", OCCUPANT);
+    return async (context) => {
+      assertBytesEqual(
+        await readFileDiagnosed(
+          workspace,
+          "out/specs",
+          `${context}: the plain file at out/specs, above the recorded ` +
+            `out/specs/A.md, is left as it is`,
+        ),
+        OCCUPANT,
+        `${context}: out/specs byte-identical — the recorded path below it ` +
+          `holds nothing, and its removal makes no write (SPEC 13.4)`,
+      );
+    };
+  },
+  firstCheck: "no-finding",
+  why:
+    "the recorded path lies below a non-directory component and holds " +
+    "nothing — nothing is read there",
+};
+
+/**
+ * Arm (e): the recorded path below a symbolic link to a real directory
+ * holding a foreign plain file `A.md` — staged inside the workspace, under
+ * no group's globs, and outside the workspace root.
+ */
+function orphanArmLinkComponent(where: "inside" | "outside"): OrphanArm {
+  return {
+    tag: `T13.4-11 (e) nothing to remove below a symbolic link (its target ${where} the workspace root)`,
+    builtConfig: ORPHAN_OUT_CONFIG,
+    recordedRel: "out/specs/A.md",
+    changedConfig: ORPHAN_MD_CONFIG,
+    stage: async (workspace) => {
+      await fsp.rm(workspace.path("out/specs"), { recursive: true });
+      const targetAbs =
+        where === "inside"
+          ? workspace.path("foreign")
+          : path.join(workspace.tempRoot, "foreign");
+      await fsp.mkdir(targetAbs, { recursive: true });
+      await fsp.writeFile(path.join(targetAbs, "A.md"), ORPHAN_FOREIGN_BYTES);
+      const linkAbs = workspace.path("out/specs");
+      const linkTarget = path.relative(path.dirname(linkAbs), targetAbs);
+      await workspace.symlink("out/specs", linkTarget, "dir");
+      if ((await workspace.kind("out/specs")) !== "symlink") {
+        throw new Error(
+          "internal error: failed to stage a symbolic link at out/specs",
+        );
+      }
+      const [resolved, expected] = await Promise.all([
+        fsp.realpath(linkAbs),
+        fsp.realpath(targetAbs),
+      ]);
+      if (resolved !== expected) {
+        throw new Error(
+          `internal error: the symbolic link staged at out/specs resolves ` +
+            `to ${resolved}, not to its target directory ${expected}`,
+        );
+      }
+      const before = await snapshotDirectory(targetAbs);
+      return async (context) => {
+        const kind = await workspace.kind("out/specs");
+        if (kind !== "symlink") {
+          fail(
+            `${context}: the symbolic link at out/specs — a directory ` +
+              `component of the recorded out/specs/A.md — is left as it is ` +
+              `(SPEC 13.4); found ${kind}`,
+          );
+        }
+        const stored = await workspace.linkTarget("out/specs");
+        if (stored !== linkTarget) {
+          fail(
+            `${context}: the symbolic link at out/specs byte-identical — ` +
+              `its stored target ${JSON.stringify(linkTarget)} (SPEC 13.4); ` +
+              `got ${JSON.stringify(stored)}`,
+          );
+        }
+        await assertDirectoryUnchanged(
+          before,
+          `the link's target directory (${where} the workspace root), ` +
+            `holding the foreign A.md — nothing below a symbolic-link ` +
+            `component is read or removed, whatever the link targets`,
+          context,
+        );
+      };
+    },
+    firstCheck: "no-finding",
+    why:
+      "the recorded path lies below a component a symbolic link occupies, " +
+      "where nothing is read whatever the link targets",
+  };
+}
+
+/** Arm (f): no occupant at the recorded path. */
+const ORPHAN_ARM_NO_OCCUPANT: OrphanArm = {
+  tag: "T13.4-11 (f) no occupant",
+  builtConfig: ORPHAN_EMIT_CONFIG,
+  recordedRel: "specs/A.md",
+  changedConfig: ORPHAN_EMIT_FALSE_CONFIG,
+  stage: async (workspace) => {
+    await fsp.rm(workspace.path("specs/A.md"));
+    return async (context) => {
+      await assertKindIs(
+        workspace,
+        "specs/A.md",
+        "absent",
+        `${context}: the recorded specs/A.md held nothing, and with ` +
+          `emission disabled nothing is written there (SPEC 13.4, 7.3)`,
+      );
+    };
+  },
+  firstCheck: "no-finding",
+  why:
+    "the recorded path holds nothing (whether the graph-data unit form " +
+    "accompanies it is unasserted)",
+};
+
+/**
+ * The order-independence arm (SPEC 13.4: a completed regeneration's outcome
+ * does not depend on the order of its writes and removals): `build` with
+ * `specs/B.md/C.mdx`, recording `specs/B.md/C.md` and `C.mdx`'s module and
+ * companions; then `C.mdx` deleted and `specs/B.mdx` added, whose emit path
+ * `specs/B.md` is the directory holding those recorded orphans. `build`
+ * exits 0, and the workspace is exactly the regenerated one — its files
+ * compared with a twin holding the same sources and configuration, freshly
+ * built (H-6's two-directory protocol; CERTIFICATIONS.md §CONF-ORPHAN's
+ * staging constraint: never `inventory`) — `check` clean.
+ */
+async function walkOrphanOrderIndependence(
+  product: ProductBinding,
+): Promise<void> {
+  const tag = "T13.4-11 (order independence)";
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": ORPHAN_NESTED_CONFIG,
+        "specs/B.md/C.mdx": ORPHAN_C_MDX,
+      },
+    },
+    async (workspace) => {
+      await buildOk(product, workspace, `${tag} initial \`build\``);
+      for (const rel of ["specs/B.md/C.md", "specs/B.md/C.xspec.ts"]) {
+        await assertKindIs(
+          workspace,
+          rel,
+          "file",
+          `${tag}: staging premise — the initial build writes C.mdx's ` +
+            `emitted Markdown and module under specs/B.md/, recording them ` +
+            `(SPEC 13.1, 13.2, 13.3)`,
+        );
+      }
+      await fsp.rm(workspace.path("specs/B.md/C.mdx"));
+      await workspace.file("specs/B.mdx", B_MDX);
+      await buildOk(
+        product,
+        workspace,
+        `${tag} \`build\` — the write replacing the directory specs/B.md, ` +
+          `each recorded orphan's removal finding nothing below the replaced ` +
+          `path or removing its file first alike; no 14.24, and no 14.22 on ` +
+          `a removal (SPEC 13.4, 12.1)`,
+      );
+      await assertKindIs(
+        workspace,
+        "specs/B.md",
+        "file",
+        `${tag}: specs/B.md is a plain file holding B.mdx's Markdown and ` +
+          `nothing under it (SPEC 13.4, 13.2)`,
+      );
+      await withWorkspace(
+        {
+          files: {
+            "xspec.config.ts": ORPHAN_NESTED_CONFIG,
+            "specs/B.mdx": B_MDX,
+          },
+        },
+        async (twin) => {
+          await buildOk(product, twin, `${tag} the twin's \`build\``);
+          await assertDirectoriesEqual(
+            workspace.root,
+            twin.root,
+            `${tag}: the workspace after \`build\` vs a twin holding the ` +
+              `same sources and configuration, freshly built — exactly the ` +
+              `regenerated one (SPEC 13.4, 12.1, 12.0; H-6)`,
+          );
+        },
+      );
+      await expectFindingFreeReport(
+        product,
+        workspace,
+        ["check", "--json"],
+        `${tag} \`check --json\` after the build — clean (SPEC 13.4, 14.10)`,
+      );
+    },
+  );
+}
+
+const T13_4_11 = defineProductTest({
+  id: "T13.4-11",
+  title:
+    'removing recorded paths no longer generated: 13.4 removes a recorded derived path\'s occupant only where it is neither a directory nor a discovered source — a symbolic link as the link itself — leaving a directory, a discovered source, or nothing as it is, making no write, and 14.10\'s recorded-file form reports exactly what that removal would remove; each arm builds with emission next to sources (under `outDir: "out"` in (d) and (e)), stages its change, then runs `check`, `build`, `check`: (a) a directory holding a file, emission disabled — no condition-10 finding concerning `specs/A.md`, the directory byte-identical; (b) a discovered code source `export const n = 1` under a code group globbing `specs/*.md`, emission disabled — no finding, the file byte-identical; (c) a symbolic link to a file outside the workspace, emission disabled — the recorded-file finding, `build` removing the link itself, its target byte-identical; (d) `out/specs` a plain file and `outDir` changed to `"md"` — no finding, `build` exits 0, `out/specs` byte-identical; (e) `out/specs` a symbolic link to a directory holding a foreign `A.md`, inside the workspace and outside its root — no finding, `build` exits 0, link, directory, and `A.md` byte-identical; (f) `specs/A.md` deleted, emission disabled — no finding, `build` exits 0, nothing there; every last `check` clean; and order independence — `specs/B.mdx` added as the orphaned `specs/B.md/C.mdx` is deleted, its emit path the directory holding the recorded orphans: `build` exits 0, the workspace equal to a freshly built twin, `check` clean (SPEC 13.4, 14.10, 12.1, 12.2)',
+  run: async (product) => {
+    await walkOrphanArm(product, ORPHAN_ARM_DIRECTORY);
+    await walkOrphanArm(product, ORPHAN_ARM_SOURCE);
+    await walkOrphanArm(product, ORPHAN_ARM_LINK);
+    await walkOrphanArm(product, ORPHAN_ARM_PLAIN_COMPONENT);
+    await walkOrphanArm(product, orphanArmLinkComponent("inside"));
+    await walkOrphanArm(product, orphanArmLinkComponent("outside"));
+    await walkOrphanArm(product, ORPHAN_ARM_NO_OCCUPANT);
+    await walkOrphanOrderIndependence(product);
+  },
+});
+
 /** TEST-SPEC §13.4, in canonical ID order (SUITE-47). */
 export const section134Tests: readonly ProductTestEntry[] = [
   T13_4_1,
@@ -2210,4 +2979,5 @@ export const section134Tests: readonly ProductTestEntry[] = [
   T13_4_5,
   T13_4_6,
   T13_4_8,
+  T13_4_11,
 ];
