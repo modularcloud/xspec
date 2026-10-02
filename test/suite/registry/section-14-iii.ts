@@ -116,10 +116,13 @@
 //   fixes the offset).
 // - Every workspace after the body's first — (b)'s onward — stages its
 //   `.mdx` sources as staged-source records (helpers/staged-mdx.ts; S-9's
-//   timing clause), registered at load and judged by the ledger self-test
-//   before any product exists, each carrying its arm's declaration: an
-//   early-error form its allowance, a negative arm's failing file
-//   `unparseable`. T14-4 and T14-6 sweep the 14.16 and 14.20 arms'
+//   timing clause), and its configuration and code sources as TypeScript
+//   records (helpers/staged-ts.ts) — the two configurations, each code
+//   arm's `src/app.ts` — registered at load and judged by the ledger
+//   self-test before any product exists, each carrying its arm's
+//   declaration: an early-error form its allowance, a negative arm's
+//   failing file — a spec source or a code source — `unparseable`. T14-4
+//   and T14-6 sweep the 14.16 and 14.20 arms'
 //   workspaces (`T14_12_REPORTER_STAGINGS`) and T14-11 re-stages the
 //   negative arms' sources, each after its own first invocation, so a
 //   record's name carries every test that stages it.
@@ -156,6 +159,8 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import type {
   InitialFileContents,
@@ -178,19 +183,29 @@ import {
 // Shared staging
 // ---------------------------------------------------------------------------
 
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// A staged-source record (S-9): every arm's workspace but the body's first
+// follows its first product invocation, and T14-4's and T14-6's sweeps stage
+// the 14.16 and spec-source 14.20 arms' workspaces after theirs.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T14-4/T14-6/T14-12 xspec.config.ts (one spec group, specs/**/*.mdx)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // One spec group plus one code group (SPEC 7.2): TypeScript files under
 // `src/` are discovered code sources, so `build` analyzes their spec-module
-// usage (4, 4.5).
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// usage (4, 4.5). A staged-source record (S-9): the code arms' workspaces
+// follow the body's first invocation, and T14-4's and T14-6's sweeps stage
+// the code-source 14.20 arms' workspaces after theirs.
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T14-4/T14-6/T14-12 xspec.config.ts (one spec group and the code group app, src/**/*.ts)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -200,7 +215,8 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
@@ -903,8 +919,8 @@ const A_STAGED = stagedMdx(
 const CODE_IMPORT = 'import A from "../specs/A.xspec"';
 const CODE_FILE = "src/app.ts";
 
-/** One code arm: `src/app.ts`'s lines and the unit the marker lies in. */
-interface CodeFormArm {
+/** One code arm's row: `src/app.ts`'s lines and the unit the marker lies in. */
+interface CodeFormRow {
   readonly arm: string;
   readonly name: string;
   /** The file's lines, each LF-terminated when laid out. */
@@ -913,7 +929,7 @@ interface CodeFormArm {
   readonly unit: string;
 }
 
-const CODE_FORM_ARMS: readonly CodeFormArm[] = [
+const CODE_FORM_ROWS: readonly CodeFormRow[] = [
   {
     arm: "l",
     name: "a rest parameter that is not last, `function f(...r: number[], x: number) {}` — a post-parse grammar check (well-formed TypeScript)",
@@ -972,6 +988,26 @@ const CODE_FORM_ARMS: readonly CodeFormArm[] = [
 ];
 
 /**
+ * One code arm: its row, and its file laid out as a staged-source record
+ * (S-9) — every code arm's workspace follows the body's first product
+ * invocation.
+ */
+interface CodeFormArm extends CodeFormRow {
+  /** `lines` laid out, each LF-terminated, as its record. */
+  readonly source: StagedTs;
+}
+
+const CODE_FORM_ARMS: readonly CodeFormArm[] = CODE_FORM_ROWS.map(
+  (row): CodeFormArm => ({
+    ...row,
+    source: stagedTs(
+      `T14-12 (${row.arm}) ${row.name} ${CODE_FILE}`,
+      row.lines.map((line) => line + "\n").join(""),
+    ),
+  }),
+);
+
+/**
  * One code arm: the file is well-formed, so `build` and `check` exit 0 on
  * the otherwise valid workspace and the marker inside the unit records its
  * `references` edge, attributed to that unit (SPEC 14.20, 4.5, 4.6).
@@ -981,13 +1017,12 @@ async function runCodeFormArm(
   arm: CodeFormArm,
 ): Promise<void> {
   const context = `T14-12 (${arm.arm}) ${arm.name}`;
-  const source = arm.lines.map((line) => line + "\n").join("");
   await withWorkspace(
     {
       files: {
         "xspec.config.ts": SPEC_AND_CODE_CONFIG,
         "specs/A.mdx": A_STAGED,
-        [CODE_FILE]: source,
+        [CODE_FILE]: arm.source,
       },
     },
     async (workspace) => {
@@ -1063,11 +1098,12 @@ export interface UnparseableArm {
   /** The unparseable file's workspace-relative path. */
   readonly file: string;
   /**
-   * Every staged file, the configuration included: each `.mdx` source a
-   * staged-source record — a spec-source arm's failing file declared
-   * unparseable (S-9) — registered at load, since every negative arm's
-   * workspace follows the body's first product invocation and T14-4, T14-6,
-   * and T14-11 stage the same records after theirs.
+   * Every staged file, the configuration included: each a staged-source
+   * record — the `.mdx` sources MDX records, the configuration and a code
+   * source TypeScript records, the arm's failing file declared unparseable
+   * (S-9) — registered at load, since every negative arm's workspace
+   * follows the body's first product invocation and T14-4, T14-6, and
+   * T14-11 stage the same records after theirs.
    */
   readonly files: Readonly<Record<string, InitialFileContents>>;
   /** The staged unparseable text (the S-9 vectors; Task 46's reuse). */
@@ -1138,7 +1174,11 @@ function codeUnparseableArm(
     files: {
       "xspec.config.ts": SPEC_AND_CODE_CONFIG,
       "specs/A.mdx": A_STAGED,
-      [CODE_FILE]: fixture.text,
+      [CODE_FILE]: stagedTs(
+        `T14-4/T14-6/T14-11/T14-12 (${arm}) ${name} ${CODE_FILE}`,
+        fixture.text,
+        "unparseable",
+      ),
     },
     source: fixture.text,
     offset: pinned(fixture, 0).start,
@@ -1146,7 +1186,8 @@ function codeUnparseableArm(
     rule,
     // `parserAgrees` confirms the stock MDX parser's position, which a code
     // source never meets; S-9's TypeScript check judges the file unparseable
-    // at staging (`unparseableDecl`).
+    // by its record's declaration — at load in the ledger self-test, and
+    // again at staging.
     parserAgrees: false,
   };
 }
@@ -1266,15 +1307,13 @@ export const T14_12_UNPARSEABLE_ARMS: readonly UnparseableArm[] = [
 ];
 
 /**
- * The workspace one negative arm stages: its `.mdx` sources records, a
- * spec-source arm's failing file declared unparseable (S-9), and a
- * code-source arm's failing file declared unparseable by its S-9
- * TypeScript declaration.
+ * The workspace one negative arm stages: every file a staged-source record
+ * carrying its own S-9 declaration — the failing file, a spec source or a
+ * code source by the arm's kind, declared unparseable — so the workspace
+ * declares nothing beside them.
  */
 function unparseableDecl(arm: UnparseableArm): WorkspaceDecl {
-  return arm.kind === "code-source"
-    ? { files: arm.files, ts: { unparseable: [arm.file] } }
-    : { files: arm.files };
+  return { files: arm.files };
 }
 
 /**

@@ -1153,8 +1153,14 @@ const LISTING_FIXTURE: RefusalFixture = {
   },
   priorRename: RENAME_FIXTURE.priorRename,
 };
-/** The rename fixture's configuration with an unknown top-level key (14.14). */
-const INVALID_CONFIG = `import { defineConfig } from "xspec"
+/**
+ * The rename fixture's configuration with an unknown top-level key (14.14):
+ * a staged-source record (S-9), since arm (g)'s invalid-configuration
+ * workspace follows the body's first product invocation.
+ */
+const INVALID_CONFIG = stagedTs(
+  "T14-10 (g) xspec.config.ts (the rename fixture's configuration with an unknown top-level key, 14.14)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1162,7 +1168,8 @@ export default defineConfig({
   },
   bogus: true
 })
-`;
+`,
+);
 
 /** A freshly built, valid workspace and its pre-staging snapshot. */
 interface BuiltWorkspace {

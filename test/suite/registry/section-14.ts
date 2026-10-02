@@ -291,8 +291,8 @@ import {
 } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
-import { stagedMdx } from "../../helpers/staged-mdx.js";
-import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
+import { StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
@@ -302,7 +302,6 @@ import {
 import type {
   InitialFileContents,
   WorkspaceDecl,
-  WorkspaceTsDecl,
 } from "../../helpers/workspace.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
@@ -375,20 +374,31 @@ import {
 // Shared fixture material and helpers
 // ---------------------------------------------------------------------------
 
-// Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// Minimal declarative configuration (SPEC 7): exactly one spec group. A
+// staged-source record (S-9; helpers/staged-ts.ts): most workspaces staging
+// it follow their body's first product invocation, so it is judged before
+// any product exists; the other stagings pass the record too.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T14-4/T14-6/T14-7/T14-8/T14-11 xspec.config.ts (one spec group, specs/**/*.mdx)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // One spec group plus one code group (SPEC 7.2): TypeScript files under
 // `src/` are discovered code sources, so `build` analyzes their spec-module
-// usage (4, 4.5).
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// usage (4, 4.5). A staged-source record (S-9), as SPECS_ONLY_CONFIG is:
+// T14-4's and T14-6's code-source sweep entries and T14-11's code arms stage
+// it after their bodies' first invocations; T14-1's, T14-2's, and T14-3's
+// first workspaces pass the record too.
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T14-4/T14-6/T14-11 xspec.config.ts (one spec group and the code group app, src/**/*.ts)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -398,7 +408,27 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
+
+// One spec group plus an unknown top-level key (SPEC 7, 14.14) — the
+// canonical valid configuration with exactly one defect, so the error is
+// attributable to it (the T7-2 attribution discipline): T14-3's
+// configuration-error arm and the 14.14 staging T14-4's and T14-6's arms
+// share (BOGUS_KEY_DECL), each workspace following its body's first
+// invocation — a staged-source record (S-9).
+const BOGUS_KEY_CONFIG = stagedTs(
+  "T14-3/T14-4/T14-6 xspec.config.ts (one spec group and the unknown top-level key bogus, 14.14)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  bogus: true
+})
+`,
+);
 
 /** One spec group over `specs/`, Markdown emission on or off (SPEC 7, 7.3). */
 function markdownConfig(emit: boolean): string {
@@ -412,6 +442,16 @@ export default defineConfig({
 })
 `;
 }
+
+/**
+ * `markdownConfig(true)` as a staged-source record (S-9): the stale
+ * workspace's configuration (STALE_DECL), which T14-6 stages after its
+ * body's first invocation (T14-4's first workspace passes it too).
+ */
+const MARKDOWN_EMIT_CONFIG = stagedTs(
+  "T14-6 xspec.config.ts (one spec group, Markdown emission on: the stale workspace, 14.10)",
+  markdownConfig(true),
+);
 
 /** Stage a fresh workspace with the given entries, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
@@ -545,7 +585,7 @@ const T14_1_FOUR_CONSTRUCT = "<div>Not a section.</div>";
 const T14_1_FIVE_PREFIX = 'import OK from "../specs/ok.xspec";\n\n';
 const T14_1_FIVE_CONSTRUCT = "OK.absent;";
 
-const T14_1_FILES: Readonly<Record<string, string>> = {
+const T14_1_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPEC_AND_CODE_CONFIG,
   "specs/ok.mdx": '<S id="present">\nA resolvable target.\n</S>\n',
   "specs/one.mdx": `${T14_1_ONE_PREFIX}${T14_1_ONE_CONSTRUCT}\n`,
@@ -664,7 +704,7 @@ const T14_1 = defineProductTest({
 // below would name if its spelling were interpreted (SPEC 2.4), and the
 // property TypeScript reads that marker as (4.5) — so the prior valid
 // generation exports it and the marker is no type error.
-const T14_2_INITIAL_FILES: Readonly<Record<string, string>> = {
+const T14_2_INITIAL_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPEC_AND_CODE_CONFIG,
   "specs/base.mdx": [
     '<S id="b1">',
@@ -748,6 +788,17 @@ const T14_2_REF_BROKEN = stagedMdx(
     "\n",
 );
 
+// The two consumer files staged after the initial build — staged-source
+// records (S-9; helpers/staged-ts.ts), judged before any product exists.
+const T14_2_APP_BROKEN = stagedTs(
+  "T14-2 src/app.ts with the unresolved marker and text call",
+  `${T14_2_APP_PREFIX}${T14_2_APP_MARKER}\n${T14_2_APP_CALL}\n`,
+);
+const T14_2_ESCAPED_BROKEN = stagedTs(
+  "T14-2 src/escaped.ts with the escape-free control and the escape-spelled marker",
+  `${T14_2_ESCAPED_PREFIX}${T14_2_ESCAPED_MARKER}\n`,
+);
+
 const T14_2 = defineProductTest({
   id: "T14-2",
   title:
@@ -767,14 +818,8 @@ const T14_2 = defineProductTest({
       // escape-spelled local `d`, and the TypeScript forms (marker; `text`
       // call; escape-spelled marker).
       await workspace.file("specs/ref.mdx", T14_2_REF_BROKEN);
-      await workspace.file(
-        "src/app.ts",
-        `${T14_2_APP_PREFIX}${T14_2_APP_MARKER}\n${T14_2_APP_CALL}\n`,
-      );
-      await workspace.file(
-        "src/escaped.ts",
-        `${T14_2_ESCAPED_PREFIX}${T14_2_ESCAPED_MARKER}\n`,
-      );
+      await workspace.file("src/app.ts", T14_2_APP_BROKEN);
+      await workspace.file("src/escaped.ts", T14_2_ESCAPED_BROKEN);
 
       const context = "T14-2 `build --json` over the six unresolved references";
       const findings = await buildFindings(product, workspace, context);
@@ -1069,19 +1114,11 @@ function assertMaskingReport(
 
 // The configuration-error arm: an unknown top-level key (SPEC 7, 14.14)
 // beside sources that are themselves invalid. The arm's workspace follows
-// the body's first invocations, so its sources are staged-source records
-// (S-9, test/self/s9-staged-sources.test.ts), the malformed one declared
-// unparseable.
+// the body's first invocations, so its configuration and sources are
+// staged-source records (S-9, test/self/s9-staged-sources.test.ts), the
+// malformed source declared unparseable.
 const T14_3_CONFIG_ARM_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/**/*.mdx"]
-  },
-  bogus: true
-})
-`,
+  "xspec.config.ts": BOGUS_KEY_CONFIG,
   "specs/invalid.mdx": stagedMdx(
     "T14-3 configuration-error arm specs/invalid.mdx (a missing id, never analyzed)",
     "<S>\nMissing id (14.1), never analyzed.\n</S>\n",
@@ -1182,9 +1219,9 @@ interface SweepEntry {
 
 /**
  * Shorthand: a specs-only workspace whose one source stages the condition —
- * a staged-source record carrying its own S-9 declaration (every sweep
- * workspace but T14-6's first follows its body's first invocation; the
- * table is converted uniformly).
+ * a staged-source record carrying its own S-9 declaration, beside the
+ * configuration's record (every sweep workspace but T14-6's first follows
+ * its body's first invocation; the table is converted uniformly).
  */
 function specArm(
   condition: string,
@@ -1207,8 +1244,15 @@ const CODE_ARM_SPEC_SOURCE = stagedMdx(
   '<S id="n1">\nCode-referenced behavior.\n</S>\n',
 );
 
-/** Shorthand: a valid spec plus one code file staging the condition. */
-function codeArm(condition: string, label: string, source: string): SweepEntry {
+/**
+ * Shorthand: a valid spec plus one code file staging the condition — a
+ * staged-source record (S-9; helpers/staged-ts.ts), as the spec arms' are.
+ */
+function codeArm(
+  condition: string,
+  label: string,
+  source: StagedTs,
+): SweepEntry {
   return {
     condition,
     label,
@@ -1307,8 +1351,11 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
   codeArm(
     "14.7",
     "unknown TypeScript reference",
-    ['import SPEC from "../specs/s.xspec";', "", "SPEC.missing;", ""].join(
-      "\n",
+    stagedTs(
+      "T14-4/T14-6 sweep src/app.ts (14.7, unknown TypeScript reference)",
+      ['import SPEC from "../specs/s.xspec";', "", "SPEC.missing;", ""].join(
+        "\n",
+      ),
     ),
   ),
   specArm(
@@ -1334,13 +1381,16 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
           "T14-4/T14-6 sweep specs/bravo.mdx (14.11, cross-module text call)",
           '<S id="second">\nBravo behavior.\n</S>\n',
         ),
-        "src/app.ts": [
-          'import ALPHA from "../specs/alpha.xspec";',
-          'import { text as textB } from "../specs/bravo.xspec";',
-          "",
-          "textB(ALPHA.first);",
-          "",
-        ].join("\n"),
+        "src/app.ts": stagedTs(
+          "T14-4/T14-6 sweep src/app.ts (14.11, cross-module text call)",
+          [
+            'import ALPHA from "../specs/alpha.xspec";',
+            'import { text as textB } from "../specs/bravo.xspec";',
+            "",
+            "textB(ALPHA.first);",
+            "",
+          ].join("\n"),
+        ),
       },
     },
     answers: { kind: "code-source" },
@@ -1399,12 +1449,15 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
   codeArm(
     "14.18",
     "unsupported node usage",
-    [
-      'import SPEC from "../specs/s.xspec";',
-      "",
-      "const alias = SPEC.n1;",
-      "",
-    ].join("\n"),
+    stagedTs(
+      "T14-4/T14-6 sweep src/app.ts (14.18, unsupported node usage)",
+      [
+        'import SPEC from "../specs/s.xspec";',
+        "",
+        "const alias = SPEC.n1;",
+        "",
+      ].join("\n"),
+    ),
   ),
   {
     condition: "14.19",
@@ -1439,7 +1492,9 @@ const SWEEP_ENTRIES: readonly SweepEntry[] = [
     label: "symbolic link in a write path",
     decl: {
       files: {
-        "xspec.config.ts": `import { defineConfig } from "xspec"
+        "xspec.config.ts": stagedTs(
+          "T14-4/T14-6 sweep xspec.config.ts (14.22, Markdown emission into outDir out, a symbolic link)",
+          `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1448,6 +1503,7 @@ export default defineConfig({
   markdown: { emit: true, outDir: "out" }
 })
 `,
+        ),
         "specs/a.mdx": VALID_A1_BEHAVIOR,
       },
       dirs: ["real-out"],
@@ -1481,10 +1537,11 @@ export default defineConfig({
 // staleness is certainly detectable. Every workspace of the decls below
 // but T14-4's first follows its body's first invocation, so each `.mdx`
 // entry is a staged-source record (S-9) — here T12.2-2's own valid a1
-// source, byte-identical, by import.
+// source, byte-identical, by import — and so is each configuration (here
+// `markdownConfig(true)`'s record).
 const STALE_DECL: WorkspaceDecl = {
   files: {
-    "xspec.config.ts": markdownConfig(true),
+    "xspec.config.ts": MARKDOWN_EMIT_CONFIG,
     "specs/a.mdx": VALID_A1_SOURCE,
   },
 };
@@ -1501,7 +1558,9 @@ const STALE_EDIT = stagedMdx(
 // import.
 const POLICY_DECL: WorkspaceDecl = {
   files: {
-    "xspec.config.ts": `import { defineConfig } from "xspec"
+    "xspec.config.ts": stagedTs(
+      "T14-4/T14-6 xspec.config.ts (the policy workspace: groups hi and lo, the forbidden rule no-hi-to-lo, 14.12)",
+      `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1518,6 +1577,7 @@ export default defineConfig({
   ]
 })
 `,
+    ),
     "hi/H.mdx": POLICY_HI_SOURCE,
     "lo/L.mdx": POLICY_LO_SOURCE,
   },
@@ -1538,18 +1598,11 @@ const GARBAGE_SESSION_CONTENT = "{ this is not a parseable session";
 
 // 14.14 (the T7-2 attribution discipline, as in T14-3's configuration arm):
 // the canonical valid configuration plus one unknown top-level key, so the
-// error is attributable to that one defect, beside a valid source.
+// error is attributable to that one defect, beside a valid source — the
+// configuration BOGUS_KEY_CONFIG, the record T14-3's arm stages too.
 const BOGUS_KEY_DECL: WorkspaceDecl = {
   files: {
-    "xspec.config.ts": `import { defineConfig } from "xspec"
-
-export default defineConfig({
-  specs: {
-    main: ["specs/**/*.mdx"]
-  },
-  bogus: true
-})
-`,
+    "xspec.config.ts": BOGUS_KEY_CONFIG,
     "specs/a.mdx": VALID_A1_BEHAVIOR,
   },
 };
@@ -2090,6 +2143,22 @@ export default defineConfig({
 `;
 }
 
+// The `.mts` arm's configuration and code file follow the `.tsx` arm's
+// invocations, so they are staged-source records (S-9; helpers/staged-ts.ts):
+// the configuration `codeGroupConfig("src/**/*.mts")`'s record, and the
+// shared unit's bytes declared unparseable under the plain-TypeScript
+// grammar the `.mts` name selects (14.20). The `.tsx` arm, the body's first
+// workspace, stages the plain constants.
+const T14_5_MTS_CONFIG = stagedTs(
+  "T14-5 xspec.config.ts (one spec group and the code group app over src/**/*.mts)",
+  codeGroupConfig("src/**/*.mts"),
+);
+const T14_5_MTS_SOURCE = stagedTs(
+  "T14-5 src/view.mts (the TSX-only unit under a plain-TypeScript name)",
+  T14_5_UNIT_SOURCE,
+  "unparseable",
+);
+
 const T14_5 = defineProductTest({
   id: "T14-5",
   title:
@@ -2165,13 +2234,13 @@ const T14_5 = defineProductTest({
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": codeGroupConfig("src/**/*.mts"),
+          "xspec.config.ts": T14_5_MTS_CONFIG,
           "specs/U.mdx": T14_5_SPEC_SOURCE,
-          "src/view.mts": T14_5_UNIT_SOURCE,
+          // S-9: any name but `.tsx` selects plain TypeScript, so the
+          // TSX-only construct is unparseable here (14.20) — the record's
+          // declaration.
+          "src/view.mts": T14_5_MTS_SOURCE,
         },
-        // S-9: any name but `.tsx` selects plain TypeScript, so the TSX-only
-        // construct is unparseable here (14.20).
-        ts: { unparseable: ["src/view.mts"] },
       },
       async (workspace) => {
         const context = "T14-5 `build --json` over the `.mts` code file";
@@ -2802,15 +2871,20 @@ const T14_7_BAD_INVALID = stagedMdx(
 // root-level origin `a.mdx` needs a root-level glob (SPEC 7.1: any glob list,
 // every match `.mdx`). The section form's target path so spelled is refused
 // alike; its `<new-id>` `z` collides with nothing anywhere, so no second
-// reason could apply even to a product normalizing the spelling.
-const T14_7_SPELLING_CONFIG = `import { defineConfig } from "xspec"
+// reason could apply even to a product normalizing the spelling. The arm's
+// workspace follows the body's first invocations, so its configuration is
+// a staged-source record (S-9; helpers/staged-ts.ts).
+const T14_7_SPELLING_CONFIG = stagedTs(
+  "T14-7 destination-spelling arm xspec.config.ts (the root-level glob *.mdx beside specs/**/*.mdx)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["*.mdx", "specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 const T14_7_SPELLING_ORIGIN = "a.mdx";
 const T14_7_SPELLING_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": T14_7_SPELLING_CONFIG,
@@ -3877,8 +3951,12 @@ const T14_8_EMB_RANGE = {
 // group and one `depends` edge between its nodes — `build` never evaluates
 // policy, so the premise build passes and `check` reports exactly the one
 // violation, locations `[]`, path `null`, its context identities alone in
-// 14.12's contractual order.
-const T14_8_POLICY_CONFIG = `import { defineConfig } from "xspec"
+// 14.12's contractual order. The arm's workspace follows the body's first
+// invocations, so its configuration is a staged-source record (S-9;
+// helpers/staged-ts.ts).
+const T14_8_POLICY_CONFIG = stagedTs(
+  "T14-8 policy arm xspec.config.ts (the forbidden rule no-spec-deps over the group main)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -3893,7 +3971,8 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 const T14_8_POL_FILE = "specs/Pol.mdx";
 const T14_8_POL_SOURCE = stagedMdx(
   "T14-8 policy arm specs/Pol.mdx (p depending on a under the no-spec-deps rule)",
@@ -4216,21 +4295,17 @@ interface RangeRuleCase {
   readonly arm: string;
   /** The SPEC 14 range rule under test (diagnostics). */
   readonly rule: string;
-  readonly config: string;
+  /** The configuration, a staged-source record (S-9) as `files`' entries are. */
+  readonly config: StagedTs;
   /**
-   * The sources beside the configuration: every `.mdx` entry a staged-source
-   * record carrying its own S-9 declaration — every arm's workspace but
-   * (a)'s follows the body's first invocation, (a)'s converted uniformly,
-   * the (w) arms' records registered by their home modules — and every
-   * code source plain contents.
+   * The sources beside the configuration, every one a staged-source record
+   * carrying its own S-9 declaration — an `.mdx` entry an MDX record, a code
+   * source a TypeScript record, 14.20's declared forms declared unparseable:
+   * every arm's workspace but (a)'s follows the body's first invocation,
+   * (a)'s converted uniformly, the (w) arms' records registered by their
+   * home modules.
    */
   readonly files: Readonly<Record<string, InitialFileContents>>;
-  /**
-   * The S-9 TypeScript declaration of the staged code sources (default:
-   * every one well-formed) — an arm whose code source 14.20 declares
-   * unparseable lists it.
-   */
-  readonly ts?: WorkspaceTsDecl;
   /** Every staged finding, with its complete location list. */
   readonly expected: readonly ExactFindingExpectation[];
 }
@@ -4559,12 +4634,24 @@ function collisionFixture(form: SameScopeDeclarationArm): AssembledFixture {
   ]);
 }
 
-/** The (u) forms as the code files of one workspace, `src/collide-<key>.ts`. */
+/**
+ * The (u) forms as the code files of one workspace, `src/collide-<key>.ts`,
+ * each staged as a staged-source record (S-9; arm (u) follows the body's
+ * first invocation).
+ */
 const T14_11_COLLISION_FILES = Object.entries(T4_5_8_FURTHER_LOCATED_FORMS).map(
-  ([key, form]) => ({
-    file: `src/collide-${key}.ts`,
-    fixture: collisionFixture(form),
-  }),
+  ([key, form]) => {
+    const file = `src/collide-${key}.ts`;
+    const fixture = collisionFixture(form);
+    return {
+      file,
+      fixture,
+      source: stagedTs(
+        `T14-11 (u) ${file} (the ${key} form beside its import)`,
+        fixture.text,
+      ),
+    };
+  },
 );
 
 // (v) 14.20's encoding offset — the byte length of the file's longest
@@ -4602,8 +4689,9 @@ const T14_11_ENCODING_FORMS: readonly EncodingForm[] = [
 
 /**
  * Each encoding form as a spec source and as a code source, its pin located:
- * the spec source a staged-source record declared unparseable (S-9; arm (v)
- * follows the body's first invocation), the code source plain bytes.
+ * each a staged-source record declared unparseable (S-9; arm (v) follows the
+ * body's first invocation) — the spec source an MDX record, the code source
+ * a TypeScript record.
  */
 const T14_11_ENCODING_FILES = T14_11_ENCODING_FORMS.flatMap((form) =>
   [`specs/${form.name}.mdx`, `src/${form.name}.ts`].map((file) => ({
@@ -4614,7 +4702,11 @@ const T14_11_ENCODING_FILES = T14_11_ENCODING_FORMS.flatMap((form) =>
           Uint8Array.from(form.bytes),
           "unparseable",
         )
-      : Uint8Array.from(form.bytes),
+      : stagedTs(
+          `T14-11 (v) ${file} (the ${form.name} encoding form)`,
+          Uint8Array.from(form.bytes),
+          "unparseable",
+        ),
     location: { file, range: { start: form.offset, end: form.offset } },
   })),
 );
@@ -4643,10 +4735,11 @@ const T14_11_ENCODING_FILES = T14_11_ENCODING_FORMS.flatMap((form) =>
 // source is the staged-source record its home module registers — the
 // failing one declared unparseable (S-9) — staged here under that very
 // declaration, as in its home arm (the (w) workspaces follow this body's
-// earlier invocations); a code-source staging's failing file is declared
-// unparseable by its S-9 TypeScript declaration (`reassertedCase`); the
-// configuration is this module's for the staging's kind (the home modules
-// stage the same text).
+// earlier invocations); a code-source staging's failing file is likewise
+// the TypeScript record its home module registers, declared unparseable
+// (`reassertedCase` confirms each staging's failing file is a record so
+// declared, at load); the configuration is this module's record for the
+// staging's kind (the home modules stage the same text).
 
 /** T14-12's arm as an `UnparseableStaging`: its sources beside the configuration. */
 function t1412Staging(arm: UnparseableArm): UnparseableStaging {
@@ -4676,13 +4769,26 @@ function reassertedCase(
   staging: UnparseableStaging,
 ): RangeRuleCase {
   const { kind, file, files, offset } = staging;
+  // S-9: the failing file is a staged-source record declared unparseable —
+  // an MDX record for a spec-source staging, a TypeScript record for a
+  // code-source one — so the workspace declares nothing beside it.
+  const failing = files[file];
+  const declared =
+    kind === "code-source"
+      ? failing instanceof StagedTs && failing.ts === "unparseable"
+      : failing instanceof StagedMdx && failing.mdx === "unparseable";
+  if (!declared) {
+    throw new Error(
+      `T14-11 (w): the re-asserted staging ${JSON.stringify(staging.name)} ` +
+        `stages its failing ${kind} ${file} as something other than a ` +
+        `staged-source record declared unparseable (S-9)`,
+    );
+  }
   return {
     arm: `w.${String(index)}`,
     rule: `14.20 — a syntax-failure offset another test pins, re-asserted: ${staging.name}`,
     config: kind === "code-source" ? SPEC_AND_CODE_CONFIG : SPECS_ONLY_CONFIG,
     files,
-    // S-9: a code-source staging's failing file is declared unparseable.
-    ...(kind === "code-source" ? { ts: { unparseable: [file] } } : {}),
     expected: [
       {
         condition: "14.20",
@@ -4765,7 +4871,10 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     config: SPEC_AND_CODE_CONFIG,
     files: {
       [T14_11_SPEC]: T14_11_A_MDX,
-      [T14_11_CODE]: T14_11_OPTIONAL_CHAIN.text,
+      [T14_11_CODE]: stagedTs(
+        "T14-11 (d) src/app.ts (SPEC?.a — a non-static bare reference)",
+        T14_11_OPTIONAL_CHAIN.text,
+      ),
     },
     expected: [
       {
@@ -4875,10 +4984,22 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
         "T14-11 (j) specs/B.mdx (an import of a missing module beside A's)",
         T14_11_IMPORT_MDX.text,
       ),
-      "src/exp.ts": T14_11_EXPORT_TS.text,
-      "src/req.ts": T14_11_REQUIRE_TS.text,
-      "src/dyn.ts": T14_11_DYNAMIC_TS.text,
-      "src/collide.ts": T14_11_COLLISION_TS.text,
+      "src/exp.ts": stagedTs(
+        "T14-11 (j) src/exp.ts (export * from the spec module)",
+        T14_11_EXPORT_TS.text,
+      ),
+      "src/req.ts": stagedTs(
+        "T14-11 (j) src/req.ts (import X = require of the spec module)",
+        T14_11_REQUIRE_TS.text,
+      ),
+      "src/dyn.ts": stagedTs(
+        "T14-11 (j) src/dyn.ts (a dynamic import() of the spec module)",
+        T14_11_DYNAMIC_TS.text,
+      ),
+      "src/collide.ts": stagedTs(
+        "T14-11 (j) src/collide.ts (a colliding const declarator beside its import)",
+        T14_11_COLLISION_TS.text,
+      ),
     },
     expected: [
       {
@@ -4930,7 +5051,13 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     arm: "l",
     rule: "14.18 — the binding's identifier extended by the longest static chain it roots; a `text` binding alone",
     config: SPEC_AND_CODE_CONFIG,
-    files: { [T14_11_SPEC]: T14_11_A_MDX, [T14_11_CODE]: T14_11_USAGE_TS.text },
+    files: {
+      [T14_11_SPEC]: T14_11_A_MDX,
+      [T14_11_CODE]: stagedTs(
+        "T14-11 (l) src/app.ts (the node binding's chain SPEC.a.b and a text binding passed on)",
+        T14_11_USAGE_TS.text,
+      ),
+    },
     expected: [0, 1].map((index) => ({
       condition: "14.18",
       locations: located(T14_11_CODE, T14_11_USAGE_TS, index),
@@ -4941,9 +5068,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     rule: "14.20 — one zero-length range at the failure's offset: a byte-order mark, an encoding failure, an MDX and a TypeScript syntax failure",
     config: SPEC_AND_CODE_CONFIG,
     // S-9: the four sources are 14.20's declared-unparseable forms — the
-    // three MDX sources' records declared so, and the TypeScript one listed
-    // in `ts`.
-    ts: { unparseable: ["src/bad.ts"] },
+    // three MDX sources' records and the TypeScript one's declared so.
     files: {
       "specs/bom.mdx": stagedMdx(
         "T14-11 (m) specs/bom.mdx (a byte-order mark)",
@@ -4960,7 +5085,11 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
         T14_11_UNCLOSED_MDX.text,
         "unparseable",
       ),
-      "src/bad.ts": T14_11_SYNTAX_TS.text,
+      "src/bad.ts": stagedTs(
+        "T14-11 (m) src/bad.ts (let x = ; — a TypeScript syntax failure)",
+        T14_11_SYNTAX_TS.text,
+        "unparseable",
+      ),
     },
     expected: [
       {
@@ -5076,7 +5205,7 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     files: {
       [T14_11_SPEC]: T14_11_A_MDX,
       ...Object.fromEntries(
-        T14_11_COLLISION_FILES.map((entry) => [entry.file, entry.fixture.text]),
+        T14_11_COLLISION_FILES.map((entry) => [entry.file, entry.source]),
       ),
     },
     expected: T14_11_COLLISION_FILES.flatMap((entry) => [
@@ -5093,11 +5222,8 @@ const T14_11_CASES: readonly RangeRuleCase[] = [
     rule: "14.20 — an encoding failure's zero-length range at the first byte of the first ill-formed sequence: a valid 5-byte prefix then `FF` → 5, `41 E2 82 41` → 1, `C0 80` → 0, `ED A0 80` → 0, `41 E2 82` at the file's end → 1, a spec and a code source alike",
     config: SPEC_AND_CODE_CONFIG,
     // S-9: every source here is invalid UTF-8, 14.20's declared form — each
-    // spec source's record declared unparseable (T14_11_ENCODING_FILES), each
-    // code source listed in `ts`.
-    ts: {
-      unparseable: T14_11_ENCODING_FORMS.map((form) => `src/${form.name}.ts`),
-    },
+    // spec source's and each code source's record declared unparseable
+    // (T14_11_ENCODING_FILES).
     files: Object.fromEntries(
       T14_11_ENCODING_FILES.map((entry) => [entry.file, entry.contents]),
     ),
@@ -5182,10 +5308,7 @@ async function runRangeRuleArm(
 ): Promise<void> {
   const context = `T14-11 (${kase.arm}) ${kase.rule}`;
   await withWorkspace(
-    {
-      files: { "xspec.config.ts": kase.config, ...kase.files },
-      ...(kase.ts === undefined ? {} : { ts: kase.ts }),
-    },
+    { files: { "xspec.config.ts": kase.config, ...kase.files } },
     async (workspace) => {
       const findings = await buildFindings(
         product,
