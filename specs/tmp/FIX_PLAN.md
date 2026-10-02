@@ -38,32 +38,9 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part B — Shared machinery
 
-### Task 14 — S-9's TypeScript judge and its fixed vectors (TEST-SPEC §17 S-9's TypeScript clause, L632; SPEC 14.20, 1.6; C1, part 1)
-
-**Where.** A new harness helper (for example `test/helpers/ts-derivability.ts`) importing `typescript-5.9.3` and nothing of the product. A new self-test (for example `test/self/s9-typescript-well-formedness.test.ts`).
-
-**Change.**
-- *The judge.* A pure function of a code source's or configuration file's bytes and name:
-  - It uses TypeScript 5.9.3's own parser at ScriptTarget ESNext, TSX or plain as the file name selects, and counts scan and parse diagnostics only — no post-parse grammar checks, name binding, or type checking.
-  - It reads the text twice, as module code and as script code. Reviewer C verified that forcing `setExternalModuleIndicator` on and off in `createSourceFile` gives 14.20's two readings.
-  - Bytes that are not valid UTF-8, or that begin with a byte-order mark, are unparseable (SPEC 1.6: "a discovered spec or code source that is not valid UTF-8 or that begins with a byte-order mark is unparseable (14.20)").
-- *Verdicts.*
-  - well-formed: both readings accept;
-  - unparseable: both reject;
-  - one-way: a harness error whatever the declaration (S-9: no fixture is text accepted read one way only).
-- *Self-test vectors.*
-  - Well-formed: T14-12's post-parse arms (L594); T4-2's relative-name and undeclared module declarations (L151); T7-2's modifier-bearing configuration imports (L321); a plain `xspec.config.ts`; a `.tsx` file holding JSX.
-  - Unparseable both ways: `010`, and T14-12's unparseable code arms.
-  - One-way: `await /re/;` (module only), `let a = await / 2 / 1;` (script only), and the top-level `await` forms 14.20 names (T14-12).
-
-**Checks.**
-- The new self-test passes.
-- Red-check it: a judge reading one way only must fail the one-way vectors.
-- Typecheck passes. No other harness code changes in this task.
-
 ### Task 15 — S-9's TypeScript check at staging time (TEST-SPEC S-9, L632; H-8; C1, part 2)
 
-**Depends on.** Task 14.
+**Depends on.** Task 14 (done: the judge is `judgeTypeScript` in `test/helpers/ts-derivability.ts`, and `tsDeclarationProblem` gives the harness error's text for a declaration, a one-way text failing every declaration; AGENTS.md's S-9 TypeScript bullet).
 
 **Where.**
 - `test/helpers/workspace.ts`: the builder's initial files and `file()`, and its declaration types (beside `WorkspaceMdxDecl`);
