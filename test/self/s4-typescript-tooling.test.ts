@@ -27,7 +27,8 @@
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+// The harness's own pinned TypeScript, as the tooling driver uses it.
+import ts from "typescript-5.9.3";
 import { expect, onTestFinished, test } from "vitest";
 import { HarnessAssertionError } from "../helpers/assertions.js";
 import {

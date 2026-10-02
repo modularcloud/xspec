@@ -41,12 +41,17 @@
 // resolved from this repository's own pinned node_modules — a compile-time
 // affordance that installs nothing into the consumer workspace — and emit
 // with LF line endings for deterministic bytes.
+//
+// The standard tooling is TypeScript 5.9.3, the release SPEC.md 14.20 fixes
+// (T1.4-5: never a later one), reached through the harness's own pinned
+// dependency `typescript-5.9.3` (an npm alias of `typescript@5.9.3`; see
+// test/vitest.config.ts) — never the product's `typescript` dependency.
 
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+import ts from "typescript-5.9.3";
 import { fail } from "./assertions.js";
 import type { ProductBinding, RunResult } from "./subprocess.js";
 import { runProduct } from "./subprocess.js";

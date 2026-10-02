@@ -33,7 +33,14 @@ import { defineConfig } from "vitest/config";
 // `micromark-extension-mdxjs`, `mdast-util-from-markdown` with
 // `mdast-util-mdx` (JSX tag matching lives in that mdast layer, not in the
 // tokenizer) — is declared there in its own right so the check stays
-// independent of the product's `remark-mdx` (TEST-SPEC S-9).
+// independent of the product's `remark-mdx` (TEST-SPEC S-9). Likewise the
+// harness's TypeScript: `typescript-5.9.3`, an npm alias of
+// `typescript@5.9.3` pinned exactly — the release SPEC.md 14.20 fixes — is the
+// parser S-9 checks TypeScript fixtures and draws with and the standard
+// tooling of section 4 (H-2; T1.4-5: never a later release). npm cannot
+// declare one package name in both dependency sets, so the alias is what
+// keeps that dependency the harness's own, independent of the product's
+// `typescript`; harness code imports `typescript-5.9.3`, never `typescript`.
 //
 // Paths below are relative to the repository root: the npm scripts are the
 // canonical entry points and always run from the package root.
