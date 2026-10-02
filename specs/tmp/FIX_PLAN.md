@@ -38,18 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 27 — T4.5-4 and T4.5-8: `using` and `await using` shadowing and module-scope collision arms (TEST-SPEC L184, L188; SPEC 4.5, 2.4, 14.15, 14.7; A12, A13)
-
-**Where.** `test/suite/registry/section-4.5.ts`.
-
-**Change.** Exact shapes are at L184 and L188.
-- *T4.5-4.* A `using SPEC = f()` in a block and an `await using SPEC = f()` in an async function. A chain rooted at the local records no edge and raises no finding; the same chain outside that scope records its edge.
-- *T4.5-8.* Module-scope `using SPEC = f()` and `await using SPEC = f()`, each beside the spec import.
-  - Each gives condition 15 plus condition 7, exit 1, with no edge or occurrence, observed through `occurrences --file`.
-  - The 14.15 finding locates the import and the declarator `SPEC = f()`, excluding `using` and `await using`.
-
-**Checks.** S-9 and S-7 pass. Both tests against the built product.
-
 ### Task 28 — T5.7-2: the U+3000 / U+202F token-bound arm (TEST-SPEC L239; SPEC 5.7, 1.4; A15)
 
 **Where.** `test/suite/registry/section-5.7.ts`: `TOKEN_BOUND_ARMS` holds only the U+00A0 and U+FEFF arms today.
