@@ -38,40 +38,9 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part B — Shared machinery
 
-### Task 18 — S-6: the name analysis behind T6.5-22(a), and its fixed vector suite (TEST-SPEC §17 S-6, L629; T6.5-22, L301; C3)
-
-**Where.** A new harness helper (for example `test/helpers/name-analysis.ts`), and a new self-test (for example `test/self/s6-name-analysis.test.ts`). The self-test must run in the self project, before any import-adding test or P-5 relies on the analysis.
-
-**Change.** The analysis takes a receiving file: a spec source (its ESM blocks and expressions, read under ECMAScript 2024 as 14.20 fixes them), a `.ts` file, or a `.tsx` file (TypeScript 5.9.3). It returns:
-- *(a) Declared names:* every name the file declares, in any scope, at value or type level.
-- *(b) Referenced names,* by T6.5-22(a)'s definition: every identifier the file spells where name resolution looks it up through scope, at value or type level, whatever it resolves to. A type reference such as `Record` in an annotation counts, and so does a JSX tag name that is a value reference (`<Foo />`, never an intrinsic `<div />`). Never counted:
-  - a property or member name: after `.`, a class, interface, or enum member's, a JSX attribute's;
-  - an object literal's non-shorthand key;
-  - a label;
-  - the name an import or export specifier spells for the other module (the `text` of `{ text as t }`).
-- *(c) Barred names,* by file kind:
-  - in every kind of file, T6.5-22's constraint list (L301): its reserved and strict-mode-barred words, `require`, `exports`, every `__`-prefixed name, the global-object properties (clause 19's, and Annex B's `escape` and `unescape`), `Iterator`, `AsyncIterator`, and `SuppressedError`;
-  - in a TSX source, `React`, and the leading identifier of the factory that any `@jsx` or `@jsxFrag` pragma in any of its comments names (the pragma's name matched regardless of ASCII case);
-  - in a spec source, `S`, `Spec`, and `text`.
-
-Expose T6.5-22(a)'s verdict for a set of added identifiers against the pre-operation file; its shape is the engineer's.
-
-**Vectors.** Exactly the ones S-6 lists, in both directions:
-- counted;
-- not counted;
-- barred, for each pragma form S-6 names;
-- the constraint-list names in every kind of file;
-- `React` in the two `.tsx` receivers (the one spelling JSX and the one spelling none), and in neither a spec source nor a `.ts` file;
-- `S`, `Spec`, and `text` in a spec source, and not in a `.ts` file.
-
-**Checks.**
-- The self-test passes.
-- Red-checks: dropping type-level declarations must fail the type-only `helper` vector, and collecting value references alone must fail `Record`.
-- Typecheck passes.
-
 ### Task 19 — T6.5-22(a): every operation the suite performs that adds an import is held to the added-identifier assertion (TEST-SPEC T6.5-22(a), L301; A28; C4(a) rides on it)
 
-**Depends on.** Task 18.
+**Depends on.** Task 18, done: `analyzeNames` and `addedIdentifierBreaches` in `test/helpers/oracles/name-analysis.ts`, which throw on a file that is not well-formed under its grammar (AGENTS.md's S-6 name-analysis bullet).
 
 **Where.** Wherever the suite performs import-adding operations. Prefer one central hook that every section-form `move` exiting 0 passes through — the subprocess driver path that the registered bodies and the property runner share (`test/helpers/subprocess.ts`), or a wrapper every such move uses. The assertion then holds "whichever test performs it".
 

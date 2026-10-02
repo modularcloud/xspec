@@ -752,6 +752,37 @@ export function deriveMdx(
   }
 }
 
+/** The mdast tree the 14.20 parse above builds — ESM blocks, expressions,
+ * and attribute expressions each carrying the ESTree acorn parsed it to
+ * (`data.estree`). */
+export type MdxTree = ReturnType<typeof fromMarkdown>;
+
+/**
+ * The tree of a source that derives under 14.20, read by the parse
+ * `deriveMdx` judges with — every S-9 allowance admitted, since a well-formed
+ * file may carry any of those early errors. TEST-SPEC S-6's name analysis
+ * (helpers/oracles/name-analysis.ts) reads a spec source's names from it. A
+ * source that does not derive so has no tree to read: a harness error.
+ */
+export function readMdxTree(text: string): MdxTree {
+  const verdict = deriveMdx(text, { allowances: MDX_ALLOWANCES });
+  if (!verdict.derives) {
+    throw new Error(
+      `S-9's MDX parse: no tree is read from a source that does not derive under SPEC 14.20 (${verdict.reason})`,
+    );
+  }
+  checkRuntimeWhitespace();
+  parsedText = text;
+  try {
+    return fromMarkdown(text, {
+      extensions: [extensionsFor(MDX_ALLOWANCES)],
+      mdastExtensions: MDAST_EXTENSIONS,
+    });
+  } finally {
+    parsedText = undefined;
+  }
+}
+
 /** The 1-based line and column of `index` in `text`, counting the line
  * endings the parser counts (U+000A, U+000D, and U+000D U+000A as one). */
 function positionAt(text: string, index: number): MdxPosition {
