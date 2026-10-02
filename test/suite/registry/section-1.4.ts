@@ -22,8 +22,11 @@
 // nothing beyond the entry's scoped query surface (identity, tags,
 // metadataHash) is demanded of the fixture product. Certification staging
 // constraints honored here:
-//   - T1.4-1 stages none of U+00A0/U+0085/U+2028 (§VIOL-VALID-WIDE expects
+//   - T1.4-1 stages neither U+00A0 nor U+0085 (§VIOL-VALID-WIDE expects
 //     T1.4-1 to keep passing under that violator);
+//   - T1.4-2's valid boundaries are U+00A0 and U+0085 alone: it stages
+//     neither U+2028 nor U+2029, which 1.4's quote-and-escape bullet bars
+//     (§VIOL-VALID-SEP expects T1.4-2 to keep passing under that violator);
 //   - non-whitespace control characters appear only in T1.4-1's control arms
 //     and T1.4-4's control tag arms (§VIOL-VALID-CTRL).
 // T1.4-3 is in no certification entry's scope: it exercises the generated
@@ -117,13 +120,15 @@ const FORBIDDEN_NAMES: readonly string[] = [
 ];
 
 /**
- * The boundary code points SPEC 1.4 excludes from both character classes:
- * U+00A0 (no-break space), U+0085 (next line), U+2028 (line separator).
+ * The valid boundary code points (T1.4-2): U+00A0 (no-break space) and
+ * U+0085 (next line), which SPEC 1.4 excludes from both character classes
+ * and no rule of 1.4 bars. U+2028 and U+2029 belong to neither class either,
+ * yet 1.4's quote-and-escape bullet bars both from every segment and tag:
+ * they are T1.4-1's and T1.4-4's invalid arms, never valid ones here.
  */
 const BOUNDARY_CODE_POINTS: readonly (readonly [number, string])[] = [
   [0x00a0, "no-break space"],
   [0x0085, "next line"],
-  [0x2028, "line separator"],
 ];
 
 /** The backslash, built from its code point (see the module header). */
@@ -329,9 +334,9 @@ async function expectSingle144(
 // character between two ordinary letters (or as the whole segment, for the
 // forbidden names) — the quote, escape, and character-reference characters
 // and U+FFFD included (SPEC 1.4) — plus the two verbatim spellings of SPEC
-// 2.4 (module header). U+00A0, U+0085, and U+2028 belong to neither 1.4
-// class and are deliberately absent from this test — they are T1.4-2's (and
-// §VIOL-VALID-WIDE's) subject.
+// 2.4 (module header). U+00A0 and U+0085 belong to neither 1.4 class and no
+// rule of 1.4 bars them: they are deliberately absent from this test — they
+// are T1.4-2's (and §VIOL-VALID-WIDE's) subject.
 interface SegmentArm {
   /** Which SPEC 1.4 rule this segment violates (failure diagnostics). */
   readonly name: string;
@@ -477,10 +482,15 @@ const BOUNDARY_SEGMENTS_SOURCE = BOUNDARY_CODE_POINTS.map(
     `<S id="${between(codePoint)}">\nSegment containing the ${label} character.\n</S>\n`,
 ).join("\n");
 
+/** The staged boundary code points as `U+XXXX` names (diagnostics). */
+const BOUNDARY_NAMES = BOUNDARY_CODE_POINTS.map(([codePoint]) =>
+  codePointName(codePoint),
+).join(" and ");
+
 const T1_4_2 = defineProductTest({
   id: "T1.4-2",
   title:
-    "segments containing U+00A0, U+0085, and U+2028 are valid — SPEC 1.4 excludes them from both character classes: builds succeed and the nodes are queryable by identity (SPEC 1.4)",
+    "segments containing U+00A0 and U+0085 are valid — SPEC 1.4 excludes them from both character classes and no rule of 1.4 bars them: builds succeed and the nodes are queryable by identity (U+2028 and U+2029, barred by 1.4's quote-and-escape bullet, are T1.4-1's and T1.4-4's invalid arms) (SPEC 1.4)",
   run: async (product) => {
     const workspace = await TestWorkspace.create({
       files: {
@@ -492,7 +502,7 @@ const T1_4_2 = defineProductTest({
       await buildOk(
         product,
         workspace,
-        "T1.4-2 `build` over segments containing U+00A0, U+0085, and U+2028",
+        `T1.4-2 \`build\` over segments containing ${BOUNDARY_NAMES}`,
       );
       for (const id of BOUNDARY_SEGMENT_IDS) {
         const identity = `specs/A.mdx#${id}`;
@@ -590,11 +600,12 @@ const T1_4_3 = defineProductTest({
 
 // --- T1.4-4 ------------------------------------------------------------------
 
-// Tags follow the segment rules except `.` is allowed. The boundary code
-// points of T1.4-2 apply to tags too — and since none of the three is 1.4
-// whitespace, 2.6 splitting must not split on them: each staged value is
-// exactly one tag, asserted exactly (a product splitting on U+00A0 would
-// report two tags; §VIOL-VALID-WIDE rejects the value outright at `build`).
+// Tags follow the segment rules except `.` is allowed. The valid boundary
+// code points of T1.4-2, U+00A0 and U+0085, apply to tags too — and since
+// neither is 1.4 whitespace, 2.6 splitting must not split on them: each
+// staged value is exactly one tag, asserted exactly (a product splitting on
+// U+00A0 would report two tags; §VIOL-VALID-WIDE rejects the value outright
+// at `build`).
 // The empty and whitespace rules of 1.4 admit no invalid-tag fixture: `tags`
 // splits on runs of 1.4 whitespace with leading/trailing whitespace ignored
 // (2.6), so no tag token can be empty or contain whitespace — whitespace-only
@@ -661,7 +672,7 @@ const INVALID_TAG_FIXTURES = INVALID_TAG_ARMS.map((arm) => ({
 const T1_4_4 = defineProductTest({
   id: "T1.4-4",
   title:
-    "tags: `.` is valid; `#`, a forbidden name, non-whitespace control characters, the quote, escape, and character-reference characters (`\"` single-quoted, `'`, backslash, `&`), and U+FFFD fail with 14.4, one finding per offending `tags` attribute located exactly at it; the verbatim escape spelling of `y` is a tag containing the backslash — condition 4, never the tag `xy`; the T1.4-2 boundary code points are valid in tags and never split (SPEC 1.4, 2.4, 2.6, 14, 14.4)",
+    "tags: `.` is valid; `#`, a forbidden name, non-whitespace control characters, the quote, escape, and character-reference characters (`\"` single-quoted, `'`, backslash, `&`), and U+FFFD fail with 14.4, one finding per offending `tags` attribute located exactly at it; the verbatim escape spelling of `y` is a tag containing the backslash — condition 4, never the tag `xy`; the T1.4-2 boundary code points U+00A0 and U+0085 are valid in tags and never split (SPEC 1.4, 2.4, 2.6, 14, 14.4)",
   run: async (product) => {
     for (const { arm, fixture } of VALID_TAG_FIXTURES) {
       const workspace = await TestWorkspace.create({

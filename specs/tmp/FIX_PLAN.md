@@ -26,7 +26,7 @@ Why the harness must change: the documents moved after the harness was last gree
 **Standing rulings.** Two rulings stand for this run: AGENTS.md's "Known residual 14.20 location gaps" and "Known SPEC 6.5 gap, deferred to a future SPEC revision" bullets. No task here addresses them, and none may be added for them.
 
 **Order.** Tasks are in dependency order, and each names what it depends on:
-- Part A (Tasks 2–12) clears the red certification gate and brings the certification families to the current CERTIFICATIONS.md.
+- Part A (Tasks 3–12) clears the red certification gate and brings the certification families to the current CERTIFICATIONS.md.
 - Part B (Tasks 13–20) builds the machinery later tasks rely on.
 - Part C (Tasks 21–61) brings the T-numbered tests to the current text, in TEST-SPEC order.
 - Part D (Tasks 62–65) covers the properties, the Windows leg, and S-9's generated TypeScript forms.
@@ -38,26 +38,12 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part A — Certification
 
-### Task 2 — T1.4-2 and T1.4-4: the valid boundaries are U+00A0 and U+0085 alone (TEST-SPEC L58, L60; SPEC 1.4; A2, A3; D1)
-
-**Where.** `test/suite/registry/section-1.4.ts`:
-- `BOUNDARY_CODE_POINTS`, which still lists U+2028 ("line separator");
-- T1.4-2's title ("U+00A0, U+0085, and U+2028 are valid") and comments;
-- T1.4-4's valid-boundary tag arms, built from the same list;
-- the staged-source records of those arms.
-
-**Change.** Drop U+2028 from the valid list. T1.4-2 then stages segments containing U+00A0 and U+0085 alone, and T1.4-4's valid-boundary tags likewise. Add no U+2028 or U+2029 invalid arm here: the CONF-VALID conformer accepts both until Task 3, and Task 4 adds the arms.
-
-**Checks.**
-- `-t VALID` certification: the conformer passes all 12 in-scope tests; VIOL-VALID-CTRL fails exactly T1.4-1, T1.4-4, and P-1; VIOL-VALID-WIDE fails exactly T1.4-2, T1.4-4, and P-1.
-- `test/self/s9-staged-sources.test.ts` passes, its count lower by the removed records.
-- T1.4-2 and T1.4-4 against the built product.
-
 ### Task 3 — CONF-VALID bars U+2028 and U+2029; VIOL-VALID-WIDE is exactly U+00A0 and U+0085; P-1 predicts both rejected (CERTIFICATIONS.md §CONF-VALID, §VIOL-VALID-WIDE; TEST-SPEC §16 P-1, L604; SPEC 1.4's quote-and-escape bullet; D1(a), D1(b); C5; A's P-1 note)
 
 **Where.**
 - `test/fixtures/conf-valid/product.mjs`: `valueViolation`, `WIDE_BOUNDARY_CODE_POINTS` (today U+00A0, U+0085, and U+2028), and the header and switch comments.
 - `test/fixtures/conf-valid/bin-wide.mjs`: its header still names three code points.
+- `test/self/certification-fixtures.ts`: the comment above the VIOL-VALID-WIDE entry still names U+2028 among the code points treated as whitespace.
 - `test/suite/registry/section-16-p1.ts`:
   - `QUOTE_ESCAPE_REFERENCE_CODE_POINTS`;
   - the alphabet, where U+2028 sits in the valid boundary group at weight 5 and U+2029 in the valid "breadth" group at weight 1;
