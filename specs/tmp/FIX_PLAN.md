@@ -38,14 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 34 — T6.5-7: the CRLF and lone-CR re-runs (TEST-SPEC L285; A21)
-
-**Where.** `test/suite/registry/section-6.5.ts`: T6.5-7.
-
-**Change.** Re-run every fixture — the MDX fixture and both code variants — with CRLF terminators and with lone-CR terminators. Compose the expected bytes by L285's rules. Its import-heading clause is already met.
-
-**Checks.** S-9 and S-7 pass. T6.5-7 against the built product.
-
 ### Task 35 — T6.5-8: the TS arm restaged, and the terminator re-runs (TEST-SPEC L287; SPEC 6.5; A22)
 
 **Where.** `test/suite/registry/section-6.5.ts`. T6.5-8's TS arm stages `import ORG …;`, a blank line, then top-level markers, and accepts any line start. That admits placements 6.5 now forbids as untimely, such as after `ORG.org.mv;`.

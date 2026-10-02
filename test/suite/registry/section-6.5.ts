@@ -197,7 +197,11 @@
 //   (the shared-line two-declaration import blocks parse, SPEC 2.1, 4) and
 //   a post-move `check` guards the composition's soundness: if the product's
 //   bytes equal the expected bytes yet something failed to resolve, the
-//   staging itself was defective and must fail loud.
+//   staging itself was defective and must fail loud. The whole workspace
+//   recurs with every staged terminator CRLF, and again with every one a
+//   lone CR (SPEC 3), composed by the same rules: emptied lines dropped
+//   with their whole terminators, staged terminators kept, and U+000A the
+//   one terminator the move inserts.
 // - T6.5-6's unstageable clauses are documented at the test, per TEST-SPEC:
 //   the collision clause's after-the-removal qualifier admits no
 //   discriminating fixture (structural IDs make the vacated set exactly the
@@ -5075,11 +5079,17 @@ const T6_5_6 = defineProductTest({
 // outside the subtree, and no moved reference targets a node remaining in
 // the origin — so the rewrite adds no import anywhere, the one direction
 // free of implementation latitude (SPEC 6.5).
+//
+// Every fixture file, staged and composed alike, is held as its lines (a
+// final empty entry terminating the last one) and spelled by joining them
+// with one terminator kind: U+000A in the first run, then CRLF and lone CR
+// in the terminator-kind re-runs (`B7_KINDS` below; SPEC 3: each one
+// terminator) — the lines hold no terminator character of their own.
 const B7_ORIGIN = "specs/Origin.mdx";
 const B7_TARGET = "specs/Target.mdx";
 const B7_KEEP = "specs/Keep.mdx";
 
-const B7_ORIGIN_BEFORE = [
+const B7_ORIGIN_BEFORE_LINES: readonly string[] = [
   'import TWO from "./Target.xspec"',
   'import Keep from "./Keep.xspec"; import TB from "./Target.xspec"',
   "",
@@ -5105,9 +5115,9 @@ const B7_ORIGIN_BEFORE = [
   "</S>",
   "</S>",
   "",
-].join("\n");
+];
 
-const B7_TARGET_BEFORE = [
+const B7_TARGET_BEFORE_LINES: readonly string[] = [
   '<S id="hub">',
   "Hub text.",
   "</S>",
@@ -5116,16 +5126,22 @@ const B7_TARGET_BEFORE = [
   "Aux text.",
   "</S>",
   "",
-].join("\n");
+];
 
-const B7_KEEP_SOURCE = ['<S id="keep">', "Keep text.", "</S>", ""].join("\n");
+const B7_KEEP_LINES: readonly string[] = [
+  '<S id="keep">',
+  "Keep text.",
+  "</S>",
+  "",
+];
 
 // Expected origin bytes, composed from the rules of SPEC 6.5 and 3 — not
 // from any product output:
 // - The own-line `TWO` declaration's own characters are deleted in place;
-//   its line, left empty purely by that deletion, is dropped with its
-//   terminator (SPEC 6.5, 3) — a product leaving an emptied line behind
-//   fails here.
+//   its line, left empty purely by that deletion, is dropped with its whole
+//   terminator — both bytes of a CRLF (SPEC 6.5, 3) — a product leaving an
+//   emptied line behind fails here, as one whose edit layer splits lines on
+//   U+000A alone does in the lone-CR re-run.
 // - On the shared line, the removed `TB` declaration's own characters ALONE
 //   are deleted — the declaration spans `import TB from "./Target.xspec"`
 //   exactly (no trailing `;` exists to reach) — so the retained `Keep`
@@ -5140,7 +5156,9 @@ const B7_KEEP_SOURCE = ['<S id="keep">', "Keep text.", "</S>", ""].join("\n");
 //   6.5, 3). Both surrounding blank lines were already blank in the source,
 //   so both are kept: two adjacent blank lines remain (rule of 3 drops only
 //   lines a removal blanked).
-const B7_ORIGIN_AFTER = [
+// - No terminator is inserted into the origin: every terminator it keeps is
+//   a staged one, kept byte-for-byte, so its lines join with the staged kind.
+const B7_ORIGIN_AFTER_LINES: readonly string[] = [
   'import Keep from "./Keep.xspec";' + " ",
   "",
   '<S id="org">',
@@ -5152,13 +5170,18 @@ const B7_ORIGIN_AFTER = [
   "</S>",
   "</S>",
   "",
-].join("\n");
+];
 
 // Expected target bytes, composed from the same rules:
 // - Top-level `<new-id>` (`mv`): the moved text is inserted at the end of
-//   the file, followed by U+000A; the existing final line is terminated, so
-//   the insertion point sits at the start of a line and no preceding U+000A
-//   is added (SPEC 6.5).
+//   the file, followed by U+000A whatever terminators the file holds (a
+//   product matching the file's terminator style where the moved text lands
+//   fails the CRLF and lone-CR re-runs); the existing final line is
+//   terminated — a lone CR is a terminator as a CRLF is (SPEC 3) — so the
+//   insertion point sits at the start of a line and no preceding U+000A is
+//   added (SPEC 6.5). The target's own lines keep their staged terminators,
+//   and the moved text carries its staged ones between its lines, each kept
+//   byte-for-byte (`b7TargetAfter`).
 // - Re-identification by prefix replacement `org.mv` → `mv` rewrites the
 //   three `id` attributes in place (SPEC 6.5).
 // - The imported references convert to local form — their targets `hub` and
@@ -5174,14 +5197,10 @@ const B7_ORIGIN_AFTER = [
 //   binds references — the double-quoted fallback applies only where a form
 //   cannot be kept, and `mv.leaf` holds no quote character). A product
 //   re-emitting a rewritten `id` attribute double-quoted fails here.
-const B7_TARGET_AFTER = [
-  '<S id="hub">',
-  "Hub text.",
-  "</S>",
-  "",
-  '<S id="aux">',
-  "Aux text.",
-  "</S>",
+// The moved text as it lands: the `org.mv` construct's own characters,
+// re-identified and converted, its last line the closing tag's (unterminated
+// here: the U+000A the move inserts after it is composed by `b7TargetAfter`).
+const B7_MOVED_AFTER_LINES: readonly string[] = [
   '<S id="mv" d={"hub"}>',
   "Moved head text.",
   "",
@@ -5195,8 +5214,18 @@ const B7_TARGET_AFTER = [
   "Moved user text.",
   "</S>",
   "</S>",
-  "",
-].join("\n");
+];
+
+/**
+ * The expected target bytes for the terminator `t` the fixture's files were
+ * staged with (SPEC 6.5, 3): the target's staged lines, each terminator
+ * kept, the last one included (the insertion point a line start, so none is
+ * added before the moved text); then the moved text, its staged terminators
+ * between its lines; then the one terminator the move inserts, U+000A.
+ */
+function b7TargetAfter(t: string): string {
+  return B7_TARGET_BEFORE_LINES.join(t) + B7_MOVED_AFTER_LINES.join(t) + X2_LF;
+}
 
 // The code-source counterpart (TEST-SPEC T6.5-7), fully composed — no
 // import is added, so no latitude: two `.ts` files of the configured code
@@ -5217,7 +5246,7 @@ const B7_TARGET_AFTER = [
 const B7_TS_OWN = "src/own-line.ts";
 const B7_TS_SHARED = "src/shared-line.ts";
 
-const B7_TS_OWN_BEFORE = [
+const B7_TS_OWN_BEFORE_LINES: readonly string[] = [
   'import TGT from "../specs/Target.xspec";',
   'import ORG from "../specs/Origin.xspec"',
   'import Keep from "../specs/Keep.xspec";',
@@ -5229,9 +5258,9 @@ const B7_TS_OWN_BEFORE = [
   "  Keep.keep;",
   "}",
   "",
-].join("\n");
+];
 
-const B7_TS_SHARED_BEFORE = [
+const B7_TS_SHARED_BEFORE_LINES: readonly string[] = [
   'import Keep from "../specs/Keep.xspec"; import ORG from "../specs/Origin.xspec"',
   'import TGT from "../specs/Target.xspec";',
   "",
@@ -5242,7 +5271,7 @@ const B7_TS_SHARED_BEFORE = [
   "  Keep.keep;",
   "}",
   "",
-].join("\n");
+];
 
 // Expected code bytes, composed from the rules of SPEC 6.4/6.5 and 3 — not
 // from any product output:
@@ -5255,17 +5284,19 @@ const B7_TS_SHARED_BEFORE = [
 //   trailing comment untouched.
 // - The origin binding is left without references, so its declaration is
 //   removed with 6.5's exact extent: in the own-line variant, the line left
-//   empty purely by the deletion is dropped with its terminator (SPEC 6.5,
-//   3); in the shared-line variant, the declaration's own characters ALONE
-//   are deleted, so the retained `Keep` import, its `;`, AND the separating
-//   U+0020 survive byte-for-byte — the kept line ends
-//   `"../specs/Keep.xspec"; ` with a trailing space before its terminator
-//   (an explicit concatenation below, so the byte is loud).
+//   empty purely by the deletion is dropped with its whole terminator, both
+//   bytes of a CRLF (SPEC 6.5, 3); in the shared-line variant, the
+//   declaration's own characters ALONE are deleted, so the retained `Keep`
+//   import, its `;`, AND the separating U+0020 survive byte-for-byte — the
+//   kept line ends `"../specs/Keep.xspec"; ` with a trailing space before
+//   its terminator (an explicit concatenation below, so the byte is loud).
 // - The `TGT.hub` and `Keep.keep` markers, the retained imports, and every
-//   other byte are unchanged: a product reprinting the code file on removal
-//   — re-indenting, dropping the comment, or normalizing `;` or whitespace
-//   — fails here while passing every resolution-only assertion.
-const B7_TS_OWN_AFTER = [
+//   other byte are unchanged — every terminator kept byte-for-byte, none
+//   inserted, so the lines join with the staged kind: a product reprinting
+//   the code file on removal — re-indenting, dropping the comment, or
+//   normalizing `;`, whitespace, or terminators — fails here while passing
+//   every resolution-only assertion.
+const B7_TS_OWN_AFTER_LINES: readonly string[] = [
   'import TGT from "../specs/Target.xspec";',
   'import Keep from "../specs/Keep.xspec";',
   "",
@@ -5276,9 +5307,9 @@ const B7_TS_OWN_AFTER = [
   "  Keep.keep;",
   "}",
   "",
-].join("\n");
+];
 
-const B7_TS_SHARED_AFTER = [
+const B7_TS_SHARED_AFTER_LINES: readonly string[] = [
   'import Keep from "../specs/Keep.xspec";' + " ",
   'import TGT from "../specs/Target.xspec";',
   "",
@@ -5289,7 +5320,7 @@ const B7_TS_SHARED_AFTER = [
   "  Keep.keep;",
   "}",
   "",
-].join("\n");
+];
 
 const B7_MOVE_ARGV = [
   "move",
@@ -5297,113 +5328,216 @@ const B7_MOVE_ARGV = [
   "specs/Target.mdx#mv",
 ] as const;
 
+/**
+ * One run of T6.5-7's fixtures — the MDX fixture and both code variants,
+ * staged together — with every line terminator of its staged files one kind
+ * (TEST-SPEC T6.5-7: each fixture recurs with every terminator CRLF, and
+ * again with every one a lone CR; SPEC 3: each one terminator).
+ */
+interface B7Kind {
+  /** The kind as the failure messages name it. */
+  readonly kind: string;
+  /** The terminator ending every line of every staged file. */
+  readonly terminator: string;
+  /** `xspec.config.ts`: one spec group and one code group (SPEC 7.2). */
+  readonly config: string | StagedTs;
+  /** The fixture's staged files, by workspace-relative path. */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+}
+
+/**
+ * The shared configuration's bytes with every terminator respelled `t`: the
+ * configuration is one of the staged files the re-runs respell (its lines
+ * hold U+000A terminators alone, checked here).
+ */
+function b7ConfigSource(t: string): string {
+  const source = SPEC_AND_CODE_CONFIG.source;
+  if (typeof source !== "string" || source.includes(X2_CR)) {
+    throw new Error(
+      "T6.5-7: the shared configuration record is expected as text whose " +
+        "every terminator is U+000A",
+    );
+  }
+  return source.split(X2_LF).join(t);
+}
+
+/**
+ * A terminator-kind re-run's staging (SPEC 3, 6.5): every staged file — the
+ * configuration included — spelled with `t`. Its workspace is created after
+ * the body's first product invocation, so each file is a staged-source
+ * record (S-9's timing clause), registered here at module load.
+ */
+function b7TerminatorKind(kind: string, t: string): B7Kind {
+  const name = (what: string): string => `T6.5-7 ${kind} re-run ${what}`;
+  return {
+    kind,
+    terminator: t,
+    config: stagedTs(
+      name("xspec.config.ts — one spec group and one code group"),
+      b7ConfigSource(t),
+    ),
+    files: {
+      [B7_ORIGIN]: stagedMdx(
+        name(`${B7_ORIGIN} — the target module imported under two bindings`),
+        B7_ORIGIN_BEFORE_LINES.join(t),
+      ),
+      [B7_TARGET]: stagedMdx(
+        name(`${B7_TARGET} — the move's target`),
+        B7_TARGET_BEFORE_LINES.join(t),
+      ),
+      [B7_KEEP]: stagedMdx(
+        name(`${B7_KEEP} — the retained third module`),
+        B7_KEEP_LINES.join(t),
+      ),
+      [B7_TS_OWN]: stagedTs(
+        name(`${B7_TS_OWN} — the origin-module import alone on its line`),
+        B7_TS_OWN_BEFORE_LINES.join(t),
+      ),
+      [B7_TS_SHARED]: stagedTs(
+        name(`${B7_TS_SHARED} — the origin-module import on a shared line`),
+        B7_TS_SHARED_BEFORE_LINES.join(t),
+      ),
+    },
+  };
+}
+
+// The first run stages U+000A terminators (its workspace precedes every
+// product invocation, so its files are plain contents); the re-runs stage
+// CRLF and lone CR.
+const B7_KINDS: readonly B7Kind[] = [
+  {
+    kind: "LF",
+    terminator: X2_LF,
+    config: SPEC_AND_CODE_CONFIG,
+    files: {
+      [B7_ORIGIN]: B7_ORIGIN_BEFORE_LINES.join(X2_LF),
+      [B7_TARGET]: B7_TARGET_BEFORE_LINES.join(X2_LF),
+      [B7_KEEP]: B7_KEEP_LINES.join(X2_LF),
+      [B7_TS_OWN]: B7_TS_OWN_BEFORE_LINES.join(X2_LF),
+      [B7_TS_SHARED]: B7_TS_SHARED_BEFORE_LINES.join(X2_LF),
+    },
+  },
+  b7TerminatorKind("CRLF", X2_CRLF),
+  b7TerminatorKind("lone CR", X2_CR),
+];
+
+/**
+ * One run of T6.5-7's fixtures under `k`'s terminators: the staging, its
+ * `build`, the move, every staged file byte-asserted against bytes composed
+ * for `k` from the rules of SPEC 6.4/6.5 and 3 (never from product output),
+ * then `check`.
+ */
+async function runB7Kind(product: ProductBinding, k: B7Kind): Promise<void> {
+  const t = k.terminator;
+  const at = `T6.5-7 (${k.kind} terminators)`;
+  await withWorkspace(k.config, k.files, async (workspace) => {
+    // Premise: the staging is valid — most acutely, the shared lines' two
+    // import declarations parse as two bindings in MDX (SPEC 2.1) and in
+    // TypeScript (SPEC 4) alike, and every marker resolves (SPEC 4.5) — so
+    // a later failure is the move's, not the staging's.
+    await buildOk(product, workspace, `${at} \`build\` over the staging`);
+
+    await expectExit(
+      product,
+      workspace,
+      [...B7_MOVE_ARGV],
+      0,
+      `${at} \`move specs/Origin.mdx#org.mv specs/Target.mdx#mv\``,
+    );
+
+    await assertFileBytes(
+      workspace.path(B7_ORIGIN),
+      B7_ORIGIN_AFTER_LINES.join(t),
+      `${at}: the origin after the move — both target-module imports ` +
+        "left unreferenced are removed with 6.5's exact extent: the " +
+        "own-line declaration's line dropped with its whole terminator " +
+        "(both bytes of a CRLF), the shared-line declaration's own " +
+        "characters alone deleted, the retained import (its `;` and the " +
+        "separating space included) kept byte-for-byte on its kept line; " +
+        "the moved construct's emptied line dropped likewise, every other " +
+        "staged terminator kept byte-for-byte (SPEC 6.5, 2.1, 3; H-4, " +
+        "normalizing nothing: an edit layer splitting lines on U+000A " +
+        "alone leaves the lone-CR origin's emptied lines behind)",
+    );
+    await assertFileBytes(
+      workspace.path(B7_TARGET),
+      b7TargetAfter(t),
+      `${at}: the target after the move — the moved references convert ` +
+        'to local form as double-quoted string literals (`d={"hub"}`, ' +
+        '`{text("aux")}`), the local reference is re-identified by ' +
+        "prefix replacement with its single-quote spelling preserved " +
+        "(`d={'mv.leaf'}`), and the insertion adds exactly the rewritten " +
+        "moved text, its staged terminators kept, plus U+000A at end of " +
+        "file — never the file's own terminator style, and none before " +
+        "the moved text, the final line being terminated (SPEC 6.5, 6.4, " +
+        "3; H-4, normalizing nothing)",
+    );
+    await assertFileBytes(
+      workspace.path(B7_KEEP),
+      B7_KEEP_LINES.join(t),
+      `${at}: the retained third module's own file is an uninvolved ` +
+        "bystander — beyond the stated edits, the identity and reference " +
+        "rewrites, and the finishing regeneration, a move changes no " +
+        "bytes (SPEC 6.5)",
+    );
+
+    // The code-source counterpart: the import-removal rule binds code
+    // sources as it binds MDX, and the moved markers are rewritten through
+    // the binding the file already has.
+    await assertFileBytes(
+      workspace.path(B7_TS_OWN),
+      B7_TS_OWN_AFTER_LINES.join(t),
+      `${at}: the own-line code variant after the move — the ` +
+        "origin-module import, its binding left without references, is " +
+        "removed with 6.5's exact extent (its line dropped with its whole " +
+        "terminator, both bytes of a CRLF), the moved markers are " +
+        "rewritten through the existing target binding (`TGT.mv`, " +
+        "`TGT.mv.leaf`; no import added), and every other byte — the " +
+        "retained imports, the `TGT.hub` and `Keep.keep` markers, " +
+        "indentation, `;`, the trailing comment, and every staged " +
+        "terminator — is unchanged (SPEC 6.5, 6.4, 4.5, 3; H-4, " +
+        "normalizing nothing: a product reprinting the code file on " +
+        "removal fails here)",
+    );
+    await assertFileBytes(
+      workspace.path(B7_TS_SHARED),
+      B7_TS_SHARED_AFTER_LINES.join(t),
+      `${at}: the shared-line code variant after the move — the ` +
+        "origin-module declaration's own characters alone are deleted " +
+        "from the line it shares with the retained third-module import, " +
+        "which is kept byte-for-byte (its `;` and the separating space " +
+        "included) on its kept line, the moved markers are rewritten " +
+        "through the existing target binding, and every other byte, " +
+        "every staged terminator included, is unchanged (SPEC 6.5, 6.4, " +
+        "4.5, 3; H-4, normalizing nothing)",
+    );
+
+    // Soundness guard on the composed expectation itself: everything
+    // resolves after the move — if the product's bytes matched the expected
+    // bytes yet a reference or import failed to resolve, the COMPOSITION
+    // was defective, and it must fail loud rather than certify a broken
+    // rewrite (SPEC 6.5, 12.2).
+    await expectExit(
+      product,
+      workspace,
+      ["check"],
+      0,
+      `${at} \`check\` immediately after the move — every converted, ` +
+        "re-identified, and re-rooted reference (MDX references and TS " +
+        "markers alike) resolves and no staleness remains (SPEC 6.5, " +
+        "12.2, 14.10)",
+    );
+  });
+}
+
 const T6_5_7 = defineProductTest({
   id: "T6.5-7",
   title:
-    "operation-side rewrite bytes for the real move: import-edit extents and reference-conversion spellings byte-asserted against independently composed expected files, staged so no import is added (the one rewrite direction free of implementation latitude) — the own-line target-module import's line dropped with its terminator, the shared-line declaration's own characters alone deleted with the retained third-module import kept byte-for-byte on its kept line, the moved references converted to local form as double-quoted string literals, the single-quoted local reference and the single-quoted descendant `id` attribute each re-identified by prefix replacement with their quote spellings preserved; and the code-source counterpart — two `.ts` files whose origin-module import, its binding referenced only by markers on moved nodes, is removed with the same exact extent (own-line and shared-line variants) while the moved markers are rewritten through the existing target binding, each file byte-equal to its composed expectation (SPEC 6.5, 6.4, 3, 2.1, 2.7, 4.5; H-4, normalizing nothing)",
+    "operation-side rewrite bytes for the real move: import-edit extents and reference-conversion spellings byte-asserted against independently composed expected files, staged so no import is added (the one rewrite direction free of implementation latitude) — the own-line target-module import's line dropped with its terminator, the shared-line declaration's own characters alone deleted with the retained third-module import kept byte-for-byte on its kept line, the moved references converted to local form as double-quoted string literals, the single-quoted local reference and the single-quoted descendant `id` attribute each re-identified by prefix replacement with their quote spellings preserved; and the code-source counterpart — two `.ts` files whose origin-module import, its binding referenced only by markers on moved nodes, is removed with the same exact extent (own-line and shared-line variants) while the moved markers are rewritten through the existing target binding, each file byte-equal to its composed expectation; every fixture, the code variants included, recurs with every terminator of its staged files CRLF and again with every one a lone CR, the expected bytes composed by the same rules — the own-line declaration's line dropped with its whole terminator, both bytes of a CRLF, every other staged terminator kept byte-for-byte, and every terminator the move inserts U+000A (SPEC 6.5, 6.4, 3, 2.1, 2.7, 4.5; H-4, normalizing nothing)",
   run: async (product) => {
-    await withWorkspace(
-      SPEC_AND_CODE_CONFIG,
-      {
-        [B7_ORIGIN]: B7_ORIGIN_BEFORE,
-        [B7_TARGET]: B7_TARGET_BEFORE,
-        [B7_KEEP]: B7_KEEP_SOURCE,
-        [B7_TS_OWN]: B7_TS_OWN_BEFORE,
-        [B7_TS_SHARED]: B7_TS_SHARED_BEFORE,
-      },
-      async (workspace) => {
-        // Premise: the staging is valid — most acutely, the shared lines'
-        // two import declarations parse as two bindings in MDX (SPEC 2.1)
-        // and in TypeScript (SPEC 4) alike, and every marker resolves (SPEC
-        // 4.5) — so a later failure is the move's, not the staging's.
-        await buildOk(product, workspace, "T6.5-7 `build` over the staging");
-
-        await expectExit(
-          product,
-          workspace,
-          [...B7_MOVE_ARGV],
-          0,
-          "T6.5-7 `move specs/Origin.mdx#org.mv specs/Target.mdx#mv`",
-        );
-
-        await assertFileBytes(
-          workspace.path(B7_ORIGIN),
-          B7_ORIGIN_AFTER,
-          "T6.5-7: the origin after the move — both target-module imports " +
-            "left unreferenced are removed with 6.5's exact extent: the " +
-            "own-line declaration's line dropped with its terminator, the " +
-            "shared-line declaration's own characters alone deleted, the " +
-            "retained import (its `;` and the separating space included) " +
-            "kept byte-for-byte on its kept line (SPEC 6.5, 2.1, 3; H-4, " +
-            "normalizing nothing)",
-        );
-        await assertFileBytes(
-          workspace.path(B7_TARGET),
-          B7_TARGET_AFTER,
-          "T6.5-7: the target after the move — the moved references " +
-            "convert to local form as double-quoted string literals " +
-            '(`d={"hub"}`, `{text("aux")}`), the local reference is ' +
-            "re-identified by prefix replacement with its single-quote " +
-            "spelling preserved (`d={'mv.leaf'}`), and the insertion adds " +
-            "exactly the rewritten moved text plus U+000A at end of file " +
-            "(SPEC 6.5, 6.4; H-4, normalizing nothing)",
-        );
-        await assertFileBytes(
-          workspace.path(B7_KEEP),
-          B7_KEEP_SOURCE,
-          "T6.5-7: the retained third module's own file is an uninvolved " +
-            "bystander — beyond the stated edits, the identity and " +
-            "reference rewrites, and the finishing regeneration, a move " +
-            "changes no bytes (SPEC 6.5)",
-        );
-
-        // The code-source counterpart: the import-removal rule binds code
-        // sources as it binds MDX, and the moved markers are rewritten
-        // through the binding the file already has.
-        await assertFileBytes(
-          workspace.path(B7_TS_OWN),
-          B7_TS_OWN_AFTER,
-          "T6.5-7: the own-line code variant after the move — the " +
-            "origin-module import, its binding left without references, " +
-            "is removed with 6.5's exact extent (its line dropped with its " +
-            "terminator), the moved markers are rewritten through the " +
-            "existing target binding (`TGT.mv`, `TGT.mv.leaf`; no import " +
-            "added), and every other byte — the retained imports, the " +
-            "`TGT.hub` and `Keep.keep` markers, indentation, `;`, and the " +
-            "trailing comment — is unchanged (SPEC 6.5, 6.4, 4.5, 3; H-4, " +
-            "normalizing nothing: a product reprinting the code file on " +
-            "removal fails here)",
-        );
-        await assertFileBytes(
-          workspace.path(B7_TS_SHARED),
-          B7_TS_SHARED_AFTER,
-          "T6.5-7: the shared-line code variant after the move — the " +
-            "origin-module declaration's own characters alone are deleted " +
-            "from the line it shares with the retained third-module " +
-            "import, which is kept byte-for-byte (its `;` and the " +
-            "separating space included) on its kept line, the moved " +
-            "markers are rewritten through the existing target binding, " +
-            "and every other byte is unchanged (SPEC 6.5, 6.4, 4.5, 3; " +
-            "H-4, normalizing nothing)",
-        );
-
-        // Soundness guard on the composed expectation itself: everything
-        // resolves after the move — if the product's bytes matched the
-        // expected bytes yet a reference or import failed to resolve, the
-        // COMPOSITION was defective, and it must fail loud rather than
-        // certify a broken rewrite (SPEC 6.5, 12.2).
-        await expectExit(
-          product,
-          workspace,
-          ["check"],
-          0,
-          "T6.5-7 `check` immediately after the move — every converted, " +
-            "re-identified, and re-rooted reference (MDX references and " +
-            "TS markers alike) resolves and no staleness remains " +
-            "(SPEC 6.5, 12.2, 14.10)",
-        );
-      },
-    );
+    for (const k of B7_KINDS) {
+      await runB7Kind(product, k);
+    }
   },
 });
 
