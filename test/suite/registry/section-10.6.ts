@@ -56,6 +56,11 @@
 //   workspace created after the body's first `build`: the f-and-e deletion's
 //   record, whose bytes it spells); each body's first workspace's initial
 //   `files` entries stay plain (S-7's sweep reaches them against the stub).
+// - Every workspace stages `SPECS_ONLY_CONFIG`, and T10.6-2's split
+//   sub-fixture is created after the body's first `build`, so the
+//   configuration is a TypeScript staged-source record (helpers/staged-ts.ts;
+//   S-9's TypeScript and timing clauses), well-formed, staged in every
+//   workspace.
 
 import type {
   ExportReport,
@@ -76,6 +81,7 @@ import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -83,14 +89,17 @@ import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. Audit
 // fixtures need no code group — audit derives `subtree-coherence` items only.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T10.6-2 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(

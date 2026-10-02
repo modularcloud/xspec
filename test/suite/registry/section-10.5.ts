@@ -59,6 +59,12 @@
 //   between `gitCommitAll` and that `build`) stays plain, as do each body's
 //   first workspace's initial `files` entries (S-7's sweep reaches them
 //   against the stub).
+// - The configuration of every workspace created after a body's first
+//   `build` (T10.5-1's extended and chain fixtures, T10.5-5's decomposition
+//   sub-fixture) is `SPECS_ONLY_CONFIG`, a TypeScript staged-source record
+//   (helpers/staged-ts.ts; S-9's TypeScript and timing clauses),
+//   well-formed, staged wherever that configuration is; `SPECS_CODE_CONFIG`
+//   serves only bodies' first workspaces and stays plain.
 
 import type {
   ExportReport,
@@ -81,20 +87,24 @@ import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T10.5-1/T10.5-5 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // Spec group plus a code group (SPEC 7.2) — fixtures deriving `code-impact`
 // items need an impacted code location (SPEC 9.2, 10.5).
@@ -112,7 +122,7 @@ export default defineConfig({
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
+  config: string | StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {

@@ -129,6 +129,7 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -146,21 +147,34 @@ import {
   runJson,
 } from "./support.js";
 
-// Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// Minimal declarative configuration (SPEC 7): exactly one spec group. Every
+// `CORE_FILES` workspace stages it, and T10.1-1's determinism twins, T10.1-4's
+// per-state workspaces, and T10.1-6's occupancy twins follow their bodies'
+// first invocations, so it is one TypeScript staged-source record
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), well-formed,
+// staged wherever this configuration is (T10.1-5's workspace too).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T10.1-1/T10.1-4/T10.1-6 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // The same spec group plus one coverage profile (SPEC 7.4) for the
 // coverage-session arm of T10.1-4: `main`'s one leaf has no incoming
 // dependency edge, so the profile leaves it uncovered and `create --coverage`
-// derives at least one item while recording the profile definition.
-const COVERAGE_CONFIG = `import { defineConfig } from "xspec"
+// derives at least one item while recording the profile definition. That
+// workspace follows the body's first invocations, so the configuration is a
+// TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript and
+// timing clauses), well-formed.
+const COVERAGE_CONFIG = stagedTs(
+  "T10.1-4 xspec.config.ts — one spec group and the coverage profile p",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -175,7 +189,8 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 const A_MDX = [
   '<S id="a">',

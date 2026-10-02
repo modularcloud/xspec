@@ -79,8 +79,16 @@
 //   provenance and coverage sub-fixtures; T10.7-7's empty-session arm
 //   stages none). T10.7-9's path-blocks v1 edit precedes the body's first
 //   `build` (git staging invokes no product) and stays plain, as do each
-//   body's first workspace's initial `files` entries; the code sources are
-//   `.ts`.
+//   body's first workspace's initial `files` entries.
+// - TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
+//   and timing clauses), every one well-formed: the configurations of the
+//   workspaces created after a body's first invocation — `SPECS_ONLY_CONFIG`
+//   (T10.7-7's empty-session arm, T10.7-9's audit arm, T10.7-12's provenance
+//   sub-fixture), `SPECS_CODE_CONFIG` (T10.7-7's payload arm), and
+//   `COVERAGE_ALL_CONFIG` (T10.7-12's coverage sub-fixture), each staged
+//   wherever that configuration is — and the code sources staged after one:
+//   T10.7-7's `src/next.ts` (`N7_CODE_SOURCE`) and T10.7-12's `src/ref.ts`
+//   and `src/del.ts` (`M12_CODE_SOURCE`, `M12_CODE_DEL_SOURCE`).
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -107,6 +115,7 @@ import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -119,14 +128,17 @@ import {
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T10.7-7/T10.7-9/T10.7-12 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // One spec group plus a direct coverage profile over it (SPEC 7.4): with the
 // group serving as its own boundary, a leaf is covered exactly when some
@@ -152,7 +164,9 @@ export default defineConfig({
 // branch node can be required and uncovered — making an
 // `uncovered-requirement` scope whose subtree text differs from its own text
 // (the T10.7-12 discriminator).
-const COVERAGE_ALL_CONFIG = `import { defineConfig } from "xspec"
+const COVERAGE_ALL_CONFIG = stagedTs(
+  "T10.7-12 xspec.config.ts — one spec group and the coverage profile p over every node (targets all)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -168,11 +182,14 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 // Spec group plus a code group (SPEC 7.2) — the T10.7-12 matrix fixture needs
 // a `code-impact` item (an impacted code location, SPEC 9.2, 10.5).
-const SPECS_CODE_CONFIG = `import { defineConfig } from "xspec"
+const SPECS_CODE_CONFIG = stagedTs(
+  "T10.7-7 xspec.config.ts — one spec group and the code group app",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -182,11 +199,12 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
+  config: string | StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
@@ -962,7 +980,7 @@ function n7PbSpec(kidText: string): string {
 // The payload arm's initial source and reviewed edit follow the body's first
 // `build` (the order arm's), so both are staged-source records
 // (helpers/staged-mdx.ts, S-9: judged before any product exists); the code
-// source beside them is `.ts`.
+// source beside them is a TypeScript record (`N7_CODE_SOURCE`).
 const T10_7_7_A2_KID_V0 = stagedMdx(
   "T10.7-7 specs/A2.mdx with a.k's text at v0 (the payload arm's initial source)",
   n7PbSpec("Kid line v0."),
@@ -985,7 +1003,13 @@ const N7_CODE = "src/next.ts#nextUnit";
 const N7_CODE_BEFORE_UNIT =
   'import A from "../specs/A2.xspec";\n\n// Byte-genaue Präambel vor der Einheit (multi-byte prefix).\n\n';
 const N7_CODE_UNIT_DECL = "function nextUnit() {\n  A.a.k;\n}";
-const N7_CODE_SOURCE = `${N7_CODE_BEFORE_UNIT}${N7_CODE_UNIT_DECL}\n`;
+// The payload arm's workspace follows the order arm's invocations and the
+// code source is staged after its first `build`, so it is a TypeScript
+// staged-source record (module header), well-formed.
+const N7_CODE_SOURCE = stagedTs(
+  "T10.7-7 src/next.ts (the payload arm's impacted code location nextUnit)",
+  `${N7_CODE_BEFORE_UNIT}${N7_CODE_UNIT_DECL}\n`,
+);
 
 // nextUnit's construct range (SPEC 1.7, 4.6): the function declaration's own
 // bytes, from the `function` keyword through the closing brace — zero-based,
@@ -2996,7 +3020,8 @@ const M12_V2: M12SpecState = {
 
 // The matrix arm's v1 and v2 edits follow the body's first `build`, so they
 // are staged-source records (helpers/staged-mdx.ts, S-9: judged before any
-// product exists); the code sources staged beside v1 are `.ts`.
+// product exists); the code sources staged beside v1 are TypeScript records
+// (`M12_CODE_SOURCE`, `M12_CODE_DEL_SOURCE`).
 const T10_7_12_A_V1 = stagedMdx(
   "T10.7-12 specs/A.mdx at v1 (the matrix arm's reviewed differences before create)",
   m12Spec(M12_V1),
@@ -3015,7 +3040,12 @@ const T10_7_12_A_V2 = stagedMdx(
 const M12_CODE_BEFORE_UNIT =
   'import A from "../specs/A.xspec";\n\n// Präzise UTF-8-Bytes vor der Einheit (multi-byte prefix).\n\n';
 const M12_CODE_UNIT_DECL = "function refUnit() {\n  A.par.n;\n  A.host.n;\n}";
-const M12_CODE_SOURCE = `${M12_CODE_BEFORE_UNIT}${M12_CODE_UNIT_DECL}\n`;
+// Staged beside v1, after the body's first `build`: a TypeScript
+// staged-source record (module header), well-formed.
+const M12_CODE_SOURCE = stagedTs(
+  "T10.7-12 src/ref.ts (the matrix arm's present code location refUnit)",
+  `${M12_CODE_BEFORE_UNIT}${M12_CODE_UNIT_DECL}\n`,
+);
 
 // refUnit's construct range (SPEC 1.7, 4.6): the function declaration's own
 // bytes, from the `function` keyword through the closing brace —
@@ -3028,8 +3058,13 @@ const M12_CODE_RANGE: SourceRange = {
 };
 
 // The deleted location's source: a top-level marker, so the location is the
-// whole file `src/del.ts` (SPEC 4.6).
-const M12_CODE_DEL_SOURCE = 'import A from "../specs/A.xspec";\n\nA.par.n;\n';
+// whole file `src/del.ts` (SPEC 4.6). Staged beside v1, after the body's
+// first `build`: a TypeScript staged-source record (module header),
+// well-formed.
+const M12_CODE_DEL_SOURCE = stagedTs(
+  "T10.7-12 src/del.ts (the matrix arm's deleted whole-file code location)",
+  'import A from "../specs/A.xspec";\n\nA.par.n;\n',
+);
 
 // Sub-fixture B: the absent-node provenance arms. px.x is edited between the
 // baseline and create, then deleted after create (its item's scope presents

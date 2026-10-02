@@ -78,6 +78,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -90,19 +91,31 @@ import {
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// T10.2-2's audit arm stages it in a workspace created after the body's
+// first invocations, so it is one TypeScript staged-source record
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), well-formed,
+// staged wherever this configuration is.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T10.2-2 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // One spec group plus a direct coverage profile over it (SPEC 7.4) — the
 // coverage-session fixtures: a leaf with no incoming dependency edge is
 // uncovered and yields an `uncovered-requirement` item (SPEC 10.7).
-const COVERAGE_CONFIG = `import { defineConfig } from "xspec"
+// T10.2-2's coverage arm stages it in a workspace created after the body's
+// first invocations, so it is a TypeScript staged-source record
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), well-formed.
+const COVERAGE_CONFIG = stagedTs(
+  "T10.2-2 xspec.config.ts — one spec group and the coverage profile p",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -117,7 +130,8 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 // Spec group, code group (SPEC 7.2), and the coverage profile together — the
 // T10.2-1 fixture needs a `code-impact` item (a code location, SPEC 9.2) and
@@ -144,7 +158,7 @@ export default defineConfig({
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
+  config: string | StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {

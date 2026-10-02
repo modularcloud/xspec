@@ -42,6 +42,7 @@ import { fail } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
@@ -56,9 +57,14 @@ import {
 } from "./section-9.js";
 import { assertSameJson, buildOk, expectExit } from "./support.js";
 
-/** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
+/**
+ * Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1).
+ * The configuration is a TypeScript staged-source record where the workspace
+ * follows the body's first product invocation (T9.3-3's arm 2; S-9's
+ * TypeScript and timing clauses), plain text elsewhere.
+ */
 async function withWorkspace<T>(
-  config: string,
+  config: string | StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
@@ -811,6 +817,15 @@ const D2_BASELINE = stagedMdx(
     "",
   ].join("\n"),
 );
+// Arm 2's configuration follows arm 1's invocations too, so it is a
+// TypeScript staged-source record (helpers/staged-ts.ts; S-9's TypeScript and
+// timing clauses), well-formed: section-5.6.ts's SPECS_ONLY_CONFIG, the same
+// expression moved here. Arm 1's workspace, the body's first, stays plain,
+// as do T9.3-1's and T9.3-2's (each body's only one).
+const T9_3_3_ARM_2_CONFIG = stagedTs(
+  "T9.3-3 arm 2 xspec.config.ts — one spec group (section-5.6.ts's SPECS_ONLY_CONFIG)",
+  SPECS_ONLY_CONFIG,
+);
 const D2_RENAMED_BLOCK = ['<S id="dm">', "Doomed original text.", "</S>"].join(
   "\n",
 );
@@ -889,7 +904,7 @@ const T9_3_3 = defineProductTest({
 
     // Arm 2 — the twice-reported reintroduced identity.
     await withWorkspace(
-      SPECS_ONLY_CONFIG,
+      T9_3_3_ARM_2_CONFIG,
       { [D2_FILE]: D2_BASELINE },
       async (workspace) => {
         await workspace.gitInit();

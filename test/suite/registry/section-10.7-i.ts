@@ -82,6 +82,12 @@
 //   coverage arm's same call: one record staged in both); every other
 //   initial `files` entry, a body's first workspace's, stays plain;
 //   T10.7-1's and T10.7-5's corrupt-session bytes stage no `.mdx` path.
+// - TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
+//   and timing clauses), every one well-formed: the configurations of those
+//   later workspaces — `COVERAGE_CONFIG` (T10.7-1's corrupt-session
+//   workspaces) and `SPECS_ONLY_CONFIG` (T10.7-2's audit arm), each staged
+//   wherever that configuration is — and T10.7-2's two post-create
+//   configuration edits (`C2_CONFIG_EDITED`, `A2_CONFIG_EDITED`).
 
 import * as fsp from "node:fs/promises";
 import type {
@@ -113,6 +119,7 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -128,19 +135,24 @@ import {
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T10.7-2 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // One spec group plus a direct coverage profile over it (SPEC 7.4): with the
 // group serving as its own boundary, a leaf is covered exactly when some
 // non-root node has a single dependency edge to it (SPEC 8).
-const COVERAGE_CONFIG = `import { defineConfig } from "xspec"
+const COVERAGE_CONFIG = stagedTs(
+  "T10.7-1 xspec.config.ts — one spec group and the coverage profile p",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -155,11 +167,12 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
+  config: StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
@@ -900,7 +913,9 @@ const C2_B = "specs/B.mdx";
 const C2_B_NODE = "specs/B.mdx#b";
 const C2_N = "extra/N.mdx";
 
-const C2_CONFIG_EDITED = `import { defineConfig } from "xspec"
+const C2_CONFIG_EDITED = stagedTs(
+  "T10.7-2 coverage arm xspec.config.ts after create (profile renamed to q, main's globs edited)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -915,7 +930,8 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 function leafSpec(id: string, text: string): string {
   return [`<S id="${id}">`, text, "</S>", ""].join("\n");
@@ -927,14 +943,17 @@ function leafSpec(id: string, text: string): string {
 // creation parameters, so its generators run against the whole current
 // workspace under the current configuration and the extra items enter on
 // re-derivation.
-const A2_CONFIG_EDITED = `import { defineConfig } from "xspec"
+const A2_CONFIG_EDITED = stagedTs(
+  "T10.7-2 audit arm xspec.config.ts after create (main gains extra/**/*.mdx)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx", "extra/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // Leaf a is the same call in the coverage arm's workspace (the body's first)
 // and the audit arm's (created after the coverage arm's invocations): one

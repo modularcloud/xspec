@@ -62,6 +62,14 @@
 // T10.4-4's reintroduction appends to bytes the rename wrote — no harness
 // constant equals them — so it is an anchored `workspace.edit()` (the tail's
 // uniqueness and end position diagnosed first, SPEC 6.4).
+//
+// The configurations and the code source of those later workspaces are
+// TypeScript staged-source records (helpers/staged-ts.ts; S-9's TypeScript
+// and timing clauses), every one well-formed and staged wherever it is
+// used: `SPECS_ONLY_CONFIG` (T10.4-1's, T10.4-2's, and T10.4-4's later
+// workspaces), `SPECS_CODE_CONFIG` and `CI_CODE_SOURCE` (T10.4-1's
+// code-impact scenario), and `COVERAGE_CONFIG` (T10.4-1's
+// uncovered-requirement scenario).
 
 import { Buffer } from "node:buffer";
 import type {
@@ -89,24 +97,30 @@ import {
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
 import { assertSameJson, buildOk, expectExit, runJson } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T10.4-1/T10.4-2/T10.4-4 xspec.config.ts — one spec group",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // Spec group plus a code group (SPEC 7.2) — the `code-impact` scenario needs
 // an impacted code location (SPEC 9.2, 10.5).
-const SPECS_CODE_CONFIG = `import { defineConfig } from "xspec"
+const SPECS_CODE_CONFIG = stagedTs(
+  "T10.4-1 code-impact xspec.config.ts — one spec group and the code group app",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -116,12 +130,15 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 // Spec group plus a direct coverage profile over it (SPEC 7.4) — the
 // `uncovered-requirement` scenario: an uncovered required leaf yields an
 // `uncovered-requirement` item in a coverage session (SPEC 10.7).
-const COVERAGE_CONFIG = `import { defineConfig } from "xspec"
+const COVERAGE_CONFIG = stagedTs(
+  "T10.4-1 uncovered-requirement xspec.config.ts — one spec group and the coverage profile p",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -136,11 +153,12 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
+  config: StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
@@ -903,17 +921,17 @@ function ciSpec(tText: string, upText: string, wText: string): string {
 }
 
 // A whole-file code location (SPEC 4.6): the bare-reference marker sits at
-// the top level, so the `references` edge runs from `src/ref.ts` itself.
-const CI_CODE_SOURCE = [
-  'import C from "../specs/C.xspec";',
-  "",
-  "C.t;",
-  "",
-].join("\n");
+// the top level, so the `references` edge runs from `src/ref.ts` itself. The
+// scenario's workspace follows the body's first `build`, so the code source
+// is a TypeScript staged-source record (module header), well-formed.
+const CI_CODE_SOURCE = stagedTs(
+  "T10.4-1 code-impact src/ref.ts (a whole-file code location referencing t)",
+  ['import C from "../specs/C.xspec";', "", "C.t;", ""].join("\n"),
+);
 
 // The scenario's initial specs/C.mdx — a workspace created after the body's
 // first `build`, so a record too (the same template call moved here); the
-// code source beside it is `.ts`.
+// code source beside it is a TypeScript record (`CI_CODE_SOURCE`).
 const T10_4_1_CI_INITIAL = stagedMdx(
   "T10.4-1 code-impact specs/C.mdx at the baseline (the scenario's initial source)",
   ciSpec("Target v0.", "Upstream v0.", "Watcher v0."),

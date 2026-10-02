@@ -84,6 +84,7 @@ import { fail, parseJsonStdout } from "../../helpers/assertions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -901,9 +902,13 @@ function assertRootExclusionImpact(
 // profile's uncovered set IS its required set (required = covered ∪
 // uncovered). It follows arm (a)'s invocations, so its `.mdx` sources are
 // staged-source records (helpers/staged-mdx.ts; S-9's before-any-product
-// clause), wrapped in place.
+// clause), wrapped in place, and so is its configuration — a TypeScript
+// staged-source record (helpers/staged-ts.ts; S-9's TypeScript and timing
+// clauses), well-formed.
 const REQUIRED_SET_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+  "xspec.config.ts": stagedTs(
+    "T8-5 required-set fixture xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -935,6 +940,7 @@ export default defineConfig({
   ]
 })
 `,
+  ),
   "tgt/T.mdx": stagedMdx(
     "T8-5 required-set fixture tgt/T.mdx",
     `<S id="t">
@@ -1326,9 +1332,13 @@ function normalizedReport(report: CoverageReport): unknown {
 // The fully covered workspace for `--check`'s "0 otherwise" arm: one
 // profile, one required leaf, covered. It follows the report workspace's
 // invocations, so its `.mdx` sources are staged-source records
-// (helpers/staged-mdx.ts; S-9's before-any-product clause), wrapped in place.
+// (helpers/staged-mdx.ts; S-9's before-any-product clause), wrapped in place,
+// and so is its configuration — a TypeScript staged-source record
+// (helpers/staged-ts.ts; S-9's TypeScript and timing clauses), well-formed.
 const CHECK_GREEN_FILES: Readonly<Record<string, InitialFileContents>> = {
-  "xspec.config.ts": `import { defineConfig } from "xspec"
+  "xspec.config.ts": stagedTs(
+    "T8.2-1 covered fixture xspec.config.ts",
+    `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1345,6 +1355,7 @@ export default defineConfig({
   ]
 })
 `,
+  ),
   "tgt/T.mdx": stagedMdx(
     "T8.2-1 covered fixture tgt/T.mdx",
     `<S id="only">
