@@ -43,6 +43,8 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import {
   assertCompileErrorAt,
@@ -67,20 +69,30 @@ import {
   runJson,
 } from "./support.js";
 
-// Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// Minimal declarative configuration (SPEC 7): exactly one spec group. A
+// staged-source record (S-9's timing clause): the arm workspaces of T2.4-2,
+// T2.4-3, and T2.4-4 after each body's first are created after its first
+// invocation.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T2.4-2/T2.4-3/T2.4-4 xspec.config.ts — the specs-only configuration of every arm workspace",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // One spec group plus one code group, for T2.4-4's TypeScript marker arm
 // (SPEC 7.2): the marker's file must be a discovered code source for `build`
-// to analyze it (4.5, 14.7).
-const SPEC_AND_CODE_CONFIG = `import { defineConfig } from "xspec"
+// to analyze it (4.5, 14.7). A staged-source record (S-9's timing clause):
+// that arm's workspace is created after T2.4-4's first invocation; T2.4-5's
+// first workspace stages it too.
+const SPEC_AND_CODE_CONFIG = stagedTs(
+  "T2.4-4 xspec.config.ts — one spec group and one code group, the marker arm",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -90,11 +102,12 @@ export default defineConfig({
     app: ["src/**/*.ts"]
   }
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
+  config: StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {
@@ -815,12 +828,18 @@ const T2_4_4_TEXT_SOURCE = stagedMdx(
 // generates the spec module (13.1), and the failing second build modifies
 // nothing (12.1), leaving the generated module in place for the type-error
 // arm compiled under standard TypeScript tooling (HARNESS-05, SPEC 13.1).
-const T2_4_4_VALID_CONSUMER =
-  'import BASE from "../specs/BASE.xspec";\n\nBASE.a;\n';
+// The arm's workspace is created after the body's first invocation, so both
+// consumers are staged-source records (S-9's timing clause).
+const T2_4_4_VALID_CONSUMER = stagedTs(
+  "T2.4-4 marker arm src/app.ts — the resolving marker `BASE.a`",
+  'import BASE from "../specs/BASE.xspec";\n\nBASE.a;\n',
+);
 const T2_4_4_MARKER_PREFIX = 'import BASE from "../specs/BASE.xspec";\n\n';
 const T2_4_4_MARKER_CONSTRUCT = 'BASE["a.b"];';
-const T2_4_4_MARKER_CONSUMER =
-  T2_4_4_MARKER_PREFIX + T2_4_4_MARKER_CONSTRUCT + "\n";
+const T2_4_4_MARKER_CONSUMER = stagedTs(
+  "T2.4-4 marker arm src/app.ts — the dotted computed index, staged after `build`",
+  T2_4_4_MARKER_PREFIX + T2_4_4_MARKER_CONSTRUCT + "\n",
+);
 
 // Positive arms: segment-per-index computed chain and dot chain resolve to
 // node `a.b`; the local string names the dotted path within the declaring
@@ -1172,12 +1191,17 @@ function verbatimArmsOf(
 }
 
 // src/app.ts: the escape-free control marker at the top level (the initial
-// state, valid), then — the edit — the escape-spelled marker beside it.
+// state, valid), then — the edit — the escape-spelled marker beside it, a
+// staged-source record (S-9's timing clause: staged after the initial
+// `build`).
 const T2_4_5_APP_PREFIX = 'import BASE from "../specs/BASE.xspec";\n\n';
 const T2_4_5_APP_CONTROL_CHAIN = "BASE.login";
 const T2_4_5_APP_INITIAL = `${T2_4_5_APP_PREFIX}${T2_4_5_APP_CONTROL_CHAIN};\n`;
 const T2_4_5_APP_ESCAPED_MARKER = `BASE.${ESCAPED_LOGIN};`;
-const T2_4_5_APP_EDITED = `${T2_4_5_APP_INITIAL}${T2_4_5_APP_ESCAPED_MARKER}\n`;
+const T2_4_5_APP_EDITED = stagedTs(
+  "T2.4-5 src/app.ts — the escape-spelled marker beside the control, staged after `build`",
+  `${T2_4_5_APP_INITIAL}${T2_4_5_APP_ESCAPED_MARKER}\n`,
+);
 
 // The control's occurrence: from the whole file (no named unit encloses it,
 // SPEC 4.6) to BASE's `login`, spanning the bare chain alone, exclusive of

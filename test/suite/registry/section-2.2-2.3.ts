@@ -41,6 +41,8 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -56,21 +58,31 @@ import {
   runJson,
 } from "./support.js";
 
-// Minimal declarative configuration (SPEC 7): exactly one spec group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// Minimal declarative configuration (SPEC 7): exactly one spec group. A
+// staged-source record (S-9's timing clause): T2.3-3's invalid-container
+// workspaces and its unparseable one are created after its first
+// invocation.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T2.3-3 xspec.config.ts — the specs-only configuration of the invalid-container and unparseable workspaces",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // As above with Markdown emission enabled (default destination: next to each
 // source file, `specs/A.mdx` → `specs/A.md`; SPEC 7.3, 13.2). The spec-group
 // globs match only `.mdx` files, so no glob matches an emit destination and
-// the discovered set is unaffected by emission (13.4).
-const EMIT_TRUE_CONFIG = `import { defineConfig } from "xspec"
+// the discovered set is unaffected by emission (13.4). A staged-source
+// record (S-9's timing clause): T2.3-3's embedding workspaces after its
+// first are created after its first invocation.
+const EMIT_TRUE_CONFIG = stagedTs(
+  "T2.3-3 xspec.config.ts — Markdown emission enabled, the embedding workspaces",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -78,11 +90,12 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
+  config: StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {

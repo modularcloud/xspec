@@ -66,6 +66,8 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -91,15 +93,20 @@ const FF = "\u000C";
 const CR = "\u000D";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group — the
-// CONF-VALID scope (T2.6-1, T2.6-2) and the negative 14.17 arms.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// CONF-VALID scope (T2.6-1, T2.6-2) and the negative 14.17 arms. A
+// staged-source record (S-9's timing clause): T2.5-3's invalid-value
+// workspaces are created after its first invocation.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T2.5-3 xspec.config.ts — the specs-only configuration of the invalid-value workspaces",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // One coverage profile in default (`leaves`) targeting, boundary and target
 // both the sole spec group ("main" is unambiguous, so boundaryKind MUST be
@@ -157,8 +164,12 @@ export default defineConfig({
 
 // Tag selection surfaces (T2.6-3): a coverage profile restricted by
 // `targetTags` (SPEC 7.4) and a forbidden policy rule whose `from` and `to`
-// are both `tags` selectors (SPEC 7.5).
-const TAG_SELECT_CONFIG = `import { defineConfig } from "xspec"
+// are both `tags` selectors (SPEC 7.5). A staged-source record (S-9's timing
+// clause): that arm's workspace is created after the body's first
+// invocation.
+const TAG_SELECT_CONFIG = stagedTs(
+  "T2.6-3 xspec.config.ts — the `targetTags` profile and the `tags` policy rule",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -182,11 +193,12 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 /** Stage a fresh workspace (config plus `files`), run `body`, dispose (H-1). */
 async function withWorkspace<T>(
-  config: string,
+  config: string | StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {

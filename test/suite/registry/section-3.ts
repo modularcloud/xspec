@@ -48,6 +48,8 @@ import {
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import {
   assertEdgeSetEqual,
@@ -59,18 +61,27 @@ import {
 
 // Minimal declarative configuration (SPEC 7): one spec group. The spec-group
 // glob matches only `.mdx` files, so no glob matches a Markdown emit
-// destination (`specs/**/*.md`, SPEC 7.3).
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// destination (`specs/**/*.md`, SPEC 7.3). This configuration and the two
+// `markdown` variants below are T3-6's emission-matrix variants, each staged
+// in its own workspace — every one after the first created after the body's
+// first invocation — so the variant table holds staged-source records (S-9's
+// timing clause).
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T3-6 xspec.config.ts — `markdown` absent (the emission matrix's first variant)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // As above with `markdown: { emit: false }` (SPEC 7.3).
-const EMIT_FALSE_CONFIG = `import { defineConfig } from "xspec"
+const EMIT_FALSE_CONFIG = stagedTs(
+  "T3-6 xspec.config.ts — `markdown: { emit: false }`",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -78,11 +89,14 @@ export default defineConfig({
   },
   markdown: { emit: false }
 })
-`;
+`,
+);
 
 // As above with emission enabled (default destination: next to each source
 // file, `specs/A.mdx` → `specs/A.md`; SPEC 7.3, 13.2).
-const EMIT_TRUE_CONFIG = `import { defineConfig } from "xspec"
+const EMIT_TRUE_CONFIG = stagedTs(
+  "T3-6 xspec.config.ts — `markdown: { emit: true }`",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -90,7 +104,8 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 // ---------------------------------------------------------------------------
 // T3-1
@@ -711,8 +726,13 @@ async function assertNotEmitted(
   }
 }
 
-// The three `markdown` variants of the emission-scope matrix (SPEC 7.3, 13.2).
-const EMISSION_VARIANTS = [
+// The three `markdown` variants of the emission-scope matrix (SPEC 7.3, 13.2),
+// each configuration a staged-source record (above).
+const EMISSION_VARIANTS: readonly {
+  readonly key: string;
+  readonly config: StagedTs;
+  readonly emits: boolean;
+}[] = [
   { key: "`markdown` absent", config: SPECS_ONLY_CONFIG, emits: false },
   {
     key: "`markdown: { emit: false }`",
@@ -720,7 +740,7 @@ const EMISSION_VARIANTS = [
     emits: false,
   },
   { key: "`markdown: { emit: true }`", config: EMIT_TRUE_CONFIG, emits: true },
-] as const;
+];
 
 const T3_6 = defineProductTest({
   id: "T3-6",

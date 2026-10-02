@@ -89,6 +89,8 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
@@ -108,20 +110,28 @@ import {
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group — the
-// negative arms need nothing else.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// negative arms need nothing else. A staged-source record (S-9's timing
+// clause): the arm workspaces of T2.7-1, T2.7-3, and T2.7-4 after each
+// body's first are created after its first invocation.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T2.7-1/T2.7-3/T2.7-4 xspec.config.ts — the specs-only configuration of every arm workspace",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // Markdown emission next to each source (SPEC 7.3, 13.2) for the arms that
 // byte-assert compiled output (T2.7-2's comment removal, T2.7-3's quoting
-// equivalence).
-const EMIT_TRUE_CONFIG = `import { defineConfig } from "xspec"
+// equivalence). A staged-source record (S-9's timing clause): T2.7-3's
+// positive quoting arm's workspace is created after its first invocation.
+const EMIT_TRUE_CONFIG = stagedTs(
+  "T2.7-3 xspec.config.ts — Markdown emission enabled, the positive quoting arm",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -129,7 +139,8 @@ export default defineConfig({
   },
   markdown: { emit: true }
 })
-`;
+`,
+);
 
 // Shared negative-arm template (the SUITE-02/03 discipline): a valid sibling
 // first, so the offending construct is a proper sub-range of the file and the
@@ -153,7 +164,7 @@ function invalidPropSource(construct: string): string {
  * source a record carrying its S-9 declaration), run `body`, dispose (H-1).
  */
 async function withWorkspace<T>(
-  config: string,
+  config: StagedTs,
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
 ): Promise<T> {

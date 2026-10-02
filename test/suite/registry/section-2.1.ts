@@ -36,12 +36,11 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
+import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type {
-  InitialFileContents,
-  WorkspaceTsDecl,
-} from "../../helpers/workspace.js";
+import type { InitialFileContents } from "../../helpers/workspace.js";
 import {
   assertConditionCounts,
   assertEdgeSetEqual,
@@ -56,21 +55,30 @@ import {
 } from "./support.js";
 
 // Minimal declarative configuration (SPEC 7): exactly one spec group. Files
-// outside `specs/` (the exists-but-undiscovered arm) belong to no group.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// outside `specs/` (the exists-but-undiscovered arm) belong to no group. A
+// staged-source record (S-9's timing clause): the arm workspaces of T2.1-2,
+// T2.1-3, and T2.1-5 after each body's first are created after its first
+// invocation.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T2.1-2/T2.1-3/T2.1-5 xspec.config.ts — the specs-only configuration of every arm workspace",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // The same plus one code group whose glob matches `.mdx` files under `docs/`
 // (SPEC 7.2): a file so matched is a discovered code source and no spec
 // source, the target class of T2.1-2's code-group-only arm (2.1; T11.4-4's
-// unavailable view target).
-const SPECS_AND_DOCS_CODE_CONFIG = `import { defineConfig } from "xspec"
+// unavailable view target). That arm's workspace is created after the
+// body's first invocation: a staged-source record (S-9's timing clause).
+const SPECS_AND_DOCS_CODE_CONFIG = stagedTs(
+  "T2.1-2 xspec.config.ts — one spec group and the `docs` code group globbing `.mdx` names",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -80,7 +88,8 @@ export default defineConfig({
     docs: ["docs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // The escape character, built from its code point so that no tool layer
 // decodes the six-character escape spellings staged below on their way into
@@ -91,12 +100,10 @@ const BACKSLASH = String.fromCodePoint(0x5c);
 async function withWorkspace<T>(
   files: Readonly<Record<string, InitialFileContents>>,
   body: (workspace: TestWorkspace) => Promise<T>,
-  config: string = SPECS_ONLY_CONFIG,
-  ts?: WorkspaceTsDecl,
+  config: string | StagedTs = SPECS_ONLY_CONFIG,
 ): Promise<T> {
   const workspace = await TestWorkspace.create({
     files: { "xspec.config.ts": config, ...files },
-    ...(ts === undefined ? {} : { ts }),
   });
   try {
     return await body(workspace);
@@ -133,13 +140,12 @@ interface InvalidImportArm {
   readonly importLine: string;
   /** Files staged beside the importing file and the configuration. */
   readonly extraFiles: Readonly<Record<string, InitialFileContents>>;
-  /** Configuration override (defaults to SPECS_ONLY_CONFIG). */
-  readonly config?: string;
   /**
-   * The S-9 TypeScript declaration of a code source whose name the default
-   * does not reach (a code group globbing `docs/` `.mdx` names).
+   * Configuration override (defaults to SPECS_ONLY_CONFIG) — a staged-source
+   * record, as every arm workspace after a body's first is created after
+   * its first invocation (S-9's timing clause).
    */
-  readonly ts?: WorkspaceTsDecl;
+  readonly config?: StagedTs;
   /**
    * Files staged OUTSIDE the workspace root, at paths relative to the root's
    * parent directory (support.ts stageBesideRoot) — the above-root arm's real
@@ -202,7 +208,6 @@ async function runInvalidImportArm(
       );
     },
     arm.config,
-    arm.ts,
   );
 }
 
@@ -318,7 +323,10 @@ const INVALID_SPECIFIER_ARMS: readonly InvalidImportArm[] = [
     // `docs/EXTRA.mdx` is matched only by the code group `docs` (SPEC 7.2):
     // a discovered code source, never a spec source. Its content is
     // well-formed TypeScript, so the code source itself contributes no
-    // finding and the import's 14.15 stands alone.
+    // finding and the import's 14.15 stands alone. The record carries both
+    // S-9 declarations — the path is an `.mdx` path and a code source whose
+    // name the TypeScript default does not reach — and the arm's workspace
+    // is created after the body's first invocation (S-9's timing clause).
     name: "a specifier designating an `.mdx` file matched only by a code group (a discovered code source)",
     importLine: 'import EXTRA from "../docs/EXTRA.xspec"',
     extraFiles: {
@@ -326,10 +334,11 @@ const INVALID_SPECIFIER_ARMS: readonly InvalidImportArm[] = [
       "docs/EXTRA.mdx": stagedMdx(
         "T2.1-2 docs/EXTRA.mdx matched only by a code group",
         "export {};\n",
+        "well-formed",
+        "well-formed",
       ),
     },
     config: SPECS_AND_DOCS_CODE_CONFIG,
-    ts: { wellFormed: ["docs/EXTRA.mdx"] },
   },
   {
     // From `specs/` (depth 1) the two `..` segments reach depth -1: the

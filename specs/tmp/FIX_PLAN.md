@@ -42,6 +42,8 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 Task 16 was split as its text allowed. Done at dc97774: the mechanism — `StagedTs` records (`test/helpers/staged-ts.ts`), sealed beside the MDX ledger and judged by `test/self/s9-staged-sources.test.ts`; the builder's record overloads; MDX records carrying `ts` for a code-group `.mdx` path — and the first module group (§1's five modules) plus the E-6 fixture's configuration and code source. AGENTS.md's "staged-source ledger's TypeScript records" bullet holds the conversion rule, the detector recipe that finds a module's remaining plain post-invocation TypeScript stagings, and the survey's totals.
 
+Done since: Task 16b (§2 and §3; `git log --grep 'Task 16b'`), its counts in that AGENTS.md bullet.
+
 Every split task below converts its modules by that rule, then checks:
 - `test/self/s9-staged-sources.test.ts` passes; AGENTS.md records its TypeScript-judgement count and the self project's test count.
 - Each converted module's suite files under the namespace against the built product keep their verdicts (diagnosed failures at the same arms), with no harness error.
@@ -49,15 +51,6 @@ Every split task below converts its modules by that rule, then checks:
 - `npm run typecheck`, `npm run format:check`, and the full self project under the namespace pass.
 
 The survey at 3f43daa (suite plus certification) names each module's runtime sites below: tests, staged paths, and distinct byte-strings. It is a floor, not the list.
-
-### Task 16b — TypeScript records: §2 and §3
-
-- `section-2.1.ts`: T2.1-2, T2.1-3, T2.1-5. `withWorkspace`'s configurations: 2 byte-strings. T2.1-2's code-group arm `docs/EXTRA.mdx` is an MDX record staged after an invocation: give it `ts: "well-formed"` (`stagedMdx`'s fourth argument), and drop the arm's `ts: { wellFormed: [...] }`.
-- `section-2.2-2.3.ts`: T2.3-3, configurations, 2 byte-strings.
-- `section-2.4.ts`: T2.4-2 through T2.4-5, configurations and `src/app.ts`, 5 byte-strings.
-- `section-2.5-2.6.ts`: T2.5-3 and T2.6-3, 2 byte-strings.
-- `section-2.7.ts`: T2.7-1, T2.7-3, and T2.7-4, 2 byte-strings.
-- `section-3.ts`: T3-6, 2 byte-strings.
 
 ### Task 16c — TypeScript records: `section-4.ts` and `section-4.1-4.2.ts`
 
