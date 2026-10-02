@@ -38,28 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 21 — Register T1.4-5: identifier by characters (TEST-SPEC L61; SPEC 1.4, 2.4, 4.1, 6.4, 6.5, 14.20; A4)
-
-**Depends on.** Task 19, since arms (b) and (c) add imports.
-
-**Where.** `test/suite/registry/section-1.4.ts` (or a new module), and `test/suite/registry/traceability.ts`.
-
-**Change.** Take every spelling from L61.
-- *(a) Access.*
-  - *Staging.* `specs/B.mdx` holds top-level sections `delete`, `default`, U+00E9, and U+1C89 followed by `x`. A spec source imports it as `B` and spells `d={B.delete}`, `{text(B.default)}`, and `d={B.`U+00E9`}`. A code source imports it as `SPEC, { text }` and spells the markers `SPEC.delete` and `SPEC.`U+00E9, plus the call `text(SPEC.default)`.
-  - *Expected.* `build` and `check` exit 0 with no finding. `query edges` reports each `depends`, `embeds`, and `references` edge to its node.
-  - *Consumer compile.* A consumer compiling `SPEC.delete`, `SPEC.default`, `SPEC.`U+00E9, and `SPEC["`U+1C89`x"]` type-checks through the tooling driver at 5.9.3 (`test/helpers/tooling.ts`).
-- *(b) Conversion,* under T6.5-8's discipline.
-  - *Staging.* Section `m` moves from `specs/a.mdx` into `specs/t.mdx`, which lacks `a.mdx`'s module. Its `d` array holds the local references `"delete"`, `"`U+00E9`"`, and `"n.2fa"`.
-  - *Expected.* The array reads exactly `d={[<O>.delete, <O>.`U+00E9`, <O>.n["2fa"]]}`, its brackets, commas, and spaces unchanged. The rewritten target derives (S-9), and `build` and `check` are clean.
-- *(c) Release and language level.* The same move, with the array holding `"`U+1C89`x"` and `"`U+2EBF0`"`, reads exactly `d={[<O>["`U+1C89`x"], <O>.`U+2EBF0`]}`. It derives, and `build` and `check` are clean.
-- *H-7.* The passages asserted, as neighbouring entries do.
-
-**Checks.**
-- S-9 judges every staged file. S-7 passes.
-- T1.4-5 against the built product (diagnose).
-- Red-check (c) through a stand-in that writes `<O>.`U+1C89`x`.
-
 ### Task 22 — T1.7-2 and T4.6-1: the `using` and `await using` unit arms (TEST-SPEC L80, L193; SPEC 1.7, 4.6; A5, A14)
 
 **Where.** `test/suite/registry/section-1.6-1.7.ts` (T1.7-2; no `using` appears anywhere in the harness today) and `section-4.6.ts` (T4.6-1).
