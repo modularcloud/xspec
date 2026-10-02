@@ -355,5 +355,24 @@ export const CERTIFICATION_FIXTURES: readonly CertificationConformer[] = [
   // nothing read below a non-directory component — and 14.10's per-file,
   // graph-data, and recorded-file forms, the last reporting exactly what
   // that removal would remove.
-  conformer("CONF-ORPHAN", "conf-orphan/bin.mjs", ["T13.4-11"], []),
+  conformer(
+    "CONF-ORPHAN",
+    "conf-orphan/bin.mjs",
+    ["T13.4-11"],
+    [
+      // VIOL-ORPHAN-THROUGHLINK: the removal of a recorded path no longer
+      // generated — and 14.10's recorded-file form, reporting exactly what
+      // it would remove — resolves the path's workspace-relative directory
+      // components through symbolic links to directories inside the
+      // workspace root, judging, reporting, and removing the entry the
+      // link's target holds under the remaining components as if it stood
+      // at the recorded path. The occupant at the recorded path itself is
+      // still judged as itself; a plain-file component, or a link to a
+      // directory outside the root, still leaves the path holding nothing;
+      // derived-file writes still traverse no link.
+      violator("VIOL-ORPHAN-THROUGHLINK", "conf-orphan/bin-throughlink.mjs", [
+        "T13.4-11",
+      ]),
+    ],
+  ),
 ];

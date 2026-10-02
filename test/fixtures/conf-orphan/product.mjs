@@ -82,7 +82,13 @@
 // module-level `deviations` switches (all off = this conformer). Each
 // VIOL-ORPHAN-* violator is a bin-<name>.mjs passing exactly one switch,
 // consumed where 13.4's removal resolves and removes a recorded path's
-// occupant (`recordedOccupant`, `removeRecorded`).
+// occupant (`recordedOccupant`, `removeRecorded`):
+// - `componentLinksInsideRoot` (VIOL-ORPHAN-THROUGHLINK, bin-throughlink.mjs):
+//   `recordedOccupant` resolves a workspace-relative directory component
+//   occupied by a symbolic link to a directory inside the workspace root
+//   through that link, so the removal and 14.10's recorded-file form — both
+//   consulting it, and nothing else — judge, report, and remove the entry the
+//   link's target holds under the path's remaining components.
 
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
@@ -1217,6 +1223,9 @@ async function readRecord(config) {
  * it stands.
  */
 async function recordedOccupant(config, rel) {
+  if (deviations.componentLinksInsideRoot) {
+    return recordedOccupantThroughInsideLinks(config, rel);
+  }
   const segments = rel.split("/");
   for (let i = 1; i < segments.length; i += 1) {
     const component = segments.slice(0, i).join("/");
@@ -1226,6 +1235,64 @@ async function recordedOccupant(config, rel) {
   }
   const abs = absUnder(config.root, rel);
   return { kind: await lstatKind(abs), abs };
+}
+
+/**
+ * VIOL-ORPHAN-THROUGHLINK's deviation (CERTIFICATIONS.md
+ * §VIOL-ORPHAN-THROUGHLINK) — `recordedOccupant` with one clause of 13.4's
+ * removal rule dropped: a workspace-relative directory component occupied by
+ * a symbolic link to a directory inside the workspace root is resolved
+ * through the link, and below it the occupant is the entry the link's target
+ * holds under the path's remaining components, judged itself (lstat) as if
+ * it stood at the recorded path. Unchanged: a component that is absent, a
+ * plain file, or a symbolic link to anything else — a directory outside the
+ * root, a file, nothing — still leaves the path holding nothing, nothing
+ * read below it; and the occupant at the recorded path itself is still
+ * judged as itself, a symbolic link there never followed.
+ */
+async function recordedOccupantThroughInsideLinks(config, rel) {
+  const rootReal = await fsp.realpath(config.root);
+  const segments = rel.split("/");
+  let dirAbs = config.root;
+  for (const segment of segments.slice(0, -1)) {
+    const componentAbs = path.join(dirAbs, segment);
+    const kind = await lstatKind(componentAbs);
+    if (kind === "dir") {
+      dirAbs = componentAbs;
+      continue;
+    }
+    const targetAbs =
+      kind === "symlink"
+        ? await linkedDirectoryInsideRoot(componentAbs, rootReal)
+        : null;
+    if (targetAbs === null) return { kind: "absent", abs: null };
+    dirAbs = targetAbs;
+  }
+  const abs = path.join(dirAbs, segments[segments.length - 1]);
+  return { kind: await lstatKind(abs), abs };
+}
+
+/**
+ * The directory a symbolic link resolves to, where that is a directory
+ * inside the workspace root (the root's real path or below it); `null` for
+ * a link resolving to anything else, outside the root, or nowhere (dangling
+ * or looping).
+ */
+async function linkedDirectoryInsideRoot(linkAbs, rootReal) {
+  let resolved;
+  try {
+    resolved = await fsp.realpath(linkAbs);
+  } catch (error) {
+    if (["ENOENT", "ENOTDIR", "ELOOP"].includes(error.code)) return null;
+    throw error;
+  }
+  if ((await lstatKind(resolved)) !== "dir") return null;
+  const fromRoot = path.relative(rootReal, resolved);
+  const outside =
+    fromRoot === ".." ||
+    fromRoot.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(fromRoot);
+  return outside ? null : resolved;
 }
 
 /**

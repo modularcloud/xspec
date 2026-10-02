@@ -38,25 +38,9 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part A — Certification
 
-### Task 8 — VIOL-ORPHAN-THROUGHLINK (CERTIFICATIONS.md §VIOL-ORPHAN-THROUGHLINK, as narrowed at e77332e; D3)
-
-**Depends on.** Task 7, done: the CONF-ORPHAN conformer (`test/fixtures/conf-orphan/product.mjs`, `bin.mjs`) passes T13.4-11, and its manifest entry lists no violators yet. Both violators deviate where its header's deviation seam says: `recordedOccupant` (the occupant 13.4's removal and 14.10's recorded-file form judge) and `removeRecorded`.
-
-**Where.** `test/fixtures/conf-orphan/bin-throughlink.mjs` (new), a deviation switch in `product.mjs`, and the manifest entry certifying `["T13.4-11"]`.
-
-**Change.** Implement the entry as it is now written. The Phase 7 driver's note: its deviation is narrower than in earlier rounds.
-- *Deviation.* Two places alone resolve the recorded path's workspace-relative directory components through symbolic links to directories *inside the workspace root*: the removal of a recorded path no longer generated, and 14.10's recorded-file form. Below such a component, the occupant is the entry the link's target holds under the remaining components; it is judged and removed by 13.4's other rules as if it stood at the recorded path, and the recorded-file form reports it.
-- *Unchanged.*
-  - A link to a directory outside the root still leaves the path holding nothing, as does a plain-file component.
-  - The occupant at the recorded path itself is still judged as itself: a link there is removed as the link.
-  - Derived-file writes still traverse no link.
-  - 13.4's reads of the journal, the session directory, and the record are unchanged.
-
-**Checks.** `-t ORPHAN`: THROUGHLINK fails exactly T13.4-11, on (e)'s inside-root staging alone. There, the first `check` reports a condition-10 recorded-file finding concerning `out/specs/A.md`, and `build` deletes the target's `A.md`. (e)'s outside staging and every other arm pass. Confirm the failing arm from the diagnosis. If the body stops at its first failing arm, also confirm through a temporary self-test, deleted before committing, that no other arm fails against the violator.
-
 ### Task 9 — VIOL-ORPHAN-LINKTARGET; the C-1 gate green (CERTIFICATIONS.md §VIOL-ORPHAN-LINKTARGET; TEST-SPEC C-1; V; D3, D4)
 
-**Depends on.** Task 8.
+**Depends on.** Task 8, done: `test/fixtures/conf-orphan/bin-throughlink.mjs` passes the switch `componentLinksInsideRoot`, consumed in `recordedOccupant` alone, and the manifest's CONF-ORPHAN entry lists VIOL-ORPHAN-THROUGHLINK; LINKTARGET's entry follows it (document order), its switch consumed in `removeRecorded`. Arm (c) is the body's third arm, so the arms after it never meet the violator in a normal run: confirm them by AGENTS.md's CONF-ORPHAN arm-isolation recipe.
 
 **Where.**
 - `test/fixtures/conf-orphan/bin-linktarget.mjs` (new), a deviation switch, and the manifest entry certifying `["T13.4-11"]`;
