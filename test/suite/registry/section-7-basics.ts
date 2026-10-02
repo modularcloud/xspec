@@ -135,7 +135,7 @@
 //   (0xFF) inside a trailing line comment, so the decoded text is a valid
 //   configuration and the encoding is the sole defect; the BOM fixture is
 //   the canonical text prefixed by EF BB BF. Both are staged as bytes
-//   (`FileContents`), never as strings.
+//   (records whose source is a byte array), never as strings.
 // - T7-2 repeated keys: 14.14 whatever TypeScript's own diagnosis of the
 //   repetition (SPEC 7) — the arms pin the 14.14 contract alone, so a
 //   product reporting it through a compiler diagnostic and one detecting
@@ -162,6 +162,18 @@
 //   exported from here and named with every staging test in ID order and
 //   every path. T7-1's first workspace (`LOCATION_FILES`) precedes any
 //   invocation and stays plain.
+// - TypeScript staged-source records (TEST-SPEC S-9's TypeScript and
+//   timing clauses; helpers/staged-ts.ts): every configuration file and
+//   code source a body stages in a workspace created after its first
+//   product invocation — `expectConfigRefused`'s one staging site (serving
+//   every arm of every refused-configuration table, the first included:
+//   `refusedConfigArms` makes one record per row at module load), T7-1's
+//   occupancy workspace, T7-2's and T7-3's later arms — is a ledger record
+//   carrying its S-9 declaration (T7-2's syntax-error and encoding arms
+//   unparseable, 14.20; every other well-formed), judged by
+//   test/self/s9-staged-sources.test.ts before any product exists. The
+//   canonical `SPECS_ONLY_CONFIG` is one record wherever it is staged,
+//   `LOCATION_FILES` included.
 
 import { Buffer } from "node:buffer";
 import * as fsp from "node:fs/promises";
@@ -186,11 +198,11 @@ import {
   snapshotDirectory,
 } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
+import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type {
-  FileContents,
   InitialFileContents,
   WorkspaceDecl,
 } from "../../helpers/workspace.js";
@@ -236,14 +248,69 @@ export const SECTION_B_SOURCE = stagedMdx(
 
 // The canonical valid configuration (SPEC 7): exactly one spec group, no
 // optional keys. Every T7-2 violation below is this file with one deviation.
-const SPECS_ONLY_CONFIG = `import { defineConfig } from "xspec"
+// A staged-source record (module header): T7-1's occupancy workspace and
+// T7-3's omission arms stage it in workspaces created after a product
+// invocation; T7-1's first workspace passes the record too, and T7-2's
+// encoding arms compose their bytes from its text.
+const SPECS_ONLY_CONFIG = stagedTs(
+  "T7-1/T7-3 xspec.config.ts (the canonical configuration: exactly one spec group, no optional keys)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
+
+/**
+ * A configuration record's text: every configuration this module composes
+ * from is a string; anything else is a defect of the module's fixtures.
+ */
+function configText(record: StagedTs): string {
+  if (typeof record.source !== "string") {
+    throw new Error(
+      `${record.name}: the staged configuration must be a string (the ` +
+        "module composes text, never bytes)",
+    );
+  }
+  return record.source;
+}
+
+/** A refused-configuration arm (T7-2, T7-3): its label and its record. */
+interface RefusedConfigArm {
+  readonly label: string;
+  readonly config: StagedTs;
+}
+
+/**
+ * An arm table's rows as refused-configuration arms, each configuration a
+ * staged-source record made at module load from its row — the expression
+ * moved, never re-spelled — named `<TEST-ID> xspec.config.ts (<label>)` and
+ * carrying the row's S-9 declaration: unparseable (14.20) where TEST-SPEC
+ * declares it so, else well-formed. `expectConfigRefused` stages every arm
+ * in a workspace created after the body's first product invocation, the
+ * first arm's excepted (S-9's timing clause; module header).
+ */
+function refusedConfigArms(
+  testId: string,
+  rows: readonly {
+    readonly label: string;
+    readonly config: string;
+    /** S-9: TEST-SPEC declares this configuration unparseable (14.20). */
+    readonly unparseable?: true;
+  }[],
+): readonly RefusedConfigArm[] {
+  return rows.map((row) => ({
+    label: row.label,
+    config: stagedTs(
+      `${testId} xspec.config.ts (${row.label})`,
+      row.config,
+      row.unparseable === true ? "unparseable" : "well-formed",
+    ),
+  }));
+}
 
 /** Stage a fresh workspace, run `body`, dispose (H-1). */
 async function withWorkspace<T>(
@@ -259,27 +326,30 @@ async function withWorkspace<T>(
 }
 
 /**
- * Stage a workspace whose only defect is the given configuration text and
- * assert `build --json` refuses it per 14.14. The staged source file is
- * valid and matched by every fixture's `specs/**\/*.mdx` glob (or, where
- * the deviation replaces that glob, by nothing — a group matching no files
- * is valid, SPEC 7), so a product that wrongly accepts the configuration
- * proceeds to a successful build (exit 0) and fails the exit-code
- * assertion — never exits 2 for a side reason. Beyond the shared 14.14
- * contract (`expectConfigurationError`), the finding is pinned to the
- * configuration file: its concerned path is exactly `xspec.config.ts` —
- * the file the upward search found, in the anchoring form of 11.6
- * relative to the invocation working directory, here the workspace root,
- * so the bare name (SPEC 14, 12.7) — and its locations are [] (a
- * configuration condition carries the file it concerns, no source range;
- * SPEC 14); a whole-root snapshot compare around the invocation pins that
- * a build failing at configuration load writes nothing (SPEC 12.1).
+ * Stage a workspace whose only defect is the given configuration — a
+ * staged-source record carrying its S-9 declaration (unparseable for
+ * T7-2's syntax-error and encoding arms, 14.20; else well-formed), since
+ * every arm but a body's first is staged after a product invocation (S-9's
+ * timing clause) — and assert `build --json` refuses it per 14.14. The
+ * staged source file is valid and matched by every fixture's
+ * `specs/**\/*.mdx` glob (or, where the deviation replaces that glob, by
+ * nothing — a group matching no files is valid, SPEC 7), so a product that
+ * wrongly accepts the configuration proceeds to a successful build (exit
+ * 0) and fails the exit-code assertion — never exits 2 for a side reason.
+ * Beyond the shared 14.14 contract (`expectConfigurationError`), the
+ * finding is pinned to the configuration file: its concerned path is
+ * exactly `xspec.config.ts` — the file the upward search found, in the
+ * anchoring form of 11.6 relative to the invocation working directory,
+ * here the workspace root, so the bare name (SPEC 14, 12.7) — and its
+ * locations are [] (a configuration condition carries the file it
+ * concerns, no source range; SPEC 14); a whole-root snapshot compare
+ * around the invocation pins that a build failing at configuration load
+ * writes nothing (SPEC 12.1).
  */
 async function expectConfigRefused(
   product: ProductBinding,
-  config: FileContents,
+  config: StagedTs,
   context: string,
-  configDeclared: "well-formed" | "unparseable" = "well-formed",
 ): Promise<void> {
   await withWorkspace(
     {
@@ -287,11 +357,6 @@ async function expectConfigRefused(
         "xspec.config.ts": config,
         "specs/A.mdx": SECTION_A_SOURCE,
       },
-      // S-9: a configuration file is judged by 14.20's TypeScript grammar
-      // (SPEC 7); the syntax-error and encoding arms are declared unparseable.
-      ...(configDeclared === "unparseable"
-        ? { ts: { unparseable: ["xspec.config.ts"] } }
-        : {}),
     },
     async (workspace) => {
       const before = await snapshotDirectory(workspace.root);
@@ -343,7 +408,7 @@ async function expectConfigRefused(
 // workspace root) — discovers alt/specs/B.mdx as `specs/B.mdx`. The two
 // listings differ in both file and ID, so which configuration served a run
 // is unambiguous.
-const LOCATION_FILES: Readonly<Record<string, string>> = {
+const LOCATION_FILES: Readonly<Record<string, InitialFileContents>> = {
   "xspec.config.ts": SPECS_ONLY_CONFIG,
   "specs/A.mdx": mdxSection("a"),
   "alt/xspec.config.ts": SPECS_ONLY_CONFIG,
@@ -787,12 +852,7 @@ const T7_1 = defineProductTest({
 // object literals with non-computed identifier or string-literal keys, array
 // literals, static string literals, and the boolean literals; no other
 // statement or expression form, no spread, no computed value.
-const FORM_VIOLATIONS: readonly {
-  label: string;
-  config: string;
-  /** S-9: TEST-SPEC T7-2 declares this configuration unparseable (14.20). */
-  unparseable?: true;
-}[] = [
+const FORM_VIOLATIONS = refusedConfigArms("T7-2", [
   {
     label: "not well-formed TypeScript — a syntax error (unclosed braces)",
     unparseable: true,
@@ -934,17 +994,20 @@ export default {
 export default defineConfig
 `,
   },
-];
+]);
 
 // The valid arm: an aliased defineConfig import (SPEC 7: optionally aliased).
-const ALIASED_CONFIG = `import { defineConfig as makeConfig } from "xspec"
+const ALIASED_CONFIG = stagedTs(
+  "T7-2 xspec.config.ts (aliased defineConfig import)",
+  `import { defineConfig as makeConfig } from "xspec"
 
 export default makeConfig({
   specs: {
     main: ["specs/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
 // The string-literal keys arm (SPEC 7: the statically literal argument's
 // object literals carry "non-computed identifier or string-literal keys"):
@@ -955,7 +1018,9 @@ export default makeConfig({
 // place group names resolve that this arm asserts: the coverage profile's
 // `target` and `boundary` (both unambiguous, so their kinds are inferred,
 // SPEC 7.4) and both policy selectors (SPEC 7.5).
-const QUOTED_KEYS_CONFIG = `import { defineConfig } from "xspec"
+const QUOTED_KEYS_CONFIG = stagedTs(
+  "T7-2 xspec.config.ts (string-literal keys)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -981,7 +1046,8 @@ export default defineConfig({
     }
   ]
 })
-`;
+`,
+);
 
 // The quoted-keys workspace: the spec group's file holds two leaves — `a`,
 // covered through the code marker's references edge, and `p`, depending
@@ -1001,10 +1067,13 @@ Dependent leaf.
 </S>
 `,
   ),
-  "src/impl.ts": `import SPEC from "../specs/A.xspec";
+  "src/impl.ts": stagedTs(
+    "T7-2 src/impl.ts (string-literal keys)",
+    `import SPEC from "../specs/A.xspec";
 
 SPEC.a;
 `,
+  ),
 };
 
 // The quoted-keys fixture's complete edge set (SPEC 5.1–5.2, 2.2, 4.5).
@@ -1035,14 +1104,17 @@ const BACKSLASH = String.fromCodePoint(0x5c);
 // escape reads `specs/*.mdx`, discovers `specs/A.mdx`, and fails the empty
 // listings and the inventory's verbatim glob.
 const VERBATIM_GLOB = `specs/${BACKSLASH}u002A.mdx`;
-const VERBATIM_GLOB_CONFIG = `import { defineConfig } from "xspec"
+const VERBATIM_GLOB_CONFIG = stagedTs(
+  "T7-2 xspec.config.ts (verbatim glob)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
     main: ["${VERBATIM_GLOB}"]
   }
 })
-`;
+`,
+);
 
 // A group name spelled with the escape of `u` (`prod`, backslash, `u0075`,
 // `ct`) names a group whose spelling contains a backslash: a profile's
@@ -1069,6 +1141,17 @@ export default defineConfig({
 `;
 }
 
+// The two verbatim-name fixtures, records made at module load: T7-2 stages
+// both after a product invocation (S-9's timing clause).
+const VERBATIM_NAME_UNKNOWN_TARGET_CONFIG = stagedTs(
+  'T7-2 xspec.config.ts (verbatim group name: a profile\'s target "product")',
+  verbatimNameConfig("product"),
+);
+const VERBATIM_NAME_CONFIG = stagedTs(
+  "T7-2 xspec.config.ts (verbatim group name: the target spelled as the group's key)",
+  verbatimNameConfig(VERBATIM_GROUP_NAME),
+);
+
 // Encoding (SPEC 7: the file's bytes MUST be valid UTF-8 and MUST NOT begin
 // with a byte-order mark; either violation is 14.14). The non-UTF-8 fixture
 // is the canonical configuration plus one trailing line comment holding the
@@ -1077,16 +1160,24 @@ export default defineConfig({
 // loads, and builds (exit 0). The BOM fixture is the canonical text prefixed
 // by EF BB BF, which TypeScript tooling strips silently, so a product
 // reading through the compiler alone loads it too.
-const NON_UTF8_CONFIG: Uint8Array = Buffer.concat([
-  Buffer.from(SPECS_ONLY_CONFIG, "utf8"),
-  Buffer.from("// ", "utf8"),
-  Buffer.from([0xff]),
-  Buffer.from("\n", "utf8"),
-]);
-const BOM_CONFIG: Uint8Array = Buffer.concat([
-  Buffer.from([0xef, 0xbb, 0xbf]),
-  Buffer.from(SPECS_ONLY_CONFIG, "utf8"),
-]);
+const NON_UTF8_CONFIG = stagedTs(
+  "T7-2 xspec.config.ts (encoding: the byte 0xFF inside a trailing line comment)",
+  Buffer.concat([
+    Buffer.from(configText(SPECS_ONLY_CONFIG), "utf8"),
+    Buffer.from("// ", "utf8"),
+    Buffer.from([0xff]),
+    Buffer.from("\n", "utf8"),
+  ]),
+  "unparseable",
+);
+const BOM_CONFIG = stagedTs(
+  "T7-2 xspec.config.ts (encoding: a leading byte-order mark)",
+  Buffer.concat([
+    Buffer.from([0xef, 0xbb, 0xbf]),
+    Buffer.from(configText(SPECS_ONLY_CONFIG), "utf8"),
+  ]),
+  "unparseable",
+);
 
 // Object-literal keys and names (SPEC 7, 14.14): a key repeated within one
 // object literal — an identifier key and a string-literal key spelling the
@@ -1095,7 +1186,7 @@ const BOM_CONFIG: Uint8Array = Buffer.concat([
 // fixture is otherwise valid: each repeated member is a valid group, and
 // the empty-named profile and rule reference the existing unambiguous
 // group `main`, so the repetition or the empty name is the only defect.
-const KEY_AND_NAME_VIOLATIONS: readonly { label: string; config: string }[] = [
+const KEY_AND_NAME_VIOLATIONS = refusedConfigArms("T7-2", [
   {
     label: "repeated key: `specs` twice within the top-level object literal",
     config: `import { defineConfig } from "xspec"
@@ -1173,7 +1264,7 @@ export default defineConfig({
 })
 `,
   },
-];
+]);
 
 // Comments (SPEC 7: permitted anywhere, contributing nothing). The commented
 // fixture places line and block comments before the import, after it,
@@ -1182,7 +1273,9 @@ export default defineConfig({
 // everything; its twin is the same configuration with every comment
 // removed. Two globs and a `markdown` key give the "between" positions
 // something to stand between (`docs/` matches nothing: valid, 7).
-const COMMENT_FREE_CONFIG = `import { defineConfig } from "xspec"
+const COMMENT_FREE_CONFIG = stagedTs(
+  "T7-2 xspec.config.ts (comment-free twin)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1193,8 +1286,11 @@ export default defineConfig({
   },
   markdown: { emit: false }
 })
-`;
-const COMMENTED_CONFIG = `// a line comment before the import
+`,
+);
+const COMMENTED_CONFIG = stagedTs(
+  "T7-2 xspec.config.ts (comments)",
+  `// a line comment before the import
 /* a block comment
    before the import */
 import { defineConfig } from "xspec" // after the import
@@ -1211,7 +1307,8 @@ export default defineConfig({
   markdown: { emit: false }
 }) // after the export
 /* after everything */
-`;
+`,
+);
 
 const T7_2 = defineProductTest({
   id: "T7-2",
@@ -1231,12 +1328,7 @@ const T7_2 = defineProductTest({
   timeoutMs: 240_000,
   run: async (product) => {
     for (const arm of FORM_VIOLATIONS) {
-      await expectConfigRefused(
-        product,
-        arm.config,
-        `T7-2 (${arm.label})`,
-        arm.unparseable === true ? "unparseable" : "well-formed",
-      );
+      await expectConfigRefused(product, arm.config, `T7-2 (${arm.label})`);
     }
 
     await withWorkspace(
@@ -1456,14 +1548,14 @@ const T7_2 = defineProductTest({
     // is an unknown group (14.14), the escape spelling resolves.
     await expectConfigRefused(
       product,
-      verbatimNameConfig("product"),
+      VERBATIM_NAME_UNKNOWN_TARGET_CONFIG,
       'T7-2 (verbatim group name: a profile\'s target "product" names no ' +
         "configured group — the group's spelling contains a backslash)",
     );
     await withWorkspace(
       {
         files: {
-          "xspec.config.ts": verbatimNameConfig(VERBATIM_GROUP_NAME),
+          "xspec.config.ts": VERBATIM_NAME_CONFIG,
           "specs/A.mdx": SECTION_A_SOURCE,
         },
       },
@@ -1523,13 +1615,11 @@ const T7_2 = defineProductTest({
       NON_UTF8_CONFIG,
       "T7-2 (encoding: the byte 0xFF inside a trailing line comment — the " +
         "file's bytes are not valid UTF-8)",
-      "unparseable",
     );
     await expectConfigRefused(
       product,
       BOM_CONFIG,
       "T7-2 (encoding: the file begins with a byte-order mark)",
-      "unparseable",
     );
 
     // Object-literal keys and names (SPEC 7, 14.14): repeated keys, empty
@@ -1543,7 +1633,7 @@ const T7_2 = defineProductTest({
     // comment-free twin's — compared as the member's serialization, member
     // order and spellings included.
     const configurationViewOf = async (
-      config: string,
+      config: StagedTs,
       label: string,
     ): Promise<unknown> =>
       await withWorkspace(
@@ -1604,7 +1694,7 @@ const T7_2 = defineProductTest({
 // every unknown-key fixture the surrounding configuration is valid (existing
 // unambiguous group references, all required fields present, permitted
 // literal values), so the unknown key is the only defect.
-const KEY_VIOLATIONS: readonly { label: string; config: string }[] = [
+const KEY_VIOLATIONS = refusedConfigArms("T7-3", [
   {
     label: "`specs` missing",
     config: `import { defineConfig } from "xspec"
@@ -1698,7 +1788,7 @@ export default defineConfig({
 })
 `,
   },
-];
+]);
 
 // Value shapes (SPEC 7, 7.1, 7.2; 14.14: a configuration that does not
 // conform, an otherwise invalid group shape) — TEST-SPEC T7-3's "one arm
@@ -1711,7 +1801,7 @@ export default defineConfig({
 // `policy` are lists, and `specs` and `code` are maps of named groups —
 // discriminating a product that reads the declarative form loosely,
 // accepting whatever its own loader tolerates.
-const VALUE_SHAPE_VIOLATIONS: readonly { label: string; config: string }[] = [
+const VALUE_SHAPE_VIOLATIONS = refusedConfigArms("T7-3", [
   {
     label: "a spec group whose value is a single string rather than a list",
     config: `import { defineConfig } from "xspec"
@@ -1793,18 +1883,21 @@ export default defineConfig({
 })
 `,
   },
-];
+]);
 
 // `code` omitted: a marker-bearing TypeScript file that WOULD be a valid
 // code source (a spec module import plus a marker recording a `references`
 // edge, SPEC 4.5) — so a product that wrongly discovers `.ts` files without
 // a `code` key records an edge from it and fails the edge-set equality.
-const MARKER_TS = `import SPEC from "../specs/A.xspec"
+const MARKER_TS = stagedTs(
+  "T7-3 src/impl.ts (code omitted: the marker-bearing file)",
+  `import SPEC from "../specs/A.xspec"
 
 export function impl(): void {
   SPEC.a
 }
-`;
+`,
+);
 
 // The complete edge set of the `code`-omitted fixture (SPEC 5.1–5.2): one
 // contains edge from A.mdx's root to its only section — and nothing sourced
@@ -1816,7 +1909,9 @@ const CODE_OMITTED_EDGES: readonly GraphEdge[] = [
 // `policy` omitted / empty lists: two spec groups joined by one depends edge
 // (external-form d prop, SPEC 2.2) — the edge T7.5-2's forbidden rule
 // (from group product to group other) would flag if the rule existed.
-const TWO_GROUP_CONFIG = `import { defineConfig } from "xspec"
+const TWO_GROUP_CONFIG = stagedTs(
+  "T7-3 xspec.config.ts (policy omitted: two spec groups)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1824,9 +1919,12 @@ export default defineConfig({
     other: ["specs/other/**/*.mdx"]
   }
 })
-`;
+`,
+);
 
-const EMPTY_LISTS_CONFIG = `import { defineConfig } from "xspec"
+const EMPTY_LISTS_CONFIG = stagedTs(
+  "T7-3 xspec.config.ts (empty coverage and policy lists)",
+  `import { defineConfig } from "xspec"
 
 export default defineConfig({
   specs: {
@@ -1836,7 +1934,8 @@ export default defineConfig({
   coverage: [],
   policy: []
 })
-`;
+`,
+);
 
 const PRODUCT_MDX = stagedMdx(
   "T7-3 specs/product/P.mdx",
@@ -1918,10 +2017,7 @@ async function assertViolatingEdgePresent(
 // profile and rule reference the existing unambiguous group `main`, so the
 // name is each fixture's only defect. A product not checking names loads
 // each and builds (exit 0).
-const REPLACEMENT_NAME_VIOLATIONS: readonly {
-  label: string;
-  config: string;
-}[] = [
+const REPLACEMENT_NAME_VIOLATIONS = refusedConfigArms("T7-3", [
   {
     label: "a spec group named with U+FFFD",
     config: `import { defineConfig } from "xspec"
@@ -1971,7 +2067,7 @@ export default defineConfig({
 })
 `,
   },
-];
+]);
 
 const T7_3 = defineProductTest({
   id: "T7-3",
