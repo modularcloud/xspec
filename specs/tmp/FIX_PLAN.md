@@ -38,25 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 43 — Register T6.5-22 with its (b) lures (TEST-SPEC L301; S-6; A28)
-
-**Depends on.** Tasks 18 and 19, and Task 14 for judging each receiving code file both ways.
-
-**Where.** The new 6.5 module, and `traceability.ts`.
-
-**Change.** Each lure is a section move whose receiving file needs an import of a target module named to steer a basename- or stem-derived choice onto a barred or captured name. Task 19's assertion applies to every lure, and `check` is clean after each move. The exact list is at L301:
-- `specs/let.mdx`, `await`, `yield`, `eval`, `Object`, `require`, `exports`, `__x`, `escape`, `unescape`, `Iterator`, `AsyncIterator`, and `SuppressedError`, each received once by a spec source and once by a `.ts` code source;
-- `specs/React.mdx`, received by a `.tsx` file whose body holds classic-runtime JSX (`<div />`) and by a `.tsx` file holding no JSX;
-- `specs/h.mdx`, received by `.tsx` files carrying `/** @jsx h */` and `/* @JSX h */`; `specs/preact.mdx`, by one carrying `/** @jsx preact.h */`; and `specs/Frag.mdx`, by one carrying `/** @jsxFrag Frag */` alone;
-- `specs/h.mdx` again, received by two `.tsx` files whose pragma TypeScript ignores: the line comment `// @jsx h`, and `/** @jsx h */` inside a function body after the file's first statement;
-- `specs/helper.mdx`, received by a `.ts` file declaring `helper` only inside a function, and by one declaring it only as a type;
-- `specs/Record.mdx`, received by a `.ts` file whose only mention of `Record` is `let r: Record<string, number> = {}`;
-- `specs/test.mdx`, received by a `.ts` file calling an undeclared global `test(…)`.
-
-Every receiving code file must be accepted by 5.9.3 both ways, and every spec source must derive.
-
-**Checks.** S-9 and S-7 pass. T6.5-22 against the built product; diagnose each lure the product breaches.
-
 ### Task 44 — Register T6.5-23, arms (a)–(e) (TEST-SPEC L302; SPEC 6.5; A29)
 
 **Depends on.** Tasks 14 and 19.
