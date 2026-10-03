@@ -38,19 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 49 — T7.1-1: the path-character arms and the code-group control (TEST-SPEC L326; SPEC 7.1, 14.19; B4)
-
-**Where.** `test/suite/registry/section-7.1-7.3.ts`.
-
-**Change.** Spellings from L326.
-- *Arms.* One arm per character 7.1 bars — `"`, `'`, the backslash, U+000A, U+000D, U+2028, and U+2029 — in a spec-group file name (for example `specs/a'b.mdx`). Add one more arm with `'` in a directory component (`specs/it's/a.mdx`).
-  - Each gives 14.19.
-  - The `"`, backslash, LF, and CR arms are Linux-leg only, gated in the body.
-  - Each file stays discovered and reachable as T11.2-3's are: the finding concerns its path, and a glob-reached `view` serves its tree with every identity unavailable.
-- *Control.* The code-group file `src/it's`, backslash, `x.ts` is valid: `build` and `check` exit 0, and a marker in it records its edge from the whole-file location.
-
-**Checks.** S-9 and S-7 pass. T7.1-1 against the built product.
-
 ### Task 50 — T7.3-1: the graph-data-area `outDir` arms and their look-alikes (TEST-SPEC L328; SPEC 7.3, 14.14; B5)
 
 **Where.** `test/suite/registry/section-7.1-7.3.ts`: `INVALID_OUTDIRS`.
