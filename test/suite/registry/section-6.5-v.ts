@@ -125,6 +125,25 @@
 //   the call re-rooted at `tb(B.m)`. Both state the preview's one
 //   `reference-rewrite` spanning the call and no `import-removal`, and the
 //   call's `embeds` edge from `src/c.ts` to `specs/B.mdx#m`.
+// - (l) and (m) are (f)'s move over two declarations of `A`'s module, `A1`
+//   and `A2`, `specs/A.mdx` holding `m`, its child `m.c`, and `k`: the
+//   markers `A1.m` and `A2.m.c` are two rewrites, (l) rooting both at the
+//   one added binding (`<X>.m`, `<X>.m.c`), (m) `A1.m` alone, `A2.m.c`
+//   re-rooted at the held `B` (`B.m.c`); each at offset 34 alone (the
+//   line-start preference), the preview's two `reference-rewrite` edits and
+//   no `import-removal`, and both markers' `references` edges from
+//   `src/c.ts`.
+// - (n) is (d)'s file with `f` spread over lines, and with `namespace N {`
+//   in its place: 37 or 38; the line starts inside the body are judged
+//   among the premises as deriving (`deriving`), as TEST-SPEC states.
+// - (o)'s receiver is the spec source `specs/third.mdx` (R16_CONFIG, no
+//   code group): `O.x` re-rooted at the later-declared `T`, nothing added,
+//   `O`'s declaration removed with its line, [0, 31) (a rewrite spelled
+//   `""`); the preview's `reference-rewrite` [45, 48) and `import-removal`
+//   [0, 31), and `p`'s `depends` edge to `specs/target.mdx#y`.
+// - (p) stages each of U+0020, U+0009, U+000B, and U+000C (built from code
+//   points) between `O`'s declaration and its line's terminator: 39 alone,
+//   the preview's `reference-rewrite` [61, 64) and no `import-removal`.
 
 import { Buffer } from "node:buffer";
 import type {
@@ -1073,6 +1092,8 @@ function s23Arm(spec: {
   readonly offsets: readonly number[];
   readonly placement: string;
   readonly excluded: Readonly<Record<number, string>>;
+  readonly deriving?: readonly number[];
+  readonly preview?: S23PreviewExpectation;
   readonly compiles?: string;
 }): S23Arm {
   return {
@@ -1096,6 +1117,8 @@ function s23Arm(spec: {
     },
     placement: spec.placement,
     excluded: spec.excluded,
+    ...(spec.deriving === undefined ? {} : { deriving: spec.deriving }),
+    ...(spec.preview === undefined ? {} : { preview: spec.preview }),
     ...(spec.compiles === undefined ? {} : { compiles: spec.compiles }),
   };
 }
@@ -2048,7 +2071,460 @@ const S23_K_CONTROL = s23KArm({
     "default",
 });
 
-/** Arms (a) through (k), in TEST-SPEC's order. */
+/** Each line's start in `lines` joined by U+000A with a final U+000A, then
+ * the file's end, in bytes. */
+function s23Starts(lines: readonly string[]): readonly number[] {
+  const starts: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    starts.push(offset);
+    offset += Buffer.byteLength(line, "utf8") + 1;
+  }
+  starts.push(offset);
+  return starts;
+}
+
+/** `actual`, failing as a harness defect unless it is TEST-SPEC's `stated`
+ * offset of `what`. */
+function s23Stated(
+  key: string,
+  what: string,
+  actual: number | undefined,
+  stated: number,
+): number {
+  if (actual !== stated) {
+    throw new Error(
+      `T6.5-23 ${key}: a harness defect — ${what} lies at ` +
+        `${String(actual)} in the staged text, not at TEST-SPEC's ` +
+        String(stated),
+    );
+  }
+  return stated;
+}
+
+// (l) and (m): (f)'s move over two declarations of `A`'s module binding
+// distinct identifiers (valid, 4, T4-4), the moved `m` carrying its child
+// `m.c`.
+
+/** `specs/A.mdx` in (l) and (m): the moved `m`, its child `m.c`, and the
+ * kept `k`. */
+const S23_LM_A_SOURCE: StagedMdx = stagedMdx(
+  "T6.5-23 (l)/(m) specs/A.mdx (the moved m and its child m.c, the kept k)",
+  [
+    '<S id="m">',
+    "M text.",
+    "",
+    '<S id="m.c">',
+    "C text.",
+    "</S>",
+    "</S>",
+    "",
+    '<S id="k">',
+    "K text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+/** `A1`'s declaration, heading the file at [0, 33). */
+const S23_IMPORT_A1 = 'import A1 from "../specs/A.xspec"';
+/** `A2`'s declaration, of the same module. */
+const S23_IMPORT_A2 = 'import A2 from "../specs/A.xspec"';
+
+/** The rewritten markers' edges after the move: from `src/c.ts` — a
+ * top-level statement's reference is attributed to the file (4.6) — to the
+ * moved nodes' new identities. */
+const S23_LM_EDGES: readonly S23Edge[] = [
+  {
+    from: S23_APP,
+    to: "specs/B.mdx#m",
+    kind: "references",
+    what: "the rewritten marker `A1.m`",
+  },
+  {
+    from: S23_APP,
+    to: "specs/B.mdx#m.c",
+    kind: "references",
+    what: "the rewritten marker `A2.m.c`",
+  },
+];
+
+/** Why an offset of (l) or (m) is excluded: untimely for `A1.m`. */
+function s23LmUntimely(where: string, between: string, more = ""): string {
+  return (
+    `${where} — untimely for \`A1.m\`, ${between} standing between it and ` +
+    `\`A1\`'s declaration${more} (6.5: an added declaration's bindings are ` +
+    "timely for every spelling rooted at them — declared at or before the " +
+    "binding each spelling was rooted at, or after it with only import " +
+    "declarations between)"
+  );
+}
+
+/** A staging of (l) or (m) at module load: `A1.m` rewritten in place to
+ * `<X>.m` and `A2.m.c` as `chained` spells it, `B`'s module's declaration at
+ * the start of line 2 (TEST-SPEC's offset 34, cross-checked against the
+ * staged text), the preview's two `reference-rewrite` edits and no
+ * `import-removal`, and both markers' `references` edges. */
+function s23LmArm(spec: {
+  readonly key: string;
+  readonly lines: readonly string[];
+  readonly chained: (ident: string) => string;
+  readonly why: string;
+  readonly placement: string;
+  readonly excluded: Readonly<Record<number, string>>;
+}): S23Arm {
+  const text = [...spec.lines, ""].join("\n");
+  const line2 = s23Stated(
+    spec.key,
+    "the start of line 2",
+    s23Starts(spec.lines)[1],
+    34,
+  );
+  return {
+    key: spec.key,
+    receiver: S23_APP,
+    kind: "typescript",
+    text,
+    staged: s23StagedApp(spec.key, text),
+    files: {
+      "xspec.config.ts": S23_CONFIG,
+      "specs/A.mdx": S23_LM_A_SOURCE,
+      "specs/B.mdx": S23_F_B_SOURCE,
+    },
+    argv: S23_F_ARGV,
+    rewrites: [
+      s23Marker(text, spec.key, "A1.m", (ident) => `${ident}.m`),
+      s23Marker(text, spec.key, "A2.m.c", spec.chained),
+    ],
+    addition: {
+      specifier: S23_F_SPECIFIER,
+      offsets: [line2],
+      why: spec.why,
+    },
+    placement: spec.placement,
+    excluded: spec.excluded,
+    preview: { rewrites: 2, removals: [] },
+    edges: S23_LM_EDGES,
+  };
+}
+
+// (l) one added binding rooting spellings formerly rooted at different
+// bindings.
+const S23_L_ONE_BINDING = s23LmArm({
+  key: "(l)",
+  lines: [S23_IMPORT_A1, "A1.m", S23_IMPORT_A2, "A2.m.c", "A1.k", "A2.k"],
+  chained: (ident) => `${ident}.m.c`,
+  why:
+    "both moved markers, `A1.m` and `A2.m.c`, need `B`'s module's default, " +
+    "which the file lacks, so one declaration of it is added, its binding " +
+    "rooting both — and it must be timely for each (6.5: its bindings " +
+    "timely for every spelling rooted at them)",
+  placement:
+    "the start of line 2 (offset 34), the only line-start admissible " +
+    "offset — timely for `A1.m` and for `A2.m.c`; the end of line 1, " +
+    "admissible too, is mid-line, and the starts of lines 3 and 4 are " +
+    "timely for `A2.m.c` alone — the one added binding rooting both, " +
+    "`<X>.m` and `<X>.m.c`, both former declarations kept by `A1.k` and " +
+    "`A2.k`",
+  excluded: {
+    0: S23_NO_STATEMENT_BEFORE,
+    33: s23MidLine("the end of line 1, `A1`'s declaration's end"),
+    39: s23LmUntimely(
+      "the start of line 3",
+      "the statement `A1.m`",
+      ", though timely for `A2.m.c`: a product judging the added binding's " +
+        "timeliness against one spelling's former binding alone — `A2`, " +
+        "the last found — admits it",
+    ),
+    72: s23LmUntimely(
+      "the end of line 3, `A2`'s declaration's end",
+      "the statement `A1.m`",
+      ", though timely for `A2.m.c`",
+    ),
+    73: s23LmUntimely(
+      "the start of line 4",
+      "the statement `A1.m`",
+      ", though timely for `A2.m.c`: a product placing the added line " +
+        "directly after the last-found former binding's declaration, " +
+        "`A2`'s, writes it here, after `<X>.m`, which TypeScript's " +
+        "CommonJS output then runs before initializing `<X>`",
+    ),
+    80: s23LmUntimely(
+      "the start of line 5",
+      "the statements `A1.m` and `A2.m.c`",
+      ", and for `A2.m.c` as well",
+    ),
+    85: s23LmUntimely(
+      "the start of line 6",
+      "the statements `A1.m`, `A2.m.c`, and `A1.k`",
+      ", and for `A2.m.c` as well",
+    ),
+    90: s23LmUntimely(
+      "the file's end",
+      "the statements `A1.m`, `A2.m.c`, `A1.k`, and `A2.k`",
+      ", and for `A2.m.c` as well",
+    ),
+  },
+});
+
+// (m) a held binding beside an added one, for one module in one file.
+const S23_M_HELD_BESIDE = s23LmArm({
+  key: "(m)",
+  lines: [
+    S23_IMPORT_A1,
+    "A1.m",
+    S23_IMPORT_B,
+    S23_IMPORT_A2,
+    "A2.m.c",
+    "A1.k",
+    "A2.k",
+    "B.b",
+  ],
+  chained: () => "B.m.c",
+  why:
+    "`B` is untimely for `A1.m` — the statement `A1.m` stands between " +
+    "`A1`'s declaration and `B`'s — so a declaration of `B`'s module is " +
+    "added, binding `<X>` distinct from `B`, rooting `A1.m` alone, while " +
+    "`B`'s declaration precedes `A2`'s, so `B` is timely for `A2.m.c`, " +
+    "which is re-rooted at it (6.5: a spelling is rooted at a binding the " +
+    "file already holds, unshadowed and timely, and at an added " +
+    "declaration's binding only where the file holds none)",
+  placement:
+    "the start of line 2 (offset 34), the only line-start admissible " +
+    "offset — the end of line 1, admissible too, is mid-line, and every " +
+    "later offset is untimely for `A1.m` — `A1.m` rewritten in place to " +
+    "`<X>.m` and `A2.m.c` to `B.m.c`, never `<X>.m.c` (a product rooting " +
+    "every spelling of a module at the added binding, once one needs it, " +
+    "writes `<X>.m.c`), both former declarations kept by `A1.k` and " +
+    "`A2.k`, and `B`'s by `B.b`",
+  excluded: {
+    0: S23_NO_STATEMENT_BEFORE,
+    33: s23MidLine("the end of line 1, `A1`'s declaration's end"),
+    39: s23LmUntimely("the start of line 3", "the statement `A1.m`"),
+    72: s23LmUntimely("the start of line 4", "the statement `A1.m`"),
+    106: s23LmUntimely("the start of line 5", "the statement `A1.m`"),
+    113: s23LmUntimely(
+      "the start of line 6",
+      "the statements `A1.m` and `A2.m.c`",
+    ),
+    118: s23LmUntimely(
+      "the start of line 7",
+      "the statements `A1.m`, `A2.m.c`, and `A1.k`",
+    ),
+    123: s23LmUntimely(
+      "the start of line 8",
+      "the statements `A1.m`, `A2.m.c`, `A1.k`, and `A2.k`",
+    ),
+    127: s23LmUntimely(
+      "the file's end",
+      "the statements `A1.m`, `A2.m.c`, `A1.k`, `A2.k`, and `B.b`",
+    ),
+  },
+});
+
+// (n) nested statement lists: (d)'s file with `f` spread over lines, and
+// separately with `namespace N {` in place of `export function f() {`.
+function s23Nested(spec: {
+  readonly key: string;
+  readonly opener: string;
+  /** The statement whose body the inner line starts lie in. */
+  readonly unit: string;
+  /** That body in words. */
+  readonly body: string;
+  /** What else a product taking the body's line start does, in words. */
+  readonly also: string;
+}): S23Arm {
+  const lines = [`${S23_IMPORT_O} // note`, spec.opener, "  O.x", "  O.w", "}"];
+  const [, line2, line3, line4, line5, end] = s23Starts(lines) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const derives =
+    ", though the form there derives (S-9: TypeScript 5.9.3's parser " +
+    `derives an import declaration in ${spec.body}, the restrictions on ` +
+    "where one may stand being post-parse grammar checks 14.20 excludes)";
+  const inside = `inside the statement \`${spec.unit}\`, where a declaration is no top-level one (6.5)`;
+  return s23Arm({
+    key: spec.key,
+    text: [...lines, ""].join("\n"),
+    offsets: [37, 38],
+    placement:
+      "no line start qualifying — the start of line 2 follows the comment, " +
+      `every line start of ${spec.body} lies inside the statement ` +
+      `\`${spec.unit}\`, where a declaration is no top-level one, and every ` +
+      "offset after it is untimely, the statement standing between it and " +
+      "`O`'s declaration — the declaration's end or after the space before " +
+      "`//`, 37 or 38, both mid-line (6.5's latitude between them), the " +
+      "marker rewritten in place to `<X>.y`",
+    excluded: {
+      0: S23_NO_STATEMENT_BEFORE,
+      [line2]:
+        "the start of line 2 — it follows the comment `// note`, no " +
+        "statement's end with whitespace alone between (6.5)",
+      [line3]: `the start of line 3 — ${inside}${derives}`,
+      [line4]:
+        `the start of line 4, after \`O.x\`'s end — ${inside}${derives}: a ` +
+        "product judging statement boundaries within the innermost " +
+        "statement list alone finds it admissible and takes it under the " +
+        `line-start preference${spec.also}`,
+      [line5]: `the start of line 5, before \`}\` — ${inside}${derives}`,
+      [end]:
+        "the file's end — untimely, the statement " +
+        `\`${spec.unit}\` standing between it and \`O\`'s declaration (6.5)`,
+    },
+    deriving: [line3, line4, line5],
+  });
+}
+
+const S23_N_FUNCTION = s23Nested({
+  key: "(n)",
+  opener: "export function f() {",
+  unit: "f",
+  body: "a function body",
+  also: "",
+});
+
+const S23_N_NAMESPACE = s23Nested({
+  key: "(n) with `namespace N {`",
+  opener: "namespace N {",
+  unit: "N",
+  body: "a namespace body",
+  also:
+    ", as does one taking a namespace body — a module block, where " +
+    "TypeScript also admits import-equals declarations — for a " +
+    "declaration site",
+});
+
+// (o) timeliness, a TypeScript source's condition alone: a third spec source
+// under the arms' move, `T`'s ESM block following `O`'s with the section `p`
+// between them.
+const S23_O_RECEIVER = "specs/third.mdx";
+/** `O`'s declaration, heading the file, with its line: [0, 31). */
+const S23_O_IMPORT = 'import O from "./origin.xspec"';
+const S23_O_TEXT = [
+  S23_O_IMPORT,
+  "",
+  '<S id="p" d={O.x} />',
+  "",
+  'import T from "./target.xspec"',
+  "",
+  '<S id="q" d={T.z} />',
+  "",
+].join("\n");
+const S23_O_REMOVAL_END = s23Stated(
+  "(o)",
+  "the end of `O`'s declaration's line",
+  Buffer.byteLength(S23_O_IMPORT, "utf8") + 1,
+  31,
+);
+const S23_O_REFERENCE = s23Marker(S23_O_TEXT, "(o)", "O.x", () => "T.y");
+s23Stated("(o)", "the reference `O.x`", S23_O_REFERENCE.start, 45);
+
+const S23_O: S23Arm = {
+  key: "(o)",
+  receiver: S23_O_RECEIVER,
+  kind: "spec-source",
+  text: S23_O_TEXT,
+  staged: stagedMdx(
+    "T6.5-23 (o) specs/third.mdx (O's ESM block, p, T's ESM block, q)",
+    S23_O_TEXT,
+  ),
+  files: {
+    "xspec.config.ts": R16_CONFIG,
+    [S23_ORIGIN]: S23_ORIGIN_SOURCE,
+    [S23_TARGET]: S23_TARGET_SOURCE,
+  },
+  argv: S23_ARGV,
+  rewrites: [
+    { start: 0, end: S23_O_REMOVAL_END, spelled: () => "" },
+    S23_O_REFERENCE,
+  ],
+  addition: undefined,
+  placement:
+    "`T` is a binding the file holds and no local declaration shadows, so " +
+    "the reference `O.x` is re-rooted at it, `T.y` — a spec source, which " +
+    "6.5 holds to no timeliness, re-roots wherever the file holds one " +
+    "unshadowed, though `T`'s ESM block follows `O`'s with the section `p` " +
+    "between them — nothing is added, and `O`'s declaration, its last use " +
+    "gone, is removed with its line, [0, 31); a product judging timeliness " +
+    "in a spec source too, the flow content between two ESM blocks counted " +
+    "as a statement standing between their declarations, adds a " +
+    "declaration of the target module and roots the reference at its " +
+    "binding",
+  excluded: {},
+  preview: {
+    rewrites: [{ start: S23_O_REFERENCE.start, end: S23_O_REFERENCE.end }],
+    removals: [{ start: 0, end: S23_O_REMOVAL_END }],
+  },
+  edges: [
+    {
+      from: `${S23_O_RECEIVER}#p`,
+      to: "specs/target.mdx#y",
+      kind: "depends",
+      what: "the section `p`",
+    },
+  ],
+};
+
+// (p) whitespace between a statement's end and its line's terminator: the
+// members of 1.4's class that are no line terminator (3), each staged after
+// `O`'s declaration where (d) stages characters outside the class.
+function s23TrailingWhitespace(codePoint: number): S23Arm {
+  const name = `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
+  const key = `(p) with ${name}`;
+  const text = `${S23_IMPORT_O}${String.fromCodePoint(codePoint)}\n${S23_F}\n`;
+  const bytes = Buffer.from(text, "utf8");
+  s23Stated(key, "`f`", bytes.indexOf(S23_F), 39);
+  const marker = s23Marker(text, key);
+  s23Stated(key, "the marker `O.x`", marker.start, 61);
+  const narrower =
+    codePoint === 0x0b || codePoint === 0x0c
+      ? `, and one judging whitespace over a set narrower than 1.4's — ` +
+        `space, tab, CR, and LF, say — takes 37 here, ${name} lying ` +
+        "outside it"
+      : "";
+  const midLine = (where: string): string =>
+    `${where} — admissible, but mid-line, while the start of line 2 is ` +
+    "admissible, taken over any other (6.5's preference): a product " +
+    "admitting a line start only where the line terminator before it " +
+    "directly follows a statement's end takes 37 or 38" +
+    narrower;
+  return s23Arm({
+    key,
+    text,
+    offsets: [39],
+    placement:
+      "the start of line 2 (offset 39), the only line-start admissible " +
+      `offset — 37, 38, and 39 each follow the declaration's end with ` +
+      `nothing but whitespace (1.4: ${name} is a member of the class) ` +
+      "between, and are timely, while offset 0 follows no statement's end, " +
+      "every offset inside `O`'s declaration or `f` lies inside a " +
+      "statement, and every offset after `f` is untimely — " +
+      `${name} kept at the end of line 1, the marker rewritten in place to ` +
+      "`<X>.y`",
+    excluded: {
+      0: S23_NO_STATEMENT_BEFORE,
+      37: midLine("the declaration's end, 37"),
+      38: midLine(`offset 38, after ${name}`),
+      72: S23_UNTIMELY_END,
+    },
+    preview: {
+      rewrites: [{ start: marker.start, end: marker.end }],
+      removals: [],
+    },
+  });
+}
+
+const S23_P_SPACE = s23TrailingWhitespace(0x20);
+const S23_P_TAB = s23TrailingWhitespace(0x09);
+const S23_P_VT = s23TrailingWhitespace(0x0b);
+const S23_P_FF = s23TrailingWhitespace(0x0c);
+
+/** Arms (a) through (p), in TEST-SPEC's order. */
 const S23_ARMS: readonly S23Arm[] = [
   S23_A_PROLOGUE,
   S23_A_BETWEEN,
@@ -2074,12 +2550,21 @@ const S23_ARMS: readonly S23Arm[] = [
   S23_J_STRING,
   S23_K_CALLEE,
   S23_K_CONTROL,
+  S23_L_ONE_BINDING,
+  S23_M_HELD_BESIDE,
+  S23_N_FUNCTION,
+  S23_N_NAMESPACE,
+  S23_O,
+  S23_P_SPACE,
+  S23_P_TAB,
+  S23_P_VT,
+  S23_P_FF,
 ];
 
 const T6_5_23 = defineProductTest({
   id: "T6.5-23",
   title:
-    'statement boundaries, the directive prologue, and timeliness — arms (a) through (k), each a section move: in (a) through (e) `move specs/origin.mdx#x specs/target.mdx#y`, whose receiver `src/c.ts` (`import O from "../specs/origin.xspec"` beside `f` = `export function f() { O.x; O.w }`) gains exactly `import <X> from "../specs/target.xspec"`, value-blind in `<X>` alone, at an admissible offset, the marker rewritten in place to `<X>.y`, every other byte as staged: (a) after a `"use client"` prologue at the start of line 2 or 3, never offset 0, and between two directives (`"use client"`, then `"use strict"; import O … // note`), no line start admissible, at offset 26, 27, 64, or 65; (b) under `// @ts-nocheck` and under `/// <reference lib="esnext" />` at the start of line 3, never above the directive; (c) at the start of line 2, before a `// @ts-expect-error` comment, never between it and the statement it governs, the file compiling clean under standard tooling before and after the move; (d) after a trailing `// note` mid-line at 37 or 38, and after U+00A0 or U+2028 at 37 alone (1.4\'s whitespace, 3\'s terminators); (e) after a `;` terminating `O`\'s declaration across a line at the start of line 3, never inside the declaration, and in 6.5\'s own shape (one call statement across two lines) at one of six mid-line offsets, never at the start of line 3; (f) timeliness under `move specs/A.mdx#m specs/B.mdx#m`: 6.5\'s example (`import A …`, `A.m`, `A.k`, `import B …`, `B.b`), `B` untimely for the marker, gains `import <X> from "../specs/B.xspec"` at the start of line 2, the marker written `<X>.m`, and `query edges` reports the marker\'s `references` edge from `src/c.ts` to `specs/B.mdx#m`; its control (`import B …` on line 2) is re-rooted to `B.m`, nothing added; with `type T = number` or `import Z = require("./z")` interposed between the two declarations `B` is untimely and the declaration is added at offset 33; with `import type { T } from "./t"` or `import "./p"` interposed `B` stays timely, the marker re-rooted to `B.m`, nothing added, the preview one `reference-rewrite` and no `import-addition` or `import-removal`; the precedence branch at a distance (`import B …`, `B.b`, `import A …`, `A.m`, `A.k`) re-rooted to `B.m`, nothing added, the preview\'s one `reference-rewrite` spanning [70, 73), and the marker\'s edge reported; (g) the spec-source side of the split rule: a target whose first two lines are one declaration of one ESM block (`import K from "./k.xspec"`, `;`), receiving T6.5-13(h)\'s moved text into `p.n`, gains `import <X> from "./x.xspec"` at offset 0, the empty line\'s start, or the file\'s end, never at the start of line 2, which derives yet splits the declaration; (h) a removed declaration\'s place: with `f` = `export function f() { O.x }`, `O`\'s declaration losing its last use and removed with its line over [0, 38), the added line stands at the removal\'s end, offset 38, the file becoming exactly `import <X> from "../specs/target.xspec"`, U+000A, `export function f() { <X>.y }`, U+000A, the preview one `reference-rewrite` spanning the marker, one `import-removal` spanning [0, 38), and the `import-addition` at 38, never 0, and `query edges` the marker\'s `references` edge from `src/c.ts#f` to `specs/target.mdx#y`; (i) that file headed by `// note` or by `// @ts-expect-error`: the added line at the removal\'s end, 46 or 58, the comment then preceding it; (j) `"use client"` after the removed declaration: the added line at 38, the string-literal statement staying no directive; (k) a callee\'s timeliness under (f)\'s move: `ta(A.m)`, below `import A, { text as ta } …` and `import B …` and above `import { text as tb } …`, rewritten whole to `<Y>(B.m)`, the file gaining exactly `import { text as <Y> } from "../specs/B.xspec"` (or `import { text } …`) at offset 49 or 82, the preview one `reference-rewrite` spanning the call and no `import-removal`, and `query edges` the call\'s `embeds` edge from `src/c.ts` to `specs/B.mdx#m`; its control, `import { text as tb } …` on line 2, re-rooted at both existing bindings, `tb(B.m)`, nothing added — each move exiting 0, every receiver well-formed after it (TypeScript 5.9.3\'s module and script readings; the stock MDX 3 grammar), the preview\'s one `import-addition` at the offset the real operation used wherever a declaration is added (T6.6-4(b)), and `check` and `build` clean after it (SPEC 6.5, 1.4, 3, 4, 4.6, 5.2, 6.4, 6.6, 11.1, 12.7, 14.20)',
+    'statement boundaries, the directive prologue, and timeliness — arms (a) through (p), each a section move: in (a) through (e) `move specs/origin.mdx#x specs/target.mdx#y`, whose receiver `src/c.ts` (`import O from "../specs/origin.xspec"` beside `f` = `export function f() { O.x; O.w }`) gains exactly `import <X> from "../specs/target.xspec"`, value-blind in `<X>` alone, at an admissible offset, the marker rewritten in place to `<X>.y`, every other byte as staged: (a) after a `"use client"` prologue at the start of line 2 or 3, never offset 0, and between two directives (`"use client"`, then `"use strict"; import O … // note`), no line start admissible, at offset 26, 27, 64, or 65; (b) under `// @ts-nocheck` and under `/// <reference lib="esnext" />` at the start of line 3, never above the directive; (c) at the start of line 2, before a `// @ts-expect-error` comment, never between it and the statement it governs, the file compiling clean under standard tooling before and after the move; (d) after a trailing `// note` mid-line at 37 or 38, and after U+00A0 or U+2028 at 37 alone (1.4\'s whitespace, 3\'s terminators); (e) after a `;` terminating `O`\'s declaration across a line at the start of line 3, never inside the declaration, and in 6.5\'s own shape (one call statement across two lines) at one of six mid-line offsets, never at the start of line 3; (f) timeliness under `move specs/A.mdx#m specs/B.mdx#m`: 6.5\'s example (`import A …`, `A.m`, `A.k`, `import B …`, `B.b`), `B` untimely for the marker, gains `import <X> from "../specs/B.xspec"` at the start of line 2, the marker written `<X>.m`, and `query edges` reports the marker\'s `references` edge from `src/c.ts` to `specs/B.mdx#m`; its control (`import B …` on line 2) is re-rooted to `B.m`, nothing added; with `type T = number` or `import Z = require("./z")` interposed between the two declarations `B` is untimely and the declaration is added at offset 33; with `import type { T } from "./t"` or `import "./p"` interposed `B` stays timely, the marker re-rooted to `B.m`, nothing added, the preview one `reference-rewrite` and no `import-addition` or `import-removal`; the precedence branch at a distance (`import B …`, `B.b`, `import A …`, `A.m`, `A.k`) re-rooted to `B.m`, nothing added, the preview\'s one `reference-rewrite` spanning [70, 73), and the marker\'s edge reported; (g) the spec-source side of the split rule: a target whose first two lines are one declaration of one ESM block (`import K from "./k.xspec"`, `;`), receiving T6.5-13(h)\'s moved text into `p.n`, gains `import <X> from "./x.xspec"` at offset 0, the empty line\'s start, or the file\'s end, never at the start of line 2, which derives yet splits the declaration; (h) a removed declaration\'s place: with `f` = `export function f() { O.x }`, `O`\'s declaration losing its last use and removed with its line over [0, 38), the added line stands at the removal\'s end, offset 38, the file becoming exactly `import <X> from "../specs/target.xspec"`, U+000A, `export function f() { <X>.y }`, U+000A, the preview one `reference-rewrite` spanning the marker, one `import-removal` spanning [0, 38), and the `import-addition` at 38, never 0, and `query edges` the marker\'s `references` edge from `src/c.ts#f` to `specs/target.mdx#y`; (i) that file headed by `// note` or by `// @ts-expect-error`: the added line at the removal\'s end, 46 or 58, the comment then preceding it; (j) `"use client"` after the removed declaration: the added line at 38, the string-literal statement staying no directive; (k) a callee\'s timeliness under (f)\'s move: `ta(A.m)`, below `import A, { text as ta } …` and `import B …` and above `import { text as tb } …`, rewritten whole to `<Y>(B.m)`, the file gaining exactly `import { text as <Y> } from "../specs/B.xspec"` (or `import { text } …`) at offset 49 or 82, the preview one `reference-rewrite` spanning the call and no `import-removal`, and `query edges` the call\'s `embeds` edge from `src/c.ts` to `specs/B.mdx#m`; its control, `import { text as tb } …` on line 2, re-rooted at both existing bindings, `tb(B.m)`, nothing added; (l) under (f)\'s move, two declarations of one module (`import A1 …`, `A1.m`, `import A2 …`, `A2.m.c`, `A1.k`, `A2.k`): one added `import <X> from "../specs/B.xspec"` at offset 34, timely for both markers, which become `<X>.m` and `<X>.m.c`, the preview two `reference-rewrite` edits and no `import-removal`, and `query edges` the markers\' `references` edges from `src/c.ts` to `specs/B.mdx#m` and `specs/B.mdx#m.c`; (m) the same with `import B …` after `A1.m` and `B.b` last: the declaration added at 34 for `A1.m` alone, `A2.m.c` re-rooted at the timely `B` as `B.m.c`; (n) (d)\'s file with `f` spread over lines, or with `namespace N {` in its place: at 37 or 38, never at a line start inside the body; (o) a spec source (`import O …`, `<S id="p" d={O.x} />`, `import T …`, `<S id="q" d={T.z} />`): `O.x` re-rooted at the later-declared `T`, nothing added, `O`\'s declaration removed with its line, the preview one `reference-rewrite` spanning [45, 48) and one `import-removal` spanning [0, 31), and `query edges` `p`\'s `depends` edge to `specs/target.mdx#y`; (p) U+0020, U+0009, U+000B, or U+000C between `O`\'s declaration and its line\'s terminator: at the start of line 2, 39, the preview one `reference-rewrite` spanning [61, 64) and no `import-removal` — each move exiting 0, every receiver well-formed after it (TypeScript 5.9.3\'s module and script readings; the stock MDX 3 grammar), the preview\'s one `import-addition` at the offset the real operation used wherever a declaration is added (T6.6-4(b)), and `check` and `build` clean after it (SPEC 6.5, 1.4, 3, 4, 4.6, 5.2, 6.4, 6.6, 11.1, 12.7, 14.20)',
   timeoutMs: 300_000,
   run: async (product) => {
     const failures: string[] = [];
