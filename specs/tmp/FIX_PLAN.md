@@ -36,19 +36,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ## Tasks
 
-### Part D — Properties, the Windows leg, and S-9's generated forms
-
-### Task 65 — E-6: a journaled section-form move into an existing target that gains an import (TEST-SPEC E-6, L641; C7)
-
-**Where.** `test/helpers/e6.ts`, run by `test/suite/e6-exchange-writer.test.ts` and `test/windows/e6-byte-identity.test.ts`.
-
-**Change.** Add a journaled section-form `move` to the representative fixture. Its moved text lands before a target parent's closing tag, in an existing target file that gains an added import. Its transcript and rewritten sources are byte-compared across the Linux and Windows legs like the other steps. This is the subset's inserted-terminator probe: every terminator 6.5 inserts is U+000A on every platform.
-
-**Checks.**
-- The E-6 writer test against the built product.
-- S-9 records for any `.mdx` the step stages after an invocation.
-- After the push, CI's Windows job on the new head.
-
 ### Final
 
 ### Task 66 — Confirm on the full suite and in CI; delete this plan
