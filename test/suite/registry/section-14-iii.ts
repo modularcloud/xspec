@@ -1808,9 +1808,9 @@ export interface ReporterStaging {
  * The 14.16 and 14.20 arms of T14-12 (TEST-SPEC T14-4: "among the matrix's
  * stagings … the 14.16 and 14.20 arms of … T14-12 (all three surfaces for
  * their spec-source stagings)"): (b)'s `export { nope }`, the condition-16
- * containers and export statement of (c)–(f), (h), (i), (k), and every
- * negative arm — the same stagings the arms above drive, so T14-4 sweeps
- * exactly what T14-12 pins.
+ * containers, export statement, and element of (c)–(f), (h), (i), (k),
+ * (ae), and (af), and every negative arm, (ac) included — the same
+ * stagings the arms above drive, so T14-4 sweeps exactly what T14-12 pins.
  */
 export const T14_12_REPORTER_STAGINGS: readonly ReporterStaging[] = [
   {

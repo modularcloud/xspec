@@ -519,7 +519,9 @@ describe("S-9: every form T6.5-16 stages, or asserts as a control's result or a 
 // `duplicate-import-binding`, `undefined-export`,
 // `invalid-assignment-target`, `let-as-identifier`, `legacy-octal` — and
 // the expression-grammar forms plainly (SPEC 14.20: a finding in a
-// well-formed file, never a parse failure).
+// well-formed file, never a parse failure), the Unicode-pin arms (ae)–(ag)
+// among them: U+2EBF0 in an expression, a JSX element name, and an
+// attribute name, judged code point by code point under Unicode 15.1.
 describe("S-9: every form T14-12's positive arms stage derives under exactly its named allowances", () => {
   test("the vector set is non-empty and uniquely named", () => {
     expect(T14_12_FORM_VECTORS.length).toBeGreaterThan(12);
