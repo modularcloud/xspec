@@ -10,9 +10,12 @@
 //   declared here against the built product exactly as test/suite/ declares
 //   them. A Linux runner cannot discriminate a product emitting native path
 //   separators (`/` is native there); on Windows these same assertions do.
-//   T12.0-5's non-UTF-8 arm gates itself to the Linux leg inside the shared
-//   body ("less its Linux-leg arm", E-6), so no arm is skipped here — it is
-//   simply not part of this platform's staging.
+//   T12.0-5's Linux-leg arms — the non-UTF-8 argument value and the
+//   positive side of the backslash (`specs/a`, backslash, `b.mdx` and
+//   `src/a`, backslash, `b.ts`, names no Windows filesystem admits) — gate
+//   themselves to the Linux leg inside the shared body ("less its Linux-leg
+//   arms", E-6), so no arm is skipped here — they are simply not part of
+//   this platform's staging.
 //
 // - The four single-casing probes are the exact probe functions the
 //   registered bodies call on the suite leg, re-invoked here: each stages one

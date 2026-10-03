@@ -74,6 +74,16 @@
 //   invalid or missing) ahead of the `show`/`view` normalization negatives,
 //   so a product normalizing `./` or `//` spellings fails at those after
 //   the value-level arms have run.
+//   The positive side of the backslash (Linux leg, gated inside the body
+//   beside the non-UTF-8 arm, so the Windows leg reruns the entry and
+//   skips no arm, E-6) closes the body over two workspaces of its own,
+//   created after the first invocation, so every file they stage is a
+//   staged-source record (S-9): a code side — `occurrences --file` over
+//   `src/a`, backslash, `b.ts` beside `src/ab.ts`, after a `src/*.ts`
+//   control showing both discovered, each marking its node — and a spec
+//   side — `view` and `at … 0` over the invalid-path `specs/a`,
+//   backslash, `b.mdx`, pinned as T12.0-13 pins its `#` path (exactly
+//   the condition-19 finding; identities unavailable, ranges on view).
 // - T12.0-6 stages the two-casing tree (`specs/A.mdx` beside `specs/a.mdx`)
 //   on Linux only — such trees exist only on case-sensitive filesystems (the
 //   suite leg is Linux); the single-casing probe, tag, ID, and session-name
@@ -83,12 +93,21 @@
 import { Buffer } from "node:buffer";
 import {
   assertReportMentions,
+  decodeAtReport,
   decodeExportReport,
   decodeFindingsReport,
   decodeIdsReport,
   decodeNodeReport,
   decodeNodeRowsReport,
+  decodeOccurrencesReport,
   decodeReachableReport,
+  decodeViewReport,
+} from "../../helpers/adapters/index.js";
+import type {
+  Finding,
+  OccurrenceRecord,
+  SourceRange,
+  ViewNode,
 } from "../../helpers/adapters/index.js";
 import {
   assertBytesEqual,
@@ -108,6 +127,7 @@ import {
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
+import type { StagedTs } from "../../helpers/staged-ts.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { WorkspaceDecl } from "../../helpers/workspace.js";
 import {
@@ -1165,10 +1185,435 @@ const T12_0_5_MALFORMED_VALUES: readonly (readonly [
   ],
 ];
 
+// The positive side of the backslash (T12.0-5; SPEC 12.0, 7, 7.1). SPEC
+// 12.0: the backslash is an ordinary byte, no separator, so an argument
+// spelled with it names or matches only a discovered file of that very path
+// (1.5); SPEC 7: a glob supports exactly `*`, `?`, and `**`, every other
+// byte a literal, so the backslash in a `--file` pattern is never an escape.
+// Linux leg only, where a file name can hold the byte: E-6 reruns the whole
+// entry on Windows "less its Linux-leg arms" (no Windows filesystem admits
+// the staged names), so the body gates these arms itself, beside the
+// non-UTF-8 arm, and the Windows leg skips no arm. The backslash is built
+// from its code point (U+005C), never spelled as an escape in this source;
+// the record names spell it in words.
+const BACKSLASH = String.fromCharCode(0x5c);
+
+/** The 12.7 unavailability marker, as decoded (one-datum state). */
+const UNAVAILABLE = { unavailable: true } as const;
+
+// The spec side: a discovered spec-group file `specs/a`, backslash, `b.mdx`
+// — an invalid source path (condition 19: 7.1 bars the backslash from a
+// spec-group file's path, 14.19) whose content is condition-free (one
+// well-formed, unique id), so the path is the file's one defect. Prose
+// precedes the section, so offset 0 lies in no section and `at … 0`
+// resolves to the root construct. Every expected range is composed from
+// the same parts the staged file is.
+const BACKSLASH_SPEC_FILE = `specs/a${BACKSLASH}b.mdx`;
+const BACKSLASH_SPEC_PROSE = "Backslash-path prose.\n\n";
+const BACKSLASH_SPEC_SECTION = [
+  '<S id="pb">',
+  "Backslash-path text.",
+  "</S>",
+].join("\n");
+const BACKSLASH_SPEC_TEXT = `${BACKSLASH_SPEC_PROSE}${BACKSLASH_SPEC_SECTION}\n`;
+const BACKSLASH_SPEC_ROOT_RANGE: SourceRange = {
+  start: 0,
+  end: Buffer.byteLength(BACKSLASH_SPEC_TEXT, "utf8"),
+};
+const BACKSLASH_SPEC_SECTION_RANGE: SourceRange = {
+  start: Buffer.byteLength(BACKSLASH_SPEC_PROSE, "utf8"),
+  end: Buffer.byteLength(
+    `${BACKSLASH_SPEC_PROSE}${BACKSLASH_SPEC_SECTION}`,
+    "utf8",
+  ),
+};
+// Staged in a workspace the body creates after its first product
+// invocation: a staged-source record (S-9), beside SPECS_ONLY_CONFIG's.
+const BACKSLASH_SPEC_SOURCE = stagedMdx(
+  "T12.0-5 specs/a, a backslash, b.mdx (the positive side of the " +
+    "backslash, spec side: a discovered spec-group file at an invalid " +
+    "source path)",
+  BACKSLASH_SPEC_TEXT,
+);
+
+/**
+ * The asserted projection of a finding (SPEC 14, 12.7): its stable code,
+ * its in-source locations, and its concerned path — message and identities
+ * stay unpinned (informational).
+ */
+function projectPathFinding(finding: Finding): {
+  readonly code: string | null;
+  readonly locations: readonly unknown[];
+  readonly path: unknown;
+} {
+  return {
+    code: finding.code,
+    locations: finding.locations,
+    path: finding.path,
+  };
+}
+
+/** The condition-19 finding concerning the backslash-named spec file. */
+const BACKSLASH_SPEC_FINDING = {
+  code: "invalid-source-path",
+  locations: [],
+  path: BACKSLASH_SPEC_FILE,
+} as const;
+
+/** A view tree's identities and construct ranges, children in order. */
+interface IdentityTree {
+  readonly identity: ViewNode["identity"];
+  readonly range: SourceRange;
+  readonly children: readonly IdentityTree[];
+}
+
+function projectIdentityTree(node: ViewNode): IdentityTree {
+  return {
+    identity: node.identity,
+    range: node.range,
+    children: node.children.map(projectIdentityTree),
+  };
+}
+
+/**
+ * T12.0-5's spec-side positive arm (Linux leg): `view` and `at … 0` given
+ * the backslash-named discovered file name that very file — membership
+ * holds, never the unknown-file exit 2 of a product reading the backslash
+ * as a separator — its structure on view with every identity explicitly
+ * unavailable, and exactly its condition-19 finding accompanying: exit 1
+ * (SPEC 12.0, 11.4, 11.5, 11.2, 7.1, 14.19; T11.2-3, and T12.0-13 for `#`).
+ */
+async function expectBackslashSpecArms(product: ProductBinding): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": SPECS_ONLY_CONFIG,
+        [BACKSLASH_SPEC_FILE]: BACKSLASH_SPEC_SOURCE,
+      },
+    },
+    async (workspace) => {
+      const spelled = JSON.stringify(BACKSLASH_SPEC_FILE);
+      const viewContext =
+        `T12.0-5 \`view ${spelled}\` (the positive side of the backslash, ` +
+        `Linux leg; the operand JSON-spelled)`;
+      const viewResult = await runCli(product, workspace, [
+        "view",
+        BACKSLASH_SPEC_FILE,
+      ]);
+      assertExitCode(
+        viewResult,
+        1,
+        `${viewContext} — the operand names the discovered file of that ` +
+          `very path (the backslash an ordinary byte, no separator), so ` +
+          `membership holds — never the unknown-file exit 2 — and the ` +
+          `answer carries the file's condition-19 finding: exit 1 (SPEC ` +
+          `12.0, 11.4, 7.1, 14.19)`,
+      );
+      const viewReport = decodeViewReport(
+        parseJsonStdout(
+          viewResult,
+          `${viewContext} — a single JSON document is the only output ` +
+            `form (SPEC 11)`,
+        ),
+        { text: false },
+        viewContext,
+      );
+      assertSameJson(
+        viewReport.findings.map(projectPathFinding),
+        [BACKSLASH_SPEC_FINDING],
+        `${viewContext} — the consulted domain is the requested file ` +
+          `alone, so exactly its condition-19 finding accompanies: the ` +
+          `stable code "invalid-source-path", no in-source locations, the ` +
+          `file as its concerned path (SPEC 7.1, 14.19, 11.2, 11.4, 12.7)`,
+      );
+      assertSameJson(
+        viewReport.views.map((view) => view.file),
+        [BACKSLASH_SPEC_FILE],
+        `${viewContext} — exactly one per-file view, for the requested ` +
+          `path presented as spelled (SPEC 11.4, 12.0, 1.5)`,
+      );
+      assertSameJson(
+        projectIdentityTree(viewReport.views[0]!.root),
+        {
+          identity: UNAVAILABLE,
+          range: BACKSLASH_SPEC_ROOT_RANGE,
+          children: [
+            {
+              identity: UNAVAILABLE,
+              range: BACKSLASH_SPEC_SECTION_RANGE,
+              children: [],
+            },
+          ],
+        },
+        `${viewContext} — the invalid-path file keeps its positional tree ` +
+          `and construct ranges on view while every node identity, root ` +
+          `included, is explicitly unavailable (SPEC 11.2, 1.5)`,
+      );
+
+      const atContext =
+        `T12.0-5 \`at ${spelled} 0\` (the positive side of the ` +
+        `backslash, Linux leg; the operand JSON-spelled)`;
+      const atResult = await runCli(product, workspace, [
+        "at",
+        BACKSLASH_SPEC_FILE,
+        "0",
+      ]);
+      assertExitCode(
+        atResult,
+        1,
+        `${atContext} — the \`<file>\` operand names the discovered file ` +
+          `exactly as a view operand does — never the unknown-file exit 2 ` +
+          `— and the answer carries the file's condition-19 finding and an ` +
+          `unavailable identity: exit 1 (SPEC 12.0, 11.5, 7.1, 14.19)`,
+      );
+      const atReport = decodeAtReport(
+        parseJsonStdout(
+          atResult,
+          `${atContext} — a single JSON document is the only output form ` +
+            `(SPEC 11)`,
+        ),
+        atContext,
+      );
+      assertSameJson(
+        atReport.findings.map(projectPathFinding),
+        [BACKSLASH_SPEC_FINDING],
+        `${atContext} — the consulted domain is the named file alone: ` +
+          `exactly its condition-19 finding (SPEC 7.1, 14.19, 11.2, 11.5)`,
+      );
+      assertSameJson(
+        atReport.resolution,
+        {
+          section: {
+            identity: UNAVAILABLE,
+            range: BACKSLASH_SPEC_ROOT_RANGE,
+          },
+          occurrence: null,
+        },
+        `${atContext} — offset 0 (prose) resolves to the root construct, ` +
+          `its identity explicitly unavailable, within no occurrence ` +
+          `(SPEC 11.5, 11.2)`,
+      );
+    },
+  );
+}
+
+// The code side: two valid code sources — `src/a`, backslash, `b.ts` (a
+// code source's path may hold the byte: 14.19 bars it from spec-group
+// paths alone) and its sibling `src/ab.ts` — each marking its own node of
+// `specs/A.mdx` from its own function unit, so every occurrence record
+// individuates its file. Under the pattern `src/a`, backslash, `*.ts` the
+// backslash is a literal byte (SPEC 7), matching the first file alone; a
+// product reading it as an escape of `*` matches neither file (the
+// configured-glob twin is T7-4's literal-backslash arm), and one reading the
+// path operand's backslash as an escape or a separator lists the sibling's
+// occurrence or none. All four files are staged in a workspace the body
+// creates after its first product invocation: staged-source records (S-9).
+const BACKSLASH_CODE_FILE = `src/a${BACKSLASH}b.ts`;
+const BACKSLASH_CODE_SIBLING = "src/ab.ts";
+const BACKSLASH_CODE_PATTERN = `src/a${BACKSLASH}*.ts`;
+const BACKSLASH_CODE_SPEC_FILE = "specs/A.mdx";
+const BACKSLASH_CODE_CONFIG = stagedTs(
+  "T12.0-5 xspec.config.ts (the positive side of the backslash, code " +
+    "side: one spec group and one code group)",
+  `import { defineConfig } from "xspec"
+
+export default defineConfig({
+  specs: {
+    main: ["specs/**/*.mdx"]
+  },
+  code: {
+    app: ["src/**/*.ts"]
+  }
+})
+`,
+);
+const BACKSLASH_CODE_SPEC = stagedMdx(
+  "T12.0-5 specs/A.mdx (the positive side of the backslash, code side: " +
+    "the two marked nodes)",
+  [
+    '<S id="alpha">',
+    "Alpha text.",
+    "</S>",
+    "",
+    '<S id="omega">',
+    "Omega text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+const BACKSLASH_CODE_SOURCES: Readonly<Record<string, StagedTs>> = {
+  [BACKSLASH_CODE_FILE]: stagedTs(
+    "T12.0-5 src/a, a backslash, b.ts (the positive side of the " +
+      "backslash, code side: the backslash-named code source, marking " +
+      "alpha)",
+    [
+      'import SPEC from "../specs/A.xspec";',
+      "",
+      "export function inBackslash(): void {",
+      "  SPEC.alpha;",
+      "}",
+      "",
+    ].join("\n"),
+  ),
+  [BACKSLASH_CODE_SIBLING]: stagedTs(
+    "T12.0-5 src/ab.ts (the positive side of the backslash, code side: " +
+      "the sibling, marking omega)",
+    [
+      'import SPEC from "../specs/A.xspec";',
+      "",
+      "export function inSibling(): void {",
+      "  SPEC.omega;",
+      "}",
+      "",
+    ].join("\n"),
+  ),
+};
+
+/** An occurrence record's individuating tuple (SPEC 12.7, 5.7). */
+interface OccurrenceTuple {
+  readonly file: unknown;
+  readonly kind: string;
+  readonly source: unknown;
+  readonly target: string;
+}
+
+function projectOccurrence(record: OccurrenceRecord): OccurrenceTuple {
+  return {
+    file: record.file,
+    kind: record.kind,
+    source:
+      "identity" in record.source ? record.source.identity : record.source,
+    target: record.target,
+  };
+}
+
+/** The first file's one occurrence: its marker of `alpha`. */
+const BACKSLASH_CODE_OCCURRENCE: OccurrenceTuple = {
+  file: BACKSLASH_CODE_FILE,
+  kind: "references",
+  source: `${BACKSLASH_CODE_FILE}#inBackslash`,
+  target: `${BACKSLASH_CODE_SPEC_FILE}#alpha`,
+};
+
+/** The sibling's one occurrence: its marker of `omega`. */
+const BACKSLASH_SIBLING_OCCURRENCE: OccurrenceTuple = {
+  file: BACKSLASH_CODE_SIBLING,
+  kind: "references",
+  source: `${BACKSLASH_CODE_SIBLING}#inSibling`,
+  target: `${BACKSLASH_CODE_SPEC_FILE}#omega`,
+};
+
+/** Tuples as a bytewise-sorted multiset (membership, not 5.7's order). */
+function sortedTuples(tuples: readonly OccurrenceTuple[]): string[] {
+  return tuples.map((tuple) => JSON.stringify(tuple)).sort();
+}
+
+/**
+ * `occurrences --file <pattern>` over the valid code-side workspace: exit
+ * 0, a finding-free answer (the admitted files are valid sources), and the
+ * records' individuating tuples (SPEC 11.3, 12.7).
+ */
+async function backslashOccurrences(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  pattern: string,
+  context: string,
+): Promise<OccurrenceTuple[]> {
+  const result = await runCli(product, workspace, [
+    "occurrences",
+    "--file",
+    pattern,
+  ]);
+  assertExitCode(
+    result,
+    0,
+    `${context} — the workspace is valid and the admitted files are ` +
+      `valid sources: a finding-free answer, exit 0 (SPEC 11.3)`,
+  );
+  const report = decodeOccurrencesReport(
+    parseJsonStdout(
+      result,
+      `${context} — a single JSON document is the only output form ` +
+        `(SPEC 11)`,
+    ),
+    context,
+  );
+  assertSameJson(
+    report.findings.map(projectPathFinding),
+    [],
+    `${context} — no finding accompanies: both code sources are valid ` +
+      `(a code source's path may hold the backslash, SPEC 14.19, 7.2)`,
+  );
+  return report.occurrences.map(projectOccurrence);
+}
+
+/**
+ * T12.0-5's code-side positive arm (Linux leg): `occurrences --file` given
+ * the first file's path, and given the pattern `src/a`, backslash, `*.ts`,
+ * lists the first file's occurrence alone (SPEC 12.0, 7, 11.3) — after the
+ * control `src/*.ts` shows both files discovered, each marking its node,
+ * so "alone" is attributable to the spelling.
+ */
+async function expectBackslashCodeArms(product: ProductBinding): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": BACKSLASH_CODE_CONFIG,
+        [BACKSLASH_CODE_SPEC_FILE]: BACKSLASH_CODE_SPEC,
+        ...BACKSLASH_CODE_SOURCES,
+      },
+    },
+    async (workspace) => {
+      const controlContext =
+        "T12.0-5 `occurrences --file src/*.ts` (the positive side of the " +
+        "backslash, Linux leg: the staging control)";
+      assertSameJson(
+        sortedTuples(
+          await backslashOccurrences(
+            product,
+            workspace,
+            "src/*.ts",
+            controlContext,
+          ),
+        ),
+        sortedTuples([BACKSLASH_CODE_OCCURRENCE, BACKSLASH_SIBLING_OCCURRENCE]),
+        `${controlContext} — both code sources are discovered, each ` +
+          `marking its own node, so the arms below discriminate by ` +
+          `spelling alone (records compared as a sorted multiset; SPEC ` +
+          `11.3, 4.5, 4.6)`,
+      );
+      const arms: readonly (readonly [string, string])[] = [
+        [
+          BACKSLASH_CODE_FILE,
+          "the first file's path — the backslash an ordinary byte, no " +
+            "separator, and no escape of the `b` after it (SPEC 12.0, 7)",
+        ],
+        [
+          BACKSLASH_CODE_PATTERN,
+          "the pattern src/a, a backslash, *.ts — the backslash a literal " +
+            "byte of the pattern, never an escape of `*`: a product " +
+            "reading it as one matches neither file (SPEC 7, 12.0)",
+        ],
+      ];
+      for (const [pattern, what] of arms) {
+        const context =
+          `T12.0-5 \`occurrences --file ${JSON.stringify(pattern)}\` (the ` +
+          `positive side of the backslash, Linux leg; the pattern ` +
+          `JSON-spelled)`;
+        assertSameJson(
+          await backslashOccurrences(product, workspace, pattern, context),
+          [BACKSLASH_CODE_OCCURRENCE],
+          `${context} — ${what}: the first file's occurrence alone`,
+        );
+      }
+    },
+  );
+}
+
 const T12_0_5 = defineProductTest({
   id: "T12.0-5",
   title:
-    "argument addressing: `<node>`, `<graph-node>`, and `<file>` arguments and `--file` globs are workspace-relative with `/` separators, independent of the working directory (representative commands run from a subdirectory), while `--test-hold <path>` resolves against the working directory; native-separator and normalization negatives — an argument spelled with `\\` (`specs\\A.mdx`), with a `.` segment (`./specs/A.mdx`), or with an empty segment (`specs//A.mdx`) is read as spelled and compared byte-wise, so it names no workspace file: an unknown-file usage error, exit 2, on `show` and `view` as representatives (the `\\` arm discriminating on the Windows leg, E-6); malformed values — an argument value that is not valid UTF-8 (raw bytes in the OS argument vector, Linux leg) and an argument value containing U+FFFD in every position (a `<node>`, a `<file>` operand, a `--file` glob, a `--tag`, a `--to`, a `<new-id>` — never `refused-invalid-id` — a session name, a `--note` text, a `--base` ref, a `--config` path, and a `--test-hold` path) — are usage errors of the syntax class: exit 2 with the plain usage error's document (`code` null), reported without loading configuration — byte-identical with the configuration file invalid or missing (T12.0-10's discipline) — and modifying nothing (SPEC 12.0, 12.7, 13.5, 6.4, 1.5)",
+    "argument addressing: `<node>`, `<graph-node>`, and `<file>` arguments and `--file` globs are workspace-relative with `/` separators, independent of the working directory (representative commands run from a subdirectory), while `--test-hold <path>` resolves against the working directory; native-separator and normalization negatives — an argument spelled with `\\` (`specs\\A.mdx`), with a `.` segment (`./specs/A.mdx`), or with an empty segment (`specs//A.mdx`) is read as spelled and compared byte-wise, so it names no workspace file: an unknown-file usage error, exit 2, on `show` and `view` as representatives (the `\\` arm discriminating on the Windows leg, E-6); the positive side of the backslash (Linux leg, gated inside the body, E-6) — with a discovered spec-group file `specs/a`, backslash, `b.mdx` staged (an invalid source path, condition 19), `view` and `at … 0` name that very file: membership holds, every node identity unavailable, exit 1 with exactly its condition-19 finding, never the unknown-file exit 2; with valid code sources `src/a`, backslash, `b.ts` and `src/ab.ts` each marking a node (both discovered, the `src/*.ts` control), `occurrences --file` given the first file's path or the pattern `src/a`, backslash, `*.ts` lists the first file's occurrence alone — the backslash an ordinary byte, never a separator or an escape; malformed values — an argument value that is not valid UTF-8 (raw bytes in the OS argument vector, Linux leg) and an argument value containing U+FFFD in every position (a `<node>`, a `<file>` operand, a `--file` glob, a `--tag`, a `--to`, a `<new-id>` — never `refused-invalid-id` — a session name, a `--note` text, a `--base` ref, a `--config` path, and a `--test-hold` path) — are usage errors of the syntax class: exit 2 with the plain usage error's document (`code` null), reported without loading configuration — byte-identical with the configuration file invalid or missing (T12.0-10's discipline) — and modifying nothing (SPEC 12.0, 12.7, 13.5, 6.4, 1.5, 7, 7.1, 11.3, 11.4, 11.5, 14.19)",
   run: async (product) => {
     await withWorkspace(
       {
@@ -1392,6 +1837,16 @@ const T12_0_5 = defineProductTest({
         }
       },
     );
+
+    // The positive side of the backslash (SPEC 12.0, 7, 7.1) — Linux leg
+    // only, where a file name can hold the byte: gated here inside the
+    // shared body, as the non-UTF-8 arm is, so the Windows leg (E-6: "less
+    // its Linux-leg arms") reruns the whole entry and skips no arm. Each
+    // side stages its own workspace.
+    if (process.platform === "linux") {
+      await expectBackslashCodeArms(product);
+      await expectBackslashSpecArms(product);
+    }
   },
 });
 
