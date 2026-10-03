@@ -60,7 +60,7 @@ Why the harness changed in this re-descent: the documents moved after the harnes
 **Order.** Tasks are in dependency order, and each names what it depends on:
 - Part A (Task 1, the certification gap D1): done and removed.
 - Part B (harness machinery): done and removed. Tasks 3 and 4 gave S-9's MDX judgement spec-group files not named `.mdx` — Task 3 the mechanism (`mdx.wellFormed` and the other `mdx` lists, the `file()` `mdx` option, or an MDX record at the path declare such a file an MDX source; module header of `test/helpers/workspace.ts`), Task 4 the declarations of the suite's three such files (T7.1-1's `specs/notes.txt` and T11.6-2's `specs/note.txt` as staged-source records, T11.6-4's under `mdx.wellFormed`). Task 2 (P-8's and P-11's capture-limit errors) and Task 2b, split from it (every other conversion of a driver rejection), are done and removed: H-11's capture-limit errors.
-- Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order. Task 5 (T4.3-2's seven dynamic node-form arms each run `occurrences` on the failing workspace and assert no record) is done and removed.
+- Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order. Task 5 (T4.3-2's seven dynamic node-form arms each run `occurrences` on the failing workspace and assert no record) is done and removed. Task 6 (every T4.5-3 arm runs `occurrences --file src/app.ts` on its failing workspace and asserts no record, through `assertArmFailsWith`'s opt-in `noOccurrence` option, which T4.5-5 does not pass) is done and removed.
 - Part D (Tasks 10–13): P-8's command sweep.
 - Task 14 confirms the result and deletes the plan.
 
@@ -69,30 +69,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 ## Tasks
 
 ### Part C — The T-numbered tests
-
-### Task 6 — T4.5-3: every arm records no occurrence (A2(a); TEST-SPEC §4.5 T4.5-3, L183; SPEC 4.5, 5.7, 11.2, 11.3)
-
-**Depends on.** Nothing.
-
-**The requirement.** TEST-SPEC L183: "A non-static bare reference in expression-statement position fails with 14.8 …, located as the statement's expression exclusive of its terminator (T14-11), no edge and no occurrence". `T4_5_3` (about L976) runs each arm through `assertArmFailsWith` (about L364), which checks only the condition count and the location.
-
-**Where.** `test/suite/registry/section-4.5.ts`:
-- `T4_5_3_ARMS`, `T4_5_3_STAGINGS`, and `T4_5_3` (about L870–985);
-- `assertArmFailsWith`, which T4.5-5 shares (about L1469, with 14.18);
-- T4.5-8's `occurrences --file src/app.ts` check (about L2016–2050) as the pattern.
-
-**Change.**
-- In every T4.5-3 arm, after the `build --json` assertions, run `occurrences --file src/app.ts` on the same failing workspace. Assert:
-  - exit 1, the full answer emitted (11.2);
-  - findings exactly `{"14.8": 1}`, located as `build`'s;
-  - an empty record list.
-  This covers every arm, the harness's extra arms included (`SPEC.a?.b;`, `SPEC.a!.b;`, `(SPEC.a).b;`): each is a non-static bare reference in expression-statement position, and the clause attaches to all such references.
-- Scope the change to T4.5-3: T4.5-5's 14.18 arms have no such clause in TEST-SPEC. Use a T4.5-3-only wrapper or an opt-in parameter; T4.5-5's behavior stays byte-for-byte the same.
-- Extend the title to state the no-edge, no-occurrence check.
-
-**Checks.**
-- T4.5-3 and T4.5-5 against the built product: record both outcomes; both passed at 44c5dad.
-- A red check through the stand-in wrapper: a record injected into one arm's `occurrences` answer makes T4.5-3 fail diagnosed.
 
 ### Task 7 — T4.5-3: add TEST-SPEC's optional-chaining spelling `SPEC?.a;` (A2(b); TEST-SPEC §4.5 T4.5-3, L183; SPEC 2.4, 4.5, 14.8)
 

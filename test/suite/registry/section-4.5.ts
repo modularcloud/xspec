@@ -48,6 +48,17 @@
 //   and the exact count {"14.8": 1} excludes it. The angle-bracket form
 //   parses only as plain TypeScript, which the `.ts` file name selects (SPEC
 //   2.4, 14.20).
+// - T4.5-3's "no edge and no occurrence" attaches to every arm, the
+//   harness's extra spellings included: each is a non-static bare reference
+//   in expression-statement position. `query edges` refuses to answer on
+//   the failing workspace (13.3), so the occurrence record is the edge's
+//   witness (SPEC 5.7, 11.2), as in T4.5-4, T4.5-8, and T4.5-9: after each
+//   arm's `build`, `occurrences --file src/app.ts` on the same workspace
+//   must exit 1 with its full answer emitted, its findings exactly
+//   {"14.8": 1}, that finding located in the offending statement's byte
+//   window as `build`'s is, and its record list empty (SPEC 11.2, 11.3).
+//   The check is T4.5-3's alone (`assertArmFailsWith`'s `noOccurrence`
+//   option): TEST-SPEC gives T4.5-5's 14.18 arms no such clause.
 // - T4.5-5 arms likewise stage exactly one unsanctioned value-level use
 //   each; the exact condition-count assertion {"14.18": 1} pins the
 //   classification (SPEC 4.5, 14.18).
@@ -359,13 +370,18 @@ function stageOffendingStatements(
  * the arm names its own — and assert `build --json` reports exactly one
  * finding of `condition`, located within the offending statement's byte
  * window. The exact condition-count assertion is simultaneously the
- * classification assertion (14.8 vs 14.18, SPEC 4.5).
+ * classification assertion (14.8 vs 14.18, SPEC 4.5). With `noOccurrence`
+ * (T4.5-3's "no edge and no occurrence"; T4.5-5 passes no options, its
+ * 14.18 arms carrying no such clause), `occurrences --file src/app.ts` on
+ * the same failing workspace must then list no record
+ * (`assertArmRecordsNoOccurrence`).
  */
 async function assertArmFailsWith(
   product: ProductBinding,
   testId: string,
   { arm, staged }: OffendingStatementStaging,
   condition: string,
+  options: { readonly noOccurrence?: boolean } = {},
 ): Promise<void> {
   const { source, window } = staged;
   const context = `${testId} \`build --json\` over ${arm.name}`;
@@ -380,7 +396,70 @@ async function assertArmFailsWith(
         { file: "src/app.ts", window },
         `${context}: the ${condition} finding`,
       );
+      if (options.noOccurrence === true) {
+        await assertArmRecordsNoOccurrence(
+          product,
+          workspace,
+          `${testId} \`occurrences --file src/app.ts\` over ${arm.name}`,
+          window,
+          condition,
+        );
+      }
     },
+  );
+}
+
+/**
+ * An arm's "no edge and no occurrence" on its failing workspace (T4.5-3).
+ * `query edges` refuses to answer there (SPEC 13.3), so the occurrence
+ * record is the edge's witness (5.7, 11.2): `occurrences --file src/app.ts`
+ * answers from the current sources, so it exits 1 with its full answer
+ * emitted, the code file's one finding — the one `condition` finding
+ * `build` reported, located in the offending statement's byte window as
+ * `build`'s is — accompanying it, and lists no record: a dynamic reference
+ * spelling records no edge and no occurrence (SPEC 4.5, 5.7, 11.2, 11.3).
+ */
+async function assertArmRecordsNoOccurrence(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+  window: { readonly start: number; readonly end: number },
+  condition: string,
+): Promise<void> {
+  const result = await expectExit(
+    product,
+    workspace,
+    ["occurrences", "--file", "src/app.ts"],
+    1,
+    `${context} — the answer carries the code file's finding, so exit 1 ` +
+      `with the full answer document (SPEC 11.2, 11.3)`,
+  );
+  const report = decodeOccurrencesReport(
+    parseJsonStdout(
+      result,
+      `${context} — a single JSON document is the only output form (SPEC 11)`,
+    ),
+    context,
+  );
+  assertConditionCounts(
+    report.findings,
+    { [condition]: 1 },
+    `${context}: the code file's one finding accompanies the answer, none ` +
+      `beside it (SPEC 11.2, 11.3)`,
+  );
+  assertFindingLocated(
+    report.findings[0]!,
+    { file: "src/app.ts", window },
+    `${context}: the accompanying ${condition} finding, located as ` +
+      `\`build\`'s is (SPEC 11.2, 14)`,
+  );
+  assertSameJson(
+    report.occurrences.map(occurrenceTuple),
+    [],
+    `${context}: no record — a non-static bare reference in ` +
+      `expression-statement position records no edge and no occurrence, ` +
+      `its position reported by its finding's range alone (SPEC 4.5, 5.7, ` +
+      `11.2; TEST-SPEC T4.5-3)`,
   );
 }
 
@@ -976,10 +1055,12 @@ const T4_5_3_STAGINGS = stageOffendingStatements("T4.5-3", T4_5_3_ARMS);
 const T4_5_3 = defineProductTest({
   id: "T4.5-3",
   title:
-    "a non-static bare reference in expression-statement position — computed index by variable, optional chaining, non-null assertion, parentheses, template-literal index (`` SPEC[`login-v2`]; ``, the module holding `login-v2`: template literals are not static), and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`SPEC.a as X;`, `<X>SPEC.a;` in a `.ts` file, `SPEC.a satisfies X;`) — fails with exactly one located 14.8 finding (invalid argument, not 14.18), the file well-formed (SPEC 4.5, 2.4, 14.8)",
+    "a non-static bare reference in expression-statement position — computed index by variable, optional chaining, non-null assertion, parentheses, template-literal index (`` SPEC[`login-v2`]; ``, the module holding `login-v2`: template literals are not static), and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`SPEC.a as X;`, `<X>SPEC.a;` in a `.ts` file, `SPEC.a satisfies X;`) — fails with exactly one located 14.8 finding (invalid argument, not 14.18), the file well-formed, with no edge and no occurrence: `occurrences --file src/app.ts` on the failing workspace exits 1 with its full answer, the one 14.8 finding accompanying it located as `build`'s is, and lists no record (SPEC 4.5, 2.4, 5.7, 11.2, 11.3, 14.8)",
   run: async (product) => {
     for (const staging of T4_5_3_STAGINGS) {
-      await assertArmFailsWith(product, "T4.5-3", staging, "14.8");
+      await assertArmFailsWith(product, "T4.5-3", staging, "14.8", {
+        noOccurrence: true,
+      });
     }
   },
 });
