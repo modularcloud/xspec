@@ -274,6 +274,7 @@ import type {
 import {
   pathExists,
   releaseHoldFile,
+  rethrowOutputOverflow,
   runProduct,
   startProduct,
 } from "../../helpers/subprocess.js";
@@ -1406,6 +1407,7 @@ const T6_6_3 = defineProductTest({
         try {
           result1 = await running.waitForExit();
         } catch (error) {
+          rethrowOutputOverflow(error);
           return fail(
             `${context1}: command 1 must complete normally once the hold ` +
               `file is deleted (SPEC 13.5) — ` +

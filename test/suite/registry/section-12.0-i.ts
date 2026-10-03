@@ -121,6 +121,7 @@ import type { ProductTestEntry } from "../../helpers/registry.js";
 import type { ProductBinding, RunResult } from "../../helpers/subprocess.js";
 import {
   releaseHoldFile,
+  rethrowOutputOverflow,
   runProduct,
   startProduct,
 } from "../../helpers/subprocess.js";
@@ -1808,6 +1809,7 @@ const T12_0_5 = defineProductTest({
           try {
             await running.waitForFile(holdAbs);
           } catch (error) {
+            rethrowOutputOverflow(error);
             fail(
               `${holdContext}: --test-hold <path> is a filesystem path ` +
                 `resolved against the working directory, so the hold file ` +

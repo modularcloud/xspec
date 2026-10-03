@@ -20,7 +20,10 @@
 //   executable or working directory is a diagnosed per-test failure, not a
 //   harness crash; runaway output is capped and killed, surfacing as a loud
 //   `ProductRunOutputOverflowError` — an exhausted capture limit is a
-//   harness error, never a silent truncation (H-11).
+//   harness error, never a silent truncation (H-11). Every helper that
+//   converts a run's rejection into a diagnosed failure lets that error
+//   through unchanged (`rethrowOutputOverflow`), the driver's own
+//   `waitForFile` included.
 // - 13.5 support: background start (`startProduct`), hold-file choreography
 //   (`createHoldFile` / `RunningProduct.waitForFile` / `releaseHoldFile`),
 //   process kill, and concurrent invocations (every run is independent).
@@ -129,16 +132,29 @@ export class ProductRunTimeoutError extends Error {
  * answer scale (`DEFAULT_MAX_OUTPUT_BYTES`), so exhausting it is a loud
  * harness error — never a silent truncation, which is indistinguishable
  * from a partial document, and never a diagnosed product failure (H-11).
- * Typed so S-8 can pin that an exhausted cap fails loudly, and so the
+ * Typed so S-8 can pin that an exhausted cap fails loudly, so the
  * termination properties (P-8, P-11), which convert exactly the hang-guard
  * kill ({@link ProductRunTimeoutError}) into a diagnosed failure, tell the
- * two kills apart.
+ * two kills apart, and so every other helper converting a run's rejection
+ * lets this one through ({@link rethrowOutputOverflow}).
  */
 export class ProductRunOutputOverflowError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ProductRunOutputOverflowError";
   }
+}
+
+/**
+ * H-11 at a conversion of a driver rejection: rethrow `error` unchanged when
+ * the capture limit killed the run ({@link ProductRunOutputOverflowError}),
+ * and return otherwise. A helper that turns a rejected run — the hang-guard
+ * kill, a premature exit, a spawn failure — into a diagnosed failure (H-8)
+ * calls it first, so an exhausted capture limit always surfaces as the
+ * harness error it is, never as a diagnosed product failure.
+ */
+export function rethrowOutputOverflow(error: unknown): void {
+  if (error instanceof ProductRunOutputOverflowError) throw error;
 }
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
@@ -181,6 +197,16 @@ export interface RunOptions {
   /** Runaway-output guard (combined stdout+stderr bytes). */
   readonly maxOutputBytes?: number;
 }
+
+/**
+ * The driver's two guards — the hang guard and the capture limit — as a
+ * helper that runs a command for registered bodies takes them, each
+ * defaulting to that helper's own bound. Registered bodies never pass them;
+ * S-8 lowers them against stand-ins to pin which kill such a helper turns
+ * into a diagnosed failure (the hang guard's) and which propagates as a
+ * harness error (the capture limit's, H-11).
+ */
+export type RunGuards = Pick<RunOptions, "timeoutMs" | "maxOutputBytes">;
 
 export interface RunResult {
   /** Exit code, or null when the process died by signal. */
@@ -298,8 +324,9 @@ export async function runProduct(
 
 /**
  * A started invocation. `waitForExit` resolves with the run result (normal
- * exits and requested kills alike) and rejects, diagnosed, on timeout, output
- * overflow, spawn failure, or a performed move's breach of T6.5-22(a).
+ * exits and requested kills alike) and rejects, diagnosed, on timeout,
+ * spawn failure, or a performed move's breach of T6.5-22(a) — and with the
+ * harness error `ProductRunOutputOverflowError` on output overflow (H-11).
  */
 export class RunningProduct {
   readonly commandLine: string;
@@ -307,6 +334,8 @@ export class RunningProduct {
   readonly #child: ChildProcess;
   readonly #exit: Promise<RunResult>;
   #settled = false;
+  /** The capture limit killed the child (its exit may not be seen yet). */
+  #overflowed = false;
 
   /** @internal — obtain instances via `startProduct`. */
   constructor(
@@ -322,14 +351,13 @@ export class RunningProduct {
     const stdoutChunks: Buffer[] = [];
     const stderrChunks: Buffer[] = [];
     let totalBytes = 0;
-    let overflowed = false;
     let timedOut = false;
 
     const capture = (sink: Buffer[]) => (chunk: Buffer) => {
       sink.push(chunk);
       totalBytes += chunk.length;
-      if (totalBytes > maxOutputBytes && !overflowed) {
-        overflowed = true;
+      if (totalBytes > maxOutputBytes && !this.#overflowed) {
+        this.#overflowed = true;
         child.kill("SIGKILL");
       }
     };
@@ -337,6 +365,9 @@ export class RunningProduct {
     child.stderr?.on("data", capture(stderrChunks));
 
     const timer = setTimeout(() => {
+      // The capture limit's kill came first: the run settles as that
+      // harness error (H-11), never relabelled a hang.
+      if (this.#overflowed) return;
       timedOut = true;
       child.kill("SIGKILL");
     }, timeoutMs);
@@ -369,7 +400,7 @@ export class RunningProduct {
             );
             return;
           }
-          if (overflowed) {
+          if (this.#overflowed) {
             reject(
               new ProductRunOutputOverflowError(
                 `${commandLine} exceeded the output limit of ${maxOutputBytes} bytes and was killed: an exhausted capture limit is a harness error, never a silent truncation (H-11).`,
@@ -421,7 +452,8 @@ export class RunningProduct {
 
   /**
    * The run's outcome. Resolves for normal exits and requested kills; rejects
-   * with a diagnosed error on timeout, output overflow, or spawn failure, and
+   * with a diagnosed error on timeout or spawn failure, with the harness
+   * error `ProductRunOutputOverflowError` on output overflow (H-11), and
    * with a diagnosed assertion failure when a performed move exiting 0 added
    * an import T6.5-22(a) rejects. Callable any number of times.
    */
@@ -434,7 +466,10 @@ export class RunningProduct {
    * SPEC.md 13.5 (`--test-hold`). Fails diagnosed, never hangs (H-8): rejects
    * when the process exits first without creating it (the red-green path for
    * stub products, carrying the run outcome), and on timeout while the
-   * process is still running.
+   * process is still running. A run the capture limit killed rejects with
+   * that `ProductRunOutputOverflowError` itself, never folded into the
+   * premature-exit error: an exhausted capture limit is a harness error
+   * (H-11).
    */
   async waitForFile(
     absPath: string,
@@ -448,11 +483,15 @@ export class RunningProduct {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       if (await pathExists(absPath)) return;
-      if (this.hasExited()) {
+      // A capture-limit kill counts as the exit at once: the run settles
+      // with that error, which propagates as itself (H-11).
+      if (this.hasExited() || this.#overflowed) {
         const outcome = await this.#exit.then(
           summarizeResult,
-          (error: unknown) =>
-            error instanceof Error ? error.message : String(error),
+          (error: unknown) => {
+            rethrowOutputOverflow(error);
+            return error instanceof Error ? error.message : String(error);
+          },
         );
         throw new Error(
           `${this.commandLine} exited before creating ${absPath} — ${outcome}`,

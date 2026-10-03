@@ -82,7 +82,8 @@
 //   invocation is wrapped so a failure to complete — a discovery hang on the
 //   staged symlink cycle, killed by the subprocess driver's timeout (H-8) —
 //   is reported as a diagnosed assertion failure: nontermination is exactly
-//   the product defect that arm tests (SPEC 7).
+//   the product defect that arm tests (SPEC 7). An exhausted capture limit
+//   is never so converted: it propagates as a harness error (H-11).
 // - 14.14 contract: `expectConfigurationError` (shared, ./support.ts).
 // - Staged-source records (TEST-SPEC S-9's before-any-product clause;
 //   helpers/staged-mdx.ts): every `.mdx` file a body stages in a workspace
@@ -133,7 +134,11 @@ import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { stagedMdx } from "../../helpers/staged-mdx.js";
 import type { StagedMdx } from "../../helpers/staged-mdx.js";
 import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
-import { runProduct, summarizeResult } from "../../helpers/subprocess.js";
+import {
+  rethrowOutputOverflow,
+  runProduct,
+  summarizeResult,
+} from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type {
   InitialFileContents,
@@ -1069,18 +1074,21 @@ const T7_5 = defineProductTest({
         const result: RunResult = await runProduct(product, {
           cwd: workspace.root,
           argv: ["ids", "--json"],
-        }).catch((error: unknown) =>
+        }).catch((error: unknown) => {
           // Module header: a run that fails to complete — the staged symlink
           // cycle hanging discovery until the subprocess driver kills it —
-          // is the tested defect, diagnosed here (SPEC 7; H-8).
-          fail(
+          // is the tested defect, diagnosed here (SPEC 7; H-8). An exhausted
+          // capture limit is never converted: it propagates as the harness
+          // error it is (H-11).
+          rethrowOutputOverflow(error);
+          return fail(
             `${context}: discovery must terminate without following ` +
               `symbolic links — in particular, the staged symlink cycle ` +
               `(cyc/self -> .) must not hang it (SPEC 7); the invocation ` +
               `did not complete: ` +
               (error instanceof Error ? error.message : String(error)),
-          ),
-        );
+          );
+        });
         assertExitCode(
           result,
           0,

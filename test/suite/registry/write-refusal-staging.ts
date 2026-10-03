@@ -76,11 +76,13 @@ import { stagedMdx } from "../../helpers/staged-mdx.js";
 import { stagedTs } from "../../helpers/staged-ts.js";
 import type {
   ProductBinding,
+  RunGuards,
   RunningProduct,
   RunResult,
 } from "../../helpers/subprocess.js";
 import {
   releaseHoldFile,
+  rethrowOutputOverflow,
   runProduct,
   startProduct,
   summarizeResult,
@@ -116,7 +118,9 @@ export function holdPathFor(workspace: TestWorkspace, name: string): string {
 /**
  * Await the hold file's appearance, converting the driver's diagnosed
  * rejection (the process exited first, or the wait timed out) into a
- * diagnosed assertion failure (H-8).
+ * diagnosed assertion failure (H-8). A run the capture limit killed is never
+ * converted: its `ProductRunOutputOverflowError` propagates as the harness
+ * error it is (H-11).
  */
 export async function awaitHoldFile(
   running: RunningProduct,
@@ -126,6 +130,7 @@ export async function awaitHoldFile(
   try {
     await running.waitForFile(absPath);
   } catch (error) {
+    rethrowOutputOverflow(error);
     fail(
       `${context}: the mutating command must create the hold file at ` +
         `${absPath} immediately after acquiring workspace exclusivity and ` +
@@ -642,21 +647,26 @@ export function refusalUnder(rel: string): StagingApplier {
 /**
  * Run a command to completion under a hang guard (never an assertion input,
  * H-10), converting a rejection — a product that blocks or hangs, killed at
- * the bound — into a diagnosed failure (H-8).
+ * the bound — into a diagnosed failure (H-8). An exhausted capture limit is
+ * never converted: it propagates as the harness error it is (H-11).
+ * `guards` lower the bound or the capture limit for S-8's vector alone.
  */
 export async function runSettled(
   product: ProductBinding,
   workspace: TestWorkspace,
   argv: readonly string[],
   context: string,
+  guards: RunGuards = {},
 ): Promise<RunResult> {
   try {
     return await runProduct(product, {
       cwd: workspace.root,
       argv,
-      timeoutMs: 30_000,
+      timeoutMs: guards.timeoutMs ?? 30_000,
+      maxOutputBytes: guards.maxOutputBytes,
     });
   } catch (error) {
+    rethrowOutputOverflow(error);
     return fail(
       `${context}: the command must terminate on its own rather than block ` +
         `or hang (SPEC 12.0; H-8: hangs become diagnosed failures) — ` +
@@ -669,7 +679,10 @@ export async function runSettled(
  * Start `argv` under `--test-hold`, wait for the hold (loud when absent),
  * apply the staging at the seam, release the hold, and wait for the exit.
  * The staging is restored, the hold released, and the process killed
- * whatever happens (a `HarnessStagingError` from `apply` included).
+ * whatever happens (a `HarnessStagingError` from `apply` included). A
+ * rejected run fails diagnosed (H-8), except an exhausted capture limit,
+ * which propagates as the harness error it is (H-11). `guards` lower the
+ * hang guard or the capture limit for S-8's vector alone.
  */
 export async function runHeldWithStaging(
   product: ProductBinding,
@@ -678,11 +691,14 @@ export async function runHeldWithStaging(
   holdName: string,
   apply: StagingApplier,
   context: string,
+  guards: RunGuards = {},
 ): Promise<RunResult> {
   const hold = holdPathFor(workspace, holdName);
   const running = await startProduct(product, {
     cwd: workspace.root,
     argv: [...argv, "--test-hold", hold],
+    timeoutMs: guards.timeoutMs,
+    maxOutputBytes: guards.maxOutputBytes,
   });
   let staging: PermissionStaging | undefined;
   try {
@@ -692,6 +708,7 @@ export async function runHeldWithStaging(
     try {
       return await running.waitForExit();
     } catch (error) {
+      rethrowOutputOverflow(error);
       return fail(
         `${context}: once the hold file is deleted the command must proceed ` +
           `and terminate on its own, stopping at the refused write (SPEC ` +

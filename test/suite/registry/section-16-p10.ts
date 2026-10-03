@@ -139,11 +139,13 @@ import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import type {
   ProductBinding,
+  RunGuards,
   RunningProduct,
   RunResult,
 } from "../../helpers/subprocess.js";
 import {
   releaseHoldFile,
+  rethrowOutputOverflow,
   runProduct,
   startProduct,
   summarizeResult,
@@ -658,19 +660,25 @@ function assertSameState(
 
 /**
  * Run one menu read to completion under the driver's hang guard, converting
- * a rejection (hang, runaway output) into a diagnosed failure (H-8).
+ * a rejection (a hang, killed at the guard) into a diagnosed failure (H-8).
+ * An exhausted capture limit is never converted: it propagates out of the
+ * property body as the harness error it is, and `checkProperty` reports it
+ * with the seed (H-11). `guards` lower the hang guard or the capture limit
+ * for S-8's vector alone.
  */
-async function runHeldRead(
+export async function runHeldRead(
   product: ProductBinding,
   cwd: string,
   menuIndex: number,
   context: string,
+  guards: RunGuards = {},
 ): Promise<void> {
   const read = READ_MENU[menuIndex];
   let result: RunResult;
   try {
-    result = await runProduct(product, { cwd, argv: read.argv });
+    result = await runProduct(product, { cwd, argv: read.argv, ...guards });
   } catch (error) {
+    rethrowOutputOverflow(error);
     return fail(
       `${context} ${read.what}: a read command must run and terminate while ` +
         `a mutating command is held (SPEC 13.5; H-8) — ` +
@@ -686,13 +694,17 @@ async function runHeldRead(
   );
 }
 
-interface StraddleRead {
+export interface StraddleRead {
   readonly running: RunningProduct;
   readonly what: string;
 }
 
-/** Await a straddle read: terminated, no signal death, exit 0 or 1. */
-async function settleStraddleRead(
+/**
+ * Await a straddle read: terminated, no signal death, exit 0 or 1. A
+ * rejected run fails diagnosed (H-8), except an exhausted capture limit,
+ * which propagates as the harness error it is (H-11).
+ */
+export async function settleStraddleRead(
   read: StraddleRead,
   context: string,
 ): Promise<void> {
@@ -700,6 +712,7 @@ async function settleStraddleRead(
   try {
     result = await read.running.waitForExit();
   } catch (error) {
+    rethrowOutputOverflow(error);
     return fail(
       `${context} straddling ${read.what}: a read command running across a ` +
         `mutating command's commit window must terminate (SPEC 13.5; H-8: ` +
@@ -918,6 +931,7 @@ async function runEpisode(
     try {
       await running.waitForFile(hold);
     } catch (error) {
+      rethrowOutputOverflow(error);
       fail(
         `${context}: ${HOLD_APPEAR_CONTEXT} — ` +
           `${error instanceof Error ? error.message : String(error)}`,
@@ -932,9 +946,10 @@ async function runEpisode(
     if (running.hasExited()) {
       const outcome = await running
         .waitForExit()
-        .then(summarizeResult, (error: unknown) =>
-          error instanceof Error ? error.message : String(error),
-        );
+        .then(summarizeResult, (error: unknown) => {
+          rethrowOutputOverflow(error);
+          return error instanceof Error ? error.message : String(error);
+        });
       fail(
         `${context}: the mutating command must proceed only once the hold ` +
           `file is deleted, but it exited while still held (SPEC 13.5) — ` +
@@ -971,6 +986,7 @@ async function runEpisode(
         try {
           result = await running.waitForExit();
         } catch (error) {
+          rethrowOutputOverflow(error);
           fail(
             `${context}: once the hold file is deleted the mutating command ` +
               `must proceed and complete (SPEC 13.5; H-8) — ` +
@@ -1002,14 +1018,19 @@ async function runEpisode(
   }
 }
 
-/** Settle a killed mutator; the death's shape is not asserted. */
-async function settleKilled(
+/**
+ * Settle a killed mutator; the death's shape is not asserted. A rejected run
+ * fails diagnosed (H-8), except an exhausted capture limit, which propagates
+ * as the harness error it is (H-11).
+ */
+export async function settleKilled(
   running: RunningProduct,
   context: string,
 ): Promise<void> {
   try {
     await running.waitForExit();
   } catch (error) {
+    rethrowOutputOverflow(error);
     fail(
       `${context}: the killed mutating command must settle (H-8) — ` +
         `${error instanceof Error ? error.message : String(error)}`,

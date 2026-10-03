@@ -33,7 +33,17 @@
 //      capture cap lowered against a flooding stand-in, let the overflow
 //      propagate out of the property, which reports it as a harness error
 //      naming the seed — never a falsified property — while the hang-guard
-//      kill, their termination clause, stays a diagnosed failure (S-3).
+//      kill, their termination clause, stays a diagnosed failure (S-3);
+//   5. and so it stays wherever a shared helper converts a run's rejection
+//      into a diagnosed failure — 13.5's runBounded and describeExit, the
+//      write-refusal staging's awaitHoldFile, runSettled, and
+//      runHeldWithStaging, P-10's runHeldRead, settleStraddleRead, and
+//      settleKilled: their capture cap lowered against a flooding
+//      stand-in, each lets the driver's ProductRunOutputOverflowError
+//      through unchanged, while the hang-guard kill (for a hold-file wait,
+//      a premature exit) stays a diagnosed failure. S-3 pins the driver's
+//      own hold-file wait and `rethrowOutputOverflow`; the conversions
+//      written inline in registered bodies call it the same way.
 
 import { Buffer } from "node:buffer";
 import { once } from "node:events";
@@ -74,8 +84,13 @@ import {
   DEFAULT_MAX_OUTPUT_BYTES,
   ProductRunOutputOverflowError,
   runProduct,
+  startProduct,
 } from "../helpers/subprocess.js";
-import type { ProductBinding } from "../helpers/subprocess.js";
+import type {
+  ProductBinding,
+  RunGuards,
+  RunningProduct,
+} from "../helpers/subprocess.js";
 import { TestWorkspace } from "../helpers/workspace.js";
 import {
   canonicalJson as canonicalJson1023,
@@ -95,6 +110,12 @@ import {
   collectStringLeaves as collectStringLeaves107ii,
 } from "../suite/registry/section-10.7-ii.js";
 import { canonicalizeJson } from "../suite/registry/section-12.0-i.js";
+import { describeExit, runBounded } from "../suite/registry/section-13.5.js";
+import {
+  runHeldRead,
+  settleKilled,
+  settleStraddleRead,
+} from "../suite/registry/section-16-p10.js";
 import {
   documentCarriesUnavailability,
   genAvailabilityTrial,
@@ -109,6 +130,13 @@ import {
   MAX_MUTATIONS_PER_TRIAL,
   runFuzzCommand,
 } from "../suite/registry/section-16-p8.js";
+import {
+  awaitHoldFile,
+  holdPathFor,
+  runHeldWithStaging,
+  runSettled,
+} from "../suite/registry/write-refusal-staging.js";
+import type { StagingApplier } from "../suite/registry/write-refusal-staging.js";
 import {
   DEEPEST_STAGED_TOWER,
   DEPTH_FLOOR,
@@ -892,14 +920,14 @@ if (mode === "flood") {
 /** The seed the guard vectors run under (one of E-5's fixed seeds). */
 const GUARD_VECTOR_SEED = 314159265;
 
-/** What a property run rejects with; a run that resolves fails the vector. */
-async function rejectionOf(run: Promise<void>): Promise<unknown> {
+/** What a run rejects with; a run that resolves fails the vector. */
+async function rejectionOf(run: Promise<unknown>): Promise<unknown> {
   try {
     await run;
   } catch (error) {
     return error;
   }
-  throw new Error("S-8: expected the property run to reject");
+  throw new Error("S-8: expected the run to reject");
 }
 
 test("S-8: an exhausted capture limit in a P-8 or P-11 command run is a harness error naming the seed, never a falsified property; the hang-guard kill stays a diagnosed failure (H-11; S-3)", async () => {
@@ -971,4 +999,172 @@ test("S-8: an exhausted capture limit in a P-8 or P-11 command run is a harness 
       "hang guard killed it",
     );
   }
+}, 60_000);
+
+/**
+ * Stand-in for the conversion vector (header item 5). Its mode rides the
+ * binding's prefix, so the argv a helper appends — a P-10 menu read, a
+ * `--test-hold <path>` pair — follows it, read only for the hold path:
+ * `flood` writes 4 MiB to stdout and exits, past any small capture cap;
+ * `exit` exits 3 at once; `hold-flood` and `hold-hang` create the hold file,
+ * wait for its deletion, then flood or never exit; anything else never
+ * exits.
+ */
+const CONVERSION_STANDIN_SOURCE = `import fs from "node:fs";
+const mode = process.argv[2];
+const flood = () => {
+  const chunk = "x".repeat(1 << 16);
+  for (let i = 0; i < 64; i += 1) process.stdout.write(chunk);
+};
+const hang = () => setInterval(() => {}, 60000);
+if (mode === "flood") {
+  flood();
+} else if (mode === "exit") {
+  process.exit(3);
+} else if (mode === "hold-flood" || mode === "hold-hang") {
+  const hold = process.argv[process.argv.indexOf("--test-hold") + 1];
+  fs.writeFileSync(hold, "");
+  const poll = setInterval(() => {
+    if (!fs.existsSync(hold)) {
+      clearInterval(poll);
+      if (mode === "hold-flood") flood();
+      else hang();
+    }
+  }, 10);
+} else {
+  hang();
+}
+`;
+
+test("S-8: an exhausted capture limit propagates as a harness error out of every shared helper that converts a run's rejection into a diagnosed failure — 13.5's, the write-refusal staging's, P-10's — while the hang-guard kill and a premature exit stay diagnosed failures (H-11; S-3)", async () => {
+  const workspace = await TestWorkspace.create({
+    files: { "conversions.mjs": CONVERSION_STANDIN_SOURCE },
+  });
+  onTestFinished(() => workspace.dispose());
+  const standin = (mode: string): ProductBinding => ({
+    label: `S-8 conversion stand-in (${mode})`,
+    command: process.execPath,
+    prefixArgs: [workspace.path("conversions.mjs"), mode],
+  });
+  const start = async (
+    mode: string,
+    guards: RunGuards = {},
+  ): Promise<RunningProduct> =>
+    await startProduct(standin(mode), {
+      cwd: workspace.root,
+      ...guards,
+    });
+  // The capture cap lowered below what `flood` emits, and the hang guard
+  // below `hang`'s lifetime.
+  const capped: RunGuards = { maxOutputBytes: 4096 };
+  const guarded: RunGuards = { timeoutMs: 300 };
+  // The held helper's staging is beside the point here: a no-op.
+  const noStaging: StagingApplier = async (root) => ({
+    mode: "write-refusal",
+    path: root,
+    restore: async () => {},
+  });
+  const context = "S-8 conversion vector";
+  const helpers: readonly {
+    readonly helper: string;
+    readonly overflow: () => Promise<unknown>;
+    readonly diagnosed: () => Promise<unknown>;
+  }[] = [
+    {
+      helper: "13.5's runBounded",
+      overflow: () =>
+        runBounded(standin("flood"), workspace.root, [], context, capped),
+      diagnosed: () =>
+        runBounded(standin("hang"), workspace.root, [], context, guarded),
+    },
+    {
+      helper: "the write-refusal staging's awaitHoldFile",
+      overflow: async () =>
+        await awaitHoldFile(
+          await start("flood", capped),
+          holdPathFor(workspace, "never-a.tmp"),
+          context,
+        ),
+      diagnosed: async () =>
+        await awaitHoldFile(
+          await start("exit"),
+          holdPathFor(workspace, "never-b.tmp"),
+          context,
+        ),
+    },
+    {
+      helper: "the write-refusal staging's runSettled",
+      overflow: () =>
+        runSettled(standin("flood"), workspace, [], context, capped),
+      diagnosed: () =>
+        runSettled(standin("hang"), workspace, [], context, guarded),
+    },
+    {
+      helper: "the write-refusal staging's runHeldWithStaging",
+      overflow: () =>
+        runHeldWithStaging(
+          standin("hold-flood"),
+          workspace,
+          [],
+          "hold-a.tmp",
+          noStaging,
+          context,
+          capped,
+        ),
+      // A guard long enough for the hold to appear first; a stand-in slower
+      // than that dies before it and fails as diagnosed all the same.
+      diagnosed: () =>
+        runHeldWithStaging(
+          standin("hold-hang"),
+          workspace,
+          [],
+          "hold-b.tmp",
+          noStaging,
+          context,
+          { timeoutMs: 1500 },
+        ),
+    },
+    {
+      helper: "P-10's runHeldRead",
+      overflow: () =>
+        runHeldRead(standin("flood"), workspace.root, 0, context, capped),
+      diagnosed: () =>
+        runHeldRead(standin("hang"), workspace.root, 0, context, guarded),
+    },
+    {
+      helper: "P-10's settleStraddleRead",
+      overflow: async () =>
+        await settleStraddleRead(
+          { running: await start("flood", capped), what: "`flood`" },
+          context,
+        ),
+      diagnosed: async () =>
+        await settleStraddleRead(
+          { running: await start("hang", guarded), what: "`hang`" },
+          context,
+        ),
+    },
+    {
+      helper: "P-10's settleKilled",
+      overflow: async () =>
+        await settleKilled(await start("flood", capped), context),
+      diagnosed: async () =>
+        await settleKilled(await start("hang", guarded), context),
+    },
+  ];
+  for (const { helper, overflow, diagnosed } of helpers) {
+    const overflowed = await rejectionOf(overflow());
+    expect(overflowed, helper).toBeInstanceOf(ProductRunOutputOverflowError);
+    expect(overflowed, helper).not.toBeInstanceOf(HarnessAssertionError);
+    const failed = await rejectionOf(diagnosed());
+    expect(failed, helper).toBeInstanceOf(HarnessAssertionError);
+    expect((failed as Error).message, helper).toContain(context);
+  }
+  // 13.5's describeExit folds a settled run into a premature-exit
+  // diagnosis — except an exhausted capture limit, which propagates.
+  const described = await rejectionOf(
+    describeExit(await start("flood", capped)),
+  );
+  expect(described).toBeInstanceOf(ProductRunOutputOverflowError);
+  expect(await describeExit(await start("exit"))).toContain("exit code 3");
 }, 60_000);

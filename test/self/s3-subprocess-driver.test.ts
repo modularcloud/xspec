@@ -7,6 +7,10 @@
 // interpretation, timeout-as-failure for hangs (reported as failures, never
 // skips — H-8), diagnosed failures for missing executables, and the 13.5
 // machinery: background start, hold-file choreography, kill, concurrency.
+// The capture limit (H-11) is pinned here too: an overflow is a loud
+// `ProductRunOutputOverflowError`, never a truncation, which the hold-file
+// wait surfaces as itself and `rethrowOutputOverflow` — the first call of
+// every helper converting a run's rejection — lets through unchanged.
 //
 // The stand-in is a tiny argv-driven Node script written into a fresh
 // TestWorkspace per test (the builder itself is certified by S-2) and driven
@@ -21,11 +25,15 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { expect, onTestFinished, test } from "vitest";
+import { HarnessAssertionError } from "../helpers/assertions.js";
 import {
   builtProductBinding,
   createHoldFile,
   pathExists,
+  ProductRunOutputOverflowError,
+  ProductRunTimeoutError,
   releaseHoldFile,
+  rethrowOutputOverflow,
   runProduct,
   startProduct,
 } from "../helpers/subprocess.js";
@@ -550,4 +558,51 @@ test("a child exceeding the output cap is killed with a loud overflow error, nev
       maxOutputBytes: 2048,
     }),
   ).rejects.toThrow(/exceeded the output limit of 2048 bytes/);
+});
+
+test("waitForFile surfaces a capture-limit kill as the driver's ProductRunOutputOverflowError itself, never folded into the premature-exit error (H-11)", async () => {
+  const { workspace, binding } = await standin();
+  const running = await startProduct(binding, {
+    cwd: workspace.root,
+    argv: ["spam"],
+    maxOutputBytes: 2048,
+  });
+  const neverCreated = path.join(workspace.tempRoot, "never-created");
+  const error = await running.waitForFile(neverCreated).then(
+    () => null,
+    (thrown: unknown) => thrown,
+  );
+  expect(error).toBeInstanceOf(ProductRunOutputOverflowError);
+  expect((error as Error).message).toMatch(
+    /exceeded the output limit of 2048 bytes/,
+  );
+  expect((error as Error).message).not.toContain("exited before creating");
+  // The very rejection the run settled with, not a copy.
+  const settled = await running.waitForExit().then(
+    () => null,
+    (thrown: unknown) => thrown,
+  );
+  expect(settled).toBe(error);
+});
+
+test("rethrowOutputOverflow rethrows exactly the capture-limit error, unchanged, and returns for every other rejection a helper converts (H-11)", () => {
+  const overflow = new ProductRunOutputOverflowError("capture limit");
+  let rethrown: unknown = null;
+  try {
+    rethrowOutputOverflow(overflow);
+  } catch (thrown) {
+    rethrown = thrown;
+  }
+  expect(rethrown).toBe(overflow);
+  for (const other of [
+    new ProductRunTimeoutError("hang guard"),
+    new HarnessAssertionError("diagnosed"),
+    new Error("failed to start"),
+    "not an error",
+    undefined,
+  ]) {
+    expect(() => {
+      rethrowOutputOverflow(other);
+    }).not.toThrow();
+  }
 });
