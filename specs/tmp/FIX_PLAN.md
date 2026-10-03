@@ -38,24 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 59 — T14-7: `refused-exposed-derived-file`, and the new `refused-invalid-destination` arms (TEST-SPEC L589; B15)
-
-**Depends on.** Tasks 13, 33, and 39–42.
-
-**Where.** `test/suite/registry/section-14.ts`.
-
-**Change.**
-- Add a `refused-exposed-derived-file` arm over T6.5-21's staging: `path` the origin's emit destination, `locations` `[]`, `identities` `[]`.
-- Assert `refused-invalid-destination`, never 14.22, for:
-  - T6.5-4's barred path characters: Task 33's cases, if not already reached through `MOVE_REFUSAL_CASES` (done at Task 33: they sit in `MOVE_REFUSAL_CASES`, which T14-7 iterates through `assertRefusalReport`, each asserting `refused-invalid-destination` alone with its `path`);
-  - T6.5-20's derived-path relations and module-linking designation, through its exported stagings.
-
-**Note (from Task 42).** T6.5-21's refused stagings are `D21_REFUSED_STAGINGS` (`test/suite/registry/section-6.5-iv.ts`; (a) with its file-form move and the two-reason move, and (b)), staged by `runD21RefusedStaging`, each move's expected findings in `move.findings` (code, `path`, and `identities` exactly where pinned); `refused-exposed-derived-file` is now in `IDENTITY_PINNED_REFUSAL_CODES`, so a T14-7 case naming it must state `identities` `[]`.
-
-**Note (from Task 41).** Every refused staging of T6.5-20, arms (a) through (e), is an entry of the table `d20RefusedStagings` returns (`test/suite/registry/section-6.5-iv.ts`): (d)'s six module-linking designations and (e)'s after-build and section-form controls included, each staged by `runD20RefusedStaging`, as T6.6-3's twins iterate it.
-
-**Checks.** S-7 passes. T14-7 against the built product.
-
 ### Task 60 — T14-11: arm (r) widened, and the new 14.15 location arms (TEST-SPEC L593; B16)
 
 **Where.** `test/suite/registry/section-14.ts`.

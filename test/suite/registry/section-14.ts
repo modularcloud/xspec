@@ -137,7 +137,9 @@
 //   applicable reason, none beside), and each finding's stable code with
 //   its concerned file/range/identity. The modifies-nothing compares,
 //   journal discipline, and preview equivalence stay the home tests'
-//   subject (T6.4-3, T6.5-4, T6.6-3). "Locating every colliding bearer"
+//   subject (T6.4-3, T6.5-4, T6.6-3), save the link-and-target compare of
+//   T6.5-4's symbolic-link arms, T14-7's own clause (the re-descent arms,
+//   below). "Locating every colliding bearer"
 //   is asserted every-participant strict (support.ts
 //   assertFindingLocatesExactly, honoring a case's declared complete
 //   bearer set, `locatedAtEach`): T6.4-3's exported two-bearer
@@ -207,6 +209,28 @@
 //   locating `C`'s existing import and the chain's spelling in `A`, the
 //   located set the spellings rooted at the added binding whether or not
 //   their characters change (14, 6.5, 5.7, 1.5, 12.0).
+//   The re-descent arms (TEST-SPEC T14-7's refused-invalid-destination and
+//   refused-exposed-derived-file clauses): T6.5-4's symbolic-link arms — a
+//   link to a directory at a component of the destination path and of a
+//   created target file's path (the shared table's inside-root entries,
+//   `MOVE_LINK_INSIDE_CASES`, and the exported outside-root staging) and
+//   of the `outDir` emit destination (the derived-path arm's exported link
+//   sibling) — each refused-invalid-destination alone, never 14.22, inside
+//   a compare of the link and its target (`assertLinkAndTargetUnchanged`:
+//   the root narrowed to the link entry and an inside target's tree, an
+//   outside target compared on its own) — the one modifies-nothing compare
+//   T14-7 owns, the link and its target byte-identical after each refusal
+//   being T14-7's own clause; T6.5-4's barred path characters through
+//   `MOVE_REFUSAL_CASES`; T6.5-20's derived-path relations and
+//   module-linking designation over its exported table
+//   (`d20RefusedStagings`, `runD20RefusedStaging`), each move exactly one
+//   refused-invalid-destination finding concerning the destination as
+//   spelled; and refused-exposed-derived-file over T6.5-21's
+//   (`D21_REFUSED_STAGINGS`, `runD21RefusedStaging`) — `path` the
+//   origin's emit destination, `identities` `[]`, the two-reason move's
+//   refused-invalid-destination beside it. Every expectation stating a
+//   `path` also asserts `locations` `[]`: a reason concerning a path
+//   carries it as the finding's `path` with `locations` `[]` (14, 12.7).
 // - T14-8 owns the every-participant strictness the home tests SOME-quantify
 //   (T1.3-5's and T2.1-5's per-file tolerance, T5.3-1's file-dimension
 //   binding, T14-7's cycle mentions-location — its collision arms are
@@ -278,6 +302,7 @@ import {
   decodeOccurrencesReport,
   decodePreviewReport,
   decodeViewFilesReport,
+  renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
   assertExitCode,
@@ -291,6 +316,7 @@ import {
 } from "../../helpers/permissions.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
+import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
 import { StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
 import { StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
@@ -331,15 +357,30 @@ import {
 } from "./section-6.5-iii.js";
 import type { RefusalExpectation } from "./section-6.5.js";
 import {
+  MOVE_DERIVED_LINK_CASE,
+  MOVE_DERIVED_LINK_COMPONENT,
+  MOVE_DERIVED_LINK_FILES,
   MOVE_DERIVED_PATH_CASE,
   MOVE_DERIVED_PATH_CONFIG,
   MOVE_DERIVED_PATH_FILES,
+  MOVE_LINK_COMPONENT,
+  MOVE_LINK_INSIDE_CASES,
+  MOVE_LINK_OUTSIDE_CASES,
+  MOVE_LINK_OUTSIDE_FILES,
   MOVE_REFUSAL_CASES,
   MOVE_REFUSAL_CONFIG,
   MOVE_REFUSAL_FILES,
+  stageMoveDerivedLinkComponent,
+  stageMoveLinkOutsideComponent,
   stageMoveRefusalOccupants,
   V4_SOLO_SOURCE,
 } from "./section-6.5.js";
+import {
+  D21_REFUSED_STAGINGS,
+  d20RefusedStagings,
+  runD20RefusedStaging,
+  runD21RefusedStaging,
+} from "./section-6.5-iv.js";
 import {
   POLICY_HI_SOURCE,
   POLICY_LO_SOURCE,
@@ -2651,9 +2692,12 @@ const T14_6 = defineProductTest({
  * assert each expected finding's concerned file/range/identity (the
  * SOME-quantified location of the home operationalization; module header)
  * or, where the case declares its complete bearer set (`locatedAtEach`),
- * exactly that set — every colliding bearer, none beside (SPEC 14).
- * The modifies-nothing compares are the home tests' subject (T6.4-3,
- * T6.5-4). Per-reason concern lookup is by counting key, total because a
+ * exactly that set — every colliding bearer, none beside (SPEC 14); a
+ * reason concerning a path (`path` stated) carries it as the finding's
+ * `path` with `locations` `[]` (SPEC 14, 12.7). The modifies-nothing
+ * compares are the home tests' subject (T6.4-3, T6.5-4); the symbolic-link
+ * arms' link-and-target compare wraps this contract
+ * (`assertLinkAndTargetUnchanged`). Per-reason concern lookup is by counting key, total because a
  * refusal report never carries two findings of one reason (SPEC 14: one
  * finding per reason). No report carries a code outside 14's list: the
  * form-exact decode admits only 14's codes (forms.ts KNOWN_CODE_TOKENS —
@@ -2736,8 +2780,86 @@ async function assertRefusalReport(
         expectation.path,
         `${context}: the ${expectation.finding} finding's concerned path`,
       );
+      if (finding.locations.length !== 0) {
+        fail(
+          `${context}: the ${expectation.finding} finding concerns a path, ` +
+            `so it carries that path as its \`path\` with \`locations\` [] ` +
+            `(SPEC 14, 12.7); got ` +
+            JSON.stringify(
+              finding.locations.map((location) => ({
+                file: renderPathValue(location.file),
+                range: location.range,
+              })),
+            ),
+        );
+      }
     }
   }
+}
+
+/**
+ * The link and its target byte-identical around one refusal (TEST-SPEC
+ * T14-7, over T6.5-4's symbolic-link arms): the workspace root narrowed to
+ * the link itself — an entry recording its kind and verbatim target bytes,
+ * never followed (snapshot.ts) — and, where the link resolves inside the
+ * root, every entry of its target directory, the ancestors of both kept as
+ * bare directory entries and every other entry pruned; a target outside the
+ * root is compared on its own around that narrowed compare, since no view
+ * of the root can see a write landing there (SPEC 6.5, 13.4).
+ */
+async function assertLinkAndTargetUnchanged(
+  workspace: TestWorkspace,
+  link: string,
+  action: () => Promise<void>,
+  context: string,
+): Promise<void> {
+  const kind = await workspace.kind(link);
+  if (kind !== "symlink") {
+    fail(
+      `${context}: staging premise — ${link} is the symbolic link T6.5-4's ` +
+        `link-component staging put there, untouched since by every ` +
+        `refused operation and by the premise \`build\`, which neither ` +
+        `traverses nor replaces it (SPEC 6.5: a refused operation modifies ` +
+        `nothing; 7, 13.4); found ${kind}`,
+    );
+  }
+  const linkPath = workspace.path(link);
+  const target = path.resolve(
+    path.dirname(linkPath),
+    await workspace.linkTarget(link),
+  );
+  const fromRoot = path.relative(workspace.root, target);
+  const insideTarget =
+    fromRoot !== "" && !fromRoot.startsWith("..") && !path.isAbsolute(fromRoot)
+      ? fromRoot.split(path.sep).join("/")
+      : null;
+  const kept = (rel: string): boolean =>
+    rel === link ||
+    link.startsWith(`${rel}/`) ||
+    (insideTarget !== null &&
+      (rel === insideTarget ||
+        insideTarget.startsWith(`${rel}/`) ||
+        rel.startsWith(`${insideTarget}/`)));
+  const narrowed = (): Promise<void> =>
+    assertLeavesUnchanged(
+      workspace.root,
+      action,
+      `${context}: the symbolic link ${link} and its target stay ` +
+        `byte-identical — nothing written through or over the link (SPEC ` +
+        `6.5, 13.4; TEST-SPEC T14-7)`,
+      { exclude: (bytes) => !kept(Buffer.from(bytes).toString("utf8")) },
+    );
+  if (insideTarget !== null) {
+    await narrowed();
+    return;
+  }
+  await assertLeavesUnchanged(
+    target,
+    narrowed,
+    `${context}: the target directory of the symbolic link ${link}, ` +
+      `outside the workspace root, stays byte-identical — nothing written ` +
+      `through the link (SPEC 6.5, 13.4; TEST-SPEC T14-7)`,
+  );
 }
 
 // The destination-path directory-component staging (the other
@@ -3324,10 +3446,162 @@ async function runT147SiblingCycleArm(product: ProductBinding): Promise<void> {
   );
 }
 
+// T6.5-4's symbolic-link arms beyond the shared table's inside-root entries
+// (TEST-SPEC T14-7's refused-invalid-destination clause: a link to a
+// directory at a component of the destination path, of a created target
+// file's path, and of the `outDir` emit destination, the link and its
+// target byte-identical after each refusal): the outside-root staging —
+// `specs/sub` a link to an empty directory beside the workspace root, both
+// forms — and the derived-path arm's link sibling — `mdout/new`, the emit
+// destination's directory component, a link to `linked/` — each staged
+// through T6.5-4's exported fixture and protocol (the link staged before
+// the premise `build`, which passes), each refused-invalid-destination
+// alone concerning the destination path, never 14.22, inside the
+// link-and-target compare. The shared table's inside-root entries
+// (`MOVE_LINK_INSIDE_CASES`) get the same compare in T14-7's table loop.
+
+/** The outside-root link staging and the derived-path link sibling (the note above). */
+async function runT147LinkArms(product: ProductBinding): Promise<void> {
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": MOVE_REFUSAL_CONFIG,
+        ...MOVE_LINK_OUTSIDE_FILES,
+      },
+    },
+    async (workspace) => {
+      await stageMoveLinkOutsideComponent(workspace);
+      await buildOk(
+        product,
+        workspace,
+        "T14-7 outside-root link staging `build` (the T6.5-4 protocol) — " +
+          "the link specs/sub is never discovered nor traversed and lies " +
+          "under no current source's write path, so each refusal below is " +
+          "the move's own",
+      );
+      for (const { argv, expected, reason } of MOVE_LINK_OUTSIDE_CASES) {
+        const context = `T14-7 move (${reason})`;
+        await assertLinkAndTargetUnchanged(
+          workspace,
+          MOVE_LINK_COMPONENT,
+          () =>
+            assertRefusalReport(product, workspace, argv, expected, context),
+          context,
+        );
+      }
+    },
+  );
+  await withWorkspace(
+    {
+      files: {
+        "xspec.config.ts": MOVE_DERIVED_PATH_CONFIG,
+        ...MOVE_DERIVED_LINK_FILES,
+      },
+    },
+    async (workspace) => {
+      await stageMoveDerivedLinkComponent(workspace);
+      await buildOk(
+        product,
+        workspace,
+        "T14-7 derived-path link sibling `build` (the T6.5-4 protocol) — " +
+          "the link mdout/new lies under no current source's write path, " +
+          "so the refusal below is the move's own",
+      );
+      const context = `T14-7 move (${MOVE_DERIVED_LINK_CASE.reason})`;
+      await assertLinkAndTargetUnchanged(
+        workspace,
+        MOVE_DERIVED_LINK_COMPONENT,
+        () =>
+          assertRefusalReport(
+            product,
+            workspace,
+            MOVE_DERIVED_LINK_CASE.argv,
+            MOVE_DERIVED_LINK_CASE.expected,
+            context,
+          ),
+        context,
+      );
+    },
+  );
+}
+
+// refused-invalid-destination over T6.5-20's derived-path relations and
+// module-linking designation (TEST-SPEC T14-7: "and so do T6.5-4's barred
+// path characters and T6.5-20's derived-path relations and module-linking
+// designation" — the barred characters reach T14-7 through
+// MOVE_REFUSAL_CASES), staged through T6.5-20's exported table and staging
+// code (`d20RefusedStagings`, `runD20RefusedStaging`: the companion legs
+// read as the home test reads them, each staging before any build or after
+// its premise `build` as the home test stages it) — each refused move
+// exactly one refused-invalid-destination finding concerning the
+// destination as spelled (the section form's target file), `locations`
+// `[]`, nothing beside, never 14.22. The modifies-nothing compares stay the
+// home test's subject.
+
+/** T6.5-20's refused stagings under T14-7's reporting contract (the note above). */
+async function runT147DerivedPathRelationArms(
+  product: ProductBinding,
+): Promise<void> {
+  for (const staging of await d20RefusedStagings(product, "T14-7 (T6.5-20)")) {
+    await runD20RefusedStaging(
+      product,
+      staging,
+      `T14-7 move (T6.5-20 ${staging.key})`,
+      (workspace, move, context) =>
+        assertRefusalReport(
+          product,
+          workspace,
+          move.argv,
+          { finding: "refused-invalid-destination", path: move.path },
+          `${context} — refused-invalid-destination alone, concerning the ` +
+            `destination as spelled, never 14.22`,
+        ),
+    );
+  }
+}
+
+// refused-exposed-derived-file over T6.5-21's refused stagings (TEST-SPEC
+// T14-7: `path` the origin's emit destination, `locations` `[]`,
+// `identities` `[]`), staged through T6.5-21's exported table and staging
+// code (`D21_REFUSED_STAGINGS`, `runD21RefusedStaging`): (a) after its
+// premise `build` — the file-form move, then the two-reason move reporting
+// refused-invalid-destination (T6.5-4's barred `'`, `path` the destination
+// as spelled) beside it — and (b) before any build, each move's findings
+// exactly the table's, `identities` stated exactly where 14 pins them.
+
+/** T6.5-21's refused stagings under T14-7's reporting contract (the note above). */
+async function runT147ExposedDerivedFileArms(
+  product: ProductBinding,
+): Promise<void> {
+  for (const staging of D21_REFUSED_STAGINGS) {
+    await runD21RefusedStaging(
+      product,
+      staging,
+      `T14-7 move (T6.5-21 ${staging.key})`,
+      (workspace, move, context) =>
+        assertRefusalReport(
+          product,
+          workspace,
+          move.argv,
+          move.findings.map((expected): RefusalExpectation =>
+            expected.identities === undefined
+              ? { finding: expected.code, path: expected.path }
+              : {
+                  finding: expected.code,
+                  path: expected.path,
+                  identities: expected.identities,
+                },
+          ),
+          context,
+        ),
+    );
+  }
+}
+
 const T14_7 = defineProductTest({
   id: "T14-7",
   title:
-    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity — its identities exactly the one 1.5 identity over the destination file, the invalid ID spelled verbatim, no prefix-produced identity beside it (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename and by the exact self-move of either form, no collision or occupied-destination reason beside it, its identities the unchanged identity as the sole element — the bare `<new-file>` root identity for the file form; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing — its identities exactly the located bearers' identities in location order; refused-structural-parent and refused-missing-target-parent concerning the violated and the target-parent identity, each the sole identities element; refused-cycle locating the would-be cycle's full path in pre-operation coordinates — a dependency cycle's participating `d` spelling; a spec import cycle's existing import declaration by its own characters and, for the import the move would add, the local reference spelling whose rewrite requires it, exactly those two, never a range for the import that does not yet exist; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included — occupancy judged in discovered-path form alone: a destination spelled `./a.mdx` for the origin `a.mdx`, `specs//b.mdx`, or `specs/../specs/b.mdx`, each naming an occupied path were it normalized, is refused-invalid-destination alone concerning the path as spelled, never reported occupied, and a section-form target path so spelled likewise; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination; the ten reasons 14 lists (refused-invalid-rewrite and refused-moved-import, T6.5-16's and T6.5-17's subjects, included) are the whole refusal vocabulary — a code 14 does not list never appears in any report, the form-exact decode admitting only 14's codes (no unresolvable-reference reason exists); every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them; refused-invalid-rewrite and refused-moved-import re-asserted over T6.5-16's and T6.5-17's exported arms — the former locating the moved construct and, for an addition no offset admits, the spellings rooted at its binding, its identities the concerned files' paths in byte order; the latter locating each moved declaration by the import range of 11.4, its identities empty — `path` null for both, every reason the entry pins beside reported together; identities over invalid paths: `move specs/A.mdx#x 'specs/new.txt#x y'` reports refused-invalid-destination (`path` `specs/new.txt`) beside refused-invalid-id with identities exactly `[\"specs/new.txt#x y\"]`, and `move specs/A.mdx#x specs/new.txt#p.y` refused-invalid-destination beside refused-missing-target-parent with `[\"specs/new.txt#p\"]` — each a plain string over the path as spelled, defining no node: `query node` on it is a usage error, exit 2; and the spec import cycle's sibling arm — `A` imports a third module `C`, the moved text carries `d={C.foo}`, `C` imports `B` — locating `C`'s existing import of `B` and the chain's spelling in `A`, the located set the spellings rooted at the added binding, independent of whether each appears as a reference-rewrite (SPEC 14, 6.4, 6.5, 5.3, 5.7, 1.5, 11.4, 12.0, 12.7)",
+    "refusal reasons: staged refusals asserting each stable code with its concerned file, range, or identity — refused-invalid-id concerning the invalid identity — its identities exactly the one 1.5 identity over the destination file, the invalid ID spelled verbatim, no prefix-produced identity beside it (intrinsic form only: a structurally misplaced but intrinsically valid new ID reports refused-structural-parent alone, never both); refused-identity-unchanged reported alone by an identity-unchanged rename and by the exact self-move of either form, no collision or occupied-destination reason beside it, its identities the unchanged identity as the sole element — the bare `<new-file>` root identity for the file form; refused-id-collision locating every colliding bearer — the location set exactly the colliding bearers, two in T6.4-3's prefix-replacement arm, `b` and `b.c`, a product locating the first alone failing — its identities exactly the located bearers' identities in location order; refused-structural-parent and refused-missing-target-parent concerning the violated and the target-parent identity, each the sole identities element; refused-cycle locating the would-be cycle's full path in pre-operation coordinates — a dependency cycle's participating `d` spelling; a spec import cycle's existing import declaration by its own characters and, for the import the move would add, the local reference spelling whose rewrite requires it, exactly those two, never a range for the import that does not yet exist; refused-destination-exists concerning the occupied path, the section form's non-spec-source occupant included — occupancy judged in discovered-path form alone: a destination spelled `./a.mdx` for the origin `a.mdx`, `specs//b.mdx`, or `specs/../specs/b.mdx`, each naming an occupied path were it normalized, is refused-invalid-destination alone concerning the path as spelled, never reported occupied, and a section-form target path so spelled likewise; refused-missing-target-parent concerning the target-parent identity; refused-invalid-destination concerning the destination path — the destination-side directory-component cases reporting this code, never 14.22: a plain file staged as a directory component of the destination path and, in the derived-path arm, of the destination's `outDir` emit destination, and in T6.5-4's symbolic-link arms a link to a directory at a component of the destination path, of a created target file's path, and of the `outDir` emit destination, the link and its target byte-identical after each refusal — and so do T6.5-4's barred path characters and T6.5-20's derived-path relations and module-linking designation, over T6.5-20's exported refused stagings; refused-exposed-derived-file over T6.5-21's exported refused stagings — `path` the origin's emit destination, `locations` `[]`, `identities` `[]`, the two-reason move's refused-invalid-destination beside it; every reason concerning a path carrying it as the finding's `path` with `locations` `[]`; the eleven reasons 14 lists (refused-exposed-derived-file, refused-invalid-rewrite, and refused-moved-import, T6.5-21's, T6.5-16's, and T6.5-17's subjects, included) are the whole refusal vocabulary — a code 14 does not list never appears in any report, the form-exact decode admitting only 14's codes (no unresolvable-reference reason exists); every applicable reason reports together, one finding per reason — a section move staged to both collide and create a dependency cycle reports both findings, never only the first; the invalid-workspace refusal reports the workspace's numbered findings alone — a rename staged to also collide on a workspace failing validation reports the validation findings only, exit 1, no refusal reason evaluated or reported beside them; refused-invalid-rewrite and refused-moved-import re-asserted over T6.5-16's and T6.5-17's exported arms — the former locating the moved construct and, for an addition no offset admits, the spellings rooted at its binding, its identities the concerned files' paths in byte order; the latter locating each moved declaration by the import range of 11.4, its identities empty — `path` null for both, every reason the entry pins beside reported together; identities over invalid paths: `move specs/A.mdx#x 'specs/new.txt#x y'` reports refused-invalid-destination (`path` `specs/new.txt`) beside refused-invalid-id with identities exactly `[\"specs/new.txt#x y\"]`, and `move specs/A.mdx#x specs/new.txt#p.y` refused-invalid-destination beside refused-missing-target-parent with `[\"specs/new.txt#p\"]` — each a plain string over the path as spelled, defining no node: `query node` on it is a usage error, exit 2; and the spec import cycle's sibling arm — `A` imports a third module `C`, the moved text carries `d={C.foo}`, `C` imports `B` — locating `C`'s existing import of `B` and the chain's spelling in `A`, the located set the spellings rooted at the added binding, independent of whether each appears as a reference-rewrite (SPEC 14, 6.4, 6.5, 4, 5.3, 5.7, 1.5, 7, 11.4, 12.0, 12.7, 13.4)",
   timeoutMs: 300_000,
   run: async (product) => {
     // --- The rename reasons, staged via T6.4-3's exported fixture: the
@@ -3373,7 +3647,10 @@ const T14_7 = defineProductTest({
     // non-spec-source occupants included, the out-of-group `.mdx` occupant
     // refusing under both applicable reasons — the 1.4-invalid new IDs, the
     // cross-file collision, the missing and within-subtree target parents,
-    // and the invalid destinations (SPEC 6.5, 14).
+    // and the invalid destinations, T6.5-4's barred path characters and its
+    // inside-root symbolic-link arms among them — each link arm inside the
+    // link-and-target compare (TEST-SPEC T14-7: the link and its target
+    // byte-identical after each refusal; SPEC 6.5, 14).
     await withWorkspace(
       {
         files: {
@@ -3391,14 +3668,26 @@ const T14_7 = defineProductTest({
           "T14-7 move-reason staging `build` (occupants staged before it; " +
             "the T6.5-4 protocol)",
         );
-        for (const { argv, expected, reason } of MOVE_REFUSAL_CASES) {
-          await assertRefusalReport(
-            product,
-            workspace,
-            argv,
-            expected,
-            `T14-7 move (${reason})`,
-          );
+        for (const kase of MOVE_REFUSAL_CASES) {
+          const context = `T14-7 move (${kase.reason})`;
+          const report = (): Promise<void> =>
+            assertRefusalReport(
+              product,
+              workspace,
+              kase.argv,
+              kase.expected,
+              context,
+            );
+          if (MOVE_LINK_INSIDE_CASES.includes(kase)) {
+            await assertLinkAndTargetUnchanged(
+              workspace,
+              MOVE_LINK_COMPONENT,
+              report,
+              context,
+            );
+          } else {
+            await report();
+          }
         }
       },
     );
@@ -3433,6 +3722,13 @@ const T14_7 = defineProductTest({
         );
       },
     );
+
+    // --- refused-invalid-destination over T6.5-4's remaining symbolic-link
+    // arms (the link-arm note): the outside-root staging and the
+    // derived-path arm's link sibling at the `outDir` emit destination's
+    // component — never 14.22, the link and its target byte-identical after
+    // each refusal (SPEC 6.5, 7, 13.4, 14).
+    await runT147LinkArms(product);
 
     // --- refused-invalid-destination, the destination-path
     // directory-component case (T14-7's own staging; the fixture note): a
@@ -3598,6 +3894,18 @@ const T14_7 = defineProductTest({
     // in `A`, the spellings rooted at the added binding whether or not any
     // character of theirs changes (SPEC 14, 6.5, 5.7).
     await runT147SiblingCycleArm(product);
+
+    // --- refused-invalid-destination over T6.5-20's derived-path relations
+    // and module-linking designation (the T6.5-20 note): every refused move
+    // of its exported table exactly one finding concerning the destination
+    // as spelled, `locations` `[]`, never 14.22 (SPEC 6.5, 4, 14).
+    await runT147DerivedPathRelationArms(product);
+
+    // --- refused-exposed-derived-file over T6.5-21's refused stagings (the
+    // T6.5-21 note): `path` the origin's emit destination, `locations` `[]`,
+    // `identities` `[]` — the two-reason move's refused-invalid-destination
+    // reported beside it (SPEC 6.5, 13.4, 14, 12.7).
+    await runT147ExposedDerivedFileArms(product);
 
     // --- refused-invalid-rewrite and refused-moved-import, re-asserted over
     // T6.5-16's and T6.5-17's exported arms (the home-tables note): the

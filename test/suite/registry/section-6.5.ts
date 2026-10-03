@@ -3379,6 +3379,26 @@ function linkComponentCases(target: string): readonly MoveRefusalCase[] {
 }
 
 /**
+ * The inside-root staging of the link-component arms (V4_LINK_COMPONENT's
+ * note): `specs/sub` → `linked/`, staged by stageMoveRefusalOccupants on the
+ * main refusal workspace — the last entries of MOVE_REFUSAL_CASES, exported
+ * for T14-7, which compares the link and its target around each (TEST-SPEC
+ * T14-7: the link and its target byte-identical after each refusal).
+ */
+export const MOVE_LINK_INSIDE_CASES: readonly MoveRefusalCase[] =
+  linkComponentCases("the empty directory linked/ inside the workspace root");
+
+/**
+ * The links of the link-component stagings (V4_LINK_COMPONENT's note),
+ * exported for T14-7's link-and-target compare: `specs/sub`, the
+ * destination-side component of MOVE_LINK_INSIDE_CASES' and
+ * MOVE_LINK_OUTSIDE_CASES' stagings, and `mdout/new`, the emit
+ * destination's component in MOVE_DERIVED_LINK_CASE's.
+ */
+export const MOVE_LINK_COMPONENT = V4_LINK_COMPONENT;
+export const MOVE_DERIVED_LINK_COMPONENT = V4_MDOUT_OCCUPANT;
+
+/**
  * T6.5-4's main-workspace staging and complete refusal-case table, exported
  * so T6.6-3 can stage each refusal identically and assert the `--preview`
  * invocation's refusal equivalence over it (TEST-SPEC §6.6: "for each
@@ -3729,9 +3749,7 @@ export const MOVE_REFUSAL_CASES: readonly MoveRefusalCase[] = [
   // The inside-root staging of the link-component arms (V4_LINK_COMPONENT's
   // note): `specs/sub` → `linked/`, staged by stageMoveRefusalOccupants; the
   // whole-root compare sees any write landing through the link.
-  ...linkComponentCases(
-    "the empty directory linked/ inside the workspace root",
-  ),
+  ...MOVE_LINK_INSIDE_CASES,
 ];
 
 /**
