@@ -38,14 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 54 — T12.2-4, arm (b): the expected orphan set comes from the record (TEST-SPEC L506; T11.6-3; B9)
-
-**Where.** `test/suite/registry/section-12.1-12.2.ts`: `t1224DerivedListing`, which today lists `extra/E.xspec.*` from the directory.
-
-**Change.** Take the expected set from the record, not from a listing of the written files. It is the dropped source's module, plus each companion that `inventory`'s `recorded` set lists for it after the build (T11.6-3), plus its Markdown where emitted.
-
-**Checks.** S-7 passes. T12.2-4 against the built product.
-
 ### Task 55 — T12.7-2: T6.5-21's two-reason order (TEST-SPEC L531; SPEC 14, 12.7; B10)
 
 **Depends on.** Tasks 13 and 42.

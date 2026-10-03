@@ -113,18 +113,22 @@
 //   1–7 negative tests and T14-1's completeness matrix. The separately
 //   listed families (references, cycles, journal, policy, sessions) get
 //   their own workspaces below.
-// - T12.2-4 (b) reads "exactly one condition-10 finding concerning the
-//   orphaned path" per orphaned recorded path: dropping a source from the
-//   groups orphans its module and every companion the product wrote beside
-//   it — 13.1 leaves the companion set to the product, and 14.10 reports one
-//   finding per such path, concerning it — so the expected set is the
-//   dropped source's derived listing (the `NAME.xspec.` prefix filter of its
-//   directory, T12.1-3's complete companion sweep; the module, whose path
-//   13.1 fixes, certainly in it), taken after the build and before the
-//   configuration change: exactly the paths the record holds for the source
-//   (13.3), enumerated from the directory because the record's layout is
-//   opaque while 13.1's name shape is not. A product without companions
-//   reports exactly one finding. Each arm's `check` and failing `build` run
+// - T12.2-4 (b) reads one condition-10 finding per orphaned path, concerning
+//   it, and no other: dropping a source from the groups orphans the paths
+//   the record holds for it (13.3) — 13.1 leaves the companion set to the
+//   product, and 14.10 reports one finding per such path — so the expected
+//   set comes from the record, as TEST-SPEC defines it: the dropped
+//   source's module (whose path 13.1 fixes, and which the record must
+//   name), each companion `inventory`'s `recorded` set lists for it after
+//   the build (T11.6-3; attributable through 13.1's naming), and its
+//   Markdown where emitted — none here, the fixture's configuration having
+//   no `markdown` key (7.3). Read on the freshly built workspace, before
+//   the configuration change, never from a listing of the written files: a
+//   product whose written files and record disagree is judged by its
+//   record. Each expected path is pinned a plain file after the build — the
+//   recorded file remaining at the path, the occupant the recorded-file
+//   form concerns (14.10, 13.4). A product without companions reports
+//   exactly one finding. Each arm's `check` and failing `build` run
 //   inside whole-root compares (T12.2-3, T12.1-4), every arm's "no
 //   condition 12" and "no condition 10" are the exact condition multiset
 //   beside the validation finding (located within its section's opening
@@ -174,6 +178,7 @@ import {
   expectConfigurationError,
   expectExit,
   readGeneratedModule,
+  recordedCompanionPaths,
   runJson,
 } from "./support.js";
 
@@ -1852,42 +1857,49 @@ async function t1224Prepare(
 }
 
 /**
- * A source's derived files as generated: every plain file in its directory
- * named `NAME.xspec.` plus a suffix — the module and all its companions,
- * SPEC 13.1's name shape (T12.1-3's complete companion sweep) — as
- * workspace-relative paths in byte order, the module (whose path 13.1
- * fixes) certainly among them. Taken after the build and before the
- * configuration change, it is exactly the set the record holds for the
- * source (13.3) and the set the change orphans whole.
+ * The paths dropping a spec source from the groups orphans, as TEST-SPEC
+ * T12.2-4(b) defines them — from the record, never from a listing of the
+ * written files: on the freshly built workspace, before the configuration
+ * change, `inventory`'s `recorded` set is read (SPEC 11.6, T11.6-3), and
+ * the set is the source's module (whose path 13.1 fixes; the record must
+ * name it), each companion the record lists for the source through 13.1's
+ * naming (`recordedCompanionPaths`: none for a product writing no
+ * companions), and its Markdown where emitted — none here, the fixture's
+ * configuration having no `markdown` key (7.3, 13.2). Each path is pinned a
+ * plain file after the build: the recorded derived file remaining at the
+ * path, the occupant 14.10's recorded-file form concerns — a recorded path
+ * holding no plain file is a record naming no derived file the build
+ * generated (13.3, 13.4, 13.1). Returned as workspace-relative paths,
+ * sorted (the fixture's paths are ASCII, so in byte order).
  */
-async function t1224DerivedListing(
+async function t1224RecordedOrphans(
+  product: ProductBinding,
   workspace: TestWorkspace,
-  dir: string,
-  stem: string,
+  sourcePath: string,
   context: string,
 ): Promise<readonly string[]> {
-  const prefix = `${stem}.xspec.`;
-  const paths: string[] = [];
-  for (const name of await workspace.readdirNames(dir)) {
-    if (!name.startsWith(prefix)) continue;
-    const rel = `${dir}/${name}`;
+  const inventoryContext = `${context} — \`inventory\` after the initial build`;
+  const companions = recordedCompanionPaths(
+    decodeInventoryRecordedDatum(
+      await runJson(product, workspace, ["inventory"], inventoryContext),
+      inventoryContext,
+    ),
+    sourcePath,
+    inventoryContext,
+  );
+  const moduleRel = `${sourcePath.slice(0, -".mdx".length)}.xspec.ts`;
+  const paths = [moduleRel, ...companions].sort();
+  for (const rel of paths) {
     const kind = await workspace.kind(rel);
     if (kind !== "file") {
       fail(
-        `${context}: ${rel} carries the derived-file name shape but is ` +
-          `${kind} — every file xspec writes is a plain file (SPEC 13.4, 13.1)`,
+        `${inventoryContext}: the record lists ${JSON.stringify(rel)} ` +
+          `among ${sourcePath}'s derived paths, but the path holds ` +
+          `${kind} after the build — the record names the derived files ` +
+          `the build generated, every file xspec writes a plain file ` +
+          `(SPEC 13.3, 13.4, 13.1)`,
       );
     }
-    paths.push(rel);
-  }
-  paths.sort();
-  const moduleRel = `${dir}/${stem}.xspec.ts`;
-  if (!paths.includes(moduleRel)) {
-    fail(
-      `${context}: a successful build generates the module ` +
-        `${JSON.stringify(moduleRel)} in the source's directory (SPEC 13.1); ` +
-        `the derived listing holds ${JSON.stringify(paths)}`,
-    );
   }
   return paths;
 }
@@ -2008,7 +2020,7 @@ async function t1224FailingStaging(
 const T12_2_4 = defineProductTest({
   id: "T12.2-4",
   title:
-    "14.10 and 14.12 confine themselves on a workspace failing `build`'s validations: from a freshly built valid workspace with a forbidden rule and an edge violating it (the premise `check` reporting exactly that violation), four stagings each given one validation error (an unresolved `d` reference in another file) and run through `check` — (a) a generated module hand-edited: the validation finding and no condition 10, the per-file mismatch form undetectable there; (b) a recorded derived path orphaned by dropping its source from the configuration's groups without a rebuild: the validation finding beside exactly one condition-10 finding per orphaned recorded path, the recorded-file form comparing the record against the set of generated paths, a set defined on any workspace (the dropped source's module and every companion beside it, 13.1); (c) the record corrupted shape-blind: the unreadable-record unit form beside the validation finding, no mismatch form; (d) the violating edge alone beside the validation error: no condition 12, the violation reported once the error is repaired — exit 1 throughout, `check` modifying nothing, `build` on each failing staging reporting the validation finding alone and modifying nothing (SPEC 12.2, 14.10, 14.12, 7.5, 13.3, 12.1)",
+    "14.10 and 14.12 confine themselves on a workspace failing `build`'s validations: from a freshly built valid workspace with a forbidden rule and an edge violating it (the premise `check` reporting exactly that violation), four stagings each given one validation error (an unresolved `d` reference in another file) and run through `check` — (a) a generated module hand-edited: the validation finding and no condition 10, the per-file mismatch form undetectable there; (b) recorded derived paths orphaned by dropping their source from the configuration's groups without a rebuild: the validation finding beside one condition-10 finding per orphaned path, concerning it — the dropped source's module, each companion `inventory`'s `recorded` set lists for it after the build (T11.6-3), and its Markdown where emitted (none: the fixture emits no Markdown) — and no other condition-10 finding, the recorded-file form comparing the record against the set of generated paths, a set defined on any workspace; (c) the record corrupted shape-blind: the unreadable-record unit form beside the validation finding, no mismatch form; (d) the violating edge alone beside the validation error: no condition 12, the violation reported once the error is repaired — exit 1 throughout, `check` modifying nothing, `build` on each failing staging reporting the validation finding alone and modifying nothing (SPEC 12.2, 14.10, 14.12, 7.5, 13.3, 12.1)",
   run: async (product) => {
     // (a) A generated module hand-edited — the module of a file other than
     // the one taking the validation error.
@@ -2029,17 +2041,18 @@ const T12_2_4 = defineProductTest({
       await t1224FailingStaging(product, workspace, { form: "none" }, context);
     });
 
-    // (b) A recorded derived path orphaned: the `extra` group dropped from
-    // the configuration without a rebuild, its source's derived files
-    // (listed after the build) remaining at paths no longer generated.
+    // (b) Recorded derived paths orphaned: the `extra` group dropped from
+    // the configuration without a rebuild, the paths the record holds for
+    // its source (read from `inventory` after the build) remaining at paths
+    // no longer generated.
     await withWorkspace(T12_2_4_FILES, async (workspace) => {
-      const context = "T12.2-4 (b, recorded derived path orphaned)";
+      const context = "T12.2-4 (b, recorded derived paths orphaned)";
       await t1224Prepare(product, workspace, context);
-      const orphaned = await t1224DerivedListing(
+      const orphaned = await t1224RecordedOrphans(
+        product,
         workspace,
-        "extra",
-        "E",
-        `${context} — the dropped source's derived files after the initial build`,
+        "extra/E.mdx",
+        `${context} — the dropped source's recorded derived paths`,
       );
       await workspace.file("xspec.config.ts", T12_2_4_CONFIG_WITHOUT_EXTRA);
       await t1224FailingStaging(
