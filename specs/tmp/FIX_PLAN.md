@@ -38,16 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 56 — T13.4-4: the directory-occupant arms (TEST-SPEC L557; SPEC 13.4; B11)
-
-**Depends on.** Nothing open. T13.4-4's link arm already stages through the shared helper `stageLinkToOutsideFile`; keep it there.
-
-**Where.** `test/suite/registry/section-13.4.ts`.
-
-**Change.** A directory at a derived path, holding nothing xspec discovers or generates, is replaced by the derived file. Two stagings: an empty directory, and a directory holding a file no group matches. In each, `build` exits 0, a plain file stands at the path, and `check` is clean.
-
-**Checks.** S-7 passes. T13.4-4 against the built product.
-
 ### Task 57 — Register T13.4-9 (TEST-SPEC L562; SPEC 13.4, 14.22; B12)
 
 **Where.** `test/suite/registry/section-13.4.ts`, and `traceability.ts` with `"14"`.

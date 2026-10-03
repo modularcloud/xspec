@@ -43,6 +43,16 @@
 //   T13.4-4's link arm rides the certification insofar as it shares the
 //   staging (its Exclusions entry "T13.4-4's link arm"). Outside the root,
 //   the targets take no part in T13.4-4's whole-workspace compare.
+// - T13.4-4's directory arms stage a directory at each of the two derived
+//   paths SPEC pins for `specs/A.mdx` — the module (13.1) and the Markdown
+//   emitted next to it (13.2, 7.3) — before any build, in two workspaces:
+//   empty, and each holding `notes.txt`, which no group matches. Neither
+//   path is a directory component of a discovered source's or another
+//   derived path, so 14.22 does not reach it (T13.4-9 stages the paths it
+//   does). "Replaced by the derived file" is asserted as the plain-file
+//   kind and the whole-workspace compare against the pristine reference
+//   (above), so nothing of a directory survives; `check` clean is the
+//   finding-free report.
 // - T13.4-3's two halves — the record missing (deleted per T13.3-2's
 //   operational definition) and unreadable (corrupted shape-blind through
 //   the H-3 record-staging adapter, T6.6-6's staging, before the
@@ -1222,10 +1232,92 @@ export async function assertOutsideLinkTargetUnchanged(
   );
 }
 
+// The directory-occupant stagings (T13.4-4's arm 3): a directory at each of
+// the two derived paths SPEC pins for `specs/A.mdx` — the generated module's
+// (13.1: `NAME.xspec.ts` in the source's directory) and the emitted
+// Markdown's (13.2, 7.3: next to the source under MARKDOWN_CONFIG) —
+// holding nothing xspec discovers or generates: empty in one workspace, and
+// in a second each holding `notes.txt`, a file no group matches (the one
+// spec group globs `.mdx` names, no code group is configured, and the name
+// holds no `.xspec.`, so no exclusion is involved either, 13.4). Neither
+// path is a directory component of a discovered source's path or of another
+// derived path, so 14.22's refusal does not reach it (T13.4-9 stages the
+// paths it does reach): writing the derived file replaces the directory
+// (13.4). Both workspaces are staged before the body's first product
+// invocation, so their plain configuration is no undeclared staging (S-9's
+// timing clause).
+const T13_4_4_DIRECTORY_PATHS = ["specs/A.xspec.ts", "specs/A.md"] as const;
+
+/** One directory-occupant staging of T13.4-4's arm 3. */
+interface DirectoryOccupantStaging {
+  /** The staging's tag in assertion contexts. */
+  readonly tag: string;
+  /** The common staging plus the directories at the derived paths. */
+  readonly decl: WorkspaceDecl;
+  /** The one file each directory holds, by name; none when empty. */
+  readonly held: string | undefined;
+}
+
+const T13_4_4_HELD_NAME = "notes.txt";
+
+const T13_4_4_DIRECTORY_STAGINGS: readonly DirectoryOccupantStaging[] = [
+  {
+    tag: "empty directories",
+    decl: { files: T13_4_4_COMMON, dirs: T13_4_4_DIRECTORY_PATHS },
+    held: undefined,
+  },
+  {
+    tag: "directories each holding a file no group matches",
+    decl: {
+      files: {
+        ...T13_4_4_COMMON,
+        ...Object.fromEntries(
+          T13_4_4_DIRECTORY_PATHS.map((dir) => [
+            `${dir}/${T13_4_4_HELD_NAME}`,
+            `user notes in the directory at ${dir}: no group matches them\n`,
+          ]),
+        ),
+      },
+    },
+    held: T13_4_4_HELD_NAME,
+  },
+];
+
+/**
+ * A directory-occupant staging verifies itself before any product
+ * invocation: each derived path holds a real directory holding exactly the
+ * staged plain file, or nothing. A staging that misses is an internal
+ * harness error, never a product verdict.
+ */
+async function verifyDirectoryOccupants(
+  workspace: TestWorkspace,
+  staging: DirectoryOccupantStaging,
+): Promise<void> {
+  const expected = staging.held === undefined ? [] : [staging.held];
+  for (const dir of T13_4_4_DIRECTORY_PATHS) {
+    const names =
+      (await workspace.kind(dir)) === "dir"
+        ? await workspace.readdirNames(dir)
+        : undefined;
+    const heldKinds = await Promise.all(
+      expected.map((name) => workspace.kind(`${dir}/${name}`)),
+    );
+    if (
+      names === undefined ||
+      names.join("/") !== expected.join("/") ||
+      heldKinds.some((kind) => kind !== "file")
+    ) {
+      throw new Error(
+        `internal error: failed to stage ${staging.tag} at ${dir}`,
+      );
+    }
+  }
+}
+
 const T13_4_4 = defineProductTest({
   id: "T13.4-4",
   title:
-    "a user-created file at a derived path is replaced by `build`, and a symbolic link at a derived file's own path is replaced as the occupant — nothing is written through it: link target byte-identical after the build, link gone, plain file present, no error (SPEC 13.4, 12.1)",
+    "a user-created file at a derived path is replaced by `build`; a symbolic link at a derived file's own path is replaced as the occupant — nothing is written through it: link target byte-identical after the build, link gone, plain file present, no error; and a directory at a derived path holding nothing xspec discovers or generates — empty, and separately holding a file no group matches — is replaced by the derived file: `build` exits 0, a plain file there, `check` clean (SPEC 13.4, 12.1; 14.22's refusal reaching only a directory component of a discovered source's or another derived path)",
   run: async (product) => {
     const reference = await TestWorkspace.create({ files: T13_4_4_COMMON });
     const dirty = await TestWorkspace.create({
@@ -1240,7 +1332,19 @@ const T13_4_4 = defineProductTest({
       // undeclared.
       ts: { unchecked: ["specs/A.xspec.ts"] },
     });
+    const directoryArms: {
+      readonly staging: DirectoryOccupantStaging;
+      readonly workspace: TestWorkspace;
+    }[] = [];
     try {
+      // Arm 3's workspaces, staged and verified before the body's first
+      // product invocation (S-9's timing clause).
+      for (const staging of T13_4_4_DIRECTORY_STAGINGS) {
+        const workspace = await TestWorkspace.create(staging.decl);
+        directoryArms.push({ staging, workspace });
+        await verifyDirectoryOccupants(workspace, staging);
+      }
+
       // The pristine reference build fixes the expected byte tree.
       await buildOk(product, reference, "T13.4-4 reference `build`");
       const sr = await snapshotDirectory(reference.root);
@@ -1351,9 +1455,59 @@ const T13_4_4 = defineProductTest({
           "pristine reference — every derived path holds its generated " +
           "plain file (SPEC 13.4, 12.0)",
       );
+
+      // Arm 3 — a directory at each derived path SPEC pins, holding nothing
+      // xspec discovers or generates: empty, and separately each holding a
+      // file no group matches. The first `build` replaces each directory
+      // with the derived file and exits 0 (13.4: writing a derived file
+      // replaces whatever exists at its path; 14.22's refusal reaches only
+      // a path that is a directory component of a discovered source's path
+      // or of another derived path, T13.4-9); a plain file stands there,
+      // the workspace equals the pristine reference — nothing of the
+      // directory left — and `check` is clean.
+      for (const { staging, workspace } of directoryArms) {
+        const tag = `T13.4-4 (${staging.tag})`;
+        await buildOk(
+          product,
+          workspace,
+          `${tag}: \`build\` over directories at the derived paths ` +
+            `${T13_4_4_DIRECTORY_PATHS.join(" and ")}, holding nothing ` +
+            `xspec discovers or generates — each replaced by the derived ` +
+            `file, not refused (SPEC 13.4; 14.22 reaches only a directory ` +
+            `component of a discovered source's or another derived path)`,
+        );
+        for (const key of T13_4_4_DIRECTORY_PATHS) {
+          const kind = await workspace.kind(key);
+          if (kind !== "file") {
+            fail(
+              `${tag}: after \`build\`, ${key} must be a plain file — the ` +
+                `derived file replaces the directory staged there (SPEC ` +
+                `13.4: writing a derived file replaces whatever exists at ` +
+                `its path); found ${kind}`,
+            );
+          }
+        }
+        assertSnapshotsEqual(
+          sr,
+          await snapshotDirectory(workspace.root),
+          `${tag}: the workspace after \`build\` vs the pristine reference ` +
+            `— each directory replaced by the derived file, nothing of it ` +
+            `left (SPEC 13.4, 12.0)`,
+        );
+        await expectFindingFreeReport(
+          product,
+          workspace,
+          ["check", "--json"],
+          `${tag}: \`check --json\` after the build — clean (SPEC 13.4, ` +
+            `14.10)`,
+        );
+      }
     } finally {
       await reference.dispose();
       await dirty.dispose();
+      for (const { workspace } of directoryArms) {
+        await workspace.dispose();
+      }
     }
   },
 });

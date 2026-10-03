@@ -494,6 +494,10 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T13.4-1": ["13.4"],
   "T13.4-2": ["13.4"],
   "T13.4-3": ["13.4"],
+  // T13.4-4's 12.1 and 14.22 citations are carriage context: every arm is a
+  // success path (`build` exits 0; the directory arms' `check` clean), the
+  // directory arms marking where 14.22's refusal stops, with its home
+  // coverage at T13.4-6/T13.4-9/T13.4-10; no numbered condition is asserted.
   "T13.4-4": ["13.4"],
   "T13.4-5": ["13.4"],
   "T13.4-6": ["13.4", "13.3", "14"],
