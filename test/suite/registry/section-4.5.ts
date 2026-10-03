@@ -35,12 +35,13 @@
 //   asserts (SPEC 5.5, 9.2, 9.3).
 // - T4.5-3 arms stage exactly one defect each — the non-static form. Every
 //   arm's chain would resolve to an existing node if read statically
-//   (`SPEC[key]` with key = "a"; the `a.b` chains with `a.b` staged;
-//   `` SPEC[`login-v2`] `` read as `SPEC["login-v2"]`, over its own module
-//   holding `login-v2`, as TEST-SPEC pins it), so a product cannot
-//   legitimately reclassify the finding as an unresolved reference (14.7):
-//   the sole present condition is 14.8, and the exact condition-count
-//   assertion simultaneously pins "not 14.18" (SPEC 4.5).
+//   (`SPEC[key]` with key = "a"; TEST-SPEC's `SPEC?.a`, optional on the
+//   root binding, read as `SPEC.a`, with `a` staged; the `a.b` chains with
+//   `a.b` staged; `` SPEC[`login-v2`] `` read as `SPEC["login-v2"]`, over
+//   its own module holding `login-v2`, as TEST-SPEC pins it), so a product
+//   cannot legitimately reclassify the finding as an unresolved reference
+//   (14.7): the sole present condition is 14.8, and the exact
+//   condition-count assertion simultaneously pins "not 14.18" (SPEC 4.5).
 // - T4.5-3's TypeScript-only arms (`SPEC.a!;`, `SPEC.a as X;`, `<X>SPEC.a;`,
 //   `SPEC.a satisfies X;`) are dynamic references in a TypeScript source —
 //   14.8 at the statement's expression, the file well-formed — never a parse
@@ -977,6 +978,17 @@ const T4_5_3_ARMS: readonly OffendingStatementArm[] = [
     lines: [T4_5_3_IMPORT, "", 'const key = "a";', "SPEC[key];"],
     offending: "SPEC[key];",
   },
+  // TEST-SPEC's pinned optional-chaining spelling, optional on the root
+  // binding itself: read statically, `SPEC.a` resolves (the shared source
+  // holds `a`), so the `?.` is the arm's sole defect. `SPEC.a?.b;` below,
+  // optional deeper in the chain, is an extra spelling of the same rule.
+  {
+    name:
+      "optional chaining on the root binding as a bare expression statement " +
+      "(TEST-SPEC's `SPEC?.a;`, SPEC 2.4, 4.5)",
+    lines: [T4_5_3_IMPORT, "", "SPEC?.a;"],
+    offending: "SPEC?.a;",
+  },
   {
     name:
       "an optional-chaining chain as a bare expression statement " +
@@ -1055,7 +1067,7 @@ const T4_5_3_STAGINGS = stageOffendingStatements("T4.5-3", T4_5_3_ARMS);
 const T4_5_3 = defineProductTest({
   id: "T4.5-3",
   title:
-    "a non-static bare reference in expression-statement position — computed index by variable, optional chaining, non-null assertion, parentheses, template-literal index (`` SPEC[`login-v2`]; ``, the module holding `login-v2`: template literals are not static), and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`SPEC.a as X;`, `<X>SPEC.a;` in a `.ts` file, `SPEC.a satisfies X;`) — fails with exactly one located 14.8 finding (invalid argument, not 14.18), the file well-formed, with no edge and no occurrence: `occurrences --file src/app.ts` on the failing workspace exits 1 with its full answer, the one 14.8 finding accompanying it located as `build`'s is, and lists no record (SPEC 4.5, 2.4, 5.7, 11.2, 11.3, 14.8)",
+    "a non-static bare reference in expression-statement position — computed index by variable, optional chaining (`SPEC?.a;`, optional on the root binding, and `SPEC.a?.b;`), non-null assertion, parentheses, template-literal index (`` SPEC[`login-v2`]; ``, the module holding `login-v2`: template literals are not static), and the TypeScript-only forms 2.4 makes dynamic in a TypeScript source, never a parse failure there (`SPEC.a as X;`, `<X>SPEC.a;` in a `.ts` file, `SPEC.a satisfies X;`) — fails with exactly one located 14.8 finding (invalid argument, not 14.18), the file well-formed, with no edge and no occurrence: `occurrences --file src/app.ts` on the failing workspace exits 1 with its full answer, the one 14.8 finding accompanying it located as `build`'s is, and lists no record (SPEC 4.5, 2.4, 5.7, 11.2, 11.3, 14.8)",
   run: async (product) => {
     for (const staging of T4_5_3_STAGINGS) {
       await assertArmFailsWith(product, "T4.5-3", staging, "14.8", {

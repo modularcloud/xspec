@@ -60,7 +60,7 @@ Why the harness changed in this re-descent: the documents moved after the harnes
 **Order.** Tasks are in dependency order, and each names what it depends on:
 - Part A (Task 1, the certification gap D1): done and removed.
 - Part B (harness machinery): done and removed. Tasks 3 and 4 gave S-9's MDX judgement spec-group files not named `.mdx` — Task 3 the mechanism (`mdx.wellFormed` and the other `mdx` lists, the `file()` `mdx` option, or an MDX record at the path declare such a file an MDX source; module header of `test/helpers/workspace.ts`), Task 4 the declarations of the suite's three such files (T7.1-1's `specs/notes.txt` and T11.6-2's `specs/note.txt` as staged-source records, T11.6-4's under `mdx.wellFormed`). Task 2 (P-8's and P-11's capture-limit errors) and Task 2b, split from it (every other conversion of a driver rejection), are done and removed: H-11's capture-limit errors.
-- Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order. Task 5 (T4.3-2's seven dynamic node-form arms each run `occurrences` on the failing workspace and assert no record) is done and removed. Task 6 (every T4.5-3 arm runs `occurrences --file src/app.ts` on its failing workspace and asserts no record, through `assertArmFailsWith`'s opt-in `noOccurrence` option, which T4.5-5 does not pass) is done and removed.
+- Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order. Task 5 (T4.3-2's seven dynamic node-form arms each run `occurrences` on the failing workspace and assert no record) is done and removed. Task 6 (every T4.5-3 arm runs `occurrences --file src/app.ts` on its failing workspace and asserts no record, through `assertArmFailsWith`'s opt-in `noOccurrence` option, which T4.5-5 does not pass) is done and removed. Task 7 (T4.5-3's arm table gains TEST-SPEC's pinned optional-chaining spelling `SPEC?.a;`, optional on the root binding, over the shared `a`/`a.b` source; the extra arms `SPEC.a?.b;`, `SPEC.a!.b;`, and `(SPEC.a).b;` stay) is done and removed.
 - Part D (Tasks 10–13): P-8's command sweep.
 - Task 14 confirms the result and deletes the plan.
 
@@ -69,21 +69,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 ## Tasks
 
 ### Part C — The T-numbered tests
-
-### Task 7 — T4.5-3: add TEST-SPEC's optional-chaining spelling `SPEC?.a;` (A2(b); TEST-SPEC §4.5 T4.5-3, L183; SPEC 2.4, 4.5, 14.8)
-
-**Depends on.** Task 6, so the new arm carries the no-occurrence check.
-
-**The requirement.** TEST-SPEC pins the optional-chaining arm as `SPEC?.a;`, optional on the root binding. The harness stages `SPEC.a?.b;` instead, plus the extra arms `SPEC.a!.b;` and `(SPEC.a).b;`. Take the spelling from L183.
-
-**Change.**
-- Add an arm to `T4_5_3_ARMS` whose `src/app.ts` is the T4.5-3 import, a blank line, and `SPEC?.a;`, over the shared `AB_SPEC_FILES` (`specs/A.mdx` holding `a` and `a.b`), so the chain would resolve if read statically.
-- It asserts what every arm asserts: exactly one 14.8, located within the statement, and (Task 6) no occurrence.
-- Keep the extra arms. Add the spelling to the title's list. The new staging is a module-load record like its siblings (`stageOffendingStatements`).
-
-**Checks.**
-- `test/self/s9-staged-sources.test.ts` passes, with one record more.
-- T4.5-3 against the built product: record the new arm's outcome. A failure counts only after a hand-staged probe shows the product's answer contradicts SPEC 4.5 and 14.8 for `SPEC?.a;`.
 
 ### Task 8 — T5.5-2: restage the kind-distinction arm in-line, as TEST-SPEC's fixture geometry requires (A3; TEST-SPEC §5.5 T5.5-2, L217; SPEC 1.6, 3, 5.4, 5.5, 5.6, 6.5)
 
