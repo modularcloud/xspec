@@ -25,8 +25,9 @@
 // Conservative operationalizations (noted per H-4):
 // - One fresh workspace per staging (H-1), every file a staged-source record
 //   (S-9's timing clause: every staging but the body's first follows a
-//   product invocation): one spec group (`specs/**/*.mdx`) and one code
-//   group (`src/**/*.ts`); `specs/origin.mdx` holding the top-level sections
+//   product invocation). Arms (a) through (e): one spec group
+//   (`specs/**/*.mdx`) and one code group (`src/**/*.ts`);
+//   `specs/origin.mdx` holding the top-level sections
 //   `x`, moved, and `w`, kept; `specs/target.mdx` holding `z` (the target
 //   (o) names, one staging throughout); the staging's `src/c.ts`; and, for
 //   (e)'s 6.5 shape, `specs/c.mdx` holding `c`. Each arm is TEST-SPEC's
@@ -75,16 +76,57 @@
 //   product's bytes read as the declaration inserted at another offset, the
 //   diagnosis names that offset and, where TEST-SPEC states it, why 6.5
 //   excludes it.
+// - Arms (f) and (g) widen the staging: each names its own move, files, and
+//   receiver (`S23Arm`). (f)'s seven stagings are TEST-SPEC's `move
+//   specs/A.mdx#m specs/B.mdx#m` over `specs/A.mdx` holding `m` and `k` and
+//   `specs/B.mdx` holding `b` and no `m`, the receiver `src/c.ts` under the
+//   arms' two groups. Where the receiver gains a declaration it is `import
+//   <X> from "../specs/B.xspec"`, the marker `A.m` rewritten in place to
+//   `<X>.m`, composed and judged as above; where it gains none (the control,
+//   the two exempt-side stagings, the precedence branch) the file is exactly
+//   the staged bytes with `A.m` rewritten to `B.m` — no declaration added
+//   (T6.5-22(a)'s judgement reads none), no other byte changed. The preview
+//   is taken wherever the receiver gains a declaration (the
+//   `import-addition` parity) and wherever TEST-SPEC states the preview's
+//   edits — the exempt side: one `reference-rewrite` and no
+//   `import-addition` or `import-removal`; the precedence branch: one
+//   `reference-rewrite` spanning [70, 73) and the same absences; the
+//   control states none, so its preview is not taken. After 6.5's example
+//   and the precedence branch, `query edges --from src/c.ts --to
+//   specs/B.mdx#m --kinds references` answers exactly the marker's edge (a
+//   top-level statement's reference is attributed to the file, 4.6).
+// - (g)'s receiver is the spec source `specs/target.mdx`, receiving into
+//   `p.n` T6.5-13(h)'s moved text: T6.5-13's cross-file origin `specs/a.mdx`
+//   and third module `specs/x.mdx` (section-6.5-iii.ts's records, under its
+//   one-spec-group R16_CONFIG), the same `a`-alone record at `specs/k.mdx`
+//   for `K.a`, and `move specs/a.mdx#m specs/target.mdx#p.n`. The moved text
+//   — its lines, its embedding re-rooted at `<X>`, and a U+000A — is a
+//   zero-length span of the rewrite at the start of the `</S>` line, as
+//   T6.5-13 composes it; `import <X> from "./x.xspec"` stands at offset 0,
+//   28, or 59 (6.5's latitude among the three line starts). Its forms are
+//   judged by S-9's MDX judge (`deriveMdx`) in place of the TypeScript one,
+//   the form composed at the start of line 2 among the premises: it derives,
+//   TEST-SPEC states, though it splits `K`'s declaration.
 
 import { Buffer } from "node:buffer";
-import type { PreviewFileEntry } from "../../helpers/adapters/index.js";
+import type {
+  EdgeKind,
+  PreviewEdit,
+  PreviewEditClass,
+  PreviewFileEntry,
+} from "../../helpers/adapters/index.js";
 import {
   decodeAppliedMappingReport,
+  decodeEdgesReport,
   decodePreviewReport,
 } from "../../helpers/adapters/index.js";
-import { judgeAddedImportsOfFile } from "../../helpers/added-import-identifiers.js";
+import {
+  type AddedImportDeclaration,
+  judgeAddedImportsOfFile,
+} from "../../helpers/added-import-identifiers.js";
 import { fail, HarnessAssertionError } from "../../helpers/assertions.js";
 import { atLineStart } from "../../helpers/import-insertion.js";
+import { deriveMdx } from "../../helpers/mdx-derivability.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { type StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
@@ -97,7 +139,17 @@ import {
 import { judgeTypeScript } from "../../helpers/ts-derivability.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
 import type { InitialFileContents } from "../../helpers/workspace.js";
-import { expectFindingFreeReport, runJson } from "./support.js";
+import {
+  A13_ORIGIN_STAGED,
+  A13_THIRD_STAGED,
+  a13MovedLines,
+  R16_CONFIG,
+} from "./section-6.5-iii.js";
+import {
+  assertEdgeSetEqual,
+  expectFindingFreeReport,
+  runJson,
+} from "./support.js";
 
 // ---------------------------------------------------------------------------
 // T6.5-23 Statement boundaries, the directive prologue, and timeliness
@@ -106,12 +158,11 @@ import { expectFindingFreeReport, runJson } from "./support.js";
 const S23_ORIGIN = "specs/origin.mdx";
 const S23_TARGET = "specs/target.mdx";
 const S23_C_SPEC = "specs/c.mdx";
-/** The receiving file of every staging below. */
+/** The receiving file of every staging below but (g)'s. */
 const S23_APP = "src/c.ts";
 /** The arms' move (TEST-SPEC: "a section move of `specs/origin.mdx#x` to
  * `specs/target.mdx#y`"). */
 const S23_ARGV = ["move", "specs/origin.mdx#x", "specs/target.mdx#y"] as const;
-const S23_MOVE_LABEL = S23_ARGV.join(" ");
 /** The target module's canonical relative specifier from `src/` (6.5). */
 const S23_TARGET_SPECIFIER = "../specs/target.xspec";
 
@@ -176,7 +227,7 @@ const S23_NBSP = String.fromCodePoint(0xa0);
 const S23_LSEP = String.fromCodePoint(0x2028);
 
 /** One span of the receiving file the rewrite replaces, in pre-operation
- * coordinates (6.6). */
+ * coordinates (6.6) — zero-length for an insertion ((g)'s moved text). */
 interface S23Rewrite {
   readonly start: number;
   readonly end: number;
@@ -184,45 +235,110 @@ interface S23Rewrite {
   readonly spelled: (ident: string) => string;
 }
 
+/** The one declaration a staging's receiver gains (SPEC 6.5). */
+interface S23Addition {
+  /** Its module's canonical specifier, as 6.5 spells it from the receiver. */
+  readonly specifier: string;
+  /** The admissible offsets TEST-SPEC names, pre-operation bytes. */
+  readonly offsets: readonly number[];
+  /** Why the receiver gains exactly this declaration, for diagnoses. */
+  readonly why: string;
+}
+
+/** A span a preview edit covers, pre-operation bytes (SPEC 6.6, 12.7). */
+interface S23Span {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * What the receiver's preview entry reports beside the `import-addition`
+ * parity — exactly one, zero-length at the offset the real operation used,
+ * where the receiver gains a declaration; none where it gains none: its
+ * `reference-rewrite` edits (their exact spans, or their count where
+ * TEST-SPEC names no span) and its `import-removal` edits (their exact
+ * spans), each unasserted where undefined — T6.6-4's and T6.6-3's business.
+ */
+interface S23PreviewExpectation {
+  readonly rewrites?: number | readonly S23Span[];
+  readonly removals?: readonly S23Span[];
+}
+
+/** A `query edges` answer after the move: exactly this edge between its two
+ * graph nodes, of its kind (SPEC 11.1, 5.2, 4.6). */
+interface S23Edge {
+  readonly from: string;
+  readonly to: string;
+  readonly kind: EdgeKind;
+  /** Whose edge it is, for diagnoses. */
+  readonly what: string;
+}
+
 /** One byte-asserted staging of T6.5-23. */
 interface S23Arm {
   /** The entry's arm and staging, e.g. `(a) between two directives`. */
   readonly key: string;
-  /** The staged `src/c.ts`. */
+  /** The receiving file — the one whose post-move bytes the arm composes. */
+  readonly receiver: string;
+  /** Its kind: the grammar S-9 and T6.5-22(a)'s judgement read it under. */
+  readonly kind: "typescript" | "spec-source";
+  /** The staged receiver. */
   readonly text: string;
   /** Its staged-source record (S-9). */
-  readonly staged: StagedTs;
-  /** Further files beside the common staging. */
-  readonly extra?: Readonly<Record<string, InitialFileContents>>;
+  readonly staged: StagedTs | StagedMdx;
+  /** Every other file of the staging, the configuration included. */
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  /** The move. */
+  readonly argv: readonly string[];
   /** The rewrite's replaced spans. */
   readonly rewrites: readonly S23Rewrite[];
-  /** The admissible offsets TEST-SPEC names, pre-operation bytes. */
-  readonly offsets: readonly number[];
-  /** Where 6.5 admits the added line here, and why, for diagnoses. */
+  /** The declaration the receiver gains, or `undefined`: it gains none. */
+  readonly addition: S23Addition | undefined;
+  /** Where 6.5 admits the added line here and why — or why nothing is
+   * added — for diagnoses. */
   readonly placement: string;
   /** Inadmissible offsets TEST-SPEC names, with why, for diagnoses. */
   readonly excluded: Readonly<Record<number, string>>;
+  /** Inadmissible offsets whose composed forms TEST-SPEC states derive
+   * (S-9), judged with the premises. */
+  readonly deriving?: readonly number[];
+  /** What the preview's entry reports, where TEST-SPEC states it; the
+   * preview is taken wherever this is set or the receiver gains a
+   * declaration (T6.6-4(b)). */
+  readonly preview?: S23PreviewExpectation;
+  /** `query edges` answers after the move. */
+  readonly edges?: readonly S23Edge[];
   /** (c): why the file compiles clean under standard tooling (H-2). */
   readonly compiles?: string;
 }
 
-/** The added declaration (6.5's exact spelling) binding `ident`. */
-function s23Declaration(ident: string): string {
-  return `import ${ident} from "${S23_TARGET_SPECIFIER}"`;
+/** The added declaration (6.5's exact spelling) binding `ident` to the
+ * module `specifier` designates. */
+function s23Declaration(
+  ident: string,
+  specifier: string = S23_TARGET_SPECIFIER,
+): string {
+  return `import ${ident} from "${specifier}"`;
 }
 
-/** The marker `O.x`'s span in `text`, rewritten to `<X>.y` (6.4: prefix
- * replacement, the chain re-rooted at the added binding). */
-function s23Marker(text: string, key: string): S23Rewrite {
+/** The marker's span in `text` — `O.x` unless `marker` says otherwise —
+ * rewritten as `spelled` spells it, `<X>.y` by default (6.4: prefix
+ * replacement, the chain re-rooted at the binding 6.5 chooses). */
+function s23Marker(
+  text: string,
+  key: string,
+  marker = "O.x",
+  spelled: (ident: string) => string = (ident) => `${ident}.y`,
+): S23Rewrite {
   const bytes = Buffer.from(text, "utf8");
-  const start = bytes.indexOf("O.x");
-  if (start < 0 || bytes.lastIndexOf("O.x") !== start) {
+  const start = bytes.indexOf(marker);
+  if (start < 0 || bytes.lastIndexOf(marker) !== start) {
     throw new Error(
       `T6.5-23 ${key}: a harness defect — the staged ${S23_APP} must hold ` +
-        `the marker \`O.x\` exactly once`,
+        `the marker \`${marker}\` exactly once`,
     );
   }
-  return { start, end: start + 3, spelled: (ident) => `${ident}.y` };
+  return { start, end: start + Buffer.byteLength(marker, "utf8"), spelled };
 }
 
 /**
@@ -289,51 +405,94 @@ function s23Compose(
 const S23_PLACEHOLDER = "X";
 
 /**
+ * Why `bytes` are no well-formed text of the receiver's kind — `undefined`
+ * when they are: a TypeScript source is text TypeScript 5.9.3 accepts both
+ * as module code and as script code, a spec source text the stock MDX 3
+ * grammar derives (14.20; S-9's judges).
+ */
+function s23Malformed(arm: S23Arm, bytes: Uint8Array): string | undefined {
+  if (arm.kind === "spec-source") {
+    const verdict = deriveMdx(bytes);
+    return verdict.derives
+      ? undefined
+      : `not text the stock MDX 3 grammar derives (14.20; S-9): ` +
+          JSON.stringify(verdict);
+  }
+  const verdict = judgeTypeScript(bytes, arm.receiver);
+  return verdict.verdict === "well-formed"
+    ? undefined
+    : `not text TypeScript 5.9.3 accepts both as module code and as script ` +
+        `code (14.20; S-9): ${JSON.stringify(verdict)}`;
+}
+
+/**
  * The staging's premises, judged before any product is driven on it (a
- * harness defect otherwise, never a product verdict): the staged text and
- * each admissible offset's composed form — the placeholder in `<X>`'s
- * place — are text TypeScript 5.9.3 accepts both as module code and as
- * script code (14.20; S-9's judge), and the admissible offsets compose
- * pairwise distinct bytes, so the product's bytes name the one it used.
+ * harness defect otherwise, never a product verdict): the staged text, each
+ * admissible offset's composed form — the placeholder in `<X>`'s place — or,
+ * where nothing is added, the form the rewrite alone composes, and each form
+ * TEST-SPEC states derives at an inadmissible offset are well-formed text of
+ * the receiver's kind (14.20; S-9's judges), and the admissible offsets
+ * compose pairwise distinct bytes, so the product's bytes name the one it
+ * used.
  */
 function s23AssertPremises(arm: S23Arm): void {
   const pre = Buffer.from(arm.text, "utf8");
-  const forms = [{ offset: -1, bytes: pre as Uint8Array }];
-  for (const offset of arm.offsets) {
-    const composed = s23Compose(pre, arm.rewrites, S23_PLACEHOLDER, {
-      offset,
-      declaration: s23Declaration(S23_PLACEHOLDER),
-    });
-    if (composed === undefined) {
+  const forms: { readonly what: string; readonly bytes: Uint8Array }[] = [
+    { what: "the staged text", bytes: pre },
+  ];
+  const addition = arm.addition;
+  if (addition === undefined) {
+    if (arm.deriving !== undefined) {
       throw new Error(
-        `T6.5-23 ${arm.key}: a harness defect — the admissible offset ` +
-          `${String(offset)} lies inside a replaced span`,
+        `T6.5-23 ${arm.key}: a harness defect — a staging gaining no ` +
+          `declaration names no offset of one`,
       );
     }
-    forms.push({ offset, bytes: composed });
+    forms.push({
+      what: "the form the rewrite alone composes",
+      bytes: s23Compose(pre, arm.rewrites, S23_PLACEHOLDER) ?? pre,
+    });
+  } else {
+    const admissible: Buffer[] = [];
+    for (const [offset, judged] of [
+      ...addition.offsets.map((offset) => [offset, "admissible"] as const),
+      ...(arm.deriving ?? []).map((offset) => [offset, "deriving"] as const),
+    ]) {
+      const composed = s23Compose(pre, arm.rewrites, S23_PLACEHOLDER, {
+        offset,
+        declaration: s23Declaration(S23_PLACEHOLDER, addition.specifier),
+      });
+      if (composed === undefined) {
+        throw new Error(
+          `T6.5-23 ${arm.key}: a harness defect — the ${judged} offset ` +
+            `${String(offset)} lies inside a replaced span`,
+        );
+      }
+      if (judged === "admissible") admissible.push(composed);
+      forms.push({
+        what:
+          `the form composed at ${judged === "admissible" ? "the admissible" : "the inadmissible, deriving"} ` +
+          `offset ${String(offset)}`,
+        bytes: composed,
+      });
+    }
+    const distinct = new Set(admissible.map((form) => form.toString("hex")));
+    if (distinct.size !== addition.offsets.length) {
+      throw new Error(
+        `T6.5-23 ${arm.key}: a harness defect — two admissible offsets ` +
+          `compose the same bytes, so the bytes cannot name the offset used`,
+      );
+    }
   }
   for (const form of forms) {
-    const verdict = judgeTypeScript(form.bytes, S23_APP);
-    if (verdict.verdict !== "well-formed") {
+    const malformed = s23Malformed(arm, form.bytes);
+    if (malformed !== undefined) {
       throw new Error(
-        `T6.5-23 ${arm.key}: a harness defect — ` +
-          (form.offset < 0
-            ? "the staged text"
-            : `the form composed at offset ${String(form.offset)}`) +
-          ` is not text TypeScript 5.9.3 accepts both as module code and ` +
-          `as script code (14.20; S-9): ${JSON.stringify(verdict)}; the ` +
-          `text reads ${JSON.stringify(Buffer.from(form.bytes).toString("utf8"))}`,
+        `T6.5-23 ${arm.key}: a harness defect — ${form.what} is ` +
+          `${malformed}; the text reads ` +
+          JSON.stringify(Buffer.from(form.bytes).toString("utf8")),
       );
     }
-  }
-  const distinct = new Set(
-    forms.slice(1).map((form) => Buffer.from(form.bytes).toString("hex")),
-  );
-  if (distinct.size !== arm.offsets.length) {
-    throw new Error(
-      `T6.5-23 ${arm.key}: a harness defect — two admissible offsets ` +
-        `compose the same bytes, so the bytes cannot name the offset used`,
-    );
   }
 }
 
@@ -341,16 +500,17 @@ function s23AssertPremises(arm: S23Arm): void {
  * a plain file of valid UTF-8 (SPEC 6.5 rewrites it in place; 1.6). */
 async function s23ReadReceiver(
   workspace: TestWorkspace,
+  arm: S23Arm,
   context: string,
 ): Promise<{ readonly bytes: Uint8Array; readonly text: string }> {
-  const kind = await workspace.kind(S23_APP);
+  const kind = await workspace.kind(arm.receiver);
   if (kind !== "file") {
     fail(
-      `${context}: after the move, ${S23_APP} must still be a plain file — ` +
-        `the move rewrites it in place (SPEC 6.5); found ${kind}`,
+      `${context}: after the move, ${arm.receiver} must still be a plain ` +
+        `file — the move rewrites it in place (SPEC 6.5); found ${kind}`,
     );
   }
-  const bytes = await workspace.readBytes(S23_APP);
+  const bytes = await workspace.readBytes(arm.receiver);
   try {
     const text = new TextDecoder("utf-8", {
       fatal: true,
@@ -359,25 +519,26 @@ async function s23ReadReceiver(
     return { bytes, text };
   } catch {
     fail(
-      `${context}: after the move, ${S23_APP} is not valid UTF-8 — 6.5 ` +
-        `keeps every file a move rewrites well-formed (SPEC 1.6, 14.20)`,
+      `${context}: after the move, ${arm.receiver} is not valid UTF-8 — ` +
+        `6.5 keeps every file a move rewrites well-formed (SPEC 1.6, 14.20)`,
     );
   }
 }
 
-/** The preview's entry for `src/c.ts`, taken before the real move (SPEC
+/** The preview's entry for the receiver, taken before the real move (SPEC
  * 6.6: a preview modifies nothing). */
 async function s23PreviewEntry(
   product: ProductBinding,
   workspace: TestWorkspace,
+  arm: S23Arm,
   context: string,
 ): Promise<PreviewFileEntry> {
-  const label = `${context}: \`${S23_MOVE_LABEL} --preview --json\` before the real move`;
+  const label = `${context}: \`${arm.argv.join(" ")} --preview --json\` before the real move`;
   const report = decodePreviewReport(
     await runJson(
       product,
       workspace,
-      [...S23_ARGV, "--preview", "--json"],
+      [...arm.argv, "--preview", "--json"],
       `${label} — a performable move previews with exit 0 (SPEC 6.6, 6.5)`,
     ),
     label,
@@ -390,14 +551,13 @@ async function s23PreviewEntry(
     );
   }
   const entries = report.files.filter(
-    (candidate) => candidate.file === S23_APP,
+    (candidate) => candidate.file === arm.receiver,
   );
   const entry = entries.length === 1 ? entries[0] : undefined;
   if (entry === undefined) {
     fail(
-      `${label}: \`files\` holds exactly one entry for ${S23_APP}, a file ` +
-        `the operation rewrites — its marker's rewrite and its import ` +
-        `addition (SPEC 6.6, 12.7); got ` +
+      `${label}: \`files\` holds exactly one entry for ${arm.receiver}, a ` +
+        `file the operation rewrites (SPEC 6.6, 12.7); got ` +
         `[${report.files.map((candidate) => JSON.stringify(candidate.file)).join(", ")}]`,
     );
   }
@@ -429,6 +589,7 @@ function s23Where(bytes: Uint8Array, offset: number): string {
  */
 function s23Misplacement(
   arm: S23Arm,
+  addition: S23Addition,
   pre: Uint8Array,
   actual: Uint8Array,
   ident: string,
@@ -438,7 +599,7 @@ function s23Misplacement(
     for (const lead of [undefined, true, false]) {
       const composed = s23Compose(pre, arm.rewrites, ident, {
         offset,
-        declaration: s23Declaration(ident),
+        declaration: s23Declaration(ident, addition.specifier),
         lead,
       });
       if (composed === undefined || Buffer.compare(composed, actual) !== 0) {
@@ -459,22 +620,261 @@ function s23Misplacement(
   }
   return found.length === 0
     ? "the bytes read as no single insertion of the declaration under 6.5's " +
-        "line discipline beside the marker's rewrite, at any offset"
+        "line discipline beside the rewrite's edits, at any offset"
     : `the bytes read as the declaration inserted at ${found.join("; or at ")}`;
+}
+
+/** The rewrite's edits in words, given the added binding's identifier, for
+ * diagnoses. */
+function s23Rewritten(
+  pre: Uint8Array,
+  rewrites: readonly S23Rewrite[],
+  ident: string,
+): string {
+  return rewrites
+    .map((rewrite) =>
+      rewrite.start === rewrite.end
+        ? `${JSON.stringify(rewrite.spelled(ident))} inserted at offset ` +
+          String(rewrite.start)
+        : `\`${Buffer.from(pre.subarray(rewrite.start, rewrite.end)).toString("utf8")}\` ` +
+          `rewritten in place to \`${rewrite.spelled(ident)}\``,
+    )
+    .join(", ");
+}
+
+/** The receiver's text after the move, as read. */
+interface S23After {
+  readonly bytes: Uint8Array;
+  readonly text: string;
+}
+
+/**
+ * The receiver gains exactly one declaration, of `addition`'s module and
+ * binding its default, value-blind in the identifier alone, at an
+ * admissible offset: the admissible offsets whose composed bytes the
+ * product's equal (pairwise distinct per staging, so one), failing diagnosed
+ * where none does.
+ */
+function s23AssertAddition(
+  arm: S23Arm,
+  addition: S23Addition,
+  pre: Uint8Array,
+  after: S23After,
+  added: readonly AddedImportDeclaration[],
+  context: string,
+): readonly number[] {
+  const ident =
+    added.length === 1 &&
+    added[0]?.specifier === addition.specifier &&
+    added[0].identifiers.length === 1
+      ? added[0].identifiers[0]
+      : undefined;
+  if (ident === undefined) {
+    fail(
+      `${context}: the move adds exactly one import declaration to ` +
+        `${arm.receiver}, binding its module's default — \`import <X> ` +
+        `from "${addition.specifier}"\` (SPEC 6.5: ${addition.why}); the ` +
+        `declarations added: ` +
+        JSON.stringify(added.map((declaration) => declaration.text)) +
+        `; the file reads ${JSON.stringify(after.text)}`,
+    );
+  }
+  const declaration = s23Declaration(ident, addition.specifier);
+  const readings = addition.offsets.filter((offset) => {
+    const composed = s23Compose(pre, arm.rewrites, ident, {
+      offset,
+      declaration,
+    });
+    return (
+      composed !== undefined && Buffer.compare(composed, after.bytes) === 0
+    );
+  });
+  if (readings.length === 0) {
+    fail(
+      `${context}: ${arm.receiver} after the move is exactly the staged ` +
+        `bytes with ${s23Rewritten(pre, arm.rewrites, ident)} and ` +
+        `${JSON.stringify(declaration)} inserted under 6.5's line ` +
+        `discipline (U+000A after it, one before it where the offset is ` +
+        `not at a line's start) at ` +
+        addition.offsets.map((offset) => s23Where(pre, offset)).join(" or ") +
+        ` — ${arm.placement} (SPEC 6.5, 1.4, 3, 6.4; T6.5-8's ` +
+        `discipline, value-blind in the identifier alone); ` +
+        `${s23Misplacement(arm, addition, pre, after.bytes, ident)}; the ` +
+        `file reads ${JSON.stringify(after.text)}`,
+    );
+  }
+  return readings;
+}
+
+/**
+ * The receiver gains no declaration — T6.5-22(a)'s judgement reads none —
+ * and is exactly the staged bytes with the rewrite's edits alone, byte-
+ * composable exactly, failing diagnosed otherwise.
+ */
+function s23AssertNothingAdded(
+  arm: S23Arm,
+  pre: Uint8Array,
+  after: S23After,
+  added: readonly AddedImportDeclaration[],
+  context: string,
+): void {
+  if (added.length > 0) {
+    fail(
+      `${context}: the move adds no import declaration to ${arm.receiver} ` +
+        `— ${arm.placement} (SPEC 6.5); the declarations added: ` +
+        JSON.stringify(added.map((declaration) => declaration.text)) +
+        `; the file reads ${JSON.stringify(after.text)}`,
+    );
+  }
+  const expected = s23Compose(pre, arm.rewrites, "") ?? Buffer.from(pre);
+  if (Buffer.compare(expected, after.bytes) !== 0) {
+    fail(
+      `${context}: ${arm.receiver} after the move is exactly the staged ` +
+        `bytes with ${s23Rewritten(pre, arm.rewrites, "")} and no other ` +
+        `byte changed — ${arm.placement} (SPEC 6.5, 6.4; byte-composable ` +
+        `exactly); expected ${JSON.stringify(expected.toString("utf8"))}, ` +
+        `the file reads ${JSON.stringify(after.text)}`,
+    );
+  }
+}
+
+/** The spans of `edits`, in a canonical order, against `spans`. */
+function s23SameSpans(
+  edits: readonly PreviewEdit[],
+  spans: readonly S23Span[],
+): boolean {
+  const key = (span: S23Span): string =>
+    `${String(span.start)}:${String(span.end)}`;
+  const got = edits.map((edit) => key(edit.range)).sort();
+  const want = spans.map(key).sort();
+  return (
+    got.length === want.length &&
+    got.every((value, index) => value === want[index])
+  );
+}
+
+/** Spans in words, for diagnoses. */
+function s23Spans(spans: readonly S23Span[]): string {
+  return spans
+    .map((span) => `[${String(span.start)}, ${String(span.end)})`)
+    .join(", ");
+}
+
+/**
+ * The preview's entry for the receiver against the real operation (SPEC
+ * 6.6: a preview reports exactly the real operation's edits; T6.6-4(b)):
+ * the `import-addition` parity, then whatever the arm's preview expectation
+ * states.
+ */
+function s23AssertPreview(
+  arm: S23Arm,
+  pre: Uint8Array,
+  entry: PreviewFileEntry,
+  readings: readonly number[],
+  context: string,
+): void {
+  const label = `${context}: the preview's entry for ${arm.receiver}`;
+  const of = (cls: PreviewEditClass): readonly PreviewEdit[] =>
+    entry.edits.filter((edit) => edit.class === cls);
+  const additions = of("import-addition");
+  if (arm.addition !== undefined) {
+    const addition = additions.length === 1 ? additions[0] : undefined;
+    if (
+      addition === undefined ||
+      addition.range.start !== addition.range.end ||
+      !readings.includes(addition.range.start)
+    ) {
+      fail(
+        `${label} reports exactly one \`import-addition\`, zero-length at ` +
+          `the offset the real operation then used — ` +
+          readings.map((offset) => s23Where(pre, offset)).join(" or ") +
+          `, where the bytes above stand (SPEC 6.6, 6.5: the offset is ` +
+          `exactly the one the preview reports; T6.6-4(b)); the preview's ` +
+          `edits: ${JSON.stringify(entry.edits)}`,
+      );
+    }
+  } else if (additions.length > 0) {
+    fail(
+      `${label} reports no \`import-addition\` — the real operation adds ` +
+        `no declaration to it (SPEC 6.6, 6.5; T6.6-4(b)); the preview's ` +
+        `edits: ${JSON.stringify(entry.edits)}`,
+    );
+  }
+  const wanted = arm.preview?.rewrites;
+  if (wanted !== undefined) {
+    const rewrites = of("reference-rewrite");
+    const holds =
+      typeof wanted === "number"
+        ? rewrites.length === wanted
+        : s23SameSpans(rewrites, wanted);
+    if (!holds) {
+      fail(
+        `${label} reports ` +
+          (typeof wanted === "number"
+            ? `exactly ${String(wanted)} \`reference-rewrite\` ` +
+              `edit${wanted === 1 ? "" : "s"}`
+            : `exactly the \`reference-rewrite\` edits spanning ` +
+              s23Spans(wanted)) +
+          ` (SPEC 6.6, 6.5, 12.7: the real operation's rewrites); the ` +
+          `preview's edits: ${JSON.stringify(entry.edits)}`,
+      );
+    }
+  }
+  const removals = arm.preview?.removals;
+  if (removals !== undefined && !s23SameSpans(of("import-removal"), removals)) {
+    fail(
+      `${label} reports ` +
+        (removals.length === 0
+          ? "no `import-removal`"
+          : `exactly the \`import-removal\` edits spanning ${s23Spans(removals)}`) +
+        ` (SPEC 6.6, 6.5, 12.7: the real operation's removals); the ` +
+        `preview's edits: ${JSON.stringify(entry.edits)}`,
+    );
+  }
+}
+
+/** `query edges` after the move answers exactly the arm's edge between its
+ * two graph nodes, of its kind (SPEC 11.1, 5.2, 4.6). */
+async function s23AssertEdge(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  edge: S23Edge,
+  context: string,
+): Promise<void> {
+  const argv = [
+    "query",
+    "edges",
+    "--from",
+    edge.from,
+    "--to",
+    edge.to,
+    "--kinds",
+    edge.kind,
+  ];
+  const label = `${context}: \`${argv.join(" ")}\` after the move`;
+  assertEdgeSetEqual(
+    decodeEdgesReport(
+      await runJson(
+        product,
+        workspace,
+        argv,
+        `${label} — a valid workspace answers with exit 0 (SPEC 11.1, 13.3)`,
+      ),
+      label,
+    ),
+    [{ from: edge.from, to: edge.to, kind: edge.kind }],
+    `${label}: exactly ${edge.what}'s \`${edge.kind}\` edge from ` +
+      `${edge.from} to ${edge.to} (SPEC 6.5, 5.2, 4.6, 11.1)`,
+  );
 }
 
 /** One staging in its own fresh workspace (see the notes). */
 async function runS23Arm(product: ProductBinding, arm: S23Arm): Promise<void> {
   const context = `T6.5-23 ${arm.key}`;
+  const moveLabel = arm.argv.join(" ");
   s23AssertPremises(arm);
   const workspace = await TestWorkspace.create({
-    files: {
-      "xspec.config.ts": S23_CONFIG,
-      [S23_ORIGIN]: S23_ORIGIN_SOURCE,
-      [S23_TARGET]: S23_TARGET_SOURCE,
-      ...arm.extra,
-      [S23_APP]: arm.staged,
-    },
+    files: { ...arm.files, [arm.receiver]: arm.staged },
   });
   try {
     await expectFindingFreeReport(
@@ -488,41 +888,44 @@ async function runS23Arm(product: ProductBinding, arm: S23Arm): Promise<void> {
       assertNoCompileErrors(
         await ConsumerProject.load({
           rootDir: workspace.root,
-          rootFiles: [S23_APP],
+          rootFiles: [arm.receiver],
         }),
-        `${context}: ${S23_APP} compiles clean under standard tooling ` +
+        `${context}: ${arm.receiver} compiles clean under standard tooling ` +
           `before the move (H-2) — ${arm.compiles}`,
       );
     }
-    const preview = await s23PreviewEntry(product, workspace, context);
+    const preview =
+      arm.addition !== undefined || arm.preview !== undefined
+        ? await s23PreviewEntry(product, workspace, arm, context)
+        : undefined;
     decodeAppliedMappingReport(
       await runJson(
         product,
         workspace,
-        [...S23_ARGV, "--json"],
-        `${context}: \`${S23_MOVE_LABEL} --json\` — a valid move whose ` +
-          `receiver holds an admissible offset is performed: exit 0 (SPEC ` +
-          `6.5, 12.0)`,
+        [...arm.argv, "--json"],
+        `${context}: \`${moveLabel} --json\` — a valid move` +
+          (arm.addition === undefined
+            ? ""
+            : " whose receiver holds an admissible offset") +
+          ` is performed: exit 0 (SPEC 6.5, 12.0)`,
       ),
-      `${context}: \`${S23_MOVE_LABEL} --json\` — the form-exact 12.7 ` +
+      `${context}: \`${moveLabel} --json\` — the form-exact 12.7 ` +
         `performed-operation document (SPEC 6.5, 12.7)`,
     );
 
     const pre = Buffer.from(arm.text, "utf8");
-    const after = await s23ReadReceiver(workspace, context);
-    const verdict = judgeTypeScript(after.bytes, S23_APP);
-    if (verdict.verdict !== "well-formed") {
+    const after = await s23ReadReceiver(workspace, arm, context);
+    const malformed = s23Malformed(arm, after.bytes);
+    if (malformed !== undefined) {
       fail(
-        `${context}: ${S23_APP} after the move is text TypeScript 5.9.3 ` +
-          `accepts both as module code and as script code — 6.5 keeps every ` +
-          `file a move rewrites well-formed (SPEC 14.20); the judge's ` +
-          `verdict: ${JSON.stringify(verdict)}; the file reads ` +
-          `${JSON.stringify(after.text)}`,
+        `${context}: ${arm.receiver} after the move is well-formed — 6.5 ` +
+          `keeps every file a move rewrites well-formed (SPEC 14.20) — yet ` +
+          `it is ${malformed}; the file reads ${JSON.stringify(after.text)}`,
       );
     }
     const judgement = judgeAddedImportsOfFile(
-      S23_APP,
-      "typescript",
+      arm.receiver,
+      arm.kind,
       arm.text,
       after.text,
     );
@@ -533,69 +936,24 @@ async function runS23Arm(product: ProductBinding, arm: S23Arm): Promise<void> {
           judgement.problems.map((problem) => `  - ${problem}`).join("\n"),
       );
     }
-    const added = judgement.added;
-    const ident =
-      added.length === 1 &&
-      added[0]?.specifier === S23_TARGET_SPECIFIER &&
-      added[0].identifiers.length === 1
-        ? added[0].identifiers[0]
-        : undefined;
-    if (ident === undefined) {
-      fail(
-        `${context}: the move adds exactly one import declaration to ` +
-          `${S23_APP}, binding the target module's default — ` +
-          `\`import <X> from "${S23_TARGET_SPECIFIER}"\` (SPEC 6.5: one ` +
-          `declaration per module whose bindings the rewritten spellings ` +
-          `are rooted at and the file lacks; \`O\` keeps its use by ` +
-          `\`O.w\`); the declarations added: ` +
-          JSON.stringify(added.map((declaration) => declaration.text)) +
-          `; the file reads ${JSON.stringify(after.text)}`,
+    let readings: readonly number[] = [];
+    if (arm.addition === undefined) {
+      s23AssertNothingAdded(arm, pre, after, judgement.added, context);
+    } else {
+      readings = s23AssertAddition(
+        arm,
+        arm.addition,
+        pre,
+        after,
+        judgement.added,
+        context,
       );
     }
-
-    const declaration = s23Declaration(ident);
-    const readings = arm.offsets.filter((offset) => {
-      const composed = s23Compose(pre, arm.rewrites, ident, {
-        offset,
-        declaration,
-      });
-      return (
-        composed !== undefined && Buffer.compare(composed, after.bytes) === 0
-      );
-    });
-    if (readings.length === 0) {
-      fail(
-        `${context}: ${S23_APP} after the move is exactly the staged bytes ` +
-          `with the marker \`O.x\` rewritten in place to \`${ident}.y\` and ` +
-          `${JSON.stringify(declaration)} inserted under 6.5's line ` +
-          `discipline (U+000A after it, one before it where the offset is ` +
-          `not at a line's start) at ` +
-          arm.offsets.map((offset) => s23Where(pre, offset)).join(" or ") +
-          ` — ${arm.placement} (SPEC 6.5, 1.4, 3, 6.4; T6.5-8's ` +
-          `discipline, value-blind in the identifier alone); ` +
-          `${s23Misplacement(arm, pre, after.bytes, ident)}; the file ` +
-          `reads ${JSON.stringify(after.text)}`,
-      );
+    if (preview !== undefined) {
+      s23AssertPreview(arm, pre, preview, readings, context);
     }
-
-    const additions = preview.edits.filter(
-      (edit) => edit.class === "import-addition",
-    );
-    const addition = additions.length === 1 ? additions[0] : undefined;
-    if (
-      addition === undefined ||
-      addition.range.start !== addition.range.end ||
-      !readings.includes(addition.range.start)
-    ) {
-      fail(
-        `${context}: the preview's entry for ${S23_APP} reports exactly ` +
-          `one \`import-addition\`, zero-length at the offset the real ` +
-          `operation then used — ` +
-          readings.map((offset) => s23Where(pre, offset)).join(" or ") +
-          `, where the bytes above stand (SPEC 6.6, 6.5: the offset is ` +
-          `exactly the one the preview reports; T6.6-4(b)); the preview's ` +
-          `edits: ${JSON.stringify(preview.edits)}`,
-      );
+    for (const edge of arm.edges ?? []) {
+      await s23AssertEdge(product, workspace, edge, context);
     }
 
     await expectFindingFreeReport(
@@ -618,9 +976,9 @@ async function runS23Arm(product: ProductBinding, arm: S23Arm): Promise<void> {
       assertNoCompileErrors(
         await ConsumerProject.load({
           rootDir: workspace.root,
-          rootFiles: [S23_APP],
+          rootFiles: [arm.receiver],
         }),
-        `${context}: ${S23_APP} compiles clean under standard tooling ` +
+        `${context}: ${arm.receiver} compiles clean under standard tooling ` +
           `after the move (H-2) — ${arm.compiles}; the file reads ` +
           `${JSON.stringify(after.text)}`,
       );
@@ -630,17 +988,50 @@ async function runS23Arm(product: ProductBinding, arm: S23Arm): Promise<void> {
   }
 }
 
-/** An arm at module load: its `src/c.ts` record and its marker's rewrite. */
-function s23Arm(spec: Omit<S23Arm, "staged" | "rewrites">): S23Arm {
+/** A staged `src/c.ts` (S-9's record, declared well-formed TypeScript). */
+function s23StagedApp(key: string, text: string): StagedTs {
+  return stagedTs(`T6.5-23 ${key} ${S23_APP}`, text, "well-formed", "ts");
+}
+
+/** Why each staging of (a) through (e) gains its declaration (SPEC 6.5). */
+const S23_O_WHY =
+  "one declaration per module whose bindings the rewritten spellings are " +
+  "rooted at and the file lacks; `O` keeps its use by `O.w`";
+
+/** An arm of (a) through (e) at module load: its `src/c.ts` record, the
+ * common staging, the arms' move, the marker's rewrite to `<X>.y`, and the
+ * target module's declaration at one of `offsets`. */
+function s23Arm(spec: {
+  readonly key: string;
+  readonly text: string;
+  readonly extra?: Readonly<Record<string, InitialFileContents>>;
+  readonly offsets: readonly number[];
+  readonly placement: string;
+  readonly excluded: Readonly<Record<number, string>>;
+  readonly compiles?: string;
+}): S23Arm {
   return {
-    ...spec,
-    staged: stagedTs(
-      `T6.5-23 ${spec.key} ${S23_APP}`,
-      spec.text,
-      "well-formed",
-      "ts",
-    ),
+    key: spec.key,
+    receiver: S23_APP,
+    kind: "typescript",
+    text: spec.text,
+    staged: s23StagedApp(spec.key, spec.text),
+    files: {
+      "xspec.config.ts": S23_CONFIG,
+      [S23_ORIGIN]: S23_ORIGIN_SOURCE,
+      [S23_TARGET]: S23_TARGET_SOURCE,
+      ...spec.extra,
+    },
+    argv: S23_ARGV,
     rewrites: [s23Marker(spec.text, spec.key)],
+    addition: {
+      specifier: S23_TARGET_SPECIFIER,
+      offsets: spec.offsets,
+      why: S23_O_WHY,
+    },
+    placement: spec.placement,
+    excluded: spec.excluded,
+    ...(spec.compiles === undefined ? {} : { compiles: spec.compiles }),
   };
 }
 
@@ -920,7 +1311,334 @@ const S23_E_SHAPE = s23Arm({
   },
 });
 
-/** Arms (a) through (e), in TEST-SPEC's order. */
+// (f) timeliness: TEST-SPEC's `move specs/A.mdx#m specs/B.mdx#m`, over
+// `specs/A.mdx` holding `m` and `k` and `specs/B.mdx` holding `b` and no `m`,
+// as throughout (f).
+const S23_F_ARGV = ["move", "specs/A.mdx#m", "specs/B.mdx#m"] as const;
+/** `B`'s module's canonical relative specifier from `src/` (6.5). */
+const S23_F_SPECIFIER = "../specs/B.xspec";
+
+const S23_F_A_SOURCE: StagedMdx = stagedMdx(
+  "T6.5-23 (f) specs/A.mdx (the moved m, the kept k)",
+  [
+    '<S id="m">',
+    "M text.",
+    "</S>",
+    "",
+    '<S id="k">',
+    "K text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+const S23_F_B_SOURCE: StagedMdx = stagedMdx(
+  "T6.5-23 (f) specs/B.mdx (b, no m)",
+  ['<S id="b">', "B text.", "</S>", ""].join("\n"),
+);
+
+/** `A`'s declaration, at [0, 32) where it heads the file. */
+const S23_IMPORT_A = 'import A from "../specs/A.xspec"';
+/** `B`'s declaration. */
+const S23_IMPORT_B = 'import B from "../specs/B.xspec"';
+
+/** The moved marker's edge after the move: from `src/c.ts` — a top-level
+ * statement's reference is attributed to the file (4.6) — to the moved
+ * node's new identity. */
+const S23_F_EDGE: S23Edge = {
+  from: S23_APP,
+  to: "specs/B.mdx#m",
+  kind: "references",
+  what: "the moved marker",
+};
+
+/** Why an offset after `A.m` is excluded in (f): untimely. */
+function s23FUntimely(where: string, between: string): string {
+  return (
+    `${where} — untimely, ${between} standing between it and \`A\`'s ` +
+    `declaration (6.5: an added binding is declared at or before the ` +
+    `binding the spelling was rooted at, or after it with no top-level ` +
+    `statement between but import declarations)`
+  );
+}
+
+/** A staging of (f) at module load: the marker `A.m` rewritten in place to
+ * `<X>.m` where `B`'s module gains a declaration, re-rooted to `B.m`
+ * where it gains none. */
+function s23FArm(spec: {
+  readonly key: string;
+  readonly lines: readonly string[];
+  readonly addition?: {
+    readonly offsets: readonly number[];
+    readonly why: string;
+  };
+  readonly placement: string;
+  readonly excluded?: Readonly<Record<number, string>>;
+  readonly preview?: S23PreviewExpectation;
+  readonly edges?: readonly S23Edge[];
+}): S23Arm {
+  const text = [...spec.lines, ""].join("\n");
+  const addition = spec.addition;
+  return {
+    key: spec.key,
+    receiver: S23_APP,
+    kind: "typescript",
+    text,
+    staged: s23StagedApp(spec.key, text),
+    files: {
+      "xspec.config.ts": S23_CONFIG,
+      "specs/A.mdx": S23_F_A_SOURCE,
+      "specs/B.mdx": S23_F_B_SOURCE,
+    },
+    argv: S23_F_ARGV,
+    rewrites: [
+      addition === undefined
+        ? s23Marker(text, spec.key, "A.m", () => "B.m")
+        : s23Marker(text, spec.key, "A.m", (ident) => `${ident}.m`),
+    ],
+    addition:
+      addition === undefined
+        ? undefined
+        : { specifier: S23_F_SPECIFIER, ...addition },
+    placement: spec.placement,
+    excluded: spec.excluded ?? {},
+    ...(spec.preview === undefined ? {} : { preview: spec.preview }),
+    ...(spec.edges === undefined ? {} : { edges: spec.edges }),
+  };
+}
+
+// (f) 6.5's example: `B` is untimely for the moved marker.
+const S23_F_EXAMPLE = s23FArm({
+  key: "(f) 6.5's example",
+  lines: [S23_IMPORT_A, "A.m", "A.k", S23_IMPORT_B, "B.b"],
+  addition: {
+    offsets: [33],
+    why:
+      "`B` is untimely for the moved marker — its declaration follows " +
+      "`A`'s with the statement `A.m` between — so a second declaration " +
+      "of `B`'s module is added, binding `<X>` distinct from `B`; a " +
+      "product rooting at `B` writes `B.m`, which TypeScript's CommonJS " +
+      "output reads before initializing `B`",
+  },
+  placement:
+    "the start of line 2 (offset 33), the only line-start admissible " +
+    "offset — the end of line 1, admissible too, is mid-line, and every " +
+    "later line start is untimely — `A.k`, `import B …`, and `B.b` " +
+    "unchanged",
+  excluded: {
+    0: S23_NO_STATEMENT_BEFORE,
+    32: s23MidLine("the end of line 1, `A`'s declaration's end"),
+    37: s23FUntimely("the start of line 3", "the statement `A.m`"),
+    41: s23FUntimely("the start of line 4", "the statements `A.m` and `A.k`"),
+    74: s23FUntimely("the start of line 5", "the statements `A.m` and `A.k`"),
+    78: s23FUntimely(
+      "the file's end",
+      "the statements `A.m`, `A.k`, and `B.b`",
+    ),
+  },
+  edges: [S23_F_EDGE],
+});
+
+// (f) its control: `B`'s declaration on line 2, before `A.m`.
+const S23_F_CONTROL = s23FArm({
+  key: "(f) control",
+  lines: [S23_IMPORT_A, S23_IMPORT_B, "A.m", "A.k", "B.b"],
+  placement:
+    "`B` is timely — its declaration directly follows `A`'s (6.5: or " +
+    "follows it with no top-level statement between them but import " +
+    "declarations) — so the marker is re-rooted to `B.m` and nothing is " +
+    "added",
+});
+
+/** The control with `line` interposed between `import A …` and `import B
+ * …`, its lines and the byte offsets of its line starts after line 2. */
+function s23FInterposed(line: string): {
+  readonly lines: readonly string[];
+  readonly starts: readonly number[];
+} {
+  const lines = [S23_IMPORT_A, line, S23_IMPORT_B, "A.m", "A.k", "B.b"];
+  const starts: number[] = [];
+  let offset = 0;
+  for (const each of lines) {
+    offset += Buffer.byteLength(each, "utf8") + 1;
+    starts.push(offset);
+  }
+  return { lines, starts: starts.slice(1) };
+}
+
+// (f) the boundary of the import-declaration exemption: a top-level
+// statement other than an import declaration interposed in the control.
+function s23FBoundary(line: string, key: string, why: string): S23Arm {
+  const { lines, starts } = s23FInterposed(line);
+  const [line3, line4, line5, line6, end] = starts as [
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  return s23FArm({
+    key,
+    lines,
+    addition: { offsets: [33], why },
+    placement:
+      "the start of line 2 (offset 33), between `import A …` and the " +
+      "interposed line — the one line-start admissible offset, the start " +
+      "of line 3 and every later one untimely — the marker rewritten in " +
+      "place to `<X>.m`, every other line unchanged",
+    excluded: {
+      0: S23_NO_STATEMENT_BEFORE,
+      32: s23MidLine("the end of line 1, `A`'s declaration's end"),
+      [line3]: s23FUntimely("the start of line 3", `\`${line}\``),
+      [line4]: s23FUntimely("the start of line 4", `\`${line}\``),
+      [line5]: s23FUntimely("the start of line 5", `\`${line}\` and \`A.m\``),
+      [line6]: s23FUntimely(
+        "the start of line 6",
+        `\`${line}\`, \`A.m\`, and \`A.k\``,
+      ),
+      [end]: s23FUntimely(
+        "the file's end",
+        `\`${line}\`, \`A.m\`, \`A.k\`, and \`B.b\``,
+      ),
+    },
+  });
+}
+
+const S23_F_TYPE_ALIAS = s23FBoundary(
+  "type T = number",
+  "(f) boundary: `type T = number`",
+  "`type T = number` reads no `B` and emits no code, yet it is a top-level " +
+    "statement other than an import declaration standing between the two " +
+    "declarations, so `B` is untimely and a declaration of `B`'s module is " +
+    "added, binding `<X>` distinct from `B`; a product exempting statements " +
+    "that emit no code re-roots the marker at `B` and adds nothing",
+);
+
+const S23_F_IMPORT_EQUALS = s23FBoundary(
+  'import Z = require("./z")',
+  '(f) boundary: `import Z = require("./z")`',
+  '`import Z = require("./z")`, a module-linking form other than an ' +
+    "import declaration (4), reads no `B`, yet it is a top-level statement " +
+    "other than an import declaration standing between the two " +
+    "declarations, so `B` is untimely and a declaration of `B`'s module is " +
+    "added, binding `<X>` distinct from `B`; a product exempting every " +
+    "module-linking form re-roots the marker at `B` and adds nothing",
+);
+
+// (f) the exempt side: an import declaration interposed instead, binding no
+// value and naming no spec module.
+function s23FExempt(line: string, key: string, what: string): S23Arm {
+  return s23FArm({
+    key,
+    lines: s23FInterposed(line).lines,
+    placement:
+      `\`${line}\`, ${what}, is an import declaration, so \`B\` stays ` +
+      "timely (6.5: no top-level statement between the two declarations " +
+      "but import declarations), the marker is re-rooted to `B.m`, and " +
+      "nothing is added; a product exempting only spec module imports, or " +
+      "only imports binding a value, adds a declaration of `B`'s module",
+    preview: { rewrites: 1, removals: [] },
+  });
+}
+
+const S23_F_TYPE_IMPORT = s23FExempt(
+  'import type { T } from "./t"',
+  '(f) exempt: `import type { T } from "./t"`',
+  "a type-only import declaration binding no value and naming no spec module",
+);
+
+const S23_F_SIDE_EFFECT = s23FExempt(
+  'import "./p"',
+  '(f) exempt: `import "./p"`',
+  "a side-effect import declaration binding nothing and naming no spec module",
+);
+
+// (f) the precedence branch at a distance: `B`'s declaration precedes
+// `A`'s, the statement `B.b` between them; the marker `A.m` at [70, 73).
+const S23_F_PRECEDENCE = s23FArm({
+  key: "(f) the precedence branch at a distance",
+  lines: [S23_IMPORT_B, "B.b", S23_IMPORT_A, "A.m", "A.k"],
+  placement:
+    "`B`'s declaration precedes `A`'s, so `B` is timely for the moved " +
+    "marker (6.5: its declaration is or precedes that of the binding the " +
+    "spelling was rooted at), though the statement `B.b` stands between " +
+    "them — the precedence branch bounds no distance, the " +
+    "import-declaration condition governing a later declaration alone — " +
+    "so the marker is re-rooted to `B.m`, nothing is added, and `A`'s " +
+    "declaration stays, kept by `A.k`; a product applying the succession " +
+    "condition in both directions adds a declaration of `B`'s module and " +
+    "writes `<X>.m`",
+  preview: { rewrites: [{ start: 70, end: 73 }], removals: [] },
+  edges: [S23_F_EDGE],
+});
+
+// (g) the spec-source side of the split rule: TEST-SPEC's target, its first
+// two lines one declaration of one ESM block, receiving into `p.n`
+// T6.5-13(h)'s moved text — T6.5-13's cross-file origin and third module —
+// which needs `import <X> from "./x.xspec"`.
+const S23_G_RECEIVER = "specs/target.mdx";
+const S23_G_TEXT = [
+  'import K from "./k.xspec"',
+  ";",
+  "",
+  '<S id="p">',
+  "x {text(K.a)}",
+  "</S>",
+  "",
+].join("\n");
+/** The start of the `</S>` line, where the moved text and a U+000A are
+ * inserted (T6.5-13's composition). */
+const S23_G_CLOSE = Buffer.from(S23_G_TEXT, "utf8").lastIndexOf("</S>");
+
+const S23_G: S23Arm = {
+  key: "(g)",
+  receiver: S23_G_RECEIVER,
+  kind: "spec-source",
+  text: S23_G_TEXT,
+  staged: stagedMdx(
+    "T6.5-23 (g) specs/target.mdx (K's declaration across lines 1 and 2 of one ESM block, then p)",
+    S23_G_TEXT,
+  ),
+  files: {
+    "xspec.config.ts": R16_CONFIG,
+    "specs/a.mdx": A13_ORIGIN_STAGED,
+    "specs/x.mdx": A13_THIRD_STAGED,
+    "specs/k.mdx": A13_THIRD_STAGED,
+  },
+  argv: ["move", "specs/a.mdx#m", `${S23_G_RECEIVER}#p.n`],
+  rewrites: [
+    {
+      start: S23_G_CLOSE,
+      end: S23_G_CLOSE,
+      spelled: (ident) => [...a13MovedLines("p.n", ident), ""].join("\n"),
+    },
+  ],
+  addition: {
+    specifier: "./x.xspec",
+    offsets: [0, 28, 59],
+    why:
+      "the moved text's `{text(X.a)}` embedding is rooted at the origin's " +
+      "binding of `specs/x.mdx`, a module the target lacks — its `K` binds " +
+      "`specs/k.mdx` — so exactly one declaration of it is added " +
+      "(T6.5-13's shape)",
+  },
+  placement:
+    "offset 0, the start of the empty line (28), or the file's end (59) — " +
+    "the admissible line starts, 6.5's latitude among them — never the " +
+    "start of line 2; the moved text inserted at the start of the `</S>` " +
+    "line, its embedding re-rooted at `<X>`",
+  excluded: {
+    26:
+      "the start of line 2 — its form derives (S-9) yet splits `K`'s " +
+      'declaration, `import K from "./k.xspec"` and the `;` on line 2 one ' +
+      "declaration of one ESM block (6.5: an admissible offset lies inside " +
+      "none of the file's statements before the edit — in a spec source, " +
+      "its ESM blocks' declarations)",
+  },
+  deriving: [26],
+};
+
+/** Arms (a) through (g), in TEST-SPEC's order. */
 const S23_ARMS: readonly S23Arm[] = [
   S23_A_PROLOGUE,
   S23_A_BETWEEN,
@@ -932,12 +1650,20 @@ const S23_ARMS: readonly S23Arm[] = [
   S23_D_LSEP,
   S23_E_SEMICOLON,
   S23_E_SHAPE,
+  S23_F_EXAMPLE,
+  S23_F_CONTROL,
+  S23_F_TYPE_ALIAS,
+  S23_F_IMPORT_EQUALS,
+  S23_F_TYPE_IMPORT,
+  S23_F_SIDE_EFFECT,
+  S23_F_PRECEDENCE,
+  S23_G,
 ];
 
 const T6_5_23 = defineProductTest({
   id: "T6.5-23",
   title:
-    'statement boundaries, the directive prologue, and timeliness — arms (a) through (e), each a section move `move specs/origin.mdx#x specs/target.mdx#y` whose receiver `src/c.ts` (`import O from "../specs/origin.xspec"` beside `f` = `export function f() { O.x; O.w }`) gains exactly `import <X> from "../specs/target.xspec"`, value-blind in `<X>` alone, at an admissible offset, the marker rewritten in place to `<X>.y`, every other byte as staged: (a) after a `"use client"` prologue at the start of line 2 or 3, never offset 0, and between two directives (`"use client"`, then `"use strict"; import O … // note`), no line start admissible, at offset 26, 27, 64, or 65; (b) under `// @ts-nocheck` and under `/// <reference lib="esnext" />` at the start of line 3, never above the directive; (c) at the start of line 2, before a `// @ts-expect-error` comment, never between it and the statement it governs, the file compiling clean under standard tooling before and after the move; (d) after a trailing `// note` mid-line at 37 or 38, and after U+00A0 or U+2028 at 37 alone (1.4\'s whitespace, 3\'s terminators); (e) after a `;` terminating `O`\'s declaration across a line at the start of line 3, never inside the declaration, and in 6.5\'s own shape (one call statement across two lines) at one of six mid-line offsets, never at the start of line 3 — each move exiting 0, the result text TypeScript 5.9.3 accepts both as module code and as script code, the preview\'s one `import-addition` at the offset the real operation used (T6.6-4(b)), and `check` and `build` clean after it (SPEC 6.5, 1.4, 3, 6.4, 6.6, 12.7, 14.20)',
+    'statement boundaries, the directive prologue, and timeliness — arms (a) through (g), each a section move: in (a) through (e) `move specs/origin.mdx#x specs/target.mdx#y`, whose receiver `src/c.ts` (`import O from "../specs/origin.xspec"` beside `f` = `export function f() { O.x; O.w }`) gains exactly `import <X> from "../specs/target.xspec"`, value-blind in `<X>` alone, at an admissible offset, the marker rewritten in place to `<X>.y`, every other byte as staged: (a) after a `"use client"` prologue at the start of line 2 or 3, never offset 0, and between two directives (`"use client"`, then `"use strict"; import O … // note`), no line start admissible, at offset 26, 27, 64, or 65; (b) under `// @ts-nocheck` and under `/// <reference lib="esnext" />` at the start of line 3, never above the directive; (c) at the start of line 2, before a `// @ts-expect-error` comment, never between it and the statement it governs, the file compiling clean under standard tooling before and after the move; (d) after a trailing `// note` mid-line at 37 or 38, and after U+00A0 or U+2028 at 37 alone (1.4\'s whitespace, 3\'s terminators); (e) after a `;` terminating `O`\'s declaration across a line at the start of line 3, never inside the declaration, and in 6.5\'s own shape (one call statement across two lines) at one of six mid-line offsets, never at the start of line 3; (f) timeliness under `move specs/A.mdx#m specs/B.mdx#m`: 6.5\'s example (`import A …`, `A.m`, `A.k`, `import B …`, `B.b`), `B` untimely for the marker, gains `import <X> from "../specs/B.xspec"` at the start of line 2, the marker written `<X>.m`, and `query edges` reports the marker\'s `references` edge from `src/c.ts` to `specs/B.mdx#m`; its control (`import B …` on line 2) is re-rooted to `B.m`, nothing added; with `type T = number` or `import Z = require("./z")` interposed between the two declarations `B` is untimely and the declaration is added at offset 33; with `import type { T } from "./t"` or `import "./p"` interposed `B` stays timely, the marker re-rooted to `B.m`, nothing added, the preview one `reference-rewrite` and no `import-addition` or `import-removal`; the precedence branch at a distance (`import B …`, `B.b`, `import A …`, `A.m`, `A.k`) re-rooted to `B.m`, nothing added, the preview\'s one `reference-rewrite` spanning [70, 73), and the marker\'s edge reported; (g) the spec-source side of the split rule: a target whose first two lines are one declaration of one ESM block (`import K from "./k.xspec"`, `;`), receiving T6.5-13(h)\'s moved text into `p.n`, gains `import <X> from "./x.xspec"` at offset 0, the empty line\'s start, or the file\'s end, never at the start of line 2, which derives yet splits the declaration — each move exiting 0, every receiver well-formed after it (TypeScript 5.9.3\'s module and script readings; the stock MDX 3 grammar), the preview\'s one `import-addition` at the offset the real operation used wherever a declaration is added (T6.6-4(b)), and `check` and `build` clean after it (SPEC 6.5, 1.4, 3, 4, 4.6, 5.2, 6.4, 6.6, 11.1, 12.7, 14.20)',
   timeoutMs: 300_000,
   run: async (product) => {
     const failures: string[] = [];

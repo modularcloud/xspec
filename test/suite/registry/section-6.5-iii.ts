@@ -227,11 +227,11 @@ import {
 // One spec group (SPEC 7.1), no code group: every staged `.mdx` under
 // `specs/` is a discovered spec source. A staged-source record: T6.5-12
 // through T6.5-14, T6.5-16, T6.5-17, and T6.5-19 stage it in workspaces
-// created after a product invocation, as T6.6-3, T6.6-4, and T14-7 do
-// through R16_CONFIG (S-9's timing clause;
+// created after a product invocation, as T6.5-23, T6.6-3, T6.6-4, and T14-7
+// do through R16_CONFIG (S-9's timing clause;
 // test/self/s9-staged-sources.test.ts).
 const CONFIG = stagedTs(
-  "T6.5-12/T6.5-13/T6.5-14/T6.5-16/T6.5-17/T6.5-19/T6.6-3/T6.6-4/T14-7 xspec.config.ts — one spec group, no code group, the module's configuration (R16_CONFIG)",
+  "T6.5-12/T6.5-13/T6.5-14/T6.5-16/T6.5-17/T6.5-19/T6.5-23/T6.6-3/T6.6-4/T14-7 xspec.config.ts — one spec group, no code group, the module's configuration (R16_CONFIG)",
   `import { defineConfig } from "xspec"
 
 export default defineConfig({
@@ -248,7 +248,8 @@ export default defineConfig({
  * T6.6-3's preview twins, which stage T6.5-16's and T6.5-17's arms byte for
  * byte (TEST-SPEC T6.6-3: "staged identically"), and for T6.6-4's tie-break
  * stagings, T6.5-13's (b), (d), and (g) restaged likewise
- * (`A13_TIE_BREAK_ARMS`).
+ * (`A13_TIE_BREAK_ARMS`), and for T6.5-23(g), which moves T6.5-13's
+ * cross-file text (section-6.5-v.ts).
  */
 export const R16_CONFIG = CONFIG;
 
@@ -1308,11 +1309,12 @@ const A13_THIRD_SOURCE = ['<S id="a">', "A text.", "</S>", ""].join("\n");
  * T6.5-13's cross-file arms and (g), T6.5-19's (a), and T6.6-4's tie-break
  * restagings at `specs/x.mdx`; T6.5-16's (g) family, T6.5-17's arms, and
  * their T6.6-3 and T14-7 restagings at `specs/x.mdx` (`R16_G_THIRD_STAGED`,
- * `M17_X_STAGED` below); T6.5-15's `specs/A.mdx`. The string stays for the
- * untouched-file compares and the S-9 vectors.
+ * `M17_X_STAGED` below); T6.5-15's `specs/A.mdx`; T6.5-23(g)'s
+ * `specs/x.mdx` and `specs/k.mdx` (section-6.5-v.ts). The string stays for
+ * the untouched-file compares and the S-9 vectors.
  */
-const A13_THIRD_STAGED = stagedMdx(
-  "T6.5-13/T6.5-15/T6.5-16/T6.5-17/T6.5-19/T6.6-3/T6.6-4/T14-7 the module holding a alone (specs/x.mdx; T6.5-15's specs/A.mdx)",
+export const A13_THIRD_STAGED = stagedMdx(
+  "T6.5-13/T6.5-15/T6.5-16/T6.5-17/T6.5-19/T6.5-23/T6.6-3/T6.6-4/T14-7 the module holding a alone (specs/x.mdx; T6.5-15's specs/A.mdx; T6.5-23's specs/k.mdx)",
   A13_THIRD_SOURCE,
 );
 /** The canonical specifier the receiving file's added declaration carries (SPEC 6.5, 2.1). */
@@ -1331,9 +1333,9 @@ const A13_TARGET_SPECIFIER = canonicalSpecifier("specs", A13_TARGET_MODULE);
  * lines) whose one body line carries, beside prose, the `{text(X.a)}`
  * embedding through the origin's binding of the third module (T6.5-10's
  * shape) — spelled with the ID it bears and the binding its embedding is
- * rooted at.
+ * rooted at. Exported for T6.5-23(g), which moves it (section-6.5-v.ts).
  */
-function a13MovedLines(id: string, root: string): string[] {
+export function a13MovedLines(id: string, root: string): string[] {
   return [`<S id="${id}">`, `Moved {text(${root}.a)} text.`, "</S>"];
 }
 
@@ -1358,9 +1360,9 @@ const A13_ORIGIN_BEFORE = [
   "",
 ].join("\n");
 const A13_ORIGIN_AFTER = [...A13_ORIGIN_HEAD, ""].join("\n");
-/** The cross-file origin as staged — one record (S-9) for T6.5-13's cross-file arms, T6.5-19's (a), and T6.6-4's tie-break restagings. */
-const A13_ORIGIN_STAGED = stagedMdx(
-  "T6.5-13/T6.5-19/T6.6-4 specs/a.mdx the cross-file origin",
+/** The cross-file origin as staged — one record (S-9) for T6.5-13's cross-file arms, T6.5-19's (a), T6.5-23's (g) (section-6.5-v.ts), and T6.6-4's tie-break restagings. */
+export const A13_ORIGIN_STAGED = stagedMdx(
+  "T6.5-13/T6.5-19/T6.5-23/T6.6-4 specs/a.mdx the cross-file origin",
   A13_ORIGIN_BEFORE,
 );
 
