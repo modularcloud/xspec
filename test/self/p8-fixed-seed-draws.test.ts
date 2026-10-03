@@ -26,6 +26,14 @@
 //      P-8's own fixed-seed trials — a form the menu offers that CI never
 //      draws would go unexercised. Should the fixed seeds miss a form, raise
 //      the per-trial command count or weight the pick; never weaken this.
+//
+// A third guard pins how P-8 decides which output contract a drawn form is
+// held to: JSON output is in effect, and the never-a-partial-JSON-document
+// clause applies, exactly when SPEC 12.0 puts it in effect — a `--json`
+// token read as a flag, or a JSON-only surface (10.7, 11, 12.6) with or
+// without one (H-5) — and every JSON-only surface the menu holds has a form
+// without `--json`, so the by-surface half of the rule is exercised, not
+// only the flag half (the sweep guard above then has it drawn).
 
 import { Buffer } from "node:buffer";
 import { expect, test } from "vitest";
@@ -36,6 +44,7 @@ import {
 import {
   COMMAND_MENU,
   genFuzzTrial,
+  jsonOutputInEffect,
   P8_RUNS_PER_SEED,
   sectionTowerSource,
 } from "../suite/registry/section-16-p8.js";
@@ -189,5 +198,71 @@ test("P-8's own fixed-seed draws exercise every command-menu form (TEST-SPEC §1
       `${String(REPLAY_RUNS)} runs; ${String(drawn.size)} of ` +
       `${String(COMMAND_MENU.length)} forms drawn) — raise the per-trial ` +
       `command count or weight the pick, never weaken this guard`,
+  ).toEqual([]);
+});
+
+test("P-8 holds a form to the JSON contract exactly when SPEC 12.0 puts JSON output in effect, and every JSON-only surface its menu holds has a form without --json (TEST-SPEC §16 P-8, H-5; guard vectors)", () => {
+  const vectors: ReadonlyArray<readonly [readonly string[], boolean]> = [
+    // JSON-only surfaces (SPEC 10.7, 11, 12.6), with or without `--json`.
+    [["version"], true],
+    [["version", "--json"], true],
+    [["inventory"], true],
+    [["query", "nodes"], true],
+    [["occurrences", "--file", "specs/B.mdx"], true],
+    [["view", "specs/A.mdx", "--text"], true],
+    [["at", "specs/A.mdx", "0"], true],
+    [["review", "export", "r1"], true],
+    // Flags stand anywhere: the surface is the first non-flag token left
+    // once flags and their values are removed (12.0's grammar).
+    [["--config", "xspec.config.ts", "view"], true],
+    [["--name", "view", "review", "list"], false],
+    // Every other surface: `--json` read as a flag, and only so.
+    [["check"], false],
+    [["ids", "--tree"], false],
+    [["review", "list"], false],
+    [["review", "next", "r1"], false],
+    [["check", "--json"], true],
+    [["--json", "check"], true],
+    [["check", "--json", "--json"], true],
+    [["check", "--file", "--json"], false],
+    [["check", "--", "--json"], false],
+  ];
+  expect(
+    vectors
+      .filter(([argv, expected]) => jsonOutputInEffect(argv) !== expected)
+      .map(
+        ([argv, expected]) =>
+          `${argv.join(" ")} (expected ${String(expected)})`,
+      ),
+    "P-8's reading of when JSON output is in effect (SPEC 12.0)",
+  ).toEqual([]);
+
+  // Per JSON-only surface the menu holds: whether a form without `--json`
+  // is among its forms. Menu forms lead with the command word.
+  const bareForm = new Map<string, boolean>();
+  for (const argv of COMMAND_MENU) {
+    const withoutJson = argv.filter((token) => token !== "--json");
+    if (!jsonOutputInEffect(withoutJson)) continue;
+    const surface =
+      argv[0] === "review" ? argv.slice(0, 2).join(" ") : (argv[0] ?? "");
+    bareForm.set(
+      surface,
+      (bareForm.get(surface) ?? false) || withoutJson.length === argv.length,
+    );
+  }
+  expect([...bareForm.keys()]).toEqual(
+    expect.arrayContaining([
+      "at",
+      "inventory",
+      "occurrences",
+      "query",
+      "version",
+      "view",
+    ]),
+  );
+  expect(
+    [...bareForm].filter(([, bare]) => !bare).map(([surface]) => surface),
+    "every JSON-only surface P-8's menu holds needs a form without --json, " +
+      "so the by-surface half of SPEC 12.0's rule is exercised",
   ).toEqual([]);
 });

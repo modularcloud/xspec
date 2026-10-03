@@ -11,18 +11,28 @@
 //     hang guard (helpers/subprocess.ts): a run killed by the per-invocation
 //     timeout is converted into a *diagnosed assertion failure* (H-8; S-3:
 //     hangs are reported as failures), because termination is this
-//     property's assertion, not merely its harness hygiene. A run killed by
-//     the driver's output-capture cap is never converted: an exhausted
-//     capture limit is a loud harness error, which `checkProperty` reports
-//     with the seed — never a falsified property, since a truncated capture
-//     is indistinguishable from a partial document (H-11; S-8 dimensions the
+//     property's assertion, not merely its harness hygiene. The guard is
+//     dimensioned to the staged answer scale, `view --text` over the
+//     largest draw included (H-11; `FUZZ_COMMAND_TIMEOUT_MS`), and its kill
+//     is reported unshrunk, as P-11's is, since every shrink candidate that
+//     re-observes it costs a full guard. A run killed by the driver's
+//     output-capture cap is never converted: an exhausted capture limit is
+//     a loud harness error, which `checkProperty` reports with the seed —
+//     never a falsified property, since a truncated capture is
+//     indistinguishable from a partial document (H-11; S-8 dimensions the
 //     cap to the staged answer scale and pins this division);
 //   * a command never dies by signal and always exits 0, 1, or 2 — the
 //     SPEC 12.0 exit-code partition ("exit codes partition all outcomes");
-//   * under `--json`, stdout is never a partial JSON document: exit 0/1
-//     emits exactly one JSON document as the entire stdout, and exit 2
-//     emits the 12.7 error document — `{"error": …}` — as that document
-//     (SPEC 12.0; the shared `assertJsonOutputConvention`, H-5);
+//   * whenever JSON output is in effect, stdout is never a partial JSON
+//     document: exit 0/1 emits exactly one JSON document as the entire
+//     stdout, and exit 2 emits the 12.7 error document — `{"error": …}` —
+//     as that document (SPEC 12.0; the shared `assertJsonOutputConvention`,
+//     H-5). JSON output is in effect by flag or by surface, as 12.0 reads
+//     it (`jsonOutputInEffect`): a `--json` token read as a flag, or a
+//     JSON-only surface — `query`, `occurrences`, `view`, `at`, and
+//     `inventory` (11), `version` (12.6), `review export` (10.7) — with or
+//     without `--json`; every other run is held to the exit partition
+//     alone;
 //   * a failing `build` — exit 1 or exit 2 — modifies nothing: the whole
 //     workspace tree, prior derived files and graph data included, is
 //     byte-identical around the invocation (SPEC 12.1, H-4; snapshot
@@ -117,19 +127,27 @@
 // themselves are T2.3-3's, T2.7-3's, T2.7-4's, T3-7's, and T14-12's.
 //
 // The command sweep spans the SPEC 12 surface: `build` (both output forms —
-// the human form via the drawn menu), `check`, `ids`, `show`, all five
-// `query` subcommands, `coverage`, `impact --base` (no repository is staged:
-// an unreadable baseline is itself an exit-2 outcome, 6.3/12.0), `review`
-// reads and `review create`, `rename`, and file-form `move`. Mutating
-// commands may legitimately succeed and modify the workspace when the
-// mutations happen to be benign — P-8 constrains their termination, exit
-// class, and JSON form only; the modifies-nothing arm is `build`'s
-// (SPEC 12.1). Two facts about the CI-pinned draws are guarded permanently,
-// before any product runs, by the fixed-seed draw guard
-// (test/self/p8-fixed-seed-draws.test.ts), which replays P-8's own draws at
-// its registered `P8_RUNS_PER_SEED` runs per seed: every `COMMAND_MENU`
-// entry is drawn at least once, and an intact MDX section tower at least
-// 2048 levels deep is staged (P-8's giant-nesting floor). Beyond those, an
+// the human form via the drawn menu), `check`, `ids`, `show`, all six
+// `query` subcommands (`reachable` over a base dependency path, with and
+// without `--json`), the other query surfaces of 11 — `occurrences`
+// (unfiltered and under `--file`), `view` (with and without `--text`), `at`
+// at an in-range offset of a base file, and `inventory` (with and without
+// `--json`) — `version` (12.6, with and without `--json`), `coverage`,
+// `impact --base` (no repository is staged: an unreadable baseline is
+// itself an exit-2 outcome, 6.3/12.0), `review` reads and `review create`,
+// `rename`, and file-form `move`. Each JSON-only surface has a form drawn
+// without `--json`, so the by-surface half of 12.0's rule is exercised (the
+// fixed-seed draw guard pins it). Mutating commands may legitimately
+// succeed and modify the workspace when the mutations happen to be
+// benign — P-8 constrains their termination, exit class, and JSON form
+// only; the modifies-nothing arm is `build`'s (SPEC 12.1). Two facts about
+// the CI-pinned draws are guarded permanently, before any product runs, by
+// the fixed-seed draw guard (test/self/p8-fixed-seed-draws.test.ts), which
+// replays P-8's own draws at its registered `P8_RUNS_PER_SEED` runs per
+// seed: every `COMMAND_MENU` entry is drawn at least once, and an intact
+// MDX section tower at least 2048 levels deep is staged (P-8's
+// giant-nesting floor); the same file pins `jsonOutputInEffect` and the
+// menu's bare form per JSON-only surface. Beyond those, an
 // implementation-time dry-run over the committed default seeds at the
 // registered 12 runs per seed (`drawFixedSeedTrials`, the S-8 replay)
 // verified that every mutation kind — the three refined classes
@@ -156,6 +174,7 @@
 // two command surfaces.
 
 import { Buffer } from "node:buffer";
+import { VALUE_FLAGS } from "../../helpers/added-import-identifiers.js";
 import { assertJsonOutputConvention, fail } from "../../helpers/assertions.js";
 import type { Choices, Gen } from "../../helpers/property.js";
 import { checkProperty, listOf } from "../../helpers/property.js";
@@ -317,6 +336,32 @@ function fuzzBaseWorkspaceFiles(): Record<string, InitialFileContents> {
 // interpreted by a shell (H-2).
 
 /**
+ * The byte offset of `anchor`'s first occurrence in a base source, plus
+ * `delta` — a menu argument computed from the constant bytes it names, so it
+ * cannot drift from them.
+ */
+function baseByteOffset(text: string, anchor: string, delta: number): number {
+  const index = text.indexOf(anchor);
+  if (index < 0) {
+    throw new Error(
+      `P-8 harness defect: the base source holds no ${JSON.stringify(anchor)}`,
+    );
+  }
+  return Buffer.byteLength(text.slice(0, index), "utf8") + delta;
+}
+
+/**
+ * `at`'s in-range offset (SPEC 11.5) over the base `specs/A.mdx`: the byte
+ * just inside its braced embedding `{text("a.b")}`, within a reference
+ * occurrence's range (5.7) — so over the base workspace the answer carries
+ * that occurrence and its resolved target beside the innermost section
+ * construct. Spelled in decimal digits, as 11.5 requires. Over a mutated
+ * file the offset can lie past its end: a legitimate usage error, exit 2
+ * (11.5, 12.0).
+ */
+const AT_OFFSET = String(baseByteOffset(BASE_SPEC_A, '{text("a.b")}', 1));
+
+/**
  * P-8's command menu. Exported for the fixed-seed draw guard
  * (test/self/p8-fixed-seed-draws.test.ts), which replays P-8's own draws at
  * {@link P8_RUNS_PER_SEED} and fails unless every entry is drawn at least
@@ -336,6 +381,26 @@ export const COMMAND_MENU: ReadonlyArray<readonly string[]> = [
   ["query", "edges", "--json"],
   ["query", "subtree", "specs/A.mdx#a", "--json"],
   ["query", "ancestors", "specs/A.mdx#a.b", "--json"],
+  // `b`'s `d` reference to `A.a` joins the two over the base workspace by a
+  // one-edge dependency path (11.1).
+  [
+    "query",
+    "reachable",
+    "--from",
+    "specs/B.mdx#b",
+    "--to",
+    "specs/A.mdx#a",
+    "--json",
+  ],
+  ["query", "reachable", "--from", "specs/B.mdx#b", "--to", "specs/A.mdx#a"],
+  ["occurrences"],
+  ["occurrences", "--file", "specs/B.mdx"],
+  ["view", "specs/A.mdx"],
+  // `B`'s `{text(A.c)}` expansion consults `specs/A.mdx` too (11.4).
+  ["view", "specs/B.mdx", "--text"],
+  ["at", "specs/A.mdx", AT_OFFSET],
+  ["inventory", "--json"],
+  ["inventory"],
   ["coverage", "--json"],
   ["coverage"],
   ["impact", "--base", "HEAD", "--json"],
@@ -344,6 +409,8 @@ export const COMMAND_MENU: ReadonlyArray<readonly string[]> = [
   ["review", "next", "r1", "--json"],
   ["rename", "specs/A.mdx", "c", "c2", "--json"],
   ["move", "specs/B.mdx", "specs/moved.mdx", "--json"],
+  ["version", "--json"],
+  ["version"],
 ];
 
 // ---------------------------------------------------------------------------
@@ -1233,11 +1300,33 @@ export function renderFuzzTrial(trial: FuzzTrial): string {
 /**
  * Per-invocation hang guard for fuzz runs. Purely the H-8 guard bounding the
  * observation "the command terminates" — never an assertion input beyond
- * that (H-10); generously above any plausible parse time for these staged
- * inputs (≤ ~100 KiB per file), and small enough that a falsified
- * termination clause shrinks within the test budget.
+ * that (H-10) — dimensioned to the staged answer scale (H-11), not to parse
+ * time alone: the menu's answer surfaces emit documents far larger than
+ * their inputs. The largest answer a menu form admits over a P-8 draw is
+ * `view specs/B.mdx --text` over `specs/B.mdx` carrying two appended
+ * depth-4096 balanced section towers (B's own maximum: the LF → U+2028
+ * rewrite that grows P-11's maximum leaves B unparseable, its import line
+ * swallowing the file). Measured against the built product (Phase 10's, at
+ * c62f451) through `runProduct` on a 4-core machine, alone, under the
+ * unprivileged namespace: that invocation emits 25.0 MB and terminates in
+ * 3.8–5.0 s (two runs); every other menu form over the generator maximum
+ * (`specs/A.mdx` or `specs/B.mdx` carrying those towers, with or without
+ * the U+2028 rewrite) — `view` 23.7 MB in at most 2.4 s, every other form
+ * in at most 2.1 s, `inventory` and `version` under 0.4 s — and any form
+ * over an unmutated-scale draw ~0.5 s. 60 s is 12× that maximum: the ≥ 4×
+ * margin a conforming product is owed over its measured answer time, plus
+ * headroom for slower CI runners and a slower product, and still more than
+ * twice the 25.4 s of the largest answer any shared-generator draw admits
+ * (P-11's `view --text` over `specs/A.mdx` under that rewrite, 125.8 MB),
+ * which no menu form requests. So a conforming product is never killed while
+ * still emitting its answer (H-11: an exhausted harness limit is a harness
+ * defect, never a diagnosed product failure), and a genuinely hanging one
+ * costs one guard per diagnosis, reported unshrunk (`runFuzzCommand`).
+ * Re-measure with a temporary self-test staging `FUZZ_BASE_FILES` with
+ * `sectionTowerSource(4096, true)` appended twice to the viewed file (see
+ * AGENTS.md) whenever a generator bound or a menu form's surface moves.
  */
-const FUZZ_COMMAND_TIMEOUT_MS = 10_000;
+const FUZZ_COMMAND_TIMEOUT_MS = 60_000;
 
 /**
  * The two subprocess-driver guards a fuzz command run is held to (P-8's
@@ -1277,11 +1366,19 @@ export async function runFuzzCommand(
       maxOutputBytes: guards.maxOutputBytes,
     });
   } catch (error) {
+    // The hang-guard kill is reported unshrunk (`shrinkable: false`), as
+    // P-11's is: a shrink candidate can re-observe it only by waiting out
+    // the guard again — one full guard per candidate — so shrinking's
+    // execution budget would stop bounding the body's wall clock (the
+    // entry's `timeoutMs`). The drawn trial, at most three mutations and
+    // five invocations after the staging build, is the reported
+    // counterexample, and its seed replays it (H-10).
     if (error instanceof ProductRunTimeoutError) {
       fail(
         `P-8: every command must terminate on fuzzed input (TEST-SPEC §16 P-8; ` +
           `SPEC 12.0), but the invocation was still running when the harness's ` +
           `hang guard killed it — ${error.message}`,
+        { shrinkable: false },
       );
     }
     throw error;
@@ -1289,9 +1386,10 @@ export async function runFuzzCommand(
 }
 
 /**
- * The 12.0 exit-code partition for a run without `--json`: no signal death,
- * exit code exactly 0, 1, or 2. (`assertJsonOutputConvention` asserts the
- * same partition plus the stdout contract for `--json` runs.)
+ * The 12.0 exit-code partition for a run without JSON output in effect: no
+ * signal death, exit code exactly 0, 1, or 2. (`assertJsonOutputConvention`
+ * asserts the same partition plus the stdout contract for the runs with
+ * JSON output in effect, `jsonOutputInEffect`.)
  */
 function assertExitPartition(result: RunResult, context: string): void {
   if (result.signal !== null) {
@@ -1315,11 +1413,68 @@ function describeCommand(argv: readonly string[]): string {
 }
 
 /**
+ * The JSON-only surfaces of SPEC 12.0 (10.7, 11, 12.6) — a single JSON
+ * document their only output form, with or without `--json` — by command
+ * word: the five query surfaces of 11 (`query`, `occurrences`, `view`, `at`,
+ * `inventory`) and `version` (12.6). `review export` (10.7) is the one
+ * JSON-only subcommand form ({@link JSON_ONLY_REVIEW_SUBCOMMANDS}).
+ */
+const JSON_ONLY_COMMANDS: ReadonlySet<string> = new Set([
+  "query",
+  "occurrences",
+  "view",
+  "at",
+  "inventory",
+  "version",
+]);
+
+/** `review`'s JSON-only subcommands (SPEC 10.7: `export`). */
+const JSON_ONLY_REVIEW_SUBCOMMANDS: ReadonlySet<string> = new Set(["export"]);
+
+/**
+ * Whether JSON output is in effect for an invocation, read as SPEC 12.0
+ * reads it: a `--json` token read as a flag — not another flag's value
+ * (`VALUE_FLAGS`, arity fixed by name), not after the `--` that ends flag
+ * reading — or a JSON-only surface, named by the first non-flag tokens once
+ * flags, their values, and `--` are removed: the command word and, for
+ * `review`, its subcommand (12.0's invocation grammar). Exported for the
+ * self-test that pins this reading (test/self/p8-fixed-seed-draws.test.ts).
+ */
+export function jsonOutputInEffect(argv: readonly string[]): boolean {
+  const words: string[] = [];
+  let flagsEnded = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index] as string;
+    if (!flagsEnded && token.startsWith("--")) {
+      if (token === "--") {
+        flagsEnded = true;
+      } else if (token === "--json") {
+        return true;
+      } else if (VALUE_FLAGS.has(token.slice(2))) {
+        index += 1;
+      }
+      continue;
+    }
+    words.push(token);
+  }
+  const [command, subcommand] = words;
+  if (command === undefined) return false;
+  if (JSON_ONLY_COMMANDS.has(command)) return true;
+  return (
+    command === "review" &&
+    subcommand !== undefined &&
+    JSON_ONLY_REVIEW_SUBCOMMANDS.has(subcommand)
+  );
+}
+
+/**
  * Run one command with the P-8 assertions: termination (via
- * `runFuzzCommand`), the 12.0 exit partition, and — when the invocation
- * carries `--json` — the never-a-partial-JSON-document contract. For `build`
- * invocations the modifies-nothing arm rides along: on a non-zero exit the
- * whole workspace tree must be byte-identical around the run (SPEC 12.1).
+ * `runFuzzCommand`), the 12.0 exit partition, and — whenever JSON output is
+ * in effect ({@link jsonOutputInEffect}: `--json` given, or a JSON-only
+ * surface with or without it) — the never-a-partial-JSON-document contract,
+ * the 12.7 error document on exit 2 included. For `build` invocations the
+ * modifies-nothing arm rides along: on a non-zero exit the whole workspace
+ * tree must be byte-identical around the run (SPEC 12.1).
  */
 async function runFuzzArm(
   product: ProductBinding,
@@ -1333,7 +1488,7 @@ async function runFuzzArm(
   const isBuild = argv[0] === "build";
   const before = isBuild ? await snapshotDirectory(workspace.root) : undefined;
   const result = await runFuzzCommand(product, workspace, argv);
-  if (argv.includes("--json")) {
+  if (jsonOutputInEffect(argv)) {
     assertJsonOutputConvention(result, context);
   } else {
     assertExitPartition(result, context);
@@ -1409,7 +1564,11 @@ const P_8 = defineProductTest({
     "`build`s modify nothing (SPEC 12.0, 12.1; TEST-SPEC §16 P-8)",
   // Wall-clock hang guard only (H-10): three fixed seeds (E-5), one staging
   // build plus a 3–5 command sweep with per-arm snapshots per trial, plus
-  // the shrink budget on falsification.
+  // the shrink budget on falsification. A conforming sweep runs ~91 s
+  // against the built product on a 4-core machine (alone, under the
+  // unprivileged namespace); a hang's diagnosis adds one per-invocation
+  // guard (`FUZZ_COMMAND_TIMEOUT_MS`, 60 s), unshrunk — ~150 s in all, so
+  // this budget leaves CI runners more than 2.5× headroom.
   timeoutMs: 420_000,
   run: async (product) => {
     await checkProperty(

@@ -109,10 +109,11 @@ export async function prepareAddedImportCheck(
 /**
  * The flags that take a value, by name: SPEC 12.0 fixes a flag's arity by
  * its name, the same for every command, and every other `--` token takes
- * none.
+ * none. Exported for P-8's reading of when JSON output is in effect
+ * (test/suite/registry/section-16-p8.ts).
  */
 // prettier-ignore
-const VALUE_FLAGS: ReadonlySet<string> = new Set([
+export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   "base", "config", "coverage", "file", "from", "group", "kinds", "name",
   "note", "status", "strategy", "tag", "test-hold", "to",
 ]);
