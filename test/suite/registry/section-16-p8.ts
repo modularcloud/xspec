@@ -127,34 +127,40 @@
 // themselves are T2.3-3's, T2.7-3's, T2.7-4's, T3-7's, and T14-12's.
 //
 // The command sweep spans the SPEC 12 surface: `build` (both output forms —
-// the human form via the drawn menu), `check`, `ids`, `show`, all six
-// `query` subcommands (`reachable` over a base dependency path, with and
-// without `--json`), the other query surfaces of 11 — `occurrences`
-// (unfiltered and under `--file`), `view` (with and without `--text`), `at`
-// at an in-range offset of a base file, and `inventory` (with and without
-// `--json`) — `version` (12.6, with and without `--json`), `coverage`,
-// `impact --base` (no repository is staged: an unreadable baseline is
-// itself an exit-2 outcome, 6.3/12.0), `review list`, `create`, and `next`,
-// the review subcommands naming a session or an item — `status`, `show`,
-// `split`, `resolve`, and `export`, each with and without `--json` — as
-// composites (`armSteps`: the session created first, then for an item form
-// a JSON read of it yielding the item the form names, each step under the
-// same assertions), `rename`, and file-form `move`. Each JSON-only surface
-// has a form drawn without `--json`, so the by-surface half of 12.0's rule
-// is exercised (the fixed-seed draw guard pins it). Mutating commands may
-// legitimately succeed and modify the workspace when the mutations happen
-// to be benign — P-8 constrains their termination, exit class, and JSON form
+// the human form via the drawn menu), `check`, `ids`, `show` (a node, with
+// and without `--json`, and a file), all six `query` subcommands (`reachable`
+// over a base dependency path, with and without `--json`), the other query
+// surfaces of 11 — `occurrences` (unfiltered and under `--file`), `view`
+// (with and without `--text`), `at` at an in-range offset of a base file, and
+// `inventory` (with and without `--json`) — `version` (12.6, with and without
+// `--json`), `coverage`, `impact --base` (no repository is staged: an
+// unreadable baseline is itself an exit-2 outcome, 6.3/12.0), `review list`,
+// `create`, and `next`, the review subcommands naming a session or an item —
+// `status`, `show`, `split`, `resolve`, and `export`, each with and without
+// `--json` — as composites (`armSteps`: the session created first, then for
+// an item form a JSON read of it yielding the item the form names, each step
+// under the same assertions), `rename` and file-form `move` (each performed
+// with `--json` and previewed with and without it, 6.6), and section-form
+// `move` (6.5) — a base section into a file the base holds and into one it
+// lacks, which the move creates — performed and previewed, each with and
+// without `--json`; `--test-hold`, a usage error beside `--preview`, never
+// appears. Each JSON-only surface has a form drawn without `--json`, so the
+// by-surface half of 12.0's rule is exercised, and every command runs with
+// JSON output in effect — `build` in the fixed arm. Mutating commands may
+// legitimately succeed and modify the workspace when the mutations happen to
+// be benign — P-8 constrains their termination, exit class, and JSON form
 // only; the modifies-nothing arm is `build`'s (SPEC 12.1). Two facts about
 // the CI-pinned draws are guarded permanently, before any product runs, by
 // the fixed-seed draw guard (test/self/p8-fixed-seed-draws.test.ts), which
-// replays P-8's own draws at its registered `P8_RUNS_PER_SEED` runs per
-// seed: every `COMMAND_MENU` entry is drawn at least once, and an intact
-// MDX section tower at least 2048 levels deep is staged (P-8's
-// giant-nesting floor); the same file pins `jsonOutputInEffect` and the
-// menu's bare form per JSON-only surface, and the review composites'
-// expansion. Beyond those, a dry-run over the committed default seeds at
-// the registered 12 runs per seed (`drawFixedSeedTrials`, the S-8 replay;
-// re-run when the review composites' 2–6 forms per trial moved the draws)
+// replays P-8's own draws at its registered `P8_RUNS_PER_SEED` runs per seed:
+// every `COMMAND_MENU` entry is drawn at least once, and an intact MDX
+// section tower at least 2048 levels deep is staged (P-8's giant-nesting
+// floor); the same file pins `jsonOutputInEffect`, the menu's bare form per
+// JSON-only surface and JSON form per command, the review composites'
+// expansion, and the mutating commands' performed, preview, and section
+// forms. Beyond those, a dry-run over the committed default seeds at the
+// registered 12 runs per seed (`drawFixedSeedTrials`, the S-8 replay; re-run
+// when the review composites' 2–6 forms per trial moved the draws)
 // verified that every mutation kind — the three refined classes included —
 // and every mutation target occurs (64 mutations): a giant MDX section
 // tower (depth 2048) and TypeScript towers of depths 512, 2048, and 4096,
@@ -408,7 +414,16 @@ const ABSENT_ITEM_ID = "p8-absent-item";
  * (test/self/p8-fixed-seed-draws.test.ts), which replays P-8's own draws at
  * {@link P8_RUNS_PER_SEED} and fails unless every entry is drawn at least
  * once — so a form added here, or a draw shift, that the fixed CI seeds
- * (E-5) never reach is caught before any product runs.
+ * (E-5) never reach is caught before any product runs. A pick takes one
+ * PRNG value whatever the menu's length, so the fixed seeds' picks are fixed
+ * values, and which forms they reach depends on the menu's length — their
+ * residues modulo it — not on the forms' order: inserting a form anywhere
+ * can leave one undrawn, wherever it stands.
+ *
+ * Every command runs with JSON output in effect at least once — `build`
+ * through the fixed arm ({@link FIXED_BUILD_ARM}), every other command
+ * through a menu form — and the same guard file pins that, beside the
+ * by-surface forms and the mutating commands' forms.
  */
 export const COMMAND_MENU: ReadonlyArray<readonly string[]> = [
   ["build"],
@@ -417,6 +432,9 @@ export const COMMAND_MENU: ReadonlyArray<readonly string[]> = [
   ["ids", "--json"],
   ["ids", "--tree"],
   ["show", "specs/A.mdx#a"],
+  // 12.4's human report has its `--json` form too (12.0: every command
+  // supports it), held to the JSON contract.
+  ["show", "specs/A.mdx#a", "--json"],
   ["show", "specs/A.mdx"],
   ["query", "node", "specs/A.mdx#a.b", "--json"],
   ["query", "nodes", "--json"],
@@ -478,11 +496,45 @@ export const COMMAND_MENU: ReadonlyArray<readonly string[]> = [
   ["review", "resolve", SESSION_SLOT, ITEM_ID_SLOT, "--status", "no-change"],
   ["review", "export", SESSION_SLOT, "--json"],
   ["review", "export", SESSION_SLOT],
+  // The mutating commands, performed and previewed. A preview (6.6) plans
+  // the operation over the fuzzed workspace and performs nothing; it
+  // supports `--json` (the preview document of 12.7) and is no JSON-only
+  // surface, so its bare form is held to the exit partition alone.
+  // `--test-hold` never appears: beside `--preview` it is a usage error
+  // (6.6, 12.0), and P-8 drives no seam.
   ["rename", "specs/A.mdx", "c", "c2", "--json"],
+  ["rename", "specs/A.mdx", "c", "c2", "--preview", "--json"],
+  ["rename", "specs/A.mdx", "c", "c2", "--preview"],
   ["move", "specs/B.mdx", "specs/moved.mdx", "--json"],
+  ["move", "specs/B.mdx", "specs/moved.mdx", "--preview", "--json"],
+  ["move", "specs/B.mdx", "specs/moved.mdx", "--preview"],
+  // The section form (6.5) moves the base's `c` out of `specs/A.mdx`: into
+  // `specs/B.mdx`, a file the base holds, its ID kept (a cross-file move
+  // keeping its ID is valid, 6.5) — `b`'s `{text(A.c)}` turns local and
+  // the moved `d` and embedding chains are rooted at B's binding of A — and
+  // into `specs/C.mdx`, which the base lacks, so the move creates it, `c`
+  // re-identified as `e` — C's import of A composed in and an import of C
+  // added to B. Over the base workspace every form here performs or
+  // previews with exit 0; a fuzzed one can refuse it (exit 1) or name an
+  // origin the trial's mutations or an earlier form removed (exit 2).
+  ["move", "specs/A.mdx#c", "specs/B.mdx#c", "--json"],
+  ["move", "specs/A.mdx#c", "specs/B.mdx#c"],
+  ["move", "specs/A.mdx#c", "specs/B.mdx#c", "--preview", "--json"],
+  ["move", "specs/A.mdx#c", "specs/B.mdx#c", "--preview"],
+  ["move", "specs/A.mdx#c", "specs/C.mdx#e", "--json"],
+  ["move", "specs/A.mdx#c", "specs/C.mdx#e"],
+  ["move", "specs/A.mdx#c", "specs/C.mdx#e", "--preview", "--json"],
+  ["move", "specs/A.mdx#c", "specs/C.mdx#e", "--preview"],
   ["version", "--json"],
   ["version"],
 ];
+
+/**
+ * The arm every trial runs first, before its drawn forms: `build --json`,
+ * whose failure must modify nothing (SPEC 12.1) — `build`'s run under JSON
+ * output, the menu holding its bare form.
+ */
+export const FIXED_BUILD_ARM: readonly string[] = ["build", "--json"];
 
 /**
  * One invocation of a drawn form's arm. A composite's read carries the
@@ -1394,9 +1446,12 @@ export const MAX_MUTATIONS_PER_TRIAL = 3;
 /**
  * Menu forms drawn per trial: 2, then up to this many while `listOf`'s
  * continue draws (0.8 each) hold. Raised from 4 with the review composites
- * (41 forms), so the fixed seeds draw every form at P8_RUNS_PER_SEED; it
- * moves every later trial of a seed, the giant-nesting floor's included
- * (the fixed-seed draw guard re-checks both).
+ * (41 forms), so the fixed seeds draw every form at P8_RUNS_PER_SEED; the
+ * 54 forms since the previews and the section form of `move` are drawn at
+ * it too (162 picks), the count unchanged. Changing it moves every later
+ * trial of a seed, the giant-nesting floor's included (the fixed-seed draw
+ * guard re-checks both), where a menu form added or removed moves no
+ * mutation draw.
  */
 const MAX_COMMANDS_PER_TRIAL = 6;
 
@@ -1468,7 +1523,12 @@ export function renderFuzzTrial(trial: FuzzTrial): string {
  * leaves (its nested `g` ids break 1.3), so over the generator maximum
  * `review create --json` answers the 13.3 gate's report at `check --json`'s
  * 4.7 MB and every step naming the session exits 2, each in at most 2.1 s
- * (re-measured with the composites). 60 s is 12× the `view --text`
+ * (re-measured with the composites), and the same holds of `rename` and
+ * `move` performed or previewed in either form and of `show --json`: each
+ * refuses or answers the gate's report there (the 4.7 MB JSON form, the
+ * 1.8 MB human one) in at most 2.0 s, and under 0.6 s over a TypeScript
+ * tower (re-measured with the previews and the section form). 60 s is 12×
+ * the `view --text`
  * maximum: the ≥ 4× margin a conforming product is owed over its measured
  * answer time, plus headroom for slower CI runners and a slower product,
  * and still more than twice the 25.4 s of the largest answer any
@@ -1752,7 +1812,7 @@ async function runFuzzTrial(
       // configuration's TypeScript well-formedness alike.
       await workspace.file(path, bytes, { mdx: "unchecked", ts: "unchecked" });
     }
-    await runFuzzArm(product, workspace, ["build", "--json"], trial);
+    await runFuzzArm(product, workspace, FIXED_BUILD_ARM, trial);
     for (const form of trial.commands) {
       await runFuzzForm(product, workspace, form, trial);
     }
@@ -1787,13 +1847,14 @@ const P_8 = defineProductTest({
   // Wall-clock hang guard only (H-10): three fixed seeds (E-5), one staging
   // build plus the fixed `build --json` arm and 2–6 drawn forms (a review
   // composite up to three invocations) with per-arm snapshots per trial,
-  // plus the shrink budget on falsification. A conforming sweep runs ~133 s
+  // plus the shrink budget on falsification. A conforming sweep runs ~123 s
   // against the built product on a 4-core machine (alone, under the
-  // unprivileged namespace; ~3.7 s a trial); a hang's diagnosis adds one
+  // unprivileged namespace; ~3.4 s a trial, 162 picks of the 54 menu forms
+  // running 210 drawn-form invocations); a hang's diagnosis adds one
   // per-invocation guard (`FUZZ_COMMAND_TIMEOUT_MS`, 60 s), unshrunk —
-  // ~195 s in all — and a falsification at most the 100 shrink executions,
-  // each a trial at most as large as the falsified one (~370 s at the mean
-  // trial) — ~500 s in all. This budget leaves CI runners 3× headroom over
+  // ~185 s in all — and a falsification at most the 100 shrink executions,
+  // each a trial at most as large as the falsified one (~340 s at the mean
+  // trial) — ~465 s in all. This budget leaves CI runners 3× headroom over
   // the hang's diagnosis and keeps the shrink budget inside it.
   timeoutMs: 600_000,
   run: async (product) => {

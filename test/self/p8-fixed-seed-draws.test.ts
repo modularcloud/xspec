@@ -41,6 +41,15 @@
 // names — so a drawn `show`, `split`, or `resolve` can reach a session's
 // items rather than only ever meeting the no-session usage error — with
 // every slot filled before a step runs.
+//
+// A fifth pins the rest of the sweep's shape: every command runs with JSON
+// output in effect at least once (12.0: every command supports `--json`) —
+// `build` in the fixed arm — and the mutating commands run performed and
+// previewed (6.4–6.6): `rename` and the file form of `move` previewed with
+// and without `--json`, and the section form, out of a base section into a
+// target file the base holds and into one it lacks (6.5 creates it),
+// performed and previewed, each with and without `--json` — never with
+// `--test-hold`, a usage error beside `--preview` (6.6).
 
 import { Buffer } from "node:buffer";
 import { expect, test } from "vitest";
@@ -51,6 +60,8 @@ import {
 import {
   armSteps,
   COMMAND_MENU,
+  FIXED_BUILD_ARM,
+  FUZZ_BASE_FILES,
   genFuzzTrial,
   ITEM_ID_SLOT,
   jsonOutputInEffect,
@@ -231,6 +242,9 @@ test("P-8 holds a form to the JSON contract exactly when SPEC 12.0 puts JSON out
     [["ids", "--tree"], false],
     [["review", "list"], false],
     [["review", "next", "r1"], false],
+    // A preview is no JSON-only surface (6.6).
+    [["rename", "specs/A.mdx", "c", "c2", "--preview"], false],
+    [["move", "specs/A.mdx#c", "specs/C.mdx#e", "--preview", "--json"], true],
     [["check", "--json"], true],
     [["--json", "check"], true],
     [["check", "--json", "--json"], true],
@@ -358,4 +372,79 @@ test("P-8 runs every review form naming a session or an item as a composite over
     });
   }
   expect(misplaced, "slots left where no read fills them").toEqual([]);
+});
+
+test("P-8 runs every command with JSON output in effect, and rename and move performed and previewed — the section form into a target file the base holds and one it lacks — each preview and section form with and without --json (TEST-SPEC §16 P-8; SPEC 6.4–6.6, 12.0; guard vectors)", () => {
+  // Every command — `review` and `query` per subcommand — runs at least
+  // once with JSON output in effect (12.0: every command supports
+  // `--json`); `build`'s run is the fixed arm, the menu holding its bare
+  // form.
+  const runs = [FIXED_BUILD_ARM, ...COMMAND_MENU];
+  const surface = (argv: readonly string[]): string =>
+    argv[0] === "review" || argv[0] === "query"
+      ? argv.slice(0, 2).join(" ")
+      : (argv[0] ?? "");
+  const underJson = new Set(
+    runs.filter((argv) => jsonOutputInEffect(argv)).map(surface),
+  );
+  expect(
+    [...new Set(runs.map(surface))].filter((name) => !underJson.has(name)),
+    "commands P-8 never runs with JSON output in effect",
+  ).toEqual([]);
+
+  // The mutating commands' forms (6.4–6.6), each classified by its operands
+  // as 12.0 reads them: a `#`-bearing target operand makes a move the
+  // section form (6.5), whose target file the base workspace holds or lacks.
+  const baseFiles = new Map(FUZZ_BASE_FILES);
+  const sectionOrigins: string[] = [];
+  const variants = COMMAND_MENU.filter(
+    (form) => form[0] === "rename" || form[0] === "move",
+  ).map((form) => {
+    const [command = "", origin = "", target = ""] = form.filter(
+      (token) => !token.startsWith("--"),
+    );
+    const section = command === "move" && target.includes("#");
+    const variant = [
+      command === "rename" ? "rename" : `move ${section ? "section" : "file"}`,
+      form.includes("--preview") ? "preview" : "performed",
+      form.includes("--json") ? "json" : "human",
+    ];
+    if (section) {
+      sectionOrigins.push(origin);
+      const targetFile = target.slice(0, target.indexOf("#"));
+      variant.push(
+        baseFiles.has(targetFile) ? "held target" : "created target",
+      );
+    }
+    return variant.join(", ");
+  });
+  const sectionVariants = ["held target", "created target"].flatMap((target) =>
+    ["performed", "preview"].flatMap((mode) =>
+      ["json", "human"].map(
+        (output) => `move section, ${mode}, ${output}, ${target}`,
+      ),
+    ),
+  );
+  expect(variants).toEqual(
+    expect.arrayContaining([
+      "rename, performed, json",
+      "rename, preview, json",
+      "rename, preview, human",
+      "move file, performed, json",
+      "move file, preview, json",
+      "move file, preview, human",
+      ...sectionVariants,
+    ]),
+  );
+  // Each section form moves a section the base workspace spells.
+  for (const origin of sectionOrigins) {
+    const [file = "", id = ""] = origin.split("#");
+    expect(baseFiles.get(file) ?? "", `${origin}: a base section`).toContain(
+      `<S id="${id}"`,
+    );
+  }
+  expect(
+    COMMAND_MENU.filter((form) => form.includes("--test-hold")),
+    "--test-hold beside --preview is a usage error (6.6), and P-8 drives no seam",
+  ).toEqual([]);
 });
