@@ -10,12 +10,17 @@
 // relative-name and undeclared module declarations and its other
 // module-linking forms (their diagnostics are post-parse); T7-2's
 // modifier-bearing configuration imports (the declarative form of 7 decides
-// them); plain configuration files; and a `.tsx` file holding JSX. Every one
-// it declares unparseable is rejected both ways: `010`, `09`, U+1C89 in an
-// identifier, the T7-2 syntax error, and T14-12's staged code arms. And the
-// top-level `await` forms 14.20 names, accepted read one way only, are a
-// harness error whatever the declaration. Every non-ASCII or control
-// character a vector's text holds is built from its code point.
+// them); plain configuration files; a `.tsx` file holding JSX; and the
+// fixed vector set of the forms the §16 generators compose — every
+// property's configuration file, P-7's capture sources, P-13's `c0/U.ts`
+// and `c1/V.ts`, and the fuzz base code source (each draw's own are judged
+// per draw by the property runner, helpers/property.ts `drawSources`).
+// Every one it declares unparseable is rejected both ways: `010`, `09`,
+// U+1C89 in an identifier, the T7-2 syntax error, and T14-12's staged code
+// arms. And the top-level `await` forms 14.20 names, accepted read one way
+// only, are a harness error whatever the declaration. Every non-ASCII or
+// control character this file's own vectors hold is built from its code
+// point.
 
 import { Buffer } from "node:buffer";
 import { describe, expect, test } from "vitest";

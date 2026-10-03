@@ -43,11 +43,14 @@
 // contents; a record exists to be judged).
 //
 // What is NOT a record: a property draw's composed code source or
-// configuration (P-7's configurations, P-13's configuration and code
-// sources — generated per trial, so no module-level record can hold them;
-// staged under the `per-draw` TypeScript declaration, `ts.perDraw` at
-// creation or `{ ts: "per-draw" }` per `file()` call, judged well-formed at
-// staging, by the section-16 modules alone — S-9's property clause); an
+// configuration (P-7's configurations and capture sources, P-13's
+// configuration and code sources — generated per trial, so no module-level
+// record can hold them; judged by the property runner before the body sees
+// the draw (helpers/property.ts `drawSources`), their forms by the fixed
+// TypeScript vector sets before any product exists, and staged under the
+// `per-draw` TypeScript declaration, `ts.perDraw` at creation or
+// `{ ts: "per-draw" }` per `file()` call, judged well-formed at staging, by
+// the section-16 modules alone — S-9's property clause); an
 // `unchecked` mutation, noise file, or tampered product-written module; and
 // an edit of bytes the product itself wrote (a rename's or move's rewritten
 // code source, which no harness constant equals), staged by

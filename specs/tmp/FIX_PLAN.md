@@ -38,24 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part D — Properties, the Windows leg, and S-9's generated forms
 
-### Task 64 — S-9's TypeScript check for generated forms: the fixed vector set and the per-draw check (TEST-SPEC S-9, L632; §16; C1, part 4)
-
-**Depends on.** Tasks 14, 15, 16b–16o (Task 16o declares the draw-composed files per draw), 62, and 63.
-
-**Where.**
-- `test/helpers/property.ts`: `checkProperty`'s per-draw S-9 option (today `mdxSources`);
-- the section-16 modules;
-- the S-9 self-test files.
-
-**Change.**
-- *Fixed vector set.* A fixed set of the generated TypeScript forms is judged well-formed before any product exists. It covers every property's configuration file, P-7's capture sources, P-13's `c0/U.ts` and `c1/V.ts`, and every other code source a generator composes.
-- *Per-draw check.* Each draw's code sources and configuration are judged before the product is driven on them. A failing draw is a harness error carrying its seed — never a product failure or a skipped draw.
-
-**Checks.**
-- The vector self-test passes.
-- Red-check by corrupting a generator's configuration template: a harness error with the seed, before any product invocation.
-- Each property against the built product at the fixed seeds, unchanged.
-
 ### Task 65 — E-6: a journaled section-form move into an existing target that gains an import (TEST-SPEC E-6, L641; C7)
 
 **Where.** `test/helpers/e6.ts`, run by `test/suite/e6-exchange-writer.test.ts` and `test/windows/e6-byte-identity.test.ts`.
