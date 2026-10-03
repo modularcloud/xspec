@@ -1107,9 +1107,10 @@ const OUTSIDE_LINK_TARGETS_DIR = "outside-link-targets";
 /**
  * A symbolic link the harness staged at a derived file's own path, resolving
  * to a plain file outside the workspace root, with the target's bytes as
- * captured before any product invocation over the staging.
+ * captured before any product invocation over the staging. Exported with the
+ * staging for T6.5-21(d) (section-6.5-iv.ts).
  */
-interface OutsideFileLink {
+export interface OutsideFileLink {
   /** The link's workspace-relative path: a derived file's own path. */
   readonly linkRel: string;
   /** The target's absolute path, beside the workspace root. */
@@ -1127,13 +1128,15 @@ interface OutsideFileLink {
  * afterward. CERTIFICATIONS.md certifies this staging through T13.4-11(c)
  * (VIOL-ORPHAN-LINKTARGET), and T13.4-4's link arm rides that certification
  * insofar as it shares this staging (the Exclusions entry "T13.4-4's link
- * arm" and the violator's note) — so both stage through this one function.
- * The staging verifies itself — the path holds a symbolic link resolving to
- * the target — and a staging that misses is an internal harness error,
- * never a product verdict. The link stores a relative target; `targetName`
- * names the target file, unique within the workspace.
+ * arm" and the violator's note) — so both stage through this one function,
+ * and so does T6.5-21(d)'s link occupant (section-6.5-iv.ts), which rides
+ * the certification likewise, insofar as it shares this staging and its
+ * after-compare. The staging verifies itself — the path holds a symbolic
+ * link resolving to the target — and a staging that misses is an internal
+ * harness error, never a product verdict. The link stores a relative
+ * target; `targetName` names the target file, unique within the workspace.
  */
-async function stageLinkToOutsideFile(
+export async function stageLinkToOutsideFile(
   workspace: TestWorkspace,
   linkRel: string,
   targetName: string,
@@ -1182,7 +1185,7 @@ async function stageLinkToOutsideFile(
  * removed in the link's place (SPEC 13.4: writes never traverse symbolic
  * links; a removal removes a symbolic link itself, never its target).
  */
-async function assertOutsideLinkTargetUnchanged(
+export async function assertOutsideLinkTargetUnchanged(
   link: OutsideFileLink,
   context: string,
 ): Promise<void> {

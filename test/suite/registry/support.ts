@@ -719,11 +719,13 @@ export function assertFindingLocatesExactly(
  * the files concerned — each a spec source's root identity or a code
  * source's whole-file identity, a created target file's spelled whatever
  * its path's validity — in byte order; `refused-moved-import` carries
- * none (its `identities` empty). For every other reason —
- * `refused-cycle` and the path-concerning
- * `refused-destination-exists` and `refused-invalid-destination` — 12.7
- * leaves the member informational, its composition unpinned, so no consumer
- * asserts it (H-4).
+ * none (its `identities` empty). `refused-exposed-derived-file`, a
+ * path-concerning reason naming no identity, carries none either: TEST-SPEC
+ * pins its `identities` `[]` (T6.5-21, T14-7) — 12.7's member "empty where
+ * none" the condition names. For every other reason — `refused-cycle` and
+ * the path-concerning `refused-destination-exists` and
+ * `refused-invalid-destination` — 12.7 leaves the member informational, its
+ * composition unpinned, so no consumer asserts it (H-4).
  */
 export const IDENTITY_PINNED_REFUSAL_CODES: ReadonlySet<string> = new Set([
   "refused-invalid-id",
@@ -731,6 +733,7 @@ export const IDENTITY_PINNED_REFUSAL_CODES: ReadonlySet<string> = new Set([
   "refused-id-collision",
   "refused-structural-parent",
   "refused-missing-target-parent",
+  "refused-exposed-derived-file",
   "refused-invalid-rewrite",
   "refused-moved-import",
 ]);
@@ -787,8 +790,8 @@ export function assertRefusalIdentities(
           `${JSON.stringify(code)} (its concerned identity as the sole ` +
           `element; the located bearers for refused-id-collision; the ` +
           `concerned files' paths in byte order for refused-invalid-rewrite; ` +
-          `none for refused-moved-import), so the case must state the exact ` +
-          `array`,
+          `none for refused-moved-import and refused-exposed-derived-file), ` +
+          `so the case must state the exact array`,
       );
     }
     return;

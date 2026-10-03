@@ -1,8 +1,9 @@
 // TEST-SPEC §6.5 (move), fourth part — SUITE-25 (continued): T6.5-20,
-// destination refusals over derived paths. T6.5-1…T6.5-10 are
-// section-6.5.ts's business, T6.5-11 section-6.5-ii.ts's, and T6.5-12…
-// T6.5-19 section-6.5-iii.ts's; this module keeps those files' edits bounded
-// (the section-10.7-i/-ii precedent).
+// destination refusals over derived paths, and T6.5-21, the
+// exposed-derived-file refusal. T6.5-1…T6.5-10 are section-6.5.ts's
+// business, T6.5-11 section-6.5-ii.ts's, and T6.5-12…T6.5-19
+// section-6.5-iii.ts's; this module keeps those files' edits bounded (the
+// section-10.7-i/-ii precedent).
 //
 // Registered product-facing bodies (C-2 "one code path"): each builds its own
 // fresh workspace (H-1), drives the product strictly as a subprocess (H-2),
@@ -102,11 +103,60 @@
 //   file-form moves alone, as the entry states them, each premise re-pinned
 //   (the retired path a plain file after the build); the section-form
 //   control is the module path's alone, staged before any build.
+//
+// SPEC 6.5 (`refused-exposed-derived-file`, 14): a file-form move, while
+// Markdown emission is enabled, is refused when its origin's emit
+// destination — no longer an emit destination once the relocation removes
+// the origin, so no longer excluded from discovery (13.4) — holds an
+// occupant discovery would then yield as a source (7). T6.5-21's notes:
+// - The common contract, asserted for every refused move by
+//   `expectD21Refusal`: inside a whole-root modifies-nothing compare (the
+//   journal absent or byte-unchanged with everything else), `move … --json`
+//   exits 1 and its stdout decodes as the form-exact 12.7 findings-only
+//   report holding exactly the move's findings, nothing beside, in 14's
+//   listed order — `refused-exposed-derived-file` concerning the origin's
+//   emit destination `specs/A.md`, `locations` `[]`, and `identities` `[]`
+//   (TEST-SPEC pins the member; support.ts `IDENTITY_PINNED_REFUSAL_CODES`
+//   classifies the reason so), and in the two-reason move
+//   `refused-invalid-destination` before it, concerning the destination as
+//   spelled, `locations` `[]`, its `identities` unpinned (12.7) and not
+//   asserted. The `--preview` twin of every refused move is T6.6-3's,
+//   staged identically from `D21_REFUSED_STAGINGS` through
+//   `runD21RefusedStaging` (one code path); T12.7-2 and T14-7 stage the
+//   same table.
+// - `specs/A.mdx` holds the section `x` and a section `y`, no import or
+//   reference, and nothing imports it: the file form rewrites no byte, and
+//   (e)'s section form leaves `y` behind, so the Markdown its regeneration
+//   writes in place differs from the premise build's.
+// - (a)'s second spec glob `specs/*.md` joins the one spec group's globs
+//   (TEST-SPEC: "a second spec glob"); (b)'s plain file of the user's holds
+//   well-formed TypeScript (`export const v = 1`, T13.4-11(b)'s code-source
+//   form), so once exposed it would be a valid code source, the workspace
+//   otherwise valid: the refusal is 6.5's reason alone. The after-build
+//   stagings re-pin their premise: after the `build`, `specs/A.md` is the
+//   plain file that build wrote (`d21BuildPremise`).
+// - The multi-reason order runs in (a)'s staging as its second refused move
+//   (each refused move modifies nothing, so it meets the identical
+//   staging), exported (`D21_TWO_REASON_MOVE`) for T12.7-2.
+// - The controls are performed arms with no T6.6-3 twin. (c)'s "emits
+//   `specs/sub/A.md`" and (e)'s "`specs/A.md` regenerated in place, holding
+//   `A.mdx`'s Markdown as the move leaves it, and `specs/sub/A.md` emitted"
+//   are pinned by T13.4-11's twin protocol (`d21AssertLikeTwin`): a twin
+//   holding the post-move sources, freshly built under the same
+//   configuration, emits the same bytes there — in (c) the moved bytes, a
+//   record, at `specs/sub/A.mdx`; in (e) the moved workspace's own sources,
+//   carried by `copyFrom` once judged well-formed (a product's malformed
+//   bytes fail diagnosed, never as a staging error). (d)'s link is staged by
+//   section-13.4.ts's `stageLinkToOutsideFile`, the staging T13.4-11(c)
+//   certifies, and compared by its `assertOutsideLinkTargetUnchanged`.
+//   (e)'s `--preview` runs first, inside a modifies-nothing compare: exit 0,
+//   `findings` [], the plan members present.
 
 import type { Finding } from "../../helpers/adapters/index.js";
 import {
   decodeAppliedMappingReport,
   decodeFindingsReport,
+  decodePreviewReport,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
@@ -115,6 +165,7 @@ import {
   fail,
   parseJsonStdout,
 } from "../../helpers/assertions.js";
+import { deriveMdx } from "../../helpers/mdx-derivability.js";
 import { defineProductTest } from "../../helpers/registry.js";
 import type { ProductTestEntry } from "../../helpers/registry.js";
 import { assertLeavesUnchanged } from "../../helpers/snapshot.js";
@@ -122,10 +173,18 @@ import { type StagedMdx, stagedMdx } from "../../helpers/staged-mdx.js";
 import { type StagedTs, stagedTs } from "../../helpers/staged-ts.js";
 import type { ProductBinding } from "../../helpers/subprocess.js";
 import { TestWorkspace } from "../../helpers/workspace.js";
-import type { InitialFileContents } from "../../helpers/workspace.js";
+import type {
+  EntryKind,
+  InitialFileContents,
+} from "../../helpers/workspace.js";
+import {
+  assertOutsideLinkTargetUnchanged,
+  stageLinkToOutsideFile,
+} from "./section-13.4.js";
 import {
   assertConditionCounts,
   assertFindingConcernsPath,
+  assertRefusalIdentities,
   buildOk,
   expectExit,
   expectFindingFreeReport,
@@ -1169,5 +1228,683 @@ const T6_5_20 = defineProductTest({
   },
 });
 
+// ===========================================================================
+// T6.5-21 — `refused-exposed-derived-file` (the module header's T6.5-21
+// notes)
+// ===========================================================================
+
+/** Every T6.5-21 staging's moved file: the file-form moves' origin. */
+const D21_ORIGIN = "specs/A.mdx";
+/** The origin's emit destination next to sources (13.2): the exposed path. */
+const D21_EMIT_PATH = "specs/A.md";
+/** Every file-form move's destination, and (e)'s created target file. */
+const D21_DESTINATION = "specs/sub/A.mdx";
+/** The destination's emit destination next to sources (13.2). */
+const D21_DESTINATION_EMIT_PATH = "specs/sub/A.md";
+/** The section (e)'s section form moves, keeping its ID. */
+const D21_SECTION = "x";
+/** The second glob that reaches `specs/A.md`: (a)'s spec glob, (b)'s code glob. */
+const D21_MD_GLOB = "specs/*.md";
+
+/**
+ * A configuration of T6.5-21: the one spec group globbing `specGlobs`, then
+ * the one code group globbing `codeGlob` (or none), Markdown emitted next to
+ * sources (TEST-SPEC: "with emission next to sources").
+ */
+function d21ConfigText(
+  specGlobs: readonly string[],
+  codeGlob: string | null,
+): string {
+  const globs = specGlobs.map((glob) => `"${glob}"`).join(", ");
+  const code =
+    codeGlob === null ? "" : `,\n  code: {\n    app: ["${codeGlob}"]\n  }`;
+  return (
+    `import { defineConfig } from "xspec"\n\n` +
+    `export default defineConfig({\n` +
+    `  specs: {\n` +
+    `    main: [${globs}]\n` +
+    `  }${code},\n` +
+    `  markdown: ${D20_EMIT_NEXT}\n` +
+    `})\n`
+  );
+}
+
+const D21_SPEC_MD_CONFIG = stagedTs(
+  "T6.5-21/T6.6-3 xspec.config.ts — specs/**/*.mdx and a second spec glob specs/*.md in the one spec group, Markdown emitted next to sources ((a)'s staging with its two-reason move, (d)'s, (e)'s, and (e)'s twin)",
+  d21ConfigText([D20_SPEC_GLOB, D21_MD_GLOB], null),
+);
+const D21_CODE_MD_CONFIG = stagedTs(
+  "T6.5-21/T6.6-3 xspec.config.ts — specs/**/*.mdx, a code group globbing specs/*.md, Markdown emitted next to sources ((b)'s staging)",
+  d21ConfigText([D20_SPEC_GLOB], D21_MD_GLOB),
+);
+const D21_UNREACHED_CONFIG = stagedTs(
+  "T6.5-21 xspec.config.ts — specs/**/*.mdx alone, no glob reaching specs/A.md, Markdown emitted next to sources ((c)'s staging and its twin)",
+  d21ConfigText([D20_SPEC_GLOB], null),
+);
+
+/**
+ * The moved file `specs/A.mdx`: the section `x` (e)'s section form moves and
+ * a section `y` that stays — so the Markdown (e)'s regeneration writes in
+ * place differs from the premise build's — no import or reference, and
+ * nothing imports it, so no relocation rewrites a byte (SPEC 6.5).
+ */
+const D21_A_SOURCE = stagedMdx(
+  "T6.5-21/T6.6-3 specs/A.mdx — the moved file, sections x and y, no import or reference (every staging's origin; at specs/sub/A.mdx, (c)'s twin's source)",
+  [
+    `<S id="${D21_SECTION}">`,
+    "Alpha text.",
+    "</S>",
+    "",
+    '<S id="y">',
+    "Why text.",
+    "</S>",
+    "",
+  ].join("\n"),
+);
+
+/**
+ * (b)'s occupant `specs/A.md`, a plain file of the user's staged before any
+ * emission: well-formed TypeScript (T13.4-11(b)'s code-source form), so the
+ * code group would discover a valid code source there once the relocation
+ * leaves the path no emit destination — the workspace otherwise valid, the
+ * refusal 6.5's reason alone.
+ */
+const D21_USER_OCCUPANT = stagedTs(
+  "T6.5-21/T6.6-3 specs/A.md — (b)'s plain file of the user's at the origin's emit destination, before any emission (export const v = 1)",
+  "export const v = 1\n",
+);
+
+/**
+ * One finding a refused move of T6.5-21 reports, the move's findings listed
+ * in 14's order: its stable code, its concerned path (`locations` `[]`, both
+ * reasons concerning a path), and its `identities` exactly where they are
+ * pinned — `[]` for `refused-exposed-derived-file` (TEST-SPEC), unstated for
+ * `refused-invalid-destination` (12.7: informational) — under support.ts
+ * `assertRefusalIdentities`'s discipline. Exported with the stagings for
+ * T6.6-3, T12.7-2, and T14-7.
+ */
+export interface D21ExpectedFinding {
+  readonly code: "refused-invalid-destination" | "refused-exposed-derived-file";
+  readonly path: string;
+  readonly identities?: readonly string[];
+}
+
+/** One refused move of T6.5-21: its argv (`--json` excluded) and findings. */
+export interface D21RefusedMove {
+  readonly argv: readonly string[];
+  readonly findings: readonly D21ExpectedFinding[];
+}
+
+/**
+ * One refused staging of T6.5-21: a fresh workspace (`config` plus `files`),
+ * the premise `build` when `built` — after which `specs/A.md` must be the
+ * plain file that build wrote, its premise re-pinned — then each refused
+ * move in turn. Exported for T6.6-3, T12.7-2, and T14-7, which stage each
+ * identically through `runD21RefusedStaging`.
+ */
+export interface D21RefusedStaging {
+  /** The arm (diagnostics), e.g. `(a) …`. */
+  readonly key: string;
+  readonly config: StagedTs;
+  readonly files: Readonly<Record<string, InitialFileContents>>;
+  readonly built: boolean;
+  readonly moves: readonly D21RefusedMove[];
+}
+
+/** The exposure finding every refused move reports: `path` `specs/A.md`. */
+const D21_EXPOSED_FINDING: D21ExpectedFinding = {
+  code: "refused-exposed-derived-file",
+  path: D21_EMIT_PATH,
+  identities: [],
+};
+
+/** The file-form move of every arm: `move specs/A.mdx specs/sub/A.mdx`. */
+const D21_FILE_MOVE: D21RefusedMove = {
+  argv: ["move", D21_ORIGIN, D21_DESTINATION],
+  findings: [D21_EXPOSED_FINDING],
+};
+
+/** The two-reason move's destination, holding T6.5-4's barred `'`. */
+const D21_BARRED_DESTINATION = "specs/a'b.mdx";
+
+/**
+ * The multi-reason order (14, 12.7), in (a)'s staging: `move specs/A.mdx
+ * "specs/a'b.mdx"` reports `refused-invalid-destination` (`path` the
+ * destination as spelled), then `refused-exposed-derived-file` — 14 listing
+ * the latter after the former and before `refused-invalid-rewrite`.
+ * Exported for T12.7-2, which asserts the same order.
+ */
+export const D21_TWO_REASON_MOVE: D21RefusedMove = {
+  argv: ["move", D21_ORIGIN, D21_BARRED_DESTINATION],
+  findings: [
+    { code: "refused-invalid-destination", path: D21_BARRED_DESTINATION },
+    D21_EXPOSED_FINDING,
+  ],
+};
+
+/**
+ * (a), the product-emitted Markdown: after a `build`, `specs/A.md` holds
+ * `A.mdx`'s Markdown while the second spec glob `specs/*.md` would discover
+ * it, as a spec-group file without `.mdx`, once it is no emit destination —
+ * the file-form move, then the two-reason move, each refused. Exported for
+ * T12.7-2 (its two-reason move) and T14-7.
+ */
+export const D21_A_STAGING: D21RefusedStaging = {
+  key: "(a) the product-emitted Markdown at specs/A.md, after a build, under a second spec glob specs/*.md",
+  config: D21_SPEC_MD_CONFIG,
+  files: { [D21_ORIGIN]: D21_A_SOURCE },
+  built: true,
+  moves: [D21_FILE_MOVE, D21_TWO_REASON_MOVE],
+};
+
+/**
+ * (b), a user-authored file before any emission: no build ever run,
+ * `specs/A.md` a plain file of the user's, under a code group globbing
+ * `specs/*.md` instead.
+ */
+const D21_B_STAGING: D21RefusedStaging = {
+  key: "(b) a plain file of the user's at specs/A.md, no build ever run, under a code group globbing specs/*.md",
+  config: D21_CODE_MD_CONFIG,
+  files: { [D21_ORIGIN]: D21_A_SOURCE, [D21_EMIT_PATH]: D21_USER_OCCUPANT },
+  built: false,
+  moves: [D21_FILE_MOVE],
+};
+
+/**
+ * Every refused staging of T6.5-21, in the entry's order. Exported for
+ * T6.6-3, whose preview twins stage each identically, and T14-7.
+ */
+export const D21_REFUSED_STAGINGS: readonly D21RefusedStaging[] = [
+  D21_A_STAGING,
+  D21_B_STAGING,
+];
+
+/**
+ * Stage one refused staging of T6.5-21 in a fresh workspace (H-1) — the
+ * premise `build` first when the staging is built after one, its premise
+ * re-pinned — and hand each refused move to `perMove` in turn: T6.5-21's own
+ * contract, T6.6-3's preview equivalence, T12.7-2's order, or T14-7's
+ * report. Exported for them (one code path for "staged identically").
+ */
+export async function runD21RefusedStaging(
+  product: ProductBinding,
+  staging: D21RefusedStaging,
+  context: string,
+  perMove: (
+    workspace: TestWorkspace,
+    move: D21RefusedMove,
+    context: string,
+  ) => Promise<void>,
+): Promise<void> {
+  const workspace = await TestWorkspace.create({
+    files: { "xspec.config.ts": staging.config, ...staging.files },
+  });
+  try {
+    if (staging.built) {
+      await d21BuildPremise(product, workspace, context);
+    }
+    for (const move of staging.moves) {
+      await perMove(workspace, move, `${context}: \`${move.argv.join(" ")}\``);
+    }
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * The premise `build` of a staging built after one: exit 0, and
+ * `specs/A.md` then the plain file holding `A.mdx`'s Markdown that build
+ * wrote (13.2, 7.3) — a product writing none there fails diagnosed at the
+ * premise, never at an assertion the arm does not stage.
+ */
+async function d21BuildPremise(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  context: string,
+): Promise<void> {
+  await buildOk(
+    product,
+    workspace,
+    `${context}: the premise \`build\` — the staged workspace passes ` +
+      `\`build\`'s validations (SPEC 12.1)`,
+  );
+  const kind = await workspace.kind(D21_EMIT_PATH);
+  if (kind !== "file") {
+    fail(
+      `${context}: staging premise — after the premise \`build\`, ` +
+        `${D21_EMIT_PATH} is the plain file holding ${D21_ORIGIN}'s ` +
+        `Markdown that build wrote, emission being next to sources (SPEC ` +
+        `13.2, 7.3); found ${kind}`,
+    );
+  }
+}
+
+/**
+ * T6.5-21's contract for one refused move: inside a whole-root
+ * modifies-nothing compare (the journal absent or byte-unchanged with
+ * everything else), `move … --json` exits 1 and its stdout decodes as the
+ * form-exact 12.7 findings-only report holding exactly the move's findings,
+ * nothing beside, in 14's listed order — each concerning its path, its
+ * `locations` `[]`, its `identities` asserted where pinned (SPEC 6.5, 14,
+ * 12.7).
+ */
+async function expectD21Refusal(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  move: D21RefusedMove,
+  context: string,
+): Promise<void> {
+  const argv = [...move.argv, "--json"];
+  const command = argv.join(" ");
+  const counts: Record<string, number> = {};
+  for (const expected of move.findings) {
+    counts[expected.code] = (counts[expected.code] ?? 0) + 1;
+  }
+  const codes = move.findings.map((expected) => expected.code).join(", then ");
+  await assertLeavesUnchanged(
+    workspace.root,
+    async () => {
+      const result = await expectExit(
+        product,
+        workspace,
+        argv,
+        1,
+        `${context} — the move is refused, a validation failure: exit 1 ` +
+          `(SPEC 6.5, 12.0)`,
+      );
+      const findings: readonly Finding[] = decodeFindingsReport(
+        parseJsonStdout(result, `${context}: \`${command}\``),
+        `${context}: \`${command}\` — a refused operation's report is the ` +
+          `form-exact 12.7 findings-only report (SPEC 12.7, H-3)`,
+      ).findings;
+      assertConditionCounts(
+        findings,
+        counts,
+        `${context} — exactly ${codes}, one finding per reason and nothing ` +
+          `beside: a refused operation reports its refusal reasons alone ` +
+          `(SPEC 6.5, 14)`,
+      );
+      move.findings.forEach((expected, index) => {
+        const finding = findings[index]!;
+        const label =
+          `${context}: finding ${String(index + 1)} of ` +
+          `${String(move.findings.length)}`;
+        if (finding.code !== expected.code) {
+          fail(
+            `${label} is ${expected.code} — the reasons in 14's listed ` +
+              `order, ${codes} (SPEC 14, 12.7); got ` +
+              `${JSON.stringify(finding.code)}`,
+          );
+        }
+        assertFindingConcernsPath(
+          finding,
+          expected.path,
+          `${label}, ${expected.code}, concerns ${expected.path} (SPEC 14, ` +
+            `6.5)`,
+        );
+        if (finding.locations.length !== 0) {
+          fail(
+            `${label}, ${expected.code}, concerns a path, so its ` +
+              `\`locations\` is [] (SPEC 14, 12.7); got ` +
+              JSON.stringify(
+                finding.locations.map((location) => ({
+                  file: renderPathValue(location.file),
+                  range: location.range,
+                })),
+              ),
+          );
+        }
+        assertRefusalIdentities(
+          finding,
+          expected.code,
+          expected.identities,
+          `${label}, ${expected.code} (SPEC 14, 12.7)`,
+        );
+      });
+    },
+    `${context}: the refused move modifies nothing — sources, derived ` +
+      `files, and the journal (absent or byte-unchanged) alike (SPEC 6.5)`,
+  );
+}
+
+/** Fail unless `rel` holds an entry of kind `expected` (diagnosed). */
+async function d21ExpectKind(
+  workspace: TestWorkspace,
+  rel: string,
+  expected: EntryKind,
+  why: string,
+): Promise<void> {
+  const kind = await workspace.kind(rel);
+  if (kind !== expected) {
+    fail(`${why}; found ${kind} at ${rel}`);
+  }
+}
+
+/**
+ * A performed file-form move of a control: `move specs/A.mdx
+ * specs/sub/A.mdx --json` exits 0 with the form-exact performed-operation
+ * report, and `specs/sub/A.mdx` holds the moved bytes — `A.mdx` holds no
+ * import and nothing imports it, so the relocation rewrites no byte (SPEC
+ * 6.5).
+ */
+async function d21PerformFileMove(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  why: string,
+  context: string,
+): Promise<void> {
+  const command = [...D21_FILE_MOVE.argv, "--json"];
+  const label = `${context}: \`${command.join(" ")}\``;
+  decodeAppliedMappingReport(
+    await runJson(
+      product,
+      workspace,
+      command,
+      `${label} — ${why}, so the move is performed: exit 0 (SPEC 6.5, ` +
+        `12.0)`,
+    ),
+    `${label} — a performed move reports the form-exact 12.7 ` +
+      `performed-operation document, \`findings\` [] beside its applied ` +
+      `mapping (SPEC 6.5, 6.4, 12.7)`,
+  );
+  await assertFileBytes(
+    workspace.path(D21_DESTINATION),
+    D21_A_SOURCE.source,
+    `${context}: ${D21_DESTINATION} holds the moved bytes — ${D21_ORIGIN} ` +
+      `holds no import and nothing imports it, so the relocation rewrites ` +
+      `no byte (SPEC 6.5)`,
+  );
+}
+
+/**
+ * The twin protocol (T13.4-11's): each path of `compared` after the move
+ * holds what a twin — `twinFiles` under `config`, plus each path of
+ * `copied` carrying the moved workspace's own bytes, first judged
+ * well-formed (a performed move's rewritten files are, SPEC 6.5, 14.20; a
+ * product's malformed bytes fail diagnosed here, never as a harness staging
+ * error) — freshly built, emits there (SPEC 13.2, 13.4, 3).
+ */
+async function d21AssertLikeTwin(
+  product: ProductBinding,
+  workspace: TestWorkspace,
+  config: StagedTs,
+  twinFiles: Readonly<Record<string, InitialFileContents>>,
+  copied: readonly string[],
+  compared: readonly string[],
+  context: string,
+): Promise<void> {
+  for (const rel of copied) {
+    const verdict = deriveMdx(await workspace.readBytes(rel));
+    if (!verdict.derives) {
+      fail(
+        `${context}: after the move, ${rel} is well-formed MDX — a ` +
+          `performed move leaves every rewritten file well-formed (SPEC ` +
+          `6.5, 14.20); the stock MDX 3 parser rejects it: ${verdict.reason}`,
+      );
+    }
+  }
+  const twin = await TestWorkspace.create({
+    files: { "xspec.config.ts": config, ...twinFiles },
+  });
+  try {
+    for (const rel of copied) {
+      await twin.copyFrom(workspace, rel);
+    }
+    await buildOk(
+      product,
+      twin,
+      `${context}: the twin's \`build\` — the post-move sources alone under ` +
+        `the same configuration, exit 0 (SPEC 12.1)`,
+    );
+    for (const rel of compared) {
+      await assertFilesEqual(
+        workspace.path(rel),
+        twin.path(rel),
+        `${context}: ${rel} after the move vs the Markdown a twin holding ` +
+          `the post-move sources, freshly built, emits there (SPEC 13.2, ` +
+          `13.4, 3)`,
+      );
+    }
+  } finally {
+    await twin.dispose();
+  }
+}
+
+/**
+ * (c), performed: no glob reaching `specs/A.md` — after a `build`, the
+ * file-form move succeeds, its finishing regeneration removing the stale
+ * `specs/A.md`, recorded and no longer generated, and emitting
+ * `specs/sub/A.md`: what a twin holding the moved bytes at
+ * `specs/sub/A.mdx`, freshly built, emits there (SPEC 6.5, 13.4, 13.2).
+ */
+async function runD21Unreached(product: ProductBinding): Promise<void> {
+  const context =
+    `T6.5-21 (c) no glob reaching ${D21_EMIT_PATH}, performed after a ` +
+    `build`;
+  const workspace = await TestWorkspace.create({
+    files: {
+      "xspec.config.ts": D21_UNREACHED_CONFIG,
+      [D21_ORIGIN]: D21_A_SOURCE,
+    },
+  });
+  try {
+    await d21BuildPremise(product, workspace, context);
+    await d21PerformFileMove(
+      product,
+      workspace,
+      `no glob reaches ${D21_EMIT_PATH}, so the vacated emit destination ` +
+        `exposes nothing to discovery`,
+      context,
+    );
+    await d21ExpectKind(
+      workspace,
+      D21_EMIT_PATH,
+      "absent",
+      `${context}: the finishing regeneration removes the stale ` +
+        `${D21_EMIT_PATH}, recorded and no longer generated (SPEC 13.4, ` +
+        `12.1, 6.5)`,
+    );
+    await d21AssertLikeTwin(
+      product,
+      workspace,
+      D21_UNREACHED_CONFIG,
+      { [D21_DESTINATION]: D21_A_SOURCE },
+      [],
+      [D21_DESTINATION_EMIT_PATH],
+      context,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (d), performed: after a `build`, `specs/A.md` replaced by a symbolic link
+ * to a file outside the workspace (section-13.4.ts's shared link staging),
+ * (a)'s `specs/*.md` glob present — discovery never yields a link (7), so
+ * the move succeeds, its finishing regeneration removing the recorded link
+ * as the link itself, its target byte-identical (SPEC 13.4, T13.4-11).
+ */
+async function runD21LinkOccupant(product: ProductBinding): Promise<void> {
+  const context =
+    `T6.5-21 (d) a symbolic link as the occupant of ${D21_EMIT_PATH}, ` +
+    `performed after a build`;
+  const workspace = await TestWorkspace.create({
+    files: {
+      "xspec.config.ts": D21_SPEC_MD_CONFIG,
+      [D21_ORIGIN]: D21_A_SOURCE,
+    },
+  });
+  try {
+    await d21BuildPremise(product, workspace, context);
+    const link = await stageLinkToOutsideFile(
+      workspace,
+      D21_EMIT_PATH,
+      "T6.5-21-d-target.md",
+    );
+    await d21PerformFileMove(
+      product,
+      workspace,
+      `discovery never yields a symbolic link (SPEC 7), so the vacated emit ` +
+        `destination holds no occupant discovery would yield as a source`,
+      context,
+    );
+    await d21ExpectKind(
+      workspace,
+      D21_EMIT_PATH,
+      "absent",
+      `${context}: the finishing regeneration removes the recorded link at ` +
+        `${D21_EMIT_PATH} as the link itself, never its target (SPEC 13.4)`,
+    );
+    await assertOutsideLinkTargetUnchanged(link, context);
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+/**
+ * (e), performed: the section form in (a)'s staging — after a `build`,
+ * `move specs/A.mdx#x specs/sub/A.mdx#x` creating the target file relocates
+ * no origin, so `specs/A.md` stays `A.mdx`'s emit destination and 6.5's
+ * reason, for a file-form move alone, does not apply. Its `--preview`
+ * succeeds alike (exit 0, `findings` [], the plan members present, nothing
+ * modified; SPEC 6.6); the move exits 0 with no finding, `specs/sub/A.mdx`
+ * created, `specs/A.md` regenerated in place and `specs/sub/A.md` emitted —
+ * each the Markdown a twin holding the post-move sources, freshly built,
+ * emits there — and `check` is clean afterward.
+ */
+async function runD21SectionForm(product: ProductBinding): Promise<void> {
+  const argv = [
+    "move",
+    `${D21_ORIGIN}#${D21_SECTION}`,
+    `${D21_DESTINATION}#${D21_SECTION}`,
+  ];
+  const context =
+    `T6.5-21 (e) the section form in (a)'s staging, performed after a ` +
+    `build: \`${argv.join(" ")}\``;
+  const workspace = await TestWorkspace.create({
+    files: {
+      "xspec.config.ts": D21_SPEC_MD_CONFIG,
+      [D21_ORIGIN]: D21_A_SOURCE,
+    },
+  });
+  try {
+    await d21BuildPremise(product, workspace, context);
+    const previewArgv = [...argv, "--preview", "--json"];
+    const previewLabel = `${context}: \`${previewArgv.join(" ")}\``;
+    await assertLeavesUnchanged(
+      workspace.root,
+      async () => {
+        const preview = await expectExit(
+          product,
+          workspace,
+          previewArgv,
+          0,
+          `${previewLabel} — a section move relocates no origin, so the ` +
+            `reason does not apply and the preview succeeds alike (SPEC ` +
+            `6.6, 6.5)`,
+        );
+        const report = decodePreviewReport(
+          parseJsonStdout(preview, previewLabel),
+          `${previewLabel} — the form-exact 12.7 preview document (SPEC ` +
+            `12.7, H-3)`,
+        );
+        if (report.findings.length !== 0) {
+          fail(
+            `${previewLabel}: a preview whose real operation would proceed ` +
+              `reports findings [] (SPEC 6.6, 12.7); got ` +
+              JSON.stringify(report.findings.map((finding) => finding.code)),
+          );
+        }
+        if (
+          report.mapping === null ||
+          report.files === null ||
+          report.delta === null
+        ) {
+          fail(
+            `${previewLabel}: a successful preview reports its plan — ` +
+              `\`mapping\`, \`files\`, and \`delta\` are null exactly on ` +
+              `refusal (SPEC 6.6, 12.7)`,
+          );
+        }
+      },
+      `${previewLabel}: the preview modifies nothing (SPEC 6.6)`,
+    );
+    const command = [...argv, "--json"];
+    const label = `${context}: \`${command.join(" ")}\``;
+    decodeAppliedMappingReport(
+      await runJson(
+        product,
+        workspace,
+        command,
+        `${label} — a section move relocates no origin, so the reason does ` +
+          `not apply: exit 0 (SPEC 6.5, 12.0)`,
+      ),
+      `${label} — a performed move reports the form-exact 12.7 ` +
+        `performed-operation document, \`findings\` [] — no finding — ` +
+        `beside its applied mapping (SPEC 6.5, 12.7)`,
+    );
+    await d21ExpectKind(
+      workspace,
+      D21_DESTINATION,
+      "file",
+      `${context}: the move creates the target file ${D21_DESTINATION} ` +
+        `(SPEC 6.5)`,
+    );
+    await d21ExpectKind(
+      workspace,
+      D21_EMIT_PATH,
+      "file",
+      `${context}: ${D21_EMIT_PATH} stays ${D21_ORIGIN}'s emit destination, ` +
+        `regenerated in place (SPEC 6.5, 13.2)`,
+    );
+    await d21ExpectKind(
+      workspace,
+      D21_DESTINATION_EMIT_PATH,
+      "file",
+      `${context}: the finishing regeneration emits ` +
+        `${D21_DESTINATION_EMIT_PATH} (SPEC 6.5, 13.2)`,
+    );
+    await expectFindingFreeReport(
+      product,
+      workspace,
+      ["check", "--json"],
+      `${context}: \`check --json\` after the move — clean (SPEC 6.5, ` +
+        `13.4, 14.10)`,
+    );
+    await d21AssertLikeTwin(
+      product,
+      workspace,
+      D21_SPEC_MD_CONFIG,
+      {},
+      [D21_ORIGIN, D21_DESTINATION],
+      [D21_EMIT_PATH, D21_DESTINATION_EMIT_PATH],
+      context,
+    );
+  } finally {
+    await workspace.dispose();
+  }
+}
+
+const T6_5_21 = defineProductTest({
+  id: "T6.5-21",
+  title:
+    "`refused-exposed-derived-file`: a file-form move, while emission is enabled, whose origin's emit destination holds an occupant discovery would yield as a source once the relocation leaves that path no emit destination is refused — exit 1, nothing modified (whole-root byte compare, the journal absent or byte-unchanged), exactly one finding, code `refused-exposed-derived-file`, `path` the origin's emit destination `specs/A.md`, `locations` `[]` and `identities` `[]`, the `--preview` reporting the same (T6.6-3); each arm stages `move specs/A.mdx specs/sub/A.mdx` with emission next to sources and spec globs `specs/**/*.mdx`: (a) after a `build`, `specs/A.md` holding `A.mdx`'s Markdown while a second spec glob `specs/*.md` would discover it as a spec-group file without `.mdx`, and (b) no build ever run, `specs/A.md` a plain file of the user's under a code group globbing `specs/*.md` — both refused; controls, each performed: (c) no glob reaching `specs/A.md` — after a `build` the move exits 0, its finishing regeneration removing the stale `specs/A.md` and emitting `specs/sub/A.md`; (d) after a `build`, `specs/A.md` replaced by a symbolic link to a file outside the workspace, (a)'s glob present — discovery never yields a link, so the move exits 0, the regeneration removing the recorded link as the link itself, its target byte-identical; (e) in (a)'s staging, the section form `move specs/A.mdx#x specs/sub/A.mdx#x` creating the target file relocates no origin — exit 0 with no finding, its `--preview` succeeding alike, `specs/sub/A.mdx` created, `specs/A.md` regenerated in place holding `A.mdx`'s Markdown as the move leaves it and `specs/sub/A.md` emitted (what a freshly built twin of the post-move sources emits), `check` clean; and the multi-reason order: `move specs/A.mdx \"specs/a'b.mdx\"` in (a)'s staging reports `refused-invalid-destination` (T6.5-4's barred character, `path` the destination) then `refused-exposed-derived-file` (SPEC 6.5, 13.4, 7, 13.2, 7.3, 6.6, 14, 12.7)",
+  run: async (product) => {
+    for (const staging of D21_REFUSED_STAGINGS) {
+      await runD21RefusedStaging(
+        product,
+        staging,
+        `T6.5-21 ${staging.key}`,
+        (workspace, move, context) =>
+          expectD21Refusal(product, workspace, move, context),
+      );
+    }
+    await runD21Unreached(product);
+    await runD21LinkOccupant(product);
+    await runD21SectionForm(product);
+  },
+});
+
 /** TEST-SPEC §6.5, fourth part, in canonical ID order (SUITE-25). */
-export const section65ivTests: readonly ProductTestEntry[] = [T6_5_20];
+export const section65ivTests: readonly ProductTestEntry[] = [T6_5_20, T6_5_21];
