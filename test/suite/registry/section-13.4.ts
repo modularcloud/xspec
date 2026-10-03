@@ -203,13 +203,15 @@
 //   concerning a path no longer generated is the recorded-file form, and a
 //   mismatch form would be a further finding. The recorded-file finding's
 //   correction, "its manual deletion" (14.10), never a rebuild, is asserted
-//   by H-3's robust matching over its `message`: information presence — a
-//   deletion or removal and its manual character ("manual", "by hand", or
-//   "yourself"; `MANUAL_DELETION_MENTIONS`) — and no clause presenting a
-//   build as what removes the file (`REBUILD_REMEDY`: a build "to remove"
-//   it, a build that "removes" it, a removal "by" a build), so the generic
-//   correction instructing rebuilding fails while a message naming the
-//   refused rebuild beside the manual deletion passes. After the manual
+//   by H-3's robust matching over its `message`, judged by the pure
+//   `judgeManualDeletionCorrection` of the human-report adapter
+//   (`test/helpers/adapters/human.ts`, driven by S-5 vectors): information
+//   presence — a deletion or removal and its manual character ("manual",
+//   "by hand", or "yourself") — and no clause presenting a build as what
+//   removes the file (`REBUILD_REMEDY`: a build "to remove" it, a build that
+//   "removes" it, a removal "by" a build), so the generic correction
+//   instructing rebuilding fails while a message naming the refused rebuild
+//   beside the manual deletion passes. After the manual
 //   deletion, `build` exits 0, `out/specs/A.md/specs/A.md` is a plain file,
 //   and `check` is clean, in both arms.
 // - T13.4-11 stays inside CERTIFICATIONS.md §CONF-ORPHAN's scope (the test
@@ -250,6 +252,7 @@ import {
   decodeFindingsReport,
   decodeInventoryRecordedDatum,
   decodeSessionStatusReport,
+  judgeManualDeletionCorrection,
   renderPathValue,
 } from "../../helpers/adapters/index.js";
 import {
@@ -3051,58 +3054,41 @@ const OBSTRUCTION_ORPHAN = "out/specs/A.md";
 const OBSTRUCTION_EMIT = "out/specs/A.md/specs/A.md";
 
 /**
- * The correction "its manual deletion" (SPEC 14.10), by H-3's robust
- * matching over the recorded-file finding's message (module header): the
- * required information — a deletion or removal, and its manual character.
- */
-const MANUAL_DELETION_MENTIONS: readonly RegExp[] = [
-  /\b(?:delet|remov)/i,
-  /\bmanual|\bby hand\b|\byourself\b/i,
-];
-
-/**
- * "Never a rebuild" (TEST-SPEC T13.4-10), by the same robust matching: a
- * clause presenting a build as what removes the file — a build "to remove"
- * or "to delete" it, a build that "removes" or "will remove" it, or a
- * removal "by", "via", "through", or "with" a build. A message naming the
- * refused rebuild beside the manual deletion matches none of them.
- */
-const REBUILD_REMEDY: readonly RegExp[] = [
-  /\b(?:re-?)?build(?:ing)?`?(?:\s+again)?\s+to\s+(?:remove|delete)\b/i,
-  /\b(?:re-?)?build(?:ing)?`?\s+(?:removes|deletes|(?:will|would|shall)\s+(?:remove|delete))\b/i,
-  /\b(?:remov|delet)\w*(?:\s+\w+){0,3}?\s+(?:by|via|through|with)\s+(?:running\s+|re-?running\s+|a\s+)?`?(?:xspec\s+)?(?:re-?)?build/i,
-];
-
-/**
  * The recorded-file finding concerning the obstructing orphan instructs its
  * manual deletion, never a rebuild: the rebuild that removes a recorded
  * file no longer generated is the very write the orphan obstructs, refused
- * (SPEC 14.10, 13.4, 14.22; H-3's robust matching).
+ * (SPEC 14.10, 13.4, 14.22; H-3's robust matching, judged by the pure
+ * `judgeManualDeletionCorrection` of the human-report adapter, whose S-5
+ * vectors drive it apart from any product).
  */
 function assertManualDeletionCorrection(
   finding: Finding,
   context: string,
 ): void {
-  assertReportMentions(
+  const judged = judgeManualDeletionCorrection(
     finding.message,
-    MANUAL_DELETION_MENTIONS,
-    `${context} — the recorded-file finding concerning ` +
-      `${OBSTRUCTION_ORPHAN} instructs the file's manual deletion, a ` +
-      `rebuild being refused while it obstructs the write (SPEC 14.10, ` +
-      `13.4, 14.22; H-3's robust matching: a deletion or removal, and its ` +
-      `manual character)`,
+    OBSTRUCTION_ORPHAN,
   );
-  const remedy = REBUILD_REMEDY.find((pattern) =>
-    pattern.test(finding.message),
-  );
-  if (remedy !== undefined) {
+  if (judged.verdict === "rebuild-remedy") {
     fail(
       `${context} — the recorded-file finding concerning ` +
         `${OBSTRUCTION_ORPHAN} instructs its manual deletion, never a ` +
         `rebuild: the rebuild is refused while the orphan obstructs its ` +
         `write, so it removes nothing (SPEC 14.10, 13.4, 14.22; H-3's ` +
         `robust matching: no clause presenting a build as what removes the ` +
-        `file, ${remedy.toString()}); got ${JSON.stringify(finding.message)}`,
+        `file, ${judged.pattern} matched ${JSON.stringify(judged.clause)}); ` +
+        `got ${JSON.stringify(finding.message)}`,
+    );
+  }
+  if (judged.verdict === "absent") {
+    fail(
+      `${context} — the recorded-file finding concerning ` +
+        `${OBSTRUCTION_ORPHAN} instructs the file's manual deletion, a ` +
+        `rebuild being refused while it obstructs the write (SPEC 14.10, ` +
+        `13.4, 14.22): required information missing from the human report ` +
+        `(H-3: information presence, never exact wording) — no deletion or ` +
+        `removal with its manual character; got ` +
+        `${JSON.stringify(finding.message)}`,
     );
   }
 }

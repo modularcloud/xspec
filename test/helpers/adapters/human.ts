@@ -91,3 +91,78 @@ export function conditionMention(condition: string): RegExp {
   // trailing period is fine — reports may end a sentence with the number.
   return new RegExp(`(?:^|[^0-9.])${escaped}(?![0-9])`);
 }
+
+/**
+ * The verdict of `judgeManualDeletionCorrection` on one finding message:
+ * the correction carried, a clause presenting a build as what removes the
+ * file, or the required information absent.
+ */
+export type ManualDeletionVerdict =
+  | {
+      /** The message carries the correction: the file's manual deletion. */
+      readonly verdict: "manual-deletion";
+      /** Which accepted form carried it. */
+      readonly form: string;
+    }
+  | {
+      /** A clause presents a build as what removes the file. */
+      readonly verdict: "rebuild-remedy";
+      /** The offending clause, as matched. */
+      readonly clause: string;
+      /** The pattern that matched it. */
+      readonly pattern: string;
+    }
+  | {
+      /** No manual-deletion instruction: the required information is absent. */
+      readonly verdict: "absent";
+    };
+
+/** A deletion or removal word (the manual-marker form). */
+const DELETION_WORD = /\b(?:delet|remov)/i;
+
+/** The manual character of the deletion (the manual-marker form). */
+const MANUAL_MARKER = /\bmanual|\bby hand\b|\byourself\b/i;
+
+/**
+ * A clause presenting a build as what removes the file: a build "to remove"
+ * or "to delete" it, a build that "removes" or "will remove" it, or a
+ * removal "by", "via", "through", or "with" a build.
+ */
+const REBUILD_REMEDY: readonly RegExp[] = [
+  /\b(?:re-?)?build(?:ing)?`?(?:\s+again)?\s+to\s+(?:remove|delete)\b/i,
+  /\b(?:re-?)?build(?:ing)?`?\s+(?:removes|deletes|(?:will|would|shall)\s+(?:remove|delete))\b/i,
+  /\b(?:remov|delet)\w*(?:\s+\w+){0,3}?\s+(?:by|via|through|with)\s+(?:running\s+|re-?running\s+|a\s+)?`?(?:xspec\s+)?(?:re-?)?build/i,
+];
+
+/**
+ * Judge whether a finding's human-readable message carries the correction
+ * "its manual deletion" (SPEC 14.10) for the recorded file at `path`, never
+ * a rebuild — H-3's robust matching: required information only, never
+ * exact wording. Pure: the T13.4-10 assertion and the S-5 vectors drive it.
+ *
+ * - Rejected, first, when any clause presents a build as what removes the
+ *   file (`REBUILD_REMEDY`).
+ * - Accepted when the message pairs a deletion or removal word with the
+ *   deletion's manual character ("manual", "by hand", or "yourself").
+ * - Otherwise the required information is absent.
+ */
+export function judgeManualDeletionCorrection(
+  message: string,
+  path: string,
+): ManualDeletionVerdict {
+  void path;
+  for (const pattern of REBUILD_REMEDY) {
+    const match = pattern.exec(message);
+    if (match !== null) {
+      return {
+        verdict: "rebuild-remedy",
+        clause: match[0],
+        pattern: pattern.toString(),
+      };
+    }
+  }
+  if (DELETION_WORD.test(message) && MANUAL_MARKER.test(message)) {
+    return { verdict: "manual-deletion", form: "a manual marker" };
+  }
+  return { verdict: "absent" };
+}
