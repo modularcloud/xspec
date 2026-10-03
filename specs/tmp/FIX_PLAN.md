@@ -38,16 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 50 — T7.3-1: the graph-data-area `outDir` arms and their look-alikes (TEST-SPEC L328; SPEC 7.3, 14.14; B5)
-
-**Where.** `test/suite/registry/section-7.1-7.3.ts`: `INVALID_OUTDIRS`.
-
-**Change.**
-- `".xspec"` and `".xspec/md"` each give 14.14, exit 2.
-- The look-alikes `".xspec2"` and `".xspecs/md"` are valid, and emission writes each destination under them.
-
-**Checks.** S-7 passes. T7.3-1 against the built product.
-
 ### Task 51 — T11.6-2: the invalid-path `.mdx` derived-map arms (TEST-SPEC L471; SPEC 11.6, 7.1, 13.1; B6)
 
 **Where.** `test/suite/registry/section-11.6.ts`, which today stages only the non-`.mdx` file (null/null).
