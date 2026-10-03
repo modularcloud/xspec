@@ -695,9 +695,28 @@ function s23Misplacement(
     }
   }
   return found.length === 0
-    ? "the bytes read as no single insertion of the declaration under 6.5's " +
-        "line discipline beside the rewrite's edits, at any offset"
+    ? `${S23_NO_READING} of the declaration under 6.5's line discipline ` +
+        "beside the rewrite's edits, at any offset"
     : `the bytes read as the declaration inserted at ${found.join("; or at ")}`;
+}
+
+/** How `s23Misplacement` begins when the bytes name no offset. */
+const S23_NO_READING = "the bytes read as no single insertion";
+
+/** The identifiers every declaration of `addition`'s spelling in `text`
+ * binds, wherever it stands — a statement's body included — for diagnoses
+ * alone. */
+function s23SpelledIdentifiers(
+  addition: S23Addition,
+  text: string,
+): readonly string[] {
+  const slot = "@IDENT@";
+  const pattern = s23Added(addition, slot)
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(slot, "([A-Za-z_$][A-Za-z0-9_$]*)");
+  return [...text.matchAll(new RegExp(pattern, "g"))].flatMap((match) =>
+    match[1] === undefined ? [] : [match[1]],
+  );
 }
 
 /** The rewrite's edits in words, given the added binding's identifier, for
@@ -755,11 +774,19 @@ function s23AssertAddition(
       ? added[0].identifiers[0]
       : undefined;
   if (ident === undefined) {
+    // A declaration a statement nests ((n): inside a body) is no added
+    // import T6.5-22(a)'s judgement reads: name where it stands.
+    const nested = s23SpelledIdentifiers(addition, after.text)
+      .map((candidate) =>
+        s23Misplacement(arm, addition, pre, after.bytes, candidate),
+      )
+      .filter((reading) => !reading.startsWith(S23_NO_READING));
     fail(
       `${context}: the move adds exactly one import declaration to ` +
         `${arm.receiver}, of one binding — ${s23Form(addition)} (SPEC ` +
         `6.5: ${addition.why}); the declarations added: ` +
         JSON.stringify(added.map((declaration) => declaration.text)) +
+        nested.map((reading) => `; ${reading}`).join("") +
         `; the file reads ${JSON.stringify(after.text)}`,
     );
   }

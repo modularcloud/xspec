@@ -38,21 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 47 — T6.5-23, arms (l)–(p) (TEST-SPEC L302)
-
-**Depends on.** Tasks 44, 45, and 46 (done at 6962dd1, 0fc515a, and 3e0a367: arms (a)–(k) in `test/suite/registry/section-6.5-v.ts`, the `S23_*` section; its machinery is AGENTS.md's T6.5-23 bullet). Task 46 added `s23RemovalArm` ((h)–(j): a declaration removed with its line, a rewrite spelled `""` over TEST-SPEC's range), `s23KArm` ((k): a call rewritten whole), and `S23Addition.spelled` (an `S23Spelling`) for an added declaration other than `import <X> from "…"` — (k)'s `import { text as <Y> } …`, or `import { text } …`, its `also` identifiers judged among the premises. Task 45 generalized `S23Arm`: each staging names its receiver and kind, its files and move, the declaration it gains (`addition`) or none, the preview's stated edits (`S23PreviewExpectation`: `reference-rewrite` count or spans, `import-removal` spans), and its `query edges` answers (`S23Edge`); a removal is a rewrite spelled `""`.
-
-**Change.** Exact bytes at L302.
-- (l) One added binding rooting spellings that were rooted at different bindings.
-- (m) A held binding beside an added one, for one module in one file.
-- (n) Nested statement lists: (d)'s file with `f` spread over lines.
-- (o) Timeliness as a TypeScript source's condition alone; the receiver gains no declaration.
-- (p) Whitespace between a statement's end and its line's terminator.
-
-After this task T6.5-23 covers (a) through (p).
-
-**Checks.** S-9 and S-7 pass. T6.5-23 against the built product (diagnose).
-
 ### Task 48 — T7-2: the four import-modifier arms (TEST-SPEC L321; SPEC 7, 14.14; B1)
 
 **Where.** `test/suite/registry/section-7-basics.ts`: `FORM_VIOLATIONS`.
