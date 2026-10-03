@@ -1769,8 +1769,9 @@ interface SyntaxClassRow {
 // and fails the plain-error pin; the rows naming `specs/A.mdx` or the
 // session `n` name what the same command would consult next, staged beside
 // the invalid configuration (above) so a product consulting it before the
-// syntax check is observed. The escape character is built from its code
-// point (no tool layer decodes a `\\` on the way in).
+// syntax check is observed. The escape character, U+2028, and U+2029 are
+// built from their code points (no tool layer decodes a `\\` or a
+// line-terminator spelling on the way in).
 const T12_0_10_SYNTAX_ROWS: readonly SyntaxClassRow[] = [
   {
     what: "an unknown command",
@@ -1925,6 +1926,32 @@ const T12_0_10_SYNTAX_ROWS: readonly SyntaxClassRow[] = [
   },
   {
     what:
+      "a `--tag` spelled with U+2028 (LINE SEPARATOR, between two letters " +
+      "as T1.4-1 spells it) — a well-formed argument value (SPEC 12.0) " +
+      "that no tag can be, malformed under 1.4's quote-and-escape bullet " +
+      "(SPEC 11.1, 1.4)",
+    argv: [
+      "query",
+      "nodes",
+      "--tag",
+      `a${String.fromCodePoint(0x2028)}b`,
+      "--json",
+    ],
+  },
+  {
+    what:
+      "a `--to` whose id segment carries U+2029 (PARAGRAPH SEPARATOR, " +
+      "between two letters as T1.4-1 spells it) — a well-formed argument " +
+      "value (SPEC 12.0) malformed as an identity, its segment barred by " +
+      "1.4's quote-and-escape bullet (SPEC 11.3, 1.4)",
+    argv: [
+      "occurrences",
+      "--to",
+      `${SYNTAX_AT_FILE}#a${String.fromCodePoint(0x2029)}b`,
+    ],
+  },
+  {
+    what:
       "a `--file` pattern outside the workspace root (`../x`, decided by " +
       "its spelling alone, SPEC 7, 11.1)",
     argv: ["ids", "--file", "../x", "--json"],
@@ -1934,7 +1961,7 @@ const T12_0_10_SYNTAX_ROWS: readonly SyntaxClassRow[] = [
 const T12_0_10 = defineProductTest({
   id: "T12.0-10",
   title:
-    "argument-check precedence: the rename/move and baseline arms ride on T6.4-4/T6.5-5/T6.3-4; on one workspace failing `build`'s validations each gated read given a usage-error argument exits 2 with that error and reports no validation findings (the exit-2 stdout is exactly the one 12.7 error document) — `coverage <unknown-profile>`, `query nodes --group <code-group>`, `review status <unknown-session>`, `show <file>#<unspelled-id>`, `query node <code-source-path>`, `query edges --from <code-source-path>#<unspelled-unit>` — each check judged from what it consults (configuration; the session directory; parse-local spelled identities or named units of the named file), the same names on a valid twin workspace giving the same exit-2 errors (byte-identical error documents); masking: `show <unparseable-file>#<id>` on the failing workspace yields the gated report of 13.3, exit 1, carrying exactly the workspace's findings; past the gate: on a passing workspace `review resolve <corrupt-session> <any-item-id> --status updated` reports the corruption, exit 1 — the item ID judged only against session content, which the corruption withholds (the same unknown item ID in the well-formed session exits 2 as the pre-corruption premise); within class 2, one arm per member of the syntax class (every error the arguments alone determine): an unknown command, subcommand (`query bogus`), or flag (`--bogus`; the `--name=value` token, T12.0-14); a repeated flag; a missing required flag (`review create --name n` with none of `--base`, `--strategy audit`, or `--coverage`) or argument (`at <file>` alone; a value-taking flag as the last token); a surplus operand (`ids extra`; a fourth `rename` operand); a malformed value (`show a#b#c`, T12.0-13; a U+FFFD-bearing value, T12.0-5); `--status bogus`; `--strategy bogus`; `query nodes --coverage bogus`; a `--kinds` element outside its vocabulary or empty (`depends,`); `review create` with two of its exactly-one-of flags; `--test-hold` beside `--preview`; a `<file>` operand beside `--file` on `view`; a session name outside the form of 10.1 (`.x`); an `<offset>` spelled `+7`; a `--to` malformed as an identity and a `--tag` malformed as a tag (`a\\b`); and a `--file` pattern outside the workspace root (`../x`, by spelling alone) — each reported without loading configuration and modifying nothing: byte-identical error documents with the configuration file invalid or missing, each the plain usage error (`code` and `path` null, no locations), the syntax-alone check preceding what the command would consult next (a session already named `n` and the named `<file>`, staged beside the invalid configuration, go unconsulted) — while a configuration error precedes every check that consults configuration or discovery: `coverage <unknown-profile>` and `query nodes --group <code-group>` with invalid configuration each report 14.14 (`configuration-error`), not the unknown profile or the wrong-kind group (SPEC 12.0, 13.3, 11.1, 11.2, 4.6, 10.1, 10.7, 11.3, 11.4, 11.5, 6.4, 6.6, 7, 14.14, 14.20, 14.21, 12.7)",
+    "argument-check precedence: the rename/move and baseline arms ride on T6.4-4/T6.5-5/T6.3-4; on one workspace failing `build`'s validations each gated read given a usage-error argument exits 2 with that error and reports no validation findings (the exit-2 stdout is exactly the one 12.7 error document) — `coverage <unknown-profile>`, `query nodes --group <code-group>`, `review status <unknown-session>`, `show <file>#<unspelled-id>`, `query node <code-source-path>`, `query edges --from <code-source-path>#<unspelled-unit>` — each check judged from what it consults (configuration; the session directory; parse-local spelled identities or named units of the named file), the same names on a valid twin workspace giving the same exit-2 errors (byte-identical error documents); masking: `show <unparseable-file>#<id>` on the failing workspace yields the gated report of 13.3, exit 1, carrying exactly the workspace's findings; past the gate: on a passing workspace `review resolve <corrupt-session> <any-item-id> --status updated` reports the corruption, exit 1 — the item ID judged only against session content, which the corruption withholds (the same unknown item ID in the well-formed session exits 2 as the pre-corruption premise); within class 2, one arm per member of the syntax class (every error the arguments alone determine): an unknown command, subcommand (`query bogus`), or flag (`--bogus`; the `--name=value` token, T12.0-14); a repeated flag; a missing required flag (`review create --name n` with none of `--base`, `--strategy audit`, or `--coverage`) or argument (`at <file>` alone; a value-taking flag as the last token); a surplus operand (`ids extra`; a fourth `rename` operand); a malformed value (`show a#b#c`, T12.0-13; a U+FFFD-bearing value, T12.0-5); `--status bogus`; `--strategy bogus`; `query nodes --coverage bogus`; a `--kinds` element outside its vocabulary or empty (`depends,`); `review create` with two of its exactly-one-of flags; `--test-hold` beside `--preview`; a `<file>` operand beside `--file` on `view`; a session name outside the form of 10.1 (`.x`); an `<offset>` spelled `+7`; a `--to` malformed as an identity and a `--tag` malformed as a tag (`a\\b`; and, one arm each, a `--tag` spelled with U+2028 and a `--to` whose id segment carries U+2029, each malformed under 1.4's quote-and-escape bullet); and a `--file` pattern outside the workspace root (`../x`, by spelling alone) — each reported without loading configuration and modifying nothing: byte-identical error documents with the configuration file invalid or missing, each the plain usage error (`code` and `path` null, no locations), the syntax-alone check preceding what the command would consult next (a session already named `n` and the named `<file>`, staged beside the invalid configuration, go unconsulted) — while a configuration error precedes every check that consults configuration or discovery: `coverage <unknown-profile>` and `query nodes --group <code-group>` with invalid configuration each report 14.14 (`configuration-error`), not the unknown profile or the wrong-kind group (SPEC 12.0, 13.3, 11.1, 11.2, 4.6, 10.1, 10.7, 11.3, 1.4, 11.4, 11.5, 6.4, 6.6, 7, 14.14, 14.20, 14.21, 12.7)",
   timeoutMs: 240_000,
   run: async (product) => {
     // --- Gated reads: usage-error arguments precede the 13.3 gate, judged

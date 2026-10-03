@@ -422,6 +422,7 @@ export const H7_TRACEABILITY: Readonly<Record<string, readonly string[]>> = {
   "T12.0-9": ["12.0"],
   "T12.0-10": [
     "12.0",
+    "1.4",
     "10.1",
     "10.7",
     "11.1",

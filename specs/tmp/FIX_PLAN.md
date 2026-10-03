@@ -38,14 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 53 — T12.0-10: two syntax-class rows (TEST-SPEC L488; SPEC 12.0, 1.4; B8)
-
-**Where.** `test/suite/registry/section-12.0-ii.ts`: `T12_0_10_SYNTAX_ROWS`.
-
-**Change.** Add a `--tag` spelled with U+2028, and a `--to` whose id segment carries U+2029. Each is malformed under 1.4's quote-and-escape bullet. Like the existing rows, each is a usage error reported without loading configuration: exit 2, `code` null.
-
-**Checks.** S-7 passes. T12.0-10 against the built product.
-
 ### Task 54 — T12.2-4, arm (b): the expected orphan set comes from the record (TEST-SPEC L506; T11.6-3; B9)
 
 **Where.** `test/suite/registry/section-12.1-12.2.ts`: `t1224DerivedListing`, which today lists `extra/E.xspec.*` from the directory.
