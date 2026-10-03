@@ -38,27 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part C — The T-numbered tests, in TEST-SPEC order
 
-### Task 40 — T6.5-20, arm (c): a source hidden or replaced, and its performed exemption (TEST-SPEC L299)
-
-**Depends on.** Task 39 (done).
-
-**Where.** As Task 39: `test/suite/registry/section-6.5-iv.ts`, T6.6-3's twins through its table.
-
-**Change.** Emission is next to sources, and each refused staging is staged before any build. Spellings from L299; every code source must be accepted by 5.9.3 both ways.
-- *Refused stagings, under Task 39's common contract:*
-  - `move specs/Z.mdx specs/B.mdx` beside a discovered code source `specs/B.md` (a code group globbing `specs/*.md`, the file well-formed TypeScript);
-  - separately, beside a discovered `specs/B.md/C.mdx`;
-  - beside a discovered code source `specs/B.md/x.ts`, the only file beneath (a code group globbing `specs/**/*.ts`, the file holding `export const v = 1`);
-  - `move specs/Z.mdx specs/A.mdx` beside a discovered code source `specs/A.xspec.ts/c.ts`;
-  - one staging per companion path of the destination, beside `specs/A.xspec.<suffix>/c.ts`, with the paths read as T13.4-9(e) reads them.
-- *The performed exemption.* `move specs/B.md/C.mdx specs/B.mdx` after a `build`: exit 0, with the effects L299 states and `check` clean.
-- *Section form.* (c)'s section-form recurrences are refused alike. The exemption staging in the section form (`move specs/B.md/C.mdx#x specs/B.mdx#x`) is refused.
-- *T6.6-3 twins* for every refused staging.
-
-**Checks.** As Task 39: S-7 passes; T6.5-20 and T6.6-3 against the built product (diagnose).
-
-**Note (from Task 39).** `test/suite/registry/section-6.5-iv.ts` holds T6.5-20. A refused staging is one `D20RefusedStaging` (configuration and files as staged-source records, `builtOccupant` `null` before any build, moves with their concerned `path`) appended to the list `d20RefusedStagings` returns; T6.6-3 iterates that list through `runD20RefusedStaging`, so the twins need no `section-6.6.ts` edit. A companion leg reads its paths through `readRecordedCompanionPaths` (`test/suite/registry/support.ts`) with its own twin (configuration, path, bytes). Performed arms are no T6.6-3 twins: run them in the body after the refused stagings. `specs/Z.mdx` (`D20_Z_SOURCE`) already holds the section `x`.
-
 ### Task 41 — T6.5-20, arms (d) and (e): module-linking designation, and the derived paths a move retires (TEST-SPEC L299)
 
 **Depends on.** Task 39 (done).
@@ -76,7 +55,7 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 **Checks.** As Task 39: S-7 passes; T6.5-20 and T6.6-3 against the built product (diagnose).
 
-**Note (from Task 39).** As Task 40's note. (e)'s `specs/A.mdx` holds a section `x`, unlike `D20_A_SOURCE`.
+**Note (from Tasks 39 and 40).** `test/suite/registry/section-6.5-iv.ts` holds T6.5-20. A refused staging is one `D20RefusedStaging` (configuration and files as staged-source records, `builtOccupant` `null` before any build, else a derived path the premise `build` must leave a plain file; moves with their concerned `path`) appended to the list `d20RefusedStagings` returns; T6.6-3 iterates that list through `runD20RefusedStaging`, so the twins need no `section-6.6.ts` edit. A companion leg reads its paths through `readRecordedCompanionPaths` (`test/suite/registry/support.ts`) with its own twin (configuration, path, bytes), as (c)'s second read in `d20RefusedStagings` does. `d20ConfigText(markdown, codeGlob)` composes a configuration with an optional code group (`D20_EMIT_NEXT` is emission next to sources). Performed arms are no T6.6-3 twins: run them in the body after the refused stagings, as (c)'s `runD20Exemption` does (the move through `runJson` and `decodeAppliedMappingReport`, the bytes, then `check` clean through `expectFindingFreeReport`). `specs/Z.mdx` (`D20_Z_SOURCE`) already holds the section `x`; (e)'s `specs/A.mdx` holds a section `x`, unlike `D20_A_SOURCE`.
 
 ### Task 42 — Register T6.5-21: `refused-exposed-derived-file` (TEST-SPEC L300; SPEC 6.5, 13.4, 14; A27, A30)
 
