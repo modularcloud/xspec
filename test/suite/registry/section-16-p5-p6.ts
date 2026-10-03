@@ -9,8 +9,9 @@
 //
 //   * P-5 arm 1 — purity sequences. A random workspace, committed as a git
 //     baseline, then 1–3 journaled operations drawn from `rename` (fresh
-//     final segment, descendants re-prefixed) and file-form `move` (fresh
-//     `specs/N<k>.mdx` destination), each followed by a commit. After every
+//     final segment, descendants re-prefixed) and file-form `move` (a fresh
+//     `specs/<name>.mdx` destination, its basename drawn as "drawn spec
+//     basenames" below says), each followed by a commit. After every
 //     operation: `query nodes` enumerates exactly the mapped identity set,
 //     every node's four hashes are byte-identical to the previous sweep under
 //     the operation's identity map (SPEC 6.2, 5.4), `check` exits 0 — all
@@ -21,9 +22,10 @@
 //   * P-5 arm 2 — random section moves. One random section-form `move`: any
 //     section subtree to a random valid target parent (its own parent, a
 //     section of any file, a file root — same-file and cross-file — or a
-//     freshly created target file), under a fresh ID, with the construct's
-//     byte layout at both boundaries randomized (see "arm-2 boundary
-//     staging" below). Staged tags/coverage/`d` travel with the subtree.
+//     freshly created target file, its basename drawn as below), under a
+//     fresh ID, with the construct's byte layout at both boundaries
+//     randomized (see "arm-2 boundary staging" below). Staged
+//     tags/coverage/`d` travel with the subtree.
 //     The impact report against the pre-move baseline must satisfy the
 //     section-move category oracle (helpers/oracles/section-move.ts, vetted
 //     by its S-6 suite before this arm trusts it): the `changed` set drawn
@@ -48,6 +50,45 @@
 //     with identities mapped through the journal suffix (SPEC 6.3) — the
 //     harness composes the per-operation mappings it requested, which is
 //     exactly the journal suffix a conforming product replays.
+//
+// Drawn spec basenames and added imports (TEST-SPEC §16 P-5: every import
+// a drawn move adds is held to T6.5-22(a)'s assertion, the drawn spec
+// sources' basenames including names from 6.5's barred classes, so that a
+// basename-derived choice meets them). The assertion needs no wiring here:
+// the subprocess driver judges every performed `move` the suite drives —
+// these bodies' moves included — with T6.5-22(a)'s check
+// (helpers/subprocess.ts → helpers/added-import-identifiers.ts), and a
+// breach rejects the invocation with a diagnosed `HarnessAssertionError`.
+// Both arms stage their spec sources under basenames drawn per trial
+// (`SPEC_BASENAME_CLASSES`: plain names, reserved and strict-mode-barred
+// words, `require` and `exports`, `__`-prefixed names, global-object
+// properties, Annex B's `escape` and `unescape`, `Iterator`,
+// `AsyncIterator`, and `SuppressedError`, and the compiler-provided `S`,
+// `Spec`, and `text`), and draw arm 1's file-move destinations and arm 2's
+// created target file from them too. The imports the drawn space adds are
+// arm 2's created-target ones — the created file gains an import of each
+// file its moved text references, and each file referencing into the
+// moved subtree gains one of the created file (an existing-file target
+// needs none; see "every staged spec source begins with an empty line"
+// below) — so both the workspace's basenames and the created file's meet a
+// basename-derived choice. The generator draws such a move in 40% of the
+// trials offering one (genSectionMoveTrial; an unbiased pick drew none
+// under the fixed seeds). Model space keeps PROP-03's `specs/A.mdx`…: the
+// staged paths are its path table applied (arm 1's `TrialState.paths`,
+// arm 2's `buildSectionMove`).
+// What holds whatever a basename is: the generator's own import bindings
+// are `M<j>`, chosen by file index and never from a basename, so every
+// staged header and reference derives (14.20) — a basename stands only
+// inside a specifier literal; every draw stays valid, a basename being an
+// ASCII identifier with no character 7.1 or 14.19 bars and no `.` (so no
+// `.xspec.` derived-file name), and `specs/<name>.mdx` lying in the
+// configuration's one spec group; and every destination stays clear of
+// 6.5's destination refusals no derivability check sees — fresh (no
+// basename staged or drawn earlier in the trial, so no identity is reused
+// either), flat under `specs/` (its derived `specs/<name>.xspec.*` paths
+// neither are nor contain another source's or derived file's path), and,
+// with no code group and no Markdown emission configured, free of any
+// module-linking designation or exposed derived file.
 //
 // Arm-2 boundary staging (the generalization past PROP-03's tag-alone-line
 // discipline; TEST-SPEC §16 P-5 "random section moves"). The two files a
@@ -126,12 +167,14 @@
 // line-start admissible offset for any import addition — the added
 // declaration an ESM block that empty line ends, whatever the file's first
 // item — which SPEC 6.5's preference takes over any other, so no root's
-// own content changes through an addition (6.2; the drawn space needs none
-// — PROP-03's complete downward import DAG already binds, at every
-// admissible destination, each file a moved subtree references — and
-// T6.5-13(h)/(j) anchor the case deterministically); the kept empty line is
-// each root's first run on both sides alike. The purity arm's workspaces
-// are staged the same way.
+// own content changes through an addition (6.2's import-addition case stays
+// undrawn, T6.5-13(h)/(j) anchoring it deterministically); the kept empty
+// line is each root's first run on both sides alike. The additions the
+// drawn space makes are the created-target ones ("drawn spec basenames"
+// above): at an existing-file target PROP-03's complete downward import
+// DAG already binds each file a moved subtree references, and every file
+// referencing into the subtree already imports the target (moveCandidates'
+// window). The purity arm's workspaces are staged the same way.
 //
 // P-6's category oracle is the baseline graph-diff oracle
 // (helpers/oracles/graph-diff.ts, vetted by its S-6 suite — SPEC 5.6's
@@ -191,9 +234,10 @@
 //   derived files exist; derived files match no spec group and are inert to
 //   baseline reconstruction).
 // - Identity reuse never occurs: fresh segments come from the model's
-//   per-file counters and fresh file names from a trial counter, so the 9.3
-//   deleted/added identity-collision edge case stays out of the input space
-//   (it is deterministic-test material).
+//   per-file counters and fresh file names from a trial counter (P-6) or a
+//   draw excluding every basename the trial has staged or drawn (P-5), so
+//   the 9.3 deleted/added identity-collision edge case stays out of the
+//   input space (it is deterministic-test material).
 //
 // P-5 and P-6 are outside every CERTIFICATIONS.md fixture scope (its
 // preamble: conformers for P-4/P-5/P-6 would be near-complete second
@@ -474,19 +518,32 @@ interface TrialState {
   model: WorkspaceModel;
   /** Model-space path per file index (`specs/A.mdx`…), fixed for the trial. */
   readonly modelPaths: readonly string[];
-  /** Current workspace path per file index (file moves mutate this). */
+  /**
+   * Current workspace path per file index: the staged paths (P-5's drawn
+   * basenames; the model paths in P-6), then as file moves leave them.
+   */
   readonly paths: string[];
-  /** Fresh-name counter for file-move destinations. */
+  /** P-6's fresh-name counter for file-move destinations. */
   movedCounter: number;
 }
 
-function initTrialState(model: WorkspaceModel): TrialState {
+/** The trial state over `model`, staged at `paths` (default: model space). */
+function initTrialState(
+  model: WorkspaceModel,
+  paths?: readonly string[],
+): TrialState {
   const cloned = structuredClone(model);
   const modelPaths = Object.keys(renderWorkspace(cloned));
+  if (paths !== undefined && paths.length !== modelPaths.length) {
+    throw new Error(
+      `P-5 harness defect: ${String(paths.length)} staged paths for ` +
+        `${String(modelPaths.length)} model files`,
+    );
+  }
   return {
     model: cloned,
     modelPaths,
-    paths: [...modelPaths],
+    paths: [...(paths ?? modelPaths)],
     movedCounter: 0,
   };
 }
@@ -502,11 +559,111 @@ function specBasename(path: string): string {
   return match[1];
 }
 
+/** `A` → `specs/A.mdx`: where a drawn basename is staged. */
+function specPath(basename: string): string {
+  return `specs/${basename}.mdx`;
+}
+
+/**
+ * The spec basenames P-5 draws (module header, "drawn spec basenames";
+ * TEST-SPEC §16 P-5, T6.5-22), one list per class — the plain class first,
+ * the shrink target: PROP-03's `A`, `B`, `C` and the former fresh-name
+ * spelling `N<k>`, seven names, more than the six one trial draws at most
+ * (three files, three file moves). Every name is an ASCII identifier
+ * without `.`; no name repeats, and no two differ in ASCII case alone
+ * (checked at module load).
+ */
+const SPEC_BASENAME_CLASSES: readonly (readonly string[])[] = [
+  ["A", "B", "C", "N0", "N1", "N2", "N3"],
+  // Reserved words (`default`, `enum`, `await`, `yield` among them) and the
+  // names strict-mode code bars as bindings (`let` … `arguments`).
+  // prettier-ignore
+  [
+    "let", "await", "yield", "default", "enum", "class", "new", "null",
+    "this", "typeof", "import", "export", "static", "implements",
+    "interface", "package", "private", "protected", "public", "eval",
+    "arguments",
+  ],
+  ["require", "exports"],
+  ["__x", "__dirname", "__filename"],
+  // Global-object properties of ECMAScript 2024's clause 19 (value,
+  // function, constructor, and other properties).
+  // prettier-ignore
+  [
+    "globalThis", "Infinity", "NaN", "undefined", "isFinite", "isNaN",
+    "parseFloat", "parseInt", "decodeURI", "encodeURIComponent",
+    "AggregateError", "Array", "Object", "Promise", "Proxy", "Symbol", "Map",
+    "WeakRef", "WeakSet", "Atomics", "JSON", "Math", "Reflect",
+  ],
+  // Annex B's global-object properties (B.2.1).
+  ["escape", "unescape"],
+  // Barred by name, no ECMAScript 2024 global-object property.
+  ["Iterator", "AsyncIterator", "SuppressedError"],
+  // The compiler-provided names no spec source binds (2.1).
+  ["S", "Spec", "text"],
+];
+
+{
+  const seen = new Map<string, string>();
+  for (const name of SPEC_BASENAME_CLASSES.flat()) {
+    const folded = name.toLowerCase();
+    const clash = seen.get(folded);
+    if (clash !== undefined || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) {
+      throw new Error(
+        `P-5 harness defect: the drawn basename ${JSON.stringify(name)} ` +
+          `${clash === undefined ? "is no ASCII identifier" : `clashes with ${JSON.stringify(clash)}`}`,
+      );
+    }
+    seen.set(folded, name);
+  }
+}
+
+/**
+ * Draw a basename `taken` does not hold: a class, uniformly (the plain one
+ * an eighth of the time), then a name of it not yet taken — a plain one
+ * when the class is spent. Shrinks toward the first free plain name.
+ */
+function drawSpecBasename(
+  choices: Choices,
+  taken: ReadonlySet<string>,
+): string {
+  const names = choices.weightedPick(
+    SPEC_BASENAME_CLASSES.map((list) => [1, list] as const),
+  );
+  const free = names.filter((name) => !taken.has(name));
+  if (free.length > 0) return choices.pick(free);
+  const plain = SPEC_BASENAME_CLASSES[0].filter((name) => !taken.has(name));
+  if (plain.length === 0) {
+    throw new Error("P-5 harness defect: every plain basename is taken");
+  }
+  return choices.pick(plain);
+}
+
+/** `count` distinct basenames, one per model file in file order. */
+function drawSpecBasenames(choices: Choices, count: number): string[] {
+  const names: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    names.push(drawSpecBasename(choices, new Set(names)));
+  }
+  return names;
+}
+
 /** Workspace identity of a model identity under the current path table. */
 function workspaceIdentityFn(state: TrialState): IdentityFn {
+  return pathTableIdentityFn(state.modelPaths, state.paths);
+}
+
+/**
+ * The identity a model identity has where file `i`'s model path
+ * `modelPaths[i]` stands at `paths[i]` (the table read when this is called).
+ */
+function pathTableIdentityFn(
+  modelPaths: readonly string[],
+  paths: readonly string[],
+): IdentityFn {
   const byModelPath = new Map<string, string>();
-  state.modelPaths.forEach((modelPath, index) => {
-    byModelPath.set(modelPath, state.paths[index]);
+  modelPaths.forEach((modelPath, index) => {
+    byModelPath.set(modelPath, paths[index]);
   });
   return (identity) => {
     const hash = identity.indexOf("#");
@@ -689,7 +846,7 @@ function applyRename(state: TrialState, op: RenameOp): AppliedOp {
 
 function applyMoveFile(state: TrialState, op: MoveFileOp): AppliedOp {
   const oldPath = state.paths[op.file];
-  const newPath = `specs/${op.newName}.mdx`;
+  const newPath = specPath(op.newName);
   const modelPath = state.modelPaths[op.file];
   const wsMap: Record<string, string> = { [oldPath]: newPath };
   const walkDotteds = (items: readonly BodyItem[], parent: string): void => {
@@ -729,13 +886,35 @@ function applyPureOp(state: TrialState, op: PureOp): AppliedOp {
 // (module header, H-4).
 
 function currentFileBytes(state: TrialState, fileIndex: number): string {
-  const rendered = renderWorkspace(state.model)[state.modelPaths[fileIndex]];
+  return withImportHeader(
+    renderWorkspace(state.model)[state.modelPaths[fileIndex]],
+    fileIndex,
+    state.paths,
+  );
+}
+
+/**
+ * File `fileIndex`'s PROP-03 rendering with its import header naming the
+ * files at `paths` (file `j` bound to `M<j>` whatever its basename, the
+ * pinned 2.1 form; module header).
+ */
+function withImportHeader(
+  rendered: string,
+  fileIndex: number,
+  paths: readonly string[],
+): string {
   if (fileIndex === 0) return rendered;
   const lines = rendered.split("\n");
   const header: string[] = [];
   for (let j = 0; j < fileIndex; j += 1) {
+    if (!lines[j].startsWith(`import M${String(j)} from "./`)) {
+      throw new Error(
+        `P-5/P-6 harness defect: line ${String(j + 1)} of file ` +
+          `${String(fileIndex)}'s rendering is no PROP-03 import line`,
+      );
+    }
     header.push(
-      `import M${String(j)} from "./${specBasename(state.paths[j])}.xspec"`,
+      `import M${String(j)} from "./${specBasename(paths[j])}.xspec"`,
     );
   }
   header.push("");
@@ -853,12 +1032,18 @@ async function sweepHashes(
 
 interface PurityTrial {
   readonly model: WorkspaceModel;
+  /** Drawn basename per model file: its staged `specs/<name>.mdx`. */
+  readonly basenames: readonly string[];
   readonly ops: readonly PureOp[];
 }
 
 const genPurityTrial: Gen<PurityTrial> = (choices) => {
   const model = genWorkspaceModel(choices);
-  const state = initTrialState(model);
+  const basenames = drawSpecBasenames(choices, model.files.length);
+  const state = initTrialState(model, basenames.map(specPath));
+  // Every basename staged or drawn so far: a destination is fresh (module
+  // header — no identity reuse, no destination refusal).
+  const taken = new Set(basenames);
   const ops: PureOp[] = [];
   do {
     const sections = sectionsOf(state.model);
@@ -879,16 +1064,15 @@ const genPurityTrial: Gen<PurityTrial> = (choices) => {
         newSeg: `s${String(state.model.files[site.file].nextSeg)}`,
       };
     } else {
-      op = {
-        kind: "moveFile",
-        file: choices.intInclusive(0, state.model.files.length - 1),
-        newName: `N${String(state.movedCounter)}`,
-      };
+      const file = choices.intInclusive(0, state.model.files.length - 1);
+      const newName = drawSpecBasename(choices, taken);
+      taken.add(newName);
+      op = { kind: "moveFile", file, newName };
     }
     applyPureOp(state, op);
     ops.push(op);
   } while (ops.length < 3 && choices.boolean(0.6));
-  return { model, ops };
+  return { model, basenames, ops };
 };
 
 // The configuration every trial's workspace stages beside the rendered
@@ -923,9 +1107,9 @@ async function runPurityTrial(
   product: ProductBinding,
   trial: PurityTrial,
 ): Promise<void> {
-  const state = initTrialState(trial.model);
+  const state = initTrialState(trial.model, trial.basenames.map(specPath));
   const workspace = await TestWorkspace.create(
-    drawWorkspace(renderP5Workspace(state.model)),
+    drawWorkspace(renderP5Workspace(state.model, state.paths)),
   );
   try {
     await workspace.gitInit();
@@ -1219,6 +1403,14 @@ interface SectionMoveTrial {
   readonly selfCloseTargetParent: boolean;
   /** Strip the root-target file's final terminator (mid-line insertion). */
   readonly stripFinalNewline: boolean;
+  /** Drawn basename per model file: its staged `specs/<name>.mdx`. */
+  readonly basenames: readonly string[];
+  /**
+   * The created target file's drawn basename (`specs/<name>.mdx`, in the
+   * spec group, 6.5), apart from every staged one; null unless the move
+   * creates its target file.
+   */
+  readonly createdBasename: string | null;
 }
 
 interface MoveCandidate {
@@ -1227,9 +1419,6 @@ interface MoveCandidate {
   /** Target parent's dotted ID; null = the target file's root. */
   readonly targetDotted: string | null;
 }
-
-/** The created-target path (`specs/**` keeps it in the spec group, 6.5). */
-const CREATED_TARGET_PATH = "specs/N0.mdx";
 
 /**
  * Valid target parents for moving `moved`, mirroring SPEC 6.5's refusals
@@ -1244,12 +1433,19 @@ const CREATED_TARGET_PATH = "specs/N0.mdx";
  * (`createdOk`) sits strictly between the two: it must import every file
  * the subtree references while every file referencing into the subtree
  * imports it, so the window must be strict — max referenced-out index
- * strictly below min referencing-in index.
+ * strictly below min referencing-in index. `createdAdds` counts the import
+ * declarations such a move adds (module header, "drawn spec basenames"):
+ * one in the created file per file the subtree references outside itself,
+ * and one per file referencing into the subtree from outside it.
  */
 function moveCandidates(
   model: WorkspaceModel,
   moved: SectionSite,
-): { readonly candidates: MoveCandidate[]; readonly createdOk: boolean } {
+): {
+  readonly candidates: MoveCandidate[];
+  readonly createdOk: boolean;
+  readonly createdAdds: number;
+} {
   const movedKeys = new Set(
     subtreeDotteds(moved.section, moved.dotted).map(
       (dotted) => `${String(moved.file)}#${dotted}`,
@@ -1326,7 +1522,11 @@ function moveCandidates(
     }
     consider(site.file, site.dotted, ancestorKeys);
   }
-  return { candidates, createdOk: maxOut < minIn };
+  return {
+    candidates,
+    createdOk: maxOut < minIn,
+    createdAdds: outFiles.size + inFiles.size,
+  };
 }
 
 const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
@@ -1343,14 +1543,26 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
     }).after;
   }
   const sections = sectionsOf(model);
-  // Bias toward subtree-bearing moves (descendant re-identification and the
-  // richer cascades) when any exist; a plain pick underexercises them under
-  // the fixed seeds. Shrinks toward the unbiased simple pick.
+  // Bias toward import-adding moves when any exist: a created target file
+  // whose moved subtree references another file or is referenced from one
+  // — the only moves of the drawn space that add an import, each judged by
+  // T6.5-22(a)'s driver hook, the drawn basenames steering a
+  // basename-derived binding (module header, "drawn spec basenames"); the
+  // unbiased picks below drew none under the fixed seeds. Otherwise toward
+  // subtree-bearing moves (descendant re-identification and the richer
+  // cascades) when any exist; a plain pick underexercises them under the
+  // fixed seeds. Shrinks toward the unbiased simple pick.
+  const importAdding = sections.filter((site) => {
+    const { createdOk, createdAdds } = moveCandidates(model, site);
+    return createdOk && createdAdds > 0;
+  });
+  const addsImports = importAdding.length > 0 && choices.boolean(0.4);
   const withChildren = sections.filter((site) =>
     site.section.items.some((item) => item.kind === "section"),
   );
-  const moved =
-    withChildren.length > 0 && choices.boolean(0.5)
+  const moved = addsImports
+    ? choices.pick(importAdding)
+    : withChildren.length > 0 && choices.boolean(0.5)
       ? choices.pick(withChildren)
       : choices.pick(sections);
   const { candidates, createdOk } = moveCandidates(model, moved);
@@ -1362,9 +1574,10 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
         `${String(moved.file)}#${moved.dotted}`,
     );
   }
-  // Target pick: sometimes a created target file (the created-root-as-added
-  // arm) when the strict import window allows; sometimes the final child
-  // re-inserted at its own former position (T6.2-4's purity, reached in the
+  // Target pick: a created target file for an import-adding move, and
+  // sometimes otherwise (the created-root-as-added arm) when the strict
+  // import window allows; sometimes the final child re-inserted at its
+  // own former position (T6.2-4's purity, reached in the
   // random space — and confined to this branch: the ordinary pick excludes
   // the pure-reproducing own-parent target so no-op trials stay rare);
   // otherwise biased toward section parents (nesting under a section, the
@@ -1376,7 +1589,7 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
     targetDotted: moved.parentDotted === "" ? null : moved.parentDotted,
   };
   let target: MoveCandidate;
-  if (createdOk && choices.boolean(0.2)) {
+  if (addsImports || (createdOk && choices.boolean(0.2))) {
     target = { toFile: null, targetDotted: null };
   } else if (isFinalChild && choices.boolean(0.2)) {
     target = ownParent;
@@ -1423,6 +1636,14 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
       text[text.length - 2] !== "\r";
     if (effective && choices.boolean(0.5)) stripFinalNewline = true;
   }
+  // The staged basenames, then the created target's apart from them
+  // (module header, "drawn spec basenames"), drawn last: no other draw
+  // depends on them.
+  const basenames = drawSpecBasenames(choices, model.files.length);
+  const createdBasename =
+    target.toFile === null
+      ? drawSpecBasename(choices, new Set(basenames))
+      : null;
   return {
     model,
     fromFile: moved.file,
@@ -1435,6 +1656,8 @@ const genSectionMoveTrial: Gen<SectionMoveTrial> = (choices) => {
     layout,
     selfCloseTargetParent,
     stripFinalNewline,
+    basenames,
+    createdBasename,
   };
 };
 
@@ -1486,34 +1709,50 @@ function stagingDefect(message: string): never {
   throw new Error(`P-5 harness defect: ${message}`);
 }
 
-/**
- * The file's piece tree: byte-identical to renderWorkspace's output when
- * `deco` is empty — locked by an equality assertion per trial — with the
- * arm-2 boundary decorations applied where staged (module header).
- */
 /** The empty line every P-5 spec source begins with (module header). */
 const LEADING_EMPTY_LINE = "\n";
 
 /**
  * The PROP-03 rendering with every spec source begun by an empty line — the
  * bytes P-5 stages, both arms (module header: TEST-SPEC §16 P-5's line-start
- * admissible offset for any import addition).
+ * admissible offset for any import addition) — keyed by, and its import
+ * headers naming, the staged `paths` (default: model space).
  */
-function renderP5Workspace(model: WorkspaceModel): Record<string, string> {
+function renderP5Workspace(
+  model: WorkspaceModel,
+  paths?: readonly string[],
+): Record<string, string> {
+  const rendered = Object.entries(renderWorkspace(model));
+  const staged = paths ?? rendered.map(([path]) => path);
+  if (staged.length !== rendered.length) {
+    stagingDefect(
+      `${String(staged.length)} staged paths for ` +
+        `${String(rendered.length)} model files`,
+    );
+  }
   return Object.fromEntries(
-    Object.entries(renderWorkspace(model)).map(([path, source]) => [
-      path,
-      LEADING_EMPTY_LINE + source,
+    rendered.map(([, source], fileIndex) => [
+      staged[fileIndex],
+      LEADING_EMPTY_LINE + withImportHeader(source, fileIndex, staged),
     ]),
   );
 }
 
+/**
+ * The file's piece tree: byte-identical to renderP5Workspace's output at
+ * the same `paths` when `deco` is empty — locked by an equality assertion
+ * per trial — with the arm-2 boundary decorations applied where staged
+ * (module header). `paths` spells the import header; `stagedIdentity` maps
+ * the model identities the pieces name (embedding targets, `depends`) to
+ * the staged ones (default: model space).
+ */
 function buildFilePieces(
   model: WorkspaceModel,
   fileIndex: number,
-  modelPaths: readonly string[],
+  paths: readonly string[],
   expansionOf: (identity: string) => string,
   deco: FileDecorations,
+  stagedIdentity: IdentityFn = (identity) => identity,
 ): SectionMovePiece[] {
   const prosePieces = (
     item: ProseItem,
@@ -1529,7 +1768,7 @@ function buildFilePieces(
           kind: "embedding",
           text: `{text(${renderRef(part.ref, fileIndex)})}`,
           expansion: expansionOf(identity),
-          target: identity,
+          target: stagedIdentity(identity),
         });
       }
     }
@@ -1559,7 +1798,9 @@ function buildFilePieces(
             parentDotted === "" ? item.seg : `${parentDotted}.${item.seg}`;
           const open = renderOpenTag(item, dotted, fileIndex);
           const selfClosed = `${open.slice(0, -1)} />`;
-          const depends = (item.deps ?? []).map(refIdentity);
+          const depends = (item.deps ?? []).map((ref) =>
+            stagedIdentity(refIdentity(ref)),
+          );
           const layout =
             deco.moved !== undefined && deco.moved.dotted === dotted
               ? deco.moved.layout
@@ -1681,7 +1922,7 @@ function buildFilePieces(
   for (let j = 0; j < fileIndex; j += 1) {
     pieces.push({
       kind: "removal",
-      text: `import M${String(j)} from "./${specBasename(modelPaths[j])}.xspec"`,
+      text: `import M${String(j)} from "./${specBasename(paths[j])}.xspec"`,
     });
     pieces.push(newline);
   }
@@ -1728,28 +1969,49 @@ interface BuiltSectionMove {
  */
 function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
   const { model, target } = trial;
-  const rendered = renderP5Workspace(model);
-  const modelPaths = Object.keys(rendered);
+  // Model space is PROP-03's; everything this returns — the oracle's
+  // documents and nodes, the staged files, the argv — speaks the staged
+  // paths of the drawn basenames (module header, "drawn spec basenames").
+  const modelPaths = Object.keys(renderWorkspace(model));
+  const paths = trial.basenames.map(specPath);
+  const rendered = renderP5Workspace(model, paths);
+  const stagedIdentity = pathTableIdentityFn(modelPaths, paths);
   const sems = semanticsOf(model);
   const expansionOf = expansionSentinels(sems);
 
-  const originPath = modelPaths[trial.fromFile];
+  const originPath = paths[trial.fromFile];
   const { toFile } = target;
   const coincident = toFile === trial.fromFile;
-  const targetPath = toFile === null ? CREATED_TARGET_PATH : modelPaths[toFile];
+  let targetPath: string;
+  if (toFile !== null) {
+    if (trial.createdBasename !== null) {
+      stagingDefect(
+        `a created-target basename for a target in file ${String(toFile)}`,
+      );
+    }
+    targetPath = paths[toFile];
+  } else {
+    if (trial.createdBasename === null) {
+      stagingDefect("a created target without a drawn basename");
+    }
+    targetPath = specPath(trial.createdBasename);
+    if (paths.includes(targetPath)) {
+      stagingDefect(`the created target ${targetPath} is a staged file`);
+    }
+  }
 
   // Builder-vs-renderer byte lock (module header): the undecorated piece
-  // tree reproduces renderWorkspace exactly for every involved file.
+  // tree reproduces the rendering exactly for every involved file.
   const involvedIndexes = new Set<number>([trial.fromFile]);
   if (toFile !== null && !coincident) involvedIndexes.add(toFile);
   for (const fileIndex of involvedIndexes) {
     const undecorated = sectionMoveSourceText(
-      buildFilePieces(model, fileIndex, modelPaths, expansionOf, {}),
+      buildFilePieces(model, fileIndex, paths, expansionOf, {}, stagedIdentity),
     );
-    if (undecorated !== rendered[modelPaths[fileIndex]]) {
+    if (undecorated !== rendered[paths[fileIndex]]) {
       stagingDefect(
         `piece-tree builder diverges from renderWorkspace for ` +
-          `${modelPaths[fileIndex]}`,
+          `${paths[fileIndex]} (${modelPaths[fileIndex]} in model space)`,
       );
     }
   }
@@ -1762,10 +2024,17 @@ function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
   };
   const origin: SectionMoveDocument = {
     path: originPath,
-    pieces: buildFilePieces(model, trial.fromFile, modelPaths, expansionOf, {
-      moved: { dotted: trial.dotted, layout: trial.layout },
-      ...(coincident ? targetSideDeco : {}),
-    }),
+    pieces: buildFilePieces(
+      model,
+      trial.fromFile,
+      paths,
+      expansionOf,
+      {
+        moved: { dotted: trial.dotted, layout: trial.layout },
+        ...(coincident ? targetSideDeco : {}),
+      },
+      stagedIdentity,
+    ),
   };
   const targetDocument: SectionMoveDocument | { createdPath: string } =
     toFile === null
@@ -1777,22 +2046,24 @@ function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
             pieces: buildFilePieces(
               model,
               toFile,
-              modelPaths,
+              paths,
               expansionOf,
               targetSideDeco,
+              stagedIdentity,
             ),
           };
 
   const involvedPaths = new Set([originPath, targetPath]);
   const otherNodes: SectionMoveGraphNode[] = [];
-  for (const [identity, sem] of sems) {
+  for (const [modelIdentity, sem] of sems) {
+    const identity = stagedIdentity(modelIdentity);
     const hash = identity.indexOf("#");
     const path = hash === -1 ? identity : identity.slice(0, hash);
     if (involvedPaths.has(path)) continue;
     otherNodes.push({
       identity,
-      children: sem.children,
-      edgeTargets: sem.edgeTargets,
+      children: sem.children.map(stagedIdentity),
+      edgeTargets: sem.edgeTargets.map(stagedIdentity),
     });
   }
 
@@ -1841,7 +2112,8 @@ function buildSectionMove(trial: SectionMoveTrial): BuiltSectionMove {
 // decoration, the undecorated collapse with an embedding, the flow layout
 // on every body shape, the target-side forms (an empty target parent
 // rendered self-closing, the root target's final terminator stripped) on
-// the coincident file and on a separate target file — plus the P-6 replay
+// the coincident file and on a separate target file, the import header
+// naming a file under each drawn basename — plus the P-6 replay
 // rewrite after a file move (the import header naming the moved path),
 // each spelled through the very builder the draws use, over one fixed
 // model. The S-9 self-test proves every vector derives before any product
@@ -1931,13 +2203,13 @@ function p5Vector(
   name: string,
   fileIndex: number,
   deco: FileDecorations,
+  paths: readonly string[] = Object.keys(renderWorkspace(P5_FORM_MODEL)),
 ): readonly [string, string] {
-  const modelPaths = Object.keys(renderWorkspace(P5_FORM_MODEL));
   const expansionOf = expansionSentinels(semanticsOf(P5_FORM_MODEL));
   return [
     name,
     sectionMoveSourceText(
-      buildFilePieces(P5_FORM_MODEL, fileIndex, modelPaths, expansionOf, deco),
+      buildFilePieces(P5_FORM_MODEL, fileIndex, paths, expansionOf, deco),
     ),
   ];
 }
@@ -2060,6 +2332,16 @@ export const P5_FORM_VECTORS: ReadonlyArray<
     { moved: { dotted: "s0", layout: FLOW_LAYOUT }, stripFinalNewline: true },
   ),
   p5Vector("target file, undecorated (importing the earlier file)", 1, {}),
+  // The import header under every drawn basename (module header, "drawn
+  // spec basenames"): the earlier file staged as `specs/<name>.mdx`.
+  ...SPEC_BASENAME_CLASSES.flat().map((basename) =>
+    p5Vector(
+      `target file importing the earlier file staged as specs/${basename}.mdx`,
+      1,
+      {},
+      [specPath(basename), specPath(basename === "B" ? "C" : "B")],
+    ),
+  ),
   p5Vector("target file: the empty target parent rendered self-closing", 1, {
     selfCloseDotted: "s0",
   }),
@@ -2083,7 +2365,9 @@ export const P5_FORM_VECTORS: ReadonlyArray<
 // --- S-9's per-draw check (helpers/property.ts `mdxSources`) ----------------
 
 function stagedPuritySources(trial: PurityTrial): DrawSource[] {
-  return Object.entries(renderP5Workspace(trial.model));
+  return Object.entries(
+    renderP5Workspace(trial.model, trial.basenames.map(specPath)),
+  );
 }
 
 function stagedSectionMoveSources(trial: SectionMoveTrial): DrawSource[] {
@@ -2514,7 +2798,7 @@ async function runReplayTrial(
 
 function renderPurityTrial(trial: PurityTrial): string {
   return JSON.stringify({
-    files: renderP5Workspace(trial.model),
+    files: renderP5Workspace(trial.model, trial.basenames.map(specPath)),
     ops: trial.ops,
   });
 }
@@ -2551,8 +2835,9 @@ const P_5 = defineProductTest({
     "prediction: the changed set drawn from the origin parent, the target parent, and the " +
     "moved subtree via the straddling-line drop rules of 3, a created target root changed as " +
     "added, a coincident parent pure on exact re-insertion, metadata-changed on no node, and " +
-    "the 5.6 cascades with their attributions (SPEC 3, 5.4-5.6, 6.1-6.5, 9, 12.2; TEST-SPEC " +
-    "§16 P-5)",
+    "the 5.6 cascades with their attributions; every import a drawn move adds passes " +
+    "T6.5-22(a), the spec basenames drawn from 6.5's barred classes (SPEC 2.1, 3, 5.4-5.6, " +
+    "6.1-6.5, 9, 12.2; TEST-SPEC §16 P-5)",
   // Wall-clock hang guard only (H-10): three fixed seeds (E-5); per purity
   // trial up to 3 operations x (sweep of every node + impact against every
   // prior commit), 8 section-move trials per seed (each one build + move +

@@ -38,25 +38,6 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 ### Part D — Properties, the Windows leg, and S-9's generated forms
 
-### Task 63 — P-5: added imports held to T6.5-22(a), and spec basenames from the barred classes (TEST-SPEC §16 P-5, L608; C4)
-
-**Depends on.** Tasks 18 and 19.
-
-**Where.** `test/suite/registry/section-16-p5-p6.ts`, and `FILE_NAMES` in `section-16-p4.ts` (`A`, `B`, `C`; shared with P-4) together with the `N<k>` basenames.
-
-**Change.**
-- *(a) Added imports.* Every import a drawn move adds is held to T6.5-22(a)'s assertion: those in a created `specs/N<k>.mdx`, and those gained by files that reference into the moved subtree. Task 19's hook covers this if P-5's moves pass through it; otherwise call the assertion explicitly.
-- *(b) Basenames.* The drawn spec basenames include names from every barred class: reserved and strict-mode-barred words, `require`, `exports`, a `__`-prefixed name, global-object properties (`escape` and `unescape` included), `Iterator`, `AsyncIterator`, and `SuppressedError`.
-- *What must still hold:*
-  - the generator's own import bindings stay derivable whatever a basename is, so choose them independently of basenames;
-  - every draw stays valid by construction (§16's preamble);
-  - destinations stay clear of 6.5's destination refusals. Today a specs-only configuration, no emission, and fresh `specs/N<k>.mdx` paths keep them clear.
-
-**Checks.**
-- S-9's per-draw check rejects no draw.
-- P-5 against the built product at the fixed seeds; record its timing.
-- P-4 still passes as before, or is adjusted if `FILE_NAMES` changes for it too.
-
 ### Task 64 — S-9's TypeScript check for generated forms: the fixed vector set and the per-draw check (TEST-SPEC S-9, L632; §16; C1, part 4)
 
 **Depends on.** Tasks 14, 15, 16b–16o (Task 16o declares the draw-composed files per draw), 62, and 63.
