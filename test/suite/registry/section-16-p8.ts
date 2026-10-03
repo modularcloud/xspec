@@ -124,11 +124,17 @@
 // commands may legitimately succeed and modify the workspace when the
 // mutations happen to be benign — P-8 constrains their termination, exit
 // class, and JSON form only; the modifies-nothing arm is `build`'s
-// (SPEC 12.1). An implementation-time dry-run over the committed default
-// seeds at the registered 12 runs per seed (`drawFixedSeedTrials`, the S-8
-// replay) verified that every menu entry, every mutation kind — the three
-// refined classes included — and every mutation target occurs — giant MDX
-// section towers (depths 512 and 2048), all three BOM flavors, a mid-file
+// (SPEC 12.1). Two facts about the CI-pinned draws are guarded permanently,
+// before any product runs, by the fixed-seed draw guard
+// (test/self/p8-fixed-seed-draws.test.ts), which replays P-8's own draws at
+// its registered `P8_RUNS_PER_SEED` runs per seed: every `COMMAND_MENU`
+// entry is drawn at least once, and an intact MDX section tower at least
+// 2048 levels deep is staged (P-8's giant-nesting floor). Beyond those, an
+// implementation-time dry-run over the committed default seeds at the
+// registered 12 runs per seed (`drawFixedSeedTrials`, the S-8 replay)
+// verified that every mutation kind — the three refined classes
+// included — and every mutation target occurs — giant MDX section
+// towers (depths 512 and 2048), all three BOM flavors, a mid-file
 // BOM, lone and balanced fragments and a range-wrapping one, spread
 // attributes, empty braces, an EOF-unbalanced brace, a deleted closer, a
 // whitespace-singleton container, seeded and existing declaration lines
@@ -310,7 +316,14 @@ function fuzzBaseWorkspaceFiles(): Record<string, InitialFileContents> {
 // or files named in arguments are usage errors). Entries are data, never
 // interpreted by a shell (H-2).
 
-const COMMAND_MENU: ReadonlyArray<readonly string[]> = [
+/**
+ * P-8's command menu. Exported for the fixed-seed draw guard
+ * (test/self/p8-fixed-seed-draws.test.ts), which replays P-8's own draws at
+ * {@link P8_RUNS_PER_SEED} and fails unless every entry is drawn at least
+ * once — so a form added here, or a draw shift, that the fixed CI seeds
+ * (E-5) never reach is caught before any product runs.
+ */
+export const COMMAND_MENU: ReadonlyArray<readonly string[]> = [
   ["build"],
   ["check", "--json"],
   ["check"],
@@ -1374,6 +1387,18 @@ async function runFuzzTrial(
 // ---------------------------------------------------------------------------
 // The registered fuzz test
 
+/**
+ * P-8's registered trials per seed of the fixed seed set (E-5; P-8 passes no
+ * `seeds`, so `DEFAULT_PROPERTY_SEEDS` apply). Each seed's trials are one
+ * sequential PRNG stream, so the trials the CI run stages are exactly
+ * `drawFixedSeedTrials(genFuzzTrial, P8_RUNS_PER_SEED)` — which the fixed-seed
+ * draw guard (test/self/p8-fixed-seed-draws.test.ts) replays, asserting that
+ * P-8's own draws stage the giant-nesting floor (TEST-SPEC §16 P-8) and draw
+ * every {@link COMMAND_MENU} form. Lowering this, or a generator or menu
+ * change that moves the draws, must keep that guard green.
+ */
+export const P8_RUNS_PER_SEED = 12;
+
 const P_8 = defineProductTest({
   id: "P-8",
   title:
@@ -1393,7 +1418,11 @@ const P_8 = defineProductTest({
       async (trial) => {
         await runFuzzTrial(product, trial);
       },
-      { runs: 12, maxShrinkExecutions: 100, render: renderFuzzTrial },
+      {
+        runs: P8_RUNS_PER_SEED,
+        maxShrinkExecutions: 100,
+        render: renderFuzzTrial,
+      },
     );
   },
 });

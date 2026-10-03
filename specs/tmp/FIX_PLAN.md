@@ -61,7 +61,7 @@ Why the harness changed in this re-descent: the documents moved after the harnes
 - Part A (Task 1, the certification gap D1): done and removed.
 - Part B (harness machinery): done and removed. Tasks 3 and 4 gave S-9's MDX judgement spec-group files not named `.mdx` — Task 3 the mechanism (`mdx.wellFormed` and the other `mdx` lists, the `file()` `mdx` option, or an MDX record at the path declare such a file an MDX source; module header of `test/helpers/workspace.ts`), Task 4 the declarations of the suite's three such files (T7.1-1's `specs/notes.txt` and T11.6-2's `specs/note.txt` as staged-source records, T11.6-4's under `mdx.wellFormed`). Task 2 (P-8's and P-11's capture-limit errors) and Task 2b, split from it (every other conversion of a driver rejection), are done and removed: H-11's capture-limit errors.
 - Part C (Tasks 5–9): the T-numbered tests, in TEST-SPEC order. Task 5 (T4.3-2's seven dynamic node-form arms each run `occurrences` on the failing workspace and assert no record) is done and removed. Task 6 (every T4.5-3 arm runs `occurrences --file src/app.ts` on its failing workspace and asserts no record, through `assertArmFailsWith`'s opt-in `noOccurrence` option, which T4.5-5 does not pass) is done and removed. Task 7 (T4.5-3's arm table gains TEST-SPEC's pinned optional-chaining spelling `SPEC?.a;`, optional on the root binding, over the shared `a`/`a.b` source; the extra arms `SPEC.a?.b;`, `SPEC.a!.b;`, and `(SPEC.a).b;` stay) is done and removed. Task 8 (T5.5-2's kind-distinction arm restaged in-line: `foo <S id="p.k">Kid text.</S> baz` at the baseline, `foo {text(B.k)} baz` after the journaled move, both composed by `kindParent` from one line head and tail, with `p`'s subtree text anchored in both states) is done and removed. Task 9 (T13.4-10's correction judged by the pure `judgeManualDeletionCorrection` in `test/helpers/adapters/human.ts`: a manual marker beside a deletion word, or an instruction to the reader to delete or remove the file, accepted; a build or xspec presented as the remover, unless negated, rejected; S-5's "correction judge" vectors) is done and removed.
-- Part D (Tasks 10–13): P-8's command sweep.
+- Part D (Tasks 10–13): P-8's command sweep. Task 10 is done and removed: `section-16-p8.ts` exports `COMMAND_MENU` and `P8_RUNS_PER_SEED` (12, which `P_8` passes), and `test/self/p8-fixed-seed-draws.test.ts` replays `drawFixedSeedTrials(genFuzzTrial, P8_RUNS_PER_SEED)` and asserts that an MDX section tower at least `GIANT_NESTING_FLOOR` deep is staged intact (TypeScript towers and towers a later mutation undid never count) and that every `COMMAND_MENU` form is drawn (AGENTS.md's "P-8's fixed-seed draw guard" bullet has the recipe and today's draws).
 - Task 14 confirms the result and deletes the plan.
 
 Take the topmost task unless told otherwise. A task too large for one spawn may be split by inserting follow-up tasks directly after it; never drop a requirement.
@@ -78,39 +78,18 @@ Take the topmost task unless told otherwise. A task too large for one spawn may 
 
 **Shared mechanics.**
 - A trial draws its mutations, then its commands: `listOf(pick(COMMAND_MENU))`, 2 to 4 per trial, run after the fixed `build --json` arm (`genFuzzTrial`, about L1178).
-- Each seed's trials are one sequential PRNG stream, so a menu change can move later draws, including the trial that meets the 2048 floor (today seed 161803399, trial 9: "specs/A.mdx: replace with a depth-2048 unclosed section tower").
+- Each seed's trials are one sequential PRNG stream. `pick` consumes one PRNG value whatever the menu's length, so adding menu forms changes only which forms the existing picks land on, never the mutation draws; raising the per-trial command count or weighting the pick does move every later trial of a seed, including the one that meets the 2048 floor (today seed 161803399, trial 9: "specs/A.mdx: replace with a depth-2048 unclosed section tower").
 - `P_8` registers 12 runs per seed with a 420 s `timeoutMs`, a hang guard only (H-10).
 - Every new form runs under `runFuzzArm`'s assertions. Argument values name base-workspace nodes and files; after mutation they may no longer exist, a legitimate exit 2 (12.0). Take each command's grammar from SPEC (6.4, 6.5, 6.6, 10.7, 11.1, 11.3–11.6, 12.0, 12.6), never from this plan.
 - *Every Part D task's checks*, beside the general ones:
-  - Task 10's guard passes, P-8's own draws hitting every menu form and the floor. If the fixed seeds miss a form, raise the per-trial command count or weight the pick; never weaken the guard.
+  - Task 10's guard passes (`test/self/p8-fixed-seed-draws.test.ts`), P-8's own draws hitting every menu form and the floor. If the fixed seeds miss a form, raise the per-trial command count or weight the pick; never weaken the guard.
   - P-8 alone against the built product, timed under the namespace, within its `timeoutMs` with clear headroom. Adjust `timeoutMs` if needed and record the timing in AGENTS.md's section-16 property-timings bullet.
   - S-7's sweep stays green.
   - P-8 passes against the built product (it did at 44c5dad), or fails only as a diagnosed failure that a hand-staged probe confirms. A harness error is a defect to fix in the task.
 
-### Task 10 — Guard P-8's own fixed-seed draws: the 2048 floor and every menu form (C1, part 1; TEST-SPEC §16 P-8, §17 S-8, E-5)
-
-**Depends on.** Nothing. Land it before Tasks 11–13, so it catches any draw shift they cause.
-
-**The gap.** The only floor guard is S-8's E-5 replay in `test/self/s8-answer-scale-capacity.test.ts` ("S-8: the fixed CI seed set stages within the derived scale (E-5 replay)", about L233–258). It replays 25 runs per seed (`DEFAULT_RUNS_PER_SEED`) and pools P-11's draws (`genAvailabilityTrial`) with P-8's. So it would not notice if the floor left P-8's registered 12 runs per seed, and nothing checks that the fixed seeds draw every menu form.
-
-**Where.** `test/suite/registry/section-16-p8.ts`: the `runs: 12` literal in `P_8`'s `checkProperty` options, and `COMMAND_MENU`. The S-8 test file above, or a new `test/self/` file.
-
-**Change.**
-- Export P-8's registered run count as one constant, used by `P_8` itself, and export `COMMAND_MENU`.
-- Add a self-test that replays `drawFixedSeedTrials(genFuzzTrial, <that constant>)`, P-8's draws alone. Assert:
-  - the deepest staged tower among them (the `depth-<n>` mutation descriptions, as S-8 reads them) is at least `GIANT_NESTING_FLOOR` (`test/self/staged-scale.ts`);
-  - every `COMMAND_MENU` entry is drawn at least once.
-- Keep S-8's pooled replay for the capacity maxima unchanged.
-
-**Checks.**
-- The new test passes at today's menu.
-- A red check of each assertion on its own, then restore:
-  - Lower the replay run count until no fixed-seed draw reaches 2048, and confirm by the replay itself; the floor assertion fails.
-  - With 1 run per seed, the three trials draw at most 12 of the 20 forms; the coverage assertion fails.
-
 ### Task 11 — P-8 sweeps the read surfaces, and the JSON-only rule applies by surface (C1, part 2; TEST-SPEC §16 P-8, §0 H-5; SPEC 11.1, 11.3–11.6, 12.0, 12.6)
 
-**Depends on.** Task 10. (Task 2, done and removed, gave `runFuzzCommand` H-11's semantics: it converts only the hang-guard kill, and an exhausted capture limit propagates as a harness error.)
+**Depends on.** Task 10 (done and removed; its guard must stay green). (Task 2, done and removed, gave `runFuzzCommand` H-11's semantics: it converts only the hang-guard kill, and an exhausted capture limit propagates as a harness error.)
 
 **Change.**
 - Add to `COMMAND_MENU`:
