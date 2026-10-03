@@ -5,7 +5,9 @@
 // One fixture story exercises the E-6 command set — `version`, `build`,
 // `check`, `query`, `coverage`, `impact`, `occurrences`, `view --text`,
 // `at`, a `move --preview`, a journaled `rename`, a journaled file-form
-// `move`, an `audit` review session (`review create --strategy audit`,
+// `move`, a journaled section-form `move` whose moved text lands before a
+// target parent's closing tag in an existing target file that gains an added
+// import, an `audit` review session (`review create --strategy audit`,
 // `next --json`, a `resolve`, an `export`), and `inventory` invoked from a
 // nested working directory, pinning the relative `/`-joined anchoring (SPEC
 // 11.6) — and captures two kinds of output:
@@ -34,7 +36,17 @@
 // directories in both rewrite directions — the moved file's own import
 // specifier and two other files' imports of its generated module are
 // recomputed (SPEC 6.5), which a native-path-API product writes `\`-separated
-// only on Windows — and `check` runs clean after it (T6.4-7). The fixture
+// only on Windows — and `check` runs clean after it (T6.4-7). The
+// section-form `move` is the subset's inserted-terminator probe (E-6): it
+// moves the relocated file's leaf into an existing section of another
+// existing file, so its moved text lands immediately before that target
+// parent's closing tag, and the target file, holding no binding of the module
+// the moved embedding is rooted at, gains an added import (as does the code
+// file whose marker the move re-roots). SPEC 6.5 makes every terminator it
+// inserts — after the moved text, after each added declaration — U+000A on
+// every platform, which a product writing the platform's native line
+// terminator into rewritten sources meets on Linux alone; no other step
+// inserts a line into a source. `check` runs clean after it too. The fixture
 // depends on no case-sensitive filesystem, no symlink creation, and no POSIX
 // signal semantics, so it stages identically on both legs.
 //
@@ -136,6 +148,11 @@ const E6_MOVED = "specs/sub/Moved.mdx";
 const E6_REFS = "specs/Refs.mdx";
 const E6_APP = "src/app.ts";
 
+// The leaf's ID after the rename, and the ID the section-form move gives it
+// under Refs.mdx's top-level `refs` section, the target parent.
+const E6_RENAMED_LEAF_ID = "core.mid.tip";
+const E6_SECTION_TARGET_ID = "refs.tip";
+
 function otherSource(version: string): string {
   return ['<S id="oth">', `Other target text, ${version}.`, "</S>", ""].join(
     "\n",
@@ -218,6 +235,44 @@ const E6_APP_SOURCE = stagedTs(
 // derived from the staged constant (pure ASCII, so character offsets are
 // byte offsets), making both legs pass the identical decimal argument.
 const E6_AT_EMBEDDING = "{text(Other.oth)}";
+
+// The section-form move's shape, read from the target file after the move so
+// the inserted-terminator probe cannot go vacuous unnoticed: the target file
+// gained an added import of Other's module — a line of its own, spelled
+// exactly as SPEC 6.5 fixes it (`import X from "…"`, single spaces, no
+// statement terminator, the canonical specifier double-quoted) and ended by
+// U+000A, its identifier X the product's deterministic latitude (6.5), read
+// from that line — and the moved text (its `id` re-identified, its embedding
+// rooted at X, its other bytes verbatim), then U+000A, stands immediately
+// before the target parent's closing tag. Refs.mdx as the earlier steps leave
+// it holds no import of Other's module and one closing tag, so neither
+// reading can come from the file before the move.
+const E6_ADDED_OTHER_IMPORT = /(?:^|\n)import (\S+) from "\.\/Other\.xspec"\n/;
+
+function assertSectionMoveLanded(targetBytes: Uint8Array): void {
+  const text = Buffer.from(targetBytes).toString("utf8");
+  const binding = E6_ADDED_OTHER_IMPORT.exec(text)?.[1];
+  const landed =
+    binding !== undefined &&
+    text.includes(
+      [
+        `<S id="${E6_SECTION_TARGET_ID}">`,
+        `Leaf embeds: {text(${binding}.oth)}`,
+        "</S>",
+        "</S>",
+      ].join("\n"),
+    );
+  if (!landed) {
+    fail(
+      `E-6 representative fixture, step "move-section": ${E6_REFS} after the ` +
+        `section-form move lacks the inserted-terminator probe's shape (SPEC ` +
+        `6.5) — an added \`import X from "./Other.xspec"\` line ended by ` +
+        `U+000A, and the moved text (\`<S id="${E6_SECTION_TARGET_ID}">\`, its ` +
+        `embedding rooted at X) followed by U+000A immediately before the ` +
+        `target parent's closing tag; its bytes: ${JSON.stringify(text)}`,
+    );
+  }
+}
 
 const GIT_DIR_BYTES = Buffer.from(".git", "utf8");
 
@@ -393,7 +448,7 @@ export async function runE6RepresentativeFixture(
     // TypeScript sources, appending the mapping to the journal (SPEC 6.4).
     await step(
       "rename",
-      ["rename", E6_CORE, "core.mid.leaf", "core.mid.tip"],
+      ["rename", E6_CORE, "core.mid.leaf", E6_RENAMED_LEAF_ID],
       0,
       "a valid rename succeeds and appends to the journal (SPEC 6.4, 6.1)",
     );
@@ -425,6 +480,36 @@ export async function runE6RepresentativeFixture(
       0,
       "the move's finishing regeneration leaves the workspace clean — every " +
         "recomputed specifier resolves (SPEC 6.5, 14.10; T6.4-7)",
+    );
+
+    // Journaled section-form move — the inserted-terminator probe (E-6): the
+    // relocated file's leaf moves under Refs.mdx's existing `refs` section,
+    // so its moved text lands immediately before that parent's closing tag
+    // in an existing target file; its embedding is rooted at Other's module,
+    // of which Refs.mdx holds no binding, so the target file gains an added
+    // import (and src/app.ts, whose marker of the leaf the move re-roots at
+    // Refs.mdx's module, gains one too). Each terminator inserted after the
+    // moved text and after an added declaration is U+000A on every platform
+    // (SPEC 6.5); the final workspace snapshot carries the rewritten sources
+    // across legs.
+    await step(
+      "move-section",
+      [
+        "move",
+        `${E6_MOVED}#${E6_RENAMED_LEAF_ID}`,
+        `${E6_REFS}#${E6_SECTION_TARGET_ID}`,
+      ],
+      0,
+      "a valid section-form move into an existing target parent succeeds and appends to the journal (SPEC 6.5, 6.1)",
+    );
+    assertSectionMoveLanded(await workspace.readBytes(E6_REFS));
+    await step(
+      "check-post-section-move",
+      ["check"],
+      0,
+      "the section move's finishing regeneration leaves the workspace clean — " +
+        "the moved embedding resolves through the target file's added import " +
+        "(SPEC 6.5, 14.10)",
     );
 
     // Audit review session (SPEC 10): create, next --json, one resolve, and
@@ -471,14 +556,15 @@ export async function runE6RepresentativeFixture(
       "the session exports as one JSON payload (SPEC 10.7)",
     );
 
-    // Inventory, invoked from the nested directory the move created
-    // (specs/sub, so it exists exactly when this step runs): the anchoring
-    // is the relative, `/`-joined canonical spelling — `root` `../..`,
-    // `config` `../../xspec.config.ts` (SPEC 11.6; the E-6 nested-cwd
-    // probe, which a native-path product misspells with `\` only on Windows) —
-    // and the report is at its densest: journal occupied, session `r`
-    // listed, recorded derived paths reflecting the move's finishing
-    // regeneration.
+    // Inventory, invoked from the nested directory the file-form move
+    // created (specs/sub, which still holds the relocated file after the
+    // section-form move, so it exists exactly when this step runs): the
+    // anchoring is the relative, `/`-joined canonical spelling — `root`
+    // `../..`, `config` `../../xspec.config.ts` (SPEC 11.6; the E-6
+    // nested-cwd probe, which a native-path product misspells with `\` only
+    // on Windows) — and the report is at its densest: journal occupied,
+    // session `r` listed, recorded derived paths reflecting the moves'
+    // finishing regenerations.
     await step(
       "inventory-nested",
       ["inventory"],

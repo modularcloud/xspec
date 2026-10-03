@@ -2,10 +2,12 @@
 // (TEST-SPEC §18 E-6; CI-01). Runs the representative fixture — `version`,
 // `build`, `check`, `query`, `coverage`, `impact`, `occurrences`,
 // `view --text`, `at`, a `move --preview`, a journaled `rename`, a journaled
-// file-form `move`, an `audit` review session, and a nested-working-directory
-// `inventory` — against the built product
-// (helpers/e6.ts), asserting every step's exact exit code, and writes the
-// captured outputs (transcript + final workspace tree) into
+// file-form `move`, a journaled section-form `move` (the inserted-terminator
+// probe: its moved text lands before a target parent's closing tag in an
+// existing target file that gains an added import), an `audit` review
+// session, and a nested-working-directory `inventory` — against the built
+// product (helpers/e6.ts), asserting every step's exact exit code, and
+// writes the captured outputs (transcript + final workspace tree) into
 // XSPEC_E6_EXCHANGE_DIR when it is set. The suite-linux CI job sets that
 // variable and uploads the directory as the `e6-linux-outputs` artifact; the
 // Windows leg (test/windows/e6-byte-identity.test.ts) reruns the identical
@@ -31,7 +33,7 @@ import {
 } from "../helpers/e6.js";
 import { builtProductBinding } from "../helpers/subprocess.js";
 
-// Generous hang guard for the whole 23-invocation fixture (H-8; each product
+// Generous hang guard for the whole 25-invocation fixture (H-8; each product
 // invocation also carries its own subprocess timeout). Never an assertion
 // input (H-10).
 const FIXTURE_TIMEOUT_MS = 300_000;

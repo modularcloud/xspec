@@ -5,10 +5,12 @@
 // `build`, `check`, `query`, `coverage`, `impact`, `occurrences`,
 // `view --text`, `at`, a `move --preview`, a journaled `rename`, a journaled
 // file-form `move` — the specifier-computation probe, with `check` clean
-// after it — an `audit` review session, and `inventory` from a nested
-// working directory, pinning the relative `/`-joined anchoring) is run here
-// against the built product, and its
-// outputs are asserted byte-identical to the Linux leg's, read from
+// after it — a journaled section-form `move` — the inserted-terminator
+// probe, its moved text landing before a target parent's closing tag in an
+// existing target file that gains an added import — an `audit` review
+// session, and `inventory` from a nested working directory, pinning the
+// relative `/`-joined anchoring) is run here against the built product, and
+// its outputs are asserted byte-identical to the Linux leg's, read from
 // XSPEC_E6_EXCHANGE_DIR (the `e6-linux-outputs` CI artifact,
 // .github/workflows/ci.yml): reports (every step's stdout/stderr — the
 // path- and range-dense occurrence, view, at, inventory, and preview
@@ -37,7 +39,7 @@ import {
 } from "../helpers/e6.js";
 import { builtProductBinding } from "../helpers/subprocess.js";
 
-// Generous hang guard for the 23-invocation fixture plus the comparison
+// Generous hang guard for the 25-invocation fixture plus the comparison
 // (H-8); never an assertion input (H-10).
 const FIXTURE_TIMEOUT_MS = 300_000;
 
